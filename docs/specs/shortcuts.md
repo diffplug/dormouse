@@ -62,7 +62,7 @@ Both modes, ahead of the passthrough gate, and only on a terminal **selected** S
 | `e` / `⇧E`, `f` / `⇧F`, `←` `→` / `⇧←` `⇧→`, `↵` | Copy editor | Passthrough only: scope, format, edges, copy (`docs/specs/mouse-and-clipboard.md` §4.3). |
 | `⌘V` / `⌘⇧V` / `Ctrl+V` / `Ctrl+Shift+V` | Paste | Paste into the terminal; the `Ctrl` variants are intercepted on every platform, macOS included. |
 
-On macOS `Ctrl+C` still reaches the running program; a literal `0x16` needs the shell's `quoted-insert` (`Ctrl+Q`) (`docs/specs/mouse-and-clipboard.md` §8.3).
+On macOS `Ctrl+C` still reaches the running program. Literal-next input: `docs/specs/mouse-and-clipboard.md` §8.3.
 
 ## Browser surfaces (passthrough)
 

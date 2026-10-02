@@ -11,6 +11,7 @@ import { setPlatform } from '../../lib/platform';
 import {
   __resetMouseSelectionForTests,
   beginDrag,
+  getMouseSelectionState,
   setHintToken,
   setMouseReporting,
   setOverride,
@@ -115,4 +116,44 @@ it('updates only the owning pane for reporting and override transitions', () => 
   expect(mouseButton()).toBeNull();
   expect(banner()).toBeNull();
   expect(commits.mock.calls.some(([id]) => id.endsWith('-two'))).toBe(false);
+});
+
+it.each(['restore', 'reporting off'] as const)('does not revive an override after %s during Make sticky confirmation', (ended) => {
+  vi.useFakeTimers();
+  setMouseReporting('one', 'vt200');
+  setOverride('one', 'temporary');
+  renderChrome();
+  const pane = container.querySelector('[data-test-pane="one"]')!;
+  const sticky = pane.querySelector<HTMLButtonElement>('[role="status"] button')!;
+  act(() => sticky.click());
+  act(() => {
+    if (ended === 'restore') setOverride('one', 'off');
+    else setMouseReporting('one', 'none');
+  });
+  // A new reporting program cannot inherit the old button's queued action.
+  if (ended === 'reporting off') act(() => setMouseReporting('one', 'vt200'));
+  act(() => vi.advanceTimersByTime(260));
+  expect(getMouseSelectionState('one').override).toBe('off');
+  expect(pane.querySelector('[role="status"]')).toBeNull();
+});
+
+it.each(['sticky', 'cancel'] as const)('does not apply a stale %s action to an override restarted in one update', (action) => {
+  vi.useFakeTimers();
+  setMouseReporting('one', 'vt200');
+  setOverride('one', 'temporary');
+  renderChrome();
+  const pane = container.querySelector('[data-test-pane="one"]')!;
+  const buttons = pane.querySelectorAll<HTMLButtonElement>('[role="status"] button');
+  act(() => buttons[action === 'sticky' ? 0 : 1]!.click());
+  act(() => {
+    setOverride('one', 'off');
+    setOverride('one', 'temporary');
+  });
+  act(() => vi.advanceTimersByTime(260));
+  expect(getMouseSelectionState('one').override).toBe('temporary');
+  expect(pane.querySelector('[role="status"]')).not.toBeNull();
+  // The new override must accept its own action after the old flash ended.
+  act(() => pane.querySelector<HTMLButtonElement>('[role="status"] button')!.click());
+  act(() => vi.advanceTimersByTime(260));
+  expect(getMouseSelectionState('one').override).toBe('permanent');
 });
