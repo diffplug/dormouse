@@ -28,7 +28,13 @@ body .mdxeditor,body .mdxeditor-popup-container{
   font-family:var(--font-body);
 }
 body .mdxeditor{flex:1;min-height:0;display:flex;flex-direction:column;background:var(--basePageBg)}
-body .mdxeditor-root-contenteditable,body .mdxeditor-source-editor{flex:1;min-height:0;overflow:auto}
+/* Each wrapper between the editor root and its scroller passes the bounded
+ * height down; otherwise the content grows past the page and wheel input has
+ * nothing to scroll. The view wrappers' display is MDXEditor's inline toggle,
+ * so their children take height:100% rather than flex. */
+body .mdxeditor-diff-source-wrapper{flex:1;min-height:0;display:flex;flex-direction:column}
+body .mdxeditor-rich-text-editor,body .mdxeditor-source-editor{flex:1;min-height:0}
+body .mdxeditor-root-contenteditable{height:100%;overflow:auto}
 
 /* Toolbar: one dense row, matching the Monaco page's header. */
 body .mdxeditor-toolbar{border-radius:0;padding:2px 6px;gap:2px;min-height:32px;box-shadow:inset 0 -1px var(--baseLine);flex:none}
