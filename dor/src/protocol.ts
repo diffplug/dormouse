@@ -66,9 +66,22 @@ export type AppControlMethod = (typeof APP_CONTROL_METHODS)[keyof typeof APP_CON
  */
 export const TOOL_CONTROL_METHODS = {
   list: 'tool.list',
+  openHandlers: 'tool.openHandlers',
 } as const;
 
 export type ToolControlMethod = (typeof TOOL_CONTROL_METHODS)[keyof typeof TOOL_CONTROL_METHODS];
+
+/**
+ * Short names for `dor` verbs: `dor o` is `dor open`. The takeover gate reads
+ * a typed command line, so it resolves these as the CLI does
+ * (`docs/specs/dor-tool.md` -> Take-over).
+ */
+export const DOR_VERB_ALIASES = { o: 'open' } as const;
+
+/** The verb a typed `dor` command line names, its alias resolved. */
+export function canonicalDorVerb(verb: string | undefined): string | undefined {
+  return verb !== undefined && Object.hasOwn(DOR_VERB_ALIASES, verb) ? DOR_VERB_ALIASES[verb as keyof typeof DOR_VERB_ALIASES] : verb;
+}
 
 /** Every method the control channel carries. */
 export type DorControlMethod = SurfaceControlMethod | WorkspaceControlMethod | AppControlMethod | ToolControlMethod;

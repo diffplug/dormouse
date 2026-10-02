@@ -6,6 +6,7 @@
 ## Files
 
 - `dor/src/commands/tool.ts` — CLI entry and generated help.
+- `dor/src/commands/open.ts` — `dor open`; `dor/src/commands/open-picker.ts` — its file picker.
 - `lib/src/host/tool-host.ts` — shared host lookup and trust entry.
 - `lib/src/components/wall/use-dor-control.ts` — launch, approval placement, dedupe, and response orchestration.
 - `lib/src/components/wall/use-tool-serving.ts` — port discovery and browser lifetime.
@@ -166,7 +167,7 @@ Source of truth: `toolCommand` in `dor/src/commands/tool.ts`; `listTools` in `li
 
 **Must accept exactly one existing local regular file or directory for `dor open`**, resolved by the `$TARGET` rules in [Declaring tools](#declaring-tools); [Folders](#folders) owns directories.
 
-**Must select the first matching entry of the user file's ordered `open` list.** Every association must name an argument-list Tool in that same user file or the built-in handler of its kind. **Never discover project configuration during this lookup**; project `open` rules are ignored with a warning during explicit project-tool lookup.
+**Must select the first matching entry of the user file's ordered `open` list.** Every association must name an argument-list Tool in that same user file or a built-in handler of its kind. **Never discover project configuration during this lookup**; project `open` rules are ignored with a warning during explicit project-tool lookup.
 
 **Must use a matching rule's optional `preview` handler for a `--preview` request**, validated as `tool` is, and its `tool` otherwise; an explicit `--tool` overrides both.
 
@@ -176,7 +177,7 @@ Source of truth: `toolCommand` in `dor/src/commands/tool.ts`; `listTools` in `li
 
 **Must reject declared Tool names beginning with `builtin:` in either configuration scope.** Built-in handler names cannot be shadowed.
 
-**Must fail without fallback on an explicit unknown handler or malformed user configuration**; `builtin:file` named for an unsupported format reports that limitation and suggests a user Tool. Built-in identity is the canonical file path in its own scope, separate from user and project Tools. The built-in handlers `builtin:file` and `builtin:folder` belong to `docs/specs/dor-tools-builtin.md`.
+**Must fail without fallback on an explicit unknown handler or malformed user configuration**; `builtin:file` named for an unsupported format reports that limitation and suggests a user Tool. Built-in identity is the canonical file path in its own scope, separate from user and project Tools. The built-in handlers `builtin:file`, `builtin:code`, and `builtin:folder` belong to `docs/specs/dor-tools-builtin.md`.
 
 Source of truth: `openCommand` in `dor/src/commands/open.ts`; `resolveOpenTool` in `lib/src/host/tool-open.ts`; `parseToolFile` in `lib/src/host/tool-registry.ts`; `surface.tool` in `lib/src/components/wall/use-dor-control.ts`. Tests: `lib/src/host/tool-open.test.ts`, `dor/test/cli-output.test.mjs`, `lib/src/components/Wall.test.tsx`.
 
@@ -184,11 +185,22 @@ Source of truth: `openCommand` in `dor/src/commands/open.ts`; `resolveOpenTool` 
 
 **Must match a directory as its name suffixed with `.📁` (U+1F4C1)**, in the filename and both path forms. **A pattern ending in `.📁` matches only directories, and a directory matches only such patterns**, so a catch-all file rule never captures one (rationale). Dot-directories follow the dotfile rule: `*.📁` skips them and `.*.📁` names them.
 
-**Must open `builtin:folder` for a directory no rule matches.** **Never let `builtin:file` open a directory or `builtin:folder` a file**: a rule naming the other kind fails the configuration, and `--tool` fails the open, naming the handler that fits.
+**Must open `builtin:folder` for a directory no rule matches.** **Never let `builtin:file` or `builtin:code` open a directory, or `builtin:folder` a file**: a rule naming the other kind fails the configuration, and `--tool` fails the open, naming the handler that fits.
 
 A folder viewer is any Tool that selects on single-click and activates on double-click through the [Preview slot](#preview-slot) invocations. `builtin:folder`, the default, belongs to `docs/specs/dor-tools-builtin.md` → Folder viewer.
 
 Source of truth: `FOLDER_MATCH_SUFFIX` / `builtinFor` in `dor-tools-builtin/src/file-viewer-format.ts`; `resolveOpenTool` in `lib/src/host/tool-open.ts`; `parseOpenRules` in `lib/src/host/tool-registry.ts`. Tests: `folders` in `lib/src/host/tool-open.test.ts`, `folder rules and preview handlers` in `lib/src/host/tool-registry.test.ts`, `a folder in the slot` in `lib/src/components/wall/preview-slot.test.tsx`.
+
+## Choosing a file
+
+**Must open a fuzzy file picker for `dor open` with no path when stdin and stdout are TTYs**, else fail asking for a path. The chosen file opens as `dor open <file>` with the invocation's flags; a cancel prints nothing and exits 1. Generated help owns the keys.
+
+- **Must list the files under the resolved CWD**: inside a git work tree, tracked plus untracked less ignored and deleted; otherwise a breadth-first walk skipping dot-entries and `node_modules`; at most 200,000.
+- **Must offer the highlighted file's `tool.openHandlers` answer in order**: what [Opening local files](#opening-local-files) selects (both read `matchingOpenRules`), then later matching rules' `tool` and `preview`, then each built-in supporting it — each once, with what it runs and what offers it.
+- **Must open the first without `--tool` and any other as `--tool <name>`.** `--tool` fixes the handler and skips the read; a host refusing the read leaves the default openable.
+- **Must show the handlers beside the list from 100 columns, else on one status line.**
+
+Source of truth: `openCommand` in `dor/src/commands/open.ts`; `runFilePicker` in `dor/src/commands/open-picker.ts`; `listFiles` in `dor/src/commands/file-list.ts`; `rankMatches` in `dor/src/commands/fuzzy.ts`; `listOpenHandlers` in `lib/src/host/tool-open.ts`. Tests: `dor/test/open-picker.test.mjs`, `open-handlers` in `lib/src/host/tool-open.test.ts`.
 
 ## Preview slot
 
@@ -246,7 +258,7 @@ Source of truth: `localFileLinkPreviewPath` in `lib/src/lib/external-links.ts`; 
 
 | Condition | Required state |
 | --- | --- |
-| Verb | `dor tool` or `dor open` |
+| Verb | `dor tool` or `dor open` (or its alias `dor o`) |
 | Caller | Visible pane of the active Workspace; integrated plain terminal (not an existing Tool); not closing or dying |
 | Command line | OSC 633 reports the invocation alone; compound shell syntax rejects takeover |
 | Directory | Resolved Tool CWD equals the caller's reported CWD |
@@ -306,7 +318,7 @@ Source of truth: `parseToolState` in `dor-tools-lib/src/osc.ts`; `getToolDirty` 
 
 ### Closing unsaved Tools
 
-The iframe save channel, connected only to a `builtin:file` frame (`docs/specs/dor-tools-builtin.md` → Editing files), binds its window, proxy origin, and a per-mount connection nonce. Save completion carries the request id and current dirty state; a timeout or disconnected editor never permits a Save closure. **Must bind each save completion to its accepted connection generation and discard it after reconnect or close**, even when a replacement connection reuses the request id or nonce. (rationale) **Must ignore a save-channel message naming another `dorTool` version or malformed for its kind**; a save error reaches the prompt control-stripped and bounded.
+The iframe save channel, connected only to a `builtin:file` or `builtin:code` frame (`docs/specs/dor-tools-builtin.md` → Editing files), binds its window, proxy origin, and a per-mount connection nonce. Save completion carries the request id and current dirty state; a timeout or disconnected editor never permits a Save closure. **Must bind each save completion to its accepted connection generation and discard it after reconnect or close**, even when a replacement connection reuses the request id or nonce. (rationale) **Must ignore a save-channel message naming another `dorTool` version or malformed for its kind**; a save error reaches the prompt control-stripped and bounded.
 
 **Must offer Save / Discard / Cancel before closing dirty Tools through Dormouse**: Pane closure, standalone window/app teardown, iframe reload or renderer change, and Workspace movement to another Window; **a Workspace close asks once, before any Surface closes.** Discard authorizes that action without declaring the edit clean; Save proceeds only after successful acknowledgement and no newer edits. A Tool without a connected save handler must be saved in its own UI or discarded. **Never prompt for a command close or move**: `dor kill`, `dor workspace close` (even `--force`), and cross-window `dor workspace move` (even `--dangerously-destroy-iframe-page-state`) refuse a dirty Tool. VS Code webview/host closure, forced termination, and crashes cannot be vetoed; drafts are not persisted.
 

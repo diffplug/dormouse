@@ -8,7 +8,7 @@ import {
   type StricliProcess,
 } from '@stricli/core';
 import { isBrowserProvider, type BrowserAutomationProvider } from 'dor-lib-common';
-import { VIEW_ERROR_ARGV, VIEW_FILE_ARGV, VIEW_FOLDER_ARGV } from 'dor-tools-builtin/file-viewer-format';
+import { VIEW_CODE_ARGV, VIEW_ERROR_ARGV, VIEW_FILE_ARGV, VIEW_FOLDER_ARGV } from 'dor-tools-builtin/file-viewer-format';
 import { agentBrowserCommand, runAgentBrowserCli } from './commands/agent-browser.js';
 import { appCommand } from './commands/app.js';
 import { awaitCommand } from './commands/await.js';
@@ -27,6 +27,7 @@ import { playwrightCommand, runPlaywrightCli } from './commands/playwright.js';
 import { versionCommand } from './commands/version.js';
 import { workspaceCommand } from './commands/workspace.js';
 import { errorLine, errorMessage, fail } from './commands/shared.js';
+import { canonicalDorVerb } from './protocol.js';
 import type {
   CliEnv,
   CliOptions,
@@ -200,7 +201,10 @@ interface CaptureProcess extends StricliProcess {
 }
 
 export async function runCli(rawArgv: string[], options: CliOptions = {}): Promise<CliResult> {
-  const argv = normalizeVersionAlias(rawArgv);
+  // `dor o` is `dor open` from here on, so preParse, help patches, and the
+  // command lookup see one name.
+  const versioned = normalizeVersionAlias(rawArgv);
+  const argv = versioned.length > 0 ? [canonicalDorVerb(versioned[0])!, ...versioned.slice(1)] : versioned;
   // Private host helper: stdout stays on a host-owned pipe, never a terminal
   // or control-socket response. The marker separates shell startup chatter.
   if (argv[0] === '__launch-env' && argv.length === 2 && /^[a-f0-9]{32}$/.test(argv[1])) {
@@ -227,11 +231,12 @@ export async function runCli(rawArgv: string[], options: CliOptions = {}): Promi
     return BROWSER_CLIS[argv[0]](argv.slice(1), options);
   }
   // `dor __view-file <file>` is the built-in viewer's private entry
-  // (docs/specs/dor-tools-builtin.md -> File viewer). Its server outlives this
+  // (docs/specs/dor-tools-builtin.md -> File viewer); `__view-code` its
+  // plain-source variant (-> Code editor). Its server outlives this
   // call; its title and announcement are the only output.
-  if (argv[0] === VIEW_FILE_ARGV && argv.length === 2) {
+  if ((argv[0] === VIEW_FILE_ARGV || argv[0] === VIEW_CODE_ARGV) && argv.length === 2) {
     const { runFileViewer } = await loadBuiltinViewers();
-    return { stdout: await runFileViewer(argv[1]), stderr: '', exitCode: 0 };
+    return { stdout: await runFileViewer(argv[1], { code: argv[0] === VIEW_CODE_ARGV }), stderr: '', exitCode: 0 };
   }
   // `dor __view-folder <dir>` is the same for `builtin:folder`, whose page
   // selects and activates files with OSC 367 `open`.

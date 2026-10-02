@@ -7,7 +7,7 @@
  * bundle.
  */
 import { isMap, isScalar, parseDocument as parseYamlDocument, type Document } from 'yaml';
-import { builtinFor, FOLDER_MATCH_SUFFIX } from 'dor-tools-builtin/file-viewer-format';
+import { builtinHandlerKind, FOLDER_MATCH_SUFFIX } from 'dor-tools-builtin/file-viewer-format';
 import { isRecord } from '../lib/is-record';
 import { truncateText } from '../lib/osc-sanitize';
 import { hasShellInputControls } from 'dor/commands/shell-quote';
@@ -326,11 +326,11 @@ function parseOpenRules(node: unknown, tools: ReadonlyMap<string, ToolEntry>, pa
       throw new ToolFileError(`${path}: open rule for '${String(rule.tool)}' has an unknown field '${unknown}' (known: ${OPEN_RULE_FIELDS.join(', ')})`);
     }
     const folder = rule.match.endsWith(FOLDER_MATCH_SUFFIX);
-    const { own, other } = builtinFor(folder);
     const handler = (field: 'tool' | 'preview'): string => {
       const name = rule[field];
-      if (name === own) return own;
-      if (name === other) {
+      const builtin = typeof name === 'string' ? builtinHandlerKind(name) : undefined;
+      if (builtin === (folder ? 'folder' : 'file')) return name as string;
+      if (builtin) {
         throw new ToolFileError(`${path}: open rule '${rule.match}' names ${name} as its ${field}, which opens ${folder ? 'files' : 'folders'}, `
           + (folder ? `but a pattern ending in ${FOLDER_MATCH_SUFFIX} matches only folders` : `but only a pattern ending in ${FOLDER_MATCH_SUFFIX} matches folders`));
       }

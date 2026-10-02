@@ -359,6 +359,34 @@ export interface ToolListResponse {
   warnings: string[];
 }
 
+/** `dor open` with no path asks, per highlighted file, what could open it. */
+export interface OpenHandlersRequest {
+  target: string;
+  cwd: string;
+  /** Order the default as `dor open --preview` selects it. */
+  preview?: boolean;
+}
+
+/** One handler `dor open --tool <tool>` accepts for the target. */
+export interface OpenHandler {
+  tool: string;
+  /** What it runs: a user Tool's argv, or what a built-in shows. */
+  description: string;
+  /** Why it is offered: the `open` rule naming it, or `built-in`. */
+  reason: string;
+}
+
+export interface OpenHandlersResponse {
+  /** The canonical absolute path. */
+  target: string;
+  directory: boolean;
+  /** The first is what `dor open` selects; empty when nothing opens it. */
+  handlers: OpenHandler[];
+  /** The user `dormouse.yml` the rules come from, whether or not it exists. */
+  config: string;
+  warnings: string[];
+}
+
 export interface SendSurfaceRequest extends WorkspaceScopedRequest {
   surface: string;
   input: string;
@@ -557,6 +585,7 @@ export interface ControlClient {
   ensureSurface(request: EnsureSurfaceRequest): Promise<EnsureSurfaceResponse>;
   toolSurface(request: ToolSurfaceRequest): Promise<ToolSurfaceResponse>;
   toolList(request: ToolListRequest): Promise<ToolListResponse>;
+  openHandlers(request: OpenHandlersRequest): Promise<OpenHandlersResponse>;
   sendSurface(request: SendSurfaceRequest): Promise<SendSurfaceResponse>;
   readSurface(request: ReadSurfaceRequest): Promise<ReadSurfaceResponse>;
   awaitSurface(request: AwaitSurfaceRequest): Promise<AwaitSurfaceResponse>;
@@ -587,10 +616,21 @@ export interface CliEnv {
   [key: string]: string | undefined;
 }
 
+/** The interactive terminal `dor open` with no path draws its picker on;
+ *  absent when stdin or stdout is not a TTY. */
+export interface PickerTerminal {
+  columns(): number;
+  rows(): number;
+  write(text: string): void;
+  /** Raw-mode input and size changes until the returned stop runs. */
+  listen(onInput: (chunk: string) => void, onResize: () => void): () => void;
+}
+
 export interface CliOptions {
   env?: CliEnv;
   client?: ControlClient;
   readStdin?: () => Promise<string>;
+  terminal?: PickerTerminal;
   versionMetadata?: VersionMetadata;
   execAgentBrowser?: BrowserExec;
   execPlaywright?: BrowserExec;

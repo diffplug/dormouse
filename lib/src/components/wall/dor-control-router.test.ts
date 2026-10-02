@@ -356,6 +356,23 @@ describe('dor tool reads', () => {
     expect(await ask({})).toEqual({ ok: false, error: 'cwd is required' });
     release();
   });
+
+  it('relays the open handlers for one target', async () => {
+    const handlers = { target: '/repo/a.md', directory: false, handlers: [], config: '/config/dormouse.yml', warnings: [] };
+    const toolControl = vi.fn(async () => ({ status: 'open-handlers' as const, handlers }));
+    setPlatform({ toolControl } as unknown as PlatformAdapter);
+    const release = installDorControlRouter();
+    const ask = async (params: Record<string, unknown>) => {
+      const detail = request({ method: 'tool.openHandlers', params: params as never });
+      window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail }));
+      await vi.waitFor(() => expect(detail.respond).toHaveBeenCalled());
+      return detail.respond.mock.calls[0][0];
+    };
+    expect(await ask({ cwd: '/repo', target: 'a.md', preview: true })).toEqual({ ok: true, result: handlers });
+    expect(toolControl).toHaveBeenCalledWith({ op: 'open-handlers', target: 'a.md', cwd: '/repo', preview: true });
+    expect(await ask({ cwd: '/repo' })).toEqual({ ok: false, error: 'cwd and target are required' });
+    release();
+  });
 });
 
 describe('dor app verbs', () => {

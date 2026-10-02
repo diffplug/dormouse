@@ -31,6 +31,25 @@ export async function handleToolControl(detail: DorControlRequest): Promise<void
         : { ok: false, error: result.status === 'error' ? result.message : 'unexpected tool host response' });
       return;
     }
+    case TOOL_CONTROL_METHODS.openHandlers: {
+      const params = detail.params ?? {};
+      const cwd = stringParam(params.cwd)?.trim();
+      const target = stringParam(params.target);
+      if (!cwd || !target) {
+        detail.respond({ ok: false, error: 'cwd and target are required' });
+        return;
+      }
+      const platform = getPlatformOrNull();
+      if (!platform?.toolControl) {
+        detail.respond({ ok: false, error: 'this host cannot read a dormouse.yml' });
+        return;
+      }
+      const result = await platform.toolControl({ op: 'open-handlers', target, cwd, preview: params.preview === true });
+      detail.respond(result.status === 'open-handlers'
+        ? { ok: true, result: result.handlers }
+        : { ok: false, error: result.status === 'error' ? result.message : 'unexpected tool host response' });
+      return;
+    }
     default: {
       const unhandled: never = detail.method;
       throw new Error(`unhandled tool control method '${String(unhandled)}'`);

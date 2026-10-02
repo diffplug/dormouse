@@ -20,6 +20,12 @@ describe('isNakedToolInvocation', () => {
     expect(isNakedToolInvocation('DEBUG=1 dor tool storybook')).toBe(true);
   });
 
+  it('accepts `dor o` as `dor open`, and only for open', () => {
+    expect(isNakedToolInvocation('dor o', 'open')).toBe(true);
+    expect(isNakedToolInvocation('dor o README.md', 'open')).toBe(true);
+    expect(isNakedToolInvocation('dor o storybook', 'tool')).toBe(false);
+  });
+
   it('rejects a line that is not a bare `dor tool`', () => {
     expect(isNakedToolInvocation(null)).toBe(false);
     expect(isNakedToolInvocation('')).toBe(false);
