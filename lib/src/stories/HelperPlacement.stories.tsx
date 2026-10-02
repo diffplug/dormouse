@@ -58,6 +58,12 @@ async function openContext() {
   await rightClickSourceHeader();
   await settleTerminalContext();
   expect(getHelper(SOURCE)?.status).toBe('completed');
+  const helper = terminal(getHelper(SOURCE)!.id);
+  // Host completion precedes xterm's asynchronous parsing of the final chunk.
+  await new Promise<void>(resolve => helper.write('', resolve));
+  const text = Array.from({ length: helper.buffer.active.length }, (_, i) =>
+    helper.buffer.active.getLine(i)?.translateToString(true) ?? '').join('');
+  expect(text.match(/git status/g)).toHaveLength(1);
 }
 function expectedSide({ layout, zoomed, cursor, sourceAtEnd }: Props) {
   // Alone in the Wall, the helper avoids the cursor; beside a neighbor, it takes the neighbor's side.
