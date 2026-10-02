@@ -15,6 +15,8 @@ vi.mock('./terminal-registry', () => ({
 }));
 
 import { restoreSession } from './session-restore';
+import { isLathPersistedLayout } from './lath/persistence';
+import { createLathWallEngine } from '../components/wall/lath-wall-engine';
 
 function createPlatform(
   savedState: PersistedSession | null,
@@ -385,6 +387,30 @@ it('recovers Tool metadata from pane rows when its layout is unusable', () => {
   expect(restored?.paneIds).toEqual(['tool']);
   expect(restored?.lathLayout?.leafMeta.tool).toMatchObject({ component: 'tool', tabComponent: 'tool', params: { command: 'pnpm storybook', toolRender: 'iframe', toolPort: 'auto', toolName: 'storybook' } });
   expect(restored?.lathLayout?.leafMeta.tool.params?.url).toBeUndefined();
+});
+
+it.each(['absent', 'corrupt'] as const)('preserves multiple Tool kinds through engine hydration with %s geometry', geometry => {
+  vi.clearAllMocks();
+  const restored = restoreSession(createPlatform({
+    version: 3,
+    lathLayout: geometry === 'corrupt' ? { version: 1, tree: { root: {} }, leafMeta: {} } : undefined,
+    panes: [
+      { id: 'tool-a', title: 'A', cwd: '/repo', surfaceType: 'tool', command: 'pnpm storybook', tool: { render: 'iframe', port: 'auto' } },
+      { id: 'shell', title: 'Shell', cwd: '/repo' },
+      { id: 'tool-b', title: 'B', cwd: '/repo', surfaceType: 'tool', command: 'pnpm dev', tool: { render: 'agent-browser-screencast', port: 'announced' } },
+      { id: 'web', title: 'Web', cwd: null, surfaceType: 'browser' },
+    ],
+  }));
+  expect(restored?.paneIds).toEqual(['tool-a', 'shell', 'tool-b']);
+  expect(isLathPersistedLayout(restored?.lathLayout)).toBe(true);
+  const engine = createLathWallEngine();
+  expect(engine.seed(restored?.lathLayout, restored?.paneIds, () => 'unexpected'))
+    .toEqual({ paneIds: ['tool-a', 'shell', 'tool-b'], fresh: false });
+  expect(engine.getMeta('tool-a')).toMatchObject({ component: 'tool', params: { command: 'pnpm storybook' } });
+  expect(engine.getMeta('tool-b')).toMatchObject({ component: 'tool', params: { command: 'pnpm dev', toolRender: 'agent-browser-screencast' } });
+  expect(engine.getMeta('shell')?.component).toBe('terminal');
+  expect(engine.getMeta('web')).toBeUndefined();
+  expect(terminalRegistryMocks.restoreTerminal.mock.calls.map(([id]) => id)).toEqual(['tool-a', 'shell', 'tool-b']);
 });
 
 it('restores the preview slot mark and open target from pane rows when its layout is unusable', () => {

@@ -7,8 +7,9 @@ connection's rendezvous and `/connect/` phone page at
 `https://relay.dormouse.sh` (`dormouse-relay`; [the one-time spec](../docs/specs/one-time.md)),
 and managed-voice speech at `https://voice.dormouse.sh` (`dormouse-voice`).
 The marketing website is a separate application. Managed voice and the Relay
-admit only the admin account; the Relay enrolls no Burrow and carries no
-terminal traffic yet. See
+admit only the admin account; device-code Burrow enrollment and account-scoped
+encrypted terminal routing are implemented. Real-provider and live production
+acceptance remain separate release gates. See
 [the spec](../docs/specs/hosted.md), whose "Application boundary" owns what
 each Worker serves.
 
@@ -82,8 +83,8 @@ branch.
 | Boundary | Resources |
 | --- | --- |
 | Preview | Dedicated test Cloudflare account with a registered workers.dev subdomain; dedicated empty Neon project and parent branch; GitHub `hosted-preview` environment |
-| Each PR | `dormouse-hosted-pr-N`, `dormouse-relay-pr-N` (with its own `OneTimeRoom` Durable Object namespace), and `dormouse-voice-pr-N` Workers, one uncached Hyperdrive all three share, and a Neon branch, all reused until close; rate-limit namespaces `1001`–`1007` shared by every relay and account preview |
-| Production | Dedicated Dormouse Postgres database, separate runtime/migration roles, uncached Hyperdrive shared by all three Workers; Workers `dormouse-hosted` (`hosted.dormouse.sh`, with rate-limit namespace `7`), `dormouse-relay` (`relay.dormouse.sh`, with its `OneTimeRoom` Durable Object namespace and rate-limit namespaces `1`–`6`), and `dormouse-voice` (`voice.dormouse.sh`, with the history-sweep Cron Trigger), each on its custom domain; GitHub `hosted-production` environment |
+| Each PR | `dormouse-hosted-pr-N`, `dormouse-relay-pr-N` (with its own `OneTimeRoom` and `RelayRoom` Durable Object namespaces), and `dormouse-voice-pr-N` Workers, one uncached Hyperdrive all three share, and a Neon branch, all reused until close; rate-limit namespaces `1001`–`1007` shared by every relay and account preview |
+| Production | Dedicated Dormouse Postgres database, separate runtime/migration roles, uncached Hyperdrive shared by all three Workers; Workers `dormouse-hosted` (`hosted.dormouse.sh`, with rate-limit namespace `7`), `dormouse-relay` (`relay.dormouse.sh`, with its `OneTimeRoom` and `RelayRoom` Durable Object namespaces and rate-limit namespaces `1`–`6`), and `dormouse-voice` (`voice.dormouse.sh`, with the history-sweep Cron Trigger), each on its custom domain; GitHub `hosted-production` environment |
 | Email | Dedicated Postmark server, verified `signin@dormouse.sh`, SPF/DKIM/DMARC, Apple Private Email Relay registration |
 | OAuth | Separate Dormouse GitHub, Google, Microsoft, and Apple registrations; exact callbacks below |
 | Release history | `hosted-release-tag` GitHub environment, an admin identity's repository-scoped Contents-write fine-grained PAT, immutable annotated `hosted/` tags |
@@ -196,9 +197,9 @@ accounts.
 2. Create a Cloudflare Hyperdrive configuration for that database with **query
    caching disabled**, using the runtime role, and keep its connection host and
    database identical to the direct migration URL. Enter connection credentials
-   directly in Cloudflare; replace the zero Hyperdrive ID in `wrangler.jsonc`,
-   `wrangler.relay.jsonc`, and `wrangler.voice.jsonc` with the resulting public ID for local operator
-   deployment. CI overrides both with the `HYPERDRIVE_ID` variable.
+   directly in Cloudflare; set the resulting public Hyperdrive ID in `wrangler.jsonc`,
+   `wrangler.relay.jsonc`, and `wrangler.voice.jsonc` for local operator
+   deployment. CI overrides all three with the `HYPERDRIVE_ID` variable.
 3. Create the runtime role with SQL (`CREATE ROLE ... LOGIN PASSWORD ...`),
    not Neon’s Console/API role creation, which grants `neon_superuser`.
    Neon requires the password over the encrypted connection and rejects a

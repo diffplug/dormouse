@@ -74,7 +74,7 @@ let generation = 0;
  * Publish a new state, skipping a write that says the same thing.
  *
  * The poll re-reads every 2 s and the service answers with a fresh object each
- * time, so without this the section re-renders twice a minute to paint
+ * time, so without this the section re-renders on every poll to paint
  * identical text. The sibling store this same dialog reads guards the same way
  * (`setPushDevices` in `lib/src/lib/push-devices.ts`); comparing the fields in
  * {@link STATUS_FIELDS} is the whole of it.

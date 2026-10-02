@@ -1018,7 +1018,7 @@ describe('agent-browser host captures', () => {
     expect(existsSync(file)).toBe(false);
     const dir = dirname(file);
     expect(dir).not.toBe(tmpdir());
-    expect(statSync(dir).mode & 0o777).toBe(0o700);
+    if (process.platform !== 'win32') expect(statSync(dir).mode & 0o777).toBe(0o700);
     // Never a name another capture wrote, and nothing left behind.
     expect([...await take(captures)]).toEqual([0xff, 0xd8, 2]);
     expect((spawnMock.mock.calls[1][1] as string[])[3]).not.toBe(file);

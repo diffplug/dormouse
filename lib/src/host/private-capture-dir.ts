@@ -1,15 +1,7 @@
 /**
- * The private per-process directory the browser host's captures are written
- * into (docs/specs/dor-browser.md → "Viewer Socket"; `./browser-capture.ts`).
- *
- * A frame is a picture of the user's authenticated browser, so the *directory*
- * is the control: one `mkdtemp` per host, which is `0700` and unguessable. A
- * derivable path directly in `os.tmpdir()` let any other local account read
- * every frame, or pre-create the name as a symlink and have the writer clobber
- * whatever it pointed at. `standalone/sidecar/clipboard-ops.js` does the same
- * for clipboard images; the paths are meant to match, cleanup included — a
- * frame of someone's authenticated browser is not something to leave in tmp for
- * the OS to reap whenever it gets round to it.
+ * Per-process screenshot directory (docs/specs/dor-browser.md -> "Browser Host").
+ * mkdtemp makes an unguessable 0700 directory on Unix. Windows inherits the
+ * temp parent's ACL; this module applies no Windows permission boundary.
  */
 import * as os from 'os';
 import * as path from 'path';
@@ -26,8 +18,7 @@ export function privateCaptureDir(prefix: string): PrivateCaptureDir {
   let once: Promise<string> | null = null;
 
   function get(): Promise<string> {
-    // mkdtemp creates at 0700 already; the chmod covers an inherited-mode
-    // filesystem and is a no-op on Windows, where %TEMP% is per-user.
+    // Unix modes do not restrict an inherited Windows ACL.
     once ??= fs.mkdtemp(path.join(os.tmpdir(), prefix)).then(async (dir) => {
       if (process.platform !== 'win32') await fs.chmod(dir, 0o700).catch(() => {});
       // Backstop for an exit that never reaches `remove` — a crash, or a host

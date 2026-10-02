@@ -110,3 +110,30 @@ test('serveSequence refuses a value the host would ignore', () => {
   for (const port of [0, 65536, 1.5]) assert.throws(() => serveSequence({ port }), RangeError);
   for (const path of ['relative', '//evil.test/', '/a b']) assert.throws(() => serveSequence({ port: 1, path }), RangeError);
 });
+
+
+test('stateSequence rejects runtime non-boolean dirty values', () => {
+  for (const dirty of ['true', 1, null, undefined]) assert.throws(() => stateSequence({ dirty }), TypeError);
+});
+
+test('openSequence rejects runtime non-boolean preview values', () => {
+  for (const preview of ['true', 1, null]) assert.throws(() => openSequence({ path: '/a', preview }), TypeError);
+});
+
+test('serveSequence bounds serialized JSON after escaping a valid path', () => {
+  assert.equal(parseToolAnnounce(content(serveSequence({ port: 1, path: '/' + 'a'.repeat(2047) })))?.path.length, 2048);
+  assert.throws(() => serveSequence({ port: 1, path: '/' + '"'.repeat(2047) }), RangeError);
+});
+
+test('openSequence bounds serialized JSON after escaping a valid path', () => {
+  assert.equal(parseToolOpen(content(openSequence({ path: '/' + 'a'.repeat(2047) })))?.path.length, 2048);
+  assert.throws(() => openSequence({ path: 'C:' + '\\'.repeat(2046) }), RangeError);
+});
+
+test('serve paths reject C1 controls that could terminate or inject OSCs', () => {
+  for (let code = 0x80; code <= 0x9f; code++) {
+    const path = '/a' + String.fromCharCode(code) + 'b';
+    assert.throws(() => serveSequence({ port: 1, path }), RangeError);
+    assert.equal(parseToolAnnounce(serve({ port: 1, path }))?.path, undefined);
+  }
+});

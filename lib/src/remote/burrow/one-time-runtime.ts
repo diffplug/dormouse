@@ -183,7 +183,7 @@ export interface OneTimeRuntimeOptions {
   readonly setTimer?: RemoteTimer;
 }
 
-/** A phone that completed message 1: the link is reserved for it. */
+/** A phone whose IK handshake and Split completed: the link is reserved for it. */
 interface ReservedPhone {
   readonly session: NoiseTransportSession;
   /** Set once its first control message parsed; until then there is nothing to confirm. */
@@ -468,8 +468,8 @@ export class OneTimeRuntime {
   // --- The ceremony ----------------------------------------------------------
 
   /**
-   * Noise message 1 against the link's key. **The first valid one reserves the
-   * link**; every later one is dropped before any WebCrypto runs.
+   * Noise message 1 against the link's key. **Reserve only after message 2 and
+   * Split also succeed**; every later init is dropped before any WebCrypto runs.
    */
   async #onInit(ct: string): Promise<void> {
     const link = this.#link;
@@ -491,7 +491,7 @@ export class OneTimeRuntime {
       message2 = await handshake.writeMessage();
       session = new NoiseTransportSession(handshake.session);
     } catch {
-      // The link stays open: nothing decrypted against it, so nobody holds it.
+      // The link stays open: IK and Split did not both complete, so nobody holds it.
       return;
     }
     // Ended while the WebCrypto ran — the end erases the key.

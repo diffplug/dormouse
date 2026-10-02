@@ -1832,10 +1832,13 @@ test('list json schema includes ids and refs regardless of id-format', async () 
 });
 
 test('list filters by kind, view, command, and cwd without port scanning', async () => {
-  const client = fixtureClient();
+  const cwd = join(tmpdir(), 'dor-list-site');
+  const client = fixtureClient(fixtureSurfaces.map(surface => ({
+    ...surface, cwd: surface.cwd === '/Users/me/projects/site' ? cwd : surface.cwd,
+  })));
   const result = await runCli(
     ['list', '--json', '--kind', 'terminal', '--view', 'paned', '--command', 'pnpm dev', '--cwd', '.'],
-    { client, env: { ...listEnv, PWD: '/Users/me/projects/site' } },
+    { client, env: { ...listEnv, PWD: cwd } },
   );
   assert.equal(result.exitCode, 0);
   assert.equal(result.stderr, '');

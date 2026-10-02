@@ -1,13 +1,7 @@
 # One-time connection
 
-> See `docs/specs/glossary.md` for Burrow, Client, Relay, Pane, and Baseboard vocabulary; this spec uses them bare.
-> Owns the one-time connection: the link a Burrow shows, the Hosted rendezvous that carries only its handshake, and the direct-only session that follows. Defers the ceremony's trust rules to `docs/specs/remote-security-model.md` -> "One-time connection" and the audited checks to `docs/specs/security-remote.md` -> "One-time connection" and `docs/specs/security-hosted.md` -> "Rendezvous boundary".
-
-A phone reaches a laptop with no account, no Relay, and no passkey: the laptop
-shows a link, the phone opens it, a person types on the laptop the two digits the
-phone shows, and the session runs over a direct WebRTC path the network policy
-allows (`docs/specs/remote-network.md`).
-Hosted's rendezvous carries the handshake and nothing after it.
+> See `docs/specs/glossary.md` for Burrow, Client, Relay, Pane, and Baseboard vocabulary.
+> Owns one-time links, Hosted rendezvous, and direct-only sessions. Trust rules: `docs/specs/remote-security-model.md` -> "One-time connection"; audited checks: `docs/specs/security-remote.md` -> "One-time connection" and `docs/specs/security-hosted.md` -> "Rendezvous boundary".
 
 ## Flow
 
@@ -20,8 +14,8 @@ Hosted's rendezvous carries the handshake and nothing after it.
    ([Laptop UI](#laptop-ui)).
 4. The phone page takes and erases the fragment, then waits for the Connect
    tap ([Phone page](#phone-page)).
-5. The tap runs `connectOnce` ([Phone client](#phone-client)), and its first
-   message 1 reserves the link ([Burrow runtime](#burrow-runtime)).
+5. The tap runs `connectOnce` ([Phone client](#phone-client)), which completes the
+   handshake ([Burrow runtime](#burrow-runtime)).
 6. The page shows the two digits; the laptop's approval modal takes the one
    attempt.
 7. A match promotes the session, and the page shows "Connecting directly…"
@@ -57,13 +51,10 @@ reaches a server.
   `docs/specs/relay.md` -> "Setup tokens and the pairing QR" states, with the
   path exactly `ONE_TIME_PAGE_PATH` (`/connect/`) and the fragment right after
   `#`; then the field rules, the expiry, and the X25519 import last.
-- **A link is live through its expiry second** (`oneTimeLinkExpired`), and the
+- **Must keep a link live through `expiry * 1000`, expiring the following millisecond** (`oneTimeLinkExpired`), and the
   parser refuses on that same rule. A caller that must tell an expired link from
   a wrong one parses at `now = 0` and asks `oneTimeLinkExpired`.
-- The prologue is `lengthPrefixedConcat` of `dormouse/e2e/v1`, `one-time`,
-  `roomId`, then `v`, `expiry`, `ephPub` in link order, from one builder both
-  ends call (the rule: `docs/specs/remote-security-model.md` -> "One-time
-  connection").
+- The prologue contract: `docs/specs/remote-security-model.md` -> "One-time connection".
 
 Which desktop release may carry a link version: `docs/specs/deploy.md` ->
 "Release checklist".
@@ -80,7 +71,7 @@ Source of truth: `formatOneTimeLinkUrl` / `parseOneTimeLinkUrl` /
 `BurrowRuntime` has a reader for it. Two WebSocket routes on the one-time
 origin: `ONE_TIME_WS_ROUTES.burrow` (`/api/one-time/burrow`) mints a room, and
 `ONE_TIME_WS_ROUTES.client` (`/api/one-time/client?room=<roomId>`) joins one.
-Each message is one JSON frame with exact keys, forwarded verbatim by the room:
+**Must send each message as one JSON frame with exact keys**, forwarded verbatim by the room:
 
 | Frame | Direction | Shape |
 | --- | --- | --- |
@@ -104,7 +95,7 @@ no deadline.
   inside the room's hard deadline, `expiresAt + ONE_TIME_EXPIRY_GRACE_MS` (45 s).
 - **The ceremony's messages are padded `control` messages** on the Noise session
   (`docs/specs/relay.md` -> "E2E framing"): `OneTimeRequestV1 {code, label}`
-  phone → Burrow, `label` one of `ONE_TIME_DEVICE_LABELS`, then one
+  phone → Burrow, the page sending a `label` from `ONE_TIME_DEVICE_LABELS`, then one
   `OneTimeOutcomeV1` — `{ok: true, burrowLabel}`, or
   `{ok: false, code}` with `code` one of `ONE_TIME_DENIAL_CODES`
   (`user-denied`, `confirmation-mismatch`, `link-expired`, `burrow-error`).
@@ -120,7 +111,8 @@ The room closes a socket with one of six codes, each exported with a `_REASON`:
 | 4014 | `WS_CLOSE_ONE_TIME_DEADLINE` | a phone joined, and the hard deadline passed |
 | 4015 | `WS_CLOSE_ONE_TIME_VIOLATION` | a binary frame, one over the length bound, or one past the message cap |
 
-Source of truth: `remote-lib-common/src/remote/one-time-wire.ts`;
+Source of truth: `OneTimeRoomFrame` / `OneTimeClientFrame` / `OneTimeBurrowFrame`
+and their guards in `remote-lib-common/src/remote/one-time-wire.ts`;
 `parseOneTimeFrame` in `lib/src/remote/one-time-rendezvous.ts`;
 `OneTimeRequestV1` / `OneTimeOutcomeV1` in
 `remote-lib-common/src/security/e2e-ceremony.ts`. Pinned by
@@ -140,7 +132,7 @@ resumes.
 | `confirming {label, expiresAt}` | a phone's request awaits the approval modal |
 | `connecting {label}` | confirmed; the direct path has `DIRECT_ONLY_DEADLINE_MS` |
 | `connected {label, since}` | both directions are direct and the rendezvous is closed |
-| `ended {reason}` | terminal |
+| `ended {reason, refusal?}` | terminal; `refusal` is `network-not-allowed`'s alone |
 
 `unavailable {reason}` and `idle` complete the type for the service, which
 decides them; a runtime never enters either.
@@ -155,6 +147,8 @@ decides them; a runtime never enters either.
   stops reading the room. Frames run through one FIFO, one at a time, and
   **the socket's close rides the same FIFO**, so a phone's `direct-switch` is
   read before the room's report that the phone left.
+- **Must reserve the link and erase its key only after message 1, message 2, and
+  Noise Split succeed; a failed handshake leaves it live.**
 - **Must spend an `E2E_INIT_BURST` `TokenBucket` token before an `init`'s
   WebCrypto.** The first non-keepalive transport message must be
   `OneTimeRequestV1`, else `burrow-error`. **Its label passes
@@ -238,7 +232,7 @@ Every failure resolves `{ok: false, message}` with fixed copy:
 | an expired link, room close `4010` or `4014`, any other close before an outcome past the link's expiry, or no answer by the room's deadline | `ONE_TIME_LINK_EXPIRED_MESSAGE` |
 | between an `ok` outcome and the switch: a decline, a lost session, the deadline, or any other close | `ONE_TIME_DIRECT_FAILED_MESSAGE` |
 | between an `ok` outcome and the switch: the laptop's goodbye | `networkNotAllowedMessage` where it names the phone's address, `ONE_TIME_DIRECT_FAILED_MESSAGE` where it names the path and no address, else `ONE_TIME_ENDED_MESSAGE` |
-| a socket that never opened | `ONE_TIME_UNREACHABLE_MESSAGE` |
+| a socket refused or lost before opening | `ONE_TIME_UNREACHABLE_MESSAGE` |
 | any other close, `close()`, or a session lost between the switch and the resolve | `ONE_TIME_ENDED_MESSAGE` |
 | a payload on message 2, or an outcome its guard refuses | `ONE_TIME_DENIAL_MESSAGES['burrow-error']` |
 
@@ -324,7 +318,7 @@ The relay Worker serves the phone's half at `ONE_TIME_PAGE_PATH` (`/connect/`):
   push, or cookie, though Pocket keeps its own on the same origin. `applyPocketTheme` applies Pocket's
   default theme without reading or writing a stored pick, for the page and its
   `PocketWall`. `scripts/e2e-lint.mjs` holds the page to the client's store rule.
-- **Mounts the wall only on `ok`**, through `mountRemoteWall`. End, Cancel, a
+- **Must mount the wall only on `ok`**, through `mountRemoteWall`. End, Cancel, a
   reported ending, a failed mount, or a failed attachment closes the client and
   releases the adapter; the first ending's copy stays.
 - **The label the page sends is `oneTimeDeviceLabel`, never Pocket's
@@ -371,7 +365,7 @@ Source of truth: `OneTimeApp` and `oneTimeDeviceLabel` in
 `lib/src/remote/pocket-app/pocket-theme.ts`; `assertPocketShell` in
 `lib/scripts/assert-pocket-worker.mjs`; `stageRelay` in
 `hosted/scripts/stage-relay.mjs`; `oneTimePageRoutes` in
-`hosted/server/one-time.ts`; `relayRules` in
+`hosted/server/one-time.ts`; `relayRules` / `oneTimePagePolicy` in
 `hosted/server/headers.ts`. Pinned by
 `lib/src/remote/one-time-app/OneTimeApp.test.tsx`,
 `lib/src/remote/pocket-app/assert-pocket-worker.test.ts`,
@@ -464,7 +458,7 @@ sits in the Baseboard's right cluster (`docs/specs/layout.md` -> "Baseboard").
 
 | State | The panel shows | Actions |
 | --- | --- | --- |
-| `idle` | the **One-time connection** button; "Open a link on your phone for a one-off connection. Your phone must be on an allowed network. No account needed." | the button opens |
+| `idle` | the **One-time connection** button; "Open a link on your phone for a one-off connection. Your phone must be on an allowed network. No account needed.", its middle sentence "Your phone can be on any network." under `phoneOnAnyNetwork` | the button opens |
 | `unavailable` | the button disabled, the reason's copy for the hint | — |
 | `opening` | "Getting a link…" | Cancel |
 | `waiting` | the link as a QR code and as selectable text; "Good for one phone. Expires in N min." | Copy link, New link, Cancel |

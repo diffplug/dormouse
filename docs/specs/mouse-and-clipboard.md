@@ -48,13 +48,15 @@ It ends on the **next mouse-up inside the terminal content area** paired with a 
 
 - **Counts:** a plain primary click (down/up that never crossed the drag threshold) or a completed drag.
 - **Does not count:** a non-primary click, whose context menu the override swallows anyway; clicks on the No-Mouse icon or the banner buttons; and an orphan mouse-up from a drag that started outside the terminal. Pinned by `lib/src/lib/terminal-mouse-router.test.ts`.
-- **On end** — or on **Cancel**, after that button's 260 ms confirmation flash — reporting is restored, banner dismissed, Mouse icon back. **No timeout:** absent any mouse action the override stays indefinitely.
+- **On end** — or on **Cancel**, after that button's 260 ms confirmation flash — reporting is restored, banner dismissed, Mouse icon back. **Must cancel a pending banner action when its temporary override ends**, never reactivating it later. **No timeout:** absent any mouse action the override stays indefinitely.
 
 **Sticky override.** **Make sticky** converts it after the same flash (the store calls this state `permanent`): banner dismissed, No-Mouse icon kept with its "click to restore" hover text, mouse and wheel still going to the terminal. It persists until the user clicks the No-Mouse icon.
 
 **Auto-clear on reporting off.** **Either override clears when the inside program stops requesting mouse reporting** (it exits, or DECRSTs `?1000l`/`?1002l`/`?1003l`); icon and banner go with it. A **dead** session's replay ends in the `REPLAY_MODE_RESET` tail that DECRSTs mouse tracking (`docs/specs/terminal-escapes.md`), so a mode latched by a dead TUI cannot block selection in the restored pane.
 
 **No keyboard path is designed** for the icons or banner buttons, and focus-based activation is not actively prevented.
+
+Source of truth: `setOverride` / `setMouseReporting` in `lib/src/lib/mouse-selection.ts`; `MouseOverrideBanner` in `lib/src/components/wall/MouseOverrideBanner.tsx`, pinned by `lib/src/components/wall/mouse-chrome.test.tsx`.
 
 ---
 
@@ -88,7 +90,7 @@ A small hint sits adjacent to an in-progress selection — below when dragging d
 A selection is anchored to the characters under it, not to screen coordinates: stored in absolute buffer rows (scrollback + viewport).
 
 - **Pure scroll** — vertical translation with no character changes — carries the selection along; coordinate math only, no matching.
-- **Content change:** any change to a cell the finalized selection overlaps cancels it immediately; repaints elsewhere on screen are irrelevant. A text snapshot, retaken whenever the selection is finalized or moved (§4.3), is compared on each xterm render; **never add a partial-match or content-tracking heuristic** — cancel-on-change is the rule (§9.1).
+- **Must cancel a finalized selection on the next xterm render when its extracted selected text changes**; repaints elsewhere are irrelevant. Retake the text snapshot when the selection is finalized or moved (§4.3). **Never add a partial-match or content-tracking heuristic** (§9.1).
 - **Terminal resize** carries a finalized linewise selection Dormouse owns, in the normal buffer, through xterm's reflow (rationale). Its editor stays open in the same format and same-labeled scope, else As selected; per-break edits drop unless the width held.
   - **Must cancel if an edge's line was trimmed or its cells no longer read as the selected text** (rationale).
   - **Must cancel any other.**
@@ -144,17 +146,11 @@ Source of truth: `render` in `lib/src/lib/copy-text.ts`, pinned by `lib/src/lib/
 
 #### 4.1.1 Auto
 
-Each break between consecutive rows is, in this order:
-
-1. **Deleted** if the next row is a true soft wrap (xterm's `isWrapped`).
-2. **Kept** if either line is blank, the next starts a list item, this one ends in `;` `{` `}` or the next starts with `)` `}` `]`, or the next line's indent is not this line's hanging indent.
-3. **Kept** if the paragraph's longest line is under 40 columns (60% of a narrower terminal), or the next line's first word would have fit on this line within that longest line (rationale).
-4. **Deleted** if this line fills that width and its last word is token-shaped (a URL or path character, or 16+ token characters) — a token split at the margin.
-5. Otherwise **one space**.
+**Must delete true soft wraps before judging hard breaks against their surrounding logical lines.** The ordered heuristic, including its bounded local width estimate, lives at `autoBreak` (rationale).
 
 **Must trim leading/trailing blank lines, collapse blank runs, and remove shared indent**, keeping relative indent. **Must use full row indentation for mid-line starts.**
 
-Source of truth: `autoBreak` in `lib/src/lib/copy-text.ts`.
+Source of truth: `autoBreak` / `wrapWidth` in `lib/src/lib/copy-text.ts`; pinned by `lib/src/lib/copy-text.test.ts`.
 
 ### 4.2 Scopes
 
@@ -164,7 +160,7 @@ Source of truth: `autoBreak` in `lib/src/lib/copy-text.ts`.
 |---|---|
 | **As selected** | The drag (opens here). |
 | **Whole words** | Each edge grown over its token, across any row break Auto deletes; an edge on a blank grows nothing. Named **Full URL** or **Full path** when the §5.1 detector classifies a grown edge token so. |
-| **Paragraph** | The lines between blank lines, frame-only lines, and box sides (`│ ┃ ║`); an edge on a boundary never crosses it. |
+| **Paragraph** | The lines between blank lines, frame-only lines, and box sides (`│ ┃ ║`) at column zero; an edge on a boundary never crosses it. |
 
 The selection overlay draws a wider scope dashed around the outline; the preview marks every cell outside the drag. Source of truth: `computeScopes` in `lib/src/lib/copy-text.ts`.
 
@@ -186,25 +182,16 @@ Source of truth: `handleMouseSelectionKeys` in `lib/src/components/wall/keyboard
 ### 4.4 Preview and Marks
 
 - One gutter-numbered row per clipboard line; leading whitespace shows as `·`.
-- Every break is a mark — `⏎` kept, `␣` one space, `⌁` deleted. **A click cycles it keep → space → none**, and the format then reads `Auto*`. A scope or format change, or a nudge, discards those edits.
+- Every break is a mark — `⏎` kept, `␣` one space, `⌁` deleted. **A click cycles it keep → space → none**, and the active format gains `*`. A scope or format change, or a nudge, discards those edits.
 - A format whose text an earlier one already gives is dimmed.
 
 ### 4.5 Placement and Dismissal
 
 - **Must render into `document.body` at `COPY_EDITOR_Z_INDEX`**: above the selection ring, below every `MODAL_LAYERS` value (rationale).
-- It takes the first spot holding it whole in the window, less `OVERLAY_VIEWPORT_MARGIN_PX`. All but the last stay clear of the **band**, the rows of the selection and its scope:
-
-  | Rank | Desktop | Touch |
-  |---|---|---|
-  | 1 | Below the band | Above, clear of the thumb that ended the drag |
-  | 2 | Above the band | Below |
-  | 3 | Beside the pane, the roomier side | The same |
-  | 4 | Squished into whichever of below, above, and the two sides gives the most area, if 120px tall (rationale) | The same |
-  | 5 | Over the band at the pane's bottom, at most 60% of the window | The same |
-
-- **Must be at least as wide as the pane and the chrome** (header and footer, never wrapped, measured at their widest in any format so `f` never resizes the editor), widening with the space to the longest line in any format of the scope, clamped to the window or the side's room (rationale). Above and below may cover neighbors.
+- **Must prefer a whole fit within the viewport less `OVERLAY_VIEWPORT_MARGIN_PX`, clear of the selection and scope band**, below then above on desktop, above then below on touch; the roomier side, squishing, and an over-band fallback follow. The rank, area comparison, bounds, and hysteresis live at `placeCopyEditor` (rationale).
+- **Must be at least as wide as the pane less its two `GAP_PX` margins and the chrome** (header and footer, never wrapped, measured at their widest in any format so `f` never resizes the editor), widening with the space to the longest line in any format of the scope, clamped to the window or the side's room (rationale). Above and below may cover neighbors.
 - **Must clip the key hints and legend before the segments, the count, or Copy; a side needs room only for those three** (rationale).
-- **Must re-place on every selection or scope change; never keep a spot that covers the selection while another fits.** A held spot, natural or squished, yields only to one better by `HYSTERESIS_PX` (rationale).
+- **Must re-place on every selection or scope change; never keep a spot that covers the selection while another fits.** (rationale)
 - **Must ease every move, restarting from the displayed rect; opening snaps**, as does any move under `motionIsInstant()` (rationale). **Must follow its pane at most once a frame** (`docs/specs/layout.md` → "Position tracking").
 - **Never show while its Wall travels**, its pane hidden, or another pane zoomed over it.
 - **Never take focus**; only an actual scrollbar press keeps its default (rationale). Presses inside it count as inside its pane (`anchoredTarget`); its `mousedown` and `contextmenu` never reach the pane.
@@ -213,7 +200,7 @@ Source of truth: `handleMouseSelectionKeys` in `lib/src/components/wall/keyboard
 - **Must flash only after a successful clipboard write, and only for the selection copied**: Copy reads ✓ Copied, never moving, and the copied selection fills, pulsing unless `motionIsInstant()`; after `COPY_FLASH_MS` (700 ms), `TOUCH_COPY_FLASH_MS` (1200 ms) on touch, the selection clears, however it moved meanwhile (rationale). Canceling clears the flash immediately.
 - **Must leave empty copies idle without writing.** **Must say a failed write failed**: Copy reads Couldn't copy for `COPY_FAILED_MS` (1500 ms) and the selection stays for a retry. Without the Clipboard API, or refused by it, the write first falls back to `execCommand('copy')` (rationale).
 
-Source of truth: `placeCopyEditor` in `lib/src/lib/copy-editor-placement.ts`, pinned by `lib/src/lib/copy-editor-placement.test.ts`; `createRectMotion` in `lib/src/components/rect-motion.ts`; `anchoredTarget` in `lib/src/lib/dom.ts`; `CopyEditor` in `lib/src/components/CopyEditor.tsx`, pinned by `moves off a wider scope whose band reaches it`, `lays its chrome probe out the same in every format`, `eases a move from the displayed rect, after opening snapped`, `hides while its Wall travels, and shows again when the travel ends`, and `never takes focus from the pane, but leaves its scrollbar its drag` in `lib/src/components/CopyEditor.test.tsx` and the plays in `lib/src/stories/CopyEditorPlacement.stories.tsx`; `copySelection` in `lib/src/lib/copy-selection.ts`, pinned by `lib/src/lib/copy-editor.test.ts`; `writeTextToClipboard` in `lib/src/lib/clipboard.ts`, pinned by `lib/src/lib/clipboard-write.test.ts`; the fill in `SelectionOverlay` in `lib/src/components/SelectionOverlay.tsx`, pinned by `lib/src/components/SelectionOverlay.test.tsx`; `TOUCH_SLOP_PX` in `lib/src/components/CopyEditor.tsx`, pinned by `CopyEditor: touch slop` in `lib/src/components/CopyEditor.test.tsx`.
+Source of truth: `placeCopyEditor` in `lib/src/lib/copy-editor-placement.ts`, pinned by `lib/src/lib/copy-editor-placement.test.ts`; `createRectMotion` in `lib/src/components/rect-motion.ts`; `anchoredTarget` in `lib/src/lib/dom.ts`; `CopyEditor` in `lib/src/components/CopyEditor.tsx`, pinned by `lib/src/components/CopyEditor.test.tsx` and the plays in `lib/src/stories/CopyEditorPlacement.stories.tsx`; `copySelection` in `lib/src/lib/copy-selection.ts`, pinned by `lib/src/lib/copy-editor.test.ts`; `writeTextToClipboard` in `lib/src/lib/clipboard.ts`, pinned by `lib/src/lib/clipboard-write.test.ts`; the fill in `SelectionOverlay` in `lib/src/components/SelectionOverlay.tsx`, pinned by `lib/src/components/SelectionOverlay.test.tsx`; `TOUCH_SLOP_PX` in `lib/src/components/CopyEditor.tsx`, pinned by `CopyEditor: touch slop` in `lib/src/components/CopyEditor.test.tsx`.
 
 ### 4.6 The Program's Own Copy (OSC 52)
 
@@ -301,17 +288,21 @@ Source of truth: `lib/src/lib/selection-text.ts` (extraction and normalization),
 
 ### 8.2 Paste Keybindings
 
-**`Cmd/Ctrl (+Shift) + V` — all four combinations, on every platform — are intercepted and paste** (`hasPasteModifier`); copy keeps the macOS separation instead (§4.3). The price: the raw control byte `0x16` (readline `quoted-insert`, vim literal-next) never reaches the program by this key — §8.3 is the escape hatch. (rationale)
+**`Cmd/Ctrl (+Shift) + V` — all four combinations, on every platform — are intercepted and paste** (`hasPasteModifier`); copy keeps the macOS separation instead (§4.3). The price: the raw control byte `0x16` (readline `quoted-insert`, vim literal-next) never reaches the program by this key, even after a program's literal-next prefix (§8.3). (rationale)
 
 Source of truth: `lib/src/components/wall/keyboard/chords.ts`.
 
-### 8.3 Sending `0x16` (Ctrl+Q)
+### 8.3 Program Literal-Next Input
 
-Because Ctrl+V is intercepted everywhere, a literal control character goes in through **Ctrl+Q, then the desired key** — readline's own `quoted-insert` (bash/zsh/fish), which the terminal does nothing to enable. No equivalent exists for programs without it (vim insert mode) — §9.2.
+**Must intercept paste chords even after a program's literal-next prefix**; Dormouse does not track that program state. `Ctrl+Q` is forwarded normally, but a following `Ctrl+V` still pastes rather than sending `0x16` (rationale). A terminal-level literal-next shortcut remains unbuilt (§9.2).
+
+Source of truth: `handleMouseSelectionKeys` in `lib/src/components/wall/keyboard/handle-mouse-selection-keys.ts`; `hasPasteModifier` in `lib/src/components/wall/keyboard/chords.ts`.
 
 ### 8.4 Platform Detection
 
-**`IS_MAC` (`lib/src/lib/platform/index.ts`) is computed once at startup** from `navigator.userAgentData.platform`, else `navigator.platform`, matched against `/Mac|iPhone|iPad/i`. It gates the copy chord (§4.3), every platform-dependent label, and the app's own macOS chrome (the AppBar's traffic-light inset, the VS Code workbench chord map) — **the paste chord alone is platform-independent** (§8.2).
+**Must use `IS_MAC` for the copy chord, platform labels, and macOS chrome**; the paste chord is platform-independent (§8.2).
+
+Source of truth: `IS_MAC` / `PLATFORM_STRING` in `lib/src/lib/platform/index.ts`.
 
 ### 8.5 Bracketed Paste
 
@@ -329,7 +320,7 @@ Paste reads the clipboard in three tiers, preferred in order:
 
 1. **File references** (a Finder/Explorer Copy of a file). Each path is shell-escaped; the space-joined list is written to the PTY with a trailing space, so the next token starts cleanly.
 2. **Plain text.** The adapter's native `readClipboardText` where it has one, else `navigator.clipboard.readText()`. **Never reverse that order** (rationale). A non-empty string goes to the PTY (bracket-wrapped, §8.5).
-3. **Raw image data.** Only when both of the above come back empty and the clipboard holds image bytes (e.g. a `Cmd+Shift+4` screenshot): the bytes are written to a newly-created private temp directory as `<uuid>-clipboard.png`, and that path is pasted as in tier 1. **On Unix-like systems the temp directory is owner-only and the image file owner-read/write**, so clipboard screenshots are not exposed to other local users. File and directory are unlinked ~5 minutes later (rationale).
+3. **Raw image data.** If file references and text are empty, save image bytes as `<uuid>-clipboard.png` in a new temp directory and paste its path as tier 1. **Must use owner-only directory and owner-read/write file modes on Unix-like systems.** Windows storage limits: `docs/specs/security-local.md` -> "Browser panes". File and directory cleanup runs after ~5 minutes while the host remains running (rationale).
 
 **Tiers 1 and 2 are read in parallel** (independent IPC roundtrips) and the file reference wins; tier 3 is sequential because it allocates a temp file. Every tier empty ⇒ silent no-op.
 
@@ -345,17 +336,15 @@ One shared Node module, `standalone/sidecar/clipboard-ops.js`, serves both hosts
 
 **The standalone/Tauri build on Windows reads the Win32 clipboard directly in Rust**, dropping the subprocess: `CF_HDROP` for file paths, `CF_UNICODETEXT` for text, `CF_DIB` for an image saved as a `.bmp` temp file — the extension differs from the sidecar path's `.png`, and the same ~5-minute cleanup applies. Non-Windows Tauri stays on the sidecar path.
 
-**Path escaping (tiers 1 and 3, and §8.7). Quote a pasted path for the Session's launch shell** — never for the host platform, never for the app-global shell selected for future terminals (rationale). Each terminal registry entry captures its `shellKind` at spawn and keeps it across a live reconnect (the `pty:list` row carries the launch-shell path) and a cold restore. **Only a missing registry entry falls back** — to the app-global selected shell, then the platform (`cmd` on Windows, posix elsewhere). Classification uses the same `shellCommandKind` `dor` uses to quote commands (`docs/specs/dor-cli.md`). Three rules:
-
-- **posix** — backslash-escape each metacharacter, matching macOS Terminal's drag-and-drop format (rationale). Newline/CR paths are single-quote-wrapped instead, since bash swallows `\<newline>` as a line continuation.
-- **cmd** — double-quote-wrap, doubling embedded `"`. cmd's own `%NAME%` (and `!NAME!` under delayed expansion) remains a parser limitation of this legacy path.
-- **powershell** — bare when every character is inert in argument mode, else single-quote-wrapped with embedded `'` doubled, reusing `dor`'s `quotePowerShellArg`. **Never reuse the cmd rule here** (rationale). The bare set excludes `,` (array operator in argument mode) and `@` (splatting, or another expression form at a token's start).
+**Path escaping (tiers 1 and 3, and §8.7). Quote a pasted path for the Session's launch shell** — never for the host platform, never for the app-global shell selected for future terminals (rationale). Each terminal registry entry captures its `shellKind` at spawn and keeps it across a live reconnect (the `pty:list` row carries the launch-shell path) and a cold restore. **Only a missing registry entry falls back** — to the app-global selected shell, then the platform (`cmd` on Windows, posix elsewhere). Classification uses the same `shellCommandKind` `dor` uses to quote commands (`docs/specs/dor-cli.md`). **Must share `quotePowerShellArg` with `dor` for literal PowerShell arguments; never use cmd quoting for PowerShell** (rationale). The posix/cmd escaping rules and their parser limitations live at `shellEscapePath`.
 
 Source of truth: `lib/src/lib/clipboard.ts` (Session-kind selection), `lib/src/lib/shell-escape.ts` (dispatch + posix/cmd rules, pinned by `lib/src/lib/shell-escape.test.ts`) over `POSIX_ESCAPABLE` in `lib/src/lib/posix-escape.ts` (the escapable set, shared with the command tokenizer), `lib/src/lib/terminal-lifecycle.ts` (captured `shellKind`), `dor/src/commands/shell-quote.ts` (`shellCommandKind`, `quotePowerShellArg`), `standalone/src-tauri/src/clipboard_win.rs` (Win32 read), and the live-PTY list contract in `docs/specs/transport.md`.
 
 ### 8.7 Drag-to-Paste
 
-Dropping files on a terminal pane types their escaped paths at the current prompt, exactly as tier 1 does (§8.6). Tauri takes the drop natively via `WindowEvent::DragDrop` and routes the paths to the selected pane (dropped if the selection is a Door or has left the layout) — but **the wiring is inert today**: `tauri.conf.json` sets `dragDropEnabled: false` (tauri-apps/tauri#14373, dormouse#38), so the native handler never fires. **Nothing in the layout stack needs the flag off any more** — Lath's pane drag is pointer-based — so flipping it is a live option, and a deliberate, separate change (rationale).
+**Must route native file drops only to the selected Pane of the active Workspace**, ignoring a Door selection or a Session outside that Workspace's layout. Paste paths as tier 1 (§8.6). **Tauri's native handler is inert while `dragDropEnabled: false`** (rationale).
+
+Source of truth: `useSessionPersistence` in `lib/src/components/wall/use-session-persistence.ts`; `app.windows` in `standalone/src-tauri/tauri.conf.json`; pinned by `lib/src/components/WorkspaceWindow.test.tsx`.
 
 **Drag-to-paste is not supported in the VSCode build**: the workbench excludes `WebviewView` (sidebar/panel) from external-file drop routing, so the iframe never receives `dragover`/`drop` for OS files (§9.2). VSCode users paste instead (§8.1/§8.5).
 
@@ -403,6 +392,7 @@ Not implemented today; they may be added in response to user feedback.
 
 ### 9.2 Paste
 
+- Enable Tauri's native file drops by setting `dragDropEnabled: true`; pointer-based Lath dragging no longer needs the flag disabled (rationale at §8.7).
 - Right-click context-menu Paste and OS Edit → Paste menu wiring.
 - A settings toggle to disable Ctrl+V interception on Windows and Linux.
 - A paste popup for previewing or transforming content before it is committed.

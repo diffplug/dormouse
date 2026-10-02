@@ -25,15 +25,14 @@ against.
 Relay demanding user verification while the Burrow did not would leave the weaker
 verifier deciding.
 
-**Why the webview can relay a confirmation safely.** Reading the two digits requires
-holding the device — a relayed or injected request has no screen to read from. The
-confirmation arrives as a bridge command carrying the displayed ceremony's immutable
-`pairingId` and the typed digits; the service, not the webview, holds the expected code
-and decides whether that ceremony is still confirmable, which is what leaves the webview
-unable to choose what is authorized, to satisfy a confirmation without the phone, or to
-fabricate a request. A mirrored code would make the confirmation something anything in
-the webview realm could satisfy, and a leaked invitation key would let a photographed QR
-be completed by whoever holds it.
+**Why the expected code stays in the Burrow process.** The bridge carries the
+displayed ceremony's immutable `pairingId` and typed digits; only the service
+knows the expected code and the pending record. Mirroring the code would let
+compromised webview code satisfy every confirmation. Keeping it private leaves
+one guess per ceremony, not an absolute proof that a person read the phone.
+`samplePairingCode` samples uniformly over 100 values; local confirmation spends
+`attempted` before comparing, so guessing succeeds with probability 1/100 for a
+ceremony whose other gates already passed.
 
 **Why the pending maps need caps on both sides.** Every `e2e` frame allocates under a
 `clientId` the relay chooses, in both `BurrowRuntime`'s client map and the service's
@@ -104,10 +103,8 @@ build was never pointed at. That is also why any new Burrow→Relay call goes th
 home-directory permissions vary by distro — `0700` on RHEL, `0755` historically on
 Debian, `0750` on Ubuntu since 21.04 — so without an explicit mode, whether a second
 account can read `burrows.json` depends on which distro the selfhoster happened to pick.
-It buys nothing on Windows, where modes are a no-op and the profile ACL already
-excludes other accounts; nothing in a container, where the namespace is the boundary;
-and nothing on a serverless deployment backed by a database, where this file never
-runs.
+Windows modes are a no-op; the installed Relay and standalone Burrow need
+native DACL controls instead. A database-backed Worker does not use this file.
 
 **What the Burrow ACL's file mode does not buy.** Neither store defends its records
 against a process running as the same user, and nothing in the table claims it does — a
@@ -233,3 +230,6 @@ Both gaps are stated in this spec rather than left in a Future list for two reas
 the audit's qualitative pass should not keep rediscovering them as findings, and a
 reader deciding whether to run this needs to know that "revoke a device" is not
 currently something they can do quickly.
+
+The owner-local rejection logs are diagnostic fragments, not a complete or
+structured record of successful connects, attaches, or writes.
