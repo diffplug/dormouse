@@ -133,6 +133,10 @@ interface MobileGestureOptionState {
 const DIAGONAL = Math.SQRT1_2;
 
 export const MOBILE_GESTURE_IDLE_STATE: MobileGestureTrackingState = { phase: 'idle' };
+// Radii, ordered FADE_START < HIGHLIGHT < SELECT < LAYOUT: LAYOUT anchors the
+// exploded options; SELECT is the drawn circle whose crossing selects the
+// closest compass direction; HIGHLIGHT previews it without selecting (no circle
+// drawn); root groups stay fully opaque until the drag passes FADE_START.
 export const RADIUS_LAYOUT = 92;
 export const RADIUS_SELECT = RADIUS_LAYOUT * 0.75;
 export const RADIUS_FADE_START = RADIUS_SELECT * 0.25;
