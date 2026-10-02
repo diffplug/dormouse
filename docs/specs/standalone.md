@@ -707,7 +707,7 @@ below reads that record rather than inferring itself from the suppression map.
    `transfer_workspace` / `open_workspace_window`. **Must return preparation refusals as `{ moved: false, reason }` without changing ownership.** On `Ok` it marks the Workspace
    **transferring**: the Wall stays mounted, nothing is
    released, and `getWindowSnapshot` omits it.
-2. **Rust** reassigns `terminalIds` to the target, keeps routing their output to
+2. **Rust** journals the arrival (below), then reassigns `terminalIds` to the target, keeps routing their output to
    the source, and asks the sidecar to stamp a `pty:marked` line per id; at that
    line the id's suppression begins, until its replay has been emitted to the
    target. The source serializes each buffer at its mark and invokes
@@ -803,9 +803,12 @@ below reads that record rather than inferring itself from the suppression map.
 - **A boot's `pty_request_init` excludes every id an arrival claims.** Ownership
   moves at the invoke, so those shells would otherwise be listed as top-level
   panes beside the Workspace about to mount them.
-- **`begin_arrival` records the arrival in `sessions/arrivals.json`** — a JSON
-  array of `{ workspaceId, from, to, workspace, settled }`, never an entry in
-  either window's snapshot (rationale); the tombstone rules below read `settled`. **Must retain an adopted record until target
+- **`begin_arrival` records the arrival in `sessions/arrivals.json` before
+  ownership moves** — a JSON array of `{ workspaceId, from, to, workspace,
+  settled }`, never an entry in either window's snapshot (rationale). **A failed
+  write must refuse the move with nothing changed**; the write runs outside
+  `arrivals`, so admission is rechecked after it and a refusal withdraws the
+  record (`a_failed_arrival_journal_refuses_the_move_with_nothing_changed`); the tombstone rules below read `settled`. **Must retain an adopted record until target
   and source snapshots both reflect the move**, marking it settled at
   `adopt_done` and checking after each `save_session` or source-window close
   (`adoption_keeps_the_journal_until_both_snapshots_are_durable`). **Must reverse
@@ -1147,7 +1150,7 @@ asks before discarding a pending download (§Per-window close).
   `deferred_quit_and_close_requests_wait_for_membership_then_run_once` in
   `standalone/src-tauri/src/quit_state.rs`, and
   `transfers_cannot_change_membership_after_close_or_quit_confirmation_begins` and
-  `begin_arrival_admits_under_the_arrivals_lock_before_queueing` in
+  `begin_arrival_journals_then_admits_under_the_arrivals_lock_before_queueing` in
   `standalone/src-tauri/src/lib.rs`.
 - **Must collect votes before killing any window's Sessions.** Confirmation
   consumes its callback once; a noninteractive full-window progress overlay

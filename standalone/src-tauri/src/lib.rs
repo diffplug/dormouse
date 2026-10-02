@@ -2504,20 +2504,35 @@ fn record_workspace_id(record: &JsonValue) -> Option<&str> {
     record.get("workspaceId").and_then(JsonValue::as_str)
 }
 
-/// Append one arrival's record, replacing any earlier record of the same id.
-fn record_arrival_on_disk(dir: &Path, arrival: &routing::Arrival) -> Result<(), String> {
+/// Append one arrival's record, replacing and returning any earlier record of
+/// the same id.
+fn record_arrival_on_disk(dir: &Path, arrival: &routing::Arrival) -> Result<Option<JsonValue>, String> {
     let _disk = guard(&ARRIVAL_DISK_LOCK);
     let Some(workspace) = arrival.payload.get("workspace") else {
         return Err("arrival payload carries no workspace".to_string());
     };
     let mut records = read_arrivals_from(dir)?;
-    records.retain(|record| record_workspace_id(record) != Some(&arrival.workspace_id));
+    let previous = records.iter().position(|record| record_workspace_id(record) == Some(&arrival.workspace_id))
+        .map(|at| records.remove(at));
     records.push(serde_json::json!({
         "workspaceId": arrival.workspace_id,
         "from": arrival.from,
         "to": arrival.to,
         "workspace": workspace,
     }));
+    write_arrivals_to(dir, &records)?;
+    Ok(previous)
+}
+
+/// Undo `record_arrival_on_disk` for an arrival refused after its write,
+/// unless a later drop of the same id has since replaced the record.
+fn withdraw_arrival_on_disk(dir: &Path, arrival: &routing::Arrival, previous: Option<JsonValue>) -> Result<(), String> {
+    let _disk = guard(&ARRIVAL_DISK_LOCK);
+    let mut records = read_arrivals_from(dir)?;
+    let ours = |r: &JsonValue| record_workspace_id(r) == Some(&arrival.workspace_id)
+        && r["from"] == arrival.from.as_str() && r["to"] == arrival.to.as_str() && r.get("settled").is_none();
+    let Some(at) = records.iter().position(ours) else { return Ok(()); };
+    match previous { Some(record) => records[at] = record, None => { records.remove(at); } }
     write_arrivals_to(dir, &records)
 }
 
@@ -2688,8 +2703,65 @@ fn transfer_admitted(
         && [from, to].into_iter().all(|label| !close.active(label) && !closing.contains(label))
 }
 
-/// Open one arrival: reassign its shells to the target and suppress them, then
-/// queue the record. **Ownership moves synchronously here**, before either
+/// Whether `arrival` may begin: no quit or close of either end (see
+/// `transfer_admitted`) and its Workspace not already in flight.
+fn admit_arrival(
+    quit: Option<&QuitState>,
+    windows: &WindowState,
+    arrivals: &ArrivalQueue,
+    arrival: &routing::Arrival,
+) -> Result<(), String> {
+    if let Some(state) = quit {
+        // Lock order: arrivals, quit machine, close machine, closing.
+        let admitted = transfer_admitted(
+            arrivals,
+            &guard(&state.machine),
+            &guard(&state.close),
+            &guard(&windows.closing),
+            &arrival.from,
+            &arrival.to,
+        );
+        if !admitted {
+            return Err("cannot transfer a Workspace while its window is closing or Dormouse is quitting".to_string());
+        }
+    }
+    if routing::has_arrival(arrivals, &arrival.workspace_id) {
+        return Err(format!("Workspace '{}' is already in flight", arrival.workspace_id));
+    }
+    Ok(())
+}
+
+/// Journal one arrival, then reassign its shells to the target and queue it.
+/// **The journal comes first**: the source omits a transferring Workspace
+/// from its saves and the target writes only after adoption, so a crash in
+/// the gap is recovered from this record alone (§Arrival queue). A failed
+/// write refuses the move with nothing changed. The write runs outside
+/// `arrivals`, whose waits reach the main thread, so admission is checked
+/// again under it and a refusal then withdraws the record.
+fn journal_and_open_arrival(
+    quit: Option<&QuitState>,
+    windows: &WindowState,
+    dir: &Path,
+    arrival: &routing::Arrival,
+) -> Result<(), String> {
+    admit_arrival(quit, windows, &guard(&windows.arrivals), arrival)?;
+    let previous = record_arrival_on_disk(dir, arrival)
+        .map_err(|e| format!("could not record the Workspace transfer: {e}"))?;
+    let mut arrivals = guard(&windows.arrivals);
+    if let Err(refused) = admit_arrival(quit, windows, &arrivals, arrival) {
+        drop(arrivals);
+        if let Err(e) = withdraw_arrival_on_disk(dir, arrival, previous) {
+            append_log(format!("[window] could not withdraw {}'s record: {e}", arrival.workspace_id));
+        }
+        return Err(refused);
+    }
+    // Ownership moves now; suppression waits for each id's `marked` line.
+    windows.begin_transfer(&arrival.terminal_ids, &arrival.from, &arrival.to);
+    routing::queue_arrival(&mut arrivals, arrival.clone());
+    Ok(())
+}
+
+/// Open one arrival. **Ownership moves synchronously here**, before either
 /// window is told anything — the single Rust reader thread processes sidecar
 /// lines in order, so every byte after this point is either dropped (and present
 /// in the replay the target is about to get) or delivered to the target
@@ -2699,32 +2771,8 @@ fn begin_arrival(
     windows: &WindowState,
     arrival: routing::Arrival,
 ) -> Result<(), String> {
-    {
-        let mut arrivals = guard(&windows.arrivals);
-        if let Some(state) = app.try_state::<QuitState>() {
-            // Lock order: arrivals, quit machine, close machine, closing.
-            let admitted = transfer_admitted(
-                &arrivals,
-                &guard(&state.machine),
-                &guard(&state.close),
-                &guard(&windows.closing),
-                &arrival.from,
-                &arrival.to,
-            );
-            if !admitted {
-                return Err("cannot transfer a Workspace while its window is closing or Dormouse is quitting".to_string());
-            }
-        }
-        if routing::has_arrival(&arrivals, &arrival.workspace_id) {
-            return Err(format!(
-                "Workspace '{}' is already in flight",
-                arrival.workspace_id
-            ));
-        }
-        // Ownership moves now; suppression waits for each id's `marked` line.
-        windows.begin_transfer(&arrival.terminal_ids, &arrival.from, &arrival.to);
-        routing::queue_arrival(&mut arrivals, arrival.clone());
-    }
+    let quit = app.try_state::<QuitState>();
+    journal_and_open_arrival(quit.as_deref(), windows, &sessions_dir(app)?, &arrival)?;
     // The split point, stamped in the stream by the sidecar and routed to the
     // source, which serializes what it holds when it sees it (§Transfer). A
     // Workspace of browser panes alone has no ids to mark; its source sends
@@ -2735,19 +2783,6 @@ fn begin_arrival(
             "data": { "ids": arrival.terminal_ids, "requestId": format!("mark-{}", arrival.workspace_id) },
         });
         send_to_sidecar(&sidecar, msg.to_string());
-    }
-    // Recorded on disk here, in neither window's snapshot: the source omits a
-    // transferring Workspace from its saves and the target writes only after
-    // adoption, so a crash in the gap would otherwise restore it nowhere
-    // (§Arrival queue). Never fatal: a failed write is logged and the transfer
-    // proceeds.
-    match sessions_dir(app) {
-        Ok(dir) => {
-            if let Err(e) = record_arrival_on_disk(&dir, &arrival) {
-                append_log(format!("[window] could not record {} on disk: {e}", arrival.workspace_id));
-            }
-        }
-        Err(e) => append_log(format!("[window] {e}")),
     }
     spawn_arrival_watchdog(app.clone(), &arrival);
     Ok(())
@@ -4726,15 +4761,47 @@ mod tests {
     }
 
     #[test]
-    fn begin_arrival_admits_under_the_arrivals_lock_before_queueing() {
+    fn begin_arrival_journals_then_admits_under_the_arrivals_lock_before_queueing() {
         let src = include_str!("lib.rs").split("#[cfg(test)]").next().unwrap();
-        let body = src.split("fn begin_arrival(").nth(1).unwrap().split("\n}").next().unwrap();
+        let body = src.split("fn journal_and_open_arrival(").nth(1).unwrap().split("\n}").next().unwrap();
+        let journal = body.find("record_arrival_on_disk(").unwrap();
         let lock = body.find("let mut arrivals = guard(&windows.arrivals)").unwrap();
-        let check = body.find("transfer_admitted(").unwrap();
-        let refuse = body.find("if !admitted {").unwrap();
+        let check = lock + body[lock..].find("admit_arrival(").unwrap();
+        let refuse = body.find("return Err(refused)").unwrap();
+        let transfer = body.find("windows.begin_transfer(").unwrap();
         let queue = body.find("routing::queue_arrival").unwrap();
-        assert!(lock < check && check < refuse && refuse < queue);
-        assert!(body[refuse..queue].contains("return Err("));
+        assert!(journal < lock && lock < check && check < refuse && refuse < transfer && transfer < queue);
+    }
+
+    #[test]
+    fn a_failed_arrival_journal_refuses_the_move_with_nothing_changed() {
+        let dir = TempDir::new("arrival-journal-first");
+        let windows = super::WindowState::default();
+        let mut arrival = arrival_of("workspace-7", "main", "ws-2");
+        arrival.terminal_ids = vec!["pane-a".to_string()];
+        windows.mint("pane-a", "main");
+        // A directory where the journal belongs fails its read on every platform.
+        fs::create_dir(arrivals_path(dir.path())).unwrap();
+        assert!(super::journal_and_open_arrival(None, &windows, dir.path(), &arrival).is_err());
+        assert_eq!(windows.owned_by("main"), vec!["pane-a"]);
+        assert!(guard(&windows.arrivals).is_empty());
+        assert!(guard(&windows.routing).marking.is_empty());
+        fs::remove_dir(arrivals_path(dir.path())).unwrap();
+        super::journal_and_open_arrival(None, &windows, dir.path(), &arrival).unwrap();
+        assert_eq!(windows.owned_by("ws-2"), vec!["pane-a"]);
+        assert_eq!(guard(&windows.arrivals).len(), 1);
+        // A refusal after the write puts back the record it replaced, and
+        // never withdraws a newer drop's record.
+        let mut later = arrival_of("workspace-7", "ws-2", "ws-3");
+        let previous = record_arrival_on_disk(dir.path(), &later).unwrap();
+        super::withdraw_arrival_on_disk(dir.path(), &arrival, None).unwrap();
+        assert_eq!(read_arrivals_from(dir.path()).unwrap()[0]["to"], "ws-3");
+        super::withdraw_arrival_on_disk(dir.path(), &later, previous).unwrap();
+        assert_eq!(read_arrivals_from(dir.path()).unwrap()[0]["to"], "ws-2");
+        later.to = "ws-4".to_string();
+        record_arrival_on_disk(dir.path(), &later).unwrap();
+        super::withdraw_arrival_on_disk(dir.path(), &later, None).unwrap();
+        assert!(read_arrivals_from(dir.path()).unwrap().is_empty());
     }
 
     #[test]
