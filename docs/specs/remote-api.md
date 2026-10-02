@@ -57,7 +57,7 @@ After authorization the same Noise session may move off the Relay onto a WebRTC 
 
 **Every byte on the channel is a Noise transport message of the promoted session**: one message per channel frame, raw bytes, the same two `CipherState`s and counters. **Every inbound frame is bounded at `NOISE_MAX_MESSAGE_LENGTH` before decryption**, and a frame over it — or a non-binary message — disposes the session. (rationale)
 
-**The channel is reliable, ordered, and labelled `DIRECT_CHANNEL_LABEL`, and one whose association reports a per-message limit under `NOISE_MAX_MESSAGE_LENGTH` is refused** — all checked before the open is reported, so a refusal abandons the attempt while the relay still carries the session, and an answerer refusing before it has answered declines. An unreported limit is not treated as small. **Two gaps are accepted**: a Burrow's polyfill reports no reliability flags, so there only the label is load-bearing; and the limit is the *remote's* advertised one, so where the two ends disagree a peer that has already switched loses the session. (rationale)
+**The channel is reliable, ordered, and labelled `DIRECT_CHANNEL_LABEL`, and one whose association reports a per-message limit under `NOISE_MAX_MESSAGE_LENGTH` is refused** — all checked before the open is reported, so a refusal abandons the attempt while the relay still carries the session, and an answerer refusing before it has answered declines. An unreported limit is not treated as small. **Two gaps are accepted**: a Burrow's polyfill rebuilds every incoming channel with its own defaults, so the offerer's reliability flags never reach the check and there only the label is load-bearing; and the limit is the *remote's* advertised one, so where the two ends disagree a peer that has already switched loses the session. (rationale)
 
 **A sender bounds its own queue, in order**, at `MAX_DIRECT_PENDING_FRAMES` / `MAX_DIRECT_PENDING_BYTES` — the pair a receiver's hold uses — and overflow disposes the session.
 
@@ -248,8 +248,6 @@ interface CommandBlock {
 Attach also delivers recent blocks, rendered at the client's own width — collapsible cards on the phone, panels in VR — rather than replaying a fixed-width terminal. A `blocks` field on `TerminalAttachResult` plus a `terminal.block` event.
 
 ### 4. Directory thumbnails
-
-`DirectoryEntry` gains a thumbnail, so the picker shows each pane's screen.
 
 ### 5. Tethering display and viewer visibility
 
