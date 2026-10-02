@@ -12,6 +12,7 @@ import {
   isExactBase64Url,
 } from '../security/bytes.js';
 import { NOISE_MAX_MESSAGE_LENGTH } from '../security/noise.js';
+import { isEnrollUserCode } from './enroll-code.js';
 import type { PasskeyAssertion } from '../security/passkey.js';
 import type { PresenceBinding } from '../security/presence.js';
 import type { SealedPushV1 } from '../security/push-seal.js';
@@ -28,6 +29,9 @@ export const API_ROUTES = {
   reauthBegin: '/api/reauth/begin',
   reauthFinish: '/api/reauth/finish',
   burrowEnroll: '/api/burrow/enroll',
+  /** Hosted only: the device-code enrollment ({@link BurrowEnrollBeginResponse}). */
+  burrowEnrollBegin: '/api/burrow/enroll/begin',
+  burrowEnrollPoll: '/api/burrow/enroll/poll',
   burrowSetupToken: '/api/burrow/setup-token',
   burrows: '/api/burrows',
   pushConfig: '/api/push/config',
@@ -44,6 +48,19 @@ export const API_ROUTES = {
 } as const;
 
 /**
+ * Every bearer a Relay mints — session, Burrow, and setup tokens, and Hosted's
+ * enrollment device code — is 32 bytes, base64url, so anything else is
+ * refused before any lookup.
+ */
+export const RELAY_BEARER_BYTE_LENGTH = 32;
+export const RELAY_BEARER_LENGTH = base64UrlLength(RELAY_BEARER_BYTE_LENGTH);
+
+/** Whether `value` has the shape of a bearer a Relay minted. */
+export function isRelayBearer(value: unknown): value is string {
+  return isExactBase64Url(value, RELAY_BEARER_LENGTH);
+}
+
+/**
  * `DELETE` path for one delivery row. The id is a bearer capability rather than
  * an enumerable identifier, so it rides the path and is percent-encoded here
  * even though base64url never needs it — one encoder, no caller deciding.
@@ -57,7 +74,9 @@ export function pushSubscriptionDeletePath(deliveryId: string): string {
  * unknown or expired. Shared because Pocket keys recovery on it: a 401 alone is
  * ambiguous (a spent setup token answers 401 too), and only this one means
  * "sign in again". Changing the string on one side without the other would
- * silently strand users on a dead session.
+ * silently strand users on a dead session. A Burrow-gated route answers it
+ * too, for a burrow token that names no Burrow, and a Burrow's standing probe
+ * reads it as removal (`docs/specs/relay.md` -> "Burrow side").
  */
 export const UNAUTHORIZED_ERROR = 'unauthorized';
 
@@ -88,6 +107,32 @@ export const BAD_PASSWORD_ERROR = 'invalid setup password';
  */
 export const ORIGIN_MISMATCH_ERROR = 'origin mismatch';
 
+/**
+ * The `error` the Hosted Relay answers when the account behind a credential is
+ * not entitled to it: 403 to a Burrow token, a setup redemption, or an
+ * enrollment poll, and 401 to a sign-in. A Burrow keys on it to stop retrying.
+ */
+export const NOT_ENTITLED_ERROR = 'this account is not entitled to the Hosted Relay';
+
+// The rest of the `error` strings both Relays answer, verbatim, so the
+// self-host and Hosted Relays cannot drift on what a Client reads. Only the
+// three above are recovery keys; these are shown, never matched.
+// `POST /api/setup/finish` also answers `ORIGIN_MISMATCH_ERROR`, with 400.
+export const BODY_TOO_LARGE_ERROR = 'request body too large';
+export const MALFORMED_CLIENT_DATA_ERROR = 'malformed clientDataJSON';
+export const CLIENT_DATA_TYPE_ERROR = 'clientData type must be webauthn.create';
+export const UNKNOWN_CHALLENGE_ERROR = 'unrecognized or expired challenge';
+export const UNIMPORTABLE_KEY_ERROR = 'unimportable public key';
+export const MALFORMED_CREDENTIAL_ID_ERROR = 'malformed credentialId';
+export const DUPLICATE_CREDENTIAL_ERROR = 'credential already registered';
+export const MALFORMED_ASSERTION_ERROR = 'malformed assertion';
+export const UNKNOWN_CREDENTIAL_ERROR = 'unknown credential';
+export const MALFORMED_BINDING_ERROR = 'malformed presence binding';
+export const UNKNOWN_NONCE_ERROR = 'unrecognized or expired nonce';
+export const WRONG_CREDENTIAL_ERROR = 'assertion is for a different credential';
+/** The 401 a failed `verifyPasskeyAssertion` answers with, naming its reason. */
+export const assertionRejectedError = (reason: string) => `assertion rejected: ${reason}`;
+
 export const WS_ROUTES = {
   burrow: '/ws/burrow',
   client: '/ws/client',
@@ -95,6 +140,26 @@ export const WS_ROUTES = {
 
 /** WS auth rides a query parameter (browsers cannot set WS headers). */
 export const WS_TOKEN_PARAM = 'token';
+
+/** The 401 `GET /ws/burrow` answers a token that names no enrolled Burrow, on either Relay. */
+export const UNKNOWN_BURROW_TOKEN_ERROR = 'unknown burrow token';
+
+/**
+ * The keepalive a Burrow or a Client sends its relay socket, and the Relay's
+ * answer (`docs/specs/relay.md` -> "Routing"); both ends of a one-time
+ * rendezvous send their room the same pair. Neither is JSON, so each is
+ * compared as a whole string before any parse; neither is forwarded. Hosted's
+ * Durable Objects answer without waking.
+ */
+export const RELAY_PING = 'ping';
+export const RELAY_PONG = 'pong';
+
+/**
+ * How often either end pings its relay socket. Once a pong has arrived on a
+ * socket, a ping unanswered by the next one ends it; a Relay that never
+ * answers is never held to a deadline.
+ */
+export const RELAY_PING_INTERVAL_MS = 30_000;
 
 /**
  * Close code the relay sends to a Burrow socket it displaces when a newer socket
@@ -113,17 +178,26 @@ export const WS_CLOSE_BURROW_REPLACED = 4000;
 export const WS_CLOSE_BURROW_REPLACED_REASON = 'replaced by a newer burrow connection';
 
 /**
- * The Burrow's `burrows.json` row is gone, so its bearer token names nothing.
- *
- * A distinct code from {@link WS_CLOSE_BURROW_REPLACED} because the two mean
- * opposite things to a reconnect: a replaced Burrow must stand down, while a
- * revoked one may retry as often as it likes — the upgrade will simply 401,
- * which is the whole of what revocation is.
+ * The Burrow's row is gone — removed from the account, or deleted from
+ * `burrows.json` — so its bearer token names nothing. Terminal at the Burrow,
+ * which reports `removed` rather than retrying an upgrade that can only 401
+ * (`docs/specs/relay.md` -> "Burrow side").
  */
 export const WS_CLOSE_BURROW_REVOKED = 4001;
 
 /** Human-readable reason paired with {@link WS_CLOSE_BURROW_REVOKED}. */
 export const WS_CLOSE_BURROW_REVOKED_REASON = 'this burrow is no longer enrolled';
+
+/**
+ * The Burrow is still enrolled, but its owner is no longer entitled to the
+ * Hosted Relay. Only Hosted sends it; terminal at the Burrow, which reports
+ * `not-entitled`. Distinct from {@link WS_CLOSE_BURROW_REVOKED} because the
+ * fix differs: a plan, not a re-enrollment.
+ */
+export const WS_CLOSE_BURROW_NOT_ENTITLED = 4002;
+
+/** Human-readable reason paired with {@link WS_CLOSE_BURROW_NOT_ENTITLED}. */
+export const WS_CLOSE_BURROW_NOT_ENTITLED_REASON = 'this account is not entitled to the Hosted Relay';
 
 /** The selfhost mode has exactly one account. */
 export const SELFHOST_ACCOUNT_ID = 'owner';
@@ -284,6 +358,113 @@ export interface BurrowEnrollResponse {
    * the weaker verifier, and the Burrow is the one that decides access.
    */
   requireUserVerification?: boolean;
+}
+
+/**
+ * Hosted's device-code enrollment (`docs/specs/hosted.md` -> "Burrow
+ * enrollment"), in place of the setup password the self-host Relay takes: the
+ * Burrow begins, the account approves the user code on the account origin,
+ * and the Burrow polls until it is enrolled. Only a Node Burrow calls either
+ * route; a request carrying `Origin` is refused. The self-host Relay serves
+ * neither.
+ */
+export interface BurrowEnrollBeginRequest {
+  /** The relay origin the Burrow was built for; any other is a 409 {@link BurrowEnrollOriginMismatch}. */
+  origin: string;
+}
+
+/** The account page a `verificationUrl` names, the user code in its fragment. */
+export const ENROLL_PAGE_PATH = '/enroll';
+
+export interface BurrowEnrollBeginResponse {
+  /**
+   * The Burrow's secret for polling, in the {@link isRelayBearer} shape. The
+   * Burrow holds it opaque; Hosted's layout is `docs/specs/hosted.md` ->
+   * "Burrow enrollment".
+   */
+  deviceCode: string;
+  /** What Dormouse shows and the account approves, `XXXX-XXXX`. */
+  userCode: string;
+  /**
+   * The account page that approves `userCode`, the code in its fragment;
+   * absent where the deployment names no account origin.
+   */
+  verificationUrl?: string;
+  /** Epoch ms after which neither code redeems. */
+  expiresAt: number;
+  /** Seconds the Burrow waits between polls. */
+  interval: number;
+}
+
+/** The shortest poll interval a Burrow accepts, in seconds. */
+export const MIN_ENROLL_POLL_INTERVAL_S = 1;
+/** The longest, which also caps a Burrow slowing down after a 429. */
+export const MAX_ENROLL_POLL_INTERVAL_S = 60;
+/** The longest `verificationUrl` a Burrow reads; Hosted's is under fifty characters. */
+const MAX_ENROLL_VERIFICATION_URL_LENGTH = 512;
+
+/**
+ * Structural validation of a {@link BurrowEnrollBeginResponse}, beside the type
+ * so a field added here cannot be silently accepted by the Burrow that reads
+ * one. The device code is a bearer, the user code goes on screen in large
+ * type, and `interval` and `expiresAt` go straight into timers, so each is
+ * held to its shape and bounds: an integer `interval` of
+ * {@link MIN_ENROLL_POLL_INTERVAL_S}–{@link MAX_ENROLL_POLL_INTERVAL_S} seconds,
+ * a finite positive `expiresAt`. `verificationUrl` is only bounded: the Burrow
+ * composes the URL it opens (`docs/specs/hosted.md` -> "Burrow enrollment").
+ */
+export function isBurrowEnrollBeginResponse(value: unknown): value is BurrowEnrollBeginResponse {
+  if (!value || typeof value !== 'object') return false;
+  const candidate = value as Record<string, unknown>;
+  const { interval, expiresAt, verificationUrl } = candidate;
+  return (
+    isRelayBearer(candidate.deviceCode) &&
+    isEnrollUserCode(candidate.userCode) &&
+    (verificationUrl === undefined || isBoundedString(verificationUrl, MAX_ENROLL_VERIFICATION_URL_LENGTH)) &&
+    typeof expiresAt === 'number' &&
+    Number.isFinite(expiresAt) &&
+    expiresAt > 0 &&
+    Number.isInteger(interval) &&
+    (interval as number) >= MIN_ENROLL_POLL_INTERVAL_S &&
+    (interval as number) <= MAX_ENROLL_POLL_INTERVAL_S
+  );
+}
+
+export interface BurrowEnrollPollRequest {
+  deviceCode: string;
+}
+
+/**
+ * `expired` also answers an unknown device code. `enrolled` answers once: the
+ * redemption is single-use. `redeemed` answers every later poll of that code
+ * until the approval expires: an earlier poll enrolled `burrowId`, whose answer
+ * never reached this one, and which the account must remove.
+ */
+export type BurrowEnrollPollResponse =
+  | { status: 'pending' }
+  | { status: 'expired' }
+  | { status: 'redeemed'; burrowId: string }
+  | { status: 'enrolled'; enrollment: BurrowEnrollResponse };
+
+/**
+ * A poll answer of a known status, `redeemed` naming a routing-id-shaped
+ * Burrow. `enrolled`'s enrollment is only an object here: the Burrow holds it
+ * to its own enrollment guard.
+ */
+export function isBurrowEnrollPollResponse(value: unknown): value is BurrowEnrollPollResponse {
+  if (!value || typeof value !== 'object') return false;
+  const answer = value as Record<string, unknown>;
+  switch (answer.status) {
+    case 'pending':
+    case 'expired':
+      return true;
+    case 'redeemed':
+      return isE2eId(answer.burrowId);
+    case 'enrolled':
+      return !!answer.enrollment && typeof answer.enrollment === 'object';
+    default:
+      return false;
+  }
 }
 
 /**

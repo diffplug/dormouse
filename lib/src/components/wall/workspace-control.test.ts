@@ -17,6 +17,7 @@ import { clearTerminalActivity, setTerminalActivity } from '../../lib/session-ac
 import { createAlertEpisode } from '../../lib/alert-episode';
 import { resetWorkspaceSurfaces, setWorkspaceSurfaces } from '../../lib/workspace-surfaces';
 import { resetWindowSessionAggregator } from '../../lib/window-session-aggregator';
+import { getWorkspaceUiSnapshot, requestConfirmation, resetWorkspaceUi } from '../../lib/workspace-ui-store';
 import { setPlatform } from '../../lib/platform';
 import type { OpenPort, PlatformAdapter } from '../../lib/platform/types';
 
@@ -304,6 +305,8 @@ describe('workspace.close', () => {
 
     const first = request('workspace.close', { workspace: 'workspace:2', force: true });
     const running = handleWorkspaceControl(first);
+    // The first close has passed its Wall lookup and acquired the close lock.
+    await Promise.resolve();
 
     const second = request('workspace.close', { workspace: 'workspace:3', force: true });
     await handleWorkspaceControl(second);
@@ -330,6 +333,45 @@ function listing(surfaces: Array<Record<string, unknown>>) {
 function terminalRows(prefix: string, refs: string[]): Array<Record<string, unknown>> {
   return refs.map((ref, index) => ({ ref, id: `${prefix}-${ref}`, kind: 'terminal', focused: index === 0 }));
 }
+
+it.each([
+  ['close', { workspace: 'workspace:2' }],
+  ['move', { workspace: 'workspace:2', toWindow: 'new' }],
+] as const)('answers a pending confirmation no as workspace.%s starts, even when it refuses', async (verb, params) => {
+  createWorkspace({ id: 'ws-2', activate: false });
+  handleFor('ws-2', { runningCount: () => 1 });
+  setPlatform({} as unknown as PlatformAdapter);
+  const confirmed = vi.fn();
+  requestConfirmation({ id: 'ws-2', char: 'q', answer: confirmed });
+  const detail = request(`workspace.${verb}`, params);
+  await handleWorkspaceControl(detail);
+  expect(answer(detail)).toEqual(expect.any(String));
+  expect(confirmed).toHaveBeenCalledExactlyOnceWith(false);
+  expect(getWorkspaceUiSnapshot().confirmation).toBeNull();
+  resetWorkspaceUi();
+});
+
+it.each(['close', 'move'] as const)('refuses workspace.%s if a newer confirmation supersedes its Wall lookup', async verb => {
+  createWorkspace({ id: 'ws-2', activate: false });
+  handleFor('ws-2');
+  const detail = request(`workspace.${verb}`, { workspace: 'workspace:2', toWindow: 'new', force: true });
+  const pending = handleWorkspaceControl(detail);
+  const newer = { id: 'ws-2', char: 'q', answer: vi.fn() };
+  requestConfirmation(newer);
+  await pending;
+  expect(answer(detail)).toContain('superseded');
+  expect(getWorkspaceUiSnapshot().confirmation).toBe(newer);
+  expect(newer.answer).not.toHaveBeenCalled();
+  resetWorkspaceUi();
+});
+
+it('cancels pending consent even when a cross-Window move names an invalid Workspace', async () => {
+  const answer = vi.fn();
+  requestConfirmation({ id: 'ws-2', char: 'q', answer });
+  await handleWorkspaceControl(request('workspace.move', { workspace: 'missing', toWindow: 'new' }));
+  expect(answer).toHaveBeenCalledExactlyOnceWith(false);
+  resetWorkspaceUi();
+});
 
 describe('surface.list --all', () => {
   it('tags every row with its Workspace and carries the directory', async () => {

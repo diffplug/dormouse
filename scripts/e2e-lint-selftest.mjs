@@ -34,8 +34,11 @@ import {
   ICE_SERVER_MODULE,
   NATIVE_PEER_FACTORY,
   PEER_FACTORIES,
+  RELAY_ROOM,
+  RELAY_ROUTING,
   RULES,
   SECURITY_SPEC,
+  WEB_PUSH_SENDER,
 } from './e2e-lint.mjs';
 
 const selftest = makeSelftest('e2e-lint.mjs', '.e2e-selftest.bak');
@@ -272,11 +275,64 @@ for (const violation of [
   );
 }
 
+// The same for the per-account relay object, which reaches frames only through
+// the shared frame layer: every way of naming, reading, logging, or keeping one
+// must redden, including the four a review found past the first version of the
+// rule — a `Buffer` decode, a `TextDecoder`, a destructured `ct`, and a frame
+// spread into an attachment.
+for (const violation of [
+  '\nconst __selftest = (frame: { ct: string }) => Buffer.from(frame.ct, "base64");\n',
+  '\nconst __selftest = (bytes: Uint8Array) => new TextDecoder().decode(bytes);\n',
+  '\nconst __selftest = (frame: object) => { const { ct } = frame as { ct: string }; return ct; };\n',
+  '\nconst __selftest = (ws: WorkerWebSocket, conn: object, raw: string) => ws.serializeAttachment({ ...conn, last: raw });\n',
+  '\nconst __selftest = (ws: WorkerWebSocket, raw: string) => ws.serializeAttachment({ role: "client", raw });\n',
+  '\nconst __selftest = (conn: { last?: string }, raw: string) => { conn.last = raw; };\n',
+  '\nconst __selftest = (frame: Record<string, string>) => frame["ct"];\n',
+  '\nconst __selftest = (raw: string) => JSON.parse(raw);\n',
+  '\nconst __selftest = (raw: string) => atob(raw);\n',
+  '\nconst __selftest = (raw: string) => fromBase64Url(raw);\n',
+  '\nconst __selftest = (frame: string) => console.log(frame);\n',
+  '\nconst __selftest = (frame: string) => console.error("RelayRoom refused a request for another account", frame);\n',
+  '\nconst __selftest = (frame: string) => console.error(`refused ${frame}`);\n',
+  '\nconst __selftest = console.error;\n',
+  "\nconst __selftest = (frame: string) => this.ctx.storage.put('frame', frame);\n",
+  '\nconst __selftest = (frame: string) => this.ctx.storage.put(ACCOUNT_KEY, frame);\n',
+  "\nconst __selftest = (frame: string) => this.ctx.storage.sql.exec('SELECT ?', frame);\n",
+  '\nconst __selftest = (ctx: DurableObjectState) => ctx.storage;\n',
+]) {
+  selftest.withAppended(
+    RELAY_ROOM,
+    violation,
+    `a forbidden read or write in ${RELAY_ROOM} stays green: ${violation.trim()}`,
+  );
+}
+
+// The shared frame layer may copy the ciphertext and nothing else.
+for (const violation of [
+  '\nconst __selftest = (frame: { ct: string }) => { const { ct } = frame; return ct; };\n',
+  '\nconst __selftest = (frame: { ct: string }) => frame.ct.length;\n',
+  '\nconst __selftest = (frame: { ct: string }) => fromBase64Url(frame.ct);\n',
+  '\nconst __selftest = (bytes: Uint8Array) => new TextDecoder().decode(bytes);\n',
+  '\nconst __selftest = (text: string) => JSON.parse(text);\n',
+  '\nconst __selftest = (raw: string) => console.log(raw);\n',
+]) {
+  selftest.withAppended(
+    RELAY_ROUTING,
+    violation,
+    `a forbidden read in ${RELAY_ROUTING} stays green: ${violation.trim()}`,
+  );
+}
+
 // A file-scoped storage exception must not become a directory-scoped escape.
 selftest.withAppended(
   'lib/src/remote/client/pocket-db.ts',
   "\nconst __selftest = { name: 'AES-GCM' };\n",
   'AES-GCM in the module beside the at-rest wrapper stays green',
+);
+selftest.withAppended(
+  'remote-lib-common/src/remote/relay-common.ts',
+  "\nconst __selftest = { name: 'AES-GCM' };\n",
+  `AES-GCM in the module beside ${WEB_PUSH_SENDER} stays green`,
 );
 
 const cited = new Map();

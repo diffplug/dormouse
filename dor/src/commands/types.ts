@@ -429,6 +429,22 @@ export interface KillSurfaceResponse {
   surfaceRef: string;
 }
 
+/** Move one Surface within this Window. Exactly one destination is required. */
+export type MoveSurfaceRequest = WorkspaceScopedRequest & {
+  surface: string;
+  destination: { workspace: string } | { new: true };
+  focus: boolean;
+  dangerouslyDestroyIframePageState: boolean;
+};
+
+export interface MoveSurfaceResponse {
+  status: 'moved';
+  surfaceId: string;
+  surfaceRef: string;
+  workspaceId: string;
+  workspaceRef: string;
+}
+
 export interface IframeSurfaceRequest extends WorkspaceScopedRequest {
   minimized: boolean;
   surface?: string;
@@ -544,6 +560,7 @@ export interface ControlClient {
   sendSurface(request: SendSurfaceRequest): Promise<SendSurfaceResponse>;
   readSurface(request: ReadSurfaceRequest): Promise<ReadSurfaceResponse>;
   awaitSurface(request: AwaitSurfaceRequest): Promise<AwaitSurfaceResponse>;
+  moveSurface(request: MoveSurfaceRequest): Promise<MoveSurfaceResponse>;
   killSurface(request: KillSurfaceRequest): Promise<KillSurfaceResponse>;
   iframeSurface(request: IframeSurfaceRequest): Promise<IframeSurfaceResponse>;
   resolveOpenTarget(request: ResolveOpenTargetRequest): Promise<ResolveOpenTargetResponse>;

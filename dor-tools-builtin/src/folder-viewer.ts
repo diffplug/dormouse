@@ -3,7 +3,7 @@ import { opendir, realpath, stat } from 'node:fs/promises';
 import type { IncomingMessage } from 'node:http';
 import { join } from 'node:path';
 import { resolveBinaryPath, spawnAndCapture } from 'dor-lib-common';
-import { openSequence } from 'dor-tools-lib/osc';
+import { openSequence, validToolOpenPath } from 'dor-tools-lib/osc';
 import { folderViewerPage } from './folder-viewer-page.js';
 import { announceViewer, HttpError, isInsideRoot, pathSegments, readJsonBody, reply, startCapabilityViewer } from './viewer-server.js';
 
@@ -160,11 +160,25 @@ export async function startFolderViewer(input: string, { open }: { open: FolderO
  * order the page sends them; the host answers nothing, showing a failure in
  * the preview slot. */
 export async function runFolderViewer(dir: string): Promise<string> {
-  const viewer = await startFolderViewer(dir, {
-    open: async (path, preview) => {
-      process.stdout.write(openSequence({ path, preview }));
-      return { ok: true, status: 'sent' };
-    },
-  });
+  const viewer = await startFolderViewer(dir, { open: oscOpen(text => process.stdout.write(text)) });
   return announceViewer(viewer, viewer.root);
+}
+
+/** Writes each open as an OSC 367 `open`. A path the host would refuse (a
+ * control character, a UNC root, over the length limit) answers an error the
+ * page shows, rather than throwing into a 500. */
+export function oscOpen(write: (text: string) => void): FolderOpen {
+  return async (path, preview) => {
+    let sequence: string;
+    try {
+      if (!validToolOpenPath(path)) throw new RangeError('invalid Tool open path');
+      sequence = openSequence({ path, preview });
+    } catch {
+      // A field can fit its own bound while JSON escaping exceeds the host's
+      // serialized payload cap. Report that refusal to the page without a write.
+      return { ok: false, error: `Cannot open ${JSON.stringify(path)} from a Tool` };
+    }
+    write(sequence);
+    return { ok: true, status: 'sent' };
+  };
 }

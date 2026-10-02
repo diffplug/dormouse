@@ -266,7 +266,7 @@ describe('the gate', () => {
     for (const candidate of [
       null,
       `${location.origin}/connect/#1.not-a-link`,
-      url.replace(location.origin, 'https://hosted.dormouse.sh'),
+      url.replace(location.origin, 'https://relay.dormouse.sh'),
       url.replace('/connect/', '/connect/x/'),
     ]) {
       act(() => root.unmount());

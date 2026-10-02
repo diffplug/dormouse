@@ -13,6 +13,8 @@ import type {
   EnsureSurfaceResponse,
   IframeSurfaceRequest,
   IframeSurfaceResponse,
+  MoveSurfaceRequest,
+  MoveSurfaceResponse,
   KillSurfaceRequest,
   KillSurfaceResponse,
   ListSurfacesRequest,
@@ -147,6 +149,10 @@ export class SocketControlClient implements ControlClient {
       request,
       { timeoutMs: request.timeoutMs + 5_000 },
     );
+  }
+
+  moveSurface(request: MoveSurfaceRequest): Promise<MoveSurfaceResponse> {
+    return this.request<MoveSurfaceResponse>(SURFACE_CONTROL_METHODS.move, request);
   }
 
   killSurface(request: KillSurfaceRequest): Promise<KillSurfaceResponse> {

@@ -1,7 +1,7 @@
 /**
  * Activation glue: wires this webview to the Burrow service behind the
  * platform adapter, and exposes a `window.dormouseBurrow` console hook for
- * enrolling in the POC (no settings UI needed).
+ * enrollment scripting alongside the Settings UI.
  *
  * The Burrow itself is a service in the process that owns the PTYs
  * (`lib/src/host/remote/service.ts`) — the Tauri sidecar, the VS Code extension
@@ -15,8 +15,10 @@
  *
  *   await window.dormouseBurrow.enroll('SETUP_PASSWORD', 'My Laptop')   // at the build's relay origin
  *   await window.dormouseBurrow.enrollOffer('My Laptop')                 // installer's offer, this machine
+ *   await window.dormouseBurrow.beginHostedEnrollment('My Laptop')       // a Hosted build: the code to approve
+ *   await window.dormouseBurrow.cancelHostedEnrollment()
  *   window.dormouseBurrow.status()
- *   window.dormouseBurrow.reconnect()      // needed after `displaced`
+ *   window.dormouseBurrow.reconnect()      // needed after `displaced`, `removed`, or `not-entitled`
  *   window.dormouseBurrow.clearEnrollment()
  */
 
@@ -118,6 +120,10 @@ function installBridgeMode(link: BurrowLink): void {
     // installer's token off its file.
     enroll: (password: string, label: string) => link.command('enroll', { password, label }),
     enrollOffer: (label: string) => link.command('enrollOffer', { label }),
+    // The service polls the approval; `status()` reports it. Answers the code
+    // already waiting, as the panel's Enroll does.
+    beginHostedEnrollment: (label: string) => link.command('beginHostedEnrollment', { label }),
+    cancelHostedEnrollment: () => link.command('cancelHostedEnrollment'),
     status: () => link.command('status'),
     reconnect: () => link.command('reconnect'),
     clearEnrollment: () => link.command('clearEnrollment'),

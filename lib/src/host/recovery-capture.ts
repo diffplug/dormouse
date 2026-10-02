@@ -32,7 +32,11 @@ const ASKS_FOR_SECOND_PRESS = /Press Ctrl[-+]C again/i;
 // carried on running.
 // It never printed a hint and never asked for another press, so an ask-only gate
 // left it stuck there for the whole poll.
-export const BLIND_SECOND_PRESS_MS = 600;
+// Pi clears its editor on the first press and exits only if the next arrives
+// within 500ms (Pi 1.0.0, macOS). Leave a poll's margin below that window while
+// still waiting past Codex's measured ~262ms one-press exit. The quiet gate
+// below still defers a retry while output is arriving.
+export const BLIND_SECOND_PRESS_MS = 400;
 
 // ...but a second press that lands while an agent is mid-shutdown destroys its
 // hint, so require the pane to have been silent for this long first. Note this is
@@ -190,7 +194,7 @@ export async function captureAgentRecovery(
   // entry. `BLIND_SECOND_PRESS_MS` is a statement about the agent ("long enough
   // that a one-press agent would already have spoken"), and the agent's clock
   // starts when the `^C` lands. Measuring from `started` folds the interrupt's own
-  // round trip into the window, which at worst leaves a claude 200ms to answer in
+  // round trip into the window, which shortens the time an agent has to answer
   // and fires the blind press while codex is still on its first ~255ms of silence.
   // The wall-clock `deadline` below stays anchored to `started`, because *that* is
   // a shutdown budget rather than an agent timing.

@@ -55,9 +55,9 @@ export function subscribeToNetworkPolicy(listener: () => void): () => void {
         // Dropped rather than rendered: the panel keys its choices off these fields.
         if (!isNetworkPolicyResult(data)) return;
         // Field by field: the event is the result plus its `name`.
-        const { policy, levels, interfaces } = data;
+        const { policy, levels, interfaces, refusal } = data;
         generation++;
-        publish({ kind: 'ready', network: { policy, levels, interfaces } });
+        publish({ kind: 'ready', network: { policy, levels, interfaces, ...(refusal ? { refusal } : {}) } });
       });
       void refreshNetworkPolicy();
     } else {
@@ -98,6 +98,17 @@ export async function refreshNetworkPolicy(): Promise<void> {
   // turn its Nothing into "not read".
   if (next.kind === 'error' && snapshot.kind === 'ready') return;
   publish(next);
+}
+
+/**
+ * Forget the path refusal the panel shows (`dismissPathRefusal`). The service
+ * answers the result without it, and its event says so to every window.
+ */
+export async function dismissPathRefusal(): Promise<void> {
+  const active = requireBurrowLink();
+  const mine = ++generation;
+  const network = await active.command('dismissPathRefusal');
+  if (mine === generation && isNetworkPolicyResult(network)) publish({ kind: 'ready', network });
 }
 
 /** The tail of {@link changeNetworkPolicy}'s queue, settled either way. */

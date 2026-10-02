@@ -16,10 +16,10 @@
  */
 
 import {
+  DIRECT_ONLY_DEADLINE_MS,
   NoiseTransportSession,
-  ONE_TIME_DIRECT_DEADLINE_MS,
   ONE_TIME_EXPIRY_GRACE_MS,
-  ONE_TIME_PONG,
+  RELAY_PONG,
   ONE_TIME_ROOM_PARAM,
   ONE_TIME_WS_ROUTES,
   WS_CLOSE_ONE_TIME_DEADLINE,
@@ -36,7 +36,6 @@ import {
   samplePairingCode,
   toBase64Url,
   type DirectPath,
-  type DirectRelayCause,
   type DirectoryEntry,
   type E2eClientStep,
   type HelloResult,
@@ -50,7 +49,7 @@ import {
 import { parseOneTimeFrame, RendezvousHold } from '../one-time-rendezvous';
 import { closeCode, realTimer, type RemoteTimer, type RemoteWebSocket } from '../ws';
 import type { RemoteAdapterClient, TerminalHandlers } from './remote-adapter';
-import { ClientSessionCore, type ClientSessionCoreDeps } from './session-core';
+import { ClientSessionCore, networkNotAllowedMessage, type ClientSessionCoreDeps } from './session-core';
 
 /** Shown when the room refused the join: another phone holds the link, or the room is gone. */
 export const ONE_TIME_LINK_USED_MESSAGE =
@@ -126,7 +125,7 @@ type Phase =
   | 'idle'
   /** The rendezvous is open: the handshake, then the person at the computer. */
   | 'confirming'
-  /** Confirmed; the direct path has `ONE_TIME_DIRECT_DEADLINE_MS` to carry both directions. */
+  /** Confirmed; the direct path has `DIRECT_ONLY_DEADLINE_MS` to carry both directions. */
   | 'connecting'
   /** Direct both ways and the rendezvous closed: protocol-v1 may run. */
   | 'connected'
@@ -144,12 +143,16 @@ export class OneTimeClient implements RemoteAdapterClient {
   #route: OneTimeRoute | null = null;
   /** The link `connectOnce` was given, so a close can tell whether it had expired. */
   #link: OneTimeLink | null = null;
+  /**
+   * Cancels the timer armed at the room's hard deadline, which bounds every
+   * wait before the outcome — WebCrypto and the socket's open included.
+   */
+  #cancelDeadline: (() => void) | null = null;
 
   /** The rendezvous socket, while this client still reads it; closed at the switch and at the end. */
   readonly #rendezvous: RendezvousHold;
   /** Whether the socket ever opened: a close before that means the room was never reached. */
   #opened = false;
-  #cancelDirectDeadline: (() => void) | null = null;
 
   /**
    * The first failure's fixed copy: **set once by {@link #fail}**, so what the
@@ -160,8 +163,6 @@ export class OneTimeClient implements RemoteAdapterClient {
   /** Rejects when {@link #failure} is set; see {@link #race}. */
   #interrupted: Promise<never> = new Promise(() => {});
   #interrupt: ((error: Error) => void) | null = null;
-  /** Resolves the wait for the switch. */
-  #onSwitched: (() => void) | null = null;
   /** Whether `connectOnce` resolved `ok`: from then on an ending is {@link setOnEnded}'s to report. */
   #announced = false;
   #onEnded: ((message: string) => void) | null = null;
@@ -185,7 +186,7 @@ export class OneTimeClient implements RemoteAdapterClient {
       visibility: deps.visibility,
       createDirectPeer: deps.createDirectPeer,
     });
-    this.#core.setOnTransportChanged((path, cause) => this.#onTransportChanged(path, cause));
+    this.#core.setOnTransportChanged((path) => this.#onTransportChanged(path));
     this.#core.setOnBurrowGone((endedByBurrow) => this.#onSessionGone(endedByBurrow));
   }
 
@@ -234,6 +235,10 @@ export class OneTimeClient implements RemoteAdapterClient {
     this.#link = link;
     // The room's hard deadline: no answer can arrive after it.
     const deadline = link.expiry * 1000 + ONE_TIME_EXPIRY_GRACE_MS;
+    this.#cancelDeadline = this.#setTimer(
+      () => this.#fail(ONE_TIME_LINK_EXPIRED_MESSAGE),
+      Math.max(0, deadline - this.#now()),
+    );
     try {
       const session = await this.#handshake(link, route, deadline);
       const code = samplePairingCode();
@@ -252,13 +257,22 @@ export class OneTimeClient implements RemoteAdapterClient {
       if (this.#failure !== null) throw new Error(this.#failure);
       // The digits have done their job: the screen moves on to the direct path.
       onConfirmed?.();
-      // Armed before `establish`, whose offer can give up synchronously.
-      const switched = this.#awaitSwitch();
+      // From here the direct path's own deadline bounds the wait.
+      this.#clearDeadline();
+      this.#phase = 'connecting';
       // After the outcome and never before: `establish` builds the direct
       // path, and a peer connection that existed ahead of authorization would
       // be one an unauthorized party had steered.
       this.#core.establish(route, session);
-      await this.#race(switched);
+      // The core's wait reads an offer that gave up synchronously inside
+      // `establish`, so asking after it misses nothing.
+      const failure = await this.#race(this.#core.awaitDirect(DIRECT_ONLY_DEADLINE_MS));
+      if (failure !== null) {
+        // A computer that said it ended the connection is the end, for the
+        // reason it gave; anything else before the switch is no direct path.
+        this.#fail(failure === 'ended-by-burrow' ? this.#endedByBurrowMessage() : ONE_TIME_DIRECT_FAILED_MESSAGE);
+        throw new Error(this.#failure ?? ONE_TIME_DIRECT_FAILED_MESSAGE);
+      }
       this.#announced = true;
       return { ok: true, burrowLabel: outcome.burrowLabel };
     } catch {
@@ -304,9 +318,9 @@ export class OneTimeClient implements RemoteAdapterClient {
   /**
    * One wait in the ceremony that the core does not own — WebCrypto, the
    * socket's open, the switch — cut short by the first failure: a room that
-   * closed, a direct path given up, {@link close}. **Checked again after it
-   * settles**, since a step can finish in the same turn as the failure that
-   * makes its result moot.
+   * closed, the room's hard deadline, a direct path given up, {@link close}.
+   * **Checked again after it settles**, since a step can finish in the same
+   * turn as the failure that makes its result moot.
    */
   async #race<T>(step: Promise<T>): Promise<T> {
     const value = await Promise.race([step, this.#interrupted]);
@@ -322,6 +336,11 @@ export class OneTimeClient implements RemoteAdapterClient {
     this.#core.rejectAll(new Error(message));
   }
 
+  #clearDeadline(): void {
+    this.#cancelDeadline?.();
+    this.#cancelDeadline = null;
+  }
+
   /** End the attempt with `message`, and release everything. */
   #finish(message: string): OneTimeResult {
     this.#failure = message;
@@ -331,34 +350,15 @@ export class OneTimeClient implements RemoteAdapterClient {
 
   // --- The direct path -------------------------------------------------------
 
-  /** Arm the direct deadline, and answer the wait for the switch. */
-  #awaitSwitch(): Promise<void> {
-    this.#phase = 'connecting';
-    this.#cancelDirectDeadline = this.#setTimer(() => {
-      this.#cancelDirectDeadline = null;
-      this.#fail(ONE_TIME_DIRECT_FAILED_MESSAGE);
-    }, ONE_TIME_DIRECT_DEADLINE_MS);
-    return new Promise((resolve) => {
-      this.#onSwitched = resolve;
-    });
-  }
-
   /**
-   * Both directions are direct, or the attempt was given up. **The switch
-   * hands the lifecycle to the channel**: the rendezvous is closed normally and
-   * its loss is no longer an ending. A given-up attempt has no relay to stay on.
+   * Both directions are direct. **The switch hands the lifecycle to the
+   * channel**: the rendezvous is closed normally and its loss is no longer an
+   * ending. A given-up attempt is `connectOnce`'s, through the core's wait.
    */
-  #onTransportChanged(path: DirectPath, cause: DirectRelayCause | null): void {
-    if (this.#phase !== 'connecting') return;
-    if (path === 'direct') {
-      this.#phase = 'connected';
-      this.#clearDirectDeadline();
-      this.#rendezvous.close();
-      this.#onSwitched?.();
-      this.#onSwitched = null;
-      return;
-    }
-    if (cause !== null) this.#fail(ONE_TIME_DIRECT_FAILED_MESSAGE);
+  #onTransportChanged(path: DirectPath): void {
+    if (this.#phase !== 'connecting' || path !== 'direct') return;
+    this.#phase = 'connected';
+    this.#rendezvous.close();
   }
 
   /**
@@ -368,7 +368,7 @@ export class OneTimeClient implements RemoteAdapterClient {
    */
   #onSessionGone(endedByBurrow: boolean): void {
     if (this.#phase === 'connecting') {
-      this.#fail(endedByBurrow ? ONE_TIME_ENDED_MESSAGE : ONE_TIME_DIRECT_FAILED_MESSAGE);
+      this.#fail(endedByBurrow ? this.#endedByBurrowMessage() : ONE_TIME_DIRECT_FAILED_MESSAGE);
       return;
     }
     if (this.#phase !== 'connected') return;
@@ -381,9 +381,16 @@ export class OneTimeClient implements RemoteAdapterClient {
     this.#onEnded?.(ONE_TIME_ENDED_MESSAGE);
   }
 
-  #clearDirectDeadline(): void {
-    this.#cancelDirectDeadline?.();
-    this.#cancelDirectDeadline = null;
+  /**
+   * What the laptop's goodbye before the switch reads as: why the path ended
+   * it, where it named this phone's address; the generic direct failure where
+   * the path was why and it named none; else an ending.
+   */
+  #endedByBurrowMessage(): string {
+    const goodbye = this.#core.goodbye;
+    const named = networkNotAllowedMessage(goodbye);
+    if (named !== null) return named;
+    return goodbye && 'reason' in goodbye ? ONE_TIME_DIRECT_FAILED_MESSAGE : ONE_TIME_ENDED_MESSAGE;
   }
 
   // --- The rendezvous socket -------------------------------------------------
@@ -449,7 +456,7 @@ export class OneTimeClient implements RemoteAdapterClient {
   #onMessage(raw: unknown): void {
     // A whole string, never JSON: the room answers a ping itself and never
     // forwards the answer.
-    if (raw === ONE_TIME_PONG) return;
+    if (raw === RELAY_PONG) return;
     const frame = parseOneTimeFrame(raw);
     // The shared guard bounds every value before any is used as a key or
     // decoded; this phone runs it rather than trusting the room to have.
@@ -522,8 +529,7 @@ export class OneTimeClient implements RemoteAdapterClient {
   #teardown(): void {
     if (this.#phase === 'ended') return;
     this.#phase = 'ended';
-    this.#clearDirectDeadline();
-    this.#onSwitched = null;
+    this.#clearDeadline();
     this.#rendezvous.close();
     this.#core.endSession(this.#failure ?? ONE_TIME_ENDED_MESSAGE, { notifyGone: false });
   }

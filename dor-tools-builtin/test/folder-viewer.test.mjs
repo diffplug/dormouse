@@ -7,7 +7,7 @@ import { request } from 'node:http';
 import { spawnSync } from 'node:child_process';
 import { runInNewContext } from 'node:vm';
 import { afterEach, beforeEach, test } from 'node:test';
-import { startFolderViewer } from '../dist/folder-viewer.js';
+import { oscOpen, startFolderViewer } from '../dist/folder-viewer.js';
 import { folderViewerPage } from '../dist/folder-viewer-page.js';
 
 const posixOnly = { skip: process.platform === 'win32' ? 'POSIX file names and symlinks' : false };
@@ -329,4 +329,30 @@ test('the page\'s Enter waits for a select in flight as a double-click does', as
   page.posts[0].ok();
   await settle();
   assert.deepEqual(page.sent(), ['select a.txt', 'activate a.txt']);
+});
+
+test('writes each open as OSC 367, and answers an error for a path the host would refuse', async () => {
+  const written = [];
+  const open = oscOpen(text => written.push(text));
+  assert.deepEqual(await open('/x/a.txt', true), { ok: true, status: 'sent' });
+  assert.equal(written.length, 1);
+  assert.match(written[0], /^\u001b]367;open;/);
+  for (const path of ['/x/line\nbreak.txt', '\\\\server\\share\\a.txt', '/' + 'a'.repeat(2048)]) {
+    const result = await open(path, false);
+    assert.equal(result.ok, false, path);
+    assert.match(result.error, /^Cannot open /);
+  }
+  assert.equal(written.length, 1);
+});
+
+
+test('answers a page-visible error when JSON escaping makes an open payload too large', async () => {
+  const written = [];
+  const open = oscOpen(text => written.push(text));
+  for (const path of ['/' + '"'.repeat(2047), 'C:' + '\\'.repeat(2046)]) {
+    const result = await open(path, false);
+    assert.equal(result.ok, false);
+    assert.match(result.error, /^Cannot open /);
+  }
+  assert.deepEqual(written, []);
 });

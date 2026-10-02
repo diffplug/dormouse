@@ -16,6 +16,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { generateNoiseKeyPair, toBase64Url, type PairingInvitation } from 'remote-lib-common';
 
 import App, {
+  BURROW_REMOVED_COPY,
   CAMERA_BOOTSTRAP_MESSAGE,
   BURROWS_EMPTY,
   BURROWS_TITLE,
@@ -28,6 +29,7 @@ import {
 } from './views';
 import type { ConnectResult, PairingResult } from '../client/pocket-client';
 import {
+  BURROW_UNAVAILABLE_MESSAGE,
   PAIRING_DENIAL_MESSAGES,
   SETUP_CODE_DEAD_MESSAGE,
   RelayRefusalError,
@@ -45,6 +47,7 @@ import {
   settle,
 } from './app-test-utils';
 import { setNativeFieldValue } from '../../lib/dom';
+import { POCKET_DEPLOYMENT_PATH, deploymentUnreachableMessage } from './deployment';
 
 const fake = vi.hoisted(() => ({
   keyStorage: vi.fn<() => Promise<void>>(),
@@ -55,6 +58,7 @@ const fake = vi.hoisted(() => ({
     | null,
   hasPriorUse: false,
   sessionToken: null as string | null,
+  accountId: 'owner' as string | null,
   setup: vi.fn<(credential: { setupToken: string }, label: string) => Promise<unknown>>(),
   signin: vi.fn<() => Promise<unknown>>(),
   retireSetupToken: vi.fn<(token: string) => Promise<void>>(),
@@ -106,6 +110,9 @@ vi.mock('../client/pocket-client', async (importOriginal) => ({
     socketOpen = true;
     get sessionToken() {
       return fake.sessionToken;
+    }
+    get accountId() {
+      return fake.accountId;
     }
     hasPriorUse = () => fake.hasPriorUse;
     registeredPushEndpoint = () => null;
@@ -169,11 +176,11 @@ let container: HTMLDivElement;
 let root: Root;
 
 /** A record as a successful pairing writes one. */
-async function knownBurrow(burrowId: string, label = 'First laptop'): Promise<KnownBurrowV1> {
+async function knownBurrow(burrowId: string, label = 'First laptop', accountId = 'owner'): Promise<KnownBurrowV1> {
   const clientStatic = await generateNoiseKeyPair();
   return {
     burrowId,
-    accountId: 'owner',
+    accountId,
     label,
     burrowStaticPublicKey: toBase64Url((await generateNoiseKeyPair()).publicKey),
     clientStaticKeyPair: {
@@ -186,14 +193,30 @@ async function knownBurrow(burrowId: string, label = 'First laptop'): Promise<Kn
   };
 }
 
+/**
+ * What this page's own origin answers at {@link POCKET_DEPLOYMENT_PATH}, one
+ * per read; empty is a self-host Relay's shell.
+ */
+let deploymentAnswers: Array<() => Promise<Response>>;
+const deploymentReads = vi.fn<() => void>();
+
 /** A real pairing URL for the origin this app is served from. */
 const invitationUrl = () => sharedInvitationUrl(location.origin);
 
 beforeEach(() => {
+  deploymentAnswers = [];
+  deploymentReads.mockReset();
+  vi.stubGlobal('fetch', async (input: RequestInfo | URL) => {
+    if (String(input) !== POCKET_DEPLOYMENT_PATH) throw new Error(`unexpected fetch ${String(input)}`);
+    deploymentReads();
+    const answer = deploymentAnswers.shift();
+    return answer ? answer() : new Response('<!doctype html>', { headers: { 'content-type': 'text/html' } });
+  });
   fake.keyStorage.mockReset().mockResolvedValue(undefined);
   fake.noiseSupported = true;
   fake.hasPriorUse = false;
   fake.sessionToken = null;
+  fake.accountId = 'owner';
   fake.setup.mockReset().mockImplementation(async () => {
     fake.hasPriorUse = true;
     return {};
@@ -222,6 +245,7 @@ beforeEach(() => {
 afterEach(() => {
   act(() => root.unmount());
   container.remove();
+  vi.unstubAllGlobals();
 });
 
 async function boot(props: Partial<Parameters<typeof App>[0]> = {}): Promise<void> {
@@ -501,6 +525,7 @@ describe('the Burrows list', () => {
     ]);
     fake.listBurrows.mockResolvedValue([
       { burrowId: 'burrow-1', label: 'a name the Relay holds', online: true },
+      { burrowId: 'burrow-2', label: 'Second laptop', online: false },
       // Enrolled, but this phone has no record for it: not a row.
       { burrowId: 'burrow-3', label: 'Someone else’s', online: true },
     ]);
@@ -511,7 +536,6 @@ describe('the Burrows list', () => {
     expect(container.textContent).toContain('First laptop');
     expect(container.textContent).not.toContain('a name the Relay holds');
     expect(container.textContent).not.toContain('Someone else’s');
-    // No `GET /api/burrows` row means offline, not absent.
     expect(rowFor(container, 'Second laptop').textContent).toContain('Offline');
   });
 
@@ -771,4 +795,146 @@ it('leads with the camera-bootstrap copy when the fragment brought us here', asy
   // Nothing was spent: the run has no token, and no Relay call was made.
   expect(fake.setup).not.toHaveBeenCalled();
   expect(fake.retireSetupToken).not.toHaveBeenCalled();
+});
+
+describe('the deployment read', () => {
+  /** Hosted's Pocket must never build a peer before it knows it is Hosted's. */
+  it('fails a Connect it has not completed, retryably, and reads again on the next', async () => {
+    deploymentAnswers.push(
+      () => Promise.reject(new TypeError('offline')),
+      () => Promise.reject(new TypeError('offline')),
+    );
+    fake.hasPriorUse = true;
+    fake.listKnownBurrows.mockResolvedValue([await knownBurrow('burrow-1', 'First laptop')]);
+    fake.listBurrows.mockResolvedValue([{ burrowId: 'burrow-1', label: '', online: true }]);
+    await boot();
+    await click(container, 'Sign in with passkey');
+    const readsAtMount = deploymentReads.mock.calls.length;
+
+    await click(container, 'Connect');
+    expect(alertText(container)).toBe(deploymentUnreachableMessage(location.host));
+    expect(fake.connect).not.toHaveBeenCalled();
+    expect(deploymentReads.mock.calls.length).toBe(readsAtMount + 1);
+
+    await click(container, 'Connect');
+    expect(fake.connect).toHaveBeenCalledWith('burrow-1');
+    expect(deploymentReads.mock.calls.length).toBe(readsAtMount + 2);
+  });
+
+  it('spends nothing on a scan before the read completes', async () => {
+    deploymentAnswers.push(
+      () => Promise.reject(new TypeError('offline')),
+      () => Promise.reject(new TypeError('offline')),
+    );
+    await boot();
+    await pasteCode((await invitationUrl()).url);
+    expect(alertText(container)).toBe(deploymentUnreachableMessage(location.host));
+    expect(fake.setup).not.toHaveBeenCalled();
+    expect(fake.signin).not.toHaveBeenCalled();
+    expect(fake.pair).not.toHaveBeenCalled();
+  });
+});
+
+describe('a Burrow the Relay no longer lists', () => {
+  const REMOVED = BURROW_REMOVED_COPY['self-host'];
+  const actionsIn = (row: HTMLElement) => [...row.querySelectorAll('button')].map((b) => b.textContent);
+
+  async function signedIn(listed: Array<{ burrowId: string; label: string; online: boolean }>) {
+    fake.hasPriorUse = true;
+    fake.listKnownBurrows.mockResolvedValue([
+      await knownBurrow('burrow-1', 'First laptop'),
+      await knownBurrow('burrow-2', 'Second laptop'),
+    ]);
+    fake.listBurrows.mockResolvedValue(listed);
+    await boot();
+    await click(container, 'Sign in with passkey');
+  }
+
+  it('reads a record the list does not name as removed, offering Forget alone; a listed offline one is unchanged', async () => {
+    await signedIn([{ burrowId: 'burrow-1', label: 'First laptop', online: false }]);
+
+    expect(rowFor(container, 'Second laptop').textContent).toContain(REMOVED);
+    expect(actionsIn(rowFor(container, 'Second laptop'))).toEqual(['Forget']);
+    expect(rowFor(container, 'First laptop').textContent).toContain('Offline');
+    expect(rowFor(container, 'First laptop').textContent).not.toContain(REMOVED);
+    expect(actionsIn(rowFor(container, 'First laptop'))).toEqual(['Connect', 'Remove']);
+
+    await click(container, 'Forget');
+    expect(fake.forgetBurrow).toHaveBeenCalledWith('burrow-2');
+  });
+
+  it('marks another account’s record unlisted by this session as the normal offline row', async () => {
+    fake.hasPriorUse = true;
+    fake.listKnownBurrows.mockResolvedValue([
+      await knownBurrow('burrow-1', 'First laptop'),
+      await knownBurrow('burrow-9', 'Work laptop', 'other-account'),
+    ]);
+    fake.listBurrows.mockResolvedValue([{ burrowId: 'burrow-1', label: 'First laptop', online: true }]);
+    await boot();
+    await click(container, 'Sign in with passkey');
+
+    expect(rowFor(container, 'Work laptop').textContent).not.toContain(REMOVED);
+    expect(rowFor(container, 'Work laptop').textContent).toContain('Offline');
+    expect(actionsIn(rowFor(container, 'Work laptop'))).toEqual(['Connect', 'Remove']);
+  });
+
+  it('uses the account that requested the list when the signed-in account changes during its read', async () => {
+    fake.hasPriorUse = true;
+    fake.listKnownBurrows.mockResolvedValue([
+      await knownBurrow('burrow-1', 'First laptop'),
+      await knownBurrow('burrow-9', 'Work laptop', 'other-account'),
+    ]);
+    fake.listBurrows.mockImplementation(async () => {
+      // The request used owner's session; another sign-in finishes before its response.
+      fake.accountId = 'other-account';
+      return [{ burrowId: 'burrow-1', label: 'First laptop', online: true }];
+    });
+    await boot();
+    await click(container, 'Sign in with passkey');
+
+    expect(rowFor(container, 'Work laptop').textContent).not.toContain(REMOVED);
+    expect(actionsIn(rowFor(container, 'Work laptop'))).toEqual(['Connect', 'Remove']);
+  });
+
+  it('marks nothing removed off a list that failed', async () => {
+    fake.hasPriorUse = true;
+    fake.listKnownBurrows.mockResolvedValue([await knownBurrow('burrow-1', 'First laptop')]);
+    fake.listBurrows.mockRejectedValue(new Error('Couldn’t reach the Relay.'));
+    await boot();
+    await click(container, 'Sign in with passkey');
+    expect(container.textContent).not.toContain(REMOVED);
+  });
+
+  it('says a Connect left unanswered was to a Burrow since removed, and only then', async () => {
+    await signedIn([
+      { burrowId: 'burrow-1', label: 'First laptop', online: true },
+      { burrowId: 'burrow-2', label: 'Second laptop', online: true },
+    ]);
+    fake.connect.mockResolvedValue({ ok: false, message: BURROW_UNAVAILABLE_MESSAGE, pairingRequired: false });
+
+    // Still listed, merely not answering: the sentence it always was.
+    fake.listBurrows.mockResolvedValue([
+      { burrowId: 'burrow-1', label: 'First laptop', online: false },
+      { burrowId: 'burrow-2', label: 'Second laptop', online: true },
+    ]);
+    act(() => rowFor(container, 'First laptop').querySelector('button')!.click());
+    await settle();
+    expect(alertText(container)).toBe(BURROW_UNAVAILABLE_MESSAGE);
+
+    // Removed while the Connect was out: the re-read says so.
+    fake.listBurrows.mockResolvedValue([{ burrowId: 'burrow-1', label: 'First laptop', online: false }]);
+    act(() => rowFor(container, 'Second laptop').querySelector('button')!.click());
+    await settle();
+    expect(alertText(container)).toBe(REMOVED);
+    expect(actionsIn(rowFor(container, 'Second laptop'))).toEqual(['Forget']);
+  });
+
+  it('keeps the unanswered sentence when the re-read fails', async () => {
+    await signedIn([{ burrowId: 'burrow-1', label: 'First laptop', online: true }]);
+    fake.connect.mockResolvedValue({ ok: false, message: BURROW_UNAVAILABLE_MESSAGE, pairingRequired: false });
+    fake.listBurrows.mockRejectedValue(new Error('Couldn’t reach the Relay.'));
+    act(() => rowFor(container, 'First laptop').querySelector('button')!.click());
+    await settle();
+    expect(alertText(container)).toBe(BURROW_UNAVAILABLE_MESSAGE);
+  });
 });

@@ -44,7 +44,7 @@
 
 **Why command finishes bypass animation deferral.** A shell-reported exit is a lifecycle event; animation detection is only a recent-output heuristic. Letting the heuristic overrule the event would add latency and let unrelated background output defer a certain completion indefinitely.
 
-**Why deferral has a ceiling.** Unbounded, it held an `OSC 9` behind any output that never went quiet for five seconds: a `watch -n1` pane redrawing once a second, or a dev server's heartbeat line every three seconds after its startup burst, deferred it indefinitely (audit probes, 2026-09-23). Thirty seconds is far past an agent's final spinner frames, which deferral exists to wait out, and short enough that a report behind a ticking clock still reaches its user. An escalated hold that deferred again restarted the ceiling: an `OSC 9` deferred at 0 s, held when it came due at 30 s, and escalated at 45 s while the pane still animated rang near 75 s (review, 2026-09-24).
+**Why deferral waits for recent output without a ceiling.** The 30-second cap addressed notifications starved by `watch -n1` redraws or dev-server heartbeat output (audit, 2026-09-23). It also rang during ongoing animation. The chosen preference is now to wait indefinitely for quiet rather than summon during output; even a brief unconfirmed redraw can delay an owed notification without cancelling it (product decision, 2026-10-01). Idle-pane notifications remain immediate.
 
 **Why a deferred event is not dispatched again.** Claimants already had first refusal when the completion happened; re-offering it at quiet time would let a later-registered await consume history, and would report one completion twice.
 
@@ -96,7 +96,7 @@
 
 **Why the keystroke fallback is not routed into the manager.** The fallback in `docs/specs/terminal-state.md` is renderer-side and lower confidence than a shell-reported command boundary. Wiring it in would buy integration-less shells a worse version of WATCHING at the price of a second command-tracking path to keep in sync.
 
-**Why resumed work withdraws an inferred WATCHING ring.** The marked `ttr.pgstencil-adopt` speech (2026-09-09 18:17:03) followed a WATCHING settle, resumed output, and confirmed BUSY before the speech deadline; the latched ring masked that activity, so the renderer spoke while the terminal was still animating. Withdrawing the ring lets the existing sink cancellation and fresh-ring delays follow the new busy/quiet cycle. Only the inference goes: explicit reports and command exits stay authoritative, and a redraw too brief to confirm BUSY never invalidates completion.
+**Why resumed work pauses an owed ring.** The marked `ttr.pgstencil-adopt` speech (2026-09-09 18:17:03) followed a WATCHING settle and resumed output. Withdrawing only confirmed WATCHING left program-sent reports ringing through animation. Pausing on the first accepted output preserves the debt even when a redraw never confirms BUSY; the same episode and original deadlines prevent alarm replay and avoid adding another full delay after quiet (product decision, 2026-10-01).
 
 ## Terminal reports
 
@@ -124,7 +124,7 @@
 
 ## Alarm settings
 
-**Why animation deferral defaults on.** Coding agents (`claude`, `codex`) send their notification OSC while their TUI is still redrawing its spinner, so an undeferred ring summons the user to a pane that is still animating (2026-09). The gate engages only while the private detector is fully armed, so a BEL from an otherwise quiet shell still rings at once. The deferral ceiling bounds the wait (Completion events); turning the switch off restores the protocols' literal timing. Installs that saved any settings blob keep the old value: the blob has no version field, and a persisted `false` cannot be told from a deliberate opt-out, so dropping it on read would leave the off position unpersistable.
+**Why animation deferral defaults on.** Coding agents (`claude`, `codex`) send their notification OSC while their TUI is still redrawing its spinner, so an undeferred ring summons the user to a pane that is still animating (2026-09). The gate engages only on recent output, so a BEL from an otherwise quiet shell still rings at once; turning the switch off restores the protocols' literal timing. Installs that saved any settings blob keep the old value: the blob has no version field, and a persisted `false` cannot be told from a deliberate opt-out, so dropping it on read would leave the off position unpersistable.
 
 **Why the settings ride the WATCHING rule set's seed/broadcast shape.** Each VS Code webview has its own origin and therefore its own `localStorage`, while the `AlertManager` is shared; without a host-authoritative copy, two webviews would each believe their own blob. The one difference is the whole-blob relay: an alarm setting is not a set of independent keys the way a rule list is.
 
@@ -139,6 +139,8 @@
 **Why presence gates delivery.** The watcher rechecked only the episode and the setting, so a push went out while the user typed in the next pane, and speech named the pane they were reading (audit, 2026-09-23). Speech is heard in the room, so it only has to spare the pane being looked at; a push reaches a phone, so it waits until the user has left every viewer.
 
 ## Spoken alarms
+
+**Why paused preparation is retained.** Host admission is not playback: Web Speech can queue an utterance and managed voice can prepare audio before the start callback. Treating a pause as cancellation lost an unsent alarm. An unstarted attempt returns to the pending queue, while revoking its callbacks prevents an old answer from starting or finishing the resumed job; a job that already started is not replayed (product decision, 2026-10-01).
 
 **Why an entropy heuristic, and what it costs.** A bare token can reach a terminal-supplied title without credential-related wording. Finite samples often fall below their alphabet's maximum entropy, so the cutoffs sit below those maxima and still miss some random tokens. Conversely, `/`, `-`, and `_` are token characters: 135 of this repo's 1102 tracked paths redact (12.3%, measured 2026-09), and `vim lib/src/lib/redact-high-entropy.ts` speaks as `vim REDACTED.ts`. Speech accepts this loss of detail to reduce accidental disclosure. Redacting before punctuation cleanup and truncation prevents those transforms from hiding a token's recognizable shape while leaving its contents speakable.
 

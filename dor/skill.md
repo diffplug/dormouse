@@ -43,7 +43,7 @@ Text output is designed for you to read: it is terse and carries the same refs. 
 
 ## Surface handles
 
-- `surface:N` — short ref, e.g. `surface:3`. Stable for the surface's whole life: reordering, minimizing, zooming, and focus changes never change it, and numbers are never reused after a kill. A ref for a killed surface fails loudly instead of silently retargeting, so refs from earlier in your session stay safe to use.
+- `surface:N` — short ref, e.g. `surface:3`. Stable while the Surface stays in the same Workspace: reordering, minimizing, zooming, and focus changes never change it, and numbers are never reused after a kill. A ref for a killed surface fails loudly instead of silently retargeting, moving to another Workspace retires the old ref and allocates a new destination ref.
 - A stable surface id (or `surface:<stable-id>`) — from `--json` output.
 - `surface:self` — the terminal you are running in.
 - `surface:focused` — whatever the user currently has focused.
@@ -208,7 +208,9 @@ dor workspace switch workspace:build      # move the user to it
 dor workspace close workspace:2 --force   # close it and everything in it
 ```
 
-A Window holds several Workspaces, each with its own surfaces and its own `surface:1`. You almost never need these: your commands land in the Workspace you were started in, and creating one is a change the user sees. When you do, name one as `workspace:<n>` or `workspace:<name>`, and pass `--workspace <ref>` to any surface command to act in it (`dor list --all` lists every Workspace in this Window). A surface's stable id finds it in any Workspace without that flag; `surface:N` does not, since every Workspace has one. `close` refuses a Workspace holding your running work unless you pass `--force`.
+A Window holds several Workspaces, each with its own surfaces and its own `surface:1`. You almost never need these: your commands land in the Workspace that currently owns your terminal's stable ID, and creating one is a change the user sees. When you do, name one as `workspace:<n>` or `workspace:<name>`, and pass `--workspace <ref>` to any surface command to act in it (`dor list --all` lists every Workspace in this Window). A surface's stable id finds it in any Workspace without that flag; `surface:N` does not, since every Workspace has one. `close` refuses a Workspace holding your running work unless you pass `--force`.
+
+**Use stable Surface IDs across moves.** `dor move <surface> <workspace>` moves one pane; `--new` creates a Workspace, and `--focus` follows it. A Workspace named `new` remains targetable. If your own terminal moves, cached `surface:N` refs immediately resolve in the destination: `dor kill surface:3` can target someone else's pane. Unscoped `dor ensure -- pnpm dev` searches only the destination and may duplicate the server you left behind. Keep that server's stable ID, or target its original Workspace with `--workspace`. The moved terminal prints a local notice with its old/new handles; the command response prints its new ref. Iframes require `--dangerously-destroy-iframe-page-state` and reopen at their saved URL; dirty or pending Tools refuse even with that flag.
 
 ## Recipes
 

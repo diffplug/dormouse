@@ -2,9 +2,9 @@ import { DEFAULT_WORKSPACE_ID, readPersistedSession } from '../../lib/session-ty
 import { useCallback, useEffect, useMemo, useRef, type RefObject } from 'react';
 import { pasteFilePaths } from '../../lib/clipboard';
 import { getPlatform } from '../../lib/platform';
-import { buildPersistedSession, saveSession, type SaveOptions, type SaveSink } from '../../lib/session-save';
+import { assemblePersistedSession, buildPersistedSession, saveSession, type SaveOptions, type SaveSink } from '../../lib/session-save';
 import { createSessionDirtyTracker } from '../../lib/session-dirty';
-import { previousWorkspaceSession, publishWorkspaceSession, SESSION_SAVE_DEBOUNCE_MS } from '../../lib/window-session-aggregator';
+import { previousWorkspaceSession, publishWorkspaceSession, workspaceSessionRevision, SESSION_SAVE_DEBOUNCE_MS } from '../../lib/window-session-aggregator';
 import { getWorkspace, setWorkspaceAlertDelivery, subscribeToWorkspaces, hasWorkspace } from '../../lib/workspace-store';
 import {
   subscribeToActivity,
@@ -24,6 +24,9 @@ export interface SessionPersistenceHandle {
   /** Build this Workspace's record without publishing it — what a Workspace
    *  leaving for another Window carries with it. */
   serialize: (options?: SaveOptions) => Promise<PersistedSession>;
+  /** This Workspace's record now, with no cwd probe: what a Surface move
+   *  publishes in the same synchronous run as its ownership change. */
+  serializeNow: () => PersistedSession;
 }
 
 export function useSessionPersistence({
@@ -32,6 +35,7 @@ export function useSessionPersistence({
   doorsRef,
   selectedIdRef,
   selectedTypeRef,
+  activeRef,
   ownsSurface,
   surfaceRefsForSave,
   workspaceId,
@@ -48,6 +52,8 @@ export function useSessionPersistence({
   doorsRef: RefObject<DooredItem[]>;
   selectedIdRef: RefObject<string | null>;
   selectedTypeRef: RefObject<WallSelectionKind>;
+  /** Only the visible Workspace receives user-originated native drops. */
+  activeRef: RefObject<boolean>;
   /** Whether a Surface belongs to this Wall — panes AND Doors. The adapter fans
    *  every Session's traffic to every mounted Wall, so this is what keeps one
    *  Workspace from persisting on another's keystroke. Must be stable: the
@@ -130,11 +136,6 @@ export function useSessionPersistence({
     return { panes, doors, lathLayout: lath.serializeLayout(), surfaceRefs };
   }, [lath, doorsRef, surfaceRefsForSave]);
 
-  const doSave = useCallback((options?: SaveOptions): Promise<void> => {
-    const { panes, doors, lathLayout, surfaceRefs } = collect();
-    return saveSession(getPlatform(), panes, doors, lathLayout, surfaceRefs?.refs, surfaceRefs?.next, sink, saveOptions(options));
-  }, [collect, sink, saveOptions]);
-
   /** The same record a save would publish, handed back instead. The Workspace
    *  is leaving, so nothing here may touch this Window's aggregator. */
   const serialize = useCallback((options?: SaveOptions): Promise<PersistedSession> => {
@@ -144,6 +145,26 @@ export function useSessionPersistence({
       sink?.previous() ?? null, saveOptions(options),
     );
   }, [collect, sink, saveOptions]);
+
+  const serializeNow = useCallback((): PersistedSession => {
+    const { panes, doors, lathLayout, surfaceRefs } = collect();
+    return assemblePersistedSession(
+      panes, doors, lathLayout, surfaceRefs?.refs, surfaceRefs?.next,
+      sink?.previous() ?? null, null, saveOptions().alertDelivery,
+    );
+  }, [collect, sink, saveOptions]);
+
+  const doSave = useCallback((options?: SaveOptions): Promise<void> => {
+    if (workspaceId === undefined) {
+      const { panes, doors, lathLayout, surfaceRefs } = collect();
+      return saveSession(getPlatform(), panes, doors, lathLayout, surfaceRefs?.refs, surfaceRefs?.next, sink, saveOptions(options));
+    }
+    // A Surface move bumps the revision; a record collected before it is stale.
+    const revision = workspaceSessionRevision(workspaceId);
+    return serialize(options).then(session => {
+      if (revision === workspaceSessionRevision(workspaceId) && hasWorkspace(workspaceId)) publishWorkspaceSession(workspaceId, session);
+    });
+  }, [collect, serialize, sink, saveOptions, workspaceId]);
 
   const persistSessionNow = useCallback(async (options?: SaveOptions): Promise<void> => {
     const runSave = (): Promise<void> => {
@@ -269,7 +290,7 @@ export function useSessionPersistence({
     // (docs/specs/mouse-and-clipboard.md -> "8.7 Drag-to-Paste").
     // See diffplug/dormouse#38 and tauri-apps/tauri#14373.
     const unsubFilesDropped = platform.onFilesDropped?.((paths) => {
-      if (paths.length === 0) return;
+      if (!activeRef.current || paths.length === 0) return;
       const sid = selectedTypeRef.current === 'pane' ? selectedIdRef.current : null;
       if (!sid) return;
       if (!ownsSurface(sid)) return;
@@ -311,7 +332,8 @@ export function useSessionPersistence({
     scheduleSessionSave,
     selectedIdRef,
     selectedTypeRef,
+    activeRef,
   ]);
 
-  return { flush: flushSessionSave, serialize };
+  return { flush: flushSessionSave, serialize, serializeNow };
 }

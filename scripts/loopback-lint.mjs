@@ -36,6 +36,8 @@
  *     options nest again (`headers`, `cookieDomainRewrite`), and `configure`
  *     takes a function whose body carries braces of its own. A `host` written
  *     below one of those is a miss, and the audit is what covers it.
+ *   - A positional port may wrap one call (`Number(process.env.PORT || 0)`);
+ *     a port expression nesting parentheses deeper hides the bind.
  *   - Outside `ws`, it matches only an explicit loopback host. A listener that
  *     binds every interface (`.listen(port)` with no host) is a different and
  *     larger problem, and `relay/` does it deliberately from config, so
@@ -127,7 +129,7 @@ const NESTED_KEYS = '(?:[^{}]|\\{(?:[^{}]|\\{[^{}]*\\})*\\})*?';
  * exercises is a claim, not a check.
  */
 const BIND_FORMS = [
-  { label: 'node, positional', re: `\\.listen\\(\\s*[^,)]+,\\s*${LOOPBACK}` },
+  { label: 'node, positional', re: `\\.listen\\(\\s*(?:[^,()]|\\([^()]*\\))+,\\s*${LOOPBACK}` },
   { label: 'node, options object', re: `\\.listen\\(\\s*\\{[^}]*?host\\s*:\\s*${LOOPBACK}` },
   { label: '@hono/node-server', re: `\\bserve\\(\\s*\\{[^}]*?hostname\\s*:\\s*${LOOPBACK}` },
   { label: 'ws, explicit loopback host', re: `${WS_NEW}host\\s*:\\s*${LOOPBACK}` },

@@ -110,8 +110,8 @@ installed release, which the installer and `manage status` both print.
   DORMOUSE_RELAY_ORIGIN=https://<laptop>.<tailnet>.ts.net pnpm dogfood:vscode
   ```
 
-  That is a self-host build: it sends nothing to `dormouse.sh` or
-  `hosted.dormouse.sh` on its own, so it has no one-time connection, no managed
+  That is a self-host build: it sends nothing to `dormouse.sh` or any host
+  under it on its own, so it has no one-time connection, no managed
   voice, and no auto-update — update it by rebuilding
   (`docs/specs/relay.md` → "Relay origin").
 
@@ -380,8 +380,8 @@ Burrow displays (`docs/specs/relay.md` → Setup tokens and the pairing QR).
    on their own; the section then shows the Relay, the relay connection and the
    paired-device count.
 
-   A stock build shows only a disabled "Use hosted.dormouse.sh" under
-   **Persistent Relay**, with nothing to enroll: the expected symptom of a stock
+   A stock build offers only "Enroll with hosted.dormouse.sh" under
+   **Persistent Relay**, and no setup password: the expected symptom of a stock
    build, not a Relay problem.
 
 3. **The phone, and only then the code.** On the phone, open
@@ -589,10 +589,8 @@ refuse to rewrite an origin; and **every Burrow is rebuilt with that origin**
 backup story as any other install (checkpoint 6): `config/` and `state/` hold
 Burrow bearer credentials and a VAPID private key.
 
-A managed cloud deployment would buy a stable origin independent of any one
-machine's name — the one thing the above does not give — and belongs with the
-multi-tenant work in `docs/specs/relay.md` `## Future`, not with a single-user
-install.
+Managed cloud accounts and deployment belong to `docs/specs/hosted.md` ->
+"Application boundary".
 
 ## Installer contract (maintainers)
 
@@ -705,8 +703,8 @@ reports which mode is live rather than asserting either.
   (`manage rollback`, `manage restart`), which also absorbs the window where an
   outgoing process answers one last time. `run-relay` passes
   `DORMOUSE_RUNTIME_FILE` and `DORMOUSE_RELEASE_ID` (`docs/specs/relay.md` →
-  Configuration); the Relay records `{pid, releaseId, port, origin, startedAt}`
-  there once **bound**, so `listening_release` (macOS, Linux) /
+  Configuration); the Relay writes `RuntimeInfo` only once **bound**, so
+  `listening_release` (macOS, Linux) /
   `Get-ListeningRelease` (Windows) is a file read, a port match and a liveness
   check. **It cannot go in `/api/hello`**, which is unauthenticated and reachable
   through the HTTPS proxy. **Empty means unknown, never

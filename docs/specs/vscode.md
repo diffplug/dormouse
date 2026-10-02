@@ -20,9 +20,7 @@ Start on the side of the webview boundary involved, then follow imports:
 
 ## What's built
 
-Two hosting modes: a `WebviewView` in the bottom panel (alongside Terminal, Problems, Output) and `WebviewPanel` editor tabs (`dormouse.open`, multiple instances). Both restore across "Developer: Reload Window". PTYs live in the extension host (`pty-manager.ts`), survive panel visibility toggling, and replay buffered output on **resume**. Scrollback is never persisted (`docs/specs/transport.md` → "Persistence policy"); `deactivate()` instead interrupts the live PTYs and records each pane's agent resume invocation for the next cold restore to auto-run (`docs/specs/layout.md` → "Agent resume on cold restore").
-
-The webview is the shared `lib/` frontend, unmodified for this host (`docs/specs/layout.md`, `docs/specs/transport.md`). The only VS Code-specific pieces in `lib/`: `lib/src/lib/platform/vscode-adapter.ts` (the postMessage bridge), `lib/src/lib/vscode-message-token.ts`, `lib/src/lib/vscode-keybindings.ts`.
+The shared frontend runs in the bottom-panel `WebviewView` and independent editor-tab `WebviewPanel`s. Their ownership, visibility, and restore contracts are in Webview hosting and Serialization and restore.
 
 ### Invariants (VS Code-specific)
 
@@ -40,7 +38,7 @@ The webview is the shared `lib/` frontend, unmodified for this host (`docs/specs
 
 ### Extension manifest
 
-**Must activate on the contributed view, restored editor panels, or an invoked contributed command.** Command activation is implicit on the supported VS Code versions ([activation events](https://code.visualstudio.com/api/references/activation-events#oncommand)). The manifest owns contributed commands, views, and title actions: ids, titles, icons, and ordering. The shipped commands are `dormouse.focus`, `dormouse.open`, `dormouse.debugTheme`, `dormouse.newTerminal`, and `dormouse.selectShell`.
+**Must activate on the contributed view, restored editor panels, or an invoked contributed command.** Command activation is implicit on the supported VS Code versions ([activation events](https://code.visualstudio.com/api/references/activation-events#oncommand)). The manifest owns contributed commands, views, and title actions: ids, titles, icons, and ordering.
 
 **No `configuration`, no `keybindings`, no context key**: settings live in the in-webview Settings dialog rather than `settings.json`, chords are handled inside the webview, and nothing is `when`-gated on Dormouse state. Context keys are [Future](#context-keys). Source of truth: `vscode-ext/package.json`.
 
@@ -183,7 +181,7 @@ frame-src   http://127.0.0.1:* http://localhost:*
 
 **That origin is a build-time constant, never a runtime value**: `vscode-ext/scripts/esbuild.mjs` bakes `DORMOUSE_RELAY_ORIGIN` into `dist/extension.js`. The default, the modes, and the build-time guards are `docs/specs/relay.md` → "Relay origin".
 
-`unsafe-inline` for styles covers the theme CSS variables VS Code injects as inline styles on the body element. Scripts stay nonce-gated on a fresh per-render nonce of 24 CSPRNG bytes (`node:crypto` `randomBytes`) base64url-encoded to 32 characters — **never `Math.random()`**. Vite builds the webview HTML from the `lib` package; at runtime `webview-html.ts` rewrites asset URLs to webview URIs, injects the CSP meta tag, swaps Vite's nonce placeholder for the real one, and appends a nonce-gated inline script carrying the boot globals (message token, initial state, selected shell, recovery commands).
+`unsafe-inline` for styles covers the theme CSS variables VS Code injects as inline styles on the body element. **Must mint a fresh per-render nonce from 24 CSPRNG bytes, never `Math.random()`**, and nonce-gate the boot globals. `getWebviewHtml` owns asset rewriting, nonce substitution, and boot serialization.
 
 **`lib/index.html` keeps `<head>` and `</head>` bare**: both splices match a literal and **throw when it is absent**, an attribute otherwise yielding an unpoliced document. Pinned by "refuses a document whose splice marker was edited away".
 
@@ -204,7 +202,7 @@ Source of truth: `getWebviewHtml` in `vscode-ext/src/webview-html.ts`, `CSP_NONC
 
 **The webview's `window` is a shared inbox, so `event.data.type` cannot decide trust** — it is attacker-chosen. The extension host posts there, and so can any framed surface (`dor iframe`, agent-browser; `docs/specs/dor-browser.md`) via `parent.postMessage`, which crosses origin and sandbox boundaries by design; the CSP governs what the document may *load*, never who may *message* it. A forgery is consequential: `dor:controlRequest` becomes a `dormouse:control-request` event `use-dor-control.ts` can turn into a `writePty`, and the `pty:*` family drives what the user sees (rationale). Host-originated messages are therefore authenticated by a **per-boot message token**:
 
-- `getWebviewHtml` mints one token per webview document — 24 CSPRNG bytes, base64url, from the same `randomSecret()` as the CSP nonce — injects it as `globalThis.__DORMOUSE_MESSAGE_TOKEN__` in the same nonce-gated inline script that seeds the other `__DORMOUSE_*` globals, and returns it alongside the HTML.
+- **Must mint a fresh message token per document from 24 CSPRNG bytes**, distinct from its CSP nonce, and inject it only through the nonce-gated boot script.
 - **`serveWebview` is the only way to put a document on a webview**: it mints, assigns `webview.html`, and returns a `WebviewChannel` whose `post()` closes over that document's token. **Minting and serving are one step**, so a token cannot drift from its document; re-serving yields a new token and channel, and nothing keys a token by webview identity, so there is no cleanup.
 - **Every host → webview send goes through a channel**, making a bypass a type error rather than a convention to remember; only the two serve sites (`setupPanel`, `resolveWebviewView`) still hold a raw webview, and `attachRouter` takes a `WebviewChannel`, not a `vscode.Webview`. `DormouseViewProvider.postMessage` forwards to its stored channel, **returning `false` before the view is served or after it disposes** — the VS Code API's own undelivered signal, already handled by the `dormouse:newTerminal` retry loop and `forwardDorControlRequest`'s rejection path.
 - `VSCodeAdapter` captures the token **once, at construction**, and both of its `message` listeners — the main dispatcher and the per-request reply listener inside `requestResponse` — call `isHostMessage(event.data, token)` before reading anything else, `type` included.
@@ -252,9 +250,9 @@ Source of truth: `VsCodeBurrowStateStore` and `ONE_TIME_SERVING_KEY` in `vscode-
 
 **Domain-separate the two proofs (`client:` / `server:`)** — without it a fake server could reflect the client's own proof back as its welcome. **The client verifies the welcome before it sends or answers anything else** (until then it forwards no notifies — they queue — answers no requests, streams no PTY, forwards no commands), and a welcome it cannot verify closes the socket, so squatting the path buys nothing (rationale). **Fresh nonces per connection** make a captured proof worthless on the next one. **Parseable JSON values that are not frame objects are rejected on both ends**, a first frame that is not a valid hello drops the socket, and **each side bounds the opening handshake to `HANDSHAKE_BUDGET_MS`**.
 
-**Nothing starts until there is a Burrow to run.** Contention begins when activation finds an enrollment for the baked origin or the serving marker in `SecretStorage`, when `secrets.onDidChange` reports that another window wrote one, or on the first `enroll` / `enrollOffer` / `oneTimeOpen` / `setNetworkPolicy` command from any webview — the bootstrap for an un-enrolled machine, so a user who never enrolls, opens a link, or changes the network policy never sees a socket. **The service runs independently of webview lifetime**: a broker window with zero Dormouse webviews still relays, contributing an empty directory.
+**Nothing starts until there is a Burrow to run.** Contention begins when activation finds an enrollment for the baked origin or the serving marker in `SecretStorage`, when `secrets.onDidChange` reports that another window wrote one, or on the first `enroll` / `enrollOffer` / `beginHostedEnrollment` / `oneTimeOpen` / `setNetworkPolicy` command from any webview — the bootstrap for an un-enrolled machine, so a user who never enrolls, opens a link, or changes the network policy never sees a socket. **The service runs independently of webview lifetime**: a broker window with zero Dormouse webviews still relays, contributing an empty directory.
 
-**A command that arrives mid-contention is held, not refused** (rationale). Commands queue (bounded at a dozen, oldest refused on overflow) and drain when a role settles — to the service if this window brokered, over the link if it did not. **Each carries its own deadline, under the adapter's 15 s timeout**, so a contention that never settles produces a reason rather than a timeout. `enroll`, `enrollOffer`, `oneTimeOpen`, and `setNetworkPolicy` are the only commands that may *start* the contention — the last **so the service stays the policy's only writer**; everything else refuses only where there is genuinely nothing to reach.
+**A command that arrives mid-contention is held, not refused** (rationale). Commands queue (bounded at a dozen, oldest refused on overflow) and drain when a role settles — to the service if this window brokered, over the link if it did not. **Each carries its own deadline, under the adapter's 15 s timeout**, so a contention that never settles produces a reason rather than a timeout. `enroll`, `enrollOffer`, `beginHostedEnrollment`, `oneTimeOpen`, and `setNetworkPolicy` are the only commands that may *start* the contention — the last **so the service stays the policy's only writer**; everything else refuses only where there is genuinely nothing to reach.
 
 Source of truth: `vscode-ext/src/burrow.ts` (service glue, provider, command routing), `ensurePeerNet` / `attempt` / `stillOurs` in `vscode-ext/src/peer-link.ts`; pinned by `vscode-ext/test/burrow.test.ts` and `vscode-ext/test/peer-link.test.ts`.
 
@@ -335,9 +333,11 @@ Once an answer names a `ptyId`, the broker replaces that owner-local id with a s
 
 **Pairing UI events are the opposite: unaddressed and broadcast to every window's webviews**, because the approval modal must appear wherever the user happens to be looking.
 
-**A window with no Burrow at all still answers the read-only commands** — reaching the terminal refusal is the ordinary un-enrolled state, not a failure. `status`, `pushDevices`, `pairingQueue`, `oneTimeStatus`, `networkPolicy`, `oneTimeEnd`, and `takeBack` answer exactly what an idle service returns (`unenrolledStatus`, `null`, `[]`, `idleOneTimeState`, `networkPolicyResult`, `{}`, `{ ended: false }` — builders shared with the service, the policy read by its `peekNetworkPolicyFor` and never saved), each caller reading the difference: `pushDevices` answers `null` for "nowhere to push" and rejects only when the Relay could not be asked (rationale), and `enrolled-gate.ts` seeds itself from `status`. That `status` reads the installer's offer file from this same process — a file read, not a socket — so the one-click card renders on a machine no window has a Burrow for, and its `enrollOffer` bootstraps the contention. **Everything else refuses with an error rather than dropping it**, so the console hook fails fast instead of hanging for its whole timeout.
+**A window with no Burrow at all still answers the read-only commands** — reaching the terminal refusal is the ordinary un-enrolled state, not a failure. `status`, `pushDevices`, `pairingQueue`, `oneTimeStatus`, `networkPolicy`, `oneTimeEnd`, `cancelHostedEnrollment`, and `takeBack` answer exactly what an idle service returns (`unenrolledStatus`, `null`, `[]`, `idleOneTimeState`, `networkPolicyResult`, `{}`, `{}`, `{ ended: false }` — builders shared with the service, the policy read by its `peekNetworkPolicyFor` and never saved), each caller reading the difference: `pushDevices` answers `null` for "nowhere to push" and rejects only when the Relay could not be asked (rationale), and `enrolled-gate.ts` seeds itself from `status`. That `status` reads the installer's offer file from this same process — a file read, not a socket — so the one-click card renders on a machine no window has a Burrow for, and its `enrollOffer` bootstraps the contention. **Everything else refuses with an error rather than dropping it**, so the console hook fails fast instead of hanging for its whole timeout.
 
 Two UI events *are* addressed: **when a window completes the handshake the broker sends it the current `status` and `one-time` events** — each is emitted only when it changes and once as the service starts, so a window opened after the enrollment or the link would otherwise sit disarmed until reloaded.
+
+**Must bound every peer frame in UTF-8 bytes before parsing**, complete frames and partial tails included. Oversized frames are discarded through their newline without losing adjacent valid frames.
 
 **Socket bind errors reject startup** and are handled as an unavailable peer link; they never leave the listen promise pending or surface as an uncaught extension host error.
 
@@ -364,12 +364,6 @@ Source of truth:
 types without checking them, so `tsc` runs separately as `pnpm typecheck`, **wired
 into the package's `test` script** so the root `pnpm test` covers it — that wiring
 is what protects `deactivate()`, which has no `try`/`catch` (rationale).
-
-The checked program spans two runtimes — `src/` is extension-host Node code but
-imports webview modules from `../lib/src/` — so its config carries both DOM and
-Node libs, looser than either alone, each side checked precisely by its own
-project (`lib/tsconfig.app.json` for the webview). What it reliably catches is
-vscode-ext's own code referring to something that no longer exists.
 
 `pnpm dogfood:vscode` uninstalls the legacy `diffplug.mouseterm` extension before
 packaging and installing the current Dormouse VSIX; the VS Code window must then

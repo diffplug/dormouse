@@ -1,8 +1,9 @@
 import { createHmac } from "node:crypto";
-import { readFile, writeFile, mkdir, appendFile, rm } from "node:fs/promises";
+import { writeFile, mkdir, appendFile, rm } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { spawnSync } from "node:child_process";
+import { vapidKeysFrom } from "./vapid.mjs";
+import { WORKERS, deployWorkers, fromStage, readConfigs } from "./workers.mjs";
 
 export function required(env, name) {
   if (!env[name])
@@ -10,47 +11,87 @@ export function required(env, name) {
   return env[name];
 }
 
-export function previewName(pr) {
+/** A PR's preview of the production Worker `name`: `<name>-pr-N`. The account's also names its Hyperdrive and Neon branch. */
+export function previewName(pr, name) {
   if (!/^[1-9]\d{0,8}$/.test(pr ?? ""))
     throw new Error("PR_NUMBER must be a positive integer");
-  return `dormouse-hosted-pr-${pr}`;
+  return `${name}-pr-${pr}`;
 }
 
-export function previewConfig(base, env, hyperdriveId) {
-  const name = previewName(env.PR_NUMBER);
+/**
+ * A Worker's preview config, allowlisted from its production `base`: its own
+ * workers.dev origin, its registry preview entry, assets rebased, its Durable
+ * Objects with their migrations (a namespace belongs to the Worker implementing it),
+ * rate limits in preview-only namespaces (counters are account-wide), and the
+ * PR's Hyperdrive wherever the base binds one. Never routes, triggers, other
+ * bindings, or production vars.
+ */
+export function previewConfig(base, env, worker, hyperdriveId) {
+  const name = previewName(env.PR_NUMBER, base.name);
   const subdomain = required(env, "CLOUDFLARE_WORKERS_SUBDOMAIN");
   if (!/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(subdomain))
     throw new Error(
       "Use the workers.dev subdomain only, without dots or a URL",
     );
-  if (!/^[a-f0-9]{32}$/.test(hyperdriveId))
-    throw new Error("Invalid Hyperdrive ID");
   if (!/^[a-f0-9]{40}$/.test(env.BUILD_SHA ?? ""))
     throw new Error("BUILD_SHA must be a commit SHA");
-  // Deliberately allowlist fields: no production routes, bindings, or OAuth secrets.
-  return {
+  const config = {
     name,
-    main: "../../server/preview-worker.ts",
+    main: fromStage(WORKERS[worker].previewMain),
     compatibility_date: base.compatibility_date,
     compatibility_flags: base.compatibility_flags,
     workers_dev: true,
     preview_urls: false,
-    assets: { ...base.assets, directory: "../../dist" },
     vars: {
       APP_ORIGIN: `https://${name}.${subdomain}.workers.dev`,
-      BUILD_SHA: required(env, "BUILD_SHA"),
+      BUILD_SHA: env.BUILD_SHA,
     },
-    hyperdrive: [{ binding: "HYPERDRIVE", id: hyperdriveId }],
-    // A Durable Object namespace belongs to the Worker that implements it, so
-    // the preview's is its own; rate-limit counters are account-wide, so the
-    // preview's move to their own namespace ids.
-    durable_objects: base.durable_objects,
-    migrations: base.migrations,
-    ratelimits: base.ratelimits?.map((limit) => ({
+  };
+  if (base.assets)
+    config.assets = { ...base.assets, directory: fromStage(base.assets.directory) };
+  if (base.hyperdrive) {
+    if (!/^[a-f0-9]{32}$/.test(hyperdriveId))
+      throw new Error("Invalid Hyperdrive ID");
+    config.hyperdrive = base.hyperdrive.map(({ binding }) => ({
+      binding,
+      id: hyperdriveId,
+    }));
+  }
+  // A binding to another Worker's class names that Worker's preview, never
+  // production's. Migrations travel only with the Durable Objects a Worker
+  // implements: one that implements none starts with none to delete.
+  if (base.durable_objects) {
+    const bindings = base.durable_objects.bindings.map((binding) =>
+      binding.script_name
+        ? { ...binding, script_name: previewName(env.PR_NUMBER, binding.script_name) }
+        : binding,
+    );
+    config.durable_objects = { ...base.durable_objects, bindings };
+    if (base.migrations && bindings.some((binding) => !binding.script_name))
+      config.migrations = base.migrations;
+  }
+  if (base.ratelimits)
+    config.ratelimits = base.ratelimits.map((limit) => ({
       ...limit,
       namespace_id: previewRatelimitNamespace(limit.namespace_id),
-    })),
-  };
+    }));
+  return config;
+}
+
+/**
+ * Every Worker's preview config, keyed as `WORKERS` is; all three share one
+ * Hyperdrive, as production does. The relay's enrollment links name the
+ * account preview, never production's account.
+ */
+export function previewConfigs(bases, env, hyperdriveId) {
+  const configs = Object.fromEntries(
+    Object.keys(WORKERS).map((worker) => [
+      worker,
+      previewConfig(bases[worker], env, worker, hyperdriveId),
+    ]),
+  );
+  configs.relay.vars.ACCOUNT_ORIGIN = configs.account.vars.APP_ORIGIN;
+  return configs;
 }
 
 /** Production rate-limit namespace ids stay below this; previews use id + offset. */
@@ -137,18 +178,64 @@ export async function findHyperdrives(api, name) {
   }
 }
 
-export async function prepare(env = process.env) {
-  const name = previewName(env.PR_NUMBER);
-  const base = JSON.parse(
-    await readFile(new URL("../wrangler.jsonc", import.meta.url), "utf8"),
-  );
-  const config = previewConfig(base, env, "0".repeat(32));
+/** Where `prepare` leaves a preview Worker's secrets for `deploy`. */
+const secretsFile = (worker) =>
+  new URL(`../.wrangler/preview/secrets.${worker}.json`, import.meta.url);
+
+/**
+ * Each preview Worker's secrets, keyed as `WORKERS` is: its `previewSecret`,
+ * the HMAC of `PREVIEW_AUTH_SECRET` with its preview Worker's name, so no two
+ * Workers or PRs share one and none is stored; and, with `previewVapid`, a
+ * VAPID pair derived the same way (`previewVapidKeys`).
+ */
+export function previewSecrets(configs, env) {
   const secret = required(env, "PREVIEW_AUTH_SECRET");
   if (secret.length < 32)
     throw new Error("PREVIEW_AUTH_SECRET needs at least 32 random characters");
-  const secrets = {
-    AUTH_SECRET: createHmac("sha256", secret).update(name).digest("hex"),
-  };
+  return Object.fromEntries(
+    Object.entries(WORKERS)
+      .filter(([, { previewSecret }]) => previewSecret)
+      .map(([worker, { previewSecret, previewVapid }]) => {
+        const name = configs[worker].name;
+        return [
+          worker,
+          {
+            [previewSecret]: createHmac("sha256", secret).update(name).digest("hex"),
+            ...(previewVapid && previewVapidKeys(secret, name)),
+          },
+        ];
+      }),
+  );
+}
+
+/**
+ * A preview's VAPID pair: the P-256 scalar is the HMAC of the preview secret
+ * with `<name>/vapid`, so it is stable across a PR's redeploys and its
+ * subscriptions survive them.
+ */
+export const previewVapidKeys = (secret, name) =>
+  vapidKeysFrom((counter) =>
+    createHmac("sha256", secret)
+      .update(`${name}/vapid${counter ? `/${counter}` : ""}`)
+      .digest(),
+  );
+
+/** Each Worker's origin in `configs`, keyed as `WORKERS` is. */
+export const originsOf = (configs) =>
+  Object.fromEntries(
+    Object.entries(configs).map(([worker, config]) => [worker, config.vars.APP_ORIGIN]),
+  );
+
+/**
+ * Validates every preview config, upserts the PR's Hyperdrive, writes each
+ * Worker's secrets file, and emits the origins: `url` (the account's, for the
+ * environment link) and `origins` (all three as JSON, for the smoke).
+ */
+export async function prepare(env = process.env) {
+  const bases = await readConfigs();
+  const name = previewName(env.PR_NUMBER, bases.account.name);
+  // Every config and secret validates before any resource is created.
+  const secrets = previewSecrets(previewConfigs(bases, env, "0".repeat(32)), env);
   const origin = hyperdriveOrigin(required(env, "DATABASE_URL"));
   const api = cloudflare(env);
   const matches = await findHyperdrives(api, name);
@@ -162,35 +249,40 @@ export async function prepare(env = process.env) {
   };
   const path = `hyperdrive/configs${matches[0] ? `/${matches[0].id}` : ""}`;
   const { result } = await api(path, matches[0] ? "PUT" : "POST", body);
-  config.hyperdrive[0].id = result.id;
-  const directory = new URL("../.wrangler/preview/", import.meta.url);
-  await mkdir(directory, { recursive: true, mode: 0o700 });
-  await writeFile(
-    new URL("wrangler.json", directory),
-    JSON.stringify(config, null, 2) + "\n",
-  );
-  await writeFile(new URL("secrets.json", directory), JSON.stringify(secrets), {
-    mode: 0o600,
-  });
+  const configs = previewConfigs(bases, env, result.id);
+  for (const [worker, values] of Object.entries(secrets)) {
+    await mkdir(new URL("./", secretsFile(worker)), { recursive: true, mode: 0o700 });
+    await writeFile(secretsFile(worker), JSON.stringify(values), { mode: 0o600 });
+  }
+  const origins = originsOf(configs);
   if (env.GITHUB_OUTPUT)
-    await appendFile(env.GITHUB_OUTPUT, `url=${config.vars.APP_ORIGIN}\n`);
+    await appendFile(
+      env.GITHUB_OUTPUT,
+      `url=${origins.account}\norigins=${JSON.stringify(origins)}\n`,
+    );
   if (env.GITHUB_STEP_SUMMARY)
     await appendFile(
       env.GITHUB_STEP_SUMMARY,
-      `Preview target: ${config.vars.APP_ORIGIN}/login\n\nRevision: ${env.BUILD_SHA}\n\nCaptured email inbox: ${config.vars.APP_ORIGIN}/dev/emails. No real email is sent. Deployment and smoke checks must succeed below.\n`,
+      `Preview target: ${origins.account}/login\n\nOne-time page: ${origins.relay}/connect/\n\nVoice: ${origins.voice}\n\nRevision: ${env.BUILD_SHA}\n\nCaptured email inbox: ${origins.account}/dev/emails. No real email is sent. Deployment and smoke checks must succeed below.\n`,
     );
-  console.log(`Prepared ${config.vars.APP_ORIGIN}`);
+  console.log(`Prepared ${Object.values(origins).join(", ")}`);
+  return configs;
 }
 
 export async function cleanup(env = process.env) {
-  const name = previewName(env.PR_NUMBER);
+  const bases = await readConfigs();
+  const name = previewName(env.PR_NUMBER, bases.account.name);
   // Validate both providers before deleting anything, so a missing Neon token is caught first.
   required(env, "NEON_PROJECT_ID");
   required(env, "NEON_API_KEY");
   const api = cloudflare(env);
   // `force`: a Worker that implements a Durable Object namespace is deleted
   // with it rather than refused.
-  await api(`workers/scripts/${name}?force=true`, "DELETE");
+  for (const base of Object.values(bases))
+    await api(
+      `workers/scripts/${previewName(env.PR_NUMBER, base.name)}?force=true`,
+      "DELETE",
+    );
   for (const item of await findHyperdrives(api, name))
     await api(`hyperdrive/configs/${item.id}`, "DELETE");
   // The official create action reuses branches; cleanup must also tolerate retries.
@@ -230,30 +322,17 @@ if (
     if (action === "prepare") await prepare();
     else if (action === "cleanup") await cleanup();
     else if (action === "deploy") {
-      await prepare();
+      const configs = await prepare();
       try {
-        const result = spawnSync(
-          "pnpm",
-          [
-            "exec",
-            "wrangler",
-            "deploy",
-            "--config",
-            ".wrangler/preview/wrangler.json",
-            "--secrets-file",
-            ".wrangler/preview/secrets.json",
-          ],
-          {
-            cwd: fileURLToPath(new URL("../", import.meta.url)),
-            stdio: "inherit",
-          },
-        );
-        process.exitCode = result.status ?? 1;
+        await deployWorkers("preview", configs, {
+          args: (worker) =>
+            WORKERS[worker].previewSecret
+              ? ["--secrets-file", fileURLToPath(secretsFile(worker))]
+              : [],
+        });
       } finally {
-        await rm(
-          new URL("../.wrangler/preview/secrets.json", import.meta.url),
-          { force: true },
-        );
+        for (const worker of Object.keys(WORKERS))
+          await rm(secretsFile(worker), { force: true });
       }
     } else throw new Error("Use prepare, deploy or cleanup");
   } catch (error) {

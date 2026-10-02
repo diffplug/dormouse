@@ -7,13 +7,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { API_ROUTES } from 'remote-lib-common';
+import { API_ROUTES, MAX_REQUEST_BODY_BYTES } from 'remote-lib-common';
 
-import {
-  BURROW_ENROLL_ATTEMPT_BURST,
-  BURROW_ENROLL_ATTEMPT_REFILL_MS,
-  MAX_REQUEST_BODY_BYTES,
-} from '../dist/app.js';
+import { BURROW_ENROLL_ATTEMPT_BURST, BURROW_ENROLL_ATTEMPT_REFILL_MS } from '../dist/app.js';
 import { freshApp, makeClock, post } from './helpers.mjs';
 
 test('burrow enrollment has one process-global budget across concurrent callers', async () => {

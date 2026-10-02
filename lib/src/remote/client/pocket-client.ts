@@ -18,10 +18,10 @@ import {
   API_ROUTES,
   DEFAULT_CHALLENGE_TTL_MS,
   DEFAULT_PAIRING_TTL_MS,
+  DIRECT_ONLY_DEADLINE_MS,
   E2E_ID_BYTE_LENGTH,
   MAX_PUSH_QUERY_DELIVERY_IDS,
   NoiseTransportSession,
-  SELFHOST_ACCOUNT_ID,
   SETUP_TOKEN_INVALID_ERROR,
   UNAUTHORIZED_ERROR,
   WS_ROUTES,
@@ -81,8 +81,13 @@ import {
   type PendingDeletionStore,
 } from './pocket-db';
 import { SCAN_LABEL } from '../setup-copy';
-import type { RemoteWebSocket } from '../ws';
-import { ClientSessionCore, type ClientSessionCoreDeps } from './session-core';
+import { RelayHeartbeat, realTimer, type RemoteTimer, type RemoteWebSocket } from '../ws';
+import {
+  ClientSessionCore,
+  networkNotAllowedMessage,
+  type ClientSessionCoreDeps,
+  type DirectWaitFailure,
+} from './session-core';
 import type { TerminalHandlers } from './remote-adapter';
 
 /** The slice of a WebSocket the client uses; a browser `WebSocket` satisfies it. */
@@ -118,7 +123,9 @@ export interface PocketStorage {
 
 /**
  * What a `PocketClient` is built from. The session core's own seams —
- * `setTimer`, `visibility`, `createDirectPeer` — pass straight through to it.
+ * `setTimer`, `visibility`, `createDirectPeer` — pass straight through to it;
+ * the relay socket's heartbeat arms on the same `setTimer` and runs on the
+ * core's visibility.
  */
 export interface PocketClientDeps
   extends Pick<ClientSessionCoreDeps<E2eRoute>, 'setTimer' | 'visibility' | 'createDirectPeer'> {
@@ -169,6 +176,37 @@ export class RelayRefusalError extends Error {
  */
 export const BURROW_SESSION_REAPED_MESSAGE =
   'This phone was away too long, so the computer let the session go. Connect again to resume.';
+
+/**
+ * What a connection the computer holds to the direct path reports when no
+ * direct path formed in time, or the computer ended it without naming this
+ * phone's address; a goodbye that names it reads
+ * {@link networkNotAllowedMessage} instead (`docs/specs/remote-network.md` ->
+ * "Local networks"). **Never tells the phone to join a network**: the computer
+ * may be the end that was off them.
+ */
+export const DIRECT_ONLY_FAILED_MESSAGE =
+  'This computer accepts phones only over a direct connection on a network it allows, and one couldn’t be made. ' +
+  'Check that this phone and the computer are both on one of those networks, then Connect again.';
+
+/**
+ * What the same connection reports when a direct connection was never
+ * possible: this browser brings no WebRTC, or the computer declined the offer.
+ * Joining another network would not help, so this never says to.
+ */
+export const DIRECT_ONLY_UNSUPPORTED_MESSAGE =
+  'This computer accepts phones only over a direct connection, and this browser or the computer can’t make one. ' +
+  'Try another browser on this phone, or check the computer’s Settings → Network.';
+
+/**
+ * The fixed copy for a direct-only connect that never went direct: no direct
+ * connection was possible at all, or one was and did not form.
+ */
+function directOnlyFailureMessage(failure: Exclude<DirectWaitFailure, 'retired'>): string {
+  return failure === 'unsupported' || failure === 'declined'
+    ? DIRECT_ONLY_UNSUPPORTED_MESSAGE
+    : DIRECT_ONLY_FAILED_MESSAGE;
+}
 
 /** What a request in flight fails with when the computer ends the session on purpose. */
 export const BURROW_SESSION_ENDED_MESSAGE = 'The computer ended this session. Connect again to resume.';
@@ -307,11 +345,21 @@ export class PocketClient {
   readonly #pendingDeletions: PendingDeletionStore;
   readonly #storage: PocketStorage;
   readonly #now: () => number;
+  readonly #setTimer: RemoteTimer;
   /** Everything a ceremony's frames and an established session do. */
   readonly #core: ClientSessionCore<E2eRoute>;
+  /** Whether a direct-only connect is waiting for its switch, reporting its endings itself. */
+  #awaitingDirect = false;
 
   #ws: PocketSocket | null = null;
-  #sessionToken: string | null = null;
+  /** The open relay socket's heartbeat, or null while none is open. */
+  #heartbeat: RelayHeartbeat | null = null;
+  /**
+   * The sign-in session: its token, and the account the Relay answered with
+   * it — `'owner'` from a self-host Relay, the account's user id from Hosted.
+   * Every presence proof names that account, and a pairing outcome must.
+   */
+  #session: { readonly token: string; readonly accountId: string } | null = null;
   /** The credential id from the most recent sign-in (or registration). */
   #credentialId: string | null = null;
 
@@ -325,6 +373,7 @@ export class PocketClient {
     this.#pendingDeletions = deps.pendingDeletions;
     this.#storage = deps.storage ?? localStoragePocketStorage();
     this.#now = deps.now ?? (() => Date.now());
+    this.#setTimer = deps.setTimer ?? realTimer;
     this.#core = new ClientSessionCore<E2eRoute>({
       sendFrame: (route, step, ciphertext) => this.#sendE2e(route, step, ciphertext),
       messages: {
@@ -340,7 +389,12 @@ export class PocketClient {
   }
 
   get sessionToken(): string | null {
-    return this.#sessionToken;
+    return this.#session?.token ?? null;
+  }
+
+  /** The signed-in session's account, or `null` signed out. */
+  get accountId(): string | null {
+    return this.#session?.accountId ?? null;
   }
 
   get connectedBurrowId(): string | null {
@@ -390,9 +444,18 @@ export class PocketClient {
    * Notified when the Burrow drops: a `burrow-gone` frame, a closed socket, a
    * session the Burrow's idle reaper took while this page was hidden, or the
    * Burrow's goodbye — the person at the computer took a pane back.
+   *
+   * **Never while a direct-only {@link connect} waits for its switch**: no wall
+   * has mounted to leave, and that connect resolves the failure itself — one
+   * report per ending.
    */
-  setOnBurrowGone(callback: (() => void) | null): void {
-    this.#core.setOnBurrowGone(callback);
+  setOnBurrowGone(callback: ((endedByBurrow: boolean) => void) | null): void {
+    this.#core.setOnBurrowGone(
+      callback &&
+        ((endedByBurrow) => {
+          if (!this.#awaitingDirect) callback(endedByBurrow);
+        }),
+    );
   }
 
   // --- Account: first-time setup + sign-in ---------------------------------
@@ -487,7 +550,7 @@ export class PocketClient {
     const begin = await this.#api<SigninBeginResponse>(API_ROUTES.signinBegin, {});
     const assertion = await this.#webauthn.getAssertion(begin.challenge, begin.rpId);
     const finish = await this.#api<SigninFinishResponse>(API_ROUTES.signinFinish, { assertion });
-    this.#sessionToken = finish.sessionToken;
+    this.#session = { token: finish.sessionToken, accountId: finish.accountId };
     this.#credentialId = assertion.credentialId;
     // Signing in is enough to pair from here. The Relay returns the asserted
     // passkey's public key, so a browser profile that never performed the
@@ -606,7 +669,7 @@ export class PocketClient {
    * that can simply be retried on the next one.
    */
   async retirePendingDeletions(): Promise<void> {
-    if (this.#sessionToken === null) return;
+    if (this.#session === null) return;
     let queued;
     try {
       queued = await this.#pendingDeletions.list();
@@ -643,14 +706,16 @@ export class PocketClient {
   }
 
   #openSocket(): Promise<void> {
-    const token = this.#requireToken();
+    const token = this.#requireSession().token;
     const url = `${this.#wsBase}${WS_ROUTES.client}?${WS_TOKEN_PARAM}=${encodeURIComponent(token)}`;
     const ws = this.#createWebSocket(url);
     this.#ws = ws;
     const isCurrent = () => this.#ws === ws;
     ws.addEventListener('message', (ev) => {
       if (!isCurrent()) return;
-      this.#onFrame((ev as { data?: unknown }).data);
+      const data = (ev as { data?: unknown }).data;
+      if (this.#heartbeat?.read(data)) return;
+      this.#onFrame(data);
     });
     ws.addEventListener('close', () => this.#onClose(ws));
     return new Promise((resolve, reject) => {
@@ -659,6 +724,7 @@ export class PocketClient {
           reject(new Error('relay socket superseded'));
           return;
         }
+        this.#startHeartbeat(ws);
         resolve();
       });
       ws.addEventListener('error', () => reject(new Error('relay socket error')));
@@ -742,7 +808,7 @@ export class PocketClient {
     // is one no later connection can build a handshake from — a record that
     // fails at the *next* attempt, with nothing left on screen to explain it.
     if (
-      outcome.accountId !== SELFHOST_ACCOUNT_ID ||
+      outcome.accountId !== this.#session?.accountId ||
       outcome.passkeyCredentialId !== passkeyCredentialId ||
       outcome.passkeyPublicKeyHash !== passkeyPublicKeyHash ||
       !isNoisePublicKey(outcome.burrowStaticPublicKey)
@@ -868,6 +934,30 @@ export class PocketClient {
       // path, and a peer connection that existed ahead of authorization would
       // be one an unauthorized party had steered.
       this.#core.establish(route, session);
+      // **A direct-only session sends no protocol-v1 before the switch**: the
+      // Burrow ends one whose application message crosses the relay, so the
+      // wall mounts only once the direct path carries both directions.
+      let failure: DirectWaitFailure | null = null;
+      if (outcome.directOnly === true) {
+        // A replacing Connect retires this wait before its own request goes
+        // out, so this one is over long before that one's outcome arrives.
+        this.#awaitingDirect = true;
+        try {
+          failure = await this.#core.awaitDirect(DIRECT_ONLY_DEADLINE_MS);
+        } finally {
+          this.#awaitingDirect = false;
+        }
+      }
+      if (failure !== null) {
+        // A replacing Connect retired this one, and its session is the live
+        // one now: answered without touching it.
+        if (failure === 'retired') return { ok: false, message: BURROW_UNAVAILABLE_MESSAGE, pairingRequired: false };
+        const message =
+          (failure === 'ended-by-burrow' ? networkNotAllowedMessage(this.#core.goodbye) : null) ??
+          directOnlyFailureMessage(failure);
+        if (this.#core.establishedRoute === route) this.#core.endSession(message, { notifyGone: false });
+        return { ok: false, message, pairingRequired: false };
+      }
       return { ok: true, burrowLabel: outcome.burrowLabel };
     }
     if (outcome.code === 'pairing-required') {
@@ -976,7 +1066,7 @@ export class PocketClient {
   }
 
   #auth(): { headers: Record<string, string> } {
-    return { headers: { authorization: `Bearer ${this.#requireToken()}` } };
+    return { headers: { authorization: `Bearer ${this.#requireSession().token}` } };
   }
 
   /**
@@ -1009,7 +1099,7 @@ export class PocketClient {
     return {
       binding,
       relayNonce: begin.relayNonce,
-      accountId: SELFHOST_ACCOUNT_ID,
+      accountId: this.#requireSession().accountId,
       passkeyCredentialId: binding.passkeyCredentialId,
       passkeyPublicKey: this.#requirePasskeyPublicKey(binding.passkeyCredentialId),
       assertion,
@@ -1069,6 +1159,30 @@ export class PocketClient {
     }
   }
 
+  /**
+   * Ping the relay socket while the page is visible, on the session core's
+   * visibility as keepalives run (`docs/specs/relay.md` → "Routing"); a socket that
+   * stops answering is a drop, though no close arrived.
+   */
+  #startHeartbeat(ws: PocketSocket): void {
+    this.#stopHeartbeat();
+    this.#heartbeat = new RelayHeartbeat(ws, this.#setTimer, () => {
+      this.#onClose(ws);
+      try {
+        ws.close();
+      } catch {
+        // already closing
+      }
+    });
+    this.#core.setSocketHeartbeat(this.#heartbeat);
+  }
+
+  #stopHeartbeat(): void {
+    this.#heartbeat?.stop();
+    this.#heartbeat = null;
+    this.#core.setSocketHeartbeat(null);
+  }
+
   #onClose(ws: PocketSocket): void {
     // Generation guard, and the whole test for "was this close intentional?":
     // `close()` tears down and nulls #ws *before* calling `ws.close()`, and a
@@ -1089,6 +1203,7 @@ export class PocketClient {
    */
   #teardown(reason: string, { notifyGone }: { notifyGone: boolean }): void {
     this.#ws = null; // never reuse a closed socket; openSocket() makes a fresh one
+    this.#stopHeartbeat();
     this.#core.endSession(reason, { notifyGone });
   }
 
@@ -1121,7 +1236,7 @@ export class PocketClient {
       // Drop the token here rather than at the call site: every later request
       // and every relay upgrade would fail the same way, and keeping it would
       // let the UI believe it is still signed in.
-      this.#sessionToken = null;
+      this.#session = null;
       throw new SessionExpiredError();
     }
     // A refusal, not a bare Error: an answer arrived, which is what `setup`
@@ -1143,11 +1258,11 @@ export class PocketClient {
    * question and costs one request on a path that has already failed.
    */
   async #diagnoseSocketFailure(original: Error): Promise<never> {
-    if (this.#sessionToken === null) throw original;
+    if (this.#session === null) throw original;
     try {
       await this.#api<BurrowsResponse>(API_ROUTES.burrows, undefined, {
         method: 'GET',
-        headers: { authorization: `Bearer ${this.#sessionToken}` },
+        headers: { authorization: `Bearer ${this.#session.token}` },
       });
     } catch (err) {
       if (err instanceof SessionExpiredError) throw err;
@@ -1157,9 +1272,9 @@ export class PocketClient {
     throw original;
   }
 
-  #requireToken(): string {
-    if (!this.#sessionToken) throw new Error('sign in first');
-    return this.#sessionToken;
+  #requireSession(): { readonly token: string; readonly accountId: string } {
+    if (!this.#session) throw new Error('sign in first');
+    return this.#session;
   }
 
   #requireCredentialId(): string {
@@ -1171,7 +1286,7 @@ export class PocketClient {
   #requirePasskeyPublicKey(credentialId: string): string {
     const publicKey = this.#storage.getPasskeyPublicKey(credentialId);
     if (!publicKey) {
-      this.#sessionToken = null;
+      this.#session = null;
       throw new PasskeyUnavailableError();
     }
     return publicKey;

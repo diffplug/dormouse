@@ -716,7 +716,7 @@ describe('LathHost — pane / Door drag', () => {
 
   function mountDrag(
     store: LathWallStore,
-    props: { externalDrag?: { id: string; startX: number; startY: number } | null } = {},
+    props: { externalDrag?: { id: string; startX: number; startY: number } | null; workspaceDrag?: import('./surface-workspace-drag').SurfaceWorkspaceDrag } = {},
   ): { engine: ReturnType<typeof createLathWallEngine> } & DragHandlers {
     const engine = createLathWallEngine(store, { durationMs: 0 });
     const handlers: DragHandlers = {
@@ -732,6 +732,7 @@ describe('LathHost — pane / Door drag', () => {
           onCommitResize={vi.fn()}
           componentsOverride={OVERRIDE}
           externalDrag={props.externalDrag ?? null}
+          workspaceDrag={props.workspaceDrag}
           {...handlers}
         />,
       );
@@ -756,14 +757,30 @@ describe('LathHost — pane / Door drag', () => {
   }
   const down = (el: HTMLElement, x: number, y: number) =>
     el.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, clientX: x, clientY: y, button: 0 }));
-  const moveTo = (x: number, y: number) => window.dispatchEvent(new MouseEvent('pointermove', { clientX: x, clientY: y }));
-  const up = () => window.dispatchEvent(new MouseEvent('pointerup', {}));
+  let pointer = { clientX: 0, clientY: 0 };
+  const moveTo = (x: number, y: number) => { pointer = { clientX: x, clientY: y }; window.dispatchEvent(new MouseEvent('pointermove', pointer)); };
+  const up = () => window.dispatchEvent(new MouseEvent('pointerup', pointer));
 
   // col[ row[a, b], c ]: dragging c onto a's top edge yields two distinct candidates —
   // above 'a' (leaf level) and above the whole a|b row (its ancestor).
   function colRowTree(): LathTree {
     return { root: split('col', [split('row', [leaf('a'), 0.5], [leaf('b'), 0.5]), 0.5], [leaf('c'), 0.5]) };
   }
+
+  it('lets the Workspace strip consume a pane release before local layout proposals and cancels on pointercancel', () => {
+    const store = seeded(rowOf('a', 'b'), [['a', leafMeta()], ['b', leafMeta()]]);
+    const workspaceDrag = { hover: vi.fn(() => true), drop: vi.fn(() => true), end: vi.fn() };
+    const { onProposeMove, onProposeMinimize } = mountDrag(store, { workspaceDrag });
+    act(() => { down(header('a'), 100, 15); moveTo(601, 300); up(); });
+    expect(workspaceDrag.drop).toHaveBeenCalledWith('a', 601, 300);
+    expect(onProposeMove).not.toHaveBeenCalled();
+    expect(onProposeMinimize).not.toHaveBeenCalled();
+    workspaceDrag.drop.mockClear();
+    act(() => { down(header('a'), 100, 15); moveTo(601, 300); window.dispatchEvent(new MouseEvent('pointercancel')); });
+    expect(workspaceDrag.drop).not.toHaveBeenCalled();
+    expect(workspaceDrag.end).toHaveBeenCalled();
+    expect(overlayEl()).toBeNull();
+  });
 
   it('enters a drag past the threshold and calls onDragStart, dimming the leaf', () => {
     const store = seeded(rowOf('a', 'b', 'c'), [['a', leafMeta({ title: 'A' })], ['b', leafMeta({ title: 'B' })], ['c', leafMeta({ title: 'C' })]]);

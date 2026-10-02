@@ -42,6 +42,33 @@ describe('QuiesceDetector', () => {
     expect(monitor.getStatus()).toBe('NOTHING_TO_SHOW');
   });
 
+  it('uses a single accepted chunk to delay an alert, independently of BUSY and resets', () => {
+    const { monitor } = createMonitor();
+    expect(monitor.hasRecentOutput()).toBe(false);
+    expect(monitor.onData()).toBe(true);
+    expect(monitor.getStatus()).toBe('NOTHING_TO_SHOW');
+    monitor.reset();
+    vi.advanceTimersByTime(4_999);
+    expect(monitor.hasRecentOutput()).toBe(true);
+    vi.advanceTimersByTime(1);
+    expect(monitor.hasRecentOutput()).toBe(false);
+  });
+
+  it('rejects resize redraws and disposed output without moving the quiet deadline', () => {
+    const { monitor } = createMonitor();
+    monitor.onData();
+    const quietAt = monitor.quietAt();
+    vi.advanceTimersByTime(1_000);
+    monitor.onResize();
+    expect(monitor.onData()).toBe(false);
+    expect(monitor.quietAt()).toBe(quietAt);
+    vi.advanceTimersByTime(500);
+    expect(monitor.onData()).toBe(true);
+    expect(monitor.quietAt()).toBe(quietAt + 1_500);
+    monitor.dispose();
+    expect(monitor.onData()).toBe(false);
+  });
+
   it('keeps the first meaningful output after a reset in NOTHING_TO_SHOW', () => {
     const { monitor, changes } = createMonitor();
     monitor.reset();

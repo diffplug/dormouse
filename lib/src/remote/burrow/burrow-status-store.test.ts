@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { BurrowLink } from '../../lib/platform/types';
+import { HOSTED_ENROLLMENT_END_REASONS } from '../../host/remote/service-protocol';
 
 let burrowLink: BurrowLink | undefined;
 
@@ -356,6 +357,70 @@ describe('an answer from an older broker', () => {
           status: { relayOrigin: 'https://laptop.tailnet.ts.net', offer: false },
         }),
       );
+    } finally {
+      unsubscribe();
+    }
+  });
+});
+
+describe('a Hosted enrollment in the status', () => {
+  it('reads one waiting without republishing it, and none from a broker without the field', async () => {
+    vi.useFakeTimers();
+    let hostedEnrollment: unknown = {
+      status: 'waiting',
+      userCode: '23AB-YZ9K',
+      verificationUrl: 'https://hosted.dormouse.sh/enroll#23AB-YZ9K',
+      expiresAt: 1_800_000_000_000,
+      accountFull: false,
+    };
+    const command = vi.fn(async () => ({
+      enrolled: false,
+      serving: false,
+      relayOrigin: 'https://relay.dormouse.sh',
+      relayMode: 'hosted',
+      burrowId: null,
+      connection: 'stopped',
+      pairedClients: 0,
+      suggestedLabel: 'ned-mac',
+      offer: false,
+      // A fresh object every answer, as the bridge delivers it.
+      ...(hostedEnrollment === undefined ? {} : { hostedEnrollment: structuredClone(hostedEnrollment) }),
+    }));
+    burrowLink = { command, respond: () => {}, notify: () => {}, on: () => () => {} };
+    const listener = vi.fn();
+    const unsubscribe = subscribeToBurrowStatus(listener);
+    const shown = () => (getBurrowStatusSnapshot() as { status: { hostedEnrollment: unknown } }).status.hostedEnrollment;
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      expect(shown()).toEqual(hostedEnrollment);
+      // A broker older than `accountOrigin` names no account page.
+      expect((getBurrowStatusSnapshot() as { status: { accountOrigin: unknown } }).status.accountOrigin).toBeNull();
+      await vi.advanceTimersByTimeAsync(3 * 2000);
+      expect(listener).toHaveBeenCalledTimes(1);
+
+      // A reason this build does not know is a failure with no sentence.
+      hostedEnrollment = { status: 'ended', reason: 'toString' };
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(shown()).toEqual({ status: 'ended', reason: 'failed' });
+      // Every reason the service exports is read as itself, and so is redeeming.
+      for (const reason of HOSTED_ENROLLMENT_END_REASONS) {
+        hostedEnrollment = { status: 'ended', reason };
+        await vi.advanceTimersByTimeAsync(2000);
+        expect(shown()).toEqual({ status: 'ended', reason });
+      }
+      // A lost answer keeps the Burrow it names, and nothing it does not know.
+      hostedEnrollment = { status: 'ended', reason: 'answer-lost', burrowId: 'B1', extra: true };
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(shown()).toEqual({ status: 'ended', reason: 'answer-lost', burrowId: 'B1' });
+      hostedEnrollment = { status: 'redeeming' };
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(shown()).toEqual({ status: 'redeeming' });
+
+      for (const malformed of [undefined, null, { status: 'waiting', userCode: 7 }, { status: 'gone' }]) {
+        hostedEnrollment = malformed;
+        await vi.advanceTimersByTimeAsync(2000);
+        expect(shown(), JSON.stringify(malformed)).toBeNull();
+      }
     } finally {
       unsubscribe();
     }

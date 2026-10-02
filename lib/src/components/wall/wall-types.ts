@@ -61,6 +61,8 @@ export type DoorAfterRestoreAction =
  * one default-shell pane (docs/specs/layout.md → "Workspaces").
  */
 export interface WallBootProps {
+  /** A move creates an empty receiving Wall; adoption supplies its only pane. */
+  emptyForMove?: boolean;
   initialPaneIds?: string[];
   restoredLathLayout?: unknown;
   initialDoors?: PersistedDoor[];

@@ -18,7 +18,9 @@ import {
   NoiseError,
   NoiseTransportSession,
   TokenBucket,
+  WS_CLOSE_BURROW_NOT_ENTITLED,
   WS_CLOSE_BURROW_REPLACED,
+  WS_CLOSE_BURROW_REVOKED,
   WS_ROUTES,
   WS_TOKEN_PARAM,
   boundedBurrowLabel,
@@ -57,13 +59,22 @@ import {
   type RelayToBurrowFrame,
 } from 'remote-lib-common';
 import type { BurrowEnrollment } from './enrollment';
+import type { BurrowStanding } from './burrow-fetch';
 import { createSerialQueue } from '../../host/remote/serial-queue';
 import type { DirectPeering } from '../direct/direct-peer';
-import { closeCode, realTimer, type RemoteTimer, type RemoteWebSocket } from '../ws';
+import type { PathRefusal } from '../direct/path-refusal';
+import {
+  RelayHeartbeat,
+  closeCode,
+  realTimer,
+  type RemoteTimer,
+  type RemoteWebSocket,
+} from '../ws';
 import { loadBurrowAcl } from './acl';
 import {
   EstablishedE2eSession,
   sealControl,
+  type DirectOnlyBreak,
   type RemoteApiSessionContext,
   type RemoteApiSessionLike,
 } from './established-session';
@@ -216,6 +227,13 @@ interface EstablishedSession {
   readonly e2e: EstablishedE2eSession;
 }
 
+/**
+ * Whether an ending tells the Client: `true` with the goodbye, flushed off the
+ * direct path as {@link EstablishedE2eSession.end} bounds it; `'unflushed'`
+ * with it sent best-effort, for a `stop()` that leaves no timer behind.
+ */
+type Goodbye = boolean | 'unflushed';
+
 /** Per-client lifecycle state tracked by the Burrow, keyed by clientId. */
 interface ClientState {
   pairing?: PendingPairingSession;
@@ -225,16 +243,30 @@ interface ClientState {
 
 /**
  * `disconnected` is a socket we expect to get back (a reconnect is armed);
- * `displaced` is a socket another Burrow took from us and no timer will restore
- * (see {@link BurrowRuntime.start}); `stopped` is a socket we closed ourselves.
+ * `stopped` is a socket we closed ourselves. The rest are {@link BurrowLatch}es.
  */
 export type BurrowStatus =
   | 'idle'
   | 'connecting'
   | 'connected'
   | 'disconnected'
-  | 'displaced'
+  | BurrowLatch
   | 'stopped';
+
+/**
+ * A relay socket no timer will restore (see {@link BurrowRuntime.start}):
+ * `displaced` is one another Burrow took from us; `removed` and `not-entitled`
+ * are a Relay that no longer takes this Burrow's token
+ * ({@link BurrowStanding}).
+ */
+export type BurrowLatch = 'displaced' | BurrowStanding;
+
+/** The close code each {@link BurrowLatch} arrives on. */
+const LATCH_FOR_CLOSE: ReadonlyMap<number, BurrowLatch> = new Map([
+  [WS_CLOSE_BURROW_REPLACED, 'displaced'],
+  [WS_CLOSE_BURROW_REVOKED, 'removed'],
+  [WS_CLOSE_BURROW_NOT_ENTITLED, 'not-entitled'],
+]);
 
 export interface BurrowOptions {
   enrollment: BurrowEnrollment;
@@ -279,12 +311,25 @@ export interface BurrowOptions {
   /** Auto-reconnect with backoff (default true; tests pass false). */
   reconnect?: boolean;
   /**
+   * Asked after a socket that never opened, before the next backoff, whether
+   * the Relay still takes this Burrow's token ({@link probeBurrowStanding});
+   * rejects when no answer about the token came. Absent, a refused upgrade is
+   * only retried.
+   */
+  probeStanding?: () => Promise<BurrowStanding | null>;
+  /**
    * How this host takes the direct path (`docs/specs/remote-api.md` →
    * Transport → "Direct path"). Absent, or with no factory, every
    * `direct-offer` is declined and every session stays relayed; a path
    * policy's refusal ends the session.
    */
   directPeering?: DirectPeering;
+  /**
+   * The path ended a direct-only session (`EstablishedE2eSession.pathRefusal`);
+   * the service holds the latest (`docs/specs/remote-network.md` -> "Local
+   * networks").
+   */
+  onPathRefused?: (refusal: PathRefusal) => void;
 }
 
 const INITIAL_BACKOFF_MS = 1_000;
@@ -306,7 +351,9 @@ export class BurrowRuntime {
   readonly #now: () => number;
   readonly #setTimer: RemoteTimer;
   readonly #reconnect: boolean;
+  readonly #probeStanding: BurrowOptions['probeStanding'];
   readonly #directPeering: DirectPeering;
+  readonly #onPathRefused: (refusal: PathRefusal) => void;
 
   /**
    * Per-client lifecycle state keyed by clientId. Folding the three concerns
@@ -326,8 +373,8 @@ export class BurrowRuntime {
    * (`docs/specs/remote-security-model.md` → Pairing).
    *
    * Kept on the Burrow rather than in the service that composes the QR so its
-   * lifetime *is* this Burrow's: a new Burrow starts with none, and a Burrow that
-   * reconnects keeps the codes still on screen. Capped at
+   * lifetime *is* this Burrow's: a new Burrow starts with none, and losing its
+   * Relay socket retires every outstanding invitation. Capped at
    * {@link MAX_TOKENS_PER_BURROW}, the Relay's own bound on the setup tokens
    * these ride with, so the two sides agree on live-versus-spent.
    */
@@ -389,11 +436,20 @@ export class BurrowRuntime {
   #ws: WebSocketLike | null = null;
   #status: BurrowStatus = 'idle';
   #stopped = false;
-  /** Latched by a {@link WS_CLOSE_BURROW_REPLACED} close; only `start()` clears it. */
-  #displaced = false;
+  /** Latched by a close or a probe; only `start()` clears it. */
+  #latched: BurrowLatch | null = null;
+  /**
+   * Whether this failure streak has had its answered probe: set by one, and
+   * cleared by an open or a `start()`.
+   */
+  #probed = false;
+  /** Bumped by `start()` and `stop()`, so a probe answering across either is dropped. */
+  #run = 0;
   #backoffMs = INITIAL_BACKOFF_MS;
   /** Cancels the armed reconnect, or null when none is armed. */
   #cancelReconnect: (() => void) | null = null;
+  /** The open socket's heartbeat, or null while none is open. */
+  #heartbeat: RelayHeartbeat | null = null;
 
   constructor(options: BurrowOptions) {
     this.#enrollment = options.enrollment;
@@ -423,7 +479,9 @@ export class BurrowRuntime {
     this.#onInvitationChanged = options.onInvitationChanged ?? (() => {});
     this.#setTimer = options.setTimer ?? realTimer;
     this.#reconnect = options.reconnect ?? true;
+    this.#probeStanding = options.probeStanding;
     this.#directPeering = options.directPeering ?? { createPeer: null };
+    this.#onPathRefused = options.onPathRefused ?? (() => {});
   }
 
   get status(): BurrowStatus {
@@ -602,6 +660,12 @@ export class BurrowRuntime {
           },
         });
       }
+      // A direct-only session's, until the switch meets it for good.
+      const directBy = established?.e2e.directDeadlineAt ?? null;
+      if (established && directBy !== null) {
+        const { e2e } = established;
+        out.push({ at: directBy, expire: () => e2e.expireDirectOnly() });
+      }
       if (established) {
         out.push({
           at: established.e2e.idleDeadlineAt,
@@ -695,14 +759,16 @@ export class BurrowRuntime {
   // --- Socket lifecycle ----------------------------------------------------
 
   /**
-   * Open the relay socket. Also the one way back from `displaced`: an evicted
-   * Burrow never reconnects on a timer, so returning is a deliberate act that
-   * evicts whichever Burrow currently holds the burrowId. Idempotent while a socket
-   * is live.
+   * Open the relay socket. Also the one way back from a {@link BurrowLatch}: a
+   * latched Burrow never reconnects on a timer, so returning is a deliberate
+   * act — one that evicts whichever Burrow currently holds the burrowId.
+   * Idempotent while a socket is live.
    */
   start(): void {
     this.#stopped = false;
-    this.#displaced = false;
+    this.#latched = null;
+    this.#probed = false;
+    this.#run += 1;
     this.#clearReconnectTimer();
     this.#backoffMs = INITIAL_BACKOFF_MS;
     // Kicked off here so the import is normally settled before the first frame;
@@ -736,10 +802,22 @@ export class BurrowRuntime {
     return this.#noiseStatic;
   }
 
+  /**
+   * Close the relay socket and everything on it. **Every established session
+   * hears the goodbye first**, while the socket can still carry it: a stop is
+   * an ending this Burrow chose — a network policy change, a clear, a swap.
+   * Sent best-effort and unflushed, since a stopped Burrow leaves no timer
+   * behind ({@link EstablishedE2eSession.end}).
+   */
   stop(): void {
+    for (const clientId of [...this.#clients.keys()]) {
+      this.#disposeEstablished(clientId, { goodbye: 'unflushed' });
+    }
     this.#stopped = true;
     this.#status = 'stopped';
+    this.#run += 1;
     this.#clearReconnectTimer();
+    this.#stopHeartbeat();
     this.#dropTransientState();
     // A stopped Burrow leaves no timer behind to wake the process it runs in.
     this.#clearReaper();
@@ -752,7 +830,7 @@ export class BurrowRuntime {
   }
 
   #connect(): void {
-    if (this.#ws || this.#stopped || this.#displaced) return;
+    if (this.#ws || this.#stopped || this.#latched) return;
     this.#status = 'connecting';
     const wsBase = this.#enrollment.relayUrl.replace(/^http/, 'ws');
     const url = `${wsBase}${WS_ROUTES.burrow}?${WS_TOKEN_PARAM}=${encodeURIComponent(this.#enrollment.burrowToken)}`;
@@ -764,19 +842,25 @@ export class BurrowRuntime {
       // (`lib/src/host/remote/service.ts`) — is a socket that closed at once:
       // thrown from the reconnect timer, it would take the host process down.
       console.warn('[burrow] could not open the relay socket', error);
-      this.#onClose(undefined);
+      this.#onClose(undefined, false);
       return;
     }
     this.#ws = ws;
+    let opened = false;
     ws.addEventListener('open', () => {
       if (this.#ws !== ws) return;
+      opened = true;
       this.#status = 'connected';
       this.#backoffMs = INITIAL_BACKOFF_MS;
+      this.#probed = false;
+      this.#heartbeat = new RelayHeartbeat(ws, this.#setTimer, () => this.#abandonSocket());
       this.#reap();
     });
     ws.addEventListener('message', (ev) => {
       if (this.#ws !== ws) return;
-      this.#onFrame((ev as { data?: unknown }).data);
+      const data = (ev as { data?: unknown }).data;
+      if (this.#heartbeat?.read(data)) return;
+      this.#onFrame(data);
     });
     ws.addEventListener('error', () => {
       // A `close` always follows; reconnection is handled there.
@@ -788,23 +872,26 @@ export class BurrowRuntime {
       // open a second one, and make this Burrow displace *itself*.
       if (this.#ws !== ws) return;
       this.#ws = null;
-      this.#onClose(closeCode(ev));
+      this.#onClose(closeCode(ev), opened);
     });
   }
 
-  #onClose(code: number | undefined): void {
+  /**
+   * The relay socket policy (`docs/specs/relay.md` -> "Burrow side"): a
+   * latching close ({@link LATCH_FOR_CLOSE}) is terminal; a socket that never
+   * opened — a refused upgrade reads only as an error event — is probed first,
+   * once per failure streak; anything else backs off and reconnects.
+   */
+  #onClose(code: number | undefined, opened: boolean): void {
+    this.#stopHeartbeat();
     this.#dropTransientState();
     if (this.#stopped) {
       this.#status = 'stopped';
       return;
     }
-    if (code === WS_CLOSE_BURROW_REPLACED) {
-      // Another Burrow claimed this burrowId and the relay evicted us on purpose
-      // (relay/src/relay.ts `registerBurrow`). Reconnecting would evict that one,
-      // which would reconnect and evict us, forever — so this close is terminal
-      // and coming back requires an explicit `start()`.
-      this.#displaced = true;
-      this.#status = 'displaced';
+    const latch = code === undefined ? undefined : LATCH_FOR_CLOSE.get(code);
+    if (latch) {
+      this.#latch(latch);
       return;
     }
     if (!this.#reconnect) {
@@ -812,6 +899,43 @@ export class BurrowRuntime {
       return;
     }
     this.#status = 'disconnected';
+    if (!opened && !this.#probed && this.#probeStanding) {
+      this.#probe(this.#probeStanding);
+      return;
+    }
+    this.#scheduleReconnect();
+  }
+
+  /** Stand down until `start()`, as `latch` says why. */
+  #latch(latch: BurrowLatch): void {
+    this.#latched = latch;
+    this.#status = latch;
+  }
+
+  /**
+   * Ask the Relay about this Burrow's token, then latch or back off. Nothing
+   * reconnects meanwhile, and an answer that lands after a `start()` or
+   * `stop()` is dropped. **Only an answer about the token spends the streak's
+   * probe**: a rejection — no answer (asleep, offline, Nothing), or a status
+   * other than 2xx, 401, or 403 — proves nothing, and the next refused upgrade
+   * asks again.
+   */
+  #probe(probe: () => Promise<BurrowStanding | null>): void {
+    const run = this.#run;
+    void probe().then(
+      (standing) => {
+        if (run !== this.#run) return;
+        this.#probed = true;
+        if (standing) this.#latch(standing);
+        else this.#scheduleReconnect();
+      },
+      () => {
+        if (run === this.#run) this.#scheduleReconnect();
+      },
+    );
+  }
+
+  #scheduleReconnect(): void {
     const delay = this.#backoffMs;
     this.#backoffMs = Math.min(this.#backoffMs * 2, MAX_BACKOFF_MS);
     this.#cancelReconnect = this.#setTimer(() => {
@@ -823,6 +947,27 @@ export class BurrowRuntime {
   #clearReconnectTimer(): void {
     this.#cancelReconnect?.();
     this.#cancelReconnect = null;
+  }
+
+  #stopHeartbeat(): void {
+    this.#heartbeat?.stop();
+    this.#heartbeat = null;
+  }
+
+  /**
+   * End the socket here and now, through the ordinary close policy: its
+   * handlers are detached by the generation guard first, so nothing it still
+   * delivers is read.
+   */
+  #abandonSocket(): void {
+    const ws = this.#ws;
+    this.#ws = null;
+    this.#onClose(undefined, true);
+    try {
+      ws?.close();
+    } catch {
+      // Already closing.
+    }
   }
 
   /**
@@ -933,14 +1078,7 @@ export class BurrowRuntime {
       this.#frames.length >= MAX_QUEUED_RELAY_FRAMES ||
       this.#frameChars + chars > MAX_QUEUED_RELAY_FRAME_CHARS
     ) {
-      const ws = this.#ws;
-      this.#ws = null;
-      this.#onClose(undefined);
-      try {
-        ws?.close();
-      } catch {
-        // Already closing; its handlers are detached by the generation guard.
-      }
+      this.#abandonSocket();
       return;
     }
     this.#frames.push({ frame, chars });
@@ -1015,8 +1153,8 @@ export class BurrowRuntime {
       session = new NoiseTransportSession(handshake.session);
       handshakeHash = toBase64Url(session.handshakeHash);
     } catch {
-      // The invitation stays live: nothing decrypted against it, so no scanner
-      // has been spent — only a valid message 1 reserves one.
+      // The invitation stays live until both handshake messages complete;
+      // a failed read or response spends no scanner.
       return;
     }
     // Nothing above allocated a client entry: a handshake that fails must cost
@@ -1426,6 +1564,9 @@ export class BurrowRuntime {
     }
     const state = this.#clientState(clientId);
     state.connection = undefined;
+    // **Direct-only exactly where the path policy is held** (Local networks):
+    // the policy checks the direct path, and the relay is not one it checks.
+    const directOnly = this.#directPeering.pathPolicy !== undefined;
     // The same static under a different relay-chosen key: its predecessor goes
     // before the replacement is promoted, so the cap is never briefly exceeded.
     // Told so, since its socket may still be open — another tab of the same
@@ -1442,6 +1583,7 @@ export class BurrowRuntime {
     this.#sendControl(clientId, 'connection', pending.connectionId, pending.session, {
       ok: true,
       burrowLabel: boundedBurrowLabel(this.#enrollment.label),
+      ...(directOnly ? { directOnly: true as const } : {}),
     } satisfies ConnectionOutcomeV1);
     if (!this.#createSession) {
       // No remote-api behind this Burrow: the outcome is the whole answer, and
@@ -1469,10 +1611,28 @@ export class BurrowRuntime {
       sendRelay: (ciphertext) =>
         this.#sendE2e(clientId, 'connection', connectionId, 'transport', ciphertext),
       onFatal: () => this.#disposeEstablished(clientId),
+      directOnly,
+      onDirectOnlyBroken: (reason) => this.#endDirectOnly(clientId, e2e, reason),
       now: this.#now,
       setTimer: this.#setTimer,
     });
     state.established = { connectionId, clientStaticPublicKey, e2e };
+    this.#armReaper();
+  }
+
+  /**
+   * End a direct-only session the relay would otherwise have to carry: with
+   * the goodbye, so the phone reads the computer's ending rather than a
+   * silence, and why where the path was (`docs/specs/remote-network.md` ->
+   * "Local networks"). `e2e` names the session meant, so a late call cannot
+   * end its replacement.
+   */
+  #endDirectOnly(clientId: string, e2e: EstablishedE2eSession, reason: DirectOnlyBreak): void {
+    if (this.#clients.get(clientId)?.established?.e2e !== e2e) return;
+    console.warn(`[burrow] ended a direct-only session: ${reason}`);
+    const refusal = e2e.pathRefusal;
+    if (refusal) this.#onPathRefused(refusal);
+    this.#disposeEstablished(clientId, { goodbye: true, only: e2e });
     this.#armReaper();
   }
 
@@ -1565,20 +1725,21 @@ export class BurrowRuntime {
    * Tear one client's established session down and prune the entry.
    *
    * `goodbye` is for an ending this Burrow chose — the idle reap, a replacement
-   * from the same Client static, the person at the Burrow taking a pane back —
-   * where the Client is told with {@link EstablishedE2eSession.end} before the
-   * dispose; every other path (a fatal session, `client-gone`, `stop()`) has no
-   * one listening, or no cipher to say it on. `only` names the session the
+   * from the same Client static, the person at the Burrow taking a pane back,
+   * `stop()`, a direct-only session the relay may not carry — where the Client
+   * is told with {@link EstablishedE2eSession.end} before the dispose; every
+   * other path (a fatal session, `client-gone`, a dropped socket) has no one
+   * listening, or no cipher to say it on. `only` names the session the
    * caller means, so a stale ending cannot take down the one that replaced it.
    */
   #disposeEstablished(
     clientId: string,
-    options: { goodbye?: boolean; only?: EstablishedE2eSession } = {},
+    options: { goodbye?: Goodbye; only?: EstablishedE2eSession } = {},
   ): void {
     const state = this.#clients.get(clientId);
     if (!state?.established) return;
     if (options.only && state.established.e2e !== options.only) return;
-    this.#clearEstablished(state, options.goodbye === true);
+    this.#clearEstablished(state, options.goodbye ?? false);
     this.#pruneClient(clientId);
   }
 
@@ -1586,13 +1747,13 @@ export class BurrowRuntime {
    * Tear one established session down and clear the slot, leaving the entry
    * itself to the caller — a promotion is about to fill it, a disposal prunes.
    */
-  #clearEstablished(state: ClientState, goodbye = false): void {
+  #clearEstablished(state: ClientState, goodbye: Goodbye = false): void {
     if (!state.established) return;
     const { e2e } = state.established;
     // Cleared first, so nothing the teardown sets off can reach this session
     // through the slot again — `end` itself reports nothing once it begins.
     state.established = undefined;
-    if (goodbye) e2e.end();
+    if (goodbye) e2e.end({ flush: goodbye !== 'unflushed' });
     else e2e.dispose();
   }
 

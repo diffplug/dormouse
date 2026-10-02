@@ -170,6 +170,44 @@ afterEach(async () => {
 });
 
 describe('bind-as-lease', () => {
+  it.skipIf(process.platform !== 'win32')('reclaims a dead named pipe and elects exactly one broker for racing windows', async () => {
+    // Windows removes the pipe when its process dies; there is no Unix corpse
+    // inode to unlink. Exercise the actual transport, not a fake socket path.
+    const corpse = spawn(process.execPath, ['-e',
+      "require('node:net').createServer().listen(process.argv[1], () => process.send('listening'))",
+      derivedSocketPath()], { stdio: ['ignore', 'ignore', 'pipe', 'ipc'] });
+    try {
+      await new Promise<void>((resolve, reject) => {
+        corpse.once('message', () => resolve());
+        corpse.once('error', reject);
+        corpse.once('exit', (code) => reject(new Error(`pipe fixture exited ${code}`)));
+      });
+      const exited = new Promise<void>((resolve) => corpse.once('exit', () => resolve()));
+      corpse.kill('SIGKILL');
+      await exited;
+      const firstSide = fakeWindow({ entries: [{ surfaceId: 'first' }] });
+      const secondSide = fakeWindow({ entries: [{ surfaceId: 'second' }] });
+      const first = await openWindow(firstSide);
+      const second = await openWindow(secondSide);
+      const roles: boolean[] = [];
+      await Promise.all([
+        first.ensurePeerNet((held) => roles.push(held)),
+        second.ensurePeerNet((held) => roles.push(held)),
+      ]);
+      const brokers = [first, second].filter((mod) => mod.isPeerBroker());
+      expect(brokers).toHaveLength(1);
+      expect(roles).toEqual([true]);
+      const expected = first.isPeerBroker() ? secondSide.entries : firstSide.entries;
+      await waitFor(async () => JSON.stringify(await brokers[0].remoteRequest('directory', {})) === JSON.stringify(expected));
+    } finally {
+      if (corpse.exitCode === null && corpse.signalCode === null) {
+        const exited = new Promise<void>((resolve) => corpse.once('exit', () => resolve()));
+        corpse.kill('SIGKILL');
+        await exited;
+      }
+    }
+  }, 15_000);
+
   it('rejects when the peer socket cannot be bound', async () => {
     const mod = await openWindow(fakeWindow());
     const failingServer = createServer();
@@ -184,7 +222,8 @@ describe('bind-as-lease', () => {
     // libuv callback with nothing to catch it.
     const mod = await openWindow(fakeWindow());
     const server = createServer();
-    const path = join(dir, 'accept-error.sock');
+    const path = derivedSocketPath();
+    if (process.platform !== 'win32') await mkdir(dirname(path), { recursive: true, mode: 0o700 });
     await mod.listenServer(server, path);
     try {
       expect(() => server.emit('error', Object.assign(new Error('EMFILE'), { code: 'EMFILE' })))
@@ -258,13 +297,13 @@ describe('bind-as-lease', () => {
     releaseStuck();
   }, 15_000);
 
-  it('does not answer broker while a reclaimed bind is still unverified', async () => {
+  it.skipIf(process.platform === 'win32')('does not answer broker while a reclaimed bind is still unverified', async () => {
     // `stillOurs` spends 250 ms watching for a window that cleared the same
     // corpse and bound after us. An enroll landing inside that window used to
     // see a bound socket, start a service, and the stand-down path
     // (`closeServer(false)`) never tears one down — two Burrows under one burrowId.
     const path = derivedSocketPath();
-    await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+    if (process.platform !== 'win32') await mkdir(dirname(path), { recursive: true, mode: 0o700 });
     const corpse = spawn(process.execPath, [
       '-e',
       `require('node:net').createServer().listen(${JSON.stringify(path)})`,
@@ -382,9 +421,9 @@ describe('bind-as-lease', () => {
     expect(roles).toEqual([true, true]);
   });
 
-  it('takes over a socket whose broker died without unlinking it', async () => {
+  it.skipIf(process.platform === 'win32')('takes over a socket whose broker died without unlinking it', async () => {
     const path = derivedSocketPath();
-    await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+    if (process.platform !== 'win32') await mkdir(dirname(path), { recursive: true, mode: 0o700 });
     // A killed process leaves the inode behind — `close()` would unlink it, so
     // the only way to produce this state is to not let the owner close.
     const corpse = spawn(process.execPath, [
@@ -405,13 +444,13 @@ describe('bind-as-lease', () => {
     expect(mod.isPeerBroker()).toBe(true);
   });
 
-  it('re-binds when the socket it reclaimed is unlinked out from under it', async () => {
+  it.skipIf(process.platform === 'win32')('re-binds when the socket it reclaimed is unlinked out from under it', async () => {
     // Two windows can clear the same corpse and the second bind displaces the
     // first without any error — the loser keeps serving an inode no client can
     // reach. On unix a path that has *gone* after our bind is the same failure,
     // and reading it as "still ours" leaves a broker nobody can dial.
     const path = derivedSocketPath();
-    await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+    if (process.platform !== 'win32') await mkdir(dirname(path), { recursive: true, mode: 0o700 });
     const corpse = spawn(process.execPath, [
       '-e',
       `require('node:net').createServer().listen(${JSON.stringify(path)})`,
@@ -446,13 +485,13 @@ describe('bind-as-lease', () => {
     expect(peer.isPeerBroker()).toBe(false);
   }, 30_000);
 
-  it('settles two windows racing for one corpse into a broker and a client', async () => {
+  it.skipIf(process.platform === 'win32')('settles two windows racing for one corpse into a broker and a client', async () => {
     // Both find the same dead socket, both may unlink it, and the second bind
     // silently displaces the first. Whoever loses that has to notice and stand
     // down rather than serve an inode nobody can reach — and must then end up a
     // client, not wedged.
     const path = derivedSocketPath();
-    await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+    if (process.platform !== 'win32') await mkdir(dirname(path), { recursive: true, mode: 0o700 });
     const corpse = spawn(process.execPath, [
       '-e',
       `require('node:net').createServer().listen(${JSON.stringify(path)})`,
@@ -478,14 +517,14 @@ describe('bind-as-lease', () => {
     expect(firstRoles.concat(secondRoles)).toEqual([true]);
   }, 30_000);
 
-  it('stands down when a competing reclaim displaces it before its verification reads the path', async () => {
+  it.skipIf(process.platform === 'win32')('stands down when a competing reclaim displaces it before its verification reads the path', async () => {
     // The interleaving the racing test above reaches only by luck, forced: a
     // competing window's unlink and rebind land after our bind but before
     // `stillOurs` first reads the path. Anchored to that read rather than to
     // our own bind, both windows would name the competitor's socket as "ours"
     // and both would broker.
     const path = derivedSocketPath();
-    await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+    if (process.platform !== 'win32') await mkdir(dirname(path), { recursive: true, mode: 0o700 });
     const corpse = spawn(process.execPath, [
       '-e',
       `require('node:net').createServer().listen(${JSON.stringify(path)})`,
@@ -878,7 +917,7 @@ describe('bind-as-lease', () => {
           }
         });
       });
-      await mkdir(dirname(derivedSocketPath()), { recursive: true, mode: 0o700 });
+      if (process.platform !== 'win32') await mkdir(dirname(derivedSocketPath()), { recursive: true, mode: 0o700 });
       await new Promise<void>((resolve, reject) => {
         server.once('error', reject);
         server.listen(derivedSocketPath(), () => {
@@ -1205,7 +1244,7 @@ describe('peer handshake', () => {
       })();
     });
     const path = derivedSocketPath();
-    await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+    if (process.platform !== 'win32') await mkdir(dirname(path), { recursive: true, mode: 0o700 });
     await new Promise<void>((resolve) => squatter.listen(path, resolve));
 
     try {
@@ -1245,7 +1284,7 @@ describe('peer handshake', () => {
       socket.write('null\n');
     });
     const path = derivedSocketPath();
-    await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+    if (process.platform !== 'win32') await mkdir(dirname(path), { recursive: true, mode: 0o700 });
     await new Promise<void>((resolve) => squatter.listen(path, resolve));
 
     try {
@@ -1266,7 +1305,7 @@ describe('peer handshake', () => {
     }
   });
 
-  it('keeps the socket directory private to this user', async () => {
+  it.skipIf(process.platform === 'win32')('keeps the socket directory private to this user', async () => {
     // The layer below the handshake: in a shared tmpdir, a directory anyone can
     // write to is one where a co-resident user can create the path first.
     const peerDir = dirname(derivedSocketPath());
@@ -1281,7 +1320,7 @@ describe('peer handshake', () => {
     expect((await stat(peerDir)).mode & 0o777).toBe(0o700);
   });
 
-  it('stands down for good when the socket directory is not one', async () => {
+  it.skipIf(process.platform === 'win32')('stands down for good when the socket directory is not one', async () => {
     // Something else holds the only place these sockets may live. No amount of
     // retrying changes that, so the link stops rather than spinning — and the
     // waiting caller is released rather than left hanging.

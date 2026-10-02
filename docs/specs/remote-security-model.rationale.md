@@ -277,6 +277,14 @@ it arrives on a *new* socket, against a Burrow that no longer holds the private
 half, so no path completes. Keeping the entry leaves the same dead code on
 screen as the mint-straddle case under [Pairing](#pairing).
 
+**Why the direct-only deadline is the sum of two bounds.** The Burrow arms it
+when it sends the outcome, but the phone arms its own `DIRECT_SETUP_TIMEOUT_MS`
+only once that outcome reaches it, and the switch it then sends crosses the
+relay, which `DIRECT_HANDOFF_TIMEOUT_MS` bounds. A deadline equal to the setup
+bound alone (as first shipped) could end a session whose phone was still inside
+both of its own bounds; the one-time runtime and the paired Burrow share the one
+constant so neither can drift shorter.
+
 ## Direct path
 
 *(2026-09; the path shipped on the Pocket side and the standalone Burrow.)*

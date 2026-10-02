@@ -3,7 +3,7 @@
  * (`docs/specs/relay.md` -> "Routing" -> "E2E framing").
  *
  * One implementation, so no two speakers can disagree about what a transport
- * plaintext is; today the harness is the only one. It knows nothing about the
+ * plaintext is across the Burrow, Pocket, and one-time phone. It knows nothing about the
  * relay envelope that carries the ciphertext — routing metadata is never
  * authenticated application content.
  */

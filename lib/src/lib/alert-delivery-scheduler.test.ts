@@ -31,6 +31,7 @@ const ringAgain = () => {
   manager.acknowledge(PANE, { input: false });
   manager.onData(PANE);
   ring();
+  vi.advanceTimersByTime(5_000);
 };
 const session = (overrides: object, label = 'pnpm build') => ({ label, overrides });
 

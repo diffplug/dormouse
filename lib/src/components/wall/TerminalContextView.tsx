@@ -1,4 +1,4 @@
-import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type DependencyList, type ReactNode, type RefObject } from 'react';
+import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type DependencyList, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
 import { ArrowCounterClockwiseIcon, ArrowLineUpIcon, ArrowSquareOutIcon, BugBeetleIcon, CaretDownIcon, CheckIcon, CircleNotchIcon, CopyIcon, PauseIcon, PushPinIcon, SlidersHorizontalIcon, TerminalIcon, WarningIcon, XIcon } from '@phosphor-icons/react';
 import { ELEVATED_PANE_SHADOW, OnOffSwitch, POPUP_SURFACE_CLASS, SUBTLE_ACTION_COLOR_CLASS, SUBTLE_ACTION_INTERACTION_CLASS, SUBTLE_ACTION_REST_COLOR_CLASS, SUBTLE_ACTION_WRAPPER_INTERACTION_CLASS, TERMINAL_CONTEXT_SURFACE_CLASS, TERMINAL_CONTEXT_EXIT_MS, TERMINAL_SELECTION_BORDER_RADIUS } from '../design';
 import { stepFocus } from '../focus-step';
@@ -65,6 +65,7 @@ export interface TerminalContextViewProps {
   /** Viewport coordinates the reveal grows from; absent, the top-left corner. */
   origin?: { x: number; y: number };
   defaultCommand?: string; title: string; surfaceRef: string; cwd: string; helperCwd?: string; mismatch?: boolean;
+  workspaceMove?: ReactNode;
   titleSources: { source: string; value: string; note?: string }[];
   scan: ContextScan; watchRule?: string | null; watching: boolean; todo: boolean;
   notification?: { title: string | null; body: string | null } | null;
@@ -82,7 +83,7 @@ export interface TerminalContextViewProps {
 }
 
 /** A context action's box, shared with the port row's off-screen measurements. */
-const ACTION_BOX_CLASS = 'inline-flex h-6 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded px-1.5';
+export const ACTION_BOX_CLASS = 'inline-flex h-6 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded px-1.5';
 
 export function ContextAction({ children, label, onClick, disabled = false, busy = false, muted = false, pressed, keepFocus = false }: { children: ReactNode; label: string; onClick?: () => void; disabled?: boolean; busy?: boolean; muted?: boolean; pressed?: boolean; keepFocus?: boolean }) {
   const windowFocused = useContext(WindowFocusedContext);
@@ -182,33 +183,36 @@ const EXPLORE_ICON = <ArrowSquareOutIcon size={15} />;
 const EXPLAIN_ICON = <BugBeetleIcon size={15} />;
 
 /** The title, its explanation, the copyable Surface ref, and `actions` on one line. */
-function TitleRow({ title, surfaceRef, onExplain, onCopyRef, actions }: {
-  title: string; surfaceRef: string; actions: ReactNode;
+function TitleRow({ title, surfaceRef, onExplain, onCopyRef, actions, workspaceMove }: {
+  title: string; surfaceRef: string; actions: ReactNode; workspaceMove?: ReactNode;
   onExplain(): void; onCopyRef(): Promise<boolean>;
 }) {
   const row = useRef<HTMLDivElement>(null);
   const measures = useRef<HTMLDivElement>(null);
   const actionsRef = useRef<HTMLDivElement>(null);
-  const [explainCompact, setExplainCompact] = useState(false);
   const [refCompact, setRefCompact] = useState(false);
-  // Explain drops its label, the title truncates to 8ch, the ref drops to its icon, then the title truncates on.
-  useRowFit(row, measures, (width, gap, [text, least, explainFull, explainIcon, refFull]) => {
+  // The title truncates to 8ch, the ref drops to its icon, then the title truncates on.
+  useRowFit(row, measures, (width, gap, [text, least, explainIcon, refFull]) => {
     const rest = (actionsRef.current?.offsetWidth ?? 0) + 3 * gap;
-    setExplainCompact(text + explainFull + refFull + rest > width);
     setRefCompact(Math.min(text, least) + explainIcon + refFull + rest > width);
   }, [title, surfaceRef], [actionsRef]);
-  return <div ref={row} data-context-title className="relative flex min-h-6 min-w-0 items-center gap-1.5">
+  return <div ref={row} data-context-title className="relative flex min-h-6 min-w-0 flex-wrap items-center gap-1.5">
     <div ref={measures} aria-hidden="true" inert className={MEASURER_CLASS}>
       <span className="whitespace-nowrap">{title}</span>
       <span className="w-[8ch] shrink-0" />
-      <span className={ACTION_BOX_CLASS}>{EXPLAIN_ICON}explain</span>
       <span className={ACTION_BOX_CLASS}>{EXPLAIN_ICON}</span>
       <span className={ACTION_BOX_CLASS}>{surfaceRef}{COPY_ICON}</span>
     </div>
-    <span className="min-w-0 flex-1 truncate" title={title}>{title}</span>
-    <ContextAction label="Explain this title" onClick={onExplain}>{EXPLAIN_ICON}{!explainCompact && 'explain'}</ContextAction>
-    <ContextCopyAction label={`Copy ${surfaceRef}`} confirmation={refCompact ? COPY_CHECK : undefined} onCopy={onCopyRef}>{!refCompact && <span>{surfaceRef}</span>}{COPY_ICON}</ContextCopyAction>
+    <span className="flex min-w-0 flex-1 items-center gap-1.5">
+      <span className="min-w-0 truncate" title={title}>{title}</span>
+      <ContextAction label="Explain this title" onClick={onExplain}>{EXPLAIN_ICON}</ContextAction>
+    </span>
+    {!workspaceMove && <ContextCopyAction label={`Copy ${surfaceRef}`} confirmation={refCompact ? COPY_CHECK : undefined} onCopy={onCopyRef}>{!refCompact && <span>{surfaceRef}</span>}{COPY_ICON}</ContextCopyAction>}
     <div ref={actionsRef} data-context-header-actions className="flex shrink-0 items-center gap-0.5">{actions}</div>
+    {workspaceMove && <div className="flex w-full min-w-0 flex-wrap items-center gap-1.5">
+      <ContextCopyAction label={`Copy ${surfaceRef}`} onCopy={onCopyRef}>{surfaceRef}{COPY_ICON}</ContextCopyAction>
+      {workspaceMove}
+    </div>}
   </div>;
 }
 
@@ -240,6 +244,14 @@ const MORE = <span className="inline-flex items-center gap-1">more…<CaretDownI
 /** Keys that open, close, or leave a closed select. Chromium on Windows and Linux
  *  lets any other key change a closed select's value, which here would launch. */
 const SELECT_PASSTHROUGH_KEYS = new Set(['Enter', ' ', 'Tab', 'Escape', 'F4']);
+/** Only a choice from the open list commits; arrows open it instead. */
+export function closedSelectKeyDown(event: KeyboardEvent<HTMLSelectElement>): void {
+  if (SELECT_PASSTHROUGH_KEYS.has(event.key) || event.altKey || event.ctrlKey || event.metaKey) return;
+  event.preventDefault();
+  if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+    try { event.currentTarget.showPicker(); } catch { /* Space and Alt+↓ still open it */ }
+  }
+}
 
 /** Measure natural action widths so overflow follows this row, not the window.
  * The native dropdown escapes the context's scroll/animation clipping and owns
@@ -304,14 +316,7 @@ function PortLaunchActions({ providers, canIframe, onPort }: {
       {hiddenPending ? OPENING : MORE}
       <select aria-label="More browser actions" title="More browser actions" value="" aria-busy={pending !== null || undefined} aria-disabled={pending !== null || undefined}
         className="absolute inset-0 cursor-pointer appearance-none opacity-0"
-        onKeyDown={event => {
-          if (SELECT_PASSTHROUGH_KEYS.has(event.key) || event.altKey || event.ctrlKey || event.metaKey) return;
-          // Only a choice from the open list launches; arrows open it instead.
-          event.preventDefault();
-          if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-            try { event.currentTarget.showPicker(); } catch { /* Space and Alt+↓ still open it */ }
-          }
-        }}
+        onKeyDown={closedSelectKeyDown}
         onChange={event => { const action = actions.find(item => key(item) === event.target.value); if (action) void run(action); }}>
         <option value="">More browser actions</option>
         {actions.slice(visible).map(action => <option key={key(action)} value={key(action)} disabled={action.disabled}>{action.disabled ? action.label : action.text}</option>)}
@@ -413,7 +418,7 @@ export function TerminalContextView(p: TerminalContextViewProps) {
       <div className="shrink-0 max-h-[45%] overflow-auto px-3 py-2">
         <div className="grid grid-cols-[3rem_minmax(0,1fr)] items-center gap-y-1">
           <span className="text-muted">Title</span>
-          <TitleRow title={p.title} surfaceRef={p.surfaceRef} onExplain={() => setDetail('title')} onCopyRef={() => attempt(p.onCopyRef)} actions={<>
+          <TitleRow workspaceMove={p.workspaceMove} title={p.title} surfaceRef={p.surfaceRef} onExplain={() => setDetail('title')} onCopyRef={() => attempt(p.onCopyRef)} actions={<>
             {placement && <div role="group" aria-label="Helper placement" className="flex shrink-0 items-center gap-0.5">{placement.available.map(side =>
               <ContextAction key={side} label={`Place helper at ${side}`} pressed={placement.side === side} keepFocus onClick={() => placement.onChange(side)}><PlacementIcon side={side} /></ContextAction>)}</div>}
             <ContextAction label="Close terminal context" onClick={close} muted><XIcon size={15} /></ContextAction>

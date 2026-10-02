@@ -57,10 +57,10 @@ needs no policy to run.
 ## Settings → Network
 
 **Why the list states only what is built (2026-09-30).** The list is what a
-person reads to decide which level to trust, so a row for a connection no code
-makes — the Hosted Relay — would promise traffic that never
-happens, and a missing row would hide one that does. The prototype listed the
-whole design; the real list drops each row until its stage ships.
+person reads to decide which level to trust, so a row for unbuilt behavior
+promises traffic that never happens, and a missing row hides one that does.
+The 2026-09-30 prototype listed the whole design; `connectionsFor` now derives
+rows from the shipped policy and runtime facts, including Hosted enrollment.
 
 **Why the push row names its condition (2026-09-30).** Push is on by the
 application default or by any Workspace's own override, and Workspaces in other
@@ -83,6 +83,18 @@ hold a secret: a one-time link shown on the laptop, or an invitation QR. With
 the check at channel open, every guarantee the user sees still holds — no
 terminal byte crosses a disallowed path — for none of that protocol.
 
+**Why the code still comes first (Ned, 2026-10-01).** Failing a wrong-network
+phone before the two-digit prompt was weighed again, so pairing could double as
+the connection test. Only the Burrow's ICE agent can judge the path — browsers
+hide their addresses behind mDNS, and the Relay sees only public IPs — so the
+check would run ICE and DTLS with a phone nobody has approved, for anyone
+holding the QR or link, and hand that holder the laptop's addresses: the
+allowed-network ones under Local networks, the STUN-learned public IP under
+Anywhere. With the code first, a grabbed QR or link yields the Relay's address
+and the Burrow id, nothing more, unless the person at the laptop types its
+digits. The phone learns at its first session instead, from a message naming the
+address the laptop saw.
+
 **Why the selected pair is evidence.** The pair's remote address is the one that
 answered ICE connectivity checks under the attempt's ufrag and password, which
 reach the peer only inside the session. SDP text, mDNS names, and addresses
@@ -94,6 +106,28 @@ the pair's local end is the ICE agent's record, not the egress interface; the
 remote end inside an allowed range is what holds the path. A route that carries
 an allowed range elsewhere — a VPN claiming the LAN's range — is the proximity
 caveat again.
+
+**Why a reported address is named, and never decides.** A phone on cellular
+forms no pair: the Burrow strips every candidate it offers and answers with
+allowed addresses the phone cannot reach, so the attempt gives up with nothing
+observed — the common case Ned hit testing the one-time preview (2026-10-01).
+The phone's offer still carries its server-reflexive candidate, the public
+address Cloudflare STUN saw, and naming it tells the person at the laptop
+"that was a carrier, not your Wi-Fi". But the offer is the phone's own text,
+written before any check answered, so it is shown as what the phone reported
+and read by nothing that decides. Only a pair the policy refused is named as
+where the phone connected from: an allowed pair that never carried a channel
+is no evidence of the network the phone was on.
+
+**Why a refusal says which end (review, 2026-10-01).** A laptop that left its
+allowed networks — off the home Wi-Fi, a VPN down — gets its pair's local end
+refused while the phone sits on the right network; naming the phone's address
+then told the person at the laptop the phone was at fault, and told the phone
+to join a network it was already on. The local end is checked first, since a
+phone's address says nothing while the laptop is itself off the networks. A
+reported address is read outside the allowed networks only, since one inside
+them is no reason for a refusal, and its copy never asserts it is off them: the
+phone's offer is a claim, and an allowed range can be public.
 
 **Why a timer as well as the state events.** libjuice, the ICE agent under
 `node-datachannel`, makes the first nominated pair in its priority order the
@@ -166,7 +200,7 @@ already holds and the security model treats as untrusted, and a one-time
 session is direct-only by design, so it never needs one.
 
 **Why Hosted-served Clients always use STUN.** Hosted runs on Cloudflare, so a
-phone that loaded Pocket or the one-time page from `hosted.dormouse.sh` has
+phone that loaded Pocket or the one-time page from `relay.dormouse.sh` has
 already shown Cloudflare its address. STUN to Cloudflare discloses nothing new,
 and making it unconditional removes a policy signal from the wire and from
 version skew. The Burrow's STUN is what reveals the laptop's public address,

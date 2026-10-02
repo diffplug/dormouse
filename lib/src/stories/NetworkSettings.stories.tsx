@@ -11,6 +11,7 @@ import {
   enrolledStatus,
 } from '../host/remote/test-burrow-link';
 import { CLOUDFLARE_STUN_HOST } from '../remote/direct/ice-servers';
+import type { PathRefusal } from '../remote/direct/path-refusal';
 import {
   networkPolicyResult,
   nothingPolicy,
@@ -55,9 +56,14 @@ const INTERFACES = [WIFI, TAILSCALE, DOCKER];
 const DAY = 86_400_000;
 
 /** A Hosted build holding `policy`, on a laptop with Wi-Fi, a tailnet, and Docker. */
-function hosted(policy: NetworkPolicy, status = UNENROLLED_STATUS) {
-  return { status, network: networkPolicyResult(policy, 'hosted', INTERFACES) };
+function hosted(policy: NetworkPolicy, status = UNENROLLED_STATUS, refusal: PathRefusal | null = null) {
+  return { status, network: networkPolicyResult(policy, 'hosted', INTERFACES, refusal) };
 }
+
+/** 10:42 this morning, on whatever clock renders the story. */
+const morning = new Date();
+morning.setHours(10, 42, 0, 0);
+const AT_10_42 = morning.getTime();
 
 /** A self-host build holding `policy`. */
 function selfHost(policy: NetworkPolicy, status = SELF_HOST_UNENROLLED_STATUS) {
@@ -163,6 +169,81 @@ export const LocalNetworksTypedRange: Story = {
   },
 };
 
+/**
+ * A phone on cellular reached the code and no further: the Burrow saw its
+ * address on the selected pair, and says so above the networks it could join.
+ * Dismiss forgets it.
+ */
+export const LocalNetworksRefusedObserved: Story = {
+  parameters: {
+    primedBurrow: hosted(
+      { level: 'local', allowed: WIFI.prefixes, autoUpdate: false },
+      UNENROLLED_STATUS,
+      { at: AT_10_42, kind: 'path-refused', end: 'remote', address: '172.58.12.9', addressSource: 'observed' },
+    ),
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = await settled(canvasElement);
+    const notice = await canvas.findByRole('status', { name: 'Last refused phone' });
+    await expect(notice).toHaveTextContent(/a phone tried to connect from 172\.58\.12\.9, which isn’t on a network allowed below\./);
+    await userEvent.click(within(notice).getByRole('button', { name: 'Dismiss' }));
+    await waitFor(() => expect(canvas.queryByRole('status', { name: 'Last refused phone' })).toBeNull());
+  },
+};
+
+/** No pair formed, so the address is the one the phone's offer reported, named as its claim and never as off the networks. */
+export const LocalNetworksRefusedReported: Story = {
+  parameters: {
+    primedBurrow: hosted(
+      { level: 'local', allowed: WIFI.prefixes, autoUpdate: false },
+      UNENROLLED_STATUS,
+      { at: AT_10_42, kind: 'given-up', end: 'remote', address: '2607:fb90:1:2::9', addressSource: 'reported' },
+    ),
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = await settled(canvasElement);
+    await expect(await canvas.findByRole('status', { name: 'Last refused phone' })).toHaveTextContent(
+      /a phone couldn’t connect directly over an allowed network \(it reported 2607:fb90:1:2::9\)\./,
+    );
+  },
+};
+
+/** This computer's own end was off the allowed networks: the panel says so, and blames no phone's network. */
+export const LocalNetworksRefusedThisComputer: Story = {
+  parameters: {
+    primedBurrow: hosted(
+      { level: 'local', allowed: WIFI.prefixes, autoUpdate: false },
+      UNENROLLED_STATUS,
+      { at: AT_10_42, kind: 'path-refused', end: 'local', localAddress: '10.0.0.2' },
+    ),
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = await settled(canvasElement);
+    const notice = await canvas.findByRole('status', { name: 'Last refused phone' });
+    await expect(notice).toHaveTextContent(
+      /a phone couldn’t connect: this computer wasn’t on a network allowed below \(its address was 10\.0\.0\.2\)\./,
+    );
+    await expect(notice).not.toHaveTextContent(/tried to connect from/);
+  },
+};
+
+/** Nothing to name: the phone offered no public address and no pair formed. */
+export const LocalNetworksRefusedNoAddress: Story = {
+  parameters: {
+    primedBurrow: hosted(
+      { level: 'local', allowed: WIFI.prefixes, autoUpdate: false },
+      UNENROLLED_STATUS,
+      { at: AT_10_42, kind: 'deadline' },
+    ),
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = await settled(canvasElement);
+    await expect(await canvas.findByRole('status', { name: 'Last refused phone' })).toHaveTextContent(
+      /a phone couldn’t reach this computer over an allowed network\./,
+    );
+  },
+};
+
 /** Every network switched off: say so, and list no connection that cannot happen. */
 export const LocalNetworksNoneAllowed: Story = {
   parameters: { primedBurrow: hosted({ level: 'local', allowed: [], autoUpdate: false }) },
@@ -186,6 +267,35 @@ export const Anywhere: Story = {
     await canvas.findByText('Your phone, on any network');
     await canvas.findByText(/Your phone can be on any network\./);
     await expect(canvas.queryByText('Allowed networks')).toBeNull();
+  },
+};
+
+/** A Hosted build, enrolled, with one phone paired. */
+const HOSTED_ENROLLED = { ...UNENROLLED_STATUS, enrolled: true, serving: true, burrowId: 'burrow-6f1c2a90', connection: 'connected', pairedClients: 1 } as const;
+
+/**
+ * Enrolled under Local networks: Hosted always, but never terminal traffic —
+ * a paired phone connects only directly, on an allowed network.
+ */
+export const LocalNetworksEnrolled: Story = {
+  parameters: { primedBurrow: hosted({ level: 'local', allowed: WIFI.prefixes, autoUpdate: false }, HOSTED_ENROLLED) },
+  play: async ({ canvasElement }) => {
+    const canvas = await settled(canvasElement);
+    await canvas.findByText(/Never terminal traffic\./);
+    await canvas.findByText('Your phone, directly, on an allowed network');
+    await canvas.findByText('relay.dormouse.sh → your phone’s push service');
+    await expect(canvas.queryByText(/Only while a one-time link is open\./)).toBeNull();
+  },
+};
+
+/** Enrolled under Anywhere: a phone that can't connect directly relays through Hosted. */
+export const AnywhereEnrolled: Story = {
+  parameters: { primedBurrow: hosted(ANYWHERE_ON, HOSTED_ENROLLED) },
+  play: async ({ canvasElement }) => {
+    const canvas = await settled(canvasElement);
+    await canvas.findByText(/terminal traffic when a phone can’t connect directly\./);
+    await canvas.findByText(CLOUDFLARE_STUN_HOST);
+    await canvas.findByText('Your phone, directly');
   },
 };
 

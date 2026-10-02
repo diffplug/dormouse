@@ -105,6 +105,7 @@ describe('held completions', () => {
     expect(manager.getState(PANE).todo).toBe(false);
 
     goIdle(manager, PANE);
+    vi.advanceTimersByTime(5_000);
     expect(manager.getState(PANE)).toMatchObject({ status: 'ALERT_RINGING', todo: false });
   });
 
@@ -141,6 +142,7 @@ describe('held completions', () => {
     manager.notifyFromProtocol(PANE, PERMISSION);
     manager.notifyFromProtocol(PANE, BELL);
     goIdle(manager, PANE);
+    vi.advanceTimersByTime(5_000);
     expect(manager.getState(PANE).notification).toEqual(PERMISSION);
   });
 
@@ -168,17 +170,17 @@ describe('held completions', () => {
     expect(manager.getState(PANE)).toMatchObject({ status: 'ALERT_RINGING', notification: PERMISSION });
   });
 
-  // Its deferral already ran from the first report; escalating it must not start another.
-  it('rings a held report whose deferral came due while engaged, still animating', () => {
+  it('rechecks recent output when a quiet report held for engagement escalates', () => {
     output(PANE, 3_000);
     manager.notifyFromProtocol(PANE, PERMISSION);
-    output(PANE, 10_000);
     engage(manager, PANE);
-    output(PANE, cfg.alert.deferCeiling);
+    vi.advanceTimersByTime(5_000);
     expect(ringing(PANE)).toBe(false);
 
     output(PANE, 5_000);
     goIdle(manager, PANE);
+    expect(ringing(PANE)).toBe(false);
+    vi.advanceTimersByTime(5_000);
     expect(manager.getState(PANE)).toMatchObject({ status: 'ALERT_RINGING', notification: PERMISSION });
   });
 
@@ -195,12 +197,14 @@ describe('held completions', () => {
     expect(manager.getState(PANE)).toMatchObject({ status: 'NOTHING_TO_SHOW', todo: true });
   });
 
-  it('withdraws a held settle once watched work resumes', () => {
+  it('defers a held settle once watched work resumes, without losing it', () => {
     engage(manager, PANE);
     watchedTurn(PANE);
     output(PANE, 3_000);
     goIdle(manager, PANE);
     expect(ringing(PANE)).toBe(false);
+    vi.advanceTimersByTime(5_000);
+    expect(ringing(PANE)).toBe(true);
   });
 });
 
@@ -345,8 +349,10 @@ describe('walking away from a permission prompt', () => {
     expect(manager.getState(PANE)).toMatchObject({ todo: false, notification: null });
   });
 
-  it('rings it once the user has gone quiet, through the redraw that never stops', () => {
+  it('keeps it pending through endless redraws, then rings when they stop', () => {
     replay(120_000);
+    expect(ringing(PANE)).toBe(false);
+    vi.advanceTimersByTime(5_000);
     expect(manager.getState(PANE)).toMatchObject({
       status: 'ALERT_RINGING',
       todo: false,
@@ -433,7 +439,7 @@ describe('a Claude Code turn', () => {
   });
 
   it.each([
-    ['at the end of the recorded turn, too short to look busy', RECORDED_TURN_MS, 0],
+    ['after a short turn and its trailing frame go quiet', RECORDED_TURN_MS, 3 + QUIET_MS],
     ['once a longer turn has gone quiet', LONG_TURN_MS, 3 + QUIET_MS],
   ] as const)('rings "claude finished" once when the user moved away mid-turn: %s', (_when, turnMs, afterEndMs) => {
     const ringAt = ENTER_AT + turnMs + afterEndMs;
@@ -449,7 +455,7 @@ describe('a Claude Code turn', () => {
 
   it('records the idle notice after a click on the ring as TODO, without a second summons', () => {
     const endAt = ENTER_AT + RECORDED_TURN_MS;
-    const clickAt = endAt + 5_000;
+    const clickAt = endAt + 3 + QUIET_MS;
     const run = player([
       ...turn(RECORDED_TURN_MS),
       MOVED_AWAY,

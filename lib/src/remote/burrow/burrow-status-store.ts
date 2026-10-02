@@ -17,7 +17,9 @@
  */
 
 import {
+  HOSTED_ENROLLMENT_END_REASONS,
   servingOf,
+  type HostedEnrollmentState,
   type InvitationEvent,
   type PushSendSummary,
   type BurrowConsoleStatus,
@@ -54,7 +56,7 @@ let refreshAgain = false;
  * the instance's `serviceId`. The *connection* moves underneath it
  * with no event at all: `connecting -> connected` on a normal start,
  * `connected -> disconnected` on a dropped relay, `-> displaced` when another
- * instance takes the slot. Without a poll the dialog would show whichever state
+ * instance takes the slot, `-> removed` when the Relay drops this Burrow. Without a poll the dialog would show whichever state
  * happened to be true the instant it opened — a machine that connected a second
  * later reads as permanently "Connecting…".
  *
@@ -72,7 +74,7 @@ let generation = 0;
  * Publish a new state, skipping a write that says the same thing.
  *
  * The poll re-reads every 2 s and the service answers with a fresh object each
- * time, so without this the section re-renders twice a minute to paint
+ * time, so without this the section re-renders on every poll to paint
  * identical text. The sibling store this same dialog reads guards the same way
  * (`setPushDevices` in `lib/src/lib/push-devices.ts`); comparing the fields in
  * {@link STATUS_FIELDS} is the whole of it.
@@ -110,6 +112,10 @@ const STATUS_FIELDS: {
   pairedClients: Object.is,
   suggestedLabel: Object.is,
   offer: Object.is,
+  // A fresh object every poll, so field by field: a reference compare would
+  // republish every 2 s while a code waits.
+  hostedEnrollment: (a, b) => JSON.stringify(a) === JSON.stringify(b),
+  accountOrigin: Object.is,
 };
 
 function sameState(a: BurrowStatusState, b: BurrowStatusState): boolean {
@@ -258,6 +264,34 @@ function normalizeStatus(status: BurrowConsoleStatus): BurrowConsoleStatus {
     relayOrigin: status.relayOrigin ?? (typeof relayUrl === 'string' ? relayUrl : ''),
     relayMode: status.relayMode === 'self-host' ? 'self-host' : 'hosted',
     offer: Boolean(status.offer),
+    hostedEnrollment: hostedEnrollmentOf(status.hostedEnrollment),
+    // Absent from a broker older than the field, which names no account page.
+    accountOrigin: typeof status.accountOrigin === 'string' ? status.accountOrigin : null,
+  };
+}
+
+/**
+ * A `hostedEnrollment` as this build can draw it, or `null` — absent from a
+ * broker older than the field, or of a shape this build does not know. Built
+ * field by field, in a fixed order, which {@link STATUS_FIELDS} compares on.
+ */
+function hostedEnrollmentOf(value: unknown): HostedEnrollmentState | null {
+  if (!value || typeof value !== 'object') return null;
+  const state = value as Record<string, unknown>;
+  if (state.status === 'waiting') {
+    const { userCode, verificationUrl, expiresAt } = state;
+    return typeof userCode === 'string' && typeof verificationUrl === 'string' && typeof expiresAt === 'number'
+      ? { status: 'waiting', userCode, verificationUrl, expiresAt, accountFull: state.accountFull === true }
+      : null;
+  }
+  if (state.status === 'redeeming') return { status: 'redeeming' };
+  if (state.status !== 'ended') return null;
+  const reason = HOSTED_ENROLLMENT_END_REASONS.find((known) => known === state.reason) ?? 'failed';
+  return {
+    status: 'ended',
+    reason,
+    ...(typeof state.message === 'string' ? { message: state.message } : {}),
+    ...(typeof state.burrowId === 'string' ? { burrowId: state.burrowId } : {}),
   };
 }
 
@@ -311,9 +345,31 @@ export async function enrollOfferBurrow(label: string): Promise<void> {
 }
 
 /**
- * Take the relay slot back after `displaced` — which is terminal by design, so
- * nothing reconnects on its own. This displaces the other instance in turn
- * (`docs/specs/relay.md`, "Relay socket policy").
+ * Begin a Hosted build's device-code enrollment under `label`; the service
+ * polls it and reports through `status` (`HostedEnrollmentState`). A code
+ * already waiting is answered, and one that ended is replaced. Rejections
+ * propagate verbatim — the caller renders them. Re-reads either way.
+ */
+export async function beginHostedEnrollment(label: string): Promise<void> {
+  const active = requireBurrowLink();
+  try {
+    await active.command('beginHostedEnrollment', { label });
+  } finally {
+    await refreshAfterMutation();
+  }
+}
+
+/** Stop the Hosted enrollment waiting or ended, and re-read. */
+export async function cancelHostedEnrollment(): Promise<void> {
+  const active = requireBurrowLink();
+  await active.command('cancelHostedEnrollment');
+  await refreshAfterMutation();
+}
+
+/**
+ * Re-open the relay socket after a latched state — terminal by design, so
+ * nothing reconnects on its own. After `displaced` this displaces the other
+ * instance in turn (`docs/specs/relay.md`, "Burrow side", relay socket policy).
  */
 export async function reconnectBurrow(): Promise<void> {
   const active = requireBurrowLink();

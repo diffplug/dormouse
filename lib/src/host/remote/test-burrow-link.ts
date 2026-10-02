@@ -52,6 +52,8 @@ export const UNENROLLED_STATUS: BurrowConsoleStatus = {
   pairedClients: 0,
   suggestedLabel: 'ned-mac',
   offer: false,
+  hostedEnrollment: null,
+  accountOrigin: 'https://hosted.dormouse.sh',
 };
 
 /**
@@ -62,6 +64,7 @@ export const SELF_HOST_UNENROLLED_STATUS: BurrowConsoleStatus = {
   ...UNENROLLED_STATUS,
   relayOrigin: SELF_HOST_RELAY_ORIGIN,
   relayMode: 'self-host',
+  accountOrigin: null,
 };
 
 /**
@@ -247,7 +250,8 @@ export interface PrimedBurrow {
  * form must render (`docs/specs/relay.md`, "Remote control, in the Settings
  * dialog") and a rejected enroll is the only way to reach it. And
  * `setNetworkPolicy` holds what it was sent and answers it, as the service
- * does, so a story can walk Settings → Network's choices.
+ * does, so a story can walk Settings → Network's choices; `dismissPathRefusal`
+ * drops the refusal it holds.
  */
 export function makeStubBurrowLink(primed: PrimedBurrow): BurrowLink {
   const { relayOrigin, relayMode } = primed.status ?? UNENROLLED_STATUS;
@@ -268,7 +272,11 @@ export function makeStubBurrowLink(primed: PrimedBurrow): BurrowLink {
       if (cmd === 'networkPolicy') return network;
       if (cmd === 'setNetworkPolicy') {
         const { policy } = params as { policy: NetworkPolicy };
-        network = networkPolicyResult(policy, relayMode, network.interfaces);
+        network = networkPolicyResult(policy, relayMode, network.interfaces, network.refusal ?? null);
+        return network;
+      }
+      if (cmd === 'dismissPathRefusal') {
+        network = networkPolicyResult(network.policy, relayMode, network.interfaces);
         return network;
       }
       if (cmd === 'oneTimeStatus') {

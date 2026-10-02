@@ -10,7 +10,11 @@ import {
 import { DEFAULT_MANAGED_VOICE_ID } from '../lib/platform/managed-voice-types';
 import { DEFAULT_RELAY_ORIGIN } from './relay-origin';
 
-const MANAGED_VOICE_SPEAK_URL = `${DEFAULT_RELAY_ORIGIN}/api/voice/speak`;
+/**
+ * A fixed origin, never the relay origin (`docs/specs/relay.md` → "Relay
+ * origin"): changing it changes where every shipped binary sends the token.
+ */
+const MANAGED_VOICE_SPEAK_URL = 'https://voice.dormouse.sh/api/voice/speak';
 
 /** The next `readFile` fails with this, once: a Windows antivirus lock, say. */
 const readFault = vi.hoisted(() => ({ next: null as NodeJS.ErrnoException | null }));
@@ -171,7 +175,7 @@ describe('speak', () => {
   });
 
   it('reports a network failure', async () => {
-    fetchMock.mockRejectedValue(new TypeError('getaddrinfo ENOTFOUND hosted.dormouse.sh'));
+    fetchMock.mockRejectedValue(new TypeError('getaddrinfo ENOTFOUND voice.dormouse.sh'));
     expect(await host.handle({ op: 'speak', text: 'x' })).toEqual({ ok: false, reason: 'network' });
   });
 
@@ -194,7 +198,7 @@ describe('speak', () => {
 });
 
 describe('the build it runs in', () => {
-  it('speaks to a Hosted build’s relay origin, a dev build’s local Hosted included', async () => {
+  it('speaks to the voice origin from any Hosted build, a dev build’s local Hosted included', async () => {
     const local = createManagedVoiceHost({
       stateDir: dir,
       onStatus: () => {},
@@ -206,7 +210,7 @@ describe('the build it runs in', () => {
     fetchMock.mockResolvedValue(audioResponse());
 
     expect(await local.handle({ op: 'speak', text: 'build finished' })).toMatchObject({ ok: true });
-    expect(fetchMock.mock.calls[0]![0]).toBe('http://localhost:8787/api/voice/speak');
+    expect(fetchMock.mock.calls[0]![0]).toBe(MANAGED_VOICE_SPEAK_URL);
   });
 
   it('sends nothing from a self-host build, whatever a Hosted build saved', async () => {

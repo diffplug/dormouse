@@ -21,11 +21,12 @@ import {
   RelayRefusalError,
   SessionExpiredError,
   PasskeyUnavailableError,
+  BURROW_UNAVAILABLE_MESSAGE,
   type ConnectResult,
   type PocketSocket,
 } from '../client/pocket-client';
 import { PasskeyAlreadyRegisteredError, browserWebAuthn } from '../client/webauthn';
-import { selfHostDirectPeer } from '../client/browser-direct-peer';
+import { deploymentDirectPeer, pocketDeploymentSource, type PocketDeployment } from './deployment';
 import { BURROW_IS_AN_APP, SCAN_LABEL, SETUP_PATH } from '../setup-copy';
 import { probeNoiseSupport, type PairingInvitation } from 'remote-lib-common';
 import {
@@ -83,7 +84,19 @@ export interface BurrowView {
    * offers *Pair again* rather than a Connect that can only fail.
    */
   needsPairing: boolean;
+  /**
+   * The Relay's list, read successfully, no longer names this Burrow: it was
+   * removed from the account or the Relay. The row offers *Forget* alone.
+   * Absent is listed.
+   */
+  removed?: boolean;
 }
+
+/** What a removed Burrow's row says, by who serves this Pocket. */
+export const BURROW_REMOVED_COPY: Record<PocketDeployment, string> = {
+  hosted: 'Removed from your account',
+  'self-host': 'No longer enrolled with this Relay',
+};
 
 type PushConfigState =
   | { status: 'loading' }
@@ -105,6 +118,22 @@ export default function App({
   /** Test/story seam for the camera; see {@link ScanInvitation}. */
   startScan?: StartScan;
 }): React.ReactElement {
+  /**
+   * Who serves this Pocket, read off its own origin: read at mount, and **awaited
+   * before every Connect and pairing**, which fail retryably on a read that does
+   * not complete, so no direct peer is built before it is known.
+   */
+  const deploymentSource = useMemo(() => pocketDeploymentSource(window.fetch.bind(window), location.host), []);
+  const [deployment, setDeployment] = useState<PocketDeployment>('self-host');
+  const requireDeployment = useCallback(async (): Promise<PocketDeployment> => {
+    const which = await deploymentSource.require();
+    setDeployment(which);
+    return which;
+  }, [deploymentSource]);
+  useEffect(() => {
+    // A failure here is reported by the Connect or pairing that reads again.
+    requireDeployment().catch(() => {});
+  }, [requireDeployment]);
   const client = useMemo(
     () =>
       new PocketClient({
@@ -112,11 +141,13 @@ export default function App({
         fetch: window.fetch.bind(window),
         webauthn: browserWebAuthn,
         createWebSocket: (url) => new WebSocket(url) as unknown as PocketSocket,
-        createDirectPeer: selfHostDirectPeer,
+        // Hosted's Pocket gathers through Cloudflare STUN, a self-host Relay's
+        // through none: one bundle, told apart by what its origin serves.
+        createDirectPeer: deploymentDirectPeer(deploymentSource),
         knownBurrows: indexedDbKnownBurrowStore(),
         pendingDeletions: indexedDbPendingDeletionStore(),
       }),
-    [],
+    [deploymentSource],
   );
 
   /**
@@ -280,7 +311,7 @@ export default function App({
   }, [client, teardownAdapter]);
 
   const run = useCallback(
-    async (label: string, fn: () => Promise<void>) => {
+    async (label: string, fn: () => Promise<unknown>) => {
       setError(null);
       setBusy(label);
       try {
@@ -307,20 +338,33 @@ export default function App({
 
   /**
    * The Burrows list: the pinned records, with online state stamped on from the
-   * Relay. **A Burrow with no record is not shown** — the Relay's list is
-   * discovery, and a row for a computer this phone holds no key for would offer
-   * an action that cannot exist.
+   * Relay, and a record of the signed-in account the Relay's list no longer
+   * names marked removed — only ever off a list that was read, since a failed
+   * read throws. **Another account's record is never marked removed**: this
+   * session's list names only its own account's Burrows. **A Burrow with no
+   * record is not shown** — the Relay's list is discovery, and a row for a
+   * computer this phone holds no key for would offer an action that cannot
+   * exist. Answers the rows it painted.
    */
-  const loadBurrows = useCallback(async () => {
+  const loadBurrows = useCallback(async (): Promise<BurrowView[]> => {
+    const account = client.accountId;
     const [records, enrolled] = await Promise.all([client.listKnownBurrows(), client.listBurrows()]);
     const online = new Map(enrolled.map((burrow) => [burrow.burrowId, burrow.online]));
-    setBurrows(records.map((record) => toBurrowView(record, online.get(record.burrowId) ?? false)));
+    const views = records.map((record) =>
+      toBurrowView(
+        record,
+        online.get(record.burrowId) ?? false,
+        account !== null && record.accountId === account && !online.has(record.burrowId),
+      ),
+    );
+    setBurrows(views);
     setPhase({ at: 'burrows' });
     // Owed deletions retry here: this runs after every sign-in and on every
     // return to the list, and a tombstone clears only on the Relay's answer.
     // Never awaited: it is best-effort, never throws, and nothing on the list
     // it just painted depends on it — a backlog is N serial DELETEs.
     void client.retirePendingDeletions();
+    return views;
   }, [client]);
 
   // Socket drop / burrow-gone: dispose the adapter and fall back to Burrows.
@@ -347,11 +391,21 @@ export default function App({
   /** The connect half, shared so a fresh pairing can continue straight into it. */
   const connectTo = useCallback(
     async (burrow: BurrowView) => {
+      const which = await requireDeployment();
       const decision: ConnectResult = await client.connect(burrow.burrowId);
       if (!decision.ok) {
         // The record has already been rewritten where the Burrow said
         // `pairing-required`; re-reading is what puts *Pair again* on the row.
         if (decision.pairingRequired) await loadBurrows();
+        // Unanswered — the Relay's offline error among the causes — may be a
+        // Burrow removed since the list was read: re-read, and say so where
+        // the list no longer names it. A read that fails says nothing new.
+        if (decision.message === BURROW_UNAVAILABLE_MESSAGE) {
+          const views = await loadBurrows().catch(() => null);
+          if (views?.find((view) => view.burrowId === burrow.burrowId)?.removed) {
+            throw new Error(BURROW_REMOVED_COPY[which]);
+          }
+        }
         throw new Error(decision.message);
       }
       try {
@@ -368,7 +422,7 @@ export default function App({
 
       setPhase({ at: 'wall', burrow });
     },
-    [client, endSession, loadBurrows],
+    [client, endSession, loadBurrows, requireDeployment],
   );
 
   const onConnect = (burrow: BurrowView) => run('connect', () => connectTo(burrow));
@@ -389,6 +443,8 @@ export default function App({
     (invitation: PairingInvitation) =>
       run('pair', async () => {
         await requirePocketKeyStorage();
+        // Before anything is spent: a pairing continues into a connect.
+        await requireDeployment();
         cancelledPairingRef.current = false;
         const label = deviceLabel();
         let spentOnSetup = false;
@@ -474,7 +530,7 @@ export default function App({
           throw err;
         }
       }),
-    [client, connectTo, loadBurrows, passkeyAlreadyRegistered, run],
+    [client, connectTo, loadBurrows, passkeyAlreadyRegistered, requireDeployment, run],
   );
 
   const onCancelPairing = () => {
@@ -620,6 +676,7 @@ export default function App({
       return (
         <BurrowsView
           burrows={burrows}
+          deployment={deployment}
           busy={busy}
           error={error}
           isPushSubscribed={isPushOn}
@@ -637,12 +694,13 @@ export default function App({
 }
 
 /** One pinned record as the list renders it. */
-function toBurrowView(record: KnownBurrowSummary, online: boolean): BurrowView {
+function toBurrowView(record: KnownBurrowSummary, online: boolean, removed = false): BurrowView {
   return {
     burrowId: record.burrowId,
     label: record.label || record.burrowId,
     online,
     needsPairing: record.authorization.state !== 'paired',
+    ...(removed ? { removed } : {}),
   };
 }
 
@@ -1057,6 +1115,7 @@ function PushNotice({
 
 export function BurrowsView({
   burrows,
+  deployment = 'self-host',
   busy,
   error,
   isPushSubscribed,
@@ -1071,6 +1130,8 @@ export function BurrowsView({
 }: {
   /** The pinned records; a Burrow with no record is not one of these. */
   burrows: BurrowView[];
+  /** Who serves this Pocket, which names what a removed row was removed from. */
+  deployment?: PocketDeployment;
   busy: string | null;
   error: string | null;
   /** True only where this device holds a Relay push row for that Burrow. */
@@ -1130,17 +1191,22 @@ export function BurrowsView({
             // Push is device-wide to turn on but per-Burrow to hold, so the row
             // carries the marker: it is the only thing that says *which* Burrow
             // the card above is still offering to register.
-            const status = [
-              !burrow.online ? 'Offline' : burrow.needsPairing ? 'Pairing needed' : 'Paired',
-              ...(!burrow.needsPairing && isPushSubscribed(burrow.burrowId) ? ['Push on'] : []),
-            ].join(' · ');
+            const status = burrow.removed
+              ? BURROW_REMOVED_COPY[deployment]
+              : [
+                  !burrow.online ? 'Offline' : burrow.needsPairing ? 'Pairing needed' : 'Paired',
+                  ...(!burrow.needsPairing && isPushSubscribed(burrow.burrowId) ? ['Push on'] : []),
+                ].join(' · ');
             // The one-action invariant, stated once: which verb this row offers
-            // and what its button says, on a single split. The local record is
-            // what picks it — the Burrow is never asked, because an authenticated
-            // `pairing-required` is the only thing that can move a row here.
-            const action = burrow.needsPairing
-              ? { label: busy === 'pair' ? '…' : 'Pair again', run: () => onScan() }
-              : { label: busy === 'connect' ? '…' : 'Connect', run: () => onConnect(burrow) };
+            // and what its button says, on a single split. A removed Burrow
+            // offers Forget alone; otherwise the local record picks — the Burrow
+            // is never asked, because an authenticated `pairing-required` is the
+            // only thing that can move a row to Pair again.
+            const action = burrow.removed
+              ? { label: busy === 'forget' ? '…' : 'Forget', run: () => onForget(burrow) }
+              : burrow.needsPairing
+                ? { label: busy === 'pair' ? '…' : 'Pair again', run: () => onScan() }
+                : { label: busy === 'connect' ? '…' : 'Connect', run: () => onConnect(burrow) };
             return (
               <div key={burrow.burrowId} className={clsx(PK.row, !burrow.online && PK.rowOffline)}>
                 <div className={PK.rowMain}>
@@ -1154,23 +1220,26 @@ export function BurrowsView({
                     // Pairing again starts at the scanner, which needs no relay
                     // socket and no online Burrow — the code on the computer's
                     // screen is what says whether it is there.
-                    disabled={busy !== null || (!burrow.online && !burrow.needsPairing)}
+                    disabled={busy !== null || (!burrow.online && !burrow.needsPairing && !burrow.removed)}
                     onClick={action.run}
                   >
                     {action.label}
                   </button>
                   {/* Removal is local and always available: it is how a phone
                       forgets a computer it will not see again, and it is what
-                      queues the delivery row's deletion. */}
-                  <button
-                    type="button"
-                    className={pkButton({ tone: 'outline', size: 'sm' })}
-                    disabled={busy !== null}
-                    aria-label={`Remove ${burrow.label || burrow.burrowId}`}
-                    onClick={() => onForget(burrow)}
-                  >
-                    {busy === 'forget' ? '…' : 'Remove'}
-                  </button>
+                      queues the delivery row's deletion. A removed row's
+                      Forget is this, so it is not offered twice. */}
+                  {burrow.removed ? null : (
+                    <button
+                      type="button"
+                      className={pkButton({ tone: 'outline', size: 'sm' })}
+                      disabled={busy !== null}
+                      aria-label={`Remove ${burrow.label || burrow.burrowId}`}
+                      onClick={() => onForget(burrow)}
+                    >
+                      {busy === 'forget' ? '…' : 'Remove'}
+                    </button>
+                  )}
                 </div>
               </div>
             );

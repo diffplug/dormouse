@@ -11,6 +11,8 @@ USAGE
   dor workspace move <workspace> [--window <label|new>] [--index <n>] [--dangerously-destroy-iframe-page-state] [--json]
   dor workspace --help
 
+To move a single Surface between Workspaces, use dor move.
+
 Manages this Window's Workspaces. Listing them is dor list --workspaces (the overview) and dor list --all (every Workspace's Surfaces); this command only mutates.
 
 A <workspace> target is workspace:<n> — a stable number that a strip reorder or a move between windows never changes — or workspace:<name>, which resolves only when exactly one Workspace carries that name and otherwise fails listing the candidates. Both forms are also accepted bare ("2", "build"). A target in another window is routed there.

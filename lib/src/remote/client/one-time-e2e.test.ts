@@ -14,7 +14,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  ONE_TIME_DIRECT_DEADLINE_MS,
+  DIRECT_ONLY_DEADLINE_MS,
   fromBase64Url,
   parseOneTimeLinkUrl,
   toBase64Url,
@@ -45,8 +45,14 @@ import type {
   PtySink,
   SurfaceHandle,
 } from '../burrow/burrow-surface-provider';
-import type { DirectPeerFactory } from '../direct/direct-peer';
-import { FakeDirectNetwork, type FakeDirectNetworkOptions } from '../direct/test-fake-peer';
+import type { DirectPathPolicy, DirectPeerFactory } from '../direct/direct-peer';
+import type { PathRefusal } from '../direct/path-refusal';
+import {
+  FakeDirectNetwork,
+  OFF_LAN_PAIR,
+  lanOnlyPolicy,
+  type FakeDirectNetworkOptions,
+} from '../direct/test-fake-peer';
 import { settleUntil } from '../test-e2e-client';
 import {
   createTestRendezvous,
@@ -121,6 +127,7 @@ let runtime: OneTimeRuntime;
 let states: OneTimeState[];
 let approvals: OneTimeApprovalRequest[];
 let phones: OneTimeClient[];
+let refusals: PathRefusal[];
 
 beforeEach(() => {
   vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -131,6 +138,7 @@ beforeEach(() => {
   states = [];
   approvals = [];
   phones = [];
+  refusals = [];
 });
 
 afterEach(() => {
@@ -140,7 +148,11 @@ afterEach(() => {
 });
 
 function makeRuntime(
-  options: { network?: FakeDirectNetworkOptions; createDirectPeer?: DirectPeerFactory | null } = {},
+  options: {
+    network?: FakeDirectNetworkOptions;
+    createDirectPeer?: DirectPeerFactory | null;
+    pathPolicy?: DirectPathPolicy;
+  } = {},
 ): OneTimeRuntime {
   if (options.network) network = new FakeDirectNetwork(options.network);
   runtime = new OneTimeRuntime({
@@ -150,7 +162,9 @@ function makeRuntime(
       new RemoteApiSession({ burrowId, send, provider, holder: { id: 'holder-1', label } }),
     directPeering: {
       createPeer: options.createDirectPeer === undefined ? () => network.createAnswerer() : options.createDirectPeer,
+      ...(options.pathPolicy ? { pathPolicy: options.pathPolicy } : {}),
     },
+    onPathRefused: (refusal) => void refusals.push(refusal),
     burrowLabel: BURROW_LABEL,
     requestApproval: (request) => void approvals.push(request),
     dismissApproval: () => {},
@@ -357,6 +371,32 @@ describe('one-time connection, end to end', () => {
     expect(await result).toEqual({ ok: false, message: ONE_TIME_ENDED_MESSAGE });
   });
 
+  it('tells a phone off the allowed networks where the laptop saw it, as the laptop records it', async () => {
+    makeRuntime({ network: { selectedPair: OFF_LAN_PAIR }, pathPolicy: lanOnlyPolicy() });
+    const { result, approval, shown } = await tapConnect(makePhone(), await openLink());
+    approval.approve(shown);
+    expect(await result).toEqual({
+      ok: false,
+      message:
+        'This computer only accepts phones on its allowed networks. Yours connected from 10.0.0.3 — ' +
+        'join the same Wi-Fi or VPN as the computer and try again.',
+    });
+    await settleUntil(() => runtime.state.status === 'ended');
+    const refusal = { at: expect.any(Number), kind: 'path-refused', end: 'remote', address: '10.0.0.3', addressSource: 'observed' };
+    expect(runtime.state).toEqual({ status: 'ended', reason: 'network-not-allowed', refusal });
+    expect(refusals).toEqual([refusal]);
+  });
+
+  it('gives the direct-failed copy, naming no network, when the laptop’s own end was off the allowed networks', async () => {
+    makeRuntime({ network: { selectedPair: { local: '10.0.0.2', remote: '192.168.1.3' } }, pathPolicy: lanOnlyPolicy() });
+    const { result, approval, shown } = await tapConnect(makePhone(), await openLink());
+    approval.approve(shown);
+    expect(await result).toEqual({ ok: false, message: ONE_TIME_DIRECT_FAILED_MESSAGE });
+    await settleUntil(() => runtime.state.status === 'ended');
+    const refusal = { at: expect.any(Number), kind: 'path-refused', end: 'local', localAddress: '10.0.0.2' };
+    expect(runtime.state).toEqual({ status: 'ended', reason: 'network-not-allowed', refusal });
+  });
+
   it('gives the direct-failed copy when the laptop builds no peer', async () => {
     makeRuntime({ createDirectPeer: null });
     const { result, approval, shown } = await tapConnect(makePhone(), await openLink());
@@ -371,7 +411,7 @@ describe('one-time connection, end to end', () => {
     const { result, approval, shown } = await tapConnect(makePhone(), await openLink());
     approval.approve(shown);
     await settleUntil(() => network.offererChannel !== null);
-    clock.advance(ONE_TIME_DIRECT_DEADLINE_MS);
+    clock.advance(DIRECT_ONLY_DEADLINE_MS);
     expect(await result).toEqual({ ok: false, message: ONE_TIME_DIRECT_FAILED_MESSAGE });
     await settleUntil(() => runtime.state.status === 'ended');
     expect(oneTimeEndReason(runtime)).toBe('direct-failed');

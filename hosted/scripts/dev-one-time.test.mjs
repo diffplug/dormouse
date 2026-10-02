@@ -1,26 +1,28 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { DEFAULT_PORT, devConfig, devOrigin, devPort } from "./dev-one-time.mjs";
+import { DEFAULT_PORT, DEV_ENROLL_SECRET, devConfig, devOrigin, devPort } from "./dev-one-time.mjs";
+import { parseConfig } from "./workers.mjs";
 
-const base = JSON.parse(
-  await readFile(new URL("../wrangler.jsonc", import.meta.url), "utf8"),
+const base = parseConfig(
+  await readFile(new URL("../wrangler.relay.jsonc", import.meta.url), "utf8"),
 );
 
-test("the dev config runs the production entry on loopback, with the rendezvous and nothing of production's", () => {
+test("the dev config runs the relay entry on loopback, with the rendezvous and nothing of production's", () => {
   const config = devConfig(
     {
       ...base,
       vars: { ...base.vars, GOOGLE_CLIENT_SECRET: "do-not-copy" },
+      hyperdrive: [{ binding: "HYPERDRIVE", id: "0".repeat(32) }],
       d1_databases: [{ production: true }],
     },
     8787,
   );
-  assert.equal(config.main, "../../server/worker.ts");
+  assert.equal(config.main, "../../server/relay-worker.ts");
   assert.notEqual(config.name, base.name);
   assert.deepEqual(config.vars, {
     APP_ORIGIN: "http://localhost:8787",
-    OAUTH_PROVIDERS: "",
+    RELAY_ENROLL_SECRET: DEV_ENROLL_SECRET,
   });
   for (const key of ["routes", "hyperdrive", "d1_databases", "workers_dev"])
     assert.equal(config[key], undefined, key);

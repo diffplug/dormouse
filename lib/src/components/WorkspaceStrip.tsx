@@ -20,16 +20,14 @@ import { createWorkspaceStripDrag, type StripDragHost } from './workspace-strip-
 import { acquireChromeKeyboardLease } from './wall/chrome-keyboard-lease';
 import { getWallHandle } from './wall/wall-handles';
 import { useDialogKeyboardOwner } from './wall/wall-context';
-import { closeWorkspaceWithSurfaces, enterWorkspace, requestWorkspaceClose, requestWorkspaceRename } from './wall/workspace-lifecycle';
+import { enterWorkspace, requestWorkspaceClose, requestWorkspaceRename } from './wall/workspace-lifecycle';
 import { getActivitySnapshot, subscribeToActivity } from '../lib/terminal-registry';
 import { getWorkspaceSurfacesSnapshot, subscribeToWorkspaceSurfaces } from '../lib/workspace-surfaces';
 import { computeWorkspaceUnion, type WorkspaceUnion } from '../lib/workspace-union';
 import { spotlightTodo } from '../lib/todo-spotlight';
-import { isWorkspaceTransferPending } from '../lib/window-session-aggregator';
 import {
   getWorkspaceUiSnapshot,
-  setPendingWorkspaceClose,
-  setPendingWorkspaceMove,
+  settleConfirmation,
   setWorkspaceMoveError,
   setRenamingWorkspace,
   subscribeToWorkspaceUi,
@@ -72,7 +70,7 @@ export function WorkspaceStrip({
   const { workspaces, activeId } = useSyncExternalStore(subscribeToWorkspaces, getWorkspacesSnapshot);
   const membership = useSyncExternalStore(subscribeToWorkspaceSurfaces, getWorkspaceSurfacesSnapshot);
   const activity = useSyncExternalStore(subscribeToActivity, getActivitySnapshot);
-  const { renamingId, pendingClose, pendingMove, moveError } = useSyncExternalStore(subscribeToWorkspaceUi, getWorkspaceUiSnapshot);
+  const { renamingId, confirmation, moveError } = useSyncExternalStore(subscribeToWorkspaceUi, getWorkspaceUiSnapshot);
   const [draggingId, setDraggingId] = useState<WorkspaceId | null>(null);
 
   const stripRef = useRef<HTMLDivElement>(null);
@@ -80,7 +78,7 @@ export function WorkspaceStrip({
 
   // The editor and the confirmation both sit outside every Wall, so a
   // capture-phase command-mode shortcut would still fire behind them.
-  useDialogKeyboardOwner(renamingId !== null || pendingClose !== null || pendingMove !== null || moveError !== null, acquireChromeKeyboardLease);
+  useDialogKeyboardOwner(renamingId !== null || confirmation !== null || moveError !== null, acquireChromeKeyboardLease);
 
   const activate = useCallback((id: WorkspaceId) => {
     getWallHandle(id)?.enterCommandMode();
@@ -160,8 +158,8 @@ export function WorkspaceStrip({
   // confirmation lands in the same place whichever Workspace it is about. No
   // Window (Storybook) leaves it viewport-centered.
   const confirmTarget = useMemo(
-    () => (pendingClose || pendingMove || moveError ? document.querySelector<HTMLElement>('[data-workspace-content]') : null),
-    [pendingClose, pendingMove, moveError],
+    () => (confirmation || moveError ? document.querySelector<HTMLElement>('[data-workspace-content]') : null),
+    [confirmation, moveError],
   );
 
   // One union per tab, computed in the loop it is rendered in: every tab shows
@@ -232,44 +230,27 @@ export function WorkspaceStrip({
       >
         <PlusIcon size={12} weight="bold" aria-hidden="true" />
       </button>
-      {/* Rename owns its input until it ends; both typed gates wait behind it.
-          The move gate is the same typed letter (the page state it destroys is
-          as gone as a killed pane's process) and waits behind a close, so only
-          one gate ever listens for the letter on screen. */}
-      {moveError && !pendingClose && !pendingMove && !renamingId && (
+      {/* Rename owns its input until it ends, and the confirmation waits behind
+          it; a refusal waits behind both (`docs/specs/layout.md` → "Workspace
+          lifecycle"). */}
+      {moveError && !confirmation && !renamingId && (
         <ModalFrame titleId="workspace-move-error" targetElement={confirmTarget}
           onEscape={() => setWorkspaceMoveError(null)} className={clsx("w-80 max-w-full overflow-auto text-sm", OVERLAY_MAX_HEIGHT.modal)}>
-          <h2 id="workspace-move-error" className="mb-2 font-semibold">Workspace could not move</h2>
+          <h2 id="workspace-move-error" className="mb-2 font-semibold">Move could not complete</h2>
           <p role="alert" className="mb-3 break-words">{moveError.reason}</p>
           <button type="button" className={modalActionButton()} onClick={() => setWorkspaceMoveError(null)}>Close</button>
         </ModalFrame>
       )}
-      {pendingClose && !renamingId && (
+      {confirmation && !renamingId && (
         <WorkspaceKillConfirm
-          char={pendingClose.char}
-          detail={workspaces.find(workspace => workspace.id === pendingClose.id)?.name}
-          canConfirm={() => !isWorkspaceTransferPending(pendingClose.id)}
-          onConfirm={() => {
-            const id = pendingClose.id;
-            setPendingWorkspaceClose(null);
-            void closeWorkspaceWithSurfaces(id);
-          }}
+          char={confirmation.char}
+          title={confirmation.title}
+          detail={confirmation.detail}
+          cancelHint={confirmation.cancelHint}
+          canConfirm={confirmation.canConfirm}
           targetElement={confirmTarget}
-          onCancel={() => setPendingWorkspaceClose(null)}
-        />
-      )}
-      {pendingMove && !pendingClose && !renamingId && (
-        <WorkspaceKillConfirm
-          char={pendingMove.char}
-          targetElement={confirmTarget}
-          title="Move and lose page state?"
-          detail={`${pendingMove.iframeCount === 1 ? 'An iframe Surface' : `${pendingMove.iframeCount} iframe Surfaces`} in this Workspace will reload at ${pendingMove.iframeCount === 1 ? 'its' : 'their'} saved URL; a page cannot leave its window.`}
-          onConfirm={() => {
-            const { proceed } = pendingMove;
-            setPendingWorkspaceMove(null);
-            proceed();
-          }}
-          onCancel={() => setPendingWorkspaceMove(null)}
+          onConfirm={() => settleConfirmation(confirmation, true)}
+          onCancel={() => settleConfirmation(confirmation, false)}
         />
       )}
     </div>

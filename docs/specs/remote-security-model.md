@@ -2,29 +2,9 @@
 
 > See `docs/specs/glossary.md` for Client, Burrow, Relay, and Session vocabulary.
 
-The trust model for remote control: three primitives between the Client
-(Dormouse Pocket), Burrow (Dormouse Terminal), and coordinating Relay.
+> Owns ceremony trust and authorization. `docs/specs/relay.md` owns message orchestration; `docs/specs/security-remote.md` owns the audited checks and open gaps.
 
-* **One end-to-end channel per ceremony** — pairing and connection each run a
-  Noise IK handshake whose two `CipherState`s carry everything after it, and the
-  Relay routes that ciphertext without reading it.
-* **Passkeys prove fresh user presence** inside that channel, over a challenge
-  derived from the handshake itself. A passkey authenticates the user; it grants
-  access to no Burrow.
-* **Each Client pairs explicitly, one-to-one, with each Burrow** — the Burrow keeps
-  its own local ACL of approved Clients, each identified by a per-Burrow X25519
-  static generated in the browser; storage follows Client statics below.
-
-Account compromise is therefore insufficient for burrow access
-([Security Guarantees](#security-guarantees)). `docs/specs/security-remote.md` -> "Remote Control"
-is this model's audited face — the properties checked nightly and the gaps left
-open (revocation, the audit trail).
-
-**Every primitive here lives in `remote-lib-common/src/security/`**, shared
-verbatim by Relay, Burrow, and Pocket so the three cannot disagree on what a
-valid credential is. Message sequences are [relay.md](./relay.md) (Relay);
-this spec defines what they must establish. Evidence:
-[remote-security-model.rationale.md](./remote-security-model.rationale.md).
+**Must share cryptographic primitives through `remote-lib-common/src/security/`.**
 
 ## Goals
 
@@ -35,10 +15,10 @@ burrow-controlled authorization; long-lived trusted client devices; passkeys.
 
 Non-goals: a compromised browser runtime or operating system; a user
 intentionally clearing browser data; permanent device identity across browser
-resets; **availability** — the relay is down whenever the machine is (a
-per-login user agent), and the Relay is a hard online dependency for every new
-session but a [one-time connection](#one-time-connection)'s
-([relay.md](./relay.md)); **traffic analysis**
+resets; **availability** — a self-host Relay shares its deployment machine's
+availability; the Relay is an online dependency for each new paired session,
+and a one-time session needs Hosted's rendezvous until the direct switch
+([relay.md](./relay.md); [One-time connection](#one-time-connection)); **traffic analysis**
 ([Residual metadata](#residual-metadata)).
 
 ## Trust Model
@@ -120,7 +100,7 @@ Source of truth: `generatePocketKeyPair` in
 `BurrowAclRecord` binds the Burrow and account to one passkey credential and public
 key hash, one Client static public key, a fresh 256-bit `deliveryId`, approval
 metadata, and a nullable revocation time. Persisted through `BurrowStateStore` — a
-0600 file in standalone, `globalState` in VS Code — **never on the Relay**
+private file in standalone (0600 on POSIX; protected user-only DACL on Windows), `globalState` in VS Code — **never on the Relay**
 ([relay.md](./relay.md)).
 
 **Authorization is the conjunction, on one record.** `BurrowAcl.authorize`
@@ -166,7 +146,8 @@ Source of truth: `remote-lib-common/src/security/acl.ts` (the schema and
   the assertion against the **stored** key for that exact credential, and
   **extends nothing** — not the session's life, not the relay socket.
 - **`PresenceProofV1` travels only inside the first Client→Burrow transport
-  payload**, carrying the binding, the Relay nonce, `accountId`, the passkey
+  payload**, carrying the binding, the Relay nonce, `accountId` (as the
+  Relay answered sign-in), the passkey
   credential id, its canonical SPKI public key, and the assertion. The Burrow
   recomputes the challenge with the same builder, requires **every binding field
   to equal what it built from its own state**, verifies RP ID, origin,
@@ -199,11 +180,11 @@ newly-added passkey is not automatically trusted; its Client must still pair.
   public key ([relay.md](./relay.md) owns the grammar); **it carries no Burrow
   static, no label, and no signature** (rationale).
 - **Invitation lifecycle, Burrow-owned**, and the QR panel renders it: `live`
-  until a valid Noise message 1 decrypts against it (`reserved`), which then
-  always ends `consumed`; an un-scanned one ends `expired` by TTL or `dropped`
+  until a valid message 1 and the responder's message 2 complete the Noise
+  handshake (`reserved`), which then always ends `consumed`; an un-scanned one ends `expired` by TTL or `dropped`
   when the Burrow discards it — lost relay socket, or evicted at the cap. **A mint
   whose keygen straddles a teardown is refused rather than inserted**
-  (rationale). **Each invitation accepts one request**; a failed decrypt leaves
+  (rationale). **Must accept one completed handshake per invitation**; a failed handshake leaves
   it live and redemption at the Relay flips nothing, and **neither may read as
   a scan**.
 - **IK against the invitation key**: Client initiator, fresh per-Burrow static as
@@ -245,8 +226,8 @@ newly-added passkey is not automatically trusted; its Client must still pair.
 - **A resumed handshake re-checks that its invitation is still the live one**
   (rationale).
 
-Before storing the record, Pocket verifies the passkey fields match its ceremony
-and compares the Burrow static to any existing pin for that `burrowId`: **a
+Before storing the record, Pocket verifies the passkey fields and its session's
+account match, and compares the Burrow static to any existing pin for that `burrowId`: **a
 mismatch is a terminal security error that keeps the old pin**.
 
 Source of truth: `BurrowRuntime.mintInvitation` / `#onPairingInit` /
@@ -254,7 +235,8 @@ Source of truth: `BurrowRuntime.mintInvitation` / `#onPairingInit` /
 `lib/src/remote/burrow/burrow-runtime.ts`, `PairingRequestV1` / `PairingOutcomeV1` /
 `samplePairingCode` in `remote-lib-common/src/security/e2e-ceremony.ts`,
 `#setupQr` in `lib/src/host/remote/service.ts`,
-`lib/src/remote/burrow/RemotePairingModal.tsx`. Pinned by
+`lib/src/remote/burrow/RemotePairingModal.tsx`, `PocketClient.pair` in
+`lib/src/remote/client/pocket-client.ts`. Pinned by
 `lib/src/remote/burrow/burrow-runtime.test.ts`.
 
 ## Connection
@@ -269,7 +251,8 @@ Source of truth: `BurrowRuntime.mintInvitation` / `#onPairingInit` /
   requires one active `BurrowAclRecord` holding all four of `accountId`,
   `passkeyCredentialId`, `passkeyPublicKeyHash`, and the IK-authenticated Client
   static.
-- **Then `ConnectionOutcomeV1`**: success carries the Burrow label; denial carries
+- **Then `ConnectionOutcomeV1`**: success carries the Burrow label (and
+  `directOnly` under Local networks); denial carries
   only `pairing-required`, `presence-rejected`, `protocol-rejected`,
   `burrow-busy`, or `burrow-error`. **Every ACL miss is `pairing-required`** —
   individual ACL and presence failures are logged owner-locally
@@ -306,9 +289,9 @@ runtime that carries these rules out ("Burrow runtime").
 - **The prologue binds every link field under its own kind** (field order:
   `docs/specs/one-time.md` -> "Link"), so a one-time transcript equals no
   pairing or connection transcript, and is useless in any other room.
-- **The first valid message 1 reserves the link**: the one-use key is erased
-  with it, a later `init` is dropped before any WebCrypto, and one that fails
-  to decrypt reserves nothing.
+- **Must reserve the link only after a valid message 1 and responder message 2
+  complete the handshake.** The one-use key is erased with it; a later `init`
+  is dropped before WebCrypto, and a failed handshake reserves nothing.
 - **The one carve-out from [Presence proofs](#presence-proofs): a fresh local
   confirmation authorizes exactly one session and writes nothing.**
   `OneTimeRequestV1` carries the phone's code and label and nothing else; the
@@ -327,7 +310,7 @@ runtime that carries these rules out ("Burrow runtime").
   outcome promotes the same session; the phone refuses protocol-v1 until both
   directions are direct, and an application message the Burrow decrypts off
   the rendezvous ends the session unread. A session with no direct path by
-  `ONE_TIME_DIRECT_DEADLINE_MS` ends at both ends, with no relayed fallback.
+  `DIRECT_ONLY_DEADLINE_MS` ends at both ends; no relayed fallback.
 - **After the switch the direct channel, not the rendezvous, is the lifecycle
   authority** — for this ceremony alone, the carve-out from
   [remote-api.md](./remote-api.md) -> "Direct path"'s rule that the Relay stays
@@ -415,12 +398,13 @@ runtime holds the same line against the rendezvous (`docs/specs/one-time.md`
 | `E2E_INIT_BURST` / `E2E_INIT_REFILL_INTERVAL_MS` | 8 / 1 000 | same |
 | `DIRECT_SETUP_TIMEOUT_MS` / `DIRECT_ANSWER_TIMEOUT_MS` / `DIRECT_GATHER_TIMEOUT_MS` / `DIRECT_SRFLX_GRACE_MS` | 15 000 / 10 000 / 3 000 / 500 | `remote-lib-common/src/security/direct-path.ts` |
 | `DIRECT_HANDOFF_TIMEOUT_MS` / `DIRECT_DISCONNECTED_GRACE_MS` | `= DIRECT_SETUP_TIMEOUT_MS` (15 000) / 5 000 | same |
+| `DIRECT_ONLY_DEADLINE_MS` | `= DIRECT_SETUP_TIMEOUT_MS + DIRECT_HANDOFF_TIMEOUT_MS` (30 000; rationale) | same |
 | `MAX_DIRECT_SDP_LENGTH` | 2 000 characters | same |
 | `MAX_DIRECT_PENDING_FRAMES` / `MAX_DIRECT_PENDING_BYTES` | 8 192 frames / 4 MiB, bytes binding first; one pair for a receiver's hold and a sender's queue alike (rationale) | same |
 | `DIRECT_BUFFER_HIGH` / `DIRECT_BUFFER_LOW` | 256 KiB / 64 KiB | same |
 | `MAX_ONE_TIME_FRAME_LENGTH` | one maximal `ct` + 512 | `remote-lib-common/src/remote/one-time-wire.ts` |
 | `MAX_ONE_TIME_FORWARDED` | 32 messages, both directions together | same |
-| `ONE_TIME_LINK_TTL_MS` / `ONE_TIME_EXPIRY_GRACE_MS` / `ONE_TIME_DIRECT_DEADLINE_MS` | `= DEFAULT_PAIRING_TTL_MS` / 30 000 / 15 000 | same |
+| `ONE_TIME_LINK_TTL_MS` / `ONE_TIME_EXPIRY_GRACE_MS` | `= DEFAULT_PAIRING_TTL_MS` / 45 000 (> `DIRECT_ONLY_DEADLINE_MS`) | same |
 | `ONE_TIME_OPEN_TIMEOUT_MS` | 8 000 | `lib/src/remote/burrow/one-time-runtime.ts` |
 
 - **Must bound waiting relay frames before enqueueing**, by count and cumulative
@@ -438,13 +422,14 @@ runtime holds the same line against the rendezvous (`docs/specs/one-time.md`
   other identity at the cap gets the fixed-size `burrow-busy` and **evicts no
   other entry**. Pending caps and the token bucket stay active at the cap.
 - **A Burrow-global token bucket gates the WebCrypto an accepted `init` buys**, on
-  the Burrow's own clock, and **answers a refused frame with nothing** — as do
-  refusals by shape, size, or a pending cap (rationale).
+  the Burrow's own clock, and **must answer a refused init with nothing**, as for shape or size refusals.
+  **Must enforce pending caps after a valid handshake by evicting the oldest
+  pending entry**, with the outcome in the expiry table below (rationale).
 - **A message is processed only for its exact pending ID and expected step**:
   unknown IDs are dropped without decryption, established frames decrypt only at
   their session's next nonce, and **the first invalid ciphertext destroys its
   session** (rationale).
-- **Rejected frames perform no WebCrypto operation and allocate no entry.**
+- **Must reject malformed or over-size routing frames before WebCrypto or entry allocation.**
   **`MAX_RELAY_TO_BURROW_FRAME_LENGTH` is measured on the received string before
   `JSON.parse`** (a non-string payload is dropped) and given to the socket
   implementation's `maxPayload` where it takes one (rationale); the wire guard
@@ -674,6 +659,9 @@ until then known only to the Relay — and one
 `deliveryId` one Pocket profile registers across Burrows. A push carries no
 counter, so a Relay that kept an envelope can re-deliver it
 ([Push sealing](#push-sealing)).
+
+**Hosted's Relay observes what the self-host Relay does**, each account's in
+its own `RelayRoom` ([hosted.md](./hosted.md) -> "Relay sockets").
 
 **Hosted's one-time rendezvous observes each room's timing, both ends' IP
 addresses, the room id, and the size and count of the handshake frames it

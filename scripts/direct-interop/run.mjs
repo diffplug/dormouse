@@ -241,6 +241,7 @@ const pathPolicy = policy && {
     path.acceptedOffer = describeSdp(accepted).candidates.map((candidate) => candidate.address);
     return accepted;
   },
+  reportedAddress: policy.reportedAddress,
   refusal: (pair) => {
     const refusal = policy.refusal(pair);
     path.checks.push({ pair: addonPair(), refusal });

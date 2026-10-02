@@ -133,9 +133,6 @@ interface Ring extends SourceSet {
  */
 interface HeldCompletion extends SourceSet {
   detail: ActivityNotification;
-  /** Its report came due from an animation deferral: escalating rings it,
-   *  never defers it again. */
-  reportDeferred: boolean;
 }
 
 interface CommandExitWatch {
@@ -252,7 +249,7 @@ interface AwaitGroup {
 }
 
 export interface AlertState {
-  /** The ringing interval's delivery identity; null while not ringing. */
+  /** The unresolved summons' delivery identity, retained while paused. */
   episode: AlertEpisode | null;
   status: SessionStatus;
   watchingEnabled: boolean;
@@ -294,10 +291,9 @@ interface AlertEntry {
   notification: ActivityNotification | null;
   /**
    * The terminal notification held behind animation, never public or
-   * persisted, and when the hold began: a replacement keeps that start, so the
-   * ceiling bounds the whole hold.
+   * persisted. Replacements keep the richest detail until quiet.
    */
-  deferred: { notification: ActivityNotification; since: number } | null;
+  deferred: ActivityNotification | null;
   deferredTimer: ReturnType<typeof setTimeout> | null;
   /** Completions withheld while engaged: escalated or dropped as engagement ends (`setViewer`), dropped by a user verb. */
   held: HeldCompletion | null;
@@ -343,15 +339,14 @@ export class AlertManager {
     this.setDeferAlertsUntilQuiet(settings.deferAlertsUntilQuiet);
   }
 
-  /** Let confirmed terminal activity finish before terminal-notification rings. */
+  /** Let recent terminal output finish before presenting an owed alert. */
   setDeferAlertsUntilQuiet(enabled: boolean): void {
     if (enabled === this.deferAlertsUntilQuiet) return;
     this.deferAlertsUntilQuiet = enabled;
-    if (enabled) return;
-
-    // Turning the gate off releases news it was holding; dropping it would turn
-    // a timing preference into alert loss.
-    for (const [id, entry] of this.entries) this.flushDeferredNotification(id, entry);
+    for (const [id, entry] of this.entries) {
+      if (enabled) this.notify(id);
+      else this.flushDeferredNotification(id, entry);
+    }
   }
 
   /** Mark (or, on promotion, unmark) a helper Session. */
@@ -389,10 +384,13 @@ export class AlertManager {
     if (!entry) return;
     // The echo of the user's own keystroke is not the program working.
     if (this.inEchoWindow(entry)) return;
-    entry.detector.onData();
+    const wasRinging = entry.ring !== null && !this.isPaused(entry);
+    if (!entry.detector.onData()) return;
     for (const set of [entry.ring, entry.held]) noteOutput(set);
     entry.ackedQuiet = false;
     this.eachWaiter(id, (waiter) => waiter.onOutput());
+    // Publish only the pause itself, not every chunk of a paused ring.
+    if (wasRinging && this.isPaused(entry)) this.notify(id);
   }
 
   onExit(id: string, exitCode?: number): void {
@@ -459,7 +457,6 @@ export class AlertManager {
       onChange: () => {
         const entry = this.entries.get(id);
         if (!entry || !this.isWatching(entry)) return;
-        this.withdrawResumedWatchingRing(entry);
         this.notify(id);
       },
       onSettled: () => this.onSettled(id),
@@ -467,14 +464,14 @@ export class AlertManager {
   }
 
   /**
-   * Watched work that resumed invalidates a ring inferred from silence, so the
-   * next settle raises a fresh one on fresh delivery delays. The detector is
-   * left alone: resetting it would stop this run from settling again. Callers
-   * are the WATCHING-only paths; this adds no rule-set check of its own.
+   * A single accepted redraw is enough to delay, never discard, an owed ring.
+   * Exit sources remain authoritative, including a report joined to an exit.
    */
-  private withdrawResumedWatchingRing(entry: AlertEntry): void {
-    if (!this.deferAlertsUntilQuiet || !entry.detector.isConfirmedBusy()) return;
-    this.invalidateWatching(entry, () => true);
+  private isPaused(entry: AlertEntry): boolean {
+    return entry.ring !== null
+      && this.deferAlertsUntilQuiet
+      && entry.detector.hasRecentOutput()
+      && !entry.ring.sources.includes('exit');
   }
 
   /**
@@ -502,12 +499,17 @@ export class AlertManager {
   private onSettled(id: string): void {
     const entry = this.entries.get(id);
     if (!entry) return;
-    this.dispatchCompletion(id, entry, { kind: 'settled' });
+    if (this.dispatchCompletion(id, entry, { kind: 'settled' })) {
+      // An await answering this settle also answers the inference retained
+      // through its output. An earlier explicit report remains separate news.
+      this.invalidateWatching(entry, () => true);
+    }
     // The settle completion gets first refusal before delivery held from an
     // earlier event. Never re-offer that historical event to current claimants.
-    // Unconditional: a claimant taking *this* settle says nothing about the
-    // earlier completion it never saw, which is now quiet and due.
-    this.flushDeferredNotification(id, entry);
+    // Regardless of a claimant: taking *this* settle says nothing about the
+    // earlier completion it never saw, which is now quiet and due — unless
+    // output accepted during dispatch renewed the quiet deadline.
+    if (!this.deferAlertsUntilQuiet || !entry.detector.hasRecentOutput()) this.flushDeferredNotification(id, entry);
   }
 
   // --- Completion events ---
@@ -582,9 +584,8 @@ export class AlertManager {
   }
 
   /**
-   * The one path from a completion that may ring to the ring: a live one, a
-   * deferred report coming due (`deferrable` false — its deferral is over),
-   * and an escalated hold alike. Engaged, it is held for engagement to end;
+   * The path from a completion that may ring to the ring: a live one and an
+   * escalated hold alike. Engaged, it is held for engagement to end;
    * otherwise a report goes through the acknowledged-state check and animation
    * deferral, and anything else rings. Publishes, including a progress cycle
    * the caller cleared before dispatch.
@@ -594,19 +595,18 @@ export class AlertManager {
     entry: AlertEntry,
     source: ListedRingSource | WatchingSource,
     detail: ActivityNotification,
-    deferrable = true,
   ): void {
     if (this.isEngaged(id)) {
-      this.hold(entry, source, detail, !deferrable);
-    } else if (source === 'report' && deferrable) {
+      this.hold(entry, source, detail);
+    } else if (source === 'report') {
       this.deliverReport(id, entry, detail);
       return;
     } else {
       this.raiseRing(entry, source, detail);
     }
-    // A terminal notification already waiting on animation joins the exit's
-    // ring (or hold) now; keeping its timer would publish stale detail later.
-    if (source === 'exit' && entry.deferred !== null) this.flushDeferredNotification(id, entry);
+    // A terminal notification waiting on animation joins the exit's ring (or
+    // hold) now; keeping its timer would publish stale detail later.
+    if (source === 'exit') this.flushDeferredNotification(id, entry);
     else this.notify(id);
   }
 
@@ -959,26 +959,17 @@ export class AlertManager {
     entry: AlertEntry,
     notification: ActivityNotification,
   ): void {
-    // Once a ring is active, another source only enriches the same summons.
-    // There is no fresh transition left for animation deferral to suppress. An
-    // already pending deferral keeps deferring: a command boundary resets the
-    // detector, so `isConfirmedBusy` alone could release a notification before
-    // quiet.
     if (
       this.deferAlertsUntilQuiet
       && entry.ring === null
-      && (entry.deferred !== null || entry.detector.isConfirmedBusy())
+      && entry.detector.hasRecentOutput()
     ) {
-      // The richer detail waits, as it would show on a ring; the ceiling still
-      // counts from the first.
-      if (entry.deferred === null) entry.deferred = { notification, since: Date.now() };
-      else entry.deferred.notification = richer(entry.deferred.notification, notification);
+      entry.deferred = richer(entry.deferred, notification);
       this.scheduleDeferredNotification(id, entry);
     } else {
-      // An existing ring means this is enrichment, not a fresh summons. Cancel
-      // any older pending detail so it cannot overwrite this notification later.
+      const detail = richer(entry.deferred, notification);
       this.clearDeferredNotification(entry);
-      this.raiseRing(entry, 'report', notification);
+      this.raiseRing(entry, 'report', detail);
     }
     // The caller may have cleared a publicly visible cycle and delegated the
     // publish to the ring rules; deferring the ring must not swallow it.
@@ -986,35 +977,33 @@ export class AlertManager {
   }
 
   /**
-   * Wake at the earlier of the detector's quiet deadline and the deferral
-   * ceiling, re-arming for the remainder if output moved the former — so
+   * Wake at the detector's quiet deadline to ring a deferred notification or
+   * publish a paused ring's end, re-arming if output moved it — so
    * continuing output costs one timer per quiet window rather than one per PTY
    * chunk. A timer already waiting stays: the due time only moves later, and
-   * the wake re-checks it. Mostly the detector's own settle gets there first;
-   * the timer is load-bearing after a command boundary resets the detector,
-   * which kills the settle that would have flushed, and for output that never
-   * goes quiet.
+   * the wake re-checks it. The detector's own settle fires only from busy, so
+   * the timer is what releases a deferral after output that never confirmed
+   * busy, after a command boundary resets the detector (killing the settle that
+   * would have flushed), and at the end of a pause.
    */
   private scheduleDeferredNotification(id: string, entry: AlertEntry): void {
     if (entry.deferredTimer !== null) return;
     entry.deferredTimer = setTimeout(() => {
       entry.deferredTimer = null;
-      if (this.deferredDueAt(entry) > Date.now()) this.scheduleDeferredNotification(id, entry);
+      if (entry.detector.hasRecentOutput()) this.scheduleDeferredNotification(id, entry);
       else this.flushDeferredNotification(id, entry);
-    }, Math.max(0, this.deferredDueAt(entry) - Date.now()));
+    }, Math.max(0, entry.detector.quietAt() - Date.now()));
   }
 
-  /** Quiet, or the deferral ceiling, whichever comes first. */
-  private deferredDueAt(entry: AlertEntry): number {
-    return Math.min(entry.detector.quietAt(), (entry.deferred?.since ?? Date.now()) + cfg.alert.deferCeiling);
-  }
-
+  /** Callers decide quiet: a settle, the wake timer, a finish, or disabling the gate. */
   private flushDeferredNotification(id: string, entry: AlertEntry): void {
     const deferred = entry.deferred;
-    if (deferred === null) return;
     this.clearDeferredNotification(entry);
-    // Never deferred again; due while engaged, it waits on engagement instead.
-    this.holdOrDeliver(id, entry, 'report', deferred.notification, false);
+    if (deferred !== null) {
+      if (this.isEngaged(id)) this.hold(entry, 'report', deferred);
+      else this.raiseRing(entry, 'report', deferred);
+    }
+    this.notify(id);
   }
 
   private clearDeferredNotification(entry: AlertEntry): void {
@@ -1189,17 +1178,15 @@ export class AlertManager {
     return Date.now() < entry.echoUntil;
   }
 
-  private hold(entry: AlertEntry, source: ListedRingSource | WatchingSource, detail: ActivityNotification, deferred: boolean): void {
-    const held = entry.held ??= { sources: [], watching: null, detail, reportDeferred: false };
+  private hold(entry: AlertEntry, source: ListedRingSource | WatchingSource, detail: ActivityNotification): void {
+    const held = entry.held ??= { sources: [], watching: null, detail };
     held.detail = richer(held.detail, detail);
-    held.reportDeferred ||= deferred;
     addSource(held, source);
   }
 
   /**
    * Presence lapsed from inactivity with focus unchanged: each held source takes
-   * the path it would have taken unengaged, with the richest held detail — a
-   * report whose deferral already came due skipping deferral.
+   * the path it would have taken unengaged, with the richest held detail.
    */
   private escalateHeld(id: string, entry: AlertEntry): void {
     const held = entry.held;
@@ -1207,7 +1194,7 @@ export class AlertManager {
     entry.held = null;
     if (held.watching !== null) this.holdOrDeliver(id, entry, held.watching, held.detail);
     for (const source of LISTED_RING_SOURCES) {
-      if (held.sources.includes(source)) this.holdOrDeliver(id, entry, source, held.detail, !held.reportDeferred);
+      if (held.sources.includes(source)) this.holdOrDeliver(id, entry, source, held.detail);
     }
   }
 
@@ -1386,7 +1373,7 @@ export class AlertManager {
   }
 
   private getProjectedStatus(id: string, entry: AlertEntry): SessionStatus {
-    if (entry.ring !== null) return 'ALERT_RINGING';
+    if (entry.ring !== null && !this.isPaused(entry)) return 'ALERT_RINGING';
     if (entry.progress !== null) return 'OSC_NOTIF_BUSY';
     // WATCHING outranks the command-exit arm: a watched command is by
     // definition running, so COMMAND_EXIT_ARMED would otherwise mask the
@@ -1421,6 +1408,9 @@ export class AlertManager {
   }
 
   private notify(id: string): void {
+    // Whatever publishes a pause arms the wake that publishes its end.
+    const entry = this.entries.get(id);
+    if (entry && this.isPaused(entry)) this.scheduleDeferredNotification(id, entry);
     const state = this.getState(id);
     const last = this.lastEmitted.get(id);
     // A helper publishes nothing, but takes back what it published before a demotion.

@@ -32,6 +32,12 @@ typography:
     fontSize: "12px"
     fontWeight: 400
     lineHeight: 1.6
+  user-code:
+    fontFamily: "var(--vscode-editor-font-family)"
+    fontSize: "32px"
+    fontWeight: 600
+    lineHeight: 1.2
+    letterSpacing: "0.08em"
 rounded:
   control: "4px"
 spacing:
@@ -108,7 +114,7 @@ Sidebar colors paint the page and text. The inactive-selection pair paints secon
 
 ## Typography
 
-All roles use the parent system's editor font. Hosted deliberately extends the compact terminal type scale with the title, body, and input roles in the frontmatter. Section headings stay at body size, bold with a 1.5 line height; account identifiers and footer text use the detail role. There is no display tier.
+All roles use the parent system's editor font. Hosted deliberately extends the compact terminal type scale with the title, body, and input roles in the frontmatter. Section headings stay at body size, bold with a 1.5 line height; account identifiers and footer text use the detail role. The enrollment user code is the one display role, sized to be compared at a glance against the code Dormouse shows.
 
 **The Browser Form Rule.** Preserve the input role's larger type and a minimum control height of 44px for buttons and inputs, including text buttons. These are Hosted account-form exceptions to the parent's terminal chrome sizing.
 
@@ -134,6 +140,8 @@ Buttons and inputs share gently rounded corners from the control radius token an
 - **Feedback:** errors use `role="alert"` and an inline retry action. Notices and loading text use `role="status"`.
 - **Account method rows:** show the provider name with either a Connect action or Connected text. State is communicated in words, not solely through color.
 - **Voice tokens (admin only):** token rows reuse the account method row, with creation date, a detail-role last-used line, and a Revoke action or Revoked text. A newly minted token appears in a notice block with its copy-now warning and a primary-colored Copy action.
+- **Enrollment approval:** the `/enroll` page replaces the account content with the user code in the user-code role, the instruction to approve only while Dormouse shows it, a primary Approve (or Sign in again, when the login is too old), and a Don’t approve text button.
+- **Computers (admin only):** rows reuse the account method row, with the id prefix, a detail-role enrollment date, and a Remove action.
 - **Navigation:** plain product and external links in the header and footer, with no tab bar or card wrapper.
 
 ## Do's and Don'ts

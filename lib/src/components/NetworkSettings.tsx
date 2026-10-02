@@ -12,15 +12,18 @@ import {
   modalActionButton,
 } from './design';
 import { useManagedVoiceConfigured } from './ManagedVoiceSection';
-import { hostOf, useBusyAction } from './remote-control-shared';
+import { hostOf, pathRefusalSentence, useBusyAction } from './remote-control-shared';
 import { HeldEnrollment, RemoteControlSection } from './RemoteControlSection';
-import type { BurrowConsoleStatus } from '../host/remote/service-protocol';
+import { relayRefuses, type BurrowConsoleStatus } from '../host/remote/service-protocol';
+import { HOSTED_VOICE_ORIGIN } from '../host/relay-origin';
 import { getPlatform } from '../lib/platform';
 import { CLOUDFLARE_STUN_HOST } from '../remote/direct/ice-servers';
 import type { UpdatesPort, UpdatesSnapshot } from '../lib/platform/types';
 import { getBurrowStatusSnapshot, subscribeToBurrowStatus } from '../remote/burrow/burrow-status-store';
+import type { PathRefusal } from '../remote/direct/path-refusal';
 import {
   changeNetworkPolicy,
+  dismissPathRefusal,
   getNetworkPolicySnapshot,
   refreshNetworkPolicy,
   subscribeToNetworkPolicy,
@@ -146,8 +149,8 @@ interface ConnectionRow {
 /** What {@link connectionsFor} reads. */
 export interface NetworkFacts {
   policy: NetworkPolicy;
-  /** The build's relay origin and mode, the enrollment, and its paired phones. */
-  status: Pick<BurrowConsoleStatus, 'relayOrigin' | 'relayMode' | 'enrolled' | 'pairedClients'>;
+  /** The build's relay origin and mode, the enrollment, its relay socket, and its paired phones. */
+  status: Pick<BurrowConsoleStatus, 'relayOrigin' | 'relayMode' | 'enrolled' | 'connection' | 'pairedClients'>;
   /** A managed-voice token is saved. */
   managedVoice: boolean;
   /** This build checks for its own updates ({@link updatesItself}). */
@@ -167,6 +170,27 @@ function updatesItself(status: Pick<BurrowConsoleStatus, 'relayMode'>): boolean 
 }
 
 /**
+ * What the relay socket carries under `policy`: one-time links only where one
+ * opens, and under Local networks never terminal traffic, which a paired
+ * phone's session may not take through the relay
+ * (`docs/specs/remote-network.md` -> "Local networks").
+ */
+function persistentRelayCarries(policy: NetworkPolicy): string {
+  const handshakes = opensOneTimeLinks(policy) ? 'Encrypted handshakes and one-time links' : 'Encrypted handshakes';
+  const requests = `${handshakes}, requests for setup codes and the push device list`;
+  return holdsToAllowedNetworks(policy.level)
+    ? `${requests}. Never terminal traffic.`
+    : `${requests}, and terminal traffic when a phone can’t connect directly.`;
+}
+
+/** Where the phone row says the phone is: on any network, an allowed one, or simply directly. */
+function phoneRowFor(policy: NetworkPolicy, persistent: boolean): string {
+  if (policy.level === 'relay') return 'Your phone, directly';
+  if (phoneOnAnyNetwork(policy)) return persistent ? 'Your phone, directly' : 'Your phone, on any network';
+  return persistent ? 'Your phone, directly, on an allowed network' : 'Your phone, on an allowed network';
+}
+
+/**
  * Every connection Dormouse opens on its own under `facts`, and nothing
  * else — each row backed by code (`docs/specs/remote-network.md` -> "Settings →
  * Network"). Terminals and browser panes reach whatever the user points them
@@ -177,57 +201,56 @@ export function connectionsFor(facts: NetworkFacts): ConnectionRow[] {
   if (policy.level === 'nothing') return [];
   const relay = hostOf(status.relayOrigin);
   const rows: ConnectionRow[] = [];
-  if (opensOneTimeLinks(policy)) {
-    rows.push(
-      {
-        to: relay,
-        when: 'Only while a one-time link is open',
-        carries: 'Encrypted handshakes. Never terminal traffic.',
-      },
-      // The transport's own predicate, so the row and the gathering never disagree.
-      ...(burrowUsesStun(policy.level)
-        ? [
-            {
-              to: CLOUDFLARE_STUN_HOST,
-              when: 'When a phone connects',
-              carries: 'A lookup that shows Cloudflare this computer’s public IP address.',
-            },
-          ]
-        : []),
-      {
-        to: phoneOnAnyNetwork(policy) ? 'Your phone, on any network' : 'Your phone, on an allowed network',
-        when: 'While connected',
-        carries: 'Terminal traffic, end-to-end encrypted.',
-      },
-    );
+  const oneTime = opensOneTimeLinks(policy);
+  // The relay socket: a self-host build's, enrolled or about to be; a Hosted
+  // build's once it is enrolled, the one-time links riding the same origin.
+  // None while the Relay no longer takes this Burrow, which asks it nothing.
+  const refused = status.enrolled && relayRefuses(status.connection);
+  const persistent =
+    runsBurrow(policy.level) && (status.relayMode === 'self-host' || status.enrolled) && !refused;
+  if (persistent) {
+    rows.push({
+      to: relay,
+      when: status.enrolled ? 'Always' : 'Always, once this computer is enrolled',
+      carries: persistentRelayCarries(policy),
+    });
+  } else if (oneTime) {
+    rows.push({
+      to: relay,
+      when: 'Only while a one-time link is open',
+      carries: 'Encrypted handshakes. Never terminal traffic.',
+    });
   }
-  if (runsBurrow(policy.level)) {
-    rows.push(
-      {
-        to: relay,
-        when: status.enrolled ? 'Always' : 'Always, once this computer is enrolled',
-        carries:
-          'Encrypted handshakes, requests for setup codes and the push device list, and terminal traffic when a phone can’t connect directly.',
-      },
-      {
-        to: 'Your phone, directly',
-        when: 'While connected',
-        carries: 'Terminal traffic, end-to-end encrypted.',
-      },
-    );
-    // Whether push is on is the application's default and every Workspace's
-    // own, some in other windows, so the row names the condition instead.
-    if (status.pairedClients > 0) {
-      rows.push({
-        to: `${relay} → your phone’s push service`,
-        when: 'When an alert goes unattended, where push is on',
-        carries: 'An end-to-end encrypted notification.',
-      });
-    }
+  // The transport's own predicate, so the row and the gathering never disagree.
+  if (oneTime && burrowUsesStun(policy.level)) {
+    rows.push({
+      to: CLOUDFLARE_STUN_HOST,
+      when: 'When a phone connects',
+      carries: 'A lookup that shows Cloudflare this computer’s public IP address.',
+    });
+  }
+  // A phone reaches this computer directly wherever one can connect at all —
+  // not under Local networks with nothing allowed, nor under My Relay only
+  // once that Relay refuses this Burrow.
+  if (oneTime || (policy.level === 'relay' && !refused)) {
+    rows.push({
+      to: phoneRowFor(policy, persistent),
+      when: 'While connected',
+      carries: 'Terminal traffic, end-to-end encrypted.',
+    });
+  }
+  // Whether push is on is the application's default and every Workspace's
+  // own, some in other windows, so the row names the condition instead.
+  if (persistent && status.pairedClients > 0) {
+    rows.push({
+      to: `${relay} → your phone’s push service`,
+      when: 'When an alert goes unattended, where push is on',
+      carries: 'An end-to-end encrypted notification.',
+    });
   }
   if (facts.managedVoice && status.relayMode === 'hosted') {
     rows.push({
-      to: relay,
+      to: hostOf(HOSTED_VOICE_ORIGIN),
       when: 'When an alert is spoken in the managed voice',
       carries: 'The pane’s name and the voice id, which Hosted passes to ElevenLabs.',
     });
@@ -403,6 +426,7 @@ function AllowedNetworks({ network }: { network: NetworkPolicyResult }) {
     <section className={SETTINGS_SECTION} aria-labelledby="network-allowed-label">
       <div id="network-allowed-label" className={LABEL}>Allowed networks</div>
       <div className={HINT}>A phone connects only when both ends of its connection are on one of these.</div>
+      {network.refusal ? <PathRefusalNotice refusal={network.refusal} /> : null}
       <div className="mt-2 flex flex-col gap-1.5">
         {interfaces.map((item) => (
           <NetworkRow
@@ -466,6 +490,23 @@ function AllowedNetworks({ network }: { network: NetworkPolicyResult }) {
         192.168.1.0/24 too. Pairing still decides which phones may connect.
       </div>
     </section>
+  );
+}
+
+/** The accessible name of the line saying the path ended a phone's session. */
+export const PATH_REFUSAL_LABEL = 'Last refused phone';
+
+/** The last session the path ended, above the allowed networks it names, until dismissed. */
+function PathRefusalNotice({ refusal }: { refusal: PathRefusal }) {
+  const { busy, error, run } = useBusyAction();
+  return (
+    <div role="status" aria-label={PATH_REFUSAL_LABEL} className="mt-2 text-sm leading-relaxed text-foreground">
+      {pathRefusalSentence(refusal, 'network-panel')}{' '}
+      <button type="button" disabled={busy} className={INLINE_ACTION_CLASS} onClick={() => void run(dismissPathRefusal)}>
+        Dismiss
+      </button>
+      {error ? <div className={ERROR}>{error}</div> : null}
+    </div>
   );
 }
 

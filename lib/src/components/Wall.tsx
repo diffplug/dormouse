@@ -92,6 +92,8 @@ import {
 import { usePreviewSlotPin } from './wall/preview-slot';
 import { browserSurfaceUrl, hostPathDisplay, iframeRefusal } from './wall/browser-url';
 import { WorkspaceSelectionOverlay } from './wall/WorkspaceSelectionOverlay';
+import { getAgentBrowserSurfaceController } from './wall/agent-browser-surface-controller';
+import { surfaceWorkspaceDrag } from './wall/surface-workspace-drag';
 import { LathHost } from './wall/LathHost';
 import {
   type LathWallEngine,
@@ -146,6 +148,7 @@ type ShellSpawnNoticeState = {
   id: string;
   text: string;
   nonce: number;
+  duration: number;
 };
 
 export type { DoorAfterRestoreAction, DoorChip, DooredItem, WallBootProps, WallEvent, WallMode, WallSelectionKind } from './wall/wall-types';
@@ -239,6 +242,8 @@ function ShellSpawnNotice({
         top: rect.top + 38,
         left: rect.left + rect.width / 2,
         transform: 'translateX(-50%)',
+        maxWidth: Math.min(420, Math.max(0, rect.width - 16)),
+        animationDuration: `${notice.duration}ms`,
       }}
     >
       {notice.text}
@@ -255,6 +260,7 @@ export function Wall({
   initialDoors,
   initialSurfaceRefs,
   initialSurfaceRefsNext,
+  emptyForMove = false,
   onEvent,
   baseboardNotice,
   dialogHost,
@@ -621,7 +627,7 @@ export function Wall({
     return false;
   }, [selectPane]);
 
-  const showShellSpawnNotice = useCallback((id: string, text: string) => {
+  const showShellSpawnNotice = useCallback((id: string, text: string, duration = 1500) => {
     if (shellSpawnNoticeTimerRef.current) {
       clearTimeout(shellSpawnNoticeTimerRef.current);
     }
@@ -629,11 +635,12 @@ export function Wall({
       id,
       text,
       nonce: ++shellSpawnNoticeCounterRef.current,
+      duration,
     });
     shellSpawnNoticeTimerRef.current = setTimeout(() => {
       setShellSpawnNotice(null);
       shellSpawnNoticeTimerRef.current = null;
-    }, 1500);
+    }, duration);
   }, []);
 
   /** Why the helper's running work (or a failed inspection) blocks closing its
@@ -897,6 +904,7 @@ export function Wall({
   useEffect(() => {
     if (lathSeededRef.current) return;
     lathSeededRef.current = true;
+    if (emptyForMove) return;
 
     // Hydrate: the restored Lath layout when usable, else fresh panes. The restored
     // Door rows ride along so their meta lands in the store, which owns it from here
@@ -929,6 +937,7 @@ export function Wall({
    *  auto-spawn refill, which would otherwise repopulate the Workspace being
    *  destroyed the moment its last pane goes. */
   const closingWorkspaceRef = useRef(false);
+  const movingSurfaceRef = useRef(emptyForMove);
 
   /** This Wall's member Surfaces: visible panes then Doors. The one expression
    *  behind membership, `ownsSurface`, and `closeAll`. */
@@ -937,15 +946,18 @@ export function Wall({
     [lath],
   );
 
+  /** A member whose live document cannot leave its webview: a move reopens it. */
+  const isIframeSurface = useCallback((id: string): boolean => {
+    const params = lath.getMeta(id)?.params;
+    return (isBrowserParams(params) || (isToolParams(params) && browserUrlFromParams(params) !== null))
+      && resolveRenderMode(params) === 'iframe';
+  }, [lath]);
+
   /** The members whose live document a move between Windows cannot carry, by
    *  the ref a `dor` caller can act on. */
   const iframeSurfaceRefs = useCallback(
-    (): string[] => memberSurfaceIds().filter((id) => {
-      const params = lath.getMeta(id)?.params;
-      return (isBrowserParams(params) || (isToolParams(params) && browserUrlFromParams(params) !== null))
-        && resolveRenderMode(params) === 'iframe';
-    }).map(surfaceRefForId),
-    [lath, memberSurfaceIds, surfaceRefForId],
+    (): string[] => memberSurfaceIds().filter(isIframeSurface).map(surfaceRefForId),
+    [isIframeSurface, memberSurfaceIds, surfaceRefForId],
   );
 
   const browserSessions = useCallback(
@@ -1030,7 +1042,7 @@ export function Wall({
         prevLeafIdsRef.current = new Set(currentIds);
         publishMembership();
       }
-      if (closingWorkspaceRef.current) return;
+      if (closingWorkspaceRef.current || movingSurfaceRef.current) return;
       // A commit that empties the tree took every pre-commit leaf with it.
       const [departedId] = prevIds;
       refillEmptyTree(departedId);
@@ -1059,6 +1071,7 @@ export function Wall({
     ownsSurface,
     selectedIdRef,
     selectedTypeRef,
+    activeRef,
     surfaceRefsForSave,
     workspaceId,
   });
@@ -1754,7 +1767,89 @@ export function Wall({
   // The methods close over current state, so they are rebuilt each render and
   // assigned INTO one stable object: the registry holds that object, so a
   // re-render never replaces a registered entry.
+  // Capture before a synchronous commit. Rollback restores the complete Wall,
+  // including a Door's held rect and the ref allocator, without killing Sessions.
+  // It runs only before `finishSurfaceMove`, so no refill has mounted a shell.
+  const captureMoveRollback = () => {
+    const snapshot = lath.store.getSnapshot();
+    const savedDoors = doorsRef.current;
+    const refs = new Map(dorSurfaceRefsRef.current);
+    const next = nextDorSurfaceRefIndexRef.current;
+    const selected = selectedIdRef.current;
+    const type = selectedTypeRef.current;
+    const last = lastPaneIdRef.current;
+    const savedMode = modeRef.current;
+    const context = terminalContextRef.current;
+    return () => {
+      movingSurfaceRef.current = true;
+      doorsRef.current = savedDoors; setDoors(savedDoors);
+      dorSurfaceRefsRef.current = refs; nextDorSurfaceRefIndexRef.current = next;
+      lath.store.restoreSnapshot(snapshot);
+      selectedIdRef.current = selected; setSelectedId(selected);
+      selectedTypeRef.current = type; setSelectedType(type);
+      lastPaneIdRef.current = last;
+      modeRef.current = savedMode; setMode(savedMode);
+      setTerminalContext(context);
+      publishMembership();
+    };
+  };
   const methods: Omit<WallHandle, 'workspaceId'> = {
+    canMoveSurfaces: workspaceId !== undefined,
+    prepareSurfaceMove: (id) => {
+      const meta = lath.getMeta(id);
+      if (!ownsSurface(id) || !meta) throw new Error('The Surface is no longer in this Workspace');
+      if (closingWorkspaceRef.current || lath.isDying(id) || isClosingSurface(id)) throw new Error('The Surface is closing');
+      if (getHelper(id)?.promoting) throw new Error('Wait for helper promotion before moving this Surface');
+      if (isToolDirty(id, meta.params)) throw new Error('Save or discard Tool edits before moving this Surface');
+      captureToolParams(lath, [id]);
+      if ((meta.params?.launchSession && !meta.params?.session) || getAgentBrowserSurfaceController(id)?.snapshot().phase === 'launching') throw new Error('Wait for the browser to connect before moving this Surface');
+      const surfaceRef = surfaceRefForId(id);
+      const params = { ...meta.params };
+      delete params.toolPreview;
+      return {
+        meta: { ...meta, params }, surfaceRef,
+        iframe: isIframeSurface(id), terminal: surfaceHasTerminal(id),
+        depart: () => {
+          const rollback = captureMoveRollback();
+          movingSurfaceRef.current = true;
+          if (terminalContextRef.current?.id === id) cancelContextPortLaunches();
+          setTerminalContext(current => current?.id === id ? null : current);
+          if (nav.hasPane(id)) {
+            if (!lath.store.removeLeaf(id).ok) throw new Error('Could not detach the Surface');
+          } else { removeDoor(id); lath.store.forgetLeaf(id); }
+          forgetSurfaceRef(id);
+          if (selectedIdRef.current === id) {
+            exitTerminalMode();
+            const nextId = livePaneId();
+            if (nextId) selectPane(nextId);
+            else { selectedIdRef.current = null; setSelectedId(null); lastPaneIdRef.current = null; }
+          }
+          publishMembership();
+          return rollback;
+        },
+      };
+    },
+    adoptSurfaceMove: (id, meta) => {
+      if (ownsSurface(id) || closingWorkspaceRef.current) throw new Error('The destination cannot accept this Surface');
+      const rollback = captureMoveRollback();
+      movingSurfaceRef.current = true;
+      const ref = livePaneId();
+      if (!lath.store.addLeaf(id, meta, ref ? { refId: ref, edge: lath.store.autoEdgeFor(ref) } : null).ok) throw new Error('Could not place the Surface');
+      const surfaceRef = surfaceRefForId(id);
+      publishMembership();
+      return { surfaceRef, rollback };
+    },
+    finishSurfaceMove: () => {
+      movingSurfaceRef.current = false;
+      if (memberSurfaceIds().length) refillEmptyTree();
+    },
+    focusSurface: (id, acknowledge) => {
+      if (acknowledge) wallActionsRef.current.onFocusPane(id);
+      else enterTerminalMode(id);
+    },
+    showMoveNotice: (id, text) => showShellSpawnNotice(id, text, 8000),
+    serializeNow: persistence.serializeNow,
+
     surfaceIds: memberSurfaceIds,
     ownsSurface,
     iframeSurfaceRefs,
@@ -2318,6 +2413,7 @@ export function Wall({
                   onProposeMinimize={onProposeMinimize}
                   externalDrag={doorDrag ? { id: doorDrag.item.id, startX: doorDrag.startX, startY: doorDrag.startY } : null}
                   onExternalDrop={onExternalDrop}
+                  workspaceDrag={workspaceId !== undefined ? surfaceWorkspaceDrag : undefined}
                 />
                 <WorkspaceSelectionOverlay lathStore={lath.store} subscribeLathFrames={lath.subscribeFrames} selectedId={terminalContext?.id ?? selectedId} selectedType={terminalContext ? 'pane' : selectedType} mode={mode} active={active} contextHelper={lath.contextHelper} />
               </div>

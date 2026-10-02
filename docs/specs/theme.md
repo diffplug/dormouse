@@ -39,14 +39,7 @@ derive a hairline from the pair foreground at low alpha or an inset shadow
 
 ### Dynamic picks
 
-`lib/src/theme-colors.css` binds most tokens to a fixed VSCode key. Seven are picked at
-runtime instead:
-
-| Token | Pick |
-|---|---|
-| `--color-door-bg` / `--color-door-fg` | whichever pair — inactive-header or terminal bg/fg — sits further from `--color-app-bg` in OKLab |
-| `--color-focus-ring` | a chromatic `focusBorder`, else a chromatic active-header background, else the candidate furthest from `--color-app-bg`; "chromatic" is OKLab chroma ≥ `FOCUS_RING_SATURATION_FLOOR` |
-| `--color-alarm-vs-{header-active,header-inactive,door,terminal}` | plain white or black, by the OKLab lightness of the background the alert treatment sits on (rationale) |
+`lib/src/theme-colors.css` binds most tokens to fixed VSCode keys. **Must derive dynamic tokens through the shared palette functions:** Door bg/fg through `pickDoorPair`, focus ring through `pickFocusRing`, and `--color-alarm-vs-{header-active,header-inactive,door,terminal}` through `pickAlarmColor` (rationale). Their choice algorithms belong beside those functions.
 
 The terminal alarm tint drives the whole-Pane alarm overlay.
 **Must derive the Door alarm tint from the newly chosen background in the same
@@ -93,11 +86,7 @@ cancel queued resolution on disposal.** Pinned by
 Dormouse uses them as solid header and Workspace-tab fills, so `applyTheme()` composites
 them over `sideBar.background` first (rationale).
 
-**A same-*object* `applyTheme()` call is a no-op only while the expected inline
-`--vscode-*` variables, `color-scheme`, and the `vscode-light` / `vscode-dark` class are still on
-`document.body`** — a fresh object for the same id re-applies, and the id
-comparison gates only the listener notification — and **ThemePicker re-restores in a layout effect after mount**
-— React Router document hydration can reconcile those writes away (rationale).
+**Must repair theme variables, theme class, and `color-scheme` lost during document hydration**, including when applying the same theme object; only an id change notifies listeners. **ThemePicker must re-restore in a layout effect after mount** (rationale).
 
 Each layer declares its theme-dependent tokens twice: at document level
 (`@theme` so Tailwind generates utility classes, or `:root`) and on `body`, the
@@ -172,13 +161,7 @@ imported VSCode theme JSON to `CONSUMED_VSCODE_KEYS`), and **may omit any key
 VSCode itself would omit** — `completeThemeVars()` fills those from registry
 defaults and the inheritance rules above.
 
-`lib/scripts/bundle-themes.mjs` bakes the bundled themes at build time (VSIX from
-OpenVSX → unzip → resolve `%nls%` labels → filter colors → `bundled.json` +
-`bundled-extensions.json`, **both checked in so builds need no network**).
-`lib/src/lib/themes/openvsx.ts` does the same in-browser for user-installed
-themes, **dynamically importing `fflate` and `jsonc-parser`** to keep them out of
-the initial bundle. The build script cannot import TS, so it restates the
-consumed-key list; `lib/src/lib/themes/consumed-keys.test.ts` pins the two.
+**Must check in both generated bundles so builds need no network.** **Must use `convertVscodeThemeColors` and `uiThemeToType` in both the build and browser importers.** The build tool imports their TypeScript module through the pinned Node runtime. **Must dynamically import `fflate` and `jsonc-parser` for installed themes**, keeping them out of the initial bundle.
 
 **Never** ship a theme in `bundled.json` without its `bundled-extensions.json`
 record, or keep a record no theme uses — that file is the provenance the
@@ -196,7 +179,7 @@ id, not object identity** (rationale). It serves the website tutorial's theme st
 ([tutorial.md](./tutorial.md)); **never** reach for `onTerminalThemeChange()`
 instead (rationale).
 
-Source of truth: `getInstalledThemes()` / `getStoredActiveThemeId()` /
+Source of truth: `DormouseTheme` in `lib/src/lib/themes/types.ts`; build importer in `lib/scripts/bundle-themes.mjs`; `fetchExtensionThemes` in `lib/src/lib/themes/openvsx.ts`; `convertVscodeThemeColors` / `uiThemeToType` in `lib/src/lib/themes/convert.ts`; `getInstalledThemes()` / `getStoredActiveThemeId()` /
 `setActiveThemeId()` in `lib/src/lib/themes/store.ts`;
 `subscribeToActiveTheme()` in `lib/src/lib/themes/apply.ts`;
 `onTerminalThemeChange()` in `lib/src/lib/terminal-theme.ts`.
@@ -303,14 +286,7 @@ Source of truth: `SNAPSHOT_EDITOR_FONT_FAMILY` in `lib/.storybook/themes.ts`;
 ## Theme debugger
 
 The Theme Debugger serves VSCode, standalone, and the website
-playground. **Never mutate theme storage or terminal colors** — snapshot
-DOM-visible state: theme metadata, consumed color `--vscode-*` tagged
-host-provided vs Dormouse-materialized with its declaration site and resolver
-trace, static `--color-*` tokens with their bound key, the terminal palette xterm.js
-reads, and Door/focus-ring picks with candidate metrics and a prose reason
-(`ThemeDiagnosticSnapshot` owns the shape). The copied report dumps
-the same snapshot. **A real VSCode webview shows only the *inferred* theme
-kind**, since VSCode exposes CSS variables and not raw built-in theme JSON.
+playground. **Must capture DOM-visible state through `ThemeDiagnosticSnapshot` without mutating theme storage or terminal colors.** Terminal colors are the visible CSS variables, including missing values, rather than an initialized xterm instance's palette. The copied report uses the same snapshot. **A real VSCode webview shows only the inferred theme kind**, since the host supplies CSS variables.
 
 Every host reaches it as `Debug current theme` in the `ThemePicker` menu, so on
 `/playground/pocket` it rides the `compact` variant (two mounts, defaulting to

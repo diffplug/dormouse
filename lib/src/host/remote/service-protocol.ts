@@ -27,6 +27,7 @@ import type {
   BurrowStatus,
 } from '../../remote/burrow/burrow-runtime';
 import type { OneTimeState } from '../../remote/burrow/one-time-runtime';
+import { isPathRefusal } from '../../remote/direct/path-refusal';
 import type { NetworkLevel, NetworkPolicy, NetworkPolicyResult } from '../../remote/network-policy';
 import type { RelayMode } from '../relay-origin';
 
@@ -173,6 +174,15 @@ export function servingOf(
 }
 
 /**
+ * Whether `connection` is a Relay that no longer takes this Burrow (a
+ * `BurrowStanding` latched, `docs/specs/relay.md` -> "Burrow side"), which the
+ * Burrow asks for nothing more: no push, device list, setup code, or relay row.
+ */
+export function relayRefuses(connection: BurrowStatus): boolean {
+  return connection === 'removed' || connection === 'not-entitled';
+}
+
+/**
  * The service instance a `status` event names, or `null` where it names none —
  * a broker older than the field — which drops no hold.
  */
@@ -198,8 +208,9 @@ export interface OneTimeEvent {
 
 /**
  * service → webview: the network policy changed (`docs/specs/remote-network.md`
- * -> "Policy"). Complete every time, so a reader replaces rather than merges;
- * `networkPolicy` answers the same shape, for a reader that arrives after it.
+ * -> "Policy"), or the path refusal it carries did. Complete every time, so a
+ * reader replaces rather than merges; `networkPolicy` and `dismissPathRefusal`
+ * answer the same shape, for a reader that arrives after it.
  */
 export interface NetworkPolicyEvent extends NetworkPolicyResult {
   name: 'network-policy';
@@ -230,7 +241,8 @@ export function idleOneTimeState(hosted: string | null, level: NetworkLevel): On
  * Whether `value` is a {@link OneTimeState} a panel can render: a known
  * `status` carrying the fields that status needs. A reason is only checked to
  * be a string — a panel keeps fixed copy per reason and falls back for one this
- * build does not know, since a VS Code broker may be a newer build.
+ * build does not know, since a VS Code broker may be a newer build — and an
+ * ending's `refusal`, where present, to pass `isPathRefusal`.
  */
 export function isOneTimeState(value: unknown): value is OneTimeState {
   if (!value || typeof value !== 'object') return false;
@@ -240,8 +252,9 @@ export function isOneTimeState(value: unknown): value is OneTimeState {
     case 'opening':
       return true;
     case 'unavailable':
-    case 'ended':
       return typeof state.reason === 'string';
+    case 'ended':
+      return typeof state.reason === 'string' && (state.refusal === undefined || isPathRefusal(state.refusal));
     case 'waiting':
       return typeof state.url === 'string' && typeof state.expiresAt === 'number';
     case 'confirming':
@@ -297,6 +310,16 @@ export interface EnrollParams {
  */
 export interface EnrollOfferParams {
   /** No token: it comes off the file, which the service re-reads at the click. */
+  label: string;
+}
+
+/**
+ * A Hosted build's device-code enrollment (`docs/specs/hosted.md` -> "Burrow
+ * enrollment"): `beginHostedEnrollment` takes the name to keep for this
+ * machine, and the service does the rest, reporting through `status`
+ * ({@link HostedEnrollmentState}). No origin and no URL: both are the build's.
+ */
+export interface HostedEnrollParams {
   label: string;
 }
 
@@ -384,6 +407,45 @@ export interface SetupQrResult {
 }
 
 /**
+ * Why a Hosted enrollment stopped short of enrolling, each read as fixed copy
+ * but `failed`, which carries the service's sentence. `answer-lost` is an
+ * approval an earlier poll redeemed whose answer never arrived. A reason this
+ * build does not know reads as `failed` with no sentence.
+ */
+export const HOSTED_ENROLLMENT_END_REASONS = ['expired', 'not-entitled', 'answer-lost', 'failed'] as const;
+export type HostedEnrollmentEndReason = (typeof HOSTED_ENROLLMENT_END_REASONS)[number];
+
+/**
+ * A Hosted build's device-code enrollment as `status` reports it: `waiting`
+ * for the account to approve `userCode`; `redeeming` once a poll redeemed it,
+ * until the enrollment is saved and started (so status always shows a code or
+ * an enrollment); or `ended` without an enrollment, until the next begin or a
+ * cancel. A success reports none: `enrolled` says it. `accountFull` is an
+ * approval the account cannot redeem until it removes a computer, which the
+ * Relay keeps, so the service polls on.
+ *
+ * **Never the device code**, which is a bearer the service holds as it holds
+ * `burrowToken` (`docs/specs/security-remote.md` -> "Trust boundary").
+ * `verificationUrl` is the account page the service composed, which the panel
+ * opens on a click; `expiresAt` is this machine's clock.
+ */
+export type HostedEnrollmentState =
+  | { status: 'waiting'; userCode: string; verificationUrl: string; expiresAt: number; accountFull: boolean }
+  | { status: 'redeeming' }
+  | ({ status: 'ended' } & HostedEnrollmentEnded);
+
+/**
+ * How a Hosted enrollment ended short of enrolling: `message` is `failed`'s
+ * sentence, and `burrowId` the Burrow an `answer-lost` approval enrolled, which
+ * the account must remove.
+ */
+export interface HostedEnrollmentEnded {
+  reason: HostedEnrollmentEndReason;
+  message?: string;
+  burrowId?: string;
+}
+
+/**
  * What `window.dormouseBurrow.status()` prints. `docs/specs/relay.md`
  * documents the console hook, so these field names are user-facing surface.
  */
@@ -400,10 +462,12 @@ export interface BurrowConsoleStatus {
   relayMode: RelayMode;
   burrowId: string | null;
   /**
-   * The relay socket's state. `displaced` is the one that needs acting on:
-   * another Dormouse instance enrolled with the same `burrowId` took the relay
-   * slot, so this one stood down and no timer will bring it back — `reconnect()`
-   * takes the slot back (and displaces the other one in turn).
+   * The relay socket's state. The latched ones need acting on, since no timer
+   * brings them back (`docs/specs/relay.md` -> "Burrow side", relay socket
+   * policy): `displaced` — another Dormouse instance enrolled with the same
+   * `burrowId` took the relay slot, and `reconnect()` takes it back;
+   * `removed` — the Relay no longer knows this Burrow; `not-entitled` — its
+   * Hosted account no longer includes the Relay.
    */
   connection: BurrowStatus;
   pairedClients: number;
@@ -420,6 +484,18 @@ export interface BurrowConsoleStatus {
    * the no-`burrowToken`-in-a-webview FAIL IF).
    */
   offer: boolean;
+  /**
+   * The device-code enrollment in a Hosted build, or `null` where none was
+   * begun since the last cancel or success, and always in a self-host build.
+   */
+  hostedEnrollment: HostedEnrollmentState | null;
+  /**
+   * The Hosted account's origin, where its computers are managed:
+   * `HOSTED_ACCOUNT_ORIGIN` in a release Hosted build, the origin the last
+   * begin resolved in a dev one (`null` before any), `null` in a self-host
+   * build.
+   */
+  accountOrigin: string | null;
 }
 
 /**

@@ -14,11 +14,13 @@ import {
   MAX_ONE_TIME_FRAME_LENGTH,
   NoiseTransportSession,
   ONE_TIME_DENIAL_CODES,
-  ONE_TIME_DIRECT_DEADLINE_MS,
+  DIRECT_ONLY_DEADLINE_MS,
+  DIRECT_SETUP_TIMEOUT_MS,
+  ONE_TIME_EXPIRY_GRACE_MS,
   ONE_TIME_LINK_TTL_MS,
-  ONE_TIME_PING,
-  ONE_TIME_PING_INTERVAL_MS,
-  ONE_TIME_PONG,
+  RELAY_PING,
+  RELAY_PING_INTERVAL_MS,
+  RELAY_PONG,
   WS_CLOSE_ONE_TIME_DEADLINE,
   WS_CLOSE_ONE_TIME_EXPIRED,
   WS_CLOSE_ONE_TIME_PEER_GONE,
@@ -276,9 +278,9 @@ describe('OneTimeClient: the rendezvous socket', () => {
     await flushUntil(() => (sockets.length > 0 && fromPhone().length > 0 ? true : undefined));
     const socket = phoneSocket();
     const parse = vi.spyOn(JSON, 'parse');
-    socket.deliver(ONE_TIME_PONG);
+    socket.deliver(RELAY_PONG);
     // A whole-string compare, never a parse.
-    expect(parse.mock.calls.some(([text]) => text === ONE_TIME_PONG)).toBe(false);
+    expect(parse.mock.calls.some(([text]) => text === RELAY_PONG)).toBe(false);
     parse.mockRestore();
     socket.deliver(new Uint8Array(8).buffer);
     socket.deliver('{"t":"one-time"');
@@ -299,16 +301,16 @@ describe('OneTimeClient: the rendezvous socket', () => {
     const burrow = await ScriptedBurrow.create();
     const result = client.connectOnce(burrow.link, LABEL, () => {});
     await burrow.answerInit();
-    const pings = () => phoneSocket().sent.filter((data) => data === ONE_TIME_PING).length;
-    clock.advance(ONE_TIME_PING_INTERVAL_MS - 1);
+    const pings = () => phoneSocket().sent.filter((data) => data === RELAY_PING).length;
+    clock.advance(RELAY_PING_INTERVAL_MS - 1);
     expect(pings()).toBe(0);
     clock.advance(1);
     expect(pings()).toBe(1);
-    clock.advance(ONE_TIME_PING_INTERVAL_MS);
+    clock.advance(RELAY_PING_INTERVAL_MS);
     expect(pings()).toBe(2);
     phoneSocket().closeWith(WS_CLOSE_ONE_TIME_PEER_GONE);
     expect(await result).toEqual({ ok: false, message: ONE_TIME_ENDED_MESSAGE });
-    clock.advance(ONE_TIME_PING_INTERVAL_MS);
+    clock.advance(RELAY_PING_INTERVAL_MS);
     expect(pings()).toBe(2);
     expect(clock.armed).toBe(0);
   });
@@ -537,6 +539,17 @@ describe('OneTimeClient: the confirmation', () => {
       message: ONE_TIME_UNREACHABLE_MESSAGE,
     });
   });
+
+  it('ends a socket that never opens at the room’s hard deadline, as the link expiring', async () => {
+    const client = makeClient({ open: false });
+    const burrow = await ScriptedBurrow.create();
+    const result = client.connectOnce(burrow.link, LABEL, () => {});
+    await flushUntil(() => sockets[0]);
+    clock.advance(burrow.link.expiry * 1000 + ONE_TIME_EXPIRY_GRACE_MS - clock.now());
+    expect(await result).toEqual({ ok: false, message: ONE_TIME_LINK_EXPIRED_MESSAGE });
+    expect(phoneSocket().closeCode).toBe(1000);
+    expect(clock.armed).toBe(0);
+  });
 });
 
 describe('OneTimeClient: the direct path', () => {
@@ -583,11 +596,12 @@ describe('OneTimeClient: the direct path', () => {
     const { result } = await connecting(client, burrow);
     const settled = vi.fn();
     void result.then(settled);
-    // The phone's own channel opens late and it switches, so neither its setup
-    // deadline nor its handoff deadline is the one that fires first.
-    clock.advance(5_000);
+    // The phone's own channel opens at the last moment its setup bound allows
+    // and it switches; the computer never does. The deadline is the sum of the
+    // two bounds, so the phone's own handoff wait spends exactly what is left.
+    clock.advance(DIRECT_SETUP_TIMEOUT_MS - 1);
     network.openChannels();
-    clock.advance(ONE_TIME_DIRECT_DEADLINE_MS - 5_000 - 1);
+    clock.advance(DIRECT_ONLY_DEADLINE_MS - DIRECT_SETUP_TIMEOUT_MS - 1);
     await settle();
     expect(settled).not.toHaveBeenCalled();
     clock.advance(1);

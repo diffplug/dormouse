@@ -3,8 +3,9 @@
  * frames in and out, and the `frames` / `sent` arrays every assertion reads.
  *
  * Shared so `FakeBurrow` and `FakeClient` cannot drift into two opinions about
- * teardown or frame recording. It stays free of `relay/test/helpers.mjs` —
- * `scripts/fake-burrow.mjs` imports `FakeBurrow` without a built Relay.
+ * teardown or frame recording. It stays free of any one Relay — the self-host
+ * suites, `relay/scripts/fake-burrow.mjs`, and Hosted's Durable Object suite
+ * all drive it.
  */
 
 /**
@@ -26,9 +27,11 @@ function record(log, frame) {
  *
  * `socket` replaces the real `WebSocket` — how the malicious-relay harness puts
  * a peer it controls between the two halves without changing either of them.
+ * `init` is Node's `WebSocket` options: `{ headers }` gives a socket the
+ * `Origin` a browser would send.
  */
-export function attachFrameSocket(target, url, socket) {
-  const ws = socket ?? new WebSocket(url);
+export function attachFrameSocket(target, url, socket, init) {
+  const ws = socket ?? new WebSocket(url, init);
   target.ws = ws;
   /** Every frame the relay delivered, and every frame this peer sent. */
   target.frames = [];
@@ -107,4 +110,66 @@ export function closeSocket(target) {
   } catch {
     /* already closing */
   }
+}
+
+export function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Poll `fn` until it returns truthy, or throw after `timeout`ms. */
+export async function until(fn, { timeout = 1000, interval = 5 } = {}) {
+  const deadline = Date.now() + timeout;
+  for (;;) {
+    if (await fn()) return;
+    if (Date.now() > deadline) throw new Error('condition not met in time');
+    await sleep(interval);
+  }
+}
+
+/**
+ * Open a WebSocket and wrap it in a tiny test harness: `ready` resolves on open
+ * (rejects on a failed upgrade), `take()` yields received frames in order with
+ * an internal cursor — JSON parsed, anything else (a pong) as its text — and
+ * `quiet()` asserts no frame arrived in a window. `init` as
+ * {@link attachFrameSocket} takes it.
+ */
+export function openFrameSocket(url, init) {
+  const ws = new WebSocket(url, init);
+  const messages = [];
+  let cursor = 0;
+  ws.addEventListener('message', (ev) => {
+    const text = typeof ev.data === 'string' ? ev.data : '';
+    try {
+      messages.push(JSON.parse(text));
+    } catch {
+      messages.push(text);
+    }
+  });
+  const ready = new Promise((resolve, reject) => {
+    ws.addEventListener('open', () => resolve());
+    ws.addEventListener('error', (ev) => reject(ev.error ?? new Error('ws error')));
+    ws.addEventListener('close', (ev) => reject(new Error(`closed before open (${ev.code})`)));
+  });
+  // Unhandled when a test expects the upgrade to fail and awaits `closed` instead.
+  ready.catch(() => {});
+  const closed = new Promise((resolve) => ws.addEventListener('close', (ev) => resolve(ev)));
+  return {
+    ws,
+    ready,
+    closed,
+    messages,
+    send: (frame) => ws.send(JSON.stringify(frame)),
+    close: () => ws.close(),
+    /** Next unconsumed frame, waiting up to `timeout`ms for it to arrive. */
+    async take(timeout = 1000) {
+      await until(() => messages.length > cursor, { timeout });
+      return messages[cursor++];
+    },
+    /** True if no new frame arrives within `ms` (i.e. the pipe stayed blocked). */
+    async quiet(ms = 60) {
+      const before = messages.length;
+      await sleep(ms);
+      return messages.length === before;
+    },
+  };
 }

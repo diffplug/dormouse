@@ -10,14 +10,17 @@
  * the same token) models a Burrow restart: its ACL starts empty again.
  *
  * Constructor: `{ relayUrl, burrowToken, burrowId, origin, rpId, label,
- * autoApprove, requireUserVerification, noiseStaticKeyPair }`. `relayUrl` may
- * be `http(s)://…` or `ws(s)://…`. With `autoApprove` the Burrow types back
- * whatever code the request displayed; otherwise call
- * `confirmPairing(clientId, code)` / `denyPairing(clientId)`.
+ * autoApprove, requireUserVerification, noiseStaticKeyPair, directOnly, socket,
+ * socketInit }`. `relayUrl` may be `http(s)://…` or `ws(s)://…`. With
+ * `autoApprove` the Burrow types back whatever code the request displayed;
+ * otherwise call `confirmPairing(clientId, code)` / `denyPairing(clientId)`.
+ * `directOnly` is `BurrowRuntime` under a held path policy (Local networks):
+ * the outcome says so, and — this Burrow having no direct path — any
+ * application message ends its session unread, with the goodbye.
  *
  * Events, for logs and assertions: `open`, `close`, `frame`, `invitation`,
  * `e2e-open`, `e2e-receive`, `e2e-error`, `pairing-request`, `paired`,
- * `denied`, `decision`, `msg`, `client-gone`.
+ * `denied`, `decision`, `msg`, `relayed-app`, `client-gone`.
  */
 
 import { EventEmitter } from 'node:events';
@@ -31,6 +34,7 @@ import {
   NoiseTransportSession,
   REMOTE_EVENTS,
   REMOTE_METHODS,
+  SESSION_END_V1,
   WS_ROUTES,
   WS_TOKEN_PARAM,
   boundedPairingLabel,
@@ -49,7 +53,7 @@ import {
   utf8Decode,
   utf8Encode,
   verifyPresenceProof,
-} from 'remote-lib-common';
+} from '../../dist/index.js';
 
 import { attachFrameSocket, closeSocket, receiveFrame, sendFrame } from './frame-socket.mjs';
 
@@ -72,10 +76,13 @@ export class FakeBurrow extends EventEmitter {
     autoApprove = true,
     requireUserVerification,
     noiseStaticKeyPair,
+    directOnly = false,
     socket,
+    socketInit,
   }) {
     super();
     this.burrowId = burrowId;
+    this.directOnly = directOnly;
     this.label = label;
     this.autoApprove = autoApprove;
     this.noiseStaticKeyPair = noiseStaticKeyPair;
@@ -107,6 +114,7 @@ export class FakeBurrow extends EventEmitter {
       this,
       `${wsBase}${WS_ROUTES.burrow}?${WS_TOKEN_PARAM}=${burrowToken}`,
       socket,
+      socketInit,
     );
     ws.addEventListener('message', (ev) => {
       // Serialized through a promise chain for the reason the relay serializes
@@ -622,7 +630,11 @@ export class FakeBurrow extends EventEmitter {
     const state = this.#clientState(clientId);
     state.connection = undefined;
     state.established = pending;
-    this.#sendControl(pending, { ok: true, burrowLabel: this.label });
+    this.#sendControl(pending, {
+      ok: true,
+      burrowLabel: this.label,
+      ...(this.directOnly ? { directOnly: true } : {}),
+    });
     this.emit('decision', { clientId, allowed: true, record });
   }
 
@@ -647,6 +659,17 @@ export class FakeBurrow extends EventEmitter {
     }
     this.emit('e2e-receive', { clientId, kind: 'connection', id: frame.id, receipt, entry: established });
     if (receipt.kind !== 'app') return;
+    // Every frame here crossed the relay: a direct-only session ends unread.
+    if (this.directOnly) {
+      this.#sendControl(established, { ...SESSION_END_V1 });
+      const state = this.clients.get(clientId);
+      if (state?.established === established) {
+        state.established = undefined;
+        this.#pruneClient(clientId);
+      }
+      this.emit('relayed-app', { clientId, id: frame.id });
+      return;
+    }
     const send = (payload) => {
       for (const ciphertext of established.session.sendApp(utf8Encode(JSON.stringify(payload)))) {
         this.e2eSendCiphertext(established, ciphertext);

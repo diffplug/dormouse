@@ -39,6 +39,8 @@ export class FakeSocket implements RemoteWebSocket {
    */
   closeEmits = true;
   readonly sent: Array<Record<string, unknown>> = [];
+  /** Every message sent that is not JSON: the relay heartbeat's pings. */
+  readonly texts: string[] = [];
   /**
    * Called with every frame this socket is asked to send. The seam the relay
    * stub (`test-relay.ts`) bridges two of these sockets through; without it a
@@ -53,7 +55,13 @@ export class FakeSocket implements RemoteWebSocket {
   }
 
   send(data: string): void {
-    const frame = JSON.parse(data) as Record<string, unknown>;
+    let frame: Record<string, unknown>;
+    try {
+      frame = JSON.parse(data) as Record<string, unknown>;
+    } catch {
+      this.texts.push(data);
+      return;
+    }
     this.sent.push(frame);
     this.onSend?.(frame);
   }

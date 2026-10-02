@@ -3,8 +3,8 @@ import {
   MAX_ONE_TIME_FRAME_LENGTH,
   ONE_TIME_EXPIRY_GRACE_MS,
   ONE_TIME_LINK_TTL_MS,
-  ONE_TIME_PING,
-  ONE_TIME_PONG,
+  RELAY_PING,
+  RELAY_PONG,
   ONE_TIME_ROOM_PARAM,
   ONE_TIME_WS_ROUTES,
   WS_CLOSE_ONE_TIME_DEADLINE,
@@ -22,11 +22,10 @@ import {
   type OneTimeRoomFrame,
 } from "remote-lib-common";
 
+import { OPEN, refuseSocket } from "./socket-room";
+
 /** A socket's role, as its hibernation tag. */
 type Role = "burrow" | "client";
-
-/** `WebSocket.OPEN`. */
-const OPEN = 1;
 
 /** The room's whole state, held as the Burrow socket's attachment. */
 interface RoomState {
@@ -53,7 +52,7 @@ export class OneTimeRoom {
     // Answered by the runtime, so a keepalive neither wakes the room nor
     // reaches `webSocketMessage` to be forwarded or counted.
     ctx.setWebSocketAutoResponse(
-      new WebSocketRequestResponsePair(ONE_TIME_PING, ONE_TIME_PONG),
+      new WebSocketRequestResponsePair(RELAY_PING, RELAY_PONG),
     );
   }
 
@@ -76,15 +75,10 @@ export class OneTimeRoom {
   }
 
   async #open(roomId: string): Promise<Response> {
-    const { 0: client, 1: server } = new WebSocketPair();
     // A room id is minted fresh for each Burrow socket, so a room opens once.
     if (this.#socket("burrow") || this.#socket("client"))
-      return this.#refuse(
-        client,
-        server,
-        WS_CLOSE_ONE_TIME_UNAVAILABLE,
-        WS_CLOSE_ONE_TIME_UNAVAILABLE_REASON,
-      );
+      return refuseSocket(WS_CLOSE_ONE_TIME_UNAVAILABLE, WS_CLOSE_ONE_TIME_UNAVAILABLE_REASON);
+    const { 0: client, 1: server } = new WebSocketPair();
     const { linkTtlMs, expiryGraceMs } = this.limits();
     const expiresAt = Date.now() + linkTtlMs;
     await this.#ctx.storage.setAlarm(expiresAt + expiryGraceMs);
@@ -105,31 +99,15 @@ export class OneTimeRoom {
   }
 
   #join(): Response {
-    const { 0: client, 1: server } = new WebSocketPair();
     // Check and set with no await between them: the one join is decided here.
     const burrow = this.#socket("burrow");
     const state = burrow && this.#state(burrow);
     if (!burrow || !state)
-      return this.#refuse(
-        client,
-        server,
-        WS_CLOSE_ONE_TIME_UNAVAILABLE,
-        WS_CLOSE_ONE_TIME_UNAVAILABLE_REASON,
-      );
-    if (state.joined)
-      return this.#refuse(
-        client,
-        server,
-        WS_CLOSE_ONE_TIME_TAKEN,
-        WS_CLOSE_ONE_TIME_TAKEN_REASON,
-      );
+      return refuseSocket(WS_CLOSE_ONE_TIME_UNAVAILABLE, WS_CLOSE_ONE_TIME_UNAVAILABLE_REASON);
+    if (state.joined) return refuseSocket(WS_CLOSE_ONE_TIME_TAKEN, WS_CLOSE_ONE_TIME_TAKEN_REASON);
     if (Date.now() > state.expiresAt)
-      return this.#refuse(
-        client,
-        server,
-        WS_CLOSE_ONE_TIME_EXPIRED,
-        WS_CLOSE_ONE_TIME_EXPIRED_REASON,
-      );
+      return refuseSocket(WS_CLOSE_ONE_TIME_EXPIRED, WS_CLOSE_ONE_TIME_EXPIRED_REASON);
+    const { 0: client, 1: server } = new WebSocketPair();
     burrow.serializeAttachment({ ...state, joined: true } satisfies RoomState);
     this.#ctx.acceptWebSocket(server, ["client"]);
     return new Response(null, { status: 101, webSocket: client });
@@ -176,22 +154,6 @@ export class OneTimeRoom {
     await (joined
       ? this.#end(WS_CLOSE_ONE_TIME_DEADLINE, WS_CLOSE_ONE_TIME_DEADLINE_REASON)
       : this.#end(WS_CLOSE_ONE_TIME_EXPIRED, WS_CLOSE_ONE_TIME_EXPIRED_REASON));
-  }
-
-  /**
-   * Accept-then-close, so the refused end reads a code rather than a failed
-   * upgrade. Accepted outside hibernation: the socket is never the room's, so
-   * none of its events reach the handlers above.
-   */
-  #refuse(
-    client: WorkerWebSocket,
-    server: WorkerWebSocket,
-    code: number,
-    reason: string,
-  ): Response {
-    server.accept();
-    server.close(code, reason);
-    return new Response(null, { status: 101, webSocket: client });
   }
 
   /** Close every socket the room holds and delete what it stored. */

@@ -14,6 +14,7 @@ import { appCommand } from './commands/app.js';
 import { awaitCommand } from './commands/await.js';
 import { ensureCommand } from './commands/ensure.js';
 import { iframeCommand } from './commands/iframe.js';
+import { moveCommand } from './commands/move.js';
 import { killCommand } from './commands/kill.js';
 import { listCommand } from './commands/list.js';
 import { readCommand } from './commands/read.js';
@@ -57,6 +58,8 @@ export type {
   IdFormat,
   IframeSurfaceRequest,
   IframeSurfaceResponse,
+  MoveSurfaceRequest,
+  MoveSurfaceResponse,
   KillSurfaceConfirmation,
   KillSurfaceRequest,
   KillSurfaceResponse,
@@ -103,6 +106,7 @@ const COMMANDS = [
   readCommand,
   awaitCommand,
   killCommand,
+  moveCommand,
   iframeCommand,
   agentBrowserCommand,
   playwrightCommand,
@@ -122,6 +126,7 @@ const ROUTES = {
   read: readCommand.command,
   await: awaitCommand.command,
   kill: killCommand.command,
+  move: moveCommand.command,
   iframe: iframeCommand.command,
   'agent-browser': agentBrowserCommand.command,
   playwright: playwrightCommand.command,

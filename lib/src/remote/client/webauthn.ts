@@ -41,6 +41,15 @@ export function isPasskeyAlreadyRegistered(err: unknown): boolean {
   return (err as { name?: unknown }).name === 'InvalidStateError';
 }
 
+/**
+ * The name a registered passkey shows in the platform's passkey manager: the
+ * app and the Relay it signs in to, never the account id, which is the
+ * credential's opaque `user.id` alone.
+ */
+export function passkeyUserName(rpId: string): string {
+  return `Dormouse Pocket (${rpId})`;
+}
+
 /** The result of a passkey registration, ready for `POST /api/setup/finish`. */
 export interface PasskeyRegistration {
   /** `PublicKeyCredential.id` — already base64url. */
@@ -116,8 +125,8 @@ async function registerPasskey(
       rp: { id: rpId, name: 'Dormouse' },
       user: {
         id: toBufferSource(utf8Encode(accountId)),
-        name: accountId,
-        displayName: accountId,
+        name: passkeyUserName(rpId),
+        displayName: passkeyUserName(rpId),
       },
       pubKeyCredParams: [{ type: 'public-key', alg: -7 }],
       excludeCredentials: excludeCredentialIds.map((id) => ({

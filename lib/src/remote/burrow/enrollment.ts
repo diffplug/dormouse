@@ -6,12 +6,18 @@
 import {
   API_ROUTES,
   BAD_PASSWORD_ERROR,
+  NOT_ENTITLED_ERROR,
   ORIGIN_MISMATCH_ERROR,
   UNAUTHORIZED_ERROR,
+  isBurrowEnrollBeginResponse,
+  isBurrowEnrollPollResponse,
   isE2eId,
   isNoiseStaticMaterial,
   mintNoiseStaticKeyPair,
   normalizeOrigin,
+  type BurrowEnrollBeginRequest,
+  type BurrowEnrollBeginResponse,
+  type BurrowEnrollPollRequest,
   type BurrowEnrollRequest,
   type BurrowEnrollResponse,
 } from 'remote-lib-common';
@@ -37,7 +43,7 @@ export interface BurrowEnrollment {
    *
    * **Local only.** It is delivered to a Client inside the encrypted pairing and
    * connection outcomes and nowhere else; the Relay never stores or sees it
-   * past the enroll request. Optional because an enrollment persisted before
+   * in an enrollment request. Optional because an enrollment persisted before
    * this field existed must keep loading rather than reading as un-enrolled.
    */
   label?: string;
@@ -59,7 +65,7 @@ export interface BurrowEnrollment {
    * and it lives only where the enrollment lives, which is owner-only storage
    * on both burrows (`docs/specs/security-remote.md` → "Credentials at rest"). Optional today
    * because an enrollment persisted before this field existed must keep
-   * loading; nothing reads it yet.
+   * loading; the service backfills a missing static before starting.
    */
   noiseStaticPrivateKey?: string;
   /** The raw 32-byte public half of that static, base64url. */
@@ -259,6 +265,20 @@ export async function performEnrollment(
   } catch (error) {
     throw new Error(`Could not enroll: the Relay did not answer JSON (${errorMessage(error)})`);
   }
+  return enrollmentFrom(relayOrigin, body, label, noiseStatic);
+}
+
+/**
+ * A Relay's {@link BurrowEnrollResponse} as this Burrow's enrollment, or a
+ * throw naming what it got wrong: one mapping for both exchanges, so the
+ * password and the device code mint the same shape through {@link isEnrollment}.
+ */
+function enrollmentFrom(
+  relayOrigin: string,
+  body: unknown,
+  label: string,
+  noiseStatic: EnrollmentStatic,
+): BurrowEnrollment {
   const enrolled = body as Partial<BurrowEnrollResponse> | null;
   const enrollment = {
     relayUrl: relayOrigin,
@@ -277,8 +297,8 @@ export async function performEnrollment(
     ...(typeof enrolled?.requireUserVerification === 'boolean'
       ? { requireUserVerification: enrolled.requireUserVerification }
       : {}),
-    // Minted above and never sent to the Relay. Persisting it is the caller's
-    // job, alongside `burrowToken`.
+    // Minted before the first request and never sent to the Relay. Persisting
+    // it is the caller's job, alongside `burrowToken`.
     ...noiseStatic,
   };
   if (!isEnrollment(enrollment)) {
@@ -287,6 +307,128 @@ export async function performEnrollment(
     );
   }
   return enrollment;
+}
+
+// --- Hosted's device code (`docs/specs/hosted.md` -> "Burrow enrollment") ---
+
+/** A begun device-code enrollment: the Relay's checked answer, and the static minted before it. */
+export interface HostedEnrollmentBegun {
+  begin: BurrowEnrollBeginResponse;
+  noiseStatic: EnrollmentStatic;
+}
+
+/**
+ * `POST /api/burrow/enroll/begin` with the baked origin, the answer checked by
+ * `isBurrowEnrollBeginResponse`. Throws what the settings panel shows. The
+ * Noise static is minted first, as {@link performEnrollment} mints it, so a
+ * runtime that cannot make one fails before the Relay is asked anything; the
+ * caller holds it until a poll redeems, and the Relay never sees it.
+ */
+export async function beginHostedEnrollment(
+  relayOrigin: string,
+  // The service's guarded fetch, as for `performEnrollment`; no default.
+  fetch: typeof globalThis.fetch,
+): Promise<HostedEnrollmentBegun> {
+  const noiseStatic = await mintNoiseStatic();
+  const response = await fetch(`${relayOrigin}${API_ROUTES.burrowEnrollBegin}`, {
+    method: 'POST',
+    signal: AbortSignal.timeout(BURROW_REQUEST_TIMEOUT_MS),
+    redirect: 'error',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ origin: relayOrigin } satisfies BurrowEnrollBeginRequest),
+  });
+  if (!response.ok) {
+    const detail = await response.text().catch(() => '');
+    throw new Error(refusalMessage(response.status, detail, relayOrigin));
+  }
+  const body: unknown = await response.json().catch(() => null);
+  if (!isBurrowEnrollBeginResponse(body)) {
+    throw new Error('Could not enroll: the Relay’s answer was not an enrollment code.');
+  }
+  return { begin: body, noiseStatic };
+}
+
+/**
+ * What one poll says. `retry` is a poll that told nothing — the Relay
+ * unreachable, a 5xx, a 2xx whose body was lost mid-read, or a 429, which asks
+ * the Burrow to `slowDown` — and the
+ * next poll asks again; `redeemed` is an approval an earlier poll spent on
+ * `burrowId`, whose answer never arrived; `refused` keeps the copy for its fixed reasons to the
+ * panel; `failed` names what went wrong.
+ */
+export type HostedEnrollmentPoll =
+  | { status: 'pending' }
+  | { status: 'retry'; slowDown: boolean }
+  | { status: 'expired' }
+  | { status: 'redeemed'; burrowId: string }
+  | { status: 'enrolled'; enrollment: BurrowEnrollment }
+  | { status: 'refused'; reason: 'not-entitled' | 'account-full' }
+  | { status: 'failed'; message: string };
+
+/**
+ * `POST /api/burrow/enroll/poll` once. **Never throws**: the service's poll
+ * loop reads every outcome. An `enrolled` answer is mapped through the same
+ * {@link isEnrollment} guard as the password exchange's, with `label` and the
+ * static {@link beginHostedEnrollment} minted.
+ */
+export async function pollHostedEnrollment(
+  relayOrigin: string,
+  deviceCode: string,
+  label: string,
+  noiseStatic: EnrollmentStatic,
+  fetch: typeof globalThis.fetch,
+): Promise<HostedEnrollmentPoll> {
+  let response: Response;
+  try {
+    response = await fetch(`${relayOrigin}${API_ROUTES.burrowEnrollPoll}`, {
+      method: 'POST',
+      signal: AbortSignal.timeout(BURROW_REQUEST_TIMEOUT_MS),
+      // The device code is a bearer until it expires.
+      redirect: 'error',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ deviceCode } satisfies BurrowEnrollPollRequest),
+    });
+  } catch {
+    return { status: 'retry', slowDown: false };
+  }
+  if (response.status === 429) return { status: 'retry', slowDown: true };
+  if (response.status >= 500) return { status: 'retry', slowDown: false };
+  if (!response.ok) {
+    const detail = await response.text().catch(() => '');
+    if (response.status === 403 && refusedError(detail) === NOT_ENTITLED_ERROR) {
+      return { status: 'refused', reason: 'not-entitled' };
+    }
+    // The poll's only 409: the account holds `MAX_ENROLLED_BURROWS` already.
+    if (response.status === 409) return { status: 'refused', reason: 'account-full' };
+    return { status: 'failed', message: refusalMessage(response.status, detail, relayOrigin) };
+  }
+  // A body lost on the wire after a 2xx's headers is a transport failure like
+  // one before them: the next poll can still hear `redeemed`. Only a complete
+  // body that is not an enrollment poll fails.
+  let text: string;
+  try {
+    text = await response.text();
+  } catch {
+    return { status: 'retry', slowDown: false };
+  }
+  const body = parseJson(text);
+  if (!isBurrowEnrollPollResponse(body)) {
+    return { status: 'failed', message: 'Could not enroll: the Relay’s answer was not an enrollment poll.' };
+  }
+  // Rebuilt, so nothing but the guarded fields reaches `status`.
+  if (body.status === 'redeemed') return { status: 'redeemed', burrowId: body.burrowId };
+  if (body.status !== 'enrolled') return { status: body.status };
+  try {
+    return { status: 'enrolled', enrollment: enrollmentFrom(relayOrigin, body.enrollment, label, noiseStatic) };
+  } catch (error) {
+    return { status: 'failed', message: errorMessage(error) };
+  }
+}
+
+/** The Noise static an enrollment carries, minted before its first request. */
+export interface EnrollmentStatic {
+  noiseStaticPrivateKey: string;
+  noiseStaticPublicKey: string;
 }
 
 /**
@@ -299,10 +441,7 @@ export async function performEnrollment(
  * than leaving the operator with a Burrow that enrolled and then does nothing
  * (`docs/specs/remote-security-model.md` → Noise suite).
  */
-async function mintNoiseStatic(): Promise<{
-  noiseStaticPrivateKey: string;
-  noiseStaticPublicKey: string;
-}> {
+async function mintNoiseStatic(): Promise<EnrollmentStatic> {
   let material;
   try {
     material = await mintNoiseStaticKeyPair();
@@ -335,6 +474,14 @@ function missingEnrollmentFields(enrollment: Record<string, unknown>): string[] 
   );
   if (!wrong.includes('burrowId') && !isE2eId(enrollment.burrowId)) wrong.unshift('burrowId');
   return wrong;
+}
+
+function parseJson(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
 }
 
 function errorMessage(error: unknown): string {

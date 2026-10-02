@@ -9,10 +9,18 @@ import assert from 'node:assert/strict';
 import { readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { API_ROUTES, E2E_ID_LENGTH, WS_ROUTES, WS_TOKEN_PARAM, isE2eId } from 'remote-lib-common';
+import {
+  API_ROUTES,
+  E2E_ID_LENGTH,
+  MAX_ENROLLED_BURROWS,
+  RELAY_BEARER_LENGTH,
+  WS_ROUTES,
+  WS_TOKEN_PARAM,
+  isE2eId,
+} from 'remote-lib-common';
 
 import { BURROW_ENROLL_ATTEMPT_REFILL_MS } from '../dist/app.js';
-import { BURROW_TOKEN_LENGTH, BurrowStore, MAX_ENROLLED_BURROWS } from '../dist/state.js';
+import { BurrowStore } from '../dist/state.js';
 
 import {
   RP_ID,
@@ -204,14 +212,14 @@ test('only Burrow-enrollment rejection invokes the retained-request delay', asyn
   assert.equal(
     (
       await app.request(API_ROUTES.pushDevices, {
-        headers: { Authorization: `Bearer ${'A'.repeat(BURROW_TOKEN_LENGTH)}` },
+        headers: { Authorization: `Bearer ${'A'.repeat(RELAY_BEARER_LENGTH)}` },
       })
     ).status,
     401,
   );
   assert.equal(
     (
-      await app.request(`${WS_ROUTES.burrow}?${WS_TOKEN_PARAM}=${'A'.repeat(BURROW_TOKEN_LENGTH)}`)
+      await app.request(`${WS_ROUTES.burrow}?${WS_TOKEN_PARAM}=${'A'.repeat(RELAY_BEARER_LENGTH)}`)
     ).status,
     401,
   );
@@ -242,16 +250,16 @@ test('a hand-edited burrows.json revokes through the read cache', async () => {
 test('a token of a shape no Burrow was ever minted never reaches burrows.json', async () => {
   const { app, stateDir } = await freshApp();
   const { body: burrow } = await enrollBurrow(app);
-  assert.equal(burrow.burrowToken.length, BURROW_TOKEN_LENGTH);
+  assert.equal(burrow.burrowToken.length, RELAY_BEARER_LENGTH);
 
   const store = new BurrowStore(stateDir);
   // Make the file unreadable-as-JSON: any lookup that actually reads it throws.
   await writeFile(join(stateDir, 'burrows.json'), 'not json');
-  for (const bad of ['', 'short', `${burrow.burrowToken}x`, `${'!'.repeat(BURROW_TOKEN_LENGTH)}`]) {
+  for (const bad of ['', 'short', `${burrow.burrowToken}x`, `${'!'.repeat(RELAY_BEARER_LENGTH)}`]) {
     assert.equal(await store.findByToken(bad), undefined, bad);
   }
   // The control: a well-shaped token does read the file, and so does throw.
-  await assert.rejects(store.findByToken('A'.repeat(BURROW_TOKEN_LENGTH)));
+  await assert.rejects(store.findByToken('A'.repeat(RELAY_BEARER_LENGTH)));
 });
 
 /**

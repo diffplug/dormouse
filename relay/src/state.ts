@@ -6,10 +6,13 @@ import { join } from 'node:path';
 
 import {
   E2E_ID_BYTE_LENGTH,
+  MAX_ENROLLED_BURROWS,
+  MAX_PUSH_SUBSCRIPTIONS_PER_ACCOUNT,
+  MAX_PUSH_SUBSCRIPTIONS_PER_BURROW,
+  RELAY_BEARER_BYTE_LENGTH,
   SELFHOST_ACCOUNT_ID,
-  base64UrlLength,
   isE2eId,
-  isExactBase64Url,
+  isRelayBearer,
   toBase64Url,
 } from 'remote-lib-common';
 import type { PushSubscriptionPayload } from 'remote-lib-common';
@@ -164,12 +167,10 @@ abstract class JsonFileStore {
 
   /**
    * Overwrite the whole file atomically (temp file + rename). `burrows.json`
-   * holds `burrowToken` in plaintext, so the directory is owner-only (`0o700`)
-   * and every file owner-read/write (`0o600`) — without an explicit mode both
-   * inherit the umask, which on a typical Linux box yields world-readable
-   * `0o755`/`0o644` and leaks live burrow tokens to every other local account.
-   * The mode only applies when the file is created, so `rename` onto an
-   * existing path keeps the temp file's `0o600`.
+   * holds a plaintext bearer: POSIX creation uses `0o700` for the directory
+   * and `0o600` for each replacement file. Windows inherits the directory DACL;
+   * the installer establishes its privacy before Relay startup. Existing
+   * directory modes are not tightened here.
    */
   protected async writeAtomic(value: unknown): Promise<void> {
     await mkdir(this.#stateDir, { recursive: true, mode: 0o700 });
@@ -360,30 +361,6 @@ export interface StoredBurrow {
   readonly enrolledAt: number;
 }
 
-/**
- * The one shape a `burrowToken` has: 32 random bytes, base64url. Minted here and
- * required at every lookup, the way `burrowId` is pinned to `isE2eId`
- * (`docs/specs/relay.md` -> State files).
- */
-const BURROW_TOKEN_BYTE_LENGTH = 32;
-export const BURROW_TOKEN_LENGTH = base64UrlLength(BURROW_TOKEN_BYTE_LENGTH);
-
-/** Whether `value` could be a token this Relay minted. */
-export function isBurrowToken(value: unknown): value is string {
-  return isExactBase64Url(value, BURROW_TOKEN_LENGTH);
-}
-
-/**
- * How many Burrows one account may have enrolled.
- *
- * Enrollment is credential-gated, so this is not a flood defense — it is the
- * bound on a file that is otherwise append-only and is re-read, re-parsed and
- * compared row by row on every burrow-gated request and every `/ws/burrow`
- * upgrade. Far above the machines a person owns; revocation (deleting a row by
- * hand) is what makes room.
- */
-export const MAX_ENROLLED_BURROWS = 32;
-
 /** Thrown by {@link BurrowStore.enroll} when {@link MAX_ENROLLED_BURROWS} is reached. */
 export class BurrowLimitReachedError extends Error {
   constructor() {
@@ -461,10 +438,12 @@ export class BurrowStore extends JsonFileStore {
    * lookup costs a `stat` (plus a `readFile` + `JSON.parse` whenever the file
    * changed) + two SHA-256 per row — so a probe
    * that cannot possibly be a token this Relay minted must not buy any of it.
-   * The same reasoning `isDeliveryId` applies at the push routes.
+   * The same reasoning `isPushDeliveryId` applies at the push routes.
    */
   async findByToken(burrowToken: string): Promise<StoredBurrow | undefined> {
-    if (!isBurrowToken(burrowToken)) return undefined;
+    // The one shape a `burrowToken` has, required at every lookup the way
+    // `burrowId` is pinned to `isE2eId` (`docs/specs/relay.md` -> State files).
+    if (!isRelayBearer(burrowToken)) return undefined;
     const burrows = await this.list();
     let match: StoredBurrow | undefined;
     for (const h of burrows) {
@@ -507,7 +486,7 @@ export class BurrowStore extends JsonFileStore {
       if (burrows.length >= MAX_ENROLLED_BURROWS) throw new BurrowLimitReachedError();
       const burrow: StoredBurrow = {
         burrowId: toBase64Url(randomBytes(E2E_ID_BYTE_LENGTH)),
-        burrowToken: toBase64Url(randomBytes(BURROW_TOKEN_BYTE_LENGTH)),
+        burrowToken: toBase64Url(randomBytes(RELAY_BEARER_BYTE_LENGTH)),
         enrolledAt: this.now(),
       };
       burrows.push(burrow);
@@ -691,9 +670,9 @@ export class PushSubscriptionStore extends JsonFileStore {
    *
    * **Not scoped to an account**, and correct only because selfhost has exactly
    * one (`SELFHOST_ACCOUNT_ID`, which `docs/specs/security-remote.md` -> "Trust boundary" pins). A delivery id is
-   * unguessable, so possession is the authorization — but multi-tenant would
-   * still have to key the delete on the calling account, since a leaked id
-   * would otherwise reach across tenants (`docs/specs/relay.md` `## Future`).
+   * unguessable, so possession is the authorization — but the multi-tenant
+   * Hosted Relay keys the delete on the calling account, since a leaked id
+   * would otherwise reach across tenants (`docs/specs/hosted.md` -> "Relay").
    */
   removeDelivery(deliveryId: string): Promise<number> {
     return this.mutate(async () => {
@@ -726,20 +705,12 @@ export class PushSubscriptionStore extends JsonFileStore {
 }
 
 /**
- * How many subscription rows one Burrow, and the whole file, may hold.
- *
- * `POST /api/push/subscribe` needs a session token and a `deliveryId` the
- * caller picks for itself — the Relay cannot check one against a Burrow's ACL,
- * by design — so without a cap one signed-in caller appends a durable row per
- * request, and every push route thereafter re-reads and re-parses the file.
- * Every sibling transient store is capped (`MAX_PENDING_REAUTH_NONCES_PER_SESSION`,
- * `MAX_TOKENS_PER_BURROW`); this is the durable one, so it matters more.
- *
- * Far above any real use: the per-Burrow cap is phones paired with one laptop,
- * the total is that across every laptop an account enrolled.
+ * The subscription caps (`MAX_PUSH_SUBSCRIPTIONS_PER_BURROW` and
+ * `MAX_PUSH_SUBSCRIPTIONS_PER_ACCOUNT` in `remote-lib-common`). This Relay has
+ * one account, so the per-account cap bounds the whole file.
  */
-export const MAX_PUSH_SUBSCRIPTIONS_PER_BURROW = 32;
-export const MAX_PUSH_SUBSCRIPTIONS_TOTAL = 256;
+export { MAX_PUSH_SUBSCRIPTIONS_PER_BURROW };
+export const MAX_PUSH_SUBSCRIPTIONS_TOTAL = MAX_PUSH_SUBSCRIPTIONS_PER_ACCOUNT;
 
 /**
  * Drop the oldest rows until both caps hold, never `keep` — the row this

@@ -8,8 +8,8 @@
 
 | Key | Action | Description |
 |-----|--------|-------------|
-| Left ⌘ → Right ⌘ (within 500 ms) | Enter command mode | Only exits passthrough; inert in command mode. |
-| Left ⇧ → Right ⇧ (within 500 ms) | Enter command mode | Independent of the ⌘ track; the gesture for keyboards with no right ⌘. |
+| Left ⌘ → Right ⌘ (less than 500 ms) | Enter command mode | Only exits passthrough; inert in command mode. |
+| Left ⇧ → Right ⇧ (less than 500 ms) | Enter command mode | Independent of the ⌘ track; the gesture for keyboards with no right ⌘. |
 | `Enter` (command) | Enter passthrough or activate | Focus the selected pane or reattach a door; Workspace targets follow the table below. |
 
 A focused cross-origin iframe surface swallows the gesture; the proxy shim detects it in-frame and re-posts it to the Wall (`docs/specs/dor-browser.md`).
@@ -50,7 +50,7 @@ Standalone only — a bare Wall (VS Code, the website playground) leaves these k
 
 ## Terminal selection & clipboard
 
-Both modes, ahead of the passthrough gate, and only on a terminal **selected** Surface — a browser surface owns its clipboard keys (below), a focused Dormouse text field owns them ahead of everything (`docs/specs/mouse-and-clipboard.md` §8.9).
+Both modes, ahead of the passthrough gate, and only on a terminal **selected** Surface — a browser surface or a Tool without its terminal view shown owns its page clipboard keys (below); a focused context terminal owns terminal clipboard keys; a focused Dormouse text field owns its clipboard chords (`docs/specs/mouse-and-clipboard.md` §8.9).
 
 | Key | Action | Description |
 |-----|--------|-------------|
@@ -62,7 +62,7 @@ Both modes, ahead of the passthrough gate, and only on a terminal **selected** S
 | `e` / `⇧E`, `f` / `⇧F`, `←` `→` / `⇧←` `⇧→`, `↵` | Copy editor | Passthrough only: scope, format, edges, copy (`docs/specs/mouse-and-clipboard.md` §4.3). |
 | `⌘V` / `⌘⇧V` / `Ctrl+V` / `Ctrl+Shift+V` | Paste | Paste into the terminal; the `Ctrl` variants are intercepted on every platform, macOS included. |
 
-On macOS `Ctrl+C` still reaches the running program; a literal `0x16` needs the shell's `quoted-insert` (`Ctrl+Q`) (`docs/specs/mouse-and-clipboard.md` §8.3).
+On macOS `Ctrl+C` still reaches the running program. Literal-next input: `docs/specs/mouse-and-clipboard.md` §8.3.
 
 ## Browser surfaces (passthrough)
 
@@ -70,7 +70,7 @@ Every key not claimed above forwards to the embedded page while a screencast pan
 
 | Key | Action | Description |
 |-----|--------|-------------|
-| `⌘V` / `Ctrl+V` | Paste into page | Replays the *local* clipboard as per-character key events — the embedded browser's own clipboard is empty. |
+| `⌘V` / `Ctrl+V` | Paste into page | Inserts the *local* clipboard as text through the host. |
 | `⌘`/`Ctrl` + `a` / `c` / `x` | Select all / copy / cut | Routed through the host's `edit` operation. |
 | `c` / `Esc` (render-swap warning) | Continue / cancel | Confirm dropping the non-active tabs when swapping a multi-tab screencast surface to the `iframe` renderer. |
 
@@ -93,6 +93,8 @@ Mirrored workbench chords — the terminal still receives the key too; [vscode.m
 | `⌘P` / `Ctrl+P` | `workbench.action.quickOpen` |
 | `⌘⇧P` / `Ctrl+Shift+P`, or `F1` (unmodified) | `workbench.action.showCommands` |
 | `⌘B` / `Ctrl+B` | `workbench.action.toggleSidebarVisibility` |
+
+Surface moves have no command-mode binding; see `docs/specs/layout.md` → Moving Surfaces between Workspaces.
 
 The standalone host contributes no chords; `docs/specs/standalone.md` owns its native-menu contract.
 

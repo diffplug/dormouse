@@ -1,3 +1,8 @@
+/** The strip itself, whose bounds a pane drag over the tabs claims. */
+export function workspaceStripElement(): HTMLElement | null {
+  return document.querySelector('[data-workspace-strip]');
+}
+
 /** Every Workspace tab in strip order. The strip renders outside every Wall, so
  *  the DOM is what its measurers share. */
 export function workspaceTabElements(): HTMLElement[] {

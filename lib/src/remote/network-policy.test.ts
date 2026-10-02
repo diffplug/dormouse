@@ -40,8 +40,8 @@ describe('what each level opens', () => {
     expect(opensOneTimeLinks({ ...NOTHING, level: 'relay' })).toBe(false);
   });
 
-  it('runs the persistent Burrow under My Relay only', () => {
-    expect(NETWORK_LEVELS.filter(runsBurrow)).toEqual(['relay']);
+  it('runs the persistent Burrow under every level but Nothing', () => {
+    expect(NETWORK_LEVELS.filter(runsBurrow)).toEqual(['local', 'anywhere', 'relay']);
   });
 
   it('gathers through STUN on the Burrow under Anywhere alone', () => {
@@ -108,8 +108,12 @@ describe('isNetworkPolicyResult', () => {
 
   it('takes what the service answers, and nothing a panel could not render', () => {
     expect(isNetworkPolicyResult(result)).toBe(true);
+    const refusal = { at: 1, kind: 'path-refused', end: 'remote', address: '172.58.12.9', addressSource: 'observed' };
+    expect(isNetworkPolicyResult({ ...result, refusal })).toBe(true);
     for (const value of [
       null,
+      { ...result, refusal: null },
+      { ...result, refusal: { ...refusal, address: '<b>hi</b>' } },
       { ...result, policy: { ...LOCAL, extra: 1 } },
       { ...result, levels: ['nothing', 'everything'] },
       { ...result, interfaces: [{ ...result.interfaces[0], kind: 'wifi' }] },

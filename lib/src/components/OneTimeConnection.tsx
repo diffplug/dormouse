@@ -6,6 +6,7 @@ import {
   hostOf,
   oneTimeControlSentence,
   own,
+  pathRefusalSentence,
   revealPanel,
   useNetworkPolicy,
 } from './remote-control-shared';
@@ -48,7 +49,10 @@ const UNAVAILABLE_COPY: Record<OneTimeUnavailableReason, string> = {
  * build does not. `host` is this build's relay host, which the rendezvous runs on.
  * `anyNetwork` ({@link phoneOnAnyNetwork}) has no allowed network to name, so
  * `direct-failed` suggests another network instead; `network-not-allowed` keeps
- * its sentence, since no path is held there to end a connection.
+ * its sentence, since no path is held there to end a connection. A
+ * `network-not-allowed` ending that carries its refusal reads
+ * `pathRefusalSentence` instead, naming the address; this is the fallback for
+ * one that does not.
  *
  * `user-ended` has no sentence: this machine ended it (End, Cancel), so there is
  * nothing to report, and the panel goes straight back to its button.
@@ -269,7 +273,9 @@ function OneTimePanel({
           aria-label={ONE_TIME_OUTCOME_LABEL}
           className="mt-1 text-sm leading-relaxed text-foreground"
         >
-          {own<string>(oneTimeEndedCopy(relayHost, anyNetwork), state.reason) ?? ENDED_FALLBACK}
+          {state.reason === 'network-not-allowed' && state.refusal
+            ? pathRefusalSentence(state.refusal, 'one-time')
+            : (own<string>(oneTimeEndedCopy(relayHost, anyNetwork), state.reason) ?? ENDED_FALLBACK)}
         </div>
       );
       actions = (

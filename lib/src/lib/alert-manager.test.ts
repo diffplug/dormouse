@@ -202,8 +202,7 @@ describe('AlertManager in isolation', () => {
 
   it('ALERT_RINGING latches through output until acknowledged', () => {
     const id = 'latch-test';
-    // Deferral ships on and withdraws a WATCHING ring once output resumes
-    // confirmed BUSY; latching through output is the switched-off timing.
+    // Deferral ships on and pauses a WATCHING ring once output resumes; latching through output is the switched-off timing.
     manager.setDeferAlertsUntilQuiet(false);
     runWatchedCommand(id);
 
@@ -426,6 +425,7 @@ describe('AlertManager in isolation', () => {
     manager.dismissAlert(id);
     manager.onData(id);
     manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'second' });
+    vi.advanceTimersByTime(5_000);
     expect(manager.getState(id).status).toBe('ALERT_RINGING');
   });
 
@@ -550,6 +550,7 @@ describe('AlertManager in isolation', () => {
     // The run goes on after the answer, then its cycle ends.
     manager.onData(id);
     manager.updateProtocolProgress(id, { state: 'clear', percent: null });
+    vi.advanceTimersByTime(5_000);
 
     expect(manager.getState(id)).toMatchObject({
       status: 'ALERT_RINGING',
@@ -732,6 +733,7 @@ describe('AlertManager in isolation', () => {
     // Output since the clear: the next bell is news, not the acknowledged state.
     manager.onData(id);
     applyTerminalEvents(manager, id, [{ kind: 'notification', notification: bell }]);
+    vi.advanceTimersByTime(5_000);
     const second = manager.getState(id).episode;
     expect(second?.id).toBeTruthy();
     expect(second?.id).not.toBe(first!.id);
@@ -1130,6 +1132,17 @@ describe('AlertManager in isolation', () => {
       manager.setDeferAlertsUntilQuiet(true);
     });
 
+    it('rings immediately in an idle pane, but waits after a single output chunk', () => {
+      manager.notifyFromProtocol('idle', REPORT);
+      expect(manager.getState('idle').status).toBe('ALERT_RINGING');
+      manager.onData('one-chunk');
+      manager.notifyFromProtocol('one-chunk', REPORT);
+      vi.advanceTimersByTime(4_999);
+      expect(manager.getState('one-chunk').episode).toBeNull();
+      vi.advanceTimersByTime(1);
+      expect(manager.getState('one-chunk')).toMatchObject({ status: 'ALERT_RINGING', notification: REPORT });
+    });
+
     it('defers a protocol alert behind an unwatched confirmed-busy detector', () => {
       const id = 'defer-unwatched-protocol';
       driveToBusy(manager, id);
@@ -1183,13 +1196,15 @@ describe('AlertManager in isolation', () => {
       expect(manager.getState(id).status).toBe('ALERT_RINGING');
     });
 
-    it('does not defer from MIGHT_BE_BUSY, which has not confirmed activity', () => {
+    it('defers from MIGHT_BE_BUSY without requiring confirmed activity', () => {
       const id = 'do-not-defer-candidate';
       manager.onData(id);
       vi.advanceTimersByTime(1_600);
       manager.onData(id);
 
       manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'Done' });
+      expect(manager.getState(id).status).toBe('WATCHING_DISABLED');
+      vi.advanceTimersByTime(5_000);
       expect(manager.getState(id).status).toBe('ALERT_RINGING');
     });
 
@@ -1281,13 +1296,13 @@ describe('AlertManager in isolation', () => {
       expect(manager.getState(id).status).toBe('ALERT_RINGING');
     });
 
-    it('rings a deferred notification at the ceiling when output never goes quiet', () => {
-      const id = 'defer-ceiling';
+    it('keeps a deferred notification past thirty seconds until output goes quiet', () => {
+      const id = 'defer-without-ceiling';
       driveToBusy(manager, id);
       manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'build failed' });
 
-      heartbeat(manager, id, cfg.alert.deferCeiling - 1_000);
-      vi.advanceTimersByTime(999);
+      heartbeat(manager, id, 120_000);
+      vi.advanceTimersByTime(4_999);
       expect(manager.getState(id).status).toBe('WATCHING_DISABLED');
       vi.advanceTimersByTime(1);
       expect(manager.getState(id)).toMatchObject({
@@ -1296,14 +1311,15 @@ describe('AlertManager in isolation', () => {
       });
     });
 
-    it('keeps the first deferral time when a later notification replaces the detail', () => {
-      const id = 'defer-ceiling-latest';
+    it('keeps the latest equal-richness detail until output goes quiet', () => {
+      const id = 'defer-latest-after-long-output';
       driveToBusy(manager, id);
       manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'First' });
       heartbeat(manager, id, 20_000);
       manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'Second' });
-      heartbeat(manager, id, cfg.alert.deferCeiling - 21_000);
-      vi.advanceTimersByTime(1_000);
+      heartbeat(manager, id, 60_000);
+      expect(manager.getState(id).notification).toBeNull();
+      vi.advanceTimersByTime(5_000);
       expect(manager.getState(id)).toMatchObject({
         status: 'ALERT_RINGING',
         notification: { source: 'OSC 9', title: null, body: 'Second' },
@@ -1370,7 +1386,7 @@ describe('AlertManager in isolation', () => {
 
   // --- Ordered ingestion ---
 
-  it('judges a notification written after a command finish against the reset detector', () => {
+  it('keeps a notification after an unarmed command finish behind recent output', () => {
     const id = 'ordered-ingestion';
     const parser = new TerminalProtocolParser();
     const feed = (chunk: string): void => {
@@ -1386,6 +1402,8 @@ describe('AlertManager in isolation', () => {
     // A precmd hook reports after the shell's D and A, in the same read.
     feed('done\r\n\x1b]633;D;0\x07\x1b]633;A\x07\x1b]777;notify;Command completed;./build.sh\x1b\\$ ');
 
+    expect(manager.getState(id).status).not.toBe('ALERT_RINGING');
+    vi.advanceTimersByTime(5_000);
     expect(manager.getState(id)).toMatchObject({
       status: 'ALERT_RINGING',
       notification: { source: 'OSC 777', title: 'Command completed', body: './build.sh' },
@@ -1624,6 +1642,7 @@ describe('AlertManager in isolation', () => {
       manager.dismissAlert(id);
       manager.onData(id);
       manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'later' });
+      vi.advanceTimersByTime(5_000);
       expect(manager.getState(id).notification?.body).toBe('later');
 
       const handle = manager.awaitCompletion(id, { until: 'quiet', timeoutMs: NEVER });

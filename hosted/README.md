@@ -1,11 +1,17 @@
 # Dormouse Hosted
 
-Account frontend and Hono/Cloudflare Worker for `https://hosted.dormouse.sh`,
-which also serves the one-time connection's rendezvous and its `/connect/`
-phone page ([its spec](../docs/specs/one-time.md)). The marketing website is a separate
-application. Managed voice exists only as an admin-only test slice; the managed
-Relay is not implemented. See
-[the spec](../docs/specs/hosted.md).
+Three Hono/Cloudflare Workers built from this package: the account frontend
+and auth at `https://hosted.dormouse.sh` (`dormouse-hosted`), the Hosted
+Relay's account-scoped routes with Pocket at the root, and the one-time
+connection's rendezvous and `/connect/` phone page at
+`https://relay.dormouse.sh` (`dormouse-relay`; [the one-time spec](../docs/specs/one-time.md)),
+and managed-voice speech at `https://voice.dormouse.sh` (`dormouse-voice`).
+The marketing website is a separate application. Managed voice and the Relay
+admit only the admin account; device-code Burrow enrollment and account-scoped
+encrypted terminal routing are implemented. Real-provider and live production
+acceptance remain separate release gates. See
+[the spec](../docs/specs/hosted.md), whose "Application boundary" owns what
+each Worker serves.
 
 This file is the whole operator runbook, in the order an operator works: run
 locally, update packages, set up GitHub, provision previews, provision
@@ -27,22 +33,25 @@ URL it prints. Request a code for a test address and read it at
 `/api/dev/emails` on that same origin. No real mail is sent, and the development database is isolated by
 the worktree path; `docs/specs/hosted.md` -> "Development and release" owns what
 the local entry serves and what production omits. The port is OS-assigned
-unless you set `PORT`. Do not share this local inbox publicly. Set
-`ELEVENLABS_API_KEY` in the environment of `pnpm dev:hosted` to hear real
-speech; see `docs/specs/hosted.md` -> "Managed voice".
+unless you set `PORT`. Do not share this local inbox publicly. The local
+origin serves the voice token routes but not speak: a Hosted build speaks only
+at `https://voice.dormouse.sh` (`docs/specs/hosted.md` -> "Development and
+release").
 
 ```sh
 pnpm test:hosted
 pnpm build:hosted
 ```
 
-Tests run the production composition in real workerd with disposable Postgres
-clones and a local OAuth simulator. `pnpm --filter dormouse-hosted test:one-time`
-runs the rendezvous suite alone, without Docker. The build includes a Wrangler
-dry-run; it does not deploy.
+Tests run each production Worker in real workerd, the account's with
+disposable Postgres clones and a local OAuth simulator.
+`pnpm --filter dormouse-hosted test:miniflare` runs the rendezvous, Pocket, and boundary
+suites alone, without Docker. The build writes each Worker's static files under `dist/<worker>/`
+(Pocket at `dist/relay/`, `/connect/` at `dist/relay/connect/`) and dry-runs all three Workers; it does
+not deploy. Production deploys only through the release workflow.
 
-The one-time rendezvous and `/connect/` page run on their own, without Docker
-or Postgres:
+The relay Worker's one-time rendezvous and `/connect/` page run on their own,
+without Docker or Postgres (its Relay routes answer 503 there):
 
 ```sh
 dor tool one-time      # outside Dormouse: pnpm dev:one-time
@@ -74,8 +83,8 @@ branch.
 | Boundary | Resources |
 | --- | --- |
 | Preview | Dedicated test Cloudflare account with a registered workers.dev subdomain; dedicated empty Neon project and parent branch; GitHub `hosted-preview` environment |
-| Each PR | `dormouse-hosted-pr-N` Worker with its own `OneTimeRoom` Durable Object namespace, uncached Hyperdrive, and Neon branch, all reused until close; rate-limit namespaces `1001` and `1002` shared by every preview |
-| Production | Dedicated Dormouse Postgres database, separate runtime/migration roles, uncached Hyperdrive, `dormouse-hosted` Worker with its `OneTimeRoom` Durable Object namespace and rate-limit namespaces `1` and `2`, and `hosted.dormouse.sh` custom domain; GitHub `hosted-production` environment |
+| Each PR | `dormouse-hosted-pr-N`, `dormouse-relay-pr-N` (with its own `OneTimeRoom` and `RelayRoom` Durable Object namespaces), and `dormouse-voice-pr-N` Workers, one uncached Hyperdrive all three share, and a Neon branch, all reused until close; rate-limit namespaces `1001`–`1007` shared by every relay and account preview |
+| Production | Dedicated Dormouse Postgres database, separate runtime/migration roles, uncached Hyperdrive shared by all three Workers; Workers `dormouse-hosted` (`hosted.dormouse.sh`, with rate-limit namespace `7`), `dormouse-relay` (`relay.dormouse.sh`, with its `OneTimeRoom` and `RelayRoom` Durable Object namespaces and rate-limit namespaces `1`–`6`), and `dormouse-voice` (`voice.dormouse.sh`, with the history-sweep Cron Trigger), each on its custom domain; GitHub `hosted-production` environment |
 | Email | Dedicated Postmark server, verified `signin@dormouse.sh`, SPF/DKIM/DMARC, Apple Private Email Relay registration |
 | OAuth | Separate Dormouse GitHub, Google, Microsoft, and Apple registrations; exact callbacks below |
 | Release history | `hosted-release-tag` GitHub environment, an admin identity's repository-scoped Contents-write fine-grained PAT, immutable annotated `hosted/` tags |
@@ -92,7 +101,7 @@ remain in the Worker, protected GitHub environments, and Bitwarden.
 
 | Service | Dedicated registration |
 | --- | --- |
-| Cloudflare | Account `0a95e814ccf2b6a95d2dc3bea0a4a2b4`; Worker `dormouse-hosted`; Hyperdrive ID in `wrangler.jsonc` |
+| Cloudflare | Account `0a95e814ccf2b6a95d2dc3bea0a4a2b4`; Workers `dormouse-hosted`, `dormouse-relay`, `dormouse-voice`; Hyperdrive ID in `wrangler.jsonc`, `wrangler.relay.jsonc`, and `wrangler.voice.jsonc` |
 | Neon | Project `young-dust-56119072`; production branch `br-billowing-brook-b4cuf3y4`; database `neondb`; migration role `neondb_owner`; SQL-created runtime role `dormouse_app` |
 | Postmark | Server `21034461`, `dormouse-hosted`; sender `signin@dormouse.sh`; return path `pm-bounces.dormouse.sh` |
 | GitHub OAuth | DiffPlug organization app `3890420`; client ID `Ov23liX1HSz03AAN3Psf` |
@@ -161,13 +170,15 @@ gets. The URL is in the deployment environment link and job summary; no PR
 comment bot or write-scoped workflow token is needed.
 
 Open `https://dormouse-hosted-pr-N.SUBDOMAIN.workers.dev/`, request a code for a
-disposable address, and read it at `/dev/emails`. This inbox is public to anyone
+disposable address, and read it at `/dev/emails`. The PR's one-time page is at
+`https://dormouse-relay-pr-N.SUBDOMAIN.workers.dev/connect/`; its voice Worker
+has no ElevenLabs key, so speak never reaches ElevenLabs. This inbox is public to anyone
 with the URL. No real email or OAuth provider is contacted. The database stores
 messages across Worker restarts.
 
 New commits retain the URL and test accounts. Migrations are append-only; to
 change an already-applied migration, close the PR, wait for successful cleanup,
-then reopen. Closing or merging deletes the Worker, Hyperdrive, and Neon branch.
+then reopen. Closing or merging deletes the three Workers, the Hyperdrive, and the Neon branch.
 Rerun failed cleanup. Keep previews enabled until all live previews are removed.
 Manual cleanup uses `node hosted/scripts/preview.mjs cleanup` with the preview
 environment's credentials and `PR_NUMBER`. These credentials cannot be downloaded
@@ -186,9 +197,9 @@ accounts.
 2. Create a Cloudflare Hyperdrive configuration for that database with **query
    caching disabled**, using the runtime role, and keep its connection host and
    database identical to the direct migration URL. Enter connection credentials
-   directly in Cloudflare; replace the zero Hyperdrive ID in `wrangler.jsonc`
-   with the resulting public ID for local operator deployment. CI overrides it
-   with the `HYPERDRIVE_ID` variable.
+   directly in Cloudflare; set the resulting public Hyperdrive ID in `wrangler.jsonc`,
+   `wrangler.relay.jsonc`, and `wrangler.voice.jsonc` for local operator
+   deployment. CI overrides all three with the `HYPERDRIVE_ID` variable.
 3. Create the runtime role with SQL (`CREATE ROLE ... LOGIN PASSWORD ...`),
    not Neon’s Console/API role creation, which grants `neon_superuser`.
    Neon requires the password over the encrypted connection and rejects a
@@ -204,10 +215,11 @@ accounts.
    `signin@dormouse.sh` (or update `EMAIL_FROM`). Configure SPF/DKIM and
    DMARC. Register the sender with Apple Private Email Relay for relay-address
    delivery.
-5. Configure `hosted.dormouse.sh` as the Worker's custom domain. Exclude this
-   hostname from Cloudflare Web Analytics, Zaraz, and other script injection
-   or rewriting rules. Disable account API caching. Keep `workers_dev` and
-   public preview URLs disabled.
+5. Each Worker's config claims its own custom domain — `hosted.dormouse.sh`,
+   `relay.dormouse.sh`, `voice.dormouse.sh` — and the first deploy of each
+   creates it. Exclude all three hostnames from Cloudflare Web Analytics,
+   Zaraz, and other script injection or rewriting rules. Disable account API
+   caching. Keep `workers_dev` and public preview URLs disabled.
 
 Authenticate Wrangler to the intended Cloudflare account before provisioning.
 Inside Dormouse, run `dor ensure -- pnpm exec wrangler login --browser=false --use-keyring`
@@ -217,7 +229,8 @@ keychain. Authenticate in your own terminal; account/provider sign-in is operato
 
 ## Separate OAuth registrations
 
-Create Dormouse registrations. Register these exact URLs with no trailing slash:
+Create Dormouse registrations. Register these exact URLs with no trailing
+slash; every callback stays on the account Worker's `hosted.dormouse.sh`:
 
 | Provider | Registration | Callback |
 | --- | --- | --- |
@@ -275,8 +288,9 @@ gh secret set HOSTED_TAG_TOKEN --repo diffplug/dormouse --env hosted-release-tag
 identity with `age-keygen` into private password-manager storage, then enter it
 at the hidden prompt; preserve that independent copy and old keys on rotation.
 Use a production Cloudflare token covering Workers deployment (which includes
-the Durable Object migration and rate-limit bindings), Hyperdrive read, and the
-custom-domain zone permissions required for that hostname.
+the Durable Object migrations, rate-limit bindings, and Cron Triggers),
+Workers secret listing, Hyperdrive read, and the custom-domain zone
+permissions for all three hostnames.
 
 The tag PAT belongs to a repository admin and selects only this repository with
 Contents write. It can bypass the existing tag ruleset and can also write code,
@@ -284,11 +298,13 @@ so it is isolated from the deploy job in a separately approved main-only
 environment (`docs/specs/security-ci.md` -> "Hosted Deployments"). Record its
 expiry; do not grant tag bypass to the bot or Actions generally.
 
-### Runtime secrets in the Worker
+### Runtime secrets in the Workers
 
-Auth, mail, and OAuth secrets live in the Worker, not GitHub. In your own
-terminal, from `hosted/`, authenticate Wrangler to the production account and
-use its hidden prompt, never a command-line value:
+Auth, mail, and OAuth secrets live in the account Worker, the enrollment
+secret and the Web Push (VAPID) pair in the relay Worker, and the ElevenLabs
+key in the voice Worker, never GitHub. In your
+own terminal, from `hosted/`, authenticate Wrangler to the production account
+and use its hidden prompt, never a command-line value:
 
 ```sh
 pnpm exec wrangler secret put AUTH_SECRET
@@ -297,8 +313,15 @@ pnpm exec wrangler secret put GITHUB_CLIENT_SECRET
 pnpm exec wrangler secret put GOOGLE_CLIENT_SECRET
 pnpm exec wrangler secret put MICROSOFT_CLIENT_SECRET
 pnpm exec wrangler secret put APPLE_CLIENT_SECRET
-pnpm exec wrangler secret put ELEVENLABS_API_KEY
+pnpm exec wrangler secret put RELAY_ENROLL_SECRET --config wrangler.relay.jsonc
+pnpm exec wrangler secret put ELEVENLABS_API_KEY --config wrangler.voice.jsonc
 ```
+
+The voice Worker's first secret creates its stub, so set it before the first
+release that deploys `dormouse-voice`: preflight reads it there. Once that
+release is live, delete the copy the account Worker held before the split
+(`pnpm exec wrangler secret delete ELEVENLABS_API_KEY`); its mapper no longer
+reads it, but a secret should live only where it is used.
 
 Create `ELEVENLABS_API_KEY` in an ElevenLabs account dedicated to Dormouse
 voice — the Worker deletes that account's entire speech history on a schedule,
@@ -306,12 +329,41 @@ so never point it at a shared account. Restrict the key to text-to-speech plus
 speech-history access, and set a spending limit in the ElevenLabs console. How
 the Worker uses the key is `docs/specs/hosted.md` -> "Managed voice".
 
-Generate a fresh cryptographically random `AUTH_SECRET` with at least 32 bytes
-of entropy in your secret manager. Client IDs are public but may be stored
+Generate a fresh cryptographically random `AUTH_SECRET`, and separately
+`RELAY_ENROLL_SECRET`, each with at least 32 bytes of entropy in your secret
+manager. Rotating `RELAY_ENROLL_SECRET` only voids enrollments in progress. Client IDs are public but may be stored
 through the same prompts as `GITHUB_CLIENT_ID`, `GOOGLE_CLIENT_ID`,
 `MICROSOFT_CLIENT_ID`, and `APPLE_CLIENT_ID`. The first secret can create the
 initial Worker stub; it does not activate account service. Set all required
 secrets before release; deployment preserves the ones already there.
+
+Generate the relay's VAPID pair once, in a private directory, and load both
+halves as relay secrets without printing them; keep a copy of the JSON in your
+secret manager, then delete it:
+
+```sh
+umask 077
+node --input-type=module -e '
+import { generateKeyPairSync } from "node:crypto";
+const { d, x, y } = generateKeyPairSync("ec", { namedCurve: "P-256" })
+  .privateKey.export({ format: "jwk" });
+const point = Buffer.concat([Buffer.from([4]), Buffer.from(x, "base64url"), Buffer.from(y, "base64url")]);
+console.log(JSON.stringify({
+  RELAY_VAPID_PUBLIC_KEY: point.toString("base64url"),
+  RELAY_VAPID_PRIVATE_KEY: d,
+}));' > vapid.json
+pnpm exec wrangler secret bulk vapid.json --config wrangler.relay.jsonc
+rm vapid.json
+```
+
+The public half is public (`GET /api/push/config` serves it); the private half
+signs every push. Both are required for a production deploy: preflight refuses
+a relay Worker missing either. Cloudflare exposes a secret's name, never its
+value, so preflight cannot tell whether the two match; the relay answers push
+off for a pair that does not, and the release's live verification fails
+unless `/api/push/config` answers the key. Rotating the pair makes every phone's subscription stale until Pocket
+re-registers it, so rotate only on compromise. Previews derive their own pair
+and never need this one.
 
 Configure the sender and enable each ready provider in `OAUTH_PROVIDERS` in
 `wrangler.jsonc`, comma separated, reviewed in a PR. The checked-in file enables
@@ -331,8 +383,17 @@ credential pair do and do not enable. Facebook is outside this milestone.
    Default `promote=false` verifies and builds only. `promote=true` enters the
    protected production environment and runs the preflight, backup and
    restore-test, migration, deployment, and live-verification sequence in
-   `docs/specs/hosted.md` -> "Production releases". No real mail is sent by its
-   smoke checks, and passing them is not acceptance.
+   `docs/specs/hosted.md` -> "Production releases", deploying the relay,
+   voice, and account Workers in that order. The relay's revision and one-time
+   checks pass before the voice or account deploys, and all three are checked
+   again after the account deploys. No real mail is sent by its smoke
+   checks, and passing them is not acceptance.
+
+   The first release after the split creates the relay's `OneTimeRoom` (`v1`),
+   then deletes the account Worker's (its append-only migration `v2`): links
+   open at that moment drop, and both become rollback floors. Its smokes repeat
+   the relay and voice checks up to six times, 10 s apart, while their new
+   custom domains' certificates issue.
 3. Tagging runs only after live verification, on the terms in
    `docs/specs/hosted.md` -> "Production releases". If only tagging fails, rerun
    failed jobs: it records the original deployment without deploying again.
@@ -341,9 +402,10 @@ credential pair do and do not enable. Facebook is outside this milestone.
 
 ## Acceptance
 
-1. Check `/api/health` and `/api/ready` on the canonical hostname. Inspect the
-   actual HTML response/CSP and browser network requests for injected marketing
-   scripts or unexpected third-party assets.
+1. Check `/api/health` on all three hostnames and `/api/ready` on
+   `hosted.dormouse.sh`. Inspect the actual HTML response/CSP and browser
+   network requests for injected marketing scripts or unexpected third-party
+   assets.
 2. Request a real email, enter its code, reload, and log out. Enter a code in a
    second browser to verify that mail access is not tied to the first browser.
 3. For each enabled provider, test first login, consent cancellation, repeat
@@ -361,9 +423,10 @@ credential pair do and do not enable. Facebook is outside this milestone.
 6. Sign in as the admin address, create a voice token, and speak one short
    phrase with it from Dormouse desktop; revoke it and confirm the next speak
    fails. Confirm another account sees no Voice tokens section.
-7. Confirm the history sweep's Cron Trigger is registered: the deploy log lists
-   `schedule: */5 * * * *`, and the dashboard shows it under Workers & Pages ->
-   `dormouse-hosted` -> Settings -> Trigger Events. After the speak in step 6,
+7. Confirm the history sweep's Cron Trigger is registered on the voice Worker
+   alone: the deploy log lists `schedule: */5 * * * *`, the dashboard shows it
+   under Workers & Pages -> `dormouse-voice` -> Settings -> Trigger Events, and
+   `dormouse-hosted` lists none. After the speak in step 6,
    the ElevenLabs console's speech history should be empty within a few
    minutes. The Worker's Cron Events list each run; a failed run means the key
    cannot list or delete history. Recheck them for failed runs after any key
@@ -371,11 +434,13 @@ credential pair do and do not enable. Facebook is outside this milestone.
 8. Confirm `/api/dev/emails`, `/dev/emails`, and `/__test/time` are absent, and
    check the live responses against the origin, caching, and cookie rules in
    `docs/specs/security-hosted.md` -> "Origin boundary".
-9. Confirm the release smoke's one-time half passed: `/connect/` answers the
-   page under its own policy with its script beside it, and the rendezvous
-   mints a room, is refused with a browser `Origin`, joins from the app origin,
-   crosses a frame each way, and is refused a second phone. Load `/connect/`
-   in a browser and confirm no injected script or third-party request.
+9. Confirm the release smoke's one-time half passed against
+   `relay.dormouse.sh`: `/connect/` answers the page under its own policy with
+   its script beside it, and the rendezvous mints a room, is refused with a
+   browser `Origin`, joins from the relay origin, crosses a frame each way, and
+   is refused a second phone. Load `https://relay.dormouse.sh/connect/` in a
+   browser and confirm no injected script or third-party request, and that
+   `https://relay.dormouse.sh/` answers Pocket's shell under Pocket's policy.
 10. With a desktop build pointed at this origin, open a one-time link on a real
     iPhone in Safari and a real Android phone in Chrome, each on the same Wi-Fi
     as the laptop and each by scanning the QR code with the native camera, which
@@ -394,9 +459,10 @@ A failed migration or deployment may already have changed production state;
 workflow failure does not automatically reverse it. Use the Worker's deployment
 history for code rollback and investigate database compatibility first;
 `docs/specs/hosted.md` -> "Production releases" owns what a code rollback does
-not undo. Cloudflare refuses a rollback past the deploy that added the
-`OneTimeRoom` migration, and every deploy or rollback drops the one-time links
-still open; established sessions run directly and are unaffected. Restore a backup only after an explicit operator decision, into a
+not undo. Cloudflare refuses a rollback of `dormouse-relay` past its
+`OneTimeRoom` migration, or of `dormouse-hosted` past the deletion of its own;
+every relay deploy or rollback drops the one-time links still open, and
+established sessions run directly and are unaffected. Restore a backup only after an explicit operator decision, into a
 separate database first.
 
 Current provisioning status is discoverable with `gh secret list --env NAME`,

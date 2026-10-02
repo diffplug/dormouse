@@ -36,13 +36,7 @@ Source of truth: `surfaceKindFromParams` / `isToolParams` in `lib/src/components
 
 **Must read user Tools from `$XDG_CONFIG_HOME/dormouse/dormouse.yml` only when that environment value is absolute**, else `~/.config/dormouse/dormouse.yml`; both local hosts use this location. User Tools require no project grant; malformed or unreadable user configuration fails lookup. Project and user Tools occupy separate reuse scopes.
 
-| Field | Behavior |
-| --- | --- |
-| `run` | Required shell command string or argument list, typed into the configured shell after integration readiness |
-| `render` | `iframe` by default, `agent-browser-screencast`, or `playwright-screencast` |
-| `viewport` | Initial browser sizing; `docs/specs/dor-browser.md` → Viewport presets owns resolution and defaults |
-| `port` | `announced` by default, or `auto`; [Serving](#serving) owns selection |
-| `prespawn_dedupe` | Optional scalar or list of literal key elements with substitutions |
+`ToolEntry` and `parseToolFile` own declaration fields and defaults. [Serving](#serving) owns port selection; `docs/specs/dor-browser.md` → Viewport presets owns sizing resolution.
 
 - **Must reject unknown `prespawn_*` fields and unknown substitutions**; unknown ordinary fields produce warnings. `$PROJECT_ROOT` is the declaring directory, `$CWD` the caller's resolved directory, and `$TARGET` the canonical local file or directory input. (rationale)
 - **Must deliver the parsed file's warnings on the untrusted answer and on a built-in open**, not only on an already-trusted lookup — those are the paths a Tool's first run takes.
@@ -55,7 +49,7 @@ Source of truth: `surfaceKindFromParams` / `isToolParams` in `lib/src/components
 
 **Must require exactly one existing local regular file or directory when `$TARGET` appears in the run list or dedupe key.** Resolve relative paths against the invocation CWD and follow symlinks to a canonical absolute path before substitution and reuse. **Must accept a `file:` URL only when its host is empty, `localhost`, or this machine's name** (case-insensitive, either side in its short form before the first dot), converting it with the host platform's `fileURLToPath`; reject other URLs, missing paths, and every other file kind (fifo, socket, device). Validate run and key inputs before showing approval. Pending approval distinguishes the original arguments and invocation CWD; [Trust](#trust) owns re-resolution and recovery. Input control-character restrictions belong to `docs/specs/security-local.md` → Dor Tool configuration.
 
-Source of truth: `lookupTool` in `lib/src/host/tool-trust.ts`; `parseToolFile` / `resolveDedupeKey` in `lib/src/host/tool-registry.ts`; `resolveToolInput` / `resolveLocalToolTarget` in `lib/src/host/tool-input.ts`; `readUserToolFile` in `lib/src/host/tool-user-config.ts`; `toolRunCommand` in `lib/src/components/wall/use-dor-control.ts`; `lib/src/host/tool-host.test.ts`, `lib/src/host/tool-trust.test.ts`, `lib/src/host/tool-input.test.ts`, `lib/src/host/tool-open.test.ts`, `lib/src/components/Wall.test.tsx`.
+Source of truth: `lookupTool` in `lib/src/host/tool-trust.ts`; `ToolEntry` / `parseToolFile` / `resolveDedupeKey` in `lib/src/host/tool-registry.ts`; `resolveToolInput` / `resolveLocalToolTarget` in `lib/src/host/tool-input.ts`; `readUserToolFile` in `lib/src/host/tool-user-config.ts`; `toolRunCommand` in `lib/src/components/wall/use-dor-control.ts`; `lib/src/host/tool-host.test.ts`, `lib/src/host/tool-trust.test.ts`, `lib/src/host/tool-input.test.ts`, `lib/src/host/tool-open.test.ts`, `lib/src/components/Wall.test.tsx`.
 
 **Must resolve a Tool's initial viewport host-side with its declaration, including after approval.** Iframe Tools accept only `pane-sync`; automated Tools accept a preset or inline dimensions. **Must preserve live user/agent sizing when reusing a Tool**, rather than reapplying its declaration.
 
@@ -279,8 +273,9 @@ Source of truth: `toolTakesOverCaller` / `toolRerunsInCaller` / `callerStillPlac
 **Must consume OSC 367 at the PTY owner's parser**, including malformed and unknown verbs, and emit no reply. `serve`, `state`, and `open` are implemented verbs. The escape registry is `docs/specs/terminal-escapes.md`.
 
 - **Must sanitize and bound the payload before retaining it.** `ToolAnnounce` / `parseToolAnnounce` and `ToolState` / `parseToolState` own the field shapes and validation limits.
+- **Must reject invalid encoder inputs and serialized payloads exceeding the host's limit**, including JSON escaping that expands an otherwise valid field. (rationale)
 - **Must reject a payload naming a version this contract does not speak.** `state` requires `v: 1`; `serve` reads an omitted `v` as 1 and refuses any other value — a future v2's rejection path.
-- **Must treat an optional serve `path` as a path/query on the discovered port, never as another authority.** Accept at most 2,048 characters starting with one `/`, with no backslash, ASCII whitespace/control, or DEL; invalid paths are ignored and the default is `/`. The port still must belong to the designated Session's process tree. Live binding memory includes the path; durable saves omit it.
+- **Must treat an optional serve `path` as a path/query on the discovered port, never as another authority.** Accept at most 2,048 characters starting with one `/`, with no backslash, ASCII whitespace, C0/C1 control, or DEL; invalid paths are ignored and the default is `/`. The port still must belong to the designated Session's process tree. Live binding memory includes the path; durable saves omit it.
 - **Must forward parsed announcements, state reports, open requests, and command-start resets in stream order to the owning renderer.** A start clears the previous command's announcement and unsaved state; later reports in that chunk survive. Both hosts forward each parse's as one `terminal:toolEvents`, which the owning renderer applies with `applyLiveToolEvents`; the fake adapter applies locally.
 - **Must reconstruct announcements, state, and resets from raw replay without emitting replies or acting on an `open`**, preserving transferred announcements when since-mark replay has no command start, and clear the renderer record on Session disposal. Ordinary terminal announcements stay inert.
 - Reserved: **Must retain `name`, `dehydrate`, and `persist` as inert parsed fields**, serving the announced-name and D1/D2 items under [Future](#future). Neither `persist: never` nor a `dehydrate` verb changes current persistence.
@@ -288,7 +283,7 @@ Source of truth: `toolTakesOverCaller` / `toolRerunsInCaller` / `callerStillPlac
 - **Must show a failed `open` in the preview slot**: a preview whose lookup fails runs the built-in error viewer there instead (`docs/specs/dor-tools-builtin.md` → Error viewer), and a failed activate is sent again as a preview unless a newer `open` from that Session followed it.
 - Reserved: **Never assign an OSC 367 verb beyond `serve`, `state`, `open`, and `dehydrate`**; `dehydrate` belongs to D2 under [Future](#future), while existing title/progress protocols keep those roles.
 
-Source of truth: `TerminalProtocolParser` / `collectTerminalToolEvents` in `lib/src/lib/terminal-protocol.ts`; `parseToolAnnounce` / `parseToolOpen` in `dor-tools-lib/src/osc.ts`; `applyLiveToolEvents` in `lib/src/lib/tool-events.ts`; `dispatchToolOpens` in `lib/src/lib/tool-open-requests.ts`; `surface.tool` in `lib/src/components/wall/use-dor-control.ts`; `recordToolAnnounce` in `lib/src/lib/tool-announce-store.ts`; `recordToolEvents` in `lib/src/lib/tool-events.ts`; `createOwnerPtyStream` in `lib/src/host/owner-pty.ts`. Tests: `dor-tools-lib/test/osc.test.mjs`, `lib/src/lib/tool-announce.test.ts`, `an OSC 367 open` in `lib/src/components/wall/preview-slot.test.tsx`, `lib/src/host/remote/sidecar-entry.test.ts`, `vscode-ext/test/message-router.test.ts`, `standalone/scripts/dev-agent-browser-announce.test.mjs`.
+Source of truth: `TerminalProtocolParser` / `collectTerminalToolEvents` in `lib/src/lib/terminal-protocol.ts`; `serveSequence` / `stateSequence` / `openSequence` / `parseToolAnnounce` / `parseToolOpen` in `dor-tools-lib/src/osc.ts`; `applyLiveToolEvents` in `lib/src/lib/tool-events.ts`; `dispatchToolOpens` in `lib/src/lib/tool-open-requests.ts`; `surface.tool` in `lib/src/components/wall/use-dor-control.ts`; `recordToolAnnounce` in `lib/src/lib/tool-announce-store.ts`; `recordToolEvents` in `lib/src/lib/tool-events.ts`; `createOwnerPtyStream` in `lib/src/host/owner-pty.ts`. Tests: `dor-tools-lib/test/osc.test.mjs`, `lib/src/lib/tool-announce.test.ts`, `an OSC 367 open` in `lib/src/components/wall/preview-slot.test.tsx`, `lib/src/host/remote/sidecar-entry.test.ts`, `vscode-ext/test/message-router.test.ts`, `standalone/scripts/dev-agent-browser-announce.test.mjs`.
 
 ## Unsaved changes
 
@@ -311,7 +306,7 @@ Source of truth: `parseToolState` in `dor-tools-lib/src/osc.ts`; `getToolDirty` 
 
 ### Closing unsaved Tools
 
-The iframe save channel, connected only to a `builtin:file` frame (`docs/specs/dor-tools-builtin.md` → Editing files), binds its window, proxy origin, and a per-mount connection nonce. Save completion carries the request id and current dirty state; a timeout or disconnected editor never permits a Save closure. **Must ignore a save-channel message naming another `dorTool` version or malformed for its kind**; a save error reaches the prompt control-stripped and bounded.
+The iframe save channel, connected only to a `builtin:file` frame (`docs/specs/dor-tools-builtin.md` → Editing files), binds its window, proxy origin, and a per-mount connection nonce. Save completion carries the request id and current dirty state; a timeout or disconnected editor never permits a Save closure. **Must bind each save completion to its accepted connection generation and discard it after reconnect or close**, even when a replacement connection reuses the request id or nonce. (rationale) **Must ignore a save-channel message naming another `dorTool` version or malformed for its kind**; a save error reaches the prompt control-stripped and bounded.
 
 **Must offer Save / Discard / Cancel before closing dirty Tools through Dormouse**: Pane closure, standalone window/app teardown, iframe reload or renderer change, and Workspace movement to another Window; **a Workspace close asks once, before any Surface closes.** Discard authorizes that action without declaring the edit clean; Save proceeds only after successful acknowledgement and no newer edits. A Tool without a connected save handler must be saved in its own UI or discarded. **Never prompt for a command close or move**: `dor kill`, `dor workspace close` (even `--force`), and cross-window `dor workspace move` (even `--dangerously-destroy-iframe-page-state`) refuse a dirty Tool. VS Code webview/host closure, forced termination, and crashes cannot be vetoed; drafts are not persisted.
 
@@ -332,6 +327,8 @@ The Tool-specific local boundaries are `docs/specs/security-local.md` → Dor To
 **Must retain resolved argv for argument-list Tools and re-quote it for the shell selected at cold restore.** Update the restored command in terminal options and Tool pane/door metadata. Literal shell-string commands retain their saved text. Reject persisted argv containing terminal controls before restoring any PTY.
 
 **Must cold-restore an approved Tool by starting its saved command through integration-gated shell readiness**, then rediscover its port. Agent-resume commands do not override the saved Tool command. Pending approvals restore as ordinary terminals and execute nothing. **Must rebuild visible Tool metadata from its pane row when layout geometry is unusable**, rather than starting the command in a plain terminal with no serving behavior.
+
+Dirty or pending Tools refuse Surface moves between Workspaces: `docs/specs/layout.md` → Moving Surfaces between Workspaces.
 
 **Must retain live Tool browser params and OSC announcements in volatile Workspace-transfer content**, applying them to the destination plan without mutating the durable record. A serving iframe Tool participates in the ordinary iframe move confirmation. **Must refuse transfer while a Tool awaits approval or its browser startup has no session binding.**
 

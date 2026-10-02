@@ -84,9 +84,15 @@ jobs:
         run: |
           set -euo pipefail
 
-          SINCE=$(gh api \
-            "/repos/$GITHUB_REPOSITORY/actions/workflows/workflow-audit.yaml/runs?status=success&per_page=1" \
-            --jq '.workflow_runs[0].created_at // ""')
+          # Pick the newest success from the unfiltered listing, which is
+          # newest first; this run, still in progress, has no conclusion yet.
+          # The `status=success` filter served a stale listing (newest success
+          # 2026-09-03 on 2026-09-28, 10-01, and 10-02, despite daily successes),
+          # re-reporting weeks of already-audited commits.
+          SUCCESSES=$(gh api --paginate \
+            "/repos/$GITHUB_REPOSITORY/actions/workflows/workflow-audit.yaml/runs?per_page=100" \
+            --jq '.workflow_runs[] | select(.conclusion == "success") | .created_at')
+          SINCE=${SUCCESSES%%$'\n'*}
           if [ -z "$SINCE" ]; then
             SINCE=$(date -u -d '25 hours ago' --iso-8601=seconds)
           fi

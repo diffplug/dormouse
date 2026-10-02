@@ -12,7 +12,9 @@ import {
   DEFAULT_CHALLENGE_TTL_MS,
   MAX_TOKENS_PER_BURROW,
   NoiseTransportSession,
+  WS_CLOSE_BURROW_NOT_ENTITLED,
   WS_CLOSE_BURROW_REPLACED,
+  WS_CLOSE_BURROW_REVOKED,
   createNoiseInitiator,
   e2eConnectionPrologue,
   fromBase64Url,
@@ -1219,6 +1221,29 @@ describe('BurrowRuntime end-to-end ceremonies', () => {
     socket.closeWith(WS_CLOSE_BURROW_REPLACED);
     await settle();
     expect(burrow.status).toBe('displaced');
+  });
+
+  it('latches removed on 4001 and not-entitled on 4002, disposing its sessions, until start()', async () => {
+    for (const [code, latch] of [
+      [WS_CLOSE_BURROW_REVOKED, 'removed'],
+      [WS_CLOSE_BURROW_NOT_ENTITLED, 'not-entitled'],
+    ] as const) {
+      sessions = [];
+      makeBurrow();
+      const { authenticator, clientStatic } = await pairedClient();
+      expect(await attemptConnection('c1', clientStatic, authenticator)).toMatchObject({ ok: true });
+      const latchedSocket = socket;
+      latchedSocket.closeWith(code);
+      await settle();
+      expect(burrow.status).toBe(latch);
+      expect(sessions[0]!.disposed).toBe(true);
+      expect(socket).toBe(latchedSocket);
+
+      // Only an explicit start comes back.
+      burrow.start();
+      expect(socket).not.toBe(latchedSocket);
+      expect(burrow.status).toBe('connecting');
+    }
   });
 
   it('ignores every frame that is not the e2e envelope or client-gone', async () => {

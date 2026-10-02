@@ -899,7 +899,8 @@ cmd_verify() {
   fi
 
   local tsip
-  tsip="$(ts ip -4 2>/dev/null | head -1 || true)"
+  tsip="$(ts ip -4 2>/dev/null || true)"
+  tsip="${tsip%%$'\n'*}"
   if [ -n "$tsip" ]; then
     if curl -s --max-time 3 -o /dev/null "http://$tsip:$PORT/api/hello" 2>/dev/null; then
       fail "plaintext port $PORT is reachable on the Tailscale IP $tsip"

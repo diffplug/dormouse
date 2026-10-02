@@ -2,7 +2,8 @@
  * The laptop's half of a one-time connection, driven by a **real** Noise IK
  * initiator through the in-memory rendezvous (`../test-rendezvous.ts`) and, for
  * the session, the in-memory direct path (`../direct/test-fake-peer.ts`): no
- * ceremony step is stubbed (`docs/specs/one-time.md` -> "Burrow runtime";
+ * ceremony step is stubbed but one case's stalled key generation
+ * (`docs/specs/one-time.md` -> "Burrow runtime";
  * `docs/specs/remote-security-model.md` -> "One-time connection").
  *
  * Every deadline runs on one injected test clock, shared by the runtime, the
@@ -11,17 +12,30 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+/** A key generation a case stands in for the real one, cleared after each case. */
+const keygen = vi.hoisted(() => ({
+  override: null as (() => Promise<import('remote-lib-common').NoiseKeyPair>) | null,
+}));
+
+vi.mock('remote-lib-common', async (importOriginal) => {
+  const real = await importOriginal<typeof import('remote-lib-common')>();
+  return {
+    ...real,
+    generateNoiseKeyPair: () => (keygen.override ?? real.generateNoiseKeyPair)(),
+  };
+});
+
 import {
   E2E_INIT_BURST,
   E2E_INIT_REFILL_INTERVAL_MS,
   ESTABLISHED_E2E_IDLE_TIMEOUT_MS,
   MAX_ONE_TIME_FORWARDED,
   MAX_ONE_TIME_FRAME_LENGTH,
-  ONE_TIME_DIRECT_DEADLINE_MS,
+  DIRECT_ONLY_DEADLINE_MS,
   ONE_TIME_LINK_TTL_MS,
-  ONE_TIME_PING,
-  ONE_TIME_PING_INTERVAL_MS,
-  ONE_TIME_PONG,
+  RELAY_PING,
+  RELAY_PING_INTERVAL_MS,
+  RELAY_PONG,
   ONE_TIME_UNKNOWN_DEVICE_LABEL,
   TokenBucket,
   fromBase64Url,
@@ -116,6 +130,7 @@ beforeEach(() => {
 
 afterEach(() => {
   runtime?.end();
+  keygen.override = null;
   vi.restoreAllMocks();
 });
 
@@ -252,6 +267,15 @@ describe('OneTimeRuntime: the link', () => {
     expect(rendezvous.room().burrow.closeCode).toBe(1000);
   });
 
+  it('ends unreachable at its deadline while key generation stalls, opening no socket', async () => {
+    keygen.override = () => new Promise(() => {});
+    makeRuntime();
+    const opened = runtime.open();
+    clock.advance(ONE_TIME_OPEN_TIMEOUT_MS);
+    expect(await opened).toEqual({ status: 'ended', reason: 'unreachable' });
+    expect(rendezvous.rooms).toHaveLength(0);
+  });
+
   it('ends unreachable when the room’s first message is not a room frame', async () => {
     makeRuntime({ rendezvous: { announce: false } });
     const opened = runtime.open();
@@ -277,12 +301,12 @@ describe('OneTimeRuntime: the link', () => {
   it('pings the rendezvous while it waits, and neither counts nor parses the answers', async () => {
     makeRuntime();
     const link = await openLink();
-    clock.advance(ONE_TIME_PING_INTERVAL_MS);
+    clock.advance(RELAY_PING_INTERVAL_MS);
     const room = rendezvous.room();
-    expect(room.burrow.sent).toEqual([ONE_TIME_PING]);
-    expect(room.burrow.received).toContain(ONE_TIME_PONG);
+    expect(room.burrow.sent).toEqual([RELAY_PING]);
+    expect(room.burrow.received).toContain(RELAY_PONG);
     // More answers than the message cap: none of them counts against it.
-    for (let i = 0; i <= MAX_ONE_TIME_FORWARDED; i += 1) fromRoom(ONE_TIME_PONG);
+    for (let i = 0; i <= MAX_ONE_TIME_FORWARDED; i += 1) fromRoom(RELAY_PONG);
     expect(runtime.state.status).toBe('waiting');
     await joinPhone(link);
   });
@@ -545,7 +569,7 @@ describe('OneTimeRuntime: the session', () => {
   it('ends direct-failed when no switch lands by the direct deadline', async () => {
     makeRuntime();
     await connecting();
-    clock.advance(ONE_TIME_DIRECT_DEADLINE_MS - 1);
+    clock.advance(DIRECT_ONLY_DEADLINE_MS - 1);
     expect(runtime.state.status).toBe('connecting');
     clock.advance(1);
     expect(oneTimeEndReason(runtime)).toBe('direct-failed');

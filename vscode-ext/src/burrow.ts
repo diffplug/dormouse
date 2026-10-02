@@ -210,9 +210,9 @@ export function notifyDirectoryChanged(): void {
  * The relay socket, preferring whatever this extension host already provides.
  *
  * `globalThis.WebSocket` only landed in Node 22, and `engines.vscode` here is
- * `^1.85.0` — VS Code 1.85 shipped Electron 25 / Node 18, and the supported
- * range spans the boundary — so on an older host there is no global to use and
- * the bundled `ws` is the only implementation. Its socket satisfies the same
+ * `^1.92.0` — VS Code 1.92 shipped Node 20.14, and the supported range spans
+ * the boundary — so on an older host there is no global to use and the bundled
+ * `ws` is the only implementation. Its socket satisfies the same
  * surface `BurrowRuntime` reads and nothing more: `send`, `close`, `readyState`,
  * `addEventListener`, with `message` events carrying `.data` and `close` events
  * carrying `.code`.
@@ -396,6 +396,7 @@ function drainQueuedCommands(): void {
 const CONTENTION_STARTERS: ReadonlySet<string> = new Set([
   'enroll',
   'enrollOffer',
+  'beginHostedEnrollment',
   'oneTimeOpen',
   'setNetworkPolicy',
 ]);
@@ -414,10 +415,12 @@ const CONTENTION_STARTERS: ReadonlySet<string> = new Set([
  * an enrolled machine's webview it has no Burrow moments before it gets one,
  * leaving the gates that arm on that answer down.
  *
- * `enroll`, `enrollOffer`, `oneTimeOpen`, and `setNetworkPolicy` are the
- * commands that may start the contention: they are how an installation with no
- * Burrow at all bootstraps — `enrollOffer` from the one-click card an idle
- * `status` advertises ({@link idleStatus}), `oneTimeOpen` from the idle
+ * `enroll`, `enrollOffer`, `beginHostedEnrollment`, `oneTimeOpen`, and
+ * `setNetworkPolicy` are the commands that may start the contention: they are
+ * how an installation with no Burrow at all bootstraps — `enrollOffer` from the
+ * one-click card an idle `status` advertises ({@link idleStatus}),
+ * `beginHostedEnrollment` from a Hosted build's enroll button, whose service
+ * then polls the approval, `oneTimeOpen` from the idle
  * one-time panel, which needs no enrollment, and `setNetworkPolicy` because the
  * service is the policy's only writer: a window writing it with a service
  * elsewhere would leave that service holding the old one. Everything else
@@ -543,7 +546,9 @@ function refuse(burrowRequestId: string): void {
  * what one with no enrollment returns (`lib/src/host/remote/service.ts`). The
  * one-time pair is the same: no service means no connection, so its status is
  * the idle one this build's origin and policy allow, and ending it is already
- * done; and with no service there is no session to take a pane back from.
+ * done; a Hosted enrollment is polled by a service, so with none there is
+ * nothing to cancel; and with no service there is no session to take a pane
+ * back from.
  */
 async function idleAnswer(cmd: string): Promise<{ result: unknown } | null> {
   switch (cmd) {
@@ -562,11 +567,15 @@ async function idleAnswer(cmd: string): Promise<{ result: unknown } | null> {
       );
       return { result: idleOneTimeState(hostedOrigin(bakedRelay()), level) };
     }
+    // With no service there is no session for the path to have ended.
     case 'networkPolicy':
+    case 'dismissPathRefusal':
       return {
         result: networkPolicyResult(await idleNetworkPolicy(), bakedRelay().mode, listNetworkInterfaces()),
       };
     case 'oneTimeEnd':
+    // Nor an enrollment awaiting approval: the service that began one holds it.
+    case 'cancelHostedEnrollment':
       return { result: {} };
     // No service holds any session, so none holds a pane: the strip clears itself.
     case 'takeBack':
@@ -619,7 +628,8 @@ function answerIdle(burrowRequestId: string, result: unknown): void {
 /**
  * Give the Burrow its storage and start it if this installation is already
  * enrolled, or another window's one-time connection is serving. Nothing
- * contends for the socket otherwise — see the module header.
+ * contends for the socket otherwise — see `docs/specs/vscode.md` → "Burrow: a
+ * service in the extension host".
  */
 export function initBurrow(ctx: vscode.ExtensionContext): vscode.Disposable {
   context = ctx;

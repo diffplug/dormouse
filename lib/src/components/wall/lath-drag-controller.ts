@@ -1,6 +1,7 @@
 // One imperative pane/Door gesture owner per LathHost mount; both paths share the
 // threshold, live-tree hit test, depth cycling, cancel, and preview machinery.
 
+import type { SurfaceWorkspaceDrag } from './surface-workspace-drag';
 import type { MutableRefObject, RefObject } from 'react';
 import { type Rect, rectKey } from '../../lib/lath/model';
 import type { DropTarget } from '../../lib/lath/ops';
@@ -57,6 +58,7 @@ export type DragController = {
 export type DragControllerDeps = {
   latestRef: MutableRefObject<{
     snapshot: LathWallSnapshot;
+    workspaceDrag?: SurfaceWorkspaceDrag;
     onDragStart?: (id: string) => void;
     onProposeMove?: (id: string, target: DropTarget) => void;
     onProposeMinimize?: (id: string) => void;
@@ -96,6 +98,7 @@ export function createDragController(deps: DragControllerDeps): DragController {
   const detach = (): void => {
     window.removeEventListener('pointermove', onMove);
     window.removeEventListener('pointerup', onUp);
+    window.removeEventListener('pointercancel', onCancel);
     window.removeEventListener('keydown', onKey);
     window.removeEventListener('wheel', onWheel);
     if (drag && drag.rafId !== null) {
@@ -107,6 +110,7 @@ export function createDragController(deps: DragControllerDeps): DragController {
   const attach = (): void => {
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onCancel);
     window.addEventListener('keydown', onKey);
     // Non-passive: the wheel cycles drop depth instead of scrolling.
     window.addEventListener('wheel', onWheel, { passive: false });
@@ -115,6 +119,9 @@ export function createDragController(deps: DragControllerDeps): DragController {
   const runHitTest = (): void => {
     const d = drag;
     if (!d || !d.active) return;
+    if (deps.latestRef.current.workspaceDrag?.hover(d.id, d.lastX, d.lastY)) {
+      d.candidates = []; publishPreview(null); return;
+    }
     const containerEl = deps.containerRef.current;
     if (!containerEl) return;
     const cr = containerEl.getBoundingClientRect();
@@ -165,6 +172,7 @@ export function createDragController(deps: DragControllerDeps): DragController {
       if (el) el.style.opacity = ''; // un-dim (the move commit tweens it into place)
     }
     if (!d) return;
+    deps.latestRef.current.workspaceDrag?.end();
     if (!d.active) {
       // Sub-threshold press: the click behavior stands (a Door click-reattaches; a
       // header selects). An external press that never became a drag still tells the Wall
@@ -180,8 +188,9 @@ export function createDragController(deps: DragControllerDeps): DragController {
       deps.suppressNextClickRef.current = false;
     }, 0);
     const chosen = d.candidates.length > 0 ? d.candidates[Math.min(d.depth, d.candidates.length - 1)] : null;
-    if (!commit) {
-      if (d.external) deps.latestRef.current.onExternalDrop?.(null); // Escape → put the Door back
+    // Escape, or a release the Workspace strip took: a Door goes back.
+    if (!commit || deps.latestRef.current.workspaceDrag?.drop(d.id, d.lastX, d.lastY)) {
+      if (d.external) deps.latestRef.current.onExternalDrop?.(null);
       return;
     }
     if (d.external) {
@@ -215,7 +224,10 @@ export function createDragController(deps: DragControllerDeps): DragController {
     scheduleHitTest();
   }
 
-  function onUp(): void {
+  function onCancel(): void { finish(false); }
+
+  function onUp(e: PointerEvent): void {
+    if (drag) { drag.lastX = e.clientX; drag.lastY = e.clientY; }
     // A release can beat the queued rAF (or follow a background tree commit).
     // Resolve once synchronously so the proposal uses the latest pointer and tree.
     runHitTest();
@@ -259,6 +271,7 @@ export function createDragController(deps: DragControllerDeps): DragController {
       if (drag?.external) {
         detach();
         drag = null;
+        deps.latestRef.current.workspaceDrag?.end();
         publishPreview(null);
       }
     },
@@ -266,7 +279,7 @@ export function createDragController(deps: DragControllerDeps): DragController {
       return drag !== null;
     },
     dispose() {
-      detach();
+      finish(false);
     },
   };
 }

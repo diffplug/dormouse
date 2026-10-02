@@ -114,6 +114,17 @@ export const MAX_DIRECT_PENDING_FRAMES = 8192;
 export const DIRECT_HANDOFF_TIMEOUT_MS = DIRECT_SETUP_TIMEOUT_MS;
 
 /**
+ * How long a direct-only session has, from its promotion, for the direct path
+ * to carry both directions before the Burrow ends it — a one-time connection,
+ * and a paired phone's under Local networks (`ConnectionOutcomeV1.directOnly`).
+ * **Never shorter than the phone can need**: it arms its own
+ * {@link DIRECT_SETUP_TIMEOUT_MS} only once the outcome reaches it, and its
+ * switch then crosses the relay, which {@link DIRECT_HANDOFF_TIMEOUT_MS}
+ * bounds. Both ends wait this long.
+ */
+export const DIRECT_ONLY_DEADLINE_MS = DIRECT_SETUP_TIMEOUT_MS + DIRECT_HANDOFF_TIMEOUT_MS;
+
+/**
  * How long a connection may sit `disconnected` before the attempt is written
  * off. ICE reports that state on a gap the connection may well recover from — a
  * phone changing networks, a radio blip — and ending a switched session there
@@ -277,6 +288,52 @@ export function isDirectSignalV1(value: unknown): value is DirectSignalV1 {
     default:
       return false;
   }
+}
+
+/**
+ * The longest address a path refusal names: an IPv6 literal with an IPv4 tail,
+ * every group spelled in full.
+ */
+export const MAX_PATH_ADDRESS_LENGTH = 45;
+
+/**
+ * Where the address a path refusal names came from
+ * (`docs/specs/remote-network.md` -> "Local networks"): `observed` is the
+ * remote end of the selected candidate pair, as the Burrow's own ICE agent
+ * reported it; `reported` is an address the phone put in its offer, which is
+ * a diagnostic and never path evidence.
+ */
+export const PATH_ADDRESS_SOURCES = Object.freeze(['observed', 'reported'] as const);
+export type PathAddressSource = (typeof PATH_ADDRESS_SOURCES)[number];
+
+const IPV4_OCTET = '(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])';
+const IPV4_LITERAL = new RegExp(`^${IPV4_OCTET}(?:\\.${IPV4_OCTET}){3}$`);
+const IPV6_GROUP = /^[0-9a-fA-F]{1,4}$/;
+
+/**
+ * Whether `value` is one IP literal, at most {@link MAX_PATH_ADDRESS_LENGTH}
+ * characters: dotted-quad IPv4, or IPv6 with at most one `::` and an optional
+ * IPv4 tail. Never a hostname, an mDNS name, a zone, or a port, so a string
+ * that passes is safe to show as it is.
+ */
+export function isIpLiteral(value: unknown): value is string {
+  if (!isBoundedString(value, MAX_PATH_ADDRESS_LENGTH) || value.length === 0) return false;
+  if (IPV4_LITERAL.test(value)) return true;
+  const halves = value.split('::');
+  if (halves.length > 2) return false;
+  const head = halves[0] === '' ? [] : halves[0]!.split(':');
+  const tail = halves.length === 2 && halves[1] !== '' ? halves[1]!.split(':') : [];
+  const groups = [...head, ...tail];
+  // An IPv4 tail ends the literal; one before a trailing `::` does not.
+  const tailAllowed = halves.length === 1 || tail.length > 0;
+  let count = 0;
+  for (let i = 0; i < groups.length; i += 1) {
+    const group = groups[i]!;
+    if (IPV6_GROUP.test(group)) count += 1;
+    else if (tailAllowed && i === groups.length - 1 && IPV4_LITERAL.test(group)) count += 2;
+    else return false;
+  }
+  return halves.length === 2 ? count <= 7 : count === 8;
 }
 
 /** What a relay transport frame may do once this end has read the peer's switch. */

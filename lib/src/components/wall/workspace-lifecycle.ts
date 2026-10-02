@@ -3,8 +3,8 @@ import { flushSync } from 'react-dom';
 import { awaitWallHandle, mountingRefusal } from './dor-control-shared';
 import { getWallHandle } from './wall-handles';
 import { forgetWorkspaceSession, isWorkspaceTransferPending } from '../../lib/window-session-aggregator';
-import { dismissWorkspaceUi, setPendingWorkspaceClose, setRenamingWorkspace } from '../../lib/workspace-ui-store';
-import { closeWorkspace, getActiveWorkspaceId, setActiveWorkspace, workspaceRefFor } from '../../lib/workspace-store';
+import { cancelPendingConfirmation, dismissWorkspaceUi, requestConfirmation, setRenamingWorkspace, type WorkspaceConfirmation } from '../../lib/workspace-ui-store';
+import { closeWorkspace, getActiveWorkspaceId, getWorkspacesSnapshot, setActiveWorkspace, workspaceRefFor } from '../../lib/workspace-store';
 import type { WorkspaceId } from '../../lib/session-types';
 import type { WorkspaceCloseMode } from './wall-types';
 import { confirmToolEditorsClose, UNSAVED_TOOL_REFUSAL } from '../../lib/tool-editor';
@@ -72,6 +72,7 @@ export async function closeWorkspaceWithSurfaces(
   id: WorkspaceId,
   mode: WorkspaceCloseMode = 'prompt',
 ): Promise<string | null> {
+  const isCurrent = cancelPendingConfirmation();
   if (isWorkspaceTransferPending(id)) return 'Workspace is transferring';
   if (closeInFlight) return CLOSE_IN_FLIGHT_REFUSAL;
   const handle = getWallHandle(id);
@@ -87,6 +88,7 @@ export async function closeWorkspaceWithSurfaces(
     // close refuses instead (`docs/specs/dor-tool.md` → Closing unsaved Tools).
     const editors = handle.dirtyToolIds();
     if (editors.length && (mode === 'silent' || !await confirmToolEditorsClose(editors))) return UNSAVED_TOOL_REFUSAL;
+    if (!isCurrent()) return 'Workspace close was superseded by a newer close or move';
     const refusal = await handle.closeAll(editors);
     if (refusal) {
       // A refusal returns to its prompt if the user navigated away during close.
@@ -113,8 +115,9 @@ export async function closeWorkspaceWithSurfaces(
  * confirmation, otherwise close immediately.
  */
 export function requestWorkspaceClose(id: WorkspaceId): void {
+  const isCurrent = cancelPendingConfirmation();
   if (closeInFlight || isWorkspaceTransferPending(id)) return;
-  void closeOnceWallRegisters(id);
+  void closeOnceWallRegisters(id, isCurrent);
 }
 
 /**
@@ -124,18 +127,30 @@ export function requestWorkspaceClose(id: WorkspaceId): void {
  * one effect away and having the close refused where nobody reads the refusal
  * (`docs/specs/layout.md` → "Workspaces").
  */
-async function closeOnceWallRegisters(id: WorkspaceId): Promise<void> {
+async function closeOnceWallRegisters(id: WorkspaceId, isCurrent: () => boolean): Promise<void> {
   const handle = await awaitWallHandle(id);
+  if (!isCurrent()) return;
   if (closeInFlight || isWorkspaceTransferPending(id)) return;
   if (!handle) return;
   if (workspaceNeedsCloseConfirmation(id)) {
     // An immediate close reveals the Workspace itself.
     setActiveWorkspace(id);
     handle.selectWorkspaceTab();
-    setPendingWorkspaceClose({ id, char: randomKillChar() });
+    requestConfirmation(workspaceCloseConfirmation(id));
     return;
   }
   await closeWorkspaceWithSurfaces(id);
+}
+
+/** The typed close question; the key is ignored while the Workspace transfers. */
+export function workspaceCloseConfirmation(id: WorkspaceId, char = randomKillChar()): WorkspaceConfirmation {
+  return {
+    id,
+    char,
+    detail: getWorkspacesSnapshot().workspaces.find(workspace => workspace.id === id)?.name,
+    canConfirm: () => !isWorkspaceTransferPending(id),
+    answer: accepted => { if (accepted) void closeWorkspaceWithSurfaces(id); },
+  };
 }
 
 /** Open the strip's inline rename editor on a Workspace. */

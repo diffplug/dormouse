@@ -56,6 +56,9 @@ const EXT_TARGET = 'vscode-ext/vitest.smoketest.config.mts';
  */
 const FIXTURES = [
   ['node, positional', "\nexport function __selftest(s) { s.listen(9999, '127.0.0.1'); }\n"],
+  // A port computed by a call — `Number(process.env.PORT || 0)` — whose inner
+  // `)` ends a scan that stops at the first one.
+  ['node, positional', "\nexport function __selftest(s) { s.listen(Number(process.env.PORT || 0), '127.0.0.1'); }\n"],
   ['node, options object', "\nexport function __selftest(s) { s.listen({ port: 9999, host: '127.0.0.1' }); }\n"],
   ['@hono/node-server', "\nexport function __selftest(app) { serve({ fetch: app.fetch, port: 9999, hostname: '127.0.0.1' }); }\n"],
   ['ws, explicit loopback host', "\nexport function __selftest() { return new WebSocketServer({ host: '127.0.0.1' }); }\n"],

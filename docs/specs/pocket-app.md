@@ -28,8 +28,8 @@ Pocket is therefore:
 out on `FakePtyAdapter` by
 `website/src/components/PocketTerminalExperience.tsx`.
 
-Three phases, one component: `SetupOrSignin`, `BurrowsView`, then `ConnectedView`
-wrapping `PocketWall`. **Everything outside the PTY core no-ops or is absent** —
+`Phase` in `lib/src/remote/pocket-app/App.tsx` owns screen state; `ConnectedView`
+wraps `PocketWall`. **Everything outside the PTY core no-ops or is absent** —
 `getCwd` → null, shells/clipboard empty, alerts inert, `alertAwait` settling
 `cancelled` rather than never resolving.
 
@@ -82,6 +82,9 @@ lands** ([remote-security-model.md](./remote-security-model.md) → Pairing).
 * **A passkey the authenticator already holds outranks an empty store**:
   `excludeCredentials` refusing (`PasskeyAlreadyRegisteredError`) proves this
   device can sign in, so sign-in leads. (rationale)
+* **A registered passkey is named `Dormouse Pocket (<rpId>)`**, self-host and
+  Hosted alike, for the platform's passkey manager; the account id the Relay
+  answered is only its `user.id`.
 * **A refused token is reported, never folded away**:
   `SETUP_TOKEN_INVALID_ERROR` — expired, spent, or minted by a since-revoked
   Burrow — becomes `SetupTokenInvalidError`, whose message is the recovery: show a
@@ -139,7 +142,7 @@ Three details the table leaves implicit:
 - **Exited surfaces stay in the directory** with `alive:false` as history, so the
   wall filters them out of selectable sessions and the active-pane default.
 
-**The pinned record picks a row's one action.** The Burrows view — titled
+**The pinned record picks a row's primary action.** The Burrows view — titled
 **Burrows** (rationale) — lists the `KnownBurrowV1` records (no record, no row),
 labeled from the record and stamped online from `GET /api/burrows`, offering
 Connect alone or **Pair again** alone, never a Connect that can only fail.
@@ -149,15 +152,26 @@ discarding the pin (rationale). Each row carries **Remove**, which tombstones th
 delivery id before deleting the record; the list carries **Scan a setup code**.
 Pairing continues into connecting.
 
+**A record of the signed-in account the Relay's list no longer names is
+removed**, marked only off a `GET /api/burrows` that succeeded; a listed
+offline Burrow, and another account's record, keep the offline row.
+**Must bind removal checks to the account that started the list read.** Its
+row reads `BURROW_REMOVED_COPY` for the deployment Pocket read
+(`docs/specs/remote-network.md` -> "Anywhere") and offers **Forget** alone,
+which is Remove. **A Connect answered `BURROW_UNAVAILABLE_MESSAGE` re-reads the
+list**, showing that copy instead where the Burrow is gone; a failed re-read
+keeps the original.
+
 Source of truth: `PlatformAdapter` in `lib/src/lib/platform/types.ts`;
-`SetupOrSignin` / `BurrowsView` / `ConnectedView` and the `probeNoiseSupport`
+`Phase`, `SetupOrSignin` / `BurrowsView` / `ConnectedView` and the `probeNoiseSupport`
 gate in `lib/src/remote/pocket-app/App.tsx`; `PairingCodeView` in
 `lib/src/remote/pocket-app/views.tsx`; `mountRemoteWall` in
 `lib/src/remote/pocket-app/remote-wall.ts`;
 `lib/src/remote/pocket-app/PocketWall.tsx`;
 `lib/src/remote/pocket-app/pair-link.ts`;
 `lib/src/remote/pocket-app/ScanInvitation.tsx`; `PocketClient.pair` in
-`lib/src/remote/client/pocket-client.ts`; `RemotePtyAdapter` in
+`lib/src/remote/client/pocket-client.ts`; `passkeyUserName` in
+`lib/src/remote/client/webauthn.ts`; `RemotePtyAdapter` in
 `lib/src/remote/client/remote-adapter.ts`; `attachableDirectoryEntries` in
 `lib/src/remote/pocket-app/wall-model.ts`.
 
@@ -476,9 +490,12 @@ previous build's hashed assets (rationale). Two rules make it hold:
   response's cache policy describes the response, and the shell is never a useful
   answer to a subresource miss. (rationale)
 
-Source of truth: `registerPocketServing` in `relay/src/app.ts`. Both built HTML
-shells are checked by `assertPocketShell` in
-`lib/scripts/assert-pocket-worker.mjs`.
+The Hosted Relay serves the same bundle by the same rules
+(`docs/specs/hosted.md` -> "Relay").
+
+Source of truth: `registerPocketServing` in `relay/src/app.ts`; `pocketRoutes` in
+`hosted/server/pocket.ts`. Both built HTML shells are checked by
+`assertPocketShell` in `lib/scripts/assert-pocket-worker.mjs`.
 
 ### The capability harness
 
@@ -540,10 +557,14 @@ injected timer, clock, and visibility seams in
 ## The path the session takes
 
 **Pocket offers a direct path once the connection outcome says `ok`**, over the
-browser's own `RTCPeerConnection` (its ICE servers:
-[remote-network.md](./remote-network.md) → Anywhere), and keeps the session
+browser's own `RTCPeerConnection` (ICE servers by deployment, read before
+every Connect and pairing: [remote-network.md](./remote-network.md) →
+Anywhere), and keeps the session
 on the relay when the browser has none or the Burrow declines
-([remote-api.md](./remote-api.md) → Direct path owns the whole protocol).
+([remote-api.md](./remote-api.md) → Direct path owns the whole protocol) —
+**unless the outcome says `directOnly`**, where the connect answers only once
+the direct path carries the session
+([remote-network.md](./remote-network.md) → Local networks).
 
 **Must retire the previous session — its peer, its channel, and its pending
 requests — immediately before the replacement's connection request goes out, and
@@ -557,22 +578,16 @@ replacement refused after the request has gone leaves none. Pinned by
 outcome arrives` and `leaves a working session alone when the replacement never
 reaches the Burrow` in `lib/src/remote/client/pocket-client.test.ts`.
 
-**The connected header names the live path** — `relay` or `direct`, captioned,
-never coloured — so a relayed fallback is visible rather than silent, **with the
-reason behind it in the hover text and never in the label**: an attempt that
-quietly stayed relayed is still `relay`, and a third state for the common case
-would read as a fault. **The transport hands up a `DirectRelayCause`, never its
-failure text**, and Pocket owns the sentence for each: what an attempt fails
-with includes a runtime's own exception message, which belongs in the operator's
-log. **A
-channel that dies after this session has switched is burrow loss**: the phone
-leaves the wall exactly as it does for a `burrow-gone`, and returning costs a
-fresh handshake and one WebAuthn prompt. Before the switch a failed channel
-costs nothing.
+**Must label the connected header with the live path, `relay` or `direct`,
+without status colours**, keeping fallback reasons in hover text. **Must pass
+only a `DirectRelayCause` to Pocket, never runtime failure text**;
+`TRANSPORT_RELAY_CAUSES` owns the displayed sentences. **Must treat a channel
+failure after the switch as Burrow loss**, returning to the list and requiring
+a fresh handshake and WebAuthn prompt; before the switch, a session permitting relay stays relayed.
 
 Source of truth: `PocketClient.connect` in
-`lib/src/remote/client/pocket-client.ts`; `selfHostDirectPeer` in
-`lib/src/remote/client/browser-direct-peer.ts`; `ClientSessionCore.transportPath` /
+`lib/src/remote/client/pocket-client.ts`; `deploymentDirectPeer` in
+`lib/src/remote/pocket-app/deployment.ts`; `ClientSessionCore.transportPath` /
 `setOnTransportChanged` in `lib/src/remote/client/session-core.ts`; `TRANSPORT_PATH_LABELS` /
 `TRANSPORT_RELAY_CAUSES` / `transportTitle` in
 `lib/src/remote/pocket-app/views.tsx`.
@@ -608,7 +623,7 @@ passkeys to the serving origin, and Chrome's Private Network Access rules block
 public-site → private-network fetches. Pocket holds itself to it by construction
 — an empty API base, a `wsBase` from `location.origin` — and the Relay enforces
 it: a registration or assertion whose `clientDataJSON.origin` is
-not the configured `DORMOUSE_ORIGIN` is rejected ([relay.md](./relay.md);
+not the configured origin is rejected ([relay.md](./relay.md);
 rationale); the Relay emits no cross-origin grant
 ([security-remote.md](./security-remote.md#cross-origin-access)). **The bundle
 mounts at the origin root, never under a path prefix**: the manifest's
@@ -626,8 +641,8 @@ Every source is the app's own origin
 * **`style-src 'unsafe-inline'`**, because the shell carries a pre-paint
   `<style>` and React writes `style` attributes — a hash covers the first but not
   the second.
-* **`connect-src` names the WebSocket origin explicitly** — `DORMOUSE_ORIGIN`
-  with the scheme swapped — rather than resting on `'self'` (rationale). It can
+* **`connect-src` names the WebSocket origin explicitly** — the origin with
+  the scheme swapped — rather than resting on `'self'` (rationale). It can
   only ever be this deployment's own relay.
 * **`img-src` also admits `data:` and `blob:`, `media-src` `blob:`**; every
   other directive is `'self'`.
@@ -640,26 +655,26 @@ in the emitted `index.html`. (rationale)
 
 One lib-owned bundle, two deployments:
 
-* **Selfhost (shipped):** the Relay serves the bundle (`lib/dist-pocket`);
+* **Selfhost:** the Relay serves the bundle (`lib/dist-pocket`);
   selfhost auth never depends on dormouse.sh existing.
-* **SaaS (staged — see [Future](#future)):** CloudFlare serves the static site
-  and routes `/api/*` and `/ws/*` to the dynamic backend (CloudFlare proxies
-  WebSockets). The same bundle mounts at the site origin; rpId is the site's.
+* **Hosted:** the relay Worker serves it at the root of `relay.dormouse.sh`
+  beside the Hosted Relay's routes (`docs/specs/hosted.md` -> "Relay"); rpId is
+  that host. The staging adds `deployment.json`, which tells the bundle Hosted
+  serves it ([remote-network.md](./remote-network.md) → Anywhere).
 
 **The website stays fully static — playground and marketing pages — in both
 worlds**, sharing all terminal UI through `lib` and never duplicating Pocket
 code.
 
-Source of truth: `pocketContentSecurityPolicy` in `relay/src/app.ts`,
-`assertPocketShell` in `lib/scripts/assert-pocket-worker.mjs`.
+Source of truth: `pocketContentSecurityPolicy` in
+`remote-lib-common/src/remote/relay-common.ts`, `assertPocketShell` in
+`lib/scripts/assert-pocket-worker.mjs`.
 
 ## Future
 
 1. **Dedupe the composition** — the website's `PocketTerminalExperience` and the
    Pocket shell (`PocketWall.tsx`) each wire `MobileTerminalUi` + `MobileWall`
    independently; extract the shared wiring so the two cannot drift.
-2. **CloudFlare routing** — the SaaS deployment above; deferred until SaaS.
-   Nothing in the shipped architecture needs rework for it.
-3. **Theme picker in Pocket** — the app restores the persisted theme but exposes
+2. **Theme picker in Pocket** — the app restores the persisted theme but exposes
    no picker; add the shared `ThemePicker` (and its theme-debugger entry) once
    its dropdown is phone-friendly.

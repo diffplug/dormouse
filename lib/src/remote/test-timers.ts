@@ -18,6 +18,11 @@ export interface FakeTimers {
   fire(): void;
   /** Fire the one armed for `delayMs`, where more than one deadline is live. */
   fireAt(delayMs: number): void;
+  /**
+   * Fire the one armed for `delayMs` most recently, where two share it: a
+   * session's keepalive and its relay socket's heartbeat run on one interval.
+   */
+  fireLatestAt(delayMs: number): void;
 }
 
 export function fakeTimers(): FakeTimers {
@@ -46,6 +51,12 @@ export function fakeTimers(): FakeTimers {
     },
     fireAt(delayMs: number): void {
       const index = live.findIndex((entry) => entry.delayMs === delayMs);
+      if (index < 0) throw new Error(`no timer armed for ${delayMs}ms`);
+      take(index)();
+    },
+    fireLatestAt(delayMs: number): void {
+      let index = live.length - 1;
+      while (index >= 0 && live[index]!.delayMs !== delayMs) index -= 1;
       if (index < 0) throw new Error(`no timer armed for ${delayMs}ms`);
       take(index)();
     },

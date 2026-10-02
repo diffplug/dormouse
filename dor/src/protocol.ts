@@ -22,6 +22,7 @@ export const SURFACE_CONTROL_METHODS = {
   read: 'surface.read',
   await: 'surface.await',
   kill: 'surface.kill',
+  move: 'surface.move',
   iframe: 'surface.iframe',
   browser: 'surface.browser',
   browserViewport: 'surface.browserViewport',
@@ -106,7 +107,7 @@ export function isWorkspaceControlMethod(method: string): method is WorkspaceCon
  * Workspace refuses exactly these (`docs/specs/vscode.md` → "Workspaces").
  */
 export function spansWorkspaces(method: string, params?: Record<string, unknown>): boolean {
-  return isWorkspaceControlMethod(method)
+  return method === SURFACE_CONTROL_METHODS.move || isWorkspaceControlMethod(method)
     || (method === SURFACE_CONTROL_METHODS.list && params?.scope === 'all');
 }
 

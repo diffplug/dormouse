@@ -31,8 +31,6 @@ export const cfg = {
      * wait to ring on inactivity. Keep these effects coupled; there is no separate
      * minimum command runtime (product decision, 2026-09-24). */
     echoWindow: 750,
-    /** ms — longest a terminal notification may wait behind animation before it rings anyway. */
-    deferCeiling: 30_000,
     /** When true, the ALERT_RINGING alarm pulse animations are frozen at T=0 (for deterministic Chromatic snapshots). */
     ringingPaused: false,
   },

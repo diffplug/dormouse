@@ -1,4 +1,5 @@
 import { getSessionAlertPolicy, subscribeToAlertDeliveryPolicy } from './alert-delivery-policy';
+import { isAlertPaused } from './alert-episode';
 import { createManagedVoiceEngine } from './managed-voice-engine';
 import { getPlatformOrNull } from './platform';
 import { SpeechQueue } from './speech-queue';
@@ -88,6 +89,7 @@ export function startAlertSpeech(): AlertSpeaker {
         text: () => toSpokenText(deriveSessionLabel(id)),
         voice: () => getSessionAlertPolicy(id).speakVoice,
         eligible: () => eligible(id, episodeId),
+        paused: () => isAlertPaused(getActivity(id)),
         onStart: () => { renderedEpisodes.set(id, episodeId); setAlertSpeechState(id, 'speaking'); },
         onFinish: (started) => {
           if (started && eligible(id, episodeId)) { setAlertSpeechState(id, 'spoken'); return; }

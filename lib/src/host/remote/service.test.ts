@@ -43,8 +43,12 @@ vi.mock('../../remote/burrow/enrollment', async (importOriginal) => {
 });
 import {
   API_ROUTES,
+  NOT_ENTITLED_ERROR,
   ONE_TIME_WS_ROUTES,
   ORIGIN_MISMATCH_ERROR,
+  RELAY_BEARER_LENGTH,
+  UNAUTHORIZED_ERROR,
+  WS_CLOSE_BURROW_REVOKED,
   mintNoiseStaticKeyPair,
   parseOneTimeLinkUrl,
   parsePairingInvitationUrl,
@@ -87,7 +91,7 @@ import {
 import { createEphemeralBurrowStateStore, type BurrowStateStore } from './burrow-state-store';
 import { DEFAULT_RELAY_ORIGIN } from '../relay-origin';
 import type { BurrowDirectPeerFactory } from './native-direct-peer';
-import { BurrowService, type BurrowServiceOptions } from './service';
+import { BurrowService, enrollVerificationUrl, type BurrowServiceOptions } from './service';
 import { ANYWHERE_ON, LAN, LOCAL_ON, RELAY_ON } from './test-burrow-link';
 import { idleOneTimeState, isOneTimeState } from './service-protocol';
 import type {
@@ -212,6 +216,8 @@ function fakeProvider(): BurrowSurfaceProvider {
 }
 
 let sockets: FakeSocket[];
+/** Where each relay socket in {@link sockets} was opened to. */
+let socketUrls: string[];
 /** The one-time rendezvous every one-time socket the service opens reaches. */
 let rendezvous: TestRendezvous;
 /** Where the Burrow's direct peers and the test phone's meet. */
@@ -327,6 +333,7 @@ function createService(seed?: Seed, over: Partial<BurrowServiceOptions> = {}): B
       }
       const socket = new FakeSocket();
       sockets.push(socket);
+      socketUrls.push(url);
       return socket;
     },
     createDirectPeer: () => network.createAnswerer(),
@@ -436,6 +443,7 @@ function answererTo(remote: string, handed: Handed[]): BurrowDirectPeerFactory {
 
 beforeEach(() => {
   sockets = [];
+  socketUrls = [];
   rendezvous = createTestRendezvous();
   network = new FakeDirectNetwork();
   sent = [];
@@ -470,6 +478,8 @@ describe('status', () => {
       pairedClients: 0,
       suggestedLabel: `${hostname()} (VS Code)`,
       offer: false,
+      hostedEnrollment: null,
+      accountOrigin: null,
     } satisfies BurrowConsoleStatus);
   });
 
@@ -513,6 +523,8 @@ describe('status', () => {
       pairedClients: 0,
       suggestedLabel: `${hostname()} (VS Code)`,
       offer: true,
+      hostedEnrollment: null,
+      accountOrigin: null,
     } satisfies BurrowConsoleStatus);
     // The one-time token is a bearer credential and this is a service→webview
     // shape (docs/specs/security-remote.md -> "Trust boundary"), so it must not appear anywhere in what was sent.
@@ -545,6 +557,8 @@ describe('status', () => {
       pairedClients: 1,
       suggestedLabel: `${hostname()} (VS Code)`,
       offer: false,
+      hostedEnrollment: null,
+      accountOrigin: null,
     } satisfies BurrowConsoleStatus);
   });
 
@@ -584,7 +598,8 @@ describe('status', () => {
 
 describe('enroll', () => {
   it('refuses in a Hosted build, before the setup password leaves the machine', async () => {
-    // Its one Relay is Hosted's, which runs none yet (docs/specs/relay.md → "Relay origin").
+    // Hosted takes no setup password: its build enrolls by device code
+    // (docs/specs/relay.md → "Relay origin").
     createHostedService();
     const result = await command('enroll', { password: 'setup', label: 'Laptop' });
 
@@ -824,6 +839,34 @@ describe('start', () => {
     await service.start();
 
     expect(sockets).toHaveLength(1);
+  });
+
+  it('asks the Relay about a refused upgrade through its guarded fetch, and reports what it said', async () => {
+    for (const [status, error, connection] of [
+      [401, UNAUTHORIZED_ERROR, 'removed'],
+      [403, NOT_ENTITLED_ERROR, 'not-entitled'],
+    ] as const) {
+      requests.length = 0;
+      sockets.length = 0;
+      createService(
+        { enrollment: ENROLLMENT },
+        {
+          fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
+            requests.push({ url: String(input), init });
+            return new Response(JSON.stringify({ error }), { status });
+          }) as unknown as typeof globalThis.fetch,
+        },
+      );
+      await service.start();
+      sockets[0]!.emitError();
+      sockets[0]!.closeWith(1006);
+      await vi.waitFor(async () =>
+        expect(((await command('status')).result as BurrowConsoleStatus).connection).toBe(connection),
+      );
+      expect(requests.map((request) => request.url)).toEqual([`${ORIGIN}${API_ROUTES.pushDevices}`]);
+      expect(sockets).toHaveLength(1);
+      service.dispose();
+    }
   });
 
   it('reconnect is the way back, and start()s a Burrow that never ran', async () => {
@@ -1421,6 +1464,17 @@ describe('push', () => {
     expect(requests).toEqual([]);
   });
 
+  it('sends nothing, and mints no setup code, once the Relay removed this Burrow', async () => {
+    createService({ enrollment: ENROLLMENT, acl: { [BURROW_ID]: [aclRecord('device-1')] } });
+    await service.start();
+    sockets[0]!.open();
+    sockets[0]!.closeWith(WS_CLOSE_BURROW_REVOKED);
+
+    await service.push('pty-1', 'x');
+    expect(await command('setupQr')).toMatchObject({ error: expect.stringContaining('not connected') });
+    expect(requests).toEqual([]);
+  });
+
   it('warns rather than rejecting when the Relay refuses the send', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     createService(
@@ -1605,7 +1659,7 @@ describe('one-time connection', () => {
     const waiting = result as Waiting;
     expect(waiting.status).toBe('waiting');
     expect(rendezvous.rooms).toHaveLength(1);
-    expect(rendezvous.room().burrowUrl).toBe('wss://hosted.dormouse.sh/api/one-time/burrow');
+    expect(rendezvous.room().burrowUrl).toBe('wss://relay.dormouse.sh/api/one-time/burrow');
     expect((await parseOneTimeLinkUrl(waiting.url, HOSTED_ORIGIN))?.roomId).toBe(
       rendezvous.room().roomId,
     );
@@ -1828,14 +1882,63 @@ describe('one-time connection', () => {
       expect(pathPolicy!.refusal({ local: '192.168.1.2', remote: '10.0.0.3' })).not.toBeNull();
     });
 
-    it('ends network-not-allowed when the phone’s end of the pair is off them', async () => {
+    it('ends network-not-allowed when the phone’s end of the pair is off them, naming it', async () => {
       createHostedService(undefined, { createDirectPeer: answererTo('10.0.0.3', []) });
       const phone = await approvedPhone();
 
       await offerOneTimeDirect(phone, network);
       await settleUntil(() => oneTimeStates().at(-1)?.status === 'ended');
-      expect(oneTimeStates().at(-1)).toEqual({ status: 'ended', reason: 'network-not-allowed' });
+      const refusal = {
+        at: expect.any(Number),
+        kind: 'path-refused',
+        end: 'remote',
+        address: '10.0.0.3',
+        addressSource: 'observed',
+      };
+      expect(oneTimeStates().at(-1)).toEqual({ status: 'ended', reason: 'network-not-allowed', refusal });
       expect(servingEvents().at(-1)).toBe(false);
+
+      // Held for Settings → Network too, the one record either runtime reports,
+      // until it is dismissed.
+      const events = () => uiEvents().filter((event) => event.name === 'network-policy');
+      expect(events().at(-1)).toMatchObject({ refusal });
+      expect((await command('networkPolicy')).result).toMatchObject({ refusal });
+      const dismissed = (await command('dismissPathRefusal')).result as Record<string, unknown>;
+      expect(dismissed).not.toHaveProperty('refusal');
+      expect(events().at(-1)).not.toHaveProperty('refusal');
+      expect((await command('networkPolicy')).result).not.toHaveProperty('refusal');
+    });
+
+    it('dismisses only the refusal held when Dismiss arrived, keeping one recorded meanwhile', async () => {
+      const answerers: Array<ReturnType<FakeDirectNetwork['createAnswerer']>> = [];
+      const remotes = ['10.0.0.3', '192.168.1.3'];
+      createHostedService(undefined, {
+        createDirectPeer: () => {
+          const answerer = network.createAnswerer();
+          answerer.selectedPair = { local: '192.168.1.2', remote: remotes[answerers.length]! };
+          answerers.push(answerer);
+          return answerer;
+        },
+      });
+      await offerOneTimeDirect(await approvedPhone(), network);
+      await settleUntil(() => oneTimeStates().at(-1)?.status === 'ended');
+      expect((await command('networkPolicy')).result).toMatchObject({ refusal: { address: '10.0.0.3' } });
+
+      // A second phone, on the allowed network, then moved off it in the same
+      // tick as a Dismiss of the first refusal: the second is news, and stays.
+      network = new FakeDirectNetwork();
+      const second = await join((await open()).url);
+      const queued = queueEvents().length;
+      second.sendControl({ code: '42', label: 'iPhone' });
+      const event = await flushUntil(() => queueEvents().slice(queued).find((e) => e.queue.length > 0));
+      await approve(event.queue[0]!);
+      expect(await second.next()).toMatchObject({ ok: true });
+      await switchDirect(second);
+      answerers[1]!.setConnectionState('connected');
+      const dismissing = service.handleCommand({ burrowRequestId: 'dismiss', cmd: 'dismissPathRefusal' });
+      answerers[1]!.reselect({ local: '192.168.1.2', remote: '10.0.0.9' });
+      await dismissing;
+      expect((await command('networkPolicy')).result).toMatchObject({ refusal: { address: '10.0.0.9' } });
     });
 
     it('rests that ending, its runtime gone, on a change of path, so no other level reports it', async () => {
@@ -1845,7 +1948,7 @@ describe('one-time connection', () => {
 
       // `autoUpdate` alone changes no path, so the ending stays to report.
       await setPolicy({ ...LOCAL_ON, autoUpdate: true });
-      expect(oneTimeStates().at(-1)).toEqual({ status: 'ended', reason: 'network-not-allowed' });
+      expect(oneTimeStates().at(-1)).toMatchObject({ status: 'ended', reason: 'network-not-allowed' });
       await setPolicy(ANYWHERE_ON);
       expect(oneTimeStates().at(-1)).toEqual({ status: 'idle' });
     });
@@ -1913,6 +2016,7 @@ describe('one-time connection', () => {
       { status: 'waiting', expiresAt: 1 },
       { status: 'connected', label: 'x' },
       { status: 'ended' },
+      { status: 'ended', reason: 'network-not-allowed', refusal: { at: 1, kind: 'deadline', address: 'phone.local', addressSource: 'observed' } },
       { status: 'unheard-of' },
     ]) {
       expect(isOneTimeState(malformed), JSON.stringify(malformed)).toBe(false);
@@ -1920,7 +2024,7 @@ describe('one-time connection', () => {
   });
 
   it('survives the enrollment going, and a reconnect', async () => {
-    // Held, not run: Local networks runs no Burrow (`network policy` below).
+    // Local networks runs the enrolled Burrow beside the link.
     createHostedService({ enrollment: ENROLLMENT });
     await service.start();
     const waiting = await open();
@@ -1929,9 +2033,10 @@ describe('one-time connection', () => {
     await command('reconnect');
     expect((await command('oneTimeStatus')).result).toEqual(waiting);
     expect(rendezvous.room().burrow.readyState).toBe(1);
+    expect(sockets[0]!.readyState).toBe(3);
     // The enrollment gate cycled; the serving one never dropped once up.
-    expect(statusEvents()).toEqual([true, true, false]);
-    expect(servingEvents()).toEqual([false, true, true]);
+    expect(statusEvents()).toEqual([true, false]);
+    expect(servingEvents()).toEqual([true, true]);
 
     // And the link still works end to end, the phone told the enrolled name
     // the connection opened under.
@@ -2164,18 +2269,68 @@ describe('network policy', () => {
     });
   });
 
-  it('holds an enrollment without running it under Local networks, which has no persistent path', async () => {
+  it('runs a Hosted enrollment under Local networks, holding its sessions to the allowed networks with no STUN', async () => {
+    const handed: Handed[] = [];
+    createHostedService({ enrollment: ENROLLMENT, network: LOCAL_ON }, { createDirectPeer: answererTo('192.168.1.3', handed) });
+    await service.start();
+    expect(sockets).toHaveLength(1);
+    expect(socketUrls[0]).toMatch(/^wss:\/\/relay\.dormouse\.sh\/ws\/burrow\?/);
+    expect((await command('status')).result).toMatchObject({ enrolled: true, connection: 'connecting' });
+    const { createPeer, pathPolicy } = handedTransport.directPeering!;
+    expect(pathPolicy).toBeDefined();
+    expect(createPeer!(pathPolicy)).not.toBeNull();
+    expect(handed).toEqual([[pathPolicy, false]]);
+
+    // And again on entering Local networks from Nothing.
+    await setPolicy(NOTHING);
+    expect(sockets[0]!.readyState).toBe(3);
+    await setPolicy(LOCAL_ON);
+    expect(sockets).toHaveLength(2);
+  });
+
+  it('runs a Hosted enrollment under Anywhere through STUN with no hold, and pushes through relay.dormouse.sh', async () => {
+    const handed: Handed[] = [];
+    createHostedService(
+      { enrollment: ENROLLMENT, network: ANYWHERE_ON, acl: { [BURROW_ID]: [aclRecord('1')] } },
+      { createDirectPeer: answererTo('203.0.113.7', handed) },
+    );
+    await service.start();
+    expect(sockets).toHaveLength(1);
+    const { createPeer, pathPolicy } = handedTransport.directPeering!;
+    expect(pathPolicy).toBeUndefined();
+    expect(createPeer!()).not.toBeNull();
+    expect(handed).toEqual([[undefined, true]]);
+
+    await service.push('session-1', 'Build finished');
+    expect(requests.map((request) => request.url)).toContain(`${HOSTED_ORIGIN}${API_ROUTES.pushSend}`);
+  });
+
+  it('restarts the running Burrow on any change to its paths, and on nothing else', async () => {
     createHostedService({ enrollment: ENROLLMENT, network: LOCAL_ON });
     await service.start();
-    expect(sockets).toEqual([]);
-    expect((await command('status')).result).toMatchObject({ enrolled: true, connection: 'stopped' });
-    await command('reconnect');
+    expect(sockets).toHaveLength(1);
 
-    // Nor on entering Local networks from Nothing.
-    await setPolicy(NOTHING);
-    await setPolicy(LOCAL_ON);
-    expect(sockets).toEqual([]);
-    expect(servingEvents()).not.toContain(true);
+    // `autoUpdate` changes no path.
+    await setPolicy({ ...LOCAL_ON, autoUpdate: true });
+    expect(sockets).toHaveLength(1);
+    expect(sockets[0]!.readyState).not.toBe(3);
+
+    // The allowed networks under Local networks do: a runtime holds the ones it started on.
+    await setPolicy({ ...LOCAL_ON, allowed: ['10.0.0.0/8'] });
+    expect(sockets[0]!.readyState).toBe(3);
+    expect(sockets).toHaveLength(2);
+    expect(handedTransport.directPeering!.pathPolicy).toBeDefined();
+
+    // So does the level, Anywhere gathering through STUN with no hold.
+    await setPolicy(ANYWHERE_ON);
+    expect(sockets[1]!.readyState).toBe(3);
+    expect(sockets).toHaveLength(3);
+    expect(handedTransport.directPeering!.pathPolicy).toBeUndefined();
+
+    // Anywhere's allowed networks hold nothing, so they restart nothing.
+    await setPolicy({ ...ANYWHERE_ON, allowed: ['10.0.0.0/8'] });
+    expect(sockets).toHaveLength(3);
+    expect((await command('status')).result).toMatchObject({ enrolled: true });
   });
 
   it('opens no one-time link under Local networks with no network allowed', async () => {
@@ -2403,5 +2558,645 @@ describe('network policy', () => {
       expect(((await command('networkPolicy')).result as { policy: NetworkPolicy }).policy).toEqual(RELAY_ON);
       expect(policyEvents()).toEqual([]);
     });
+  });
+});
+
+describe('Hosted enrollment', () => {
+  const USER_CODE = '23AB-YZ9K';
+  const DEVICE_CODE = 'D'.repeat(RELAY_BEARER_LENGTH);
+  const INTERVAL_S = 5;
+  const TTL_MS = 10 * 60_000;
+
+  type PollAnswer = { status: number; body: unknown };
+  /** What the fake Hosted Relay's begin answers, and its queue of poll answers. */
+  let begin: Record<string, unknown>;
+  /** A promise is a poll held on the wire until the test settles it. */
+  let polls: Array<PollAnswer | Error | Response | Promise<PollAnswer>>;
+
+  const reply = (status: number, body: unknown) =>
+    ({
+      ok: status >= 200 && status < 300,
+      status,
+      json: async () => body,
+      text: async () => JSON.stringify(body),
+    }) as Response;
+
+  /** `relay.dormouse.sh` serving begin and poll; an empty poll queue is `pending`. */
+  function hostedFetch(): typeof globalThis.fetch {
+    return (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      requests.push({ url, init });
+      if (url.endsWith(API_ROUTES.burrowEnrollBegin)) return reply(200, begin);
+      if (url.endsWith(API_ROUTES.burrowEnrollPoll)) {
+        const next = await (polls.shift() ?? { status: 200, body: { status: 'pending' } });
+        if (next instanceof Error) throw next;
+        if (next instanceof Response) return next;
+        return reply(next.status, next.body);
+      }
+      throw new Error(`unexpected request ${url}`);
+    }) as unknown as typeof globalThis.fetch;
+  }
+
+  const enrolledAnswer = (burrowId = BURROW_ID) => ({
+    status: 200,
+    body: {
+      status: 'enrolled',
+      enrollment: {
+        burrowId,
+        burrowToken: 'hosted-token',
+        origin: HOSTED_ORIGIN,
+        rpId: new URL(HOSTED_ORIGIN).hostname,
+      },
+    },
+  });
+
+  function hosted(seed?: Seed, over: Partial<BurrowServiceOptions> = {}): BurrowService {
+    return createHostedService(seed, { fetch: hostedFetch(), ...over });
+  }
+
+  const pollRequests = () => requests.filter((request) => request.url.endsWith(API_ROUTES.burrowEnrollPoll));
+  const beginRequests = () => requests.filter((request) => request.url.endsWith(API_ROUTES.burrowEnrollBegin));
+
+  /** Queue a poll the fake Relay holds on the wire until the test answers it. */
+  function heldPoll(): (answer: PollAnswer) => void {
+    let settle: (answer: PollAnswer) => void = () => {};
+    polls.push(new Promise<PollAnswer>((resolve) => (settle = resolve)));
+    return settle;
+  }
+
+  /** The sentence a redemption this machine could not keep ends with. */
+  const stranded = (burrowId: string) =>
+    `Your account holds Burrow ${burrowId}, which this computer could not keep; remove it at https://hosted.dormouse.sh/account.`;
+
+  async function hostedEnrollment(): Promise<unknown> {
+    return ((await command('status')).result as BurrowConsoleStatus).hostedEnrollment;
+  }
+
+  /** Let the work a fired timer started finish: fetches, WebCrypto, the store. */
+  async function drain(until: () => boolean): Promise<void> {
+    for (let turn = 0; turn < 500 && !until(); turn += 1) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+  }
+
+  /** Fire the next poll and wait for it to have asked. */
+  async function nextPoll(): Promise<void> {
+    const asked = pollRequests().length;
+    await vi.advanceTimersByTimeAsync(INTERVAL_S * 1000);
+    await drain(() => pollRequests().length > asked);
+    // And for what the answer started.
+    for (let turn = 0; turn < 20; turn += 1) await new Promise((resolve) => setImmediate(resolve));
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    begin = {
+      deviceCode: DEVICE_CODE,
+      userCode: USER_CODE,
+      // Followed in no release build: the account page is the Burrow's to compose.
+      verificationUrl: `https://hosted.example/enroll#${USER_CODE}`,
+      expiresAt: Date.now() + TTL_MS,
+      interval: INTERVAL_S,
+    };
+    polls = [];
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('begins at the baked origin and shows a code it composed the account page for, never the device code', async () => {
+    hosted();
+    const { result, error } = await command('beginHostedEnrollment', { label: 'Work laptop' });
+
+    expect(error).toBeUndefined();
+    const waiting = {
+      status: 'waiting',
+      userCode: USER_CODE,
+      verificationUrl: `https://hosted.dormouse.sh/enroll#${USER_CODE}`,
+      expiresAt: Date.now() + TTL_MS,
+      accountFull: false,
+    };
+    expect(result).toEqual(waiting);
+    expect(requests.map((request) => request.url)).toEqual([`${HOSTED_ORIGIN}${API_ROUTES.burrowEnrollBegin}`]);
+    expect(requestBody(0)).toEqual({ origin: HOSTED_ORIGIN });
+    expect(await hostedEnrollment()).toEqual(waiting);
+    expect(statusEvents()).toEqual([false]);
+    // The device code is a bearer, held like `burrowToken`.
+    expect(JSON.stringify(sent)).not.toContain(DEVICE_CODE);
+  });
+
+  it('polls every interval and starts the enrollment it redeems, under Local networks', async () => {
+    hosted();
+    await service.start();
+    await command('beginHostedEnrollment', { label: 'Work laptop' });
+
+    await nextPoll();
+    expect(pollRequests()).toHaveLength(1);
+    expect(JSON.parse(pollRequests()[0]!.init!.body as string)).toEqual({ deviceCode: DEVICE_CODE });
+    expect(pollRequests()[0]!.init!.redirect).toBe('error');
+
+    polls.push(enrolledAnswer());
+    await nextPoll();
+    await drain(() => store.enrollment !== null);
+
+    expect(store.enrollment).toMatchObject({
+      relayUrl: HOSTED_ORIGIN,
+      burrowId: BURROW_ID,
+      burrowToken: 'hosted-token',
+      origin: HOSTED_ORIGIN,
+      label: 'Work laptop',
+    });
+    expect(store.enrollment?.noiseStaticPublicKey).toEqual(expect.any(String));
+    expect((await command('status')).result).toMatchObject({
+      enrolled: true,
+      connection: 'connecting',
+      hostedEnrollment: null,
+    });
+    expect(statusEvents().at(-1)).toBe(true);
+    // Local networks runs the persistent Burrow on the enrollment's own Relay,
+    // and polling is over.
+    expect(sockets).toHaveLength(1);
+    expect(socketUrls[0]).toMatch(/^wss:\/\/relay\.dormouse\.sh\/ws\/burrow\?/);
+    await vi.advanceTimersByTimeAsync(INTERVAL_S * 3000);
+    expect(pollRequests()).toHaveLength(2);
+  });
+
+  it('is refused in a self-host build, and under Nothing, before any request', async () => {
+    createService({ network: RELAY_ON }, { fetch: hostedFetch() });
+    expect((await command('beginHostedEnrollment', { label: 'x' })).error).toContain('setup password');
+
+    hosted({ network: NOTHING });
+    expect((await command('beginHostedEnrollment', { label: 'x' })).error).toContain('set to Nothing');
+    expect(requests).toEqual([]);
+  });
+
+  it('says which host it could not reach and why, never undici’s bare `fetch failed`', async () => {
+    const unresolved = Object.assign(new TypeError('fetch failed'), {
+      cause: Object.assign(new Error('getaddrinfo ENOTFOUND relay.dormouse.sh'), { code: 'ENOTFOUND' }),
+    });
+    hosted(undefined, { fetch: () => Promise.reject(unresolved) });
+    expect((await command('beginHostedEnrollment', { label: 'x' })).error).toBe(
+      'Couldn’t reach relay.dormouse.sh: the name doesn’t resolve.',
+    );
+  });
+
+  it('refuses a begin answer that is not an enrollment code, waiting on nothing', async () => {
+    begin = { ...begin, interval: 0 };
+    hosted();
+
+    expect((await command('beginHostedEnrollment', { label: 'x' })).error).toContain('not an enrollment code');
+    expect(await hostedEnrollment()).toBeNull();
+  });
+
+  it('ends on an account not entitled, and polls on through a full one, which the Relay keeps', async () => {
+    hosted();
+    await command('beginHostedEnrollment', { label: 'x' });
+    polls.push({ status: 409, body: { error: 'this account already has 32 computers enrolled' } });
+    await nextPoll();
+    expect(await hostedEnrollment()).toMatchObject({ status: 'waiting', accountFull: true });
+
+    // A computer removed at the account, and the kept approval redeems.
+    polls.push(enrolledAnswer());
+    await nextPoll();
+    await drain(() => store.enrollment !== null);
+    expect(store.enrollment?.burrowId).toBe(BURROW_ID);
+
+    service.dispose();
+    hosted();
+    await command('beginHostedEnrollment', { label: 'x' });
+    polls.push({ status: 403, body: { error: NOT_ENTITLED_ERROR } });
+    await nextPoll();
+    expect(await hostedEnrollment()).toEqual({ status: 'ended', reason: 'not-entitled' });
+    const asked = pollRequests().length;
+    await vi.advanceTimersByTimeAsync(INTERVAL_S * 3000);
+    expect(pollRequests()).toHaveLength(asked);
+  });
+
+  it('keeps polling through an unreachable Relay and a 5xx, and slows down on a 429', async () => {
+    hosted();
+    await command('beginHostedEnrollment', { label: 'x' });
+    polls.push(new Error('offline'), { status: 503, body: {} }, { status: 429, body: {} });
+    await nextPoll();
+    await nextPoll();
+    await nextPoll();
+    expect(pollRequests()).toHaveLength(3);
+    expect(await hostedEnrollment()).toMatchObject({ status: 'waiting' });
+
+    // The interval grew by five seconds.
+    await vi.advanceTimersByTimeAsync(INTERVAL_S * 1000);
+    await drain(() => false);
+    expect(pollRequests()).toHaveLength(3);
+    await vi.advanceTimersByTimeAsync(5_000);
+    await drain(() => pollRequests().length > 3);
+    expect(pollRequests()).toHaveLength(4);
+  });
+
+  it('ends at the Relay’s expired, and at its own deadline', async () => {
+    hosted();
+    await command('beginHostedEnrollment', { label: 'x' });
+    polls.push({ status: 200, body: { status: 'expired' } });
+    await nextPoll();
+    expect(await hostedEnrollment()).toEqual({ status: 'ended', reason: 'expired' });
+
+    // A Relay whose code would outlive the bound is held to it by this clock.
+    begin = { ...begin, expiresAt: Date.now() + 24 * 60 * 60_000 };
+    const { result } = await command('beginHostedEnrollment', { label: 'x' });
+    expect((result as { expiresAt: number }).expiresAt).toBe(Date.now() + 15 * 60_000);
+    await vi.advanceTimersByTimeAsync(15 * 60_000);
+    await drain(() => false);
+    expect(await hostedEnrollment()).toEqual({ status: 'ended', reason: 'expired' });
+    const asked = pollRequests().length;
+    await vi.advanceTimersByTimeAsync(INTERVAL_S * 3000);
+    expect(pollRequests()).toHaveLength(asked);
+  });
+
+  it('stops polling on cancel, on Nothing, and on dispose', async () => {
+    hosted();
+    await command('beginHostedEnrollment', { label: 'x' });
+    expect((await command('cancelHostedEnrollment')).result).toEqual({});
+    expect(await hostedEnrollment()).toBeNull();
+    await vi.advanceTimersByTimeAsync(INTERVAL_S * 3000);
+    expect(pollRequests()).toEqual([]);
+
+    await command('beginHostedEnrollment', { label: 'x' });
+    await setPolicy(NOTHING);
+    expect(await hostedEnrollment()).toBeNull();
+    await vi.advanceTimersByTimeAsync(INTERVAL_S * 3000);
+    expect(pollRequests()).toEqual([]);
+
+    await setPolicy(LOCAL_ON);
+    await command('beginHostedEnrollment', { label: 'x' });
+    expect(vi.getTimerCount()).toBe(1);
+    service.dispose();
+    // No timer left to ask, even of a transport that would refuse it.
+    expect(vi.getTimerCount()).toBe(0);
+    await vi.advanceTimersByTimeAsync(INTERVAL_S * 3000);
+    expect(pollRequests()).toEqual([]);
+  });
+
+  it.each(['cancel', 'Nothing'] as const)('starts a fresh begin after %s while the old request is pending', async (stop) => {
+    const settle: Array<(response: Response) => void> = [];
+    const arrivals = [Promise.withResolvers<void>(), Promise.withResolvers<void>()];
+    hosted(undefined, {
+      fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
+        requests.push({ url: String(input), init });
+        if (settle.length >= arrivals.length) throw new Error('a joined begin asked for a third code');
+        return new Promise<Response>((resolve) => {
+          settle.push(resolve);
+          arrivals[settle.length - 1]!.resolve();
+        });
+      }) as typeof globalThis.fetch,
+    });
+    const old = command('beginHostedEnrollment', { label: 'old' });
+    // WebCrypto runs on real worker threads: event-loop spins do not bound
+    // how long it takes to mint the Noise static before fetch is reached.
+    await arrivals[0]!.promise;
+    if (stop === 'cancel') await command('cancelHostedEnrollment');
+    else {
+      await setPolicy(NOTHING);
+      await setPolicy(LOCAL_ON);
+    }
+    const fresh = command('beginHostedEnrollment', { label: 'fresh' });
+    await arrivals[1]!.promise;
+    expect(settle).toHaveLength(2);
+
+    // The old finally must not clear the replacement begin's promise.
+    settle[0]!(reply(200, begin));
+    expect((await old).error).toContain('cancelled');
+    const joined = command('beginHostedEnrollment', { label: 'joined' });
+    // Both commands await the cached policy. This later read resumes after
+    // joined has passed that await and observed the still-pending begin.
+    await command('networkPolicy');
+    expect(settle).toHaveLength(2);
+    settle[1]!(reply(200, { ...begin, userCode: '9999-ZZZZ' }));
+    expect((await fresh).result).toMatchObject({ status: 'waiting', userCode: '9999-ZZZZ' });
+    expect((await joined).result).toEqual((await fresh).result);
+    expect(beginRequests()).toHaveLength(2);
+  });
+
+  it('holds an enrollment a poll in flight redeems after a cancel: the Relay already spent it', async () => {
+    hosted();
+    await command('beginHostedEnrollment', { label: 'Work laptop' });
+    const answer = heldPoll();
+    await nextPoll();
+    await command('cancelHostedEnrollment');
+    expect(await hostedEnrollment()).toBeNull();
+    answer(enrolledAnswer());
+    await drain(() => store.enrollment !== null);
+
+    expect(store.enrollment).toMatchObject({ burrowId: BURROW_ID, label: 'Work laptop' });
+    expect((await command('status')).result).toMatchObject({ enrolled: true, hostedEnrollment: null });
+    // And polls nothing more.
+    await vi.advanceTimersByTimeAsync(INTERVAL_S * 3000);
+    expect(pollRequests()).toHaveLength(1);
+  });
+
+  it('holds one a cancelled code’s poll redeems, and drops the code begun after it', async () => {
+    hosted();
+    await command('beginHostedEnrollment', { label: 'x' });
+    const answer = heldPoll();
+    await nextPoll();
+    await command('cancelHostedEnrollment');
+    begin = { ...begin, deviceCode: 'E'.repeat(RELAY_BEARER_LENGTH), userCode: '9999-ZZZZ' };
+    await command('beginHostedEnrollment', { label: 'x' });
+    expect(await hostedEnrollment()).toMatchObject({ status: 'waiting', userCode: '9999-ZZZZ' });
+    answer(enrolledAnswer());
+    await drain(() => store.enrollment !== null);
+    await drain(() => vi.getTimerCount() === 0);
+
+    expect(store.enrollment?.burrowId).toBe(BURROW_ID);
+    expect(await hostedEnrollment()).toBeNull();
+    await vi.advanceTimersByTimeAsync(INTERVAL_S * 3000);
+    expect(pollRequests()).toHaveLength(1);
+  });
+
+  it('names the Burrow left at the account when a late redemption finds this machine enrolled', async () => {
+    const OTHER = 'T7lzkkrPT8nx4m9zf90V4h';
+    hosted();
+    await command('beginHostedEnrollment', { label: 'x' });
+    const late = heldPoll();
+    await nextPoll();
+    await command('cancelHostedEnrollment');
+    begin = { ...begin, deviceCode: 'E'.repeat(RELAY_BEARER_LENGTH), userCode: '9999-ZZZZ' };
+    await command('beginHostedEnrollment', { label: 'x' });
+    polls.push(enrolledAnswer());
+    await nextPoll();
+    await drain(() => store.enrollment !== null);
+
+    late(enrolledAnswer(OTHER));
+    await drain(() => false);
+    expect(store.enrollment?.burrowId).toBe(BURROW_ID);
+    expect((await command('status')).result).toMatchObject({
+      enrolled: true,
+      hostedEnrollment: {
+        status: 'ended',
+        reason: 'failed',
+        message: expect.stringContaining(stranded(OTHER)),
+      },
+    });
+  });
+
+  it('warns, holding nothing, when a redemption lands after disposal', async () => {
+    hosted();
+    await command('beginHostedEnrollment', { label: 'x' });
+    const answer = heldPoll();
+    await nextPoll();
+    service.dispose();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    answer(enrolledAnswer());
+    await drain(() => warn.mock.calls.length > 0);
+
+    expect(store.enrollment).toBeNull();
+    expect(String(warn.mock.calls[0]![0])).toContain(stranded(BURROW_ID));
+    warn.mockRestore();
+  });
+
+  it('reports redeeming until the redeemed enrollment is saved and started', async () => {
+    hosted();
+    await command('beginHostedEnrollment', { label: 'x' });
+    const save = store.saveEnrollment.bind(store);
+    let release: () => void = () => {};
+    const held = new Promise<void>((resolve) => (release = resolve));
+    store.saveEnrollment = async (enrollment) => {
+      await held;
+      return save(enrollment);
+    };
+    polls.push(enrolledAnswer());
+    await nextPoll();
+
+    // Never a status with neither a code nor an enrollment.
+    expect((await command('status')).result).toMatchObject({
+      enrolled: false,
+      hostedEnrollment: { status: 'redeeming' },
+    });
+    // Nor does a Cancel or a begin void it.
+    await command('cancelHostedEnrollment');
+    expect((await command('beginHostedEnrollment', { label: 'x' })).result).toEqual({
+      status: 'redeeming',
+    });
+    expect(beginRequests()).toHaveLength(1);
+    release();
+    await drain(() => store.enrollment !== null);
+    await drain(() => false);
+    expect((await command('status')).result).toMatchObject({ enrolled: true, hostedEnrollment: null });
+  });
+
+  it('names the account origin in status: the fixed one in a release build, the begin’s in a dev one', async () => {
+    hosted();
+    expect((await command('status')).result).toMatchObject({ accountOrigin: 'https://hosted.dormouse.sh' });
+    service.dispose();
+
+    hosted(undefined, { relay: { origin: 'http://localhost:8787', mode: 'hosted' } });
+    expect((await command('status')).result).toMatchObject({ accountOrigin: null });
+    await command('beginHostedEnrollment', { label: 'x' });
+    // The origin the panel's waiting view opens, so Manage computers matches it.
+    expect((await command('status')).result).toMatchObject({
+      accountOrigin: 'https://hosted.example',
+      hostedEnrollment: { verificationUrl: `https://hosted.example/enroll#${USER_CODE}` },
+    });
+  });
+
+  it('is refused on an enrolled machine, before any request', async () => {
+    hosted({ enrollment: ENROLLMENT });
+    await service.start();
+    expect((await command('beginHostedEnrollment', { label: 'x' })).error).toContain(
+      `already enrolled as Burrow ${BURROW_ID}`,
+    );
+    expect(requests).toEqual([]);
+  });
+
+  it('ends answer-lost when the Relay says an earlier poll redeemed the code', async () => {
+    hosted();
+    await command('beginHostedEnrollment', { label: 'x' });
+    const lost = 'A'.repeat(22);
+    polls.push({ status: 200, body: { status: 'redeemed', burrowId: lost } });
+    await nextPoll();
+
+    // Naming the Burrow the account must remove.
+    expect(await hostedEnrollment()).toEqual({ status: 'ended', reason: 'answer-lost', burrowId: lost });
+    expect(store.enrollment).toBeNull();
+    await vi.advanceTimersByTimeAsync(INTERVAL_S * 3000);
+    expect(pollRequests()).toHaveLength(1);
+  });
+
+  it('polls again when a 200’s body is lost mid-read, and hears the redemption it spent', async () => {
+    hosted();
+    await command('beginHostedEnrollment', { label: 'x' });
+    // Headers arrive; the body stream breaks before the enrollment does.
+    const broken = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('{"status":"enrolled","enrol'));
+        controller.error(new TypeError('connection reset'));
+      },
+    });
+    polls.push(new Response(broken, { status: 200, headers: { 'content-type': 'application/json' } }));
+    await nextPoll();
+    expect(await hostedEnrollment()).toMatchObject({ status: 'waiting' });
+
+    const lost = 'A'.repeat(22);
+    polls.push({ status: 200, body: { status: 'redeemed', burrowId: lost } });
+    await nextPoll();
+    expect(await hostedEnrollment()).toEqual({ status: 'ended', reason: 'answer-lost', burrowId: lost });
+    expect(pollRequests()).toHaveLength(2);
+  });
+
+  it('ends failed on a complete 200 body that is not JSON', async () => {
+    hosted();
+    await command('beginHostedEnrollment', { label: 'x' });
+    polls.push(new Response('<html>', { status: 200 }));
+    await nextPoll();
+    expect(await hostedEnrollment()).toMatchObject({ status: 'ended', reason: 'failed' });
+  });
+
+  it('refuses a redemption for another origin, saving nothing, and says so', async () => {
+    hosted();
+    await command('beginHostedEnrollment', { label: 'x' });
+    const answer = enrolledAnswer();
+    (answer.body.enrollment as { origin: string }).origin = 'https://relay.example.com';
+    polls.push(answer);
+    await nextPoll();
+    await drain(() => store.enrollment !== null);
+
+    expect(store.enrollment).toBeNull();
+    expect(await hostedEnrollment()).toEqual({
+      status: 'ended',
+      reason: 'failed',
+      message: expect.stringContaining('The Relay says its origin is https://relay.example.com'),
+    });
+    expect(((await hostedEnrollment()) as { message: string }).message).toContain(stranded(BURROW_ID));
+  });
+
+  it('ends failed when the redeemed enrollment cannot be saved', async () => {
+    hosted();
+    await command('beginHostedEnrollment', { label: 'x' });
+    store.saveEnrollment = async () => {
+      throw new Error('keychain is locked');
+    };
+    polls.push(enrolledAnswer());
+    await nextPoll();
+
+    // A fixed sentence naming the Burrow the Relay recorded, and where to remove it.
+    expect(await hostedEnrollment()).toEqual({
+      status: 'ended',
+      reason: 'failed',
+      message: `keychain is locked ${stranded(BURROW_ID)}`,
+    });
+    expect((await command('status')).result).toMatchObject({ enrolled: false });
+  });
+
+  it('retains a saved redemption when startup fails, with recovery guidance rather than removal advice', async () => {
+    hosted();
+    await command('beginHostedEnrollment', { label: 'x' });
+    store.loadAcl = async () => {
+      throw new Error('ACL store is unavailable');
+    };
+    polls.push(enrolledAnswer());
+    await nextPoll();
+
+    expect(store.enrollment).toMatchObject({ burrowId: BURROW_ID });
+    expect((await command('status')).result).toMatchObject({ enrolled: true });
+    expect(await hostedEnrollment()).toEqual({
+      status: 'ended',
+      reason: 'failed',
+      message: 'ACL store is unavailable This computer saved its enrollment; restart Dormouse to try connecting again.',
+    });
+    expect((await command('beginHostedEnrollment', { label: 'again' })).error).toContain('already enrolled');
+    // An explicit reconnect can also use the retained credential once storage recovers.
+    store.loadAcl = async () => [];
+    expect((await command('reconnect')).error).toBeUndefined();
+    expect(sockets).toHaveLength(1);
+  });
+
+  it('answers the code already waiting to a second begin', async () => {
+    // Another VS Code window's Enroll lands on this service: voiding the code
+    // the first window shows would leave it approving nothing.
+    hosted();
+    const first = (await command('beginHostedEnrollment', { label: 'x' })).result;
+    begin = { ...begin, deviceCode: 'E'.repeat(RELAY_BEARER_LENGTH), userCode: '9999-ZZZZ' };
+    expect((await command('beginHostedEnrollment', { label: 'y' })).result).toEqual(first);
+    expect(beginRequests()).toHaveLength(1);
+  });
+
+  it('joins a begin already in flight rather than asking twice', async () => {
+    hosted();
+    const both = [1, 2].map((n) =>
+      service.handleCommand({ burrowRequestId: `join-${n}`, cmd: 'beginHostedEnrollment', params: { label: 'x' } }),
+    );
+    await Promise.all(both);
+    const answers = sent
+      .filter((message) => message.event === 'burrow:result')
+      .filter((message) => String(message.data.burrowRequestId).startsWith('join-'));
+    expect(answers.map((message) => message.data.result)).toEqual([
+      expect.objectContaining({ userCode: USER_CODE }),
+      expect.objectContaining({ userCode: USER_CODE }),
+    ]);
+    expect(beginRequests()).toHaveLength(1);
+  });
+
+  it('keeps one that ended until a new begin has a code, then replaces it, saying so', async () => {
+    hosted();
+    await command('beginHostedEnrollment', { label: 'x' });
+    polls.push({ status: 200, body: { status: 'expired' } });
+    await nextPoll();
+    expect(await hostedEnrollment()).toEqual({ status: 'ended', reason: 'expired' });
+
+    // "Get a new code" is a begin: one that fails keeps the ending on screen.
+    const events = statusEvents().length;
+    const good = begin;
+    begin = { ...begin, interval: 0 };
+    expect((await command('beginHostedEnrollment', { label: 'x' })).error).toContain('not an enrollment code');
+    expect(await hostedEnrollment()).toEqual({ status: 'ended', reason: 'expired' });
+    expect(statusEvents()).toHaveLength(events);
+
+    begin = { ...good, deviceCode: 'E'.repeat(RELAY_BEARER_LENGTH), userCode: '9999-ZZZZ' };
+    await command('beginHostedEnrollment', { label: 'x' });
+    expect(statusEvents()).toHaveLength(events + 1);
+    await nextPoll();
+    expect(JSON.parse(pollRequests().at(-1)!.init!.body as string)).toEqual({
+      deviceCode: 'E'.repeat(RELAY_BEARER_LENGTH),
+    });
+    expect(await hostedEnrollment()).toMatchObject({ status: 'waiting', userCode: '9999-ZZZZ' });
+  });
+});
+
+describe('enrollVerificationUrl', () => {
+  const code = '23AB-YZ9K';
+  const release = { origin: HOSTED_ORIGIN, mode: 'hosted' } as const;
+  const dev = { origin: 'http://localhost:8787', mode: 'hosted' } as const;
+
+  it('composes the account page in a release build, whatever the Relay names', () => {
+    for (const verificationUrl of [undefined, `https://hosted.example/enroll#${code}`, 'javascript:alert(1)']) {
+      expect(enrollVerificationUrl(release, { userCode: code, verificationUrl })).toBe(
+        `https://hosted.dormouse.sh/enroll#${code}`,
+      );
+    }
+  });
+
+  it('follows the Relay’s account origin in a dev build, held to the link’s checks', () => {
+    expect(enrollVerificationUrl(dev, { userCode: code, verificationUrl: `http://localhost:5173/enroll#${code}` }))
+      .toBe(`http://localhost:5173/enroll#${code}`);
+    expect(enrollVerificationUrl(dev, { userCode: code, verificationUrl: `https://hosted-pr-7.example.dev/enroll#${code}` }))
+      .toBe(`https://hosted-pr-7.example.dev/enroll#${code}`);
+    for (const verificationUrl of [
+      undefined,
+      `http://192.168.1.4:5173/enroll#${code}`,
+      `https://hosted.example/account#${code}`,
+      `https://hosted.example/enroll?x=1#${code}`,
+      `https://user@hosted.example/enroll#${code}`,
+      `https://hosted.example/enroll#9999-ZZZZ`,
+      `https://hosted.example/enroll#${code}x`,
+      `javascript:alert(1)//enroll#${code}`,
+    ]) {
+      expect(() => enrollVerificationUrl(dev, { userCode: code, verificationUrl }), String(verificationUrl)).toThrow(
+        /named no account page/,
+      );
+    }
+  });
+
+  it('composes none in a self-host build', () => {
+    expect(() => enrollVerificationUrl({ origin: ORIGIN, mode: 'self-host' }, { userCode: code })).toThrow(
+      /setup password/,
+    );
   });
 });

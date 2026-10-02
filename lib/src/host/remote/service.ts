@@ -10,22 +10,29 @@
 import { hostname } from 'node:os';
 import {
   API_ROUTES,
+  ENROLL_PAGE_PATH,
+  MAX_ENROLL_POLL_INTERVAL_S,
   MAX_PENDING_PAIRINGS,
   deriveNoiseStaticPublicKey,
   formatPairingInvitationUrl,
   isSetupTokenResponse,
   mintNoiseStaticKeyPair,
+  parseLinkFragment,
   randomBase64Url,
+  type BurrowEnrollBeginResponse,
   type EnrollmentOffer,
 } from 'remote-lib-common';
 import {
+  beginHostedEnrollment,
   originMismatchMessage,
   performEnrollment,
+  pollHostedEnrollment,
   type BurrowEnrollCredential,
   type BurrowEnrollment,
+  type EnrollmentStatic,
 } from '../../remote/burrow/enrollment';
 import type { BurrowSurfaceProvider } from '../../remote/burrow/burrow-surface-provider';
-import { burrowFetch } from '../../remote/burrow/burrow-fetch';
+import { burrowFetch, describingFetchFailures, probeBurrowStanding } from '../../remote/burrow/burrow-fetch';
 import type { PendingPairing } from '../../remote/burrow/pairing-approval';
 import {
   loadPushDevices,
@@ -35,6 +42,7 @@ import {
   type AlertPushDeps,
 } from '../../remote/burrow/push-delivery';
 import type { RemoteApiSessionContext } from '../../remote/burrow/established-session';
+import type { PathRefusal } from '../../remote/direct/path-refusal';
 import { RemoteApiSession } from '../../remote/burrow/remote-api';
 import {
   BurrowRuntime,
@@ -60,7 +68,15 @@ import {
   type NetworkPolicy,
   type NetworkPolicyResult,
 } from '../../remote/network-policy';
-import { hostedOrigin, isRelayOrigin, type RelayBuild } from '../relay-origin';
+import {
+  ACCOUNT_PAGE_PATH,
+  HOSTED_ACCOUNT_ORIGIN,
+  hostedAccountOrigin,
+  hostedOrigin,
+  isDevHostedBuild,
+  isRelayOrigin,
+  type RelayBuild,
+} from '../relay-origin';
 import { readEnrollmentOffer } from './enroll-offer';
 import type { BurrowStateStore } from './burrow-state-store';
 import { directPeeringFor, samePaths } from './direct-peering';
@@ -73,12 +89,16 @@ import {
   approvalKind,
   idleOneTimeState,
   isBurrowCommand,
+  relayRefuses,
   type ApproveParams,
   type BurrowUiEvent,
   type DenyParams,
   type EnrollOfferParams,
   type EnrollParams,
   type EnrollResult,
+  type HostedEnrollParams,
+  type HostedEnrollmentEnded,
+  type HostedEnrollmentState,
   type BurrowStatusEvent,
   type InvitationEvent,
   type OneTimeEvent,
@@ -157,15 +177,6 @@ function safeHostname(): string {
   }
 }
 
-/**
- * Whether this build enrolls at all: only a self-host build, a Hosted one's
- * Relay being Hosted's, which runs none yet (`docs/specs/relay.md` → "Relay
- * origin").
- */
-export function canEnroll(relay: RelayBuild): boolean {
-  return relay.mode === 'self-host';
-}
-
 /** What every command the `nothing` level refuses answers, before any request. */
 const NETWORK_OFF_REFUSAL =
   'Settings → Network is set to Nothing, so this computer opens no connections on its own.';
@@ -225,21 +236,92 @@ function requestedNetworkPolicy(value: unknown, relay: RelayBuild): NetworkPolic
   return { ...policy, allowed };
 }
 
-/** What `enroll` and `enrollOffer` answer where {@link canEnroll} is false. */
-const HOSTED_ENROLLMENT_REFUSAL =
-  'This build’s Relay is Dormouse Hosted, which is not running one yet. A Relay you run takes ' +
-  'a Dormouse built with its origin (DORMOUSE_RELAY_ORIGIN).';
+/** What `enroll` and `enrollOffer` answer in a Hosted build, naming where its codes are approved. */
+function hostedEnrollmentRefusal(accountOrigin: string): string {
+  return (
+    `This Dormouse enrolls with Dormouse Hosted by approving a code at ${new URL(accountOrigin).host}, not with ` +
+    'a setup password. A Relay you run takes a Dormouse built with its origin (DORMOUSE_RELAY_ORIGIN).'
+  );
+}
+
+/** What `beginHostedEnrollment` answers in a self-host build. */
+const SELF_HOST_DEVICE_CODE_REFUSAL =
+  'This Dormouse enrolls with its own Relay’s setup password; enrollment codes are for Dormouse Hosted.';
 
 /**
- * The installer's offer this build could spend: read only where
- * {@link canEnroll}, and `null` unless it names the baked origin. One reader
- * for the service and the VS Code glue, which both answer `status`.
+ * How long a Hosted enrollment waits for approval, by this machine's clock:
+ * the Relay's `expiresAt`, held to these bounds, since that is the Relay's
+ * clock and this one may be minutes off it. The Relay's `expired` ends it too.
+ */
+const HOSTED_ENROLLMENT_MIN_WAIT_MS = 60_000;
+const HOSTED_ENROLLMENT_MAX_WAIT_MS = 15 * 60_000;
+
+/** How much a 429 lengthens the poll interval, up to `MAX_ENROLL_POLL_INTERVAL_S`. */
+const HOSTED_ENROLLMENT_SLOW_DOWN_MS = 5_000;
+
+/**
+ * The account page that approves `begin.userCode`, composed here
+ * (`docs/specs/hosted.md` -> "Burrow enrollment"): **never the Relay's
+ * `verificationUrl` in a release build**, which opens
+ * `HOSTED_ACCOUNT_ORIGIN/enroll#<userCode>`. A dev Hosted build
+ * (`isDevHostedBuild`) takes the origin of the Relay's `verificationUrl`,
+ * holding it to a link's checks — https or loopback http, no credentials, path
+ * `/enroll`, no query, fragment exactly the code — and throws without one.
+ */
+export function enrollVerificationUrl(
+  relay: RelayBuild,
+  begin: Pick<BurrowEnrollBeginResponse, 'userCode' | 'verificationUrl'>,
+): string {
+  const account = hostedAccountOrigin(relay);
+  if (account === null) throw new Error(SELF_HOST_DEVICE_CODE_REFUSAL);
+  const origin = isDevHostedBuild(relay) ? namedAccountOrigin(begin) : account;
+  if (origin === null) {
+    throw new Error(
+      `The Relay at ${relay.origin} named no account page to approve ${begin.userCode} at.`,
+    );
+  }
+  return `${origin}${ENROLL_PAGE_PATH}#${begin.userCode}`;
+}
+
+/**
+ * The account origin `status` names: `HOSTED_ACCOUNT_ORIGIN` in a release
+ * Hosted build; in a dev one, `resolved` — the origin the last begin took from
+ * the Relay — or `null` before any; `null` in a self-host build.
+ */
+export function accountOriginFor(relay: RelayBuild, resolved: string | null = null): string | null {
+  return isDevHostedBuild(relay) ? resolved : hostedAccountOrigin(relay);
+}
+
+/** The origin of a `verificationUrl` that is exactly `<origin>/enroll#<userCode>`, or `null`. */
+function namedAccountOrigin(
+  begin: Pick<BurrowEnrollBeginResponse, 'userCode' | 'verificationUrl'>,
+): string | null {
+  const named = begin.verificationUrl;
+  if (typeof named !== 'string') return null;
+  let origin: string;
+  try {
+    origin = new URL(named).origin;
+  } catch {
+    return null;
+  }
+  const fragment = parseLinkFragment(named, origin, {
+    maxLength: 512,
+    pathname: ENROLL_PAGE_PATH,
+    hashPrefix: '#',
+  });
+  return fragment === begin.userCode ? origin : null;
+}
+
+/**
+ * The installer's offer this build could spend: read only in a self-host
+ * build, and `null` unless it names the baked origin. One reader for the
+ * service and the VS Code glue, which both answer `status`.
  */
 export async function readUsableOffer(
   relay: RelayBuild,
   read: () => Promise<EnrollmentOffer | null>,
 ): Promise<EnrollmentOffer | null> {
-  if (!canEnroll(relay)) return null;
+  if (relay.mode !== 'self-host') return null;
   const offer = await read();
   return offer && isRelayOrigin(offer.origin, relay.origin) ? offer : null;
 }
@@ -283,6 +365,8 @@ export function unenrolledStatus(
   kind: BurrowKind,
   relay: RelayBuild,
   serving = false,
+  hostedEnrollment: HostedEnrollmentState | null = null,
+  accountOrigin: string | null = accountOriginFor(relay),
 ): BurrowConsoleStatus {
   return {
     enrolled: false,
@@ -294,6 +378,8 @@ export function unenrolledStatus(
     pairedClients: 0,
     suggestedLabel: suggestedBurrowLabel(kind),
     offer: offer !== null,
+    hostedEnrollment,
+    accountOrigin,
   };
 }
 
@@ -347,6 +433,27 @@ export function suggestedBurrowLabel(kind: BurrowKind): string {
   return machine ? `${machine} (${KIND_NAMES[kind]})` : KIND_NAMES[kind];
 }
 
+/**
+ * A Hosted enrollment awaiting approval. The device code and the Noise static
+ * stay here, in this process; `status` carries the rest
+ * ({@link HostedEnrollmentState}).
+ */
+interface HostedEnrollmentRun {
+  readonly deviceCode: string;
+  readonly noiseStatic: EnrollmentStatic;
+  readonly label: string;
+  readonly userCode: string;
+  readonly verificationUrl: string;
+  /** This machine's deadline (`HOSTED_ENROLLMENT_MAX_WAIT_MS`). */
+  readonly expiresAt: number;
+  intervalMs: number;
+  /** The last poll found the approving account full. */
+  accountFull: boolean;
+  /** A poll redeemed it, and its enrollment is being saved and started. */
+  redeeming: boolean;
+  timer: ReturnType<typeof setTimeout> | null;
+}
+
 export class BurrowService {
   readonly #store: BurrowStateStore;
   readonly #provider: BurrowSurfaceProvider;
@@ -379,6 +486,12 @@ export class BurrowService {
   /** The first read in flight, which every reader joins. */
   #policyRead: Promise<NetworkPolicy> | null = null;
   /**
+   * The last session either runtime ended for its path, until dismissed or
+   * replaced (`docs/specs/remote-network.md` -> "Local networks"). Memory
+   * only: a restart forgets it.
+   */
+  #pathRefusal: PathRefusal | null = null;
+  /**
    * Lifecycle changes and pairing approvals run one at a time on this chain.
    *
    * Each of those reads `#burrow`, awaits a store round trip, and then acts on
@@ -400,6 +513,17 @@ export class BurrowService {
    * process.
    */
   readonly #pairings = new Map<string, PendingPairing>();
+
+  /** The Hosted enrollment awaiting approval, polled by its own timer. */
+  #enrollRun: HostedEnrollmentRun | null = null;
+  /** How the last one ended short of enrolling, until the next begin or a cancel. */
+  #enrollEnded: HostedEnrollmentEnded | null = null;
+  /** Bumped by every begin and cancel, so a begin still in flight that was superseded keeps nothing. */
+  #enrollSeq = 0;
+  /** The begin in flight, which every other begin joins. */
+  #enrollBegin: Promise<HostedEnrollmentState> | null = null;
+  /** The account origin the last begin resolved: what a dev Hosted build's `status` names. */
+  #accountOrigin: string | null = null;
 
   /**
    * The one-time connection, as `oneTimeStatus` answers it and the `one-time`
@@ -451,11 +575,14 @@ export class BurrowService {
       this.#refuseNothing();
       return createWebSocket(url);
     };
-    const injectedFetch = options.fetch;
+    // Looked up at the call, like `burrowFetch`'s default; a request that gets
+    // no answer says which host and why, never undici's bare `fetch failed`.
+    const injectedFetch = describingFetchFailures((input, init) =>
+      (options.fetch ?? globalThis.fetch)(input, init),
+    );
     this.#fetch = async (input, init) => {
       this.#refuseNothing();
-      // Looked up at the call, like `burrowFetch`'s default.
-      return (injectedFetch ?? globalThis.fetch)(input, init);
+      return injectedFetch(input, init);
     };
     // A factory's `null` is a direct path declined, the session kept relayed.
     const createDirectPeer = options.createDirectPeer;
@@ -505,6 +632,7 @@ export class BurrowService {
   dispose(): void {
     if (this.#disposed) return;
     this.#disposed = true;
+    this.#stopHostedEnrollment();
     this.#stopBurrow();
     const oneTime = this.#oneTime;
     this.#oneTime = null;
@@ -536,6 +664,12 @@ export class BurrowService {
         return this.#serialize(() => this.#enroll(params as EnrollParams));
       case 'enrollOffer':
         return this.#serialize(() => this.#enrollOffer(params as EnrollOfferParams));
+      // Off the chain: the begin is one request and writes nothing; the poll's
+      // enrolled answer takes the lease for its persist-then-start.
+      case 'beginHostedEnrollment':
+        return this.#beginHostedEnrollment(params as HostedEnrollParams | undefined);
+      case 'cancelHostedEnrollment':
+        return this.#cancelHostedEnrollment();
       case 'status':
         return this.#status();
       case 'reconnect':
@@ -563,7 +697,9 @@ export class BurrowService {
         await this.#settledLevel();
         return this.#oneTimeState;
       case 'networkPolicy':
-        return networkPolicyResult(await this.#networkPolicy(), this.#relay.mode, this.#listInterfaces());
+        return this.#networkPolicyResult(await this.#networkPolicy());
+      case 'dismissPathRefusal':
+        return this.#dismissPathRefusal();
       case 'setNetworkPolicy':
         return this.#serialize(() => this.#setNetworkPolicy(params as SetNetworkPolicyParams | undefined));
       case 'pushTest':
@@ -582,7 +718,7 @@ export class BurrowService {
   // --- Commands ---
 
   async #enroll(params: EnrollParams): Promise<EnrollResult> {
-    if (!canEnroll(this.#relay)) throw new Error(HOSTED_ENROLLMENT_REFUSAL);
+    if (this.#relay.mode !== 'self-host') throw new Error(this.#hostedEnrollmentRefusal());
     await this.#networkPolicy();
     this.#refuseNothing();
     this.#refuseOtherOrigin((params as { relayUrl?: unknown }).relayUrl);
@@ -621,7 +757,7 @@ export class BurrowService {
    * (`docs/specs/relay.md` → "Remote control, in the Settings dialog").
    */
   async #enrollOffer(params: EnrollOfferParams): Promise<EnrollResult> {
-    if (!canEnroll(this.#relay)) throw new Error(HOSTED_ENROLLMENT_REFUSAL);
+    if (this.#relay.mode !== 'self-host') throw new Error(this.#hostedEnrollmentRefusal());
     await this.#networkPolicy();
     this.#refuseNothing();
     this.#refuseOtherOrigin((params as { origin?: unknown }).origin);
@@ -645,14 +781,32 @@ export class BurrowService {
    */
   async #enrollWith(credential: BurrowEnrollCredential, label: string): Promise<EnrollResult> {
     const enrollment = await performEnrollment(this.#relay.origin, credential, label, this.#fetch);
+    await this.#adoptEnrollment(
+      enrollment,
+      `The Relay has already recorded Burrow ${enrollment.burrowId}; remove it from burrows.json.`,
+    );
+    return { burrowId: enrollment.burrowId };
+  }
+
+  /**
+   * Hold an enrollment either exchange just minted: the Relay's own origin
+   * checked against the baked one, then store-first persistence and the
+   * status edge the webview gate needs. **Runs on `#serialize`.** `leftBehind`
+   * names, for the operator, the Burrow the Relay recorded for an origin this
+   * build refuses; `onSaved` lets the Hosted caller distinguish a lost
+   * credential from a startup failure after persistence.
+   */
+  async #adoptEnrollment(
+    enrollment: BurrowEnrollment,
+    leftBehind?: string,
+    onSaved?: () => void,
+  ): Promise<void> {
     if (!isRelayOrigin(enrollment.origin, this.#relay.origin)) {
       // An older Relay, which ignores the request's `origin` and so enrolled a
       // Burrow built for another: nothing is persisted here, and the row it
       // appended is named for the operator (docs/specs/relay.md → "Relay origin").
-      throw new Error(
-        `${originMismatchMessage(enrollment.origin, this.#relay.origin)} The Relay has already ` +
-          `recorded Burrow ${enrollment.burrowId}; remove it from burrows.json.`,
-      );
+      const mismatch = originMismatchMessage(enrollment.origin, this.#relay.origin);
+      throw new Error(leftBehind ? `${mismatch} ${leftBehind}` : mismatch);
     }
     // Persist before touching the running Burrow. The credential we just minted
     // exists nowhere else and cannot be minted again from the same exchange — a
@@ -661,6 +815,7 @@ export class BurrowService {
     // otherwise, and a brand-new `burrowToken` lost to the failure. Failing here
     // instead leaves the old Burrow running and everything it reports still true.
     await this.#store.saveEnrollment(enrollment);
+    onSaved?.();
     if (this.#burrow) {
       // Swapping one running Burrow for another. The gate the webviews arm their
       // outbound work on is edge-triggered (`enrolled-gate.ts`), and everything
@@ -674,7 +829,269 @@ export class BurrowService {
       this.#emitStatus();
     }
     await this.#startBurrow(enrollment);
-    return { burrowId: enrollment.burrowId };
+    // A Burrow the level holds without running announced nothing; `start()`
+    // says the same for the same reason.
+    if (!this.#burrow) this.#emitStatus();
+  }
+
+  // --- Hosted enrollment (`docs/specs/hosted.md` -> "Burrow enrollment") ---
+
+  /**
+   * Begin a device-code enrollment and poll it from here, answering the
+   * `waiting` state the panel draws. **A code already waiting or redeeming is
+   * answered, not voided** — another VS Code window's Enroll lands on the same
+   * service — and a begin in flight is joined; one that ended is replaced once
+   * a new code is in hand. Refused in a self-host build, on an enrolled
+   * machine, and under `nothing` before any request.
+   */
+  async #beginHostedEnrollment(params: HostedEnrollParams | undefined): Promise<HostedEnrollmentState> {
+    if (this.#relay.mode === 'self-host') throw new Error(SELF_HOST_DEVICE_CODE_REFUSAL);
+    const named = typeof params?.label === 'string' ? params.label.trim() : '';
+    const label = named || suggestedBurrowLabel(this.#kind);
+    await this.#networkPolicy();
+    this.#refuseNothing();
+    this.#refuseEnrolled();
+    if (this.#enrollRun) return this.#hostedEnrollmentState()!;
+    if (this.#enrollBegin) return await this.#enrollBegin;
+    const begun = this.#beginRun(label, ++this.#enrollSeq);
+    this.#enrollBegin = begun;
+    try {
+      return await begun;
+    } finally {
+      if (this.#enrollBegin === begun) this.#enrollBegin = null;
+    }
+  }
+
+  /** The begin request, then the run it starts in place of any before it, unless `seq` was superseded. */
+  async #beginRun(label: string, seq: number): Promise<HostedEnrollmentState> {
+    const { begin, noiseStatic } = await beginHostedEnrollment(this.#relay.origin, this.#fetch);
+    if (seq !== this.#enrollSeq || this.#disposed) {
+      throw new Error('This enrollment was cancelled.');
+    }
+    // Enrolled, or redeeming another code, while this one was asked for.
+    this.#refuseEnrolled();
+    if (this.#enrollRun?.redeeming) return this.#hostedEnrollmentState()!;
+    const verificationUrl = enrollVerificationUrl(this.#relay, begin);
+    const now = this.#now();
+    const wait = Math.min(
+      Math.max(begin.expiresAt - now, HOSTED_ENROLLMENT_MIN_WAIT_MS),
+      HOSTED_ENROLLMENT_MAX_WAIT_MS,
+    );
+    const run: HostedEnrollmentRun = {
+      deviceCode: begin.deviceCode,
+      noiseStatic,
+      label,
+      userCode: begin.userCode,
+      verificationUrl,
+      expiresAt: now + wait,
+      intervalMs: begin.interval * 1000,
+      accountFull: false,
+      redeeming: false,
+      timer: null,
+    };
+    this.#clearEnrollRun();
+    this.#enrollEnded = null;
+    this.#enrollRun = run;
+    this.#accountOrigin = new URL(verificationUrl).origin;
+    this.#schedulePoll(run);
+    this.#emitStatus();
+    return this.#hostedEnrollmentState()!;
+  }
+
+  /** What `enroll` and `enrollOffer` answer in a Hosted build: the account this build approves codes at. */
+  #hostedEnrollmentRefusal(): string {
+    return hostedEnrollmentRefusal(accountOriginFor(this.#relay, this.#accountOrigin) ?? HOSTED_ACCOUNT_ORIGIN);
+  }
+
+  /** What a begin on an enrolled machine answers: a second enrollment would replace the first. */
+  #refuseEnrolled(): void {
+    if (this.#enrollment) {
+      throw new Error(
+        `This computer is already enrolled as Burrow ${this.#enrollment.burrowId}. Disconnect it to enroll again.`,
+      );
+    }
+  }
+
+  /**
+   * Stop the enrollment waiting or ended, and say so; a begin in flight keeps
+   * nothing. **A redeeming one is left to land**: its credential is spent.
+   * Cancel stops future polls, but a poll already out that redeems is still
+   * held ({@link #redeemHostedEnrollment}).
+   */
+  #cancelHostedEnrollment(): Record<string, never> {
+    this.#enrollSeq++;
+    this.#enrollBegin = null;
+    const run = this.#enrollRun && !this.#enrollRun.redeeming ? this.#enrollRun : null;
+    const had = run !== null || this.#enrollEnded !== null;
+    if (run) this.#clearEnrollRun();
+    this.#enrollEnded = null;
+    if (had) this.#emitStatus();
+    return {};
+  }
+
+  /** At disposal: forget every Hosted enrollment, unannounced, and void a begin in flight. */
+  #stopHostedEnrollment(): void {
+    this.#enrollSeq++;
+    this.#enrollBegin = null;
+    this.#clearEnrollRun();
+    this.#enrollEnded = null;
+  }
+
+  #clearEnrollRun(): void {
+    if (this.#enrollRun?.timer) clearTimeout(this.#enrollRun.timer);
+    this.#enrollRun = null;
+  }
+
+  /** The next poll after `run.intervalMs`, or at the deadline if that comes first. */
+  #schedulePoll(run: HostedEnrollmentRun): void {
+    const delay = Math.max(0, Math.min(run.intervalMs, run.expiresAt - this.#now()));
+    run.timer = setTimeout(() => void this.#pollHostedEnrollment(run), delay);
+  }
+
+  async #pollHostedEnrollment(run: HostedEnrollmentRun): Promise<void> {
+    run.timer = null;
+    if (this.#enrollRun !== run) return;
+    if (this.#now() >= run.expiresAt) {
+      this.#endHostedEnrollment(run, { reason: 'expired' });
+      return;
+    }
+    const answer = await pollHostedEnrollment(
+      this.#relay.origin,
+      run.deviceCode,
+      run.label,
+      run.noiseStatic,
+      this.#fetch,
+    );
+    // Held whatever happened while the poll was out: see the method.
+    if (answer.status === 'enrolled') {
+      await this.#redeemHostedEnrollment(run, answer.enrollment);
+      return;
+    }
+    if (this.#enrollRun !== run) return;
+    switch (answer.status) {
+      case 'pending':
+        this.#setAccountFull(run, false);
+        this.#schedulePoll(run);
+        return;
+      case 'retry':
+        if (answer.slowDown) {
+          run.intervalMs = Math.min(
+            run.intervalMs + HOSTED_ENROLLMENT_SLOW_DOWN_MS,
+            MAX_ENROLL_POLL_INTERVAL_S * 1000,
+          );
+        }
+        this.#schedulePoll(run);
+        return;
+      case 'expired':
+        this.#endHostedEnrollment(run, { reason: 'expired' });
+        return;
+      // An earlier poll redeemed it and its answer was lost on the way.
+      case 'redeemed':
+        this.#endHostedEnrollment(run, { reason: 'answer-lost', burrowId: answer.burrowId });
+        return;
+      // The Relay keeps an approval it refused, so a full account polls on
+      // and enrolls once a computer is removed; an entitlement ends it.
+      case 'refused':
+        if (answer.reason === 'account-full') {
+          this.#setAccountFull(run, true);
+          this.#schedulePoll(run);
+        } else {
+          this.#endHostedEnrollment(run, { reason: answer.reason });
+        }
+        return;
+      case 'failed':
+        this.#endHostedEnrollment(run, { reason: 'failed', message: answer.message });
+        return;
+    }
+  }
+
+  /**
+   * Hold an enrollment a poll of `run` redeemed. **Single-use, and recorded by
+   * the Relay**, so it is held even when `run` was cancelled or replaced while
+   * the poll was out; `run`, if still current, reports `redeeming` until the
+   * save-and-start on the lifecycle chain finishes. Only an enrolled machine or
+   * a disposed service cannot hold it, and a failure to — either of those, the
+   * origin check, or the save — ends every enrollment with a sentence naming
+   * the Burrow the account must remove (a console warning once disposed,
+   * there being nothing left to show it).
+   */
+  async #redeemHostedEnrollment(run: HostedEnrollmentRun, enrollment: BurrowEnrollment): Promise<void> {
+    if (this.#enrollRun === run) {
+      if (run.timer) clearTimeout(run.timer);
+      run.timer = null;
+      run.redeeming = true;
+      this.#emitStatus();
+    }
+    const stranded =
+      `Your account holds Burrow ${enrollment.burrowId}, which this computer could not keep; ` +
+      `remove it at ${new URL(run.verificationUrl).origin}${ACCOUNT_PAGE_PATH}.`;
+    let saved = false;
+    try {
+      await this.#serialize(async () => {
+        if (this.#disposed) throw new Error('Dormouse closed before it could save the enrollment.');
+        if (this.#enrollment) {
+          throw new Error(
+            `This computer was already enrolled as Burrow ${this.#enrollment.burrowId} when another code was approved.`,
+          );
+        }
+        await this.#adoptEnrollment(enrollment, undefined, () => {
+          saved = true;
+          // Retain the persisted identity even if startup's ACL read fails.
+          this.#enrollment = enrollment;
+        });
+      });
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      const message = saved
+        ? `${detail} This computer saved its enrollment; restart Dormouse to try connecting again.`
+        : `${detail} ${stranded}`;
+      if (this.#disposed) {
+        console.warn(`[burrow] ${message}`);
+        return;
+      }
+      // A redemption of another code still landing reports itself first.
+      if (this.#enrollRun === run || !this.#enrollRun?.redeeming) {
+        this.#enrollSeq++;
+        this.#clearEnrollRun();
+      }
+      this.#enrollEnded = { reason: 'failed', message };
+      this.#emitStatus();
+      return;
+    }
+    // Enrolled: whatever code is still waiting — a replacing begin's — is moot.
+    this.#enrollSeq++;
+    this.#clearEnrollRun();
+    this.#emitStatus();
+  }
+
+  #setAccountFull(run: HostedEnrollmentRun, full: boolean): void {
+    if (run.accountFull === full) return;
+    run.accountFull = full;
+    this.#emitStatus();
+  }
+
+  /** End `run` short of enrolling, if it is still the one waiting. */
+  #endHostedEnrollment(run: HostedEnrollmentRun, ended: HostedEnrollmentEnded): void {
+    if (this.#enrollRun !== run) return;
+    this.#clearEnrollRun();
+    this.#enrollEnded = ended;
+    this.#emitStatus();
+  }
+
+  /** What `status` reports of the Hosted enrollment: never its device code. */
+  #hostedEnrollmentState(): HostedEnrollmentState | null {
+    const run = this.#enrollRun;
+    if (run?.redeeming) return { status: 'redeeming' };
+    if (run) {
+      return {
+        status: 'waiting',
+        userCode: run.userCode,
+        verificationUrl: run.verificationUrl,
+        expiresAt: run.expiresAt,
+        accountFull: run.accountFull,
+      };
+    }
+    return this.#enrollEnded ? { status: 'ended', ...this.#enrollEnded } : null;
   }
 
   /**
@@ -693,7 +1110,11 @@ export class BurrowService {
   async #status(): Promise<BurrowConsoleStatus> {
     const offer = this.#enrollment ? null : await readUsableOffer(this.#relay, this.#readOffer);
     const enrollment = this.#enrollment;
-    if (!enrollment) return unenrolledStatus(offer, this.#kind, this.#relay, this.#serving());
+    const hostedEnrollment = this.#hostedEnrollmentState();
+    const accountOrigin = accountOriginFor(this.#relay, this.#accountOrigin);
+    if (!enrollment) {
+      return unenrolledStatus(offer, this.#kind, this.#relay, this.#serving(), hostedEnrollment, accountOrigin);
+    }
     return {
       enrolled: true,
       serving: this.#serving(),
@@ -704,13 +1125,16 @@ export class BurrowService {
       pairedClients: this.#burrow?.activeRecords.length ?? 0,
       suggestedLabel: suggestedBurrowLabel(this.#kind),
       offer: false,
+      hostedEnrollment,
+      accountOrigin,
     };
   }
 
   /**
-   * Re-open the relay socket now. The only way back from `displaced`: an evicted
-   * Burrow stands down for good rather than fighting the Burrow that replaced it, so
-   * returning has to be asked for.
+   * Re-open the relay socket now. The only way back from a latched state
+   * (`BurrowLatch`): a latched Burrow stands down for good — rather than
+   * fighting the Burrow that replaced it, or retrying a token its Relay
+   * refuses — so returning has to be asked for.
    *
    * Only the restart takes the lifecycle lease. The status snapshot after it is
    * a plain read — one that may touch the disk for the offer file — and holding
@@ -754,7 +1178,7 @@ export class BurrowService {
   async #setupQr(): Promise<SetupQrResult> {
     const enrollment = this.#enrollment;
     const burrow = this.#burrow;
-    if (!enrollment || !burrow) throw await this.#notConnected();
+    if (!enrollment || !burrow || relayRefuses(burrow.status)) throw await this.#notConnected();
     const response = await burrowFetch(
       { enrollment, fetch: this.#fetch, errorPrefix: 'could not mint a setup code' },
       API_ROUTES.burrowSetupToken,
@@ -868,6 +1292,7 @@ export class BurrowService {
       requestApproval: (request) => this.#requestOneTimeApproval(runtime, request),
       dismissApproval: () => this.#dismissOneTimeApproval(runtime),
       onChange: (next) => this.#onOneTimeChanged(runtime, next),
+      onPathRefused: (refusal) => this.#recordPathRefusal(refusal),
       now: this.#now,
     });
     // Swapped in before either runtime moves: the one being replaced ends
@@ -960,7 +1385,8 @@ export class BurrowService {
    * an old path exempt; the allowed networks under any other level, and
    * `autoUpdate`, touch no connection. Then the relay socket follows the
    * level: stopped under one that runs no Burrow, the enrollment kept; started
-   * on entering one that does ({@link runsBurrow}).
+   * under one that does ({@link runsBurrow}), and restarted on any change
+   * {@link samePaths} sees, since a runtime holds its paths for its life.
    */
   async #setNetworkPolicy(params: SetNetworkPolicyParams | undefined): Promise<NetworkPolicyResult> {
     const next = requestedNetworkPolicy(params?.policy, this.#relay);
@@ -969,24 +1395,53 @@ export class BurrowService {
     const previous = await this.#networkPolicy().catch(() => nothingPolicy());
     await this.#store.saveNetworkPolicy(next);
     this.#policy = next;
+    // Nothing polls nothing: an enrollment awaiting approval ends with the level.
+    if (next.level === 'nothing') this.#cancelHostedEnrollment();
     if (!samePaths(previous, next)) {
       this.#oneTime?.end('user-ended');
       this.#restOneTime();
     }
-    const result = networkPolicyResult(next, this.#relay.mode, this.#listInterfaces());
+    const result = this.#networkPolicyResult(next);
     try {
-      if (!runsBurrow(next.level)) {
-        if (this.#burrow) {
-          this.#stopBurrow();
-          this.#emitStatus();
-        }
-      } else if (!runsBurrow(previous.level) && !this.#burrow) {
-        await this.#start();
+      // A running Burrow holds the paths it started under for its life
+      // (`directPeeringFor`), so any change to them restarts it; its sessions
+      // hear the goodbye as it stops.
+      if (this.#burrow && (!runsBurrow(next.level) || !samePaths(previous, next))) {
+        this.#stopBurrow();
+        this.#emitStatus();
       }
+      if (runsBurrow(next.level) && !this.#burrow) await this.#start();
     } finally {
       // Saved either way, so said either way: a start that failed is its own error.
       this.#emit({ name: 'network-policy', ...result });
     }
+    return result;
+  }
+
+  /** What `networkPolicy` answers for `policy`: this build's levels, the interfaces now, and the refusal held. */
+  #networkPolicyResult(policy: NetworkPolicy): NetworkPolicyResult {
+    return networkPolicyResult(policy, this.#relay.mode, this.#listInterfaces(), this.#pathRefusal);
+  }
+
+  /** Hold `refusal` as the latest, and say so to every window. */
+  #recordPathRefusal(refusal: PathRefusal): void {
+    if (this.#disposed) return;
+    this.#pathRefusal = refusal;
+    if (this.#policy) this.#emit({ name: 'network-policy', ...this.#networkPolicyResult(this.#policy) });
+  }
+
+  /**
+   * Forget the refusal held when Dismiss arrived — the panel's Dismiss — and
+   * say so to every window. Captured before the policy read: one recorded
+   * meanwhile is news the panel has not shown, and stays.
+   */
+  async #dismissPathRefusal(): Promise<NetworkPolicyResult> {
+    const dismissing = this.#pathRefusal;
+    const policy = await this.#networkPolicy();
+    const cleared = dismissing !== null && this.#pathRefusal === dismissing;
+    if (cleared) this.#pathRefusal = null;
+    const result = this.#networkPolicyResult(policy);
+    if (cleared) this.#emit({ name: 'network-policy', ...result });
     return result;
   }
 
@@ -1169,6 +1624,8 @@ export class BurrowService {
       dismissApproval: (clientId) => this.#resolvePairing(clientId),
       onInvitationChanged: (inviteId, state, outcome) =>
         this.#emitInvitation(inviteId, state, outcome),
+      onPathRefused: (refusal) => this.#recordPathRefusal(refusal),
+      probeStanding: () => probeBurrowStanding({ enrollment, fetch: this.#fetch }),
       now: this.#now,
     });
     this.#burrow.start();
@@ -1336,14 +1793,15 @@ export class BurrowService {
   }
 
   /**
-   * Push delivery needs a live Burrow: the ACL it reads is the running one's.
+   * Push delivery needs a live Burrow its Relay still takes: the ACL it reads
+   * is the running one's.
    * **Its fetch asks again at the request**: sealing awaits, and a Burrow
    * stopped meanwhile — Nothing, a clear, a swap — sends nothing.
    */
   #pushDeps(): AlertPushDeps | null {
     const burrow = this.#burrow;
     const enrollment = this.#enrollment;
-    if (!burrow || !enrollment) return null;
+    if (!burrow || !enrollment || relayRefuses(burrow.status)) return null;
     return {
       enrollment,
       activeRecords: () => burrow.activeRecords,

@@ -33,8 +33,7 @@
   package name, version and counter before writing pins; select the upstream
   addon by matching commit and peer. `scripts/xterm-bump.test.mjs` pins that,
   standalone drift repair, and the lint's canopy checks.
-- **Every pin must be exact, and every addon's core peer must equal its
-  workspace's core pin** — the `@xterm/*` packages share a repo but carry
+- **Every pin must be exact, and every addon's core peer must be `^<workspace-core-pin>`** — the `@xterm/*` packages share a repo but carry
   independent beta counters (rationale). `scripts/xterm-lint.mjs` owns the full
   check list in its header comment; `scripts/xterm-bump.mjs` (`pnpm bump:xterm`)
   writes the newest coherent per-commit set for `lib` and `standalone` alike.
@@ -57,13 +56,13 @@ PR:
    `addons/addon-webgl/` files touched since canopy's fork base. Most betas
    touch none; otherwise review that diff.
 2. **May retain canopy's older baseline after reviewing a bump that leaves the
-   forked addon unchanged.** Otherwise, **must rebase and release the fork** per
+   forked addon unchanged.** Otherwise, **must update the fork base and release it** per
    FORK.md's `Merging upstream` —
    **a conflict-free merge is not a correct one** (rationale).
-3. **After rebasing, bump `canopy/package.json`** with `--canopy <forkVersion>`
+3. **After updating the fork base, bump `canopy/package.json`** with `--canopy <forkVersion>`
    and update its recorded triple ("Canopy lab"), which the lint requires.
 
-**Must land any required fork rebase with the `@xterm/*` bump in one PR.**
+**Must land any required fork-base update with the `@xterm/*` bump in one PR.**
 
 ## SDF glyph architecture
 

@@ -10,7 +10,8 @@ import { EmailDev, SystemTime } from "pgstencil";
 import { authPolicy } from "./policy";
 import { migrations } from "./migrations";
 import { allowedDevRequest } from "./dev-host-guard";
-import { elevenLabs, voiceRoutes, type Synthesize } from "./voice";
+import { relayAccountRoutes, type RelayAccountHost } from "./relay-account";
+import { voiceTokenRoutes } from "./voice";
 
 // Bind first, then derive the origin from the port actually bound, so an unset
 // PORT runs beside another checkout's server. `localhost`, not `127.0.0.1`: it
@@ -58,23 +59,19 @@ const auth = createAuthApp({
 auth.app.get("/api/dev/emails", (c) =>
   c.json(email.all().map(({ to, text }) => ({ to, text }))),
 );
-// A quarter second of silent MP3 (MPEG-1 Layer III, 128 kbps, 44.1 kHz; zeroed
-// side info decodes as silence).
-const silence: Synthesize = async () => {
-  const frame = 417;
-  const audio = new Uint8Array(frame * 10);
-  for (let i = 0; i < audio.length; i += frame)
-    audio.set([0xff, 0xfb, 0x90, 0x64], i);
-  return new Response(audio, { headers: { "content-type": "audio/mpeg" } });
-};
-const elevenLabsKey = process.env.ELEVENLABS_API_KEY;
-const voice = {
+const app = new Hono();
+// Built once, so the approval limiter counts across requests.
+const host: RelayAccountHost = {
   databaseUrl,
   auth: (request: Request) => auth.app.fetch(request),
-  synthesize: elevenLabsKey ? elevenLabs(elevenLabsKey) : silence,
+  approveLimit: devLimit(10),
+  // No relay runs here, so no Burrow holds a socket to close.
+  closeBurrow: async () => {},
 };
-const app = new Hono();
-voiceRoutes(app, () => voice);
+voiceTokenRoutes(app, () => host);
+relayAccountRoutes(app, () => host);
+// No speak: a Hosted build speaks only at the fixed voice origin, so no
+// Dormouse build could reach one here.
 app.all("*", (c) => auth.app.fetch(c.req.raw));
 const vite = await createViteServer({
   server: {
@@ -91,8 +88,25 @@ ready = {
   vite,
 };
 console.log(
-  `Dormouse Hosted: ${origin}\nLocal email inbox: ${origin}/api/dev/emails\nEmail stays local; OAuth is disabled in this development entry.\nManaged voice: ${elevenLabsKey ? "real ElevenLabs key" : "silent fake audio (ELEVENLABS_API_KEY unset)"}.`,
+  `Dormouse Hosted: ${origin}\nLocal email inbox: ${origin}/api/dev/emails\nEmail stays local; OAuth is disabled in this development entry.`,
 );
+/** A `ratelimits` binding's stand-in: `perMinute` per key per wall-clock minute. */
+function devLimit(perMinute: number): RateLimit {
+  const counts = new Map<string, number>();
+  let minute = 0;
+  return {
+    async limit({ key }) {
+      const now = Math.floor(Date.now() / 60_000);
+      if (now !== minute) {
+        minute = now;
+        counts.clear();
+      }
+      const count = (counts.get(key) ?? 0) + 1;
+      counts.set(key, count);
+      return { success: count <= perMinute };
+    },
+  };
+}
 for (const signal of ["SIGINT", "SIGTERM"] as const)
   process.once(signal, async () => {
     server.close();

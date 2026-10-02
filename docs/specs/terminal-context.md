@@ -17,7 +17,7 @@
 - **Must retain exited output**, offer Reset, and avoid automatic restart loops.
 - **Must pause status and process-inspection polling while the context is hidden**, invalidating cached idle results. Reopening publishes current terminal status; source closure inspects work on demand.
 
-**Must carry one status line per helper state**, offering Reset in place of Modify only after user input and after exit.
+**Must carry one status line per helper state**, offering Reset in place of Modify only for user-touched or exited helpers.
 
 **Must make Reset an explicit discard**, confirming loss of scrollback, unfinished input, running programs, and unsaved edits. Cancellation changes nothing; confirmation disposes the old helper and launches a fresh one using the source's current directory and current global setting. Stale timers cannot write to the replacement.
 
@@ -53,11 +53,15 @@ Source of truth: `context` in `standalone/sidecar/pty-core.js`; `terminalContext
 
 **Must make diagnostic text drag-selectable**, including detail-dialog errors, without focusing the helper. Copy routing follows `docs/specs/mouse-and-clipboard.md` → "Terminal context input".
 
+**Must drain the helper's queued xterm writes and verify a single autorun command echo before placement snapshots.**
+
 **Must suppress xterm's auto-revealed scrollbar in visual snapshots**, while retaining terminal scrolling and layout.
 
 **Must fit every control inside the panel at its minimum width, label included.** Port action overflow follows `docs/specs/layout.md` → "Header context menu". The gallery's play check measures each button against the panel and against its own box.
 
-Source of truth: `TerminalContextView` in `lib/src/components/wall/TerminalContextView.tsx`; `lib/src/stories/TerminalContext.stories.tsx` supplies sample output; `lib/src/stories/Wall.stories.tsx` exercises the live helper. `lib/src/stories/HelperPlacement.stories.tsx` checks rendered placement and real xterm input/focus retention; the gallery checks narrow controls and always-visible details. `visualSnapshot` in `lib/.storybook/preview.ts` suppresses scrollbar paint.
+Source of truth: `TerminalContextView` in `lib/src/components/wall/TerminalContextView.tsx`; `lib/src/stories/TerminalContext.stories.tsx` supplies sample output; `lib/src/stories/Wall.stories.tsx` exercises the live helper. `lib/src/stories/HelperPlacement.stories.tsx` checks rendered placement and real xterm input/focus retention; the gallery checks narrow controls and always-visible details. `visualSnapshot` in `lib/.storybook/preview.ts` suppresses scrollbar paint. Tests: `lib/src/lib/platform/fake-adapter-helper.test.ts`.
+
+The Window-host workspace picker follows `docs/specs/layout.md` → Moving Surfaces between Workspaces.
 
 ## Tool context
 

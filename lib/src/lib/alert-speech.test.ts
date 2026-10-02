@@ -137,6 +137,70 @@ describe('toSpokenText', () => {
  * (`alert-delivery-scheduler.test.ts`).
  */
 describe('spoken alarms', () => {
+  it('keeps a paused queued alarm while allowing another pane to speak', () => {
+    ringTwoWithFirstSpeaking();
+    const second = getActivity('pty-2');
+    setTerminalActivity('pty-2', { ...second, status: 'BUSY' });
+    ring('pty-3');
+    due('pty-3');
+    engine.utterances[0].onend?.();
+    expect(engine.spoken).toHaveLength(2);
+    engine.utterances[1].onstart?.();
+    expect(getAlertSpeechState('pty-3')).toBe('speaking');
+    engine.utterances[1].onend?.();
+    setTerminalActivity('pty-2', second);
+    expect(engine.spoken).toHaveLength(3);
+    engine.utterances[2].onstart?.();
+    expect(getAlertSpeechState('pty-2')).toBe('speaking');
+  });
+
+  it('retains preparation that never started and rejects its cancelled callbacks', () => {
+    start();
+    ring('pty-1');
+    const state = getActivity('pty-1');
+    due('pty-1');
+    const oldStart = engine.utterances[0].onstart;
+    const oldEnd = engine.utterances[0].onend;
+    setTerminalActivity('pty-1', { ...state, status: 'BUSY' });
+    expect(engine.cancels).toBe(1);
+    oldStart?.();
+    oldEnd?.();
+    expect(getAlertSpeechState('pty-1')).toBeNull();
+    vi.advanceTimersByTime(120_000);
+    expect(engine.spoken).toHaveLength(1);
+    setTerminalActivity('pty-1', state);
+    expect(engine.spoken).toHaveLength(2);
+    engine.utterances[1].onstart?.();
+    oldStart?.();
+    oldEnd?.();
+    expect(getAlertSpeechState('pty-1')).toBe('speaking');
+  });
+
+  it('cuts started speech on a pause without replaying it after quiet', () => {
+    start();
+    ring('pty-1');
+    const state = getActivity('pty-1');
+    due('pty-1');
+    engine.utterances[0].onstart?.();
+    setTerminalActivity('pty-1', { ...state, status: 'BUSY' });
+    expect(engine.cancels).toBe(1);
+    expect(getAlertSpeechState('pty-1')).toBe('spoken');
+    setTerminalActivity('pty-1', state);
+    expect(engine.spoken).toHaveLength(1);
+    expect(getAlertSpeechState('pty-1')).toBe('spoken');
+  });
+
+  it('drops paused preparation on acknowledgement instead of restoring it later', () => {
+    start();
+    ring('pty-1');
+    const state = getActivity('pty-1');
+    due('pty-1');
+    setTerminalActivity('pty-1', { ...state, status: 'BUSY' });
+    setStatus('pty-1', 'NOTHING_TO_SHOW');
+    setTerminalActivity('pty-1', state);
+    expect(engine.spoken).toHaveLength(1);
+  });
+
   it('speaks terminal-supplied OSC 0/2/9 titles when they are the pane label', () => {
     const sources: TerminalTitleSource[] = ['osc0', 'osc2', 'osc9'];
     for (const [index, source] of sources.entries()) {
@@ -407,5 +471,27 @@ describe('spoken alarms', () => {
     for (let i = 0; i < 65; i++) engine.utterances[i].onend?.();
     expect(engine.spoken).toHaveLength(65);
     expect(engine.utterances.every(utterance => utterance.onend === null)).toBe(true);
+  });
+
+  it('returns paused preparation to a full queue and speaks it after quiet', () => {
+    start();
+    for (let i = 0; i < 66; i++) ring(`pty-${i}`);
+    const first = getActivity('pty-0');
+    for (let i = 0; i < 66; i++) due(`pty-${i}`);
+    setTerminalActivity('pty-0', { ...first, status: 'BUSY' });
+    expect(engine.cancels).toBe(1);
+    engine.utterances[1].onstart?.();
+    expect(getAlertSpeechState('pty-1')).toBe('speaking');
+    setTerminalActivity('pty-0', first);
+    engine.utterances[1].onend?.();
+    engine.utterances[2].onstart?.();
+    expect(getAlertSpeechState('pty-0')).toBe('speaking');
+    for (let i = 2; i < 66; i++) {
+      engine.utterances[i].onstart?.();
+      engine.utterances[i].onend?.();
+    }
+    expect(engine.spoken).toHaveLength(66);
+    expect(getAlertSpeechState('pty-64')).toBe('spoken');
+    expect(getAlertSpeechState('pty-65')).toBeNull();
   });
 });

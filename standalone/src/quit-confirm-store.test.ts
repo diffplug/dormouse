@@ -15,7 +15,7 @@ import {
 
 import { chromeKeyboardHeld } from '../../lib/src/components/wall/chrome-keyboard-lease';
 import { createWorkspace, closeWorkspace, moveWorkspace, renameWorkspace, resetWorkspaces, setActiveWorkspace } from 'dormouse-lib/lib/workspace-store';
-import { getWorkspaceUiSnapshot, resetWorkspaceUi, setPendingWorkspaceClose, setPendingWorkspaceMove, setRenamingWorkspace, setWorkspaceMoveError } from 'dormouse-lib/lib/workspace-ui-store';
+import { getWorkspaceUiSnapshot, requestConfirmation, resetWorkspaceUi, setRenamingWorkspace, setWorkspaceMoveError } from 'dormouse-lib/lib/workspace-ui-store';
 import { isWorkspaceTransferPending, resetWindowSessionAggregator, setWorkspaceTransferPending } from 'dormouse-lib/lib/window-session-aggregator';
 
 // The gate↔orchestrator seam itself is covered by quit.test.ts.
@@ -112,13 +112,14 @@ describe("quit-confirm store", () => {
   });
 
   it('clears competing chrome without dropping transfer guards', () => {
-    setPendingWorkspaceClose({ id: 'workspace-1', char: 'a' });
-    setPendingWorkspaceMove({ id: 'workspace-1', char: 'b', iframeCount: 1, proceed: vi.fn() });
+    const answer = vi.fn();
+    requestConfirmation({ id: 'workspace-1', char: 'a', answer });
     setRenamingWorkspace('workspace-1');
     setWorkspaceMoveError({ id: 'workspace-1', reason: 'Wait for the Tool browser to connect' });
     setWorkspaceTransferPending('workspace-1', true);
     openQuitConfirm(makeCtx());
-    expect(getWorkspaceUiSnapshot()).toEqual({ pendingClose: null, pendingMove: null, renamingId: null, moveError: null });
+    expect(getWorkspaceUiSnapshot()).toEqual({ confirmation: null, renamingId: null, moveError: null });
+    expect(answer).toHaveBeenCalledExactlyOnceWith(false);
     expect(isWorkspaceTransferPending('workspace-1')).toBe(true);
     expect(chromeKeyboardHeld()).toBe(true);
   });

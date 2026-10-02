@@ -9,17 +9,7 @@
 
 import { randomBytes } from 'node:crypto';
 
-import { DEFAULT_PAIRING_TTL_MS, MAX_TOKENS_PER_BURROW, toBase64Url } from 'remote-lib-common';
-
-export { MAX_TOKENS_PER_BURROW };
-
-/**
- * How long a minted token stays redeemable. It *is* `DEFAULT_PAIRING_TTL_MS`
- * because the two are one window from the user's side: the nonce the token
- * leaves behind rides into the pairing request, so it must outlive the passkey
- * ceremony that stands between scanning the QR and pairing.
- */
-export const SETUP_TOKEN_TTL_MS = DEFAULT_PAIRING_TTL_MS;
+import { MAX_TOKENS_PER_BURROW, SETUP_TOKEN_TTL_MS, toBase64Url } from 'remote-lib-common';
 
 // `MAX_TOKENS_PER_BURROW` bounds this map, which anything holding a `burrowToken`
 // can otherwise grow for the process's lifetime by re-rendering its QR in a

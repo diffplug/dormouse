@@ -40,7 +40,7 @@ CWD:
 
 **Every CWD is bounded at `MAX_CWD_LENGTH` and stripped of control characters before storage**, whatever the source ([terminal-escapes.md](terminal-escapes.md), rationale).
 
-**The OSC 7 host is the URL parser's mapped hostname except in case and the literal `localhost` spelling** — the two the raw slice alone preserves; a slice diverging further is unnormalized input, and taking it would let an ignorable code point inside `localhost` read as remote. Pinned by `bounds every CWD source and strips control characters` in `lib/src/lib/terminal-state.test.ts`. Source of truth: `fileUriHost` in `lib/src/lib/terminal-state.ts`.
+**Must use the URL parser's normalized OSC 7 hostname, preserving raw case and the literal `localhost` spelling only.** Pinned by `bounds every CWD source and strips control characters` in `lib/src/lib/terminal-state.test.ts`. Source of truth: `fileUriHost` in `lib/src/lib/terminal-state.ts`.
 
 Non-OSC CWD sources:
 
@@ -95,7 +95,9 @@ Source of truth: `cwdFromManualPath` in `lib/src/lib/terminal-state.ts`; `seedTe
 - `commandFinish` moves `currentCommand` to `lastCommand`, stores `event.finishedAt` (otherwise reducer time) and `exitCode`, snapshots the latest in-run OSC 0/2/9 title into `lastCommand.finalTerminalTitle` (titles older than `startedAt` or younger than `finishedAt` excluded), clears `currentCommand`, and sets `{ kind: "finished", exitCode }`. **With no `currentCommand` it only sets the activity**, never inventing a `lastCommand`.
 - `title` updates the per-source entry in `titleCandidates`. **Later OSC title events never erase earlier candidates from other sources.**
 
-Command-line tokenizing is dialect-free: **`\` escapes exactly the set `shellEscapePosix` writes** (`POSIX_ESCAPABLE` in `lib/src/lib/posix-escape.ts`; both halves pinned by `terminal-state.test.ts`). **A leading `&` is PowerShell's call operator, never a POSIX background suffix**, and is dropped rather than read as a boundary. **A redirection keeps its `&` or `|`** — `2>&1`, `<&3`, `>|`, `&>`, `&>>` separate nothing — and **`|&`, like fish's `&|`, is a pipe**. **An unquoted `#` starting a word comments out the rest of its line.** **An unquoted newline separates commands like `;`**; a backslash-newline continues the line. **A here-document's body is skipped**: after an unquoted `<<` or `<<-` (not `<<<`), the lines through its delimiter, quotes removed and leading tabs stripped under `<<-`. **Grouping `(` `)` `{` `}` is dropped; a `$(…)`, `<(…)` or `>(…)` substitution or a `name=(…)` array is one word**, separators included. **An unquoted Windows path containing spaces stays split.** **A launcher suffix is not part of a program's name** — `npm.cmd` and `C:\tools\claude.exe` are `npm` and `claude` for the header, the WATCHING key, and the terminal context alike. Accepted: `foo.bat` and `foo.exe` in one directory cannot be watched separately. (rationale)
+**Must tokenize without selecting a shell dialect, and read back exactly the `POSIX_ESCAPABLE` set that `shellEscapePosix` writes.** **Must derive the same suffix-free program name for headers, WATCHING keys, and terminal context**: `npm.cmd` and `C:\tools\claude.exe` become `npm` and `claude`; launcher variants in one directory cannot be watched separately. (rationale)
+
+Source of truth: `tokenizeCommand` / `commandProgramName` in `lib/src/lib/terminal-state.ts`; `POSIX_ESCAPABLE` in `lib/src/lib/posix-escape.ts`; pinned by `lib/src/lib/terminal-state.test.ts`.
 
 **`displayCommand` is a one-line, per-program summary of those tokens** — the program name plus a bounded argument count, suffixed `| ...` or ` ...` past a pipeline or compound boundary. Source of truth: `summarizeCommandLine` and `commandTitleTokens` in `lib/src/lib/terminal-state.ts`.
 

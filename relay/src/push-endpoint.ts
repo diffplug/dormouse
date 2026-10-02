@@ -14,6 +14,8 @@ import type { LookupAddress, LookupOptions } from 'node:dns';
 import { Agent } from 'node:https';
 import { BlockList, isIP, type LookupFunction } from 'node:net';
 
+import { MAX_PUSH_ENDPOINT_LENGTH } from 'remote-lib-common';
+
 // Separate lists matter: Node's BlockList maps an IPv4 address into
 // `::ffff:0:0/96` even when `check(..., 'ipv4')` is requested, so combining the
 // families would make the mapped-address deny range reject every IPv4 address.
@@ -85,15 +87,8 @@ export function isPublicNetworkAddress(address: string): boolean {
   return false;
 }
 
-/**
- * Longest push endpoint this Relay will store. A real one is a provider URL a
- * couple of hundred characters long (FCM, APNs and Mozilla autopush all sit
- * well under this), so the cap is several times the headroom any of them needs
- * — and it is what keeps a stored row a known size, since every push route
- * re-reads and re-parses the whole file
- * (`docs/specs/relay.md` -> State files).
- */
-export const MAX_PUSH_ENDPOINT_LENGTH = 1024;
+/** Shared with the Hosted Relay (`docs/specs/relay.md` -> State files). */
+export { MAX_PUSH_ENDPOINT_LENGTH };
 
 /**
  * Cheap admission check. Hostnames are revalidated through DNS at connection

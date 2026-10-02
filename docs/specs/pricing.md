@@ -6,9 +6,9 @@
 > clients verify, the managed-voice boundary, and the content contract of the
 > Hosted page.
 > **Defers:** page chrome, rail, and link obligations to
-> `docs/specs/website-docs.md` -> "Reference page chrome"; the hosted Relay's
-> account model and tenancy to the **saas-multitenant** scope in
-> `docs/specs/relay.md`; the cloud-hosted trust boundary to
+> `docs/specs/website-docs.md` -> "Reference page chrome"; the Hosted Relay's
+> accounts, enrollment, and entitlement, and managed voice's routes, to
+> `docs/specs/hosted.md`; the cloud-hosted trust boundary to
 > `docs/specs/security-remote.md` -> "Cloud-hosted mode"; alarm delivery to
 > `docs/specs/alert.md` -> "Spoken alarms".
 > **Status:** the Hosted page publishes the tiers and the FAQ; everything that
@@ -107,14 +107,15 @@ Source of truth: `tiersOnSale` and `pricingJsonLd` in
    behind a cache of at most 60 seconds.
 2. **Checkout and licences**: purchase, the signed licence, activation in
    Settings, verification, grace, revocation.
-3. **Managed voice**: the TTS endpoint, the entitlement check, the disclosure,
-   one voice per Pane.
-4. **Hosted Relay inclusion**, gated on the independent review `docs/specs/security-remote.md` -> "Cloud-hosted
-   mode" requires; the account model is the **saas-multitenant** scope.
+3. **Managed voice for members**: the licence replacing the admin gate
+   (`docs/specs/hosted.md` -> "Managed voice"), the disclosure, one voice per
+   Pane.
+4. **Hosted Relay inclusion**: the licence as the Relay's entitlement
+   (`docs/specs/hosted.md` -> "Relay"), gated on the independent review
+   `docs/specs/security-remote.md` -> "Cloud-hosted mode" requires.
 5. **Renewal, cancellation, and refund** paths.
 
-Team and enterprise tiers are never sold through this page; they belong to the
-**saas-multitenant** scope. A free hosted tier is undecided — see
+Team and enterprise tiers are never sold through this page. A free hosted tier is undecided — see
 [Open questions](#open-questions).
 
 ### Tiers
@@ -161,7 +162,7 @@ is the ladder as the page prints it today.
   source-available under FSL, so a member can always self-host. The page says
   so in those words.
 - **The hosted Relay is part of the plan, never a second purchase.** Reserved: the
-  **saas-multitenant** scope reads the plan from the licence below rather than
+  **hosted-launch** scope reads the plan from the licence below rather than
   minting a second account.
 - **Nothing shipped free is ever gated**: the terminal, `dor`, browser panes,
   the notepad, alerts with the system voice, the self-host Relay, and Pocket
@@ -195,8 +196,9 @@ is the ladder as the page prints it today.
 - **A refund or chargeback revokes**: the server marks the licence, the next
   refresh disables it, and the seat returns to its cohort.
 - **The licence is the identity the hosted Relay will accept.** Reserved: the
-  **saas-multitenant** scope enrolls a Burrow against this licence, so a member
-  never signs up twice.
+  **hosted-launch** scope makes this licence the entitlement Burrow enrollment
+  checks (`docs/specs/hosted.md` -> "Burrow enrollment"), so a member never
+  signs up twice.
 
 ### Managed voice
 

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { access, copyFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawn } from 'node:child_process';
 import { get } from 'node:http';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -30,6 +30,10 @@ async function fixture(t) {
     });
   `);
   const cli = path.join(bin, 'cli.cjs');
+  // Windows kill('SIGTERM') bypasses JS handlers. Exercise the same shutdown
+  // handler over IPC there; POSIX continues exercising the actual signal.
+  const signals = path.join(bin, 'signals.mjs');
+  await writeFile(signals, "process.on('message', signal => process.emit(signal));");
   await writeFile(cli, `
     if (process.argv[2] === 'list' && process.env.TEST_DOR_LIST) {
       console.log(process.env.TEST_DOR_LIST);
@@ -54,8 +58,8 @@ async function fixture(t) {
   return {
     root,
     start(overrides = {}) {
-      const child = spawn(process.execPath, [path.join(standalone, 'scripts/dev-agent-browser.mjs')], {
-        cwd: root, env: { ...cleanEnv(bin), ...overrides }, stdio: ['ignore', 'pipe', 'pipe'],
+      const child = spawn(process.execPath, ['--import', pathToFileURL(signals).href, path.join(standalone, 'scripts/dev-agent-browser.mjs')], {
+        cwd: root, env: { ...cleanEnv(bin), ...overrides }, stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
       });
       // Object.assign, not a spread: `runner`'s `output`/`closed` are getters
       // over live state, and spreading would snapshot them once.
@@ -73,7 +77,10 @@ async function fixture(t) {
           return this;
         },
         async stop() {
-          if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM');
+          if (child.exitCode === null && child.signalCode === null) {
+            if (process.platform === 'win32' && child.connected) child.send('SIGTERM', () => {});
+            else child.kill('SIGTERM');
+          }
           const timer = setTimeout(() => child.kill('SIGKILL'), 5000);
           try { return await this.exited; } finally { clearTimeout(timer); }
         },

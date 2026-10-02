@@ -2,6 +2,7 @@
 // positioning only; gestures surface as proposals and never activate/focus.
 // See docs/specs/tiling-engine.md → "The HTML adapter (LathHost)".
 
+import type { SurfaceWorkspaceDrag } from './surface-workspace-drag';
 import {
   memo,
   useCallback,
@@ -272,6 +273,7 @@ export function LathHost({
   onProposeMinimize,
   externalDrag,
   onExternalDrop,
+  workspaceDrag,
   componentsOverride,
 }: {
   /** The Wall's engine handle: LathHost reads `lath.store`, drives `lath.animator`,
@@ -296,6 +298,7 @@ export function LathHost({
   /** Drop of an external (Door) drag: a hit-tested target, or `null` on cancel / a
    *  release over no candidate — the Wall leaves the Door where it is. */
   onExternalDrop?: (target: DropTarget | null) => void;
+  workspaceDrag?: SurfaceWorkspaceDrag;
   componentsOverride?: LathComponentsOverride;
 }) {
   const { mounted: terminalContext } = useContext(TerminalContextContext);
@@ -356,8 +359,8 @@ export function LathHost({
 
   // Everything the once-built controller reads through: the latest store snapshot + Wall
   // callbacks, re-mirrored each render so it always sees current values.
-  const latestRef = useRef({ snapshot, onDragStart, onProposeMove, onProposeMinimize, onExternalDrop });
-  latestRef.current = { snapshot, onDragStart, onProposeMove, onProposeMinimize, onExternalDrop };
+  const latestRef = useRef({ snapshot, onDragStart, onProposeMove, onProposeMinimize, onExternalDrop, workspaceDrag });
+  latestRef.current = { snapshot, onDragStart, onProposeMove, onProposeMinimize, onExternalDrop, workspaceDrag };
 
   // The current preview overlay rect (null → no overlay). The dragged leaf itself is
   // dimmed imperatively; only this rect is React state.

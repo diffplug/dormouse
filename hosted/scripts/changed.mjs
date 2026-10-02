@@ -3,12 +3,13 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 // Shared build inputs can change Hosted without editing its directory: the
-// theme the account frontend imports, and the one-time phone page it stages
-// (whose Vite config takes Pocket's resolution).
+// theme the account frontend imports, and the whole Pocket bundle and one-time
+// phone page the relay stages. Whole packages and directories, never a
+// hand-picked subset of Pocket's import graph, so a new import cannot slip past.
 export function touchesHosted(paths) {
   return paths.some(
     (path) =>
-      /^(hosted\/|remote-lib-common\/src\/|lib\/src\/(theme|remote\/|lib\/(themes\/|(?:local-json-store|is-record|css-color)\.ts$))|lib\/one-time\/|\.github\/workflows\/hosted-[^/]+\.yml$)/.test(
+      /^(?:hosted\/|remote-lib-common\/|dor-lib-common\/|lib\/(?:src|pocket|one-time)\/|lib\/vite[^/]*\.config\.ts$|lib\/tsconfig[^/]*\.json$|\.github\/workflows\/hosted-[^/]+\.yml$)/.test(
         path,
       ) ||
       [
@@ -16,8 +17,6 @@ export function touchesHosted(paths) {
         "pnpm-lock.yaml",
         "pnpm-workspace.yaml",
         "lib/package.json",
-        "lib/vite.one-time.config.ts",
-        "lib/vite.pocket.config.ts",
         "lib/scripts/assert-pocket-worker.mjs",
       ].includes(path),
   );

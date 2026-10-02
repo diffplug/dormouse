@@ -13,6 +13,7 @@ export function WorkspaceKillConfirm({ char, onConfirm, onCancel, canConfirm, ti
   title?: string;
   targetElement?: HTMLElement | null;
   detail?: string;
+  cancelHint?: string;
   layer?: ModalLayer;
 }) {
   // Callers pass fresh closures each render; both listeners read the latest ones

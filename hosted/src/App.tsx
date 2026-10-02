@@ -6,28 +6,43 @@ import {
   type FormEvent,
 } from "react";
 import {
+  approveEnrollment,
   createVoiceToken,
   getAccounts,
+  getComputers,
   getProviders,
   getSession,
   getVoiceTokens,
   post,
   providerNames,
+  removeComputer,
   revokeVoiceToken,
   social,
   type Account,
+  type Computer,
   type Provider,
   type Session,
   type VoiceToken,
 } from "./api";
-import { LOGIN_FRESH_AGE_MS } from "../server/policy-constants";
+import { LOGIN_FRESH_AGE_MS, RECENT_LOGIN_WINDOW } from "../server/policy-constants";
+import { takeEnrollment, type Enrollment } from "./enrollment";
 
-export function App() {
+export function App({ enrollment }: { enrollment: Enrollment | null }) {
   const [session, setSession] = useState<Session | null>(null);
   const [enabled, setEnabled] = useState<Provider[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   // Null hides the Voice tokens section (docs/specs/hosted.md -> "Interface").
   const [voiceTokens, setVoiceTokens] = useState<VoiceToken[] | null>(null);
+  // Null hides the Computers section, as for voice tokens.
+  const [computers, setComputers] = useState<Computer[] | null>(null);
+  // The enrollment awaiting approval, in memory only: through sign-in and
+  // back, never into storage (docs/specs/hosted.md -> "Burrow enrollment").
+  const [enrolling, setEnrollingState] = useState(enrollment);
+  const enrollingRef = useRef(enrolling);
+  const setEnrolling = (next: Enrollment | null) => {
+    enrollingRef.current = next;
+    setEnrollingState(next);
+  };
   const [minted, setMinted] = useState("");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState("");
@@ -49,16 +64,25 @@ export function App() {
       getSession(),
       getProviders(),
     ]);
-    // A failed token list hides the voice section, never the account page.
-    const [linked, tokens] = current
-      ? await Promise.all([getAccounts(), getVoiceTokens().catch(() => null)])
-      : [[], null];
+    // A failed list hides its section, never the account page.
+    const [linked, tokens, enrolled] = current
+      ? await Promise.all([
+          getAccounts(),
+          getVoiceTokens().catch(() => null),
+          getComputers().catch(() => null),
+        ])
+      : [[], null, null];
     if (generation !== refreshGeneration.current) return;
     setSession(current);
     setEnabled(providers);
     setAccounts(linked);
     setVoiceTokens(tokens);
-    history.replaceState(null, "", current ? "/account" : "/login");
+    setComputers(enrolled);
+    history.replaceState(
+      null,
+      "",
+      enrollingRef.current ? "/enroll" : current ? "/account" : "/login",
+    );
   }, []);
   useEffect(() => {
     history.replaceState(null, "", location.pathname);
@@ -84,6 +108,20 @@ export function App() {
   useEffect(() => {
     if (enterCode) codeInput.current?.focus();
   }, [enterCode]);
+  useEffect(() => {
+    // A link opened in the tab already on `/enroll` changes only the fragment:
+    // take its code as the first load did, without reloading. Elsewhere a
+    // fragment means nothing.
+    const takeLink = () => {
+      const next = takeEnrollment();
+      if (!next) return;
+      setEnrolling(next);
+      setError("");
+      setNotice("");
+    };
+    window.addEventListener("hashchange", takeLink);
+    return () => window.removeEventListener("hashchange", takeLink);
+  }, []);
 
   async function act(label: string, action: () => Promise<void>) {
     if (actionPending.current) return;
@@ -133,6 +171,7 @@ export function App() {
       await post("sign-out");
       setSession(null);
       setAccounts([]);
+      setComputers(null);
       setMinted("");
       setEnterCode(false);
       setCode("");
@@ -161,6 +200,29 @@ export function App() {
           ) ?? null,
       );
     });
+  const approve = (code: string) =>
+    act("approve", async () => {
+      await approveEnrollment(code);
+      clearEnrollment();
+      await refresh();
+      setNotice(
+        `Approved ${code}. Dormouse on your computer finishes enrolling in a few seconds.`,
+      );
+    });
+  const clearEnrollment = () => {
+    setEnrolling(null);
+    setError("");
+    history.replaceState(null, "", session ? "/account" : "/login");
+  };
+  const removeOne = (burrowId: string) =>
+    act(`remove-${burrowId}`, async () => {
+      await removeComputer(burrowId);
+      setComputers(
+        (enrolled) =>
+          enrolled?.filter((computer) => computer.burrowId !== burrowId) ??
+          null,
+      );
+    });
   const copyMinted = () =>
     act("copy", async () => {
       await navigator.clipboard.writeText(minted);
@@ -181,11 +243,23 @@ export function App() {
         </a>
       </header>
       <main>
-        <h1>{session ? "Your account" : "Sign in to Dormouse Hosted"}</h1>
+        <h1>
+          {enrolling
+            ? "Approve a computer"
+            : session
+              ? "Your account"
+              : "Sign in to Dormouse Hosted"}
+        </h1>
         <p className="intro">
-          {session
-            ? "Manage how you sign in."
-            : "One account for Dormouse’s hosted services."}
+          {enrolling
+            ? !enrolling.code
+              ? "This link cannot be approved."
+              : session
+                ? "Dormouse on your computer asked to join this account."
+                : "Sign in to approve the computer that sent you here."
+            : session
+              ? "Manage how you sign in."
+              : "One account for Dormouse’s hosted services."}
         </p>
         {loading ? (
           <p role="status">Checking your account…</p>
@@ -209,7 +283,60 @@ export function App() {
                 {notice}
               </p>
             )}
-            {session ? (
+            {enrolling && (session || !enrolling.code) ? (
+              <section aria-label="Computer to approve" className="enroll">
+                {enrolling.code ? (
+                  <>
+                    <p className="user-code">{enrolling.code}</p>
+                    <p>
+                      Approve only if Dormouse on your computer is showing this
+                      code right now.
+                    </p>
+                    {fresh ? (
+                      <button
+                        className="primary"
+                        disabled={!!busy}
+                        onClick={() => void approve(enrolling.code!)}
+                      >
+                        {busy === "approve" ? "Approving…" : "Approve"}
+                      </button>
+                    ) : (
+                      <>
+                        <p className="help">
+                          Approving a computer needs a login from the last{" "}
+                          {RECENT_LOGIN_WINDOW}. Sign in again; this code stays
+                          on this page.
+                        </p>
+                        <button
+                          className="primary"
+                          disabled={!!busy}
+                          onClick={() => void signOut()}
+                        >
+                          {busy === "logout" ? "Signing out…" : "Sign in again"}
+                        </button>
+                      </>
+                    )}
+                  </>
+                ) : (
+                  <p className="help">
+                    This link has no valid code. Start again from Dormouse on
+                    your computer.
+                  </p>
+                )}
+                <button
+                  type="button"
+                  className="text-button"
+                  disabled={!!busy}
+                  onClick={clearEnrollment}
+                >
+                  {enrolling.code
+                    ? "Don’t approve"
+                    : session
+                      ? "Go to your account"
+                      : "Sign in"}
+                </button>
+              </section>
+            ) : session ? (
               <>
                 <dl className="identity">
                   <dt>Email</dt>
@@ -268,7 +395,8 @@ export function App() {
                     ) && (
                       <p className="help">
                         To connect another provider, sign out and sign in again.
-                        Connections require a login from the last 10 minutes.
+                        Connections require a login from the last{" "}
+                        {RECENT_LOGIN_WINDOW}.
                       </p>
                     )}
                 </section>
@@ -326,6 +454,41 @@ export function App() {
                     </button>
                   </section>
                 )}
+                {computers && (
+                  <section aria-labelledby="computers">
+                    <h2 id="computers">Computers</h2>
+                    <p className="help">
+                      Computers enrolled to this account can reach your phones
+                      through the Hosted Relay. Remote control is in admin-only
+                      testing.
+                    </p>
+                    {computers.length === 0 && (
+                      <p className="help">
+                        No computers yet. Enroll one from Dormouse on that
+                        computer.
+                      </p>
+                    )}
+                    {computers.map((computer) => (
+                      <div className="method" key={computer.burrowId}>
+                        <span>
+                          Computer {computer.burrowId.slice(0, 8)}
+                          <span className="detail">
+                            Enrolled{" "}
+                            {new Date(computer.enrolledAt).toLocaleDateString()}
+                          </span>
+                        </span>
+                        <button
+                          disabled={!!busy}
+                          onClick={() => void removeOne(computer.burrowId)}
+                        >
+                          {busy === `remove-${computer.burrowId}`
+                            ? "Removing…"
+                            : "Remove"}
+                        </button>
+                      </div>
+                    ))}
+                  </section>
+                )}
                 <section>
                   <h2>Signed in on this browser</h2>
                   <p className="help">
@@ -337,12 +500,16 @@ export function App() {
                     {busy === "logout" ? "Signing out…" : "Sign out"}
                   </button>
                 </section>
-                <p className="footnote">
-                  {voiceTokens
-                    ? "Remote control is"
-                    : "Hosted voice and remote control are"}{" "}
-                  not available yet.
-                </p>
+                {!(voiceTokens && computers) && (
+                  <p className="footnote">
+                    {voiceTokens
+                      ? "Remote control is"
+                      : computers
+                        ? "Hosted voice is"
+                        : "Hosted voice and remote control are"}{" "}
+                    not available yet.
+                  </p>
+                )}
               </>
             ) : (
               <>
@@ -454,13 +621,22 @@ export function App() {
                     ))}
                   </section>
                 )}
-                <p className="help">
-                  Already have an account? Use your existing sign-in method,
-                  then connect other providers from your account.
-                </p>
-                <p className="footnote">
-                  Hosted voice and remote control are not available yet.
-                </p>
+                {enrolling && enabled.length > 0 ? (
+                  <p className="help">
+                    Signing in with a provider leaves this page. Afterwards,
+                    open the link from Dormouse again.
+                  </p>
+                ) : (
+                  <p className="help">
+                    Already have an account? Use your existing sign-in method,
+                    then connect other providers from your account.
+                  </p>
+                )}
+                {!enrolling && (
+                  <p className="footnote">
+                    Hosted voice and remote control are not available yet.
+                  </p>
+                )}
               </>
             )}
           </>

@@ -10,14 +10,19 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { serve } from '@hono/node-server';
-import { API_ROUTES, WS_ROUTES, WS_TOKEN_PARAM, toBase64Url, utf8Encode } from 'remote-lib-common';
+import { API_ROUTES, WS_ROUTES, WS_TOKEN_PARAM } from 'remote-lib-common';
 
 import { createApp } from '../dist/app.js';
-import { SimAuthenticator } from '../../remote-lib-common/test/harness/actors.mjs';
+import {
+  SimAuthenticator,
+  registrationClientData as browserRegistrationClientData,
+} from '../../remote-lib-common/test/harness/actors.mjs';
+import { openFrameSocket } from '../../remote-lib-common/test/harness/frame-socket.mjs';
 import { ORIGIN, PASSWORD, RP_ID } from './fixtures.mjs';
 
 export * from './fixtures.mjs';
 export { makeClock } from '../../remote-lib-common/test/harness/clock.mjs';
+export { sleep, until } from '../../remote-lib-common/test/harness/frame-socket.mjs';
 
 /**
  * No app here pays the real `CREDENTIAL_FAILURE_DELAY_MS`: a suite full of 401s
@@ -98,9 +103,9 @@ export function newAuthenticator() {
   return SimAuthenticator.create({ rpId: RP_ID });
 }
 
-/** Build registration clientDataJSON exactly as a browser would (webauthn.create). */
-export function registrationClientData({ challenge, origin = ORIGIN, type = 'webauthn.create' }) {
-  return toBase64Url(utf8Encode(JSON.stringify({ type, challenge, origin, crossOrigin: false })));
+/** The shared harness's registration clientDataJSON, from this suite's `ORIGIN` unless named. */
+export function registrationClientData({ origin = ORIGIN, ...rest }) {
+  return browserRegistrationClientData({ origin, ...rest });
 }
 
 /** Serialize an unpadded base64url challenge the way some browsers do in clientDataJSON. */
@@ -156,20 +161,6 @@ export async function signin(app, authenticator, { origin = ORIGIN, rpId = RP_ID
 
 // --- Slice 2: live Relay + WebSocket relay scaffolding --------------------
 
-export function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-/** Poll `fn` until it returns truthy, or throw after `timeout`ms. */
-export async function until(fn, { timeout = 1000, interval = 5 } = {}) {
-  const deadline = Date.now() + timeout;
-  for (;;) {
-    if (await fn()) return;
-    if (Date.now() > deadline) throw new Error('condition not met in time');
-    await sleep(interval);
-  }
-}
-
 /**
  * Boot a real listening server for a `createApp` result (WS needs a socket, not
  * `app.request`). Binds port 0 and reports the OS-assigned port; the returned
@@ -217,45 +208,12 @@ export function startRelay(created) {
   });
 }
 
-/**
- * Open a WebSocket and wrap it in a tiny test harness: `ready` resolves on open
- * (rejects on a failed upgrade), `take()` yields received frames in order with
- * an internal cursor, and `quiet()` asserts no frame arrived in a window.
- */
+/** {@link openFrameSocket}, tracked so a Relay teardown can force it shut. */
 export function wsConnect(url) {
-  const ws = new WebSocket(url);
-  OPEN_SOCKETS.add(ws);
-  ws.addEventListener('close', () => OPEN_SOCKETS.delete(ws));
-  const messages = [];
-  let cursor = 0;
-  ws.addEventListener('message', (ev) => {
-    messages.push(JSON.parse(typeof ev.data === 'string' ? ev.data : ''));
-  });
-  const ready = new Promise((resolve, reject) => {
-    ws.addEventListener('open', () => resolve());
-    ws.addEventListener('error', (ev) => reject(ev.error ?? new Error('ws error')));
-    ws.addEventListener('close', (ev) => reject(new Error(`closed before open (${ev.code})`)));
-  });
-  const closed = new Promise((resolve) => ws.addEventListener('close', (ev) => resolve(ev)));
-  return {
-    ws,
-    ready,
-    closed,
-    messages,
-    send: (frame) => ws.send(JSON.stringify(frame)),
-    close: () => ws.close(),
-    /** Next unconsumed frame, waiting up to `timeout`ms for it to arrive. */
-    async take(timeout = 1000) {
-      await until(() => messages.length > cursor, { timeout });
-      return messages[cursor++];
-    },
-    /** True if no new frame arrives within `ms` (i.e. the pipe stayed blocked). */
-    async quiet(ms = 60) {
-      const before = messages.length;
-      await sleep(ms);
-      return messages.length === before;
-    },
-  };
+  const socket = openFrameSocket(url);
+  OPEN_SOCKETS.add(socket.ws);
+  socket.ws.addEventListener('close', () => OPEN_SOCKETS.delete(socket.ws));
+  return socket;
 }
 
 /** POST /api/burrow/enroll with the setup password; returns the JSON body. */

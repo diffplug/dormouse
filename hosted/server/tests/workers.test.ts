@@ -3,7 +3,6 @@ import { digest } from "@pgstencil/auth/security";
 import { fileURLToPath } from "node:url";
 import {
   Miniflare,
-  convertV4MiniflareOptions,
   Request as WorkerRequest,
   Response as WorkerResponse,
 } from "miniflare";
@@ -22,15 +21,37 @@ import {
 import type { Session } from "../../src/api";
 import { ADMIN_EMAIL } from "../admin";
 import { CRON_SWEEP_CAP, SPEECH_SWEEP_CAP, VOICE_DAILY_CAP } from "../voice";
-import { bundleWorker, wrangler } from "./bundle";
+import { ALREADY_APPROVED, RECENT_LOGIN_REQUIRED } from "../relay-account";
+import {
+  API_ROUTES,
+  NOT_ENTITLED_ERROR,
+  WS_CLOSE_BURROW_REVOKED,
+  WS_ROUTES,
+  WS_TOKEN_PARAM,
+} from "remote-lib-common";
+import { rawUpgrade } from "./raw-socket";
+import {
+  ENTRIES,
+  ORIGINS,
+  TEST_ENROLL_SECRET,
+  bundleWorker,
+  miniflareOptions,
+  together,
+  wrangler,
+  type Name,
+} from "./bundle";
+import { limitOf, untilLimited } from "./rate-limit";
 
-const origin = "https://hosted.dormouse.sh";
+const origin = ORIGINS.account;
+const voiceOrigin = ORIGINS.voice;
+/** The sibling Workers' origins: same-site, so a browser sends them the login cookie. */
+const SAME_SITE = ["https://dormouse.sh", ORIGINS.relay, voiceOrigin];
 const bundle = (production: boolean | "preview") =>
   bundleWorker(
     production === "preview"
       ? "server/preview-worker.ts"
       : production
-        ? "server/worker.ts"
+        ? ENTRIES.account
         : "server/tests/worker-entry.ts",
     production
       ? []
@@ -43,31 +64,37 @@ const bundle = (production: boolean | "preview") =>
 const testBundle = bundle(false);
 const productionBundle = bundle(true);
 const previewBundle = bundle("preview");
+const relayBundle = bundleWorker(ENTRIES.relay);
+const voiceBundles = {
+  test: bundleWorker("server/tests/voice-entry.ts"),
+  production: bundleWorker(ENTRIES.voice),
+  preview: bundleWorker("server/voice-preview-worker.ts"),
+};
 type Result = Awaited<ReturnType<Miniflare["dispatchFetch"]>>;
 type Handler = (
   request: WorkerRequest,
 ) => WorkerResponse | Promise<WorkerResponse>;
 
-/** One Worker under Miniflare; `database` backs the HYPERDRIVE binding. */
-const workerOptions = ({
-  script,
-  database,
-  assets,
-  ...rest
-}: {
-  script: string;
-  database: string;
-  assets: Handler;
-  bindings: Record<string, string>;
-  outboundService: Handler;
-}) =>
-  convertV4MiniflareOptions({
-    modules: true,
+/** Worker `name` under Miniflare; `database` backs the HYPERDRIVE binding. */
+const workerOptions = (
+  name: Name,
+  {
     script,
-    compatibilityDate: wrangler.compatibility_date,
-    compatibilityFlags: wrangler.compatibility_flags,
+    database,
+    assets,
+    ...rest
+  }: {
+    script: string;
+    database: string;
+    assets?: Handler;
+    bindings: Record<string, string>;
+    outboundService: Handler;
+    routes?: string[];
+  },
+) =>
+  miniflareOptions(name, script, {
     hyperdrives: { HYPERDRIVE: database },
-    serviceBindings: { ASSETS: assets },
+    ...(assets ? { serviceBindings: { ASSETS: assets } } : {}),
     ...rest,
   });
 
@@ -107,89 +134,145 @@ async function fixture(
     bindings[`${id.toUpperCase()}_CLIENT_SECRET`] = credentials.clientSecret;
   }
   Object.assign(bindings, overrides);
-  const worker = new Miniflare(
-    workerOptions({
-      script: (
-        await (production === "preview"
-          ? previewBundle
-          : production
-            ? productionBundle
-            : testBundle)
-      ).outputFiles![0].text,
-      bindings,
-      database: context.database.url,
-      // Vite's content-hashed build output, with the SPA fallback answering
-      // every other path — including an unknown one under /assets/ — with the shell.
-      assets: (request) =>
-          new URL(request.url).pathname === "/assets/app-abc123.js"
-            ? new WorkerResponse("export const build = 1;\n", {
-                headers: { "content-type": "text/javascript" },
-              })
-            : new WorkerResponse(
-                "<!doctype html><html><title>Dormouse Hosted</title></html>",
-                {
-                  headers: { "content-type": "text/html" },
-                },
-              ),
-      async outboundService(request) {
-        if (production === "preview")
-          throw new Error(
-            "Preview must never send external mail or OAuth requests",
-          );
-        const url = new URL(request.url);
-        if (url.href === "https://api.postmarkapp.com/email") {
-          expect(request.headers.get("x-postmark-server-token")).toBe(
-            "test-token",
-          );
-          const mail = (await request.json()) as {
-            To: string;
-            From: string;
-            Subject: string;
-            HtmlBody: string;
-            TextBody: string;
-          };
-          await context.email.send({
-            to: [mail.To],
-            from: mail.From,
-            subject: mail.Subject,
-            html: mail.HtmlBody,
-            text: mail.TextBody,
-          });
-          return new WorkerResponse(JSON.stringify({ ErrorCode: 0 }), {
-            headers: { "content-type": "application/json" },
-          });
-        }
-        if (url.href.startsWith("https://api.elevenlabs.io/v1/history?")) {
-          elevenLabs.sweeps.push(url.href);
-          return WorkerResponse.json({ history: [] });
-        }
-        if (url.origin === "https://api.elevenlabs.io") {
-          elevenLabs.requests.push({
-            url: url.href,
-            key: request.headers.get("xi-api-key"),
-            body: await request.json(),
-          });
-          return elevenLabs.respond();
-        }
-        const path = endpointPaths[url.origin + url.pathname];
-        if (!path) throw new Error(`Unexpected outbound host: ${url.hostname}`);
-        const response = await fetch(provider.origin + path + url.search, {
-          method: request.method,
-          headers: Object.fromEntries(request.headers),
-          ...(request.method === "POST" ? { body: await request.text() } : {}),
-        });
-        return new WorkerResponse(await response.arrayBuffer(), {
-          status: response.status,
-          headers: {
-            "content-type":
-              response.headers.get("content-type") ?? "application/json",
-          },
-        });
+  const outboundService: Handler = async (request) => {
+    if (production === "preview")
+      throw new Error(
+        "Preview must never send external mail or OAuth requests",
+      );
+    const url = new URL(request.url);
+    if (url.href === "https://api.postmarkapp.com/email") {
+      expect(request.headers.get("x-postmark-server-token")).toBe(
+        "test-token",
+      );
+      const mail = (await request.json()) as {
+        To: string;
+        From: string;
+        Subject: string;
+        HtmlBody: string;
+        TextBody: string;
+      };
+      await context.email.send({
+        to: [mail.To],
+        from: mail.From,
+        subject: mail.Subject,
+        html: mail.HtmlBody,
+        text: mail.TextBody,
+      });
+      return new WorkerResponse(JSON.stringify({ ErrorCode: 0 }), {
+        headers: { "content-type": "application/json" },
+      });
+    }
+    if (url.href.startsWith("https://api.elevenlabs.io/v1/history?")) {
+      elevenLabs.sweeps.push(url.href);
+      return WorkerResponse.json({ history: [] });
+    }
+    if (url.origin === "https://api.elevenlabs.io") {
+      elevenLabs.requests.push({
+        url: url.href,
+        key: request.headers.get("xi-api-key"),
+        body: await request.json(),
+      });
+      return elevenLabs.respond();
+    }
+    const path = endpointPaths[url.origin + url.pathname];
+    if (!path) throw new Error(`Unexpected outbound host: ${url.hostname}`);
+    const response = await fetch(provider.origin + path + url.search, {
+      method: request.method,
+      headers: Object.fromEntries(request.headers),
+      ...(request.method === "POST" ? { body: await request.text() } : {}),
+    });
+    return new WorkerResponse(await response.arrayBuffer(), {
+      status: response.status,
+      headers: {
+        "content-type":
+          response.headers.get("content-type") ?? "application/json",
       },
-    }),
+    });
+  };
+  // The relay Worker runs beside the account, as its `RelayRoom` binding needs,
+  // on the same database, answering for its own host; its enrollment links
+  // name this account.
+  const worker = new Miniflare(
+    together(
+      workerOptions("account", {
+        script: (
+          await (production === "preview"
+            ? previewBundle
+            : production
+              ? productionBundle
+              : testBundle)
+        ).outputFiles![0].text,
+        bindings,
+        database: context.database.url,
+        // Vite's content-hashed build output, with the SPA fallback answering
+        // every other path — including an unknown one under /assets/ — with the shell.
+        assets: (request) =>
+            new URL(request.url).pathname === "/assets/app-abc123.js"
+              ? new WorkerResponse("export const build = 1;\n", {
+                  headers: { "content-type": "text/javascript" },
+                })
+              : new WorkerResponse(
+                  "<!doctype html><html><title>Dormouse Hosted</title></html>",
+                  {
+                    headers: { "content-type": "text/html" },
+                  },
+                ),
+        outboundService,
+      }),
+      workerOptions("relay", {
+        script: (await relayBundle).outputFiles![0].text,
+        bindings: {
+          APP_ORIGIN: ORIGINS.relay,
+          ACCOUNT_ORIGIN: origin,
+          RELAY_ENROLL_SECRET: TEST_ENROLL_SECRET,
+        },
+        database: context.database.url,
+        assets: () => new WorkerResponse("<!doctype html>", { headers: { "content-type": "text/html" } }),
+        outboundService,
+        routes: [`${new URL(ORIGINS.relay).host}/*`],
+      }),
+    ),
   );
+  // The voice Worker on the same database, with every binding the account
+  // has (its mapper drops what it does not use), started on first use.
+  let voiceWorker: Promise<Miniflare> | undefined;
+  const voice = () =>
+    (voiceWorker ??= (async () => {
+      const started = new Miniflare(
+        workerOptions("voice", {
+          script: (
+            await voiceBundles[
+              production === "preview"
+                ? "preview"
+                : production
+                  ? "production"
+                  : "test"
+            ]
+          ).outputFiles![0].text,
+          bindings: { ...bindings, APP_ORIGIN: voiceOrigin },
+          database: context.database.url,
+          outboundService,
+        }),
+      );
+      await started.ready;
+      return started;
+    })());
+  const relay = async () => worker;
+  /** One relay request as a Burrow sends it: JSON, no cookie, no Origin. */
+  const burrowCall = async (path: string, body?: unknown, bearer?: string) => {
+    const response = await (await relay()).dispatchFetch(ORIGINS.relay + path, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...(bearer ? { authorization: `Bearer ${bearer}` } : {}),
+      },
+      body: JSON.stringify(body ?? {}),
+    });
+    return { status: response.status, json: (await response.json()) as Record<string, any> };
+  };
+  let url: URL;
   try {
-    await worker.ready;
+    url = await worker.ready;
   } catch (error) {
     await worker.dispose();
     await provider.close();
@@ -290,11 +373,12 @@ async function fixture(
       }
       return { path, result: await request(path) };
     }
-    // Token management is same-origin JSON; speak is bearer-only, with no cookie.
-    const voice = (method: string, path = "") =>
+    // Token management is same-origin JSON on the account; speak is
+    // bearer-only on the voice Worker, with no cookie.
+    const tokens = (method: string, path = "") =>
       request("/api/voice/tokens" + path, { method, headers: { origin } });
-    const speak = (token: string | undefined, body: unknown) =>
-      worker.dispatchFetch(origin + "/api/voice/speak", {
+    const speak = async (token: string | undefined, body: unknown) =>
+      (await voice()).dispatchFetch(voiceOrigin + "/api/voice/speak", {
         method: "POST",
         headers: {
           "content-type": "application/json",
@@ -303,29 +387,55 @@ async function fixture(
         body: typeof body === "string" ? body : JSON.stringify(body),
       });
     const mint = async () =>
-      (await (await voice("POST")).json()) as { id: string; token: string };
-    return { request, post, session, email, oauth, voice, speak, mint };
+      (await (await tokens("POST")).json()) as { id: string; token: string };
+    /** The account's Relay routes, from this origin unless `from` names another. */
+    const approve = (userCode: unknown, from = origin) =>
+      request("/api/relay/enrollments/approve", {
+        method: "POST",
+        body: JSON.stringify({ userCode }),
+        headers: { origin: from, "content-type": "application/json" },
+      });
+    const computers = async () =>
+      (await request("/api/relay/burrows")).json() as Promise<{
+        burrows: { burrowId: string; enrolledAt: string }[];
+      }>;
+    const remove = (burrowId: string, from = origin) =>
+      request(`/api/relay/burrows/${burrowId}`, { method: "DELETE", headers: { origin: from } });
+    return { request, post, session, email, oauth, tokens, speak, mint, approve, computers, remove };
   }
   return {
     ...context,
     worker,
+    /** A relay socket's upgrade, from a Burrow: no Origin. */
+    burrowSocket: (burrowToken: string) =>
+      rawUpgrade(url, `${ORIGINS.relay}${WS_ROUTES.burrow}?${WS_TOKEN_PARAM}=${burrowToken}`, {}),
     provider,
     elevenLabs,
     browser,
+    burrowCall,
+    /** A device-code enrollment begun as the Burrow begins one. */
+    begin: async () =>
+      (await burrowCall(API_ROUTES.burrowEnrollBegin, { origin: ORIGINS.relay })).json as {
+        deviceCode: string;
+        userCode: string;
+        verificationUrl: string;
+      },
+    poll: (deviceCode: string) => burrowCall(API_ROUTES.burrowEnrollPoll, { deviceCode }),
     advance: (time: string) =>
       worker.dispatchFetch(origin + "/__test/time", {
         method: "POST",
         body: time,
       }),
-    /** Background passes scheduled so far; the test entry only. */
+    /** Background passes the voice Worker scheduled so far; the test entry only. */
     waitUntilCalls: async () =>
       Number(
         await (
-          await worker.dispatchFetch(origin + "/__test/wait-until")
+          await (await voice()).dispatchFetch(voiceOrigin + "/__test/wait-until")
         ).text(),
       ),
     close: async () => {
       await worker.dispose();
+      await (await voiceWorker)?.dispose();
       await provider.close();
       await context.close();
     },
@@ -408,7 +518,7 @@ test.for(providerIds)(
   },
 );
 
-test("same-site marketing requests fail; production excludes dev endpoints and unconfigured providers", async ({
+test("same-site requests fail, the sibling Workers' included; production excludes dev endpoints and unconfigured providers", async ({
   onTestFinished,
 }) => {
   const f = await fixture(true, "github");
@@ -417,15 +527,17 @@ test("same-site marketing requests fail; production excludes dev endpoints and u
   expect(await (await browser.request("/api/providers")).json()).toEqual([
     "github",
   ]);
-  expect(
-    (
-      await browser.post(
-        "email-otp/send-verification-otp",
-        { email: "x@example.test", type: "sign-in" },
-        "https://dormouse.sh",
-      )
-    ).status,
-  ).toBe(403);
+  for (const sameSite of SAME_SITE)
+    expect(
+      (
+        await browser.post(
+          "email-otp/send-verification-otp",
+          { email: "x@example.test", type: "sign-in" },
+          sameSite,
+        )
+      ).status,
+      sameSite,
+    ).toBe(403);
   const shell = await browser.request("/login");
   expect(shell.headers.get("content-security-policy")).toContain(
     "script-src 'self'",
@@ -459,9 +571,12 @@ test("same-site marketing requests fail; production excludes dev endpoints and u
     "/api/auth/revoke-sessions",
   ])
     expect((await browser.request(path)).status).toBe(404);
-  expect(
-    (await f.worker.dispatchFetch("https://dormouse.sh/api/auth/csrf")).status,
-  ).toBe(421);
+  // Straight to the account Worker: the relay beside it answers its own host.
+  const account = (await f.worker.getWorker(wrangler.account.name)) as unknown as {
+    fetch(url: string): Promise<Response>;
+  };
+  for (const sameSite of SAME_SITE)
+    expect((await account.fetch(sameSite + "/api/auth/csrf")).status, sameSite).toBe(421);
   await browser.email("real-clock@example.test");
   expect(
     Math.abs(
@@ -569,23 +684,25 @@ test("managed voice: only the verified admin mints, speaks, and revokes", async 
   onTestFinished(f.close);
   const admin = f.browser(),
     other = f.browser();
-  expect((await admin.voice("GET")).status).toBe(401);
+  expect((await admin.tokens("GET")).status).toBe(401);
   await other.email("other@example.test");
-  expect((await other.voice("GET")).status).toBe(403);
-  expect((await other.voice("POST")).status).toBe(403);
+  expect((await other.tokens("GET")).status).toBe(403);
+  expect((await other.tokens("POST")).status).toBe(403);
   await admin.email(ADMIN_EMAIL);
-  expect(await (await admin.voice("GET")).json()).toEqual({ tokens: [] });
-  // A same-site page carries the cookie but not this origin.
-  expect(
-    (
-      await admin.request("/api/voice/tokens", {
-        method: "POST",
-        headers: { origin: "https://dormouse.sh" },
-      })
-    ).status,
-  ).toBe(403);
+  expect(await (await admin.tokens("GET")).json()).toEqual({ tokens: [] });
+  // A same-site page — a sibling Worker's included — carries the cookie but not this origin.
+  for (const sameSite of SAME_SITE)
+    expect(
+      (
+        await admin.request("/api/voice/tokens", {
+          method: "POST",
+          headers: { origin: sameSite },
+        })
+      ).status,
+      sameSite,
+    ).toBe(403);
 
-  const minted = await admin.voice("POST");
+  const minted = await admin.tokens("POST");
   expect(minted.status).toBe(201);
   const { id, token } = (await minted.json()) as { id: string; token: string };
   expect(token).toMatch(/^dmv_[A-Za-z0-9_-]{43}$/);
@@ -620,7 +737,7 @@ test("managed voice: only the verified admin mints, speaks, and revokes", async 
     ]),
   );
   const [listed] = (
-    (await (await admin.voice("GET")).json()) as {
+    (await (await admin.tokens("GET")).json()) as {
       tokens: { id: string; lastUsedAt: string | null; revokedAt: null }[];
     }
   ).tokens;
@@ -689,11 +806,21 @@ test("managed voice: only the verified admin mints, speaks, and revokes", async 
   // No refused or failed speech (400, 401, 403, 429, 502) scheduled a sweep.
   expect(await f.waitUntilCalls()).toBe(1);
 
-  expect((await admin.voice("DELETE", "/" + id)).status).toBe(204);
+  for (const sameSite of SAME_SITE)
+    expect(
+      (
+        await admin.request("/api/voice/tokens/" + id, {
+          method: "DELETE",
+          headers: { origin: sameSite },
+        })
+      ).status,
+      sameSite,
+    ).toBe(403);
+  expect((await admin.tokens("DELETE", "/" + id)).status).toBe(204);
   expect((await admin.speak(token, hi)).status).toBe(401);
-  expect((await admin.voice("DELETE", "/not-a-token")).status).toBe(404);
+  expect((await admin.tokens("DELETE", "/not-a-token")).status).toBe(404);
   expect(
-    (await admin.voice("DELETE", "/00000000-0000-4000-8000-000000000000"))
+    (await admin.tokens("DELETE", "/00000000-0000-4000-8000-000000000000"))
       .status,
   ).toBe(404);
 
@@ -704,8 +831,8 @@ test("managed voice: only the verified admin mints, speaks, and revokes", async 
     `UPDATE "user" SET "emailVerified" = false WHERE email = $1`,
     [ADMIN_EMAIL],
   );
-  expect((await admin.voice("GET")).status).toBe(403);
-  expect((await admin.voice("POST")).status).toBe(403);
+  expect((await admin.tokens("GET")).status).toBe(403);
+  expect((await admin.tokens("POST")).status).toBe(403);
   expect(
     (await admin.speak(second.token, hi)).status,
   ).toBe(403);
@@ -730,7 +857,7 @@ test("sweep caps fit Workers Free's 50 subrequests per invocation", () => {
   expect(1 + 1 + 1 + SPEECH_SWEEP_CAP).toBeLessThanOrEqual(50);
 });
 
-test("production cron sweeps ElevenLabs history with only its key and no database", async ({
+test("the voice Worker's cron sweeps ElevenLabs history with only its key and no database", async ({
   onTestFinished,
 }) => {
   // Simulated history, newest first.
@@ -746,13 +873,12 @@ test("production cron sweeps ElevenLabs history with only its key and no databas
     maxInFlight = 0;
   const sweeper = async (bindings: Record<string, string>) => {
     const worker = new Miniflare(
-      workerOptions({
-        script: (await productionBundle).outputFiles![0].text,
-        // No AUTH_SECRET, APP_ORIGIN, or mail and OAuth credentials.
+      workerOptions("voice", {
+        script: (await voiceBundles.production).outputFiles![0].text,
+        // No APP_ORIGIN.
         bindings,
         // Nothing listens here, so any database access would fail the run.
         database: "postgres://user:pass@127.0.0.1:9/none",
-        assets: () => new WorkerResponse("", { status: 500 }),
         async outboundService(request) {
           const url = new URL(request.url);
           expect(url.origin).toBe("https://api.elevenlabs.io");
@@ -819,4 +945,121 @@ test("production cron sweeps ElevenLabs history with only its key and no databas
   gone = "";
   expect((await scheduled()).outcome).toBe("ok");
   expect(history.size).toBe(0);
+});
+
+test("enrollment: only a recent admin login from this origin approves, and the Burrow is the approver's until removed", async ({
+  onTestFinished,
+}) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const admin = f.browser(),
+    other = f.browser();
+  const begun = await f.begin();
+  expect(begun.verificationUrl).toBe(`${origin}/enroll#${begun.userCode}`);
+
+  expect((await admin.approve(begun.userCode)).status).toBe(401);
+  await other.email("other@example.test");
+  const refused = await other.approve(begun.userCode);
+  expect(refused.status).toBe(403);
+  expect(await refused.json()).toEqual({ message: NOT_ENTITLED_ERROR });
+  expect((await other.request("/api/relay/burrows")).status).toBe(403);
+  await admin.email(ADMIN_EMAIL);
+  // A same-site page — a sibling Worker's included — carries the cookie but not this origin.
+  for (const sameSite of SAME_SITE)
+    expect((await admin.approve(begun.userCode, sameSite)).status, sameSite).toBe(403);
+  expect((await f.poll(begun.deviceCode)).json).toEqual({ status: "pending" });
+
+  // A malformed code is a 400; the code forgives case and spacing.
+  for (const code of ["not a code", "ZZZZ-ZZZ0", 7])
+    expect((await admin.approve(code)).status, String(code)).toBe(400);
+  expect((await admin.approve(` ${begun.userCode.toLowerCase().replace("-", "")} `)).status).toBe(204);
+  // A live approval answers the same 409 to a second approval, and never moves.
+  const again = await admin.approve(begun.userCode);
+  expect(again.status).toBe(409);
+  expect(await again.json()).toEqual({ message: ALREADY_APPROVED });
+  // A code no Burrow holds is approved all the same, and expires unredeemed.
+  expect((await admin.approve("ZZZZ-ZZZZ")).status).toBe(204);
+
+  const enrolled = await f.poll(begun.deviceCode);
+  expect(enrolled.json.status).toBe("enrolled");
+  const { burrowId, burrowToken } = enrolled.json.enrollment;
+  const adminId = (await admin.session())!.user.id;
+  expect(
+    await queryDatabase(f.database.url, `SELECT "userId" FROM dormouse_relay_burrows WHERE "burrowId" = $1`, [burrowId]),
+  ).toEqual([{ userId: adminId }]);
+  const listed = await admin.computers();
+  expect(listed.burrows.map(({ burrowId }) => burrowId)).toEqual([burrowId]);
+  expect(Math.abs(Date.parse(listed.burrows[0].enrolledAt) - Date.now())).toBeLessThan(60_000);
+  expect((await f.burrowCall(API_ROUTES.burrowSetupToken, undefined, burrowToken)).status).toBe(200);
+  const socket = await f.burrowSocket(burrowToken);
+  expect(socket.status).toBe(101);
+
+  // Remove: this origin only; another account's Burrow is not found.
+  expect((await admin.remove(burrowId, ORIGINS.relay)).status).toBe(403);
+  const foreign = "BBBBBBBBBBBBBBBBBBBBBB";
+  await queryDatabase(
+    f.database.url,
+    `INSERT INTO dormouse_relay_burrows ("burrowId", "userId", "tokenHash") VALUES ($1, $2, 'x')`,
+    [foreign, (await other.session())!.user.id],
+  );
+  expect((await admin.remove(foreign)).status).toBe(404);
+  expect(socket.socket!.closedWith()).toBeUndefined();
+  expect((await admin.remove(burrowId)).status).toBe(204);
+  // Its live relay socket closes as revoked, pushed from the account Worker.
+  expect((await socket.socket!.closed).code).toBe(WS_CLOSE_BURROW_REVOKED);
+  expect((await f.burrowSocket(burrowToken)).status).toBe(401);
+  // A removed Burrow is gone, so its token opens nothing.
+  expect(await f.burrowCall(API_ROUTES.burrowSetupToken, undefined, burrowToken)).toEqual({
+    status: 401,
+    json: { error: "unauthorized" },
+  });
+  expect(await admin.computers()).toEqual({ burrows: [] });
+  expect(
+    await queryDatabase(f.database.url, `SELECT "burrowId" FROM dormouse_relay_burrows ORDER BY "burrowId"`),
+  ).toEqual([{ burrowId: foreign }]);
+  expect((await admin.remove(burrowId)).status).toBe(404);
+
+  // A redeemed approval is approved again only once it has expired, and then unredeemed.
+  expect((await f.poll(begun.deviceCode)).json).toEqual({ status: "redeemed", burrowId });
+  expect((await admin.approve(begun.userCode)).status).toBe(409);
+  await queryDatabase(
+    f.database.url,
+    `UPDATE dormouse_relay_enrollment_approvals SET "expiresAt" = now() - interval '1 second' WHERE "userCode" = $1`,
+    [begun.userCode],
+  );
+  expect((await admin.approve(begun.userCode)).status).toBe(204);
+  expect(
+    await queryDatabase(
+      f.database.url,
+      `SELECT "redeemedBurrowId", "redeemedAt" FROM dormouse_relay_enrollment_approvals WHERE "userCode" = $1`,
+      [begun.userCode],
+    ),
+  ).toEqual([{ redeemedBurrowId: null, redeemedAt: null }]);
+});
+
+test("enrollment approval needs a login from the recent-login window, and attempts are limited per account", async ({
+  onTestFinished,
+}) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const admin = f.browser();
+  await admin.email(ADMIN_EMAIL);
+  const begun = await f.begin();
+  const signedIn = Date.parse((await admin.session())!.session.createdAt);
+  await f.advance(new Date(signedIn + 10 * 60_000).toISOString());
+  const stale = await admin.approve(begun.userCode);
+  expect(stale.status).toBe(403);
+  expect(await stale.json()).toEqual({ message: RECENT_LOGIN_REQUIRED });
+  expect((await f.poll(begun.deviceCode)).json).toEqual({ status: "pending" });
+
+  // A fresh login approves; every attempt counts toward the account's limit.
+  await admin.email(ADMIN_EMAIL);
+  const approveLimit = limitOf("RELAY_APPROVE_LIMIT");
+  const limited = await untilLimited(approveLimit, async (i) => {
+    const valid = i === approveLimit - 1;
+    const response = await admin.approve(valid ? begun.userCode : "not a code");
+    if (response.status !== 429) expect(response.status).toBe(valid ? 204 : 400);
+    return response;
+  });
+  expect(limited.headers.get("retry-after")).toBe("60");
 });
