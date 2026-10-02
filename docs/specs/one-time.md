@@ -135,7 +135,7 @@ resumes.
 
 | `OneTimeState` | Meaning |
 | --- | --- |
-| `opening` | minting the keypair, then waiting up to `ONE_TIME_OPEN_TIMEOUT_MS` (8 s) for the room frame |
+| `opening` | minting the keypair, then awaiting the room frame, both within `ONE_TIME_OPEN_TIMEOUT_MS` (8 s) |
 | `waiting {url, expiresAt}` | the link is live; `expiresAt` is its last live millisecond |
 | `confirming {label, expiresAt}` | a phone's request awaits the approval modal |
 | `connecting {label}` | confirmed; the direct path has `DIRECT_ONLY_DEADLINE_MS` |

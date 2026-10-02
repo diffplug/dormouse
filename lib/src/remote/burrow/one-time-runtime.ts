@@ -316,20 +316,25 @@ export class OneTimeRuntime {
     this.#openDeadlineAt = this.#now() + ONE_TIME_OPEN_TIMEOUT_MS;
     this.#setState({ status: 'opening' });
     this.#armDeadline();
+    // Detached, so the deadline settles `opened` even while the keygen stalls.
+    void this.#mint();
+    return opened;
+  }
+
+  /** Mint the one-use keypair, then open the rendezvous if still opening. */
+  async #mint(): Promise<void> {
     let keyPair: NoiseKeyPair;
     try {
       keyPair = await generateNoiseKeyPair();
     } catch (error) {
       console.warn('[one-time] could not mint the link key', error);
       this.#end('burrow-error');
-      return opened;
+      return;
     }
-    // Ended while the keygen ran: nothing may open a socket for it now. Read
-    // through the getter, which the entry check above has not narrowed.
-    if (this.state.status !== 'opening') return opened;
+    // Ended while the keygen ran: nothing may open a socket for it now.
+    if (this.#state.status !== 'opening') return;
     this.#keyPair = keyPair;
     this.#connect();
-    return opened;
   }
 
   /** End the connection, whatever it is doing. Idempotent. */
