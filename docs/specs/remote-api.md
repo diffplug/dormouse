@@ -67,7 +67,7 @@ After authorization the same Noise session may move off the Relay onto a WebRTC 
 * A receiver processes relay frames until it decrypts `direct-switch`, holding channel frames meanwhile — **overflow disposing the session** — then drains them in arrival order.
 * **After inbound has switched, a relay `transport` frame disposes the session**, refused before any decrypt, as does a `ct` that will not decode.
 * **After either direction has switched, the channel closing or erroring disposes the session**: the Client reports burrow loss exactly as a `burrow-gone`. **Before any switch a channel failure only abandons the attempt** — including a channel not open by its setup budget — and the session stays relayed.
-* **A `direct-switch` arriving at an end that has abandoned its channel ends the session.**
+* **A `direct-switch` arriving at an end that has abandoned its channel, or never began one, ends the session.**
 * **A peer that does not switch back within `DIRECT_HANDOFF_TIMEOUT_MS` of this end's own switch ends the session**; an end whose peer had already switched waits on nothing.
 * **A connection reporting `failed` or `closed` ends the attempt at once; `disconnected` is waited out** for `DIRECT_DISCONNECTED_GRACE_MS`.
 
