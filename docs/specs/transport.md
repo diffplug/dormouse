@@ -1,8 +1,7 @@
 # Transport and PTY Protocol Spec
 
-> See `docs/specs/glossary.md` for Session / Pane / Door and Process / Link vocabulary.
->
-> Adapter-agnostic protocol shared by every `PlatformAdapter`: PTY lifecycle, buffering, the webview ↔ platform message protocol, persisted-session types, and the invariants every adapter must honor. Host-specific layering lives in `docs/specs/vscode.md` and `docs/specs/standalone.md`; the phone's adapter in `docs/specs/pocket-app.md`. See `docs/specs/alert.md` for `AlertManager` semantics and `docs/specs/terminal-state.md` for semantic events.
+> - See `docs/specs/glossary.md` for Session / Pane / Door and Process / Link vocabulary.
+> - Adapter-agnostic protocol shared by every `PlatformAdapter`: PTY lifecycle, buffering, the webview ↔ platform message protocol, persisted-session types, and the invariants every adapter must honor. Host-specific layering lives in `docs/specs/vscode.md` and `docs/specs/standalone.md`; the phone's adapter in `docs/specs/pocket-app.md`. See `docs/specs/alert.md` for `AlertManager` semantics and `docs/specs/terminal-state.md` for semantic events.
 
 ## Adapter model
 

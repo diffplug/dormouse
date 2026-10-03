@@ -1,9 +1,9 @@
 # Dormouse Standalone (Tauri) Integration Spec
 
-> See `docs/specs/glossary.md` for Session / Surface / Pane / Door vocabulary.
-> Owns the standalone-specific layer: the Tauri windows, the Rust ↔ sidecar bridge, the AppBar, persistence at the adapter boundary, shutdown ordering, logging, and the build/dev workflow.
-> Defers the protocol it speaks — PTY lifecycle, message contracts, persisted-session types, adapter-agnostic invariants — to `docs/specs/transport.md`.
-> Evidence and dead approaches: [standalone.rationale.md](standalone.rationale.md).
+> - See `docs/specs/glossary.md` for Session / Surface / Pane / Door vocabulary.
+> - Owns the standalone-specific layer: the Tauri windows, the Rust ↔ sidecar bridge, the AppBar, persistence at the adapter boundary, shutdown ordering, logging, and the build/dev workflow.
+> - Defers the protocol it speaks — PTY lifecycle, message contracts, persisted-session types, adapter-agnostic invariants — to `docs/specs/transport.md`.
+> - Evidence and dead approaches: [standalone.rationale.md](standalone.rationale.md).
 
 ## Architecture
 

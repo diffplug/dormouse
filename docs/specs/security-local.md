@@ -1,8 +1,9 @@
 # Local Security
 
-> See `docs/specs/glossary.md` for Pane, Session, and the Surface model; this spec uses them bare.
-> Owns the boundaries a user of the local application has: terminal output, browser panes, `dor`, loopback listeners, the network policy's Nothing, and what persists on disk. Defers every mechanism to the spec named at its rule, and the network boundary to `docs/specs/security-remote.md`.
-> Read `docs/specs/security.md` first; `docs/specs/security-audit.md` says how the `FAIL IF` lines here are run.
+> - See `docs/specs/glossary.md` for Pane, Session, and the Surface model; this spec uses them bare.
+> - Owns the boundaries a user of the local application has: terminal output, browser panes, `dor`, loopback listeners, the network policy's Nothing, and what persists on disk.
+> - Defers every mechanism to the spec named at its rule, and the network boundary to `docs/specs/security-remote.md`.
+> - Read `docs/specs/security.md` first; `docs/specs/security-audit.md` says how the `FAIL IF` lines here are run.
 
 ## Terminal output
 

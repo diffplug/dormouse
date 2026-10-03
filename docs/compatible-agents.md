@@ -1,7 +1,7 @@
 # Compatible agents
 
-> See `docs/specs/glossary.md` for Surface, Session, Pane, resume, and restore vocabulary.
-> Owns the public agent guide and shared agent capture, recovery records, detection, and cold-restore execution. Host shutdown ordering and target selection belong to `docs/specs/vscode.md` and `docs/specs/standalone.md`; watching belongs to `docs/specs/alert.md`.
+> - See `docs/specs/glossary.md` for Surface, Session, Pane, resume, and restore vocabulary.
+> - Owns the public agent guide and shared agent capture, recovery records, detection, and cold-restore execution. Host shutdown ordering and target selection belong to `docs/specs/vscode.md` and `docs/specs/standalone.md`; watching belongs to `docs/specs/alert.md`.
 
 Dormouse runs CLI agents in ordinary terminal panes. For the agents below, it can also save the conversation's resume command during an orderly shutdown and reopen that conversation on the next start.
 

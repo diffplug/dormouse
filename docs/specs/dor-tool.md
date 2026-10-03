@@ -1,7 +1,7 @@
 # Dor Tools
 
-> See `docs/specs/glossary.md` for Surface / Session / Pane / Door vocabulary.
-> Owns tool designation, configuration, trust workflow, serving, naming, and command lifecycle. Browser chrome belongs to `docs/specs/dor-browser.md`; helpers belong to `docs/specs/terminal-context.md`; the built-in Tools themselves to `docs/specs/dor-tools-builtin.md`; the integration library to `docs/specs/dor-tools-lib.md`.
+> - See `docs/specs/glossary.md` for Surface / Session / Pane / Door vocabulary.
+> - Owns tool designation, configuration, trust workflow, serving, naming, and command lifecycle. Browser chrome belongs to `docs/specs/dor-browser.md`; helpers belong to `docs/specs/terminal-context.md`; the built-in Tools themselves to `docs/specs/dor-tools-builtin.md`; the integration library to `docs/specs/dor-tools-lib.md`.
 
 ## Availability
 

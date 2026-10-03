@@ -1,7 +1,7 @@
 # Theme Spec
 
-> See `docs/specs/glossary.md` for Pane / Door vocabulary used in the surface hierarchy below.
-> **Defers to `DESIGN.md`:** the named color rules (Bg-Only Chrome, Host-Theme-Only, Inset-Over-Border) and the Don'ts they carry. This spec owns the token plumbing under them.
+> - See `docs/specs/glossary.md` for Pane / Door vocabulary used in the surface hierarchy below.
+> - **Defers to `DESIGN.md`:** the named color rules (Bg-Only Chrome, Host-Theme-Only, Inset-Over-Border) and the Don'ts they carry. This spec owns the token plumbing under them.
 
 VS Code supplies `--vscode-*`; standalone, website, and Pocket use `applyTheme()`
 with bundled or installed themes — Pocket before first paint, including auth

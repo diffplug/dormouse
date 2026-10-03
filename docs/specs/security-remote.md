@@ -1,8 +1,9 @@
 # Remote Control Security
 
-> See `docs/specs/glossary.md` for Pane; this spec uses it bare.
-> Owns the boundary the product presents to the network: remote control. Defers the trust model to `docs/specs/remote-security-model.md`, the Relay runtime to `docs/specs/relay.md`, the self-host deployment to `SELF_HOST.md`, Hosted's account routing and one-time rendezvous to `docs/specs/security-hosted.md`, and the boundaries a local user has to `docs/specs/security-local.md`.
-> Read `docs/specs/security.md` first; `docs/specs/security-audit.md` says how the `FAIL IF` lines here are run.
+> - See `docs/specs/glossary.md` for Pane; this spec uses it bare.
+> - Owns the boundary the product presents to the network: remote control.
+> - Defers the trust model to `docs/specs/remote-security-model.md`, the Relay runtime to `docs/specs/relay.md`, the self-host deployment to `SELF_HOST.md`, Hosted's account routing and one-time rendezvous to `docs/specs/security-hosted.md`, and the boundaries a local user has to `docs/specs/security-local.md`.
+> - Read `docs/specs/security.md` first; `docs/specs/security-audit.md` says how the `FAIL IF` lines here are run.
 
 ## Remote Control
 

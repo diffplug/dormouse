@@ -1,8 +1,7 @@
 # Remote Security Model
 
-> See `docs/specs/glossary.md` for Client, Burrow, Relay, and Session vocabulary.
-
-> Owns ceremony trust and authorization. `docs/specs/relay.md` owns message orchestration; `docs/specs/security-remote.md` owns the audited checks and open gaps.
+> - See `docs/specs/glossary.md` for Client, Burrow, Relay, and Session vocabulary.
+> - Owns ceremony trust and authorization. `docs/specs/relay.md` owns message orchestration; `docs/specs/security-remote.md` owns the audited checks and open gaps.
 
 **Must share cryptographic primitives through `remote-lib-common/src/security/`.**
 

@@ -1,7 +1,6 @@
 # Run the Dormouse Relay behind Tailscale — rationale
 
-> Informative companion to [SELF_HOST.md](SELF_HOST.md): evidence keyed by that
-> file's headings. Nothing here is normative.
+> Informative companion to [SELF_HOST.md](SELF_HOST.md): evidence keyed by that file's headings. Nothing here is normative.
 
 ## Prerequisites
 

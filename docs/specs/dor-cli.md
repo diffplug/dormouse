@@ -1,20 +1,8 @@
 # Dor CLI
 
-> See `docs/specs/glossary.md` for canonical Surface / Session / Pane
-> vocabulary. A Surface is `dor`'s user-facing handle; Pane stays layout
-> vocabulary, out of the public target grammar.
->
-> Owns the bundled CLI:
-> staging, the PTY env contract, external-binary spawning, control plumbing,
-> handles, the shipped command set, and the bundled agent skill. **The CLI is
-> the public API; any socket under it is private host plumbing.**
->
-> Defers to `docs/specs/dor-browser.md` for what a browser Surface renders, to
-> `docs/specs/alert.md` for `dor await`'s wake conditions, and to the generated
-> help (`dor/test/snapshots/help/`, pinned exhaustive by
-> `dor/test/cli-help.test.mjs`) for command names, syntax, flags, defaults,
-> output shapes, and `await`'s exit codes. Evidence:
-> [dor-cli.rationale.md](dor-cli.rationale.md).
+> - See `docs/specs/glossary.md` for canonical Surface / Session / Pane vocabulary. A Surface is `dor`'s user-facing handle; Pane stays layout vocabulary, out of the public target grammar.
+> - Owns the bundled CLI: staging, the PTY env contract, external-binary spawning, control plumbing, handles, the shipped command set, and the bundled agent skill. **The CLI is the public API; any socket under it is private host plumbing.**
+> - Defers to `docs/specs/dor-browser.md` for what a browser Surface renders, to `docs/specs/alert.md` for `dor await`'s wake conditions, and to the generated help (`dor/test/snapshots/help/`, pinned exhaustive by `dor/test/cli-help.test.mjs`) for command names, syntax, flags, defaults, output shapes, and `await`'s exit codes. Evidence: [dor-cli.rationale.md](dor-cli.rationale.md).
 
 ## Bundling And PATH
 

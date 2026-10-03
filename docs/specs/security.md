@@ -1,12 +1,8 @@
 # Security
 
-> See `docs/specs/glossary.md` for Session, Pane, Surface, and remote-role vocabulary.
-> Owns the guarantees Dormouse makes, what it does not defend, the gaps it
-> knows about, and how all of it is checked. Defers every mechanism to the spec
-> that owns it, and every audited check to the specs under
-> [How the guarantees are checked](#how-the-guarantees-are-checked). Published
-> at `https://dormouse.sh/security`, whole but for the three blocks split
-> by audience; `docs/specs/website-docs.md` owns the page.
+> - See `docs/specs/glossary.md` for Session, Pane, Surface, and remote-role vocabulary.
+> - Owns the guarantees Dormouse makes, what it does not defend, the gaps it knows about, and how all of it is checked.
+> - Defers every mechanism to the spec that owns it, and every audited check to the specs under [How the guarantees are checked](#how-the-guarantees-are-checked). Published at `https://dormouse.sh/security`, whole but for the three blocks split by audience; `docs/specs/website-docs.md` owns the page.
 
 Dormouse holds shells, source trees, credentials, and local files. Its
 **dependencies and release pipeline** determine what code reaches a machine;

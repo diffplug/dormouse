@@ -1,8 +1,6 @@
 # Remote Security Model — rationale
 
-> Informative companion to [remote-security-model.md](remote-security-model.md):
-> the evidence, measurements, and dead-approach history behind its rules, keyed
-> by that spec's headings. Nothing here is normative.
+> Informative companion to [remote-security-model.md](remote-security-model.md): the evidence, measurements, and dead-approach history behind its rules, keyed by that spec's headings. Nothing here is normative.
 
 ## Passkeys
 

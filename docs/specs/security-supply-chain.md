@@ -1,7 +1,8 @@
 # Supply Chain Security
 
-> Owns what Dormouse puts on a user's machine — the dependency graph, the bundled runtime, the themes — how that is disclosed, and the cooldown before a new release is adopted. Defers the disclosure page's rendering to `docs/specs/website-docs.md -> "Reference page chrome"` and the runtime's build to `docs/specs/standalone.md`.
-> Read `docs/specs/security.md` first; `docs/specs/security-audit.md` says how the `FAIL IF` lines here are run.
+> - Owns what Dormouse puts on a user's machine — the dependency graph, the bundled runtime, the themes — how that is disclosed, and the cooldown before a new release is adopted.
+> - Defers the disclosure page's rendering to `docs/specs/website-docs.md -> "Reference page chrome"` and the runtime's build to `docs/specs/standalone.md`.
+> - Read `docs/specs/security.md` first; `docs/specs/security-audit.md` says how the `FAIL IF` lines here are run.
 
 ## Disclosure
 

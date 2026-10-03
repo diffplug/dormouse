@@ -1,10 +1,7 @@
 # Pocket App Architecture
 
-> See `docs/specs/glossary.md` for Session / Pane vocabulary.
-> How the phone client (Dormouse Pocket) is structured and deployed. The
-> protocol is [remote-api.md](./remote-api.md); the selfhost Relay is
-> [relay.md](./relay.md); key and pairing rules are
-> [remote-security-model.md](./remote-security-model.md).
+> - See `docs/specs/glossary.md` for Session / Pane vocabulary.
+> - How the phone client (Dormouse Pocket) is structured and deployed. The protocol is [remote-api.md](./remote-api.md); the selfhost Relay is [relay.md](./relay.md); key and pairing rules are [remote-security-model.md](./remote-security-model.md).
 
 ## The seam: the remote session is a platform adapter
 

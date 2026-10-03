@@ -1,8 +1,8 @@
 # Relay (selfhost) and Burrow service
 
-> See `docs/specs/glossary.md` for Session / Pane / Surface vocabulary; this spec uses it for what the relay exposes.
-> Owns the selfhost Relay server (`relay/`), the wire it routes, and the desktop Burrow service that enrolls with it: the Relay origin a build bakes, `BurrowService` and its store, enrollment, the relay socket, Settings → Remote control, and running and installing the Relay. `docs/specs/hosted.md` owns the Hosted Relay; host plumbing is `docs/specs/standalone.md` -> "Burrow service" and `docs/specs/vscode.md` -> "Burrow: a service in the extension host".
-> Read `docs/specs/remote-security-model.md` first — it owns the trust model this one deploys and what the Burrow decides and proves; `docs/specs/remote-api.md` owns what flows after authorization, `docs/specs/pocket-app.md` the Pocket app this Relay serves.
+> - See `docs/specs/glossary.md` for Session / Pane / Surface vocabulary; this spec uses it for what the relay exposes.
+> - Owns the selfhost Relay server (`relay/`), the wire it routes, and the desktop Burrow service that enrolls with it: the Relay origin a build bakes, `BurrowService` and its store, enrollment, the relay socket, Settings → Remote control, and running and installing the Relay. `docs/specs/hosted.md` owns the Hosted Relay; host plumbing is `docs/specs/standalone.md` -> "Burrow service" and `docs/specs/vscode.md` -> "Burrow: a service in the extension host".
+> - Read `docs/specs/remote-security-model.md` first — it owns the trust model this one deploys and what the Burrow decides and proves; `docs/specs/remote-api.md` owns what flows after authorization, `docs/specs/pocket-app.md` the Pocket app this Relay serves.
 
 The Relay is one Node process (Hono). No database. Every security primitive lives in `remote-lib-common`.
 

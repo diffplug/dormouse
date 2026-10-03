@@ -1,12 +1,8 @@
 # Website Documentation
 
-> See `docs/specs/glossary.md` for canonical Surface / Session / Pane
-> vocabulary used by the public product guide and browser workflow.
->
-> Owns the public references on dormouse.sh and the off-site product guide.
-> The page list is `DOCS_PAGES` in `website/src/lib/docs-pages.ts`; the
-> repository files a route publishes are `SITE_ROUTES` in
-> `website/scripts/generate-docs.js`.
+> - See `docs/specs/glossary.md` for canonical Surface / Session / Pane vocabulary used by the public product guide and browser workflow.
+> - Owns the public references on dormouse.sh and the off-site product guide.
+> - The page list is `DOCS_PAGES` in `website/src/lib/docs-pages.ts`; the repository files a route publishes are `SITE_ROUTES` in `website/scripts/generate-docs.js`.
 
 Internal specs remain maintainer references, the one exception being the
 security spec, published whole. Public docs are otherwise written from shipped

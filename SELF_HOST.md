@@ -1,12 +1,8 @@
 # Run the Dormouse Relay behind Tailscale
 
-> See `docs/specs/glossary.md` for Session, baseboard, and remote-role vocabulary.
-> This is an assistant-run setup playbook. Start a fresh Claude instance in
-> this repository and say: `read @SELF_HOST.md and walk me through it`.
->
-> It is also the spec for `deploy/local/` — the
-> [Installer contract](#installer-contract-maintainers) at the end is the
-> maintainer half, and `scripts/spec-lint.mjs` checks this file with the specs.
+> - See `docs/specs/glossary.md` for Session, baseboard, and remote-role vocabulary.
+> - This is an assistant-run setup playbook. Start a fresh Claude instance in this repository and say: `read @SELF_HOST.md and walk me through it`.
+> - It is also the spec for `deploy/local/` — the [Installer contract](#installer-contract-maintainers) at the end is the maintainer half, and `scripts/spec-lint.mjs` checks this file with the specs.
 
 Installs the Dormouse coordinating Relay on the user's own laptop — or, to
 outlive its sleep, on an always-on tailnet box ("Keeping the relay up while the

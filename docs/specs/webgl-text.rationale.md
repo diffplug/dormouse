@@ -1,7 +1,6 @@
 # WebGL Text Rendering (SDF fork + canopy) — Rationale
 
-> Informative companion to [webgl-text.md](webgl-text.md), keyed by that spec's
-> headings. Nothing here is normative.
+> Informative companion to [webgl-text.md](webgl-text.md), keyed by that spec's headings. Nothing here is normative.
 
 ## Fork pipeline
 

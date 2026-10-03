@@ -1,17 +1,8 @@
 # WebGL Text Rendering (SDF fork + canopy)
 
-> Text in a 3D scene is a texture at arbitrary scale, not a 1:1 pixel grid —
-> hence signed distance fields (SDF).
->
-> **Two webgl addons, one repo.** Production terminals render *stock*
-> `@xterm/addon-webgl` (`docs/specs/layout.md` → "Renderer"); only `canopy/`
-> consumes the SDF fork, which is what everything below describes.
->
-> Release recipe:
-> [FORK.md on the `sdf` branch](https://github.com/diffplug/xterm.js/blob/sdf/FORK.md),
-> not restated here. `addons/addon-webgl/` paths are fork-repo paths — clone at
-> `~/projects/xterm.js`, or read them from the release tarball's `src/` under
-> `canopy/node_modules`.
+> - Text in a 3D scene is a texture at arbitrary scale, not a 1:1 pixel grid — hence signed distance fields (SDF).
+> - **Two webgl addons, one repo.** Production terminals render *stock* `@xterm/addon-webgl` (`docs/specs/layout.md` → "Renderer"); only `canopy/` consumes the SDF fork, which is what everything below describes.
+> - Release recipe: [FORK.md on the `sdf` branch](https://github.com/diffplug/xterm.js/blob/sdf/FORK.md), not restated here. `addons/addon-webgl/` paths are fork-repo paths — clone at `~/projects/xterm.js`, or read them from the release tarball's `src/` under `canopy/node_modules`.
 
 ## Fork pipeline
 

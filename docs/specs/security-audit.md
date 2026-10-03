@@ -1,7 +1,8 @@
 # Security Audit
 
-> Owns how the security specs are audited: the schedule and the release gate, the four domains and their prompts, the orchestration contract, the three outcomes, the reporting step, and the environment that holds `AUDIT_PAT`. Defers what is audited to `docs/specs/security.md` and the specs it names, and each agent's procedure to its prompt in `.github/audit/`.
-> Read `docs/specs/security.md` first.
+> - Owns how the security specs are audited: the schedule and the release gate, the four domains and their prompts, the orchestration contract, the three outcomes, the reporting step, and the environment that holds `AUDIT_PAT`.
+> - Defers what is audited to `docs/specs/security.md` and the specs it names, and each agent's procedure to its prompt in `.github/audit/`.
+> - Read `docs/specs/security.md` first.
 
 ## Schedule and gate
 
