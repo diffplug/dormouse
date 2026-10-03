@@ -33,9 +33,11 @@ export async function reopenClosed({ gesture }: { gesture: boolean }): Promise<R
     return false;
   });
   if (reopenedWindow) return { status: 'reopened', kind: 'window' };
-  // A pending kill newer than every record comes back as itself, not rebuilt.
-  if (pending && pending.startedAt >= recordAt && restorePendingKill(pendingKillKey(pending.kind, pending.id), gesture)) {
-    return restoredResponse(pending);
+  // A pending kill newer than every record comes back as itself, not rebuilt;
+  // one that cannot come back now gives way to the next.
+  for (const kill of getPendingKills()) {
+    if (kill.startedAt < recordAt) break;
+    if (restorePendingKill(pendingKillKey(kill.kind, kill.id), gesture)) return restoredResponse(kill);
   }
   const record = popReopenRecord();
   if (!record) {

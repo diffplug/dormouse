@@ -153,18 +153,11 @@ export function reattachHelper(helper: HelperTerminal): boolean {
 export function resetHelper(parentId: string, parent: { workspaceId: WorkspaceId; title: string; ref: string }): void {
   if (!isDelayedKillEnabled()) { disposeHelper(parentId); return; }
   const old = detachHelper(parentId);
-  if (old) pendHelper(old, parent);
-}
-
-function pendHelper(old: HelperTerminal, parent: { workspaceId: WorkspaceId; title: string; ref: string }): void {
+  if (!old) return;
   addPendingKill({ kind: 'helper', id: old.id, workspaceId: parent.workspaceId, ref: parent.ref, surfaceId: old.parentId, title: parent.title, label: 'Helper' }, {
-    restore: () => {
-      if (reattachHelper(old)) return;
-      // A closed parent leaves nothing to return to; a replacement with work
-      // of its own is not discarded for it, so the old one stays pending.
-      if (parentIsOpen(old.parentId) && registry.has(old.id)) pendHelper(old, parent);
-      else disposeSession(old.id);
-    },
+    // A closed parent, or a replacement with work of its own, refuses: the old
+    // helper stays pending, its countdown untouched, until it finalizes.
+    restore: () => reattachHelper(old),
     finalize: () => disposeSession(old.id),
   });
 }

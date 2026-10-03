@@ -1,6 +1,7 @@
 import { isAppControlMethod, isToolControlMethod, isWindowControlMethod, isWorkspaceControlMethod, SURFACE_CONTROL_METHODS } from 'dor/protocol';
 import { registry, isHelperSession } from '../../lib/terminal-store';
 import { createRefCount } from '../../lib/ref-count';
+import { getPendingKill, isPendingKillSession } from '../../lib/pending-kills';
 import { getActiveWorkspaceId, isWindowRef, resolveWorkspaceRef, workspaceRefFor } from '../../lib/workspace-store';
 import { handleAppControl } from './app-control';
 import { handleReopenControl } from './reopen';
@@ -70,6 +71,19 @@ function withHelperOrigin(detail: DorControlRequest): DorControlRequest {
  * chosen Wall, within its own Workspace.
  */
 export function resolveDorControlRoute(detail: DorControlRequest): DorControlRoute {
+  const route = resolveRoute(detail);
+  // A pending kill's Wall stays mounted off the strip, and a pending Session
+  // keeps its process: neither may be reached, nor call into its Wall
+  // (`docs/specs/reopen.md` → "Labs: No-confirm delayed kill").
+  if (route.kind === 'handle' && getPendingKill('workspace', route.handle.workspaceId)) {
+    return { kind: 'error', message: `workspace '${workspaceRefFor(route.handle.workspaceId)}' is a pending kill` };
+  }
+  const caller = detail.helperParentId ?? detail.surfaceId;
+  if (caller && isPendingKillSession(caller)) return { kind: 'error', message: `surface '${caller}' is a pending kill` };
+  return route;
+}
+
+function resolveRoute(detail: DorControlRequest): DorControlRoute {
   if (isAppControlMethod(detail.method)) return { kind: 'app' };
   if (isToolControlMethod(detail.method)) return { kind: 'tool' };
   if (isWindowControlMethod(detail.method)) return { kind: 'reopen' };

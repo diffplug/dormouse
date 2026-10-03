@@ -1394,6 +1394,19 @@ describe('Labs: a Workspace close that would ask, kept pending', () => {
     expect(listed).toEqual({ ok: false, error: "workspace 'build' is a pending kill" });
   });
 
+  it('refuses dor commands into its hidden Wall, by a member\'s id or from a member', async () => {
+    await pendSecond();
+    const [leaf] = leafIdsIn('ws-2');
+    const send = (detail: Record<string, unknown>) => new Promise<{ ok: boolean; error?: string }>(resolve => {
+      act(() => { window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: { ...detail, respond: resolve } })); });
+    });
+    expect(await send({ method: SURFACE_CONTROL_METHODS.read, params: { surface: leaf } }))
+      .toEqual({ ok: false, error: `workspace '${workspaceStore.workspaceRefFor('ws-2')}' is a pending kill` });
+    expect(await send({ method: SURFACE_CONTROL_METHODS.split, surfaceId: leaf, params: {} }))
+      .toEqual({ ok: false, error: `workspace '${workspaceStore.workspaceRefFor('ws-2')}' is a pending kill` });
+    expect(leafIdsIn('ws-2')).toEqual([leaf]);
+  });
+
   it('restores to its slot with the same Wall and Surfaces', async () => {
     const first = await pendSecond();
     const leaves = leafIdsIn('ws-2');

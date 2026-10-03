@@ -61,10 +61,12 @@ describe('helper lifecycle', () => {
       resetHelper('parent', { workspaceId: 'ws', title: 'shell', ref: 'surface:1' });
       const fresh = await openHelper('parent');
       registry.get(fresh.id)!.untouched = false;
-      pending.restorePendingKill(pending.pendingKillKey('helper', old.id));
+      const [before] = pending.getPendingKills();
+      // Refused, not re-pended: nothing came back, and its countdown runs on.
+      expect(pending.restorePendingKill(pending.pendingKillKey('helper', old.id))).toBe(false);
       expect(getHelper('parent')).toBe(fresh);
       expect(registry.has(old.id)).toBe(true);
-      expect(pending.getPendingKills().map(kill => kill.id)).toEqual([old.id]);
+      expect(pending.getPendingKills()).toEqual([before]);
     } finally {
       pending._resetPendingKillsForTesting();
       vi.restoreAllMocks();

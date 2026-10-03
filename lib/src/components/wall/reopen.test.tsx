@@ -17,7 +17,7 @@ import { recordToolDirty, resetToolDirty } from '../../lib/tool-dirty-store';
 import { mountWallHarness, type WallHarness } from './wall-test-utils';
 import { getWallHandle } from './wall-handles';
 import { reopenClosed } from './reopen';
-import { _resetPendingKillsForTesting, addPendingKill } from '../../lib/pending-kills';
+import { _resetPendingKillsForTesting, addPendingKill, getPendingKills } from '../../lib/pending-kills';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -268,6 +268,26 @@ describe('Reopen', () => {
     addPendingKill({ kind: 'helper', id: 'helper-x', workspaceId: DEFAULT_WORKSPACE_ID, ref: 'surface:1', surfaceId: 'pane-a', title: 'shell', label: 'Helper' }, { restore: () => {}, finalize: () => {} });
     try {
       expect((await control(WINDOW_CONTROL_METHODS.reopen)).result).toEqual({ status: 'reopened', kind: 'surface', surfaceId: 'pane-a', surfaceRef: 'surface:1' });
+    } finally {
+      _resetPendingKillsForTesting();
+    }
+  });
+
+  it('passes over a pending kill that cannot come back now, to the next one, then the record behind it', async () => {
+    await renderTerminalBesideBrowser();
+    await control(SURFACE_CONTROL_METHODS.kill, { surface: 'web', confirmation: { mode: 'dangerously' } });
+    await harness.flush();
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 2)); });
+    const older = vi.fn(() => true);
+    addPendingKill({ kind: 'helper', id: 'helper-old', workspaceId: DEFAULT_WORKSPACE_ID, ref: 'surface:1', surfaceId: 'pane-a', title: 'shell', label: 'Helper' }, { restore: older, finalize: () => {} });
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 2)); });
+    addPendingKill({ kind: 'helper', id: 'helper-x', workspaceId: DEFAULT_WORKSPACE_ID, ref: 'surface:1', surfaceId: 'pane-a', title: 'shell', label: 'Helper' }, { restore: () => false, finalize: () => {} });
+    try {
+      expect((await control(WINDOW_CONTROL_METHODS.reopen)).result).toMatchObject({ kind: 'surface', surfaceId: 'pane-a' });
+      expect(older).toHaveBeenCalledOnce();
+      expect((await control(WINDOW_CONTROL_METHODS.reopen)).result).toMatchObject({ kind: 'surface', surfaceRef: 'surface:3' });
+      expect(await control(WINDOW_CONTROL_METHODS.reopen)).toEqual({ ok: false, error: 'Nothing to reopen' });
+      expect(getPendingKills().map(kill => kill.id)).toEqual(['helper-x']);
     } finally {
       _resetPendingKillsForTesting();
     }

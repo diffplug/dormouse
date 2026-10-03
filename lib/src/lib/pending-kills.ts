@@ -37,8 +37,9 @@ export interface PendingKill {
 }
 
 export interface PendingKillActions {
-  /** Bring it back as it was; `focus` brings it into view, as a gesture does. */
-  restore(focus: boolean): void;
+  /** Bring it back as it was; `focus` brings it into view, as a gesture does.
+   *  `false` refuses — it cannot come back now — leaving it pending as it was. */
+  restore(focus: boolean): boolean | void;
   /** End it through today's kill path, settling once it has. `teardown` is a
    *  quit or window close, where nothing may come back instead. */
   finalize(teardown: boolean): void | Promise<void>;
@@ -110,8 +111,16 @@ function settle(key: string, run: (actions: PendingKillActions) => void): boolea
   return true;
 }
 
+/** Restore one pending kill; false when there is none, or it refused and
+ *  stays pending with its countdown untouched. */
 export function restorePendingKill(key: string, focus = true): boolean {
-  return settle(key, actions => actions.restore(focus));
+  const entry = entries.get(key);
+  if (!entry || entry.actions.restore(focus) === false) return false;
+  if (entries.get(key) === entry) {
+    entries.delete(key);
+    publish();
+  }
+  return true;
 }
 
 export function finalizePendingKill(key: string): boolean {

@@ -95,6 +95,18 @@ describe('a pending kill', () => {
     }
   });
 
+  it('refuses a dor command its own process makes while it is pending', async () => {
+    await renderTwoShells();
+    await clickKill('pane-b');
+    const answer = await new Promise<{ ok: boolean; error?: string }>(resolve => {
+      act(() => { window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
+        method: SURFACE_CONTROL_METHODS.split, surfaceId: 'pane-b', params: {}, respond: resolve,
+      } })); });
+    });
+    expect(answer).toEqual({ ok: false, error: "surface 'pane-b' is a pending kill" });
+    expect(leafIds()).toEqual(['pane-a']);
+  });
+
   it('restores the same Surface, its ref intact', async () => {
     await renderTwoShells();
     await clickKill('pane-b');
