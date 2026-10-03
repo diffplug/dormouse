@@ -7,7 +7,7 @@
  */
 
 import type { BrowserViewportConfig, BrowserViewportSetting } from 'dor-lib-common/browser-viewports';
-import type { ToolListRequest, ToolListResponse } from 'dor/commands/types';
+import type { OpenHandlersRequest, OpenHandlersResponse, ToolListRequest, ToolListResponse } from 'dor/commands/types';
 
 export type ToolHostRequest =
   /** `preview` selects a matching rule's `preview:` handler (`dor open --preview`). */
@@ -15,7 +15,8 @@ export type ToolHostRequest =
   | { op: 'lookup'; name: string; cwd: string; args?: string[]; global?: boolean }
   | { op: 'trust'; kind: 'upstream' | 'folder'; projectRoot: string }
   | { op: 'browser-config'; cwd: string }
-  | ({ op: 'list' } & ToolListRequest);
+  | ({ op: 'list' } & ToolListRequest)
+  | ({ op: 'open-handlers' } & OpenHandlersRequest);
 
 /** Which authority declared a Tool, namespacing its dedupe key and persisted
  *  `scope`. Project Tools carry none. `docs/specs/dor-tool.md` -> Identity and
@@ -80,4 +81,5 @@ export type ToolControlResult =
   | ToolLookupResult
   | { status: 'trust-recorded' }
   | { status: 'browser-config'; config: BrowserViewportConfig }
-  | { status: 'list'; listing: ToolListResponse };
+  | { status: 'list'; listing: ToolListResponse }
+  | { status: 'open-handlers'; handlers: OpenHandlersResponse };

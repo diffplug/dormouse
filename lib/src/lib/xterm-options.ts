@@ -11,7 +11,7 @@ import { IS_WINDOWS } from './platform';
  * app intact. Both are opt-in/negotiated, so they coexist — each program turns
  * on whichever it understands. colorSchemeQuery answers DSR 996 and DECSET
  * 2031, which the advertised iTerm2 version promises
- * (docs/specs/terminal-escapes.md -> iTerm2 identity).
+ * (docs/specs/transport.md -> iTerm2 identity).
  */
 export function xtermVtExtensions(): ITerminalOptions['vtExtensions'] {
   return { kittyKeyboard: true, win32InputMode: IS_WINDOWS, colorSchemeQuery: true };

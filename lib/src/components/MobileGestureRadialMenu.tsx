@@ -243,6 +243,14 @@ function OptionChip({
   );
 }
 
+/** Pack root chips as a square keypad. Cardinal centers sit one
+ * `GAP_CARDINAL_RING` beyond the select circle. Each diagonal's first option
+ * anchors its inward corner at that same horizontal/vertical gap: SE top-left,
+ * NE bottom-left, SW top-right, NW bottom-right. Its secondaries are stacked
+ * above/below at `GAP_CLUSTER` to the right for NE/SE and left for NW/SW.
+ * `ROOT_DIAGONAL_CORNER_RADIUS` scales the diagonal gap, rather than treating
+ * the root chips as exploded circular option anchors.
+ */
 function rootOptionLayout(
   direction: MobileGestureDirection,
   index: number,
@@ -377,6 +385,9 @@ export function MobileGestureRadialMenu({ state }: { state: MobileGestureTrackin
         || state.phase === 'complete';
       const targetOpacity = faded ? 0 : rootGroupOpacity(state, direction);
       return (
+        // One element per root label for the whole gesture: the chosen group's
+        // labels tween from root to exploded positions, never fade out and get
+        // replaced by newly spawned ones.
         <div
           key={`${direction}-${index}`}
           className={clsx(

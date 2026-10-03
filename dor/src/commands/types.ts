@@ -5,6 +5,7 @@ import type {
 } from '@stricli/core';
 import type { BrowserAutomationProvider, BrowserBinding, SurfaceRenderMode } from 'dor-lib-common/browser-providers';
 import type { BrowserViewportSetting } from 'dor-lib-common/browser-viewports';
+import type { FileFormat } from 'dor-tools-builtin/file-viewer-format';
 
 export type { BrowserAutomationProvider, BrowserBinding, SurfaceRenderMode };
 
@@ -220,6 +221,8 @@ export interface AppRestartResponse {
 }
 
 export interface SplitSurfaceRequest extends WorkspaceScopedRequest {
+  /** The invoking directory, where the new Session starts; `surface` is placement only. */
+  cwd?: string;
   /** Raw argv for the initial command; the host quotes it for the target shell. */
   command?: string[];
   direction: SplitDirection;
@@ -357,6 +360,30 @@ export interface ToolListResponse {
   tools: ToolListEntry[];
   /** Non-fatal `dormouse.yml` lint output, printed to stderr by the CLI. */
   warnings: string[];
+}
+
+/** `dor open` with no path asks, per highlighted file, what could open it. */
+export interface OpenHandlersRequest {
+  target: string;
+  cwd: string;
+  /** Order the default as `dor open --preview` selects it. */
+  preview?: boolean;
+}
+
+/** One handler `dor open --tool <tool>` accepts for the target. */
+export interface OpenHandler {
+  tool: string;
+  /** What it runs: a user Tool's argv, or what a built-in shows. */
+  description: string;
+  /** Why it is offered: the `open` rule naming it, or `built-in`. */
+  reason: string;
+}
+
+export interface OpenHandlersResponse {
+  /** The first is what `dor open` selects; empty when nothing opens it. */
+  handlers: OpenHandler[];
+  /** The user `dormouse.yml` the rules come from, whether or not it exists. */
+  config: string;
 }
 
 export interface SendSurfaceRequest extends WorkspaceScopedRequest {
@@ -557,6 +584,7 @@ export interface ControlClient {
   ensureSurface(request: EnsureSurfaceRequest): Promise<EnsureSurfaceResponse>;
   toolSurface(request: ToolSurfaceRequest): Promise<ToolSurfaceResponse>;
   toolList(request: ToolListRequest): Promise<ToolListResponse>;
+  openHandlers(request: OpenHandlersRequest): Promise<OpenHandlersResponse>;
   sendSurface(request: SendSurfaceRequest): Promise<SendSurfaceResponse>;
   readSurface(request: ReadSurfaceRequest): Promise<ReadSurfaceResponse>;
   awaitSurface(request: AwaitSurfaceRequest): Promise<AwaitSurfaceResponse>;
@@ -587,10 +615,62 @@ export interface CliEnv {
   [key: string]: string | undefined;
 }
 
+/** The interactive terminal `dor open` with no path draws its picker on;
+ *  absent when stdin or stdout is not a TTY. */
+export interface PickerTerminal {
+  columns(): number;
+  rows(): number;
+  write(text: string): void;
+  /** Raw-mode input and size changes until the returned stop runs. */
+  listen(onInput: (chunk: string) => void, onResize: () => void): () => void;
+}
+
+/** The control socket a terminal's env names. */
+export interface ControlEndpoint {
+  socketPath: string;
+  token: string;
+  surfaceId?: string;
+  timeoutMs?: number;
+}
+
+/**
+ * Everything `dor` needs from the machine it runs on (`docs/specs/dor-cli.md`
+ * -> Bundling and Environment): `dor/src/node-host.ts` is the real one, and the
+ * website playground supplies its own, so the CLI itself loads in a browser.
+ */
+export interface CliHost {
+  platform: string;
+  cwd(): string;
+  homedir(): string;
+  /** This platform's `path.resolve` of `path` against `base`. */
+  resolvePath(base: string, path: string): string;
+  connect(endpoint: ControlEndpoint): ControlClient;
+  /** Streams the files under `cwd` for `dor open`'s picker. */
+  listFiles(cwd: string, options: { onFiles: (paths: string[]) => void; signal: AbortSignal; home?: string }): Promise<{ truncated: boolean }>;
+  /** A text file's contents, or null when it does not exist (`dor skill --install`). */
+  readTextFile(path: string): string | null;
+  writeTextFile(path: string, text: string): void;
+  /** `dor agent-browser` / `dor playwright`, which drive a local binary. */
+  runBrowserCli(provider: BrowserAutomationProvider, args: string[], options: CliOptions): Promise<CliResult>;
+  /** The built-in Tools' runtime, for the private `dor __view-*` entries. */
+  loadBuiltinViewers(): Promise<BuiltinViewers>;
+  versionMetadata: VersionMetadata;
+  skillMarkdown: string;
+}
+
+/** `dor-tools-builtin/runtime`: each entry starts its viewer and answers its announcement. */
+export interface BuiltinViewers {
+  runFileViewer(file: string, formatOf: (path: string) => FileFormat | null): Promise<string>;
+  runFolderViewer(dir: string): Promise<string>;
+  runErrorViewer(target: string, message: string): Promise<string>;
+}
+
 export interface CliOptions {
+  host: CliHost;
   env?: CliEnv;
   client?: ControlClient;
   readStdin?: () => Promise<string>;
+  terminal?: PickerTerminal;
   versionMetadata?: VersionMetadata;
   execAgentBrowser?: BrowserExec;
   execPlaywright?: BrowserExec;

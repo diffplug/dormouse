@@ -36,6 +36,10 @@
 
 **Why a failed read must not be memoized.** The read errors that are neither `ENOENT` nor a parse failure — EACCES, EIO, a handle held open on Windows — say nothing about what the file holds; answering them empty, or caching that emptiness, lets the next save overwrite unseen state with nothing, since every change is a read-modify-write of the whole file.
 
+## Application menu
+
+WKWebView performs native edits (cut, copy, paste, select all) only through the application's Edit menu; with none, Cmd+C/X/V did nothing inside Tool iframes, whose keys Dormouse's own JS never sees. Tested in the dev build on macOS (2026-10): a chord whose keydown the page cancels never reaches the menu item, so the terminal and Dormouse's fields keep their JS handling without a double paste. WebView2 and WebKitGTK edit natively without a menu, and on those platforms menu accelerators would take Ctrl+C from the terminal before the page saw it.
+
 ## Siri affordance
 
 **What it cost.** On 2026-09-28 the unified log showed Dormouse dwelling 707 times and building the affordance's host window 478 times in one day; no other app did either more than once. The same `NSCampoLightweightUIController` raised the assertion behind that week's macOS 27.0 crashes: a mouse-entered event reaching a tracking area it had just torn down.
@@ -222,7 +226,7 @@ stays the webview's throughout and no polling loop is needed.
 
 **The WKWebView WAL measurement.** WKWebView stores `localStorage` as SQLite in WAL mode, and WebKit pins that WAL with a long-lived reader that never advances during a running session — so it is never checkpointed, and an external checkpoint is blocked by the same reader. Rewriting the multi-MB scrollback-bearing session blob on every save grew the WAL to ~1 GB within a few hours (recorded 2026-07); a days-long session made it pathological. The Rust file store that replaced it has no WAL and rewrites the same file each time.
 
-**Why the sessions directory is fsynced after the rename.** Fsyncing only the temp file leaves the new name recoverable-but-absent after a power loss; the directory-entry fsync is what makes the rename itself durable. Windows has no equivalent concept, hence unix-only.
+**Why the sessions directory is fsynced after the rename.** Fsyncing only the temp file leaves the new name recoverable-but-absent after a power loss; a successful directory-entry fsync makes the rename durable. Its failure is ignored, so this step is best-effort. Windows has no equivalent concept, hence unix-only.
 
 **Why the mode is set before the bytes.** Under the bare umask the transcript-bearing blob lands `0644` in a `0755` directory any other local account can read, and tightening after the write would leave a window in which it was readable. Continuing after a permission failure would contradict the owner-only guarantee; aborting before writing preserves the previous snapshot and leaves at most an empty temp file.
 
@@ -230,7 +234,7 @@ stays the webview's throughout and no polling loop is needed.
 
 **What the teardown flush lost.** The pre-Rust path flushed the session on teardown into WebKit `localStorage` and lost the final debounce/heartbeat window; awaiting the write pipeline to disk (`drainSessionSaves`) recovers it, which a last fire-and-forget save would not.
 
-**What a record build costs.** `getCwd` is a synchronous `execFileSync('lsof', …)` in the sidecar on macOS (`getCwdForPid` in `standalone/sidecar/pty-core.js`), one round trip per terminal pane, on every debounced save and every 30 s heartbeat. That price is why the dirty triggers are keyed to the owning Workspace: an unkeyed trigger would make every idle Workspace pay it whenever any Workspace moved.
+**What a record build costs.** `getCwd` is an `lsof` subprocess in the sidecar on macOS (`getCwdsForPids` in `standalone/sidecar/pty-core.js`), one round trip per terminal pane, on every debounced save and every 30 s heartbeat. That price is why the dirty triggers are keyed to the owning Workspace: an unkeyed trigger would make every idle Workspace pay it whenever any Workspace moved.
 
 **Why a timed-out boot list is asked again rather than acted on.** `timedOut` is the whole difference between "the host holds nothing" and "the host never answered", and `resumeOrRestoreFrom` cannot tell them apart — it cold-restores over the second, starting a second set of shells on top of the ones still running. The arrival path already refused rather than restore; the ordinary boot path had no such guard, and a launch slower than the 500 ms budget (a cold sidecar behind an antivirus scan, a laptop waking) is exactly when it bites. A retry is cheap in the case that matters and free in every other: an empty list still resolves the moment it arrives.
 

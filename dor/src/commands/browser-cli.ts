@@ -114,14 +114,9 @@ export function extractSessionFlags(
  * `surface:` handles resolve via the host port scan, a bare `:port`/`host:port`
  * sugars to http. Non-navigation commands and plain URLs pass through unchanged.
  *
- * The target is matched by shape (not position), which is what lets `open
- * --headed surface:3` resolve — dor can't know the provider's flag arity, so it
- * can't reliably find "the positional". The trade-off is that a *flag value*
- * shaped like a target would be grabbed; this is safe because no agent-browser
- * `open` flag takes a `surface:`/`:port`/`host:port`-shaped value (`--headers` is
- * JSON, `--init-script` a path, `--enable` a feature name), and `inferredHttpUrl`
- * rejects a bare-integer host so a stray `n:n` value can't become a URL. Only the
- * first special-shaped arg is rewritten — these verbs take a single target.
+ * Only the first positional target after the actual navigation command is
+ * rewritten. Skip known option values; preserve the entire argv when an
+ * unknown option makes command or target position ambiguous.
  */
 export async function resolveOpenTargetArgs(
   rest: string[],
@@ -129,10 +124,9 @@ export async function resolveOpenTargetArgs(
   workspace: string | undefined,
   verbs: ReadonlySet<string>,
 ): Promise<ParseResult<string[]>> {
-  const subcommand = rest.find((arg) => verbs.has(arg));
-  if (subcommand === undefined || !verbs.has(subcommand)) return { ok: true, value: rest };
-
-  const commandIndex = rest.findIndex((arg) => verbs.has(arg));
+  const provider = verbs.has('navigate') ? 'agent-browser' : 'playwright';
+  const commandIndex = nativeCommandIndex(provider, rest);
+  if (commandIndex === undefined || !verbs.has(rest[commandIndex]!)) return { ok: true, value: rest };
   const valueFlags = verbs.has('navigate') ? AGENT_BROWSER_VALUE_FLAGS : PLAYWRIGHT_OPEN_VALUE_FLAGS;
   const booleanFlags = verbs.has('navigate') ? AGENT_BROWSER_BOOLEAN_FLAGS : PLAYWRIGHT_OPEN_BOOLEAN_FLAGS;
   let index = -1;
@@ -144,7 +138,9 @@ export async function resolveOpenTargetArgs(
       if (booleanFlags.has(name)) { if (rest[i + 1] === 'true' || rest[i + 1] === 'false') i += 1; continue; }
       return { ok: true, value: rest };
     }
-    if (isSpecialOpenTarget(arg)) { index = i; break; }
+    if (!isSpecialOpenTarget(arg)) return { ok: true, value: rest };
+    index = i;
+    break;
   }
   if (index === -1) return { ok: true, value: rest };
 
@@ -240,8 +236,8 @@ const AGENT_BROWSER_BOOLEAN_FLAGS = new Set([
  * destination page run before its viewport is ready. */
 function blankNavigationArgs(args: string[]): string[] | Error {
   const result = [...args];
-  const verbIndex = result.findIndex((arg) => arg === 'open' || arg === 'goto' || arg === 'navigate');
-  if (verbIndex < 0) return new Error('No navigation command to prepare');
+  const verbIndex = nativeCommandIndex('agent-browser', result);
+  if (verbIndex === undefined || !['open', 'goto', 'navigate'].includes(result[verbIndex]!)) return new Error('No navigation command to prepare');
   const positions: number[] = [];
   for (let i = 0; i < result.length; i += 1) {
     const arg = result[i] ?? '';
@@ -295,8 +291,8 @@ const PLAYWRIGHT_OPEN_VALUE_FLAGS = new Set(['--browser', '--config', '--device'
 const PLAYWRIGHT_OPEN_BOOLEAN_FLAGS = new Set(['--headed', '--mobile', '--persistent', '--json', '--raw']);
 
 function playwrightDestination(args: string[]): { blank: string[]; goto: string[] } | Error {
-  const openIndex = args.indexOf('open');
-  if (openIndex < 0) return new Error('No playwright open command to prepare');
+  const openIndex = nativeCommandIndex('playwright', args);
+  if (openIndex === undefined || args[openIndex] !== 'open') return new Error('No playwright open command to prepare');
   const targetIndices: number[] = [];
   for (let i = 0; i < args.length; i += 1) {
     if (i === openIndex) continue;
@@ -317,11 +313,12 @@ function playwrightDestination(args: string[]): { blank: string[]; goto: string[
   return { blank, goto };
 }
 
-function nativeCommand(provider: BrowserAutomationProvider, args: string[]): string | undefined {
+/** First command after known options; never mistake a flag value for a verb. */
+function nativeCommandIndex(provider: BrowserAutomationProvider, args: string[]): number | undefined {
   if (provider === 'playwright') {
     for (let i = 0; i < args.length; i += 1) {
       const arg = args[i] ?? '';
-      if (!arg.startsWith('-')) return arg;
+      if (!arg.startsWith('-')) return i;
       const [name] = arg.split('=', 1);
       if (PLAYWRIGHT_OPEN_VALUE_FLAGS.has(name)) { if (!arg.includes('=')) i += 1; continue; }
       if (!PLAYWRIGHT_OPEN_BOOLEAN_FLAGS.has(name)) return undefined;
@@ -330,7 +327,7 @@ function nativeCommand(provider: BrowserAutomationProvider, args: string[]): str
   }
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i] ?? '';
-    if (!arg.startsWith('-')) return arg;
+    if (!arg.startsWith('-')) return i;
     const [name] = arg.split('=', 1);
     if (AGENT_BROWSER_VALUE_FLAGS.has(name)) { if (!arg.includes('=')) i += 1; continue; }
     if (AGENT_BROWSER_BOOLEAN_FLAGS.has(name)) {
@@ -340,6 +337,11 @@ function nativeCommand(provider: BrowserAutomationProvider, args: string[]): str
     return undefined;
   }
   return undefined;
+}
+
+function nativeCommand(provider: BrowserAutomationProvider, args: string[]): string | undefined {
+  const index = nativeCommandIndex(provider, args);
+  return index === undefined ? undefined : args[index];
 }
 
 /**
@@ -369,7 +371,7 @@ export async function runBrowserCli(d: BrowserCliDescriptor, args: string[], opt
   // browserBinaryIsMissing re-checks on disk.
   const defaultBinaryPath = resolveBinaryPath(defaultBinary, env);
   const client = requireControlClient(options);
-  const callerCwd = callerWorkingDirectory(undefined, env);
+  const callerCwd = callerWorkingDirectory(undefined, options);
 
   // An informational command needs no binding: nothing binds, and a
   // `--surface` one names no session at all.

@@ -20,8 +20,8 @@ export interface SizeHold {
   readonly label: string;
   /** Which of that session's attachments set it, opaque too. */
   readonly lease: string;
-  /** Which service instance serves that session; absent from an older Burrow. */
-  readonly serviceId?: string;
+  /** Which service instance serves that session. */
+  readonly serviceId: string;
   /** The size its holder last set, as the pane applied it. */
   readonly cols: number;
   readonly rows: number;
@@ -73,9 +73,7 @@ export function holdSize(id: string, hold: SizeHold): void {
   const { holder, label, lease, serviceId, cols, rows } = hold;
   set(id, [
     ...current.filter((held) => held.holder !== holder),
-    serviceId === undefined
-      ? { holder, label, lease, cols, rows }
-      : { holder, label, lease, serviceId, cols, rows },
+    { holder, label, lease, serviceId, cols, rows },
   ]);
 }
 
@@ -96,13 +94,12 @@ export function releaseSizeHold(id: string, hold: Pick<SizeHold, 'holder' | 'lea
 /**
  * Forget every hold another service instance took: `serviceId` now speaks for
  * this machine, and the sessions of the one before it are gone with it, their
- * releases with them. A hold that names no instance — an older Burrow's — is
- * kept.
+ * releases with them.
  */
 export function dropSizeHoldsFromOtherServices(serviceId: string): void {
   let dropped = false;
   for (const [id, current] of [...holds]) {
-    const next = current.filter((held) => held.serviceId === undefined || held.serviceId === serviceId);
+    const next = current.filter((held) => held.serviceId === serviceId);
     if (next.length === current.length) continue;
     dropped = true;
     if (next.length === 0) holds.delete(id);

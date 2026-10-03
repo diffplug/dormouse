@@ -10,8 +10,8 @@ import type { PlatformAdapter } from '../../../lib/platform/types';
 let platform: FakePtyAdapter;
 let writeText: ReturnType<typeof vi.fn>;
 
-/** The menu-less standalone host is the one that needs JS clipboard chords, and
- *  a native `readClipboardText` is what identifies it. */
+/** The standalone hosts supply JS clipboard chords, and a native
+ *  `readClipboardText` is what identifies them. */
 function withNativeClipboardRead(text: string): void {
   (platform as PlatformAdapter).readClipboardText = vi.fn(async () => text);
 }

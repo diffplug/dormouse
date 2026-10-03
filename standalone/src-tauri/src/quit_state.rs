@@ -234,6 +234,7 @@ impl QuitMachine {
 
     /// The OS is ending the app itself (Dock Quit, logout), which never
     /// relaunches.
+    #[cfg(any(target_os = "macos", test))]
     pub fn forget_restart(&mut self) {
         self.intent = QuitIntent::default();
     }

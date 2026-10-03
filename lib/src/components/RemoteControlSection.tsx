@@ -291,7 +291,7 @@ function outcomeSentence(
 
 /**
  * The phone-setup panel's whole lifecycle: mint on open, replace the code before
- * it dies, and flip to spent when the Relay says the phone used it.
+ * it dies, and flip to spent when the Burrow retires its invitation.
  *
  * **Its own busy and error, not the section's {@link useBusyAction}.** A mint
  * here fires on a timer rather than on a click: running it through the shared

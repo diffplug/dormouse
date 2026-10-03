@@ -5,7 +5,6 @@ const path = require('node:path');
 const {
   create,
   detectAvailableShells,
-  getCwdForPid,
   parseCwdFromLsof,
   parseCwdsFromLsof,
   getCwdsForPids,
@@ -23,7 +22,6 @@ const {
   parseNetstatListening,
   getDescendantPids,
   getListeningPortsForPids,
-  getOpenPortsForPid,
   getOpenPortsForPids,
   openPortScanTimeoutMs,
   OPEN_PORT_TIMEOUT_MS,
@@ -890,34 +888,6 @@ test('parseCwdFromLsof returns the cwd for the requested pid', () => {
   assert.equal(parseCwdFromLsof(output, 4242), '/home/tester/project');
 });
 
-test('getCwdForPid uses lsof with -a and parses the target pid cwd', () => {
-  const calls = [];
-  const cwd = getCwdForPid(4242, {
-    fsModule: {
-      readlinkSync: () => { throw new Error('ENOENT'); },
-    },
-    execFileSync(file, args, options) {
-      calls.push({ file, args, options });
-      return [
-        'p100',
-        'fcwd',
-        'n/',
-        'p4242',
-        'fcwd',
-        'n/home/tester/project',
-        '',
-      ].join('\n');
-    },
-  });
-
-  assert.equal(cwd, '/home/tester/project');
-  assert.deepEqual(calls, [{
-    file: 'lsof',
-    args: ['-a', '-d', 'cwd', '-p', '4242', '-Fn'],
-    options: { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true },
-  }]);
-});
-
 // ── resolveSpawnConfig shell/args override ──────────────────────────────
 
 test('resolveSpawnConfig uses explicit shell and args when provided', () => {
@@ -1075,7 +1045,7 @@ test('resolveSpawnConfig injects bash integration for Git Bash despite its --log
 
   // The --login -i defaults are subsumed by the init-file script, which sources
   // the login profile itself.
-  const script = path.join(integrationDir, 'bash', 'shellIntegration.bash');
+  const script = path.win32.join(integrationDir, 'bash', 'shellIntegration.bash');
   assert.deepEqual(config.shellArgs, ['--init-file', script]);
 });
 
@@ -1128,7 +1098,7 @@ test('resolveSpawnConfig injects pwsh integration via -NoExit -Command dot-sourc
     },
   );
 
-  const script = path.join(integrationDir, 'pwsh', 'shellIntegration.ps1');
+  const script = path.win32.join(integrationDir, 'pwsh', 'shellIntegration.ps1');
   assert.deepEqual(config.shellArgs, ['-NoExit', '-Command', `. '${script}'`]);
 });
 
@@ -1149,7 +1119,7 @@ test('resolveSpawnConfig injects Windows PowerShell (powershell.exe) too', () =>
     },
   );
 
-  const script = path.join(integrationDir, 'pwsh', 'shellIntegration.ps1');
+  const script = path.win32.join(integrationDir, 'pwsh', 'shellIntegration.ps1');
   assert.deepEqual(config.shellArgs, ['-NoExit', '-Command', `. '${script}'`]);
 });
 
@@ -1172,7 +1142,7 @@ test('resolveSpawnConfig merges integration into an interactive pwsh -Command (e
   );
 
   // The dev-shell command runs first, then our dot-source installs the prompt wrapper.
-  const script = path.join(integrationDir, 'pwsh', 'shellIntegration.ps1');
+  const script = path.win32.join(integrationDir, 'pwsh', 'shellIntegration.ps1');
   assert.deepEqual(config.shellArgs, [
     '-NoExit',
     '-Command',
@@ -1195,7 +1165,7 @@ test('resolveSpawnConfig adds a -Command to an interactive pwsh launch that has 
     },
   );
 
-  const script = path.join(integrationDir, 'pwsh', 'shellIntegration.ps1');
+  const script = path.win32.join(integrationDir, 'pwsh', 'shellIntegration.ps1');
   assert.deepEqual(config.shellArgs, ['-NoExit', '-NoLogo', '-Command', `. '${script}'`]);
 });
 
@@ -1340,8 +1310,8 @@ test('resolveSpawnConfig skips zsh integration when the scripts are not present'
 // No other common shells exist on disk → just $SHELL.
 const noOtherShellsFsModule = { statSync() { throw new Error('ENOENT'); } };
 
-test('detectAvailableShells returns $SHELL on non-Windows', () => {
-  const shells = detectAvailableShells({
+test('detectAvailableShells returns $SHELL on non-Windows', async () => {
+  const shells = await detectAvailableShells({
     platform: 'linux',
     env: { SHELL: '/bin/zsh' },
     fsModule: noOtherShellsFsModule,
@@ -1350,8 +1320,8 @@ test('detectAvailableShells returns $SHELL on non-Windows', () => {
   assert.deepEqual(shells, [{ name: 'zsh', path: '/bin/zsh', args: [] }]);
 });
 
-test('detectAvailableShells falls back to /bin/sh when $SHELL is unset', () => {
-  const shells = detectAvailableShells({
+test('detectAvailableShells falls back to /bin/sh when $SHELL is unset', async () => {
+  const shells = await detectAvailableShells({
     platform: 'darwin',
     env: {},
     fsModule: noOtherShellsFsModule,
@@ -1360,9 +1330,9 @@ test('detectAvailableShells falls back to /bin/sh when $SHELL is unset', () => {
   assert.deepEqual(shells, [{ name: 'sh', path: '/bin/sh', args: [] }]);
 });
 
-test('detectAvailableShells also offers common shells that exist on disk, $SHELL first', () => {
+test('detectAvailableShells also offers common shells that exist on disk, $SHELL first', async () => {
   const present = new Set(['/bin/zsh', '/bin/bash', '/bin/sh']);
-  const shells = detectAvailableShells({
+  const shells = await detectAvailableShells({
     platform: 'darwin',
     env: { SHELL: '/bin/zsh' },
     fsModule: { statSync(p) { if (present.has(String(p))) return { isFile: () => true }; throw new Error('ENOENT'); } },
@@ -1376,13 +1346,13 @@ test('detectAvailableShells also offers common shells that exist on disk, $SHELL
   ]);
 });
 
-test('detectAvailableShells detects PowerShell and cmd on Windows', () => {
+test('detectAvailableShells detects PowerShell and cmd on Windows', async () => {
   const existingFiles = new Set([
     'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',
     'C:\\Windows\\System32\\cmd.exe',
   ]);
 
-  const shells = detectAvailableShells({
+  const shells = await detectAvailableShells({
     platform: 'win32',
     env: {
       SystemRoot: 'C:\\Windows',
@@ -1404,13 +1374,13 @@ test('detectAvailableShells detects PowerShell and cmd on Windows', () => {
   assert.equal(shells[1].name, 'Command Prompt');
 });
 
-test('detectAvailableShells detects Git Bash on Windows', () => {
+test('detectAvailableShells detects Git Bash on Windows', async () => {
   const existingFiles = new Set([
     'C:\\Windows\\System32\\cmd.exe',
     'C:\\Program Files\\Git\\bin\\bash.exe',
   ]);
 
-  const shells = detectAvailableShells({
+  const shells = await detectAvailableShells({
     platform: 'win32',
     env: {
       SystemRoot: 'C:\\Windows',
@@ -1433,13 +1403,13 @@ test('detectAvailableShells detects Git Bash on Windows', () => {
   assert.deepEqual(gitBash.args, ['--login', '-i']);
 });
 
-test('detectAvailableShells detects WSL distros from the registry on Windows', () => {
+test('detectAvailableShells detects WSL distros from the registry on Windows', async () => {
   const existingFiles = new Set([
     'C:\\Windows\\System32\\cmd.exe',
     'C:\\Windows\\System32\\wsl.exe',
   ]);
 
-  const shells = detectAvailableShells({
+  const shells = await detectAvailableShells({
     platform: 'win32',
     env: {
       SystemRoot: 'C:\\Windows',
@@ -1454,7 +1424,7 @@ test('detectAvailableShells detects WSL distros from the registry on Windows', (
       },
       readdirSync() { throw new Error('ENOENT'); },
     },
-    execFileSync(file, args) {
+    execFile(file, args) {
       // `reg query ...\Lxss /s /v DistributionName` output shape.
       if (String(file).endsWith('reg.exe')) {
         return [
@@ -1467,7 +1437,7 @@ test('detectAvailableShells detects WSL distros from the registry on Windows', (
           'End of search: 2 match(es) found.',
         ].join('\r\n');
       }
-      throw new Error(`unexpected execFileSync: ${file} ${args}`);
+      throw new Error(`unexpected execFile: ${file} ${args}`);
     },
   });
 
@@ -1480,8 +1450,8 @@ test('detectAvailableShells detects WSL distros from the registry on Windows', (
   assert.ok(debian, 'Debian WSL should be detected');
 });
 
-test('detectAvailableShells omits WSL when no distros are registered', () => {
-  const shells = detectAvailableShells({
+test('detectAvailableShells omits WSL when no distros are registered', async () => {
+  const shells = await detectAvailableShells({
     platform: 'win32',
     env: { SystemRoot: 'C:\\Windows', ComSpec: 'C:\\Windows\\System32\\cmd.exe' },
     fsModule: {
@@ -1493,8 +1463,8 @@ test('detectAvailableShells omits WSL when no distros are registered', () => {
       },
       readdirSync() { throw new Error('ENOENT'); },
     },
-    // reg.exe exits non-zero when the Lxss key is absent → execFileSync throws.
-    execFileSync() { throw new Error('reg: key not found'); },
+    // reg.exe exits non-zero when the Lxss key is absent → execFile throws.
+    execFile() { throw new Error('reg: key not found'); },
   });
 
   assert.equal(shells.find((s) => s.path.endsWith('wsl.exe')), undefined);
@@ -1629,7 +1599,7 @@ test('parseNetstatListening parses LISTENING TCP rows for tracked pids', () => {
   ]);
 });
 
-test('getDescendantPids (linux) reads ppid from /proc/<pid>/stat', () => {
+test('getDescendantPids (linux) reads ppid from /proc/<pid>/stat', async () => {
   const procStat = {
     '100': '100 (zsh) S 1 100 100 0',
     '200': '200 (node) S 100 200 200 0',
@@ -1647,11 +1617,11 @@ test('getDescendantPids (linux) reads ppid from /proc/<pid>/stat', () => {
       throw new Error('ENOENT');
     },
   };
-  const pids = getDescendantPids(100, { platform: 'linux', fsModule });
+  const pids = await getDescendantPids(100, { platform: 'linux', fsModule });
   assert.deepEqual(pids.sort((a, b) => a - b), [100, 200, 400]);
 });
 
-test('getListeningPortsForPids (linux) maps fd inodes to /proc/net/tcp ports', () => {
+test('getListeningPortsForPids (linux) maps fd inodes to /proc/net/tcp ports', async () => {
   const fdLinks = {
     '/proc/200/fd/3': 'socket:[55501]',
     '/proc/200/fd/4': '/dev/null',
@@ -1677,21 +1647,21 @@ test('getListeningPortsForPids (linux) maps fd inodes to /proc/net/tcp ports', (
       throw new Error('ENOENT'); // no tcp6
     },
   };
-  const ports = getListeningPortsForPids([200], { platform: 'linux', fsModule });
+  const ports = await getListeningPortsForPids([200], { platform: 'linux', fsModule });
   assert.deepEqual(ports, [
     { protocol: 'tcp', family: 'IPv4', address: '127.0.0.1', port: 5432, pid: 200, processName: 'node' },
     { protocol: 'tcp', family: 'IPv4', address: '0.0.0.0', port: 8080, pid: 200, processName: 'node' },
   ]);
 });
 
-test('getListeningPortsForPids (darwin) runs lsof with the descendant pid list', () => {
+test('getListeningPortsForPids (darwin) runs lsof with the descendant pid list', async () => {
   let capturedArgs;
-  const execFileSync = (cmd, args) => {
+  const execFile = (cmd, args) => {
     assert.equal(cmd, 'lsof');
     capturedArgs = args;
     return ['p4242', 'cnode', 'tIPv4', 'n*:3000'].join('\n');
   };
-  const ports = getListeningPortsForPids([100, 200], { platform: 'darwin', execFileSync });
+  const ports = await getListeningPortsForPids([100, 200], { platform: 'darwin', execFile });
   assert.ok(capturedArgs.includes('-sTCP:LISTEN'));
   assert.ok(capturedArgs.includes('100,200'));
   assert.deepEqual(ports, [
@@ -1699,43 +1669,38 @@ test('getListeningPortsForPids (darwin) runs lsof with the descendant pid list',
   ]);
 });
 
-test('getListeningPortsForPids (darwin) keeps the live pids when lsof exits non-zero over a dead one', () => {
+test('getListeningPortsForPids (darwin) keeps the live pids when lsof exits non-zero over a dead one', async () => {
   // A batched scan covers every descendant of every terminal, so one child
   // exiting between `ps` and `lsof` is the common case, not the odd one; the
   // stdout lsof printed before its non-zero exit is the answer.
-  const execFileSync = () => {
+  const execFile = () => {
     const err = new Error('lsof exited 1');
     err.status = 1;
     err.stdout = ['p4242', 'cnode', 'tIPv4', 'n*:3000', ''].join('\n');
     throw err;
   };
-  const ports = getListeningPortsForPids([100, 4242, 999_999], { platform: 'darwin', execFileSync });
+  const ports = await getListeningPortsForPids([100, 4242, 999_999], { platform: 'darwin', execFile });
   assert.deepEqual(ports.map((p) => [p.pid, p.port]), [[4242, 3000]]);
 });
 
-test('getListeningPortsForPids (win32) prefers Get-NetTCPConnection', () => {
-  const execFileSync = (cmd, args) => {
+test('getListeningPortsForPids (win32) prefers Get-NetTCPConnection', async () => {
+  const execFile = (cmd, args) => {
     assert.equal(cmd, 'powershell.exe');
     const script = args[args.length - 1];
-    if (script.includes('Win32_Process')) {
-      return JSON.stringify([{ ProcessId: 4242, Name: 'node.exe' }]);
-    }
     if (script.includes('Get-NetTCPConnection')) {
       return JSON.stringify([{ LocalAddress: '0.0.0.0', LocalPort: 3000, OwningProcess: 4242 }]);
     }
     throw new Error(`unexpected script: ${script}`);
   };
-  const ports = getListeningPortsForPids([4242], { platform: 'win32', execFileSync });
+  const ports = await getListeningPortsForPids([4242], { platform: 'win32', execFile }, new Map([[4242, 'node.exe']]));
   assert.deepEqual(ports, [
     { protocol: 'tcp', family: 'IPv4', address: '0.0.0.0', port: 3000, pid: 4242, processName: 'node.exe' },
   ]);
 });
 
-test('getListeningPortsForPids (win32) falls back to netstat when the cmdlet fails', () => {
-  const execFileSync = (cmd, args) => {
+test('getListeningPortsForPids (win32) falls back to netstat when the cmdlet fails', async () => {
+  const execFile = (cmd, args) => {
     if (cmd === 'powershell.exe') {
-      const script = args[args.length - 1];
-      if (script.includes('Win32_Process')) return JSON.stringify([]);
       throw new Error('Get-NetTCPConnection: not recognized');
     }
     if (cmd === 'netstat') {
@@ -1743,26 +1708,24 @@ test('getListeningPortsForPids (win32) falls back to netstat when the cmdlet fai
     }
     throw new Error('unexpected');
   };
-  const ports = getListeningPortsForPids([4242], { platform: 'win32', execFileSync });
+  const ports = await getListeningPortsForPids([4242], { platform: 'win32', execFile });
   assert.deepEqual(ports, [
     { protocol: 'tcp', family: 'IPv4', address: '0.0.0.0', port: 3000, pid: 4242, processName: undefined },
   ]);
 });
 
-test('Windows port subprocesses share the socket budget, including netstat fallback', () => {
+test('Windows port subprocesses share the socket budget, including netstat fallback', async () => {
   let now = 0;
   const timeouts = [];
-  const execFileSync = (cmd, args, options) => {
+  const execFile = (cmd, args, options) => {
     timeouts.push(options.timeout);
     const script = args.at(-1);
     if (script.includes('ParentProcessId')) {
       now += OPEN_PORT_TIMEOUT_MS;
-      return JSON.stringify([{ ProcessId: 4242, ParentProcessId: 1 }]);
+      return JSON.stringify([{ ProcessId: 4242, ParentProcessId: 1, Name: 'node.exe' }]);
     }
-    if (script.includes('Win32_Process')) {
-      now += options.timeout;
-      return JSON.stringify([{ ProcessId: 4242, Name: 'node.exe' }]);
-    }
+    // The process table above already named every pid.
+    if (script.includes('Win32_Process')) assert.fail('second process query');
     if (script.includes('Get-NetTCPConnection')) {
       now += 1000;
       throw new Error('cmdlet failed');
@@ -1771,52 +1734,32 @@ test('Windows port subprocesses share the socket budget, including netstat fallb
     now += 500;
     return '  TCP    0.0.0.0:3000   0.0.0.0:0   LISTENING   4242\n';
   };
-  const result = getOpenPortsForPids([4242], { platform: 'win32', execFileSync, now: () => now });
+  const result = await getOpenPortsForPids([4242], { platform: 'win32', execFile, now: () => now });
   const budget = openPortScanTimeoutMs(1);
-  assert.deepEqual(timeouts, [OPEN_PORT_TIMEOUT_MS, budget, budget - 1000, budget - 1500]);
-  assert.equal(now, OPEN_PORT_TIMEOUT_MS + budget);
+  assert.deepEqual(timeouts, [OPEN_PORT_TIMEOUT_MS, budget, budget - 1000]);
+  assert.equal(now, OPEN_PORT_TIMEOUT_MS + 1500);
   assert.equal(result.get(4242)[0].processName, 'node.exe');
 });
 
-test('Windows does not start netstat after the socket deadline expires', () => {
+test('Windows does not start netstat after the socket deadline expires', async () => {
   let now = 0;
   const commands = [];
-  const execFileSync = (cmd, args, options) => {
+  const execFile = (cmd, args, options) => {
     commands.push(cmd);
-    if (args.at(-1).includes('Win32_Process')) return '[]';
     now += options.timeout;
     throw new Error('timed out');
   };
-  assert.deepEqual(getListeningPortsForPids([4242], {
-    platform: 'win32', execFileSync, now: () => now, scanTimeoutMs: 3100,
+  assert.deepEqual(await getListeningPortsForPids([4242], {
+    platform: 'win32', execFile, now: () => now, scanTimeoutMs: 3100,
   }), []);
   assert.deepEqual(commands, ['powershell.exe']);
   assert.equal(now, 3100);
 });
 
-test('a slow optional Windows name lookup cannot hide already enumerated ports', () => {
-  let now = 0;
-  const execFileSync = (cmd, args, options) => {
-    if (args.at(-1).includes('Get-NetTCPConnection')) {
-      now += 10;
-      return JSON.stringify([{ LocalAddress: '0.0.0.0', LocalPort: 3000, OwningProcess: 4242 }]);
-    }
-    assert.ok(args.at(-1).includes('Win32_Process'));
-    assert.equal(options.timeout, 3090);
-    now += options.timeout;
-    throw new Error('WMI timed out');
-  };
-  const ports = getListeningPortsForPids([4242], {
-    platform: 'win32', execFileSync, now: () => now, scanTimeoutMs: 3100,
-  });
-  assert.deepEqual(ports.map(({ port, processName }) => ({ port, processName })), [{ port: 3000, processName: undefined }]);
-  assert.equal(now, 3100);
-});
-
-test('getOpenPortsForPid de-duplicates and sorts by port', () => {
+test('getOpenPortsForPids de-duplicates and sorts by port', async () => {
   // darwin path: lsof returns a duplicate (same family/addr/port) plus an
   // out-of-order pair to exercise sorting.
-  const execFileSync = (cmd) => {
+  const execFile = (cmd) => {
     if (cmd === 'ps') return '100 1\n200 100\n';
     if (cmd === 'lsof') {
       return [
@@ -1827,19 +1770,19 @@ test('getOpenPortsForPid de-duplicates and sorts by port', () => {
     }
     throw new Error('unexpected');
   };
-  const ports = getOpenPortsForPid(100, { platform: 'darwin', execFileSync });
+  const ports = (await getOpenPortsForPids([100], { platform: 'darwin', execFile })).get(100);
   assert.deepEqual(ports.map((p) => p.port), [3000, 8080]);
 });
 
-test('getOpenPortsForPid returns [] for a non-integer pid', () => {
-  assert.deepEqual(getOpenPortsForPid(undefined, { platform: 'linux' }), []);
+test('getOpenPortsForPids skips a non-integer pid', async () => {
+  assert.equal((await getOpenPortsForPids([undefined], { platform: 'linux' })).size, 0);
 });
 
-test('getOpenPortsForPids answers per root pid from ONE process table and ONE socket scan', () => {
+test('getOpenPortsForPids answers per root pid from ONE process table and ONE socket scan', async () => {
   // Two terminals, each with a child serving a port. A listing that spans them
   // must not pay for a `ps` + `lsof` pair per terminal.
   const spawns = [];
-  const execFileSync = (cmd, args, options) => {
+  const execFile = (cmd, args, options) => {
     spawns.push(cmd);
     if (cmd === 'ps') return '100 1\n200 100\n300 1\n400 300\n';
     if (cmd === 'lsof') {
@@ -1855,7 +1798,7 @@ test('getOpenPortsForPids answers per root pid from ONE process table and ONE so
     throw new Error(`unexpected spawn: ${cmd}`);
   };
 
-  const ports = getOpenPortsForPids([100, 300], { platform: 'darwin', execFileSync });
+  const ports = await getOpenPortsForPids([100, 300], { platform: 'darwin', execFile });
 
   assert.deepEqual(spawns, ['ps', 'lsof']);
   // Each root owns only what its own descendants opened.
@@ -1863,7 +1806,7 @@ test('getOpenPortsForPids answers per root pid from ONE process table and ONE so
   assert.deepEqual(ports.get(300).map((p) => p.port), [5173]);
 });
 
-test('getOpenPortsMany answers a key for every requested id, [] for one with no PTY', () => {
+test('getOpenPortsMany answers a key for every requested id, [] for one with no PTY', async () => {
   const events = [];
   const mgr = create((event, data) => events.push({ event, data }), {
     spawn() {
@@ -1872,7 +1815,7 @@ test('getOpenPortsMany answers a key for every requested id, [] for one with no 
   }, { replay: true });
   mgr.spawn('pane-a');
 
-  mgr.getOpenPortsMany(['pane-a', 'pane-gone'], 'req-2');
+  await mgr.getOpenPortsMany(['pane-a', 'pane-gone'], 'req-2');
 
   const answer = events.find((e) => e.event === 'openPortsMany');
   assert.equal(answer.data.requestId, 'req-2');
@@ -1880,6 +1823,34 @@ test('getOpenPortsMany answers a key for every requested id, [] for one with no 
   // A pane with no live PTY is never scanned for.
   assert.deepEqual(answer.data.ports['pane-gone'], []);
 });
+
+for (const many of [false, true]) {
+  test(`pending ${many ? 'batched' : 'single'} port scans allow PTY I/O and discard a replaced PTY's result`, async () => {
+    const events = [];
+    const writes = [];
+    let finishScan, output;
+    const manager = create((event, data) => events.push({ event, data }), {
+      spawn() {
+        return { pid: 42, onData(fn) { output = fn; }, onExit() {}, resize() {},
+          write(data) { writes.push(data); }, kill() {} };
+      },
+    }, { scanPorts: () => new Promise((resolve) => { finishScan = resolve; }) });
+    manager.spawn('pane');
+    const scan = many ? manager.getOpenPortsMany(['pane'], 'request') : manager.getOpenPorts('pane', 'request');
+    manager.write('pane', 'typed');
+    output('echo');
+    assert.deepEqual(writes, ['typed']);
+    assert.ok(events.some(({ event, data }) => event === 'data' && data.data === 'echo'));
+    manager.kill('pane');
+    manager.spawn('pane'); // Same pid too: object identity must fence the answer.
+    finishScan(new Map([[42, [{ port: 1234 }]]]));
+    await scan;
+    const answer = events.find(({ event }) => event === (many ? 'openPortsMany' : 'openPorts'));
+    assert.equal(answer.data.requestId, 'request');
+    assert.deepEqual(many ? answer.data.ports.pane : answer.data.ports, []);
+    manager.killAll();
+  });
+}
 
 // The clamping arithmetic itself lives in lib/src/host/replay-buffer.ts and is
 // tested there; what belongs here is the buffer accounting this file owns and
@@ -1963,11 +1934,12 @@ test('parseCwdsFromLsof keys every process block by its pid', () => {
   assert.deepEqual([...parseCwdsFromLsof(output)], [[100, '/'], [4242, '/home/tester/project']]);
 });
 
-test('getCwdsForPids resolves every pid in ONE lsof call', () => {
+test('getCwdsForPids resolves every pid in ONE lsof call', async () => {
   const calls = [];
-  const cwds = getCwdsForPids([4242, 4243], {
+  const cwds = await getCwdsForPids([4242, 4243], {
+    platform: 'darwin',
     fsModule: { readlinkSync: () => { throw new Error('ENOENT'); } },
-    execFileSync(file, args, options) {
+    execFile(file, args, options) {
       calls.push({ file, args, options });
       return [
         'p4242', 'fcwd', 'n/home/tester/one',
@@ -1979,42 +1951,46 @@ test('getCwdsForPids resolves every pid in ONE lsof call', () => {
 
   assert.equal(calls.length, 1);
   assert.deepEqual(calls[0].args, ['-a', '-d', 'cwd', '-p', '4242,4243', '-Fn']);
+  assert.deepEqual(calls[0].options, { timeout: OPEN_PORT_TIMEOUT_MS });
   assert.deepEqual([...cwds], [[4242, '/home/tester/one'], [4243, '/home/tester/two']]);
 });
 
-test('getCwdsForPids keeps the live pids when lsof exits non-zero over a dead one', () => {
+test('getCwdsForPids keeps the live pids when lsof exits non-zero over a dead one', async () => {
   // `lsof -p live,dead` exits 1 and still prints the live block on stdout.
   const err = new Error('Command failed: lsof');
   err.status = 1;
   err.stdout = ['p4242', 'fcwd', 'n/home/tester/one', ''].join('\n');
-  const cwds = getCwdsForPids([4242, 4243], {
+  const cwds = await getCwdsForPids([4242, 4243], {
+    platform: 'darwin',
     fsModule: { readlinkSync: () => { throw new Error('ENOENT'); } },
-    execFileSync() { throw err; },
+    execFile() { throw err; },
   });
 
   assert.deepEqual([...cwds], [[4242, '/home/tester/one']]);
 });
 
-test('getCwdsForPids survives an lsof failure with no stdout at all', () => {
-  const cwds = getCwdsForPids([4242], {
+test('getCwdsForPids survives an lsof failure with no stdout at all', async () => {
+  const cwds = await getCwdsForPids([4242], {
+    platform: 'darwin',
     fsModule: { readlinkSync: () => { throw new Error('ENOENT'); } },
-    execFileSync() { throw new Error('spawn ENOENT'); },
+    execFile() { throw new Error('spawn ENOENT'); },
   });
 
   assert.equal(cwds.size, 0);
 });
 
-test('getCwdsForPids reads /proc where it can and never spawns for those pids', () => {
+test('getCwdsForPids reads /proc where it can and never spawns for those pids', async () => {
   let spawned = false;
-  const cwds = getCwdsForPids([7, 8], {
+  const cwds = await getCwdsForPids([7, 8], {
+    platform: 'linux',
     fsModule: { readlinkSync: (p) => `/proc-cwd-for${p}` },
-    execFileSync() { spawned = true; return ''; },
+    execFile() { spawned = true; return ''; },
   });
   assert.equal(spawned, false);
   assert.deepEqual([...cwds], [[7, '/proc-cwd-for/proc/7/cwd'], [8, '/proc-cwd-for/proc/8/cwd']]);
 });
 
-test('getCwds answers a key for every requested id, null for one with no PTY', () => {
+test('getCwds answers a key for every requested id, null for one with no PTY', async () => {
   const events = [];
   const fakePty = () => ({
     pid: 999_001,
@@ -2025,7 +2001,7 @@ test('getCwds answers a key for every requested id, null for one with no PTY', (
   }, { replay: true });
   mgr.spawn('pane-a');
 
-  mgr.getCwds(['pane-a', 'pane-gone'], 'req-1');
+  await mgr.getCwds(['pane-a', 'pane-gone'], 'req-1');
 
   const answer = events.find((e) => e.event === 'cwds');
   assert.equal(answer.data.requestId, 'req-1');

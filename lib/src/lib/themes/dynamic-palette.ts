@@ -18,6 +18,12 @@ export interface FocusRingCandidate {
 
 export const FOCUS_RING_SATURATION_FLOOR = 0.05;
 
+/**
+ * Prefer a chromatic preferred candidate; otherwise choose the strongest
+ * chromatic nonpreferred candidate, then the candidate furthest from appLab.
+ * Chromatic means chroma >= FOCUS_RING_SATURATION_FLOOR; ties retain input order.
+ * Runtime and diagnostics share this rule (dynamic-palette.picks.test.ts).
+ */
 export function pickFocusRing(candidates: readonly FocusRingCandidate[], appLab: Lab): FocusRingCandidate | null {
   if (candidates.length === 0) return null;
 
@@ -53,6 +59,7 @@ export interface DoorChoice {
   fg: '--color-header-inactive-fg' | '--color-terminal-fg';
 }
 
+/** Choose the bg/fg pair furthest from the app in OKLab; ties take chrome. */
 export function pickDoorPair(panelLab: Lab, terminalLab: Lab, appLab: Lab): DoorChoice {
   const panelDist = deltaEOklab(panelLab, appLab);
   const termDist = deltaEOklab(terminalLab, appLab);

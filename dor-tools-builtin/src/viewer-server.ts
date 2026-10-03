@@ -1,20 +1,15 @@
 import { randomBytes } from 'node:crypto';
+import { constants } from 'node:fs';
+import { open, type FileHandle } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { isAbsolute, relative, sep } from 'node:path';
-import { serveSequence } from 'dor-tools-lib/osc';
-import { CONTROLS, viewerTitle } from './file-viewer-format.js';
 import { allowsFileViewerRequest } from './file-viewer-loopback-guard.js';
+import { HttpError, viewerAnnouncement, viewerHeaders } from './viewer-http.js';
+
+export { HttpError, pathSegments } from './viewer-http.js';
 
 const TEXT = 'text/plain; charset=utf-8';
-const HTML_ESCAPES: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 
-/** `s` as HTML text or a quoted attribute value. */
-export const escapeHtml = (s: string): string => s.replace(/[&<>"']/g, c => HTML_ESCAPES[c]!);
-
-/** Thrown by a route to answer with `status` and `message` as plain text. */
-export class HttpError extends Error {
-  constructor(readonly status: number, message = '') { super(message); }
-}
 
 /** Node sends no body on a HEAD response. */
 export function reply(res: ServerResponse, status: number, body: string | Buffer = '', type = TEXT): void {
@@ -26,7 +21,16 @@ export function reply(res: ServerResponse, status: number, body: string | Buffer
  * bytes (read to the end, buffering none past it, so the refusal is delivered),
  * 400 unparsable. */
 export async function readJsonBody(req: IncomingMessage, limit: number): Promise<unknown> {
-  if ((req.headers['content-type'] ?? '').split(';')[0].trim().toLowerCase() !== 'application/json') throw new HttpError(415);
+  if (contentType(req) !== 'application/json') throw new HttpError(415);
+  const body = await readBody(req, limit);
+  try { return JSON.parse(body.toString('utf8')); } catch { throw new HttpError(400); }
+}
+
+/** A request's media type, lowercased, without parameters. */
+export const contentType = (req: IncomingMessage) => (req.headers['content-type'] ?? '').split(';')[0].trim().toLowerCase();
+
+/** A request body; 413 with `tooLarge` past `limit` bytes, as `readJsonBody`. */
+export async function readBody(req: IncomingMessage, limit: number, tooLarge = ''): Promise<Buffer> {
   const chunks: Buffer[] = [];
   let size = 0;
   await new Promise<void>((done, fail) => {
@@ -34,8 +38,17 @@ export async function readJsonBody(req: IncomingMessage, limit: number): Promise
     req.on('end', done);
     req.on('error', fail);
   });
-  if (size > limit) throw new HttpError(413);
-  try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { throw new HttpError(400); }
+  if (size > limit) throw new HttpError(413, tooLarge);
+  return Buffer.concat(chunks);
+}
+
+/** `path` opened read-only without following a final symlink, when it is a
+ * regular file; the caller owns the descriptor. */
+export async function openRegularFile(path: string): Promise<FileHandle> {
+  const file = await open(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
+  try { if (!(await file.stat()).isFile()) throw new Error('not a regular file'); }
+  catch (error) { await file.close(); throw error; }
+  return file;
 }
 
 /** Whether the absolute `path` is `root` or under it. */
@@ -44,15 +57,6 @@ export function isInsideRoot(root: string, path: string): boolean {
   return !(isAbsolute(rel) || rel === '..' || rel.startsWith(`..${sep}`));
 }
 
-/** `path`'s `/` segments; null when its spelling alone could leave a root: a
- * backslash or a `.` or `..` segment, and when `strict`, an empty segment or a
- * control character. Containment is decided on the realpath. */
-export function pathSegments(path: string, { strict = false } = {}): string[] | null {
-  const parts = path.split('/');
-  const refused = path.includes('\\') || (strict && CONTROLS.test(path))
-    || parts.some(part => part === '.' || part === '..' || (strict && part === ''));
-  return refused ? null : parts;
-}
 
 export interface CapabilityViewer { port: number; prefix: string; close(): Promise<void> }
 
@@ -78,12 +82,9 @@ export async function startCapabilityViewer({ csp, post = false, chunked = false
   };
   let port = 0;
   const server = createServer((req, res) => {
-    res.setHeader('Cache-Control', 'no-store');
-    res.setHeader('Referrer-Policy', 'no-referrer');
-    res.setHeader('X-Content-Type-Options', 'nosniff');
+    for (const [name, value] of Object.entries(viewerHeaders(csp))) res.setHeader(name, value);
     // The iframe proxy must retain this policy on every MIME type.
     res.setHeader('X-Dormouse-Preserve-CSP', '1');
-    res.setHeader('Content-Security-Policy', csp);
     if (!allowsFileViewerRequest(req, port, prefix, { post })) { answer(res, 403); return; }
     route(req, res, prefix).catch(error => {
       if (res.headersSent) res.destroy();
@@ -109,5 +110,5 @@ export function announceViewer(viewer: { port: number; path: string; close(): Pr
   const stop = () => { void viewer.close().then(() => { process.exitCode = 0; }); };
   process.once('SIGINT', stop);
   process.once('SIGTERM', stop);
-  return `\x1b]2;${viewerTitle(target)}\x07${serveSequence(viewer)}`;
+  return viewerAnnouncement(viewer, target);
 }

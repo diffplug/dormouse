@@ -11,11 +11,6 @@ terminal region and reflows xterm mid-gesture. The trade — the keyboard coveri
 the same physical area — is the cheaper cost, since what it hides is the app
 keyboard UI the OS keyboard is replacing anyway.
 
-**Why the two rows sit on different grounds.** The Touch row acts on the
-terminal, so `terminal-bg` reads it as part of the surface above; the Input row
-and the reserve act on the app, so the header-inactive pair separates them while
-still following the selected theme rather than a hardcoded color.
-
 ## Touch mode selector
 
 **Why the selector is self-labeling.** Icon-only touch controls are
@@ -53,11 +48,6 @@ the touch origin, so a rose centered there would be under the thumb; offsetting
 into the opposite diagonal fills visible area instead — a lower-right press
 opens the rose up and left, a lower-left press up and right. Same reason the
 guide line is drawn only in the offset copy.
-
-**Why the ticks and the chips share one opacity treatment.** Full-opacity ticks
-with a thicker one on the active direction make the select circle and the label
-clusters read as a single gesture system rather than a circle with unrelated
-text floating near it.
 
 ## Root layout
 

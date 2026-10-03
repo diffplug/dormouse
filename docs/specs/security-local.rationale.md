@@ -41,10 +41,11 @@ Why deceptive links are gated twice. The modal omits its Open action and focuses
 Why the origin check is not an authenticity check. The iframe proxy serves the
 untrusted upstream on the same origin it grants the shim, so `e.origin` cannot
 tell a message the shim sent from one the page sent; what the check buys is that
-no *other* frame can send them at all. The four shim messages are bounded
-downstream instead — exiting passthrough, selecting a pane, an `http:`/`https:`
-only `browserSurfaceUrl` behind an open prompt, and a frame-URL reading that may
-lie. `use-wall-keyboard`'s leader channel accepts any live grant rather than one
+no *other* frame can send them at all. The shim's actions are bounded
+downstream — exiting passthrough, selecting a pane, an `http:`/`https:` URL
+behind an open prompt, a frame-URL reading that may lie, and read-only theme
+variables. Theme delivery additionally checks the actual iframe window;
+requesting it grants no host command. `use-wall-keyboard`'s leader channel accepts any live grant rather than one
 panel's, so a page in one browser pane can exit passthrough while another is
 focused. The nested-frame relay preserves this boundary: it accepts only the
 same proxy origin and reconstructs one of the three pane-level shapes, so
@@ -76,6 +77,23 @@ the copies by `lib/src/lib/mirrored-constants.test.ts`. A change to the HMAC
 construction or the comparison in one copy breaks the channel loudly; a change
 that weakens the comparison in both — a string compare for a `timingSafeEqual` —
 breaks nothing visible.
+
+What mutual proof buys. Whoever merely bound the path receives the client's
+nonce and a client proof tied to the squatter's challenge, but no token or
+Surface request. That proof is not replayable against the real server's fresh
+random challenge. The server proves knowledge of the token before the client
+releases its request; it does not prove itself before receiving the client proof.
+
+Why a failed handshake gets no reply at all. A wrong answer and a port scan get
+the same nothing: any distinguishable response tells a prober a Dormouse control
+endpoint is at that path, exactly what the random name is spent hiding.
+
+Why a lost bind withholds the token rather than exiting. PTY work has to survive
+a dead control channel, so exiting the host is not the answer. But a host that
+kept handing `DORMOUSE_CONTROL_TOKEN` to every shell after a failed bind would
+feed both clients and their bearer credential to whoever won the race for the
+path or pipe name. Withholding it degrades safely instead: nothing dials a
+stranger.
 
 ## Loopback Listeners
 

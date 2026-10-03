@@ -36,7 +36,7 @@
 
 **Why hold instead of drop.** A completion on an engaged Session used to be discarded, so a report the user never acted on was lost once they walked away — the permission prompt under Engagement is the recorded case. Holding keeps the summons owed without ringing a pane the user is looking at: acting on it answers it, and walking away rings it.
 
-**Why dropping on an explicit disengage may be a mistake.** Moving focus to another pane, or leaving the window, is a deliberate act by someone who was looking at the completion, so ringing it then would summon them for something they just saw (decision, 2026-09-23). It also forgets a prompt the user glanced at and clicked away from to look something up. If that proves common, escalating on every disengage and letting the acknowledged-state check absorb the repeat is the alternative.
+**Why an explicit disengage drops a held completion, and the doubt about it.** Moving focus to another pane, or leaving the window, is a deliberate act by someone who was looking at the completion, so ringing it then would summon them for something they just saw (decision, 2026-09-23). It also forgets a prompt the user glanced at and clicked away from to look something up. If that proves common, escalating on every disengage and letting the acknowledged-state check absorb the repeat is the alternative.
 
 **Why nothing is decided at the point of detection.** Dispatching before suppression lets an observer see the three-second `npm test` that finished attended and would never have rung anyone. A seam firing only the events a human would have been shown could not serve `dor await` at all.
 
@@ -166,17 +166,11 @@ Guarding only completion leaves a stale `start` free to replace the active utter
 
 ## Push notifications
 
-**Why the device-list fetch is lazy and its store is not.** The fetch is Burrow machinery and rides the lazily-imported `RemotePairingModalHost` chunk; the store and its refresh fence stay in the common bundle because the Settings dialog reads them in every host, so disarming is one call on the store.
-
 **Why `toPushText` is not `toSpokenText`.** The angle-bracket rule exists only because WebKit's synthesizer wedges on them (Spoken alarms); an OS notification has no such failure, and instead has bidi and zero-width formatting that can visually reorder or hide text.
 
 **Why the Burrow, not the Relay, chooses recipients.** A revoked Client keeps its subscription row on the Relay, nothing propagating a revocation today (`docs/specs/remote-security-model.md` → Future), so a Relay picking recipients from its own rows would keep pushing Pane labels to a de-authorized phone.
 
 **Why the Burrow does not ask which devices are subscribed first.** The Relay intersects the Burrow's targets with its own subscriptions regardless, so the target set is identical either way; asking first would cost the alarm a second round trip.
-
-## Settings dialog
-
-**Why the device line always says something.** A push that silently goes nowhere is indistinguishable from a broken one, so each cause is worth its own message rather than an empty list.
 
 ## Pane Header
 

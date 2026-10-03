@@ -46,6 +46,8 @@ interface PtyBufferEntry {
 
 const MAX_BUFFER_CHARS = 1_000_000;
 const ptyBuffers = new Map<string, PtyBufferEntry>();
+// Tombstones: a killed id is never resumable, so late output the child still
+// sends for it must not recreate a buffer. Cleared when `spawn` reuses the id.
 const killedPtyIds = new Set<string>();
 
 function trimChunks(chunks: string[], totalChars: number): number {
@@ -275,6 +277,7 @@ function ensureChild(extensionPath: string): ChildProcess {
         listener({
           requestId: msg.requestId,
           surfaceId: msg.surfaceId,
+          helperParentId: msg.helperParentId,
           method: msg.method,
           params: msg.params,
           timeoutMs: msg.timeoutMs,
@@ -439,8 +442,15 @@ export function getCwd(id: string): Promise<string | null> {
 }
 
 export function getOpenPorts(id: string): Promise<OpenPort[]> {
-  return requestChild<{ ports?: OpenPort[] }>({ type: 'getOpenPorts', id }, (msg) => msg.type === 'openPorts' && msg.id === id, openPortRequestTimeoutMs(1))
-    .then((msg) => msg.ports || [], () => []);
+  return getOpenPortsMany([id]).then((ports) => ports[id] ?? []);
+}
+
+let openPortsSequence = 0;
+/** Every id's ports from one pty-host scan (`docs/specs/transport.md` -> "Port scan deadlines"). */
+export function getOpenPortsMany(ids: string[]): Promise<Record<string, OpenPort[]>> {
+  const requestId = `ports-${++openPortsSequence}`;
+  return requestChild<{ ports?: Record<string, OpenPort[]> }>({ type: 'getOpenPortsMany', ids, requestId }, (msg) => msg.type === 'openPortsMany' && msg.requestId === requestId, openPortRequestTimeoutMs(ids.length))
+    .then((msg) => msg.ports || {}, () => ({}));
 }
 
 export function write(id: string, data: string, options: WritePtyOptions = {}): void {

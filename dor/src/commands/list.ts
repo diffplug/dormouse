@@ -12,7 +12,7 @@
 
 import { buildCommand, type FlagParametersForType } from '@stricli/core';
 import type {
-  CliEnv,
+  CliOptions,
   Command,
   DorCommandContext,
   IdFormat,
@@ -201,7 +201,7 @@ async function runListCommand(
       ...(flags.window === undefined ? {} : { window: flags.window }),
     });
     const env = context.options.env ?? {};
-    const filtered = applyListFilters(response, flags, env);
+    const filtered = applyListFilters(response, flags, context.options);
     const idFormat = flags.idFormat ?? 'refs';
     const stdout = flags.json === true
       ? renderListJson(filtered, env, includePorts)
@@ -248,9 +248,9 @@ function checkScopeFlags(flags: ListFlags): { ok: true } | { ok: false; message:
 function applyListFilters(
   response: ListSurfacesResponse,
   flags: ListFlags,
-  env: CliEnv,
+  options: CliOptions,
 ): ListSurfacesResponse {
-  const cwd = flags.cwd === undefined ? undefined : callerWorkingDirectory(flags.cwd, env);
+  const cwd = flags.cwd === undefined ? undefined : callerWorkingDirectory(flags.cwd, options);
   return {
     ...response,
     surfaces: response.surfaces.filter((surface) => (

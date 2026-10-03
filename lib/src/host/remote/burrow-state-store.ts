@@ -8,10 +8,11 @@
  * The interface is async because the hosts that implement it are: files the
  * sidecar owns here, `VsCodeBurrowStateStore` there (enrollment in
  * `SecretStorage`, ACL in `globalState` — `docs/specs/vscode.md`). {@link FileBurrowStateStore}
- * is the sidecar's: two files, 0600, under a directory the app passes in.
+ * is the sidecar's: private JSON state under a directory the app passes in
+ * only after establishing owner-only access (POSIX modes or a Windows DACL).
  */
 
-import { readFile, rm } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { BurrowAclRecord } from 'remote-lib-common';
 import { filterAclRecords } from '../../remote/burrow/acl';
@@ -26,13 +27,10 @@ export type { BurrowAclRecord };
 
 export interface BurrowStateStore {
   /**
-   * Whether a write survives this process. Only the dev-harness store (no state
-   * directory) says `false`. Required rather than optional so a store that
-   * forgot to answer is not silently read as durable.
-   *
-   * Nothing reads it today — its consumer went with the webview-persisted Burrow
-   * hand-off — and it is kept as the store contract's own statement of
-   * durability, which an implementor must make before anything can rely on it.
+   * Whether a write survives this process. A host without a usable private
+   * state directory uses an ephemeral store and reports `false`. Required
+   * rather than optional: an implementor must state its durability before
+   * a consumer can rely on it.
    */
   readonly persistent: boolean;
   loadEnrollment(): Promise<BurrowEnrollment | null>;
@@ -57,24 +55,6 @@ const FILE_NAME = 'burrow.json';
  * knows, and a policy it dropped would let the default recompute.
  */
 const NETWORK_POLICY_FILE_NAME = 'network-policy.json';
-
-/** What {@link FILE_NAME} was called before the Burrow rename. */
-const RETIRED_FILE_NAME = 'remote-host.json';
-
-/**
- * Delete what the rename stranded in `stateDir`. Called once at boot
- * (`sidecar-entry.ts`), never from a read: the retired file holds a live
- * `burrowToken`, and an install upgraded across the rename would otherwise keep
- * that credential on disk with no code left that knows the name.
- *
- * **Never fatal** — nothing here is read, so a failure is logged and stepped
- * over. `docs/specs/security-remote.md` → "Credentials at rest".
- */
-export async function forgetRetiredState(stateDir: string): Promise<void> {
-  await rm(join(stateDir, RETIRED_FILE_NAME), { force: true }).catch((error: unknown) => {
-    console.warn(`[burrow] could not remove the retired ${RETIRED_FILE_NAME}`, error);
-  });
-}
 
 interface BurrowStateFile {
   version: 1;

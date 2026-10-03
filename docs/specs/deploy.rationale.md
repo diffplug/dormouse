@@ -2,6 +2,10 @@
 
 > Informative companion to [deploy.md](deploy.md): evidence and design history keyed by that spec's headings. Nothing here is normative.
 
+## Versioning
+
+Source audit, 2026-10: the bump invokes Cargo directly after editing version files. The native build refuses an ambient Node version that differs from the workspace pin; the script does not arrange that pin on PATH.
+
 ## Stage 1: CI workflow
 
 **Why `release-attest` is its own environment, with no secrets and no reviewer.** A required reviewer would stall every release on manual approval at its first jobs, and build jobs have no business seeing credentials. Neither existing `v*` environment fits: `vscode-extension-publish` requires reviewers; `security-audit` holds `AUDIT_PAT` and `CLAUDE_CODE_OAUTH_TOKEN`.
@@ -27,3 +31,5 @@ The 2026-09-05 audit found that standalone resume commands reset every working a
 ## Two signing layers
 
 **What each layer actually proves.** OS signing proves the executable is from DiffPlug; Tauri signing proves the update bundle was not tampered with in transit.
+
+The October 2026 audit traced `sign_macos`, `sign_windows`, and `sign_updates`: the Linux AppImage is copied from verified CI artifacts and receives Tauri signing, with no Linux OS-signing step. The body now states that platform scope rather than requiring both layers for Linux too.

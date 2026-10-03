@@ -846,7 +846,7 @@ export type ChromeButtonVariants = VariantProps<typeof chromeButton>;
 // where `modalIconButton` would reach for `text-muted`,
 // `hover:bg-foreground/10`, or `outline-focus-ring` — host tokens that would
 // read as a foreign color on the preview. Hover feedback is the label
-// underline, not a fill, for the same reason (docs/specs/theme.md).
+// underline, not a fill, for the same reason.
 export const themePreviewButton = tv({
   base: 'flex min-w-0 items-center rounded transition-colors focus-visible:outline-2 focus-visible:outline-current',
   variants: {

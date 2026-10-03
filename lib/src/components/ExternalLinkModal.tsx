@@ -1,4 +1,5 @@
 import { useRef } from 'react';
+import type { OpenHandler } from 'dor/commands/types';
 import { ProhibitIcon, WarningOctagonIcon } from '@phosphor-icons/react';
 import { writeTextToClipboard } from '../lib/clipboard';
 import type { DisplayMatchVerdict, ExternalUriDecision } from '../lib/external-links';
@@ -47,10 +48,21 @@ export function ExternalLinkModal({
   request,
   onCancel,
   onConfirm,
+  handlers = [],
+  selected = 0,
+  onSelect,
+  busy = false,
+  error,
 }: {
   request: ExternalLinkModalRequest;
   onCancel: () => void;
   onConfirm: () => void;
+  handlers?: OpenHandler[];
+  /** The chosen index into `handlers`; the first is the default. */
+  selected?: number;
+  onSelect?: (index: number) => void;
+  busy?: boolean;
+  error?: string;
 }) {
   const primaryButtonRef = useRef<HTMLButtonElement>(null);
   const secondaryButtonRef = useRef<HTMLButtonElement>(null);
@@ -106,6 +118,33 @@ export function ExternalLinkModal({
         {displayUri}
       </ModalReviewBlock>
 
+      {openableDecision && !isDeceptive && handlers.length > 0 && (
+        <div className="mt-3 text-xs">
+          <label className="flex items-center gap-2">
+            Open with
+            <select
+              aria-label="File viewer"
+              value={selected}
+              disabled={busy}
+              onChange={event => onSelect?.(Number(event.target.value))}
+              className="min-w-0 flex-1 rounded border border-input-border bg-input-bg p-1 text-foreground"
+            >
+              {handlers.map((handler, index) => (
+                <option key={handler.tool} value={index}>
+                  {handler.tool}{index === 0 ? ' (default)' : ''}
+                </option>
+              ))}
+            </select>
+          </label>
+          <p className="mt-1 break-words text-muted">
+            {handlers[selected].description}
+            {' — '}
+            {handlers[selected].reason}
+          </p>
+        </div>
+      )}
+      {error && <p role="alert" className="mt-3 break-words text-xs text-error">{error}</p>}
+
       <div className="mt-4 flex justify-end gap-2 text-xs">
         {isDeceptive ? (
           <>
@@ -140,9 +179,10 @@ export function ExternalLinkModal({
               ref={primaryButtonRef}
               type="button"
               onClick={onConfirm}
+              disabled={busy}
               className={`${modalActionButton({ tone: 'primary' })} min-w-[5rem]`}
             >
-              {'Open '}{buttonNoun}
+              {busy ? 'Please wait…' : <>Open {buttonNoun}</>}
             </button>
           </>
         ) : (

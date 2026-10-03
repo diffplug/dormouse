@@ -1,5 +1,6 @@
 import { DEFAULT_MOUSE_SELECTION_STATE } from "dormouse-lib/lib/mouse-selection";
 import type { TutorialState } from "./tutorial-state";
+import { watchDorOpen, type CommandStoreModule } from "./tut-dor-open-detector";
 
 type WallEvent = import("dormouse-lib/components/Wall").WallEvent;
 type WallMode = import("dormouse-lib/components/Wall").WallMode;
@@ -36,6 +37,8 @@ export interface TutDetectorOptions {
   activityStore: ActivityStoreModule;
   mouseStore: MouseSelectionModule;
   themeStore: ThemeStoreModule;
+  /** The desktop's shells' command lines, which credit the `dor open` section. */
+  commandStore?: CommandStoreModule;
 }
 
 export class TutDetector {
@@ -43,6 +46,7 @@ export class TutDetector {
   private activityStore: ActivityStoreModule;
   private mouseStore: MouseSelectionModule;
   private themeStore: ThemeStoreModule;
+  private commandStore: CommandStoreModule | undefined;
   private started = false;
   private currentMode: WallMode = "command";
   private currentPaneId: string | null = null;
@@ -56,8 +60,9 @@ export class TutDetector {
   private previousThemeId = '';
   private disposables: (() => void)[] = [];
 
-  constructor({ state, activityStore, mouseStore, themeStore }: TutDetectorOptions) {
+  constructor({ state, activityStore, mouseStore, themeStore, commandStore }: TutDetectorOptions) {
     this.state = state;
+    this.commandStore = commandStore;
     this.activityStore = activityStore;
     this.mouseStore = mouseStore;
     this.themeStore = themeStore;
@@ -95,6 +100,7 @@ export class TutDetector {
     this.disposables.push(
       this.themeStore.subscribeToActiveTheme(() => this.processTheme()),
     );
+    if (this.commandStore) this.disposables.push(watchDorOpen(this.state, this.commandStore));
   }
 
   handleWallEvent(event: WallEvent): void {

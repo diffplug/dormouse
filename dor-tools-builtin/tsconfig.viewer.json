@@ -1,8 +1,8 @@
 {
   "compilerOptions": {
-    "target": "ES2022", "lib": ["ES2022", "DOM"], "module": "ES2022",
-    "moduleResolution": "bundler", "strict": true, "noEmit": true,
+    "target": "ES2022", "lib": ["ES2022", "DOM", "DOM.Iterable"], "module": "ES2022",
+    "moduleResolution": "bundler", "strict": true, "noEmit": true, "jsx": "react-jsx",
     "skipLibCheck": true, "noUnusedLocals": true, "noUnusedParameters": true
   },
-  "include": ["viewer/**/*.ts"]
+  "include": ["viewer/**/*.ts", "viewer/**/*.tsx"]
 }

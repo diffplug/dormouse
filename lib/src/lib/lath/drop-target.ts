@@ -24,6 +24,8 @@ export function materializeTarget(tree: LathTree, target: EdgeDropTarget): { tre
   const { start, end } = target.range;
   if (node.kind !== 'split' || !Number.isInteger(start) || !Number.isInteger(end)
     || start < 0 || end > node.children.length || end - start < 2) return null;
+  // Every child is the split itself; a one-child wrapper would size the drop as a sibling.
+  if (end - start === node.children.length) return { tree, path: target.path };
   const selected = node.children.slice(start, end);
   const group: LathNode = { kind: 'split', dir: node.dir, children: normalizeWeights(selected) };
   const replacement: LathNode = {

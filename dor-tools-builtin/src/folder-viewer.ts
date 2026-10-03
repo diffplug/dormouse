@@ -4,7 +4,7 @@ import type { IncomingMessage } from 'node:http';
 import { join } from 'node:path';
 import { resolveBinaryPath, spawnAndCapture } from 'dor-lib-common';
 import { openSequence, validToolOpenPath } from 'dor-tools-lib/osc';
-import { folderViewerPage } from './folder-viewer-page.js';
+import { byDisplayOrder, FOLDER_CSP, folderViewerPage } from './folder-viewer-page.js';
 import { announceViewer, HttpError, isInsideRoot, pathSegments, readJsonBody, reply, startCapabilityViewer } from './viewer-server.js';
 
 /** Entries one listing returns. */
@@ -14,19 +14,12 @@ const READ_LIMIT = 100_000;
 const BODY_LIMIT = 8 * 1024;
 const GIT_TIMEOUT_MS = 5000;
 const GIT_OUTPUT_LIMIT = 4 * 1024 * 1024;
-const CSP = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'";
 
 export type FolderEntryKind = 'dir' | 'file' | 'other';
 export interface FolderEntry { name: string; kind: FolderEntryKind; ignored: boolean }
 export type FolderOpenResult = { ok: true; status: string } | { ok: false; error: string };
 /** Opens a canonical path inside the root: `preview` for select, pinned for activate. */
 export type FolderOpen = (path: string, preview: boolean) => Promise<FolderOpenResult>;
-
-const compare = (a: string, b: string): number => a < b ? -1 : a > b ? 1 : 0;
-type Ordered = { dir: boolean; folded: string; entry: { name: string } };
-/** Directories first, then by lowercased name, then by name. */
-const byDisplayOrder = (a: Ordered, b: Ordered): number =>
-  Number(!a.dir) - Number(!b.dir) || compare(a.folded, b.folded) || compare(a.entry.name, b.entry.name);
 
 /** The `names` in `dir` that `git` ignores. Any failure (no git, not a
  * repository, a timeout) answers none: ignore state only dims entries. */
@@ -134,7 +127,7 @@ export async function startFolderViewer(input: string, { open }: { open: FolderO
     return path;
   }
 
-  const viewer = await startCapabilityViewer({ csp: CSP, post: true, unavailable: 'Folder viewer unavailable',
+  const viewer = await startCapabilityViewer({ csp: FOLDER_CSP, post: true, unavailable: 'Folder viewer unavailable',
     route: async (req, res, prefix) => {
       const url = new URL(req.url!, 'http://localhost');
       const name = url.pathname.startsWith(prefix) ? url.pathname.slice(prefix.length) : undefined;
@@ -169,8 +162,16 @@ export async function runFolderViewer(dir: string): Promise<string> {
  * page shows, rather than throwing into a 500. */
 export function oscOpen(write: (text: string) => void): FolderOpen {
   return async (path, preview) => {
-    if (!validToolOpenPath(path)) return { ok: false, error: `Cannot open ${JSON.stringify(path)} from a Tool` };
-    write(openSequence({ path, preview }));
+    let sequence: string;
+    try {
+      if (!validToolOpenPath(path)) throw new RangeError('invalid Tool open path');
+      sequence = openSequence({ path, preview });
+    } catch {
+      // A field can fit its own bound while JSON escaping exceeds the host's
+      // serialized payload cap. Report that refusal to the page without a write.
+      return { ok: false, error: `Cannot open ${JSON.stringify(path)} from a Tool` };
+    }
+    write(sequence);
     return { ok: true, status: 'sent' };
   };
 }

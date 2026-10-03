@@ -1,7 +1,4 @@
-import { resolve as resolvePath } from 'node:path';
-import { SocketControlClient } from '../control-client.js';
 import type {
-  CliEnv,
   CliOptions,
   CliResult,
   ControlClient,
@@ -9,6 +6,9 @@ import type {
   IdFormat,
   ParseResult,
 } from './types.js';
+import { errorLine, escapeControl, renderJson } from './terminal-text.js';
+
+export { errorLine, printable, renderJson } from './terminal-text.js';
 
 export const stringParser = (input: string): string => input;
 
@@ -16,10 +16,6 @@ export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/** The one spelling of a `dor` error line, shared by every path that prints one. */
-export function errorLine(message: string): string {
-  return `Error: ${message}`;
-}
 
 export function fail(message: string): CliResult {
   return { exitCode: 1, stdout: '', stderr: `${errorLine(message)}\n` };
@@ -43,18 +39,6 @@ export function parseNonNegativeInt(input: string, flag: string): number {
   return value;
 }
 
-export function renderJson(payload: unknown): string {
-  return `${JSON.stringify(payload, null, 2)}\n`;
-}
-
-const TERMINAL_CONTROLS = /[\x00-\x1f\x7f-\x9f]/g;
-const escapeControl = (char: string) => `\\u${char.charCodeAt(0).toString(16).padStart(4, '0')}`;
-
-/** Repo text relayed by the host, bound for a terminal: C0, DEL, and C1
- *  controls become `\u` escapes, so the text cannot drive the terminal. */
-export function printable(text: string): string {
-  return text.replace(TERMINAL_CONTROLS, escapeControl);
-}
 
 /** `renderJson` for repo text: `JSON.stringify` escapes only C0, so DEL and C1
  *  are escaped too, which leaves the parsed value unchanged. */
@@ -116,7 +100,7 @@ function resolveControlClient(options: CliOptions, timeoutMs?: number): ParseRes
 
   return {
     ok: true,
-    value: new SocketControlClient({
+    value: options.host.connect({
       socketPath,
       token,
       surfaceId: env.DORMOUSE_SURFACE_ID,
@@ -184,8 +168,8 @@ export function msysToWindowsCwd(pwd: string, platform: string): string {
 // travel in the request. Prefer the shell's PWD (injectable, matches what the
 // user sees) and fall back to the process cwd. resolvePath canonicalizes both the
 // default and a relative/absolute path into one absolute path the host can key on.
-// Shared by `ensure`, `list`, `tool`, `open`, and `skill`.
-export function callerWorkingDirectory(flag: string | undefined, env: CliEnv | undefined): string {
-  const base = msysToWindowsCwd(env?.PWD ?? process.cwd(), process.platform);
-  return resolvePath(base, flag ?? '.');
+// Shared by `ensure`, `split`, `list`, `tool`, `open`, and `skill`.
+export function callerWorkingDirectory(flag: string | undefined, { env, host }: CliOptions): string {
+  const base = msysToWindowsCwd(env?.PWD ?? host.cwd(), host.platform);
+  return host.resolvePath(base, flag ?? '.');
 }

@@ -1,6 +1,6 @@
 /**
  * The pairing invitation and its QR grammar (`docs/specs/relay.md` → "Setup
- * tokens" → QR grammar).
+ * tokens and the pairing QR").
  *
  * A Burrow mints an invitation, renders it as one URL, and a phone reads it back
  * with {@link parsePairingInvitationUrl}. Both halves live here so the emitter

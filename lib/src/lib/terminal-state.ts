@@ -379,10 +379,22 @@ export function summarizeCommandLine(raw: string): string {
 }
 
 /**
- * The key WATCHING rules are stored under: the program a command line waits on,
- * as a bare name or `<runner> <script>`, or null when the line holds no
- * runnable word. Every key it returns passes {@link isWatchKey}. The rules that
- * derive it are `docs/specs/alert.md` -> WATCHING Track.
+ * WATCHING's canonical lexical key, using only the shell-reported raw line.
+ * Take the last command of a list and its first pipeline stage, ignoring
+ * grouping, compound-command grammar (POSIX and fish), loop headers, and case
+ * patterns. A closing segment contributes no command, including its
+ * redirections/pipeline. Strip redirections and separate targets before
+ * selecting either program or script.
+ *
+ * Skip leading assignments and known transparent wrappers; an unknown wrapper
+ * flag stops the skip rather than guessing how many words it consumes. Reduce
+ * argv[0] to its basename without a launcher suffix. Script runners key as
+ * `<runner> <script>` after their flags/shared run verb; an invalid script key
+ * falls back to the bare runner. Empty or invalid program names return null.
+ * Every returned key passes isWatchKey. The helper tables/functions below own
+ * accepted wrapper flags, runner flags, and shell grammar; tests pin these in
+ * terminal-state.test.ts -> WATCHING key. Cross-module eligibility and matching
+ * rules remain in docs/specs/alert.md -> WATCHING Track.
  */
 export function commandWatchKey(raw: string): string | null {
   const commands = listCommands(tokenizeCommand(raw.trim()));
@@ -774,7 +786,7 @@ export const MAX_CWD_LENGTH = 4096;
  * grouping key, so it is held state rather than a transient — the same reason
  * titles and notification bodies are sanitized (`terminal-protocol.ts`). The
  * emit-side scripts already remove control characters
- * (`docs/specs/terminal-escapes.md` → the `Cwd=` rule), but the parser accepts
+ * (`docs/specs/terminal-state.md` → Shell-integration injection), but the parser accepts
  * OSC 7 / OSC 9;9 / OSC 1337 from any program, not only from those scripts.
  *
  * Interior whitespace is preserved rather than collapsed: a path may legally

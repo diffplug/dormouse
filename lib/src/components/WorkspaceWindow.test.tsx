@@ -15,6 +15,7 @@ import { recordToolDirty, resetToolDirty } from '../lib/tool-dirty-store';
 import { browserLeafMeta, toolLeafMeta } from './wall/lath-wall-engine';
 import { leafTree } from '../lib/lath/model';
 import { WorkspaceWindow } from './WorkspaceWindow';
+import * as clipboard from '../lib/clipboard';
 import { WorkspaceStrip } from './WorkspaceStrip';
 import * as workspaceStore from '../lib/workspace-store';
 import * as workspaceMotion from './workspace-motion';
@@ -105,6 +106,33 @@ async function render(node = <WorkspaceWindow initialPaneIds={['pane-a']} />): P
 }
 
 describe('WorkspaceWindow', () => {
+  it('routes native file drops only to the active Workspace selected pane', async () => {
+    const first = getActiveWorkspaceId();
+    createWorkspace({ id: 'ws-2', activate: false });
+    const listeners = new Set<(paths: string[]) => void>();
+    Object.assign(fake, {
+      onFilesDropped: (handler: (paths: string[]) => void) => {
+        listeners.add(handler);
+        return () => { listeners.delete(handler); };
+      },
+    });
+    const paste = vi.spyOn(clipboard, 'pasteFilePaths').mockImplementation(() => {});
+    await render();
+    expect(listeners.size).toBe(2);
+    const drop = () => { for (const listener of listeners) listener(['C:/work/example.txt']); };
+    await act(async () => { drop(); });
+    expect(paste.mock.calls).toEqual([['pane-a', ['C:/work/example.txt']]]);
+    paste.mockClear();
+    await act(async () => { setActiveWorkspace('ws-2'); });
+    const [secondPane] = leafIdsIn('ws-2');
+    await act(async () => { drop(); });
+    expect(paste.mock.calls).toEqual([[secondPane, ['C:/work/example.txt']]]);
+    paste.mockClear();
+    await act(async () => { setActiveWorkspace(first); });
+    await act(async () => { drop(); });
+    expect(paste.mock.calls).toEqual([['pane-a', ['C:/work/example.txt']]]);
+  });
+
   it('clicking + enters the new terminal in passthrough and moves keyboard focus off the button', async () => {
     const first = getActiveWorkspaceId();
     await render(<><WorkspaceStrip /><WorkspaceWindow initialPaneIds={['pane-a']} /></>);

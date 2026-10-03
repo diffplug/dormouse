@@ -25,7 +25,8 @@ by default, and its state — a painted terminal — only exists after it runs.
 > **This is a walkthrough, not a spec.** It lives outside `docs/specs/`, so the
 > fold discipline in `AGENTS.md` does not apply to it and `spec-lint` does not
 > check it. Where it disagrees with a spec, the spec is right. The three it
-> leans on are `relay.md` (what the Relay and the installer do),
+> leans on are `relay.md` (what the Relay, the installer, and the laptop's
+> enrollment and Settings do),
 > `remote-security-model.md` (why the ceremony has the shape it has), and
 > `pocket-app.md` (the phone).
 
@@ -61,8 +62,8 @@ below asks you to trust it with any of them.
 
 ## 1. Stand up the Relay
 
-The whole self-host story today is one coordinating Relay on your own laptop,
-reachable only from your tailnet. One idempotent command builds the current
+This walkthrough uses one coordinating Relay on your own machine,
+fronted by Tailscale Serve. One idempotent command builds the current
 checkout into a self-contained release and installs it:
 
 ```sh
@@ -215,8 +216,8 @@ An enrolled machine can mint one, on request:
 
 That code is the origin you would otherwise type into mobile Safari, carrying a
 **setup token** the Relay issues and will redeem in place of the setup
-password, plus an **invitation**: an id and a one-use public key that are the
-*laptop's own* and never go near the Relay. The invitation's private half stays
+password, plus an **invitation**: an id and a one-use public key minted by the
+laptop. The Relay sees the id when routing the handshake. The private half stays
 in the laptop's Burrow process, so a phone that completes a handshake against it
 has provably read this screen — which is what makes it worth something in §6.
 (`docs/specs/relay.md` → Setup tokens and the pairing QR owns the grammar.)
@@ -312,7 +313,8 @@ from the record, which learned it inside an encrypted pairing outcome; only the
 online dot comes from the Relay. The card above them is push, which §7 comes
 back to.
 
-Each row offers exactly one action, and nothing is asked to decide which.
+The local record and Relay presence choose each row's primary action.
+A machine removed from the account offers **Forget**; otherwise
 **Connect** is offered where this browser holds an authorized record, and
 **Pair again** where an authenticated denial took that authorization away —
 which is the only thing that can move a row, and which keeps the pinned Burrow key
@@ -338,8 +340,8 @@ phone                        relay                        burrow (laptop)
   |<-- outcome (encrypted) -----|<-- outcome -----------------|  ACL record saved
 ```
 
-The handshake runs against the one-use key printed in the QR, which never left
-the laptop, so a phone that completes it has provably read *this* screen. The
+The handshake runs against the QR's one-use public key; its private half stays
+on the laptop, so completing it proves the phone read *this* screen. The
 Relay sees two routing ids and a handshake hash.
 
 Then the phone shows two digits, and the laptop asks for them. The phone paints

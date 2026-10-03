@@ -1,6 +1,8 @@
 import { DEFAULT_HELPER_COMMAND, type TerminalContextRequest, type TerminalContextInfo } from '../terminal-context-types';
 import type { OpenPort, PlatformAdapter, PtyDataDetail, PtyInfo, BurrowLink, SpawnPtyOptions, UpdatesPort, WritePtyOptions } from './types';
 import type { ManagedVoicePort } from './managed-voice-types';
+import type { IframeProxyResult } from './iframe-proxy-types';
+import type { ToolControlResult, ToolHostRequest } from './tool-types';
 import type { AlertManager } from '../alert-manager';
 import { createAlertHost, type AlertHost, type AlertRealm } from '../../host/alert-host';
 import { createAlertClient, type AlertClientMethods } from '../../host/alert-client';
@@ -32,6 +34,9 @@ export interface FakeScenario {
   endsWithPrompt?: boolean;
 }
 
+/** `helper` marks a helper terminal's spawn, which runs the fake helper shell. */
+export interface PtySpawnDetail { id: string; helper: boolean }
+
 export interface FakePtySize {
   cols: number;
   rows: number;
@@ -50,7 +55,7 @@ export class FakePtyAdapter implements PlatformAdapter {
   private dataHandlers = new Set<(detail: PtyDataDetail) => void>();
   private exitHandlers = new Set<(detail: { id: string; exitCode: number }) => void>();
   private resizeHandlers = new Set<(detail: FakePtyResizeDetail) => void>();
-  private spawnHandlers = new Set<(detail: { id: string }) => void>();
+  private spawnHandlers = new Set<(detail: PtySpawnDetail) => void>();
   private terminals = new Set<string>();
   /** The deterministic demo shell behind each helper (docs/specs/terminal-context.md). */
   private helpers = new Map<string, { cwd: string; busy: boolean }>();
@@ -103,6 +108,11 @@ export class FakePtyAdapter implements PlatformAdapter {
   // about Settings → Network or managed voice installs one.
   updates?: UpdatesPort;
   managedVoice?: ManagedVoicePort;
+
+  // Absent unless a page installs them: the website playground answers both
+  // from its read-only snapshot (docs/specs/tutorial.md -> Playground filesystem).
+  toolControl?: (request: ToolHostRequest) => Promise<ToolControlResult>;
+  createIframeProxyUrl?: (targetUrl: string) => Promise<IframeProxyResult>;
 
 
   /** Where a due push goes. There is no Burrow here, so by default it reaches
@@ -192,7 +202,7 @@ export class FakePtyAdapter implements PlatformAdapter {
       rows: options?.rows ?? DEFAULT_PTY_SIZE.rows,
     });
     for (const handler of this.spawnHandlers) {
-      handler({ id });
+      handler({ id, helper: !!options?.helper });
     }
     if (options?.helper) { this.startHelperShell(id); return; }
     const scenario = this.resolveScenario(id);
@@ -223,23 +233,29 @@ export class FakePtyAdapter implements PlatformAdapter {
   private startHelperShell(id: string): void {
     const helper = this.helpers.get(id)!;
     let input = '';
-    const prompt = () => this.sendOutput(id, `\x1b]633;A\x07${helper.cwd} ❯ \x1b]633;B\x07`);
+    const prompt = () => `\x1b]633;A\x07${helper.cwd} ❯ \x1b]633;B\x07`;
     this.inputHandlers.set(id, data => {
-      if (data === '\x03') { helper.busy = false; input = ''; this.sendOutput(id, '^C\r\n\x1b]633;D;130\x07'); prompt(); return; }
+      if (data === '\x03') { helper.busy = false; input = ''; this.sendOutput(id, '^C\r\n\x1b]633;D;130\x07' + prompt()); return; }
       if (helper.busy) return;
+      // Submit the echo, command output, and returned prompt as one PTY chunk.
+      // xterm 6.1.0-beta.304 can yield after parsing the echo, then replay that
+      // parsed prefix when a resize flushes the remaining queue. Keep the CRLF
+      // in the same write as the echo (fake-adapter-helper.test.ts).
+      let output = '';
       for (const char of data) {
         if (char === '\r' || char === '\n') {
           const command = input; input = '';
-          this.sendOutput(id, `\r\n\x1b]633;E;${command}\x07\x1b]633;C\x07`);
-          if (/^(sleep|nano|vim)\b/.test(command)) { helper.busy = true; this.sendOutput(id, 'Demo process running. Ctrl+C stops it.\r\n'); continue; }
-          const output = command === 'git status' ? 'On branch main\r\nnothing to commit, working tree clean' : command.startsWith('echo ') ? command.slice(5) : command === 'pwd' ? helper.cwd : command ? `Demo shell: ${command}` : '';
-          if (output) this.sendOutput(id, output + '\r\n');
-          this.sendOutput(id, '\x1b]633;D;0\x07'); prompt();
-        } else if (char === '\x7f') { if (input) { input = input.slice(0, -1); this.sendOutput(id, '\b \b'); } }
-        else { input += char; this.sendOutput(id, char); }
+          output += `\r\n\x1b]633;E;${command}\x07\x1b]633;C\x07`;
+          if (/^(sleep|nano|vim)\b/.test(command)) { helper.busy = true; output += 'Demo process running. Ctrl+C stops it.\r\n'; continue; }
+          const result = command === 'git status' ? 'On branch main\r\nnothing to commit, working tree clean' : command.startsWith('echo ') ? command.slice(5) : command === 'pwd' ? helper.cwd : command ? `Demo shell: ${command}` : '';
+          if (result) output += result + '\r\n';
+          output += '\x1b]633;D;0\x07' + prompt();
+        } else if (char === '\x7f') { if (input) { input = input.slice(0, -1); output += '\b \b'; } }
+        else { input += char; output += char; }
       }
+      if (output) this.sendOutput(id, output);
     });
-    queueMicrotask(prompt);
+    queueMicrotask(() => this.sendOutput(id, prompt()));
   }
 
   private resolveScenario(id: string): FakeScenario | null {
@@ -319,6 +335,19 @@ export class FakePtyAdapter implements PlatformAdapter {
     return this.openPortsMap.get(id) ?? [];
   }
 
+  /** Per id through `getOpenPorts`, so a test overriding it covers both;
+   *  an id whose lookup throws is left out, as a failed host scan is. */
+  async getOpenPortsMany(ids: string[]): Promise<Record<string, OpenPort[]>> {
+    const entries = await Promise.all(ids.map(async (id) => {
+      try {
+        return [[id, await this.getOpenPorts(id)] as const];
+      } catch {
+        return [];
+      }
+    }));
+    return Object.fromEntries(entries.flat());
+  }
+
   getPtySize(id: string): FakePtySize {
     return this.terminalSizes.get(id) ?? DEFAULT_PTY_SIZE;
   }
@@ -354,7 +383,7 @@ export class FakePtyAdapter implements PlatformAdapter {
   }
   /** Fires synchronously inside `spawnPty(id)` after the pty is registered
    *  but before its scenario starts playing. Returns an unsubscribe fn. */
-  onPtySpawn(handler: (detail: { id: string }) => void): () => void {
+  onPtySpawn(handler: (detail: PtySpawnDetail) => void): () => void {
     this.spawnHandlers.add(handler);
     return () => {
       this.spawnHandlers.delete(handler);

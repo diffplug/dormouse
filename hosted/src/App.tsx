@@ -31,7 +31,7 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
   const [session, setSession] = useState<Session | null>(null);
   const [enabled, setEnabled] = useState<Provider[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
-  // Null hides the Voice tokens section (docs/specs/hosted.md -> "Interface").
+  // Null hides the Voice tokens section.
   const [voiceTokens, setVoiceTokens] = useState<VoiceToken[] | null>(null);
   // Null hides the Computers section, as for voice tokens.
   const [computers, setComputers] = useState<Computer[] | null>(null);
@@ -85,6 +85,7 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
     );
   }, []);
   useEffect(() => {
+    // An auth callback's query parameters (`?error=`) never stay in history.
     history.replaceState(null, "", location.pathname);
     void refresh()
       .catch((error) => setError(error.message))

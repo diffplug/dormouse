@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { FakePtyAdapter } from "dormouse-lib/lib/platform/fake-adapter";
 import { PlaygroundShellRegistry } from "./playground-shells";
 import type { InteractiveProgram } from "./tutorial-shell";
+import { VirtualFs } from "./playground-fs/vfs";
 
 function createProgram(): InteractiveProgram {
   return {
@@ -104,5 +105,24 @@ describe("PlaygroundShellRegistry", () => {
     adapter.killPty("one");
 
     expect(program.dispose).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("PlaygroundShellRegistry with a filesystem", () => {
+  it("prompts in the filesystem's directory as each non-helper terminal spawns", async () => {
+    const adapter = new FakePtyAdapter();
+    const output: Record<string, string> = { one: "", helper: "" };
+    adapter.onPtyData((detail) => { output[detail.id] += detail.data; });
+    const fs = new VirtualFs({ "/home/demo/p/a": "" });
+    const registry = new PlaygroundShellRegistry(adapter, () => createProgram(), { fs, cwd: "/home/demo/p" });
+
+    adapter.spawnPty("one");
+    adapter.spawnPty("helper", { helper: { parentId: "one", command: "git status" } });
+    await Promise.resolve();
+
+    expect(output.one).toContain("~/p");
+    expect(registry.cwdOf("one")).toBe("/home/demo/p");
+    expect(registry.cwdOf("helper")).toBeNull();
+    registry.disposeAll();
   });
 });

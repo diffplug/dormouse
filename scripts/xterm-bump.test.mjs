@@ -4,6 +4,7 @@ import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSy
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { pathToFileURL } from 'node:url';
 import { gzipSync } from 'node:zlib';
 
 const CORE = '@xterm/xterm';
@@ -55,7 +56,7 @@ function run(args, { manifest = {}, missingRelease = false, mismatchPeer = false
         throw new Error('unexpected network request: ' + url);
       };
     `);
-    const result = spawnSync(process.execPath, ['--import', join(root, 'fetch.mjs'), join(root, 'scripts/xterm-bump.mjs'), ...args], { encoding: 'utf8' });
+    const result = spawnSync(process.execPath, ['--import', pathToFileURL(join(root, 'fetch.mjs')).href, join(root, 'scripts/xterm-bump.mjs'), ...args], { encoding: 'utf8' });
     const packages = Object.fromEntries(['lib', 'standalone', 'canopy'].map((dir) => [dir, JSON.parse(readFileSync(join(root, dir, 'package.json'))).dependencies]));
     return { ...result, packages };
   } finally {
@@ -77,16 +78,17 @@ test('canopy dry-run verifies the release without rewriting pins', () => {
   assert.equal(result.packages.canopy[FORK], 'old-url');
   assert.match(result.stdout, /canopy → fork .*@xterm\/xterm 6\.1\.0-beta\.12/);
 });
-for (const [label, options] of [
-  ['missing release', { missingRelease: true }],
-  ['wrong archive identity', { manifest: { name: '@xterm/addon-webgl' } }],
-  ['wrong archive version', { manifest: { version: '0.20.0-sdf12.1' } }],
-  ['missing core peer', { manifest: { peerDependencies: {} } }],
-  ['peer counter mismatch', { manifest: { peerDependencies: { [CORE]: '^6.1.0-beta.13' } } }],
-  ['upstream addon peer mismatch', { mismatchPeer: true }],
+for (const [label, options, reason] of [
+  ['missing release', { missingRelease: true }, /release 404/],
+  ['wrong archive identity', { manifest: { name: '@xterm/addon-webgl' } }, new RegExp('release manifest identity/core peer disagrees')],
+  ['wrong archive version', { manifest: { version: '0.20.0-sdf12.1' } }, new RegExp('release manifest identity/core peer disagrees')],
+  ['missing core peer', { manifest: { peerDependencies: {} } }, new RegExp('release manifest identity/core peer disagrees')],
+  ['peer counter mismatch', { manifest: { peerDependencies: { [CORE]: '^6.1.0-beta.13' } } }, new RegExp('release manifest identity/core peer disagrees')],
+  ['upstream addon peer mismatch', { mismatchPeer: true }, new RegExp('no @xterm/addon-webgl published')],
 ]) test(`canopy refuses ${label} before rewriting pins`, () => {
   const result = run(canopyArgs, options);
   assert.notEqual(result.status, 0);
+  assert.match(result.stderr, reason);
   assert.equal(result.packages.canopy[FORK], 'old-url');
 });
 test('default bump repairs standalone when lib already has the newest coherent set', () => {

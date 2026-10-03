@@ -52,12 +52,15 @@ describe('compatible agents', () => {
     expect(body).not.toContain('If automatic agent startup becomes disruptive');
   });
 
-  it('sends the contributor link to the withheld contract on GitHub', () => {
+  it('sends contributor links to withheld headings on GitHub', () => {
     expect(data.agents.withheldLinks).toEqual([{
+      from: '#detection',
+      to: `${REPO_BLOB_BASE}/docs/compatible-agents.md#detection`,
+    }, {
       from: '#recovery-contract-maintainers',
       to: `${REPO_BLOB_BASE}/docs/compatible-agents.md#recovery-contract-maintainers`,
     }]);
-    expect(generatedHrefs()).toContain(data.agents.withheldLinks[0].to);
+    expect(generatedHrefs()).toEqual(expect.arrayContaining(data.agents.withheldLinks.map(({ to }) => to)));
   });
 
   it('keeps the supported-agent table aligned with executable and resume definitions', () => {

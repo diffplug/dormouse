@@ -48,6 +48,7 @@ vi.mock("@xterm/xterm", () => ({
     parser = { registerCsiHandler: () => ({ dispose: () => {} }) };
     modes = { mouseTrackingMode: "none" as const, bracketedPasteMode: false };
     loadAddon(): void {}
+    attachCustomKeyEventHandler(): void {}
     open(): void {}
     write(data: string, callback?: () => void): void {
       mocks.writes.push(data);

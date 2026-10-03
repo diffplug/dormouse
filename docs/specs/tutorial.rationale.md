@@ -20,6 +20,18 @@
 
 **Why `ensureShell` runs from two directions.** `paneAdded` covers splits, restores, dor surfaces and the seed ids alike, but cannot auto-launch the seed commands: that has to happen at spawn, exactly once. `FakePtyAdapter.onPtySpawn` is the spawn-time hook that does, and it necessarily overlaps the seed ids `paneAdded` already announced — hence idempotence rather than a split of responsibilities.
 
+**What supplies the mouse-capturing text.** Both neighbor panes, `ascii-splash` and `changelog`.
+
+**Coverage audit, against `mouse-and-clipboard.md`'s section numbers as of 2026-09.** Exercisable: §§1–2 (mouse reporting + override), §§3.1–3.3 (drag, block shape, block hint), §§3.6–3.7 (drag keys + popup), §§4.1–4.3 (Raw / Rewrapped copy, shortcuts, dismissal; since replaced by the copy editor). Partial: §3.4 exposes change/resize cancellation but not pure scroll; §3.5 lacks enough scrollback; §8.2 writes paste chords to the fake PTY, whose shell ignores bracket markers. Missing: §§3.3 and 5 lack smart tokens and therefore `e` extension; §8.5 lacks a scenario that enables bracketed paste. Auto-scroll during a drag and right-click paste are deferred in the implementation ([§9. Future](mouse-and-clipboard.md#9-future)), not Playground gaps.
+
+## Playground filesystem
+
+**Why the registry prints the first prompt.** The desktop used to play `SCENARIO_SHELL_PROMPT` on every spawned terminal; it prints a prompt without `OSC 633 ; A/B`, so a split Tool (`requireIntegration`) never saw integration and closed after its wait. Adding the OSCs to the scenario does not help: `writePty` is dropped while a scenario's timers hold the id, and the integration poll can type the Tool's command into that window.
+
+**Why `/bin/fake` is the default shell.** With no shell named, `shellCommandKind` reads a Windows platform string as `cmd`, which refuses every split Tool and quotes for `cmd` (measured 2026-10).
+
+**Why a service worker.** A built-in viewer is a server its page reaches by relative `fetch`; a browser page has no loopback listener, and a `srcdoc` or `blob:` frame breaks the pages' relative URLs and the Monaco worker, which would mean patching the editors. Scoping a worker to `/playground-fs/` serves the unchanged pages at real http(s) URLs. It keeps no token map because an idle worker is stopped and restarted at will; asking the windows costs one `MessageChannel` round trip per request.
+
 ## Runner-local intercepts
 
 **Why the demos' OSCs are invisible.** `FakePtyAdapter.sendOutput` runs its bytes through the real `TerminalProtocolParser`, which consumes the `OSC 633` sequences instead of printing them, so a demo can report shell integration into a pane whose alt-screen TUI is mid-draw without corrupting the frame.
@@ -39,9 +51,3 @@
 **What `sendOutput` is for.** The only way the alert demos can fake shell integration and a program-sent notification with no real shell behind the pane.
 
 **Why the theme subscription backs the opening ask.** Picking a theme needs no command-mode vocabulary ([Profiles](#profiles)); the picker remains operable through ordinary keyboard focus. Comparing consecutive theme ids also keeps the achievement repeatable after progress is reset.
-
-## Mouse and Clipboard Feature Coverage
-
-**What supplies the mouse-capturing text.** Both neighbor panes, `ascii-splash` and `changelog`; why `changelog` is also the copy target: [Layout](#layout).
-
-**Coverage audit, against `mouse-and-clipboard.md`'s section numbers as of 2026-09.** Exercisable: §§1–2 (mouse reporting + override), §§3.1–3.3 (drag, block shape, block hint), §§3.6–3.7 (drag keys + popup), §§4.1–4.3 (Raw / Rewrapped copy, shortcuts, dismissal; since replaced by the copy editor). Partial: §3.4 exposes change/resize cancellation but not pure scroll; §3.5 lacks enough scrollback; §8.2 writes paste chords to the fake PTY, whose shell ignores bracket markers. Missing: §§3.3 and 5 lack smart tokens and therefore `e` extension; §8.5 lacks a scenario that enables bracketed paste. Auto-scroll during a drag and right-click paste are deferred in the implementation ([§9. Future](mouse-and-clipboard.md#9-future)), not Playground gaps.

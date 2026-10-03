@@ -18,8 +18,8 @@ import {
 } from './quit-confirm-store';
 
 /**
- * The window-close and quit teardown dialog (docs/specs/standalone.md §Quit
- * flow, "Confirmation dialog"): the typed-letter confirmation, the progress
+ * The window-close and quit teardown dialog (docs/specs/standalone.md -> "Quit
+ * protocol"): the typed-letter confirmation, the progress
  * overlay. Mounted through Wall's
  * `dialogHost` slot. Command-mode suppression is the store's chrome keyboard
  * lease, held for every phase. Store-connected shell + presentational modal,
@@ -56,7 +56,8 @@ export function WorkspaceTeardownModal({
   intent?: QuitConfirmIntent;
 }) {
   const progressRef = useRef<HTMLParagraphElement>(null);
-  // Live count — the dialog stays open even if it drops to 0 (see spec).
+  // Live count. The dialog stays open even if it drops to 0: a zero count
+  // never closes it by itself.
   const { requester } = intent;
   const getRunningCount = useCallback(() => quitRunningWork({ requester }), [requester]);
   const runningCount = useSyncExternalStore(subscribeToTerminalPaneState, getRunningCount);

@@ -1,0 +1,22 @@
+# Your Dormouse user config. On your own machine it lives at
+# ~/.config/dormouse/dormouse.yml; in this playground it is read-only and
+# changes nothing. Both Tools below are made up, to show the shape.
+
+tools:
+  # `dor tool storybook` runs it, then frames whichever port it binds.
+  storybook:
+    run: pnpm storybook
+    port: auto
+
+  # A viewer for one file: Dormouse passes the path as $TARGET, and opening
+  # the same file again reveals the Tool already showing it.
+  csv:
+    run: [csv-peek, --serve, $TARGET]
+    port: announced
+    prespawn_dedupe: [$TARGET]
+
+# What `dor open` uses for a file: the first matching rule wins, and files no
+# rule matches open in the built-in viewers.
+open:
+  - match: "*.csv"
+    tool: csv

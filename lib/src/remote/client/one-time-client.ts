@@ -143,6 +143,11 @@ export class OneTimeClient implements RemoteAdapterClient {
   #route: OneTimeRoute | null = null;
   /** The link `connectOnce` was given, so a close can tell whether it had expired. */
   #link: OneTimeLink | null = null;
+  /**
+   * Cancels the timer armed at the room's hard deadline, which bounds every
+   * wait before the outcome — WebCrypto and the socket's open included.
+   */
+  #cancelDeadline: (() => void) | null = null;
 
   /** The rendezvous socket, while this client still reads it; closed at the switch and at the end. */
   readonly #rendezvous: RendezvousHold;
@@ -230,6 +235,10 @@ export class OneTimeClient implements RemoteAdapterClient {
     this.#link = link;
     // The room's hard deadline: no answer can arrive after it.
     const deadline = link.expiry * 1000 + ONE_TIME_EXPIRY_GRACE_MS;
+    this.#cancelDeadline = this.#setTimer(
+      () => this.#fail(ONE_TIME_LINK_EXPIRED_MESSAGE),
+      Math.max(0, deadline - this.#now()),
+    );
     try {
       const session = await this.#handshake(link, route, deadline);
       const code = samplePairingCode();
@@ -248,6 +257,8 @@ export class OneTimeClient implements RemoteAdapterClient {
       if (this.#failure !== null) throw new Error(this.#failure);
       // The digits have done their job: the screen moves on to the direct path.
       onConfirmed?.();
+      // From here the direct path's own deadline bounds the wait.
+      this.#clearDeadline();
       this.#phase = 'connecting';
       // After the outcome and never before: `establish` builds the direct
       // path, and a peer connection that existed ahead of authorization would
@@ -307,9 +318,9 @@ export class OneTimeClient implements RemoteAdapterClient {
   /**
    * One wait in the ceremony that the core does not own — WebCrypto, the
    * socket's open, the switch — cut short by the first failure: a room that
-   * closed, a direct path given up, {@link close}. **Checked again after it
-   * settles**, since a step can finish in the same turn as the failure that
-   * makes its result moot.
+   * closed, the room's hard deadline, a direct path given up, {@link close}.
+   * **Checked again after it settles**, since a step can finish in the same
+   * turn as the failure that makes its result moot.
    */
   async #race<T>(step: Promise<T>): Promise<T> {
     const value = await Promise.race([step, this.#interrupted]);
@@ -323,6 +334,11 @@ export class OneTimeClient implements RemoteAdapterClient {
     this.#failure ??= message;
     this.#interrupt?.(new Error(message));
     this.#core.rejectAll(new Error(message));
+  }
+
+  #clearDeadline(): void {
+    this.#cancelDeadline?.();
+    this.#cancelDeadline = null;
   }
 
   /** End the attempt with `message`, and release everything. */
@@ -513,6 +529,7 @@ export class OneTimeClient implements RemoteAdapterClient {
   #teardown(): void {
     if (this.#phase === 'ended') return;
     this.#phase = 'ended';
+    this.#clearDeadline();
     this.#rendezvous.close();
     this.#core.endSession(this.#failure ?? ONE_TIME_ENDED_MESSAGE, { notifyGone: false });
   }

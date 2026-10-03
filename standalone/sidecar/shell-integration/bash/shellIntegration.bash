@@ -35,7 +35,7 @@ __dormouse_633_c1st=$'\302\234'
 # splits on the first raw ';' then decodes \\ and \xNN; newlines/CR keep the
 # sequence single-line; BEL/ESC/C1-ST are the OSC terminators. Escaping costs
 # nothing here because the parser decodes \xNN back.
-# Why terminators must not survive: docs/specs/terminal-escapes.md -> OSC 633.
+# Why terminators must not survive: docs/specs/terminal-state.md -> "Shell-integration injection".
 #
 # Out-param rather than a return value: the call site would otherwise need
 # $(...), which forks a subshell on every command in the user's shell.
@@ -55,7 +55,7 @@ __dormouse_633_escape() {
 # parser reads Cwd= verbatim — no \xNN decoding, so a Windows path's backslashes
 # arrive intact — which rules out escaping, so the terminators are removed
 # instead. A path component may hold any byte but '/' and NUL, so a directory
-# name can carry one; see docs/specs/terminal-escapes.md -> OSC 633.
+# name can carry one; see docs/specs/terminal-state.md -> "Shell-integration injection".
 #
 # The C1 ST goes first and explicitly: under LC_ALL=C it is two ordinary bytes
 # that [[:cntrl:]] does not match.
@@ -94,7 +94,7 @@ __dormouse_633_prompt() {
 # `fc -l -1` stops one short of `history 1` (bash's own flag that this line
 # added an entry), or it added none and neither ignorespace nor HISTIGNORE
 # could be why; and the entry contains $BASH_COMMAND, whitespace aside. Why
-# each check: docs/specs/terminal-escapes.rationale.md -> Shell-integration injection.
+# each check: docs/specs/terminal-state.rationale.md -> Shell-integration injection.
 __dormouse_633_command_line() {
   __dormouse_633_out=$BASH_COMMAND
   [[ -o history ]] || return 0
@@ -127,7 +127,7 @@ __dormouse_633_preexec() {
   [ -n "${COMP_LINE:-}" ] && return                        # tab-completion, not a submitted command
   # A `bind -x` key (fzf's Ctrl-R) runs with READLINE_LINE bound from bash 4.0;
   # staying armed reports the line it leaves instead. 3.2 binds nothing (see
-  # docs/specs/terminal-escapes.rationale.md -> Shell-integration injection).
+  # docs/specs/terminal-state.rationale.md -> Shell-integration injection).
   [ -n "${READLINE_LINE+x}" ] && [ "${BASH_VERSINFO[0]}" -ge 4 ] && return
   __dormouse_633_armed=
   __dormouse_633_ran=1

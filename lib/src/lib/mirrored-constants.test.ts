@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, resolve, win32 } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   PAIRING_OUTCOME_COPY,
@@ -38,7 +38,7 @@ const rsSrc = readRepoFile(rs);
 const rustMs = (name: string) =>
   Number(extract(rsSrc, rs, new RegExp(`^const ${name}: u64 = ([\\d_]+);$`, 'm')).replace(/_/g, ''));
 
-// docs/specs/terminal-escapes.md -> "iTerm2 identity"
+// docs/specs/transport.md -> "iTerm2 identity"
 describe('ITERM2_COMPAT_VERSION mirrors', () => {
   it('matches the sidecar copy in standalone/sidecar/pty-core.js', () => {
     const file = 'standalone/sidecar/pty-core.js';
@@ -73,7 +73,7 @@ describe('helper autorun command mirrors', () => {
   });
 });
 
-// docs/specs/dor-cli.md: the control-socket handshake. The CLI is a bundled ESM
+// docs/specs/security-local.md -> "The dor control socket": the handshake. The CLI is a bundled ESM
 // binary with no shared build against the CJS server module, so the proof
 // domains are duplicated — and drift is silent: the server's own test builds
 // its client frames from the server's copy, so only a failed handshake at
@@ -137,12 +137,12 @@ describe('enrollment-offer path mirrors the installers', () => {
     const source = readRepoFile(file);
     const variable = extract(source, file, /^\$INSTALL_ROOT = Join-Path \$env:(\w+) '[^']+'$/m);
     const local = 'C:\\Users\\ned\\AppData\\Local';
-    const root = join(
+    const root = win32.join(
       local,
       extract(source, file, /^\$INSTALL_ROOT = Join-Path \$env:\w+ '([^']+)'$/m),
     );
-    const run = join(root, extract(source, file, /^\$RUN_DIR = Join-Path \$INSTALL_ROOT '([^']+)'$/m));
-    const offerFile = join(
+    const run = win32.join(root, extract(source, file, /^\$RUN_DIR = Join-Path \$INSTALL_ROOT '([^']+)'$/m));
+    const offerFile = win32.join(
       run,
       extract(source, file, /^\$ENROLL_OFFER_FILE = Join-Path \$RUN_DIR '([^']+)'$/m),
     );

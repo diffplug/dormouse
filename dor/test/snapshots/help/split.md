@@ -9,13 +9,17 @@ USAGE
 
 If no direction is provided, --auto is used. --auto chooses right when the target surface is wide, down when it is narrow, and right when the target is minimized.
 
+The new terminal starts in the directory where you invoke dor split. --surface and --workspace control placement; they do not change the working directory.
+
 Use -- followed by a command to run an initial command in the new terminal surface.
 
-Focus depends only on whether you pass --. A bare "dor split" (no --) moves focus to the new surface so a human can start typing in it — avoid it in automation, since it steals the user's keystrokes. Anything with -- leaves focus on the caller: "dor split -- <command>" runs the command in the background, and a bare "dor split --" opens a blank terminal without stealing focus.
+Supplying -- or an initial command leaves focus unchanged. "dor split -- <command>" runs the command in the new terminal, and "dor split --" opens a blank terminal. Without -- or an initial command, dor split focuses the new surface.
 
 --minimize creates the surface and immediately sends it to the minimized area.
 
---surface selects the surface to split. If the target is minimized, the new surface is created minimized too and inserted immediately to the right of the target door. If omitted, Dormouse uses the caller surface when available, then the focused surface.
+--surface selects the reference Surface for placement. If it is minimized, the new Surface is created minimized too and inserted immediately to the right of its Door. If --surface is omitted, Dormouse uses the caller's Surface, or an auxiliary helper's source Surface. When --workspace selects another Workspace, placement defaults to that Workspace's focused Surface.
+
+From an auxiliary helper, split creates a separate terminal and leaves the helper in place. Helpers cannot be explicit Surface targets, including surface:self.
 
 split creates terminal Surfaces. Compose browser content commands through the initial command:
 
@@ -41,7 +45,7 @@ FLAGS
                   Split direction. Mutually exclusive; default is --auto.
      [--json]       Print JSON output.
      [--minimize]   Create the surface minimized.
-     [--surface]    Surface to split.
+     [--surface]    Reference Surface for placement.
      [--workspace]  Workspace to act in, instead of the caller's.
   -h  --help        Print help information and exit
       --            All subsequent inputs should be interpreted as arguments

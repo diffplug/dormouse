@@ -58,7 +58,7 @@ test('a pinned executable that is gone runs the caller\'s own, and says so', asy
   const result = await runCli(['playwright', 'snapshot'], options);
   assert.deepEqual(calls.find(c => c[0] === 'exec'), ['exec', '/tools/playwright-cli', ['--session=gui-123', 'snapshot'], firstProject]);
   assert.equal(result.exitCode, 0);
-  assert.match(result.stderr, new RegExp(`playwright-cli \\(${gone}\\) is gone`));
+  assert.ok(result.stderr.includes(`playwright-cli (${gone}) is gone`), result.stderr);
   // The pane then learns the executable that ran.
   assert.equal(calls.at(-1)[1].binaryPath, '/tools/playwright-cli');
 });
@@ -67,7 +67,7 @@ test('a pinned directory that is gone is named, not reported as a missing playwr
   const { calls, options } = fixture({ session: 'gui-123', cwd: gone, binaryPath: pinnedCli });
   const result = await runCli(['playwright', '--key', 'app', 'snapshot'], options);
   assert.equal(result.exitCode, 1);
-  assert.match(result.stderr, new RegExp(`no longer exists: ${gone}`));
+  assert.ok(result.stderr.includes(`no longer exists: ${gone}`), result.stderr);
   assert.doesNotMatch(result.stderr, /not installed/);
   assert.equal(calls.some(c => c[0] === 'exec'), false);
 });
