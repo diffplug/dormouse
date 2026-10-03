@@ -76,10 +76,13 @@ function watchHelper(helper: HelperTerminal, launchCwd?: string): void {
 /** Recover a live helper PTY whose source also survived. Replays do not prove
  *  absence of user input, so recovery always disarms autorun. */
 export function restoreHelper(id: string, identity: HelperIdentity): void {
-  const helper: HelperTerminal = { ...identity, id, status: 'preserved' };
-  helpers.set(identity.parentId, helper);
-  watchHelper(helper);
   parkElement(id);
+  installHelper({ ...identity, id, status: 'preserved' });
+}
+
+function installHelper(helper: HelperTerminal): void {
+  helpers.set(helper.parentId, helper);
+  watchHelper(helper);
   notifyHelpers();
 }
 
@@ -134,9 +137,7 @@ export function reattachHelper(helper: HelperTerminal): boolean {
   const { parentId } = helper;
   if (!parentIsOpen(parentId) || !registry.has(helper.id) || helpers.get(parentId)?.promoting) return false;
   if (helpers.has(parentId)) disposeHelper(parentId);
-  helpers.set(parentId, helper);
-  watchHelper(helper);
-  notifyHelpers();
+  installHelper(helper);
   return true;
 }
 

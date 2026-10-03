@@ -11,7 +11,8 @@ import { loadJson, saveJson } from './local-json-store';
 const DELAYED_KILL_KEY = 'dormouse.labs.delayedKill';
 
 const listeners = new Set<() => void>();
-let delayedKill = loadJson(DELAYED_KILL_KEY, false, (value): value is boolean => typeof value === 'boolean');
+const isBoolean = (value: unknown): value is boolean => typeof value === 'boolean';
+let delayedKill = loadJson(DELAYED_KILL_KEY, false, isBoolean);
 
 /** Whether this host offers Labs at all: Standalone only. */
 export function labsAvailable(): boolean {
@@ -43,7 +44,7 @@ export function subscribeToLabsSettings(listener: () => void): () => void {
 // Another window changed it.
 globalThis.addEventListener?.('storage', (event: StorageEvent) => {
   if (event.key !== DELAYED_KILL_KEY) return;
-  const next = loadJson(DELAYED_KILL_KEY, false, (value): value is boolean => typeof value === 'boolean');
+  const next = loadJson(DELAYED_KILL_KEY, false, isBoolean);
   if (next === delayedKill) return;
   delayedKill = next;
   for (const listener of listeners) listener();

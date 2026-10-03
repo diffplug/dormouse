@@ -75,7 +75,8 @@ function expire(): void {
   const now = Date.now();
   const due = [...entries.entries()].filter(([, { kill }]) => kill.resumedAt !== null && timeLeft(kill, now) <= 0);
   for (const [key] of due) finalizePendingKill(key);
-  arm();
+  // Each finalize re-arms; a timer that fired early has nothing due yet.
+  if (due.length === 0) arm();
 }
 
 export function pendingKillKey(kind: PendingKillKind, id: string): string {
@@ -140,10 +141,6 @@ export function subscribeToPendingKills(listener: () => void): () => void {
   return () => { listeners.delete(listener); };
 }
 
-export function newestPendingKill(): PendingKill | null {
-  return snapshot[0] ?? null;
-}
-
 export function getPendingKill(kind: PendingKillKind, id: string): PendingKill | null {
   return entries.get(pendingKillKey(kind, id))?.kill ?? null;
 }
@@ -152,11 +149,28 @@ export function getPendingKill(kind: PendingKillKind, id: string): PendingKill |
  *  pending Surface or helper, or a member of a pending Workspace. Hidden from
  *  Clients and silenced (`docs/specs/reopen.md`). */
 export function isPendingKillSession(id: string): boolean {
-  if (entries.has(pendingKillKey('surface', id)) || entries.has(pendingKillKey('helper', id))) return true;
-  for (const [workspaceId, ids] of getWorkspaceSurfacesSnapshot()) {
-    if (ids.includes(id)) return entries.has(pendingKillKey('workspace', workspaceId));
-  }
-  return false;
+  return entries.size > 0 && pendingKillSessionIds().includes(id);
+}
+
+/** Every Session a pending kill keeps alive: its Surface or helper, or every
+ *  member of its Workspace. */
+export function pendingKillSessionIds(): string[] {
+  if (entries.size === 0) return [];
+  const membership = getWorkspaceSurfacesSnapshot();
+  return snapshot.flatMap(kill => kill.kind === 'workspace' ? membership.get(kill.id) ?? [] : [kill.id]);
+}
+
+/** A pending kill in `workspaceId` is this Wall's own, whatever its kind but a Workspace's. */
+export function isOwnPendingKill(kill: PendingKill, workspaceId: WorkspaceId): boolean {
+  return kill.kind !== 'workspace' && kill.workspaceId === workspaceId;
+}
+
+/** Why a `dor` Surface target names nothing in `workspaceId`: a pending kill,
+ *  by its stable id anywhere or by the ref it keeps there. */
+export function pendingSurfaceRefusal(target: string, named: { ref?: string; id?: string }, workspaceId: WorkspaceId): string | null {
+  const pending = snapshot.some(kill => kill.kind === 'surface'
+    && (named.ref !== undefined ? kill.ref === named.ref && kill.workspaceId === workspaceId : kill.id === named.id));
+  return pending ? `surface '${target}' is a pending kill` : null;
 }
 
 /** How far through its countdown a kill is, 0 to 1. */

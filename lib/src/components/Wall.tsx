@@ -74,7 +74,7 @@ import { registerWallHandle, type WallHandle } from './wall/wall-handles';
 import { prepareWorkspaceTransfer } from './wall/workspace-transfer';
 import { installDorControlRouter } from './wall/dor-control-router';
 import { reopenClosed } from './wall/reopen';
-import { addPendingKill, finalizePendingKills, getPendingKill, getPendingKills, type PendingKill } from '../lib/pending-kills';
+import { addPendingKill, finalizePendingKills, isOwnPendingKill, type PendingKill } from '../lib/pending-kills';
 import { isDelayedKillEnabled } from '../lib/labs-settings';
 import { remove as removeFromTree, type DropTarget, type RestoreToken } from '../lib/lath/ops';
 import { pushReopenRecord, type SurfaceReopenRecord } from '../lib/reopen-stack';
@@ -116,7 +116,7 @@ import { useWallKeyboard } from './wall/use-wall-keyboard';
 import { useSessionPersistence } from './wall/use-session-persistence';
 import { useDevServerPortCorrelation } from './wall/use-dev-server-ports';
 import { useAlertDelivery } from './wall/use-alert-delivery';
-import { classifySurfaceTarget, queueToolSpawn, restartSurfaceInPlace, toolRunCommand, useDorControl, waitForNewToolCommand } from './wall/use-dor-control';
+import { queueToolSpawn, restartSurfaceInPlace, toolRunCommand, useDorControl, waitForNewToolCommand } from './wall/use-dor-control';
 import { errorText } from './wall/dor-control-shared';
 import { useWindowFocused } from './wall/use-window-focused';
 import { useEngagementFocus } from './wall/use-engagement-focus';
@@ -763,17 +763,7 @@ export function Wall({
   }, [fireEvent, forgetSurfaceRef, removeDoor, selectAfterKill, disposeDetached, lath, nav]);
 
   /** This Wall's own pending Surfaces and helpers. */
-  const ownPendingKill = (kill: PendingKill): boolean => kill.kind !== 'workspace' && kill.workspaceId === effectiveWorkspaceId;
-
-  /** Why a `dor` target names nothing: a pending kill of this Wall's, by its
-   *  stable id or the ref it keeps (`docs/specs/reopen.md`). */
-  const pendingKillRefusal = (target: string): string | null => {
-    const classified = classifySurfaceTarget(target);
-    const pending = classified.kind === 'stable' ? getPendingKill('surface', classified.id)
-      : classified.kind === 'ref' ? getPendingKills().find(kill => kill.kind === 'surface' && kill.workspaceId === effectiveWorkspaceId && kill.ref === classified.ref) ?? null
-        : null;
-    return pending ? `surface '${target}' is a pending kill` : null;
-  };
+  const ownPendingKill = (kill: PendingKill): boolean => isOwnPendingKill(kill, effectiveWorkspaceId);
 
   /** Make a close that would ask a pending kill instead (set below, once
    *  restoring has what it needs). */
@@ -1752,7 +1742,6 @@ export function Wall({
 
   const previewSlot = usePreviewSlotPin(lath);
   const { findSurfaceByParams, updateSurfaceParams, handleDorControl } = useDorControl({
-    pendingKillRefusal,
     lath,
     nav,
     doorsRef,
@@ -2056,7 +2045,7 @@ export function Wall({
       unregister();
       releaseRouter();
       clearWorkspaceSurfaces(handle.workspaceId);
-      finalizePendingKills(kill => kill.kind !== 'workspace' && kill.workspaceId === handle.workspaceId);
+      finalizePendingKills(kill => isOwnPendingKill(kill, handle.workspaceId));
     };
   }, []);
 

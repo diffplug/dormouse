@@ -100,20 +100,29 @@ export async function closeWorkspaceWithSurfaces(
       if (mode === 'prompt') setActiveWorkspace(id);
       return refusal;
     }
-    let closed = false;
-    // Mount a replacement Wall before selecting its tab, including the last close.
-    flushSync(() => { closed = closeWorkspace(id); });
-    if (!closed) return 'Workspace no longer exists';
+    if (!dropFromStrip(id, mode === 'prompt')) return 'Workspace no longer exists';
     if (record) pushReopenRecord(record);
-    forgetWorkspaceSession(id);
-    // Clear only this Workspace's chrome: a stranded editor or confirmation
-    // holds the keyboard lease after its Workspace disappears.
-    dismissWorkspaceUi(id);
-    if (mode === 'prompt') getWallHandle(getActiveWorkspaceId())?.selectWorkspaceTab();
     return null;
   } finally {
     closeInFlight = false;
   }
+}
+
+/**
+ * Take a Workspace off the strip — the store selects a successor, or a fresh
+ * replacement — with its record and chrome. False when it was already gone.
+ */
+function dropFromStrip(id: WorkspaceId, selectSuccessor: boolean): boolean {
+  let closed = false;
+  // Mount a replacement Wall before selecting its tab, including the last close.
+  flushSync(() => { closed = closeWorkspace(id); });
+  if (!closed) return false;
+  forgetWorkspaceSession(id);
+  // Clear only this Workspace's chrome: a stranded editor or confirmation
+  // holds the keyboard lease after its Workspace disappears.
+  dismissWorkspaceUi(id);
+  if (selectSuccessor) getWallHandle(getActiveWorkspaceId())?.selectWorkspaceTab();
+  return true;
 }
 
 /**
@@ -182,16 +191,12 @@ function pendWorkspace(id: WorkspaceId): void {
   const index = workspaces.findIndex(workspace => workspace.id === id);
   if (index < 0) return;
   const meta = workspaces[index];
-  dismissWorkspaceUi(id);
   setHeld([...held, id]);
-  // Off the strip: the store selects a successor, or a fresh replacement.
-  flushSync(() => { closeWorkspace(id); });
-  // Nothing pending survives a restart.
-  forgetWorkspaceSession(id);
-  getWallHandle(getActiveWorkspaceId())?.selectWorkspaceTab();
+  // Its record goes with it: nothing pending survives a restart.
+  dropFromStrip(id, true);
   const release = () => setHeld(held.filter(heldId => heldId !== id));
   const restore = (focus: boolean) => {
-    createWorkspace({ id, name: meta.name, nameIsAuto: meta.nameIsAuto, alertDelivery: meta.alertDelivery, activate: focus });
+    createWorkspace({ ...meta, activate: focus });
     moveWorkspace(id, index);
     release();
     // Back on the strip: its record is written again.
@@ -208,7 +213,6 @@ function pendWorkspace(id: WorkspaceId): void {
         // Work that refuses to close (a helper's) brings the Workspace back to say so.
         if (refusal) { restore(true); return; }
         release();
-        dismissWorkspaceUi(id);
       });
     },
   });

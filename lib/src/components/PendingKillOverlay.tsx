@@ -20,7 +20,11 @@ export function PendingKillOverlay() {
   // finalize from the bottom, and a bottom-anchored stack would otherwise slide
   // the held entry out from under the pointer.
   const [frozenHeight, setFrozenHeight] = useState<number | null>(null);
-  if (kills.length === 0) return null;
+  if (kills.length === 0) {
+    // The last entry can leave under the pointer, with no pointerleave to thaw it.
+    if (frozenHeight !== null) setFrozenHeight(null);
+    return null;
+  }
   const hidden = kills.length - SHOWN;
   return (
     <ol

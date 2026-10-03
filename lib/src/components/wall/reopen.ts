@@ -2,7 +2,7 @@ import type { ReopenResponse } from 'dor/commands/types';
 import { getPlatform } from '../../lib/platform';
 import { newestReopenClosedAt, popReopenRecord, pushReopenRecord, type SurfaceReopenRecord, type WorkspaceReopenRecord } from '../../lib/reopen-stack';
 import { withFreshSurfaceIds } from '../../lib/session-remap';
-import { newestPendingKill, pendingKillKey, restorePendingKill, type PendingKill } from '../../lib/pending-kills';
+import { getPendingKills, pendingKillKey, restorePendingKill, type PendingKill } from '../../lib/pending-kills';
 import { restoreSession } from '../../lib/session-restore';
 import { createWorkspace, generateWorkspaceId, getActiveWorkspaceId, moveWorkspace, setActiveWorkspace, workspaceRefFor } from '../../lib/workspace-store';
 import type { DorControlRequest } from './use-dor-control';
@@ -26,7 +26,7 @@ export const NOTHING_TO_REOPEN = 'Nothing to reopen';
  */
 export async function reopenClosed({ gesture }: { gesture: boolean }): Promise<ReopenResponse | null> {
   const recordAt = newestReopenClosedAt() ?? 0;
-  const pending = newestPendingKill();
+  const pending = getPendingKills()[0];
   // A host that cannot answer leaves this Window's own records to answer.
   const reopenedWindow = await getPlatform().reopenClosedWindow?.(Math.max(recordAt, pending?.startedAt ?? 0)).catch((error: unknown) => {
     console.warn('[reopen] the host could not reopen a closed window', error);

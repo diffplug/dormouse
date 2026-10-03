@@ -8,7 +8,7 @@ import { deriveSessionLabels } from './session-label';
 import { getTerminalPaneStateSnapshot, subscribeToTerminalPaneState } from './terminal-state-store';
 import { getWorkspace, getWorkspacesSnapshot } from './workspace-store';
 import { getWorkspaceSurfacesSnapshot } from './workspace-surfaces';
-import { getPendingKills, subscribeToPendingKills } from './pending-kills';
+import { getPendingKills, pendingKillSessionIds, subscribeToPendingKills } from './pending-kills';
 
 /**
  * This realm's half of ring delivery (`docs/specs/alert.md` -> Alarm
@@ -51,6 +51,7 @@ function publishAlertSessions(send: (sessions: Record<string, AlertSessionInfo>)
   let stale: Set<string> | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let dueAt = 0;
+  let pendingKey = '';
 
   function schedule(delayMs: number): void {
     const at = Date.now() + delayMs;
@@ -98,14 +99,11 @@ function publishAlertSessions(send: (sessions: Record<string, AlertSessionInfo>)
     }
     // A pending kill rings nobody: published silenced, so whatever it armed is
     // consumed rather than delivered (`docs/specs/reopen.md`).
-    for (const kill of pending) {
-      const ids = kill.kind === 'workspace' ? surfaces.get(kill.id) ?? [] : [kill.id];
-      for (const id of ids) {
-        const prior = sent.get(id);
-        const same = prior !== undefined && sameAlertDeliveryOverrides(prior.overrides, SILENCED);
-        published.set(id, same ? prior : { label: prior?.label ?? kill.title, overrides: SILENCED });
-        if (!same) changed = true;
-      }
+    for (const id of pendingKillSessionIds()) {
+      const prior = sent.get(id);
+      const same = prior !== undefined && sameAlertDeliveryOverrides(prior.overrides, SILENCED);
+      published.set(id, same ? prior : { label: prior?.label ?? labels.get(id) ?? 'terminal', overrides: SILENCED });
+      if (!same) changed = true;
     }
     if (!changed && published.size === sent.size) return;
     sent = published;
@@ -114,7 +112,13 @@ function publishAlertSessions(send: (sessions: Record<string, AlertSessionInfo>)
 
   const stops = [
     subscribeToAlertDeliveryPolicy(() => schedule(0)),
-    subscribeToPendingKills(() => schedule(0)),
+    // Holding a countdown changes nothing published: only which kills are pending.
+    subscribeToPendingKills(() => {
+      const key = getPendingKills().map(kill => `${kill.kind}:${kill.id}`).join();
+      if (key === pendingKey) return;
+      pendingKey = key;
+      schedule(0);
+    }),
     subscribeToTerminalPaneState(labelMayChange),
     subscribeToActivity(labelMayChange),
   ];

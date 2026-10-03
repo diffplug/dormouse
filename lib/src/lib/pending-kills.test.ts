@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   _resetPendingKillsForTesting, addPendingKill, finalizePendingKills, getPendingKills, holdPendingKill,
-  newestPendingKill, PENDING_KILL_MS, pendingKillKey, pendingKillProgress, restorePendingKill,
+  PENDING_KILL_MS, pendingKillKey, pendingKillProgress, restorePendingKill,
 } from './pending-kills';
 
 function pend(id: string) {
@@ -43,7 +43,6 @@ describe('pending kills', () => {
     vi.advanceTimersByTime(10);
     const b = pend('b');
     expect(getPendingKills().map(kill => kill.id)).toEqual(['b', 'a']);
-    expect(newestPendingKill()?.id).toBe('b');
     restorePendingKill(pendingKillKey('surface', 'b'), false);
     expect(b.restore).toHaveBeenCalledWith(false);
     vi.advanceTimersByTime(PENDING_KILL_MS);

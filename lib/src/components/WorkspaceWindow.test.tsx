@@ -1344,6 +1344,18 @@ describe('Reopen a closed Workspace', () => {
   });
 });
 
+it('never moves a Wall\'s DOM when the strip reorders, which would reload its iframes', async () => {
+  const first = getActiveWorkspaceId();
+  createWorkspace({ id: 'ws-2', activate: false });
+  createWorkspace({ id: 'ws-3', activate: false });
+  await render();
+  const before = walls();
+  await act(async () => { workspaceStore.moveWorkspace('ws-3', 0); });
+  await flush();
+  expect(getWorkspacesSnapshot().workspaces.map(ws => ws.id)).toEqual(['ws-3', first, 'ws-2']);
+  expect(walls()).toEqual(before);
+});
+
 describe('Labs: a Workspace close that would ask, kept pending', () => {
   beforeEach(() => {
     Object.assign(fake, { offersLabs: true });

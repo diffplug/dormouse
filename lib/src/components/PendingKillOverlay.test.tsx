@@ -65,6 +65,16 @@ describe('PendingKillOverlay', () => {
     expect(list.style.minHeight).toBe('');
   });
 
+  it('thaws when its last entry leaves under the pointer', () => {
+    pend('a');
+    const list = container.querySelector<HTMLElement>('ol')!;
+    vi.spyOn(list, 'getBoundingClientRect').mockReturnValue({ height: 120 } as DOMRect);
+    act(() => list.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, relatedTarget: document.body })));
+    act(() => container.querySelector<HTMLButtonElement>('button[aria-label="Kill now"]')!.click());
+    pend('b');
+    expect(container.querySelector<HTMLElement>('ol')!.style.minHeight).toBe('');
+  });
+
   it('holds an entry\'s countdown while the pointer rests on it', () => {
     pend('a');
     const entry = entries()[0];

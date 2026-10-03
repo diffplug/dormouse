@@ -2,7 +2,7 @@ import { withFreshSurfaceIds } from '../../lib/session-remap';
 import type { PersistedWindow, PersistedWorkspace, WorkspaceId } from '../../lib/session-types';
 import { generateWorkspaceId, getWorkspacesSnapshot } from '../../lib/workspace-store';
 import { getWallHandle } from './wall-handles';
-import { getPendingKills } from '../../lib/pending-kills';
+import { pendingKillSessionIds } from '../../lib/pending-kills';
 import { countRunningSessionsIn } from '../../lib/terminal-state-store';
 
 /**
@@ -19,10 +19,6 @@ export function windowNeedsCloseConfirmation(): boolean {
     || countRunningSessionsIn(pendingKillSessionIds()) > 0;
 }
 
-/** Every Session a pending kill keeps alive. */
-function pendingKillSessionIds(): string[] {
-  return getPendingKills().flatMap(kill => kill.kind === 'workspace' ? getWallHandle(kill.id)?.surfaceIds() ?? [] : [kill.id]);
-}
 
 /**
  * This Window as the snapshot a reopened window boots from, or null when its

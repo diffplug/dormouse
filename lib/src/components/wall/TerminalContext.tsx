@@ -58,8 +58,9 @@ export function TerminalContext({ id, title, closing, origin, warning: openWarni
   const copy = async (value: string) => { if (!await writeTextToClipboard(value)) throw new Error('Could not copy to clipboard'); };
   const mismatch = !!helper && !!cwd && !!helperCwd && (cwd.path !== helperCwd.path || cwd.isRemote !== helperCwd.isRemote || (cwd.isRemote && cwd.host !== helperCwd.host));
   const source = wallHandleOwning(id);
+  const label = deriveSurfaceLabel(state, appTitleForPane, title ?? id);
   const warning = openWarning ?? (helperError || (helper && helper.status !== 'waiting' && (!cwd || !helperCwd) ? 'Directory comparison unavailable: a terminal has not reported its directory.' : undefined));
-  return <TerminalContextView placement={placement} terminalRole={tool ? 'tool' : 'helper'} closing={closing} origin={origin} title={deriveSurfaceLabel(state, appTitleForPane, title ?? id)} surfaceRef={actions.resolveSurfaceRef(id)}
+  return <TerminalContextView placement={placement} terminalRole={tool ? 'tool' : 'helper'} closing={closing} origin={origin} title={label} surfaceRef={actions.resolveSurfaceRef(id)}
     workspaceMove={source?.canMoveSurfaces ? <MoveWorkspaceAction id={id} sourceId={source.workspaceId} /> : undefined} titleSources={titleSources} cwd={cwd ? display(cwd) : 'Directory unknown'} helperCwd={helperCwd && display(helperCwd)} mismatch={mismatch}
     scan={scan} watchRule={offeredRule} watching={watchRule !== null} todo={activities.get(id)?.todo === true} notification={activities.get(id)?.notification}
     status={tool ? (state.currentCommand ? 'running' : 'completed') : helper?.status ?? 'waiting'} command={tool ? state.currentCommand?.rawCommandLine ?? state.lastCommand?.rawCommandLine ?? '' : helper?.command ?? defaultCommand} defaultCommand={defaultCommand} warning={warning}
@@ -71,7 +72,7 @@ export function TerminalContext({ id, title, closing, origin, warning: openWarni
     onPort={(entry, mode) => context.openPort(id, entry, mode)}
     onModify={async command => { await platform.terminalContext?.({ op: 'settings', command }); setDefaultCommand(command); }}
     resetAsks={!isDelayedKillEnabled()}
-    onReset={async () => { resetHelper(id, source?.workspaceId ?? DEFAULT_WORKSPACE_ID, deriveSurfaceLabel(state, appTitleForPane, title ?? id)); await openHelper(id); }} onPromote={() => context.promote(id)}
+    onReset={async () => { resetHelper(id, source?.workspaceId ?? DEFAULT_WORKSPACE_ID, label); await openHelper(id); }} onPromote={() => context.promote(id)}
     onKeepPreview={preview ? () => actions.onPinPreview?.(id) : undefined}>
     {tool && <div data-context-terminal={id} className="h-full px-3 py-2" onMouseDown={() => getTerminalInstance(id)?.focus()}><TerminalPane id={id} isFocused={false} /></div>}
     {helper && <div data-helper-terminal={helper.id} className="h-full px-3 py-2" onMouseDown={() => focusSession(helper.id, true)}><TerminalPane key={helper.id} id={helper.id} isFocused={false} /></div>}
