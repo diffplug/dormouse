@@ -346,6 +346,8 @@ with an `error` and reaches no Burrow.
   binding; the previously bound live Burrow gets `client-gone` first.
 - **A `transport` frame is forwarded only within that binding**, in either
   direction; one outside it is dropped.
+- **A frame naming an offline Burrow is answered with an offline `error`**
+  and leaves the binding as it was.
 - **Never parsed, never remembered, never authorized**: the Relay does not decode
   `ct`, keeps no Noise state, and verifies nothing; only the Burrow knows whether
   a ceremony succeeded.
