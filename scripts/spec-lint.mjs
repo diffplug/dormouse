@@ -53,8 +53,10 @@
  *  13. Every citation of a spec section — `docs/specs/<name>.md -> "Heading"`,
  *      `→ Heading`, `§Heading`, or `` `## Future` `` — in a tracked source
  *      file or spec names a spec that exists and a heading (quoted forms may
- *      also name a bolded phrase) that exists in it. Code comments cite specs
- *      this way in hundreds of places and nothing else keeps them honest.
+ *      also name a bolded phrase) that exists in it. A quoted heading may wrap
+ *      onto the next line, and every quoted heading in a list (`-> "A", "B"
+ *      and "C"`) is checked. Code comments cite specs this way in hundreds of
+ *      places and nothing else keeps them honest.
  *  14. A rationale file states no rule: no paragraph or bullet opens with a
  *      bolded imperative (**Never …**, **Must …**, …). Those belong in the
  *      spec.
@@ -469,7 +471,8 @@ for (const spec of foldCheckedFiles) {
 // `` `## Future` ``. A quoted reference may also name a bolded phrase; an
 // unquoted one runs on into the sentence, so its prefixes are tried, and a
 // lone word must open a heading. A numbered `§` names the heading that carries
-// that number.
+// that number. A quoted reference may continue as a list (`"A", "B" and "C"`),
+// and may wrap: a line with an unclosed quote is read joined to the next one.
 const CITABLE = [...new Set([...ROOT_FILES.filter((f) => f.endsWith('.md')), ...EXTERNAL_SPECS])]
   .map((f) => f.replaceAll('.', '\\.')).join('|');
 const CITATION_RE = new RegExp(
@@ -479,6 +482,10 @@ const CITATION_RE = new RegExp(
   '|\\(\\s*"([^"]+)")',
   'g',
 );
+// The further headings of a quoted citation, from just past its first one.
+const MORE_QUOTED_RE = /^\s*(?:,\s*(?:and\s+|or\s+)?|and\s+|or\s+)"([^"]+)"/;
+// A comment or blockquote marker that opens a continuation line.
+const CONTINUATION_RE = /^\s*(?:\/\/+|\*(?!\*)|#|>)?\s*/;
 const CITING_FILE_RE = new RegExp(`\\.(?:${SOURCE_EXTENSIONS.join('|')})$`);
 const citeTarget = memo((rel) => {
   const text = readIfExists(rel);
@@ -491,9 +498,14 @@ const citeTarget = memo((rel) => {
 for (const rel of trackedFiles().filter((f) => CITING_FILE_RE.test(f))) {
   let text;
   try { text = read(rel); } catch { continue; }
-  text.split('\n').forEach((line, i) => {
-    if (!line.includes('.md')) return; // every citable name ends in .md; this guard is exact, and cheaper than the regex
+  const lines = text.split('\n');
+  lines.forEach((own, i) => {
+    if (!own.includes('.md')) return; // every citable name ends in .md; this guard is exact, and cheaper than the regex
+    // An odd quote count means a quoted heading wraps; a match must still start on this line.
+    const wraps = (own.split('"').length - 1) % 2 === 1 && i + 1 < lines.length;
+    const line = wraps ? `${own} ${lines[i + 1].replace(CONTINUATION_RE, '')}` : own;
     for (const m of line.matchAll(CITATION_RE)) {
+      if (m.index >= own.length) break;
       const t = citeTarget(m[1]);
       if (!t) {
         // A backticked path in a spec is check 4's report already; anything else is nobody's.
@@ -502,28 +514,33 @@ for (const rel of trackedFiles().filter((f) => CITING_FILE_RE.test(f))) {
         continue;
       }
       const quoted = m[2] !== undefined || m[6] !== undefined;
-      const ref = (m[2] ?? m[3] ?? m[4] ?? m[5] ?? m[6]).replace(/^#+\s*/, '').trim();
-      if (!ref) continue;
+      const refs = [(m[2] ?? m[3] ?? m[4] ?? m[5] ?? m[6]).replace(/^#+\s*/, '').trim()];
+      if (quoted) {
+        let rest = line.slice(m.index + m[0].length);
+        for (let more; (more = rest.match(MORE_QUOTED_RE)); rest = rest.slice(more[0].length)) refs.push(more[1].trim());
+      }
       const inHeading = (r) => t.heads.some((h) => h.includes(r));
       const opensHeading = (r) => t.heads.some((h) => h === r || h.startsWith(`${r} `) || h.startsWith(`${r}:`));
       const names = (r) => inHeading(r) || t.bolds.some((b) => b.includes(r));
-      let ok;
-      if (/^\d+(?:\.\d+)*$/.test(ref)) {
-        ok = t.heads.some((h) => h.startsWith(`${ref} `) || h.startsWith(`${ref}.`));
-      } else if (quoted) {
-        ok = names(ref);
-      } else {
-        const words = ref.split(/\s+/);
-        ok = words.some((_, k) => {
-          const r = words.slice(0, words.length - k).join(' ');
-          return r.includes(' ') ? names(r) : opensHeading(r);
-        });
-      }
-      if (!ok) {
-        problems.push(
-          `${rel}:${i + 1}: cites ${m[1]} -> "${ref}", which names no heading` +
-          `${quoted ? ' or phrase' : ''} in that file`,
-        );
+      for (const ref of refs.filter(Boolean)) {
+        let ok;
+        if (/^\d+(?:\.\d+)*$/.test(ref)) {
+          ok = t.heads.some((h) => h.startsWith(`${ref} `) || h.startsWith(`${ref}.`));
+        } else if (quoted) {
+          ok = names(ref);
+        } else {
+          const words = ref.split(/\s+/);
+          ok = words.some((_, k) => {
+            const r = words.slice(0, words.length - k).join(' ');
+            return r.includes(' ') ? names(r) : opensHeading(r);
+          });
+        }
+        if (!ok) {
+          problems.push(
+            `${rel}:${i + 1}: cites ${m[1]} -> "${ref}", which names no heading` +
+            `${quoted ? ' or phrase' : ''} in that file`,
+          );
+        }
       }
     }
   });
