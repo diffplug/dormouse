@@ -168,12 +168,12 @@ sequenceDiagram
       R-->>Burrow: expired
     else no live approval
       R-->>Burrow: pending
-    else live, unredeemed
-      R-->>Burrow: enrolled {burrowId, burrowToken, origin, rpId}
     else already redeemed
       R-->>Burrow: redeemed {burrowId}
     else approver not entitled, or account full
       R-->>Burrow: 403 NOT_ENTITLED_ERROR, or 409, approval kept
+    else live, unredeemed
+      R-->>Burrow: enrolled {burrowId, burrowToken, origin, rpId}
     end
   end
 ```
