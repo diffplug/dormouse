@@ -31,9 +31,9 @@
  *      heading in the spec), and has no `## Future` — rationale files are
  *      informative, the fold belongs to the spec. Rationale files are not
  *      specs: they skip checks 1, 2, and 5 but ride 3 and 4.
- *   9. Retired: navigation maps and section-local pointers may coexist.
- *      Maps are optional and need not cover every file; check 4 validates
- *      their repo paths, while check 12 validates targeted pointers.
+ *   9. A spec navigates by one form: a `Files` / `Code Map` heading (any
+ *      level, any case) or section-local `Source of truth` pointers, never
+ *      both. Check 4 validates a map's repo paths, check 12 the pointers.
  *  10. Word-budget ratchet: every spec, plus AGENTS.md and SECURITY.md, stays
  *      under its budget in scripts/spec-word-budgets.json. A budget is the
  *      file's size rounded up to the nearest BUDGET_STEP words. Growth past
@@ -331,6 +331,26 @@ for (const rat of rationaleFiles) {
   }
 }
 
+// A `Source of truth` lead-in, however punctuated, that points into this repo;
+// `Source of truth (<name> repo):` points outside it. Checks 9 and 12 share it.
+function sourceOfTruthLead(line) {
+  const lead = /Source of truth\b([^:\n]*):/.exec(line);
+  return lead && !/\brepo\)/.test(lead[1]) ? lead : null;
+}
+
+// --- Check 9: a map or pointers, never both ----------------------------------
+const MAP_HEADING_RE = /^(?:Files|Code Map)$/i;
+for (const spec of foldCheckedFiles) {
+  const map = headings(spec).find((h) => MAP_HEADING_RE.test(h.title));
+  if (!map) continue;
+  const pointer = proseLines(spec).findIndex(sourceOfTruthLead);
+  if (pointer === -1) continue;
+  problems.push(
+    `${spec}:${pointer + 1}: \`Source of truth\` pointer beside "${'#'.repeat(map.level)} ${map.title}" (line ${map.line}) — ` +
+    'choose the map or section pointers, never both (AGENTS.md -> "Specs")',
+  );
+}
+
 // --- Check 10: word-budget ratchet ------------------------------------------
 // A budget is the file's size rounded up to the nearest BUDGET_STEP words, so
 // a rule (46 words at the corpus median) rarely fits without trimming a clause
@@ -418,9 +438,8 @@ const SYMBOLS_IN_FILE_RE = /((?:`[^`\n]+`\s*(?:\/|,|and|\+)?\s*)+)\bin\s+`([^`\n
 for (const spec of foldCheckedFiles) {
   const lines = proseLines(spec);
   lines.forEach((line, i) => {
-    const lead = /Source of truth\b([^:\n]*):/.exec(line);
+    const lead = sourceOfTruthLead(line);
     if (!lead) return;
-    if (/\brepo\)/.test(lead[1])) return; // `Source of truth (<name> repo):` — outside this repo
     const para = blockAt(lines, i, line.slice(lead.index));
     const tokens = [...para.matchAll(TICK_RE)].map((m) => m[1]);
     if (!tokens.some(checkablePath)) {

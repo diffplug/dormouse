@@ -48,6 +48,10 @@ it replaced.
 
 ## Reference page chrome
 
+`/docs` redirects with a 302 rather than a 301 because its target is a
+judgement call expected to be revisited, and a 301 outlives it in readers'
+caches.
+
 Brand caramel measures 5.56:1 on the site's black but 3.43–3.78:1 on every
 bundled light theme, which is why prose links could not keep it once the docs
 pages started following the reader's theme.
@@ -87,6 +91,14 @@ kind: they 302 to a signature-expiring S3 object (so `HEAD` 403s where `GET`
 succeeds), cannot be cached downstream, leak every visitor's IP to a third
 party, and disappear with the comment they were uploaded to — taking the
 listing's images with them.
+
+## `/self-host` runbook
+
+`SELF_HOST.md` has two consumers that outrank the website: an assistant reads
+it in a checkout (`read @SELF_HOST.md and walk me through it`), and
+`scripts/deploy-lint.mjs` audits its Installer contract against
+`deploy/local/`. A second copy under `website/` would be a second file to keep
+true about how a server is installed.
 
 ## Homepage browser proof
 

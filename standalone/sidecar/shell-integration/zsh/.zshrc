@@ -46,7 +46,7 @@ if [[ -z ${DORMOUSE_SHELL_INTEGRATION} ]]; then
   # splits on the first raw ';' then decodes \\ and \xNN; newlines/CR keep the
   # sequence single-line; BEL/ESC/C1-ST are the OSC terminators. Escaping costs
   # nothing here because the parser decodes \xNN back.
-  # Why terminators must not survive: docs/specs/terminal-escapes.md -> OSC 633.
+  # Why terminators must not survive: docs/specs/terminal-state.md -> "Shell-integration injection".
   #
   # Out-param rather than a return value: the call site would otherwise need
   # $(...), which forks a subshell on every command in the user's shell.
@@ -66,7 +66,7 @@ if [[ -z ${DORMOUSE_SHELL_INTEGRATION} ]]; then
   # parser reads Cwd= verbatim — no \xNN decoding, so a Windows path's
   # backslashes arrive intact — which rules out escaping, so the terminators are
   # removed instead. A path component may hold any byte but '/' and NUL, so a
-  # directory name can carry one; see docs/specs/terminal-escapes.md -> OSC 633.
+  # directory name can carry one; see docs/specs/terminal-state.md -> "Shell-integration injection".
   #
   # The C1 ST goes first and explicitly: under LC_ALL=C it is two ordinary bytes
   # that [[:cntrl:]] does not match.

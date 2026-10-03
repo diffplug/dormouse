@@ -1,0 +1,130 @@
+/* The Markdown page: MDXEditor on the workbench's --vscode-* variables, with
+ * prose at the terminal's font size and close spacing. */
+:root{color-scheme:light dark}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0;overflow:hidden}
+body{background:var(--vscode-editor-background,Canvas);color:var(--vscode-editor-foreground,CanvasText);font:var(--vscode-font-size,13px)/1.4 var(--vscode-font-family,system-ui,sans-serif)}
+#root{height:100%;display:flex;flex-direction:column;position:relative}
+
+body .mdxeditor,body .mdxeditor-popup-container{
+  --font-body:var(--vscode-font-family,system-ui,sans-serif);
+  --font-mono:var(--vscode-editor-font-family,ui-monospace,Menlo,monospace);
+  --basePageBg:var(--vscode-editor-background,Canvas);
+  --baseBase:var(--vscode-editor-background,var(--slate-1));
+  --baseBgSubtle:var(--vscode-sideBar-background,var(--slate-2));
+  --baseBg:var(--vscode-sideBar-background,var(--slate-3));
+  --baseBgHover:color-mix(in srgb,var(--vscode-editor-foreground,CanvasText) 10%,transparent);
+  --baseBgActive:color-mix(in srgb,var(--vscode-editor-foreground,CanvasText) 18%,transparent);
+  --baseLine:color-mix(in srgb,var(--vscode-editor-foreground,CanvasText) 14%,transparent);
+  --baseBorder:color-mix(in srgb,var(--vscode-editor-foreground,CanvasText) 22%,transparent);
+  --baseBorderHover:color-mix(in srgb,var(--vscode-editor-foreground,CanvasText) 35%,transparent);
+  --baseText:var(--vscode-descriptionForeground,var(--slate-11));
+  --baseTextContrast:var(--vscode-editor-foreground,var(--slate-12));
+  --accentBg:var(--vscode-list-activeSelectionBackground,var(--blue-3));
+  --accentSolid:var(--vscode-button-background,var(--blue-9));
+  --accentSolidHover:var(--vscode-button-hoverBackground,var(--blue-10));
+  --accentText:var(--vscode-textLink-foreground,var(--blue-11));
+  --accentBorder:var(--vscode-focusBorder,var(--blue-7));
+  font-family:var(--font-body);
+}
+body .mdxeditor{flex:1;min-height:0;display:flex;flex-direction:column;background:var(--basePageBg)}
+/* Each wrapper between the editor root and its scroller passes the bounded
+ * height down; otherwise the content grows past the page and wheel input has
+ * nothing to scroll. The view wrappers' display is MDXEditor's inline toggle,
+ * so their children take height:100% rather than flex. */
+body .mdxeditor-diff-source-wrapper{flex:1;min-height:0;display:flex;flex-direction:column}
+body .mdxeditor-rich-text-editor,body .mdxeditor-source-editor{flex:1;min-height:0}
+body .mdxeditor-root-contenteditable{height:100%;overflow:auto}
+
+/* Toolbar: one dense row, matching the Monaco page's header. */
+body .mdxeditor-toolbar{border-radius:0;padding:2px 6px;gap:2px;min-height:32px;box-shadow:inset 0 -1px var(--baseLine);flex:none}
+body .mdxeditor-toolbar svg{width:18px;height:18px}
+body .mdxeditor-toolbar button{padding:2px}
+.controls{display:flex;align-items:center;gap:4px;margin-left:auto;padding-left:8px;white-space:nowrap}
+.controls .state{opacity:.65;font-size:11px;margin-right:4px}
+.controls button,.mermaid-bar button,dialog button{font:inherit;font-size:12px;color:inherit;border:0;background:transparent;padding:3px 7px;border-radius:3px;cursor:pointer;white-space:nowrap}
+.controls button:hover,.mermaid-bar button:hover,dialog button:hover{background:var(--baseBgHover)}
+.controls button:focus-visible,.mermaid-bar button:focus-visible{outline:1px solid var(--vscode-focusBorder,Highlight);outline-offset:-1px}
+.controls button:disabled{opacity:.4;cursor:default}
+.controls button[aria-pressed=true]{box-shadow:inset 0 -1px currentColor}
+.controls .save:not(:disabled){background:var(--vscode-button-background,Highlight);color:var(--vscode-button-foreground,HighlightText)}
+.error{padding:6px 12px;color:var(--vscode-errorForeground,CanvasText);background:var(--vscode-sideBar-background,Canvas);white-space:pre-wrap;flex:none}
+
+/* Prose: the terminal's font size, tight leading and margins. */
+.prose{font-size:var(--vscode-editor-font-size,13px);line-height:1.4;padding:8px 14px 24px;max-width:none}
+.prose>:first-child{margin-top:0}
+.prose p{margin:0 0 .45em}
+.prose h1,.prose h2,.prose h3,.prose h4,.prose h5,.prose h6{margin:.9em 0 .3em;line-height:1.2;font-weight:600}
+.prose h1{font-size:1.5em}.prose h2{font-size:1.25em}.prose h3{font-size:1.1em}.prose h4,.prose h5,.prose h6{font-size:1em}
+.prose h1,.prose h2{padding-bottom:.15em;border-bottom:1px solid var(--baseLine)}
+.prose ul,.prose ol{margin:0 0 .45em;padding-left:1.5em}
+.prose li{margin:0}
+.prose li>p{margin:0}
+.prose blockquote{margin:0 0 .45em;padding:0 .8em;border-left:3px solid var(--baseBorder);color:var(--baseText)}
+.prose hr{border:0;border-top:1px solid var(--baseBorder);margin:.8em 0}
+.prose a{color:var(--accentText)}
+.prose code{font-family:var(--font-mono);font-size:.92em;padding:.05em .3em;border-radius:3px;background:var(--baseBgHover)}
+.prose table{border-collapse:collapse;margin:0 0 .6em}
+.prose th,.prose td{border:1px solid var(--baseBorder);padding:2px 8px;vertical-align:top}
+.prose th{background:var(--baseBgSubtle);font-weight:600}
+.prose img{max-width:100%}
+/* MDXEditor's table editor: content-sized, its row/column tools slim and shown on hover. */
+.prose [class*=tableEditor]{width:auto;min-width:min(100%,320px);table-layout:auto;height:auto}
+.prose [class*=tableEditor]>tbody>tr>:not([class*=toolCell]){padding:1px 8px}
+.prose [class*=tableEditor] :is(thead th,tfoot th,tfoot td,[class*=toolCell],[class*=tableToolsColumn]){padding:0;border:0;background:none;height:auto;min-width:16px}
+.prose [class*=tableEditor] button{padding:0;line-height:0}
+.prose [class*=tableEditor] button svg{width:14px;height:14px}
+.prose [class*=tableEditor]:not(:hover):not(:focus-within) button{visibility:hidden}
+.prose .md-comment{font-family:var(--font-mono);font-size:.85em;opacity:.55}
+/* Code blocks and frontmatter edit in the terminal font. */
+.prose .cm-editor{font-family:var(--font-mono);font-size:var(--vscode-editor-font-size,13px)}
+.prose .cm-editor .cm-scroller{font-family:inherit;line-height:1.35}
+body .mdxeditor [class*=codeMirrorWrapper]{padding:4px 6px;margin-bottom:.6em}
+/* MDXEditor fixes CodeMirror to a light theme; its chrome follows the workbench here. */
+body .mdxeditor .cm-editor{background:transparent!important;color:var(--baseTextContrast)!important}
+body .mdxeditor .cm-gutters{background:transparent!important;color:var(--baseText)!important;border-right:1px solid var(--baseLine)!important}
+body .mdxeditor .cm-activeLine,body .mdxeditor .cm-activeLineGutter{background:transparent!important}
+body .mdxeditor .cm-focused :is(.cm-activeLine,.cm-activeLineGutter){background:var(--baseBgHover)!important}
+body .mdxeditor .cm-content{caret-color:var(--baseTextContrast)!important}
+body .mdxeditor .cm-cursor{border-left-color:var(--baseTextContrast)!important}
+body .mdxeditor .cm-selectionBackground,body .mdxeditor .cm-content ::selection{background:var(--vscode-editor-selectionBackground,Highlight)!important}
+/* Code tokens in Monaco's vs / vs-dark token colors, so code here matches the
+ * file editor. Token spans are reset first, overriding the light theme's own. */
+body .mdxeditor{--tok-keyword:#0000ff;--tok-string:#a31515;--tok-string2:#800000;--tok-number:#098658;--tok-comment:#008000;--tok-type:#008080;--tok-property:#001188;--tok-meta:#808080;--tok-invalid:#cd3131;--tok-link:#0451a5}
+body .mdxeditor.dark-theme{--tok-keyword:#569cd6;--tok-string:#ce9178;--tok-string2:#b46695;--tok-number:#b5cea8;--tok-comment:#608b4e;--tok-type:#3dc9b0;--tok-property:#9cdcfe;--tok-meta:#cc6666;--tok-invalid:#f44747;--tok-link:#3794ff}
+body .mdxeditor .cm-content span{color:inherit;font-style:normal;font-weight:inherit;text-decoration:none}
+body .mdxeditor .cm-editor :is(.tok-keyword,.tok-atom,.tok-bool,.tok-heading){color:var(--tok-keyword)}
+body .mdxeditor .cm-editor :is(.tok-string,.tok-literal,.tok-deleted){color:var(--tok-string)}
+body .mdxeditor .cm-editor .tok-string2{color:var(--tok-string2)}
+body .mdxeditor .cm-editor :is(.tok-number,.tok-inserted){color:var(--tok-number)}
+body .mdxeditor .cm-editor .tok-comment{color:var(--tok-comment)}
+body .mdxeditor .cm-editor :is(.tok-typeName,.tok-className,.tok-namespace,.tok-macroName){color:var(--tok-type)}
+body .mdxeditor .cm-editor :is(.tok-propertyName,.tok-variableName2,.tok-labelName){color:var(--tok-property)}
+body .mdxeditor .cm-editor .tok-meta{color:var(--tok-meta)}
+body .mdxeditor .cm-editor .tok-invalid{color:var(--tok-invalid)}
+body .mdxeditor .cm-editor :is(.tok-link,.tok-url){color:var(--tok-link)}
+body .mdxeditor .cm-editor .tok-link{text-decoration:underline}
+body .mdxeditor .cm-editor :is(.tok-heading,.tok-strong){font-weight:600}
+body .mdxeditor .cm-editor .tok-emphasis{font-style:italic}
+body .mdxeditor-source-editor .cm-editor{font-family:var(--font-mono);font-size:var(--vscode-editor-font-size,13px);height:100%}
+body .mdxeditor-source-editor .cm-scroller{line-height:1.35}
+
+.mermaid-block{margin:0 0 .6em;border:1px solid var(--baseLine);border-radius:4px;overflow:hidden}
+.mermaid-bar{display:flex;align-items:center;justify-content:space-between;padding:1px 4px 1px 8px;font-size:11px;color:var(--baseText);background:var(--baseBgSubtle)}
+.mermaid-diagram{padding:8px;overflow:auto;text-align:center}
+.mermaid-diagram svg{max-width:100%;height:auto}
+.mermaid-error{margin:0;padding:6px 8px;font-family:var(--font-mono);font-size:12px;white-space:pre-wrap;color:var(--vscode-errorForeground,CanvasText)}
+
+.images-panel{position:absolute;top:34px;right:6px;z-index:5;width:min(360px,calc(100% - 12px));max-height:60%;overflow:auto;padding:6px;background:var(--vscode-editorWidget-background,Canvas);color:var(--vscode-editor-foreground,CanvasText);border:1px solid var(--vscode-widget-border,var(--baseBorder,GrayText));border-radius:4px;box-shadow:0 4px 14px rgba(0,0,0,.25);font-size:12px}
+.images-panel ul{list-style:none;margin:0;padding:0;display:grid;gap:4px}
+.images-panel li{display:grid;grid-template-columns:40px 1fr;grid-auto-rows:auto;align-items:center;column-gap:8px}
+.images-panel img{grid-row:span 3;width:40px;height:30px;object-fit:contain;background:var(--baseBgSubtle);border-radius:2px}
+.images-panel .image-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:inherit;font-family:var(--vscode-editor-font-family,monospace);color:inherit;background:var(--vscode-input-background,transparent);border:1px solid var(--vscode-input-border,transparent);border-radius:2px;padding:2px 4px}
+.images-panel span.image-name{background:none;border-color:transparent;opacity:.7}
+.images-panel .image-folder{grid-column:2;opacity:.6;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.images-panel .image-error{grid-column:2;color:var(--vscode-errorForeground,CanvasText);font-size:11px}
+.images-panel p{margin:4px 2px}
+.images-panel .hint{opacity:.6;font-size:11px}
+
+dialog{max-width:min(420px,90vw);border:1px solid var(--vscode-focusBorder,GrayText);padding:20px;background:var(--vscode-editorWidget-background,Canvas);color:var(--vscode-editor-foreground,CanvasText);font:inherit}
+dialog h2{font-size:14px;margin:0 0 8px}dialog p{margin:0 0 16px}dialog form>div{display:flex;justify-content:flex-end;gap:8px}

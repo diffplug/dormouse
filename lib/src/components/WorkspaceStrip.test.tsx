@@ -299,9 +299,9 @@ describe('WorkspaceStrip', () => {
     expect(getTodoSpotlight()).toBeNull();
   });
 
-  /** docs/specs/layout.md -> "Workspace tabs": borderless text on a rounded hit
-   *  area that washes on hover and harder under the press, with a pointer and a
-   *  keyboard focus ring. */
+  /** The tab's TODO pill is borderless text on a rounded hit area that washes
+   *  on hover and harder under the press, with a pointer and a keyboard focus
+   *  ring. */
   it('draws the pill borderless, with hover, press, pointer, and focus-visible states', async () => {
     const first = getWorkspacesSnapshot().workspaces[0].id;
     setWorkspaceSurfaces(first, ['pane-a']);

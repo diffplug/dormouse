@@ -244,6 +244,7 @@ export function browserDisplayModeFromParams(params: unknown): BrowserDisplayMod
  *  kind is `use-session-persistence.ts`, where this return flows into the
  *  narrower `PersistedSurfaceType`. */
 export function surfaceKindFromParams(params: unknown): SurfaceKind {
+  // Tool first: a serving Tool carries `renderMode` too.
   if (isToolParams(params)) return 'tool';
   return isBrowserParams(params) ? 'browser' : 'terminal';
 }

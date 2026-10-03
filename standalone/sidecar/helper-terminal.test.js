@@ -41,19 +41,19 @@ test('POSIX folder opening retains exit-error reporting', () => {
   });
 });
 
-test('process inspection fails closed while ordinary port discovery remains fail-soft', () => {
-  const runtime = { platform: 'darwin', execFileSync() { throw new Error('ps failed'); } };
-  assert.deepEqual(getDescendantPids(42, runtime), [42]);
-  assert.throws(() => getDescendantPids(42, { ...runtime, strict: true }), /inspect/);
+test('process inspection fails closed while ordinary port discovery remains fail-soft', async () => {
+  const runtime = { platform: 'darwin', execFile() { throw new Error('ps failed'); } };
+  assert.deepEqual(await getDescendantPids(42, runtime), [42]);
+  await assert.rejects(getDescendantPids(42, { ...runtime, strict: true }), /inspect/);
 });
 
-test('strict inspection requires the terminal process to appear in the process table', () => {
+test('strict inspection requires the terminal process to appear in the process table', async () => {
   for (const output of ['', 'invalid response', '1 0\n123 1']) {
-    const runtime = { platform: 'darwin', execFileSync() { return output; } };
-    assert.deepEqual(getDescendantPids(42, runtime), [42]);
-    assert.throws(() => getDescendantPids(42, { ...runtime, strict: true }), /inspect/);
+    const runtime = { platform: 'darwin', execFile() { return output; } };
+    assert.deepEqual(await getDescendantPids(42, runtime), [42]);
+    await assert.rejects(getDescendantPids(42, { ...runtime, strict: true }), /inspect/);
   }
-  assert.deepEqual(getDescendantPids(42, { platform: 'darwin', strict: true, execFileSync() { return '42 1\n43 42'; } }), [42, 43]);
+  assert.deepEqual(await getDescendantPids(42, { platform: 'darwin', strict: true, execFile() { return '42 1\n43 42'; } }), [42, 43]);
 });
 
 test('helper ownership survives a live listing and promotion preserves the PTY and replay', () => {

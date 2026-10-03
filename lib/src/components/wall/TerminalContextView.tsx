@@ -96,7 +96,9 @@ export function ContextAction({ children, label, onClick, disabled = false, busy
     className={`${ACTION_BOX_CLASS} disabled:opacity-40 aria-pressed:bg-current/10 ${windowFocused ? SUBTLE_ACTION_INTERACTION_CLASS : ''} ${color}`}>{children}</button>;
 }
 
-/** docs/specs/layout.md → "Header context menu" lowercases visible action text only. */
+/** Visible action text is lowercase, since `iframe` and `agent-browser` cannot be
+ *  capitalized; tooltips, accessible names, and proper nouns such as Finder keep
+ *  their case. */
 const actionText = (label: string) => label.charAt(0).toLowerCase() + label.slice(1);
 
 const COPIED = <><CheckIcon size={14} weight="bold" />copied</>;

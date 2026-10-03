@@ -1313,44 +1313,6 @@ describe('BurrowRuntime end-to-end ceremonies', () => {
     expect(burrow.trackedClientCount).toBe(0);
   });
 
-  it('refuses to pair when this Burrow has no Noise static to present', async () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const created = new BurrowRuntime({
-      // Every other field is a real enrollment; only the static is missing,
-      // which is the state a corrupt store leaves behind.
-      enrollment: {
-        ...enrollment,
-        noiseStaticPrivateKey: undefined,
-        noiseStaticPublicKey: undefined,
-      },
-      reconnect: false,
-      createWebSocket: () => (socket = new FakeSocket()),
-      loadAcl: () => [],
-      saveAcl: (_burrowId, records) => {
-        savedRecords = [...records];
-      },
-      requestApproval: (pending) => approvals.push(pending),
-      dismissApproval: (clientId) => dismissed.push(clientId),
-      onInvitationChanged: recordInvitation,
-      now: () => clock,
-    });
-    created.start();
-    socket.open();
-    burrow = created;
-    burrows.push(created);
-
-    const { invitation, session, code } = await requestPairing('c1', await newAuthenticator());
-    approvals[0]!.approve(code);
-    // A record written here would authorize a Client that could never complete
-    // a connection IK, and its `burrowStaticPublicKey` pin would be empty.
-    expect(await outcome(session, 'pairing', invitation.inviteId)).toEqual({
-      ok: false,
-      code: 'burrow-error',
-    });
-    expect(savedRecords).toEqual([]);
-    warn.mockRestore();
-  });
-
   it('drops a frame whose routing values are out of shape, before any crypto', async () => {
     makeBurrow();
     const generateKey = vi.spyOn(globalThis.crypto.subtle, 'generateKey');

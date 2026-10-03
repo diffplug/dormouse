@@ -26,7 +26,7 @@ test('the webview cannot reach a Relay', () => {
 // The inline-image addon compiles a vendored WebAssembly SIXEL decoder at
 // Session creation, so this webview needs the WASM grant — and only that one.
 // `'unsafe-eval'` would unblock the same decoder while re-enabling `eval` for
-// the whole document (docs/specs/terminal-escapes.md -> "Inline graphics").
+// the whole document (docs/specs/layout.md -> "Inline graphics").
 // Nothing else exercises this policy: the smoketest never boots a webview.
 test('script-src grants WebAssembly compilation and nothing more', () => {
   const scriptSrc = csp

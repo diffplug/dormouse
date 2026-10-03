@@ -385,6 +385,9 @@ export function MobileGestureRadialMenu({ state }: { state: MobileGestureTrackin
         || state.phase === 'complete';
       const targetOpacity = faded ? 0 : rootGroupOpacity(state, direction);
       return (
+        // One element per root label for the whole gesture: the chosen group's
+        // labels tween from root to exploded positions, never fade out and get
+        // replaced by newly spawned ones.
         <div
           key={`${direction}-${index}`}
           className={clsx(

@@ -95,7 +95,8 @@ const toolHost = createToolHost({ stateDir: process.env.DORMOUSE_STATE_DIR });
 // there and go back only once the channel is actually listening. A lost bind
 // (a squatted Windows pipe name, an unsafe socket directory) is not fatal to
 // PTY work, but it must not leave Dormouse handing the token, and the surface
-// API it opens, to whoever won the path. See docs/specs/dor-cli.md.
+// API it opens, to whoever won the path. See docs/specs/security-local.md ->
+// "The dor control socket".
 const dorControlToken = process.env.DORMOUSE_CONTROL_TOKEN;
 delete process.env.DORMOUSE_CONTROL_TOKEN;
 delete process.env.DORMOUSE_CONTROL_SOCKET;
@@ -254,7 +255,8 @@ async function shutdown() {
   shuttingDown = true;
   // Close any headed pop-out windows so quitting never orphans a real Chrome
   // window (spec → "Pop-Out" lifecycle). Bounded so a hung agent-browser
-  // can't wedge the exit; mirrors the VS Code host's deactivate().
+  // can't wedge the exit; mirrors the VS Code host's deactivate(). Must stay
+  // inside Rust's `shutdown_sidecar_and_wait` grace (~2.5s) in lib.rs.
   try {
     await Promise.race([
       browserHost.close(),

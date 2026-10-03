@@ -919,9 +919,9 @@ async function pairedNothing(ctx, { decide, burrowShot, pocketShot, as, complain
   await ctx.shot(burrowShot);
 
   // "Nothing was paired" is an absence, and the count is re-read on a 2 s poll
-  // (`docs/specs/relay.md`), so it is given a cycle to move before being
-  // believed — a count read the instant the outcome lands would pass whether or
-  // not the Burrow wrote a record.
+  // (`POLL_MS` in `lib/src/remote/burrow/burrow-status-store.ts`), so it is
+  // given a cycle to move before being believed — a count read the instant the
+  // outcome lands would pass whether or not the Burrow wrote a record.
   await delay(2_500);
   const after = await pairedCount(burrow);
   if (after !== before) {
@@ -969,8 +969,8 @@ function nextCode(code) {
  *
  * Setup codes live five minutes, so an expired one is the likeliest thing this
  * scanner ever meets — and `parsePairingInvitationUrl` refuses it with the same
- * `null` it gives a QR off a cereal box (`docs/specs/pocket-app.md` → the
- * scanner). The scenario exists because the phone used to say the same sentence
+ * `null` it gives a QR off a cereal box (`rejectionFor` in
+ * `lib/src/remote/pocket-app/ScanInvitation.tsx`). The scenario exists because the phone used to say the same sentence
  * to both, sending a user who needed a fresh code off to look for a different
  * QR. Nothing is scanned and no ceremony starts: both codes go in by hand,
  * through the paste field beside the viewfinder.

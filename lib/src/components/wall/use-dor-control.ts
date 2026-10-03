@@ -119,6 +119,8 @@ export type DorControlParams = {
   args?: unknown;
   global?: unknown;
   file?: unknown;
+  /** `tool.openHandlers`: the file the picker asks about. */
+  target?: unknown;
   tool?: unknown;
   setting?: unknown;
   initialViewport?: unknown;
@@ -664,7 +666,7 @@ export function useDorControl({
      *  terminal but renders both capabilities. */
     leafMeta?: LeafMeta;
     /** Create the leaf but stage no shell and spawn no PTY — a pane awaiting
-     *  approval (docs/specs/dor-tool.md -> Trust rule 3). */
+     *  approval (docs/specs/dor-tool.md -> Trust rule 2). */
     deferTerminal?: boolean;
     /** Lay the leaf out even beside a Door reference, which otherwise makes
      *  it a Door. */
@@ -1272,6 +1274,7 @@ export function useDorControl({
             case 'trust-recorded':
             case 'browser-config':
             case 'list':
+            case 'open-handlers':
               // Only the ops that ask for these produce them; a lookup never does.
               detail.respond({ ok: false, error: 'unexpected tool host response' });
               return;
@@ -1361,7 +1364,7 @@ export function useDorControl({
                 focusNeutral: true,
                 // No shell until a human approves: `createSplitSurface` would
                 // otherwise stage shell opts and, on some paths, spawn the PTY
-                // outright (docs/specs/dor-tool.md -> Trust rule 3).
+                // outright (docs/specs/dor-tool.md -> Trust rule 2).
                 deferTerminal: true,
                 leafMeta: toolLeafMeta(lookup.name, {
                   surfaceType: 'tool',

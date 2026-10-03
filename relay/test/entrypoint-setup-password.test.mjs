@@ -19,7 +19,8 @@ test('the running Relay accepts the setup password it persisted', async (t) => {
   const response = await fetch(`http://127.0.0.1:${port}${API_ROUTES.burrowEnroll}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ password }),
+    // The entrypoint's default origin, as `readConfig` derives it from `PORT`.
+    body: JSON.stringify({ password, origin: `http://localhost:${port}` }),
   });
 
   assert.equal(response.status, 200);

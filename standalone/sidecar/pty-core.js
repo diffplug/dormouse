@@ -1,7 +1,8 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { execFile, execFileSync, spawn } = require('node:child_process');
+const { execFile, spawn } = require('node:child_process');
+const { createPortScanner } = require('./port-scanner');
 
 function safeResolve(resolver) {
   try {
@@ -23,9 +24,11 @@ function resolveDefaultShell(platform = process.platform, env = process.env) {
   return env.SHELL || '/bin/sh';
 }
 
+// C shells must spawn without `-l`, or a csh/tcsh login shell opens no usable
+// terminal; pinned by pty-core.test.js.
 const LOGIN_ARG_UNSUPPORTED_SHELLS = new Set(['csh', 'tcsh']);
 // Mirrors ITERM2_COMPAT_VERSION in lib/src/lib/terminal-protocol.ts — pinned by
-// lib/src/lib/mirrored-constants.test.ts (terminal-escapes.md: one
+// lib/src/lib/mirrored-constants.test.ts (transport.md: one
 // compatibility version across env and device responses).
 const ITERM2_COMPAT_VERSION = '3.6.6';
 
@@ -137,7 +140,7 @@ function withPrependedPath(env, dir, platform = process.platform) {
 
 // Another terminal's identity, inherited when the host was launched from it.
 // Dormouse is the pane's terminal now, and tools read these to decide what to
-// emit (docs/specs/terminal-escapes.md -> "iTerm2 identity"). Names match
+// emit (docs/specs/transport.md -> "iTerm2 identity"). Names match
 // case-insensitively on win32, like its environment.
 const FOREIGN_TERMINAL_ENV = new RegExp(`^(?:${[
   'VTE_VERSION', 'WT_SESSION', 'WT_PROFILE_ID', 'TERM_FEATURES', 'TERM_SESSION_ID',
@@ -235,7 +238,8 @@ function winPathToWslMount(winPath) {
 // Enable OSC 633 shell integration for shells that support reliable injection,
 // returning possibly-modified { env, shellArgs }. The keystroke-based command
 // heuristic remains the fallback for shells we can't inject (cmd.exe, others)
-// or when the scripts aren't present on disk. See docs/specs/terminal-escapes.md.
+// or when the scripts aren't present on disk. See docs/specs/terminal-state.md ->
+// "Shell-integration injection".
 //
 // zsh        — injected purely via env (`ZDOTDIR`), as reliable as a PATH prepend.
 //        We point ZDOTDIR at our scripts and pass the user's real ZDOTDIR through
@@ -378,6 +382,29 @@ module.exports.resolveSpawnConfig = resolveSpawnConfig;
 module.exports.withPrependedPath = withPrependedPath;
 module.exports.canonicalizeWindowsCwd = canonicalizeWindowsCwd;
 
+// ── Subprocesses ───────────────────────────────────────────────────────────
+
+/** stdout of one subprocess, rejecting on spawn failure, non-zero exit, or
+ *  timeout with the partial stdout on `err.stdout`. Never block on a child
+ *  here: this event loop also carries every PTY's input and output
+ *  (docs/specs/transport.md -> "Universal invariants"). `runtime.execFile`
+ *  substitutes the same contract in tests. */
+function runText(runtime, command, args, options = {}) {
+  if (runtime.execFile) return Promise.resolve().then(() => runtime.execFile(command, args, options));
+  return new Promise((resolve, reject) => {
+    const child = execFile(command, args, { encoding: 'utf-8', windowsHide: true, ...options }, (err, stdout) => {
+      if (err) { err.stdout = stdout; reject(err); } else resolve(stdout);
+    });
+    child.stdin?.end();
+  });
+}
+
+/** `runText`'s stdout, or the partial stdout a failed run still printed. */
+async function runTextLenient(runtime, command, args, options) {
+  try { return await runText(runtime, command, args, options); }
+  catch (err) { return typeof err?.stdout === 'string' ? err.stdout : ''; }
+}
+
 // ── Shell detection ────────────────────────────────────────────────────────
 
 function fileExists(filePath, fsModule = fs) {
@@ -388,10 +415,9 @@ function fileExists(filePath, fsModule = fs) {
   }
 }
 
-function detectWindowsShells(runtime = {}) {
+async function detectWindowsShells(runtime = {}) {
   const env = runtime.env || process.env;
   const fsModule = runtime.fsModule || fs;
-  const execFileSyncFn = runtime.execFileSync || execFileSync;
   const systemRoot = env.SystemRoot || env.SYSTEMROOT || 'C:\\Windows';
   const shells = [];
 
@@ -432,19 +458,19 @@ function detectWindowsShells(runtime = {}) {
   // registry (`HKCU\...\Lxss\<guid>\DistributionName`) is the same source wsl.exe
   // reads, mirroring how Windows Terminal enumerates WSL.
   //
-  // windowsHide (CREATE_NO_WINDOW) below is essential, not cosmetic: the sidecar
-  // is itself spawned CREATE_NO_WINDOW, and a *synchronous* spawn of a console
-  // child without that flag deadlocks on Windows console allocation — that is the
-  // actual reason the old wsl.exe call timed out, and reg.exe times out the same
-  // way without it.
+  // windowsHide (CREATE_NO_WINDOW, set by runText) is essential, not cosmetic:
+  // the sidecar is itself spawned CREATE_NO_WINDOW, and a console child without
+  // that flag stalls on Windows console allocation — the actual reason the old
+  // wsl.exe call timed out.
   const wslExe = path.win32.join(systemRoot, 'System32', 'wsl.exe');
   if (fileExists(wslExe, fsModule)) {
     try {
       const regExe = path.win32.join(systemRoot, 'System32', 'reg.exe');
-      const raw = execFileSyncFn(
+      const raw = await runText(
+        runtime,
         regExe,
         ['query', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Lxss', '/s', '/v', 'DistributionName'],
-        { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 5000, windowsHide: true },
+        { timeout: 5000 },
       );
       for (const line of raw.split(/\r?\n/)) {
         const match = line.match(/^\s*DistributionName\s+REG_SZ\s+(.+?)\s*$/);
@@ -540,7 +566,7 @@ function detectUnixShells(runtime = {}) {
   return shells;
 }
 
-function detectAvailableShells(runtime = {}) {
+async function detectAvailableShells(runtime = {}) {
   const platform = runtime.platform || process.platform;
   if (platform === 'win32') {
     return detectWindowsShells(runtime);
@@ -589,26 +615,19 @@ function parseCwdFromLsof(output, pid) {
 
 module.exports.parseCwdFromLsof = parseCwdFromLsof;
 
-function getCwdForPid(pid, runtime = {}) {
-  return getCwdsForPids([pid], runtime).get(pid) ?? null;
-}
-
-module.exports.getCwdForPid = getCwdForPid;
-
 /**
  * `pid -> cwd` for every pid that could be resolved, in ONE pass.
  *
- * Batched at this layer because a save probes every terminal pane at once and
- * the macOS branch is a synchronous subprocess on the sidecar's only event loop:
+ * Batched at this layer because a save probes every terminal pane at once:
  * one `lsof` for N pids instead of N spawns is the whole point
  * (docs/specs/transport.md -> "Persisted session"). Linux is a readlink per pid
- * with no subprocess to batch, and Windows resolves nothing either way.
+ * with no subprocess to batch, and Windows resolves nothing.
  */
-function getCwdsForPids(pids, runtime = {}) {
+async function getCwdsForPids(pids, runtime = {}) {
   const fsModule = runtime.fsModule || fs;
-  const execFileSyncFn = runtime.execFileSync || execFileSync;
   const found = new Map();
   const unresolved = [];
+  if ((runtime.platform || process.platform) === 'win32') return found;
 
   // Linux: /proc/<pid>/cwd symlink.
   for (const pid of pids) {
@@ -620,20 +639,14 @@ function getCwdsForPids(pids, runtime = {}) {
 
   // macOS: lsof. `-a` is required so `-p` and `-d cwd` are combined instead
   // of OR'ed, which otherwise returns unrelated processes and often `/`.
-  let out = '';
-  try {
-    out = execFileSyncFn('lsof', ['-a', '-d', 'cwd', '-p', unresolved.join(','), '-Fn'], {
-      encoding: 'utf-8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-      windowsHide: true, // see runPowerShell: avoid the console-allocation deadlock
-    });
-  } catch (err) {
-    // `lsof` exits non-zero when ANY requested pid is gone, and still prints the
-    // ones it did resolve. Throwing that stdout away is what turned one dead pid
-    // into every pane losing its cwd for that save — and a quit teardown, which
-    // kills and then flushes, is exactly when a pid goes missing mid-batch.
-    out = typeof err?.stdout === 'string' ? err.stdout : (err?.stdout?.toString('utf-8') ?? '');
-  }
+  // `lsof` exits non-zero when ANY requested pid is gone, and still prints the
+  // ones it did resolve. Throwing that stdout away is what turned one dead pid
+  // into every pane losing its cwd for that save — and a quit teardown, which
+  // kills and then flushes, is exactly when a pid goes missing mid-batch.
+  // Borrows the port probes' per-subprocess cap; it only bounds a stuck `lsof`.
+  const out = await runTextLenient(runtime, 'lsof', ['-a', '-d', 'cwd', '-p', unresolved.join(','), '-Fn'], {
+    timeout: OPEN_PORT_TIMEOUT_MS,
+  });
   for (const [pid, cwd] of parseCwdsFromLsof(out)) {
     if (cwd) found.set(pid, cwd);
   }
@@ -645,9 +658,9 @@ module.exports.getCwdsForPids = getCwdsForPids;
 
 // ── Open-port discovery ──────────────────────────────────────────────────────
 //
-// `getOpenPortsForPid(rootPid)` answers "which TCP ports are listening, opened
-// by this shell or any of its descendant processes?" It works in two steps that
-// are each platform-specific but share the same shape:
+// `getOpenPortsForPids(rootPids)` answers, per root pid, "which TCP ports are
+// listening, opened by this shell or any of its descendant processes?" It works
+// in two steps that are each platform-specific but share the same shape:
 //
 //   1. getDescendantPids(rootPid) — walk the process tree to the full set of
 //      PIDs rooted at the shell (the shell itself plus every transitive child).
@@ -736,8 +749,8 @@ function parsePsPairs(output) {
 
 module.exports.parsePsPairs = parsePsPairs;
 
-function getDescendantPids(rootPid, runtime = {}) {
-  const pairs = readProcessTable(runtime);
+async function getDescendantPids(rootPid, runtime = {}) {
+  const pairs = await readProcessTable(runtime);
   if (pairs && (!runtime.strict || pairs.some(([pid]) => pid === rootPid))) return [...buildDescendantSet(pairs, rootPid)];
   // Port discovery tolerates a failed scan; helper work inspection must not
   // mistake one for idle (docs/specs/terminal-context.md).
@@ -745,11 +758,12 @@ function getDescendantPids(rootPid, runtime = {}) {
   return [rootPid];
 }
 
-/** Every `[pid, ppid]` pair on this platform, or null when the scan fails or the platform is unknown. */
-function readProcessTable(runtime) {
+/** Every `[pid, ppid]` pair on this platform — `[pid, ppid, name]` on Windows,
+ *  where the same query names each process — or null when the scan fails or
+ *  the platform is unknown. */
+async function readProcessTable(runtime) {
   const platform = runtime.platform || process.platform;
   const fsModule = runtime.fsModule || fs;
-  const execFileSyncFn = runtime.execFileSync || execFileSync;
 
   try {
     if (platform === 'linux') {
@@ -767,22 +781,17 @@ function readProcessTable(runtime) {
 
     // macOS (and any other POSIX): ps gives the whole pid/ppid table.
     if (platform === 'darwin') {
-      const out = execFileSyncFn('ps', ['-axo', 'pid=,ppid='], {
-        encoding: 'utf-8',
-        stdio: ['ignore', 'pipe', 'ignore'],
-        timeout: OPEN_PORT_TIMEOUT_MS,
-        windowsHide: true, // see runPowerShell: avoid the console-allocation deadlock
-      });
+      const out = await runText(runtime, 'ps', ['-axo', 'pid=,ppid='], { timeout: OPEN_PORT_TIMEOUT_MS });
       return parsePsPairs(out);
     }
 
     if (platform === 'win32') {
-      const rows = runPowerShellJson(
-        'Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId | ConvertTo-Json -Compress',
-        execFileSyncFn,
+      const rows = await runPowerShellJson(
+        'Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name | ConvertTo-Json -Compress',
+        runtime,
       );
       return rows
-        .map((r) => [Number(r.ProcessId), Number(r.ParentProcessId)])
+        .map((r) => [Number(r.ProcessId), Number(r.ParentProcessId), r.Name == null ? undefined : String(r.Name)])
         .filter(([pid, ppid]) => Number.isInteger(pid) && Number.isInteger(ppid));
     }
   } catch {
@@ -971,29 +980,19 @@ function parseHostPort(token, wildcardFamily = 'IPv4') {
   return { address, port };
 }
 
-function macListeningPorts(pids, runtime = {}) {
-  const execFileSyncFn = runtime.execFileSync || execFileSync;
+async function macListeningPorts(pids, runtime = {}) {
   if (pids.length === 0) return [];
-  let out = '';
-  try {
-    out = execFileSyncFn(
-      'lsof',
-      ['-nP', '-a', '-iTCP', '-sTCP:LISTEN', '-p', pids.join(','), '-Fpcnt'],
-      {
-        encoding: 'utf-8',
-        stdio: ['ignore', 'pipe', 'ignore'],
-        timeout: runtime.scanTimeoutMs ?? OPEN_PORT_TIMEOUT_MS,
-        windowsHide: true,
-      },
-    );
-  } catch (err) {
-    // lsof exits non-zero when ANY requested pid is gone (or has no matching
-    // files) and still prints the ones it did resolve — the same trap
-    // `getCwdsForPids` documents. A batched scan covers every descendant of
-    // every terminal, so a child exiting between `ps` and `lsof` would
-    // otherwise empty the whole Window's listing.
-    out = typeof err?.stdout === 'string' ? err.stdout : (err?.stdout?.toString('utf-8') ?? '');
-  }
+  // lsof exits non-zero when ANY requested pid is gone (or has no matching
+  // files) and still prints the ones it did resolve — the same trap
+  // `getCwdsForPids` documents. A batched scan covers every descendant of
+  // every terminal, so a child exiting between `ps` and `lsof` would
+  // otherwise empty the whole Window's listing.
+  const out = await runTextLenient(
+    runtime,
+    'lsof',
+    ['-nP', '-a', '-iTCP', '-sTCP:LISTEN', '-p', pids.join(','), '-Fpcnt'],
+    { timeout: runtime.scanTimeoutMs ?? OPEN_PORT_TIMEOUT_MS },
+  );
   return parseLsofListening(out);
 }
 
@@ -1055,84 +1054,52 @@ function parseNetstatListening(output, pidSet) {
 
 module.exports.parseNetstatListening = parseNetstatListening;
 
-function runPowerShell(script, execFileSyncFn) {
-  return execFileSyncFn(
-    'powershell.exe',
-    ['-NoProfile', '-NonInteractive', '-Command', script],
-    // windowsHide: a synchronous spawn of a console child from the CREATE_NO_WINDOW
-    // sidecar deadlocks on console allocation without it (see the WSL note above).
-    { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'], timeout: OPEN_PORT_TIMEOUT_MS, windowsHide: true },
-  );
+function runPowerShell(script, runtime, timeout = OPEN_PORT_TIMEOUT_MS) {
+  return runText(runtime, 'powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { timeout });
 }
 
 /** Run a `... | ConvertTo-Json` script and return its rows as an array. */
-function runPowerShellJson(script, execFileSyncFn) {
-  return normalizeJsonArray(JSON.parse(runPowerShell(script, execFileSyncFn)));
+async function runPowerShellJson(script, runtime, timeout) {
+  return normalizeJsonArray(JSON.parse(await runPowerShell(script, runtime, timeout)));
 }
 
-function windowsListeningPorts(pids, runtime = {}) {
-  const rawExecFileSync = runtime.execFileSync || execFileSync;
+async function windowsListeningPorts(pids, runtime = {}, names) {
   const now = runtime.now || (() => performance.now());
   const deadline = now() + (runtime.scanTimeoutMs ?? OPEN_PORT_TIMEOUT_MS);
-  // Mandatory port enumeration gets the budget first; optional process names
-  // spend only what remains after the cmdlet or its netstat fallback.
-  const execFileSyncFn = (command, args, options) => {
-    const remaining = Math.ceil(deadline - now());
-    if (remaining <= 0) throw new Error('port scan deadline exhausted');
-    return rawExecFileSync(command, args, { ...options, timeout: remaining });
+  const remaining = () => {
+    const ms = Math.ceil(deadline - now());
+    if (ms <= 0) throw new Error('port scan deadline exhausted');
+    return ms;
   };
   const pidSet = new Set(pids);
   let ports;
   try {
-    const json = runPowerShell(
+    const json = await runPowerShell(
       'Get-NetTCPConnection -State Listen | Select-Object LocalAddress,LocalPort,OwningProcess | ConvertTo-Json -Compress',
-      execFileSyncFn,
+      runtime,
+      remaining(),
     );
     ports = parseNetTcpConnections(json, pidSet);
   } catch {
     try {
-      const out = execFileSyncFn('netstat', ['-ano', '-p', 'TCP'], {
-        encoding: 'utf-8',
-        stdio: ['ignore', 'pipe', 'ignore'],
-        windowsHide: true, // see runPowerShell: avoid the console-allocation deadlock
-      });
-      ports = parseNetstatListening(out, pidSet);
+      ports = parseNetstatListening(await runText(runtime, 'netstat', ['-ano', '-p', 'TCP'], { timeout: remaining() }), pidSet);
     } catch { return []; }
   }
-  if (!ports.length) return ports;
-
-  // Names are best-effort: exhaustion here must still return the ports.
-  const nameByPid = new Map();
-  try {
-    const rows = runPowerShellJson(
-      'Get-CimInstance Win32_Process | Select-Object ProcessId,Name | ConvertTo-Json -Compress',
-      execFileSyncFn,
-    );
-    for (const row of rows) nameByPid.set(Number(row.ProcessId), String(row.Name));
-  } catch { /* names are optional */ }
-  return ports.map((port) => ({ ...port, processName: nameByPid.get(port.pid) }));
+  // Names come from the process-table read; a failed read leaves ports unnamed.
+  return ports.map((port) => ({ ...port, processName: names?.get(port.pid) }));
 }
 
-function getListeningPortsForPids(pids, runtime = {}) {
+/** `names` (pid -> process name) labels the Windows ports, whose socket table
+ *  carries none; other platforms read names alongside their sockets. */
+async function getListeningPortsForPids(pids, runtime = {}, names) {
   const platform = runtime.platform || process.platform;
   if (platform === 'linux') return linuxListeningPorts(pids, runtime);
   if (platform === 'darwin') return macListeningPorts(pids, runtime);
-  if (platform === 'win32') return windowsListeningPorts(pids, runtime);
+  if (platform === 'win32') return windowsListeningPorts(pids, runtime, names);
   return [];
 }
 
 module.exports.getListeningPortsForPids = getListeningPortsForPids;
-
-/**
- * Listening TCP ports opened by `rootPid` or any of its descendant processes,
- * de-duplicated by (family, address, port) and sorted by port. Returns [] on
- * any platform-specific failure rather than throwing.
- */
-function getOpenPortsForPid(rootPid, runtime = {}) {
-  return getOpenPortsForPids([rootPid], runtime).get(rootPid) ?? [];
-}
-
-module.exports.getOpenPortsForPid = getOpenPortsForPid;
 
 /** De-duplicated by (family, address, port) and sorted by port — the shape a
  *  caller reads a Surface's ports in. */
@@ -1151,25 +1118,29 @@ function dedupeListeningPorts(ports) {
  *
  * Batched at this layer for the same reason `getCwdsForPids` is: `dor list --all
  * --ports` asks about every terminal of every Workspace at once, and each step is
- * a synchronous subprocess on the sidecar's only event loop — two spawns for N
- * terminals instead of 2N. Returns [] per pid on any platform failure rather than
- * throwing.
+ * a subprocess — two spawns for N terminals instead of 2N. Returns [] per pid on
+ * any platform failure rather than throwing.
  */
-function getOpenPortsForPids(rootPids, runtime = {}) {
+async function getOpenPortsForPids(rootPids, runtime = {}) {
   const byRoot = new Map();
   const roots = [...new Set(rootPids.filter((pid) => Number.isInteger(pid)))];
   if (roots.length === 0) return byRoot;
 
-  const pairs = readProcessTable(runtime);
+  const pairs = await readProcessTable(runtime);
   // A failed scan is tolerated here (unlike helper-work inspection): each root
   // then owns only itself, exactly as `getDescendantPids` falls back.
   const owned = new Map(roots.map((root) => [root, pairs ? buildDescendantSet(pairs, root) : new Set([root])]));
   const union = new Set();
   for (const pids of owned.values()) for (const pid of pids) union.add(pid);
 
-  // The socket scan's budget scales with the batch; the process-table read
-  // above does not, its cost being the whole table either way.
-  const ports = getListeningPortsForPids([...union], { ...runtime, scanTimeoutMs: openPortScanTimeoutMs(roots.length) });
+  // The socket scan's budget scales with the request (`budgetCount` when
+  // coalesced requests share this scan); the process-table read above does
+  // not, its cost being the whole table either way.
+  const ports = await getListeningPortsForPids(
+    [...union],
+    { ...runtime, scanTimeoutMs: openPortScanTimeoutMs(runtime.budgetCount ?? roots.length) },
+    pairs ? new Map(pairs.map(([pid, , name]) => [pid, name])) : undefined,
+  );
   for (const [root, pids] of owned) {
     byRoot.set(root, dedupeListeningPorts(ports.filter((entry) => pids.has(entry.pid))));
   }
@@ -1275,7 +1246,7 @@ module.exports.pacedInputSegments = pacedInputSegments;
 // `onHelper(id, isHelper)` hears every helper decision — each spawn and each
 // promotion that succeeds — so the host's alerts, which keep a helper inert,
 // read this map's answer rather than keeping their own (docs/specs/alert.md).
-module.exports.create = function create(send, ptyModule, { replay = false, sliceSince = null, onHelper = () => {} } = {}) {
+module.exports.create = function create(send, ptyModule, { replay = false, sliceSince = null, onHelper = () => {}, scanPorts = createPortScanner((pids, count) => getOpenPortsForPids(pids, { budgetCount: count })) } = {}) {
   if (!ptyModule || typeof ptyModule.spawn !== 'function') {
     throw new TypeError('create() requires a node-pty compatible module');
   }
@@ -1288,7 +1259,7 @@ module.exports.create = function create(send, ptyModule, { replay = false, slice
   // `chars` is what the buffer currently holds (a trim decrements it);
   // `received` is everything ever received and is never decremented, so it is the
   // only stable coordinate for marking a position in a pane's output
-  // (docs/specs/transport.md -> "Persisted session").
+  // (docs/specs/transport.md -> "Universal invariants").
   const sessions = new Map(); // id -> { chunks: string[], chars: number, received: number }
   const REPLAY_CHARS = 200000;
   const ptyShells = new Map(); // id -> resolved shell executable
@@ -1603,7 +1574,7 @@ module.exports.create = function create(send, ptyModule, { replay = false, slice
     return 'git status';
   }
   const shellBasename = (value) => path.basename(value).replace(/^-/, '').replace(/\.exe$/i, '').toLowerCase();
-  function context(request, requestId) {
+  async function context(request, requestId) {
     const result = { requestId };
     try {
       const p = ptys.get(request.id);
@@ -1621,7 +1592,7 @@ module.exports.create = function create(send, ptyModule, { replay = false, slice
         // Left null when inspection throws: unknown work is never idle.
         result.busy = null;
         result.busy = !p ? false
-          : getDescendantPids(p.pid, { strict: true }).some(pid => pid !== p.pid)
+          : (await getDescendantPids(p.pid, { strict: true })).some(pid => pid !== p.pid)
             || (!!p.process && shellBasename(p.process) !== shellBasename(ptyShells.get(request.id)));
       } else if (request.op === 'promote') {
         if (request.restore) {
@@ -1642,63 +1613,42 @@ module.exports.create = function create(send, ptyModule, { replay = false, slice
     send('context', result);
   }
 
-  function getCwd(id, requestId) {
-    const p = ptys.get(id);
-    if (!p) { send('cwd', { id, cwd: null, requestId }); return; }
-    send('cwd', { id, cwd: getCwdForPid(p.pid), requestId });
+  /** One scan answering every id; an id with no live PTY answers `empty`. */
+  async function answerForIds(ids, empty, scan) {
+    const answers = {};
+    const live = [];
+    for (const id of Array.isArray(ids) ? ids : []) {
+      answers[id] = empty;
+      const p = ptys.get(id);
+      if (p) live.push([id, p]);
+    }
+    // Hosts dispatch these without awaiting, so a failed scan answers empty
+    // rather than rejecting.
+    const resolved = await scan([...new Set(live.map(([, p]) => p.pid))]).catch(() => new Map());
+    // A scan completing after exit or replacement cannot describe the new PTY.
+    for (const [id, p] of live) if (ptys.get(id) === p) answers[id] = resolved.get(p.pid) ?? empty;
+    return answers;
+  }
+
+  async function getCwd(id, requestId) {
+    send('cwd', { id, cwd: (await answerForIds([id], null, getCwdsForPids))[id], requestId });
   }
 
   /** One answer for every id a save asks about, so N panes cost one process
-   *  scan rather than N (docs/specs/transport.md -> "Persisted session"). An id
-   *  with no live PTY answers null, exactly as `getCwd` does. */
-  function getCwds(ids, requestId) {
-    const targets = Array.isArray(ids) ? ids : [];
-    const cwds = {};
-    const idsByPid = new Map();
-    for (const id of targets) {
-      cwds[id] = null;
-      const p = ptys.get(id);
-      if (!p) continue;
-      const sharing = idsByPid.get(p.pid);
-      if (sharing) sharing.push(id);
-      else idsByPid.set(p.pid, [id]);
-    }
-    const resolved = getCwdsForPids([...idsByPid.keys()]);
-    for (const [pid, sharing] of idsByPid) {
-      const cwd = resolved.get(pid) ?? null;
-      for (const id of sharing) cwds[id] = cwd;
-    }
-    send('cwds', { cwds, requestId });
+   *  scan rather than N (docs/specs/transport.md -> "Persisted session"). */
+  async function getCwds(ids, requestId) {
+    send('cwds', { cwds: await answerForIds(ids, null, getCwdsForPids), requestId });
   }
 
-  function getOpenPorts(id, requestId) {
-    const p = ptys.get(id);
-    // getOpenPortsForPid is fail-soft (returns [] on any platform error).
-    send('openPorts', { id, ports: p ? getOpenPortsForPid(p.pid) : [], requestId });
+  async function getOpenPorts(id, requestId) {
+    send('openPorts', { id, ports: (await answerForIds([id], [], scanPorts))[id], requestId });
   }
 
-  /** One answer for every id a listing asks about, so N terminals cost one
-   *  process scan rather than N (`docs/specs/dor-cli.md` -> "Current Implemented
-   *  Commands"). An id with no live PTY answers `[]`, exactly as `getOpenPorts`
-   *  does. */
-  function getOpenPortsMany(ids, requestId) {
-    const targets = Array.isArray(ids) ? ids : [];
-    const ports = {};
-    const idsByPid = new Map();
-    for (const id of targets) {
-      ports[id] = [];
-      const p = ptys.get(id);
-      if (!p) continue;
-      const sharing = idsByPid.get(p.pid);
-      if (sharing) sharing.push(id);
-      else idsByPid.set(p.pid, [id]);
-    }
-    const resolved = getOpenPortsForPids([...idsByPid.keys()]);
-    for (const [pid, sharing] of idsByPid) {
-      const found = resolved.get(pid) ?? [];
-      for (const id of sharing) ports[id] = found;
-    }
-    send('openPortsMany', { ports, requestId });
+  /** One answer for every id a listing or a Dev-Server Chip / Tool serving pass
+   *  asks about, so N terminals cost one process scan rather than N
+   *  (docs/specs/transport.md -> "Port scan deadlines"). */
+  async function getOpenPortsMany(ids, requestId) {
+    send('openPortsMany', { ports: await answerForIds(ids, [], scanPorts), requestId });
   }
 
   // Send ONE ^C to the given PTYs (all live ones when `ids` is omitted), so an
@@ -1767,8 +1717,8 @@ module.exports.create = function create(send, ptyModule, { replay = false, slice
     setTimeout(tick, 50);
   }
 
-  function getShells(requestId) {
-    send('shells', { shells: detectAvailableShells(), requestId });
+  async function getShells(requestId) {
+    send('shells', { shells: await detectAvailableShells(), requestId });
   }
 
   return { spawn, write, resize, hasPty, kill, killAll, list, context,

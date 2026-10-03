@@ -67,7 +67,8 @@ const PROBE_LINES = 3;
 const PROBE_MIN_CELL_PX = 4;
 const PROBE_MARGIN_CELLS = 8;
 
-/** On touch, the root's margin around the visible editor (spec §4.5). */
+/** On touch, the root's margin around the visible editor
+ *  (docs/specs/mouse-and-clipboard.rationale.md -> "4.5 Placement and Dismissal"). */
 export const TOUCH_SLOP_PX = 16;
 
 /** Geometry and, after mounting, visibility are the motion driver's alone:
@@ -391,10 +392,11 @@ const OpenCopyEditor = memo(function OpenCopyEditor({ terminalId, selection, edi
     </div>
   ), [...chromeDeps, editor.format]);
 
-  // On touch the root pads the visible surface with a `TOUCH_SLOP_PX` margin
-  // (spec §4.5): a press that just misses lands on the editor itself, so the
+  // On touch the root pads the visible surface with a `TOUCH_SLOP_PX` margin:
+  // a press that just misses lands on the editor itself, so the
   // handlers below and the outside-press check make it inert, and no control
-  // sits under it.
+  // sits under it. `touch-manipulation` keeps a quick second tap a tap, never
+  // a double-tap zoom.
   const root = (
     <div
       ref={rootRef}

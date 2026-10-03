@@ -388,7 +388,7 @@ export class BurrowRuntime {
    * connection `init` arriving before `start()`'s import settles must await the
    * same import rather than race a second one or be dropped.
    */
-  #noiseStatic: Promise<NoiseKeyPair | null> | null = null;
+  #noiseStatic: Promise<NoiseKeyPair> | null = null;
 
   /**
    * Frames are handled one at a time, in arrival order. Every `e2e` step awaits
@@ -497,9 +497,8 @@ export class BurrowRuntime {
   }
 
   /**
-   * Seal one push plaintext to one paired Client, or `null` when this Burrow has
-   * no usable Noise static. The private key never leaves this class, which is
-   * why the delivery path asks rather than borrowing it
+   * Seal one push plaintext to one paired Client. The private key never leaves
+   * this class, which is why the delivery path asks rather than borrowing it
    * (`docs/specs/remote-security-model.md` -> Push sealing).
    *
    * Answers `null` rather than throwing on a corrupt `clientStaticPublicKey`,
@@ -511,7 +510,6 @@ export class BurrowRuntime {
     plaintext: Uint8Array,
   ): Promise<SealedPushV1 | null> {
     const noiseStatic = await this.#loadNoiseStatic();
-    if (!noiseStatic) return null;
     try {
       return await sealPush({
         burrowStaticPrivateKey: noiseStatic.privateKey,
@@ -773,31 +771,20 @@ export class BurrowRuntime {
     this.#backoffMs = INITIAL_BACKOFF_MS;
     // Kicked off here so the import is normally settled before the first frame;
     // the connection path awaits the same promise, so a race costs a wait
-    // rather than a dropped handshake.
-    void this.#loadNoiseStatic();
+    // rather than a dropped handshake. A failure surfaces at that await.
+    this.#loadNoiseStatic().catch(() => {});
     this.#connect();
   }
 
   /**
-   * Import the enrolled Noise static once, nonextractably.
-   *
-   * Resolves `null` rather than rejecting when there is nothing usable: the
-   * service refuses to start a Burrow whose halves disagree
-   * (`lib/src/host/remote/service.ts`), so reaching that here means the state
-   * file changed underneath us, and a connection that finds no static simply
-   * never answers.
+   * Import the enrolled Noise static once, nonextractably. The service starts
+   * no Burrow whose halves do not correspond (`lib/src/host/remote/service.ts`),
+   * so this imports what it already checked.
    */
-  #loadNoiseStatic(): Promise<NoiseKeyPair | null> {
+  #loadNoiseStatic(): Promise<NoiseKeyPair> {
     this.#noiseStatic ??= (async () => {
-      const pkcs8 = this.#enrollment.noiseStaticPrivateKey;
-      const publicKey = this.#enrollment.noiseStaticPublicKey;
-      if (pkcs8 === undefined || publicKey === undefined) return null;
-      try {
-        return { privateKey: await importNoiseStaticPrivateKey(pkcs8), publicKey: fromBase64Url(publicKey) };
-      } catch (error) {
-        console.warn('[burrow] could not import the Noise static key', error);
-        return null;
-      }
+      const { noiseStaticPrivateKey: pkcs8, noiseStaticPublicKey: publicKey } = this.#enrollment;
+      return { privateKey: await importNoiseStaticPrivateKey(pkcs8), publicKey: fromBase64Url(publicKey) };
     })();
     return this.#noiseStatic;
   }
@@ -1274,17 +1261,6 @@ export class BurrowRuntime {
       this.#finishPairing(clientId, 'invitation-expired');
       return;
     }
-    const burrowStaticPublicKey = this.#enrollment.noiseStaticPublicKey;
-    if (burrowStaticPublicKey === undefined) {
-      // There is nothing for the Client to pin. Writing a record here would
-      // authorize a Client whose very next connection cannot complete IK
-      // against a static this Burrow does not have — a pairing into a dead end,
-      // reported as success. The service refuses to start such a Burrow
-      // (`lib/src/host/remote/service.ts`), so this is the belt to that brace.
-      console.warn('[burrow] refusing to pair: this Burrow has no Noise static to present');
-      this.#finishPairing(clientId, 'burrow-error');
-      return;
-    }
     if (!constantTimeEqual(utf8Encode(code), utf8Encode(pending.approval.code))) {
       this.#finishPairing(clientId, 'confirmation-mismatch');
       return;
@@ -1318,7 +1294,7 @@ export class BurrowRuntime {
         if (this.#clients.get(clientId)?.pairing !== pending) return;
         this.#sendPairingOutcome(clientId, pending, {
           ok: true,
-          burrowStaticPublicKey,
+          burrowStaticPublicKey: this.#enrollment.noiseStaticPublicKey,
           burrowLabel: boundedBurrowLabel(this.#enrollment.label),
           accountId: record.accountId,
           passkeyCredentialId: record.passkeyCredentialId,
@@ -1418,7 +1394,6 @@ export class BurrowRuntime {
     // a flood decide when this Burrow does WebCrypto.
     if (!this.#spendInitToken()) return;
     const staticKeyPair = await this.#loadNoiseStatic();
-    if (!staticKeyPair) return;
     let session: NoiseTransportSession;
     let message2: Uint8Array;
     let clientStaticPublicKey: string;
@@ -1603,7 +1578,7 @@ export class BurrowRuntime {
           burrowId: this.#enrollment.burrowId,
           send,
           // Bounded again rather than trusted: a record off disk may have been
-          // written by an older build or by hand, and this is shown on a pane.
+          // written by hand, and this is shown on a pane.
           label: boundedPairingLabel(label),
           end: () => this.#disposeEstablished(clientId, { goodbye: true, only: e2e }),
         }),

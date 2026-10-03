@@ -102,7 +102,7 @@ export type RelayHonoEnv<Var extends object = object> = {
   Variables: { db: Client } & Var;
 };
 
-/** One connection, released once `action` settles. */
+/** One connection, released once `action` settles: Workers I/O cannot outlive its request, so no pool spans requests. */
 export function database<T>(
   c: { env: Pick<RelayEnv, "HYPERDRIVE"> },
   action: (db: Client) => Promise<T>,

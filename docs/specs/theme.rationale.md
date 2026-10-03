@@ -20,6 +20,14 @@
 
 **Why `list.inactiveSelectionForeground` falls back to the normal foreground.** Matches VSCode list/tree behavior: an inactive selected row does not force the active-selection white text, which materializing from `list.activeSelectionForeground` would.
 
+## Terminal color contract
+
+**Why the color queries are answered rather than passed through.** A TUI that adapts to a light or dark background asks with `OSC 11 ; ?`; with no answer it assumes dark, and on a light theme its adaptive chrome — Codex's composer "pill", for one — renders unreadable. xterm.js does not answer the query itself, so the parse boundary is the only place holding the real theme.
+
+## OSC color queries on Windows require the bundled ConPTY
+
+**Two ConPTY backends, one of which eats the query.** Which backend node-pty spawns with decides whether a program's query reaches the consumer at all: under the in-box `CreatePseudoConsole` it never does, so nothing can answer and the light-theme failure under [Terminal color contract](#terminal-color-contract) is unavoidable on Windows. The bundled OpenConsole path is the same passthrough Windows Terminal itself relies on, which is what makes the extra prebuilds worth their packaging cost on both distributions.
+
 ## Theme data
 
 **Why the active-theme subscription compares ids.** Changing the installed-theme JSON replaces cached objects even for unchanged entries, so object identity can report a theme change when the selected id stayed the same.
@@ -41,10 +49,6 @@ showed the stored theme.
 **Why the host fallback is module state.** Uninstalling the active theme is reachable from two depths — the picker row's `X` and the store dialog's `Remove` — and a prop-held fallback goes missing on one, dropping to the first bundled theme instead of the host's. `setDefaultThemeId()` is the same module-state shape as `lib/src/lib/shell-defaults.ts`.
 
 **Why `useRestoredTheme()` latches the fallback ahead of any child render.** On the desktop Pocket page the header's picker mounts before the component that calls the hook, so a latch deferred to an effect would let the picker re-resolve against no fallback at all.
-
-**Why the picker row's `X` keeps a gap from the select target.** The two paths above do not recover symmetrically: `Remove` leaves the extension row on screen to re-install, while the `X` means re-finding the extension through an OpenVSX search. The gap prices in the harder undo.
-
-**Why a story, not only a unit test, pins the short-viewport cap.** A unit test can stub the trigger and menu rectangles to pin side selection and resize recomputation, including a visual viewport shrinking while the layout viewport stays fixed, but it cannot prove that the real list yields height while the footer survives. `lib/src/components/design.test.ts` pins the viewport inset, `lib/src/components/use-anchored-menu.test.tsx` the geometry, and the Argos-snapshotted story the rendered result.
 
 **Why the colour tokens are their own file.** The website compiles the library from source, so its Tailwind root has to scan `lib/src` or none of the library's utilities are emitted there — which is how the picker once lost its width, cap, and stacking on the docs pages, silently and with no build error. Scanning alone was not enough: the colour utilities resolve against an `@theme` the website did not declare, so the picker, the OpenVSX store, and the theme debugger each rendered with no surface, border, or text colour, and the picker carried a private inline stylesheet to compensate. Importing the whole of `theme.css` was not an option either — its `@theme` retunes `--text-xs`/`--text-sm` for a dense terminal UI, which would shrink type across the marketing site. Splitting the colour half out lets a host take the tokens without the app, and the inline stylesheet was deleted.
 
