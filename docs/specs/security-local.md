@@ -16,8 +16,9 @@ The attacker is any program writing to a PTY.
 `file:` link whose display text names its target, which previews through the
 user's `open` rules (`docs/specs/dor-tool.md` -> "Terminal links"); a target whose
 display text names a different host gets **no open action at all**
-(`docs/specs/mouse-and-clipboard.md` -> "OSC 8 hyperlinks", which also owns
-revalidating every external-URL launch); file opens use
+(`docs/specs/mouse-and-clipboard.md` -> "OSC 8 hyperlinks"). **Must revalidate
+every external-URL launch through `normalizeExternalUri`**, consent
+notwithstanding (VS Code's in the extension host); file opens use
 `docs/specs/dor-tool.md` -> "Opening local files".
 
 **Unsupported escape sequences must fail inertly** — consumed or ignored, with
