@@ -34,7 +34,7 @@ Source of truth: `TutRunner` in `website/src/lib/tut-runner.ts`; `TutDetector` i
 - **The desktop page must restore its own theme** with `useRestoredTheme(WEBSITE_DEFAULT_THEME_ID)` (`website/src/lib/website-theme.ts`), which also declares the host fallback the Settings picker re-resolves through; its `SiteHeader` carries no controls (rationale).
 - `/playground/desktop` runs `Wall` (`FakePtyAdapter`, `initialMode="passthrough"`). **Must seed its three-pane L-shape as an explicit Lath snapshot** — `restoredLathLayout` from `DESKTOP_PLAYGROUND_LAYOUT` — never the synchronous `initialPaneIds` path (rationale); `website/src/lib/playground-desktop-layout.test.ts` pins it. `DESKTOP_PANES` in the same file owns each seed's id, command, and title; **`tut-boxed` is the Auto-copy + `cp-override` target** (rationale). **Titles are seeded as pending shell opts** (`setPendingShellOpts(id, { title })`) before the Wall mounts, and a user-pin outranks the engine fallback (`docs/specs/terminal-state.md` → "Header Derivation").
 
-Every visible pane gets a `TutorialShell` via `PlaygroundShellRegistry`. **`ensureShell` must stay idempotent** — `paneAdded` covers every pane that becomes visible, and `FakePtyAdapter.onPtySpawn` covers the seed panes again, auto-launching each seed's command exactly once (rationale). The page's `startProgram` knows `tut` (`TutRunner`), `ascii-splash`/`splash`, and `changelog`.
+Every visible pane gets a `TutorialShell` via `PlaygroundShellRegistry`. **`ensureShell` must stay idempotent** — `paneAdded` covers every pane that becomes visible, and `FakePtyAdapter.onPtySpawn` covers the seed panes again, auto-launching each seed's command exactly once (rationale). The page's `startProgram` knows `tut` (`TutRunner`), `ascii-splash`/`splash`, `changelog`, and `dor` ([Playground filesystem](#playground-filesystem)).
 
 `/playground/pocket` runs `MobileWall` with **`pocket-tut`** (active, `TutRunner` on `POCKET_TUTORIAL_PROFILE`) and **`pocket-changelog`** (`ChangelogRunner`), and starts a `TutDetector` over the same shared stores. **Must credit Pocket gesture items only on the active tutorial Session's Gesture navigation screen**, through `MobileTerminalUi.onGestureScroll` and `onGestureInput`.
 
@@ -82,7 +82,22 @@ Pocket reuses `cp-select` / `cp-raw` / `cp-rewrap` but drops `cp-override`: Sele
 * **Shell integration must be reported for every command it runs** — `OSC 633 ; A/B` around the prompt, `633 ; E` + `633 ; C` on launch, `633 ; D` on exit. WATCHING is keyed on the running command's name (`docs/specs/alert.md`), and the OSCs also keep `docs/specs/terminal-state.md`'s keystroke fallback from engaging here (rationale).
 * **While a program runs, every input byte goes to it** — `\x03` included, which the runners treat as quit — as do bytes left in the chunk after the Enter that launched it. On exit the terminal returns to the prompt instead of restarting the program.
 
-**The only commands are the ones `startProgram` knows** ([Layout](#layout)); anything else prints an "Unknown command" line and exits `127`.
+**The only commands are the ones `startProgram` knows** ([Layout](#layout)) and the desktop's `cd`, `ls`, and `pwd`; anything else prints an "Unknown command" line and exits `127`.
+
+## Playground filesystem
+
+The desktop shells share one read-only filesystem: the tracked files of `dor-tools-lib/`, inlined at build time and mounted at `/home/demo/dor-tools-lib`, every shell's starting directory. `website/src/lib/playground-fs/playground-fs.test.ts` pins the snapshot to `git ls-files dor-tools-lib`.
+
+- **Must report the shell's directory with every prompt (`OSC 633 ; P ; Cwd=`)**: take-over and launch matching compare it (`docs/specs/dor-tool.md` → Take-over). `cd`, `ls`, and `pwd` are the filesystem builtins; nothing writes.
+- **Must print each spawned non-helper terminal's first prompt from `PlaygroundShellRegistry`**; no scenario plays on the desktop, and a split Tool waits on that prompt's integration (rationale).
+- **Must name `/bin/fake` as the default shell**, so a Windows visitor's Tool commands quote as posix rather than being refused as `cmd` (rationale).
+- **The playground `dor` knows `open` / `o` and the private `__view-*` entries.** `open` sends the real CLI's `surface.tool` request through `dispatchDorControlRequest`, running the real picker when the path is omitted. `FakePtyAdapter.toolControl` answers `open` and `open-handlers` from the snapshot as a host with no user `dormouse.yml` does.
+- **A `__view-*` entry must report its port, answering at the page's origin (`OpenPort.origin`), before announcing it, and withdraw it on exit.** `useToolServing` then frames `<origin>/playground-fs/<token>/…`.
+- **Must serve the real viewer pages and CSPs on the Node viewers' routes, answered from the snapshot**; `save`, `image`, and `rename` answer `403`. The editors are unchanged, so edits stay in the page.
+- **The `/playground-fs/` service worker must stay stateless**: it serves `assets/*` from the static `/builtin-viewer/` build and relays every other request to the top-level playground windows, where the one holding the URL's token answers (rationale). Without a service worker, `__view-*` exits `1`.
+- **`createIframeProxyUrl` must front only `<origin>/playground-fs/` URLs**, whose pages carry the shim from `instrumentHtml`, so theme and the save channel connect as behind a proxy; any other page is refused (`scheme`). These frames are same-origin with the Wall: first-party pages over a fixed snapshot.
+
+Source of truth: `installPlaygroundFs` in `website/src/lib/playground-fs/index.ts`; `TutorialShell` in `website/src/lib/tutorial-shell.ts`; `website/public/playground-fs/sw.js`; `website/scripts/build-builtin-viewer.js`.
 
 ## Storage
 

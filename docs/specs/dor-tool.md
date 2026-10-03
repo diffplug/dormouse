@@ -87,6 +87,8 @@ Source of truth: `createToolHost` in `lib/src/host/tool-host.ts`; `FileToolTrust
 | `port: auto`, no announced port | Wait for one unchanged poll; one port frames, several show a conflict, zero keeps waiting |
 | Anonymous command | Uses `auto` |
 
+**Must frame a port at `http://localhost:<port>`, or at the origin its scan entry names (`OpenPort.origin`)**: only a platform sets it, never Tool output; the website playground's virtual viewers answer at its own origin (`docs/specs/tutorial.md` → Playground filesystem).
+
 - **Must scan unbound Tools on a poll while their command runs, and a Tool alone at once when its announced port or path changes**; that scan is never an autobind poll. Reset settle memory and retire browser resources when the observed command-run id changes, even when the command text is unchanged; an initial observation preserves an imported live binding. (rationale)
 - **Must let a changed announced port or path override a committed conflict or browser**, but only after a matching scan. An unchanged announcement never undoes URL-bar navigation. (rationale)
 - **Must stop ordinary port scans once a browser or conflict is committed.** An unannounced additional port appearing after settle is not detected.
@@ -317,7 +319,7 @@ Dirty or pending Tools refuse Surface moves between Workspaces: `docs/specs/layo
 
 **Must pause serving updates during Workspace closure or transfer, and never launch a Tool, looked up or approved, into a closing or transferring Workspace.**
 
-**Must provide Tool host operations in standalone and VS Code.** Remote terminal transport remains protocol-v1; remote browser presentation is staged in `docs/specs/remote-api.md`.
+**Must provide Tool host operations in standalone and VS Code**; the desktop playground answers `open` and `open-handlers` from its snapshot (`docs/specs/tutorial.md` → Playground filesystem). Remote terminal transport remains protocol-v1; remote browser presentation is staged in `docs/specs/remote-api.md`.
 
 Source of truth: `PersistedToolMetadata` in `lib/src/lib/session-types.ts`; `captureToolParams` / `restoreToolParams` in `lib/src/components/wall/tool-transfer.ts`; `toolControl` in `lib/src/lib/platform/types.ts`.
 
