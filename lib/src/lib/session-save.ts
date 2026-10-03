@@ -114,7 +114,7 @@ export function assemblePersistedSession(
   for (const pane of panes) {
     allPanes.set(pane.id, {
       id: pane.id,
-      title: persistedVisiblePaneTitle(pane.title),
+      title: pane.surfaceType === 'tool' ? persistedToolTitle(pane.id) : persistedVisiblePaneTitle(pane.title),
       surfaceType: pane.surfaceType ?? 'terminal',
       params: pane.params,
     });
@@ -220,7 +220,15 @@ function persistedVisiblePaneTitle(title: string): string {
 }
 
 function persistedDoorTitle(id: string, fallback: string, component: string | undefined): string {
+  if (component === 'tool') return persistedToolTitle(id);
   const userTitle = getTerminalPaneState(id).titleCandidates.user?.title.trim();
   if (userTitle) return userTitle;
   return component && component !== 'terminal' ? persistedVisiblePaneTitle(fallback) : UNNAMED_PANEL_TITLE;
+}
+
+/** Only a user's rename of a Tool persists: a restored title is a user title,
+ *  and the URL its browser layer last showed would hide the title its program
+ *  announces again when it reruns. */
+function persistedToolTitle(id: string): string {
+  return getTerminalPaneState(id).titleCandidates.user?.title.trim() || UNNAMED_PANEL_TITLE;
 }
