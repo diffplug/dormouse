@@ -420,17 +420,20 @@ What each step establishes: `docs/specs/remote-security-model.md` -> "Pairing".
 
 ### Connect (every session)
 
-```
-phone                        relay                        burrow
-  |-- e2e init (Noise msg 1) -->|-- e2e init {clientId} ------>|
-  |<-- e2e response ------------|<-- e2e response (msg 2 =     |
-  |                             |     32-byte Burrow challenge)  |
-  |   ONE biometric prompt:     |                              |
-  |-- reauth begin/finish ----->|  presence challenge + nonce  |
-  |-- e2e transport ----------->|-- e2e transport ------------>|  challenge consumed,
-  |    ConnectionRequestV1      |                              |  proof + ACL checked
-  |<-- e2e transport -----------|<-- ConnectionOutcomeV1 ------|
-  |====== protocol-v1 inside the same Noise session ==========>|
+```mermaid
+sequenceDiagram
+  Phone->>Relay: e2e init (Noise msg 1)
+  Relay->>Burrow: e2e init {clientId}
+  Burrow-->>Relay: e2e response (msg 2 = 32-byte Burrow challenge)
+  Relay-->>Phone: e2e response
+  Note over Phone: ONE biometric prompt
+  Phone->>Relay: reauth begin/finish
+  Phone->>Relay: e2e transport ConnectionRequestV1
+  Relay->>Burrow: e2e transport
+  Note over Burrow: challenge consumed, proof + ACL checked
+  Burrow-->>Relay: e2e transport ConnectionOutcomeV1
+  Relay-->>Phone: e2e transport
+  Phone->>Burrow: protocol-v1 inside the same Noise session
 ```
 
 What each step establishes: `docs/specs/remote-security-model.md` ->
