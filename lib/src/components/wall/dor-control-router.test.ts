@@ -4,6 +4,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { registry, type TerminalEntry } from '../../lib/terminal-store';
 import { installDorControlRouter, resolveDorControlRoute } from './dor-control-router';
+import { _resetPendingKillsForTesting, addPendingKill } from '../../lib/pending-kills';
 import { registerWallHandle, resetWallHandles, stubWallHandle, type WallHandle } from './wall-handles';
 import type { DorControlRequest } from './use-dor-control';
 import { getPlatformOrNull, setPlatform } from '../../lib/platform';
@@ -52,6 +53,7 @@ beforeEach(() => {
 
 afterEach(() => {
   disposers.splice(0).forEach((dispose) => dispose());
+  _resetPendingKillsForTesting();
 });
 
 describe('dor control routing', () => {
@@ -129,6 +131,17 @@ describe('dor control routing', () => {
       }
       expect(owner.handleDorControl).toHaveBeenCalledTimes(1);
     } finally { registry.delete('helper'); }
+  });
+
+  it('refuses a request a pending helper makes, though it names its open parent', () => {
+    const first = getWorkspacesSnapshot().workspaces[0].id;
+    handleFor(first, ['pane-a']);
+    addPendingKill(
+      { kind: 'helper', id: 'helper-1', workspaceId: first, surfaceId: 'pane-a', title: 'helper', label: 'Helper' },
+      { restore: () => true, finalize: () => {} },
+    );
+    expect(resolveDorControlRoute(request({ method: 'surface.split', surfaceId: 'helper-1', helperParentId: 'pane-a' } as Partial<DorControlRequest>)))
+      .toEqual({ kind: 'error', message: "surface 'helper-1' is a pending kill" });
   });
 
   it('falls back to the active Workspace for an unknown caller', () => {

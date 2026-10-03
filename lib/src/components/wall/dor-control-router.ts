@@ -78,8 +78,9 @@ export function resolveDorControlRoute(detail: DorControlRequest): DorControlRou
   if (route.kind === 'handle' && getPendingKill('workspace', route.handle.workspaceId)) {
     return { kind: 'error', message: `workspace '${workspaceRefFor(route.handle.workspaceId)}' is a pending kill` };
   }
-  const caller = detail.helperParentId ?? detail.surfaceId;
-  if (caller && isPendingKillSession(caller)) return { kind: 'error', message: `surface '${caller}' is a pending kill` };
+  // A helper's request names its parent; a pending helper is itself the caller.
+  const caller = [detail.surfaceId, detail.helperParentId].find(id => id && isPendingKillSession(id));
+  if (caller) return { kind: 'error', message: `surface '${caller}' is a pending kill` };
   return route;
 }
 
