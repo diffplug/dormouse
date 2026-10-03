@@ -276,7 +276,13 @@ export function createSidecarSurfaceBridge(
     setWindows(labels) {
       if (!Array.isArray(labels)) return;
       const live = labels.filter((label): label is string => typeof label === 'string');
-      if (live.length === 0) return;
+      // No window left: nothing outstanding can be answered, so it settles with
+      // what it has. The set itself is kept, never emptied (a later ask still
+      // has a window to wait on, and the next push replaces it).
+      if (live.length === 0) {
+        for (const pending of [...asks.values()]) pending.settle();
+        return;
+      }
       windows = new Set(live);
       // Re-evaluate what is already out: a window that closed mid-fan-out can
       // never answer, and must not hold an ask open to its whole budget.

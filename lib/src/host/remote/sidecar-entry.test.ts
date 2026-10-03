@@ -172,6 +172,18 @@ describe('asking the webview', () => {
     expect(await pending).toEqual([{ surfaceId: 'in-main' }]);
   });
 
+  it('the last window closing settles every ask', async () => {
+    vi.useFakeTimers();
+    bridge.setWindows(['main']);
+    const pending = bridge.provider.collectDirectory();
+    let settled = false;
+    void pending.then(() => { settled = true; });
+    bridge.setWindows([]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(settled).toBe(true);
+    expect(await pending).toEqual([]);
+  });
+
   it('a window opening mid-fan-out never received the ask, so it is not waited on', async () => {
     bridge.setWindows(['main']);
     const pending = bridge.provider.collectDirectory();
