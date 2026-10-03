@@ -133,7 +133,34 @@ Source of truth: `dor-lib-common/src/spawn.ts`,
 ## Host Plumbing
 
 The control channel carries every Surface verb — `send` keystrokes in, `read`
-screen and scrollback out, `kill` — and `dor app` from `dor` to the Wall.
+screen and scrollback out, `kill` — and `dor app` from `dor` to the Wall. The
+control server runs in the sidecar (Standalone) or `pty-host.js` (VS Code):
+
+```mermaid
+sequenceDiagram
+  participant D as dor
+  participant S as control server
+  participant H as Rust / extension host
+  participant A as TauriAdapter / VSCodeAdapter
+  participant W as Wall handler
+  D->>S: JSON line {requestId dor-*, surfaceId, method, params, timeoutMs}
+  S->>H: dor:controlRequest
+  H->>A: to the routed window / owning webview
+  A->>W: dormouse:control-request + AbortSignal
+  W-->>A: respond
+  A-->>H: dor:controlResponse
+  H-->>S: dor:controlResponse
+  S-->>D: response
+  opt socket closes, or server reaper fires
+    S->>H: dor:controlCancel {requestId}
+    alt Standalone
+      H->>A: the window that took the request
+    else VS Code
+      H->>A: broadcast to every webview
+    end
+    A->>W: signal aborts
+  end
+```
 
 ### Standalone
 
@@ -146,10 +173,6 @@ and sets `DORMOUSE_SURFACE_ID` per PTY. **Rust must not set
 control variables to the env `pty-core` merges into every shell only once the
 socket is bound, holding stdin commands until then so no PTY spawns with the
 channel's fate undecided.
-
-Control direction: `dor` → sidecar JSON-lines net socket → Rust command/event
-bridge → `TauriAdapter` `CustomEvent("dormouse:control-request")` → Wall
-handler, and back along the same hops.
 
 Routing precedence, the refusal for a Surface no window owns, and a cancel
 following its own request belong to `docs/specs/standalone.md` -> "Routing"; a
@@ -165,10 +188,6 @@ on each PTY spawn. **`getDorRuntimeEnv` must omit both control variables:** the
 token reaches `pty-host.js` through the fork env alone, and the host folds it
 with a bound socket path onto each spawn's env itself. Its `ready` message is
 held until the channel settles, so no spawn can race the bind.
-
-Control direction: `dor` → pty-host JSON-lines net socket → extension-host
-child-process IPC → `message-router` → `VSCodeAdapter`
-`CustomEvent("dormouse:control-request")` → Wall handler, and back.
 
 One extension host can hold multiple Dormouse webviews, so the request carries
 `DORMOUSE_SURFACE_ID` and `message-router.ts` routes it to the webview that owns
@@ -193,15 +212,12 @@ fixed client deadline (`dor ensure --restart` at 60s).
 **Must answer a malformed control request with an error before forwarding it,
 and keep serving the connection** (`standalone/sidecar/dor-control-server.test.js`).
 
-**Some requests outlive their client.** When a socket closes with entries still
-pending, or the server's own timer fires, the server drops the entry and emits
-`dor:controlCancel { requestId }`. Standalone carries it over the request's own
-sidecar → Rust → adapter hop, which requires that **`dor-*` request ids never
-collide with Rust's own `req-*` invoke ids**; VS Code broadcasts it over
-child-process IPC to every active router, since only the webview holding that id
-has anything to abort. The adapter aborts the handler's signal. **A handler that
-parks must release whatever it armed when the signal fires** — nothing it
-responds with afterwards can reach the client.
+**Some requests outlive their client.** Standalone routes their cancel by
+request id, so **`dor-*` request ids never collide with Rust's own `req-*`
+invoke ids**; VS Code broadcasts it, since only the webview holding that id has
+anything to abort.
+**A handler that parks must release whatever it armed when the signal fires** —
+nothing it responds with afterwards can reach the client.
 
 **Must cancel `ensure`'s polling when the client disconnects**: before an
 interrupted command returns to its prompt it prevents the relaunch; during
