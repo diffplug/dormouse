@@ -10,9 +10,15 @@
 
 **Why the clocks start at the ack.** The fallback and silence windows are statements about the agent, not about the round trip; measuring from step entry folds the interrupt's own latency into the window and shortens it by an amount that varies with load.
 
-**Why the ask gate keys on an English UI string.** Claude's `Press Ctrl-C again` and Cursor's `Press Ctrl+C again` (supplied macOS exit excerpt, Cursor 2026.09.23-86fc751) could change. That failure loses recovery for that shutdown, where a mistimed second press destroys Codex's hint every time.
+**Why the ask gate keys on an English UI string.** Claude's `Press Ctrl-C again`, Cursor's `Press Ctrl+C again` (supplied macOS exit excerpt, Cursor 2026.09.23-86fc751) and Copilot's `ctrl+c again to exit` could change. That failure loses recovery for that shutdown, where a mistimed second press destroys Codex's hint every time.
+
+**Why a third press, and only on an ask** (Claude 2.1.288, Copilot 1.0.88, Antigravity 1.2.13, Pi 1.0.0, macOS, 2026-10-03). Mid-turn, the first `^C` only cancels the turn: Claude prints `Interrupted`, asks `Press Ctrl-C again to exit` after the second press and prints its hint about 12 ms after the third; Copilot asks `ctrl+c again to exit` after the second; Antigravity likewise. With two presses, all three lost the conversation in a live restart and a 12-agent harness run. A third press is reserved for a pane that asks after its latest press and has then gone quiet, so a program that never asks still gets at most two presses, and an exit that repeats its ask above its hint (Cursor) is not cut off mid-print; counting only output after that press keeps a slow exit from seeing the previous press's ask.
+
+**Why repainting does not hold the quiet gate.** After a cancel Claude requests the cursor position (`ESC[?6n`) every ~203 ms, and Pi redraws its `Working` spinner in place every ~82 ms (Pi's `^C` never cancels a turn). Counted as output, both kept the pane from ever being quiet for 200 ms, so neither got its second press; Pi then needs two presses under 500 ms apart. Only a line feed or text written without repositioning the cursor now counts as a print in flight. A program that only repaints can therefore receive its second press where it previously got one.
 
 **Two settle-on-quiet heuristics died on the same fact.** Codex says nothing for ~250 ms and then prints its entire shutdown at once, so a poll that treats silence as completion exits before codex has spoken; both attempts to settle early on quiet lost the hint that way. Polling to the ceiling instead costs nothing, the record being written the moment each command is found.
+
+**Why the capture widens every pane first** (Copilot 1.0.88, macOS, 2026-10-03). Copilot lays its exit summary out for the pane and hard-wraps the `Resume` line below about 74 columns, so in a 40-column split the hint read `copilot --resume=ab5`, the rest of the id two lines down. Minimized panes and unshown Workspaces were also 2 columns wide (fixed separately), where Copilot printed no hint at all. Resizing to 250x50 before the first press makes every agent lay its hint out on one line; the PTYs die right after the capture. The marks wait at least 80 ms after the resize, and up to 200 ms while output is still arriving, because a full-screen program answers it by redrawing what it shows, which can include an old hint; a redraw that starts later still lands in the scan. A resize that throws (a PTY exiting at that moment) is logged and skipped.
 
 **Why widening the scan is not a free optimisation.** Scanning the whole buffer let a stale hint or an old launch echo win. The narrow scan also fails in the safe direction: buffer eviction can only discard fresh output, never promote stale output as fresh.
 
@@ -41,6 +47,8 @@ Rows 1–2 are why a blanket second press is wrong; `Press Ctrl-C again` was abs
 ## Detection
 
 **Why the rightmost match wins by position, not by pattern order.** An agent that redraws its hint with carriage returns leaves several candidates in the window; position is the only ordering that tracks which one the user can see, so ranking patterns against each other would sometimes surface a stale id.
+
+**Why a wrong-shaped id is skipped, not taken.** Codex 0.160 (2026-10) prints `Or run codex resume and select <thread name>.` after its id line, so the rightmost match was `codex resume and`, and cold restore ran it. Copilot 1.0.88 hard-wraps its hint to the pane width (below about 74 columns), so a separator follows a fragment of the id (`copilot --resume=ab5`); Copilot resumes by prefix, so a long fragment found the conversation and a short one opened a new one. Every registered agent prints a UUID, so a terminated token of another shape names no conversation and the scan moves to an older hint. A token still at the buffer end keeps holding the scan, as before.
 
 **Why the invocation match tolerates prose.** Codex's real hint is prose on the same line — `To continue this session, run codex resume <id>` — so requiring the invocation to start a line, or to be followed by anything stronger than a word break, would miss the hint recovery exists for.
 

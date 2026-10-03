@@ -12,6 +12,13 @@ export const AGENT_EXIT_FIXTURES = [
     command: 'codex resume 22222222-2222-4222-8222-222222222222',
   },
   {
+    // 0.160 adds a picker line after the id; its `codex resume` is followed by
+    // prose ("and select <thread name>"), and is the newest invocation.
+    agent: 'Codex', version: '0.160.0', os: 'macOS',
+    output: 'Token usage: total=12,058 input=12,053 (+ 7,936 cached) output=5\nTo continue this session, run:\n  \x1b[36mcodex resume 22222222-2222-7222-8222-222222222222\x1b[39m\nOr run \x1b[36mcodex resume\x1b[39m and select \x1b[36mWrite mouse haiku file\x1b[39m.\nuser@machine project % ',
+    command: 'codex resume 22222222-2222-7222-8222-222222222222',
+  },
+  {
     agent: 'Pi', version: 'not recorded (supplied exit excerpt)', os: 'macOS',
     output: '~\r\n?16k ?996 R30k CH98.0% $0.044 (sub) 5.9%/272k (auto)             (openai) gpt-6.1-sol � medium To resume this session: pi --session 77777777-7777-7777-8777-777777777777 user@machine ~ % ',
     command: 'pi --session 77777777-7777-7777-8777-777777777777',
