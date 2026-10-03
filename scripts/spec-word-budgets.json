@@ -33,7 +33,7 @@
   "docs/specs/standalone.md": 7200,
   "docs/specs/terminal-context.md": 1150,
   "docs/specs/terminal-escapes.md": 1850,
-  "docs/specs/terminal-state.md": 2400,
+  "docs/specs/terminal-state.md": 2450,
   "docs/specs/theme.md": 1850,
   "docs/specs/tiling-engine.md": 4500,
   "docs/specs/transport.md": 4050,
