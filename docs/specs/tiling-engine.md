@@ -108,9 +108,9 @@ Source of truth: `createDragController` in `lib/src/components/wall/lath-drag-co
 
 ```mermaid
 flowchart TD
-  T{"Door has a token?"} -- yes --> EM{"tree empty?"}
-  EM -- yes --> ROOT["fallback: leaf becomes the root"]
-  EM -- no --> EX{"fingerprinted context around siblingId?"}
+  EM{"tree empty?"} -- yes --> ROOT["leaf becomes the root"]
+  EM -- no --> T{"Door has a token?"}
+  T -- yes --> EX{"fingerprinted context around siblingId?"}
   EX -- yes --> T1["exact: original index and weight"]
   EX -- no --> NB{"siblingId still a leaf?"}
   NB -- yes --> T2["neighbor: split beside it on the original edge"]
