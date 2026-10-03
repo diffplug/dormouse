@@ -183,7 +183,7 @@ export interface OneTimeRuntimeOptions {
   readonly setTimer?: RemoteTimer;
 }
 
-/** A phone that completed message 1: the link is reserved for it. */
+/** A phone whose IK handshake and Split completed: the link is reserved for it. */
 interface ReservedPhone {
   readonly session: NoiseTransportSession;
   /** Set once its first control message parsed; until then there is nothing to confirm. */
@@ -316,20 +316,25 @@ export class OneTimeRuntime {
     this.#openDeadlineAt = this.#now() + ONE_TIME_OPEN_TIMEOUT_MS;
     this.#setState({ status: 'opening' });
     this.#armDeadline();
+    // Detached, so the deadline settles `opened` even while the keygen stalls.
+    void this.#mint();
+    return opened;
+  }
+
+  /** Mint the one-use keypair, then open the rendezvous if still opening. */
+  async #mint(): Promise<void> {
     let keyPair: NoiseKeyPair;
     try {
       keyPair = await generateNoiseKeyPair();
     } catch (error) {
       console.warn('[one-time] could not mint the link key', error);
       this.#end('burrow-error');
-      return opened;
+      return;
     }
-    // Ended while the keygen ran: nothing may open a socket for it now. Read
-    // through the getter, which the entry check above has not narrowed.
-    if (this.state.status !== 'opening') return opened;
+    // Ended while the keygen ran: nothing may open a socket for it now.
+    if (this.#state.status !== 'opening') return;
     this.#keyPair = keyPair;
     this.#connect();
-    return opened;
   }
 
   /** End the connection, whatever it is doing. Idempotent. */
@@ -468,8 +473,8 @@ export class OneTimeRuntime {
   // --- The ceremony ----------------------------------------------------------
 
   /**
-   * Noise message 1 against the link's key. **The first valid one reserves the
-   * link**; every later one is dropped before any WebCrypto runs.
+   * Noise message 1 against the link's key. **Reserve only after message 2 and
+   * Split also succeed**; every later init is dropped before any WebCrypto runs.
    */
   async #onInit(ct: string): Promise<void> {
     const link = this.#link;
@@ -491,7 +496,7 @@ export class OneTimeRuntime {
       message2 = await handshake.writeMessage();
       session = new NoiseTransportSession(handshake.session);
     } catch {
-      // The link stays open: nothing decrypted against it, so nobody holds it.
+      // The link stays open: IK and Split did not both complete, so nobody holds it.
       return;
     }
     // Ended while the WebCrypto ran — the end erases the key.

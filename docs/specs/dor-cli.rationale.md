@@ -83,21 +83,7 @@ redirects Unix stderr to a log or `/dev/null`, and daemon diagnostics discard
 write errors. Closing capture's read ends does not signal or kill descendants;
 a descendant that continues writing must tolerate a closed output sink.
 
-## Control-channel security
-
-**Who the threat is.** Not the network — the channel is a local socket or named pipe. The attacker is a second account on the same box, or any process running as the user; interposing inherits the whole verb set at once — keystrokes in, screen and scrollback out, pane destroyed.
-
-**Where the 8-byte socket name comes from.** macOS caps `sun_path` near 104 bytes and its `os.tmpdir()` already spends ~50, so the per-uid directory plus a 16-byte random component would not fit. Both spellings then use the same length; only the POSIX one is constrained.
-
-**What mutual proof buys.** Whoever merely bound the path receives the client's
-nonce and a client proof tied to the squatter's challenge, but no token or
-Surface request. That proof is not replayable against the real server's fresh
-random challenge. The server proves knowledge of the token before the client
-releases its request; it does not prove itself before receiving the client proof.
-
-**Why a failed handshake gets no reply at all.** A wrong answer and a port scan get the same nothing: any distinguishable response tells a prober a Dormouse control endpoint is at that path, exactly what the random name is spent hiding.
-
-**Why the token stops at the process that owns the server.** PTY work has to survive a dead control channel, so exiting the host is not the answer. But a host that kept handing `DORMOUSE_CONTROL_TOKEN` to every shell after a failed bind would feed both clients and their bearer credential to whoever won the race for the path or pipe name. Withholding it degrades safely instead: nothing dials a stranger.
+A Windows reproduction in 2026-10 (Node 22.22.3, cross-spawn 7.0.6) passed a literal percent-delimited environment expression unchanged through simple and npm-shaped global/local batch shims. The earlier claim that forwarded arguments contain no such expression did not describe browser passthrough; bypassing the shared shim escaping would reintroduce expansion.
 
 ## Current Implemented Commands
 

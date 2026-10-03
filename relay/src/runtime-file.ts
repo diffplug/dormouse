@@ -25,7 +25,8 @@ export interface RuntimeInfo {
 }
 
 /**
- * Write `info` to `path` atomically, mode `0600`.
+ * Write `info` to `path` atomically, POSIX mode `0600`; Windows inherits the
+ * containing directory's DACL, protected by the shipped installer.
  *
  * Called only after a successful bind: writing before would claim a port this
  * process may fail to take, which is precisely the confusion the file exists to

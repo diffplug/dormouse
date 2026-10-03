@@ -102,13 +102,20 @@ export type RelayHonoEnv<Var extends object = object> = {
   Variables: { db: Client } & Var;
 };
 
-/** One connection, released once `action` settles. */
+/** One connection, released once `action` settles: Workers I/O cannot outlive its request, so no pool spans requests. */
 export function database<T>(
   c: { env: Pick<RelayEnv, "HYPERDRIVE"> },
   action: (db: Client) => Promise<T>,
 ): Promise<T> {
   return withClient(c.env.HYPERDRIVE.connectionString, action);
 }
+
+/**
+ * "Now" for a liveness check inside `locked`'s action: the statement's start,
+ * after the lock wait. Not `now()`, the transaction's start before that wait,
+ * so a row that expired while its writer waited would still read as live.
+ */
+export const LOCKED_NOW = "statement_timestamp()";
 
 /** Runs `action` in a transaction holding `key`'s advisory lock, so a cap check and its insert cannot interleave. */
 export async function locked<T>(db: Client, key: string, action: () => Promise<T>) {

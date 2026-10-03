@@ -84,11 +84,17 @@ test('the file entry titles itself, announces its port and path, serves the stag
     assert.equal((await call(viewer, viewer.path)).status, 200);
     // The separately staged runtime reads its assets beside itself.
     const prefix = viewer.path.replace(/view$/, '');
-    for (const name of ['editor.js', 'editor.css', 'editor.worker.js']) {
+    for (const name of ['editor.js', 'editor.css', 'editor.worker.js', 'markdown.js', 'markdown.css']) {
       assert.equal((await call(viewer, `${prefix}assets/${name}`)).status, 200, name);
     }
     await terminates(child, viewer);
-  } finally { child.kill('SIGKILL'); }
+  } finally {
+    if (child.exitCode === null && child.signalCode === null) {
+      const exited = once(child, 'exit');
+      child.kill('SIGKILL');
+      await exited;
+    }
+  }
 });
 
 test('ordinary staged CLI commands work without the builtin runtime', async () => {
@@ -112,7 +118,13 @@ test('the folder entry titles itself, announces its port and path, then exits on
     assert.equal(viewer.v, 1);
     assert.deepEqual(JSON.parse((await call(viewer, `${viewer.path}list?dir=`)).body).entries, [{ name: 'a.txt', kind: 'file', ignored: false }]);
     await terminates(child, viewer);
-  } finally { child.kill('SIGKILL'); }
+  } finally {
+    if (child.exitCode === null && child.signalCode === null) {
+      const exited = once(child, 'exit');
+      child.kill('SIGKILL');
+      await exited;
+    }
+  }
 });
 
 test('the folder entry selects and activates with OSC 367 open, in the order the page sends them', { timeout: 10_000 }, async () => {
@@ -129,7 +141,13 @@ test('the folder entry selects and activates with OSC 367 open, in the order the
       { v: 1, path: file, preview: true },
       { v: 1, path: file, preview: false },
     ]);
-  } finally { child.kill('SIGKILL'); }
+  } finally {
+    if (child.exitCode === null && child.signalCode === null) {
+      const exited = once(child, 'exit');
+      child.kill('SIGKILL');
+      await exited;
+    }
+  }
 });
 
 test('the error entry titles itself after its target and serves the escaped message', { timeout: 10_000 }, async () => {
@@ -142,5 +160,11 @@ test('the error entry titles itself after its target and serves the escaped mess
     assert.match(page.body, /no Tool matches &lt;report\.pdf&gt;/);
     assert.equal((await call(viewer, `${viewer.path}anything`)).status, 404);
     await terminates(child, viewer);
-  } finally { child.kill('SIGKILL'); }
+  } finally {
+    if (child.exitCode === null && child.signalCode === null) {
+      const exited = once(child, 'exit');
+      child.kill('SIGKILL');
+      await exited;
+    }
+  }
 });

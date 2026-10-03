@@ -199,8 +199,8 @@ function paragraphLines(buf: CopyBuffer, from: LineFacts, dir: 1 | -1): LineFact
  *  read the whole of it: with the line's index and the paragraph's size. */
 const paragraphWidth = new WeakMap<LineFacts, { width: number; index: number; size: number }>();
 
-/** The width a program wrapped the paragraph around the break after row `r`
- *  at, as best the text says: its longest line (rationale). */
+/** Estimate the wrap width from the longest logical line near this break,
+ *  walking at most `WIDTH_REACH` lines each way within its paragraph. */
 function wrapWidth(buf: CopyBuffer, r: number): number {
   const above = line(buf, r);
   const below = line(buf, r + 1);
@@ -223,7 +223,17 @@ const minWrapWidth = (buf: CopyBuffer) => Math.min(40, Math.floor(buf.cols * 0.6
 
 export type BreakKind = 'keep' | 'space' | 'none';
 
-/** Auto's judgement of the line break between rows `r` and `r + 1`. */
+/** Auto judges the break between rows `r` and `r + 1` in order:
+ * 1. Delete a true soft wrap before inspecting the joined logical lines.
+ * 2. Keep blanks, a new list item, code punctuation (`; { }` / `) } ]`), or
+ *    indentation that differs from the current line's hanging indent.
+ * 3. Keep a break when the local longest line is under `minWrapWidth`, or
+ *    when the next first word would have fit within that width.
+ * 4. Delete a margin split whose last word is token-shaped; otherwise space.
+ * `wrapWidth` reads at most `WIDTH_REACH` logical lines on each side within
+ * the paragraph, not necessarily the whole paragraph. Its cache is reusable
+ * only when that bounded walk would reach both paragraph boundaries.
+ */
 export function autoBreak(buf: CopyBuffer, r: number): BreakKind {
   if (r + 1 >= buf.length) return 'keep';
   if (buf.row(r + 1).wrapped) return 'none';
@@ -591,6 +601,8 @@ export function computeScopes(buf: CopyBuffer, sel: Span): Scope[] {
 // ---------------------------------------------------------------------------
 // Nudging an edge a word at a time
 
+/** The next cell in `dir`, across rows. An edge past its row's text (a drag
+ *  can end in trailing blank cells) is clamped to the text first. */
 function step(buf: CopyBuffer, p: GridPos, dir: 1 | -1): GridPos | null {
   let { row, col } = p;
   col = Math.min(col, buf.row(row).cells.length) + dir;
@@ -608,7 +620,7 @@ const cellAt = (buf: CopyBuffer, p: GridPos) => buf.row(p.row).cells[p.col];
 /**
  * Move a selection edge one word in `dir`. `edge` says which side of a word it
  * rests on: a start lands on a word's first cell, an end on its last. A row
- * boundary ends a word.
+ * boundary ends a word, and an edge on whitespace lands on the adjacent word.
  */
 export function nudge(buf: CopyBuffer, p: GridPos, dir: 1 | -1, edge: 'start' | 'end'): GridPos {
   const leavingWord = (dir > 0) === (edge === 'start') && !isBlankCell(cellAt(buf, p));

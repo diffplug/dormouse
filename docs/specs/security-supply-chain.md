@@ -13,24 +13,9 @@
 - every cargo dependency, direct listed separately from transitive
 - the Node.js runtime bundled as a Tauri sidecar in the standalone app
 
-The roots are `productDependencyFilters` in `website/scripts/generate-deps.js`. **A workspace package is a root if Dormouse writes its files onto a user's disk, whatever the route.**
+**Must classify every workspace from its shipping route: a product root or runtime edge if Dormouse writes its files onto a user's disk, an exclusion only if it installs no artifact.** The root and exclusion arrays document those routes beside their entries; the audit derives shipping independently from the builds.
 
-| Root | Route onto the disk |
-| --- | --- |
-| `dormouse-standalone` | installed |
-| `dormouse` | the VS Code extension, installed |
-| `dormouse-sidecar` | rides inside the Tauri bundle as a `bundle.resources` tree, `node_modules` intact |
-| `dor` | staged onto every terminal's `PATH` |
-| `relay` | built and installed by a selfhoster ([SELF_HOST.md](../../SELF_HOST.md)) — notably `web-push`, signing with a private key and making outbound requests |
-| `dormouse-lib` | compiled into both hosts, yet the VS Code extension's dependency walk never arrives at it (rationale) |
-
-**Must list `dormouse-lib` as a root independently of workspace edges**; `remote-lib-common`, `dor-lib-common`, `dor-tools-builtin`, and `dor-tools-lib` are workspace edges from those roots. **Must use package names for roots and exclusions**; for example, `vscode-ext/` declares itself `dormouse` and `website/` declares itself `dormouse-website`.
-
-**Must exclude workspaces that install no artifact:**
-
-- `canopy` — a Storybook-only rendering lab no shipped build imports.
-- `dormouse-website` — runs in a visitor's browser rather than being installed anywhere (rationale).
-- `dormouse-hosted` — runs on Workers and in the browser; no installed desktop or selfhost artifact imports it.
+**Must list `dormouse-lib` as a root independently of workspace edges** (rationale). **Must use package names for roots and exclusions.**
 
 **External binaries are outside this graph by construction** — the user's shell, and the `agent-browser` CLI `dor agent-browser` forwards to (`npm i -g agent-browser`, a dependency of nothing here, resolved off `PATH`). **Dormouse instead ships nothing that pulls them in silently** (rationale).
 
@@ -49,7 +34,7 @@ The roots are `productDependencyFilters` in `website/scripts/generate-deps.js`. 
 
 - **FAIL IF** `node website/scripts/generate-deps.js` changes `website/src/data/dependencies-npm.json`, `website/src/data/dependencies-cargo.json`, or `website/src/data/dependencies-runtime.json` when run against a clean working tree after `pnpm install --frozen-lockfile` (rationale).
 - **FAIL IF** `.github/workflows/ci.yml` stops running that generator under that same install precondition, or stops failing on a diff (rationale).
-- **FAIL IF** the disclosure omits a shipped workspace's graph or excludes a shipped package. Derive shipping routes from `pnpm-workspace.yaml` and the builds, not the enumeration above; the generator enforces classification, but cannot establish whether an exclusion is justified (rationale).
+- **FAIL IF** the disclosure omits a shipped workspace's graph or excludes a shipped package. Derive shipping routes from `pnpm-workspace.yaml` and the builds, not the generator's arrays; the generator enforces classification, but cannot establish whether an exclusion is justified (rationale).
 
 Source of truth: `productDependencyFilters` / `excludedWorkspacePackages` / `optionalSiblingsAtSameVersion` in `website/scripts/generate-deps.js`; `assertWorkspaceCoverage` in `website/scripts/dependency-workspaces.js`; `getShippedCargoGraph` / `getCargoGitRepository` in `website/scripts/cargo-dependencies.js`.
 

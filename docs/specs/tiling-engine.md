@@ -5,17 +5,6 @@
 > **Defers** the interaction model on top to [layout.md](layout.md): selection, focus, modes, session lifecycle.
 > Evidence behind the rules: [tiling-engine.rationale.md](tiling-engine.rationale.md).
 
-## Code Map
-
-Follow these entrypoints from Wall policy down into geometry and rendering:
-
-| Entrypoint | Role |
-|---|---|
-| `lib/src/components/Wall.tsx` | Creates the engine and connects user actions to its operations. |
-| `lib/src/components/wall/lath-wall-engine.ts` | Wall-facing operations, animator ownership, and persistence projection over the store. |
-| `lib/src/components/wall/lath-wall-store.ts` | State commits and derived geometry; imports the pure core operations and queries. |
-| `lib/src/components/wall/LathHost.tsx` | HTML rendering and gesture binding; imports pane renderers and drag handling. |
-
 ## Why
 
 Lath replaces dockview's split tree, resize, drag-move, maximize, and serialization, eliminating its broader model's failure modes (rationale).
@@ -42,7 +31,7 @@ Invariants, enforced by every op and checked by `validate(tree)`:
 
 **Zoom is never in the tree.** It is presentation state (`zoomedId` in the wall store), so the tree, every other rect, and all leaf DOM stay unchanged beneath a zoomed leaf; LathHost owns the elevated inset geometry (rationale).
 
-Source of truth: `LathTree` / `validate` / `normalize` / `leafTree` in `lib/src/lib/lath/model.ts`.
+Source of truth: `LathTree` / `validate` in `lib/src/lib/lath/model.ts`.
 
 ## Layout
 
@@ -52,7 +41,7 @@ Derived pure queries, each of which **must be called with the same `rect` + `opt
 
 | Query | Answers |
 | --- | --- |
-| `neighbors(tree, rect, id, direction, opts) → LeafId \| null` | Spatial navigation. Candidates must lie strictly beyond the leaf's edge; secondary-axis overlap preferred, then nearest edge-to-edge, tie-broken by smaller y, then x, then id. |
+| `neighbors(tree, rect, id, direction, opts) → LeafId \| null` | Spatial navigation. Candidates must lie beyond or touch the leaf's edge; secondary-axis overlap preferred, then nearest edge-to-edge, tie-broken by smaller y, then x, then id. |
 | `autoEdge(tree, rect, id, opts) → Edge` | Aspect-ratio split heuristic: laid-out rect wider than tall → `'right'`, else `'bottom'` (also `'right'` for a missing leaf). |
 | `sashes(tree, rect, opts) → { splitPath, boundary, dir, rect }[]` | One entry per adjacent child pair of every split. `dir` is the parent split's axis (`'row'` → a vertical divider, col-resize); `rect` is the gap band between the pair, zero-thickness when `gap: 0` (the adapter widens the hit area). |
 | `nodeRectAtPath(tree, rect, opts, path) → Rect \| null` | Rect of any interior node under the same geometry, walking only the root→leaf spine. |
@@ -63,26 +52,23 @@ Source of truth: `lib/src/lib/lath/layout.ts`.
 
 All ops are pure and synchronous, take the tree as their first argument (elided in the table), and return `{ tree: LathTree; ok: boolean }` plus op-specific fields. **On `ok: false` the returned `tree` is the input object**, on `ok: true` always a fresh one — so identity-comparison detects a rejected op, and tree identity never signals "no visual change." **Speculative evaluation is free**: sash live-resize and DnD previews run `layout(op(tree, …).tree, …)` per frame without committing (rationale).
 
-| Op | Notes |
-| --- | --- |
-| `split(at, edge, newId)` | Inserts `newId` beside `at`, extending the parent split when directions match (flatten invariant) or nesting a new one. The new leaf takes half of `at`'s weight. |
-| `remove(id)` | Siblings absorb the weight proportionally; single-child splits collapse and re-flatten. Returns a `RestoreToken`. |
-| `replace(oldId, newId)` | Atomic identity swap in place — no transient add/remove states (the `dor iframe` replace-untouched-terminal case). |
-| `move(id, target: DropTarget)` | Remove + insert as one op; the leaf keeps its old normalized weight in the new context; existing siblings share the remainder. Reordering siblings preserves their proportions. `target.path` is read against the input tree, then re-found post-removal by surviving leaf set — falling back to the target's first surviving leaf if that subtree dissolved. |
-| `swap(a, b)` | Leaf identity swap (drag-onto-center; the Cmd-Arrow swap). `a === b` is rejected. |
-| `resize(splitPath, boundary, deltaPx, rect, opts)` | Moves the visible boundary between children `boundary`/`boundary + 1` by `deltaPx`, clamped to their recursive minima. Other child rectangles stay fixed; this split's weights are rebased on the rendered allocation. Zero-pixel children retain positive weights. A clamped no-op preserves weights and is still `ok: true`; non-finite deltas and non-integer boundaries reject. Streamed during a sash drag: pass the *original* tree each frame with a cumulative delta; the final tree commits on pointerup. |
-| `insert(id, target: DropTarget, weight = 0.5)` | The insert half of `move`, public for external (Door) drops: a NEW leaf at a drop target carrying `weight`, clamped into (0,1); NaN rejects. Swap targets, existing ids, empty trees, and paths off the tree are rejected. |
-| `restore(token, opts?)` | Reinserts a removed leaf, best effort (below). |
+| Operation | Behavior |
+|---|---|
+| `split` | Insert a new leaf beside a reference, taking half its weight. |
+| `remove` | Remove a leaf and return its restore context; siblings absorb its weight proportionally. |
+| `replace` / `swap` | Change leaf identities atomically, preserving geometry. |
+| `move` | Remove and reinsert atomically, carrying the old weight. Back in its own split the siblings keep their proportions, so a reorder or drop-back moves no other pane; elsewhere it renormalizes alongside its new siblings. Resolve the target against the input tree and re-find it after removal. |
+| `resize` | Move the visible boundary from the rendered allocation, clamped against recursive minimums; every other child keeps its rect and every weight stays positive. A fully clamped no-op still succeeds; a non-finite delta or non-integer boundary rejects. Callers pass the drag-start tree and cumulative delta. |
+| `insert` | Insert a new leaf beside an edge target; reject swap targets, duplicates, empty trees, missing paths and NaN weights. |
+| `restore` | Reinsert from a persisted token through the tiers below. |
 
 `DropTarget` is either a leaf swap or an edge at an ancestor path; the latter gives DnD its depth levels.
-
-**Must preserve visible geometry when a pane is dropped back at its existing sibling boundary.** Tests: `preserves pane widths when reordering siblings or dropping back at the same boundary` in `lib/src/lib/lath/ops.test.ts`; `property: sash motion matches visible geometry` in `lib/src/lib/lath/property.test.ts`.
 
 Source of truth: `lib/src/lib/lath/ops.ts`.
 
 ## Hierarchical drag and drop
 
-**Pointer events only** (`pointerdown` → `DRAG_THRESHOLD_PX` (5px) → drag; no HTML5 DnD), so drags are testable from CDP and never race React's synthetic events. **One `DragController` owns both the pane and Door gestures** — threshold, hit-test, click-suppression — built once per LathHost mount and fed header presses plus the `externalDrag` mirror; `Door.tsx` / `Baseboard.tsx` report presses only. **Must read the live store directly for each drag preview and release**, including commits React has not rendered yet.
+**Pointer events only** (`pointerdown` → `DRAG_THRESHOLD_PX` (5px) → drag; no HTML5 DnD), so drags are testable from CDP and never race React's synthetic events. **One `DragController` owns both the pane and Door gestures** — threshold, hit-test, click-suppression — built once per LathHost mount and fed header presses plus the `externalDrag` mirror; `Door.tsx` / `Baseboard.tsx` report presses only. **Must hit-test each preview and the release against the store's live tree**, including commits React has not rendered, so a background `dor split` / `dor kill` mid-drag shows up in the next preview.
 
 `hitTest` takes a point already in Wall coordinates and returns drop candidates innermost→outermost, each carrying its target, committed preview rect, and depth. `dragged: null` is an external drag (a Door coming in): no `swap` candidates, previews via `insert`. **Gesture mechanics and the preview overlay are adapter concerns.**
 
@@ -102,13 +88,13 @@ Adapter gesture (LathHost):
 
 **Door drag-out** runs the same machinery with `dragged: null`. A `Door` press reports its start point (`onDoorDragStart(item, press)`) and the Wall puts LathHost into external-drag mode at once (`externalDrag={ id, startX, startY }`); below the threshold the press is a plain click (reattach), above it the chip stays put in the baseboard. A drop on a candidate removes the Door and `insertLeaf`s the surface there with an enter hint from the target edge — **the token is not consulted, because the user chose the position**. A drop on nothing, Escape, a sub-threshold release, or a drop back onto the baseboard leaves the Door in place.
 
-Source of truth: `hitTest` in `lib/src/lib/lath/hit-test.ts`; `createDragController` in `lib/src/components/wall/lath-drag-controller.ts`; the drag callbacks in `lib/src/components/Wall.tsx`; presses in `lib/src/components/Door.tsx` / `lib/src/components/Baseboard.tsx`.
+**Must delegate Workspace-strip pane drops to `docs/specs/layout.md` → Moving Surfaces between Workspaces** before local hit testing; cross-Wall adoption remounts the leaf.
 
-**Must delegate Workspace-strip pane drops to `docs/specs/layout.md` → Moving Surfaces between Workspaces** before local hit testing; cross-Wall adoption remounts the leaf. Source of truth: `createDragController` in `lib/src/components/wall/lath-drag-controller.ts`.
+Source of truth: `createDragController` in `lib/src/components/wall/lath-drag-controller.ts`; the drag callbacks in `lib/src/components/Wall.tsx`.
 
 ## Restore tokens (Doors)
 
-`remove` returns a JSON-serializable `RestoreToken` of the leaf's ancestry: its own `leafId`; `siblingId` (the nearest same-parent sibling leaf it sat beside); `siblingLeafIds` / `siblingFingerprint` (that sibling *node's* leaf set and structure fingerprint, **written on every non-root removal and consulted only when the set holds more than one leaf**, i.e. when the sibling was itself a split subtree); `edge` (such that neighbor-tier restore is `split(siblingId, edge, leafId)`); its normalized `weight` and child `index`; and a structure-only `fingerprint` — kinds, dirs, leaf ids, no weights — of the parent split *post-removal*. **A root-leaf removal writes neither sibling field**, with `siblingId` and `fingerprint` null, so it can only reach the fallback tier. `restore` applies three tiers, driven from the Wall's `handleReattach`:
+**Must persist `RestoreToken` as the Door's sole restore payload.** Its canonical fields and capture rules live beside `remove` in `lib/src/lib/lath/ops.ts`. Legacy tokens without sibling-subtree context retain the older leaf-neighbor behavior when exact restoration fails. Root-leaf removals can reach only fallback. `restore` applies three tiers from the Wall's `handleReattach`:
 
 1. **exact** — the fingerprinted context still exists around `siblingId`: reinsert at the original index and weight, existing siblings shrinking proportionally;
 2. **neighbor** — the sibling still exists: split beside it on the original edge;
@@ -118,7 +104,7 @@ Source of truth: `hitTest` in `lib/src/lib/lath/hit-test.ts`; `createDragControl
 - A survivor that is a split subtree keeps **exact**, targeted by `siblingLeafIds` / `siblingFingerprint`, so `A | (B over C)` restores beside the whole `B/C` column rather than inside it.
 - **Must supply a live `fallbackRef` when exact/neighbor tiers fail in a nonempty tree**; otherwise restore returns `ok: false`.
 
-Tokens serialize with Doors (`PersistedDoor.token`) as the sole restore payload. A parked leaf still carries one: parking decides whether the DOM survives, the token decides where the leaf lands.
+A parked leaf still carries a token: parking decides whether DOM survives, the token decides where the leaf lands.
 
 Source of truth: `RestoreToken` / `restore` in `lib/src/lib/lath/ops.ts`.
 
@@ -144,7 +130,7 @@ A **parked** leaf is mounted by the adapter but absent from the split tree: its 
 - **Never evict parked browser or Tool DOM to enforce a count limit.** Parked documents remain mounted until reattachment or Surface destruction; retention is unbounded. Tests: `lib/src/components/wall/LathHost.test.tsx`. (rationale) Parking budgets **minimized browser and Tool Surfaces only**: a hidden Workspace parks nothing — its leaves stay mounted and merely stop painting (`docs/specs/layout.md` → Workspaces).
 - **Hydration.** A restored session's Doors have no store entry yet, so `seed` puts the persisted rows' meta into `leafMeta` beside the tree's leaves (`leafMetaFromPersistedDoor`) — the only place a Door's wire row is read for metadata. The runtime record is `{ id, token }`.
 
-Source of truth: `parked` / `doorLeaf` / `addDoor` / `forgetLeaf` / `parkedIds` in `lib/src/components/wall/lath-wall-store.ts`; `shouldParkOnMinimize` / `leafMetaFromPersistedDoor` in `lib/src/components/wall/lath-wall-engine.ts`; `minimizePane` in `lib/src/components/Wall.tsx`; the parked render branch in `lib/src/components/wall/LathHost.tsx`.
+Source of truth: `minimizePane` in `lib/src/components/Wall.tsx`; `shouldParkOnMinimize` in `lib/src/components/wall/lath-wall-engine.ts`; `doorLeaf` in `lib/src/components/wall/lath-wall-store.ts`.
 
 ## The wall store and engine
 
@@ -153,7 +139,7 @@ The **store** is the state machine + geometry + enter hints, reached directly as
 **`lath-wall-store.ts` is the sole state authority.** Its snapshot `{ tree, leafMeta, parked, zoomedId, revision }` sits behind a `useSyncExternalStore` contract: identity stable between commits, `leafMeta`/`parked` reused by identity when a commit does not touch them, `revision` bumping on *every* commit including meta and zoom writes. The reported layout geometry and the pending enter-hint map are side state, never in the snapshot, so neither notifies.
 
 - **Every tree mutation commits atomically**; a rejected op commits nothing, notifies nothing, and returns the failure verbatim.
-- Geometry-dependent queries (`neighborOf`, `autoEdgeFor`, `resizeBoundary`, restore's fallback tier, `addLeaf`'s null-position autoEdge) read the rect + opts LathHost last reported via `setLayoutGeometry`, which **rejects a degenerate (zero-area) rect** in favor of the `!geometry` fallback (rationale).
+- Geometry-dependent queries (`neighborOf`, `autoEdgeFor`, `resizeBoundary`, restore's fallback tier, `addLeaf`'s null-position autoEdge) read the rect + opts LathHost last reported via `setLayoutGeometry`, which **must reject zero-area reports**, retaining the last valid geometry or using the no-geometry fallback before the first valid report (rationale).
 - `LATH_LAYOUT_OPTS` (gap `PANE_GUTTER_PX` = 7; `minLeaf` 100×60) lives here as the one geometry both the store and the adapter lay out with.
 
 **`lath-wall-engine.ts` is the Wall-facing handle**, holding only what the store does not — the animator and its `exitMs` / `markDying` / `isDying` / frame + wake signals, the vocabulary maps (Edge ↔ dor direction, arrow → direction), the meta builders (`terminalLeafMeta` / `browserLeafMeta` / `leafMetaFromPersistedDoor`), `shouldParkOnMinimize`, and the persistence conveniences `serializeLayout` / `seed` — and **no selection/focus/mode/activation state**. Two projection rules bind its readers: `listPanes()` is tree pre-order + meta, so **parked leaves are not visible and are not listed**, while `getMeta(id)` *does* resolve Doored leaves.
@@ -168,26 +154,26 @@ Source of truth: `lib/src/components/wall/lath-wall-store.ts`; `lib/src/componen
 
 - One flat container; one stable `position: absolute` div per leaf, keyed by id, carrying `data-lath-leaf`, moved and resized by inline styles, hosting pane content as ordinary React children. **Must never re-parent, reorder, or unmount the div within one Wall** except on a remove commit, and **leaf divs render in sorted-by-id DOM order, not tree order** — reordering keyed siblings moves DOM nodes, blurring the xterm inside one and reloading a moved `<iframe>`.
 - Each leaf div is a 30px header slot over a filling body, plus an optional whole-leaf **overlay** slot for chrome spanning header *and* body; header slot and zoom inset both derive from `PANE_HEADER_HEIGHT_PX` in `lib/src/components/design.tsx`. **All three slots resolve from `leafMeta.component` / `.tabComponent` through one registry, never a surface-kind branch beside it**; an unregistered key renders that slot empty, and `componentsOverride` is the jsdom test seam for all three. **The positioned wrapper carries geometry only** — header, body, and overlay live in a memoized inner unit keyed on `{ id, meta, parked, resolved components }`, so a geometry-only frame never re-renders the content.
-- Sashes render from core `sashes()` geometry as sibling divs (hit area widened to 8px, cursor per axis); a drag streams a core `resize` preview from the drag-start tree with the cumulative delta and proposes one commit on pointerup (`onCommitResize`); **Must accept primary-button sash presses only, use the release coordinates for the final delta, and cancel on Escape, pointer cancellation, window blur, or a concurrent tree/zoom change.** Metadata writes do not cancel. `lib/src/components/wall/LathHost.test.tsx` pins gesture interruption. **Geometry is reported through `store.setLayoutGeometry` from inside the measuring layout effect, never a passive effect over the rendered size** (rationale); the store's zero-area rejection is the backstop.
+- Sashes render from core `sashes()` geometry as sibling divs (hit area widened to 8px, cursor per axis); a drag streams a core `resize` preview from the drag-start tree with the cumulative delta and proposes one commit on pointerup (`onCommitResize`). **Must accept primary-button presses only and take the final delta from the release coordinates**; Escape, pointer cancellation, window blur, or a concurrent tree or zoom change cancels. **Geometry is reported through `store.setLayoutGeometry` from inside the measuring layout effect, never a passive effect over the rendered size** (rationale); the store's zero-area rejection is the backstop.
 - Zoom retargets only the chosen leaf to the wall rect inset by `LATH_ZOOM_MARGIN` (half a pane header) and elevates it above tiled/dying panes and sashes, applying the blurred `LATH_ZOOM_SHADOW` while elevated. Unzoom keeps both until the return frame settles.
 - **The binding never calls `.focus()` and emits no activation events.** Gestures surface as proposals (`onCommitResize`, `onLeafFocused`, the drag callbacks) that the Wall commits.
 - Terminal Context renders above the tiled leaves. **Its placer runs inside each paint, before `notifyFrames`**, so the ring measures the helper where it is painted; `docs/specs/layout.md` → Header context menu owns the context.
 - The selection ring and kill overlay measure leaf elements through `resolvePaneElement`, which climbs to `[data-lath-leaf]`; `WorkspaceSelectionOverlay` re-measures on every store commit (`revision`) and every animator tick, and **same-identity re-measures snap 1:1**, so the ring tracks kills, restores, and tweens frame-accurately ([layout.md → Ring travel](layout.md#ring-travel) owns its between-panes travel, a JS tween rather than a CSS transition).
 
-Source of truth: `BODY_COMPONENTS` / `TAB_COMPONENTS` / `OVERLAY_COMPONENTS` in `lib/src/components/wall/LathHost.tsx`; the `.lath-host` rules in `lib/src/index.css`.
+Source of truth: `LathHost` in `lib/src/components/wall/LathHost.tsx`; the `.lath-host` rules in `lib/src/index.css`.
 
 ## Animation
 
 **Animation is core, not adapter.** The headless **animator** turns committed layout changes into presentation frames as a pure function of time (`now` is always passed in — no DOM, timers, or `Date`), so every renderer animates identically and tests assert real interpolated values against a fake clock. [layout.md → Animations](layout.md#animations) owns the user-visible zoom / spawn / kill behaviors this implements.
 
-- `createAnimator({ durationMs, easing? })` exposes `retarget(targets, now, enters?, { snap?, layers? })`, `markDying(id, now, { shrinkTowardBottomRight? })`, `isDying(id)`, `framesAt(now): Map<LeafId, Frame>` (`Frame = { rect, opacity, layer }`), and `settledAt(now)` — **an adapter stops ticking once settled**. **Layers are discrete, never interpolated** — `LATH_LAYER_TILED` 0 / `LATH_LAYER_DYING` 1 / `LATH_LAYER_ELEVATED` 2, a rising leaf entering the higher band before geometry moves and a lowering one staying until the motion settles; adapters map the bands to renderer z-order.
+- **Must stop ticking once `settledAt(now)` is true.** The canonical animator interface and frame shape are `LathAnimator` / `Frame` in `lib/src/lib/lath/animator.ts`. **Layers are discrete, never interpolated**: a rising leaf adopts the higher band before moving; a lowering leaf keeps it until settled. Adapters map `LATH_LAYER_TILED`, `LATH_LAYER_DYING`, and `LATH_LAYER_ELEVATED` to renderer z-order.
 - Default motion is the house easing (`LATH_MOTION_MS` 440ms, `cubic-bezier(0.22, 1, 0.36, 1)` solved in JS by `cubicBezier`); `createAnimator` takes a bare `t → eased` and hands no easing back. **A caller needing a *rate* must read `slope(t)` off the `Easing` `cubicBezier` returns — `LATH_EASING` for house motion** — never differences of successive samples (rationale; [layout.md → Ring travel](layout.md#ring-travel) is the cautionary case).
 - **A `retarget` mid-flight starts every leaf from its current interpolated frame** — interruptible by construction, no in-progress guards. `snap: true` starts leaves already settled (sash-drag commits, container resizes: hand-placed geometry must not tween), as does a retarget whose from/to frames already match.
-- **Enter hints are derived by the store's mutators, not passed in.** `addLeaf` / `restoreLeaf` / `insertLeaf` set the hint to the *opposite* of the edge they commit (`oppositeEdge`, so a pane placed right grows from its left boundary; a reattach hint therefore comes from the door token's edge), `consumeEnterHints` drains it at the next retarget, and the leaf's frames begin collapsed against that boundary at opacity 0. **Precedence**: a re-admitted parked leaf's held rect (an `EnterFrom` rect at full opacity) beats an explicit `setEnterHint`, which beats a derived hint (rationale). The only `setEnterHint` user is the auto-spawn refill (`'top-left'`, the killed last pane having shrunk toward the bottom-right).
-- **Exit is two-phase.** The Wall's `lath.markDying(id, { shrinkTowardBottomRight })` freezes and fades the leaf in place — the last-pane kill shrinking toward its bottom-right corner — with its terminal DOM still mounted; a `setTimeout(lath.exitMs)` then runs `disposeSession` and commits `store.removeLeaf`, and survivors tween into the reclaimed space on the resulting retarget. The finalizer bails if the leaf is already gone (superseded by a replace) and **forgets the surface ref only after the removal** (rationale). `isDying` makes a second kill a no-op. Dying leaves get `pointer-events: none`; a dying zoomed leaf keeps its elevated inset geometry and layer while LathHost applies the animator's opacity.
-- **Ownership split**: the core animator is pure and owns the dying state; the *engine* owns the animator instance, `exitMs`, and the frame/wake signals (`markDying` fades without a store commit, so it wakes the tick loop itself); the *store* owns the enter-hint map; *LathHost* drives a rAF tick while unsettled and applies `framesAt` **imperatively** to the leaf divs (left/top/width/height/opacity/z-index/box-shadow/pointer-events). **Reduced motion is the same code path**, not a branch — `durationMs` 0 under `motionIsInstant()`, which the visual-snapshot `animate: false` in `lib/.storybook/preview.ts` also sets. **A no-deps layout effect re-asserts the current frames after any unrelated React commit**, so a mid-tween re-render cannot snap styles back to target (rationale). **Must keep sash preview geometry and pane-drag dimming authoritative during animation paints** (`keeps the sash preview under the pointer while an earlier layout tween is running` / `keeps a dragged pane dimmed across animation frames and preview renders` in `lib/src/components/wall/LathHost.test.tsx`). **There is no CSS entrance/exit path.**
+- **Must derive add/insert hints from the opposite placement edge and reattach hints from the opposite token edge.** **Must prefer a parked leaf's held rect over an explicit hint, and an explicit hint over a derived hint**; held rects start at full opacity, edge hints collapsed at opacity 0. `consumeEnterHints` drains hints at retarget. Auto-spawn alone overrides entry with `'top-left'`. Capture and precedence mechanics live at `deriveEnterHint` / `admit` in `lib/src/components/wall/lath-wall-store.ts` (rationale).
+- **Exit is two-phase.** The Wall's `lath.markDying(id, { shrinkTowardBottomRight })` freezes and fades the leaf in place — the last-pane kill shrinking toward its bottom-right corner — with its terminal DOM still mounted; a `setTimeout(lath.exitMs)` then commits `store.removeLeaf` before `disposeSession`, and survivors tween into the reclaimed space on the resulting retarget. The finalizer bails if the leaf is already gone (superseded by a replace) and **forgets the surface ref only after the removal** (rationale). `isDying` makes a second kill a no-op. Dying leaves get `pointer-events: none`; a dying zoomed leaf keeps its elevated inset geometry and layer while LathHost applies the animator's opacity.
+- **Ownership split**: the core animator is pure and owns the dying state; the *engine* owns the animator instance, `exitMs`, and the frame/wake signals (`markDying` fades without a store commit, so it wakes the tick loop itself); the *store* owns the enter-hint map; *LathHost* drives a rAF tick while unsettled and applies `framesAt` **imperatively** to the leaf divs (left/top/width/height/opacity/z-index/box-shadow/pointer-events). **Reduced motion is the same code path**, not a branch — `durationMs` 0 under `motionIsInstant()`, which the visual-snapshot `animate: false` in `lib/.storybook/preview.ts` also sets. **A no-deps layout effect re-asserts the current frames after any unrelated React commit**, so a mid-tween re-render cannot snap styles back to target (rationale). **There is no CSS entrance/exit path.**
 
-Source of truth: `createAnimator` in `lib/src/lib/lath/animator.ts`; the animator ownership in `lib/src/components/wall/lath-wall-engine.ts`; the enter-hint derivation in `lib/src/components/wall/lath-wall-store.ts`; the frame-application effects in `lib/src/components/wall/LathHost.tsx`.
+Source of truth: `createAnimator` in `lib/src/lib/lath/animator.ts`; the animator ownership in `lib/src/components/wall/lath-wall-engine.ts`.
 
 ## Pane props contract
 
@@ -205,9 +191,9 @@ Source of truth: `lib/src/components/wall/pane-props.ts`; `PaneWriteContext` in 
 
 The versioned Lath layout rides inside `PersistedSession`, and saves write only the native Lath layout. Store metadata also covers Doored leaves, so `lathLayoutFromStore` filters it to tree members and the save path materializes each Door's live metadata separately. Every leaf's metadata goes out through `persistableLeafMeta`: **a Tool's derived browser fields are stripped and a Tool still awaiting approval persists as a plain terminal** (`docs/specs/dor-tool.md` → Persistence and hosts). A restart therefore cold-loads every Surface where the user left it, a Tool as the terminal running its command — **a parked document never survives a restart, only a minimize**.
 
-**The session read boundary resolves the layout once**: `persistedLathLayout` returns the native `lathLayout` only after validating node shapes, tree invariants, and valid metadata for exactly its leaves; otherwise undefined. `lib/src/lib/lath/persistence.test.ts` pins rejection and `lib/src/components/wall/lath-wall-engine.test.ts` pins recovery. **Both recovery paths then gate on the layout's leaf set matching the visible pane set** — the resume gate in `reconnect.ts`, the cold path in `session-restore.ts` — with the `restoredLathLayout` prop and the engine's `seed` seeing only a Lath layout. An absent, rejected, or empty one falls back to fresh panes, except that **a cold restore holding a visible Tool pane synthesizes a single-row layout from the pane projection instead**, dropping browser panes, so a Tool's command survives corrupt geometry.
+**The session read boundary resolves the layout once**: `persistedLathLayout` returns the native `lathLayout` only after validating node shapes, tree invariants, and valid metadata for exactly its leaves; otherwise undefined. `lib/src/lib/lath/persistence.test.ts` pins rejection and `lib/src/components/wall/lath-wall-engine.test.ts` pins recovery. **Both recovery paths then gate on the layout's leaf set matching the visible pane set** — the resume gate in `reconnect.ts`, the cold path in `session-restore.ts` — with the `restoredLathLayout` prop and the engine's `seed` seeing only a Lath layout. An absent, rejected, or empty one falls back to fresh panes, except that **a cold restore holding a visible Tool pane must synthesize a valid single-row layout from the pane projection instead**, dropping browser panes, so Tool identity and commands survive corrupt geometry. Pinned through engine hydration by `lib/src/lib/session-restore.test.ts`.
 
-Source of truth: `LeafMeta` / `LathPersistedLayout` / `lathLayoutFromStore` / `isLathPersistedLayout` in `lib/src/lib/lath/persistence.ts`; `persistableLeafMeta` in `lib/src/components/wall/lath-wall-engine.ts`; `lathLayout` / `token` in `lib/src/lib/session-types.ts`; the save in `lib/src/components/wall/use-session-persistence.ts` / `lib/src/lib/session-save.ts`; `persistedLathLayout` in `lib/src/lib/session-restore.ts`, consumed by `lib/src/lib/reconnect.ts`.
+Source of truth: `lathLayoutFromStore` in `lib/src/lib/lath/persistence.ts`; the save in `lib/src/components/wall/use-session-persistence.ts`; `persistedLathLayout` in `lib/src/lib/session-restore.ts`, consumed by `lib/src/lib/reconnect.ts`.
 
 ## Testing
 

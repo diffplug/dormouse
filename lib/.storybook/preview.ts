@@ -152,6 +152,8 @@ const DYNAMIC_PALETTE_VARS = [
   '--color-alarm-vs-door',
   '--color-alarm-vs-terminal',
 ] as const;
+// Falls back to the first bundled theme, so a renamed or removed bundle cannot
+// leave stories without theme vars.
 const PREFERRED_STORYBOOK_THEME = 'Light (Visual Studio)';
 const FIRST_STORYBOOK_THEME = Object.keys(VSCODE_THEMES)[0] ?? '';
 const DEFAULT_STORYBOOK_THEME = VSCODE_THEMES[PREFERRED_STORYBOOK_THEME]

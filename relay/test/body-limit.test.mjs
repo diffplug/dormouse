@@ -23,7 +23,7 @@ import {
 } from 'remote-lib-common';
 
 import { MAX_PUSH_SEND_BODY_BYTES } from '../dist/app.js';
-import { PASSWORD, enrollBurrow, fakePushSender, freshApp, ownerSession } from './helpers.mjs';
+import { ORIGIN, PASSWORD, enrollBurrow, fakePushSender, freshApp, ownerSession } from './helpers.mjs';
 
 const VAPID_PUBLIC = 'BJxKIjEEuJH0dLHTAcMFVYRnLsIBWcuMt5S1FCdDLbxCkmpUuLfHTFzWSFCPFTFsFvT8sVFTFxKIjEE';
 
@@ -80,7 +80,7 @@ test('a lying content-length is refused on the header alone', async () => {
 
 test('an ordinary body is untouched by the limit', async () => {
   const { app } = await freshApp();
-  const res = await rawPost(app, API_ROUTES.burrowEnroll, JSON.stringify({ password: PASSWORD }));
+  const res = await rawPost(app, API_ROUTES.burrowEnroll, JSON.stringify({ password: PASSWORD, origin: ORIGIN }));
   assert.equal(res.status, 200);
 });
 

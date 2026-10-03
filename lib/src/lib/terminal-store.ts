@@ -69,7 +69,7 @@ export interface PendingShellOpts {
 }
 
 export const registry = new Map<string, TerminalEntry>();
-/** Helper Sessions are private to their source: excluded from alerts, `dor`, remote projections, and cross-pane derivations. */
+/** Helper Sessions are private to their source: excluded from alerts, public `dor` targets, remote projections, and cross-pane derivations. */
 export const isHelperSession = (id: string): boolean => !!registry.get(id)?.helper;
 export const pendingShellOpts = new Map<string, PendingShellOpts>();
 

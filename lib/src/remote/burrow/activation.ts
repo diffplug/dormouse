@@ -1,7 +1,7 @@
 /**
  * Activation glue: wires this webview to the Burrow service behind the
  * platform adapter, and exposes a `window.dormouseBurrow` console hook for
- * enrolling in the POC (no settings UI needed).
+ * enrollment scripting alongside the Settings UI.
  *
  * The Burrow itself is a service in the process that owns the PTYs
  * (`lib/src/host/remote/service.ts`) — the Tauri sidecar, the VS Code extension
@@ -22,12 +22,11 @@
  *   window.dormouseBurrow.clearEnrollment()
  */
 
-import {
-  approvalKind,
-  type PairingQueueEvent,
-  type PairingQueueItem,
-  type PushDevicesResult,
-  type BurrowConsoleStatus,
+import type {
+  PairingQueueEvent,
+  PairingQueueItem,
+  PushDevicesResult,
+  BurrowConsoleStatus,
 } from '../../host/remote/service-protocol';
 import { getPlatform } from '../../lib/platform';
 import type { BurrowLink } from '../../lib/platform/types';
@@ -111,9 +110,8 @@ function installBridgeMode(link: BurrowLink): void {
 
   const target = globalThis as unknown as { dormouseBurrow?: unknown };
   if (target.dormouseBurrow) return;
-  // Same method names and result shapes as the legacy hook (docs/specs/relay.md
-  // → "Running it"), one round trip further away — so `status()` and
-  // `reconnect()` are promises here.
+  // The service is one round trip away, so every method, `status()` and
+  // `reconnect()` included, answers a promise.
   target.dormouseBurrow = {
     // No Relay argument, and no token: the only Relay is the build's baked
     // origin (`docs/specs/relay.md` → "Relay origin"), and the service reads the
@@ -132,12 +130,9 @@ function installBridgeMode(link: BurrowLink): void {
 
 /**
  * Project the service's queue onto the modal's store, each request named by
- * `(kind, clientId)`. **An item that names no kind is a pairing** — a broker
- * older than the field sends none, and nothing it sends can be a one-time
- * request (`service-protocol.ts` → `ApprovalKind`).
+ * `(kind, clientId)`.
  */
-function mirrorPairingQueue(link: BurrowLink, raw: readonly PairingQueueItem[]): void {
-  const queue = raw.map((item) => ({ ...item, kind: approvalKind(item) }));
+function mirrorPairingQueue(link: BurrowLink, queue: readonly PairingQueueItem[]): void {
   for (const pending of getPairingApprovalSnapshot()) {
     if (!queue.some((item) => sameRequest(item, pending))) resolvePairingApproval(pending);
   }

@@ -42,9 +42,20 @@ export function connectToolFrame({ dirty, save }: ToolFrameOptions, scope: Windo
     }
     if (!host || event.origin !== host.origin || message.connection !== host.connection || dirty() === undefined) return;
     const { request } = message;
-    save().then(
-      () => post({ kind: 'saved', request, dirty: dirty() ?? true }),
-      reason => post({ kind: 'saved', request, error: reason instanceof Error ? reason.message : String(reason), dirty: dirty() ?? true }),
+    // A new connect (even with the same nonce) or close retires this generation.
+    // Request ids can repeat on a replacement connection; old disk writes may
+    // finish, but their replies must never settle that connection's save.
+    const savingHost = host;
+    const completed = (error?: string) => {
+      if (host !== savingHost) return;
+      post({ kind: 'saved', request, dirty: dirty() ?? true, ...(error === undefined ? {} : { error }) });
+    };
+    let result: Promise<void>;
+    try { result = save(); }
+    catch (reason) { completed(reason instanceof Error ? reason.message : String(reason)); return; }
+    Promise.resolve(result).then(
+      () => completed(),
+      reason => completed(reason instanceof Error ? reason.message : String(reason)),
     );
   };
   scope.addEventListener('message', receive);

@@ -29,11 +29,12 @@ export interface AccountLogin {
 }
 
 /**
- * The account Worker's cookie routes' gate: a state-changing request carries
- * exactly this origin — same-site pages, the relay and voice origins among
- * them, share the login cookie — then the Better Auth handler's `get-session`
- * answers the login (401 without one), and only the verified admin passes
- * (`refuse` answers anyone else). Sets `login`.
+ * The account Worker's cookie routes' gate: a presented `Origin` is exactly
+ * this origin, and a state-changing request must present one — same-site
+ * pages, the relay and voice origins among them, share the login cookie —
+ * then the Better Auth handler's `get-session` answers the login (401
+ * without one), and only the verified admin passes (`refuse` answers anyone
+ * else). Sets `login`.
  */
 export function cookieAdmin(
   host: (c: Context) => AccountHost,
@@ -41,11 +42,10 @@ export function cookieAdmin(
 ): MiddlewareHandler<{ Variables: { login: AccountLogin } }> {
   return async (c, next) => {
     const origin = new URL(c.req.url).origin;
-    if (
-      c.req.method !== "GET" &&
-      c.req.method !== "HEAD" &&
-      c.req.header("origin") !== origin
-    )
+    const presented = c.req.header("origin");
+    // A read may omit `Origin`; nothing may present a foreign one.
+    const safe = c.req.method === "GET" || c.req.method === "HEAD";
+    if (presented === undefined ? !safe : presented !== origin)
       return c.json({ message: "Invalid origin." }, 403);
     const headers = new Headers();
     for (const name of ["cookie", "cf-connecting-ip"]) {

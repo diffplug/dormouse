@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { request } from 'node:http';
 import { afterEach, beforeEach, test } from 'node:test';
 import { startFileViewer } from '../dist/file-viewer.js';
-import { fileViewerFormat, viewerTitle } from '../dist/file-viewer-format.js';
+import { builtinHandler, fileViewerFormat, viewerTitle } from '../dist/file-viewer-format.js';
 
 let root;
 const viewers = [];
@@ -65,20 +65,49 @@ test('editor saves require same-origin POST and a matching revision, and serve o
   assert.equal((await post(html, 'save', data)).status, 403);
 });
 
+const code = builtinHandler('tool', 'builtin:code');
+
+test('builtin:code opens Markdown, HTML, and SVG as source in Monaco, and refuses binary formats', async () => {
+  for (const [name, text] of [['doc.md', '# hi'], ['page.html', '<script>bad()</script>'], ['icon.svg', '<svg/>']]) {
+    const file = join(root, name);
+    await writeFile(file, text);
+    const viewer = await startFileViewer(file, { formatOf: code.format });
+    viewers.push(viewer);
+    const page = await get(viewer);
+    assert.match(page.body, /assets\/editor\.js/);
+    assert.ok(!page.body.includes('bad()'));
+    assert.equal(JSON.parse((await get(viewer, viewer.path.replace(/view$/, 'source'))).body).text, text);
+    // The Markdown editor's image routes belong to builtin:file.
+    assert.equal((await get(viewer, viewer.path.replace(/view$/, 'images/a.png'))).status, 404);
+  }
+  await writeFile(join(root, 'a.png'), 'png');
+  await assert.rejects(startFileViewer(join(root, 'a.png'), { formatOf: code.format }), /unsupported/);
+});
+
+test('builtin:code is an alternative only where it differs from builtin:file', () => {
+  assert.deepEqual(['a.md', 'a.html', 'a.svg', 'a.ts', 'a.png', 'a.pdf'].map(code.offered), [true, true, true, false, false, false]);
+  assert.equal(code.format('a.png'), null);
+  assert.deepEqual(['a.md', 'a.ts', 'a.html', 'a.png', 'a.mp4'].map(builtinHandler('tool', 'builtin:file').describe),
+    ['Markdown editor', 'code editor', 'HTML preview', 'image viewer', 'media player']);
+});
+
 test('known formats override source-name heuristics, PDFs never preview, and prototype keys are not formats', () => {
   for (const [name, mime] of [['readme.png', 'image/png'], ['LICENSE.html', 'text/html; charset=utf-8']]) {
     assert.deepEqual(fileViewerFormat(name), { mime, text: false });
   }
   for (const name of ['report.pdf', 'README.pdf', 'LICENSE.PDF']) assert.equal(fileViewerFormat(name), null, name);
-  for (const name of ['README', 'Dockerfile.dev', 'README.md', '.gitignore']) {
+  for (const name of ['README', 'Dockerfile.dev', 'notes.mdx', '.gitignore']) {
     assert.deepEqual(fileViewerFormat(name), { mime: 'text/plain; charset=utf-8', text: true });
+  }
+  for (const name of ['README.md', 'guide.MARKDOWN']) {
+    assert.deepEqual(fileViewerFormat(name), { mime: 'text/plain; charset=utf-8', text: true, markdown: true });
   }
   assert.deepEqual(fileViewerFormat('README.css'), { mime: 'text/css; charset=utf-8', text: true });
   assert.equal(fileViewerFormat('file.constructor'), null);
 });
 
 test('keeps text out of the editor HTML and requires the per-run token on every method', async () => {
-  const viewer = await start('README.md', '<script>bad()</script> & hello');
+  const viewer = await start('README', '<script>bad()</script> & hello');
   const good = await get(viewer);
   assert.equal(good.status, 200);
   assert.ok(!good.body.includes('bad()'));
@@ -99,7 +128,7 @@ test('keeps text out of the editor HTML and requires the per-run token on every 
   assert.equal((await get(viewer, viewer.path, { Origin: 'https://evil.test' })).status, 403);
   assert.equal((await get(viewer, viewer.path, {}, 'POST')).status, 403);
   assert.equal((await get(viewer, viewer.path, {}, 'HEAD')).body, '');
-  const second = await startFileViewer(join(root, 'README.md'));
+  const second = await startFileViewer(join(root, 'README'));
   viewers.push(second);
   assert.notEqual(second.path, viewer.path);
   assert.equal((await get(second, viewer.path)).status, 403);
@@ -209,4 +238,19 @@ test('titles a viewer with its target\'s basename, controls stripped', () => {
   }
   // C0 (BEL, ESC), DEL, and C1 (NEL, CSI, ST) could end or open a sequence.
   assert.equal(viewerTitle(join(root, 'a\x07\x1b]2;x\x7f\u0085\u009b\u009cb.txt')), 'a]2;xb.txt');
+});
+
+
+test('editor saves atomically while its retained raw grant still reads the original file', async () => {
+  const viewer = await start('save.ts', 'original');
+  const sourcePath = viewer.path.replace(/view$/, 'source');
+  const first = JSON.parse((await get(viewer, sourcePath)).body);
+  const saved = await post(viewer, 'save', { text: 'edited', version: first.version });
+  assert.equal(saved.status, 200, saved.body);
+  const next = JSON.parse((await get(viewer, sourcePath)).body);
+  assert.equal(next.text, 'edited');
+  assert.equal(next.version, JSON.parse(saved.body).version);
+  const raw = await get(viewer, viewer.path.replace(/view$/, 'file/save.ts'));
+  assert.equal(raw.status, 200);
+  assert.equal(raw.body, 'original');
 });

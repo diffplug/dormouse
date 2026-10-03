@@ -136,12 +136,14 @@ export function AgentBrowserScreenModal({
   const currentMode: RenderMode = snapshot?.renderMode ?? 'agent-browser-screencast';
   const canSwapRender = !!controller.actions.setRenderMode;
   const [renderMode, setRenderMode] = useState<RenderMode>(currentMode);
-  // The controller declares what this Surface can take (a tool never pops out
-  // or changes provider); the current mode always shows so it stays selected.
+  // The controller declares what this Surface can take; a Tool never pops out.
+  // The current mode always shows so it stays selected.
   const offered = (mode: RenderMode) => mode === currentMode || controller.renderModes.includes(mode);
   const providers = BROWSER_PROVIDER_IDS.filter(provider => offered(renderModeFor(provider, 'screencast')) || offered(renderModeFor(provider, 'popout')));
   const [provider, setChosenProvider] = useBrowserProvider(providers, parseRenderMode(currentMode).provider);
   const selected = parseRenderMode(renderMode);
+  // A provider switch keeps the presentation where offered, else screencast.
+  // Only Apply remembers the provider; Cancel leaves the preference alone.
   const chooseProvider = (value: typeof provider) => {
     setChosenProvider(value);
     if (selected.presentation !== 'iframe') {

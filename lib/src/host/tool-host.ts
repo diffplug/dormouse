@@ -12,7 +12,7 @@ import { dirname } from 'node:path';
 import type { ToolControlResult, ToolHostRequest } from '../lib/platform/tool-types';
 import { resolveUpstreamUrl } from './git-upstream';
 import { listTools } from './tool-list';
-import { resolveOpenTool } from './tool-open';
+import { listOpenHandlers, resolveOpenTool } from './tool-open';
 import type { ToolInput } from './tool-input';
 import { parseBrowserSection, type ToolEntry } from './tool-registry';
 import { mergeBrowserConfig, toolViewport } from './browser-config';
@@ -86,6 +86,7 @@ export function createToolHost(options: { stateDir?: string; userConfigPath?: st
           return { status: 'browser-config', config: await readBrowserConfig(request.cwd, userPath) };
         }
         if (request.op === 'open') return await resolveOpenTool(request, userPath);
+        if (request.op === 'open-handlers') return { status: 'open-handlers', handlers: await listOpenHandlers(request, userPath) };
         if (request.op === 'list') return { status: 'list', listing: await listTools(request, { trust, userPath }) };
         const args = request.args ?? [];
         const project = request.global ? null : await lookupTool(request.name, request.cwd, trust, { args });

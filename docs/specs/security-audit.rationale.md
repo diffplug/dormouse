@@ -60,6 +60,8 @@ Run 35205193090's `## Summary` also inverted the placeholder it was reading: "tw
 
 ## Outcomes and reporting
 
+Source audit, 2026-10: quoted `VERDICT:` lines in the first fragment can displace later verdicts beyond the 32,000-character clamp. PASS status with finished domains but no merged report can still close failure issues. The default `gh issue list` returns only 30, leaving older open failures unreconciled. These reporter defects remain unfixed in the current code.
+
 Collapsing the inconclusive case into `FAIL`, as the step originally did, filed an identical issue for "the repo is insecure" and "the auditor stopped early".
 
 A `FAIL IF` condition no audit run can read makes the verdict a coin flip, because no run can ever determine it. `AUDIT_PAT`-readable GitHub state is not in that class: a failed call there is a real `UNVERIFIABLE`. `## Future` holds such an obligation only while its subject is unbuilt, since a staged item must eventually be promoted; a standing obligation on existing infrastructure is present-tense fact and stays beside its rule. `security-hosted.md` carried two: the Cloudflare script-injection exclusion, which is a zone setting, and a closing activation sentence that stated its own answer. Run 35586089654 (2026-09-21) reached both as `UNVERIFIABLE` in its sub-auditors and its domain lead resolved both to PASS, on the ground that the audited condition was the in-repo half; run 35709640946 (2026-09-22) left both `UNVERIFIABLE`, so a pass with 375 PASS and 0 FAIL returned INCONCLUSIVE and held the release gate shut (issue #747). Nothing in the tree had changed between them. #757 staged both under `security-hosted.md`'s `## Future` and kept the in-repo half — the deploy's `preflight` gate — as a `FAIL IF`.
@@ -80,7 +82,7 @@ The redaction step is the only thing between an accidental `printenv` and a worl
 
 Without the transcript a run that produces no verdict is undiagnosable: `claude-code-action` keeps tool output out of the step log on purpose and the runner is ephemeral. World-readable is consistent with the audit reports already posted to public issues; `***` masking applies to step logs, not to artifact contents.
 
-Two weakenings found by the audit's own first run were covered by no example in the judgement bullet, and both became their own bullets.
+The October 2026 audit checked the upload's `if: always()` and the reporter's absent-artifact branch. They attempt postprocessing after ordinary failures, but cannot establish an upload after the runner itself times out or is cancelled; the issue links a download only when the artifact lookup returns an id.
 
 Publishing the fragments when no merged report exists is the same "a prompt is not a control" split as the guards above. Run 34581574869 (2026-09-11) ended its turn before the merge, so this step's report section was one line saying no report was produced — while `supply-chain` and `ci-and-secrets` had finished `VERDICT: PASS` fragments in the working directory, already redacted and already read twice by the guard loops. `.github/audit/orchestrator.md` §4 now forbids ending the turn there, but the run's findings should not depend on that sentence being followed. Verbatim and unmerged, because §3's merge is the only thing entitled to characterise a fragment; the cut-off and absent markers are the exception, being the same mechanical tests the step's own guard loops already ran, and a fragment published without them reads as a finished report.
 

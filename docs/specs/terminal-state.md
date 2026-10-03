@@ -1,7 +1,7 @@
 # Terminal CWD and Command State
 
-> See `docs/specs/glossary.md` for Session vocabulary. Owns the per-Session terminal semantic state that layout and grouping consume.
-> **Defers:** alert/TODO behavior and the notification OSCs (OSC 9 / 9;4 / 99 / 777 / BEL) to `docs/specs/alert.md`; the escape-sequence registry and parsing-location rules to `docs/specs/terminal-escapes.md`.
+> See `docs/specs/glossary.md` for Session vocabulary. Owns the per-Session terminal semantic state that layout and grouping consume, and the shell integration that reports it.
+> **Defers:** alert/TODO behavior and the notification OSCs (OSC 9 / 9;4 / 99 / 777 / BEL) to `docs/specs/alert.md`; the escape-sequence registry, parsing-location rules, and value bounds to `docs/specs/terminal-escapes.md`.
 
 **`cwd` means "the shell/session reported this directory"** — not the internal CWD of a foreground program. **A command snapshots `cwdAtStart` at start**; grouping and header disambiguation use that snapshot while it runs.
 
@@ -11,7 +11,7 @@
 
 - **Host identity is part of directory identity**: `file://localhost/Users/me/project` and `file://prod-box/home/me/project` are different locations even where their display labels compact alike.
 - **`ShellActivity` is not `isRunning`** — the shell process keeps running; what matters is whether a foreground command is active.
-- **Terminal title is a label override, never a command lifecycle signal.** `titleCandidates` keeps the latest value per channel with its own timestamp — the only store of it — so app, shell, and user sources stay independently inspectable.
+- **Terminal title is a label override, never a command lifecycle signal.** `titleCandidates` keeps the latest value per channel with its own timestamp — the only store of it — so app, shell, and user sources stay independently inspectable; a later title never erases another source's candidate.
 
 **Must transfer semantic state and OSC-driven status at the stream mark, before
 applying the destination's since-mark replay.** Screen serialization carries no
@@ -22,65 +22,62 @@ Source of truth: `snapshotTerminalState` / `restoreTransferredTerminalState` in
 ## Normalized Events
 
 - **Feature code must consume `TerminalPaneState` or `TerminalSemanticEvent`, never raw OSC sequences** — all protocol parsing emits that canonical union (`lib/src/lib/terminal-state.ts`) first.
-- **Must timestamp protocol-derived events in stream order before the reducer, across PTY chunks and clock adjustments.** Pinned by `orders semantic events across PTY reads when the clock stalls or moves backward` in `lib/src/lib/terminal-protocol.test.ts`.
-- `AlertManager` consumes command lifecycle events too, but only those the protocol parser produced (`docs/specs/alert.md`).
+- **Must timestamp protocol-derived events in stream order before the reducer, across PTY chunks and clock adjustments**, including a stalled or backward clock (pinned by `lib/src/lib/terminal-protocol.test.ts`).
+- `AlertManager` consumes command lifecycle events only from the protocol parser (`docs/specs/alert.md` -> "WATCHING Track").
 
 ## Supported OSC Inputs
 
-CWD:
+The registry lists the sequences; this section owns what each one means.
 
-| Sequence | Source | Notes |
-|---|---|---|
-| `OSC 7 ; file://host/path ST` | `osc7` | Parsed as a `file:` URI; path decoded, host derived from the parser. |
-| `OSC 9 ; 9 ; <cwd> ST` | `osc9_9` | Windows Terminal / ConEmu. Drive-letter and UNC paths are Windows paths; every other path is `unknown`, never `posix` (rationale). |
-| `OSC 633 ; P ; Cwd=<cwd> ST` | `osc633` | VS Code-style. |
-| `OSC 1337 ; CurrentDir=<cwd> ST` | `osc1337` | iTerm2 compatibility. |
+CWD, sourced `osc7`, `osc9_9`, `osc633` (`P ; Cwd=`), `osc1337` (`CurrentDir=`):
 
-**Must preserve native CWD text, including percent signs, semicolons and edge spaces; percent-decode only OSC 7 file URIs.** Pinned by `preserves literal percent escapes and whitespace in native CWDs` in `lib/src/lib/terminal-state.test.ts` and `preserves semicolons in OSC 633 CWD %j` in `lib/src/lib/terminal-protocol.test.ts`.
-
-**Every CWD is bounded at `MAX_CWD_LENGTH` and stripped of control characters before storage**, whatever the source ([terminal-escapes.md](terminal-escapes.md), rationale).
-
-**The OSC 7 host is the URL parser's mapped hostname except in case and the literal `localhost` spelling** — the two the raw slice alone preserves; a slice diverging further is unnormalized input, and taking it would let an ignorable code point inside `localhost` read as remote. Pinned by `bounds every CWD source and strips control characters` in `lib/src/lib/terminal-state.test.ts`. Source of truth: `fileUriHost` in `lib/src/lib/terminal-state.ts`.
-
-Non-OSC CWD sources:
-
+- **OSC 7 is parsed as a `file:` URI, its host taken from the URL parser's normalized hostname, preserving raw case and the literal `localhost` spelling only.**
+- **OSC 9;9 drive-letter and UNC paths are Windows paths; every other path is `unknown`, never `posix`** (rationale).
+- **Must preserve native CWD text, including percent signs, semicolons and edge spaces; percent-decode only OSC 7 file URIs** (rationale).
 - `process` — the adapter polled the PTY's process for its working directory.
-- `manual` — seeded via `cwdFromManualPath()`. `seedTerminalManualCwd()` (session restore) writes it **only into a pane with no CWD yet**; `seedLaunchedCommand()` (known spawn directory) emits a `cwd` event the reducer applies **unconditionally** — safe only at spawn, before any OSC has reported.
+- `manual` — seeded via `cwdFromManualPath()`. `seedTerminalManualCwd()` (session restore) writes it **only into a pane with no CWD yet**; `seedLaunchedCommand()` (known spawn directory) applies it **unconditionally** — safe only at spawn, before any OSC has reported.
 
-Command lifecycle:
+Command lifecycle, for both `OSC 133` and `OSC 633`: `A` → `promptStart`, `B` → `promptEnd`, `D ; <exitCode?>` → `commandFinish`, and:
 
-| Sequence | Event |
-|---|---|
-| `OSC 133 ; A ST` / `OSC 633 ; A ST` | `promptStart` |
-| `OSC 133 ; B ST` / `OSC 633 ; B ST` | `promptEnd` |
-| `OSC 133 ; C [; <key>=<value> ...] ST` | `commandLine` when a command line is present — fish ≥ 4's percent-encoded UTF-8 `cmdline_url`, else kitty's `printf %q` `cmdline`, which runs to the end of the sequence — bounded and sanitized like `E`; then `commandStart(source: "osc133_boundaries")`. |
-| `OSC 633 ; E ; <commandline> [; <nonce>] ST` | `commandLine`; parses only the command field, decoding VS Code `\xAB` / `\\` escapes. Bounded and sanitized like every retained value; one reducing to nothing emits nothing ([terminal-escapes.md](terminal-escapes.md)). |
-| `OSC 633 ; C ST` | `commandStart(source: "osc633_boundaries")`. The reducer re-labels the stored run `osc633_E` when a command line is pending; the *event* source stays a boundary, which is what promotes the pane to OSC-driven ([Keystroke fallback](#keystroke-fallback)). |
-| `OSC 133 ; D ; <exitCode?> ST` / `OSC 633 ; D ; <exitCode?> ST` | `commandFinish` |
+- `OSC 133 ; C` → `commandStart(source: "osc133_boundaries")`, preceded by `commandLine` when it carries one: fish ≥ 4's percent-encoded UTF-8 `cmdline_url`, else kitty's `printf %q` `cmdline`, which runs to the end of the sequence.
+- `OSC 633 ; E ; <commandline> [; <nonce>]` → `commandLine` from the command field alone, decoding VS Code `\xAB` / `\\` escapes.
+- `OSC 633 ; C` → `commandStart(source: "osc633_boundaries")`. **The stored run is re-labelled `osc633_E` when a command line is pending; the *event* source stays a boundary**, which is what promotes the pane to OSC-driven ([Keystroke fallback](#keystroke-fallback)).
 
-Title fallback: `OSC 0 ; <title> ST` and `OSC 2 ; <title> ST` emit `title` with sources `osc0` and `osc2`.
+Titles:
 
-Title candidate diagnostics:
-
-| Sequence | Candidate source | Header/door override |
-|---|---|---|
-| `OSC 9 ; <message> ST` | `osc9` | Yes |
-| `OSC 99 ; ... title/body ... ST` | `osc99` | No |
-| `OSC 777 ; notify ; <title> ; <body> ST` | `osc777` | No |
-
-**Only the OSC 9 *message* form feeds the title channel** (body text); the *progress* form `OSC 9 ; 4` has no text payload and contributes no candidate (`docs/specs/alert.md`).
-
-Non-OSC title source:
-
+- `OSC 0` / `OSC 2` → `title` sourced `osc0` / `osc2`.
+- **Only the OSC 9 *message* form feeds the title channel** (`osc9`, which may override the header); the *progress* form `OSC 9 ; 4` contributes no candidate.
+- **`OSC 99` / `OSC 777 ; notify` candidates (`osc99`, `osc777`) are diagnostics only** — the header context menu's title-candidates table, never a header override.
 - `user` — pinned via the inline rename UI (`setTerminalUserTitle`). **Always wins** over every other candidate. **Titles starting with `<idle>` are rejected as reserved**.
 
-**The `user_input` command fallback is best effort and renderer-only** — synthesized outside the parse path, it never reaches `AlertManager` (`docs/specs/alert.md`).
+**A programmatic interactive launch writing directly to the platform PTY must emit `commandLine` + `commandStart(source: "user_input")` synchronously before the write**, through `seedLaunchedCommand` — it bypasses xterm's keystroke fallback; an integrated shell's later boundaries stay authoritative.
 
-**A programmatic interactive launch writing directly to the platform PTY must emit `commandLine` + `commandStart(source: "user_input")` synchronously before the write** — it bypasses xterm's keystroke fallback, leaving headers, grouping and `countRunningSessions` wrong on shells with no OSC integration. `dor split/ensure -- <command>` and cold-restore agent resume both use `seedLaunchedCommand`; an integrated shell's later boundaries stay authoritative.
+**Supported-but-malformed semantic OSCs are consumed without changing state.**
 
-**Supported-but-malformed semantic OSCs are consumed without changing state.** Terminators, split chunks, and unsupported-OSC handling: `docs/specs/terminal-escapes.md`.
+Source of truth: `TerminalProtocolParser` in `lib/src/lib/terminal-protocol.ts`; `fileUriHost` / `cwdFromManualPath` in `lib/src/lib/terminal-state.ts`; `seedTerminalManualCwd` and `seedLaunchedCommand` in `lib/src/lib/terminal-state-store.ts`.
 
-Source of truth: `cwdFromManualPath` in `lib/src/lib/terminal-state.ts`; `seedTerminalManualCwd` and `seedLaunchedCommand` in `lib/src/lib/terminal-state-store.ts`, their callers in `lib/src/lib/terminal-lifecycle.ts`.
+## Shell-integration injection
+
+**Dormouse injects its own shell integration when it spawns a shell** (rationale); the scripts emit the `OSC 633` rows above (`A`, `B`, `C`, `D;<exit>`, `E`, `P;Cwd=`). **Injection is fail-safe**: missing scripts skip it and the shell spawns as before, on the [Keystroke fallback](#keystroke-fallback). An env channel fires as reliably as the `PATH` prepend; an args channel only for the launch shapes below (rationale).
+
+| Shell | Channel | Injected when |
+|---|---|---|
+| zsh | env (`ZDOTDIR`) | Always. **Nothing may be written into that directory at runtime** — it ships inside the signed macOS bundle (`.zshrc` has the why). |
+| bash | args (`--init-file`) | **The launch args are only `-i` / `-l` / `--login`** — Git Bash's `--login -i` included, a `-c <cmd>` not (rationale). |
+| PowerShell (`pwsh`, `powershell.exe`) | args (dot-source via `-Command`) | **A bare launch or one carrying `-NoExit`, unless it uses `-File` / `-EncodedCommand`**; appended after any startup command it carries (rationale). |
+| WSL | args (a `sh -c` detector inside the distro, reaching the bash script by its `/mnt/...` path) | **Only the exact two-argument `-d <distro>` launch.** **bash is the only integrated WSL shell** (rationale). |
+| cmd.exe | — | Never: always the keystroke fallback, with no exit codes. |
+
+**bash's `E` is the submitted line, read back from history only when the last entry provably is it, else its first simple command** (`$BASH_COMMAND`) (rationale).
+
+**Both distributions ship the scripts**: standalone through the Tauri `../sidecar/**/*` glob, the VS Code build into `dist/shell-integration`, which the host names in `DORMOUSE_SHELL_INTEGRATION_DIR`.
+
+**Emitted fields must be filtered before they are written — a security boundary.** An attacker-chosen directory name or command can carry an OSC terminator (BEL, `ESC \`, or the C1 ST `U+009C`) that ends the `633` sequence early, so the remainder arrives as a fresh, fully-trusted OSC. **The parser cannot defend against this** — it scans raw bytes (rationale). The field grammar the parser decodes:
+
+- **`E` escapes** BEL, ESC and the C1 ST alongside `\`, `;`, LF and CR; the parser decodes `\xNN` back, so it still reports verbatim.
+- **`Cwd=` is read verbatim**, no `\xNN` decoding, so a Windows path's backslashes arrive intact — its control characters are therefore *removed*, not escaped.
+
+Source of truth: `applyShellIntegration` in `standalone/sidecar/pty-core.js`; the scripts under `standalone/sidecar/shell-integration/`; pinned by `standalone/sidecar/shell-integration.test.js`.
 
 ## Reducer
 
@@ -88,31 +85,30 @@ Source of truth: `cwdFromManualPath` in `lib/src/lib/terminal-state.ts`; `seedTe
 
 ### OSC-driven events
 
-- `cwd` replaces the latest session CWD (no-op when both identity and source are unchanged).
-- `promptStart` sets `{ kind: "prompt" }`; `promptEnd` sets `{ kind: "editing" }`. **Both clear `currentCommand` and `pendingCommandLine`** (rationale).
-- `commandLine` stores `pendingCommandLine`.
-- `commandStart` creates `currentCommand`, snapshots `cwdAtStart`, uses `event.startedAt` when present, clears `pendingCommandLine`, and sets `{ kind: "running" }`. `displayCommand` is the summarized pending command line; with none pending (a bare `OSC 133 ; C`) it falls back to the newest OSC 0/2/9 title candidate, then to the literal `shell`.
-- `commandFinish` moves `currentCommand` to `lastCommand`, stores `event.finishedAt` (otherwise reducer time) and `exitCode`, snapshots the latest in-run OSC 0/2/9 title into `lastCommand.finalTerminalTitle` (titles older than `startedAt` or younger than `finishedAt` excluded), clears `currentCommand`, and sets `{ kind: "finished", exitCode }`. **With no `currentCommand` it only sets the activity**, never inventing a `lastCommand`.
-- `title` updates the per-source entry in `titleCandidates`. **Later OSC title events never erase earlier candidates from other sources.**
+- **`promptStart` and `promptEnd` clear the running command and any pending command line** (rationale).
+- **A `commandStart` with no pending command line** (a bare `OSC 133 ; C`) takes its `displayCommand` from the newest OSC 0/2/9 title candidate, else the literal `shell`.
+- **`commandFinish` snapshots the latest in-run OSC 0/2/9 title into `lastCommand.finalTerminalTitle`; with no `currentCommand` it only sets the activity**, never inventing a `lastCommand`.
 
-Command-line tokenizing is dialect-free: **`\` escapes exactly the set `shellEscapePosix` writes** (`POSIX_ESCAPABLE` in `lib/src/lib/posix-escape.ts`; both halves pinned by `terminal-state.test.ts`). **A leading `&` is PowerShell's call operator, never a POSIX background suffix**, and is dropped rather than read as a boundary. **A redirection keeps its `&` or `|`** — `2>&1`, `<&3`, `>|`, `&>`, `&>>` separate nothing — and **`|&`, like fish's `&|`, is a pipe**. **An unquoted `#` starting a word comments out the rest of its line.** **An unquoted newline separates commands like `;`**; a backslash-newline continues the line. **A here-document's body is skipped**: after an unquoted `<<` or `<<-` (not `<<<`), the lines through its delimiter, quotes removed and leading tabs stripped under `<<-`. **Grouping `(` `)` `{` `}` is dropped; a `$(…)`, `<(…)` or `>(…)` substitution or a `name=(…)` array is one word**, separators included. **An unquoted Windows path containing spaces stays split.** **A launcher suffix is not part of a program's name** — `npm.cmd` and `C:\tools\claude.exe` are `npm` and `claude` for the header, the WATCHING key, and the terminal context alike. Accepted: `foo.bat` and `foo.exe` in one directory cannot be watched separately. (rationale)
+**Must tokenize without selecting a shell dialect, and read back exactly the `POSIX_ESCAPABLE` set that `shellEscapePosix` writes.** **Must derive the same suffix-free program name for headers, WATCHING keys, and terminal context**: `npm.cmd` and `C:\tools\claude.exe` become `npm` and `claude`; launcher variants in one directory cannot be watched separately. (rationale)
 
-**`displayCommand` is a one-line, per-program summary of those tokens** — the program name plus a bounded argument count, suffixed `| ...` or ` ...` past a pipeline or compound boundary. Source of truth: `summarizeCommandLine` and `commandTitleTokens` in `lib/src/lib/terminal-state.ts`.
+**`displayCommand` is a one-line, per-program summary of those tokens.**
+
+Source of truth: `reduceTerminalState` / `tokenizeCommand` / `commandProgramName` / `summarizeCommandLine` in `lib/src/lib/terminal-state.ts`; `POSIX_ESCAPABLE` in `lib/src/lib/posix-escape.ts`; pinned by `lib/src/lib/terminal-state.test.ts`.
 
 ### Keystroke fallback
 
-For shells without OSC 133/633 integration, the command is read off the screen rather than reconstructed from keystrokes.
+For shells without OSC 133/633 integration, the command is read off the screen rather than reconstructed from keystrokes (rationale). **It is best effort and renderer-only.**
 
-- **Prompt-shape learning.** Every detected idle prompt — the shell's first at spawn included — teaches a cwd-invariant prompt **shape**: the trailing terminator character (`%`, `$`, `#`, `>`, `❯`, `➜`, `λ`) plus how many times it already appears earlier in the prompt. **A prompt with no recognized terminator yields no shape**, hence no title rather than a wrong one.
-- **Submit parsing.** On submit (an Enter not inside a bracketed paste, including split paste markers) it reads the cursor's rendered logical line — `prompt + command`, soft-wrapped rows joined, bounded at the cursor column so zsh-autosuggestions ghost text is excluded — splits the command off at the shape's terminator occurrence, and trims what follows. **A non-empty result emits `commandLine` + `commandStart(source: "user_input")` immediately, and nothing further while it is current** — keystrokes into a running program are not submissions. Command-internal terminators (`dir > out.txt`) survive, sitting after the prompt's own. (rationale)
-- **Shape survival and resume seeding.** **The shape survives across commands** (no reset on `promptStart`/`promptEnd`/`commandStart`) and **is pre-seeded from replay during resume**, including VS Code panel reopen. Cold restore has no transcript to seed from. **Seeding is learn-only and fires no prompt transition.** (rationale)
-- **Must key fallback state, including learned prompt shapes, by the stable Session id** (`docs/specs/layout.md` → Session lifecycle and terminal registry). Pinned by `keys prompt and command state by Session id` in `lib/src/lib/terminal-state-store.test.ts`.
-- **Synthesized idle transitions.** Prompt-looking output always refreshes the learned shape, but **may synthesize the idle prompt transition only when `currentCommand.source === "user_input"`**. (rationale)
-- **What counts as a returned prompt.** Judged over a pane's last 1,024 output chars, **must remove alternate-screen spans (DEC modes 47/1047/1049) statefully before truncation, across chunk and command boundaries; RIS resets this state** — presentation controls go to `stripTerminalControls` (`docs/compatible-agents.md` → "Detection"). **The window is cut from `TerminalProtocolParseResult.textData`, never the raw chunk** (rationale). **Matching is anchored** to one of a fixed set of prompt shapes on a final line of at most 200 characters; **a custom prompt carrying neither a path/user signal (`/`, `~`, `@`, `:`) nor a recognized terminator must not match**, a false positive flipping a running command back to idle.
-- **Stripping runs in boundary mode**, as resume detection does (`docs/compatible-agents.md` → "Detection"): **a genuine trailing newline must keep reading as `null`, a trailing boundary must not**. Both directions pinned by `lib/src/lib/terminal-state-store.test.ts`. (rationale)
-- **Per-pane retirement.** **The keystroke fallback and real OSC 633/133 integration are mutually exclusive per pane.** The first authentic OSC boundary (`promptStart`/`promptEnd`/`commandFinish` always, or a `commandStart` sourced `osc633_boundaries`/`osc133_boundaries`) promotes the pane to **OSC-driven**: `recordTerminalUserInput` early-returns and no further `user_input` `commandStart`/`commandLine` is synthesized, so injected shells never double-count. **The fallback's own synthesized prompt markers carry a `keystrokeHeuristic` flag and must not trigger promotion**, or it would retire the path emitting them. The flag is per-pane runtime state, seeded fresh, cleared on pane reset/removal, **never persisted**; `isPaneOscDriven()` exposes it for `dor ensure --restart` (`docs/specs/dor-cli.md`).
+- **Prompt shape.** Every detected idle prompt — the shell's first at spawn included — teaches a cwd-invariant shape keyed on the prompt's trailing terminator. **A prompt with no recognized terminator yields no shape**, hence no title rather than a wrong one.
+- **Submit.** On an Enter outside a bracketed paste, the command is split off the cursor's rendered logical line at the shape. **A non-empty result emits `commandLine` + `commandStart(source: "user_input")` immediately, and nothing further while it is current** — keystrokes into a running program are not submissions.
+- **The shape survives across commands and is pre-seeded from replay during resume**, including VS Code panel reopen; cold restore has no transcript to seed from. **Seeding is learn-only and fires no prompt transition.** (rationale)
+- **Must key fallback state, including learned prompt shapes, by the stable Session id** (`docs/specs/layout.md` → Session lifecycle and terminal registry).
+- **A returned prompt may synthesize the idle transition only when `currentCommand.source === "user_input"`**; prompt-looking output always refreshes the shape. (rationale)
+- **What counts as a returned prompt.** Judged over a bounded tail of `TerminalProtocolParseResult.textData`, never the raw chunk (rationale), **with alternate-screen spans (DEC modes 47/1047/1049) removed statefully before truncation, across chunk and command boundaries; RIS resets this state** (rationale). **Matching is anchored to a fixed set of prompt shapes; a custom prompt carrying neither a path/user signal (`/`, `~`, `@`, `:`) nor a recognized terminator must not match**, a false positive flipping a running command back to idle.
+- **Stripping runs in boundary mode** (`docs/compatible-agents.md` → "Detection"): **a genuine trailing newline must keep reading as no prompt, a trailing boundary must not**; both directions pinned by `lib/src/lib/terminal-state-store.test.ts` (rationale).
+- **Per-pane retirement.** **The keystroke fallback and real OSC 633/133 integration are mutually exclusive per pane.** The first authentic boundary (`promptStart`/`promptEnd`/`commandFinish` always, or a `commandStart` sourced `osc633_boundaries`/`osc133_boundaries`) promotes the pane to **OSC-driven**, after which no `user_input` event is synthesized, so injected shells never double-count. **The fallback's own synthesized prompt markers must not trigger promotion.** The flag is per-pane runtime state, **never persisted**; `isPaneOscDriven()` exposes it for `dor ensure --restart` (`docs/specs/dor-cli.md`; rationale).
 
-Source of truth: `detectPromptSubmit` in `lib/src/lib/terminal-command-input.ts`, `readLogicalLineFromBuffer` in `lib/src/lib/terminal-buffer-read.ts`, `derivePromptShape` / `extractCommand` in `lib/src/lib/terminal-prompt-shape.ts`, `PromptAltScreenFilter` / `detectReturnedShellPrompt` / `recordTerminalUserInput` in `lib/src/lib/terminal-state-store.ts`, `stripTerminalControls` and `TerminalControlStreamFilter` (replay seeding only) in `lib/src/lib/terminal-controls.ts`.
+Source of truth: `recordTerminalUserInput` / `recordTerminalOutput` / `seedPromptShapeFromScrollback` in `lib/src/lib/terminal-state-store.ts`.
 
 ### CWD precedence
 
@@ -123,7 +119,7 @@ Source of truth: `detectPromptSubmit` in `lib/src/lib/terminal-command-input.ts`
 | `manual` | Initial seed only; replaceable by any later source. |
 | (none) | Default `null`. |
 
-**Must apply asynchronous process-CWD results to their originating Session and drop results for a disposed Session.** Pinned by `applies process CWD only to the originating Session` and `does not resurrect a disposed pane when a late process CWD arrives` in `lib/src/lib/terminal-state-store.test.ts`.
+**Must apply asynchronous process-CWD results to their originating Session and drop results for a disposed Session** (pinned by `lib/src/lib/terminal-state-store.test.ts`).
 
 Source of truth: `processCwdMayReplace` in `lib/src/lib/terminal-state.ts`, applied by `updateCwdIfAllowed` in `lib/src/lib/terminal-state-store.ts`.
 
@@ -138,16 +134,16 @@ Header priority — first match wins:
    - The alert manager's live `OSC 9` message text, unless the pane's own `osc9` candidate places that message outside the command's window. **With no `osc9` candidate at all the app title is trusted.** (rationale)
    - The newest in-run `OSC 0` / `OSC 2` / `OSC 9` candidate.
    - `currentCommand.displayCommand`.
-3. After a command has finished (`currentCommand` null and `lastCommand` set): `<idle> ${LAST_TITLE}`, `LAST_TITLE` applying the same priority to `lastCommand` with the in-run title taken from `lastCommand.finalTerminalTitle` (snapshotted at finish) **so a post-finish title event cannot overwrite it**.
+3. After a command has finished (`currentCommand` null and `lastCommand` set): `<idle> ${LAST_TITLE}`, `LAST_TITLE` applying the same priority to `lastCommand` with the in-run title taken from `lastCommand.finalTerminalTitle` **so a post-finish title event cannot overwrite it**.
 
-   On a non-zero exit a trailing fail glyph is appended — `<idle> ${LAST_TITLE} ✗` — and `lastCommandFailed` set. **"Failed" requires a real non-zero `exitCode`**: the keystroke fallback never records one, so it shows no glyph either way. **The glyph rides in `primary`**; the pane header colors it red from `lastCommandFailed`. (rationale)
+   On a non-zero exit a trailing fail glyph is appended — `<idle> ${LAST_TITLE} ✗` — and `lastCommandFailed` set. **"Failed" requires a real non-zero `exitCode`**: the keystroke fallback never records one, so it shows no glyph either way. **The glyph rides in `primary`** and is the header's only failure signal. (rationale)
 4. Otherwise (no running command and no last command): `<idle>`.
 
 **Must filter app-sent title overrides.** A bare interpreter name or executable path (`zsh`, `C:\WINDOWS\system32\cmd.exe`) is discarded; cmd.exe's `<path>\cmd.exe - <command>` form is reduced to the `<command>` half; titles carrying arguments or prose (`lazygit: dormouse`, `README.md - VIM`) are kept. (rationale)
 
-**`OSC 99` / `OSC 777` candidates are diagnostics only** (the header context menu's title-candidates table). **Shell titles from outside a command's window — before it started or after it finished — are never promoted**: they neither replace `<idle>` nor pollute `LAST_TITLE`.
+**Shell titles from outside a command's window — before it started or after it finished — are never promoted**: they neither replace `<idle>` nor pollute `LAST_TITLE`.
 
-**`<idle> ${LAST_TITLE}` persists across prompt/editing transitions** until a new `commandStart` replaces it, keeping visible which program just exited; only a pane with no `lastCommand` shows plain `<idle>`. **Failure is surfaced by the `✗` glyph and nothing more** — output and TODO notification belong to `docs/specs/alert.md`.
+**`<idle> ${LAST_TITLE}` persists across prompt/editing transitions** until a new `commandStart` replaces it, keeping visible which program just exited; only a pane with no `lastCommand` shows plain `<idle>`.
 
 Callers showing one Session's label use `deriveSurfaceLabel()` = `deriveHeader` + `resolveDisplayPrimary()`, which substitutes the Session's saved/fallback title when the derived primary is the generic `shell` label. **`<idle>` is never substituted**, so an idle pane is not mislabeled with a stale saved title.
 
@@ -159,7 +155,7 @@ Source of truth: `deriveHeader` / `deriveSurfaceLabel` / `resolveDisplayPrimary`
 
 - **Directory group keys use `cwdIdentity(cwd)`** (`scheme|host|pathKind|path`), so remote hosts and Windows/POSIX path kinds stay distinct. Directory mode keys on `cwdAtStart ?? cwd`; command mode on the running command's `displayCommand`, else the idle label.
 - **Windows UNC display labels keep `\\server\share\` as the path root** and do not repeat the server/share in the trailing path segments.
-- **`prompt` and `editing` collapse into one `idle` bucket**; **`finished` stays distinct** so a recently-completed pane can be filtered separately though its header label carries the same `<idle>` prefix. `statusBucket` projects the 5 `ShellActivity.kind` values onto 4.
+- **`prompt` and `editing` collapse into one `idle` bucket**; **`finished` stays distinct** so a recently-completed pane can be filtered separately though its header label carries the same `<idle>` prefix.
 
 Source of truth: `groupTerminalPanes` / `TerminalGroupingMode` / `cwdIdentity` / `statusBucket` in `lib/src/lib/terminal-state.ts`.
 
@@ -170,3 +166,7 @@ Source of truth: `groupTerminalPanes` / `TerminalGroupingMode` / `cwdIdentity` /
 **Must abbreviate home only at a complete path boundary**, retaining the absolute path for copying and native directory operations. Compare helper and source host identity as well as directory paths.
 
 Source of truth: `explainTerminalTitle` / `cwdDisplay` in `lib/src/lib/terminal-state.ts`; `TerminalContext` in `lib/src/components/wall/TerminalContext.tsx`.
+
+## Future
+
+- **fish shell integration** — inject via `XDG_DATA_DIRS`: fish auto-sources `*/fish/vendor_conf.d/*.fish`, so the integration ships as a vendor conf file (env channel, as reliable as the `PATH` prepend). Until it lands, fish ≥ 4 reports `OSC 133` itself, command line included, and older fish uses the keystroke fallback.

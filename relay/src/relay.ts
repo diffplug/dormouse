@@ -226,8 +226,8 @@ export class RelayHub {
     if (this.#clients.get(client.clientId) !== client) return;
     if (answeredPing(client.socket, raw)) return;
     // The envelope the end-to-end protocol rides in: an `init` binds, and
-    // everything after it is forwarded within that binding (relay.md ->
-    // Relay). Never decoded here.
+    // everything after it is forwarded within that binding
+    // (`docs/specs/relay.md` -> "Routing"). Never decoded here.
     const read = readClientFrame(raw);
     if ('error' in read) {
       this.#toClient(client, read.error);

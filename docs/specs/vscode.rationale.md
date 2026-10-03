@@ -68,6 +68,8 @@
 
 **Where the `WebSocket` boundary falls.** `globalThis.WebSocket` arrived in Node 22, and VS Code 1.92 — the floor `engines.vscode` declares — shipped Node 20.14 (its release notes, July 2024), so an older extension host has no global to use.
 
+**Why `pushDevices` answers `null` instead of refusing.** When an un-enrolled window refused the read-only commands, the Settings dialog reported an unreachable server on machines that had simply never enrolled.
+
 ## The direct path
 
 macOS library validation decides which process may load the addon. Run under
@@ -103,10 +105,12 @@ macOS host, hence copying only the declared platform packages.
 
 **Why a result is never broadcast when a route exists.** Ids are globally unique, so broadcasting another window's answer settles nothing anywhere — and it puts that window's Burrow state in front of webviews that never asked for it.
 
-**Why `pushDevices` answers `null` instead of refusing.** When an un-enrolled window refused the read-only commands, the Settings dialog reported an unreachable server on machines that had simply never enrolled.
+**What the broadcast buys.** Unambiguous settling is only half of it: the same fan-out lets a losing window forward a command to the broker window and receive the answer back.
 
 ## Build and development
 
 **Why a self-host VSIX needs no update switch of its own.** VS Code treats a VSIX install as a pinned version and leaves it out of Marketplace auto-update (microsoft/vscode#219932, fixed by #219933 in the July 2024 iteration, 1.92; the diff covers the CLI's VSIX path, `code --install-extension`, which `pnpm dogfood:vscode` takes — checked 2026-09). An extension cannot opt itself out of Marketplace updates, and a distinct extension id would collide with the Marketplace build's command, view, and keybinding contributions when both are installed, and would strand the enrollment in another id's `SecretStorage`.
 
 **Why the separate typecheck is wired into `test`.** A reference to a deleted function once reached a commit and surfaced only as a runtime throw during `deactivate()`, which — having no `try`/`catch` — skipped every teardown step behind it. `tsc` is the package's only automated check for that class of error.
+
+**Why the typecheck config carries both DOM and Node libs.** The checked program spans two runtimes — `src/` is extension-host Node code but imports webview modules from `../lib/src/` — so `vscode-ext/tsconfig.json` is looser than either runtime alone; each side is checked precisely by its own project (`lib/tsconfig.app.json` for the webview). What it reliably catches is vscode-ext's own code referring to something that no longer exists.

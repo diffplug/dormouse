@@ -65,7 +65,9 @@ test('drains normal command output before releasing capture pipes', async () => 
 test('releases inherited pipes so the capture caller can exit while the daemon lives', async () => {
   // This test launches a capture caller, whose short-lived command starts a
   // daemon sharing its pipes. A resolved promise alone does not prove that the
-  // caller's event loop can exit.
+  // caller's event loop can exit. Detach the daemon from the short-lived
+  // Windows console too; inheriting capture pipes alone does not make it
+  // independent of the command's console lifetime.
   const daemonScript = `
     process.stdout.on('error', () => {});
     process.stderr.on('error', () => {});
@@ -78,7 +80,7 @@ test('releases inherited pipes so the capture caller can exit while the daemon l
   const commandScript = `
     const { spawn } = require('node:child_process');
     const daemon = spawn(process.execPath, ['-e', ${JSON.stringify(daemonScript)}, String(process.pid)], {
-      stdio: ['ignore', 'inherit', 'inherit'], windowsHide: true,
+      stdio: ['ignore', 'inherit', 'inherit'], windowsHide: true, detached: true,
     });
     daemon.unref();
     process.stdout.write(String(daemon.pid));
@@ -123,7 +125,7 @@ test('runs relative paths in the requested cwd without changing the caller cwd',
   try {
     const result = await spawnAndCapture(node, ['-e', 'process.stdout.write(process.cwd())'], { cwd });
     assert.equal(result.ok, true);
-    assert.equal(result.stdout, await realpath(cwd));
+    assert.equal(await realpath(result.stdout), await realpath(cwd));
     assert.equal(process.cwd(), before);
   } finally { await rm(cwd, { recursive: true, force: true }); }
 });

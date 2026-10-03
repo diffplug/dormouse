@@ -155,16 +155,15 @@ export const RELAY_PING = 'ping';
 export const RELAY_PONG = 'pong';
 
 /**
- * How often either end pings its relay socket. Once a pong has arrived on a
- * socket, a ping unanswered by the next one ends it; a Relay that never
- * answers is never held to a deadline.
+ * How often either end pings its relay socket. A ping unanswered by the next
+ * one ends the socket, the first ping included.
  */
 export const RELAY_PING_INTERVAL_MS = 30_000;
 
 /**
  * Close code the relay sends to a Burrow socket it displaces when a newer socket
- * claims the same `burrowId` (only one socket may own a burrowId — see relay.md
- * "Relay"). In the 4000-4999 application-private range.
+ * claims the same `burrowId` (only one socket may own a burrowId —
+ * `docs/specs/relay.md` -> "Routing"). In the 4000-4999 application-private range.
  *
  * This lives on the wire contract rather than inside `relay` because the Burrow
  * keys its reconnect policy on it: every other close is transient and gets
@@ -327,10 +326,9 @@ export type BurrowEnrollRequest = (
   /**
    * The relay origin the Burrow was built for. A Relay whose own origin differs
    * refuses the request before it reads the credential
-   * ({@link BurrowEnrollOriginMismatch}). Optional and additive: an older
-   * Burrow sends none and enrolls as before.
+   * ({@link BurrowEnrollOriginMismatch}); one that names none is a 400.
    */
-  origin?: string;
+  origin: string;
 };
 
 /** The 409 body for a {@link BurrowEnrollRequest} naming another origin. */
@@ -350,9 +348,7 @@ export interface BurrowEnrollResponse {
    * Whether the Burrow must demand a user-verified assertion (biometric/PIN,
    * not merely presence).
    *
-   * Optional and additive: an older Burrow reading a newer Relay's response
-   * ignores it, and a newer Burrow reading an older Relay's sees `undefined`,
-   * which is the same as `false`. It travels here rather than being
+   * Sent only when `true`; absent is `false`. It travels here rather than being
    * configured on the Burrow because the invariant is that the two sides
    * *mirror* — a Relay demanding UV while the Burrow does not means the Burrow is
    * the weaker verifier, and the Burrow is the one that decides access.
@@ -697,7 +693,7 @@ export interface PushSendResponse {
 }
 
 // ---------------------------------------------------------------------------
-// Relay frames (see relay.md "Relay"). One JSON frame per WS message.
+// Relay frames (`docs/specs/relay.md` -> "Routing"). One JSON frame per WS message.
 // `clientId` is assigned by the Relay per client socket; the client itself
 // never sees or sends it.
 
@@ -824,8 +820,8 @@ export function isE2eCiphertext(value: unknown): value is string {
 
 /**
  * The shape guard both a relay and a Burrow run on a Client-originated `e2e`
- * frame — the both-sides rule the relay and the Burrow share (relay.md ->
- * Relay). It cannot check the ciphertext, so all it enforces is that the
+ * frame — the both-sides rule the relay and the Burrow share
+ * (`docs/specs/relay.md` -> "Routing"). It cannot check the ciphertext, so all it enforces is that the
  * routing values are bounded. Pinned by `remote-lib-common/test/wire.test.mjs`
  * and, against real relay-minted ids, `relay/test/e2e-relay.test.mjs`.
  */
@@ -984,8 +980,6 @@ export interface TerminalDataEvent {
    * Base64url of the UTF-8 text projection: the same chunk with string-control
    * payloads removed, for a consumer reading output as text. Omitted means
    * identical to `bytes`; present is authoritative, an empty string included.
-   * Additive on protocol-v1 — an older Client that ignores it falls back to
-   * `bytes`, which is what it always used.
    */
   text?: string;
 }
@@ -1016,8 +1010,8 @@ export const MAX_TERMINAL_DIMENSION = 2000;
 /**
  * Coerce a requested terminal dimension (cols or rows) to a positive integer,
  * falling back to `fallback` when the value is absent or not finite. Shared so
- * the Burrow api, the client adapter, and the test harness all sanitize sizes the
- * same way.
+ * the Burrow api, the owning webview's responder, the client adapter, and the
+ * test harness all sanitize sizes the same way.
  *
  * Clamped at **both** ends, and the upper bound is the security-relevant half:
  * a local resize is derived from element geometry and cannot be large, but

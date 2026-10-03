@@ -10,6 +10,7 @@ import { UnicodeGraphemesAddon } from '@xterm/addon-unicode-graphemes';
 import { TerminalWebglRenderer } from './terminal-webgl';
 import { shellCommandKind, type ShellCommandKind } from 'dor/commands/shell-quote';
 import { getPlatform, IS_MAC, IS_WINDOWS, PLATFORM_STRING } from './platform';
+import { isMacSelectAll } from './select-all';
 import type { PtyDataDetail } from './platform/types';
 import type { HelperIdentity } from './terminal-context-types';
 import type { PersistedAlertState } from './session-types';
@@ -151,19 +152,22 @@ function createXtermHost(id: string, grid?: TerminalGrid): { terminal: Terminal;
     },
   });
 
-  // Only hosts that can run workbench commands (the VS Code adapter) opt in;
-  // on every other platform runWorkbenchCommand is undefined, so the chords
-  // stay in xterm exactly as before.
-  if (getPlatform().runWorkbenchCommand) {
-    terminal.attachCustomKeyEventHandler((event) => {
-      const command = vscodeWorkbenchCommandForKeydown(event, { isMac: IS_MAC });
-      if (!command) return true;
+  terminal.attachCustomKeyEventHandler((event) => {
+    // xterm.js's own select-all would highlight the whole buffer
+    // (docs/specs/mouse-and-clipboard.md → "3.9 Select All").
+    if (isMacSelectAll(event)) {
       event.preventDefault();
-      event.stopPropagation();
-      getPlatform().runWorkbenchCommand?.(command);
-      return true;
-    });
-  }
+      return false;
+    }
+    // Only hosts that can run workbench commands (the VS Code adapter) opt in;
+    // elsewhere runWorkbenchCommand is undefined and the chords stay in xterm.
+    const command = getPlatform().runWorkbenchCommand && vscodeWorkbenchCommandForKeydown(event, { isMac: IS_MAC });
+    if (!command) return true;
+    event.preventDefault();
+    event.stopPropagation();
+    getPlatform().runWorkbenchCommand?.(command);
+    return true;
+  });
 
   terminal.loadAddon(new UnicodeGraphemesAddon());
   const fit = new FitAddon();
@@ -367,11 +371,15 @@ function typeCommandWhenPromptReady(id: string, command: string, requireIntegrat
       : getTerminalPaneState(id).currentCommand === null;
     if (ready) {
       clearInterval(timer);
+      seedLaunchedCommand(id, command);
       getPlatform().writePty(id, `${command}\r`);
     } else if ((elapsed += LAUNCH_PROMPT_POLL_MS) >= timeoutMs) {
       clearInterval(timer);
       // Best effort for split; drop for ensure (the handler kills + errors).
-      if (!requireIntegration) getPlatform().writePty(id, `${command}\r`);
+      if (!requireIntegration) {
+        seedLaunchedCommand(id, command);
+        getPlatform().writePty(id, `${command}\r`);
+      }
     }
   }, LAUNCH_PROMPT_POLL_MS);
 }
@@ -431,7 +439,9 @@ export function resumeTerminal(
 
   if (replayData) {
     // Dead session: append the reset tail. A live resume leaves the modes to
-    // the still-running process that owns them (see REPLAY_MODE_RESET).
+    // the still-running process that owns them (see REPLAY_MODE_RESET). The
+    // tail goes through writeReplay so the replay filter drops any report it
+    // provokes, and its DECRSTs re-sync the mouse-selection store.
     writeReplay(entry, replayData, ...(isDead ? [REPLAY_MODE_RESET] : []));
     seedPromptShapeFromScrollback(id, replayData);
   }

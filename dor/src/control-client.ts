@@ -37,6 +37,8 @@ import type {
   SendSurfaceResponse,
   SplitSurfaceRequest,
   SplitSurfaceResponse,
+  OpenHandlersRequest,
+  OpenHandlersResponse,
   ToolListRequest,
   ToolListResponse,
   ToolSurfaceRequest,
@@ -128,6 +130,10 @@ export class SocketControlClient implements ControlClient {
 
   toolList(request: ToolListRequest): Promise<ToolListResponse> {
     return this.request<ToolListResponse>(TOOL_CONTROL_METHODS.list, request);
+  }
+
+  openHandlers(request: OpenHandlersRequest): Promise<OpenHandlersResponse> {
+    return this.request<OpenHandlersResponse>(TOOL_CONTROL_METHODS.openHandlers, request);
   }
 
   sendSurface(request: SendSurfaceRequest): Promise<SendSurfaceResponse> {

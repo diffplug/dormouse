@@ -457,6 +457,7 @@ export function attachRouter(
       type: 'dor:controlRequest',
       requestId: request.requestId,
       surfaceId: request.surfaceId,
+      helperParentId: request.helperParentId,
       method: request.method,
       params: request.params ?? {},
     } satisfies ExtensionMessage).then(
@@ -583,6 +584,11 @@ export function attachRouter(
       case 'pty:getOpenPorts':
         ptyManager.getOpenPorts(msg.id).then((ports) => {
           post({ type: 'pty:openPorts', id: msg.id, ports, requestId: msg.requestId } satisfies ExtensionMessage);
+        });
+        break;
+      case 'pty:getOpenPortsMany':
+        ptyManager.getOpenPortsMany(msg.ids).then((ports) => {
+          post({ type: 'pty:openPortsMany', ports, requestId: msg.requestId } satisfies ExtensionMessage);
         });
         break;
       case 'pty:getShells':

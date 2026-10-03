@@ -48,6 +48,10 @@ it replaced.
 
 ## Reference page chrome
 
+`/docs` redirects with a 302 rather than a 301 because its target is a
+judgement call expected to be revisited, and a 301 outlives it in readers'
+caches.
+
 Brand caramel measures 5.56:1 on the site's black but 3.43–3.78:1 on every
 bundled light theme, which is why prose links could not keep it once the docs
 pages started following the reader's theme.
@@ -88,9 +92,17 @@ succeeds), cannot be cached downstream, leak every visitor's IP to a third
 party, and disappear with the comment they were uploaded to — taking the
 listing's images with them.
 
+## `/self-host` runbook
+
+`SELF_HOST.md` has two consumers that outrank the website: an assistant reads
+it in a checkout (`read @SELF_HOST.md and walk me through it`), and
+`scripts/deploy-lint.mjs` audits its Installer contract against
+`deploy/local/`. A second copy under `website/` would be a second file to keep
+true about how a server is installed.
+
 ## Homepage browser proof
 
-Proving the transcript end to end would need a live Burrow and a real
+Proving the transcript end to end would need a running platform host and a real
 `agent-browser` in CI, and a captured dev-server port is not stable enough to
 commit — a busy 5173 silently becomes 5174.
 
@@ -105,3 +117,15 @@ table's own scroller, which is why only that page showed it.
 
 Breaking after every separator rather than after each run was the first attempt
 and read badly: `--watch` parted at its dashes, `https://` at its slashes.
+
+## Markdown parsing
+
+The guide uses inline 22px alert-state icons. Portable Markdown has no image-sizing syntax, so the parser allows a narrow raw `<img>` rather than general HTML.
+
+## Generated documentation boundary
+
+A combined generated-data import made reference routes pull other documents into their shared chunk. The unpublished guide likewise emitted data no page imported; build-only rewrite logs enlarged browser payloads without serving any renderer.
+
+## `/agent-skill` guide
+
+Installed CLI instructions stay matched to their own version. Repairing a website link during generation would hide the bundled source's dependency on the latest public reference. The current URL-prefix check misses alternate spellings of the same origin (source audit, 2026-10).

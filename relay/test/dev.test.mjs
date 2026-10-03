@@ -68,10 +68,10 @@ async function password(stateDir) {
   return (await new SetupPasswordStore(stateDir).load())?.password;
 }
 
-async function enroll(url, setupPassword) {
+async function enroll({ url, origin }, setupPassword) {
   return fetch(`${url}${API_ROUTES.burrowEnroll}`, {
     method: 'POST', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ password: setupPassword, name: 'dev fixture' }),
+    body: JSON.stringify({ password: setupPassword, origin }),
   });
 }
 
@@ -85,13 +85,13 @@ test('parallel dev worktrees have distinct listeners and persistent state, with 
   assert.notEqual(keyA, keyB);
   for (const [run, key] of [[first, keyA], [second, keyB]]) {
     assert.equal(run.origin, run.url.replace('127.0.0.1', 'localhost'));
-    const response = await enroll(run.url, key);
+    const response = await enroll(run, key);
     assert.equal(response.status, 200);
     const body = await response.json();
     assert.equal(body.origin, run.origin);
     assert.equal(body.rpId, 'localhost');
   }
-  assert.equal((await enroll(second.url, keyA)).status, 401);
+  assert.equal((await enroll(second, keyA)).status, 401);
   await one.stop();
   await assert.rejects(fetch(first.url));
   assert.equal((await fetch(`${second.url}/api/hello`)).status, 200);
@@ -115,7 +115,7 @@ test('dev honors explicit ports/origins/state and refuses an occupied port witho
   const listening = await custom.listening();
   assert.equal(new URL(listening.url).port, port);
   assert.equal(listening.origin, 'https://dev.example.test');
-  const response = await enroll(listening.url, await password(stateDir));
+  const response = await enroll(listening, await password(stateDir));
   assert.equal((await response.json()).origin, listening.origin);
 });
 

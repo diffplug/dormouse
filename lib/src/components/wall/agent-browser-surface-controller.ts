@@ -139,9 +139,15 @@ function allowedBinaryPath(candidate: unknown, provider: BrowserAutomationProvid
 }
 
 /**
- * Where the Surface's browser is in its life (docs/specs/dor-browser.md →
- * "Browser Connection" has the transition table). The stream connection
- * exists exactly in `live`, and so does every daemon command (`driver`).
+ * Local lifecycle transitions. The stream and command driver exist only in live.
+ * idle → launching without a session, live for a handed-over stream, otherwise attaching;
+ * launching → live with the returned stream, otherwise attaching, or ended on failure;
+ * attaching → live or ended; live → parked after hidden headless delay, relaunching,
+ * or ended when its browser goes; a failed unpark reattaches without a page.
+ * parked → live at its stream on unpark, or relaunching;
+ * relaunching → live with the returned stream, otherwise attaching headless;
+ * ended → relaunching, or a navigation rebinds with its page; disposed is terminal.
+ * Cross-file lifetime/visibility requirements: docs/specs/dor-browser.md → "Browser Connection".
  */
 type Phase =
   /** Constructed; no view has started it yet. */
@@ -218,11 +224,9 @@ export class AgentBrowserSurfaceController {
   }
   /** Gates the render modes offered; see `ensureStarted`. */
   private readonly isTool: boolean;
-  /** What `setRenderMode` accepts, fixed on first use with the host's
-   *  capabilities. Never a popout or another provider for a tool, whose
-   *  `render` is `iframe` or `agent-browser-screencast`: the swap would tear the browser
-   *  down and re-derive the same screencast, so asking for a native window would
-   *  get a reload (`docs/specs/dor-tool.md` -> Declaring tools). */
+  /** What `setRenderMode` accepts, fixed on first use with host capabilities.
+   *  Tools offer iframe and the declarable screencast modes of either provider,
+   *  never popout (`docs/specs/dor-tool.md` → Declaring tools). */
   private renderModesCache: readonly RenderMode[] | null = null;
   private get renderModes(): readonly RenderMode[] {
     return this.renderModesCache ??= offeredRenderModes(this.isTool, this.provider);

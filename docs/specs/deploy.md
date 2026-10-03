@@ -43,7 +43,7 @@ Human-driven, in order:
 
 ## Versioning
 
-**Must synchronize the four version files — `lib/package.json`, `vscode-ext/package.json`, `standalone/src-tauri/Cargo.toml`, `standalone/src-tauri/tauri.conf.json` — and Cargo.lock's `dormouse` entry with `scripts/bump-version.sh`** (`cargo check --offline`). **A version is `X.Y.Z`**: both the bump script and `sign-and-deploy.sh` reject a prerelease suffix, rather than one of them discovering it after the tag is pushed.
+**Must synchronize the four version files — `lib/package.json`, `vscode-ext/package.json`, `standalone/src-tauri/Cargo.toml`, `standalone/src-tauri/tauri.conf.json` — and Cargo.lock's `dormouse` entry with `scripts/bump-version.sh`.** The bump runs Cargo directly; an ambient Node mismatch can fail after version files have changed. **Must accept only `X.Y.Z` release versions** in both bump and signing scripts.
 
 **A release is triggered by pushing one tag (`v0.1.0`)** — never separate `vscode-ext/v*` and `standalone/v*` tags, because one changelog entry covers both.
 
@@ -51,7 +51,7 @@ Source of truth: `scripts/bump-version.sh`; `on.push.tags` in `.github/workflows
 
 ## Two-stage pipeline
 
-**Both signing steps must run locally** — Windows code signing requires a physical USB hardware key (EV cert via PIV), macOS a local Developer ID cert.
+**Must apply production OS and updater signatures locally** — Windows OS signing uses a physical PIV key, macOS a local Developer ID certificate.
 
 - **Stage 1 (CI)** — build, attest, and upload the unsigned artifacts: the three Tauri bundles and the `.vsix`, which Stage 2 verifies but never signs.
 - **Stage 2 (local, `sign-and-deploy.sh`)** — verify, sign, and release.
@@ -120,16 +120,19 @@ pnpm --dir standalone exec tauri signer generate  # creates the Tauri update sig
 
 ### Two signing layers
 
-**Both layers are required** (rationale).
+**Must apply OS signing on macOS and Windows, and updater signing to every desktop bundle.** Linux receives the updater signature alone (rationale).
 
 | Layer | What it signs | Who verifies | Without it |
 |-------|--------------|--------------|------------|
 | OS (codesign / jsign) | Executable (`.app` / `.exe`) | OS, on launch | Gatekeeper / SmartScreen warnings |
 | Tauri updater (ed25519) | Update bundle (`.tar.gz` / `.exe` / `.AppImage`) | Running app, on update | Updater rejects the download |
 
-**Must OS-sign the inner executable, package it, then Tauri-sign the final bundle.** Embed the generated `.sig` in the website manifest and remove the sidecar signature file before upload.
+**Must OS-sign macOS and Windows code before packaging, then Tauri-sign every final bundle.** Embed the generated `.sig` in the website manifest and remove the sidecar signature file before upload.
 
-Two macOS packaging edge cases the script enforces, each of which would ship a release that fails only on the user's machine: **never `--deep`-sign the outer `.app`** — nested binaries (the Node sidecar, the node-pty and node-datachannel prebuilds, `spawn-helper`) are signed individually first, and the script then launches the signed sidecar and requires both native addons from it — and **build the `.tar.gz` with `COPYFILE_DISABLE=1`**, re-scanning the result for `._*`. Both carry their reasoning at `sign_macos_app` and `notarize_macos` in the script.
+- **Never `--deep`-sign the outer macOS `.app`; sign nested code first and verify the signed sidecar loads `node-pty` and `node-datachannel/polyfill`.**
+- **Must archive macOS updates with `COPYFILE_DISABLE=1` and reject `._*` entries.**
+
+Source of truth: `sign_macos_app` / `notarize_macos` in `scripts/sign-and-deploy.sh`.
 
 ### Packaged app logging
 

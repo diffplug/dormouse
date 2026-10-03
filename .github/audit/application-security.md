@@ -13,7 +13,9 @@ PAT — do not use one.
 
 Read, at minimum: `docs/specs/remote-security-model.md` **and its paired
 `docs/specs/remote-security-model.rationale.md`**, `docs/specs/relay.md`,
-`docs/specs/remote-api.md`, `docs/specs/pocket-app.md`, `SELF_HOST.md`, and then
+`docs/specs/remote-api.md`, `docs/specs/pocket-app.md`, `docs/specs/one-time.md`
+("Link", "Wire contract", "Burrow runtime", "Phone client"),
+`docs/specs/remote-network.md` ("Local networks", "Anywhere"), `SELF_HOST.md`, and then
 the code they point at — `remote-lib-common/src/security/`, `relay/src/`,
 `lib/src/remote/`, `lib/src/host/remote/`, `vscode-ext/src/burrow*.ts`,
 `scripts/relay-origin.mjs`, and all three installers —
@@ -77,7 +79,10 @@ asset discovery, descriptor lifetime, and every request gate. Also read
 `dor-tools-builtin/src/viewer-assets.ts`, and
 `dor-tools-builtin/viewer/editor.ts`: writes must target only the opened text
 file, compare disk revisions, reject substituted symlinks, and never expose
-arbitrary assets or execute the source document. The folder viewer shares that
+arbitrary assets or execute the source document. The Markdown editor widens
+both: read `dor-tools-builtin/src/markdown-images.ts` for image containment and
+its no-replace pastes and renames, and `dor-tools-builtin/viewer/markdown-safety.ts`
+for how document HTML reaches the page, which allows inline script. The folder viewer shares that
 listener and guard: read `dor-tools-builtin/src/folder-viewer.ts` and
 `dor-tools-builtin/src/folder-viewer-page.ts` for path containment, the POST
 gate, how names reach the page, and the git invocation; its POSTs become OSC
@@ -94,7 +99,7 @@ on the Burrow), and its two other choke points,
 `lib/src/host/managed-voice-host.ts` and `standalone/src/updater.ts`.
 
 For the rest of `docs/specs/security-local.md`, read each section's owner first
-— `docs/specs/terminal-escapes.md`, `docs/specs/dor-browser.md`,
+— `docs/specs/terminal-escapes.md` and the owners its rows name, `docs/specs/dor-browser.md`,
 `docs/specs/dor-cli.md`, `docs/specs/vscode.md` -> "Webview message
 authentication", `docs/specs/standalone.md` -> "Persistence" — then the parser, the iframe shim, the
 control-socket code, and the persistence paths they point at. `## Persisted
@@ -192,7 +197,8 @@ Be adversarial, and go past the `FAIL IF` list. Ask specifically:
   drift is a finding; say which side is wrong. The newest sections are the ones
   most likely to have drifted: `remote-security-model.md`'s Presence proofs,
   Pairing, Connection, Push sealing, Burrow bounds, Noise suite and Burrow identity,
-  and `relay.md`'s Relay and E2E framing. `scripts/e2e-lint.mjs` mechanizes the
+  `relay.md`'s Routing, E2E framing, Relay origin
+  and Burrow side. `scripts/e2e-lint.mjs` mechanizes the
   structural half of that ("one suite, no negotiation, no plaintext path, no
   legacy discriminant") — check that each of its rules still names a real
   `docs/specs/security-remote.md` line and that

@@ -25,6 +25,7 @@ export function elevenLabs(
   sweepDelayMs = 10_000,
 ): Synthesize {
   return async (voiceId, text) => {
+    // 128 kbps MP3: 200 characters stay under a shipped desktop's 512 KiB MAX_AUDIO_BYTES (lib/src/host/managed-voice-host.ts).
     const response = await fetch(
       `${ELEVENLABS_API}/text-to-speech/${voiceId}?output_format=mp3_44100_128`,
       {

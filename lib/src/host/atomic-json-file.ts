@@ -1,12 +1,14 @@
 /**
- * The one way a Node-side host commits a private JSON file: owner-only, and
- * temp-then-rename so a crash can never publish a half-written one. Shared by
+ * The atomic JSON writer for host state: temp-then-rename so a crash cannot
+ * publish a half-written file. Unix modes are set here; Windows writers inherit
+ * the caller's storage DACL. Shared by
  * the Burrow state store and the Tool trust store, whose files hold a bearer
  * credential and a security decision respectively.
  */
 
 import { randomUUID } from 'node:crypto';
 import { chmod, mkdir, rename, rm, writeFile } from 'node:fs/promises';
+import { setTimeout as delay } from 'node:timers/promises';
 
 /** Write `value` as JSON to `path`, creating `dir` (which contains it) first. */
 export async function writeJsonAtomic(dir: string, path: string, value: unknown): Promise<void> {
@@ -23,8 +25,8 @@ export async function writeJsonAtomic(dir: string, path: string, value: unknown)
   // below, so neither call protects anything. What protects it there is the
   // owner-only DACL that `burrow_state_dir` in
   // `standalone/src-tauri/src/lib.rs` applies to this directory before
-  // spawning us; the files written below inherit it. Node cannot set an ACL,
-  // which is why the guarantee lives on the Rust side rather than here.
+  // spawning us; the files written below inherit it. This writer relies on
+  // its caller supplying that private parent, rather than invoking an ACL helper.
   if (process.platform !== 'win32') await chmod(dir, 0o700).catch(() => {});
   // Temp-then-rename in the same directory, so a crash mid-write leaves the
   // previous contents intact rather than a truncated file that reads as empty.
@@ -34,7 +36,17 @@ export async function writeJsonAtomic(dir: string, path: string, value: unknown)
   let renamed = false;
   try {
     await writeFile(tmp, JSON.stringify(value), { mode: 0o600 });
-    await rename(tmp, path);
+    // Concurrent replacements can briefly leave a Windows destination pending
+    // deletion. Retry only that platform's sharing failures, with ten 10ms waits;
+    // keep the old file intact and propagate persistent or unrelated failures.
+    for (let attempt = 0; ; attempt++) {
+      try { await rename(tmp, path); break; }
+      catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (process.platform !== 'win32' || attempt === 10 || (code !== 'EPERM' && code !== 'EBUSY')) throw error;
+        await delay(10);
+      }
+    }
     renamed = true;
   } finally {
     // A failed rename must not accumulate temp files holding the same secret.

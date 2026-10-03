@@ -45,6 +45,10 @@ export default defineConfig(({ command }) => ({
     port,
     strictPort: true,
     hmr: host ? { protocol: "ws", host, port: 1421 } : undefined,
+    // The Tauri CLI rebuilds the Rust side itself. Watching `target/` also
+    // crashes on Windows, where a build script Cargo is still writing is
+    // locked and `fs.watch` throws EBUSY.
+    watch: { ignored: ["**/src-tauri/**"] },
     fs: {
       // Allow serving files from the source-aliased workspace packages.
       allow: [libDir, dorDir, dorToolsBuiltinDir, dorToolsLibDir, remoteLibCommonDir, "."],

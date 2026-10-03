@@ -167,12 +167,10 @@ abstract class JsonFileStore {
 
   /**
    * Overwrite the whole file atomically (temp file + rename). `burrows.json`
-   * holds `burrowToken` in plaintext, so the directory is owner-only (`0o700`)
-   * and every file owner-read/write (`0o600`) — without an explicit mode both
-   * inherit the umask, which on a typical Linux box yields world-readable
-   * `0o755`/`0o644` and leaks live burrow tokens to every other local account.
-   * The mode only applies when the file is created, so `rename` onto an
-   * existing path keeps the temp file's `0o600`.
+   * holds a plaintext bearer: POSIX creation uses `0o700` for the directory
+   * and `0o600` for each replacement file. Windows inherits the directory DACL;
+   * the installer establishes its privacy before Relay startup. Existing
+   * directory modes are not tightened here.
    */
   protected async writeAtomic(value: unknown): Promise<void> {
     await mkdir(this.#stateDir, { recursive: true, mode: 0o700 });
@@ -372,8 +370,8 @@ export class BurrowLimitReachedError extends Error {
 }
 
 /**
- * What {@link BurrowStore} read before the Host→Burrow rename. Every row held a
- * plaintext `burrowToken` — the `/ws/burrow` bearer for one machine — and
+ * What the v1.0–v1.1 `server/` Relay kept before the Host→Burrow rename. Every
+ * row held a plaintext `hostToken` — that Relay's `/ws/host` bearer for one machine — and
  * nothing reads the file any more, so it is deleted unread at boot rather than
  * left behind (`docs/specs/security-remote.md` → "Credentials at rest").
  *

@@ -153,6 +153,31 @@ describe('captureAgentRecovery', () => {
     expect(secondPressAt).toBeGreaterThanOrEqual(BLIND_SECOND_PRESS_MS + QUIET_BEFORE_RETRY_MS);
   });
 
+  it("captures Pi's double-press exit", async () => {
+    const fixture = AGENT_EXIT_FIXTURES.find((item) => item.agent === 'Pi')!;
+    const host = new FakePtys(['pi'])
+      .onPress('pi', 1, 40, '\x1b[2K\r')
+      .onPress('pi', 2, 40, fixture.output);
+    const interrupt = host.interrupt.bind(host);
+    host.interrupt = async (ids) => {
+      // Pi's second press after 500ms only clears the editor again.
+      if (host.presses.length === 1 && host.time >= 500) return;
+      await interrupt(ids);
+    };
+    expect(await captureAgentRecovery(host)).toBe(1);
+    expect(host.presses).toEqual([['pi'], ['pi']]);
+    expect(host.time).toBeLessThan(500);
+    expect(host.found.pi).toBe(fixture.command);
+  });
+
+  it('lets Codex print its delayed one-press exit without interrupting it again', async () => {
+    const host = new FakePtys(['codex'])
+      .onPress('codex', 1, 260, `\r\n${CODEX_HINT}\r\n`);
+    expect(await captureAgentRecovery(host)).toBe(1);
+    expect(host.presses).toEqual([['codex']]);
+    expect(host.found.codex).toBe(CODEX_HINT);
+  });
+
   it('never presses a pane that already yielded, and presses each pane at most twice', async () => {
     const host = new FakePtys(['quick', 'silent'])
       .onPress('quick', 1, 40, `\r\n${CLAUDE_HINT}\r\n`);

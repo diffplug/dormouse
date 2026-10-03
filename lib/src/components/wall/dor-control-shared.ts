@@ -9,6 +9,7 @@
 
 import { getWallHandle, type WallHandle } from './wall-handles';
 import type { WorkspaceId } from '../../lib/session-types';
+import type { DorControlRequest } from './use-dor-control';
 
 /** A param as it crossed the control socket: whatever is not a string is absent. */
 export function stringParam(value: unknown): string | undefined {
@@ -49,4 +50,19 @@ export async function awaitWallHandle(id: WorkspaceId): Promise<WallHandle | nul
     await new Promise<void>((resolve) => { setTimeout(resolve, 0); });
   }
   return getWallHandle(id);
+}
+
+/**
+ * The request as one Wall sees it, rewritten once at the seam instead of
+ * re-checked by every consumer of the caller id. `surfaceId` is the caller only
+ * as a Surface this Wall holds: dropped otherwise, so `surface:self` names
+ * nothing and an omitted target falls back to the Workspace's focused Surface.
+ * A helper is never a Surface, even once promoted after its request was
+ * captured; it only lends its source as `placementSurfaceId`, so nothing takes
+ * over, retargets, or marks the source as the caller.
+ */
+export function requestForWall(handle: WallHandle, detail: DorControlRequest): DorControlRequest {
+  const owned = (id: string | undefined) => (id && handle.ownsSurface(id) ? id : undefined);
+  if (detail.helperParentId) return { ...detail, surfaceId: undefined, placementSurfaceId: owned(detail.helperParentId) };
+  return detail.surfaceId === owned(detail.surfaceId) ? detail : { ...detail, surfaceId: undefined };
 }

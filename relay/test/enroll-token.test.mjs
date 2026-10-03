@@ -62,8 +62,9 @@ async function appWithOffer(contents, options = {}) {
   return { ...created, enrollTokenFile };
 }
 
+/** Enroll naming this Relay's origin, as every Burrow does, unless `body` says otherwise. */
 function enroll(app, body) {
-  return post(app, API_ROUTES.burrowEnroll, body);
+  return post(app, API_ROUTES.burrowEnroll, { origin: ORIGIN, ...body });
 }
 
 test('a valid enroll token enrolls the burrow and consumes the offer', async () => {
@@ -246,11 +247,16 @@ test('a Burrow built for another origin is refused before anything is spent or s
   assert.equal((await enroll(app, { password: 'wrong', origin: 'https://elsewhere.example' })).status, 409);
 });
 
-test('a Burrow naming this origin, however spelled, enrolls; one naming none still does', async () => {
-  const { app } = await appWithOffer(offer());
+test('a Burrow naming this origin, however spelled, enrolls; one naming none is a 400', async () => {
+  const { app, enrollTokenFile, stateDir } = await appWithOffer(offer());
+  // Malformed before the credential is read: nothing spent, nothing appended.
+  for (const malformed of [undefined, null, 42, { href: ORIGIN }]) {
+    const unnamed = await enroll(app, { password: PASSWORD, origin: malformed });
+    assert.equal(unnamed.status, 400, JSON.stringify(malformed));
+  }
+  assert.equal(existsSync(join(stateDir, 'burrows.json')), false);
+  assert.equal(existsSync(enrollTokenFile), true);
   assert.equal((await enroll(app, { enrollToken: TOKEN, origin: `${ORIGIN}/` })).status, 200);
-  const older = await appWithOffer(offer());
-  assert.equal((await enroll(older.app, { password: PASSWORD })).status, 200);
 });
 
 // --- redeemEnrollToken directly: the claim race and the operator warning ---
@@ -304,11 +310,10 @@ test('releasing a claim never clobbers a still-newer installer offer', async () 
   assert.equal(await redeemEnrollToken(path, newest.token), 'redeemed');
 });
 
-test('an offer deleted mid-redemption rejects, whichever half lost', async () => {
+test('an offer deleted between its read and its claim rejects', async () => {
+  // Deleted before the read is the spent-offer case below.
   const path = await offerPath(offer());
-  const redemption = redeemEnrollToken(path, TOKEN);
-  await unlink(path);
-  assert.equal(await redemption, 'rejected');
+  assert.equal(await redeemEnrollToken(path, TOKEN, () => unlink(path)), 'rejected');
 });
 
 test('a file that exists but is not an offer warns the operator, naming it', async () => {

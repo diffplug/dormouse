@@ -256,3 +256,23 @@ test('playwright device, mobile, and headed options leave viewport choice to nat
     assert.equal(surfaces[0].initialViewport, undefined);
   }
 });
+
+for (const provider of ['agent-browser', 'playwright']) test(provider+' viewport preparation skips a pre-command value named open', async () => {
+  const calls=[];
+  const options={
+    env:{PWD:process.cwd()},
+    client:{
+      resolveBrowser:async()=>({binding:{session:'dormouse.1.default'},fresh:true,initialViewport:{mode:'fixed',width:1440,height:900,dpr:2},launchViewport:{width:1440,height:900,dpr:2}}),
+      browserSurface:async request=>{calls.push(['surface',request]);return {};},
+      browserViewport:async()=>({actual:{width:1440,height:900,dpr:2}}),
+    },
+    [provider === 'agent-browser' ? 'execAgentBrowser' : 'execPlaywright']:async(_binary,args)=>{
+      calls.push(['exec',args]);return {exitCode:0,stdout:args.includes('eval')?'2\n':'native\n',stderr:''};
+    },
+  };
+  const nativeArgs=provider==='agent-browser'?['--init-script','open','open','http://localhost:5173']:['--config','open','open','http://localhost:5173'];
+  const result=await runCli([provider,...nativeArgs],options);
+  assert.equal(result.exitCode,0,result.stderr);
+  const blank=calls.filter(c=>c[0]==='exec')[0][1].slice(provider==='agent-browser'?2:1);
+  assert.deepEqual(blank,[nativeArgs[0],'open','open','about:blank']);
+});

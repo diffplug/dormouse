@@ -63,6 +63,7 @@ import { relayPushRoutes } from "./relay-push";
 import {
   OWNER_COLUMNS,
   database,
+  LOCKED_NOW,
   locked,
   ownerOf,
   requireBurrow,
@@ -522,7 +523,7 @@ export function relayApiRoutes(app: Hono<{ Bindings: RelayEnv }>) {
           `WITH spent AS (
             UPDATE dormouse_relay_enrollment_approvals
             SET "redeemedBurrowId" = $3, "redeemedAt" = now()
-            WHERE "userCode" = $1 AND "userId" = $2 AND "expiresAt" > now()
+            WHERE "userCode" = $1 AND "userId" = $2 AND "expiresAt" > ${LOCKED_NOW}
               AND "redeemedAt" IS NULL
             RETURNING "userId"
           )
@@ -537,7 +538,7 @@ export function relayApiRoutes(app: Hono<{ Bindings: RelayEnv }>) {
           rows: [spent],
         } = await db.query<{ redeemedBurrowId: string }>(
           `SELECT "redeemedBurrowId" FROM dormouse_relay_enrollment_approvals
-          WHERE "userCode" = $1 AND "expiresAt" > now() AND "redeemedBurrowId" IS NOT NULL`,
+          WHERE "userCode" = $1 AND "expiresAt" > ${LOCKED_NOW} AND "redeemedBurrowId" IS NOT NULL`,
           [userCode],
         );
         return spent ? { redeemed: spent.redeemedBurrowId } : "expired";
@@ -642,8 +643,8 @@ async function consumeChallenge(db: Client, challenge: string, burrowId: string 
  * in one statement: its own expired rows pruned, its live rows trimmed to
  * leave one slot under the cap (latest expiry kept), then the row. No other
  * owner's rows are read. `expiry` is a TTL in milliseconds or an instant; a
- * row already expired is not inserted. Answers its expiry in epoch
- * milliseconds, or undefined when nothing was inserted.
+ * row already expired is not inserted and trims nothing. Answers its expiry
+ * in epoch milliseconds, or undefined when nothing was inserted.
  */
 export async function admit(
   db: Client,
@@ -660,16 +661,16 @@ export async function admit(
   return locked(db, `${table}:${ownerValue}`, async () => {
     const { rows } = await db.query<{ expiresAt: number }>(
       `WITH pruned AS (
-        DELETE FROM ${table} WHERE ${owner} = $1 AND "expiresAt" <= now()
+        DELETE FROM ${table} WHERE ${owner} = $1 AND "expiresAt" <= ${LOCKED_NOW}
       ), trimmed AS (
-        DELETE FROM ${table} WHERE ${pk} IN (
-          SELECT ${pk} FROM ${table} WHERE ${owner} = $1 AND "expiresAt" > now()
+        DELETE FROM ${table} WHERE ${expiresAt} > ${LOCKED_NOW} AND ${pk} IN (
+          SELECT ${pk} FROM ${table} WHERE ${owner} = $1 AND "expiresAt" > ${LOCKED_NOW}
           ORDER BY "expiresAt" DESC, ${pk} OFFSET $2
         )
       )
       INSERT INTO ${table} (${columns.map((column) => `"${column}"`).join(", ")}, "expiresAt")
       SELECT ${columns.map((_, i) => `$${i + 3}`).join(", ")}, ${expiresAt}
-      WHERE ${expiresAt} > now()
+      WHERE ${expiresAt} > ${LOCKED_NOW}
       ON CONFLICT (${pk}) DO NOTHING
       RETURNING ${epochMs('"expiresAt"')} AS "expiresAt"`,
       [ownerValue, cap - 1, ...values, expiry],

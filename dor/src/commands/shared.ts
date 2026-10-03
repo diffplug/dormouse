@@ -56,6 +56,11 @@ export function printable(text: string): string {
   return text.replace(TERMINAL_CONTROLS, escapeControl);
 }
 
+/** The same controls removed rather than escaped. */
+export function stripControls(text: string): string {
+  return text.replace(TERMINAL_CONTROLS, '');
+}
+
 /** `renderJson` for repo text: `JSON.stringify` escapes only C0, so DEL and C1
  *  are escaped too, which leaves the parsed value unchanged. */
 export function renderPrintableJson(payload: unknown): string {
@@ -184,7 +189,7 @@ export function msysToWindowsCwd(pwd: string, platform: string): string {
 // travel in the request. Prefer the shell's PWD (injectable, matches what the
 // user sees) and fall back to the process cwd. resolvePath canonicalizes both the
 // default and a relative/absolute path into one absolute path the host can key on.
-// Shared by `ensure`, `list`, `tool`, `open`, and `skill`.
+// Shared by `ensure`, `split`, `list`, `tool`, `open`, and `skill`.
 export function callerWorkingDirectory(flag: string | undefined, env: CliEnv | undefined): string {
   const base = msysToWindowsCwd(env?.PWD ?? process.cwd(), process.platform);
   return resolvePath(base, flag ?? '.');

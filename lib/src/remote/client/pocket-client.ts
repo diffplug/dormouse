@@ -415,8 +415,8 @@ export class PocketClient {
 
   /**
    * Whether this browser has been used with Dormouse before, which decides
-   * whether the auth screen offers sign-in at all
-   * (docs/specs/pocket-app.md). The evidence is stored passkey material: setup
+   * whether the auth screen offers sign-in at all (`SetupOrSignin` in
+   * `lib/src/remote/pocket-app/App.tsx`). The evidence is stored passkey material: setup
    * and sign-in both cache the asserted public key. Blocked site data does not
    * throw past {@link localStoragePocketStorage}'s mirror, so a setup completed
    * in this tab still flips the screen; a storage that throws anyway reads as a
@@ -1154,14 +1154,14 @@ export class PocketClient {
         this.#core.rejectAll(new Error(BURROW_UNAVAILABLE_MESSAGE));
         return;
       default:
-        // Every legacy frame is ignored: this Client speaks one protocol.
+        // Every other frame is ignored: this Client speaks one protocol.
         return;
     }
   }
 
   /**
    * Ping the relay socket while the page is visible, on the session core's
-   * visibility as keepalives run (`docs/specs/pocket-app.md`); a socket that
+   * visibility as keepalives run (`docs/specs/relay.md` → "Routing"); a socket that
    * stops answering is a drop, though no close arrived.
    */
   #startHeartbeat(ws: PocketSocket): void {

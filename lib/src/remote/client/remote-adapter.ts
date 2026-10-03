@@ -371,6 +371,10 @@ export class RemotePtyAdapter implements PlatformAdapter {
     return [];
   }
 
+  async getOpenPortsMany(ids: string[]): Promise<Record<string, OpenPort[]>> {
+    return Object.fromEntries(ids.map((id) => [id, []]));
+  }
+
   async readClipboardFilePaths(): Promise<string[] | null> {
     return null;
   }

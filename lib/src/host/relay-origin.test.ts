@@ -198,11 +198,7 @@ describe('resolveRelayOrigin', () => {
   });
 
   it('fails the build on a retired variable set to anything non-blank', () => {
-    expect(RETIRED_RELAY_VARIABLES).toEqual([
-      'DORMOUSE_REMOTE_CONNECT_SRC',
-      'DORMOUSE_HOSTED_ORIGIN',
-      'DORMOUSE_ONE_TIME_ORIGIN',
-    ]);
+    expect(RETIRED_RELAY_VARIABLES).toEqual(['DORMOUSE_REMOTE_CONNECT_SRC']);
     for (const name of RETIRED_RELAY_VARIABLES) {
       expect(() => resolveRelayOrigin({ [name]: 'https://*.ts.net wss://*.ts.net' }, 'test'), name).toThrow(
         new RegExp(`${name} is retired`),
