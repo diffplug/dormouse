@@ -2372,7 +2372,9 @@ fn build_window(
     // The only platform read of this window's box: from here the `Moved` /
     // `Resized` payloads keep the cache current (§Boot and geometry).
     seed_geometry(app, label);
-    if let Some(state) = app.try_state::<WindowState>() {
+    // Only while it still exists: a window destroyed before this line has
+    // already been dropped from the order, and must not come back as a target.
+    if let (Some(state), Some(_)) = (app.try_state::<WindowState>(), app.get_webview_window(label)) {
         state.note_window(label);
     }
     Ok(())
