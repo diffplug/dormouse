@@ -2,6 +2,7 @@
  * @vitest-environment jsdom
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { registry, type TerminalEntry } from '../../lib/terminal-store';
 import { installDorControlRouter, resolveDorControlRoute } from './dor-control-router';
 import { registerWallHandle, resetWallHandles, stubWallHandle, type WallHandle } from './wall-handles';
 import type { DorControlRequest } from './use-dor-control';
@@ -37,6 +38,13 @@ function request(overrides: Partial<DorControlRequest> = {}): DorControlRequest 
   } as DorControlRequest & { respond: ReturnType<typeof vi.fn> };
 }
 
+/** Delivers through the installed router, as a host request arrives. */
+function dispatch<T extends DorControlRequest>(detail: T): T {
+  disposers.push(installDorControlRouter());
+  window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail }));
+  return detail;
+}
+
 beforeEach(() => {
   resetWallHandles();
   resetWorkspaces();
@@ -53,6 +61,74 @@ describe('dor control routing', () => {
     const owner = handleFor(first, ['pane-a']);
     handleFor(second, ['pane-b']);
     expect(resolveDorControlRoute(request({ surfaceId: 'pane-a' }))).toEqual({ kind: 'handle', handle: owner });
+  });
+
+  it('passes the actual helper id to app restart', async () => {
+    const previous = getPlatformOrNull();
+    const restart = vi.fn(async () => true);
+    setPlatform({ requestAppRestart: restart } as unknown as PlatformAdapter);
+    try {
+      const detail = dispatch(request({ method: 'app.restart', surfaceId: 'helper', helperParentId: 'parent' }));
+      await Promise.resolve();
+      expect(restart).toHaveBeenCalledExactlyOnceWith('helper');
+      expect(detail.respond).toHaveBeenCalledWith({ ok: true, result: { relaunch: true } });
+    } finally { setPlatform(previous!); }
+  });
+
+  it('routes helper callers through their source, lending only its placement', () => {
+    const first = getWorkspacesSnapshot().workspaces[0].id;
+    const owner = handleFor(first, ['parent']);
+    handleFor(createWorkspace({ id: 'other' }).id, ['other-pane']);
+    const detail = request({ surfaceId: 'helper', helperParentId: 'parent' });
+    expect(resolveDorControlRoute(detail)).toEqual({ kind: 'handle', handle: owner });
+    dispatch(detail);
+    expect(owner.handleDorControl).toHaveBeenCalledWith(expect.objectContaining({
+      surfaceId: undefined, helperParentId: 'parent', placementSurfaceId: 'parent',
+    }));
+  });
+
+  it('keeps helper origin, without a placement, when explicitly routed to another Workspace', () => {
+    const target = handleFor(getWorkspacesSnapshot().workspaces[0].id, ['destination']);
+    const detail = dispatch(request({ surfaceId: 'foreign-helper', helperParentId: 'foreign-parent',
+      params: { workspace: 'workspace:1' } }));
+    expect(target.handleDorControl).toHaveBeenCalledWith(expect.objectContaining({
+      surfaceId: undefined, helperParentId: 'foreign-parent', placementSurfaceId: undefined,
+    }));
+    const self = dispatch(request({ ...detail, method: 'surface.kill', params: { workspace: 'workspace:1', surface: 'surface:self' } }));
+    expect(self.respond).toHaveBeenCalledWith({ ok: false, error: expect.stringContaining('not public Surface targets') });
+    expect(target.handleDorControl).toHaveBeenCalledTimes(1);
+  });
+
+  it('waits for a helper source to register, then refuses rather than using the active Workspace', async () => {
+    vi.useFakeTimers();
+    try {
+      const unrelated = handleFor(getWorkspacesSnapshot().workspaces[0].id, ['unrelated']);
+      const late = dispatch(request({ surfaceId: 'helper', helperParentId: 'late' }));
+      const owner = handleFor(createWorkspace({ id: 'ws-late', activate: false }).id, ['late']);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(owner.handleDorControl).toHaveBeenCalledTimes(1);
+      const gone = dispatch(request({ surfaceId: 'helper', helperParentId: 'gone' }));
+      await vi.advanceTimersByTimeAsync(10);
+      expect(gone.respond).toHaveBeenCalledWith({ ok: false, error: 'The helper source Surface is no longer available' });
+      expect(late.respond).not.toHaveBeenCalled();
+      expect(unrelated.handleDorControl).not.toHaveBeenCalled();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('captures in-process helper identity from the registry without aliasing self', () => {
+    const owner = handleFor(getWorkspacesSnapshot().workspaces[0].id, ['parent']);
+    registry.set('helper', { helper: { parentId: 'parent', command: '' } } as TerminalEntry);
+    try {
+      dispatch(request({ surfaceId: 'helper' }));
+      expect(owner.handleDorControl).toHaveBeenCalledWith(expect.objectContaining({
+        surfaceId: undefined, helperParentId: 'parent', placementSurfaceId: 'parent',
+      }));
+      for (const surface of ['helper', 'surface:helper', 'surface:self']) {
+        const detail = dispatch(request({ surfaceId: 'helper', params: { surface } }));
+        expect(detail.respond).toHaveBeenCalledWith({ ok: false, error: expect.stringContaining('not public Surface targets') });
+      }
+      expect(owner.handleDorControl).toHaveBeenCalledTimes(1);
+    } finally { registry.delete('helper'); }
   });
 
   it('falls back to the active Workspace for an unknown caller', () => {

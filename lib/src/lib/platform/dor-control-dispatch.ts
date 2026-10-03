@@ -1,4 +1,3 @@
-import { isHelperSession } from '../terminal-store';
 import type { DorControlRequestPayload, DorControlResult } from 'dor/protocol';
 
 /**
@@ -34,10 +33,6 @@ export function dispatchDorControlRequest(
   respond: (response: DorControlResult) => void,
   { oscOpen = false }: { oscOpen?: boolean } = {},
 ): void {
-  if (payload.surfaceId && isHelperSession(payload.surfaceId)) {
-    respond({ ok: false, error: 'Helper terminals do not support dor' });
-    return;
-  }
   const { requestId } = payload;
   const controller = new AbortController();
   inFlight.set(requestId, controller);
@@ -46,6 +41,7 @@ export function dispatchDorControlRequest(
     detail: {
       requestId,
       surfaceId: payload.surfaceId,
+      helperParentId: payload.helperParentId,
       method: payload.method,
       params: payload.params ?? {},
       // Set only for a Session's own OSC 367 `open` (`tool-open-requests.ts`);

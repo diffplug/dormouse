@@ -20,6 +20,9 @@ import { ModeContext, PaneWriteContext, SelectedIdContext, WallActionsContext, W
 import { installBrowserHost, stubWallActions as stubActions } from './wall-test-utils';
 import { encodeViewerFrame } from '../../lib/platform/browser-automation';
 
+// Any test host counts as a Mac for the forwarder's ⌘A exemption.
+vi.mock('../../lib/select-all', () => ({ isMacSelectAll: (e: KeyboardEvent) => e.type === 'keydown' && e.metaKey && e.key === 'a' }));
+
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
 type TestPanelParams = {
@@ -865,6 +868,16 @@ describe('AgentBrowserPanel canvas input forwarding', () => {
     await renderWithMode('passthrough', 'ab-panel', true);
     await press();
     expect(sentKeyEvents().length).toBeGreaterThan(whileHidden);
+  });
+
+  it('still forwards a Cmd+A the Wall cancelled only to stop a native select-all', async () => {
+    const host = installBrowserHost();
+    await renderWithMode('passthrough', 'ab-panel');
+    // As the Wall's earlier capture listener leaves it.
+    const selectAll = new KeyboardEvent('keydown', { key: 'a', metaKey: true, bubbles: true, cancelable: true });
+    selectAll.preventDefault();
+    await act(async () => { window.dispatchEvent(selectAll); });
+    expect(host.requests('edit')).toEqual([expect.objectContaining({ edit: 'selectAll' })]);
   });
 });
 
