@@ -43,7 +43,7 @@ A reopened Surface is rebuilt from its record: a new Session and process. "Lost"
 | Trivial close ([The rule](#the-rule)) | Nothing: no record | Nothing | No (as today) |
 | `builtin:file` (viewer or editor) reporting clean | Same path, same Lath position | Cursor and scroll position | No (today: yes) |
 | `builtin:folder` | Same path | Expanded subfolders | No (today: yes) |
-| `iframe` browser | Same URL | Live page state | Open question |
+| `iframe` browser | Same URL, reloaded | Live page state | No (the browser convention: a closed tab reopens at its URL) |
 | Touched shell, repo Tool, agent-browser / playwright, dirty or unreported Tool, running work | — | — | Yes |
 
 Repo Tools join the table only through `docs/specs/dor-tool.md` → "Dehydrate and rehydrate" (D2), which supplies the safe-to-stop contract args alone do not.
@@ -72,7 +72,7 @@ Starting points: `RestoreToken` / `restore` in `lib/src/lib/lath/ops.ts`; `killP
 
 ### Labs: No-confirm delayed kill
 
-**Settings gains a Labs section** (`lib/src/components/SettingsDialog.tsx`), Standalone only, holding one toggle, **No-confirm delayed kill**, off by default. With it on, a close that would confirm instead becomes a **pending kill**: the Surface leaves the layout at once but its process lives until a countdown finalizes it.
+**Settings gains a Labs section** (`lib/src/components/SettingsDialog.tsx`), Standalone only and app-wide (every window reads one setting), holding one toggle, **No-confirm delayed kill**, off by default. With it on, a close that would confirm instead becomes a **pending kill**: the Surface leaves the layout at once but its process lives until a countdown finalizes it.
 
 | Confirmation | With the toggle on |
 |---|---|
@@ -92,7 +92,7 @@ Starting points: `RestoreToken` / `restore` in `lib/src/lib/lath/ops.ts`; `killP
 - **Must suppress alerts from pending Surfaces and omit them from `dor` listings and Clients**; a `dor` command addressing one fails as pending kill.
 - **Must count pending running work in the quit and window-close gates**, then finalize every pending kill on quit. Nothing pending survives a restart.
 
-**The overlay** stacks pending kills in the window's bottom-right corner, above the Baseboard, newest on top. Each entry shows the Surface's title and kind, a bar filling toward the kill, restore on click, and finalize now. Past a few entries the stack collapses to a count. Countdown length and pause-on-hover are open questions.
+**The overlay** stacks pending kills in the window's bottom-right corner, above the Baseboard, newest on top. Each entry shows the Surface's title and kind, a bar filling toward the kill, restore on click, and finalize now. Past a few entries the stack collapses to a count. **The countdown is 10 s and pauses while the pointer is over its entry**; past 3 entries the rest collapse to a `+N` row.
 
 **Promotion amends `docs/specs/transport.md` → "The governing rule"** ("deliberately ending something ends it") for the toggle's duration.
 
@@ -100,9 +100,9 @@ Starting points: `RestoreToken` / `restore` in `lib/src/lib/lath/ops.ts`; `killP
 
 Promoting either scope rewrites, in the same PR: `docs/specs/layout.md` → "Kill confirmation" and "Workspace lifecycle"; `docs/specs/shortcuts.md`; the glossary verb table; `docs/specs/dor-cli.md` for `dor reopen`; `docs/specs/standalone.md` → "Per-window close"; and this spec, moving the built part above the fold.
 
-### Open questions
+### Decisions
 
-- Do `iframe` browsers count as reopenable (reload at URL, as browsers do)?
-- Should a touched idle shell become reopenable at lower fidelity — serialized scrollback replayed into a fresh shell, exports and history lost? The default here is no.
-- Delayed kill: the countdown length, pause-on-hover, and the overlay's collapse threshold.
-- Should Labs settings be per Window or app-wide? The default here is app-wide.
+- **`iframe` browsers are reopenable** at their URL, reloaded: a closed browser tab is universally understood to lose its live page, so the table, not losslessness of page state, decides.
+- **A touched idle shell is never reopenable**, even at lower fidelity: replaying scrollback into a fresh shell looks like the old one while its exports, history, and jobs are gone.
+- **The delayed-kill countdown is 10 s, pausing on hover, collapsing past 3 entries**: long enough to notice a wrong kill, short enough that a pending process does not linger.
+- **Labs settings are app-wide**, like every other Standalone setting.
