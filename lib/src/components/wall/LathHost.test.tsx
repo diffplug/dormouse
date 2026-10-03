@@ -1010,6 +1010,21 @@ describe('LathHost — pane / Door drag', () => {
     expect(badge()).toBeNull();
   });
 
+  it('does not anchor a slide on the dragged pane\'s own header', async () => {
+    const store = seeded(rowOf('a', 'b', 'c', 'd'), ['a', 'b', 'c', 'd'].map(id => [id, leafMeta()]));
+    const { onProposeMove } = mountDrag(store);
+    act(() => down(header('d'), 700, 15));
+    act(() => moveTo(690, 15)); // past the threshold, still on d's header
+    await flushFrame();
+    await pause();
+    for (const x of [500, 300]) {
+      act(() => moveTo(x, 15));
+      await flushFrame();
+    }
+    act(() => up());
+    expect(onProposeMove).toHaveBeenCalledWith('d', { kind: 'edge', path: [1], edge: 'top' });
+  });
+
   it('drops beside one pane after a quick sweep along the headers', async () => {
     const store = seeded(rowOf('a', 'b', 'c', 'd'), ['a', 'b', 'c', 'd'].map(id => [id, leafMeta()]));
     const { onProposeMove } = mountDrag(store);

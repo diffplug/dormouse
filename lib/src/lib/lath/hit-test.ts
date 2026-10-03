@@ -26,8 +26,6 @@ export type DropHit = {
   /** The anchor still lies on the hovered edge's line, so the slide continues. False
    *  when there was no anchor, or the pointer left that line (the caller drops it). */
   anchored: boolean;
-  /** The pointer is in an edge band, where an anchor can be set. */
-  onEdge: boolean;
 };
 
 type Point = { x: number; y: number };
@@ -164,7 +162,7 @@ export function hitTest(
   opts: LayoutOpts,
   anchor: Point | null = null,
 ): DropHit {
-  const miss: DropHit = { candidate: null, anchored: false, onEdge: false };
+  const miss: DropHit = { candidate: null, anchored: false };
   if (tree.root === null) return miss;
   if (point.x < rect.x || point.x > rect.x + rect.width || point.y < rect.y || point.y > rect.y + rect.height) {
     return miss;
@@ -203,7 +201,6 @@ export function hitTest(
     return {
       candidate: previewRect && { target, previewRect, scopeRect: here.leafRect, scopeLeafCount: 1, canWiden: false },
       anchored: false,
-      onEdge: false,
     };
   }
 
@@ -227,9 +224,9 @@ export function hitTest(
     if (!scope || s.end - s.start < scope.end - scope.start - COINCIDE_EPS) scope = s;
   }
   // An anchor whose line no common ancestor spans cannot continue; the caller drops it.
-  if (!scope) return { candidate: null, anchored: false, onEdge: true };
+  if (!scope) return { candidate: null, anchored: false };
   const previewRect = evaluate(scope.target);
-  if (!previewRect) return { candidate: null, anchored, onEdge: true };
+  if (!previewRect) return { candidate: null, anchored };
   const materialized = materializeTarget(tree, scope.target)!;
   const scopeLeaves = leaves({ root: nodeAtPath(materialized.tree, materialized.path) });
   const extent = scope.end - scope.start;
@@ -242,6 +239,5 @@ export function hitTest(
       canWiden: scopes.some((s) => s.end - s.start > extent + COINCIDE_EPS),
     },
     anchored,
-    onEdge: true,
   };
 }

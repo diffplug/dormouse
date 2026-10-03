@@ -38,8 +38,6 @@ type PaneDragState = {
   candidate: DropCandidate | null;
   /** Wall-coordinate point where the current slide began, or null before a pause. */
   anchor: { x: number; y: number } | null;
-  /** The last hit was in an edge band, where a pause anchors a slide. */
-  onEdge: boolean;
   armTimer: ReturnType<typeof setTimeout> | null;
   lastX: number;
   lastY: number;
@@ -168,7 +166,6 @@ export function createDragController(deps: DragControllerDeps): DragController {
     // mid-drag is reflected in the very next frame.
     const hit = hitTest(deps.getSnapshot().tree, deps.rectRef.current, point, d.external ? null : d.id, LATH_LAYOUT_OPTS, d.anchor);
     if (!hit.anchored) d.anchor = null; // left the slide's line
-    d.onEdge = hit.onEdge;
     d.candidate = hit.candidate;
     publishPreview(hit.candidate);
   };
@@ -176,17 +173,17 @@ export function createDragController(deps: DragControllerDeps): DragController {
   const clearHit = (d: PaneDragState): void => {
     d.candidate = null;
     d.anchor = null;
-    d.onEdge = false;
     publishPreview(null);
   };
 
-  // A pause on an edge anchors a slide there; a pause mid-slide keeps the anchor.
+  // A pause on an edge drop anchors a slide there; a pause mid-slide keeps the anchor.
+  // A rejected drop never anchors: every pane drag starts in its own header's band.
   const arm = (): void => {
     const d = drag;
     if (!d) return;
     d.armTimer = null;
     const containerEl = deps.containerRef.current;
-    if (!d.active || d.anchor || !d.onEdge || !containerEl) return;
+    if (!d.active || d.anchor || d.candidate?.target.kind !== 'edge' || !containerEl) return;
     const cr = containerEl.getBoundingClientRect();
     d.anchor = { x: d.lastX - cr.left, y: d.lastY - cr.top };
     runHitTest();
@@ -288,7 +285,7 @@ export function createDragController(deps: DragControllerDeps): DragController {
       if (deps.getSnapshot().zoomedId !== null) return;
       drag = {
         id, external: false, active: false, startX: clientX, startY: clientY,
-        candidate: null, anchor: null, onEdge: false, armTimer: null, lastX: clientX, lastY: clientY, rafId: null,
+        candidate: null, anchor: null, armTimer: null, lastX: clientX, lastY: clientY, rafId: null,
       };
       attach();
     },
@@ -296,7 +293,7 @@ export function createDragController(deps: DragControllerDeps): DragController {
       if (drag) return;
       drag = {
         id, external: true, active: false, startX, startY,
-        candidate: null, anchor: null, onEdge: false, armTimer: null, lastX: startX, lastY: startY, rafId: null,
+        candidate: null, anchor: null, armTimer: null, lastX: startX, lastY: startY, rafId: null,
       };
       attach();
     },
