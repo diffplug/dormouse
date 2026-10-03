@@ -492,8 +492,8 @@ split is `docs/specs/transport.md` → "Transferring a Workspace".
    only then does Rust nudge the target (`workspace-arriving`, carrying nothing)
    or build the torn-out window. **An arrival without content is not drainable.**
 3. **Target** drains with `take_arrivals` and, per arrival, arms its collector
-   *before* calling `adopt_ready(workspaceId)` (rationale). Rust forwards
-   `pty:requestInit` scoped to **that arrival's ids and no others**, the collector's
+   *before* calling `adopt_ready(workspaceId)` (rationale). Rust answers
+   `pty:requestInit` with **that arrival's ids and no others**, the collector's
    token echoed. The target resumes over them and mounts the Workspace at the
    payload's index, else the drop index. **It never spawns or kills**; the
    sidecar re-sends the Sessions' alert state (§Alerts).
