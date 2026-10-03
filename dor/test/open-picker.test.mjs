@@ -236,6 +236,20 @@ test('file names cannot write terminal controls', async () => {
   });
 });
 
+// Windows file names cannot hold a colon.
+test('a listed file whose name looks like a URL scheme opens as a path', { skip: process.platform === 'win32' }, async () => {
+  await withTree(async (dir) => {
+    await writeFile(join(dir, 'notes:draft.md'), '');
+    const { terminal, client, result } = await startPicker(dir, ['o']);
+    terminal.send('draft');
+    await until(() => client.requests.some(r => r.method === 'openHandlers'), 'the handler read');
+    terminal.send('\r');
+    await result;
+    assert.equal(client.requests.find(r => r.method === 'openHandlers').request.target, './notes:draft.md');
+    assert.equal(client.requests.find(r => r.method === 'toolSurface').request.file, './notes:draft.md');
+  });
+});
+
 test('without a terminal, dor open needs a path; dor o FILE is dor open FILE', async () => {
   await withTree(async (dir) => {
     const client = pickerClient();

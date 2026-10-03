@@ -66,7 +66,7 @@ Placement follows dor tool: typed alone at a prompt in a visible, integrated pla
           this.process.exitCode = 1;
           return undefined;
         }
-        file = choice.file;
+        file = listedPath(choice.file);
         tool = choice.tool ?? tool;
       }
       return dispatchToolSurface(this, {
@@ -83,6 +83,12 @@ Placement follows dor tool: typed alone at a prompt in a visible, integrated pla
   }),
 };
 
+/** A listed file the host would read as a URL or Surface handle
+ * (`notes:draft.md`) keeps naming the file. */
+function listedPath(file: string): string {
+  return /^[a-z][a-z\d+.-]*:/i.test(file) ? `./${file}` : file;
+}
+
 /** The picker's choice, null when cancelled. */
 async function pickFile(context: DorCommandContext, cwd: string, flags: OpenFlags) {
   const { terminal } = context.options;
@@ -95,7 +101,7 @@ async function pickFile(context: DorCommandContext, cwd: string, flags: OpenFlag
   return runFilePicker({
     terminal,
     listFiles: (onFiles, signal) => host.listFiles(cwd, { onFiles, signal, home }),
-    handlers: file => client.openHandlers({ target: file, cwd, ...(flags.preview ? { preview: true } : {}) }),
+    handlers: file => client.openHandlers({ target: listedPath(file), cwd, ...(flags.preview ? { preview: true } : {}) }),
     fixedTool: flags.tool,
     home,
   });
