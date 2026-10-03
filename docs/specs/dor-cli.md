@@ -310,7 +310,7 @@ flowchart TD
   C -- no --> WS{--workspace?}
   WS -- unresolved --> REF
   WS -- registered --> H[that Wall answers]
-  WS -- unregistered --> P[retry, then refuse]
+  WS -- unregistered --> P["re-resolve next tick; refuse if still unmounted"]
   WS -- absent --> ST{stable-id target held?}
   ST -- yes --> H
   ST -- no --> CA{caller or helper source held?}
