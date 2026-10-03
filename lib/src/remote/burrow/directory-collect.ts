@@ -17,7 +17,7 @@ import {
   resolveDisplayPrimary,
 } from '../../lib/terminal-registry';
 import { isHelperSession, registry } from '../../lib/terminal-store';
-import { getWorkspacesSnapshot, workspaceRefFor, workspaceRefsAreAppWide } from '../../lib/workspace-store';
+import { getWorkspacesSnapshot, refsArePositional, workspaceRefFor } from '../../lib/workspace-store';
 import { getWorkspaceSurfacesSnapshot } from '../../lib/workspace-surfaces';
 import { buildDirectorySnapshot, type DirectoryPaneInput, type DirectoryWorkspaceInput } from './directory';
 
@@ -28,7 +28,7 @@ import { buildDirectorySnapshot, type DirectoryPaneInput, type DirectoryWorkspac
  * `workspace:1`).
  */
 function collectWorkspaces(): DirectoryWorkspaceInput[] {
-  if (!workspaceRefsAreAppWide()) return [];
+  if (refsArePositional()) return [];
   const { workspaces, activeId } = getWorkspacesSnapshot();
   const membership = getWorkspaceSurfacesSnapshot();
   return workspaces.map((workspace) => ({

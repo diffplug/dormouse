@@ -66,6 +66,9 @@ describe('attachableDirectoryEntries', () => {
   });
 });
 
+/** The one group a Burrow that names no Workspace files every row in. */
+const UNGROUPED = { id: '', label: 'Other' };
+
 describe('directorySessionItems', () => {
   it('marks the active pane and carries title/secondary', () => {
     const items = directorySessionItems(
@@ -73,8 +76,8 @@ describe('directorySessionItems', () => {
       's2',
     );
     expect(items).toEqual([
-      { id: 's1', title: 'zsh', secondary: '/home/me', active: false, status: undefined, episode: null, todo: false },
-      { id: 's2', title: 'vim', secondary: null, active: true, status: undefined, episode: null, todo: false },
+      { id: 's1', group: UNGROUPED, title: 'zsh', secondary: '/home/me', active: false, status: undefined, episode: null, todo: false },
+      { id: 's2', group: UNGROUPED, title: 'vim', secondary: null, active: true, status: undefined, episode: null, todo: false },
     ]);
   });
 
@@ -105,7 +108,7 @@ describe('directorySessionItems', () => {
       's1',
     );
     expect(items).toEqual([
-      { id: 's2', title: 'alive', secondary: null, active: false, status: undefined, episode: null, todo: false },
+      { id: 's2', group: UNGROUPED, title: 'alive', secondary: null, active: false, status: undefined, episode: null, todo: false },
     ]);
   });
 });
@@ -154,14 +157,9 @@ describe('directorySessionItems with Workspaces', () => {
     ]);
   });
 
-  it('files nothing when the Burrow names no Workspace', () => {
+  it('files every row in one group when the Burrow names no Workspace', () => {
     const items = directorySessionItems([entry('s1'), entry('s2')], null);
-    expect(items.some((item) => 'group' in item)).toBe(false);
-  });
-
-  it('ignores a malformed Workspace rather than grouping under it', () => {
-    const odd = entry('odd', { workspace: { ref: 7, name: null } as unknown as DirectoryEntry['workspace'] });
-    expect(directorySessionItems([odd], null)[0]).not.toHaveProperty('group');
+    expect(new Set(items.map((item) => item.group?.id)).size).toBe(1);
   });
 });
 
