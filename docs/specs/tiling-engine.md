@@ -82,10 +82,21 @@ The scope model:
 Adapter gesture (LathHost):
 
 - **Start** on a leaf's header slot, primary button only, bailing on buttons/inputs/contenteditable so header chrome keeps working. **Never while zoomed or during a sash drag** — the two are mutually exclusive. Grabbing a header fires its press-time click path first, so a drag begins from passthrough on that pane; accepted quirk (rationale).
-- **During**: the dragged leaf dims to 0.6; one `data-lath-drop-preview` overlay draws the chosen candidate's rect in the selection color; hit-testing is rAF-coalesced and flushed on release (`lib/src/components/wall/LathHost.test.tsx`); **must anchor a slide only where the pointer pauses on an edge drop**, never the dragged pane's own rejected edge, so sweeping a header along the header row drops beside one pane at a time (rationale); Escape, pointer cancellation, and window blur cancel; the click, and a double-click's dblclick, the browser synthesizes on pointerup are swallowed in the capture phase.
-- **Drops surface as proposals the Wall commits**: `onDragStart(id)` (selection moves onto the dragged pane, covering the drag-while-door-selected case), `onProposeMove(id, target)` (→ `moveLeaf`, then select), and `onProposeMinimize(id)` when released below the container (→ `minimizePane`, token and all). Committed moves tween via the animator.
+- **During**: the dragged leaf dims to 0.6; one `data-lath-drop-preview` overlay draws the chosen candidate's rect in the selection color; hit-testing is rAF-coalesced and flushed on release (`lib/src/components/wall/LathHost.test.tsx`); **must anchor a slide only where the pointer pauses on an edge drop**, never the dragged pane's own rejected edge, so sweeping a header along the header row drops beside one pane at a time (rationale); the click, and a double-click's dblclick, the browser synthesizes on pointerup are swallowed in the capture phase.
+- **Drops surface as proposals the Wall commits**: `onDragStart(id)` moves selection onto the dragged pane, covering the drag-while-door-selected case; `onProposeMove` → `moveLeaf`, then select; `onProposeMinimize` → `minimizePane`, token and all.
 
-**Door drag-out** runs the same machinery with `dragged: null`. A `Door` press reports its start point (`onDoorDragStart(item, press)`) and the Wall puts LathHost into external-drag mode at once (`externalDrag={ id, startX, startY }`); below the threshold the press is a plain click (reattach), above it the chip stays put in the baseboard. A drop on a candidate removes the Door and `insertLeaf`s the surface there with an enter hint from the target edge — **the token is not consulted, because the user chose the position**. A drop on nothing, Escape, a sub-threshold release, or a drop back onto the baseboard leaves the Door in place.
+**Door drag-out** runs the same machinery with `dragged: null`, entered at once through the Wall's `externalDrag={ id, startX, startY }`; the chip stays in the baseboard meanwhile. A candidate drop `insertLeaf`s the Surface there with an enter hint from the target edge — **the token is not consulted, because the user chose the position**.
+
+```mermaid
+stateDiagram-v2
+  [*] --> Pressed: header or Door press
+  Pressed --> [*]: release under DRAG_THRESHOLD_PX, the click stands
+  Pressed --> Active: past threshold
+  Active --> [*]: Escape, pointercancel, blur or release on nothing, a Door stays
+  Active --> [*]: release over the Workspace strip
+  Active --> [*]: pane released below the wall, onProposeMinimize
+  Active --> [*]: release on a candidate, onProposeMove or onExternalDrop
+```
 
 **Must delegate Workspace-strip pane drops to `docs/specs/layout.md` → Moving Surfaces between Workspaces** before local hit testing; cross-Wall adoption remounts the leaf.
 
@@ -95,15 +106,26 @@ Source of truth: `createDragController` in `lib/src/components/wall/lath-drag-co
 
 **Must persist `RestoreToken` as the Door's sole restore payload.** Its canonical fields and capture rules live beside `remove` in `lib/src/lib/lath/ops.ts`. Legacy tokens without sibling-subtree context retain the older leaf-neighbor behavior when exact restoration fails. Root-leaf removals can reach only fallback. `restore` applies three tiers from the Wall's `handleReattach`:
 
-1. **exact** — the fingerprinted context still exists around `siblingId`: reinsert at the original index and weight, existing siblings shrinking proportionally;
-2. **neighbor** — the sibling still exists: split beside it on the original edge;
-3. **fallback** — split beside `opts.fallbackRef` via `autoEdge`, or `'right'` with no rect. Restoring into an empty tree makes the leaf the root.
+```mermaid
+flowchart TD
+  EM{"tree empty?"} -- yes --> ROOT["leaf becomes the root"]
+  EM -- no --> T{"Door has a token?"}
+  T -- yes --> EX{"fingerprinted context around siblingId?"}
+  EX -- yes --> T1["exact: original index and weight"]
+  EX -- no --> NB{"siblingId still a leaf?"}
+  NB -- yes --> T2["neighbor: split beside it on the original edge"]
+  NB -- no --> FB{"fallbackRef live?"}
+  FB -- yes --> T3["fallback: split beside it via autoEdge"]
+  FB -- no --> NO["ok: false"]
+  T -- no --> AL["Wall: addLeaf beside the last leaf via autoEdge"]
+  NO --> AL
+```
 
 - A leaf removed from a two-child split whose survivor is a single leaf **always degrades to neighbor** — the collapse erases the fingerprinted parent, and neighbor reproduces the same position at 50/50 rather than the original weights.
 - A survivor that is a split subtree keeps **exact**, targeted by `siblingLeafIds` / `siblingFingerprint`, so `A | (B over C)` restores beside the whole `B/C` column rather than inside it — **including after that subtree flattened into its grandparent**, found as a child range; a changed group degrades to neighbor.
-- **Must supply a live `fallbackRef` when exact/neighbor tiers fail in a nonempty tree**; otherwise restore returns `ok: false`.
+- **Must supply a live `fallbackRef` when exact/neighbor tiers fail in a nonempty tree.**
 
-A parked leaf still carries a token: parking decides whether DOM survives, the token decides where the leaf lands.
+A parked leaf still carries a token: parking decides whether DOM survives, the token where it lands.
 
 Source of truth: `RestoreToken` / `restore` in `lib/src/lib/lath/ops.ts`.
 
@@ -190,7 +212,7 @@ Source of truth: `lib/src/components/wall/pane-props.ts`; `PaneWriteContext` in 
 
 The versioned Lath layout rides inside `PersistedSession`, and saves write only the native Lath layout. Store metadata also covers Doored leaves, so `lathLayoutFromStore` filters it to tree members and the save path materializes each Door's live metadata separately. Every leaf's metadata goes out through `persistableLeafMeta`: **a Tool's derived browser fields are stripped and a Tool still awaiting approval persists as a plain terminal** (`docs/specs/dor-tool.md` → Persistence and hosts). A restart therefore cold-loads every Surface where the user left it, a Tool as the terminal running its command — **a parked document never survives a restart, only a minimize**.
 
-**The session read boundary resolves the layout once**: `persistedLathLayout` returns the native `lathLayout` only after validating node shapes, tree invariants, and valid metadata for exactly its leaves; otherwise undefined. `lib/src/lib/lath/persistence.test.ts` pins rejection and `lib/src/components/wall/lath-wall-engine.test.ts` pins recovery. **Both recovery paths then gate on the layout's leaf set matching the visible pane set** — the resume gate in `reconnect.ts`, the cold path in `session-restore.ts` — with the `restoredLathLayout` prop and the engine's `seed` seeing only a Lath layout. An absent, rejected, or empty one falls back to fresh panes, except that **a cold restore holding a visible Tool pane must synthesize a valid single-row layout from the pane projection instead**, dropping browser panes, so Tool identity and commands survive corrupt geometry. Pinned through engine hydration by `lib/src/lib/session-restore.test.ts`.
+**The session read boundary resolves the layout once**: `persistedLathLayout` returns the native `lathLayout` only after validating node shapes, tree invariants, and valid metadata for exactly its leaves; otherwise undefined. `lib/src/lib/lath/persistence.test.ts` pins rejection and `lib/src/components/wall/lath-wall-engine.test.ts` pins recovery. **Both recovery paths then gate on the layout's leaf set matching the visible pane set**, with the `restoredLathLayout` prop and the engine's `seed` seeing only a Lath layout. An absent, rejected, or empty one falls back to fresh panes, except that **a cold restore holding a visible Tool pane must synthesize a valid single-row layout from the pane projection instead**, dropping browser panes, so Tool identity and commands survive corrupt geometry. Pinned through engine hydration by `lib/src/lib/session-restore.test.ts`.
 
 Source of truth: `lathLayoutFromStore` in `lib/src/lib/lath/persistence.ts`; the save in `lib/src/components/wall/use-session-persistence.ts`; `persistedLathLayout` in `lib/src/lib/session-restore.ts`, consumed by `lib/src/lib/reconnect.ts`.
 

@@ -130,7 +130,26 @@ Source of truth: `toolSemanticName` in `lib/src/components/wall/tool-name.ts`.
 
 ## CLI
 
-**Must return the Tool Surface handle.** A new Tool follows [Take-over](#take-over), otherwise splitting focus-neutrally. A matching Tool follows [Identity and dedupe](#identity-and-dedupe).
+**Must return the Tool Surface handle**, placed in this order (rules in [Trust](#trust), [Preview slot](#preview-slot), [Identity and dedupe](#identity-and-dedupe), [Take-over](#take-over)):
+
+```mermaid
+flowchart TD
+  R[surface.tool] --> O{OSC open, not from a running Tool?}
+  O -- yes --> X[refuse]
+  O -- no --> L{named Tool or dor open?}
+  L -- no --> PS
+  L -- yes --> LK{host lookup}
+  LK -- untrusted --> PE[pending pane: pending]
+  LK -- failed --> X
+  LK -- failed, OSC preview --> EV[error viewer] --> PS
+  LK -- ok --> PS{slot answers?}
+  PS -- yes --> S[slot's answer]
+  PS -- no --> K{keyed match?}
+  K -- yes --> M[existing or adopted]
+  K -- no --> T{take-over holds?}
+  T -- yes --> TO[run in caller: takeover]
+  T -- no --> SP[split, focus-neutral: created]
+```
 
 **Must retain `dor tool` and `dor open` as Surface-producing commands on every supported host**, never route them to a native editor. Generated help owns syntax and response types own shape.
 
@@ -188,13 +207,33 @@ Source of truth: `runFilePicker` in `dor/src/commands/open-picker.ts`; `listOpen
 
 A running Tool may send either as an OSC 367 `open` instead ([OSC 367](#osc-367)).
 
-A preview is answered by the first of:
+Same Tool: same scope, name and run; a run a superseded retarget interrupted is
+not running.
 
-1. A pinned Tool matching the resolved key is revealed focus-neutrally: `existing`.
-2. A slot given the same Tool (scope, name, run) for the same target is revealed focus-neutrally, without restart: `existing`. When its command is not running, counting a run a superseded retarget interrupted, it is retargeted to that Tool again: `adopted`.
-3. A slot asked from its own Session is pinned, and a new slot is created, so the `dor` awaiting the answer is never interrupted.
-4. A slot is retargeted: `retargeted`.
-5. Otherwise a new slot is created: `created`.
+```mermaid
+flowchart TD
+  Q{--preview?}
+  Q -- yes --> P1{pinned Tool with resolved key?}
+  P1 -- yes --> EX1[reveal, focus-neutral: existing]
+  P1 -- no --> P2{slot?}
+  P2 -- no --> NEW[new slot: created]
+  P2 -- yes --> P3{slot shows same Tool and target?}
+  P3 -- running --> EX2[reveal, focus-neutral: existing]
+  P3 -- not running --> RR[re-run: adopted]
+  P3 -- no --> P4{asked from slot's Session?}
+  P4 -- yes --> PIN[pin slot, new slot: created]
+  P4 -- no --> RT[retarget: retargeted]
+  Q -- no --> A1{slot shows target, no --fresh?}
+  A1 -- no --> ORD[ordinary open]
+  A1 -- yes --> A2{pinned Tool with resolved key?}
+  A2 -- yes --> ORD
+  A2 -- no --> A3{asked from slot's Session?}
+  A3 -- yes --> PO[pin slot] --> ORD
+  A3 -- no --> A4{slot runs same Tool?}
+  A4 -- running --> EXP[pin, reveal: existing]
+  A4 -- not running --> RRP[re-run, pin: adopted]
+  A4 -- no --> RTP[retarget, pin: retargeted]
+```
 
 - **Must retarget in place**: interrupt the slot's command, wait up to 1s for its prompt, then type the new Tool's command quoted for the slot's shell, in the slot's directory. Retain the Session id, Surface ref, terminal, and a user rename; the new Tool may differ. Retire the old command's browser, announcements, and unsaved state at once ([Serving](#serving)); a Door slot reattaches focus-neutrally. **Must keep a slot still running after that 1s**: pin it untouched and place the launch as if there were no slot (rationale); slot Tools should exit on Ctrl+C (`less -K`, `glow`). **Must restore a slot pinned during the interrupt**, whatever becomes of the request: type its previous command again, then place the launch as if there were no slot.
 - **Must let the newest preview in a Workspace supersede older ones**: a preview not yet past its lookup, or still interrupting the slot, answers `superseded` with the slot's handle, or an error while there is no slot (rationale). **Must restore a run a superseded or cancelled retarget interrupted and nothing replaced**, once a Tool request ends with no preview left to come.
@@ -202,7 +241,7 @@ A preview is answered by the first of:
 - **Never let a preview take over its caller or become a Door.** A new slot splits focus-neutrally from `--surface` when given, else from the slot pinned last while it is a visible pane of the Workspace, else from the caller (rationale). `--preview` rejects `--fresh` and `--minimize`.
 - **Must exclude a marked slot from keyed dedupe.** It keeps its key, which counts once pinned, so pinning only clears the mark.
 - **Must pin at once when the slot's Tool reports unsaved changes** ([Unsaved changes](#unsaved-changes)); clean and unreported state never pin. A double-click on its Pane header, or Keep open in its terminal context, pins too (`docs/specs/layout.md` → Pane header). **Never pin on keyboard input or focus** (rationale).
-- **Must pin without restarting when `dor open` resolves the slot's running Tool and target**, revealing it as a keyed match is and reporting `existing`; a slot not running is re-run as in rule 2, then pinned. A pinned Tool with the resolved key is revealed first, leaving the slot untouched. A different Tool for that target retargets the slot, then pins it. From the slot's own Session, `dor open` pins it and continues as an ordinary open; `--fresh` bypasses the slot.
+- **Must pin without restarting when `dor open` resolves the slot's running Tool and target.**
 
 Source of truth: `surface.tool` in `lib/src/components/wall/use-dor-control.ts`; `decidePreviewSlot` in `lib/src/components/wall/preview-slot.ts`.
 
@@ -231,7 +270,7 @@ Source of truth: `activateTerminalLink` in `lib/src/lib/terminal-link-activation
 
 ## Take-over
 
-**Must run a standalone `dor tool` or `dor open` invocation in its calling pane when every takeover condition holds.** Otherwise use the ordinary split path. Trust approval and keyed reuse take precedence. Helper callers follow `docs/specs/dor-cli.md` → Helper callers and targets. (rationale)
+**Must run a standalone `dor tool` or `dor open` invocation in its calling pane when every takeover condition holds**, after the earlier rungs of [CLI](#cli). Helper callers follow `docs/specs/dor-cli.md` → Helper callers and targets. (rationale)
 
 | Condition | Required state |
 | --- | --- |
@@ -244,7 +283,21 @@ Source of truth: `activateTerminalLink` in `lib/src/lib/terminal-link-activation
 
 **Must retain Tool designation after its command exits.** Takeover is one-shot per Surface: a later invocation from that prompt splits unless keyed reuse finds a match; the same keyed Tool reruns in place through the handshake below.
 
-**Must answer `takeover` before waiting for the calling shell's prompt**, then transform and type the command. The answer promises placement, not successful command startup.
+```mermaid
+sequenceDiagram
+  participant Sh as caller's shell
+  participant D as dor
+  participant W as Wall
+  Sh->>D: runs dor tool alone
+  D->>W: surface.tool
+  W-->>D: takeover or adopted
+  D->>Sh: prints the handle, exits
+  Sh-->>W: back at a prompt
+  W->>W: recheck, then become the Tool if takeover
+  W->>Sh: type the command
+```
+
+**Must answer `takeover` before waiting for the calling shell's prompt**, which returns only once `dor` exits; the answer promises placement, not command startup.
 
 - **Must leave the caller unchanged on prompt timeout or cancellation**, and recheck transfer/closing state, pane membership, CWD, kind, and helper presence after the wait. **Must complete an accepted takeover after switching Workspaces** without changing the active Workspace. (rationale)
 - **Must retain the Session id, Surface ref, scrollback, and any user rename** through the transformation.
