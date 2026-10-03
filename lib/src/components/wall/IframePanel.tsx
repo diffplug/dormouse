@@ -204,6 +204,18 @@ export function IframePanel({ id, title, params, onReady }: PaneProps & {
   // accurate focus model, and real error pages. Reachability is diagnosed by
   // the proxy and shown as a served page inside the frame.
   const [resolution, setResolution] = useState<Resolution>(() => (sourceUrl ? { kind: 'resolving' } : { kind: 'empty' }));
+  // This mounted view's lease on its proxy grant (docs/specs/dor-browser.md →
+  // "Iframe Proxy Leases"): Reload, Back and Forward keep the grant and its
+  // origin, and unmounting — a kill, a swap, a transfer — ends it. Minted by
+  // the effect that releases it, so a released id is never asked for again:
+  // StrictMode's mount, unmount, mount gets a second lease, and no transport
+  // can deliver a create of the first after its release.
+  const [lease, setLease] = useState<string | null>(null);
+  useEffect(() => {
+    const minted = `${id}#${globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2)}`;
+    setLease(minted);
+    return () => getPlatform().releaseIframeProxy?.(minted);
+  }, [id]);
   useEffect(() => {
     if (!isTool || resolution.kind !== 'proxied' || !iframeRef.current) return;
     return connectIframeTheme(iframeRef.current, resolution.origin);
@@ -236,9 +248,11 @@ export function IframePanel({ id, title, params, onReady }: PaneProps & {
       setResolution({ kind: 'raw', src: sourceUrl });
       return;
     }
-    let cancelled = false;
     setResolution({ kind: 'resolving' });
-    createProxy(sourceUrl).then(
+    // The lease arrives with the first effect pass.
+    if (lease === null) return;
+    let cancelled = false;
+    createProxy(sourceUrl, lease).then(
       (result: IframeProxyResult) => {
         if (cancelled) return;
         if (result.ok) setResolution({ kind: 'proxied', src: result.url, origin: originOf(result.url) });
@@ -249,7 +263,7 @@ export function IframePanel({ id, title, params, onReady }: PaneProps & {
       },
     );
     return () => { cancelled = true; };
-  }, [sourceUrl, reloadNonce]);
+  }, [sourceUrl, reloadNonce, lease]);
 
   // Register a screen controller so the embed surface shows the unified
   // browser chrome (URL + the far-left chip → Display modal) and can swap back

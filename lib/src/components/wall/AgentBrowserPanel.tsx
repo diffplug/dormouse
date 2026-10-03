@@ -142,10 +142,10 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [controller, paneWrite, id]);
 
-  // Feed effective on-screen visibility (foreground window, and not a parked leaf)
-  // so the controller can park a hidden pane after the debounce. A minimized
-  // screencast stays mounted and connected but stops pulling frames.
-  const visible = useSurfaceVisibility(parked);
+  // Feed effective on-screen visibility (foreground window, not a parked leaf,
+  // not under a zoomed one) so the controller can park a hidden pane after the
+  // debounce. A minimized screencast stays mounted but stops pulling frames.
+  const visible = useSurfaceVisibility(parked, id);
   useEffect(() => {
     controller.setVisible(visible);
   }, [controller, visible]);
