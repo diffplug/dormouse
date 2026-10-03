@@ -954,6 +954,25 @@ export interface DirectoryEntry {
   cwd?: string;
   ringing: boolean;
   hasTODO: boolean;
+  /**
+   * The Workspace holding the pane, on a Burrow whose Workspace refs are unique
+   * across its Windows; absent elsewhere, and from an older Burrow. A Client
+   * that reads none lists the entries ungrouped.
+   */
+  workspace?: DirectoryWorkspace;
+}
+/**
+ * A pane's Workspace as the directory names it. `ref` and `name` are the
+ * keys of the staged `WindowSnapshot.workspaces[]` (remote-api.md → Future,
+ * The Window), so `window.watch` names a Workspace the same way.
+ */
+export interface DirectoryWorkspace {
+  /** The Workspace's `dor` ref (`workspace:<n>`), unique within the Burrow. */
+  ref: string;
+  /** The name its tab shows. */
+  name: string;
+  /** The Workspace its Window shows; one per Window. */
+  active: boolean;
 }
 export interface DirectorySnapshot {
   entries: DirectoryEntry[];

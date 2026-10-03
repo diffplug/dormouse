@@ -134,6 +134,12 @@ function refsArePositional(): boolean {
   return !registryInstalled;
 }
 
+/** Whether {@link workspaceRefFor} names a Workspace uniquely across every
+ *  Window of the application, which only a host that mints ids can promise. */
+export function workspaceRefsAreAppWide(): boolean {
+  return !refsArePositional();
+}
+
 /** "Workspace N", one past the highest existing `Workspace <n>` name. */
 function nextDefaultName(): string {
   let max = 0;

@@ -15,6 +15,15 @@ import { setTerminalActivity, clearTerminalActivity } from '../../lib/session-ac
 import { createAlertEpisode } from '../../lib/alert-episode';
 import { registry, type TerminalEntry } from '../../lib/terminal-store';
 import { clearSizeHold, getSizeHolds, holdSize } from '../../lib/size-hold-store';
+import {
+  installWorkspaceIdPool,
+  renameWorkspace,
+  resetWorkspaceIdPool,
+  resetWorkspaces,
+  setActiveWorkspace,
+  setWorkspaces,
+} from '../../lib/workspace-store';
+import { resetWorkspaceSurfaces, setWorkspaceSurfaces } from '../../lib/workspace-surfaces';
 import { installPeerSurfaceResponder } from './peer-surfaces';
 import { takeBackSize } from './take-back';
 
@@ -262,6 +271,76 @@ describe('surface responder', () => {
     // Answering still works: it costs nothing until the Burrow asks.
     registerSurface('surface-2', 'pty-2');
     expect(quiet.answer('directory', {})).toHaveLength(1);
+  });
+});
+
+describe('Workspaces in the directory', () => {
+  /** A Window of two Workspaces, `web` shown and `api` hidden behind it. */
+  function twoWorkspaces(): void {
+    registerSurface('api-shell');
+    registerSurface('web-shell');
+    setWorkspaces({
+      workspaces: [
+        { id: 'workspace-4', name: 'api', nameIsAuto: false },
+        { id: 'workspace-9', name: 'web', nameIsAuto: true },
+      ],
+      activeId: 'workspace-9',
+    });
+    setWorkspaceSurfaces('workspace-4', ['api-shell']);
+    setWorkspaceSurfaces('workspace-9', ['web-shell']);
+  }
+
+  const answered = () =>
+    (platform.answer('directory', {}) as Array<{ surfaceId: string; workspace?: unknown }>)
+      .map(({ surfaceId, workspace }) => ({ surfaceId, workspace }));
+
+  beforeEach(async () => {
+    // Standalone's registry: refs are minted numbers, unique across Windows.
+    await installWorkspaceIdPool(async () => []);
+  });
+
+  afterEach(() => {
+    resetWorkspaceIdPool();
+    resetWorkspaces();
+    resetWorkspaceSurfaces();
+  });
+
+  it('lists a hidden Workspace’s terminals, naming every entry’s Workspace', () => {
+    twoWorkspaces();
+    expect(answered()).toEqual([
+      { surfaceId: 'api-shell', workspace: { ref: 'workspace:4', name: 'api', active: false } },
+      { surfaceId: 'web-shell', workspace: { ref: 'workspace:9', name: 'web', active: true } },
+    ]);
+  });
+
+  it('names no Workspace where a ref is only a strip position', () => {
+    // VS Code: every webview is its own `workspace:1`, so naming it would merge
+    // one window's terminals with another's on the phone.
+    resetWorkspaceIdPool();
+    twoWorkspaces();
+    expect(answered()).toEqual([
+      { surfaceId: 'api-shell', workspace: undefined },
+      { surfaceId: 'web-shell', workspace: undefined },
+    ]);
+  });
+
+  it('tells the Burrow when a Workspace is switched, renamed, or gains a member', async () => {
+    twoWorkspaces();
+    await armed();
+    await Promise.resolve();
+    const before = platform.notified;
+
+    setActiveWorkspace('workspace-4');
+    await Promise.resolve();
+    expect(platform.notified).toBe(before + 1);
+
+    renameWorkspace('workspace-9', 'frontend');
+    await Promise.resolve();
+    expect(platform.notified).toBe(before + 2);
+
+    setWorkspaceSurfaces('workspace-4', ['api-shell', 'web-shell']);
+    await Promise.resolve();
+    expect(platform.notified).toBe(before + 3);
   });
 });
 
