@@ -15,6 +15,7 @@ import { DEFAULT_HELPER_COMMAND } from './terminal-context-types';
 import { ITERM2_COMPAT_VERSION } from './terminal-protocol';
 import { OPEN_PORT_TIMEOUT_MS, OPEN_PORT_TIMEOUT_PER_ID_MS, openPortRequestTimeoutMs } from './platform/types';
 import { DEFAULT_RECOVERY_WAIT_MS } from '../host/recovery-capture';
+import { TOOL_PAYLOAD_LIMIT } from 'dor-tools-lib/osc';
 
 // Pins for constants defined in more than one language/runtime, where an
 // import is impossible (the sidecar is plain CJS, the Tauri backend is Rust,
@@ -44,6 +45,16 @@ describe('ITERM2_COMPAT_VERSION mirrors', () => {
     const file = 'standalone/sidecar/pty-core.js';
     const version = extract(readRepoFile(file), file, /^const ITERM2_COMPAT_VERSION = '([^']+)';$/m);
     expect(version).toBe(ITERM2_COMPAT_VERSION);
+  });
+});
+
+// docs/specs/dor-tool.md -> Reaping. The PTY core bounds the
+// `DORMOUSE_DEHYDRATE` it sets by the payload limit the renderer captured under;
+// a lower copy would silently rehydrate every large-but-valid payload from args.
+describe('dehydrate payload limit mirrors', () => {
+  it('matches the PTY core copy in standalone/sidecar/pty-core.js', () => {
+    const file = 'standalone/sidecar/pty-core.js';
+    expect(Number(extract(readRepoFile(file), file, /^const DEHYDRATE_LIMIT = (\d+);$/m))).toBe(TOOL_PAYLOAD_LIMIT);
   });
 });
 

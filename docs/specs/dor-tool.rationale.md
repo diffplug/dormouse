@@ -62,6 +62,24 @@ rendering, Windows shells, or cold restore. The reusable recipe is
 
 The September 2026 integration reuses Terminal Context for the Tool's primary terminal. The auxiliary helper's automatic refresh, Reset, and Promote semantics do not describe a serving command, whose Session also owns the browser and remote terminal identity. Sharing the presentation avoids introducing a second navigation mechanism or a second shell.
 
+## Reaping
+
+Clean or unreported state cannot mean "safe to stop" (decided 2026-10-03). Most Tools report no `state` at all, and a viewer that reports clean can still hold what no args restore: a REPL's variables, a tree's expansion, a half-run job. Reaping such a Tool would lose work while its pane looked intact. The Tool is the only party that knows, so it opts in, and `dehydrate: true` is the opt-in: a stateless Tool announces it and emits nothing, and its args are its whole state. `persist: "never"` lets a run that opted in withdraw for a stretch (a long job) by announcing again, since announcements are last-write-wins.
+
+Ctrl+C is the graceful-stop signal because it is the one stop every host can already deliver. SIGTERM to the PTY leader reaches the shell, which an interactive shell ignores; node-pty exposes neither the foreground process group nor the master fd to signal it; Windows has no SIGTERM for console programs. Writing `\x03` to the PTY makes the line discipline (or ConPTY's `CTRL_C_EVENT`) deliver an interrupt to the foreground job, which Node surfaces as `SIGINT` on both. The preview slot's retarget already relies on it (Preview slot). Unverified on a Windows machine as of 2026-10-03.
+
+The default threshold, 30 minutes, trades a boot against memory. A rehydrate costs a cold start (seconds for a dev server), and the payload keeps the Tool's own state, so a premature reap costs little; Edge's sleeping tabs, which restore pages without any payload, default to 2 hours with 5 minutes as their shortest setting. Switching Workspaces within a task takes minutes; one left over a meeting is parked work. Output resets the clock because a Tool still printing (a watcher rebuilding on save) is in use even when unseen.
+
+The environment carries the payload rather than the typed command: a `VAR=value cmd` prefix has no PowerShell spelling, applies only to the first command of a shell-string `run`, lands the JSON in shell history and the echoed line, and breaks command matching against the stored command. Spawn environment reaches every later command in that shell, a retargeted preview slot's included, so the integration scripts unset it at the first command's finish. WSL shells do not inherit it (no `WSLENV` entry), so they rehydrate from args.
+
+The payload stays in memory because the snapshot holds structure, never process state (`docs/specs/transport.md` → What is persisted), and a payload written there would outlive the run that vouched for it. The `reaped` mark does persist: without it a resume drops a pane whose PTY is gone as a stale save, and a cold restore would boot every reaped Tool of every hidden Workspace at once.
+
+The ladder has no retype (decided 2026-10-03, PR #961 review): a rehydrated run that fails is left at its prompt. An earlier draft typed the command once more without the payload when the dehydrated run exited non-zero before announcing, but no shipped Tool reaches it — `readDehydrated` answers null for a malformed, oversized, or unknown-version value, and `builtin:folder` skips paths it no longer has — and it misfired: a user's Ctrl+C during startup (exit 130) relaunched the Tool, and a Tool whose args fail printed its error twice.
+
+The stop silences the run's command-exit watch first. Observed in the innerdogfood harness (2026-10-03): a folder viewer launched while engaged had its exit seen, so the reap's Ctrl+C rang `COMMAND_EXIT` while it sat Doored, and the rehydrate carried that ring back as a TODO; a push or spoken alarm would have announced the host's own housekeeping.
+
+A preview slot is excluded because its retarget interrupts and retypes in place (Preview slot), which a Session with no shell cannot take. A Tool with an auxiliary helper keeps a second shell alive anyway, and killing the parent would orphan it.
+
 ## Naming
 
 A name read from a browser or terminal passes through whatever those show mid-switch: the dev-server chip that named serving Tools went chip, bare address, chip on every preview retarget (`docs/specs/layout.rationale.md` → Pane header, 2026-09-29). The dedupe key is what tells two Surfaces of one Tool apart, so its elements beyond the name are what the name adds; an absolute path's last component is usually the checkout or file it scopes to.

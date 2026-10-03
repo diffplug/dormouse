@@ -1,4 +1,5 @@
 import { getToolDirty } from '../../lib/tool-dirty-store';
+import { isToolReaped } from '../../lib/tool-reap-store';
 import type { TransferredTools } from './tool-transfer';
 import { getToolAnnounce } from '../../lib/tool-announce-store';
 import type { ToolAnnounce } from 'dor-tools-lib/osc';
@@ -86,7 +87,10 @@ export async function prepareWorkspaceTransfer(
   // Window could ask about are gone, and the target restores from this record.
   const session = await deps.serialize({ probeCwd: true });
   const allIds = deps.surfaceIds();
-  const panes = allIds.filter(deps.hasTerminal);
+  // A reaped Tool has no PTY to hand over or mark: it travels in the record
+  // alone, reaped (docs/specs/dor-tool.md -> Reaping).
+  const reaped = allIds.filter((id) => deps.hasTerminal(id) && isToolReaped(id));
+  const panes = allIds.filter((id) => deps.hasTerminal(id) && !isToolReaped(id));
   // A helper rides with its source, in that order: the target's resume needs the
   // parent in the same slice to re-parent it.
   const helpers = new Map<string, string>();
@@ -119,7 +123,7 @@ export async function prepareWorkspaceTransfer(
       // a popped-out one would keep streaming here and both would auto-revert
       // the same window.
       for (const id of allIds) disposeAgentBrowserSurfaceController(id);
-      for (const id of terminalIds) releaseSession(id);
+      for (const id of [...terminalIds, ...reaped]) releaseSession(id);
     },
   };
 }

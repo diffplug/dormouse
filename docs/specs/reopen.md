@@ -24,7 +24,7 @@ A reopened Surface is rebuilt from its record: a new Session and process. "Lost"
 | `iframe` browser | Same URL, reloaded | Live page state | No |
 | Touched or running shell, any other Tool (`builtin:code` included), a built-in whose command has ended, agent-browser / playwright, a dirty or unreported Tool | — | — | Yes |
 
-A read-only `builtin:file` view reports clean as it starts (`docs/specs/dor-tools-builtin.md`). Repo Tools join the table only through `docs/specs/dor-tool.md` → "Dehydrate and rehydrate" (D2), which supplies the safe-to-stop contract args alone do not.
+A read-only `builtin:file` view reports clean as it starts (`docs/specs/dor-tools-builtin.md`). Repo Tools join the table only through `docs/specs/dor-tool.md` → "Reaping", which supplies the safe-to-stop contract args alone do not.
 
 ## The reopen record
 

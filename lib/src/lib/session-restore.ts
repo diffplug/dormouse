@@ -4,7 +4,22 @@ import type { PlatformAdapter } from './platform/types';
 import { PLATFORM_STRING } from './platform';
 import { buildShellCommandForKind, shellCommandKind } from 'dor/commands/shell-quote';
 import { carrySurfaceRefs, readPersistedSession, type PersistedDoor, type PersistedPane, type PersistedSession, type PersistedSurfaceRefs } from './session-types';
-import { getDefaultShellOpts, restoreBrowserSurfaceTodo, restoreTerminal } from './terminal-registry';
+import { createReapedTerminal, getDefaultShellOpts, restoreBrowserSurfaceTodo, restoreTerminal, setTerminalActivity } from './terminal-registry';
+import { markToolReaped } from './tool-reap-store';
+
+/** Whether `pane` is a Tool saved while reaped, which this host restores with
+ *  no process (`docs/specs/dor-tool.md` -> Reaping). */
+export function isReapedToolPane(platform: PlatformAdapter, pane: PersistedPane): boolean {
+  return platform.reapsTools === true && pane.surfaceType === 'tool' && pane.tool?.reaped === true;
+}
+
+/** Rebuild a reaped Tool's Session with no PTY, its alert shown and kept for
+ *  the rehydrate's spawn, which starts it from bare args when it is seen. */
+export function restoreReapedTool(pane: PersistedPane): void {
+  createReapedTerminal(pane.id, { cwd: pane.cwd, title: pane.title, shell: getDefaultShellOpts()?.shell, untouched: pane.untouched });
+  if (pane.alert) setTerminalActivity(pane.id, pane.alert);
+  markToolReaped(pane.id, { payload: null, cwd: pane.cwd, alert: pane.alert ?? null });
+}
 
 export interface RestoredSession {
   paneIds: string[];
@@ -139,7 +154,13 @@ export function restoreSession(platform: PlatformAdapter, sources: RestoreSource
   // agent is still Live and has nothing to resume.
   const recoveryCommands = platform.getRecoveryCommands?.() ?? {};
 
-  for (const pane of panes) restorePane(pane, recoveryCommands[pane.id] ?? null);
+  for (const pane of panes) {
+    if (isReapedToolPane(platform, pane)) {
+      restoreReapedTool(pane);
+      continue;
+    }
+    restorePane(pane, recoveryCommands[pane.id] ?? null);
+  }
 
   return {
     // Without a usable layout Wall seeds terminal metadata for each id. Browser

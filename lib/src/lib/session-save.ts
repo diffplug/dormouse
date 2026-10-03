@@ -5,6 +5,7 @@ import type { PlatformAdapter } from './platform/types';
 import { browserPersistedPane, isToolCommandArgv, readPersistedSession, toPersistedAlertState, type PersistedDoor, type PersistedPane, type PersistedSession, type PersistedSurfaceRefs, type PersistedToolMetadata, type PersistedSurfaceType } from './session-types';
 import { getActivity, getLivePersistedAlertState, getTerminalPaneState, isUntouched } from './terminal-registry';
 import { UNNAMED_PANEL_TITLE } from './terminal-state';
+import { isToolReaped } from './tool-reap-store';
 
 /**
  * Where a save reads its previous record from and where it writes the new one.
@@ -151,7 +152,8 @@ export function assemblePersistedSession(
     };
     if (pane.surfaceType !== 'tool') return terminalPane;
     const command = toolCommandFromParams(pane.params) ?? previousPane?.command;
-    const tool = toolMetadataFromParams(pane.params) ?? previousPane?.tool;
+    const metadata = toolMetadataFromParams(pane.params) ?? previousPane?.tool;
+    const tool = metadata && withReapedMark(metadata, isToolReaped(pane.id));
     return {
       ...terminalPane,
       surfaceType: 'tool',
@@ -195,6 +197,15 @@ export async function saveSession(
 export function toolCommandFromParams(params: Record<string, unknown> | undefined): string | null {
   const command = params?.command;
   return typeof command === 'string' && command.trim() ? command : null;
+}
+
+/** The live reaped mark, never the payload, which stays in memory
+ *  (`docs/specs/dor-tool.md` -> Reaping). */
+function withReapedMark(tool: PersistedToolMetadata, reaped: boolean): PersistedToolMetadata {
+  if ((tool.reaped === true) === reaped) return tool;
+  const next = { ...tool };
+  delete next.reaped;
+  return reaped ? { ...next, reaped: true } : next;
 }
 
 function toolMetadataFromParams(params: Record<string, unknown> | undefined): PersistedToolMetadata | null {

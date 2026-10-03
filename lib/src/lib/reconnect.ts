@@ -5,7 +5,7 @@ import type { PlatformAdapter, PtyInfo } from './platform/types';
 import { restoreBrowserSurfaceTodo, resumeTerminal } from './terminal-registry';
 import type { TerminalResumeInfo } from './terminal-lifecycle';
 import { carrySurfaceRefs, readPersistedSession, type PersistedDoor, type PersistedSession, type PersistedSurfaceRefs } from './session-types';
-import { persistedLathLayout, restoreSession } from './session-restore';
+import { isReapedToolPane, persistedLathLayout, restoreReapedTool, restoreSession } from './session-restore';
 
 export interface ReconnectResult {
   paneIds: string[];
@@ -199,7 +199,7 @@ export function resumeOrRestoreFrom(
 
   const mine = live.ptys.filter((pty) =>
     opts.ptyIds === undefined || opts.ptyIds.has(pty.id) || opts.claimUnowned?.has(pty.id));
-  const resumed = mine.length > 0 ? resumeLivePtys(mine, live.replay, saved, opts.terminalGrids) : null;
+  const resumed = mine.length > 0 ? resumeLivePtys(platform, mine, live.replay, saved, opts.terminalGrids) : null;
   if (resumed) return resumed;
 
   const restored = restoreSession(platform, { savedSession: saved });
@@ -211,6 +211,7 @@ export function resumeOrRestoreFrom(
 }
 
 function resumeLivePtys(
+  platform: PlatformAdapter,
   ptyList: PtyInfo[],
   replayBuffer: Map<string, string>,
   saved: PersistedSession | null,
@@ -244,14 +245,16 @@ function resumeLivePtys(
     ids.push(pty.id);
     if (pty.helper) adoptOrphanedHelper(pty.id);
   }
+  // A reaped Tool has no PTY to list, yet is no stale pane: it keeps its
+  // place, with no process, until it is shown (docs/specs/dor-tool.md -> Reaping).
+  const reaped = (saved?.panes ?? []).filter((pane) => !ptyById.has(pane.id) && isReapedToolPane(platform, pane));
   // Pull saved visible/doors state so a resume (e.g. after panel
   // close/reopen) restores splits and doors instead of stacking every live
   // PTY into one tab group.
-  return getSavedResumePlan(saved, ids) ?? {
-    paneIds: ids,
-    doors: [],
-    ...carrySurfaceRefs(saved),
-  };
+  const plan = getSavedResumePlan(saved, ids, reaped.map((pane) => pane.id));
+  if (!plan) return { paneIds: ids, doors: [], ...carrySurfaceRefs(saved) };
+  for (const pane of reaped) restoreReapedTool(pane);
+  return plan;
 }
 
 function getSavedPaneResumeInfo(saved: PersistedSession | null, liveIds: string[]): Map<string, { title: string; untouched: boolean }> {
@@ -267,13 +270,13 @@ function getSavedPaneResumeInfo(saved: PersistedSession | null, liveIds: string[
   return result;
 }
 
-function getSavedResumePlan(saved: PersistedSession | null, liveIds: string[]): ReconnectResult | null {
+function getSavedResumePlan(saved: PersistedSession | null, liveIds: string[], reapedIds: readonly string[]): ReconnectResult | null {
   if (!saved || !Array.isArray(saved.panes)) return null;
 
   // Reuse persisted visible/doors state only when every live PTY is covered
   // by the saved session. Extra saved panes can be stale, but extra live panes
-  // have no reliable saved layout position.
-  const liveSet = new Set(liveIds);
+  // have no reliable saved layout position. A reaped Tool counts as live.
+  const liveSet = new Set([...liveIds, ...reapedIds]);
   const savedSet = new Set(saved.panes.map((p) => p.id));
   if (!liveIds.every((id) => savedSet.has(id))) return null;
 

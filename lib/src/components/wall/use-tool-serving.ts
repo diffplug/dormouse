@@ -42,7 +42,8 @@ function toolNameFromParams(params: Record<string, unknown>): string | null {
   return typeof name === 'string' ? name : null;
 }
 
-function toolLeaves(lath: LathWallEngine, doors: DooredItem[]): ToolLeaf[] {
+/** Every Tool leaf this Wall owns, visible or Doored. */
+export function toolLeaves(lath: LathWallEngine, doors: readonly DooredItem[]): ToolLeaf[] {
   const leaves: ToolLeaf[] = [];
   for (const pane of lath.listPanes()) {
     if (isToolParams(pane.params)) leaves.push({ id: pane.id, params: pane.params });

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createLathWallEngine, persistableLeafMeta, toolLeafMeta } from './lath-wall-engine';
 import { captureToolParams, restoreToolParams } from './tool-transfer';
 import type { RestoredSession } from '../../lib/session-restore';
+import { beginToolStop, endToolStop } from '../../lib/tool-reap-store';
 
 const params = {
   surfaceType: 'tool', command: 'pnpm storybook', toolRender: 'agent-browser-screencast',
@@ -62,5 +63,13 @@ describe('Tool Workspace transfer', () => {
     const plan: RestoredSession = { paneIds: ['shell'], doors: [{ id: 'shell', title: 'Shell', component: 'terminal' }] };
     restoreToolParams(plan, { shell: params, missing: params });
     expect(plan.doors).toEqual([{ id: 'shell', title: 'Shell', component: 'terminal' }]);
+  });
+
+  it('refuses to move a Tool while it is stopping, whose PTY this webview is about to kill', () => {
+    const lath = engine();
+    beginToolStop('tool');
+    expect(() => captureToolParams(lath, ['tool'])).toThrow(/stopping/);
+    endToolStop('tool');
+    expect(() => captureToolParams(lath, ['tool'])).not.toThrow();
   });
 });

@@ -77,6 +77,7 @@ import { listenerUrlsByPort } from './port-url';
 import { becomeToolMeta, dorDirectionForEdge, toolLeafMeta, type LathWallEngine } from './lath-wall-engine';
 import type { WallNav } from './keyboard/types';
 import { toolCommandFromParams } from '../../lib/session-save';
+import { rehydrateTool } from './tool-reaper';
 import { VIEW_ERROR_ARGV } from 'dor-tools-builtin/file-viewer-format';
 import type { LeafMeta } from '../../lib/lath/persistence';
 import type { DooredItem } from './wall-types';
@@ -1550,7 +1551,9 @@ export function useDorControl({
         });
         if (decision.kind === 'existing') {
           if (decision.pin) previewSlot.pin(decision.id);
-          respondStanding('existing', decision.id, revealSurface(decision.id, { focusNeutral: decision.quiet }));
+          // A reaped match starts again (docs/specs/dor-tool.md -> Reaping).
+          const rehydrated = rehydrateTool(lath, decision.id) !== null;
+          respondStanding(rehydrated ? 'adopted' : 'existing', decision.id, revealSurface(decision.id, { focusNeutral: decision.quiet }));
           return;
         }
         if (decision.kind === 'retarget') {
@@ -1610,9 +1613,18 @@ export function useDorControl({
             }
             // A dedicated Surface whose command exited is unambiguously free,
             // so re-run in place rather than splitting — where `dor ensure`,
-            // aimed at arbitrary shells, would stop matching.
+            // aimed at arbitrary shells, would stop matching. A reaped one has
+            // no shell to type into: it rehydrates (docs/specs/dor-tool.md -> Reaping).
             const idle = matchState.currentCommand === null;
-            if (idle) {
+            const rehydrated = rehydrateTool(lath, match.id);
+            // Held like any launch until the command reports, so a queued
+            // request for this key finds it running.
+            if (rehydrated) {
+              if (await waitForNewToolCommand(match.id, rehydrated.command, rehydrated.cwd, detail.signal) !== 'ready') {
+                detail.respond({ ok: false, error: `surface '${surfaceRefForId(match.id)}' command did not restart` });
+                return;
+              }
+            } else if (idle) {
               const restarted = await restartSurfaceInPlace(match.id, matchedCommand, matchedCwd, detail.signal, { acceptCompletedRun: true });
               if (!restarted.ok) {
                 detail.respond({

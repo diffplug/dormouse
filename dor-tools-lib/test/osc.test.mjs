@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import { openSequence, parseToolAnnounce, parseToolOpen, parseToolState, serveSequence, stateSequence } from '../dist/osc.js';
+import { dehydrateSequence, DEHYDRATE_ENV, openSequence, parseToolAnnounce, parseToolDehydrate, parseToolOpen, parseToolState, readDehydrated, serveSequence, stateSequence, TOOL_PAYLOAD_LIMIT } from '../dist/osc.js';
 
 const serve = payload => `serve;${JSON.stringify(payload)}`;
 /** What a host's parser receives: the sequence without `ESC ] 367 ;` and its terminator. */
@@ -24,8 +24,8 @@ describe('parseToolAnnounce', () => {
     assert.deepEqual(parseToolAnnounce(serve({ port: 4242 })), { port: 4242, name: null, key: null, dehydrate: false, persist: null });
   });
 
-  test('ignores every verb but serve — dehydrate is D2 and half-honoring it is worse than dropping it', () => {
-    assert.equal(parseToolAnnounce('dehydrate;{"v":1}'), null);
+  test('ignores every verb but serve', () => {
+    assert.equal(parseToolAnnounce('dehydrate;{"v":1,"state":{"port":1}}'), null);
     assert.equal(parseToolAnnounce('progress;{"v":1}'), null);
   });
 
@@ -67,7 +67,12 @@ describe('parseToolAnnounce', () => {
 
   test('returns null when nothing actionable is stated', () => {
     assert.equal(parseToolAnnounce(serve({ v: 1 })), null);
-    assert.equal(parseToolAnnounce(serve({ dehydrate: true })), null);
+    assert.equal(parseToolAnnounce(serve({ dehydrate: false, persist: 'sometimes' })), null);
+  });
+
+  test('reads a reaping declaration alone as an announcement, selecting no port', () => {
+    assert.deepEqual(parseToolAnnounce(serve({ dehydrate: true, v: 1 })), { port: null, name: null, key: null, dehydrate: true, persist: null });
+    assert.deepEqual(parseToolAnnounce(serve({ persist: 'never' })), { port: null, name: null, key: null, dehydrate: false, persist: 'never' });
   });
 });
 
@@ -136,4 +141,62 @@ test('serve paths reject C1 controls that could terminate or inject OSCs', () =>
     assert.throws(() => serveSequence({ port: 1, path }), RangeError);
     assert.equal(parseToolAnnounce(serve({ port: 1, path }))?.path, undefined);
   }
+});
+
+describe('dehydrate', () => {
+  test('round-trips a Tool state through the sequence, the host parse, and the environment', () => {
+    const state = { expanded: ['src', 'src/lib'], selected: 'README.md' };
+    const parsed = parseToolDehydrate(content(dehydrateSequence(state)));
+    assert.ok(parsed);
+    // The host hands the payload back verbatim: it never re-serializes the Tool's JSON.
+    assert.equal(parsed.payload, JSON.stringify({ v: 1, state }));
+    assert.deepEqual(readDehydrated(parsed.payload), state);
+    assert.equal(DEHYDRATE_ENV, 'DORMOUSE_DEHYDRATE');
+  });
+
+  test('refuses an unknown version, a missing or null state, another verb, and malformed JSON', () => {
+    for (const raw of ['{"v":2,"state":1}', '{"state":1}', '{"v":1}', '{"v":1,"state":null}', '[1]', 'not json', '']) {
+      assert.equal(parseToolDehydrate(`dehydrate;${raw}`), null, raw);
+      assert.equal(readDehydrated(raw), null, raw);
+    }
+    assert.equal(parseToolDehydrate('serve;{"v":1,"state":1}'), null);
+  });
+
+  test('a missing, garbage, or oversized environment value reads as none: start from args', () => {
+    assert.equal(readDehydrated(undefined), null);
+    assert.equal(readDehydrated('{"v":1,"state":'), null);
+    const oversized = JSON.stringify({ v: 1, state: 'x'.repeat(TOOL_PAYLOAD_LIMIT) });
+    assert.equal(readDehydrated(oversized), null);
+    assert.equal(parseToolDehydrate(`dehydrate;${oversized}`), null);
+  });
+
+  test('escapes the C1 controls JSON leaves raw, so a state string cannot end the sequence', () => {
+    const state = { name: 'a\u009cb\u009d\u007fc' };
+    const sequence = dehydrateSequence(state);
+    assert.ok(!/[\u007f-\u009f]/.test(sequence), JSON.stringify(sequence));
+    assert.deepEqual(readDehydrated(parseToolDehydrate(content(sequence)).payload), state);
+  });
+
+  test('the encoder refuses what the host would drop', () => {
+    assert.throws(() => dehydrateSequence(null), TypeError);
+    assert.throws(() => dehydrateSequence(undefined), TypeError);
+    assert.throws(() => dehydrateSequence('x'.repeat(TOOL_PAYLOAD_LIMIT)), RangeError);
+    // Falsy but present states are states.
+    for (const state of [0, false, '', []]) assert.deepEqual(readDehydrated(JSON.stringify({ v: 1, state })), state);
+  });
+});
+
+describe('serveSequence reaping options', () => {
+  test('announces dehydrate and persist beside the port, or alone', () => {
+    assert.deepEqual(parseToolAnnounce(content(serveSequence({ port: 6006, dehydrate: true }))), { port: 6006, name: null, key: null, dehydrate: true, persist: null });
+    assert.deepEqual(parseToolAnnounce(content(serveSequence({ dehydrate: true }))), { port: null, name: null, key: null, dehydrate: true, persist: null });
+    assert.equal(parseToolAnnounce(content(serveSequence({ port: 1, persist: 'never' })))?.persist, 'never');
+  });
+
+  test('refuses an announcement that states nothing, or a path without a port', () => {
+    assert.throws(() => serveSequence({}), RangeError);
+    assert.throws(() => serveSequence({ dehydrate: false }), RangeError);
+    assert.throws(() => serveSequence({ path: '/x', dehydrate: true }), RangeError);
+    assert.throws(() => serveSequence({ port: 1, persist: 'sometimes' }), RangeError);
+  });
 });
