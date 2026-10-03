@@ -15,7 +15,7 @@ import type { DooredItem } from './wall-types';
 
 const reaper = vi.hoisted(() => ({
   stopTool: vi.fn(async () => true),
-  rehydrateTool: vi.fn(() => true),
+  rehydrateTool: vi.fn(() => null),
   toolReapIdleMs: () => 10_000,
 }));
 vi.mock('./tool-reaper', () => reaper);

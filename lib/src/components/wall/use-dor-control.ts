@@ -1613,7 +1613,11 @@ export function useDorControl({
             // aimed at arbitrary shells, would stop matching. A reaped one has
             // no shell to type into: it rehydrates (docs/specs/dor-tool.md -> Reaping).
             const idle = matchState.currentCommand === null;
-            if (!rehydrateTool(lath, match.id) && idle) {
+            const rehydrated = rehydrateTool(lath, match.id);
+            // Held like any launch until the command reports, so a queued
+            // request for this key finds it running.
+            if (rehydrated) await waitForNewToolCommand(match.id, rehydrated.command, rehydrated.cwd, detail.signal);
+            else if (idle) {
               const restarted = await restartSurfaceInPlace(match.id, matchedCommand, matchedCwd, detail.signal, { acceptCompletedRun: true });
               if (!restarted.ok) {
                 detail.respond({

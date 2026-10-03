@@ -1705,7 +1705,9 @@ export function Wall({
           if (closingWorkspaceRef.current || isWorkspaceTransferPending(effectiveWorkspaceId)
             || !lath.getMeta(match.id) || lath.isDying(match.id) || isClosingSurface(match.id)) return;
           const state = getTerminalPaneState(match.id);
-          if (!rehydrateTool(lath, match.id) && state.currentCommand === null) {
+          const rehydrated = rehydrateTool(lath, match.id);
+          if (rehydrated) await waitForNewToolCommand(match.id, rehydrated.command, rehydrated.cwd);
+          else if (state.currentCommand === null) {
             const matchedCommand = lath.getMeta(match.id)?.params?.command;
             const command = typeof matchedCommand === 'string' ? matchedCommand : toolRunCommand(resolved.run, match.id);
             const restarted = await restartSurfaceInPlace(match.id, command, state.cwd?.path ?? cwd, undefined, { acceptCompletedRun: true });

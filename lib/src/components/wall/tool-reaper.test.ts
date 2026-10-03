@@ -206,14 +206,14 @@ describe('rehydrateTool', () => {
 
   it('spawns a fresh shell with the payload, in the run directory, and types the command at its prompt', async () => {
     const lath = await reaped();
-    expect(rehydrateTool(lath, ID)).toBe(true);
+    expect(rehydrateTool(lath, ID)).toEqual({ command: COMMAND, cwd: '/repo' });
     expect(spawns.at(-1)).toMatchObject({ dehydrate: PAYLOAD, cwd: '/repo' });
     expect(registry.get(ID)?.exited).toBe(false);
     await prompt();
     expect(writes).toEqual([`${COMMAND}\r`]);
     // One rehydrate per reap: the payload goes to one run alone.
     expect(isToolReaped(ID)).toBe(false);
-    expect(rehydrateTool(lath, ID)).toBe(false);
+    expect(rehydrateTool(lath, ID)).toBeNull();
   });
 
   it('starts from bare args when no payload was captured', async () => {
