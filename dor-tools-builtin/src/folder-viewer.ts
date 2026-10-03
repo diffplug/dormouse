@@ -4,7 +4,7 @@ import type { IncomingMessage } from 'node:http';
 import { join } from 'node:path';
 import { resolveBinaryPath, spawnAndCapture } from 'dor-lib-common';
 import { openSequence, validToolOpenPath } from 'dor-tools-lib/osc';
-import { folderViewerPage } from './folder-viewer-page.js';
+import { FOLDER_CSP, folderViewerPage } from './folder-viewer-page.js';
 import { announceViewer, HttpError, isInsideRoot, pathSegments, readJsonBody, reply, startCapabilityViewer } from './viewer-server.js';
 
 /** Entries one listing returns. */
@@ -14,7 +14,6 @@ const READ_LIMIT = 100_000;
 const BODY_LIMIT = 8 * 1024;
 const GIT_TIMEOUT_MS = 5000;
 const GIT_OUTPUT_LIMIT = 4 * 1024 * 1024;
-const CSP = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'";
 
 export type FolderEntryKind = 'dir' | 'file' | 'other';
 export interface FolderEntry { name: string; kind: FolderEntryKind; ignored: boolean }
@@ -134,7 +133,7 @@ export async function startFolderViewer(input: string, { open }: { open: FolderO
     return path;
   }
 
-  const viewer = await startCapabilityViewer({ csp: CSP, post: true, unavailable: 'Folder viewer unavailable',
+  const viewer = await startCapabilityViewer({ csp: FOLDER_CSP, post: true, unavailable: 'Folder viewer unavailable',
     route: async (req, res, prefix) => {
       const url = new URL(req.url!, 'http://localhost');
       const name = url.pathname.startsWith(prefix) ? url.pathname.slice(prefix.length) : undefined;

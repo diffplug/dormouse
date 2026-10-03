@@ -1,5 +1,6 @@
-import { basename } from 'node:path';
-import { escapeHtml } from './viewer-server.js';
+import { escapeHtml, lastSegment } from './html.js';
+
+export const FOLDER_CSP = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'";
 
 const STYLE = `
 :root{color-scheme:light dark}
@@ -293,7 +294,7 @@ const SCRIPT = `(function () {
 /** The folder viewer's one page. Entry names reach the DOM only through
  * `textContent`; the root's path is escaped into the markup. */
 export function folderViewerPage(root: string): string {
-  const name = escapeHtml(basename(root) || root);
+  const name = escapeHtml(lastSegment(root) || root);
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>${name}</title><style>${STYLE}</style></head>`
     + `<body><header><span id="root" title="${escapeHtml(root)}">${name}</span>`
     + '<button type="button" id="show" aria-pressed="true" title="Show ignored files">Ignored</button><button type="button" id="collapse" aria-label="Collapse all folders" title="Collapse all folders"><svg viewBox="0 0 16 16"><path d="M3 1h11l1 1v10h-1V2H3zM1 4h11l1 1v9l-1 1H1l-1-1V5zm0 1v9h11V5zm2 4V8h7v1z"/></svg></button><button type="button" id="refresh" aria-label="Refresh" title="Refresh"><svg viewBox="0 0 16 16"><path d="M13 2v4H9l1.5-1.5A4.5 4.5 0 1 0 12.4 9h1A5.5 5.5 0 1 1 11.2 3.8z"/></svg></button></header>'

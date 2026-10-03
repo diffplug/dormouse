@@ -9,6 +9,9 @@ import type {
   IdFormat,
   ParseResult,
 } from './types.js';
+import { escapeControl } from './terminal-text.js';
+
+export { printable, stripControls } from './terminal-text.js';
 
 export const stringParser = (input: string): string => input;
 
@@ -45,20 +48,6 @@ export function parseNonNegativeInt(input: string, flag: string): number {
 
 export function renderJson(payload: unknown): string {
   return `${JSON.stringify(payload, null, 2)}\n`;
-}
-
-const TERMINAL_CONTROLS = /[\x00-\x1f\x7f-\x9f]/g;
-const escapeControl = (char: string) => `\\u${char.charCodeAt(0).toString(16).padStart(4, '0')}`;
-
-/** Repo text relayed by the host, bound for a terminal: C0, DEL, and C1
- *  controls become `\u` escapes, so the text cannot drive the terminal. */
-export function printable(text: string): string {
-  return text.replace(TERMINAL_CONTROLS, escapeControl);
-}
-
-/** The same controls removed rather than escaped. */
-export function stripControls(text: string): string {
-  return text.replace(TERMINAL_CONTROLS, '');
 }
 
 /** `renderJson` for repo text: `JSON.stringify` escapes only C0, so DEL and C1

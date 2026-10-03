@@ -8,10 +8,8 @@ import { CONTROLS, viewerTitle } from './file-viewer-format.js';
 import { allowsFileViewerRequest } from './file-viewer-loopback-guard.js';
 
 const TEXT = 'text/plain; charset=utf-8';
-const HTML_ESCAPES: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 
-/** `s` as HTML text or a quoted attribute value. */
-export const escapeHtml = (s: string): string => s.replace(/[&<>"']/g, c => HTML_ESCAPES[c]!);
+export { escapeHtml } from './html.js';
 
 /** Thrown by a route to answer with `status` and `message` as plain text. */
 export class HttpError extends Error {

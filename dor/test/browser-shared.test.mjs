@@ -6,7 +6,7 @@ import { build } from 'esbuild';
 // admit a runtime Node dependency here.
 test('shared CLI modules bundle for a browser without Node shims', async () => {
   await build({
-    entryPoints: ['commands/types', 'commands/shell-quote', 'protocol']
+    entryPoints: ['commands/types', 'commands/shell-quote', 'commands/open-picker', 'protocol']
       .map(name => fileURLToPath(new URL(`../src/${name}.ts`, import.meta.url))),
     outdir: 'browser-shared-test',
     bundle: true,

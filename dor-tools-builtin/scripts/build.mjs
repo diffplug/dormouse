@@ -1,13 +1,11 @@
 import { build } from 'esbuild';
-import { rm } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
+import { buildViewerAssets } from './build-viewer.mjs';
 
 // Runs after tsc: the self-contained Node runtime replaces tsc's re-export
 // `dist/runtime.js`, and the Monaco and Markdown pages land beside it in
 // `dist/viewer`, whose files `viewerAsset` serves by name.
 const absWorkingDir = fileURLToPath(new URL('../', import.meta.url));
-// Chunk names carry content hashes; a stale one would still be served.
-await rm(new URL('../dist/viewer/', import.meta.url), { recursive: true, force: true });
 await Promise.all([
   build({
     absWorkingDir,
@@ -16,19 +14,5 @@ await Promise.all([
     target: 'node24',
     banner: { js: "import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);" },
   }),
-  build({
-    absWorkingDir,
-    entryPoints: { editor: 'viewer/editor.ts', 'editor.worker': 'node_modules/monaco-editor/esm/vs/editor/editor.worker.js' },
-    outdir: 'dist/viewer', bundle: true, format: 'esm', platform: 'browser',
-    target: 'es2022', minify: true, loader: { '.ttf': 'file' }, assetNames: '[name]',
-  }),
-  // Mermaid and CodeMirror's languages load as split chunks on first use.
-  build({
-    absWorkingDir,
-    entryPoints: { markdown: 'viewer/markdown.tsx' },
-    outdir: 'dist/viewer', bundle: true, format: 'esm', platform: 'browser', splitting: true,
-    target: 'es2022', minify: true, jsx: 'automatic', chunkNames: 'markdown-[hash]',
-    loader: { '.ttf': 'file', '.woff': 'file', '.woff2': 'file' }, assetNames: 'markdown-[name]-[hash]',
-    define: { 'process.env.NODE_ENV': '"production"' },
-  }),
+  buildViewerAssets(fileURLToPath(new URL('../dist/viewer/', import.meta.url))),
 ]);

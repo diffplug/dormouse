@@ -5,7 +5,7 @@
  */
 import type { OpenHandlersResponse, PickerTerminal } from './types.js';
 import { fuzzyMatch, Ranker } from './fuzzy.js';
-import { printable, stripControls } from './shared.js';
+import { printable, stripControls } from './terminal-text.js';
 
 export interface PickerChoice {
   /** Relative to the listing directory, `/`-separated. */
