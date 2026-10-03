@@ -76,10 +76,11 @@ holding the room to no deadline.
   parsing it**; both ends read the room through `parseOneTimeFrame`. A room
   forwards at most `MAX_ONE_TIME_FORWARDED` (32) frames, both directions
   together.
-- **Timings.** An unused link lives `ONE_TIME_LINK_TTL_MS` (the pairing TTL,
-  5 minutes). The join and the confirmation finish by its expiry, and the
-  direct path's `DIRECT_ONLY_DEADLINE_MS` (30 s) after the outcome ends
-  inside the room's hard deadline, `expiresAt + ONE_TIME_EXPIRY_GRACE_MS` (45 s).
+- **Timings.** An unused link lives `ONE_TIME_LINK_TTL_MS`. The join and the
+  confirmation finish by its expiry, and the direct path's
+  `DIRECT_ONLY_DEADLINE_MS` after the outcome ends inside the room's hard
+  deadline, `expiresAt + ONE_TIME_EXPIRY_GRACE_MS`. Values:
+  `docs/specs/remote-security-model.md` -> "Burrow bounds".
 - **The ceremony's messages are padded `control` messages** on the Noise session
   (`docs/specs/relay.md` -> "E2E framing"): `OneTimeRequestV1 {code, label}`
   phone → Burrow, the page sending a `label` from `ONE_TIME_DEVICE_LABELS`, then one
