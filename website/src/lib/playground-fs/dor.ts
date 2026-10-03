@@ -5,14 +5,17 @@
  * a built-in Tool runs, which announce virtual viewers instead of ports.
  */
 import { runFilePicker } from "dor/commands/open-picker";
-import { printable, renderJson, renderToolResponse, renderVersion, renderVersionJson } from "dor/commands/terminal-text";
+import { errorLine, printable, renderJson, renderToolResponse, renderVersion, renderVersionJson } from "dor/commands/terminal-text";
+import { getHelpTarget, isPassthroughHelpInvocation, normalizeVersionAlias } from "dor/help-route";
 import type { PickerTerminal, ToolSurfaceResponse } from "dor/commands/types";
 import { canonicalDorVerb, SURFACE_CONTROL_METHODS } from "dor/protocol";
+import { isBrowserProvider } from "dor-lib-common/browser-providers";
 import { builtinHandler, VIEW_ERROR_ARGV } from "dor-tools-builtin/file-viewer-format";
 import { viewerAnnouncement } from "dor-tools-builtin/viewer-http";
 import type { FakePtyAdapter } from "dormouse-lib/lib/platform/fake-adapter";
 import { cancelDorControlRequest, dispatchDorControlRequest } from "dormouse-lib/lib/platform/dor-control-dispatch";
 import type { ToolControlResult, ToolHostRequest } from "dormouse-lib/lib/platform/tool-types";
+import changelog from "../../data/changelog.json";
 import type { InteractiveProgram } from "../tutorial-shell";
 import { HOME, type VirtualFs } from "./vfs";
 import { DOR_COMMANDS, dorHelp, dorSkill } from "./dor-reference";
@@ -34,51 +37,36 @@ export interface PlaygroundDorOptions {
 /** Ports the virtual viewers report: never a real listener, only distinct per viewer. */
 let nextPort = 40000;
 
-const errorLine = (message: string) => `Error: ${printable(message)}\r\n`;
+const errorText = (message: string) => `${errorLine(printable(message))}\r\n`;
 const crlf = (text: string) => text.replace(/\r?\n/g, "\r\n");
-
-const HELP_FLAGS = new Set(["--help", "-h"]);
-/** Commands whose arguments belong to another CLI: only a bare `--help` is dor's. */
-const PASSTHROUGH = new Set(["agent-browser", "playwright"]);
 const UNSUPPORTED = "UNSUPPORTED IN PLAYGROUND";
 
-/** The help `dor <argv>` asks for, as `dor/src/cli.ts` routes it: `""` for
- * `dor --help`, a command's name, or null for no help. */
-function helpTarget(argv: string[]): string | null {
-  const [first, second] = argv;
-  if (first === undefined || (argv.length === 1 && HELP_FLAGS.has(first))) return "";
-  if (first === "help") return second && DOR_COMMANDS.has(canonicalDorVerb(second)) ? canonicalDorVerb(second) : "";
-  const command = canonicalDorVerb(first);
-  if (!DOR_COMMANDS.has(command)) return null;
-  const help = PASSTHROUGH.has(command) ? argv.length === 2 && HELP_FLAGS.has(second) : argv.some((arg) => HELP_FLAGS.has(arg));
-  return help ? command : null;
-}
+/** The commands the playground prints for itself, each taking at most `--json`. */
+const SERVED = new Map<string, (json: boolean) => string | Promise<string>>([
+  ["version", (json) => {
+    // The latest released Dormouse, which is what the site serves.
+    const metadata = { version: changelog.releases[0]?.version ?? "unknown", commit: "playground", commitsSinceVersion: 0 };
+    return json ? renderVersionJson(metadata) : renderVersion(metadata);
+  }],
+  ["skill", async (json) => (json ? renderJson({ markdown: await dorSkill() }) : dorSkill())],
+]);
 
-/** The real CLI's verbs where the playground can serve them; the rest of its
- * commands fail as unsupported here rather than unknown. */
+/** The real CLI's verbs where the playground can serve them, routed as
+ * `dor/src/cli.ts` routes them; its other commands fail as unsupported here
+ * rather than unknown. */
 export function startPlaygroundDor(options: PlaygroundDorOptions): InteractiveProgram {
-  const argv = options.args.length === 1 && (options.args[0] === "--version" || options.args[0] === "-v") ? ["version"] : options.args;
-  const help = helpTarget(argv);
-  if (help !== null) return new DorText(options, async () => [0, await dorHelp(help)]);
-  const [first = "", ...rest] = argv;
-  const verb = canonicalDorVerb(first);
+  const [first, ...rest] = normalizeVersionAlias(options.args);
+  const argv = first === undefined ? [] : [canonicalDorVerb(first), ...rest];
+  const verb = argv[0] ?? "";
+  const help = isBrowserProvider(verb) && !isPassthroughHelpInvocation(argv) ? undefined : getHelpTarget(argv, (name) => DOR_COMMANDS.has(name));
+  if (help) return new DorText(options, 0, () => dorHelp(help.scope === "root" ? "" : help.commandName));
   if (verb === "open") return new DorOpen(options, rest);
   if (builtinHandler("argv", verb) || verb === VIEW_ERROR_ARGV) return new DorViewer(options, verb, rest);
+  const served = SERVED.get(verb);
   const json = rest.length === 1 && rest[0] === "--json";
-  if ((verb === "version" || verb === "skill") && (rest.length === 0 || json)) {
-    return new DorText(options, async () => [0, verb === "version" ? await version(json) : json ? renderJson({ markdown: await dorSkill() }) : await dorSkill()]);
-  }
-  const message = !DOR_COMMANDS.has(verb) ? `unknown command '${first}'`
-    : verb === "version" || verb === "skill" ? `dor ${[verb, ...rest].join(" ")} is ${UNSUPPORTED}`
-    : `dor ${verb} is ${UNSUPPORTED}`;
-  return new DorText(options, async () => [1, errorLine(message)]);
-}
-
-/** `dor version`: the latest released Dormouse, which is what the site serves. */
-async function version(json: boolean): Promise<string> {
-  const { releases } = (await import("../../data/changelog.json")).default as { releases: { version: string }[] };
-  const metadata = { version: releases[0]?.version ?? "unknown", commit: "playground", commitsSinceVersion: 0 };
-  return json ? renderVersionJson(metadata) : renderVersion(metadata);
+  if (served && (rest.length === 0 || json)) return new DorText(options, 0, () => served(json));
+  const message = DOR_COMMANDS.has(verb) ? `dor ${(served ? argv : [verb]).join(" ")} is ${UNSUPPORTED}` : `unknown command '${first}'`;
+  return new DorText(options, 1, () => errorText(message));
 }
 
 /** A run that finishes once: `cleanup`, then its last output and exit code. */
@@ -105,12 +93,12 @@ abstract class DorProgram implements InteractiveProgram {
   }
 }
 
-/** Prints text once it loads, then exits with its code. */
+/** Prints text, once it loads, then exits with `exitCode`. */
 class DorText extends DorProgram {
-  constructor(options: PlaygroundDorOptions, private readonly text: () => Promise<[exitCode: number, text: string]>) { super(options); }
+  constructor(options: PlaygroundDorOptions, private readonly exitCode: number, private readonly text: () => string | Promise<string>) { super(options); }
   start(): void {
-    this.text().then(([exitCode, text]) => this.finish(exitCode, crlf(text)), (error: unknown) => {
-      this.finish(1, errorLine(error instanceof Error ? error.message : String(error)));
+    Promise.resolve().then(this.text).then((text) => this.finish(this.exitCode, crlf(text)), (error: unknown) => {
+      this.finish(1, errorText(error instanceof Error ? error.message : String(error)));
     });
   }
 }
@@ -146,7 +134,7 @@ class DorOpen extends DorProgram {
 
   start(): void {
     const flags = parseOpenArgs(this.args);
-    if (flags instanceof Error) { this.finish(1, errorLine(flags.message)); return; }
+    if (flags instanceof Error) { this.finish(1, errorText(flags.message)); return; }
     if (flags.path !== undefined) { this.open(flags, flags.path, flags.tool); return; }
     const { adapter, terminalId, cwd, fs, toolControl } = this.options;
     const terminal: PickerTerminal = {
@@ -190,7 +178,7 @@ class DorOpen extends DorProgram {
       },
     }, ({ ok, result, error }) => {
       this.requestId = null;
-      if (!ok) { this.finish(1, errorLine(error ?? "request failed")); return; }
+      if (!ok) { this.finish(1, errorText(error ?? "request failed")); return; }
       const response = result as ToolSurfaceResponse;
       const warnings = (response.warnings ?? []).map((warning) => `${printable(warning)}\r\n`).join("");
       this.finish(0, warnings + crlf(renderToolResponse(response, flags.json)));
@@ -219,7 +207,7 @@ class DorViewer extends DorProgram {
   start(): void {
     const { adapter, terminalId, viewers, cwd, relay } = this.options;
     const viewer = viewers.open(terminalId, this.verb, this.args, cwd);
-    if (viewer instanceof Error) { this.finish(1, errorLine(viewer.message)); return; }
+    if (viewer instanceof Error) { this.finish(1, errorText(viewer.message)); return; }
     this.token = viewer.token;
     relay().then(() => {
       if (this.finished) return;
@@ -228,7 +216,7 @@ class DorViewer extends DorProgram {
       adapter.setOpenPorts(terminalId, [{ protocol: "tcp", family: "IPv4", address: "127.0.0.1", port, pid: 1, processName: "dor" }]);
       adapter.sendOutput(terminalId, viewerAnnouncement({ port, path: viewer.path }, viewer.target));
     }, (error: unknown) => {
-      this.finish(1, errorLine(error instanceof Error ? error.message : String(error)));
+      this.finish(1, errorText(error instanceof Error ? error.message : String(error)));
     });
   }
 

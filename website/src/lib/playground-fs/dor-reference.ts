@@ -17,8 +17,9 @@ export const DOR_COMMANDS: ReadonlySet<string> = new Set([...HELP.keys()].filter
 
 /** `dor <command> --help`; `""` is `dor --help`. */
 export async function dorHelp(command: string): Promise<string> {
-  const markdown = await HELP.get(command)!();
-  return `${/```text\n([\s\S]*?)\n```/.exec(markdown)?.[1] ?? markdown}\n`;
+  const text = /```text\n([\s\S]*?)\n```/.exec(await HELP.get(command)!())?.[1];
+  if (text === undefined) throw new Error(`malformed help snapshot for '${command || "dor"}'`);
+  return `${text}\n`;
 }
 
 /** What `dor skill` prints. */

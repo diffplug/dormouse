@@ -28,6 +28,7 @@ import { versionCommand } from './commands/version.js';
 import { workspaceCommand } from './commands/workspace.js';
 import { errorLine, errorMessage, fail } from './commands/shared.js';
 import { canonicalDorVerb } from './protocol.js';
+import { getHelpTarget, isPassthroughHelpInvocation, normalizeVersionAlias, type HelpTarget } from './help-route.js';
 import type {
   CliEnv,
   CliOptions,
@@ -247,7 +248,7 @@ export async function runCli(rawArgv: string[], options: CliOptions = {}): Promi
     return { stdout: await runErrorViewer(argv[1], argv[2]), stderr: '', exitCode: 0 };
   }
 
-  const helpTarget = getHelpTarget(argv);
+  const helpTarget = getHelpTarget(argv, isCommandName);
   const [commandName, ...args] = rewriteHelpArgv(argv);
 
   // Some commands need argv validated *before* stricli parses it (the `--` command
@@ -284,48 +285,11 @@ function loadBuiltinViewers(): Promise<typeof import('dor-tools-builtin/runtime'
   return import(new URL('./builtin/runtime.js', import.meta.url).href);
 }
 
-/** Map a bare top-level `--version`/`-v` to the `version` command, as most CLIs
- * accept it (dor has no conflicting `-v`). Only the sole-argument form is
- * rewritten; a trailing `--version` on a subcommand stays that command's concern. */
-function normalizeVersionAlias(argv: string[]): string[] {
-  if (argv.length === 1 && (argv[0] === '--version' || argv[0] === '-v')) {
-    return ['version'];
-  }
-  return argv;
-}
-
 /** Each browser provider's passthrough, run under its id as the command. */
 const BROWSER_CLIS: Record<BrowserAutomationProvider, (args: string[], options: CliOptions) => Promise<CliResult>> = {
   'agent-browser': runAgentBrowserCli,
   playwright: runPlaywrightCli,
 };
-
-function isPassthroughHelpInvocation(argv: string[]): boolean {
-  return argv.length === 2 && (argv[1] === '--help' || argv[1] === '-h');
-}
-
-type HelpTarget =
-  | { scope: 'root' }
-  | { scope: 'command'; commandName: string };
-
-function getHelpTarget(argv: string[]): HelpTarget | undefined {
-  if (argv[0] === 'help') {
-    const subject = argv[1];
-    return subject && isCommandName(subject)
-      ? { scope: 'command', commandName: subject }
-      : { scope: 'root' };
-  }
-  if (argv.length === 0 || (argv.length === 1 && (argv[0] === '--help' || argv[0] === '-h'))) {
-    return { scope: 'root' };
-  }
-
-  const commandName = argv[0];
-  if (commandName && isCommandName(commandName) && argv.some((arg) => arg === '--help' || arg === '-h')) {
-    return { scope: 'command', commandName };
-  }
-
-  return undefined;
-}
 
 function rewriteHelpArgv(argv: string[]): string[] {
   if (argv[0] !== 'help') return argv;

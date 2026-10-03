@@ -9,9 +9,9 @@ import type {
   IdFormat,
   ParseResult,
 } from './types.js';
-import { escapeControl, renderJson } from './terminal-text.js';
+import { errorLine, escapeControl, renderJson } from './terminal-text.js';
 
-export { printable, renderJson } from './terminal-text.js';
+export { errorLine, printable, renderJson } from './terminal-text.js';
 
 export const stringParser = (input: string): string => input;
 
@@ -19,10 +19,6 @@ export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/** The one spelling of a `dor` error line, shared by every path that prints one. */
-export function errorLine(message: string): string {
-  return `Error: ${message}`;
-}
 
 export function fail(message: string): CliResult {
   return { exitCode: 1, stdout: '', stderr: `${errorLine(message)}\n` };

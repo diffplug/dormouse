@@ -61,7 +61,6 @@ describe("playground dor open", () => {
     expect(output()).toContain("Error: --preview cannot be combined with --fresh");
     expect(onExit).toHaveBeenCalledWith(1);
   });
-
 });
 
 describe("playground dor's other commands", () => {
@@ -73,22 +72,28 @@ describe("playground dor's other commands", () => {
   }
 
   it("prints the real CLI's help, routed as the CLI routes it", async () => {
-    for (const args of [[], ["--help"], ["help"]]) {
+    // As the CLI routes it, `help` takes the command's own name, not its alias.
+    for (const args of [[], ["--help"], ["help"], ["help", "o"]]) {
       expect(await ran(args)).toMatchObject({ exitCode: 0, text: expect.stringContaining("USAGE\r\n  dor split [") });
     }
-    for (const args of [["open", "--help"], ["help", "o"], ["o", "README.md", "-h"]]) {
+    for (const args of [["open", "--help"], ["help", "open"], ["o", "README.md", "-h"]]) {
       expect((await ran(args)).text).toContain("USAGE\r\n  dor open [--json]");
     }
     expect((await ran(["agent-browser", "--help"])).text).toContain("USAGE\r\n  dor agent-browser");
   });
 
-  it("serves version and skill, and refuses the rest of the CLI as unsupported", async () => {
+  it("serves version and skill", async () => {
     expect((await ran(["--version"])).text).toMatch(/^dor \d+\.\d+\.\d+ \[playground\]\r\n$/);
     expect(JSON.parse((await ran(["skill", "--json"])).text).markdown).toContain("dor ensure");
-    expect(await ran(["split", "--", "ls"])).toEqual({ exitCode: 1, text: "Error: dor split is UNSUPPORTED IN PLAYGROUND\r\n" });
-    expect((await ran(["agent-browser", "open", "x", "--help"])).text).toContain("dor agent-browser is UNSUPPORTED IN PLAYGROUND");
-    expect((await ran(["skill", "--install"])).text).toContain("dor skill --install is UNSUPPORTED IN PLAYGROUND");
-    expect(await ran(["bogus"])).toEqual({ exitCode: 1, text: "Error: unknown command 'bogus'\r\n" });
+  });
+
+  it.each([
+    [["split", "--", "ls"], "Error: dor split is UNSUPPORTED IN PLAYGROUND"],
+    [["agent-browser", "open", "x", "--help"], "Error: dor agent-browser is UNSUPPORTED IN PLAYGROUND"],
+    [["skill", "--install"], "Error: dor skill --install is UNSUPPORTED IN PLAYGROUND"],
+    [["bogus"], "Error: unknown command 'bogus'"],
+  ])("refuses %j", async (args, line) => {
+    expect(await ran(args)).toEqual({ exitCode: 1, text: `${line}\r\n` });
   });
 });
 
