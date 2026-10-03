@@ -770,10 +770,9 @@ export function attachRouter(
           const data = previouslyOwned.has(id)
             ? ptyManager.getScrollback(id)
             : ptyManager.getReplayData(id);
-          if (data) {
-            const replay: ExtensionMessage = { type: 'pty:replay', id, data };
-            post(replay);
-          }
+          // One per listed PTY, empty or not: the collector finishes on a
+          // replay for each, and would otherwise wait out its timeout.
+          post({ type: 'pty:replay', id, data: data ?? '' } satisfies ExtensionMessage);
         }
         for (const [id] of reconnectable) {
           const alertState = alertManager.getState(id);

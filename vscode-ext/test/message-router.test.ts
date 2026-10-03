@@ -602,6 +602,27 @@ it('leaves a disposed view\'s PTYs for the view, not a re-initializing panel', (
   }
 });
 
+// The shared collector finishes on one replay per listed PTY
+// (collectLivePtys), so an empty buffer still gets one rather than leaving the
+// reconnect to wait out its timeout.
+it('replays every listed PTY at a reconnect, an empty buffer included', () => {
+  const view = fakeWebview();
+  const viewRouter = router.attachRouter(view.channel, { reconnect: true, adoptOrphans: true });
+  view.send({ type: 'dormouse:init' });
+  view.send({ type: 'pty:spawn', id: 'quiet-pty', options: { cwd: '/repo' } });
+  viewRouter.dispose();
+
+  const reopened = fakeWebview();
+  const reopenedRouter = router.attachRouter(reopened.channel, { reconnect: true, adoptOrphans: true });
+  try {
+    reopened.send({ type: 'dormouse:init' });
+    expect(reopened.posted.filter((message) => message.type === 'pty:replay'))
+      .toEqual([{ type: 'pty:replay', id: 'quiet-pty', data: '' }]);
+  } finally {
+    reopenedRouter.dispose();
+  }
+});
+
 /**
  * A Session's alert state follows its PTY here, whoever asked
  * (docs/specs/alert.md): started over, and seeded, at the spawn; given the
