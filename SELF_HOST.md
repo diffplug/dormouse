@@ -550,9 +550,9 @@ Source of truth: `deploy/local/install-macos.sh`,
 ### Mechanism map
 
 Service and install root are in the table at the top of this file; logs and
-service-definition paths are under "What the installer does". Both Windows
-deviations exist because the macOS mechanism has no unprivileged Windows
-equivalent (rationale).
+service-definition paths are under "What the installer does". The Windows
+`KeepAlive` and `current`/`previous` rows deviate because the macOS mechanism
+has no unprivileged Windows equivalent (rationale).
 
 | | macOS | Windows | Linux |
 | --- | --- | --- | --- |
