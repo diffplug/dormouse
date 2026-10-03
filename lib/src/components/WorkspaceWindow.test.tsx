@@ -9,7 +9,7 @@ import { StrictMode, act } from 'react';
 import { flushSync } from 'react-dom';
 import { type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { SURFACE_CONTROL_METHODS } from 'dor/protocol';
+import { SURFACE_CONTROL_METHODS, WINDOW_CONTROL_METHODS } from 'dor/protocol';
 import { moveSurface } from './wall/surface-move';
 import { recordToolDirty, resetToolDirty } from '../lib/tool-dirty-store';
 import { browserLeafMeta, toolLeafMeta } from './wall/lath-wall-engine';
@@ -35,6 +35,8 @@ import { getWorkspaceSurfacesSnapshot, resetWorkspaceSurfaces } from '../lib/wor
 import { isWorkspaceTransferPending, previousWorkspaceSession, publishWorkspaceSession, resetWindowSessionAggregator, seedWindowSession, setWorkspaceTransferPending } from '../lib/window-session-aggregator';
 import { getWorkspaceUiSnapshot, requestConfirmation, resetWorkspaceUi, settleConfirmation } from '../lib/workspace-ui-store';
 import { resetTodoSpotlight } from '../lib/todo-spotlight';
+import { _reopenRecordsForTesting, _resetReopenStackForTesting } from '../lib/reopen-stack';
+import { reopenClosed } from './wall/reopen';
 import {
   closeWorkspace,
   createWorkspace,
@@ -65,6 +67,7 @@ beforeEach(() => {
   resetWindowSessionAggregator();
   resetWorkspaceBootPlans();
   resetTodoSpotlight();
+  _resetReopenStackForTesting();
   fake = new FakePtyAdapter();
   setPlatform(fake);
   harness = mountWallHarness();
@@ -1273,5 +1276,68 @@ describe('Surface moves between Workspaces', () => {
     expect(getWallHandle(source)!.ownsSurface('frame')).toBe(true);
     await act(async () => { settleConfirmation(getWorkspaceUiSnapshot().confirmation!, false); expect(await pending).toBeNull(); });
     expect(getWallHandle(source)!.ownsSurface('frame')).toBe(true);
+  });
+});
+
+describe('Reopen a closed Workspace', () => {
+  const WEB = { surfaceType: 'browser', renderMode: 'iframe', url: 'http://localhost:5173/docs' };
+
+  /** ws-2 holds one iframe browser: every member reopenable. */
+  async function renderWithBrowserWorkspace(): Promise<string> {
+    const first = getActiveWorkspaceId();
+    setWorkspaceBootPlan('ws-2', { restoredLathLayout: {
+      version: 1, tree: leafTree('web'), leafMeta: { web: browserLeafMeta('docs', WEB) },
+    } });
+    createWorkspace({ id: 'ws-2', name: 'docs', activate: false });
+    await render(<><WorkspaceStrip /><WorkspaceWindow initialPaneIds={['pane-a']} /></>);
+    return first;
+  }
+
+  it('closes a Workspace holding only reopenable members unasked and reopens it whole, at its slot', async () => {
+    const first = await renderWithBrowserWorkspace();
+    createWorkspace({ id: 'ws-3', activate: false });
+    await flush();
+    await act(async () => { requestWorkspaceClose('ws-2'); });
+    await flush();
+    expect(getWorkspaceUiSnapshot().confirmation).toBeNull();
+    expect(getWorkspacesSnapshot().workspaces.map(ws => ws.id)).toEqual([first, 'ws-3']);
+    expect(_reopenRecordsForTesting().map(record => record.kind)).toEqual(['workspace']);
+
+    await act(async () => { reopenClosed({ gesture: true }); });
+    await flush();
+    const ids = getWorkspacesSnapshot().workspaces.map(ws => ws.id);
+    const reopened = ids[1];
+    expect(ids).toEqual([first, reopened, 'ws-3']);
+    expect(reopened).not.toBe('ws-2');
+    expect(getActiveWorkspaceId()).toBe(reopened);
+    expect(getWorkspacesSnapshot().workspaces[1].name).toBe('docs');
+    const [leaf] = leafIdsIn(reopened);
+    expect(leaf).not.toBe('web');
+    expect(getWallHandle(reopened)!.serializeNow().lathLayout).toMatchObject({ leafMeta: { [leaf]: { params: WEB } } });
+  });
+
+  it('answers dor reopen with the Workspace it reopened, leaving the active one active', async () => {
+    const first = await renderWithBrowserWorkspace();
+    await act(async () => { expect(await closeWorkspaceWithSurfaces('ws-2', 'silent')).toBeNull(); });
+    await flush();
+    let response: { ok: boolean; result?: { kind: string; workspaceId: string; workspaceRef: string } } | undefined;
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
+        method: WINDOW_CONTROL_METHODS.reopen, params: {}, respond: (r: typeof response) => { response = r; },
+      } }));
+    });
+    await flush();
+    const reopened = getWorkspacesSnapshot().workspaces[1].id;
+    expect(response).toEqual({ ok: true, result: { status: 'reopened', kind: 'workspace', workspaceId: reopened, workspaceRef: workspaceStore.workspaceRefFor(reopened) } });
+    expect(getActiveWorkspaceId()).toBe(first);
+  });
+
+  it('leaves no record when a member made the close confirm', async () => {
+    await renderWithBrowserWorkspace();
+    vi.spyOn(getWallHandle('ws-2')!, 'needsCloseConfirmation').mockReturnValue(true);
+    await act(async () => { expect(await closeWorkspaceWithSurfaces('ws-2', 'silent')).toBeNull(); });
+    await flush();
+    expect(getWorkspacesSnapshot().workspaces.map(ws => ws.id)).not.toContain('ws-2');
+    expect(_reopenRecordsForTesting()).toHaveLength(0);
   });
 });

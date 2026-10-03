@@ -1091,7 +1091,7 @@ export function Wall({
   // --- Reopen (docs/specs/reopen.md) ---
   pushSurfaceRecordRef.current = (id: string) => {
     const meta = lath.getMeta(id);
-    const pane = persistence.serializePane(id);
+    const [pane] = persistence.serializeReported(member => member === id).panes;
     if (!meta || !pane) return;
     const doorIndex = doorsRef.current.findIndex(door => door.id === id);
     const token = doorIndex >= 0 ? doorsRef.current[doorIndex].token : removeFromTree(lath.store.getSnapshot().tree, id).token;
@@ -1911,6 +1911,7 @@ export function Wall({
     },
     reopenSurface,
     serializeNow: persistence.serializeNow,
+    serializeReported: () => persistence.serializeReported(),
 
     surfaceIds: memberSurfaceIds,
     ownsSurface,

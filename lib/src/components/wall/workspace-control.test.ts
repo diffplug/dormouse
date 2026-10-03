@@ -260,7 +260,7 @@ describe('workspace.close', () => {
     const refused = request('workspace.close', { workspace: 'workspace:2' });
     await handleWorkspaceControl(refused);
     expect(answer(refused)).toBe(
-      "workspace 'workspace:2' holds running or touched Surfaces; pass --force to close it",
+      "workspace 'workspace:2' holds Surfaces Reopen cannot restore; pass --force to close it",
     );
     expect(closeAll).not.toHaveBeenCalled();
     expect(getWorkspacesSnapshot().workspaces).toHaveLength(2);

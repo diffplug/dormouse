@@ -37,6 +37,8 @@ export interface WallHandle {
   reopenSurface(record: SurfaceReopenRecord, focus: boolean): { id: string; ref: string };
   /** This Workspace's record now, with no cwd probe. */
   serializeNow(): PersistedSession;
+  /** The same, each cwd as its Session last reported it: a reopen record. */
+  serializeReported(): PersistedSession;
   workspaceId: WorkspaceId;
   /** The Wall's member Surfaces: visible panes ∪ Doors. */
   surfaceIds(): string[];
@@ -137,6 +139,7 @@ export function stubWallHandle(workspaceId: WorkspaceId, overrides: Partial<Wall
     showNotice: () => {},
     reopenSurface: () => { throw new Error('Reopen is unavailable'); },
     serializeNow: () => ({ version: 3, panes: [] }),
+    serializeReported: () => ({ version: 3, panes: [] }),
     surfaceIds: () => [],
     ownsSurface: () => false,
     iframeSurfaceRefs: () => [],

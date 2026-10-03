@@ -1,6 +1,6 @@
 import type { LeafMeta } from './lath/persistence';
 import type { RestoreToken } from './lath/ops';
-import type { PersistedPane, WorkspaceId } from './session-types';
+import type { PersistedPane, PersistedWorkspace, WorkspaceId } from './session-types';
 
 /**
  * What a close leaves for Reopen (`docs/specs/reopen.md`): one record per
@@ -21,7 +21,16 @@ export interface SurfaceReopenRecord {
   placement: { kind: 'pane'; token: RestoreToken } | { kind: 'door'; index: number; token: unknown };
 }
 
-export type ReopenRecord = SurfaceReopenRecord;
+/** A closed Workspace: its record as a save would publish it, and its slot. */
+export interface WorkspaceReopenRecord {
+  kind: 'workspace';
+  closedAt: number;
+  workspace: PersistedWorkspace;
+  /** Its strip position at the close. */
+  index: number;
+}
+
+export type ReopenRecord = SurfaceReopenRecord | WorkspaceReopenRecord;
 
 const CAPACITY = 20;
 const records: ReopenRecord[] = [];

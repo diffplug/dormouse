@@ -339,7 +339,7 @@ function fixtureClient(surfacesFixture = fixtureSurfaces) {
       this.requests.push({ method: 'closeWorkspace', request });
       // Mirror the host: a Workspace holding work refuses without --force.
       if (!request.force) {
-        throw new Error("workspace 'workspace:2' holds running or touched Surfaces; pass --force to close it");
+        throw new Error("workspace 'workspace:2' holds Surfaces Reopen cannot restore; pass --force to close it");
       }
       return { status: 'closed', workspaceId: 'workspace-2b1c', workspaceRef: 'workspace:2', name: 'build' };
     },
