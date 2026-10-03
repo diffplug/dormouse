@@ -102,6 +102,8 @@ export async function stopTool(lath: LathWallEngine, id: string): Promise<boolea
   beginToolStop(id);
   let payload: string | null;
   try {
+    // The stop is the host's own doing: never a command-exit ring or a push.
+    getPlatform().alertSilenceRun?.(id);
     getPlatform().writePty(id, '\x03');
     await waitFor(() => !registry.has(id) || getTerminalPaneState(id).currentCommand === null, TOOL_STOP_GRACE_MS);
     await new Promise(resolve => setTimeout(resolve, STOP_SETTLE_MS));

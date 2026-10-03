@@ -739,6 +739,20 @@ describe('AlertManager in isolation', () => {
     expect(second?.id).not.toBe(first!.id);
   });
 
+  // `docs/specs/dor-tool.md` -> Reaping: the host stops the run itself.
+  it('rings nothing for a run a reap silenced, keeping the TODO owed', () => {
+    const id = 'command-exit-reaped';
+
+    armCommandExit(manager, id);
+    manager.toggleTodo(id);
+    manager.silenceRun(id);
+    expect(manager.getState(id).status).not.toBe('COMMAND_EXIT_ARMED');
+
+    finishCommand(manager, id);
+    manager.onExit(id, 130);
+    expect(manager.getState(id)).toMatchObject({ status: 'WATCHING_DISABLED', todo: true });
+  });
+
   it('finishes an armed command-exit watch when the PTY exits without commandFinish', () => {
     const id = 'command-exit-pty-exit';
 

@@ -123,7 +123,7 @@ A **reap** stops an idle Tool's Session, shell included; **rehydrate** starts it
 
 **Must reap only after 30 minutes continuously out of sight** — Doored, in an inactive Workspace, or in a hidden webview — **with no PTY output** (rationale): never on the minimize or switch itself, and never for memory pressure. The stop:
 
-1. Write Ctrl+C to the PTY, the graceful-stop signal on every platform; ConPTY delivers it as `CTRL_C_EVENT` (rationale).
+1. Silence the run's command-exit alert, then write Ctrl+C to the PTY, the graceful-stop signal on every platform; ConPTY delivers it as `CTRL_C_EVENT` (rationale).
 2. Keep the last `dehydrate` payload the run emits from then until the kill; none earlier counts.
 3. Kill the PTY at the prompt or after a grace, whichever comes first, so a hung Tool blocks nothing.
 

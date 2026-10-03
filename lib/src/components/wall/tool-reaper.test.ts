@@ -132,7 +132,10 @@ describe('stopTool', () => {
     const lath = servingTool();
     // Emitted before the stop: not the run's word on how to restore it.
     emit(`\x1b]367;dehydrate;{"v":1,"state":"early"}\x07`);
+    const silenced = vi.spyOn(fake, 'alertSilenceRun');
     const stopped = stopTool(lath, ID);
+    // Before the interrupt: the stop's own exit is no news, never a ring or a push.
+    expect(silenced).toHaveBeenCalledWith(ID);
     expect(writes).toEqual(['\x03']);
     expect(isToolStopping(ID)).toBe(true);
     emit(`\x1b]367;dehydrate;${PAYLOAD}\x07`);

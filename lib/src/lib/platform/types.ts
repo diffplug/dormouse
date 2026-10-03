@@ -396,6 +396,9 @@ export interface PlatformAdapter {
   alertAcknowledge(id: string): void;
   alertToggleTodo(id: string): void;
   alertClearTodo(id: string): void;
+  /** A reap is about to stop the Session's run: its end rings nothing, and its
+   *  TODO stays (`docs/specs/dor-tool.md` -> Reaping). */
+  alertSilenceRun?(id: string): void;
   /**
    * Park until the Session finishes what it is doing (`docs/specs/alert.md` ->
    * Await), for `dor await`. The host owns the wake condition, the grace

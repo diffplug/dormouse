@@ -74,6 +74,8 @@ The environment carries the payload rather than the typed command: a `VAR=value 
 
 The payload stays in memory because the snapshot holds structure, never process state (`docs/specs/transport.md` → What is persisted), and a payload written there would outlive the run that vouched for it. The `reaped` mark does persist: without it a resume drops a pane whose PTY is gone as a stale save, and a cold restore would boot every reaped Tool of every hidden Workspace at once.
 
+The stop silences the run's command-exit watch first. Observed in the innerdogfood harness (2026-10-03): a folder viewer launched while engaged had its exit seen, so the reap's Ctrl+C rang `COMMAND_EXIT` while it sat Doored, and the rehydrate carried that ring back as a TODO; a push or spoken alarm would have announced the host's own housekeeping.
+
 A preview slot is excluded because its retarget interrupts and retypes in place (Preview slot), which a Session with no shell cannot take. A Tool with an auxiliary helper keeps a second shell alive anyway, and killing the parent would orphan it.
 
 ## Naming

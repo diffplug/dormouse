@@ -21,6 +21,7 @@ export type AlertClientMethods = Required<Pick<
   | 'alertAcknowledge'
   | 'alertToggleTodo'
   | 'alertClearTodo'
+  | 'alertSilenceRun'
   | 'alertAwait'
   | 'onAlertState'
   | 'onWatchedCommands'
@@ -84,6 +85,7 @@ export function createAlertClient(send: (command: AlertCommand) => void): AlertC
     alertAcknowledge: (id) => send({ op: 'acknowledge', id }),
     alertToggleTodo: (id) => send({ op: 'toggleTodo', id }),
     alertClearTodo: (id) => send({ op: 'clearTodo', id }),
+    alertSilenceRun: (id) => send({ op: 'silenceRun', id }),
 
     /**
      * Parked in the host, which owns the wake condition and the ceiling; only
