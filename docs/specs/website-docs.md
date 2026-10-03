@@ -216,8 +216,8 @@ links carry it. **Never give a page a slug that `website/src/routes.ts` or
 
 **These pages follow the reader's theme; the rest of the site does not.** Only
 `DocsLayout` adds the `docs-themed` body class, which redefines the site's
-`--color-*` tokens from the applied `--vscode-*`; picker placement is
-[theme.md](./theme.md) → Where the user picks a theme.
+`--color-*` tokens from the applied `--vscode-*`; the picker is theme.md's
+`compact` variant ([theme.md](./theme.md) → Where the user picks a theme).
 
 **Prose links take the picked theme's `accent`, contrast-corrected — never
 brand caramel, never `--vscode-textLink-foreground`** (rationale). Caramel
