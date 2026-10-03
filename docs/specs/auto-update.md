@@ -47,7 +47,7 @@ Update status is a text notice in the Baseboard, the always-visible bottom strip
 
 "Install when I quit" is the approval; "Changelog" opens `https://dormouse.sh/changelog/after/<getVersion()>`. **"Restart now" calls `quit_restart`** (`docs/specs/standalone.md` → "Restart"): the quit installs on its way out, then relaunches. **A refusal turns a still-shown `downloaded` into `restart-refused`, carrying the host's reason and never "Restart now"**, since the refusal holds until relaunch; the update stays pending. ` · ` separates the message from the action labels.
 
-**Every state is dismissible via [×].** Dismissing an unapproved `available` notice approves nothing (a later Check now may offer it again); dismissing `downloading`, `downloaded`, or `restart-refused` hides the notice only and **never cancels** an approved download/install.
+**Every state is dismissible via [×].** Dismissing an unapproved `available` notice approves nothing (Check now may offer it again); dismissing `downloading`, `downloaded`, or `restart-refused` hides the notice only and **never cancels** an approved download/install.
 
 **The notice carries the Baseboard's own text style (`text-sm font-mono text-muted`), in its single right-hand `ml-auto` cluster** — clear of doors and the shortcut hint.
 
