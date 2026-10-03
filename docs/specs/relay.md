@@ -617,8 +617,8 @@ stateDiagram-v2
   connecting --> disconnected: close unopened
   connected --> disconnected: other close
   disconnected --> connecting: backoff
-  disconnected --> removed: probe 401
-  disconnected --> notEntitled: probe 403
+  disconnected --> removed: unopened, probe 401
+  disconnected --> notEntitled: unopened, probe 403
   connected --> displaced: 4000 WS_CLOSE_BURROW_REPLACED
   connected --> removed: 4001 WS_CLOSE_BURROW_REVOKED
   connected --> notEntitled: 4002 WS_CLOSE_BURROW_NOT_ENTITLED, Hosted only
@@ -632,8 +632,8 @@ takes the slot back.
 
 - **A socket that never opened is probed before its next backoff**, a refused
   upgrade being only an error event: one `GET /api/push/devices` as the Burrow,
-  its 401 `UNAUTHORIZED_ERROR` or `UNKNOWN_BURROW_TOKEN_ERROR`, its 403
-  `NOT_ENTITLED_ERROR`. **Only a 2xx, 401, or 403 spends the failure streak's
+  whose 401 `UNAUTHORIZED_ERROR` or `UNKNOWN_BURROW_TOKEN_ERROR`, or 403
+  `NOT_ENTITLED_ERROR`, latches. **Only a 2xx, 401, or 403 spends the failure streak's
   one probe** (rationale).
 - **A latched `removed` or `not-entitled` Burrow (`relayRefuses`) asks its Relay
   nothing more**: no push, device list, or setup code.
