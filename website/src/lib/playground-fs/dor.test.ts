@@ -4,7 +4,6 @@ import { FakePtyAdapter } from "dormouse-lib/lib/platform/fake-adapter";
 import { serveSequence } from "dor-tools-lib/osc";
 import { startPlaygroundDor } from "./dor";
 import { createPlaygroundFs, PLAYGROUND_CWD } from "./snapshot";
-import { playgroundToolControl } from "./tool-control";
 import { PlaygroundViewers } from "./viewers";
 
 interface ControlDetail { surfaceId: string; method: string; params: Record<string, unknown>; respond(result: unknown): void }
@@ -20,7 +19,7 @@ function harness(args: string[], relay: () => Promise<unknown> = () => Promise.r
   const viewers = new PlaygroundViewers(fs, (id, data) => adapter.sendOutput(id, data), location.origin);
   const onExit = vi.fn();
   const program = startPlaygroundDor({
-    adapter, terminalId: "t", args, cwd: PLAYGROUND_CWD, fs, viewers, relay, toolControl: playgroundToolControl(fs), onExit,
+    adapter, terminalId: "t", args, cwd: PLAYGROUND_CWD, fs, viewers, relay, onExit,
   });
   return { adapter, program, onExit, output: () => output };
 }
@@ -41,10 +40,11 @@ let stopListening = () => {};
 afterEach(() => stopListening());
 
 describe("playground dor open", () => {
-  it("sends the real CLI's surface.tool request and prints its answer", () => {
+  it("sends the real CLI's surface.tool request and prints its answer", async () => {
     const requests = answerControl({ status: "takeover", surfaceRef: "surface:1", command: "dor __view-file /x" });
     const { program, onExit, output } = harness(["o", "--preview", "README.md"]);
     program.start();
+    await vi.waitFor(() => expect(onExit).toHaveBeenCalled());
     expect(requests).toMatchObject([{
       surfaceId: "t", method: "surface.tool",
       params: { file: "README.md", fresh: false, minimized: false, cwd: PLAYGROUND_CWD, preview: true },
@@ -87,8 +87,15 @@ describe("playground dor's other commands", () => {
     expect(JSON.parse((await ran(["skill", "--json"])).text).markdown).toContain("dor ensure");
   });
 
+  it("runs the real CLI's commands that need no Node, over the page", async () => {
+    const requests = answerControl({ status: "created", surfaceId: "s3", surfaceRef: "surface:3", direction: "right", minimized: false, command: "ls" });
+    const { exitCode, text } = await ran(["split", "--right", "--", "ls"]);
+    expect(requests).toMatchObject([{ surfaceId: "t", method: "surface.split", params: { direction: "right", command: ["ls"] } }]);
+    expect({ exitCode, text }).toMatchObject({ exitCode: 0, text: expect.stringContaining("surface:3") });
+    expect(await ran(["split", "--left", "--right"])).toMatchObject({ exitCode: 1, text: expect.stringMatching(/^Error: /) });
+  });
+
   it.each([
-    [["split", "--", "ls"], "Error: dor split is UNSUPPORTED IN PLAYGROUND"],
     [["agent-browser", "open", "x", "--help"], "Error: dor agent-browser is UNSUPPORTED IN PLAYGROUND"],
     [["skill", "--install"], "Error: dor skill --install is UNSUPPORTED IN PLAYGROUND"],
     [["bogus"], "Error: unknown command 'bogus'"],

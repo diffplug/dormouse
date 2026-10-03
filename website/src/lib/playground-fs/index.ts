@@ -15,15 +15,14 @@ import { PlaygroundViewers } from "./viewers";
 export function installPlaygroundFs(adapter: FakePtyAdapter) {
   const fs = createPlaygroundFs();
   const viewers = new PlaygroundViewers(fs, (id, data) => adapter.sendOutput(id, data), location.origin);
-  const toolControl = playgroundToolControl(fs);
-  adapter.toolControl = toolControl;
+  adapter.toolControl = playgroundToolControl(fs);
   adapter.createIframeProxyUrl = playgroundIframeUrl;
   let relay: Promise<() => void> | undefined;
   const connect = () => relay ??= connectViewerRelay(viewers);
   return {
     shellFs: { fs, cwd: PLAYGROUND_CWD },
     startDor: (terminalId: string, args: string[], cwd: string, onExit: (exitCode?: number) => void): InteractiveProgram =>
-      startPlaygroundDor({ adapter, terminalId, args, cwd, fs, viewers, relay: connect, toolControl, onExit }),
+      startPlaygroundDor({ adapter, terminalId, args, cwd, fs, viewers, relay: connect, onExit }),
     dispose: () => {
       delete adapter.toolControl;
       delete adapter.createIframeProxyUrl;

@@ -1,22 +1,35 @@
 /**
  * The desktop playground's `dor` (docs/specs/tutorial.md -> Playground
- * filesystem): `open` / `o` against the snapshot, through the same
- * `surface.tool` request the real CLI sends, and the private `__view-*` entries
- * a built-in Tool runs, which announce virtual viewers instead of ports.
+ * filesystem): the real CLI's commands that need no Node, run through its own
+ * stricli application over `PlaygroundControlClient`; `open` / `o` with the
+ * real picker over the snapshot; and the private `__view-*` entries a built-in
+ * Tool runs, which announce virtual viewers instead of ports.
  */
 import { runFilePicker } from "dor/commands/open-picker";
 import { errorLine, printable, renderJson, renderToolResponse, renderVersion, renderVersionJson } from "dor/commands/terminal-text";
 import { getHelpTarget, isPassthroughHelpInvocation, normalizeVersionAlias } from "dor/help-route";
-import type { PickerTerminal, ToolSurfaceResponse } from "dor/commands/types";
-import { canonicalDorVerb, SURFACE_CONTROL_METHODS } from "dor/protocol";
+import { buildDorApplication, runDorCommand } from "dor/cli-app";
+import { appCommand } from "dor/commands/app";
+import { awaitCommand } from "dor/commands/await";
+import { ensureCommand } from "dor/commands/ensure";
+import { iframeCommand } from "dor/commands/iframe";
+import { killCommand } from "dor/commands/kill";
+import { listCommand } from "dor/commands/list";
+import { moveCommand } from "dor/commands/move";
+import { readCommand } from "dor/commands/read";
+import { sendCommand } from "dor/commands/send";
+import { splitCommand } from "dor/commands/split";
+import { toolCommand } from "dor/commands/tool";
+import type { PickerTerminal } from "dor/commands/types";
+import { workspaceCommand } from "dor/commands/workspace";
+import { canonicalDorVerb } from "dor/protocol";
 import { isBrowserProvider } from "dor-lib-common/browser-providers";
 import { builtinHandler, VIEW_ERROR_ARGV } from "dor-tools-builtin/file-viewer-format";
 import { viewerAnnouncement } from "dor-tools-builtin/viewer-http";
 import type { FakePtyAdapter } from "dormouse-lib/lib/platform/fake-adapter";
-import { cancelDorControlRequest, dispatchDorControlRequest } from "dormouse-lib/lib/platform/dor-control-dispatch";
-import type { ToolControlResult, ToolHostRequest } from "dormouse-lib/lib/platform/tool-types";
 import changelog from "../../data/changelog.json";
 import type { InteractiveProgram } from "../tutorial-shell";
+import { PlaygroundControlClient } from "./control-client";
 import { HOME, type VirtualFs } from "./vfs";
 import { DOR_COMMANDS, dorHelp, dorSkill } from "./dor-reference";
 import type { PlaygroundViewers } from "./viewers";
@@ -30,7 +43,6 @@ export interface PlaygroundDorOptions {
   viewers: PlaygroundViewers;
   /** Settles once the service worker can serve viewers; connects it on first call. */
   relay(): Promise<unknown>;
-  toolControl(request: ToolHostRequest): Promise<ToolControlResult>;
   onExit(exitCode: number): void;
 }
 
@@ -40,6 +52,13 @@ let nextPort = 40000;
 const errorText = (message: string) => `${errorLine(printable(message))}\r\n`;
 const crlf = (text: string) => text.replace(/\r?\n/g, "\r\n");
 const UNSUPPORTED = "UNSUPPORTED IN PLAYGROUND";
+
+/** The real CLI's commands that load without Node: the Wall answers their requests. */
+const CLI_COMMANDS = [
+  splitCommand, ensureCommand, toolCommand, sendCommand, readCommand, awaitCommand,
+  killCommand, moveCommand, iframeCommand, listCommand, workspaceCommand, appCommand,
+];
+const CLI_APPLICATION = buildDorApplication(CLI_COMMANDS);
 
 /** The commands the playground prints for itself, each taking at most `--json`. */
 const SERVED = new Map<string, (json: boolean) => string | Promise<string>>([
@@ -62,6 +81,7 @@ export function startPlaygroundDor(options: PlaygroundDorOptions): InteractivePr
   if (help) return new DorText(options, 0, () => dorHelp(help.scope === "root" ? "" : help.commandName));
   if (verb === "open") return new DorOpen(options, rest);
   if (builtinHandler("argv", verb) || verb === VIEW_ERROR_ARGV) return new DorViewer(options, verb, rest);
+  if (CLI_COMMANDS.some((command) => command.name === verb)) return new DorCli(options, verb, rest);
   const served = SERVED.get(verb);
   const json = rest.length === 1 && rest[0] === "--json";
   if (served && (rest.length === 0 || json)) return new DorText(options, 0, () => served(json));
@@ -127,7 +147,7 @@ function parseOpenArgs(args: string[]): OpenFlags | Error {
 /** `dor open [path]`: the picker when the path is omitted, then one `surface.tool` request. */
 class DorOpen extends DorProgram {
   private input: ((chunk: string) => void) | null = null;
-  private requestId: string | null = null;
+  private readonly client = new PlaygroundControlClient(this.options.terminalId);
   private stopPicker: (() => void) | null = null;
 
   constructor(options: PlaygroundDorOptions, private readonly args: string[]) { super(options); }
@@ -136,7 +156,7 @@ class DorOpen extends DorProgram {
     const flags = parseOpenArgs(this.args);
     if (flags instanceof Error) { this.finish(1, errorText(flags.message)); return; }
     if (flags.path !== undefined) { this.open(flags, flags.path, flags.tool); return; }
-    const { adapter, terminalId, cwd, fs, toolControl } = this.options;
+    const { adapter, terminalId, cwd, fs } = this.options;
     const terminal: PickerTerminal = {
       columns: () => adapter.getPtySize(terminalId).cols,
       rows: () => adapter.getPtySize(terminalId).rows,
@@ -151,11 +171,7 @@ class DorOpen extends DorProgram {
     void runFilePicker({
       terminal,
       listFiles: async (onFiles) => { onFiles(fs.files(cwd)); return { truncated: false }; },
-      handlers: async (file) => {
-        const result = await toolControl({ op: "open-handlers", target: file, cwd, ...(flags.preview ? { preview: true } : {}) });
-        if (result.status !== "open-handlers") throw new Error("unexpected tool host response");
-        return result.handlers;
-      },
+      handlers: (file) => this.client.openHandlers({ target: file, cwd, ...(flags.preview ? { preview: true } : {}) }),
       fixedTool: flags.tool,
       home: HOME,
     }).then((choice) => {
@@ -167,32 +183,46 @@ class DorOpen extends DorProgram {
   }
 
   private open(flags: OpenFlags, file: string, tool: string | undefined): void {
-    const requestId = this.requestId = crypto.randomUUID();
-    dispatchDorControlRequest({
-      requestId,
-      surfaceId: this.options.terminalId,
-      method: SURFACE_CONTROL_METHODS.tool,
-      params: {
-        file, tool, fresh: flags.fresh, minimized: flags.minimize, cwd: this.options.cwd,
-        ...(flags.preview ? { preview: true } : {}),
-      },
-    }, ({ ok, result, error }) => {
-      this.requestId = null;
-      if (!ok) { this.finish(1, errorText(error ?? "request failed")); return; }
-      const response = result as ToolSurfaceResponse;
+    this.client.toolSurface({
+      file, tool, fresh: flags.fresh, minimized: flags.minimize, cwd: this.options.cwd,
+      ...(flags.preview ? { preview: true } : {}),
+    }).then((response) => {
       const warnings = (response.warnings ?? []).map((warning) => `${printable(warning)}\r\n`).join("");
       this.finish(0, warnings + crlf(renderToolResponse(response, flags.json)));
-    });
+    }, (error: unknown) => this.finish(1, errorText(error instanceof Error ? error.message : String(error))));
   }
 
   handleInput(data: string): void {
     if (this.input) this.input(data);
-    else if (data.includes("\x03") && this.requestId) this.finish(130);
+    else if (data.includes("\x03")) this.finish(130);
   }
 
   protected cleanup(): void {
     this.stopPicker?.();
-    if (this.requestId) cancelDorControlRequest(this.requestId);
+    this.client.cancel();
+  }
+}
+
+/** One of `CLI_COMMANDS`, run by the real CLI's parser and renderers. */
+class DorCli extends DorProgram {
+  private readonly client = new PlaygroundControlClient(this.options.terminalId);
+
+  constructor(options: PlaygroundDorOptions, private readonly verb: string, private readonly args: string[]) { super(options); }
+
+  start(): void {
+    const { cwd, terminalId } = this.options;
+    runDorCommand(CLI_APPLICATION, CLI_COMMANDS, this.verb, this.args, {
+      client: this.client,
+      env: { PWD: cwd, HOME, DORMOUSE_SURFACE_ID: terminalId },
+    }, false).then(({ exitCode, stdout, stderr }) => this.finish(exitCode, crlf(stdout + stderr)));
+  }
+
+  handleInput(data: string): void {
+    if (data.includes("\x03")) this.finish(130);
+  }
+
+  protected cleanup(): void {
+    this.client.cancel();
   }
 }
 
