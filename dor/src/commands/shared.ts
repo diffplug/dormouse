@@ -98,12 +98,9 @@ function resolveControlClient(options: CliOptions, timeoutMs?: number): ParseRes
     return { ok: false, message: 'Dormouse control endpoint is not available in this terminal yet.' };
   }
 
-  if (!options.connect) {
-    return { ok: false, message: 'Dormouse control endpoint is not available in this terminal yet.' };
-  }
   return {
     ok: true,
-    value: options.connect({
+    value: options.host.connect({
       socketPath,
       token,
       surfaceId: env.DORMOUSE_SURFACE_ID,
@@ -171,20 +168,8 @@ export function msysToWindowsCwd(pwd: string, platform: string): string {
 // travel in the request. Prefer the shell's PWD (injectable, matches what the
 // user sees) and fall back to the process cwd. resolvePath canonicalizes both the
 // default and a relative/absolute path into one absolute path the host can key on.
-// Shared by `ensure`, `list`, `tool`, `open`, and `skill`. Reads `process`
-// only where there is one: the website playground runs these commands too.
-export function callerWorkingDirectory(flag: string | undefined, options: CliOptions): string {
-  const host = globalThis.process;
-  const base = msysToWindowsCwd(options.env?.PWD ?? host?.cwd() ?? '/', host?.platform ?? 'browser');
-  return (options.resolvePath ?? resolvePosixPath)(base, flag ?? '.');
-}
-
-/** `node:path`'s POSIX `resolve` for one absolute `base` and a `path`. */
-export function resolvePosixPath(base: string, path: string): string {
-  const parts: string[] = [];
-  for (const part of (path.startsWith('/') ? path : `${base}/${path}`).split('/')) {
-    if (part === '..') parts.pop();
-    else if (part !== '' && part !== '.') parts.push(part);
-  }
-  return `/${parts.join('/')}`;
+// Shared by `ensure`, `list`, `tool`, `open`, and `skill`.
+export function callerWorkingDirectory(flag: string | undefined, { env, host }: CliOptions): string {
+  const base = msysToWindowsCwd(env?.PWD ?? host.cwd(), host.platform);
+  return host.resolvePath(base, flag ?? '.');
 }

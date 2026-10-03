@@ -39,40 +39,34 @@ function answerControl(result: unknown): ControlDetail[] {
 let stopListening = () => {};
 afterEach(() => stopListening());
 
+/** `dor <args>` run to its exit. */
+async function ran(args: string[]) {
+  const { program, onExit, output } = harness(args);
+  program.start();
+  await vi.waitFor(() => expect(onExit).toHaveBeenCalled());
+  return { exitCode: onExit.mock.calls[0][0], text: output() };
+}
+
 describe("playground dor open", () => {
   it("sends the real CLI's surface.tool request and prints its answer", async () => {
     const requests = answerControl({ status: "takeover", surfaceRef: "surface:1", command: "dor __view-file /x" });
-    const { program, onExit, output } = harness(["o", "--preview", "README.md"]);
-    program.start();
-    await vi.waitFor(() => expect(onExit).toHaveBeenCalled());
+    expect(await ran(["o", "--preview", "README.md"])).toEqual({ exitCode: 0, text: 'takeover surface:1  "dor __view-file /x"\r\n' });
     expect(requests).toMatchObject([{
       surfaceId: "t", method: "surface.tool",
       params: { file: "README.md", fresh: false, minimized: false, cwd: PLAYGROUND_CWD, preview: true },
     }]);
-    expect(output()).toContain('takeover surface:1  "dor __view-file /x"\r\n');
-    expect(onExit).toHaveBeenCalledWith(0);
   });
 
-  it("refuses flags the real CLI refuses, without asking the host", () => {
+  it("refuses flags the real CLI refuses, without asking the host", async () => {
     const requests = answerControl({});
-    const { program, onExit, output } = harness(["open", "--preview", "--fresh", "x"]);
-    program.start();
+    expect(await ran(["open", "--preview", "--fresh", "x"])).toEqual({ exitCode: 1, text: "Error: --preview cannot be combined with --fresh\r\n" });
     expect(requests).toEqual([]);
-    expect(output()).toContain("Error: --preview cannot be combined with --fresh");
-    expect(onExit).toHaveBeenCalledWith(1);
   });
 });
 
 describe("playground dor's other commands", () => {
-  async function ran(args: string[]) {
-    const { program, onExit, output } = harness(args);
-    program.start();
-    await vi.waitFor(() => expect(onExit).toHaveBeenCalled());
-    return { exitCode: onExit.mock.calls[0][0], text: output() };
-  }
-
-  it("prints the real CLI's help, routed as the CLI routes it", async () => {
-    // As the CLI routes it, `help` takes the command's own name, not its alias.
+  it("prints the real CLI's help", async () => {
+    // `help` takes the command's own name, not its alias.
     for (const args of [[], ["--help"], ["help"], ["help", "o"]]) {
       expect(await ran(args)).toMatchObject({ exitCode: 0, text: expect.stringContaining("USAGE\r\n  dor split [") });
     }
@@ -82,12 +76,12 @@ describe("playground dor's other commands", () => {
     expect((await ran(["agent-browser", "--help"])).text).toContain("USAGE\r\n  dor agent-browser");
   });
 
-  it("serves version and skill", async () => {
+  it("prints version and skill from the playground's host", async () => {
     expect((await ran(["--version"])).text).toMatch(/^dor \d+\.\d+\.\d+ \[playground\]\r\n$/);
     expect(JSON.parse((await ran(["skill", "--json"])).text).markdown).toContain("dor ensure");
   });
 
-  it("runs the real CLI's commands that need no Node, over the page", async () => {
+  it("runs the real CLI's commands over the page", async () => {
     const requests = answerControl({ status: "created", surfaceId: "s3", surfaceRef: "surface:3", direction: "right", minimized: false, command: "ls" });
     const { exitCode, text } = await ran(["split", "--right", "--", "ls"]);
     expect(requests).toMatchObject([{ surfaceId: "t", method: "surface.split", params: { direction: "right", command: ["ls"] } }]);

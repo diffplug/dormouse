@@ -12,7 +12,7 @@
 - **Must load the runtime only for valid `__view-*` invocations, in the launcher's process**, through a URL relative to `dor.js`. Other CLI commands never load the viewer implementation; `./runtime` exports only types, so a value import fails `dor`'s build.
 - **Must speak the Tool protocol through `dor-tools-lib`** (`docs/specs/dor-tools-lib.md`): the viewers announce and report with its `osc` encoders, and the editor answers the save channel with its `frame` client.
 
-Source of truth: `dor/package.json`, `dor-tools-builtin/package.json`; `dor-tools-builtin/scripts/build.mjs`; `buildViewerAssets` in `dor-tools-builtin/scripts/build-viewer.mjs`; `dor/scripts/stage-builtins.mjs`; `viewerAsset` in `dor-tools-builtin/src/viewer-assets.ts`; `loadBuiltinViewers` in `dor/src/cli.ts`. Tests: `dor/test/builtin-viewers.test.mjs`.
+Source of truth: `dor/package.json`, `dor-tools-builtin/package.json`; `dor-tools-builtin/scripts/build.mjs`; `buildViewerAssets` in `dor-tools-builtin/scripts/build-viewer.mjs`; `dor/scripts/stage-builtins.mjs`; `viewerAsset` in `dor-tools-builtin/src/viewer-assets.ts`; `loadBuiltinViewers` in `dor/src/node-host.ts`. Tests: `dor/test/builtin-viewers.test.mjs`.
 
 ## File viewer
 

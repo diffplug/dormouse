@@ -1,7 +1,6 @@
 /** Render stamped build metadata for the bundled `dor` CLI. */
 
 import { buildCommand } from '@stricli/core';
-import { DOR_VERSION_METADATA } from '../generated-version.js';
 import type { Command, DorCommandContext } from './types.js';
 import { writeStdout } from './shared.js';
 import { renderVersion, renderVersionJson } from './terminal-text.js';
@@ -38,6 +37,6 @@ JSON output:
 };
 
 function runVersionCommand(this: DorCommandContext, flags: VersionFlags): void {
-  const metadata = this.options.versionMetadata ?? DOR_VERSION_METADATA;
+  const metadata = this.options.versionMetadata ?? this.options.host.versionMetadata;
   writeStdout(this, flags.json === true ? renderVersionJson(metadata) : renderVersion(metadata));
 }

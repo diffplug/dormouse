@@ -4,7 +4,7 @@
 
 ## Bundling And PATH
 
-The CLI's control client needs Node types, but the renderer imports CLI protocol and shell helpers as values. A browser-platform bundle check rejects Node imports in those helpers and their dependencies without splitting the CLI into separate TypeScript projects.
+The CLI's control client needs Node types, but the renderer imports CLI protocol and shell helpers as values. A browser-platform bundle check rejects Node imports in those helpers and their dependencies without splitting the CLI into separate TypeScript projects. The website playground runs the whole CLI that way, so every command's parsing, help, and output are the real ones; one `CliHost` holds everything that needs the machine, and the type checker makes the playground answer each capability, even if only with `UNSUPPORTED IN PLAYGROUND`.
 
 **What a missing `ELECTRON_RUN_AS_NODE` looks like.** Under VS Code `DORMOUSE_NODE` is the editor's Electron binary — Node only when that variable is set, and terminals routinely strip it from the ambient env. Without it Electron launches its GUI, ignores the script, and exits 0: no error, no output, success exit code, reading as "the command did nothing" rather than as a launcher bug.
 

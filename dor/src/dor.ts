@@ -1,17 +1,9 @@
 #!/usr/bin/env node
 
-import { resolve } from 'node:path';
 import { runCli } from './cli.js';
-import { SocketControlClient } from './control-client.js';
 import type { PickerTerminal } from './commands/types.js';
 
-runCli(process.argv.slice(2), {
-  env: process.env,
-  connect: (endpoint) => new SocketControlClient(endpoint),
-  resolvePath: resolve,
-  readStdin,
-  terminal: ttyTerminal(),
-}).then(
+runCli(process.argv.slice(2), { env: process.env, readStdin, terminal: ttyTerminal() }).then(
   (result) => {
     process.stdout.write(result.stdout);
     process.stderr.write(result.stderr);

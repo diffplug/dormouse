@@ -1,9 +1,6 @@
 /** Print the bundled Dormouse agent skill, or install its bootstrap stub. */
 
 import { buildCommand } from '@stricli/core';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { resolve as resolvePath } from 'node:path';
-import { DOR_SKILL_MARKDOWN as skillMarkdown } from '../generated-skill.js';
 import type { Command, DorCommandContext } from './types.js';
 import { callerWorkingDirectory, renderJson, writeStdout } from './shared.js';
 
@@ -66,18 +63,20 @@ JSON output:
 
 function runSkillCommand(this: DorCommandContext, flags: SkillFlags): void | Error {
   if (flags.install === true) return installStub(this, flags.json === true);
-  writeStdout(this, flags.json === true ? renderJson({ markdown: skillMarkdown }) : skillMarkdown);
+  const markdown = this.options.host.skillMarkdown;
+  writeStdout(this, flags.json === true ? renderJson({ markdown }) : markdown);
   return undefined;
 }
 
 function installStub(context: DorCommandContext, json: boolean): void | Error {
+  const { host } = context.options;
   const projectDir = callerWorkingDirectory(undefined, context.options);
 
   // Read both instruction files once up front; the adopt pass and the append
   // pass below share the contents. `content: null` means the file is absent.
   const candidates = CANDIDATES.map((name) => {
-    const path = resolvePath(projectDir, name);
-    return { name, path, content: existsSync(path) ? readFileSync(path, 'utf8') : null };
+    const path = host.resolvePath(projectDir, name);
+    return { name, path, content: host.readTextFile(path) };
   });
 
   // First adopt an existing block wherever it already lives, rewriting it in
@@ -86,7 +85,7 @@ function installStub(context: DorCommandContext, json: boolean): void | Error {
     if (content === null || !content.includes(BEGIN_MARKER)) continue;
     const rewritten = rewriteStub(content, name);
     if (rewritten instanceof Error) return rewritten;
-    writeFileSync(path, rewritten);
+    host.writeTextFile(path, rewritten);
     return renderInstall(context, 'updated', name, json);
   }
 
@@ -97,7 +96,7 @@ function installStub(context: DorCommandContext, json: boolean): void | Error {
     agents.content === null && claude.content !== null && !claude.content.includes('@AGENTS.md')
       ? claude
       : agents;
-  writeFileSync(target.path, appendStub(target.content ?? ''));
+  host.writeTextFile(target.path, appendStub(target.content ?? ''));
   return renderInstall(context, target.content === null ? 'created' : 'updated', target.name, json);
 }
 
