@@ -69,7 +69,7 @@ and Tauri's `resource_dir()` hands out a verbatim prefix (rationale).
 misparses LF-only batch files (rationale), and staging copies bytes verbatim.
 `.gitattributes` pins it (`*.cmd text eol=crlf`; the POSIX launcher `eol=lf`).
 
-**Must keep browser-shared CLI modules free of Node runtime dependencies**, even though the CLI package uses Node types. `dor/test/browser-shared.test.mjs` bundles their dependency graphs for the browser. (rationale)
+**Must keep `dor/src/cli-core.ts`, every command module, and the other browser-shared CLI modules free of Node runtime dependencies**, even though the CLI package uses Node types: Node reaches the CLI only through the `CliHost` that `dor/src/node-host.ts` supplies, which the website playground replaces. `dor/test/browser-shared.test.mjs` bundles their dependency graphs for the browser. (rationale)
 
 ### Git Bash PATH survival
 
@@ -363,7 +363,7 @@ Behavior help does not carry:
 socket**. **Consumers must gate on `has_terminal` / `has_browser`, not `kind`**,
 the capability vocabulary commands also use in target errors.
 
-Source of truth: `dor/src/cli.ts`, `dor/src/commands/`,
+Source of truth: `dor/src/cli-core.ts`, `dor/src/commands/`,
 `buildShellCommandForKind` in `dor/src/commands/shell-quote.ts`, and
 `useDorControl` in `lib/src/components/wall/use-dor-control.ts`.
 

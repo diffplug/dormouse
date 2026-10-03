@@ -580,7 +580,8 @@ Source of truth: `createPlaywrightProvider` in `lib/src/host/playwright-host.ts`
 `dor iframe <url>` frames the page's own DOM — zero-lag for human inspection, but
 agents cannot drive or read it. On hosts with `createIframeProxyUrl`,
 `IframePanel` frames a per-grant loopback proxy URL; without it, a raw
-uninstrumented iframe.
+uninstrumented iframe. The desktop playground's fronts only its own viewers
+(`docs/specs/tutorial.md` → Playground filesystem).
 
 The proxy instruments any `http://` upstream, loopback and remote alike:
 

@@ -9,9 +9,9 @@ import {
   DEFAULT_AGENT_BROWSER_BIN,
   streamStatusArgs,
   type BrowserAutomationProvider,
-} from 'dor-lib-common';
-import { runBrowserCli, type BrowserCliDescriptor } from './browser-cli.js';
-import type { CliOptions, CliResult, Command, DorCommandContext } from './types.js';
+} from 'dor-lib-common/browser-providers';
+import type { BrowserCliDescriptor } from './browser-cli.js';
+import type { Command, DorCommandContext } from './types.js';
 import { stringParser, workspaceFlag } from './shared.js';
 
 const INSTALL_HINT = BROWSER_PROVIDERS['agent-browser'].installHint;
@@ -122,7 +122,7 @@ Examples:
 
 // `goto` / `navigate` are documented aliases of `open`, so a Dormouse target
 // resolves the same in all three.
-const AGENT_BROWSER: BrowserCliDescriptor = {
+export const AGENT_BROWSER: BrowserCliDescriptor = {
   provider: 'agent-browser',
   sessionNoun: 'an agent-browser session name',
   navigationVerbs: new Set(['open', 'goto', 'navigate']),
@@ -140,6 +140,3 @@ const AGENT_BROWSER: BrowserCliDescriptor = {
   streamStatus: streamStatusArgs,
 };
 
-export function runAgentBrowserCli(args: string[], options: CliOptions): Promise<CliResult> {
-  return runBrowserCli(AGENT_BROWSER, args, options);
-}

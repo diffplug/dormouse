@@ -371,7 +371,7 @@ export async function runBrowserCli(d: BrowserCliDescriptor, args: string[], opt
   // browserBinaryIsMissing re-checks on disk.
   const defaultBinaryPath = resolveBinaryPath(defaultBinary, env);
   const client = requireControlClient(options);
-  const callerCwd = callerWorkingDirectory(undefined, env);
+  const callerCwd = callerWorkingDirectory(undefined, options);
 
   // An informational command needs no binding: nothing binds, and a
   // `--surface` one names no session at all.

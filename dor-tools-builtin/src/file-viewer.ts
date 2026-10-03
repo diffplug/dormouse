@@ -4,7 +4,7 @@ import { basename, dirname, relative, resolve, sep } from 'node:path';
 import { stateSequence } from 'dor-tools-lib/osc';
 import { fileViewerFormat, type FileFormat } from './file-viewer-format.js';
 import { announceViewer, contentType, HttpError, isInsideRoot, openRegularFile, pathSegments, readBody, readJsonBody, reply, startCapabilityViewer } from './viewer-server.js';
-import { editorPage, markdownPage } from './editor-page.js';
+import { EDITOR_CSP, editorPage, markdownPage } from './editor-page.js';
 import { IMAGE_LIMIT, openImage, renameImage, writePastedImage } from './markdown-images.js';
 import { readEditableFile, readUpTo, saveEditableFile, TEXT_LIMIT } from './editable-file.js';
 import { viewerAsset } from './viewer-assets.js';
@@ -12,9 +12,6 @@ import { viewerAsset } from './viewer-assets.js';
 const ASSET_LIMIT = 256;
 const CHUNK = 64 * 1024;
 const CSP = "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self'; font-src 'self'; connect-src 'self'; frame-src 'self'; object-src 'self'; base-uri 'self'; form-action 'none'";
-// The editor pages load only their own scripts, workers, fonts, and images;
-// the Markdown page renders document HTML through its own allowlist.
-const EDITOR_CSP = "default-src 'none'; script-src 'self' 'unsafe-inline'; worker-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src 'none'; object-src 'none'; media-src 'none'; base-uri 'none'; form-action 'none'";
 // An image the Markdown editor shows can be opened directly; it never runs as a document there.
 const IMAGE_CSP = "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:";
 type Resource = { file: FileHandle; mime: string };

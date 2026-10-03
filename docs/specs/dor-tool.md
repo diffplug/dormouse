@@ -320,7 +320,7 @@ Dirty or pending Tools refuse Surface moves between Workspaces: `docs/specs/layo
 
 **Must pause serving updates during Workspace closure or transfer, and never launch a Tool, looked up or approved, into a closing or transferring Workspace.**
 
-**Must provide Tool host operations in standalone and VS Code.** Remote terminal transport remains protocol-v1; remote browser presentation is staged in `docs/specs/remote-api.md`.
+**Must provide Tool host operations in standalone and VS Code**; the desktop playground answers `open` and `open-handlers` from its snapshot (`docs/specs/tutorial.md` → Playground filesystem). Remote terminal transport remains protocol-v1; remote browser presentation is staged in `docs/specs/remote-api.md`.
 
 Source of truth: `PersistedToolMetadata` in `lib/src/lib/session-types.ts`; `captureToolParams` / `restoreToolParams` in `lib/src/components/wall/tool-transfer.ts`; `toolControl` in `lib/src/lib/platform/types.ts`.
 

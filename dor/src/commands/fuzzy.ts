@@ -103,6 +103,8 @@ function matchRange(term: string, haystack: string, text: string, from: number, 
 
 const isLower = (code: number) => (code >= 97 && code <= 122) || (code >= 48 && code <= 57);
 const isUpper = (code: number) => code >= 65 && code <= 90;
+/** `setImmediate` where Node has it; the website playground's picker has only timers. */
+const defer: (fn: () => void) => void = globalThis.setImmediate ?? ((fn) => { setTimeout(fn, 0); });
 
 function boundaryBonus(text: string, i: number): number {
   if (i === 0) return BOUNDARY_PATH;
@@ -222,7 +224,7 @@ export class Ranker {
   private schedule(): void {
     if (this.scheduled || this.disposed || !this.scanning) return;
     this.scheduled = true;
-    setImmediate(() => {
+    defer(() => {
       this.scheduled = false;
       if (this.disposed) return;
       this.step(SLICE_MS);

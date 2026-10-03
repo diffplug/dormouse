@@ -1,8 +1,6 @@
-import { homedir } from 'node:os';
 import { buildCommand } from '@stricli/core';
 import type { Command, DorCommandContext, WorkspaceScopedFlags } from './types.js';
 import { callerWorkingDirectory, requireControlClient, stringParser, workspaceFlag, workspaceParam } from './shared.js';
-import { listFiles } from './file-list.js';
 import { runFilePicker } from './open-picker.js';
 import { dispatchToolSurface, TOOL_TIMEOUT_MS } from './tool.js';
 
@@ -57,7 +55,7 @@ Placement follows dor tool: typed alone at a prompt in a visible, integrated pla
       if (flags.preview && (flags.fresh || flags.minimize)) {
         return new Error(`--preview cannot be combined with ${flags.fresh ? '--fresh' : '--minimize'}`);
       }
-      const cwd = callerWorkingDirectory(flags.cwd, this.options.env);
+      const cwd = callerWorkingDirectory(flags.cwd, this.options);
       let file = path;
       let tool = flags.tool;
       if (file === undefined) {
@@ -92,10 +90,11 @@ async function pickFile(context: DorCommandContext, cwd: string, flags: OpenFlag
   // Fail before drawing anything when there is no Dormouse to open in.
   const client = requireControlClient(context.options, TOOL_TIMEOUT_MS);
   if (client instanceof Error) return client;
-  const home = context.options.env?.HOME ?? homedir();
+  const { host } = context.options;
+  const home = context.options.env?.HOME ?? host.homedir();
   return runFilePicker({
     terminal,
-    listFiles: (onFiles, signal) => listFiles(cwd, { onFiles, signal, home }),
+    listFiles: (onFiles, signal) => host.listFiles(cwd, { onFiles, signal, home }),
     handlers: file => client.openHandlers({ target: file, cwd, ...(flags.preview ? { preview: true } : {}) }),
     fixedTool: flags.tool,
     home,

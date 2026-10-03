@@ -11,7 +11,7 @@ export interface DesktopPaneSpec {
 }
 
 export const DESKTOP_PANES: readonly DesktopPaneSpec[] = [
-  { id: PANE_MAIN, command: "tut", title: "tutorial" },
+  { id: PANE_MAIN, command: "tutorial", title: "tutorial" },
   { id: PANE_BOXED, command: "changelog", title: "changelog" },
   { id: PANE_SPLASH, command: "ascii-splash", title: "ascii-splash" },
 ];

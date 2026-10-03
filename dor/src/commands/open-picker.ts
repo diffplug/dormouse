@@ -5,7 +5,7 @@
  */
 import type { OpenHandlersResponse, PickerTerminal } from './types.js';
 import { fuzzyMatch, Ranker } from './fuzzy.js';
-import { printable, stripControls } from './shared.js';
+import { printable, stripControls } from './terminal-text.js';
 
 export interface PickerChoice {
   /** Relative to the listing directory, `/`-separated. */
@@ -396,7 +396,8 @@ export function parseKeys(chunk: string): Key[] {
   return keys;
 }
 
-function shortPath(path: string, home: string | undefined): string {
+/** `path` with `home` spelled `~`. */
+export function shortPath(path: string, home: string | undefined): string {
   return home && (path === home || path.startsWith(`${home}/`) || path.startsWith(`${home}\\`)) ? `~${path.slice(home.length)}` : path;
 }
 

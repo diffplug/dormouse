@@ -26,6 +26,7 @@ Device routes (`website/src/routes.ts`):
 - **Must credit a keyboard split before its automatic passthrough transition**, and tell the user to re-enter command mode for the following navigation item (rationale).
 - **Must credit `kb-arrows` only on command-mode selection of a distinct pane**; an arrow or click counts, a swap's resulting focus does not.
 - **Must credit `al-spreads` only when newly enabled WATCHING shares a command key with another live pane.**
+- **Must credit the `dor open` section from the command lines the shells report**, never from a hook in the playground `dor` or its viewers.
 
 Source of truth: `TutRunner` in `website/src/lib/tut-runner.ts`; `TutDetector` in `website/src/lib/tut-detector.ts`; `TutorialState` in `website/src/lib/tutorial-state.ts`; profiles in `website/src/lib/tut-items.ts`.
 
@@ -34,7 +35,7 @@ Source of truth: `TutRunner` in `website/src/lib/tut-runner.ts`; `TutDetector` i
 - **The desktop page must restore its own theme** with `useRestoredTheme(WEBSITE_DEFAULT_THEME_ID)` (`website/src/lib/website-theme.ts`), which also declares the host fallback the Settings picker re-resolves through; its `SiteHeader` carries no controls (rationale).
 - `/playground/desktop` runs `Wall` (`FakePtyAdapter`, `initialMode="passthrough"`). **Must seed its three-pane L-shape as an explicit Lath snapshot** — `restoredLathLayout` from `DESKTOP_PLAYGROUND_LAYOUT` — never the synchronous `initialPaneIds` path (rationale); `website/src/lib/playground-desktop-layout.test.ts` pins it. `DESKTOP_PANES` in the same file owns each seed's id, command, and title; **`tut-boxed` is the Auto-copy + `cp-override` target** (rationale). **Titles are seeded as pending shell opts** (`setPendingShellOpts(id, { title })`) before the Wall mounts, and a user-pin outranks the engine fallback (`docs/specs/terminal-state.md` → "Header Derivation").
 
-Every visible pane gets a `TutorialShell` via `PlaygroundShellRegistry`. **`ensureShell` must stay idempotent** — `paneAdded` covers every pane that becomes visible, and `FakePtyAdapter.onPtySpawn` covers the seed panes again, auto-launching each seed's command exactly once (rationale). The page's `startProgram` knows `tut` (`TutRunner`), `ascii-splash`/`splash`, and `changelog`.
+Every visible pane gets a `TutorialShell` via `PlaygroundShellRegistry`. **`ensureShell` must stay idempotent** — `paneAdded` covers every pane that becomes visible, and `FakePtyAdapter.onPtySpawn` covers the seed panes again, auto-launching each seed's command exactly once (rationale). The page's `startProgram` knows `tutorial` (`TutRunner`), `ascii-splash`/`splash`, `changelog`, and `dor` ([Playground filesystem](#playground-filesystem)).
 
 `/playground/pocket` runs `MobileWall` with **`pocket-tut`** (active, `TutRunner` on `POCKET_TUTORIAL_PROFILE`) and **`pocket-changelog`** (`ChangelogRunner`), and starts a `TutDetector` over the same shared stores. **Must credit Pocket gesture items only on the active tutorial Session's Gesture navigation screen**, through `MobileTerminalUi.onGestureScroll` and `onGestureInput`.
 
@@ -66,7 +67,7 @@ Extras: `Starred on GitHub` (persisted separately), FlappyTerm, `Reset progress`
 
 **`TutRunner` intercepts four keys while a specific section is open; they are not real Dormouse shortcuts.** The three alert demos report fake commands as `OSC 633 ; E / C / D` through `FakePtyAdapter.sendOutput`, which the real `TerminalProtocolParser` strips from visible output (rationale). **Must snapshot the live inactivity timeout at demo launch; the run outlasts it and the BUSY-confirm floor.** Each demo's countdown, page timer, and re-press guard run the same snapshotted duration — longer for `s`, whose fake command must outlive WATCHING's silence chain. Pinned by `website/src/lib/tut-runner.test.ts`.
 
-- **`s`** (Alerts) — reports `longtask` on both alert panes so command-keyed WATCHING demonstrates `al-spreads`, pumping only the quiet `tut-boxed` (rationale). **A press while that command is still running is ignored**, and **the page cancels any prior pump and exit timer** — the runner's guard is per instance, so a re-run `tut` would otherwise stack them.
+- **`s`** (Alerts) — reports `longtask` on both alert panes so command-keyed WATCHING demonstrates `al-spreads`, pumping only the quiet `tut-boxed` (rationale). **A press while that command is still running is ignored**, and **the page cancels any prior pump and exit timer** — the runner's guard is per instance, so a re-run `tutorial` would otherwise stack them.
 - **`n`** (Alerts) — writes a raw `OSC 777` notification to `tut-boxed`, exercising a terminal report, which needs no WATCHING rule.
 - **`x`** (Alerts) — starts a fake `slowbuild` on `tut-splash` and reports its exit after the captured duration. **The command name must stay unwatched**, so a command exit rather than WATCHING raises the ring (rationale). **The page must cancel the prior exit timer across runner instances.**
 - **`p`** (Copy paste) — toggles the **Place To Paste** scratch modal (`website/src/components/PlaceToPaste.tsx`). Desktop only.
@@ -80,9 +81,24 @@ Pocket reuses `cp-select` / `cp-raw` / `cp-rewrap` but drops `cp-override`: Sele
 `TutorialShell` ([Layout](#layout)):
 
 * **Shell integration must be reported for every command it runs** — `OSC 633 ; A/B` around the prompt, `633 ; E` + `633 ; C` on launch, `633 ; D` on exit. WATCHING is keyed on the running command's name (`docs/specs/alert.md`), and the OSCs also keep `docs/specs/terminal-state.md`'s keystroke fallback from engaging here (rationale).
-* **While a program runs, every input byte goes to it** — `\x03` included, which the runners treat as quit — as do bytes left in the chunk after the Enter that launched it. On exit the terminal returns to the prompt instead of restarting the program.
+* **While a program runs, every input byte goes to it** — `\x03` included, which the runners treat as quit — as do bytes left in the chunk after the Enter that launched it. On exit the terminal returns to the prompt instead of restarting the program. At the prompt, `\x03` abandons the line for a new prompt and runs nothing. Tab completes the last word: a command name, and on the desktop `dor`'s verb or a snapshot path.
 
-**The only commands are the ones `startProgram` knows** ([Layout](#layout)); anything else prints an "Unknown command" line and exits `127`.
+**The only commands are the ones `startProgram` knows** ([Layout](#layout)) and the desktop's `cd`, `ls`, and `pwd`; anything else prints an "Unknown command" line and exits `127`.
+
+## Playground filesystem
+
+The desktop shells share one read-only filesystem: the tracked files of `dor-tools-lib/`, inlined at build time and mounted at `/home/demo/dor-tools-lib`, every shell's starting directory. Beside it sits the playground's own user config at `~/.config/dormouse/dormouse.yml`, **inert**: shown, never read for rules. `website/src/lib/playground-fs/playground-fs.test.ts` pins the snapshot to `git ls-files dor-tools-lib` and the config to a warning-free user Tool file.
+
+- **Must report the shell's directory with every prompt (`OSC 633 ; P ; Cwd=`)**: take-over and launch matching compare it (`docs/specs/dor-tool.md` → Take-over). `cd`, `ls`, and `pwd` are the filesystem builtins; nothing writes.
+- **Must print each spawned non-helper terminal's first prompt from `PlaygroundShellRegistry`**; no scenario plays on the desktop, and a split Tool waits on that prompt's integration (rationale).
+- **Must name `/bin/fake` as the default shell**, so a Windows visitor's Tool commands quote as posix rather than being refused as `cmd` (rationale).
+- **The playground `dor` must run the real CLI (`runCli` in `dor/src/cli-core.ts`) over a playground `CliHost` and a `ControlClient` that sends each request to the Wall; what needs Node must fail `UNSUPPORTED IN PLAYGROUND`.** It serves the `__view-*` entries itself. `FakePtyAdapter.toolControl` answers `open` and `open-handlers` from the snapshot as a host with no user `dormouse.yml` does.
+- **A `__view-*` entry must report its port before announcing it, and withdraw it on exit.**
+- **Must serve the real viewer pages and CSPs on the Node viewers' routes, answered from the snapshot**; `save`, `image`, and `rename` answer `403`. The editors are unchanged, so edits stay in the page.
+- **`createIframeProxyUrl` must map only a `localhost` URL under `/playground-fs/` to the page's own origin**, refusing others (`scheme`). The viewer pages carry the shim from `instrumentHtml`, so theme and the save channel connect as behind a proxy, and are same-origin with the Wall: first-party pages over a fixed snapshot.
+- **The `/playground-fs/` service worker must stay stateless**: it serves `assets/*` from the static `/builtin-viewer/` build and relays every other request to the top-level playground windows, where the one holding the URL's token answers (rationale). It registers when the first viewer starts; without one, `__view-*` exits `1`.
+
+Source of truth: `installPlaygroundFs` in `website/src/lib/playground-fs/index.ts`; `TutorialShell` in `website/src/lib/tutorial-shell.ts`; `website/public/playground-fs/sw.js`; `website/scripts/build-builtin-viewer.js`.
 
 ## Storage
 

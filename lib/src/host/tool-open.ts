@@ -3,7 +3,8 @@ import { basename, relative, sep } from 'node:path';
 import picomatch from 'picomatch';
 import type { OpenHandler, OpenHandlersRequest, OpenHandlersResponse } from 'dor/commands/types';
 import type { ToolLookupResult } from '../lib/platform/tool-types';
-import { BUILTIN_HANDLERS, FOLDER_MATCH_SUFFIX, builtinHandler, defaultBuiltin } from 'dor-tools-builtin/file-viewer-format';
+import { FOLDER_MATCH_SUFFIX, builtinHandler } from 'dor-tools-builtin/file-viewer-format';
+import { builtinOpenResult, noUserToolMessage, offerBuiltins } from '../lib/tool-open-builtin';
 import { resolveLocalToolTarget } from './tool-input';
 import type { OpenRule, ToolFile } from './tool-registry';
 import { readUserToolFile, resolveUserTool } from './tool-user-config';
@@ -17,24 +18,12 @@ export async function resolveOpenTool(request: OpenRequest, path: string): Promi
   const file = await readUserToolFile(path);
   // An explicit handler outranks every rule, so none is matched.
   const name = request.tool ?? (await openCandidates(request, file, target, directory))[0]?.tool;
-  const kind = directory ? 'folder' : 'file';
-  const builtin = builtinHandler('tool', name);
-  if (builtin) {
-    if (builtin.opens !== kind) return { status: 'error', message: `${name} cannot open the ${kind} '${request.target}'; use ${defaultBuiltin(directory).tool}` };
-    if (!directory && !builtin.format(target)) return { status: 'error',
-      message: `${name} does not support '${basename(target)}'; add an open rule to ${path} naming a user Tool` };
-    // The built-in viewers run no user entry, but the user file was still
-    // parsed to get here — its lint warnings are the user's to see.
-    return {
-      status: 'ok', projectRoot: request.cwd, path: '<built-in>', name: builtin.kind, scope: 'builtin',
-      run: ['dor', builtin.argv, target], key: [target], render: 'iframe', port: 'announced',
-      warnings: file ? [...file.warnings] : [], target,
-    };
-  }
+  // The built-in viewers run no user entry, but the user file was still
+  // parsed to get here — its lint warnings are the user's to see.
+  const builtin = builtinOpenResult(request, name, target, directory, path, file ? [...file.warnings] : []);
+  if (builtin) return builtin;
   const entry = name && file?.tools.get(name);
-  if (!file || !entry) return { status: 'error', message: request.tool
-    ? `no user Tool '${request.tool}' in ${path}`
-    : `no Tool matches '${request.target}'; add an open rule to ${path}, or use dor open --tool <name> <file>` };
+  if (!file || !entry) return { status: 'error', message: noUserToolMessage(request, path) };
   const resolved = await resolveUserTool(file, path, entry, request.cwd, [target]);
   return resolved.status === 'ok' ? { ...resolved, target } : resolved;
 }
@@ -67,10 +56,7 @@ async function openCandidates(
     offer(rule.tool, where);
     if (rule.preview) offer(rule.preview, `preview handler of ${where}`);
   });
-  const kind = directory ? 'folder' : 'file';
-  for (const builtin of BUILTIN_HANDLERS) {
-    if (builtin.opens === kind && builtin.offered(target)) offer(builtin.tool, candidates.size ? 'built-in' : 'built-in; no open rule matches');
-  }
+  offerBuiltins(candidates, target, directory);
   return [...candidates].map(([tool, reason]) => ({ tool, reason }));
 }
 

@@ -1,8 +1,8 @@
 /** Playwright's native CLI with Dormouse addressing and a shared browser pane. */
 import { buildCommand } from '@stricli/core';
-import { BROWSER_PROVIDERS, PLAYWRIGHT_BIN_ENV, type BrowserAutomationProvider } from 'dor-lib-common';
-import { runBrowserCli, type BrowserCliDescriptor } from './browser-cli.js';
-import type { CliOptions, CliResult, Command, DorCommandContext } from './types.js';
+import { BROWSER_PROVIDERS, PLAYWRIGHT_BIN_ENV, type BrowserAutomationProvider } from 'dor-lib-common/browser-providers';
+import type { BrowserCliDescriptor } from './browser-cli.js';
+import type { Command, DorCommandContext } from './types.js';
 import { stringParser, workspaceFlag } from './shared.js';
 
 export const playwrightCommand: Command = {
@@ -51,7 +51,7 @@ Examples:
   }),
 };
 
-const PLAYWRIGHT: BrowserCliDescriptor = {
+export const PLAYWRIGHT: BrowserCliDescriptor = {
   provider: 'playwright',
   sessionNoun: 'a playwright session name',
   sessionAliases: ['-s'],
@@ -68,6 +68,3 @@ const PLAYWRIGHT: BrowserCliDescriptor = {
   exec: (options) => options.execPlaywright,
 };
 
-export function runPlaywrightCli(args: string[], options: CliOptions): Promise<CliResult> {
-  return runBrowserCli(PLAYWRIGHT, args, options);
-}

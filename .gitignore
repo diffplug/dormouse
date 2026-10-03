@@ -55,6 +55,7 @@ website/node_modules/
 website/src/data/changelog.json
 website/src/data/docs.*.json
 website/public/guide/
+website/public/builtin-viewer/
 
 # OS
 .DS_Store

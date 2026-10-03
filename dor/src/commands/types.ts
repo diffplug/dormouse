@@ -5,6 +5,7 @@ import type {
 } from '@stricli/core';
 import type { BrowserAutomationProvider, BrowserBinding, SurfaceRenderMode } from 'dor-lib-common/browser-providers';
 import type { BrowserViewportSetting } from 'dor-lib-common/browser-viewports';
+import type { FileFormat } from 'dor-tools-builtin/file-viewer-format';
 
 export type { BrowserAutomationProvider, BrowserBinding, SurfaceRenderMode };
 
@@ -624,7 +625,48 @@ export interface PickerTerminal {
   listen(onInput: (chunk: string) => void, onResize: () => void): () => void;
 }
 
+/** The control socket a terminal's env names. */
+export interface ControlEndpoint {
+  socketPath: string;
+  token: string;
+  surfaceId?: string;
+  timeoutMs?: number;
+}
+
+/**
+ * Everything `dor` needs from the machine it runs on (`docs/specs/dor-cli.md`
+ * -> Bundling and Environment): `dor/src/node-host.ts` is the real one, and the
+ * website playground supplies its own, so the CLI itself loads in a browser.
+ */
+export interface CliHost {
+  platform: string;
+  cwd(): string;
+  homedir(): string;
+  /** This platform's `path.resolve` of `path` against `base`. */
+  resolvePath(base: string, path: string): string;
+  connect(endpoint: ControlEndpoint): ControlClient;
+  /** Streams the files under `cwd` for `dor open`'s picker. */
+  listFiles(cwd: string, options: { onFiles: (paths: string[]) => void; signal: AbortSignal; home?: string }): Promise<{ truncated: boolean }>;
+  /** A text file's contents, or null when it does not exist (`dor skill --install`). */
+  readTextFile(path: string): string | null;
+  writeTextFile(path: string, text: string): void;
+  /** `dor agent-browser` / `dor playwright`, which drive a local binary. */
+  runBrowserCli(provider: BrowserAutomationProvider, args: string[], options: CliOptions): Promise<CliResult>;
+  /** The built-in Tools' runtime, for the private `dor __view-*` entries. */
+  loadBuiltinViewers(): Promise<BuiltinViewers>;
+  versionMetadata: VersionMetadata;
+  skillMarkdown: string;
+}
+
+/** `dor-tools-builtin/runtime`: each entry starts its viewer and answers its announcement. */
+export interface BuiltinViewers {
+  runFileViewer(file: string, formatOf: (path: string) => FileFormat | null): Promise<string>;
+  runFolderViewer(dir: string): Promise<string>;
+  runErrorViewer(target: string, message: string): Promise<string>;
+}
+
 export interface CliOptions {
+  host: CliHost;
   env?: CliEnv;
   client?: ControlClient;
   readStdin?: () => Promise<string>;

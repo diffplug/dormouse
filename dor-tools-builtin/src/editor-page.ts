@@ -1,4 +1,8 @@
-import { escapeHtml } from './viewer-server.js';
+import { escapeHtml } from './viewer-http.js';
+
+// The editor pages load only their own scripts, workers, fonts, and images;
+// the Markdown page renders document HTML through its own allowlist.
+export const EDITOR_CSP = "default-src 'none'; script-src 'self' 'unsafe-inline'; worker-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src 'none'; object-src 'none'; media-src 'none'; base-uri 'none'; form-action 'none'";
 
 const CONFIRM = '<dialog id="confirm"><form method="dialog"><h2>Discard unsaved changes?</h2><p>Reloading replaces your edits with the file on disk.</p><div><button value="cancel">Cancel</button><button value="discard">Discard and reload</button></div></form></dialog>';
 
