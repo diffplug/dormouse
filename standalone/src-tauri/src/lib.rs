@@ -561,7 +561,8 @@ const QUIT_ACK_TIMEOUT_MS: u64 = 2_000;
 // sum of all teardown work. Sits above the webview's own teardown
 // ceiling (docs/specs/standalone.md §Quit flow) — `QUIT_TEARDOWN_CEILING_MS` in
 // `standalone/src/quit.ts`, pinned under this by
-// `lib/src/lib/mirrored-constants.test.ts`.
+// `lib/src/lib/mirrored-constants.test.ts`. Also above `kill_sidecar_and_wait`'s
+// ~5s cap, which the Windows install phase awaits under one refresh.
 const QUIT_PHASE_TIMEOUT_MS: u64 = 14_000;
 const QUIT_POLL_STEP_MS: u64 = 500;
 // A per-window close whose webview never acks: its listener is dead, so close it.
@@ -3406,7 +3407,8 @@ fn close_window(app: AppHandle, window: tauri::Window) {
 // Normal app quit should let the Node sidecar run its shutdown handler first:
 // that handler closes headed agent-browser pop-out windows before killing PTYs.
 // If the sidecar is wedged, fall back to the same hard kill path so quit remains
-// bounded.
+// bounded. The grace must exceed the sidecar's 1.5s browser-cleanup deadline
+// (`shutdown` in standalone/sidecar/main.js).
 fn shutdown_sidecar_and_wait(state: &SidecarState) {
     const POLL_INTERVAL: Duration = Duration::from_millis(20);
     const MAX_POLLS: u32 = 125;
@@ -3457,7 +3459,7 @@ fn shutdown_sidecar_and_wait(state: &SidecarState) {
 // and can't hang, whereas the job-object `wait()` consumes a completion-port
 // message the reaper thread may already have drained (e.g. if the sidecar had
 // crashed earlier), which would block forever. The ~5s cap means a wedged
-// sidecar can't stall quit indefinitely.
+// sidecar can't stall quit indefinitely. Must stay under `QUIT_PHASE_TIMEOUT_MS`.
 fn kill_sidecar_and_wait(child: &SharedChild) {
     // Poll for exit at this cadence, up to ~5s total (MAX_POLLS × POLL_INTERVAL).
     const POLL_INTERVAL: Duration = Duration::from_millis(20);
@@ -3922,9 +3924,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
-        // Replace Tauri's default menu, which binds Cmd+V to a native Paste
-        // action that fights with the webview's DOM keydown handler. The
-        // terminal owns Cmd+C / Cmd+V / Cmd+X in JS (see `Wall.tsx`).
+        // Replace Tauri's default menu (docs/specs/standalone.md -> Application menu).
         .menu(|handle| {
             #[cfg(target_os = "macos")]
             let pkg = handle.package_info();
@@ -3960,6 +3960,21 @@ pub fn run() {
                         true,
                         Some("CmdOrCtrl+Q"),
                     )?,
+                ],
+            )?));
+            #[cfg(target_os = "macos")]
+            items.push(Box::new(Submenu::with_items(
+                handle,
+                "Edit",
+                true,
+                &[
+                    &PredefinedMenuItem::undo(handle, None)?,
+                    &PredefinedMenuItem::redo(handle, None)?,
+                    &PredefinedMenuItem::separator(handle)?,
+                    &PredefinedMenuItem::cut(handle, None)?,
+                    &PredefinedMenuItem::copy(handle, None)?,
+                    &PredefinedMenuItem::paste(handle, None)?,
+                    &PredefinedMenuItem::select_all(handle, None)?,
                 ],
             )?));
             items.push(Box::new(Submenu::with_items(

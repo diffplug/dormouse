@@ -4,6 +4,7 @@ import { handleContextCopy } from './keyboard/handle-context-copy';
 import { handleEditableClipboard } from './keyboard/handle-editable-clipboard';
 import { handleMouseSelectionKeys } from './keyboard/handle-mouse-selection-keys';
 import { handleKillConfirm } from './keyboard/handle-kill-confirm';
+import { cancelUiSelectAll } from './keyboard/cancel-ui-select-all';
 import { handlePaneShortcuts } from './keyboard/handle-pane-shortcuts';
 import { handlePaneNavigation } from './keyboard/handle-pane-navigation';
 import { handleWorkspaceShortcuts } from './keyboard/handle-workspace-shortcuts';
@@ -16,6 +17,12 @@ import type { NavHistoryRef, WallKeyboardCtx } from './keyboard/types';
 // runs between listeners, so without this claim its listener would answer the
 // same key too.
 const answeredKeys = new WeakSet<KeyboardEvent>();
+
+// Physical keys whose last keydown a Wall consumed. Their keyup is consumed
+// too: under win32-input-mode (and kitty release events) xterm reports the
+// release to the program, which would get half of a key it never saw and, as
+// user input, dismiss the copy editor that key just opened.
+const consumedKeys = new Set<string>();
 
 export function useWallKeyboard(ctx: WallKeyboardCtx): void {
   const lastCmdSide = useRef<'left' | 'right' | null>(null);
@@ -40,7 +47,19 @@ export function useWallKeyboard(ctx: WallKeyboardCtx): void {
       // "Workspaces").
       if (!c.activeRef.current || answeredKeys.has(e)) return;
       answeredKeys.add(e);
+      cancelUiSelectAll(e);
+      dispatch(e, c);
+      if (e.defaultPrevented) consumedKeys.add(e.code);
+      else consumedKeys.delete(e.code);
+    };
 
+    // Plain stopPropagation keeps the release from xterm's textarea while other
+    // window listeners (the mouse router's Alt tracking) still see it.
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (consumedKeys.delete(e.code)) e.stopPropagation();
+    };
+
+    const dispatch = (e: KeyboardEvent, c: WallKeyboardCtx) => {
       // Any other key cancels a pending leader: a left-Shift capital, a word,
       // then a right-Shift capital is typing, not the gesture.
       if (e.key !== 'Meta' && e.key !== 'Shift') lastCmdSide.current = lastShiftSide.current = null;
@@ -84,9 +103,11 @@ export function useWallKeyboard(ctx: WallKeyboardCtx): void {
     };
 
     window.addEventListener('keydown', handler, true);
+    window.addEventListener('keyup', onKeyUp, true);
     window.addEventListener('message', onMessage);
     return () => {
       window.removeEventListener('keydown', handler, true);
+      window.removeEventListener('keyup', onKeyUp, true);
       window.removeEventListener('message', onMessage);
     };
   }, []);

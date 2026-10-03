@@ -73,7 +73,7 @@ describe('helper autorun command mirrors', () => {
   });
 });
 
-// docs/specs/dor-cli.md: the control-socket handshake. The CLI is a bundled ESM
+// docs/specs/security-local.md -> "The dor control socket": the handshake. The CLI is a bundled ESM
 // binary with no shared build against the CJS server module, so the proof
 // domains are duplicated — and drift is silent: the server's own test builds
 // its client frames from the server's copy, so only a failed handshake at

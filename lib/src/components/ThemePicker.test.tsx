@@ -62,7 +62,7 @@ describe('ThemePicker', () => {
 
   // Only the geometry `useAnchoredMenu` computes — the rest of the panel is
   // Tailwind, and asserting a class list would fail on any equivalent restyle
-  // while passing on real breakage (docs/specs/theme.rationale.md).
+  // while passing on real breakage.
   it('offsets the compact menu off its trigger, capped to the viewport', () => {
     const menu = openCompact();
     expect(menu.style.position).toBe('absolute');

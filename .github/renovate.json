@@ -18,6 +18,11 @@
   },
   "packageRules": [
     {
+      "description": "The built-in Markdown editor stays on Mermaid 11; see docs/specs/dor-tools-builtin.rationale.md, Markdown editor",
+      "matchPackageNames": ["mermaid"],
+      "allowedVersions": "<12"
+    },
+    {
       "description": "Declare a dependency the same way in every workspace: under update-lockfile, an exact pin beside a caret splits one release into a package.json rewrite and a lockfile-only update on a separate `-lockfile` branch, so it arrives as two PRs that each move one workspace (#727/#728, #732/#733)",
       "matchManagers": ["npm", "cargo"],
       "rangeStrategy": "update-lockfile"

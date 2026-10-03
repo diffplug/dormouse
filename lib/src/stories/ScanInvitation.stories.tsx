@@ -58,7 +58,7 @@ export const CameraStarting: Story = {
 
 // Permission refused. The one camera failure the user can fix, and paste stays
 // available beneath it — a desktop browser and the dev loop have no camera at
-// all (`docs/specs/pocket-app.md`).
+// all.
 export const CameraDenied: Story = {
   args: { startScan: refused('NotAllowedError') },
 };

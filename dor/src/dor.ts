@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 
 import { runCli } from './cli.js';
+import type { PickerTerminal } from './commands/types.js';
 
-runCli(process.argv.slice(2), { env: process.env, readStdin }).then(
+runCli(process.argv.slice(2), { env: process.env, readStdin, terminal: ttyTerminal() }).then(
   (result) => {
     process.stdout.write(result.stdout);
     process.stderr.write(result.stderr);
@@ -23,4 +24,29 @@ function readStdin(): Promise<string> {
     process.stdin.on('error', reject);
     process.stdin.resume();
   });
+}
+
+/** The picker's terminal (`dor open` with no path), only when a person is at one. */
+function ttyTerminal(): PickerTerminal | undefined {
+  const { stdin, stdout } = process;
+  if (!stdin.isTTY || !stdout.isTTY) return undefined;
+  return {
+    columns: () => stdout.columns || 80,
+    rows: () => stdout.rows || 24,
+    write: (text) => { stdout.write(text); },
+    listen(onInput, onResize) {
+      const input = (chunk: Buffer | string) => onInput(String(chunk));
+      stdin.setRawMode(true);
+      stdin.setEncoding('utf8');
+      stdin.on('data', input);
+      stdin.resume();
+      stdout.on('resize', onResize);
+      return () => {
+        stdin.off('data', input);
+        stdout.off('resize', onResize);
+        stdin.setRawMode(false);
+        stdin.pause();
+      };
+    },
+  };
 }

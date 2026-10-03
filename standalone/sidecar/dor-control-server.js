@@ -253,6 +253,8 @@ function createDorControlServer({ socketPath, socketDir, token, send, getHelperP
     return true;
   }
 
+  // A malformed request is answered with an error and never forwarded; the
+  // connection stays open for the client's next line.
   function handleRequest(socket, line) {
     let request;
     try {

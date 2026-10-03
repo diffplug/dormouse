@@ -586,6 +586,11 @@ export function attachRouter(
           post({ type: 'pty:openPorts', id: msg.id, ports, requestId: msg.requestId } satisfies ExtensionMessage);
         });
         break;
+      case 'pty:getOpenPortsMany':
+        ptyManager.getOpenPortsMany(msg.ids).then((ports) => {
+          post({ type: 'pty:openPortsMany', ports, requestId: msg.requestId } satisfies ExtensionMessage);
+        });
+        break;
       case 'pty:getShells':
         ptyManager.getAvailableShells().then((shells) => {
           post({

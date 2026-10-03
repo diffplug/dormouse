@@ -1,6 +1,7 @@
 import { getToolDirty, resetToolDirty } from '../tool-dirty-store';
 import { getToolAnnounce, resetToolAnnounces } from '../tool-announce-store';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { openPortRequestTimeoutMs } from './types';
 
 const terminalStateStoreMocks = vi.hoisted(() => ({
   applyTerminalSemanticEvents: vi.fn(),
@@ -603,6 +604,20 @@ describe('VSCodeAdapter port deadline', () => {
     await vi.advanceTimersByTimeAsync(7500);
     const ports = [{ address: '127.0.0.1', port: 5173, pid: 1 }];
     windowTarget.dispatchEvent(hostMessage({ type: 'pty:openPorts', requestId: request.requestId, ports }));
+    expect(await answer).toEqual(ports);
+  });
+
+  it('budgets a batched request for every id it names', async () => {
+    vi.useFakeTimers();
+    const adapter = new VSCodeAdapter();
+    const ids = Array.from({ length: 20 }, (_, index) => `pane-${index}`);
+    const answer = adapter.getOpenPortsMany(ids);
+    const request = postMessage.mock.calls.at(-1)![0];
+    expect(request).toMatchObject({ type: 'pty:getOpenPortsMany', ids });
+    // Past a single request's budget, inside twenty ids' worth.
+    await vi.advanceTimersByTimeAsync(openPortRequestTimeoutMs(1, 2) + 1000);
+    const ports = { 'pane-0': [{ address: '127.0.0.1', port: 5173, pid: 1 }] };
+    windowTarget.dispatchEvent(hostMessage({ type: 'pty:openPortsMany', requestId: request.requestId, ports }));
     expect(await answer).toEqual(ports);
   });
 });

@@ -126,7 +126,7 @@ export function persistableLeafMeta(meta: LeafMeta): LeafMeta {
   // it a tool would restore a pane that spawns a shell in a repo nobody
   // approved, with no gesture at all — and the prompt cannot be restored either,
   // since the grant it was asking for was never made
-  // (`docs/specs/dor-tool.md` -> Trust rule 3).
+  // (`docs/specs/dor-tool.md` -> Trust rule 2).
   if (meta.params.toolPending !== undefined) {
     return { component: 'terminal', tabComponent: 'terminal', title: meta.title };
   }
