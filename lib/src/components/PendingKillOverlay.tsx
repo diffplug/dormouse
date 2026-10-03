@@ -1,5 +1,5 @@
 import { XIcon } from '@phosphor-icons/react';
-import { useLayoutEffect, useRef, useSyncExternalStore } from 'react';
+import { useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import {
   finalizePendingKill, getPendingKills, holdPendingKill, PENDING_KILL_MS, pendingKillKey, pendingKillProgress,
   restorePendingKill, subscribeToPendingKills, type PendingKill,
@@ -16,13 +16,19 @@ const SHOWN = 3;
  */
 export function PendingKillOverlay() {
   const kills = useSyncExternalStore(subscribeToPendingKills, getPendingKills);
+  // While the pointer is over the stack its top edge stays put: older entries
+  // finalize from the bottom, and a bottom-anchored stack would otherwise slide
+  // the held entry out from under the pointer.
+  const [frozenHeight, setFrozenHeight] = useState<number | null>(null);
   if (kills.length === 0) return null;
   const hidden = kills.length - SHOWN;
   return (
     <ol
       aria-label="Pending kills"
       className="pointer-events-none fixed right-2 bottom-9 flex w-64 max-w-[calc(100vw-1rem)] flex-col gap-1.5"
-      style={{ zIndex: PENDING_KILL_Z_INDEX }}
+      style={{ zIndex: PENDING_KILL_Z_INDEX, minHeight: frozenHeight ?? undefined }}
+      onPointerEnter={event => setFrozenHeight(event.currentTarget.getBoundingClientRect().height)}
+      onPointerLeave={() => setFrozenHeight(null)}
     >
       {kills.slice(0, SHOWN).map(kill => <PendingKillEntry key={pendingKillKey(kill.kind, kill.id)} kill={kill} />)}
       {hidden > 0 && (
