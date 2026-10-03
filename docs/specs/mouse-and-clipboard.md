@@ -12,8 +12,6 @@
 
 **Visibility.** The **Mouse icon** marks an inside program requesting mouse reporting (§6.1); the **No-Mouse icon** takes the same slot while an override is active.
 
-**Click.** The icons start and end the override (§2).
-
 Source of truth: `TerminalPaneHeader` in `lib/src/components/wall/TerminalPaneHeader.tsx`.
 
 ---

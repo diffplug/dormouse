@@ -318,7 +318,7 @@ with a monotonic `revision`; a webview drops a snapshot behind the one it holds.
   it** (§Routing). A target the registry cannot place — one no window reports,
   or a name two windows carry — falls through to the caller's window, which
   refuses a name duplicated there and otherwise resolves its own. **A target
-  routes as a number only when it reads as `POSITIONAL_WORKSPACE_REF`**
+  routes as a number only when it reads as `NUMERIC_WORKSPACE_REF`**
   (`dor/src/protocol.ts`); `007` and `0` are names.
 - **Must keep numbered and opaque refs consistent across Rust, the webview, and
   the browser harness**: `standalone/scripts/workspace-ref-cases.json` holds the
@@ -681,8 +681,7 @@ Source of truth: `QuitMachine` in `standalone/src-tauri/src/quit_state.rs`;
 **Must intercept every quit trigger in Rust** and run the webview teardown
 before exiting (rationale).
 
-**Every window votes before any window is torn down** (rationale): Rust asks
-them all, and only once all agree walks them one teardown at a time.
+**Every window votes before any window is torn down** (rationale).
 
 ```mermaid
 stateDiagram-v2

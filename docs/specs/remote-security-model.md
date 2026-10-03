@@ -175,7 +175,7 @@ newly-added passkey is not automatically trusted; its Client must still pair.
 
 - **The invitation is Burrow memory.** `setupQr` mints the Relay's setup token
   and, locally, a 16-byte invitation id plus a one-use X25519 invitation
-  keypair, bounded by the eight-invitation cap and expiring on the pairing TTL.
+  keypair, bounded by the eight-invitation cap.
   The QR carries `burrowId`, invitation id, expiry, setup token, and invitation
   public key ([relay.md](./relay.md) owns the grammar); **it carries no Burrow
   static, no label, and no signature** (rationale).
@@ -646,8 +646,8 @@ established above and pinned by
 
 **Never claim this model for paid SaaS before an independent cryptographic
 review** of the Noise integration, the WebAuthn channel binding, key storage,
-and the push construction. Self-hosting is the shipped deployment and carries no
-such claim.
+and the push construction. No shipped build, Hosted or self-host, carries such a
+claim.
 
 ## Residual metadata
 
