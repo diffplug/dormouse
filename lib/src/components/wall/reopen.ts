@@ -1,7 +1,7 @@
 import { isWindowControlMethod, unsupportedControlMethodMessage } from 'dor/protocol';
 import type { ReopenResponse } from 'dor/commands/types';
 import { getPlatform } from '../../lib/platform';
-import { popReopenRecord, pushReopenRecord, type SurfaceReopenRecord, type WorkspaceReopenRecord } from '../../lib/reopen-stack';
+import { newestReopenClosedAt, popReopenRecord, pushReopenRecord, type SurfaceReopenRecord, type WorkspaceReopenRecord } from '../../lib/reopen-stack';
 import { withFreshSurfaceIds } from '../../lib/session-remap';
 import { restoreSession } from '../../lib/session-restore';
 import type { WorkspaceId } from '../../lib/session-types';
@@ -10,6 +10,7 @@ import type { DorControlRequest } from './use-dor-control';
 import { wallBootFromResult } from './wall-types';
 import { getWallHandle } from './wall-handles';
 import { setWorkspaceBootPlan } from './workspace-boot-plans';
+import { mintSurfaceId } from './window-reopen';
 
 /**
  * The Reopen verb (`docs/specs/reopen.md`): `⌘⇧T`, command-mode `u`, and
@@ -19,16 +20,20 @@ import { setWorkspaceBootPlan } from './workspace-boot-plans';
 export type ReopenOutcome =
   | { kind: 'surface'; workspaceId: WorkspaceId; surfaceId: string; surfaceRef: string }
   | { kind: 'workspace'; workspaceId: WorkspaceId }
+  | { kind: 'window' }
   | { kind: 'nothing' };
 
 export const NOTHING_TO_REOPEN = 'Nothing to reopen';
 
 /**
- * Reopen the newest record. A gesture brings what it reopened into view and
- * answers an empty stack with a brief notice; `dor reopen` stays
+ * Reopen the newest record: this Window's own, or a closed window the host
+ * holds, whichever closed last. A gesture brings what it reopened into view
+ * and answers an empty stack with a brief notice; `dor reopen` stays
  * focus-neutral and reads the outcome instead.
  */
-export function reopenClosed({ gesture }: { gesture: boolean }): ReopenOutcome {
+export async function reopenClosed({ gesture }: { gesture: boolean }): Promise<ReopenOutcome> {
+  const platform = getPlatform();
+  if (await platform.reopenClosedWindow?.(newestReopenClosedAt() ?? 0)) return { kind: 'window' };
   const record = popReopenRecord();
   if (!record) {
     if (gesture) getWallHandle(getActiveWorkspaceId())?.showNotice(NOTHING_TO_REOPEN);
@@ -65,23 +70,21 @@ function reopenWorkspace(record: WorkspaceReopenRecord, gesture: boolean): Reope
   return { kind: 'workspace', workspaceId: id };
 }
 
-function mintSurfaceId(): string {
-  return `pane-${crypto.randomUUID()}`;
-}
-
 /** `dor reopen` (`window.reopen`): focus-neutral, and an empty stack refuses. */
-export function handleReopenControl(detail: DorControlRequest): void {
+export async function handleReopenControl(detail: DorControlRequest): Promise<void> {
   if (!isWindowControlMethod(detail.method)) {
     detail.respond({ ok: false, error: unsupportedControlMethodMessage(detail.method) });
     return;
   }
-  const outcome = reopenClosed({ gesture: false });
+  const outcome = await reopenClosed({ gesture: false });
   if (outcome.kind === 'nothing') {
     detail.respond({ ok: false, error: NOTHING_TO_REOPEN });
     return;
   }
   const result: ReopenResponse = outcome.kind === 'surface'
     ? { status: 'reopened', kind: 'surface', surfaceId: outcome.surfaceId, surfaceRef: outcome.surfaceRef }
-    : { status: 'reopened', kind: 'workspace', workspaceId: outcome.workspaceId, workspaceRef: workspaceRefFor(outcome.workspaceId) };
+    : outcome.kind === 'workspace'
+      ? { status: 'reopened', kind: 'workspace', workspaceId: outcome.workspaceId, workspaceRef: workspaceRefFor(outcome.workspaceId) }
+      : { status: 'reopened', kind: 'window' };
   detail.respond({ ok: true, result });
 }

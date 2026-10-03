@@ -130,7 +130,7 @@ async function bootstrap() {
     initQuitFlow(adapter);
     initWindowClose(adapter);
     // The macOS File menu's Reopen Closed (docs/specs/reopen.md → Reopen verb).
-    void listenToWindow("dormouse://reopen-closed", () => { reopenClosed({ gesture: true }); });
+    void listenToWindow("dormouse://reopen-closed", () => { void reopenClosed({ gesture: true }); });
     // A quit or a close with ≥1 running command opens <WorkspaceTeardownModalHost>.
     setQuitConfirmGate(openQuitConfirm);
   }

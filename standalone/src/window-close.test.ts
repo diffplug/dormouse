@@ -11,15 +11,17 @@ import type { TauriAdapter } from "./tauri-adapter";
 const mocks = vi.hoisted(() => ({
   invoke: vi.fn(async (_cmd: string) => undefined as unknown),
   listen: vi.fn(),
-  countRunningSessions: vi.fn(() => 0),
+  needsConfirmation: vi.fn(() => false),
+  reopenSnapshot: vi.fn((): unknown => null),
   getWorkspacesSnapshot: vi.fn(() => ({ workspaces: [{ id: "w1", name: "Deploys" }], activeId: "w1" })),
   hasPendingUpdate: vi.fn(() => false),
 }));
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: mocks.listen }));
-vi.mock("dormouse-lib/lib/terminal-registry", () => ({
-  countRunningSessions: mocks.countRunningSessions,
+vi.mock("dormouse-lib/components/wall/window-reopen", () => ({
+  windowNeedsCloseConfirmation: mocks.needsConfirmation,
+  windowReopenSnapshot: mocks.reopenSnapshot,
 }));
 
 
@@ -62,9 +64,10 @@ describe("per-window close", () => {
       listeners.set(event, cb);
       return Promise.resolve(() => {});
     });
-    mocks.countRunningSessions.mockReturnValue(0);
+    mocks.needsConfirmation.mockReturnValue(false);
     mocks.invoke.mockResolvedValue(undefined);
     mocks.hasPendingUpdate.mockReturnValue(false);
+    mocks.reopenSnapshot.mockReturnValue(null);
   });
 
   afterEach(() => _resetWindowCloseForTesting());
@@ -100,8 +103,22 @@ describe("per-window close", () => {
     expect(adapter.gracefulKillPtys).toHaveBeenCalledWith(expect.any(Number));
   });
 
-  it("asks first when the window holds running work, and Cancel leaves it alone", async () => {
-    mocks.countRunningSessions.mockReturnValue(2);
+  // The webview dies with the close, so the host keeps what Reopen needs
+  // (docs/specs/reopen.md); read before the kill empties the Sessions.
+  it("hands the host a reopenable window's snapshot before removing and killing", async () => {
+    const snapshot = { version: 1, workspaces: [], activeWorkspaceId: "w9" };
+    mocks.reopenSnapshot.mockReturnValue(snapshot);
+    const order: string[] = [];
+    mocks.invoke.mockImplementation(async (cmd: string) => void order.push(cmd));
+    initWindowClose(fakeAdapter(order));
+    closeRequested();
+    await settle();
+    expect(order).toEqual(["window_close_ack", "push_closed_window", "remove_window_session", "gracefulKill", "close_window"]);
+    expect(mocks.invoke).toHaveBeenCalledWith("push_closed_window", { snapshot: JSON.stringify(snapshot), closedAt: expect.any(Number) });
+  });
+
+  it("asks first when the window holds work Reopen cannot restore, and Cancel leaves it alone", async () => {
+    mocks.needsConfirmation.mockReturnValue(true);
     const adapter = fakeAdapter();
     initWindowClose(adapter);
     closeRequested();
@@ -122,7 +139,7 @@ describe("per-window close", () => {
   it("asks about an approved download even with nothing running", async () => {
     // The download lives in this webview's memory, so closing the window is the
     // one ending that silently discards it.
-    mocks.countRunningSessions.mockReturnValue(0);
+    mocks.needsConfirmation.mockReturnValue(false);
     mocks.hasPendingUpdate.mockReturnValue(true);
     const adapter = fakeAdapter();
     initWindowClose(adapter);
@@ -135,7 +152,7 @@ describe("per-window close", () => {
   });
 
   it("says nothing about an update when none is downloaded", async () => {
-    mocks.countRunningSessions.mockReturnValue(1);
+    mocks.needsConfirmation.mockReturnValue(true);
     initWindowClose(fakeAdapter());
     closeRequested();
     await settle();
@@ -144,7 +161,7 @@ describe("per-window close", () => {
   });
 
   it("deduplicates a repeat close trigger while a decision is outstanding", async () => {
-    mocks.countRunningSessions.mockReturnValue(1);
+    mocks.needsConfirmation.mockReturnValue(true);
     initWindowClose(fakeAdapter());
     closeRequested();
     await settle();

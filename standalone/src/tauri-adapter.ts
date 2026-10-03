@@ -569,6 +569,10 @@ export class TauriAdapter implements PlatformAdapter {
    *  adopted the Workspace, rejected with the host's reason when it was handed
    *  back. Imported on use: `workspace-move` pulls the whole move protocol in,
    *  which a window that never moves anything need not load. */
+  reopenClosedWindow(newerThan: number): Promise<boolean> {
+    return rawInvoke<boolean>("reopen_closed_window", { newerThan });
+  }
+
   async transferWorkspace(workspaceId: string, toWindow: string, options: { index?: number } = {}): Promise<void> {
     const { tearOutWorkspace, transferWorkspaceTo } = await import("./workspace-move");
     // A torn-out window has one tab, so an index names no slot there.

@@ -171,6 +171,26 @@ describe('Reopen', () => {
     expect(leafIds()).toHaveLength(2);
   });
 
+  it('reopens a closed window the host holds when it closed after this Window\'s newest record', async () => {
+    const fake = new FakePtyAdapter();
+    const reopenClosedWindow = vi.fn(async (newerThan: number) => newerThan < 1000);
+    Object.assign(fake, { reopenClosedWindow });
+    setPlatform(fake);
+    await renderTerminalBesideBrowser();
+    await control(SURFACE_CONTROL_METHODS.kill, { surface: 'web', confirmation: { mode: 'dangerously' } });
+    await harness.flush();
+    const [record] = _reopenRecordsForTesting();
+    // The window closed later than the Surface did: it comes back first.
+    record.closedAt = 500;
+    expect((await control(WINDOW_CONTROL_METHODS.reopen)).result).toEqual({ status: 'reopened', kind: 'window' });
+    expect(reopenClosedWindow).toHaveBeenLastCalledWith(500);
+    expect(_reopenRecordsForTesting()).toHaveLength(1);
+    // The Surface closed later than any window: this Window's own record wins.
+    record.closedAt = 2000;
+    expect((await control(WINDOW_CONTROL_METHODS.reopen)).result).toMatchObject({ kind: 'surface' });
+    expect(reopenClosedWindow).toHaveBeenLastCalledWith(2000);
+  });
+
   it('says so briefly when `u` finds nothing to reopen', async () => {
     await renderTerminalBesideBrowser();
     await pressU();

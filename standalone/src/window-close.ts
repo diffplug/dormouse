@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { countRunningSessions } from "dormouse-lib/lib/terminal-registry";
+import { windowNeedsCloseConfirmation, windowReopenSnapshot } from "dormouse-lib/components/wall/window-reopen";
 import { openQuitConfirm } from "./quit-confirm-store";
 import { createTeardownFlow } from "./teardown-flow";
 import type { TauriAdapter } from "./tauri-adapter";
@@ -16,7 +16,8 @@ import { listenToWindow } from "./window-label";
  *
  * A close is **deliberate**: unlike a quit it takes the window's snapshot off
  * disk, so the next launch does not reopen it. It runs no agent-recovery
- * capture for the same reason — nothing is coming back.
+ * capture for the same reason — nothing resumes; Reopen rebuilds a window
+ * whose close asked nothing from the record it leaves the host.
  *
  * The ack / confirm half is `createTeardownFlow`, shared with the quit; what is
  * close-specific is the teardown below.
@@ -35,9 +36,10 @@ const flow = createTeardownFlow({
   // Always asked, never optional: a close is one window's own decision, and the
   // dialog host is mounted in every window.
   gate: () => openQuitConfirm,
-  // An approved download lives in this webview's memory, so closing throws it
-  // away — worth asking about even with nothing running.
-  mustConfirm: () => countRunningSessions() > 0 || hasPendingUpdate(),
+  // Asks when any member's own close would (docs/specs/reopen.md). An approved
+  // download lives in this webview's memory, so closing throws it away — worth
+  // asking about even when everything else could be reopened.
+  mustConfirm: () => windowNeedsCloseConfirmation() || hasPendingUpdate(),
   proceed: runCloseTeardown,
 });
 
@@ -53,6 +55,9 @@ export function initWindowClose(adapter: TauriAdapter): void {
 
 async function runCloseTeardown(): Promise<void> {
   const adapter = closeAdapter;
+  // First, while every Session is still here to read: the closing webview
+  // dies, so the host keeps the record (docs/specs/reopen.md).
+  await pushReopenRecord().catch((err) => console.warn("[window-close] no reopen record; proceeding", err));
   try {
     // Remove the snapshot BEFORE the kill, so an exit-triggered save cannot
     // write it back: Rust refuses every later save for this label.
@@ -73,6 +78,11 @@ async function runCloseTeardown(): Promise<void> {
   } finally {
     void invoke("close_window").catch(() => {});
   }
+}
+
+async function pushReopenRecord(): Promise<void> {
+  const snapshot = windowReopenSnapshot();
+  if (snapshot) await invoke("push_closed_window", { snapshot: JSON.stringify(snapshot), closedAt: Date.now() });
 }
 
 /** @internal Reset module state for testing. */

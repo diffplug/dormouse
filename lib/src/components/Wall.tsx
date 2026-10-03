@@ -2368,7 +2368,7 @@ export function Wall({
     minimizePane,
     openTerminalContext: (id, origin) => contextActions.open(id, { origin }),
     requestKill,
-    reopenClosed: () => { reopenClosed({ gesture: true }); },
+    reopenClosed: () => { void reopenClosed({ gesture: true }); },
     acceptKill,
     rejectKill,
     setRenamingPaneId,

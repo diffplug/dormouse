@@ -34,6 +34,7 @@ vi.mock("dormouse-lib/lib/window-session-aggregator", () => ({
 vi.mock("dormouse-lib/lib/workspace-store", () => ({
   subscribeToWorkspaces: () => () => {},
   getWorkspacesSnapshot: mocks.getWorkspacesSnapshot,
+  generateWorkspaceId: () => "workspace-9",
 }));
 vi.mock("./updater", () => ({
   hasPendingUpdate: mocks.hasPendingUpdate,
@@ -80,7 +81,11 @@ describe("one window, two teardown flows", () => {
     _resetQuitConfirmForTesting();
     listeners.clear();
     resetWallHandles();
-    registerWallHandle(stubWallHandle("w1", { dirtyToolIds: () => getToolDirty("editor") === true ? ["editor"] : [] }));
+    registerWallHandle(stubWallHandle("w1", {
+      dirtyToolIds: () => getToolDirty("editor") === true ? ["editor"] : [],
+      // Running work is what a quit counts; a close asks about the same Session.
+      needsCloseConfirmation: () => mocks.countRunningSessions() > 0,
+    }));
     mocks.listen.mockImplementation((event: string, cb: (e: { payload?: unknown }) => void) => {
       listeners.set(event, cb);
       return Promise.resolve(() => {});

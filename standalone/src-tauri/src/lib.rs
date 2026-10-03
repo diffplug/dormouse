@@ -150,6 +150,32 @@ struct WindowState {
     /// The next `workspace-<n>`, seeded above every id on disk at setup and
     /// handed out in blocks so a webview can mint synchronously.
     next_workspace: AtomicU64,
+    /// Windows closed with everything reopenable, newest first
+    /// (docs/specs/reopen.md). Memory only: a quit forgets them.
+    closed_windows: Mutex<Vec<ClosedWindow>>,
+}
+
+/// What Reopen rebuilds a closed window from: the snapshot its webview built
+/// with fresh ids, and where it sat.
+#[derive(Debug, Clone, PartialEq)]
+struct ClosedWindow {
+    snapshot: String,
+    geometry: Option<WindowGeometry>,
+    /// The webview's clock, so it compares with that window's own records.
+    closed_at: f64,
+}
+
+/// As many closed windows as a Window keeps closed Surfaces.
+const CLOSED_WINDOW_CAP: usize = 20;
+
+fn push_closed(stack: &mut Vec<ClosedWindow>, closed: ClosedWindow) {
+    stack.insert(0, closed);
+    stack.truncate(CLOSED_WINDOW_CAP);
+}
+
+/// The newest closed window, if it closed after `newer_than`.
+fn take_closed_newer_than(stack: &mut Vec<ClosedWindow>, newer_than: f64) -> Option<ClosedWindow> {
+    if stack.first()?.closed_at > newer_than { Some(stack.remove(0)) } else { None }
 }
 
 impl RoutingState {
@@ -3229,6 +3255,43 @@ fn take_arrivals(window: tauri::Window, windows: tauri::State<'_, WindowState>) 
     routing::arrival_payloads(&guard(&windows.arrivals), window.label())
 }
 
+/// A closing window whose close asked nothing leaves its snapshot here, built
+/// with fresh ids, for Reopen (docs/specs/reopen.md); its geometry is the cached box.
+#[tauri::command]
+fn push_closed_window(
+    window: tauri::Window,
+    windows: tauri::State<'_, WindowState>,
+    geometry: tauri::State<'_, GeometryState>,
+    snapshot: String,
+    closed_at: f64,
+) {
+    let geometry = geometry.refresh_rect(window.label(), None).map(CachedRect::to_logical);
+    push_closed(&mut guard(&windows.closed_windows), ClosedWindow { snapshot, geometry, closed_at });
+}
+
+/// Reopen the newest closed window in a new one, when it closed after
+/// `newer_than` — the asking window's own newest record. The new window finds
+/// the snapshot on disk and restores it as any window boots.
+#[tauri::command(async)]
+fn reopen_closed_window(
+    app: AppHandle,
+    windows: tauri::State<'_, WindowState>,
+    newer_than: f64,
+) -> Result<bool, String> {
+    let Some(closed) = take_closed_newer_than(&mut guard(&windows.closed_windows), newer_than) else {
+        return Ok(false);
+    };
+    let label = next_window_label(&windows);
+    let dir = sessions_dir(&app)?;
+    {
+        let _disk = guard(&ARRIVAL_DISK_LOCK);
+        write_session_to(&dir, &label, &closed.snapshot)?;
+    }
+    append_log(format!("[window] reopening a closed window as {label}"));
+    build_window(&app, &label, closed.geometry)?;
+    Ok(true)
+}
+
 /// Remove this window's persisted snapshot and stop it being written again.
 #[tauri::command]
 async fn remove_window_session(window: tauri::Window) -> Result<(), String> {
@@ -4282,6 +4345,8 @@ pub fn run() {
             workspace_report,
             workspace_registry,
             remove_window_session,
+            push_closed_window,
+            reopen_closed_window,
             window_at_cursor,
             hover_workspace_target,
             get_available_shells,
@@ -5485,6 +5550,23 @@ mod tests {
             super::routing::restorable_labels(&names),
             vec!["main".to_string(), "ws-2".to_string()]
         );
+    }
+
+    /// Reopen takes the newest closed window only when it closed after the
+    /// asking window's own newest record; at most 20 are kept.
+    #[test]
+    fn closed_windows_reopen_newest_first_and_only_when_newer() {
+        use super::{push_closed, take_closed_newer_than, ClosedWindow};
+        let closed = |n: u32| ClosedWindow { snapshot: format!("w{n}"), geometry: None, closed_at: f64::from(n) };
+        let mut stack = Vec::new();
+        for n in 1..=25 {
+            push_closed(&mut stack, closed(n));
+        }
+        assert_eq!(stack.len(), 20);
+        assert_eq!(take_closed_newer_than(&mut stack, 25.0), None);
+        assert_eq!(take_closed_newer_than(&mut stack, 24.0).map(|w| w.snapshot), Some("w25".into()));
+        assert_eq!(take_closed_newer_than(&mut stack, 0.0).map(|w| w.snapshot), Some("w24".into()));
+        assert_eq!(stack.last().map(|w| w.snapshot.as_str()), Some("w6"));
     }
 
     /// The cached box is fed by the window events alone, and it is what both the
