@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { AGENT_EXIT_FIXTURES } from '../lib/__fixtures__/coding-agents';
 import {
   BLIND_SECOND_PRESS_MS,
+  MAX_PRESSES,
   QUIET_BEFORE_RETRY_MS,
   captureAgentRecovery,
   type RecoveryHost,
@@ -80,6 +81,12 @@ class FakePtys implements RecoveryHost {
     this.text.set(id, (this.text.get(id) ?? '') + data);
     this.count.set(id, (this.count.get(id) ?? 0) + data.length);
   }
+}
+
+/** `data` every `period` ms after the pane's first press, for `span` ms. */
+function every(host: FakePtys, id: string, period: number, span: number, data: string): FakePtys {
+  for (let at = period; at <= span; at += period) host.onPress(id, 1, at, data);
+  return host;
 }
 
 const CLAUDE_HINT = 'claude --resume 11111111-1111-4111-8111-111111111111';
@@ -168,6 +175,76 @@ describe('captureAgentRecovery', () => {
     expect(host.presses).toEqual([['pi'], ['pi']]);
     expect(host.time).toBeLessThan(500);
     expect(host.found.pi).toBe(fixture.command);
+  });
+
+  describe('an agent interrupted mid-turn', () => {
+    // Measured 2026-10 (claude 2.1.288, copilot 1.0.88, pi 1.0.0): the first ^C
+    // only cancels the turn; the agent's own exit gesture comes after it.
+    const fixture = (agent: string) => AGENT_EXIT_FIXTURES.find((item) => item.agent === agent)!;
+
+    it('presses Claude a third time when it asks after cancelling the turn', async () => {
+      // After the cancel Claude polls the cursor position (`ESC[?6n`) every ~200ms:
+      // control bytes, not a print in flight.
+      const host = new FakePtys(['claude'])
+        .onPress('claude', 1, 40, '\x1b[2K  ⎿  Interrupted · What should Claude do instead?\r\n\x1b[1G❯ ');
+      every(host, 'claude', 200, 1300, '\x1b[?6n');
+      host.onPress('claude', 2, 10, '\x1b[1G\x1b[2KPress Ctrl-C again to exit')
+        .onPress('claude', 3, 12, `\r\nResume this session with:\r\n${CLAUDE_HINT}\r\n`);
+      expect(await captureAgentRecovery(host)).toBe(1);
+      expect(host.presses).toHaveLength(3);
+      expect(host.found.claude).toBe(CLAUDE_HINT);
+    });
+
+    it("presses Copilot again on its lowercase `ctrl+c again`", async () => {
+      const host = new FakePtys(['copilot'])
+        .onPress('copilot', 1, 40, '\r\n ● Operation cancelled by user\r\n')
+        .onPress('copilot', 2, 20, '\x1b[3;1H\x1b[1mctrl+c\x1b[22m again to exit\x1b[K')
+        .onPress('copilot', 3, 20, fixture('GitHub Copilot').output);
+      expect(await captureAgentRecovery(host)).toBe(1);
+      expect(host.presses).toHaveLength(3);
+      expect(host.found.copilot).toBe(fixture('GitHub Copilot').command);
+    });
+
+    it('presses Pi twice inside its 500ms window through its spinner', async () => {
+      // Pi keeps redrawing `Working` in place every ~82ms and exits only on two
+      // presses less than 500ms apart.
+      const host = every(new FakePtys(['pi']), 'pi', 80, 1300,
+        '\x1b[?2026h\x1b[36;1H\x1b[2K── ⠴ Working ──\x1b[?2026l');
+      host.onPress('pi', 2, 40, fixture('Pi').output);
+      const interrupt = host.interrupt.bind(host);
+      host.interrupt = async (ids) => {
+        if (host.presses.length === 1 && host.time >= 500) return;
+        await interrupt(ids);
+      };
+      expect(await captureAgentRecovery(host)).toBe(1);
+      expect(host.found.pi).toBe(fixture('Pi').command);
+    });
+  });
+
+  it('counts only an ask that arrived after the latest press', async () => {
+    // Claude's exit is slow here: the first press's ask is still in the scan
+    // window when the second press lands, and must not earn a third.
+    const host = new FakePtys(['a'])
+      .onPress('a', 1, 40, 'Press Ctrl-C again to exit')
+      .onPress('a', 2, 160, `\r\n${CLAUDE_HINT}\r\n`);
+    await captureAgentRecovery(host);
+    expect(host.presses).toHaveLength(2);
+    expect(host.found.a).toBe(CLAUDE_HINT);
+  });
+
+  it('bounds the presses of a pane that asks after every one', async () => {
+    const host = new FakePtys(['a']);
+    for (let press = 1; press <= 10; press++) host.onPress('a', press, 20, '\r\nPress Ctrl-C again to exit');
+    await captureAgentRecovery(host);
+    expect(host.presses).toHaveLength(MAX_PRESSES);
+  });
+
+  it('never presses a program that does not ask more than twice, even one that only repaints', async () => {
+    // Repainting in place is no print in flight, so the blind second press may
+    // land; nothing past it is unasked.
+    const host = every(new FakePtys(['top']), 'top', 50, 1300, '\x1b[H\x1b[2Kload 0.42');
+    await captureAgentRecovery(host);
+    expect(host.presses).toHaveLength(2);
   });
 
   it('lets Codex print its delayed one-press exit without interrupting it again', async () => {

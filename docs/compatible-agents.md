@@ -90,7 +90,8 @@ Open a **draft pull request** with the entry, fixture, documentation, and verifi
 
 - **Must use the shared `captureAgentRecovery` machine in both hosts**, supplying live ids, an acknowledged interrupt, a monotonic received count, output since a mark, and immediate record delivery.
 - **Must capture before killing the target PTYs**, within the host's bounded teardown. Each host owns the target scope; interrupt every live PTY within it, regardless of recognized command, and exclude exited PTYs. (rationale)
-- **Must write one `^C` into each target PTY per interrupt call, never signal it.** The shared machine alone decides the second press. Host interrupts must settle within their timeout. (rationale)
+- **Must write one `^C` into each target PTY per interrupt call, never signal it.** The shared machine alone decides every further press. Host interrupts must settle within their timeout. (rationale)
+- **Never press a pane more than twice unless output since its latest press asks again** (`Ctrl+C again`), **and never more than three times.** (rationale)
 - **Never finish early on quiet or replace the retry gates with a blanket second press.** Poll until every target yields or the capture budget expires; retry timing and ask detection live in the module's comments. (rationale)
 - **Must scan only output received after the mark taken before the first interrupt.** Never widen the scan into earlier output; buffer eviction may discard fresh output but must not promote stale output into the scan. (rationale)
 - **Must report each detected command immediately**, retaining earlier detections if a later target times out.

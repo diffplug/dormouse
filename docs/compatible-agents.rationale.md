@@ -10,7 +10,11 @@
 
 **Why the clocks start at the ack.** The fallback and silence windows are statements about the agent, not about the round trip; measuring from step entry folds the interrupt's own latency into the window and shortens it by an amount that varies with load.
 
-**Why the ask gate keys on an English UI string.** Claude's `Press Ctrl-C again` and Cursor's `Press Ctrl+C again` (supplied macOS exit excerpt, Cursor 2026.09.23-86fc751) could change. That failure loses recovery for that shutdown, where a mistimed second press destroys Codex's hint every time.
+**Why the ask gate keys on an English UI string.** Claude's `Press Ctrl-C again`, Cursor's `Press Ctrl+C again` (supplied macOS exit excerpt, Cursor 2026.09.23-86fc751) and Copilot's `ctrl+c again to exit` could change. That failure loses recovery for that shutdown, where a mistimed second press destroys Codex's hint every time.
+
+**Why a third press, and only on an ask** (Claude 2.1.288, Copilot 1.0.88, Antigravity 1.2.13, Pi 1.0.0, macOS, 2026-10-03). Mid-turn, the first `^C` only cancels the turn: Claude prints `Interrupted`, asks `Press Ctrl-C again to exit` after the second press and prints its hint about 12 ms after the third; Copilot asks `ctrl+c again to exit` after the second; Antigravity likewise. With two presses, all three lost the conversation in a live restart and a 12-agent harness run. A third press is reserved for a pane that asks after its latest press, so a program that is not an agent still gets at most the two it got before; counting only output after that press keeps a slow exit from seeing the previous press's ask.
+
+**Why repainting does not hold the quiet gate.** After a cancel Claude requests the cursor position (`ESC[?6n`) every ~203 ms, and Pi redraws its `Working` spinner in place every ~82 ms (Pi's `^C` never cancels a turn). Counted as output, both kept the pane from ever being quiet for 200 ms, so neither got its second press; Pi then needs two presses under 500 ms apart. Only a line feed or text written without repositioning the cursor now counts as a print in flight. A program that only repaints can therefore receive its second press where it previously got one.
 
 **Two settle-on-quiet heuristics died on the same fact.** Codex says nothing for ~250 ms and then prints its entire shutdown at once, so a poll that treats silence as completion exits before codex has spoken; both attempts to settle early on quiet lost the hint that way. Polling to the ceiling instead costs nothing, the record being written the moment each command is found.
 

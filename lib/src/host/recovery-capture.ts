@@ -19,10 +19,16 @@ import { detectResumeCommand } from '../lib/resume-patterns';
 import { stripTerminalControls } from '../lib/terminal-controls';
 
 // An explicit ask (Claude's `Press Ctrl-C again`, Cursor's `Press Ctrl+C
-// again`) permits an immediate second press. Other panes without a recovery
-// hint must pass both fallback clocks below before retrying. Keying on an
-// English UI string is deliberate: docs/compatible-agents.rationale.md.
-const ASKS_FOR_SECOND_PRESS = /Press Ctrl[-+]C again/i;
+// again`, Copilot's `ctrl+c again to exit`) permits an immediate further press.
+// Other panes without a recovery hint must pass both fallback clocks below
+// before retrying. Keying on an English UI string is deliberate:
+// docs/compatible-agents.rationale.md.
+const ASKS_FOR_ANOTHER_PRESS = /Ctrl[-+]C again/i;
+
+// The most presses any pane gets. Only an ask earns one past the second: an
+// agent interrupted mid-turn spends its first press cancelling the turn (Claude,
+// Copilot, Antigravity) and then asks for its usual exit pair.
+export const MAX_PRESSES = 3;
 
 // When to press a silent pane again without having been asked.
 //
@@ -44,6 +50,17 @@ export const BLIND_SECOND_PRESS_MS = 400;
 // cost two rounds), but as evidence that pressing again cannot interrupt a print
 // already in flight.
 export const QUIET_BEFORE_RETRY_MS = 200;
+
+// What counts as a print in flight for that gate: anything with a line feed, or
+// visible text written where the cursor already was. Output that only repaints
+// in place (Pi's `Working` spinner, every ~82ms) or carries no text at all
+// (Claude polls `ESC[?6n` every ~200ms after a cancel) would otherwise hold the
+// gate shut for the whole capture.
+const REPOSITIONS = /\x1b\[[0-9;?]*[HfABCDEFGJKd]|\r(?!\n)/;
+function printsInFlight(output: string): boolean {
+  if (output.includes('\n')) return true;
+  return stripTerminalControls(output).trim() !== '' && !REPOSITIONS.test(output);
+}
 
 // `Press Ctrl-C again` is a live TUI footer, so it is always within a few hundred
 // bytes of the tail. Bounding the strip matters: the buffer runs to ~1MB, and
@@ -152,8 +169,12 @@ export async function captureAgentRecovery(
   const lastGrewAt = new Map<string, number>();
 
   const pending = () => liveIds.filter((id) => !commands[id]);
-  // Panes that asked for a second press during the most recent scan.
+  // Panes that asked for another press since their latest one.
   const asked = new Set<string>();
+  const presses = new Map(liveIds.map((id) => [id, 1]));
+  // Where each pane's latest press landed in its output: an ask only counts
+  // after it, or a slow exit would see the previous press's ask and press again.
+  const pressMark = new Map(startMark);
   // One buffer read per pending pane per tick, shared by both things a tick needs
   // to know about that pane: joining the chunks is the expensive part, so asking
   // twice would double the cost of the poll for no new information.
@@ -181,9 +202,8 @@ export async function captureAgentRecovery(
       }
       // Strip presentation controls first — claude renders that prompt inside its
       // TUI, so the raw buffer can carry escapes through the phrase.
-      if (ASKS_FOR_SECOND_PRESS.test(stripTerminalControls(scanned.slice(-ASK_TAIL_CHARS)))) {
-        asked.add(id);
-      }
+      const sincePress = host.outputSince(id, pressMark.get(id) ?? start).slice(-ASK_TAIL_CHARS);
+      if (ASKS_FOR_ANOTHER_PRESS.test(stripTerminalControls(sincePress))) asked.add(id);
     }
   };
 
@@ -200,7 +220,6 @@ export async function captureAgentRecovery(
   // a shutdown budget rather than an agent timing.
   const interruptedAt = now();
   for (const id of liveIds) lastGrewAt.set(id, interruptedAt);
-  const pressedTwice = new Set<string>();
 
   // Poll to the ceiling. Do NOT try to finish early on quiet: codex says nothing
   // for ~250ms after the interrupt and then prints its whole shutdown at once, so
@@ -222,16 +241,25 @@ export async function captureAgentRecovery(
     const elapsed = now() - interruptedAt;
     for (const id of pending()) {
       const mark = host.receivedChars(id);
-      if (mark !== lastMark.get(id)) { lastMark.set(id, mark); lastGrewAt.set(id, now()); }
+      const last = lastMark.get(id) ?? mark;
+      if (mark === last) continue;
+      if (printsInFlight(host.outputSince(id, last))) lastGrewAt.set(id, now());
+      lastMark.set(id, mark);
     }
     const quietFor = (id: string) => now() - (lastGrewAt.get(id) ?? interruptedAt);
-    const retry = pending().filter((id) => !pressedTwice.has(id)
-      && (asked.has(id)
-        || (elapsed >= BLIND_SECOND_PRESS_MS && quietFor(id) >= QUIET_BEFORE_RETRY_MS)));
+    const retry = pending().filter((id) => {
+      const count = presses.get(id) ?? 1;
+      if (asked.has(id)) return count < MAX_PRESSES;
+      return count === 1 && elapsed >= BLIND_SECOND_PRESS_MS && quietFor(id) >= QUIET_BEFORE_RETRY_MS;
+    });
     if (retry.length > 0) {
       const why = retry.some((id) => asked.has(id)) ? 'asked' : `silent past ${BLIND_SECOND_PRESS_MS}ms`;
-      retry.forEach((id) => pressedTwice.add(id));
-      log.info(`[recovery] second press for ${retry.length} pane(s) at +${elapsed}ms after ^C (${why})`);
+      for (const id of retry) {
+        presses.set(id, (presses.get(id) ?? 1) + 1);
+        pressMark.set(id, host.receivedChars(id));
+        asked.delete(id);
+      }
+      log.info(`[recovery] another press for ${retry.length} pane(s) at +${elapsed}ms after ^C (${why})`);
       await host.interrupt(retry);
     }
   }
@@ -246,7 +274,7 @@ export async function captureAgentRecovery(
   // disclosure this whole scope exists to remove.
   for (const id of pending()) {
     const after = host.receivedChars(id) - (startMark.get(id) ?? 0);
-    log.info(`[recovery]   no hint from ${id}: +${after} bytes since interrupt, asked=${asked.has(id)}, pressedTwice=${pressedTwice.has(id)}`);
+    log.info(`[recovery]   no hint from ${id}: +${after} bytes since interrupt, asked=${asked.has(id)}, presses=${presses.get(id)}`);
   }
   return found;
 }
