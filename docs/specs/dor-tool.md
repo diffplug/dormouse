@@ -129,11 +129,11 @@ A **reap** stops an idle Tool's Session, shell included; **rehydrate** starts it
 
 **Must rehydrate a reaped Tool when it becomes visible, or when `dor tool` or `dor open` matches it** (reporting `adopted`), never into a closing or transferring Workspace: a fresh shell in the run's directory, the saved command typed as cold restore types it ([Persistence and hosts](#persistence-and-hosts)). It degrades in tiers:
 
-| Tier | Start |
+| Tier | When |
 | --- | --- |
-| Dehydrated | `DORMOUSE_DEHYDRATE` holds the captured payload |
-| Bare args | No payload, or the dehydrated run exited non-zero before any `serve`: the command typed again without it |
-| Error | The bare run failed too; its output stays above the prompt |
+| Dehydrated | A payload was captured: `DORMOUSE_DEHYDRATE` holds it |
+| Bare args | No payload was captured |
+| Error | The run fails: its output stays above the prompt, never retyped (rationale) |
 
 - **Must hand the payload to the rehydrated run alone**: the host sets `DORMOUSE_DEHYDRATE` on that spawn and strips an inherited one from every other, and shell integration unsets it when the first command finishes.
 - **Must keep the payload in renderer memory, never on disk** (rationale). A `reaped` mark in Tool metadata persists, so a resume, cold restore, or Workspace transfer keeps the Tool reaped, to rehydrate from bare args when shown.

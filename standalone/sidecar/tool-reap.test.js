@@ -1,6 +1,6 @@
 // A reap and rehydrate on a real PTY (docs/specs/dor-tool.md -> Reaping): the
 // PTY core's spawn, the shipped bash integration, and a real Tool process. The
-// renderer half — when to stop, which payload counts, the bare-args retry — is
+// renderer half — when to stop, which payload counts — is
 // pinned by lib/src/components/wall/tool-reaper.test.ts; this pins what only a
 // real shell shows: Ctrl+C reaching the Tool through the line discipline, the
 // payload arriving in its environment, and the integration unsetting it so no
@@ -117,7 +117,7 @@ for (const [name, shell] of [['bash', BASH], ['zsh', ZSH]]) test(`${name}: a Too
     await s.spawn(payload);
     assert.deepEqual(await s.run(), { stops: 1 });
     assert.equal(await s.stop(), JSON.stringify({ v: 1, state: { stops: 2 } }));
-    // The bare-args retry, or any later command in this shell, runs without it.
+    // Any later command in this shell runs without it.
     assert.equal(await s.run(), null);
     await s.stop();
   } finally {

@@ -77,7 +77,7 @@ __dormouse_633_prompt() {
   local exit_code=$?
   __dormouse_633_armed=
   # A rehydrated Tool's payload belongs to its first command alone
-  # (docs/specs/dor-tool.md -> Reaping); the bare-args retry runs without it.
+  # (docs/specs/dor-tool.md -> Reaping); no later command inherits it.
   if [ -n "$__dormouse_633_ran" ]; then printf '\033]633;D;%s\007' "$exit_code"; unset DORMOUSE_DEHYDRATE; fi
   __dormouse_633_ran=
   __dormouse_633_safe_cwd "$PWD"

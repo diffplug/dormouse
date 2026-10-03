@@ -96,7 +96,7 @@ if [[ -z ${DORMOUSE_SHELL_INTEGRATION} ]]; then
     if [[ -z ${__dormouse_633_first_prompt} ]]; then
       builtin printf '\e]633;D;%s\a' "$exit_code"
       # A rehydrated Tool's payload belongs to its first command alone
-      # (docs/specs/dor-tool.md -> Reaping); the bare-args retry runs without it.
+      # (docs/specs/dor-tool.md -> Reaping); no later command inherits it.
       builtin unset DORMOUSE_DEHYDRATE
     fi
     __dormouse_633_first_prompt=

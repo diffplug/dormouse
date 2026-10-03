@@ -33,7 +33,7 @@ function Global:__dormouse_633_osc([string]$body) {
 }
 
 # A rehydrated Tool's payload belongs to its first command alone
-# (docs/specs/dor-tool.md -> Reaping); the bare-args retry runs without it.
+# (docs/specs/dor-tool.md -> Reaping); no later command inherits it.
 function Global:__dormouse_633_clear_dehydrate {
 	Remove-Item Env:DORMOUSE_DEHYDRATE -ErrorAction SilentlyContinue
 }

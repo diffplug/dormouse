@@ -236,37 +236,6 @@ describe('rehydrateTool', () => {
     rehydrateTool(lath, ID);
     expect(lath.getMeta(ID)?.params?.command).toBe("viewer 'a b.md'");
   });
-
-  describe('the bare-args tier', () => {
-    async function rehydratedRun(exitCode: number, announced: boolean) {
-      const lath = await reaped();
-      rehydrateTool(lath, ID);
-      await prompt();
-      writes = [];
-      startRun();
-      if (announced) announce();
-      applyTerminalSemanticEvents(ID, [{ type: 'commandFinish', exitCode }]);
-      return lath;
-    }
-
-    it('types the command once more when the dehydrated run fails before announcing', async () => {
-      await rehydratedRun(1, false);
-      expect(writes).toEqual([`${COMMAND}\r`]);
-      // Once: the bare run failing too is the error tier.
-      startRun();
-      applyTerminalSemanticEvents(ID, [{ type: 'commandFinish', exitCode: 1 }]);
-      expect(writes).toEqual([`${COMMAND}\r`]);
-    });
-
-    it('leaves a run that announced, or exited cleanly, alone', async () => {
-      await rehydratedRun(1, true);
-      expect(writes).toEqual([]);
-      disposeSession(ID);
-      resetToolReaps();
-      await rehydratedRun(0, false);
-      expect(writes).toEqual([]);
-    });
-  });
 });
 
 it('keeps the Session state a reap does not end: the rename and the cwd', async () => {

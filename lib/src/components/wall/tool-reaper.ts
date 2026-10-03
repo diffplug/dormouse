@@ -40,8 +40,6 @@ export const TOOL_STOP_GRACE_MS = 3_000;
 /** After the prompt returns: a payload parsed in the same chunk as the shell's
  *  finish can arrive in the message after it. */
 const STOP_SETTLE_MS = 100;
-/** How long a dehydrated run may take to fail before its bare retry is moot. */
-const RETRY_WINDOW_MS = 120_000;
 
 export function toolReapIdleMs(): number {
   return toolReapIdleMsOverride() ?? TOOL_REAP_IDLE_MS;
@@ -115,8 +113,7 @@ export async function stopTool(lath: LathWallEngine, id: string): Promise<boolea
 /**
  * Start a reaped Tool again in a fresh shell: its saved command, argv
  * re-quoted for the shell it gets, with the payload in `DORMOUSE_DEHYDRATE`.
- * A dehydrated run that fails before it announces is typed once more, without
- * the payload, which the shell integration has unset by then. Answers the
+ * Answers the
  * command and directory it started, or null when `id` is not reaped or has no
  * command to start.
  */
@@ -134,35 +131,5 @@ export function rehydrateTool(lath: LathWallEngine, id: string): { command: stri
   const fallbackCwd = typeof params.cwd === 'string' ? params.cwd : null;
   const cwd = record?.cwd ?? getTerminalPaneState(id).cwd?.path ?? fallbackCwd;
   rehydrateTerminal(id, { cwd, shell: shell?.shell, args: shell?.args, command, dehydrate: record?.payload, alert: record?.alert });
-  if (record?.payload) retryWithoutPayload(id, command);
   return { command, cwd: getTerminalPaneState(id).cwd?.path ?? cwd ?? '' };
-}
-
-/** The bare-args tier: once, when the dehydrated run exits non-zero having
- *  announced nothing. */
-function retryWithoutPayload(id: string, command: string): void {
-  let runId: string | null = null;
-  const stop = () => { clearTimeout(timer); unsubscribe(); };
-  const timer = setTimeout(stop, RETRY_WINDOW_MS);
-  const unsubscribe = subscribeToTerminalPaneState((changed) => {
-    if (changed !== undefined && changed !== id) return;
-    const entry = registry.get(id);
-    if (!entry || entry.exited) { stop(); return; }
-    const state = getTerminalPaneState(id);
-    // A run that announced is up: the bare retry is moot.
-    if (getToolAnnounce(id) !== null) { stop(); return; }
-    if (runId === null) {
-      // The launch seeds a run of its own that the first prompt ends: only
-      // the one the shell reports is the Tool's.
-      const run = state.currentCommand;
-      if (run?.rawCommandLine === command && run.source !== 'user_input') runId = run.id;
-      return;
-    }
-    if (state.currentCommand !== null || state.lastCommand?.id !== runId) return;
-    stop();
-    const exitCode = state.lastCommand.exitCode;
-    if (exitCode !== undefined && exitCode !== 0 && getToolAnnounce(id) === null) {
-      getPlatform().writePty(id, `${command}\r`);
-    }
-  });
 }
