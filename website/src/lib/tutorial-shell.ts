@@ -61,6 +61,11 @@ export function shellWords(line: string): string[] {
 
 const ESCAPABLE = new RegExp(POSIX_ESCAPABLE.source, 'g');
 
+/** The pages' programs (`splash` is `ascii-splash`'s alias), and with a
+ * filesystem the builtins and `dor` too, sorted as a listing shows them. */
+const PROGRAMS = ['ascii-splash', 'changelog', 'tutorial'];
+const FS_COMMANDS = [...PROGRAMS, 'cd', 'dor', 'ls', 'pwd'].sort();
+
 /** The longest prefix every one of `names` shares. */
 function commonPrefix(names: string[]): string {
   let prefix = names[0] ?? '';
@@ -76,7 +81,7 @@ const EXIT_COMMAND_NOT_FOUND = 127;
 
 /**
  * Minimal browser shell for playground panes. Provides line editing,
- * command history, dispatch to interactive programs (`tut`, `ascii-splash`,
+ * command history, dispatch to interactive programs (`tutorial`, `ascii-splash`,
  * ...) supplied by the host, and shell-integration reporting for all of it.
  * Output goes through `sendOutput`; input bytes arrive via `handleInput`.
  */
@@ -124,7 +129,7 @@ export class TutorialShell {
     this.runningCommandLine = null;
   }
 
-  /** Programmatically run a command. Used to auto-launch `tut` on mount. */
+  /** Programmatically run a command. Used to auto-launch `tutorial` on mount. */
   runCommand(name: string, args: string[] = []): void {
     if (this.activeProgram) return;
     if (!this.launch(name, args, [name, ...args].join(' '))) {
@@ -270,23 +275,29 @@ export class TutorialShell {
     this.redrawPromptLine();
   }
 
-  /** With a filesystem, completes the word at the end of the line as bash
-   * does: `dor`'s verb, or a path, never the command name. A unique match is
-   * finished; several extend to their common prefix, and a second Tab that
-   * extends nothing lists them. */
+  /** Completes the word at the end of the line as bash does: a command name,
+   * and with a filesystem `dor`'s verb or a path. A unique match is finished;
+   * several extend to their common prefix, and a second Tab that extends
+   * nothing lists them. */
   private complete(): void {
     const place = this.place;
-    if (!place) return;
     const raw = /(?:\\.|[^\s\\])*$/.exec(this.lineBuffer)![0];
     const before = shellWords(this.lineBuffer.slice(0, this.lineBuffer.length - raw.length));
-    if (before.length === 0) return;
     const word = shellWords(raw)[0] ?? '';
     const slash = word.lastIndexOf('/');
-    const stem = word.slice(slash + 1);
-    const dir = place.fs.resolve(place.cwd, word.slice(0, slash + 1) || '.');
-    const entries: DirEntry[] = before.length === 1 && before[0] === 'dor'
-      ? [{ name: 'open', kind: 'file' }]
-      : (dir === null ? null : place.fs.list(dir)) ?? [];
+    let stem = word.slice(slash + 1);
+    let entries: DirEntry[];
+    if (before.length === 0) {
+      stem = word;
+      entries = this.commands().map((name) => ({ name, kind: 'file' }));
+    } else if (!place) {
+      return;
+    } else if (before.length === 1 && before[0] === 'dor') {
+      entries = [{ name: 'open', kind: 'file' }];
+    } else {
+      const dir = place.fs.resolve(place.cwd, word.slice(0, slash + 1) || '.');
+      entries = (dir === null ? null : place.fs.list(dir)) ?? [];
+    }
     const matches = entries.filter(({ name, kind }) => name.startsWith(stem)
       && (stem.startsWith('.') || !name.startsWith('.')) && (before[0] !== 'cd' || kind === 'dir'));
     if (matches.length === 0) return;
@@ -327,12 +338,16 @@ export class TutorialShell {
       return null;
     }
     if (!this.launch(name, args, cmd)) {
-      const names = place ? ['tut', 'dor open', 'ls', 'cd', 'ascii-splash', 'changelog'] : ['tut', 'ascii-splash', 'changelog'];
-      const list = names.map((known) => `${fg(36)}${known}${fg(90)}`);
+      const list = this.commands().map((known) => `${fg(36)}${known}${fg(90)}`);
       this.sendOutput(`${fg(90)}Unknown command. Try ${list.slice(0, -1).join(', ')}, or ${list[list.length - 1]}.${RESET}\r\n`);
       this.finishCommand(EXIT_COMMAND_NOT_FOUND);
     }
     return this.activeProgram;
+  }
+
+  /** What this shell runs, as completion offers it and the unknown-command hint names it. */
+  private commands(): readonly string[] {
+    return this.place ? FS_COMMANDS : PROGRAMS;
   }
 
   private prompt(): string {

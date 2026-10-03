@@ -259,8 +259,21 @@ describe("TutorialShell tab completion", () => {
     return { program, echo: text() };
   }
 
-  it("never completes the command name", () => {
-    expect(typed("ch\t").echo).toBe("ch");
+  it("completes a command name, and lists every command on an empty line", () => {
+    expect(typed("tu\t").echo).toBe("tutorial ");
+    expect(typed("c\t\t").echo).toBe("c\r\ncd  changelog\r\n" + promptFor("~/p") + "c");
+    expect(typed("\t\t").echo).toBe("\r\nascii-splash  cd  changelog  dor  ls  pwd  tutorial\r\n" + promptFor("~/p"));
+    expect(typed("./t\t").echo).toBe("./t");
+  });
+
+  it("completes only the programs in a shell without a filesystem", () => {
+    const output: string[] = [];
+    const shell = new TutorialShell((data) => output.push(data), () => null, { promptShown: true });
+    shell.handleInput("\t\t");
+    expect(output.join("")).toContain("ascii-splash  changelog  tutorial\r\n");
+    output.length = 0;
+    shell.handleInput("ls s\t");
+    expect(output.join("")).toBe("ls s");
   });
 
   it("completes dor's verb and a path, closing a file with a space and a directory with a slash", () => {
@@ -298,8 +311,8 @@ describe("TutorialShell Ctrl+C", () => {
     const startProgram = vi.fn(() => null);
     const output: string[] = [];
     const shell = new TutorialShell((data) => output.push(data), startProgram);
-    shell.handleInput("tut\x03");
-    expect(output.join("")).toContain("tut\r\n\x1b]633;A\x07");
+    shell.handleInput("tutorial\x03");
+    expect(output.join("")).toContain("tutorial\r\n\x1b]633;A\x07");
     expect(output.join("")).not.toContain("^C");
     output.length = 0;
     shell.handleInput("\r");

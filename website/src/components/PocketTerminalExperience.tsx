@@ -27,7 +27,7 @@ const POCKET_SESSIONS: MobileWallSession[] = [
   { id: POCKET_CHANGELOG_PANE, title: "changelog" },
 ];
 const POCKET_AUTOSTART_COMMANDS = new Map<string, string>([
-  [POCKET_TUTORIAL_PANE, "tut"],
+  [POCKET_TUTORIAL_PANE, "tutorial"],
   [POCKET_CHANGELOG_PANE, "changelog"],
 ]);
 
@@ -141,7 +141,7 @@ export function PocketTerminalExperience({
       const shellRegistry = new PlaygroundShellRegistry(
         adapter,
         (terminalId, name, args, onExit) => {
-          if (name === "tut") {
+          if (name === "tutorial") {
             const runner = new TutRunner({
               adapter,
               terminalId,

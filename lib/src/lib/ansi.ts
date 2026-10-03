@@ -16,7 +16,7 @@ export const CURSOR_HOME = `${ESC}H`;
 export const fg = (code: number): string => `${ESC}${code}m`;
 
 // Alt-screen toggles paired with full clear + cursor visibility flips.
-// Use these for full-screen TUIs (tut, ascii-splash) so exiting restores
+// Use these for full-screen TUIs (tutorial, ascii-splash) so exiting restores
 // whatever was on screen before.
 export const ENTER_ALT_SCREEN = `${ESC}?1049h${CLEAR_SCREEN}${CURSOR_HOME}${ESC}?25l`;
 export const LEAVE_ALT_SCREEN = `${CLEAR_SCREEN}${CURSOR_HOME}${ESC}?25h${ESC}?1049l`;

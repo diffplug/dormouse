@@ -171,7 +171,7 @@ function PlaygroundDesktopExperience() {
       const shellRegistry = new PlaygroundShellRegistry(
         adapter,
         (terminalId, name, args, onExit) => {
-          if (name === "tut") {
+          if (name === "tutorial") {
             return new TutRunner({
               adapter,
               terminalId,
@@ -185,7 +185,7 @@ function PlaygroundDesktopExperience() {
               onTriggerBusyDemo: (durationMs, commandMs) => {
                 // TutRunner ignores `s` for the whole `commandMs`, but that
                 // guard is per runner while these refs are per page: exiting
-                // `tut` and re-running it, or running it in a second pane,
+                // `tutorial` and re-running it, or running it in a second pane,
                 // builds a fresh runner that cannot see this pump or timer.
                 busyDemoDisposeRef.current?.();
                 if (busyDemoFinishTimerRef.current !== null) {
