@@ -590,7 +590,9 @@ machine.
   without one.
 - **Must stop polling** on the Relay's `expired`, at this machine's own deadline
   (the clocks being separate), on Cancel, on disposal, and under `nothing`. **A
-  full account polls on**, the Relay keeping the approval.
+  full account polls on**, the Relay keeping the approval. **A poll with no
+  answer or a 5xx retries; a 429 also widens the interval**, capped at
+  `MAX_ENROLL_POLL_INTERVAL_S`; any other refusal ends the run.
 - **Must hold a redemption that lands after Cancel or a new begin**: the Relay
   has spent and recorded it. When it cannot be held, the failure names the
   Burrow and the account page to remove it at.
