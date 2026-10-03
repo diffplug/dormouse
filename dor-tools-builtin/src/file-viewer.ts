@@ -87,7 +87,7 @@ async function stream(req: IncomingMessage, res: ServerResponse, resource: Resou
  * creates a fresh capability; only the file argument is persisted by Dormouse. */
 /** `formatOf` is the handler's (`BuiltinHandler.format`): `builtin:code`'s
  * serves every textual format as source. */
-export async function startFileViewer(input: string, { onDirty = () => {}, formatOf = fileViewerFormat }: { onDirty?: (dirty: boolean) => void; formatOf?: (path: string) => FileFormat | null } = {}): Promise<{ port: number; path: string; target: string; close(): Promise<void> }> {
+export async function startFileViewer(input: string, { onDirty = () => {}, formatOf = fileViewerFormat }: { onDirty?: (dirty: boolean) => void; formatOf?: (path: string) => FileFormat | null } = {}): Promise<{ port: number; path: string; target: string; editable: boolean; close(): Promise<void> }> {
   const target = await realpath(input);
   const format = formatOf(target);
   if (!format) throw new Error('unsupported file format; configure a user Tool association');
@@ -196,7 +196,7 @@ export async function startFileViewer(input: string, { onDirty = () => {}, forma
         } finally { await image.file.close(); }
       },
     });
-    return { port: viewer.port, path: `${viewer.prefix}${format.text ? 'view' : `file/${encodeURIComponent(basename(target))}`}`, target, close: viewer.close };
+    return { port: viewer.port, path: `${viewer.prefix}${format.text ? 'view' : `file/${encodeURIComponent(basename(target))}`}`, target, editable: format.text, close: viewer.close };
   } catch (error) { await closeFiles(); throw error; }
 }
 
@@ -204,5 +204,7 @@ export async function startFileViewer(input: string, { onDirty = () => {}, forma
  * call, and returns its title and OSC 367 announcement for the caller to print. */
 export async function runFileViewer(file: string, formatOf: (path: string) => FileFormat | null): Promise<string> {
   const viewer = await startFileViewer(file, { formatOf, onDirty: dirty => { process.stdout.write(stateSequence({ dirty })); } });
-  return announceViewer(viewer, viewer.target);
+  // An editor reports its own state once loaded; a view of anything else
+  // cannot change, so it is clean from the start (docs/specs/dor-tools-builtin.md).
+  return announceViewer(viewer, viewer.target) + (viewer.editable ? '' : stateSequence({ dirty: false }));
 }

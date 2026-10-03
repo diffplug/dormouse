@@ -699,11 +699,15 @@ export function Wall({
       // check, so a late OSC signal can't type the command into a dead surface.
       disposeSession(id);
       removeDoor(id);
-      // Guard: no current caller kills a selected door (ensure's throwaway is
-      // never selected), but if one did, fall back to a visible pane.
+      // A kill gesture on the selected Door hands selection to its next
+      // surviving neighbor, as a revealed Door's kill does below.
       if (selectedIdRef.current === id && selectedTypeRef.current === 'door') {
+        const nextDoor = modeRef.current === 'command' && doorNeighbors
+          ? doorNeighbors.find(neighbor => doorsRef.current.some(item => item.id === neighbor)) ?? doorsRef.current[0]?.id
+          : null;
         const survivorId = lath.listPanes()[0]?.id ?? null;
-        if (survivorId) selectPane(survivorId);
+        if (nextDoor) selectDoor(nextDoor);
+        else if (survivorId) selectPane(survivorId);
         else setSelectedId(null);
       }
       clearLocalSurfaceActivity(id);
@@ -799,7 +803,10 @@ export function Wall({
           id,
           neighbors: [...doorsRef.current.slice(index + 1), ...doorsRef.current.slice(0, index).reverse()].map(item => item.id),
         };
-        handleReattachRef.current(door, { enterPassthrough: false, afterRestore: closeKindOf(id) === 'confirm' ? 'confirm-kill' : 'close' });
+        // Only a confirmation needs the pane; any other close takes the Door
+        // as it is, so a reopen puts it back on the Baseboard.
+        if (closeKindOf(id) === 'confirm') handleReattachRef.current(door, { enterPassthrough: false, afterRestore: 'confirm-kill' });
+        else void closeSurface(id);
         return;
       }
       // The helper inspection below can outlive the Surface (an exit, a `dor
@@ -1196,9 +1203,7 @@ export function Wall({
         // Guard against removal between scheduling and execution.
         if (!nav.hasPane(item.id)) return;
         focusSession(item.id, false);
-        if (afterRestore === 'close') {
-          void closeSurfaceRef.current(item.id);
-        } else if (afterRestore === 'confirm-kill') {
+        if (afterRestore === 'confirm-kill') {
           setConfirmKill({ id: item.id, char: randomKillChar() });
         } else if (typeof afterRestore === 'object' && afterRestore.type === 'replace-terminal') {
           // Atomic identity swap in place — no transient add/remove.
