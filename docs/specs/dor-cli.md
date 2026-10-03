@@ -444,9 +444,10 @@ handle requires a live control endpoint.
 
 **The explicit port, never the hostname, is the signal for the `http` default**
 (rationale). An explicit scheme is always honored. This overrides
-`agent-browser`'s own `https` default for a bare `host:port`. **Reject** an
-input that is neither a URL nor a `host:port`, including a purely numeric "host"
-like `800:600` (rationale).
+`agent-browser`'s own `https` default for a bare `host:port`. **`dor iframe`
+rejects** an input that is neither an http(s) URL nor a `host:port`, including a
+purely numeric "host" like `800:600` (rationale); `dor agent-browser` forwards
+any such target to the provider unchanged.
 
 **Must resolve navigation targets CLI-side before forwarding to the browser provider.** Only the first target of a navigation verb is eligible. Skip known option values; an unknown option leaves the argv unchanged rather than guessing its arity. The provider descriptors and `resolveOpenTargetArgs` own recognized verbs and option arities.
 
