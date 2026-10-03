@@ -18,6 +18,15 @@ const KEYBOARD_ITEM_IDS = [
   "kb-move",
 ] as const;
 
+const DOR_OPEN_ITEM_IDS = [
+  "op-config",
+  "op-markdown",
+  "op-folder",
+  "op-preview",
+  "op-pick",
+  "op-handler",
+] as const;
+
 const ALERT_ITEM_IDS = [
   "al-watch-cmd",
   "al-spreads",
@@ -40,6 +49,7 @@ export const ITEM_IDS = [
   ...THEME_ITEM_IDS,
   ...GESTURE_ITEM_IDS,
   ...KEYBOARD_ITEM_IDS,
+  ...DOR_OPEN_ITEM_IDS,
   ...ALERT_ITEM_IDS,
   ...COPY_ITEM_IDS,
 ] as const;
@@ -193,6 +203,43 @@ export const DESKTOP_SECTIONS: readonly Section[] = [
       },
     ],
     prose: ['tmux shortcuts also work — `%` `"` `d` `x`.'],
+  },
+  {
+    id: 'dor-open',
+    title: 'dor open',
+    items: [
+      {
+        id: 'op-config',
+        title: 'Open your Dormouse config',
+        hint: 'Split a pane for a shell, then run `dor open ~/.config/dormouse/dormouse.yml`. The code editor takes the shell\'s place, so split again for each next step.',
+      },
+      {
+        id: 'op-markdown',
+        title: 'Open `README.md`',
+        hint: 'Run `dor open README.md`. The same command picks the Markdown editor for Markdown. Edit away; this playground cannot save.',
+      },
+      {
+        id: 'op-folder',
+        title: 'Open a folder',
+        hint: 'Run `dor open .` to browse the folder you are in.',
+      },
+      {
+        id: 'op-preview',
+        title: 'Preview a file from the folder',
+        hint: 'Click a file in the folder. It opens in the preview pane, the one with the italic title; clicking another file replaces it.',
+      },
+      {
+        id: 'op-pick',
+        title: 'Find a file with `dor o`',
+        hint: 'Run `dor o`, type a few letters of a file name, and press `Enter`.',
+      },
+      {
+        id: 'op-handler',
+        title: 'Open `README.md` as source',
+        hint: 'In `dor o`, pick `README.md`, press `Tab` until it opens with `builtin:code`, then press `Enter`.',
+      },
+    ],
+    prose: ['On your own machine `dor open` works in any Dormouse terminal, and the `open` rules in your config hand files to your own Tools.'],
   },
   {
     id: 'alert',

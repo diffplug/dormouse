@@ -103,11 +103,13 @@ export class VirtualFs {
     return display;
   }
 
-  /** Every file under `dir`, relative to it, `/`-separated, in display order. */
+  /** Every file under `dir`, relative to it, `/`-separated, in display order;
+   * dot-entries are skipped, as the picker skips them outside a work tree. */
   files(dir: string): string[] {
     const out: string[] = [];
     const walk = (path: string, prefix: string) => {
       for (const entry of this.list(path) ?? []) {
+        if (entry.name.startsWith(".")) continue;
         const child = `${path === "/" ? "" : path}/${entry.name}`;
         if (entry.kind === "dir") walk(child, `${prefix}${entry.name}/`);
         else out.push(`${prefix}${entry.name}`);

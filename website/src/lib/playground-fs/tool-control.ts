@@ -1,18 +1,16 @@
 /**
  * The desktop playground's `toolControl` (docs/specs/tutorial.md -> Playground
- * filesystem): a host with no user `dormouse.yml`, so every target opens with
- * a built-in, resolved as the hosts resolve one.
+ * filesystem): a host whose user `dormouse.yml` is inert, so every target
+ * opens with a built-in, resolved as the hosts resolve one.
  */
 import { builtinHandler } from "dor-tools-builtin/file-viewer-format";
 import { defaultBrowserViewportConfig } from "dor-lib-common/browser-viewports";
 import type { IframeProxyResult } from "dormouse-lib/lib/platform/iframe-proxy-types";
 import type { ToolControlResult, ToolHostRequest } from "dormouse-lib/lib/platform/tool-types";
 import { builtinOpenResult, noUserToolMessage, offerBuiltins } from "dormouse-lib/lib/tool-open-builtin";
-import { HOME, type VirtualFs } from "./vfs";
+import { USER_CONFIG } from "./snapshot";
+import type { VirtualFs } from "./vfs";
 import { VIEWER_SCOPE } from "./viewers";
-
-/** Where a real host would look for open rules; the playground has none. */
-const USER_CONFIG = `${HOME}/.config/dormouse/dormouse.yml`;
 
 export function playgroundToolControl(fs: VirtualFs) {
   /** `input` as an existing snapshot path and its built-in candidates, or the host's error. */

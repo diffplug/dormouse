@@ -93,10 +93,11 @@ exports[`TutRunner snapshots > renders the top-level menu 1`] = `
 
   [36m❯[0m [1mMake it yours[0m  [2m[0/1 complete][0m
     Keyboard navigation  [2m[0/7 complete][0m
+    dor open  [2m[0/6 complete][0m
     Alerts and attention  [2m[0/8 complete][0m
     Copy paste  [2m[0/4 complete][0m
     Starred on GitHub  [2m[not yet][0m
-    🐭 FlappyTerm 🐭  [2m[LOCKED 0/20][0m
+    🐭 FlappyTerm 🐭  [2m[LOCKED 0/26][0m
 
     [2mReset progress[0m
 

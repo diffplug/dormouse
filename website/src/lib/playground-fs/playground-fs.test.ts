@@ -1,7 +1,8 @@
 import { execFileSync } from "node:child_process";
 import { describe, expect, it, vi } from "vitest";
 import { stateSequence } from "dor-tools-lib/osc";
-import { createPlaygroundFs, PLAYGROUND_CWD, SNAPSHOT_FILES } from "./snapshot";
+import { parseToolFile } from "dormouse-lib/host/tool-registry";
+import { createPlaygroundFs, PLAYGROUND_CWD, SNAPSHOT_FILES, USER_CONFIG } from "./snapshot";
 import { playgroundIframeUrl, playgroundToolControl } from "./tool-control";
 import { READ_ONLY_ERROR, PlaygroundViewers, type ViewerRequest } from "./viewers";
 import { VirtualFs } from "./vfs";
@@ -15,6 +16,16 @@ describe("the snapshot", () => {
     const tracked = execFileSync("git", ["ls-files", "dor-tools-lib"], { cwd: new URL("../../../../", import.meta.url), encoding: "utf8" })
       .trim().split("\n").map((path) => path.slice("dor-tools-lib/".length));
     expect(Object.keys(SNAPSHOT_FILES).sort()).toEqual(tracked.sort());
+  });
+});
+
+describe("the playground's user config", () => {
+  it("is mounted where a host reads it, and parses as a user Tool file without warnings", () => {
+    const text = createPlaygroundFs().read(USER_CONFIG)!;
+    const file = parseToolFile(text, { path: USER_CONFIG, dir: "/home/demo/.config/dormouse", scope: "user" });
+    expect(file.warnings).toEqual([]);
+    expect([...file.tools.keys()]).toEqual(["storybook", "csv"]);
+    expect(file.open.map((rule) => rule.tool)).toEqual(["csv"]);
   });
 });
 
