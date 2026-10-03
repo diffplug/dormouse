@@ -344,6 +344,12 @@ export function attachRouter(
   channel: WebviewChannel,
   options?: {
     reconnect?: boolean;
+    /**
+     * Claim live PTYs no router owns at `dormouse:init`. Only the WebviewView
+     * sets it: its disposal is the only thing that leaves PTYs alive and
+     * unowned (a panel kills its own), so they are the view's to take back.
+     */
+    adoptOrphans?: boolean;
     killOnDispose?: boolean;
     onSaveState?: (state: unknown) => void | PromiseLike<void>;
     getSelectedShell?: () => { shell?: string; args?: string[] } | null;
@@ -354,6 +360,7 @@ export function attachRouter(
   },
 ): vscode.Disposable {
   const reconnect = options?.reconnect ?? false;
+  const adoptOrphans = options?.adoptOrphans ?? false;
   const killOnDispose = options?.killOnDispose ?? false;
   // Also this webview's realm of the alerts, so one webview's blur never
   // touches another's (docs/specs/alert.md → Engagement).
@@ -740,9 +747,9 @@ export function attachRouter(
           }
         }
 
-        // Also claim unowned PTYs (from disposed routers / other webviews)
+        // Also claim the PTYs a disposed view left unowned.
         for (const [id, info] of ptys) {
-          if (!globalOwnedPtyIds.has(id)) {
+          if (adoptOrphans && !globalOwnedPtyIds.has(id)) {
             claim(id);
             reconnectable.set(id, info);
           }

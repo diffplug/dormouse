@@ -32,7 +32,7 @@ Source of truth: `attachRouter` in `vscode-ext/src/message-router.ts`, pinned by
 The extension host is the platform host of `docs/specs/transport.md` → "PTY lifecycle": `pty-manager.ts` forks the pty-host child, the `WebviewView` and each `WebviewPanel` are the webviews, and each router owns its own PTY ids.
 
 - Hiding or toggling the Dormouse panel neither kills its PTYs nor destroys sessions.
-- **Closing an editor-tab `WebviewPanel` kills that panel's owned PTYs** (`killOnDispose`), and VS Code discards the tab's per-panel state. **Disposing the `WebviewView` releases its router and leaves the PTYs alive.**
+- **Closing an editor-tab `WebviewPanel` kills that panel's owned PTYs** (`killOnDispose`), and VS Code discards the tab's per-panel state. **Disposing the `WebviewView` releases its router and leaves the PTYs alive** for its next router alone.
 - Each VS Code window gets its own extension host, and therefore its own pty-host child.
 - **Must cap each PTY's replay and scrollback at 1,000,000 characters**, replay clearing on first read; **a pty-host child crash reports every live PTY exited and keeps its buffer**, ignoring a replaced child's late output and exits.
 

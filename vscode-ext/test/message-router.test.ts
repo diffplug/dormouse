@@ -575,6 +575,34 @@ describe('alarm delivery', () => {
 });
 
 /**
+ * A disposed WebviewView leaves its PTYs alive for the view's next router
+ * (docs/specs/vscode.md); an editor panel re-initializing in between must not
+ * take them into its Workspace.
+ */
+it('leaves a disposed view\'s PTYs for the view, not a re-initializing panel', () => {
+  const view = fakeWebview();
+  const viewRouter = router.attachRouter(view.channel, { reconnect: true, adoptOrphans: true });
+  view.send({ type: 'dormouse:init' });
+  view.send({ type: 'pty:spawn', id: 'view-pty', options: { cwd: '/repo' } });
+  viewRouter.dispose();
+
+  const panel = fakeWebview();
+  const panelRouter = router.attachRouter(panel.channel, { reconnect: true, killOnDispose: true });
+  const reopened = fakeWebview();
+  const reopenedRouter = router.attachRouter(reopened.channel, { reconnect: true, adoptOrphans: true });
+  try {
+    panel.send({ type: 'dormouse:init' });
+    expect(panel.posted.filter((message) => message.type === 'pty:list').at(-1)).toMatchObject({ ptys: [] });
+    reopened.send({ type: 'dormouse:init' });
+    expect(reopened.posted.filter((message) => message.type === 'pty:list').at(-1))
+      .toMatchObject({ ptys: [{ id: 'view-pty', alive: true }] });
+  } finally {
+    panelRouter.dispose();
+    reopenedRouter.dispose();
+  }
+});
+
+/**
  * A Session's alert state follows its PTY here, whoever asked
  * (docs/specs/alert.md): started over, and seeded, at the spawn; given the
  * resize grace at the resize; removed at the kill.
