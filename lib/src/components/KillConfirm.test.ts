@@ -10,7 +10,7 @@ describe('randomKillChar', () => {
     expect(Array.from({ length: 20 }, randomKillChar)).toEqual(Array(20).fill('q'));
   });
 
-  it('draws a lowercase letter other than x or k when unpinned', () => {
-    for (let i = 0; i < 200; i++) expect(randomKillChar()).toMatch(/^[a-jl-wyz]$/);
+  it('draws a lowercase letter other than x, k, or u when unpinned', () => {
+    for (let i = 0; i < 200; i++) expect(randomKillChar()).toMatch(/^[a-jl-tvwyz]$/);
   });
 });
