@@ -84,10 +84,9 @@ stateDiagram-v2
 ```
 
 * A sender's `direct-switch` is its **last** message on the relay path; every later message, keepalives included, goes on the channel. A receiver holds channel frames until it decrypts the peer's — **overflow disposing the session** — then drains them in arrival order.
-* **Once either direction has switched, a channel failure disposes the session**: the Client reports burrow loss exactly as a `burrow-gone`. **Before any switch it only abandons the attempt** — including a channel not open by its setup budget — and the session stays relayed.
+* **Once either direction has switched, a channel failure disposes the session**: the Client reports burrow loss exactly as a `burrow-gone`. **Before any switch it only abandons the attempt** — including a channel not open by its setup budget — and the session stays relayed. **A `direct-switch` reaching an end that abandoned for any cause, or never began, ends the session.**
 * **After inbound has switched, a relay `transport` frame disposes the session**, refused before any decrypt, as does a `ct` that will not decode.
-* **A `direct-switch` reaching an abandoned or never-begun end ends the session.**
-* **An end waits at most `DIRECT_HANDOFF_TIMEOUT_MS` after its own switch for the peer's**; one whose peer switched first waits on nothing.
+* **An end waits at most `DIRECT_HANDOFF_TIMEOUT_MS` after its own switch for the peer's.**
 * **A connection reporting `failed` or `closed` fails the channel at once; `disconnected` is waited out** for `DIRECT_DISCONNECTED_GRACE_MS`.
 
 **The Relay stays the lifecycle authority.** `client-gone`, `burrow-gone`, and either relay socket closing dispose the session, channel included, exactly as relayed; the idle deadline, keepalives, and every Burrow bound are path-agnostic ([remote-security-model.md](./remote-security-model.md) → Burrow bounds). A one-time session has no Relay; its authority after the switch is the channel ([remote-security-model.md](./remote-security-model.md) → One-time connection).
@@ -247,7 +246,7 @@ A command still running — "is my build done?" — is the commonest reason to o
 inflight?: {
   commandLine: string | null;
   startedAt: number;
-  bytes: string;                // base64, tail-capped
+  bytes: string;                // base64url, tail-capped
   truncated: boolean;
 }
 ```

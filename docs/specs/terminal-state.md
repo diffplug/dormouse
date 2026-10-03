@@ -35,19 +35,16 @@ CWD, sourced `osc7`, `osc9_9`, `osc633` (`P ; Cwd=`), `osc1337` (`CurrentDir=`):
 - `process` — the adapter polled the PTY's process for its working directory.
 - `manual` — seeded via `cwdFromManualPath()`. `seedTerminalManualCwd()` (session restore) writes it **only into a pane with no CWD yet**; `seedLaunchedCommand()` (known spawn directory) applies it **unconditionally** — safe only at spawn, before any OSC has reported.
 
-Command lifecycle, for both `OSC 133` and `OSC 633`, as `ShellActivity`; any event applies in any state, `D` with an optional exit code:
+Command lifecycle, for both `OSC 133` and `OSC 633`, as `ShellActivity` (from `unknown`); any event applies in any state:
 
-```mermaid
-stateDiagram-v2
-  direction LR
-  [*] --> unknown
-  unknown --> prompt: A promptStart
-  prompt --> editing: B promptEnd
-  editing --> running: C commandStart
-  running --> finished: D commandFinish
-  finished --> prompt: A
-  running --> prompt: A without D, run dropped
-```
+| Boundary | Event | `ShellActivity` |
+| --- | --- | --- |
+| `A` | `promptStart` | `prompt` |
+| `B` | `promptEnd` | `editing` |
+| `C` | `commandStart` | `running` |
+| `D` | `commandFinish` | `finished`, with an optional exit code |
+
+**An `A`, a `B`, or another `C` drops a run that saw no `D`**, recording no last command.
 
 `C` and the command line, by emitter:
 
