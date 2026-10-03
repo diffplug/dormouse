@@ -38,7 +38,9 @@ process.on('SIGINT', () => {
   process.stdout.write('\\x1b]367;dehydrate;' + JSON.stringify({ v: 1, state }) + '\\x07');
   process.exit(0);
 });
-setInterval(() => {}, 1000);
+// Bounded: a Tool left running by a failed step must not hold the PTY open,
+// which would keep this file alive after its tests and hang the suite.
+setTimeout(() => process.exit(0), 30_000);
 `;
 
 function session(shell = BASH) {
@@ -102,6 +104,11 @@ function session(shell = BASH) {
     },
   };
 }
+
+// Backstop: a PTY handle a failed test leaves open keeps this file's process
+// alive after every test settled, and `node --test` then waits forever (main
+// CI hung on it twice). Results are reported by then; exit once they are.
+test.after(() => { setTimeout(() => process.exit(), 2_000).unref(); });
 
 for (const [name, shell] of [['bash', BASH], ['zsh', ZSH]]) test(`${name}: a Tool stopped with Ctrl+C restarts with its payload, which no later command inherits`, { skip: !shell && `needs ${name}`, timeout: 60_000 }, async () => {
   const s = session(shell);
