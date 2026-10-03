@@ -625,6 +625,11 @@ export interface PickerTerminal {
 export interface CliOptions {
   env?: CliEnv;
   client?: ControlClient;
+  /** Opens the control socket the env names; the Node entry supplies it, so
+   *  the commands load where there is no socket (the website playground). */
+  connect?: (endpoint: { socketPath: string; token: string; surfaceId?: string; timeoutMs?: number }) => ControlClient;
+  /** This platform's `path.resolve`; POSIX when absent. */
+  resolvePath?: (base: string, path: string) => string;
   readStdin?: () => Promise<string>;
   terminal?: PickerTerminal;
   versionMetadata?: VersionMetadata;

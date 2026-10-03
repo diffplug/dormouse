@@ -207,7 +207,7 @@ async function runToolCommand(this: DorCommandContext, flags: ToolFlags, ...rest
     fresh: flags.fresh === true,
     minimized: flags.minimize === true,
     surface: flags.surface,
-    cwd: callerWorkingDirectory(flags.cwd, this.options.env),
+    cwd: callerWorkingDirectory(flags.cwd, this.options),
   }, flags.json === true);
 }
 
@@ -235,7 +235,7 @@ async function listTools(context: DorCommandContext, flags: ToolFlags): Promise<
   const client = requireControlClient(context.options, TOOL_TIMEOUT_MS);
   if (client instanceof Error) return client;
   try {
-    const listing = await client.toolList({ cwd: callerWorkingDirectory(flags.cwd, context.options.env), global: flags.global === true });
+    const listing = await client.toolList({ cwd: callerWorkingDirectory(flags.cwd, context.options), global: flags.global === true });
     const { warnings, ...shown } = listing;
     for (const warning of warnings) writeStderr(context, `${printable(warning)}\n`);
     writeStdout(context, flags.json === true ? renderPrintableJson(shown) : renderToolList(listing, flags.global === true));

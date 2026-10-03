@@ -71,7 +71,7 @@ function runSkillCommand(this: DorCommandContext, flags: SkillFlags): void | Err
 }
 
 function installStub(context: DorCommandContext, json: boolean): void | Error {
-  const projectDir = callerWorkingDirectory(undefined, context.options.env);
+  const projectDir = callerWorkingDirectory(undefined, context.options);
 
   // Read both instruction files once up front; the adopt pass and the append
   // pass below share the contents. `content: null` means the file is absent.

@@ -57,7 +57,7 @@ Placement follows dor tool: typed alone at a prompt in a visible, integrated pla
       if (flags.preview && (flags.fresh || flags.minimize)) {
         return new Error(`--preview cannot be combined with ${flags.fresh ? '--fresh' : '--minimize'}`);
       }
-      const cwd = callerWorkingDirectory(flags.cwd, this.options.env);
+      const cwd = callerWorkingDirectory(flags.cwd, this.options);
       let file = path;
       let tool = flags.tool;
       if (file === undefined) {

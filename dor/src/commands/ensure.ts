@@ -163,7 +163,7 @@ async function runEnsureCommand(this: DorCommandContext, flags: EnsureFlags, ...
       minimized: flags.minimize === true,
       restart: flags.restart === true,
       surface: flags.surface,
-      cwd: callerWorkingDirectory(flags.cwd, this.options.env),
+      cwd: callerWorkingDirectory(flags.cwd, this.options),
       ...workspaceParam(flags.workspace),
     });
     writeStdout(this, renderEnsureResponse(response, flags.json === true));

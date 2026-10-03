@@ -1,12 +1,3 @@
-import {
-  buildApplication,
-  buildRouteMap,
-  help,
-  run as runStricli,
-  text_en,
-  type ApplicationText,
-  type StricliProcess,
-} from '@stricli/core';
 import { isBrowserProvider, type BrowserAutomationProvider } from 'dor-lib-common';
 import { builtinHandler, VIEW_ERROR_ARGV } from 'dor-tools-builtin/file-viewer-format';
 import { agentBrowserCommand, runAgentBrowserCli } from './commands/agent-browser.js';
@@ -26,15 +17,13 @@ import { openCommand } from './commands/open.js';
 import { playwrightCommand, runPlaywrightCli } from './commands/playwright.js';
 import { versionCommand } from './commands/version.js';
 import { workspaceCommand } from './commands/workspace.js';
-import { errorLine, errorMessage, fail } from './commands/shared.js';
+import { buildDorApplication, runDorCommand } from './cli-app.js';
 import { canonicalDorVerb } from './protocol.js';
 import { getHelpTarget, isPassthroughHelpInvocation, normalizeVersionAlias, type HelpTarget } from './help-route.js';
 import type {
-  CliEnv,
   CliOptions,
   CliResult,
   Command,
-  DorCommandContext,
   HelpPatch,
 } from './commands/types.js';
 
@@ -117,89 +106,7 @@ const COMMANDS = [
   appCommand,
 ] as const satisfies readonly Command[];
 
-const ROUTES = {
-  split: splitCommand.command,
-  ensure: ensureCommand.command,
-  tool: toolCommand.command,
-  open: openCommand.command,
-  version: versionCommand.command,
-  skill: skillCommand.command,
-  send: sendCommand.command,
-  read: readCommand.command,
-  await: awaitCommand.command,
-  kill: killCommand.command,
-  move: moveCommand.command,
-  iframe: iframeCommand.command,
-  'agent-browser': agentBrowserCommand.command,
-  playwright: playwrightCommand.command,
-  list: listCommand.command,
-  workspace: workspaceCommand.command,
-  app: appCommand.command,
-};
-
-const DOR_TEXT: ApplicationText = {
-  ...text_en,
-  commandErrorResult: (error, _ansiColor) => errorLine(error.message),
-  exceptionWhileLoadingCommandContext: (error, _ansiColor) => `Error: ${errorMessage(error)}`,
-  exceptionWhileLoadingCommandFunction: (error, _ansiColor) => `Error: ${errorMessage(error)}`,
-  exceptionWhileParsingArguments: (error, _ansiColor) => `Error: ${errorMessage(error)}`,
-  exceptionWhileRunningCommand: (error, _ansiColor) => `Error: ${errorMessage(error)}`,
-  noCommandRegisteredForInput: ({ input }) => `Error: unknown command '${input}'`,
-};
-
-const APPLICATION = buildApplication(
-  buildRouteMap({
-    routes: ROUTES,
-    docs: {
-      brief: 'control Dormouse from a terminal',
-      fullDescription: 'Dormouse bundles the dor CLI into every terminal it launches.',
-    },
-  }),
-  {
-    name: 'dor',
-    scanner: {
-      allowArgumentEscapeSequence: true,
-      caseStyle: 'allow-kebab-for-camel',
-    },
-    documentation: {
-      disableAnsiColor: true,
-    },
-    localization: {
-      text: DOR_TEXT,
-    },
-  },
-  // Replaces stricli's default integration set, which also registers
-  // `--help-all`/`-H`. That flag bypasses the `helpPatches` in `applyHelpPatches`
-  // (which only fire for `--help`/`-h`), so it printed raw generated usage lines
-  // that contradict what the commands accept — `dor ensure ... <command>...`
-  // without the `--` that `validateEnsureDelimiter` requires, and the
-  // mutually-exclusive `split`/`send` flags shown as freely combinable. Dropping
-  // it leaves `--help` as the single documented help surface.
-  {
-    help: help({
-      brief: text_en.briefs.help,
-      alias: 'h',
-      defaultForRouteMap: true,
-      includeHidden: false,
-      // stricli would derive these from `documentation`, but an explicit
-      // integration set opts out of that defaulting, so restate them.
-      formatting: {
-        useAliasInUsageLine: false,
-        onlyRequiredInUsageLine: false,
-        caseStyle: 'convert-camel-to-kebab',
-      },
-    }),
-  },
-);
-
-interface CaptureProcess extends StricliProcess {
-  readonly stdout: {
-    write(chunk: string): void;
-  };
-  readonly stderr: {
-    write(chunk: string): void;
-  };
-}
+const APPLICATION = buildDorApplication(COMMANDS);
 
 export async function runCli(rawArgv: string[], options: CliOptions = {}): Promise<CliResult> {
   // `dor o` is `dor open` from here on, so preParse, help patches, and the
@@ -251,32 +158,8 @@ export async function runCli(rawArgv: string[], options: CliOptions = {}): Promi
   const helpTarget = getHelpTarget(argv, isCommandName);
   const [commandName, ...args] = rewriteHelpArgv(argv);
 
-  // Some commands need argv validated *before* stricli parses it (the `--` command
-  // tail in `dor ensure`, `dor send`'s input-flag ordering). Each owns that check
-  // as `Command.preParse`, defined next to its flags in the command module; here we
-  // just dispatch it. `helpTarget` already captured whether this is a help
-  // invocation (in which case the command func never runs), so reuse it to skip.
-  const command = commandName ? COMMANDS.find((entry) => entry.name === commandName) : undefined;
-  if (command?.preParse && helpTarget === undefined) {
-    const check = command.preParse(args);
-    if (!check.ok) return fail(check.message);
-  }
-
-  const capture = createCaptureProcess(options.env);
-  await runStricli(APPLICATION, commandName ? [commandName, ...args] : [], {
-    process: capture.process,
-    forCommand: (): DorCommandContext => ({
-      process: capture.process,
-      options,
-      commandArgs: args,
-    }),
-  });
-
-  return {
-    exitCode: normalizeExitCode(capture.process.exitCode),
-    stdout: applyHelpPatches(capture.stdout(), helpTarget),
-    stderr: capture.stderr(),
-  };
+  const result = await runDorCommand(APPLICATION, COMMANDS, commandName, args, options, helpTarget !== undefined);
+  return { ...result, stdout: applyHelpPatches(result.stdout, helpTarget) };
 }
 
 /** Resolve from the running CLI, never a workspace package or the caller's cwd.
@@ -297,8 +180,8 @@ function rewriteHelpArgv(argv: string[]): string[] {
   return subject && isCommandName(subject) ? [subject, '--help'] : ['--help'];
 }
 
-function isCommandName(value: string): value is keyof typeof ROUTES {
-  return value in ROUTES;
+function isCommandName(value: string): boolean {
+  return COMMANDS.some((command) => command.name === value);
 }
 
 function applyHelpPatches(stdout: string, target: HelpTarget | undefined): string {
@@ -405,56 +288,3 @@ function escapeRegExp(value: string): string {
   return value.replace(/[\\^$.*+?()[\]{}|]/g, '\\$&');
 }
 
-function createCaptureProcess(env: CliEnv | undefined): {
-  process: CaptureProcess;
-  stdout(): string;
-  stderr(): string;
-} {
-  let stdout = '';
-  let stderr = '';
-  const process: CaptureProcess = {
-    stdout: {
-      write(chunk) {
-        stdout += chunk;
-      },
-    },
-    stderr: {
-      write(chunk) {
-        stderr += chunk;
-      },
-    },
-    env: sanitizeEnv(env),
-  };
-
-  return {
-    process,
-    stdout: () => stdout,
-    stderr: () => stderr,
-  };
-}
-
-function sanitizeEnv(env: CliEnv | undefined): Readonly<Partial<Record<string, string>>> {
-  const sanitized: Record<string, string> = {};
-  for (const [key, value] of Object.entries(env ?? {})) {
-    if (typeof value === 'string') {
-      sanitized[key] = value;
-    }
-  }
-  return sanitized;
-}
-
-function normalizeExitCode(exitCode: number | string | null | undefined): number {
-  const numeric = typeof exitCode === 'number'
-    ? exitCode
-    : typeof exitCode === 'string'
-      ? Number(exitCode)
-      : 0;
-  if (numeric === 0) return 0;
-  // Commands that need a verdict richer than pass/fail set `process.exitCode`
-  // themselves and return void — stricli assigns its own with `??=`, so theirs
-  // survives (`dor await`: 2 for a timeout, 3 for a dead surface). Pass such a
-  // code through, and collapse everything else to 1: stricli's own codes are all
-  // negative and all mean "usage or target error", as does any other shape that
-  // could not be a deliberate verdict (NaN, fractional, shell-reserved).
-  return Number.isInteger(numeric) && numeric > 0 && numeric < 126 ? numeric : 1;
-}
