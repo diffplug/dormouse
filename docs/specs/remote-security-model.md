@@ -646,8 +646,8 @@ established above and pinned by
 
 **Never claim this model for paid SaaS before an independent cryptographic
 review** of the Noise integration, the WebAuthn channel binding, key storage,
-and the push construction. Self-hosting is the shipped deployment and carries no
-such claim.
+and the push construction. No shipped build, Hosted or self-host, carries such a
+claim.
 
 ## Residual metadata
 

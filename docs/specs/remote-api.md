@@ -247,7 +247,7 @@ A command still running — "is my build done?" — is the commonest reason to o
 inflight?: {
   commandLine: string | null;
   startedAt: number;
-  bytes: string;                // base64, tail-capped
+  bytes: string;                // base64url, tail-capped
   truncated: boolean;
 }
 ```

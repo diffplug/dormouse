@@ -318,7 +318,7 @@ with a monotonic `revision`; a webview drops a snapshot behind the one it holds.
   it** (§Routing). A target the registry cannot place — one no window reports,
   or a name two windows carry — falls through to the caller's window, which
   refuses a name duplicated there and otherwise resolves its own. **A target
-  routes as a number only when it reads as `POSITIONAL_WORKSPACE_REF`**
+  routes as a number only when it reads as `NUMERIC_WORKSPACE_REF`**
   (`dor/src/protocol.ts`); `007` and `0` are names.
 - **Must keep numbered and opaque refs consistent across Rust, the webview, and
   the browser harness**: `standalone/scripts/workspace-ref-cases.json` holds the
