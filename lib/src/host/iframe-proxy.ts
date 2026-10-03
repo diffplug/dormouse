@@ -55,6 +55,7 @@ import * as http from 'http';
 import * as net from 'net';
 import { IFRAME_HTTP_ONLY, type IframeProxyResult } from '../lib/platform/iframe-proxy-types';
 import { isForeignOrigin, isLoopbackHost, isOwnOrigin } from './loopback-guard';
+import { createSerialQueue } from './remote/serial-queue';
 import {
   FRAMING_RESPONSE_HEADERS,
   HEAD_MARKER,
@@ -72,13 +73,21 @@ import {
   type ErrorPage,
 } from './iframe-proxy-rewrite';
 
-// Sliding idle TTL: a live iframe refreshes its grant on every request, so a
-// grant only expires once its surface stops fetching (closed/killed). Lazy
-// sweep on the next createIframeProxyUrl, like the stream relay.
+// An unleased grant's sliding idle TTL: every request refreshes it, so one
+// expires once nothing fetches through it. Lazy sweep on the next
+// createIframeProxyUrl. A leased grant has no TTL: its lease ends it.
 const GRANT_IDLE_TTL_MS = 5 * 60_000;
 const GRANT_SWEEP_MS = 60_000;
-// Backstop against unbounded server accumulation if sweeps never run.
+// Backstop against unbounded unleased-server accumulation if sweeps never run.
 const MAX_GRANTS = 32;
+/** How many leases may be held at once. Past it a new lease is refused, never
+ *  made room for: every lease is a view someone may be looking at. */
+export const MAX_IFRAME_LEASES = 128;
+const MAX_LEASE_FIELD = 128;
+// Sent on a freshly minted grant's first document: its port may be one an
+// earlier grant fronted for another upstream, whose storage and service
+// worker the browser still keys on that origin.
+const CLEAR_SITE_DATA = '"cache", "storage"';
 // We only buffer the <head> region (to find the shim insertion point); if no
 // </head>/<body> shows up within this many bytes, instrument what we have and pipe.
 const HEAD_STREAM_CAP = 512 * 1024;
@@ -99,6 +108,14 @@ const UPSTREAM_IDLE_TIMEOUT_MS = 30_000;
 export type ProxyLogger = (message: string) => void;
 let log: ProxyLogger = () => {};
 
+/**
+ * A mounted iframe view's hold on its grant (docs/specs/dor-browser.md →
+ * "Iframe Proxy Leases"). `id` is the webview's, scoped to `owner`, which the
+ * host transport names — never the webview — so one webview can neither
+ * release nor reuse another's.
+ */
+export type IframeLease = { owner: string; id: string };
+
 interface Grant {
   /** The fixed upstream this grant fronts (origin + initial path). */
   upstream: URL;
@@ -106,6 +123,12 @@ interface Grant {
   proxyOrigin: string;
   server: http.Server;
   lastUsed: number;
+  /** Held by a lease: no idle TTL, no eviction. */
+  leased: boolean;
+  /** Not yet served a document: the next one clears the origin's site data. */
+  fresh: boolean;
+  /** Upgraded sockets, which `server.close()` would leave running. */
+  sockets: Set<net.Socket>;
   /**
    * The webview's own ancestor chain, or `null` when the caller supplied none
    * this grant can use. It decides both privileges this server hands out — the
@@ -119,6 +142,62 @@ interface Grant {
 const grants = new Map<number, Grant>();
 let lastSweep = 0;
 
+/** A live lease: its grant once minted, and its acquisitions, run one at a
+ *  time so concurrent asks agree on one grant. Released is gone from
+ *  `leases`, which every acquisition rechecks. */
+type Lease = IframeLease & { grant?: Grant; acquire: ReturnType<typeof createSerialQueue> };
+/** Every live lease, by `leaseKey`. */
+const leases = new Map<string, Lease>();
+const leaseKey = (lease: IframeLease) => `${lease.owner}\0${lease.id}`;
+
+function validLease(lease: unknown): IframeLease | undefined {
+  const { owner, id } = (lease ?? {}) as { owner?: unknown; id?: unknown };
+  const field = (value: unknown): value is string => typeof value === 'string' && value.length > 0 && value.length <= MAX_LEASE_FIELD;
+  return field(owner) && field(id) ? { owner, id } : undefined;
+}
+
+function sameChain(a: string[] | null, b: string[] | null): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+function framedUrl(grant: Grant, upstream: URL): IframeProxyResult {
+  // The proxy origin maps to one fixed upstream, so the full path resolves
+  // transparently — keep the upstream's own initial path/search/hash so
+  // deep-linked and hash-routed targets land where the user pointed. The hash is
+  // browser-only; it is preserved in the iframe URL but never sent upstream.
+  return { ok: true, url: `${grant.proxyOrigin}${upstream.pathname}${upstream.search}${upstream.hash}` };
+}
+
+function closeGrant(grant: Grant): void {
+  grants.delete(grant.port);
+  grant.server.close();
+  grant.server.closeAllConnections();
+  for (const socket of grant.sockets) socket.destroy();
+  grant.sockets.clear();
+}
+
+/**
+ * End leases: `owner`'s lease `id`, or every lease of `owner`. Each one's grant
+ * stops listening and drops its connections at once.
+ */
+export function releaseIframeProxyLease(owner: string, id?: string): void {
+  endLeases((lease) => lease.owner === owner && (id === undefined || lease.id === id));
+}
+
+/** End every lease whose owner is not among `owners`: the windows still open. */
+export function retainIframeProxyOwners(owners: readonly string[]): void {
+  const live = new Set(owners);
+  endLeases((lease) => !live.has(lease.owner));
+}
+
+function endLeases(ends: (lease: Lease) => boolean): void {
+  for (const [key, lease] of leases) {
+    if (!ends(lease)) continue;
+    leases.delete(key);
+    if (lease.grant) closeGrant(lease.grant);
+  }
+}
+
 /**
  * Stand up a loopback proxy in front of `targetUrl` and return the URL the
  * panel should frame, or a structured reason it could not. The actual upstream
@@ -127,7 +206,7 @@ let lastSweep = 0;
  */
 export async function createIframeProxyUrl(
   targetUrl: string,
-  opts?: { log?: ProxyLogger; embedderOrigins?: unknown },
+  opts?: { log?: ProxyLogger; embedderOrigins?: unknown; lease?: unknown },
 ): Promise<IframeProxyResult> {
   if (opts?.log) log = opts.log;
   const embedderOrigins = normalizeEmbedderOrigins(opts?.embedderOrigins);
@@ -156,6 +235,53 @@ export async function createIframeProxyUrl(
     return { ok: false, reason: 'scheme', detail: 'link-local / metadata addresses are refused' };
   }
 
+  const lease = opts?.lease === undefined ? undefined : validLease(opts.lease);
+  if (opts?.lease !== undefined && !lease) return { ok: false, reason: 'unreachable', detail: 'invalid iframe lease' };
+  if (!lease) {
+    const minted = await mintGrant(upstream, embedderOrigins, false);
+    return 'port' in minted ? framedUrl(minted, upstream) : minted;
+  }
+  const key = leaseKey(lease);
+  let held = leases.get(key);
+  if (!held) {
+    if (leases.size >= MAX_IFRAME_LEASES) {
+      log(`[iframe-proxy] refused a lease: ${MAX_IFRAME_LEASES} are held`);
+      return { ok: false, reason: 'unreachable', detail: 'too many embedded pages are open' };
+    }
+    leases.set(key, held = { ...lease, acquire: createSerialQueue() });
+  }
+  const entry = held;
+  return entry.acquire(() => acquireLeased(entry, key, upstream, embedderOrigins));
+}
+
+const CLOSED_VIEW: IframeProxyResult = { ok: false, reason: 'unreachable', detail: 'the embedded view was closed' };
+
+/** The lease's grant, reused while it fronts the same upstream origin for the
+ *  same embedder chain — a Reload, Back or Forward keeps the page's origin —
+ *  else a fresh one in its place. One released meanwhile mints nothing. */
+async function acquireLeased(lease: Lease, key: string, upstream: URL, embedderOrigins: string[] | null): Promise<IframeProxyResult> {
+  const released = () => leases.get(key) !== lease;
+  if (released()) return CLOSED_VIEW;
+  if (lease.grant && lease.grant.upstream.origin === upstream.origin && sameChain(lease.grant.embedderOrigins, embedderOrigins)) {
+    return framedUrl(lease.grant, upstream);
+  }
+  if (lease.grant) {
+    closeGrant(lease.grant);
+    lease.grant = undefined;
+  }
+  const minted = await mintGrant(upstream, embedderOrigins, true);
+  if (!('port' in minted)) return minted;
+  if (released()) {
+    closeGrant(minted);
+    return CLOSED_VIEW;
+  }
+  lease.grant = minted;
+  return framedUrl(minted, upstream);
+}
+
+type Refusal = Extract<IframeProxyResult, { ok: false }>;
+
+async function mintGrant(upstream: URL, embedderOrigins: string[] | null, leased: boolean): Promise<Grant | Refusal> {
   const now = Date.now();
   sweepGrants(now);
 
@@ -165,6 +291,9 @@ export async function createIframeProxyUrl(
     proxyOrigin: '',
     server: null as unknown as http.Server,
     lastUsed: now,
+    leased,
+    fresh: true,
+    sockets: new Set(),
     embedderOrigins,
   };
   const server = http.createServer((req, res) => handleRequest(grant, req, res));
@@ -186,13 +315,8 @@ export async function createIframeProxyUrl(
   // Sweep after insertion as well, so neither sequential nor concurrent calls
   // leave more than MAX_GRANTS published listeners behind.
   sweepGrants(Date.now());
-  log(`[iframe-proxy] ${upstream.href} → ${grant.proxyOrigin}`);
-
-  // The proxy origin maps to one fixed upstream, so the full path resolves
-  // transparently — keep the upstream's own initial path/search/hash so
-  // deep-linked and hash-routed targets land where the user pointed. The hash is
-  // browser-only; it is preserved in the iframe URL but never sent upstream.
-  return { ok: true, url: `${grant.proxyOrigin}${upstream.pathname}${upstream.search}${upstream.hash}` };
+  log(`[iframe-proxy] ${upstream.href} → ${grant.proxyOrigin}${leased ? ' (leased)' : ''}`);
+  return grant;
 }
 
 function listen(server: http.Server): Promise<number> {
@@ -259,6 +383,12 @@ function handleRequest(grant: Grant, req: http.IncomingMessage, res: http.Server
   // Documents come back identity, so their HTML can be instrumented.
   const dest = req.headers['sec-fetch-dest'];
   if (typeof dest !== 'string' || DOCUMENT_DESTINATIONS.has(dest)) delete headers['accept-encoding'];
+  // Only a frame's own load, which names its destination: a probe without
+  // one must not spend it.
+  if (grant.fresh && (dest === 'document' || dest === 'iframe')) {
+    grant.fresh = false;
+    res.setHeader('clear-site-data', CLEAR_SITE_DATA);
+  }
 
   const upstreamReq = http.request({
     protocol: 'http:',
@@ -485,6 +615,15 @@ function handleUpgrade(grant: Grant, req: http.IncomingMessage, socket: net.Sock
     socket.write(`HTTP/1.1 ${response.statusCode} ${response.statusMessage}\r\n${lines.join('\r\n')}\r\n\r\n`);
     if (upstreamHead.length) socket.write(upstreamHead);
     if (head.length) upstream.write(head);
+    // A revoked grant ends its pipes too — even if a new grant has since bound
+    // its port.
+    if (grants.get(grant.port) !== grant) {
+      socket.destroy();
+      upstream.destroy();
+      return;
+    }
+    grant.sockets.add(socket);
+    socket.on('close', () => grant.sockets.delete(socket));
     upstream.on('error', () => socket.destroy());
     upstream.on('close', () => socket.destroy());
     socket.on('close', () => upstream.destroy());
@@ -503,16 +642,19 @@ function handleUpgrade(grant: Grant, req: http.IncomingMessage, socket: net.Sock
   upstreamReq.end();
 }
 
+/** Reclaim unleased grants: idle past the TTL, or the oldest past the cap. */
 function sweepGrants(now: number): void {
+  // Every grant bounds the unleased ones, so the throttle needs no filter.
   if (now - lastSweep < GRANT_SWEEP_MS && grants.size < MAX_GRANTS) return;
+  const unleased = [...grants.values()].filter((grant) => !grant.leased);
+  if (now - lastSweep < GRANT_SWEEP_MS && unleased.length < MAX_GRANTS) return;
   lastSweep = now;
-  const ordered = [...grants.values()].sort((a, b) => a.lastUsed - b.lastUsed);
-  for (const grant of ordered) {
+  let count = unleased.length;
+  for (const grant of unleased.sort((a, b) => a.lastUsed - b.lastUsed)) {
     const expired = now - grant.lastUsed > GRANT_IDLE_TTL_MS;
-    const overCap = grants.size > MAX_GRANTS;
-    if (!expired && !overCap) break;
-    grants.delete(grant.port);
-    grant.server.close();
+    if (!expired && count <= MAX_GRANTS) break;
+    count -= 1;
+    closeGrant(grant);
     log(`[iframe-proxy] swept grant for ${grant.upstream.href}`);
   }
 }

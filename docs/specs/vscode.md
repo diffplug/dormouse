@@ -17,7 +17,7 @@ The shared frontend runs in the bottom-panel `WebviewView` and independent edito
 - **Never let a resuming router steal another webview's PTYs**: each router's `ownedPtyIds` is enforced by the module-level `globalOwnedPtyIds`.
 - **Every save path must merge current alert states through `toPersistedAlertState`** — the frontend's periodic `dormouse:saveState` and the backend's deactivate refresh (`refreshSavedSessionStateFromPtys`) alike, so the two produce consistent state: missing the merge reverts alert state on restore, passing live state persists transient fields.
 - **A Session's alert state follows its PTY**: `pty:spawn` claims the id before starting its alert state over from `options.alert`, so the seeded state reaches the claiming webview, and **every kill removes the entry**. **Must reserve a closing router's PTYs until its deferred kills finish**, so another router cannot claim them during CWD work.
-- **Every webview and Client write and resize goes through `alertedPty`**, a remote Client's from either Burrow tier included (`writeClientInput`), so input is acknowledged and a resize's grace opened first (`docs/specs/alert.md` → Engagement).
+- **Every webview and Client write and resize goes through `alertedPty`**, a remote Client's from either Burrow tier included (`writeClientInput`); what it does: `docs/specs/alert.md` -> "Engagement", "WATCHING Track".
 - **`retainContextWhenHidden` is set on both `WebviewPanel` and `WebviewView`**, so xterm.js DOM, scrollback, and PTY subscriptions survive hide/show without a resume.
 - **Workbench chords in the `lib/src/lib/vscode-keybindings.ts` allowlist are mirrored**: xterm still processes the key while the webview posts `dormouse:runWorkbenchCommand`, and `message-router.ts` revalidates it against the same set before `vscode.commands.executeCommand`.
 
@@ -65,7 +65,7 @@ Source of truth: `connectWebview` / `reportWindowPresence` in `vscode-ext/src/me
 
 The selected shell is `dormouse.selectedShellPath`, read from `workspaceState` before `globalState`; **a global save clears the workspace value** so it cannot shadow the new default. Its name is mirrored into `WebviewView.description`, and `dormouse:selectedShell` keeps the webview's default-shell slot current.
 
-`dormouse.newTerminal` focuses the view and posts `dormouse:newTerminal` with the selected shell. `dormouse.selectShell` opens a QuickPick and — **only when the pick differs from the previous selection** — focuses the view and posts `dormouse:newTerminal` with `replaceUntouched: true` and `announce: true` (`docs/specs/layout.md` → "Session lifecycle and terminal registry" owns what Wall does with it).
+`dormouse.newTerminal` focuses the view and posts `dormouse:newTerminal` with the selected shell. `dormouse.selectShell` opens a QuickPick; a changed pick focuses the view and posts `dormouse:newTerminal` (`docs/specs/layout.md` -> "Session lifecycle and terminal registry").
 
 **The QuickPick is the only shell control here**: `VSCodeAdapter` sets `hostOwnsShells`, so the shared Settings dialog hides its Shell row. Source of truth: `vscode-ext/src/shell-selection.ts`.
 
@@ -165,11 +165,23 @@ The shared `BurrowService` (`docs/specs/relay.md` → "Burrow side", which owns 
 
 Source of truth: `VsCodeBurrowStateStore` in `vscode-ext/src/burrow-store.ts`, `markOneTimeServing` and `contendIfServing` in `vscode-ext/src/burrow.ts`.
 
-**Which window: bind-as-lease.** Unarbitrated, every window's extension host would start a Burrow against the same enrollment and fight over the one `/ws/burrow` socket (rationale), so **the bind is the lease**. Every contending window binds one fixed path — `<hash>.sock` in a per-user `dormouse-peer-<uid>` directory in the temp dir, or `\\.\pipe\dormouse-peer-<hash>` on Windows — **the hash is the first 12 hex characters of SHA-256 over `context.globalStorageUri.fsPath`**, so every window, whatever its build, computes the same path (hashed for the platform path cap; rationale). The winner is the broker and runs the service; everyone else connects to it as a client.
+**Which window: bind-as-lease.** **The bind is the lease**, so the windows' extension hosts never fight over the enrollment's one `/ws/burrow` socket (rationale). Every contending window binds one fixed path — `<hash>.sock` in a per-user `dormouse-peer-<uid>` directory in the temp dir, or `\\.\pipe\dormouse-peer-<hash>` on Windows — **the hash is the first 12 hex characters of SHA-256 over `context.globalStorageUri.fsPath`**, so every window, whatever its build, computes the same path (hashed for the platform path cap; rationale). The winner is the broker and runs the service; everyone else connects to it as a client.
+
+```mermaid
+stateDiagram-v2
+  [*] --> Unsettled: start trigger
+  Unsettled --> Broker: uncontested bind
+  Unsettled --> Client: connect, welcome verified
+  Unsettled --> Provisional: refused twice → unlink, rebind
+  Provisional --> Broker: stillOurs
+  Provisional --> Unsettled: path replaced or gone
+  Client --> Unsettled: broker socket closed
+  Unsettled --> StoodDown: unsafe directory, or token wait exhausted
+```
 
 - **Roles never flip downward**: no `onRole(false)` after a `true` (rationale).
-- **Contend on broker death, not on a timer**: when the broker exits every client's socket closes and they race to bind; `bind` picks exactly one. No TTL, heartbeat file, or watcher.
-- **A corpse is cleared, then the bind is re-checked**: **never unlink on the first refusal**, and a window whose bound socket was replaced or removed stands down (`stillOurs`; rationale).
+- **Contend on broker death, not on a timer**: `bind` picks exactly one; no TTL, heartbeat file, or watcher.
+- **A corpse is cleared, then the bind is re-checked**: **never unlink on the first refusal** (rationale).
 - **A bind is not a role until it is believed**: every "is this window the broker" answer reads `brokerConfirmed`, so **unverified reads as unsettled** and a command landing mid-verification is held for the verdict (rationale).
 - **Errors after `listen` are logged, not thrown**, so a late server error cannot take the extension host down (rationale).
 
@@ -180,7 +192,7 @@ Source of truth: `VsCodeBurrowStateStore` in `vscode-ext/src/burrow-store.ts`, `
 *The handshake.* The shared secret is a mode-0600 `burrow.peer-token` in `globalStorageUri`, **created once with an exclusive `wx` write rather than a rename** so two windows starting together agree on one token. **Treat an empty read as *not yet written*, never as the token**, waiting it out with a bounded retry (rationale); **exhausting that wait latches the same permanent stand-down** as an unsafe directory. The token **never crosses the socket**; three frames prove mutual knowledge of it:
 
 1. `challenge { nonce }` — the *server* speaks first, on accept, so a client never volunteers a proof into whatever bound the path.
-2. `hello { nonce, proof }` — the client answers `HMAC-SHA256(token, "client:" + relayNonce)` with a fresh nonce of its own.
+2. `hello { nonce, proof }` — the client answers `HMAC-SHA256(token, "client:" + challengeNonce)` with a fresh nonce of its own.
 3. `welcome { proof }` — the server verifies in constant time, then answers `HMAC-SHA256(token, "server:" + clientNonce)`.
 
 **Domain-separate the two proofs (`client:` / `server:`)**, or a fake server could reflect the client's proof back as its welcome. **The client verifies the welcome before it sends or answers anything else** — it forwards no notifies (they queue), answers no requests, streams no PTY, forwards no commands — and an unverifiable welcome closes the socket (rationale). **Fresh nonces per connection** make a captured proof worthless on the next. **Parseable JSON that is not a frame object is rejected on both ends**, a first frame that is not a valid hello drops the socket, and **each side bounds the handshake to `HANDSHAKE_BUDGET_MS`**.
@@ -226,7 +238,7 @@ The service owns the PTYs but not the *view* of them: each webview is its own JS
 
 **Every webview installs the responder**, broker or not; it carries none of the relay, enrollment, or pairing machinery. **Installing must be idempotent per link** (rationale).
 
-**Each webview counts once, and a late answer repairs the snapshot**: a duplicate answer cannot contribute the same panes twice, and an answer for an already-settled request **triggers a directory invalidation instead** (`docs/specs/remote-api.md` → Directory).
+**Each webview counts once**: a duplicate answer cannot contribute the same panes twice. A late answer: `docs/specs/remote-api.md` -> "Directory".
 
 **A peer answer belongs to the authenticated broker socket that asked for it**: if that broker disappears mid-fan-out the answer is dropped even when this window has already connected to a replacement, since **request ids restart per broker**. A rejected fan-out contributes an empty answer. **Nothing in an answer but its `ptyId` (`routedPtyId`) is interpreted below the Burrow.**
 

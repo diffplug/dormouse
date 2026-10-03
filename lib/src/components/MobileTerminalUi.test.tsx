@@ -415,6 +415,44 @@ describe('MobileTerminalUi session list', () => {
     expect(inset(container, 'ringing-idle')).toBe('door');
     expect(inset(container, 'quiet')).toBeNull();
   });
+
+  /** Each section's label, then its rows' titles. */
+  const sections = (container: HTMLElement) =>
+    [...container.querySelectorAll('section:has(> h3)')].map((section) => [
+      section.querySelector('h3')?.textContent,
+      ...[...section.querySelectorAll('button')].map((row) => row.textContent),
+    ]);
+
+  it('lists rows under their group, each group where its first row falls', () => {
+    const api = { id: 'workspace:1', label: 'api' };
+    const web = { id: 'workspace:2', label: 'web' };
+    const container = renderSessions([
+      { id: 'a', title: 'server', group: web, episode: null },
+      { id: 'b', title: 'tests', group: api, episode: null },
+      { id: 'c', title: 'vite', group: web, episode: null },
+    ]);
+    expect(sections(container)).toEqual([['web', 'server', 'vite'], ['api', 'tests']]);
+  });
+
+  it('lists rows with no group beside labelled ones without a label of their own', () => {
+    const api = { id: 'workspace:1', label: 'api' };
+    const container = renderSessions([
+      { id: 'a', title: 'server', group: api, episode: null },
+      { id: 'b', title: 'loose', episode: null },
+    ]);
+    expect([...container.querySelectorAll('h3')].map((h) => h.textContent)).toEqual(['api']);
+    expect([...container.querySelectorAll('button')].map((row) => row.textContent)).toContain('loose');
+  });
+
+  it('shows no group label when every row shares one', () => {
+    const only = { id: 'workspace:1', label: 'api' };
+    const container = renderSessions([
+      { id: 'a', title: 'server', group: only, episode: null },
+      { id: 'b', title: 'tests', group: only, episode: null },
+    ]);
+    expect(container.querySelector('h3')).toBeNull();
+    expect([...container.querySelectorAll('button')].map((row) => row.textContent)).toContain('tests');
+  });
 });
 
 describe('paneMouseOverride', () => {

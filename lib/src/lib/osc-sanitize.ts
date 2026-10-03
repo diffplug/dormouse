@@ -2,7 +2,7 @@
  * The shared sanitizer for untrusted OSC payload text — OSC 9/99/777
  * notifications and the shell-reported command line, all arbitrary process
  * output that reaches UI (`docs/specs/alert.md` -> notification protocols,
- * `docs/specs/terminal-escapes.md`). The OSC 367 parsers in dor-tools-lib carry
+ * `docs/specs/terminal-state.md` -> "Supported OSC Inputs"). The OSC 367 parsers in dor-tools-lib carry
  * their own copy of `sanitizeText`, since that package imports nothing.
  */
 

@@ -25,6 +25,7 @@ import {
   type ViewerSyncIntent,
 } from '../lib/platform/browser-automation';
 import { BrowserStreamGrants } from './browser-stream-guard';
+import type { CaptureClaim } from './browser-capture-budget';
 import { isLoopbackHost } from './loopback-guard';
 
 /** What a provider pushes to one viewer of a live browser. */
@@ -174,6 +175,14 @@ export function closeSocket(socket: WebSocket, code: number, reason: string, log
 
 /** Continued input keeps the stream painting this long after the last. */
 export const PROVISIONAL_INPUT_WINDOW_MS = 250;
+/** Changed frames this close together are one burst of motion. */
+export const SETTLE_MS = 200;
+/** A burst this long is motion: the stream paints it and the crisp loop
+ *  waits until the page has settled for `SETTLE_MS`, then captures once. */
+export const MOTION_MS = 500;
+/** Input this recent marks the pane the user is working in, whose captures
+ *  go ahead of the host-wide budget's queue. */
+const URGENT_AFTER_INPUT_MS = 2000;
 const OVERDUE_FLOOR_MS = 400;
 // A capture this slow is flagged `stalled` in its debug log.
 const STALL_WARNING_MS = 8000;
@@ -189,8 +198,8 @@ export interface BrowserViewDeps {
   /** The Surface shows its browser as its own window: no frame is sent. */
   headed: boolean;
   /** One device-resolution JPEG of the browser, or undefined when none can
-   *  be taken now. */
-  capture(): Promise<Uint8Array | undefined>;
+   *  be taken now: through the host-wide budget, which `claim` queues in. */
+  capture(claim: CaptureClaim): Promise<Uint8Array | undefined>;
   /** Called once the socket has closed, however it closed. */
   onClose(): void;
   /** Sync-to-pane's side of a pane's socket — never a headed one's: the
@@ -208,12 +217,14 @@ export interface BrowserViewDeps {
 /**
  * One viewer socket: the provider's sink on one side, the webview's socket on
  * the other. A stream frame is sent as a provisional paint when it is the
- * first, inside the input window, or while a capture is overdue; any changed
- * frame pulses the crisp loop, whose capture replaces it. At most one capture
- * is in flight; one starts no sooner than 1.5× the average capture after the
- * last began, never inside the input window; one out past twice the average
- * (at least 400 ms) is overdue and never re-issued; one a provisional paint
- * superseded while it ran is dropped and owed again.
+ * first, inside the input window, while a capture is overdue, or while the
+ * page is in motion — settle, then sharpen; any changed frame pulses the
+ * crisp loop, whose capture replaces it. At most one capture is in flight;
+ * one starts no sooner than 1.5× the average capture after the last began,
+ * never inside the input window or while in motion, and only as the host-wide
+ * budget allows; one out past twice the average (at least 400 ms) is overdue
+ * and never re-issued; one a provisional paint superseded while it ran is
+ * dropped and owed again.
  */
 export class BrowserView implements ViewerSink {
   private upstream: Upstream | null = null;
@@ -222,7 +233,10 @@ export class BrowserView implements ViewerSink {
   // What the socket last carried, which is what the webview's canvas shows.
   private last: { kind: ViewerFrameKind; jpeg: Uint8Array; message: Uint8Array } | null = null;
   private size: { width: number; height: number } | undefined;
-  private provisionalUntil = -Infinity;
+  private lastInput = -Infinity;
+  // The current burst of changed frames: when it began, and its latest.
+  private burstStart = -Infinity;
+  private lastChange = -Infinity;
   private activeTab: string | undefined;
   // Counts the provisional paints that supersede a capture in flight — not
   // those made only because one is overdue, which it is newer than.
@@ -272,7 +286,7 @@ export class BrowserView implements ViewerSink {
   /** Paint the stream for a while: input reached the page another way (a
    *  host editing op). */
   openProvisionalWindow(): void {
-    this.provisionalUntil = performance.now() + PROVISIONAL_INPUT_WINDOW_MS;
+    this.lastInput = performance.now();
   }
 
   // --- the provider's sink ---
@@ -282,7 +296,10 @@ export class BrowserView implements ViewerSink {
     this.stats.framesIn += 1;
     if (size) this.size = size;
     const now = performance.now();
-    const forInput = !this.last || !this.capturable || now <= this.provisionalUntil;
+    if (now - this.lastChange > SETTLE_MS) this.burstStart = now;
+    this.lastChange = now;
+    // In motion, a frame is newer than any capture already running.
+    const forInput = !this.last || !this.capturable || now <= this.provisionalUntil() || this.moving(now);
     if (forInput || this.captureOverdue(now)) {
       this.send('provisional', jpeg);
       if (forInput) this.provisionalGeneration += 1;
@@ -364,6 +381,16 @@ export class BrowserView implements ViewerSink {
     return Math.max(2 * this.avgMs, OVERDUE_FLOOR_MS);
   }
 
+  /** When the input window closes. */
+  private provisionalUntil(): number {
+    return this.lastInput + PROVISIONAL_INPUT_WINDOW_MS;
+  }
+
+  /** Changed frames have kept coming for `MOTION_MS`, and the last is recent. */
+  private moving(now: number): boolean {
+    return now - this.lastChange <= SETTLE_MS && this.lastChange - this.burstStart >= MOTION_MS;
+  }
+
   private captureOverdue(now: number): boolean {
     return this.inFlight && now - this.lastStart > this.overdueAfterMs();
   }
@@ -382,8 +409,10 @@ export class BrowserView implements ViewerSink {
     // capture self-throttles; the 50 ms floor stops a fast failure spinning.
     const paceWait = this.lastStart + Math.max(50, this.avgMs * 1.5) - now;
     // Inside the input window every capture is superseded before it lands.
-    const provisionalWait = this.provisionalUntil - now;
-    const wait = Math.max(paceWait, provisionalWait);
+    const provisionalWait = this.provisionalUntil() - now;
+    // In motion, one capture once the page settles.
+    const settleWait = this.moving(now) ? this.lastChange + SETTLE_MS - now : 0;
+    const wait = Math.max(paceWait, provisionalWait, settleWait);
     if (wait > 0) {
       this.timer ??= setTimeout(() => {
         this.timer = undefined;
@@ -399,9 +428,15 @@ export class BrowserView implements ViewerSink {
     this.inFlight = true;
     this.dirty = false;
     const generation = this.provisionalGeneration;
-    const started = this.lastStart = performance.now();
+    let started = this.lastStart = performance.now();
     this.stats.captures += 1;
-    void this.deps.capture().catch(() => undefined).then((jpeg) => {
+    const claim: CaptureClaim = {
+      urgent: started - this.lastInput <= URGENT_AFTER_INPUT_MS,
+      wanted: () => !this.closed,
+      // Time queued in the budget is not the capture's: pacing measures shots.
+      started: () => { started = performance.now(); },
+    };
+    void this.deps.capture(claim).catch(() => undefined).then((jpeg) => {
       const elapsedMs = performance.now() - started;
       this.stats.captureMs += elapsedMs;
       if (elapsedMs > STALL_WARNING_MS) this.deps.log?.(`[browser-viewer] capture stalled ${Math.round(elapsedMs)}ms`);

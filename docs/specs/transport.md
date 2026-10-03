@@ -69,10 +69,22 @@ Source of truth: `ITERM2_COMPAT_VERSION` in `standalone/sidecar/pty-core.js` and
 
 1. The visible or deserialized webview calls `requestInit` (VS Code: `{ type: 'dormouse:init' }`).
 2. The host answers `pty:list` (one `PtyInfo` per owned PTY), then `pty:replay` for each PTY with buffered output, then `alert:state` for each.
-3. The webview resumes terminals with their launch shells for Session-specific clipboard/drop escaping.
+3. The webview resumes terminals with their launch shells (consumer: `docs/specs/mouse-and-clipboard.md` -> "8.6 Paste Content").
 4. A saved layout is reused only when its leaves match the live visible pane set; saved minimized PTYs are registered as Doors.
 
-**A collection finishes only on its own answer**: a host serving several windows echoes the `requestInit` token on the `pty:list` and every `pty:replay` behind it, and the collector ignores a different one (rationale). **An answer carrying no token is taken** — the hosts that echo none (VS Code, Pocket, the website) run one collector per JS realm. **A collection that timed out is not one that found no PTYs**, and `LivePtys` says which; cold-restoring on a timeout starts a second set of shells over the running ones. **A collector given `retryTimeoutMs` asks once more before reporting silence** (rationale), and **`resumeOrRestore` and `restoreWindow` ask for it only when the saved session names a terminal pane**. Source of truth: `collectLivePtys` in `lib/src/lib/reconnect.ts`; `list` in `standalone/sidecar/pty-core.js`.
+```mermaid
+flowchart TD
+  A[requestInit, fresh token] --> B{own pty:list in time?}
+  B -- "yes, PTYs listed" --> R[resume them]
+  B -- "yes, none" --> S[cold restore]
+  B -- no --> D{retryTimeoutMs, unused?}
+  D -- yes --> A
+  D -- no, timedOut --> E{caller}
+  E -- arrival --> F["refuse (standalone.md → Arrival queue)"]
+  E -- boot --> S
+```
+
+**A collection finishes only on its own answer**: a host serving several windows echoes the `requestInit` token on the `pty:list` and every `pty:replay` behind it, and the collector ignores a different one (rationale). **An answer carrying no token is taken** — the hosts that echo none (VS Code, Pocket, the website) run one collector per JS realm. **A collection that timed out is not one that found no PTYs** (`LivePtys`): restoring over it starts a second set of shells, which only boot risks, after its retry. **A collector given `retryTimeoutMs` asks once more before reporting silence** (rationale), and **`resumeOrRestore` and `restoreWindow` give it only when the saved session names a terminal pane**. Source of truth: `collectLivePtys` in `lib/src/lib/reconnect.ts`; `list` in `standalone/sidecar/pty-core.js`.
 
 **Seeded titles reject the sentinels.** Saved pane and door titles come back through `setTerminalUserTitle()`, which rejects the reserved `<idle>` prefix (`docs/specs/terminal-state.md` → Supported OSC Inputs); the seed also skips `<unnamed>`, the default panel placeholder (rationale).
 
@@ -99,7 +111,7 @@ Source of truth: `REPLAY_MODE_RESET` in `lib/src/lib/terminal-report-filter.ts`,
 A Workspace can move from one webview to another with its Sessions still running (`docs/specs/standalone.md` → Transfer). It is a resume, not a restore:
 
 - **Release, never dispose, and only once the target has adopted the Workspace.** The source detaches its half of each Session and **never kills the PTY**. **Never reachable from a webview unmount** — a reload or a StrictMode double-mount would strand every PTY the window still owns (rationale). A move the target never took leaves the Workspace exactly as it was.
-- **Split at a mark stamped in the stream, then suppress until the replay.** The host keeps routing an id's output to the source until its `pty:marked` line, written behind every `pty:data` already sent and ahead of every later one; the source then holds exactly the bytes before the mark and serializes its buffer there as the arrival's content. From the mark the host drops the id's output until the target's replay reaches it. The target writes the serialized buffer, then the since-mark replay: no duplicate or lost bytes at the seam, and the source xterm's retained screen and scrollback survive beyond the host's bounded tail. Output already trimmed from xterm is not recovered. **An id the host never marked is serialized anyway and replayed whole.** Suppression fails open after a bound (rationale); the hand-back is `docs/specs/standalone.md` → "Arrival queue".
+- **Split at a mark stamped in the stream, then suppress until the replay.** The host keeps routing an id's output to the source until its `pty:marked` line, written behind every `pty:data` already sent and ahead of every later one; the source then holds exactly the bytes before the mark and serializes its buffer there as the arrival's content. From the mark the host drops the id's output until the target's replay reaches it. The target writes the serialized buffer, then the since-mark replay: no duplicate or lost bytes at the seam, and the source xterm's retained screen and scrollback survive beyond the host's bounded tail. Output already trimmed from xterm is not recovered. **An id the host never marked is serialized anyway and replayed whole.** Suppression fails open after a bound (rationale); the message sequence and hand-back are `docs/specs/standalone.md` → "Arrival queue".
 - **Must include retained, naturally exited buffers in explicit marked requests**, with `alive: false` and their exit code, replaying their since-mark tail; ordinary discovery stays live-only.
 - **Ask for exactly the moving ids, at their marks.** `pty:requestInit` names them; a marked id replays only its output since the mark, any other its whole buffer. **Omitted ids are not empty ids**: a computed set that came out empty is a no-op, never every PTY in the process.
 - **Must replay a transfer at its source grid and drain parsing before mounting the target Wall**, then fit the target pane. **Must preserve mouse encoding as well as tracking**, including the SGR and SGR-pixel encodings xterm's serializer omits.
@@ -123,7 +135,7 @@ Source of truth: the message schema in `vscode-ext/src/message-types.ts` (`Webvi
 
 | Direction | Message | Contract |
 | --- | --- | --- |
-| Webview → host | `dormouse:openExternal` | Open a user-confirmed external URI from an OSC 8 hyperlink. **Hosts must revalidate** through `normalizeExternalUri` in `lib/src/lib/external-links.ts`. |
+| Webview → host | `dormouse:openExternal` | Open a user-confirmed external URI from an OSC 8 hyperlink; revalidation: `docs/specs/mouse-and-clipboard.md` -> "OSC 8 hyperlinks". |
 | Webview → host | `pty:getOpenPorts` | TCP listening ports of a PTY's shell **and all of its descendant subprocesses**, answered with `pty:openPorts`. `getOpenPortsForPids()` in `standalone/sidecar/pty-core.js` serves both hosts. |
 | Host → webview | `pty:openPorts` | De-duplicated by `(family, address, port)`, sorted by port then address; empty when the PTY is gone or enumeration fails. |
 | Webview → host | `pty:getOpenPortsMany` | `ids`, answered by `pty:openPortsMany` from one scan. |
@@ -205,7 +217,7 @@ Source of truth: `PersistedSession` in `lib/src/lib/session-types.ts`; `lib/src/
 
 ### The governing rule
 
-**Dormouse restores only what it destroyed without asking.** Deliberately ending something ends it:
+**Dormouse restores only what it destroyed without asking** (rationale). Deliberately ending something ends it:
 
 | Boundary | Deliberate? | Outcome |
 | --- | --- | --- |
@@ -220,7 +232,7 @@ Source of truth: `PersistedSession` in `lib/src/lib/session-types.ts`; `lib/src/
 | VS Code editor-tab close (`killOnDispose: true`) | Yes | Fresh for that panel |
 | VS Code extension-host crash | No, and the last periodic save stands | Restore structure, no agent resume — `deactivate()` never ran |
 
-**Standalone persists one `PersistedWindow` per window**, every Workspace in it (rationale). "Restore structure" brings back the layout, cwds, titles, doors, and TODO/alert blobs; "auto-resume agents" is `docs/compatible-agents.md` → "Cold restore". A cold-restored pane opens empty.
+Standalone's per-window record: `docs/specs/standalone.md` -> "Persistence". "Restore structure" brings back the layout, cwds, titles, doors, and TODO/alert blobs; "auto-resume agents" is `docs/compatible-agents.md` → "Cold restore". A cold-restored pane opens empty.
 
 ## Universal invariants
 

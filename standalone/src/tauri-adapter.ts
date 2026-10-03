@@ -4,6 +4,7 @@ import { applyLiveToolEvents } from '../../lib/src/lib/tool-events';
 import { offerProgramCopy } from '../../lib/src/lib/mouse-selection';
 import type { TerminalContextRequest, TerminalContextInfo } from '../../lib/src/lib/terminal-context-types';
 import { invoke as rawInvoke } from "@tauri-apps/api/core";
+import { IframeLeaseOrder } from '../../lib/src/lib/platform/iframe-lease-order';
 import { open } from "@tauri-apps/plugin-shell";
 import { coalesceCwds } from "./coalesce-cwds";
 import type {
@@ -118,6 +119,9 @@ export class TauriAdapter implements PlatformAdapter {
 
   readonly burrow: BurrowLink = this.burrowClient.link;
 
+  /** Iframe lease messages, kept in order across Rust's command threads. */
+  private readonly leaseOrder = new IframeLeaseOrder();
+
   // --- Alerts (docs/specs/standalone.md → "Alerts") ---
   //
   // The app's one AlertManager is the sidecar's; this window is one of its
@@ -133,9 +137,15 @@ export class TauriAdapter implements PlatformAdapter {
     // resolved colors up whenever they change (the initial push is in
     // requestInit) — mirroring VSCodeAdapter.pushThemeColors.
     onTerminalThemeChange(() => this.pushThemeColors());
+    // The iframe panel calls this detached (`const createProxy = getPlatform().createIframeProxyUrl`).
+    this.createIframeProxyUrl = this.createIframeProxyUrl.bind(this);
   }
 
   async init(): Promise<void> {
+    // A page this one replaced in the window (a reload) may have left iframe
+    // leases it never released; this page holds none yet. Every lease this
+    // page takes waits on it, so the release reaches the sidecar first.
+    this.leaseOrder.reset = rawInvoke("iframe_release_proxy", { lease: null }).catch(() => {});
     const replayExits = new Map<string, number>();
     const replayKey = (id: string, requestId?: string) => JSON.stringify([requestId, id]);
     // Registered together rather than one await after another: every `listen`
@@ -450,20 +460,25 @@ export class TauriAdapter implements PlatformAdapter {
     return result;
   }
 
-  async createIframeProxyUrl(targetUrl: string): Promise<IframeProxyResult> {
+  async createIframeProxyUrl(targetUrl: string, lease?: string): Promise<IframeProxyResult> {
     // The sidecar stands up the loopback proxy and serves the bytes (shared
     // lib/src/host/iframe-proxy.ts). On failure, report unreachable so the panel
     // shows a hint rather than a never-loading frame.
     try {
       // The webview's ancestor chain decides who may frame the proxy and where
       // its shim may post; only this realm can read it.
-      return await rawInvoke<IframeProxyResult>("iframe_create_proxy_url", {
+      return await this.leaseOrder.create(lease, () => rawInvoke<IframeProxyResult>("iframe_create_proxy_url", {
         target: targetUrl,
         embedderOrigins: embedderOrigins(),
-      });
+        lease: lease ?? null,
+      }));
     } catch (err) {
       return { ok: false, reason: "unreachable", detail: errMessage(err) };
     }
+  }
+
+  releaseIframeProxy(lease: string): void {
+    this.leaseOrder.release(lease, () => void rawInvoke("iframe_release_proxy", { lease }).catch(() => {}));
   }
 
   // --- browser automation (docs/specs/dor-browser.md → "Browser Host").

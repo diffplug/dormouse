@@ -1,7 +1,7 @@
 # Terminal CWD and Command State
 
 > See `docs/specs/glossary.md` for Session vocabulary. Owns the per-Session terminal semantic state that layout and grouping consume, and the shell integration that reports it.
-> **Defers:** alert/TODO behavior and the notification OSCs (OSC 9 / 9;4 / 99 / 777 / BEL) to `docs/specs/alert.md`; the escape-sequence registry, parsing-location rules, and value bounds to `docs/specs/terminal-escapes.md`.
+> **Defers:** alert/TODO behavior and the notification OSCs (OSC 9 / 9;4 / 99 / 777 / BEL) to `docs/specs/alert.md`; the escape-sequence registry and parsing-location rules to `docs/specs/terminal-escapes.md`.
 
 **`cwd` means "the shell/session reported this directory"** — not the internal CWD of a foreground program. **A command snapshots `cwdAtStart` at start**; grouping and header disambiguation use that snapshot while it runs.
 
@@ -27,8 +27,6 @@ Source of truth: `snapshotTerminalState` / `restoreTransferredTerminalState` in
 
 ## Supported OSC Inputs
 
-The registry lists the sequences; this section owns what each one means.
-
 CWD, sourced `osc7`, `osc9_9`, `osc633` (`P ; Cwd=`), `osc1337` (`CurrentDir=`):
 
 - **OSC 7 is parsed as a `file:` URI, its host taken from the URL parser's normalized hostname, preserving raw case and the literal `localhost` spelling only.**
@@ -37,7 +35,21 @@ CWD, sourced `osc7`, `osc9_9`, `osc633` (`P ; Cwd=`), `osc1337` (`CurrentDir=`):
 - `process` — the adapter polled the PTY's process for its working directory.
 - `manual` — seeded via `cwdFromManualPath()`. `seedTerminalManualCwd()` (session restore) writes it **only into a pane with no CWD yet**; `seedLaunchedCommand()` (known spawn directory) applies it **unconditionally** — safe only at spawn, before any OSC has reported.
 
-Command lifecycle, for both `OSC 133` and `OSC 633`: `A` → `promptStart`, `B` → `promptEnd`, `D ; <exitCode?>` → `commandFinish`, and:
+Command lifecycle, for both `OSC 133` and `OSC 633`, as `ShellActivity`; any event applies in any state, `D` with an optional exit code:
+
+```mermaid
+stateDiagram-v2
+  direction LR
+  [*] --> unknown
+  unknown --> prompt: A promptStart
+  prompt --> editing: B promptEnd
+  editing --> running: C commandStart
+  running --> finished: D commandFinish
+  finished --> prompt: A
+  running --> prompt: A without D, run dropped
+```
+
+`C` and the command line, by emitter:
 
 - `OSC 133 ; C` → `commandStart(source: "osc133_boundaries")`, preceded by `commandLine` when it carries one: fish ≥ 4's percent-encoded UTF-8 `cmdline_url`, else kitty's `printf %q` `cmdline`, which runs to the end of the sequence.
 - `OSC 633 ; E ; <commandline> [; <nonce>]` → `commandLine` from the command field alone, decoding VS Code `\xAB` / `\\` escapes.
@@ -52,13 +64,15 @@ Titles:
 
 **A programmatic interactive launch writing directly to the platform PTY must emit `commandLine` + `commandStart(source: "user_input")` synchronously before the write**, through `seedLaunchedCommand` — it bypasses xterm's keystroke fallback; an integrated shell's later boundaries stay authoritative.
 
+**Every semantic value `TerminalProtocolParser` *retains* is bounded and stripped of control characters before storage**, whatever the emitter: `TITLE_LIMIT` / `BODY_LIMIT` for titles and notification bodies, whose whitespace controls collapse to spaces before the trim; `COMMAND_LINE_LIMIT` for the command line (`OSC 633 ; E`, `OSC 133 ; C`), source bounded at 4× `COMMAND_LINE_LIMIT` code points for OSC 633 or shell-quoted input, or 12× for percent-encoded UTF-8, then decoded, sanitized, and capped at `COMMAND_LINE_LIMIT` code points (rationale), **line breaks kept as `\n`**; `MAX_CWD_LENGTH` for every CWD source, interior whitespace preserved. **Semantic value limits count code points**, so a cut never splits a surrogate pair. **A value that reduces to nothing is dropped, never stored empty.**
+
 **Supported-but-malformed semantic OSCs are consumed without changing state.**
 
-Source of truth: `TerminalProtocolParser` in `lib/src/lib/terminal-protocol.ts`; `fileUriHost` / `cwdFromManualPath` in `lib/src/lib/terminal-state.ts`; `seedTerminalManualCwd` and `seedLaunchedCommand` in `lib/src/lib/terminal-state-store.ts`.
+Source of truth: `TerminalProtocolParser` / `commandLineEvents` in `lib/src/lib/terminal-protocol.ts`; `fileUriHost` / `cwdFromManualPath` / `boundedCwdValue` in `lib/src/lib/terminal-state.ts`; `seedTerminalManualCwd` and `seedLaunchedCommand` in `lib/src/lib/terminal-state-store.ts`.
 
 ## Shell-integration injection
 
-**Dormouse injects its own shell integration when it spawns a shell** (rationale); the scripts emit the `OSC 633` rows above (`A`, `B`, `C`, `D;<exit>`, `E`, `P;Cwd=`). **Injection is fail-safe**: missing scripts skip it and the shell spawns as before, on the [Keystroke fallback](#keystroke-fallback). An env channel fires as reliably as the `PATH` prepend; an args channel only for the launch shapes below (rationale).
+**Dormouse injects its own shell integration when it spawns a shell** (rationale); the scripts emit the `OSC 633` boundaries above (`A`, `B`, `C`, `D;<exit>`, `E`, `P;Cwd=`). **Injection is fail-safe**: missing scripts skip it and the shell spawns as before, on the [Keystroke fallback](#keystroke-fallback). An env channel fires as reliably as the `PATH` prepend; an args channel only for the launch shapes below (rationale).
 
 | Shell | Channel | Injected when |
 |---|---|---|
@@ -70,7 +84,7 @@ Source of truth: `TerminalProtocolParser` in `lib/src/lib/terminal-protocol.ts`;
 
 **bash's `E` is the submitted line, read back from history only when the last entry provably is it, else its first simple command** (`$BASH_COMMAND`) (rationale).
 
-**Both distributions ship the scripts**: standalone through the Tauri `../sidecar/**/*` glob, the VS Code build into `dist/shell-integration`, which the host names in `DORMOUSE_SHELL_INTEGRATION_DIR`.
+**Both distributions ship the scripts**: standalone per `docs/specs/standalone.md` -> "Build and development", the VS Code build into `dist/shell-integration`, which the host names in `DORMOUSE_SHELL_INTEGRATION_DIR`.
 
 **Emitted fields must be filtered before they are written — a security boundary.** An attacker-chosen directory name or command can carry an OSC terminator (BEL, `ESC \`, or the C1 ST `U+009C`) that ends the `633` sequence early, so the remainder arrives as a fresh, fully-trusted OSC. **The parser cannot defend against this** — it scans raw bytes (rationale). The field grammar the parser decodes:
 

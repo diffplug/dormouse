@@ -101,9 +101,19 @@ Source of truth: `applyTheme()` in `lib/src/lib/themes/apply.ts`;
 
 ## Tool iframe themes
 
-**Must publish the workbench's resolved `--vscode-*` variables, theme class, and `color-scheme` to proxied Tool iframes**, initially, after document loads, and on host theme changes, without reloading. **Never override third-party page backgrounds, fonts, or controls**; tools consume the variables themselves. Remove previously published variables absent from the next snapshot. Ordinary browser Surfaces and uninstrumented frames receive no theme.
+**Must publish the workbench's resolved `--vscode-*` variables, theme class, and `color-scheme` to proxied Tool iframes** without reloading. **Never override third-party page backgrounds, fonts, or controls**; tools consume the variables themselves. Remove previously published variables absent from the next snapshot. Ordinary browser Surfaces and uninstrumented frames receive no theme.
 
-**Must address only the current frame's proxy origin and verify its window identity for theme requests.** The shim accepts theme data only from its parent at the configured app origin, sets properties through CSSOM, and emits `dormouse:theme` after applying them to `html` and `body`.
+```mermaid
+sequenceDiagram
+  participant A as app connectIframeTheme
+  participant S as Tool iframeShim
+  A->>S: theme, on connect and each host theme change
+  S->>A: theme-request, at start and each load
+  A->>S: theme
+  Note over S: CSSOM on html and body, then dormouse:theme
+```
+
+**Must address only the current frame's proxy origin and verify its window identity for theme requests.** The shim accepts theme data only from its parent at the configured app origin.
 
 Source of truth: `captureIframeTheme` / `connectIframeTheme` in `lib/src/lib/themes/iframe-theme.ts`; `iframeShim` in `lib/src/host/iframe-proxy-rewrite.ts`.
 
@@ -142,8 +152,8 @@ Source of truth: `getTerminalTheme()` in `lib/src/lib/terminal-theme.ts`;
 `CreatePseudoConsole` silently swallows color queries, while node-pty's bundled
 OpenConsole (`conpty.dll`) forwards them (rationale). **Both distributions must
 ship** `node-pty/prebuilds/<arch>/conpty.node` plus its sibling
-`conpty/{conpty.dll,OpenConsole.exe}`: standalone via the Tauri
-`resources: ["../sidecar/**/*"]` glob, the VS Code extension via
+`conpty/{conpty.dll,OpenConsole.exe}`: standalone per
+`docs/specs/standalone.md` -> "Build and development", the VS Code extension via
 `cp -RL node_modules/node-pty dist/node-pty`. The flag also has an installer
 consequence ([auto-update.md](auto-update.md#sidecar-teardown-on-windows)).
 

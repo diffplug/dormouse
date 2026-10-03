@@ -59,6 +59,7 @@ import { REPLAY_MODE_RESET } from './terminal-report-filter';
 import { cfg } from '../cfg';
 import { TerminalWebglRenderer } from './terminal-webgl';
 import { parkElement } from './terminal-lifecycle';
+import { FitAddon } from './xterm-test-mock';
 
 interface MockTerminalInstance {
   writes: string[];
@@ -418,6 +419,23 @@ describe('terminal-registry alert behavior', () => {
     expect(isUntouched(id)).toBe(false);
   });
 
+  it.each(['restore', 'launch'])('never spawns a %s at the 2x1 FitAddon floor of an unlaid container', (launch) => {
+    // A minimized pane or a Workspace not yet shown has no layout; FitAddon
+    // still proposes its 2x1 minimum, and an agent resumed there ran 2 columns wide.
+    const fit = vi.spyOn(FitAddon.prototype, 'proposeDimensions').mockReturnValue({ cols: 2, rows: 1 });
+    const spawn = vi.spyOn(fakePlatform, 'spawnPty');
+    try {
+      const id = `unlaid-${launch}`;
+      if (launch === 'restore') restoreTerminal(id, {});
+      else getOrCreateTerminal(id);
+      // The mock xterm is 80x24.
+      expect(spawn).toHaveBeenCalledWith(id, expect.objectContaining({ cols: 80, rows: 24 }));
+    } finally {
+      fit.mockRestore();
+      spawn.mockRestore();
+    }
+  });
+
   it('rejects an unsafe persisted resume command before it can be typed', async () => {
     const id = 'unsafe-resume-command';
     const received: string[] = [];
@@ -434,10 +452,11 @@ describe('terminal-registry alert behavior', () => {
 
   it('auto-runs a restored resume command once the fresh shell reaches a prompt', async () => {
     const id = 'tracked-resume-command';
+    const resumeCommand = 'claude --resume 4f2c9b1e-6a03-4d5e-8f60-123456789abc';
     const received: string[] = [];
     fakePlatform.setInputHandler(id, (data) => received.push(data));
 
-    restoreTerminal(id, { resumeCommand: 'claude --resume 4f2c9b1e-6a03' });
+    restoreTerminal(id, { resumeCommand });
 
     // Seeded synchronously — the platform write below bypasses xterm's keystroke
     // fallback, so without this a non-integrated shell would never count the
@@ -445,7 +464,7 @@ describe('terminal-registry alert behavior', () => {
     expect(getTerminalPaneState(id)).toMatchObject({
       activity: { kind: 'running' },
       currentCommand: {
-        rawCommandLine: 'claude --resume 4f2c9b1e-6a03',
+        rawCommandLine: resumeCommand,
         source: 'user_input',
       },
     });
@@ -455,7 +474,7 @@ describe('terminal-registry alert behavior', () => {
     expect(received).toEqual([]);
 
     await vi.advanceTimersByTimeAsync(20_000);
-    expect(received).toEqual(['claude --resume 4f2c9b1e-6a03\r']);
+    expect(received).toEqual([`${resumeCommand}\r`]);
   });
 
   it('auto-runs a restored tool command once shell integration is ready', async () => {
@@ -474,16 +493,17 @@ describe('terminal-registry alert behavior', () => {
 
   it.each(['restore', 'split'])('seeds the actual %s launch after a non-integrated shell prompt', async (launch) => {
     const id = 'launch-after-prompt-' + launch;
+    const command = 'codex resume 22222222-2222-7222-8222-222222222222';
     const received: string[] = [];
     fakePlatform.setInputHandler(id, (data) => {
-      expect(getTerminalPaneState(id).currentCommand?.rawCommandLine).toBe('codex resume abc');
+      expect(getTerminalPaneState(id).currentCommand?.rawCommandLine).toBe(command);
       received.push(data);
     });
-    if (launch === 'restore') restoreTerminal(id, { resumeCommand: 'codex resume abc' });
-    else { setPendingShellOpts(id, { command: 'codex resume abc' }); getOrCreateTerminal(id); }
+    if (launch === 'restore') restoreTerminal(id, { resumeCommand: command });
+    else { setPendingShellOpts(id, { command }); getOrCreateTerminal(id); }
     fakePlatform.sendOutput(id, 'C:\\repo>');
     await vi.advanceTimersByTimeAsync(200);
-    expect(received).toEqual(['codex resume abc\r']);
+    expect(received).toEqual([`${command}\r`]);
     expect(getTerminalPaneState(id).currentCommand?.source).toBe('user_input');
     expect(countRunningSessions()).toBe(1);
   });
@@ -499,12 +519,12 @@ describe('terminal-registry alert behavior', () => {
   });
   it('announces the resume in the pane instead of replaying a transcript', () => {
     const id = 'noticed-resume-command';
-    const entry = restoreTerminal(id, { resumeCommand: 'codex resume 01JCX8ZK' });
+    const entry = restoreTerminal(id, { resumeCommand: 'codex resume 01a100fe-5be3-7d43-a77f-88d30d0f7f12' });
 
     // The pane has no scrollback to explain itself with, so the notice is the
     // only thing saying why an agent appeared — and that the interrupted turn
     // did not continue.
-    expect(entry.terminal.writes.join('')).toContain('codex resume 01JCX8ZK');
+    expect(entry.terminal.writes.join('')).toContain('codex resume 01a100fe-5be3-7d43-a77f-88d30d0f7f12');
   });
 
   // The host seeds it at the spawn, having started the id over: the reminder

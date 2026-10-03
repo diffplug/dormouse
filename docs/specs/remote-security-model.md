@@ -179,14 +179,7 @@ newly-added passkey is not automatically trusted; its Client must still pair.
   The QR carries `burrowId`, invitation id, expiry, setup token, and invitation
   public key ([relay.md](./relay.md) owns the grammar); **it carries no Burrow
   static, no label, and no signature** (rationale).
-- **Invitation lifecycle, Burrow-owned**, and the QR panel renders it: `live`
-  until a valid message 1 and the responder's message 2 complete the Noise
-  handshake (`reserved`), which then always ends `consumed`; an un-scanned one ends `expired` by TTL or `dropped`
-  when the Burrow discards it — lost relay socket, or evicted at the cap. **A mint
-  whose keygen straddles a teardown is refused rather than inserted**
-  (rationale). **Must accept one completed handshake per invitation**; a failed handshake leaves
-  it live and redemption at the Relay flips nothing, and **neither may read as
-  a scan**.
+
 - **IK against the invitation key**: Client initiator, fresh per-Burrow static as
   `s`, invitation public key as `rs`. **Both handshake payloads are empty**;
   `Split` yields the pairing channel, and no ACL, delivery ID, or resumable
@@ -225,6 +218,23 @@ newly-added passkey is not automatically trusted; its Client must still pair.
   (rationale).
 - **A resumed handshake re-checks that its invitation is still the live one**
   (rationale).
+
+**Invitation lifecycle, Burrow-owned** (`InvitationState`), and the QR panel
+renders it:
+
+```mermaid
+stateDiagram-v2
+  [*] --> live: setupQr mints
+  live --> live: failed handshake, Relay redemption
+  live --> reserved: message 1 read, message 2 written
+  live --> expired: pairing TTL
+  live --> dropped: relay socket lost, evicted at the cap
+  reserved --> consumed: every ending, TTL and eviction included
+```
+
+**Must accept one completed handshake per invitation**, and **a failed
+handshake or a Relay redemption never reads as a scan**. **A mint whose keygen
+straddles a teardown is refused rather than inserted** (rationale).
 
 Before storing the record, Pocket verifies the passkey fields and its session's
 account match, and compares the Burrow static to any existing pin for that `burrowId`: **a
@@ -404,7 +414,7 @@ runtime holds the same line against the rendezvous (`docs/specs/one-time.md`
 | `DIRECT_BUFFER_HIGH` / `DIRECT_BUFFER_LOW` | 256 KiB / 64 KiB | same |
 | `MAX_ONE_TIME_FRAME_LENGTH` | one maximal `ct` + 512 | `remote-lib-common/src/remote/one-time-wire.ts` |
 | `MAX_ONE_TIME_FORWARDED` | 32 messages, both directions together | same |
-| `ONE_TIME_LINK_TTL_MS` / `ONE_TIME_EXPIRY_GRACE_MS` | `= DEFAULT_PAIRING_TTL_MS` / 45 000 (> `DIRECT_ONLY_DEADLINE_MS`) | same |
+| `ONE_TIME_LINK_TTL_MS` / `ONE_TIME_EXPIRY_GRACE_MS` | `= DEFAULT_PAIRING_TTL_MS` (300 000) / 45 000 (> `DIRECT_ONLY_DEADLINE_MS`) | same |
 | `ONE_TIME_OPEN_TIMEOUT_MS` | 8 000 | `lib/src/remote/burrow/one-time-runtime.ts` |
 
 - **Must bound waiting relay frames before enqueueing**, by count and cumulative

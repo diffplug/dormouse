@@ -8,7 +8,7 @@
 
 The attacker is any program writing to a PTY.
 
-**Must bound retained output by representation**: `TerminalProtocolParser` semantic values by code points and control stripping, an incomplete semantic OSC by length, and ImageAddon data by encoded bytes, decoded pixels, and FIFO storage (`docs/specs/terminal-escapes.md` -> "Parsing location", `docs/specs/layout.md` -> "Inline graphics").
+**Must bound retained output by representation**: `TerminalProtocolParser` semantic values by code points and control stripping, an incomplete semantic OSC by length, and ImageAddon data by encoded bytes, decoded pixels, and FIFO storage (`docs/specs/terminal-state.md` -> "Supported OSC Inputs", `docs/specs/terminal-escapes.md` -> "Parsing location", `docs/specs/layout.md` -> "Inline graphics").
 
 **Never let untrusted PTY output write the clipboard or access a file**: consume `OSC 50` and unsupported `OSC 1337`; consume `OSC 52`, which only offers its text to the copy editor over the user's own drag, copied when the user picks it (`docs/specs/mouse-and-clipboard.md` §4.6). **Inline images carry their own bytes**: no path is resolved, ImageAddon dropping any non-`inline=1` transfer (`docs/specs/layout.md` -> "Inline graphics").
 
@@ -16,8 +16,10 @@ The attacker is any program writing to a PTY.
 `file:` link whose display text names its target, which previews through the
 user's `open` rules (`docs/specs/dor-tool.md` -> "Terminal links"); a target whose
 display text names a different host gets **no open action at all**
-(`docs/specs/mouse-and-clipboard.md` -> "OSC 8 hyperlinks"). **Must revalidate external-URL launches through `normalizeExternalUri`** (VS Code's in the extension
-host); file opens use `docs/specs/dor-tool.md` -> "Opening local files".
+(`docs/specs/mouse-and-clipboard.md` -> "OSC 8 hyperlinks"). **Must revalidate
+every external-URL launch through `normalizeExternalUri`**, consent
+notwithstanding (VS Code's in the extension host); file opens use
+`docs/specs/dor-tool.md` -> "Opening local files".
 
 **Unsupported escape sequences must fail inertly** — consumed or ignored, with
 no visible garbage, clipboard, file, focus, or privilege effect
@@ -126,7 +128,7 @@ either** (rationale).
 - **FAIL IF** the iframe proxy forwards `Cookie` upstream or `Set-Cookie` downstream on HTTP or WebSocket handshakes, including refused upgrades. Pinned by `lib/src/host/iframe-proxy.test.ts` (rationale).
 - **FAIL IF** the iframe proxy stops checking that `Host` names its own grant port, on either path. Its per-grant ephemeral port and one-fixed-upstream binding are real mitigations but neither is a secret, so the `Host` check is what makes DNS rebinding fail.
 - **FAIL IF** the iframe proxy drops upstream `X-Frame-Options` / CSP `frame-ancestors` without replacing them with exactly `frame-ancestors 'self' <validated embedder chain>` — the full chain the webview supplies with each proxy URL request — admits another source, or targets the shim anywhere but its own proxy origin and that chain's innermost origin. `'self'` admits same-grant nesting only. With no usable chain it must preserve the headers and inject nothing (rationale).
-- **FAIL IF** a request bearing a *foreign* `Origin` refreshes a grant's idle timer: a grant holds a live upstream binding, and a stranger polling it keeps a closed pane's binding open. An *absent* `Origin` must keep refreshing it — that is what a live frame's own navigations and sub-resources send.
+- **FAIL IF** an iframe proxy grant outlives its view — a leased grant or its upgraded pipe survives its lease's release or its owner's reinitialization or end, or a lease's owner comes from the webview, not the host transport — or a *foreign* `Origin` refreshes an unleased grant's idle timer: a grant holds a live upstream binding a stranger must not keep open. An *absent* `Origin` must keep refreshing it, as a live frame's own loads send. `releaseIframeProxyLease` in `lib/src/host/iframe-proxy.ts` and its callers.
 - **FAIL IF** the browser viewer listener upgrades without both its own loopback `Host` and a single-use, 60-second grant for that one view, or passes a provider a webview message it has not rebuilt; or the host dials an agent-browser stream or a browser's CDP off loopback: `createViewerServer` and `parseViewerInput` in `lib/src/host/browser-viewer.ts`, `viewStream` and `askCdpEndpoint` in `lib/src/host/agent-browser-host.ts`. The webview holds no CDP and reaches no daemon (rationale). Pinned by `lib/src/host/browser-viewer.test.ts`.
 - **FAIL IF** the browser-dev bridge drops any of its four gates — the per-run token, the loopback `Host` check, the `application/json` content-type required of every non-GET, and the exact-origin `access-control-allow-origin` — or the first three stop running together before routing. It is dev-only, but dispatches `pty_spawn` with caller-supplied `shell`, `args`, `cwd` and `env` on a maintainer or CI-agent machine (rationale).
 - **FAIL IF** the browser-dev Vite server permits cross-origin reads of token-bearing modules or disables its DNS-rebinding Host check. Pinned by `standalone/scripts/dev-agent-browser.test.mjs` (rationale).
@@ -175,9 +177,8 @@ every window snapshot, its geometry sibling, and the arrival journal
 helper locks the whole standalone app-data directory before the sidecar spawns.
 
 **No writer persists scrollback** (`docs/specs/transport.md` -> "What is
-persisted"); the first save after an upgrade rewrites a snapshot without it, and a
-boot sweep deletes orphaned `*.json.tmp` files. Snapshots older versions left
-behind do carry transcripts (rationale).
+persisted", "Retiring the transcripts already on disk"). Snapshots older versions
+left behind do carry transcripts (rationale).
 
 **Standalone writes `recovery.json` beside its sessions directory**, under the
 state root, owner-only: one rebuilt agent-resume invocation per Surface, never a

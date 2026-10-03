@@ -12,6 +12,8 @@
 
 **Why cancelling the pairing wait reports nothing.** The ceremony the user abandoned has nothing left to say to them; the laptop's modal carries the recovery, telling the user to cancel if the phone shows no code — which is why the phone's two digits go up before the outcome is known ([remote-security-model.md](remote-security-model.md) → Pairing owns that half).
 
+**Why only a 404 sign-in falls back to registering.** `setup` caches the passkey before `setupFinish`, so a first run whose `finish` never reached the Relay leaves a browser that reads as returning while holding a credential the account never got; without the fallback every later scan signs in, fails, and only clearing site data recovers. A 404 is the Relay saying it never heard of the credential. Any other refusal (an expired challenge, a rejected assertion, a restarting Relay's 502) proves nothing about the credential, and registering on it would spend the single-use token and mint a redundant second passkey.
+
 **Why a refused `POST /api/setup/retire` aborts the ceremony.** The Relay refusing to retire the code means the code is already dead, and the Burrow would refuse the pairing that follows for the same reason. Continuing spends a WebAuthn prompt and a Noise handshake to reach that refusal further from the recovery.
 
 **Why a resize for the pane being attached is kept.** The wall attaches a new pane with its xterm's pre-fit default (80×24) and fits it a few milliseconds later, while the attach is still in flight; the refit after the attach then finds nothing to change. Dropping that resize left the Burrow's PTY at 80×24 under a 53×28 phone, so the shell wrapped every line at the wrong width (one-time connection end to end, standalone harness, 2026-09).

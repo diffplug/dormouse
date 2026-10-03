@@ -312,7 +312,11 @@ export interface PlatformAdapter {
   // could not. Absent on hosts with no process to run a proxy (e.g. the web
   // host), where the panel falls back to a raw, uninstrumented `<iframe>`;
   // the desktop playground answers only for its own virtual viewers.
-  createIframeProxyUrl?(targetUrl: string): Promise<IframeProxyResult>;
+  // `lease` names the mounted view holding the grant: it keeps the grant, and
+  // its origin, until `releaseIframeProxy` (docs/specs/dor-browser.md →
+  // "Iframe Proxy Leases").
+  createIframeProxyUrl?(targetUrl: string, lease?: string): Promise<IframeProxyResult>;
+  releaseIframeProxy?(lease: string): void;
 
   // Dor Tools (see docs/specs/dor-tool.md). Two operations behind one method:
   // resolve a tool name against the nearest dormouse.yml, and record a trust

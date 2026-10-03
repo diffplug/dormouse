@@ -48,6 +48,12 @@ In September 2026, both production installations use `createAskSurfaceProvider`:
 
 **Why duplicate `surfaceId`s collapse instead of both being listed.** The same cold-restore id collision as §The provider seam, one level up: two identical rows would make a picker keyed by `surfaceId` a lottery over which window an attach actually reaches.
 
+**Why `workspace` is withheld where refs are strip positions.** Every answerer's entries meet in one listing. VS Code's webviews each call themselves `workspace:1` "Workspace 1", so naming them would file every window's terminals under one header; withheld, the Client lists them flat, as before. Standalone's refs come from one application-wide counter, so they stay distinct across its Windows.
+
+**Why entry order carries the Workspace order.** Each Window answers with entries only — the peer answer stays one `DirectoryEntry` per pane across builds (`docs/specs/vscode.md` -> "Peer surfaces") — so sending entries in strip order gives the Client the Burrow's order without a second shape on the ask bridge.
+
+**Why a late answer invalidates instead of being dropped.** It arrives after the Burrow has already rendered a directory missing whatever that answerer owns — an empty picker on a machine that does have terminals — and nothing can re-open a settled request. Without the invalidation an idle machine has no other reason to re-collect, so the phone's picker stays wrong indefinitely.
+
 ## Terminal surfaces
 
 **Why the owner's xterm answers and a mirror does not.** The answers are renderer-dependent: cell size, window pixel geometry, and XTSMGRAPHICS canvas limits are all properties of the renderer that produces them, and DA1 advertises what that renderer's addons can decode. The Burrow cannot answer them itself — a headless xterm in Node cannot host ImageAddon, which decodes images through the browser's own image pipeline — so the answer has to come from a renderer, and attach-is-the-resize keeps the owner's xterm a faithful model at the viewer's size, which makes it the right one. Letting both answer writes the reply twice into the PTY's input, and each further viewer adds another copy.

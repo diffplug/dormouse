@@ -151,9 +151,34 @@ Source of truth: `relaySocketRoutes` in `hosted/server/relay-sockets.ts`; `hoste
 
 A Burrow joins an account by device code, in place of the self-host setup password. The account owns the Burrow; the Burrow's own ACL still authorizes every Client. The relay serves the Burrow's two routes, the account the rest; wire types are `BurrowEnrollBeginResponse` / `BurrowEnrollPollResponse` in `remote-lib-common/src/remote/wire.ts`. The desktop's side is `docs/specs/relay.md` -> "Burrow side".
 
-1. The Burrow sends `{ origin }` to `POST /api/burrow/enroll/begin`. Another origin, or none, is the self-host 409 `ORIGIN_MISMATCH_ERROR`. The answer: `deviceCode`, `userCode` (`XXXX-XXXX`), `verificationUrl` (`ACCOUNT_ORIGIN/enroll#<userCode>`, absent without `ACCOUNT_ORIGIN`), `expiresAt` (`ENROLLMENT_TTL_MS`, 10 minutes), and `interval` (5 seconds).
-2. The user opens the link, signs in, compares the code with the one Dormouse shows, and approves it.
-3. The Burrow polls `POST /api/burrow/enroll/poll` with `{ deviceCode }` every `interval`: `expired` for a malformed or expired code; `pending` while no live approval holds its user code; `enrolled` with the self-host `BurrowEnrollResponse`, `origin` the relay's `APP_ORIGIN` and `rpId` its hostname, without `requireUserVerification`; or `redeemed` with the `burrowId` an earlier poll enrolled, until the approval expires, so the Burrow can name what the account must remove. 403 `NOT_ENTITLED_ERROR` when the approver is no longer entitled; 409 naming `ACCOUNT_ORIGIN/account` at `MAX_ENROLLED_BURROWS` Burrows. Both refusals keep the approval, so a later poll can enroll.
+```mermaid
+sequenceDiagram
+  participant Burrow
+  participant R as relay Worker
+  participant A as account Worker
+  actor User
+  Burrow->>R: POST /api/burrow/enroll/begin {origin}
+  R-->>Burrow: deviceCode, userCode, verificationUrl, expiresAt, interval
+  Note over Burrow,User: Dormouse shows userCode and links verificationUrl
+  User->>A: sign in, compare code, approve {userCode}
+  Note over R,A: approval row in Postgres, keyed by userCode
+  loop every interval
+    Burrow->>R: POST /api/burrow/enroll/poll {deviceCode}
+    alt malformed or expired code
+      R-->>Burrow: expired
+    else no live approval
+      R-->>Burrow: pending
+    else already redeemed
+      R-->>Burrow: redeemed {burrowId}
+    else approver not entitled, or account full
+      R-->>Burrow: 403 NOT_ENTITLED_ERROR, or 409, approval kept
+    else live, unredeemed
+      R-->>Burrow: enrolled {burrowId, burrowToken, origin, rpId}
+    end
+  end
+```
+
+Begin answers another origin, or none, with the self-host 409 `ORIGIN_MISMATCH_ERROR`. `userCode` is `XXXX-XXXX`; `verificationUrl` is `ACCOUNT_ORIGIN/enroll#<userCode>`, absent without `ACCOUNT_ORIGIN`; `expiresAt` is `ENROLLMENT_TTL_MS` (10 minutes) out; `interval` is 5 seconds. `enrolled` is the self-host `BurrowEnrollResponse`, `origin` the relay's `APP_ORIGIN` and `rpId` its hostname, without `requireUserVerification`. `redeemed` answers until the approval expires, so the Burrow can name what the account must remove. The 409 names `ACCOUNT_ORIGIN/account` at `MAX_ENROLLED_BURROWS` Burrows.
 
 - **Never write from begin.** The device code is 32 bytes, the bearer shape: a 4-byte big-endian expiry in epoch seconds, then 28 random bytes. The user code is `enrollUserCode`: `HMAC-SHA-256(RELAY_ENROLL_SECRET, deviceCode)` read five bits at a time into `ENROLL_USER_CODE_ALPHABET`, values past it skipped (rationale).
 - **Must store the approval alone** (`dormouse_relay_enrollment_approvals`): it cannot tell an issued code from any well-formed one, so it approves any; one no Burrow redeems expires (rationale).
