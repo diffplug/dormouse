@@ -143,7 +143,7 @@ sequenceDiagram
   participant H as Rust / extension host
   participant A as TauriAdapter / VSCodeAdapter
   participant W as Wall handler
-  D->>S: JSON line {requestId dor-*, surfaceId, method, params, timeoutMs}
+  D->>S: request line, dor-* requestId
   S->>H: dor:controlRequest
   H->>A: to the routed window / owning webview
   A->>W: dormouse:control-request + AbortSignal
@@ -152,6 +152,7 @@ sequenceDiagram
   H-->>S: dor:controlResponse
   S-->>D: response
   opt socket closes, or server reaper fires
+    S-->>D: timeout error (reaper only)
     S->>H: dor:controlCancel {requestId}
     alt Standalone
       H->>A: the window that took the request
@@ -213,7 +214,7 @@ fixed client deadline (`dor ensure --restart` at 60s).
 and keep serving the connection** (`standalone/sidecar/dor-control-server.test.js`).
 
 **Some requests outlive their client.** Standalone routes their cancel by
-request id, so **`dor-*` request ids never collide with Rust's own `req-*`
+request id, which requires that **`dor-*` request ids never collide with Rust's own `req-*`
 invoke ids**; VS Code broadcasts it, since only the webview holding that id has
 anything to abort.
 **A handler that parks must release whatever it armed when the signal fires** —
