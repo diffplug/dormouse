@@ -1216,6 +1216,24 @@ describe('BurrowRuntime end-to-end ceremonies', () => {
     ).toHaveLength(1);
   });
 
+  it('still reports the outcome of a ceremony whose invitation was evicted', async () => {
+    // Eviction spends the code but not the ceremony a phone is mid-way
+    // through; how that ends is the person's to hear either way.
+    makeBurrow();
+    const scanned = await requestPairing('c1', await newAuthenticator());
+    for (let i = 0; i < MAX_TOKENS_PER_BURROW; i += 1) await mintInvitation();
+    invitationEvents.length = 0;
+    clock += DEFAULT_PAIRING_TTL_MS + 1;
+    sendE2e('c2', 'pairing', scanned.invitation.inviteId, 'init', toBase64Url(new Uint8Array(96)));
+    await settle();
+
+    expect(invitationEvents).toContainEqual({
+      inviteId: scanned.invitation.inviteId,
+      state: 'consumed',
+      outcome: 'expired',
+    });
+  });
+
   it('stands down for good on a displacement close', async () => {
     makeBurrow();
     socket.closeWith(WS_CLOSE_BURROW_REPLACED);

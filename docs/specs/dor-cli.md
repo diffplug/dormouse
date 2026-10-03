@@ -496,9 +496,10 @@ handle requires a live control endpoint.
 
 **The explicit port, never the hostname, is the signal for the `http` default**
 (rationale). An explicit scheme is always honored. This overrides
-`agent-browser`'s own `https` default for a bare `host:port`. **Reject** an
-input that is neither a URL nor a `host:port`, including a purely numeric "host"
-like `800:600` (rationale).
+`agent-browser`'s own `https` default for a bare `host:port`. **`dor iframe`
+rejects** an input that is neither an http(s) URL nor a `host:port`, including a
+purely numeric "host" like `800:600` (rationale); `dor agent-browser` forwards
+any such target to the provider unchanged.
 
 **Must resolve navigation targets CLI-side before forwarding to the browser provider.** Only the first target of a navigation verb is eligible. Skip known option values; an unknown option leaves the argv unchanged rather than guessing its arity. The provider descriptors and `resolveOpenTargetArgs` own recognized verbs and option arities.
 
@@ -549,7 +550,9 @@ navigation verbs, nonbinding/informational controls, and execution scope.
   agent-browser), and the host reports Playwright's stream. **The call must wait past
   `BROWSER_REQUEST_TIMEOUT_MS`**, since the host's answer can queue behind a
   launch or close of the browser (rationale). A failure there adds a stderr
-  warning without changing the command's success.
+  warning without changing the command's success. **Exception: a fixed-DPR
+  Playwright `open` binds before navigating**, and on a DPR mismatch kills a
+  Surface it created and fails unopened.
 
 A `--surface` handle resolves against **listed** Surfaces ([Handle
 Model](#handle-model)), and the host applies two gates in order:

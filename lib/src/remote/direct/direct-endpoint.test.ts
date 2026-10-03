@@ -527,7 +527,7 @@ describe('DirectEndpoint', () => {
     run.offerer.endpoint.onSignal({ v: 1, t: 'direct-switch' });
 
     expect(run.offerer.fatals).toEqual([
-      'the peer moved to a direct path this end had abandoned',
+      'the peer moved to a direct path this end abandoned or never began',
     ]);
   });
 

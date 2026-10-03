@@ -343,9 +343,11 @@ with `burrowId` stamped from the socket. A Burrow handles exactly these and
 with an `error` and reaches no Burrow.
 
 - **An `init` binds** the Client socket to the named Burrow, replacing any
-  binding; the previously bound live Burrow gets `client-gone` first.
+  binding; a different, live, previously bound Burrow gets `client-gone` first.
 - **A `transport` frame is forwarded only within that binding**, in either
   direction; one outside it is dropped.
+- **A frame naming an offline Burrow is answered with an offline `error`**
+  and leaves the binding as it was.
 - **Never parsed, never remembered, never authorized**: the Relay does not decode
   `ct`, keeps no Noise state, and verifies nothing; only the Burrow knows whether
   a ceremony succeeded.
@@ -598,7 +600,9 @@ machine.
   without one.
 - **Must stop polling** on the Relay's `expired`, at this machine's own deadline
   (the clocks being separate), on Cancel, on disposal, and under `nothing`. **A
-  full account polls on**, the Relay keeping the approval.
+  full account polls on**, the Relay keeping the approval. **A poll with no
+  answer or a 5xx retries; a 429 also widens the interval**, capped at
+  `MAX_ENROLL_POLL_INTERVAL_S`; any other refusal ends the run.
 - **Must hold a redemption that lands after Cancel or a new begin**: the Relay
   has spent and recorded it. When it cannot be held, the failure names the
   Burrow and the account page to remove it at.

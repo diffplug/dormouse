@@ -1173,7 +1173,8 @@ export function Wall({
       ? sel
       : lath.listPanes()[0]?.id;
     const r = token ? lath.store.restoreLeaf(meta, token, { fallbackRef }) : { ok: false };
-    // No token (or no fallback was possible — empty tree): make the leaf the root.
+    // No token, or no tier applied: add it the way a new pane is added (beside
+    // the last leaf, or as the root of an empty tree).
     if (!r.ok) lath.store.addLeaf(id, meta, null);
   }, [lath]);
 

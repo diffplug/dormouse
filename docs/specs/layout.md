@@ -190,7 +190,7 @@ Each Wall renders one Workspace. Standalone mounts one Wall **per Workspace**; V
 - **Must reject duplicate Workspace IDs before mutating the model.**
 - **Must retain mode and selection across switches unless the [activation gesture](#workspace-tabs) changes them.**
 - **Close confirms first when any member's own close would** (`docs/specs/reopen.md` → "Workspaces and windows"), then closes every member Surface. **Must select the fresh Workspace that replaces the last closed one. Must serialize closes across the Window.**
-- **A Workspace whose Wall has not registered is refused** (`workspace '<ref>' is still mounting`, one wording for every caller), never closed past (I4). **A gesture waits out the registration gap first**, as `dor workspace close` does.
+- **A Workspace whose Wall has not registered is refused** (`workspace '<ref>' is still mounting`, one wording for every caller), never closed past (I4). **A gesture waits out the registration gap first**, as `dor workspace close` does, and is dropped unannounced on its timeout, a pending transfer, or a close in flight.
 - **Rename edits the Workspace `name` only**, never a Surface title or the per-pane inline rename, and pins it ([Workspace names](#workspace-names)). **A press inside the open rename editor never starts a reorder.**
 - **Must drop the closing Workspace's rename editor and pending confirmation, and no other's.**
 - **Every Workspace verb runs outside the strip**, which renders the rename editor and confirmation from a store, so tab gestures and `dor` commands take one path. **Every Workspace verb has a `dor` counterpart** (`docs/specs/dor-cli.md` → "dor workspace"): a command close raises no confirmation, refusing instead, and closes its member Surfaces silently.

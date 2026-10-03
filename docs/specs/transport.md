@@ -68,7 +68,7 @@ Source of truth: `ITERM2_COMPAT_VERSION` in `standalone/sidecar/pty-core.js` and
 ### Reconnection protocol
 
 1. The visible or deserialized webview calls `requestInit` (VS Code: `{ type: 'dormouse:init' }`).
-2. The host answers `pty:list` (one `PtyInfo` per owned PTY), then `pty:replay` for each PTY with buffered output, then `alert:state` for each.
+2. The host answers `pty:list` (one `PtyInfo` per owned PTY), then one `pty:replay` for each, empty or not, then `alert:state` for each.
 3. The webview resumes terminals with their launch shells (consumer: `docs/specs/mouse-and-clipboard.md` -> "8.6 Paste Content").
 4. A saved layout is reused only when its leaves match the live visible pane set; saved minimized PTYs are registered as Doors.
 
