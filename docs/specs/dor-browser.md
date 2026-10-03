@@ -243,6 +243,25 @@ Source of truth: `resolveBrowserViewport` in `dor-lib-common/src/browser-viewpor
 neither bundles nor forks a browser. `dor agent-browser` / `dor playwright` extract identity flags, handle
 `dor-embed-size` and prepare initial sizing ([Viewport presets](#viewport-presets)); native commands then run against the resolved session, and flags
 Dormouse does not model pass through (`docs/specs/dor-cli.md` → Browser Surface Addressing).
+The webview's two channels:
+
+```mermaid
+flowchart LR
+  C[webview]
+  subgraph Host[browser host: VS Code extension host, or sidecar behind one Rust command]
+    BH[createBrowserHost]
+    VS[viewer server, 127.0.0.1]
+  end
+  subgraph Provider
+    CLI[provider CLI]
+    UP[agent-browser stream, or CDP]
+  end
+  DOR[dor, trusted] -- native passthrough --> CLI
+  C -- "PlatformAdapter.browser: BrowserRequest, BrowserResult" --> BH
+  C <-- "ViewerInput; ViewerState, ViewerFrame" --> VS
+  BH -- fixed argv or client call --> CLI
+  VS -- bounded local dial --> UP
+```
 
 **Must resolve new GUI launches in a fresh shell environment**, in the browser's
 cwd while it exists (rationale): the host runs the staged `dor __launch-env`
@@ -380,8 +399,7 @@ Source of truth: `lib/src/components/wall/agent-browser-surface-controller.ts`
 never a daemon's stream, never CDP. One loopback listener in the host serves a
 socket per Surface, onto the browser at the stream `view` names; its upgrade
 gate and input rebuilding are audited in `docs/specs/security-local.md` →
-"Loopback Listeners". The messages are `ViewerState`, `ViewerInput` and the
-binary `ViewerFrame`.
+"Loopback Listeners".
 
 - **Must send state only on change, and current state to a connecting socket,
   except `sync`, which answers each size sent.** Agent-browser's `url` is an
@@ -446,9 +464,7 @@ Source of truth: `lib/src/components/wall/agent-browser-surface-controller.ts`
 **Every browser operation rides one `PlatformAdapter.browser(request)`**: a
 provider-tagged `BrowserRequest` answered by a `BrowserResult`. A host lists
 the providers it drives in `browserProviders`; one without them (the web demo)
-offers no automated renderer. VS Code runs the shared host in the extension
-host; standalone runs the bundled copy in the sidecar behind one Rust command.
-**No frame rides a request's transport**: frames reach the webview over the
+offers no automated renderer. **No frame rides a request's transport**: frames reach the webview over the
 [Viewer Socket](#viewer-socket), never the sidecar stdio PTY traffic shares.
 
 - **`launch`** without a session opens an http(s) `url` in a new GUI session;
