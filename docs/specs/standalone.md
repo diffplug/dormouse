@@ -460,7 +460,7 @@ The protocol and every failure path are §Arrival queue; what a move *is*:
 - **A pane's helper Session travels with it**, directly after its source, which
   lets the target's resume re-parent it; nothing else in the payload names it.
 - **An arrival whose PTYs never answer is refused, never cold-restored**: those
-  shells are still running (`docs/specs/transport.md` → "Reconnection").
+  shells are still running (`docs/specs/transport.md` → "Reconnection protocol").
 - **A Workspace that comes back must mount from the record it brought**, never
   the plan it first booted with.
 
@@ -507,7 +507,7 @@ sequenceDiagram
   alt adopted
     T->>R: adopt_done
     R-->>S: workspace-departed
-  else adopt_failed, target Destroyed, or ARRIVAL_MAX
+  else adopt_failed, Destroyed, window not built, or ARRIVAL_MAX
     R-->>S: workspace-arrival-failed {replayIds}
     R->>P: pty:requestInit {forWindow: source, marked ids}
     P-->>S: pty:replay since mark
@@ -535,8 +535,8 @@ sequenceDiagram
   releases its resumed Sessions and boots fresh.** **A refused `adopt_done`
   unwinds the mount** from the received payload, releasing (never killing) and
   closing the Workspace, without preparing another move (rationale).
-- **A refused arrival hands the shells back**, drops the record, and the source
-  clears **transferring**. With both ends gone the shells are reaped.
+- **A refused arrival hands the shells back**: Rust drops the record and the
+  source clears **transferring**. With both ends gone the shells are reaped.
 - **An arrival unadopted after `ARRIVAL_MAX` is handed back** by a watchdog armed
   at `begin_arrival`, retiring only the record it was armed for (`queued_at`).
 - **A hand-back replays what the marked ids missed** (rationale): each marked id
