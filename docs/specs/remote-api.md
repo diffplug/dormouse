@@ -101,7 +101,7 @@ Reserved: **`paneRef` is set to the same value as `surfaceId`** and no Client re
 
 **Duplicate `surfaceId`s collapse to the first answerer** — the same owner an attach's read-only resolve probe selects, so the row shown is the surface attached. (rationale)
 
-Invalidation reaches the session through `watchDirectory`. **A late answer — one for an ask that already settled — invalidates the directory rather than being dropped**, at each burrow's ask bridge (`docs/specs/standalone.md`, `docs/specs/vscode.md`).
+Invalidation reaches the session through `watchDirectory`. **A late answer — one for an ask that already settled — invalidates the directory rather than being dropped** (rationale), at each burrow's ask bridge (`docs/specs/standalone.md` -> "Rust ↔ sidecar bridge", `docs/specs/vscode.md` -> "Peer surfaces").
 
 **Never list or attach standalone browser or iframe Surfaces**: neither enters the xterm registry. ([Future](#future) stages browser remoting; iframes stay unsupported even there.)
 

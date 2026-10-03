@@ -226,7 +226,7 @@ The service owns the PTYs but not the *view* of them: each webview is its own JS
 
 **Every webview installs the responder**, broker or not; it carries none of the relay, enrollment, or pairing machinery. **Installing must be idempotent per link** (rationale).
 
-**Each webview counts once, and a late answer repairs the snapshot**: a duplicate answer cannot contribute the same panes twice, and an answer for an already-settled request **triggers a directory invalidation instead** (`docs/specs/remote-api.md` → Directory).
+**Each webview counts once**: a duplicate answer cannot contribute the same panes twice. A late answer: `docs/specs/remote-api.md` -> "Directory".
 
 **A peer answer belongs to the authenticated broker socket that asked for it**: if that broker disappears mid-fan-out the answer is dropped even when this window has already connected to a replacement, since **request ids restart per broker**. A rejected fan-out contributes an empty answer. **Nothing in an answer but its `ptyId` (`routedPtyId`) is interpreted below the Burrow.**
 

@@ -136,8 +136,7 @@ its xterm size — it asks over `burrow:ask`, and
   the window it delivered to (`burrow:askDelivered`) so the collector settles
   on that one answer. `ASK_BUDGET_MS` bounds the whole fan-out; whatever
   answered is the best available snapshot.
-- **An answer for an ask the bridge no longer holds invalidates the directory**
-  rather than being dropped (`docs/specs/remote-api.md` → Directory).
+- A late answer: `docs/specs/remote-api.md` -> "Directory".
 
 **The sidecar owns the parse**, standalone's only one
 (`docs/specs/terminal-escapes.md` → Parsing location): a `pty-core` `data` event
