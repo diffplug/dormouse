@@ -299,7 +299,8 @@ describe("TutorialShell Ctrl+C", () => {
     const output: string[] = [];
     const shell = new TutorialShell((data) => output.push(data), startProgram);
     shell.handleInput("tut\x03");
-    expect(output.join("")).toContain("tut^C\r\n\x1b]633;A\x07");
+    expect(output.join("")).toContain("tut\r\n\x1b]633;A\x07");
+    expect(output.join("")).not.toContain("^C");
     output.length = 0;
     shell.handleInput("\r");
     expect(startProgram).not.toHaveBeenCalled();

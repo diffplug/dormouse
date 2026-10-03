@@ -218,7 +218,7 @@ export class TutorialShell {
         }
       } else if (ch === '\x03') {
         // Ctrl+C abandons the line, as a shell's interrupt does: nothing runs.
-        this.sendOutput('^C\r\n');
+        this.sendOutput('\r\n');
         this.lineBuffer = '';
         this.historyIndex = null;
         this.historyDraft = '';
