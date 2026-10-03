@@ -49,7 +49,7 @@ A spec is the accurate reference for the current code: it states the invariants 
 
 - **`docs/specs/glossary.md`** — Canonical vocabulary: the Surface model, Session layers, `Window ⊃ Workspace ⊃ Pane ⊃ Surface`, transition verbs, invariants I1–I10. Read first; every spec defers to it for state, kind, and verb names.
 - **`docs/specs/layout.md`** — The interaction model over the tiling engine: modes, command-mode dispatch, navigation, minimize/reattach, kill/rename, session lifecycle and persistence recovery, the Workspace model. Read before touching keyboard/navigation/mode/workspace behavior.
-- **`docs/specs/reopen.md`** — Which user closes confirm, and Reopen (`⌘⇧T`, `u`, `dor reopen`) for closed Surfaces, Workspaces, and windows; Labs delayed kill (design).
+- **`docs/specs/reopen.md`** — Which user closes confirm, and Reopen (`⌘⇧T`, `u`, `dor reopen`) for closed Surfaces, Workspaces, and windows; Labs no-confirm delayed kill.
 - **`docs/specs/shortcuts.md`** — Quick-reference table of every shortcut by mode/context; layout.md owns the behavior — update both when a binding changes.
 - **`docs/specs/tiling-engine.md`** — **Lath**, the in-house headless tiling engine: pure split-tree core, never-re-parent LathHost adapter, wall store + engine, Lath-only persistence.
 - **`docs/specs/alert.md`** — The Activity layer: alert tracks, attention model, TODO lifecycle, notification protocols with their sanitization rules, the Workspace union projection.
