@@ -96,7 +96,22 @@ The desktop shells share one read-only filesystem: the tracked files of `dor-too
 - **A `__view-*` entry must report its port before announcing it, and withdraw it on exit.**
 - **Must serve the real viewer pages and CSPs on the Node viewers' routes, answered from the snapshot**; `save`, `image`, and `rename` answer `403`. The editors are unchanged, so edits stay in the page.
 - **`createIframeProxyUrl` must map only a `localhost` URL under `/playground-fs/` to the page's own origin**, refusing others (`scheme`). The viewer pages carry the shim from `instrumentHtml`, so theme and the save channel connect as behind a proxy, and are same-origin with the Wall: first-party pages over a fixed snapshot.
-- **The `/playground-fs/` service worker must stay stateless**: it serves `assets/*` from the static `/builtin-viewer/` build and relays every other request to the top-level playground windows, where the one holding the URL's token answers (rationale). It registers when the first viewer starts; without one, `__view-*` exits `1`.
+- **The `/playground-fs/` service worker must stay stateless**, relaying each viewer request as below (rationale). It registers when the first viewer starts; without one, `__view-*` exits `1`.
+
+```mermaid
+sequenceDiagram
+  participant F as viewer iframe
+  participant SW as /playground-fs/ service worker
+  participant P as top-level playground windows
+  F->>SW: GET /playground-fs/token/route
+  alt route is assets/*
+    SW-->>F: the static /builtin-viewer/ build
+  else any other route
+    SW->>P: playground-fs-request, to every window
+    P-->>SW: the window holding the token answers from the snapshot
+    SW-->>F: that answer, or 404 when none answers in time
+  end
+```
 
 Source of truth: `installPlaygroundFs` in `website/src/lib/playground-fs/index.ts`; `TutorialShell` in `website/src/lib/tutorial-shell.ts`; `website/public/playground-fs/sw.js`; `website/scripts/build-builtin-viewer.js`.
 
