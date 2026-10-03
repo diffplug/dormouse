@@ -7,10 +7,21 @@
 
 ## Architecture
 
-**Rust stays thin**: it spawns and supervises the sidecar, bridges the webview to
-it, and owns the OS-integration edges (window events, menu, file drop, dock icon,
-logging) plus the session file store. All real logic runs in the Node sidecar, on
-the same `lib/src/host/` modules the VS Code host runs — `build-sidecar-proxy.mjs`
+```mermaid
+flowchart LR
+  W[Webview per window: TauriAdapter] -- invoke --> R[Rust]
+  R -- "emit_to (§Routing)" --> W
+  R -- JSON lines on stdin --> P[Node sidecar]
+  P -- JSON lines on stdout --> R
+  P -. stderr .-> R
+  R --> L[(dormouse.log)]
+  D[dor in a pane] -- control socket --> P
+  P -- /ws/burrow --> X[(Relay)]
+```
+
+**Rust stays thin**: besides the bridge, only the OS-integration edges (window
+events, menu, file drop, dock icon, logging) and the session file store. All
+real logic runs in the sidecar, on the same `lib/src/host/` modules the VS Code host runs — `build-sidecar-proxy.mjs`
 bundles them into the sidecar's `.cjs` copies, so the two hosts cannot drift.
 
 ## Boot sequence
@@ -47,12 +58,8 @@ Source of truth: `standalone/src-tauri/src/lib.rs` (`SidecarState`, the
 `#[tauri::command]` set) and `standalone/sidecar/main.js` (the dispatch table);
 `TauriAdapter` in `standalone/src/tauri-adapter.ts`.
 
-The sidecar speaks JSON-lines over stdio: commands in on stdin, events out on
-stdout. **stdout is the protocol** — sidecar diagnostics go to stderr, which Rust
-appends to the log file.
-
-Webview → Rust is Tauri invokes, most of them thin sidecar forwarders. Two
-carve-outs are handled in Rust: `load_session` / `save_session` (§Persistence)
+**stdout is the protocol**: sidecar diagnostics go to stderr. Most invokes are
+thin sidecar forwarders; two carve-outs are handled in Rust: `load_session` / `save_session` (§Persistence)
 and the Windows `clipboard` readers (`clipboard_win.rs`;
 `docs/specs/mouse-and-clipboard.md` §8.6).
 
