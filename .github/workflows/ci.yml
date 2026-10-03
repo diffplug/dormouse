@@ -81,7 +81,10 @@ jobs:
           echo "::error::could not install zsh; the shell-integration suite would silently cover only bash"
           exit 1
 
+      # It finishes in about 4 minutes. Without a bound, a test file that never
+      # exits holds the job until the 6-hour default.
       - name: Test
+        timeout-minutes: 20
         run: pnpm test
 
       - name: Build

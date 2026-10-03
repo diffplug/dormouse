@@ -94,6 +94,9 @@ function session(shell = BASH) {
       const seen = await waitFor(mark, (s) => prompts(s) >= 1, 'prompt after Ctrl+C');
       return /\x1b\]367;dehydrate;([^\x07]*)\x07/.exec(seen)?.[1] ?? null;
     },
+    // A SIGHUP that lands as bash redraws its prompt is occasionally lost,
+    // leaving the shell alive and its PTY holding the test process open;
+    // package.json's `--test-force-exit` ends the file anyway.
     kill() { mgr.kill('tool'); },
     close() {
       mgr.killAll();
