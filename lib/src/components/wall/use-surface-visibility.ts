@@ -1,12 +1,14 @@
 import { useContext, useEffect, useState } from 'react';
+import { isSeen } from '../../lib/surface-sight';
 import { WorkspaceActiveContext } from './wall-context';
 
 /**
- * Whether a Surface is actually on screen. Three things can hide one: the window is
- * backgrounded, its Workspace is not the visible one, or the leaf is **parked** —
- * mounted but out of the tree, so its DOM survives while it paints nothing
- * (docs/specs/tiling-engine.md → "Parked leaves"). Callers gate streaming work on it
- * so a hidden pane stops consuming resources while its daemon/session stays alive.
+ * Whether a Surface is actually on screen (`lib/src/lib/surface-sight.ts`).
+ * Three things can hide one: the window is backgrounded, its Workspace is not
+ * the visible one, or the leaf is **parked** — mounted but out of the tree, so
+ * its DOM survives while it paints nothing (docs/specs/tiling-engine.md →
+ * "Parked leaves"). Callers gate streaming work on it so a hidden pane stops
+ * consuming resources while its daemon/session stays alive.
  *
  * Pass the pane's `parked` prop; omitting it means "never parked", which is right for
  * any surface rendered outside LathHost.
@@ -21,5 +23,5 @@ export function useSurfaceVisibility(parked = false): boolean {
     return () => document.removeEventListener('visibilitychange', onChange);
   }, []);
 
-  return docVisible && workspaceActive && !parked;
+  return isSeen({ windowShown: docVisible, workspaceActive, parked, covered: false });
 }
