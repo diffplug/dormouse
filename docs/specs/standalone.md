@@ -478,31 +478,47 @@ Workspace, its `terminalIds`, and `allIds` naming every member Surface, under
 Rust's own `from` / `to`. Rust holds the record from the source's invoke until
 the target adopts the Workspace or dies, and every step reads that record
 rather than inferring it from the suppression map (rationale). The mark-and-replay
-split is `docs/specs/transport.md` → "Transferring a Workspace".
+split is `docs/specs/transport.md` → "Transferring a Workspace". Sidecar lines
+reach a webview through Rust (§Routing).
 
-1. **Source** prepares the Workspace, touching nothing, and invokes
-   `transfer_workspace` / `open_workspace_window`. **Must return preparation
-   refusals as `{ moved: false, reason }` without changing ownership.** On `Ok`
-   it marks the Workspace **transferring**: still mounted, nothing released,
-   omitted from `getWindowSnapshot`.
-2. **Rust** journals the arrival, reassigns `terminalIds` to the target, keeps
-   routing their output to the source until each id's `pty:marked`, and
-   suppresses it from there until its replay reaches the target. The source
-   submits each buffer serialized at its mark via `transfer_workspace_content`;
-   only then does Rust nudge the target (`workspace-arriving`, carrying nothing)
-   or build the torn-out window. **An arrival without content is not drainable.**
-3. **Target** drains with `take_arrivals` and, per arrival, arms its collector
-   *before* calling `adopt_ready(workspaceId)` (rationale). Rust answers
-   `pty:requestInit` with **that arrival's ids and no others**, the collector's
-   token echoed. The target resumes over them and mounts the Workspace at the
-   payload's index, else the drop index. **It never spawns or kills**; the
-   sidecar re-sends the Sessions' alert state (§Alerts).
-4. **Target** invokes `adopt_done(workspaceId)`. Rust retires the record, clears
-   marks and suppression, and emits `workspace-departed` for **that Workspace
-   alone** to its source.
-5. **Source** commits: releases every Session (never kills one), drops the
-   helper, closes the Workspace, and closes the window if it was the last.
+```mermaid
+sequenceDiagram
+  participant S as Source webview
+  participant R as Rust
+  participant P as Sidecar
+  participant T as Target webview
+  S->>R: transfer_workspace / open_workspace_window
+  Note over R: begin_arrival: journal, then owner := target
+  R->>P: pty:mark {ids}
+  P-->>S: pty:marked {id, mark}
+  Note over R: drop id's output until target replay
+  S->>R: transfer_workspace_content (buffers at marks)
+  R-->>T: workspace-arriving (tear-out: build window)
+  T->>R: take_arrivals, then adopt_ready
+  R->>P: pty:requestInit {ids, marks, requestId}
+  P-->>T: pty:list, pty:replay since mark, alert:state
+  alt adopted
+    T->>R: adopt_done
+    R-->>S: workspace-departed
+  else adopt_failed, target Destroyed, or ARRIVAL_MAX
+    R-->>S: workspace-arrival-failed {replayIds}
+    R->>P: pty:requestInit {forWindow: source, marked ids}
+    P-->>S: pty:replay since mark
+  end
+```
 
+- **Must return preparation refusals as `{ moved: false, reason }` without
+  changing ownership.** On `Ok` the source marks the Workspace
+  **transferring**: still mounted, nothing released, omitted from
+  `getWindowSnapshot`.
+- **An arrival without content is not drainable.**
+- **The target arms its collector before `adopt_ready`** (rationale), and
+  `pty:requestInit` names **that arrival's ids and no others**. The target
+  mounts the Workspace at the payload's index, else the drop index. **It never
+  spawns or kills**; the replayed `alert:state` is §Alerts.
+- **`workspace-departed` names that Workspace alone.** The source then releases
+  every Session (never kills one), drops the helper, and closes the Workspace,
+  and its window if it was the last.
 - **Nothing is released before the target has adopted it.**
 - **A transferring Workspace is in no snapshot its source writes, and neither
   end's teardown kills or interrupts its shells**: the target's
@@ -512,17 +528,13 @@ split is `docs/specs/transport.md` → "Transferring a Workspace".
   releases its resumed Sessions and boots fresh.** **A refused `adopt_done`
   unwinds the mount** from the received payload, releasing (never killing) and
   closing the Workspace, without preparing another move (rationale).
-- **A refused arrival hands the shells back.** The target's `adopt_failed` and a
-  target `Destroyed` with the arrival still queued both return `terminalIds` to
-  the source, drop the record, and emit `workspace-arrival-failed`; the source
+- **A refused arrival hands the shells back**, drops the record, and the source
   clears **transferring**. With both ends gone the shells are reaped.
 - **An arrival unadopted after `ARRIVAL_MAX` is handed back** by a watchdog armed
   at `begin_arrival`, retiring only the record it was armed for (`queued_at`).
-- **A hand-back replays what the marked ids missed** (rationale):
-  `hand_back_arrival` returns each marked id to the source suppressed and asks
-  the sidecar for `outputSince(mark)`, whose replay lifts the suppression into
-  the existing xterms; an id never stamped goes straight back, and the failure
-  event carries the replay ids. **Must retain source cuts from `pty:marked`
+- **A hand-back replays what the marked ids missed** (rationale): each marked id
+  stays suppressed until its since-mark replay lands in the source's existing
+  xterm; an id never stamped goes straight back. **Must retain source cuts from `pty:marked`
   through target replay and natural exit until settlement, and discard them on
   explicit kill.** **Must apply a handed-back PTY's exit status after its
   replay**, leaving its pane dead with no running command.
