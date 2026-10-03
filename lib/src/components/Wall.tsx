@@ -2382,7 +2382,7 @@ export function Wall({
   });
 
   // LathHost surfaces `focusin` inside a leaf as an op proposal (embed self-focus
-  // adoption, acceptance row 8): passthrough → enter the leaf if selection differs;
+  // adoption): passthrough → enter the leaf if selection differs;
   // command → move selection onto it.
   const onLeafFocused = useCallback((id: string) => {
     if (modeRef.current === 'passthrough') {

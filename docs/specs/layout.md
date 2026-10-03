@@ -252,7 +252,7 @@ flowchart TD
   MA -- yes --> CM["command mode"]
 ```
 
-**A key targeted inside `[data-terminal-context]` leaves the chain before dual-tap**, so no Wall gesture, the mode-exit dual-tap included, fires from inside an open context. **Must let one Wall answer each key**, even a key that activates another Workspace. **Must prevent default and stop propagation for a handled key and its `keyup`**, which win32-input-mode or kitty would report to the program. Bare Meta/Shift presses stop only internal dispatch; the detector leaves their DOM event untouched. A staged kill confirmation answers before the dialog gate, so its letter works while its modal is open.
+**A key targeted inside `[data-terminal-context]` leaves the chain before dual-tap.** **Must let one Wall answer each key**, even a key that activates another Workspace. **Must prevent default and stop propagation for a handled key and its `keyup`**, which win32-input-mode or kitty would report to the program. Bare Meta/Shift presses stop only internal dispatch; the detector leaves their DOM event untouched.
 
 **Every open dialog holds its own reference-counted lease on that gate**, and command-mode dispatch resumes only once the last lease is released.
 

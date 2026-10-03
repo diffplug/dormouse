@@ -200,10 +200,10 @@ Source of truth: `runFilePicker` in `dor/src/commands/open-picker.ts`; `listOpen
 
 **Must keep at most one preview slot per Workspace**: a Tool Surface whose params carry `toolPreview`, marked in its Pane header and Door (`docs/specs/layout.md` → Pane header) and tagged `[preview]` by `dor list`. Creating a slot pins every other marked Surface, a closing one included, so a refused close never leaves two. **Must resolve a preview through the user's ordered `open` list**, as `dor open` does, never through a faster built-in-only renderer (rationale). A Tool browsing files selects and activates them through two invocations:
 
-| Gesture | Invocation | Result |
-| --- | --- | --- |
-| Select | `dor open --preview <file>` | Show the file in the slot |
-| Activate | `dor open <file>` | Pin the slot when it shows that file; otherwise the ordinary open |
+| Gesture | Invocation |
+| --- | --- |
+| Select | `dor open --preview <file>` |
+| Activate | `dor open <file>` |
 
 A running Tool may send either as an OSC 367 `open` instead ([OSC 367](#osc-367)).
 
