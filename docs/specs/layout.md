@@ -235,9 +235,24 @@ Source of truth: `handleDualTap` in `lib/src/components/wall/keyboard/handle-dua
 
 **Must support Workspace navigation in command mode through bare `1`–`9`, arrows, and `Enter`.** Digits select by strip position; out-of-range positions are consumed without switching. **Never bind `c`, `n`/`p`, `$`, or `&`.** Rename inputs and confirmation dialogs retain their own controls.
 
-All keys are handled in one capture-phase `keydown` listener on `window`, which delegates in a fixed order: *(an inactive Workspace or an answered key stops here)* → dual-tap → editable-field clipboard → mouse-selection keys → *(passthrough stops here)* → *(a rename or the chrome lease stops here)* → kill confirmation → *(an open dialog stops here)* → Workspace shortcuts → pane shortcuts → pane navigation. **A key whose target sits inside `[data-terminal-context]` leaves that chain before dual-tap**: it reaches diagnostic-text copy, editable-field clipboard, then mouse-selection keys against the focused context terminal, and stops — so no Wall gesture, the mode-exit dual-tap included, fires from inside an open context. **Must let one Wall answer each key**, even a key that activates another Workspace. **Must prevent default and stop propagation for a handled key and its `keyup`**, which win32-input-mode or kitty would report to the program. Bare Meta/Shift presses stop only internal dispatch; the detector leaves their DOM event untouched.
+One capture-phase `keydown` listener on `window` delegates in a fixed order; a handler that handles the key, or a gate that holds, ends the chain:
 
-That order is load-bearing twice: a rename input suppresses the pane shortcuts but **not** the mode-exit gesture or the field's own clipboard chords; and a staged kill confirmation hijacks each key reaching it before the dialog gate, so the confirm letter works even though the modal is open.
+```mermaid
+flowchart TD
+  K["window keydown, capture phase"] --> A{"Wall active, key unanswered?"}
+  A -- yes --> X{"target inside data-terminal-context?"}
+  X -- yes --> X1["diagnostic copy → field clipboard → selection keys (context terminal)"]
+  X -- no --> D["dual-tap → editable-field clipboard → mouse-selection keys"]
+  D --> P{"passthrough?"}
+  P -- no --> R{"pane rename or chrome lease?"}
+  R -- no --> KC["kill confirmation"]
+  KC --> DL{"dialog lease held?"}
+  DL -- no --> W["Workspace shortcuts → pane shortcuts → pane navigation"]
+  M["iframe shim leader message, proxy origin only"] --> MA{"Wall active and passthrough?"}
+  MA -- yes --> CM["command mode"]
+```
+
+**A key targeted inside `[data-terminal-context]` leaves the chain before dual-tap**, so no Wall gesture, the mode-exit dual-tap included, fires from inside an open context. **Must let one Wall answer each key**, even a key that activates another Workspace. **Must prevent default and stop propagation for a handled key and its `keyup`**, which win32-input-mode or kitty would report to the program. Bare Meta/Shift presses stop only internal dispatch; the detector leaves their DOM event untouched. A staged kill confirmation answers before the dialog gate, so its letter works while its modal is open.
 
 **Every open dialog holds its own reference-counted lease on that gate**, and command-mode dispatch resumes only once the last lease is released.
 
@@ -328,7 +343,7 @@ Minimizing detaches the leaf into a Door with its restore token (`docs/specs/til
 
 ### Reattach (click door, `Enter`/`m`/`d` on door, or drag out)
 
-Reattach applies the token's restore policy (`docs/specs/tiling-engine.md` → "Restore tokens") with the selected pane if live, else the first pane, as its fallback reference; if the restore still fails (no token, empty tree), the leaf becomes the root, so **a reattach is never silently swallowed**. A door dragged out of the baseboard skips the token and inserts at the drop position.
+Reattach applies the token's restore policy (`docs/specs/tiling-engine.md` → "Restore tokens") with the selected pane if live, else the first pane, as its fallback reference; a tokenless or failed restore splits beside the last leaf (or roots an empty tree), so **a reattach is never silently swallowed**. A door dragged out of the baseboard skips the token and inserts at the drop position.
 
 ### Splitting from a Door
 
@@ -405,16 +420,27 @@ Three save triggers, in ascending urgency:
 
 **Under a Workspace, a Wall publishes its record to the Window aggregator instead of the platform slot**, comparing each save against its own Workspace's previous record (`docs/specs/transport.md` → "Persisted session types"). **A Wall marks itself dirty only for Surfaces it owns.** VS Code persists one Workspace per webview.
 
-Snapshots are read through `readPersistedSession()`, which discards an unreadable blob so malformed storage starts fresh rather than blocking startup (`docs/specs/transport.md` → "Persisted session types").
+Startup recovery plans each Workspace from its slice of one live-PTY list (`docs/specs/standalone.md` → Persistence); a single-Wall host plans through `resumeOrRestore`.
 
-Startup recovery is priority-based. **A Window plans once per Workspace off one live-PTY list**: one host round trip restores N Workspaces, each taking the slice its own saved panes name (`docs/specs/standalone.md` → Persistence). A single-Wall host reaches the same behavior through `resumeOrRestore`.
+```mermaid
+flowchart TD
+  L{"live PTYs in this slice?"} -- yes --> R["resume: resumeTerminal each"]
+  L -- no --> S{"saved panes?"}
+  S -- no --> E["one new pane"]
+  S -- yes --> C["restore: restoreTerminal per non-browser pane"]
+  R --> RC{"saved session covers every live PTY?"}
+  RC -- no --> RF["live PTYs as fresh splits, no Doors"]
+  RC -- yes --> G{"Lath leaf set = visible panes?"}
+  C --> G
+  G -- yes --> OK["saved layout + saved Doors"]
+  G -- no --> T{"cold, with a visible Tool?"}
+  T -- yes --> SY["single-row layout + saved Doors"]
+  T -- no --> F["fresh splits + saved Doors"]
+```
 
-1. **Resume** (webview recreated, retained Live or Exited PTYs): `resumeTerminal()` each. **Saved pane and door titles are seeded back via `setTerminalUserTitle()`**, so persisted placeholder labels never replay as user pins. If the saved session covers every retained PTY, restore the saved Lath layout when its leaf set matches and reattach saved minimized items as doors. **Never fall through to cold restore just because the visible `paneIds` list is empty** — a wall whose retained sessions are all minimized is still a resume.
-2. **Restore** (app restart, cold start): the Wall's `seed` hydrates from the restored Lath layout, else falls to (3); `restoreTerminal()` per pane with its saved cwd and title, plus the single-use agent resume invocation (`docs/compatible-agents.md` → "Cold restore") and the pane's persisted TODO, which rides the spawn (`docs/specs/alert.md` → Public State). Browser surfaces are rebuilt from their persisted params.
-3. **Fallback/manual pane creation**: with no saved layout safely applicable, add panes as splits from the previous pane.
-4. **Empty state**: one new pane.
-
-Every PTY spawned by (2)–(4) uses the current default shell selection.
+- **Resume** (webview recreated, retained Live or Exited PTYs): **saved pane and door titles are seeded back via `setTerminalUserTitle()`**, so persisted placeholder labels never replay as user pins. **Never fall through to cold restore just because the visible `paneIds` list is empty** — a wall whose retained sessions are all minimized is still a resume.
+- **Restore** (app restart, cold start): each pane respawns with saved cwd and title, plus the single-use agent resume invocation (`docs/compatible-agents.md` → "Cold restore") and the pane's persisted TODO, which rides the spawn (`docs/specs/alert.md` → Public State). Every PTY a restore or the one new pane spawns uses the current default shell selection.
+- **A visible browser Surface is rebuilt only from the saved layout**, which alone carries its params; a browser Door returns with the saved Doors.
 
 Source of truth: `lib/src/components/wall/use-session-persistence.ts` (save triggers); `collectLivePtys` / `resumeOrRestoreFrom` in `lib/src/lib/reconnect.ts` (recovery priority).
 

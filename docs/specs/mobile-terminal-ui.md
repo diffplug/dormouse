@@ -172,7 +172,7 @@ visible**, four items, self-labeling on the same rule as the touch selector.
 
 | Mode | Reserve area content |
 | --- | --- |
-| Sessions | Session rows with active, alert, and TODO state; selecting one makes it the single visible terminal. |
+| Sessions | Session rows with active, alert, and TODO state, under group labels when they name more than one group; selecting one makes it the single visible terminal. |
 | Recent | Placeholder ([Future](#future)). |
 | Type | A button focusing the hidden terminal input — the way back from a dismissed keyboard. Typed keys echo into the terminal as they happen. |
 | Draft | Placeholder ([Future](#future)). |

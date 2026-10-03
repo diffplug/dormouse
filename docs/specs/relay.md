@@ -394,36 +394,46 @@ Source of truth: `RelayHub` in `relay/src/relay.ts`; the sweeps in
 
 ### Pairing (phone ↔ laptop, first time)
 
-```
-phone                        relay                        burrow (laptop)
-  |   scan the Burrow's QR        |                              |
-  |-- setup (token) ----------->|  registers a passkey         |
-  |-- signin (passkey) -------->|  session token               |
-  |-- e2e init (Noise msg 1) -->|-- e2e init {clientId} ------>|  invitation -> reserved
-  |<-- e2e response ------------|<-- e2e response (Noise msg 2) |
-  |-- reauth begin/finish ----->|  presence challenge + nonce  |
-  |-- e2e transport ----------->|-- e2e transport ------------>|  proof verified,
-  |    {code, label, proof}     |                              |  modal opens
-  |                             |                              |  user types the code
-  |<-- e2e transport -----------|<-- e2e transport ------------|  ACL record written
-  |    PairingOutcomeV1         |     (same size either way)   |
+```mermaid
+sequenceDiagram
+  Note over Phone: scan the Burrow's QR
+  alt no usable passkey
+    Phone->>Relay: setup (token), then signin
+  else passkey held
+    Phone->>Relay: signin if needed, then setup retire (token)
+  end
+  Phone->>Relay: e2e init (Noise msg 1)
+  Relay->>Burrow: e2e init {clientId}
+  Note over Burrow: invitation reserved
+  Burrow-->>Relay: e2e response (Noise msg 2)
+  Relay-->>Phone: e2e response
+  Note over Phone: two digits shown
+  Phone->>Relay: reauth begin/finish
+  Phone->>Relay: e2e transport {code, label, presence}
+  Relay->>Burrow: e2e transport
+  Note over Burrow: proof verified, modal opens, user types the code, ACL record written
+  Burrow-->>Relay: e2e transport PairingOutcomeV1, same size either way
+  Relay-->>Phone: e2e transport
 ```
 
 What each step establishes: `docs/specs/remote-security-model.md` -> "Pairing".
 
 ### Connect (every session)
 
-```
-phone                        relay                        burrow
-  |-- e2e init (Noise msg 1) -->|-- e2e init {clientId} ------>|
-  |<-- e2e response ------------|<-- e2e response (msg 2 =     |
-  |                             |     32-byte Burrow challenge)  |
-  |   ONE biometric prompt:     |                              |
-  |-- reauth begin/finish ----->|  presence challenge + nonce  |
-  |-- e2e transport ----------->|-- e2e transport ------------>|  challenge consumed,
-  |    ConnectionRequestV1      |                              |  proof + ACL checked
-  |<-- e2e transport -----------|<-- ConnectionOutcomeV1 ------|
-  |====== protocol-v1 inside the same Noise session ==========>|
+```mermaid
+sequenceDiagram
+  Phone->>Relay: e2e init (Noise msg 1)
+  Relay->>Burrow: e2e init {clientId}
+  Burrow-->>Relay: e2e response (msg 2 = 32-byte Burrow challenge)
+  Relay-->>Phone: e2e response
+  Note over Phone: ONE biometric prompt
+  Phone->>Relay: reauth begin/finish
+  Phone->>Relay: e2e transport ConnectionRequestV1
+  Relay->>Burrow: e2e transport
+  Note over Burrow: challenge consumed, proof + ACL checked
+  Burrow-->>Relay: e2e transport ConnectionOutcomeV1
+  Relay-->>Phone: e2e transport
+  Phone->>Burrow: protocol-v1 inside the same Noise session
 ```
 
 What each step establishes: `docs/specs/remote-security-model.md` ->
@@ -599,20 +609,32 @@ machine.
 any close **except three, which are terminal** (rationale): the Burrow disposes
 its sessions, latches a state, and arms no timer.
 
-| Close | State | Meaning |
-|---|---|---|
-| `WS_CLOSE_BURROW_REPLACED` (4000; rationale) | `displaced` | another instance enrolled with the same `burrowId` took the relay slot |
-| `WS_CLOSE_BURROW_REVOKED` (4001) | `removed` | the Burrow's row is gone |
-| `WS_CLOSE_BURROW_NOT_ENTITLED` (4002, Hosted only) | `not-entitled` | its owner is no longer entitled |
+```mermaid
+stateDiagram-v2
+  state "not-entitled" as notEntitled
+  [*] --> connecting: start()
+  connecting --> connected: open
+  connecting --> disconnected: close unopened
+  connected --> disconnected: other close
+  disconnected --> connecting: backoff
+  disconnected --> removed: unopened, probe 401
+  disconnected --> notEntitled: unopened, probe 403
+  connected --> displaced: 4000 WS_CLOSE_BURROW_REPLACED
+  connected --> removed: 4001 WS_CLOSE_BURROW_REVOKED
+  connected --> notEntitled: 4002 WS_CLOSE_BURROW_NOT_ENTITLED, Hosted only
+  displaced --> connecting: start()
+  removed --> connecting: start()
+  notEntitled --> connecting: start()
+```
 
-Coming back is an explicit `reconnect()` or a fresh start, which after
-`displaced` takes the slot back.
+`start()` is an explicit `reconnect()` or a fresh start; after `displaced` it
+takes the slot back.
 
 - **A socket that never opened is probed before its next backoff**, a refused
-  upgrade being only an error event: one `GET /api/push/devices` as the Burrow.
-  A 401 `UNAUTHORIZED_ERROR` or `UNKNOWN_BURROW_TOKEN_ERROR` latches `removed`,
-  a 403 `NOT_ENTITLED_ERROR` `not-entitled`. **Only a 2xx, 401, or 403 spends
-  the failure streak's one probe** (rationale).
+  upgrade being only an error event: one `GET /api/push/devices` as the Burrow,
+  whose 401 `UNAUTHORIZED_ERROR` or `UNKNOWN_BURROW_TOKEN_ERROR`, or 403
+  `NOT_ENTITLED_ERROR`, latches. **Only a 2xx, 401, or 403 spends the failure streak's
+  one probe** (rationale).
 - **A latched `removed` or `not-entitled` Burrow (`relayRefuses`) asks its Relay
   nothing more**: no push, device list, or setup code.
 - **Ignore every event and probe answer from a socket the runtime no longer

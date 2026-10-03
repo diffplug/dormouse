@@ -12,13 +12,27 @@
 
 **Visibility.** The **Mouse icon** marks an inside program requesting mouse reporting (§6.1); the **No-Mouse icon** takes the same slot while an override is active.
 
-**Click.** The Mouse icon starts a **temporary override** (§2); the No-Mouse icon ends any override immediately and restores mouse reporting.
+**Click.** The icons start and end the override (§2).
 
 Source of truth: `TerminalPaneHeader` in `lib/src/components/wall/TerminalPaneHeader.tsx`.
 
 ---
 
 ## 2. Override State
+
+```mermaid
+stateDiagram-v2
+  direction LR
+  [*] --> off
+  off --> temporary: Mouse icon, while reporting
+  temporary --> permanent: Make sticky
+  temporary --> off: qualifying mouse-up, Cancel, No-Mouse icon
+  permanent --> off: No-Mouse icon
+  temporary --> off: reporting stops
+  permanent --> off: reporting stops
+```
+
+The mobile touch modes set it directly (`docs/specs/mobile-terminal-ui.md` -> "Touch mode selector").
 
 **Temporary override.** While active:
 
@@ -32,7 +46,7 @@ It ends on the **next mouse-up inside the terminal content area** paired with a 
 - **Does not count:** a non-primary click, whose context menu the override swallows anyway; clicks on the No-Mouse icon or the banner buttons; and an orphan mouse-up from a drag that started outside the terminal. Pinned by `lib/src/lib/terminal-mouse-router.test.ts`.
 - **On end** — or on **Cancel** — reporting is restored and the banner dismissed. **Must cancel a pending banner action when its temporary override ends**, never reactivating it later. **No timeout:** absent any mouse action the override stays indefinitely.
 
-**Sticky override.** **Make sticky** converts it (the store calls this state `permanent`): banner dismissed, No-Mouse icon kept, mouse and wheel still going to the terminal. It persists until the user clicks the No-Mouse icon.
+**Sticky override** (`permanent`): banner dismissed, No-Mouse icon kept, mouse and wheel still going to the terminal.
 
 **Auto-clear on reporting off.** **Either override clears when the inside program stops requesting mouse reporting** (it exits, or DECRSTs `?9l`/`?1000l`/`?1002l`/`?1003l`); icon and banner go with it. A **dead** session's replay ends in the `REPLAY_MODE_RESET` tail that DECRSTs mouse tracking (`docs/specs/transport.md` -> "Replay-time mode-reset tail (Dormouse-emitted)"), so a mode latched by a dead TUI cannot block selection in the restored pane.
 
