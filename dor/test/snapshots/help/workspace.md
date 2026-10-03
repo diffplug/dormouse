@@ -39,7 +39,7 @@ JSON output:
   }
 
 FLAGS
-     [--force]                                  Close even when the Workspace holds running or touched Surfaces.
+     [--force]                                  Close even when the Workspace holds Surfaces Reopen cannot restore.
      [--json]                                   Print JSON output.
      [--window]                                 move: the window to move to (a label, or "new").
      [--index]                                  move: the 0-based strip position to move to.

@@ -2,4 +2,4 @@ exitCode: 1
 stdout:
 
 stderr:
-Error: workspace 'workspace:2' holds running or touched Surfaces; pass --force to close it
+Error: workspace 'workspace:2' holds Surfaces Reopen cannot restore; pass --force to close it

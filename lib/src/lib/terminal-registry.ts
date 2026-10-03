@@ -57,6 +57,7 @@ export {
   unmountElement,
 } from './terminal-lifecycle';
 export type { SurfaceFocusHandle } from './terminal-lifecycle';
+export { markSessionTouched } from './terminal-store';
 
 export { setDefaultShellOpts, getDefaultShellOpts } from './shell-defaults';
 
@@ -98,7 +99,6 @@ export {
 export {
   applyTerminalSemanticEvents,
   countRunningSessions,
-  countRunningSessionsIn,
   ensureTerminalPaneState,
   fillTerminalProcessCwd,
   getRunningCommandWatchKey,

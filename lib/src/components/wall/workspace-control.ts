@@ -321,7 +321,7 @@ export async function handleWorkspaceControl(detail: DorControlRequest): Promise
       if (params.force !== true && workspaceNeedsCloseConfirmation(target.id)) {
         detail.respond({
           ok: false,
-          error: `workspace '${target.ref}' holds running or touched Surfaces; pass --force to close it`,
+          error: `workspace '${target.ref}' holds Surfaces Reopen cannot restore; pass --force to close it`,
         });
         return;
       }

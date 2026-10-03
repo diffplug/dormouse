@@ -193,7 +193,12 @@ export function createSidecarSurfaceBridge(
   const pty = alertedPty(options.alerts, options.mgr);
 
   const { provider, notifyDirectoryChanged } = createAskSurfaceProvider(ask, {
-    writePty: pty.writeClientInput,
+    // The webview holds the `untouched` flag a close reads, so it hears of the
+    // input too (docs/specs/layout.md → "Kill confirmation").
+    writePty(id, data) {
+      pty.writeClientInput(id, data);
+      options.send('terminal:clientInput', { id });
+    },
     resizePty: pty.resize,
 
     streamPty(ptyId, sink) {

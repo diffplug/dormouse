@@ -255,12 +255,12 @@ describe('workspace.close', () => {
     const second = createWorkspace({ id: 'ws-2', name: 'build', activate: false }).id;
     const closeAll = vi.fn(async () => null);
     handleFor(getWorkspacesSnapshot().workspaces[0].id);
-    handleFor(second, { runningCount: () => 1, closeAll });
+    handleFor(second, { needsCloseConfirmation: () => true, closeAll });
 
     const refused = request('workspace.close', { workspace: 'workspace:2' });
     await handleWorkspaceControl(refused);
     expect(answer(refused)).toBe(
-      "workspace 'workspace:2' holds running or touched Surfaces; pass --force to close it",
+      "workspace 'workspace:2' holds Surfaces Reopen cannot restore; pass --force to close it",
     );
     expect(closeAll).not.toHaveBeenCalled();
     expect(getWorkspacesSnapshot().workspaces).toHaveLength(2);
@@ -339,7 +339,7 @@ it.each([
   ['move', { workspace: 'workspace:2', toWindow: 'new' }],
 ] as const)('answers a pending confirmation no as workspace.%s starts, even when it refuses', async (verb, params) => {
   createWorkspace({ id: 'ws-2', activate: false });
-  handleFor('ws-2', { runningCount: () => 1 });
+  handleFor('ws-2', { needsCloseConfirmation: () => true });
   setPlatform({} as unknown as PlatformAdapter);
   const confirmed = vi.fn();
   requestConfirmation({ id: 'ws-2', char: 'q', answer: confirmed });

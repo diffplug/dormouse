@@ -28,6 +28,7 @@ import type {
   WorkspaceMutationResponse,
   ReadSurfaceRequest,
   ReadSurfaceResponse,
+  ReopenResponse,
   ResolveBrowserRequest,
   ResolveBrowserResponse,
   ResolveOpenTargetRequest,
@@ -47,6 +48,7 @@ import {
   APP_CONTROL_METHODS,
   SURFACE_CONTROL_METHODS,
   TOOL_CONTROL_METHODS,
+  WINDOW_CONTROL_METHODS,
   WORKSPACE_CONTROL_METHODS,
   type DorControlMethod,
 } from './protocol.js';
@@ -187,5 +189,9 @@ export abstract class MethodControlClient implements ControlClient {
 
   restartApp(): Promise<AppRestartResponse> {
     return this.request<AppRestartResponse>(APP_CONTROL_METHODS.restart, {});
+  }
+
+  reopenClosed(): Promise<ReopenResponse> {
+    return this.request<ReopenResponse>(WINDOW_CONTROL_METHODS.reopen, {});
   }
 }

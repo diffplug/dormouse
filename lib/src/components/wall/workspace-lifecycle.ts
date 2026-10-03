@@ -5,7 +5,8 @@ import { getWallHandle } from './wall-handles';
 import { forgetWorkspaceSession, isWorkspaceTransferPending } from '../../lib/window-session-aggregator';
 import { cancelPendingConfirmation, dismissWorkspaceUi, requestConfirmation, setRenamingWorkspace, type WorkspaceConfirmation } from '../../lib/workspace-ui-store';
 import { closeWorkspace, getActiveWorkspaceId, getWorkspacesSnapshot, setActiveWorkspace, workspaceRefFor } from '../../lib/workspace-store';
-import type { WorkspaceId } from '../../lib/session-types';
+import type { PersistedSession, WorkspaceId } from '../../lib/session-types';
+import { pushReopenRecord, type WorkspaceReopenRecord } from '../../lib/reopen-stack';
 import type { WorkspaceCloseMode } from './wall-types';
 import { confirmToolEditorsClose, UNSAVED_TOOL_REFUSAL } from '../../lib/tool-editor';
 
@@ -16,11 +17,10 @@ import { confirmToolEditorsClose, UNSAVED_TOOL_REFUSAL } from '../../lib/tool-ed
  * these open; it decides nothing.
  */
 
-/** Whether closing this Workspace asks first: it holds a Surface the user has
- *  typed into, or a running Session. */
+/** Whether closing this Workspace asks first: any member is one whose own
+ *  close would ask (`docs/specs/layout.md` → "Workspace lifecycle"). */
 export function workspaceNeedsCloseConfirmation(id: WorkspaceId): boolean {
-  const handle = getWallHandle(id);
-  return !!handle && (handle.hasTouchedSurfaces() || handle.runningCount() > 0);
+  return getWallHandle(id)?.needsCloseConfirmation() ?? false;
 }
 
 /** A click on `+` waits for the fresh Wall before focusing its terminal. */
@@ -89,6 +89,9 @@ export async function closeWorkspaceWithSurfaces(
     const editors = handle.dirtyToolIds();
     if (editors.length && (mode === 'silent' || !await confirmToolEditorsClose(editors))) return UNSAVED_TOOL_REFUSAL;
     if (!isCurrent()) return 'Workspace close was superseded by a newer close or move';
+    // Reopenable only whole: one member whose own close would ask leaves no
+    // record, so the record is taken before any member closes.
+    const record = handle.needsCloseConfirmation() ? null : workspaceReopenRecord(id, handle.serializeReported());
     const refusal = await handle.closeAll(editors);
     if (refusal) {
       // A refusal returns to its prompt if the user navigated away during close.
@@ -99,6 +102,7 @@ export async function closeWorkspaceWithSurfaces(
     // Mount a replacement Wall before selecting its tab, including the last close.
     flushSync(() => { closed = closeWorkspace(id); });
     if (!closed) return 'Workspace no longer exists';
+    if (record) pushReopenRecord(record);
     forgetWorkspaceSession(id);
     // Clear only this Workspace's chrome: a stranded editor or confirmation
     // holds the keyboard lease after its Workspace disappears.
@@ -151,6 +155,14 @@ export function workspaceCloseConfirmation(id: WorkspaceId, char = randomKillCha
     canConfirm: () => !isWorkspaceTransferPending(id),
     answer: accepted => { if (accepted) void closeWorkspaceWithSurfaces(id); },
   };
+}
+
+function workspaceReopenRecord(id: WorkspaceId, session: PersistedSession): WorkspaceReopenRecord | null {
+  const { workspaces } = getWorkspacesSnapshot();
+  const index = workspaces.findIndex(workspace => workspace.id === id);
+  if (index < 0) return null;
+  const { name, nameIsAuto } = workspaces[index];
+  return { kind: 'workspace', closedAt: Date.now(), workspace: { id, name, nameIsAuto, session }, index };
 }
 
 /** Open the strip's inline rename editor on a Workspace. */

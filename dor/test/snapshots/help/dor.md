@@ -16,6 +16,7 @@ USAGE
   dor read <surface> [--json] [--lines count] [--scrollback] [--workspace ref]
   dor await <surface> --until condition [--json] [--timeout seconds] [--workspace ref]
   dor kill <surface> [--confirm-if-read text|--confirm-dangerously] [--json] [--workspace ref]
+  dor reopen [--json]
   dor move [--new] [--focus] [--dangerously-destroy-iframe-page-state] [--json] [--workspace ref] <args>...
   dor iframe [--json] [--minimize] [--surface id|ref] [--workspace ref] <target>
   dor agent-browser [--key name|--session name|--surface handle] [--workspace ref] [args...]
@@ -42,6 +43,7 @@ COMMANDS
   read           Read terminal text from a surface.
   await          Wait until a terminal surface finishes.
   kill           Kill a surface.
+  reopen         Reopen the most recently closed surface, workspace, or window.
   move           Move a surface to another workspace.
   iframe         Open a target in an iframe surface.
   agent-browser  Drive a browser surface via your agent-browser install.

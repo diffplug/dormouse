@@ -16,7 +16,7 @@ Source of truth: `surface.tool` in `lib/src/components/wall/use-dor-control.ts`.
 - **Must retain the Session id, public Surface ref, and terminal across serving and renderer changes.** These are changes within one Surface.
 - **Never offer or apply a renderer swap outside a Tool's declarable `render` values** ([Declaring tools](#declaring-tools)), in the Display modal or `onSwapRenderMode` (rationale).
 - **Must run the terminal Activity model for a Tool**, including when its browser is visible. Watched-command defaults belong to `docs/specs/alert.md`.
-- **Never apply the untouched-shell kill or shell-replacement shortcut to a Tool**, which spawns touched.
+- **Never apply the untouched-shell kill or shell-replacement shortcut to a Tool**, which spawns touched; the Tools a close does not ask about are `docs/specs/reopen.md` → "Reopenable kinds".
 
 Source of truth: `surfaceKindFromParams` in `lib/src/components/wall/browser-surface.ts`; `onSwapRenderMode` in `lib/src/components/Wall.tsx`.
 
@@ -387,7 +387,7 @@ The Tool-specific local boundaries are `docs/specs/security-local.md` → Dor To
 
 ## Persistence and hosts
 
-**Must persist the command and stable Tool metadata with `surfaceType: 'tool'`**, retaining the ordinary CWD field. Never persist a derived URL, browser session binding, conflict, or pending approval as runnable Tool state.
+**Must persist the command and stable Tool metadata with `surfaceType: 'tool'`**, retaining the ordinary CWD field. Never persist a derived URL, browser session binding, conflict, or pending approval as runnable Tool state. **Must persist a Tool's title only when the user renamed it**: a restored title is the user's, and would hide the title the Tool announces when it runs again.
 
 **Must retain resolved browser viewport settings with Tool metadata**, including cold restore and Workspace transfer; sizing behavior belongs to `docs/specs/dor-browser.md` → Viewport presets.
 

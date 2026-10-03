@@ -24,7 +24,7 @@ Source of truth: `dor/package.json`, `dor-tools-builtin/package.json`; `dor-tool
 
 **Must require a user Tool for PDFs**, including files named `README.pdf`. (rationale)
 
-**Must retain media/HTML grant descriptors until the Tool exits.** Refresh reads those files again; replacements and dependency-graph changes require restarting. Text editing follows [Editing files](#editing-files). Cold restore creates a fresh URL capability; Workspace movement keeps the live binding.
+**Must retain media/HTML grant descriptors until the Tool exits.** Refresh reads those files again; replacements and dependency-graph changes require restarting. Text editing follows [Editing files](#editing-files). **Must report a view that cannot be edited clean as it starts**, so closing it asks nothing (`docs/specs/reopen.md` → "Reopenable kinds"). Cold restore creates a fresh URL capability; Workspace movement keeps the live binding.
 
 Source of truth: `runFileViewer` in `dor-tools-builtin/src/file-viewer.ts`; `fileViewerFormat` in `dor-tools-builtin/src/file-viewer-format.ts`. Tests: `dor-tools-builtin/test/file-viewer.test.mjs`.
 

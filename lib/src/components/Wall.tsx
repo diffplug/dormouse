@@ -44,10 +44,8 @@ import {
   getTerminalPaneState,
   getTerminalPaneStateSnapshot,
   getActivitySnapshot,
-  isUntouched,
   getOrCreateTerminal,
   getTerminalInstance,
-  countRunningSessionsIn,
   setTerminalUserTitle,
   UNNAMED_PANEL_TITLE,
 } from '../lib/terminal-registry';
@@ -71,10 +69,14 @@ import { nextTodoMember } from '../lib/workspace-union';
 import { deriveDisplayedSurfaceLabel } from '../lib/session-label';
 import { getWorkspace, getWorkspacesSnapshot, subscribeToWorkspaces, workspaceRefFor } from '../lib/workspace-store';
 import { awaitWallEmpty } from './wall/close-all';
+import { closeKind, type CloseKind } from './wall/close-kind';
 import { registerWallHandle, type WallHandle } from './wall/wall-handles';
 import { prepareWorkspaceTransfer } from './wall/workspace-transfer';
 import { installDorControlRouter } from './wall/dor-control-router';
-import type { DropTarget, RestoreToken } from '../lib/lath/ops';
+import { reopenClosed } from './wall/reopen';
+import { remove as removeFromTree, type DropTarget, type RestoreToken } from '../lib/lath/ops';
+import { pushReopenRecord, type SurfaceReopenRecord } from '../lib/reopen-stack';
+import { reopenPane } from '../lib/session-restore';
 import type { Edge } from '../lib/lath/model';
 import { useDynamicPalette } from '../lib/themes/use-dynamic-palette';
 import {
@@ -103,6 +105,7 @@ import {
   shouldParkOnMinimize,
   edgeForDorDirection,
   directionForArrow,
+  persistableLeafMeta,
 } from './wall/lath-wall-engine';
 import type { LeafMeta } from '../lib/lath/persistence';
 import { useToolServing } from './wall/use-tool-serving';
@@ -328,15 +331,13 @@ export function Wall({
   const lathRef = useRef<LathWallEngine | null>(null);
   if (lathRef.current === null) lathRef.current = createLathWallEngine();
   const lath = lathRef.current;
-  /** An untouched *shell* — the only thing the kill-without-confirm and
-   *  replace-in-place shortcuts may take. A Tool is never one: input to either
-   *  of its capabilities is input to the Tool (docs/specs/dor-tool.md → The
-   *  tool capability set). */
-  const isUntouchedShell = (id: string): boolean =>
-    isUntouched(id) && !isToolParams(lath.getMeta(id)?.params);
+  /** What a user close of this Surface does (`closeKind`). A Tool is never a
+   *  trivial close: input to either of its capabilities is input to the Tool
+   *  (docs/specs/dor-tool.md → The tool capability set). */
+  const closeKindOf = (id: string): CloseKind => closeKind(id, lath.getMeta(id)?.params);
   /** A blank shell may be replaced in place; one that owns a helper is not blank
    *  (docs/specs/terminal-context.md → Helper lifecycle). */
-  const isReplaceableShell = (id: string): boolean => isUntouchedShell(id) && !getHelper(id);
+  const isReplaceableShell = (id: string): boolean => closeKindOf(id) === 'trivial' && !getHelper(id);
   const restoredLathLayoutRef = useRef(restoredLathLayout);
   const dorSurfaceRefsRef = useRef<Map<string, string> | null>(null);
   const nextDorSurfaceRefIndexRef = useRef(1);
@@ -675,6 +676,18 @@ export function Wall({
     setTerminalContext({ id, warning });
   }, []);
 
+  /** Selection after the selected Surface is killed: in command mode, the next
+   *  surviving Door of a kill gesture's neighbors, else the first live pane. */
+  const selectAfterKill = useCallback((doorNeighbors: string[] | null): void => {
+    const nextDoor = modeRef.current === 'command' && doorNeighbors
+      ? doorNeighbors.find(neighbor => doorsRef.current.some(door => door.id === neighbor)) ?? doorsRef.current[0]?.id
+      : null;
+    if (nextDoor) { selectDoor(nextDoor); return; }
+    const survivorId = lath.listPanes()[0]?.id ?? null;
+    if (survivorId) selectPane(survivorId);
+    else setSelectedId(null);
+  }, [selectDoor, selectPane, lath]);
+
   /** Tear a Surface down after its helper guard. */
   const killPaneImmediately = useCallback((id: string): void => {
     closeHelperParent(id);
@@ -700,13 +713,9 @@ export function Wall({
       // check, so a late OSC signal can't type the command into a dead surface.
       disposeSession(id);
       removeDoor(id);
-      // Guard: no current caller kills a selected door (ensure's throwaway is
-      // never selected), but if one did, fall back to a visible pane.
-      if (selectedIdRef.current === id && selectedTypeRef.current === 'door') {
-        const survivorId = lath.listPanes()[0]?.id ?? null;
-        if (survivorId) selectPane(survivorId);
-        else setSelectedId(null);
-      }
+      // A kill gesture on the selected Door hands selection to its next
+      // surviving neighbor, as a revealed Door's kill does below.
+      if (selectedIdRef.current === id && selectedTypeRef.current === 'door') selectAfterKill(doorNeighbors);
       clearLocalSurfaceActivity(id);
       forgetSurfaceRef(id);
       fireEvent({ type: 'kill', id });
@@ -739,19 +748,15 @@ export function Wall({
       // `listPanes()`, so an earlier delete would let a `dor` projection re-mint a
       // fresh ref for the dying pane.
       forgetSurfaceRef(id);
-      if (wasSelectedPane) {
-        const nextDoor = modeRef.current === 'command' && doorNeighbors
-          ? doorNeighbors.find(neighbor => doorsRef.current.some(door => door.id === neighbor)) ?? doorsRef.current[0]?.id
-          : null;
-        if (nextDoor) { selectDoor(nextDoor); return; }
-        const survivorId = lath.listPanes()[0]?.id ?? null;
-        if (survivorId) selectPane(survivorId);
-        else setSelectedId(null);
-      }
+      if (wasSelectedPane) selectAfterKill(doorNeighbors);
     }, exitMs);
     clearLocalSurfaceActivity(id);
     fireEvent({ type: 'kill', id });
-  }, [fireEvent, forgetSurfaceRef, removeDoor, selectPane, selectDoor, lath, nav]);
+  }, [fireEvent, forgetSurfaceRef, removeDoor, selectAfterKill, lath, nav]);
+
+  /** Push the reopen record of a Surface about to close (set below, once the
+   *  serializer exists). */
+  const pushSurfaceRecordRef = useRef<(id: string) => void>(() => {});
 
   /**
    * A permanent Surface closure checks helper work before teardown
@@ -768,6 +773,9 @@ export function Wall({
       if (refused) { revealRefusal(id, refused); return refused; }
       if (isToolDirty(id, lath.getMeta(id)?.params)
         && !(editors === 'ask' ? await confirmToolEditorsClose([id]) : editors.includes(id))) return UNSAVED_TOOL_REFUSAL;
+      // Decided now, from the state the kill leaves behind; a Workspace close
+      // leaves one record for all its members instead.
+      if (!closingWorkspaceRef.current && closeKindOf(id) === 'reopenable') pushSurfaceRecordRef.current(id);
       killPaneImmediately(id);
       return null;
     } finally {
@@ -793,14 +801,19 @@ export function Wall({
           id,
           neighbors: [...doorsRef.current.slice(index + 1), ...doorsRef.current.slice(0, index).reverse()].map(item => item.id),
         };
-        handleReattachRef.current(door, { enterPassthrough: false, afterRestore: isUntouchedShell(id) ? 'close' : 'confirm-kill' });
+        // Only a confirmation needs the pane; any other close takes the Door
+        // as it is, so a reopen puts it back on the Baseboard.
+        if (closeKindOf(id) === 'confirm') handleReattachRef.current(door, { enterPassthrough: false, afterRestore: 'confirm-kill' });
+        else void closeSurface(id, 'ask');
         return;
       }
       // The helper inspection below can outlive the Surface (an exit, a `dor
       // kill`); a confirm overlay for a gone pane would never clear itself.
       if (!nav.hasPane(id) || lath.isDying(id)) return;
       doorKillReturnRef.current = null;
-      if (isUntouchedShell(id)) { void closeSurface(id); return; }
+      // `ask`: a Tool that turns dirty during the helper check prompts rather
+      // than refusing a gesture in silence.
+      if (closeKindOf(id) !== 'confirm') { void closeSurface(id, 'ask'); return; }
       setConfirmKill({ id, char: randomKillChar() });
     };
     if (!getHelper(id)) { stage(); return; }
@@ -869,9 +882,10 @@ export function Wall({
     }
   }, [selectDoor, lath]);
 
-  const addMinimizedSplitDoor = useCallback((referenceId: string, item: DooredItem, select: boolean) => {
-    const index = doorsRef.current.findIndex((door) => door.id === referenceId);
-    const insertAt = index >= 0 ? index + 1 : doorsRef.current.length;
+  /** Put a Door on the Baseboard at `index` (clamped), selecting it in command
+   *  mode when asked. */
+  const insertDoorAt = useCallback((index: number, item: DooredItem, select: boolean) => {
+    const insertAt = Math.min(index, doorsRef.current.length);
     const nextDoors = [
       ...doorsRef.current.slice(0, insertAt),
       item,
@@ -885,6 +899,11 @@ export function Wall({
       selectDoor(item.id);
     }
   }, [selectDoor]);
+
+  const addMinimizedSplitDoor = useCallback((referenceId: string, item: DooredItem, select: boolean) => {
+    const index = doorsRef.current.findIndex((door) => door.id === referenceId);
+    insertDoorAt(index >= 0 ? index + 1 : doorsRef.current.length, item, select);
+  }, [insertDoorAt]);
 
   /** Exit terminal mode */
   const exitTerminalMode = useCallback(() => {
@@ -1075,6 +1094,34 @@ export function Wall({
     workspaceId,
   });
 
+  // --- Reopen (docs/specs/reopen.md) ---
+  /** A record's meta reopens pinned: a newer preview may hold the slot by then
+   *  (docs/specs/dor-tool.md → Preview slot). */
+  const reopenableLeafMeta = (meta: LeafMeta): LeafMeta => {
+    const persistable = persistableLeafMeta(meta);
+    if (!persistable.params || !('toolPreview' in persistable.params)) return persistable;
+    const { toolPreview: _preview, ...params } = persistable.params;
+    return { ...persistable, params };
+  };
+  pushSurfaceRecordRef.current = (id: string) => {
+    // A Surface already fading out was recorded by the close that started it.
+    if (lath.isDying(id)) return;
+    const meta = lath.getMeta(id);
+    const [pane] = persistence.serializeReported(member => member === id).panes;
+    if (!meta || !pane) return;
+    const index = doorsRef.current.findIndex(door => door.id === id);
+    const token = index < 0 ? removeFromTree(lath.store.getSnapshot().tree, id).token : null;
+    if (index < 0 && !token) return;
+    pushReopenRecord({
+      kind: 'surface',
+      closedAt: Date.now(),
+      workspaceId: effectiveWorkspaceId,
+      pane,
+      meta: reopenableLeafMeta(meta),
+      placement: token ? { kind: 'pane', token } : { kind: 'door', index, token: doorsRef.current[index].token },
+    });
+  };
+
   /**
    * Close every Surface in this Workspace, each through the same coordinator a
    * manual close uses (helper guard → kill). Resolves null once the Wall is
@@ -1173,9 +1220,7 @@ export function Wall({
         // Guard against removal between scheduling and execution.
         if (!nav.hasPane(item.id)) return;
         focusSession(item.id, false);
-        if (afterRestore === 'close') {
-          void closeSurfaceRef.current(item.id);
-        } else if (afterRestore === 'confirm-kill') {
+        if (afterRestore === 'confirm-kill') {
           setConfirmKill({ id: item.id, char: randomKillChar() });
         } else if (typeof afterRestore === 'object' && afterRestore.type === 'replace-terminal') {
           // Atomic identity swap in place — no transient add/remove.
@@ -1193,6 +1238,26 @@ export function Wall({
   }, [selectPane, removeDoor, removeDoorAndSelect, restoreFromToken, enterTerminalMode, forgetSurfaceRef, showShellSpawnNotice, lath, nav]);
   const handleReattachRef = useRef(handleReattach);
   handleReattachRef.current = handleReattach;
+
+  /**
+   * Rebuild a closed Surface from its record as a new Surface with a new ref
+   * (glossary I10): where it sat, a Pane beside the selected pane when its
+   * neighbors are gone. `focus` selects it as a reopen gesture does.
+   */
+  const reopenSurface = useCallback((record: SurfaceReopenRecord, focus: boolean): { id: string; ref: string } => {
+    const id = generatePaneId();
+    const meta = reopenPane(id, record.pane, record.meta);
+    const ref = surfaceRefForId(id);
+    const { placement } = record;
+    if (placement.kind === 'door') {
+      lath.store.addDoor(id, meta);
+      insertDoorAt(placement.index, { id, token: { ...(placement.token as RestoreToken), leafId: id } }, focus);
+    } else {
+      restoreFromToken(id, meta, { ...placement.token, leafId: id });
+      if (focus) enterTerminalMode(id);
+    }
+    return { id, ref };
+  }, [generatePaneId, surfaceRefForId, restoreFromToken, enterTerminalMode, insertDoorAt, lath]);
 
   /** A Door click, or a pin in its popover: reattach into passthrough, a human
    *  gesture that acknowledges the Session. */
@@ -1854,20 +1919,21 @@ export function Wall({
       else enterTerminalMode(id);
     },
     showMoveNotice: (id, text) => showShellSpawnNotice(id, text, 8000),
+    showNotice: (text) => {
+      const id = livePaneId();
+      if (id) showShellSpawnNotice(id, text);
+    },
+    reopenSurface,
     serializeNow: persistence.serializeNow,
+    serializeReported: () => persistence.serializeReported(),
 
     surfaceIds: memberSurfaceIds,
     ownsSurface,
     iframeSurfaceRefs,
     browserSessions,
-    hasTouchedSurfaces: () => memberSurfaceIds().some((id) => {
-      // A browser Surface has no "untouched" notion and always holds a page, so
-      // it counts; so does a Tool, before its terminal exists to be asked. A
-      // terminal counts once its Session exists and has input.
-      if (!surfaceHasTerminal(id) || isToolParams(lath.getMeta(id)?.params)) return true;
-      return getTerminalInstance(id) !== null && !isReplaceableShell(id);
-    }),
-    runningCount: () => countRunningSessionsIn(memberSurfaceIds()),
+    // A shell whose Session has not spawned yet has nothing to lose.
+    needsCloseConfirmation: () => memberSurfaceIds().some(id => closeKindOf(id) === 'confirm'
+      && !(surfaceKindFromParams(lath.getMeta(id)?.params) === 'terminal' && getTerminalInstance(id) === null)),
     dirtyToolIds: () => memberSurfaceIds().filter(id => isToolDirty(id, lath.getMeta(id)?.params)),
     enterSelectedPane: () => {
       const id = livePaneId();
@@ -2316,6 +2382,7 @@ export function Wall({
     minimizePane,
     openTerminalContext: (id, origin) => contextActions.open(id, { origin }),
     requestKill,
+    reopenClosed: () => { void reopenClosed({ gesture: true }); },
     acceptKill,
     rejectKill,
     setRenamingPaneId,

@@ -1,5 +1,5 @@
 import { recordToolDirty } from './tool-dirty-store';
-import { registry } from './terminal-store';
+import { helperMayBeBusy, registry } from './terminal-store';
 import {
   commandWatchKey,
   createTerminalPaneState,
@@ -91,9 +91,7 @@ export function countRunningSessions(except?: string | null): number {
   return countRunning(null, except);
 }
 
-/** The same count restricted to `ids` — the Workspace close confirmation asks it
- *  of one Workspace's member Surfaces (`docs/specs/layout.md` → "Workspaces").
- *  `null` means every Session in the Window. */
+/** The same count restricted to `ids`; `null` means every Session in the Window. */
 export function countRunningSessionsIn(ids: Iterable<string> | null): number {
   return countRunning(ids === null ? null : new Set(ids), null);
 }
@@ -103,7 +101,7 @@ function countRunning(scope: ReadonlySet<string> | null, except: string | null |
   for (const [id, state] of paneStates) {
     if ((scope && !scope.has(id)) || id === except) continue;
     const entry = registry.get(id);
-    if (state.activity.kind === 'running' || (entry?.helper && !entry.exited && entry.helperBusy !== false)) count++;
+    if (state.activity.kind === 'running' || (entry?.helper && helperMayBeBusy(entry))) count++;
   }
   return count;
 }

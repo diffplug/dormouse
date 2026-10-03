@@ -107,6 +107,7 @@ configureBurrow({
  */
 function writeClientInput(ptyId: string, data: string): void {
   alertedPtys.writeClientInput(ptyId, data);
+  for (const listener of clientInputListeners) listener(ptyId);
 }
 
 function resizeForClient(ptyId: string, cols: number, rows: number, repaint?: boolean): void {
@@ -223,6 +224,7 @@ type SemanticEventsListener = (id: string, events: TerminalSemanticEvent[]) => v
 const semanticEventsListeners = new Set<SemanticEventsListener>();
 const toolEventsListeners = new Set<(id: string, events: TerminalProtocolEvent[]) => void>();
 const clipboardOfferListeners = new Set<(id: string, text: string) => void>();
+const clientInputListeners = new Set<(id: string) => void>();
 
 export function onProcessedPtyData(listener: ProcessedDataListener): () => void {
   processedDataListeners.add(listener);
@@ -515,6 +517,10 @@ export function attachRouter(
       if (ownedPtyIds.has(id)) post({ type: 'terminal:clipboardOffer', id, text } satisfies ExtensionMessage);
     };
     clipboardOfferListeners.add(onClipboardOffer);
+    const onClientInput = (id: string) => {
+      if (ownedPtyIds.has(id)) post({ type: 'terminal:clientInput', id } satisfies ExtensionMessage);
+    };
+    clientInputListeners.add(onClientInput);
     const removeSemanticListener = onTerminalSemanticEvents((id, events) => {
       if (!ownedPtyIds.has(id)) return;
       post({ type: 'terminal:semanticEvents', id, events } satisfies ExtensionMessage);
@@ -540,6 +546,7 @@ export function attachRouter(
       removeSemanticListener();
       toolEventsListeners.delete(onToolEvents);
       clipboardOfferListeners.delete(onClipboardOffer);
+      clientInputListeners.delete(onClientInput);
       removeExitListener();
       removeAlertListener();
       removeSpeakListener();

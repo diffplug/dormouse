@@ -45,6 +45,7 @@ import { getTerminalTheme, onTerminalThemeChange } from "dormouse-lib/lib/termin
 import { parseReplay } from "dormouse-lib/lib/platform/replay-parse";
 import type { TerminalSemanticEvent } from "dormouse-lib/lib/terminal-state";
 import { applyTerminalSemanticEvents } from "dormouse-lib/lib/terminal-state-store";
+import { markSessionTouched } from "dormouse-lib/lib/terminal-store";
 import type { DorControlCancelPayload, DorControlRequestPayload } from "dor/protocol";
 import {
   cancelDorControlRequest,
@@ -350,6 +351,8 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
     } else if (event === "terminal:clipboardOffer") {
       const { id, text } = data as { id: string; text: string };
       offerProgramCopy(id, text);
+    } else if (event === "terminal:clientInput") {
+      markSessionTouched((data as { id: string }).id);
     } else if (event === "pty:exit") {
       const payload = data as { id: string; exitCode: number };
       for (const handler of this.exitHandlers) handler(payload);

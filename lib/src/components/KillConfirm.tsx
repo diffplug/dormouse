@@ -14,8 +14,9 @@ export interface ConfirmKill {
 export const KILL_SHAKE_MS = 400;
 export const KILL_CONFIRM_MS = 220;
 
-// Excludes both kill shortcuts ('x' and 'k') so a double-tap can't accept itself.
-const KILL_CONFIRM_CHARS = 'abcdefghijlmnopqrstuvwyz';
+// Excludes both kill shortcuts ('x' and 'k') so a double-tap can't accept itself,
+// and Reopen's 'u', so reaching to undo an earlier close never confirms this one.
+const KILL_CONFIRM_CHARS = 'abcdefghijlmnopqrstvwyz';
 export function randomKillChar(): string {
   return cfg.killConfirm.char ?? KILL_CONFIRM_CHARS[Math.floor(Math.random() * KILL_CONFIRM_CHARS.length)];
 }

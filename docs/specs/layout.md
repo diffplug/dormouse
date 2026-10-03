@@ -111,7 +111,7 @@ A minimized session becomes a **door**, showing its label plus the alert badge c
 
 - **Click** (any mode) or **Enter** (command mode): restore the session as a pane and enter passthrough.
 - **m** / **d** (command mode): restore into a pane but stay in command mode — the inverse of `m`/`d` on a pane, making them toggles.
-- **x** / **k** (command mode): restore into a pane, then show the kill confirmation (an untouched Surface is killed outright — [Kill confirmation](#kill-confirmation)).
+- **x** / **k** (command mode): restore into a pane, then show the kill confirmation; a close that asks nothing closes the Door as it is, so Reopen returns it to the Baseboard ([Kill confirmation](#kill-confirmation)).
 - **Arrow keys** navigate to and between doors ([Spatial navigation](#spatial-navigation)).
 
 ### Baseboard responsive sizing
@@ -189,7 +189,7 @@ Each Wall renders one Workspace. Standalone mounts one Wall **per Workspace**; V
 - **A closing Workspace takes no new Surfaces**: while `closeAll` walks, this Wall answers every Surface-creating `dor` verb with an error, **rechecked after any host round trip the verb makes before creating** (`CREATING_CONTROL_METHODS` in `lib/src/components/wall/use-dor-control.ts`).
 - **Must reject duplicate Workspace IDs before mutating the model.**
 - **Must retain mode and selection across switches unless the [activation gesture](#workspace-tabs) changes them.**
-- **Close confirms first when the Workspace holds touched Surfaces or running work**, then closes every member Surface. **Must select the fresh Workspace that replaces the last closed one. Must serialize closes across the Window.**
+- **Close confirms first when any member's own close would** (`docs/specs/reopen.md` → "Workspaces and windows"), then closes every member Surface. **Must select the fresh Workspace that replaces the last closed one. Must serialize closes across the Window.**
 - **A Workspace whose Wall has not registered is refused** (`workspace '<ref>' is still mounting`, one wording for every caller), never closed past (I4). **A gesture waits out the registration gap first**, as `dor workspace close` does, and is dropped unannounced on its timeout, a pending transfer, or a close in flight.
 - **Rename edits the Workspace `name` only**, never a Surface title or the per-pane inline rename, and pins it ([Workspace names](#workspace-names)). **A press inside the open rename editor never starts a reorder.**
 - **Must drop the closing Workspace's rename editor and pending confirmation, and no other's.**
@@ -274,11 +274,11 @@ A split from an existing pane (`|`/`%`/`-`/`"` or the header split buttons) spaw
 
 Dirty Tool close consent: `docs/specs/dor-tool.md` → Closing unsaved Tools.
 
-`x`/`k` (or the kill button, which first leaves passthrough) shows a pane-centered confirmation with a random lowercase letter; typing it confirms the kill. **`x` and `k` are excluded from that alphabet** so a double-tap can't accept itself. `Escape`, the cancel button, and clicking another panel cancel; any other key dismisses it.
+`x`/`k` (or the kill button, which first leaves passthrough) shows a pane-centered confirmation with a random lowercase letter; typing it confirms the kill. **`x`, `k`, and Reopen's `u` are excluded from that alphabet** so neither a double-tap nor a reopen accepts it. Which closes skip it: `docs/specs/reopen.md` → "The rule". `Escape`, the cancel button, and clicking another panel cancel; any other key dismisses it.
 
-**Must return keyboard selection to the next surviving Door after killing a revealed Door**, falling back to previous Doors, then a pane only if no Doors remain. Apply this to confirmed and untouched kills only while the revealed pane is still selected in command mode; cancellation, refusal, or navigating away discards the return target.
+**Must return keyboard selection to the next surviving Door after killing a revealed Door**, falling back to previous Doors, then a pane only if no Doors remain. Apply this to confirmed and unasked kills only while the revealed pane, or the Door, is still selected in command mode; cancellation, refusal, or navigating away discards the return target.
 
-**Untouched plain terminal sessions skip this confirmation; Tools still require it.** A newly spawned shell starts `untouched: true`; the first user-originated PTY input flips it to false. Counted: printable keys, Enter, control keys, keyboard CSI such as arrows/history, paste, file-drop path insertion, forwarded mouse reports. Not counted: replay-shaped terminal reports and mouse reports removed by an override.
+A newly spawned shell starts `untouched: true`; the first user-originated PTY input flips it to false. Counted: printable keys, Enter, control keys, keyboard CSI such as arrows/history, paste, file-drop path insertion, forwarded mouse reports, `dor send` input, and a Client's input, which the host owning the PTY reports to the webview as `terminal:clientInput`. Not counted: replay-shaped terminal reports and mouse reports removed by an override.
 
 Source of truth: `requestKill` in `lib/src/components/Wall.tsx`; `wireXtermHandlers` in `lib/src/lib/terminal-lifecycle.ts` (untouched input gate).
 

@@ -1,8 +1,9 @@
-import { isAppControlMethod, isToolControlMethod, isWorkspaceControlMethod, SURFACE_CONTROL_METHODS } from 'dor/protocol';
+import { isAppControlMethod, isToolControlMethod, isWindowControlMethod, isWorkspaceControlMethod, SURFACE_CONTROL_METHODS } from 'dor/protocol';
 import { registry, isHelperSession } from '../../lib/terminal-store';
 import { createRefCount } from '../../lib/ref-count';
 import { getActiveWorkspaceId, isWindowRef, resolveWorkspaceRef, workspaceRefFor } from '../../lib/workspace-store';
 import { handleAppControl } from './app-control';
+import { handleReopenControl } from './reopen';
 import { handleToolControl } from './tool-control';
 import { errorText, mountingRefusal, requestForWall, ROUTE_RETRIES } from './dor-control-shared';
 import { getWallHandle, wallHandleOwning, type WallHandle } from './wall-handles';
@@ -27,6 +28,9 @@ export type DorControlRoute =
   /** Answered by the Window before anything is resolved: a `tool.*` read of
    *  the Tool configuration names no Workspace or Surface either. */
   | { kind: 'tool' }
+  /** Answered by the Window before anything is resolved: a `window.*` verb
+   *  takes the Window's own reopen stack. */
+  | { kind: 'reopen' }
   /** Answered by the Window itself: a `workspace.*` container verb
    *  (`container: true`), or the `--all` listing that spans them. */
   | { kind: 'window'; container: boolean }
@@ -68,6 +72,7 @@ function withHelperOrigin(detail: DorControlRequest): DorControlRequest {
 export function resolveDorControlRoute(detail: DorControlRequest): DorControlRoute {
   if (isAppControlMethod(detail.method)) return { kind: 'app' };
   if (isToolControlMethod(detail.method)) return { kind: 'tool' };
+  if (isWindowControlMethod(detail.method)) return { kind: 'reopen' };
   const params: WindowControlParams = detail.params ?? {};
   if (typeof params.surface === 'string') {
     const target = classifySurfaceTarget(params.surface);
@@ -151,9 +156,10 @@ function dispatchDorControl(detail: DorControlRequest, attempt: number): void {
   }
 }
 
-function runRoute(route: Extract<DorControlRoute, { kind: 'app' | 'tool' | 'window' | 'handle' }>, detail: DorControlRequest): unknown {
+function runRoute(route: Extract<DorControlRoute, { kind: 'app' | 'tool' | 'reopen' | 'window' | 'handle' }>, detail: DorControlRequest): unknown {
   switch (route.kind) {
     case 'app': return handleAppControl(detail);
+    case 'reopen': return handleReopenControl(detail);
     case 'tool': return handleToolControl(detail);
     case 'window': return route.container ? handleWorkspaceControl(detail) : listAllWorkspaceSurfaces(detail);
     case 'handle': return route.handle.handleDorControl(requestForWall(route.handle, detail));

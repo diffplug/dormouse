@@ -75,7 +75,10 @@ export function WorkspaceTeardownModal({
   }
   const names = workspaceNames.join(', ');
   const scope = names ? `Workspaces: ${names}. ` : '';
-  const count = hasRunning ? `${runningCount} running command${runningCount === 1 ? '' : 's'} will be stopped.` : 'No commands are still running.';
+  // A window close with nothing running may still ask because Reopen could not
+  // bring it back: a shell someone typed into, or a Surface no reopen rebuilds.
+  const idle = intent.unreopenable ? 'Reopen cannot bring this window back.' : 'No commands are still running.';
+  const count = hasRunning ? `${runningCount} running command${runningCount === 1 ? '' : 's'} will be stopped.` : idle;
   const update = intent.discardsUpdate ? ' The downloaded update will be discarded.' : '';
   // A quit captures agent resumes; a window close ends its Sessions for good.
   const resume = intent.kind === 'quit' ? ' Supported agent sessions resume when Dormouse reopens.' : '';
