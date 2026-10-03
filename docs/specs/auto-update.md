@@ -6,13 +6,33 @@ The standalone app checks for updates on launch, where the network policy allows
 
 ## How it works
 
-**Must read and clear the post-install marker on launch** (§localStorage) and show its banner; a reported failure suppresses this launch's check. Otherwise wait 5 seconds, then read the network policy with `networkPolicy` over the Burrow link and, where it allows (`docs/specs/remote-network.md` → "Updates"), `check()` — no update is silent, an update raises the approval prompt; then the reminder, if due: `check-due`, recording `remindedAt`. **Must skip that `check()` once an update is approved**, including through Check now during the wait or the policy read. **The reminder is re-evaluated hourly while the app runs**, reading no policy and never checking; **never over an undismissed notice, nor while the clock reads before 2026-09**, not yet set. Version-lookup and check failures are logged. **Only approval starts the background `download()`**; a failed one is logged and the prompt returns.
+**Must read and clear the post-install marker on launch** (§localStorage) and show its banner; a reported failure suppresses this launch's check. Otherwise wait 5 seconds, then read the network policy with `networkPolicy` over the Burrow link and, where it allows (`docs/specs/remote-network.md` → "Updates"), `check()` — no update is silent, an update raises the approval prompt; then the reminder, if due: `check-due`, recording `remindedAt`. **Must skip that `check()` once an update is approved**, including through Check now during the wait or the policy read. **The reminder is re-evaluated hourly while the app runs**, reading no policy and never checking; **never over an undismissed notice, nor while the clock reads before 2026-09**, not yet set. Version-lookup, check, and download failures are logged. **Only approval starts the background `download()`**.
 
-**Check now** — the `check-due` and `check-failed` links, and the `updates` port — shows `checking`, then `available`, `up-to-date`, or `check-failed`. **A second ask joins the check in flight. An update already approved is shown again, `downloading` or `downloaded`, instead of checked for**, which would offer it for approval twice. **Every successful check, automatic or asked for, records `checkedAt`** (§localStorage).
+```mermaid
+stateDiagram-v2
+  state "check-due" as due
+  state "check-failed" as failed
+  state "up-to-date" as utd
+  state "restart-refused" as refused
+  [*] --> available: launch check() finds one
+  [*] --> due: reminder
+  [*] --> checking: Settings Check now
+  due --> checking: Check now
+  failed --> checking: Try again
+  checking --> available
+  checking --> utd
+  checking --> failed
+  available --> downloading: Install when I quit
+  downloading --> available: download() fails
+  downloading --> downloaded: download() ok
+  downloaded --> refused: quit_restart refused
+```
+
+**A second Check now joins the check in flight. An update already approved is shown again, `downloading` or `downloaded`, instead of checked for**, which would offer it for approval twice. **Every successful check, automatic or asked for, records `checkedAt`** (§localStorage).
 
 **A self-host build never checks** (`docs/specs/relay.md` → "Relay origin"): `startUpdateCheck()` returns at once and `checkNow()` does nothing unless the webview's own baked mode, `bakedRelayMode()`, is `hosted`.
 
-**A failed download leaves the *available* update in place** so a second approval retries rather than no-ops; only a successful `download()` promotes `check()`'s in-memory *available* `Update` to *pending*.
+**A failed download leaves the *available* update in place** so a second approval retries; only a successful `download()` makes it *pending*.
 
 **`startUpdateCheck()` and `checkNow()` are no-ops under the browser-dev harness** (`VITE_DORMOUSE_BROWSER_DEV_HOST`), which has no Tauri updater behind it.
 
