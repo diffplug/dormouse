@@ -283,7 +283,21 @@ Source of truth: `activateTerminalLink` in `lib/src/lib/terminal-link-activation
 
 **Must retain Tool designation after its command exits.** Takeover is one-shot per Surface: a later invocation from that prompt splits unless keyed reuse finds a match; the same keyed Tool reruns in place through the handshake below.
 
-**Must answer `takeover` before waiting for the calling shell's prompt**, then transform and type the command. The answer promises placement, not successful command startup.
+```mermaid
+sequenceDiagram
+  participant Sh as caller's shell
+  participant D as dor
+  participant W as Wall
+  Sh->>D: runs dor tool alone
+  D->>W: surface.tool
+  W-->>D: takeover
+  D->>Sh: prints the handle, exits
+  Sh-->>W: back at a prompt
+  W->>W: recheck, become the Tool
+  W->>Sh: type the command
+```
+
+**Must answer `takeover` before waiting for the calling shell's prompt**, which returns only once `dor` exits; the answer promises placement, not command startup.
 
 - **Must leave the caller unchanged on prompt timeout or cancellation**, and recheck transfer/closing state, pane membership, CWD, kind, and helper presence after the wait. **Must complete an accepted takeover after switching Workspaces** without changing the active Workspace. (rationale)
 - **Must retain the Session id, Surface ref, scrollback, and any user rename** through the transformation.
