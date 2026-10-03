@@ -681,8 +681,7 @@ Source of truth: `QuitMachine` in `standalone/src-tauri/src/quit_state.rs`;
 **Must intercept every quit trigger in Rust** and run the webview teardown
 before exiting (rationale).
 
-**Every window votes before any window is torn down** (rationale): Rust asks
-them all, and only once all agree walks them one teardown at a time.
+**Every window votes before any window is torn down** (rationale).
 
 ```mermaid
 stateDiagram-v2
