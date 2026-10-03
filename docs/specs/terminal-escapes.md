@@ -30,7 +30,7 @@ State-driving and security-sensitive OSCs — plus the `CSI > q` query — are p
 
 **The owner splits a PTY read above `MAX_PARSER_INPUT_CHARS` (64 Ki UTF-16 code units) before parsing it, and never through a surrogate pair**, so **both** projections — one message, not two — fit the 1 MiB application-message cap after base64url and JSON framing (rationale; [remote-api.md](remote-api.md)).
 
-Two escape-aware consumers are **not** parse sites: `lib/src/lib/terminal-controls.ts` strips presentation controls ([transport.md](transport.md)) and `lib/src/lib/terminal-state-store.ts` elides alternate-screen spans ([terminal-state.md](terminal-state.md)). Both read already-stripped output; neither changes what reaches xterm.js.
+Two escape-aware consumers are **not** parse sites: `lib/src/lib/terminal-controls.ts` strips presentation controls and `lib/src/lib/terminal-state-store.ts` elides alternate-screen spans ([terminal-state.md](terminal-state.md)). Both read already-stripped output; neither changes what reaches xterm.js.
 
 Source of truth: `oscDispositionAt` / `commandLineEvents` in `lib/src/lib/terminal-protocol.ts`, `boundedCwdValue` in `lib/src/lib/terminal-state.ts`, `createProcessedPtyStream` in `lib/src/lib/processed-pty-stream.ts`, `createOwnerPtyStream` in `lib/src/host/owner-pty.ts`.
 
@@ -91,7 +91,7 @@ Replay (`pty:replay`) is the raw stream requiring re-parse: **the webview runs a
 | Sequence | Role | Disposition | Where |
 |---|---|---|---|
 | `CSI > q` | iTerm2 extended device-attributes query | Answered `DCS > \| iTerm2 <version> ST` at the PTY boundary and stripped, never forwarded to xterm.js. Both `ESC [ > q` and the C1 `U+009B > q` are recognized, **in ground text only** (rationale). | [transport.md](transport.md#iterm2-identity) |
-| `CSI ? ... h` (DECSET) / `CSI ? ... l` (DECRST) | Private-mode set/reset, including mouse tracking and bracketed paste | Observed without consuming; xterm.js still handles the sequence. | [mouse-and-clipboard.md](mouse-and-clipboard.md#background-the-two-mouse-regimes), §8.5 |
+| `CSI ? ... h` (DECSET) / `CSI ? ... l` (DECRST) | Private-mode set/reset, including mouse tracking and bracketed paste | Observed without consuming; xterm.js still handles the sequence. | [mouse-and-clipboard.md](mouse-and-clipboard.md#61-state-matrix), §8.5 |
 | Kitty keyboard protocol | Disambiguated key-event reporting (CSI u with modifiers, e.g. Shift+Enter distinguishable from Enter) | Enabled; xterm.js handles the push/pop (`CSI > u` / `CSI < u`) and the modified key reports. | `xtermVtExtensions` in `lib/src/lib/xterm-options.ts` |
 | `CSI ? 9001 h/l` (win32-input-mode) | Faithful Win32 `INPUT_RECORD` key reporting for ConPTY apps reading via the Console API — Codex on Windows (rationale) | Advertised **only on Windows**; off for a pane while any kitty consumer is on its protocol stack, the two being mutually exclusive in xterm.js (rationale). | `lib/src/lib/keyboard-protocol-arbiter.ts` |
 | `CSI ? 996 n` / `CSI ? 2031 h/l` | Color-scheme query; change reports on/off | Answered by the owner's xterm.js (`colorSchemeQuery`); its reply is a [terminal reply](transport.md#report-filtering-on-the-input-side). | `xtermVtExtensions` in `lib/src/lib/xterm-options.ts` |

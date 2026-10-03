@@ -36,6 +36,10 @@ export const pkButton = tv({
       outline: 'shadow-[inset_0_0_0_1px] shadow-app-fg/25 text-app-fg',
       ghost: 'text-inherit hover:bg-current/10',
     },
+    // A step larger than desktop chrome, a phone-only exception to DESIGN.md's
+    // Two-Step Rule: desktop's
+    // secondary sizes are illegible at thumb distance, and a fingertip needs a
+    // taller target than a cursor.
     size: {
       lg: 'min-h-[44px] px-4 text-[13px]',
       sm: 'min-h-9 px-3 text-[12px]',
@@ -79,6 +83,7 @@ export const PK = {
   noticeBody: 'm-0 text-[12px] leading-relaxed text-header-inactive-fg/70',
   field: 'flex flex-col gap-1.5',
   fieldLabel: 'text-[11px] text-app-fg/60',
+  // 16px, never less: iOS zooms the page on focusing a smaller input.
   input:
     'w-full rounded-lg bg-input-bg px-3.5 py-3 text-[16px] text-app-fg outline-none focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-focus-ring',
   title: 'm-0 text-[20px] font-semibold',

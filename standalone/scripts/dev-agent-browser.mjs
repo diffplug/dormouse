@@ -30,7 +30,7 @@ const insideDormouse = Boolean(process.env.DORMOUSE_SURFACE_ID);
 // Only the token: the sidecar picks the control socket path itself (hardened
 // per-user directory on POSIX, unguessable pipe name on Windows) and reports it
 // on its own stderr as `[dor-control] listening on …`, which this harness
-// forwards. See docs/specs/dor-cli.md -> Control-channel security.
+// forwards. See docs/specs/security-local.md -> "The dor control socket".
 //
 // A real bearer credential: it goes into the environment of every shell this
 // harness spawns, and holding it is full access to the `dor` control API

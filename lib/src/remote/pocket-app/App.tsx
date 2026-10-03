@@ -725,9 +725,9 @@ function hasPriorUseNow(client: PocketClient, passkeyAlreadyRegistered: boolean)
 
 /**
  * What the list of paired machines is called, on its own header and on the back
- * button that returns to it, so the two cannot drift
- * (`docs/specs/pocket-app.md` → The seam: the remote session is a platform
- * adapter).
+ * button that returns to it, so the two cannot drift. "Burrows", not
+ * "Computers": one computer runs two Burrows (standalone and the VS Code
+ * extension enroll separately), so the machine is the wrong noun.
  */
 export const BURROWS_TITLE = 'Burrows';
 

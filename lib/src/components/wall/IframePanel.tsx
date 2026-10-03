@@ -17,7 +17,7 @@ import {
   type ScreenRegistration,
 } from './agent-browser-screen';
 import { isToolParams, toolScopeFromParams } from './browser-surface';
-import { builtinFor } from 'dor-tools-builtin/file-viewer-format';
+import { builtinHandler } from 'dor-tools-builtin/file-viewer-format';
 import { connectIframeTheme } from '../../lib/themes/iframe-theme';
 import { connectToolEditor, withToolEditorConsent } from '../../lib/tool-editor';
 import { offeredRenderModes } from './browser-automation';
@@ -207,7 +207,7 @@ export function IframePanel({ id, title, params, onReady }: PaneProps & {
     return connectIframeTheme(iframeRef.current, resolution.origin);
   }, [isTool, resolution]);
   useEffect(() => {
-    if (!isTool || params.toolName !== builtinFor(false).kind || toolScopeFromParams(params) !== 'builtin'
+    if (!isTool || !builtinHandler('kind', params.toolName)?.editor || toolScopeFromParams(params) !== 'builtin'
       || resolution.kind !== 'proxied' || !iframeRef.current) return;
     return connectToolEditor(id, String(params.toolTarget ?? title), iframeRef.current, resolution.origin);
   }, [id, isTool, params?.toolName, params?.toolScope, params?.toolTarget, title, resolution]);

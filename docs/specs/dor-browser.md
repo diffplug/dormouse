@@ -133,7 +133,7 @@ Source of truth: `lib/src/components/wall/SurfacePaneHeader.tsx`,
 
 For loopback URLs (`localhost`, `*.localhost`, `127.0.0.1`, `::1`) the header
 asks which terminal-backed Surface — mounted, or a minimized Door — serves the
-port (`PlatformAdapter.getOpenPorts`).
+port (`PlatformAdapter.getOpenPortsMany`).
 
 - **Show a chip only when exactly one candidate Surface owns that port**; zero
   or two-plus leave it unsettled, so a later dev server still matches.

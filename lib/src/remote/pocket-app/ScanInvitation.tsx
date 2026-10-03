@@ -199,8 +199,8 @@ export function ScanInvitation({
 
   // **No camera while a ceremony this screen started is running.** It was
   // stopped the moment the code was accepted, and one running behind a WebAuthn
-  // prompt and two round trips is the recording light nobody can account for
-  // (docs/specs/pocket-app.md). `busy` falling back to null is also what
+  // prompt and two round trips is the recording light nobody can account for.
+  // `busy` falling back to null is also what
   // reopens it for a second attempt, so a ceremony that failed without leaving
   // this screen gets the scanner back rather than only the paste field.
   useEffect(() => {

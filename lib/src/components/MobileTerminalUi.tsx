@@ -232,6 +232,9 @@ function TouchModeSelector({
   disabled: boolean;
   onSelect: (mode: MobileTerminalTouchMode) => void;
 }) {
+  // The Touch row acts on the terminal, so it sits on terminal-bg as part of
+  // the surface above; the Input row and reserve act on the app, on the
+  // header-inactive pair. The single divider is the Input row's top border.
   return (
     <section
       aria-label="Touch mode"

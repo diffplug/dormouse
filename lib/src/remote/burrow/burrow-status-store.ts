@@ -272,7 +272,7 @@ async function readBurrowStatus(): Promise<void> {
     const status = (await active.command('status')) as BurrowConsoleStatus | null;
     if (mine !== generation) return;
     // `hostedEnrollment` is the one field a newer broker in another VS Code
-    // window may extend (`docs/specs/vscode.md` → the peer link).
+    // window may extend (`docs/specs/vscode.md` → "Peer surfaces").
     setState(
       status
         ? { kind: 'ready', status: { ...status, hostedEnrollment: hostedEnrollmentOf(status.hostedEnrollment) } }

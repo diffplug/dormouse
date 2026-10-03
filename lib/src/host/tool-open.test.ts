@@ -75,7 +75,7 @@ it.each(['explicit', 'association'] as const)('explains unsupported formats when
   if (selection === 'association') await writeConfig('open:\n  - {match: "*.binary", tool: "builtin:file"}\n');
   else await rm(config);
   expect(await host().handle({ op: 'open', target, cwd: root, ...(selection === 'explicit' ? { tool: 'builtin:file' } : {}) })).toEqual({
-    status: 'error', message: `the built-in viewer does not support 'unknown.binary'; add an open rule to ${config} naming a user Tool`,
+    status: 'error', message: `builtin:file does not support 'unknown.binary'; add an open rule to ${config} naming a user Tool`,
   });
 });
 
@@ -159,6 +159,91 @@ it('reports the canonical target an open resolved, for the preview slot, and non
   const named = await host().handle({ op: 'lookup', name: 'markdown', cwd: root, args: [spelled], global: true });
   expect(named).toMatchObject({ status: 'ok', run: ['markdown', target] });
   expect(named).not.toHaveProperty('target');
+});
+
+describe('builtin:code', () => {
+  it('opens any text format as source, Markdown and HTML included, keyed apart from builtin:file', async () => {
+    await rm(config);
+    const target = join(root, 'docs', 'README.md');
+    expect(await host().handle({ op: 'open', target, cwd: root, tool: 'builtin:code' })).toMatchObject({
+      status: 'ok', scope: 'builtin', name: 'code', run: ['dor', '__view-code', target], key: [target], target,
+    });
+    const page = join(root, 'index.html');
+    await writeFile(page, '<p>hi</p>');
+    await writeConfig('open:\n  - {match: "*.html", tool: "builtin:code"}\n');
+    expect(await host().handle({ op: 'open', target: page, cwd: root })).toMatchObject({ status: 'ok', name: 'code' });
+  });
+
+  it('refuses binary files and folders', async () => {
+    const image = join(root, 'a.png');
+    await writeFile(image, 'png');
+    expect(await host().handle({ op: 'open', target: image, cwd: root, tool: 'builtin:code' }))
+      .toMatchObject({ status: 'error', message: expect.stringContaining("builtin:code does not support 'a.png'") });
+    expect(await host().handle({ op: 'open', target: 'docs', cwd: root, tool: 'builtin:code' }))
+      .toEqual({ status: 'error', message: "builtin:code cannot open the folder 'docs'; use builtin:folder" });
+  });
+});
+
+describe('open-handlers', () => {
+  const handlers = async (target: string, extra: { preview?: boolean } = {}) => {
+    const result = await host().handle({ op: 'open-handlers', target, cwd: root, ...extra });
+    if (result.status !== 'open-handlers') throw new Error(JSON.stringify(result));
+    return result.handlers;
+  };
+
+  it('offers the default first, then later matching rules, then the built-ins, each once', async () => {
+    await writeConfig(`tools:
+  special:
+    run: [special, $TARGET]
+  markdown:
+    run: [markdown, --watch, $TARGET]
+  glance:
+    run: [glance, $TARGET]
+open:
+  - {match: docs/README.md, tool: special}
+  - {match: '*.txt', tool: glance}
+  - {match: '**/*.md', tool: markdown, preview: glance}
+  - {match: '*.md', tool: builtin:file}
+`);
+    const target = join(root, 'docs', 'README.md');
+    expect(await handlers('docs/README.md')).toEqual({
+      config,
+      handlers: [
+        { tool: 'special', description: 'special $TARGET', reason: "open rule 1, 'docs/README.md'" },
+        { tool: 'markdown', description: 'markdown --watch $TARGET', reason: "open rule 3, '**/*.md'" },
+        { tool: 'glance', description: 'glance $TARGET', reason: "preview handler of open rule 3, '**/*.md'" },
+        { tool: 'builtin:file', description: 'Markdown editor', reason: "open rule 4, '*.md'" },
+        { tool: 'builtin:code', description: 'code editor (source)', reason: 'built-in' },
+      ],
+    });
+    // The first handler is always what dor open selects.
+    expect(await host().handle({ op: 'open', target, cwd: root })).toMatchObject({ name: 'special' });
+  });
+
+  it('puts the first rule\'s preview handler first for a preview', async () => {
+    await writeConfig(viewerConfig('*.md').replace('tool: viewer}', "tool: viewer, preview: 'builtin:file'}"));
+    expect((await handlers('docs/README.md', { preview: true })).handlers.map(handler => handler.tool)).toEqual(['builtin:file', 'viewer', 'builtin:code']);
+    expect(await host().handle({ op: 'open', target: 'docs/README.md', cwd: root, preview: true })).toMatchObject({ scope: 'builtin', name: 'file' });
+  });
+
+  it('says when only a built-in matches, and offers nothing for what nothing opens', async () => {
+    await rm(config);
+    expect(await handlers('docs/README.md')).toMatchObject({ handlers: [
+      { tool: 'builtin:file', description: 'Markdown editor', reason: 'built-in; no open rule matches' },
+      { tool: 'builtin:code', reason: 'built-in' },
+    ] });
+    const source = join(root, 'main.ts');
+    await writeFile(source, '');
+    expect((await handlers(source)).handlers).toEqual([{ tool: 'builtin:file', description: 'code editor', reason: 'built-in; no open rule matches' }]);
+    const binary = join(root, 'x.bin');
+    await writeFile(binary, '');
+    expect((await handlers(binary)).handlers).toEqual([]);
+    expect((await handlers('docs')).handlers).toEqual([{ tool: 'builtin:folder', description: 'folder viewer', reason: 'built-in; no open rule matches' }]);
+  });
+
+  it('reports a target that does not exist as an error', async () => {
+    expect(await host().handle({ op: 'open-handlers', target: 'missing.md', cwd: root })).toMatchObject({ status: 'error' });
+  });
 });
 
 describe('folders', () => {

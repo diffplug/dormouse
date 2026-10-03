@@ -157,8 +157,9 @@ pub fn route<'a>(event: &str, data: &'a JsonValue, view: &RouteView<'a>) -> Rout
         // Precedence: an explicit `--workspace` goes to the window holding it
         // and an explicit `--window` to that window — cross-window targeting —
         // then the caller's own Surface's owner, then the focused window. A
-        // target the registry cannot place falls through, so the caller's own
-        // window refuses it by name (docs/specs/dor-cli.md -> "Standalone").
+        // target the registry cannot place falls through to the caller's own
+        // window, which resolves it locally or refuses it by name
+        // (docs/specs/dor-cli.md -> "Standalone").
         "dor:controlRequest" => {
             let params = data.get("params");
             if let Some(target) = params
