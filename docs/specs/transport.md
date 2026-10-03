@@ -80,11 +80,11 @@ flowchart TD
   B -- no --> D{retryTimeoutMs, unused?}
   D -- yes --> A
   D -- no, timedOut --> E{caller}
-  E -- arrival --> F[refuse: adopt_failed]
+  E -- arrival --> F["refuse (standalone.md → Arrival queue)"]
   E -- boot --> S
 ```
 
-**A collection finishes only on its own answer**: a host serving several windows echoes the `requestInit` token on the `pty:list` and every `pty:replay` behind it, and the collector ignores a different one (rationale). **An answer carrying no token is taken** — the hosts that echo none (VS Code, Pocket, the website) run one collector per JS realm. **A collection that timed out is not one that found no PTYs** (`LivePtys`): restoring over it starts a second set of shells. **A collector given `retryTimeoutMs` asks once more before reporting silence** (rationale), and **`resumeOrRestore` and `restoreWindow` give it only when the saved session names a terminal pane**. Source of truth: `collectLivePtys` in `lib/src/lib/reconnect.ts`; `list` in `standalone/sidecar/pty-core.js`.
+**A collection finishes only on its own answer**: a host serving several windows echoes the `requestInit` token on the `pty:list` and every `pty:replay` behind it, and the collector ignores a different one (rationale). **An answer carrying no token is taken** — the hosts that echo none (VS Code, Pocket, the website) run one collector per JS realm. **A collection that timed out is not one that found no PTYs** (`LivePtys`): restoring over it starts a second set of shells, which only boot risks, after its retry. **A collector given `retryTimeoutMs` asks once more before reporting silence** (rationale), and **`resumeOrRestore` and `restoreWindow` give it only when the saved session names a terminal pane**. Source of truth: `collectLivePtys` in `lib/src/lib/reconnect.ts`; `list` in `standalone/sidecar/pty-core.js`.
 
 **Seeded titles reject the sentinels.** Saved pane and door titles come back through `setTerminalUserTitle()`, which rejects the reserved `<idle>` prefix (`docs/specs/terminal-state.md` → Supported OSC Inputs); the seed also skips `<unnamed>`, the default panel placeholder (rationale).
 
