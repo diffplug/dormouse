@@ -123,7 +123,7 @@ Source of truth: the message schema in `vscode-ext/src/message-types.ts` (`Webvi
 
 | Direction | Message | Contract |
 | --- | --- | --- |
-| Webview → host | `dormouse:openExternal` | Open a user-confirmed external URI from an OSC 8 hyperlink. **Hosts must revalidate** through `normalizeExternalUri` in `lib/src/lib/external-links.ts`. |
+| Webview → host | `dormouse:openExternal` | Open a user-confirmed external URI from an OSC 8 hyperlink; revalidation: `docs/specs/mouse-and-clipboard.md` -> "OSC 8 hyperlinks". |
 | Webview → host | `pty:getOpenPorts` | TCP listening ports of a PTY's shell **and all of its descendant subprocesses**, answered with `pty:openPorts`. `getOpenPortsForPids()` in `standalone/sidecar/pty-core.js` serves both hosts. |
 | Host → webview | `pty:openPorts` | De-duplicated by `(family, address, port)`, sorted by port then address; empty when the PTY is gone or enumeration fails. |
 | Webview → host | `pty:getOpenPortsMany` | `ids`, answered by `pty:openPortsMany` from one scan. |
