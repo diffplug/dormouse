@@ -28,6 +28,10 @@ const INPUT_BACKLOG = 256;
 // unbounded: it lasts as long as the page load, nothing waits on it past a
 // launch's own bounds, and ending it could take down the browser it started.
 const CLI_TIMEOUT_MS = 10_000;
+// A CDP capture into a wedged page never answers: it fails here, so the next
+// capture of the browser starts afresh instead of joining it
+// (`./browser-capture.ts`), as agent-browser's CLI capture does at its bound.
+const CAPTURE_TIMEOUT_MS = 30_000;
 
 function realpathOrUndefined(file: string): string | undefined {
   try {
@@ -429,8 +433,19 @@ export function createPlaywrightProvider(deps: { log?(text: string): void } = {}
     async screenshot(b) {
       const { v, page } = await livePage(b, false);
       const cdp = await control(v, page);
-      const { data } = await cdp.send('Page.captureScreenshot', { format: 'jpeg', quality: CAPTURE_JPEG_QUALITY, captureBeyondViewport: false });
-      return { bytes: Buffer.from(data, 'base64') };
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const timedOut = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`playwright capture timed out after ${CAPTURE_TIMEOUT_MS} ms`)), CAPTURE_TIMEOUT_MS);
+      });
+      try {
+        const { data } = await Promise.race([
+          cdp.send('Page.captureScreenshot', { format: 'jpeg', quality: CAPTURE_JPEG_QUALITY, captureBeyondViewport: false }),
+          timedOut,
+        ]);
+        return { bytes: Buffer.from(data, 'base64') };
+      } finally {
+        clearTimeout(timer);
+      }
     },
 
     async view(b, stream, { headed }, sink) {

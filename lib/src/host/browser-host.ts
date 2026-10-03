@@ -36,6 +36,7 @@ import {
   type BrowserResult,
 } from '../lib/platform/browser-automation';
 import { createBrowserCaptures } from './browser-capture';
+import { createCaptureBudget } from './browser-capture-budget';
 import { createViewportSync } from './browser-sync';
 import type { WebSocket } from 'ws';
 import { BrowserView, WEBVIEW_ID, closeSocket, createViewerServer, measuredViewport, type Upstream, type ViewerSink } from './browser-viewer';
@@ -280,6 +281,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
   // The viewer sockets open on each browser: a launch or close ends them.
   const views = new Map<string, Set<BrowserView>>();
   const captures = createBrowserCaptures();
+  const budget = createCaptureBudget();
   let closed = false;
 
   function providerFor(id: BrowserAutomationProvider): BrowserProvider<unknown> {
@@ -601,7 +603,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     }
     const view = new BrowserView(socket, {
       headed: isHeaded,
-      capture: () => crisp(bound),
+      capture: (claim) => budget.run(() => crisp(bound), claim),
       onClose: () => {
         const open = views.get(bound.id);
         open?.delete(view);
