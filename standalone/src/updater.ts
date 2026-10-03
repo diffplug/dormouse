@@ -187,6 +187,13 @@ function performCheck(): Promise<Update | null> {
       const update = await checkForUpdate();
       const now = Date.now();
       saveCheckRecord({ since: now, remindedAt: null, ...peekCheckRecord(), checkedAt: now });
+      // An approval made while this check was in flight owns this session's
+      // update: the handle it is downloading or holds must not be replaced.
+      const approved = pendingUpdate ?? (downloadPromise ? availableUpdate : null);
+      if (update && approved) {
+        if (update !== approved) void update.close().catch(() => {});
+        return approved;
+      }
       if (update) {
         // One still unapproved is replaced, and its handle let go.
         const replaced = availableUpdate;
