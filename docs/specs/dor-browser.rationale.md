@@ -58,7 +58,15 @@ so the private helper only supplies environment.
 
 **Why a bare Wall mints its own key scope.** Every VS Code webview is a bare Wall, and each named `--key default` `dormouse.1.default`: two webviews' default browsers were one browser behind two Surfaces, and killing either closed it under the other. Playwright had avoided it with random session names and a reservation; one deterministic scheme with a scope unique per bare Wall covers both, and needs no migration because a key finds its Surface's stored session first (review of the browser stack, 2026-09).
 
-## Managed identity
+## Resource Policy
+
+**Why one notion of sight.** Four costs of a pane nobody sees — a screencast under a zoomed pane, one in a hidden VS Code webview, a popped-out pane's stream, a minimized iframe — were each found separately in the browser-stack review (static reading, 2026-09-23), and each had grown, or would have, its own idea of "hidden". Zoom raises one leaf over the tiled layout with the rest still mounted and unparked under it, showing only a half-header margin, so their screencasts and crisp loops kept running.
+
+**Why VS Code reports its webview shown.** Both hosting modes set `retainContextWhenHidden`, and nothing in VS Code's API promises that a retained hidden webview's page reads `document.visibilityState === 'hidden'` (Page Visibility is per top-level page; the webview is an iframe in the workbench). The extension knows (`WebviewView.visible`, `WebviewPanel.visible`), so it says so rather than leaving parking to an unverified browser behavior.
+
+**Why minimized iframes are counted, not bounded.** Issue #610: an eight-Surface parking cap silently dropped the oldest parked document, and reattaching it reloaded — losing unsaved page state, which is unacceptable for a page the user minimized to come back to. Nothing in either host reads memory, and `performance.measureUserAgentSpecificMemory()` needs cross-origin isolation and reports cross-origin frames only in aggregate, so a per-page number is out of reach from the embedder; a count of live minimized pages is the signal there is. The old cap's eight is the threshold, so a user who never hit the cap never sees the note.
+
+
 
 **Why a key numbers past sessions held elsewhere.** A key's session is `dormouse.<scope>.<name>`, and the key lookup searches only the answering Wall. A pane bound to that session which left for another Workspace keeps it, so the same command here bound a second pane to the same browser, and closing either closed the other's (review of #777, 2026-09). Playwright keys had minted a fresh UUID each, so this was new there; agent-browser keys always worked this way.
 
@@ -109,6 +117,10 @@ so the private helper only supplies environment.
 **Why `url` is a commit edge, apart from `tabs`.** Measured against agent-browser 0.31.1 (2026-09): on `open`, the stream sends `tabs` (about:blank), then `url` naming the target at navigation commit, and refreshes `tabs` only when the CLI command completes — after `load`. During a slow load the tab list still named the previous page, so a pop-out issued then relaunched the page before the one being loaded.
 
 **Whose limitation the CSS-resolution provisional frame is.** Chromium's `Page.startScreencast` captures in DIP and exposes no DPR knob, so the stream is CSS-resolution whatever the client asks for — upstream Chromium, not something agent-browser chose or could fix.
+
+**Why settle, then sharpen.** An animated page drove the crisp loop at up to ~5.5 device-resolution captures a second per pane (~120 ms each, paced at 1.5× that), each a spawn or CDP call, an encode, 100-700 KB over IPC and a decode, while the stream frames of the same motion were received and thrown away (static reading, 2026-09-23). Detail lost on moving content is not seen; the one capture once it rests is. The cost is that moving content is CSS-resolution on HiDPI until it stops.
+
+**Why one budget for every pane, and its slot timeout.** Nothing bounded captures across panes: k animated panes meant ~5.5k a second. The budget was deferred until every capture had a bound, because Playwright's CDP capture into a wedged page never answered and would have held a slot forever; it now fails at 30 s like agent-browser's CLI capture, and a slot frees after 10 s so other panes go on meanwhile. A capture still running is joined by the next ask for its browser, so freeing a slot never piles a second capture on a queue blocked behind a page load.
 
 **Why a headed window's page is followed over CDP.** The daemon's stream lists the headed window's tabs, but refreshes them only when a CLI command completes, so a navigation made in the window itself never reached the header. The webview once followed it by holding a browser-level CDP socket from `get cdp-url`, which granted it `Runtime.evaluate` in any target and `file://` navigation (review of the browser stack, 2026-09); the same observer now runs in the host.
 
@@ -207,6 +219,14 @@ The built-in local-file viewer supplies its own content boundary and permits the
 **Why a grant gets its own origin instead of a path token.** A dedicated origin keeps root-relative resources and client-side routers working with no body URL rewriting; a path token would have to survive every link, redirect and `fetch` the page makes.
 
 **Why a frame is transparent until its first load.** An iframe paints its `bg-white` before its document arrives, so a new frame flashed white in a dark theme for as long as its server took to answer (observed on preview slot switches, 2026-09-28). Opacity leaves the frame laid out and loading, and no shim or uninstrumented-document check reads visibility. The 1s fallback shows a document whose `load` never fires.
+
+## Iframe Proxy Leases
+
+**Why a grant's life is its view's, not its traffic's.** Reproduced against the proxy (2026-09-24, then again as the failing tests that pin this, 2026-10-03): a live Vite pane idle for five minutes lost its grant on the next grant created anywhere — its HMR socket survived, module fetches then failed with `ECONNREFUSED` — and 33 grant creations anywhere evicted a live pane under the 32-grant cap. Every Reload, Back or Forward minted a new port, which is a new origin, so the app's localStorage, IndexedDB and service worker went with it.
+
+**Why the host names the owner.** A webview that reloads or a window that closes never releases what its last page held; owner-scoped release at reinitialization and at the end of the owner reclaims those. Were the owner the webview's word, one webview could release another's views.
+
+**Why a fresh grant clears site data.** A port freed by one grant can be handed by the OS to the next, for another upstream, while the browser still keys the first upstream's storage and service worker on `http://127.0.0.1:<port>`. Only a freshly minted grant's first document clears it, so a reused grant keeps its page's storage.
 
 ## Iframe Shim
 
