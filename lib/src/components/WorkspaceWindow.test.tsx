@@ -37,6 +37,8 @@ import { getWorkspaceUiSnapshot, requestConfirmation, resetWorkspaceUi, settleCo
 import { resetTodoSpotlight } from '../lib/todo-spotlight';
 import { _reopenRecordsForTesting, _resetReopenStackForTesting } from '../lib/reopen-stack';
 import { reopenClosed } from './wall/reopen';
+import { _resetPendingKillsForTesting, finalizePendingKill, getPendingKills, pendingKillKey, restorePendingKill } from '../lib/pending-kills';
+import { _resetLabsSettingsForTesting, setDelayedKillSetting } from '../lib/labs-settings';
 import {
   closeWorkspace,
   createWorkspace,
@@ -1339,5 +1341,63 @@ describe('Reopen a closed Workspace', () => {
     await flush();
     expect(getWorkspacesSnapshot().workspaces.map(ws => ws.id)).not.toContain('ws-2');
     expect(_reopenRecordsForTesting()).toHaveLength(0);
+  });
+});
+
+describe('Labs: a Workspace close that would ask, kept pending', () => {
+  beforeEach(() => {
+    Object.assign(fake, { offersLabs: true });
+    setDelayedKillSetting(true);
+    // Every shell has been typed into, so every Workspace close would ask.
+    vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(false);
+    vi.spyOn(terminalRegistry, 'getTerminalInstance').mockReturnValue({} as ReturnType<typeof terminalRegistry.getTerminalInstance>);
+  });
+  afterEach(() => {
+    _resetPendingKillsForTesting();
+    _resetLabsSettingsForTesting();
+  });
+
+  async function pendSecond(): Promise<string> {
+    const first = getActiveWorkspaceId();
+    createWorkspace({ id: 'ws-2', name: 'build', activate: false });
+    createWorkspace({ id: 'ws-3', activate: false });
+    await render(<><WorkspaceStrip /><WorkspaceWindow initialPaneIds={['pane-a']} /></>);
+    await act(async () => { requestWorkspaceClose('ws-2'); });
+    await flush();
+    return first;
+  }
+
+  it('leaves the strip at once, asking nothing, with its Wall still mounted', async () => {
+    const first = await pendSecond();
+    expect(getWorkspaceUiSnapshot().confirmation).toBeNull();
+    expect(getWorkspacesSnapshot().workspaces.map(ws => ws.id)).toEqual([first, 'ws-3']);
+    expect(wallFor('ws-2')).not.toBeNull();
+    expect(getPendingKills().map(kill => [kill.kind, kill.id, kill.title])).toEqual([['workspace', 'ws-2', 'build']]);
+    const listed = await new Promise<{ ok: boolean; error?: string }>(resolve => {
+      act(() => { window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
+        method: SURFACE_CONTROL_METHODS.list, params: { workspace: 'build' }, respond: resolve,
+      } })); });
+    });
+    expect(listed).toEqual({ ok: false, error: "workspace 'build' is a pending kill" });
+  });
+
+  it('restores to its slot with the same Wall and Surfaces', async () => {
+    const first = await pendSecond();
+    const leaves = leafIdsIn('ws-2');
+    await act(async () => { restorePendingKill(pendingKillKey('workspace', 'ws-2')); });
+    await flush();
+    expect(getWorkspacesSnapshot().workspaces.map(ws => ws.id)).toEqual([first, 'ws-2', 'ws-3']);
+    expect(getActiveWorkspaceId()).toBe('ws-2');
+    expect(leafIdsIn('ws-2')).toEqual(leaves);
+  });
+
+  it('closes through every member Surface when finalized, then lets its Wall go', async () => {
+    const dispose = vi.spyOn(terminalRegistry, 'disposeSession');
+    await pendSecond();
+    const [leaf] = leafIdsIn('ws-2');
+    await act(async () => { finalizePendingKill(pendingKillKey('workspace', 'ws-2')); });
+    await act(async () => { await vi.waitFor(() => expect(wallFor('ws-2')).toBeNull()); });
+    expect(dispose).toHaveBeenCalledWith(leaf);
+    expect(getPendingKills()).toEqual([]);
   });
 });

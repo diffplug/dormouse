@@ -4,7 +4,9 @@ import { awaitWallHandle, mountingRefusal } from './dor-control-shared';
 import { getWallHandle } from './wall-handles';
 import { forgetWorkspaceSession, isWorkspaceTransferPending } from '../../lib/window-session-aggregator';
 import { cancelPendingConfirmation, dismissWorkspaceUi, requestConfirmation, setRenamingWorkspace, type WorkspaceConfirmation } from '../../lib/workspace-ui-store';
-import { closeWorkspace, getActiveWorkspaceId, getWorkspacesSnapshot, setActiveWorkspace, workspaceRefFor } from '../../lib/workspace-store';
+import { closeWorkspace, createWorkspace, getActiveWorkspaceId, getWorkspacesSnapshot, moveWorkspace, setActiveWorkspace, workspaceRefFor } from '../../lib/workspace-store';
+import { addPendingKill } from '../../lib/pending-kills';
+import { isDelayedKillEnabled } from '../../lib/labs-settings';
 import type { PersistedSession, WorkspaceId } from '../../lib/session-types';
 import { pushReopenRecord, type WorkspaceReopenRecord } from '../../lib/reopen-stack';
 import type { WorkspaceCloseMode } from './wall-types';
@@ -137,6 +139,7 @@ async function closeOnceWallRegisters(id: WorkspaceId, isCurrent: () => boolean)
   if (closeInFlight || isWorkspaceTransferPending(id)) return;
   if (!handle) return;
   if (workspaceNeedsCloseConfirmation(id)) {
+    if (isDelayedKillEnabled()) { pendWorkspace(id); return; }
     // An immediate close reveals the Workspace itself.
     setActiveWorkspace(id);
     handle.selectWorkspaceTab();
@@ -144,6 +147,71 @@ async function closeOnceWallRegisters(id: WorkspaceId, isCurrent: () => boolean)
     return;
   }
   await closeWorkspaceWithSurfaces(id);
+}
+
+/**
+ * Workspaces off the strip whose Walls must stay mounted: pending kills, and
+ * ones finalizing until their Surfaces are disposed (`docs/specs/glossary.md`
+ * → "Invariants" I4). `WorkspaceWindow` renders these beside the strip's.
+ */
+let held: readonly WorkspaceId[] = [];
+const heldListeners = new Set<() => void>();
+
+function setHeld(next: readonly WorkspaceId[]): void {
+  held = next;
+  for (const listener of heldListeners) listener();
+}
+
+export function getHeldWorkspaces(): readonly WorkspaceId[] {
+  return held;
+}
+
+export function subscribeToHeldWorkspaces(listener: () => void): () => void {
+  heldListeners.add(listener);
+  return () => { heldListeners.delete(listener); };
+}
+
+/**
+ * A Workspace close that would ask, under Labs: the tab leaves the strip at
+ * once while its Wall stays mounted and inactive, until its countdown closes
+ * it or the user restores it (`docs/specs/reopen.md` → "Labs: No-confirm
+ * delayed kill").
+ */
+function pendWorkspace(id: WorkspaceId): void {
+  const { workspaces } = getWorkspacesSnapshot();
+  const index = workspaces.findIndex(workspace => workspace.id === id);
+  if (index < 0) return;
+  const meta = workspaces[index];
+  dismissWorkspaceUi(id);
+  setHeld([...held, id]);
+  // Off the strip: the store selects a successor, or a fresh replacement.
+  flushSync(() => { closeWorkspace(id); });
+  // Nothing pending survives a restart.
+  forgetWorkspaceSession(id);
+  getWallHandle(getActiveWorkspaceId())?.selectWorkspaceTab();
+  const release = () => setHeld(held.filter(heldId => heldId !== id));
+  const restore = (focus: boolean) => {
+    createWorkspace({ id, name: meta.name, nameIsAuto: meta.nameIsAuto, alertDelivery: meta.alertDelivery, activate: focus });
+    moveWorkspace(id, index);
+    release();
+    // Back on the strip: its record is written again.
+    void getWallHandle(id)?.flushPersistence();
+    if (focus) getWallHandle(id)?.selectWorkspaceTab();
+  };
+  addPendingKill({ kind: 'workspace', id, workspaceId: id, title: meta.name, label: 'Workspace' }, {
+    restore,
+    finalize: () => {
+      const handle = getWallHandle(id);
+      if (!handle) { release(); return; }
+      // Unsaved Tool edits are discarded: the pending kill was the decision.
+      void handle.closeAll(handle.dirtyToolIds()).then(refusal => {
+        // Work that refuses to close (a helper's) brings the Workspace back to say so.
+        if (refusal) { restore(true); return; }
+        release();
+        dismissWorkspaceUi(id);
+      });
+    },
+  });
 }
 
 /** The typed close question; the key is ignored while the Workspace transfers. */
