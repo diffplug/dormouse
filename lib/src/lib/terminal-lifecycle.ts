@@ -387,10 +387,11 @@ function typeCommandWhenPromptReady(id: string, command: string, requireIntegrat
 /** The size a new PTY starts at. A container with no layout yet — a minimized
  *  pane, a Workspace not yet shown — still gets FitAddon's 2x1 floor from
  *  `proposeDimensions`, and nothing refits it until it is shown, so an agent
- *  resumed there would run two columns wide. The first real fit resizes. */
+ *  resumed there would run two columns wide. It takes the xterm's own size
+ *  instead, so the first real fit that changes it resizes both. */
 function spawnSize(entry: TerminalEntry): TerminalGrid {
   const dims = entry.fit.proposeDimensions();
-  return dims && dims.cols > 2 && dims.rows > 1 ? dims : { cols: 80, rows: 30 };
+  return dims && dims.cols > 2 && dims.rows > 1 ? dims : { cols: entry.terminal.cols, rows: entry.terminal.rows };
 }
 
 export function getOrCreateTerminal(id: string): TerminalEntry {

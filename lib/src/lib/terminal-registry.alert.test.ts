@@ -428,7 +428,8 @@ describe('terminal-registry alert behavior', () => {
       const id = `unlaid-${launch}`;
       if (launch === 'restore') restoreTerminal(id, {});
       else getOrCreateTerminal(id);
-      expect(spawn).toHaveBeenCalledWith(id, expect.objectContaining({ cols: 80, rows: 30 }));
+      // The mock xterm is 80x24.
+      expect(spawn).toHaveBeenCalledWith(id, expect.objectContaining({ cols: 80, rows: 24 }));
     } finally {
       fit.mockRestore();
       spawn.mockRestore();

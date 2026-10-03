@@ -84,9 +84,15 @@ const SCAN_OVERLAP_CHARS = ASK_TAIL_CHARS;
 // the capture, so nobody sees the size.
 export const RECOVERY_SIZE = { cols: 250, rows: 50 };
 
-// How long the resize gets to reach each program before the marks are taken:
-// the repaint it provokes is old screen content, not output of the interrupt.
-const WIDEN_SETTLE_MS = 80;
+// The marks wait for the repaint the resize provokes, which is old screen
+// content (possibly an old hint), not output of the interrupt: at least
+// SETTLE_MIN_MS, then while any target is still repainting, up to the cap. A
+// repaint that starts after the minimum or outlasts the cap still lands in the
+// scan; whatever is waited is budget the poll below no longer has.
+const SETTLE_MIN_MS = 80;
+const SETTLE_QUIET_MS = 40;
+const SETTLE_MAX_MS = 200;
+const SETTLE_STEP_MS = 10;
 
 /** How long the whole capture may take by default. */
 export const DEFAULT_RECOVERY_WAIT_MS = 1300;
@@ -168,8 +174,21 @@ export async function captureAgentRecovery(
     return 0;
   }
 
-  for (const id of liveIds) host.resize(id, RECOVERY_SIZE.cols, RECOVERY_SIZE.rows);
-  await sleep(WIDEN_SETTLE_MS);
+  for (const id of liveIds) {
+    // Guarded per id, like `interrupt`: a PTY that exits just now may throw.
+    try { host.resize(id, RECOVERY_SIZE.cols, RECOVERY_SIZE.rows); } catch (err) {
+      log.error(`[recovery] resize of ${id} failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+  const totalReceived = () => liveIds.reduce((sum, id) => sum + host.receivedChars(id), 0);
+  let settled = totalReceived();
+  let quietSince = now();
+  while (now() - started < SETTLE_MAX_MS
+    && (now() - started < SETTLE_MIN_MS || now() - quietSince < SETTLE_QUIET_MS)) {
+    await sleep(SETTLE_STEP_MS);
+    const received = totalReceived();
+    if (received !== settled) { settled = received; quietSince = now(); }
+  }
 
   const commands: Record<string, string> = noCommands();
   // Marks come from the exact monotonic counter the buffer already maintains, not
@@ -267,7 +286,9 @@ export async function captureAgentRecovery(
     const quietFor = (id: string) => now() - (lastGrewAt.get(id) ?? interruptedAt);
     const retry = pending().filter((id) => {
       const count = presses.get(id) ?? 1;
-      if (asked.has(id)) return count < MAX_PRESSES;
+      // A first ask is answered at once; the third press also waits out the quiet
+      // gate, since an exit that repeats its ask may be printing its hint behind it.
+      if (asked.has(id)) return count === 1 || (count < MAX_PRESSES && quietFor(id) >= QUIET_BEFORE_RETRY_MS);
       return count === 1 && elapsed >= BLIND_SECOND_PRESS_MS && quietFor(id) >= QUIET_BEFORE_RETRY_MS;
     });
     if (retry.length > 0) {

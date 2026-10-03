@@ -242,6 +242,18 @@ describe('captureAgentRecovery', () => {
     });
   });
 
+  it('holds a third press while the exit that repeats its ask is still printing', async () => {
+    // Cursor's exit prints `Press Ctrl+C again to exit` above its hint; split
+    // across ticks, the ask alone must not earn a press that cuts the hint off.
+    const host = new FakePtys(['a'])
+      .onPress('a', 1, 40, 'Press Ctrl+C again to exit')
+      .onPress('a', 2, 10, '\r\n  Press Ctrl+C again to exit\r\n')
+      .onPress('a', 2, 90, `\r\n  To resume this session: ${CLAUDE_HINT}\r\n`);
+    await captureAgentRecovery(host);
+    expect(host.presses).toHaveLength(2);
+    expect(host.found.a).toBe(CLAUDE_HINT);
+  });
+
   it('counts only an ask that arrived after the latest press', async () => {
     // Claude's exit is slow here: the first press's ask is still in the scan
     // window when the second press lands, and must not earn a third.
@@ -297,12 +309,25 @@ describe('captureAgentRecovery', () => {
     expect(RECOVERY_SIZE.cols).toBeGreaterThanOrEqual(200);
   });
 
-  it('does not scan the repaint the widening provokes', async () => {
+  it('does not scan the repaint the widening provokes, while it keeps arriving', async () => {
     // A full-screen program redraws what it shows — here a hint printed long
     // before this capture — and that is not output the interrupt produced.
-    const host = new FakePtys(['a']).onResize('a', 20, `\r\nold: ${CLAUDE_HINT}\r\n`);
+    const host = new FakePtys(['a']);
+    for (const delay of [20, 60, 100]) host.onResize('a', delay, '\x1b[H\x1b[2Kredraw ');
+    host.onResize('a', 140, `\r\nold: ${CLAUDE_HINT}\r\n`);
     await captureAgentRecovery(host);
     expect(host.found).toEqual({});
+  });
+
+  it('still presses every pane when one cannot be resized', async () => {
+    const host = new FakePtys(['gone', 'a']).onPress('a', 1, 40, `\r\n${CLAUDE_HINT}\r\n`);
+    const resize = host.resize.bind(host);
+    host.resize = (id, cols, rows) => {
+      if (id === 'gone') throw new Error('Cannot resize a pty that has already exited');
+      resize(id, cols, rows);
+    };
+    expect(await captureAgentRecovery(host)).toBe(1);
+    expect(host.presses[0]).toEqual(['gone', 'a']);
   });
 
   it('never presses an exited pane', async () => {

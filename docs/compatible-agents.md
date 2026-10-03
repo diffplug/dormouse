@@ -92,7 +92,7 @@ Open a **draft pull request** with the entry, fixture, documentation, and verifi
 - **Must write one `^C` into each target PTY per interrupt call, never signal it.** The shared machine alone decides every further press. Host interrupts must settle within their timeout. (rationale)
 - **Never press a pane a third time unless it asked (`Ctrl+C again`) since its latest press, nor a fourth time.** (rationale)
 - **Never finish early on quiet or replace the retry gates with a blanket second press.** Poll until every target yields or the capture budget expires; retry timing and ask detection live in the module's comments. (rationale)
-- **Must widen every target before its first press, marking only after the resize settles.** (rationale)
+- **Must widen every target before its first press.** (rationale)
 - **Must scan only output received after the mark taken before the first interrupt.** Never widen the scan into earlier output; buffer eviction may discard fresh output but must not promote stale output into the scan. (rationale)
 - **Must report each detected command immediately**, retaining earlier detections if a later target times out.
 
