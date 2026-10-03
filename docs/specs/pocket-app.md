@@ -45,20 +45,35 @@ a pasted one goes to `parsePairingInvitationUrl` ([relay.md](./relay.md) owns
 the grammar) (rationale). **The invitation lives in memory only**, cleared on
 every terminal outcome.
 
-**After the parse.** A browser with no usable passkey registers one with the
-scanned token (`setup({ setupToken })`) and signs in; one that already holds a
-passkey signs in if it must, then **spends the code at `POST /api/setup/retire`**
-so a photographed QR cannot register a passkey afterwards — a refusal aborts.
-Pairing then runs per [remote-security-model.md](./remote-security-model.md) →
-Pairing, and **the two digits go on screen before the outcome is known and stay
+**After the parse.**
+
+```mermaid
+flowchart TD
+  T{session token?}
+  T -- no --> U{prior passkey use?}
+  U -- no --> G["setup({ setupToken }), signin"]
+  U -- yes --> I[signin]
+  I -- 404 --> G
+  I -- ok --> R[POST /api/setup/retire]
+  T -- yes --> R
+  R -- refused --> X[abort]
+  R --> P[pair]
+  G --> P
+  P -- approved --> C[connect]
+```
+
+**A phone that registers nothing spends the code at `POST /api/setup/retire`**,
+so a photographed QR cannot register a passkey afterwards. **Only a sign-in
+refused 404 falls back to registering** (rationale). Pairing runs per
+[remote-security-model.md](./remote-security-model.md) → Pairing, and **the two digits go on screen before the outcome is known and stay
 until it lands**. **Cancelling closes the relay socket** and reports nothing.
 (rationale)
 **A refused token is reported, never folded away**: `SETUP_TOKEN_INVALID_ERROR`
 becomes `SetupTokenInvalidError`, whose recovery is a new code on the computer.
 
 **Runtimes are gated, not degraded**: `probeNoiseSupport` runs before sign-in,
-setup, pairing, or connection, and `false` renders a fixed upgrade requirement,
-performing no remote operation.
+setup, pairing, or connection; `false` renders a fixed upgrade requirement
+instead.
 
 **Pocket hides `MobileWall`'s local Kill affordance**: v1 grants no phone-side
 kill or layout authority (rationale).
