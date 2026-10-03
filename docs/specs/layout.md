@@ -343,7 +343,7 @@ Minimizing detaches the leaf into a Door with its restore token (`docs/specs/til
 
 ### Reattach (click door, `Enter`/`m`/`d` on door, or drag out)
 
-Reattach applies the token's restore policy (`docs/specs/tiling-engine.md` → "Restore tokens") with the selected pane if live, else the first pane, as its fallback reference; if the restore still fails (no token, empty tree), the leaf becomes the root, so **a reattach is never silently swallowed**. A door dragged out of the baseboard skips the token and inserts at the drop position.
+Reattach applies the token's restore policy (`docs/specs/tiling-engine.md` → "Restore tokens") with the selected pane if live, else the first pane, as its fallback reference; a tokenless or failed restore splits beside the last leaf instead, so **a reattach is never silently swallowed**. A door dragged out of the baseboard skips the token and inserts at the drop position.
 
 ### Splitting from a Door
 
