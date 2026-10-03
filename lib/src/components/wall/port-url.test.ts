@@ -98,3 +98,16 @@ describe('listenerUrlsByPort', () => {
     expect(listenerUrlsByPort(ports)[0].processName).toBe('vite');
   });
 });
+
+describe('listenerUrlsByPort with a scan-supplied origin', () => {
+  it('answers at the origin instead of localhost', () => {
+    const ports = [{ ...tcp({ address: '127.0.0.1', port: 1 }), origin: 'https://dormouse.sh' }];
+    expect(listenerUrlsByPort(ports)).toEqual([{ port: 1, host: 'localhost', url: 'https://dormouse.sh/' }]);
+  });
+  it.each(['javascript:alert(1)', 'https://dormouse.sh/path', 'not a url', ''])(
+    'ignores %j, which is not a bare http(s) origin', (origin) => {
+      const ports = [{ ...tcp({ address: '127.0.0.1', port: 1 }), origin }];
+      expect(listenerUrlsByPort(ports)[0].url).toBe('http://localhost:1/');
+    },
+  );
+});

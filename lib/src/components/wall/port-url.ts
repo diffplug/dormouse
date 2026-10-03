@@ -16,11 +16,23 @@ export function servesLoopback(address: string): boolean {
   return address === '127.0.0.1' || address === '::1' || address === '0.0.0.0' || address === '::';
 }
 
+/** An http(s) origin and nothing more, so a path resolves against it unchanged. */
+function isHttpOrigin(origin: string | undefined): origin is string {
+  if (!origin) return false;
+  try {
+    const url = new URL(origin);
+    return (url.protocol === 'http:' || url.protocol === 'https:') && url.origin === origin;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Group TCP listeners into one openable URL per distinct port, sorted ascending
  * by port. Per port: a loopback-servable bind wins the host `localhost`;
  * otherwise pick a listener IPv4-first then address-lexicographic, bracketing
- * IPv6 (`[::1]`). The URL is `http://<host>:<port>/`. `processName` is the
+ * IPv6 (`[::1]`). The URL is `http://<host>:<port>/`, or a listener's own
+ * `origin` where the platform scan supplied one. `processName` is the
  * selected listener's, falling back to the first defined one for that port.
  */
 export function listenerUrlsByPort(ports: OpenPort[]): PortUrlEntry[] {
@@ -40,10 +52,11 @@ export function listenerUrlsByPort(ports: OpenPort[]): PortUrlEntry[] {
         : selectedListener.address;
     const processName = selectedListener.processName
       ?? portListeners.find((entry) => entry.processName !== undefined)?.processName;
+    const origin = portListeners.map((entry) => entry.origin).find(isHttpOrigin);
     return {
       port,
       host,
-      url: `http://${host}:${port}/`,
+      url: origin ? `${origin}/` : `http://${host}:${port}/`,
       ...(processName !== undefined ? { processName } : {}),
     };
   });

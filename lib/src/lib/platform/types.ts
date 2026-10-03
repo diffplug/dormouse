@@ -63,6 +63,11 @@ export interface OpenPort {
   port: number;
   pid: number;
   processName?: string;
+  /** Where the listener answers, when that is not `http://localhost:<port>`:
+   *  the website playground's virtual viewers, served from the page's own
+   *  origin (`docs/specs/dor-tool.md` -> Serving). Only a platform scan sets
+   *  it, never Tool output. */
+  origin?: string;
 }
 
 /** Base scan budget. The macOS and Windows socket scans add a per-id allowance;
@@ -310,14 +315,16 @@ export interface PlatformAdapter {
   // Renderer"). Stands up a loopback proxy in front of a `dor iframe` target and
   // returns the proxy URL the panel should frame, or a structured reason it
   // could not. Absent on hosts with no process to run a proxy (e.g. the web
-  // host), where the panel falls back to a raw, uninstrumented `<iframe>`.
+  // host), where the panel falls back to a raw, uninstrumented `<iframe>`;
+  // the desktop playground answers only for its own virtual viewers.
   createIframeProxyUrl?(targetUrl: string): Promise<IframeProxyResult>;
 
   // Dor Tools (see docs/specs/dor-tool.md). Two operations behind one method:
   // resolve a tool name against the nearest dormouse.yml, and record a trust
   // decision a human made in Dormouse's own chrome. Both need a filesystem, so
   // this is absent on hosts with none (the web demo), where `dor tool <name>`
-  // reports that the host cannot read a tool file. `dor tool -- <command>`
+  // reports that the host cannot read a tool file; the desktop playground
+  // answers `open` from its read-only snapshot. `dor tool -- <command>`
   // needs none of it and works everywhere.
   toolControl?(request: ToolHostRequest): Promise<ToolControlResult>;
 
