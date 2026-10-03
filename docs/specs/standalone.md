@@ -131,8 +131,8 @@ its xterm size — it asks over `burrow:ask`, and
 `lib/src/remote/burrow/peer-surfaces.ts` answers naming the ask's
 `burrowRequestId`.
 
-- **An ask collects one answer per window** and concatenates them, **keyed by
-  which window answered, never by how many have**: Rust stamps the sending
+- **An ask collects one answer per window** and concatenates them in label
+  order, **keyed by which window answered, never by how many have**: Rust stamps the sending
   window's label on every `burrow:command`, so a window answering twice
   contributes once.
 - **Rust pushes the live window labels** (`burrow:windows`) at setup and on

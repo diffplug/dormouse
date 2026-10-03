@@ -12,6 +12,7 @@ import {
   attachableDirectoryEntries,
   directorySessionItems,
   directoryWallSessions,
+  pickerEntries,
   type PaneActivator,
 } from './wall-model';
 
@@ -65,6 +66,9 @@ describe('attachableDirectoryEntries', () => {
   });
 });
 
+/** The one group a Burrow that names no Workspace files every row in. */
+const UNGROUPED = { id: '', label: 'Other' };
+
 describe('directorySessionItems', () => {
   it('marks the active pane and carries title/secondary', () => {
     const items = directorySessionItems(
@@ -72,8 +76,8 @@ describe('directorySessionItems', () => {
       's2',
     );
     expect(items).toEqual([
-      { id: 's1', title: 'zsh', secondary: '/home/me', active: false, status: undefined, episode: null, todo: false },
-      { id: 's2', title: 'vim', secondary: null, active: true, status: undefined, episode: null, todo: false },
+      { id: 's1', group: UNGROUPED, title: 'zsh', secondary: '/home/me', active: false, status: undefined, episode: null, todo: false },
+      { id: 's2', group: UNGROUPED, title: 'vim', secondary: null, active: true, status: undefined, episode: null, todo: false },
     ]);
   });
 
@@ -104,8 +108,58 @@ describe('directorySessionItems', () => {
       's1',
     );
     expect(items).toEqual([
-      { id: 's2', title: 'alive', secondary: null, active: false, status: undefined, episode: null, todo: false },
+      { id: 's2', group: UNGROUPED, title: 'alive', secondary: null, active: false, status: undefined, episode: null, todo: false },
     ]);
+  });
+});
+
+/** An entry in a Workspace, as a Burrow with app-wide Workspace refs sends it. */
+function inWorkspace(surfaceId: string, ref: string, active = false): DirectoryEntry {
+  return entry(surfaceId, { workspace: { ref, name: `${ref} name`, active } });
+}
+
+describe('pickerEntries', () => {
+  it('puts the Workspaces a Window shows first, then the Burrow’s Workspace order', () => {
+    const ordered = pickerEntries([
+      inWorkspace('a1', 'workspace:1'),
+      inWorkspace('b1', 'workspace:2', true),
+      inWorkspace('c1', 'workspace:3'),
+      inWorkspace('a2', 'workspace:1'),
+      inWorkspace('d1', 'workspace:4', true),
+    ]);
+    expect(ordered.map((e) => e.surfaceId)).toEqual(['b1', 'd1', 'a1', 'a2', 'c1']);
+  });
+
+  it('lists panes the Burrow named no Workspace for last', () => {
+    const ordered = pickerEntries([entry('loose'), inWorkspace('a1', 'workspace:1')]);
+    expect(ordered.map((e) => e.surfaceId)).toEqual(['a1', 'loose']);
+  });
+
+  it('keeps Burrow order for an older Burrow that names no Workspace', () => {
+    expect(pickerEntries([entry('s2'), entry('s1')]).map((e) => e.surfaceId)).toEqual(['s2', 's1']);
+  });
+
+  it('leaves out exited panes', () => {
+    expect(pickerEntries([inWorkspace('dead', 'workspace:1', true)].map((e) => ({ ...e, alive: false })))).toEqual([]);
+  });
+});
+
+describe('directorySessionItems with Workspaces', () => {
+  it('files each row under its Workspace’s name', () => {
+    const items = directorySessionItems(
+      [inWorkspace('a1', 'workspace:1', true), inWorkspace('b1', 'workspace:2'), entry('loose')],
+      null,
+    );
+    expect(items.map((item) => [item.id, item.group])).toEqual([
+      ['a1', { id: 'workspace:1', label: 'workspace:1 name' }],
+      ['b1', { id: 'workspace:2', label: 'workspace:2 name' }],
+      ['loose', { id: '', label: 'Other' }],
+    ]);
+  });
+
+  it('files every row in one group when the Burrow names no Workspace', () => {
+    const items = directorySessionItems([entry('s1'), entry('s2')], null);
+    expect(new Set(items.map((item) => item.group?.id)).size).toBe(1);
   });
 });
 

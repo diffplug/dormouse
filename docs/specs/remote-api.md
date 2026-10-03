@@ -114,13 +114,17 @@ Reserved: a `capabilities` field on the client hello (what the client can render
 
 **Must list registered terminal Surfaces, excluding helper Sessions.** A Tool remains listed through its terminal even while showing its browser capability. `directory.watch` subscribes without attaching; `DirectoryEntry` / `DirectorySnapshot` own the payload. Thumbnails are staged ([Future](#future)).
 
+**Must list every Workspace's terminals, hidden ones included; `workspace` names an entry's Workspace only where its `ref` is unique across the Burrow's Windows** (standalone; VS Code sends none; rationale). **Entries arrive in each Window's strip order** (rationale); `active` marks the Workspace that Window shows. **A Client must list entries without `workspace` as before.**
+
+Reserved: `workspace.ref` and `name` are `WindowSnapshot.workspaces[]` keys ([Future](#future), The Window).
+
 Reserved: **`paneRef` is set to the same value as `surfaceId`** and no Client reads it — it becomes the Pane handle when `window.watch` lands ([Future](#future), The Window), so a Burrow keeps setting it. **`focused` and `exitCode` likewise have no Client reader yet.**
 
 **Snapshot-only, never deltas**: on any change the Burrow coalesces and resends the whole listing, one snapshot per collect (rationale). **A collect emits only while it is still the newest and its subscription stands**, so a stale answer — an empty timed-out one included — never blanks the picker (rationale). **A collection that rejects emits nothing**, leaving the last good snapshot standing; the next invalidation or `directory.watch` retries it.
 
 **Duplicate `surfaceId`s collapse to the first answerer** — the same owner an attach's read-only resolve probe selects, so the row shown is the surface attached. (rationale)
 
-Invalidation reaches the session through `watchDirectory`. **A late answer — one for an ask that already settled — invalidates the directory rather than being dropped** (rationale), at each burrow's ask bridge (`docs/specs/standalone.md` -> "Rust ↔ sidecar bridge", `docs/specs/vscode.md` -> "Peer surfaces").
+Invalidation reaches the session through `watchDirectory`, Workspace and membership changes included. **A late answer — one for an ask that already settled — invalidates the directory rather than being dropped** (rationale), at each burrow's ask bridge (`docs/specs/standalone.md` -> "Rust ↔ sidecar bridge", `docs/specs/vscode.md` -> "Peer surfaces").
 
 **Never list or attach standalone browser or iframe Surfaces**: neither enters the xterm registry. ([Future](#future) stages browser remoting; iframes stay unsupported even there.)
 

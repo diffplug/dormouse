@@ -133,6 +133,17 @@ describe('asking the webview', () => {
     expect(await pending).toEqual([{ surfaceId: 'in-main' }, { surfaceId: 'in-ws-2' }]);
   });
 
+  it('lists windows in label order, whichever answers first', async () => {
+    // Arrival order changes collect to collect; a phone grouping by Workspace
+    // would see its headers swap places on every refresh.
+    bridge.setWindows(['main', 'ws-2']);
+    const pending = bridge.provider.collectDirectory();
+    const ask = asks()[0]!;
+    answer(ask, [{ surfaceId: 'in-ws-2' }], 'ws-2');
+    answer(ask, [{ surfaceId: 'in-main' }], 'main');
+    expect(await pending).toEqual([{ surfaceId: 'in-main' }, { surfaceId: 'in-ws-2' }]);
+  });
+
   it('a second answer from one window cannot settle the ask', async () => {
     vi.useFakeTimers();
     bridge.setWindows(['main', 'ws-2']);

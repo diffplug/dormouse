@@ -98,12 +98,32 @@ placement and `docs/specs/layout.md` corner case #6.
   sessions**; the destination attaches to them, or opens the same named session
   a launch was opening. **An abandoned launch closes only a session the host
   minted.**
-- Iframe proxy grants are reclaimed by the proxy idle sweep, not a per-surface
-  teardown hook.
+- An iframe view's proxy grant ends with its lease
+  ([Iframe Proxy Leases](#iframe-proxy-leases)).
 
 Source of truth: `createContentSurface` in `lib/src/components/Wall.tsx`,
 `closeBrowserSurface` in `lib/src/components/wall/agent-browser-surface-controller.ts`,
 `prepareWorkspaceTransfer` in `lib/src/components/wall/workspace-transfer.ts`.
+
+## Resource Policy
+
+**Sight** — can anyone see a Surface's pane: its window (VS Code: webview) is
+shown, its Workspace active, its leaf unparked, and no other leaf zoomed over
+it. **Must derive sight in one pure place from the existing View states**
+(`Doored`, `Hidden` arrive as parked). A popped-out pane's window is its
+consumers' concern. **The VS Code extension must tell its webview whether it is
+shown**, on each (re)initialization and change (rationale).
+
+- An unseen screencast parks ([Browser Connection](#browser-connection)).
+- An iframe proxy grant follows its view's lease, not sight
+  ([Iframe Proxy Leases](#iframe-proxy-leases)).
+- **Never evict or reload a minimized iframe page to bound resources**; past
+  `RETAINED_PAGES_WARN_ABOVE` of them a Baseboard shows a quiet count, never a
+  modal (`docs/specs/layout.md` → Baseboard places it).
+
+Source of truth: `lib/src/lib/surface-sight.ts`,
+`useSurfaceVisibility` in `lib/src/components/wall/use-surface-visibility.ts`,
+`lib/src/components/RetainedPagesIndicator.tsx`.
 
 ## Browser Chrome
 
@@ -378,8 +398,8 @@ controller is `live`.
   been answered**, whatever the transport's order; **a Surface's close is sent
   at once**, for its bound session or the one its launch names.
 
-**Parking.** A pane that goes off-screen, or whose view unmounts, parks after a
-debounce: its viewer socket closes, the daemon/session stays alive, and
+**Parking.** A pane that loses sight ([Resource Policy](#resource-policy)), or
+whose view unmounts, parks after a debounce: its viewer socket closes, the daemon/session stays alive, and
 daemon-side streaming stops because no client triggers it (rationale).
 
 - **An unpark keeps the last good frame on screen**; a fresh reattach asks the
@@ -424,6 +444,10 @@ gate and input rebuilding are audited in `docs/specs/security-local.md` →
 - **A headed socket carries no frames.**
 - **Must paint changed stream frames provisionally and replace them with
   host-owned device-resolution captures** (rationale).
+- **Settle, then sharpen**: a page in motion paints from the stream, then gets
+  one capture once it rests. **All sockets' captures share one host-wide
+  budget**, spent only by a capture that starts, recent input first; **a capture outliving its slot frees it, and
+  every provider bounds its capture** (rationale).
 
 **Upstreams.** agent-browser: the daemon's stream, dialed on `127.0.0.1` only;
 **a tab list or URL is state at any size**,
@@ -653,6 +677,7 @@ Header rewriting:
 | response | hop-by-hop (RFC 7230 §6.1) | dropped |
 | response | `Location` | an exact upstream origin rewritten back to the proxy origin, so a redirect stays inside the proxy |
 | response | `Vary` | `Sec-Fetch-Dest` appended, since the `Accept-Encoding` sent upstream depends on it |
+| response | `Clear-Site-Data` | `"cache", "storage"` on a freshly minted grant's first frame load only: its port may have fronted another upstream |
 | response body | `<meta http-equiv="content-security-policy">` | removed unless the response opts into CSP preservation |
 
 **Must update this table whenever header rewriting changes.**
@@ -666,9 +691,9 @@ UTF-8 BOM.**
 **Must preserve enforced and report-only CSP verbatim when the upstream response sends `X-Dormouse-Preserve-CSP: 1`**, for every MIME type, adding the validated ancestor policy separately. **Never infer this opt-in from request headers.** Additional upstream restrictions may prevent framing or shim execution. (rationale)
 
 **One dedicated `127.0.0.1:0` server per grant, with no token in the path** — the
-origin itself is the grant boundary (rationale). Grants have a sliding idle TTL
-and a hard cap; **a request the `Host` check refuses never refreshes the TTL**,
-so a stranger cannot hold one open.
+origin itself is the grant boundary (rationale). A grant asked for without a
+lease has a sliding idle TTL and a hard cap; **a request the `Host` check
+refuses never refreshes the TTL**, so a stranger cannot hold one open.
 
 Current limits: absolute-origin subresources (`http://localhost:5173/...`,
 `ws://localhost:5173/...`) bypass the proxy uninstrumented — acceptable for
@@ -680,6 +705,26 @@ Source of truth: `lib/src/components/wall/IframePanel.tsx`,
 (`instrumentHtml`, `isBlockedAddress`), `IFRAME_HTTP_ONLY` in
 `lib/src/lib/platform/iframe-proxy-types.ts`, `iframeRefusal` in
 `lib/src/components/wall/browser-url.ts`.
+
+### Iframe Proxy Leases
+
+**Every mounted `IframePanel` takes its grant under a lease** it mints, held
+under an **owner the host transport names** (VS Code router, standalone window
+label), never the webview.
+
+- **A leased grant has no idle TTL and is never evicted.** It ends, with every
+  connection and upgraded pipe, when its lease is released (unmount), its owner
+  reinitializes or ends, or the lease moves to another upstream origin
+  (rationale).
+- **The same lease, upstream origin and embedder chain reuse the grant**, so
+  Reload, Back and Forward keep the page's origin and storage.
+- **Leases are bounded by `MAX_IFRAME_LEASES`; past it a new one is refused,
+  never made room for.**
+
+Source of truth: `createIframeProxyUrl` and `releaseIframeProxyLease` in
+`lib/src/host/iframe-proxy.ts`, `attachRouter` in
+`vscode-ext/src/message-router.ts`, `iframe_release_proxy` in
+`standalone/src-tauri/src/lib.rs`.
 
 ### Iframe Shim
 
@@ -723,7 +768,8 @@ Source of truth: `lib/src/components/wall/IframePanel.tsx`, `subscribeWindowFocu
 ## Iframe Host Capability And CSP
 
 The optional `PlatformAdapter.createIframeProxyUrl` method and the
-`IframeProxyResult` union are canonical in the platform types. Reachability is
+`IframeProxyResult` union are canonical in the platform types, as is
+`releaseIframeProxy`, which ends a lease. Reachability is
 diagnosed lazily by served error pages, and frame refusal only as an
 uninstrumented load ([Iframe Shim](#iframe-shim)). VS Code routes the request
 to `vscode-ext/src/iframe-proxy-host.ts`; standalone through the sidecar's
@@ -751,7 +797,8 @@ that audit**:
 
 **`'self'` in the replacement policy permits same-grant nesting; foreign
 ancestors fail.** `isOwnOrigin` and `isForeignOrigin` are not each other's
-negation — an *absent* `Origin` keeps refreshing a grant's idle timer (rationale).
+negation — an *absent* `Origin` keeps refreshing an unleased grant's idle
+timer (rationale).
 
 Source of truth: `lib/src/lib/platform/iframe-proxy-types.ts`,
 `embedderOrigins` in `lib/src/lib/embedder-origins.ts`,
@@ -767,9 +814,9 @@ A moved iframe Surface remounts at its saved URL after consent: `docs/specs/layo
   cookies, tabs, DOM state, and scroll.
 - Upstream support for stream keyboard `commands`, replacing the host edit
   workaround and enabling undo/redo.
-- General per-surface teardown hook for iframe proxy grants and future
-  Dormouse-owned backend processes; agent-browser surfaces already dispose their
-  controller on kill/swap.
+- General per-surface teardown hook for future Dormouse-owned backend
+  processes; agent-browser surfaces already dispose their controller on
+  kill/swap, and iframe views release their leases.
 - Process-backed targets are owned by the **dor-tools** scope
   (`docs/specs/dor-tool.md` `## Future`), which subsumes the plugin/backend
   target axis formerly staged here.

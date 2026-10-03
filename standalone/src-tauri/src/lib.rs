@@ -1444,23 +1444,44 @@ fn take_recovery_commands(
 // the shared lib/src/host/iframe-proxy.ts; this only bridges the request.
 #[tauri::command(async)]
 fn iframe_create_proxy_url(
+    window: tauri::Window,
     state: tauri::State<'_, SidecarState>,
     target: String,
     // The webview's own ancestor chain, which is what decides who may frame the
     // proxy. Forwarded verbatim and validated in the proxy itself
     // (`normalizeEmbedderOrigins`), so this stays a bridge and nothing more.
     embedder_origins: Option<Vec<String>>,
+    // The mounted view's lease id; its owner is this window, which only Rust
+    // can name (docs/specs/dor-browser.md → "Iframe Proxy Leases").
+    lease: Option<String>,
 ) -> Result<JsonValue, String> {
-    let response = request_from_sidecar_timeout(
-        &state,
-        "iframe:createProxyUrl",
-        serde_json::json!({
-            "target": target,
-            "embedderOrigins": embedder_origins.unwrap_or_default(),
-        }),
-        Duration::from_secs(5),
-    )?;
+    let mut data = serde_json::json!({
+        "target": target,
+        "embedderOrigins": embedder_origins.unwrap_or_default(),
+    });
+    if let Some(id) = lease {
+        data["lease"] = serde_json::json!({ "owner": window.label(), "id": id });
+    }
+    let response =
+        request_from_sidecar_timeout(&state, "iframe:createProxyUrl", data, Duration::from_secs(5))?;
     Ok(response.get("result").cloned().unwrap_or(JsonValue::Null))
+}
+
+// Ends this window's lease `lease`, or every lease it holds — what a webview
+// does as it boots, for any a page it replaced never released.
+#[tauri::command]
+fn iframe_release_proxy(
+    window: tauri::Window,
+    state: tauri::State<'_, SidecarState>,
+    lease: Option<String>,
+) {
+    send_to_sidecar(
+        &state,
+        sidecar_line(
+            "iframe:releaseProxy",
+            serde_json::json!({ "owner": window.label(), "id": lease }),
+        ),
+    );
 }
 
 // The repository holding each directory, for Workspace auto-naming, answered by
@@ -4222,6 +4243,7 @@ pub fn run() {
             capture_agent_recovery,
             take_recovery_commands,
             iframe_create_proxy_url,
+            iframe_release_proxy,
             tool_control,
             managed_voice,
             git_info,

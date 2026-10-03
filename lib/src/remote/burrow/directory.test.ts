@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { buildDirectoryEntry, buildDirectorySnapshot, type DirectoryPaneInput } from './directory';
+import {
+  buildDirectoryEntry,
+  buildDirectorySnapshot,
+  type DirectoryPaneInput,
+  type DirectoryWorkspaceInput,
+} from './directory';
 import type { CwdState, ShellActivity, TerminalPaneState } from '../../lib/terminal-state';
 
 function pane(partial: Partial<TerminalPaneState> = {}): TerminalPaneState {
@@ -99,5 +104,48 @@ describe('buildDirectoryEntry', () => {
       input({ paneRef: 'b', surfaceId: 'b' }),
     ]);
     expect(entries.map((e) => e.surfaceId)).toEqual(['a', 'b']);
+  });
+});
+
+describe('buildDirectorySnapshot with Workspaces', () => {
+  const panes = (...ids: string[]) => ids.map((id) => input({ paneRef: id, surfaceId: id }));
+  const workspace = (
+    ref: string,
+    surfaceIds: string[],
+    active = false,
+  ): DirectoryWorkspaceInput => ({ ref, name: `name of ${ref}`, active, surfaceIds });
+
+  it('orders entries by Workspace, keeping registry order within one', () => {
+    const entries = buildDirectorySnapshot(panes('a', 'b', 'c', 'd'), [
+      workspace('workspace:7', ['d', 'b']),
+      workspace('workspace:3', ['c', 'a'], true),
+    ]);
+    expect(entries.map((entry) => [entry.surfaceId, entry.workspace?.ref])).toEqual([
+      ['b', 'workspace:7'],
+      ['d', 'workspace:7'],
+      ['a', 'workspace:3'],
+      ['c', 'workspace:3'],
+    ]);
+  });
+
+  it('names each entry’s Workspace with its ref, name, and whether its Window shows it', () => {
+    const [shown, hidden] = buildDirectorySnapshot(panes('a', 'b'), [
+      workspace('workspace:1', ['a'], true),
+      workspace('workspace:2', ['b']),
+    ]);
+    expect(shown!.workspace).toEqual({ ref: 'workspace:1', name: 'name of workspace:1', active: true });
+    expect(hidden!.workspace).toEqual({ ref: 'workspace:2', name: 'name of workspace:2', active: false });
+  });
+
+  it('lists a pane no Workspace claims last, naming none', () => {
+    const entries = buildDirectorySnapshot(panes('loose', 'a'), [workspace('workspace:1', ['a'], true)]);
+    expect(entries.map((entry) => entry.surfaceId)).toEqual(['a', 'loose']);
+    expect('workspace' in entries[1]!).toBe(false);
+  });
+
+  it('names no Workspace and keeps registry order where none is given', () => {
+    const entries = buildDirectorySnapshot(panes('b', 'a'));
+    expect(entries.map((entry) => entry.surfaceId)).toEqual(['b', 'a']);
+    expect(entries.some((entry) => 'workspace' in entry)).toBe(false);
   });
 });
