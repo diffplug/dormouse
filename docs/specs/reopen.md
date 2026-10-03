@@ -46,7 +46,7 @@ A reopened Surface is rebuilt from its record: a new Session and process. "Lost"
 | `iframe` browser | Same URL, reloaded | Live page state | No (the browser convention: a closed tab reopens at its URL) |
 | Touched shell, repo Tool, agent-browser / playwright, dirty or unreported Tool, running work | — | — | Yes |
 
-Repo Tools join the table only through `docs/specs/dor-tool.md` → "Dehydrate and rehydrate" (D2), which supplies the safe-to-stop contract args alone do not.
+Repo Tools join the table only through `docs/specs/dor-tool.md` → "Reaping", which supplies the safe-to-stop contract args alone do not.
 
 ### The reopen record
 
