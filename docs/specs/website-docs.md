@@ -327,17 +327,25 @@ delta rule before it can exist there.
 
 **Must** render the guarantees table and the two lists by audience, from
 `docs.security.json`, never restated: `securityAudiences` splits each entry by
-the spec its links name — `security-local.md`, `security-ci.md`, and
-`security-audit.md` to this page; `remote-security-model.md`,
-`security-remote.md`, and `SELF_HOST.md` to `/self-host`;
-`security-supply-chain.md` to `/supply-chain` — and an entry naming no spec, a
-spec in no group, or two groups fails the build. This page renders its own
+the spec its links name, and an entry naming no spec, a spec in no group, or
+two groups fails the build.
+
+```mermaid
+flowchart LR
+  SEC[docs/specs/security.md] -->|SECURITY_DELTA| J[docs.security.json]
+  J -->|security| P1["/security"]
+  J -->|self-host| P2["/self-host"]
+  J -->|supply-chain| P3["/supply-chain"]
+  SH[SELF_HOST.md] -->|SELF_HOST_DELTA| JS[docs.selfhost.json] --> P2
+```
+
+This page renders its own
 audience's entries with every other block whole, so the spec file on GitHub is
 the one place every entry appears together. The three pages cross-link, and
 each specialized page links `/security#how-the-guarantees-are-checked`;
 `website/src/pages/security-pages.test.tsx` pins the entries and links.
 
-Source of truth: `SECURITY_DELTA` and `securityAudiences` in `website/scripts/generate-docs.js`; `SecurityDocs` in `website/src/pages/SecurityDocs.tsx`.
+Source of truth: `SECURITY_DELTA`, `SECURITY_AUDIENCES` (spec → audience), and `securityAudiences` in `website/scripts/generate-docs.js`; `SecurityDocs` in `website/src/pages/SecurityDocs.tsx`.
 
 ## Generated documentation boundary
 

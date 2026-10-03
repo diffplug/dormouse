@@ -18,6 +18,8 @@ import {
 } from '../../lib/size-hold-store';
 import { isHelperSession, registry } from '../../lib/terminal-store';
 import { subscribeToTerminalPaneState } from '../../lib/terminal-state-store';
+import { subscribeToWorkspaces } from '../../lib/workspace-store';
+import { subscribeToWorkspaceSurfaces } from '../../lib/workspace-surfaces';
 import type { SurfaceHold } from './burrow-surface-provider';
 import { collectDirectorySnapshot } from './directory-collect';
 import { armWhile } from './enrolled-gate';
@@ -196,7 +198,7 @@ export function installPeerSurfaceResponder(): void {
     if (serviceId) dropSizeHoldsFromOtherServices(serviceId);
   });
   // Announcing is not free — one crossing per pane-state change, activity
-  // change, and focus move — so it is armed only while something can reach
+  // change, focus move, and Workspace change — so it is armed only while something can reach
   // these terminals: an enrolled Burrow, or a one-time phone (`enrolled-gate.ts`).
   armWhile(link, { serving: () => {
     let armed = true;
@@ -217,6 +219,10 @@ export function installPeerSurfaceResponder(): void {
     };
     const unsubscribePaneState = subscribeToTerminalPaneState(notifyDirectory);
     const unsubscribeActivity = subscribeToActivity(notifyDirectory);
+    // A switch, rename, create, close, or reorder; and membership, which a
+    // Surface or Workspace moving between Windows changes on both sides.
+    const unsubscribeWorkspaces = subscribeToWorkspaces(notifyDirectory);
+    const unsubscribeMembership = subscribeToWorkspaceSurfaces(notifyDirectory);
     const hasDocument = typeof document !== 'undefined';
     if (hasDocument) {
       document.addEventListener('focusin', notifyDirectory);
@@ -226,6 +232,8 @@ export function installPeerSurfaceResponder(): void {
       armed = false;
       unsubscribePaneState();
       unsubscribeActivity();
+      unsubscribeWorkspaces();
+      unsubscribeMembership();
       if (!hasDocument) return;
       document.removeEventListener('focusin', notifyDirectory);
       document.removeEventListener('focusout', notifyDirectory);

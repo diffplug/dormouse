@@ -7,10 +7,21 @@
 
 ## Architecture
 
-**Rust stays thin**: it spawns and supervises the sidecar, bridges the webview to
-it, and owns the OS-integration edges (window events, menu, file drop, dock icon,
-logging) plus the session file store. All real logic runs in the Node sidecar, on
-the same `lib/src/host/` modules the VS Code host runs — `build-sidecar-proxy.mjs`
+```mermaid
+flowchart LR
+  W[Webview per window: TauriAdapter] -- invoke --> R[Rust]
+  R -- "emit_to (§Routing)" --> W
+  R -- JSON lines on stdin --> P[Node sidecar]
+  P -- JSON lines on stdout --> R
+  P -. stderr .-> R
+  R --> L[(dormouse.log)]
+  D[dor in a pane] -- control socket --> P
+  P -- /ws/burrow --> X[(Relay)]
+```
+
+**Rust stays thin**: besides the bridge, only the OS-integration edges (window
+events, menu, file drop, dock icon, logging) and the session file store. All
+real logic runs in the sidecar, on the same `lib/src/host/` modules the VS Code host runs — `build-sidecar-proxy.mjs`
 bundles them into the sidecar's `.cjs` copies, so the two hosts cannot drift.
 
 ## Boot sequence
@@ -47,12 +58,8 @@ Source of truth: `standalone/src-tauri/src/lib.rs` (`SidecarState`, the
 `#[tauri::command]` set) and `standalone/sidecar/main.js` (the dispatch table);
 `TauriAdapter` in `standalone/src/tauri-adapter.ts`.
 
-The sidecar speaks JSON-lines over stdio: commands in on stdin, events out on
-stdout. **stdout is the protocol** — sidecar diagnostics go to stderr, which Rust
-appends to the log file.
-
-Webview → Rust is Tauri invokes, most of them thin sidecar forwarders. Two
-carve-outs are handled in Rust: `load_session` / `save_session` (§Persistence)
+**stdout is the protocol**: sidecar diagnostics go to stderr. Most invokes are
+thin sidecar forwarders; two carve-outs are handled in Rust: `load_session` / `save_session` (§Persistence)
 and the Windows `clipboard` readers (`clipboard_win.rs`;
 `docs/specs/mouse-and-clipboard.md` §8.6).
 
@@ -124,8 +131,8 @@ its xterm size — it asks over `burrow:ask`, and
 `lib/src/remote/burrow/peer-surfaces.ts` answers naming the ask's
 `burrowRequestId`.
 
-- **An ask collects one answer per window** and concatenates them, **keyed by
-  which window answered, never by how many have**: Rust stamps the sending
+- **An ask collects one answer per window** and concatenates them in label
+  order, **keyed by which window answered, never by how many have**: Rust stamps the sending
   window's label on every `burrow:command`, so a window answering twice
   contributes once.
 - **Rust pushes the live window labels** (`burrow:windows`) at setup and on
@@ -453,7 +460,7 @@ The protocol and every failure path are §Arrival queue; what a move *is*:
 - **A pane's helper Session travels with it**, directly after its source, which
   lets the target's resume re-parent it; nothing else in the payload names it.
 - **An arrival whose PTYs never answer is refused, never cold-restored**: those
-  shells are still running (`docs/specs/transport.md` → "Reconnection").
+  shells are still running (`docs/specs/transport.md` → "Reconnection protocol").
 - **A Workspace that comes back must mount from the record it brought**, never
   the plan it first booted with.
 
@@ -478,31 +485,47 @@ Workspace, its `terminalIds`, and `allIds` naming every member Surface, under
 Rust's own `from` / `to`. Rust holds the record from the source's invoke until
 the target adopts the Workspace or dies, and every step reads that record
 rather than inferring it from the suppression map (rationale). The mark-and-replay
-split is `docs/specs/transport.md` → "Transferring a Workspace".
+split is `docs/specs/transport.md` → "Transferring a Workspace". Sidecar lines
+reach a webview through Rust (§Routing).
 
-1. **Source** prepares the Workspace, touching nothing, and invokes
-   `transfer_workspace` / `open_workspace_window`. **Must return preparation
-   refusals as `{ moved: false, reason }` without changing ownership.** On `Ok`
-   it marks the Workspace **transferring**: still mounted, nothing released,
-   omitted from `getWindowSnapshot`.
-2. **Rust** journals the arrival, reassigns `terminalIds` to the target, keeps
-   routing their output to the source until each id's `pty:marked`, and
-   suppresses it from there until its replay reaches the target. The source
-   submits each buffer serialized at its mark via `transfer_workspace_content`;
-   only then does Rust nudge the target (`workspace-arriving`, carrying nothing)
-   or build the torn-out window. **An arrival without content is not drainable.**
-3. **Target** drains with `take_arrivals` and, per arrival, arms its collector
-   *before* calling `adopt_ready(workspaceId)` (rationale). Rust answers
-   `pty:requestInit` with **that arrival's ids and no others**, the collector's
-   token echoed. The target resumes over them and mounts the Workspace at the
-   payload's index, else the drop index. **It never spawns or kills**; the
-   sidecar re-sends the Sessions' alert state (§Alerts).
-4. **Target** invokes `adopt_done(workspaceId)`. Rust retires the record, clears
-   marks and suppression, and emits `workspace-departed` for **that Workspace
-   alone** to its source.
-5. **Source** commits: releases every Session (never kills one), drops the
-   helper, closes the Workspace, and closes the window if it was the last.
+```mermaid
+sequenceDiagram
+  participant S as Source webview
+  participant R as Rust
+  participant P as Sidecar
+  participant T as Target webview
+  S->>R: transfer_workspace / open_workspace_window
+  Note over R: begin_arrival: journal, then owner := target
+  R->>P: pty:mark {ids}
+  P-->>S: pty:marked {id, mark}
+  Note over R: drop id's output until target replay
+  S->>R: transfer_workspace_content (buffers at marks)
+  R-->>T: workspace-arriving (tear-out: build window)
+  T->>R: take_arrivals, then adopt_ready
+  R->>P: pty:requestInit {ids, marks, requestId}
+  P-->>T: pty:list, pty:replay since mark, alert:state
+  alt adopted
+    T->>R: adopt_done
+    R-->>S: workspace-departed
+  else adopt_failed, Destroyed, window not built, or ARRIVAL_MAX
+    R-->>S: workspace-arrival-failed {replayIds}
+    R->>P: pty:requestInit {forWindow: source, marked ids}
+    P-->>S: pty:replay since mark
+  end
+```
 
+- **Must return preparation refusals as `{ moved: false, reason }` without
+  changing ownership.** On `Ok` the source marks the Workspace
+  **transferring**: still mounted, nothing released, omitted from
+  `getWindowSnapshot`.
+- **An arrival without content is not drainable.**
+- **The target arms its collector before `adopt_ready`** (rationale), and
+  `pty:requestInit` names **that arrival's ids and no others**. The target
+  mounts the Workspace at the payload's index, else the drop index. **It never
+  spawns or kills**; the replayed `alert:state` is §Alerts.
+- **`workspace-departed` names that Workspace alone.** The source then releases
+  every Session (never kills one), drops the helper, and closes the Workspace,
+  and its window if it was the last.
 - **Nothing is released before the target has adopted it.**
 - **A transferring Workspace is in no snapshot its source writes, and neither
   end's teardown kills or interrupts its shells**: the target's
@@ -512,19 +535,15 @@ split is `docs/specs/transport.md` → "Transferring a Workspace".
   releases its resumed Sessions and boots fresh.** **A refused `adopt_done`
   unwinds the mount** from the received payload, releasing (never killing) and
   closing the Workspace, without preparing another move (rationale).
-- **A refused arrival hands the shells back.** The target's `adopt_failed` and a
-  target `Destroyed` with the arrival still queued both return `terminalIds` to
-  the source, drop the record, and emit `workspace-arrival-failed`; the source
-  clears **transferring**. With both ends gone the shells are reaped.
+- **A refused arrival hands the shells back**: Rust drops the record and the
+  source clears **transferring**. With both ends gone the shells are reaped.
 - **An arrival unadopted after `ARRIVAL_MAX` is handed back** by a watchdog armed
   at `begin_arrival`, retiring only the record it was armed for (`queued_at`).
-- **A hand-back replays what the marked ids missed** (rationale):
-  `hand_back_arrival` returns each marked id to the source suppressed and asks
-  the sidecar for `outputSince(mark)`, whose replay lifts the suppression into
-  the existing xterms; an id never stamped goes straight back, and the failure
-  event carries the replay ids. **Must retain source cuts from `pty:marked`
-  through target replay and natural exit until settlement, and discard them on
-  explicit kill.** **Must apply a handed-back PTY's exit status after its
+- **A hand-back replays what the marked ids missed** (rationale): each marked id
+  stays suppressed until its since-mark replay lands in the source's existing
+  xterm; an id never stamped goes straight back. **Must retain source cuts from
+  `pty:marked` through target replay and natural exit until settlement, and
+  discard them on explicit kill.** **Must apply a handed-back PTY's exit status after its
   replay**, leaving its pane dead with no running command.
 - **`take_arrivals` does not consume**; the record settles at `adopt_done` and
   the webview dedupes by id (rationale).
@@ -665,15 +684,23 @@ before exiting (rationale).
 **Every window votes before any window is torn down** (rationale): Rust asks
 them all, and only once all agree walks them one teardown at a time.
 
-| Phase | What happens |
-|---|---|
-| Voting | every window acks, asks about its own running work, and calls `quit_vote` — or `quit_cancel`, which tells every window and destroys nothing |
-| Walking | the `dormouse://quit-teardown` event reaches one window at a time, **`main` last**; each hands on with `quit_window_done`, and the last one installs and calls `quit_proceed` |
+```mermaid
+stateDiagram-v2
+  [*] --> Idle
+  Idle --> Voting: request_quit → quit-requested
+  Idle --> Exit: request_quit, no windows
+  Voting --> Idle: quit_cancel → quit-cancelled
+  Voting --> Walking: last quit_vote, or last unvoted window forgotten
+  Voting --> Exit: last window forgotten
+  Walking --> Walking: quit_window_done or torn-down window forgotten → next quit-teardown
+  Walking --> Exit: quit_proceed, or no window left
+  Exit --> [*]: app.exit(0) past the cleanup gate
+```
 
-- **A cancel is refused once the walk starts.**
+- **A cancel is refused once the walk starts**, and **the walk tears `main` down
+  last**.
 - **A window that leaves outside the flow is forgotten**, its vote never waited
-  on. **A flow that runs out of windows exits**, and so does a trigger that finds
-  none.
+  on. **A flow that runs out of windows exits.**
 - **A quit keeps every window's snapshot on disk** — the whole difference from a
   per-window close. A quit mid-transfer restores the Workspace at most once:
   from the target once it has published it, or from a source handed it back; a
