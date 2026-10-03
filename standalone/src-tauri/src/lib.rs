@@ -962,6 +962,9 @@ struct PtySpawnOptions {
     /// A cold restore's persisted alert state, seeded by the sidecar's
     /// AlertManager behind the spawn. Opaque here, like `helper`.
     alert: Option<JsonValue>,
+    /// A rehydrated Tool's `DORMOUSE_DEHYDRATE` value; the PTY core bounds it
+    /// (docs/specs/dor-tool.md -> Reaping). Opaque here.
+    dehydrate: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -4682,6 +4685,16 @@ mod tests {
         assert_eq!(line["data"]["id"], "t1");
         assert_eq!(line["data"]["options"]["cols"], 80);
         assert_eq!(line["data"]["options"]["alert"], alert);
+    }
+
+    /// A rehydrated Tool's payload rides its spawn whole; dropping the field
+    /// here would silently rehydrate every Tool from bare args.
+    #[test]
+    fn a_spawn_carries_a_rehydrated_tools_payload_to_the_sidecar() {
+        let options: super::PtySpawnOptions =
+            serde_json::from_value(serde_json::json!({ "dehydrate": "{\"v\":1,\"state\":[1]}" })).unwrap();
+        let line = parse_line(&super::pty_spawn_message("t1", Some(&options)));
+        assert_eq!(line["data"]["options"]["dehydrate"], "{\"v\":1,\"state\":[1]}");
     }
 
     #[test]

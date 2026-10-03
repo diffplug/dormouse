@@ -27,6 +27,7 @@ const {
   OPEN_PORT_TIMEOUT_MS,
   OPEN_PORT_TIMEOUT_PER_ID_MS,
   pacedInputSegments,
+  DEHYDRATE_LIMIT,
 } = require('./pty-core');
 
 test('resolveSpawnConfig uses POSIX shell and home defaults', () => {
@@ -71,6 +72,24 @@ test('resolveSpawnConfig prepends dor CLI bin and injects surface id', () => {
   assert.equal(config.env.PATH, '/Applications/Dormouse/dor-cli/bin:/usr/bin');
   assert.equal(config.env.DORMOUSE_CLI_BIN, undefined);
   assert.equal(config.env.DORMOUSE_SURFACE_ID, 'pane-1');
+});
+
+test('resolveSpawnConfig hands a rehydrated Tool its payload, and no other pane an inherited one', () => {
+  const runtime = (env) => ({
+    platform: 'linux',
+    env: { PATH: '/usr/bin', ...env },
+    osModule: { homedir: () => '/home/tester', tmpdir: () => '/tmp/fallback' },
+  });
+  const payload = '{"v":1,"state":{"expanded":["src"]}}';
+  // A host launched from a rehydrated Tool's shell carries one: never every pane's.
+  const inherited = resolveSpawnConfig({ surfaceId: 'pane-1' }, runtime({ DORMOUSE_DEHYDRATE: payload }));
+  assert.equal(inherited.env.DORMOUSE_DEHYDRATE, undefined);
+  const rehydrated = resolveSpawnConfig({ surfaceId: 'pane-1', dehydrate: payload }, runtime({}));
+  assert.equal(rehydrated.env.DORMOUSE_DEHYDRATE, payload);
+  // Past the bound, or unable to sit in an environment block: bare args.
+  for (const dehydrate of ['x'.repeat(DEHYDRATE_LIMIT + 1), 'a\0b', '', 42]) {
+    assert.equal(resolveSpawnConfig({ surfaceId: 'pane-1', dehydrate }, runtime({})).env.DORMOUSE_DEHYDRATE, undefined);
+  }
 });
 
 test('resolveSpawnConfig keeps the sidecar storage roots out of the pane', () => {

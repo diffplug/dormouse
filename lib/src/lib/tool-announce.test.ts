@@ -86,3 +86,13 @@ it('parses an OSC 367 open as a request the host forwards, which recording ignor
   recordToolEvents('open-only', parsed.events);
   expect(getToolAnnounce('open-only')).toBeNull();
 });
+
+it('parses an OSC 367 dehydrate as an event the host forwards whole, which recording ignores', () => {
+  const payload = JSON.stringify({ v: 1, state: { expanded: ['src'] } });
+  const parsed = new TerminalProtocolParser().process(`before\x1b]367;dehydrate;${payload}\x07after`);
+  expect(parsed.visibleData).toBe('beforeafter');
+  expect(parsed.events).toEqual([{ kind: 'toolDehydrate', dehydrate: { payload } }]);
+  expect(collectTerminalToolEvents(parsed.events)).toEqual(parsed.events);
+  recordToolEvents('dehydrate-only', parsed.events);
+  expect(getToolAnnounce('dehydrate-only')).toBeNull();
+});

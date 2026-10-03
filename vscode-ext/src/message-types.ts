@@ -12,7 +12,7 @@ import type { BurrowCommand, BurrowResult } from '../../lib/src/host/remote/serv
 // Messages from webview → extension host
 export type WebviewMessage =
   | { type: 'pty:context'; request: TerminalContextRequest; requestId: string }
-  | { type: 'pty:spawn'; id: string; options?: { cols?: number; rows?: number; cwd?: string; shell?: string; args?: string[]; helper?: HelperIdentity; alert?: PersistedAlertState } }
+  | { type: 'pty:spawn'; id: string; options?: { cols?: number; rows?: number; cwd?: string; shell?: string; args?: string[]; helper?: HelperIdentity; alert?: PersistedAlertState; dehydrate?: string } }
   | { type: 'pty:input'; id: string; data: string; paced?: boolean; userInput?: true }
   | { type: 'pty:resize'; id: string; cols: number; rows: number }
   | { type: 'pty:kill'; id: string }

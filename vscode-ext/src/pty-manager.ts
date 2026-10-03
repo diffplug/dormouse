@@ -21,6 +21,8 @@ export interface PtySpawnOptions {
   cwd?: string;
   shell?: string;
   args?: string[];
+  /** A rehydrated Tool's `DORMOUSE_DEHYDRATE` (docs/specs/dor-tool.md -> Reaping). */
+  dehydrate?: string;
 }
 
 // The pty host forwards the dor wire payloads verbatim over IPC.
@@ -377,6 +379,7 @@ export function spawn(id: string, options?: PtySpawnOptions): void {
     args: options?.args,
     env: dorEnv,
     helper: options?.helper,
+    dehydrate: options?.dehydrate,
   });
 }
 

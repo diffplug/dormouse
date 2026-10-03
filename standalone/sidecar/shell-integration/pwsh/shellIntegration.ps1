@@ -32,6 +32,12 @@ function Global:__dormouse_633_osc([string]$body) {
 	return "$($Global:__dormouse_633_esc)]633;$body$($Global:__dormouse_633_bel)"
 }
 
+# A rehydrated Tool's payload belongs to its first command alone
+# (docs/specs/dor-tool.md -> Reaping); the bare-args retry runs without it.
+function Global:__dormouse_633_clear_dehydrate {
+	Remove-Item Env:DORMOUSE_DEHYDRATE -ErrorAction SilentlyContinue
+}
+
 # Preserve the user's prompt so we can chain to it. `$function:prompt` is the
 # prompt as it stands after the profile ran; if the user defined none, this is
 # PowerShell's built-in default.
@@ -128,6 +134,7 @@ function Global:prompt() {
 		if ($Global:__dormouse_633_command_running) {
 			$result += __dormouse_633_osc "D;$exitCode"
 			$Global:__dormouse_633_command_running = $false
+			__dormouse_633_clear_dehydrate
 		}
 	} else {
 		# No PSReadLine: report the whole previous command (E/C/D) from history,
@@ -139,6 +146,7 @@ function Global:prompt() {
 			$result += __dormouse_633_osc "E;$(__dormouse_633_escape $lastHistory.CommandLine)"
 			$result += __dormouse_633_osc 'C'
 			$result += __dormouse_633_osc "D;$exitCode"
+			__dormouse_633_clear_dehydrate
 		}
 		# Clear the -1 sentinel on every render (history ids start at 1, so 0 never
 		# matches a real command) so the first real command is reported next prompt.

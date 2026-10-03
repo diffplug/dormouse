@@ -1,4 +1,4 @@
-import { parseToolAnnounce, parseToolOpen, parseToolState, type ToolAnnounce, type ToolOpen, type ToolState } from 'dor-tools-lib/osc';
+import { parseToolAnnounce, parseToolDehydrate, parseToolOpen, parseToolState, type ToolAnnounce, type ToolDehydrate, type ToolOpen, type ToolState } from 'dor-tools-lib/osc';
 import type { ActivityNotification, ProtocolProgressUpdate } from './alert-manager';
 import { parseColor } from './css-color';
 import { sanitizeClipboardText, sanitizeCommandLine, sanitizeText, truncateText } from './osc-sanitize';
@@ -30,6 +30,9 @@ export type TerminalProtocolEvent =
   | { kind: 'toolState'; state: ToolState }
   /** A request, not a report: acted on live, never reconstructed from replay. */
   | { kind: 'toolOpen'; open: ToolOpen }
+  /** A stopping Tool's restore payload: kept only during its reap, never from
+   *  replay (`docs/specs/dor-tool.md` -> Reaping). */
+  | { kind: 'toolDehydrate'; dehydrate: ToolDehydrate }
   | { kind: 'progress'; progress: ProtocolProgressUpdate }
   | { kind: 'response'; data: string }
   | { kind: 'semantic'; event: TerminalSemanticEvent };
@@ -319,7 +322,9 @@ export class TerminalProtocolParser {
       const state = parseToolState(payload);
       if (state) return [{ kind: 'toolState', state }];
       const open = parseToolOpen(payload);
-      return open ? [{ kind: 'toolOpen', open }] : [];
+      if (open) return [{ kind: 'toolOpen', open }];
+      const dehydrate = parseToolDehydrate(payload);
+      return dehydrate ? [{ kind: 'toolDehydrate', dehydrate }] : [];
     }
     if (content === '52' || content.startsWith('52;')) return parseOsc52(content);
     const colorResponse = this.parseColorQuery(content);
@@ -527,7 +532,7 @@ function applyTerminalReport(sink: TerminalProtocolAlertSink, id: string, event:
 }
 
 /**
- * The Tool announcement, state, open and command-start events the renderer
+ * The Tool announcement, state, open, dehydrate and command-start events the renderer
  * acts on, in stream order: what a parse site forwards to the renderer that
  * holds the Tool stores (`applyLiveToolEvents`). Reports stay with the owner's
  * `AlertManager`, and a response is the owner's alone to write.
@@ -536,7 +541,7 @@ export function collectTerminalToolEvents(
   events: readonly TerminalProtocolEvent[],
 ): TerminalProtocolEvent[] {
   return events.filter((event) => event.kind === 'toolAnnounce' || event.kind === 'toolState' || event.kind === 'toolOpen'
-    || isProtocolCommandStart(event));
+    || event.kind === 'toolDehydrate' || isProtocolCommandStart(event));
 }
 
 export function collectTerminalProtocolResponses(events: TerminalProtocolEvent[]): string[] {

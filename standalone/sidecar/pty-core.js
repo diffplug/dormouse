@@ -167,7 +167,21 @@ function withoutInternalDormouseEnv(env) {
   // reads DORMOUSE_STATE_DIR) must never write into the running app's state.
   delete next.DORMOUSE_STATE_DIR;
   delete next.DORMOUSE_RECOVERY_DIR;
+  // One rehydrated Tool's payload, never every pane a host launched from it
+  // spawns (docs/specs/dor-tool.md -> Reaping). Set below from `dehydrate`.
+  delete next.DORMOUSE_DEHYDRATE;
   return next;
+}
+
+// `TOOL_PAYLOAD_LIMIT` in dor-tools-lib/src/osc.ts, which bounds the payload
+// the renderer captured; mirrored here because this file loads no lib code.
+const DEHYDRATE_LIMIT = 4096;
+
+/** The `DORMOUSE_DEHYDRATE` a rehydrating spawn may set, or null: a bounded
+ *  string that can sit in an environment block. The Tool validates the rest. */
+function dehydrateEnv(value) {
+  return typeof value === 'string' && value.length > 0 && value.length <= DEHYDRATE_LIMIT && !value.includes('\0')
+    ? value : null;
 }
 
 // Win32 only. The bundled node.exe is patched to the GUI subsystem
@@ -365,6 +379,8 @@ function resolveSpawnConfig(options, runtime = {}) {
     COLORTERM: 'truecolor',
     DORMOUSE_SURFACE_ID: surfaceId || options?.id || '',
   };
+  const dehydrate = dehydrateEnv(options?.dehydrate);
+  if (dehydrate !== null) childEnv.DORMOUSE_DEHYDRATE = dehydrate;
   const integrated = applyShellIntegration(shell, childEnv, shellArgs, integrationDir, runtime);
 
   return {
@@ -379,6 +395,7 @@ function resolveSpawnConfig(options, runtime = {}) {
 }
 
 module.exports.resolveSpawnConfig = resolveSpawnConfig;
+module.exports.DEHYDRATE_LIMIT = DEHYDRATE_LIMIT;
 module.exports.withPrependedPath = withPrependedPath;
 module.exports.canonicalizeWindowsCwd = canonicalizeWindowsCwd;
 

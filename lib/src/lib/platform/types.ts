@@ -165,6 +165,9 @@ export interface SpawnPtyOptions {
   args?: string[];
   helper?: HelperIdentity;
   alert?: PersistedAlertState;
+  /** A rehydrated Tool's `DORMOUSE_DEHYDRATE`, set on this spawn alone
+   *  (`docs/specs/dor-tool.md` -> Reaping). */
+  dehydrate?: string;
 }
 
 export interface WritePtyOptions {
@@ -322,6 +325,9 @@ export interface PlatformAdapter {
   // answers `open` from its read-only snapshot. `dor tool -- <command>`
   // needs none of it and works everywhere.
   toolControl?(request: ToolHostRequest): Promise<ToolControlResult>;
+  /** This host stops idle Tools and restarts them with `SpawnPtyOptions.dehydrate`
+   *  (`docs/specs/dor-tool.md` -> Reaping). Absent where no process runs. */
+  readonly reapsTools?: boolean;
 
   // The repository holding each local directory, for Workspace auto-naming
   // (docs/specs/layout.md → "Workspace names"). Absent on a host with no local
