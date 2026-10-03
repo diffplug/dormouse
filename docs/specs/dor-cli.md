@@ -498,7 +498,9 @@ navigation verbs, nonbinding/informational controls, and execution scope.
   agent-browser), and the host reports Playwright's stream. **The call must wait past
   `BROWSER_REQUEST_TIMEOUT_MS`**, since the host's answer can queue behind a
   launch or close of the browser (rationale). A failure there adds a stderr
-  warning without changing the command's success.
+  warning without changing the command's success. **Exception: a fixed-DPR
+  Playwright `open` binds before navigating**, and on a DPR mismatch kills a
+  Surface it created and fails unopened.
 
 A `--surface` handle resolves against **listed** Surfaces ([Handle
 Model](#handle-model)), and the host applies two gates in order:
