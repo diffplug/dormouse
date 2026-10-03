@@ -434,6 +434,16 @@ describe('MobileTerminalUi session list', () => {
     expect(sections(container)).toEqual([['web', 'server', 'vite'], ['api', 'tests']]);
   });
 
+  it('lists rows with no group beside labelled ones without a label of their own', () => {
+    const api = { id: 'workspace:1', label: 'api' };
+    const container = renderSessions([
+      { id: 'a', title: 'server', group: api, episode: null },
+      { id: 'b', title: 'loose', episode: null },
+    ]);
+    expect([...container.querySelectorAll('h3')].map((h) => h.textContent)).toEqual(['api']);
+    expect([...container.querySelectorAll('button')].map((row) => row.textContent)).toContain('loose');
+  });
+
   it('shows no group label when every row shares one', () => {
     const only = { id: 'workspace:1', label: 'api' };
     const container = renderSessions([

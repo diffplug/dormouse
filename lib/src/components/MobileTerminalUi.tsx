@@ -41,6 +41,7 @@ import {
 import { useDynamicPalette } from '../lib/themes/use-dynamic-palette';
 import { isComposingKey, isEditableTarget } from '../lib/dom';
 import { TouchUiContext } from './touch-ui-context';
+import { TODO_PILL_TRACKING_CLASS } from './design';
 import { AlertRingInset, alertRingRow, useAlertRingBurst } from './alert-ring';
 import type { AlertEpisode } from '../lib/alert-episode';
 import { getTerminalInstance, type SessionStatus } from '../lib/terminal-registry';
@@ -367,11 +368,14 @@ function SessionsPane({
     <div className="h-full overflow-auto p-2">
       {groups.length < 2 ? rows(sessions) : (
         <div className="grid gap-3">
-          {groups.map(({ group, items }) => (
-            <section key={group.id} aria-label={group.label} className="grid gap-1">
-              <h3 className="truncate px-2 font-mono text-xs font-semibold tracking-[0.08em] text-muted">
-                {group.label}
-              </h3>
+          {groups.map(({ group, items }, index) => (
+            // By position: rows with no group and a group whose id is '' are two groups.
+            <section key={index} aria-label={group?.label} className="grid gap-1">
+              {group ? (
+                <h3 className={clsx('truncate px-2 font-mono text-xs font-semibold text-muted', TODO_PILL_TRACKING_CLASS)}>
+                  {group.label}
+                </h3>
+              ) : null}
               {rows(items)}
             </section>
           ))}
@@ -385,13 +389,13 @@ function SessionsPane({
  *  share one unlabelled group, so a list that names none is a single group. */
 function groupSessions(
   sessions: MobileTerminalSessionItem[],
-): Array<{ group: MobileTerminalSessionGroup; items: MobileTerminalSessionItem[] }> {
-  const groups = new Map<string | undefined, { group: MobileTerminalSessionGroup; items: MobileTerminalSessionItem[] }>();
+): Array<{ group?: MobileTerminalSessionGroup; items: MobileTerminalSessionItem[] }> {
+  const groups = new Map<string | undefined, { group?: MobileTerminalSessionGroup; items: MobileTerminalSessionItem[] }>();
   for (const session of sessions) {
     const key = session.group?.id;
     let entry = groups.get(key);
     if (!entry) {
-      entry = { group: session.group ?? { id: '', label: '' }, items: [] };
+      entry = { group: session.group, items: [] };
       groups.set(key, entry);
     }
     entry.items.push(session);
