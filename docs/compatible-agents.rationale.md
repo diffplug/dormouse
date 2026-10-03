@@ -18,6 +18,8 @@
 
 **Two settle-on-quiet heuristics died on the same fact.** Codex says nothing for ~250 ms and then prints its entire shutdown at once, so a poll that treats silence as completion exits before codex has spoken; both attempts to settle early on quiet lost the hint that way. Polling to the ceiling instead costs nothing, the record being written the moment each command is found.
 
+**Why the capture widens every pane first** (Copilot 1.0.88, macOS, 2026-10-03). Copilot lays its exit summary out for the pane and hard-wraps the `Resume` line below about 74 columns, so in a 40-column split the hint read `copilot --resume=ab5`, the rest of the id two lines down. Minimized panes and unshown Workspaces were also 2 columns wide (fixed separately), where Copilot printed no hint at all. Resizing to 250x50 before the first press makes every agent lay its hint out on one line; the PTYs die right after the capture. The marks wait 80 ms after the resize because a full-screen program answers it by redrawing what it shows, which can include an old hint; a redraw slower than that still lands in the scan.
+
 **Why widening the scan is not a free optimisation.** Scanning the whole buffer let a stale hint or an old launch echo win. The narrow scan also fails in the safe direction: buffer eviction can only discard fresh output, never promote stale output as fresh.
 
 **Where a missing hint comes from.** A Dormouse launched from inside a Claude Code session inherits `CLAUDE_CODE_CHILD_SESSION`, which disables transcript saving in claude, so it legitimately prints nothing to record.

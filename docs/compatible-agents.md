@@ -77,7 +77,7 @@ pnpm lint:specs
 
 These tests use fixtures and require no installed agents or credentials. Before submitting, also run `pnpm test` and verify the real agent in disposable conversations:
 
-- Interrupt it while idle and while its input contains unsent text. Record which gestures produce its resume hint and how long that takes.
+- Interrupt it while idle, mid-response, and while its input contains unsent text. Record which gestures produce its resume hint and how long that takes.
 - Check that an orderly Dormouse shutdown captures the conversation and that a cold start restores the same one, including when two panes use the same working directory.
 - Check watching during a response, after completion, at a permission prompt, and while idle. It should settle when attention is needed and should not keep ringing during idle redraws.
 - Record the agent version, operating system, Dormouse host tested, and any limitations. Do not claim a platform or scenario you have not tested.
@@ -88,11 +88,12 @@ Open a **draft pull request** with the entry, fixture, documentation, and verifi
 
 ### Capture
 
-- **Must use the shared `captureAgentRecovery` machine in both hosts**, supplying live ids, an acknowledged interrupt, a monotonic received count, output since a mark, and immediate record delivery.
+- **Must use the shared `captureAgentRecovery` machine in both hosts**, supplying live ids, a resize, an acknowledged interrupt, a monotonic received count, output since a mark, and immediate record delivery.
 - **Must capture before killing the target PTYs**, within the host's bounded teardown. Each host owns the target scope; interrupt every live PTY within it, regardless of recognized command, and exclude exited PTYs. (rationale)
 - **Must write one `^C` into each target PTY per interrupt call, never signal it.** The shared machine alone decides every further press. Host interrupts must settle within their timeout. (rationale)
-- **Never press a pane more than twice unless output since its latest press asks again** (`Ctrl+C again`), **and never more than three times.** (rationale)
+- **Never press a pane a third time unless it asked (`Ctrl+C again`) since its latest press, nor a fourth time.** (rationale)
 - **Never finish early on quiet or replace the retry gates with a blanket second press.** Poll until every target yields or the capture budget expires; retry timing and ask detection live in the module's comments. (rationale)
+- **Must widen every target before its first press, marking only after the resize settles.** (rationale)
 - **Must scan only output received after the mark taken before the first interrupt.** Never widen the scan into earlier output; buffer eviction may discard fresh output but must not promote stale output into the scan. (rationale)
 - **Must report each detected command immediately**, retaining earlier detections if a later target times out.
 
@@ -102,7 +103,7 @@ Source of truth: `captureAgentRecovery` / `RecoveryHost` in `lib/src/host/recove
 
 **Must derive supported executable names and resume options from `CODING_AGENTS`.**
 
-- **Must rebuild only a known invocation plus an opaque id.** The command is *rebuilt* as label, space, captured id, never sliced from the buffer, keeping the hint's executable alias; a long option's id may follow a space or `=`, and only Claude's legacy `claude --continue` omits it. An agent registered with `id: 'uuid'` must print a UUID; other ids begin with an ASCII alphanumeric and contain only ASCII alphanumerics, hyphens, and underscores. The invocation must end on a word break but nothing stronger (rationale).
+- **Must rebuild only a known invocation plus an opaque id.** The command is *rebuilt* as label, space, captured id, never sliced from the buffer, keeping the hint's executable alias; a long option's id may follow a space or `=`, and only Claude's legacy `claude --continue` omits it. A `uuid` agent's id must be a UUID; other ids begin with an ASCII alphanumeric and contain only ASCII alphanumerics, hyphens, and underscores. The invocation must end on a word break but nothing stronger (rationale).
 - **Must observe a separator after the newest invocation before capturing it.** Buffer end is insufficient, even at the capture deadline; never fall back to an older hint while the newest is unterminated. Pinned by `waits through every ID split` in `lib/src/host/recovery-capture.test.ts` (rationale).
 - **Must strip the scan window as a whole, in one pass, with an unterminated control swallowing the rest of it** — the string controls (OSC, DCS, SOS, PM, APC) **in either introducer form, `ESC` or bare C1**, and equally a CSI the window was cut off *inside* (rationale). **Must match every escape by its full ECMA-48 shape**, never by the Fe range (rationale). **Must share one implementation**: `stripTerminalControls` removes string controls by running `TerminalControlStreamFilter`, so the batch and streaming readers cannot disagree.
 - **Must strip in boundary mode**: complete non-string ESC/CSI sequences and standalone C1 controls become newlines, except SGR and charset designators. ESC and C1 counterparts must produce the same boundary. String controls and their payloads vanish; LF, CR, and TAB remain text boundaries; other C0 controls that do not move or erase text vanish. **Must discard incomplete trailing presentation controls without creating a boundary** (rationale).

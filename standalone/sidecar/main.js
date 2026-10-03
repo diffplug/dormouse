@@ -177,6 +177,7 @@ function handleLine(line) {
           recovery.beginCapture();
           const count = await captureAgentRecovery({
             liveIds: () => mgr.liveIds(),
+            resize: (id, cols, rows) => mgr.resize(id, cols, rows),
             // One press, and the caller decides about a second: `mgr.interrupt`
             // writes synchronously, so the ack is immediate.
             interrupt: async (ids) => { mgr.interrupt(ids); },

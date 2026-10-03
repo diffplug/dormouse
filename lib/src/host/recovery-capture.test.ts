@@ -3,6 +3,7 @@ import { AGENT_EXIT_FIXTURES } from '../lib/__fixtures__/coding-agents';
 import {
   BLIND_SECOND_PRESS_MS,
   MAX_PRESSES,
+  RECOVERY_SIZE,
   QUIET_BEFORE_RETRY_MS,
   captureAgentRecovery,
   type RecoveryHost,
@@ -17,6 +18,9 @@ class FakePtys implements RecoveryHost {
   time = 0;
   /** Every `^C` batch, in order. */
   readonly presses: string[][] = [];
+  /** Every host call that changes a PTY, in order. */
+  readonly calls: string[] = [];
+  private resized: Array<(id: string) => void> = [];
   readonly found: Record<string, string> = {};
   private readonly text = new Map<string, string>();
   private readonly count = new Map<string, number>();
@@ -41,6 +45,12 @@ class FakePtys implements RecoveryHost {
     return this;
   }
 
+  /** `data` arrives `delay` ms after the pane is resized. */
+  onResize(id: string, delay: number, data: string): this {
+    this.resized.push((target) => { if (target === id) this.queue.push({ due: this.time + delay, id, data }); });
+    return this;
+  }
+
   exit(id: string): this {
     this.live = this.live.filter((other) => other !== id);
     return this;
@@ -48,7 +58,18 @@ class FakePtys implements RecoveryHost {
 
   liveIds(): string[] { return [...this.live]; }
 
+  resize(id: string, cols: number, rows: number): void {
+    this.calls.push(`resize ${id} ${cols}x${rows}`);
+    for (const react of this.resized) react(id);
+  }
+
+  /** Virtual time since the first `^C` (the capture widens and settles before it). */
+  get sincePress(): number { return this.time - (this.firstPressAt ?? this.time); }
+  private firstPressAt: number | null = null;
+
   async interrupt(ids: string[]): Promise<void> {
+    this.firstPressAt ??= this.time;
+    this.calls.push(`^C ${ids.join(',')}`);
     this.presses.push([...ids]);
     for (const id of ids) {
       const n = this.presses.filter((batch) => batch.includes(id)).length;
@@ -105,7 +126,7 @@ describe('captureAgentRecovery', () => {
         .onPress('a', 1, 80, output.slice(cut));
       await captureAgentRecovery(host);
       expect(host.found.a, `split at ID character ${length}`).toBe(command);
-      expect(host.time).toBe(80);
+      expect(host.sincePress).toBe(80);
     }
   });
 
@@ -140,7 +161,7 @@ describe('captureAgentRecovery', () => {
 
     // Second press well inside the blind window, so the ask is what triggered it.
     expect(host.presses).toEqual([['a'], ['a']]);
-    expect(host.time).toBeLessThan(BLIND_SECOND_PRESS_MS);
+    expect(host.sincePress).toBeLessThan(BLIND_SECOND_PRESS_MS);
     expect(host.found.a).toBe(CLAUDE_HINT);
   });
 
@@ -156,7 +177,7 @@ describe('captureAgentRecovery', () => {
     expect(host.presses).toHaveLength(2);
     // Not at BLIND_SECOND_PRESS_MS: the pane was still printing, and a press
     // landing mid-print destroys the hint.
-    const secondPressAt = host.time;
+    const secondPressAt = host.sincePress;
     expect(secondPressAt).toBeGreaterThanOrEqual(BLIND_SECOND_PRESS_MS + QUIET_BEFORE_RETRY_MS);
   });
 
@@ -168,12 +189,12 @@ describe('captureAgentRecovery', () => {
     const interrupt = host.interrupt.bind(host);
     host.interrupt = async (ids) => {
       // Pi's second press after 500ms only clears the editor again.
-      if (host.presses.length === 1 && host.time >= 500) return;
+      if (host.presses.length === 1 && host.sincePress >= 500) return;
       await interrupt(ids);
     };
     expect(await captureAgentRecovery(host)).toBe(1);
     expect(host.presses).toEqual([['pi'], ['pi']]);
-    expect(host.time).toBeLessThan(500);
+    expect(host.sincePress).toBeLessThan(500);
     expect(host.found.pi).toBe(fixture.command);
   });
 
@@ -213,7 +234,7 @@ describe('captureAgentRecovery', () => {
       host.onPress('pi', 2, 40, fixture('Pi').output);
       const interrupt = host.interrupt.bind(host);
       host.interrupt = async (ids) => {
-        if (host.presses.length === 1 && host.time >= 500) return;
+        if (host.presses.length === 1 && host.sincePress >= 500) return;
         await interrupt(ids);
       };
       expect(await captureAgentRecovery(host)).toBe(1);
@@ -266,6 +287,24 @@ describe('captureAgentRecovery', () => {
     expect(host.presses.slice(1)).toEqual([['silent']]);
   });
 
+  it('widens every target before its first press, so no agent wraps its hint', async () => {
+    // Copilot hard-wraps its exit summary to the pane: below ~74 columns the
+    // separator its wrap adds lands inside the id.
+    const host = new FakePtys(['a', 'b']);
+    await captureAgentRecovery(host, { maxWaitMs: 100 });
+    const size = `${RECOVERY_SIZE.cols}x${RECOVERY_SIZE.rows}`;
+    expect(host.calls.slice(0, 3)).toEqual([`resize a ${size}`, `resize b ${size}`, '^C a,b']);
+    expect(RECOVERY_SIZE.cols).toBeGreaterThanOrEqual(200);
+  });
+
+  it('does not scan the repaint the widening provokes', async () => {
+    // A full-screen program redraws what it shows — here a hint printed long
+    // before this capture — and that is not output the interrupt produced.
+    const host = new FakePtys(['a']).onResize('a', 20, `\r\nold: ${CLAUDE_HINT}\r\n`);
+    await captureAgentRecovery(host);
+    expect(host.found).toEqual({});
+  });
+
   it('never presses an exited pane', async () => {
     const host = new FakePtys(['alive', 'gone']).exit('gone');
     await captureAgentRecovery(host);
@@ -305,7 +344,7 @@ describe('captureAgentRecovery', () => {
   it('exits as soon as every pane has yielded', async () => {
     const host = new FakePtys(['a']).onPress('a', 1, 40, `\r\n${CLAUDE_HINT}\r\n`);
     await captureAgentRecovery(host, { maxWaitMs: 10_000 });
-    expect(host.time).toBeLessThanOrEqual(80);
+    expect(host.sincePress).toBeLessThanOrEqual(80);
   });
 
   it('restricts the capture to the ids it is given', async () => {

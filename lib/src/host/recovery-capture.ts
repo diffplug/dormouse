@@ -75,6 +75,16 @@ const ASK_TAIL_CHARS = 8192;
 // window is by far the larger of the two, so it sets the overlap.
 const SCAN_OVERLAP_CHARS = ASK_TAIL_CHARS;
 
+// Every target is resized to this before its first press. Agents lay their exit
+// hint out for the pane: Copilot hard-wraps it below ~74 columns, and the
+// separator its wrap adds lands inside the id. These PTYs are killed right after
+// the capture, so nobody sees the size.
+export const RECOVERY_SIZE = { cols: 250, rows: 50 };
+
+// How long the resize gets to reach each program before the marks are taken:
+// the repaint it provokes is old screen content, not output of the interrupt.
+const WIDEN_SETTLE_MS = 80;
+
 /** How long the whole capture may take by default. */
 export const DEFAULT_RECOVERY_WAIT_MS = 1300;
 
@@ -90,6 +100,8 @@ export interface RecoveryHost {
   /** Ids that can still take a `^C`. An exited PTY can neither receive one nor
    *  ever yield a hint, so it must not appear here. */
   liveIds(): string[];
+  /** Resize a PTY, as a window resize would. */
+  resize(id: string, cols: number, rows: number): void;
   /** Send exactly ONE `^C` to each id and resolve when the host has acked it.
    *  The second press is this module's decision, never the host's. */
   interrupt(ids: string[]): Promise<void>;
@@ -152,6 +164,9 @@ export async function captureAgentRecovery(
     log.info('[recovery] no live PTYs to interrupt');
     return 0;
   }
+
+  for (const id of liveIds) host.resize(id, RECOVERY_SIZE.cols, RECOVERY_SIZE.rows);
+  await sleep(WIDEN_SETTLE_MS);
 
   const commands: Record<string, string> = noCommands();
   // Marks come from the exact monotonic counter the buffer already maintains, not

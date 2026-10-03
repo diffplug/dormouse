@@ -18,4 +18,6 @@ test('pty-core is created with the shared sliceSince, so recovery capture reads 
 test('recovery capture and the record take are answered from pty-core marks', () => {
   assert.match(source, /receivedChars:\s*\(id\)\s*=>\s*mgr\.receivedChars\(id\)/);
   assert.match(source, /outputSince:\s*\(id,\s*mark\)\s*=>\s*mgr\.outputSince\(id,\s*mark\)/);
+  // Widens each target before its first press (recovery-capture.ts -> RECOVERY_SIZE).
+  assert.match(source, /resize:\s*\(id,\s*cols,\s*rows\)\s*=>\s*mgr\.resize\(id,\s*cols,\s*rows\)/);
 });
