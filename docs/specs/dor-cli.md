@@ -133,7 +133,35 @@ Source of truth: `dor-lib-common/src/spawn.ts`,
 ## Host Plumbing
 
 The control channel carries every Surface verb — `send` keystrokes in, `read`
-screen and scrollback out, `kill` — and `dor app` from `dor` to the Wall.
+screen and scrollback out, `kill` — and `dor app` from `dor` to the Wall. The
+control server runs in the sidecar (Standalone) or `pty-host.js` (VS Code):
+
+```mermaid
+sequenceDiagram
+  participant D as dor
+  participant S as control server
+  participant H as Rust / extension host
+  participant A as TauriAdapter / VSCodeAdapter
+  participant W as Wall handler
+  D->>S: request line, dor-* requestId
+  S->>H: dor:controlRequest
+  H->>A: to the routed window / owning webview
+  A->>W: dormouse:control-request + AbortSignal
+  W-->>A: respond
+  A-->>H: dor_control_response / dor:controlResponse
+  H-->>S: dor:controlResponse
+  S-->>D: response
+  opt socket closes, or server reaper fires
+    S-->>D: timeout error (reaper only)
+    S->>H: dor:controlCancel {requestId}
+    alt Standalone
+      H->>A: the window that took the request
+    else VS Code
+      H->>A: broadcast to every webview
+    end
+    A->>W: signal aborts
+  end
+```
 
 ### Standalone
 
@@ -146,10 +174,6 @@ and sets `DORMOUSE_SURFACE_ID` per PTY. **Rust must not set
 control variables to the env `pty-core` merges into every shell only once the
 socket is bound, holding stdin commands until then so no PTY spawns with the
 channel's fate undecided.
-
-Control direction: `dor` → sidecar JSON-lines net socket → Rust command/event
-bridge → `TauriAdapter` `CustomEvent("dormouse:control-request")` → Wall
-handler, and back along the same hops.
 
 Routing precedence, the refusal for a Surface no window owns, and a cancel
 following its own request belong to `docs/specs/standalone.md` -> "Routing"; a
@@ -165,10 +189,6 @@ on each PTY spawn. **`getDorRuntimeEnv` must omit both control variables:** the
 token reaches `pty-host.js` through the fork env alone, and the host folds it
 with a bound socket path onto each spawn's env itself. Its `ready` message is
 held until the channel settles, so no spawn can race the bind.
-
-Control direction: `dor` → pty-host JSON-lines net socket → extension-host
-child-process IPC → `message-router` → `VSCodeAdapter`
-`CustomEvent("dormouse:control-request")` → Wall handler, and back.
 
 One extension host can hold multiple Dormouse webviews, so the request carries
 `DORMOUSE_SURFACE_ID` and `message-router.ts` routes it to the webview that owns
@@ -193,15 +213,12 @@ fixed client deadline (`dor ensure --restart` at 60s).
 **Must answer a malformed control request with an error before forwarding it,
 and keep serving the connection** (`standalone/sidecar/dor-control-server.test.js`).
 
-**Some requests outlive their client.** When a socket closes with entries still
-pending, or the server's own timer fires, the server drops the entry and emits
-`dor:controlCancel { requestId }`. Standalone carries it over the request's own
-sidecar → Rust → adapter hop, which requires that **`dor-*` request ids never
-collide with Rust's own `req-*` invoke ids**; VS Code broadcasts it over
-child-process IPC to every active router, since only the webview holding that id
-has anything to abort. The adapter aborts the handler's signal. **A handler that
-parks must release whatever it armed when the signal fires** — nothing it
-responds with afterwards can reach the client.
+**Some requests outlive their client.** Standalone routes their cancel by
+request id, which requires that **`dor-*` request ids never collide with Rust's own `req-*`
+invoke ids**; VS Code broadcasts it, since only the webview holding that id has
+anything to abort.
+**A handler that parks must release whatever it armed when the signal fires** —
+nothing it responds with afterwards can reach the client.
 
 **Must cancel `ensure`'s polling when the client disconnects**: before an
 interrupted command returns to its prompt it prevents the relaunch; during
@@ -263,18 +280,14 @@ Invariants:
   (`window:main`, `window:ws-2`), and a host with one Window answers `window:1`;
   each accepts its own ref bare. A Surface ref alone never identifies a
   Workspace.
-- **One Wall answers each request**, resolved in order: the Window's own verbs
-  ([dor workspace](#dor-workspace), and `dor list --all`, which fans out to
-  every Wall), an explicit `--workspace`, the Workspace holding the target
-  Surface when it is named by its **stable id** — unique Window-wide, unlike
-  `surface:N` — else the Workspace owning the calling Surface, else the active
-  one. **Nothing mounted answers `workspace '<ref>' is still mounting` for the
-  active Workspace** after a bounded retry covering the tick between a
-  Workspace's creation and its Wall registering — never left to the caller's
-  deadline, which every managed `dor agent-browser` would pay
-  (`docs/specs/dor-browser.md` → "Managed identity"). **A `--workspace` the store
-  resolves but whose Wall has not registered waits out that same retry**, then
-  answers the same refusal, not the unknown-Workspace one. **Every request is
+- **One Wall answers each request**, in the figure's order below; `dor list
+  --all` fans out to every Wall, and a **stable id** is unique Window-wide,
+  unlike `surface:N`. **Nothing mounted answers `workspace '<ref>' is still
+  mounting` for the active Workspace** after a bounded retry covering the tick
+  between a Workspace's creation and its Wall registering, never left to the
+  caller's deadline (`docs/specs/dor-browser.md` → "Managed identity"); **a
+  resolved `--workspace` whose Wall has not registered answers the same**, not
+  the unknown-Workspace refusal. **Every request is
   answered, including a container ref of the wrong type and a handler that
   throws** — an unanswered one blocks its caller to the deadline. A Workspace
   being closed refuses the Surface-creating verbs (`docs/specs/layout.md` →
@@ -285,6 +298,28 @@ Invariants:
   failure — what gives `--workspace` a reference to place against.
   Cross-window duplicate ids follow `docs/specs/vscode.md` → "Peer surfaces
   across windows".
+
+```mermaid
+flowchart TD
+  R[request] --> AT{app.* or tool.*?}
+  AT -- yes --> WIN[the Window answers]
+  AT -- no --> BAD{helper --surface, or another --window?}
+  BAD -- yes --> REF[refuse]
+  BAD -- no --> C{workspace verb, list --all?}
+  C -- yes --> WIN
+  C -- no --> WS{--workspace?}
+  WS -- unresolved --> REF
+  WS -- registered --> H[that Wall answers]
+  WS -- unregistered --> P["re-resolve next tick, refuse if still unmounted"]
+  WS -- absent --> ST{stable-id target held?}
+  ST -- yes --> H
+  ST -- no --> CA{caller or helper source held?}
+  CA -- yes --> H
+  CA -- no, helper --> P
+  CA -- no --> AC{active Wall registered?}
+  AC -- yes --> H
+  AC -- no --> P
+```
 
 Source of truth: `dor/src/commands/shared.ts`, `parseWorkspaceRef` in
 `dor/src/protocol.ts`, `classifySurfaceTarget` in
@@ -411,7 +446,7 @@ Source of truth: `dor/src/commands/workspace.ts`, `handleWorkspaceControl` in
 ## dor app
 
 **`dor app` verbs act on the running app, so the webview's control router
-answers them before resolving any Workspace, Surface, or Window param**; Rust
+answers them first** ([Handle Model](#handle-model)); Rust
 still delivers them by the caller's Surface ([Standalone](#standalone)).
 `restart` is the only one: it asks the host for the quit that relaunches
 (`docs/specs/standalone.md` → "Restart"), so the running-work confirmation still
@@ -587,7 +622,7 @@ Source of truth: `createDorControlServer` in `standalone/sidecar/dor-control-ser
 
 **Must route `dor tool` and `dor open` through the Tool launch contract**, including approval, explicit-key reuse, and placement (`docs/specs/dor-tool.md` → CLI).
 
-**The router answers `tool.list` (`dor tool --list`) and `tool.openHandlers` (the `dor open` picker) before resolving any Workspace or Surface**, like `app.*`.
+**The router answers `tool.list` (`dor tool --list`) and `tool.openHandlers` (the `dor open` picker) first**, like `app.*` ([Handle Model](#handle-model)).
 
 Source of truth: `toolCommand` in `dor/src/commands/tool.ts`; `openCommand` in `dor/src/commands/open.ts`; `handleToolControl` in `lib/src/components/wall/tool-control.ts`.
 

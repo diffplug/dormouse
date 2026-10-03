@@ -5,23 +5,34 @@
 
 ## Flow
 
-1. The laptop's **One-time connection** button runs `oneTimeOpen`
-   ([Service and hosts](#service-and-hosts)).
-2. `OneTimeRuntime` mints a one-use X25519 keypair and opens the Burrow route;
-   the room answers with `OneTimeRoomFrame` and idles, hibernated, until a
-   phone joins ([Hosted rendezvous](#hosted-rendezvous)).
-3. The laptop shows the [link](#link) as a QR code and as text
-   ([Laptop UI](#laptop-ui)).
-4. The phone page takes and erases the fragment, then waits for the Connect
-   tap ([Phone page](#phone-page)).
-5. The tap runs `connectOnce` ([Phone client](#phone-client)), which completes the
-   handshake ([Burrow runtime](#burrow-runtime)).
-6. The page shows the two digits; the laptop's approval modal takes the one
-   attempt.
-7. A match promotes the session, which waits until both directions have
-   switched to the direct path.
-8. Both ends leave the room, which deletes itself; the direct channel carries
-   the session from then on and decides when it ends.
+Until the switch the room forwards every phone↔laptop message verbatim
+([Hosted rendezvous](#hosted-rendezvous)); the laptop's state names in the
+notes are `OneTimeState`s.
+
+```mermaid
+sequenceDiagram
+  participant L as Laptop (OneTimeRuntime)
+  participant H as OneTimeRoom
+  participant P as Phone (OneTimeClient)
+  Note over L: oneTimeOpen: opening, mints the one-use keypair
+  L->>H: Burrow route
+  H->>L: OneTimeRoomFrame
+  Note over L: waiting, shows the link as QR and text
+  Note over P: takes and erases the fragment, waits for the Connect tap
+  Note over P: connectOnce: mints a static, writes message 1
+  P->>H: client route
+  P->>L: init (message 1)
+  Note over L: link reserved, key erased
+  L->>P: response (message 2)
+  Note over P: shows the two digits
+  P->>L: OneTimeRequestV1
+  Note over L: confirming, approval modal, one attempt
+  L->>P: OneTimeOutcomeV1
+  Note over L,P: connecting, DIRECT_ONLY_DEADLINE_MS to switch both directions
+  L->>H: close at the switch (connected)
+  P->>H: close at the switch
+  Note over H: deletes itself, the channel carries the session
+```
 
 ## Link
 
@@ -158,22 +169,16 @@ Source of truth: `OneTimeRuntime` in
 
 **`OneTimeClient` is single-use: one `connectOnce`, one rendezvous socket, and
 at most one session**, on `ClientSessionCore`, direct or not at all.
-`connectOnce`:
-
-1. Mints a static with `generateNoiseKeyPair`, writes message 1, then joins the
-   link's room on the client route and completes IK; both payloads are empty.
-2. Hands the two digits to `onCode`, sends `OneTimeRequestV1 {code, label}`,
-   and reads one outcome.
-3. On `ok`, establishes the session and offers the direct path, which has
-   `DIRECT_ONLY_DEADLINE_MS` to carry both directions; a decline, an abandoned
-   attempt, or the deadline fails the attempt.
-4. At the switch, closes the rendezvous normally and resolves
-   `{ok: true, burrowLabel}`.
+`connectOnce` is the phone's half of [Flow](#flow): message 1 exists before the
+socket opens, both handshake payloads are empty, and at the switch it closes
+the rendezvous normally and resolves `{ok: true, burrowLabel}`; a decline, an abandoned attempt,
+or no switch by `DIRECT_ONLY_DEADLINE_MS` fails it.
 
 - **Never open a socket outside `connectOnce`**, which runs once per client
   and opens none for an expired link.
-- **Must end steps 1–2 at the room's hard deadline**, WebCrypto and the
-  socket's open included; step 3 runs on the direct deadline instead.
+- **Must end the handshake and the confirmation at the room's hard deadline**,
+  WebCrypto and the socket's open included; the direct path runs on the direct
+  deadline instead.
 - **Never import store, passkey, push, or worker code** (the static's rule:
   `docs/specs/remote-security-model.md` -> "One-time connection").
 - Every protocol-v1 method refuses until both directions are direct (Direct
