@@ -235,9 +235,24 @@ Source of truth: `handleDualTap` in `lib/src/components/wall/keyboard/handle-dua
 
 **Must support Workspace navigation in command mode through bare `1`–`9`, arrows, and `Enter`.** Digits select by strip position; out-of-range positions are consumed without switching. **Never bind `c`, `n`/`p`, `$`, or `&`.** Rename inputs and confirmation dialogs retain their own controls.
 
-All keys are handled in one capture-phase `keydown` listener on `window`, which delegates in a fixed order: *(an inactive Workspace or an answered key stops here)* → dual-tap → editable-field clipboard → mouse-selection keys → *(passthrough stops here)* → *(a rename or the chrome lease stops here)* → kill confirmation → *(an open dialog stops here)* → Workspace shortcuts → pane shortcuts → pane navigation. **A key whose target sits inside `[data-terminal-context]` leaves that chain before dual-tap**: it reaches diagnostic-text copy, editable-field clipboard, then mouse-selection keys against the focused context terminal, and stops — so no Wall gesture, the mode-exit dual-tap included, fires from inside an open context. **Must let one Wall answer each key**, even a key that activates another Workspace. **Must prevent default and stop propagation for a handled key and its `keyup`**, which win32-input-mode or kitty would report to the program. Bare Meta/Shift presses stop only internal dispatch; the detector leaves their DOM event untouched.
+One capture-phase `keydown` listener on `window` delegates in a fixed order; a handler that handles the key, or a gate that holds, ends the chain:
 
-That order is load-bearing twice: a rename input suppresses the pane shortcuts but **not** the mode-exit gesture or the field's own clipboard chords; and a staged kill confirmation hijacks each key reaching it before the dialog gate, so the confirm letter works even though the modal is open.
+```mermaid
+flowchart TD
+  K["window keydown, capture phase"] --> A{"Wall active, key unanswered?"}
+  A -- yes --> X{"target inside data-terminal-context?"}
+  X -- yes --> X1["diagnostic copy → editable-field clipboard → mouse-selection keys on the context terminal"]
+  X -- no --> D["dual-tap → editable-field clipboard → mouse-selection keys"]
+  D --> P{"passthrough?"}
+  P -- no --> R{"pane rename or chrome lease?"}
+  R -- no --> KC["kill confirmation"]
+  KC --> DL{"dialog lease held?"}
+  DL -- no --> W["Workspace shortcuts → pane shortcuts → pane navigation"]
+  M["iframe shim leader message, proxy origin only"] --> MA{"Wall active and passthrough?"}
+  MA -- yes --> CM["command mode"]
+```
+
+**A key targeted inside `[data-terminal-context]` leaves the chain before dual-tap**, so no Wall gesture, the mode-exit dual-tap included, fires from inside an open context. **Must let one Wall answer each key**, even a key that activates another Workspace. **Must prevent default and stop propagation for a handled key and its `keyup`**, which win32-input-mode or kitty would report to the program. Bare Meta/Shift presses stop only internal dispatch; the detector leaves their DOM event untouched. A staged kill confirmation answers before the dialog gate, so its letter works while its modal is open.
 
 **Every open dialog holds its own reference-counted lease on that gate**, and command-mode dispatch resumes only once the last lease is released.
 
