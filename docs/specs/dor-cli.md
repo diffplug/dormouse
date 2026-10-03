@@ -36,10 +36,8 @@ return the CLI's exit status** (`dor/test/launcher.test.mjs`, including
 Public PTY env:
 
 - `DORMOUSE_NODE` — Node runtime the launcher execs; `process.execPath` under VS
-  Code. **On Windows the standalone host must point this at a console-subsystem
-  node**, never its GUI-subsystem bundled node, which drops all stdout/stderr
-  under a shell's ConPTY (rationale; `docs/specs/standalone.md`, Windows node
-  subsystem).
+  Code; standalone on Windows: `docs/specs/standalone.md` -> "Windows node
+  subsystem".
 - `DORMOUSE_CLI_JS` — absolute path to staged `dist/dor.js`.
 - `DORMOUSE_SURFACE_ID` — stable invoking Session/surface id.
 - `DORMOUSE_HOST` — hosting app kind: `vscode` or `standalone`.
@@ -154,10 +152,9 @@ bridge → `TauriAdapter` `CustomEvent("dormouse:control-request")` → Wall
 handler, and back along the same hops.
 
 Routing precedence, the refusal for a Surface no window owns, and a cancel
-following its own request belong to `docs/specs/standalone.md` → Routing. **A
-target the registry cannot place — an unknown ref, or a name two windows use —
-reaches the caller's own window, which resolves it locally or refuses it by
-name.**
+following its own request belong to `docs/specs/standalone.md` -> "Routing"; a
+target the registry cannot place, to `docs/specs/standalone.md` -> "Workspace
+registry".
 
 ### VS Code
 

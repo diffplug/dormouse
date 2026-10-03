@@ -584,10 +584,11 @@ Source of truth: `restoreWindowOrFresh` in `standalone/src/window-restore.ts`.
 
 **Every Workspace saving at the same moment costs one `pty_get_cwds`**: both
 adapters fold the calls of one microtask into a single invoke
-(`standalone/src/coalesce-cwds.ts`). **A listing that spans terminals costs one
-`pty_get_open_ports_many`**, which the sidecar answers from one process-table
-read and one socket scan; its deadline is `docs/specs/transport.md` → "Port scan
-deadlines".
+(`standalone/src/coalesce-cwds.ts`). A listing's one scan
+(`docs/specs/dor-cli.md` -> "Current Implemented Commands") is one
+`pty_get_open_ports_many`, which the sidecar answers from one process-table
+read and one socket scan; its deadline is
+`docs/specs/transport.md` -> "Port scan deadlines".
 
 **Nothing is deleted at boot but orphaned session temp files and what the
 arrival merge settles** (`docs/specs/transport.md` → "Retiring the transcripts already on disk").
