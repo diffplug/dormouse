@@ -292,3 +292,17 @@ describe("TutorialShell tab completion", () => {
     expect(program.handleInput).toHaveBeenCalledWith("\t");
   });
 });
+
+describe("TutorialShell Ctrl+C", () => {
+  it("abandons the line for a new prompt without running it", () => {
+    const startProgram = vi.fn(() => null);
+    const output: string[] = [];
+    const shell = new TutorialShell((data) => output.push(data), startProgram);
+    shell.handleInput("tut\x03");
+    expect(output.join("")).toContain("tut^C\r\n\x1b]633;A\x07");
+    output.length = 0;
+    shell.handleInput("\r");
+    expect(startProgram).not.toHaveBeenCalled();
+    expect(output.join("")).not.toContain("633;E");
+  });
+});

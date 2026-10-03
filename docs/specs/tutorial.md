@@ -80,7 +80,7 @@ Pocket reuses `cp-select` / `cp-raw` / `cp-rewrap` but drops `cp-override`: Sele
 `TutorialShell` ([Layout](#layout)):
 
 * **Shell integration must be reported for every command it runs** — `OSC 633 ; A/B` around the prompt, `633 ; E` + `633 ; C` on launch, `633 ; D` on exit. WATCHING is keyed on the running command's name (`docs/specs/alert.md`), and the OSCs also keep `docs/specs/terminal-state.md`'s keystroke fallback from engaging here (rationale).
-* **While a program runs, every input byte goes to it** — `\x03` included, which the runners treat as quit — as do bytes left in the chunk after the Enter that launched it. On exit the terminal returns to the prompt instead of restarting the program.
+* **While a program runs, every input byte goes to it** — `\x03` included, which the runners treat as quit — as do bytes left in the chunk after the Enter that launched it. On exit the terminal returns to the prompt instead of restarting the program. At the prompt, `\x03` abandons the line for a new prompt and runs nothing.
 
 **The only commands are the ones `startProgram` knows** ([Layout](#layout)) and the desktop's `cd`, `ls`, and `pwd`; anything else prints an "Unknown command" line and exits `127`.
 

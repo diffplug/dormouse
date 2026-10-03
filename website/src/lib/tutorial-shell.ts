@@ -216,6 +216,13 @@ export class TutorialShell {
           if (rest) launchedProgram.handleInput(rest);
           return;
         }
+      } else if (ch === '\x03') {
+        // Ctrl+C abandons the line, as a shell's interrupt does: nothing runs.
+        this.sendOutput('^C\r\n');
+        this.lineBuffer = '';
+        this.historyIndex = null;
+        this.historyDraft = '';
+        this.showPrompt();
       } else if (ch === '\x7f' || ch === '\b') {
         if (this.lineBuffer.length > 0) {
           this.lineBuffer = this.lineBuffer.slice(0, -1);
