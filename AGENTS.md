@@ -6,6 +6,7 @@ A mouse-friendly multitasking terminal built with pnpm, react, typescript, vite,
 
 ```
 pnpm install     # install deps
+pnpm setup:git   # once per clone: merge markdown sentence by sentence
 pnpm build       # build lib, vscode extension, Pocket, website, and Hosted
 ```
 
@@ -133,6 +134,9 @@ Six sibling lints run in `pnpm test`. Five enforce one invariant a spec states i
 
 `scripts/spec-lint-selftest.mjs` plants one defect per finding check in the spec lint. The `deploy`, `e2e`, and `loopback` lints carry self-tests that mutate each rule in whichever direction it points: a present-control rule has its control deleted (and, for exact-count rules, a copy added), a `forbidden` rule has the banned text appended. `scripts/e2e-lint-selftest.mjs` is mostly the second kind; `scripts/deploy-lint-selftest.mjs` mostly the first. Either way the lint must go red. **A rule added to one of these lints without its self-test case is not enforced** — it is a claim that something is checked. They share plumbing, and only that, through `scripts/lint-kit.mjs`. `scripts/installer-verify-test.mjs` (also `pnpm lint:deploy`) runs the installer shell helpers lint can only read, extracted from the shipped files; `scripts/ps1-cmdlet-lint-selftest.mjs` carries the `ps1-cmdlet` lint's mutations. `pnpm test` also runs `scripts/clamp-issue-body-selftest.mjs`, the test for `scripts/clamp-issue-body.mjs` (the helper the audit workflows use to keep an issue body postable); it lives at the repo root because its callers do.
 
+## Markdown
+
+**Must write each markdown paragraph and list item on one source line**, in every tracked `*.md` and `*.mdx`: a newline is a block boundary, never a wrap, and never a hard line break. `scripts/md-unwrap.mjs` (`pnpm lint:md`, part of `pnpm test`) enforces it; `node scripts/md-unwrap.mjs --fix` joins wrapped paragraphs. `pnpm setup:git` makes `scripts/md-merge.mjs` this clone's merge driver for them, so edits to different sentences of one paragraph merge; a conflict leaves its sentences one per line for `--fix` to rejoin once resolved.
 
 ## Design
 

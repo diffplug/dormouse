@@ -75,3 +75,12 @@ test('changed selection resolves a newly present untracked referenced source', t
   assert.deepEqual(reports.map(report => report.spec), ['docs/specs/example.md']);
   assert.ok(reports[0].references.includes('src/new.ts'));
 });
+
+test('a source pointer is measured in the files it names', t => {
+  const { root, run } = fixture(t);
+  for (const name of ['a', 'b', 'c', 'd', 'e']) writeFileSync(join(root, `src/${name}.ts`), 'export {};\n');
+  const pointer = (names) => 'Source of truth: ' + names.map(name => `\x60${name}\x60 in \x60src/${name}.ts\x60`).join('; ') + '.\n';
+  appendFileSync(join(root, 'docs/specs/example.md'), '\n' + pointer(['a', 'b', 'c', 'd']) + '\n' + pointer(['a', 'b', 'c', 'd', 'e']));
+  const hits = run().specs.find(report => report.spec === 'docs/specs/example.md').prose.filter(hit => hit.kind === 'POINTER');
+  assert.deepEqual(hits.map(hit => [hit.line, hit.detail]), [[7, '5-file source pointer']]);
+});
