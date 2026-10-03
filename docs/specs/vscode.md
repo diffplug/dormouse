@@ -176,7 +176,7 @@ Source of truth: `VsCodeBurrowStateStore` in `vscode-ext/src/burrow-store.ts`, `
 
 *The directory.* On unix every bind and connect is held to `peerDirIsSafe()`, the predicate the `dor` control socket uses (`docs/specs/security-local.md` → "The dor control socket"). A loose directory we own is tightened; anything else is somebody else's and **the peer link stands down for good**, releasing the callers waiting on the contention. Windows named pipes carry their own ACL and skip this layer.
 
-*The handshake.* The shared secret is a mode-0600 `burrow.peer-token` in `globalStorageUri`, **created once with an exclusive `wx` write rather than a rename** so two windows starting together agree on one token. **Treat an empty read as *not yet written*, never as the token** (rationale); **exhausting that bounded wait latches the same permanent stand-down** as an unsafe directory. The token **never crosses the socket**; three frames prove mutual knowledge of it:
+*The handshake.* The shared secret is a mode-0600 `burrow.peer-token` in `globalStorageUri`, **created once with an exclusive `wx` write rather than a rename** so two windows starting together agree on one token. **Treat an empty read as *not yet written*, never as the token**, waiting it out with a bounded retry (rationale); **exhausting that wait latches the same permanent stand-down** as an unsafe directory. The token **never crosses the socket**; three frames prove mutual knowledge of it:
 
 1. `challenge { nonce }` — the *server* speaks first, on accept, so a client never volunteers a proof into whatever bound the path.
 2. `hello { nonce, proof }` — the client answers `HMAC-SHA256(token, "client:" + relayNonce)` with a fresh nonce of its own.
