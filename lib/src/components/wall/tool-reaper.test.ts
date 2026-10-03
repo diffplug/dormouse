@@ -17,6 +17,7 @@ import { recordToolDirty, resetToolDirty } from '../../lib/tool-dirty-store';
 import { applyLiveToolEvents, recordToolEvents } from '../../lib/tool-events';
 import { getToolReap, isToolReaped, isToolStopping, markToolReaped, resetToolReaps } from '../../lib/tool-reap-store';
 import { createLathWallEngine, toolLeafMeta } from './lath-wall-engine';
+import { _resetPendingKillsForTesting, addPendingKill } from '../../lib/pending-kills';
 import { rehydrateTool, stopTool, TOOL_STOP_GRACE_MS, toolReapBlocker } from './tool-reaper';
 
 vi.mock('@xterm/xterm', () => import('../../lib/xterm-test-mock'));
@@ -115,6 +116,17 @@ describe('toolReapBlocker', () => {
   it('refuses a Tool whose browser is popped out, which is in sight in its own window', () => {
     const lath = servingTool({ renderMode: 'agent-browser-popout' });
     expect(toolReapBlocker(ID, lath.getMeta(ID)?.params)).toMatch(/popped out/);
+  });
+
+  it('refuses a pending kill, whose restore must bring back the same process', () => {
+    const lath = servingTool();
+    addPendingKill(
+      { kind: 'surface', id: ID, workspaceId: 'workspace:1' as never, title: 't', label: 'Tool' },
+      { restore: () => {}, finalize: () => {} },
+    );
+    expect(toolReapBlocker(ID, lath.getMeta(ID)?.params)).toMatch(/pending kill/);
+    _resetPendingKillsForTesting();
+    expect(toolReapBlocker(ID, lath.getMeta(ID)?.params)).toBeNull();
   });
 
   it('refuses a preview slot, and a command other than the designated one', () => {
