@@ -103,6 +103,7 @@ delete process.env.DORMOUSE_CONTROL_SOCKET;
 
 const dorControl = createDorControlServer({
   token: dorControlToken,
+  getHelperParentId: mgr.getHelperParentId,
   send,
 });
 

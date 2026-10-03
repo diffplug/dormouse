@@ -277,6 +277,7 @@ function ensureChild(extensionPath: string): ChildProcess {
         listener({
           requestId: msg.requestId,
           surfaceId: msg.surfaceId,
+          helperParentId: msg.helperParentId,
           method: msg.method,
           params: msg.params,
           timeoutMs: msg.timeoutMs,

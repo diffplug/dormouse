@@ -503,6 +503,7 @@ test('split sends command argv to the host', async () => {
     request: {
       command: ['pnpm', 'dev'],
       direction: 'auto',
+      cwd: process.cwd(),
       minimized: false,
       surface: undefined,
       focusNeutral: true,

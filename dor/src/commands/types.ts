@@ -220,6 +220,8 @@ export interface AppRestartResponse {
 }
 
 export interface SplitSurfaceRequest extends WorkspaceScopedRequest {
+  /** The invoking directory, where the new Session starts; `surface` is placement only. */
+  cwd?: string;
   /** Raw argv for the initial command; the host quotes it for the target shell. */
   command?: string[];
   direction: SplitDirection;

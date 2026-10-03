@@ -154,7 +154,7 @@ function serverTimeoutFor(clientTimeoutMs, fallbackMs) {
 // `socketPath` and `socketDir` are test seams: production callers leave both
 // unset and take the hardened path this module picks, which they then hand to
 // spawned shells.
-function createDorControlServer({ socketPath, socketDir, token, send, timeoutMs = 65000 }) {
+function createDorControlServer({ socketPath, socketDir, token, send, getHelperParentId = () => undefined, timeoutMs = 65000 }) {
   if (!token) return null;
 
   const effectiveSocketPath = socketPath || resolveControlSocketPath(socketDir);
@@ -270,6 +270,11 @@ function createDorControlServer({ socketPath, socketDir, token, send, timeoutMs 
       return;
     }
 
+    const surfaceId = typeof request.surfaceId === 'string' ? request.surfaceId : undefined;
+    // Only the host knows a helper's source before cross-window routing; the
+    // renderer refuses helper targets (docs/specs/dor-cli.md -> Helper callers).
+    const helperParentId = getHelperParentId(surfaceId);
+
     const timeout = setTimeout(() => {
       reap(request.requestId);
       writeResponse(socket, { requestId: request.requestId, ok: false, error: `timed out waiting for ${request.method}` });
@@ -279,7 +284,8 @@ function createDorControlServer({ socketPath, socketDir, token, send, timeoutMs 
     pending.set(request.requestId, { socket, timeout });
     send('dor:controlRequest', {
       requestId: request.requestId,
-      surfaceId: typeof request.surfaceId === 'string' ? request.surfaceId : undefined,
+      surfaceId,
+      ...(helperParentId ? { helperParentId } : {}),
       method: request.method,
       params: request.params ?? {},
     });

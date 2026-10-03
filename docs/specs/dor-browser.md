@@ -83,7 +83,7 @@ replace an untouched, helper-less *terminal* caller in place, else split next to
 the reference surface. **Never replace a reference that already has a browser** —
 web content is not destroyed to make room. A replacement transfers the target
 Surface's `surface:N` ref to the new browser Surface id. The pane context menu
-never replaces ([Pane Context Menu Connect](#pane-context-menu-connect)).
+never replaces ([Pane Context Menu Connect](#pane-context-menu-connect)). Helper callers follow `docs/specs/dor-cli.md` → Helper callers and targets.
 
 **Must open focus-neutrally**, like `dor ensure`, except a Pane Context Menu
 placement and `docs/specs/layout.md` corner case #6.
