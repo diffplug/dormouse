@@ -259,17 +259,17 @@ The webview's two channels:
 ```mermaid
 flowchart LR
   C[webview]
-  subgraph Host[browser host: VS Code extension host, or sidecar behind one Rust command]
+  subgraph Host[browser host]
     BH[createBrowserHost]
     VS[viewer server, 127.0.0.1]
   end
   subgraph Provider
-    CLI[provider CLI]
+    CLI[provider CLI or client]
     UP[agent-browser stream, or CDP]
   end
   DOR[dor, trusted] -- native passthrough --> CLI
-  C -- "PlatformAdapter.browser: BrowserRequest, BrowserResult" --> BH
-  C <-- "ViewerInput; ViewerState, ViewerFrame" --> VS
+  C -- PlatformAdapter.browser --> BH
+  C <-- "ViewerInput; ViewerState, binary ViewerFrame" --> VS
   BH -- fixed argv or client call --> CLI
   VS -- bounded local dial --> UP
 ```
@@ -475,7 +475,9 @@ Source of truth: `lib/src/components/wall/agent-browser-surface-controller.ts`
 **Every browser operation rides one `PlatformAdapter.browser(request)`**: a
 provider-tagged `BrowserRequest` answered by a `BrowserResult`. A host lists
 the providers it drives in `browserProviders`; one without them (the web demo)
-offers no automated renderer. **No frame rides a request's transport**: frames reach the webview over the
+offers no automated renderer. VS Code runs the shared host in the extension
+host; standalone runs the bundled copy in the sidecar behind one Rust command.
+**No frame rides a request's transport**: frames reach the webview over the
 [Viewer Socket](#viewer-socket), never the sidecar stdio PTY traffic shares.
 
 - **`launch`** without a session opens an http(s) `url` in a new GUI session;
