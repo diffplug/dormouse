@@ -29,15 +29,13 @@ Retained semantic-value bounds: `docs/specs/terminal-state.md` -> "Supported OSC
 ```mermaid
 flowchart LR
   PTY[PTY read] --> P[createOwnerPtyStream]
-  P -->|reports, boundaries| AM[AlertManager]
+  P -->|reports, boundaries, activity| AM[AlertManager]
   P -->|query replies| IN[PTY input]
-  P -->|terminal:semanticEvents| TS[TerminalPaneState]
-  P -->|terminal:toolEvents| TL[Tool stores]
-  P -->|terminal:clipboardOffer| CE[copy editor]
-  P -->|pty:data| X[owner xterm.js]
+  P -->|semantic, Tool, clipboard messages| R["owning renderer (transport.md)"]
+  P -->|pty:data| X[owning renderer's xterm.js]
   P -->|same chunk| SUB[other subscribers]
   RP[pty:replay] --> OS[parseReplay in webview]
-  OS -->|semantic, Tool events| TS & TL
+  OS -->|semantic, Tool events| R
   OS -->|visibleData| X
 ```
 
