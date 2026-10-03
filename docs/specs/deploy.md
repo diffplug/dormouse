@@ -61,8 +61,9 @@ flowchart LR
   subgraph local [sign-and-deploy.sh]
     dl[download, verify] --> sm[sign-mac] --> nz[notarize] --> su[sign-updates]
     dl --> sw[sign-win] --> su --> rel[GitHub Release]
+    su --> man[standalone-latest.json]
   end
-  su --> man[standalone-latest.json] --> web[release branch]
+  man -- commit, promote --> web[release branch]
 ```
 
 Stage 1 (CI) builds, attests, and uploads the unsigned artifacts, the `.vsix` included, which Stage 2 verifies but never signs.
