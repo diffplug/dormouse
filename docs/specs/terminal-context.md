@@ -3,7 +3,8 @@
 > See `docs/specs/glossary.md` for Surface / Session / Pane vocabulary.
 > This spec owns the helper terminal lifecycle and global autorun preference.
 > Layout owns context composition and input focus; terminal-state owns shell
-> semantics; alert owns suppression; transport owns live recovery.
+> semantics; alert owns suppression; transport owns live recovery; dor-cli
+> owns helper-origin `dor` commands.
 
 ## Helper lifecycle
 

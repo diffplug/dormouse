@@ -1,7 +1,7 @@
 /**
  * The chunked replay buffer both Node-resident hosts keep per PTY, and the one
  * read the agent-recovery capture makes of it (docs/specs/transport.md ->
- * "Persisted session").
+ * "PTY buffering").
  *
  * Each host owns its own buffer record — `ptyBuffers` in
  * `vscode-ext/src/pty-manager.ts`, `sessions` in

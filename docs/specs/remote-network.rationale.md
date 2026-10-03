@@ -62,12 +62,6 @@ promises traffic that never happens, and a missing row hides one that does.
 The 2026-09-30 prototype listed the whole design; `connectionsFor` now derives
 rows from the shipped policy and runtime facts, including Hosted enrollment.
 
-**Why the push row names its condition (2026-09-30).** Push is on by the
-application default or by any Workspace's own override, and Workspaces in other
-windows are out of the panel's reach, so a row keyed on the default alone
-omitted a push the code sends. Listed whenever a phone is paired, the row's
-"where push is on" is true however push was turned on.
-
 **Why the panel fills the LAN prefixes.** `setNetworkPolicy` takes a policy
 only exactly and answers what it saved; filling in networks there would save
 something the request did not say. The panel already holds the interfaces the

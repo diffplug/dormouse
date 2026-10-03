@@ -144,6 +144,9 @@ export type DorControlRequest = Omit<DorControlRequestPayload, 'params'> & {
    *  may make and whose failure shows in the preview slot. Never set by a
    *  control-socket request. */
   oscOpen?: true;
+  /** The default placement reference when it is not the caller: a helper's
+   *  source this Wall holds (`requestForWall` in `dor-control-shared.ts`). */
+  placementSurfaceId?: string;
 };
 
 /** Outcome of {@link EnsureBrowserSurface}: the fields the caller maps onto
@@ -171,6 +174,7 @@ type EnsureBrowserSurface = (args: {
    *  terminal refreshing an existing surface). */
   reference: () => ParseResult<DorSurface>;
   minimized?: boolean;
+  preserveSource?: boolean;
 }) => EnsureBrowserSurfaceResult;
 
 /**
@@ -257,8 +261,8 @@ function resolveSurfaceTarget(
   callerSurfaceId: string | undefined,
 ): ParseResult<DorSurface> {
   // A caller this Wall does not hold never reaches here as one: the router
-  // drops it before dispatching (`dor-control-router.ts`), so an omitted target
-  // falls back to this Workspace's focused Surface.
+  // drops it before dispatching (`requestForWall`), so an omitted target falls
+  // back to this Workspace's focused Surface.
   const resolvedTarget = target ?? callerSurfaceId ?? 'surface:focused';
   const classified = classifySurfaceTarget(resolvedTarget);
   const matches = surfaces.filter((surface) => matchesTarget(classified, surface, callerSurfaceId));
@@ -666,7 +670,7 @@ export function useDorControl({
      *  terminal but renders both capabilities. */
     leafMeta?: LeafMeta;
     /** Create the leaf but stage no shell and spawn no PTY — a pane awaiting
-     *  approval (docs/specs/dor-tool.md -> Trust rule 3). */
+     *  approval (docs/specs/dor-tool.md -> Trust rule 2). */
     deferTerminal?: boolean;
     /** Lay the leaf out even beside a Door reference, which otherwise makes
      *  it a Door. */
@@ -678,6 +682,7 @@ export function useDorControl({
     reference: DorSurface;
     title: string;
     focusNeutral?: boolean;
+    preserveSource?: boolean;
   }) => ParseResult<{ id: string; ref: string; status: 'created' | 'replaced' }>;
   /** A Wall closure in flight. */
   isClosingSurface: (id: string) => boolean;
@@ -968,6 +973,7 @@ export function useDorControl({
     initialViewport,
     reference,
     minimized = false,
+    preserveSource,
   }) => {
     const refreshedParams = {
       nativeIdentity,
@@ -1013,6 +1019,7 @@ export function useDorControl({
         ...refreshedParams,
       },
       reference: target.value,
+      preserveSource,
       title,
       // `dor agent-browser` opens the screencast in the background; caller keeps focus.
       focusNeutral: true,
@@ -1042,10 +1049,25 @@ export function useDorControl({
       return;
     }
 
+    // New work goes beside the target, else the caller or a helper's source,
+    // else focus. A source that is hidden, or disappears while lookup waits,
+    // fails rather than falling back to focus, as does a closing target.
+    const resolvePlacement = (resolve: typeof resolveListedSurface): ParseResult<DorSurface> => {
+      const explicit = stringParam(params.surface);
+      const result = resolve(explicit ?? detail.placementSurfaceId, detail.surfaceId);
+      if (!result.ok && explicit === undefined && detail.placementSurfaceId) {
+        return { ok: false, message: 'The helper source Surface is not available for placement' };
+      }
+      if (result.ok && !isTargetable(result.value.id)) {
+        return { ok: false, message: 'The placement Surface is closing' };
+      }
+      return result;
+    };
+
     // Resolve the split reference surface across listed Surfaces. A minimized
     // reference is valid: the Wall creates the new split as a sibling Door.
     const resolveSplitTarget = () => {
-      const target = resolveListedSurface(stringParam(params.surface), detail.surfaceId);
+      const target = resolvePlacement(resolveListedSurface);
       if (!target.ok) {
         detail.respond({ ok: false, error: target.message });
         return null;
@@ -1095,6 +1117,8 @@ export function useDorControl({
         direction,
         minimized: booleanParam(params.minimized),
         reference: resolved.target,
+        // The invoking directory, like `dor ensure`; `--surface` only places.
+        cwd: stringParam(params.cwd),
         // The CLI computes the focus intent — a bare `dor split` steals focus;
         // a `--` tail or an initial command does not — and sends it as
         // focusNeutral. Honor it.
@@ -1364,7 +1388,7 @@ export function useDorControl({
                 focusNeutral: true,
                 // No shell until a human approves: `createSplitSurface` would
                 // otherwise stage shell opts and, on some paths, spawn the PTY
-                // outright (docs/specs/dor-tool.md -> Trust rule 3).
+                // outright (docs/specs/dor-tool.md -> Trust rule 2).
                 deferTerminal: true,
                 leafMeta: toolLeafMeta(lookup.name, {
                   surfaceType: 'tool',
@@ -1973,7 +1997,7 @@ export function useDorControl({
         detail.respond({ ok: false, error: `${refusal} — open it with dor agent-browser open ${url}` });
         return;
       }
-      const target = resolveVisibleSurface(stringParam(params.surface), detail.surfaceId);
+      const target = resolvePlacement(resolveVisibleSurface);
       if (!target.ok) {
         detail.respond({ ok: false, error: target.message });
         return;
@@ -1982,6 +2006,7 @@ export function useDorControl({
         minimized: booleanParam(params.minimized),
         params: { surfaceType: 'browser', renderMode: 'iframe', url },
         reference: target.value,
+        preserveSource: !!detail.helperParentId,
         title: hostPathDisplay(url, true),
         // `dor iframe` opens the embed in the background; caller keeps focus.
         focusNeutral: true,
@@ -2230,7 +2255,8 @@ export function useDorControl({
         // agent-browser's is its session; every host answer names one.
         nativeIdentity: status.nativeIdentity ?? session,
         minimized: booleanParam(params.minimized),
-        reference: () => resolveVisibleSurface(stringParam(params.surface), detail.surfaceId),
+        reference: () => resolvePlacement(resolveVisibleSurface),
+        preserveSource: !!detail.helperParentId,
       });
       if (!result.ok) {
         detail.respond({ ok: false, error: result.message });

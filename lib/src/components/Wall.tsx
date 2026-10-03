@@ -1333,7 +1333,7 @@ export function Wall({
     focusNeutral?: boolean;
     /** Create the leaf but stage no shell and spawn no PTY. `dor tool` uses it
      *  for a pane awaiting approval: nothing from the repo may run until a human
-     *  chooses (docs/specs/dor-tool.md -> Trust rule 3). */
+     *  chooses (docs/specs/dor-tool.md -> Trust rule 2). */
     deferTerminal?: boolean;
     /** Lay the leaf out even beside a Door reference, which otherwise makes it
      *  a Door: a pending approval, a preview slot. */
@@ -1353,8 +1353,8 @@ export function Wall({
     }
 
     const newId = generatePaneId();
-    // An explicit cwd (dor ensure --cwd, defaulting to the caller's directory)
-    // wins; otherwise inherit the reference pane's local cwd as dor split does.
+    // An explicit cwd (the invoking directory `dor ensure` and `dor split`
+    // send) wins; otherwise inherit the reference pane's local cwd.
     const inheritedCwd = cwd ?? getInheritableCwd(referenceId);
 
     if (deferTerminal) {

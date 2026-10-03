@@ -72,8 +72,8 @@ non-Windows branches round-trip through the sidecar. A source-scanning test in
 **`pty_graceful_kill` SIGTERMs the calling window's live PTYs** (§Routing) and
 resolves one grace tick after the last exits, or at its timeout for
 SIGTERM-ignoring programs. **Must forward final output during that grace
-period**; the sidecar retains no scrollback. Under ConPTY the SIGTERM is an
-immediate kill. Pinned by `standalone/sidecar/pty-core.test.js`.
+period**. Under ConPTY the SIGTERM is an immediate kill. **The sidecar
+keeps each PTY's latest 200,000 UTF-16 code units for replay.** Pinned by `standalone/sidecar/pty-core.test.js`.
 
 Sidecar events reach the webview, where `TauriAdapter` converts dor control
 requests into the `dormouse:control-request` CustomEvent that `Wall` handles
@@ -247,15 +247,16 @@ Picking a shell in the Settings dialog's **Shell** row
 
 Source of truth: the `.menu(...)` builder in `standalone/src-tauri/src/lib.rs`.
 
-The app replaces Tauri's default menu with a macOS-only App submenu and a Window
-submenu. **Must keep the macOS fullscreen item**: it and its Ctrl+Cmd+F are the
-only exit from native fullscreen when AppKit does not reveal the traffic
-lights. **No Edit submenu** — its predefined Paste binds Cmd+V natively and
-would fire alongside the terminal's own handling
-(`docs/specs/mouse-and-clipboard.md` §8.2), so macOS delivers Cmd+C/X/V to the
-webview as plain keydowns, in Dormouse's own text fields too
-(`docs/specs/mouse-and-clipboard.md` §8.9). **A new menu item must not claim a
-chord the webview already handles.**
+The app replaces Tauri's default menu with macOS-only App and Edit submenus and
+a Window submenu. **Must keep the macOS fullscreen item**: it and its
+Ctrl+Cmd+F are the only exit from native fullscreen when AppKit does not reveal
+the traffic lights.
+
+- **Must keep the Edit submenu on macOS**, Tool iframes' only clipboard path
+  (rationale).
+- **Must cancel the keydown of any chord the page handles**, so the menu item
+  skips it (rationale): `docs/specs/mouse-and-clipboard.md` §3.9, §8.2, §8.9.
+- **Never add an Edit submenu on Windows or Linux** (rationale).
 
 ## Siri affordance
 

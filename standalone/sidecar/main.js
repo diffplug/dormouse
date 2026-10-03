@@ -95,13 +95,15 @@ const toolHost = createToolHost({ stateDir: process.env.DORMOUSE_STATE_DIR });
 // there and go back only once the channel is actually listening. A lost bind
 // (a squatted Windows pipe name, an unsafe socket directory) is not fatal to
 // PTY work, but it must not leave Dormouse handing the token, and the surface
-// API it opens, to whoever won the path. See docs/specs/dor-cli.md.
+// API it opens, to whoever won the path. See docs/specs/security-local.md ->
+// "The dor control socket".
 const dorControlToken = process.env.DORMOUSE_CONTROL_TOKEN;
 delete process.env.DORMOUSE_CONTROL_TOKEN;
 delete process.env.DORMOUSE_CONTROL_SOCKET;
 
 const dorControl = createDorControlServer({
   token: dorControlToken,
+  getHelperParentId: mgr.getHelperParentId,
   send,
 });
 

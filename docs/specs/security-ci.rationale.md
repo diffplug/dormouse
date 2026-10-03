@@ -48,7 +48,7 @@ The October 2026 audit read tend 0.3.5's `claude/action.yaml`, `restore-sensitiv
 
 **Why the secret inventory is placement-checked.** Env-scoping is what stops a workflow pushed to an excluded branch from reading a secret, so a repo-level copy of an environment secret reopens exactly what the environment gate closes. The `release-attest` environment exists only to bound the ref a provenance OIDC token can be minted from.
 
-**Why `CHROMATIC_PROJECT_TOKEN` and `ARGOS_TOKEN` are listed in `secrets.allowed`.** Each entry is an explicit acknowledgment that the bot can read that token.
+**Why every repo-level secret is listed in `secrets.allowed`.** Each entry is an explicit acknowledgment that the bot can read that token. `CHROMATIC_PROJECT_TOKEN` stayed at repo level and in the list when the Chromatic workflow was deleted (2026-09-23); both go together.
 
 **Why 48 hours is thinner than it reads.** `workflow-audit` runs at 07:13 UTC and the security audit at 04:21, so the steady state is ~21.5h and a single skipped run lands at ~45.5h — inside tolerance by under three hours, which is why one skipped run is a signal rather than noise.
 

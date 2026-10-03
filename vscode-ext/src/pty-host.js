@@ -21,6 +21,7 @@ delete process.env.DORMOUSE_CONTROL_SOCKET;
 
 const dorControl = createDorControlServer({
   token: dorControlToken,
+  getHelperParentId: mgr.getHelperParentId,
   send(event, data) {
     process.send({ type: event, ...data });
   },
@@ -39,7 +40,7 @@ process.on('message', (msg) => {
     case 'gracefulKillAll': mgr.gracefulKillAll(msg.timeout, msg.requestId); break;
     case 'context': mgr.context(msg.request, msg.requestId); break;
     case 'getCwd':  mgr.getCwd(msg.id); break;
-    case 'getOpenPorts': mgr.getOpenPorts(msg.id); break;
+    case 'getOpenPortsMany': mgr.getOpenPortsMany(msg.ids, msg.requestId); break;
     case 'getShells': mgr.getShells(msg.requestId); break;
     case 'dor:controlResponse': dorControl?.respond(msg); break;
   }

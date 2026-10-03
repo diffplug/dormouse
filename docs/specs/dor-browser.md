@@ -83,7 +83,7 @@ replace an untouched, helper-less *terminal* caller in place, else split next to
 the reference surface. **Never replace a reference that already has a browser** —
 web content is not destroyed to make room. A replacement transfers the target
 Surface's `surface:N` ref to the new browser Surface id. The pane context menu
-never replaces ([Pane Context Menu Connect](#pane-context-menu-connect)).
+never replaces ([Pane Context Menu Connect](#pane-context-menu-connect)). Helper callers follow `docs/specs/dor-cli.md` → Helper callers and targets.
 
 **Must open focus-neutrally**, like `dor ensure`, except a Pane Context Menu
 placement and `docs/specs/layout.md` corner case #6.
@@ -133,7 +133,7 @@ Source of truth: `lib/src/components/wall/SurfacePaneHeader.tsx`,
 
 For loopback URLs (`localhost`, `*.localhost`, `127.0.0.1`, `::1`) the header
 asks which terminal-backed Surface — mounted, or a minimized Door — serves the
-port (`PlatformAdapter.getOpenPorts`).
+port (`PlatformAdapter.getOpenPortsMany`).
 
 - **Show a chip only when exactly one candidate Surface owns that port**; zero
   or two-plus leave it unsettled, so a later dev server still matches.

@@ -68,6 +68,8 @@
 
 **Where the `WebSocket` boundary falls.** `globalThis.WebSocket` arrived in Node 22, and VS Code 1.92 — the floor `engines.vscode` declares — shipped Node 20.14 (its release notes, July 2024), so an older extension host has no global to use.
 
+**Why `pushDevices` answers `null` instead of refusing.** When an un-enrolled window refused the read-only commands, the Settings dialog reported an unreachable server on machines that had simply never enrolled.
+
 ## The direct path
 
 macOS library validation decides which process may load the addon. Run under
@@ -103,7 +105,7 @@ macOS host, hence copying only the declared platform packages.
 
 **Why a result is never broadcast when a route exists.** Ids are globally unique, so broadcasting another window's answer settles nothing anywhere — and it puts that window's Burrow state in front of webviews that never asked for it.
 
-**Why `pushDevices` answers `null` instead of refusing.** When an un-enrolled window refused the read-only commands, the Settings dialog reported an unreachable server on machines that had simply never enrolled.
+**What the broadcast buys.** Unambiguous settling is only half of it: the same fan-out lets a losing window forward a command to the broker window and receive the answer back.
 
 ## Build and development
 

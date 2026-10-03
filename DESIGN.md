@@ -268,7 +268,7 @@ The selection ring around the focused pane in command mode is an SVG with `strok
 When selection moves between panes/doors, the focus ring **glides** to the new target over 220ms (`FOCUS_MOTION_MS`, half the pane-motion duration) on the house curve `cubic-bezier(0.22, 1, 0.36, 1)`, and the source/destination pane headers crossfade their active/inactive palette over the same 220ms (`HEADER_PALETTE_TRANSITION_CLASS` in `design.tsx`), so the two read as one gesture. The ring's rect is a per-frame JS tween (`rect-tween.ts`), not a CSS transition; same-identity re-measures (sash drag, window resize, animator frames) snap 1:1, and a pane↔door move lerps the corner radii so the shape never pops. Reduced motion nulls both: the ring snaps and the header palette swaps instantly.
 
 #### Copy Editor Travel
-The copy editor's moves and resizes ease on the focus ring's duration and curve (`FOCUS_MOTION_MS`, `rect-tween.ts` driven by `rect-motion.ts`); `docs/specs/mouse-and-clipboard.md` §4.5 owns when.
+The copy editor's moves and resizes ease on the focus ring's duration and curve (`FOCUS_MOTION_MS`, `rect-tween.ts` driven by `rect-motion.ts`, which owns when it snaps instead).
 
 ## 6. Do's and Don'ts
 
