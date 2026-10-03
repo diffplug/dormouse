@@ -290,10 +290,10 @@ sequenceDiagram
   participant W as Wall
   Sh->>D: runs dor tool alone
   D->>W: surface.tool
-  W-->>D: takeover
+  W-->>D: takeover or adopted
   D->>Sh: prints the handle, exits
   Sh-->>W: back at a prompt
-  W->>W: recheck, become the Tool
+  W->>W: recheck, then become the Tool if takeover
   W->>Sh: type the command
 ```
 
