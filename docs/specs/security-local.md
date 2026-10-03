@@ -16,8 +16,9 @@ The attacker is any program writing to a PTY.
 `file:` link whose display text names its target, which previews through the
 user's `open` rules (`docs/specs/dor-tool.md` -> "Terminal links"); a target whose
 display text names a different host gets **no open action at all**
-(`docs/specs/mouse-and-clipboard.md` -> "OSC 8 hyperlinks"). **Must revalidate external-URL launches through `normalizeExternalUri`** (VS Code's in the extension
-host); file opens use `docs/specs/dor-tool.md` -> "Opening local files".
+(`docs/specs/mouse-and-clipboard.md` -> "OSC 8 hyperlinks", which also owns
+revalidating every external-URL launch); file opens use
+`docs/specs/dor-tool.md` -> "Opening local files".
 
 **Unsupported escape sequences must fail inertly** — consumed or ignored, with
 no visible garbage, clipboard, file, focus, or privilege effect
@@ -175,9 +176,8 @@ every window snapshot, its geometry sibling, and the arrival journal
 helper locks the whole standalone app-data directory before the sidecar spawns.
 
 **No writer persists scrollback** (`docs/specs/transport.md` -> "What is
-persisted"); the first save after an upgrade rewrites a snapshot without it, and a
-boot sweep deletes orphaned `*.json.tmp` files. Snapshots older versions left
-behind do carry transcripts (rationale).
+persisted", "Retiring the transcripts already on disk"). Snapshots older versions
+left behind do carry transcripts (rationale).
 
 **Standalone writes `recovery.json` beside its sessions directory**, under the
 state root, owner-only: one rebuilt agent-resume invocation per Surface, never a
