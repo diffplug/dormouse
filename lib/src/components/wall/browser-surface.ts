@@ -226,6 +226,12 @@ export function isBrowserParams(params: unknown): boolean {
   return p.surfaceType === 'browser' || typeof p.renderMode === 'string';
 }
 
+/** Whether a Surface with these params keeps a live page in an iframe — a
+ *  browser or Tool in the iframe renderer — which minimizing never stops. */
+export function retainsLivePage(params: unknown): boolean {
+  return (isBrowserParams(params) || isToolParams(params)) && resolveRenderMode(params) === 'iframe';
+}
+
 /** Browser display identity projected from canonical persisted params. */
 export function browserDisplayModeFromParams(params: unknown): BrowserDisplayMode | undefined {
   if (!isBrowserParams(params)) return undefined;

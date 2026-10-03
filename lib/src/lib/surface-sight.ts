@@ -36,6 +36,17 @@ export function isSeen(inputs: SurfaceSightInputs): boolean {
   return unseenReason(inputs) === null;
 }
 
+/**
+ * Minimized iframe documents are never evicted or reloaded (#610), so each
+ * keeps its memory, scripts and sockets while nobody sees it. Past this many
+ * on one Baseboard, it says so, quietly.
+ */
+export const RETAINED_PAGES_WARN_ABOVE = 8;
+
+export function retainedPagesWarning(retained: number): boolean {
+  return retained > RETAINED_PAGES_WARN_ABOVE;
+}
+
 /** Whether `zoomedId`, the Workspace's zoomed leaf, covers leaf `id`. */
 export function coveredByZoom(id: string, zoomedId: string | null): boolean {
   return zoomedId !== null && zoomedId !== id;

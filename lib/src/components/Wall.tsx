@@ -84,6 +84,7 @@ import {
   toolBrowserLaunchParams,
   type LaunchFallback,
   browserDisplayModeFromParams,
+  retainsLivePage,
   browserUrlFromParams,
   isBrowserParams,
   surfaceKindFromParams,
@@ -468,7 +469,7 @@ export function Wall({
     const meta = lath.store.getSnapshot().leafMeta;
     return doorsRef.current.map((door) => {
       const leaf = meta.get(door.id);
-      return `${leaf?.title ?? ''}\u0001${surfaceKindFromParams(leaf?.params)}\u0001${browserDisplayModeFromParams(leaf?.params) ?? ''}\u0001${isPreviewSlotParams(leaf?.params)}`;
+      return `${leaf?.title ?? ''}\u0001${surfaceKindFromParams(leaf?.params)}\u0001${browserDisplayModeFromParams(leaf?.params) ?? ''}\u0001${isPreviewSlotParams(leaf?.params)}\u0001${retainsLivePage(leaf?.params)}`;
     }).join('\u0000');
   });
   // The Baseboard's chips: the runtime Doors plus the store's current fallback title
@@ -482,6 +483,7 @@ export function Wall({
         kind: surfaceKindFromParams(meta?.params),
         browserDisplay: browserDisplayModeFromParams(meta?.params),
         ...(isPreviewSlotParams(meta?.params) ? { preview: true } : {}),
+        ...(retainsLivePage(meta?.params) ? { livePage: true } : {}),
       };
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `doorDisplayMetadata` is the store read

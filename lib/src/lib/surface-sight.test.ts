@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { coveredByZoom, isSeen, unseenReason, type SurfaceSightInputs } from './surface-sight';
+import { RETAINED_PAGES_WARN_ABOVE, coveredByZoom, isSeen, retainedPagesWarning, unseenReason, type SurfaceSightInputs } from './surface-sight';
 
 const seen: SurfaceSightInputs = { windowShown: true, workspaceActive: true, parked: false, covered: false };
 
@@ -20,5 +20,12 @@ describe('surface sight', () => {
     expect(coveredByZoom('a', 'b')).toBe(true);
     expect(coveredByZoom('b', 'b')).toBe(false);
     expect(coveredByZoom('a', null)).toBe(false);
+  });
+});
+
+describe('retained pages', () => {
+  it('warns only past the threshold', () => {
+    expect(retainedPagesWarning(RETAINED_PAGES_WARN_ABOVE)).toBe(false);
+    expect(retainedPagesWarning(RETAINED_PAGES_WARN_ABOVE + 1)).toBe(true);
   });
 });
