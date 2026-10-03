@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { shellWords, TutorialShell, type InteractiveProgram } from "./tutorial-shell";
+import { shellWords, TutorialShell, type InteractiveProgram, type StartProgram } from "./tutorial-shell";
 import { VirtualFs } from "./playground-fs/vfs";
 import { promptFor } from "dormouse-lib/lib/ansi";
 
@@ -191,25 +191,26 @@ describe("TutorialShell OSC 633 shell integration", () => {
   });
 });
 
+/** A shell in `/home/demo/p` of `files`, past its first prompt. */
+function createFsShell(files: Record<string, string>, startProgram: StartProgram = () => null) {
+  const output: string[] = [];
+  const shell = new TutorialShell((data) => output.push(data), startProgram, { fs: new VirtualFs(files), cwd: "/home/demo/p" });
+  shell.showInitialPrompt();
+  return { shell, text: () => output.join(""), clear: () => { output.length = 0; } };
+}
+
 describe("TutorialShell with a filesystem", () => {
-  const fs = new VirtualFs({ "/home/demo/p/src/a.ts": "", "/home/demo/p/README.md": "" });
+  const files = { "/home/demo/p/src/a.ts": "", "/home/demo/p/README.md": "" };
   const plain = (text: string) => text.replace(/\x1b\[[0-9;]*m/g, "");
 
-  function createFsShell() {
-    const output: string[] = [];
-    const shell = new TutorialShell((data) => output.push(data), () => null, { fs, cwd: "/home/demo/p" });
-    shell.showInitialPrompt();
-    return { shell, text: () => output.join(""), clear: () => { output.length = 0; } };
-  }
-
   it("reports its directory with every prompt and shows it home-relative", () => {
-    const { text } = createFsShell();
+    const { text } = createFsShell(files);
     expect(text()).toContain("\x1b]633;P;Cwd=/home/demo/p\x07");
     expect(plain(text())).toContain("user@dormouse:~/p$ ");
   });
 
   it("changes directory with cd and reports the new one", () => {
-    const { shell, text, clear } = createFsShell();
+    const { shell, text, clear } = createFsShell(files);
     clear();
     shell.handleInput("cd src\r");
     expect(shell.cwd).toBe("/home/demo/p/src");
@@ -224,7 +225,7 @@ describe("TutorialShell with a filesystem", () => {
   });
 
   it("lists directories first, marked with a slash, and prints pwd", () => {
-    const { shell, text, clear } = createFsShell();
+    const { shell, text, clear } = createFsShell(files);
     clear();
     shell.handleInput("ls\r");
     expect(plain(text())).toContain("src/  README.md\r\n");
@@ -234,7 +235,7 @@ describe("TutorialShell with a filesystem", () => {
   });
 
   it("escapes a reported command line's separators", () => {
-    const { shell, text } = createFsShell();
+    const { shell, text } = createFsShell(files);
     shell.handleInput("ls 'a;b'\r");
     expect(text()).toContain("\x1b]633;E;ls 'a\\x3bb'\x07");
   });
@@ -246,18 +247,16 @@ describe("TutorialShell with a filesystem", () => {
 });
 
 describe("TutorialShell tab completion", () => {
-  const fs = new VirtualFs({
+  const files = {
     "/home/demo/p/src/osc.ts": "", "/home/demo/p/src/frame.ts": "", "/home/demo/p/README.md": "", "/home/demo/p/sub/x": "",
-  });
+  };
 
   function typed(input: string) {
-    const output: string[] = [];
     const program: InteractiveProgram = { start: vi.fn(), handleInput: vi.fn(), dispose: vi.fn() };
-    const shell = new TutorialShell((data) => output.push(data), (name) => (name === "dor" ? program : null), { fs, cwd: "/home/demo/p" });
-    shell.showInitialPrompt();
-    output.length = 0;
+    const { shell, text, clear } = createFsShell(files, (name) => (name === "dor" ? program : null));
+    clear();
     shell.handleInput(input);
-    return { shell, program, echo: output.join("") };
+    return { program, echo: text() };
   }
 
   it("never completes the command name", () => {

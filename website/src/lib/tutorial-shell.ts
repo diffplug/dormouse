@@ -1,5 +1,6 @@
 import { BOLD, CLEAR_LINE, PROMPT, RESET, fg, promptFor } from 'dormouse-lib/lib/ansi';
 import { shortPath } from 'dor/commands/open-picker';
+import { POSIX_ESCAPABLE } from 'dormouse-lib/lib/posix-escape';
 import { HOME, type DirEntry, type VirtualFs } from './playground-fs/vfs';
 
 export type SendOutput = (data: string) => void;
@@ -57,6 +58,8 @@ export function shellWords(line: string): string[] {
   if (inWord) words.push(word);
   return words;
 }
+
+const ESCAPABLE = new RegExp(POSIX_ESCAPABLE.source, 'g');
 
 /** The longest prefix every one of `names` shares. */
 function commonPrefix(names: string[]): string {
@@ -220,9 +223,7 @@ export class TutorialShell {
           this.sendOutput('\b \b');
         }
       } else if (ch >= ' ') {
-        this.lineBuffer += ch;
-        this.historyIndex = null;
-        this.sendOutput(ch);
+        this.type(ch);
       }
     }
   }
@@ -275,30 +276,31 @@ export class TutorialShell {
     const word = shellWords(raw)[0] ?? '';
     const slash = word.lastIndexOf('/');
     const stem = word.slice(slash + 1);
-    let entries: DirEntry[];
-    if (before.length === 1 && before[0] === 'dor') {
-      entries = [{ name: 'open', kind: 'file' }];
-    } else {
-      const dir = place.fs.resolve(place.cwd, word.slice(0, slash + 1) || '.');
-      entries = (dir === null ? null : place.fs.list(dir)) ?? [];
-      if (before[0] === 'cd') entries = entries.filter((entry) => entry.kind === 'dir');
-    }
-    const matches = entries.filter(({ name }) => name.startsWith(stem) && (stem.startsWith('.') || !name.startsWith('.')));
+    const dir = place.fs.resolve(place.cwd, word.slice(0, slash + 1) || '.');
+    const entries: DirEntry[] = before.length === 1 && before[0] === 'dor'
+      ? [{ name: 'open', kind: 'file' }]
+      : (dir === null ? null : place.fs.list(dir)) ?? [];
+    const matches = entries.filter(({ name, kind }) => name.startsWith(stem)
+      && (stem.startsWith('.') || !name.startsWith('.')) && (before[0] !== 'cd' || kind === 'dir'));
     if (matches.length === 0) return;
-    const [only] = matches;
-    const rest = (matches.length === 1 ? only.name : commonPrefix(matches.map(({ name }) => name))).slice(stem.length);
+    const rest = commonPrefix(matches.map(({ name }) => name)).slice(stem.length);
     // Quoted words keep their text; bare ones escape what the shell would split on.
-    const escaped = /['"]/.test(raw) ? rest : rest.replace(/[\s'"\\$`;&|<>()]/g, '\\$&');
-    const insert = matches.length === 1 ? escaped + (only.kind === 'dir' ? '/' : ' ') : escaped;
+    let insert = /['"]/.test(raw) ? rest : rest.replace(ESCAPABLE, '\\$&');
+    if (matches.length === 1) insert += matches[0].kind === 'dir' ? '/' : ' ';
     if (insert) {
-      this.lineBuffer += insert;
-      this.historyIndex = null;
-      this.sendOutput(insert);
+      this.type(insert);
     } else if (this.tabbed) {
       const list = matches.map(({ name, kind }) => (kind === 'dir' ? `${name}/` : name)).join('  ');
       this.sendOutput(`\r\n${list}\r\n${this.prompt()}${this.lineBuffer}`);
     }
     this.tabbed = !insert;
+  }
+
+  /** Appends `text` to the line and echoes it. */
+  private type(text: string): void {
+    this.lineBuffer += text;
+    this.historyIndex = null;
+    this.sendOutput(text);
   }
 
   private redrawPromptLine(): void {
