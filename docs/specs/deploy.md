@@ -53,12 +53,23 @@ Source of truth: `scripts/bump-version.sh`; `on.push.tags` in `.github/workflows
 
 **Must apply production OS and updater signatures locally** — Windows OS signing uses a physical PIV key, macOS a local Developer ID certificate.
 
-- **Stage 1 (CI)** — build, attest, and upload the unsigned artifacts: the three Tauri bundles and the `.vsix`, which Stage 2 verifies but never signs.
-- **Stage 2 (local, `sign-and-deploy.sh`)** — verify, sign, and release.
+```mermaid
+flowchart LR
+  tag[push vX.Y.Z] --> bs[build-standalone] & bv[build-vscode] & sa[security-audit]
+  bs & bv & sa --> pv[publish-vscode] --> mp[Marketplace + OpenVSX]
+  pv -. run succeeded .-> dl
+  subgraph local [sign-and-deploy.sh]
+    dl[download, verify] --> sm[sign-mac] --> nz[notarize] --> su[sign-updates]
+    dl --> sw[sign-win] --> su --> rel[GitHub Release]
+  end
+  su --> man[standalone-latest.json] --> web[release branch]
+```
+
+Stage 1 (CI) builds, attests, and uploads the unsigned artifacts, the `.vsix` included, which Stage 2 verifies but never signs.
 
 ## Stage 1: CI workflow
 
-Triggered by tag push `v*`: `build-standalone`, `build-vscode`, and `security-audit` run in parallel, then `publish-vscode` once all three succeed. Matrix targets, pnpm/Node versions, and step ordering live in [.github/workflows/release.yml](../../.github/workflows/release.yml).
+Matrix targets, pnpm/Node versions, and step ordering live in [.github/workflows/release.yml](../../.github/workflows/release.yml).
 
 Environment protection, secret placement, and token permissions follow `docs/specs/security-ci.md` → "GitHub Actions Policies", "Automated Maintainer (tend)", and "VS Code Extension Releases".
 
