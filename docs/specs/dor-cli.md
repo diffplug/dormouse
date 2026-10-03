@@ -148,7 +148,7 @@ sequenceDiagram
   H->>A: to the routed window / owning webview
   A->>W: dormouse:control-request + AbortSignal
   W-->>A: respond
-  A-->>H: dor:controlResponse
+  A-->>H: dor_control_response / dor:controlResponse
   H-->>S: dor:controlResponse
   S-->>D: response
   opt socket closes, or server reaper fires
@@ -310,7 +310,7 @@ flowchart TD
   C -- no --> WS{--workspace?}
   WS -- unresolved --> REF
   WS -- registered --> H[that Wall answers]
-  WS -- unregistered --> P["re-resolve next tick; refuse if still unmounted"]
+  WS -- unregistered --> P["re-resolve next tick, refuse if still unmounted"]
   WS -- absent --> ST{stable-id target held?}
   ST -- yes --> H
   ST -- no --> CA{caller or helper source held?}

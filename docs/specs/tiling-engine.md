@@ -92,7 +92,7 @@ stateDiagram-v2
   [*] --> Pressed: header or Door press
   Pressed --> [*]: release under DRAG_THRESHOLD_PX, the click stands
   Pressed --> Active: past threshold
-  Active --> [*]: Escape, pointercancel, blur or release on nothing; a Door stays
+  Active --> [*]: Escape, pointercancel, blur or release on nothing, a Door stays
   Active --> [*]: release over the Workspace strip
   Active --> [*]: pane released below the wall, onProposeMinimize
   Active --> [*]: release on a candidate, onProposeMove or onExternalDrop

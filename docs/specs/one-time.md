@@ -22,8 +22,8 @@ sequenceDiagram
   Note over P: connectOnce: mints a static, writes message 1
   P->>H: client route
   P->>L: init (message 1)
-  L->>P: response (message 2)
   Note over L: link reserved, key erased
+  L->>P: response (message 2)
   Note over P: shows the two digits
   P->>L: OneTimeRequestV1
   Note over L: confirming, approval modal, one attempt

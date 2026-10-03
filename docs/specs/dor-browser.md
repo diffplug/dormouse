@@ -269,7 +269,7 @@ flowchart LR
   end
   DOR[dor, trusted] -- native passthrough --> CLI
   C -- PlatformAdapter.browser --> BH
-  C <-- "ViewerInput; ViewerState, binary ViewerFrame" --> VS
+  C <-- "ViewerInput / ViewerState, binary ViewerFrame" --> VS
   BH -- fixed argv or client call --> CLI
   VS -- bounded local dial --> UP
 ```

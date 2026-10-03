@@ -226,7 +226,7 @@ renders it:
 stateDiagram-v2
   [*] --> live: setupQr mints
   live --> live: failed handshake, Relay redemption
-  live --> reserved: message 1 read, message 2 sent
+  live --> reserved: message 1 read, message 2 written
   live --> expired: pairing TTL
   live --> dropped: relay socket lost, evicted at the cap
   reserved --> consumed: every ending, TTL and eviction included
