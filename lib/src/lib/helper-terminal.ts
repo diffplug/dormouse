@@ -1,6 +1,9 @@
 import { getPlatform } from './platform';
 import { registry } from './terminal-store';
 import { disposeSession, getOrCreateTerminal, parkElement, setPendingShellOpts } from './terminal-lifecycle';
+import { addPendingKill } from './pending-kills';
+import { isDelayedKillEnabled } from './labs-settings';
+import type { WorkspaceId } from './session-types';
 import { getDefaultShellOpts } from './shell-defaults';
 import { getInheritableCwd, getTerminalPaneState, isPaneOscDriven, seedLaunchedCommand } from './terminal-state-store';
 import { DEFAULT_HELPER_COMMAND, type HelperIdentity } from './terminal-context-types';
@@ -111,6 +114,45 @@ export function disposeHelper(parentId: string): void {
   if (helper.promoting) throw new Error('Helper promotion is in progress');
   forgetHelper(parentId);
   disposeSession(helper.id);
+}
+
+/**
+ * Take the parent's helper off it without ending its Session — a Reset made a
+ * pending kill (`docs/specs/reopen.md`). The caller owns the returned helper:
+ * {@link reattachHelper} puts it back, `disposeSession` ends it.
+ */
+export function detachHelper(parentId: string): HelperTerminal | undefined {
+  const helper = helpers.get(parentId);
+  if (!helper || helper.promoting) return undefined;
+  forgetHelper(parentId);
+  return helper;
+}
+
+/** Put a detached helper back on its parent, ending the one that replaced it.
+ *  False when the parent has closed or its helper is being promoted. */
+export function reattachHelper(helper: HelperTerminal): boolean {
+  const { parentId } = helper;
+  if (!parentIsOpen(parentId) || !registry.has(helper.id) || helpers.get(parentId)?.promoting) return false;
+  if (helpers.has(parentId)) disposeHelper(parentId);
+  helpers.set(parentId, helper);
+  watchHelper(helper);
+  notifyHelpers();
+  return true;
+}
+
+/**
+ * Discard a parent's helper for a fresh one. Under Labs the old one is a
+ * pending kill instead, which a restore puts back in place of the fresh one
+ * (`docs/specs/reopen.md` → "Labs: No-confirm delayed kill").
+ */
+export function resetHelper(parentId: string, workspaceId: WorkspaceId, parentTitle: string): void {
+  if (!isDelayedKillEnabled()) { disposeHelper(parentId); return; }
+  const old = detachHelper(parentId);
+  if (!old) return;
+  addPendingKill({ kind: 'helper', id: old.id, workspaceId, title: parentTitle, label: 'Helper' }, {
+    restore: () => { if (!reattachHelper(old)) disposeSession(old.id); },
+    finalize: () => disposeSession(old.id),
+  });
 }
 
 /** Parents torn down while their registry entry lingers for the kill fade; a

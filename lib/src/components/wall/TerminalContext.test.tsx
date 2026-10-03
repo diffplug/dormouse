@@ -290,6 +290,14 @@ it('requires explicit confirmation before resetting a preserved helper', async (
   props.status = 'preserved'; render(); await click('Reset helper terminal'); await click('Keep helper'); expect(props.onReset).not.toHaveBeenCalled();
   await click('Reset helper terminal'); await click('Discard and reset'); expect(props.onReset).toHaveBeenCalledOnce();
 });
+
+it('resets at once, with no question, when Labs makes the old helper a pending kill', async () => {
+  props.status = 'preserved'; props.resetAsks = false; render();
+  await click('Reset helper terminal');
+  expect(props.onReset).toHaveBeenCalledOnce();
+  expect(container.textContent).not.toContain('Discard and reset');
+});
+
 it('keeps a failed promotion visible and retryable', async () => {
   props.onPromote = vi.fn(async () => { throw new Error('Placement failed'); }); render(); await click('Move this terminal into a new pane');
   expect(container.querySelector('[role="alert"]')?.textContent).toBe('Placement failed'); expect(props.onClose).not.toHaveBeenCalled();

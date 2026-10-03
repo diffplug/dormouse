@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { registry, pendingShellOpts, type TerminalEntry } from './terminal-store';
 import { applyTerminalSemanticEvents, getTerminalPaneState, resetTerminalPaneState, removeTerminalPaneState } from './terminal-state-store';
-import { beginPromotion, cancelPromotion, closeHelperParent, disposeHelper, finishPromotion, getHelper, helperHasWork, openHelper, restoreHelper, setHelperVisible, subscribeHelpers } from './helper-terminal';
+import { beginPromotion, cancelPromotion, closeHelperParent, detachHelper, disposeHelper, resetHelper, finishPromotion, getHelper, helperHasWork, openHelper, reattachHelper, restoreHelper, setHelperVisible, subscribeHelpers } from './helper-terminal';
 
 const host = vi.hoisted(() => ({ writePty: vi.fn(), terminalContext: vi.fn() }));
 vi.mock('./platform', () => ({ getPlatform: () => host }));
@@ -22,6 +22,45 @@ afterEach(() => { setHelperVisible('parent', false); disposeHelper('parent'); re
 const prompt = (id: string) => applyTerminalSemanticEvents(id, [{ type: 'promptStart' }, { type: 'promptEnd' }]);
 
 describe('helper lifecycle', () => {
+  it('detaches a helper with its Session alive and puts it back in place of its replacement', async () => {
+    const old = await openHelper('parent');
+    expect(detachHelper('parent')).toBe(old);
+    expect(getHelper('parent')).toBeUndefined();
+    expect(registry.has(old.id)).toBe(true);
+    const fresh = await openHelper('parent');
+    expect(reattachHelper(old)).toBe(true);
+    expect(getHelper('parent')).toBe(old);
+    expect(registry.has(fresh.id)).toBe(false);
+  });
+
+  it('resets into a pending kill under Labs, which restores the old helper in place of the fresh one', async () => {
+    const labs = await import('./labs-settings');
+    const pending = await import('./pending-kills');
+    vi.spyOn(labs, 'isDelayedKillEnabled').mockReturnValue(true);
+    try {
+      const old = await openHelper('parent');
+      resetHelper('parent', 'ws', 'shell');
+      expect(registry.has(old.id)).toBe(true);
+      expect(pending.getPendingKills().map(kill => [kill.kind, kill.id])).toEqual([['helper', old.id]]);
+      const fresh = await openHelper('parent');
+      pending.restorePendingKill(pending.pendingKillKey('helper', old.id));
+      expect(getHelper('parent')).toBe(old);
+      expect(registry.has(fresh.id)).toBe(false);
+    } finally {
+      pending._resetPendingKillsForTesting();
+      vi.restoreAllMocks();
+    }
+  });
+
+  it('refuses to put a helper back on a parent that has closed', async () => {
+    const old = await openHelper('parent');
+    detachHelper('parent');
+    closeHelperParent('parent');
+    expect(reattachHelper(old)).toBe(false);
+    expect(getHelper('parent')).toBeUndefined();
+  });
+
+
   it('rejects late helper startup while its closing parent remains registered for the fade', async () => {
     let resolve!: (value: unknown) => void;
     host.terminalContext.mockImplementationOnce(() => new Promise(r => { resolve = r; }));
