@@ -306,13 +306,19 @@ test('abandoning releases what it held, and is refused once switched', () => {
   assert.throws(() => switched.abandon(), /cannot be abandoned/);
 });
 
-test('a switch onto an abandoned channel is fatal, and a switch while attempting drains', () => {
+test('a switch onto an abandoned or never-begun channel is fatal, and a switch while attempting drains', () => {
   const abandoned = new DirectCutover();
   abandoned.begin();
   abandoned.abandon();
   assert.deepEqual(abandoned.onSwitchDecrypted(), { kind: 'fatal' });
   // Refused before anything moved: the session is over, not half switched.
   assert.equal(abandoned.inbound, 'relay');
+
+  // Never begun: the peer cannot have a channel to this end, so its switch
+  // would leave inbound on a path nothing carries.
+  const idle = new DirectCutover();
+  assert.deepEqual(idle.onSwitchDecrypted(), { kind: 'fatal' });
+  assert.equal(idle.inbound, 'relay');
 
   const attempting = new DirectCutover();
   attempting.begin();
@@ -344,6 +350,7 @@ test('switches each direction on its own, and only both make it direct', () => {
 
 test('holds channel frames until the peer’s switch, then drains them in order', () => {
   const cutover = new DirectCutover();
+  cutover.begin();
   assert.equal(cutover.onChannelFrame(frame(1)), 'held');
   assert.equal(cutover.onChannelFrame(frame(2)), 'held');
   assert.equal(cutover.pendingFrames, 2);
@@ -359,6 +366,7 @@ test('holds channel frames until the peer’s switch, then drains them in order'
 
 test('a relay transport after the peer’s switch is a violation', () => {
   const cutover = new DirectCutover();
+  cutover.begin();
   cutover.onSwitchDecrypted();
   assert.equal(cutover.onRelayTransport(), 'violation');
 });
@@ -391,6 +399,7 @@ test('overflows on the byte cap, whatever the frame count', () => {
  */
 test('a held frame is copied, so the caller’s buffer may be reused', () => {
   const cutover = new DirectCutover();
+  cutover.begin();
   const buffer = frame(1);
   assert.equal(cutover.onChannelFrame(buffer), 'held');
   buffer.fill(9);

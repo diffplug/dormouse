@@ -168,6 +168,33 @@ describe('updater', () => {
     expect(readBannerState()).toEqual({ status: 'downloaded', version: '0.5.0' });
   });
 
+  it('keeps an approval made while the delayed launch check is in flight', async () => {
+    const offered = makeUpdate('0.5.0');
+    const found = makeUpdate('0.5.0');
+    let answerCheck!: (value: typeof found) => void;
+    let finishDownload!: () => void;
+    offered.download.mockImplementation(() => new Promise<void>(resolve => { finishDownload = resolve; }));
+    mocks.check.mockResolvedValueOnce(offered);
+    startUpdateCheck();
+    await vi.advanceTimersByTimeAsync(0);
+    checkNow();
+    await vi.advanceTimersByTimeAsync(0);
+    mocks.check.mockImplementationOnce(() => new Promise(resolve => { answerCheck = resolve; }));
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(mocks.check).toHaveBeenCalledTimes(2);
+
+    approveUpdate();
+    answerCheck(found);
+    await vi.advanceTimersByTimeAsync(0);
+    finishDownload();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(offered.close).not.toHaveBeenCalled();
+    expect(found.close).toHaveBeenCalledOnce();
+    expect(hasPendingUpdate()).toBe(true);
+    expect(readBannerState()).toEqual({ status: 'downloaded', version: '0.5.0' });
+  });
+
   // Drive check → approve → download so an approved, downloaded update is pending.
   async function reachDownloadedUpdate(update: ReturnType<typeof makeUpdate>) {
     mocks.check.mockResolvedValue(update);
