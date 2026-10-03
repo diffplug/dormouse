@@ -144,7 +144,7 @@ describe('stopTool', () => {
     expect(await stopped).toBe(true);
     expect(kills).toEqual([ID]);
     expect(getToolReap(ID)).toEqual({ payload: PAYLOAD, cwd: '/repo', alert: expect.anything() });
-    expect(registry.get(ID)).toMatchObject({ exited: true, dormant: true });
+    expect(registry.get(ID)?.exited).toBe(true);
     // The run is over: its announcement no longer speaks for the Session.
     expect(getToolAnnounce(ID)).toBeNull();
   });
@@ -208,7 +208,7 @@ describe('rehydrateTool', () => {
     const lath = await reaped();
     expect(rehydrateTool(lath, ID)).toBe(true);
     expect(spawns.at(-1)).toMatchObject({ dehydrate: PAYLOAD, cwd: '/repo' });
-    expect(registry.get(ID)).toMatchObject({ exited: false, dormant: false });
+    expect(registry.get(ID)?.exited).toBe(false);
     await prompt();
     expect(writes).toEqual([`${COMMAND}\r`]);
     // One rehydrate per reap: the payload goes to one run alone.

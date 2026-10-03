@@ -72,7 +72,7 @@ describe('restoring', () => {
     const shellPane: PersistedPane = { id: 'shell', title: 'zsh', cwd: '/repo', untouched: true };
     restoreSession(fake, { savedSession: session([reapedPane, shellPane]) });
     expect(spawned).toEqual(['shell']);
-    expect(registry.get('tool')).toMatchObject({ exited: true, dormant: true });
+    expect(registry.get('tool')?.exited).toBe(true);
     expect(isToolReaped('tool')).toBe(true);
     expect(getToolReap('tool')).toEqual({ payload: null, cwd: '/repo', alert: reapedPane.alert });
   });
@@ -84,7 +84,7 @@ describe('restoring', () => {
     expect(plan.paneIds).toEqual(['tool', 'shell']);
     expect(spawned).toEqual([]);
     expect(isToolReaped('tool')).toBe(true);
-    expect(registry.get('tool')?.dormant).toBe(true);
+    expect(registry.get('tool')?.exited).toBe(true);
   });
 
   it('starts the Tool as before on a host that does not reap', () => {

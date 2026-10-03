@@ -16,7 +16,6 @@ import type { DooredItem } from './wall-types';
 const reaper = vi.hoisted(() => ({
   stopTool: vi.fn(async () => true),
   rehydrateTool: vi.fn(() => true),
-  toolReapBlocker: vi.fn((): string | null => null),
   toolReapIdleMs: () => 10_000,
 }));
 vi.mock('./tool-reaper', () => reaper);
@@ -96,13 +95,9 @@ describe('useToolReaper', () => {
     expect(reaper.stopTool).toHaveBeenCalled();
   });
 
-  it('stops nothing the blocker refuses, or while the Workspace closes or moves', () => {
-    reaper.toolReapBlocker.mockReturnValue('it never declared itself safe to stop');
-    render([door]);
-    act(() => { vi.advanceTimersByTime(IDLE_MS * 2); });
-    expect(reaper.stopTool).not.toHaveBeenCalled();
-    reaper.toolReapBlocker.mockReturnValue(null);
+  it('stops nothing while the Workspace closes or moves', () => {
     paused = true;
+    render([door]);
     act(() => { vi.advanceTimersByTime(IDLE_MS * 2); });
     expect(reaper.stopTool).not.toHaveBeenCalled();
   });

@@ -202,6 +202,7 @@ export function toolCommandFromParams(params: Record<string, unknown> | undefine
 /** The live reaped mark, never the payload, which stays in memory
  *  (`docs/specs/dor-tool.md` -> Reaping). */
 function withReapedMark(tool: PersistedToolMetadata, reaped: boolean): PersistedToolMetadata {
+  if ((tool.reaped === true) === reaped) return tool;
   const next = { ...tool };
   delete next.reaped;
   return reaped ? { ...next, reaped: true } : next;

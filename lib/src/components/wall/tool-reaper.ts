@@ -6,6 +6,7 @@
 import { buildShellCommandForKind, shellCommandKind } from 'dor/commands/shell-quote';
 import { parseRenderMode } from 'dor-lib-common/browser-providers';
 import { getPlatform, PLATFORM_STRING } from '../../lib/platform';
+import { toolReapIdleMsOverride } from '../../lib/feature-flags';
 import { getHelper } from '../../lib/helper-terminal';
 import { isToolCommandArgv } from '../../lib/session-types';
 import { toolCommandFromParams } from '../../lib/session-save';
@@ -33,26 +34,17 @@ import type { LathWallEngine } from './lath-wall-engine';
 import { retireToolRun } from './use-tool-serving';
 
 /** How long a Tool must be out of sight and silent before it is reaped. */
-export const TOOL_REAP_IDLE_MS = 30 * 60_000;
-/** `localStorage` key overriding `TOOL_REAP_IDLE_MS`, in ms: testing only. */
-export const TOOL_REAP_IDLE_OVERRIDE_KEY = 'dormouse.debug.toolReapIdleMs';
+const TOOL_REAP_IDLE_MS = 30 * 60_000;
 /** How long a stopping Tool has to exit on its own before its PTY is killed. */
 export const TOOL_STOP_GRACE_MS = 3_000;
 /** After the prompt returns: a payload parsed in the same chunk as the shell's
  *  finish can arrive in the message after it. */
 const STOP_SETTLE_MS = 100;
-const POLL_MS = 50;
 /** How long a dehydrated run may take to fail before its bare retry is moot. */
 const RETRY_WINDOW_MS = 120_000;
 
 export function toolReapIdleMs(): number {
-  try {
-    const value = Number(globalThis.localStorage?.getItem(TOOL_REAP_IDLE_OVERRIDE_KEY) ?? NaN);
-    if (Number.isFinite(value) && value > 0) return value;
-  } catch {
-    // No storage in this context: the default.
-  }
-  return TOOL_REAP_IDLE_MS;
+  return toolReapIdleMsOverride() ?? TOOL_REAP_IDLE_MS;
 }
 
 /** Why `id` may not be reaped now, or null when it may. The idle and
@@ -78,14 +70,15 @@ export function toolReapBlocker(id: string, params: Record<string, unknown> | un
   return null;
 }
 
-function waitFor(done: () => boolean, timeoutMs: number): Promise<void> {
+/** Resolves once `done()` holds after a pane-state change, or at the deadline. */
+function waitFor(id: string, done: () => boolean, timeoutMs: number): Promise<void> {
   return new Promise((resolve) => {
-    const deadline = Date.now() + timeoutMs;
-    const tick = () => {
-      if (done() || Date.now() >= deadline) resolve();
-      else setTimeout(tick, POLL_MS);
-    };
-    tick();
+    const finish = () => { clearTimeout(timer); unsubscribe(); resolve(); };
+    const timer = setTimeout(finish, timeoutMs);
+    const unsubscribe = subscribeToTerminalPaneState((changed) => {
+      if ((changed === undefined || changed === id) && done()) finish();
+    });
+    if (done()) finish();
   });
 }
 
@@ -105,7 +98,7 @@ export async function stopTool(lath: LathWallEngine, id: string): Promise<boolea
     // The stop is the host's own doing: never a command-exit ring or a push.
     getPlatform().alertSilenceRun?.(id);
     getPlatform().writePty(id, '\x03');
-    await waitFor(() => !registry.has(id) || getTerminalPaneState(id).currentCommand === null, TOOL_STOP_GRACE_MS);
+    await waitFor(id, () => !registry.has(id) || getTerminalPaneState(id).currentCommand === null, TOOL_STOP_GRACE_MS);
     await new Promise(resolve => setTimeout(resolve, STOP_SETTLE_MS));
   } finally {
     payload = endToolStop(id);
@@ -139,14 +132,7 @@ export function rehydrateTool(lath: LathWallEngine, id: string): boolean {
   if (command !== params.command) lath.store.updateParams(id, { command });
   const fallbackCwd = typeof params.cwd === 'string' ? params.cwd : null;
   const cwd = record?.cwd ?? getTerminalPaneState(id).cwd?.path ?? fallbackCwd;
-  rehydrateTerminal(id, {
-    cwd,
-    shell: shell?.shell,
-    args: shell?.args,
-    command,
-    dehydrate: record?.payload ?? null,
-    alert: record?.alert ?? null,
-  });
+  rehydrateTerminal(id, { cwd, shell: shell?.shell, args: shell?.args, command, dehydrate: record?.payload, alert: record?.alert });
   if (record?.payload) retryWithoutPayload(id, command);
   return true;
 }
@@ -162,6 +148,8 @@ function retryWithoutPayload(id: string, command: string): void {
     const entry = registry.get(id);
     if (!entry || entry.exited) { stop(); return; }
     const state = getTerminalPaneState(id);
+    // A run that announced is up: the bare retry is moot.
+    if (getToolAnnounce(id) !== null) { stop(); return; }
     if (runId === null) {
       // The launch seeds a run of its own that the first prompt ends: only
       // the one the shell reports is the Tool's.

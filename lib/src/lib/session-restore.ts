@@ -15,8 +15,8 @@ export function isReapedToolPane(platform: PlatformAdapter, pane: PersistedPane)
 
 /** Rebuild a reaped Tool's Session with no PTY, its alert shown and kept for
  *  the rehydrate's spawn, which starts it from bare args when it is seen. */
-export function restoreReapedTool(pane: PersistedPane, shell: string | undefined): void {
-  createReapedTerminal(pane.id, { cwd: pane.cwd, title: pane.title, shell, untouched: pane.untouched });
+export function restoreReapedTool(pane: PersistedPane): void {
+  createReapedTerminal(pane.id, { cwd: pane.cwd, title: pane.title, shell: getDefaultShellOpts()?.shell, untouched: pane.untouched });
   if (pane.alert) setTerminalActivity(pane.id, pane.alert);
   markToolReaped(pane.id, { payload: null, cwd: pane.cwd, alert: pane.alert ?? null });
 }
@@ -114,7 +114,7 @@ export function restoreSession(platform: PlatformAdapter, sources: RestoreSource
       continue;
     }
     if (isReapedToolPane(platform, pane)) {
-      restoreReapedTool(pane, shellOpts?.shell);
+      restoreReapedTool(pane);
       continue;
     }
     restoreTerminal(pane.id, {

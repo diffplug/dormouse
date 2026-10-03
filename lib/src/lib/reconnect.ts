@@ -2,7 +2,7 @@ import type { TerminalGrid } from './terminal-transfer';
 import { adoptOrphanedHelper, restoreHelper } from './helper-terminal';
 import type { LathPersistedLayout } from './lath/persistence';
 import type { PlatformAdapter, PtyInfo } from './platform/types';
-import { getDefaultShellOpts, restoreBrowserSurfaceTodo, resumeTerminal } from './terminal-registry';
+import { restoreBrowserSurfaceTodo, resumeTerminal } from './terminal-registry';
 import type { TerminalResumeInfo } from './terminal-lifecycle';
 import { carrySurfaceRefs, readPersistedSession, type PersistedDoor, type PersistedSession, type PersistedSurfaceRefs } from './session-types';
 import { isReapedToolPane, persistedLathLayout, restoreReapedTool, restoreSession } from './session-restore';
@@ -253,7 +253,7 @@ function resumeLivePtys(
   // PTY into one tab group.
   const plan = getSavedResumePlan(saved, ids, reaped.map((pane) => pane.id));
   if (!plan) return { paneIds: ids, doors: [], ...carrySurfaceRefs(saved) };
-  for (const pane of reaped) restoreReapedTool(pane, getDefaultShellOpts()?.shell);
+  for (const pane of reaped) restoreReapedTool(pane);
   return plan;
 }
 

@@ -9,7 +9,7 @@ import { getPlatform } from '../../lib/platform';
 import type { PtyDataDetail } from '../../lib/platform/types';
 import { isToolReaped } from '../../lib/tool-reap-store';
 import type { LathWallEngine } from './lath-wall-engine';
-import { rehydrateTool, stopTool, toolReapBlocker, toolReapIdleMs } from './tool-reaper';
+import { rehydrateTool, stopTool, toolReapIdleMs } from './tool-reaper';
 import { toolLeaves } from './use-tool-serving';
 import type { DooredItem } from './wall-types';
 
@@ -47,33 +47,37 @@ export function useToolReaper({
     /** When each Tool left sight; absent while it is seen. */
     const outOfSight = new Map<string, number>();
     const lastOutput = new Map<string, number>();
-    const onData = (detail: PtyDataDetail) => { lastOutput.set(detail.id, Date.now()); };
+    /** This Wall's Tools as of the last evaluation: other output is not theirs. */
+    let tools = new Set<string>();
+    const onData = (detail: PtyDataDetail) => { if (tools.has(detail.id)) lastOutput.set(detail.id, Date.now()); };
+    // Read once: the tick is sized from it too.
+    const idleMs = toolReapIdleMs();
 
     evaluate.current = () => {
       const now = Date.now();
       const hidden = !activeRef.current || webviewHidden();
       const doorIds = new Set(doorsRef.current.map(door => door.id));
       const leaves = toolLeaves(lath, doorsRef.current);
-      const live = new Set(leaves.map(leaf => leaf.id));
-      for (const id of outOfSight.keys()) if (!live.has(id)) outOfSight.delete(id);
-      for (const id of lastOutput.keys()) if (!live.has(id)) lastOutput.delete(id);
-      const idleMs = toolReapIdleMs();
-      for (const { id, params } of leaves) {
+      tools = new Set(leaves.map(leaf => leaf.id));
+      for (const id of outOfSight.keys()) if (!tools.has(id)) outOfSight.delete(id);
+      for (const id of lastOutput.keys()) if (!tools.has(id)) lastOutput.delete(id);
+      for (const { id } of leaves) {
         if (!hidden && !doorIds.has(id)) {
           outOfSight.delete(id);
-          if (isToolReaped(id) && !paused()) rehydrateTool(lath, id);
+          if (!paused()) rehydrateTool(lath, id);
           continue;
         }
         let since = outOfSight.get(id);
         if (since === undefined) outOfSight.set(id, since = now);
         // Never on the minimize or switch itself: the clock starts there.
         if (now - Math.max(since, lastOutput.get(id) ?? 0) < idleMs || paused()) continue;
-        if (toolReapBlocker(id, params) === null) void stopTool(lath, id);
+        // `stopTool` declines whatever is not safe to stop.
+        if (!isToolReaped(id)) void stopTool(lath, id);
       }
     };
 
     platform.onPtyData(onData);
-    const tick = Math.min(MAX_TICK_MS, Math.max(MIN_TICK_MS, toolReapIdleMs() / 4));
+    const tick = Math.min(MAX_TICK_MS, Math.max(MIN_TICK_MS, idleMs / 4));
     const timer = setInterval(() => evaluate.current(), tick);
     const onVisibility = () => evaluate.current();
     document.addEventListener('visibilitychange', onVisibility);

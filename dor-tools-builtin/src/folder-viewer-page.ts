@@ -218,17 +218,25 @@ const SCRIPT = `(function () {
     })(root);
     return found;
   }
-  // Parents before children, each awaited; a path the folder no longer has is skipped.
+  // One depth at a time, each level's folders loading together, so a parent
+  // is listed before its children; a path the folder no longer has is skipped.
   function restore(saved) {
     if (!saved || !Array.isArray(saved.expanded)) return Promise.resolve();
     if (saved.showIgnored === false) setShowIgnored(false);
+    var levels = [];
+    saved.expanded.forEach(function (path) {
+      var depth = path.split('/').length;
+      (levels[depth] = levels[depth] || []).push(path);
+    });
     var chain = Promise.resolve();
-    saved.expanded.slice().sort(function (a, b) { return a.split('/').length - b.split('/').length; }).forEach(function (path) {
+    levels.forEach(function (paths) {
       chain = chain.then(function () {
-        var node = find(path);
-        if (!node || node.kind !== 'dir' || node.expanded) return null;
-        toggle(node, true);
-        return node.loading;
+        return Promise.all(paths.map(function (path) {
+          var node = find(path);
+          if (!node || node.kind !== 'dir' || node.expanded) return null;
+          toggle(node, true);
+          return node.loading;
+        }));
       });
     });
     return chain.then(function () {

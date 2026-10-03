@@ -31,13 +31,6 @@ export interface TerminalEntry {
    * stops offering it as attachable.
    */
   exited?: boolean;
-  /**
-   * A reaped Tool's Session: its PTY was killed while idle and is gone, not
-   * exited, until `rehydrateTerminal` spawns the next one
-   * (`docs/specs/dor-tool.md` -> Reaping). The kill's own exit, which only VS
-   * Code delivers, is not news.
-   */
-  dormant?: boolean;
 }
 
 export interface TerminalOverlayDims {

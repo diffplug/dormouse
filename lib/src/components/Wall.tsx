@@ -108,7 +108,6 @@ import type { LeafMeta } from '../lib/lath/persistence';
 import { useToolServing } from './wall/use-tool-serving';
 import { useToolReaper } from './wall/use-tool-reaper';
 import { rehydrateTool } from './wall/tool-reaper';
-import { isToolReaped } from '../lib/tool-reap-store';
 import type { WallNav } from './wall/keyboard/types';
 import { useWallKeyboard } from './wall/use-wall-keyboard';
 import { useSessionPersistence } from './wall/use-session-persistence';
@@ -1706,9 +1705,7 @@ export function Wall({
           if (closingWorkspaceRef.current || isWorkspaceTransferPending(effectiveWorkspaceId)
             || !lath.getMeta(match.id) || lath.isDying(match.id) || isClosingSurface(match.id)) return;
           const state = getTerminalPaneState(match.id);
-          if (isToolReaped(match.id)) {
-            rehydrateTool(lath, match.id);
-          } else if (state.currentCommand === null) {
+          if (!rehydrateTool(lath, match.id) && state.currentCommand === null) {
             const matchedCommand = lath.getMeta(match.id)?.params?.command;
             const command = typeof matchedCommand === 'string' ? matchedCommand : toolRunCommand(resolved.run, match.id);
             const restarted = await restartSurfaceInPlace(match.id, command, state.cwd?.path ?? cwd, undefined, { acceptCompletedRun: true });

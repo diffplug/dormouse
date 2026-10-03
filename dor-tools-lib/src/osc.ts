@@ -16,10 +16,7 @@ import { isRecord, sanitizeText } from './sanitize.js';
 /** Cap on the whole payload before parsing. A tool's announcement is a handful
  *  of fields; anything larger is a mistake or an attack, and JSON.parse on
  *  unbounded terminal output is not something to offer. */
-const PAYLOAD_LIMIT = 4096;
-/** The serialized payload bound, which a host also applies to the
- *  `DEHYDRATE_ENV` value it sets on a rehydrated spawn. */
-export const TOOL_PAYLOAD_LIMIT = PAYLOAD_LIMIT;
+export const TOOL_PAYLOAD_LIMIT = 4096;
 const NAME_LIMIT = 200;
 const KEY_ELEMENT_LIMIT = 512;
 const KEY_ELEMENTS_LIMIT = 8;
@@ -71,7 +68,7 @@ function readKey(value: unknown): string[] | null {
 export function parseToolPayload(content: string, verb: string): Record<string, unknown> | null {
   if (!content.startsWith(`${verb};`)) return null;
   const raw = content.slice(verb.length + 1);
-  if (raw.length === 0 || raw.length > PAYLOAD_LIMIT) return null;
+  if (raw.length === 0 || raw.length > TOOL_PAYLOAD_LIMIT) return null;
   try {
     const payload: unknown = JSON.parse(raw);
     return isRecord(payload) ? payload : null;
@@ -195,9 +192,14 @@ export interface ToolDehydrate {
  * checks only its version and bound: the state is the Tool's own business,
  * handed back verbatim (`docs/specs/dor-tool.md` -> Reaping). */
 export function parseToolDehydrate(content: string): ToolDehydrate | null {
+  const state = dehydratedState(content);
+  return state === null ? null : { payload: content.slice('dehydrate;'.length) };
+}
+
+/** A v1 `dehydrate` payload's state, or null. */
+function dehydratedState(content: string): unknown {
   const record = parseToolPayload(content, 'dehydrate');
-  if (!record || record.v !== 1 || record.state === undefined || record.state === null) return null;
-  return { payload: content.slice('dehydrate;'.length) };
+  return record && record.v === 1 && record.state !== undefined ? record.state : null;
 }
 
 /** The `dehydrate` payload a Tool writes on the graceful-stop signal, just
@@ -220,15 +222,13 @@ function escapeC1(raw: string): string {
  * — or null for none: a missing, malformed, oversized, or unknown-version value
  * means start from args alone, never fail. */
 export function readDehydrated<T = unknown>(value: string | undefined): T | null {
-  if (typeof value !== 'string') return null;
-  const parsed = parseToolDehydrate(`dehydrate;${value}`);
-  return parsed ? (JSON.parse(parsed.payload) as { state: T }).state : null;
+  return typeof value === 'string' ? dehydratedState(`dehydrate;${value}`) as T | null : null;
 }
 
 function sequence(verb: string, payload: object, encode: (raw: string) => string = raw => raw): string {
   // JSON escaping can expand a field beyond its own bound. The host caps the
   // serialized payload before parsing, so never emit a sequence it will ignore.
   const raw = encode(JSON.stringify(payload));
-  if (raw.length > PAYLOAD_LIMIT) throw new RangeError('Tool payload exceeds its serialized size limit');
+  if (raw.length > TOOL_PAYLOAD_LIMIT) throw new RangeError('Tool payload exceeds its serialized size limit');
   return `\x1b]367;${verb};${raw}\x07`;
 }

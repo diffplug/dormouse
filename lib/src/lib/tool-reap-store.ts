@@ -21,24 +21,23 @@ export interface ToolReapRecord {
 
 /** Sessions between the graceful-stop signal and their PTY's kill, each with
  *  the last payload emitted since that signal. */
-const stopping = new Map<string, { payload: string | null }>();
+const stopping = new Map<string, string | null>();
 const reaped = new Map<string, ToolReapRecord>();
 
 /** Start keeping `dehydrate` payloads for `id`: only one emitted after the
  *  graceful-stop signal counts. */
 export function beginToolStop(id: string): void {
-  stopping.set(id, { payload: null });
+  stopping.set(id, null);
 }
 
 /** A live `dehydrate` from `id`'s output; ignored unless it is stopping. */
 export function offerToolDehydrate(id: string, payload: string): void {
-  const stop = stopping.get(id);
-  if (stop) stop.payload = payload;
+  if (stopping.has(id)) stopping.set(id, payload);
 }
 
 /** Stop keeping payloads for `id`, answering the last one kept. */
 export function endToolStop(id: string): string | null {
-  const payload = stopping.get(id)?.payload ?? null;
+  const payload = stopping.get(id) ?? null;
   stopping.delete(id);
   return payload;
 }

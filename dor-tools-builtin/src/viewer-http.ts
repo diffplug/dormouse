@@ -37,6 +37,5 @@ export function pathSegments(path: string, { strict = false } = {}): string[] | 
  * `target` and the OSC 367 `serve` announcement, declaring `dehydrate` when the
  * viewer emits its state on the graceful-stop signal. */
 export function viewerAnnouncement(viewer: { port: number; path: string }, target: string, { dehydrate = false } = {}): string {
-  const { port, path } = viewer;
-  return `\x1b]2;${viewerTitle(target)}\x07${serveSequence(dehydrate ? { port, path, dehydrate } : { port, path })}`;
+  return `\x1b]2;${viewerTitle(target)}\x07${serveSequence({ port: viewer.port, path: viewer.path, dehydrate: dehydrate || undefined })}`;
 }
