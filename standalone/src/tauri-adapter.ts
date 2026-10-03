@@ -136,6 +136,10 @@ export class TauriAdapter implements PlatformAdapter {
   }
 
   async init(): Promise<void> {
+    // A page this one replaced in the window (a reload) may have left iframe
+    // leases it never released; this page holds none yet. Awaited, so the
+    // release reaches the sidecar before any lease this page takes.
+    await rawInvoke("iframe_release_proxy", { lease: null }).catch(() => {});
     const replayExits = new Map<string, number>();
     const replayKey = (id: string, requestId?: string) => JSON.stringify([requestId, id]);
     // Registered together rather than one await after another: every `listen`
@@ -450,7 +454,7 @@ export class TauriAdapter implements PlatformAdapter {
     return result;
   }
 
-  async createIframeProxyUrl(targetUrl: string): Promise<IframeProxyResult> {
+  async createIframeProxyUrl(targetUrl: string, lease?: string): Promise<IframeProxyResult> {
     // The sidecar stands up the loopback proxy and serves the bytes (shared
     // lib/src/host/iframe-proxy.ts). On failure, report unreachable so the panel
     // shows a hint rather than a never-loading frame.
@@ -460,10 +464,15 @@ export class TauriAdapter implements PlatformAdapter {
       return await rawInvoke<IframeProxyResult>("iframe_create_proxy_url", {
         target: targetUrl,
         embedderOrigins: embedderOrigins(),
+        lease: lease ?? null,
       });
     } catch (err) {
       return { ok: false, reason: "unreachable", detail: errMessage(err) };
     }
+  }
+
+  releaseIframeProxy(lease: string): void {
+    void rawInvoke("iframe_release_proxy", { lease }).catch(() => {});
   }
 
   // --- browser automation (docs/specs/dor-browser.md → "Browser Host").

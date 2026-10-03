@@ -96,6 +96,7 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
     // drops `this` and makes the internal `this.host` access throw. The VS Code
     // adapter binds for the same reason; mirror it so any call style is safe.
     this.createIframeProxyUrl = this.createIframeProxyUrl.bind(this);
+    this.releaseIframeProxy = this.releaseIframeProxy.bind(this);
     this.toolControl = this.toolControl.bind(this);
   }
 
@@ -245,15 +246,20 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
     }
   }
 
-  async createIframeProxyUrl(targetUrl: string): Promise<IframeProxyResult> {
+  async createIframeProxyUrl(targetUrl: string, lease?: string): Promise<IframeProxyResult> {
     try {
       return await this.host.invoke("iframe_create_proxy_url", {
         target: targetUrl,
         embedderOrigins: embedderOrigins(),
+        lease: lease ?? null,
       });
     } catch (err) {
       return { ok: false, reason: "unreachable", detail: errMessage(err) };
     }
+  }
+
+  releaseIframeProxy(lease: string): void {
+    this.host.send("iframe_release_proxy", { lease });
   }
 
   readonly browserProviders = BROWSER_PROVIDER_IDS;

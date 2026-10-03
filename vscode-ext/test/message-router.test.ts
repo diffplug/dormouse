@@ -25,6 +25,15 @@ const wiring = vi.hoisted(() => ({
   pushes: [] as Array<[string, string]>,
 }));
 
+const iframeProxy = vi.hoisted(() => ({
+  create: vi.fn(async (..._args: unknown[]) => ({ ok: true, url: 'http://127.0.0.1:1/' })),
+  release: vi.fn(),
+}));
+vi.mock('../src/iframe-proxy-host', () => ({
+  createIframeProxyUrl: iframeProxy.create,
+  releaseIframeProxyLease: iframeProxy.release,
+}));
+
 vi.mock('../src/peer-link', () => ({
   configurePeerLink: (deps: PeerLinkDeps) => {
     wiring.peer = deps;
@@ -662,4 +671,30 @@ it('tells the webview whether VS Code shows it, on init and on each change', () 
     expect(shown().at(-1)).toEqual({ type: 'dormouse:shown', shown: false });
   } finally { disposable.dispose(); }
   expect(listeners.size).toBe(0);
+});
+
+// docs/specs/dor-browser.md → "Iframe Proxy Leases": a webview's leases are
+// held under its router, which ends them when the webview goes or reloads.
+it('holds a webview\'s iframe leases under its router, and ends them with it', () => {
+  const webview = fakeWebview();
+  const other = fakeWebview();
+  const disposable = router.attachRouter(webview.channel);
+  const otherDisposable = router.attachRouter(other.channel);
+  try {
+    webview.send({ type: 'iframe:createProxyUrl', url: 'http://localhost:5173/', embedderOrigins: [], lease: 'surface-1#a', requestId: 'r1' });
+    other.send({ type: 'iframe:createProxyUrl', url: 'http://localhost:5173/', embedderOrigins: [], lease: 'surface-1#a', requestId: 'r2' });
+    const [owner, otherOwner] = iframeProxy.create.mock.calls.map(([, , lease]) => (lease as { owner: string; id: string }).owner);
+    expect(owner).not.toBe(otherOwner);
+    webview.send({ type: 'iframe:releaseProxy', lease: 'surface-1#a' });
+    expect(iframeProxy.release).toHaveBeenLastCalledWith(owner, 'surface-1#a');
+    webview.send({ type: 'dormouse:init' });
+    expect(iframeProxy.release).toHaveBeenLastCalledWith(owner);
+    iframeProxy.release.mockClear();
+    disposable.dispose();
+    expect(iframeProxy.release).toHaveBeenCalledWith(owner);
+    expect(iframeProxy.release).not.toHaveBeenCalledWith(otherOwner);
+  } finally {
+    disposable.dispose();
+    otherDisposable.dispose();
+  }
 });

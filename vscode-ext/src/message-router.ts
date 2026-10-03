@@ -17,7 +17,7 @@ import type { WebviewMessage, ExtensionMessage } from './message-types';
 import type { DorControlRequest } from './pty-manager';
 import { dorWorkspaceRefusal } from './dor-workspace-guard';
 import { runBrowserRequest } from './agent-browser-host';
-import { createIframeProxyUrl } from './iframe-proxy-host';
+import { createIframeProxyUrl, releaseIframeProxyLease } from './iframe-proxy-host';
 import { toolControl } from './tool-host';
 import type { ToolHostRequest } from '../../lib/src/lib/platform/types';
 import { ASK_BUDGET_MS } from '../../lib/src/host/remote/service-protocol';
@@ -664,6 +664,8 @@ export function attachRouter(
           // Validated host-side (`normalizeEmbedderOrigins`); an unusable chain
           // costs the shim, never a wider grant.
           Array.isArray(msg.embedderOrigins) ? msg.embedderOrigins : [],
+          // The lease is this webview's: its owner is this router.
+          msg.lease === undefined ? undefined : { owner: routerId, id: msg.lease },
         ).then(
           (result) => post({
             type: 'iframe:proxyUrl', requestId: msg.requestId, result,
@@ -673,6 +675,9 @@ export function attachRouter(
             result: { ok: false, reason: 'unreachable', detail: err?.message ?? String(err) },
           } satisfies ExtensionMessage),
         );
+        break;
+      case 'iframe:releaseProxy':
+        if (typeof msg.lease === 'string') releaseIframeProxyLease(routerId, msg.lease);
         break;
       case 'peer:answer': {
         // Every webview answers, so "nobody owns it" settles immediately
@@ -713,8 +718,9 @@ export function attachRouter(
         // Tear down previous subscriptions first (webview was destroyed and recreated).
         disconnectWebview?.();
         disconnectWebview = connectWebview();
-        // Recreated content is a new realm.
+        // Recreated content is a new realm, and holds no iframe view yet.
         alertHost.endRealm(routerId);
+        releaseIframeProxyLease(routerId);
         postShown();
 
         // Re-publish the currently-selected shell so split-spawns in the
@@ -837,6 +843,7 @@ export function attachRouter(
         if (request.pending.size === 0) request.settle();
       }
       alertHost.endRealm(routerId);
+      releaseIframeProxyLease(routerId);
       shownDisposable?.dispose();
       removeWatchedCommandListener();
       removeAlertSettingsListener();

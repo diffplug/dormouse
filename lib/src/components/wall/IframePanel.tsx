@@ -204,6 +204,12 @@ export function IframePanel({ id, title, params, onReady }: PaneProps & {
   // accurate focus model, and real error pages. Reachability is diagnosed by
   // the proxy and shown as a served page inside the frame.
   const [resolution, setResolution] = useState<Resolution>(() => (sourceUrl ? { kind: 'resolving' } : { kind: 'empty' }));
+  // This mounted view's lease on its proxy grant (docs/specs/dor-browser.md →
+  // "Iframe Proxy Leases"): Reload, Back and Forward keep the grant and its
+  // origin, and unmounting — a kill, a swap, a transfer — ends it. Declared
+  // before the effect that takes it, so a StrictMode remount releases first.
+  const [lease] = useState(() => `${id}#${crypto.randomUUID()}`);
+  useEffect(() => () => getPlatform().releaseIframeProxy?.(lease), [lease]);
   useEffect(() => {
     if (!isTool || resolution.kind !== 'proxied' || !iframeRef.current) return;
     return connectIframeTheme(iframeRef.current, resolution.origin);
@@ -238,7 +244,7 @@ export function IframePanel({ id, title, params, onReady }: PaneProps & {
     }
     let cancelled = false;
     setResolution({ kind: 'resolving' });
-    createProxy(sourceUrl).then(
+    createProxy(sourceUrl, lease).then(
       (result: IframeProxyResult) => {
         if (cancelled) return;
         if (result.ok) setResolution({ kind: 'proxied', src: result.url, origin: originOf(result.url) });
@@ -249,7 +255,7 @@ export function IframePanel({ id, title, params, onReady }: PaneProps & {
       },
     );
     return () => { cancelled = true; };
-  }, [sourceUrl, reloadNonce]);
+  }, [sourceUrl, reloadNonce, lease]);
 
   // Register a screen controller so the embed surface shows the unified
   // browser chrome (URL + the far-left chip → Display modal) and can swap back

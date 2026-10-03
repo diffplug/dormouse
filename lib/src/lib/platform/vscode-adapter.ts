@@ -81,6 +81,7 @@ export class VSCodeAdapter implements PlatformAdapter {
     // Called through a detached reference, which would otherwise drop `this`
     // and throw on the internal `requestResponse`.
     this.createIframeProxyUrl = this.createIframeProxyUrl.bind(this);
+    this.releaseIframeProxy = this.releaseIframeProxy.bind(this);
 
     // Seed the default shell from the extension-injected global so that
     // the first terminal on startup (which spawns synchronously on Wall
@@ -336,18 +337,22 @@ export class VSCodeAdapter implements PlatformAdapter {
     return result ?? { status: 'error', message: 'tool request timed out' };
   }
 
-  async createIframeProxyUrl(url: string): Promise<IframeProxyResult> {
+  async createIframeProxyUrl(url: string, lease?: string): Promise<IframeProxyResult> {
     // The extension host stands up the loopback proxy and serves the bytes (see
     // iframe-proxy-host.ts). On timeout, report unreachable so the panel shows a
     // hint rather than hanging on a never-loading frame.
     const result = await this.requestResponse<IframeProxyResult>(
       // The webview's ancestor chain is only knowable here: it decides who may
       // frame the proxy (`lib/src/lib/embedder-origins.ts`).
-      'iframe:createProxyUrl', 'iframe:proxyUrl', { url, embedderOrigins: embedderOrigins() },
+      'iframe:createProxyUrl', 'iframe:proxyUrl', { url, embedderOrigins: embedderOrigins(), ...(lease ? { lease } : {}) },
       (msg) => msg.result,
       5000,
     );
     return result ?? { ok: false, reason: 'unreachable', detail: 'iframe proxy request timed out' };
+  }
+
+  releaseIframeProxy(lease: string): void {
+    this.vscode.postMessage({ type: 'iframe:releaseProxy', lease });
   }
 
   onPtyData(handler: (detail: PtyDataDetail) => void): void {

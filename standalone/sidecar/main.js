@@ -13,7 +13,7 @@ const clipboard = require('./clipboard-ops');
 const { createDorControlServer } = require('./dor-control-server');
 // Built from lib/src/host/iframe-proxy.ts (shared with the VS Code host) by
 // scripts/build-sidecar-proxy.mjs. See docs/specs/dor-browser.md.
-const { createIframeProxyUrl } = require('./iframe-proxy.cjs');
+const { createIframeProxyUrl, releaseIframeProxyLease, retainIframeProxyOwners } = require('./iframe-proxy.cjs');
 const { createToolHost } = require('./tool-host.cjs');
 const { gitInfo } = require('./git-info.cjs');
 // Same pattern: lib/src/host/browser-host.ts is the single source of truth for
@@ -156,6 +156,9 @@ rl.on('line', (line) => {
 function handleLine(line) {
   try {
     const { event, data } = JSON.parse(line);
+    // A closed window's iframe views are gone with it: end their leases. The
+    // shared host takes the same event for the Burrow and the alerts.
+    if (event === 'burrow:windows' && Array.isArray(data?.labels)) retainIframeProxyOwners(data.labels.filter((label) => typeof label === 'string'));
     // The PTY lifecycle and I/O, the alerts and the Burrow.
     if (host.handleCommand(event, data)) return;
     switch (event) {
@@ -217,8 +220,13 @@ function handleLine(line) {
             // Validated inside the proxy (`normalizeEmbedderOrigins`); an
             // unusable chain costs the shim, never a wider grant.
             embedderOrigins: data.embedderOrigins,
+            // Owner stamped by Rust: the asking window.
+            lease: data.lease,
           }),
         }));
+        break;
+      case 'iframe:releaseProxy':
+        if (typeof data?.owner === 'string') releaseIframeProxyLease(data.owner, typeof data.id === 'string' ? data.id : undefined);
         break;
       case 'browser:request':
         // Frames never ride this JSON-lines stdio, which PTY traffic shares:

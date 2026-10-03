@@ -166,7 +166,26 @@ describe('IframePanel', () => {
     setPlatform(platform);
     await renderPanel(stubActions(), { id: 'iframe-bare-proxy', title: 'Raw iframe', params: { url: 'localhost:5173' } });
 
-    expect(createIframeProxyUrl).toHaveBeenCalledWith('http://localhost:5173');
+    expect(createIframeProxyUrl).toHaveBeenCalledWith('http://localhost:5173', expect.stringMatching(/^iframe-bare-proxy#/));
+  });
+
+  // docs/specs/dor-browser.md → "Iframe Proxy Leases".
+  it('asks under one lease for the life of the view, and releases it on unmount', async () => {
+    const createIframeProxyUrl = vi.fn(async (_url: string, _lease?: string) => ({ ok: true as const, url: 'http://127.0.0.1:61234/app' }));
+    const releaseIframeProxy = vi.fn();
+    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'createIframeProxyUrl' | 'releaseIframeProxy'>;
+    platform.createIframeProxyUrl = createIframeProxyUrl;
+    platform.releaseIframeProxy = releaseIframeProxy;
+    setPlatform(platform);
+    await renderPanel(stubActions(), paneProps('iframe-leased'));
+    await act(async () => { getAgentBrowserScreenController('iframe-leased')?.chromeActions.reload(); });
+    const leases = new Set(createIframeProxyUrl.mock.calls.map(([, lease]) => lease));
+    expect(createIframeProxyUrl.mock.calls.length).toBeGreaterThan(1);
+    expect(leases.size).toBe(1);
+    const [lease] = leases;
+    act(() => root.unmount());
+    expect(releaseIframeProxy).toHaveBeenLastCalledWith(lease);
+    root = createRoot(container);
   });
 
   // The frame is not the only consumer of the source URL: `liveUrl`, the
