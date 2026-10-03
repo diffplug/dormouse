@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { hasBrowser, hasTerminal } from 'dor/commands/types';
 import {
   isBrowserParams,
+  retainsLivePage,
   isToolParams,
   namespacedToolKey,
   resolveRenderMode,
@@ -214,5 +215,16 @@ describe('a pending tool is not persisted (regression: PR #493 review)', () => {
     const persisted = persistableLeafMeta(meta);
     expect(persisted.component).toBe('terminal');
     expect(persisted.params).toBeUndefined();
+  });
+});
+
+describe('retainsLivePage', () => {
+  it('is an iframe-rendered browser or Tool, never a screencast or a terminal', () => {
+    expect(retainsLivePage({ surfaceType: 'browser', renderMode: 'iframe', url: 'http://localhost:5173' })).toBe(true);
+    expect(retainsLivePage({ surfaceType: 'tool', renderMode: 'iframe', url: 'http://localhost:6007' })).toBe(true);
+    // A Tool not yet serving frames nothing.
+    expect(retainsLivePage({ surfaceType: 'tool', renderMode: 'iframe' })).toBe(false);
+    expect(retainsLivePage({ surfaceType: 'browser', renderMode: 'agent-browser-screencast' })).toBe(false);
+    expect(retainsLivePage({ surfaceType: 'terminal' })).toBe(false);
   });
 });

@@ -2,7 +2,7 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vites
 import * as http from 'node:http';
 import * as net from 'node:net';
 import { gunzipSync, gzipSync } from 'node:zlib';
-import { createIframeProxyUrl } from './iframe-proxy';
+import { MAX_IFRAME_LEASES, createIframeProxyUrl, releaseIframeProxyLease, retainIframeProxyOwners } from './iframe-proxy';
 
 // The app's own ancestor chain, as `lib/src/lib/embedder-origins.ts` reports it
 // from a VS Code webview: the extension's document plus the workbench above it.
@@ -667,12 +667,142 @@ describe('iframe grant capacity', () => {
   it.each(['sequential', 'concurrent'] as const)('keeps at most 32 published listeners after %s creation', async (mode) => {
     advanceClock(6 * 60_000);
     await sweep();
-    const port = await upstream((_q, s) => { s.writeHead(204); s.end(); });
+    // An evicted grant's port is free for any process to bind again — another
+    // test file's server, or a later grant here — so a port that merely
+    // listens proves nothing. Only this upstream's token, through this
+    // proxy, does, and live grants never share a port.
+    const token = `capacity-${mode}-${Math.random()}`;
+    const port = await upstream((_q, s) => { s.writeHead(200, { 'content-type': 'text/plain' }); s.end(token); });
     const target = `http://127.0.0.1:${port}/`;
     const urls: string[] = [];
     if (mode === 'concurrent') urls.push(...await Promise.all(Array.from({ length: 40 }, () => frame(target))));
     else for (let i = 0; i < 40; i++) urls.push(await frame(target));
-    const listening = await Promise.all(urls.map((url) => isListening(Number(new URL(url).port))));
-    expect(listening.filter(Boolean)).toHaveLength(32);
+    const answers = await Promise.all(urls.map((url) => get(url).then((r) => r.body === token, () => false)));
+    const live = new Set(urls.filter((_, i) => answers[i]).map((url) => new URL(url).port));
+    expect(live.size).toBe(32);
+  });
+});
+
+// docs/specs/dor-browser.md → "Iframe Proxy Leases": a grant leased to a
+// mounted iframe view lives exactly as long as the lease, whatever its HTTP
+// activity.
+describe('iframe proxy leases', () => {
+  let n = 0;
+  const lease = (owner = 'window-a') => ({ owner, id: `surface-${++n}#mount` });
+  const leased = (l: { owner: string; id: string }) => ({ ...NO_LOG, lease: l });
+  const portOf = (url: string) => Number(new URL(url).port);
+
+  it('keeps an idle leased grant past the idle sweep, which reclaims an unleased one', async () => {
+    const port = await upstream((_q, s) => { s.writeHead(200, { 'content-type': 'text/plain' }); s.end('ok'); });
+    const live = await frame(`http://127.0.0.1:${port}/`, leased(lease()));
+    const unleased = await frame(`http://127.0.0.1:${port}/`);
+    advanceClock(6 * 60_000);
+    await sweep();
+    expect(await isListening(portOf(live))).toBe(true);
+    expect((await get(live)).body).toBe('ok');
+    expect(await isListening(portOf(unleased))).toBe(false);
+  });
+
+  it('never evicts a leased grant to make room, however many grants come after it', async () => {
+    const port = await upstream((_q, s) => { s.writeHead(204); s.end(); });
+    const live = await frame(`http://127.0.0.1:${port}/`, leased(lease()));
+    for (let i = 0; i < 40; i++) await frame(`http://127.0.0.1:${port}/`);
+    expect(await isListening(portOf(live))).toBe(true);
+  });
+
+  it('keeps one origin for a lease across Reload, Back and Forward on the same upstream', async () => {
+    const port = await upstream((_q, s) => { s.writeHead(204); s.end(); });
+    const l = lease();
+    const first = await frame(`http://127.0.0.1:${port}/a`, leased(l));
+    const again = await frame(`http://127.0.0.1:${port}/b?x=1`, leased(l));
+    expect(new URL(again).origin).toBe(new URL(first).origin);
+    expect(new URL(again).pathname).toBe('/b');
+    // Concurrent asks of one lease agree on one grant too.
+    const [c, d] = await Promise.all([frame(`http://127.0.0.1:${port}/c`, leased(l)), frame(`http://127.0.0.1:${port}/d`, leased(l))]);
+    expect(new URL(c).origin).toBe(new URL(first).origin);
+    expect(new URL(d).origin).toBe(new URL(first).origin);
+  });
+
+  it('mints a new grant when a lease moves to another upstream, and closes the old one', async () => {
+    const a = await upstream((_q, s) => { s.writeHead(204); s.end(); });
+    const b = await upstream((_q, s) => { s.writeHead(204); s.end(); });
+    const l = lease();
+    const first = await frame(`http://127.0.0.1:${a}/`, leased(l));
+    const moved = await frame(`http://127.0.0.1:${b}/`, leased(l));
+    expect(new URL(moved).origin).not.toBe(new URL(first).origin);
+    expect(await isListening(portOf(first))).toBe(false);
+  });
+
+  it('revokes the grant at once when its lease is released, and only its own owner can', async () => {
+    const port = await upstream((_q, s) => { s.writeHead(204); s.end(); });
+    const l = lease();
+    const url = await frame(`http://127.0.0.1:${port}/`, leased(l));
+    releaseIframeProxyLease('window-b', l.id);
+    expect(await isListening(portOf(url))).toBe(true);
+    releaseIframeProxyLease(l.owner, l.id);
+    expect(await isListening(portOf(url))).toBe(false);
+  });
+
+  it('revokes a lease released while its grant was still being minted', async () => {
+    const port = await upstream((_q, s) => { s.writeHead(204); s.end(); });
+    const l = lease();
+    const pending = createIframeProxyUrl(`http://127.0.0.1:${port}/`, leased(l));
+    releaseIframeProxyLease(l.owner, l.id);
+    expect(await pending).toMatchObject({ ok: false });
+  });
+
+  it('ends an open upgraded pipe when its lease is released', async () => {
+    const server = http.createServer();
+    server.on('upgrade', (_req, socket) => {
+      socket.write('HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n');
+    });
+    upstreams.push(server);
+    const port = await new Promise<number>((resolve) => server.listen(0, '127.0.0.1', () => resolve((server.address() as net.AddressInfo).port)));
+    const l = lease();
+    const url = await frame(`http://127.0.0.1:${port}/`, leased(l));
+    const socket = net.connect(portOf(url), '127.0.0.1');
+    const switched = new Promise<void>((resolve) => socket.once('data', () => resolve()));
+    socket.write(`GET /hmr HTTP/1.1\r\nHost: 127.0.0.1:${portOf(url)}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n`);
+    await switched;
+    const closed = new Promise<void>((resolve) => socket.once('close', () => resolve()));
+    releaseIframeProxyLease(l.owner, l.id);
+    await closed;
+  });
+
+  it('revokes every lease of an owner that went away, and keeps the others', async () => {
+    const port = await upstream((_q, s) => { s.writeHead(204); s.end(); });
+    const gone = await frame(`http://127.0.0.1:${port}/`, leased(lease('window-gone')));
+    const kept = await frame(`http://127.0.0.1:${port}/`, leased(lease('window-kept')));
+    retainIframeProxyOwners(['window-kept']);
+    expect(await isListening(portOf(gone))).toBe(false);
+    expect(await isListening(portOf(kept))).toBe(true);
+    releaseIframeProxyLease('window-kept');
+    expect(await isListening(portOf(kept))).toBe(false);
+  });
+
+  it('refuses a lease past its bound rather than evicting a live one', async () => {
+    const port = await upstream((_q, s) => { s.writeHead(204); s.end(); });
+    const owner = 'window-full';
+    const urls: string[] = [];
+    for (let i = 0; i < MAX_IFRAME_LEASES; i++) urls.push(await frame(`http://127.0.0.1:${port}/`, leased(lease(owner))));
+    const refused = await createIframeProxyUrl(`http://127.0.0.1:${port}/`, leased(lease(owner)));
+    expect(refused).toMatchObject({ ok: false, reason: 'unreachable' });
+    expect(await isListening(portOf(urls[0]))).toBe(true);
+    releaseIframeProxyLease(owner);
+    expect(await isListening(portOf(urls[0]))).toBe(false);
+  }, 30_000);
+
+  it('clears site data on a freshly minted grant’s first response only', async () => {
+    const port = await upstream((_q, s) => { s.writeHead(200, { 'content-type': 'text/html' }); s.end('<head></head>'); });
+    const l = lease();
+    const url = await frame(`http://127.0.0.1:${port}/`, leased(l));
+    const load = (target: string) => request(target, { headers: { 'Sec-Fetch-Dest': 'iframe' } });
+    // A request that names no frame load — a probe — does not spend it.
+    expect((await get(url)).headers['clear-site-data']).toBeUndefined();
+    expect((await load(url)).headers['clear-site-data']).toBe('"cache", "storage"');
+    expect((await load(url)).headers['clear-site-data']).toBeUndefined();
+    // A Reload keeps the grant, so the page's storage survives it.
+    const reloaded = await frame(`http://127.0.0.1:${port}/`, leased(l));
+    expect((await load(reloaded)).headers['clear-site-data']).toBeUndefined();
   });
 });

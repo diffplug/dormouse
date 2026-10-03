@@ -67,6 +67,7 @@ function setupPanel(
     // Reflect this panel's Workspace union onto the editor-tab title
     // (`<title> 🔔 [TODO]`). Icon stays the Dormouse mascot.
     onUnion: (union) => { panel.title = workspaceTitle(union); },
+    shown: { current: () => panel.visible, onDidChange: panel.onDidChangeViewState },
     // Panels persist via vscode.setState() (per-panel, managed by VS Code).
     // Don't write to workspaceState — that's for the WebviewView only.
   });

@@ -103,7 +103,7 @@ Source of truth: `useHeaderTier` in `lib/src/components/wall/use-header-tier.ts`
 
 ## Baseboard
 
-**Must group the right-hand controls**, in order: the `N more →` overflow arrow, the host-supplied `notice` slot, the one-time connection indicator (`docs/specs/one-time.md` -> "Laptop UI"), then the always-present spoken-alarm, push, and Settings buttons. The two status buttons toggle their alarm settings and expose state through shape and `aria-pressed`; Settings opens `docs/specs/alert.md` → Settings dialog. With no Doors and room for it, the baseboard shows the command-mode gesture hint.
+**Must group the right-hand controls**, in order: the `N more →` overflow arrow, the live-minimized-pages count (`docs/specs/dor-browser.md` → "Resource Policy"), the host-supplied `notice` slot, the one-time connection indicator (`docs/specs/one-time.md` -> "Laptop UI"), then the always-present spoken-alarm, push, and Settings buttons. The two status buttons toggle their alarm settings and expose state through shape and `aria-pressed`; Settings opens `docs/specs/alert.md` → Settings dialog. With no Doors and room for it, the baseboard shows the command-mode gesture hint.
 
 A minimized session becomes a **door**, showing its label plus the alert badge cluster (`docs/specs/alert.md` → Door); both speech states also name themselves in the Door's `title` and accessible name. **A Door's label is header-derived only for a terminal-backed Surface** (`hasTerminal`); any other keeps its stored title, and a browser Door adds the display glyphs from `docs/specs/dor-browser.md` → "Browser Chrome".
 
@@ -116,7 +116,7 @@ A minimized session becomes a **door**, showing its label plus the alert badge c
 
 ### Baseboard responsive sizing
 
-- **Everything in the right cluster but the overflow arrow — notice, one-time indicator, the three buttons — is never available to Doors; never measure the overflow arrow into it**, since its presence is an output of the fit.
+- **Everything in the right cluster but the overflow arrow — page count, notice, one-time indicator, the three buttons — is never available to Doors; never measure the overflow arrow into it**, since its presence is an output of the fit.
 - **At least one door is always shown**, even if it overflows; past that, Doors fit while room remains for an overflow arrow. A scrolled baseboard shows `← N more` and/or `N more →`; clicking one reveals one Door in that direction. One Door too long to fit between both arrows keeps both and truncates its title.
 - **An arrow hiding a ringing or TODO Door must say so**, wearing the Door shape with a static alarm inset and TODO pill, its accessible name counting them (`3 more, 1 ringing, 1 TODO`). **Every arrow must reserve the width of the TODO one**, so the fit never depends on which Doors an arrow hides.
 - **Must reveal the selected Door when selection or membership changes**, without overriding manual overflow scrolling.

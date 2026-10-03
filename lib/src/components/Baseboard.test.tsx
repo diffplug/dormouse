@@ -18,6 +18,7 @@ import { applyAlertSettingsFromHost, DEFAULT_ALERT_SETTINGS, getAlertSettings } 
 import { createDialogKeyboardCoordinator, DialogKeyboardContext, SelectedIdContext, WorkspaceIdContext } from './wall/wall-context';
 import { createWorkspace, getWorkspace, resetWorkspaces } from '../lib/workspace-store';
 import type { DoorChip } from './wall/wall-types';
+import { RETAINED_PAGES_WARN_ABOVE } from './RetainedPagesIndicator';
 import {
   addInstalledTheme,
   getActiveThemeId,
@@ -113,6 +114,21 @@ describe('Baseboard settings controls', () => {
     renderBaseboard(items.slice(1), 'c');
     expect(container.querySelector('[data-door-id="c"]')).not.toBeNull();
     expect(container.querySelector('[data-door-id="b"]')).toBeNull();
+  });
+
+  // #610: minimized iframes are never evicted, so many of them earn a quiet note.
+  it('counts the minimized pages that stay live, quietly, only past the threshold', () => {
+    const doors = (n: number): DoorChip[] => Array.from({ length: n }, (_, i) => ({
+      id: `page-${i}`, title: `page ${i}`, kind: 'browser' as const, browserDisplay: 'iframe' as const, livePage: true,
+    }));
+    const screencast: DoorChip = { id: 'cast', title: 'cast', kind: 'browser', browserDisplay: 'agent-browser-resize' };
+    renderBaseboard([...doors(RETAINED_PAGES_WARN_ABOVE), screencast]);
+    expect(container.querySelector('[data-retained-pages]')).toBeNull();
+    renderBaseboard([...doors(RETAINED_PAGES_WARN_ABOVE + 1), screencast]);
+    const indicator = container.querySelector('[data-retained-pages]');
+    expect(indicator?.getAttribute('data-retained-pages')).toBe(String(RETAINED_PAGES_WARN_ABOVE + 1));
+    expect(indicator?.getAttribute('title')).toContain('still running');
+    expect(indicator?.querySelector('button')).toBeNull();
   });
 
   it('keeps separate speech, push, and general settings buttons', () => {
