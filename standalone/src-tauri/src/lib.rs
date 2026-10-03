@@ -379,7 +379,10 @@ fn dispatch_sidecar_event(app: &AppHandle, event: &str, data: JsonValue) {
             Route::EmitTo(label) => Delivery::To(label.to_string()),
             // Resolved here, where the focus order is a sibling of the map the
             // table read; the lock over it is separate and taken for one clone.
-            Route::Focused => match state.focused() {
+            Route::Focused { fallback } => match state
+                .focused()
+                .or_else(|| fallback.map(str::to_string))
+            {
                 Some(label) => Delivery::To(label),
                 None => Delivery::Broadcast,
             },

@@ -47,8 +47,9 @@ pub enum Route<'a> {
     /// pane none of them shows.
     Drop,
     /// A `dor` request naming no Surface belongs to whichever window the user
-    /// is looking at. Resolved by the caller, which alone holds the focus order.
-    Focused,
+    /// is looking at. Resolved by the caller, which alone holds the focus order;
+    /// with no window focused yet it goes to `fallback` ([`unfocused_target`]).
+    Focused { fallback: Option<&'a str> },
     /// A `dor` control request naming a Surface no window owns. Answered with
     /// an error rather than handed to a sibling, which would act on the wrong
     /// terminal (docs/specs/dor-cli.md -> "Standalone").
@@ -181,7 +182,9 @@ pub fn route<'a>(event: &str, data: &'a JsonValue, view: &RouteView<'a>) -> Rout
                 }
             }
             let Some(surface_id) = str_field(data, "surfaceId") else {
-                return Route::Focused;
+                return Route::Focused {
+                    fallback: unfocused_target(view.registry),
+                };
             };
             match view.owners.get(surface_id) {
                 Some(label) => Route::EmitTo(label.as_str()),
@@ -545,10 +548,22 @@ pub fn window_at(
     })
 }
 
+/// Where a `Route::Focused` request goes when no window has focus yet (a
+/// launch nobody has clicked into, or every focused window closed): exactly one
+/// window, `main` while it is registered, else the lowest label. Never every
+/// window: each would run the request against its own active Workspace.
+pub fn unfocused_target(registry: &crate::workspaces::Registry) -> Option<&str> {
+    if registry.windows.contains_key(MAIN_LABEL) {
+        return Some(MAIN_LABEL);
+    }
+    registry.windows.keys().map(String::as_str).min()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
 
     fn labels(pairs: &[(&str, &str)]) -> HashMap<String, String> {
         pairs
@@ -584,6 +599,19 @@ mod tests {
             vec![crate::workspaces::Entry { id: "workspace-5".into(), name: "Docs".into(), active: true }],
         );
         let view = state.view(&registry);
+        // No Surface named: the focused window, else exactly one window — never
+        // a broadcast, which every window would answer from its own Workspace.
+        assert_eq!(
+            route("dor:controlRequest", &json!({ "requestId": "dor-3" }), &view),
+            Route::Focused { fallback: Some(MAIN_LABEL) }
+        );
+        let mut torn_out = crate::workspaces::Registry::default();
+        crate::workspaces::report(&mut torn_out, "ws-3", Vec::new());
+        crate::workspaces::report(&mut torn_out, "ws-2", Vec::new());
+        assert_eq!(
+            route("dor:controlRequest", &json!({ "requestId": "dor-4" }), &state.view(&torn_out)),
+            Route::Focused { fallback: Some("ws-2") }
+        );
         let from_main = |params: JsonValue| json!({ "surfaceId": "a", "params": params });
         assert_eq!(
             route("dor:controlRequest", &from_main(json!({ "workspace": "workspace:5" })), &view),
@@ -682,7 +710,7 @@ mod tests {
             (
                 "dor:controlRequest",
                 json!({"requestId":"dor-2"}),
-                Route::Focused,
+                Route::Focused { fallback: None },
             ),
             // A cancel follows the window that took its request; one for a
             // request nobody is holding has nothing to follow.
