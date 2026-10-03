@@ -677,15 +677,23 @@ before exiting (rationale).
 **Every window votes before any window is torn down** (rationale): Rust asks
 them all, and only once all agree walks them one teardown at a time.
 
-| Phase | What happens |
-|---|---|
-| Voting | every window acks, asks about its own running work, and calls `quit_vote` — or `quit_cancel`, which tells every window and destroys nothing |
-| Walking | the `dormouse://quit-teardown` event reaches one window at a time, **`main` last**; each hands on with `quit_window_done`, and the last one installs and calls `quit_proceed` |
+```mermaid
+stateDiagram-v2
+  [*] --> Idle
+  Idle --> Voting: request_quit → quit-requested
+  Idle --> Exit: request_quit, no windows
+  Voting --> Idle: quit_cancel → quit-cancelled
+  Voting --> Walking: last quit_vote, or last unvoted window forgotten
+  Voting --> Exit: last window forgotten
+  Walking --> Walking: quit_window_done → next quit-teardown
+  Walking --> Exit: quit_proceed, or no window left
+  Exit --> [*]: app.exit(0) past the cleanup gate
+```
 
-- **A cancel is refused once the walk starts.**
+- **A cancel is refused once the walk starts**, and **the walk tears `main` down
+  last**.
 - **A window that leaves outside the flow is forgotten**, its vote never waited
-  on. **A flow that runs out of windows exits**, and so does a trigger that finds
-  none.
+  on. **A flow that runs out of windows exits.**
 - **A quit keeps every window's snapshot on disk** — the whole difference from a
   per-window close. A quit mid-transfer restores the Workspace at most once:
   from the target once it has published it, or from a source handed it back; a
