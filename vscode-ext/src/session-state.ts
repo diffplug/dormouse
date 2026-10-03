@@ -148,6 +148,7 @@ export async function captureAgentRecoveryCommands(
     // receive a `^C` nor ever yield a hint — including them would scan them on
     // every tick and permanently defeat the capture's early exit.
     liveIds: () => [...ptyManager.getBufferedPtys()].filter(([, e]) => e.alive).map(([id]) => id),
+    resize: (id, cols, rows) => ptyManager.resize(id, cols, rows),
     interrupt: (ids) => ptyManager.interrupt(ids),
     receivedChars: (id) => ptyManager.getScrollbackReceived(id),
     outputSince: (id, mark) => ptyManager.getScrollbackSince(id, mark),

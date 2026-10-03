@@ -108,7 +108,7 @@ Downloaded CI artifacts must pass three checks before any signing step:
 2. `gh attestation verify` proves the manifest was attested by `.github/workflows/release.yml` in `diffplug/dormouse`, for `refs/tags/vX.Y.Z`, at the exact commit SHA the local tag resolves to.
 3. `sha256sum -c` (or `shasum -a 256 -c`) proves every downloaded file the manifest lists still has the hash CI recorded before upload.
 
-**Must attest the manifest** (rationale). **Must re-verify cached artifacts and require a successful release workflow before every signing, notarization, or release subcommand**, then restore executable modes only in fresh working copies. CI run selection matches both tag and commit, including when every download is cached.
+**Must attest the manifest** (rationale). **Must re-verify cached artifacts and require a successful release workflow before every signing, notarization, or release subcommand**, then restore executable modes only in fresh working copies. That run includes the reviewer-gated `publish-vscode`, so the extension is approved and published before any desktop signing starts. CI run selection matches both tag and commit, including when every download is cached.
 
 **Never select release artifacts with a broad `find | head`** — use strict expected paths or exactly-one matching. Release upload rejects unexpected local files or existing remote asset names.
 

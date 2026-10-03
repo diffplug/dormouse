@@ -1357,8 +1357,14 @@ export class BurrowRuntime {
     if (!state || !pending) return;
     state.pairing = undefined;
     // Always `consumed`: reaching here means a phone completed message 1
-    // against this invitation, whatever ended the ceremony afterwards.
-    this.#retireInvitation(pending.inviteId, 'consumed', outcome);
+    // against this invitation, whatever ended the ceremony afterwards. An
+    // invitation the mint cap already evicted was reported `consumed` then, with
+    // no outcome; the ceremony's outcome is still reported now.
+    if (this.#invitations.has(pending.inviteId)) {
+      this.#retireInvitation(pending.inviteId, 'consumed', outcome);
+    } else if (outcome) {
+      this.#onInvitationChanged(pending.inviteId, 'consumed', outcome);
+    }
     this.#dismissApproval(clientId);
     this.#pruneClient(clientId);
   }

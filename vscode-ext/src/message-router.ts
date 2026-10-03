@@ -359,6 +359,10 @@ export function attachRouter(
 ): vscode.Disposable {
   const reconnect = options?.reconnect ?? false;
   const killOnDispose = options?.killOnDispose ?? false;
+  // Only a router whose PTYs outlive it (the WebviewView's) leaves live PTYs
+  // unowned, so only such a router claims them back at `dormouse:init`; a
+  // panel kills its own.
+  const adoptOrphans = !killOnDispose;
   // Also this webview's realm of the alerts, so one webview's blur never
   // touches another's (docs/specs/alert.md → Engagement).
   const routerId = `router-${++nextRouterId}`;
@@ -761,9 +765,9 @@ export function attachRouter(
           }
         }
 
-        // Also claim unowned PTYs (from disposed routers / other webviews)
+        // Also claim the PTYs a disposed view left unowned.
         for (const [id, info] of ptys) {
-          if (!globalOwnedPtyIds.has(id)) {
+          if (adoptOrphans && !globalOwnedPtyIds.has(id)) {
             claim(id);
             reconnectable.set(id, info);
           }
@@ -784,10 +788,9 @@ export function attachRouter(
           const data = previouslyOwned.has(id)
             ? ptyManager.getScrollback(id)
             : ptyManager.getReplayData(id);
-          if (data) {
-            const replay: ExtensionMessage = { type: 'pty:replay', id, data };
-            post(replay);
-          }
+          // One per listed PTY, empty or not: the collector finishes on a
+          // replay for each, and would otherwise wait out its timeout.
+          post({ type: 'pty:replay', id, data: data ?? '' } satisfies ExtensionMessage);
         }
         for (const [id] of reconnectable) {
           const alertState = alertManager.getState(id);
