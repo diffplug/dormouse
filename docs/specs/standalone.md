@@ -238,9 +238,8 @@ shell picker belongs here**: both live in the Settings dialog
 `docs/specs/alert.md` → Workspace union.
 
 Picking a shell in the Settings dialog's **Shell** row
-(`lib/src/components/ShellPicker.tsx`) persists it and dispatches
-`dormouse:new-terminal` with `replaceUntouched: true` (`docs/specs/layout.md` →
-"Session lifecycle and terminal registry").
+(`lib/src/components/ShellPicker.tsx`) persists it; what a changed pick spawns:
+`docs/specs/layout.md` -> "Session lifecycle and terminal registry".
 
 ### Application menu
 
