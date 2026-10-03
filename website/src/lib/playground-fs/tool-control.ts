@@ -8,8 +8,7 @@ import { defaultBrowserViewportConfig } from "dor-lib-common/browser-viewports";
 import type { IframeProxyResult } from "dormouse-lib/lib/platform/iframe-proxy-types";
 import type { ToolControlResult, ToolHostRequest } from "dormouse-lib/lib/platform/tool-types";
 import { builtinOpenResult, noUserToolMessage, offerBuiltins } from "dormouse-lib/lib/tool-open-builtin";
-import { USER_CONFIG } from "./snapshot";
-import type { VirtualFs } from "./vfs";
+import { USER_CONFIG, type VirtualFs } from "./vfs";
 import { VIEWER_SCOPE } from "./viewers";
 
 export function playgroundToolControl(fs: VirtualFs) {

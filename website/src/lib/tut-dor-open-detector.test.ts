@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createTerminalPaneState, type CommandRun, type TerminalPaneState } from "dormouse-lib/lib/terminal-state";
-import { DorOpenDetector } from "./tut-dor-open-detector";
+import { watchDorOpen } from "./tut-dor-open-detector";
 import { DESKTOP_SECTIONS } from "./tut-items";
 import { TutorialState } from "./tutorial-state";
 
@@ -14,11 +14,10 @@ function harness() {
   const panes = new Map<string, TerminalPaneState>();
   let listener = () => {};
   const state = new TutorialState(DESKTOP_SECTIONS);
-  const detector = new DorOpenDetector(state, {
+  watchDorOpen(state, {
     subscribeToTerminalPaneState: (next) => { listener = next; return () => {}; },
     getTerminalPaneStateSnapshot: () => panes,
   });
-  detector.start();
   const set = (id: string, currentCommand: CommandRun | null, lastCommand: CommandRun | null = null) => {
     panes.set(id, { ...createTerminalPaneState(), currentCommand, lastCommand });
     listener();
@@ -28,7 +27,7 @@ function harness() {
   return { set, done };
 }
 
-describe("DorOpenDetector", () => {
+describe("watchDorOpen", () => {
   it("credits each built-in Tool by the viewer it runs", () => {
     const { set, done } = harness();
     const typed = run("dor open x", 0);
@@ -45,6 +44,15 @@ describe("DorOpenDetector", () => {
     set("f", run(`dor __view-folder ${CWD}`), run("dor open .", 0));
     set("q", run(`dor __view-file ${CWD}/package.json`));
     expect(done()).toContain("op-preview");
+  });
+
+  it("ignores a run that finished before it started", () => {
+    const panes = new Map([["a", { ...createTerminalPaneState(), lastCommand: run("dor o", 0) }]]);
+    let listener = () => {};
+    const state = new TutorialState(DESKTOP_SECTIONS);
+    watchDorOpen(state, { subscribeToTerminalPaneState: (next) => { listener = next; return () => {}; }, getTerminalPaneStateSnapshot: () => panes });
+    listener();
+    expect(state.isComplete("op-pick")).toBe(false);
   });
 
   it("credits the picker only when it opened something, and README.md as source", () => {

@@ -2,10 +2,10 @@ import { execFileSync } from "node:child_process";
 import { describe, expect, it, vi } from "vitest";
 import { stateSequence } from "dor-tools-lib/osc";
 import { parseToolFile } from "dormouse-lib/host/tool-registry";
-import { createPlaygroundFs, PLAYGROUND_CWD, SNAPSHOT_FILES, USER_CONFIG } from "./snapshot";
+import { createPlaygroundFs, PLAYGROUND_CWD, SNAPSHOT_FILES } from "./snapshot";
 import { playgroundIframeUrl, playgroundToolControl } from "./tool-control";
 import { READ_ONLY_ERROR, PlaygroundViewers, type ViewerRequest } from "./viewers";
-import { VirtualFs } from "./vfs";
+import { USER_CONFIG, VirtualFs } from "./vfs";
 
 const README = `${PLAYGROUND_CWD}/README.md`;
 const get = (route: string, search = ""): ViewerRequest => ({ method: "GET", route, search, body: "" });

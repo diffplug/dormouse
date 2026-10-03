@@ -7,6 +7,9 @@ import { byDisplayOrder } from "dor-tools-builtin/folder-viewer-page";
 
 export const HOME = "/home/demo";
 
+/** The playground's own user config, beside the snapshot: shown, never read for rules. */
+export const USER_CONFIG = `${HOME}/.config/dormouse/dormouse.yml`;
+
 export type EntryKind = "dir" | "file";
 export interface DirEntry { name: string; kind: EntryKind }
 

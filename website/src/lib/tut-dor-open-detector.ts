@@ -1,3 +1,6 @@
+import { canonicalDorVerb } from "dor/protocol";
+import { builtinHandler, fileViewerFormat } from "dor-tools-builtin/file-viewer-format";
+import { USER_CONFIG } from "./playground-fs/vfs";
 import type { ItemId } from "./tut-items";
 import type { TutorialState } from "./tutorial-state";
 import { shellWords } from "./tutorial-shell";
@@ -9,70 +12,64 @@ export interface CommandStoreModule {
   getTerminalPaneStateSnapshot: () => Map<string, TerminalPaneState>;
 }
 
-/** The `dor` invocation a command line is, or null. */
-function dorWords(commandLine: string | null): string[] | null {
+/** The `dor` invocation a command line is, split as the playground shell ran it, or null. */
+function dorWords(commandLine: string | null | undefined): string[] | null {
   const words = commandLine ? shellWords(commandLine) : [];
   return words[0] === "dor" ? words.slice(1) : null;
+}
+
+/** The built-in a `dor __view-*` run serves, and its target. */
+function viewer(commandLine: string | null | undefined) {
+  const [verb, target = ""] = dorWords(commandLine) ?? [];
+  const kind = builtinHandler("argv", verb)?.kind;
+  return kind ? { kind, target } : null;
 }
 
 /**
  * Credits the `dor open` section (`tut-items.ts`) from the command lines the
  * playground's shells report, so neither `dor` nor its viewers trace anything:
  * a built-in Tool shows up as the `dor __view-*` entry it runs, and `dor o`
- * as a picker run that opened something.
+ * as a picker run that opened something. `TutDetector` owns its lifecycle.
  */
-export class DorOpenDetector {
-  private readonly seen = new Set<string>();
-  private stop: (() => void) | null = null;
-
-  constructor(private readonly state: TutorialState, private readonly store: CommandStoreModule) {}
-
-  start(): void {
-    // Runs already under way count as seen: only what happens from now on is credit.
-    for (const pane of this.store.getTerminalPaneStateSnapshot().values()) {
-      for (const run of [pane.currentCommand, pane.lastCommand]) if (run) this.seen.add(run.id);
-    }
-    this.stop = this.store.subscribeToTerminalPaneState(() => this.process());
+export function watchDorOpen(state: TutorialState, store: CommandStoreModule): () => void {
+  const started = new Set<string>();
+  const finished = new Set<string>();
+  // Runs already under way count as seen: only what happens from now on is credit.
+  for (const pane of store.getTerminalPaneStateSnapshot().values()) {
+    if (pane.currentCommand) started.add(pane.currentCommand.id);
+    if (pane.lastCommand) finished.add(pane.lastCommand.id);
   }
-
-  dispose(): void {
-    this.stop?.();
-    this.stop = null;
-  }
-
-  private process(): void {
-    const panes = [...this.store.getTerminalPaneStateSnapshot().values()];
-    const folderOpen = panes.some((pane) => dorWords(pane.currentCommand?.rawCommandLine ?? null)?.[0] === "__view-folder");
+  return store.subscribeToTerminalPaneState(() => {
+    const panes = [...store.getTerminalPaneStateSnapshot().values()];
+    const folderOpen = panes.some((pane) => viewer(pane.currentCommand?.rawCommandLine)?.kind === "folder");
     for (const pane of panes) {
-      const started = pane.currentCommand;
-      if (started && !this.seen.has(started.id)) {
-        this.seen.add(started.id);
-        for (const id of startCredits(dorWords(started.rawCommandLine), !pane.lastCommand && folderOpen)) this.state.markComplete(id);
+      const run = pane.currentCommand;
+      if (run && !started.has(run.id)) {
+        started.add(run.id);
+        const opened = viewer(run.rawCommandLine);
+        // A file clicked in the folder arrives as a new pane's first command.
+        if (opened) for (const id of credits(opened, !pane.lastCommand && folderOpen)) state.markComplete(id);
       }
-      const finished = pane.lastCommand;
-      if (finished && !this.seen.has(`${finished.id}:done`) && finished.exitCode !== undefined) {
-        this.seen.add(`${finished.id}:done`);
+      const last = pane.lastCommand;
+      if (last && !finished.has(last.id) && last.exitCode !== undefined) {
+        finished.add(last.id);
         // A picker that opened something exits 0; a cancel exits 1.
-        const words = dorWords(finished.rawCommandLine);
-        if (finished.exitCode === 0 && (words?.[0] === "o" || words?.[0] === "open") && words.slice(1).every((word) => word.startsWith("-"))) {
-          this.state.markComplete("op-pick");
+        const [verb, ...flags] = dorWords(last.rawCommandLine) ?? [];
+        if (last.exitCode === 0 && canonicalDorVerb(verb ?? "") === "open" && flags.every((flag) => flag.startsWith("-"))) {
+          state.markComplete("op-pick");
         }
       }
     }
-  }
+  });
 }
 
-/** What a newly started `dor` run credits. `fromFolder`: the run is a new
- * pane's first command while a folder viewer is open, which is how a file
- * clicked in the folder arrives in the preview pane. */
-function startCredits(words: string[] | null, fromFolder: boolean): ItemId[] {
-  if (!words) return [];
-  const [verb, target = ""] = words;
-  const credits: ItemId[] = [];
-  if (verb === "__view-folder") credits.push("op-folder");
-  if (verb === "__view-file" && target.endsWith("/.config/dormouse/dormouse.yml")) credits.push("op-config");
-  if (verb === "__view-file" && target.endsWith(".md")) credits.push("op-markdown");
-  if (verb === "__view-code" && target.endsWith(".md")) credits.push("op-handler");
-  if ((verb === "__view-file" || verb === "__view-code") && fromFolder) credits.push("op-preview");
-  return credits;
+function credits({ kind, target }: { kind: string; target: string }, fromFolder: boolean): ItemId[] {
+  const markdown = !!fileViewerFormat(target)?.markdown;
+  const ids: ItemId[] = [];
+  if (kind === "folder") ids.push("op-folder");
+  if (kind === "file" && target === USER_CONFIG) ids.push("op-config");
+  if (kind === "file" && markdown) ids.push("op-markdown");
+  if (kind === "code" && markdown) ids.push("op-handler");
+  if (kind !== "folder" && fromFolder) ids.push("op-preview");
+  return ids;
 }

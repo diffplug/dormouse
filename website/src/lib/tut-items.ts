@@ -211,12 +211,12 @@ export const DESKTOP_SECTIONS: readonly Section[] = [
       {
         id: 'op-config',
         title: 'Open your Dormouse config',
-        hint: 'Split a pane for a shell, then run `dor open ~/.config/dormouse/dormouse.yml`. The code editor takes the shell\'s place, so split again for each next step.',
+        hint: 'Split a pane, then run `dor open ~/.config/dormouse/dormouse.yml`. Each viewer takes its shell\'s place.',
       },
       {
         id: 'op-markdown',
         title: 'Open `README.md`',
-        hint: 'Run `dor open README.md`. The same command picks the Markdown editor for Markdown. Edit away; this playground cannot save.',
+        hint: 'Run `dor open README.md`; Markdown opens in the Markdown editor. This playground cannot save.',
       },
       {
         id: 'op-folder',

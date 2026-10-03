@@ -7,7 +7,6 @@ import { PlaygroundShellRegistry } from "../lib/playground-shells";
 import { DESKTOP_TUTORIAL_PROFILE } from "../lib/tut-items";
 import { TutorialState } from "../lib/tutorial-state";
 import { TutDetector } from "../lib/tut-detector";
-import { DorOpenDetector } from "../lib/tut-dor-open-detector";
 import {
   BUSY_DEMO_INTERVAL_MS,
   TutRunner,
@@ -98,7 +97,6 @@ function PlaygroundDesktopExperience() {
   const adapterRef = useRef<FakePtyAdapter | null>(null);
   const shellRegistryRef = useRef<PlaygroundShellRegistry | null>(null);
   const detectorRef = useRef<TutDetector | null>(null);
-  const dorOpenDetectorRef = useRef<DorOpenDetector | null>(null);
   const stateRef = useRef<TutorialState | null>(null);
   const autoStartedRef = useRef<Set<string>>(new Set());
   const spawnUnsubRef = useRef<(() => void) | null>(null);
@@ -166,12 +164,10 @@ function PlaygroundDesktopExperience() {
         activityStore: registry,
         mouseStore: mouseSelection,
         themeStore: themes,
+        commandStore: registry,
       });
       detectorRef.current = detector;
       detector.start();
-      const dorOpenDetector = new DorOpenDetector(tutorialState, registry);
-      dorOpenDetectorRef.current = dorOpenDetector;
-      dorOpenDetector.start();
 
       const shellRegistry = new PlaygroundShellRegistry(
         adapter,
@@ -292,8 +288,6 @@ function PlaygroundDesktopExperience() {
     return () => {
       cancelled = true;
       detectorRef.current?.dispose();
-      dorOpenDetectorRef.current?.dispose();
-      dorOpenDetectorRef.current = null;
       detectorRef.current = null;
       shellRegistryRef.current?.disposeAll();
       shellRegistryRef.current = null;

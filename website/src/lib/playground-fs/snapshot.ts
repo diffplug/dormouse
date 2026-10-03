@@ -1,11 +1,8 @@
-import { HOME, VirtualFs } from "./vfs";
+import { HOME, USER_CONFIG, VirtualFs } from "./vfs";
 import USER_CONFIG_TEXT from "./dormouse.yml?raw";
 
 /** Where the snapshot is mounted, and every playground shell's starting directory. */
 export const PLAYGROUND_CWD = `${HOME}/dor-tools-lib`;
-
-/** The playground's own user config, beside the snapshot: shown, never read for rules. */
-export const USER_CONFIG = `${HOME}/.config/dormouse/dormouse.yml`;
 
 // The tracked files of the repo's `dor-tools-lib/`, inlined at build time;
 // `playground-fs.test.ts` pins this glob to `git ls-files dor-tools-lib`.
