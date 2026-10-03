@@ -4480,7 +4480,7 @@ describe('dor from helper terminals', () => {
   it('splits from the source using the helper directory, while helpers remain absent from discovery', async () => {
     await act(async () => root.render(<Wall initialPaneIds={['pane-a', 'pane-b']} />));
     terminalRegistry.seedTerminalManualCwd('pane-a', '/source');
-    const response = await issue('surface.split', { direction: 'right', callerCwd: '/helper', focusNeutral: true });
+    const response = await issue('surface.split', { direction: 'right', cwd: '/helper', focusNeutral: true });
     const created = response.mock.calls[0][0].result.surfaceId;
     expect(pendingShellOpts.get(created)?.cwd).toBe('/helper');
     expect(leafCount()).toBe(3);
@@ -4564,4 +4564,16 @@ describe('dor from helper terminals', () => {
     expect(response).toHaveBeenCalledWith(expect.objectContaining({ result: expect.objectContaining({ status: 'existing', surfaceId: 'pane-a' }) }));
     expect(leafCount()).toBe(1);
   });
+});
+
+it('starts a split in the invoking directory, inheriting its reference only without one', async () => {
+  await act(async () => root.render(<Wall initialPaneIds={['pane-a']} />));
+  act(() => terminalRegistry.applyTerminalSemanticEvents('pane-a', [{ type: 'cwd', cwd: terminalRegistry.cwdFromOsc633('/source')! }]));
+  for (const [cwd, expected] of [['/invoked', '/invoked'], [undefined, '/source']] as const) {
+    const respond = vi.fn();
+    await act(async () => dispatchDorControlRequest({ requestId: `split-${expected}`, surfaceId: 'pane-a',
+      method: 'surface.split', params: { direction: 'right', cwd, surface: 'pane-a', focusNeutral: true } }, respond));
+    await flush();
+    expect(pendingShellOpts.get(respond.mock.calls[0][0].result.surfaceId)?.cwd).toBe(expected);
+  }
 });

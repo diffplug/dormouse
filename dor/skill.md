@@ -89,7 +89,7 @@ dor split --minimize -- ./watch.sh
 dor split --                   # blank terminal, focus stays with you
 ```
 
-Direction flags `--left|--right|--up|--down` (default `--auto`). `--surface <ref>` picks which surface to split from. Always include the `--` (see Rules and pitfalls).
+Direction flags `--left|--right|--up|--down` (default `--auto`). `--surface <ref>` picks which surface to split from; the new terminal starts in your current directory. Always include the `--` (see Rules and pitfalls).
 
 ### `dor send` — type into a terminal
 

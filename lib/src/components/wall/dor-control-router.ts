@@ -4,7 +4,7 @@ import { createRefCount } from '../../lib/ref-count';
 import { getActiveWorkspaceId, isWindowRef, resolveWorkspaceRef, workspaceRefFor } from '../../lib/workspace-store';
 import { handleAppControl } from './app-control';
 import { handleToolControl } from './tool-control';
-import { errorText, mountingRefusal, ROUTE_RETRIES } from './dor-control-shared';
+import { errorText, mountingRefusal, requestForWall, ROUTE_RETRIES } from './dor-control-shared';
 import { getWallHandle, wallHandleOwning, type WallHandle } from './wall-handles';
 import { handleWorkspaceControl, listAllWorkspaceSurfaces, type WindowControlParams } from './workspace-control';
 import { classifySurfaceTarget, type DorControlRequest } from './use-dor-control';
@@ -155,21 +155,8 @@ function runRoute(route: Extract<DorControlRoute, { kind: 'app' | 'tool' | 'wind
     case 'app': return handleAppControl(detail);
     case 'tool': return handleToolControl(detail);
     case 'window': return route.container ? handleWorkspaceControl(detail) : listAllWorkspaceSurfaces(detail);
-    case 'handle': return route.handle.handleDorControl(callerFor(route.handle, detail));
+    case 'handle': return route.handle.handleDorControl(requestForWall(route.handle, detail));
   }
-}
-
-/**
- * Helpers keep their actual identity; only their placement anchor is scoped
- * to this Wall. Ordinary foreign callers retain the existing omitted-placement
- * fallback by dropping their id. Explicit self never aliases the source.
- */
-function callerFor(handle: WallHandle, detail: DorControlRequest): DorControlRequest {
-  if (detail.helperParentId) {
-    return { ...detail, placementSurfaceId: handle.ownsSurface(detail.helperParentId) ? detail.helperParentId : undefined };
-  }
-  if (!detail.surfaceId || handle.ownsSurface(detail.surfaceId)) return detail;
-  return { ...detail, surfaceId: undefined };
 }
 
 /**

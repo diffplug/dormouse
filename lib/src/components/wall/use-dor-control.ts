@@ -92,7 +92,6 @@ export type DorControlParams = {
   command?: unknown;
   confirmation?: unknown;
   cwd?: unknown;
-  callerCwd?: unknown;
   direction?: unknown;
   focusNeutral?: unknown;
   input?: unknown;
@@ -143,8 +142,8 @@ export type DorControlRequest = Omit<DorControlRequestPayload, 'params'> & {
    *  may make and whose failure shows in the preview slot. Never set by a
    *  control-socket request. */
   oscOpen?: true;
-  /** Helper's source when it belongs to the answering Wall. Separate from the
-   * actual caller so actions and restart never treat the parent as self. */
+  /** The default placement reference when it is not the caller: a helper's
+   *  source this Wall holds (`requestForWall` in `dor-control-shared.ts`). */
   placementSurfaceId?: string;
 };
 
@@ -258,11 +257,12 @@ function resolveSurfaceTarget(
   surfaces: DorSurface[],
   target: string | undefined,
   callerSurfaceId: string | undefined,
+  anchorSurfaceId = callerSurfaceId,
 ): ParseResult<DorSurface> {
   // A caller this Wall does not hold never reaches here as one: the router
-  // drops it before dispatching (`dor-control-router.ts`), so an omitted target
-  // falls back to this Workspace's focused Surface.
-  const resolvedTarget = target ?? callerSurfaceId ?? 'surface:focused';
+  // drops it before dispatching (`requestForWall`), so an omitted target falls
+  // back to the anchor, else this Workspace's focused Surface.
+  const resolvedTarget = target ?? anchorSurfaceId ?? 'surface:focused';
   const classified = classifySurfaceTarget(resolvedTarget);
   const matches = surfaces.filter((surface) => matchesTarget(classified, surface, callerSurfaceId));
   const single = pickSingleMatch(matches, resolvedTarget);
@@ -272,7 +272,7 @@ function resolveSurfaceTarget(
   if (classified.kind === 'title') {
     return { ok: false, message: `surface target '${resolvedTarget}' was not found` };
   }
-  const fallback = !target && !callerSurfaceId ? (surfaces[0] ?? null) : null;
+  const fallback = !target && !anchorSurfaceId ? (surfaces[0] ?? null) : null;
   if (fallback) return { ok: true, value: fallback };
   return { ok: false, message: `surface '${resolvedTarget}' was not found` };
 }
@@ -720,12 +720,14 @@ export function useDorControl({
   const resolveVisibleSurface = useCallback((
     target: string | undefined,
     callerSurfaceId: string | undefined,
-  ): ParseResult<DorSurface> => resolveSurfaceTarget(buildDorSurfaces(), target, callerSurfaceId), [buildDorSurfaces]);
+    anchorSurfaceId?: string,
+  ): ParseResult<DorSurface> => resolveSurfaceTarget(buildDorSurfaces(), target, callerSurfaceId, anchorSurfaceId), [buildDorSurfaces]);
 
   const resolveListedSurface = useCallback((
     target: string | undefined,
     callerSurfaceId: string | undefined,
-  ): ParseResult<DorSurface> => resolveSurfaceTarget(buildDorSurfaceList(), target, callerSurfaceId), [buildDorSurfaceList]);
+    anchorSurfaceId?: string,
+  ): ParseResult<DorSurface> => resolveSurfaceTarget(buildDorSurfaceList(), target, callerSurfaceId, anchorSurfaceId), [buildDorSurfaceList]);
 
   // The shared prelude of every handler that acts on an existing surface
   // (send / read / await / kill / resolve*): a target surface is required and
@@ -1048,13 +1050,12 @@ export function useDorControl({
       return;
     }
 
-    // Helpers borrow geometry, never caller identity. The router drops only
-    // the anchor for an explicitly selected foreign Workspace. A captured
-    // anchor disappearing while lookup waits must fail, not fall back to focus.
-    const placementCaller = detail.helperParentId ? detail.placementSurfaceId : detail.surfaceId;
+    // New work goes beside the target, else the anchor (the caller, or a
+    // helper's source), else focus. An anchor that disappears while lookup
+    // waits fails rather than falling back to focus, as does a closing target.
     const resolvePlacement = (resolve: typeof resolveListedSurface): ParseResult<DorSurface> => {
-      const result = resolve(stringParam(params.surface), placementCaller);
-      if (result.ok && detail.helperParentId && !isTargetable(result.value.id)) {
+      const result = resolve(stringParam(params.surface), detail.surfaceId, detail.placementSurfaceId);
+      if (result.ok && !isTargetable(result.value.id)) {
         return { ok: false, message: 'The placement Surface is closing' };
       }
       return result;
@@ -1113,9 +1114,8 @@ export function useDorControl({
         direction,
         minimized: booleanParam(params.minimized),
         reference: resolved.target,
-        // Ordinary splits inherit their reference's directory; a helper's
-        // invocation directory wins over its source's.
-        cwd: detail.helperParentId ? stringParam(params.callerCwd) : undefined,
+        // The invoking directory, like `dor ensure`; `--surface` only places.
+        cwd: stringParam(params.cwd),
         // The CLI computes the focus intent — a bare `dor split` steals focus;
         // a `--` tail or an initial command does not — and sends it as
         // focusNeutral. Honor it.
@@ -1454,7 +1454,7 @@ export function useDorControl({
         const toolParams = { surfaceType: 'tool', cwd, ...identity };
 
         const callerId = detail.surfaceId;
-        const callerGate = callerId === undefined || detail.helperParentId ? null : readCallerGate(callerId, cwd);
+        const callerGate = callerId === undefined ? null : readCallerGate(callerId, cwd);
 
         /**
          * Run the resolved Tool in the preview slot in place: interrupt it, then

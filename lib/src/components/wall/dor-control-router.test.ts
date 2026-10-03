@@ -75,7 +75,7 @@ describe('dor control routing', () => {
     } finally { setPlatform(previous!); }
   });
 
-  it('routes helper callers through their source without making helpers members', () => {
+  it('routes helper callers through their source, lending only its placement', () => {
     const first = getWorkspacesSnapshot().workspaces[0].id;
     const owner = handleFor(first, ['parent']);
     handleFor(createWorkspace({ id: 'other' }).id, ['other-pane']);
@@ -83,17 +83,16 @@ describe('dor control routing', () => {
     expect(resolveDorControlRoute(detail)).toEqual({ kind: 'handle', handle: owner });
     dispatch(detail);
     expect(owner.handleDorControl).toHaveBeenCalledWith(expect.objectContaining({
-      surfaceId: 'helper', helperParentId: 'parent', placementSurfaceId: 'parent',
+      surfaceId: undefined, helperParentId: 'parent', placementSurfaceId: 'parent',
     }));
-    expect(owner.ownsSurface('helper')).toBe(false);
   });
 
-  it('keeps helper origin and self identity when explicitly routed to another window or Workspace', () => {
+  it('keeps helper origin, without a placement, when explicitly routed to another Workspace', () => {
     const target = handleFor(getWorkspacesSnapshot().workspaces[0].id, ['destination']);
     const detail = dispatch(request({ surfaceId: 'foreign-helper', helperParentId: 'foreign-parent',
       params: { workspace: 'workspace:1' } }));
     expect(target.handleDorControl).toHaveBeenCalledWith(expect.objectContaining({
-      surfaceId: 'foreign-helper', helperParentId: 'foreign-parent', placementSurfaceId: undefined,
+      surfaceId: undefined, helperParentId: 'foreign-parent', placementSurfaceId: undefined,
     }));
     const self = dispatch(request({ ...detail, method: 'surface.kill', params: { workspace: 'workspace:1', surface: 'surface:self' } }));
     expect(self.respond).toHaveBeenCalledWith({ ok: false, error: expect.stringContaining('not public Surface targets') });
@@ -112,7 +111,7 @@ describe('dor control routing', () => {
     try {
       dispatch(request({ surfaceId: 'helper' }));
       expect(owner.handleDorControl).toHaveBeenCalledWith(expect.objectContaining({
-        surfaceId: 'helper', helperParentId: 'parent', placementSurfaceId: 'parent',
+        surfaceId: undefined, helperParentId: 'parent', placementSurfaceId: 'parent',
       }));
       for (const surface of ['helper', 'surface:helper', 'surface:self']) {
         const detail = dispatch(request({ surfaceId: 'helper', params: { surface } }));

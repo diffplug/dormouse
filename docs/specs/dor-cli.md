@@ -414,7 +414,7 @@ The spec keeps the behavior help cannot express:
 
 | Command | Behavioral contract |
 |---|---|
-| `split` | **Only a bare split focuses the new Surface.** A `--` marker or command tail leaves the caller focused; pre-parse preserves the marker stricli discards. |
+| `split` | **Only a bare split focuses the new Surface.** A `--` marker or command tail leaves the caller focused; pre-parse preserves the marker stricli discards. **Must start in the invoking directory**, like `ensure`; `--surface` only places. |
 | `ensure` | **Must have a `--` command tail.** Matching uses the exact OSC 633 command plus resolved CWD; `cmd.exe` without integration fails immediately, other unintegrated shells time out after 8s and close the temporary Surface. `--restart` drives the live PTY in place, preserving layout and minimized/visible state, so it works on Doors too. |
 | `send` | **Must select exactly one input mode.** Text then key is the only mixed order; duplicate flags require the explicit sequence form. Input is paced, `sent` meaning queued ([transport.md → Paced input](transport.md#paced-input)). |
 | `read` | Clean, ANSI-free rendered lines; line limits count rendered lines. |
@@ -697,11 +697,11 @@ Source of truth: `dor/src/commands/skill.ts`, `scripts/generate-dor-skill.mjs`,
 
 - **Must route an unscoped helper-origin request through the source's Workspace.** A missing source refuses rather than falling back to the active Workspace.
 - **Must keep unpromoted helpers out of discovery, matching, and explicit targeting**, including `surface:self` and internal ids. Never substitute the source for an explicit helper target or mark the source as the caller in a listing. Promotion assigns the ordinary public Surface ref without changing Session identity.
-- **Must use the source as the helper's default placement reference**, separately from caller identity. The helper's invocation directory supplies new work's CWD, including `split`.
+- **Must use the source as the helper's default placement reference, never as its caller.** A helper is never the caller a Wall sees, even once promoted, so nothing marks, takes over, or retargets the source on its behalf.
 - **Never promote, take over, or replace a helper or placement reference to fulfill a helper-origin creation**, including for a request accepted before promotion; matching, keyed reuse, and preview slots still apply. A captured placement reference disappearing before creation fails.
 - **Must retain the actual helper Session as an app-restart requester**, without exempting its source from running-work checks.
 
-Source of truth: `resolveDorControlRoute` in `lib/src/components/wall/dor-control-router.ts`; `handleDorControl` in `lib/src/components/wall/use-dor-control.ts`; `createDorControlServer` in `standalone/sidecar/dor-control-server.js`.
+Source of truth: `resolveDorControlRoute` in `lib/src/components/wall/dor-control-router.ts`; `requestForWall` in `lib/src/components/wall/dor-control-shared.ts`; `handleDorControl` in `lib/src/components/wall/use-dor-control.ts`; `createDorControlServer` in `standalone/sidecar/dor-control-server.js`.
 
 ## Dor Tools
 

@@ -1353,8 +1353,8 @@ export function Wall({
     }
 
     const newId = generatePaneId();
-    // An explicit cwd (dor ensure --cwd, defaulting to the caller's directory)
-    // wins; otherwise inherit the reference pane's local cwd as dor split does.
+    // An explicit cwd (the invoking directory `dor ensure` and `dor split`
+    // send) wins; otherwise inherit the reference pane's local cwd.
     const inheritedCwd = cwd ?? getInheritableCwd(referenceId);
 
     if (deferTerminal) {
