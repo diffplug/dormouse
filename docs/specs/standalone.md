@@ -692,7 +692,7 @@ stateDiagram-v2
   Voting --> Idle: quit_cancel → quit-cancelled
   Voting --> Walking: last quit_vote, or last unvoted window forgotten
   Voting --> Exit: last window forgotten
-  Walking --> Walking: quit_window_done → next quit-teardown
+  Walking --> Walking: quit_window_done or torn-down window forgotten → next quit-teardown
   Walking --> Exit: quit_proceed, or no window left
   Exit --> [*]: app.exit(0) past the cleanup gate
 ```
