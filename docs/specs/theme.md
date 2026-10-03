@@ -142,8 +142,8 @@ Source of truth: `getTerminalTheme()` in `lib/src/lib/terminal-theme.ts`;
 `CreatePseudoConsole` silently swallows color queries, while node-pty's bundled
 OpenConsole (`conpty.dll`) forwards them (rationale). **Both distributions must
 ship** `node-pty/prebuilds/<arch>/conpty.node` plus its sibling
-`conpty/{conpty.dll,OpenConsole.exe}`: standalone via the Tauri
-`resources: ["../sidecar/**/*"]` glob, the VS Code extension via
+`conpty/{conpty.dll,OpenConsole.exe}`: standalone per
+`docs/specs/standalone.md` -> "Build and development", the VS Code extension via
 `cp -RL node_modules/node-pty dist/node-pty`. The flag also has an installer
 consequence ([auto-update.md](auto-update.md#sidecar-teardown-on-windows)).
 

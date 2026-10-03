@@ -8,7 +8,7 @@
 
 The attacker is any program writing to a PTY.
 
-**Must bound retained output by representation**: `TerminalProtocolParser` semantic values by code points and control stripping, an incomplete semantic OSC by length, and ImageAddon data by encoded bytes, decoded pixels, and FIFO storage (`docs/specs/terminal-escapes.md` -> "Parsing location", `docs/specs/layout.md` -> "Inline graphics").
+**Must bound retained output by representation**: `TerminalProtocolParser` semantic values by code points and control stripping, an incomplete semantic OSC by length, and ImageAddon data by encoded bytes, decoded pixels, and FIFO storage (`docs/specs/terminal-state.md` -> "Supported OSC Inputs", `docs/specs/terminal-escapes.md` -> "Parsing location", `docs/specs/layout.md` -> "Inline graphics").
 
 **Never let untrusted PTY output write the clipboard or access a file**: consume `OSC 50` and unsupported `OSC 1337`; consume `OSC 52`, which only offers its text to the copy editor over the user's own drag, copied when the user picks it (`docs/specs/mouse-and-clipboard.md` §4.6). **Inline images carry their own bytes**: no path is resolved, ImageAddon dropping any non-`inline=1` transfer (`docs/specs/layout.md` -> "Inline graphics").
 
@@ -16,8 +16,10 @@ The attacker is any program writing to a PTY.
 `file:` link whose display text names its target, which previews through the
 user's `open` rules (`docs/specs/dor-tool.md` -> "Terminal links"); a target whose
 display text names a different host gets **no open action at all**
-(`docs/specs/mouse-and-clipboard.md` -> "OSC 8 hyperlinks"). **Must revalidate external-URL launches through `normalizeExternalUri`** (VS Code's in the extension
-host); file opens use `docs/specs/dor-tool.md` -> "Opening local files".
+(`docs/specs/mouse-and-clipboard.md` -> "OSC 8 hyperlinks"). **Must revalidate
+every external-URL launch through `normalizeExternalUri`**, consent
+notwithstanding (VS Code's in the extension host); file opens use
+`docs/specs/dor-tool.md` -> "Opening local files".
 
 **Unsupported escape sequences must fail inertly** — consumed or ignored, with
 no visible garbage, clipboard, file, focus, or privilege effect
@@ -175,9 +177,8 @@ every window snapshot, its geometry sibling, and the arrival journal
 helper locks the whole standalone app-data directory before the sidecar spawns.
 
 **No writer persists scrollback** (`docs/specs/transport.md` -> "What is
-persisted"); the first save after an upgrade rewrites a snapshot without it, and a
-boot sweep deletes orphaned `*.json.tmp` files. Snapshots older versions left
-behind do carry transcripts (rationale).
+persisted", "Retiring the transcripts already on disk"). Snapshots older versions
+left behind do carry transcripts (rationale).
 
 **Standalone writes `recovery.json` beside its sessions directory**, under the
 state root, owner-only: one rebuilt agent-resume invocation per Surface, never a

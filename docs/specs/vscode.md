@@ -17,7 +17,7 @@ The shared frontend runs in the bottom-panel `WebviewView` and independent edito
 - **Never let a resuming router steal another webview's PTYs**: each router's `ownedPtyIds` is enforced by the module-level `globalOwnedPtyIds`.
 - **Every save path must merge current alert states through `toPersistedAlertState`** — the frontend's periodic `dormouse:saveState` and the backend's deactivate refresh (`refreshSavedSessionStateFromPtys`) alike, so the two produce consistent state: missing the merge reverts alert state on restore, passing live state persists transient fields.
 - **A Session's alert state follows its PTY**: `pty:spawn` claims the id before starting its alert state over from `options.alert`, so the seeded state reaches the claiming webview, and **every kill removes the entry**. **Must reserve a closing router's PTYs until its deferred kills finish**, so another router cannot claim them during CWD work.
-- **Every webview and Client write and resize goes through `alertedPty`**, a remote Client's from either Burrow tier included (`writeClientInput`), so input is acknowledged and a resize's grace opened first (`docs/specs/alert.md` → Engagement).
+- **Every webview and Client write and resize goes through `alertedPty`**, a remote Client's from either Burrow tier included (`writeClientInput`); what it does: `docs/specs/alert.md` -> "Engagement", "WATCHING Track".
 - **`retainContextWhenHidden` is set on both `WebviewPanel` and `WebviewView`**, so xterm.js DOM, scrollback, and PTY subscriptions survive hide/show without a resume.
 - **Workbench chords in the `lib/src/lib/vscode-keybindings.ts` allowlist are mirrored**: xterm still processes the key while the webview posts `dormouse:runWorkbenchCommand`, and `message-router.ts` revalidates it against the same set before `vscode.commands.executeCommand`.
 
@@ -65,7 +65,7 @@ Source of truth: `connectWebview` / `reportWindowPresence` in `vscode-ext/src/me
 
 The selected shell is `dormouse.selectedShellPath`, read from `workspaceState` before `globalState`; **a global save clears the workspace value** so it cannot shadow the new default. Its name is mirrored into `WebviewView.description`, and `dormouse:selectedShell` keeps the webview's default-shell slot current.
 
-`dormouse.newTerminal` focuses the view and posts `dormouse:newTerminal` with the selected shell. `dormouse.selectShell` opens a QuickPick and — **only when the pick differs from the previous selection** — focuses the view and posts `dormouse:newTerminal` with `replaceUntouched: true` and `announce: true` (`docs/specs/layout.md` → "Session lifecycle and terminal registry" owns what Wall does with it).
+`dormouse.newTerminal` focuses the view and posts `dormouse:newTerminal` with the selected shell. `dormouse.selectShell` opens a QuickPick; a changed pick focuses the view and posts `dormouse:newTerminal` (`docs/specs/layout.md` -> "Session lifecycle and terminal registry").
 
 **The QuickPick is the only shell control here**: `VSCodeAdapter` sets `hostOwnsShells`, so the shared Settings dialog hides its Shell row. Source of truth: `vscode-ext/src/shell-selection.ts`.
 
@@ -226,7 +226,7 @@ The service owns the PTYs but not the *view* of them: each webview is its own JS
 
 **Every webview installs the responder**, broker or not; it carries none of the relay, enrollment, or pairing machinery. **Installing must be idempotent per link** (rationale).
 
-**Each webview counts once, and a late answer repairs the snapshot**: a duplicate answer cannot contribute the same panes twice, and an answer for an already-settled request **triggers a directory invalidation instead** (`docs/specs/remote-api.md` → Directory).
+**Each webview counts once**: a duplicate answer cannot contribute the same panes twice. A late answer: `docs/specs/remote-api.md` -> "Directory".
 
 **A peer answer belongs to the authenticated broker socket that asked for it**: if that broker disappears mid-fan-out the answer is dropped even when this window has already connected to a replacement, since **request ids restart per broker**. A rejected fan-out contributes an empty answer. **Nothing in an answer but its `ptyId` (`routedPtyId`) is interpreted below the Burrow.**
 

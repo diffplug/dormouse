@@ -95,8 +95,6 @@ macOS host, hence copying only the declared platform packages.
 
 **Why installing the responder is keyed by the link.** Each install adds a `status` subscription, and each arming under it adds pane-state, activity, and focus listeners with no handle left to remove them. A flag would be wrong because the platform adapter, not the module, is what owns a link.
 
-**Why a late answer invalidates instead of being dropped** (the rule is `docs/specs/remote-api.md` → Directory; every ask bridge shares it). It arrives after the Burrow has already rendered a directory missing whatever that answerer owns — an empty picker on a machine that does have terminals — and nothing can re-open a settled request. Without the invalidation an idle machine has no other reason to re-collect, so the phone's picker stays wrong indefinitely.
-
 ## Peer surfaces across windows
 
 **Why a raw `ptyId` cannot key a route.** "Duplicate Workspace in New Window" cold-restores identical surface and PTY ids into several windows; a `ptyId → latest answering peer` table would then acknowledge the first surface answer while streaming and writing to the last.

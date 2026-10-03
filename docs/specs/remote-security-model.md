@@ -404,7 +404,7 @@ runtime holds the same line against the rendezvous (`docs/specs/one-time.md`
 | `DIRECT_BUFFER_HIGH` / `DIRECT_BUFFER_LOW` | 256 KiB / 64 KiB | same |
 | `MAX_ONE_TIME_FRAME_LENGTH` | one maximal `ct` + 512 | `remote-lib-common/src/remote/one-time-wire.ts` |
 | `MAX_ONE_TIME_FORWARDED` | 32 messages, both directions together | same |
-| `ONE_TIME_LINK_TTL_MS` / `ONE_TIME_EXPIRY_GRACE_MS` | `= DEFAULT_PAIRING_TTL_MS` / 45 000 (> `DIRECT_ONLY_DEADLINE_MS`) | same |
+| `ONE_TIME_LINK_TTL_MS` / `ONE_TIME_EXPIRY_GRACE_MS` | `= DEFAULT_PAIRING_TTL_MS` (300 000) / 45 000 (> `DIRECT_ONLY_DEADLINE_MS`) | same |
 | `ONE_TIME_OPEN_TIMEOUT_MS` | 8 000 | `lib/src/remote/burrow/one-time-runtime.ts` |
 
 - **Must bound waiting relay frames before enqueueing**, by count and cumulative

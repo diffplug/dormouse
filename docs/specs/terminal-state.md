@@ -1,7 +1,7 @@
 # Terminal CWD and Command State
 
 > See `docs/specs/glossary.md` for Session vocabulary. Owns the per-Session terminal semantic state that layout and grouping consume, and the shell integration that reports it.
-> **Defers:** alert/TODO behavior and the notification OSCs (OSC 9 / 9;4 / 99 / 777 / BEL) to `docs/specs/alert.md`; the escape-sequence registry, parsing-location rules, and value bounds to `docs/specs/terminal-escapes.md`.
+> **Defers:** alert/TODO behavior and the notification OSCs (OSC 9 / 9;4 / 99 / 777 / BEL) to `docs/specs/alert.md`; the escape-sequence registry and parsing-location rules to `docs/specs/terminal-escapes.md`.
 
 **`cwd` means "the shell/session reported this directory"** — not the internal CWD of a foreground program. **A command snapshots `cwdAtStart` at start**; grouping and header disambiguation use that snapshot while it runs.
 
@@ -52,9 +52,11 @@ Titles:
 
 **A programmatic interactive launch writing directly to the platform PTY must emit `commandLine` + `commandStart(source: "user_input")` synchronously before the write**, through `seedLaunchedCommand` — it bypasses xterm's keystroke fallback; an integrated shell's later boundaries stay authoritative.
 
+**Every semantic value `TerminalProtocolParser` *retains* is bounded and stripped of control characters before storage**, whatever the emitter: `TITLE_LIMIT` / `BODY_LIMIT` for titles and notification bodies, whose whitespace controls collapse to spaces before the trim; `COMMAND_LINE_LIMIT` for the command line (`OSC 633 ; E`, `OSC 133 ; C`), source bounded at 4× `COMMAND_LINE_LIMIT` code points for OSC 633 or shell-quoted input, or 12× for percent-encoded UTF-8, then decoded, sanitized, and capped at `COMMAND_LINE_LIMIT` code points (rationale), **line breaks kept as `\n`**; `MAX_CWD_LENGTH` for every CWD source, interior whitespace preserved. **Semantic value limits count code points**, so a cut never splits a surrogate pair. **A value that reduces to nothing is dropped, never stored empty.**
+
 **Supported-but-malformed semantic OSCs are consumed without changing state.**
 
-Source of truth: `TerminalProtocolParser` in `lib/src/lib/terminal-protocol.ts`; `fileUriHost` / `cwdFromManualPath` in `lib/src/lib/terminal-state.ts`; `seedTerminalManualCwd` and `seedLaunchedCommand` in `lib/src/lib/terminal-state-store.ts`.
+Source of truth: `TerminalProtocolParser` / `commandLineEvents` in `lib/src/lib/terminal-protocol.ts`; `fileUriHost` / `cwdFromManualPath` / `boundedCwdValue` in `lib/src/lib/terminal-state.ts`; `seedTerminalManualCwd` and `seedLaunchedCommand` in `lib/src/lib/terminal-state-store.ts`.
 
 ## Shell-integration injection
 
@@ -70,7 +72,7 @@ Source of truth: `TerminalProtocolParser` in `lib/src/lib/terminal-protocol.ts`;
 
 **bash's `E` is the submitted line, read back from history only when the last entry provably is it, else its first simple command** (`$BASH_COMMAND`) (rationale).
 
-**Both distributions ship the scripts**: standalone through the Tauri `../sidecar/**/*` glob, the VS Code build into `dist/shell-integration`, which the host names in `DORMOUSE_SHELL_INTEGRATION_DIR`.
+**Both distributions ship the scripts**: standalone per `docs/specs/standalone.md` -> "Build and development", the VS Code build into `dist/shell-integration`, which the host names in `DORMOUSE_SHELL_INTEGRATION_DIR`.
 
 **Emitted fields must be filtered before they are written — a security boundary.** An attacker-chosen directory name or command can carry an OSC terminator (BEL, `ESC \`, or the C1 ST `U+009C`) that ends the `633` sequence early, so the remainder arrives as a fresh, fully-trusted OSC. **The parser cannot defend against this** — it scans raw bytes (rationale). The field grammar the parser decodes:
 

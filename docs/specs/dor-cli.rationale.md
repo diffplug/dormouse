@@ -8,8 +8,6 @@ The CLI's control client needs Node types, but the renderer imports CLI protocol
 
 **What a missing `ELECTRON_RUN_AS_NODE` looks like.** Under VS Code `DORMOUSE_NODE` is the editor's Electron binary — Node only when that variable is set, and terminals routinely strip it from the ambient env. Without it Electron launches its GUI, ignores the script, and exits 0: no error, no output, success exit code, reading as "the command did nothing" rather than as a launcher bug.
 
-**Why the standalone's bundled node is GUI-subsystem.** A console-subsystem node pops a stray terminal window every time Rust spawns the sidecar, so the bundled binary is patched to the GUI subsystem — and that same patch leaves it no console to inherit.
-
 **What a verbatim path looks like.** cmd.exe fails with "The system cannot find the path specified.", naming neither the launcher nor the prefix that caused it. Tauri's `resource_dir()` returns a verbatim prefix in the bundled and dev layouts alike, so the standalone host strips it once at the boundary (`resolve_sidecar_path`) and every derived path stays plain.
 
 **What an LF-only `dor.cmd` looks like.** cmd.exe misparses rather than refuses, dropping the leading character of every line — `setlocal` → `tlocal`, `if not` → `not` — so the launcher spews parse errors even on runs that otherwise work, and the noise points at the batch source rather than at line endings.

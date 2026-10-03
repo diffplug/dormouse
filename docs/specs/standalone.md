@@ -136,8 +136,7 @@ its xterm size — it asks over `burrow:ask`, and
   the window it delivered to (`burrow:askDelivered`) so the collector settles
   on that one answer. `ASK_BUDGET_MS` bounds the whole fan-out; whatever
   answered is the best available snapshot.
-- **An answer for an ask the bridge no longer holds invalidates the directory**
-  rather than being dropped (`docs/specs/remote-api.md` → Directory).
+- A late answer: `docs/specs/remote-api.md` -> "Directory".
 
 **The sidecar owns the parse**, standalone's only one
 (`docs/specs/terminal-escapes.md` → Parsing location): a `pty-core` `data` event
@@ -239,9 +238,8 @@ shell picker belongs here**: both live in the Settings dialog
 `docs/specs/alert.md` → Workspace union.
 
 Picking a shell in the Settings dialog's **Shell** row
-(`lib/src/components/ShellPicker.tsx`) persists it and dispatches
-`dormouse:new-terminal` with `replaceUntouched: true` (`docs/specs/layout.md` →
-"Session lifecycle and terminal registry").
+(`lib/src/components/ShellPicker.tsx`) persists it; what a changed pick spawns:
+`docs/specs/layout.md` -> "Session lifecycle and terminal registry".
 
 ### Application menu
 
@@ -568,8 +566,8 @@ Source of truth: `window_at` in `standalone/src-tauri/src/routing.rs`;
 
 ## Persistence
 
-One `PersistedWindow` per window, restored on the next launch
-(`docs/specs/transport.md` → "The governing rule" and "Persisted session
+**One `PersistedWindow` per window, every Workspace in it**, restored on the
+next launch (`docs/specs/transport.md` → "The governing rule" and "Persisted session
 types"). Each Workspace's Wall publishes to the Window aggregator, whose one
 debounced writer is `TauriAdapter.saveWindowState`; `getWindowState` is the boot
 reader and **parses the blob once**. Source of truth: `windowStateSlot` in
@@ -586,10 +584,11 @@ Source of truth: `restoreWindowOrFresh` in `standalone/src/window-restore.ts`.
 
 **Every Workspace saving at the same moment costs one `pty_get_cwds`**: both
 adapters fold the calls of one microtask into a single invoke
-(`standalone/src/coalesce-cwds.ts`). **A listing that spans terminals costs one
-`pty_get_open_ports_many`**, which the sidecar answers from one process-table
-read and one socket scan; its deadline is `docs/specs/transport.md` → "Port scan
-deadlines".
+(`standalone/src/coalesce-cwds.ts`). A listing's one scan
+(`docs/specs/dor-cli.md` -> "Current Implemented Commands") is one
+`pty_get_open_ports_many`, which the sidecar answers from one process-table
+read and one socket scan; its deadline is
+`docs/specs/transport.md` -> "Port scan deadlines".
 
 **Nothing is deleted at boot but orphaned session temp files and what the
 arrival merge settles** (`docs/specs/transport.md` → "Retiring the transcripts already on disk").

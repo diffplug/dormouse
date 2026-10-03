@@ -69,7 +69,7 @@ Source of truth: `ITERM2_COMPAT_VERSION` in `standalone/sidecar/pty-core.js` and
 
 1. The visible or deserialized webview calls `requestInit` (VS Code: `{ type: 'dormouse:init' }`).
 2. The host answers `pty:list` (one `PtyInfo` per owned PTY), then `pty:replay` for each PTY with buffered output, then `alert:state` for each.
-3. The webview resumes terminals with their launch shells for Session-specific clipboard/drop escaping.
+3. The webview resumes terminals with their launch shells (consumer: `docs/specs/mouse-and-clipboard.md` -> "8.6 Paste Content").
 4. A saved layout is reused only when its leaves match the live visible pane set; saved minimized PTYs are registered as Doors.
 
 **A collection finishes only on its own answer**: a host serving several windows echoes the `requestInit` token on the `pty:list` and every `pty:replay` behind it, and the collector ignores a different one (rationale). **An answer carrying no token is taken** — the hosts that echo none (VS Code, Pocket, the website) run one collector per JS realm. **A collection that timed out is not one that found no PTYs**, and `LivePtys` says which; cold-restoring on a timeout starts a second set of shells over the running ones. **A collector given `retryTimeoutMs` asks once more before reporting silence** (rationale), and **`resumeOrRestore` and `restoreWindow` ask for it only when the saved session names a terminal pane**. Source of truth: `collectLivePtys` in `lib/src/lib/reconnect.ts`; `list` in `standalone/sidecar/pty-core.js`.
@@ -123,7 +123,7 @@ Source of truth: the message schema in `vscode-ext/src/message-types.ts` (`Webvi
 
 | Direction | Message | Contract |
 | --- | --- | --- |
-| Webview → host | `dormouse:openExternal` | Open a user-confirmed external URI from an OSC 8 hyperlink. **Hosts must revalidate** through `normalizeExternalUri` in `lib/src/lib/external-links.ts`. |
+| Webview → host | `dormouse:openExternal` | Open a user-confirmed external URI from an OSC 8 hyperlink; revalidation: `docs/specs/mouse-and-clipboard.md` -> "OSC 8 hyperlinks". |
 | Webview → host | `pty:getOpenPorts` | TCP listening ports of a PTY's shell **and all of its descendant subprocesses**, answered with `pty:openPorts`. `getOpenPortsForPids()` in `standalone/sidecar/pty-core.js` serves both hosts. |
 | Host → webview | `pty:openPorts` | De-duplicated by `(family, address, port)`, sorted by port then address; empty when the PTY is gone or enumeration fails. |
 | Webview → host | `pty:getOpenPortsMany` | `ids`, answered by `pty:openPortsMany` from one scan. |
@@ -205,7 +205,7 @@ Source of truth: `PersistedSession` in `lib/src/lib/session-types.ts`; `lib/src/
 
 ### The governing rule
 
-**Dormouse restores only what it destroyed without asking.** Deliberately ending something ends it:
+**Dormouse restores only what it destroyed without asking** (rationale). Deliberately ending something ends it:
 
 | Boundary | Deliberate? | Outcome |
 | --- | --- | --- |
@@ -220,7 +220,7 @@ Source of truth: `PersistedSession` in `lib/src/lib/session-types.ts`; `lib/src/
 | VS Code editor-tab close (`killOnDispose: true`) | Yes | Fresh for that panel |
 | VS Code extension-host crash | No, and the last periodic save stands | Restore structure, no agent resume — `deactivate()` never ran |
 
-**Standalone persists one `PersistedWindow` per window**, every Workspace in it (rationale). "Restore structure" brings back the layout, cwds, titles, doors, and TODO/alert blobs; "auto-resume agents" is `docs/compatible-agents.md` → "Cold restore". A cold-restored pane opens empty.
+Standalone's per-window record: `docs/specs/standalone.md` -> "Persistence". "Restore structure" brings back the layout, cwds, titles, doors, and TODO/alert blobs; "auto-resume agents" is `docs/compatible-agents.md` → "Cold restore". A cold-restored pane opens empty.
 
 ## Universal invariants
 
