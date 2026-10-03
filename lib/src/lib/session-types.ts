@@ -38,6 +38,9 @@ export interface PersistedToolMetadata {
   preview?: true;
   /** The canonical file an `open` gave this Tool. */
   target?: string;
+  /** Stopped while idle: restored with no process, started when shown
+   *  (`docs/specs/dor-tool.md` -> Reaping). */
+  reaped?: true;
 }
 
 /** Durable pane structure, never scrollback. Single-use recovery commands travel
@@ -225,7 +228,8 @@ function isPersistedToolMetadataShape(value: unknown): boolean {
     (value.port === 'announced' || value.port === 'auto') &&
     (value.key === undefined || (Array.isArray(value.key) && value.key.every((part) => typeof part === 'string'))) &&
     (value.preview === undefined || value.preview === true) &&
-    (value.target === undefined || (typeof value.target === 'string' && !hasShellInputControls(value.target)))
+    (value.target === undefined || (typeof value.target === 'string' && !hasShellInputControls(value.target))) &&
+    (value.reaped === undefined || value.reaped === true)
   );
 }
 

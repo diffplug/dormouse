@@ -33,7 +33,7 @@ before speech or push (`docs/specs/alert.md` -> "Text And Security").
 shell-integration scripts — the parser scans raw bytes and cannot defend it
 (`docs/specs/terminal-state.md` -> "Shell-integration injection"; rationale).
 
-**Must confine output to the screen, Session state, and bounded terminal reports** — rendered text/images, alerts, titles, prompt/command boundaries, CWD, and `OSC 8` — except a running designated Tool's OSC 367 `open`, gated below. **The PTY-boundary parser writes exactly three answer families**: `OSC 10/11/12 ; ?` color, `OSC 99` capability, `CSI > q` device. xterm.js and ImageAddon answer cursor, device, focus, size, and graphics reports
+**Must confine output to the screen, Session state, and bounded terminal reports** — rendered text/images, alerts, titles, prompt/command boundaries, CWD, and `OSC 8` — except a running designated Tool's OSC 367 `open`, gated below, and a stopping Tool's `dehydrate`, which reaches only its own next run (`docs/specs/dor-tool.md` → Reaping). **The PTY-boundary parser writes exactly three answer families**: `OSC 10/11/12 ; ?` color, `OSC 99` capability, `CSI > q` device. xterm.js and ImageAddon answer cursor, device, focus, size, and graphics reports
 (`docs/specs/transport.md` -> "Report filtering on the input side").
 
 - **FAIL IF** `TerminalProtocolParser` in `lib/src/lib/terminal-protocol.ts` stops consuming `OSC 52` or `OSC 50`, or a parse site stops running it before `pty:data` leaves it (rationale). Pinned by `lib/src/lib/terminal-protocol.test.ts`.

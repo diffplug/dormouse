@@ -1,5 +1,6 @@
 import { clearToolAnnounce } from './tool-announce-store';
 import { clearToolDirty } from './tool-dirty-store';
+import { clearToolReap } from './tool-reap-store';
 import { clearPreviewTransition } from './preview-transition-store';
 import { serializeTransferTerminal, type TerminalGrid } from './terminal-transfer';
 import { Terminal, type IBufferRange } from '@xterm/xterm';
@@ -197,7 +198,7 @@ function wirePtyEvents(id: string, terminal: Terminal): () => void {
     }
   };
   const handleExit = (detail: { id: string; exitCode: number }) => {
-    if (detail.id !== id) return;
+    if (detail.id !== id || registry.get(id)?.dormant) return;
     terminal.write(`\r\n[Process exited with code ${detail.exitCode}]\r\n`);
     // The PTY process is dead but the pane lingers in the registry; mark it so
     // the directory reports this surface as `alive: false` to the phone.
@@ -473,6 +474,8 @@ export function restoreTerminal(
     requireIntegration?: boolean;
     /** The pane's persisted TODO, seeded by the host at the spawn. */
     alert?: PersistedAlertState | null;
+    /** A rehydrated Tool's payload, set as `DORMOUSE_DEHYDRATE` on this spawn. */
+    dehydrate?: string | null;
   },
 ): TerminalEntry {
   const existing = registry.get(id);
@@ -497,6 +500,7 @@ export function restoreTerminal(
     shell: opts.shell,
     args: opts.args,
     ...(opts.alert ? { alert: opts.alert } : {}),
+    ...(opts.dehydrate ? { dehydrate: opts.dehydrate } : {}),
   });
   seedProcessCwdAfterSpawn(id);
 
@@ -517,6 +521,91 @@ export function restoreTerminal(
     typeCommandWhenPromptReady(id, command, opts.requireIntegration === true);
   }
 
+  return entry;
+}
+
+const REAPED_NOTICE = `${DIM}⏾ Stopped while idle; it restarts when shown${RESET}`;
+
+/** Write a reaped Tool's notice where its prompt would be. */
+function writeReapedNotice(entry: TerminalEntry): void {
+  entry.terminal.write(`\r\n${REAPED_NOTICE}\r\n`);
+}
+
+/**
+ * Kill a reaped Tool's PTY, keeping its terminal: the Session reads as exited,
+ * with its scrollback, title, and cwd, until `rehydrateTerminal`
+ * (`docs/specs/dor-tool.md` -> Reaping). Only the standalone host delivers no
+ * exit for a kill, so the finish is applied here rather than awaited.
+ */
+export function reapTerminal(id: string): void {
+  const entry = registry.get(id);
+  if (!entry) return;
+  entry.dormant = true;
+  getPlatform().killPty(id);
+  entry.exited = true;
+  if (getTerminalPaneState(id).currentCommand) applyTerminalSemanticEvents(id, [{ type: 'commandFinish' }]);
+  writeReapedNotice(entry);
+}
+
+/** A reaped Tool's Session as a resume, cold restore, or Workspace arrival
+ *  rebuilds it: a terminal with no PTY, which `rehydrateTerminal` starts. */
+export function createReapedTerminal(
+  id: string,
+  opts: { cwd?: string | null; title?: string | null; shell?: string; untouched?: boolean },
+): TerminalEntry {
+  const existing = registry.get(id);
+  if (existing) return existing;
+  const entry = setupTerminalEntry(id, { shell: opts.shell, untouched: opts.untouched ?? false });
+  entry.exited = true;
+  entry.dormant = true;
+  resetTerminalPaneState(id);
+  seedTerminalManualCwd(id, opts.cwd);
+  const trimmedTitle = opts.title?.trim();
+  if (trimmedTitle && trimmedTitle !== UNNAMED_PANEL_TITLE) setTerminalUserTitle(id, trimmedTitle);
+  writeReapedNotice(entry);
+  return entry;
+}
+
+/**
+ * Start a reaped Tool again: a fresh shell under the same Session id, its
+ * command typed once integration reports a prompt, as cold restore types it.
+ * Reuses the reaped terminal, keeping its scrollback and user title; a Session
+ * this webview never held is created as `restoreTerminal` creates one.
+ */
+export function rehydrateTerminal(
+  id: string,
+  opts: {
+    cwd: string | null;
+    shell?: string;
+    args?: string[];
+    command: string;
+    dehydrate?: string | null;
+    alert?: PersistedAlertState | null;
+  },
+): TerminalEntry {
+  const entry = registry.get(id);
+  if (!entry) return restoreTerminal(id, { ...opts, requireIntegration: true, resumeCommand: null });
+  const userTitle = getTerminalPaneState(id).titleCandidates.user?.title;
+  entry.dormant = false;
+  entry.exited = false;
+  entry.shellKind = shellCommandKind(opts.shell, PLATFORM_STRING);
+  // A new shell: the old one's integration and prompt state are not its own.
+  resetTerminalPaneState(id);
+  seedTerminalManualCwd(id, opts.cwd);
+  if (userTitle) setTerminalUserTitle(id, userTitle);
+  const dims = entry.fit.proposeDimensions();
+  getPlatform().spawnPty(id, {
+    cols: dims?.cols || entry.terminal.cols || 80,
+    rows: dims?.rows || entry.terminal.rows || 30,
+    cwd: opts.cwd ?? undefined,
+    shell: opts.shell,
+    args: opts.args,
+    ...(opts.alert ? { alert: opts.alert } : {}),
+    ...(opts.dehydrate ? { dehydrate: opts.dehydrate } : {}),
+  });
+  seedProcessCwdAfterSpawn(id);
+  seedLaunchedCommand(id, opts.command, opts.cwd ?? undefined);
+  typeCommandWhenPromptReady(id, opts.command, true);
   return entry;
 }
 
@@ -620,6 +709,7 @@ function teardownSession(id: string, { kill }: { kill: boolean }): void {
   removeMouseSelectionState(id);
   clearToolAnnounce(id);
   clearToolDirty(id);
+  clearToolReap(id);
   clearPreviewTransition(id);
   clearTerminalActivity(id);
   clearSizeHold(id);

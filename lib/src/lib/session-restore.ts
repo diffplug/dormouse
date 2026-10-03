@@ -3,8 +3,23 @@ import { type LathPersistedLayout, isLathPersistedLayout } from './lath/persiste
 import type { PlatformAdapter } from './platform/types';
 import { PLATFORM_STRING } from './platform';
 import { buildShellCommandForKind, shellCommandKind } from 'dor/commands/shell-quote';
-import { carrySurfaceRefs, readPersistedSession, type PersistedDoor, type PersistedSession, type PersistedSurfaceRefs } from './session-types';
-import { getDefaultShellOpts, restoreBrowserSurfaceTodo, restoreTerminal } from './terminal-registry';
+import { carrySurfaceRefs, readPersistedSession, type PersistedDoor, type PersistedPane, type PersistedSession, type PersistedSurfaceRefs } from './session-types';
+import { createReapedTerminal, getDefaultShellOpts, restoreBrowserSurfaceTodo, restoreTerminal, setTerminalActivity } from './terminal-registry';
+import { markToolReaped } from './tool-reap-store';
+
+/** Whether `pane` is a Tool saved while reaped, which this host restores with
+ *  no process (`docs/specs/dor-tool.md` -> Reaping). */
+export function isReapedToolPane(platform: PlatformAdapter, pane: PersistedPane): boolean {
+  return platform.reapsTools === true && pane.surfaceType === 'tool' && pane.tool?.reaped === true;
+}
+
+/** Rebuild a reaped Tool's Session with no PTY, its alert shown and kept for
+ *  the rehydrate's spawn, which starts it from bare args when it is seen. */
+export function restoreReapedTool(pane: PersistedPane, shell: string | undefined): void {
+  createReapedTerminal(pane.id, { cwd: pane.cwd, title: pane.title, shell, untouched: pane.untouched });
+  if (pane.alert) setTerminalActivity(pane.id, pane.alert);
+  markToolReaped(pane.id, { payload: null, cwd: pane.cwd, alert: pane.alert ?? null });
+}
 
 export interface RestoredSession {
   paneIds: string[];
@@ -96,6 +111,10 @@ export function restoreSession(platform: PlatformAdapter, sources: RestoreSource
     // PTY + xterm for the pane id that never gets mounted.
     if (pane.surfaceType === 'browser') {
       restoreBrowserSurfaceTodo(pane);
+      continue;
+    }
+    if (isReapedToolPane(platform, pane)) {
+      restoreReapedTool(pane, shellOpts?.shell);
       continue;
     }
     restoreTerminal(pane.id, {

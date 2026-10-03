@@ -76,6 +76,8 @@ import { listenerUrlsByPort } from './port-url';
 import { becomeToolMeta, dorDirectionForEdge, toolLeafMeta, type LathWallEngine } from './lath-wall-engine';
 import type { WallNav } from './keyboard/types';
 import { toolCommandFromParams } from '../../lib/session-save';
+import { isToolReaped } from '../../lib/tool-reap-store';
+import { rehydrateTool } from './tool-reaper';
 import { VIEW_ERROR_ARGV } from 'dor-tools-builtin/file-viewer-format';
 import type { LeafMeta } from '../../lib/lath/persistence';
 import type { DooredItem } from './wall-types';
@@ -1609,9 +1611,12 @@ export function useDorControl({
             }
             // A dedicated Surface whose command exited is unambiguously free,
             // so re-run in place rather than splitting — where `dor ensure`,
-            // aimed at arbitrary shells, would stop matching.
+            // aimed at arbitrary shells, would stop matching. A reaped one has
+            // no shell to type into: it rehydrates (docs/specs/dor-tool.md -> Reaping).
             const idle = matchState.currentCommand === null;
-            if (idle) {
+            if (isToolReaped(match.id)) {
+              rehydrateTool(lath, match.id);
+            } else if (idle) {
               const restarted = await restartSurfaceInPlace(match.id, matchedCommand, matchedCwd, detail.signal, { acceptCompletedRun: true });
               if (!restarted.ok) {
                 detail.respond({
