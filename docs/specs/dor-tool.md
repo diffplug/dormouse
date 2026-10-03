@@ -134,7 +134,7 @@ Source of truth: `toolSemanticName` in `lib/src/components/wall/tool-name.ts`.
 
 ```mermaid
 flowchart TD
-  R[surface.tool] --> O{OSC open from an idle Tool?}
+  R[surface.tool] --> O{OSC open, not from a running Tool?}
   O -- yes --> X[refuse]
   O -- no --> L{named Tool or dor open?}
   L -- no --> PS
@@ -148,7 +148,7 @@ flowchart TD
   K -- yes --> M[existing or adopted]
   K -- no --> T{take-over holds?}
   T -- yes --> TO[run in caller: takeover]
-  T -- no --> SP[split: created]
+  T -- no --> SP[split, focus-neutral: created]
 ```
 
 **Must retain `dor tool` and `dor open` as Surface-producing commands on every supported host**, never route them to a native editor. Generated help owns syntax and response types own shape.
