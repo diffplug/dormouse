@@ -440,7 +440,7 @@ Source of truth: `TerminalResizeContext` in `lib/src/components/wall/wall-contex
 
 ### Spawn (new pane reveal)
 
-Enter motion: `docs/specs/tiling-engine.md` → "Animation". Shell-selection replacement shows a transient notice over the resulting pane, static under reduced motion; Surface moves reuse it in alternate-screen programs (`docs/specs/dor-cli.md` → Handle Model).
+Enter motion: `docs/specs/tiling-engine.md` → "Animation". Shell-selection replacement shows a transient notice over the resulting pane, static under reduced motion; its reuse after a Surface move: `docs/specs/dor-cli.md` -> "Handle Model".
 
 ### Kill (two-phase fade + tween reclaim)
 
