@@ -127,7 +127,33 @@ Source of truth: `remote-lib-common/src/security/acl.ts` (the schema and
 
 ## Presence proofs
 
-**Use one verifier for pairing and connection.**
+**Use one verifier for pairing and connection.** Both ceremonies run the same
+order, every Pocket↔Burrow message relayed:
+
+```mermaid
+sequenceDiagram
+  participant A as Authenticator
+  participant P as Pocket
+  participant R as Relay
+  participant B as Burrow
+  P->>B: IK message 1
+  B->>P: message 2: empty, or the connection's burrowChallenge
+  opt pairing
+    Note over P: shows the two-digit code
+  end
+  P->>R: POST /api/reauth/begin {binding}
+  R-->>P: relayNonce, challenge
+  P->>A: get(challenge), the binding's credential only
+  A-->>P: assertion
+  P->>R: POST /api/reauth/finish
+  P->>B: PairingRequestV1 or ConnectionRequestV1, with PresenceProofV1
+  alt pairing
+    Note over B: verify proof, modal, typed code, ACL write on a match
+  else connection
+    Note over B: consume burrowChallenge, verify proof, ACL check
+  end
+  B->>P: PairingOutcomeV1 or ConnectionOutcomeV1
+```
 
 - **The WebAuthn challenge is derived, not random.**
   `presenceChallenge(binding, relayNonce)` is base64url
@@ -192,9 +218,8 @@ newly-added passkey is not automatically trusted; its Client must still pair.
   `Split` yields the pairing channel, and no ACL, delivery ID, or resumable
   state exists yet.
 - **Reverse two-digit confirmation.** Pocket samples a uniform code `00`–`99`
-  (rejection sampling) and sends it with its `PresenceProofV1` and sanitized
-  device label in the first transport payload. After the proof verifies, the
-  Burrow opens a modal with the label, an empty two-digit input, and the copy:
+  (rejection sampling) and sends it with a sanitized device label. The modal
+  shows the label, an empty two-digit input, and the copy:
   *Only authorize if your phone is showing a two-digit code. If it shows an
   error or no code, cancel this request.* **The Burrow holds the expected code and
   never displays, mirrors, or retransmits it**, and compares the typed digits
