@@ -46,13 +46,26 @@ Under `local` each runtime — a one-time link, or the persistent Burrow — is 
 - **The check gates terminal traffic, not approval** (rationale): an off-network phone holding a link can reach the two-digit prompt and still receives no terminal byte.
 - **A paired phone's session is direct-only**, with the one-time rule (`docs/specs/one-time.md` -> "Burrow runtime"): **`BurrowRuntime` makes a session direct-only exactly where the path policy is held**, says so in its outcome (`directOnly`), and hands the flag to `EstablishedE2eSession`, which ends it unread on an application message off the Relay, on a refused path, on a given-up attempt, or not direct both ways by `DIRECT_ONLY_DEADLINE_MS` — each with the goodbye.
 - **Pocket sends no protocol-v1 on a direct-only session before both directions are direct.** A connect that never gets there ends the session with fixed copy, the path refusal's where the goodbye names the phone's address (below); **the generic copy never says to join a network**. **A Burrow ending meanwhile is that connect's failure alone**, never burrow loss.
-- **The path refusal: where the path ends a direct-only session a path policy holds — refused, or given up or past the deadline once the phone offered — `EstablishedE2eSession` records a `PathRefusal`**, paired and one-time alike:
-  - **`end: 'local'` where the policy refused this machine's end** — the pair's local end, checked first, or no candidate of this end — naming only its own address (`localAddress`).
-  - **Else `end: 'remote'`, naming the refused pair's remote end (`observed`), the only evidence; else the first public IP literal outside the allowed networks the phone offered, read before the strip (`reported`), which decides nothing** (rationale). No end where neither applies.
-  - **The goodbye carries only the phone's address** (`docs/specs/remote-api.md` -> Transport), on the relay before the switch; the phone shows `networkNotAllowedMessage`, **never told the allowed networks, nor that a `reported` address is off them**; no address, or no goodbye, keeps the generic copy.
-  - **The service holds the latest in memory**, from both runtimes, on `networkPolicy` until `dismissPathRefusal`, **which clears only the refusal held at its arrival**; a one-time ending carries it. The laptop shows `pathRefusalSentence`, **blaming the phone's network only for `end: 'remote'`**.
 - **Never describe the level as proof of proximity** — a range is an address range, which another network can reuse, and a permitted peer can forward.
 - **Never enroll Hosted into a customer's tailnet** or mint per-customer hostnames.
+
+**The path refusal: where the path ends a direct-only session a path policy holds — refused, or given up or past the deadline once the phone offered — `EstablishedE2eSession` records a `PathRefusal`**, paired and one-time alike, its end chosen in this order:
+
+```mermaid
+flowchart TD
+  A{policy refused this end's address, or no candidate of this end?} -- yes --> L["end: 'local', localAddress"]
+  A -- no --> B{policy refused the pair's remote end, address known?}
+  B -- yes --> O["end: 'remote', observed"]
+  B -- no --> C{offer carried a public IP outside the allowed networks?}
+  C -- yes --> R["end: 'remote', reported"]
+  C -- no --> D{remote end refused?}
+  D -- yes --> M["end: 'remote'"]
+  D -- no --> K[no end]
+```
+
+- **`end: 'local'` names only this machine's own address; `observed` is the only evidence; `reported`, read before the strip, blames nothing** (rationale).
+- **The goodbye carries only the phone's address** (`docs/specs/remote-api.md` -> Transport), on the relay before the switch; the phone shows `networkNotAllowedMessage`, **never told the allowed networks, nor that a `reported` address is off them**; no address, or no goodbye, keeps the generic copy.
+- **The service holds the latest in memory**, from both runtimes, on `networkPolicy` until `dismissPathRefusal`, **which clears only the refusal held at its arrival**; a one-time ending carries it. The laptop shows `pathRefusalSentence`, **blaming the phone's network only for an `end: 'remote'` that is not `reported`**.
 
 Source of truth: `lib/src/host/remote/local-networks.ts`; `DirectPeer` in `lib/src/remote/direct/direct-peer.ts`; `lib/src/remote/direct/path-refusal.ts`; `EstablishedE2eSession` in `lib/src/remote/burrow/established-session.ts`; `PocketClient.connect` in `lib/src/remote/client/pocket-client.ts`. By hand against a browser, `scripts/direct-interop/run.mjs --allow` (rationale).
 
