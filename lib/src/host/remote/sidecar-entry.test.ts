@@ -380,6 +380,13 @@ describe('PTYs', () => {
     expect(alerts.getState('pty-1')).toMatchObject({ status: 'ALERT_RINGING', todo: false });
   });
 
+  // The webview holds `untouched`, which decides whether closing asks
+  // (docs/specs/layout.md → "Kill confirmation"); mouse reports count, as local ones do.
+  it.each(['ls\r', '\x1b[<0;10;5M'])('tells the webview a Client wrote %j', (data) => {
+    bridge.provider.writePty('pty-1', data);
+    expect(emitted('terminal:clientInput')).toEqual([{ id: 'pty-1' }]);
+  });
+
   it('gives a Client\'s repaint bounce the resize grace', () => {
     const onResize = vi.spyOn(alerts, 'onResize');
     bridge.provider.resizePty('pty-1', 80, 24, true);

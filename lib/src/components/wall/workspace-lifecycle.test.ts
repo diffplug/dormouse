@@ -175,7 +175,7 @@ describe('requestWorkspaceClose', () => {
   it('raises the confirmation once the registered Wall reports work', async () => {
     const [first] = ids();
     createWorkspace({ id: 'ws-2' });
-    handleFor('ws-2', { runningCount: () => 1 });
+    handleFor('ws-2', { needsCloseConfirmation: () => true });
     requestWorkspaceClose('ws-2');
     await Promise.resolve();
     expect(getWorkspaceUiSnapshot().confirmation?.id).toBe('ws-2');

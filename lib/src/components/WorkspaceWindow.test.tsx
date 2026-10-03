@@ -171,8 +171,9 @@ describe('WorkspaceWindow', () => {
   });
 
   it.each(['x', 'k'])('reveals and confirms a requested workspace close, then selects the next tab (%s)', async (killKey) => {
-    // Every Workspace holds running work, so every close confirms.
-    vi.spyOn(terminalRegistry, 'countRunningSessionsIn').mockReturnValue(1);
+    // Every Workspace holds a touched shell, so every close confirms.
+    vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(false);
+    vi.spyOn(terminalRegistry, 'getTerminalInstance').mockReturnValue({} as ReturnType<typeof terminalRegistry.getTerminalInstance>);
     const first = getActiveWorkspaceId();
     createWorkspace({ id: 'ws-2', activate: false });
     createWorkspace({ id: 'ws-3', activate: false });
@@ -867,12 +868,11 @@ describe('WorkspaceWindow', () => {
     expect(getActiveWorkspaceId()).toBe(second);
   });
 
-  it('reports a fresh Workspace as untouched with nothing running', async () => {
+  it('closes a fresh Workspace without confirming', async () => {
     const first = getWorkspacesSnapshot().workspaces[0].id;
     await render();
     const handle = getWallHandle(first)!;
-    expect(handle.hasTouchedSurfaces()).toBe(false);
-    expect(handle.runningCount()).toBe(0);
+    expect(handle.needsCloseConfirmation()).toBe(false);
   });
 });
 
@@ -1202,7 +1202,7 @@ describe('Surface moves between Workspaces', () => {
 
   it('does not let an older close awaiting its Wall replace a newer iframe consent', async () => {
     const source = await iframeWalls();
-    vi.spyOn(getWallHandle('ws-2')!, 'hasTouchedSurfaces').mockReturnValue(true);
+    vi.spyOn(getWallHandle('ws-2')!, 'needsCloseConfirmation').mockReturnValue(true);
     let pending!: Promise<Awaited<ReturnType<typeof moveSurface>>>;
     await act(async () => {
       requestWorkspaceClose('ws-2');

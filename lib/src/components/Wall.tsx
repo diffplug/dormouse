@@ -44,10 +44,8 @@ import {
   getTerminalPaneState,
   getTerminalPaneStateSnapshot,
   getActivitySnapshot,
-  isUntouched,
   getOrCreateTerminal,
   getTerminalInstance,
-  countRunningSessionsIn,
   setTerminalUserTitle,
   UNNAMED_PANEL_TITLE,
 } from '../lib/terminal-registry';
@@ -71,6 +69,7 @@ import { nextTodoMember } from '../lib/workspace-union';
 import { deriveDisplayedSurfaceLabel } from '../lib/session-label';
 import { getWorkspace, getWorkspacesSnapshot, subscribeToWorkspaces, workspaceRefFor } from '../lib/workspace-store';
 import { awaitWallEmpty } from './wall/close-all';
+import { closeKind, type CloseKind } from './wall/close-kind';
 import { registerWallHandle, type WallHandle } from './wall/wall-handles';
 import { prepareWorkspaceTransfer } from './wall/workspace-transfer';
 import { installDorControlRouter } from './wall/dor-control-router';
@@ -326,15 +325,13 @@ export function Wall({
   const lathRef = useRef<LathWallEngine | null>(null);
   if (lathRef.current === null) lathRef.current = createLathWallEngine();
   const lath = lathRef.current;
-  /** An untouched *shell* — the only thing the kill-without-confirm and
-   *  replace-in-place shortcuts may take. A Tool is never one: input to either
-   *  of its capabilities is input to the Tool (docs/specs/dor-tool.md → The
-   *  tool capability set). */
-  const isUntouchedShell = (id: string): boolean =>
-    isUntouched(id) && !isToolParams(lath.getMeta(id)?.params);
+  /** What a user close of this Surface does (`closeKind`). A Tool is never a
+   *  trivial close: input to either of its capabilities is input to the Tool
+   *  (docs/specs/dor-tool.md → The tool capability set). */
+  const closeKindOf = (id: string): CloseKind => closeKind(id, lath.getMeta(id)?.params);
   /** A blank shell may be replaced in place; one that owns a helper is not blank
    *  (docs/specs/terminal-context.md → Helper lifecycle). */
-  const isReplaceableShell = (id: string): boolean => isUntouchedShell(id) && !getHelper(id);
+  const isReplaceableShell = (id: string): boolean => closeKindOf(id) === 'trivial' && !getHelper(id);
   const restoredLathLayoutRef = useRef(restoredLathLayout);
   const dorSurfaceRefsRef = useRef<Map<string, string> | null>(null);
   const nextDorSurfaceRefIndexRef = useRef(1);
@@ -791,14 +788,14 @@ export function Wall({
           id,
           neighbors: [...doorsRef.current.slice(index + 1), ...doorsRef.current.slice(0, index).reverse()].map(item => item.id),
         };
-        handleReattachRef.current(door, { enterPassthrough: false, afterRestore: isUntouchedShell(id) ? 'close' : 'confirm-kill' });
+        handleReattachRef.current(door, { enterPassthrough: false, afterRestore: closeKindOf(id) === 'confirm' ? 'confirm-kill' : 'close' });
         return;
       }
       // The helper inspection below can outlive the Surface (an exit, a `dor
       // kill`); a confirm overlay for a gone pane would never clear itself.
       if (!nav.hasPane(id) || lath.isDying(id)) return;
       doorKillReturnRef.current = null;
-      if (isUntouchedShell(id)) { void closeSurface(id); return; }
+      if (closeKindOf(id) !== 'confirm') { void closeSurface(id); return; }
       setConfirmKill({ id, char: randomKillChar() });
     };
     if (!getHelper(id)) { stage(); return; }
@@ -1851,14 +1848,9 @@ export function Wall({
     ownsSurface,
     iframeSurfaceRefs,
     browserSessions,
-    hasTouchedSurfaces: () => memberSurfaceIds().some((id) => {
-      // A browser Surface has no "untouched" notion and always holds a page, so
-      // it counts; so does a Tool, before its terminal exists to be asked. A
-      // terminal counts once its Session exists and has input.
-      if (!surfaceHasTerminal(id) || isToolParams(lath.getMeta(id)?.params)) return true;
-      return getTerminalInstance(id) !== null && !isReplaceableShell(id);
-    }),
-    runningCount: () => countRunningSessionsIn(memberSurfaceIds()),
+    // A shell whose Session has not spawned yet has nothing to lose.
+    needsCloseConfirmation: () => memberSurfaceIds().some(id => closeKindOf(id) === 'confirm'
+      && !(surfaceKindFromParams(lath.getMeta(id)?.params) === 'terminal' && getTerminalInstance(id) === null)),
     dirtyToolIds: () => memberSurfaceIds().filter(id => isToolDirty(id, lath.getMeta(id)?.params)),
     enterSelectedPane: () => {
       const id = livePaneId();

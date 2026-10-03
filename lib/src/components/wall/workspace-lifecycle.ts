@@ -16,11 +16,10 @@ import { confirmToolEditorsClose, UNSAVED_TOOL_REFUSAL } from '../../lib/tool-ed
  * these open; it decides nothing.
  */
 
-/** Whether closing this Workspace asks first: it holds a Surface the user has
- *  typed into, or a running Session. */
+/** Whether closing this Workspace asks first: any member is one whose own
+ *  close would ask (`docs/specs/layout.md` → "Workspace lifecycle"). */
 export function workspaceNeedsCloseConfirmation(id: WorkspaceId): boolean {
-  const handle = getWallHandle(id);
-  return !!handle && (handle.hasTouchedSurfaces() || handle.runningCount() > 0);
+  return getWallHandle(id)?.needsCloseConfirmation() ?? false;
 }
 
 /** A click on `+` waits for the fresh Wall before focusing its terminal. */

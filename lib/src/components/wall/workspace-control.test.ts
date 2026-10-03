@@ -255,7 +255,7 @@ describe('workspace.close', () => {
     const second = createWorkspace({ id: 'ws-2', name: 'build', activate: false }).id;
     const closeAll = vi.fn(async () => null);
     handleFor(getWorkspacesSnapshot().workspaces[0].id);
-    handleFor(second, { runningCount: () => 1, closeAll });
+    handleFor(second, { needsCloseConfirmation: () => true, closeAll });
 
     const refused = request('workspace.close', { workspace: 'workspace:2' });
     await handleWorkspaceControl(refused);
@@ -339,7 +339,7 @@ it.each([
   ['move', { workspace: 'workspace:2', toWindow: 'new' }],
 ] as const)('answers a pending confirmation no as workspace.%s starts, even when it refuses', async (verb, params) => {
   createWorkspace({ id: 'ws-2', activate: false });
-  handleFor('ws-2', { runningCount: () => 1 });
+  handleFor('ws-2', { needsCloseConfirmation: () => true });
   setPlatform({} as unknown as PlatformAdapter);
   const confirmed = vi.fn();
   requestConfirmation({ id: 'ws-2', char: 'q', answer: confirmed });

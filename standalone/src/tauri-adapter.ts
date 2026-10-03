@@ -55,6 +55,7 @@ import type { TerminalSemanticEvent } from "dormouse-lib/lib/terminal-state";
 import {
   applyTerminalSemanticEvents,
 } from "dormouse-lib/lib/terminal-state-store";
+import { markSessionTouched } from "dormouse-lib/lib/terminal-lifecycle";
 import type { DorControlCancelPayload, DorControlRequestPayload } from "dor/protocol";
 import {
   cancelDorControlRequest,
@@ -175,6 +176,11 @@ export class TauriAdapter implements PlatformAdapter {
       // An OSC 52 write, offered to the copy editor; never the clipboard.
       listenToWindow<{ id: string; text: string }>("terminal:clipboardOffer", (event) => {
         offerProgramCopy(event.payload.id, event.payload.text);
+      }),
+
+      // A remote Client typed into this window's Session.
+      listenToWindow<{ id: string }>("terminal:clientInput", (event) => {
+        markSessionTouched(event.payload.id);
       }),
 
       listenToWindow<{ id: string; exitCode: number }>("pty:exit", (event) => {

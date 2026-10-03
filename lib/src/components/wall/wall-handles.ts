@@ -46,10 +46,9 @@ export interface WallHandle {
    *  launching, which a `--key` elsewhere in the Window must not mint again
    *  (docs/specs/dor-browser.md → "Managed identity"). */
   browserSessions(provider: BrowserAutomationProvider): string[];
-  /** Any member terminal Session the user has typed into (the close confirmation
-   *  gate, alongside `runningCount`). */
-  hasTouchedSurfaces(): boolean;
-  runningCount(): number;
+  /** Any member a user close would confirm (`closeKind` in
+   *  `lib/src/components/wall/close-kind.ts`): the Workspace close gate. */
+  needsCloseConfirmation(): boolean;
   /** Dirty reports consumed only by Tool-designated members, including Doors. */
   dirtyToolIds(): string[];
   /** Leave command selection on chrome and focus a live pane. */
@@ -134,8 +133,7 @@ export function stubWallHandle(workspaceId: WorkspaceId, overrides: Partial<Wall
     ownsSurface: () => false,
     iframeSurfaceRefs: () => [],
     browserSessions: () => [],
-    hasTouchedSurfaces: () => false,
-    runningCount: () => 0,
+    needsCloseConfirmation: () => false,
     dirtyToolIds: () => [],
     enterSelectedPane: () => {},
     enterCommandMode: () => {},

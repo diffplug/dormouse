@@ -41,6 +41,7 @@ export {
   getTerminalOverlayDims,
   getSessionInputVersion,
   isUntouched,
+  markSessionTouched,
   mountElement,
   writeUserInput,
   refitSession,
