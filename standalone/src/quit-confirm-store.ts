@@ -25,6 +25,9 @@ export interface QuitConfirmIntent {
    *  the download lives in the webview, so nothing else can install it
    *  (docs/specs/auto-update.md). Never set on a quit, which installs it. */
   discardsUpdate?: boolean;
+  /** This window holds something Reopen could not rebuild, so closing it loses
+   *  it for good (docs/specs/reopen.md). Only ever set on a window close. */
+  unreopenable?: boolean;
   /** The Surface that asked for a restart, which never counts as running work
    *  here (docs/specs/standalone.md → "Restart"). Only ever set on a quit. */
   requester?: string | null;

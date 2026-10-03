@@ -49,6 +49,7 @@ export function initWindowClose(adapter: TauriAdapter): void {
     flow.request({
       kind: "close-window",
       ...(hasPendingUpdate() ? { discardsUpdate: true } : {}),
+      ...(windowNeedsCloseConfirmation() ? { unreopenable: true } : {}),
     });
   });
 }

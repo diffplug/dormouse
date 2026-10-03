@@ -9,7 +9,7 @@ import { isRecord } from './is-record';
  * PTY's, the host's — with the ones the close just killed, and its `surface:N`
  * refs start over in the Workspace it reopens as.
  */
-export function withFreshSurfaceIds(session: PersistedSession, mint: () => string): PersistedSession {
+export function withFreshSurfaceIds(session: PersistedSession, mint = () => `pane-${crypto.randomUUID()}`): PersistedSession {
   const ids = new Map<string, string>();
   const fresh = (id: string): string => {
     let next = ids.get(id);

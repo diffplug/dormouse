@@ -96,7 +96,6 @@ export {
 export {
   applyTerminalSemanticEvents,
   countRunningSessions,
-  countRunningSessionsIn,
   ensureTerminalPaneState,
   fillTerminalProcessCwd,
   getRunningCommandWatchKey,

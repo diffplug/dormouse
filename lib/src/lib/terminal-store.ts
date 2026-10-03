@@ -70,6 +70,12 @@ export interface PendingShellOpts {
 
 export const registry = new Map<string, TerminalEntry>();
 
+/** Whether a helper Session may hold running work: anything short of the
+ *  host's answer that it is idle, unless it has exited. */
+export function helperMayBeBusy(entry: TerminalEntry): boolean {
+  return !entry.exited && entry.helperBusy !== false;
+}
+
 /** Human input reached this Session: it is no longer `untouched`, which is
  *  what lets a close skip its confirmation (`docs/specs/layout.md` → "Kill
  *  confirmation"). Here, beside the registry, so a host adapter can call it

@@ -14,11 +14,6 @@ export function windowNeedsCloseConfirmation(): boolean {
   return listWallHandles().some(handle => handle.needsCloseConfirmation());
 }
 
-/** A fresh Surface id for a rebuilt record. */
-export function mintSurfaceId(): string {
-  return `pane-${crypto.randomUUID()}`;
-}
-
 /**
  * This Window as the snapshot a reopened window boots from, or null when its
  * close is not reopenable. Every Workspace and Surface takes a fresh id, as a
@@ -36,7 +31,7 @@ export function windowReopenSnapshot(): PersistedWindow | null {
     if (!handle) return null;
     const id = generateWorkspaceId();
     fresh.set(workspace.id, id);
-    records.push({ id, name: workspace.name, nameIsAuto: workspace.nameIsAuto, session: withFreshSurfaceIds(handle.serializeReported(), mintSurfaceId) });
+    records.push({ id, name: workspace.name, nameIsAuto: workspace.nameIsAuto, session: withFreshSurfaceIds(handle.serializeReported()) });
   }
   if (records.length === 0) return null;
   return { version: 1, workspaces: records, activeWorkspaceId: fresh.get(activeId) ?? records[0].id };

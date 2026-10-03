@@ -59,7 +59,7 @@ async function probeCwds(
 }
 
 /** The Surfaces whose cwd a save probes: every non-browser pane and Door. */
-function cwdSurfaceIds(panes: SavePaneInput[], doors: PersistedDoor[]): string[] {
+export function cwdSurfaceIds(panes: SavePaneInput[], doors: PersistedDoor[]): string[] {
   const browser = new Map<string, boolean>();
   for (const pane of panes) browser.set(pane.id, pane.surfaceType === 'browser');
   for (const door of doors) browser.set(door.id, door.component === 'browser');

@@ -59,18 +59,14 @@ async function runReopenCommand(this: DorCommandContext, flags: ReopenFlags): Pr
 }
 
 function reopenedRef(response: ReopenResponse): string {
-  if (response.kind === 'surface') return response.surfaceRef ?? 'surface';
-  if (response.kind === 'workspace') return response.workspaceRef ?? 'workspace';
+  if (response.kind === 'surface') return response.surfaceRef;
+  if (response.kind === 'workspace') return response.workspaceRef;
   return 'window';
 }
 
 function renderReopenJson(response: ReopenResponse): string {
-  return renderJson({
-    status: response.status,
-    kind: response.kind,
-    ...(response.surfaceId !== undefined ? { surface_id: response.surfaceId } : {}),
-    ...(response.surfaceRef !== undefined ? { surface_ref: response.surfaceRef } : {}),
-    ...(response.workspaceId !== undefined ? { workspace_id: response.workspaceId } : {}),
-    ...(response.workspaceRef !== undefined ? { workspace_ref: response.workspaceRef } : {}),
-  });
+  const { status, kind } = response;
+  if (kind === 'surface') return renderJson({ status, kind, surface_id: response.surfaceId, surface_ref: response.surfaceRef });
+  if (kind === 'workspace') return renderJson({ status, kind, workspace_id: response.workspaceId, workspace_ref: response.workspaceRef });
+  return renderJson({ status, kind });
 }

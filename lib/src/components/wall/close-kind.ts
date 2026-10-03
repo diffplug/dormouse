@@ -1,6 +1,6 @@
 import { getHelper } from '../../lib/helper-terminal';
 import { getTerminalPaneState, isUntouched } from '../../lib/terminal-registry';
-import { registry } from '../../lib/terminal-store';
+import { helperMayBeBusy, registry } from '../../lib/terminal-store';
 import { getToolDirty } from '../../lib/tool-dirty-store';
 import { isToolParams, resolveRenderMode, surfaceKindFromParams, toolScopeFromParams } from './browser-surface';
 
@@ -25,7 +25,7 @@ function isTrivialShell(id: string): boolean {
   const helper = getHelper(id);
   if (!helper) return true;
   const helperEntry = registry.get(helper.id);
-  return helperEntry?.untouched === true && (helperEntry.exited === true || helperEntry.helperBusy === false);
+  return isUntouched(helper.id) && !!helperEntry && !helperMayBeBusy(helperEntry);
 }
 
 /**

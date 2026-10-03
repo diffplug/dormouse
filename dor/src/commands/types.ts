@@ -221,14 +221,11 @@ export interface AppRestartResponse {
 }
 
 /** What `dor reopen` brought back: a Surface, a Workspace, or a window. */
-export interface ReopenResponse {
-  status: 'reopened';
-  kind: 'surface' | 'workspace' | 'window';
-  surfaceId?: string;
-  surfaceRef?: string;
-  workspaceId?: string;
-  workspaceRef?: string;
-}
+export type ReopenResponse = { status: 'reopened' } & (
+  | { kind: 'surface'; surfaceId: string; surfaceRef: string }
+  | { kind: 'workspace'; workspaceId: string; workspaceRef: string }
+  | { kind: 'window' }
+);
 
 export interface SplitSurfaceRequest extends WorkspaceScopedRequest {
   /** The invoking directory, where the new Session starts; `surface` is placement only. */

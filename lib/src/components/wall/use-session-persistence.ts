@@ -2,7 +2,7 @@ import { DEFAULT_WORKSPACE_ID, readPersistedSession } from '../../lib/session-ty
 import { useCallback, useEffect, useMemo, useRef, type RefObject } from 'react';
 import { pasteFilePaths } from '../../lib/clipboard';
 import { getPlatform } from '../../lib/platform';
-import { assemblePersistedSession, buildPersistedSession, saveSession, type SaveOptions, type SaveSink } from '../../lib/session-save';
+import { assemblePersistedSession, buildPersistedSession, cwdSurfaceIds, saveSession, type SaveOptions, type SaveSink } from '../../lib/session-save';
 import { createSessionDirtyTracker } from '../../lib/session-dirty';
 import { previousWorkspaceSession, publishWorkspaceSession, workspaceSessionRevision, SESSION_SAVE_DEBOUNCE_MS } from '../../lib/window-session-aggregator';
 import { getWorkspace, setWorkspaceAlertDelivery, subscribeToWorkspaces, hasWorkspace } from '../../lib/workspace-store';
@@ -160,12 +160,13 @@ export function useSessionPersistence({
   }, [collect, sink, saveOptions]);
 
   const serializeReported = useCallback((include: (id: string) => boolean = () => true): PersistedSession => {
-    const { panes, doors, lathLayout, surfaceRefs } = collect();
-    const members = [...panes, ...doors].map(member => member.id).filter(include);
+    const collected = collect();
+    const panes = collected.panes.filter(pane => include(pane.id));
+    const doors = collected.doors.filter(door => include(door.id));
+    const cwds = Object.fromEntries(cwdSurfaceIds(panes, doors).map(id => [id, getInheritableCwd(id) ?? null]));
     return assemblePersistedSession(
-      panes.filter(pane => include(pane.id)), doors.filter(door => include(door.id)), lathLayout,
-      surfaceRefs?.refs, surfaceRefs?.next, sink?.previous() ?? null,
-      Object.fromEntries(members.map(id => [id, getInheritableCwd(id) ?? null])), saveOptions().alertDelivery,
+      panes, doors, collected.lathLayout, collected.surfaceRefs?.refs, collected.surfaceRefs?.next,
+      sink?.previous() ?? null, cwds, saveOptions().alertDelivery,
     );
   }, [collect, sink, saveOptions]);
 

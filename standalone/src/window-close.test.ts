@@ -126,7 +126,8 @@ describe("per-window close", () => {
 
     expect(getQuitConfirmPhase()).toBe("open");
     // The dialog says "close", not "quit".
-    expect(getQuitConfirmIntent()).toEqual({ kind: "close-window" });
+    // The dialog says why: Reopen could not bring this window back.
+    expect(getQuitConfirmIntent()).toEqual({ kind: "close-window", unreopenable: true });
     expect(adapter.gracefulKillPtys).not.toHaveBeenCalled();
 
     dismissDialog();
@@ -147,7 +148,7 @@ describe("per-window close", () => {
     await settle();
 
     expect(getQuitConfirmPhase()).toBe("open");
-    expect(getQuitConfirmIntent()).toMatchObject({ kind: "close-window", discardsUpdate: true });
+    expect(getQuitConfirmIntent()).toEqual({ kind: "close-window", discardsUpdate: true });
     expect(adapter.gracefulKillPtys).not.toHaveBeenCalled();
   });
 

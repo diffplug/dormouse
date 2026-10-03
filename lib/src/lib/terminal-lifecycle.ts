@@ -721,7 +721,6 @@ export function writeUserInput(id: string, data: string): void {
   getPlatform().writePty(id, data, { userInput: true });
 }
 
-
 /**
  * A non-terminal content surface's focus contract, so `focusSession` can drive
  * it like any xterm pane. The iframe surface registers one whose `focus` moves

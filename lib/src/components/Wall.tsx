@@ -674,6 +674,18 @@ export function Wall({
     setTerminalContext({ id, warning });
   }, []);
 
+  /** Selection after the selected Surface is killed: in command mode, the next
+   *  surviving Door of a kill gesture's neighbors, else the first live pane. */
+  const selectAfterKill = useCallback((doorNeighbors: string[] | null): void => {
+    const nextDoor = modeRef.current === 'command' && doorNeighbors
+      ? doorNeighbors.find(neighbor => doorsRef.current.some(door => door.id === neighbor)) ?? doorsRef.current[0]?.id
+      : null;
+    if (nextDoor) { selectDoor(nextDoor); return; }
+    const survivorId = lath.listPanes()[0]?.id ?? null;
+    if (survivorId) selectPane(survivorId);
+    else setSelectedId(null);
+  }, [selectDoor, selectPane, lath]);
+
   /** Tear a Surface down after its helper guard. */
   const killPaneImmediately = useCallback((id: string): void => {
     closeHelperParent(id);
@@ -701,15 +713,7 @@ export function Wall({
       removeDoor(id);
       // A kill gesture on the selected Door hands selection to its next
       // surviving neighbor, as a revealed Door's kill does below.
-      if (selectedIdRef.current === id && selectedTypeRef.current === 'door') {
-        const nextDoor = modeRef.current === 'command' && doorNeighbors
-          ? doorNeighbors.find(neighbor => doorsRef.current.some(item => item.id === neighbor)) ?? doorsRef.current[0]?.id
-          : null;
-        const survivorId = lath.listPanes()[0]?.id ?? null;
-        if (nextDoor) selectDoor(nextDoor);
-        else if (survivorId) selectPane(survivorId);
-        else setSelectedId(null);
-      }
+      if (selectedIdRef.current === id && selectedTypeRef.current === 'door') selectAfterKill(doorNeighbors);
       clearLocalSurfaceActivity(id);
       forgetSurfaceRef(id);
       fireEvent({ type: 'kill', id });
@@ -742,19 +746,11 @@ export function Wall({
       // `listPanes()`, so an earlier delete would let a `dor` projection re-mint a
       // fresh ref for the dying pane.
       forgetSurfaceRef(id);
-      if (wasSelectedPane) {
-        const nextDoor = modeRef.current === 'command' && doorNeighbors
-          ? doorNeighbors.find(neighbor => doorsRef.current.some(door => door.id === neighbor)) ?? doorsRef.current[0]?.id
-          : null;
-        if (nextDoor) { selectDoor(nextDoor); return; }
-        const survivorId = lath.listPanes()[0]?.id ?? null;
-        if (survivorId) selectPane(survivorId);
-        else setSelectedId(null);
-      }
+      if (wasSelectedPane) selectAfterKill(doorNeighbors);
     }, exitMs);
     clearLocalSurfaceActivity(id);
     fireEvent({ type: 'kill', id });
-  }, [fireEvent, forgetSurfaceRef, removeDoor, selectPane, selectDoor, lath, nav]);
+  }, [fireEvent, forgetSurfaceRef, removeDoor, selectAfterKill, lath, nav]);
 
   /** Push the reopen record of a Surface about to close (set below, once the
    *  serializer exists). */
@@ -882,9 +878,10 @@ export function Wall({
     }
   }, [selectDoor, lath]);
 
-  const addMinimizedSplitDoor = useCallback((referenceId: string, item: DooredItem, select: boolean) => {
-    const index = doorsRef.current.findIndex((door) => door.id === referenceId);
-    const insertAt = index >= 0 ? index + 1 : doorsRef.current.length;
+  /** Put a Door on the Baseboard at `index` (clamped), selecting it in command
+   *  mode when asked. */
+  const insertDoorAt = useCallback((index: number, item: DooredItem, select: boolean) => {
+    const insertAt = Math.min(index, doorsRef.current.length);
     const nextDoors = [
       ...doorsRef.current.slice(0, insertAt),
       item,
@@ -898,6 +895,11 @@ export function Wall({
       selectDoor(item.id);
     }
   }, [selectDoor]);
+
+  const addMinimizedSplitDoor = useCallback((referenceId: string, item: DooredItem, select: boolean) => {
+    const index = doorsRef.current.findIndex((door) => door.id === referenceId);
+    insertDoorAt(index >= 0 ? index + 1 : doorsRef.current.length, item, select);
+  }, [insertDoorAt]);
 
   /** Exit terminal mode */
   const exitTerminalMode = useCallback(() => {
@@ -1093,16 +1095,16 @@ export function Wall({
     const meta = lath.getMeta(id);
     const [pane] = persistence.serializeReported(member => member === id).panes;
     if (!meta || !pane) return;
-    const doorIndex = doorsRef.current.findIndex(door => door.id === id);
-    const token = doorIndex >= 0 ? doorsRef.current[doorIndex].token : removeFromTree(lath.store.getSnapshot().tree, id).token;
-    if (!token) return;
+    const index = doorsRef.current.findIndex(door => door.id === id);
+    const token = index < 0 ? removeFromTree(lath.store.getSnapshot().tree, id).token : null;
+    if (index < 0 && !token) return;
     pushReopenRecord({
       kind: 'surface',
       closedAt: Date.now(),
       workspaceId: effectiveWorkspaceId,
       pane,
       meta: persistableLeafMeta(meta),
-      placement: doorIndex >= 0 ? { kind: 'door', index: doorIndex, token } : { kind: 'pane', token: token as RestoreToken },
+      placement: token ? { kind: 'pane', token } : { kind: 'door', index, token: doorsRef.current[index].token },
     });
   };
 
@@ -1234,22 +1236,13 @@ export function Wall({
     const { placement } = record;
     if (placement.kind === 'door') {
       lath.store.addDoor(id, meta);
-      const index = Math.min(placement.index, doorsRef.current.length);
-      const token = { ...(placement.token as RestoreToken), leafId: id };
-      const nextDoors = [...doorsRef.current.slice(0, index), { id, token }, ...doorsRef.current.slice(index)];
-      doorsRef.current = nextDoors;
-      setDoors(nextDoors);
-      if (focus) {
-        modeRef.current = 'command';
-        setMode('command');
-        selectDoor(id);
-      }
+      insertDoorAt(placement.index, { id, token: { ...(placement.token as RestoreToken), leafId: id } }, focus);
     } else {
       restoreFromToken(id, meta, { ...placement.token, leafId: id });
       if (focus) enterTerminalMode(id);
     }
     return { id, ref };
-  }, [generatePaneId, surfaceRefForId, restoreFromToken, enterTerminalMode, selectDoor, lath]);
+  }, [generatePaneId, surfaceRefForId, restoreFromToken, enterTerminalMode, insertDoorAt, lath]);
 
   /** A Door click, or a pin in its popover: reattach into passthrough, a human
    *  gesture that acknowledges the Session. */
