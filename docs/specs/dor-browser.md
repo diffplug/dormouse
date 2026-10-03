@@ -186,7 +186,18 @@ where it does not; always `iframe`; for a Tool, only its declarable renders
 other mode.** Screencast resolution is Resize with pane or Fixed size; device
 emulation is CLI-only.
 
-**Resize with pane is owned by the host** (rationale):
+**Resize with pane is owned by the host** (rationale), which reports each
+engagement's state to its panes:
+
+```mermaid
+stateDiagram-v2
+  [*] --> applying: first size of an engagement
+  applying --> synced: viewport taken after the write matches
+  synced --> applying: new size, page shown anew, or new engagement
+  applying --> off: another writer, or Fixed
+  synced --> off: another writer, or Fixed
+  off --> applying: new engagement
+```
 
 - **Must send the pane's laid-out CSS size — never `getBoundingClientRect()`,
   which a Workspace presentation scales — and display ratio over the viewer
@@ -200,8 +211,8 @@ emulation is CLI-only.
   provider vouches for it: agent-browser's changed frames, Playwright's poll
   measurement; never `status`, Playwright's screencast metadata, or the ratio
   (rationale). **One still differing a settle window later, with no write
-  since, is another writer's**: the host stops that browser's sync, reports
-  `off`, and writes no later size of that engagement. **A page shown anew (the
+  since, is another writer's**, and no later size of that engagement is
+  written. **A page shown anew (the
   active tab) is written, never judged.**
 - **A Fixed viewport ends the browser's sync**, after its write in flight;
   **refused if a launch or close of that browser began meanwhile, or the host
