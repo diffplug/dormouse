@@ -8,7 +8,7 @@ import { deriveSessionLabels } from './session-label';
 import { getTerminalPaneStateSnapshot, subscribeToTerminalPaneState } from './terminal-state-store';
 import { getWorkspace, getWorkspacesSnapshot } from './workspace-store';
 import { getWorkspaceSurfacesSnapshot } from './workspace-surfaces';
-import { getPendingKills, pendingKillSessionIds, subscribeToPendingKills } from './pending-kills';
+import { getPendingKills, pendingKillSessionIds } from './pending-kills';
 
 /**
  * This realm's half of ring delivery (`docs/specs/alert.md` -> Alarm
@@ -51,7 +51,6 @@ function publishAlertSessions(send: (sessions: Record<string, AlertSessionInfo>)
   let stale: Set<string> | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let dueAt = 0;
-  let pendingKey = '';
 
   function schedule(delayMs: number): void {
     const at = Date.now() + delayMs;
@@ -112,13 +111,6 @@ function publishAlertSessions(send: (sessions: Record<string, AlertSessionInfo>)
 
   const stops = [
     subscribeToAlertDeliveryPolicy(() => schedule(0)),
-    // Holding a countdown changes nothing published: only which kills are pending.
-    subscribeToPendingKills(() => {
-      const key = getPendingKills().map(kill => `${kill.kind}:${kill.id}`).join();
-      if (key === pendingKey) return;
-      pendingKey = key;
-      schedule(0);
-    }),
     subscribeToTerminalPaneState(labelMayChange),
     subscribeToActivity(labelMayChange),
   ];

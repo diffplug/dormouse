@@ -174,6 +174,18 @@ describe("per-window close", () => {
     expect(getQuitConfirmPhase()).toBe("open");
   });
 
+  it("closes anyway when a pending kill's finalize fails", async () => {
+    const { addPendingKill } = await import("dormouse-lib/lib/pending-kills");
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    addPendingKill({ kind: "surface", id: "p", workspaceId: "w1", title: "t", label: "Terminal" }, {
+      restore: vi.fn(), finalize: () => { throw new Error("Helper promotion is in progress"); },
+    });
+    initWindowClose(fakeAdapter());
+    closeRequested();
+    await settle();
+    expect(commands()).toContain("close_window");
+  });
+
   it("closes anyway when a teardown step rejects", async () => {
     const adapter = {
       gracefulKillPtys: vi.fn(async () => { throw new Error("SIGTERM refused"); }),

@@ -79,7 +79,8 @@ function restoredResponse(kill: PendingKill): ReopenResponse {
   if (kill.kind === 'workspace') {
     return { status: 'reopened', kind: 'workspace', workspaceId: kill.id, workspaceRef: workspaceRefFor(kill.id) };
   }
-  return { status: 'reopened', kind: 'surface', surfaceId: kill.id, surfaceRef: kill.ref ?? kill.id };
+  // A helper comes back on its parent, the Surface a caller can name.
+  return { status: 'reopened', kind: 'surface', surfaceId: kill.surfaceId ?? kill.id, surfaceRef: kill.ref ?? kill.id };
 }
 
 /** `dor reopen` (`window.reopen`): focus-neutral, and an empty stack refuses. */

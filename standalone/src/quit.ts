@@ -1,6 +1,10 @@
 import { invoke } from "@tauri-apps/api/core";
 import { flushWindowSession } from "dormouse-lib/lib/window-session-aggregator";
 import { finalizePendingKills } from "dormouse-lib/lib/pending-kills";
+
+/** A pending Workspace closes its members before the capture; bounded so it
+ *  never holds the quit. */
+const PENDING_KILL_FINALIZE_MS = 2000;
 import { DEFAULT_RECOVERY_WAIT_MS } from "dormouse-lib/host/recovery-capture";
 import type { TauriAdapter } from "./tauri-adapter";
 import { dismissQuitConfirm, quitRunningWork } from "./quit-confirm-store";
@@ -112,7 +116,8 @@ async function runQuitTeardown(last: boolean): Promise<void> {
     void invoke("quit_progress").catch(() => {}); // teardown phase begins
     // Nothing pending survives a quit, nor is captured for resume
     // (docs/specs/reopen.md → "Labs: No-confirm delayed kill").
-    finalizePendingKills();
+    await withTimeout(finalizePendingKills(undefined, { teardown: true }), PENDING_KILL_FINALIZE_MS,
+      `[quit] pending kills took over ${PENDING_KILL_FINALIZE_MS}ms; proceeding`);
     if (adapter) {
       await withTimeout(
         (async () => {

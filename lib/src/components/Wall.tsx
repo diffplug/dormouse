@@ -74,7 +74,7 @@ import { registerWallHandle, type WallHandle } from './wall/wall-handles';
 import { prepareWorkspaceTransfer } from './wall/workspace-transfer';
 import { installDorControlRouter } from './wall/dor-control-router';
 import { reopenClosed } from './wall/reopen';
-import { addPendingKill, finalizePendingKills, isOwnPendingKill, type PendingKill } from '../lib/pending-kills';
+import { addPendingKill, finalizePendingKills, isOwnPendingKill, pendingKillKey, restorePendingKill, type PendingKill } from '../lib/pending-kills';
 import { isDelayedKillEnabled } from '../lib/labs-settings';
 import { remove as removeFromTree, type DropTarget, type RestoreToken } from '../lib/lath/ops';
 import { pushReopenRecord, type SurfaceReopenRecord } from '../lib/reopen-stack';
@@ -1311,6 +1311,9 @@ export function Wall({
       label: SURFACE_KIND_LABEL[kind],
     }, {
       restore: (focus) => {
+        // Its Workspace went pending after it did: that comes back first, or
+        // this would return to a Wall nobody can see.
+        restorePendingKill(pendingKillKey('workspace', effectiveWorkspaceId), focus);
         if (focus) setActiveWorkspace(effectiveWorkspaceId);
         if (doorIndex >= 0) {
           insertDoorAt(doorIndex, { id, token }, focus);

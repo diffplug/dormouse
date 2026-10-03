@@ -65,6 +65,20 @@ describe('PendingKillOverlay', () => {
     expect(list.style.minHeight).toBe('');
   });
 
+  it('releases a held entry pushed into the +N row, which no pointer can leave', () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      for (const id of ['a', 'b', 'c']) { vi.advanceTimersByTime(5); pend(id); }
+      const oldest = entries().find(entry => entry.dataset.pendingKill === 'surface:a')!;
+      act(() => oldest.dispatchEvent(new PointerEvent('pointerover', { bubbles: true })));
+      expect(getPendingKills().find(kill => kill.id === 'a')!.resumedAt).toBeNull();
+      vi.advanceTimersByTime(5);
+      pend('d');
+    } finally { vi.useRealTimers(); }
+    expect(entries().map(entry => entry.dataset.pendingKill)).not.toContain('surface:a');
+    expect(getPendingKills().find(kill => kill.id === 'a')!.resumedAt).not.toBeNull();
+  });
+
   it('thaws when its last entry leaves under the pointer', () => {
     pend('a');
     const list = container.querySelector<HTMLElement>('ol')!;

@@ -23,6 +23,7 @@ import * as uiGeometry from '../lib/ui-geometry';
 import { LATH_MOTION_MS } from '../lib/lath/animator';
 import { closeWorkspaceWithSurfaces, requestWorkspaceClose } from './wall/workspace-lifecycle';
 import * as terminalRegistry from '../lib/terminal-registry';
+import * as helperTerminal from '../lib/helper-terminal';
 import { setPlatform } from '../lib/platform';
 import { FakePtyAdapter } from '../lib/platform/fake-adapter';
 import { getActivitySnapshot, setTerminalActivity } from '../lib/terminal-registry';
@@ -1401,6 +1402,49 @@ describe('Labs: a Workspace close that would ask, kept pending', () => {
     expect(getWorkspacesSnapshot().workspaces.map(ws => ws.id)).toEqual([first, 'ws-2', 'ws-3']);
     expect(getActiveWorkspaceId()).toBe('ws-2');
     expect(leafIdsIn('ws-2')).toEqual(leaves);
+  });
+
+  it('brings a pending Workspace back first when restoring a Surface pended inside it', async () => {
+    const first = getActiveWorkspaceId();
+    createWorkspace({ id: 'ws-2', name: 'build' });
+    await render(<><WorkspaceStrip /><WorkspaceWindow initialPaneIds={['pane-a']} /></>);
+    const [leaf] = leafIdsIn('ws-2');
+    await act(async () => {
+      wallFor('ws-2').querySelector<HTMLButtonElement>(`[data-lath-leaf="${leaf}"] button[aria-label="Kill"]`)!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flush();
+    await act(async () => { requestWorkspaceClose('ws-2'); });
+    await flush();
+    expect(getWorkspacesSnapshot().workspaces.map(ws => ws.id)).toEqual([first]);
+    await act(async () => { restorePendingKill(pendingKillKey('surface', leaf)); });
+    await flush();
+    expect(getWorkspacesSnapshot().workspaces.map(ws => ws.id)).toEqual([first, 'ws-2']);
+    expect(getActiveWorkspaceId()).toBe('ws-2');
+    expect(leafIdsIn('ws-2')).toContain(leaf);
+  });
+
+  it('asks as before, pending nothing, when a member\'s helper runs a command', async () => {
+    vi.spyOn(helperTerminal, 'getHelper').mockImplementation(id => id.startsWith('pane') ? { id: 'helper', parentId: id, command: '', status: 'running' } : undefined);
+    vi.spyOn(helperTerminal, 'helperHasWork').mockResolvedValue(true);
+    createWorkspace({ id: 'ws-2', name: 'build', activate: false });
+    await render(<><WorkspaceStrip /><WorkspaceWindow initialPaneIds={['pane-a']} /></>);
+    await act(async () => { requestWorkspaceClose('ws-2'); });
+    await flush();
+    expect(getPendingKills()).toEqual([]);
+    expect(getWorkspaceUiSnapshot().confirmation?.id).toBe('ws-2');
+  });
+
+  it('takes back the unused replacement for a pended last Workspace when it returns', async () => {
+    const only = getActiveWorkspaceId();
+    await render(<><WorkspaceStrip /><WorkspaceWindow initialPaneIds={['pane-a']} /></>);
+    // The replacement's own shell reads as untouched: nobody has used it.
+    vi.spyOn(terminalRegistry, 'isUntouched').mockImplementation(id => !leafIdsIn(only).includes(id));
+    await act(async () => { requestWorkspaceClose(only); });
+    await flush();
+    const [replacement] = getWorkspacesSnapshot().workspaces.map(ws => ws.id);
+    expect(replacement).not.toBe(only);
+    await act(async () => { restorePendingKill(pendingKillKey('workspace', only)); });
+    await act(async () => { await vi.waitFor(() => expect(getWorkspacesSnapshot().workspaces.map(ws => ws.id)).toEqual([only])); });
   });
 
   it('closes through every member Surface when finalized, then lets its Wall go', async () => {

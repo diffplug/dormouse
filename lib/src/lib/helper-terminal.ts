@@ -132,11 +132,15 @@ export function detachHelper(parentId: string): HelperTerminal | undefined {
 }
 
 /** Put a detached helper back on its parent, ending the one that replaced it.
- *  False when the parent has closed or its helper is being promoted. */
+ *  False when the parent has closed, or the replacement holds anything a
+ *  discard would lose: user input, a running command, a promotion. */
 export function reattachHelper(helper: HelperTerminal): boolean {
   const { parentId } = helper;
-  if (!parentIsOpen(parentId) || !registry.has(helper.id) || helpers.get(parentId)?.promoting) return false;
-  if (helpers.has(parentId)) disposeHelper(parentId);
+  if (!parentIsOpen(parentId) || !registry.has(helper.id)) return false;
+  const replacement = helpers.get(parentId);
+  const entry = replacement && registry.get(replacement.id);
+  if (replacement && (replacement.promoting || entry?.untouched === false || getTerminalPaneState(replacement.id).currentCommand)) return false;
+  if (replacement) disposeHelper(parentId);
   installHelper(helper);
   return true;
 }
@@ -146,12 +150,21 @@ export function reattachHelper(helper: HelperTerminal): boolean {
  * pending kill instead, which a restore puts back in place of the fresh one
  * (`docs/specs/reopen.md` → "Labs: No-confirm delayed kill").
  */
-export function resetHelper(parentId: string, workspaceId: WorkspaceId, parentTitle: string): void {
+export function resetHelper(parentId: string, parent: { workspaceId: WorkspaceId; title: string; ref: string }): void {
   if (!isDelayedKillEnabled()) { disposeHelper(parentId); return; }
   const old = detachHelper(parentId);
-  if (!old) return;
-  addPendingKill({ kind: 'helper', id: old.id, workspaceId, title: parentTitle, label: 'Helper' }, {
-    restore: () => { if (!reattachHelper(old)) disposeSession(old.id); },
+  if (old) pendHelper(old, parent);
+}
+
+function pendHelper(old: HelperTerminal, parent: { workspaceId: WorkspaceId; title: string; ref: string }): void {
+  addPendingKill({ kind: 'helper', id: old.id, workspaceId: parent.workspaceId, ref: parent.ref, surfaceId: old.parentId, title: parent.title, label: 'Helper' }, {
+    restore: () => {
+      if (reattachHelper(old)) return;
+      // A closed parent leaves nothing to return to; a replacement with work
+      // of its own is not discarded for it, so the old one stays pending.
+      if (parentIsOpen(old.parentId) && registry.has(old.id)) pendHelper(old, parent);
+      else disposeSession(old.id);
+    },
     finalize: () => disposeSession(old.id),
   });
 }

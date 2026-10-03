@@ -17,6 +17,7 @@ import { recordToolDirty, resetToolDirty } from '../../lib/tool-dirty-store';
 import { mountWallHarness, type WallHarness } from './wall-test-utils';
 import { getWallHandle } from './wall-handles';
 import { reopenClosed } from './reopen';
+import { _resetPendingKillsForTesting, addPendingKill } from '../../lib/pending-kills';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -260,6 +261,16 @@ describe('Reopen', () => {
     });
     await expect(reopenClosed({ gesture: false })).rejects.toThrow('is still mounting');
     expect(_reopenRecordsForTesting()).toHaveLength(1);
+  });
+
+  it('answers a restored pending helper with the parent it went back on', async () => {
+    await renderTerminalBesideBrowser();
+    addPendingKill({ kind: 'helper', id: 'helper-x', workspaceId: DEFAULT_WORKSPACE_ID, ref: 'surface:1', surfaceId: 'pane-a', title: 'shell', label: 'Helper' }, { restore: () => {}, finalize: () => {} });
+    try {
+      expect((await control(WINDOW_CONTROL_METHODS.reopen)).result).toEqual({ status: 'reopened', kind: 'surface', surfaceId: 'pane-a', surfaceRef: 'surface:1' });
+    } finally {
+      _resetPendingKillsForTesting();
+    }
   });
 
   it('says so briefly when `u` finds nothing to reopen', async () => {

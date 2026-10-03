@@ -26,6 +26,7 @@ import { ManagedVoiceSection, useManagedVoiceOffered } from './ManagedVoiceSecti
 import { getPlatform } from '../lib/platform';
 import { getShellsSnapshot, subscribeToShells } from '../lib/shell-store';
 import { getDelayedKillSetting, labsAvailable, setDelayedKillSetting, subscribeToLabsSettings } from '../lib/labs-settings';
+import { PENDING_KILL_MS } from '../lib/pending-kills';
 import {
   getAlertSettings,
   getPushDevices,
@@ -466,7 +467,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                   <SwitchRow label="No-confirm delayed kill" on={delayedKill} onChange={setDelayedKillSetting} />
                   <div className={`${UNDER_SWITCH_INDENT} mt-1 text-sm leading-relaxed text-muted`}>
                     Closing something that would ask first closes it at once instead, and keeps
-                    it running for ten seconds in the corner, where a click brings it back.
+                    it running for {PENDING_KILL_MS / 1000} seconds in the corner, where a click brings it back.
                   </div>
                 </section>
               </TopicSection>

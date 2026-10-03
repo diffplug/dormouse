@@ -1,5 +1,5 @@
 import { XIcon } from '@phosphor-icons/react';
-import { useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import {
   finalizePendingKill, getPendingKills, holdPendingKill, PENDING_KILL_MS, pendingKillKey, pendingKillProgress,
   restorePendingKill, subscribeToPendingKills, type PendingKill,
@@ -44,6 +44,9 @@ export function PendingKillOverlay() {
 
 function PendingKillEntry({ kill }: { kill: PendingKill }) {
   const key = pendingKillKey(kill.kind, kill.id);
+  // An entry pushed into the `+N` row leaves with no pointerleave: never strand
+  // its countdown held.
+  useEffect(() => () => holdPendingKill(key, false), [key]);
   return (
     <li
       className={`${POPUP_SURFACE_CLASS} pointer-events-auto relative flex items-center overflow-hidden`}

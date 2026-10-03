@@ -128,14 +128,16 @@ describe("quit orchestrator", () => {
     expect(mocks.invoke).toHaveBeenCalledWith("quit_proceed");
   });
 
-  it("finalizes every pending kill before the agent capture, so none is resumed", async () => {
-    const finalize = vi.fn();
-    addPendingKill({ kind: "surface", id: "pending", workspaceId: "w1", title: "t", label: "Terminal" }, { restore: vi.fn(), finalize });
-    const adapter = fakeAdapter();
-    vi.mocked(adapter.captureAgentRecovery).mockImplementation(async () => { expect(finalize).toHaveBeenCalledOnce(); });
+  it("finalizes every pending kill, a Workspace's closing included, before the agent capture", async () => {
+    const order: string[] = [];
+    // A pending Workspace's finalize closes its members asynchronously.
+    const finalize = vi.fn(async () => { await new Promise((r) => setTimeout(r, 5)); order.push("finalized"); });
+    addPendingKill({ kind: "workspace", id: "w2", workspaceId: "w2", title: "t", label: "Workspace" }, { restore: vi.fn(), finalize });
+    const adapter = fakeAdapter(order);
     await triggerQuit(adapter);
-    expect(finalize).toHaveBeenCalledOnce();
-    expect(adapter.captureAgentRecovery).toHaveBeenCalled();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(finalize).toHaveBeenCalledWith(true);
+    expect(order.slice(0, 2)).toEqual(["finalized", "captureRecovery"]);
   });
 
   it("runs teardown steps capture → flush → kill → flush → window → drain → install → proceed in order", async () => {

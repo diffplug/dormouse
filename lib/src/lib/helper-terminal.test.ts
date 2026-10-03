@@ -39,13 +39,32 @@ describe('helper lifecycle', () => {
     vi.spyOn(labs, 'isDelayedKillEnabled').mockReturnValue(true);
     try {
       const old = await openHelper('parent');
-      resetHelper('parent', 'ws', 'shell');
+      resetHelper('parent', { workspaceId: 'ws', title: 'shell', ref: 'surface:1' });
       expect(registry.has(old.id)).toBe(true);
       expect(pending.getPendingKills().map(kill => [kill.kind, kill.id])).toEqual([['helper', old.id]]);
       const fresh = await openHelper('parent');
       pending.restorePendingKill(pending.pendingKillKey('helper', old.id));
       expect(getHelper('parent')).toBe(old);
       expect(registry.has(fresh.id)).toBe(false);
+    } finally {
+      pending._resetPendingKillsForTesting();
+      vi.restoreAllMocks();
+    }
+  });
+
+  it('keeps the old helper pending rather than discard a replacement holding user input', async () => {
+    const labs = await import('./labs-settings');
+    const pending = await import('./pending-kills');
+    vi.spyOn(labs, 'isDelayedKillEnabled').mockReturnValue(true);
+    try {
+      const old = await openHelper('parent');
+      resetHelper('parent', { workspaceId: 'ws', title: 'shell', ref: 'surface:1' });
+      const fresh = await openHelper('parent');
+      registry.get(fresh.id)!.untouched = false;
+      pending.restorePendingKill(pending.pendingKillKey('helper', old.id));
+      expect(getHelper('parent')).toBe(fresh);
+      expect(registry.has(old.id)).toBe(true);
+      expect(pending.getPendingKills().map(kill => kill.id)).toEqual([old.id]);
     } finally {
       pending._resetPendingKillsForTesting();
       vi.restoreAllMocks();

@@ -76,6 +76,6 @@ Source of truth: `closeWorkspaceWithSurfaces` in `lib/src/components/wall/worksp
 - **Must silence alerts from pending Sessions and omit them from `dor` listings and Clients**; a `dor` target naming one, by id or the ref it keeps, fails as a pending kill.
 - **Must count pending running work in the quit and window-close gates, then finalize every pending kill as either tears down.** A Workspace leaving for another window or closing finalizes its own. Nothing pending is persisted, so none survives a restart.
 
-**The overlay** stacks pending kills in the window's bottom-right corner, above the Baseboard, newest on top. Each entry shows the Surface's title and kind, a bar filling toward the kill, restore on click, and kill now. **The countdown is 10 s and holds while the pointer rests on its entry**; past 3 entries the rest collapse to a `+N` row. (rationale)
+**The overlay** stacks pending kills in the window's bottom-right corner, above the Baseboard, newest on top. Each entry shows the Surface's title and kind, a bar filling toward the kill, restore on click, and kill now. **A countdown holds while the pointer rests on its entry**; past a few entries the rest collapse to a `+N` row. (rationale)
 
 Source of truth: `lib/src/lib/pending-kills.ts`; `pendKillRef` in `lib/src/components/Wall.tsx`; `pendWorkspace` in `lib/src/components/wall/workspace-lifecycle.ts`; `resetHelper` in `lib/src/lib/helper-terminal.ts`; `lib/src/components/PendingKillOverlay.tsx`; `lib/src/lib/labs-settings.ts`.

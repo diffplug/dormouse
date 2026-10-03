@@ -20,8 +20,11 @@ export interface PendingKill {
   id: string;
   /** The Workspace it belongs to, or is. */
   workspaceId: WorkspaceId;
-  /** The `surface:N` a `dor` caller may still name it by. */
+  /** The `surface:N` a `dor` caller may still name it by; a helper's is its
+   *  parent's. */
   ref?: string;
+  /** The public Surface a restore brings back: a helper's parent. */
+  surfaceId?: string;
   title: string;
   /** What it is, as the overlay names it. */
   label: string;
@@ -36,8 +39,9 @@ export interface PendingKill {
 export interface PendingKillActions {
   /** Bring it back as it was; `focus` brings it into view, as a gesture does. */
   restore(focus: boolean): void;
-  /** End it through today's kill path. */
-  finalize(): void;
+  /** End it through today's kill path, settling once it has. `teardown` is a
+   *  quit or window close, where nothing may come back instead. */
+  finalize(teardown: boolean): void | Promise<void>;
 }
 
 type Entry = { kill: PendingKill; actions: PendingKillActions };
@@ -111,13 +115,28 @@ export function restorePendingKill(key: string, focus = true): boolean {
 }
 
 export function finalizePendingKill(key: string): boolean {
-  return settle(key, actions => actions.finalize());
+  return settle(key, actions => { void runFinalize(actions, false); });
 }
 
-/** Finalize every pending kill `which` keeps (all of them by default): a quit,
- *  a window close, a Workspace leaving. */
-export function finalizePendingKills(which: (kill: PendingKill) => boolean = () => true): void {
-  for (const [key, { kill }] of [...entries.entries()]) if (which(kill)) finalizePendingKill(key);
+/** One finalize, its failure logged rather than stopping its caller. */
+async function runFinalize(actions: PendingKillActions, teardown: boolean): Promise<void> {
+  try {
+    await actions.finalize(teardown);
+  } catch (error) {
+    console.warn('[pending-kill] finalize failed', error);
+  }
+}
+
+/** Finalize every pending kill `which` keeps, settling once all have: a
+ *  Workspace leaving, or — every one, as `teardown` — a quit or window close. */
+export async function finalizePendingKills(
+  which: (kill: PendingKill) => boolean = () => true,
+  { teardown = false }: { teardown?: boolean } = {},
+): Promise<void> {
+  const due = [...entries.entries()].filter(([, { kill }]) => which(kill));
+  for (const [key] of due) entries.delete(key);
+  if (due.length) publish();
+  await Promise.all(due.map(([, { actions }]) => runFinalize(actions, teardown)));
 }
 
 /** Hold or release one countdown, as the pointer over its entry does. */

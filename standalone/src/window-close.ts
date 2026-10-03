@@ -60,9 +60,10 @@ async function runCloseTeardown(): Promise<void> {
   // First, while every Session is still here to read: the closing webview
   // dies, so the host keeps the record (docs/specs/reopen.md).
   await pushReopenRecord().catch((err) => console.warn("[window-close] no reopen record; proceeding", err));
-  // Nothing pending outlives its window (docs/specs/reopen.md).
-  finalizePendingKills();
   try {
+    // Nothing pending outlives its window (docs/specs/reopen.md).
+    await withTimeout(finalizePendingKills(undefined, { teardown: true }), GRACEFUL_KILL_MS,
+      `[window-close] pending kills took over ${GRACEFUL_KILL_MS}ms; closing anyway`);
     // Remove the snapshot BEFORE the kill, so an exit-triggered save cannot
     // write it back: Rust refuses every later save for this label.
     await invoke("remove_window_session").catch((err) =>

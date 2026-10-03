@@ -6,6 +6,7 @@ import { forgetWorkspaceSession, isWorkspaceTransferPending } from '../../lib/wi
 import { cancelPendingConfirmation, dismissWorkspaceUi, requestConfirmation, setRenamingWorkspace, type WorkspaceConfirmation } from '../../lib/workspace-ui-store';
 import { closeWorkspace, createWorkspace, getActiveWorkspaceId, getWorkspacesSnapshot, moveWorkspace, setActiveWorkspace, workspaceRefFor } from '../../lib/workspace-store';
 import { addPendingKill } from '../../lib/pending-kills';
+import { getHelper, helperHasWork } from '../../lib/helper-terminal';
 import { isDelayedKillEnabled } from '../../lib/labs-settings';
 import type { PersistedSession, WorkspaceId } from '../../lib/session-types';
 import { pushReopenRecord, type WorkspaceReopenRecord } from '../../lib/reopen-stack';
@@ -148,7 +149,11 @@ async function closeOnceWallRegisters(id: WorkspaceId, isCurrent: () => boolean)
   if (closeInFlight || isWorkspaceTransferPending(id)) return;
   if (!handle) return;
   if (workspaceNeedsCloseConfirmation(id)) {
-    if (isDelayedKillEnabled()) { pendWorkspace(id); return; }
+    // Running helper work refuses a close outright; it is no pending kill.
+    if (isDelayedKillEnabled() && !await helpersHaveWork(handle.surfaceIds())) {
+      if (isCurrent() && !closeInFlight) pendWorkspace(id);
+      return;
+    }
     // An immediate close reveals the Workspace itself.
     setActiveWorkspace(id);
     handle.selectWorkspaceTab();
@@ -186,6 +191,12 @@ export function subscribeToHeldWorkspaces(listener: () => void): () => void {
  * it or the user restores it (`docs/specs/reopen.md` → "Labs: No-confirm
  * delayed kill").
  */
+async function helpersHaveWork(ids: readonly string[]): Promise<boolean> {
+  const helpers = ids.flatMap(id => getHelper(id) ?? []);
+  const busy = await Promise.all(helpers.map(helper => helperHasWork(helper).catch(() => true)));
+  return busy.includes(true);
+}
+
 function pendWorkspace(id: WorkspaceId): void {
   const { workspaces } = getWorkspacesSnapshot();
   const index = workspaces.findIndex(workspace => workspace.id === id);
@@ -194,6 +205,8 @@ function pendWorkspace(id: WorkspaceId): void {
   setHeld([...held, id]);
   // Its record goes with it: nothing pending survives a restart.
   dropFromStrip(id, true);
+  // The last Workspace leaving left a fresh replacement in its place.
+  const replacement = workspaces.length === 1 ? getActiveWorkspaceId() : null;
   const release = () => setHeld(held.filter(heldId => heldId !== id));
   const restore = (focus: boolean) => {
     createWorkspace({ ...meta, activate: focus });
@@ -202,18 +215,20 @@ function pendWorkspace(id: WorkspaceId): void {
     // Back on the strip: its record is written again.
     void getWallHandle(id)?.flushPersistence();
     if (focus) getWallHandle(id)?.selectWorkspaceTab();
+    // A replacement nobody has used goes again, as if it never came.
+    const unused = replacement !== null ? getWallHandle(replacement) : null;
+    if (unused && unused.surfaceIds().length <= 1 && !unused.needsCloseConfirmation()) void closeWorkspaceWithSurfaces(replacement!, 'silent');
   };
   addPendingKill({ kind: 'workspace', id, workspaceId: id, title: meta.name, label: 'Workspace' }, {
     restore,
-    finalize: () => {
+    finalize: async (teardown) => {
       const handle = getWallHandle(id);
-      if (!handle) { release(); return; }
       // Unsaved Tool edits are discarded: the pending kill was the decision.
-      void handle.closeAll(handle.dirtyToolIds()).then(refusal => {
-        // Work that refuses to close (a helper's) brings the Workspace back to say so.
-        if (refusal) { restore(true); return; }
-        release();
-      });
+      const refusal = handle ? await handle.closeAll(handle.dirtyToolIds()) : null;
+      // Work that refuses to close (a helper's) brings the Workspace back to
+      // say so, except when the window is going anyway.
+      if (refusal && !teardown) restore(false);
+      else release();
     },
   });
 }
