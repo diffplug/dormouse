@@ -86,7 +86,6 @@ import {
   browserDisplayModeFromParams,
   retainsLivePage,
   browserUrlFromParams,
-  isBrowserParams,
   surfaceKindFromParams,
   isPreviewSlotParams, isToolParams, matchesToolKey, namespacedToolKey, toolPendingFromParams,
 } from './wall/browser-surface';
@@ -949,11 +948,7 @@ export function Wall({
   );
 
   /** A member whose live document cannot leave its webview: a move reopens it. */
-  const isIframeSurface = useCallback((id: string): boolean => {
-    const params = lath.getMeta(id)?.params;
-    return (isBrowserParams(params) || (isToolParams(params) && browserUrlFromParams(params) !== null))
-      && resolveRenderMode(params) === 'iframe';
-  }, [lath]);
+  const isIframeSurface = useCallback((id: string): boolean => retainsLivePage(lath.getMeta(id)?.params), [lath]);
 
   /** The members whose live document a move between Windows cannot carry, by
    *  the ref a `dor` caller can act on. */

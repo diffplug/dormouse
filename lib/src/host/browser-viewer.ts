@@ -233,7 +233,6 @@ export class BrowserView implements ViewerSink {
   // What the socket last carried, which is what the webview's canvas shows.
   private last: { kind: ViewerFrameKind; jpeg: Uint8Array; message: Uint8Array } | null = null;
   private size: { width: number; height: number } | undefined;
-  private provisionalUntil = -Infinity;
   private lastInput = -Infinity;
   // The current burst of changed frames: when it began, and its latest.
   private burstStart = -Infinity;
@@ -288,7 +287,6 @@ export class BrowserView implements ViewerSink {
    *  host editing op). */
   openProvisionalWindow(): void {
     this.lastInput = performance.now();
-    this.provisionalUntil = this.lastInput + PROVISIONAL_INPUT_WINDOW_MS;
   }
 
   // --- the provider's sink ---
@@ -301,7 +299,7 @@ export class BrowserView implements ViewerSink {
     if (now - this.lastChange > SETTLE_MS) this.burstStart = now;
     this.lastChange = now;
     // In motion, a frame is newer than any capture already running.
-    const forInput = !this.last || !this.capturable || now <= this.provisionalUntil || this.moving(now);
+    const forInput = !this.last || !this.capturable || now <= this.provisionalUntil() || this.moving(now);
     if (forInput || this.captureOverdue(now)) {
       this.send('provisional', jpeg);
       if (forInput) this.provisionalGeneration += 1;
@@ -383,6 +381,11 @@ export class BrowserView implements ViewerSink {
     return Math.max(2 * this.avgMs, OVERDUE_FLOOR_MS);
   }
 
+  /** When the input window closes. */
+  private provisionalUntil(): number {
+    return this.lastInput + PROVISIONAL_INPUT_WINDOW_MS;
+  }
+
   /** Changed frames have kept coming for `MOTION_MS`, and the last is recent. */
   private moving(now: number): boolean {
     return now - this.lastChange <= SETTLE_MS && this.lastChange - this.burstStart >= MOTION_MS;
@@ -406,7 +409,7 @@ export class BrowserView implements ViewerSink {
     // capture self-throttles; the 50 ms floor stops a fast failure spinning.
     const paceWait = this.lastStart + Math.max(50, this.avgMs * 1.5) - now;
     // Inside the input window every capture is superseded before it lands.
-    const provisionalWait = this.provisionalUntil - now;
+    const provisionalWait = this.provisionalUntil() - now;
     // In motion, one capture once the page settles.
     const settleWait = this.moving(now) ? this.lastChange + SETTLE_MS - now : 0;
     const wait = Math.max(paceWait, provisionalWait, settleWait);

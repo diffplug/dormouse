@@ -122,7 +122,8 @@ shown**, on each (re)initialization and change (rationale).
   modal (`docs/specs/layout.md` → Baseboard places it).
 
 Source of truth: `lib/src/lib/surface-sight.ts`,
-`useSurfaceVisibility` in `lib/src/components/wall/use-surface-visibility.ts`.
+`useSurfaceVisibility` in `lib/src/components/wall/use-surface-visibility.ts`,
+`lib/src/components/RetainedPagesIndicator.tsx`.
 
 ## Browser Chrome
 

@@ -9,6 +9,10 @@ import * as path from 'path';
 import { promises as fs } from 'fs';
 import { privateCaptureDir } from './private-capture-dir';
 
+/** The longest any capture is waited on; agent-browser's CLI is killed at the
+ *  same bound. */
+export const CAPTURE_TIMEOUT_MS = 30_000;
+
 /** One capture by a provider: written to `file()` by a CLI, or its bytes. */
 export type Shoot = (file: () => Promise<string>) => Promise<{ path: string } | { bytes: Uint8Array }>;
 
@@ -37,7 +41,7 @@ export function createBrowserCaptures(): BrowserCaptures {
       if (pending) return pending;
       // Joined whole, read and delete included: every caller gets the bytes,
       // none a file another has already removed.
-      const taking: Promise<Uint8Array> = (async () => {
+      const shooting: Promise<Uint8Array> = (async () => {
         // A fresh random name per capture: unguessable, and never one a
         // capture still running writes.
         let written: string | undefined;
@@ -51,7 +55,20 @@ export function createBrowserCaptures(): BrowserCaptures {
           // written it anyway — the frame never outlives its capture.
           if (written !== undefined) await fs.unlink(written).catch(() => {});
         }
-      })().finally(() => { if (inFlight.get(id) === taking) inFlight.delete(id); });
+      })();
+      // Bounded for every provider: one that never answers — a CDP call into a
+      // wedged page — fails here, and the next capture starts afresh instead
+      // of joining it. A late shot still deletes its own file.
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const taking = Promise.race([
+        shooting,
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error(`capture timed out after ${CAPTURE_TIMEOUT_MS} ms`)), CAPTURE_TIMEOUT_MS);
+        }),
+      ]).finally(() => {
+        clearTimeout(timer);
+        if (inFlight.get(id) === taking) inFlight.delete(id);
+      });
       inFlight.set(id, taking);
       return taking;
     },

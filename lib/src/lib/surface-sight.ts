@@ -21,30 +21,8 @@ export interface SurfaceSightInputs {
   covered: boolean;
 }
 
-/** Why nobody sees a Surface, the first that applies in this order. */
-export type UnseenReason = 'parked' | 'workspace' | 'window' | 'covered';
-
-export function unseenReason(inputs: SurfaceSightInputs): UnseenReason | null {
-  if (inputs.parked) return 'parked';
-  if (!inputs.workspaceActive) return 'workspace';
-  if (!inputs.windowShown) return 'window';
-  if (inputs.covered) return 'covered';
-  return null;
-}
-
-export function isSeen(inputs: SurfaceSightInputs): boolean {
-  return unseenReason(inputs) === null;
-}
-
-/**
- * Minimized iframe documents are never evicted or reloaded (#610), so each
- * keeps its memory, scripts and sockets while nobody sees it. Past this many
- * on one Baseboard, it says so, quietly.
- */
-export const RETAINED_PAGES_WARN_ABOVE = 8;
-
-export function retainedPagesWarning(retained: number): boolean {
-  return retained > RETAINED_PAGES_WARN_ABOVE;
+export function isSeen({ windowShown, workspaceActive, parked, covered }: SurfaceSightInputs): boolean {
+  return windowShown && workspaceActive && !parked && !covered;
 }
 
 /** Whether `zoomedId`, the Workspace's zoomed leaf, covers leaf `id`. */

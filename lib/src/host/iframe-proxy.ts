@@ -55,6 +55,7 @@ import * as http from 'http';
 import * as net from 'net';
 import { IFRAME_HTTP_ONLY, type IframeProxyResult } from '../lib/platform/iframe-proxy-types';
 import { isForeignOrigin, isLoopbackHost, isOwnOrigin } from './loopback-guard';
+import { createSerialQueue } from './remote/serial-queue';
 import {
   FRAMING_RESPONSE_HEADERS,
   HEAD_MARKER,
@@ -141,13 +142,12 @@ interface Grant {
 const grants = new Map<number, Grant>();
 let lastSweep = 0;
 
-type Lease = { owner: string; id: string; grant?: Grant };
+/** A live lease: its grant once minted, and its acquisitions, run one at a
+ *  time so concurrent asks agree on one grant. Released is gone from
+ *  `leases`, which every acquisition rechecks. */
+type Lease = IframeLease & { grant?: Grant; acquire: ReturnType<typeof createSerialQueue> };
 /** Every live lease, by `leaseKey`. */
 const leases = new Map<string, Lease>();
-/** Each lease's acquisitions, run one at a time, and how often it has been
- *  released while any were waiting: one asked before a release never mints. */
-type LeaseQueue = { tail: Promise<unknown>; owner: string; id: string; releases: number };
-const leaseQueues = new Map<string, LeaseQueue>();
 const leaseKey = (lease: IframeLease) => `${lease.owner}\0${lease.id}`;
 
 function validLease(lease: unknown): IframeLease | undefined {
@@ -181,21 +181,20 @@ function closeGrant(grant: Grant): void {
  * stops listening and drops its connections at once.
  */
 export function releaseIframeProxyLease(owner: string, id?: string): void {
-  for (const queue of leaseQueues.values()) {
-    if (queue.owner === owner && (id === undefined || queue.id === id)) queue.releases += 1;
-  }
-  for (const [key, lease] of leases) {
-    if (lease.owner !== owner || (id !== undefined && lease.id !== id)) continue;
-    leases.delete(key);
-    if (lease.grant) closeGrant(lease.grant);
-  }
+  endLeases((lease) => lease.owner === owner && (id === undefined || lease.id === id));
 }
 
 /** End every lease whose owner is not among `owners`: the windows still open. */
 export function retainIframeProxyOwners(owners: readonly string[]): void {
   const live = new Set(owners);
-  for (const owner of new Set([...leases.values()].map((lease) => lease.owner))) {
-    if (!live.has(owner)) releaseIframeProxyLease(owner);
+  endLeases((lease) => !live.has(lease.owner));
+}
+
+function endLeases(ends: (lease: Lease) => boolean): void {
+  for (const [key, lease] of leases) {
+    if (!ends(lease)) continue;
+    leases.delete(key);
+    if (lease.grant) closeGrant(lease.grant);
   }
 }
 
@@ -238,64 +237,51 @@ export async function createIframeProxyUrl(
 
   const lease = opts?.lease === undefined ? undefined : validLease(opts.lease);
   if (opts?.lease !== undefined && !lease) return { ok: false, reason: 'unreachable', detail: 'invalid iframe lease' };
-  if (!lease) return mintGrant(upstream, embedderOrigins, false);
+  if (!lease) {
+    const minted = await mintGrant(upstream, embedderOrigins, false);
+    return 'port' in minted ? framedUrl(minted, upstream) : minted;
+  }
   const key = leaseKey(lease);
-  // One lease's acquisitions run in turn, so concurrent asks agree on a grant.
-  let queue = leaseQueues.get(key);
-  if (!queue) leaseQueues.set(key, queue = { tail: Promise.resolve(), ...lease, releases: 0 });
-  const ticket = queue.releases;
-  const released = () => queue.releases !== ticket;
-  const acquiring = queue.tail.then(() => acquireLeased(lease, key, upstream, embedderOrigins, released));
-  queue.tail = acquiring;
-  void acquiring.finally(() => { if (queue.tail === acquiring) leaseQueues.delete(key); });
-  return acquiring;
+  let held = leases.get(key);
+  if (!held) {
+    if (leases.size >= MAX_IFRAME_LEASES) {
+      log(`[iframe-proxy] refused a lease: ${MAX_IFRAME_LEASES} are held`);
+      return { ok: false, reason: 'unreachable', detail: 'too many embedded pages are open' };
+    }
+    leases.set(key, held = { ...lease, acquire: createSerialQueue() });
+  }
+  const entry = held;
+  return entry.acquire(() => acquireLeased(entry, key, upstream, embedderOrigins));
 }
 
 const CLOSED_VIEW: IframeProxyResult = { ok: false, reason: 'unreachable', detail: 'the embedded view was closed' };
 
 /** The lease's grant, reused while it fronts the same upstream origin for the
  *  same embedder chain — a Reload, Back or Forward keeps the page's origin —
- *  else a fresh one in its place. */
-async function acquireLeased(
-  lease: IframeLease,
-  key: string,
-  upstream: URL,
-  embedderOrigins: string[] | null,
-  released: () => boolean,
-): Promise<IframeProxyResult> {
+ *  else a fresh one in its place. One released meanwhile mints nothing. */
+async function acquireLeased(lease: Lease, key: string, upstream: URL, embedderOrigins: string[] | null): Promise<IframeProxyResult> {
+  const released = () => leases.get(key) !== lease;
   if (released()) return CLOSED_VIEW;
-  let held = leases.get(key);
-  if (held?.grant && held.grant.upstream.origin === upstream.origin && sameChain(held.grant.embedderOrigins, embedderOrigins)) {
-    return framedUrl(held.grant, upstream);
+  if (lease.grant && lease.grant.upstream.origin === upstream.origin && sameChain(lease.grant.embedderOrigins, embedderOrigins)) {
+    return framedUrl(lease.grant, upstream);
   }
-  if (held?.grant) {
-    closeGrant(held.grant);
-    held.grant = undefined;
-  }
-  if (!held) {
-    if (leases.size >= MAX_IFRAME_LEASES) {
-      log(`[iframe-proxy] refused a lease: ${MAX_IFRAME_LEASES} are held`);
-      return { ok: false, reason: 'unreachable', detail: 'too many embedded pages are open' };
-    }
-    leases.set(key, held = { ...lease });
+  if (lease.grant) {
+    closeGrant(lease.grant);
+    lease.grant = undefined;
   }
   const minted = await mintGrant(upstream, embedderOrigins, true);
-  if (!minted.ok) {
-    if (leases.get(key) === held) leases.delete(key);
-    return minted;
-  }
-  const grant = grants.get(Number(new URL(minted.url).port))!;
-  // Released while it was being minted: it never serves.
-  if (leases.get(key) !== held || released()) {
-    if (leases.get(key) === held) leases.delete(key);
-    closeGrant(grant);
+  if (!('port' in minted)) return minted;
+  if (released()) {
+    closeGrant(minted);
     return CLOSED_VIEW;
   }
-  held.grant = grant;
-  return minted;
+  lease.grant = minted;
+  return framedUrl(minted, upstream);
 }
 
-async function mintGrant(upstream: URL, embedderOrigins: string[] | null, leased: boolean): Promise<IframeProxyResult> {
+type Refusal = Extract<IframeProxyResult, { ok: false }>;
+
+async function mintGrant(upstream: URL, embedderOrigins: string[] | null, leased: boolean): Promise<Grant | Refusal> {
   const now = Date.now();
   sweepGrants(now);
 
@@ -330,7 +316,7 @@ async function mintGrant(upstream: URL, embedderOrigins: string[] | null, leased
   // leave more than MAX_GRANTS published listeners behind.
   sweepGrants(Date.now());
   log(`[iframe-proxy] ${upstream.href} → ${grant.proxyOrigin}${leased ? ' (leased)' : ''}`);
-  return framedUrl(grant, upstream);
+  return grant;
 }
 
 function listen(server: http.Server): Promise<number> {
@@ -656,6 +642,8 @@ function handleUpgrade(grant: Grant, req: http.IncomingMessage, socket: net.Sock
 
 /** Reclaim unleased grants: idle past the TTL, or the oldest past the cap. */
 function sweepGrants(now: number): void {
+  // Every grant bounds the unleased ones, so the throttle needs no filter.
+  if (now - lastSweep < GRANT_SWEEP_MS && grants.size < MAX_GRANTS) return;
   const unleased = [...grants.values()].filter((grant) => !grant.leased);
   if (now - lastSweep < GRANT_SWEEP_MS && unleased.length < MAX_GRANTS) return;
   lastSweep = now;

@@ -367,10 +367,16 @@ export function attachRouter(
   // the webview requires (docs/specs/vscode.md → "Webview message
   // authentication"). A raw `vscode.Webview` never reaches this scope.
   const post = (message: ExtensionMessage): Thenable<boolean> => channel.post(message);
-  const postShown = () => {
-    if (options?.shown) void post({ type: 'dormouse:shown', shown: options.shown.current() } satisfies ExtensionMessage);
+  // `onDidChangeViewState` also fires on focus and column moves: post changes.
+  let sentShown: boolean | undefined;
+  const postShown = (always = false) => {
+    if (!options?.shown) return;
+    const shown = options.shown.current();
+    if (!always && shown === sentShown) return;
+    sentShown = shown;
+    void post({ type: 'dormouse:shown', shown } satisfies ExtensionMessage);
   };
-  const shownDisposable = options?.shown?.onDidChange(postShown);
+  const shownDisposable = options?.shown?.onDidChange(() => postShown());
 
   // Track which PTY IDs were spawned (or reconnected) through this webview
   const ownedPtyIds = new Set<string>();
@@ -721,7 +727,7 @@ export function attachRouter(
         // Recreated content is a new realm, and holds no iframe view yet.
         alertHost.endRealm(routerId);
         releaseIframeProxyLease(routerId);
-        postShown();
+        postShown(true);
 
         // Re-publish the currently-selected shell so split-spawns in the
         // freshly-mounted webview know what to use.

@@ -18,7 +18,7 @@ import { applyAlertSettingsFromHost, DEFAULT_ALERT_SETTINGS, getAlertSettings } 
 import { createDialogKeyboardCoordinator, DialogKeyboardContext, SelectedIdContext, WorkspaceIdContext } from './wall/wall-context';
 import { createWorkspace, getWorkspace, resetWorkspaces } from '../lib/workspace-store';
 import type { DoorChip } from './wall/wall-types';
-import { RETAINED_PAGES_WARN_ABOVE } from '../lib/surface-sight';
+import { RETAINED_PAGES_WARN_ABOVE } from './RetainedPagesIndicator';
 import {
   addInstalledTheme,
   getActiveThemeId,

@@ -8,9 +8,11 @@
  * A capture that outlives `timeoutMs` frees its slot and answers undefined:
  * a provider whose capture never settles (a CDP call into a wedged page) must
  * not hold the budget for every other pane. It may still be running, which
- * its provider bounds; the next claim for that browser joins it rather than
- * starting another (`./browser-capture.ts`).
+ * `./browser-capture.ts` bounds; the next claim for that browser joins it
+ * rather than starting another.
  */
+
+import { settleAllWithin } from '../lib/settle-within';
 
 export interface CaptureClaim {
   /** The user is interacting with this pane: it goes ahead of the queue. */
@@ -66,17 +68,11 @@ export function createCaptureBudget(opts: { perSecond?: number; concurrent?: num
           claim,
           drop: () => resolve(undefined),
           start: () => {
-            let done = false;
-            const finish = (value: T | undefined) => {
-              if (done) return;
-              done = true;
-              clearTimeout(slotTimer);
+            void settleAllWithin<T | undefined>([capture()], timeoutMs, undefined).then(([value]) => {
               running -= 1;
               resolve(value);
               pump();
-            };
-            const slotTimer = setTimeout(() => finish(undefined), timeoutMs);
-            capture().then(finish, () => finish(undefined));
+            });
           },
         });
         pump();
