@@ -241,7 +241,7 @@ One capture-phase `keydown` listener on `window` delegates in a fixed order; a h
 flowchart TD
   K["window keydown, capture phase"] --> A{"Wall active, key unanswered?"}
   A -- yes --> X{"target inside data-terminal-context?"}
-  X -- yes --> X1["diagnostic copy → editable-field clipboard → mouse-selection keys on the context terminal"]
+  X -- yes --> X1["diagnostic copy → field clipboard → selection keys (context terminal)"]
   X -- no --> D["dual-tap → editable-field clipboard → mouse-selection keys"]
   D --> P{"passthrough?"}
   P -- no --> R{"pane rename or chrome lease?"}
@@ -343,7 +343,7 @@ Minimizing detaches the leaf into a Door with its restore token (`docs/specs/til
 
 ### Reattach (click door, `Enter`/`m`/`d` on door, or drag out)
 
-Reattach applies the token's restore policy (`docs/specs/tiling-engine.md` → "Restore tokens") with the selected pane if live, else the first pane, as its fallback reference; a tokenless or failed restore splits beside the last leaf instead, so **a reattach is never silently swallowed**. A door dragged out of the baseboard skips the token and inserts at the drop position.
+Reattach applies the token's restore policy (`docs/specs/tiling-engine.md` → "Restore tokens") with the selected pane if live, else the first pane, as its fallback reference; a tokenless or failed restore splits beside the last leaf (or roots an empty tree), so **a reattach is never silently swallowed**. A door dragged out of the baseboard skips the token and inserts at the drop position.
 
 ### Splitting from a Door
 
