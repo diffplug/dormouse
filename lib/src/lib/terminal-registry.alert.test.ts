@@ -59,6 +59,7 @@ import { REPLAY_MODE_RESET } from './terminal-report-filter';
 import { cfg } from '../cfg';
 import { TerminalWebglRenderer } from './terminal-webgl';
 import { parkElement } from './terminal-lifecycle';
+import { FitAddon } from './xterm-test-mock';
 
 interface MockTerminalInstance {
   writes: string[];
@@ -416,6 +417,22 @@ describe('terminal-registry alert behavior', () => {
     pasteFilePaths(id, ['/tmp/example file.txt']);
 
     expect(isUntouched(id)).toBe(false);
+  });
+
+  it.each(['restore', 'launch'])('never spawns a %s at the 2x1 FitAddon floor of an unlaid container', (launch) => {
+    // A minimized pane or a Workspace not yet shown has no layout; FitAddon
+    // still proposes its 2x1 minimum, and an agent resumed there ran 2 columns wide.
+    const fit = vi.spyOn(FitAddon.prototype, 'proposeDimensions').mockReturnValue({ cols: 2, rows: 1 });
+    const spawn = vi.spyOn(fakePlatform, 'spawnPty');
+    try {
+      const id = `unlaid-${launch}`;
+      if (launch === 'restore') restoreTerminal(id, {});
+      else getOrCreateTerminal(id);
+      expect(spawn).toHaveBeenCalledWith(id, expect.objectContaining({ cols: 80, rows: 30 }));
+    } finally {
+      fit.mockRestore();
+      spawn.mockRestore();
+    }
   });
 
   it('rejects an unsafe persisted resume command before it can be typed', async () => {

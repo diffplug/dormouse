@@ -384,6 +384,15 @@ function typeCommandWhenPromptReady(id: string, command: string, requireIntegrat
   }, LAUNCH_PROMPT_POLL_MS);
 }
 
+/** The size a new PTY starts at. A container with no layout yet — a minimized
+ *  pane, a Workspace not yet shown — still gets FitAddon's 2x1 floor from
+ *  `proposeDimensions`, and nothing refits it until it is shown, so an agent
+ *  resumed there would run two columns wide. The first real fit resizes. */
+function spawnSize(entry: TerminalEntry): { cols: number; rows: number } {
+  const dims = entry.fit.proposeDimensions();
+  return dims && dims.cols > 2 && dims.rows > 1 ? { cols: dims.cols, rows: dims.rows } : { cols: 80, rows: 30 };
+}
+
 export function getOrCreateTerminal(id: string): TerminalEntry {
   const existing = registry.get(id);
   if (existing) return existing;
@@ -400,10 +409,8 @@ export function getOrCreateTerminal(id: string): TerminalEntry {
     setTerminalUserTitle(id, shellOpts.title);
   }
 
-  const dims = entry.fit.proposeDimensions();
   getPlatform().spawnPty(id, {
-    cols: dims?.cols || 80,
-    rows: dims?.rows || 30,
+    ...spawnSize(entry),
     shell: shellOpts?.shell,
     args: shellOpts?.args,
     cwd: shellOpts?.cwd,
@@ -489,10 +496,8 @@ export function restoreTerminal(
     setTerminalUserTitle(id, trimmedTitle);
   }
 
-  const dims = entry.fit.proposeDimensions();
   getPlatform().spawnPty(id, {
-    cols: dims?.cols || 80,
-    rows: dims?.rows || 30,
+    ...spawnSize(entry),
     cwd: opts.cwd ?? undefined,
     shell: opts.shell,
     args: opts.args,
