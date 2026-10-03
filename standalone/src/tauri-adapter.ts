@@ -55,7 +55,7 @@ import type { TerminalSemanticEvent } from "dormouse-lib/lib/terminal-state";
 import {
   applyTerminalSemanticEvents,
 } from "dormouse-lib/lib/terminal-state-store";
-import { markSessionTouched } from "dormouse-lib/lib/terminal-lifecycle";
+import { markSessionTouched } from "dormouse-lib/lib/terminal-store";
 import type { DorControlCancelPayload, DorControlRequestPayload } from "dor/protocol";
 import {
   cancelDorControlRequest,

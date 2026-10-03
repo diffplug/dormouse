@@ -15,7 +15,7 @@ import { embedderOrigins } from '../embedder-origins';
 import {
   applyTerminalSemanticEvents,
 } from '../terminal-state-store';
-import { markSessionTouched } from '../terminal-lifecycle';
+import { markSessionTouched } from '../terminal-store';
 import { getTerminalTheme, onTerminalThemeChange } from '../terminal-theme';
 import { HOST_MESSAGE_TOKEN_FIELD, isHostMessage, readHostMessageToken } from '../vscode-message-token';
 import { parseReplay } from './replay-parse';
