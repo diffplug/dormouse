@@ -566,8 +566,8 @@ Source of truth: `window_at` in `standalone/src-tauri/src/routing.rs`;
 
 ## Persistence
 
-One `PersistedWindow` per window, restored on the next launch
-(`docs/specs/transport.md` → "The governing rule" and "Persisted session
+**One `PersistedWindow` per window, every Workspace in it**, restored on the
+next launch (`docs/specs/transport.md` → "The governing rule" and "Persisted session
 types"). Each Workspace's Wall publishes to the Window aggregator, whose one
 debounced writer is `TauriAdapter.saveWindowState`; `getWindowState` is the boot
 reader and **parses the blob once**. Source of truth: `windowStateSlot` in

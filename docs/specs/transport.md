@@ -205,7 +205,7 @@ Source of truth: `PersistedSession` in `lib/src/lib/session-types.ts`; `lib/src/
 
 ### The governing rule
 
-**Dormouse restores only what it destroyed without asking.** Deliberately ending something ends it:
+**Dormouse restores only what it destroyed without asking** (rationale). Deliberately ending something ends it:
 
 | Boundary | Deliberate? | Outcome |
 | --- | --- | --- |
@@ -220,7 +220,7 @@ Source of truth: `PersistedSession` in `lib/src/lib/session-types.ts`; `lib/src/
 | VS Code editor-tab close (`killOnDispose: true`) | Yes | Fresh for that panel |
 | VS Code extension-host crash | No, and the last periodic save stands | Restore structure, no agent resume — `deactivate()` never ran |
 
-**Standalone persists one `PersistedWindow` per window**, every Workspace in it (rationale). "Restore structure" brings back the layout, cwds, titles, doors, and TODO/alert blobs; "auto-resume agents" is `docs/compatible-agents.md` → "Cold restore". A cold-restored pane opens empty.
+Standalone's per-window record: `docs/specs/standalone.md` -> "Persistence". "Restore structure" brings back the layout, cwds, titles, doors, and TODO/alert blobs; "auto-resume agents" is `docs/compatible-agents.md` → "Cold restore". A cold-restored pane opens empty.
 
 ## Universal invariants
 
