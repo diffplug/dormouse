@@ -181,7 +181,7 @@ stateDiagram-v2
 
 - **Roles never flip downward**: no `onRole(false)` after a `true` (rationale).
 - **Contend on broker death, not on a timer**: `bind` picks exactly one; no TTL, heartbeat file, or watcher.
-- **Never unlink on the first refusal** (rationale).
+- **Never unlink on the first refusal; a reclaimed bind is re-checked (`stillOurs`) before it serves** (rationale).
 - **A bind is not a role until it is believed**: every "is this window the broker" answer reads `brokerConfirmed`, so **unverified reads as unsettled** and a command landing mid-verification is held for the verdict (rationale).
 - **Errors after `listen` are logged, not thrown**, so a late server error cannot take the extension host down (rationale).
 

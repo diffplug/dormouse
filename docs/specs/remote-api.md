@@ -84,7 +84,7 @@ stateDiagram-v2
 ```
 
 * A sender's `direct-switch` is its **last** message on the relay path; every later message, keepalives included, goes on the channel. A receiver holds channel frames until it decrypts the peer's — **overflow disposing the session** — then drains them in arrival order.
-* **Once either direction has switched, a channel failure disposes the session**: the Client reports burrow loss exactly as a `burrow-gone`. **Before any switch it only abandons the attempt**, and the session stays relayed until **a `direct-switch` reaches the abandoned end, which ends the session.**
+* **Once either direction has switched, a channel failure disposes the session**: the Client reports burrow loss exactly as a `burrow-gone`. **Before any switch it only abandons the attempt**, and the session stays relayed. **A `direct-switch` reaching an end that abandoned for any cause ends the session.**
 * **After inbound has switched, a relay `transport` frame disposes the session**, refused before any decrypt, as does a `ct` that will not decode.
 * **An end waits at most `DIRECT_HANDOFF_TIMEOUT_MS` after its own switch for the peer's.**
 * **A connection reporting `failed` or `closed` fails the channel at once; `disconnected` is waited out** for `DIRECT_DISCONNECTED_GRACE_MS`.

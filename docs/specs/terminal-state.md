@@ -44,7 +44,7 @@ Command lifecycle, for both `OSC 133` and `OSC 633`, as `ShellActivity` (from `u
 | `C` | `commandStart` | `running` |
 | `D` | `commandFinish` | `finished`, with an optional exit code |
 
-**An `A` or `B` drops a run that saw no `D`**, recording no last command.
+**An `A`, a `B`, or another `C` drops a run that saw no `D`**, recording no last command.
 
 `C` and the command line, by emitter:
 

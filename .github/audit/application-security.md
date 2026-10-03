@@ -202,7 +202,8 @@ Be adversarial, and go past the `FAIL IF` list. Ask specifically:
   structural half of that ("one suite, no negotiation, no plaintext path, no
   legacy discriminant") — check that each of its rules with no `spec` of its
   own still names a real `docs/specs/security-remote.md` line (the rest name
-  `docs/specs/security-hosted.md` lines, which `hosted.md` audits) and that
+  `docs/specs/security-hosted.md` lines, which `hosted.md` audits), that no
+  rule names any other `spec`, and that
   `scripts/e2e-lint-selftest.mjs` still proves every rule load-bearing, then
   look for what a *textual* lint cannot see.
 
