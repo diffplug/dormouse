@@ -4,6 +4,7 @@
  * `useToolReaper` decides when; this module is what a stop and a rehydrate do.
  */
 import { buildShellCommandForKind, shellCommandKind } from 'dor/commands/shell-quote';
+import { parseRenderMode } from 'dor-lib-common/browser-providers';
 import { getPlatform, PLATFORM_STRING } from '../../lib/platform';
 import { getHelper } from '../../lib/helper-terminal';
 import { isToolCommandArgv } from '../../lib/session-types';
@@ -61,6 +62,8 @@ export function toolReapBlocker(id: string, params: Record<string, unknown> | un
   if (isToolReaped(id) || isToolStopping(id)) return 'already reaped';
   if (toolPendingFromParams(params)) return 'awaiting approval';
   if (params.toolPreview === true) return 'a preview slot';
+  // A popped-out browser is in sight in its own window, Door or not.
+  if (parseRenderMode(params.renderMode).presentation === 'popout') return 'its browser is popped out';
   const entry = registry.get(id);
   if (!entry || entry.exited) return 'no live Session';
   const command = toolCommandFromParams(params);

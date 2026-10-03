@@ -112,6 +112,11 @@ describe('toolReapBlocker', () => {
     expect(toolReapBlocker(ID, lath.getMeta(ID)?.params)).toMatch(/persist: never/);
   });
 
+  it('refuses a Tool whose browser is popped out, which is in sight in its own window', () => {
+    const lath = servingTool({ renderMode: 'agent-browser-popout' });
+    expect(toolReapBlocker(ID, lath.getMeta(ID)?.params)).toMatch(/popped out/);
+  });
+
   it('refuses a preview slot, and a command other than the designated one', () => {
     const slot = servingTool({ toolPreview: true });
     expect(toolReapBlocker(ID, slot.getMeta(ID)?.params)).toMatch(/preview/);

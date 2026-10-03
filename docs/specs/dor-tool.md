@@ -119,7 +119,7 @@ Source of truth: `ToolPanel` in `lib/src/components/wall/ToolPanel.tsx`.
 
 A **reap** stops an idle Tool's Session, shell included; **rehydrate** starts it again in the same Surface, which keeps its leaf, Tool metadata, scrollback, rename, and alert, and reads as an exited Session meanwhile.
 
-**Must reap only a Tool whose running designated command declared itself safe to stop** with `dehydrate: true` in the run's latest `serve` ([OSC 367](#osc-367)): its args alone restart it, and a payload only adds fidelity. Clean or unreported state never qualifies (rationale). **Never reap a Tool** that reports unsaved changes, announced `persist: "never"`, is a marked preview slot, awaits approval, has an auxiliary helper, or belongs to a closing or transferring Workspace.
+**Must reap only a Tool whose running designated command declared itself safe to stop** with `dehydrate: true` in the run's latest `serve` ([OSC 367](#osc-367)): its args alone restart it, and a payload only adds fidelity. Clean or unreported state never qualifies (rationale). **Never reap a Tool** that reports unsaved changes, announced `persist: "never"`, is a marked preview slot or popped out, awaits approval, has an auxiliary helper, or belongs to a closing or transferring Workspace.
 
 **Must reap only after 30 minutes continuously out of sight** — Doored, in an inactive Workspace, or in a hidden webview — **with no PTY output** (rationale): never on the minimize or switch itself, and never for memory pressure. The stop:
 
