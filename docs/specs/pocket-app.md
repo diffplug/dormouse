@@ -21,7 +21,7 @@ remote-api v1 terminal protocol:
 | `resizePty`              | `terminal.resize`                       |
 | `onPtyExit`              | `terminal.closed`                       |
 
-Pocket is therefore:
+Pocket is:
 
 > auth screens + `MobileTerminalUi`/`MobileWall` + **`RemotePtyAdapter`**
 
@@ -40,8 +40,8 @@ retained, no call is made, the token is not spent, and the auth screen asks for
 a scan from inside Pocket. **An installed iOS Pocket can never receive a scanned
 hash** — Camera opens Safari, a different partition. (rationale)
 
-**The scanner reads a code as data**: it never navigates, and the camera text or
-a pasted one goes to `parsePairingInvitationUrl` ([relay.md](./relay.md) owns
+**The scanner reads a code as data**: it never navigates, and camera or pasted text
+goes to `parsePairingInvitationUrl` ([relay.md](./relay.md) owns
 the grammar) (rationale). **The invitation lives in memory only**, cleared on
 every terminal outcome.
 
@@ -56,7 +56,7 @@ flowchart TD
   I -- 404 --> G
   I -- ok --> R[POST /api/setup/retire]
   T -- yes --> R
-  R -- refused --> X[abort]
+  R & I & G -- fails --> X[abort]
   R --> P[pair]
   G --> P
   P -- approved --> C[connect]
