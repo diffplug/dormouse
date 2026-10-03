@@ -45,7 +45,7 @@ checkable and by review otherwise:
 - The alert explanation matches [alert.md](alert.md): notification protocols
   and unattended command exit ring with zero configuration, independent of
   WATCHING; command exit needs `OSC 633` / `OSC 133` boundaries, and WATCHING
-  the reported command line (alert.md → Limitation). The guide must not promise that every quiet Pane is
+  the reported command line (`docs/specs/alert.md` → WATCHING Track). The guide must not promise that every quiet Pane is
   automatically marked done after a fixed interval.
 - Pocket is described only as shipped or explicitly in development.
 - Browser Surfaces are explained to match [dor-browser.md](dor-browser.md)
