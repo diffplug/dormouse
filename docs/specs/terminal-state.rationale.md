@@ -6,15 +6,11 @@
 
 **Why a non-Windows path on `osc9_9` is `unknown`, not `posix`.** The channel is a Windows-ism (Windows Terminal, ConEmu), so a lone `/foo` on it is no evidence of a POSIX shell; guessing `posix` would collide two genuinely different locations on the `scheme|host|pathKind|path` grouping key.
 
-**What the CWD bound and control-character strip protect.** A directory name may hold any byte but `/` and NUL, and the CWD it produces is retained per Session, rendered in the pane header, and used as a grouping key — so unbounded or control-bearing text reaches the UI and a map key, not just a log line.
-
 Native path payloads are not URLs: decoding `%20` or trimming edge spaces changes directory identity. The [iTerm2 CurrentDir contract](https://iterm2.com/documentation-escape-codes.html) reports a directory, while OSC 7 carries a file URL; Dormouse's OSC 633 emitters likewise write the sanitized path verbatim.
 
 ## Shell-integration injection
 
 **Why the mechanism cannot be uniform.** One env var guarantees a `PATH` binary is *found*, but no shell has an env var for *run our hook code on every prompt* — hence a per-shell mechanism, and hence the Channel column: an env-var channel is as reliable as the `PATH` prepend, while a `shellArgs` channel only fires for the launch shapes Dormouse recognizes.
-
-**Why nothing may be written into the zsh dotfile directory.** It ships inside the signed macOS app bundle, and any file added to a bundle after signing invalidates the signature — Gatekeeper then reports the app "damaged" rather than naming the real problem. macOS `/etc/zshrc` sets `HISTFILE` while `ZDOTDIR` still points at our directory, so it lands inside it and has to be redirected rather than tolerated.
 
 **Why bash injection keys on the launch args.** `--init-file` and login mode are mutually exclusive, so the script has to replace login-profile sourcing itself, which is only safe when the launch was a plain interactive/login shell — Git Bash's `--login -i` is why login flags stay in the allowed set, while anything with a specific `-c <cmd>` is a job, not a session.
 
@@ -23,8 +19,6 @@ Native path payloads are not URLs: decoding `%20` or trimming edge spaces change
 **Why a `bind -x` key is recognized by `READLINE_LINE`.** The key's command runs through the same `DEBUG` trap while the prompt is armed, so it was reported as the command and spent the arming: the line it left, as fzf's Ctrl-R leaves the chosen command, ran with no `E`/`C` at all. From bash 4.0 `READLINE_LINE` is bound for exactly the key command's run and unbound after it. 3.2 binds nothing, and nothing else the trap can read differs from a submitted line — `BASH_SOURCE`, `BASH_LINENO`, `FUNCNAME`, `$-`, `BASH_SUBSHELL` — while its `READLINE_LINE` is an ordinary variable that a widget written for 4.x leaves set, which would silence every later line without the version check. Measured on bash 3.2.57 (macOS), 4.0.44, 4.4.23, 5.0.18, 5.2.37 and 5.3.20, 2026-09.
 
 **Why the PowerShell dot-source is appended, not prepended.** A launch that already carries a startup command — the VS "Developer PowerShell" arrives as `-NoExit -Command "& { Import-Module … }"` — is setting up an environment our wrapper should install *after*, or the wrapper wraps a `prompt` that the startup command then replaces.
-
-**Why PSReadLine matters.** PowerShell has no `preexec`, so the only hook that fires between submitting a command and running it is `PSConsoleHostReadLine`, which PSReadLine supplies; wrapping it is what makes the running command appear immediately, as it does under bash and zsh. The fallback reconstructs the `E`/`C`/`D` triple from the next prompt with the command line pulled from history, leaving the running command invisible until it finishes.
 
 **Why the WSL detector prefers bash.** It has to decide without knowing the distro. Bash whenever it exists — including when detection returns nothing — integrates the common case, stepping aside for an explicitly configured zsh or fish login shell avoids replacing a shell the user chose, and the login-shell fallback covers a distro with no bash at all, e.g. Alpine.
 
@@ -68,4 +62,4 @@ Native path payloads are not URLs: decoding `%20` or trimming edge spaces change
 
 **Why app-sent titles are filtered.** Under Windows ConPTY the console title is relayed for every child process whether or not it chose one, so an `OSC 0`/`OSC 2` title is frequently just the child's image path (`C:\WINDOWS\system32\cmd.exe`, which pnpm's script shell broadcasts) — no command information, so letting it through replaces a correctly detected command label with noise. A title carrying arguments or prose did come from a program that chose it.
 
-**Why the fail glyph lives in `primary` rather than only in the flag.** Plain-text title consumers — OS window titles, tab titles — render `primary` and nothing else, so a flag-only signal would lose the failure there; the flag exists alongside it so the pane header can color the glyph without re-parsing the string.
+**Why the fail glyph lives in `primary` rather than only in the flag.** Plain-text title consumers — OS window titles, tab titles — render `primary` and nothing else, so a flag-only signal would lose the failure there.
