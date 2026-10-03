@@ -1,4 +1,5 @@
-import { CLEAR_LINE, PROMPT, RESET, fg } from 'dormouse-lib/lib/ansi';
+import { BOLD, CLEAR_LINE, PROMPT, RESET, fg } from 'dormouse-lib/lib/ansi';
+import { tildePath, type VirtualFs } from './playground-fs/vfs';
 
 export type SendOutput = (data: string) => void;
 
@@ -15,7 +16,7 @@ export interface InteractiveProgram {
 export type StartProgram = (
   name: string,
   args: string[],
-  onExit: () => void,
+  onExit: (exitCode?: number) => void,
 ) => InteractiveProgram | null;
 
 // Report real command boundaries: WATCHING is keyed on the running command.
@@ -23,8 +24,38 @@ export type StartProgram = (
 const OSC_PROMPT_START = '\x1b]633;A\x07';
 const OSC_PROMPT_END = '\x1b]633;B\x07';
 const OSC_COMMAND_START = '\x1b]633;C\x07';
-const oscCommandLine = (commandLine: string) => `\x1b]633;E;${commandLine}\x07`;
+/** A 633 property value: the parser splits on `;` and unescapes `\\` and `\x3b`. */
+const osc633Value = (value: string) => value.replace(/\\/g, '\\\\').replace(/;/g, '\\x3b');
+const oscCommandLine = (commandLine: string) => `\x1b]633;E;${osc633Value(commandLine)}\x07`;
 const oscCommandFinish = (exitCode: number) => `\x1b]633;D;${exitCode}\x07`;
+const oscCwd = (cwd: string) => `\x1b]633;P;Cwd=${osc633Value(cwd)}\x07`;
+
+/** `line` split into words as a POSIX shell would, honoring quotes and
+ * backslashes; the playground has no expansions. */
+export function shellWords(line: string): string[] {
+  const words: string[] = [];
+  let word = '';
+  let inWord = false;
+  let quote: "'" | '"' | null = null;
+  for (let index = 0; index < line.length; index++) {
+    const ch = line[index];
+    if (quote) {
+      if (ch === quote) quote = null;
+      else if (ch === '\\' && quote === '"' && /["\\$`]/.test(line[index + 1] ?? '')) word += line[++index];
+      else word += ch;
+    } else if (/\s/.test(ch)) {
+      if (inWord) words.push(word);
+      word = '';
+      inWord = false;
+    } else {
+      inWord = true;
+      if (ch === "'" || ch === '"') quote = ch;
+      else word += ch === '\\' && index + 1 < line.length ? line[++index] : ch;
+    }
+  }
+  if (inWord) words.push(word);
+  return words;
+}
 
 /** Exit code a POSIX shell uses for an unrecognized command. */
 const EXIT_COMMAND_NOT_FOUND = 127;
@@ -45,15 +76,27 @@ export class TutorialShell {
   private activeProgram: InteractiveProgram | null = null;
   private promptShown = false;
   private runningCommandLine: string | null = null;
+  private readonly fs: VirtualFs | null;
+  /** The working directory, reported with each prompt; only with `fs`. */
+  cwd: string | null;
 
+  /** With `fs` and `cwd`, the shell has a working directory and the `cd`,
+   * `ls`, and `pwd` builtins (docs/specs/tutorial.md -> Playground filesystem). */
   constructor(
     sendOutput: SendOutput,
     startProgram: StartProgram,
-    options: { promptShown?: boolean } = {},
+    options: { promptShown?: boolean; fs?: VirtualFs; cwd?: string } = {},
   ) {
     this.sendOutput = sendOutput;
     this.startProgram = startProgram;
     this.promptShown = options.promptShown ?? false;
+    this.fs = options.fs ?? null;
+    this.cwd = this.fs ? options.cwd ?? '/' : null;
+  }
+
+  /** Shows the first prompt, unless a program or an earlier prompt already holds the screen. */
+  showInitialPrompt(): void {
+    if (!this.activeProgram && !this.promptShown) this.showPrompt();
   }
 
   dispose(): void {
@@ -89,9 +132,9 @@ export class TutorialShell {
   private launch(name: string, args: string[], commandLine: string): boolean {
     this.runningCommandLine = commandLine;
     this.sendOutput(oscCommandLine(commandLine) + OSC_COMMAND_START);
-    const program = this.startProgram(name, args, () => {
+    const program = this.startProgram(name, args, (exitCode = 0) => {
       this.activeProgram = null;
-      this.finishCommand(0);
+      this.finishCommand(exitCode);
     });
     if (!program) return false;
     this.activeProgram = program;
@@ -199,7 +242,7 @@ export class TutorialShell {
   }
 
   private redrawPromptLine(): void {
-    this.sendOutput(`\r${CLEAR_LINE}${PROMPT}${this.lineBuffer}`);
+    this.sendOutput(`\r${CLEAR_LINE}${this.prompt()}${this.lineBuffer}`);
   }
 
   private processCommand(cmd: string): InteractiveProgram | null {
@@ -207,18 +250,72 @@ export class TutorialShell {
       this.showPrompt();
       return null;
     }
-    const [name, ...args] = cmd.split(/\s+/);
+    const [name = '', ...args] = shellWords(cmd);
+    if (this.fs && (name === 'cd' || name === 'ls' || name === 'pwd')) {
+      this.sendOutput(oscCommandLine(cmd) + OSC_COMMAND_START);
+      this.finishCommand(name === 'cd' ? this.cd(args) : name === 'ls' ? this.ls(args) : this.pwd());
+      return null;
+    }
     if (!this.launch(name, args, cmd)) {
-      this.sendOutput(
-        `${fg(90)}Unknown command. Try ${fg(36)}tut${fg(90)}, ${fg(36)}ascii-splash${fg(90)}, or ${fg(36)}changelog${fg(90)}.${RESET}\r\n`,
-      );
+      const names = this.fs ? ['tut', 'dor open', 'ls', 'cd', 'ascii-splash', 'changelog'] : ['tut', 'ascii-splash', 'changelog'];
+      const list = names.map((known) => `${fg(36)}${known}${fg(90)}`);
+      this.sendOutput(`${fg(90)}Unknown command. Try ${list.slice(0, -1).join(', ')}, or ${list[list.length - 1]}.${RESET}\r\n`);
       this.finishCommand(EXIT_COMMAND_NOT_FOUND);
     }
     return this.activeProgram;
   }
 
+  private prompt(): string {
+    return this.cwd === null ? PROMPT : `${fg(32)}user${RESET}@${fg(36)}dormouse${RESET}:${BOLD}${fg(34)}${tildePath(this.cwd)}${RESET}$ `;
+  }
+
   private showPrompt(): void {
-    this.sendOutput(OSC_PROMPT_START + PROMPT + OSC_PROMPT_END);
+    this.sendOutput(OSC_PROMPT_START + (this.cwd === null ? '' : oscCwd(this.cwd)) + this.prompt() + OSC_PROMPT_END);
     this.promptShown = true;
+  }
+
+  /** Writes builtin output, which is plain text lines. */
+  private print(lines: string[]): void {
+    if (lines.length) this.sendOutput(lines.map((line) => `${line}\r\n`).join(''));
+  }
+
+  /** `path` resolved against the cwd, or null after reporting why not. */
+  private resolve(command: string, path: string): string | null {
+    const resolved = this.fs!.resolve(this.cwd!, path);
+    if (resolved !== null && this.fs!.kind(resolved)) return resolved;
+    this.print([`${command}: no such file or directory: ${path}`]);
+    return null;
+  }
+
+  private cd(args: string[]): number {
+    const target = this.resolve('cd', args[0] ?? '~');
+    if (target === null) return 1;
+    if (this.fs!.kind(target) !== 'dir') {
+      this.print([`cd: not a directory: ${args[0]}`]);
+      return 1;
+    }
+    this.cwd = target;
+    return 0;
+  }
+
+  private ls(args: string[]): number {
+    const paths = args.filter((arg) => !arg.startsWith('-'));
+    if (paths.length === 0) paths.push('.');
+    let exitCode = 0;
+    paths.forEach((path, index) => {
+      const target = this.resolve('ls', path);
+      if (target === null) { exitCode = 1; return; }
+      const entries = this.fs!.list(target);
+      if (paths.length > 1) this.print([`${index ? '\r\n' : ''}${path}:`]);
+      this.print([entries
+        ? entries.map(({ name, kind }) => (kind === 'dir' ? `${BOLD}${fg(34)}${name}/${RESET}` : name)).join('  ')
+        : path]);
+    });
+    return exitCode;
+  }
+
+  private pwd(): number {
+    this.print([this.cwd!]);
+    return 0;
   }
 }

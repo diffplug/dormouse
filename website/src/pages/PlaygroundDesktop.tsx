@@ -100,6 +100,7 @@ function PlaygroundDesktopExperience() {
   const stateRef = useRef<TutorialState | null>(null);
   const autoStartedRef = useRef<Set<string>>(new Set());
   const spawnUnsubRef = useRef<(() => void) | null>(null);
+  const disposeFsRef = useRef<(() => void) | null>(null);
   const busyDemoDisposeRef = useRef<(() => void) | null>(null);
   const busyDemoFinishTimerRef = useRef<number | null>(null);
   const commandExitDemoFinishTimerRef = useRef<number | null>(null);
@@ -131,15 +132,16 @@ function PlaygroundDesktopExperience() {
       if (getPreferredPlayground() === "pocket") return;
       // None of these consumes another, so load the whole bundle at once rather
       // than paying a round of module resolution each on the boot path.
-      const [platform, registry, mouseSelection, themes, alertSettings, wall, scenarios, asciiSplash] = await Promise.all([
+      const [platform, registry, mouseSelection, themes, alertSettings, wall, shellDefaults, asciiSplash, playgroundFs] = await Promise.all([
         import("dormouse-lib/lib/platform"),
         import("dormouse-lib/lib/terminal-registry"),
         import("dormouse-lib/lib/mouse-selection"),
         import("dormouse-lib/lib/themes"),
         import("dormouse-lib/lib/alert-settings"),
         import("dormouse-lib/components/Wall"),
-        import("dormouse-lib/lib/platform/fake-scenarios"),
+        import("dormouse-lib/lib/shell-defaults"),
         import("../lib/ascii-splash-runner"),
+        import("../lib/playground-fs"),
         import("dormouse-lib/index.css"),
       ]);
       if (cancelled) return;
@@ -148,13 +150,12 @@ function PlaygroundDesktopExperience() {
       registry.initAlertStateReceiver();
       adapterRef.current = adapter;
 
-      adapter.setDefaultScenario(scenarios.SCENARIO_SHELL_PROMPT);
-      // Each runner-owned pane suppresses the default shell-prompt scenario,
-      // otherwise spawnPty queues a delayed `user@dormouse:~$` write that
-      // would land in the runner's alt-screen and corrupt its output.
-      for (const pane of DESKTOP_PANES) {
-        adapter.setScenario(pane.id, { name: "none", chunks: [] });
-      }
+      // Every shell is the playground's own, which prints its prompt on spawn
+      // (`PlaygroundShellRegistry`); no scenario plays. A named shell keeps a
+      // Windows visitor's default from reading as `cmd`, whose Tools are refused.
+      shellDefaults.setDefaultShellOpts({ shell: "/bin/fake" });
+      const fsHost = playgroundFs.installPlaygroundFs(adapter);
+      disposeFsRef.current = fsHost.dispose;
 
       const tutorialState = new TutorialState(DESKTOP_TUTORIAL_PROFILE.sections);
       stateRef.current = tutorialState;
@@ -252,8 +253,12 @@ function PlaygroundDesktopExperience() {
           if (name === "changelog") {
             return new ChangelogRunner({ adapter, terminalId, onExit });
           }
+          if (name === "dor") {
+            return fsHost.startDor(terminalId, args, shellRegistry.cwdOf(terminalId) ?? playgroundFs.PLAYGROUND_CWD, onExit);
+          }
           return null;
         },
+        { fs: fsHost.fs, cwd: playgroundFs.PLAYGROUND_CWD },
       );
       shellRegistryRef.current = shellRegistry;
 
@@ -262,7 +267,7 @@ function PlaygroundDesktopExperience() {
       // the terminal first spawns, after its state reset, so nothing clobbers it.
       const paneById = new Map(DESKTOP_PANES.map((p) => [p.id, p]));
       for (const pane of DESKTOP_PANES) {
-        registry.setPendingShellOpts(pane.id, { title: pane.title });
+        registry.setPendingShellOpts(pane.id, { title: pane.title, shell: "/bin/fake" });
       }
       // Subscribe before Wall mounts so the spawn fired by TerminalPane's
       // mount effect doesn't race past us. If the pty already exists by
@@ -289,6 +294,8 @@ function PlaygroundDesktopExperience() {
       autoStartedRef.current.clear();
       spawnUnsubRef.current?.();
       spawnUnsubRef.current = null;
+      disposeFsRef.current?.();
+      disposeFsRef.current = null;
       busyDemoDisposeRef.current?.();
       busyDemoDisposeRef.current = null;
       if (busyDemoFinishTimerRef.current !== null) {
