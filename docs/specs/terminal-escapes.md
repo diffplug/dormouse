@@ -24,7 +24,22 @@ State-driving and security-sensitive OSCs — plus the `CSI > q` query — are p
 
 Retained semantic-value bounds: `docs/specs/terminal-state.md` -> "Supported OSC Inputs".
 
-**The owner alone acts on the events** its parse produced — writing the responses, feeding its `AlertManager`, forwarding the semantic and Tool events to the owning renderer — and hands every consumer the same chunk ([remote-api.md](remote-api.md#terminal-surfaces)).
+**The owner alone acts on the events** its parse produced, and hands every consumer the same chunk ([remote-api.md](remote-api.md#terminal-surfaces)).
+
+```mermaid
+flowchart LR
+  PTY[PTY read] --> P[createOwnerPtyStream]
+  P -->|reports, boundaries| AM[AlertManager]
+  P -->|query replies| IN[PTY input]
+  P -->|terminal:semanticEvents| TS[TerminalPaneState]
+  P -->|terminal:toolEvents| TL[Tool stores]
+  P -->|terminal:clipboardOffer| CE[copy editor]
+  P -->|pty:data| X[owner xterm.js]
+  P -->|same chunk| SUB[other subscribers]
+  RP[pty:replay] --> OS[parseReplay in webview]
+  OS -->|semantic, Tool events| TS & TL
+  OS -->|visibleData| X
+```
 
 **A sink that subscribes inside a forwarded string control starts at the next ground byte**, a cancel releasing it as surely as a terminator (rationale); only a late attachment is ever held, the owner's renderer being there from spawn.
 
@@ -38,11 +53,11 @@ Source of truth: `oscDispositionAt` in `lib/src/lib/terminal-protocol.ts`, `crea
 
 **Supported semantic sequences are consumed and never re-emitted** — empty or unparseable payloads, unrecognized `OSC 1337` subcommands, `OSC 50`, and `OSC 52` included. **`OSC 8` and the recognized ImageAddon `OSC 1337` forms are the exceptions**: they stay in `pty:data` so xterm.js owns hyperlink regions and inline graphics. Dormouse supplies only the hyperlink activation handler. Every other OSC family passes through unchanged, so xterm.js handles standard behavior Dormouse does not model.
 
-**`textData` is the same chunk with every string-control payload removed**, for consumers reading output as text; every other control is left for `stripTerminalControls`. The webview receives them apart: `pty:data` (the stripped output; feeds xterm.js), `terminal:semanticEvents` (normalized CWD / prompt-command / title events; feeds `TerminalPaneState`), and `terminal:toolEvents` (OSC 367, [dor-tool.md](dor-tool.md#osc-367)). **Notification-derived state never travels as `pty:data`**: the parse site feeds its own process's `AlertManager`.
+**`textData` is the same chunk with every string-control payload removed**, for consumers reading output as text; every other control is left for `stripTerminalControls`. Tool events are OSC 367 ([dor-tool.md](dor-tool.md#osc-367)). **Notification-derived state never travels as `pty:data`.**
 
 Each chunk is also classified for the quiesce detector: **the activity monitor's `onData()` fires only when `visibleData` is non-empty**, so a chunk of nothing but notification/progress OSCs is not meaningful output, while one carrying visible output alongside them is.
 
-Replay (`pty:replay`) is the raw stream requiring re-parse: **the webview runs a one-shot parser over the buffered bytes** (`parseReplay` in `lib/src/lib/platform/replay-parse.ts`), so semantic state repopulates and OSCs are stripped before xterm sees them. **Historical replay must not re-fire** alerts, quiesce events, protocol notifications, or query responses — it applies the semantic and Tool events and drops the rest (rationale). **Every parser in a realm holding the theme takes `themeColorProvider`**, one-shot replay parsers included: a *declined* query stays in `visibleData` for the receiving renderer to answer, and answering is the owner's alone (rationale).
+Replay (`pty:replay`) is the raw stream requiring re-parse: **the webview runs a one-shot parser over the buffered bytes** (`parseReplay` in `lib/src/lib/platform/replay-parse.ts`). **Historical replay must not re-fire** alerts, quiesce events, protocol notifications, or query responses — it applies the semantic and Tool events and drops the rest (rationale). **Every parser in a realm holding the theme takes `themeColorProvider`**, one-shot replay parsers included: a *declined* query stays in `visibleData` for the receiving renderer to answer, and answering is the owner's alone (rationale).
 
 ## Supported OSCs
 
