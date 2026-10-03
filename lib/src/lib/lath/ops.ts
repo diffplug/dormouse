@@ -252,12 +252,15 @@ export function swap(tree: LathTree, a: LeafId, b: LeafId): { tree: LathTree; ok
   return { tree: { root }, ok: true };
 }
 
-/** Insert leaf `newId` (normalized weight `w`, the moved leaf's carried weight) beside the
- *  node at `targetPath`, at that node's parent level. Sibling insert when the parent
- *  runs along the edge axis (siblings share the remaining `1 - w`); otherwise nest
- *  the target under a new split (target keeps the `1 - w` complement). `normalize`
- *  extends/flattens as directions dictate. */
-function insertBesideNode(tree: LathTree, targetPath: number[], edge: Edge, newId: LeafId, w: number): LathTree {
+/** Insert leaf `newId` (weight `w`) beside the node at `targetPath`, at that node's
+ *  parent level. Sibling insert when the parent runs along the edge axis: renormalized
+ *  alongside the current siblings, or with `keepSiblings` the siblings share the
+ *  remaining `1 - w` (a reorder within the leaf's own split). Otherwise nest the target
+ *  under a new split (target keeps the `1 - w` complement). `normalize` extends/flattens
+ *  as directions dictate. */
+function insertBesideNode(
+  tree: LathTree, targetPath: number[], edge: Edge, newId: LeafId, w: number, keepSiblings = false,
+): LathTree {
   const axis = edgeAxis(edge);
   const before = edgeIsBefore(edge);
   const newLeaf = mkLeaf(newId);
@@ -278,7 +281,8 @@ function insertBesideNode(tree: LathTree, targetPath: number[], edge: Edge, newI
   const idx = targetPath[targetPath.length - 1];
   const parent = nodeAtPath(tree, parentPath);
   if (parent && parent.kind === 'split' && parent.dir === axis) {
-    const children = parent.children.map((child) => ({ node: child.node, weight: child.weight * (1 - w) }));
+    const scale = keepSiblings ? 1 - w : 1;
+    const children = parent.children.map((child) => ({ node: child.node, weight: child.weight * scale }));
     children.splice(before ? idx : idx + 1, 0, { node: newLeaf, weight: w });
     const newParent: LathNode = { kind: 'split', dir: axis, children: normalizeWeights(children) };
     return { root: normalize(replaceAtPath(root, parentPath, newParent)) };
@@ -309,13 +313,24 @@ export function insert(
   target: DropTarget,
   weight = 0.5,
 ): { tree: LathTree; ok: boolean } {
+  return insertImpl(tree, id, target, weight, false);
+}
+
+function insertImpl(
+  tree: LathTree, id: LeafId, target: DropTarget, weight: number, keepSiblings: boolean,
+): { tree: LathTree; ok: boolean } {
   if (target.kind === 'swap' || Number.isNaN(weight)) return { tree, ok: false };
   if (tree.root === null) return { tree, ok: false };
   if (findLeafPath(tree, id) !== null) return { tree, ok: false };
   if (nodeAtPath(tree, target.path) === null) return { tree, ok: false };
   const eps = 1e-6;
   const w = Math.min(Math.max(weight, eps), 1 - eps);
-  return { tree: insertBesideNode(tree, target.path, target.edge, id, w), ok: true };
+  return { tree: insertBesideNode(tree, target.path, target.edge, id, w, keepSiblings), ok: true };
+}
+
+function sameLeafSet(a: LeafId[], b: LeafId[]): boolean {
+  const set = new Set(b);
+  return a.length === set.size && a.every((l) => set.has(l));
 }
 
 /** Move a leaf to a drop target as one op (no token). A `swap` target defers to
@@ -337,7 +352,8 @@ export function move(tree: LathTree, id: LeafId, target: DropTarget): { tree: La
   // The dragged leaf is the whole target subtree / its only descendant leaf — nothing to be beside.
   if (targetLeaves.length === 1 && targetLeaves[0] === id) return { tree, ok: false };
 
-  const w = idPath.length === 0 ? 1 : (nodeAtPath(tree, idPath.slice(0, -1)) as SplitNode).children[idPath[idPath.length - 1]].weight;
+  const parent = idPath.length === 0 ? null : (nodeAtPath(tree, idPath.slice(0, -1)) as SplitNode);
+  const w = parent ? parent.children[idPath[idPath.length - 1]].weight : 1;
 
   const t2 = remove(tree, id).tree;
 
@@ -351,7 +367,12 @@ export function move(tree: LathTree, id: LeafId, target: DropTarget): { tree: La
     if (insertPath === null) return { tree, ok: false };
   }
 
-  const r = insert(t2, id, { kind: 'edge', path: insertPath, edge: target.edge }, w);
+  // Back into its own split: the siblings keep their proportions, so a reorder or a drop
+  // at the leaf's existing boundary changes no other pane. Elsewhere it shares as an insert.
+  const destination = insertPath.length === 0 ? null : nodeAtPath(t2, insertPath.slice(0, -1));
+  const ownSplit = parent !== null && destination?.kind === 'split' && destination.dir === parent.dir
+    && sameLeafSet(leaves({ root: destination }), leaves({ root: parent }).filter((l) => l !== id));
+  const r = insertImpl(t2, id, { kind: 'edge', path: insertPath, edge: target.edge }, w, ownSplit);
   return r.ok ? r : { tree, ok: false };
 }
 

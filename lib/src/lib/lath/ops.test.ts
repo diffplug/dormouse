@@ -154,6 +154,14 @@ describe('move', () => {
     });
   });
 
+  it('shares a leaf moved into another split alongside its new siblings', () => {
+    const t = tree(mk('row', [leaf('a'), 0.5], [mk('col', [leaf('b'), 0.5], [leaf('c'), 0.5]), 0.5]));
+    const out = move(t, 'a', { kind: 'edge', path: [1, 1], edge: 'bottom' });
+    expect(rects(out.tree, R(0, 0, 90, 90))).toEqual({
+      b: R(0, 0, 90, 30), c: R(0, 30, 90, 30), a: R(0, 60, 90, 30),
+    });
+  });
+
   it('moves a leaf beside an ancestor split (“beside the whole column”)', () => {
     const t = tree(mk('row', [leaf('a'), 0.5], [mk('col', [leaf('b'), 0.5], [leaf('c'), 0.5]), 0.5]));
     const out = move(t, 'a', { kind: 'edge', path: [1], edge: 'right' });
@@ -196,6 +204,14 @@ describe('insert', () => {
     const out = insert(leafTree('a'), 'b', { kind: 'edge', path: [], edge: 'right' }, 0.75);
     expect(out.tree).toEqual(tree(mk('row', [leaf('a'), 0.25], [leaf('b'), 0.75])));
     expect(validate(out.tree)).toEqual([]);
+  });
+
+  it('renormalizes a sibling insert alongside the existing children', () => {
+    const t = tree(mk('row', ...['a', 'b', 'c', 'd'].map((id): [ReturnType<typeof leaf>, number] => [leaf(id), 0.25])));
+    const out = insert(t, 'X', { kind: 'edge', path: [3], edge: 'right' });
+    expect(rects(out.tree, R(0, 0, 90, 10))).toEqual({
+      a: R(0, 0, 15, 10), b: R(15, 0, 15, 10), c: R(30, 0, 15, 10), d: R(45, 0, 15, 10), X: R(60, 0, 30, 10),
+    });
   });
 
   it('rejects a NaN insertion weight without corrupting the tree', () => {

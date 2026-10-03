@@ -61,20 +61,21 @@ describe('hitTest — hierarchical depth (leaf + ancestors sharing a boundary)',
   );
 
   it('yields leaf → ancestor → deeper-ancestor candidates in depth order (external drag)', () => {
-    // The leaf and its same-axis parent produce the identical split; only the
-    // distinct column-wide alternative survives deduplication.
+    // External drag (dragged null): insert never perturbs the ancestry, so all three
+    // coinciding levels survive as distinct results.
     const cands = hitTest(t, RECT, { x: 490, y: 150 }, null, opts); // b's right edge
     expect(cands.map((c) => c.target)).toEqual([
       { kind: 'edge', path: [0, 0, 1], edge: 'right' },
+      { kind: 'edge', path: [0, 0], edge: 'right' },
       { kind: 'edge', path: [0], edge: 'right' },
     ]);
-    expect(cands.map((c) => c.depth)).toEqual([0, 1]);
+    expect(cands.map((c) => c.depth)).toEqual([0, 1, 2]);
     for (const c of cands) {
       expect(c.previewRect).toEqual(insertPreview(t, c.target));
     }
-    // Each preview is a different destination.
+    // The three previews are genuinely different destinations.
     const keys = cands.map((c) => JSON.stringify(c.previewRect));
-    expect(new Set(keys).size).toBe(2);
+    expect(new Set(keys).size).toBe(3);
   });
 });
 
