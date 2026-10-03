@@ -103,7 +103,7 @@ sequenceDiagram
   participant F as viewer iframe
   participant SW as /playground-fs/ service worker
   participant P as top-level playground windows
-  F->>SW: GET /playground-fs/token/route
+  F->>SW: request /playground-fs/token/route
   alt route is assets/*
     SW-->>F: the static /builtin-viewer/ build
   else any other route
