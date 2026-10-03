@@ -111,6 +111,8 @@ import {
 } from './wall/lath-wall-engine';
 import type { LeafMeta } from '../lib/lath/persistence';
 import { useToolServing } from './wall/use-tool-serving';
+import { useToolReaper } from './wall/use-tool-reaper';
+import { rehydrateTool } from './wall/tool-reaper';
 import type { WallNav } from './wall/keyboard/types';
 import { useWallKeyboard } from './wall/use-wall-keyboard';
 import { useSessionPersistence } from './wall/use-session-persistence';
@@ -1741,7 +1743,9 @@ export function Wall({
 
   // --- dor control plane (the `dor` CLI's webview handler) ---
   // A tool grows its browser when its command starts serving.
-  useToolServing({ lath, doorsRef, paused: useCallback(() => closingWorkspaceRef.current || isWorkspaceTransferPending(effectiveWorkspaceId), [effectiveWorkspaceId]) });
+  const toolsPaused = useCallback(() => closingWorkspaceRef.current || isWorkspaceTransferPending(effectiveWorkspaceId), [effectiveWorkspaceId]);
+  useToolServing({ lath, doorsRef, paused: toolsPaused });
+  useToolReaper({ lath, doors, doorsRef, active, paused: toolsPaused });
 
   const previewSlot = usePreviewSlotPin(lath);
   const { findSurfaceByParams, updateSurfaceParams, handleDorControl } = useDorControl({
@@ -1836,7 +1840,11 @@ export function Wall({
           if (closingWorkspaceRef.current || isWorkspaceTransferPending(effectiveWorkspaceId)
             || !lath.getMeta(match.id) || lath.isDying(match.id) || isClosingSurface(match.id)) return;
           const state = getTerminalPaneState(match.id);
-          if (state.currentCommand === null) {
+          const rehydrated = rehydrateTool(lath, match.id);
+          if (rehydrated) {
+            if (await waitForNewToolCommand(match.id, rehydrated.command, rehydrated.cwd) !== 'ready') showShellSpawnNotice(match.id, 'command did not restart');
+          }
+          else if (state.currentCommand === null) {
             const matchedCommand = lath.getMeta(match.id)?.params?.command;
             const command = typeof matchedCommand === 'string' ? matchedCommand : toolRunCommand(resolved.run, match.id);
             const restarted = await restartSurfaceInPlace(match.id, command, state.cwd?.path ?? cwd, undefined, { acceptCompletedRun: true });

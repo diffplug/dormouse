@@ -34,7 +34,8 @@ export function pathSegments(path: string, { strict = false } = {}): string[] | 
 }
 
 /** What a `dor __view-*` entry prints for its caller: an OSC 2 title naming
- * `target` and the OSC 367 `serve` announcement. */
-export function viewerAnnouncement(viewer: { port: number; path: string }, target: string): string {
-  return `\x1b]2;${viewerTitle(target)}\x07${serveSequence(viewer)}`;
+ * `target` and the OSC 367 `serve` announcement, declaring `dehydrate` when the
+ * viewer emits its state on the graceful-stop signal. */
+export function viewerAnnouncement(viewer: { port: number; path: string }, target: string, { dehydrate = false } = {}): string {
+  return `\x1b]2;${viewerTitle(target)}\x07${serveSequence({ port: viewer.port, path: viewer.path, dehydrate: dehydrate || undefined })}`;
 }

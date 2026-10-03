@@ -88,6 +88,7 @@ export interface TauriAdapter extends AlertClientMethods {}
  */
 export class TauriAdapter implements PlatformAdapter {
   readonly offersLabs = true;
+  readonly reapsTools = true;
   private dataHandlers = new Set<(detail: PtyDataDetail) => void>();
   private exitHandlers = new Set<(detail: { id: string; exitCode: number }) => void>();
   private listHandlers = new Set<(detail: PtyListDetail) => void>();

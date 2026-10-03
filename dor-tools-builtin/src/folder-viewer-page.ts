@@ -54,6 +54,7 @@ const SCRIPT = `(function () {
   var previewTimer = 0;
   var sequence = 0;
   var selectsSettled = Promise.resolve(); // once every select sent so far has settled; never rejects
+  var stateTimer = 0;
 
   function fail(error) { status.textContent = error && error.message ? error.message : String(error); }
   function indent(level) { return (4 + (level - 1) * 12) + 'px'; }
@@ -183,6 +184,65 @@ const SCRIPT = `(function () {
     if (node.expanded && !node.loaded && !node.loading) {
       node.loading = load(node).catch(fail).then(function () { node.loading = null; });
     }
+    reportState();
+  }
+
+  // The view this process writes as its dehydrate payload when it is stopped
+  // while idle, and reopens from when it starts again: the expanded folders
+  // shown, the selection, and the ignored-files toggle.
+  function viewState() {
+    var expanded = [];
+    (function walk(node) {
+      node.children.forEach(function (child) {
+        if (child.kind === 'dir' && child.expanded) { expanded.push(child.path); walk(child); }
+      });
+    })(root);
+    return { expanded: expanded, selected: selected ? selected.path : null, showIgnored: showIgnored };
+  }
+  function reportState() {
+    clearTimeout(stateTimer);
+    stateTimer = setTimeout(function () {
+      request('state', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(viewState()) })
+        .catch(function () {});
+    }, 300);
+  }
+  // A loaded node at a page path; a compacted row's path is its whole chain.
+  function find(path) {
+    var found = null;
+    (function walk(node) {
+      node.children.forEach(function (child) {
+        if (found) return;
+        if (child.path === path) found = child;
+        else if (child.kind === 'dir' && child.loaded && path.indexOf(child.path + '/') === 0) walk(child);
+      });
+    })(root);
+    return found;
+  }
+  // One depth at a time, each level's folders loading together, so a parent
+  // is listed before its children; a path the folder no longer has is skipped.
+  function restore(saved) {
+    if (!saved || !Array.isArray(saved.expanded)) return Promise.resolve();
+    if (saved.showIgnored === false) setShowIgnored(false);
+    var levels = [];
+    saved.expanded.forEach(function (path) {
+      var depth = path.split('/').length;
+      (levels[depth] = levels[depth] || []).push(path);
+    });
+    var chain = Promise.resolve();
+    levels.forEach(function (paths) {
+      chain = chain.then(function () {
+        return Promise.all(paths.map(function (path) {
+          var node = find(path);
+          if (!node || node.kind !== 'dir' || node.expanded) return null;
+          toggle(node, true);
+          return node.loading;
+        }));
+      });
+    });
+    return chain.then(function () {
+      var node = typeof saved.selected === 'string' ? find(saved.selected) : null;
+      if (node && !hidden(node)) select(node, false);
+    });
   }
 
   // The latest request alone owns the status line; a superseded preview is not an error.
@@ -212,10 +272,11 @@ const SCRIPT = `(function () {
     if (node !== selected) status.textContent = '';
     if (selected) selected.li.setAttribute('aria-selected', 'false');
     selected = node;
-    if (!node) { tree.removeAttribute('aria-activedescendant'); return; }
+    if (!node) { tree.removeAttribute('aria-activedescendant'); reportState(); return; }
     node.li.setAttribute('aria-selected', 'true');
     tree.setAttribute('aria-activedescendant', node.li.id);
     node.row.scrollIntoView({ block: 'nearest' });
+    reportState();
     if (node.kind !== 'file' || !preview) return;
     if (preview === 'now') send('select', node);
     else previewTimer = setTimeout(function () { send('select', node); }, 150);
@@ -279,12 +340,14 @@ const SCRIPT = `(function () {
     event.preventDefault();
     if (next && next !== selected) select(next, 'settle');
   });
-  show.addEventListener('click', function () {
-    showIgnored = !showIgnored;
+  function setShowIgnored(value) {
+    showIgnored = value;
     show.setAttribute('aria-pressed', String(showIgnored));
     tree.classList.toggle('hide-ignored', !showIgnored);
     if (selected && hidden(selected)) select(null, false);
-  });
+    reportState();
+  }
+  show.addEventListener('click', function () { setShowIgnored(!showIgnored); });
   document.getElementById('refresh').addEventListener('click', function () {
     status.textContent = '';
     refresh().catch(fail);
@@ -295,7 +358,9 @@ const SCRIPT = `(function () {
     });
     tree.focus();
   });
-  load(root).catch(fail);
+  load(root).then(function () {
+    return request('state').then(restore, function () {});
+  }).catch(fail);
 })();`;
 
 /** The folder viewer's one page. Entry names reach the DOM only through

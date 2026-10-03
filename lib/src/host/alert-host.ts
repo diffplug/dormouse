@@ -200,6 +200,9 @@ export function createAlertHost(options: AlertHostOptions): AlertHost {
         case 'clearTodo':
           manager.clearTodo(id);
           return;
+        case 'silenceRun':
+          manager.silenceRun(id);
+          return;
       }
     },
 

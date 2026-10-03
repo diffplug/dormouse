@@ -34,6 +34,7 @@ const DETACHED = Symbol('detached');
 export interface VSCodeAdapter extends AlertClientMethods {}
 
 export class VSCodeAdapter implements PlatformAdapter {
+  readonly reapsTools = true;
   // VS Code owns the theme here: it provides --vscode-* itself and has its own
   // theme UI, so Dormouse hides the Settings dialog's Theme row.
   readonly hostOwnsTheme = true;

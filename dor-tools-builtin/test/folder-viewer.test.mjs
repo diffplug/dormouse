@@ -4,10 +4,12 @@ import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { request } from 'node:http';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
 import { runInNewContext } from 'node:vm';
 import { afterEach, beforeEach, test } from 'node:test';
-import { oscOpen, startFolderViewer } from '../dist/folder-viewer.js';
+import { folderDehydrateSequence, oscOpen, readFolderViewState, startFolderViewer } from '../dist/folder-viewer.js';
+import { parseToolDehydrate, readDehydrated, TOOL_PAYLOAD_LIMIT } from 'dor-tools-lib/osc';
 import { folderViewerPage } from '../dist/folder-viewer-page.js';
 
 const posixOnly = { skip: process.platform === 'win32' ? 'POSIX file names and symlinks' : false };
@@ -272,11 +274,13 @@ test('no route returns file contents', async () => {
 });
 
 /** Runs the page's script against a stub DOM whose root lists the files
- * `names`. Each POST it sends waits in `posts` until the test settles it. */
-async function runPage(names) {
+ * `names`, or whose directories list as `listings` maps them. Each select or
+ * activate it sends waits in `posts` until the test settles it; view-state
+ * reports land in `states`, and `saved` answers its restore. */
+async function runPage(names, { listings = null, saved = null } = {}) {
   class Element {
-    constructor() { this.style = {}; this.classList = { toggle() {} }; this.handlers = {}; }
-    setAttribute() {}
+    constructor() { this.style = {}; this.classList = { toggle() {} }; this.handlers = {}; this.attributes = {}; }
+    setAttribute(name, value) { this.attributes[name] = value; }
     removeAttribute() {}
     appendChild(child) { return child; }
     addEventListener(type, handler) { this.handlers[type] = handler; }
@@ -291,13 +295,25 @@ async function runPage(names) {
   };
   const answer = body => ({ ok: true, text: async () => JSON.stringify(body) });
   const posts = [];
-  const fetch = (url, init) => init
-    ? new Promise((resolve, reject) => posts.push({ sent: `${url} ${JSON.parse(init.body).path}`, ok: () => resolve(answer({ ok: true, status: 'created' })), fail: () => reject(new Error('lost')) }))
-    : Promise.resolve(answer({ entries: names.map(name => entry(name, 'file')), truncated: false }));
+  const states = [];
+  const listing = url => {
+    const dir = decodeURIComponent(url.slice('list?dir='.length));
+    return listings ? listings[dir] ?? [] : names.map(name => entry(name, 'file'));
+  };
+  const fetch = (url, init) => {
+    if (url === 'state') {
+      if (init) states.push(JSON.parse(init.body));
+      return Promise.resolve(answer(init ? { ok: true } : saved));
+    }
+    return init
+      ? new Promise((resolve, reject) => posts.push({ sent: `${url} ${JSON.parse(init.body).path}`, ok: () => resolve(answer({ ok: true, status: 'created' })), fail: () => reject(new Error('lost')) }))
+      : Promise.resolve(answer({ entries: listing(url), truncated: false }));
+  };
   runInNewContext(/<script>([\s\S]*)<\/script>/.exec(folderViewerPage(root))[1], { document, fetch, setTimeout, clearTimeout });
   await settle();
   const tree = elements.tree.handlers;
   return {
+    items, elements, states,
     posts, sent: () => posts.map(post => post.sent),
     click: (name, detail = 1) => tree.click({ target: items[names.indexOf(name)], detail }),
     dblclick: name => tree.dblclick({ target: items[names.indexOf(name)] }),
@@ -355,4 +371,106 @@ test('answers a page-visible error when JSON escaping makes an open payload too 
     assert.match(result.error, /^Cannot open /);
   }
   assert.deepEqual(written, []);
+});
+
+test('restores the view it is handed, parents first, selecting without a preview', async () => {
+  const listings = {
+    '': [entry('src', 'dir'), entry('README.md', 'file')],
+    src: [entry('lib', 'dir'), entry('main.ts', 'file')],
+    'src/lib': [entry('a.ts', 'file')],
+  };
+  // Children before parents, and a folder that is gone: order and absence are the page's to handle.
+  const saved = { expanded: ['src/lib', 'gone', 'src'], selected: 'src/lib/a.ts', showIgnored: false };
+  const page = await runPage([], { listings, saved });
+  for (let i = 0; i < 6; i++) await settle();
+  const expanded = page.items.filter(item => item.attributes['aria-expanded'] === 'true');
+  assert.equal(expanded.length, 2);
+  const selected = page.items.filter(item => item.attributes['aria-selected'] === 'true');
+  assert.equal(selected.length, 1);
+  assert.equal(page.elements.show.attributes['aria-pressed'], 'false');
+  // A restore is not a gesture: no preview opens.
+  assert.deepEqual(page.sent(), []);
+});
+
+test('reports its view to its process as it changes', async () => {
+  const listings = { '': [entry('src', 'dir')], src: [entry('a.ts', 'file')] };
+  const page = await runPage(['src'], { listings });
+  page.click('src');
+  await new Promise(resolve => setTimeout(resolve, 400));
+  assert.deepEqual(page.states.at(-1), { expanded: ['src'], selected: 'src', showIgnored: true });
+});
+
+test('keeps the view the page reports, as relative paths only, and serves it back', async () => {
+  const viewer = await start();
+  assert.equal((await call(viewer, `${viewer.path}state`)).body, 'null');
+  const reported = { expanded: ['src', '../escape', '/abs', 'a\u0007b', 'src/lib'], selected: 'src/lib/a.ts', showIgnored: false };
+  assert.equal((await post(viewer, 'state', reported)).status, 200);
+  const kept = { expanded: ['src', 'src/lib'], selected: 'src/lib/a.ts', showIgnored: false };
+  assert.deepEqual(viewer.viewState(), kept);
+  assert.deepEqual(JSON.parse((await call(viewer, `${viewer.path}state`)).body), kept);
+  // The same Origin and body rules as select and activate.
+  assert.equal((await post(viewer, 'state', reported, { Origin: 'http://evil.test' })).status, 403);
+});
+
+test('starts from the view a rehydrate hands it', async () => {
+  const initial = readFolderViewState({ expanded: ['src'], selected: null, showIgnored: true });
+  const viewer = await startFolderViewer(root, { open: async () => ({ ok: true, status: 'sent' }), initial });
+  viewers.push(viewer);
+  assert.deepEqual(JSON.parse((await call(viewer, `${viewer.path}state`)).body), initial);
+});
+
+test('its dehydrate payload round-trips, dropping expansions until it fits the host bound', () => {
+  const state = { expanded: ['src', 'src/lib'], selected: 'README.md', showIgnored: false };
+  const content = sequence => /^\u001b]367;(.*)\u0007$/s.exec(sequence)[1];
+  assert.deepEqual(readFolderViewState(readDehydrated(parseToolDehydrate(content(folderDehydrateSequence(state))).payload)), state);
+  const many = { ...state, expanded: Array.from({ length: 256 }, (_, i) => `dir-${i}/${'x'.repeat(40)}`) };
+  const sequence = folderDehydrateSequence(many);
+  assert.ok(sequence.length <= TOOL_PAYLOAD_LIMIT + 32);
+  const restored = readDehydrated(parseToolDehydrate(content(sequence)).payload);
+  assert.ok(restored.expanded.length > 0 && restored.expanded.length < 256);
+  assert.deepEqual(restored.expanded, many.expanded.slice(0, restored.expanded.length));
+});
+
+/** `dor __view-folder` as a real process: what it prints, until it exits. */
+function viewerProcess(dir, env = {}) {
+  const runtime = pathToFileURL(join(import.meta.dirname, '../dist/runtime.js')).href;
+  const script = `const { runFolderViewer } = await import(${JSON.stringify(runtime)}); process.stdout.write(await runFolderViewer(${JSON.stringify(dir)}));`;
+  const child = spawn(process.execPath, ['--input-type=module', '-e', script], { env: { ...process.env, DORMOUSE_DEHYDRATE: '', ...env }, stdio: ['ignore', 'pipe', 'inherit'] });
+  let output = '';
+  child.stdout.on('data', chunk => { output += chunk; });
+  const exited = new Promise(resolve => child.on('exit', resolve));
+  const announced = new Promise((resolve, reject) => {
+    const check = () => {
+      const serve = /\u001b]367;serve;([^\u0007]*)\u0007/.exec(output);
+      if (serve) { child.stdout.off('data', check); resolve(JSON.parse(serve[1])); }
+    };
+    child.stdout.on('data', check);
+    child.on('exit', () => reject(new Error(`exited before announcing: ${output}`)));
+  });
+  return { child, exited, announced, output: () => output };
+}
+
+test('a real viewer declares itself safe to stop, writes its view on Ctrl+C, and reopens from it', { skip: process.platform === 'win32' ? 'SIGINT cannot be sent to a Windows child' : false }, async () => {
+  await files({ src: null, 'src/lib': null, 'src/lib/a.ts': '' });
+  const first = viewerProcess(root);
+  const serve = await first.announced;
+  assert.equal(serve.dehydrate, true);
+  const viewer = { port: serve.port, path: serve.path };
+  const view = { expanded: ['src', 'src/lib'], selected: 'src/lib/a.ts', showIgnored: false };
+  assert.equal((await post(viewer, 'state', view)).status, 200);
+  first.child.kill('SIGINT');
+  await first.exited;
+  const payload = /\u001b]367;dehydrate;([^\u0007]*)\u0007/.exec(first.output())?.[1];
+  assert.ok(payload, first.output());
+  assert.deepEqual(readDehydrated(payload), view);
+
+  // Rehydrated: the view it was handed; anything else it cannot read starts collapsed.
+  for (const [dehydrate, expected] of [[payload, view], ['garbage', null], ['', null]]) {
+    const next = viewerProcess(root, { DORMOUSE_DEHYDRATE: dehydrate });
+    const announced = await next.announced;
+    const state = await call({ port: announced.port, path: announced.path }, `${announced.path}state`);
+    assert.deepEqual(JSON.parse(state.body), expected);
+    next.child.kill('SIGINT');
+    await next.exited;
+  }
 });

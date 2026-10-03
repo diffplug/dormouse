@@ -1,5 +1,6 @@
 import { clearToolAnnounce } from './tool-announce-store';
 import { clearToolDirty } from './tool-dirty-store';
+import { clearToolReap, isToolReaped } from './tool-reap-store';
 import { clearPreviewTransition } from './preview-transition-store';
 import { serializeTransferTerminal, type TerminalGrid } from './terminal-transfer';
 import { Terminal, type IBufferRange } from '@xterm/xterm';
@@ -198,7 +199,8 @@ function wirePtyEvents(id: string, terminal: Terminal): () => void {
     }
   };
   const handleExit = (detail: { id: string; exitCode: number }) => {
-    if (detail.id !== id) return;
+    // A reaped Tool's kill is not news (`reapTerminal`).
+    if (detail.id !== id || isToolReaped(id)) return;
     terminal.write(`\r\n[Process exited with code ${detail.exitCode}]\r\n`);
     // The PTY process is dead but the pane lingers in the registry; mark it so
     // the directory reports this surface as `alive: false` to the phone.
@@ -466,46 +468,65 @@ export function resumeTerminal(
   return entry;
 }
 
+interface SessionSeed { cwd?: string | null; title?: string | null; shell?: string; untouched?: boolean }
+
+/** A Session's terminal with its saved cwd and title, and no PTY yet. */
+function createSeededEntry(id: string, seed: SessionSeed): TerminalEntry {
+  const entry = setupTerminalEntry(id, { shell: seed.shell, untouched: seed.untouched ?? false });
+  resetTerminalPaneState(id);
+  seedTerminalManualCwd(id, seed.cwd);
+  const trimmedTitle = seed.title?.trim();
+  if (trimmedTitle && trimmedTitle !== UNNAMED_PANEL_TITLE) setTerminalUserTitle(id, trimmedTitle);
+  return entry;
+}
+
+interface SpawnSeed {
+  cwd?: string | null;
+  shell?: string;
+  args?: string[];
+  alert?: PersistedAlertState | null;
+  dehydrate?: string | null;
+}
+
+/** Spawn `entry`'s PTY at `spawnSize`: `alert` seeds the host's state,
+ *  `dehydrate` becomes this spawn's `DORMOUSE_DEHYDRATE`. */
+function spawnEntryPty(id: string, entry: TerminalEntry, spawn: SpawnSeed): void {
+  getPlatform().spawnPty(id, {
+    ...spawnSize(entry),
+    cwd: spawn.cwd ?? undefined,
+    shell: spawn.shell,
+    args: spawn.args,
+    ...(spawn.alert ? { alert: spawn.alert } : {}),
+    ...(spawn.dehydrate ? { dehydrate: spawn.dehydrate } : {}),
+  });
+  seedProcessCwdAfterSpawn(id);
+}
+
+/** Type `command` once the fresh shell reaches a prompt. Seeded before the
+ *  write because this bypasses xterm's keystroke fallback, and typed only at
+ *  a prompt — spawn-then-type is exactly the window shell startup swallows
+ *  keystrokes in. */
+function launchCommand(id: string, command: string, cwd: string | null | undefined, requireIntegration: boolean): void {
+  seedLaunchedCommand(id, command, cwd ?? undefined);
+  typeCommandWhenPromptReady(id, command, requireIntegration);
+}
+
 // A cold restore never replays a transcript — scrollback is not persisted
 // (docs/specs/transport.md -> "What is persisted"). What can come back is the
 // agent the host interrupted on its way down, which this pane re-runs itself.
 export function restoreTerminal(
   id: string,
-  opts: {
-    cwd?: string | null;
-    title?: string | null;
-    shell?: string;
-    args?: string[];
-    untouched?: boolean;
+  opts: SessionSeed & SpawnSeed & {
     resumeCommand?: string | null;
     command?: string | null;
     requireIntegration?: boolean;
-    /** The pane's persisted TODO, seeded by the host at the spawn. */
-    alert?: PersistedAlertState | null;
   },
 ): TerminalEntry {
   const existing = registry.get(id);
   if (existing) return existing;
 
-  const entry = setupTerminalEntry(id, {
-    shell: opts.shell,
-    untouched: opts.untouched ?? false,
-  });
-  resetTerminalPaneState(id);
-  seedTerminalManualCwd(id, opts.cwd);
-  const trimmedTitle = opts.title?.trim();
-  if (trimmedTitle && trimmedTitle !== UNNAMED_PANEL_TITLE) {
-    setTerminalUserTitle(id, trimmedTitle);
-  }
-
-  getPlatform().spawnPty(id, {
-    ...spawnSize(entry),
-    cwd: opts.cwd ?? undefined,
-    shell: opts.shell,
-    args: opts.args,
-    ...(opts.alert ? { alert: opts.alert } : {}),
-  });
-  seedProcessCwdAfterSpawn(id);
+  const entry = createSeededEntry(id, opts);
+  spawnEntryPty(id, entry, opts);
 
   // Revalidated rather than trusted: the snapshot may have been written by an
   // older detector, and this string is about to be executed.
@@ -517,14 +538,64 @@ export function restoreTerminal(
     // an agent simply appears. It also states the discontinuity the resume hides
     // — the interrupted turn did not continue.
     if (resume) entry.terminal.write(`${DIM}⟲ resuming agent session: ${resume}${RESET}\r\n`);
-    // Seeded before the write because this bypasses xterm's keystroke fallback,
-    // and typed only once the fresh shell reaches a prompt — spawn-then-type is
-    // exactly the window shell startup swallows keystrokes in.
-    seedLaunchedCommand(id, command, opts.cwd ?? undefined);
-    typeCommandWhenPromptReady(id, command, opts.requireIntegration === true);
+    launchCommand(id, command, opts.cwd, opts.requireIntegration === true);
   }
 
   return entry;
+}
+
+const REAPED_NOTICE = `${DIM}⏾ Stopped while idle; it restarts when shown${RESET}`;
+
+/** Write a reaped Tool's notice where its prompt would be. */
+function writeReapedNotice(entry: TerminalEntry): void {
+  entry.terminal.write(`\r\n${REAPED_NOTICE}\r\n`);
+}
+
+/**
+ * Kill a reaped Tool's PTY, keeping its terminal: the Session reads as exited,
+ * with its scrollback, title, and cwd, until `rehydrateTerminal`
+ * (`docs/specs/dor-tool.md` -> Reaping). The finish is applied here, since
+ * the standalone host routes no exit for a kill, and the modes a killed TUI
+ * left (alternate screen, mouse reports) are reset before the next shell.
+ */
+export function reapTerminal(id: string): void {
+  const entry = registry.get(id);
+  if (!entry) return;
+  getPlatform().killPty(id);
+  entry.exited = true;
+  if (getTerminalPaneState(id).currentCommand) applyTerminalSemanticEvents(id, [{ type: 'commandFinish' }]);
+  writeReplay(entry, REPLAY_MODE_RESET);
+  writeReapedNotice(entry);
+}
+
+/** A reaped Tool's Session as a resume, cold restore, or Workspace arrival
+ *  rebuilds it: a terminal with no PTY, which `rehydrateTerminal` starts. */
+export function createReapedTerminal(id: string, seed: SessionSeed): TerminalEntry {
+  const existing = registry.get(id);
+  if (existing) return existing;
+  const entry = createSeededEntry(id, seed);
+  entry.exited = true;
+  writeReapedNotice(entry);
+  return entry;
+}
+
+/**
+ * Start a reaped Tool again: a fresh shell under the same Session id, its
+ * command typed once integration reports a prompt, as cold restore types it.
+ * Reuses the reaped terminal, keeping its scrollback and user title.
+ */
+export function rehydrateTerminal(id: string, opts: Omit<SpawnSeed, 'cwd'> & { cwd: string | null; command: string }): void {
+  const entry = registry.get(id);
+  if (!entry) return;
+  const userTitle = getTerminalPaneState(id).titleCandidates.user?.title;
+  entry.exited = false;
+  entry.shellKind = shellCommandKind(opts.shell, PLATFORM_STRING);
+  // A new shell: the old one's integration and prompt state are not its own.
+  resetTerminalPaneState(id);
+  seedTerminalManualCwd(id, opts.cwd);
+  if (userTitle) setTerminalUserTitle(id, userTitle);
+  spawnEntryPty(id, entry, opts);
+  launchCommand(id, opts.command, opts.cwd, true);
 }
 
 /** Reveal a Session's element in `container`. The caller owns fitting: only it knows
@@ -627,6 +698,7 @@ function teardownSession(id: string, { kill }: { kill: boolean }): void {
   removeMouseSelectionState(id);
   clearToolAnnounce(id);
   clearToolDirty(id);
+  clearToolReap(id);
   clearPreviewTransition(id);
   clearTerminalActivity(id);
   clearSizeHold(id);

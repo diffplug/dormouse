@@ -27,6 +27,7 @@ const {
   OPEN_PORT_TIMEOUT_MS,
   OPEN_PORT_TIMEOUT_PER_ID_MS,
   pacedInputSegments,
+  DEHYDRATE_LIMIT,
 } = require('./pty-core');
 
 test('resolveSpawnConfig uses POSIX shell and home defaults', () => {
@@ -71,6 +72,24 @@ test('resolveSpawnConfig prepends dor CLI bin and injects surface id', () => {
   assert.equal(config.env.PATH, '/Applications/Dormouse/dor-cli/bin:/usr/bin');
   assert.equal(config.env.DORMOUSE_CLI_BIN, undefined);
   assert.equal(config.env.DORMOUSE_SURFACE_ID, 'pane-1');
+});
+
+test('resolveSpawnConfig hands a rehydrated Tool its payload, and no other pane an inherited one', () => {
+  const runtime = (env) => ({
+    platform: 'linux',
+    env: { PATH: '/usr/bin', ...env },
+    osModule: { homedir: () => '/home/tester', tmpdir: () => '/tmp/fallback' },
+  });
+  const payload = '{"v":1,"state":{"expanded":["src"]}}';
+  // A host launched from a rehydrated Tool's shell carries one: never every pane's.
+  const inherited = resolveSpawnConfig({ surfaceId: 'pane-1' }, runtime({ DORMOUSE_DEHYDRATE: payload }));
+  assert.equal(inherited.env.DORMOUSE_DEHYDRATE, undefined);
+  const rehydrated = resolveSpawnConfig({ surfaceId: 'pane-1', dehydrate: payload }, runtime({}));
+  assert.equal(rehydrated.env.DORMOUSE_DEHYDRATE, payload);
+  // Past the bound, or unable to sit in an environment block: bare args.
+  for (const dehydrate of ['x'.repeat(DEHYDRATE_LIMIT + 1), 'a\0b', '', 42]) {
+    assert.equal(resolveSpawnConfig({ surfaceId: 'pane-1', dehydrate }, runtime({})).env.DORMOUSE_DEHYDRATE, undefined);
+  }
 });
 
 test('resolveSpawnConfig keeps the sidecar storage roots out of the pane', () => {
@@ -2219,4 +2238,26 @@ test('gracefulKill([]) kills nothing and still answers', async () => {
   mgr.gracefulKill([], 1, 'req-1');
   await done;
   assert.deepEqual(pty.killed, []);
+});
+
+// A killed generation's exit lands after the kill; once a reaped Tool respawns
+// under the id it would end the new Session (docs/specs/dor-tool.md -> Reaping).
+test('a generation replaced under its id never reports its exit; a killed one does', () => {
+  const events = [];
+  const pty = fakePtyModule();
+  const mgr = create((event, data) => events.push({ event, data }), pty.module);
+  mgr.spawn('a');
+  mgr.kill('a');
+  pty.listeners.get('a').exit({ exitCode: 1 });
+  assert.deepEqual(events.filter((e) => e.event === 'exit').map((e) => e.data.exitCode), [1]);
+  events.length = 0;
+  mgr.spawn('a');
+  const killedGeneration = pty.listeners.get('a');
+  mgr.kill('a');
+  mgr.spawn('a');
+  killedGeneration.exit({ exitCode: 0 });
+  assert.deepEqual(events.filter((e) => e.event === 'exit'), []);
+  assert.equal(mgr.hasPty('a'), true);
+  pty.listeners.get('a').exit({ exitCode: 3 });
+  assert.deepEqual(events.filter((e) => e.event === 'exit').map((e) => e.data.exitCode), [3]);
 });

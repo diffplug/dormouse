@@ -76,7 +76,9 @@ __dormouse_633_user_pc="$PROMPT_COMMAND"    # preserve the user's PROMPT_COMMAND
 __dormouse_633_prompt() {
   local exit_code=$?
   __dormouse_633_armed=
-  if [ -n "$__dormouse_633_ran" ]; then printf '\033]633;D;%s\007' "$exit_code"; fi
+  # A rehydrated Tool's payload belongs to its first command alone
+  # (docs/specs/dor-tool.md -> Reaping); no later command inherits it.
+  if [ -n "$__dormouse_633_ran" ]; then printf '\033]633;D;%s\007' "$exit_code"; unset DORMOUSE_DEHYDRATE; fi
   __dormouse_633_ran=
   __dormouse_633_safe_cwd "$PWD"
   printf '\033]633;P;Cwd=%s\007' "$__dormouse_633_out"

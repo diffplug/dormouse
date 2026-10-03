@@ -3,7 +3,7 @@ import { opendir, realpath, stat } from 'node:fs/promises';
 import type { IncomingMessage } from 'node:http';
 import { join } from 'node:path';
 import { resolveBinaryPath, spawnAndCapture } from 'dor-lib-common';
-import { openSequence, validToolOpenPath } from 'dor-tools-lib/osc';
+import { DEHYDRATE_ENV, dehydrateSequence, openSequence, readDehydrated, validToolOpenPath } from 'dor-tools-lib/osc';
 import { byDisplayOrder, FOLDER_CSP, folderViewerPage } from './folder-viewer-page.js';
 import { announceViewer, HttpError, isInsideRoot, pathSegments, readJsonBody, reply, startCapabilityViewer } from './viewer-server.js';
 
@@ -35,9 +35,49 @@ async function gitIgnored(git: string | undefined, dir: string, names: string[])
   return new Set(result.ok && result.exitCode === 0 ? result.stdout.split('\0').map(path => path.slice(2)) : []);
 }
 
+/** What the page shows beyond the folder itself: the dehydrate payload this
+ * viewer restores from (docs/specs/dor-tool.md -> Reaping). Paths are the
+ * page's own, relative to the root; one a listing no longer has is skipped. */
+export interface FolderViewState { expanded: string[]; selected: string | null; showIgnored: boolean }
+
+/** Expanded directories one state keeps. */
+const VIEW_EXPANDED_LIMIT = 256;
+const VIEW_PATH_LIMIT = 1024;
+
+const viewPath = (value: unknown): value is string =>
+  typeof value === 'string' && value !== '' && value.length <= VIEW_PATH_LIMIT && pathSegments(value, { strict: true }) !== null;
+
+/** A page-reported or restored view state, or null: only relative paths survive. */
+export function readFolderViewState(value: unknown): FolderViewState | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  return {
+    expanded: Array.isArray(record.expanded) ? record.expanded.filter(viewPath).slice(0, VIEW_EXPANDED_LIMIT) : [],
+    selected: viewPath(record.selected) ? record.selected : null,
+    showIgnored: record.showIgnored !== false,
+  };
+}
+
+/** The view state as a `dehydrate` sequence, dropping the last expansions
+ * until it fits the host's bound: fidelity, never correctness. */
+export function folderDehydrateSequence(state: FolderViewState): string {
+  for (let keep = state.expanded.length; ; keep = Math.floor(keep / 2)) {
+    try {
+      return dehydrateSequence({ ...state, expanded: state.expanded.slice(0, keep) });
+    } catch (error) {
+      if (!(error instanceof RangeError) || keep === 0) throw error;
+    }
+  }
+}
+
 /** One Tool process lists one canonical root, a directory at a time, and never
- * serves file contents: select and activate hand a path to `open`. */
-export async function startFolderViewer(input: string, { open }: { open: FolderOpen }): Promise<{ port: number; path: string; root: string; close(): Promise<void> }> {
+ * serves file contents: select and activate hand a path to `open`. Its view
+ * starts from `initial` and follows what the page reports. */
+export async function startFolderViewer(
+  input: string,
+  { open, initial = null }: { open: FolderOpen; initial?: FolderViewState | null },
+): Promise<{ port: number; path: string; root: string; viewState(): FolderViewState | null; close(): Promise<void> }> {
+  let view = initial;
   const root = await realpath(input);
   if (!(await stat(root)).isDirectory()) throw new Error('not a directory');
   const page = folderViewerPage(root);
@@ -131,10 +171,15 @@ export async function startFolderViewer(input: string, { open }: { open: FolderO
     route: async (req, res, prefix) => {
       const url = new URL(req.url!, 'http://localhost');
       const name = url.pathname.startsWith(prefix) ? url.pathname.slice(prefix.length) : undefined;
-      if (req.method === 'POST') {
+      if (req.method === 'POST' && name === 'state') {
+        view = readFolderViewState(await readJsonBody(req, BODY_LIMIT)) ?? view;
+        reply(res, 200, '{"ok":true}', 'application/json');
+      } else if (req.method === 'POST') {
         if (name !== 'select' && name !== 'activate') throw new HttpError(404);
         const target = await resolveInside(await requestedPath(req));
         reply(res, 200, JSON.stringify(await open(target, name === 'select')), 'application/json');
+      } else if (name === 'state') {
+        reply(res, 200, JSON.stringify(view), 'application/json');
       } else if (name === '') {
         reply(res, 200, page, 'text/html; charset=utf-8');
       } else if (name === 'list') {
@@ -144,17 +189,25 @@ export async function startFolderViewer(input: string, { open }: { open: FolderO
       }
     },
   });
-  return { port: viewer.port, path: viewer.prefix, root, close: viewer.close };
+  return { port: viewer.port, path: viewer.prefix, root, viewState: () => view, close: viewer.close };
 }
 
 /** The `dor __view-folder <dir>` entry: starts the viewer, which outlives the
  * call, and returns its title and OSC 367 announcement for the caller to print.
  * Select and activate write OSC 367 `open` to this Tool's terminal, in the
  * order the page sends them; the host answers nothing, showing a failure in
- * the preview slot. */
+ * the preview slot. It is safe to stop: on Ctrl+C it writes its view as a
+ * `dehydrate` payload, and restores it from `DORMOUSE_DEHYDRATE`. */
 export async function runFolderViewer(dir: string): Promise<string> {
-  const viewer = await startFolderViewer(dir, { open: oscOpen(text => process.stdout.write(text)) });
-  return announceViewer(viewer, viewer.root);
+  // A rehydrated viewer reopens as it was; anything else starts collapsed.
+  const initial = readFolderViewState(readDehydrated(process.env[DEHYDRATE_ENV]));
+  const viewer = await startFolderViewer(dir, { open: oscOpen(text => process.stdout.write(text)), initial });
+  return announceViewer(viewer, viewer.root, {
+    dehydrate: () => {
+      const view = viewer.viewState();
+      return view ? folderDehydrateSequence(view) : null;
+    },
+  });
 }
 
 /** Writes each open as an OSC 367 `open`. A path the host would refuse (a

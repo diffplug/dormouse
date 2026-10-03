@@ -11,7 +11,7 @@
 
 | Entry point | Tool side | Host side |
 |---|---|---|
-| `osc` | `serveSequence`, `stateSequence`, `openSequence`: throw on a value the host would ignore | `parseToolAnnounce`, `parseToolState`, `parseToolOpen`, `validToolServePath` |
+| `osc` | `serveSequence`, `stateSequence`, `openSequence`, `dehydrateSequence`: throw on a value the host would ignore; `readDehydrated` | `parseToolAnnounce`, `parseToolState`, `parseToolOpen`, `parseToolDehydrate`, `validToolServePath` |
 | `protocol` | `readHostMessage` | `readFrameMessage` (sanitizes and bounds a save error) |
 | `frame` | `connectToolFrame` | — |
 

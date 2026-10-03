@@ -72,6 +72,7 @@ Source of truth: `BUILTIN_HANDLERS` in `dor-tools-builtin/src/file-viewer-format
 - **Must read at most 100,000 names and retain at most 5,000 entries before following symlinks**, selected by raw directory kind and name; return the retained entries in display order by resolved kind, directories first.
 - **Must route the page's select and activate through its own process**: a same-origin POST to its capability listener, which writes it to the Tool's terminal as an OSC 367 `open` (`docs/specs/dor-tool.md` → OSC 367), `preview` for a select, in arrival order. The page learns only that it was sent, or, for a path or serialized payload the OSC encoder refuses, an error instead of a write.
 - **Must hold an activate until every select in flight settles**, keeping selects concurrent. (rationale)
+- **Must be safe to stop** (`docs/specs/dor-tool.md` → Reaping): the process writes the view its page reports — expanded folders, selection, ignored toggle, as root-relative paths — as its `dehydrate` payload and reopens it, skipping vanished paths, with no preview.
 
 Source of truth: `runFolderViewer` in `dor-tools-builtin/src/folder-viewer.ts`; `folderViewerPage` in `dor-tools-builtin/src/folder-viewer-page.ts`. Tests: `dor-tools-builtin/test/folder-viewer.test.mjs`.
 

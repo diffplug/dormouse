@@ -115,6 +115,34 @@ Source of truth: `useToolServing` in `lib/src/components/wall/use-tool-serving.t
 
 Source of truth: `ToolPanel` in `lib/src/components/wall/ToolPanel.tsx`.
 
+## Reaping
+
+A **reap** stops an idle Tool's Session, shell included; **rehydrate** starts it again in the same Surface, which keeps its leaf, Tool metadata, scrollback, rename, and alert, and reads as an exited Session meanwhile.
+
+**Must reap only a Tool whose running designated command declared itself safe to stop** with `dehydrate: true` in the run's latest `serve` ([OSC 367](#osc-367)): its args alone restart it, and a payload only adds fidelity. Clean or unreported state never qualifies (rationale). **Never reap a Tool** that reports unsaved changes, announced `persist: "never"`, is a marked preview slot or popped out, awaits approval, has an auxiliary helper, or belongs to a closing or transferring Workspace.
+
+**Must reap only after 30 minutes continuously out of sight** — Doored, in an inactive Workspace, or in a hidden webview — **with no PTY output** (rationale): never on the minimize or switch itself, and never for memory pressure. The stop:
+
+1. Silence the run's command-exit alert, then write Ctrl+C to the PTY, the graceful-stop signal on every platform; ConPTY delivers it as `CTRL_C_EVENT` (rationale).
+2. Keep the last `dehydrate` payload the run emits from then until the kill; none earlier counts.
+3. Kill the PTY at the prompt or after a grace, whichever comes first, so a hung Tool blocks nothing.
+
+**Must rehydrate a reaped Tool when it becomes visible, or when `dor tool` or `dor open` matches it** (reporting `adopted`), never into a closing or transferring Workspace: a fresh shell in the run's directory, the saved command typed as cold restore types it ([Persistence and hosts](#persistence-and-hosts)). It degrades in tiers:
+
+| Tier | When |
+| --- | --- |
+| Dehydrated | A payload was captured: `DORMOUSE_DEHYDRATE` holds it |
+| Bare args | No payload was captured |
+| Error | The run fails: its output stays above the prompt, never retyped (rationale) |
+
+- **Must hand the payload to the rehydrated run alone**: the host sets `DORMOUSE_DEHYDRATE` on that spawn and strips an inherited one from every other, and shell integration unsets it when the first command finishes.
+- **Must keep the payload in renderer memory, never on disk** (rationale). A `reaped` mark in Tool metadata persists, so a resume, cold restore, or Workspace transfer keeps the Tool reaped, to rehydrate from bare args when shown.
+- **Must refuse a Workspace transfer or Surface move while a Tool is stopping.**
+
+Standalone and VS Code reap; the website playground runs no processes and reaps nothing.
+
+Source of truth: `useToolReaper` in `lib/src/components/wall/use-tool-reaper.ts`; `lib/src/lib/tool-reap-store.ts`.
+
 ## Naming
 
 **Must name a serving Tool's Pane header from its params and a user rename alone**, never its port, page, or terminal output, so the name changes only with a retarget, a runtime re-key, or a rename (rationale). The first that applies:
@@ -310,18 +338,20 @@ Source of truth: `toolTakesOverCaller` / `toolRerunsInCaller` in `lib/src/compon
 
 ## OSC 367
 
-**Must consume OSC 367 at the PTY owner's parser**, including malformed and unknown verbs, and emit no reply. `serve`, `state`, and `open` are implemented verbs. The escape registry is `docs/specs/terminal-escapes.md`.
+**Must consume OSC 367 at the PTY owner's parser**, including malformed and unknown verbs, and emit no reply. `serve`, `state`, `open`, and `dehydrate` are the verbs. The escape registry is `docs/specs/terminal-escapes.md`.
 
-- **Must sanitize and bound the payload before retaining it.** `parseToolAnnounce`, `parseToolState`, and `parseToolOpen` own the field shapes and validation limits.
+- **Must sanitize and bound the payload before retaining it.** `parseToolAnnounce`, `parseToolState`, `parseToolOpen`, and `parseToolDehydrate` own the field shapes and validation limits.
 - **Must reject invalid encoder inputs and serialized payloads exceeding the host's limit**, including JSON escaping that expands an otherwise valid field. (rationale)
-- **Must reject a payload naming a version this contract does not speak.** `state` and `open` require `v: 1`; `serve` reads an omitted `v` as 1 and refuses any other value — a future v2's rejection path.
+- **Must reject a payload naming a version this contract does not speak.** `state`, `open`, and `dehydrate` require `v: 1`; `serve` reads an omitted `v` as 1 and refuses any other value — a future v2's rejection path.
+- **Must take a `dehydrate` payload only from live output during its Session's stop** ([Reaping](#reaping)), whole and unparsed beyond the version, as the value of `DORMOUSE_DEHYDRATE`. `dehydrateSequence` builds it from a Tool's JSON `state`; `readDehydrated` reads that value back as the state, or null for a missing, malformed, oversized, or unknown-version one.
 - **Must treat an optional serve `path` as a path/query on the discovered port, never as another authority.** Accept at most 2,048 characters starting with one `/`, with no backslash, ASCII whitespace, C0/C1 control, or DEL; invalid paths are ignored and the default is `/`. The port still must belong to the designated Session's process tree. Live binding memory includes the path; durable saves omit it.
 - **Must forward parsed announcements, state reports, open requests, and command-start resets in stream order to the owning renderer.** A start clears the previous command's announcement and unsaved state; later reports in that chunk survive. Both hosts forward each parse's events as one `terminal:toolEvents` message; the fake adapter applies them locally.
 - **Must reconstruct announcements, state, and resets from raw replay without emitting replies or acting on an `open`**, preserving transferred announcements when since-mark replay has no command start, and clear the renderer record on Session disposal. Ordinary terminal announcements stay inert.
-- Reserved: **Must retain `name`, `dehydrate`, and `persist` as inert parsed fields**, serving the announced-name and D1/D2 items under [Future](#future). Neither `persist: never` nor a `dehydrate` verb changes current persistence.
+- **Must read a `serve` carrying only `dehydrate` or `persist` as an announcement**, which selects no port. `dehydrate: true` and `persist: "never"` govern [Reaping](#reaping) alone; `persist: "respawn"` is the default, and neither changes cold restore.
+- Reserved: **Must retain `name` as an inert parsed field**, serving the announced-name item under [Future](#future).
 - **Must act on `open` only from live output of a Tool Session whose designated command is running**, as `dor open` from that Session (`--preview` when `preview` is true), resolved from the Session's local CWD, else the target's directory. The path is absolute, with no control character; the Tool gets no answer.
 - **Must show a failed `open` in the preview slot**: a preview whose lookup fails runs the built-in error viewer there instead (`docs/specs/dor-tools-builtin.md` → Error viewer), and a failed activate is sent again as a preview unless a newer `open` from that Session followed it.
-- Reserved: **Never assign an OSC 367 verb beyond `serve`, `state`, `open`, and `dehydrate`**; `dehydrate` belongs to D2 under [Future](#future), while existing title/progress protocols keep those roles.
+- **Never assign an OSC 367 verb beyond `serve`, `state`, `open`, and `dehydrate`**; existing title/progress protocols keep those roles.
 
 Source of truth: `dor-tools-lib/src/osc.ts`; `TerminalProtocolParser` in `lib/src/lib/terminal-protocol.ts`; `applyLiveToolEvents` in `lib/src/lib/tool-events.ts`; `dispatchToolOpens` in `lib/src/lib/tool-open-requests.ts`.
 
@@ -381,13 +411,6 @@ Source of truth: `PersistedToolMetadata` in `lib/src/lib/session-types.ts`; `cap
 
 **Scope: dor-tools** — remaining design, in implementation order.
 
-- **D1 — reaping without cooperation.** Idle-threshold reap +
-  rehydrate-from-args + `persist: "never"`: every stateless tool, no new API,
-  no Windows question. Establish an explicit safe-to-stop contract first;
-  clean or unknown state alone is insufficient.
-- **D2 — dehydrate/rehydrate.** The `367;dehydrate` verb +
-  `DORMOUSE_DEHYDRATE`, opted into by the `dehydrate` flag the shipped `serve`
-  payload already reserves. The Windows graceful-stop is needed here only.
 - **The announced `name`.** Wire the reserved [OSC 367](#osc-367) `name` into
   the title-candidates channel and `dor list`'s location column.
 - **Later** — `prespawn_*` beyond the dedupe literal: a computed key, and
@@ -399,33 +422,11 @@ Source of truth: `PersistedToolMetadata` in `lib/src/lib/session-types.ts`; `cap
 
 **Scope: open-folder** — the [Preview slot](#preview-slot)'s speed within the open rules: opt-in retarget without restart, built-in viewer first.
 
-### Dehydrate and rehydrate
-
-**Reap a tool announcing `dehydrate: true` on an idle threshold while
-`Doored` / `Hidden`** — Surfaces of an inactive Workspace included — **never on
-the minimize itself** (reattach must not cost a boot every time) **or under
-memory pressure**. The headline case is Workspaces, not shutdown: an inactive
-Workspace of dehydratable tools drops to zero processes, relieving the
-parked-surface pressure hidden Workspaces carry (`docs/specs/layout.md`
-→ Workspaces; `docs/specs/tiling-engine.md` → Parked leaves).
-
-**This is an in-session mechanism.** The payload lives with the running host;
-whether it survives a host quit follows each host's session-persistence story
-(`docs/specs/transport.md`). The flow: host sends the graceful-stop signal →
-tool emits `367;dehydrate;{json}` on the way out → rehydrate respawns with
-`DORMOUSE_DEHYDRATE` in the env.
-
-**Args-only restart is the mandatory floor; the payload is fidelity, never
-correctness.** Degradation is Lath-restore-token style — dehydrated state →
-bare args → error. Small versioned JSON, never a document. A hung tool blocks
-nothing: request, grace, kill anyway, fall back to args.
-
 ### Open questions
 
 The [OSC 367](#osc-367) collision sweep before the contract is frozen (xterm
 ctlseqs plus the iTerm2/kitty/WezTerm/ConEmu private ranges; runners-up 3676
-and 4242); the Windows graceful-stop for D2; the dehydrate idle-threshold
-default; whether `persist` belongs in the announce or the file (currently the
+and 4242); whether `persist` belongs in the announce or the file (currently the
 announce — self-knowledge, like a runtime re-key); the final marketing noun
 ("Dor Tools" carries the LLM-tool-use collision-avoidance; the spec says
 "tool" throughout).
