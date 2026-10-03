@@ -1,14 +1,9 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { createConnection } from 'node:net';
+import type { ControlEndpoint } from './commands/types.js';
 import { MethodControlClient } from './control-methods.js';
 import type { DorControlMethod, DorControlResult } from './protocol.js';
 
-export interface SocketControlClientOptions {
-  socketPath: string;
-  token: string;
-  surfaceId?: string;
-  timeoutMs?: number;
-}
 
 // Must match standalone/sidecar/dor-control-server.js, the other half of this
 // handshake. The two live in different packages (a bundled ESM CLI and a plain
@@ -49,7 +44,7 @@ export class SocketControlClient extends MethodControlClient {
   // across simultaneous invocations.
   private readonly idBase = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
-  constructor(options: SocketControlClientOptions) {
+  constructor(options: ControlEndpoint) {
     super();
     this.socketPath = options.socketPath;
     this.token = options.token;
