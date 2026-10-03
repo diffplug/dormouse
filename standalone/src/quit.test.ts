@@ -41,6 +41,7 @@ vi.mock("./updater", () => ({
 }));
 
 import { initQuitFlow, setQuitConfirmGate, _resetForTesting } from "./quit";
+import { addPendingKill } from "dormouse-lib/lib/pending-kills";
 import {
   getQuitConfirmPhase,
   openQuitConfirm,
@@ -125,6 +126,16 @@ describe("quit orchestrator", () => {
 
     expect(adapter.requestSessionFlush).toHaveBeenCalled();
     expect(mocks.invoke).toHaveBeenCalledWith("quit_proceed");
+  });
+
+  it("finalizes every pending kill before the agent capture, so none is resumed", async () => {
+    const finalize = vi.fn();
+    addPendingKill({ kind: "surface", id: "pending", workspaceId: "w1", title: "t", label: "Terminal" }, { restore: vi.fn(), finalize });
+    const adapter = fakeAdapter();
+    vi.mocked(adapter.captureAgentRecovery).mockImplementation(async () => { expect(finalize).toHaveBeenCalledOnce(); });
+    await triggerQuit(adapter);
+    expect(finalize).toHaveBeenCalledOnce();
+    expect(adapter.captureAgentRecovery).toHaveBeenCalled();
   });
 
   it("runs teardown steps capture → flush → kill → flush → window → drain → install → proceed in order", async () => {

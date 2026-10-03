@@ -3,6 +3,8 @@ import { createWorkspace, resetWorkspaces, getWorkspacesSnapshot } from '../../l
 import type { PersistedSession } from '../../lib/session-types';
 import { registerWallHandle, resetWallHandles, stubWallHandle } from './wall-handles';
 import { windowNeedsCloseConfirmation, windowReopenSnapshot } from './window-reopen';
+import { _resetPendingKillsForTesting, addPendingKill } from '../../lib/pending-kills';
+import { applyTerminalSemanticEvents, removeTerminalPaneState } from '../../lib/terminal-state-store';
 
 const session = (id: string): PersistedSession => ({
   version: 3,
@@ -38,6 +40,19 @@ describe('closing one window of several', () => {
     createWorkspace({ id: 'ws-2', name: 'docs', activate: false });
     registerWallHandle(stubWallHandle(getWorkspacesSnapshot().workspaces[0].id, { needsCloseConfirmation: () => false }));
     expect(windowNeedsCloseConfirmation()).toBe(true);
+  });
+
+  it('asks when a pending kill still runs a command', () => {
+    twoWorkspaces(null);
+    addPendingKill({ kind: 'surface', id: 'gone', workspaceId: 'ws-2', title: 'build', label: 'Terminal' }, { restore: () => {}, finalize: () => {} });
+    try {
+      expect(windowNeedsCloseConfirmation()).toBe(false);
+      applyTerminalSemanticEvents('gone', [{ type: 'commandStart' }]);
+      expect(windowNeedsCloseConfirmation()).toBe(true);
+    } finally {
+      _resetPendingKillsForTesting();
+      removeTerminalPaneState('gone');
+    }
   });
 
   it('asks, and leaves no record, when any Workspace would ask', () => {

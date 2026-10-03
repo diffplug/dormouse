@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { flushWindowSession } from "dormouse-lib/lib/window-session-aggregator";
+import { finalizePendingKills } from "dormouse-lib/lib/pending-kills";
 import { DEFAULT_RECOVERY_WAIT_MS } from "dormouse-lib/host/recovery-capture";
 import type { TauriAdapter } from "./tauri-adapter";
 import { dismissQuitConfirm, quitRunningWork } from "./quit-confirm-store";
@@ -109,6 +110,9 @@ async function runQuitTeardown(last: boolean): Promise<void> {
   const adapter = quitAdapter;
   try {
     void invoke("quit_progress").catch(() => {}); // teardown phase begins
+    // Nothing pending survives a quit, nor is captured for resume
+    // (docs/specs/reopen.md → "Labs: No-confirm delayed kill").
+    finalizePendingKills();
     if (adapter) {
       await withTimeout(
         (async () => {

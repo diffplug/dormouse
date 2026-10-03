@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { windowNeedsCloseConfirmation, windowReopenSnapshot } from "dormouse-lib/components/wall/window-reopen";
+import { finalizePendingKills } from "dormouse-lib/lib/pending-kills";
 import { openQuitConfirm } from "./quit-confirm-store";
 import { createTeardownFlow } from "./teardown-flow";
 import type { TauriAdapter } from "./tauri-adapter";
@@ -59,6 +60,8 @@ async function runCloseTeardown(): Promise<void> {
   // First, while every Session is still here to read: the closing webview
   // dies, so the host keeps the record (docs/specs/reopen.md).
   await pushReopenRecord().catch((err) => console.warn("[window-close] no reopen record; proceeding", err));
+  // Nothing pending outlives its window (docs/specs/reopen.md).
+  finalizePendingKills();
   try {
     // Remove the snapshot BEFORE the kill, so an exit-triggered save cannot
     // write it back: Rust refuses every later save for this label.

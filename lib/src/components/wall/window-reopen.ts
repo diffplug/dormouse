@@ -2,6 +2,8 @@ import { withFreshSurfaceIds } from '../../lib/session-remap';
 import type { PersistedWindow, PersistedWorkspace, WorkspaceId } from '../../lib/session-types';
 import { generateWorkspaceId, getWorkspacesSnapshot } from '../../lib/workspace-store';
 import { getWallHandle } from './wall-handles';
+import { getPendingKills } from '../../lib/pending-kills';
+import { countRunningSessionsIn } from '../../lib/terminal-state-store';
 
 /**
  * Closing one window of several (`docs/specs/reopen.md` → "Workspaces and
@@ -9,10 +11,17 @@ import { getWallHandle } from './wall-handles';
  * that asks nothing leaves the host a record to reopen it from.
  */
 
-/** Whether closing this Window asks first: any Workspace's close would, or a
- *  Workspace's Wall has not mounted to say what it holds. */
+/** Whether closing this Window asks first: any Workspace's close would, a
+ *  Workspace's Wall has not mounted to say what it holds, or a pending kill
+ *  holds running work (`docs/specs/reopen.md`). */
 export function windowNeedsCloseConfirmation(): boolean {
-  return getWorkspacesSnapshot().workspaces.some(workspace => getWallHandle(workspace.id)?.needsCloseConfirmation() ?? true);
+  return getWorkspacesSnapshot().workspaces.some(workspace => getWallHandle(workspace.id)?.needsCloseConfirmation() ?? true)
+    || countRunningSessionsIn(pendingKillSessionIds()) > 0;
+}
+
+/** Every Session a pending kill keeps alive. */
+function pendingKillSessionIds(): string[] {
+  return getPendingKills().flatMap(kill => kill.kind === 'workspace' ? getWallHandle(kill.id)?.surfaceIds() ?? [] : [kill.id]);
 }
 
 /**
