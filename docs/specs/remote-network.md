@@ -49,19 +49,15 @@ Under `local` each runtime — a one-time link, or the persistent Burrow — is 
 - **Never describe the level as proof of proximity** — a range is an address range, which another network can reuse, and a permitted peer can forward.
 - **Never enroll Hosted into a customer's tailnet** or mint per-customer hostnames.
 
-**The path refusal: where the path ends a direct-only session a path policy holds — refused, or given up or past the deadline once the phone offered — `EstablishedE2eSession` records a `PathRefusal`**, paired and one-time alike, its end chosen in this order:
+**The path refusal: where the path ends a direct-only session a path policy holds — refused, or given up or past the deadline once the phone offered — `EstablishedE2eSession` records a `PathRefusal`**, paired and one-time alike, its end from the first row that applies:
 
-```mermaid
-flowchart TD
-  A{policy refused this end's address, or no candidate of this end?} -- yes --> L["end: 'local', localAddress"]
-  A -- no --> B{policy refused the pair's remote end, address known?}
-  B -- yes --> O["end: 'remote', observed"]
-  B -- no --> C{offer carried a public IP outside the allowed networks?}
-  C -- yes --> R["end: 'remote', reported"]
-  C -- no --> D{remote end refused?}
-  D -- yes --> M["end: 'remote'"]
-  D -- no --> K[no end]
-```
+| Condition | `end` | Address |
+|---|---|---|
+| The policy refused the pair's local end, or this end had no candidate | `local` | this machine's own (`localAddress`) |
+| It refused the pair's remote end, whose address is known | `remote` | `observed` |
+| The phone's offer carried a public IP outside the allowed networks | `remote` | `reported` |
+| It refused the remote end, no address known | `remote` | none |
+| Otherwise | none | none |
 
 - **`end: 'local'` names only this machine's own address; `observed` is the only evidence; `reported`, read before the strip, blames nothing** (rationale).
 - **The goodbye carries only the phone's address** (`docs/specs/remote-api.md` -> Transport), on the relay before the switch; the phone shows `networkNotAllowedMessage`, **never told the allowed networks, nor that a `reported` address is off them**; no address, or no goodbye, keeps the generic copy.
