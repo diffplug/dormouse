@@ -72,7 +72,7 @@ Source of truth: `TerminalProtocolParser` / `commandLineEvents` in `lib/src/lib/
 
 ## Shell-integration injection
 
-**Dormouse injects its own shell integration when it spawns a shell** (rationale); the scripts emit the `OSC 633` rows above (`A`, `B`, `C`, `D;<exit>`, `E`, `P;Cwd=`). **Injection is fail-safe**: missing scripts skip it and the shell spawns as before, on the [Keystroke fallback](#keystroke-fallback). An env channel fires as reliably as the `PATH` prepend; an args channel only for the launch shapes below (rationale).
+**Dormouse injects its own shell integration when it spawns a shell** (rationale); the scripts emit the `OSC 633` boundaries above (`A`, `B`, `C`, `D;<exit>`, `E`, `P;Cwd=`). **Injection is fail-safe**: missing scripts skip it and the shell spawns as before, on the [Keystroke fallback](#keystroke-fallback). An env channel fires as reliably as the `PATH` prepend; an args channel only for the launch shapes below (rationale).
 
 | Shell | Channel | Injected when |
 |---|---|---|
