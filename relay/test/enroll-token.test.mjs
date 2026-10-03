@@ -310,11 +310,10 @@ test('releasing a claim never clobbers a still-newer installer offer', async () 
   assert.equal(await redeemEnrollToken(path, newest.token), 'redeemed');
 });
 
-test('an offer deleted mid-redemption rejects, whichever half lost', async () => {
+test('an offer deleted between its read and its claim rejects', async () => {
+  // Deleted before the read is the spent-offer case below.
   const path = await offerPath(offer());
-  const redemption = redeemEnrollToken(path, TOKEN);
-  await unlink(path);
-  assert.equal(await redemption, 'rejected');
+  assert.equal(await redeemEnrollToken(path, TOKEN, () => unlink(path)), 'rejected');
 });
 
 test('a file that exists but is not an offer warns the operator, naming it', async () => {
