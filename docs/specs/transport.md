@@ -69,7 +69,7 @@ Source of truth: `ITERM2_COMPAT_VERSION` in `standalone/sidecar/pty-core.js` and
 
 1. The visible or deserialized webview calls `requestInit` (VS Code: `{ type: 'dormouse:init' }`).
 2. The host answers `pty:list` (one `PtyInfo` per owned PTY), then `pty:replay` for each PTY with buffered output, then `alert:state` for each.
-3. The webview resumes terminals with their launch shells for Session-specific clipboard/drop escaping.
+3. The webview resumes terminals with their launch shells (consumer: `docs/specs/mouse-and-clipboard.md` -> "8.6 Paste Content").
 4. A saved layout is reused only when its leaves match the live visible pane set; saved minimized PTYs are registered as Doors.
 
 **A collection finishes only on its own answer**: a host serving several windows echoes the `requestInit` token on the `pty:list` and every `pty:replay` behind it, and the collector ignores a different one (rationale). **An answer carrying no token is taken** — the hosts that echo none (VS Code, Pocket, the website) run one collector per JS realm. **A collection that timed out is not one that found no PTYs**, and `LivePtys` says which; cold-restoring on a timeout starts a second set of shells over the running ones. **A collector given `retryTimeoutMs` asks once more before reporting silence** (rationale), and **`resumeOrRestore` and `restoreWindow` ask for it only when the saved session names a terminal pane**. Source of truth: `collectLivePtys` in `lib/src/lib/reconnect.ts`; `list` in `standalone/sidecar/pty-core.js`.
