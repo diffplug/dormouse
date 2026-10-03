@@ -257,12 +257,11 @@ function resolveSurfaceTarget(
   surfaces: DorSurface[],
   target: string | undefined,
   callerSurfaceId: string | undefined,
-  anchorSurfaceId = callerSurfaceId,
 ): ParseResult<DorSurface> {
   // A caller this Wall does not hold never reaches here as one: the router
   // drops it before dispatching (`requestForWall`), so an omitted target falls
-  // back to the anchor, else this Workspace's focused Surface.
-  const resolvedTarget = target ?? anchorSurfaceId ?? 'surface:focused';
+  // back to this Workspace's focused Surface.
+  const resolvedTarget = target ?? callerSurfaceId ?? 'surface:focused';
   const classified = classifySurfaceTarget(resolvedTarget);
   const matches = surfaces.filter((surface) => matchesTarget(classified, surface, callerSurfaceId));
   const single = pickSingleMatch(matches, resolvedTarget);
@@ -272,7 +271,7 @@ function resolveSurfaceTarget(
   if (classified.kind === 'title') {
     return { ok: false, message: `surface target '${resolvedTarget}' was not found` };
   }
-  const fallback = !target && !anchorSurfaceId ? (surfaces[0] ?? null) : null;
+  const fallback = !target && !callerSurfaceId ? (surfaces[0] ?? null) : null;
   if (fallback) return { ok: true, value: fallback };
   return { ok: false, message: `surface '${resolvedTarget}' was not found` };
 }
@@ -720,14 +719,12 @@ export function useDorControl({
   const resolveVisibleSurface = useCallback((
     target: string | undefined,
     callerSurfaceId: string | undefined,
-    anchorSurfaceId?: string,
-  ): ParseResult<DorSurface> => resolveSurfaceTarget(buildDorSurfaces(), target, callerSurfaceId, anchorSurfaceId), [buildDorSurfaces]);
+  ): ParseResult<DorSurface> => resolveSurfaceTarget(buildDorSurfaces(), target, callerSurfaceId), [buildDorSurfaces]);
 
   const resolveListedSurface = useCallback((
     target: string | undefined,
     callerSurfaceId: string | undefined,
-    anchorSurfaceId?: string,
-  ): ParseResult<DorSurface> => resolveSurfaceTarget(buildDorSurfaceList(), target, callerSurfaceId, anchorSurfaceId), [buildDorSurfaceList]);
+  ): ParseResult<DorSurface> => resolveSurfaceTarget(buildDorSurfaceList(), target, callerSurfaceId), [buildDorSurfaceList]);
 
   // The shared prelude of every handler that acts on an existing surface
   // (send / read / await / kill / resolve*): a target surface is required and
@@ -1050,11 +1047,15 @@ export function useDorControl({
       return;
     }
 
-    // New work goes beside the target, else the anchor (the caller, or a
-    // helper's source), else focus. An anchor that disappears while lookup
-    // waits fails rather than falling back to focus, as does a closing target.
+    // New work goes beside the target, else the caller or a helper's source,
+    // else focus. A source that is hidden, or disappears while lookup waits,
+    // fails rather than falling back to focus, as does a closing target.
     const resolvePlacement = (resolve: typeof resolveListedSurface): ParseResult<DorSurface> => {
-      const result = resolve(stringParam(params.surface), detail.surfaceId, detail.placementSurfaceId);
+      const explicit = stringParam(params.surface);
+      const result = resolve(explicit ?? detail.placementSurfaceId, detail.surfaceId);
+      if (!result.ok && explicit === undefined && detail.placementSurfaceId) {
+        return { ok: false, message: 'The helper source Surface is not available for placement' };
+      }
       if (result.ok && !isTargetable(result.value.id)) {
         return { ok: false, message: 'The placement Surface is closing' };
       }

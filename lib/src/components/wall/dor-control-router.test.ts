@@ -99,10 +99,20 @@ describe('dor control routing', () => {
     expect(target.handleDorControl).toHaveBeenCalledTimes(1);
   });
 
-  it('refuses a missing helper source instead of falling back to the active Workspace', () => {
-    handleFor(getWorkspacesSnapshot().workspaces[0].id, ['unrelated']);
-    expect(resolveDorControlRoute(request({ surfaceId: 'helper', helperParentId: 'gone' })))
-      .toEqual({ kind: 'error', message: 'The helper source Surface is no longer available' });
+  it('waits for a helper source to register, then refuses rather than using the active Workspace', async () => {
+    vi.useFakeTimers();
+    try {
+      const unrelated = handleFor(getWorkspacesSnapshot().workspaces[0].id, ['unrelated']);
+      const late = dispatch(request({ surfaceId: 'helper', helperParentId: 'late' }));
+      const owner = handleFor(createWorkspace({ id: 'ws-late', activate: false }).id, ['late']);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(owner.handleDorControl).toHaveBeenCalledTimes(1);
+      const gone = dispatch(request({ surfaceId: 'helper', helperParentId: 'gone' }));
+      await vi.advanceTimersByTimeAsync(10);
+      expect(gone.respond).toHaveBeenCalledWith({ ok: false, error: 'The helper source Surface is no longer available' });
+      expect(late.respond).not.toHaveBeenCalled();
+      expect(unrelated.handleDorControl).not.toHaveBeenCalled();
+    } finally { vi.useRealTimers(); }
   });
 
   it('captures in-process helper identity from the registry without aliasing self', () => {

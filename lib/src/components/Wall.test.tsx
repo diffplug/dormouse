@@ -4490,6 +4490,15 @@ describe('dor from helper terminals', () => {
     expect(listed.mock.calls[0][0].result.surfaces.some((s: { id: string }) => s.id === 'helper-a')).toBe(false);
   });
 
+  it('names the helper source when it is hidden instead of placing beside focus', async () => {
+    await act(async () => root.render(<Wall initialPaneIds={['pane-a', 'pane-b']} />));
+    act(() => container.querySelector<HTMLButtonElement>('[data-lath-leaf="pane-a"] [aria-label="Minimize"]')!.click());
+    await flush();
+    const response = await issue('surface.iframe', { url: 'http://localhost:8080' });
+    expect(response).toHaveBeenCalledWith({ ok: false, error: 'The helper source Surface is not available for placement' });
+    expect(leafCount()).toBe(1);
+  });
+
   it('preserves an untouched placement target when creating an iframe', async () => {
     await act(async () => root.render(<Wall initialPaneIds={['pane-a']} />));
     const response = await issue('surface.iframe', { url: 'http://localhost:8080' });

@@ -109,7 +109,8 @@ export function resolveDorControlRoute(detail: DorControlRequest): DorControlRou
   const callerAnchor = detail.helperParentId ?? detail.surfaceId;
   const owner = callerAnchor ? wallHandleOwning(callerAnchor) : null;
   if (owner) return { kind: 'handle', handle: owner };
-  if (detail.helperParentId) return { kind: 'error', message: 'The helper source Surface is no longer available' };
+  // The source's Wall may still be registering (a reload, a Workspace transfer).
+  if (detail.helperParentId) return { kind: 'pending', message: 'The helper source Surface is no longer available' };
   // An unknown caller (a shell started outside Dormouse, a killed Surface's
   // late request) is served by the Workspace the user is in.
   const activeId = getActiveWorkspaceId();
