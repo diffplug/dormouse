@@ -206,7 +206,18 @@ where it does not; always `iframe`; for a Tool, only its declarable renders
 other mode.** Screencast resolution is Resize with pane or Fixed size; device
 emulation is CLI-only.
 
-**Resize with pane is owned by the host** (rationale):
+**Resize with pane is owned by the host** (rationale), which reports each
+engagement's state to its panes:
+
+```mermaid
+stateDiagram-v2
+  [*] --> applying: first size of an engagement
+  applying --> synced: viewport taken after the write matches
+  synced --> applying: new size, page shown anew, or new engagement
+  applying --> off: another writer, or Fixed
+  synced --> off: another writer, or Fixed
+  off --> applying: new engagement
+```
 
 - **Must send the pane's laid-out CSS size — never `getBoundingClientRect()`,
   which a Workspace presentation scales — and display ratio over the viewer
@@ -220,8 +231,8 @@ emulation is CLI-only.
   provider vouches for it: agent-browser's changed frames, Playwright's poll
   measurement; never `status`, Playwright's screencast metadata, or the ratio
   (rationale). **One still differing a settle window later, with no write
-  since, is another writer's**: the host stops that browser's sync, reports
-  `off`, and writes no later size of that engagement. **A page shown anew (the
+  since, is another writer's**, and no later size of that engagement is
+  written. **A page shown anew (the
   active tab) is written, never judged.**
 - **A Fixed viewport ends the browser's sync**, after its write in flight;
   **refused if a launch or close of that browser began meanwhile, or the host
@@ -263,6 +274,25 @@ Source of truth: `resolveBrowserViewport` in `dor-lib-common/src/browser-viewpor
 neither bundles nor forks a browser. `dor agent-browser` / `dor playwright` extract identity flags, handle
 `dor-embed-size` and prepare initial sizing ([Viewport presets](#viewport-presets)); native commands then run against the resolved session, and flags
 Dormouse does not model pass through (`docs/specs/dor-cli.md` → Browser Surface Addressing).
+The webview's two channels:
+
+```mermaid
+flowchart LR
+  C[webview]
+  subgraph Host[browser host]
+    BH[createBrowserHost]
+    VS[viewer server, 127.0.0.1]
+  end
+  subgraph Provider
+    CLI[provider CLI or client]
+    UP[agent-browser stream, or CDP]
+  end
+  DOR[dor, trusted] -- native passthrough --> CLI
+  C -- PlatformAdapter.browser --> BH
+  C <-- "ViewerInput / ViewerState, binary ViewerFrame" --> VS
+  BH -- fixed argv or client call --> CLI
+  VS -- bounded local dial --> UP
+```
 
 **Must resolve new GUI launches in a fresh shell environment**, in the browser's
 cwd while it exists (rationale): the host runs the staged `dor __launch-env`
@@ -400,8 +430,7 @@ Source of truth: `lib/src/components/wall/agent-browser-surface-controller.ts`
 never a daemon's stream, never CDP. One loopback listener in the host serves a
 socket per Surface, onto the browser at the stream `view` names; its upgrade
 gate and input rebuilding are audited in `docs/specs/security-local.md` →
-"Loopback Listeners". The messages are `ViewerState`, `ViewerInput` and the
-binary `ViewerFrame`.
+"Loopback Listeners".
 
 - **Must send state only on change, and current state to a connecting socket,
   except `sync`, which answers each size sent.** Agent-browser's `url` is an

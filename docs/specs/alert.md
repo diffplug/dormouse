@@ -166,9 +166,22 @@ An **await** parks on one Session until it finishes what it is doing, then repor
 
 **An await crosses from the renderer to the host process that holds the manager**, and the wait itself never leaves the host:
 
-- The renderer asks to park (`await`, under an `awaitId` its client mints) and, if it gives up, to cancel (`awaitCancel`); **the host answers exactly one `alert:awaitResult {awaitId, outcome}` per await, to the realm that parked it**, a cancel included. **An `awaitId` already parked in that realm is ignored**; a malformed `id` or `until` is answered `cancelled`.
+```mermaid
+sequenceDiagram
+  participant D as dor await
+  participant R as renderer realm
+  participant H as host AlertManager
+  D->>R: control request await
+  R->>H: await {realm-minted awaitId, id, until, timeoutMs}
+  opt dor hangs up or server reaper fires
+    R->>H: awaitCancel {awaitId}
+  end
+  H-->>R: alert:awaitResult {awaitId, outcome}
+  R-->>D: resolved / timeout / died, or error if cancelled
+```
+
+- **The host answers exactly one `alert:awaitResult` per await, to the realm that parked it**, a cancel included. **An `awaitId` already parked in that realm is ignored**; a malformed `id` or `until` is answered `cancelled`.
 - **A realm that ends — a disposed or recreated webview, a reloaded or closed window — has everything it parked cancelled and answered by the host, *synchronously*** (rationale); a disposing adapter settles its own.
-- `cancelled` has no wire outcome of its own: the renderer reports it to `dor` as an error, which is also what forgets the in-flight control request.
 - The fake adapter runs the same host in process. The Pocket phone adapter has no `dor` and protocol-v1 carries no await, so it settles every request `cancelled` at once.
 - **An await survives a Workspace transfer**: the manager never moves (Live Workspace transfer).
 

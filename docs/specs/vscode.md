@@ -165,11 +165,23 @@ The shared `BurrowService` (`docs/specs/relay.md` → "Burrow side", which owns 
 
 Source of truth: `VsCodeBurrowStateStore` in `vscode-ext/src/burrow-store.ts`, `markOneTimeServing` and `contendIfServing` in `vscode-ext/src/burrow.ts`.
 
-**Which window: bind-as-lease.** Unarbitrated, every window's extension host would start a Burrow against the same enrollment and fight over the one `/ws/burrow` socket (rationale), so **the bind is the lease**. Every contending window binds one fixed path — `<hash>.sock` in a per-user `dormouse-peer-<uid>` directory in the temp dir, or `\\.\pipe\dormouse-peer-<hash>` on Windows — **the hash is the first 12 hex characters of SHA-256 over `context.globalStorageUri.fsPath`**, so every window, whatever its build, computes the same path (hashed for the platform path cap; rationale). The winner is the broker and runs the service; everyone else connects to it as a client.
+**Which window: bind-as-lease.** **The bind is the lease**, so the windows' extension hosts never fight over the enrollment's one `/ws/burrow` socket (rationale). Every contending window binds one fixed path — `<hash>.sock` in a per-user `dormouse-peer-<uid>` directory in the temp dir, or `\\.\pipe\dormouse-peer-<hash>` on Windows — **the hash is the first 12 hex characters of SHA-256 over `context.globalStorageUri.fsPath`**, so every window, whatever its build, computes the same path (hashed for the platform path cap; rationale). The winner is the broker and runs the service; everyone else connects to it as a client.
+
+```mermaid
+stateDiagram-v2
+  [*] --> Unsettled: start trigger
+  Unsettled --> Broker: uncontested bind
+  Unsettled --> Client: connect, welcome verified
+  Unsettled --> Provisional: refused twice → unlink, rebind
+  Provisional --> Broker: stillOurs
+  Provisional --> Unsettled: path replaced or gone
+  Client --> Unsettled: broker socket closed
+  Unsettled --> StoodDown: unsafe directory, or token wait exhausted
+```
 
 - **Roles never flip downward**: no `onRole(false)` after a `true` (rationale).
-- **Contend on broker death, not on a timer**: when the broker exits every client's socket closes and they race to bind; `bind` picks exactly one. No TTL, heartbeat file, or watcher.
-- **A corpse is cleared, then the bind is re-checked**: **never unlink on the first refusal**, and a window whose bound socket was replaced or removed stands down (`stillOurs`; rationale).
+- **Contend on broker death, not on a timer**: `bind` picks exactly one; no TTL, heartbeat file, or watcher.
+- **A corpse is cleared, then the bind is re-checked**: **never unlink on the first refusal** (rationale).
 - **A bind is not a role until it is believed**: every "is this window the broker" answer reads `brokerConfirmed`, so **unverified reads as unsettled** and a command landing mid-verification is held for the verdict (rationale).
 - **Errors after `listen` are logged, not thrown**, so a late server error cannot take the extension host down (rationale).
 
@@ -180,7 +192,7 @@ Source of truth: `VsCodeBurrowStateStore` in `vscode-ext/src/burrow-store.ts`, `
 *The handshake.* The shared secret is a mode-0600 `burrow.peer-token` in `globalStorageUri`, **created once with an exclusive `wx` write rather than a rename** so two windows starting together agree on one token. **Treat an empty read as *not yet written*, never as the token**, waiting it out with a bounded retry (rationale); **exhausting that wait latches the same permanent stand-down** as an unsafe directory. The token **never crosses the socket**; three frames prove mutual knowledge of it:
 
 1. `challenge { nonce }` — the *server* speaks first, on accept, so a client never volunteers a proof into whatever bound the path.
-2. `hello { nonce, proof }` — the client answers `HMAC-SHA256(token, "client:" + relayNonce)` with a fresh nonce of its own.
+2. `hello { nonce, proof }` — the client answers `HMAC-SHA256(token, "client:" + challengeNonce)` with a fresh nonce of its own.
 3. `welcome { proof }` — the server verifies in constant time, then answers `HMAC-SHA256(token, "server:" + clientNonce)`.
 
 **Domain-separate the two proofs (`client:` / `server:`)**, or a fake server could reflect the client's proof back as its welcome. **The client verifies the welcome before it sends or answers anything else** — it forwards no notifies (they queue), answers no requests, streams no PTY, forwards no commands — and an unverifiable welcome closes the socket (rationale). **Fresh nonces per connection** make a captured proof worthless on the next. **Parseable JSON that is not a frame object is rejected on both ends**, a first frame that is not a valid hello drops the socket, and **each side bounds the handshake to `HANDSHAKE_BUDGET_MS`**.

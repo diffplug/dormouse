@@ -27,8 +27,6 @@ Source of truth: `snapshotTerminalState` / `restoreTransferredTerminalState` in
 
 ## Supported OSC Inputs
 
-The registry lists the sequences; this section owns what each one means.
-
 CWD, sourced `osc7`, `osc9_9`, `osc633` (`P ; Cwd=`), `osc1337` (`CurrentDir=`):
 
 - **OSC 7 is parsed as a `file:` URI, its host taken from the URL parser's normalized hostname, preserving raw case and the literal `localhost` spelling only.**
@@ -37,7 +35,21 @@ CWD, sourced `osc7`, `osc9_9`, `osc633` (`P ; Cwd=`), `osc1337` (`CurrentDir=`):
 - `process` — the adapter polled the PTY's process for its working directory.
 - `manual` — seeded via `cwdFromManualPath()`. `seedTerminalManualCwd()` (session restore) writes it **only into a pane with no CWD yet**; `seedLaunchedCommand()` (known spawn directory) applies it **unconditionally** — safe only at spawn, before any OSC has reported.
 
-Command lifecycle, for both `OSC 133` and `OSC 633`: `A` → `promptStart`, `B` → `promptEnd`, `D ; <exitCode?>` → `commandFinish`, and:
+Command lifecycle, for both `OSC 133` and `OSC 633`, as `ShellActivity`; any event applies in any state, `D` with an optional exit code:
+
+```mermaid
+stateDiagram-v2
+  direction LR
+  [*] --> unknown
+  unknown --> prompt: A promptStart
+  prompt --> editing: B promptEnd
+  editing --> running: C commandStart
+  running --> finished: D commandFinish
+  finished --> prompt: A
+  running --> prompt: A without D, run dropped
+```
+
+`C` and the command line, by emitter:
 
 - `OSC 133 ; C` → `commandStart(source: "osc133_boundaries")`, preceded by `commandLine` when it carries one: fish ≥ 4's percent-encoded UTF-8 `cmdline_url`, else kitty's `printf %q` `cmdline`, which runs to the end of the sequence.
 - `OSC 633 ; E ; <commandline> [; <nonce>]` → `commandLine` from the command field alone, decoding VS Code `\xAB` / `\\` escapes.
@@ -60,7 +72,7 @@ Source of truth: `TerminalProtocolParser` / `commandLineEvents` in `lib/src/lib/
 
 ## Shell-integration injection
 
-**Dormouse injects its own shell integration when it spawns a shell** (rationale); the scripts emit the `OSC 633` rows above (`A`, `B`, `C`, `D;<exit>`, `E`, `P;Cwd=`). **Injection is fail-safe**: missing scripts skip it and the shell spawns as before, on the [Keystroke fallback](#keystroke-fallback). An env channel fires as reliably as the `PATH` prepend; an args channel only for the launch shapes below (rationale).
+**Dormouse injects its own shell integration when it spawns a shell** (rationale); the scripts emit the `OSC 633` boundaries above (`A`, `B`, `C`, `D;<exit>`, `E`, `P;Cwd=`). **Injection is fail-safe**: missing scripts skip it and the shell spawns as before, on the [Keystroke fallback](#keystroke-fallback). An env channel fires as reliably as the `PATH` prepend; an args channel only for the launch shapes below (rationale).
 
 | Shell | Channel | Injected when |
 |---|---|---|
