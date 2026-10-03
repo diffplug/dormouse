@@ -420,16 +420,27 @@ Three save triggers, in ascending urgency:
 
 **Under a Workspace, a Wall publishes its record to the Window aggregator instead of the platform slot**, comparing each save against its own Workspace's previous record (`docs/specs/transport.md` → "Persisted session types"). **A Wall marks itself dirty only for Surfaces it owns.** VS Code persists one Workspace per webview.
 
-Snapshots are read through `readPersistedSession()`, which discards an unreadable blob so malformed storage starts fresh rather than blocking startup (`docs/specs/transport.md` → "Persisted session types").
+Startup recovery plans each Workspace from its slice of one live-PTY list (`docs/specs/standalone.md` → Persistence); a single-Wall host plans through `resumeOrRestore`.
 
-Startup recovery is priority-based. **A Window plans once per Workspace off one live-PTY list**: one host round trip restores N Workspaces, each taking the slice its own saved panes name (`docs/specs/standalone.md` → Persistence). A single-Wall host reaches the same behavior through `resumeOrRestore`.
+```mermaid
+flowchart TD
+  L{"live PTYs in this slice?"} -- yes --> R["resume: resumeTerminal each"]
+  L -- no --> S{"saved panes?"}
+  S -- no --> E["one new pane"]
+  S -- yes --> C["restore: restoreTerminal per non-browser pane"]
+  R --> RC{"saved session covers every live PTY?"}
+  RC -- no --> RF["live PTYs as fresh splits, no Doors"]
+  RC -- yes --> G{"Lath leaf set = visible panes?"}
+  C --> G
+  G -- yes --> OK["saved layout + saved Doors"]
+  G -- no --> T{"cold, with a visible Tool?"}
+  T -- yes --> SY["single-row layout + saved Doors"]
+  T -- no --> F["fresh splits + saved Doors"]
+```
 
-1. **Resume** (webview recreated, retained Live or Exited PTYs): `resumeTerminal()` each. **Saved pane and door titles are seeded back via `setTerminalUserTitle()`**, so persisted placeholder labels never replay as user pins. If the saved session covers every retained PTY, restore the saved Lath layout when its leaf set matches and reattach saved minimized items as doors. **Never fall through to cold restore just because the visible `paneIds` list is empty** — a wall whose retained sessions are all minimized is still a resume.
-2. **Restore** (app restart, cold start): the Wall's `seed` hydrates from the restored Lath layout, else falls to (3); `restoreTerminal()` per pane with its saved cwd and title, plus the single-use agent resume invocation (`docs/compatible-agents.md` → "Cold restore") and the pane's persisted TODO, which rides the spawn (`docs/specs/alert.md` → Public State). Browser surfaces are rebuilt from their persisted params.
-3. **Fallback/manual pane creation**: with no saved layout safely applicable, add panes as splits from the previous pane.
-4. **Empty state**: one new pane.
-
-Every PTY spawned by (2)–(4) uses the current default shell selection.
+- **Resume** (webview recreated, retained Live or Exited PTYs): **saved pane and door titles are seeded back via `setTerminalUserTitle()`**, so persisted placeholder labels never replay as user pins. **Never fall through to cold restore just because the visible `paneIds` list is empty** — a wall whose retained sessions are all minimized is still a resume.
+- **Restore** (app restart, cold start): each pane respawns with saved cwd and title, plus the single-use agent resume invocation (`docs/compatible-agents.md` → "Cold restore") and the pane's persisted TODO, which rides the spawn (`docs/specs/alert.md` → Public State). Every PTY a restore or the one new pane spawns uses the current default shell selection.
+- **A visible browser Surface is rebuilt only from the saved layout**, which alone carries its params; a browser Door returns with the saved Doors.
 
 Source of truth: `lib/src/components/wall/use-session-persistence.ts` (save triggers); `collectLivePtys` / `resumeOrRestoreFrom` in `lib/src/lib/reconnect.ts` (recovery priority).
 
