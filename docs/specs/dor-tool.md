@@ -208,7 +208,7 @@ Source of truth: `surface.tool` in `lib/src/components/wall/use-dor-control.ts`;
 
 ### Switching the slot
 
-**Must hold a preview's slot as a ghost from the moment `dor open --preview` reaches the renderer until the new view is ready**: what a visible slot last fully showed, never a Door's, and never for a preview from the slot's own Session, which never retargets it. The newest preview takes a switch over, keeping its ghost and a committed switch's ready signals; the switch ends at once when the request places the Tool elsewhere or answers otherwise. Session disposal ends a switch.
+**Must hold a preview's slot as a ghost from the moment `dor open --preview` reaches the renderer until the new view is ready**: what a visible slot last fully showed, never a Door's, and never for a preview from the slot's own Session, which never retargets it. The newest preview takes a switch over, keeping its ghost and a committed switch's ready signals; the switch ends at once when the request places the Tool elsewhere or answers otherwise, and one taken over ends nothing. Session disposal ends a switch.
 
 - **Never reload or reconnect a ghost, and never dim it** (rationale). The ghost takes no input; a press on it selects the pane. Under a browser ghost the terminal face shows only as the switch ends (rationale).
 - **Must count the new view ready** on its browser layer's first document load or screencast frame; for a terminal-only Tool, once visible output (neither OSC nor its command's echo) settles or its command finishes, so a failure shows; or after a fallback timeout.
