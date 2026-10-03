@@ -206,7 +206,14 @@ export function parseToolDehydrate(content: string): ToolDehydrate | null {
  * and the Tool then restarts from its args alone. */
 export function dehydrateSequence(state: unknown): string {
   if (state === undefined || state === null) throw new TypeError('dehydrate state must be a JSON value other than null');
-  return sequence('dehydrate', { v: 1, state });
+  return sequence('dehydrate', { v: 1, state }, escapeC1);
+}
+
+/** JSON leaves DEL and the C1 controls raw, and a C1 ST inside a string would
+ *  end the sequence early; the state is the Tool's own, so escape rather than
+ *  refuse (docs/specs/dor-tool.rationale.md -> OSC 367). */
+function escapeC1(raw: string): string {
+  return raw.replace(/[\u007f-\u009f]/g, c => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`);
 }
 
 /** The state a rehydrated Tool was handed — pass `process.env.DORMOUSE_DEHYDRATE`
@@ -218,10 +225,10 @@ export function readDehydrated<T = unknown>(value: string | undefined): T | null
   return parsed ? (JSON.parse(parsed.payload) as { state: T }).state : null;
 }
 
-function sequence(verb: string, payload: object): string {
+function sequence(verb: string, payload: object, encode: (raw: string) => string = raw => raw): string {
   // JSON escaping can expand a field beyond its own bound. The host caps the
   // serialized payload before parsing, so never emit a sequence it will ignore.
-  const raw = JSON.stringify(payload);
+  const raw = encode(JSON.stringify(payload));
   if (raw.length > PAYLOAD_LIMIT) throw new RangeError('Tool payload exceeds its serialized size limit');
   return `\x1b]367;${verb};${raw}\x07`;
 }

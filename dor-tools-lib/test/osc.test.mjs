@@ -170,6 +170,13 @@ describe('dehydrate', () => {
     assert.equal(parseToolDehydrate(`dehydrate;${oversized}`), null);
   });
 
+  test('escapes the C1 controls JSON leaves raw, so a state string cannot end the sequence', () => {
+    const state = { name: 'a\u009cb\u009d\u007fc' };
+    const sequence = dehydrateSequence(state);
+    assert.ok(!/[\u007f-\u009f]/.test(sequence), JSON.stringify(sequence));
+    assert.deepEqual(readDehydrated(parseToolDehydrate(content(sequence)).payload), state);
+  });
+
   test('the encoder refuses what the host would drop', () => {
     assert.throws(() => dehydrateSequence(null), TypeError);
     assert.throws(() => dehydrateSequence(undefined), TypeError);
