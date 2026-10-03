@@ -7,6 +7,7 @@ import { createWorkspace, generateWorkspaceId, getActiveWorkspaceId, moveWorkspa
 import type { DorControlRequest } from './use-dor-control';
 import { wallBootFromResult } from './wall-types';
 import { getWallHandle } from './wall-handles';
+import { mountingRefusal } from './dor-control-shared';
 import { setWorkspaceBootPlan } from './workspace-boot-plans';
 
 /**
@@ -23,7 +24,12 @@ export const NOTHING_TO_REOPEN = 'Nothing to reopen';
  * `dor reopen` stays focus-neutral and reads the answer instead.
  */
 export async function reopenClosed({ gesture }: { gesture: boolean }): Promise<ReopenResponse | null> {
-  if (await getPlatform().reopenClosedWindow?.(newestReopenClosedAt() ?? 0)) return { status: 'reopened', kind: 'window' };
+  // A host that cannot answer leaves this Window's own records to answer.
+  const reopenedWindow = await getPlatform().reopenClosedWindow?.(newestReopenClosedAt() ?? 0).catch((error: unknown) => {
+    console.warn('[reopen] the host could not reopen a closed window', error);
+    return false;
+  });
+  if (reopenedWindow) return { status: 'reopened', kind: 'window' };
   const record = popReopenRecord();
   if (!record) {
     if (gesture) getWallHandle(getActiveWorkspaceId())?.showNotice(NOTHING_TO_REOPEN);
@@ -36,9 +42,11 @@ function reopenSurface(record: SurfaceReopenRecord, gesture: boolean): ReopenRes
   // A Surface whose Workspace has closed reopens in the active one.
   const handle = getWallHandle(record.workspaceId) ?? getWallHandle(getActiveWorkspaceId());
   if (!handle) {
-    // Nothing mounted to take it: keep the record for the next attempt.
+    // Nothing mounted to take it: keep the record for the next attempt, and
+    // say why rather than that there is nothing to reopen.
     pushReopenRecord(record);
-    return null;
+    if (gesture) return null;
+    throw new Error(mountingRefusal(workspaceRefFor(getActiveWorkspaceId())));
   }
   if (gesture) setActiveWorkspace(handle.workspaceId);
   const { id, ref } = handle.reopenSurface(record, gesture);

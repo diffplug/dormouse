@@ -3297,13 +3297,23 @@ fn reopen_closed_window(
         return Ok(false);
     };
     let label = next_window_label(&windows);
-    let dir = sessions_dir(&app)?;
-    {
-        let _disk = guard(&ARRIVAL_DISK_LOCK);
-        write_session_to(&dir, &label, &closed.snapshot)?;
+    let opened = sessions_dir(&app).and_then(|dir| {
+        {
+            let _disk = guard(&ARRIVAL_DISK_LOCK);
+            write_session_to(&dir, &label, &closed.snapshot)?;
+        }
+        append_log(format!("[window] reopening a closed window as {label}"));
+        build_window(&app, &label, closed.geometry).inspect_err(|_| {
+            // No window to own it: a snapshot left behind would open at the next launch.
+            let _disk = guard(&ARRIVAL_DISK_LOCK);
+            let _ = remove_session_from(&dir, &label);
+        })
+    });
+    if let Err(err) = opened {
+        // Kept for a later attempt rather than lost with the failure.
+        push_closed(&mut guard(&windows.closed_windows), closed);
+        return Err(err);
     }
-    append_log(format!("[window] reopening a closed window as {label}"));
-    build_window(&app, &label, closed.geometry)?;
     Ok(true)
 }
 

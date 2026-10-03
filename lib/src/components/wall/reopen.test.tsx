@@ -16,6 +16,7 @@ import * as terminalRegistry from '../../lib/terminal-registry';
 import { recordToolDirty, resetToolDirty } from '../../lib/tool-dirty-store';
 import { mountWallHarness, type WallHarness } from './wall-test-utils';
 import { getWallHandle } from './wall-handles';
+import { reopenClosed } from './reopen';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -189,6 +190,76 @@ describe('Reopen', () => {
     record.closedAt = 2000;
     expect((await control(WINDOW_CONTROL_METHODS.reopen)).result).toMatchObject({ kind: 'surface' });
     expect(reopenClosedWindow).toHaveBeenLastCalledWith(2000);
+  });
+
+  it('records a close once, however many kills reach it during its fade', async () => {
+    await renderTerminalBesideBrowser();
+    // The second lands after the first has started the fade, before it removes the pane.
+    vi.useFakeTimers({ toFake: ['setTimeout'] });
+    try {
+      for (let i = 0; i < 2; i++) {
+        await act(async () => {
+          window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
+            method: SURFACE_CONTROL_METHODS.kill, params: { surface: 'web', confirmation: { mode: 'dangerously' } }, respond: () => {},
+          } }));
+          for (let tick = 0; tick < 10; tick++) await Promise.resolve();
+        });
+      }
+      vi.runAllTimers();
+    } finally {
+      vi.useRealTimers();
+    }
+    await harness.flush();
+    expect(_reopenRecordsForTesting()).toHaveLength(1);
+  });
+
+  it('reopens a closed preview viewer pinned, leaving the slot to a newer preview', async () => {
+    const params = { surfaceType: 'tool', command: 'dor __view-file /repo/a.md', cwd: '/repo', toolScope: 'builtin', toolName: 'file', toolPreview: true };
+    vi.spyOn(terminalRegistry, 'restoreTerminal').mockImplementation(() => ({}) as ReturnType<typeof terminalRegistry.restoreTerminal>);
+    await act(async () => harness.root.render(<Wall
+      restoredLathLayout={{ version: 1, tree: { root: { kind: 'split', dir: 'row', children: [
+        { node: { kind: 'leaf', id: 'pane-a' }, weight: 0.5 }, { node: { kind: 'leaf', id: 'slot' }, weight: 0.5 },
+      ] } }, leafMeta: {
+        'pane-a': { component: 'terminal', tabComponent: 'terminal', title: 'shell' },
+        slot: { component: 'tool', tabComponent: 'tool', title: 'a.md', params },
+      } }}
+      initialMode="command"
+    />));
+    await harness.flush();
+    act(() => {
+      terminalRegistry.applyTerminalSemanticEvents('slot', [{ type: 'commandLine', commandLine: params.command }, { type: 'commandStart' }]);
+      recordToolDirty('slot', false);
+    });
+    try {
+      await control(SURFACE_CONTROL_METHODS.kill, { surface: 'slot', confirmation: { mode: 'dangerously' } });
+      await harness.flush();
+      expect(_reopenRecordsForTesting()[0]?.kind === 'surface' && _reopenRecordsForTesting()[0].meta.params).not.toHaveProperty('toolPreview');
+    } finally {
+      terminalRegistry.removeTerminalPaneState('slot');
+      resetToolDirty();
+    }
+  });
+
+  it('falls back to this Window\'s own records when the host cannot answer for closed windows', async () => {
+    const fake = new FakePtyAdapter();
+    Object.assign(fake, { reopenClosedWindow: vi.fn(async () => { throw new Error('sessions dir unavailable'); }) });
+    setPlatform(fake);
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await renderTerminalBesideBrowser();
+    await control(SURFACE_CONTROL_METHODS.kill, { surface: 'web', confirmation: { mode: 'dangerously' } });
+    await harness.flush();
+    expect((await control(WINDOW_CONTROL_METHODS.reopen)).result).toMatchObject({ kind: 'surface' });
+  });
+
+  it('refuses dor reopen as still mounting, keeping the record, when no Wall can take it', async () => {
+    pushReopenRecord({
+      kind: 'surface', closedAt: 1, workspaceId: DEFAULT_WORKSPACE_ID,
+      pane: { id: 'p', cwd: null, title: '', untouched: true },
+      meta: { component: 'terminal', tabComponent: 'terminal', title: '' },
+      placement: { kind: 'door', index: 0, token: null },
+    });
+    await expect(reopenClosed({ gesture: false })).rejects.toThrow('is still mounting');
+    expect(_reopenRecordsForTesting()).toHaveLength(1);
   });
 
   it('says so briefly when `u` finds nothing to reopen', async () => {

@@ -802,14 +802,16 @@ export function Wall({
         // Only a confirmation needs the pane; any other close takes the Door
         // as it is, so a reopen puts it back on the Baseboard.
         if (closeKindOf(id) === 'confirm') handleReattachRef.current(door, { enterPassthrough: false, afterRestore: 'confirm-kill' });
-        else void closeSurface(id);
+        else void closeSurface(id, 'ask');
         return;
       }
       // The helper inspection below can outlive the Surface (an exit, a `dor
       // kill`); a confirm overlay for a gone pane would never clear itself.
       if (!nav.hasPane(id) || lath.isDying(id)) return;
       doorKillReturnRef.current = null;
-      if (closeKindOf(id) !== 'confirm') { void closeSurface(id); return; }
+      // `ask`: a Tool that turns dirty during the helper check prompts rather
+      // than refusing a gesture in silence.
+      if (closeKindOf(id) !== 'confirm') { void closeSurface(id, 'ask'); return; }
       setConfirmKill({ id, char: randomKillChar() });
     };
     if (!getHelper(id)) { stage(); return; }
@@ -1091,7 +1093,17 @@ export function Wall({
   });
 
   // --- Reopen (docs/specs/reopen.md) ---
+  /** A record's meta reopens pinned: a newer preview may hold the slot by then
+   *  (docs/specs/dor-tool.md → Preview slot). */
+  const reopenableLeafMeta = (meta: LeafMeta): LeafMeta => {
+    const persistable = persistableLeafMeta(meta);
+    if (!persistable.params || !('toolPreview' in persistable.params)) return persistable;
+    const { toolPreview: _preview, ...params } = persistable.params;
+    return { ...persistable, params };
+  };
   pushSurfaceRecordRef.current = (id: string) => {
+    // A Surface already fading out was recorded by the close that started it.
+    if (lath.isDying(id)) return;
     const meta = lath.getMeta(id);
     const [pane] = persistence.serializeReported(member => member === id).panes;
     if (!meta || !pane) return;
@@ -1103,7 +1115,7 @@ export function Wall({
       closedAt: Date.now(),
       workspaceId: effectiveWorkspaceId,
       pane,
-      meta: persistableLeafMeta(meta),
+      meta: reopenableLeafMeta(meta),
       placement: token ? { kind: 'pane', token } : { kind: 'door', index, token: doorsRef.current[index].token },
     });
   };

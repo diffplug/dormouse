@@ -34,6 +34,12 @@ describe('closing one window of several', () => {
     return { first };
   }
 
+  it('asks when a Workspace\'s Wall has not mounted to say what it holds', () => {
+    createWorkspace({ id: 'ws-2', name: 'docs', activate: false });
+    registerWallHandle(stubWallHandle(getWorkspacesSnapshot().workspaces[0].id, { needsCloseConfirmation: () => false }));
+    expect(windowNeedsCloseConfirmation()).toBe(true);
+  });
+
   it('asks, and leaves no record, when any Workspace would ask', () => {
     twoWorkspaces('ws-2');
     expect(windowNeedsCloseConfirmation()).toBe(true);

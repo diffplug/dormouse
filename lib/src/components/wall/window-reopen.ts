@@ -1,7 +1,7 @@
 import { withFreshSurfaceIds } from '../../lib/session-remap';
 import type { PersistedWindow, PersistedWorkspace, WorkspaceId } from '../../lib/session-types';
 import { generateWorkspaceId, getWorkspacesSnapshot } from '../../lib/workspace-store';
-import { getWallHandle, listWallHandles } from './wall-handles';
+import { getWallHandle } from './wall-handles';
 
 /**
  * Closing one window of several (`docs/specs/reopen.md` → "Workspaces and
@@ -9,9 +9,10 @@ import { getWallHandle, listWallHandles } from './wall-handles';
  * that asks nothing leaves the host a record to reopen it from.
  */
 
-/** Whether closing this Window asks first: any Workspace's close would. */
+/** Whether closing this Window asks first: any Workspace's close would, or a
+ *  Workspace's Wall has not mounted to say what it holds. */
 export function windowNeedsCloseConfirmation(): boolean {
-  return listWallHandles().some(handle => handle.needsCloseConfirmation());
+  return getWorkspacesSnapshot().workspaces.some(workspace => getWallHandle(workspace.id)?.needsCloseConfirmation() ?? true);
 }
 
 /**
