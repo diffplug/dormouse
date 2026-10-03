@@ -428,11 +428,13 @@ export class BrowserView implements ViewerSink {
     this.inFlight = true;
     this.dirty = false;
     const generation = this.provisionalGeneration;
-    const started = this.lastStart = performance.now();
+    let started = this.lastStart = performance.now();
     this.stats.captures += 1;
     const claim: CaptureClaim = {
       urgent: started - this.lastInput <= URGENT_AFTER_INPUT_MS,
       wanted: () => !this.closed,
+      // Time queued in the budget is not the capture's: pacing measures shots.
+      started: () => { started = performance.now(); },
     };
     void this.deps.capture(claim).catch(() => undefined).then((jpeg) => {
       const elapsedMs = performance.now() - started;

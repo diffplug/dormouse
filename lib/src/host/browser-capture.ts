@@ -19,6 +19,8 @@ export type Shoot = (file: () => Promise<string>) => Promise<{ path: string } | 
 export interface BrowserCaptures {
   /** A JPEG of browser `id`, joining one of it already running. */
   take(id: string, shoot: Shoot): Promise<Uint8Array>;
+  /** Whether a capture of `id` is running, which `take` would join. */
+  running(id: string): boolean;
   /** Join none of `id`'s running captures: its browser was closed or
    *  replaced, and one still running deletes its own file when it ends. */
   forget(id: string): void;
@@ -72,6 +74,7 @@ export function createBrowserCaptures(): BrowserCaptures {
       inFlight.set(id, taking);
       return taking;
     },
+    running: (id) => inFlight.has(id),
     forget(id) {
       inFlight.delete(id);
     },

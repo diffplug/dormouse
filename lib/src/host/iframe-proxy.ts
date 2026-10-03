@@ -382,9 +382,10 @@ function handleRequest(grant: Grant, req: http.IncomingMessage, res: http.Server
   }
   // Documents come back identity, so their HTML can be instrumented.
   const dest = req.headers['sec-fetch-dest'];
-  const isDocument = typeof dest !== 'string' || DOCUMENT_DESTINATIONS.has(dest);
-  if (isDocument) delete headers['accept-encoding'];
-  if (isDocument && grant.fresh) {
+  if (typeof dest !== 'string' || DOCUMENT_DESTINATIONS.has(dest)) delete headers['accept-encoding'];
+  // Only a frame's own load, which names its destination: a probe without
+  // one must not spend it.
+  if (grant.fresh && (dest === 'document' || dest === 'iframe')) {
     grant.fresh = false;
     res.setHeader('clear-site-data', CLEAR_SITE_DATA);
   }
@@ -614,8 +615,9 @@ function handleUpgrade(grant: Grant, req: http.IncomingMessage, socket: net.Sock
     socket.write(`HTTP/1.1 ${response.statusCode} ${response.statusMessage}\r\n${lines.join('\r\n')}\r\n\r\n`);
     if (upstreamHead.length) socket.write(upstreamHead);
     if (head.length) upstream.write(head);
-    // A revoked grant ends its pipes too.
-    if (!grants.has(grant.port)) {
+    // A revoked grant ends its pipes too — even if a new grant has since bound
+    // its port.
+    if (grants.get(grant.port) !== grant) {
       socket.destroy();
       upstream.destroy();
       return;

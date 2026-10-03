@@ -19,6 +19,8 @@ export interface CaptureClaim {
   urgent: boolean;
   /** False once nobody wants the capture — its socket closed. */
   wanted(): boolean;
+  /** Called as its slot comes up. */
+  started?(): void;
 }
 
 export interface CaptureBudget {
@@ -57,6 +59,7 @@ export function createCaptureBudget(opts: { perSecond?: number; concurrent?: num
       }
       starts.push(now);
       running += 1;
+      next.claim.started?.();
       next.start();
     }
   }

@@ -118,7 +118,7 @@ so the private helper only supplies environment.
 
 **Whose limitation the CSS-resolution provisional frame is.** Chromium's `Page.startScreencast` captures in DIP and exposes no DPR knob, so the stream is CSS-resolution whatever the client asks for — upstream Chromium, not something agent-browser chose or could fix.
 
-**Why settle, then sharpen.** An animated page drove the crisp loop at up to ~5.5 device-resolution captures a second per pane (~120 ms each, paced at 1.5× that), each a spawn or CDP call, an encode, 100-700 KB over IPC and a decode, while the stream frames of the same motion were received and thrown away (static reading, 2026-09-23). Detail lost on moving content is not seen; the one capture once it rests is. The cost is that moving content is CSS-resolution on HiDPI until it stops.
+**Why settle, then sharpen.** An animated page drove the crisp loop at up to ~5.5 device-resolution captures a second per pane (~120 ms each, paced at 1.5× that), each a spawn or CDP call, an encode, 100-700 KB over IPC and a decode, while the stream frames of the same motion were received and thrown away (static reading, 2026-09-23). Detail lost on moving content is not seen; the one capture once it rests is. The cost is that moving content is CSS-resolution on HiDPI until it stops — and a page that never stops (a looping spinner, a video) stays at stream resolution for as long as it moves, where it once got a sharp capture every ~180 ms. Measured with Playwright's Chromium (2026-10-03): an animation's first ~500 ms took six captures, the rest only stream paints, and one capture landed ~220 ms after its last frame.
 
 **Why one budget for every pane, and its slot timeout.** Nothing bounded captures across panes: k animated panes meant ~5.5k a second. The budget was deferred until every capture had a bound, because Playwright's CDP capture into a wedged page never answered and would have held a slot forever; it now fails at 30 s like agent-browser's CLI capture, and a slot frees after 10 s so other panes go on meanwhile. A capture still running is joined by the next ask for its browser, so freeing a slot never piles a second capture on a queue blocked behind a page load.
 
@@ -226,7 +226,7 @@ The built-in local-file viewer supplies its own content boundary and permits the
 
 **Why the host names the owner.** A webview that reloads or a window that closes never releases what its last page held; owner-scoped release at reinitialization and at the end of the owner reclaims those. Were the owner the webview's word, one webview could release another's views.
 
-**Why a fresh grant clears site data.** A port freed by one grant can be handed by the OS to the next, for another upstream, while the browser still keys the first upstream's storage and service worker on `http://127.0.0.1:<port>`. Only a freshly minted grant's first document clears it, so a reused grant keeps its page's storage.
+**Why a fresh grant clears site data.** A port freed by one grant can be handed by the OS to the next, for another upstream, while the browser still keys the first upstream's storage and service worker on `http://127.0.0.1:<port>`. Only a freshly minted grant's first frame load clears it, so a reused grant keeps its page's storage, and a probe that names no destination cannot spend it. It is a mitigation, not a guarantee: a cache-first service worker the old upstream left can answer the navigation before the proxy sees it, and whether WebKit webviews honor the header on a loopback origin is unverified.
 
 ## Iframe Shim
 

@@ -790,10 +790,13 @@ describe('iframe proxy leases', () => {
     const port = await upstream((_q, s) => { s.writeHead(200, { 'content-type': 'text/html' }); s.end('<head></head>'); });
     const l = lease();
     const url = await frame(`http://127.0.0.1:${port}/`, leased(l));
-    expect((await get(url)).headers['clear-site-data']).toBe('"cache", "storage"');
+    const load = (target: string) => request(target, { headers: { 'Sec-Fetch-Dest': 'iframe' } });
+    // A request that names no frame load — a probe — does not spend it.
     expect((await get(url)).headers['clear-site-data']).toBeUndefined();
+    expect((await load(url)).headers['clear-site-data']).toBe('"cache", "storage"');
+    expect((await load(url)).headers['clear-site-data']).toBeUndefined();
     // A Reload keeps the grant, so the page's storage survives it.
     const reloaded = await frame(`http://127.0.0.1:${port}/`, leased(l));
-    expect((await get(reloaded)).headers['clear-site-data']).toBeUndefined();
+    expect((await load(reloaded)).headers['clear-site-data']).toBeUndefined();
   });
 });

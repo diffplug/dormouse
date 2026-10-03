@@ -76,6 +76,18 @@ describe('the capture budget', () => {
     expect(abandoned).not.toHaveBeenCalled();
   });
 
+  it('tells a claim when its slot comes up, not when it queued', async () => {
+    const budget = createCaptureBudget({ concurrent: 1, perSecond: 100 });
+    const first = pending();
+    void budget.run(first.fn, claim());
+    const started = vi.fn();
+    void budget.run(async () => 'x', { urgent: false, wanted: () => true, started });
+    expect(started).not.toHaveBeenCalled();
+    first.settle('a');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(started).toHaveBeenCalledOnce();
+  });
+
   it('answers a failed capture undefined and moves on', async () => {
     const budget = createCaptureBudget({ concurrent: 1, perSecond: 100 });
     expect(await budget.run(async () => { throw new Error('gone'); }, claim())).toBeUndefined();

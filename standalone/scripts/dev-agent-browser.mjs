@@ -145,6 +145,8 @@ const invokeMap = {
   read_clipboard_file_paths: () => requestSidecar('clipboard:readFiles', {}, 'clipboard:files', (data) => data.paths ?? null),
   read_clipboard_image_as_file_path: () => requestSidecar('clipboard:readImage', {}, 'clipboard:image', (data) => data.path ?? null),
   read_clipboard_text: () => requestSidecar('clipboard:readText', {}, 'clipboard:text', (data) => data.text ?? null),
+  // Invoked at boot, so the release lands before this page's first lease.
+  iframe_release_proxy: async ({ lease }) => { writeSidecar('iframe:releaseProxy', { owner: HARNESS_WINDOW, id: lease ?? null }); return null; },
   iframe_create_proxy_url: ({ target, embedderOrigins, lease }) => requestSidecar('iframe:createProxyUrl', {
     target, embedderOrigins, ...(typeof lease === 'string' ? { lease: { owner: HARNESS_WINDOW, id: lease } } : {}),
   }, 'iframe:proxyUrl', (data) => data.result),

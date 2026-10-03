@@ -417,7 +417,7 @@ binary `ViewerFrame`.
   host-owned device-resolution captures** (rationale).
 - **Settle, then sharpen**: a page in motion paints from the stream, then gets
   one capture once it rests. **All sockets' captures share one host-wide
-  budget**, recent input first; **a capture outliving its slot frees it, and
+  budget**, spent only by a capture that starts, recent input first; **a capture outliving its slot frees it, and
   every provider bounds its capture** (rationale).
 
 **Upstreams.** agent-browser: the daemon's stream, dialed on `127.0.0.1` only;
@@ -648,7 +648,7 @@ Header rewriting:
 | response | hop-by-hop (RFC 7230 §6.1) | dropped |
 | response | `Location` | an exact upstream origin rewritten back to the proxy origin, so a redirect stays inside the proxy |
 | response | `Vary` | `Sec-Fetch-Dest` appended, since the `Accept-Encoding` sent upstream depends on it |
-| response | `Clear-Site-Data` | `"cache", "storage"` on a freshly minted grant's first document only: its port may have fronted another upstream |
+| response | `Clear-Site-Data` | `"cache", "storage"` on a freshly minted grant's first frame load only: its port may have fronted another upstream |
 | response body | `<meta http-equiv="content-security-policy">` | removed unless the response opts into CSP preservation |
 
 **Must update this table whenever header rewriting changes.**

@@ -51,6 +51,7 @@ import {
   dispatchDorControlRequest,
 } from "dormouse-lib/lib/platform/dor-control-dispatch";
 import { BrowserSidecarHost } from "./browser-sidecar-host";
+import { IframeLeaseOrder } from '../../lib/src/lib/platform/iframe-lease-order';
 
 const errMessage = (err: unknown): string => err instanceof Error ? err.message : String(err);
 
@@ -85,6 +86,9 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
     this.host.send("alert_command", { payload });
   });
 
+  /** Iframe lease messages in order over the bridge's separate requests. */
+  private readonly leaseOrder = new IframeLeaseOrder();
+
   constructor(private readonly host: BrowserSidecarHost) {
     Object.assign(this, this.alerts.methods);
     // See TauriAdapter: the sidecar parses and has no DOM, so it is told the
@@ -102,6 +106,8 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
 
   async init(): Promise<void> {
     await this.host.init();
+    // As TauriAdapter: a reloaded page's leases go before this page takes any.
+    this.leaseOrder.reset = this.host.invoke("iframe_release_proxy", { lease: null }).catch(() => {});
     this.unlistenHost = this.host.onEvent(({ event, data }) => this.handleHostEvent(event, data));
     // The SSE stream is the only way the alerts' events reach this adapter,
     // and whatever the sidecar sent while it was down is lost: `sync` has the
@@ -248,18 +254,18 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
 
   async createIframeProxyUrl(targetUrl: string, lease?: string): Promise<IframeProxyResult> {
     try {
-      return await this.host.invoke("iframe_create_proxy_url", {
+      return await this.leaseOrder.create(lease, () => this.host.invoke<IframeProxyResult>("iframe_create_proxy_url", {
         target: targetUrl,
         embedderOrigins: embedderOrigins(),
         lease: lease ?? null,
-      });
+      }));
     } catch (err) {
       return { ok: false, reason: "unreachable", detail: errMessage(err) };
     }
   }
 
   releaseIframeProxy(lease: string): void {
-    this.host.send("iframe_release_proxy", { lease });
+    this.leaseOrder.release(lease, () => this.host.send("iframe_release_proxy", { lease }));
   }
 
   readonly browserProviders = BROWSER_PROVIDER_IDS;

@@ -208,7 +208,7 @@ export function IframePanel({ id, title, params, onReady }: PaneProps & {
   // "Iframe Proxy Leases"): Reload, Back and Forward keep the grant and its
   // origin, and unmounting — a kill, a swap, a transfer — ends it. Declared
   // before the effect that takes it, so a StrictMode remount releases first.
-  const [lease] = useState(() => `${id}#${crypto.randomUUID()}`);
+  const [lease] = useState(() => `${id}#${globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2)}`);
   useEffect(() => () => getPlatform().releaseIframeProxy?.(lease), [lease]);
   useEffect(() => {
     if (!isTool || resolution.kind !== 'proxied' || !iframeRef.current) return;

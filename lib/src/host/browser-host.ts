@@ -36,7 +36,7 @@ import {
   type BrowserResult,
 } from '../lib/platform/browser-automation';
 import { createBrowserCaptures } from './browser-capture';
-import { createCaptureBudget } from './browser-capture-budget';
+import { createCaptureBudget, type CaptureClaim } from './browser-capture-budget';
 import { createViewportSync } from './browser-sync';
 import type { WebSocket } from 'ws';
 import { BrowserView, WEBVIEW_ID, closeSocket, createViewerServer, measuredViewport, type Upstream, type ViewerSink } from './browser-viewer';
@@ -603,7 +603,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     }
     const view = new BrowserView(socket, {
       headed: isHeaded,
-      capture: (claim) => budget.run(() => crisp(bound), claim),
+      capture: (claim) => crisp(bound, claim),
       onClose: () => {
         const open = views.get(bound.id);
         open?.delete(view);
@@ -627,9 +627,12 @@ export function createBrowserHost(deps: BrowserHostDeps) {
   /** One device-resolution JPEG of `bound`'s browser, for its viewer sockets'
    *  crisp paint; undefined when none can be taken. A launch or close ends
    *  every viewer socket of the browser first, so none asks mid-relaunch. */
-  async function crisp({ p, b, id }: Bound): Promise<Uint8Array | undefined> {
+  async function crisp({ p, b, id }: Bound, claim: CaptureClaim): Promise<Uint8Array | undefined> {
+    const shoot = () => captures.take(id, (file) => p.screenshot(b, file));
     try {
-      return await captures.take(id, (file) => p.screenshot(b, file));
+      // Only a capture that starts spends the budget: joining one of the same
+      // browser costs nothing, so a slow browser's re-asks never hold slots.
+      return await (captures.running(id) ? shoot() : budget.run(shoot, claim));
     } catch (error) {
       log(error);
       return undefined;
