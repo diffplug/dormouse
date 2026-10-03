@@ -5,7 +5,7 @@
 
 ## GitHub Actions Policies
 
-**Must pin every action by commit hash, not version tag, in every workflow this repository authors**; Renovate updates the hashes. The one exception is `tend-*.yaml`, generated upstream with tag pins (see "Upstream compromise").
+**Must pin every action by commit hash, not version tag, in every workflow this repository authors**; Renovate updates the hashes. The one exception is `max-sixty/tend/claude` in `tend-*.yaml`, generated upstream with a version-tag pin (see "Upstream compromise").
 
 **Agent-managed workflows are `tend-*.yaml`, `.github/workflows/workflow-audit.yaml`, and `.github/workflows/security-audit.yaml`.** They are exempt from the two rules below because they must modify issues, PRs, or code, or fetch an OIDC token; "Automated Maintainer (tend)" bounds their scope.
 
@@ -40,7 +40,7 @@ The [tend](https://github.com/max-sixty/tend) agent harness runs as the GitHub u
 
 **Org-level secrets.** An org secret shared with this repo is reachable exactly like a repo-level one but absent from this repo's own listing — `gh api repos/diffplug/dormouse/actions/organization-secrets` is the check. **None are visible today** (rationale); **must re-evaluate and name any that becomes visible before accepting it**, and the inventory `FAIL IF` admits none.
 
-**Upstream compromise.** Generated workflows reference `max-sixty/tend/claude@<version>` — a mutable **tag**, so upstream can change what our workflows execute with no commit here and `workflow-audit.yaml` seeing a byte-identical file. **Accepted residual** (rationale). **The version pin bounds deliberate upgrades, not a hostile upstream**; `uvx tend@latest` runs only at install and nightly regen, so a compromise of that path affects the next re-run, not in-flight workflows. `tend-mention` and `tend-notifications` also run `astral-sh/setup-uv@<tag>`, whose `uv` interprets a `run:` step holding `TEND_BOT_TOKEN` — a broader trust, **accepted on the same generated-file grounds** (rationale).
+**Upstream compromise.** Generated workflows reference `max-sixty/tend/claude@<version>` — a mutable **tag**, so upstream can change what our workflows execute with no commit here and `workflow-audit.yaml` seeing a byte-identical file. **Accepted residual** (rationale). **The version pin bounds deliberate upgrades, not a hostile upstream**; `uvx tend@latest` runs only at install and nightly regen, so a compromise of that path affects the next re-run, not in-flight workflows. `tend-mention` and `tend-notifications` also run `astral-sh/setup-uv`, whose `uv` interprets a `run:` step holding `TEND_BOT_TOKEN`; the generator pins that action by commit and the `uv` download by checksum.
 
 **Audit visibility.** `.github/workflows/workflow-audit.yaml` walks nightly every commit touching `.github/workflows/`, `.config/tend.yaml`, `.github/audit/`, or `.vscode/` since its previous successful run, **across all branches**, so a workflow pushed to a feature branch is seen without a PR. **This enumeration and the job's `WINDOW` must name the same paths** (rationale). It reports the *unexplained*, classifying out four routine sources on independently checked provenance or content, each with an accepted residual:
 
