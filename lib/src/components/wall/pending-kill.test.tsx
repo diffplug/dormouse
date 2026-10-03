@@ -18,6 +18,8 @@ import {
 } from '../../lib/pending-kills';
 import { _resetReopenStackForTesting, _reopenRecordsForTesting } from '../../lib/reopen-stack';
 import { mountWallHarness, type WallHarness } from './wall-test-utils';
+import { recordToolDirty, resetToolDirty } from '../../lib/tool-dirty-store';
+import { cancelEditorClose, getEditorClosePrompt } from '../../lib/tool-editor';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -112,6 +114,32 @@ describe('a pending kill', () => {
     expect(dispose).toHaveBeenCalledWith('pane-b');
     expect(getPendingKills()).toEqual([]);
     expect((await control(SURFACE_CONTROL_METHODS.read, { surface: 'surface:2' })).error).toBe("surface 'surface:2' was not found");
+  });
+
+  it('takes an unsaved Tool without asking, its page parked until restore or finalize', async () => {
+    const params = { surfaceType: 'tool', command: 'dor __view-file /repo/a.md', cwd: '/repo', toolScope: 'builtin', toolName: 'file', toolRender: 'iframe', toolPort: 'announced' };
+    await act(async () => harness.root.render(<Wall restoredLathLayout={{ version: 1, tree: { root: { kind: 'split', dir: 'row', children: [
+      { node: { kind: 'leaf', id: 'pane-a' }, weight: 0.5 }, { node: { kind: 'leaf', id: 'editor' }, weight: 0.5 },
+    ] } }, leafMeta: {
+      'pane-a': { component: 'terminal', tabComponent: 'terminal', title: 'shell' },
+      editor: { component: 'tool', tabComponent: 'tool', title: 'a.md', params },
+    } }} initialMode="command" />));
+    await harness.flush();
+    act(() => recordToolDirty('editor', true));
+    try {
+      await clickKill('editor');
+      expect(getEditorClosePrompt()).toBeNull();
+      expect(getPendingKills().map(kill => [kill.id, kill.label])).toEqual([['editor', 'Tool']]);
+      // Parked, not unmounted: the frame and its edits stay in the DOM.
+      expect(harness.container.querySelector('[data-lath-leaf="editor"]')).not.toBeNull();
+      await act(async () => { restorePendingKill(pendingKillKey('surface', 'editor')); });
+      await harness.flush();
+      expect(getPendingKills()).toEqual([]);
+      expect(getEditorClosePrompt()).toBeNull();
+    } finally {
+      resetToolDirty();
+      cancelEditorClose();
+    }
   });
 
   it('comes back from a Door as a Door', async () => {
