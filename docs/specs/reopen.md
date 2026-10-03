@@ -92,7 +92,7 @@ Starting points: `RestoreToken` / `restore` in `lib/src/lib/lath/ops.ts`; `killP
 - **Must suppress alerts from pending Surfaces and omit them from `dor` listings and Clients**; a `dor` command addressing one fails as pending kill.
 - **Must count pending running work in the quit and window-close gates**, then finalize every pending kill on quit. Nothing pending survives a restart.
 
-**The overlay** stacks pending kills in the window's bottom-right corner, above the Baseboard, newest on top. Each entry shows the Surface's title and kind, a bar filling toward the kill, restore on click, and finalize now. Past a few entries the stack collapses to a count. **The countdown is 10 s and pauses while the pointer is over its entry**; past 3 entries the rest collapse to a `+N` row.
+**The overlay** stacks pending kills in the window's bottom-right corner, above the Baseboard, newest on top. Each entry shows the Surface's title and kind, a bar filling toward the kill, restore on click, and finalize now. **The countdown is 10 s and pauses while the pointer is over its entry**; past 3 entries the rest collapse to a `+N` row.
 
 **Promotion amends `docs/specs/transport.md` → "The governing rule"** ("deliberately ending something ends it") for the toggle's duration.
 
