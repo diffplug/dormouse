@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { TutorialShell, type InteractiveProgram } from "./tutorial-shell";
+import { shellWords, TutorialShell, type InteractiveProgram } from "./tutorial-shell";
+import { VirtualFs } from "./playground-fs/vfs";
 
 function createHarness() {
   const output: string[] = [];
@@ -186,5 +187,59 @@ describe("TutorialShell OSC 633 shell integration", () => {
 
     shell.reportRunningCommand();
     expect(output.join("")).toBe("");
+  });
+});
+
+describe("TutorialShell with a filesystem", () => {
+  const fs = new VirtualFs({ "/home/demo/p/src/a.ts": "", "/home/demo/p/README.md": "" });
+  const plain = (text: string) => text.replace(/\x1b\[[0-9;]*m/g, "");
+
+  function createFsShell() {
+    const output: string[] = [];
+    const shell = new TutorialShell((data) => output.push(data), () => null, { fs, cwd: "/home/demo/p" });
+    shell.showInitialPrompt();
+    return { shell, text: () => output.join(""), clear: () => { output.length = 0; } };
+  }
+
+  it("reports its directory with every prompt and shows it home-relative", () => {
+    const { text } = createFsShell();
+    expect(text()).toContain("\x1b]633;P;Cwd=/home/demo/p\x07");
+    expect(plain(text())).toContain("user@dormouse:~/p$ ");
+  });
+
+  it("changes directory with cd and reports the new one", () => {
+    const { shell, text, clear } = createFsShell();
+    clear();
+    shell.handleInput("cd src\r");
+    expect(shell.cwd).toBe("/home/demo/p/src");
+    expect(text()).toContain("\x1b]633;D;0\x07");
+    expect(text()).toContain("\x1b]633;P;Cwd=/home/demo/p/src\x07");
+    shell.handleInput("cd\r");
+    expect(shell.cwd).toBe("/home/demo");
+    clear();
+    shell.handleInput("cd nope\r");
+    expect(plain(text())).toContain("cd: no such file or directory: nope");
+    expect(text()).toContain("\x1b]633;D;1\x07");
+  });
+
+  it("lists directories first, marked with a slash, and prints pwd", () => {
+    const { shell, text, clear } = createFsShell();
+    clear();
+    shell.handleInput("ls\r");
+    expect(plain(text())).toContain("src/  README.md\r\n");
+    clear();
+    shell.handleInput("pwd\r");
+    expect(plain(text())).toContain("/home/demo/p\r\n");
+  });
+
+  it("escapes a reported command line's separators", () => {
+    const { shell, text } = createFsShell();
+    shell.handleInput("ls 'a;b'\r");
+    expect(text()).toContain("\x1b]633;E;ls 'a\\x3bb'\x07");
+  });
+
+  it("splits words as a POSIX shell quotes them", () => {
+    expect(shellWords(`dor __view-error '/a b' "it's \\"x\\"" c\\ d`)).toEqual(["dor", "__view-error", "/a b", `it's "x"`, "c d"]);
+    expect(shellWords("  a   ''  ")).toEqual(["a", ""]);
   });
 });
