@@ -26,9 +26,9 @@ import type { RemotePtyAdapter } from '../client/remote-adapter';
 import { usePocketTheme } from './pocket-theme';
 import {
   activatePane,
-  attachableDirectoryEntries,
   directorySessionItems,
   directoryWallSessions,
+  pickerEntries,
 } from './wall-model';
 
 export function PocketWall({ adapter, onError, restoreTheme }: {
@@ -47,7 +47,9 @@ export function PocketWall({ adapter, onError, restoreTheme }: {
   const [activePaneId, setActivePaneId] = useState<string | null>(null);
   const [touchMode, setTouchMode] = useState<MobileTerminalTouchMode>('gestures');
   const [keyboardMode, setKeyboardMode] = useState<MobileTerminalKeyboardMode>('type');
-  const attachableEntries = useMemo(() => attachableDirectoryEntries(entries), [entries]);
+  // Picker order throughout — the list, the wall's swipe order, and the default
+  // pane, which is therefore one the Burrow's own Window shows.
+  const attachableEntries = useMemo(() => pickerEntries(entries), [entries]);
 
   // Track the live directory. Re-read on subscribe in case a snapshot landed
   // between the initial render and this effect.

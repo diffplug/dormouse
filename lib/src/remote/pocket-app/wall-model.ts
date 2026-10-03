@@ -2,10 +2,13 @@
 
 import type { DirectoryEntry } from 'remote-lib-common';
 import type { MobileWallSession } from '../../components/MobileWall';
-import type { MobileTerminalSessionItem } from '../../components/MobileTerminalUi';
+import type { MobileTerminalSessionGroup, MobileTerminalSessionItem } from '../../components/MobileTerminalUi';
 import type { SessionStatus } from '../../lib/terminal-registry';
 
 const DEFAULT_TITLE = 'Terminal';
+/** The group of panes the Burrow named no Workspace for: a header beside ones it
+ *  did, and none when it named none, since a list of one group is flat. */
+const UNGROUPED: MobileTerminalSessionGroup = { id: '', label: 'Other' };
 
 /** Title for a surface, falling back to a friendly default when the Burrow sends none. */
 function paneTitle(entry: DirectoryEntry): string {
@@ -14,6 +17,27 @@ function paneTitle(entry: DirectoryEntry): string {
 
 export function attachableDirectoryEntries(entries: DirectoryEntry[]): DirectoryEntry[] {
   return entries.filter((entry) => entry.alive);
+}
+
+/**
+ * The attachable entries in picker order: each Workspace's panes together,
+ * Workspaces a Window shows first, then the Burrow's own order, and panes it
+ * named no Workspace for last. Without Workspaces this is Burrow order.
+ */
+export function pickerEntries(entries: DirectoryEntry[]): DirectoryEntry[] {
+  const groups = new Map<string | undefined, { rank: number; entries: DirectoryEntry[] }>();
+  for (const entry of attachableDirectoryEntries(entries)) {
+    const { workspace } = entry;
+    const key = workspace?.ref;
+    let group = groups.get(key);
+    if (!group) {
+      group = { rank: workspace ? (workspace.active ? 0 : 1) : 2, entries: [] };
+      groups.set(key, group);
+    }
+    group.entries.push(entry);
+  }
+  // Stable, so equal ranks keep the order the Burrow sent them in.
+  return [...groups.values()].sort((a, b) => a.rank - b.rank).flatMap((group) => group.entries);
 }
 
 /** The `{id,title}` sessions `MobileWall` mounts, in Burrow order. */
@@ -37,6 +61,7 @@ export function directorySessionItems(
 ): MobileTerminalSessionItem[] {
   return attachableDirectoryEntries(entries).map((entry) => ({
     id: entry.surfaceId,
+    group: entry.workspace ? { id: entry.workspace.ref, label: entry.workspace.name } : UNGROUPED,
     title: paneTitle(entry),
     secondary: secondaryLine(entry),
     active: entry.surfaceId === activeSurfaceId,

@@ -41,6 +41,7 @@ import {
 import { useDynamicPalette } from '../lib/themes/use-dynamic-palette';
 import { isComposingKey, isEditableTarget } from '../lib/dom';
 import { TouchUiContext } from './touch-ui-context';
+import { TODO_PILL_TRACKING_CLASS } from './design';
 import { AlertRingInset, alertRingRow, useAlertRingBurst } from './alert-ring';
 import type { AlertEpisode } from '../lib/alert-episode';
 import { getTerminalInstance, type SessionStatus } from '../lib/terminal-registry';
@@ -53,9 +54,18 @@ export type MobileTerminalKeyboardMode = 'sessions' | 'recent' | 'type' | 'draft
 export type MobileTerminalTouchMode = 'gestures' | 'selection' | 'cursor';
 type PhosphorIcon = ComponentType<{ size?: number; weight?: 'regular' | 'bold' | 'duotone' | 'fill' }>;
 
+/** A heading the session list files a row under — Pocket's is the pane's Workspace. */
+export interface MobileTerminalSessionGroup {
+  id: string;
+  label: string;
+}
+
 export interface MobileTerminalSessionItem {
   id: string;
   title: string;
+  /** Rows sharing a group list together under its label, in first-row order;
+   *  a list whose rows share one group shows no label. */
+  group?: MobileTerminalSessionGroup;
   secondary?: string | null;
   active?: boolean;
   status?: SessionStatus;
@@ -345,15 +355,52 @@ function SessionsPane({
     );
   }
 
-  return (
-    <div className="h-full overflow-auto p-2">
-      <div className="grid gap-1">
-        {sessions.map((session) => (
-          <SessionRow key={session.id} session={session} disabled={disabled} onSelect={onSelect} />
-        ))}
-      </div>
+  const rows = (items: MobileTerminalSessionItem[]) => (
+    <div className="grid gap-1">
+      {items.map((session) => (
+        <SessionRow key={session.id} session={session} disabled={disabled} onSelect={onSelect} />
+      ))}
     </div>
   );
+  const groups = groupSessions(sessions);
+
+  return (
+    <div className="h-full overflow-auto p-2">
+      {groups.length < 2 ? rows(sessions) : (
+        <div className="grid gap-3">
+          {groups.map(({ group, items }, index) => (
+            // By position: rows with no group and a group whose id is '' are two groups.
+            <section key={index} aria-label={group?.label} className="grid gap-1">
+              {group ? (
+                <h3 className={clsx('truncate px-2 font-mono text-xs font-semibold text-muted', TODO_PILL_TRACKING_CLASS)}>
+                  {group.label}
+                </h3>
+              ) : null}
+              {rows(items)}
+            </section>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Rows by group, each group where its first row falls. Rows with no group
+ *  share one unlabelled group, so a list that names none is a single group. */
+function groupSessions(
+  sessions: MobileTerminalSessionItem[],
+): Array<{ group?: MobileTerminalSessionGroup; items: MobileTerminalSessionItem[] }> {
+  const groups = new Map<string | undefined, { group?: MobileTerminalSessionGroup; items: MobileTerminalSessionItem[] }>();
+  for (const session of sessions) {
+    const key = session.group?.id;
+    let entry = groups.get(key);
+    if (!entry) {
+      entry = { group: session.group, items: [] };
+      groups.set(key, entry);
+    }
+    entry.items.push(session);
+  }
+  return [...groups.values()];
 }
 
 /** A row is its own component so it can hold the burst hook; the mobile list has

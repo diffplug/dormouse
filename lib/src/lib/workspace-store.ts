@@ -129,8 +129,9 @@ export function workspaceRefNumber(id: WorkspaceId): number | null {
   return match ? Number(match[1]) : null;
 }
 
-/** Positions exist only on hosts without an application-wide registry. */
-function refsArePositional(): boolean {
+/** Positions exist only on hosts without an application-wide registry; every
+ *  other host's {@link workspaceRefFor} is unique across its Windows. */
+export function refsArePositional(): boolean {
   return !registryInstalled;
 }
 

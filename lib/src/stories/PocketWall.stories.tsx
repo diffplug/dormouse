@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react';
 import { useEffect, useRef } from 'react';
+import { expect, userEvent, waitFor, within } from 'storybook/test';
 import { toBase64Url, utf8Encode, type DirectoryEntry } from 'remote-lib-common';
 import { ConnectedView } from '../remote/pocket-app/App';
 import type {
@@ -8,7 +9,7 @@ import type {
   TerminalHandlers,
 } from '../remote/client/remote-adapter';
 import { installRemoteAdapter } from '../remote/pocket-app/remote-wall';
-import { disposeAllSessions } from '../lib/terminal-registry';
+import { disposeAllSessions, getTerminalInstance } from '../lib/terminal-registry';
 import { settleTerminals } from './settle-terminals';
 
 // The adapter decodes `terminal.data` as base64url UTF-8, so encode splash text
@@ -28,6 +29,44 @@ const SINGLE_SESSION: DirectoryEntry[] = [
     ringing: false,
     hasTODO: false,
   },
+];
+
+/** A terminal in a Workspace, as a standalone Burrow names it. */
+function workspaceTerminal(
+  surfaceId: string,
+  title: string,
+  cwd: string,
+  workspace: { ref: string; name: string; active?: boolean },
+  extra: Partial<DirectoryEntry> = {},
+): DirectoryEntry {
+  return {
+    paneRef: surfaceId,
+    surfaceId,
+    type: 'terminal',
+    title,
+    focused: false,
+    activity: 'prompt',
+    alive: true,
+    cwd,
+    ringing: false,
+    hasTODO: false,
+    workspace: { active: false, ...workspace },
+    ...extra,
+  };
+}
+
+const DORMOUSE = { ref: 'workspace:3', name: 'dormouse @ main' };
+const SITE = { ref: 'workspace:1', name: 'website @ docs-rail', active: true };
+const NOTES = { ref: 'workspace:5', name: 'notes' };
+
+// Burrow order (strip order) puts `dormouse` first; the picker lifts the
+// Workspace the desktop shows (`website`) above it.
+const WORKSPACE_SESSIONS: DirectoryEntry[] = [
+  workspaceTerminal('pane-1', 'claude', '~/projects/dormouse', DORMOUSE, { hasTODO: true }),
+  workspaceTerminal('pane-2', 'pnpm test', '~/projects/dormouse/lib', DORMOUSE, { activity: 'running', ringing: true }),
+  workspaceTerminal('pane-3', 'vite', '~/projects/dormouse/website', SITE, { activity: 'running' }),
+  workspaceTerminal('pane-4', 'zsh', '~/projects/dormouse/website', SITE),
+  workspaceTerminal('pane-5', 'zsh', '~/notes', NOTES),
 ];
 
 // Streamed once the wall attaches the pane — stands in for the Burrow's repaint.
@@ -73,11 +112,11 @@ class FakeRemoteClient implements RemoteAdapterClient {
   unsubscribe() {}
 }
 
-function PocketWallStory() {
+function PocketWallStory({ snapshot = SINGLE_SESSION }: { snapshot?: DirectoryEntry[] }) {
   const adapterRef = useRef<RemotePtyAdapter | null>(null);
   if (!adapterRef.current) {
     // `mountRemoteWall` minus its `hello`, and without awaiting the start.
-    const adapter = installRemoteAdapter(new FakeRemoteClient(SINGLE_SESSION));
+    const adapter = installRemoteAdapter(new FakeRemoteClient(snapshot));
     void adapter.init();
     adapterRef.current = adapter;
   }
@@ -127,4 +166,18 @@ export const ConnectedShell: Story = {};
 // Canonical Pocket default theme, pinned for automated visual regression.
 export const ConnectedShellKimbieDark: Story = {
   globals: { theme: 'Kimbie Dark' },
+};
+
+// The session list on a standalone Burrow with three Workspaces: the one its
+// Window shows first, each under its name. Only the attached pane streams, so
+// the gate is its splash: the default pane is the shown Workspace's first.
+export const WorkspaceSessions: Story = {
+  args: { snapshot: WORKSPACE_SESSIONS },
+  play: async ({ canvasElement }) => {
+    await waitFor(() => expect(getTerminalInstance('pane-3')?.buffer.active.cursorY).toBeGreaterThan(0));
+    const canvas = within(canvasElement);
+    await userEvent.click(canvas.getByRole('button', { name: 'Sessions input mode' }));
+    const headings = canvas.getAllByRole('heading', { level: 3 }).map((heading) => heading.textContent);
+    await expect(headings).toEqual([SITE.name, DORMOUSE.name, NOTES.name]);
+  },
 };
