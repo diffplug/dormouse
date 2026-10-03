@@ -180,23 +180,6 @@ newly-added passkey is not automatically trusted; its Client must still pair.
   public key ([relay.md](./relay.md) owns the grammar); **it carries no Burrow
   static, no label, and no signature** (rationale).
 
-**Invitation lifecycle, Burrow-owned** (`InvitationState`), and the QR panel
-renders it:
-
-```mermaid
-stateDiagram-v2
-  [*] --> live: setupQr mints
-  live --> live: failed handshake, Relay redemption
-  live --> reserved: message 1 read, message 2 sent
-  live --> expired: pairing TTL
-  live --> dropped: relay socket lost, evicted at the cap
-  reserved --> consumed: every ending, TTL and eviction included
-```
-
-**Must accept one completed handshake per invitation**, and **a failed
-handshake or a Relay redemption never reads as a scan**. **A mint whose keygen
-straddles a teardown is refused rather than inserted** (rationale).
-
 - **IK against the invitation key**: Client initiator, fresh per-Burrow static as
   `s`, invitation public key as `rs`. **Both handshake payloads are empty**;
   `Split` yields the pairing channel, and no ACL, delivery ID, or resumable
@@ -235,6 +218,23 @@ straddles a teardown is refused rather than inserted** (rationale).
   (rationale).
 - **A resumed handshake re-checks that its invitation is still the live one**
   (rationale).
+
+**Invitation lifecycle, Burrow-owned** (`InvitationState`), and the QR panel
+renders it:
+
+```mermaid
+stateDiagram-v2
+  [*] --> live: setupQr mints
+  live --> live: failed handshake, Relay redemption
+  live --> reserved: message 1 read, message 2 sent
+  live --> expired: pairing TTL
+  live --> dropped: relay socket lost, evicted at the cap
+  reserved --> consumed: every ending, TTL and eviction included
+```
+
+**Must accept one completed handshake per invitation**, and **a failed
+handshake or a Relay redemption never reads as a scan**. **A mint whose keygen
+straddles a teardown is refused rather than inserted** (rationale).
 
 Before storing the record, Pocket verifies the passkey fields and its session's
 account match, and compares the Burrow static to any existing pin for that `burrowId`: **a
