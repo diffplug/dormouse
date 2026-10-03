@@ -10,11 +10,7 @@
 
 ## Browser Chrome
 
-**Why the robot is independent of presentation.** Agent visibility is the
-important capability boundary: an in-pane screencast and an iframe share the
-same human geometry, while only the screencast is available to an agent. A
-separate presentation glyph then distinguishes pane-sized, fixed, and popped-out
-views without weakening that first signal.
+**Why the robot is independent of presentation.** Agent visibility is the important capability boundary: an in-pane screencast and an iframe share the same human geometry, while only the screencast is available to an agent. A separate presentation glyph then distinguishes pane-sized, fixed, and popped-out views without weakening that first signal.
 
 **What the scheme ladder decides.** A typed `host:port` chooses `http://`, which the iframe proxy supports for remote and loopback targets alike. A bare remote host chooses `https://`; entering it in an iframe reports the unsupported scheme and requires an explicit render swap to agent-browser.
 
@@ -46,13 +42,7 @@ views without weakening that first signal.
 
 ## Automated Browser
 
-**Why GUI launches resolve in a fresh shell.** The installed macOS sidecar had
-`/usr/bin:/bin:/usr/sbin:/sbin` while both provider CLIs were installed under
-`/opt/homebrew/bin` (measured 2026-09-28). Remembering an executable alone also
-misses the Node runtime needed by its shebang. A fresh shell exports both
-without shell-integration state publication or a global cache. Calling the
-public `dor … open` command would duplicate the host's pane-binding lifecycle,
-so the private helper only supplies environment.
+**Why GUI launches resolve in a fresh shell.** The installed macOS sidecar had `/usr/bin:/bin:/usr/sbin:/sbin` while both provider CLIs were installed under `/opt/homebrew/bin` (measured 2026-09-28). Remembering an executable alone also misses the Node runtime needed by its shebang. A fresh shell exports both without shell-integration state publication or a global cache. Calling the public `dor … open` command would duplicate the host's pane-binding lifecycle, so the private helper only supplies environment.
 
 **Why one-session-one-surface is not an invariant.** `dor` forwards the user's command before it asks the host for a surface, so a surface killed or render-swapped inside that window is gone by the time the trailing request arrives — and the session behind it is still live and needs somewhere to render.
 
@@ -168,11 +158,7 @@ A post-open blank-tab sweep can become such a query when a later relaunch, expli
 
 **Why one lifecycle for both providers.** The two hosts carried the same policies twice — headed tracking, relaunch generations, the blank-tab sweep, capture joins, the editing scripts — and the copies drifted: an empty copy clobbered the clipboard in one, the capture directory lacked its `chmod` in the other, and only Playwright serialized its closes with its relaunches, so the webview kept its own record of closes in flight for agent-browser (review of the browser stack, 2026-09).
 
-**Why captures use a private directory.** External screenshot writers use the
-ambient umask; a random directory prevents pre-created names and Unix `0700`
-blocks other accounts. A shared Windows temp parent reproduced inherited
-Everyone read grants on the directory and screenshot (2026-10-01); Unix modes
-do not remove those grants. Windows therefore relies on the temp parent's ACL.
+**Why captures use a private directory.** External screenshot writers use the ambient umask; a random directory prevents pre-created names and Unix `0700` blocks other accounts. A shared Windows temp parent reproduced inherited Everyone read grants on the directory and screenshot (2026-10-01); Unix modes do not remove those grants. Windows therefore relies on the temp parent's ACL.
 
 **Why a named launch into a live browser navigates.** A Tool re-announcing — its dev server moved — sends a named launch into the session it already has. Relaunching it stopped the daemon (`close`, then SIGTERM and SIGKILL), so an agent driving that Tool lost its tabs, page state and CDP clients on every move, and a `dor agent-browser` command in flight failed or started a daemon mid-relaunch (review of #777, 2026-09). Only a change of mode needs a new browser.
 
@@ -262,12 +248,4 @@ The built-in local-file viewer supplies its own content boundary and permits the
 
 ## Daemon-owned crisp captures
 
-The historical agent-browser 0.27.3 experiment (measurement date unrecorded) used
-headless CDP attachment and correct-target selection. `Page.captureScreenshot`
-was byte-identical to the CLI at DPR 1 and followed external `set viewport`, but
-returned CSS-resolution frames at higher DPR unless the client reapplied
-`Emulation.setDeviceMetricsOverride`. That override introduced another viewport
-writer; external `set device`/`set viewport` ratios were not recoverable from
-frames. `captureBeyondViewport:true` bypassed emulation and crashed the headless
-daemon; `clip.scale` returned blank frames. These results motivate the
-Future item's daemon-owned route.
+The historical agent-browser 0.27.3 experiment (measurement date unrecorded) used headless CDP attachment and correct-target selection. `Page.captureScreenshot` was byte-identical to the CLI at DPR 1 and followed external `set viewport`, but returned CSS-resolution frames at higher DPR unless the client reapplied `Emulation.setDeviceMetricsOverride`. That override introduced another viewport writer; external `set device`/`set viewport` ratios were not recoverable from frames. `captureBeyondViewport:true` bypassed emulation and crashed the headless daemon; `clip.scale` returned blank frames. These results motivate the Future item's daemon-owned route.

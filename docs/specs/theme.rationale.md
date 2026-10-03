@@ -40,11 +40,7 @@
 
 **Why `/playground/pocket` keeps the `compact` picker.** Those two mounts render a mobile prototype: no baseboard, so no Settings dialog to put the picker in. The dialog trigger keeps its label so it reads as the same control as the row it stands in for; `compact` stands alone and needs only the swatch.
 
-**Why the picker reconciles storage after hydration.** The server cannot read
-installed themes or the stored active id. Reading them during the first client
-render made its label and swatch differ from the prerendered markup; React
-reported the mismatch and kept the stale server attributes even while the body
-showed the stored theme.
+**Why the picker reconciles storage after hydration.** The server cannot read installed themes or the stored active id. Reading them during the first client render made its label and swatch differ from the prerendered markup; React reported the mismatch and kept the stale server attributes even while the body showed the stored theme.
 
 **Why the host fallback is module state.** Uninstalling the active theme is reachable from two depths — the picker row's `X` and the store dialog's `Remove` — and a prop-held fallback goes missing on one, dropping to the first bundled theme instead of the host's. `setDefaultThemeId()` is the same module-state shape as `lib/src/lib/shell-defaults.ts`.
 
@@ -54,30 +50,8 @@ showed the stored theme.
 
 **Why `compact` anchors absolutely.** Chromium offsets a fixed descendant of the docs' sticky mobile bar by that containing block; the dialog variants need fixed positioning to escape the dialog's `overflow-y-auto` surface, which would clip an absolute menu, while the compact mounts sit in no such scroller. Anchoring absolutely leaves the menu unmeasured; the trigger is still measured for side selection and the height cap.
 
-**Why the swatch previews chrome instead of repeating the terminal background.**
-The row already supplies the terminal foreground/background. The active header
-fill and runtime focus-ring pick show the chrome's two accent roles.
-Quiet Light uses green header fills and a purple focus border, so
-a background circle plus a focus dot hid the green. Resolving and flattening the
-candidate first also avoids showing translucent selection fills at an opacity the
-app never uses — which is also why the preview shares `applyTheme`'s
-`resolveThemeVars` rather than resolving on its own: a preview that skipped the
-selection flatten would show a candidate at an alpha the app never paints, and
-nothing would catch the divergence. The swatch remains circular while its
-enclosing entry takes the Settings controls' 4px corners: a 16px circle inset
-8px from an entry edge shares no corner with it, so the concentric derivation
-has nothing to match, and the entry keeps the radius every other Settings
-control has.
+**Why the swatch previews chrome instead of repeating the terminal background.** The row already supplies the terminal foreground/background. The active header fill and runtime focus-ring pick show the chrome's two accent roles. Quiet Light uses green header fills and a purple focus border, so a background circle plus a focus dot hid the green. Resolving and flattening the candidate first also avoids showing translucent selection fills at an opacity the app never uses — which is also why the preview shares `applyTheme`'s `resolveThemeVars` rather than resolving on its own: a preview that skipped the selection flatten would show a candidate at an alpha the app never paints, and nothing would catch the divergence. The swatch remains circular while its enclosing entry takes the Settings controls' 4px corners: a 16px circle inset 8px from an entry edge shares no corner with it, so the concentric derivation has nothing to match, and the entry keeps the radius every other Settings control has.
 
 ## Storybook simulation
 
-In Linux Chromium 153 (measured 2026-09), upgrading Vitest 4.1.11 to 5.0.2
-changed the implicit fallback for `❯` from DejaVu Sans (10.90625px at 13px)
-to DejaVu Sans Mono (7.828125px). The computed font stack was unchanged.
-Storybook 11 with Vitest 4 retained the baseline glyph; Vitest 5 with the
-same Vite version reproduced the change. Argos reported 25 Chromium changes
-across terminal-context prompts and mobile gesture labels; WebKit stayed clean.
-Naming the same fallback in both snapshot browsers restores all 295 Chromium
-baseline images and intentionally changes 27 WebKit images. Sharing symbol
-shapes and metrics across browsers is preferable to preserving different
-implicit fallbacks. Application and interactive Storybook fonts remain native.
+In Linux Chromium 153 (measured 2026-09), upgrading Vitest 4.1.11 to 5.0.2 changed the implicit fallback for `❯` from DejaVu Sans (10.90625px at 13px) to DejaVu Sans Mono (7.828125px). The computed font stack was unchanged. Storybook 11 with Vitest 4 retained the baseline glyph; Vitest 5 with the same Vite version reproduced the change. Argos reported 25 Chromium changes across terminal-context prompts and mobile gesture labels; WebKit stayed clean. Naming the same fallback in both snapshot browsers restores all 295 Chromium baseline images and intentionally changes 27 WebKit images. Sharing symbol shapes and metrics across browsers is preferable to preserving different implicit fallbacks. Application and interactive Storybook fonts remain native.

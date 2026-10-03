@@ -10,9 +10,7 @@ pnpm setup:git   # once per clone: merge markdown sentence by sentence
 pnpm build       # build lib, vscode extension, Pocket, website, and Hosted
 ```
 
-**Inside Dormouse, run `innerdogfood`** — `dor tool innerdogfood`.
-The Tool shows the harness in its own pane and prints the command to drive it
-(`docs/specs/standalone.md` → "Standalone browser-dev harness").
+**Inside Dormouse, run `innerdogfood`** — `dor tool innerdogfood`. The Tool shows the harness in its own pane and prints the command to drive it (`docs/specs/standalone.md` → "Standalone browser-dev harness").
 
 ## Worktrees
 
@@ -148,11 +146,7 @@ See [PRODUCT.md](PRODUCT.md) for users, brand personality, and aesthetic directi
 4. **No chrome, all content** — Minimize UI chrome. Terminals are the content.
 5. **Theme-adaptive** — Never hardcode colors. Support light and dark from day one.
 
-The concrete type scale, color strategy (surfaces, foregrounds, header palette, dynamic door bg, selection ring), and shared chrome constants live in
-[`lib/src/components/design.tsx`](lib/src/components/design.tsx) — read it
-before adding or changing any `text-*`, `bg-*`, `text-color-*`, or border
-class anywhere in `lib/src/`. `docs/specs/theme.md` → "Runtime model" owns how
-the token files are split; `DESIGN.md` → "Don't" owns what adding one costs.
+The concrete type scale, color strategy (surfaces, foregrounds, header palette, dynamic door bg, selection ring), and shared chrome constants live in [`lib/src/components/design.tsx`](lib/src/components/design.tsx) — read it before adding or changing any `text-*`, `bg-*`, `text-color-*`, or border class anywhere in `lib/src/`. `docs/specs/theme.md` → "Runtime model" owns how the token files are split; `DESIGN.md` → "Don't" owns what adding one costs.
 
 <!-- dor-skill:begin — managed by `dor skill --install`; edits inside are overwritten -->
 ## Running inside Dormouse

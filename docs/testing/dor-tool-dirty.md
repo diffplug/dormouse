@@ -4,16 +4,11 @@ Branch: `dor-tool-dirty`, stacked on `dor-tool-qc`.
 
 ## Scope
 
-Tools report unsaved state with `OSC 367;state;{"v":1,"dirty":true|false}`.
-This pass adds indication; save coordination and close protection remain future work.
+Tools report unsaved state with `OSC 367;state;{"v":1,"dirty":true|false}`. This pass adds indication; save coordination and close protection remain future work.
 
 ## Plan
 
-Run source-mutating root tests before starting innerdogfood. Start the real
-sidecar/staged CLI in a visible `dor ensure` pane, with an isolated XDG config.
-Use `scripts/dor-tool-qc/server.mjs --announce --dirty-controls` as a user Tool.
-All credentials and captures stay in the ignored `standalone/src-tauri/target/`
-fixture directory and credentials are deleted at shutdown.
+Run source-mutating root tests before starting innerdogfood. Start the real sidecar/staged CLI in a visible `dor ensure` pane, with an isolated XDG config. Use `scripts/dor-tool-qc/server.mjs --announce --dirty-controls` as a user Tool. All credentials and captures stay in the ignored `standalone/src-tauri/target/` fixture directory and credentials are deleted at shutdown.
 
 | Case | Expected | Result |
 | --- | --- | --- |
@@ -39,5 +34,4 @@ Native host rendering, cold restart, and cross-window transfer were not exercise
 
 ## Cleanup
 
-The fixture Tool was closed and its listener PID verified exited. The harness
-was stopped and private CLI credentials deleted.
+The fixture Tool was closed and its listener PID verified exited. The harness was stopped and private CLI credentials deleted.

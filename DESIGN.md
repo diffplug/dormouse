@@ -154,9 +154,7 @@ Every literal color the Host-Theme-Only Rule below permits, in full. Each is her
 
 ## 3. Typography
 
-**Display Font:** none (no display tier).
-**Body Font:** `var(--vscode-editor-font-family)`.
-**Label/Mono Font:** same as body. Sans and mono resolve to the same VSCode editor font.
+**Display Font:** none (no display tier). **Body Font:** `var(--vscode-editor-font-family)`. **Label/Mono Font:** same as body. Sans and mono resolve to the same VSCode editor font.
 
 **Character:** monospace, the user's own editor face. The system has no opinion about Cascadia vs. SF Mono vs. JetBrains Mono vs. Fira Code; whatever is set in the editor is what Dormouse uses, including ligature settings. This is the typographic equivalent of the host-theme rule.
 

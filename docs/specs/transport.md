@@ -254,9 +254,7 @@ Source of truth: `sliceSince` in `lib/src/host/replay-buffer.ts`; `answerForIds`
 
 **Never queue a port request behind another scan**, so each request's own budget holds (rationale).
 
-**Must budget port requests for both serial scans and an IPC margin per hop**:
-`2 × OPEN_PORT_TIMEOUT_MS + count × OPEN_PORT_TIMEOUT_PER_ID_MS + hops × OPEN_PORT_ROUND_TRIP_MARGIN_MS`.
-VS Code's child request uses one hop; its webview request uses two. Tauri's sidecar request uses one. **Must share the Windows socket-scan allowance across `Get-NetTCPConnection` and its `netstat` fallback**, starting none after exhaustion. The constants are mirrored across TypeScript, the sidecar, and Rust, pinned by `lib/src/lib/mirrored-constants.test.ts`.
+**Must budget port requests for both serial scans and an IPC margin per hop**: `2 × OPEN_PORT_TIMEOUT_MS + count × OPEN_PORT_TIMEOUT_PER_ID_MS + hops × OPEN_PORT_ROUND_TRIP_MARGIN_MS`. VS Code's child request uses one hop; its webview request uses two. Tauri's sidecar request uses one. **Must share the Windows socket-scan allowance across `Get-NetTCPConnection` and its `netstat` fallback**, starting none after exhaustion. The constants are mirrored across TypeScript, the sidecar, and Rust, pinned by `lib/src/lib/mirrored-constants.test.ts`.
 
 Source of truth: `openPortRequestTimeoutMs` in `lib/src/lib/platform/types.ts`; `open_ports_many_timeout` in `standalone/src-tauri/src/lib.rs`; `createPortScanner` in `standalone/sidecar/port-scanner.js`.
 

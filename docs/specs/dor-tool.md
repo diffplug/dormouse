@@ -235,8 +235,7 @@ Source of truth: `runFilePicker` in `dor/src/commands/open-picker.ts`; `listOpen
 
 A running Tool may send either as an OSC 367 `open` instead ([OSC 367](#osc-367)).
 
-Same Tool: same scope, name and run; a run a superseded retarget interrupted is
-not running.
+Same Tool: same scope, name and run; a run a superseded retarget interrupted is not running.
 
 ```mermaid
 flowchart TD
@@ -411,22 +410,11 @@ Source of truth: `PersistedToolMetadata` in `lib/src/lib/session-types.ts`; `cap
 
 **Scope: dor-tools** — remaining design, in implementation order.
 
-- **The announced `name`.** Wire the reserved [OSC 367](#osc-367) `name` into
-  the title-candidates channel and `dor list`'s location column.
-- **Later** — `prespawn_*` beyond the dedupe literal: a computed key, and
-  `prespawn_port`. Pocket/remote browser view (rides the browser-surface
-  staging in `docs/specs/remote-api.md`; reserve the kind on the wire now). An in-pane terminal/browser strip (decide against the
-  glossary's reserved multiple-Surfaces-per-Pane). A `boots: web` hint if the
-  terminal flash grates. `--has terminal` / `--has browser` *filter flags* for
-  `dor list`, whose rows already carry the fields.
+- **The announced `name`.** Wire the reserved [OSC 367](#osc-367) `name` into the title-candidates channel and `dor list`'s location column.
+- **Later** — `prespawn_*` beyond the dedupe literal: a computed key, and `prespawn_port`. Pocket/remote browser view (rides the browser-surface staging in `docs/specs/remote-api.md`; reserve the kind on the wire now). An in-pane terminal/browser strip (decide against the glossary's reserved multiple-Surfaces-per-Pane). A `boots: web` hint if the terminal flash grates. `--has terminal` / `--has browser` *filter flags* for `dor list`, whose rows already carry the fields.
 
 **Scope: open-folder** — the [Preview slot](#preview-slot)'s speed within the open rules: opt-in retarget without restart, built-in viewer first.
 
 ### Open questions
 
-The [OSC 367](#osc-367) collision sweep before the contract is frozen (xterm
-ctlseqs plus the iTerm2/kitty/WezTerm/ConEmu private ranges; runners-up 3676
-and 4242); whether `persist` belongs in the announce or the file (currently the
-announce — self-knowledge, like a runtime re-key); the final marketing noun
-("Dor Tools" carries the LLM-tool-use collision-avoidance; the spec says
-"tool" throughout).
+The [OSC 367](#osc-367) collision sweep before the contract is frozen (xterm ctlseqs plus the iTerm2/kitty/WezTerm/ConEmu private ranges; runners-up 3676 and 4242); whether `persist` belongs in the announce or the file (currently the announce — self-knowledge, like a runtime re-key); the final marketing noun ("Dor Tools" carries the LLM-tool-use collision-avoidance; the spec says "tool" throughout).

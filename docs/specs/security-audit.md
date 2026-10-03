@@ -99,6 +99,4 @@ Source of truth: `Verify AUDIT_PAT is provisioned` in `.github/workflows/securit
 
 ### Credential separation
 
-A second job outside the `security-audit` environment, running the domains that
-need no PAT and passing their fragments back as artifacts, would leave
-`application-security` and `hosted` unable to hold `AUDIT_PAT` at all.
+A second job outside the `security-audit` environment, running the domains that need no PAT and passing their fragments back as artifacts, would leave `application-security` and `hosted` unable to hold `AUDIT_PAT` at all.
