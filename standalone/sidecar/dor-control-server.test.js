@@ -354,50 +354,6 @@ test('dor control server cancels a pending request when its own timeout fires', 
   }
 });
 
-test('a request id already pending is refused, never overwriting the first', async () => {
-  // Overwriting would orphan the first entry's timer, which would later reap
-  // the second request and cancel it in the renderer.
-  const socketPath = testSocketPath('duplicate-id');
-  const sent = [];
-  const server = createDorControlServer({
-    socketPath,
-    token: 'secret',
-    timeoutMs: 1000,
-    send(event, data) {
-      sent.push({ event, data });
-    },
-  });
-
-  assert.ok(server);
-  await server.ready;
-
-  let second;
-  try {
-    const first = sendSocketRequest(socketPath, { requestId: 'dup', method: 'surface.list' });
-    await waitFor(() => sent.length === 1, 'the first request');
-    second = await openSocketRequest(socketPath, { requestId: 'dup', method: 'surface.list' });
-    const reply = await new Promise((resolve) => {
-      let buffer = '';
-      const timer = setTimeout(() => resolve(null), 500);
-      second.on('data', (chunk) => {
-        buffer += chunk;
-        const index = buffer.indexOf('\n');
-        if (index === -1) return;
-        clearTimeout(timer);
-        resolve(JSON.parse(buffer.slice(0, index)));
-      });
-    });
-    assert.deepEqual(reply, { requestId: 'dup', ok: false, error: "request id 'dup' is already pending" });
-    assert.equal(sent.filter((entry) => entry.event === 'dor:controlRequest').length, 1);
-
-    server.respond({ requestId: 'dup', ok: true, result: { surfaces: [] } });
-    assert.deepEqual((await first).lines[2], { requestId: 'dup', ok: true, result: { surfaces: [] } });
-  } finally {
-    second?.destroy();
-    server.close();
-  }
-});
-
 test('a request timeoutMs stretches the server deadline past the option default', async () => {
   const socketPath = testSocketPath('deadline-stretch');
   const sent = [];

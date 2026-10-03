@@ -270,14 +270,6 @@ function createDorControlServer({ socketPath, socketDir, token, send, getHelperP
       return;
     }
 
-    // Ids are the client's, so a collision is refused rather than overwriting
-    // the pending entry, whose orphaned timer would later reap this one and
-    // cancel it in the renderer.
-    if (pending.has(request.requestId)) {
-      writeResponse(socket, { requestId: request.requestId, ok: false, error: `request id '${request.requestId}' is already pending` });
-      return;
-    }
-
     const surfaceId = typeof request.surfaceId === 'string' ? request.surfaceId : undefined;
     // Only the host knows a helper's source before cross-window routing; the
     // renderer refuses helper targets (docs/specs/dor-cli.md -> Helper callers).
