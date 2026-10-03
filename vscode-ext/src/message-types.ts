@@ -26,7 +26,8 @@ export type WebviewMessage =
   | { type: 'dormouse:runWorkbenchCommand'; command: VSCodeWorkbenchCommand }
   // Validated host-side, so the webview's shape is not trusted here.
   | { type: 'browser:request'; request: unknown; requestId: string }
-  | { type: 'iframe:createProxyUrl'; url: string; embedderOrigins: string[]; requestId: string }
+  | { type: 'iframe:createProxyUrl'; url: string; embedderOrigins: string[]; lease?: string; requestId: string }
+  | { type: 'iframe:releaseProxy'; lease: string }
   | { type: 'tool:control'; request: ToolHostRequest; requestId: string }
   // Peer surfaces: the Burrow runs in the extension host, but the terminals
   // live in whichever webview opened them. See docs/specs/vscode.md → "Peer
@@ -92,6 +93,7 @@ export type ExtensionMessage =
     }
   | { type: 'dormouse:selectedShell'; shell?: string; args?: string[] }
   | { type: 'dormouse:openThemeDebugger' }
+  | { type: 'dormouse:shown'; shown: boolean }
   | { type: 'dormouse:flushSessionSave'; requestId: string }
   | ({ type: 'dor:controlRequest' } & DorControlRequestPayload)
   | ({ type: 'dor:controlCancel' } & DorControlCancelPayload)

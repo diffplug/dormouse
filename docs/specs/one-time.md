@@ -169,9 +169,8 @@ Source of truth: `OneTimeRuntime` in
 
 **`OneTimeClient` is single-use: one `connectOnce`, one rendezvous socket, and
 at most one session**, on `ClientSessionCore`, direct or not at all.
-`connectOnce` is the phone's half of [Flow](#flow): message 1 exists before the
-socket opens, both handshake payloads are empty, and at the switch it closes
-the rendezvous normally and resolves `{ok: true, burrowLabel}`; a decline, an abandoned attempt,
+`connectOnce` is the phone's half of [Flow](#flow): both handshake payloads are
+empty, and at the switch it closes the rendezvous normally and resolves `{ok: true, burrowLabel}`; a decline, an abandoned attempt,
 or no switch by `DIRECT_ONLY_DEADLINE_MS` fails it.
 
 - **Never open a socket outside `connectOnce`**, which runs once per client

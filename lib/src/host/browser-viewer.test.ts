@@ -4,8 +4,9 @@ import { request as httpRequest } from 'node:http';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { WebSocket } from 'ws';
 import { decodeViewerFrame, type ViewerFrame, type ViewerState } from '../lib/platform/browser-automation';
-import { BrowserView, PROVISIONAL_INPUT_WINDOW_MS, WINDOW_GONE_GRACE_MS, closeReason, createViewerServer, measuredViewport, parseViewerInput, type Upstream } from './browser-viewer';
+import { BrowserView, MOTION_MS, PROVISIONAL_INPUT_WINDOW_MS, SETTLE_MS, WINDOW_GONE_GRACE_MS, closeReason, createViewerServer, measuredViewport, parseViewerInput, type Upstream } from './browser-viewer';
 import { openViewer } from './browser-host-test-utils';
+import type { CaptureClaim } from './browser-capture-budget';
 
 /** The webview's socket as a view sees it: what was sent, and input to send. */
 class FakeSocket extends EventEmitter {
@@ -34,7 +35,7 @@ const jpeg = (n: number) => new Uint8Array([n]);
 function makeView(opts: { headed?: boolean; capturable?: boolean } = {}) {
   const socket = new FakeSocket();
   const captures: ((jpeg: Uint8Array | undefined) => void)[] = [];
-  const capture = vi.fn(() => new Promise<Uint8Array | undefined>((resolve) => { captures.push(resolve); }));
+  const capture = vi.fn((_claim: CaptureClaim) => new Promise<Uint8Array | undefined>((resolve) => { captures.push(resolve); }));
   const inputs: unknown[] = [];
   const upstream: Upstream = {
     capturable: opts.capturable ?? true,
@@ -133,6 +134,54 @@ describe('a viewer socket', () => {
     expect(socket.kinds().filter((kind) => kind.startsWith('provisional'))).toHaveLength(13);
     await vi.advanceTimersByTimeAsync(600);
     expect(capture).toHaveBeenCalledTimes(2);
+  });
+
+  it('settles, then sharpens: paints a page in motion from the stream, and captures once it rests', async () => {
+    const { socket, view, capture, captures } = makeView();
+    view.frame(jpeg(1));
+    await vi.advanceTimersByTimeAsync(100);
+    captures[0](jpeg(9));
+    // An animation: a changed frame every 50 ms.
+    let n = 2;
+    let atMotion = 0;
+    for (let t = 0; t < MOTION_MS + 1000; t += 50) {
+      view.frame(jpeg(n++));
+      if (t === MOTION_MS) atMotion = capture.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(50);
+      captures.at(-1)!(jpeg(99));
+    }
+    const duringMotion = capture.mock.calls.length;
+    // Before the burst counts as motion the loop captures as ever; past it, none.
+    expect(atMotion).toBeGreaterThan(1);
+    expect(duringMotion).toBe(atMotion);
+    // ...and the stream paints every frame of it.
+    const painted = socket.kinds().filter((kind) => kind.startsWith('provisional')).length;
+    expect(painted).toBeGreaterThan(1000 / 50 - 2);
+    // At rest: one crisp capture, SETTLE_MS after the last frame.
+    await vi.advanceTimersByTimeAsync(SETTLE_MS - 60);
+    expect(capture).toHaveBeenCalledTimes(duringMotion);
+    await vi.advanceTimersByTimeAsync(60);
+    expect(capture).toHaveBeenCalledTimes(duringMotion + 1);
+    captures.at(-1)!(jpeg(42));
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(socket.kinds().at(-1)).toBe('crisp 42');
+    expect(capture).toHaveBeenCalledTimes(duringMotion + 1);
+  });
+
+  it('claims the budget urgently only for a pane with recent input, and never once closed', async () => {
+    const { socket, view, capture, captures } = makeView();
+    view.frame(jpeg(1));
+    await vi.advanceTimersByTimeAsync(100);
+    expect(capture.mock.calls[0][0].urgent).toBe(false);
+    captures[0](jpeg(9));
+    socket.input({ type: 'input_text', text: 'x' });
+    view.frame(jpeg(2));
+    await vi.advanceTimersByTimeAsync(PROVISIONAL_INPUT_WINDOW_MS + 100);
+    const claim = capture.mock.calls[1][0];
+    expect(claim.urgent).toBe(true);
+    expect(claim.wanted()).toBe(true);
+    view.close(1000, 'done');
+    expect(claim.wanted()).toBe(false);
   });
 
   it('coalesces the frames that arrive during a capture into one follow-up', async () => {

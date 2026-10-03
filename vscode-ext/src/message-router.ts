@@ -17,7 +17,7 @@ import type { WebviewMessage, ExtensionMessage } from './message-types';
 import type { DorControlRequest } from './pty-manager';
 import { dorWorkspaceRefusal } from './dor-workspace-guard';
 import { runBrowserRequest } from './agent-browser-host';
-import { createIframeProxyUrl } from './iframe-proxy-host';
+import { createIframeProxyUrl, releaseIframeProxyLease } from './iframe-proxy-host';
 import { toolControl } from './tool-host';
 import type { ToolHostRequest } from '../../lib/src/lib/platform/types';
 import { ASK_BUDGET_MS } from '../../lib/src/host/remote/service-protocol';
@@ -351,10 +351,18 @@ export function attachRouter(
     // (owned-PTY alert state, or a PTY claimed/released). The host reflects it
     // onto native chrome (tab title / view badge). See docs/specs/vscode.md.
     onUnion?: (union: WorkspaceUnion) => void;
+    // Whether VS Code shows this webview. A retained hidden webview is not
+    // promised a `hidden` page, so the webview is told, on (re)initializing
+    // and on each change (docs/specs/dor-browser.md → "Resource Policy").
+    shown?: { current(): boolean; onDidChange: vscode.Event<unknown> };
   },
 ): vscode.Disposable {
   const reconnect = options?.reconnect ?? false;
   const killOnDispose = options?.killOnDispose ?? false;
+  // Only a router whose PTYs outlive it (the WebviewView's) leaves live PTYs
+  // unowned, so only such a router claims them back at `dormouse:init`; a
+  // panel kills its own.
+  const adoptOrphans = !killOnDispose;
   // Also this webview's realm of the alerts, so one webview's blur never
   // touches another's (docs/specs/alert.md → Engagement).
   const routerId = `router-${++nextRouterId}`;
@@ -363,6 +371,16 @@ export function attachRouter(
   // the webview requires (docs/specs/vscode.md → "Webview message
   // authentication"). A raw `vscode.Webview` never reaches this scope.
   const post = (message: ExtensionMessage): Thenable<boolean> => channel.post(message);
+  // `onDidChangeViewState` also fires on focus and column moves: post changes.
+  let sentShown: boolean | undefined;
+  const postShown = (always = false) => {
+    if (!options?.shown) return;
+    const shown = options.shown.current();
+    if (!always && shown === sentShown) return;
+    sentShown = shown;
+    void post({ type: 'dormouse:shown', shown } satisfies ExtensionMessage);
+  };
+  const shownDisposable = options?.shown?.onDidChange(() => postShown());
 
   // Track which PTY IDs were spawned (or reconnected) through this webview
   const ownedPtyIds = new Set<string>();
@@ -656,6 +674,8 @@ export function attachRouter(
           // Validated host-side (`normalizeEmbedderOrigins`); an unusable chain
           // costs the shim, never a wider grant.
           Array.isArray(msg.embedderOrigins) ? msg.embedderOrigins : [],
+          // The lease is this webview's: its owner is this router.
+          msg.lease === undefined ? undefined : { owner: routerId, id: msg.lease },
         ).then(
           (result) => post({
             type: 'iframe:proxyUrl', requestId: msg.requestId, result,
@@ -665,6 +685,9 @@ export function attachRouter(
             result: { ok: false, reason: 'unreachable', detail: err?.message ?? String(err) },
           } satisfies ExtensionMessage),
         );
+        break;
+      case 'iframe:releaseProxy':
+        if (typeof msg.lease === 'string') releaseIframeProxyLease(routerId, msg.lease);
         break;
       case 'peer:answer': {
         // Every webview answers, so "nobody owns it" settles immediately
@@ -705,8 +728,10 @@ export function attachRouter(
         // Tear down previous subscriptions first (webview was destroyed and recreated).
         disconnectWebview?.();
         disconnectWebview = connectWebview();
-        // Recreated content is a new realm.
+        // Recreated content is a new realm, and holds no iframe view yet.
         alertHost.endRealm(routerId);
+        releaseIframeProxyLease(routerId);
+        postShown(true);
 
         // Re-publish the currently-selected shell so split-spawns in the
         // freshly-mounted webview know what to use.
@@ -740,9 +765,9 @@ export function attachRouter(
           }
         }
 
-        // Also claim unowned PTYs (from disposed routers / other webviews)
+        // Also claim the PTYs a disposed view left unowned.
         for (const [id, info] of ptys) {
-          if (!globalOwnedPtyIds.has(id)) {
+          if (adoptOrphans && !globalOwnedPtyIds.has(id)) {
             claim(id);
             reconnectable.set(id, info);
           }
@@ -763,10 +788,9 @@ export function attachRouter(
           const data = previouslyOwned.has(id)
             ? ptyManager.getScrollback(id)
             : ptyManager.getReplayData(id);
-          if (data) {
-            const replay: ExtensionMessage = { type: 'pty:replay', id, data };
-            post(replay);
-          }
+          // One per listed PTY, empty or not: the collector finishes on a
+          // replay for each, and would otherwise wait out its timeout.
+          post({ type: 'pty:replay', id, data: data ?? '' } satisfies ExtensionMessage);
         }
         for (const [id] of reconnectable) {
           const alertState = alertManager.getState(id);
@@ -828,6 +852,8 @@ export function attachRouter(
         if (request.pending.size === 0) request.settle();
       }
       alertHost.endRealm(routerId);
+      releaseIframeProxyLease(routerId);
+      shownDisposable?.dispose();
       removeWatchedCommandListener();
       removeAlertSettingsListener();
       resolveAllFlushRequests();

@@ -166,7 +166,50 @@ describe('IframePanel', () => {
     setPlatform(platform);
     await renderPanel(stubActions(), { id: 'iframe-bare-proxy', title: 'Raw iframe', params: { url: 'localhost:5173' } });
 
-    expect(createIframeProxyUrl).toHaveBeenCalledWith('http://localhost:5173');
+    expect(createIframeProxyUrl).toHaveBeenCalledWith('http://localhost:5173', expect.stringMatching(/^iframe-bare-proxy#/));
+  });
+
+  // docs/specs/dor-browser.md → "Iframe Proxy Leases".
+  it('asks under one lease for the life of the view, and releases it on unmount', async () => {
+    const createIframeProxyUrl = vi.fn(async (_url: string, _lease?: string) => ({ ok: true as const, url: 'http://127.0.0.1:61234/app' }));
+    const releaseIframeProxy = vi.fn();
+    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'createIframeProxyUrl' | 'releaseIframeProxy'>;
+    platform.createIframeProxyUrl = createIframeProxyUrl;
+    platform.releaseIframeProxy = releaseIframeProxy;
+    setPlatform(platform);
+    await renderPanel(stubActions(), paneProps('iframe-leased'));
+    await act(async () => { getAgentBrowserScreenController('iframe-leased')?.chromeActions.reload(); });
+    const leases = new Set(createIframeProxyUrl.mock.calls.map(([, lease]) => lease));
+    expect(createIframeProxyUrl.mock.calls.length).toBeGreaterThan(1);
+    expect(leases.size).toBe(1);
+    const [lease] = leases;
+    act(() => root.unmount());
+    expect(releaseIframeProxy).toHaveBeenLastCalledWith(lease);
+    root = createRoot(container);
+  });
+
+  // StrictMode mounts, unmounts and remounts: reusing one id would send create,
+  // release, create, which a transport may deliver as create, create, release
+  // — closing the grant the live view was just given.
+  it('never asks for a lease it has released, under StrictMode', async () => {
+    const calls: string[] = [];
+    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'createIframeProxyUrl' | 'releaseIframeProxy'>;
+    platform.createIframeProxyUrl = async (_url: string, lease?: string) => {
+      calls.push(`create ${lease}`);
+      return { ok: true as const, url: 'http://127.0.0.1:61234/app' };
+    };
+    platform.releaseIframeProxy = (lease: string) => { calls.push(`release ${lease}`); };
+    setPlatform(platform);
+    await renderPanel(stubActions(), paneProps('iframe-strict'));
+    const released = new Set<string>();
+    for (const call of calls) {
+      const [verb, lease] = call.split(' ');
+      if (verb === 'release') released.add(lease);
+      else expect(released.has(lease), `${call} after its release in ${calls.join(', ')}`).toBe(false);
+    }
+    const created = calls.filter((call) => call.startsWith('create')).map((call) => call.split(' ')[1]);
+    expect(created.length).toBeGreaterThan(0);
+    expect(released.has(created.at(-1)!)).toBe(false);
   });
 
   // The frame is not the only consumer of the source URL: `liveUrl`, the

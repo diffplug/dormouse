@@ -21,6 +21,7 @@ import type { AlertSink } from '../lib/alert-delivery-model';
 import { SettingsPreview } from './SettingsPreview';
 import { Door } from './Door';
 import { OneTimeIndicator } from './OneTimeIndicator';
+import { RetainedPagesIndicator } from './RetainedPagesIndicator';
 import { DoorElementsContext, SelectedIdContext, useDialogKeyboardOwner } from './wall/wall-context';
 import type { DoorChip, DooredItem } from './wall/wall-types';
 import { IS_MAC } from '../lib/platform';
@@ -377,6 +378,8 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
         )}
 
         <div ref={rightClusterEl} className="flex shrink-0 items-end gap-1.5">
+          <RetainedPagesIndicator count={items.filter((item) => item.livePage).length} />
+
           {notice}
 
           <OneTimeIndicator />

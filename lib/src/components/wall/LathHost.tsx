@@ -282,7 +282,7 @@ export function LathHost({
   lath: LathWallEngine;
   /** Wall commits the resize (as an op proposal) once the drag ends. */
   onCommitResize: (splitPath: number[], boundary: number, deltaPx: number) => void;
-  /** focusin inside a leaf's subtree (embed self-focus adoption, acceptance row 8). */
+  /** focusin inside a leaf's subtree (embed self-focus adoption). */
   onLeafFocused?: (id: string) => void;
   /** A pane drag crossed its threshold — the Wall applies its selection policy. */
   onDragStart?: (id: string) => void;

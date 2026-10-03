@@ -6,9 +6,9 @@ The standalone app checks for updates on launch, where the network policy allows
 
 ## How it works
 
-**Must read and clear the post-install marker on launch** (§localStorage) and show its banner; a reported failure suppresses this launch's check. Otherwise wait 5 seconds, then read the network policy with `networkPolicy` over the Burrow link and, where it allows (`docs/specs/remote-network.md` → "Updates"), `check()` — no update is silent, an update raises the approval prompt; then the reminder, if due: `check-due`, recording `remindedAt`. **Must skip that `check()` once an update is approved**, including through Check now during the wait or the policy read. **The reminder is re-evaluated hourly while the app runs**, reading no policy and never checking; **never over an undismissed notice, nor while the clock reads before 2026-09**, not yet set. Version-lookup, check, and download failures are logged. **Only approval starts the background `download()`**.
+**Must read and clear the post-install marker on launch** (§localStorage) and show its banner; a reported failure suppresses this launch's check and launch reminder. Otherwise wait 5 seconds, then read the network policy with `networkPolicy` over the Burrow link and, where it allows (`docs/specs/remote-network.md` → "Updates"), `check()` — no update is silent, an update raises the approval prompt; then the reminder, if due: `check-due`, recording `remindedAt`. **Must skip that `check()` once an update is approved**, including through Check now during the wait or the policy read, **and must drop its result when approved while it runs**. **The reminder is re-evaluated hourly while the app runs**, reading no policy and never checking; **never over an undismissed notice, nor while the clock reads before 2026-09**, not yet set. Version-lookup, check, and download failures are logged. **Only approval starts the background `download()`**.
 
-**A second Check now joins the check in flight. An update already approved is shown again, `downloading` or `downloaded`, instead of checked for**, which would offer it for approval twice. **Every successful check, automatic or asked for, records `checkedAt`** (§localStorage).
+Check now (`checkNow()`) shows `checking`, then `available`, `up-to-date`, or `check-failed`. **A second Check now joins the check in flight. An update already approved is shown again, `downloading` or `downloaded`, instead of checked for**, which would offer it for approval twice. **Every successful check, automatic or asked for, records `checkedAt`** (§localStorage).
 
 **A self-host build never checks** (`docs/specs/relay.md` → "Relay origin"): `startUpdateCheck()` returns at once and `checkNow()` does nothing unless the webview's own baked mode, `bakedRelayMode()`, is `hosted`.
 
@@ -47,27 +47,7 @@ Update status is a text notice in the Baseboard, the always-visible bottom strip
 
 "Install when I quit" is the approval; "Changelog" opens `https://dormouse.sh/changelog/after/<getVersion()>`. **"Restart now" calls `quit_restart`** (`docs/specs/standalone.md` → "Restart"): the quit installs on its way out, then relaunches. **A refusal turns a still-shown `downloaded` into `restart-refused`, carrying the host's reason and never "Restart now"**, since the refusal holds until relaunch; the update stays pending. ` · ` separates the message from the action labels.
 
-```mermaid
-stateDiagram-v2
-  state "check-due" as due
-  state "check-failed" as failed
-  state "up-to-date" as utd
-  state "restart-refused" as refused
-  [*] --> available: launch check() finds one
-  [*] --> due: reminder
-  [*] --> checking: checkNow() from Settings
-  due --> checking: checkNow()
-  failed --> checking: checkNow()
-  checking --> available
-  checking --> utd
-  checking --> failed
-  available --> downloading: approveUpdate()
-  downloading --> available: download() fails
-  downloading --> downloaded: download() ok
-  downloaded --> refused: quit_restart refused
-```
-
-**Every state is dismissible via [×].** Dismissing an unapproved `available` notice means no download and no install that session; dismissing `downloading`, `downloaded`, or `restart-refused` hides the notice only and **never cancels** an approved download/install.
+**Every state is dismissible via [×].** Dismissing an unapproved `available` notice approves nothing (Check now may offer it again); dismissing `downloading`, `downloaded`, or `restart-refused` hides the notice only and **never cancels** an approved download/install.
 
 **The notice carries the Baseboard's own text style (`text-sm font-mono text-muted`), in its single right-hand `ml-auto` cluster** — clear of doors and the shortcut hint.
 

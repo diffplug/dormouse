@@ -18,4 +18,14 @@ test('pty-core is created with the shared sliceSince, so recovery capture reads 
 test('recovery capture and the record take are answered from pty-core marks', () => {
   assert.match(source, /receivedChars:\s*\(id\)\s*=>\s*mgr\.receivedChars\(id\)/);
   assert.match(source, /outputSince:\s*\(id,\s*mark\)\s*=>\s*mgr\.outputSince\(id,\s*mark\)/);
+  // Widens each target before its first press (recovery-capture.ts -> RECOVERY_SIZE).
+  assert.match(source, /resize:\s*\(id,\s*cols,\s*rows\)\s*=>\s*mgr\.resize\(id,\s*cols,\s*rows\)/);
+});
+
+test('iframe leases are owned by the window Rust stamps, and end with it', () => {
+  // docs/specs/dor-browser.md -> "Iframe Proxy Leases": without these a closed
+  // window's grants would listen until quit.
+  assert.match(source, /lease:\s*data\.lease/);
+  assert.match(source, /case 'iframe:releaseProxy':[\s\S]*?releaseIframeProxyLease\(data\.owner/);
+  assert.match(source, /event === 'burrow:windows'[\s\S]*?retainIframeProxyOwners\(/);
 });

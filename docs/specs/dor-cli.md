@@ -282,12 +282,10 @@ Invariants:
   Workspace.
 - **One Wall answers each request**, in the figure's order below; `dor list
   --all` fans out to every Wall, and a **stable id** is unique Window-wide,
-  unlike `surface:N`. **Nothing mounted answers `workspace '<ref>' is still
-  mounting` for the active Workspace** after a bounded retry covering the tick
-  between a Workspace's creation and its Wall registering, never left to the
-  caller's deadline (`docs/specs/dor-browser.md` → "Managed identity"); **a
-  resolved `--workspace` whose Wall has not registered answers the same**, not
-  the unknown-Workspace refusal. **Every request is
+  unlike `surface:N`. **A Wall not yet registered — the active Workspace's or
+  a resolved `--workspace`'s — answers `workspace '<ref>' is still mounting`
+  after a bounded retry**, never the unknown-Workspace refusal nor the caller's
+  deadline (`docs/specs/dor-browser.md` → "Managed identity"). **Every request is
   answered, including a container ref of the wrong type and a handler that
   throws** — an unanswered one blocks its caller to the deadline. A Workspace
   being closed refuses the Surface-creating verbs (`docs/specs/layout.md` →
@@ -479,9 +477,10 @@ handle requires a live control endpoint.
 
 **The explicit port, never the hostname, is the signal for the `http` default**
 (rationale). An explicit scheme is always honored. This overrides
-`agent-browser`'s own `https` default for a bare `host:port`. **Reject** an
-input that is neither a URL nor a `host:port`, including a purely numeric "host"
-like `800:600` (rationale).
+`agent-browser`'s own `https` default for a bare `host:port`. **`dor iframe`
+rejects** an input that is neither an http(s) URL nor a `host:port`, including a
+purely numeric "host" like `800:600` (rationale); `dor agent-browser` forwards
+any such target to the provider unchanged.
 
 **Must resolve navigation targets CLI-side before forwarding to the browser provider.** Only the first target of a navigation verb is eligible. Skip known option values; an unknown option leaves the argv unchanged rather than guessing its arity. The provider descriptors and `resolveOpenTargetArgs` own recognized verbs and option arities.
 
@@ -532,7 +531,9 @@ navigation verbs, nonbinding/informational controls, and execution scope.
   agent-browser), and the host reports Playwright's stream. **The call must wait past
   `BROWSER_REQUEST_TIMEOUT_MS`**, since the host's answer can queue behind a
   launch or close of the browser (rationale). A failure there adds a stderr
-  warning without changing the command's success.
+  warning without changing the command's success. **Exception: a fixed-DPR
+  Playwright `open` binds before navigating**, and on a DPR mismatch kills a
+  Surface it created and fails unopened.
 
 A `--surface` handle resolves against **listed** Surfaces ([Handle
 Model](#handle-model)), and the host applies two gates in order:

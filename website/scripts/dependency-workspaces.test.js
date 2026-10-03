@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assertWorkspaceCoverage, getDependencyNames } from './dependency-workspaces.js';
+import { assertWorkspaceCoverage, getDependencyNames, missingDependency } from './dependency-workspaces.js';
 
 const workspace = (name, fields = {}) => ({ pkg: { name, ...fields } });
 
@@ -50,5 +50,16 @@ describe('dependency edges', () => {
 
   it('accepts a manifest declaring neither block', () => {
     expect(getDependencyNames({})).toEqual([]);
+  });
+});
+
+// docs/specs/security-supply-chain.md -> "Disclosure": only an external
+// package's optional edge may go undisclosed.
+describe('a dependency this machine did not install', () => {
+  it('is skipped only on an optional edge an external package declares', () => {
+    expect(missingDependency({ optional: false, isWorkspace: false, isProductRoot: false })).toBe('throw');
+    expect(missingDependency({ optional: true, isWorkspace: false, isProductRoot: false })).toBe('skip');
+    expect(missingDependency({ optional: true, isWorkspace: true, isProductRoot: true })).toBe('describe');
+    expect(missingDependency({ optional: true, isWorkspace: true, isProductRoot: false })).toBe('throw');
   });
 });

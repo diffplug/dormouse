@@ -6,6 +6,10 @@ export interface CodingAgent {
   commands: readonly string[];
   /** A positional subcommand (codex) or long option; the ID is always required. */
   resume: string;
+  /** IDs are UUIDs unless the agent opts out: any other token after the resume
+   *  invocation names no conversation (Codex 0.160 also prints `codex resume and
+   *  select <thread>`). `opaque` accepts any id-shaped token instead. */
+  id?: 'opaque';
   watchByDefault: boolean;
 }
 

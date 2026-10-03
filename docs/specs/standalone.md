@@ -318,7 +318,7 @@ with a monotonic `revision`; a webview drops a snapshot behind the one it holds.
   it** (§Routing). A target the registry cannot place — one no window reports,
   or a name two windows carry — falls through to the caller's window, which
   refuses a name duplicated there and otherwise resolves its own. **A target
-  routes as a number only when it reads as `POSITIONAL_WORKSPACE_REF`**
+  routes as a number only when it reads as `NUMERIC_WORKSPACE_REF`**
   (`dor/src/protocol.ts`); `007` and `0` are names.
 - **Must keep numbered and opaque refs consistent across Rust, the webview, and
   the browser harness**: `standalone/scripts/workspace-ref-cases.json` holds the
@@ -340,7 +340,7 @@ Source of truth: `standalone/src-tauri/src/workspaces.rs`;
 | `pty:marked` | `data.id` | the window showing it; the id then falls silent until its replay |
 | `pty:list` | `data.forWindow` | the window that asked |
 | `alert:*` | `data.forWindow`, then `data.id` | that window; else the window showing the Session; neither → every window |
-| `dor:controlRequest` | `params.workspace`, `params.window`, `data.surfaceId` | in that precedence: the window holding the named Workspace (§Workspace registry), the named window, the caller's Surface's owner; none → the focused window |
+| `dor:controlRequest` | `params.workspace`, `params.window`, `data.surfaceId` | in that precedence: the window holding the named Workspace (§Workspace registry), the named window, the caller's Surface's owner; none → the most recently focused window (a never-focused one last), **never all** |
 | `dor:controlCancel` | `data.requestId` | the window its request went to; unknown → every window |
 | `burrow:ask` | `data.params.surfaceId` | its owner; a Surface with no PTY here, or an ask naming none, → every window (§Burrow service) |
 | `voice:result` | — | nowhere: only one that outlived its invoke gets here |
@@ -681,8 +681,7 @@ Source of truth: `QuitMachine` in `standalone/src-tauri/src/quit_state.rs`;
 **Must intercept every quit trigger in Rust** and run the webview teardown
 before exiting (rationale).
 
-**Every window votes before any window is torn down** (rationale): Rust asks
-them all, and only once all agree walks them one teardown at a time.
+**Every window votes before any window is torn down** (rationale).
 
 ```mermaid
 stateDiagram-v2

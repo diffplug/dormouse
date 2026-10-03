@@ -301,6 +301,16 @@ impl WindowState {
         (lost, owned)
     }
 
+    /// A window opened: last in the focus order until it is focused, so a
+    /// window nobody has clicked into still answers `Route::Focused` once every
+    /// focused one has closed, rather than that request reaching every window.
+    fn note_window(&self, label: &str) {
+        let mut order = guard(&self.focus_order);
+        if !order.iter().any(|entry| entry == label) {
+            order.push(label.to_string());
+        }
+    }
+
     fn touch_focus(&self, label: &str) {
         let mut order = guard(&self.focus_order);
         order.retain(|entry| entry != label);
@@ -1437,23 +1447,44 @@ fn take_recovery_commands(
 // the shared lib/src/host/iframe-proxy.ts; this only bridges the request.
 #[tauri::command(async)]
 fn iframe_create_proxy_url(
+    window: tauri::Window,
     state: tauri::State<'_, SidecarState>,
     target: String,
     // The webview's own ancestor chain, which is what decides who may frame the
     // proxy. Forwarded verbatim and validated in the proxy itself
     // (`normalizeEmbedderOrigins`), so this stays a bridge and nothing more.
     embedder_origins: Option<Vec<String>>,
+    // The mounted view's lease id; its owner is this window, which only Rust
+    // can name (docs/specs/dor-browser.md → "Iframe Proxy Leases").
+    lease: Option<String>,
 ) -> Result<JsonValue, String> {
-    let response = request_from_sidecar_timeout(
-        &state,
-        "iframe:createProxyUrl",
-        serde_json::json!({
-            "target": target,
-            "embedderOrigins": embedder_origins.unwrap_or_default(),
-        }),
-        Duration::from_secs(5),
-    )?;
+    let mut data = serde_json::json!({
+        "target": target,
+        "embedderOrigins": embedder_origins.unwrap_or_default(),
+    });
+    if let Some(id) = lease {
+        data["lease"] = serde_json::json!({ "owner": window.label(), "id": id });
+    }
+    let response =
+        request_from_sidecar_timeout(&state, "iframe:createProxyUrl", data, Duration::from_secs(5))?;
     Ok(response.get("result").cloned().unwrap_or(JsonValue::Null))
+}
+
+// Ends this window's lease `lease`, or every lease it holds — what a webview
+// does as it boots, for any a page it replaced never released.
+#[tauri::command]
+fn iframe_release_proxy(
+    window: tauri::Window,
+    state: tauri::State<'_, SidecarState>,
+    lease: Option<String>,
+) {
+    send_to_sidecar(
+        &state,
+        sidecar_line(
+            "iframe:releaseProxy",
+            serde_json::json!({ "owner": window.label(), "id": lease }),
+        ),
+    );
 }
 
 // The repository holding each directory, for Workspace auto-naming, answered by
@@ -2365,6 +2396,11 @@ fn build_window(
     // The only platform read of this window's box: from here the `Moved` /
     // `Resized` payloads keep the cache current (§Boot and geometry).
     seed_geometry(app, label);
+    // Only while it still exists: a window destroyed before this line has
+    // already been dropped from the order, and must not come back as a target.
+    if let (Some(state), Some(_)) = (app.try_state::<WindowState>(), app.get_webview_window(label)) {
+        state.note_window(label);
+    }
     Ok(())
 }
 
@@ -4210,6 +4246,7 @@ pub fn run() {
             capture_agent_recovery,
             take_recovery_commands,
             iframe_create_proxy_url,
+            iframe_release_proxy,
             tool_control,
             managed_voice,
             git_info,
@@ -4712,6 +4749,21 @@ mod tests {
         assert!(state.transfer_marks.is_empty());
         let registry = super::workspaces::Registry::default();
         assert!(matches!(super::routing::route("pty:data", &serde_json::json!({"id": "t1", "data": "live"}), &state.view(&registry)), super::routing::Route::EmitTo("ws-2")));
+    }
+
+    #[test]
+    fn a_window_never_focused_still_takes_unanchored_requests() {
+        let windows = super::WindowState::default();
+        windows.touch_focus("main");
+        windows.note_window("ws-2");
+        windows.note_window("ws-3");
+        windows.touch_focus("ws-3");
+        // Opening is not focusing: ws-3 stays ahead of the never-focused ws-2.
+        windows.note_window("ws-3");
+        assert_eq!(windows.focused().as_deref(), Some("ws-3"));
+        windows.drop_window("ws-3");
+        windows.drop_window("main");
+        assert_eq!(windows.focused().as_deref(), Some("ws-2"));
     }
 
     #[test]

@@ -103,7 +103,7 @@ Source of truth: `useHeaderTier` in `lib/src/components/wall/use-header-tier.ts`
 
 ## Baseboard
 
-**Must group the right-hand controls**, in order: the `N more →` overflow arrow, the host-supplied `notice` slot, the one-time connection indicator (`docs/specs/one-time.md` -> "Laptop UI"), then the always-present spoken-alarm, push, and Settings buttons. The two status buttons toggle their alarm settings and expose state through shape and `aria-pressed`; Settings opens `docs/specs/alert.md` → Settings dialog. With no Doors and room for it, the baseboard shows the command-mode gesture hint.
+**Must group the right-hand controls**, in order: the `N more →` overflow arrow, the live-minimized-pages count (`docs/specs/dor-browser.md` → "Resource Policy"), the host-supplied `notice` slot, the one-time connection indicator (`docs/specs/one-time.md` -> "Laptop UI"), then the always-present spoken-alarm, push, and Settings buttons. The two status buttons toggle their alarm settings and expose state through shape and `aria-pressed`; Settings opens `docs/specs/alert.md` → Settings dialog. With no Doors and room for it, the baseboard shows the command-mode gesture hint.
 
 A minimized session becomes a **door**, showing its label plus the alert badge cluster (`docs/specs/alert.md` → Door); both speech states also name themselves in the Door's `title` and accessible name. **A Door's label is header-derived only for a terminal-backed Surface** (`hasTerminal`); any other keeps its stored title, and a browser Door adds the display glyphs from `docs/specs/dor-browser.md` → "Browser Chrome".
 
@@ -116,7 +116,7 @@ A minimized session becomes a **door**, showing its label plus the alert badge c
 
 ### Baseboard responsive sizing
 
-- **Everything in the right cluster but the overflow arrow — notice, one-time indicator, the three buttons — is never available to Doors; never measure the overflow arrow into it**, since its presence is an output of the fit.
+- **Everything in the right cluster but the overflow arrow — page count, notice, one-time indicator, the three buttons — is never available to Doors; never measure the overflow arrow into it**, since its presence is an output of the fit.
 - **At least one door is always shown**, even if it overflows; past that, Doors fit while room remains for an overflow arrow. A scrolled baseboard shows `← N more` and/or `N more →`; clicking one reveals one Door in that direction. One Door too long to fit between both arrows keeps both and truncates its title.
 - **An arrow hiding a ringing or TODO Door must say so**, wearing the Door shape with a static alarm inset and TODO pill, its accessible name counting them (`3 more, 1 ringing, 1 TODO`). **Every arrow must reserve the width of the TODO one**, so the fit never depends on which Doors an arrow hides.
 - **Must reveal the selected Door when selection or membership changes**, without overriding manual overflow scrolling.
@@ -190,7 +190,7 @@ Each Wall renders one Workspace. Standalone mounts one Wall **per Workspace**; V
 - **Must reject duplicate Workspace IDs before mutating the model.**
 - **Must retain mode and selection across switches unless the [activation gesture](#workspace-tabs) changes them.**
 - **Close confirms first when the Workspace holds touched Surfaces or running work**, then closes every member Surface. **Must select the fresh Workspace that replaces the last closed one. Must serialize closes across the Window.**
-- **A Workspace whose Wall has not registered is refused** (`workspace '<ref>' is still mounting`, one wording for every caller), never closed past (I4). **A gesture waits out the registration gap first**, as `dor workspace close` does.
+- **A Workspace whose Wall has not registered is refused** (`workspace '<ref>' is still mounting`, one wording for every caller), never closed past (I4). **A gesture waits out the registration gap first**, as `dor workspace close` does, and is dropped unannounced on its timeout, a pending transfer, or a close in flight.
 - **Rename edits the Workspace `name` only**, never a Surface title or the per-pane inline rename, and pins it ([Workspace names](#workspace-names)). **A press inside the open rename editor never starts a reorder.**
 - **Must drop the closing Workspace's rename editor and pending confirmation, and no other's.**
 - **Every Workspace verb runs outside the strip**, which renders the rename editor and confirmation from a store, so tab gestures and `dor` commands take one path. **Every Workspace verb has a `dor` counterpart** (`docs/specs/dor-cli.md` → "dor workspace"): a command close raises no confirmation, refusing instead, and closes its member Surfaces silently.
@@ -252,7 +252,7 @@ flowchart TD
   MA -- yes --> CM["command mode"]
 ```
 
-**A key targeted inside `[data-terminal-context]` leaves the chain before dual-tap**, so no Wall gesture, the mode-exit dual-tap included, fires from inside an open context. **Must let one Wall answer each key**, even a key that activates another Workspace. **Must prevent default and stop propagation for a handled key and its `keyup`**, which win32-input-mode or kitty would report to the program. Bare Meta/Shift presses stop only internal dispatch; the detector leaves their DOM event untouched. A staged kill confirmation answers before the dialog gate, so its letter works while its modal is open.
+**A key targeted inside `[data-terminal-context]` leaves the chain before dual-tap.** **Must let one Wall answer each key**, even a key that activates another Workspace. **Must prevent default and stop propagation for a handled key and its `keyup`**, which win32-input-mode or kitty would report to the program. Bare Meta/Shift presses stop only internal dispatch; the detector leaves their DOM event untouched.
 
 **Every open dialog holds its own reference-counted lease on that gate**, and command-mode dispatch resumes only once the last lease is released.
 

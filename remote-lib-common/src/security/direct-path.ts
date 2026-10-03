@@ -451,12 +451,14 @@ export class DirectCutover {
    * after it, so `drain` carries the held frames in arrival order and empties
    * the queue.
    *
-   * **A switch onto a channel this end has abandoned is `fatal`**: nothing that
-   * peer sends can arrive any more, and the alternative is a session whose every
-   * request hangs unanswered.
+   * **A switch onto a channel this end has abandoned, or never began, is
+   * `fatal`**: nothing that peer sends can arrive any more, and the alternative
+   * is a session whose every request hangs unanswered. The offer is processed
+   * before any switch behind it on the relay, so a switch reaching an `idle`
+   * end is a peer that never negotiated one.
    */
   onSwitchDecrypted(): DirectSwitchOutcome {
-    if (this.#state === 'abandoned') return { kind: 'fatal' };
+    if (this.#state !== 'attempting') return { kind: 'fatal' };
     this.#inbound = 'direct';
     return { kind: 'drain', frames: this.#held.take() };
   }

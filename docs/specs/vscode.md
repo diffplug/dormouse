@@ -32,7 +32,7 @@ Source of truth: `attachRouter` in `vscode-ext/src/message-router.ts`, pinned by
 The extension host is the platform host of `docs/specs/transport.md` → "PTY lifecycle": `pty-manager.ts` forks the pty-host child, the `WebviewView` and each `WebviewPanel` are the webviews, and each router owns its own PTY ids.
 
 - Hiding or toggling the Dormouse panel neither kills its PTYs nor destroys sessions.
-- **Closing an editor-tab `WebviewPanel` kills that panel's owned PTYs** (`killOnDispose`), and VS Code discards the tab's per-panel state. **Disposing the `WebviewView` releases its router and leaves the PTYs alive.**
+- **Closing an editor-tab `WebviewPanel` kills that panel's owned PTYs** (`killOnDispose`), and VS Code discards the tab's per-panel state. **Disposing the `WebviewView` releases its router and leaves the PTYs alive** for its next router alone.
 - Each VS Code window gets its own extension host, and therefore its own pty-host child.
 - **Must cap each PTY's replay and scrollback at 1,000,000 characters**, replay clearing on first read; **a pty-host child crash reports every live PTY exited and keeps its buffer**, ignoring a replaced child's late output and exits.
 
@@ -165,7 +165,7 @@ The shared `BurrowService` (`docs/specs/relay.md` → "Burrow side", which owns 
 
 Source of truth: `VsCodeBurrowStateStore` in `vscode-ext/src/burrow-store.ts`, `markOneTimeServing` and `contendIfServing` in `vscode-ext/src/burrow.ts`.
 
-**Which window: bind-as-lease.** **The bind is the lease**, so the windows' extension hosts never fight over the enrollment's one `/ws/burrow` socket (rationale). Every contending window binds one fixed path — `<hash>.sock` in a per-user `dormouse-peer-<uid>` directory in the temp dir, or `\\.\pipe\dormouse-peer-<hash>` on Windows — **the hash is the first 12 hex characters of SHA-256 over `context.globalStorageUri.fsPath`**, so every window, whatever its build, computes the same path (hashed for the platform path cap; rationale). The winner is the broker and runs the service; everyone else connects to it as a client.
+**Which window: bind-as-lease.** **The bind is the lease**, so the windows' extension hosts never fight over the enrollment's one `/ws/burrow` socket (rationale). Every contending window binds one fixed path — `<hash>.sock` in a per-user `dormouse-peer-<uid>` directory in the temp dir, or `\\.\pipe\dormouse-peer-<hash>` on Windows — **the hash is the first 12 hex characters of SHA-256 over `context.globalStorageUri.fsPath`**, so every window, whatever its build, computes the same path (hashed for the platform path cap; rationale). The winner is the broker and runs the service.
 
 ```mermaid
 stateDiagram-v2
@@ -181,7 +181,7 @@ stateDiagram-v2
 
 - **Roles never flip downward**: no `onRole(false)` after a `true` (rationale).
 - **Contend on broker death, not on a timer**: `bind` picks exactly one; no TTL, heartbeat file, or watcher.
-- **A corpse is cleared, then the bind is re-checked**: **never unlink on the first refusal** (rationale).
+- **Never unlink on the first refusal; a reclaimed bind is re-checked (`stillOurs`) before it serves** (rationale).
 - **A bind is not a role until it is believed**: every "is this window the broker" answer reads `brokerConfirmed`, so **unverified reads as unsettled** and a command landing mid-verification is held for the verdict (rationale).
 - **Errors after `listen` are logged, not thrown**, so a late server error cannot take the extension host down (rationale).
 
@@ -254,7 +254,7 @@ The broker window listens on the authenticated local socket and every other wind
 
 **Cross-window streams are reference-counted per routed PTY**: two attachments to one foreign surface share one `subscribe`, only zero-to-one starts the owner forwarding and only one-to-zero stops it. **The owner answers the first `subscribe` with `subscribed` only after its sink and atomic liveness check are installed**, a recorded exit going first on the same ordered socket, so an exit cannot be overtaken by a successful attach. **The last unsubscribe stops the forwarding but keeps the route** (rationale). **Routes are refreshed by every resolve and dropped only by an `exit` frame or the owning window disconnecting** (`forgetPeerRoutes`).
 
-**Never key routes by a raw `ptyId`** — pane and PTY ids are unique only within a window, and cold restore can duplicate them across windows (rationale). The broker replaces an answer's owner-local `ptyId` with an opaque route handle for the `(peer socket, ptyId)` pair; follow-up surface asks address that peer alone, and `subscribe`, `write`, and PTY-only `resize` translate it back to the owner's id on that socket only. **The handle is checked against this window's PTYs and stays in the peer namespace after its route closes**, so a stale handle fails closed. **When a peer disconnects, every handle routed to it is dropped and reported as exited.**
+**Never key routes by a raw `ptyId`** — pane and PTY ids are unique only within a window, and cold restore can duplicate them across windows (rationale). The broker replaces an answer's owner-local `ptyId` with an opaque route handle for the `(peer socket, ptyId)` pair; follow-up surface asks address that peer alone, and `subscribe`, `write`, and PTY-only `resizePty` translate it back to the owner's id on that socket only. **The handle is checked against this window's PTYs and stays in the peer namespace after its route closes**, so a stale handle fails closed. **When a peer disconnects, every handle routed to it is dropped and reported as exited.**
 
 **Never send a result both ways**: the broker's `commandRoutes` records which window is owed each in-flight `burrowRequestId`; an answer with an entry goes to that socket alone, one without to this window's webviews (rationale). A disconnecting window's routes are dropped, its commands left to the asking adapter's timeout, and **whatever the broker was still asking it is settled empty on the spot**. **A `result` frame is taken only from the window the request was put to.**
 

@@ -691,6 +691,19 @@ describe('AlertManager in isolation', () => {
     });
   });
 
+  // A prompt boundary with no finish event (an OSC 133 emitter that skips D)
+  // still ends the command: alert.md -> "Command-exit Track".
+  it('rings at a prompt boundary that arrives without a finish event', () => {
+    const id = 'command-exit-prompt';
+
+    armCommandExit(manager, id);
+    manager.applyTerminalSemanticEvents(id, [{ type: 'promptStart' }]);
+    expect(manager.getState(id)).toMatchObject({
+      status: 'ALERT_RINGING',
+      notification: { source: 'COMMAND_EXIT', title: 'Command finished', body: 'pnpm build' },
+    });
+  });
+
   // `docs/specs/alert.md` -> Public State.
   it('a second source joining mid-episode keeps the episode id', () => {
     const id = 'episode-cross-track';

@@ -84,8 +84,8 @@ import {
   toolBrowserLaunchParams,
   type LaunchFallback,
   browserDisplayModeFromParams,
+  retainsLivePage,
   browserUrlFromParams,
-  isBrowserParams,
   surfaceKindFromParams,
   isPreviewSlotParams, isToolParams, matchesToolKey, namespacedToolKey, toolPendingFromParams,
 } from './wall/browser-surface';
@@ -470,7 +470,7 @@ export function Wall({
     const meta = lath.store.getSnapshot().leafMeta;
     return doorsRef.current.map((door) => {
       const leaf = meta.get(door.id);
-      return `${leaf?.title ?? ''}\u0001${surfaceKindFromParams(leaf?.params)}\u0001${browserDisplayModeFromParams(leaf?.params) ?? ''}\u0001${isPreviewSlotParams(leaf?.params)}`;
+      return `${leaf?.title ?? ''}\u0001${surfaceKindFromParams(leaf?.params)}\u0001${browserDisplayModeFromParams(leaf?.params) ?? ''}\u0001${isPreviewSlotParams(leaf?.params)}\u0001${retainsLivePage(leaf?.params)}`;
     }).join('\u0000');
   });
   // The Baseboard's chips: the runtime Doors plus the store's current fallback title
@@ -484,6 +484,7 @@ export function Wall({
         kind: surfaceKindFromParams(meta?.params),
         browserDisplay: browserDisplayModeFromParams(meta?.params),
         ...(isPreviewSlotParams(meta?.params) ? { preview: true } : {}),
+        ...(retainsLivePage(meta?.params) ? { livePage: true } : {}),
       };
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `doorDisplayMetadata` is the store read
@@ -949,11 +950,7 @@ export function Wall({
   );
 
   /** A member whose live document cannot leave its webview: a move reopens it. */
-  const isIframeSurface = useCallback((id: string): boolean => {
-    const params = lath.getMeta(id)?.params;
-    return (isBrowserParams(params) || (isToolParams(params) && browserUrlFromParams(params) !== null))
-      && resolveRenderMode(params) === 'iframe';
-  }, [lath]);
+  const isIframeSurface = useCallback((id: string): boolean => retainsLivePage(lath.getMeta(id)?.params), [lath]);
 
   /** The members whose live document a move between Windows cannot carry, by
    *  the ref a `dor` caller can act on. */
@@ -1143,7 +1140,8 @@ export function Wall({
       ? sel
       : lath.listPanes()[0]?.id;
     const r = token ? lath.store.restoreLeaf(meta, token, { fallbackRef }) : { ok: false };
-    // No token (or no fallback was possible — empty tree): make the leaf the root.
+    // No token, or no tier applied: add it the way a new pane is added (beside
+    // the last leaf, or as the root of an empty tree).
     if (!r.ok) lath.store.addLeaf(id, meta, null);
   }, [lath]);
 
@@ -2325,7 +2323,7 @@ export function Wall({
   });
 
   // LathHost surfaces `focusin` inside a leaf as an op proposal (embed self-focus
-  // adoption, acceptance row 8): passthrough → enter the leaf if selection differs;
+  // adoption): passthrough → enter the leaf if selection differs;
   // command → move selection onto it.
   const onLeafFocused = useCallback((id: string) => {
     if (modeRef.current === 'passthrough') {

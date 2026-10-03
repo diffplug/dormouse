@@ -197,7 +197,7 @@ export class DirectEndpoint {
       case 'direct-switch': {
         const outcome = this.#cutover.onSwitchDecrypted();
         if (outcome.kind === 'fatal') {
-          this.#deps.fatal('the peer moved to a direct path this end had abandoned');
+          this.#deps.fatal('the peer moved to a direct path this end abandoned or never began');
           return;
         }
         this.#settle();
