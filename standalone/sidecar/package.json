@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "main": "main.js",
   "scripts": {
-    "test": "node --test"
+    "test": "node --test --test-force-exit"
   },
   "dependencies": {
     "detect-libc": "2.1.2",

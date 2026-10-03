@@ -31,13 +31,14 @@ const raw = process.env.DORMOUSE_DEHYDRATE;
 let handed = null;
 try { const parsed = JSON.parse(raw); if (parsed && parsed.v === 1 && parsed.state != null) handed = parsed.state; } catch {}
 const state = handed ?? { stops: 0 };
-process.stdout.write('\\x1b]367;serve;{"dehydrate":true,"v":1}\\x07');
-process.stdout.write('HANDED=' + JSON.stringify(handed) + '\\n');
+// The handler goes in before HANDED: the test sends Ctrl+C as soon as it reads it.
 process.on('SIGINT', () => {
   state.stops += 1;
   process.stdout.write('\\x1b]367;dehydrate;' + JSON.stringify({ v: 1, state }) + '\\x07');
   process.exit(0);
 });
+process.stdout.write('\\x1b]367;serve;{"dehydrate":true,"v":1}\\x07');
+process.stdout.write('HANDED=' + JSON.stringify(handed) + '\\n');
 setInterval(() => {}, 1000);
 `;
 
@@ -46,8 +47,11 @@ function session(shell = BASH) {
   writeFileSync(path.join(home, 'tool.js'), TOOL);
   let output = '';
   const waiters = new Set();
+  let onExit = null;
   const mgr = create((event, data) => {
-    if (event !== 'data' || data.id !== 'tool') return;
+    if (data.id !== 'tool') return;
+    if (event === 'exit') onExit?.();
+    if (event !== 'data') return;
     output += data.data;
     for (const waiter of waiters) waiter();
   }, require('node-pty'));
@@ -94,10 +98,22 @@ function session(shell = BASH) {
       const seen = await waitFor(mark, (s) => prompts(s) >= 1, 'prompt after Ctrl+C');
       return /\x1b\]367;dehydrate;([^\x07]*)\x07/.exec(seen)?.[1] ?? null;
     },
-    kill() { mgr.kill('tool'); },
-    close() {
-      mgr.killAll();
-      // A dying zsh can still be writing its history into the bare home.
+    /** Kill the shell and wait for it to exit: a dying shell writes its
+     *  history into the bare home. A SIGHUP that lands as bash redraws its
+     *  prompt is occasionally lost, so the wait is bounded; the shell left
+     *  alive holds the test process open, which package.json's
+     *  `--test-force-exit` ends. */
+    async kill() {
+      if (!mgr.hasPty('tool')) return;
+      let timer;
+      const exited = new Promise((resolve) => { onExit = resolve; timer = setTimeout(resolve, 3_000); });
+      mgr.kill('tool');
+      await exited;
+      clearTimeout(timer);
+      onExit = null;
+    },
+    async close() {
+      await this.kill();
       rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
     },
   };
@@ -111,7 +127,7 @@ for (const [name, shell] of [['bash', BASH], ['zsh', ZSH]]) test(`${name}: a Too
     assert.equal(await s.run(), null);
     const payload = await s.stop();
     assert.equal(payload, JSON.stringify({ v: 1, state: { stops: 1 } }));
-    s.kill();
+    await s.kill();
 
     // The rehydrate: a fresh shell carrying the payload to its first command.
     await s.spawn(payload);
@@ -121,7 +137,7 @@ for (const [name, shell] of [['bash', BASH], ['zsh', ZSH]]) test(`${name}: a Too
     assert.equal(await s.run(), null);
     await s.stop();
   } finally {
-    s.close();
+    await s.close();
   }
 });
 
@@ -132,9 +148,9 @@ test('a missing, garbage, or oversized payload restarts the Tool from its args',
       await s.spawn(dehydrate);
       assert.equal(await s.run(), null, `handed for ${String(dehydrate).slice(0, 20)}`);
       await s.stop();
-      s.kill();
+      await s.kill();
     }
   } finally {
-    s.close();
+    await s.close();
   }
 });
