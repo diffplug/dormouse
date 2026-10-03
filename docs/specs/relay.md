@@ -394,19 +394,26 @@ Source of truth: `RelayHub` in `relay/src/relay.ts`; the sweeps in
 
 ### Pairing (phone ↔ laptop, first time)
 
-```
-phone                        relay                        burrow (laptop)
-  |   scan the Burrow's QR        |                              |
-  |-- setup (token) ----------->|  registers a passkey         |
-  |-- signin (passkey) -------->|  session token               |
-  |-- e2e init (Noise msg 1) -->|-- e2e init {clientId} ------>|  invitation -> reserved
-  |<-- e2e response ------------|<-- e2e response (Noise msg 2) |
-  |-- reauth begin/finish ----->|  presence challenge + nonce  |
-  |-- e2e transport ----------->|-- e2e transport ------------>|  proof verified,
-  |    {code, label, proof}     |                              |  modal opens
-  |                             |                              |  user types the code
-  |<-- e2e transport -----------|<-- e2e transport ------------|  ACL record written
-  |    PairingOutcomeV1         |     (same size either way)   |
+```mermaid
+sequenceDiagram
+  Note over Phone: scan the Burrow's QR
+  alt no usable passkey
+    Phone->>Relay: setup (token), then signin
+  else passkey held
+    Phone->>Relay: signin if needed, then setup retire (token)
+  end
+  Phone->>Relay: e2e init (Noise msg 1)
+  Relay->>Burrow: e2e init {clientId}
+  Note over Burrow: invitation reserved
+  Burrow-->>Relay: e2e response (Noise msg 2)
+  Relay-->>Phone: e2e response
+  Note over Phone: two digits shown
+  Phone->>Relay: reauth begin/finish
+  Phone->>Relay: e2e transport {code, label, presence}
+  Relay->>Burrow: e2e transport
+  Note over Burrow: proof verified, modal opens, user types the code, ACL record written
+  Burrow-->>Relay: e2e transport PairingOutcomeV1, same size either way
+  Relay-->>Phone: e2e transport
 ```
 
 What each step establishes: `docs/specs/remote-security-model.md` -> "Pairing".
