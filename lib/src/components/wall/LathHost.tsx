@@ -22,11 +22,12 @@ import { layout, sashes } from '../../lib/lath/layout';
 import { LATH_LAYER_DYING, LATH_LAYER_ELEVATED, LATH_LAYER_TILED } from '../../lib/lath/animator';
 import { type DropTarget, resize } from '../../lib/lath/ops';
 import { useFocusRingColor } from '../../lib/themes/use-focus-ring-color';
-import { ELEVATED_PANE_SHADOW, PANE_HEADER_HEIGHT_PX, TERMINAL_SELECTION_BORDER_RADIUS } from '../design';
+import { ELEVATED_PANE_SHADOW, PANE_HEADER_HEIGHT_PX } from '../design';
 import type { PaneProps } from './pane-props';
 import { type LeafMeta, LATH_LAYOUT_OPTS } from './lath-wall-store';
 import { nowMs, type LathWallEngine } from './lath-wall-engine';
-import { type DragController, createDragController } from './lath-drag-controller';
+import { type DragController, type DragPreview, createDragController } from './lath-drag-controller';
+import { LathDropPreview } from './LathDropPreview';
 import { TerminalPanel } from './TerminalPanel';
 import { BrowserPanel } from './BrowserPanel';
 import { ToolPanel } from './ToolPanel';
@@ -364,7 +365,7 @@ export function LathHost({
 
   // The current preview overlay rect (null → no overlay). The dragged leaf itself is
   // dimmed imperatively; only this rect is React state.
-  const [dragPreview, setDragPreview] = useState<Rect | null>(null);
+  const [dragPreview, setDragPreview] = useState<DragPreview | null>(null);
   // Set when a real drag ends so the click the browser synthesizes on pointerup does
   // not re-fire header/door click behavior; cleared by the click suppressor (or a tick).
   const suppressNextClickRef = useRef(false);
@@ -782,24 +783,7 @@ export function LathHost({
           multiPane={!snapshot.zoomedId && frames.size > 1} preferences={contextPreferences.current} />
       )}
 
-      {/* Drop-preview overlay: the exact rect the current candidate would commit to,
-          painted in the selection color (translucent fill + solid border). */}
-      {dragPreview && (
-        <div
-          data-lath-drop-preview=""
-          className="lath-drop-preview"
-          style={{
-            left: dragPreview.x,
-            top: dragPreview.y,
-            width: dragPreview.width,
-            height: dragPreview.height,
-            zIndex: Z_PREVIEW,
-            border: `1px solid ${selectionColor}`,
-            borderRadius: TERMINAL_SELECTION_BORDER_RADIUS,
-            backgroundColor: `color-mix(in srgb, ${selectionColor} 22%, transparent)`,
-          }}
-        />
-      )}
+      {dragPreview && <LathDropPreview preview={dragPreview} wall={rect} color={selectionColor} zIndex={Z_PREVIEW} />}
     </div>
   );
   return (

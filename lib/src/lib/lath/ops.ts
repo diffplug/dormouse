@@ -25,6 +25,9 @@ import {
 } from './model';
 import { type LayoutOpts, allocateChildSpans, autoEdge, minSpan, nodeRectAtPath } from './layout';
 
+import { type DropTarget, materializeTarget, targetByLeafSet } from './drop-target';
+export type { DropTarget } from './drop-target';
+
 type SplitNode = Extract<LathNode, { kind: 'split' }>;
 
 /** JSON-serializable restore context captured by `remove`, persisted with Doors. */
@@ -52,11 +55,6 @@ export type RestoreToken = {
   fingerprint: string | null;
 };
 
-/** A resolved drop, produced by hit-testing. */
-export type DropTarget =
-  | { kind: 'edge'; path: number[]; edge: Edge }
-  | { kind: 'swap'; leaf: LeafId };
-
 function mkLeaf(id: LeafId): LathNode {
   return { kind: 'leaf', id };
 }
@@ -70,26 +68,6 @@ function findSplitPathByFingerprint(tree: LathTree, fingerprint: string): number
       return;
     }
     node.children.forEach((child, i) => walk(child.node, [...path, i]));
-  };
-  if (tree.root) walk(tree.root, []);
-  return result;
-}
-
-function findPathByLeafSet(tree: LathTree, target: Set<LeafId>): number[] | null {
-  if (target.size === 0) return null;
-  let result: number[] | null = null;
-  const eq = (s: Set<LeafId>): boolean => s.size === target.size && [...s].every((x) => target.has(x));
-  const walk = (node: LathNode, path: number[]): Set<LeafId> => {
-    let set: Set<LeafId>;
-    if (node.kind === 'leaf') set = new Set([node.id]);
-    else {
-      set = new Set();
-      node.children.forEach((c, i) => {
-        for (const id of walk(c.node, [...path, i])) set.add(id);
-      });
-    }
-    if (eq(set) && (result === null || path.length < result.length)) result = path;
-    return set;
   };
   if (tree.root) walk(tree.root, []);
   return result;
@@ -203,11 +181,12 @@ export function restore(
     }
 
     if (token.siblingLeafIds && token.siblingLeafIds.length > 1 && token.siblingFingerprint) {
-      const siblingPath = findPathByLeafSet(tree, new Set(token.siblingLeafIds));
-      if (siblingPath !== null) {
-        const sibling = nodeAtPath(tree, siblingPath);
+      const siblingTarget = targetByLeafSet(tree, new Set(token.siblingLeafIds), token.edge);
+      const resolved = siblingTarget && materializeTarget(tree, siblingTarget);
+      if (resolved) {
+        const sibling = nodeAtPath(resolved.tree, resolved.path);
         if (sibling && structureFingerprint(sibling) === token.siblingFingerprint) {
-          const r = insert(tree, token.leafId, { kind: 'edge', path: siblingPath, edge: token.edge }, token.weight);
+          const r = insert(tree, token.leafId, siblingTarget, token.weight);
           if (r.ok) return { tree: r.tree, ok: true, tier: 'exact' };
         }
       }
@@ -322,10 +301,11 @@ function insertImpl(
   if (target.kind === 'swap' || Number.isNaN(weight)) return { tree, ok: false };
   if (tree.root === null) return { tree, ok: false };
   if (findLeafPath(tree, id) !== null) return { tree, ok: false };
-  if (nodeAtPath(tree, target.path) === null) return { tree, ok: false };
+  const resolved = materializeTarget(tree, target);
+  if (!resolved) return { tree, ok: false };
   const eps = 1e-6;
   const w = Math.min(Math.max(weight, eps), 1 - eps);
-  return { tree: insertBesideNode(tree, target.path, target.edge, id, w, keepSiblings), ok: true };
+  return { tree: insertBesideNode(resolved.tree, resolved.path, target.edge, id, w, keepSiblings), ok: true };
 }
 
 function sameLeafSet(a: LeafId[], b: LeafId[]): boolean {
@@ -345,8 +325,9 @@ export function move(tree: LathTree, id: LeafId, target: DropTarget): { tree: La
 
   const idPath = findLeafPath(tree, id);
   if (idPath === null) return { tree, ok: false };
-  const targetNode = nodeAtPath(tree, target.path);
-  if (targetNode === null) return { tree, ok: false };
+  const resolved = materializeTarget(tree, target);
+  if (!resolved) return { tree, ok: false };
+  const targetNode = nodeAtPath(resolved.tree, resolved.path)!;
 
   const targetLeaves = leaves({ root: targetNode });
   // The dragged leaf is the whole target subtree / its only descendant leaf — nothing to be beside.
@@ -358,21 +339,15 @@ export function move(tree: LathTree, id: LeafId, target: DropTarget): { tree: La
   const t2 = remove(tree, id).tree;
 
   const targetSet = new Set(targetLeaves.filter((l) => l !== id));
-  let insertPath = findPathByLeafSet(t2, targetSet);
-  if (insertPath === null) {
-    // Rare: the target subtree dissolved (its split flattened as the removal collapsed a
-    // neighbor). Degrade to inserting beside the target's first surviving leaf.
-    const anchor = targetLeaves.find((l) => l !== id);
-    insertPath = anchor !== undefined ? findLeafPath(t2, anchor) : null;
-    if (insertPath === null) return { tree, ok: false };
-  }
-
+  const destination = targetByLeafSet(t2, targetSet, target.edge);
+  if (!destination) return { tree, ok: false };
   // Back into its own split: the siblings keep their proportions, so a reorder or a drop
   // at the leaf's existing boundary changes no other pane. Elsewhere it shares as an insert.
-  const destination = insertPath.length === 0 ? null : nodeAtPath(t2, insertPath.slice(0, -1));
-  const ownSplit = parent !== null && destination?.kind === 'split' && destination.dir === parent.dir
-    && sameLeafSet(leaves({ root: destination }), leaves({ root: parent }).filter((l) => l !== id));
-  const r = insertImpl(t2, id, { kind: 'edge', path: insertPath, edge: target.edge }, w, ownSplit);
+  const at = materializeTarget(t2, destination);
+  const container = at && at.path.length > 0 ? nodeAtPath(at.tree, at.path.slice(0, -1)) : null;
+  const ownSplit = parent !== null && container?.kind === 'split' && container.dir === parent.dir
+    && sameLeafSet(leaves({ root: container }), leaves({ root: parent }).filter((l) => l !== id));
+  const r = insertImpl(t2, id, destination, w, ownSplit);
   return r.ok ? r : { tree, ok: false };
 }
 
