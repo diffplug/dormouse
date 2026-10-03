@@ -85,7 +85,11 @@ export type OneTimeEndReason =
   | 'expired'
   /** The phone's socket closed before the switch, or the channel after it. */
   | 'phone-left'
-  /** No direct path: declined, abandoned, or not switched by `DIRECT_ONLY_DEADLINE_MS`. */
+  /**
+   * No direct path: declined, abandoned, or not switched by
+   * `DIRECT_ONLY_DEADLINE_MS` — or any fatal session failure before the switch,
+   * a failed decrypt included, since `onFatal` carries no cause to tell them apart.
+   */
   | 'direct-failed'
   /** The path ended a session held to the allowed networks, before the switch or after: its `refusal` says how. */
   | 'network-not-allowed'
