@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getCargoGitRepository, getShippedCargoGraph } from "./cargo-dependencies.js";
-import { assertWorkspaceCoverage, getDependencyNames } from "./dependency-workspaces.js";
+import { assertWorkspaceCoverage, getDependencyNames, missingOptionalEdge } from "./dependency-workspaces.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, "../..");
@@ -192,21 +192,19 @@ function scanDependency(fromDir, packageName, declaredBy) {
 
   const packageJsonPath = getPackageJsonPath(fromDir, packageName);
   if (!packageJsonPath) {
-    // Absent by design rather than under-reported, in one of two ways. An
-    // optional dependency of an external package ships to nobody: the Tauri
-    // bundle copies `standalone/sidecar/node_modules`, and pnpm puts a package
-    // there only if that manifest declares it — the addon's own list also names
-    // builds this project never releases (android, musl). An optional
-    // dependency a product root declares itself does ship, on the platform that
-    // can hold it, so it is described from a sibling below. Anything else
-    // missing is still a hard error.
-    if (declaredBy.optional) {
-      if (declaredBy.isProductRoot) {
-        undescribedPackages.set(
-          packageName,
-          optionalSiblingsAtSameVersion(declaredBy.pkg, packageName),
-        );
-      }
+    // Absent by design rather than under-reported only on an optional edge
+    // `missingOptionalEdge` covers: the Tauri bundle copies
+    // `standalone/sidecar/node_modules`, and pnpm puts a package there only if
+    // that manifest declares it — the addon's own list also names builds this
+    // project never releases (android, musl). Anything else missing is a hard
+    // error.
+    const edge = declaredBy.optional ? missingOptionalEdge(declaredBy) : 'throw';
+    if (edge === 'skip') return;
+    if (edge === 'describe') {
+      undescribedPackages.set(
+        packageName,
+        optionalSiblingsAtSameVersion(declaredBy.pkg, packageName),
+      );
       return;
     }
     throw new Error(`Could not resolve package.json for "${packageName}" from ${fromDir}`);
@@ -223,8 +221,9 @@ function scanDependency(fromDir, packageName, declaredBy) {
 
 function scanDependencies(pkg, fromDir) {
   const isProductRoot = productRoots.has(pkg.name);
+  const isWorkspace = workspacePackagesByName.has(pkg.name);
   for (const { name, optional } of getDependencyNames(pkg)) {
-    scanDependency(fromDir, name, { pkg, optional, isProductRoot });
+    scanDependency(fromDir, name, { pkg, optional, isWorkspace, isProductRoot });
   }
 }
 

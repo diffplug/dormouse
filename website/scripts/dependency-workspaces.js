@@ -38,3 +38,13 @@ export function getDependencyNames(pkg) {
     ...Object.keys(pkg.optionalDependencies ?? {}).map((name) => ({ name, optional: true })),
   ];
 }
+
+// What an optional edge this machine did not install means
+// (docs/specs/security-supply-chain.md -> "Disclosure"). An external package's
+// ships to nobody, since every bundle stages only what a product root declares;
+// a product root's ships on the platform that can hold it, so it is described
+// from a sibling; any other workspace's has no rule and must not vanish.
+export function missingOptionalEdge({ isWorkspace, isProductRoot }) {
+  if (!isWorkspace) return 'skip';
+  return isProductRoot ? 'describe' : 'throw';
+}
