@@ -3,6 +3,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { ExternalLinkModalHost } from './ExternalLinkModalHost';
+import type { DorControlResult } from 'dor/protocol';
 import { clearExternalLinkConfirmation, getExternalLinkConfirmationSnapshot, requestExternalLinkConfirmation } from '../lib/external-link-confirmation';
 
 const mocks = vi.hoisted(() => ({ open: vi.fn(), toolControl: vi.fn(), confirm: () => {} }));
@@ -19,20 +20,22 @@ vi.mock('./ExternalLinkModal', async (original) => {
 });
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+type Request = { method: string; params: Record<string, unknown>; surfaceId: string; respond: (result: DorControlResult) => void };
+let requests: Request[];
+const capture = (event: Event) => requests.push((event as CustomEvent<Request>).detail);
 let root: Root;
 let container: HTMLDivElement;
 beforeEach(() => {
   mocks.open.mockReset();
-  mocks.toolControl.mockReset().mockResolvedValue({ status: 'open-handlers', handlers: { handlers: [
-    { tool: 'builtin:file', description: 'Rendered document', reason: 'built-in' },
-    { tool: 'builtin:code', description: 'Source code', reason: 'built-in' },
-  ], config: '/home/me/.config/dormouse/dormouse.yml' } });
+  requests = [];
+  window.addEventListener('dormouse:control-request', capture);
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
   act(() => root.render(<ExternalLinkModalHost />));
 });
 afterEach(() => {
+  window.removeEventListener('dormouse:control-request', capture);
   act(() => root.unmount());
   clearExternalLinkConfirmation();
   container.remove();
@@ -64,52 +67,53 @@ it('rejects confirmation of a blocked URI', () => {
 
 const fileUri = 'file:///work/my%20report.md';
 const source = { surfaceId: 'pane-a', cwd: '/work' };
+const viewers = { handlers: [
+  { tool: 'builtin:file', description: 'Rendered document', reason: 'built-in' },
+  { tool: 'builtin:code', description: 'Source code', reason: 'built-in' },
+], config: '/home/me/.config/dormouse/dormouse.yml' };
 const button = (text: string) => [...document.body.querySelectorAll('button')].find(button => button.textContent === text)!;
-type Request = { params: Record<string, unknown>; surfaceId: string; respond: (result: { ok: boolean; error?: string }) => void };
-let requests: Request[];
-const capture = (event: Event) => requests.push((event as CustomEvent<Request>).detail);
-beforeEach(() => { requests = []; window.addEventListener('dormouse:control-request', capture); });
-afterEach(() => window.removeEventListener('dormouse:control-request', capture));
-const requestFile = async () => { await act(async () => requestExternalLinkConfirmation(fileUri, '[Image #2]', source)); };
+const alertText = () => document.body.querySelector('[role="alert"]')?.textContent;
+const answer = async (request: Request, result: DorControlResult) => { await act(async () => request.respond(result)); };
+const requestFile = async (lookup: DorControlResult = { ok: true, result: viewers }) => {
+  act(() => requestExternalLinkConfirmation(fileUri, '[Image #2]', source));
+  await answer(requests[0], lookup);
+};
 
 it('loads the picker candidates without opening, then opens the default in the originating Session', async () => {
   await requestFile();
-  expect(mocks.toolControl).toHaveBeenCalledWith({ op: 'open-handlers', target: fileUri, cwd: '/work' });
-  expect(requests).toEqual([]);
+  expect(requests).toEqual([expect.objectContaining({ surfaceId: 'pane-a', method: 'tool.openHandlers', params: { target: fileUri, cwd: '/work' } })]);
   expect(document.body.textContent).toContain('Rendered document');
   act(() => button('Open file').click());
-  expect(requests).toHaveLength(1);
-  expect(requests[0]).toMatchObject({ surfaceId: 'pane-a', params: { file: fileUri, surface: 'pane-a', cwd: '/work' } });
-  expect(requests[0].params).not.toHaveProperty('tool');
+  expect(requests[1]).toMatchObject({ surfaceId: 'pane-a', method: 'surface.tool', params: { file: fileUri, surface: 'pane-a', cwd: '/work' } });
+  expect(requests[1].params).not.toHaveProperty('tool');
   expect(mocks.open).not.toHaveBeenCalled();
   expect(getExternalLinkConfirmationSnapshot()).not.toBeNull();
-  act(() => requests[0].respond({ ok: true }));
+  await answer(requests[1], { ok: true });
   expect(getExternalLinkConfirmationSnapshot()).toBeNull();
 });
 
 it('opens another candidate explicitly, keeps failures visible, and allows retry', async () => {
   await requestFile();
   const select = document.body.querySelector('select')!;
-  act(() => { select.value = 'builtin:code'; select.dispatchEvent(new Event('change', { bubbles: true })); });
+  act(() => { select.value = '1'; select.dispatchEvent(new Event('change', { bubbles: true })); });
   expect(document.body.textContent).toContain('Source code');
   act(() => button('Open file').click());
-  expect(requests[0].params.tool).toBe('builtin:code');
+  expect(requests[1].params.tool).toBe('builtin:code');
   act(() => mocks.confirm());
-  expect(requests).toHaveLength(1);
-  act(() => requests[0].respond({ ok: false, error: 'File no longer exists' }));
-  expect(document.body.querySelector('[role="alert"]')?.textContent).toBe('File no longer exists');
+  expect(requests).toHaveLength(2);
+  await answer(requests[1], { ok: false, error: 'File no longer exists' });
+  expect(alertText()).toBe('File no longer exists');
   expect(getExternalLinkConfirmationSnapshot()).not.toBeNull();
   act(() => button('Open file').click());
-  expect(requests).toHaveLength(2);
+  expect(requests).toHaveLength(3);
 });
 
 it('shows lookup rejection and never falls back to the external opener', async () => {
-  mocks.toolControl.mockResolvedValue({ status: 'error', message: 'Not a local file URL' });
-  await requestFile();
-  expect(document.body.querySelector('[role="alert"]')?.textContent).toBe('Not a local file URL');
+  await requestFile({ ok: false, error: 'Not a local file URL' });
+  expect(alertText()).toBe('Not a local file URL');
   act(() => button('Open file').click());
-  act(() => requests[0].respond({ ok: false, error: 'Not a local file URL' }));
-  expect(document.body.querySelector('[role="alert"]')?.textContent).toBe('Not a local file URL');
+  await answer(requests[1], { ok: false, error: 'Not a local file URL' });
+  expect(alertText()).toBe('Not a local file URL');
   expect(mocks.open).not.toHaveBeenCalled();
 });
 
@@ -118,35 +122,32 @@ it('ignores an old launch result and old callback after a new link replaces the 
   const oldConfirm = mocks.confirm;
   act(() => button('Open file').click());
   act(() => requestExternalLinkConfirmation('https://example.com/'));
-  act(() => { oldConfirm(); requests[0].respond({ ok: true }); });
+  await act(async () => { oldConfirm(); requests[1].respond({ ok: true }); });
   expect(getExternalLinkConfirmationSnapshot()?.uri).toBe('https://example.com/');
-  expect(requests).toHaveLength(1);
+  expect(requests).toHaveLength(2);
   expect(mocks.open).not.toHaveBeenCalled();
 });
 
 it('ignores a late viewer lookup after cancellation', async () => {
-  let finish!: (value: unknown) => void;
-  mocks.toolControl.mockReturnValue(new Promise(resolve => { finish = resolve; }));
-  await requestFile();
+  act(() => requestExternalLinkConfirmation(fileUri, '[Image #2]', source));
   act(() => button('Cancel').click());
-  await act(async () => finish({ status: 'error', message: 'late error' }));
+  await answer(requests[0], { ok: false, error: 'late error' });
   expect(getExternalLinkConfirmationSnapshot()).toBeNull();
-  expect(document.body.querySelector('[role="alert"]')).toBeNull();
-  expect(requests).toHaveLength(0);
+  expect(alertText()).toBeUndefined();
+  expect(requests).toHaveLength(1);
 });
 
-it('does not inspect or open files hidden behind deceptive link text', async () => {
-  await act(async () => requestExternalLinkConfirmation(fileUri, 'https://trusted.example/', source));
+it('does not inspect or open files hidden behind deceptive link text', () => {
+  act(() => requestExternalLinkConfirmation(fileUri, 'https://trusted.example/', source));
   act(() => mocks.confirm());
-  expect(mocks.toolControl).not.toHaveBeenCalled();
   expect(mocks.open).not.toHaveBeenCalled();
   expect(requests).toHaveLength(0);
 });
 
-it('explains a file link with no originating terminal instead of passing it to the OS', async () => {
-  await act(async () => requestExternalLinkConfirmation(fileUri));
+it('explains a file link with no originating terminal instead of passing it to the OS', () => {
+  act(() => requestExternalLinkConfirmation(fileUri));
   act(() => button('Open file').click());
-  expect(document.body.querySelector('[role="alert"]')?.textContent).toContain('originating terminal');
+  expect(alertText()).toContain('originating terminal');
   expect(mocks.open).not.toHaveBeenCalled();
   expect(requests).toHaveLength(0);
 });

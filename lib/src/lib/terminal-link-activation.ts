@@ -1,7 +1,7 @@
 import { PREVIEW_SUPERSEDED_ERROR } from 'dor/commands/types';
 import { SURFACE_CONTROL_METHODS } from 'dor/protocol';
 import { requestExternalLinkConfirmation } from './external-link-confirmation';
-import { localFileLinkPreviewPath } from './external-links';
+import { decodeFileLink, localFileLinkPreviewPath } from './external-links';
 import { getPlatform } from './platform';
 import { dispatchDorControlRequest } from './platform/dor-control-dispatch';
 import { normalizeFileUriPath } from './terminal-state';
@@ -31,7 +31,7 @@ export function activateTerminalLink(
   const ownPreview = !preview && lastPreview?.id === id && lastPreview.uri === uri ? lastPreview : null;
   if (preview) lastPreview = null;
   const path = localFileLinkPreviewPath(uri, displayText);
-  const source = { surfaceId: id, cwd: terminalLinkCwd(id, uri) };
+  const source = { surfaceId: id, cwd: linkCwd(id, path ?? decodeFileLink(uri)?.path) };
   // Only a host that resolves open rules can answer.
   if (path === null || !getPlatform().toolControl) {
     requestExternalLinkConfirmation(uri, displayText, source);
@@ -53,16 +53,10 @@ export function activateTerminalLink(
   });
 }
 
-/** Preserve the click's directory across confirmation and viewer selection. The
- * host still validates locality, controls, existence, and file kind. */
-function terminalLinkCwd(id: string, uri: string): string | undefined {
-  const cwd = getInheritableCwd(id);
-  if (cwd) return cwd;
-  try {
-    const url = new URL(uri);
-    if (url.protocol === 'file:') return directoryOf(normalizeFileUriPath(decodeURIComponent(url.pathname)));
-  } catch { /* Invalid URLs are explained by the confirmation dialog. */ }
-  return undefined;
+/** The click's directory, kept across confirmation and viewer selection: the
+ *  Session's CWD, else the linked file's own. The host still validates the link. */
+function linkCwd(id: string, path: string | undefined): string | undefined {
+  return getInheritableCwd(id) ?? (path === undefined ? undefined : directoryOf(normalizeFileUriPath(path)));
 }
 
 /** The parent of a native path with `/` separators; a root keeps its slash,

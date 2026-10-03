@@ -4,7 +4,7 @@ import { ExternalLinkModal } from '../components/ExternalLinkModal';
 import { classifyDisplayMatch, inspectExternalUri } from '../lib/external-links';
 
 function ExternalLinkModalStory({ uri, displayText, ...dialog }: { uri: string; displayText: string } & Pick<ComponentProps<typeof ExternalLinkModal>, 'handlers' | 'error' | 'busy'>) {
-  const [selectedTool, setSelectedTool] = useState('');
+  const [selected, setSelected] = useState(0);
   return (
     <div className="relative h-[360px] w-[680px] overflow-hidden rounded bg-app-bg font-mono text-terminal-fg">
       <div className="p-4 text-sm">
@@ -13,8 +13,8 @@ function ExternalLinkModalStory({ uri, displayText, ...dialog }: { uri: string; 
       </div>
       <ExternalLinkModal
         {...dialog}
-        selectedTool={selectedTool}
-        onSelectTool={setSelectedTool}
+        selected={selected}
+        onSelect={setSelected}
         request={{
           uri,
           displayText,

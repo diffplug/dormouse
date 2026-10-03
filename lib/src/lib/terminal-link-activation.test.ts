@@ -62,6 +62,13 @@ describe('activateTerminalLink', () => {
     expect(requests.map(request => request.params.cwd)).toEqual(['/work/docs', 'C:/work', 'C:/']);
   });
 
+  it('runs a folder link in its parent, previewed or confirmed, when the Session reports no cwd', () => {
+    click(1, 'file:///work/docs/', 'docs/');
+    expect(requests.map(request => request.params.cwd)).toEqual(['/work']);
+    click(1, 'file:///work/docs/', '[Docs]');
+    expect(getExternalLinkConfirmationSnapshot()?.source?.cwd).toBe('/work');
+  });
+
   it('preserves the source and directory for a labelled file confirmation', () => {
     seedTerminalManualCwd(SESSION, '/work');
     click(1, URI, '[Image #2]');

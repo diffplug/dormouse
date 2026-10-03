@@ -18,7 +18,7 @@ user's `open` rules (`docs/specs/dor-tool.md` -> "Terminal links"); a target who
 display text names a different host gets **no open action at all** — close and
 copy only, copy holding initial focus
 (`docs/specs/mouse-and-clipboard.md` -> "OSC 8 hyperlinks"). **Must revalidate external-URL launches through `normalizeExternalUri`** (VS Code's in the extension
-host); file opens use `docs/specs/dor-tool.md` → "Opening local files".
+host); file opens use `docs/specs/dor-tool.md` -> "Opening local files".
 
 **Unsupported escape sequences must fail inertly** — consumed or ignored, with
 no visible garbage, clipboard, file, focus, or privilege effect

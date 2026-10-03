@@ -935,6 +935,8 @@ describe('an OSC 367 open', () => {
 });
 
 describe('a terminal link', () => {
+  const openFileButton = () => [...document.body.querySelectorAll('button')].find(button => button.textContent === 'Open file')!;
+
   it('confirms a labelled link through the real Wall and pins its existing preview', async () => {
     await mountSlot();
     fake.toolControl = vi.fn(async request => request.op === 'open-handlers'
@@ -943,8 +945,7 @@ describe('a terminal link', () => {
     await act(async () => activateTerminalLink('pane-a', { detail: 1 }, 'file:///repo/a.md', '[Report]'));
     expect(getExternalLinkConfirmationSnapshot()).not.toBeNull();
     expect(fake.toolControl).toHaveBeenCalledTimes(1);
-    const open = [...document.body.querySelectorAll('button')].find(button => button.textContent === 'Open file')!;
-    await act(async () => open.click());
+    await act(async () => openFileButton().click());
     await waitUntil(() => getExternalLinkConfirmationSnapshot() === null);
     expect(fake.toolControl).toHaveBeenLastCalledWith({ op: 'open', target: 'file:///repo/a.md', cwd: '/repo', tool: undefined });
     expect(container.querySelector('[data-lath-leaf="slot"] .italic')).toBeNull();
@@ -955,8 +956,7 @@ describe('a terminal link', () => {
     await mountSlot();
     fake.toolControl = vi.fn(async () => ({ status: 'open-handlers' as const, handlers: { handlers: [], config: '/config/dormouse.yml' } }));
     await act(async () => activateTerminalLink('closed-pane', { detail: 1 }, 'file:///repo/a.md', '[Report]'));
-    const open = [...document.body.querySelectorAll('button')].find(button => button.textContent === 'Open file')!;
-    await act(async () => open.click());
+    await act(async () => openFileButton().click());
     await waitUntil(() => document.body.querySelector('[role="alert"]') !== null);
     expect(getExternalLinkConfirmationSnapshot()).not.toBeNull();
     expect(document.body.querySelector('[role="alert"]')?.textContent).toBe('The originating terminal is no longer available.');

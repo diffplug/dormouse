@@ -49,8 +49,8 @@ export function ExternalLinkModal({
   onCancel,
   onConfirm,
   handlers = [],
-  selectedTool = '',
-  onSelectTool,
+  selected = 0,
+  onSelect,
   busy = false,
   error,
 }: {
@@ -58,8 +58,9 @@ export function ExternalLinkModal({
   onCancel: () => void;
   onConfirm: () => void;
   handlers?: OpenHandler[];
-  selectedTool?: string;
-  onSelectTool?: (tool: string) => void;
+  /** The chosen index into `handlers`; the first is the default. */
+  selected?: number;
+  onSelect?: (index: number) => void;
   busy?: boolean;
   error?: string;
 }) {
@@ -74,8 +75,6 @@ export function ExternalLinkModal({
   const buttonNoun = openableDecision
     ? pickOpenButtonNoun(openableDecision.scheme, openableDecision.uri)
     : 'URL';
-
-  const selectedHandler = handlers.find(handler => handler.tool === selectedTool) ?? handlers[0];
 
   const handleCopy = () => {
     void writeTextToClipboard(request.uri);
@@ -125,22 +124,22 @@ export function ExternalLinkModal({
             Open with
             <select
               aria-label="File viewer"
-              value={selectedTool}
+              value={selected}
               disabled={busy}
-              onChange={event => onSelectTool?.(event.target.value)}
-              className="min-w-0 flex-1 rounded bg-input-bg p-1 text-foreground"
+              onChange={event => onSelect?.(Number(event.target.value))}
+              className="min-w-0 flex-1 rounded border border-input-border bg-input-bg p-1 text-foreground"
             >
               {handlers.map((handler, index) => (
-                <option key={handler.tool} value={index === 0 ? '' : handler.tool}>
+                <option key={handler.tool} value={index}>
                   {handler.tool}{index === 0 ? ' (default)' : ''}
                 </option>
               ))}
             </select>
           </label>
           <p className="mt-1 break-words text-muted">
-            {selectedHandler.description}
+            {handlers[selected].description}
             {' — '}
-            {selectedHandler.reason}
+            {handlers[selected].reason}
           </p>
         </div>
       )}

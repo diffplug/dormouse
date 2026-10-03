@@ -240,9 +240,9 @@ Source of truth: `beginPreviewSwitch` in `lib/src/components/wall/use-dor-contro
 
 - **Must send a link to the confirmation dialog unless its display text names its target**: trimmed, with at most one trailing `ls -F` classifier removed, the text equals the decoded path or a whole-component suffix of it, case-sensitively — `x/README.md` names `/x/README.md`, `EADME.md` does not. A host that is not a plain name, or a control character in the decoded path, sends it there too. The dialog belongs to `docs/specs/mouse-and-clipboard.md` -> "OSC 8 hyperlinks".
 - **Must fall back to the dialog when the open fails**, a superseded preview excepted — its status, or its error while there is no slot. A double-click's pin never reopens the dialog its failed preview opened. A host without Tool operations sends every link to the dialog.
-- **Must open a confirmed `file:` link through `dor open` from its originating Session**, using the CWD captured for confirmation and keeping the file open. Never send it to the system URL opener; a closed source or a host without Tool operations reports an error.
-- **Must offer confirmed file links the same ordered viewers as [Choosing a file](#choosing-a-file)**, with the first using default dispatch and another using the explicit Tool. Host validation and user-owned open rules still apply.
-- **Must keep an opening failure visible in the dialog and allow retry or cancellation.** A cancelled or replaced dialog ignores its outstanding replies.
+- **Must open a confirmed `file:` link as a pinned `dor open` from its originating Session**, with the CWD captured at the click, never through the system URL opener. A closed source or a host without Tool operations reports an error.
+- **Must offer it the `tool.openHandlers` answer as [Choosing a file](#choosing-a-file) does.**
+- **Must keep an opening failure in the dialog, open to retry or cancel**; a cancelled or replaced dialog ignores its outstanding replies.
 
 Source of truth: `activateTerminalLink` in `lib/src/lib/terminal-link-activation.ts`; `ExternalLinkModalHost` in `lib/src/components/ExternalLinkModalHost.tsx`.
 
