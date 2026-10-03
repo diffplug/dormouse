@@ -343,7 +343,7 @@ with `burrowId` stamped from the socket. A Burrow handles exactly these and
 with an `error` and reaches no Burrow.
 
 - **An `init` binds** the Client socket to the named Burrow, replacing any
-  binding; the previously bound live Burrow gets `client-gone` first.
+  binding; a different, live, previously bound Burrow gets `client-gone` first.
 - **A `transport` frame is forwarded only within that binding**, in either
   direction; one outside it is dropped.
 - **A frame naming an offline Burrow is answered with an offline `error`**
