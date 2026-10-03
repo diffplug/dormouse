@@ -57,19 +57,38 @@ After authorization the same Noise session may move off the Relay onto a WebRTC 
 
 **Every byte on the channel is a Noise transport message of the promoted session**: one message per channel frame, raw bytes, the same two `CipherState`s and counters. **Every inbound frame is bounded at `NOISE_MAX_MESSAGE_LENGTH` before decryption**, and a frame over it — or a non-binary message — disposes the session. (rationale)
 
-**The channel is reliable, ordered, and labelled `DIRECT_CHANNEL_LABEL`, and one whose association reports a per-message limit under `NOISE_MAX_MESSAGE_LENGTH` is refused** — all checked before the open is reported, so a refusal abandons the attempt while the relay still carries the session, and an answerer refusing before it has answered declines. An unreported limit is not treated as small. **Two gaps are accepted**: a Burrow's polyfill rebuilds every incoming channel with its own defaults, so the offerer's reliability flags never reach the check and there only the label is load-bearing; and the limit is the *remote's* advertised one, so where the two ends disagree a peer that has already switched loses the session. (rationale)
+**The channel is reliable, ordered, and labelled `DIRECT_CHANNEL_LABEL`, and one whose association reports a per-message limit under `NOISE_MAX_MESSAGE_LENGTH` is refused** — all checked before the open is reported, so a refusal is a channel failure, and an answerer refusing before it has answered declines. An unreported limit is not treated as small. **Two gaps are accepted**: a Burrow's polyfill rebuilds every incoming channel with its own defaults, so the offerer's reliability flags never reach the check and there only the label is load-bearing; and the limit is the *remote's* advertised one, so where the two ends disagree a peer that has already switched loses the session. (rationale)
 
 **A sender bounds its own queue, in order**, at `MAX_DIRECT_PENDING_FRAMES` / `MAX_DIRECT_PENDING_BYTES` — the pair a receiver's hold uses — and overflow disposes the session.
 
-**The switch preserves order per direction:**
+**The switch preserves order per direction**, by one `DirectCutover` at each end:
 
-* A sender's `direct-switch` is its **last** message on the relay path; every later message, keepalives included, goes on the channel.
-* A receiver processes relay frames until it decrypts `direct-switch`, holding channel frames meanwhile — **overflow disposing the session** — then drains them in arrival order.
+```mermaid
+stateDiagram-v2
+  state "outbound direct" as out
+  state "inbound direct" as in
+  state "both direct" as both
+  state "session disposed" as gone
+  [*] --> idle: promotion
+  idle --> attempting: offer sent or received
+  attempting --> abandoned: decline, setup budget, channel failure
+  attempting --> out: channel opens, own direct-switch sent
+  attempting --> in: peer's direct-switch decrypted
+  out --> both: peer's direct-switch decrypted
+  in --> both: channel opens, own direct-switch sent
+  abandoned --> gone: peer's direct-switch
+  attempting --> gone: held frames overflow
+  out --> gone: overflow, channel failure, DIRECT_HANDOFF_TIMEOUT_MS
+  in --> gone: channel failure, relay transport frame
+  both --> gone: channel failure, relay transport frame
+```
+
+* A sender's `direct-switch` is its **last** message on the relay path; every later message, keepalives included, goes on the channel. A receiver holds channel frames until it decrypts the peer's — **overflow disposing the session** — then drains them in arrival order.
+* **Once either direction has switched, a channel failure disposes the session**: the Client reports burrow loss exactly as a `burrow-gone`. **Before any switch it only abandons the attempt**, and the session stays relayed.
 * **After inbound has switched, a relay `transport` frame disposes the session**, refused before any decrypt, as does a `ct` that will not decode.
-* **After either direction has switched, the channel closing or erroring disposes the session**: the Client reports burrow loss exactly as a `burrow-gone`. **Before any switch a channel failure only abandons the attempt** — including a channel not open by its setup budget — and the session stays relayed.
-* **A `direct-switch` arriving at an end that has abandoned its channel ends the session.**
-* **A peer that does not switch back within `DIRECT_HANDOFF_TIMEOUT_MS` of this end's own switch ends the session**; an end whose peer had already switched waits on nothing.
-* **A connection reporting `failed` or `closed` ends the attempt at once; `disconnected` is waited out** for `DIRECT_DISCONNECTED_GRACE_MS`.
+* **A `direct-switch` reaching an abandoned end ends the session.**
+* **An end waits at most `DIRECT_HANDOFF_TIMEOUT_MS` after its own switch for the peer's**; one whose peer switched first waits on nothing.
+* **A connection reporting `failed` or `closed` fails the channel at once; `disconnected` is waited out** for `DIRECT_DISCONNECTED_GRACE_MS`.
 
 **The Relay stays the lifecycle authority.** `client-gone`, `burrow-gone`, and either relay socket closing dispose the session, channel included, exactly as relayed; the idle deadline, keepalives, and every Burrow bound are path-agnostic ([remote-security-model.md](./remote-security-model.md) → Burrow bounds). A one-time session has no Relay; its authority after the switch is the channel ([remote-security-model.md](./remote-security-model.md) → One-time connection).
 
