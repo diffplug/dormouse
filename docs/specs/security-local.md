@@ -8,7 +8,7 @@
 
 The attacker is any program writing to a PTY.
 
-**Must bound retained output by representation**: `TerminalProtocolParser` semantic values by code points and control stripping, an incomplete semantic OSC by length, and ImageAddon data by encoded bytes, decoded pixels, and FIFO storage (`docs/specs/terminal-escapes.md` -> "Parsing location", `docs/specs/layout.md` -> "Inline graphics").
+**Must bound retained output by representation**: `TerminalProtocolParser` semantic values by code points and control stripping, an incomplete semantic OSC by length, and ImageAddon data by encoded bytes, decoded pixels, and FIFO storage (`docs/specs/terminal-state.md` -> "Supported OSC Inputs", `docs/specs/terminal-escapes.md` -> "Parsing location", `docs/specs/layout.md` -> "Inline graphics").
 
 **Never let untrusted PTY output write the clipboard or access a file**: consume `OSC 50` and unsupported `OSC 1337`; consume `OSC 52`, which only offers its text to the copy editor over the user's own drag, copied when the user picks it (`docs/specs/mouse-and-clipboard.md` §4.6). **Inline images carry their own bytes**: no path is resolved, ImageAddon dropping any non-`inline=1` transfer (`docs/specs/layout.md` -> "Inline graphics").
 

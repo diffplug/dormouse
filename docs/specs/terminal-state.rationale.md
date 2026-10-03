@@ -8,6 +8,10 @@
 
 Native path payloads are not URLs: decoding `%20` or trimming edge spaces changes directory identity. The [iTerm2 CurrentDir contract](https://iterm2.com/documentation-escape-codes.html) reports a directory, while OSC 7 carries a file URL; Dormouse's OSC 633 emitters likewise write the sanitized path verbatim.
 
+**What the CWD bound and control-character strip protect.** A directory name may hold any byte but `/` and NUL, and the CWD it produces is retained per Session, rendered in the pane header, and used as a grouping key — so unbounded or control-bearing text reaches the UI and a map key, not just a log line.
+
+**Why command-line source and decoded output have separate bounds.** The source caps allow encoding expansion (4× for OSC 633 or shell quoting, 12× for percent-encoded UTF-8) while bounding decoder allocation. The retained result has its own cap; post-decode sanitization removes controls introduced by decoding.
+
 ## Shell-integration injection
 
 **Why the mechanism cannot be uniform.** One env var guarantees a `PATH` binary is *found*, but no shell has an env var for *run our hook code on every prompt* — hence a per-shell mechanism, and hence the Channel column: an env-var channel is as reliable as the `PATH` prepend, while a `shellArgs` channel only fires for the launch shapes Dormouse recognizes.

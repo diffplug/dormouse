@@ -724,7 +724,7 @@ function parseOsc133CommandLine(params: string): TerminalProtocolEvent[] {
 
 /**
  * The `commandLine` event for a shell-reported command line, from `OSC 633 ; E`
- * or `OSC 133 ; C` alike (`docs/specs/terminal-escapes.md`): bounded *before*
+ * or `OSC 133 ; C` alike (`docs/specs/terminal-state.md` → "Supported OSC Inputs"): bounded *before*
  * `decode` to `COMMAND_LINE_LIMIT * encodedWidth` source code points, with
  * multipliers 4 for OSC 633 / shell-quoted input and 12 for percent-encoded
  * UTF-8. The decoded value is capped separately at `COMMAND_LINE_LIMIT`, so

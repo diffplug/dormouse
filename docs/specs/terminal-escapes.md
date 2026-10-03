@@ -22,7 +22,7 @@ State-driving and security-sensitive OSCs — plus the `CSI > q` query — are p
 
 **Must buffer an unterminated consumed OSC up to `OSC_INCOMPLETE_LIMIT` (16,384 UTF-16 code units), then discard through its terminator or cancellation**, retaining only a split `ESC`, never promoting payload to text or its terminating BEL to an alert (rationale). A complete sequence in a single read is parsed whole. Pinned by `discards an oversized consumed OSC through its %j terminator` in `lib/src/lib/terminal-protocol.test.ts`. **An unterminated OSC the parser will forward streams to xterm.js instead**, preserving a split `ESC \` terminator (rationale). **Route by the OSC id, and decide nothing while more digits could follow** — `133` becomes `1337` — for `1337` by the subcommand ([layout.md](layout.md#inline-graphics)).
 
-**Every semantic value `TerminalProtocolParser` *retains* is bounded and stripped of control characters before storage**, whatever the emitter: `TITLE_LIMIT` / `BODY_LIMIT` for titles and notification bodies, whose whitespace controls collapse to spaces before the trim; `COMMAND_LINE_LIMIT` for the command line (`OSC 633 ; E`, `OSC 133 ; C`), source bounded at 4× `COMMAND_LINE_LIMIT` code points for OSC 633 or shell-quoted input, or 12× for percent-encoded UTF-8, then decoded, sanitized, and capped at `COMMAND_LINE_LIMIT` code points (rationale), **line breaks kept as `\n`**; `MAX_CWD_LENGTH` for every CWD source, interior whitespace preserved. **Semantic value limits count code points**, so a cut never splits a surrogate pair. **A value that reduces to nothing is dropped, never stored empty.**
+Retained semantic-value bounds: `docs/specs/terminal-state.md` -> "Supported OSC Inputs".
 
 **The owner alone acts on the events** its parse produced — writing the responses, feeding its `AlertManager`, forwarding the semantic and Tool events to the owning renderer — and hands every consumer the same chunk ([remote-api.md](remote-api.md#terminal-surfaces)).
 
@@ -32,7 +32,7 @@ State-driving and security-sensitive OSCs — plus the `CSI > q` query — are p
 
 Two escape-aware consumers are **not** parse sites: `lib/src/lib/terminal-controls.ts` strips presentation controls and `lib/src/lib/terminal-state-store.ts` elides alternate-screen spans ([terminal-state.md](terminal-state.md)). Both read already-stripped output; neither changes what reaches xterm.js.
 
-Source of truth: `oscDispositionAt` / `commandLineEvents` in `lib/src/lib/terminal-protocol.ts`, `boundedCwdValue` in `lib/src/lib/terminal-state.ts`, `createProcessedPtyStream` in `lib/src/lib/processed-pty-stream.ts`, `createOwnerPtyStream` in `lib/src/host/owner-pty.ts`.
+Source of truth: `oscDispositionAt` in `lib/src/lib/terminal-protocol.ts`, `createProcessedPtyStream` in `lib/src/lib/processed-pty-stream.ts`, `createOwnerPtyStream` in `lib/src/host/owner-pty.ts`.
 
 ### `pty:data` strip semantics
 
