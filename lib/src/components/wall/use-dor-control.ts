@@ -2310,7 +2310,7 @@ export function useDorControl({
       if (entries.length > 1) {
         detail.respond({
           ok: false,
-          error: `surface '${target.ref}' is serving multiple ports (${entries.map((entry) => entry.port).join(', ')}); open one explicitly, e.g. http://localhost:${entries[0].port}`,
+          error: `surface '${target.ref}' is serving multiple ports (${entries.map((entry) => entry.port).join(', ')}); open one explicitly, e.g. ${entries[0].url}`,
         });
         return;
       }
