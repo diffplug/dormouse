@@ -541,9 +541,9 @@ sequenceDiagram
   at `begin_arrival`, retiring only the record it was armed for (`queued_at`).
 - **A hand-back replays what the marked ids missed** (rationale): each marked id
   stays suppressed until its since-mark replay lands in the source's existing
-  xterm; an id never stamped goes straight back. **Must retain source cuts from `pty:marked`
-  through target replay and natural exit until settlement, and discard them on
-  explicit kill.** **Must apply a handed-back PTY's exit status after its
+  xterm; an id never stamped goes straight back. **Must retain source cuts from
+  `pty:marked` through target replay and natural exit until settlement, and
+  discard them on explicit kill.** **Must apply a handed-back PTY's exit status after its
   replay**, leaving its pane dead with no running command.
 - **`take_arrivals` does not consume**; the record settles at `adopt_done` and
   the webview dedupes by id (rationale).
