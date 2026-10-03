@@ -1,7 +1,8 @@
 /**
  * Cross-window broker/client transport for the Burrow. The bind-as-lease,
  * monotone-role, and mutual-handshake contracts live in `docs/specs/vscode.md`
- * → "Peer surfaces across windows".
+ * → "Burrow: a service in the extension host"; routing in "Peer surfaces across
+ * windows".
  */
 
 import { chmod, lstat, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';

@@ -308,7 +308,7 @@ Source of truth: `SNAPSHOT_EDITOR_FONT_FAMILY` in `lib/.storybook/themes.ts`;
 ## Theme debugger
 
 The Theme Debugger serves VSCode, standalone, and the website
-playground. **Must capture DOM-visible state through `ThemeDiagnosticSnapshot` without mutating theme storage or terminal colors.** Terminal colors are the visible CSS variables, including missing values, rather than an initialized xterm instance's palette. The copied report uses the same snapshot. **A real VSCode webview shows only the inferred theme kind**, since the host supplies CSS variables.
+playground. **Must capture DOM-visible state through `ThemeDiagnosticSnapshot` without mutating theme storage or terminal colors.** Terminal colors are the visible CSS variables, including missing values, rather than an initialized xterm instance's palette. The copied report uses the same snapshot. **A real VSCode webview shows only the inferred theme kind**, since the host supplies CSS variables. In VS Code it traces only host-exposed `--vscode-*` variables and materialized fallbacks, **never raw built-in VS Code theme files**.
 
 Every host reaches it as `Debug current theme` in the `ThemePicker` menu, so on
 `/playground/pocket` it rides the `compact` variant (two mounts, defaulting to
