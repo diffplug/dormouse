@@ -78,6 +78,23 @@ construction or the comparison in one copy breaks the channel loudly; a change
 that weakens the comparison in both — a string compare for a `timingSafeEqual` —
 breaks nothing visible.
 
+What mutual proof buys. Whoever merely bound the path receives the client's
+nonce and a client proof tied to the squatter's challenge, but no token or
+Surface request. That proof is not replayable against the real server's fresh
+random challenge. The server proves knowledge of the token before the client
+releases its request; it does not prove itself before receiving the client proof.
+
+Why a failed handshake gets no reply at all. A wrong answer and a port scan get
+the same nothing: any distinguishable response tells a prober a Dormouse control
+endpoint is at that path, exactly what the random name is spent hiding.
+
+Why a lost bind withholds the token rather than exiting. PTY work has to survive
+a dead control channel, so exiting the host is not the answer. But a host that
+kept handing `DORMOUSE_CONTROL_TOKEN` to every shell after a failed bind would
+feed both clients and their bearer credential to whoever won the race for the
+path or pipe name. Withholding it degrades safely instead: nothing dials a
+stranger.
+
 ## Loopback Listeners
 
 **What the browser gives an attacker page.** An ephemeral port is not a secret — the
