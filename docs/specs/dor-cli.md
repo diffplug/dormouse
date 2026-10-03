@@ -279,18 +279,14 @@ Invariants:
   (`window:main`, `window:ws-2`), and a host with one Window answers `window:1`;
   each accepts its own ref bare. A Surface ref alone never identifies a
   Workspace.
-- **One Wall answers each request**, resolved in order: the Window's own verbs
-  ([dor workspace](#dor-workspace), and `dor list --all`, which fans out to
-  every Wall), an explicit `--workspace`, the Workspace holding the target
-  Surface when it is named by its **stable id** — unique Window-wide, unlike
-  `surface:N` — else the Workspace owning the calling Surface, else the active
-  one. **Nothing mounted answers `workspace '<ref>' is still mounting` for the
-  active Workspace** after a bounded retry covering the tick between a
-  Workspace's creation and its Wall registering — never left to the caller's
-  deadline, which every managed `dor agent-browser` would pay
-  (`docs/specs/dor-browser.md` → "Managed identity"). **A `--workspace` the store
-  resolves but whose Wall has not registered waits out that same retry**, then
-  answers the same refusal, not the unknown-Workspace one. **Every request is
+- **One Wall answers each request**, in the figure's order below; `dor list
+  --all` fans out to every Wall, and a **stable id** is unique Window-wide,
+  unlike `surface:N`. **Nothing mounted answers `workspace '<ref>' is still
+  mounting` for the active Workspace** after a bounded retry covering the tick
+  between a Workspace's creation and its Wall registering, never left to the
+  caller's deadline (`docs/specs/dor-browser.md` → "Managed identity"); **a
+  resolved `--workspace` whose Wall has not registered answers the same**, not
+  the unknown-Workspace refusal. **Every request is
   answered, including a container ref of the wrong type and a handler that
   throws** — an unanswered one blocks its caller to the deadline. A Workspace
   being closed refuses the Surface-creating verbs (`docs/specs/layout.md` →
@@ -301,6 +297,28 @@ Invariants:
   failure — what gives `--workspace` a reference to place against.
   Cross-window duplicate ids follow `docs/specs/vscode.md` → "Peer surfaces
   across windows".
+
+```mermaid
+flowchart TD
+  R[request] --> AT{app.* or tool.*?}
+  AT -- yes --> WIN[the Window answers]
+  AT -- no --> BAD{helper --surface, or another --window?}
+  BAD -- yes --> REF[refuse]
+  BAD -- no --> C{workspace verb, list --all?}
+  C -- yes --> WIN
+  C -- no --> WS{--workspace?}
+  WS -- unresolved --> REF
+  WS -- registered --> H[that Wall answers]
+  WS -- unregistered --> P[retry, then refuse]
+  WS -- absent --> ST{stable-id target held?}
+  ST -- yes --> H
+  ST -- no --> CA{caller or helper source held?}
+  CA -- yes --> H
+  CA -- no, helper --> P
+  CA -- no --> AC{active Wall registered?}
+  AC -- yes --> H
+  AC -- no --> P
+```
 
 Source of truth: `dor/src/commands/shared.ts`, `parseWorkspaceRef` in
 `dor/src/protocol.ts`, `classifySurfaceTarget` in
@@ -427,7 +445,7 @@ Source of truth: `dor/src/commands/workspace.ts`, `handleWorkspaceControl` in
 ## dor app
 
 **`dor app` verbs act on the running app, so the webview's control router
-answers them before resolving any Workspace, Surface, or Window param**; Rust
+answers them first** ([Handle Model](#handle-model)); Rust
 still delivers them by the caller's Surface ([Standalone](#standalone)).
 `restart` is the only one: it asks the host for the quit that relaunches
 (`docs/specs/standalone.md` → "Restart"), so the running-work confirmation still
@@ -600,7 +618,7 @@ Source of truth: `createDorControlServer` in `standalone/sidecar/dor-control-ser
 
 **Must route `dor tool` and `dor open` through the Tool launch contract**, including approval, explicit-key reuse, and placement (`docs/specs/dor-tool.md` → CLI).
 
-**The router answers `tool.list` (`dor tool --list`) and `tool.openHandlers` (the `dor open` picker) before resolving any Workspace or Surface**, like `app.*`.
+**The router answers `tool.list` (`dor tool --list`) and `tool.openHandlers` (the `dor open` picker) first**, like `app.*` ([Handle Model](#handle-model)).
 
 Source of truth: `toolCommand` in `dor/src/commands/tool.ts`; `openCommand` in `dor/src/commands/open.ts`; `handleToolControl` in `lib/src/components/wall/tool-control.ts`.
 
