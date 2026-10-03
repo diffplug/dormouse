@@ -5,18 +5,28 @@ import {
   type ExternalUriDecision,
 } from './external-links';
 
+export interface ExternalLinkSource {
+  surfaceId: string;
+  cwd?: string;
+}
+
 export interface PendingExternalLink {
+  id: number;
+  source?: ExternalLinkSource;
   uri: string;
   displayText: string;
   verdict: DisplayMatchVerdict;
   decision: ExternalUriDecision;
 }
 
+let nextId = 0;
 let pendingExternalLink: PendingExternalLink | null = null;
 const listeners = new Set<() => void>();
 
-export function requestExternalLinkConfirmation(uri: string, displayText: string = ''): void {
+export function requestExternalLinkConfirmation(uri: string, displayText: string = '', source?: ExternalLinkSource): void {
   pendingExternalLink = {
+    id: ++nextId,
+    source,
     uri,
     displayText,
     verdict: classifyDisplayMatch(uri, displayText),
