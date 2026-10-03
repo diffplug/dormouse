@@ -22,7 +22,8 @@ A focused cross-origin iframe surface swallows the gesture; the proxy shim detec
 | `-` or `"` | Split top/bottom | New pane below, selected, in passthrough. |
 | `z` | Zoom and focus | Enters passthrough; on the pane that already owns zoom, unzooms. |
 | `m` or `d` | Minimize / reattach | Stays in command mode, unlike `Enter` on a door. |
-| `k` or `x` | Kill | Kills the selected pane or door behind a random-letter prompt; an untouched Surface skips it. |
+| `k` or `x` | Kill | Kills the selected pane or door behind a random-letter prompt; a reopenable or trivial close skips it. |
+| `u` | Reopen | Reopens the last closed Surface, Workspace, or window, whatever is selected; macOS `⌘⇧T` works in both modes. |
 | `,` | Rename selected item | Rename the selected terminal or Tool pane or Workspace tab; consumed no-op on browser surfaces, doors, and `+`. |
 | `a` | Alert | Dismiss the ring if any, then open the terminal context. Terminal Surfaces only; doors excluded. |
 | `t` | Toggle todo | Toggle the TODO marker on the selected Surface, terminal or browser; doors excluded. |

@@ -144,6 +144,7 @@ Source of truth: the message schema in `vscode-ext/src/message-types.ts` (`Webvi
 | Host → webview | `terminal:semanticEvents` | Normalized CWD / prompt-command / title events the owner's parser derived, in stream order. |
 | Host → webview | `terminal:toolEvents` | Ordered Tool announcements, state, and command-start resets (`docs/specs/dor-tool.md` → OSC 367). |
 | Host → webview | `terminal:clipboardOffer` | One decoded `OSC 52` write, offered to the copy editor (`docs/specs/mouse-and-clipboard.md` §4.6). |
+| Host → webview | `terminal:clientInput` | A remote Client wrote to this Session, which is no longer untouched (`docs/specs/layout.md` → "Kill confirmation"). |
 | Webview → host | `pty:spawn` | `options.alert`: a cold-restored pane's persisted alert state (`docs/specs/alert.md` → Public State). |
 | Webview → host | `dormouse:themeColors` (VS Code) / `pty_theme_colors` (standalone) | Resolved foreground / background / cursor, so the owner's parser can answer OSC 10/11/12. |
 | Host → webview | `pty:replay` | Buffered raw output; the webview's one-shot parse of it is the only re-parse there is. |
