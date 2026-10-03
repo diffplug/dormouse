@@ -30,7 +30,7 @@ State-driving and security-sensitive OSCs — plus the `CSI > q` query — are p
 
 **The owner splits a PTY read above `MAX_PARSER_INPUT_CHARS` (64 Ki UTF-16 code units) before parsing it, and never through a surrogate pair**, so **both** projections — one message, not two — fit the 1 MiB application-message cap after base64url and JSON framing (rationale; [remote-api.md](remote-api.md)).
 
-Two escape-aware consumers are **not** parse sites: `lib/src/lib/terminal-controls.ts` strips presentation controls ([transport.md](transport.md)) and `lib/src/lib/terminal-state-store.ts` elides alternate-screen spans ([terminal-state.md](terminal-state.md)). Both read already-stripped output; neither changes what reaches xterm.js.
+Two escape-aware consumers are **not** parse sites: `lib/src/lib/terminal-controls.ts` strips presentation controls and `lib/src/lib/terminal-state-store.ts` elides alternate-screen spans ([terminal-state.md](terminal-state.md)). Both read already-stripped output; neither changes what reaches xterm.js.
 
 Source of truth: `oscDispositionAt` / `commandLineEvents` in `lib/src/lib/terminal-protocol.ts`, `boundedCwdValue` in `lib/src/lib/terminal-state.ts`, `createProcessedPtyStream` in `lib/src/lib/processed-pty-stream.ts`, `createOwnerPtyStream` in `lib/src/host/owner-pty.ts`.
 

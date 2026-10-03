@@ -2,6 +2,10 @@
 
 > Informative companion to [transport.md](transport.md): the evidence, symptoms, and dead-approach history behind its rules, keyed by that spec's headings (AGENTS.md → "What, not why"). Nothing here is normative.
 
+## PTY buffering
+
+**Why a buffer outlives its process.** Recovery capture runs before any kill (`docs/compatible-agents.md` → "Capture"), but a webview reopened over an exited pane still needs its transcript, and a Workspace transfer replays an exited pane's since-mark tail.
+
 ## Paced input
 
 Measured on macOS 27 with Claude Code 2.1.274 and Codex 0.154.0, 2026-09 (issue #679).
@@ -67,8 +71,6 @@ moving a Workspace and losing it.
 
 ## Message protocol
 
-**What the broadcast buys.** Unambiguous settling is only half of it: the same fan-out lets a losing window forward a command to the broker window and receive the answer back (`docs/specs/vscode.md` → "Peer surfaces across windows").
-
 **The per-store tax.** Each app-global store relayed webview↔host this way costs one `PlatformAdapter` push method, an on/off listener pair, two `AlertCommand` ops and an event, and a host coordinator with its own subscribe/unsubscribe. Two are worth paying that twice for the directness; at a third, the keyed channel + key→normalizer registry is cheaper than another copy of the plumbing.
 
 ## Retiring the transcripts already on disk
@@ -97,9 +99,7 @@ moving a Workspace and losing it.
 
 **Exempt synchronous reads.** Linux walks `/proc` with synchronous fs calls; they read kernel memory rather than wait on a child, and are unmeasured but expected in single-digit milliseconds. A dev server with thousands of fds is the case that would revisit it.
 
-**VS Code scrollback outlives the process for repeat resumes.** Recovery capture runs before any kill (`docs/compatible-agents.md` → "Capture"), but a webview reopened over an exited pane still needs its transcript. The shared PTY core formerly kept a second buffer: VS Code never read it, and standalone's reader became unreachable when the adapter stopped persisting transcripts. Removing that duplicate leaves buffering with its actual consumer.
-
-**Where a flat `scrollbackChars` bites.** The cap is reached first on exactly the long-running agent pane recovery exists for, so a caller treating buffer length as a stream position sees no growth on the pane it most needs to watch.
+**Where a flat buffer length bites.** The cap is reached first on exactly the long-running agent pane recovery exists for, so a caller treating buffer length as a stream position sees no growth on the pane it most needs to watch.
 
 **The phantom-running symptoms of a spawn failure with no exit.** A running header that never clears, a `countRunningSessions` that never returns to zero, and therefore a quit confirmation on every window close. Reached whenever a persisted or selected shell binary is gone.
 

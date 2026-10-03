@@ -34,6 +34,7 @@ The extension host is the platform host of `docs/specs/transport.md` → "PTY li
 - Hiding or toggling the Dormouse panel neither kills its PTYs nor destroys sessions.
 - **Closing an editor-tab `WebviewPanel` kills that panel's owned PTYs** (`killOnDispose`), and VS Code discards the tab's per-panel state. **Disposing the `WebviewView` releases its router and leaves the PTYs alive.**
 - Each VS Code window gets its own extension host, and therefore its own pty-host child.
+- **Must cap each PTY's replay and scrollback at 1,000,000 characters**, replay clearing on first read; **a pty-host child crash reports every live PTY exited and keeps its buffer**, ignoring a replaced child's late output and exits.
 
 ### Workspaces
 
@@ -192,7 +193,7 @@ Source of truth: `VsCodeBurrowStateStore` in `vscode-ext/src/burrow-store.ts`, `
 
 Source of truth: `vscode-ext/src/burrow.ts`, `ensurePeerNet` in `vscode-ext/src/peer-link.ts`; pinned by `vscode-ext/test/burrow.test.ts` and `vscode-ext/test/peer-link.test.ts`.
 
-**The webview bridge.** A webview reaches the service over `BurrowLink`, implemented in `vscode-adapter.ts` on three messages, each wrapping the shared client's shape in a `payload`: `burrow:command { payload: BurrowCommand }` out, `burrow:result { payload: BurrowResult }` and `burrow:event { payload }` back. **Everything else is the shared client** in `lib/src/host/remote/link-client.ts` (`docs/specs/transport.md` → Message protocol). Results are **broadcast to every webview in the window**, and one correlation id serves both the in-window fan-out and the cross-window forward.
+**The webview bridge.** A webview reaches the service over `BurrowLink`, implemented in `vscode-adapter.ts` on three messages, each wrapping the shared client's shape in a `payload`: `burrow:command { payload: BurrowCommand }` out, `burrow:result { payload: BurrowResult }` and `burrow:event { payload }` back. **Everything else is the shared client** in `lib/src/host/remote/link-client.ts` (`docs/specs/transport.md` → Message protocol). Results are **broadcast to every webview in the window** — safe only because the shared client mints globally unique ids — and one correlation id serves both the in-window fan-out and the cross-window forward.
 
 Events are pushed: `pairing-queue` (a complete snapshot — **the mirror replaces rather than merges**), `status { enrolled, serving, serviceId }`, `one-time` (`docs/specs/one-time.md`), and `network-policy`. The queue is pushed only when it changes, so **the webview asks for it once on every transition to serving**.
 

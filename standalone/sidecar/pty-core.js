@@ -24,6 +24,8 @@ function resolveDefaultShell(platform = process.platform, env = process.env) {
   return env.SHELL || '/bin/sh';
 }
 
+// C shells must spawn without `-l`, or a csh/tcsh login shell opens no usable
+// terminal; pinned by pty-core.test.js.
 const LOGIN_ARG_UNSUPPORTED_SHELLS = new Set(['csh', 'tcsh']);
 // Mirrors ITERM2_COMPAT_VERSION in lib/src/lib/terminal-protocol.ts — pinned by
 // lib/src/lib/mirrored-constants.test.ts (transport.md: one
@@ -1257,7 +1259,7 @@ module.exports.create = function create(send, ptyModule, { replay = false, slice
   // `chars` is what the buffer currently holds (a trim decrements it);
   // `received` is everything ever received and is never decremented, so it is the
   // only stable coordinate for marking a position in a pane's output
-  // (docs/specs/transport.md -> "Persisted session").
+  // (docs/specs/transport.md -> "Universal invariants").
   const sessions = new Map(); // id -> { chunks: string[], chars: number, received: number }
   const REPLAY_CHARS = 200000;
   const ptyShells = new Map(); // id -> resolved shell executable
