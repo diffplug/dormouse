@@ -189,7 +189,7 @@ Each Wall renders one Workspace. Standalone mounts one Wall **per Workspace**; V
 - **A closing Workspace takes no new Surfaces**: while `closeAll` walks, this Wall answers every Surface-creating `dor` verb with an error, **rechecked after any host round trip the verb makes before creating** (`CREATING_CONTROL_METHODS` in `lib/src/components/wall/use-dor-control.ts`).
 - **Must reject duplicate Workspace IDs before mutating the model.**
 - **Must retain mode and selection across switches unless the [activation gesture](#workspace-tabs) changes them.**
-- **Close confirms first when any member's own close would** (`docs/specs/reopen.md` → "Workspaces and windows"), then closes every member Surface. **Must select the fresh Workspace that replaces the last closed one. Must serialize closes across the Window.**
+- **Close confirms first when any member's own close would** (`docs/specs/reopen.md` → "Workspaces and windows"; under Labs a pending kill instead), then closes every member Surface. **Must select the fresh Workspace that replaces the last closed one. Must serialize closes across the Window.**
 - **A Workspace whose Wall has not registered is refused** (`workspace '<ref>' is still mounting`, one wording for every caller), never closed past (I4). **A gesture waits out the registration gap first**, as `dor workspace close` does, and is dropped unannounced on its timeout, a pending transfer, or a close in flight.
 - **Rename edits the Workspace `name` only**, never a Surface title or the per-pane inline rename, and pins it ([Workspace names](#workspace-names)). **A press inside the open rename editor never starts a reorder.**
 - **Must drop the closing Workspace's rename editor and pending confirmation, and no other's.**
@@ -274,7 +274,7 @@ A split from an existing pane (`|`/`%`/`-`/`"` or the header split buttons) spaw
 
 Dirty Tool close consent: `docs/specs/dor-tool.md` → Closing unsaved Tools.
 
-`x`/`k` (or the kill button, which first leaves passthrough) shows a pane-centered confirmation with a random lowercase letter; typing it confirms the kill. **`x`, `k`, and Reopen's `u` are excluded from that alphabet** so neither a double-tap nor a reopen accepts it. Which closes skip it: `docs/specs/reopen.md` → "The rule". `Escape`, the cancel button, and clicking another panel cancel; any other key dismisses it.
+`x`/`k` (or the kill button, which first leaves passthrough) shows a pane-centered confirmation with a random lowercase letter; typing it confirms the kill. **`x`, `k`, and Reopen's `u` are excluded from that alphabet** so neither a double-tap nor a reopen accepts it. Which closes skip it: `docs/specs/reopen.md` → "The rule"; under Labs one that would show it becomes a pending kill instead (`docs/specs/reopen.md` → "Labs: No-confirm delayed kill"). `Escape`, the cancel button, and clicking another panel cancel; any other key dismisses it.
 
 **Must return keyboard selection to the next surviving Door after killing a revealed Door**, falling back to previous Doors, then a pane only if no Doors remain. Apply this to confirmed and unasked kills only while the revealed pane, or the Door, is still selected in command mode; cancellation, refusal, or navigating away discards the return target.
 

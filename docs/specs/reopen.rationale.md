@@ -12,4 +12,4 @@ A touched idle shell is never reopenable, even at lower fidelity: replaying scro
 
 ## Labs: No-confirm delayed kill
 
-The countdown is 10 s, pausing on hover and collapsing past 3 entries: long enough to notice a wrong kill, short enough that a pending process does not linger.
+The countdown is 10 s (`PENDING_KILL_MS`), holding on hover, and the stack collapses past 3 entries (`SHOWN`): long enough to notice a wrong kill, short enough that a pending process does not linger (design session, 2026-10-02).

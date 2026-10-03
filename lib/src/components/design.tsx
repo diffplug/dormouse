@@ -240,6 +240,10 @@ export const SELECTION_RING_Z_INDEX = 50;
  *  (docs/specs/mouse-and-clipboard.md §4.5). */
 export const COPY_EDITOR_Z_INDEX = 55;
 
+/** The pending-kill stack's z-index: over the ring and copy editor, under
+ *  every modal (docs/specs/reopen.md → "Labs: No-confirm delayed kill"). */
+export const PENDING_KILL_Z_INDEX = 57;
+
 export const MODAL_LAYERS = {
   app: 60,
   pane: 100,

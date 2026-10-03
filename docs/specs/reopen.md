@@ -1,7 +1,7 @@
 # Reopen and delayed kill
 
 > See `docs/specs/glossary.md` for Surface / Session / Pane / Door vocabulary.
-> This spec owns which user closes confirm, reopening closed Surfaces, Workspaces, and windows, and the Labs delayed-kill mode (`## Future`). `docs/specs/layout.md` → "Kill confirmation" owns the confirmation's interaction; `docs/specs/dor-tool.md` → "Unsaved changes" owns Tool dirty state.
+> This spec owns which user closes confirm, reopening closed Surfaces, Workspaces, and windows, and the Labs delayed-kill mode. `docs/specs/layout.md` → "Kill confirmation" owns the confirmation's interaction; `docs/specs/dor-tool.md` → "Unsaved changes" owns Tool dirty state.
 
 ## The rule
 
@@ -54,18 +54,14 @@ Source of truth: `reopenClosed` in `lib/src/components/wall/reopen.ts`; the `.me
 
 Source of truth: `closeWorkspaceWithSurfaces` in `lib/src/components/wall/workspace-lifecycle.ts`; `lib/src/components/wall/window-reopen.ts`; `push_closed_window` / `reopen_closed_window` in `standalone/src-tauri/src/lib.rs`.
 
-## Future
+## Labs: No-confirm delayed kill
 
-**Scope: delayed-kill** — behind a Labs toggle: [Labs: No-confirm delayed kill](#labs-no-confirm-delayed-kill).
-
-### Labs: No-confirm delayed kill
-
-**Settings gains a Labs section** (`lib/src/components/SettingsDialog.tsx`), Standalone only and app-wide (every window reads one setting), holding one toggle, **No-confirm delayed kill**, off by default. With it on, a close that would confirm instead becomes a **pending kill**: the Surface leaves the layout at once but its process lives until a countdown finalizes it.
+**Settings offers a Labs topic on Standalone only**, holding one toggle, **No-confirm delayed kill**, off by default and app-wide: every window reads one stored value and follows another window's change. With it on, a gesture close that would confirm becomes a **pending kill** instead: the Surface leaves the layout at once while its process lives until a countdown finalizes it.
 
 | Confirmation | With the toggle on |
 |---|---|
-| Pane kill (letter prompt) | Pending kill |
-| Unsaved Tool close (Save / Discard / Cancel) | Pending kill; the parked DOM keeps the edits until finalize |
+| Pane or Door kill (letter prompt) | Pending kill |
+| Unsaved Tool close (Save / Discard / Cancel) | Pending kill; the parked page keeps the edits until finalize, which discards them |
 | Workspace close | Pending kill of the whole Workspace |
 | Helper Reset | Pending kill of the old helper; the fresh one starts at once |
 | Reopenable close | Unchanged: immediate, onto the reopen stack |
@@ -74,12 +70,12 @@ Source of truth: `closeWorkspaceWithSurfaces` in `lib/src/components/wall/worksp
 | Links, Tool trust, remote control | Unchanged: outward, not local state |
 | `dor` command closes | Unchanged: immediate |
 
-- **Must detach a pending Surface the way minimize does** (keep the token, park its DOM, keep the PTY Live) without creating a Door. A pending Workspace is a hidden Workspace tab whose Wall stays mounted and inactive.
-- **Must finalize through today's kill path** when the countdown completes or the user finalizes the entry early.
-- **Restoring a pending kill reattaches the same Surface**, ref and process intact; it is not a rebuild. `⌘⇧T` / `u` / `dor reopen` take the newest entry across pending kills and reopen records.
-- **Must suppress alerts from pending Surfaces and omit them from `dor` listings and Clients**; a `dor` command addressing one fails as pending kill.
-- **Must count pending running work in the quit and window-close gates**, then finalize every pending kill on quit. Nothing pending survives a restart.
+- **Must detach a pending Surface the way minimize does** (keep the token, park its page, keep the PTY Live) without creating a Door. **A pending Workspace leaves the strip** — a successor activates, or a fresh replacement if it was the last — **while its Wall stays mounted and inactive**.
+- **Must finalize through the kill path** when the countdown completes or the user finalizes the entry early; a pending Workspace closes every member, and comes back if a helper's work refuses.
+- **Restoring a pending kill reattaches the same Surface or Workspace**, ref and process intact, at its slot; it is not a rebuild. One that cannot come back now (a helper whose parent closed or whose replacement holds work) stays pending, its countdown untouched. Reopen takes the newest entry across pending kills and reopen records ([Reopen verb](#reopen-verb)), passing over one that cannot come back.
+- **Must silence alerts from pending Sessions and omit them from `dor` listings and Clients**; a `dor` request naming one, by id or the ref it keeps, made by one, or reaching a pending Workspace's Wall fails as a pending kill.
+- **Must count pending running work in the quit and window-close gates, then finalize every pending kill as either tears down.** A Workspace leaving for another window or closing finalizes its own. Nothing pending is persisted, so none survives a restart.
 
-**The overlay** stacks pending kills in the window's bottom-right corner, above the Baseboard, newest on top. Each entry shows the Surface's title and kind, a bar filling toward the kill, restore on click, and finalize now. **The countdown is 10 s and pauses while the pointer is over its entry**; past 3 entries the rest collapse to a `+N` row. (rationale)
+**The overlay** stacks pending kills in the window's bottom-right corner, above the Baseboard, newest on top. Each entry shows the Surface's title and kind, a bar filling toward the kill, restore on click, and kill now. **A countdown holds while the pointer rests on its entry**; past a few entries the rest collapse to a `+N` row. (rationale)
 
-**Promotion amends `docs/specs/transport.md` → "The governing rule"** ("deliberately ending something ends it") for the toggle's duration, and `docs/specs/layout.md` → "Kill confirmation" for the pending kill. **Labs settings are app-wide**, like every other Standalone setting.
+Source of truth: `lib/src/lib/pending-kills.ts`; `pendKillRef` in `lib/src/components/Wall.tsx`; `pendWorkspace` in `lib/src/components/wall/workspace-lifecycle.ts`; `resetHelper` in `lib/src/lib/helper-terminal.ts`; `lib/src/components/PendingKillOverlay.tsx`; `lib/src/lib/labs-settings.ts`.

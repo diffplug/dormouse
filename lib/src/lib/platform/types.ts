@@ -228,6 +228,12 @@ export interface PlatformAdapter {
   hostOwnsShells?: boolean;
 
   /**
+   * Whether Settings offers Labs (`docs/specs/reopen.md` → "Labs: No-confirm
+   * delayed kill"). Absent reads as `false`; only the Standalone adapters set it.
+   */
+  offersLabs?: boolean;
+
+  /**
    * Whether the host updates Dormouse itself, so Settings → Network offers no
    * update check of its own. Absent reads as `false`.
    *

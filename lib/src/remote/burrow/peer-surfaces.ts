@@ -17,6 +17,7 @@ import {
   subscribeToSizeHolds,
 } from '../../lib/size-hold-store';
 import { isHelperSession, registry } from '../../lib/terminal-store';
+import { isPendingKillSession } from '../../lib/pending-kills';
 import { subscribeToTerminalPaneState } from '../../lib/terminal-state-store';
 import { subscribeToWorkspaces } from '../../lib/workspace-store';
 import { subscribeToWorkspaceSurfaces } from '../../lib/workspace-surfaces';
@@ -107,7 +108,8 @@ function driveOwnSurface({
   rows,
   hold,
 }: PeerSurfaceParams): PeerSurfaceResult[] {
-  const entry = isHelperSession(surfaceId) ? undefined : registry.get(surfaceId);
+  // A pending kill is out of the user's sight, so out of every Client's too.
+  const entry = isHelperSession(surfaceId) || isPendingKillSession(surfaceId) ? undefined : registry.get(surfaceId);
   if (!entry) return [];
 
   const term = entry.terminal;

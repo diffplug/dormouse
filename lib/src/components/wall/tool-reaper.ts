@@ -8,6 +8,7 @@ import { parseRenderMode } from 'dor-lib-common/browser-providers';
 import { getPlatform, PLATFORM_STRING } from '../../lib/platform';
 import { toolReapIdleMsOverride } from '../../lib/feature-flags';
 import { getHelper } from '../../lib/helper-terminal';
+import { isPendingKillSession } from '../../lib/pending-kills';
 import { isToolCommandArgv } from '../../lib/session-types';
 import { toolCommandFromParams } from '../../lib/session-save';
 import {
@@ -50,6 +51,8 @@ export function toolReapIdleMs(): number {
 export function toolReapBlocker(id: string, params: Record<string, unknown> | undefined): string | null {
   if (!isToolParams(params)) return 'not a Tool';
   if (isToolReaped(id) || isToolStopping(id)) return 'already reaped';
+  // A pending kill's restore must bring back the same process (docs/specs/reopen.md).
+  if (isPendingKillSession(id)) return 'it is a pending kill';
   if (toolPendingFromParams(params)) return 'awaiting approval';
   if (params.toolPreview === true) return 'a preview slot';
   // A popped-out browser is in sight in its own window, Door or not.

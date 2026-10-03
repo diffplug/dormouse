@@ -23,6 +23,7 @@ import * as uiGeometry from '../lib/ui-geometry';
 import { LATH_MOTION_MS } from '../lib/lath/animator';
 import { closeWorkspaceWithSurfaces, requestWorkspaceClose } from './wall/workspace-lifecycle';
 import * as terminalRegistry from '../lib/terminal-registry';
+import * as helperTerminal from '../lib/helper-terminal';
 import { setPlatform } from '../lib/platform';
 import { FakePtyAdapter } from '../lib/platform/fake-adapter';
 import { getActivitySnapshot, setTerminalActivity } from '../lib/terminal-registry';
@@ -37,6 +38,8 @@ import { getWorkspaceUiSnapshot, requestConfirmation, resetWorkspaceUi, settleCo
 import { resetTodoSpotlight } from '../lib/todo-spotlight';
 import { _reopenRecordsForTesting, _resetReopenStackForTesting } from '../lib/reopen-stack';
 import { reopenClosed } from './wall/reopen';
+import { _resetPendingKillsForTesting, finalizePendingKill, getPendingKills, pendingKillKey, restorePendingKill } from '../lib/pending-kills';
+import { _resetLabsSettingsForTesting, setDelayedKillSetting } from '../lib/labs-settings';
 import {
   closeWorkspace,
   createWorkspace,
@@ -1339,5 +1342,131 @@ describe('Reopen a closed Workspace', () => {
     await flush();
     expect(getWorkspacesSnapshot().workspaces.map(ws => ws.id)).not.toContain('ws-2');
     expect(_reopenRecordsForTesting()).toHaveLength(0);
+  });
+});
+
+it('never moves a Wall\'s DOM when the strip reorders, which would reload its iframes', async () => {
+  const first = getActiveWorkspaceId();
+  createWorkspace({ id: 'ws-2', activate: false });
+  createWorkspace({ id: 'ws-3', activate: false });
+  await render();
+  const before = walls();
+  await act(async () => { workspaceStore.moveWorkspace('ws-3', 0); });
+  await flush();
+  expect(getWorkspacesSnapshot().workspaces.map(ws => ws.id)).toEqual(['ws-3', first, 'ws-2']);
+  expect(walls()).toEqual(before);
+});
+
+describe('Labs: a Workspace close that would ask, kept pending', () => {
+  beforeEach(() => {
+    Object.assign(fake, { offersLabs: true });
+    setDelayedKillSetting(true);
+    // Every shell has been typed into, so every Workspace close would ask.
+    vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(false);
+    vi.spyOn(terminalRegistry, 'getTerminalInstance').mockReturnValue({} as ReturnType<typeof terminalRegistry.getTerminalInstance>);
+  });
+  afterEach(() => {
+    _resetPendingKillsForTesting();
+    _resetLabsSettingsForTesting();
+  });
+
+  async function pendSecond(): Promise<string> {
+    const first = getActiveWorkspaceId();
+    createWorkspace({ id: 'ws-2', name: 'build', activate: false });
+    createWorkspace({ id: 'ws-3', activate: false });
+    await render(<><WorkspaceStrip /><WorkspaceWindow initialPaneIds={['pane-a']} /></>);
+    await act(async () => { requestWorkspaceClose('ws-2'); });
+    await flush();
+    return first;
+  }
+
+  it('leaves the strip at once, asking nothing, with its Wall still mounted', async () => {
+    const first = await pendSecond();
+    expect(getWorkspaceUiSnapshot().confirmation).toBeNull();
+    expect(getWorkspacesSnapshot().workspaces.map(ws => ws.id)).toEqual([first, 'ws-3']);
+    expect(wallFor('ws-2')).not.toBeNull();
+    expect(getPendingKills().map(kill => [kill.kind, kill.id, kill.title])).toEqual([['workspace', 'ws-2', 'build']]);
+    const listed = await new Promise<{ ok: boolean; error?: string }>(resolve => {
+      act(() => { window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
+        method: SURFACE_CONTROL_METHODS.list, params: { workspace: 'build' }, respond: resolve,
+      } })); });
+    });
+    expect(listed).toEqual({ ok: false, error: "workspace 'build' is a pending kill" });
+  });
+
+  it('refuses dor commands into its hidden Wall, by a member\'s id or from a member', async () => {
+    await pendSecond();
+    const [leaf] = leafIdsIn('ws-2');
+    const send = (detail: Record<string, unknown>) => new Promise<{ ok: boolean; error?: string }>(resolve => {
+      act(() => { window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: { ...detail, respond: resolve } })); });
+    });
+    expect(await send({ method: SURFACE_CONTROL_METHODS.read, params: { surface: leaf } }))
+      .toEqual({ ok: false, error: `workspace '${workspaceStore.workspaceRefFor('ws-2')}' is a pending kill` });
+    expect(await send({ method: SURFACE_CONTROL_METHODS.split, surfaceId: leaf, params: {} }))
+      .toEqual({ ok: false, error: `workspace '${workspaceStore.workspaceRefFor('ws-2')}' is a pending kill` });
+    expect(leafIdsIn('ws-2')).toEqual([leaf]);
+  });
+
+  it('restores to its slot with the same Wall and Surfaces', async () => {
+    const first = await pendSecond();
+    const leaves = leafIdsIn('ws-2');
+    await act(async () => { restorePendingKill(pendingKillKey('workspace', 'ws-2')); });
+    await flush();
+    expect(getWorkspacesSnapshot().workspaces.map(ws => ws.id)).toEqual([first, 'ws-2', 'ws-3']);
+    expect(getActiveWorkspaceId()).toBe('ws-2');
+    expect(leafIdsIn('ws-2')).toEqual(leaves);
+  });
+
+  it('brings a pending Workspace back first when restoring a Surface pended inside it', async () => {
+    const first = getActiveWorkspaceId();
+    createWorkspace({ id: 'ws-2', name: 'build' });
+    await render(<><WorkspaceStrip /><WorkspaceWindow initialPaneIds={['pane-a']} /></>);
+    const [leaf] = leafIdsIn('ws-2');
+    await act(async () => {
+      wallFor('ws-2').querySelector<HTMLButtonElement>(`[data-lath-leaf="${leaf}"] button[aria-label="Kill"]`)!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flush();
+    await act(async () => { requestWorkspaceClose('ws-2'); });
+    await flush();
+    expect(getWorkspacesSnapshot().workspaces.map(ws => ws.id)).toEqual([first]);
+    await act(async () => { restorePendingKill(pendingKillKey('surface', leaf)); });
+    await flush();
+    expect(getWorkspacesSnapshot().workspaces.map(ws => ws.id)).toEqual([first, 'ws-2']);
+    expect(getActiveWorkspaceId()).toBe('ws-2');
+    expect(leafIdsIn('ws-2')).toContain(leaf);
+  });
+
+  it('asks as before, pending nothing, when a member\'s helper runs a command', async () => {
+    vi.spyOn(helperTerminal, 'getHelper').mockImplementation(id => id.startsWith('pane') ? { id: 'helper', parentId: id, command: '', status: 'running' } : undefined);
+    vi.spyOn(helperTerminal, 'helperHasWork').mockResolvedValue(true);
+    createWorkspace({ id: 'ws-2', name: 'build', activate: false });
+    await render(<><WorkspaceStrip /><WorkspaceWindow initialPaneIds={['pane-a']} /></>);
+    await act(async () => { requestWorkspaceClose('ws-2'); });
+    await flush();
+    expect(getPendingKills()).toEqual([]);
+    expect(getWorkspaceUiSnapshot().confirmation?.id).toBe('ws-2');
+  });
+
+  it('takes back the unused replacement for a pended last Workspace when it returns', async () => {
+    const only = getActiveWorkspaceId();
+    await render(<><WorkspaceStrip /><WorkspaceWindow initialPaneIds={['pane-a']} /></>);
+    // The replacement's own shell reads as untouched: nobody has used it.
+    vi.spyOn(terminalRegistry, 'isUntouched').mockImplementation(id => !leafIdsIn(only).includes(id));
+    await act(async () => { requestWorkspaceClose(only); });
+    await flush();
+    const [replacement] = getWorkspacesSnapshot().workspaces.map(ws => ws.id);
+    expect(replacement).not.toBe(only);
+    await act(async () => { restorePendingKill(pendingKillKey('workspace', only)); });
+    await act(async () => { await vi.waitFor(() => expect(getWorkspacesSnapshot().workspaces.map(ws => ws.id)).toEqual([only])); });
+  });
+
+  it('closes through every member Surface when finalized, then lets its Wall go', async () => {
+    const dispose = vi.spyOn(terminalRegistry, 'disposeSession');
+    await pendSecond();
+    const [leaf] = leafIdsIn('ws-2');
+    await act(async () => { finalizePendingKill(pendingKillKey('workspace', 'ws-2')); });
+    await act(async () => { await vi.waitFor(() => expect(wallFor('ws-2')).toBeNull()); });
+    expect(dispose).toHaveBeenCalledWith(leaf);
+    expect(getPendingKills()).toEqual([]);
   });
 });

@@ -4,7 +4,7 @@ import { createSerialQueue } from '../../host/remote/serial-queue';
 import { useCallback, useEffect, useRef, type MutableRefObject } from 'react';
 import { getPlatform, PLATFORM_STRING } from '../../lib/platform';
 import { currentWindowRef, getActiveWorkspaceId } from '../../lib/workspace-store';
-import type { WorkspaceId } from '../../lib/session-types';
+import { DEFAULT_WORKSPACE_ID, type WorkspaceId } from '../../lib/session-types';
 import type { DorControlRequestPayload, DorControlResult } from 'dor/protocol';
 import { SURFACE_CONTROL_METHODS, unsupportedControlMethodMessage } from 'dor/protocol';
 import type {
@@ -17,6 +17,7 @@ import type {
 } from 'dor/commands/types';
 import { hasBrowser, hasTerminal, PREVIEW_SUPERSEDED_ERROR } from 'dor/commands/types';
 import { MAX_AWAIT_TIMEOUT_MS } from '../../lib/alert-manager';
+import { pendingSurfaceRefusal } from '../../lib/pending-kills';
 import type { OpenPort, PtyDataDetail } from '../../lib/platform/types';
 import type { ToolKeyScope, ToolRender } from '../../lib/platform/tool-types';
 import { buildShellCommandForKind, hasShellInputControls, shellCommandKind } from 'dor/commands/shell-quote';
@@ -261,6 +262,7 @@ function resolveSurfaceTarget(
   surfaces: DorSurface[],
   target: string | undefined,
   callerSurfaceId: string | undefined,
+  workspaceId: WorkspaceId,
 ): ParseResult<DorSurface> {
   // A caller this Wall does not hold never reaches here as one: the router
   // drops it before dispatching (`requestForWall`), so an omitted target falls
@@ -277,7 +279,9 @@ function resolveSurfaceTarget(
   }
   const fallback = !target && !callerSurfaceId ? (surfaces[0] ?? null) : null;
   if (fallback) return { ok: true, value: fallback };
-  return { ok: false, message: `surface '${resolvedTarget}' was not found` };
+  const named = classified.kind === 'ref' ? { ref: classified.ref } : classified.kind === 'stable' ? { id: classified.id } : null;
+  const pending = named && pendingSurfaceRefusal(resolvedTarget, named, workspaceId);
+  return { ok: false, message: pending ?? `surface '${resolvedTarget}' was not found` };
 }
 
 function booleanParam(value: unknown): boolean {
@@ -723,12 +727,12 @@ export function useDorControl({
   const resolveVisibleSurface = useCallback((
     target: string | undefined,
     callerSurfaceId: string | undefined,
-  ): ParseResult<DorSurface> => resolveSurfaceTarget(buildDorSurfaces(), target, callerSurfaceId), [buildDorSurfaces]);
+  ): ParseResult<DorSurface> => resolveSurfaceTarget(buildDorSurfaces(), target, callerSurfaceId, workspaceScope() ?? DEFAULT_WORKSPACE_ID), [buildDorSurfaces, workspaceScope]);
 
   const resolveListedSurface = useCallback((
     target: string | undefined,
     callerSurfaceId: string | undefined,
-  ): ParseResult<DorSurface> => resolveSurfaceTarget(buildDorSurfaceList(), target, callerSurfaceId), [buildDorSurfaceList]);
+  ): ParseResult<DorSurface> => resolveSurfaceTarget(buildDorSurfaceList(), target, callerSurfaceId, workspaceScope() ?? DEFAULT_WORKSPACE_ID), [buildDorSurfaceList, workspaceScope]);
 
   // The shared prelude of every handler that acts on an existing surface
   // (send / read / await / kill / resolve*): a target surface is required and

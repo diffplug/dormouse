@@ -233,6 +233,8 @@ Source of truth: `PersistedSession` in `lib/src/lib/session-types.ts`; `lib/src/
 | VS Code editor-tab close (`killOnDispose: true`) | Yes | Fresh for that panel |
 | VS Code extension-host crash | No, and the last periodic save stands | Restore structure, no agent resume — `deactivate()` never ran |
 
+**Under Labs → No-confirm delayed kill, a close that would ask ends nothing until its countdown does**, and a restore resumes nothing — the Session never left (`docs/specs/reopen.md` → "Labs: No-confirm delayed kill"); nothing pending survives a quit, window close, or restart.
+
 Standalone's per-window record: `docs/specs/standalone.md` -> "Persistence". "Restore structure" brings back the layout, cwds, titles, doors, and TODO/alert blobs; "auto-resume agents" is `docs/compatible-agents.md` → "Cold restore". A cold-restored pane opens empty.
 
 ## Universal invariants

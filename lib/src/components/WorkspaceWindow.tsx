@@ -8,8 +8,11 @@ import { getWorkspacesSnapshot, subscribeToWorkspaces } from '../lib/workspace-s
 import type { SessionFlushRequest } from '../lib/platform/types';
 import { installWorkspaceAutoNaming } from '../lib/workspace-autoname-controller';
 import type { WallBootPlans, WallBootProps } from './wall/wall-types';
+import type { WorkspaceId } from '../lib/session-types';
 import { RingHandoffContext } from './wall/wall-context';
 import type { RingFrame } from '../lib/rect-tween';
+import { PendingKillOverlay } from './PendingKillOverlay';
+import { getHeldWorkspaces, subscribeToHeldWorkspaces } from './wall/workspace-lifecycle';
 
 /**
  * One Window's Workspaces: a mounted `<Wall>` each, all in the same grid cell so
@@ -34,6 +37,16 @@ export function WorkspaceWindow({
   initialPlans?: WallBootPlans;
 }) {
   const { workspaces, activeId } = useSyncExternalStore(subscribeToWorkspaces, getWorkspacesSnapshot);
+  // A pending or finalizing Workspace is off the strip but keeps its Wall.
+  const held = useSyncExternalStore(subscribeToHeldWorkspaces, getHeldWorkspaces);
+  // Mounted in the order each first appeared, never strip order: the active
+  // Wall stacks on top regardless, and moving a Wall's DOM would reload every
+  // iframe in it — a pending Workspace leaving the strip and coming back, or a
+  // reorder.
+  const mountOrder = useRef<WorkspaceId[]>([]);
+  const live = new Set([...workspaces.map(workspace => workspace.id), ...held]);
+  mountOrder.current = [...mountOrder.current.filter(id => live.has(id)), ...[...live].filter(id => !mountOrder.current.includes(id))];
+  const mounted = mountOrder.current;
   const ringHandoff = useRef<RingFrame | null>(null);
   // One shape for both callers, fixed at first render: without per-Workspace
   // plans the single boot record belongs to the Workspace that was active then.
@@ -72,18 +85,18 @@ export function WorkspaceWindow({
         data-workspace-content
         className="grid min-h-0 flex-1 grid-cols-1 grid-rows-1 overflow-hidden bg-app-bg"
       >
-        {workspaces.map((workspace) => {
-          const isActive = workspace.id === activeId;
-          const plan = getWorkspaceBootPlan(workspace.id);
+        {mounted.map((workspaceId) => {
+          const isActive = workspaceId === activeId;
+          const plan = getWorkspaceBootPlan(workspaceId);
           return (
             <WorkspaceMotion
-              key={workspace.id}
-              id={workspace.id}
+              key={workspaceId}
+              id={workspaceId}
               active={isActive}
             >
               <Wall
                 {...plan}
-                workspaceId={workspace.id}
+                workspaceId={workspaceId}
                 active={isActive}
                 baseboardNotice={isActive ? baseboardNotice : undefined}
                 dialogHost={isActive ? dialogHost : undefined}
@@ -93,6 +106,7 @@ export function WorkspaceWindow({
           );
         })}
       </div>
+      <PendingKillOverlay />
     </RingHandoffContext.Provider>
   );
 }

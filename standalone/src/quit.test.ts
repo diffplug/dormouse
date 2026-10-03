@@ -41,6 +41,7 @@ vi.mock("./updater", () => ({
 }));
 
 import { initQuitFlow, setQuitConfirmGate, _resetForTesting } from "./quit";
+import { addPendingKill } from "dormouse-lib/lib/pending-kills";
 import {
   getQuitConfirmPhase,
   openQuitConfirm,
@@ -125,6 +126,18 @@ describe("quit orchestrator", () => {
 
     expect(adapter.requestSessionFlush).toHaveBeenCalled();
     expect(mocks.invoke).toHaveBeenCalledWith("quit_proceed");
+  });
+
+  it("finalizes every pending kill, a Workspace's closing included, before the agent capture", async () => {
+    const order: string[] = [];
+    // A pending Workspace's finalize closes its members asynchronously.
+    const finalize = vi.fn(async () => { await new Promise((r) => setTimeout(r, 5)); order.push("finalized"); });
+    addPendingKill({ kind: "workspace", id: "w2", workspaceId: "w2", title: "t", label: "Workspace" }, { restore: vi.fn(), finalize });
+    const adapter = fakeAdapter(order);
+    await triggerQuit(adapter);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(finalize).toHaveBeenCalledWith(true);
+    expect(order.slice(0, 2)).toEqual(["finalized", "captureRecovery"]);
   });
 
   it("runs teardown steps capture → flush → kill → flush → window → drain → install → proceed in order", async () => {
