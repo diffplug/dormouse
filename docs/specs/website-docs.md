@@ -333,9 +333,9 @@ two groups fails the build.
 ```mermaid
 flowchart LR
   SEC[docs/specs/security.md] -->|SECURITY_DELTA| J[docs.security.json]
-  J -->|security-local, security-ci, security-audit| P1["/security"]
-  J -->|remote-security-model, security-remote, SELF_HOST| P2["/self-host"]
-  J -->|security-supply-chain| P3["/supply-chain"]
+  J -->|security| P1["/security"]
+  J -->|self-host| P2["/self-host"]
+  J -->|supply-chain| P3["/supply-chain"]
   SH[SELF_HOST.md] -->|SELF_HOST_DELTA| JS[docs.selfhost.json] --> P2
 ```
 
@@ -345,7 +345,7 @@ the one place every entry appears together. The three pages cross-link, and
 each specialized page links `/security#how-the-guarantees-are-checked`;
 `website/src/pages/security-pages.test.tsx` pins the entries and links.
 
-Source of truth: `SECURITY_DELTA` and `securityAudiences` in `website/scripts/generate-docs.js`; `SecurityDocs` in `website/src/pages/SecurityDocs.tsx`.
+Source of truth: `SECURITY_DELTA`, `SECURITY_AUDIENCES` (spec → audience), and `securityAudiences` in `website/scripts/generate-docs.js`; `SecurityDocs` in `website/src/pages/SecurityDocs.tsx`.
 
 ## Generated documentation boundary
 
