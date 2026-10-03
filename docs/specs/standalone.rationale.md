@@ -36,6 +36,10 @@
 
 **Why a failed read must not be memoized.** The read errors that are neither `ENOENT` nor a parse failure — EACCES, EIO, a handle held open on Windows — say nothing about what the file holds; answering them empty, or caching that emptiness, lets the next save overwrite unseen state with nothing, since every change is a read-modify-write of the whole file.
 
+## Application menu
+
+WKWebView performs native edits (cut, copy, paste, select all) only through the application's Edit menu; with none, Cmd+C/X/V did nothing inside Tool iframes, whose keys Dormouse's own JS never sees. Tested in the dev build on macOS (2026-10): a chord whose keydown the page cancels never reaches the menu item, so the terminal and Dormouse's fields keep their JS handling without a double paste. WebView2 and WebKitGTK edit natively without a menu, and on those platforms menu accelerators would take Ctrl+C from the terminal before the page saw it.
+
 ## Siri affordance
 
 **What it cost.** On 2026-09-28 the unified log showed Dormouse dwelling 707 times and building the affordance's host window 478 times in one day; no other app did either more than once. The same `NSCampoLightweightUIController` raised the assertion behind that week's macOS 27.0 crashes: a mouse-entered event reaching a tracking area it had just torn down.
