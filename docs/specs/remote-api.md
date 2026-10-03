@@ -71,7 +71,7 @@ stateDiagram-v2
   state "session disposed" as gone
   [*] --> idle: promotion
   idle --> attempting: offer sent or received
-  attempting --> abandoned: decline, setup budget, channel failure
+  attempting --> abandoned: no peer, decline, setup budget, channel failure
   attempting --> out: channel opens, own direct-switch sent
   attempting --> in: peer's direct-switch decrypted
   out --> both: peer's direct-switch decrypted
