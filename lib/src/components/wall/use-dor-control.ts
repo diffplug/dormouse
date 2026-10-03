@@ -260,6 +260,7 @@ function resolveSurfaceTarget(
   surfaces: DorSurface[],
   target: string | undefined,
   callerSurfaceId: string | undefined,
+  pendingKillRefusal: (target: string) => string | null,
 ): ParseResult<DorSurface> {
   // A caller this Wall does not hold never reaches here as one: the router
   // drops it before dispatching (`requestForWall`), so an omitted target falls
@@ -276,7 +277,7 @@ function resolveSurfaceTarget(
   }
   const fallback = !target && !callerSurfaceId ? (surfaces[0] ?? null) : null;
   if (fallback) return { ok: true, value: fallback };
-  return { ok: false, message: `surface '${resolvedTarget}' was not found` };
+  return { ok: false, message: pendingKillRefusal(resolvedTarget) ?? `surface '${resolvedTarget}' was not found` };
 }
 
 function booleanParam(value: unknown): boolean {
@@ -644,6 +645,7 @@ export function useDorControl({
   previewSlot,
   workspaceRef,
   workspaceScope,
+  pendingKillRefusal,
 }: {
   /** The Lath engine — visible-pane projection (`lath.listPanes()`), aspect-ratio
    *  split resolution (`autoEdgeFor`), and per-leaf param writes. */
@@ -707,6 +709,8 @@ export function useDorControl({
    *  sessions it answers for; `undefined` on a bare Wall, which mints a scope
    *  of its own (docs/specs/dor-browser.md → Managed identity). */
   workspaceScope: () => WorkspaceId | undefined;
+  /** Why a target that names no listed Surface names a pending kill, or null. */
+  pendingKillRefusal: (target: string) => string | null;
 }): {
   /** The live surface (visible pane or minimized door) whose params match, or
    *  null. Shared with the context's port launches in Wall.tsx. */
@@ -722,12 +726,12 @@ export function useDorControl({
   const resolveVisibleSurface = useCallback((
     target: string | undefined,
     callerSurfaceId: string | undefined,
-  ): ParseResult<DorSurface> => resolveSurfaceTarget(buildDorSurfaces(), target, callerSurfaceId), [buildDorSurfaces]);
+  ): ParseResult<DorSurface> => resolveSurfaceTarget(buildDorSurfaces(), target, callerSurfaceId, pendingKillRefusal), [buildDorSurfaces, pendingKillRefusal]);
 
   const resolveListedSurface = useCallback((
     target: string | undefined,
     callerSurfaceId: string | undefined,
-  ): ParseResult<DorSurface> => resolveSurfaceTarget(buildDorSurfaceList(), target, callerSurfaceId), [buildDorSurfaceList]);
+  ): ParseResult<DorSurface> => resolveSurfaceTarget(buildDorSurfaceList(), target, callerSurfaceId, pendingKillRefusal), [buildDorSurfaceList, pendingKillRefusal]);
 
   // The shared prelude of every handler that acts on an existing surface
   // (send / read / await / kill / resolve*): a target surface is required and

@@ -10,6 +10,7 @@ import { installWorkspaceAutoNaming } from '../lib/workspace-autoname-controller
 import type { WallBootPlans, WallBootProps } from './wall/wall-types';
 import { RingHandoffContext } from './wall/wall-context';
 import type { RingFrame } from '../lib/rect-tween';
+import { PendingKillOverlay } from './PendingKillOverlay';
 
 /**
  * One Window's Workspaces: a mounted `<Wall>` each, all in the same grid cell so
@@ -93,6 +94,7 @@ export function WorkspaceWindow({
           );
         })}
       </div>
+      <PendingKillOverlay />
     </RingHandoffContext.Provider>
   );
 }

@@ -67,13 +67,15 @@ import { DEFAULT_WORKSPACE_ID, type PersistedSurfaceRefs, type WorkspaceId } fro
 import { clearWorkspaceSurfaces, setWorkspaceSurfaces } from '../lib/workspace-surfaces';
 import { nextTodoMember } from '../lib/workspace-union';
 import { deriveDisplayedSurfaceLabel } from '../lib/session-label';
-import { getWorkspace, getWorkspacesSnapshot, subscribeToWorkspaces, workspaceRefFor } from '../lib/workspace-store';
+import { getWorkspace, getWorkspacesSnapshot, setActiveWorkspace, subscribeToWorkspaces, workspaceRefFor } from '../lib/workspace-store';
 import { awaitWallEmpty } from './wall/close-all';
 import { closeKind, type CloseKind } from './wall/close-kind';
 import { registerWallHandle, type WallHandle } from './wall/wall-handles';
 import { prepareWorkspaceTransfer } from './wall/workspace-transfer';
 import { installDorControlRouter } from './wall/dor-control-router';
 import { reopenClosed } from './wall/reopen';
+import { addPendingKill, finalizePendingKills, getPendingKill, getPendingKills, type PendingKill } from '../lib/pending-kills';
+import { isDelayedKillEnabled } from '../lib/labs-settings';
 import { remove as removeFromTree, type DropTarget, type RestoreToken } from '../lib/lath/ops';
 import { pushReopenRecord, type SurfaceReopenRecord } from '../lib/reopen-stack';
 import { reopenPane } from '../lib/session-restore';
@@ -114,7 +116,7 @@ import { useWallKeyboard } from './wall/use-wall-keyboard';
 import { useSessionPersistence } from './wall/use-session-persistence';
 import { useDevServerPortCorrelation } from './wall/use-dev-server-ports';
 import { useAlertDelivery } from './wall/use-alert-delivery';
-import { queueToolSpawn, restartSurfaceInPlace, toolRunCommand, useDorControl, waitForNewToolCommand } from './wall/use-dor-control';
+import { classifySurfaceTarget, queueToolSpawn, restartSurfaceInPlace, toolRunCommand, useDorControl, waitForNewToolCommand } from './wall/use-dor-control';
 import { errorText } from './wall/dor-control-shared';
 import { useWindowFocused } from './wall/use-window-focused';
 import { useEngagementFocus } from './wall/use-engagement-focus';
@@ -170,6 +172,9 @@ export type { WallActions } from './wall/wall-context';
 export { SelectionRing } from './wall/SelectionRing';
 export { roundedRectPath } from '../lib/ring-geometry';
 export { TerminalPaneHeader } from './wall/TerminalPaneHeader';
+
+/** What a pending kill's entry calls each kind of Surface. */
+const SURFACE_KIND_LABEL = { terminal: 'Terminal', tool: 'Tool', browser: 'Browser' } as const;
 
 function persistedPanelTitle(title: string | null | undefined): string {
   const trimmed = title?.trim();
@@ -686,6 +691,21 @@ export function Wall({
     else setSelectedId(null);
   }, [selectDoor, selectPane, lath]);
 
+  /** Kill a Surface with no pane: a Door, or a pending kill. */
+  const disposeDetached = useCallback((id: string): void => {
+    closeBrowserSurface(id, lath.getMeta(id)?.params);
+    // Drop the meta the store kept for it and, if it was parked, unmount the
+    // DOM (and any iframe document still running inside it) with it.
+    lath.store.forgetLeaf(id);
+    // Dispose the session/registry entry — this stops the PTY and makes a
+    // still-armed typeCommandWhenPromptReady exit via its `!registry.has(id)`
+    // check, so a late OSC signal can't type the command into a dead surface.
+    disposeSession(id);
+    clearLocalSurfaceActivity(id);
+    forgetSurfaceRef(id);
+    fireEvent({ type: 'kill', id });
+  }, [fireEvent, forgetSurfaceRef, lath]);
+
   /** Tear a Surface down after its helper guard. */
   const killPaneImmediately = useCallback((id: string): void => {
     closeHelperParent(id);
@@ -702,21 +722,11 @@ export function Wall({
       // teardown lands here: the throwaway was created straight into a door.
       const door = doorsRef.current.find(d => d.id === id);
       if (!door) return;
-      closeBrowserSurface(id, lath.getMeta(id)?.params);
-      // Destroy the Door: drop the meta the store kept for it and, if it was parked,
-      // unmount the DOM (and any iframe document still running inside it) with it.
-      lath.store.forgetLeaf(id);
-      // Dispose the session/registry entry — this stops the PTY and makes a
-      // still-armed typeCommandWhenPromptReady exit via its `!registry.has(id)`
-      // check, so a late OSC signal can't type the command into a dead surface.
-      disposeSession(id);
       removeDoor(id);
       // A kill gesture on the selected Door hands selection to its next
       // surviving neighbor, as a revealed Door's kill does below.
       if (selectedIdRef.current === id && selectedTypeRef.current === 'door') selectAfterKill(doorNeighbors);
-      clearLocalSurfaceActivity(id);
-      forgetSurfaceRef(id);
-      fireEvent({ type: 'kill', id });
+      disposeDetached(id);
       return;
     }
     // Close its browser session and release the client-side controller
@@ -750,7 +760,24 @@ export function Wall({
     }, exitMs);
     clearLocalSurfaceActivity(id);
     fireEvent({ type: 'kill', id });
-  }, [fireEvent, forgetSurfaceRef, removeDoor, selectAfterKill, lath, nav]);
+  }, [fireEvent, forgetSurfaceRef, removeDoor, selectAfterKill, disposeDetached, lath, nav]);
+
+  /** This Wall's own pending Surfaces and helpers. */
+  const ownPendingKill = (kill: PendingKill): boolean => kill.kind !== 'workspace' && kill.workspaceId === effectiveWorkspaceId;
+
+  /** Why a `dor` target names nothing: a pending kill of this Wall's, by its
+   *  stable id or the ref it keeps (`docs/specs/reopen.md`). */
+  const pendingKillRefusal = (target: string): string | null => {
+    const classified = classifySurfaceTarget(target);
+    const pending = classified.kind === 'stable' ? getPendingKill('surface', classified.id)
+      : classified.kind === 'ref' ? getPendingKills().find(kill => kill.kind === 'surface' && kill.workspaceId === effectiveWorkspaceId && kill.ref === classified.ref) ?? null
+        : null;
+    return pending ? `surface '${target}' is a pending kill` : null;
+  };
+
+  /** Make a close that would ask a pending kill instead (set below, once
+   *  restoring has what it needs). */
+  const pendKillRef = useRef<(id: string) => void>(() => {});
 
   /** Push the reopen record of a Surface about to close (set below, once the
    *  serializer exists). */
@@ -801,8 +828,9 @@ export function Wall({
         };
         // Only a confirmation needs the pane; any other close takes the Door
         // as it is, so a reopen puts it back on the Baseboard.
-        if (closeKindOf(id) === 'confirm') handleReattachRef.current(door, { enterPassthrough: false, afterRestore: 'confirm-kill' });
-        else void closeSurface(id, 'ask');
+        if (closeKindOf(id) !== 'confirm') void closeSurface(id, 'ask');
+        else if (isDelayedKillEnabled()) pendKillRef.current(id);
+        else handleReattachRef.current(door, { enterPassthrough: false, afterRestore: 'confirm-kill' });
         return;
       }
       // The helper inspection below can outlive the Surface (an exit, a `dor
@@ -812,6 +840,7 @@ export function Wall({
       // `ask`: a Tool that turns dirty during the helper check prompts rather
       // than refusing a gesture in silence.
       if (closeKindOf(id) !== 'confirm') { void closeSurface(id, 'ask'); return; }
+      if (isDelayedKillEnabled()) { pendKillRef.current(id); return; }
       setConfirmKill({ id, char: randomKillChar() });
     };
     if (!getHelper(id)) { stage(); return; }
@@ -1129,6 +1158,8 @@ export function Wall({
   const closeAll = useCallback(async (editors: readonly string[] = []): Promise<string | null> => {
     closingWorkspaceRef.current = true;
     cancelContextPortLaunches();
+    // Nothing pending outlives the Wall that holds it.
+    finalizePendingKills(ownPendingKill);
     await collapseWorkspace(effectiveWorkspaceId);
     // Walked until nothing new turns up rather than over one snapshot: a member
     // pane's `dor` request can create a Surface during the awaits, and one
@@ -1256,6 +1287,54 @@ export function Wall({
     }
     return { id, ref };
   }, [generatePaneId, surfaceRefForId, restoreFromToken, enterTerminalMode, insertDoorAt, lath]);
+
+  /**
+   * A pending kill (`docs/specs/reopen.md` → "Labs: No-confirm delayed kill"):
+   * the Surface leaves the layout as a minimize does — its token kept, a page
+   * parked, its process Live — with no Door; restoring puts the same Surface
+   * back, and finalizing takes today's kill path.
+   */
+  pendKillRef.current = (id: string) => {
+    const meta = lath.getMeta(id);
+    if (!meta) return;
+    setTerminalContext(current => current?.id === id ? null : current);
+    const doorIndex = doorsRef.current.findIndex(door => door.id === id);
+    const doorNeighbors = doorKillReturnRef.current?.id === id ? doorKillReturnRef.current.neighbors : null;
+    doorKillReturnRef.current = null;
+    const wasSelected = selectedIdRef.current === id;
+    let token: RestoreToken | null;
+    if (doorIndex >= 0) {
+      token = doorsRef.current[doorIndex].token as RestoreToken;
+      removeDoor(id);
+    } else {
+      token = lath.store.doorLeaf(id, { park: shouldParkOnMinimize(meta) }).token;
+      if (!token) return;
+    }
+    if (wasSelected) selectAfterKill(doorNeighbors);
+    const kind = surfaceKindFromParams(meta.params);
+    addPendingKill({
+      kind: 'surface',
+      id,
+      workspaceId: effectiveWorkspaceId,
+      ref: surfaceRefForId(id),
+      title: deriveDisplayedSurfaceLabel(kind, id, persistedPanelTitle(meta.title)),
+      label: SURFACE_KIND_LABEL[kind],
+    }, {
+      restore: (focus) => {
+        if (focus) setActiveWorkspace(effectiveWorkspaceId);
+        if (doorIndex >= 0) {
+          insertDoorAt(doorIndex, { id, token }, focus);
+          return;
+        }
+        restoreFromToken(id, lath.getMeta(id) ?? meta, token);
+        if (focus) enterTerminalMode(id);
+      },
+      finalize: () => {
+        closeHelperParent(id);
+        disposeDetached(id);
+      },
+    });
+  };
 
   /** A Door click, or a pin in its popover: reattach into passthrough, a human
    *  gesture that acknowledges the Session. */
@@ -1673,6 +1752,7 @@ export function Wall({
 
   const previewSlot = usePreviewSlotPin(lath);
   const { findSurfaceByParams, updateSurfaceParams, handleDorControl } = useDorControl({
+    pendingKillRefusal,
     lath,
     nav,
     doorsRef,
@@ -1947,14 +2027,18 @@ export function Wall({
       return meta ? deriveDisplayedSurfaceLabel(surfaceKindFromParams(meta.params), next, persistedPanelTitle(meta.title)) : null;
     },
     flushPersistence: (options) => persistence.flush(options),
-    prepareWorkspaceTransfer: () => prepareWorkspaceTransfer({
+    prepareWorkspaceTransfer: () => {
+      // No pending kill follows a Workspace to its destination.
+      finalizePendingKills(ownPendingKill);
+      return prepareWorkspaceTransfer({
       workspaceId: effectiveWorkspaceId,
       naming: getWorkspace(effectiveWorkspaceId) ?? { name: '', nameIsAuto: false },
       serialize: persistence.serialize,
       surfaceIds: memberSurfaceIds,
       hasTerminal: surfaceHasTerminal,
       captureTools: () => captureToolParams(lath, memberSurfaceIds()),
-    }),
+      });
+    },
     closeAll,
     handleDorControl,
   };
@@ -1972,6 +2056,7 @@ export function Wall({
       unregister();
       releaseRouter();
       clearWorkspaceSurfaces(handle.workspaceId);
+      finalizePendingKills(kill => kill.kind !== 'workspace' && kill.workspaceId === handle.workspaceId);
     };
   }, []);
 

@@ -19,6 +19,7 @@ import {
 import { isHelperSession, registry } from '../../lib/terminal-store';
 import { getWorkspacesSnapshot, refsArePositional, workspaceRefFor } from '../../lib/workspace-store';
 import { getWorkspaceSurfacesSnapshot } from '../../lib/workspace-surfaces';
+import { isPendingKillSession } from '../../lib/pending-kills';
 import { buildDirectorySnapshot, type DirectoryPaneInput, type DirectoryWorkspaceInput } from './directory';
 
 /**
@@ -44,7 +45,7 @@ export function collectDirectorySnapshot(): DirectoryEntry[] {
   const activityStates = getActivitySnapshot();
   const appTitleForPane = buildAppTitleResolver(paneStates, activityStates);
 
-  const ids = [...registry.keys()].filter((id) => !isHelperSession(id));
+  const ids = [...registry.keys()].filter((id) => !isHelperSession(id) && !isPendingKillSession(id));
   // Reuse these per-pane states in the map below rather than re-fetching (each
   // miss would allocate a fresh default twice).
   const allPanes = ids.map((id) => getTerminalPaneState(id));

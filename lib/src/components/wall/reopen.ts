@@ -2,6 +2,7 @@ import type { ReopenResponse } from 'dor/commands/types';
 import { getPlatform } from '../../lib/platform';
 import { newestReopenClosedAt, popReopenRecord, pushReopenRecord, type SurfaceReopenRecord, type WorkspaceReopenRecord } from '../../lib/reopen-stack';
 import { withFreshSurfaceIds } from '../../lib/session-remap';
+import { newestPendingKill, pendingKillKey, restorePendingKill, type PendingKill } from '../../lib/pending-kills';
 import { restoreSession } from '../../lib/session-restore';
 import { createWorkspace, generateWorkspaceId, getActiveWorkspaceId, moveWorkspace, setActiveWorkspace, workspaceRefFor } from '../../lib/workspace-store';
 import type { DorControlRequest } from './use-dor-control';
@@ -24,12 +25,18 @@ export const NOTHING_TO_REOPEN = 'Nothing to reopen';
  * `dor reopen` stays focus-neutral and reads the answer instead.
  */
 export async function reopenClosed({ gesture }: { gesture: boolean }): Promise<ReopenResponse | null> {
+  const recordAt = newestReopenClosedAt() ?? 0;
+  const pending = newestPendingKill();
   // A host that cannot answer leaves this Window's own records to answer.
-  const reopenedWindow = await getPlatform().reopenClosedWindow?.(newestReopenClosedAt() ?? 0).catch((error: unknown) => {
+  const reopenedWindow = await getPlatform().reopenClosedWindow?.(Math.max(recordAt, pending?.startedAt ?? 0)).catch((error: unknown) => {
     console.warn('[reopen] the host could not reopen a closed window', error);
     return false;
   });
   if (reopenedWindow) return { status: 'reopened', kind: 'window' };
+  // A pending kill newer than every record comes back as itself, not rebuilt.
+  if (pending && pending.startedAt >= recordAt && restorePendingKill(pendingKillKey(pending.kind, pending.id), gesture)) {
+    return restoredResponse(pending);
+  }
   const record = popReopenRecord();
   if (!record) {
     if (gesture) getWallHandle(getActiveWorkspaceId())?.showNotice(NOTHING_TO_REOPEN);
@@ -66,6 +73,13 @@ function reopenWorkspace(record: WorkspaceReopenRecord, gesture: boolean): Reope
   createWorkspace({ id, name, nameIsAuto, activate: gesture, alertDelivery: session.alertDelivery });
   moveWorkspace(id, record.index);
   return { status: 'reopened', kind: 'workspace', workspaceId: id, workspaceRef: workspaceRefFor(id) };
+}
+
+function restoredResponse(kill: PendingKill): ReopenResponse {
+  if (kill.kind === 'workspace') {
+    return { status: 'reopened', kind: 'workspace', workspaceId: kill.id, workspaceRef: workspaceRefFor(kill.id) };
+  }
+  return { status: 'reopened', kind: 'surface', surfaceId: kill.id, surfaceRef: kill.ref ?? kill.id };
 }
 
 /** `dor reopen` (`window.reopen`): focus-neutral, and an empty stack refuses. */

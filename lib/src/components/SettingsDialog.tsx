@@ -1,4 +1,4 @@
-import { BellIcon, GearIcon, GlobeIcon, MagnifyingGlassIcon, PulseIcon } from '@phosphor-icons/react';
+import { BellIcon, FlaskIcon, GearIcon, GlobeIcon, MagnifyingGlassIcon, PulseIcon } from '@phosphor-icons/react';
 import { SecondsField, SwitchRow } from './AlarmSettingsControls';
 import { ScrollFades } from './ScrollFades';
 import type { AlertSink } from '../lib/alert-delivery-model';
@@ -25,6 +25,7 @@ import { PushTestButton, SpeakTestButton } from './AlarmTestButtons';
 import { ManagedVoiceSection, useManagedVoiceOffered } from './ManagedVoiceSection';
 import { getPlatform } from '../lib/platform';
 import { getShellsSnapshot, subscribeToShells } from '../lib/shell-store';
+import { getDelayedKillSetting, labsAvailable, setDelayedKillSetting, subscribeToLabsSettings } from '../lib/labs-settings';
 import {
   getAlertSettings,
   getPushDevices,
@@ -99,6 +100,7 @@ const TOPICS = [
   { id: 'activity', label: 'Activity', icon: PulseIcon, groups: ['watcher', 'inactivity'] },
   { id: 'notifications', label: 'Notifications', icon: BellIcon, groups: ['speech', 'push'] },
   { id: 'network', label: 'Network', icon: GlobeIcon, groups: ['network', 'phones', 'updates'] },
+  { id: 'labs', label: 'Labs', icon: FlaskIcon, groups: ['delayedKill'] },
 ] as const;
 type TopicId = typeof TOPICS[number]['id'];
 type GroupId = typeof TOPICS[number]['groups'][number];
@@ -167,6 +169,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const watched = useSyncExternalStore(subscribeToWatchedCommands, getWatchedCommandsSnapshot);
   const settings = useSyncExternalStore(subscribeToAlertSettings, getAlertSettings);
   const shellState = useSyncExternalStore(subscribeToShells, getShellsSnapshot);
+  const delayedKill = useSyncExternalStore(subscribeToLabsSettings, getDelayedKillSetting);
   const searchRef = useRef<HTMLInputElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const scrollFrame = useRef<number | null>(null);
@@ -457,6 +460,17 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                 <NetworkUpdates />
               </div>
             </TopicSection>
+            {labsAvailable() && (
+              <TopicSection id="labs" hidden={!visible('labs')}>
+                <section data-setting="delayedKill" hidden={!matches('delayedKill')} className="mt-4">
+                  <SwitchRow label="No-confirm delayed kill" on={delayedKill} onChange={setDelayedKillSetting} />
+                  <div className={`${UNDER_SWITCH_INDENT} mt-1 text-sm leading-relaxed text-muted`}>
+                    Closing something that would ask first closes it at once instead, and keeps
+                    it running for ten seconds in the corner, where a click brings it back.
+                  </div>
+                </section>
+              </TopicSection>
+            )}
           </div>
           <ScrollFades above={above} below={below} />
         </div>
