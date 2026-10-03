@@ -355,9 +355,7 @@ Behavior help does not carry:
 - `kill` accepts browser Surfaces.
 - `ensure` against an unintegrated shell other than `cmd.exe` times out and
   closes the temporary Surface.
-- `list` ANDs its filters client-side and **owns every Workspace read**.
-  `--workspaces` admits its flags by an allowlist, so a flag added to `list` is
-  refused there until it is named.
+- `list` **owns every Workspace read**.
 - Every command exits 1 on a usage or target error; besides 0, only `await`
   uses others (2, 3; help). `await` prints no terminal text (rationale).
 
