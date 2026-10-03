@@ -62,11 +62,33 @@ describe("playground dor open", () => {
     expect(onExit).toHaveBeenCalledWith(1);
   });
 
-  it("names its verbs for anything else", () => {
-    const { program, onExit, output } = harness(["split"]);
+});
+
+describe("playground dor's other commands", () => {
+  async function ran(args: string[]) {
+    const { program, onExit, output } = harness(args);
     program.start();
-    expect(output()).toContain("Error: unknown command 'split'");
-    expect(onExit).toHaveBeenCalledWith(1);
+    await vi.waitFor(() => expect(onExit).toHaveBeenCalled());
+    return { exitCode: onExit.mock.calls[0][0], text: output() };
+  }
+
+  it("prints the real CLI's help, routed as the CLI routes it", async () => {
+    for (const args of [[], ["--help"], ["help"]]) {
+      expect(await ran(args)).toMatchObject({ exitCode: 0, text: expect.stringContaining("USAGE\r\n  dor split [") });
+    }
+    for (const args of [["open", "--help"], ["help", "o"], ["o", "README.md", "-h"]]) {
+      expect((await ran(args)).text).toContain("USAGE\r\n  dor open [--json]");
+    }
+    expect((await ran(["agent-browser", "--help"])).text).toContain("USAGE\r\n  dor agent-browser");
+  });
+
+  it("serves version and skill, and refuses the rest of the CLI as unsupported", async () => {
+    expect((await ran(["--version"])).text).toMatch(/^dor \d+\.\d+\.\d+ \[playground\]\r\n$/);
+    expect(JSON.parse((await ran(["skill", "--json"])).text).markdown).toContain("dor ensure");
+    expect(await ran(["split", "--", "ls"])).toEqual({ exitCode: 1, text: "Error: dor split is UNSUPPORTED IN PLAYGROUND\r\n" });
+    expect((await ran(["agent-browser", "open", "x", "--help"])).text).toContain("dor agent-browser is UNSUPPORTED IN PLAYGROUND");
+    expect((await ran(["skill", "--install"])).text).toContain("dor skill --install is UNSUPPORTED IN PLAYGROUND");
+    expect(await ran(["bogus"])).toEqual({ exitCode: 1, text: "Error: unknown command 'bogus'\r\n" });
   });
 });
 

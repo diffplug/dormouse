@@ -5,7 +5,7 @@
  * a built-in Tool runs, which announce virtual viewers instead of ports.
  */
 import { runFilePicker } from "dor/commands/open-picker";
-import { printable, renderToolResponse } from "dor/commands/terminal-text";
+import { printable, renderJson, renderToolResponse, renderVersion, renderVersionJson } from "dor/commands/terminal-text";
 import type { PickerTerminal, ToolSurfaceResponse } from "dor/commands/types";
 import { canonicalDorVerb, SURFACE_CONTROL_METHODS } from "dor/protocol";
 import { builtinHandler, VIEW_ERROR_ARGV } from "dor-tools-builtin/file-viewer-format";
@@ -15,6 +15,7 @@ import { cancelDorControlRequest, dispatchDorControlRequest } from "dormouse-lib
 import type { ToolControlResult, ToolHostRequest } from "dormouse-lib/lib/platform/tool-types";
 import type { InteractiveProgram } from "../tutorial-shell";
 import { HOME, type VirtualFs } from "./vfs";
+import { DOR_COMMANDS, dorHelp, dorSkill } from "./dor-reference";
 import type { PlaygroundViewers } from "./viewers";
 
 export interface PlaygroundDorOptions {
@@ -30,21 +31,54 @@ export interface PlaygroundDorOptions {
   onExit(exitCode: number): void;
 }
 
-const USAGE = "Usage: dor open [--preview] [--fresh] [--minimize] [--tool <name>] [path]\r\n"
-  + "This playground's dor knows only open (alias o); its files are a read-only copy of dor-tools-lib.\r\n";
-
 /** Ports the virtual viewers report: never a real listener, only distinct per viewer. */
 let nextPort = 40000;
 
 const errorLine = (message: string) => `Error: ${printable(message)}\r\n`;
-const crlf = (text: string) => text.replace(/\n/g, "\r\n");
+const crlf = (text: string) => text.replace(/\r?\n/g, "\r\n");
 
+const HELP_FLAGS = new Set(["--help", "-h"]);
+/** Commands whose arguments belong to another CLI: only a bare `--help` is dor's. */
+const PASSTHROUGH = new Set(["agent-browser", "playwright"]);
+const UNSUPPORTED = "UNSUPPORTED IN PLAYGROUND";
+
+/** The help `dor <argv>` asks for, as `dor/src/cli.ts` routes it: `""` for
+ * `dor --help`, a command's name, or null for no help. */
+function helpTarget(argv: string[]): string | null {
+  const [first, second] = argv;
+  if (first === undefined || (argv.length === 1 && HELP_FLAGS.has(first))) return "";
+  if (first === "help") return second && DOR_COMMANDS.has(canonicalDorVerb(second)) ? canonicalDorVerb(second) : "";
+  const command = canonicalDorVerb(first);
+  if (!DOR_COMMANDS.has(command)) return null;
+  const help = PASSTHROUGH.has(command) ? argv.length === 2 && HELP_FLAGS.has(second) : argv.some((arg) => HELP_FLAGS.has(arg));
+  return help ? command : null;
+}
+
+/** The real CLI's verbs where the playground can serve them; the rest of its
+ * commands fail as unsupported here rather than unknown. */
 export function startPlaygroundDor(options: PlaygroundDorOptions): InteractiveProgram {
-  const [verb = "", ...rest] = options.args;
-  if (canonicalDorVerb(verb) === "open") return new DorOpen(options, rest);
+  const argv = options.args.length === 1 && (options.args[0] === "--version" || options.args[0] === "-v") ? ["version"] : options.args;
+  const help = helpTarget(argv);
+  if (help !== null) return new DorText(options, async () => [0, await dorHelp(help)]);
+  const [first = "", ...rest] = argv;
+  const verb = canonicalDorVerb(first);
+  if (verb === "open") return new DorOpen(options, rest);
   if (builtinHandler("argv", verb) || verb === VIEW_ERROR_ARGV) return new DorViewer(options, verb, rest);
-  const help = verb === "" || verb === "help" || verb === "--help";
-  return new DorMessage(options, help ? 0 : 1, help ? USAGE : errorLine(`unknown command '${verb}'`) + USAGE);
+  const json = rest.length === 1 && rest[0] === "--json";
+  if ((verb === "version" || verb === "skill") && (rest.length === 0 || json)) {
+    return new DorText(options, async () => [0, verb === "version" ? await version(json) : json ? renderJson({ markdown: await dorSkill() }) : await dorSkill()]);
+  }
+  const message = !DOR_COMMANDS.has(verb) ? `unknown command '${first}'`
+    : verb === "version" || verb === "skill" ? `dor ${[verb, ...rest].join(" ")} is ${UNSUPPORTED}`
+    : `dor ${verb} is ${UNSUPPORTED}`;
+  return new DorText(options, async () => [1, errorLine(message)]);
+}
+
+/** `dor version`: the latest released Dormouse, which is what the site serves. */
+async function version(json: boolean): Promise<string> {
+  const { releases } = (await import("../../data/changelog.json")).default as { releases: { version: string }[] };
+  const metadata = { version: releases[0]?.version ?? "unknown", commit: "playground", commitsSinceVersion: 0 };
+  return json ? renderVersionJson(metadata) : renderVersion(metadata);
 }
 
 /** A run that finishes once: `cleanup`, then its last output and exit code. */
@@ -71,9 +105,14 @@ abstract class DorProgram implements InteractiveProgram {
   }
 }
 
-class DorMessage extends DorProgram {
-  constructor(options: PlaygroundDorOptions, private readonly exitCode: number, private readonly text: string) { super(options); }
-  start(): void { this.finish(this.exitCode, this.text); }
+/** Prints text once it loads, then exits with its code. */
+class DorText extends DorProgram {
+  constructor(options: PlaygroundDorOptions, private readonly text: () => Promise<[exitCode: number, text: string]>) { super(options); }
+  start(): void {
+    this.text().then(([exitCode, text]) => this.finish(exitCode, crlf(text)), (error: unknown) => {
+      this.finish(1, errorLine(error instanceof Error ? error.message : String(error)));
+    });
+  }
 }
 
 interface OpenFlags { preview: boolean; fresh: boolean; minimize: boolean; json: boolean; tool?: string; path?: string }

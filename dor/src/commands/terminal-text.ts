@@ -1,5 +1,5 @@
 // Browser-safe: the website playground's dor prints with these.
-import type { ToolSurfaceResponse } from './types.js';
+import type { ToolSurfaceResponse, VersionMetadata } from './types.js';
 
 const TERMINAL_CONTROLS = /[\x00-\x1f\x7f-\x9f]/g;
 export const escapeControl = (char: string) => `\\u${char.charCodeAt(0).toString(16).padStart(4, '0')}`;
@@ -33,4 +33,26 @@ export function renderToolResponse(response: ToolSurfaceResponse, json: boolean)
     });
   }
   return `${response.status} ${response.surfaceRef}  ${JSON.stringify(response.command)}\n`;
+}
+
+// The prerelease-style build tag: `<version>+<N>` when the build carries commits
+// past the version tag, else just `<version>`.
+function buildTag(metadata: VersionMetadata): string {
+  return metadata.commitsSinceVersion > 0
+    ? `${metadata.version}+${metadata.commitsSinceVersion}`
+    : metadata.version;
+}
+
+export function renderVersion(metadata: VersionMetadata): string {
+  const suffix = metadata.commitsSinceVersion > 0 ? ` (${buildTag(metadata)})` : '';
+  return `dor ${metadata.version} [${metadata.commit}]${suffix}\n`;
+}
+
+export function renderVersionJson(metadata: VersionMetadata): string {
+  return renderJson({
+    version: metadata.version,
+    commit: metadata.commit,
+    commits_since_version: metadata.commitsSinceVersion,
+    build: buildTag(metadata),
+  });
 }

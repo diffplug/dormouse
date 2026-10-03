@@ -2,12 +2,9 @@
 
 import { buildCommand } from '@stricli/core';
 import { DOR_VERSION_METADATA } from '../generated-version.js';
-import type {
-  Command,
-  DorCommandContext,
-  VersionMetadata,
-} from './types.js';
-import { renderJson, writeStdout } from './shared.js';
+import type { Command, DorCommandContext } from './types.js';
+import { writeStdout } from './shared.js';
+import { renderVersion, renderVersionJson } from './terminal-text.js';
 
 interface VersionFlags {
   readonly json?: boolean;
@@ -43,26 +40,4 @@ JSON output:
 function runVersionCommand(this: DorCommandContext, flags: VersionFlags): void {
   const metadata = this.options.versionMetadata ?? DOR_VERSION_METADATA;
   writeStdout(this, flags.json === true ? renderVersionJson(metadata) : renderVersion(metadata));
-}
-
-// The prerelease-style build tag: `<version>+<N>` when the build carries commits
-// past the version tag, else just `<version>`.
-function buildTag(metadata: VersionMetadata): string {
-  return metadata.commitsSinceVersion > 0
-    ? `${metadata.version}+${metadata.commitsSinceVersion}`
-    : metadata.version;
-}
-
-export function renderVersion(metadata: VersionMetadata): string {
-  const suffix = metadata.commitsSinceVersion > 0 ? ` (${buildTag(metadata)})` : '';
-  return `dor ${metadata.version} [${metadata.commit}]${suffix}\n`;
-}
-
-function renderVersionJson(metadata: VersionMetadata): string {
-  return renderJson({
-    version: metadata.version,
-    commit: metadata.commit,
-    commits_since_version: metadata.commitsSinceVersion,
-    build: buildTag(metadata),
-  });
 }
