@@ -3939,6 +3939,12 @@ fn start_sidecar(app: &AppHandle) -> Result<SidecarState, String> {
 /// carries one; nothing else can ever raise this id.
 const QUIT_MENU_ITEM_ID: &str = "dormouse-quit";
 
+/// The File menu's Reopen Closed item (docs/specs/reopen.md → Reopen verb).
+/// macOS only: a menu accelerator fires before the webview sees the key, so
+/// it works in passthrough; on Windows and Linux `Ctrl+Shift+T` would take a
+/// key programs read as `Ctrl+T`.
+const REOPEN_MENU_ITEM_ID: &str = "dormouse-reopen-closed";
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     panic_policy::abort_on_panic();
@@ -3986,6 +3992,19 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             items.push(Box::new(Submenu::with_items(
                 handle,
+                "File",
+                true,
+                &[&MenuItem::with_id(
+                    handle,
+                    REOPEN_MENU_ITEM_ID,
+                    "Reopen Closed",
+                    true,
+                    Some("CmdOrCtrl+Shift+T"),
+                )?],
+            )?));
+            #[cfg(target_os = "macos")]
+            items.push(Box::new(Submenu::with_items(
+                handle,
                 "Edit",
                 true,
                 &[
@@ -4021,6 +4040,11 @@ pub fn run() {
         .on_menu_event(|app, event| {
             if event.id() == QUIT_MENU_ITEM_ID {
                 request_quit(app, QuitIntent::default());
+            } else if event.id() == REOPEN_MENU_ITEM_ID {
+                // The focused window reopens: its own stack, or a closed window.
+                if let Some(label) = app.try_state::<WindowState>().and_then(|state| state.focused()) {
+                    let _ = app.emit_to(label.as_str(), "dormouse://reopen-closed", ());
+                }
             }
         })
         .on_window_event(|window, event| {

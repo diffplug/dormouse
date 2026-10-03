@@ -8,9 +8,10 @@ import { surfaceKindFromParams } from './browser-surface';
  * already in memory (`docs/specs/reopen.md` → "The rule"):
  *
  * - `trivial` closes at once and leaves no trace;
+ * - `reopenable` closes at once onto the reopen stack;
  * - `confirm` asks first.
  */
-export type CloseKind = 'trivial' | 'confirm';
+export type CloseKind = 'trivial' | 'reopenable' | 'confirm';
 
 /**
  * An untouched shell that is not running and owns no helper with user work.

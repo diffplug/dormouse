@@ -19,6 +19,7 @@ import { moveCommand } from './commands/move.js';
 import { killCommand } from './commands/kill.js';
 import { listCommand } from './commands/list.js';
 import { readCommand } from './commands/read.js';
+import { reopenCommand } from './commands/reopen.js';
 import { sendCommand } from './commands/send.js';
 import { skillCommand } from './commands/skill.js';
 import { splitCommand } from './commands/split.js';
@@ -49,6 +50,7 @@ const COMMANDS = [
   readCommand,
   awaitCommand,
   killCommand,
+  reopenCommand,
   moveCommand,
   iframeCommand,
   agentBrowserCommand,

@@ -4,7 +4,8 @@ import { setPlatform } from "dormouse-lib/lib/platform";
 import { installPeerSurfaceResponder } from "dormouse-lib/remote/burrow/peer-surfaces";
 import type { PlatformAdapter } from "dormouse-lib/lib/platform/types";
 import { restoreWindowOrFresh } from "./window-restore";
-import { isMainWindow, resolveWindowLabel } from "./window-label";
+import { isMainWindow, listenToWindow, resolveWindowLabel } from "./window-label";
+import { reopenClosed } from "dormouse-lib/components/wall/reopen";
 import { setWindowLabel } from "dormouse-lib/lib/workspace-store";
 import { seedShellStore } from "dormouse-lib/lib/shell-store";
 import { restoreActiveTheme } from "dormouse-lib/lib/themes";
@@ -128,6 +129,8 @@ async function bootstrap() {
     const adapter = platform as import("./tauri-adapter").TauriAdapter;
     initQuitFlow(adapter);
     initWindowClose(adapter);
+    // The macOS File menu's Reopen Closed (docs/specs/reopen.md → Reopen verb).
+    void listenToWindow("dormouse://reopen-closed", () => { reopenClosed({ gesture: true }); });
     // A quit or a close with ≥1 running command opens <WorkspaceTeardownModalHost>.
     setQuitConfirmGate(openQuitConfirm);
   }

@@ -357,6 +357,10 @@ function fixtureClient(surfacesFixture = fixtureSurfaces) {
       this.requests.push({ method: 'restartApp' });
       return { relaunch: true };
     },
+    async reopenClosed() {
+      this.requests.push({ method: 'reopenClosed' });
+      return { status: 'reopened', kind: 'surface', surfaceId: 'surface-4f2a', surfaceRef: 'surface:4' };
+    },
     async resolveOpenTarget(request) {
       this.requests.push({ method: 'resolveOpenTarget', request });
       // Mirror the host: surface:1 owns port 5173; surface:2 owns nothing.
@@ -1770,6 +1774,24 @@ test('app restart against a Dormouse that predates it', async () => {
 test('app restart passes a host refusal through', async () => {
   const client = { async restartApp() { throw new Error('Restart needs a packaged build'); } };
   await snapshot('app-restart-refused', await runCli(['app', 'restart'], { client, env: standaloneEnv }));
+});
+
+test('reopen asks the host once and names what came back', async () => {
+  const client = fixtureClient();
+  await snapshot('reopen', await runCli(['reopen'], { client, env: standaloneEnv }));
+  await snapshot('reopen-json', await runCli(['reopen', '--json'], { client, env: standaloneEnv }));
+  assert.deepEqual(client.requests, [{ method: 'reopenClosed' }, { method: 'reopenClosed' }]);
+  const workspace = { async reopenClosed() { return { status: 'reopened', kind: 'workspace', workspaceId: 'workspace-7', workspaceRef: 'workspace:7' }; } };
+  await snapshot('reopen-workspace', await runCli(['reopen'], { client: workspace, env: standaloneEnv }));
+  const window = { async reopenClosed() { return { status: 'reopened', kind: 'window' }; } };
+  await snapshot('reopen-window', await runCli(['reopen'], { client: window, env: standaloneEnv }));
+});
+
+test('reopen passes a host refusal through, and names a host that predates it', async () => {
+  const empty = { async reopenClosed() { throw new Error('Nothing to reopen'); } };
+  await snapshot('reopen-nothing', await runCli(['reopen'], { client: empty, env: standaloneEnv }));
+  const old = { async reopenClosed() { throw new Error("unsupported Dormouse control method 'window.reopen'"); } };
+  await snapshot('reopen-predates', await runCli(['reopen'], { client: old, env: standaloneEnv }));
 });
 
 test('app usage errors name the action', async () => {

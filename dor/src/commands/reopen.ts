@@ -1,0 +1,76 @@
+/**
+ * `dor reopen` — the Reopen verb's `dor` counterpart
+ * (`docs/specs/dor-cli.md` → "dor reopen").
+ */
+
+import { buildCommand } from '@stricli/core';
+import { unsupportedControlMethodMessage, WINDOW_CONTROL_METHODS } from '../protocol.js';
+import type { Command, DorCommandContext, ReopenResponse } from './types.js';
+import { errorMessage, renderJson, requireControlClient, writeStdout } from './shared.js';
+
+interface ReopenFlags {
+  readonly json?: boolean;
+}
+
+export const reopenCommand: Command = {
+  name: 'reopen',
+  command: buildCommand<ReopenFlags, [], DorCommandContext>({
+    docs: {
+      brief: 'Reopen the most recently closed surface, workspace, or window.',
+      customUsage: ['[--json]'],
+      fullDescription: `Reopens the newest close this window remembers, as the Reopen Closed menu item and command-mode u do. Only a close Reopen can restore is remembered: a clean built-in file or folder viewer, an iframe browser, or a Workspace or window holding nothing else but untouched shells. A shell someone typed into, a running command, or unsaved work is never remembered, so closing one asks first. A reopened surface is a new surface with a new ref, at the path or URL it had. Nothing is remembered across a restart.
+
+Text output:
+  reopened surface:4
+
+JSON output:
+  {
+    "status": "reopened",
+    "kind": "surface",
+    "surface_id": "...",
+    "surface_ref": "surface:4"
+  }`,
+    },
+    parameters: {
+      flags: {
+        json: { kind: 'boolean', brief: 'Print JSON output.', optional: true, withNegated: false },
+      },
+      positional: { kind: 'tuple', parameters: [] },
+    },
+    func: runReopenCommand,
+  }),
+};
+
+async function runReopenCommand(this: DorCommandContext, flags: ReopenFlags): Promise<void | Error> {
+  const client = requireControlClient(this.options);
+  if (client instanceof Error) return client;
+  let response: ReopenResponse;
+  try {
+    response = await client.reopenClosed();
+  } catch (error) {
+    const message = errorMessage(error);
+    if (message === unsupportedControlMethodMessage(WINDOW_CONTROL_METHODS.reopen)) {
+      return new Error('this Dormouse predates dor reopen');
+    }
+    return new Error(message);
+  }
+  writeStdout(this, flags.json === true ? renderReopenJson(response) : `reopened ${reopenedRef(response)}\n`);
+  return undefined;
+}
+
+function reopenedRef(response: ReopenResponse): string {
+  if (response.kind === 'surface') return response.surfaceRef ?? 'surface';
+  if (response.kind === 'workspace') return response.workspaceRef ?? 'workspace';
+  return 'window';
+}
+
+function renderReopenJson(response: ReopenResponse): string {
+  return renderJson({
+    status: response.status,
+    kind: response.kind,
+    ...(response.surfaceId !== undefined ? { surface_id: response.surfaceId } : {}),
+    ...(response.surfaceRef !== undefined ? { surface_ref: response.surfaceRef } : {}),
+    ...(response.workspaceId !== undefined ? { workspace_id: response.workspaceId } : {}),
+    ...(response.workspaceRef !== undefined ? { workspace_ref: response.workspaceRef } : {}),
+  });
+}

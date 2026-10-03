@@ -1,0 +1,157 @@
+/**
+ * @vitest-environment jsdom
+ *
+ * Reopen (`docs/specs/reopen.md`): a reopenable close leaves a record, and the
+ * verb — command-mode `u` or `dor reopen` — rebuilds it as a new Surface.
+ */
+import { act } from 'react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { SURFACE_CONTROL_METHODS, WINDOW_CONTROL_METHODS } from 'dor/protocol';
+import { Wall } from '../Wall';
+import { setPlatform } from '../../lib/platform';
+import { FakePtyAdapter } from '../../lib/platform/fake-adapter';
+import { _reopenRecordsForTesting, _resetReopenStackForTesting, popReopenRecord, pushReopenRecord, type SurfaceReopenRecord } from '../../lib/reopen-stack';
+import { DEFAULT_WORKSPACE_ID } from '../../lib/session-types';
+import * as closeKinds from './close-kind';
+import { mountWallHarness, type WallHarness } from './wall-test-utils';
+import { getWallHandle } from './wall-handles';
+
+globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+
+vi.mock('../TerminalPane', () => ({
+  TerminalPane: ({ id }: { id: string }) => <div data-testid="terminal-pane" data-session-id={id} />,
+}));
+
+let harness: WallHarness;
+
+beforeEach(() => {
+  setPlatform(new FakePtyAdapter());
+  harness = mountWallHarness();
+  _resetReopenStackForTesting();
+});
+
+afterEach(() => {
+  harness.dispose();
+  vi.restoreAllMocks();
+  _resetReopenStackForTesting();
+});
+
+const WEB_PARAMS = { surfaceType: 'browser', renderMode: 'iframe', url: 'http://localhost:5173/docs' };
+
+/** A terminal beside an iframe browser, in command mode. */
+async function renderTerminalBesideBrowser(): Promise<void> {
+  await act(async () => harness.root.render(<Wall
+    restoredLathLayout={{
+      version: 1,
+      tree: { root: { kind: 'split', dir: 'row', children: [
+        { node: { kind: 'leaf', id: 'pane-a' }, weight: 0.5 },
+        { node: { kind: 'leaf', id: 'web' }, weight: 0.5 },
+      ] } },
+      leafMeta: {
+        'pane-a': { component: 'terminal', tabComponent: 'terminal', title: 'shell' },
+        web: { component: 'browser', tabComponent: 'surface', title: 'docs', params: WEB_PARAMS },
+      },
+    }}
+    initialMode="command"
+  />));
+  await harness.flush();
+}
+
+function control<T>(method: string, params: Record<string, unknown> = {}): Promise<{ ok: boolean; error?: string; result?: T }> {
+  return new Promise((resolve) => {
+    act(() => {
+      window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: { method, params, respond: resolve } }));
+    });
+  });
+}
+
+const leafIds = (): string[] => Array.from(harness.container.querySelectorAll<HTMLElement>('[data-lath-leaf]')).map(el => el.dataset.lathLeaf!);
+
+async function pressU(): Promise<void> {
+  await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'u', bubbles: true, cancelable: true })); });
+  await harness.flush();
+}
+
+describe('the reopen stack', () => {
+  const record = (n: number): SurfaceReopenRecord => ({
+    kind: 'surface', closedAt: n, workspaceId: DEFAULT_WORKSPACE_ID,
+    pane: { id: `p${n}`, cwd: null, title: '', untouched: true },
+    meta: { component: 'terminal', tabComponent: 'terminal', title: '' },
+    placement: { kind: 'door', index: 0, token: null },
+  });
+
+  it('pops newest first and keeps only the newest 20', () => {
+    for (let n = 1; n <= 25; n++) pushReopenRecord(record(n));
+    expect(_reopenRecordsForTesting()).toHaveLength(20);
+    expect(popReopenRecord()?.closedAt).toBe(25);
+    expect(popReopenRecord()?.closedAt).toBe(24);
+    expect(_reopenRecordsForTesting().at(-1)?.closedAt).toBe(6);
+  });
+});
+
+describe('Reopen', () => {
+  it('rebuilds a reopenable close where it sat, as a new Surface with a new ref', async () => {
+    vi.spyOn(closeKinds, 'closeKind').mockImplementation(id => id === 'web' ? 'reopenable' : 'confirm');
+    await renderTerminalBesideBrowser();
+    const killed = await control<{ surfaceRef: string }>(SURFACE_CONTROL_METHODS.kill, { surface: 'web', confirmation: { mode: 'dangerously' } });
+    expect(killed.ok).toBe(true);
+    await harness.flush();
+    expect(leafIds()).toEqual(['pane-a']);
+    expect(_reopenRecordsForTesting()).toHaveLength(1);
+
+    await pressU();
+    const reopened = leafIds().find(id => id !== 'pane-a')!;
+    expect(reopened).not.toBe('web');
+    // Back on the right of pane-a, as it sat.
+    const layout = getWallHandle(DEFAULT_WORKSPACE_ID)!.serializeNow().lathLayout as { tree: { root: unknown }; leafMeta: Record<string, { params?: unknown }> };
+    expect(layout.tree.root).toMatchObject({ kind: 'split', dir: 'row', children: [{ node: { id: 'pane-a' } }, { node: { id: reopened } }] });
+    expect(layout.leafMeta[reopened].params).toMatchObject(WEB_PARAMS);
+    const listed = await control<{ surfaces: Array<{ id: string; ref: string; url?: string }> }>(SURFACE_CONTROL_METHODS.list);
+    const surface = listed.result!.surfaces.find(s => s.id === reopened)!;
+    // surface:1 is pane-a and surface:2 the closed browser, retired for good.
+    expect(surface.ref).toBe('surface:3');
+    expect(_reopenRecordsForTesting()).toHaveLength(0);
+  });
+
+  it('records nothing for a close that is not reopenable', async () => {
+    vi.spyOn(closeKinds, 'closeKind').mockReturnValue('confirm');
+    await renderTerminalBesideBrowser();
+    await control(SURFACE_CONTROL_METHODS.kill, { surface: 'web', confirmation: { mode: 'dangerously' } });
+    await harness.flush();
+    expect(_reopenRecordsForTesting()).toHaveLength(0);
+  });
+
+  it('answers dor reopen with the reopened ref, and refuses an empty stack', async () => {
+    vi.spyOn(closeKinds, 'closeKind').mockImplementation(id => id === 'web' ? 'reopenable' : 'confirm');
+    await renderTerminalBesideBrowser();
+    expect(await control(WINDOW_CONTROL_METHODS.reopen)).toEqual({ ok: false, error: 'Nothing to reopen' });
+    await control(SURFACE_CONTROL_METHODS.kill, { surface: 'web', confirmation: { mode: 'dangerously' } });
+    await harness.flush();
+    const reopened = await control<{ kind: string; surfaceRef: string }>(WINDOW_CONTROL_METHODS.reopen);
+    expect(reopened.result).toMatchObject({ status: 'reopened', kind: 'surface', surfaceRef: 'surface:3' });
+    await harness.flush();
+    expect(leafIds()).toHaveLength(2);
+  });
+
+  it('says so briefly when `u` finds nothing to reopen', async () => {
+    await renderTerminalBesideBrowser();
+    await pressU();
+    expect(document.body.textContent).toContain('Nothing to reopen');
+    expect(leafIds()).toEqual(['pane-a', 'web']);
+  });
+
+  it('puts a reopened Door back at its slot on the Baseboard', async () => {
+    vi.spyOn(closeKinds, 'closeKind').mockImplementation(id => id === 'web' ? 'reopenable' : 'confirm');
+    await renderTerminalBesideBrowser();
+    await act(async () => { harness.container.querySelector<HTMLElement>('[data-lath-leaf="web"] [aria-label="Minimize"]')!.click(); });
+    await harness.flush();
+    await control(SURFACE_CONTROL_METHODS.kill, { surface: 'web', confirmation: { mode: 'dangerously' } });
+    await harness.flush();
+    expect(harness.container.querySelector('[data-door-id]')).toBeNull();
+    await pressU();
+    const door = harness.container.querySelector<HTMLElement>('[data-door-id]');
+    expect(door?.dataset.doorId).toBeDefined();
+    expect(door?.dataset.doorId).not.toBe('web');
+    expect(leafIds()).toEqual(['pane-a']);
+  });
+});

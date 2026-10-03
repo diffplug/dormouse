@@ -60,6 +60,17 @@ export const APP_CONTROL_METHODS = {
 export type AppControlMethod = (typeof APP_CONTROL_METHODS)[keyof typeof APP_CONTROL_METHODS];
 
 /**
+ * The wire identifier for each Window control operation — verbs on the Window
+ * the request lands in, whichever Workspace is active
+ * (`docs/specs/dor-cli.md` → "dor reopen").
+ */
+export const WINDOW_CONTROL_METHODS = {
+  reopen: 'window.reopen',
+} as const;
+
+export type WindowControlMethod = (typeof WINDOW_CONTROL_METHODS)[keyof typeof WINDOW_CONTROL_METHODS];
+
+/**
  * The wire identifier for each read of the Tool configuration
  * (`docs/specs/dor-tool.md` → CLI). Launching a Tool places a Surface, so it
  * is `surface.tool` instead.
@@ -84,11 +95,12 @@ export function canonicalDorVerb(verb: string): string {
 }
 
 /** Every method the control channel carries. */
-export type DorControlMethod = SurfaceControlMethod | WorkspaceControlMethod | AppControlMethod | ToolControlMethod;
+export type DorControlMethod = SurfaceControlMethod | WorkspaceControlMethod | AppControlMethod | WindowControlMethod | ToolControlMethod;
 
 const WORKSPACE_METHOD_SET: ReadonlySet<string> = new Set(Object.values(WORKSPACE_CONTROL_METHODS));
 const APP_METHOD_SET: ReadonlySet<string> = new Set(Object.values(APP_CONTROL_METHODS));
 const TOOL_METHOD_SET: ReadonlySet<string> = new Set(Object.values(TOOL_CONTROL_METHODS));
+const WINDOW_METHOD_SET: ReadonlySet<string> = new Set(Object.values(WINDOW_CONTROL_METHODS));
 
 /**
  * A host's refusal of a method it does not know. **Frozen text:** a newer `dor`
@@ -101,6 +113,11 @@ export function unsupportedControlMethodMessage(method: string): string {
 /** Whether this method acts on the running app rather than on any Workspace. */
 export function isAppControlMethod(method: string): method is AppControlMethod {
   return APP_METHOD_SET.has(method);
+}
+
+/** Whether this method acts on the Window rather than on one Workspace. */
+export function isWindowControlMethod(method: string): method is WindowControlMethod {
+  return WINDOW_METHOD_SET.has(method);
 }
 
 /** Whether this method reads the Tool configuration rather than any Workspace. */

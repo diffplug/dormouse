@@ -52,6 +52,8 @@ export interface WallKeyboardCtx {
   /** The kill gesture: `requestKill` in `lib/src/components/Wall.tsx` decides
    *  between reattach, immediate closure, and the confirm overlay. */
   requestKill: (id: string) => void;
+  /** The Reopen verb (`reopenClosed` in `lib/src/components/wall/reopen.ts`). */
+  reopenClosed: () => void;
   acceptKill: () => void;
   rejectKill: () => void;
   setRenamingPaneId: Dispatch<SetStateAction<string | null>>;

@@ -73,7 +73,10 @@ import { closeKind, type CloseKind } from './wall/close-kind';
 import { registerWallHandle, type WallHandle } from './wall/wall-handles';
 import { prepareWorkspaceTransfer } from './wall/workspace-transfer';
 import { installDorControlRouter } from './wall/dor-control-router';
-import type { DropTarget, RestoreToken } from '../lib/lath/ops';
+import { reopenClosed } from './wall/reopen';
+import { remove as removeFromTree, type DropTarget, type RestoreToken } from '../lib/lath/ops';
+import { pushReopenRecord, type SurfaceReopenRecord } from '../lib/reopen-stack';
+import { reopenPane } from '../lib/session-restore';
 import type { Edge } from '../lib/lath/model';
 import { useDynamicPalette } from '../lib/themes/use-dynamic-palette';
 import {
@@ -102,6 +105,7 @@ import {
   shouldParkOnMinimize,
   edgeForDorDirection,
   directionForArrow,
+  persistableLeafMeta,
 } from './wall/lath-wall-engine';
 import type { LeafMeta } from '../lib/lath/persistence';
 import { useToolServing } from './wall/use-tool-serving';
@@ -748,6 +752,10 @@ export function Wall({
     fireEvent({ type: 'kill', id });
   }, [fireEvent, forgetSurfaceRef, removeDoor, selectPane, selectDoor, lath, nav]);
 
+  /** Push the reopen record of a Surface about to close (set below, once the
+   *  serializer exists). */
+  const pushSurfaceRecordRef = useRef<(id: string) => void>(() => {});
+
   /**
    * A permanent Surface closure checks helper work before teardown
    * (`docs/specs/terminal-context.md` → "Promotion and source closure"), then a
@@ -763,6 +771,9 @@ export function Wall({
       if (refused) { revealRefusal(id, refused); return refused; }
       if (isToolDirty(id, lath.getMeta(id)?.params)
         && !(editors === 'ask' ? await confirmToolEditorsClose([id]) : editors.includes(id))) return UNSAVED_TOOL_REFUSAL;
+      // Decided now, from the state the kill leaves behind; a Workspace close
+      // leaves one record for all its members instead.
+      if (!closingWorkspaceRef.current && closeKindOf(id) === 'reopenable') pushSurfaceRecordRef.current(id);
       killPaneImmediately(id);
       return null;
     } finally {
@@ -1070,6 +1081,24 @@ export function Wall({
     workspaceId,
   });
 
+  // --- Reopen (docs/specs/reopen.md) ---
+  pushSurfaceRecordRef.current = (id: string) => {
+    const meta = lath.getMeta(id);
+    const pane = persistence.serializePane(id);
+    if (!meta || !pane) return;
+    const doorIndex = doorsRef.current.findIndex(door => door.id === id);
+    const token = doorIndex >= 0 ? doorsRef.current[doorIndex].token : removeFromTree(lath.store.getSnapshot().tree, id).token;
+    if (!token) return;
+    pushReopenRecord({
+      kind: 'surface',
+      closedAt: Date.now(),
+      workspaceId: effectiveWorkspaceId,
+      pane,
+      meta: persistableLeafMeta(meta),
+      placement: doorIndex >= 0 ? { kind: 'door', index: doorIndex, token } : { kind: 'pane', token: token as RestoreToken },
+    });
+  };
+
   /**
    * Close every Surface in this Workspace, each through the same coordinator a
    * manual close uses (helper guard → kill). Resolves null once the Wall is
@@ -1187,6 +1216,35 @@ export function Wall({
   }, [selectPane, removeDoor, removeDoorAndSelect, restoreFromToken, enterTerminalMode, forgetSurfaceRef, showShellSpawnNotice, lath, nav]);
   const handleReattachRef = useRef(handleReattach);
   handleReattachRef.current = handleReattach;
+
+  /**
+   * Rebuild a closed Surface from its record as a new Surface with a new ref
+   * (glossary I10): where it sat, a Pane beside the selected pane when its
+   * neighbors are gone. `focus` selects it as a reopen gesture does.
+   */
+  const reopenSurface = useCallback((record: SurfaceReopenRecord, focus: boolean): { id: string; ref: string } => {
+    const id = generatePaneId();
+    const meta = reopenPane(id, record.pane, record.meta);
+    const ref = surfaceRefForId(id);
+    const { placement } = record;
+    if (placement.kind === 'door') {
+      lath.store.addDoor(id, meta);
+      const index = Math.min(placement.index, doorsRef.current.length);
+      const token = { ...(placement.token as RestoreToken), leafId: id };
+      const nextDoors = [...doorsRef.current.slice(0, index), { id, token }, ...doorsRef.current.slice(index)];
+      doorsRef.current = nextDoors;
+      setDoors(nextDoors);
+      if (focus) {
+        modeRef.current = 'command';
+        setMode('command');
+        selectDoor(id);
+      }
+    } else {
+      restoreFromToken(id, meta, { ...placement.token, leafId: id });
+      if (focus) enterTerminalMode(id);
+    }
+    return { id, ref };
+  }, [generatePaneId, surfaceRefForId, restoreFromToken, enterTerminalMode, selectDoor, lath]);
 
   /** A Door click, or a pin in its popover: reattach into passthrough, a human
    *  gesture that acknowledges the Session. */
@@ -1842,6 +1900,11 @@ export function Wall({
       else enterTerminalMode(id);
     },
     showMoveNotice: (id, text) => showShellSpawnNotice(id, text, 8000),
+    showNotice: (text) => {
+      const id = livePaneId();
+      if (id) showShellSpawnNotice(id, text);
+    },
+    reopenSurface,
     serializeNow: persistence.serializeNow,
 
     surfaceIds: memberSurfaceIds,
@@ -2299,6 +2362,7 @@ export function Wall({
     minimizePane,
     openTerminalContext: (id, origin) => contextActions.open(id, { origin }),
     requestKill,
+    reopenClosed: () => { reopenClosed({ gesture: true }); },
     acceptKill,
     rejectKill,
     setRenamingPaneId,

@@ -55,6 +55,7 @@ function makeCtx(overrides: Partial<WallKeyboardCtx> = {}): WallKeyboardCtx {
     enterTerminalMode: vi.fn(),
     openTerminalContext: vi.fn(),
     requestKill: vi.fn(),
+    reopenClosed: vi.fn(),
     setRenamingPaneId: vi.fn(),
     fireEvent: vi.fn(),
     ...overrides,
@@ -80,6 +81,24 @@ describe('handlePaneShortcuts kill behavior', () => {
 
     expect(ctx.requestKill).toHaveBeenCalledWith('pane-a');
     expect(event.defaultPrevented).toBe(true);
+  });
+});
+
+describe('handlePaneShortcuts reopen', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it.each(['pane', 'door', 'workspace'] as const)('reopens on `u` with a %s selected', (selectedType) => {
+    const ctx = makeCtx({ selectedTypeRef: { current: selectedType } });
+    const event = keydown('u');
+    expect(handlePaneShortcuts(event, ctx, { current: null })).toBe(true);
+    expect(ctx.reopenClosed).toHaveBeenCalledTimes(1);
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it('leaves a chorded `u` alone', () => {
+    const ctx = makeCtx();
+    handlePaneShortcuts(keydownMeta('u'), ctx, { current: null });
+    expect(ctx.reopenClosed).not.toHaveBeenCalled();
   });
 });
 

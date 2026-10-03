@@ -7,6 +7,7 @@ import { createSessionDirtyTracker } from '../../lib/session-dirty';
 import { previousWorkspaceSession, publishWorkspaceSession, workspaceSessionRevision, SESSION_SAVE_DEBOUNCE_MS } from '../../lib/window-session-aggregator';
 import { getWorkspace, setWorkspaceAlertDelivery, subscribeToWorkspaces, hasWorkspace } from '../../lib/workspace-store';
 import {
+  getInheritableCwd,
   subscribeToActivity,
   subscribeToTerminalPaneState,
   UNNAMED_PANEL_TITLE,
@@ -15,7 +16,7 @@ import { surfaceKindFromParams } from './browser-surface';
 import { persistableLeafMeta } from './lath-wall-engine';
 import type { LathWallEngine } from './lath-wall-engine';
 import type { DooredItem, WallSelectionKind } from './wall-types';
-import type { PersistedDoor, PersistedSession, PersistedSurfaceRefs, WorkspaceId } from '../../lib/session-types';
+import type { PersistedDoor, PersistedPane, PersistedSession, PersistedSurfaceRefs, WorkspaceId } from '../../lib/session-types';
 import type { SessionFlushRequest } from '../../lib/platform/types';
 
 export interface SessionPersistenceHandle {
@@ -27,6 +28,9 @@ export interface SessionPersistenceHandle {
   /** This Workspace's record now, with no cwd probe: what a Surface move
    *  publishes in the same synchronous run as its ownership change. */
   serializeNow: () => PersistedSession;
+  /** One member's row of that record, its cwd as the Session last reported it:
+   *  what a reopen record carries (`docs/specs/reopen.md`). */
+  serializePane: (id: string) => PersistedPane | undefined;
 }
 
 export function useSessionPersistence({
@@ -153,6 +157,14 @@ export function useSessionPersistence({
       sink?.previous() ?? null, null, saveOptions().alertDelivery,
     );
   }, [collect, sink, saveOptions]);
+
+  const serializePane = useCallback((id: string): PersistedPane | undefined => {
+    const { panes, doors } = collect();
+    return assemblePersistedSession(
+      panes.filter(pane => pane.id === id), doors.filter(door => door.id === id), undefined, undefined, undefined,
+      sink?.previous() ?? null, { [id]: getInheritableCwd(id) ?? null }, undefined,
+    ).panes[0];
+  }, [collect, sink]);
 
   const doSave = useCallback((options?: SaveOptions): Promise<void> => {
     if (workspaceId === undefined) {
@@ -335,5 +347,5 @@ export function useSessionPersistence({
     activeRef,
   ]);
 
-  return { flush: flushSessionSave, serialize, serializeNow };
+  return { flush: flushSessionSave, serialize, serializeNow, serializePane };
 }

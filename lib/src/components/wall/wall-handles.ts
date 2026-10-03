@@ -1,5 +1,6 @@
 import type { LeafMeta } from '../../lib/lath/persistence';
 import type { PersistedSession } from '../../lib/session-types';
+import type { SurfaceReopenRecord } from '../../lib/reopen-stack';
 import type { BrowserAutomationProvider } from 'dor-lib-common/browser-providers';
 import type { WorkspaceId } from '../../lib/session-types';
 import type { SaveOptions } from '../../lib/session-save';
@@ -29,6 +30,11 @@ export interface WallHandle {
   finishSurfaceMove(): void;
   focusSurface(id: string, acknowledge: boolean): void;
   showMoveNotice(id: string, text: string): void;
+  /** A brief notice on the pane the user is on: the Window's answer to a verb
+   *  with nothing to act on. */
+  showNotice(text: string): void;
+  /** Rebuild a closed Surface here (`docs/specs/reopen.md`); `focus` selects it. */
+  reopenSurface(record: SurfaceReopenRecord, focus: boolean): { id: string; ref: string };
   /** This Workspace's record now, with no cwd probe. */
   serializeNow(): PersistedSession;
   workspaceId: WorkspaceId;
@@ -128,6 +134,8 @@ export function stubWallHandle(workspaceId: WorkspaceId, overrides: Partial<Wall
     finishSurfaceMove: () => {},
     focusSurface: () => {},
     showMoveNotice: () => {},
+    showNotice: () => {},
+    reopenSurface: () => { throw new Error('Reopen is unavailable'); },
     serializeNow: () => ({ version: 3, panes: [] }),
     surfaceIds: () => [],
     ownsSurface: () => false,
