@@ -159,7 +159,7 @@ An **await** parks on one Session until it finishes what it is doing, then repor
 | Ceiling | `dor await`'s `--timeout` as `timeoutMs`, the only number not derived from `cfg.alert` |
 
 - **Enforce all three host-side**, so no hop reaps a parked await early and no caller parks forever by lying about its deadline.
-- The host's `MAX_AWAIT_TIMEOUT_MS` matches the CLI's 1–86400 whole-second range (`docs/specs/dor-cli.md`) (rationale).
+- The ceiling's bound, `MAX_AWAIT_TIMEOUT_MS`: `docs/specs/dor-cli.md` -> "Deadlines And Cancellation" (rationale).
 - **Reject a non-finite, non-positive, or over-ceiling request rather than clamping it** — it settles `cancelled`, absorbing nothing; the webview handler rejects the same values with a visible error.
 
 **Several awaits may park on one Session**, sharing one claimant: a completion goes to every await whose condition it satisfies, each resolving on the first qualifying signal after it registered.
