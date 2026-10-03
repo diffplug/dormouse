@@ -172,8 +172,8 @@ sequenceDiagram
   participant R as renderer realm
   participant H as host AlertManager
   D->>R: control request await
-  R->>H: await {awaitId, id, until, timeoutMs}
-  opt dor hangs up or deadline passes
+  R->>H: await {realm-minted awaitId, id, until, timeoutMs}
+  opt dor hangs up or server reaper fires
     R->>H: awaitCancel {awaitId}
   end
   H-->>R: alert:awaitResult {awaitId, outcome}
