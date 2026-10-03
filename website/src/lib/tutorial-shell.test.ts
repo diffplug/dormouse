@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { shellWords, TutorialShell, type InteractiveProgram } from "./tutorial-shell";
 import { VirtualFs } from "./playground-fs/vfs";
+import { promptFor } from "dormouse-lib/lib/ansi";
 
 function createHarness() {
   const output: string[] = [];
@@ -241,5 +242,54 @@ describe("TutorialShell with a filesystem", () => {
   it("splits words as a POSIX shell quotes them", () => {
     expect(shellWords(`dor __view-error '/a b' "it's \\"x\\"" c\\ d`)).toEqual(["dor", "__view-error", "/a b", `it's "x"`, "c d"]);
     expect(shellWords("  a   ''  ")).toEqual(["a", ""]);
+  });
+});
+
+describe("TutorialShell tab completion", () => {
+  const fs = new VirtualFs({
+    "/home/demo/p/src/osc.ts": "", "/home/demo/p/src/frame.ts": "", "/home/demo/p/README.md": "", "/home/demo/p/sub/x": "",
+  });
+
+  function typed(input: string) {
+    const output: string[] = [];
+    const program: InteractiveProgram = { start: vi.fn(), handleInput: vi.fn(), dispose: vi.fn() };
+    const shell = new TutorialShell((data) => output.push(data), (name) => (name === "dor" ? program : null), { fs, cwd: "/home/demo/p" });
+    shell.showInitialPrompt();
+    output.length = 0;
+    shell.handleInput(input);
+    return { shell, program, echo: output.join("") };
+  }
+
+  it("never completes the command name", () => {
+    expect(typed("ch\t").echo).toBe("ch");
+  });
+
+  it("completes dor's verb and a path, closing a file with a space and a directory with a slash", () => {
+    expect(typed("dor op\t").echo).toBe("dor open ");
+    expect(typed("dor open R\t").echo).toBe("dor open README.md ");
+    expect(typed("ls s\t").echo).toBe("ls s");
+    expect(typed("ls sr\t").echo).toBe("ls src/");
+    expect(typed("ls src/o\t").echo).toBe("ls src/osc.ts ");
+    expect(typed("ls ~/p/R\t").echo).toBe("ls ~/p/README.md ");
+  });
+
+  it("offers cd only directories", () => {
+    expect(typed("cd s\t\t").echo).toContain("src/  sub/");
+    expect(typed("cd R\t").echo).toBe("cd R");
+  });
+
+  it("lists an ambiguous completion on the second Tab, then redraws the line", () => {
+    const { echo } = typed("ls src/\t\t");
+    expect(echo).toBe("ls src/\r\nframe.ts  osc.ts\r\n" + promptFor("~/p") + "ls src/");
+  });
+
+  it("runs what it completed", () => {
+    const { program } = typed("dor op\tR\t\r");
+    expect(program.start).toHaveBeenCalled();
+  });
+
+  it("leaves Tab to a running program", () => {
+    const { program } = typed("dor\r\t");
+    expect(program.handleInput).toHaveBeenCalledWith("\t");
   });
 });
