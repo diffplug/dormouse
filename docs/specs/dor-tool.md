@@ -130,7 +130,26 @@ Source of truth: `toolSemanticName` in `lib/src/components/wall/tool-name.ts`.
 
 ## CLI
 
-**Must return the Tool Surface handle.** A new Tool follows [Take-over](#take-over), otherwise splitting focus-neutrally. A matching Tool follows [Identity and dedupe](#identity-and-dedupe).
+**Must return the Tool Surface handle**, placed in this order (rules in [Trust](#trust), [Preview slot](#preview-slot), [Identity and dedupe](#identity-and-dedupe), [Take-over](#take-over)):
+
+```mermaid
+flowchart TD
+  R[surface.tool] --> O{OSC open from an idle Tool?}
+  O -- yes --> X[refuse]
+  O -- no --> L{named Tool or dor open?}
+  L -- no --> PS
+  L -- yes --> LK{host lookup}
+  LK -- untrusted --> PE[pending pane: pending]
+  LK -- failed --> X
+  LK -- failed, OSC preview --> EV[error viewer] --> PS
+  LK -- ok --> PS{slot answers?}
+  PS -- yes --> S[slot's answer]
+  PS -- no --> K{keyed match?}
+  K -- yes --> M[existing or adopted]
+  K -- no --> T{take-over holds?}
+  T -- yes --> TO[run in caller: takeover]
+  T -- no --> SP[split: created]
+```
 
 **Must retain `dor tool` and `dor open` as Surface-producing commands on every supported host**, never route them to a native editor. Generated help owns syntax and response types own shape.
 
@@ -251,7 +270,7 @@ Source of truth: `activateTerminalLink` in `lib/src/lib/terminal-link-activation
 
 ## Take-over
 
-**Must run a standalone `dor tool` or `dor open` invocation in its calling pane when every takeover condition holds.** Otherwise use the ordinary split path. Trust approval and keyed reuse take precedence. Helper callers follow `docs/specs/dor-cli.md` → Helper callers and targets. (rationale)
+**Must run a standalone `dor tool` or `dor open` invocation in its calling pane when every takeover condition holds**, after the earlier rungs of [CLI](#cli). Helper callers follow `docs/specs/dor-cli.md` → Helper callers and targets. (rationale)
 
 | Condition | Required state |
 | --- | --- |
