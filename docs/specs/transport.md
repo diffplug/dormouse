@@ -225,6 +225,7 @@ Standalone's per-window record: `docs/specs/standalone.md` -> "Persistence". "Re
 ## Universal invariants
 
 - **A position in a pane's output is a received count, not a buffer length.** The bounded buffer evicts from the front, so its length goes flat while output keeps flowing (rationale). Anything marking a point in the stream, or watching a pane for growth, reads the monotonic received count and slices since it, clamped to what the buffer still holds.
+- **Only an id's current PTY reports an exit**: never one killed or replaced under it.
 - **A spawn that fails still reports an exit.** `pty-core.spawn` answers a node-pty failure with `error` *and* `exit`; `error` reaches no webview (rationale).
 - **Teardown acks are correlated by request id, never by message type alone.** For `interrupt` and the graceful kill the pty-host echoes `requestId` on `interruptDone` / `gracefulKillDone` and the caller compares it — a timed-out call's ack still arrives afterwards (rationale).
 - **An omitted interrupt target list is not an empty one.** `pty-core.interrupt(ids)` broadcasts to every live PTY only when `ids` is *omitted*; an empty array is a no-op, so a caller whose computed set comes out empty never sends the blanket second press that destroys codex's hint.

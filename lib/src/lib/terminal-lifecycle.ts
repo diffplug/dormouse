@@ -1,6 +1,6 @@
 import { clearToolAnnounce } from './tool-announce-store';
 import { clearToolDirty } from './tool-dirty-store';
-import { clearToolReap, isToolReaped } from './tool-reap-store';
+import { clearToolReap } from './tool-reap-store';
 import { clearPreviewTransition } from './preview-transition-store';
 import { serializeTransferTerminal, type TerminalGrid } from './terminal-transfer';
 import { Terminal, type IBufferRange } from '@xterm/xterm';
@@ -198,8 +198,7 @@ function wirePtyEvents(id: string, terminal: Terminal): () => void {
     }
   };
   const handleExit = (detail: { id: string; exitCode: number }) => {
-    // A reaped Tool's kill is not news (`reapTerminal`).
-    if (detail.id !== id || isToolReaped(id)) return;
+    if (detail.id !== id) return;
     terminal.write(`\r\n[Process exited with code ${detail.exitCode}]\r\n`);
     // The PTY process is dead but the pane lingers in the registry; mark it so
     // the directory reports this surface as `alive: false` to the phone.
@@ -547,9 +546,8 @@ function writeReapedNotice(entry: TerminalEntry): void {
 /**
  * Kill a reaped Tool's PTY, keeping its terminal: the Session reads as exited,
  * with its scrollback, title, and cwd, until `rehydrateTerminal`
- * (`docs/specs/dor-tool.md` -> Reaping). Only VS Code delivers an exit for a
- * kill, and `handleExit` ignores it while the Tool is reaped, so the finish
- * is applied here rather than awaited.
+ * (`docs/specs/dor-tool.md` -> Reaping). No host reports a killed PTY's exit,
+ * so the finish is applied here.
  */
 export function reapTerminal(id: string): void {
   const entry = registry.get(id);

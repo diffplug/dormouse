@@ -1409,13 +1409,15 @@ module.exports.create = function create(send, ptyModule, { replay = false, slice
 
     p.onExit(({ exitCode, signal }) => {
       session.exitCode = exitCode;
+      // Only the id's current generation reports its exit: a killed PTY's
+      // arrives after the kill, and once a reaped Tool respawns under the id
+      // it would end the new Session (docs/specs/dor-tool.md -> Reaping).
+      if (ptys.get(id) !== p) return;
       send('exit', { id, exitCode, signal });
-      if (ptys.get(id) === p) {
-        cancelRepaint(id);
-        cancelInput(id);
-        ptys.delete(id);
-        ptyShells.delete(id);
-      }
+      cancelRepaint(id);
+      cancelInput(id);
+      ptys.delete(id);
+      ptyShells.delete(id);
     });
 
     if (config.cwdWarning) {

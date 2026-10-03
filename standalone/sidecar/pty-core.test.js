@@ -2239,3 +2239,20 @@ test('gracefulKill([]) kills nothing and still answers', async () => {
   await done;
   assert.deepEqual(pty.killed, []);
 });
+
+// A killed generation's exit lands after the kill; once a reaped Tool respawns
+// under the id it would end the new Session (docs/specs/dor-tool.md -> Reaping).
+test('only the id\'s current generation reports its exit', () => {
+  const events = [];
+  const pty = fakePtyModule();
+  const mgr = create((event, data) => events.push({ event, data }), pty.module);
+  mgr.spawn('a');
+  const killedGeneration = pty.listeners.get('a');
+  mgr.kill('a');
+  mgr.spawn('a');
+  killedGeneration.exit({ exitCode: 0 });
+  assert.deepEqual(events.filter((e) => e.event === 'exit'), []);
+  assert.equal(mgr.hasPty('a'), true);
+  pty.listeners.get('a').exit({ exitCode: 3 });
+  assert.deepEqual(events.filter((e) => e.event === 'exit').map((e) => e.data.exitCode), [3]);
+});
