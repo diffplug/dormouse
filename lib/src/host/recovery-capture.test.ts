@@ -82,8 +82,8 @@ class FakePtys implements RecoveryHost {
   }
 }
 
-const CLAUDE_HINT = 'claude --resume 01JABCDEF';
-const CODEX_HINT = 'codex resume 01HXYZ';
+const CLAUDE_HINT = 'claude --resume 11111111-1111-4111-8111-111111111111';
+const CODEX_HINT = 'codex resume 22222222-2222-7222-8222-222222222222';
 
 describe('captureAgentRecovery', () => {
   it.each(AGENT_EXIT_FIXTURES)('waits through every ID split in the $agent exit hint', async ({ output, command }) => {
@@ -203,7 +203,7 @@ describe('captureAgentRecovery', () => {
 
   it('reads only bytes received after its own mark', async () => {
     // A hint from a PREVIOUS run, sitting in the buffer before the capture starts.
-    const host = new FakePtys(['a']).seed('a', `\r\nold: claude --resume STALE0000\r\n`);
+    const host = new FakePtys(['a']).seed('a', `\r\nold: claude --resume 33333333-3333-4333-8333-333333333333\r\n`);
     await captureAgentRecovery(host);
     expect(host.found).toEqual({});
   });

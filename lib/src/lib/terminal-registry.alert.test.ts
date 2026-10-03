@@ -437,7 +437,7 @@ describe('terminal-registry alert behavior', () => {
     const received: string[] = [];
     fakePlatform.setInputHandler(id, (data) => received.push(data));
 
-    restoreTerminal(id, { resumeCommand: 'claude --resume 4f2c9b1e-6a03' });
+    restoreTerminal(id, { resumeCommand: 'claude --resume 4f2c9b1e-6a03-4d5e-8f60-123456789abc' });
 
     // Seeded synchronously — the platform write below bypasses xterm's keystroke
     // fallback, so without this a non-integrated shell would never count the
@@ -445,7 +445,7 @@ describe('terminal-registry alert behavior', () => {
     expect(getTerminalPaneState(id)).toMatchObject({
       activity: { kind: 'running' },
       currentCommand: {
-        rawCommandLine: 'claude --resume 4f2c9b1e-6a03',
+        rawCommandLine: 'claude --resume 4f2c9b1e-6a03-4d5e-8f60-123456789abc',
         source: 'user_input',
       },
     });
@@ -455,7 +455,7 @@ describe('terminal-registry alert behavior', () => {
     expect(received).toEqual([]);
 
     await vi.advanceTimersByTimeAsync(20_000);
-    expect(received).toEqual(['claude --resume 4f2c9b1e-6a03\r']);
+    expect(received).toEqual(['claude --resume 4f2c9b1e-6a03-4d5e-8f60-123456789abc\r']);
   });
 
   it('auto-runs a restored tool command once shell integration is ready', async () => {
@@ -476,14 +476,14 @@ describe('terminal-registry alert behavior', () => {
     const id = 'launch-after-prompt-' + launch;
     const received: string[] = [];
     fakePlatform.setInputHandler(id, (data) => {
-      expect(getTerminalPaneState(id).currentCommand?.rawCommandLine).toBe('codex resume abc');
+      expect(getTerminalPaneState(id).currentCommand?.rawCommandLine).toBe('codex resume 22222222-2222-7222-8222-222222222222');
       received.push(data);
     });
-    if (launch === 'restore') restoreTerminal(id, { resumeCommand: 'codex resume abc' });
-    else { setPendingShellOpts(id, { command: 'codex resume abc' }); getOrCreateTerminal(id); }
+    if (launch === 'restore') restoreTerminal(id, { resumeCommand: 'codex resume 22222222-2222-7222-8222-222222222222' });
+    else { setPendingShellOpts(id, { command: 'codex resume 22222222-2222-7222-8222-222222222222' }); getOrCreateTerminal(id); }
     fakePlatform.sendOutput(id, 'C:\\repo>');
     await vi.advanceTimersByTimeAsync(200);
-    expect(received).toEqual(['codex resume abc\r']);
+    expect(received).toEqual(['codex resume 22222222-2222-7222-8222-222222222222\r']);
     expect(getTerminalPaneState(id).currentCommand?.source).toBe('user_input');
     expect(countRunningSessions()).toBe(1);
   });
@@ -499,12 +499,12 @@ describe('terminal-registry alert behavior', () => {
   });
   it('announces the resume in the pane instead of replaying a transcript', () => {
     const id = 'noticed-resume-command';
-    const entry = restoreTerminal(id, { resumeCommand: 'codex resume 01JCX8ZK' });
+    const entry = restoreTerminal(id, { resumeCommand: 'codex resume 01a100fe-5be3-7d43-a77f-88d30d0f7f12' });
 
     // The pane has no scrollback to explain itself with, so the notice is the
     // only thing saying why an agent appeared — and that the interrupted turn
     // did not continue.
-    expect(entry.terminal.writes.join('')).toContain('codex resume 01JCX8ZK');
+    expect(entry.terminal.writes.join('')).toContain('codex resume 01a100fe-5be3-7d43-a77f-88d30d0f7f12');
   });
 
   // The host seeds it at the spawn, having started the id over: the reminder
