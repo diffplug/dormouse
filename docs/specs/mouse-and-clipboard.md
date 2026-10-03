@@ -22,7 +22,7 @@ Source of truth: `TerminalPaneHeader` in `lib/src/components/wall/TerminalPaneHe
 
 **Temporary override.** While active:
 
-- Mouse events go to the terminal, not the inside program, and any report xterm still emits is stripped before the PTY (`stripMouseReportsFromInput`, `docs/specs/transport.md` -> "Report filtering on the input side").
+- Mouse events go to the terminal, not the inside program; the reports xterm still emits: `docs/specs/transport.md` -> "Report filtering on the input side".
 - **Wheel events are suppressed too**, so xterm cannot turn scroll into mouse reports or alternate-screen arrow keys.
 - A banner over the pane offers **Make sticky** and **Cancel**.
 
