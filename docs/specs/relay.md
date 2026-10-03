@@ -609,20 +609,32 @@ machine.
 any close **except three, which are terminal** (rationale): the Burrow disposes
 its sessions, latches a state, and arms no timer.
 
-| Close | State | Meaning |
-|---|---|---|
-| `WS_CLOSE_BURROW_REPLACED` (4000; rationale) | `displaced` | another instance enrolled with the same `burrowId` took the relay slot |
-| `WS_CLOSE_BURROW_REVOKED` (4001) | `removed` | the Burrow's row is gone |
-| `WS_CLOSE_BURROW_NOT_ENTITLED` (4002, Hosted only) | `not-entitled` | its owner is no longer entitled |
+```mermaid
+stateDiagram-v2
+  state "not-entitled" as notEntitled
+  [*] --> connecting: start()
+  connecting --> connected: open
+  connecting --> disconnected: close unopened
+  connected --> disconnected: other close
+  disconnected --> connecting: backoff
+  disconnected --> removed: probe 401
+  disconnected --> notEntitled: probe 403
+  connected --> displaced: 4000 WS_CLOSE_BURROW_REPLACED
+  connected --> removed: 4001 WS_CLOSE_BURROW_REVOKED
+  connected --> notEntitled: 4002 WS_CLOSE_BURROW_NOT_ENTITLED, Hosted only
+  displaced --> connecting: start()
+  removed --> connecting: start()
+  notEntitled --> connecting: start()
+```
 
-Coming back is an explicit `reconnect()` or a fresh start, which after
-`displaced` takes the slot back.
+`start()` is an explicit `reconnect()` or a fresh start; after `displaced` it
+takes the slot back.
 
 - **A socket that never opened is probed before its next backoff**, a refused
-  upgrade being only an error event: one `GET /api/push/devices` as the Burrow.
-  A 401 `UNAUTHORIZED_ERROR` or `UNKNOWN_BURROW_TOKEN_ERROR` latches `removed`,
-  a 403 `NOT_ENTITLED_ERROR` `not-entitled`. **Only a 2xx, 401, or 403 spends
-  the failure streak's one probe** (rationale).
+  upgrade being only an error event: one `GET /api/push/devices` as the Burrow,
+  its 401 `UNAUTHORIZED_ERROR` or `UNKNOWN_BURROW_TOKEN_ERROR`, its 403
+  `NOT_ENTITLED_ERROR`. **Only a 2xx, 401, or 403 spends the failure streak's
+  one probe** (rationale).
 - **A latched `removed` or `not-entitled` Burrow (`relayRefuses`) asks its Relay
   nothing more**: no push, device list, or setup code.
 - **Ignore every event and probe answer from a socket the runtime no longer
