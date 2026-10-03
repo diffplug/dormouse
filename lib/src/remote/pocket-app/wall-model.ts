@@ -1,11 +1,13 @@
 /** Pure directory-snapshot → mobile-wall projection; see `docs/specs/pocket-app.md`. */
 
-import type { DirectoryEntry } from 'remote-lib-common';
+import type { DirectoryEntry, DirectoryWorkspace } from 'remote-lib-common';
 import type { MobileWallSession } from '../../components/MobileWall';
-import type { MobileTerminalSessionItem } from '../../components/MobileTerminalUi';
+import type { MobileTerminalSessionGroup, MobileTerminalSessionItem } from '../../components/MobileTerminalUi';
 import type { SessionStatus } from '../../lib/terminal-registry';
 
 const DEFAULT_TITLE = 'Terminal';
+/** The header over panes the Burrow named no Workspace for, beside ones it did. */
+const UNGROUPED_LABEL = 'Other';
 
 /** Title for a surface, falling back to a friendly default when the Burrow sends none. */
 function paneTitle(entry: DirectoryEntry): string {
@@ -14,6 +16,34 @@ function paneTitle(entry: DirectoryEntry): string {
 
 export function attachableDirectoryEntries(entries: DirectoryEntry[]): DirectoryEntry[] {
   return entries.filter((entry) => entry.alive);
+}
+
+/** The entry's Workspace when it is well formed; a Burrow too old to send one sends none. */
+function workspaceOf(entry: DirectoryEntry): DirectoryWorkspace | undefined {
+  const workspace = entry.workspace as Partial<DirectoryWorkspace> | undefined;
+  if (typeof workspace?.ref !== 'string' || typeof workspace.name !== 'string') return undefined;
+  return { ref: workspace.ref, name: workspace.name, active: workspace.active === true };
+}
+
+/**
+ * The attachable entries in picker order: each Workspace's panes together,
+ * Workspaces a Window shows first, then the Burrow's own order, and panes it
+ * named no Workspace for last. Without Workspaces this is Burrow order.
+ */
+export function pickerEntries(entries: DirectoryEntry[]): DirectoryEntry[] {
+  const groups = new Map<string | undefined, { rank: number; entries: DirectoryEntry[] }>();
+  for (const entry of attachableDirectoryEntries(entries)) {
+    const workspace = workspaceOf(entry);
+    const key = workspace?.ref;
+    let group = groups.get(key);
+    if (!group) {
+      group = { rank: workspace ? (workspace.active ? 0 : 1) : 2, entries: [] };
+      groups.set(key, group);
+    }
+    group.entries.push(entry);
+  }
+  // Stable, so equal ranks keep the order the Burrow sent them in.
+  return [...groups.values()].sort((a, b) => a.rank - b.rank).flatMap((group) => group.entries);
 }
 
 /** The `{id,title}` sessions `MobileWall` mounts, in Burrow order. */
@@ -35,8 +65,12 @@ export function directorySessionItems(
   entries: DirectoryEntry[],
   activeSurfaceId: string | null,
 ): MobileTerminalSessionItem[] {
-  return attachableDirectoryEntries(entries).map((entry) => ({
+  const attachable = attachableDirectoryEntries(entries);
+  // Grouped only once the Burrow names a Workspace; until then the list is flat.
+  const grouped = attachable.some((entry) => workspaceOf(entry) !== undefined);
+  return attachable.map((entry) => ({
     id: entry.surfaceId,
+    ...(grouped ? { group: groupFor(entry) } : {}),
     title: paneTitle(entry),
     secondary: secondaryLine(entry),
     active: entry.surfaceId === activeSurfaceId,
@@ -46,6 +80,11 @@ export function directorySessionItems(
     episode: null,
     todo: entry.hasTODO,
   }));
+}
+
+function groupFor(entry: DirectoryEntry): MobileTerminalSessionGroup {
+  const workspace = workspaceOf(entry);
+  return workspace ? { id: workspace.ref, label: workspace.name } : { id: '', label: UNGROUPED_LABEL };
 }
 
 function statusFor(entry: DirectoryEntry): SessionStatus | undefined {
