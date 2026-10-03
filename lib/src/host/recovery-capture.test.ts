@@ -110,6 +110,19 @@ function every(host: FakePtys, id: string, period: number, span: number, data: s
   return host;
 }
 
+const fixture = (agent: string) => AGENT_EXIT_FIXTURES.find((item) => item.agent === agent)!;
+
+/** Pi exits only when the second press lands within 500ms of the first; a later
+ *  one just clears its editor again. */
+function piIgnoresLatePress(host: FakePtys): FakePtys {
+  const interrupt = host.interrupt.bind(host);
+  host.interrupt = async (ids) => {
+    if (host.presses.length === 1 && host.sincePress >= 500) return;
+    await interrupt(ids);
+  };
+  return host;
+}
+
 const CLAUDE_HINT = 'claude --resume 11111111-1111-4111-8111-111111111111';
 const CODEX_HINT = 'codex resume 22222222-2222-7222-8222-222222222222';
 
@@ -182,26 +195,18 @@ describe('captureAgentRecovery', () => {
   });
 
   it("captures Pi's double-press exit", async () => {
-    const fixture = AGENT_EXIT_FIXTURES.find((item) => item.agent === 'Pi')!;
-    const host = new FakePtys(['pi'])
+    const host = piIgnoresLatePress(new FakePtys(['pi'])
       .onPress('pi', 1, 40, '\x1b[2K\r')
-      .onPress('pi', 2, 40, fixture.output);
-    const interrupt = host.interrupt.bind(host);
-    host.interrupt = async (ids) => {
-      // Pi's second press after 500ms only clears the editor again.
-      if (host.presses.length === 1 && host.sincePress >= 500) return;
-      await interrupt(ids);
-    };
+      .onPress('pi', 2, 40, fixture('Pi').output));
     expect(await captureAgentRecovery(host)).toBe(1);
     expect(host.presses).toEqual([['pi'], ['pi']]);
     expect(host.sincePress).toBeLessThan(500);
-    expect(host.found.pi).toBe(fixture.command);
+    expect(host.found.pi).toBe(fixture('Pi').command);
   });
 
   describe('an agent interrupted mid-turn', () => {
     // Measured 2026-10 (claude 2.1.288, copilot 1.0.88, pi 1.0.0): the first ^C
     // only cancels the turn; the agent's own exit gesture comes after it.
-    const fixture = (agent: string) => AGENT_EXIT_FIXTURES.find((item) => item.agent === agent)!;
 
     it('presses Claude a third time when it asks after cancelling the turn', async () => {
       // After the cancel Claude polls the cursor position (`ESC[?6n`) every ~200ms:
@@ -231,12 +236,7 @@ describe('captureAgentRecovery', () => {
       // presses less than 500ms apart.
       const host = every(new FakePtys(['pi']), 'pi', 80, 1300,
         '\x1b[?2026h\x1b[36;1H\x1b[2K── ⠴ Working ──\x1b[?2026l');
-      host.onPress('pi', 2, 40, fixture('Pi').output);
-      const interrupt = host.interrupt.bind(host);
-      host.interrupt = async (ids) => {
-        if (host.presses.length === 1 && host.sincePress >= 500) return;
-        await interrupt(ids);
-      };
+      piIgnoresLatePress(host.onPress('pi', 2, 40, fixture('Pi').output));
       expect(await captureAgentRecovery(host)).toBe(1);
       expect(host.found.pi).toBe(fixture('Pi').command);
     });

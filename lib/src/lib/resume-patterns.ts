@@ -10,18 +10,17 @@ interface ResumePattern {
    *  Global (scanning wants every match in a line); every use must therefore
    *  reset `lastIndex` or go through `matchAll`, which does. */
   regex: RegExp;
-  /** Same grammar anchored to the complete persisted invocation, with the
-   *  agent's id shape enforced. */
+  /** The complete persisted invocation, with the agent's id shape enforced. The
+   *  scan locates invocations with the opaque grammar and checks a rebuilt one
+   *  against this afterwards, so a hint still being printed holds the scan
+   *  rather than letting an older hint win. */
   exact: RegExp;
-  /** The agent's id shape. The scan locates invocations with the opaque
-   *  grammar and checks this afterwards, so a hint still being printed holds
-   *  the scan rather than letting an older hint win. */
-  id: RegExp;
 }
 
-// Supported agents emit opaque ASCII identifiers (UUID/ULID-shaped).
-// Keep this deliberately narrower than a shell word: the captured value is
-// later executed, so punctuation with shell meaning must never enter it.
+// Where an id may be: what the scan locates invocations with, and the whole
+// grammar for an `opaque` agent. Keep this deliberately narrower than a shell
+// word: the captured value is later executed, so punctuation with shell meaning
+// must never enter it. Registered agents print UUIDs, checked against `UUID`.
 const RESUME_ID = String.raw`[A-Za-z0-9][A-Za-z0-9_-]*`;
 const UUID = String.raw`[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}`;
 
@@ -29,8 +28,8 @@ const UUID = String.raw`[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]
  *  is not an offer to continue. Nothing stronger belongs here: agents render a
  *  hint inside prose punctuation as often as bare (`Resume with
  *  \`claude --resume <id>\`.`), and requiring whitespace or end-of-line after it
- *  silently dropped every one of those. Safety comes from RESUME_ID plus the
- *  rebuild below, not from what follows the match. This also matches an
+ *  silently dropped every one of those. Safety comes from the id grammar plus
+ *  the rebuild below, not from what follows the match. This also matches an
  *  unfinished tail; the scanner waits for a separator after its newest match
  *  before accepting it, since the next PTY read may extend the id. */
 const ENDS_INVOCATION = String.raw`(?![A-Za-z0-9_-])`;
@@ -41,21 +40,20 @@ function pattern(command: string, argument: string, idShape: string | null): Res
   const label = `${command} ${argument}`;
   // A long option's id may follow `=` or a space; the rebuild always uses a space.
   const separator = argument.startsWith('--') ? '[= ]' : ' ';
-  const withId = (grammar: string) => (idShape === null ? '' : `${separator}(${grammar})`);
+  const withId = (grammar: string | null) => (grammar === null ? '' : `${separator}(${grammar})`);
   const escaped = escapeRegex(label);
   return {
     label,
     // Do not read `agent` from the suffix of `cursor-agent` or an arbitrary
     // executable/path. Keeping the executable from the hint preserves aliases.
-    regex: new RegExp(String.raw`(?<![A-Za-z0-9_./\\-])${escaped}${withId(RESUME_ID)}${ENDS_INVOCATION}`, 'g'),
-    exact: new RegExp(`^${escaped}${withId(idShape ?? '')}$`),
-    id: new RegExp(`^(?:${idShape ?? ''})$`),
+    regex: new RegExp(String.raw`(?<![A-Za-z0-9_./\\-])${escaped}${withId(idShape === null ? null : RESUME_ID)}${ENDS_INVOCATION}`, 'g'),
+    exact: new RegExp(`^${escaped}${withId(idShape)}$`),
   };
 }
 
 const BUILTIN_PATTERNS: ResumePattern[] = [
   ...CODING_AGENTS.flatMap((agent) => agent.commands.map((command) =>
-    pattern(command, agent.resume, agent.id === 'uuid' ? UUID : RESUME_ID))),
+    pattern(command, agent.resume, agent.id === 'opaque' ? RESUME_ID : UUID))),
   // Claude's legacy exit hint, the one form without an id: registered agents
   // must name the exact conversation.
   pattern('claude', '--continue', null),
@@ -71,14 +69,10 @@ const SCAN_LINES = 50;
  *  shared patterns' `lastIndex` untouched — it scans against a clone). */
 function resumeCommandInVisible(visible: string): string | null {
   const matches: { index: number; end: number; valid: boolean; command: string }[] = [];
-  for (const { label, regex, id } of BUILTIN_PATTERNS) {
+  for (const { label, regex, exact } of BUILTIN_PATTERNS) {
     for (const match of visible.matchAll(regex)) {
-      matches.push({
-        index: match.index,
-        end: match.index + match[0].length,
-        valid: match[1] === undefined || id.test(match[1]),
-        command: rebuild(label, match),
-      });
+      const command = rebuild(label, match);
+      matches.push({ index: match.index, end: match.index + match[0].length, valid: exact.test(command), command });
     }
   }
   matches.sort((a, b) => b.index - a.index);

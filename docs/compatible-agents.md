@@ -53,12 +53,11 @@ Add a registry entry, exit fixture, and table row. Both hosts share recovery.
      name: 'GitHub Copilot',
      commands: ['copilot'],
      resume: '--resume',
-     id: 'uuid',
      watchByDefault: true,
    }
    ```
 
-2. Declare the installed executable names, resume option or subcommand, and `id: 'uuid'` if every hint carries a UUID. [Detection](#detection) owns parsing and ID rules. If the agent cannot identify the exact conversation on exit, discuss its capture mechanism in an issue first; never substitute a “latest conversation” command.
+2. Declare the installed executable names and resume option or subcommand, and `id: 'opaque'` only if its ids are not UUIDs. [Detection](#detection) owns parsing and ID rules. If the agent cannot identify the exact conversation on exit, discuss its capture mechanism in an issue first; never substitute a “latest conversation” command.
 3. Add a sanitized exit excerpt to [the fixtures](../lib/src/lib/__fixtures__/coding-agents.ts), with the expected rebuilt command, agent version, and operating system. Replace personal paths, account information, and session IDs; preserve relevant wording and terminal escapes. Record real exit output rather than reconstructing a hint from documentation.
 4. Add the agent and its command forms to the supported-agents table. Set `watchByDefault` only after checking that the agent becomes quiet when it needs attention. Registry tests pin fixture coverage; website tests pin the table.
 
@@ -103,7 +102,7 @@ Source of truth: `captureAgentRecovery` / `RecoveryHost` in `lib/src/host/recove
 
 **Must derive supported executable names and resume options from `CODING_AGENTS`.**
 
-- **Must rebuild only a known invocation plus an opaque id.** The command is *rebuilt* as label, space, captured id, never sliced from the buffer, keeping the hint's executable alias; a long option's id may follow a space or `=`, and only Claude's legacy `claude --continue` omits it. A `uuid` agent's id must be a UUID; other ids begin with an ASCII alphanumeric and contain only ASCII alphanumerics, hyphens, and underscores. The invocation must end on a word break but nothing stronger (rationale).
+- **Must rebuild only a known invocation plus an opaque id.** The command is *rebuilt* as label, space, captured id, never sliced from the buffer, keeping the hint's executable alias; a long option's id may follow a space or `=`, and only Claude's legacy `claude --continue` omits it. An agent's id must be a UUID unless it registers `id: 'opaque'`, whose ids begin with an ASCII alphanumeric and contain only ASCII alphanumerics, hyphens, and underscores. The invocation must end on a word break but nothing stronger (rationale).
 - **Must observe a separator after the newest invocation before capturing it.** Buffer end is insufficient, even at the capture deadline; never fall back to an older hint while the newest is unterminated. Pinned by `waits through every ID split` in `lib/src/host/recovery-capture.test.ts` (rationale).
 - **Must strip the scan window as a whole, in one pass, with an unterminated control swallowing the rest of it** — the string controls (OSC, DCS, SOS, PM, APC) **in either introducer form, `ESC` or bare C1**, and equally a CSI the window was cut off *inside* (rationale). **Must match every escape by its full ECMA-48 shape**, never by the Fe range (rationale). **Must share one implementation**: `stripTerminalControls` removes string controls by running `TerminalControlStreamFilter`, so the batch and streaming readers cannot disagree.
 - **Must strip in boundary mode**: complete non-string ESC/CSI sequences and standalone C1 controls become newlines, except SGR and charset designators. ESC and C1 counterparts must produce the same boundary. String controls and their payloads vanish; LF, CR, and TAB remain text boundaries; other C0 controls that do not move or erase text vanish. **Must discard incomplete trailing presentation controls without creating a boundary** (rationale).

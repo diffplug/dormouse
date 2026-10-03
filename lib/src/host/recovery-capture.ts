@@ -16,7 +16,7 @@
  */
 
 import { detectResumeCommand } from '../lib/resume-patterns';
-import { stripTerminalControls } from '../lib/terminal-controls';
+import { stripTerminalControls, stripTerminalControlsBothWays } from '../lib/terminal-controls';
 
 // An explicit ask (Claude's `Press Ctrl-C again`, Cursor's `Press Ctrl+C
 // again`, Copilot's `ctrl+c again to exit`) permits an immediate further press.
@@ -56,10 +56,13 @@ export const QUIET_BEFORE_RETRY_MS = 200;
 // in place (Pi's `Working` spinner, every ~82ms) or carries no text at all
 // (Claude polls `ESC[?6n` every ~200ms after a cancel) would otherwise hold the
 // gate shut for the whole capture.
-const REPOSITIONS = /\x1b\[[0-9;?]*[HfABCDEFGJKd]|\r(?!\n)/;
 function printsInFlight(output: string): boolean {
   if (output.includes('\n')) return true;
-  return stripTerminalControls(output).trim() !== '' && !REPOSITIONS.test(output);
+  if (/\r(?!\n)/.test(output)) return false;
+  // `boundaries` differs from `plain` exactly when a control moved the cursor
+  // (the same reading `docs/specs/terminal-state.md` → "Keystroke fallback" uses).
+  const { boundaries, plain } = stripTerminalControlsBothWays(output);
+  return /\S/.test(plain) && boundaries === plain;
 }
 
 // `Press Ctrl-C again` is a live TUI footer, so it is always within a few hundred
@@ -103,7 +106,7 @@ export interface RecoveryHost {
   /** Resize a PTY, as a window resize would. */
   resize(id: string, cols: number, rows: number): void;
   /** Send exactly ONE `^C` to each id and resolve when the host has acked it.
-   *  The second press is this module's decision, never the host's. */
+   *  Every further press is this module's decision, never the host's. */
   interrupt(ids: string[]): Promise<void>;
   /** Chars ever received for a pane, never decremented by a buffer trim. */
   receivedChars(id: string): number;
@@ -175,7 +178,6 @@ export async function captureAgentRecovery(
   // usable offset — and that pane is exactly the long-running agent this exists
   // for.
   const startMark = new Map(liveIds.map((id) => [id, host.receivedChars(id)]));
-  const lastMark = new Map(startMark);
   // How far each pane has already been scanned. A tick re-reads only
   // `SCAN_OVERLAP_CHARS` behind it, so scanning costs what arrived since the last
   // tick instead of re-joining and re-stripping everything since the interrupt.
@@ -190,9 +192,10 @@ export async function captureAgentRecovery(
   // Where each pane's latest press landed in its output: an ask only counts
   // after it, or a slow exit would see the previous press's ask and press again.
   const pressMark = new Map(startMark);
-  // One buffer read per pending pane per tick, shared by both things a tick needs
-  // to know about that pane: joining the chunks is the expensive part, so asking
-  // twice would double the cost of the poll for no new information.
+  // One buffer read per pending pane per tick, shared by everything a tick needs
+  // to know about that pane — the hint, the ask, and whether it is still
+  // printing: joining the chunks is the expensive part, so reading again would
+  // multiply the cost of the poll for no new information.
   const scanPending = () => {
     asked.clear();
     for (const id of pending()) {
@@ -206,7 +209,13 @@ export async function captureAgentRecovery(
       const start = startMark.get(id) ?? Infinity;
       const from = Math.max(start, (scannedTo.get(id) ?? start) - SCAN_OVERLAP_CHARS);
       const scanned = host.outputSince(id, from);
-      scannedTo.set(id, host.receivedChars(id));
+      const received = host.receivedChars(id);
+      // `scanned` ends at `received`; what arrived after `mark` is its tail,
+      // clamped to what eviction left.
+      const since = (mark: number) => (received > mark ? scanned.slice(-Math.min(received - mark, scanned.length)) : '');
+      const fresh = since(scannedTo.get(id) ?? start);
+      if (fresh && printsInFlight(fresh)) lastGrewAt.set(id, now());
+      scannedTo.set(id, received);
       if (!scanned) continue;
       const detected = detectResumeCommand(scanned);
       if (detected) {
@@ -217,7 +226,8 @@ export async function captureAgentRecovery(
       }
       // Strip presentation controls first — claude renders that prompt inside its
       // TUI, so the raw buffer can carry escapes through the phrase.
-      const sincePress = host.outputSince(id, pressMark.get(id) ?? start).slice(-ASK_TAIL_CHARS);
+      // The overlap keeps at least `ASK_TAIL_CHARS` of tail in `scanned`.
+      const sincePress = since(pressMark.get(id) ?? start).slice(-ASK_TAIL_CHARS);
       if (ASKS_FOR_ANOTHER_PRESS.test(stripTerminalControls(sincePress))) asked.add(id);
     }
   };
@@ -225,7 +235,7 @@ export async function captureAgentRecovery(
   // One press to everything, then retry through the ask or quiet fallback gate.
   // `interrupt` is already bounded and always settles within its own timeout.
   await host.interrupt(liveIds);
-  // The clock the second-press rules run on, taken *after* the ack rather than at
+  // The clock the retry rules run on, taken *after* the ack rather than at
   // entry. `BLIND_SECOND_PRESS_MS` is a statement about the agent ("long enough
   // that a one-press agent would already have spoken"), and the agent's clock
   // starts when the `^C` lands. Measuring from `started` folds the interrupt's own
@@ -254,13 +264,6 @@ export async function captureAgentRecovery(
 
     // Retry an uncaptured pane when it asks, or after both fallback clocks pass.
     const elapsed = now() - interruptedAt;
-    for (const id of pending()) {
-      const mark = host.receivedChars(id);
-      const last = lastMark.get(id) ?? mark;
-      if (mark === last) continue;
-      if (printsInFlight(host.outputSince(id, last))) lastGrewAt.set(id, now());
-      lastMark.set(id, mark);
-    }
     const quietFor = (id: string) => now() - (lastGrewAt.get(id) ?? interruptedAt);
     const retry = pending().filter((id) => {
       const count = presses.get(id) ?? 1;
@@ -272,7 +275,6 @@ export async function captureAgentRecovery(
       for (const id of retry) {
         presses.set(id, (presses.get(id) ?? 1) + 1);
         pressMark.set(id, host.receivedChars(id));
-        asked.delete(id);
       }
       log.info(`[recovery] another press for ${retry.length} pane(s) at +${elapsed}ms after ^C (${why})`);
       await host.interrupt(retry);

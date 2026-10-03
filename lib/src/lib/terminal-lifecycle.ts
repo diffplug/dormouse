@@ -388,9 +388,9 @@ function typeCommandWhenPromptReady(id: string, command: string, requireIntegrat
  *  pane, a Workspace not yet shown — still gets FitAddon's 2x1 floor from
  *  `proposeDimensions`, and nothing refits it until it is shown, so an agent
  *  resumed there would run two columns wide. The first real fit resizes. */
-function spawnSize(entry: TerminalEntry): { cols: number; rows: number } {
+function spawnSize(entry: TerminalEntry): TerminalGrid {
   const dims = entry.fit.proposeDimensions();
-  return dims && dims.cols > 2 && dims.rows > 1 ? { cols: dims.cols, rows: dims.rows } : { cols: 80, rows: 30 };
+  return dims && dims.cols > 2 && dims.rows > 1 ? dims : { cols: 80, rows: 30 };
 }
 
 export function getOrCreateTerminal(id: string): TerminalEntry {

@@ -451,10 +451,11 @@ describe('terminal-registry alert behavior', () => {
 
   it('auto-runs a restored resume command once the fresh shell reaches a prompt', async () => {
     const id = 'tracked-resume-command';
+    const resumeCommand = 'claude --resume 4f2c9b1e-6a03-4d5e-8f60-123456789abc';
     const received: string[] = [];
     fakePlatform.setInputHandler(id, (data) => received.push(data));
 
-    restoreTerminal(id, { resumeCommand: 'claude --resume 4f2c9b1e-6a03-4d5e-8f60-123456789abc' });
+    restoreTerminal(id, { resumeCommand });
 
     // Seeded synchronously — the platform write below bypasses xterm's keystroke
     // fallback, so without this a non-integrated shell would never count the
@@ -462,7 +463,7 @@ describe('terminal-registry alert behavior', () => {
     expect(getTerminalPaneState(id)).toMatchObject({
       activity: { kind: 'running' },
       currentCommand: {
-        rawCommandLine: 'claude --resume 4f2c9b1e-6a03-4d5e-8f60-123456789abc',
+        rawCommandLine: resumeCommand,
         source: 'user_input',
       },
     });
@@ -472,7 +473,7 @@ describe('terminal-registry alert behavior', () => {
     expect(received).toEqual([]);
 
     await vi.advanceTimersByTimeAsync(20_000);
-    expect(received).toEqual(['claude --resume 4f2c9b1e-6a03-4d5e-8f60-123456789abc\r']);
+    expect(received).toEqual([`${resumeCommand}\r`]);
   });
 
   it('auto-runs a restored tool command once shell integration is ready', async () => {
@@ -491,16 +492,17 @@ describe('terminal-registry alert behavior', () => {
 
   it.each(['restore', 'split'])('seeds the actual %s launch after a non-integrated shell prompt', async (launch) => {
     const id = 'launch-after-prompt-' + launch;
+    const command = 'codex resume 22222222-2222-7222-8222-222222222222';
     const received: string[] = [];
     fakePlatform.setInputHandler(id, (data) => {
-      expect(getTerminalPaneState(id).currentCommand?.rawCommandLine).toBe('codex resume 22222222-2222-7222-8222-222222222222');
+      expect(getTerminalPaneState(id).currentCommand?.rawCommandLine).toBe(command);
       received.push(data);
     });
-    if (launch === 'restore') restoreTerminal(id, { resumeCommand: 'codex resume 22222222-2222-7222-8222-222222222222' });
-    else { setPendingShellOpts(id, { command: 'codex resume 22222222-2222-7222-8222-222222222222' }); getOrCreateTerminal(id); }
+    if (launch === 'restore') restoreTerminal(id, { resumeCommand: command });
+    else { setPendingShellOpts(id, { command }); getOrCreateTerminal(id); }
     fakePlatform.sendOutput(id, 'C:\\repo>');
     await vi.advanceTimersByTimeAsync(200);
-    expect(received).toEqual(['codex resume 22222222-2222-7222-8222-222222222222\r']);
+    expect(received).toEqual([`${command}\r`]);
     expect(getTerminalPaneState(id).currentCommand?.source).toBe('user_input');
     expect(countRunningSessions()).toBe(1);
   });
