@@ -112,6 +112,20 @@ describe('useToolReaper', () => {
     expect(reaper.rehydrateTool).toHaveBeenCalledWith(lath, ID);
   });
 
+  it('starts a Tool shown while it was stopping as soon as the stop ends', async () => {
+    let finish!: () => void;
+    reaper.stopTool.mockImplementationOnce(() => new Promise<boolean>((resolve) => {
+      finish = () => { markToolReaped(ID, { payload: null, cwd: null, alert: null }); resolve(true); };
+    }));
+    render([door]);
+    act(() => { vi.advanceTimersByTime(IDLE_MS); });
+    render([]);
+    // Shown mid-stop: not reaped yet, so nothing to start until the stop ends.
+    reaper.rehydrateTool.mockClear();
+    await act(async () => { finish(); });
+    expect(reaper.rehydrateTool).toHaveBeenCalledWith(lath, ID);
+  });
+
   it('never rehydrates into a closing or transferring Workspace', () => {
     markToolReaped(ID, { payload: null, cwd: null, alert: null });
     paused = true;

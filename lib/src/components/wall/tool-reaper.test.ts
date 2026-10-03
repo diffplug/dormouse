@@ -216,6 +216,13 @@ describe('rehydrateTool', () => {
     expect(rehydrateTool(lath, ID)).toBeNull();
   });
 
+  it('keeps a Tool reaped when it has no terminal to start in', async () => {
+    const lath = await reaped();
+    registry.delete(ID);
+    expect(rehydrateTool(lath, ID)).toBeNull();
+    expect(isToolReaped(ID)).toBe(true);
+  });
+
   it('starts from bare args when no payload was captured', async () => {
     const lath = await reaped({}, null);
     rehydrateTool(lath, ID);

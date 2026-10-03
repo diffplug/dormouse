@@ -1,6 +1,6 @@
 import { clearToolAnnounce } from './tool-announce-store';
 import { clearToolDirty } from './tool-dirty-store';
-import { clearToolReap } from './tool-reap-store';
+import { clearToolReap, isToolReaped } from './tool-reap-store';
 import { clearPreviewTransition } from './preview-transition-store';
 import { serializeTransferTerminal, type TerminalGrid } from './terminal-transfer';
 import { Terminal, type IBufferRange } from '@xterm/xterm';
@@ -198,7 +198,8 @@ function wirePtyEvents(id: string, terminal: Terminal): () => void {
     }
   };
   const handleExit = (detail: { id: string; exitCode: number }) => {
-    if (detail.id !== id) return;
+    // A reaped Tool's kill is not news (`reapTerminal`).
+    if (detail.id !== id || isToolReaped(id)) return;
     terminal.write(`\r\n[Process exited with code ${detail.exitCode}]\r\n`);
     // The PTY process is dead but the pane lingers in the registry; mark it so
     // the directory reports this surface as `alive: false` to the phone.
@@ -546,8 +547,9 @@ function writeReapedNotice(entry: TerminalEntry): void {
 /**
  * Kill a reaped Tool's PTY, keeping its terminal: the Session reads as exited,
  * with its scrollback, title, and cwd, until `rehydrateTerminal`
- * (`docs/specs/dor-tool.md` -> Reaping). No host reports a killed PTY's exit,
- * so the finish is applied here.
+ * (`docs/specs/dor-tool.md` -> Reaping). The finish is applied here, since
+ * the standalone host routes no exit for a kill, and the modes a killed TUI
+ * left (alternate screen, mouse reports) are reset before the next shell.
  */
 export function reapTerminal(id: string): void {
   const entry = registry.get(id);
@@ -555,6 +557,7 @@ export function reapTerminal(id: string): void {
   getPlatform().killPty(id);
   entry.exited = true;
   if (getTerminalPaneState(id).currentCommand) applyTerminalSemanticEvents(id, [{ type: 'commandFinish' }]);
+  writeReplay(entry, REPLAY_MODE_RESET);
   writeReapedNotice(entry);
 }
 

@@ -72,7 +72,8 @@ export function useToolReaper({
         // Never on the minimize or switch itself: the clock starts there.
         if (now - Math.max(since, lastOutput.get(id) ?? 0) < idleMs || paused()) continue;
         // `stopTool` declines whatever is not safe to stop.
-        if (!isToolReaped(id)) void stopTool(lath, id);
+        // Once stopped, a Tool shown meanwhile starts again at once.
+        if (!isToolReaped(id)) void stopTool(lath, id).then(() => evaluate.current());
       }
     };
 

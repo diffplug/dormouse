@@ -114,7 +114,10 @@ export function announceViewer(
   { dehydrate }: { dehydrate?: () => string | null } = {},
 ): string {
   const stop = () => {
-    const sequence = dehydrate?.();
+    // Fidelity, never correctness: a state that cannot be written is dropped,
+    // and the stop goes on.
+    let sequence: string | null = null;
+    try { sequence = dehydrate?.() ?? null; } catch { /* restart from args */ }
     if (sequence) process.stdout.write(sequence);
     void viewer.close().then(() => { process.exitCode = 0; });
   };

@@ -122,7 +122,7 @@ export async function stopTool(lath: LathWallEngine, id: string): Promise<boolea
  */
 export function rehydrateTool(lath: LathWallEngine, id: string): { command: string; cwd: string } | null {
   const params = lath.getMeta(id)?.params;
-  if (!isToolReaped(id) || !isToolParams(params)) return null;
+  if (!isToolReaped(id) || !isToolParams(params) || !registry.has(id)) return null;
   const shell = getDefaultShellOpts();
   const command = isToolCommandArgv(params.toolArgv)
     ? buildShellCommandForKind(shellCommandKind(shell?.shell, PLATFORM_STRING), params.toolArgv)

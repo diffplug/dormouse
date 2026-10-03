@@ -1409,11 +1409,13 @@ module.exports.create = function create(send, ptyModule, { replay = false, slice
 
     p.onExit(({ exitCode, signal }) => {
       session.exitCode = exitCode;
-      // Only the id's current generation reports its exit: a killed PTY's
-      // arrives after the kill, and once a reaped Tool respawns under the id
-      // it would end the new Session (docs/specs/dor-tool.md -> Reaping).
-      if (ptys.get(id) !== p) return;
+      // A generation replaced under the id never reports: once a reaped Tool
+      // respawns, the killed shell's late exit would end the new Session
+      // (docs/specs/dor-tool.md -> Reaping). A killed one still does.
+      const current = ptys.get(id);
+      if (current && current !== p) return;
       send('exit', { id, exitCode, signal });
+      if (current !== p) return;
       cancelRepaint(id);
       cancelInput(id);
       ptys.delete(id);

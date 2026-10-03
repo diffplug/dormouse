@@ -1550,7 +1550,9 @@ export function useDorControl({
         });
         if (decision.kind === 'existing') {
           if (decision.pin) previewSlot.pin(decision.id);
-          respondStanding('existing', decision.id, revealSurface(decision.id, { focusNeutral: decision.quiet }));
+          // A reaped match starts again (docs/specs/dor-tool.md -> Reaping).
+          const rehydrated = rehydrateTool(lath, decision.id) !== null;
+          respondStanding(rehydrated ? 'adopted' : 'existing', decision.id, revealSurface(decision.id, { focusNeutral: decision.quiet }));
           return;
         }
         if (decision.kind === 'retarget') {
@@ -1616,8 +1618,12 @@ export function useDorControl({
             const rehydrated = rehydrateTool(lath, match.id);
             // Held like any launch until the command reports, so a queued
             // request for this key finds it running.
-            if (rehydrated) await waitForNewToolCommand(match.id, rehydrated.command, rehydrated.cwd, detail.signal);
-            else if (idle) {
+            if (rehydrated) {
+              if (await waitForNewToolCommand(match.id, rehydrated.command, rehydrated.cwd, detail.signal) !== 'ready') {
+                detail.respond({ ok: false, error: `surface '${surfaceRefForId(match.id)}' command did not restart` });
+                return;
+              }
+            } else if (idle) {
               const restarted = await restartSurfaceInPlace(match.id, matchedCommand, matchedCwd, detail.signal, { acceptCompletedRun: true });
               if (!restarted.ok) {
                 detail.respond({
