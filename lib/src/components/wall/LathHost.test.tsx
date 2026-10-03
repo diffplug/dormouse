@@ -14,6 +14,7 @@ import { leafTree, type LathNode, type LathTree, type Rect } from '../../lib/lat
 import { leaf, split, tree as treeOf, movePreview as movePreviewAt } from '../../lib/lath/test-util';
 import { leafMeta } from '../../lib/lath/test-fixtures';
 import { PANE_HEADER_HEIGHT_PX } from '../design';
+import { SLIDE_ARM_MS } from './lath-drag-controller';
 import type { PaneProps } from './pane-props';
 import { LayoutFramesContext } from './wall-context';
 
@@ -859,9 +860,12 @@ describe('LathHost — pane / Door drag', () => {
   let pointer = { clientX: 0, clientY: 0 };
   const moveTo = (x: number, y: number) => { pointer = { clientX: x, clientY: y }; window.dispatchEvent(new MouseEvent('pointermove', pointer)); };
   const up = () => window.dispatchEvent(new MouseEvent('pointerup', pointer));
+  // Hold the pointer still long enough to anchor a slide.
+  const pause = () => act(() => new Promise<void>((resolve) => setTimeout(resolve, SLIDE_ARM_MS + 20)));
+  const badge = () => container.querySelector('[data-lath-drop-choice]')?.textContent ?? null;
 
-  // col[ row[a, b], c ]: dragging c onto a's top edge yields two distinct candidates —
-  // above 'a' (leaf level) and above the whole a|b row (its ancestor).
+  // col[ row[a, b], c ]: dragging c onto a's top edge drops above 'a'; sliding along
+  // that edge into b widens it to above the whole a|b row (its ancestor).
   function colRowTree(): LathTree {
     return { root: split('col', [split('row', [leaf('a'), 0.5], [leaf('b'), 0.5]), 0.5], [leaf('c'), 0.5]) };
   }
@@ -962,7 +966,7 @@ describe('LathHost — pane / Door drag', () => {
     expect(onExternalDrop).toHaveBeenCalledWith(null);
   });
 
-  it('cycles the drop depth outward with the wheel', async () => {
+  it('widens from one pane to its whole row by pausing on the edge and sliding along it', async () => {
     const t = colRowTree();
     const store = seeded(t, [['a', leafMeta({ title: 'A' })], ['b', leafMeta({ title: 'B' })], ['c', leafMeta({ title: 'C' })]]);
     const { onProposeMove } = mountDrag(store);
@@ -972,27 +976,30 @@ describe('LathHost — pane / Door drag', () => {
     act(() => moveTo(100, 5)); // a's top band
     await flushFrame();
     expect(overlayRect()).toEqual(movePreview(t, 'c', { kind: 'edge', path: [0, 0], edge: 'top' }));
+    expect(badge()).toBeNull();
 
-    act(() => window.dispatchEvent(new WheelEvent('wheel', { deltaY: 10, cancelable: true })));
+    await pause();
+    expect(badge()).toContain('one pane');
+    expect(badge()).toContain('slide along the edge to widen');
+    act(() => moveTo(600, 5)); // along the same line into b
+    await flushFrame();
     expect(overlayRect()).toEqual(movePreview(t, 'c', { kind: 'edge', path: [0], edge: 'top' }));
 
     act(() => up());
     expect(onProposeMove).toHaveBeenCalledWith('c', { kind: 'edge', path: [0], edge: 'top' });
   });
 
-  it('shows and cycles contiguous group choices, then commits the selected group', async () => {
+  it('slides a contiguous group, outlines it, and commits it', async () => {
     const store = seeded(rowOf('a', 'b', 'c', 'd'), ['a', 'b', 'c', 'd'].map(id => [id, leafMeta()]));
     const { onProposeMove } = mountDrag(store);
     act(() => down(header('d'), 700, 15));
-    act(() => moveTo(300, 5));
+    act(() => moveTo(300, 60)); // b's top band, below the header row
     await flushFrame();
-    const choice = () => container.querySelector('[data-lath-drop-choice]')!.textContent;
-    expect(choice()).toContain('one pane');
-    expect(choice()).toContain('1/4');
-    expect(choice()).toContain('scroll to choose');
-    act(() => window.dispatchEvent(new WheelEvent('wheel', { deltaY: 10, cancelable: true })));
-    expect(choice()).toContain('2 panes');
-    expect(choice()).toContain('2/4');
+    await pause();
+    expect(badge()).toContain('one pane');
+    act(() => moveTo(100, 60)); // slide left into a
+    await flushFrame();
+    expect(badge()).toContain('2 panes');
     const target: DropTarget = { kind: 'edge', path: [], edge: 'top', range: { start: 0, end: 2 } };
     expect(overlayRect()).toEqual(movePreview(store.getSnapshot().tree, 'd', target));
     const scope = container.querySelector<HTMLElement>('[data-lath-drop-scope]')!;
@@ -1000,19 +1007,19 @@ describe('LathHost — pane / Door drag', () => {
     expect(parseFloat(scope.style.width)).toBeGreaterThan(390);
     act(() => up());
     expect(onProposeMove).toHaveBeenCalledWith('d', target);
-    expect(container.querySelector('[data-lath-drop-choice]')).toBeNull();
+    expect(badge()).toBeNull();
   });
 
-  it('uses the latest pointer position before cycling group choices', () => {
+  it('drops beside one pane after a quick sweep along the headers', async () => {
     const store = seeded(rowOf('a', 'b', 'c', 'd'), ['a', 'b', 'c', 'd'].map(id => [id, leafMeta()]));
     const { onProposeMove } = mountDrag(store);
     act(() => down(header('d'), 700, 15));
-    act(() => {
-      moveTo(300, 5);
-      window.dispatchEvent(new WheelEvent('wheel', { deltaY: 10, cancelable: true }));
-      up();
-    });
-    expect(onProposeMove).toHaveBeenCalledWith('d', { kind: 'edge', path: [], edge: 'top', range: { start: 0, end: 2 } });
+    for (const x of [600, 500, 300]) {
+      act(() => moveTo(x, 15));
+      await flushFrame();
+    }
+    act(() => up());
+    expect(onProposeMove).toHaveBeenCalledWith('d', { kind: 'edge', path: [1], edge: 'top' });
   });
 
   it('proposes a minimize when dropped below the wall (baseboard zone)', async () => {

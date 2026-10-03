@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { layout } from './layout';
-import { createHitTester, hitTest } from './hit-test';
+import { hitTest } from './hit-test';
 import { isLathPersistedLayout, lathLayoutFromStore } from './persistence';
 import { targetRect } from './drop-target';
 import { type LathNode, findLeafPath, nodeAtPath, leafTree, leaves, validate } from './model';
@@ -67,35 +67,36 @@ describe('contiguous group drops', () => {
 });
 
 describe('group drop discovery', () => {
-  it('offers every contiguous scope containing the hovered pane, smallest first', () => {
-    const candidates = hitTest(row, box, { x: 375, y: 5 }, null, opts);
-    expect(candidates.map(c => c.target)).toEqual([
-      { kind: 'edge', path: [1], edge: 'top' },
-      { kind: 'edge', path: [], edge: 'top', range: { start: 0, end: 2 } },
-      { kind: 'edge', path: [], edge: 'top', range: { start: 1, end: 3 } },
-      { kind: 'edge', path: [], edge: 'top', range: { start: 0, end: 3 } },
-      { kind: 'edge', path: [], edge: 'top', range: { start: 1, end: 4 } },
-      { kind: 'edge', path: [], edge: 'top' },
-    ]);
-    expect(candidates[2].scopeRect).toEqual(R(250, 0, 500, 600));
-    expect(candidates[2].scopeLeafCount).toBe(2);
-    for (const candidate of candidates) {
-      const committed = insert(row, 'new', candidate.target);
-      expect(candidate.previewRect).toEqual(layout(committed.tree, box, opts).get('new'));
+  const top = (x: number) => ({ x, y: 5 });
+
+  it('slides along a shared edge to the smallest covering group', () => {
+    const slide = (from: number, to: number) => hitTest(row, box, top(to), null, opts, top(from)).candidate!;
+    expect(slide(375, 625).target).toEqual({ kind: 'edge', path: [], edge: 'top', range: { start: 1, end: 3 } });
+    expect(slide(375, 125).target).toEqual({ kind: 'edge', path: [], edge: 'top', range: { start: 0, end: 2 } });
+    expect(slide(375, 875).target).toEqual({ kind: 'edge', path: [], edge: 'top', range: { start: 1, end: 4 } });
+    expect(slide(125, 875).target).toEqual({ kind: 'edge', path: [], edge: 'top' });
+    expect(slide(330, 375).target).toEqual({ kind: 'edge', path: [1], edge: 'top' });
+    const pair = slide(375, 625);
+    expect(pair.scopeRect).toEqual(R(250, 0, 500, 600));
+    expect(pair.scopeLeafCount).toBe(2);
+    expect(pair.canWiden).toBe(true);
+    expect(slide(125, 875).canWiden).toBe(false);
+    for (const [from, to] of [[375, 625], [375, 125], [375, 875], [125, 875]]) {
+      const candidate = slide(from, to);
+      expect(candidate.previewRect).toEqual(layout(insert(row, 'new', candidate.target).tree, box, opts).get('new'));
     }
   });
 
-  it('deduplicates groups that become identical when the dragged child is removed', () => {
-    const candidates = hitTest(row, box, { x: 375, y: 5 }, 'd', opts);
-    expect(candidates).toHaveLength(4);
-    for (const candidate of candidates) {
-      expect(candidate.previewRect).toEqual(layout(move(row, 'd', candidate.target).tree, box, opts).get('d'));
-    }
+  it('counts the group without the dragged pane and previews the committed move', () => {
+    const candidate = hitTest(row, box, top(875), 'd', opts, top(375)).candidate!;
+    expect(candidate.target).toEqual({ kind: 'edge', path: [], edge: 'top', range: { start: 1, end: 4 } });
+    expect(candidate.scopeLeafCount).toBe(2);
+    expect(candidate.previewRect).toEqual(layout(move(row, 'd', candidate.target).tree, box, opts).get('d'));
   });
 
   it('does not reserve a real pane id for external preview bookkeeping', () => {
     const t = tree(leaf('__lath_external_drop__'));
-    expect(hitTest(t, box, { x: 10, y: 300 }, null, opts)).toHaveLength(1);
+    expect(hitTest(t, box, { x: 10, y: 300 }, null, opts).candidate).not.toBeNull();
   });
 });
 
@@ -109,6 +110,12 @@ describe('three-pane layout choices', () => {
           const pair = splitLeaf(leafTree('a'), 'a', direction, 'b').tree;
           const original = splitLeaf(pair, splitFirst, direction, 'c').tree;
           const found = new Set<string>();
+          const edgePoints = [...layout(original, box, opts).values()].flatMap((r) => [
+            { x: r.x + 1, y: r.y + r.height / 2 },
+            { x: r.x + r.width - 1, y: r.y + r.height / 2 },
+            { x: r.x + r.width / 2, y: r.y + 1 },
+            { x: r.x + r.width / 2, y: r.y + r.height - 1 },
+          ]);
           for (const rect of layout(original, box, opts).values()) {
             const points = [
               { x: rect.x + 1, y: rect.y + rect.height / 2 },
@@ -116,7 +123,9 @@ describe('three-pane layout choices', () => {
               { x: rect.x + rect.width / 2, y: rect.y + 1 },
               { x: rect.x + rect.width / 2, y: rect.y + rect.height - 1 },
             ];
-            for (const point of points) for (const candidate of hitTest(original, box, point, dragged, opts)) {
+            for (const point of points) for (const anchor of [null, ...edgePoints]) {
+              const candidate = hitTest(original, box, point, dragged, opts, anchor).candidate;
+              if (!candidate) continue;
               const result = move(original, dragged, candidate.target);
               expect(result.ok).toBe(true);
               expect(validate(result.tree)).toEqual([]);
@@ -163,7 +172,7 @@ describe('group drop geometry and persistence', () => {
     }
   });
 
-  it('preserves immutable trees, identities, and exact previews across 300 seeded group moves', () => {
+  it('preserves immutable trees, identities, and exact previews across 300 seeded group slides', () => {
     let seed = 0x5a17;
     const random = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 0x100000000; };
     const freeze = (value: unknown): void => {
@@ -190,7 +199,12 @@ describe('group drop geometry and persistence', () => {
           { x: r.x + r.width / 2, y: r.y + 0.1 },
           { x: r.x + 0.1, y: r.y + r.height / 2 },
         ];
-        for (const point of points) for (const candidate of hitTest(original, bounds, point, dragged, geometry)) {
+        // Slide from the same edge of one other pane, and from nowhere.
+        const other = [...rectangles.values()][Math.floor(random() * rectangles.size)];
+        const anchors = [null, { x: other.x + other.width / 2, y: other.y + 0.1 }, { x: other.x + 0.1, y: other.y + other.height / 2 }];
+        for (const point of points) for (const anchor of anchors) {
+          const candidate = hitTest(original, bounds, point, dragged, geometry, anchor).candidate;
+          if (!candidate) continue;
           if (candidate.target.kind === 'edge' && candidate.target.range) groups++;
           const result = dragged === null ? insert(original, 'new', candidate.target) : move(original, dragged, candidate.target);
           expect(result.ok).toBe(true);
@@ -204,31 +218,6 @@ describe('group drop geometry and persistence', () => {
     expect(groups).toBeGreaterThan(100);
   });
 });
-
-describe('gesture hit-test cache', () => {
-  it('reuses speculative layouts within one edge and invalidates every geometry input', () => {
-    const cached = createHitTester();
-    const point = { x: 375, y: 5 };
-    const first = cached(row, box, point, 'd', opts);
-    expect(cached(row, { ...box }, { x: 376, y: 6 }, 'd', { ...opts })).toBe(first);
-    const cases: Parameters<typeof hitTest>[] = [
-      [row, box, { x: 375, y: 300 }, 'd', opts],
-      [row, box, point, null, opts],
-      [row, { ...box, width: 1200 }, point, 'd', opts],
-      [row, box, point, 'd', { ...opts, gap: 7 }],
-      [row, box, point, 'd', { ...opts, minLeaf: { width: 400, height: 60 } }],
-      [splitLeaf(row, 'b', 'bottom', 'new').tree, box, point, 'd', opts],
-    ];
-    for (const args of cases) {
-      const result = cached(...args);
-      expect(result).not.toBe(first);
-      expect(result).toEqual(hitTest(...args));
-    }
-    expect(cached(row, box, { x: -1, y: 5 }, 'd', opts)).toEqual([]);
-    expect(cached(row, box, point, 'd', opts)).toEqual(first);
-  });
-});
-
 
 describe('restore scopes after normalization', () => {
   it.each(['row', 'col'] as const)('restores beside an entire split sibling flattened into a %s grandparent', (dir) => {

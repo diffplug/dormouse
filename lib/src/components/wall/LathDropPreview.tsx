@@ -24,7 +24,7 @@ export function LathDropPreview({ preview, wall, color, zIndex }: {
         backgroundColor: 'color-mix(in srgb, ' + color + ' 22%, transparent)',
       }}
     />
-    <div
+    {preview.badge && <div
       data-lath-drop-choice=""
       role="status"
       className={POPUP_SURFACE_CLASS + ' pointer-events-none absolute px-2 py-1 text-sm'}
@@ -35,8 +35,7 @@ export function LathDropPreview({ preview, wall, color, zIndex }: {
         zIndex: zIndex + 1,
       }}
     >
-      {preview.label}
-      {preview.count > 1 && <span> {'\u00b7'} {preview.choice}/{preview.count} {'\u00b7'} scroll to choose</span>}
-    </div>
+      {preview.badge}
+    </div>}
   </>;
 }

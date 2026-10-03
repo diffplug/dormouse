@@ -1,29 +1,31 @@
 // One imperative pane/Door gesture owner per LathHost mount; both paths share the
-// threshold, live-tree hit test, depth cycling, cancel, and preview machinery.
+// threshold, live-tree hit test, slide anchoring, cancel, and preview machinery.
 
 import type { SurfaceWorkspaceDrag } from './surface-workspace-drag';
 import type { MutableRefObject, RefObject } from 'react';
 import { type Rect, rectKey } from '../../lib/lath/model';
 import type { DropTarget } from '../../lib/lath/ops';
-import { type DropCandidate, createHitTester } from '../../lib/lath/hit-test';
+import { type DropCandidate, hitTest } from '../../lib/lath/hit-test';
 import { type LathWallSnapshot, LATH_LAYOUT_OPTS } from './lath-wall-store';
 import { DRAG_THRESHOLD_PX } from '../design';
 
 /** Opacity applied to the dragged leaf while its drop preview floats elsewhere. */
 const DRAG_DIM = 0.6;
+/** A pause this long on an edge anchors a slide. Without the pause, sweeping a header
+ *  along the row of headers (every pane's top band) would stretch a group from the
+ *  dragged pane instead of naming one pane at a time. */
+export const SLIDE_ARM_MS = 300;
 
 export type DragPreview = {
   rect: Rect;
   scopeRect: Rect | null;
-  label: string;
-  choice: number;
-  count: number;
+  /** Scope label shown once a slide is anchored or the scope spans several panes. */
+  badge: string | null;
 };
 
 /** A live pane / Door drag session. Each frame hit-tests against the *live* store
  *  tree (read fresh, so a background `dor split`/`dor kill` commit mid-drag is
- *  reflected); `depth` indexes the hit-test candidates, cycled by the wheel and reset
- *  when the candidate list changes. */
+ *  reflected); a pause on an edge anchors a slide that widens the drop scope. */
 type PaneDragState = {
   /** The dragged leaf (internal) or the Door being dragged in (external). */
   id: string;
@@ -33,10 +35,12 @@ type PaneDragState = {
   active: boolean;
   startX: number;
   startY: number;
-  candidates: DropCandidate[];
-  depth: number;
-  /** Serialized candidate targets — a change resets `depth` to the innermost. */
-  candKey: string;
+  candidate: DropCandidate | null;
+  /** Wall-coordinate point where the current slide began, or null before a pause. */
+  anchor: { x: number; y: number } | null;
+  /** The last hit was in an edge band, where a pause anchors a slide. */
+  onEdge: boolean;
+  armTimer: ReturnType<typeof setTimeout> | null;
   lastX: number;
   lastY: number;
   rafId: number | null;
@@ -88,7 +92,6 @@ export type DragControllerDeps = {
 export function createDragController(deps: DragControllerDeps): DragController {
   // The live drag session (mutated in place by the window handlers).
   let drag: PaneDragState | null = null;
-  const hitTest = createHitTester();
   // The last preview rect published to React state (`x,y,w,h`); a frame that lands in
   // the same band skips the redundant setState (and its forced re-layout).
   let lastPreviewKey = '';
@@ -101,16 +104,20 @@ export function createDragController(deps: DragControllerDeps): DragController {
       }
       return;
     }
+    const { target } = candidate;
+    const anchored = !!drag?.anchor;
+    let badge: string | null = null;
+    if (target.kind === 'edge' && (anchored || candidate.scopeLeafCount > 1)) {
+      badge = target.path.length === 0 && !target.range ? 'whole layout'
+        : candidate.scopeLeafCount === 1 ? 'one pane' : candidate.scopeLeafCount + ' panes';
+      if (anchored && candidate.canWiden) badge += ' \u00b7 slide along the edge to widen';
+    }
     const preview: DragPreview = {
       rect: candidate.previewRect,
-      scopeRect: candidate.target.kind === 'edge' ? candidate.scopeRect : null,
-      label: candidate.target.kind === 'swap' ? 'swap panes'
-        : candidate.target.path.length === 0 && !candidate.target.range ? 'whole layout'
-        : candidate.scopeLeafCount === 1 ? 'one pane' : candidate.scopeLeafCount + ' panes',
-      choice: (drag?.depth ?? 0) + 1,
-      count: drag?.candidates.length ?? 1,
+      scopeRect: target.kind === 'edge' ? candidate.scopeRect : null,
+      badge,
     };
-    const key = [rectKey(preview.rect), preview.scopeRect && rectKey(preview.scopeRect), preview.label, preview.choice, preview.count].join('|');
+    const key = [rectKey(preview.rect), preview.scopeRect && rectKey(preview.scopeRect), preview.badge].join('|');
     if (key === lastPreviewKey) return;
     lastPreviewKey = key;
     deps.setDragPreview(preview);
@@ -122,10 +129,13 @@ export function createDragController(deps: DragControllerDeps): DragController {
     window.removeEventListener('pointercancel', onCancel);
     window.removeEventListener('blur', onCancel);
     window.removeEventListener('keydown', onKey);
-    window.removeEventListener('wheel', onWheel);
     if (drag && drag.rafId !== null) {
       cancelAnimationFrame(drag.rafId);
       drag.rafId = null;
+    }
+    if (drag && drag.armTimer !== null) {
+      clearTimeout(drag.armTimer);
+      drag.armTimer = null;
     }
   };
 
@@ -135,15 +145,13 @@ export function createDragController(deps: DragControllerDeps): DragController {
     window.addEventListener('pointercancel', onCancel);
     window.addEventListener('blur', onCancel);
     window.addEventListener('keydown', onKey);
-    // Non-passive: the wheel cycles drop depth instead of scrolling.
-    window.addEventListener('wheel', onWheel, { passive: false });
   };
 
   const runHitTest = (): void => {
     const d = drag;
     if (!d || !d.active) return;
     if (deps.latestRef.current.workspaceDrag?.hover(d.id, d.lastX, d.lastY)) {
-      d.candidates = []; publishPreview(null); return;
+      clearHit(d); return;
     }
     const containerEl = deps.containerRef.current;
     if (!containerEl) return;
@@ -152,27 +160,36 @@ export function createDragController(deps: DragControllerDeps): DragController {
     // candidates (the minimize is decided at `finish` from the pointer position). A Door
     // dropped there just cancels (dragged back down it stays a Door), so external skips it.
     if (!d.external && d.lastY > cr.bottom) {
-      d.candidates = [];
-      publishPreview(null);
+      clearHit(d);
       return;
     }
     const point = { x: d.lastX - cr.left, y: d.lastY - cr.top };
     // Hit-test the LIVE store tree so a background `dor split`/`dor kill` commit
-    // mid-drag is reflected in the very next frame (the `candKey` reset below absorbs
-    // the candidate list changing under the pointer).
-    const cands = hitTest(deps.getSnapshot().tree, deps.rectRef.current, point, d.external ? null : d.id, LATH_LAYOUT_OPTS);
-    const key = cands.map((c) => JSON.stringify(c.target)).join('|');
-    if (key !== d.candKey) {
-      d.candKey = key;
-      d.depth = 0; // a new candidate list starts at the innermost
-    }
-    d.candidates = cands;
-    if (cands.length === 0) {
-      publishPreview(null);
-      return;
-    }
-    d.depth = Math.min(d.depth, cands.length - 1);
-    publishPreview(cands[d.depth]);
+    // mid-drag is reflected in the very next frame.
+    const hit = hitTest(deps.getSnapshot().tree, deps.rectRef.current, point, d.external ? null : d.id, LATH_LAYOUT_OPTS, d.anchor);
+    if (!hit.anchored) d.anchor = null; // left the slide's line
+    d.onEdge = hit.onEdge;
+    d.candidate = hit.candidate;
+    publishPreview(hit.candidate);
+  };
+
+  const clearHit = (d: PaneDragState): void => {
+    d.candidate = null;
+    d.anchor = null;
+    d.onEdge = false;
+    publishPreview(null);
+  };
+
+  // A pause on an edge anchors a slide there; a pause mid-slide keeps the anchor.
+  const arm = (): void => {
+    const d = drag;
+    if (!d) return;
+    d.armTimer = null;
+    const containerEl = deps.containerRef.current;
+    if (!d.active || d.anchor || !d.onEdge || !containerEl) return;
+    const cr = containerEl.getBoundingClientRect();
+    d.anchor = { x: d.lastX - cr.left, y: d.lastY - cr.top };
+    runHitTest();
   };
 
   const scheduleHitTest = (): void => {
@@ -210,7 +227,7 @@ export function createDragController(deps: DragControllerDeps): DragController {
     setTimeout(() => {
       deps.suppressNextClickRef.current = false;
     }, 0);
-    const chosen = d.candidates.length > 0 ? d.candidates[Math.min(d.depth, d.candidates.length - 1)] : null;
+    const chosen = d.candidate;
     // Escape, or a release the Workspace strip took: a Door goes back.
     if (!commit || deps.latestRef.current.workspaceDrag?.drop(d.id, d.lastX, d.lastY)) {
       if (d.external) deps.latestRef.current.onExternalDrop?.(null);
@@ -245,6 +262,8 @@ export function createDragController(deps: DragControllerDeps): DragController {
       }
     }
     scheduleHitTest();
+    if (d.armTimer !== null) clearTimeout(d.armTimer);
+    d.armTimer = setTimeout(arm, SLIDE_ARM_MS);
   }
 
   function onCancel(): void { finish(false); }
@@ -261,17 +280,6 @@ export function createDragController(deps: DragControllerDeps): DragController {
     if (e.key === 'Escape') finish(false);
   }
 
-  function onWheel(e: WheelEvent): void {
-    const d = drag;
-    if (!d || !d.active || e.deltaY === 0) return;
-    runHitTest(); // flush a pending pointer/tree change before choosing its next scope
-    if (d.candidates.length === 0) return;
-    e.preventDefault();
-    const n = d.candidates.length;
-    const step = e.deltaY > 0 ? 1 : -1; // scroll away/down → one level outward, wrap
-    d.depth = ((d.depth + step) % n + n) % n;
-    publishPreview(d.candidates[d.depth]);
-  }
 
   return {
     beginInternal(id, clientX, clientY) {
@@ -280,7 +288,7 @@ export function createDragController(deps: DragControllerDeps): DragController {
       if (deps.getSnapshot().zoomedId !== null) return;
       drag = {
         id, external: false, active: false, startX: clientX, startY: clientY,
-        candidates: [], depth: 0, candKey: '', lastX: clientX, lastY: clientY, rafId: null,
+        candidate: null, anchor: null, onEdge: false, armTimer: null, lastX: clientX, lastY: clientY, rafId: null,
       };
       attach();
     },
@@ -288,7 +296,7 @@ export function createDragController(deps: DragControllerDeps): DragController {
       if (drag) return;
       drag = {
         id, external: true, active: false, startX, startY,
-        candidates: [], depth: 0, candKey: '', lastX: startX, lastY: startY, rafId: null,
+        candidate: null, anchor: null, onEdge: false, armTimer: null, lastX: startX, lastY: startY, rafId: null,
       };
       attach();
     },

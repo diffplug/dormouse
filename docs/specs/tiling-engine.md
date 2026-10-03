@@ -25,7 +25,7 @@ Lath is a **headless geometry engine**: it owns the split tree, rects, animation
 
 Invariants, enforced by every op and checked by `validate(tree)`:
 
-- A split has ≥ 2 children and **never directly contains a same-direction split** — same-direction children flatten on construction, i3-style, through the shared `normalize` constructor **every structural op builds through**; `replace` and `swap` exchange leaf identities in place, which can change no direction, so they write through `replaceAtPath` alone. That flattening gives DnD its depth semantics: every ancestor boundary is a real, distinct drop level.
+- A split has ≥ 2 children and **never directly contains a same-direction split** — same-direction children flatten on construction, i3-style, through the shared `normalize` constructor **every structural op builds through**; `replace` and `swap` exchange leaf identities in place, which can change no direction, so they write through `replaceAtPath` alone. That flattening gives DnD its scopes: every ancestor boundary is a real, distinct drop.
 - Weights within a split are finite, > 0, and normalized to sum 1.
 - Leaf ids are unique. `root: null` is the empty Wall, and **no add / split / insert op accepts one** — the Wall seeds it with `leafTree(id)`, and `restore` alone reinserts into it, as the root at the fallback tier. The "always one pane visible" auto-spawn rule stays app-level.
 
@@ -62,7 +62,7 @@ All ops are pure and synchronous, take the tree as their first argument (elided 
 | `insert` | Insert a new leaf beside an edge target; reject swap targets, duplicates, empty trees, missing paths and NaN weights. |
 | `restore` | Reinsert from a persisted token through the tiers below. |
 
-`DropTarget` is either a leaf swap or an edge at an ancestor path, optionally narrowed to a contiguous child range of that split; edges give DnD its depth levels. **Must normalize a range away in the committed tree**, so persistence keeps its version-1 shape; an invalid range rejects.
+`DropTarget` is either a leaf swap or an edge at an ancestor path, optionally narrowed to a contiguous child range of that split; edges give DnD its scopes. **Must normalize a range away in the committed tree**, so persistence keeps its version-1 shape; an invalid range rejects.
 
 Source of truth: `lib/src/lib/lath/ops.ts`; `lib/src/lib/lath/drop-target.ts`.
 
@@ -70,20 +70,19 @@ Source of truth: `lib/src/lib/lath/ops.ts`; `lib/src/lib/lath/drop-target.ts`.
 
 **Pointer events only** (`pointerdown` → `DRAG_THRESHOLD_PX` (5px) → drag; no HTML5 DnD), so drags are testable from CDP and never race React's synthetic events. **One `DragController` owns both the pane and Door gestures** — threshold, hit-test, click-suppression — built once per LathHost mount and fed header presses plus the `externalDrag` mirror; `Door.tsx` / `Baseboard.tsx` report presses only. **Must hit-test each preview and the release against the store's live tree**, including commits React has not rendered, so a background `dor split` / `dor kill` mid-drag shows up in the next preview.
 
-`hitTest` takes a point already in Wall coordinates and returns drop candidates innermost→outermost, each carrying its target, committed preview rect, and depth. `dragged: null` is an external drag (a Door coming in): no `swap` candidates, previews via `insert`. **Gesture mechanics and the preview overlay are adapter concerns.**
+`hitTest` takes a point already in Wall coordinates, plus the anchor of a slide in progress, and returns the one drop it would commit: its target, committed preview rect, and scope bounds. `dragged: null` is an external drag (a Door coming in): no `swap` candidates, previews via `insert`. **Gesture mechanics and the preview overlay are adapter concerns.**
 
-The depth model:
+The scope model:
 
 - A leaf's center region yields `swap` (internal drags only, never with yourself).
-- A leaf's inner edge bands — `min(0.3 × extent, 96)` px per side, the nearest in-band edge winning a corner — yield `edge` targets **at the leaf's level**. A point in a gap attributes to the nearest leaf, so boundaries have no dead zones.
-- When the hovered leaf's edge coincides (≤ 0.5px) with an ancestor boundary, `hitTest` also yields `edge` targets **at each ancestor level** — "beside this entire column," up to the root.
-- **Every candidate's `previewRect` is the exact rect the drop would commit** — a speculative `move` (or `insert`) plus `layout`, never a heuristic hint zone. Rejected ops, beside-itself no-ops (layout identical to current), and duplicate ancestor levels are filtered out, so every surviving depth is a genuinely different drop (rationale).
-- Resolution starts at the innermost candidate; the **scroll wheel** cycles outward through `depth`, wrapping, scroll-up backward. The list resets to innermost whenever its target set changes.
+- A leaf's inner edge bands — `min(0.3 × extent, 96)` px per side, the nearest in-band edge winning a corner — drop beside **the leaf**. A point in a gap attributes to the nearest leaf, so boundaries have no dead zones.
+- **A slide along an edge widens the scope.** While the pointer stays on the anchor's boundary line, the scope is the smallest one spanning anchor to pointer: the leaf, a contiguous range of an ancestor's children laid along the line, or a whole ancestor sharing the line. Equal spans resolve to the innermost (rationale). A slide keeps its edge through the corner bands it crosses; leaving the line drops the anchor.
+- **Every drop's `previewRect` is the exact rect it would commit** — a speculative `move` (or `insert`) plus `layout`, never a heuristic hint zone. Rejected ops and beside-itself no-ops (layout identical to current) yield no drop.
 
 Adapter gesture (LathHost):
 
 - **Start** on a leaf's header slot, primary button only, bailing on buttons/inputs/contenteditable so header chrome keeps working. **Never while zoomed or during a sash drag** — the two are mutually exclusive. Grabbing a header fires its press-time click path first, so a drag begins from passthrough on that pane; accepted quirk (rationale).
-- **During**: the dragged leaf dims to 0.6; one `data-lath-drop-preview` overlay draws the chosen candidate's rect in the selection color; hit-testing is rAF-coalesced and flushed on release (`lib/src/components/wall/LathHost.test.tsx`); Escape, pointer cancellation, and window blur cancel; the click, and a double-click's dblclick, the browser synthesizes on pointerup are swallowed in the capture phase.
+- **During**: the dragged leaf dims to 0.6; one `data-lath-drop-preview` overlay draws the chosen candidate's rect in the selection color; hit-testing is rAF-coalesced and flushed on release (`lib/src/components/wall/LathHost.test.tsx`); **must anchor a slide only where the pointer pauses on an edge**, so sweeping a header along the header row drops beside one pane at a time (rationale); Escape, pointer cancellation, and window blur cancel; the click, and a double-click's dblclick, the browser synthesizes on pointerup are swallowed in the capture phase.
 - **Drops surface as proposals the Wall commits**: `onDragStart(id)` (selection moves onto the dragged pane, covering the drag-while-door-selected case), `onProposeMove(id, target)` (→ `moveLeaf`, then select), and `onProposeMinimize(id)` when released below the container (→ `minimizePane`, token and all). Committed moves tween via the animator.
 
 **Door drag-out** runs the same machinery with `dragged: null`. A `Door` press reports its start point (`onDoorDragStart(item, press)`) and the Wall puts LathHost into external-drag mode at once (`externalDrag={ id, startX, startY }`); below the threshold the press is a plain click (reattach), above it the chip stays put in the baseboard. A drop on a candidate removes the Door and `insertLeaf`s the surface there with an enter hint from the target edge — **the token is not consulted, because the user chose the position**. A drop on nothing, Escape, a sub-threshold release, or a drop back onto the baseboard leaves the Door in place.
