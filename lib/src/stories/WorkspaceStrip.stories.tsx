@@ -37,8 +37,7 @@ function StripStory({ width = 640, busyIndex, todoLabels }: {
       const label = todoLabels?.[index];
       return registerWallHandle(stubWallHandle(ws(index), {
         ...(index === busyIndex ? {
-          hasTouchedSurfaces: () => true,
-          runningCount: () => 1,
+          needsCloseConfirmation: () => true,
           closeAll: () => new Promise<null>(() => {}),
         } : {}),
         ...(label === undefined ? {} : { peekNextTodo: () => label }),

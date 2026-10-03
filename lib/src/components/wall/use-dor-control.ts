@@ -27,6 +27,7 @@ import {
   getTerminalPaneState,
   getTerminalShellKind,
   isPaneOscDriven,
+  markSessionTouched,
   subscribeToTerminalPaneState,
 } from '../../lib/terminal-registry';
 import { stripTerminalControls } from '../../lib/terminal-controls';
@@ -1842,6 +1843,9 @@ export function useDorControl({
       }
       const target = requireTerminalSurface(params.surface, detail);
       if (!target) return;
+      // Input someone chose to send: an untouched shell it reaches is no longer
+      // one a close may take without asking (docs/specs/layout.md → "Kill confirmation").
+      markSessionTouched(target.id);
       getPlatform().writePty(target.id, input, { paced: true });
       detail.respond({
         ok: true,

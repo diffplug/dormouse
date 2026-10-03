@@ -28,6 +28,13 @@ export function handlePaneShortcuts(
   navHistory: NavHistoryRef,
 ): boolean {
   const sid = ctx.selectedIdRef.current;
+  // Reopen acts on the Window, so it answers whatever is selected.
+  if (e.key === 'u' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+    e.preventDefault();
+    e.stopPropagation();
+    ctx.reopenClosed();
+    return true;
+  }
   // Workspace chrome never dispatches pane verbs.
   if (isWorkspaceSelection(ctx.selectedTypeRef.current)) {
     if (!PANE_VERB_KEYS.has(e.key) && !(isArrowKey(e.key) && (e.metaKey || e.ctrlKey))) return false;

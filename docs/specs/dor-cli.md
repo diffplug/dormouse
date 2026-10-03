@@ -328,8 +328,8 @@ Source of truth: `dor/src/commands/shared.ts`, `parseWorkspaceRef` in
 ## Current Implemented Commands
 
 Implemented commands call private `surface.*` control methods, **enumerated once
-in `dor/src/protocol.ts` (`SURFACE_CONTROL_METHODS`, with `WORKSPACE_CONTROL_METHODS`
-and `APP_CONTROL_METHODS` beside it)** so the emitting client and the dispatching webview cannot drift.
+in `dor/src/protocol.ts` (`SURFACE_CONTROL_METHODS`, with `WORKSPACE_CONTROL_METHODS`,
+`APP_CONTROL_METHODS`, and `WINDOW_CONTROL_METHODS` beside it)** so the emitting client and the dispatching webview cannot drift.
 
 `surface.list` joins one Workspace's Surfaces — visible panes **plus minimized
 (doored)** ones, each tagged `view` — with terminal state and activity
@@ -415,8 +415,9 @@ Wall ([Handle Model](#handle-model)):
   is auto-named (`docs/specs/layout.md` → "Workspace names").
 - `rename` renames the Workspace only, no Surface title (`docs/specs/layout.md`
   → "Workspaces"); `dor list --workspaces --json` reports `auto`.
-- `close` **refuses without a confirmation** when the Workspace holds a touched
-  or running Surface unless `--force`, as `dor kill` does. It also refuses when
+- `close` **refuses without a confirmation** when the Workspace's close would
+  ask (`docs/specs/reopen.md` → "Workspaces and windows") unless `--force`, as
+  `dor kill` does. It also refuses when
   another close is in flight, or when its Wall never registers (`still
   mounting`, after the routing retry), which would leave its Sessions running
   with nothing holding them. Member Surfaces close in sequence; a refusal leaves
@@ -466,6 +467,22 @@ applies and the relaunch restores what any quit restores
 
 Source of truth: `dor/src/commands/app.ts`, `handleAppControl` in
 `lib/src/components/wall/app-control.ts`.
+
+## dor reopen
+
+**`dor reopen` is the Reopen verb (`docs/specs/reopen.md` → "Reopen verb"),
+answered by the webview's control router before any Workspace resolves**
+([Handle Model](#handle-model)); Rust delivers it by the caller's Surface
+([Standalone](#standalone)), so it reopens into the caller's Window.
+
+- **Must stay focus-neutral** and answer what came back: a Surface's handles, a
+  Workspace's, or a window.
+- **Must refuse an empty stack** rather than answer nothing.
+- **A Dormouse older than the verb answers `unsupported Dormouse control method
+  'window.reopen'`**, which the CLI names as a host that predates it.
+
+Source of truth: `dor/src/commands/reopen.ts`, `handleReopenControl` in
+`lib/src/components/wall/reopen.ts`.
 
 ## Browser Open Target Resolution
 

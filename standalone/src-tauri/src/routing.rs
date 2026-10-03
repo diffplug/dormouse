@@ -149,6 +149,12 @@ pub fn route<'a>(event: &str, data: &'a JsonValue, view: &RouteView<'a>) -> Rout
             Some(id) => showing(view, id),
             None => Route::Broadcast,
         },
+        // A Client's input clears the `untouched` flag the window showing the
+        // Session holds; no replay carries it, so it is never suppressed.
+        "terminal:clientInput" => match str_field(data, "id") {
+            Some(id) => showing(view, id),
+            None => Route::Drop,
+        },
         // The list answers one window's `pty:requestInit`, which named itself.
         "pty:list" => match str_field(data, "forWindow") {
             Some(label) => Route::EmitTo(label),
@@ -648,6 +654,12 @@ mod tests {
                 Route::EmitTo("ws-2"),
             ),
             ("pty:exit", json!({"id":"b"}), Route::EmitTo("ws-2")),
+            (
+                "terminal:clientInput",
+                json!({"id":"b"}),
+                Route::EmitTo("ws-2"),
+            ),
+            ("terminal:clientInput", json!({"id":"zz"}), Route::Drop),
             ("pty:replay", json!({"id":"a"}), Route::EmitTo("main")),
             ("pty:replay", json!({"id":"exited", "forWindow":"ws-2"}), Route::EmitTo("ws-2")),
             ("pty:replay", json!({"id":"b", "forWindow":"main"}), Route::EmitTo("main")),

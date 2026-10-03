@@ -1,0 +1,10 @@
+exitCode: 0
+stdout:
+{
+  "status": "reopened",
+  "kind": "surface",
+  "surface_id": "surface-4f2a",
+  "surface_ref": "surface:4"
+}
+
+stderr:

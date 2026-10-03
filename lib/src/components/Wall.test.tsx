@@ -26,7 +26,7 @@ import type { BrowserRequest, BrowserResult } from '../lib/platform/browser-auto
 import type { PersistedSession } from '../lib/session-types';
 import * as terminalRegistry from '../lib/terminal-registry';
 import { UNNAMED_PANEL_TITLE } from '../lib/terminal-registry';
-import { pendingShellOpts } from '../lib/terminal-store';
+import { pendingShellOpts, registry, type TerminalEntry } from '../lib/terminal-store';
 import { createTerminalPaneState, type TerminalPaneState } from '../lib/terminal-state';
 import { getWallHandle, listWallHandles, registerWallHandle, stubWallHandle } from './wall/wall-handles';
 import { installBrowserHost, mountWallHarness, reportRunning, waitUntil, type WallHarness } from './wall/wall-test-utils';
@@ -2978,6 +2978,23 @@ describe('Wall on the Lath engine', () => {
     });
   });
 
+  it('counts dor send as input, so a kill of the shell it reached confirms', async () => {
+    registry.set('pane-a', { untouched: true, terminal: { focus() {}, blur() {} } } as unknown as TerminalEntry);
+    try {
+      await act(async () => root.render(<Wall initialPaneIds={['pane-a', 'pane-b']} initialMode="command" />));
+      await flush();
+      await act(async () => window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
+        method: SURFACE_CONTROL_METHODS.send, params: { surface: 'surface:1', input: 'export X=1\r' }, respond: vi.fn(),
+      } })));
+      await act(async () => {
+        container.querySelector<HTMLButtonElement>('[data-lath-leaf="pane-a"] button[aria-label="Kill"]')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      });
+      expect(Array.from(document.body.querySelectorAll('h2')).some(h => h.textContent === 'Confirm kill')).toBe(true);
+    } finally {
+      registry.delete('pane-a');
+    }
+  });
+
   it('rejects anonymous Tool argv containing terminal editing controls before launching', async () => {
     await act(async () => root.render(<Wall initialPaneIds={['pane-a']} />));
     await flush();
@@ -3602,6 +3619,44 @@ describe('Wall on the Lath engine', () => {
     await kill('pane-a');
     expect(confirmKillOverlay()).not.toBeNull();
     expect(container.querySelector('[data-lath-leaf="pane-a"]')).not.toBeNull();
+  });
+
+  /** pane-a is an untouched shell owning a helper whose own entry is `helperEntry`. */
+  function untouchedShellWithHelper(helperEntry: Partial<TerminalEntry>): () => void {
+    registry.set('pane-a', { untouched: true, terminal: { focus() {}, blur() {} } } as unknown as TerminalEntry);
+    registry.set('helper-a', helperEntry as TerminalEntry);
+    const helper: helpers.HelperTerminal = { id: 'helper-a', parentId: 'pane-a', command: '', status: 'off' };
+    vi.spyOn(helpers, 'getHelper').mockImplementation(id => id === 'pane-a' ? helper : undefined);
+    vi.spyOn(helpers, 'helperHasWork').mockResolvedValue(false);
+    vi.spyOn(helpers, 'closeHelperParent').mockImplementation(() => {});
+    return () => { registry.delete('pane-a'); registry.delete('helper-a'); };
+  }
+
+  it('confirms killing an untouched shell whose helper holds user input', async () => {
+    const cleanup = untouchedShellWithHelper({ untouched: false, helperBusy: false });
+    try {
+      await act(async () => root.render(<Wall initialPaneIds={['pane-a', 'pane-b']} initialMode="command" />));
+      await flush();
+      await act(async () => {
+        container.querySelector<HTMLButtonElement>('[data-lath-leaf="pane-a"] button[aria-label="Kill"]')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      });
+      await flush();
+      expect(confirmKillOverlay()).not.toBeNull();
+      expect(getWallHandle(DEFAULT_WORKSPACE_ID)!.needsCloseConfirmation()).toBe(true);
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('closes a Workspace whose only shell is untouched, with an idle untouched helper, without confirming', async () => {
+    const cleanup = untouchedShellWithHelper({ untouched: true, helperBusy: false });
+    try {
+      await act(async () => root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />));
+      await flush();
+      expect(getWallHandle(DEFAULT_WORKSPACE_ID)!.needsCloseConfirmation()).toBe(false);
+    } finally {
+      cleanup();
+    }
   });
 
   /** Minimize pane-a beside pane-b (the Door stays selected) and press the kill key on it. */

@@ -3,6 +3,7 @@ import { getToolAnnounce, resetToolAnnounces } from '../tool-announce-store';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { openPortRequestTimeoutMs } from './types';
 import { hostShown, setHostShown } from '../host-shown';
+import { registry, type TerminalEntry } from '../terminal-store';
 
 const terminalStateStoreMocks = vi.hoisted(() => ({
   applyTerminalSemanticEvents: vi.fn(),
@@ -281,6 +282,17 @@ describe('VSCodeAdapter PTY exit handling', () => {
 
     expect(terminalStateStoreMocks.applyTerminalSemanticEvents).toHaveBeenCalledTimes(1);
     expect(terminalStateStoreMocks.applyTerminalSemanticEvents).toHaveBeenCalledWith('pane-1', events);
+  });
+
+  it('counts a remote Client\'s input as touching the Session', () => {
+    registry.set('pane-1', { untouched: true } as TerminalEntry);
+    try {
+      void new VSCodeAdapter();
+      windowTarget.dispatchEvent(hostMessage({ type: 'terminal:clientInput', id: 'pane-1' }));
+      expect(registry.get('pane-1')?.untouched).toBe(false);
+    } finally {
+      registry.delete('pane-1');
+    }
   });
 
   it('round-trips host-parsed semantic events through JSON to the webview adapter', () => {

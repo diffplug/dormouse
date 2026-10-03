@@ -220,6 +220,13 @@ export interface AppRestartResponse {
   relaunch: boolean;
 }
 
+/** What `dor reopen` brought back: a Surface, a Workspace, or a window. */
+export type ReopenResponse = { status: 'reopened' } & (
+  | { kind: 'surface'; surfaceId: string; surfaceRef: string }
+  | { kind: 'workspace'; workspaceId: string; workspaceRef: string }
+  | { kind: 'window' }
+);
+
 export interface SplitSurfaceRequest extends WorkspaceScopedRequest {
   /** The invoking directory, where the new Session starts; `surface` is placement only. */
   cwd?: string;
@@ -599,6 +606,7 @@ export interface ControlClient {
   switchWorkspace(request: SwitchWorkspaceRequest): Promise<WorkspaceMutationResponse>;
   moveWorkspace(request: MoveWorkspaceRequest): Promise<WorkspaceMutationResponse>;
   restartApp(): Promise<AppRestartResponse>;
+  reopenClosed(): Promise<ReopenResponse>;
 }
 
 export interface BrowserExecResult {

@@ -200,6 +200,7 @@ A user verb is an intentional action that produces a single observable change.
 | `moveWorkspace` | Reorder a Workspace within its Window; a minted ref renames nothing (a host with no registry still numbers by position) and touches no Session |
 | `transferWorkspace` | Move a Workspace to another Window, Surfaces and Sessions intact: `release` each member Session (detached, Process still Live) and resume it there. Kills nothing — not a `closeWorkspace`. |
 | `tearOut` | `transferWorkspace` into a Window created for it. A Window whose last Workspace leaves closes itself. |
+| `reopen` | Rebuild the newest reopenable close — a Surface, Workspace, or window — from its in-memory record as a new one: new Sessions, ids, and refs (`docs/specs/reopen.md`). Never a `restore` or `reattach`. |
 
 Source of truth: `setActiveWorkspace` / `createWorkspace` / `closeWorkspace` / `renameWorkspace` / `moveWorkspace` in `lib/src/lib/workspace-store.ts`; `closeAll` in `lib/src/components/Wall.tsx`; `prepareWorkspaceTransfer` in `lib/src/components/wall/workspace-transfer.ts`.
 
@@ -255,7 +256,7 @@ Use glossary names instead. A left-column term retains meaning only where noted.
 |---|---|
 | **detach** | Retired: DOM-level op → **unmount**; user-level Pane→Door → **minimize**. |
 | **reconnect** | Retired: live-PTY case → **resume**; cold start → **restore**. |
-| **restore** | Keeps its cold-start rehydrate meaning. Never for Door→Pane (**reattach**) or alert-manager seeding (**seed**). |
+| **restore** | Keeps its cold-start rehydrate meaning. Never for Door→Pane (**reattach**), a closed Surface's rebuild (**reopen**), or alert-manager seeding (**seed**). |
 | **attach** | Retired at the DOM layer (`attachTerminal`) → **mount**; user-level **reattach** (Door→Pane) keeps the `re-` prefix. |
 | **session** | The durable identity of a **terminal Surface**. Never for the Activity projection (`ActivityState`, not `SessionUiState`), nor for a browser provider's lowercase `session` string (`dormouse.<scope>.<key>`) — not a Dormouse durable unit. |
 | **terminal** | Keeps its meaning for the `xterm.Terminal` instance; prose meaning "the whole thing" is **Session**. |

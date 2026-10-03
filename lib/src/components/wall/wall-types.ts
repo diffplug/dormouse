@@ -49,7 +49,6 @@ export type WorkspaceCloseMode = 'prompt' | 'silent';
 
 export type DoorAfterRestoreAction =
   | 'confirm-kill'
-  | 'close'
   | {
       type: 'replace-terminal';
       newId: string;

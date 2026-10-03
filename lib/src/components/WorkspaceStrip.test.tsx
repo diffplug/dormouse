@@ -629,7 +629,7 @@ describe('WorkspaceStrip', () => {
   it('does not accept a pending kill during transfer and releases its keyboard lease on departure', async () => {
     createWorkspace({ id: 'ws-2' });
     const closeAll = vi.fn(async () => null);
-    stubHandle('ws-2', { hasTouchedSurfaces: () => true, closeAll });
+    stubHandle('ws-2', { needsCloseConfirmation: () => true, closeAll });
     await render();
     await act(async () => { requestConfirmation(workspaceCloseConfirmation('ws-2', 'q')); });
     expect(document.body.querySelector('#kill-confirm-title')?.textContent).toBe('Confirm kill workspace');
@@ -649,7 +649,7 @@ describe('WorkspaceStrip', () => {
 
   it('keeps the close confirmation up through a bare Shift or Meta, as the pane kill does', async () => {
     await act(async () => { createWorkspace({ id: 'ws-2' }); });
-    stubHandle('ws-2', { hasTouchedSurfaces: () => true, closeAll: async () => null });
+    stubHandle('ws-2', { needsCloseConfirmation: () => true, closeAll: async () => null });
     await render();
     await act(async () => {
       container.querySelector<HTMLButtonElement>('[data-workspace-tab-close="ws-2"]')!.click();

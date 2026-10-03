@@ -29,6 +29,7 @@ import {
 import { watchSelection, type SelectionWatch } from './selection-watch';
 import { normalizeResumeCommand } from './resume-patterns';
 import {
+  markSessionTouched,
   pendingShellOpts,
   registry,
   type PendingShellOpts,
@@ -718,14 +719,6 @@ export function writeUserInput(id: string, data: string): void {
   if (getMouseSelectionState(id).selection?.dragging === false) setMouseSelection(id, null);
   markSessionTouched(id);
   getPlatform().writePty(id, data, { userInput: true });
-}
-
-export function markSessionTouched(id: string): void {
-  const entry = registry.get(id);
-  if (!entry) return;
-  entry.inputVersion = (entry.inputVersion ?? 0) + 1;
-  entry.untouched = false;
-  if (entry.helper) entry.helperBusy = undefined;
 }
 
 /**

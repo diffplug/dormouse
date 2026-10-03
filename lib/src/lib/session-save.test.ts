@@ -254,6 +254,23 @@ describe('saveSession', () => {
     });
   });
 
+  // A restored title is a user title; the URL a Tool's browser layer showed
+  // would pin it over the title its program announces when it runs again.
+  it('persists only a user\'s rename of a Tool, pane or Door', async () => {
+    terminalRegistryMocks.getTerminalPaneState.mockImplementation((id: string) => ({
+      titleCandidates: id === 'renamed' ? { user: { title: 'Docs' } } : {},
+    }));
+    const platform = createPlatform(null);
+    const params = { surfaceType: 'tool', command: 'view /repo/a.md' };
+    await saveSession(platform, [
+      { id: 'viewer', title: 'localhost:51526/x/view', surfaceType: 'tool', params },
+      { id: 'renamed', title: 'localhost:51527/y/view', surfaceType: 'tool', params },
+    ], [{ id: 'door', title: 'localhost:51528/z/view', component: 'tool', params }]);
+    const saved = vi.mocked(platform.saveState).mock.calls[0]![0] as PersistedSession;
+    const title = (id: string) => saved.panes.find(pane => pane.id === id)?.title;
+    expect([title('viewer'), title('renamed'), title('door')]).toEqual([UNNAMED_PANEL_TITLE, 'Docs', UNNAMED_PANEL_TITLE]);
+  });
+
   it('persists the preview slot mark and open target for panes and Doors, and omits them otherwise', async () => {
     const platform = createPlatform(null);
     const params = { surfaceType: 'tool', command: 'view /repo/a.md', toolArgv: ['view', '/repo/a.md'], toolTarget: '/repo/a.md', toolPreview: true };

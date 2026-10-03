@@ -353,6 +353,11 @@ export interface PlatformAdapter {
   /** Hosts that hand Workspaces between windows stamp marks; returns the
    *  unsubscribe. Absent on hosts with one window. */
   onPtyMarked?(handler: (detail: PtyMarkedDetail) => void): () => void;
+  /** Reopen the newest window closed with everything reopenable, when it
+   *  closed after `newerThan` (ms since the epoch), in a new window; resolves
+   *  whether one opened (`docs/specs/reopen.md`). Absent on hosts with one
+   *  window. */
+  reopenClosedWindow?(newerThan: number): Promise<boolean>;
   /** Hand a Workspace to another window — a label, or `'new'` for one torn out
    *  — through the host's transfer (`docs/specs/standalone.md` → Transfer),
    *  `index` naming its slot in the target's strip (appended without one).

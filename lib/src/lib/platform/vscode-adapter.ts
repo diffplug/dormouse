@@ -15,6 +15,7 @@ import { embedderOrigins } from '../embedder-origins';
 import {
   applyTerminalSemanticEvents,
 } from '../terminal-state-store';
+import { markSessionTouched } from '../terminal-store';
 import { getTerminalTheme, onTerminalThemeChange } from '../terminal-theme';
 import { HOST_MESSAGE_TOKEN_FIELD, isHostMessage, readHostMessageToken } from '../vscode-message-token';
 import { parseReplay } from './replay-parse';
@@ -131,6 +132,8 @@ export class VSCodeAdapter implements PlatformAdapter {
         applyTerminalSemanticEvents(msg.id, msg.events ?? []);
       } else if (msg.type === 'terminal:clipboardOffer') {
         if (typeof msg.text === 'string') offerProgramCopy(msg.id, msg.text);
+      } else if (msg.type === 'terminal:clientInput') {
+        markSessionTouched(msg.id);
       } else if (msg.type === 'dormouse:flushSessionSave') {
         for (const handler of this.flushRequestHandlers) {
           handler({ requestId: msg.requestId });

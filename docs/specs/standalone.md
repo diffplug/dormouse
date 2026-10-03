@@ -252,8 +252,9 @@ Picking a shell in the Settings dialog's **Shell** row
 
 Source of truth: the `.menu(...)` builder in `standalone/src-tauri/src/lib.rs`.
 
-The app replaces Tauri's default menu with macOS-only App and Edit submenus and
-a Window submenu. **Must keep the macOS fullscreen item**: it and its
+The app replaces Tauri's default menu with macOS-only App, File, and Edit
+submenus and a Window submenu; File holds Reopen Closed (`docs/specs/reopen.md`
+→ "Reopen verb"). **Must keep the macOS fullscreen item**: it and its
 Ctrl+Cmd+F are the only exit from native fullscreen when AppKit does not reveal
 the traffic lights.
 
@@ -410,14 +411,16 @@ Source of truth: `CleanupGate` and `WindowEvent::Destroyed` in
 **Closing a window with siblings alive ends that window alone**; only the last
 window's close is the quit, and on macOS too. Rust prevents the close and emits
 `dormouse://window-close-requested`; the webview acks (a watchdog closes the
-window anyway if that listener is dead), asks about *its own* running work,
-removes its snapshot, kills its PTYs, and calls back `close_window`.
+window anyway if that listener is dead), asks when any of *its own* Workspaces'
+closes would (`docs/specs/reopen.md` → "Workspaces and windows"), hands Rust a
+reopen record when it asked nothing, removes its snapshot, kills its PTYs, and
+calls back `close_window`.
 
 - **Must attempt to remove the blob, geometry and temp sibling included, before
   killing this Window's PTYs** (`docs/specs/transport.md` → "The governing
   rule"). A removal failure is logged and the close proceeds.
-- **It runs no agent-recovery capture**: nothing is coming back.
-- **It confirms on a pending download as well as on running work**: the
+- **It runs no agent-recovery capture**: nothing resumes; Reopen rebuilds.
+- **It confirms on a pending download as well**: the
   download lives in this webview, so nothing else can install it
   (`docs/specs/auto-update.md`).
 - **Must refuse every later save for a closing label, geometry included, for the
