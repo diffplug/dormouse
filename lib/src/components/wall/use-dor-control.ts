@@ -1886,9 +1886,8 @@ export function useDorControl({
         detail.respond({ ok: false, error: `invalid await condition '${String(until)}'` });
         return;
       }
-      // The host re-checks this, but a bad ceiling there settles `cancelled`
-      // silently (no response ever reaches the caller); rejecting here turns
-      // that into a visible error.
+      // The host re-checks this and answers a bad ceiling as a settled
+      // `cancelled`; rejecting here names what was wrong instead.
       const timeoutMs = numberParam(params.timeoutMs);
       if (timeoutMs === undefined || timeoutMs <= 0 || timeoutMs > MAX_AWAIT_TIMEOUT_MS) {
         detail.respond({ ok: false, error: `timeoutMs must be a positive number no greater than ${MAX_AWAIT_TIMEOUT_MS}` });
