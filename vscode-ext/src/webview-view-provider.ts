@@ -102,7 +102,6 @@ export class DormouseViewProvider implements vscode.WebviewViewProvider {
     this.routerDisposable?.dispose();
     this.routerDisposable = ownedRouter = attachRouter(this.channel, {
       reconnect: true,
-      adoptOrphans: true,
       onSaveState: (state) => {
         return saveSessionState(this.context, mergeAlertStates(state, getAlertStates()));
       },
