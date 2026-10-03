@@ -357,10 +357,10 @@ export function LathHost({
   // Wall sets `externalDrag`, carrying the press point). Both feed the same core
   // `hitTest` and render one preview overlay. ---
 
-  // Everything the once-built controller reads through: the latest store snapshot + Wall
-  // callbacks, re-mirrored each render so it always sees current values.
-  const latestRef = useRef({ snapshot, onDragStart, onProposeMove, onProposeMinimize, onExternalDrop, workspaceDrag });
-  latestRef.current = { snapshot, onDragStart, onProposeMove, onProposeMinimize, onExternalDrop, workspaceDrag };
+  // Wall callbacks are mirrored each render; the controller reads the store
+  // directly so a synchronous commit cannot race a release.
+  const latestRef = useRef({ onDragStart, onProposeMove, onProposeMinimize, onExternalDrop, workspaceDrag });
+  latestRef.current = { onDragStart, onProposeMove, onProposeMinimize, onExternalDrop, workspaceDrag };
 
   // The current preview overlay rect (null → no overlay). The dragged leaf itself is
   // dimmed imperatively; only this rect is React state.
@@ -399,6 +399,7 @@ export function LathHost({
   if (dragControllerRef.current === null) {
     dragControllerRef.current = createDragController({
       latestRef,
+      getSnapshot: store.getSnapshot,
       containerRef,
       rectRef,
       leafElsRef,
@@ -444,23 +445,42 @@ export function LathHost({
         onCommitResize(d.splitPath, d.boundary, d.delta);
       }
     };
-    const onUp = () => end(true);
+    const onUp = (e: PointerEvent) => {
+      const d = dragRef.current;
+      if (d) d.delta = d.dir === 'row' ? e.clientX - d.startX : e.clientY - d.startY;
+      end(true);
+    };
+    const onCancel = () => end(false);
+    // Paths belong to the drag-start tree. A live structural change invalidates
+    // the gesture, while metadata writes remain harmless.
+    const unsubscribe = store.subscribe(() => {
+      const d = dragRef.current;
+      const current = store.getSnapshot();
+      if (d && (current.tree !== d.tree || current.zoomedId !== null)) end(false);
+    });
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') end(false); // cancel: revert the preview, commit nothing
     };
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onCancel);
+    window.addEventListener('blur', onCancel);
     window.addEventListener('keydown', onKey);
     return () => {
       if (rafId !== null) cancelAnimationFrame(rafId);
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onCancel);
+      window.removeEventListener('blur', onCancel);
+      unsubscribe();
       window.removeEventListener('keydown', onKey);
     };
-  }, [dragging, onCommitResize]);
+  }, [dragging, onCommitResize, store]);
 
   const activeTree = preview ?? snapshot.tree;
   const { targets: frames, layers } = presentationTargets(activeTree, rect, snapshot.zoomedId);
+  const previewFramesRef = useRef(frames);
+  previewFramesRef.current = frames;
   const contextSource = terminalContext && frames.get(terminalContext.id);
   const contextMeta = terminalContext && snapshot.leafMeta.get(terminalContext.id);
   const sashList = sashes(activeTree, rect, LATH_LAYOUT_OPTS);
@@ -556,6 +576,14 @@ export function LathHost({
   const applyFrames = useCallback(
     (t: number) => {
       const paint = animator.framesAt(t);
+      // A live sash owns geometry, including when a previous layout is still
+      // tweening. Keep those animation ticks from overwriting the drag preview.
+      if (dragRef.current) {
+        for (const [id, rect] of previewFramesRef.current) {
+          const frame = paint.get(id);
+          if (frame && !animator.isDying(id)) paint.set(id, { ...frame, rect });
+        }
+      }
       for (const [id, el] of leafElsRef.current) {
         const f = paint.get(id);
         if (!f) continue; // not tracked (e.g. just-removed) — leave React's styles
@@ -563,7 +591,8 @@ export function LathHost({
         el.style.top = `${f.rect.y}px`;
         el.style.width = `${f.rect.width}px`;
         el.style.height = `${f.rect.height}px`;
-        el.style.opacity = f.opacity >= 1 ? '' : `${f.opacity}`;
+        const opacity = dragController.opacityFor(id, f.opacity);
+        el.style.opacity = opacity >= 1 ? '' : `${opacity}`;
         el.style.zIndex = `${zIndexForLayer(f.layer)}`;
         el.style.boxShadow = f.layer >= LATH_LAYER_ELEVATED ? LATH_ZOOM_SHADOW : '';
         // Elevated zoom is interactive; only the animator's dying state makes a
@@ -572,7 +601,7 @@ export function LathHost({
       }
       lath.placeContext(paint);
     },
-    [animator, lath],
+    [animator, lath, dragController],
   );
 
   // The single tick body and the loop's entry point (from the retarget effects and the
@@ -723,6 +752,10 @@ export function LathHost({
             className="lath-sash"
             style={style}
             onPointerDown={(e) => {
+              if (e.button !== 0 || dragRef.current) return;
+              const current = store.getSnapshot();
+              // The displayed sash belongs to this render, not a newer tree.
+              if (current.tree !== snapshot.tree || current.zoomedId !== null) return;
               if (dragController.hasDrag()) return; // a pane drag has the pointer
               e.preventDefault();
               (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);

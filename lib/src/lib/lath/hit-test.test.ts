@@ -44,10 +44,11 @@ describe('hitTest — edge bands at the leaf level', () => {
   ];
   for (const { edge, point } of cases) {
     it(`innermost candidate is the leaf-level ${edge} edge`, () => {
-      const cands = hitTest(t, RECT, point, 'a', opts);
+      const dragged = edge === 'left' ? 'c' : 'a';
+      const cands = hitTest(t, RECT, point, dragged, opts);
       expect(cands[0].target).toEqual({ kind: 'edge', path: [1], edge });
       expect(cands[0].depth).toBe(0);
-      expect(cands[0].previewRect).toEqual(movePreview(t, 'a', { kind: 'edge', path: [1], edge }));
+      expect(cands[0].previewRect).toEqual(movePreview(t, dragged, { kind: 'edge', path: [1], edge }));
     });
   }
 });
@@ -123,4 +124,9 @@ describe('hitTest — misses', () => {
     expect(hitTest(t, RECT, { x: 500, y: 700 }, 'a', opts)).toEqual([]);
     expect(hitTest(tree(null), RECT, { x: 100, y: 100 }, 'a', opts)).toEqual([]);
   });
+});
+
+it('filters a drop back at the same boundary in a three-pane row', () => {
+  const t = tree(mk('row', [leaf('a'), 0.2], [leaf('b'), 0.3], [leaf('c'), 0.5]));
+  expect(hitTest(t, RECT, { x: 199, y: 300 }, 'b', opts)).toEqual([]);
 });
