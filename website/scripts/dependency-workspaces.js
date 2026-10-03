@@ -39,12 +39,16 @@ export function getDependencyNames(pkg) {
   ];
 }
 
-// What an optional edge this machine did not install means
-// (docs/specs/security-supply-chain.md -> "Disclosure"). An external package's
-// ships to nobody, since every bundle stages only what a product root declares;
-// a product root's ships on the platform that can hold it, so it is described
-// from a sibling; any other workspace's has no rule and must not vanish.
-export function missingOptionalEdge({ isWorkspace, isProductRoot }) {
+// What a dependency this machine did not install means
+// (docs/specs/security-supply-chain.md -> "Disclosure"). A required edge is a
+// broken install. An optional one is absent by design only where a rule covers
+// it: an external package's ships to nobody, since every bundle stages only
+// what a product root declares (the addon's own list also names builds this
+// project never releases, android and musl); a product root's ships on the
+// platform that can hold it, so it is described from a sibling; any other
+// workspace's has no rule and must not vanish.
+export function missingDependency({ optional, isWorkspace, isProductRoot }) {
+  if (!optional) return 'throw';
   if (!isWorkspace) return 'skip';
   return isProductRoot ? 'describe' : 'throw';
 }

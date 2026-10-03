@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getCargoGitRepository, getShippedCargoGraph } from "./cargo-dependencies.js";
-import { assertWorkspaceCoverage, getDependencyNames, missingOptionalEdge } from "./dependency-workspaces.js";
+import { assertWorkspaceCoverage, getDependencyNames, missingDependency } from "./dependency-workspaces.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, "../..");
@@ -192,13 +192,7 @@ function scanDependency(fromDir, packageName, declaredBy) {
 
   const packageJsonPath = getPackageJsonPath(fromDir, packageName);
   if (!packageJsonPath) {
-    // Absent by design rather than under-reported only on an optional edge
-    // `missingOptionalEdge` covers: the Tauri bundle copies
-    // `standalone/sidecar/node_modules`, and pnpm puts a package there only if
-    // that manifest declares it — the addon's own list also names builds this
-    // project never releases (android, musl). Anything else missing is a hard
-    // error.
-    const edge = declaredBy.optional ? missingOptionalEdge(declaredBy) : 'throw';
+    const edge = missingDependency(declaredBy);
     if (edge === 'skip') return;
     if (edge === 'describe') {
       undescribedPackages.set(

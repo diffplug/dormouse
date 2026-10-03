@@ -550,20 +550,24 @@ pub fn window_at(
 
 /// Where a `Route::Focused` request goes when no window has focus yet (a
 /// launch nobody has clicked into, or every focused window closed): exactly one
-/// window, `main` while it is registered, else the lowest label. Never every
-/// window: each would run the request against its own active Workspace.
+/// window, `main` while it is registered, else the lowest `ws-<n>` (the order
+/// [`restorable_labels`] restores in). Never every window: each would run the
+/// request against its own active Workspace.
 pub fn unfocused_target(registry: &crate::workspaces::Registry) -> Option<&str> {
     if registry.windows.contains_key(MAIN_LABEL) {
         return Some(MAIN_LABEL);
     }
-    registry.windows.keys().map(String::as_str).min()
+    registry
+        .windows
+        .keys()
+        .map(String::as_str)
+        .min_by_key(|label| (ws_index(label).unwrap_or(u64::MAX), *label))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
-
 
     fn labels(pairs: &[(&str, &str)]) -> HashMap<String, String> {
         pairs
@@ -606,7 +610,7 @@ mod tests {
             Route::Focused { fallback: Some(MAIN_LABEL) }
         );
         let mut torn_out = crate::workspaces::Registry::default();
-        crate::workspaces::report(&mut torn_out, "ws-3", Vec::new());
+        crate::workspaces::report(&mut torn_out, "ws-10", Vec::new());
         crate::workspaces::report(&mut torn_out, "ws-2", Vec::new());
         assert_eq!(
             route("dor:controlRequest", &json!({ "requestId": "dor-4" }), &state.view(&torn_out)),
