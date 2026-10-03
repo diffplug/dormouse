@@ -75,7 +75,7 @@ function session(shell = BASH) {
       mgr.spawn('tool', {
         shell, args: ['-i'], cwd: home,
         // A bare home: the developer's profile stays out of the shell.
-        env: { HOME: home, PATH: process.env.PATH, TERM: 'xterm-256color' },
+        env: { HOME: home, PATH: process.env.PATH, TERM: 'xterm-256color', skip_global_compinit: '1' },
         ...(dehydrate === undefined ? {} : { dehydrate }),
       });
       await waitFor(mark, (seen) => prompts(seen) >= 1, 'first prompt');
