@@ -5,17 +5,17 @@
  * a built-in Tool runs, which announce virtual viewers instead of ports.
  */
 import { runFilePicker } from "dor/commands/open-picker";
-import { printable } from "dor/commands/terminal-text";
+import { printable, renderToolResponse } from "dor/commands/terminal-text";
 import type { PickerTerminal, ToolSurfaceResponse } from "dor/commands/types";
 import { canonicalDorVerb, SURFACE_CONTROL_METHODS } from "dor/protocol";
 import { builtinHandler, VIEW_ERROR_ARGV } from "dor-tools-builtin/file-viewer-format";
-import { serveSequence } from "dor-tools-lib/osc";
+import { viewerAnnouncement } from "dor-tools-builtin/viewer-http";
 import type { FakePtyAdapter } from "dormouse-lib/lib/platform/fake-adapter";
 import { cancelDorControlRequest, dispatchDorControlRequest } from "dormouse-lib/lib/platform/dor-control-dispatch";
 import type { ToolControlResult, ToolHostRequest } from "dormouse-lib/lib/platform/tool-types";
 import type { InteractiveProgram } from "../tutorial-shell";
 import { HOME, type VirtualFs } from "./vfs";
-import type { PlaygroundViewers, ViewerAnnouncement } from "./viewers";
+import type { PlaygroundViewers } from "./viewers";
 
 export interface PlaygroundDorOptions {
   adapter: FakePtyAdapter;
@@ -24,8 +24,8 @@ export interface PlaygroundDorOptions {
   cwd: string;
   fs: VirtualFs;
   viewers: PlaygroundViewers;
-  /** Settles once the service worker can serve viewers. */
-  relay: Promise<unknown>;
+  /** Settles once the service worker can serve viewers; connects it on first call. */
+  relay(): Promise<unknown>;
   toolControl(request: ToolHostRequest): Promise<ToolControlResult>;
   onExit(exitCode: number): void;
 }
@@ -36,27 +36,44 @@ const USAGE = "Usage: dor open [--preview] [--fresh] [--minimize] [--tool <name>
 /** Ports the virtual viewers report: never a real listener, only distinct per viewer. */
 let nextPort = 40000;
 
+const errorLine = (message: string) => `Error: ${printable(message)}\r\n`;
+const crlf = (text: string) => text.replace(/\n/g, "\r\n");
+
 export function startPlaygroundDor(options: PlaygroundDorOptions): InteractiveProgram {
   const [verb = "", ...rest] = options.args;
-  const name = canonicalDorVerb(verb);
-  if (name === "open") return new DorOpen(options, rest);
-  const viewer = builtinHandler("argv", verb);
-  if (viewer || verb === VIEW_ERROR_ARGV) return new DorViewer(options, verb, rest);
-  return new DorMessage(options, verb === "" || verb === "help" || verb === "--help" ? 0 : 1,
-    verb === "" || verb === "help" || verb === "--help" ? USAGE : `Error: unknown command '${printable(verb)}'\r\n${USAGE}`);
+  if (canonicalDorVerb(verb) === "open") return new DorOpen(options, rest);
+  if (builtinHandler("argv", verb) || verb === VIEW_ERROR_ARGV) return new DorViewer(options, verb, rest);
+  const help = verb === "" || verb === "help" || verb === "--help";
+  return new DorMessage(options, help ? 0 : 1, help ? USAGE : errorLine(`unknown command '${verb}'`) + USAGE);
 }
 
-const errorLine = (message: string) => `Error: ${printable(message)}\r\n`;
+/** A run that finishes once: `cleanup`, then its last output and exit code. */
+abstract class DorProgram implements InteractiveProgram {
+  private done = false;
+  constructor(protected readonly options: PlaygroundDorOptions) {}
+  abstract start(): void;
+  handleInput(_data: string): void {}
+  protected cleanup(): void {}
 
-/** Runs to completion at once. */
-class DorMessage implements InteractiveProgram {
-  constructor(private readonly options: PlaygroundDorOptions, private readonly exitCode: number, private readonly text: string) {}
-  start(): void {
-    this.options.adapter.sendOutput(this.options.terminalId, this.text);
-    this.options.onExit(this.exitCode);
+  get finished(): boolean { return this.done; }
+
+  dispose(): void {
+    if (this.done) return;
+    this.done = true;
+    this.cleanup();
   }
-  handleInput(): void {}
-  dispose(): void {}
+
+  protected finish(exitCode: number, text = ""): void {
+    if (this.done) return;
+    this.dispose();
+    if (text) this.options.adapter.sendOutput(this.options.terminalId, text);
+    this.options.onExit(exitCode);
+  }
+}
+
+class DorMessage extends DorProgram {
+  constructor(options: PlaygroundDorOptions, private readonly exitCode: number, private readonly text: string) { super(options); }
+  start(): void { this.finish(this.exitCode, this.text); }
 }
 
 interface OpenFlags { preview: boolean; fresh: boolean; minimize: boolean; json: boolean; tool?: string; path?: string }
@@ -81,13 +98,12 @@ function parseOpenArgs(args: string[]): OpenFlags | Error {
 }
 
 /** `dor open [path]`: the picker when the path is omitted, then one `surface.tool` request. */
-class DorOpen implements InteractiveProgram {
+class DorOpen extends DorProgram {
   private input: ((chunk: string) => void) | null = null;
   private requestId: string | null = null;
   private stopPicker: (() => void) | null = null;
-  private done = false;
 
-  constructor(private readonly options: PlaygroundDorOptions, private readonly args: string[]) {}
+  constructor(options: PlaygroundDorOptions, private readonly args: string[]) { super(options); }
 
   start(): void {
     const flags = parseOpenArgs(this.args);
@@ -116,7 +132,7 @@ class DorOpen implements InteractiveProgram {
       fixedTool: flags.tool,
       home: HOME,
     }).then((choice) => {
-      if (this.done) return;
+      if (this.finished) return;
       // A cancel opens nothing and prints nothing, but is not a success.
       if (!choice) this.finish(1);
       else this.open(flags, choice.file, choice.tool ?? flags.tool);
@@ -134,90 +150,55 @@ class DorOpen implements InteractiveProgram {
         ...(flags.preview ? { preview: true } : {}),
       },
     }, ({ ok, result, error }) => {
-      if (this.done) return;
       this.requestId = null;
       if (!ok) { this.finish(1, errorLine(error ?? "request failed")); return; }
       const response = result as ToolSurfaceResponse;
       const warnings = (response.warnings ?? []).map((warning) => `${printable(warning)}\r\n`).join("");
-      this.finish(0, warnings + (flags.json
-        ? JSON.stringify({
-          status: response.status, surface_id: response.surfaceId, surface_ref: response.surfaceRef,
-          command: response.command, cwd: response.cwd, minimized: response.minimized, key: response.key,
-        }, null, 2).replace(/\n/g, "\r\n") + "\r\n"
-        : `${response.status} ${response.surfaceRef}  ${JSON.stringify(response.command)}\r\n`));
+      this.finish(0, warnings + crlf(renderToolResponse(response, flags.json)));
     });
   }
 
   handleInput(data: string): void {
-    if (this.input) { this.input(data); return; }
-    if (data.includes("\x03") && this.requestId) {
-      cancelDorControlRequest(this.requestId);
-      this.finish(130);
-    }
+    if (this.input) this.input(data);
+    else if (data.includes("\x03") && this.requestId) this.finish(130);
   }
 
-  dispose(): void {
-    this.done = true;
+  protected cleanup(): void {
     this.stopPicker?.();
     if (this.requestId) cancelDorControlRequest(this.requestId);
-  }
-
-  private finish(exitCode: number, text = ""): void {
-    if (this.done) return;
-    this.dispose();
-    if (text) this.options.adapter.sendOutput(this.options.terminalId, text);
-    this.options.onExit(exitCode);
   }
 }
 
 /** `dor __view-file|__view-code|__view-folder <path>` and `dor __view-error
  * <target> <message>`: serves a virtual viewer until Ctrl+C, like the real
  * process serving a loopback port. */
-class DorViewer implements InteractiveProgram {
+class DorViewer extends DorProgram {
   private token: string | null = null;
-  private done = false;
 
-  constructor(private readonly options: PlaygroundDorOptions, private readonly verb: string, private readonly args: string[]) {}
+  constructor(options: PlaygroundDorOptions, private readonly verb: string, private readonly args: string[]) { super(options); }
 
   start(): void {
-    const { adapter, terminalId, viewers, fs, cwd, relay } = this.options;
-    const [input = "", message = ""] = this.args;
-    const path = fs.resolve(cwd, input);
-    const handler = builtinHandler("argv", this.verb);
-    let viewer: ViewerAnnouncement | Error;
-    if (this.verb === VIEW_ERROR_ARGV) viewer = viewers.openError(terminalId, input, message);
-    else if (path === null || !handler) viewer = new Error(`no such file or folder: ${input}`);
-    else viewer = handler.opens === "folder" ? viewers.openFolder(terminalId, path) : viewers.openFile(terminalId, path, handler.format);
-    if (viewer instanceof Error) { this.exit(1, errorLine(viewer.message)); return; }
+    const { adapter, terminalId, viewers, cwd, relay } = this.options;
+    const viewer = viewers.open(terminalId, this.verb, this.args, cwd);
+    if (viewer instanceof Error) { this.finish(1, errorLine(viewer.message)); return; }
     this.token = viewer.token;
-    relay.then(() => {
-      if (this.done) return;
+    relay().then(() => {
+      if (this.finished) return;
       // Reported before the announcement, whose scan must already find it.
       const port = nextPort++;
-      adapter.setOpenPorts(terminalId, [{
-        protocol: "tcp", family: "IPv4", address: "127.0.0.1", port, pid: 1, processName: "dor", origin: location.origin,
-      }]);
-      adapter.sendOutput(terminalId, `\x1b]2;${viewer.title}\x07${serveSequence({ port, path: viewer.path })}`);
+      adapter.setOpenPorts(terminalId, [{ protocol: "tcp", family: "IPv4", address: "127.0.0.1", port, pid: 1, processName: "dor" }]);
+      adapter.sendOutput(terminalId, viewerAnnouncement({ port, path: viewer.path }, viewer.target));
     }, (error: unknown) => {
-      this.exit(1, errorLine(error instanceof Error ? error.message : String(error)));
+      this.finish(1, errorLine(error instanceof Error ? error.message : String(error)));
     });
   }
 
   handleInput(data: string): void {
-    if (data.includes("\x03")) this.exit(0);
+    if (data.includes("\x03")) this.finish(0);
   }
 
-  dispose(): void {
-    if (this.done) return;
-    this.done = true;
+  protected cleanup(): void {
     if (this.token) this.options.viewers.close(this.token);
     this.options.adapter.setOpenPorts(this.options.terminalId, []);
-  }
-
-  private exit(exitCode: number, text = ""): void {
-    if (this.done) return;
-    this.dispose();
-    if (text) this.options.adapter.sendOutput(this.options.terminalId, text);
-    this.options.onExit(exitCode);
   }
 }

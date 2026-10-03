@@ -9,7 +9,7 @@ import { PlaygroundViewers } from "./viewers";
 
 interface ControlDetail { surfaceId: string; method: string; params: Record<string, unknown>; respond(result: unknown): void }
 
-function harness(args: string[], relay: Promise<unknown> = Promise.resolve()) {
+function harness(args: string[], relay: () => Promise<unknown> = () => Promise.resolve()) {
   const adapter = new FakePtyAdapter();
   adapter.spawnPty("t");
   // What the program writes, before the protocol parser strips its OSCs.
@@ -17,7 +17,7 @@ function harness(args: string[], relay: Promise<unknown> = Promise.resolve()) {
   const send = adapter.sendOutput.bind(adapter);
   vi.spyOn(adapter, "sendOutput").mockImplementation((id, data) => { output += data; send(id, data); });
   const fs = createPlaygroundFs();
-  const viewers = new PlaygroundViewers(fs, (id, data) => adapter.sendOutput(id, data), () => location.origin);
+  const viewers = new PlaygroundViewers(fs, (id, data) => adapter.sendOutput(id, data), location.origin);
   const onExit = vi.fn();
   const program = startPlaygroundDor({
     adapter, terminalId: "t", args, cwd: PLAYGROUND_CWD, fs, viewers, relay, toolControl: playgroundToolControl(fs), onExit,
@@ -71,12 +71,12 @@ describe("playground dor open", () => {
 });
 
 describe("playground dor __view-*", () => {
-  it("reports a port answering at this origin before announcing it, and withdraws it on Ctrl+C", async () => {
+  it("reports its port before announcing it, and withdraws it on Ctrl+C", async () => {
     const { adapter, program, onExit, output } = harness(["__view-folder", PLAYGROUND_CWD]);
     program.start();
     await Promise.resolve();
     const [port] = await adapter.getOpenPorts("t");
-    expect(port).toMatchObject({ protocol: "tcp", address: "127.0.0.1", origin: location.origin });
+    expect(port).toMatchObject({ protocol: "tcp", address: "127.0.0.1" });
     const path = /"path":"([^"]+)"/.exec(output())![1];
     expect(path).toMatch(/^\/playground-fs\/[0-9a-f-]{36}\/$/);
     expect(output()).toContain(`\x1b]2;dor-tools-lib\x07${serveSequence({ port: port.port, path })}`);
@@ -88,12 +88,12 @@ describe("playground dor __view-*", () => {
   it("exits with the host's error for a file it cannot show", () => {
     const { program, onExit, output } = harness(["__view-file", "nope"]);
     program.start();
-    expect(output()).toContain("Error: no such file: /home/demo/dor-tools-lib/nope");
+    expect(output()).toContain("Error: no such file or folder: nope");
     expect(onExit).toHaveBeenCalledWith(1);
   });
 
   it("exits when the service worker cannot start", async () => {
-    const { program, onExit, output } = harness(["__view-file", "LICENSE"], Promise.reject(new Error("no service worker")));
+    const { program, onExit, output } = harness(["__view-file", "LICENSE"], () => Promise.reject(new Error("no service worker")));
     program.start();
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(output()).toContain("Error: no service worker");

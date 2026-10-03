@@ -3,18 +3,13 @@ import { constants } from 'node:fs';
 import { open, type FileHandle } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { isAbsolute, relative, sep } from 'node:path';
-import { serveSequence } from 'dor-tools-lib/osc';
-import { CONTROLS, viewerTitle } from './file-viewer-format.js';
 import { allowsFileViewerRequest } from './file-viewer-loopback-guard.js';
+import { HttpError, viewerAnnouncement, viewerHeaders } from './viewer-http.js';
+
+export { HttpError, pathSegments } from './viewer-http.js';
 
 const TEXT = 'text/plain; charset=utf-8';
 
-export { escapeHtml } from './html.js';
-
-/** Thrown by a route to answer with `status` and `message` as plain text. */
-export class HttpError extends Error {
-  constructor(readonly status: number, message = '') { super(message); }
-}
 
 /** Node sends no body on a HEAD response. */
 export function reply(res: ServerResponse, status: number, body: string | Buffer = '', type = TEXT): void {
@@ -62,15 +57,6 @@ export function isInsideRoot(root: string, path: string): boolean {
   return !(isAbsolute(rel) || rel === '..' || rel.startsWith(`..${sep}`));
 }
 
-/** `path`'s `/` segments; null when its spelling alone could leave a root: a
- * backslash or a `.` or `..` segment, and when `strict`, an empty segment or a
- * control character. Containment is decided on the realpath. */
-export function pathSegments(path: string, { strict = false } = {}): string[] | null {
-  const parts = path.split('/');
-  const refused = path.includes('\\') || (strict && CONTROLS.test(path))
-    || parts.some(part => part === '.' || part === '..' || (strict && part === ''));
-  return refused ? null : parts;
-}
 
 export interface CapabilityViewer { port: number; prefix: string; close(): Promise<void> }
 
@@ -96,12 +82,9 @@ export async function startCapabilityViewer({ csp, post = false, chunked = false
   };
   let port = 0;
   const server = createServer((req, res) => {
-    res.setHeader('Cache-Control', 'no-store');
-    res.setHeader('Referrer-Policy', 'no-referrer');
-    res.setHeader('X-Content-Type-Options', 'nosniff');
+    for (const [name, value] of Object.entries(viewerHeaders(csp))) res.setHeader(name, value);
     // The iframe proxy must retain this policy on every MIME type.
     res.setHeader('X-Dormouse-Preserve-CSP', '1');
-    res.setHeader('Content-Security-Policy', csp);
     if (!allowsFileViewerRequest(req, port, prefix, { post })) { answer(res, 403); return; }
     route(req, res, prefix).catch(error => {
       if (res.headersSent) res.destroy();
@@ -127,5 +110,5 @@ export function announceViewer(viewer: { port: number; path: string; close(): Pr
   const stop = () => { void viewer.close().then(() => { process.exitCode = 0; }); };
   process.once('SIGINT', stop);
   process.once('SIGTERM', stop);
-  return `\x1b]2;${viewerTitle(target)}\x07${serveSequence(viewer)}`;
+  return viewerAnnouncement(viewer, target);
 }

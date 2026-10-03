@@ -1,8 +1,6 @@
 import { ERROR_CSP, errorViewerPage } from './error-viewer-page.js';
 import { announceViewer, HttpError, reply, startCapabilityViewer } from './viewer-server.js';
 
-export { errorViewerPage };
-
 /** A listener serving only that page, for the preview slot to frame when an
  * OSC 367 `open` fails (docs/specs/dor-tools-builtin.md -> Error viewer). */
 export async function startErrorViewer(target: string, message: string): Promise<{ port: number; path: string; close(): Promise<void> }> {

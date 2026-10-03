@@ -22,19 +22,28 @@ self.addEventListener('fetch', (event) => {
 async function relay(request, token, rawRoute, search) {
   let route;
   try { route = decodeURIComponent(rawRoute); } catch { return new Response('', { status: 400 }); }
-  const message = { type: 'playground-fs-request', token, method: request.method, route, search,
-    body: request.method === 'POST' ? await request.text() : '' };
-  const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+  const [body, windows] = await Promise.all([
+    request.method === 'POST' ? request.text() : '',
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }),
+  ]);
+  const message = { type: 'playground-fs-request', token, method: request.method, route, search, body };
+  const channels = [];
   const asks = windows.filter((client) => client.frameType === 'top-level').map((client) => new Promise((resolve, reject) => {
     const channel = new MessageChannel();
+    channels.push(channel);
     channel.port1.onmessage = ({ data }) => (data ? resolve(data) : reject());
     client.postMessage(message, [channel.port2]);
   }));
-  const timeout = new Promise((_, reject) => setTimeout(reject, TIMEOUT_MS));
+  let timer;
+  const timeout = new Promise((_, reject) => { timer = setTimeout(reject, TIMEOUT_MS); });
   try {
-    const { status, headers, body } = await Promise.race([Promise.any(asks), timeout]);
-    return new Response(body, { status, headers });
+    const { status, headers, body: answer } = await Promise.race([Promise.any(asks), timeout]);
+    return new Response(answer, { status, headers });
   } catch {
     return new Response('This viewer has closed.', { status: 404, headers: { 'Content-Type': 'text/plain; charset=utf-8' } });
+  } finally {
+    clearTimeout(timer);
+    // A window that holds no viewer, or no playground at all, never answers.
+    for (const channel of channels) channel.port1.close();
   }
 }

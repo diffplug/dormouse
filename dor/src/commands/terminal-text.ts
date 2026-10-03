@@ -1,4 +1,6 @@
-// Browser-safe: the website playground runs the picker that imports these.
+// Browser-safe: the website playground's dor prints with these.
+import type { ToolSurfaceResponse } from './types.js';
+
 const TERMINAL_CONTROLS = /[\x00-\x1f\x7f-\x9f]/g;
 export const escapeControl = (char: string) => `\\u${char.charCodeAt(0).toString(16).padStart(4, '0')}`;
 
@@ -11,4 +13,24 @@ export function printable(text: string): string {
 /** The same controls removed rather than escaped. */
 export function stripControls(text: string): string {
   return text.replace(TERMINAL_CONTROLS, '');
+}
+
+export function renderJson(payload: unknown): string {
+  return `${JSON.stringify(payload, null, 2)}\n`;
+}
+
+/** What `dor tool` and `dor open` print for the host's answer. */
+export function renderToolResponse(response: ToolSurfaceResponse, json: boolean): string {
+  if (json) {
+    return renderJson({
+      status: response.status,
+      surface_id: response.surfaceId,
+      surface_ref: response.surfaceRef,
+      command: response.command,
+      cwd: response.cwd,
+      minimized: response.minimized,
+      key: response.key,
+    });
+  }
+  return `${response.status} ${response.surfaceRef}  ${JSON.stringify(response.command)}\n`;
 }

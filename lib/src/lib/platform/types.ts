@@ -63,11 +63,6 @@ export interface OpenPort {
   port: number;
   pid: number;
   processName?: string;
-  /** Where the listener answers, when that is not `http://localhost:<port>`:
-   *  the website playground's virtual viewers, served from the page's own
-   *  origin (`docs/specs/dor-tool.md` -> Serving). Only a platform scan sets
-   *  it, never Tool output. */
-  origin?: string;
 }
 
 /** Base scan budget. The macOS and Windows socket scans add a per-id allowance;

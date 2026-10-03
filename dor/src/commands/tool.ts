@@ -7,13 +7,11 @@ import type {
   ParseResult,
   ToolListResponse,
   ToolSurfaceRequest,
-  ToolSurfaceResponse,
 } from './types.js';
 import {
   callerWorkingDirectory,
   errorMessage,
   printable,
-  renderJson,
   renderPrintableJson,
   requireControlClient,
   scanPreDelimiterArgs,
@@ -23,6 +21,7 @@ import {
   writeStderr,
   writeStdout,
 } from './shared.js';
+import { renderToolResponse } from './terminal-text.js';
 
 interface ToolFlags {
   readonly list?: boolean;
@@ -231,20 +230,6 @@ export async function dispatchToolSurface(
   }
 }
 
-function renderToolResponse(response: ToolSurfaceResponse, json: boolean): string {
-  if (json) {
-    return renderJson({
-      status: response.status,
-      surface_id: response.surfaceId,
-      surface_ref: response.surfaceRef,
-      command: response.command,
-      cwd: response.cwd,
-      minimized: response.minimized,
-      key: response.key,
-    });
-  }
-  return `${response.status} ${response.surfaceRef}  ${JSON.stringify(response.command)}\n`;
-}
 
 async function listTools(context: DorCommandContext, flags: ToolFlags): Promise<void | Error> {
   const client = requireControlClient(context.options, TOOL_TIMEOUT_MS);

@@ -29,7 +29,7 @@ export async function buildViewerAssets(outdir) {
 }
 
 // `node scripts/build-viewer.mjs <outdir>`
-if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   if (!process.argv[2]) throw new Error('usage: build-viewer.mjs <outdir>');
   await buildViewerAssets(process.argv[2]);
 }

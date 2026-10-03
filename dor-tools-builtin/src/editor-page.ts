@@ -1,4 +1,4 @@
-import { escapeHtml } from './html.js';
+import { escapeHtml } from './viewer-http.js';
 
 // The editor pages load only their own scripts, workers, fonts, and images;
 // the Markdown page renders document HTML through its own allowlist.

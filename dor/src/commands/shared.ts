@@ -9,9 +9,9 @@ import type {
   IdFormat,
   ParseResult,
 } from './types.js';
-import { escapeControl } from './terminal-text.js';
+import { escapeControl, renderJson } from './terminal-text.js';
 
-export { printable, stripControls } from './terminal-text.js';
+export { printable, renderJson } from './terminal-text.js';
 
 export const stringParser = (input: string): string => input;
 
@@ -46,9 +46,6 @@ export function parseNonNegativeInt(input: string, flag: string): number {
   return value;
 }
 
-export function renderJson(payload: unknown): string {
-  return `${JSON.stringify(payload, null, 2)}\n`;
-}
 
 /** `renderJson` for repo text: `JSON.stringify` escapes only C0, so DEL and C1
  *  are escaped too, which leaves the parsed value unchanged. */

@@ -1,10 +1,9 @@
 import { execFileSync } from "node:child_process";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { stateSequence } from "dor-tools-lib/osc";
 import { createPlaygroundFs, PLAYGROUND_CWD, SNAPSHOT_FILES } from "./snapshot";
-import { playgroundToolControl } from "./tool-control";
+import { playgroundIframeUrl, playgroundToolControl } from "./tool-control";
 import { READ_ONLY_ERROR, PlaygroundViewers, type ViewerRequest } from "./viewers";
-import { fileViewerFormat } from "dor-tools-builtin/file-viewer-format";
 import { VirtualFs } from "./vfs";
 
 const README = `${PLAYGROUND_CWD}/README.md`;
@@ -66,19 +65,33 @@ describe("playgroundToolControl", () => {
   });
 });
 
+describe("playgroundIframeUrl", () => {
+  it("frames an announced viewer at this origin and refuses every other page", async () => {
+    vi.stubGlobal("location", { origin: "https://dormouse.sh" });
+    try {
+      expect(await playgroundIframeUrl("http://localhost:40000/playground-fs/t/view?x=1"))
+        .toEqual({ ok: true, url: "https://dormouse.sh/playground-fs/t/view?x=1" });
+      expect(await playgroundIframeUrl("http://localhost:5173/")).toMatchObject({ ok: false, reason: "scheme" });
+      expect(await playgroundIframeUrl("http://example.com/playground-fs/t/view")).toMatchObject({ ok: false });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
 describe("PlaygroundViewers", () => {
   function harness() {
     const writes: [string, string][] = [];
-    const viewers = new PlaygroundViewers(createPlaygroundFs(), (id, data) => writes.push([id, data]), () => "https://dormouse.sh");
+    const viewers = new PlaygroundViewers(createPlaygroundFs(), (id, data) => writes.push([id, data]), "https://dormouse.sh");
     return { viewers, writes };
   }
 
   it("serves the editor page instrumented under the editor policy, and the file as source", () => {
     const { viewers } = harness();
-    const viewer = viewers.openFile("t1", README, fileViewerFormat);
+    const viewer = viewers.open("t1", "__view-file", [README], "/");
     if (viewer instanceof Error) throw viewer;
     expect(viewer.path).toBe(`/playground-fs/${viewer.token}/view`);
-    expect(viewer.title).toBe("README.md");
+    expect(viewer.target).toBe(README);
     const page = viewers.handle(viewer.token, get("view"))!;
     expect(page.headers["Content-Security-Policy"]).toContain("worker-src 'self'");
     expect(page.body).toContain("assets/markdown.js");
@@ -89,7 +102,7 @@ describe("PlaygroundViewers", () => {
 
   it("refuses every write and reports dirty state to the viewer's terminal", () => {
     const { viewers, writes } = harness();
-    const viewer = viewers.openFile("t1", README, fileViewerFormat);
+    const viewer = viewers.open("t1", "__view-file", [README], "/");
     if (viewer instanceof Error) throw viewer;
     for (const route of ["save", "image", "rename"]) {
       expect(viewers.handle(viewer.token, post(route, { text: "x", version: "snapshot" }))).toMatchObject({ status: 403, body: READ_ONLY_ERROR });
@@ -100,7 +113,7 @@ describe("PlaygroundViewers", () => {
 
   it("lists a folder and sends select and activate as OSC 367 opens of absolute paths", () => {
     const { viewers, writes } = harness();
-    const viewer = viewers.openFolder("t2", PLAYGROUND_CWD);
+    const viewer = viewers.open("t2", "__view-folder", ["."], PLAYGROUND_CWD);
     if (viewer instanceof Error) throw viewer;
     const listing = JSON.parse(viewers.handle(viewer.token, get("list", "?dir=src"))!.body);
     expect(listing.entries.map((entry: { name: string }) => entry.name)).toEqual(["frame.ts", "osc.ts", "protocol.ts", "sanitize.ts"]);
@@ -111,7 +124,8 @@ describe("PlaygroundViewers", () => {
 
   it("answers nothing for a token it does not hold, or once closed", () => {
     const { viewers } = harness();
-    const viewer = viewers.openError("t3", README, "gone");
+    const viewer = viewers.open("t3", "__view-error", [README, "gone"], "/");
+    if (viewer instanceof Error) throw viewer;
     expect(viewers.handle(viewer.token, get(""))!.body).toContain("gone");
     viewers.close(viewer.token);
     expect(viewers.handle(viewer.token, get(""))).toBeNull();

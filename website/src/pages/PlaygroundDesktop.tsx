@@ -254,11 +254,11 @@ function PlaygroundDesktopExperience() {
             return new ChangelogRunner({ adapter, terminalId, onExit });
           }
           if (name === "dor") {
-            return fsHost.startDor(terminalId, args, shellRegistry.cwdOf(terminalId) ?? playgroundFs.PLAYGROUND_CWD, onExit);
+            return fsHost.startDor(terminalId, args, shellRegistry.cwdOf(terminalId) ?? fsHost.shellFs.cwd, onExit);
           }
           return null;
         },
-        { fs: fsHost.fs, cwd: playgroundFs.PLAYGROUND_CWD },
+        fsHost.shellFs,
       );
       shellRegistryRef.current = shellRegistry;
 

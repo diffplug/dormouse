@@ -3,21 +3,14 @@
  * Playground filesystem): a fixed tree of text files, POSIX paths only.
  */
 
+import { byDisplayOrder } from "dor-tools-builtin/folder-viewer-page";
+
 export const HOME = "/home/demo";
 
 export type EntryKind = "dir" | "file";
 export interface DirEntry { name: string; kind: EntryKind }
 
 type FsNode = { kind: "dir"; children: Map<string, FsNode> } | { kind: "file"; text: string };
-
-const compare = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
-
-/** Directories first, then by lowercased name, then by name: the order the
- * real folder viewer lists in (`dor-tools-builtin/src/folder-viewer.ts`). */
-function byDisplayOrder(a: DirEntry, b: DirEntry): number {
-  return Number(a.kind !== "dir") - Number(b.kind !== "dir")
-    || compare(a.name.toLowerCase(), b.name.toLowerCase()) || compare(a.name, b.name);
-}
 
 /** `path` with `.`, `..`, and repeated slashes resolved; `..` stops at `/`. */
 export function normalizePath(path: string): string {
@@ -28,12 +21,6 @@ export function normalizePath(path: string): string {
     else parts.push(part);
   }
   return `/${parts.join("/")}`;
-}
-
-/** `path` with the home directory spelled `~`, as a prompt shows it. */
-export function tildePath(path: string): string {
-  if (path === HOME) return "~";
-  return path.startsWith(`${HOME}/`) ? `~${path.slice(HOME.length)}` : path;
 }
 
 export class VirtualFs {
@@ -92,11 +79,14 @@ export class VirtualFs {
     return node?.kind === "file" ? node.text : null;
   }
 
-  /** A directory's entries in display order, or null when `path` is not one. */
+  /** A directory's entries in the folder viewer's order, or null when `path` is not one. */
   list(path: string): DirEntry[] | null {
     const node = this.node(path);
     if (node?.kind !== "dir") return null;
-    return [...node.children].map(([name, child]) => ({ name, kind: child.kind })).sort(byDisplayOrder);
+    return [...node.children]
+      .map(([name, child]) => ({ dir: child.kind === "dir", folded: name.toLowerCase(), entry: { name, kind: child.kind } }))
+      .sort(byDisplayOrder)
+      .map(({ entry }) => entry);
   }
 
   /** `name` in `dir` extended through each directory holding one directory

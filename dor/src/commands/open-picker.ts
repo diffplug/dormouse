@@ -396,7 +396,8 @@ export function parseKeys(chunk: string): Key[] {
   return keys;
 }
 
-function shortPath(path: string, home: string | undefined): string {
+/** `path` with `home` spelled `~`. */
+export function shortPath(path: string, home: string | undefined): string {
   return home && (path === home || path.startsWith(`${home}/`) || path.startsWith(`${home}\\`)) ? `~${path.slice(home.length)}` : path;
 }
 

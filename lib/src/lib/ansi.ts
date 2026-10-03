@@ -29,4 +29,5 @@ export const MOUSE_DISABLE = `${ESC}?1003l${ESC}?1002l${ESC}?1000l${ESC}?1006l`;
 
 // Stylized `user@dormouse:~$ ` prompt used by the playground shell and
 // by canned scenarios so they look the same.
-export const PROMPT = `${fg(32)}user${RESET}@${fg(36)}dormouse${RESET}:${BOLD}${fg(34)}~${RESET}$ `;
+export const promptFor = (dir: string): string => `${fg(32)}user${RESET}@${fg(36)}dormouse${RESET}:${BOLD}${fg(34)}${dir}${RESET}$ `;
+export const PROMPT = promptFor('~');

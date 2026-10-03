@@ -1,4 +1,5 @@
-import { escapeHtml, lastSegment } from './html.js';
+import { viewerTitle } from './file-viewer-format.js';
+import { escapeHtml } from './viewer-http.js';
 
 export const ERROR_CSP = "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'";
 const STYLE = `
@@ -12,7 +13,7 @@ p{margin:0;opacity:.8;overflow-wrap:anywhere;white-space:pre-wrap}
 
 /** The page naming why `target` could not be shown: text only, no script. */
 export function errorViewerPage(target: string, message: string): string {
-  const name = escapeHtml(lastSegment(target) || target);
+  const name = escapeHtml(viewerTitle(target));
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>${name}</title><style>${STYLE}</style></head>`
     + `<body><main><h1>Can't show ${name}</h1><p>${escapeHtml(message)}</p></main></body></html>`;
 }

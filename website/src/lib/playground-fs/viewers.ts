@@ -7,10 +7,12 @@
  */
 import { EDITOR_CSP, editorPage, markdownPage } from "dor-tools-builtin/editor-page";
 import { ERROR_CSP, errorViewerPage } from "dor-tools-builtin/error-viewer-page";
+import { builtinHandler, VIEW_ERROR_ARGV, viewerTitle } from "dor-tools-builtin/file-viewer-format";
 import { FOLDER_CSP, folderViewerPage } from "dor-tools-builtin/folder-viewer-page";
-import { viewerTitle, type FileFormat } from "dor-tools-builtin/file-viewer-format";
+import { HttpError, pathSegments, viewerHeaders } from "dor-tools-builtin/viewer-http";
 import { openSequence, stateSequence } from "dor-tools-lib/osc";
 import { instrumentHtml } from "dormouse-lib/host/iframe-proxy-rewrite";
+import { isRecord } from "dormouse-lib/lib/is-record";
 import type { VirtualFs } from "./vfs";
 
 /** Every viewer URL starts here; the service worker's scope. */
@@ -39,12 +41,15 @@ type Viewer = { terminalId: string } & (
   | { kind: "error"; target: string; message: string }
 );
 
-/** What `serveSequence` announces, and the title the real `announceViewer` prints. */
-export interface ViewerAnnouncement { token: string; path: string; title: string }
+const CSP: Record<Viewer["kind"], string> = { file: EDITOR_CSP, folder: FOLDER_CSP, error: ERROR_CSP };
 
-const HTML = "text/html; charset=utf-8";
-const JSON_TYPE = "application/json";
-const TEXT = "text/plain; charset=utf-8";
+/** A started viewer: the token its URLs carry, and what `serveSequence` announces. */
+export interface ViewerAnnouncement { token: string; path: string; target: string }
+
+type Reply = { status: number; body: string; type: string };
+const reply = (status: number, body: string, type: string): Reply => ({ status, body, type });
+const json = (value: unknown): Reply => reply(200, JSON.stringify(value), "application/json");
+const html = (page: string): Reply => reply(200, page, "text/html; charset=utf-8");
 
 /** One window's viewers, keyed by an unguessable token in their URL. */
 export class PlaygroundViewers {
@@ -55,26 +60,25 @@ export class PlaygroundViewers {
     /** Writes to a viewer's terminal as its process's stdout would. */
     private readonly write: (terminalId: string, data: string) => void,
     /** The Wall's origin, which the instrumented pages report to. */
-    private readonly embedderOrigin: () => string,
+    private readonly embedderOrigin: string,
   ) {}
 
-  /** Starts a file viewer on `target` with the handler's `format`, or names why it cannot. */
-  openFile(terminalId: string, target: string, format: (path: string) => FileFormat | null): ViewerAnnouncement | Error {
-    if (this.fs.kind(target) !== "file") return new Error(`no such file: ${target}`);
-    const served = format(target);
-    if (!served) return new Error("unsupported file format; configure a user Tool association");
+  /** Starts the viewer `dor <verb> <args…>` runs in `terminalId`, or names why it cannot. */
+  open(terminalId: string, verb: string, [input = "", message = ""]: string[], cwd: string): ViewerAnnouncement | Error {
+    if (verb === VIEW_ERROR_ARGV) return this.add({ terminalId, kind: "error", target: input, message }, "", input);
+    const handler = builtinHandler("argv", verb);
+    const target = this.fs.resolve(cwd, input);
+    const kind = target === null ? null : this.fs.kind(target);
+    if (!handler || target === null || !kind) return new Error(`no such file or folder: ${input}`);
+    if (handler.opens === "folder") {
+      return kind === "dir" ? this.add({ terminalId, kind: "folder", root: target }, "", target) : new Error("not a directory");
+    }
+    if (kind !== "file") return new Error(`not a file: ${input}`);
+    const format = handler.format(target);
+    if (!format) return new Error("unsupported file format; configure a user Tool association");
     // The snapshot holds only text; the HTML, image, and media routes have nothing to serve.
-    if (!served.text) return new Error("the playground's file viewer shows text files only");
-    return this.add({ terminalId, kind: "file", target, markdown: !!served.markdown }, "view", target);
-  }
-
-  openFolder(terminalId: string, root: string): ViewerAnnouncement | Error {
-    if (this.fs.kind(root) !== "dir") return new Error("not a directory");
-    return this.add({ terminalId, kind: "folder", root }, "", root);
-  }
-
-  openError(terminalId: string, target: string, message: string): ViewerAnnouncement {
-    return this.add({ terminalId, kind: "error", target, message }, "", target);
+    if (!format.text) return new Error("the playground's file viewer shows text files only");
+    return this.add({ terminalId, kind: "file", target, markdown: !!format.markdown }, "view", target);
   }
 
   close(token: string): void {
@@ -84,113 +88,79 @@ export class PlaygroundViewers {
   private add(viewer: Viewer, page: string, target: string): ViewerAnnouncement {
     const token = crypto.randomUUID();
     this.viewers.set(token, viewer);
-    return { token, path: `${VIEWER_SCOPE}${token}/${page}`, title: viewerTitle(target) };
+    return { token, path: `${VIEWER_SCOPE}${token}/${page}`, target };
   }
 
   /** The answer for one request to `token`'s viewer, or null when this window has none. */
   handle(token: string, request: ViewerRequest): ViewerResponse | null {
     const viewer = this.viewers.get(token);
     if (!viewer) return null;
+    let answer: Reply;
     try {
-      switch (viewer.kind) {
-        case "file": return this.fileRoute(viewer, request);
-        case "folder": return this.folderRoute(viewer, request);
-        case "error":
-          if (request.method !== "GET" || request.route !== "") return reply(404, "", TEXT, ERROR_CSP);
-          return reply(200, errorViewerPage(viewer.target, viewer.message), HTML, ERROR_CSP);
-      }
+      answer = viewer.kind === "file" ? this.fileRoute(viewer, request)
+        : viewer.kind === "folder" ? this.folderRoute(viewer, request)
+        : request.method === "GET" && request.route === "" ? html(errorViewerPage(viewer.target, viewer.message))
+        : reply(404, "", "text/plain; charset=utf-8");
     } catch (error) {
-      if (error instanceof HttpError) return reply(error.status, error.message, TEXT, cspOf(viewer));
-      throw error;
+      if (!(error instanceof HttpError)) throw error;
+      answer = reply(error.status, error.message, "text/plain; charset=utf-8");
     }
+    return { status: answer.status, body: answer.body, headers: { "Content-Type": answer.type, ...viewerHeaders(CSP[viewer.kind]) } };
   }
 
-  private fileRoute(viewer: Extract<Viewer, { kind: "file" }>, { method, route, body }: ViewerRequest): ViewerResponse {
+  private fileRoute(viewer: Extract<Viewer, { kind: "file" }>, { method, route, body }: ViewerRequest): Reply {
     const name = viewerTitle(viewer.target);
     if (method === "POST") {
       if (route === "state") {
         const dirty = parseJson(body)?.dirty;
         if (typeof dirty !== "boolean") throw new HttpError(400);
         this.write(viewer.terminalId, stateSequence({ dirty }));
-        return reply(200, "{}", JSON_TYPE, EDITOR_CSP);
+        return json({});
       }
       if (route === "save" || (viewer.markdown && (route === "image" || route === "rename"))) {
         throw new HttpError(403, READ_ONLY_ERROR);
       }
       throw new HttpError(404);
     }
-    if (route === "view") {
-      return reply(200, instrumentHtml((viewer.markdown ? markdownPage : editorPage)(name), this.embedderOrigin()), HTML, EDITOR_CSP);
-    }
-    if (route === "source") {
-      const text = this.fs.read(viewer.target);
-      if (text === null) throw new HttpError(404);
-      return reply(200, JSON.stringify({ text, version: "snapshot", name }), JSON_TYPE, EDITOR_CSP);
-    }
+    if (route === "view") return html(instrumentHtml((viewer.markdown ? markdownPage : editorPage)(name), this.embedderOrigin));
+    if (route === "source") return json({ text: this.fs.read(viewer.target), version: "snapshot", name });
     throw new HttpError(404);
   }
 
-  private folderRoute(viewer: Extract<Viewer, { kind: "folder" }>, { method, route, search, body }: ViewerRequest): ViewerResponse {
+  private folderRoute(viewer: Extract<Viewer, { kind: "folder" }>, { method, route, search, body }: ViewerRequest): Reply {
     if (method === "POST") {
       if (route !== "select" && route !== "activate") throw new HttpError(404);
       const path = parseJson(body)?.path;
       if (typeof path !== "string" || !path) throw new HttpError(400);
-      const target = this.inside(viewer.root, path);
-      this.write(viewer.terminalId, openSequence({ path: target, preview: route === "select" }));
-      return reply(200, JSON.stringify({ ok: true, status: "sent" }), JSON_TYPE, FOLDER_CSP);
+      this.write(viewer.terminalId, openSequence({ path: this.inside(viewer.root, path), preview: route === "select" }));
+      return json({ ok: true, status: "sent" });
     }
-    if (route === "") {
-      return reply(200, instrumentHtml(folderViewerPage(viewer.root), this.embedderOrigin()), HTML, FOLDER_CSP);
-    }
-    if (route === "list") {
-      const dir = this.inside(viewer.root, new URLSearchParams(search).get("dir") ?? "");
-      const entries = this.fs.list(dir);
-      if (!entries) throw new HttpError(404, "not a directory");
-      return reply(200, JSON.stringify({
-        entries: entries.map(({ name, kind }) => ({ name: kind === "dir" ? this.fs.compacted(dir, name) : name, kind, ignored: false })),
-        truncated: false,
-      }), JSON_TYPE, FOLDER_CSP);
-    }
-    throw new HttpError(404);
+    if (route === "") return html(instrumentHtml(folderViewerPage(viewer.root), this.embedderOrigin));
+    if (route !== "list") throw new HttpError(404);
+    const dir = this.inside(viewer.root, new URLSearchParams(search).get("dir") ?? "");
+    const entries = this.fs.list(dir);
+    if (!entries) throw new HttpError(404, "not a directory");
+    return json({
+      entries: entries.map(({ name, kind }) => ({ name: kind === "dir" ? this.fs.compacted(dir, name) : name, kind, ignored: false })),
+      truncated: false,
+    });
   }
 
   /** The existing path the page-supplied POSIX `rel` names inside `root`. */
   private inside(root: string, rel: string): string {
-    const parts = rel === "" ? [] : rel.split("/");
-    if (parts.some((part) => part === "" || part === "." || part === "..")) throw new HttpError(403, "invalid path");
+    const parts = rel === "" ? [] : pathSegments(rel, { strict: true });
+    if (!parts) throw new HttpError(403, "invalid path");
     const path = [root, ...parts].join("/");
     if (!this.fs.kind(path)) throw new HttpError(404, "no such entry");
     return path;
   }
 }
 
-class HttpError extends Error {
-  constructor(readonly status: number, message = "") { super(message); }
-}
-
-const cspOf = (viewer: Viewer): string =>
-  viewer.kind === "file" ? EDITOR_CSP : viewer.kind === "folder" ? FOLDER_CSP : ERROR_CSP;
-
 function parseJson(body: string): Record<string, unknown> | null {
   try {
     const value: unknown = JSON.parse(body);
-    return value && typeof value === "object" ? value as Record<string, unknown> : null;
+    return isRecord(value) ? value : null;
   } catch {
     return null;
   }
-}
-
-/** With the headers every real viewer response carries (`viewer-server.ts`). */
-function reply(status: number, body: string, contentType: string, csp: string): ViewerResponse {
-  return {
-    status,
-    body,
-    headers: {
-      "Content-Type": contentType,
-      "Cache-Control": "no-store",
-      "Referrer-Policy": "no-referrer",
-      "X-Content-Type-Options": "nosniff",
-      "Content-Security-Policy": csp,
-    },
-  };
 }

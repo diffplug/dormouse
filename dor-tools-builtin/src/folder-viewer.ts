@@ -4,7 +4,7 @@ import type { IncomingMessage } from 'node:http';
 import { join } from 'node:path';
 import { resolveBinaryPath, spawnAndCapture } from 'dor-lib-common';
 import { openSequence, validToolOpenPath } from 'dor-tools-lib/osc';
-import { FOLDER_CSP, folderViewerPage } from './folder-viewer-page.js';
+import { byDisplayOrder, FOLDER_CSP, folderViewerPage } from './folder-viewer-page.js';
 import { announceViewer, HttpError, isInsideRoot, pathSegments, readJsonBody, reply, startCapabilityViewer } from './viewer-server.js';
 
 /** Entries one listing returns. */
@@ -20,12 +20,6 @@ export interface FolderEntry { name: string; kind: FolderEntryKind; ignored: boo
 export type FolderOpenResult = { ok: true; status: string } | { ok: false; error: string };
 /** Opens a canonical path inside the root: `preview` for select, pinned for activate. */
 export type FolderOpen = (path: string, preview: boolean) => Promise<FolderOpenResult>;
-
-const compare = (a: string, b: string): number => a < b ? -1 : a > b ? 1 : 0;
-type Ordered = { dir: boolean; folded: string; entry: { name: string } };
-/** Directories first, then by lowercased name, then by name. */
-const byDisplayOrder = (a: Ordered, b: Ordered): number =>
-  Number(!a.dir) - Number(!b.dir) || compare(a.folded, b.folded) || compare(a.entry.name, b.entry.name);
 
 /** The `names` in `dir` that `git` ignores. Any failure (no git, not a
  * repository, a timeout) answers none: ignore state only dims entries. */

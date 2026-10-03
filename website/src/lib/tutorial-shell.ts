@@ -1,5 +1,6 @@
-import { BOLD, CLEAR_LINE, PROMPT, RESET, fg } from 'dormouse-lib/lib/ansi';
-import { tildePath, type VirtualFs } from './playground-fs/vfs';
+import { BOLD, CLEAR_LINE, PROMPT, RESET, fg, promptFor } from 'dormouse-lib/lib/ansi';
+import { shortPath } from 'dor/commands/open-picker';
+import { HOME, type VirtualFs } from './playground-fs/vfs';
 
 export type SendOutput = (data: string) => void;
 
@@ -57,6 +58,9 @@ export function shellWords(line: string): string[] {
   return words;
 }
 
+/** A shell's filesystem and working directory. */
+interface Place { fs: VirtualFs; cwd: string }
+
 /** Exit code a POSIX shell uses for an unrecognized command. */
 const EXIT_COMMAND_NOT_FOUND = 127;
 
@@ -76,9 +80,8 @@ export class TutorialShell {
   private activeProgram: InteractiveProgram | null = null;
   private promptShown = false;
   private runningCommandLine: string | null = null;
-  private readonly fs: VirtualFs | null;
-  /** The working directory, reported with each prompt; only with `fs`. */
-  cwd: string | null;
+  /** The filesystem and working directory, when the shell has them. */
+  private readonly place: Place | null;
 
   /** With `fs` and `cwd`, the shell has a working directory and the `cd`,
    * `ls`, and `pwd` builtins (docs/specs/tutorial.md -> Playground filesystem). */
@@ -90,8 +93,12 @@ export class TutorialShell {
     this.sendOutput = sendOutput;
     this.startProgram = startProgram;
     this.promptShown = options.promptShown ?? false;
-    this.fs = options.fs ?? null;
-    this.cwd = this.fs ? options.cwd ?? '/' : null;
+    this.place = options.fs ? { fs: options.fs, cwd: options.cwd ?? '/' } : null;
+  }
+
+  /** The working directory, reported with each prompt; only with `fs`. */
+  get cwd(): string | null {
+    return this.place?.cwd ?? null;
   }
 
   /** Shows the first prompt, unless a program or an earlier prompt already holds the screen. */
@@ -251,13 +258,14 @@ export class TutorialShell {
       return null;
     }
     const [name = '', ...args] = shellWords(cmd);
-    if (this.fs && (name === 'cd' || name === 'ls' || name === 'pwd')) {
+    const place = this.place;
+    if (place && (name === 'cd' || name === 'ls' || name === 'pwd')) {
       this.sendOutput(oscCommandLine(cmd) + OSC_COMMAND_START);
-      this.finishCommand(name === 'cd' ? this.cd(args) : name === 'ls' ? this.ls(args) : this.pwd());
+      this.finishCommand(name === 'cd' ? this.cd(place, args) : name === 'ls' ? this.ls(place, args) : this.print(place.cwd));
       return null;
     }
     if (!this.launch(name, args, cmd)) {
-      const names = this.fs ? ['tut', 'dor open', 'ls', 'cd', 'ascii-splash', 'changelog'] : ['tut', 'ascii-splash', 'changelog'];
+      const names = place ? ['tut', 'dor open', 'ls', 'cd', 'ascii-splash', 'changelog'] : ['tut', 'ascii-splash', 'changelog'];
       const list = names.map((known) => `${fg(36)}${known}${fg(90)}`);
       this.sendOutput(`${fg(90)}Unknown command. Try ${list.slice(0, -1).join(', ')}, or ${list[list.length - 1]}.${RESET}\r\n`);
       this.finishCommand(EXIT_COMMAND_NOT_FOUND);
@@ -266,56 +274,52 @@ export class TutorialShell {
   }
 
   private prompt(): string {
-    return this.cwd === null ? PROMPT : `${fg(32)}user${RESET}@${fg(36)}dormouse${RESET}:${BOLD}${fg(34)}${tildePath(this.cwd)}${RESET}$ `;
+    return this.place ? promptFor(shortPath(this.place.cwd, HOME)) : PROMPT;
   }
 
   private showPrompt(): void {
-    this.sendOutput(OSC_PROMPT_START + (this.cwd === null ? '' : oscCwd(this.cwd)) + this.prompt() + OSC_PROMPT_END);
+    this.sendOutput(OSC_PROMPT_START + (this.place ? oscCwd(this.place.cwd) : '') + this.prompt() + OSC_PROMPT_END);
     this.promptShown = true;
   }
 
-  /** Writes builtin output, which is plain text lines. */
-  private print(lines: string[]): void {
-    if (lines.length) this.sendOutput(lines.map((line) => `${line}\r\n`).join(''));
-  }
-
-  /** `path` resolved against the cwd, or null after reporting why not. */
-  private resolve(command: string, path: string): string | null {
-    const resolved = this.fs!.resolve(this.cwd!, path);
-    if (resolved !== null && this.fs!.kind(resolved)) return resolved;
-    this.print([`${command}: no such file or directory: ${path}`]);
-    return null;
-  }
-
-  private cd(args: string[]): number {
-    const target = this.resolve('cd', args[0] ?? '~');
-    if (target === null) return 1;
-    if (this.fs!.kind(target) !== 'dir') {
-      this.print([`cd: not a directory: ${args[0]}`]);
-      return 1;
-    }
-    this.cwd = target;
+  /** Writes one line of builtin output; answers exit code 0. */
+  private print(line: string): number {
+    this.sendOutput(`${line}\r\n`);
     return 0;
   }
 
-  private ls(args: string[]): number {
+  /** `path` resolved against the cwd, or null after reporting why not. */
+  private resolve({ fs, cwd }: Place, command: string, path: string): string | null {
+    const resolved = fs.resolve(cwd, path);
+    if (resolved !== null && fs.kind(resolved)) return resolved;
+    this.print(`${command}: no such file or directory: ${path}`);
+    return null;
+  }
+
+  private cd(place: Place, args: string[]): number {
+    const target = this.resolve(place, 'cd', args[0] ?? '~');
+    if (target === null) return 1;
+    if (place.fs.kind(target) !== 'dir') {
+      this.print(`cd: not a directory: ${args[0]}`);
+      return 1;
+    }
+    place.cwd = target;
+    return 0;
+  }
+
+  private ls(place: Place, args: string[]): number {
     const paths = args.filter((arg) => !arg.startsWith('-'));
     if (paths.length === 0) paths.push('.');
     let exitCode = 0;
     paths.forEach((path, index) => {
-      const target = this.resolve('ls', path);
+      const target = this.resolve(place, 'ls', path);
       if (target === null) { exitCode = 1; return; }
-      const entries = this.fs!.list(target);
-      if (paths.length > 1) this.print([`${index ? '\r\n' : ''}${path}:`]);
-      this.print([entries
+      const entries = place.fs.list(target);
+      if (paths.length > 1) this.print(`${index ? '\r\n' : ''}${path}:`);
+      this.print(entries
         ? entries.map(({ name, kind }) => (kind === 'dir' ? `${BOLD}${fg(34)}${name}/${RESET}` : name)).join('  ')
-        : path]);
+        : path);
     });
     return exitCode;
-  }
-
-  private pwd(): number {
-    this.print([this.cwd!]);
-    return 0;
   }
 }

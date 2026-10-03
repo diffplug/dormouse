@@ -1,12 +1,13 @@
 /**
  * The desktop playground's `toolControl` (docs/specs/tutorial.md -> Playground
- * filesystem): `lib/src/host/tool-open.ts` with no user `dormouse.yml`, so
- * every target opens with the built-in its kind and format select.
+ * filesystem): a host with no user `dormouse.yml`, so every target opens with
+ * a built-in, resolved as the hosts resolve one.
  */
-import { BUILTIN_HANDLERS, builtinHandler, defaultBuiltin, viewerTitle } from "dor-tools-builtin/file-viewer-format";
+import { builtinHandler } from "dor-tools-builtin/file-viewer-format";
 import { defaultBrowserViewportConfig } from "dor-lib-common/browser-viewports";
 import type { IframeProxyResult } from "dormouse-lib/lib/platform/iframe-proxy-types";
 import type { ToolControlResult, ToolHostRequest } from "dormouse-lib/lib/platform/tool-types";
+import { builtinOpenResult, noUserToolMessage, offerBuiltins } from "dormouse-lib/lib/tool-open-builtin";
 import { HOME, type VirtualFs } from "./vfs";
 import { VIEWER_SCOPE } from "./viewers";
 
@@ -14,12 +15,15 @@ import { VIEWER_SCOPE } from "./viewers";
 const USER_CONFIG = `${HOME}/.config/dormouse/dormouse.yml`;
 
 export function playgroundToolControl(fs: VirtualFs) {
-  /** `input` as an existing snapshot path and its kind, or the host's error. */
-  function target(input: string, cwd: string): { path: string; directory: boolean } | Error {
+  /** `input` as an existing snapshot path and its built-in candidates, or the host's error. */
+  function target(input: string, cwd: string) {
     const path = fs.resolve(cwd, input);
     if (path === null) return new Error("expected a local path or file: URL, not another URL or a Surface handle");
     const kind = fs.kind(path);
-    return kind ? { path, directory: kind === "dir" } : new Error(`no such file or folder: ${input}`);
+    if (!kind) return new Error(`no such file or folder: ${input}`);
+    const candidates = new Map<string, string>();
+    offerBuiltins(candidates, path, kind === "dir");
+    return { path, directory: kind === "dir", candidates };
   }
 
   return async (request: ToolHostRequest): Promise<ToolControlResult> => {
@@ -27,40 +31,17 @@ export function playgroundToolControl(fs: VirtualFs) {
       case "open": {
         const resolved = target(request.target, request.cwd);
         if (resolved instanceof Error) return { status: "error", message: resolved.message };
-        const { path, directory } = resolved;
-        const kind = directory ? "folder" : "file";
-        const name = request.tool ?? BUILTIN_HANDLERS.find((handler) => handler.opens === kind && handler.offered(path))?.tool;
-        const builtin = builtinHandler("tool", name);
-        if (!builtin) {
-          return { status: "error", message: request.tool
-            ? `no user Tool '${request.tool}' in ${USER_CONFIG}`
-            : `no Tool matches '${request.target}'; add an open rule to ${USER_CONFIG}, or use dor open --tool <name> <file>` };
-        }
-        if (builtin.opens !== kind) {
-          return { status: "error", message: `${name} cannot open the ${kind} '${request.target}'; use ${defaultBuiltin(directory).tool}` };
-        }
-        if (!directory && !builtin.format(path)) {
-          return { status: "error", message: `${name} does not support '${viewerTitle(path)}'; add an open rule to ${USER_CONFIG} naming a user Tool` };
-        }
-        return {
-          status: "ok", projectRoot: request.cwd, path: "<built-in>", name: builtin.kind, scope: "builtin",
-          run: ["dor", builtin.argv, path], key: [path], render: "iframe", port: "announced", warnings: [], target: path,
-        };
+        const name = request.tool ?? resolved.candidates.keys().next().value;
+        return builtinOpenResult(request, name, resolved.path, resolved.directory, USER_CONFIG, [])
+          ?? { status: "error", message: noUserToolMessage(request, USER_CONFIG) };
       }
       case "open-handlers": {
         const resolved = target(request.target, request.cwd);
         if (resolved instanceof Error) throw resolved;
-        const kind = resolved.directory ? "folder" : "file";
-        const offered = BUILTIN_HANDLERS.filter((handler) => handler.opens === kind && handler.offered(resolved.path));
-        return {
-          status: "open-handlers",
-          handlers: {
-            handlers: offered.map((handler, index) => ({
-              tool: handler.tool, description: handler.describe(resolved.path), reason: index ? "built-in" : "built-in; no open rule matches",
-            })),
-            config: USER_CONFIG,
-          },
-        };
+        const handlers = [...resolved.candidates].map(([tool, reason]) => ({
+          tool, description: builtinHandler("tool", tool)!.describe(resolved.path), reason,
+        }));
+        return { status: "open-handlers", handlers: { handlers, config: USER_CONFIG } };
       }
       case "lookup":
         return { status: "no-file" };
@@ -72,10 +53,13 @@ export function playgroundToolControl(fs: VirtualFs) {
   };
 }
 
-/** Fronts only the playground's own viewers, which instrument themselves; any
- * other page is refused, since nothing here can proxy it. */
+/** Fronts only the playground's own viewers: `useToolServing` frames an
+ * announced port at `localhost`, and the page that answers is this origin's
+ * `/playground-fs/` service worker. Every other page is refused, since
+ * nothing here can proxy it. */
 export async function playgroundIframeUrl(targetUrl: string): Promise<IframeProxyResult> {
-  return targetUrl.startsWith(`${location.origin}${VIEWER_SCOPE}`)
-    ? { ok: true, url: targetUrl }
+  const url = new URL(targetUrl);
+  return url.hostname === "localhost" && url.pathname.startsWith(VIEWER_SCOPE)
+    ? { ok: true, url: `${location.origin}${url.pathname}${url.search}` }
     : { ok: false, reason: "scheme", detail: "the playground frames only its own file viewers" };
 }
