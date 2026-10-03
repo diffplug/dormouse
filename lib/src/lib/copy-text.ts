@@ -601,6 +601,8 @@ export function computeScopes(buf: CopyBuffer, sel: Span): Scope[] {
 // ---------------------------------------------------------------------------
 // Nudging an edge a word at a time
 
+/** The next cell in `dir`, across rows. An edge past its row's text (a drag
+ *  can end in trailing blank cells) is clamped to the text first. */
 function step(buf: CopyBuffer, p: GridPos, dir: 1 | -1): GridPos | null {
   let { row, col } = p;
   col = Math.min(col, buf.row(row).cells.length) + dir;
@@ -618,7 +620,7 @@ const cellAt = (buf: CopyBuffer, p: GridPos) => buf.row(p.row).cells[p.col];
 /**
  * Move a selection edge one word in `dir`. `edge` says which side of a word it
  * rests on: a start lands on a word's first cell, an end on its last. A row
- * boundary ends a word.
+ * boundary ends a word, and an edge on whitespace lands on the adjacent word.
  */
 export function nudge(buf: CopyBuffer, p: GridPos, dir: 1 | -1, edge: 'start' | 'end'): GridPos {
   const leavingWord = (dir > 0) === (edge === 'start') && !isBlankCell(cellAt(buf, p));

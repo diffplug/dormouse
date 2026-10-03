@@ -73,6 +73,9 @@ export function TerminalPaneHeader({ id, title, params, terminalContext = false 
   const context = useContext(TerminalContextContext);
   const activityStates = useSyncExternalStore(subscribeToActivity, getActivitySnapshot);
   const terminalStates = useSyncExternalStore(subscribeToTerminalPaneState, getTerminalPaneStateSnapshot);
+  // Primitive selectors, never the store's map: it is replaced on every drag
+  // and hover update, so a whole-map subscription would rerender every header
+  // (docs/specs/mouse-and-clipboard.md §7).
   const showMouseIcon = useSyncExternalStore(
     subscribeToMouseSelection, () => getMouseSelectionState(id).mouseReporting !== 'none',
   );
