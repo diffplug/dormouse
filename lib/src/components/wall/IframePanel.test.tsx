@@ -188,6 +188,30 @@ describe('IframePanel', () => {
     root = createRoot(container);
   });
 
+  // StrictMode mounts, unmounts and remounts: reusing one id would send create,
+  // release, create, which a transport may deliver as create, create, release
+  // — closing the grant the live view was just given.
+  it('never asks for a lease it has released, under StrictMode', async () => {
+    const calls: string[] = [];
+    const platform = new FakePtyAdapter() as FakePtyAdapter & Pick<PlatformAdapter, 'createIframeProxyUrl' | 'releaseIframeProxy'>;
+    platform.createIframeProxyUrl = async (_url: string, lease?: string) => {
+      calls.push(`create ${lease}`);
+      return { ok: true as const, url: 'http://127.0.0.1:61234/app' };
+    };
+    platform.releaseIframeProxy = (lease: string) => { calls.push(`release ${lease}`); };
+    setPlatform(platform);
+    await renderPanel(stubActions(), paneProps('iframe-strict'));
+    const released = new Set<string>();
+    for (const call of calls) {
+      const [verb, lease] = call.split(' ');
+      if (verb === 'release') released.add(lease);
+      else expect(released.has(lease), `${call} after its release in ${calls.join(', ')}`).toBe(false);
+    }
+    const created = calls.filter((call) => call.startsWith('create')).map((call) => call.split(' ')[1]);
+    expect(created.length).toBeGreaterThan(0);
+    expect(released.has(created.at(-1)!)).toBe(false);
+  });
+
   // The frame is not the only consumer of the source URL: `liveUrl`, the
   // history entries, and the upstream base that in-frame locations are mapped
   // against all read the same string. Normalized only at the frame, a

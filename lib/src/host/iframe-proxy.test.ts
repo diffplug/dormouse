@@ -667,13 +667,19 @@ describe('iframe grant capacity', () => {
   it.each(['sequential', 'concurrent'] as const)('keeps at most 32 published listeners after %s creation', async (mode) => {
     advanceClock(6 * 60_000);
     await sweep();
-    const port = await upstream((_q, s) => { s.writeHead(204); s.end(); });
+    // An evicted grant's port is free for any process to bind again — another
+    // test file's server, or a later grant here — so a port that merely
+    // listens proves nothing. Only this upstream's token, through this
+    // proxy, does, and live grants never share a port.
+    const token = `capacity-${mode}-${Math.random()}`;
+    const port = await upstream((_q, s) => { s.writeHead(200, { 'content-type': 'text/plain' }); s.end(token); });
     const target = `http://127.0.0.1:${port}/`;
     const urls: string[] = [];
     if (mode === 'concurrent') urls.push(...await Promise.all(Array.from({ length: 40 }, () => frame(target))));
     else for (let i = 0; i < 40; i++) urls.push(await frame(target));
-    const listening = await Promise.all(urls.map((url) => isListening(Number(new URL(url).port))));
-    expect(listening.filter(Boolean)).toHaveLength(32);
+    const answers = await Promise.all(urls.map((url) => get(url).then((r) => r.body === token, () => false)));
+    const live = new Set(urls.filter((_, i) => answers[i]).map((url) => new URL(url).port));
+    expect(live.size).toBe(32);
   });
 });
 
