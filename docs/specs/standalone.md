@@ -333,7 +333,7 @@ Source of truth: `standalone/src-tauri/src/workspaces.rs`;
 | `pty:marked` | `data.id` | the window showing it; the id then falls silent until its replay |
 | `pty:list` | `data.forWindow` | the window that asked |
 | `alert:*` | `data.forWindow`, then `data.id` | that window; else the window showing the Session; neither → every window |
-| `dor:controlRequest` | `params.workspace`, `params.window`, `data.surfaceId` | in that precedence: the window holding the named Workspace (§Workspace registry), the named window, the caller's Surface's owner; none → the focused window, else `main`, else one registered window, **never all** |
+| `dor:controlRequest` | `params.workspace`, `params.window`, `data.surfaceId` | in that precedence: the window holding the named Workspace (§Workspace registry), the named window, the caller's Surface's owner; none → the most recently focused window (a never-focused one last), **never all** |
 | `dor:controlCancel` | `data.requestId` | the window its request went to; unknown → every window |
 | `burrow:ask` | `data.params.surfaceId` | its owner; a Surface with no PTY here, or an ask naming none, → every window (§Burrow service) |
 | `voice:result` | — | nowhere: only one that outlived its invoke gets here |
