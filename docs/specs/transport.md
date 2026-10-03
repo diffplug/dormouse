@@ -72,7 +72,19 @@ Source of truth: `ITERM2_COMPAT_VERSION` in `standalone/sidecar/pty-core.js` and
 3. The webview resumes terminals with their launch shells (consumer: `docs/specs/mouse-and-clipboard.md` -> "8.6 Paste Content").
 4. A saved layout is reused only when its leaves match the live visible pane set; saved minimized PTYs are registered as Doors.
 
-**A collection finishes only on its own answer**: a host serving several windows echoes the `requestInit` token on the `pty:list` and every `pty:replay` behind it, and the collector ignores a different one (rationale). **An answer carrying no token is taken** — the hosts that echo none (VS Code, Pocket, the website) run one collector per JS realm. **A collection that timed out is not one that found no PTYs**, and `LivePtys` says which; cold-restoring on a timeout starts a second set of shells over the running ones. **A collector given `retryTimeoutMs` asks once more before reporting silence** (rationale), and **`resumeOrRestore` and `restoreWindow` ask for it only when the saved session names a terminal pane**. Source of truth: `collectLivePtys` in `lib/src/lib/reconnect.ts`; `list` in `standalone/sidecar/pty-core.js`.
+```mermaid
+flowchart TD
+  A[requestInit, fresh token] --> B{own pty:list in time?}
+  B -- "yes, PTYs listed" --> R[resume them]
+  B -- "yes, none" --> S[cold restore]
+  B -- no --> D{retryTimeoutMs, unused?}
+  D -- yes --> A
+  D -- no, timedOut --> E{caller}
+  E -- arrival --> F[refuse: adopt_failed]
+  E -- boot --> S
+```
+
+**A collection finishes only on its own answer**: a host serving several windows echoes the `requestInit` token on the `pty:list` and every `pty:replay` behind it, and the collector ignores a different one (rationale). **An answer carrying no token is taken** — the hosts that echo none (VS Code, Pocket, the website) run one collector per JS realm. **A collection that timed out is not one that found no PTYs** (`LivePtys`): restoring over it starts a second set of shells. **A collector given `retryTimeoutMs` asks once more before reporting silence** (rationale), and **`resumeOrRestore` and `restoreWindow` give it only when the saved session names a terminal pane**. Source of truth: `collectLivePtys` in `lib/src/lib/reconnect.ts`; `list` in `standalone/sidecar/pty-core.js`.
 
 **Seeded titles reject the sentinels.** Saved pane and door titles come back through `setTerminalUserTitle()`, which rejects the reserved `<idle>` prefix (`docs/specs/terminal-state.md` → Supported OSC Inputs); the seed also skips `<unnamed>`, the default panel placeholder (rationale).
 
