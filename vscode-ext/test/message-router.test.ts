@@ -641,3 +641,25 @@ it('removes the alert state of the PTYs a closing panel kills', async () => {
   await vi.waitFor(() => expect(ptys.order).toContain('kill panel-pty'));
   expect(router.getAlertStates().has('panel-pty')).toBe(false);
 });
+
+// A retained hidden webview is not promised a hidden page, so the extension
+// says (docs/specs/dor-browser.md → "Resource Policy").
+it('tells the webview whether VS Code shows it, on init and on each change', () => {
+  const webview = fakeWebview();
+  let visible = true;
+  const listeners = new Set<(event: unknown) => void>();
+  const onDidChange = ((listener: (event: unknown) => void) => {
+    listeners.add(listener);
+    return { dispose: () => listeners.delete(listener) };
+  }) as never;
+  const disposable = router.attachRouter(webview.channel, { shown: { current: () => visible, onDidChange } });
+  const shown = () => webview.posted.filter((message) => message.type === 'dormouse:shown');
+  try {
+    webview.send({ type: 'dormouse:init' });
+    expect(shown()).toEqual([{ type: 'dormouse:shown', shown: true }]);
+    visible = false;
+    for (const listener of listeners) listener({});
+    expect(shown().at(-1)).toEqual({ type: 'dormouse:shown', shown: false });
+  } finally { disposable.dispose(); }
+  expect(listeners.size).toBe(0);
+});

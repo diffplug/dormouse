@@ -351,6 +351,10 @@ export function attachRouter(
     // (owned-PTY alert state, or a PTY claimed/released). The host reflects it
     // onto native chrome (tab title / view badge). See docs/specs/vscode.md.
     onUnion?: (union: WorkspaceUnion) => void;
+    // Whether VS Code shows this webview. A retained hidden webview is not
+    // promised a `hidden` page, so the webview is told, on (re)initializing
+    // and on each change (docs/specs/dor-browser.md → "Resource Policy").
+    shown?: { current(): boolean; onDidChange: vscode.Event<unknown> };
   },
 ): vscode.Disposable {
   const reconnect = options?.reconnect ?? false;
@@ -363,6 +367,10 @@ export function attachRouter(
   // the webview requires (docs/specs/vscode.md → "Webview message
   // authentication"). A raw `vscode.Webview` never reaches this scope.
   const post = (message: ExtensionMessage): Thenable<boolean> => channel.post(message);
+  const postShown = () => {
+    if (options?.shown) void post({ type: 'dormouse:shown', shown: options.shown.current() } satisfies ExtensionMessage);
+  };
+  const shownDisposable = options?.shown?.onDidChange(postShown);
 
   // Track which PTY IDs were spawned (or reconnected) through this webview
   const ownedPtyIds = new Set<string>();
@@ -707,6 +715,7 @@ export function attachRouter(
         disconnectWebview = connectWebview();
         // Recreated content is a new realm.
         alertHost.endRealm(routerId);
+        postShown();
 
         // Re-publish the currently-selected shell so split-spawns in the
         // freshly-mounted webview know what to use.
@@ -828,6 +837,7 @@ export function attachRouter(
         if (request.pending.size === 0) request.settle();
       }
       alertHost.endRealm(routerId);
+      shownDisposable?.dispose();
       removeWatchedCommandListener();
       removeAlertSettingsListener();
       resolveAllFlushRequests();

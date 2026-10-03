@@ -114,6 +114,7 @@ export class DormouseViewProvider implements vscode.WebviewViewProvider {
       onUnion: (union) => {
         if (this.view) this.view.badge = workspaceBadge(union);
       },
+      shown: { current: () => view.visible, onDidChange: view.onDidChangeVisibility },
     });
   }
 

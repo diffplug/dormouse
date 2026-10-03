@@ -10,6 +10,7 @@ import { createAlertClient, type AlertClientMethods } from '../../host/alert-cli
 import { isAlertEvent } from '../../host/alert-protocol';
 import { readInjectedRecoveryCommands } from '../vscode-recovery-global';
 import { setDefaultShellOpts } from '../shell-defaults';
+import { setHostShown } from '../host-shown';
 import { embedderOrigins } from '../embedder-origins';
 import {
   applyTerminalSemanticEvents,
@@ -148,6 +149,8 @@ export class VSCodeAdapter implements PlatformAdapter {
         }));
       } else if (msg.type === 'dormouse:selectedShell') {
         setDefaultShellOpts(msg.shell ? { shell: msg.shell, args: msg.args } : null);
+      } else if (msg.type === 'dormouse:shown') {
+        setHostShown(msg.shown !== false);
       } else if (msg.type === 'dormouse:openThemeDebugger') {
         window.dispatchEvent(new CustomEvent('dormouse:openThemeDebugger'));
       } else if (msg.type === 'dor:controlRequest') {

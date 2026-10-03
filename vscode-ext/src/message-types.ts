@@ -92,6 +92,7 @@ export type ExtensionMessage =
     }
   | { type: 'dormouse:selectedShell'; shell?: string; args?: string[] }
   | { type: 'dormouse:openThemeDebugger' }
+  | { type: 'dormouse:shown'; shown: boolean }
   | { type: 'dormouse:flushSessionSave'; requestId: string }
   | ({ type: 'dor:controlRequest' } & DorControlRequestPayload)
   | ({ type: 'dor:controlCancel' } & DorControlCancelPayload)

@@ -2,6 +2,7 @@ import { getToolDirty, resetToolDirty } from '../tool-dirty-store';
 import { getToolAnnounce, resetToolAnnounces } from '../tool-announce-store';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { openPortRequestTimeoutMs } from './types';
+import { hostShown, setHostShown } from '../host-shown';
 
 const terminalStateStoreMocks = vi.hoisted(() => ({
   applyTerminalSemanticEvents: vi.fn(),
@@ -630,5 +631,21 @@ describe('VSCodeAdapter host capabilities', () => {
     expect([adapter.hostOwnsTheme, adapter.hostOwnsShells, adapter.hostOwnsUpdates]).toEqual([true, true, true]);
     // The Marketplace updates the extension, so Settings → Network names it.
     expect(adapter.updates).toBeUndefined();
+  });
+});
+
+describe('VSCodeAdapter webview visibility', () => {
+  beforeEach(stubWebviewEnv);
+  afterEach(() => {
+    setHostShown(true);
+    vi.unstubAllGlobals();
+  });
+
+  it('reports the webview hidden and shown as the extension says', () => {
+    new VSCodeAdapter();
+    windowTarget.dispatchEvent(hostMessage({ type: 'dormouse:shown', shown: false }));
+    expect(hostShown()).toBe(false);
+    windowTarget.dispatchEvent(hostMessage({ type: 'dormouse:shown', shown: true }));
+    expect(hostShown()).toBe(true);
   });
 });
