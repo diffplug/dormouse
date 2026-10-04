@@ -7,7 +7,7 @@
 
 - **Must bundle the viewers and their runtime dependencies into `dist/runtime.js` in `dor-tools-builtin`**, without workspace or installed-package resolution at runtime. `dor`'s prebuild builds this package first.
 - **Must stage the runtime and its adjacent `viewer` assets together under `dor/dist/builtin`**. Both hosts copy that tree with the CLI; `viewerAsset` serves the files the build placed in it, by exact name, relative to the runtime module.
-- **Must keep `file-viewer-format`, the page builders (`editor-page`, `folder-viewer-page`, `error-viewer-page`) with their CSPs, `viewer-http`, and `image-format` free of Node runtime dependencies**: lib's renderer and host modules import the first, the website playground serves the pages and checks images with the last (`docs/specs/tutorial.md` → Playground filesystem), and every build of lib source maps `dor-tools-builtin/*` to this package's `src`, as it maps `dor/*`. `dor-tools-builtin/test/browser-shared.test.mjs` bundles them for a browser.
+- **Must keep `file-viewer-format`, the page builders (`editor-page`, `folder-viewer-page`, `error-viewer-page`) with their CSPs, `viewer-http`, `image-format`, and `editor-routes` free of Node runtime dependencies**: lib's renderer and host modules import the first, the website playground serves the pages and answers the editor routes with the last (`docs/specs/tutorial.md` → Playground filesystem), and every build of lib source maps `dor-tools-builtin/*` to this package's `src`, as it maps `dor/*`. `dor-tools-builtin/test/browser-shared.test.mjs` bundles them for a browser.
 - **Must build the viewer assets through `buildViewerAssets`**, which the website runs into its own static tree.
 - **Must load the runtime only for valid `__view-*` invocations, in the launcher's process**, through a URL relative to `dor.js`. Other CLI commands never load the viewer implementation; `./runtime` exports only types, so a value import fails `dor`'s build.
 - **Must speak the Tool protocol through `dor-tools-lib`** (`docs/specs/dor-tools-lib.md`): the viewers announce and report with its `osc` encoders, and the editor answers the save channel with its `frame` client.
@@ -38,7 +38,7 @@ Source of truth: `runFileViewer` in `dor-tools-builtin/src/file-viewer.ts`; `fil
 
 **Must report dirty state immediately to the containing iframe and in order through OSC 367** (`docs/specs/dor-tool.md` → Unsaved changes), and answer the host's iframe save channel (`docs/specs/dor-tool.md` → Closing unsaved Tools) with `connectToolFrame`.
 
-Source of truth: `saveEditableFile` in `dor-tools-builtin/src/editable-file.ts`; `dor-tools-builtin/viewer/editor.ts`. Tests: `dor-tools-builtin/test/atomic-save.test.mjs`.
+Source of truth: `saveText` in `dor-tools-builtin/src/editor-routes.ts`; `replaceEditable` in `dor-tools-builtin/src/editable-file.ts`; `dor-tools-builtin/viewer/editor.ts`. Tests: `dor-tools-builtin/test/atomic-save.test.mjs`.
 
 ## Markdown editor
 
@@ -53,7 +53,7 @@ Source of truth: `saveEditableFile` in `dor-tools-builtin/src/editable-file.ts`;
 - **Must edit only a PNG or JPEG at or under the document's canonical directory whose spelled path is its realpath**, in the [Image editor](#image-editor) over the document. Its save leaves the source unchanged and reloads every display; closing it unsaved asks first.
 - **Must report the Tool dirty while the document or open image is unsaved**; Cmd/Ctrl+S saves the one in front, and the close-prompt save writes both.
 
-Source of truth: `dor-tools-builtin/viewer/markdown.tsx`; `safeCreateDOM` in `dor-tools-builtin/viewer/markdown-safety.ts`; `openImage` / `writePastedImage` / `renameImage` / `saveImageInFolder` in `dor-tools-builtin/src/markdown-images.ts`. Tests: `dor-tools-builtin/test/markdown-editor.test.mjs`.
+Source of truth: `dor-tools-builtin/viewer/markdown.tsx`; `safeCreateDOM` in `dor-tools-builtin/viewer/markdown-safety.ts`; `editorRoutes` in `dor-tools-builtin/src/editor-routes.ts`; `openImage` / `editableImageFile` / `renameImage` in `dor-tools-builtin/src/markdown-images.ts`. Tests: `dor-tools-builtin/test/markdown-editor.test.mjs`.
 
 ## Image editor
 
@@ -63,7 +63,7 @@ Source of truth: `dor-tools-builtin/viewer/markdown.tsx`; `safeCreateDOM` in `do
 - **Must refuse a save whose `Content-Type` or signature is not its extension's type** (415).
 - **Must send the revision as the `X-Dor-Version` response header and take it back as the save's `version` query parameter**, the body being the image bytes. The Markdown editor's in-place replacement shares this contract.
 
-Source of truth: `saveImageFile` in `dor-tools-builtin/src/markdown-images.ts`; `saveEditableBytes` in `dor-tools-builtin/src/editable-file.ts`; `imagePage` in `dor-tools-builtin/src/editor-page.ts`. Tests: `dor-tools-builtin/test/file-viewer.test.mjs`.
+Source of truth: `editorRoutes` in `dor-tools-builtin/src/editor-routes.ts`; `replaceEditable` in `dor-tools-builtin/src/editable-file.ts`; `imagePage` in `dor-tools-builtin/src/editor-page.ts`. Tests: `dor-tools-builtin/test/file-viewer.test.mjs`.
 
 ## Code editor
 

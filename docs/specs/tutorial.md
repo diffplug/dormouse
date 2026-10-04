@@ -89,7 +89,7 @@ The desktop shells share one filesystem, a snapshot of the tracked files of `dor
 - **A `__view-*` entry must report its port before announcing it, and withdraw it on exit.**
 - **Must serve the real viewer pages, CSPs, and contracts on the Node viewers' routes** (`docs/specs/dor-tools-builtin.md`); PNG and JPEG open in the image editor, and other non-text formats are refused.
 - **`createIframeProxyUrl` must map only a `localhost` URL under `/playground-fs/` to the page's own origin**, refusing others (`scheme`). The viewer pages carry the shim from `instrumentHtml`, so theme and the save channel connect as behind a proxy, and are same-origin with the Wall: first-party pages over the window's own files.
-- **The `/playground-fs/` service worker must stay stateless**, relaying each viewer request as below, bodies as bytes (rationale). It registers when the first viewer starts; without one, `__view-*` exits `1`.
+- **The `/playground-fs/` service worker must stay stateless**, relaying each viewer request as below, bodies as Blobs (rationale). It registers when the first viewer starts; without one, `__view-*` exits `1`.
 
 ```mermaid
 sequenceDiagram
@@ -106,7 +106,7 @@ sequenceDiagram
   end
 ```
 
-Source of truth: `installPlaygroundFs` in `website/src/lib/playground-fs/index.ts`; `TutorialShell` in `website/src/lib/tutorial-shell.ts`; `website/public/playground-fs/sw.js`; `website/scripts/build-builtin-viewer.js`.
+Source of truth: `installPlaygroundFs` in `website/src/lib/playground-fs/index.ts`; `editorRoutes` in `dor-tools-builtin/src/editor-routes.ts`; `TutorialShell` in `website/src/lib/tutorial-shell.ts`; `website/public/playground-fs/sw.js`; `website/scripts/build-builtin-viewer.js`.
 
 ## Storage
 

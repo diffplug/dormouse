@@ -22,9 +22,10 @@ self.addEventListener('fetch', (event) => {
 async function relay(request, token, rawRoute, search) {
   let route;
   try { route = decodeURIComponent(rawRoute); } catch { return new Response('', { status: 400 }); }
-  // Bodies cross as bytes (an image paste or save), cloned to each window.
+  // A body (an image paste or save) crosses as a Blob, which every window
+  // receives by reference; only the one that answers reads its bytes.
   const [body, windows] = await Promise.all([
-    request.method === 'POST' ? request.arrayBuffer() : new ArrayBuffer(0),
+    request.method === 'POST' ? request.blob() : new Blob(),
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }),
   ]);
   const contentType = request.headers.get('Content-Type') ?? '';

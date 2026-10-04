@@ -5,19 +5,20 @@
  * the window's in-memory filesystem and reached through the `/playground-fs/`
  * service worker rather than a loopback port.
  */
-import { EDITOR_CSP, editorPage, imagePage, markdownPage } from "dor-tools-builtin/editor-page";
-import { ERROR_CSP, errorViewerPage } from "dor-tools-builtin/error-viewer-page";
-import { builtinHandler, CONTROLS, fileViewerFormat, VIEW_ERROR_ARGV, viewerTitle } from "dor-tools-builtin/file-viewer-format";
-import { FOLDER_CSP, folderViewerPage } from "dor-tools-builtin/folder-viewer-page";
+import { EDITOR_CSP } from "dor-tools-builtin/editor-page";
 import {
-  checkImageSave, editableImageType, IMAGE_CSP, IMAGE_LIMIT, IMAGE_LIMIT_MESSAGE, isImage, PASTE_ATTEMPTS,
-  PASTE_EXHAUSTED_MESSAGE, PASTE_LIMIT_MESSAGE, pastedImageExtension, pastedImageName, VERSION_HEADER,
-} from "dor-tools-builtin/image-format";
-import { HttpError, pathSegments, viewerHeaders } from "dor-tools-builtin/viewer-http";
+  editorKind, editorRoutes, imageSegments, PATH_CHANGED_MESSAGE, STALE_MESSAGE,
+  type EditorKind, type EditorRequest, type EditorStore,
+} from "dor-tools-builtin/editor-routes";
+import { ERROR_CSP, errorViewerPage } from "dor-tools-builtin/error-viewer-page";
+import { builtinHandler, fileViewerFormat, VIEW_ERROR_ARGV, viewerTitle } from "dor-tools-builtin/file-viewer-format";
+import { FOLDER_CSP, folderViewerPage } from "dor-tools-builtin/folder-viewer-page";
+import { IMAGE_CSP, IMAGES_ROUTE, type SizeBound } from "dor-tools-builtin/image-format";
+import { HttpError, mediaType, pathSegments, viewerHeaders } from "dor-tools-builtin/viewer-http";
 import { openSequence, stateSequence } from "dor-tools-lib/osc";
 import { instrumentHtml } from "dormouse-lib/host/iframe-proxy-rewrite";
 import { isRecord } from "dormouse-lib/lib/is-record";
-import type { FileData, VirtualFs } from "./vfs";
+import { bytesOf, parentOf, type FileData, type VirtualFs } from "./vfs";
 
 /** Every viewer URL starts here; the service worker's scope. */
 export const VIEWER_SCOPE = "/playground-fs/";
@@ -31,26 +32,24 @@ export interface ViewerRequest {
   search: string;
   /** The request's `Content-Type` header, as sent. */
   contentType: string;
-  /** The request body's bytes; empty for a GET. */
-  body: ArrayBuffer;
+  /** The request body; empty for a GET. A `Blob` crosses to every window by reference. */
+  body: Blob;
 }
 
-/** The answer the service worker turns into a `Response`; a binary body is
- * an `ArrayBuffer` the window may transfer. */
+/** The answer the service worker turns into a `Response`. */
 export interface ViewerResponse {
   status: number;
   headers: Record<string, string>;
-  body: string | ArrayBuffer;
+  body: string | Blob;
 }
 
 type Viewer = { terminalId: string } & (
-  | { kind: "file"; target: string; markdown: boolean }
-  | { kind: "image"; target: string; mime: string }
+  | { kind: "editor"; editor: EditorKind; root: string; routes: ReturnType<typeof editorRoutes> }
   | { kind: "folder"; root: string }
   | { kind: "error"; target: string; message: string }
 );
 
-const CSP: Record<Viewer["kind"], string> = { file: EDITOR_CSP, image: EDITOR_CSP, folder: FOLDER_CSP, error: ERROR_CSP };
+const CSP: Record<Viewer["kind"], string> = { editor: EDITOR_CSP, folder: FOLDER_CSP, error: ERROR_CSP };
 
 /** A started viewer: the token its URLs carry, and what `serveSequence` announces. */
 export interface ViewerAnnouncement { token: string; path: string; target: string }
@@ -59,15 +58,9 @@ type Reply = { status: number; body: string | Uint8Array; type: string; headers?
 const reply = (status: number, body: string | Uint8Array, type: string): Reply => ({ status, body, type });
 const json = (value: unknown): Reply => reply(200, JSON.stringify(value), "application/json");
 const html = (page: string): Reply => reply(200, page, "text/html; charset=utf-8");
-/** An image's bytes, which never run as a document, with their revision when editable. */
-const image = (bytes: Uint8Array, mime: string, version?: string): Reply =>
-  ({ ...reply(200, bytes, mime), headers: { "Content-Security-Policy": IMAGE_CSP, ...version && { [VERSION_HEADER]: version } } });
 
-const STALE = "The file changed on disk. Your edits are safe here; compare or reload before saving.";
-
-/** The sha256 revision of `data` as its bytes, as the Node viewers report it. */
-async function revision(data: FileData): Promise<string> {
-  const bytes = typeof data === "string" ? new TextEncoder().encode(data) : data;
+/** The sha256 revision of `bytes`, as the Node viewers report it. */
+async function sha256(bytes: Uint8Array): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", bytes as Uint8Array<ArrayBuffer>);
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
@@ -76,6 +69,8 @@ async function revision(data: FileData): Promise<string> {
 export class PlaygroundViewers {
   private readonly viewers = new Map<string, Viewer>();
   private readonly pasteListeners = new Set<() => void>();
+  /** The revision of each file's data as last hashed, so a save hashes only its new bytes. */
+  private readonly revisions = new Map<string, { data: FileData; version: string }>();
 
   constructor(
     private readonly fs: VirtualFs,
@@ -104,11 +99,15 @@ export class PlaygroundViewers {
     if (kind !== "file") return new Error(`not a file: ${input}`);
     const format = handler.format(target);
     if (!format) return new Error("unsupported file format; configure a user Tool association");
-    if (format.text) return this.add({ terminalId, kind: "file", target, markdown: !!format.markdown }, "view", target);
-    const mime = editableImageType(target);
+    const editor = editorKind(format, target);
     // The HTML, media, and view-only image routes are not served here.
-    if (!mime) return new Error("the playground's file viewer shows text, PNG, and JPEG files only");
-    return this.add({ terminalId, kind: "image", target, mime }, "view", target);
+    if (!editor) return new Error("the playground's file viewer shows text, PNG, and JPEG files only");
+    const root = parentOf(target);
+    const routes = editorRoutes({
+      kind: editor, file: target, name: viewerTitle(target), store: this.store(root),
+      onDirty: (dirty) => this.write(terminalId, stateSequence({ dirty })),
+    });
+    return this.add({ terminalId, kind: "editor", editor, root, routes }, "view", target);
   }
 
   close(token: string): void {
@@ -127,155 +126,101 @@ export class PlaygroundViewers {
     if (!viewer) return null;
     let answer: Reply;
     try {
-      answer = viewer.kind === "file" ? await this.fileRoute(viewer, request)
-        : viewer.kind === "image" ? await this.imageRoute(viewer, request)
-        : viewer.kind === "folder" ? this.folderRoute(viewer, request)
+      answer = viewer.kind === "editor" ? await this.editorRoute(viewer, request)
+        : viewer.kind === "folder" ? await this.folderRoute(viewer, request)
         : request.method === "GET" && request.route === "" ? html(errorViewerPage(viewer.target, viewer.message))
         : reply(404, "", "text/plain; charset=utf-8");
     } catch (error) {
       if (!(error instanceof HttpError)) throw error;
       answer = reply(error.status, error.message, "text/plain; charset=utf-8");
     }
-    // A copy, so transferring the answer never detaches a file's stored bytes.
-    const body = typeof answer.body === "string" ? answer.body : answer.body.slice().buffer;
+    // A Blob copies the bytes once, so a stored file's bytes never leave the window.
+    const body = typeof answer.body === "string" ? answer.body : new Blob([answer.body as Uint8Array<ArrayBuffer>]);
     return { status: answer.status, body, headers: { ...viewerHeaders(CSP[viewer.kind]), "Content-Type": answer.type, ...answer.headers } };
   }
 
-  /** `POST state`, which every editor reports its dirty state through. */
-  private state(viewer: { terminalId: string }, body: ArrayBuffer): Reply {
-    const dirty = parseJson(body)?.dirty;
-    if (typeof dirty !== "boolean") throw new HttpError(400);
-    this.write(viewer.terminalId, stateSequence({ dirty }));
-    return json({});
-  }
-
-  private async fileRoute(viewer: Extract<Viewer, { kind: "file" }>, { method, route, search, contentType, body }: ViewerRequest): Promise<Reply> {
-    const name = viewerTitle(viewer.target);
-    const root = parentOf(viewer.target);
-    if (method === "POST") {
-      if (route === "state") return this.state(viewer, body);
-      if (route === "save") {
-        const data = parseJson(body);
-        if (typeof data?.text !== "string" || typeof data?.version !== "string") throw new HttpError(400);
-        return json(await this.replace(viewer.target, data.version, data.text));
-      }
-      if (!viewer.markdown) throw new HttpError(404);
-      if (route === "image") return json({ name: this.paste(root, mediaType(contentType), bounded(body, PASTE_LIMIT_MESSAGE)) });
-      if (route === "rename") {
-        const data = parseJson(body);
-        if (typeof data?.from !== "string" || typeof data?.to !== "string") throw new HttpError(400);
-        this.renameImage(root, data.from, data.to);
-        return json({});
-      }
-      if (route.startsWith("image-save/")) {
-        const { path, mime } = this.editableImageIn(root, route.slice("image-save/".length));
-        return json(await this.saveImage(path, mime, contentType, body, search));
-      }
-      throw new HttpError(404);
+  /** The editor's own routes (`editorRoutes`), then the Markdown editor's images. */
+  private async editorRoute(viewer: Extract<Viewer, { kind: "editor" }>, { method, route, search, contentType, body }: ViewerRequest): Promise<Reply> {
+    const request: EditorRequest = {
+      method, route, query: new URLSearchParams(search), contentType: mediaType(contentType),
+      body: async (bound: SizeBound) => {
+        if (body.size > bound.limit) throw new HttpError(413, bound.message);
+        return new Uint8Array(await body.arrayBuffer());
+      },
+    };
+    const answer = await viewer.routes(request);
+    if (answer) {
+      const { body } = answer;
+      return { status: 200, ...answer, body: typeof body === "string" && answer.type.startsWith("text/html") ? instrumentHtml(body, this.embedderOrigin) : body };
     }
-    if (route === "view") return html(instrumentHtml((viewer.markdown ? markdownPage : editorPage)(name), this.embedderOrigin));
-    if (route === "source") {
-      const data = this.fs.data(viewer.target);
-      if (data === null) throw new HttpError(404);
-      return json({ text: utf8(data), version: await revision(data), name });
-    }
-    if (viewer.markdown && route.startsWith("edit/")) {
-      const { path, mime } = this.editableImageIn(root, route.slice("edit/".length));
-      const bytes = this.fs.bytes(path)!;
-      return image(bytes, mime, await revision(bytes));
-    }
-    if (viewer.markdown && route.startsWith("images/")) {
-      const path = this.imageIn(root, route.slice("images/".length));
-      if (this.fs.kind(path) !== "file") throw new HttpError(404);
-      return image(this.fs.bytes(path)!, fileViewerFormat(path)!.mime);
-    }
-    throw new HttpError(404);
+    if (viewer.editor !== "markdown" || !route.startsWith(IMAGES_ROUTE)) throw new HttpError(404);
+    const path = [viewer.root, ...imageSegments(route.slice(IMAGES_ROUTE.length))].join("/");
+    const bytes = this.fs.bytes(path);
+    if (!bytes) throw new HttpError(404);
+    // An image the Markdown editor shows never runs as a document.
+    return { ...reply(200, bytes, fileViewerFormat(path)!.mime), headers: { "Content-Security-Policy": IMAGE_CSP } };
   }
 
-  /** The standalone image editor's page, its pixels, and their save. */
-  private async imageRoute(viewer: Extract<Viewer, { kind: "image" }>, { method, route, search, contentType, body }: ViewerRequest): Promise<Reply> {
-    if (method === "POST") {
-      if (route === "state") return this.state(viewer, body);
-      if (route === "save") return json(await this.saveImage(viewer.target, viewer.mime, contentType, body, search));
-      throw new HttpError(404);
-    }
-    if (route === "view") return html(instrumentHtml(imagePage(viewerTitle(viewer.target)), this.embedderOrigin));
-    if (route === "source") {
-      const bytes = this.fs.bytes(viewer.target);
-      if (!bytes) throw new HttpError(404);
-      return image(bytes, viewer.mime, await revision(bytes));
-    }
-    throw new HttpError(404);
+  /** The window's filesystem as an editor's store, for a document in `root`. */
+  private store(root: string): EditorStore {
+    const { fs } = this;
+    const under = (segments: string[]) => [root, ...segments].join("/");
+    /** `file`'s data and bytes, `missing` when it is gone, 413 past `bound`. */
+    const current = (file: string, bound: SizeBound, missing: HttpError) => {
+      const data = fs.data(file);
+      if (data === null) throw missing;
+      const bytes = bytesOf(data);
+      if (bytes.length > bound.limit) throw new HttpError(413, bound.message);
+      return { data, bytes };
+    };
+    return {
+      read: async (file, bound) => {
+        const { data, bytes } = current(file, bound, new HttpError(404));
+        return { bytes, version: await this.revision(file, data) };
+      },
+      replace: async (file, version, bound, encode) => {
+        const { data: before, bytes } = current(file, bound, new HttpError(409, PATH_CHANGED_MESSAGE));
+        if (await this.revision(file, before) !== version) throw new HttpError(409, STALE_MESSAGE);
+        const next = encode(bytes);
+        if (next.length > bound.limit) throw new HttpError(413, bound.message);
+        const nextVersion = await sha256(next);
+        // A save that landed while this one hashed wins; this one is now stale.
+        if (fs.data(file) !== before) throw new HttpError(409, STALE_MESSAGE);
+        fs.write(file, next);
+        this.revisions.set(file, { data: next, version: nextVersion });
+        return { version: nextVersion };
+      },
+      editableImage: async (segments) => fs.kind(under(segments)) === "file" ? under(segments) : null,
+      create: async (name, bytes) => {
+        if (fs.kind(under([name]))) return false;
+        fs.write(under([name]), bytes);
+        for (const listener of this.pasteListeners) listener();
+        return true;
+      },
+      rename: async (from, to) => {
+        const source = under(from), target = under(to);
+        if (fs.kind(source) !== "file") throw new HttpError(404);
+        if (source === target) return true;
+        if (fs.kind(target)) return false;
+        fs.rename(source, target);
+        return true;
+      },
+    };
   }
 
-  /** Replaces `path` with `next` when its revision is still `version`. */
-  private async replace(path: string, version: string, next: FileData): Promise<{ version: string }> {
-    const before = this.fs.data(path);
-    if (before === null) throw new HttpError(409, "The file path changed. Reopen it before saving.");
-    if (await revision(before) !== version) throw new HttpError(409, STALE);
-    const nextVersion = await revision(next);
-    // A save that landed while this one hashed wins; this one is now stale.
-    if (this.fs.data(path) !== before) throw new HttpError(409, STALE);
-    this.fs.write(path, next);
-    return { version: nextVersion };
+  /** The sha256 revision of `data`, stored at `path`, hashed once per stored value. */
+  private async revision(path: string, data: FileData): Promise<string> {
+    const cached = this.revisions.get(path);
+    if (cached?.data === data) return cached.version;
+    const version = await sha256(bytesOf(data));
+    this.revisions.set(path, { data, version });
+    return version;
   }
 
-  /** An image save: the editable image's own bytes, typed by Content-Type, over `?version=`. */
-  private saveImage(path: string, mime: string, contentType: string, body: ArrayBuffer, search: string): Promise<{ version: string }> {
-    const bytes = bounded(body, IMAGE_LIMIT_MESSAGE);
-    const version = new URLSearchParams(search).get("version");
-    if (!version) throw new HttpError(400);
-    checkImageSave(mime, mediaType(contentType), bytes);
-    return this.replace(path, version, bytes);
-  }
-
-  /** Writes a pasted image beside the document as a new file, as `writePastedImage` names it. */
-  private paste(root: string, type: string, bytes: Uint8Array): string {
-    const ext = pastedImageExtension(type, bytes);
-    const now = new Date();
-    for (let n = 1; n <= PASTE_ATTEMPTS; n++) {
-      const name = pastedImageName(now, n, ext);
-      if (this.fs.kind(`${root}/${name}`)) continue;
-      this.fs.write(`${root}/${name}`, bytes);
-      for (const listener of this.pasteListeners) listener();
-      return name;
-    }
-    throw new HttpError(409, PASTE_EXHAUSTED_MESSAGE);
-  }
-
-  /** `route`, relative to `root`, as a path when its spelling stays inside `root` and names an image; else 404. */
-  private imageIn(root: string, route: string): string {
-    if (!pathSegments(route, { strict: true }) || !isImage(route)) throw new HttpError(404);
-    return `${root}/${route}`;
-  }
-
-  /** An existing PNG or JPEG at or under `root`. */
-  private editableImageIn(root: string, route: string): { path: string; mime: string } {
-    const path = this.imageIn(root, route);
-    const mime = editableImageType(path);
-    if (!mime) throw new HttpError(415, "Only PNG and JPEG images can be edited.");
-    if (this.fs.kind(path) !== "file") throw new HttpError(404);
-    return { path, mime };
-  }
-
-  /** Renames an image within its own directory, never replacing another file, as `renameImage`. */
-  private renameImage(root: string, from: string, to: string): void {
-    const source = this.imageIn(root, from);
-    const target = this.imageIn(root, to);
-    const name = target.slice(target.lastIndexOf("/") + 1);
-    if (parentOf(source) !== parentOf(target) || CONTROLS.test(name) || name.startsWith(".")) {
-      throw new HttpError(400, "Choose a new image name in the same folder.");
-    }
-    if (this.fs.kind(source) !== "file") throw new HttpError(404);
-    if (source === target) return;
-    if (this.fs.kind(target)) throw new HttpError(409, `${name} already exists.`);
-    this.fs.rename(source, target);
-  }
-
-  private folderRoute(viewer: Extract<Viewer, { kind: "folder" }>, { method, route, search, body }: ViewerRequest): Reply {
+  private async folderRoute(viewer: Extract<Viewer, { kind: "folder" }>, { method, route, search, body }: ViewerRequest): Promise<Reply> {
     if (method === "POST") {
       if (route !== "select" && route !== "activate") throw new HttpError(404);
-      const path = parseJson(body)?.path;
+      const path = parseJson(await body.text())?.path;
       if (typeof path !== "string" || !path) throw new HttpError(400);
       this.write(viewer.terminalId, openSequence({ path: this.inside(viewer.root, path), preview: route === "select" }));
       return json({ ok: true, status: "sent" });
@@ -301,27 +246,9 @@ export class PlaygroundViewers {
   }
 }
 
-const parentOf = (path: string) => path.slice(0, path.lastIndexOf("/")) || "/";
-
-/** A Content-Type without parameters, lowercased, as `contentType` in `viewer-server.ts`. */
-const mediaType = (header: string) => header.split(";")[0].trim().toLowerCase();
-
-/** `body` as bytes, or 413 past one image's bound. */
-function bounded(body: ArrayBuffer, message: string): Uint8Array {
-  if (body.byteLength > IMAGE_LIMIT) throw new HttpError(413, message);
-  return new Uint8Array(body);
-}
-
-/** A file's contents as text; 415 when stored bytes are not UTF-8, as `readEditableFile`. */
-function utf8(data: FileData): string {
-  if (typeof data === "string") return data;
-  try { return new TextDecoder("utf-8", { fatal: true }).decode(data); }
-  catch { throw new HttpError(415, "This editor supports UTF-8 text. Open this file in another editor."); }
-}
-
-function parseJson(body: ArrayBuffer): Record<string, unknown> | null {
+function parseJson(body: string): Record<string, unknown> | null {
   try {
-    const value: unknown = JSON.parse(new TextDecoder().decode(body));
+    const value: unknown = JSON.parse(body);
     return isRecord(value) ? value : null;
   } catch {
     return null;

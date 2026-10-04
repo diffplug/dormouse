@@ -20,6 +20,9 @@ export type FileData = string | Uint8Array;
 type Dir = { kind: "dir"; children: Map<string, FsNode> };
 type FsNode = Dir | { kind: "file"; data: FileData };
 
+/** `data` as bytes: text encodes as UTF-8, and stored bytes are returned as they are. */
+export const bytesOf = (data: FileData): Uint8Array => typeof data === "string" ? new TextEncoder().encode(data) : data;
+
 /** An overlay entry hiding a stock file renamed away. */
 const WHITEOUT = Symbol("whiteout");
 
@@ -34,7 +37,8 @@ export function normalizePath(path: string): string {
   return `/${parts.join("/")}`;
 }
 
-const parentOf = (path: string) => path.slice(0, path.lastIndexOf("/")) || "/";
+/** The directory holding the normalized `path`. */
+export const parentOf = (path: string) => path.slice(0, path.lastIndexOf("/")) || "/";
 const nameOf = (path: string) => path.slice(path.lastIndexOf("/") + 1);
 
 /** The immutable tree every window's overlay sits on. */
@@ -111,16 +115,10 @@ export class VirtualFs {
     return node?.kind === "file" ? node.data : null;
   }
 
-  /** A file's contents as text (bytes decode as UTF-8), or null when `path` is not a file. */
-  read(path: string): string | null {
-    const data = this.data(path);
-    return data === null || typeof data === "string" ? data : new TextDecoder().decode(data);
-  }
-
-  /** A file's contents as bytes (text encodes as UTF-8), or null when `path` is not a file. */
+  /** A file's contents as bytes, or null when `path` is not a file. */
   bytes(path: string): Uint8Array | null {
     const data = this.data(path);
-    return data === null || typeof data !== "string" ? data : new TextEncoder().encode(data);
+    return data === null ? null : bytesOf(data);
   }
 
   /** Creates or replaces the file `path`, whose directory must exist. */

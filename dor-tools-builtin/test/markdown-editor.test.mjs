@@ -5,7 +5,8 @@ import { join } from 'node:path';
 import { request } from 'node:http';
 import { afterEach, beforeEach, test } from 'node:test';
 import { startFileViewer } from '../dist/file-viewer.js';
-import { writePastedImage } from '../dist/markdown-images.js';
+import { editorStore } from '../dist/editable-file.js';
+import { pasteImage } from '../dist/editor-routes.js';
 
 const PNG = Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108020000009077' + '53de0000000c4944415408d763f8cfc000000301010018dd8db00000000049454e44ae426082', 'hex');
 const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0x10]);
@@ -102,8 +103,8 @@ test('pasted images become new files beside the document, checked against their 
 test('a paste never replaces an existing file', async () => {
   const now = new Date(2026, 9, 2, 13, 4, 5);
   await writeFile(join(docs, 'image-20261002-130405.png'), 'existing');
-  assert.equal(await writePastedImage(docs, 'image/png', PNG, now), 'image-20261002-130405-2.png');
-  assert.equal(await writePastedImage(docs, 'image/jpeg', JPEG, now), 'image-20261002-130405.jpg');
+  assert.equal(await pasteImage(editorStore(docs), 'image/png', PNG, now), 'image-20261002-130405-2.png');
+  assert.equal(await pasteImage(editorStore(docs), 'image/jpeg', JPEG, now), 'image-20261002-130405.jpg');
   assert.equal(await readFile(join(docs, 'image-20261002-130405.png'), 'utf8'), 'existing');
 });
 

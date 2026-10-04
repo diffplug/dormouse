@@ -1,16 +1,24 @@
-/** The browser-safe half of the image routes (`markdown-images.ts`): the
- * formats, signatures, pasted names, and bounds the website playground's
- * viewers share with the Node viewers. */
+/** The image half of the editor routes (`editor-routes.ts`): the formats,
+ * signatures, pasted names, bounds, and route names the editor pages, the
+ * Node viewers, and the website playground's viewers share. Browser-safe. */
 import { fileViewerFormat } from './file-viewer-format.js';
 import { HttpError } from './viewer-http.js';
 
-/** Bound on one image's bytes: a paste, a read for editing, or a save. */
-export const IMAGE_LIMIT = 32 * 1024 * 1024;
-export const IMAGE_LIMIT_MESSAGE = 'Images are limited to 32 MiB.';
-export const PASTE_LIMIT_MESSAGE = 'Pasted images are limited to 32 MiB.';
+/** A size bound and the 413 message past it. */
+export interface SizeBound { limit: number; message: string }
+/** Bound on one image's bytes: a read for editing, or a save. */
+export const IMAGE_BOUND: SizeBound = { limit: 32 * 1024 * 1024, message: 'Images are limited to 32 MiB.' };
+/** `IMAGE_BOUND`, for a paste. */
+export const PASTE_BOUND: SizeBound = { limit: IMAGE_BOUND.limit, message: 'Pasted images are limited to 32 MiB.' };
 /** The response header carrying an editable image's revision, which its save
  * echoes as the `version` query parameter. */
 export const VERSION_HEADER = 'X-Dor-Version';
+/** The Markdown editor's image routes, each followed by the image's `/`-separated
+ * path relative to the document's folder: read to edit (with `VERSION_HEADER`),
+ * save in place, and show. */
+export const EDIT_ROUTE = 'edit/';
+export const IMAGE_SAVE_ROUTE = 'image-save/';
+export const IMAGES_ROUTE = 'images/';
 // An image the Markdown editor shows can be opened directly; it never runs as a document there.
 export const IMAGE_CSP = "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:";
 

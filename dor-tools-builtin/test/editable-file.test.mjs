@@ -3,12 +3,18 @@ import { mkdtemp, realpath, rm, readFile, writeFile, symlink, rename, stat, read
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, test } from 'node:test';
-import { IMAGE_BOUND, IMAGE_LIMIT, readEditableFile, readEditableImage, saveEditableBytes, saveEditableFile } from '../dist/editable-file.js';
+import { editorStore } from '../dist/editable-file.js';
+import { readText, saveText } from '../dist/editor-routes.js';
+import { IMAGE_BOUND } from '../dist/image-format.js';
 import { execFileSync } from 'node:child_process';
 import { win32 } from 'node:path';
 let root, file;
 beforeEach(async () => { root = await realpath(await mkdtemp(join(tmpdir(), 'dor-edit-'))); file = join(root, 'source.ts'); });
 afterEach(async () => { await rm(root, { recursive: true, force: true }); });
+const readEditableFile = file => readText(editorStore(root), file);
+const saveEditableFile = (file, text, version, operations) => saveText(editorStore(root, operations), file, text, version);
+const readEditableImage = file => editorStore(root).read(file, IMAGE_BOUND);
+const saveEditableBytes = (file, bytes, version, bound) => editorStore(root).replace(file, version, bound, () => bytes);
 
 test('saves the opened UTF-8 file, preserving its BOM, line endings and permissions', async () => {
   await writeFile(file, '\uFEFFone\r\ntwo\r\n', { mode: 0o640 });
@@ -74,7 +80,7 @@ test('reads an image up to 32 MiB, where text stops at 8', async () => {
   await writeFile(file, Buffer.alloc(8 * 1024 * 1024 + 1));
   await assert.rejects(readEditableFile(file), { status: 413 });
   assert.equal((await readEditableImage(file)).bytes.length, 8 * 1024 * 1024 + 1);
-  await writeFile(file, Buffer.alloc(IMAGE_LIMIT + 1));
+  await writeFile(file, Buffer.alloc(IMAGE_BOUND.limit + 1));
   await assert.rejects(readEditableImage(file), { status: 413 });
 });
 

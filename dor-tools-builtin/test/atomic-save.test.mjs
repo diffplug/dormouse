@@ -6,7 +6,8 @@ import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { beforeEach, afterEach, test } from 'node:test';
 import { saveFileOperations, windowsReplaceCommand } from '../dist/atomic-save.js';
-import { readEditableFile, saveEditableFile } from '../dist/editable-file.js';
+import { editorStore } from '../dist/editable-file.js';
+import { readText, saveText } from '../dist/editor-routes.js';
 let root, file;
 beforeEach(async () => { root=await realpath(await mkdtemp(join(tmpdir(),'dor-save-platform-'))); file=join(root,'source.txt'); await writeFile(file,'original'); });
 afterEach(async () => { await rm(root,{recursive:true,force:true}); });
@@ -24,6 +25,8 @@ test('the Windows replacement passes paths as environment data, never script tex
   assert.equal(command.env.DORMOUSE_SAVE_BACKUP,backup);
 });
 
+const readEditableFile=file=>readText(editorStore(root),file);
+const saveEditableFile=(file,text,version,operations)=>saveText(editorStore(root,operations),file,text,version);
 const saveFiles=async()=>(await readdir(root)).filter(name=>name.startsWith('.dor-save-'));
 
 test('a native replacement sharing failure preserves the old file and retains the draft', { skip:process.platform!=='win32', timeout:15000 }, async () => {

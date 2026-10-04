@@ -3,12 +3,13 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { basename, dirname, relative, resolve, sep } from 'node:path';
 import { stateSequence } from 'dor-tools-lib/osc';
 import { fileViewerFormat, type FileFormat } from './file-viewer-format.js';
-import { announceViewer, contentType, HttpError, isInsideRoot, openRegularFile, pathSegments, readBody, readJsonBody, reply, startCapabilityViewer } from './viewer-server.js';
-import { EDITOR_CSP, editorPage, imagePage, markdownPage } from './editor-page.js';
-import { openImage, readImageInFolder, renameImage, saveImageFile, saveImageInFolder, writePastedImage } from './markdown-images.js';
-import { IMAGE_BOUND, IMAGE_LIMIT, readEditableFile, readEditableImage, readUpTo, saveEditableFile, TEXT_LIMIT } from './editable-file.js';
+import { announceViewer, contentType, HttpError, isInsideRoot, openRegularFile, pathSegments, readBody, reply, startCapabilityViewer } from './viewer-server.js';
+import { EDITOR_CSP } from './editor-page.js';
+import { editorKind, editorRoutes, TEXT_BOUND } from './editor-routes.js';
+import { openImage } from './markdown-images.js';
+import { editorStore, readUpTo } from './editable-file.js';
 import { viewerAsset } from './viewer-assets.js';
-import { editableImageType, IMAGE_CSP, PASTE_LIMIT_MESSAGE, VERSION_HEADER } from './image-format.js';
+import { IMAGE_CSP, IMAGES_ROUTE } from './image-format.js';
 
 const ASSET_LIMIT = 256;
 const CHUNK = 64 * 1024;
@@ -19,7 +20,7 @@ class ViewerLimitError extends Error {}
 
 async function textSize(file: FileHandle): Promise<number> {
   const { size } = await file.stat();
-  if (size > TEXT_LIMIT) throw new ViewerLimitError('text preview exceeds 8 MiB; configure a Tool for this file');
+  if (size > TEXT_BOUND.limit) throw new ViewerLimitError('text preview exceeds 8 MiB; configure a Tool for this file');
   return size;
 }
 
@@ -135,20 +136,9 @@ export async function startFileViewer(input: string, { onDirty = () => {}, forma
     if (!main) throw new Error('not a supported regular file');
     if (format.text) await textSize(main.file); // fail oversized text before announcing
     // PNG and JPEG open in the image editor (docs/specs/dor-tools-builtin.md -> Image editor).
-    const imageType = format.text ? undefined : editableImageType(target);
-    const editable = format.text || !!imageType;
-    let saving = false;
-    /** One save at a time per viewer. */
-    const save = async <T>(write: () => Promise<T>): Promise<T> => {
-      if (saving) throw new HttpError(409, 'Another save is in progress.');
-      saving = true;
-      try { return await write(); } finally { saving = false; }
-    };
-    const sendImage = (res: ServerResponse, image: { bytes: Buffer; version: string; mime: string }) => {
-      res.setHeader('Content-Security-Policy', IMAGE_CSP);
-      res.setHeader(VERSION_HEADER, image.version);
-      reply(res, 200, image.bytes, image.mime);
-    };
+    const kind = editorKind(format, target);
+    const editable = !!kind;
+    const editor = kind && editorRoutes({ kind, file: target, name: basename(target), store: editorStore(root), onDirty });
     const viewer = await startCapabilityViewer({ csp: editable ? EDITOR_CSP : CSP, post: editable, chunked: true, unavailable: 'File preview unavailable', release: closeFiles,
       route: async (req, res, prefix) => {
         let route: string;
@@ -156,75 +146,22 @@ export async function startFileViewer(input: string, { onDirty = () => {}, forma
         try { route = decodeURIComponent(url.pathname.slice(prefix.length)); }
         catch { throw new HttpError(400); }
         if (!pathSegments(route)) throw new HttpError(403);
-        // An image save names the revision it replaces; its body is the image's bytes.
-        const imageSave = async (write: (bytes: Buffer, version: string) => Promise<{ version: string }>) => {
-          const bytes = await readBody(req, IMAGE_LIMIT, IMAGE_BOUND.message);
-          const version = url.searchParams.get('version');
-          if (!version) throw new HttpError(400);
-          reply(res, 200, JSON.stringify(await save(() => write(bytes, version))), 'application/json');
-        };
-        if (req.method === 'POST') {
-          if (format.markdown && route === 'image') {
-            // The image's own bytes, typed by Content-Type.
-            const bytes = await readBody(req, IMAGE_LIMIT, PASTE_LIMIT_MESSAGE);
-            reply(res, 200, JSON.stringify({ name: await writePastedImage(root, contentType(req), bytes) }), 'application/json');
-            return;
-          }
-          if (format.markdown && route === 'rename') {
-            const data = await readJsonBody(req, 64 * 1024) as { from?: unknown; to?: unknown } | null;
-            if (typeof data?.from !== 'string' || typeof data?.to !== 'string') throw new HttpError(400);
-            await renameImage(root, data.from, data.to);
-            reply(res, 200, '{}', 'application/json');
-            return;
-          }
-          if (format.markdown && route.startsWith('image-save/')) {
-            await imageSave((bytes, version) => saveImageInFolder(root, route.slice('image-save/'.length), contentType(req), bytes, version));
-            return;
-          }
-          if (imageType && route === 'save') {
-            await imageSave((bytes, version) => saveImageFile(target, imageType, contentType(req), bytes, version));
-            return;
-          }
-          if (!editable || (route !== 'save' && route !== 'state')) throw new HttpError(404);
-          // JSON escapes a byte as at most six (`\u00XX`).
-          const data = await readJsonBody(req, TEXT_LIMIT * 6 + 1024) as { dirty?: unknown; text?: unknown; version?: unknown } | null;
-          if (route === 'state') {
-            if (typeof data?.dirty !== 'boolean') throw new HttpError(400);
-            onDirty(data.dirty);
-            reply(res, 200, '{}', 'application/json');
-            return;
-          }
-          if (typeof data?.text !== 'string' || typeof data?.version !== 'string') throw new HttpError(400);
-          const { text, version } = data;
-          reply(res, 200, JSON.stringify(await save(() => saveEditableFile(target, text, version))), 'application/json');
+        const answer = await editor?.({ method: req.method!, route, query: url.searchParams, contentType: contentType(req), body: bound => readBody(req, bound.limit, bound.message) });
+        if (answer) {
+          for (const [name, value] of Object.entries(answer.headers ?? {})) res.setHeader(name, value);
+          reply(res, 200, answer.body, answer.type);
           return;
         }
+        if (req.method === 'POST') throw new HttpError(404);
         if (editable && route.startsWith('assets/')) {
           const asset = await viewerAsset(route.slice('assets/'.length));
           reply(res, 200, asset.bytes, asset.mime);
           return;
         }
-        if (imageType && route === 'source') {
-          sendImage(res, { ...await readEditableImage(target), mime: imageType });
-          return;
-        }
-        if (format.text && route === 'source') {
-          const { text, version } = await readEditableFile(target);
-          reply(res, 200, JSON.stringify({ text, version, name: basename(target) }), 'application/json');
-          return;
-        }
-        if (route === 'view' && editable) {
-          reply(res, 200, (imageType ? imagePage : format.markdown ? markdownPage : editorPage)(basename(target)), 'text/html; charset=utf-8');
-          return;
-        }
         const resource = resources.get(route);
         if (resource) { await stream(req, res, resource); return; }
-        if (format.markdown && route.startsWith('edit/')) {
-          sendImage(res, await readImageInFolder(root, route.slice('edit/'.length)));
-          return;
-        }
-        if (!format.markdown || !route.startsWith('images/')) throw new HttpError(404);
-        const image = await openImage(root, route.slice('images/'.length));
+        if (kind !== 'markdown' || !route.startsWith(IMAGES_ROUTE)) throw new HttpError(404);
+        const image = await openImage(root, route.slice(IMAGES_ROUTE.length));
         try {
           res.setHeader('Content-Security-Policy', IMAGE_CSP);
           await stream(req, res, image);

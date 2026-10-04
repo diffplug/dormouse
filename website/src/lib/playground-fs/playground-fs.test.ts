@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { IMAGE_CSP, IMAGE_LIMIT, VERSION_HEADER } from "dor-tools-builtin/image-format";
+import { IMAGE_BOUND, IMAGE_CSP, VERSION_HEADER } from "dor-tools-builtin/image-format";
 import { stateSequence } from "dor-tools-lib/osc";
 import { parseToolFile } from "dormouse-lib/host/tool-registry";
 import { createPlaygroundFs, PLAYGROUND_CWD, SNAPSHOT_FILES } from "./snapshot";
@@ -14,18 +14,18 @@ const README = `${PLAYGROUND_CWD}/README.md`;
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
 const PNG_EDITED = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 4, 5, 6, 7]);
 const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 9]);
-const buffer = (bytes: Uint8Array) => bytes.slice().buffer;
 const sha256 = (data: string | Uint8Array) => createHash("sha256").update(data).digest("hex");
-const get = (route: string, search = ""): ViewerRequest => ({ method: "GET", route, search, contentType: "", body: new ArrayBuffer(0) });
+const encode = (text: string) => new TextEncoder().encode(text);
+const get = (route: string, search = ""): ViewerRequest => ({ method: "GET", route, search, contentType: "", body: new Blob() });
 const post = (route: string, body: unknown): ViewerRequest =>
-  ({ method: "POST", route, search: "", contentType: "application/json", body: buffer(new TextEncoder().encode(JSON.stringify(body))) });
+  ({ method: "POST", route, search: "", contentType: "application/json", body: new Blob([JSON.stringify(body)]) });
 const upload = (route: string, bytes: Uint8Array, contentType: string, search = ""): ViewerRequest =>
-  ({ method: "POST", route, search, contentType, body: buffer(bytes) });
-const text = (response: ViewerResponse | null) => {
+  ({ method: "POST", route, search, contentType, body: new Blob([bytes as Uint8Array<ArrayBuffer>]) });
+const text = async (response: ViewerResponse | null) => {
   const body = response!.body;
-  return typeof body === "string" ? body : new TextDecoder().decode(body);
+  return typeof body === "string" ? body : await body.text();
 };
-const bytes = (response: ViewerResponse | null) => new Uint8Array(response!.body as ArrayBuffer);
+const bytes = async (response: ViewerResponse | null) => new Uint8Array(await (response!.body as Blob).arrayBuffer());
 
 describe("the snapshot", () => {
   it("is exactly the tracked files of dor-tools-lib", () => {
@@ -37,7 +37,7 @@ describe("the snapshot", () => {
 
 describe("the playground's user config", () => {
   it("is mounted where a host reads it, and parses as a user Tool file without warnings", () => {
-    const text = createPlaygroundFs().read(USER_CONFIG)!;
+    const text = createPlaygroundFs().data(USER_CONFIG) as string;
     const file = parseToolFile(text, { path: USER_CONFIG, dir: "/home/demo/.config/dormouse", scope: "user" });
     expect(file.warnings).toEqual([]);
     expect([...file.tools.keys()]).toEqual(["storybook", "csv"]);
@@ -70,10 +70,10 @@ describe("VirtualFs", () => {
     fs.write("/home/demo/p/a.md", "A");
     fs.write("/home/demo/p/new.png", new Uint8Array([1, 2]));
     fs.rename("/home/demo/p/b.png", "/home/demo/p/c.png");
-    expect(fs.read("/home/demo/p/a.md")).toBe("A");
+    expect(fs.data("/home/demo/p/a.md")).toBe("A");
     expect(fs.bytes("/home/demo/p/new.png")).toEqual(new Uint8Array([1, 2]));
     expect(fs.kind("/home/demo/p/b.png")).toBeNull();
-    expect(fs.read("/home/demo/p/c.png")).toBe("b");
+    expect(fs.data("/home/demo/p/c.png")).toBe("b");
     expect(fs.files("/home/demo/p")).toEqual(["a.md", "c.png", "new.png"]);
     fs.rename("/home/demo/p/c.png", "/home/demo/p/b.png");
     expect(fs.files("/home/demo/p")).toEqual(["a.md", "b.png", "new.png"]);
@@ -81,15 +81,15 @@ describe("VirtualFs", () => {
     expect(() => fs.write("/home/demo/p", "x")).toThrow("is a directory");
 
     const fresh = new VirtualFs(stock);
-    expect(fresh.read("/home/demo/p/a.md")).toBe("a");
+    expect(fresh.data("/home/demo/p/a.md")).toBe("a");
     expect(fresh.files("/home/demo/p")).toEqual(["a.md", "b.png"]);
   });
 
   it("gives each playground filesystem its own overlay on the one snapshot", () => {
     const written = createPlaygroundFs();
     written.write(README, "# changed");
-    expect(written.read(README)).toBe("# changed");
-    expect(createPlaygroundFs().read(README)).toBe(SNAPSHOT_FILES["README.md"]);
+    expect(written.data(README)).toBe("# changed");
+    expect(createPlaygroundFs().data(README)).toBe(SNAPSHOT_FILES["README.md"]);
   });
 });
 
@@ -158,20 +158,20 @@ describe("PlaygroundViewers", () => {
     expect(page.headers["Content-Security-Policy"]).toContain("worker-src 'self'");
     expect(page.body).toContain("assets/markdown.js");
     expect(page.body).toContain("<script>");
-    expect(JSON.parse(text(await viewer.handle(get("source")))))
+    expect(JSON.parse(await text(await viewer.handle(get("source")))))
       .toEqual({ text: SNAPSHOT_FILES["README.md"], version: sha256(SNAPSHOT_FILES["README.md"]), name: "README.md" });
   });
 
   it("saves text over its revision, refuses a stale one, and reports dirty state to the viewer's terminal", async () => {
     const { fs, open, writes } = harness();
     const viewer = open("__view-file", [README]);
-    const { version } = JSON.parse(text(await viewer.handle(get("source"))));
+    const { version } = JSON.parse(await text(await viewer.handle(get("source"))));
     const saved = await viewer.handle(post("save", { text: "# saved", version }));
     expect(saved).toMatchObject({ status: 200 });
-    expect(JSON.parse(text(saved))).toEqual({ version: sha256("# saved") });
-    expect(fs.read(README)).toBe("# saved");
+    expect(JSON.parse(await text(saved))).toEqual({ version: sha256("# saved") });
+    expect(fs.data(README)).toEqual(encode("# saved"));
     expect(await viewer.handle(post("save", { text: "# stale", version }))).toMatchObject({ status: 409 });
-    expect(fs.read(README)).toBe("# saved");
+    expect(fs.data(README)).toEqual(encode("# saved"));
     expect(await viewer.handle(post("save", { text: 1, version }))).toMatchObject({ status: 400 });
     expect((await viewer.handle(post("state", { dirty: true })))!.status).toBe(200);
     expect(writes).toEqual([["t1", stateSequence({ dirty: true })]]);
@@ -186,14 +186,14 @@ describe("PlaygroundViewers", () => {
     const viewer = open("__view-file", [README]);
     const first = await viewer.handle(upload("image", PNG, "image/png"));
     const second = await viewer.handle(upload("image", JPEG, "Image/JPEG; charset=x"));
-    expect(JSON.parse(text(first))).toEqual({ name: "image-20261003-140509.png" });
-    expect(JSON.parse(text(second))).toEqual({ name: "image-20261003-140509.jpg" });
-    expect(JSON.parse(text(await viewer.handle(upload("image", PNG, "image/png"))))).toEqual({ name: "image-20261003-140509-2.png" });
+    expect(JSON.parse(await text(first))).toEqual({ name: "image-20261003-140509.png" });
+    expect(JSON.parse(await text(second))).toEqual({ name: "image-20261003-140509.jpg" });
+    expect(JSON.parse(await text(await viewer.handle(upload("image", PNG, "image/png"))))).toEqual({ name: "image-20261003-140509-2.png" });
     expect(pastes).toHaveBeenCalledTimes(3);
     expect(fs.bytes(`${PLAYGROUND_CWD}/image-20261003-140509.png`)).toEqual(PNG);
     expect(fs.list(PLAYGROUND_CWD)!.map((entry) => entry.name)).toContain("image-20261003-140509-2.png");
     const shown = await viewer.handle(get("images/image-20261003-140509.png", "?v=2"));
-    expect(bytes(shown)).toEqual(PNG);
+    expect(await bytes(shown)).toEqual(PNG);
     expect(shown!.headers).toMatchObject({ "Content-Type": "image/png", "Content-Security-Policy": IMAGE_CSP });
   });
 
@@ -204,7 +204,7 @@ describe("PlaygroundViewers", () => {
     const viewer = open("__view-file", [README]);
     expect(await viewer.handle(upload("image", JPEG, "image/png"))).toMatchObject({ status: 415, body: "The pasted data is not a PNG image." });
     expect(await viewer.handle(upload("image", PNG, "text/plain"))).toMatchObject({ status: 415 });
-    expect(await viewer.handle(upload("image", new Uint8Array(IMAGE_LIMIT + 1), "image/png"))).toMatchObject({ status: 413 });
+    expect(await viewer.handle(upload("image", new Uint8Array(IMAGE_BOUND.limit + 1), "image/png"))).toMatchObject({ status: 413 });
     const code = open("__view-code", [README]);
     expect(await code.handle(upload("image", PNG, "image/png"))).toMatchObject({ status: 404 });
     expect(pastes).not.toHaveBeenCalled();
@@ -216,7 +216,7 @@ describe("PlaygroundViewers", () => {
     fs.write(`${PLAYGROUND_CWD}/src/shot.png`, PNG);
     const viewer = open("__view-file", [README]);
     const opened = await viewer.handle(get("edit/src/shot.png"));
-    expect(bytes(opened)).toEqual(PNG);
+    expect(await bytes(opened)).toEqual(PNG);
     const version = opened!.headers[VERSION_HEADER];
     expect(version).toBe(sha256(PNG));
     const query = `?version=${version}`;
@@ -224,8 +224,8 @@ describe("PlaygroundViewers", () => {
     expect(await viewer.handle(upload("image-save/src/shot.png", JPEG, "image/png", query))).toMatchObject({ status: 415 });
     expect(await viewer.handle(upload("image-save/src/shot.png", PNG_EDITED, "image/png"))).toMatchObject({ status: 400 });
     const saved = await viewer.handle(upload("image-save/src/shot.png", PNG_EDITED, "image/png", query));
-    expect(JSON.parse(text(saved))).toEqual({ version: sha256(PNG_EDITED) });
-    expect(bytes(await viewer.handle(get("images/src/shot.png")))).toEqual(PNG_EDITED);
+    expect(JSON.parse(await text(saved))).toEqual({ version: sha256(PNG_EDITED) });
+    expect(await bytes(await viewer.handle(get("images/src/shot.png")))).toEqual(PNG_EDITED);
     expect(await viewer.handle(upload("image-save/src/shot.png", PNG, "image/png", query))).toMatchObject({ status: 409 });
     expect(await viewer.handle(get("edit/../shot.png"))).toMatchObject({ status: 404 });
     expect(await viewer.handle(get("edit/LICENSE.gif"))).toMatchObject({ status: 415 });
@@ -252,7 +252,7 @@ describe("PlaygroundViewers", () => {
     expect(viewer.path).toBe(`/playground-fs/${viewer.token}/view`);
     expect((await viewer.handle(get("view")))!.body).toContain("assets/image.js");
     const source = await viewer.handle(get("source"));
-    expect(bytes(source)).toEqual(PNG);
+    expect(await bytes(source)).toEqual(PNG);
     expect(source!.headers[VERSION_HEADER]).toBe(sha256(PNG));
     expect(await viewer.handle(upload("save", JPEG, "image/jpeg", `?version=${sha256(PNG)}`))).toMatchObject({ status: 415 });
     expect(await viewer.handle(upload("save", PNG_EDITED, "image/png", `?version=${sha256(PNG)}`))).toMatchObject({ status: 200 });
@@ -263,11 +263,28 @@ describe("PlaygroundViewers", () => {
     expect(() => open("__view-file", ["anim.gif"], PLAYGROUND_CWD)).toThrow("text, PNG, and JPEG files only");
   });
 
+  it("hashes each stored value once: a save hashes only its new bytes", async () => {
+    const { fs, open } = harness();
+    fs.write(`${PLAYGROUND_CWD}/shot.png`, PNG);
+    const viewer = open("__view-file", ["shot.png"], PLAYGROUND_CWD);
+    const digest = vi.spyOn(crypto.subtle, "digest");
+    try {
+      const version = (await viewer.handle(get("source")))!.headers[VERSION_HEADER];
+      expect(digest).toHaveBeenCalledTimes(1);
+      expect(await viewer.handle(upload("save", PNG_EDITED, "image/png", `?version=${version}`))).toMatchObject({ status: 200 });
+      expect(digest).toHaveBeenCalledTimes(2);
+      expect((await viewer.handle(get("source")))!.headers[VERSION_HEADER]).toBe(sha256(PNG_EDITED));
+      expect(digest).toHaveBeenCalledTimes(2);
+    } finally {
+      digest.mockRestore();
+    }
+  });
+
   it("lists a folder and sends select and activate as OSC 367 opens of absolute paths", async () => {
     const { fs, writes, open } = harness();
     fs.write(`${PLAYGROUND_CWD}/src/new.ts`, "");
     const viewer = open("__view-folder", ["."], PLAYGROUND_CWD);
-    const listing = JSON.parse(text(await viewer.handle(get("list", "?dir=src"))));
+    const listing = JSON.parse(await text(await viewer.handle(get("list", "?dir=src"))));
     expect(listing.entries.map((entry: { name: string }) => entry.name)).toEqual(["frame.ts", "new.ts", "osc.ts", "protocol.ts", "sanitize.ts"]);
     expect((await viewer.handle(post("select", { path: "src/osc.ts" })))!.status).toBe(200);
     expect(writes[0][1]).toContain(`"path":"${PLAYGROUND_CWD}/src/osc.ts","preview":true`);
@@ -277,38 +294,32 @@ describe("PlaygroundViewers", () => {
   it("answers nothing for a token it does not hold, or once closed", async () => {
     const { viewers, open } = harness();
     const viewer = open("__view-error", [README, "gone"]);
-    expect(text(await viewer.handle(get("")))).toContain("gone");
+    expect(await text(await viewer.handle(get("")))).toContain("gone");
     viewers.close(viewer.token);
     expect(await viewer.handle(get(""))).toBeNull();
   });
 });
 
 describe("the window side of the viewer relay", () => {
-  it("carries a binary request body in and transfers a binary answer out", async () => {
+  it("carries a Blob request body in and a Blob answer out, never the stored bytes", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date(2026, 9, 3, 14, 5, 9));
     const fs = createPlaygroundFs();
     const viewers = new PlaygroundViewers(fs, () => {}, "https://dormouse.sh");
     const viewer = viewers.open("t1", "__view-file", [README], "/");
     if (viewer instanceof Error) throw viewer;
-    let transferred: unknown;
     const ask = async (request: ViewerRequest) => {
       const { port1, port2 } = new MessageChannel();
       const answer = new Promise<ViewerResponse | null>((resolve) => { port2.onmessage = ({ data }) => resolve(data); });
-      const post = vi.spyOn(port1, "postMessage");
       const message: RelayMessage = { type: "playground-fs-request", token: viewer.token, ...request };
       await respond(viewers, message, port1);
-      transferred = post.mock.calls[0]?.[1];
       try { return await answer; } finally { port1.close(); port2.close(); }
     };
     try {
-      expect(JSON.parse(text(await ask(upload("image", PNG, "image/png"))))).toEqual({ name: "image-20261003-140509.png" });
-      expect(transferred).toEqual([]);
+      expect(JSON.parse(await text(await ask(upload("image", PNG, "image/png"))))).toEqual({ name: "image-20261003-140509.png" });
       const shown = await ask(get("images/image-20261003-140509.png"));
-      expect(shown!.body).toBeInstanceOf(ArrayBuffer);
-      expect(transferred).toEqual([expect.any(ArrayBuffer)]);
-      expect(bytes(shown)).toEqual(PNG);
-      // The transferred answer was a copy; the file keeps its bytes.
+      expect(shown!.body).toBeInstanceOf(Blob);
+      expect(await bytes(shown)).toEqual(PNG);
       expect(fs.bytes(`${PLAYGROUND_CWD}/image-20261003-140509.png`)).toEqual(PNG);
       expect(await ask(get("images/missing.png"))).toMatchObject({ status: 404 });
     } finally {

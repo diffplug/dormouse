@@ -42,8 +42,8 @@ function activated(registration: ServiceWorkerRegistration): Promise<void> {
   });
 }
 
-/** Answers one relayed request on `port`, transferring a binary body; null
- * (no answer) when this window holds no such viewer, or answering failed. */
+/** Answers one relayed request on `port`; null (no answer) when this window
+ * holds no such viewer, or answering failed. */
 export async function respond(viewers: PlaygroundViewers, request: RelayMessage, port: MessagePort): Promise<void> {
   let response: ViewerResponse | null;
   try {
@@ -52,5 +52,5 @@ export async function respond(viewers: PlaygroundViewers, request: RelayMessage,
     console.error("playground viewer request failed", error);
     response = null;
   }
-  port.postMessage(response, response && typeof response.body !== "string" ? [response.body] : []);
+  port.postMessage(response);
 }
