@@ -88,12 +88,10 @@ const proseOnly = (text) => proseLines(text).join('\n');
 
 // A size, duration, or ratio written into a spec's prose or tables (not a
 // backticked constant). AGENTS.md -> "What stays": presentation lives at the
-// code unless a peer must agree with it. `404s` is a plural, not a duration.
-const PRESENTATION_RE = /(?<![\w.])\d+(?:\.\d+)?\s?(?:px|ms|%|s|rem|em|fps)(?!\w)/g;
-const HTTP_STATUS_PLURAL_RE = /^[1-5]\d\ds$/;
-function presentationValues(line) {
-  return (line.replace(/`[^`\n]*`/g, '').match(PRESENTATION_RE) ?? []).filter((value) => !HTTP_STATUS_PLURAL_RE.test(value));
-}
+// code unless a peer must agree with it. A bare `s` after three or more digits
+// is a plural (`404s`, `1990s`), not a duration.
+const PRESENTATION_RE = /(?<![\w.])(?!\d{3,}s(?!\w))\d+(?:\.\d+)?\s?(?:px|ms|%|s|rem|em|fps)(?!\w)/g;
+const presentationValues = (line) => line.replace(/`[^`\n]*`/g, '').match(PRESENTATION_RE) ?? [];
 
 function proseCandidates(path, text) {
   const prose = proseOnly(text);
@@ -120,7 +118,7 @@ function proseCandidates(path, text) {
     }
   }
   if (!path.endsWith('.rationale.md')) {
-    proseLines(text).forEach((line, index) => {
+    prose.split('\n').forEach((line, index) => {
       const values = presentationValues(line);
       if (values.length > 0) {
         candidates.push({ kind: 'PRESENTATION', line: index + 1, words: wordCount(line), detail: `presentation value(s) ${values.join(', ')}` });

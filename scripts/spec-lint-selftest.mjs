@@ -49,7 +49,8 @@ const SOURCE = 'standalone/scripts/clean-dev-sidecar.mjs'; // a comment appended
 // the citation check, which scans every tracked source file, this one included.
 const spec = (name) => ['docs/specs', name].join('/');
 
-// Check 19 needs a real bolded clause from another spec to restate in SPEC.
+// Check 19 needs a real bolded clause from another spec to restate in SPEC;
+// eight words keeps it clear of the lint's six-word floor however it normalizes.
 const RESTATED = BY_HEADROOM.filter((f) => f !== SPEC)
   .flatMap((f) => [...readRepoFile(f).matchAll(/\*\*([^*\n`]+)\*\*/g)].map((m) => m[1]))
   .find((clause) => clause.trim().split(/\s+/).length >= 8);

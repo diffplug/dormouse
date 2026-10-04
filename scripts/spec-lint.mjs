@@ -96,7 +96,7 @@
  * scripts/spec-lint-selftest.mjs plants one defect per finding check and
  * requires this lint to go red.
  */
-import { readdirSync, existsSync, writeFileSync } from 'node:fs';
+import { readdirSync, existsSync, statSync, writeFileSync } from 'node:fs';
 import { join, dirname, normalize } from 'node:path';
 import { readRepoFile, repoRoot as ROOT, trackedFiles } from './lint-kit.mjs';
 import { countWords, proseLines as proseLinesOf, SOURCE_EXTENSIONS } from './spec-md.mjs';
@@ -159,7 +159,13 @@ const memo = (fn) => {
   return (key) => (cache.has(key) ? cache : cache.set(key, fn(key))).get(key);
 };
 const read = memo(readRepoFile);
-const readIfExists = (rel) => (existsSync(join(ROOT, rel)) ? read(rel) : null);
+/** A repo file's text, or null when the path is missing or not a regular file. */
+const readIfExists = (rel) => (statSync(join(ROOT, rel), { throwIfNoEntry: false })?.isFile() ? read(rel) : null);
+
+/** The fold heading's title: `Future` or `N. Future`. */
+const FUTURE_TITLE_RE = /^(\d+\.\s*)?Future$/i;
+/** A bolded phrase. */
+const BOLD_RE = /\*\*([^*\n]+)\*\*/g;
 
 /** GitHub-style anchor slug for a heading title. */
 function slug(title) {
@@ -217,7 +223,7 @@ for (const spec of specFiles) {
 // --- Check 2: Future is the last section ------------------------------------
 for (const spec of foldCheckedFiles) {
   const h2s = headings(spec).filter((h) => h.level === 2);
-  const futureIdx = h2s.findIndex((h) => /^(\d+\.\s*)?Future$/i.test(h.title));
+  const futureIdx = h2s.findIndex((h) => FUTURE_TITLE_RE.test(h.title));
   if (futureIdx !== -1 && futureIdx !== h2s.length - 1) {
     problems.push(
       `${spec}: "## ${h2s[futureIdx].title}" must be the last section ` +
@@ -286,6 +292,8 @@ for (const spec of foldCheckedFiles) {
 
 // --- Check 6: named scopes defined once; bold references resolve --------------
 const SCOPE_RE = /\*\*Scope: ([a-z0-9-]+)\*\*/g;
+/** A scope definition: the bold scope name leading its line. */
+const SCOPE_LEAD_RE = new RegExp(`^${SCOPE_RE.source}`);
 // Cross-spec references also use the bare form ("the **dor-tools** scope"),
 // which AGENTS.md sanctions with "other specs link to it by name".
 const SCOPE_REF_RE = /\*\*([a-z0-9-]+)\*\* scope/g;
@@ -343,7 +351,7 @@ for (const rat of rationaleFiles) {
   }
   const specAnchors = anchorsOf(spec);
   for (const h of headings(rat).filter((h) => h.level === 2)) {
-    if (/^(\d+\.\s*)?Future$/i.test(h.title)) {
+    if (FUTURE_TITLE_RE.test(h.title)) {
       problems.push(`${rat}: rationale files are informative — the fold ("## Future") belongs to ${spec}`);
     } else if (!specAnchors.has(slug(h.title))) {
       problems.push(`${rat}: "## ${h.title}" is not a heading in ${spec}`);
@@ -474,13 +482,10 @@ for (const spec of foldCheckedFiles) {
 // Symbols placed in a file, anywhere in a spec's prose: a pointer outside
 // `Source of truth` rots the same way. Rationale files are history, and may
 // name what is gone. A directory, or a path check 4 reports missing, is skipped.
-const sourceOf = memo((path) => {
-  try { return checkablePath(path) ? readIfExists(path) : null; } catch { return null; }
-});
-for (const rel of allFiles.filter((f) => !hasRationale.has(f))) {
+for (const rel of allFiles.filter((f) => !rationaleFiles.includes(f))) {
   proseLines(rel).forEach((line, i) => {
     for (const m of line.matchAll(SYMBOLS_IN_FILE_RE)) {
-      const src = sourceOf(m[2]);
+      const src = checkablePath(m[2]) ? readIfExists(m[2]) : null;
       if (src === null) continue;
       for (const sym of [...m[1].matchAll(TICK_RE)].map((x) => x[1])) {
         if (!IDENT_RE.test(sym)) continue;
@@ -519,7 +524,7 @@ const citeTarget = memo((rel) => {
   if (text === null) return null;
   return {
     heads: headings(rel).map((h) => h.title),
-    bolds: [...text.matchAll(/\*\*([^*\n]+)\*\*/g)].map((m) => m[1]),
+    bolds: [...text.matchAll(BOLD_RE)].map((m) => m[1]),
   };
 });
 for (const rel of trackedFiles().filter((f) => CITING_FILE_RE.test(f))) {
@@ -645,24 +650,24 @@ for (const rel of allFiles) {
 }
 
 // --- Check 18: Future opens with a named scope, and no scope is empty ---------
-const SCOPE_LEAD_RE = /^\*\*Scope: [a-z0-9-]+\*\*/;
 for (const spec of foldCheckedFiles) {
-  const fold = headings(spec).find((h) => h.level === 2 && /^(\d+\.\s*)?Future$/i.test(h.title));
+  const fold = headings(spec).find((h) => h.level === 2 && FUTURE_TITLE_RE.test(h.title));
   if (!fold) continue;
-  const lines = proseLines(spec);
-  const first = lines.findIndex((l, i) => i >= fold.line && l.trim() !== '');
-  if (first !== -1 && !SCOPE_LEAD_RE.test(lines[first])) {
-    problems.push(`${spec}:${first + 1}: "## ${fold.title}" opens without a "**Scope: X**" lead (AGENTS.md -> "Named scopes")`);
+  // The lines below the fold heading; `fold.line` is 1-based, so index k is line fold.line + k + 1.
+  const body = proseLines(spec).slice(fold.line);
+  const at = (k) => fold.line + k + 1;
+  const first = body.findIndex((l) => l.trim() !== '');
+  if (first !== -1 && !SCOPE_LEAD_RE.test(body[first])) {
+    problems.push(`${spec}:${at(first)}: "## ${fold.title}" opens without a "**Scope: X**" lead (AGENTS.md -> "Named scopes")`);
   }
-  lines.forEach((line, i) => {
-    if (i < fold.line) return;
+  body.forEach((line, k) => {
     const lead = SCOPE_LEAD_RE.exec(line);
     if (!lead) return;
     const inline = line.slice(lead[0].length).replace(/^[\s—–:.-]+/, '').trim();
     if (inline && !inline.endsWith(':')) return;
-    const next = lines.slice(i + 1).find((l) => l.trim() !== '');
+    const next = body.slice(k + 1).find((l) => l.trim() !== '');
     if (next === undefined || SCOPE_LEAD_RE.test(next) || /^#{1,6}\s/.test(next)) {
-      problems.push(`${spec}:${i + 1}: ${lead[0]} lists no item before the next scope or heading`);
+      problems.push(`${spec}:${at(k)}: ${lead[0]} lists no item before the next scope or heading`);
     }
   });
 }
@@ -673,13 +678,25 @@ for (const spec of foldCheckedFiles) {
 const RESTATED_MIN_WORDS = 6;
 const normalized = (text) => text.toLowerCase().replace(/[\p{P}\p{S}]/gu, ' ').replace(/\s+/g, ' ').trim();
 const specProse = new Map(foldCheckedFiles.map((f) => [f, ` ${normalized(proseLines(f).join('\n'))} `]));
+// Every run of RESTATED_MIN_WORDS words -> the specs containing it, so a
+// clause is substring-searched only in specs that share its opening words.
+const specsWithRun = new Map();
+for (const [spec, prose] of specProse) {
+  const words = prose.trim().split(' ');
+  for (let k = 0; k + RESTATED_MIN_WORDS <= words.length; k++) {
+    const run = words.slice(k, k + RESTATED_MIN_WORDS).join(' ');
+    if (!specsWithRun.has(run)) specsWithRun.set(run, new Set());
+    specsWithRun.get(run).add(spec);
+  }
+}
 for (const spec of foldCheckedFiles) {
   proseLines(spec).forEach((line, i) => {
-    for (const m of line.matchAll(/\*\*([^*\n]+)\*\*/g)) {
+    for (const m of line.matchAll(BOLD_RE)) {
       const clause = normalized(m[1]);
-      if (clause.split(' ').length < RESTATED_MIN_WORDS) continue;
-      for (const [other, prose] of specProse) {
-        if (other !== spec && prose.includes(` ${clause} `)) {
+      const words = clause.split(' ');
+      if (words.length < RESTATED_MIN_WORDS) continue;
+      for (const other of specsWithRun.get(words.slice(0, RESTATED_MIN_WORDS).join(' ')) ?? []) {
+        if (other !== spec && specProse.get(other).includes(` ${clause} `)) {
           problems.push(
             `${spec}:${i + 1}: bolded "${m[1]}" is restated in ${other} — keep it in the spec that owns it ` +
             '(a `FAIL IF` over a feature spec) and point there (AGENTS.md -> "What, not why")',
@@ -694,25 +711,24 @@ for (const spec of foldCheckedFiles) {
 // Only quoted spans are candidates: a rule phrased like the test named after
 // it is the test following the spec, not the spec quoting the test.
 const QUOTED_SPAN_RE = /`([^`\n]+)`|"([^"\n]+)"/g;
-const quotedSpans = foldCheckedFiles.flatMap((spec) => proseLines(spec).flatMap((line, i) =>
-  [...line.matchAll(QUOTED_SPAN_RE)]
-    .map((m) => ({ spec, line: i + 1, span: m[1] ?? m[2], key: normalized(m[1] ?? m[2]) }))
-    .filter((q) => q.key.split(' ').length >= RESTATED_MIN_WORDS)));
-if (quotedSpans.length > 0) {
-  const TEST_FILE_RE = /\.(?:test|spec|smoketest)\.[cm]?[jt]sx?$|(?:^|\/)tests?\/.*\.[cm]?[jt]sx?$/;
-  // `it('…')`, `test.each(…)("…")`, … — a template title with `${…}` is never quoted whole.
-  const TITLE_RE = /\b(?:it|test)(?:\.(?:only|skip|todo|concurrent|each\([^)]*\)))?\(\s*(['"`])((?:(?!\1)[^\\\n]|\\.)*)\1/g;
-  const titles = new Map();
-  for (const rel of trackedFiles().filter((f) => TEST_FILE_RE.test(f))) {
-    let text;
-    try { text = read(rel); } catch { continue; }
-    for (const m of text.matchAll(TITLE_RE)) titles.set(normalized(m[2]), rel);
-  }
-  for (const q of quotedSpans) {
-    if (titles.has(q.key)) {
-      problems.push(`${q.spec}:${q.line}: quotes the title of a test in ${titles.get(q.key)} ("${q.span}") — cite the test file, never a title`);
+const TEST_FILE_RE = /\.(?:test|spec|smoketest)\.[cm]?[jt]sx?$|(?:^|\/)tests?\/.*\.[cm]?[jt]sx?$/;
+// `it('…')`, `test.each(…)("…")`, … — a template title with `${…}` is never quoted whole.
+const TITLE_RE = /\b(?:it|test)(?:\.(?:only|skip|todo|concurrent|each\([^)]*\)))?\(\s*(['"`])((?:(?!\1)[^\\\n]|\\.)*)\1/g;
+const testTitles = new Map(); // normalized title -> test file
+for (const rel of trackedFiles().filter((f) => TEST_FILE_RE.test(f))) {
+  for (const m of (readIfExists(rel) ?? '').matchAll(TITLE_RE)) testTitles.set(normalized(m[2]), rel);
+}
+for (const spec of foldCheckedFiles) {
+  proseLines(spec).forEach((line, i) => {
+    for (const m of line.matchAll(QUOTED_SPAN_RE)) {
+      const span = m[1] ?? m[2];
+      const key = normalized(span);
+      const test = testTitles.get(key);
+      if (test && key.split(' ').length >= RESTATED_MIN_WORDS) {
+        problems.push(`${spec}:${i + 1}: quotes the title of a test in ${test} ("${span}") — cite the test file, never a title`);
+      }
     }
-  }
+  });
 }
 
 // -----------------------------------------------------------------------------
