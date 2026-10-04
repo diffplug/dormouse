@@ -13,7 +13,7 @@ Source of truth: `lib/src/components/wall/BrowserPanel.tsx`, `lib/src/components
 
 An automated renderer belongs to one **provider**, the CLI that drives its browser. **Must read every per-provider fact from the one registry** — render modes, CLI, binary for `dor`, the hosts and the webview; label and viewport hint for the GUI — never a ternary on the provider or a mode prefix. **Must spell provider names in full and lowercase in UI, commands and renderer identifiers**, including public `render_mode` and `dormouse.yml` `render` values; abbreviated modes are not aliases. `parseRenderMode` reads anything but a provider's mode as `iframe`.
 
-**Must name automated actions by provider, with one "switch to <provider>" link shown only when another provider is available.** The remembered preference defaults to agent-browser, falling back to an available provider; the Display modal opens on the current browser's provider.
+**Must name automated actions by provider, with one "switch to \<provider>" link shown only when another provider is available.** The remembered preference defaults to agent-browser, falling back to an available provider; the Display modal opens on the current browser's provider.
 
 Source of truth: `BROWSER_PROVIDERS` and `parseRenderMode` in `dor-lib-common/src/browser-providers.ts`; `BROWSER_PROVIDER_GUI` in `lib/src/components/wall/browser-automation.ts`; `BrowserProviderSwitch` in `lib/src/components/wall/BrowserProviderSwitch.tsx`.
 
@@ -119,7 +119,7 @@ stateDiagram-v2
 | From -> To | Behavior |
 | --- | --- |
 | `iframe` or the other provider -> `agent-browser-*` / `playwright-*` | **The pane swaps at once** to a session-less pane whose controller launches at the current URL, headed for a popout (rationale). **A failed launch restores the previous renderer in place** (`launchFallback: { restore }`), even minimized: the embed, or the previous provider reopened in its own session, keeping its `key` (rationale). Inert without the capability. **A non-http(s) `url` refuses the swap** (`browserSurfaceUrl`). |
-| `agent-browser-screencast` <-> `agent-browser-popout` | Same Surface id and session, headed/headless relaunch; preserves only the active URL. |
+| `agent-browser-screencast` ↔ `agent-browser-popout` | Same Surface id and session, headed/headless relaunch; preserves only the active URL. |
 | `agent-browser-*` -> `iframe` | Uses canonical `params.url`; with multiple tabs, requires confirmation, because only the active tab survives. |
 
 Source of truth: `lib/src/components/wall/AgentBrowserScreenModal.tsx`, `offeredRenderModes` in `lib/src/components/wall/browser-automation.ts`, `onSwapRenderMode` in `lib/src/components/Wall.tsx`, `createViewportSync` in `lib/src/host/browser-sync.ts`.
