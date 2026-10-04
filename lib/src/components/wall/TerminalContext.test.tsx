@@ -2,7 +2,8 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { TerminalContextView, type TerminalContextViewProps } from './TerminalContextView';
+import { contextTeeth, TerminalContextView, type TerminalContextViewProps } from './TerminalContextView';
+import { TERMINAL_CONTEXT_TEETH_PX } from '../design';
 import { TerminalPaneHeader } from './TerminalPaneHeader';
 import { TerminalPanel } from './TerminalPanel';
 import { TerminalContext } from './TerminalContext';
@@ -136,7 +137,7 @@ it('moves trailing actions into the dropdown on resize and dispatches hidden act
   } finally { client.mockRestore(); offset.mockRestore(); vi.unstubAllGlobals(); }
 });
 
-it('keeps Explain icon-only and compacts the Surface ref as the title row narrows', () => {
+it('drops the title explanation label, then compacts the Surface ref, as the header narrows', () => {
   let width = 320;
   const observers = new Set<() => void>();
   vi.stubGlobal('ResizeObserver', class {
@@ -144,22 +145,22 @@ it('keeps Explain icon-only and compacts the Surface ref as the title row narrow
     observe() {} disconnect() {} unobserve() {}
   });
   const client = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function(this: HTMLElement) { return this.hasAttribute('data-context-title') ? width : 0; });
-  // Ten pixels a character, twenty an icon, 8ch as eighty: title 80, Explain 20, ref 110, close 20.
+  // Ten pixels a character, twenty an icon: ref 110, explanation 130 or 20 bare, close 20.
   const offset = vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(function(this: HTMLElement) {
-    return (this.textContent?.length ?? 0) * 10 + this.querySelectorAll('svg').length * 20 + (this.classList.contains('w-[8ch]') ? 80 : 0);
+    return (this.textContent?.length ?? 0) * 10 + this.querySelectorAll('svg').length * 20;
   });
   const resize = (next: number) => act(() => { width = next; observers.forEach(notify => notify()); });
   try {
     render();
-    expect(button('Explain this title').textContent).toBe('');
-    expect(button('Copy surface:3').textContent).toBe('surface:3');
-    resize(260);
-    expect(button('Explain this title').textContent).toBe('');
+    expect(button('Explain this title').textContent).toBe('debug title');
     expect(button('Copy surface:3').textContent).toBe('surface:3');
     resize(200);
+    expect(button('Explain this title').textContent).toBe('');
+    expect(button('Copy surface:3').textContent).toBe('surface:3');
+    resize(140);
     expect(button('Copy surface:3').textContent).toBe('');
     resize(320);
-    expect(button('Explain this title').textContent).toBe('');
+    expect(button('Explain this title').textContent).toBe('debug title');
     expect(button('Copy surface:3').textContent).toBe('surface:3');
   } finally { client.mockRestore(); offset.mockRestore(); vi.unstubAllGlobals(); }
 });
@@ -173,10 +174,10 @@ it('re-fits the title row when its helper placement buttons change', () => {
     disconnect() { for (const callbacks of observed.values()) callbacks.delete(this.callback); }
     unobserve() {}
   });
-  const client = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function(this: HTMLElement) { return this.hasAttribute('data-context-title') ? 260 : 0; });
+  const client = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function(this: HTMLElement) { return this.hasAttribute('data-context-title') ? 170 : 0; });
   // As above; each placement side and the close add a twenty-pixel icon to the actions group.
   const offset = vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(function(this: HTMLElement) {
-    return (this.textContent?.length ?? 0) * 10 + this.querySelectorAll('svg').length * 20 + (this.classList.contains('w-[8ch]') ? 80 : 0);
+    return (this.textContent?.length ?? 0) * 10 + this.querySelectorAll('svg').length * 20;
   });
   try {
     props.placement = { side: 'bottom', available: ['bottom'], onChange: vi.fn() };
@@ -210,7 +211,7 @@ it('drops the explorer label, and its busy text, before truncating the directory
     await click('Reveal in Finder');
     expect(button('Reveal in Finder').getAttribute('aria-busy')).toBe('true');
     expect(button('Reveal in Finder').textContent).toBe('');
-    resize(300);
+    resize(400);
     expect(button('Reveal in Finder').textContent).toContain('reveal in Finder');
   } finally { client.mockRestore(); offset.mockRestore(); vi.unstubAllGlobals(); }
 });
@@ -437,13 +438,43 @@ it('offers Keep open only for a preview slot, as a focusable button that keeps f
   expect(props.onClose).toHaveBeenCalledOnce();
 });
 
+it('cuts 90° teeth corner to corner along the edge facing the source', () => {
+  const { outline, clip } = contextTeeth('left', 300, 200);
+  const points = outline.slice(1).split(' L').map(point => point.split(',').map(Number));
+  expect(points[0]).toEqual([TERMINAL_CONTEXT_TEETH_PX, 0]);
+  expect(points.at(-1)).toEqual([TERMINAL_CONTEXT_TEETH_PX, 200]);
+  // Tips on the outer edge, each half a tooth from its valleys: a right angle at every point.
+  for (let k = 1; k < points.length; k += 2) {
+    expect(points[k][0]).toBe(0);
+    expect(points[k + 1][1] - points[k][1]).toBe(TERMINAL_CONTEXT_TEETH_PX);
+  }
+  // The clip reaches past the other three sides for the halo, never past the teeth.
+  const xs = clip.slice('polygon('.length, -1).split(', ').map(point => parseFloat(point));
+  expect([Math.min(...xs), Math.max(...xs)]).toEqual([0, 316]);
+  expect(contextTeeth('bottom', 300, 200).outline.startsWith('M0,190 L')).toBe(true);
+});
+
+it('faces its teeth toward the source and carries each row into them', () => {
+  props.placement = { side: 'right', available: ['right'], onChange: vi.fn() };
+  render();
+  const context = container.querySelector<HTMLElement>('[data-terminal-context]')!;
+  expect(context.dataset.contextTeeth).toBe('left');
+  const status = container.querySelector<HTMLElement>('[aria-label="Helper terminal status"]')!;
+  expect(status.style.borderLeft).toBe(`${TERMINAL_CONTEXT_TEETH_PX}px solid transparent`);
+  expect(status.style.borderRight).toBe('0px solid transparent');
+  props.placement = undefined;
+  render();
+  expect(context.dataset.contextTeeth).toBeUndefined();
+  expect(context.querySelector('svg path.fill-none')).toBeNull();
+});
+
 it('always shows context details alongside the helper', () => {
   render();
   expect(button('Terminal context details')).toBeNull();
   expect(button('Open in system browser')).not.toBeNull();
   expect(button('Explain this title')).not.toBeNull();
   expect(button('Copy absolute path')).not.toBeNull();
-  expect(container.textContent).toContain('Alerts');
+  expect(container.querySelector('[role="switch"][aria-label^="TODO"]')).not.toBeNull();
   expect(container.querySelector('textarea')).not.toBeNull();
 });
 

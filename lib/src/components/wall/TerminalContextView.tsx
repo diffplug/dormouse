@@ -1,6 +1,6 @@
 import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type DependencyList, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
-import { ArrowCounterClockwiseIcon, ArrowLineUpIcon, ArrowSquareOutIcon, BugBeetleIcon, CaretDownIcon, CheckIcon, CircleNotchIcon, CopyIcon, PauseIcon, PushPinIcon, SlidersHorizontalIcon, TerminalIcon, WarningIcon, XIcon } from '@phosphor-icons/react';
-import { ELEVATED_PANE_SHADOW, OnOffSwitch, POPUP_SURFACE_CLASS, SUBTLE_ACTION_COLOR_CLASS, SUBTLE_ACTION_INTERACTION_CLASS, SUBTLE_ACTION_REST_COLOR_CLASS, SUBTLE_ACTION_WRAPPER_INTERACTION_CLASS, TERMINAL_CONTEXT_SURFACE_CLASS, TERMINAL_CONTEXT_EXIT_MS, TERMINAL_SELECTION_BORDER_RADIUS } from '../design';
+import { ArrowCounterClockwiseIcon, ArrowLineUpIcon, ArrowSquareOutIcon, BugBeetleIcon, CaretDownIcon, CheckIcon, CircleNotchIcon, CopyIcon, FolderSimpleIcon, PauseIcon, PlugIcon, PushPinIcon, SlidersHorizontalIcon, TerminalIcon, WarningIcon, XIcon } from '@phosphor-icons/react';
+import { ELEVATED_PANE_SHADOW, OnOffSwitch, POPUP_SURFACE_CLASS, SUBTLE_ACTION_COLOR_CLASS, SUBTLE_ACTION_INTERACTION_CLASS, SUBTLE_ACTION_REST_COLOR_CLASS, SUBTLE_ACTION_WRAPPER_INTERACTION_CLASS, TERMINAL_CONTEXT_SURFACE_CLASS, TERMINAL_CONTEXT_EXIT_MS, TERMINAL_CONTEXT_TEETH_PX, TERMINAL_SELECTION_BORDER_RADIUS } from '../design';
 import { stepFocus } from '../focus-step';
 import { renderModeFor, type BrowserAutomationProvider } from 'dor-lib-common/browser-providers';
 import { AgentRobotIcon, BROWSER_DISPLAY_LABEL, BrowserDisplayIcon } from './BrowserDisplayIcon';
@@ -64,7 +64,7 @@ export interface TerminalContextViewProps {
   closing?: boolean;
   /** Viewport coordinates the reveal grows from; absent, the top-left corner. */
   origin?: { x: number; y: number };
-  defaultCommand?: string; title: string; surfaceRef: string; cwd: string; helperCwd?: string; mismatch?: boolean;
+  defaultCommand?: string; surfaceRef: string; cwd: string; helperCwd?: string; mismatch?: boolean;
   workspaceMove?: ReactNode;
   titleSources: { source: string; value: string; note?: string }[];
   scan: ContextScan; watchRule?: string | null; watching: boolean; todo: boolean;
@@ -134,9 +134,9 @@ const OPENING = <>{SPINNER}opening…</>;
 
 /** Drag-selectable diagnostic text. A press focuses it, so Cmd/Ctrl+C reaches
  *  `handleContextCopy` rather than the helper terminal. */
-function ContextDiagnostic({ className, children }: { className: string; children: ReactNode }) {
+function ContextDiagnostic({ className, style, children }: { className: string; style?: CSSProperties; children: ReactNode }) {
   return <div role="alert" data-context-diagnostic tabIndex={-1} onPointerDown={event => event.currentTarget.focus({ preventScroll: true })}
-    className={`select-text cursor-text outline-none ${className}`}>{children}</div>;
+    style={style} className={`select-text cursor-text outline-none ${className}`}>{children}</div>;
 }
 
 /** `compact`: the button shows only its icon, so opening shows only the spinner. */
@@ -185,38 +185,37 @@ const COPY_ICON = <CopyIcon size={12} />;
 const COPY_CHECK = <CheckIcon size={12} weight="bold" />;
 const EXPLORE_ICON = <ArrowSquareOutIcon size={15} />;
 const EXPLAIN_ICON = <BugBeetleIcon size={15} />;
+const EXPLAIN_TEXT = 'debug title';
+/** Muted marks leading the directory and port rows in place of a label column. */
+const FOLDER_ICON = <FolderSimpleIcon size={14} className="shrink-0 text-muted" />;
+const PORT_ICON = <PlugIcon size={14} className="shrink-0 text-muted" />;
 
-/** The title, its explanation, the copyable Surface ref, and `actions` on one line. */
-function TitleRow({ title, surfaceRef, onExplain, onCopyRef, actions, workspaceMove }: {
-  title: string; surfaceRef: string; actions: ReactNode; workspaceMove?: ReactNode;
+/** The copyable Surface ref, the title explanation, the workspace move, then `actions`. */
+function HeaderRow({ surfaceRef, onExplain, onCopyRef, actions, workspaceMove }: {
+  surfaceRef: string; actions: ReactNode; workspaceMove?: ReactNode;
   onExplain(): void; onCopyRef(): Promise<boolean>;
 }) {
   const row = useRef<HTMLDivElement>(null);
   const measures = useRef<HTMLDivElement>(null);
   const actionsRef = useRef<HTMLDivElement>(null);
-  const [refCompact, setRefCompact] = useState(false);
-  // The title truncates to 8ch, the ref drops to its icon, then the title truncates on.
-  useRowFit(row, measures, (width, gap, [text, least, explainIcon, refFull]) => {
-    const rest = (actionsRef.current?.offsetWidth ?? 0) + 3 * gap;
-    setRefCompact(Math.min(text, least) + explainIcon + refFull + rest > width);
-  }, [title, surfaceRef], [actionsRef]);
-  return <div ref={row} data-context-title className="relative flex min-h-6 min-w-0 flex-wrap items-center gap-1.5">
+  const [compact, setCompact] = useState<0 | 1 | 2>(0);
+  // The explanation drops its label, then the ref drops to its icon; the workspace move wraps.
+  useRowFit(row, measures, (width, gap, [ref, explain, explainIcon]) => {
+    const room = width - (actionsRef.current?.offsetWidth ?? 0) - 2 * gap;
+    setCompact(ref + explain + gap <= room ? 0 : ref + explainIcon + gap <= room ? 1 : 2);
+  }, [surfaceRef], [actionsRef]);
+  return <div ref={row} data-context-title className="relative flex min-h-7 min-w-0 items-center gap-1">
     <div ref={measures} aria-hidden="true" inert className={MEASURER_CLASS}>
-      <span className="whitespace-nowrap">{title}</span>
-      <span className="w-[8ch] shrink-0" />
-      <span className={ACTION_BOX_CLASS}>{EXPLAIN_ICON}</span>
       <span className={ACTION_BOX_CLASS}>{surfaceRef}{COPY_ICON}</span>
+      <span className={ACTION_BOX_CLASS}>{EXPLAIN_ICON}{EXPLAIN_TEXT}</span>
+      <span className={ACTION_BOX_CLASS}>{EXPLAIN_ICON}</span>
     </div>
-    <span className="flex min-w-0 flex-1 items-center gap-1.5">
-      <span className="min-w-0 truncate" title={title}>{title}</span>
-      <ContextAction label="Explain this title" onClick={onExplain}>{EXPLAIN_ICON}</ContextAction>
-    </span>
-    {!workspaceMove && <ContextCopyAction label={`Copy ${surfaceRef}`} confirmation={refCompact ? COPY_CHECK : undefined} onCopy={onCopyRef}>{!refCompact && <span>{surfaceRef}</span>}{COPY_ICON}</ContextCopyAction>}
-    <div ref={actionsRef} data-context-header-actions className="flex shrink-0 items-center gap-0.5">{actions}</div>
-    {workspaceMove && <div className="flex w-full min-w-0 flex-wrap items-center gap-1.5">
-      <ContextCopyAction label={`Copy ${surfaceRef}`} onCopy={onCopyRef}>{surfaceRef}{COPY_ICON}</ContextCopyAction>
+    <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-1">
+      <ContextCopyAction label={`Copy ${surfaceRef}`} confirmation={compact === 2 ? COPY_CHECK : undefined} onCopy={onCopyRef}>{compact < 2 && <span>{surfaceRef}</span>}{COPY_ICON}</ContextCopyAction>
+      <ContextAction label="Explain this title" onClick={onExplain}>{EXPLAIN_ICON}{compact === 0 && EXPLAIN_TEXT}</ContextAction>
       {workspaceMove}
-    </div>}
+    </div>
+    <div ref={actionsRef} data-context-header-actions className="flex shrink-0 items-center gap-0.5 self-start">{actions}</div>
   </div>;
 }
 
@@ -230,13 +229,15 @@ function DirRow({ cwd, explorerLabel, canExplore, onExplore, onCopyPath }: {
   const [compact, setCompact] = useState(false);
   const text = actionText(explorerLabel);
   // The explorer drops its label before the directory truncates.
-  useRowFit(row, measures, (width, gap, [path, copy, explorer]) => setCompact(path + copy + explorer + 2 * gap > width), [cwd, text]);
-  return <div ref={row} data-context-dir className="relative flex min-h-6 min-w-0 items-center gap-1.5">
+  useRowFit(row, measures, (width, gap, [lead, path, copy, explorer]) => setCompact(lead + path + copy + explorer + 3 * gap > width), [cwd, text]);
+  return <div ref={row} data-context-dir className="relative flex h-6 min-w-0 items-center gap-1">
     <div ref={measures} aria-hidden="true" inert className={MEASURER_CLASS}>
+      <span className="inline-flex">{FOLDER_ICON}</span>
       <span className="whitespace-nowrap">{cwd}</span>
       <span className={ACTION_BOX_CLASS}>{COPY_ICON}</span>
       <span className={ACTION_BOX_CLASS}>{EXPLORE_ICON}{text}</span>
     </div>
+    {FOLDER_ICON}
     {/* Right-to-left so truncation drops the start; the isolate keeps the path's own order. */}
     <span className="min-w-0 truncate [direction:rtl]" title={cwd}><bdi>{cwd}</bdi></span>
     <ContextCopyAction label="Copy absolute path" confirmation={COPY_CHECK} onCopy={onCopyPath}>{COPY_ICON}</ContextCopyAction>
@@ -274,12 +275,15 @@ function PortLaunchActions({ providers, canIframe, onPort }: {
   const root = useRef<HTMLDivElement>(null);
   const measures = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(actions.length);
+  // The row never squeezes below the trigger it falls back to; the port label truncates instead.
+  const [floor, setFloor] = useState(0);
   const [pending, setPending] = useState<PortMode | null>(null);
   const windowFocused = useContext(WindowFocusedContext);
   const hiddenPending = pending !== null && actions.findIndex(action => action.mode === pending) >= visible;
   const labels = actions.map(action => action.text).join('|');
   // A pending action shows "opening…", so each action reserves at least that.
   useRowFit(root, measures, (width, gap, [rest, opening, ...faces]) => {
+    setFloor(hiddenPending ? opening : rest);
     const widths = faces.map(face => Math.max(face, opening));
     const total = widths.reduce((sum, value) => sum + value, 0) + Math.max(0, widths.length - 1) * gap;
     if (total <= width) { setVisible(widths.length); return; }
@@ -302,7 +306,7 @@ function PortLaunchActions({ providers, canIframe, onPort }: {
     try { await onPort(mode); } finally { setPending(null); }
   };
   const key = (action: PortAction) => action.mode ?? 'switch';
-  return <div ref={root} data-port-actions className="relative flex min-w-8 flex-1 items-center gap-1">
+  return <div ref={root} data-port-actions className="relative flex flex-1 items-center gap-1" style={{ minWidth: floor }}>
     <div ref={measures} aria-hidden="true" inert className={MEASURER_CLASS}>
       {/* The trigger at rest and while opening, then each action's face. */}
       <span className={ACTION_BOX_CLASS}>{MORE}</span>
@@ -343,7 +347,55 @@ function PlacementIcon({ side }: { side: ContextSide }) {
 
 /** The custom properties `.terminal-context-enter` / `-exit` read (`lib/src/theme.css`)
  *  that JS owns: the exit length the removal timer must match, and the corner radius. */
-const SURFACE_STYLE = { boxShadow: ELEVATED_PANE_SHADOW, '--context-exit-duration': `${TERMINAL_CONTEXT_EXIT_MS}ms`, '--context-radius': TERMINAL_SELECTION_BORDER_RADIUS } as CSSProperties;
+const SURFACE_STYLE = { '--context-exit-duration': `${TERMINAL_CONTEXT_EXIT_MS}ms`, '--context-radius': TERMINAL_SELECTION_BORDER_RADIUS } as CSSProperties;
+
+const OPPOSITE: Record<ContextSide, ContextSide> = { left: 'right', right: 'left', top: 'bottom', bottom: 'top' };
+const SIDE_NAME: Record<ContextSide, 'Left' | 'Right' | 'Top' | 'Bottom'> = { left: 'Left', right: 'Right', top: 'Top', bottom: 'Bottom' };
+const CORNERS: Record<ContextSide, string[]> = {
+  left: ['TopLeft', 'BottomLeft'], right: ['TopRight', 'BottomRight'], top: ['TopLeft', 'TopRight'], bottom: ['BottomLeft', 'BottomRight'],
+};
+/** Past `ELEVATED_PANE_SHADOW`'s reach, so the teeth's clip keeps the halo on the other three sides. */
+const HALO_PX = 16;
+
+/** 90° teeth cut corner to corner along `edge` of a `width`×`height` panel, tips on the
+ *  panel's outer edge and valleys `TERMINAL_CONTEXT_TEETH_PX` inside it. `clip` keeps the
+ *  halo everywhere else; `outline` strokes the teeth, which the clip would cut in half. */
+export function contextTeeth(edge: ContextSide, width: number, height: number): { clip: string; outline: string } {
+  const depth = TERMINAL_CONTEXT_TEETH_PX;
+  const vertical = edge === 'left' || edge === 'right';
+  const along = vertical ? height : width;
+  const across = vertical ? width : height;
+  const count = Math.max(1, Math.round(along / (2 * depth)));
+  const step = along / count;
+  // Drawn with the teeth on the left (x across from the tips, y along the edge), then turned to `edge`.
+  const teeth: [number, number][] = [[depth, 0]];
+  for (let k = 0; k < count; k++) teeth.push([0, (k + 0.5) * step], [depth, (k + 1) * step]);
+  const turn = ([x, y]: [number, number]): [number, number] =>
+    edge === 'left' ? [x, y] : edge === 'right' ? [width - x, y] : edge === 'top' ? [y, x] : [y, height - x];
+  const px = (points: [number, number][]) => points.map(turn).map(([x, y]) => `${+x.toFixed(2)}px ${+y.toFixed(2)}px`);
+  const clip: [number, number][] = [[depth, -HALO_PX], [across + HALO_PX, -HALO_PX], [across + HALO_PX, along + HALO_PX], [depth, along + HALO_PX], ...teeth.slice().reverse()];
+  return { clip: `polygon(${px(clip).join(', ')})`, outline: `M${teeth.map(turn).map(([x, y]) => `${+x.toFixed(2)},${+y.toFixed(2)}`).join(' L')}` };
+}
+
+/** Recuts the teeth whenever the panel resizes, writing the clip and outline directly
+ *  so LathHost's per-frame placement never re-renders the context. */
+function useTeeth(panel: RefObject<HTMLElement | null>, outline: RefObject<SVGPathElement | null>, edge: ContextSide | undefined) {
+  useLayoutEffect(() => {
+    const element = panel.current;
+    if (!element || !edge) return;
+    const cut = () => {
+      const { offsetWidth: width, offsetHeight: height } = element;
+      if (!width || !height) return;
+      const teeth = contextTeeth(edge, width, height);
+      element.style.clipPath = teeth.clip;
+      outline.current?.setAttribute('d', teeth.outline);
+    };
+    cut();
+    const observer = new ResizeObserver(cut);
+    observer.observe(element);
+    return () => { observer.disconnect(); element.style.clipPath = ''; };
+  }, [panel, outline, edge]);
+}
 
 /** Freeze the reveal as it stands so an interrupted entrance contracts from what
  *  is visible instead of flashing to full size; CSS clamps the origin, so it is
@@ -359,7 +411,9 @@ function snapshotExit(surface: HTMLElement, content: HTMLElement | null) {
 export function TerminalContextView(p: TerminalContextViewProps) {
   const motionClass = motionIsInstant() ? '' : p.closing ? 'terminal-context-exit' : 'terminal-context-enter';
   const surface = useRef<HTMLElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
   const content = useRef<HTMLDivElement>(null);
+  const outline = useRef<SVGPathElement>(null);
   // Offsets of the opening pointer inside the surface; the keyframes clamp them.
   useLayoutEffect(() => {
     const element = surface.current;
@@ -408,8 +462,20 @@ export function TerminalContextView(p: TerminalContextViewProps) {
   // A Tool's command is whatever its shell reported, line breaks included.
   const statusLabel = isTool ? (p.status === 'running' ? `Running ${p.command.replace(/\s+/g, ' ')}…` : 'At prompt') : status.label(p.command);
   const placement = p.placement;
-  return <section ref={surface} aria-label="Terminal context" data-terminal-context tabIndex={-1} inert={p.closing} aria-hidden={p.closing || undefined} style={SURFACE_STYLE} data-context-side={placement?.side}
-    className={`${TERMINAL_CONTEXT_SURFACE_CLASS} ${motionClass} ${p.closing ? 'pointer-events-none' : ''} absolute inset-0 flex flex-col overflow-hidden text-sm outline-none`}
+  // The edge facing the source is cut into teeth that reach over it (DESIGN.md → "Terminal Context Teeth").
+  const teeth = placement && OPPOSITE[placement.side];
+  useTeeth(panel, outline, teeth);
+  const reach = (side: ContextSide) => (side === teeth ? TERMINAL_CONTEXT_TEETH_PX : 0);
+  /** A row with its own background carries it into the teeth beside it. */
+  const fill = (...sides: ContextSide[]) => Object.fromEntries(sides.map(side => [`border${SIDE_NAME[side]}`, `${reach(side)}px solid transparent`])) as CSSProperties;
+  const diagnosticInset: CSSProperties = { marginLeft: 12 + reach('left'), marginRight: 12 + reach('right') };
+  const panelStyle: CSSProperties = { boxShadow: ELEVATED_PANE_SHADOW };
+  if (teeth) {
+    Object.assign(panelStyle, { [`border${SIDE_NAME[teeth]}Width`]: 0 });
+    for (const corner of CORNERS[teeth]) Object.assign(panelStyle, { [`border${corner}Radius`]: 0 });
+  }
+  return <section ref={surface} aria-label="Terminal context" data-terminal-context tabIndex={-1} inert={p.closing} aria-hidden={p.closing || undefined} style={SURFACE_STYLE} data-context-side={placement?.side} data-context-teeth={teeth}
+    className={`${motionClass} ${p.closing ? 'pointer-events-none' : ''} absolute inset-0 font-mono text-sm text-foreground outline-none`}
     onContextMenu={event => event.preventDefault()}
     onKeyDown={event => {
       if (isComposingKey(event.nativeEvent)) return;
@@ -420,48 +486,57 @@ export function TerminalContextView(p: TerminalContextViewProps) {
       }
       if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); if (detail) setDetail(null); else close(); }
     }}>
+    <div ref={panel} className={`${TERMINAL_CONTEXT_SURFACE_CLASS} absolute inset-0 flex flex-col overflow-hidden`} style={panelStyle}>
     <div ref={content} className="terminal-context-content flex min-h-0 flex-1 flex-col">
-      <div className="shrink-0 max-h-[45%] overflow-auto px-3 py-2">
-        <div className="grid grid-cols-[3rem_minmax(0,1fr)] items-center gap-y-1">
-          <span className="text-muted">Title</span>
-          <TitleRow workspaceMove={p.workspaceMove} title={p.title} surfaceRef={p.surfaceRef} onExplain={() => setDetail('title')} onCopyRef={() => attempt(p.onCopyRef)} actions={<>
-            {placement && <div role="group" aria-label="Helper placement" className="flex shrink-0 items-center gap-0.5">{placement.available.map(side =>
-              <ContextAction key={side} label={`Place helper at ${side}`} pressed={placement.side === side} keepFocus onClick={() => placement.onChange(side)}><PlacementIcon side={side} /></ContextAction>)}</div>}
-            <ContextAction label="Close terminal context" onClick={close} muted><XIcon size={15} /></ContextAction>
-          </>} />
-          <span className="text-muted">Dir</span>
-          <DirRow cwd={p.cwd} explorerLabel={p.explorerLabel} canExplore={p.canExplore} onExplore={() => attempt(p.onExplore)} onCopyPath={() => attempt(p.onCopyPath)} />
-          <span className="text-muted">Ports</span>
-          <div data-context-ports className="flex min-h-7 min-w-0 items-center gap-2">
-            {p.scan.status === 'scanning' ? <span className="truncate text-muted">Scanning ports…</span> : p.scan.status === 'failed' ? <span className="truncate text-error">Port scan failed · Reopen to try again</span> : !selected ? <span className="truncate text-muted">No listening ports</span> : <>
-              <div className="flex min-w-0 max-w-[45%] shrink items-center gap-2">
-                {entries.length > 1 ? <><select aria-label="Port" title={`${entries.length} ports`} value={selected.port} onChange={e => setPort(Number(e.target.value))} className="h-6 min-w-0 rounded border border-input-border bg-input-bg px-1 text-foreground">{entries.map(entry => <option key={entry.port} value={entry.port}>{entry.host}:{entry.port}{entry.processName ? ` · ${entry.processName}` : ''}</option>)}</select><span className="shrink-0 text-muted">{entries.length} ports</span></>
-                  : <span className="truncate" title={`${selected.host}:${selected.port}${selected.processName ? ` · ${selected.processName}` : ''}`}>{selected.host}:{selected.port} <span className="text-muted">{selected.processName}</span></span>}
-              </div>
-              <span className="ml-1 h-3 shrink-0 border-l border-border" />
-              <PortLaunchActions providers={p.browserProviders} canIframe={p.canIframe} onPort={mode => attempt(() => p.onPort(selected, mode))} />
-            </>}
+      <div className="shrink-0 max-h-[45%] overflow-auto pb-1" style={{ paddingLeft: 8 + reach('left'), paddingRight: 4 + reach('right'), paddingTop: reach('top') }}>
+        <HeaderRow workspaceMove={p.workspaceMove} surfaceRef={p.surfaceRef} onExplain={() => setDetail('title')} onCopyRef={() => attempt(p.onCopyRef)} actions={<>
+          {placement && <div role="group" aria-label="Helper placement" className="flex shrink-0 items-center gap-0.5">{placement.available.map(side =>
+            <ContextAction key={side} label={`Place helper at ${side}`} pressed={placement.side === side} keepFocus onClick={() => placement.onChange(side)}><PlacementIcon side={side} /></ContextAction>)}</div>}
+          <ContextAction label="Close terminal context" onClick={close} muted><XIcon size={15} /></ContextAction>
+        </>} />
+        {/* A narrow panel moves the toggles under the rows, where they sit side by side. */}
+        <div className="@container"><div className="grid grid-cols-[minmax(0,1fr)] items-start gap-x-2 pl-1 @[20rem]:grid-cols-[minmax(0,1fr)_auto]">
+          <div className="grid min-w-0 grid-cols-[minmax(0,1fr)]">
+            <DirRow cwd={p.cwd} explorerLabel={p.explorerLabel} canExplore={p.canExplore} onExplore={() => attempt(p.onExplore)} onCopyPath={() => attempt(p.onCopyPath)} />
+            <div data-context-ports className="flex h-6 min-w-0 items-center gap-1">
+              {PORT_ICON}
+              {p.scan.status === 'scanning' ? <span className="truncate text-muted">Scanning ports…</span> : p.scan.status === 'failed' ? <span className="truncate text-error">Port scan failed · Reopen to try again</span> : !selected ? <span className="truncate text-muted">No listening ports</span> : <>
+                <div className="flex min-w-0 max-w-[45%] shrink items-center gap-2">
+                  {entries.length > 1 ? <><select aria-label="Port" title={`${entries.length} ports`} value={selected.port} onChange={e => setPort(Number(e.target.value))} className="h-6 min-w-0 rounded border border-input-border bg-input-bg px-1 text-foreground">{entries.map(entry => <option key={entry.port} value={entry.port}>{entry.host}:{entry.port}{entry.processName ? ` · ${entry.processName}` : ''}</option>)}</select><span className="shrink-0 text-muted">{entries.length} ports</span></>
+                    : <span className="truncate" title={`${selected.host}:${selected.port}${selected.processName ? ` · ${selected.processName}` : ''}`}>{selected.host}:{selected.port} <span className="text-muted">{selected.processName}</span></span>}
+                </div>
+                <span className="ml-1 h-3 shrink-0 border-l border-border" />
+                <PortLaunchActions providers={p.browserProviders} canIframe={p.canIframe} onPort={mode => attempt(() => p.onPort(selected, mode))} />
+              </>}
+            </div>
           </div>
-          <span className="text-muted">Alerts</span><div className="flex min-h-6 flex-wrap items-center gap-2"><span>{p.watchRule ? `Watch all ${p.watchRule} commands` : 'No command running'}</span>{p.watchRule && <OnOffSwitch on={p.watching} onEnable={p.onWatch} onDisable={p.onWatch} label={`Watch all ${p.watchRule} commands`} />}<span className="mx-1 h-3 border-l border-border" /><span>TODO</span><OnOffSwitch on={p.todo} onEnable={p.onTodo} onDisable={p.onTodo} label="TODO" /></div>
-        </div>
-        {p.notification && <div className="ml-12 mt-2 border-l-2 border-border py-1 pl-3"><div>{p.notification.title}</div><div className="whitespace-pre-wrap text-muted">{p.notification.body}</div></div>}
+          {/* Stacked beside the rows they belong to, so they cost no height. */}
+          <div data-context-alerts className="flex flex-wrap items-center gap-x-2 @[20rem]:grid @[20rem]:gap-x-1 @[20rem]:grid-cols-[auto_auto] @[20rem]:justify-items-end">
+            {p.watchRule
+              ? <><span className="max-w-[16ch] truncate" title={`Watch all ${p.watchRule} commands`}>watch {p.watchRule}</span><OnOffSwitch on={p.watching} onEnable={p.onWatch} onDisable={p.onWatch} label={`Watch all ${p.watchRule} commands`} /></>
+              : <span className="col-span-2 flex h-6 items-center text-muted" title="No command running">no command</span>}
+            <span>TODO</span><OnOffSwitch on={p.todo} onEnable={p.onTodo} onDisable={p.onTodo} label="TODO" />
+          </div>
+        </div></div>
+        {p.notification && <div className="mb-1 ml-6 mt-1 border-l-2 border-border py-1 pl-3"><div>{p.notification.title}</div><div className="whitespace-pre-wrap text-muted">{p.notification.body}</div></div>}
       </div>
-      <div className="@container flex min-h-0 flex-1 flex-col border-t border-border">
-        <div aria-label={isTool ? 'Tool terminal status' : 'Helper terminal status'} className="flex h-9 shrink-0 items-center gap-3 whitespace-nowrap px-3">
+      <div className="@container flex min-h-0 flex-1 flex-col">
+        {/* In the terminal's own background between hairlines: the helper's label, not a second header. */}
+        <div aria-label={isTool ? 'Tool terminal status' : 'Helper terminal status'} style={fill('left', 'right')}
+          className="flex h-7 shrink-0 items-center gap-3 whitespace-nowrap bg-terminal-bg px-3 shadow-[inset_0_1px_0_var(--color-border),inset_0_-1px_0_var(--color-border)]">
           {/* Named at every width, so a Tool's own terminal never passes for a helper (docs/specs/terminal-context.md). */}
           <span className="flex shrink-0 items-center gap-2 font-semibold"><TerminalIcon size={15} /><span className="@[48rem]:hidden">{isTool ? 'Tool' : 'Helper'}</span><span className="hidden @[48rem]:inline">{isTool ? 'Tool terminal' : 'Helper terminal'}</span></span>
-          <div className="flex min-w-0 items-center gap-2 text-muted">{status.icon}<span className="truncate" title={statusLabel}>{statusLabel}</span>
-            {!isTool && (status.reset ? <ContextAction label="Reset helper terminal" onClick={requestReset}><ArrowCounterClockwiseIcon size={13} />{resetAsks ? 'Reset…' : 'Reset'}</ContextAction> : <ContextAction label="Modify autorun command" onClick={() => { setCommand(p.defaultCommand ?? p.command); setDetail('modify'); }}><SlidersHorizontalIcon size={15} />Modify</ContextAction>)}
-          </div>
+          <div className="flex min-w-0 items-center gap-2 text-muted">{status.icon}<span className="truncate" title={statusLabel}>{statusLabel}</span></div>
+          {!isTool && (status.reset ? <ContextAction label="Reset helper terminal" onClick={requestReset}><ArrowCounterClockwiseIcon size={13} />{resetAsks ? 'Reset…' : 'Reset'}</ContextAction> : <ContextAction label="Modify autorun command" onClick={() => { setCommand(p.defaultCommand ?? p.command); setDetail('modify'); }}><SlidersHorizontalIcon size={15} />Modify</ContextAction>)}
           <div className="ml-auto flex shrink-0 items-center gap-2">
             {/* The action leaves with the mark, so focus stays in the context for Escape and Tab. */}
             {p.onKeepPreview && <ContextAction label="Keep open" onClick={() => { surface.current?.focus({ preventScroll: true }); p.onKeepPreview?.(); }}><PushPinIcon size={15} />Keep open</ContextAction>}
             {!isTool && <ContextAction label="Move this terminal into a new pane" busy={busy} onClick={() => void submit(p.onPromote)}><ArrowLineUpIcon size={15} />Promote</ContextAction>}
           </div>
         </div>
-        {p.mismatch && <ContextDiagnostic className="mx-3 mb-2 flex max-h-[40%] min-h-0 shrink items-start gap-2 overflow-auto border-l-4 border-error bg-error/10 px-3 py-2"><WarningIcon size={18} weight="fill" className="shrink-0 text-error" /><div className="min-w-0 break-words"><div className="font-semibold">Helper directory differs from parent</div><div className="mt-1 grid grid-cols-[4rem_minmax(0,1fr)] gap-x-2"><span className="text-muted">Helper</span><strong>{p.helperCwd}</strong><span className="text-muted">Parent</span><span>{p.cwd}</span></div></div></ContextDiagnostic>}
-        {(p.warning || (!detail && error)) && <ContextDiagnostic className="mx-3 mb-2 max-h-[40%] min-h-0 shrink overflow-auto break-words border-l-4 border-error bg-error/10 px-3 py-2">{p.warning || error}</ContextDiagnostic>}
-        <div className="min-h-16 flex-1 bg-terminal-bg text-terminal-fg">{p.children}</div>
+        {p.mismatch && <ContextDiagnostic style={diagnosticInset} className="my-2 flex max-h-[40%] min-h-0 shrink items-start gap-2 overflow-auto border-l-4 border-error bg-error/10 px-3 py-2"><WarningIcon size={18} weight="fill" className="shrink-0 text-error" /><div className="min-w-0 break-words"><div className="font-semibold">Helper directory differs from parent</div><div className="mt-1 grid grid-cols-[4rem_minmax(0,1fr)] gap-x-2"><span className="text-muted">Helper</span><strong>{p.helperCwd}</strong><span className="text-muted">Parent</span><span>{p.cwd}</span></div></div></ContextDiagnostic>}
+        {(p.warning || (!detail && error)) && <ContextDiagnostic style={diagnosticInset} className="my-2 max-h-[40%] min-h-0 shrink overflow-auto break-words border-l-4 border-error bg-error/10 px-3 py-2">{p.warning || error}</ContextDiagnostic>}
+        <div className="min-h-16 flex-1 bg-terminal-bg text-terminal-fg" style={fill('left', 'right', 'bottom')}>{p.children}</div>
       </div>
     {detail && <div className="absolute inset-0 z-10 bg-app-bg/35" onClick={() => setDetail(null)}><div ref={detailRoot} role="dialog" aria-modal="true" aria-label={DETAILS[detail].label} className={`${POPUP_SURFACE_CLASS} absolute inset-x-3 top-3 max-h-[calc(100%-1.5rem)] overflow-auto p-4`} onClick={e => e.stopPropagation()}>
       <div className="mb-3 flex items-center justify-between font-semibold"><span>{DETAILS[detail].heading}</span><ContextAction label="Close details" onClick={() => setDetail(null)} muted><XIcon size={14} /></ContextAction></div>
@@ -469,5 +544,7 @@ export function TerminalContextView(p: TerminalContextViewProps) {
       {error && <ContextDiagnostic className="mt-2 text-error">{error}</ContextDiagnostic>}
     </div></div>}
     </div>
+    </div>
+    {teeth && <svg aria-hidden="true" className="pointer-events-none absolute inset-0 size-full overflow-visible"><path ref={outline} className="fill-none stroke-foreground/20" /></svg>}
   </section>;
 }

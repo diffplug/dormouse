@@ -204,6 +204,7 @@ const LathLeaf = memo(function LathLeaf({
   zIndex,
   hidden,
   parked,
+  receded,
   registerEl,
   onHeaderPointerDown,
   onLeafFocused,
@@ -223,6 +224,8 @@ const LathLeaf = memo(function LathLeaf({
   /** Parked: mounted but out of the tree, holding its last rect so the guest's
    *  viewport survives (docs/specs/tiling-engine.md → "Parked leaves"). */
   parked: boolean;
+  /** Another pane's terminal context is open (docs/specs/layout.md → "Header context menu"). */
+  receded: boolean;
   registerEl: (el: HTMLDivElement | null) => void;
   /** Header-press → maybe a pane drag (threshold-gated in the drag controller). Stable. */
   onHeaderPointerDown: (e: ReactPointerEvent<HTMLDivElement>) => void;
@@ -249,6 +252,7 @@ const LathLeaf = memo(function LathLeaf({
     <div
       data-lath-leaf={id}
       data-lath-parked={parked ? '' : undefined}
+      data-receded={receded ? '' : undefined}
       className="lath-leaf"
       style={style}
       ref={registerEl}
@@ -485,6 +489,8 @@ export function LathHost({
   const previewFramesRef = useRef(frames);
   previewFramesRef.current = frames;
   const contextSource = terminalContext && frames.get(terminalContext.id);
+  // Peers come back as the exit starts, alongside the ring.
+  const recedeFor = contextSource && !terminalContext.closing ? terminalContext.id : undefined;
   const contextMeta = terminalContext && snapshot.leafMeta.get(terminalContext.id);
   const sashList = sashes(activeTree, rect, LATH_LAYOUT_OPTS);
 
@@ -723,6 +729,7 @@ export function LathHost({
             Tab={meta ? resolveTab(meta.tabComponent) : undefined}
             Overlay={meta ? resolveOverlay(meta.component) : undefined}
             {...geom}
+            receded={recedeFor !== undefined && id !== recedeFor}
             registerEl={cb.registerEl}
             onHeaderPointerDown={cb.onHeaderPointerDown}
             onLeafFocused={onLeafFocused}

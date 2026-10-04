@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react';
 import { expect, userEvent, waitFor, within } from 'storybook/test';
 import { Wall } from '../components/Wall';
+import { TERMINAL_CONTEXT_TEETH_PX } from '../components/design';
 import { disposeHelper, getHelper } from '../lib/helper-terminal';
 import { flushTerminal, getTerminalInstance, refitSession } from '../lib/terminal-registry';
 import { flattenScenario, SCENARIO_SHELL_PROMPT } from '../lib/platform';
@@ -123,13 +124,15 @@ async function prepare(args: Props) {
   const b = sourcePane().getBoundingClientRect();
   if (!args.zoomed && args.layout !== 'single') {
     const overlap = { right: b.right - a.left, left: a.right - b.left, bottom: b.bottom - a.top, top: a.bottom - b.top };
-    expect(overlap[side]).toBeCloseTo(side === 'top' ? 4 : 16);
+    // Only the teeth reach over the source, and they face it.
+    expect(overlap[side]).toBeCloseTo(TERMINAL_CONTEXT_TEETH_PX);
+    expect(context().dataset.contextTeeth).toBe({ right: 'left', left: 'right', bottom: 'top', top: 'bottom' }[side]);
   } else {
-    expect(a.left - b.left).toBeCloseTo(16);
-    expect(b.right - a.right).toBeCloseTo(16);
-    expect(a.top - b.top).toBeGreaterThanOrEqual(16);
-    expect(b.bottom - a.bottom).toBeGreaterThanOrEqual(16);
-    expect(side === 'top' ? a.top - b.top : b.bottom - a.bottom).toBeCloseTo(16);
+    // A covering helper lies flush on the source's edges, teeth toward the half it leaves visible.
+    expect(a.left - b.left).toBeCloseTo(0);
+    expect(b.right - a.right).toBeCloseTo(0);
+    expect(side === 'top' ? a.top - b.top : b.bottom - a.bottom).toBeCloseTo(0);
+    expect(context().dataset.contextTeeth).toBe(side === 'top' ? 'bottom' : 'top');
   }
   return { expectSourceUnchanged };
 }
