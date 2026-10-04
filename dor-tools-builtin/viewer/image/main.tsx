@@ -1,13 +1,12 @@
 /** The standalone image page (`dor open shot.png`): the editor over one PNG or
- * JPEG file, saved over it through the shared document session
+ * JPEG file, saved over it as the page's document
  * (docs/specs/dor-tools-builtin.md -> Image editor). */
 import { createRef, useSyncExternalStore } from 'react';
 import { createRoot } from 'react-dom/client';
 import { flushSync } from 'react-dom';
-import { documentSession, stateLabel, type DocumentState } from '../document-session';
-import { ImageEditor, type ImageEditorHandle, type Revision } from './editor';
-import { decodeImage, fetchImage, saveImage, type EditableMime } from './io';
-import type { Raster } from './pixels';
+import { documentPage, sameState, stateLabel, type DocumentState } from '../document-session';
+import { editorDocument, ImageEditor, type ImageEditorHandle } from './editor';
+import { imageSource, type LoadedImage } from './io';
 import './page.css';
 
 let store: { doc: DocumentState; error: string | null } = { doc: { loaded: false, dirty: false, saving: false }, error: null };
@@ -18,31 +17,13 @@ const usePage = () => useSyncExternalStore(subscribe, () => store);
 const editor = createRef<ImageEditorHandle>();
 let loads = 0;
 
-const session = documentSession<Revision | null, Blob>({
-  snapshot() {
-    const { content, mark } = editor.current!.snapshot();
-    return { content, mark };
-  },
-  mark: () => editor.current?.revision() ?? null,
-  holds: mark => !!mark && !!editor.current?.holds(mark),
-  async apply(blob, name) {
-    const image = await decodeImage(blob);
-    const mime: EditableMime = blob.type === 'image/jpeg' ? 'image/jpeg' : 'image/png';
-    // A reload mounts a fresh editor, so undo starts over.
-    flushSync(() => root.render(<Page key={++loads} image={image} name={name} mime={mime} />));
-  },
-}, {
+// A reload mounts a fresh editor, so undo starts over.
+const session = documentPage().open(editorDocument(editor, (image, name) => flushSync(() => root.render(<Page key={++loads} image={image} name={name} />))), {
   report(doc) {
-    if (doc.loaded !== store.doc.loaded || doc.dirty !== store.doc.dirty || doc.saving !== store.doc.saving) update({ doc });
+    if (!sameState(doc, store.doc)) update({ doc });
   },
   fail(error) { update({ error }); },
-}, {
-  async load() {
-    const { blob, version } = await fetchImage('source');
-    return { content: blob, version, name: document.title };
-  },
-  save: (blob, version) => saveImage('save', blob, version),
-});
+}, imageSource('source', 'save', document.title));
 
 function Controls() {
   const { doc } = usePage();
@@ -55,14 +36,9 @@ function Controls() {
   );
 }
 
-function Page(props: { image: Raster; name: string; mime: EditableMime }) {
+function Page({ image, name }: { image: LoadedImage; name: string }) {
   const { error } = usePage();
-  return (
-    <>
-      {error && <div className="page-error" role="alert">{error}</div>}
-      <ImageEditor ref={editor} {...props} onChange={session.changed} controls={<Controls />} />
-    </>
-  );
+  return <ImageEditor ref={editor} image={image.raster} mime={image.mime} name={name} error={error} onChange={session.changed} controls={<Controls />} />;
 }
 
 /** Before the first load lands: its progress, or why it failed. */

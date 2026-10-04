@@ -3,7 +3,7 @@
 import type { Point, Rect } from './pixels';
 
 interface Base { id: string; color: string; width: number }
-export type BoxKind = 'rect' | 'ellipse' | 'redact';
+type BoxKind = 'rect' | 'ellipse' | 'redact';
 export type Shape =
   | Base & { kind: BoxKind; x: number; y: number; w: number; h: number }
   | Base & { kind: 'arrow'; x1: number; y1: number; x2: number; y2: number }
@@ -249,10 +249,8 @@ export function move(shape: Shape, dx: number, dy: number): Shape {
   }
 }
 
-/** Whether a just-drawn shape is too small to keep: a click, not a drag. */
+/** Whether a just-dragged shape is too small to keep: a click, not a drag. */
 export function degenerate(shape: Shape, slop: number): boolean {
-  if (shape.kind === 'text') return !shape.text.trim();
-  if (shape.kind === 'callout') return false;
   if (shape.kind === 'highlight') return shape.points.length < 2;
   const b = bounds(shape);
   return b.width < slop && b.height < slop;

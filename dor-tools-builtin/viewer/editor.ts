@@ -16,7 +16,7 @@ import 'monaco-editor/esm/vs/basic-languages/css/css.contribution.js';
 import 'monaco-editor/esm/vs/basic-languages/markdown/markdown.contribution.js';
 import 'monaco-editor/esm/vs/basic-languages/ini/ini.contribution.js';
 import 'monaco-editor/esm/vs/basic-languages/dockerfile/dockerfile.contribution.js';
-import { documentSession, stateLabel } from './document-session';
+import { documentPage, stateLabel, textSource } from './document-session';
 import { pageTheme } from './page-theme';
 import './editor.css';
 
@@ -38,7 +38,7 @@ let appliedTheme = '';
   getWorker: () => new Worker(new URL('./editor.worker.js', import.meta.url), { type: 'module' }),
 };
 
-const session = documentSession<number>({
+const session = documentPage().open<number>({
   snapshot() {
     model.pushStackElement(); // Further typing must be undoable back to this save.
     return { content: model.getValue(), mark: model.getAlternativeVersionId() };
@@ -72,7 +72,7 @@ const session = documentSession<number>({
     error.textContent = text ?? '';
     error.hidden = text === null;
   },
-});
+}, textSource);
 function applyTheme() {
   const css = getComputedStyle(document.body);
   const colors: Record<string, string> = {};

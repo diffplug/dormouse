@@ -4,7 +4,7 @@
  * device pixels from the canvas's top-left. */
 export interface View { zoom: number; x: number; y: number; fit: boolean }
 
-export const MIN_ZOOM = 0.02, MAX_ZOOM = 64;
+const MIN_ZOOM = 0.02, MAX_ZOOM = 64;
 const STEPS = [0.05, 0.1, 0.125, 0.25, 1 / 3, 0.5, 2 / 3, 1, 1.5, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64];
 
 /** The whole image, centered, never enlarged past 100%. */

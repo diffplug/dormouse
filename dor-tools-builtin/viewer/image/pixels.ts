@@ -53,6 +53,12 @@ export function fillRect(r: Raster, rect: Rect, color: Rgba): void {
   }
 }
 
+/** The smallest rectangle holding both. */
+export function unionRect(a: Rect, b: Rect): Rect {
+  const x = Math.min(a.x, b.x), y = Math.min(a.y, b.y);
+  return { x, y, width: Math.max(a.x + a.width, b.x + b.width) - x, height: Math.max(a.y + a.height, b.y + b.height) - y };
+}
+
 /** A copy of the part of `rect` on the raster; 0×0 when none is. */
 export function crop(r: Raster, rect: Rect): Raster {
   const c = clipRect(r, rect);
@@ -75,6 +81,17 @@ export function copyRegion(r: Raster, rect: Rect, mask?: Mask): Raster {
     }
   }
   return out;
+}
+
+/** Copies `src` with its top-left at (x, y), every pixel overwriting (transparent ones too). */
+export function blit(dst: Raster, src: Raster, x: number, y: number): void {
+  x = Math.round(x); y = Math.round(y);
+  const x0 = Math.max(0, -x), x1 = Math.min(src.width, dst.width - x);
+  if (x1 <= x0) return;
+  for (let sy = Math.max(0, -y); sy < Math.min(src.height, dst.height - y); sy++) {
+    const from = (sy * src.width + x0) * 4;
+    dst.data.set(src.data.subarray(from, from + (x1 - x0) * 4), ((y + sy) * dst.width + x + x0) * 4);
+  }
 }
 
 /** Draws `src` with its top-left at (x, y): fully transparent pixels are skipped, the rest overwrite. */
@@ -244,13 +261,12 @@ export function fillHole(r: Raster, rect: Rect, mask: Mask | undefined, color: R
 /** Cuts the selection out of `r`: returns its pixels (transparent outside
  * `mask`) and where they sat, and fills the hole with the ring's dominant
  * color, or transparent when there is no ring. Null when the selection is off the raster. */
-export function liftSelection(r: Raster, rect: Rect, mask?: Mask): { pixels: Raster; at: Rect; fill: Rgba } | null {
+export function liftSelection(r: Raster, rect: Rect, mask?: Mask): { pixels: Raster; at: Rect } | null {
   const at = clipRect(r, rect);
   if (!at) return null;
   const pixels = copyRegion(r, at, mask);
-  const fill = dominantBorderColor(r, at, mask) ?? [0, 0, 0, 0];
-  fillHole(r, at, mask, fill);
-  return { pixels, at, fill };
+  fillHole(r, at, mask, dominantBorderColor(r, at, mask) ?? [0, 0, 0, 0]);
+  return { pixels, at };
 }
 
 /** A copy of `r` with `amount` columns (`x`) or rows (`y`) opened before index

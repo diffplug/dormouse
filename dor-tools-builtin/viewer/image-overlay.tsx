@@ -1,74 +1,68 @@
 /** The image editor over the whole Markdown page, editing one PNG or JPEG at
  * or under the document's folder in place (docs/specs/dor-tools-builtin.md ->
- * Markdown editor). It is the session's front document while open. */
-import { useEffect, useRef, useState } from 'react';
-import { confirmDiscard, message, type FrontDocument } from './document-session';
-import { ImageEditor, type ImageEditorHandle } from './image/editor';
-import { decodeImage, fetchImage, saveImage, type EditableMime } from './image/io';
-import type { Raster } from './image/pixels';
+ * Markdown editor). While open, it is the page's front document. */
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { flushSync } from 'react-dom';
+import { confirmDiscard, sameState, type DocumentPage, type DocumentState, type OpenDocument } from './document-session';
+import { editorDocument, ImageEditor, type ImageEditorHandle } from './image/editor';
+import { Icon } from './image/icons';
+import { imageSource, type LoadedImage } from './image/io';
+import { EDIT_ROUTE, IMAGE_SAVE_ROUTE } from '../src/image-format';
+import { pathRoute } from './images-panel';
 
-export function ImageOverlay({ path, session, onSaved, onClose }: {
+export function ImageOverlay({ path, page, onSaved, onClose }: {
   /** The image, as `localImagePath` spells it. */
   path: string;
-  session: { front(document: FrontDocument | null): void; changed(): void };
-  /** After the file on disk changes. */
-  onSaved(path: string): void;
+  page: DocumentPage;
+  /** After the file on disk changes, with its new revision. */
+  onSaved(path: string, version: string): void;
   onClose(): void;
 }) {
-  const route = path.split('/').map(encodeURIComponent).join('/');
   const name = path.slice(path.lastIndexOf('/') + 1);
-  const [image, setImage] = useState<{ raster: Raster; mime: EditableMime } | { error: string } | null>(null);
+  const [image, setImage] = useState<LoadedImage | null>(null);
+  const [state, setState] = useState<DocumentState>({ loaded: false, dirty: false, saving: false });
+  const [error, setError] = useState<string | null>(null);
   const editor = useRef<ImageEditorHandle>(null);
   const confirm = useRef<HTMLDialogElement>(null);
-  const version = useRef('');
-  const dirty = useRef(false);
-  const failure = useRef<unknown>(null);
+  const doc = useRef<OpenDocument>(null);
 
   useEffect(() => {
-    let live = true;
-    fetchImage(`edit/${route}`).then(async ({ blob, version: current }) => {
-      const raster = await decodeImage(blob);
-      if (!live) return;
-      version.current = current;
-      setImage({ raster, mime: blob.type === 'image/jpeg' ? 'image/jpeg' : 'image/png' });
-    }).catch(reason => { if (live) setImage({ error: message(reason) }); });
-    return () => { live = false; };
-  }, [route]);
-
-  useEffect(() => {
-    session.front({
-      dirty: () => dirty.current,
-      async save() {
-        // The editor shows a failed save itself; the host's close prompt needs it thrown.
-        failure.current = null;
-        await editor.current?.save();
-        if (failure.current) throw failure.current;
+    const route = pathRoute(path), source = imageSource(EDIT_ROUTE + route, IMAGE_SAVE_ROUTE + route, name);
+    const opened = page.open(editorDocument(editor, loaded => flushSync(() => setImage(loaded))), { report: next => setState(prev => sameState(prev, next) ? prev : next), fail: setError }, {
+      ...source,
+      async save(blob, version) {
+        const saved = await source.save(blob, version);
+        onSaved(path, saved.version);
+        return saved;
       },
     });
-    return () => { dirty.current = false; session.front(null); };
-  }, [session]);
-
-  async function save(blob: Blob) {
-    try {
-      version.current = (await saveImage(`image-save/${route}`, blob, version.current)).version;
-    } catch (reason) { failure.current = reason; throw reason; }
-    onSaved(path);
-  }
+    doc.current = opened;
+    void opened.load();
+    return () => { doc.current = null; opened.close(); };
+  }, [page, path, name, onSaved]);
 
   async function close() {
-    if (dirty.current && !await confirmDiscard(confirm.current!)) return;
+    if (doc.current?.dirty() && !await confirmDiscard(confirm.current!)) return;
     onClose();
+  }
+  function onKeyDown(event: KeyboardEvent) {
+    // Esc the editor leaves, outside the discard prompt (which handles its own).
+    if (event.key !== 'Escape' || event.defaultPrevented || confirm.current?.open) return;
+    event.preventDefault();
+    void close();
   }
 
   return (
-    <div className="image-overlay" role="dialog" aria-modal="true" aria-label={`Edit ${name}`}
-      onKeyDown={event => { if (event.key === 'Escape' && !(image && 'raster' in image)) { event.preventDefault(); onClose(); } }}>
-      {image && 'raster' in image
-        ? <ImageEditor ref={editor} image={image.raster} name={name} mime={image.mime} onSave={save} onClose={() => void close()}
-            onDirty={value => { dirty.current = value; session.changed(); }}
-            controls={<span className="image-overlay-name" title={path}>{name}</span>} />
+    <div className="image-overlay" role="dialog" aria-modal="true" aria-label={`Edit ${name}`} onKeyDown={onKeyDown}>
+      {image
+        ? <ImageEditor ref={editor} image={image.raster} mime={image.mime} name={name} error={error} onChange={() => doc.current?.changed()}
+            controls={<>
+              <span className="image-overlay-name" title={path}>{name}</span>
+              <button type="button" className="ie-save" disabled={!state.dirty || state.saving} title="Save [Cmd/Ctrl+S]" onClick={() => void doc.current?.save()}>{state.saving ? 'Saving…' : 'Save'}</button>
+              <button type="button" className="ie-icon" aria-label="Close" title="Close [Esc]" onClick={() => void close()}><Icon name="close" /></button>
+            </>} />
         : <div className="image-overlay-pending">
-            {image ? <span className="error" role="alert">{image.error}</span> : <span className="state">Loading {name}…</span>}
+            {error ? <span className="error" role="alert">{error}</span> : <span className="state">Loading {name}…</span>}
             <button type="button" autoFocus onClick={onClose}>Close</button>
           </div>}
       <dialog ref={confirm}>

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { $getRoot, $isElementNode, type LexicalEditor, type LexicalNode } from 'lexical';
 import { $isImageNode, type ImageNode } from '@mdxeditor/editor';
+import { editableImageType, IMAGES_ROUTE } from '../src/image-format';
 import { message, request } from './document-session';
 
 /** A relative image `src` as the `/`-separated path the viewer serves under
@@ -14,19 +15,21 @@ export function localImagePath(src: string): string | null {
 }
 
 /** Whether the image editor can open `path`, a `localImagePath`: PNG and JPEG. */
-export const editableImage = (path: string | null): path is string => !!path && /\.(png|jpe?g)$/i.test(path);
+export const editableImage = (path: string | null): path is string => !!path && !!editableImageType(path);
 
-/** How many times each local image was saved from this page; its URL carries
- * the count so every display loads the new pixels. The server ignores the query. */
-const saves = new Map<string, number>();
-export const imageSaved = (path: string) => { saves.set(path, (saves.get(path) ?? 0) + 1); };
+/** `path`, a `localImagePath`, as it is spelled after a viewer route. */
+export const pathRoute = (path: string) => path.split('/').map(encodeURIComponent).join('/');
 
-/** The URL the page loads a document image from. */
-export const imageUrl = (src: string) => {
+/** The revision each local image was saved at from this page, by `localImagePath`. */
+export type SavedImages = Readonly<Record<string, string>>;
+
+/** The URL the page loads a document image from. One saved here carries its
+ * revision, so every display loads the new pixels; the server ignores the query. */
+export const imageUrl = (src: string, saved: SavedImages) => {
   const path = localImagePath(src);
   if (path === null) return src;
-  const count = saves.get(path);
-  return `images/${path.split('/').map(encodeURIComponent).join('/')}${count ? `?v=${count}` : ''}`;
+  const version = Object.hasOwn(saved, path) ? saved[path] : undefined;
+  return `${IMAGES_ROUTE}${pathRoute(path)}${version ? `?v=${encodeURIComponent(version)}` : ''}`;
 };
 
 /** The document's image nodes; call within a read or update. */
@@ -51,7 +54,7 @@ function renamedSource(src: string, name: string): string {
   return folder + (/%[\da-f]{2}/i.test(base.slice(folder.length)) ? encodeURIComponent(name) : name);
 }
 
-function ImageRow({ src, editor, onEdit }: { src: string; editor: LexicalEditor; onEdit(path: string): void }) {
+function ImageRow({ src, editor, saved, onEdit }: { src: string; editor: LexicalEditor; saved: SavedImages; onEdit(path: string): void }) {
   const path = localImagePath(src);
   const name = path?.split('/').pop() ?? src;
   const folder = path?.slice(0, -name.length) ?? '';
@@ -70,7 +73,7 @@ function ImageRow({ src, editor, onEdit }: { src: string; editor: LexicalEditor;
   }
   return (
     <li>
-      <img src={imageUrl(src)} alt="" loading="lazy" />
+      <img src={imageUrl(src, saved)} alt="" loading="lazy" />
       {path === null
         ? <span className="image-name" title={src}>{src}</span>
         : <input className="image-name" value={draft} disabled={state.busy} aria-label={`Rename ${name}`} spellCheck={false}
@@ -90,11 +93,11 @@ function ImageRow({ src, editor, onEdit }: { src: string; editor: LexicalEditor;
 /** Every image the document shows; local ones rename on disk at once, and
  * their links in the document change with the next save. PNG and JPEG open
  * in the image editor through `onEdit`. */
-export function ImagesPanel({ editor, sources, onEdit }: { editor: LexicalEditor; sources: string[]; onEdit(path: string): void }) {
+export function ImagesPanel({ editor, sources, saved, onEdit }: { editor: LexicalEditor; sources: string[]; saved: SavedImages; onEdit(path: string): void }) {
   return (
     <section className="images-panel" aria-label="Images">
       {sources.length
-        ? <ul>{sources.map(src => <ImageRow key={src} src={src} editor={editor} onEdit={onEdit} />)}</ul>
+        ? <ul>{sources.map(src => <ImageRow key={src} src={src} editor={editor} saved={saved} onEdit={onEdit} />)}</ul>
         : <p>No images. Paste one to save it beside this file.</p>}
       <p className="hint">Renaming moves the file now; save to keep this document's links.</p>
     </section>

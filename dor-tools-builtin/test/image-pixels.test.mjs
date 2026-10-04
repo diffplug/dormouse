@@ -4,11 +4,15 @@ import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 
 // viewer/ is bundled for the browser, never compiled to dist, so the test bundles it too.
-const bundle = await build({
-  entryPoints: [fileURLToPath(new URL('../viewer/image/pixels.ts', import.meta.url))],
-  bundle: true, format: 'esm', platform: 'neutral', write: false, logLevel: 'silent',
-});
-const px = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString('base64')}`);
+async function load(path) {
+  const bundle = await build({
+    entryPoints: [fileURLToPath(new URL(path, import.meta.url))],
+    bundle: true, format: 'esm', platform: 'neutral', write: false, logLevel: 'silent',
+  });
+  return import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString('base64')}`);
+}
+const px = await load('../viewer/image/pixels.ts');
+const { History } = await load('../viewer/image/history.ts');
 
 const WHITE = [255, 255, 255, 255], BLACK = [0, 0, 0, 255], RED = [255, 0, 0, 255], BLUE = [0, 0, 255, 255];
 
@@ -141,9 +145,8 @@ test('lifting a selection fills the hole with the ring\'s dominant color', () =>
 
   const lifted = px.liftSelection(r, rect);
   assert.deepEqual(lifted.at, rect);
-  assert.deepEqual(lifted.fill, WHITE);
   assert.deepEqual(colors(lifted.pixels), Array(4).fill(BLUE.join(',')));
-  assert.deepEqual(at(r, 2, 2), WHITE);
+  assert.deepEqual([at(r, 2, 2), at(r, 3, 3)], [WHITE, WHITE]);
   assert.deepEqual(at(r, 1, 1), RED);
 
   // Pasting the lift back elsewhere moves it; a lasso lift is transparent outside its mask.
@@ -151,9 +154,11 @@ test('lifting a selection fills the hole with the ring\'s dominant color', () =>
   assert.deepEqual(at(r, 5, 5), BLUE);
   const s = raster(4, 4, BLUE);
   px.fillRect(s, { x: 0, y: 0, width: 4, height: 1 }, RED);
+  px.fillRect(s, { x: 1, y: 1, width: 1, height: 1 }, BLACK);
   const mask = px.polygonMask(4, 4, [{ x: 1, y: 1 }, { x: 4, y: 1 }, { x: 1, y: 4 }]);
   const tri = px.liftSelection(s, px.maskBounds(mask, 4, 4), mask);
-  assert.deepEqual(tri.fill, BLUE, 'the ring outside a lasso includes the unselected bounding-box pixels');
+  assert.deepEqual(at(s, 1, 1), BLUE, 'the ring outside a lasso includes the unselected bounding-box pixels');
+  assert.deepEqual(at(tri.pixels, 0, 0), BLACK);
   assert.deepEqual([tri.pixels.width, tri.pixels.height], [2, 2]);
   assert.deepEqual(at(tri.pixels, 0, 1), BLUE);
   assert.equal(at(tri.pixels, 1, 1)[3], 0);
@@ -203,4 +208,78 @@ test('crop and paste clip to the raster', () => {
   px.paste(r, stamp, -2, -2);
   assert.deepEqual(at(r, 0, 0), BLUE);
   assert.deepEqual(at(r, 1, 0), WHITE);
+});
+
+test('blit copies every pixel, transparent ones too, clipped to the raster; unionRect bounds two rects', () => {
+  const r = raster(3, 3);
+  const src = raster(2, 2, BLUE);
+  px.fillRect(src, { x: 1, y: 1, width: 1, height: 1 }, [0, 0, 0, 0]);
+  px.blit(r, src, 2, 2);
+  assert.deepEqual(at(r, 2, 2), BLUE);
+  px.blit(r, src, 0, 0);
+  assert.deepEqual([at(r, 0, 0), at(r, 1, 0), at(r, 1, 1)], [BLUE, BLUE, [0, 0, 0, 0]]);
+  px.blit(r, src, -1, -1);
+  assert.deepEqual(at(r, 0, 0), [0, 0, 0, 0]);
+  px.blit(r, src, 5, 0);
+  assert.deepEqual(px.unionRect({ x: 1, y: 2, width: 2, height: 1 }, { x: 0, y: 4, width: 1, height: 1 }), { x: 0, y: 2, width: 3, height: 3 });
+});
+
+/** An in-place edit of `doc`'s raster, filling `rect` with `color`, committed as a patch. */
+function patchFill(history, rect, color) {
+  const r = history.current.raster, before = px.crop(r, rect);
+  px.fillRect(r, rect, color);
+  const doc = { raster: r, objects: history.current.objects };
+  history.commit(doc, { rect, before, after: px.crop(r, rect) });
+  return doc;
+}
+
+test('history undoes and redoes in-place patches and whole-raster replacements in order', () => {
+  const original = { raster: raster(4, 4), objects: [] };
+  const h = new History(original);
+  const painted = patchFill(h, { x: 0, y: 0, width: 2, height: 2 }, RED);
+  const filled = patchFill(h, { x: 1, y: 1, width: 3, height: 3 }, BLUE);
+  const cropped = { raster: px.crop(filled.raster, { x: 1, y: 1, width: 2, height: 2 }), objects: [] };
+  h.commit(cropped);
+  const after = colors(cropped.raster);
+
+  assert.ok(h.undo());
+  assert.equal(h.current, filled);
+  assert.deepEqual([at(h.current.raster, 0, 0), at(h.current.raster, 1, 1), at(h.current.raster, 3, 3)], [RED, BLUE, BLUE]);
+  assert.ok(h.undo());
+  assert.equal(h.current, painted);
+  assert.deepEqual([at(h.current.raster, 1, 1), at(h.current.raster, 3, 3)], [RED, WHITE]);
+  assert.ok(h.undo());
+  assert.equal(h.current, original);
+  assert.ok(colors(h.current.raster).every(c => c === WHITE.join(',')));
+  assert.equal(h.undo(), false);
+
+  assert.ok(h.redo() && h.redo() && h.redo());
+  assert.equal(h.current, cropped);
+  assert.deepEqual(colors(h.current.raster), after);
+  assert.deepEqual(at(filled.raster, 3, 3), BLUE, 'the replaced raster holds its last revision');
+  assert.equal(h.redo(), false);
+
+  // A new edit after an undo drops the redo.
+  h.undo();
+  patchFill(h, { x: 3, y: 0, width: 1, height: 1 }, BLACK);
+  assert.equal(h.canRedo, false);
+});
+
+test('history keeps patches and replaced rasters within its byte limit, oldest first', () => {
+  // Each 1×1 patch holds 8 bytes (before and after); a replaced 4×4 raster, 64.
+  const h = new History({ raster: raster(4, 4), objects: [] }, 24);
+  for (const x of [0, 1, 2, 3]) patchFill(h, { x, y: 0, width: 1, height: 1 }, RED);
+  let undos = 0;
+  while (h.undo()) undos++;
+  assert.equal(undos, 3);
+  assert.deepEqual(at(h.current.raster, 0, 0), RED, 'the oldest patch is gone');
+  assert.deepEqual(at(h.current.raster, 1, 0), WHITE);
+
+  const big = new History({ raster: raster(4, 4), objects: [] }, 64);
+  big.commit({ raster: raster(2, 2), objects: [] });
+  assert.equal(big.canUndo, true, 'a replaced raster at the limit stays');
+  patchFill(big, { x: 0, y: 0, width: 1, height: 1 }, RED);
+  assert.equal(big.canUndo, true);
+  big.undo();
+  assert.equal(big.canUndo, false, 'the replaced raster went first once over the limit');
 });

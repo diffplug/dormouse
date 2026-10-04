@@ -3,9 +3,9 @@ import { connectToolFrame } from 'dor-tools-lib/frame';
 /** What the page shows: whether a document is loaded, has unsaved edits, or is saving. */
 export interface DocumentState { loaded: boolean; dirty: boolean; saving: boolean }
 
-/** One editor's view of the opened document, whose contents are `Content`
- * (the file's text, or an image's bytes). */
-export interface DocumentEditor<Mark, Content = string> {
+/** One editor's view of an opened document. It saves `Content` (the file's
+ * text, or an image's bytes) and is given `Loaded` (the same, or decoded pixels). */
+export interface DocumentEditor<Mark, Content = string, Loaded = Content> {
   /** The contents to save and a mark naming the revision they came from. */
   snapshot(): { content: Content | Promise<Content>; mark: Mark };
   /** The current revision's mark, when naming it is cheaper than a snapshot. */
@@ -13,22 +13,34 @@ export interface DocumentEditor<Mark, Content = string> {
   /** Whether the editor still holds the revision `mark` names. */
   holds(mark: Mark): boolean;
   /** Replaces the editor's contents with the file's. */
-  apply(content: Content, name: string): void | Promise<void>;
+  apply(content: Loaded, name: string): void | Promise<void>;
 }
 
-/** How a page reads and writes its document's contents. */
-export interface DocumentSource<Content> {
-  load(): Promise<{ content: Content; version: string; name: string }>;
+/** How a page reads and writes a document's contents. */
+export interface DocumentSource<Content, Loaded = Content> {
+  load(): Promise<{ content: Loaded; version: string; name: string }>;
   /** Writes `content` over revision `version`; resolves to the new revision. */
   save(content: Content, version: string): Promise<{ version: string }>;
+}
+
+/** Where a page shows one document's state and errors. */
+export interface DocumentView {
+  report(state: DocumentState): void;
+  /** Shows `text` as the document's error, or clears it when null. */
+  fail(text: string | null): void;
+}
+
+/** `response` when it succeeded; else rejects with its text (or status). */
+export async function checked(response: Response): Promise<Response> {
+  if (!response.ok) throw new Error(await response.text() || `Request failed (${response.status})`);
+  return response;
 }
 
 export async function request(path: string, body?: unknown) {
   const response = await fetch(path, body === undefined ? undefined : {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
   });
-  if (!response.ok) throw new Error(await response.text() || `Request failed (${response.status})`);
-  return response.json();
+  return (await checked(response)).json();
 }
 
 /** A text document: `source` and `save` carry it as JSON. */
@@ -42,7 +54,9 @@ export const textSource: DocumentSource<string> = {
 
 export const message = (reason: unknown) => reason instanceof Error ? reason.message : String(reason);
 
-/** The status both pages show beside Save. */
+export const sameState = (a: DocumentState, b: DocumentState) => a.loaded === b.loaded && a.dirty === b.dirty && a.saving === b.saving;
+
+/** The status the pages show beside Save. */
 export const stateLabel = ({ loaded, dirty, saving }: DocumentState) =>
   !loaded ? 'Loading…' : saving ? 'Saving…' : dirty ? 'Unsaved' : 'Saved';
 
@@ -55,67 +69,121 @@ export function confirmDiscard(dialog = document.getElementById('confirm') as HT
   return answer;
 }
 
-/** A second document a page edits in front of its own, as the Markdown page's
- * image overlay. While it is in front, Cmd/Ctrl+S saves it instead, the Tool
- * is dirty while either document is, and the host's close-prompt save writes both. */
-export interface FrontDocument {
+/** One document a page has open: its revision on disk, the editor's mark for
+ * it, and one revision-checked save at a time. */
+export interface OpenDocument {
+  /** Whether the first load has landed. */
+  loaded(): boolean;
+  /** Whether the editor moved off the saved revision. */
   dirty(): boolean;
-  /** Rejects when the document could not be saved. */
+  /** Reads the file into the editor; shows a failure. */
+  load(): Promise<void>;
+  /** Saves unsaved edits; shows a failure. */
   save(): Promise<void>;
+  /** `save`, also rejecting with the failure. */
+  write(): Promise<void>;
+  /** Reads the file again, after the user agrees to discard unsaved edits. */
+  reload(): Promise<void>;
+  /** Call after every edit. */
+  changed(): void;
+  /** Takes the editor's contents as the saved revision: for an editor's own
+   * normalization of the text it loaded, before any edit. */
+  rebase(): void;
+  /** Shows `reason` as this document's error. */
+  fail(reason: unknown): void;
+  /** Takes the document off the page. */
+  close(): void;
 }
 
-/** Loads, saves, and reports one document for a built-in editor page
- * (docs/specs/dor-tools-builtin.md -> Editing files): revision-checked saves on
- * Save or Cmd/Ctrl+S, dirty state reported to the containing iframe at once
- * and to the Tool's OSC 367 stream in order. */
-export function documentSession<Mark, Content = string>(editor: DocumentEditor<Mark, Content>, view: {
-  report(state: DocumentState): void;
-  /** Shows `text` as the page's error, or clears it when null. */
-  fail(text: string | null): void;
-}, source: DocumentSource<Content> = textSource as unknown as DocumentSource<Content>) {
-  let version = '';
-  let saved: { mark: Mark } | undefined;
-  let saving: Promise<void> | null = null;
+export interface DocumentPage {
+  /** Opens a document in front of the page's others. */
+  open<Mark, Content = string, Loaded = Content>(editor: DocumentEditor<Mark, Content, Loaded>, view: DocumentView,
+    source: DocumentSource<Content, Loaded>): OpenDocument;
+}
+
+/** A built-in editor page (docs/specs/dor-tools-builtin.md -> Editing files)
+ * over a stack of open documents: its own, and any it edits in front, as the
+ * Markdown page's image overlay. Cmd/Ctrl+S saves the front document; the
+ * Tool is dirty while any document is, which the page reports to the
+ * containing iframe at once and to the Tool's OSC 367 stream in order; the
+ * host's close-prompt save writes them all. */
+export function documentPage(): DocumentPage {
+  /** The page's own document first; the last is in front. */
+  const documents: OpenDocument[] = [];
   let lastDirty: boolean | undefined;
   let stateQueue = Promise.resolve();
-  let front: FrontDocument | null = null;
-  const fail = (reason: unknown) => view.fail(message(reason));
-  const dirty = () => !!saved && !editor.holds(saved.mark);
-  /** What the Tool reports: this document or the one in front has unsaved edits. */
-  const toolDirty = () => dirty() || !!front?.dirty();
-  const current = () => editor.mark ? editor.mark() : editor.snapshot().mark;
+  const toolDirty = () => documents.some(doc => doc.dirty());
   // The host's close prompt saves through this channel (docs/specs/dor-tool.md -> Closing unsaved Tools).
   const host = connectToolFrame({
-    dirty: () => saved ? toolDirty() : undefined,
+    dirty: () => documents[0]?.loaded() ? toolDirty() : undefined,
     async save() {
       // In turn: the viewer takes one save at a time.
-      const errors: unknown[] = [];
-      await save().catch(reason => { fail(reason); errors.push(reason); });
-      await front?.save().catch(reason => { errors.push(reason); });
-      if (errors.length) throw errors[0];
+      let failure: { reason: unknown } | undefined;
+      for (const doc of [...documents]) {
+        try { await doc.write(); } catch (reason) { failure ??= { reason }; }
+      }
+      if (failure) throw failure.reason;
     },
   });
 
   function report() {
-    view.report({ loaded: !!saved, dirty: dirty(), saving: saving !== null });
     // Post immediately so the preview is pinned before a second selection can
     // replace it. The ordered OSC reports also cover automated browser renders.
     host.report();
-    const changed = toolDirty();
-    if (changed !== lastDirty) {
-      lastDirty = changed;
-      stateQueue = stateQueue.then(() => request('state', { dirty: changed })).then(() => {}, fail);
+    const dirty = toolDirty();
+    if (dirty !== lastDirty) {
+      lastDirty = dirty;
+      stateQueue = stateQueue.then(() => request('state', { dirty })).then(() => {}, reason => documents[0]?.fail(reason));
     }
   }
-  async function save() {
+
+  // Capture phase: runs before the editors, and outside them too.
+  window.addEventListener('keydown', event => {
+    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') {
+      event.preventDefault();
+      void documents.at(-1)?.save();
+    }
+  }, true);
+  window.addEventListener('beforeunload', event => {
+    if (window.parent === window && toolDirty()) { event.preventDefault(); event.returnValue = ''; }
+  });
+
+  return {
+    open(editor, view, source) {
+      const doc = openDocument(editor, view, source, report, () => {
+        const at = documents.indexOf(doc);
+        if (at < 0) return;
+        documents.splice(at, 1);
+        report();
+      });
+      documents.push(doc);
+      return doc;
+    },
+  };
+}
+
+function openDocument<Mark, Content, Loaded>(editor: DocumentEditor<Mark, Content, Loaded>, view: DocumentView,
+  source: DocumentSource<Content, Loaded>, onReport: () => void, onClose: () => void): OpenDocument {
+  let version = '';
+  let saved: { mark: Mark } | undefined;
+  let saving: Promise<void> | null = null;
+  const fail = (reason: unknown) => view.fail(message(reason));
+  const dirty = () => !!saved && !editor.holds(saved.mark);
+  const current = () => editor.mark ? editor.mark() : editor.snapshot().mark;
+
+  function report() {
+    view.report({ loaded: !!saved, dirty: dirty(), saving: saving !== null });
+    onReport();
+  }
+  function write(): Promise<void> {
     if (saving) return saving;
-    if (!dirty()) return;
-    const { content, mark } = editor.snapshot();
+    if (!dirty()) return Promise.resolve();
     view.fail(null);
-    saving = Promise.resolve(content).then(body => source.save(body, version)).then(result => {
-      version = result.version;
+    saving = (async () => {
+      const { content, mark } = editor.snapshot();
+      version = (await source.save(await content, version)).version;
       saved = { mark }; // Undo restores this revision; newer edits stay dirty.
-    }).finally(() => { saving = null; report(); });
+    })().catch(reason => { fail(reason); throw reason; }).finally(() => { saving = null; report(); });
     report();
     return saving;
   }
@@ -127,40 +195,24 @@ export function documentSession<Mark, Content = string>(editor: DocumentEditor<M
     report();
   }
 
-  // Capture phase: runs before the editor, and outside it too.
-  window.addEventListener('keydown', event => {
-    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') {
-      event.preventDefault();
-      if (front) void front.save().catch(() => {}); // the front document shows its own errors
-      else void save().catch(fail);
-    }
-  }, true);
-  window.addEventListener('beforeunload', event => {
-    if (window.parent === window && toolDirty()) { event.preventDefault(); event.returnValue = ''; }
-  });
   return {
+    loaded: () => !!saved,
+    dirty,
     load: () => load().catch(fail),
-    save: () => save().catch(fail),
-    /** Reads the file again, after the user agrees to discard unsaved edits. */
+    save: () => write().catch(() => {}),
+    write,
     async reload() {
       if (saving || (dirty() && !await confirmDiscard())) return;
       view.fail(null);
       await load().catch(fail);
     },
-    /** Call after every edit, and when the front document's dirty state changes. */
     changed: report,
-    /** Puts `document` in front of this one, or takes it away (null). */
-    front(document: FrontDocument | null) {
-      front = document;
-      if (saved) report();
-    },
-    /** Takes the editor's contents as the saved revision: for an editor's own
-     * normalization of the text it loaded, before any edit. */
     rebase() {
       if (!saved || saving) return;
       saved = { mark: current() };
       report();
     },
     fail,
+    close: onClose,
   };
 }

@@ -12,8 +12,8 @@ import {
   rootEditor$, Separator, viewMode$, tablePlugin, thematicBreakPlugin, toolbarPlugin, UndoRedo, type MDXEditorMethods, type Realm,
 } from '@mdxeditor/editor';
 import '@mdxeditor/editor/style.css';
-import { documentSession, stateLabel, type DocumentState } from './document-session';
-import { editableImage, imageSaved, imageSources, imageUrl, ImagesPanel, localImagePath } from './images-panel';
+import { checked, documentPage, sameState, stateLabel, textSource, type DocumentState } from './document-session';
+import { editableImage, imageSources, imageUrl, ImagesPanel, localImagePath, type SavedImages } from './images-panel';
 import { ImageOverlay } from './image-overlay';
 import { commentsPlugin } from './markdown-comments';
 import { markdownSafetyPlugin } from './markdown-safety';
@@ -23,9 +23,10 @@ import './markdown.css';
 
 // Page state outside React, replaced whole on each change: the session reports
 // into it, the editor's image nodes feed it, and components subscribe.
-// `editing` is the image open in the editor overlay; `saves` counts its saves.
-let store: { doc: DocumentState; error: string | null; images: string[]; panel: boolean; editor: LexicalEditor | null; editing: string | null; saves: number } =
-  { doc: { loaded: false, dirty: false, saving: false }, error: null, images: [], panel: false, editor: null, editing: null, saves: 0 };
+// `editing` is the image open in the editor overlay; `saved` holds the
+// revision of each image saved from it.
+let store: { doc: DocumentState; error: string | null; images: string[]; panel: boolean; editor: LexicalEditor | null; editing: string | null; saved: SavedImages } =
+  { doc: { loaded: false, dirty: false, saving: false }, error: null, images: [], panel: false, editor: null, editing: null, saved: {} };
 const listeners = new Set<() => void>();
 const update = (change: Partial<typeof store>) => { store = { ...store, ...change }; for (const listener of listeners) listener(); };
 const subscribe = (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; };
@@ -34,9 +35,10 @@ const editorRef = createRef<MDXEditorMethods>();
 let realm: Realm | undefined;
 let loads = 0;
 
+const page = documentPage();
 // The editor trims the document; saves end it with one newline, and the server
 // restores the file's line endings.
-const session = documentSession<string>({
+const session = page.open<string>({
   snapshot() {
     const markdown = editorRef.current!.getMarkdown();
     return { content: markdown ? `${markdown}\n` : '', mark: markdown };
@@ -49,10 +51,10 @@ const session = documentSession<string>({
   },
 }, {
   report(doc) {
-    if (doc.loaded !== store.doc.loaded || doc.dirty !== store.doc.dirty || doc.saving !== store.doc.saving) update({ doc });
+    if (!sameState(doc, store.doc)) update({ doc });
   },
   fail(error) { update({ error }); },
-});
+}, textSource);
 
 /** The document's source for the image node `key`, when the image editor can open it. */
 function editablePath(editor: LexicalEditor, key: string): string | null {
@@ -63,12 +65,13 @@ function editablePath(editor: LexicalEditor, key: string): string | null {
 /** Opens a PNG or JPEG under the document's folder in the image editor overlay. */
 const editImage = (path: string) => update({ editing: path });
 
+const previewUrl = async (src: string) => imageUrl(src, store.saved);
+
 /** After an image save: every display of it loads the new file, and the document's source stays as it is. */
-function refreshImage(path: string) {
-  imageSaved(path);
+function refreshImage(path: string, version: string) {
+  update({ saved: { ...store.saved, [path]: version } });
   // A new handler makes each image node resolve its URL again.
-  realm?.pub(imagePreviewHandler$, async (src: string) => imageUrl(src));
-  update({ saves: store.saves + 1 });
+  realm?.pub(imagePreviewHandler$, (src: string) => previewUrl(src));
 }
 
 /** MDXEditor's own image toolbar (delete, settings), which it does not export; read before `imagePlugin` replaces it. */
@@ -116,8 +119,7 @@ const capture = realmPlugin({
 /** Sends a pasted or dropped image's bytes; the server names the new file. */
 async function upload(file: File): Promise<string> {
   try {
-    const response = await fetch('image', { method: 'POST', headers: { 'Content-Type': file.type }, body: file });
-    if (!response.ok) throw new Error(await response.text() || `Request failed (${response.status})`);
+    const response = await checked(await fetch('image', { method: 'POST', headers: { 'Content-Type': file.type }, body: file }));
     return (await response.json()).name;
   } catch (reason) { session.fail(reason); throw reason; }
 }
@@ -151,11 +153,12 @@ function Toolbar() {
 const tokenClasses = [syntaxHighlighting(classHighlighter)];
 
 // `imagePlugin` types `EditImageToolbar` without the props it passes.
+// `capture()` comes before `imagePlugin()`, so it reads MDXEditor's own image toolbar first.
 const plugins = [
   capture(), markdownSafetyPlugin(), commentsPlugin(),
   headingsPlugin(), listsPlugin(), quotePlugin(), thematicBreakPlugin(), linkPlugin(), linkDialogPlugin(),
   tablePlugin(), frontmatterPlugin(), markdownShortcutPlugin(),
-  imagePlugin({ imageUploadHandler: upload, imagePreviewHandler: async src => imageUrl(src), disableImageResize: true, EditImageToolbar: ImageToolbar as FC }),
+  imagePlugin({ imageUploadHandler: upload, imagePreviewHandler: previewUrl, disableImageResize: true, EditImageToolbar: ImageToolbar as FC }),
   codeBlockPlugin({ defaultCodeBlockLanguage: '', codeBlockEditorDescriptors: [mermaidDescriptor] }),
   codeMirrorPlugin({ codeBlockLanguages: {
     '': 'Plain text', sh: 'Shell', bash: 'Bash', js: 'JavaScript', jsx: 'JSX', ts: 'TypeScript', tsx: 'TSX', json: 'JSON',
@@ -177,7 +180,7 @@ function markdownStyle(markdown: string) {
 
 function Page({ markdown }: { markdown: string }) {
   const theme = useSyncExternalStore(subscribeTheme, pageTheme);
-  const { error, images, panel, editor, editing } = usePage();
+  const { error, images, panel, editor, editing, saved } = usePage();
   const style = useMemo(() => markdownStyle(markdown), [markdown]);
   return (
     <>
@@ -199,8 +202,8 @@ function Page({ markdown }: { markdown: string }) {
           session.fail(`Showing source: the rich editor cannot parse this file (${reason}).`);
         }}
       />
-      {panel && editor && <ImagesPanel editor={editor} sources={images} onEdit={editImage} />}
-      {editing && <ImageOverlay key={editing} path={editing} session={session} onSaved={refreshImage}
+      {panel && editor && <ImagesPanel editor={editor} sources={images} saved={saved} onEdit={editImage} />}
+      {editing && <ImageOverlay key={editing} path={editing} page={page} onSaved={refreshImage}
         onClose={() => { update({ editing: null }); editorRef.current?.focus(); }} />}
     </>
   );

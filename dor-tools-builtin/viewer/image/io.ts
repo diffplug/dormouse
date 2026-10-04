@@ -2,15 +2,18 @@
  * image routes share (docs/specs/dor-tools-builtin.md -> Image editor): a GET
  * returns the bytes with their revision in `X-Dor-Version`; a save POSTs the
  * bytes with `?version=` and answers `{version}`. */
+import { VERSION_HEADER } from '../../src/image-format';
+import { checked, type DocumentSource } from '../document-session';
 import type { Raster } from './pixels';
 
 export type EditableMime = 'image/png' | 'image/jpeg';
-export const VERSION_HEADER = 'X-Dor-Version';
+/** An image file as the editor opens it. */
+export interface LoadedImage { raster: Raster; mime: EditableMime }
 
 /** The pixels of an image file, exactly as stored (no premultiplication or
  * color conversion where the browser honors the request). The page's CSP has
  * no `blob:` images, so this decodes without an `<img>`. */
-export async function decodeImage(blob: Blob): Promise<Raster> {
+async function decodeImage(blob: Blob): Promise<Raster> {
   const bitmap = await createImageBitmap(blob, { premultiplyAlpha: 'none', colorSpaceConversion: 'none' });
   try { return rasterFromBitmap(bitmap); } finally { bitmap.close(); }
 }
@@ -24,22 +27,27 @@ export function rasterFromBitmap(bitmap: ImageBitmap): Raster {
   return { width: bitmap.width, height: bitmap.height, data };
 }
 
-async function failure(response: Response) {
-  return new Error(await response.text() || `Request failed (${response.status})`);
+/** GETs and decodes an editable image, with the revision it is at. */
+async function loadImage(path: string): Promise<LoadedImage & { version: string }> {
+  const response = await checked(await fetch(path, { cache: 'no-store' }));
+  const blob = await response.blob();
+  return {
+    raster: await decodeImage(blob),
+    mime: blob.type === 'image/jpeg' ? 'image/jpeg' : 'image/png',
+    version: response.headers.get(VERSION_HEADER) ?? '',
+  };
 }
 
-/** GETs an editable image and the revision it is at. */
-export async function fetchImage(path: string): Promise<{ blob: Blob; version: string }> {
-  const response = await fetch(path, { cache: 'no-store' });
-  if (!response.ok) throw await failure(response);
-  return { blob: await response.blob(), version: response.headers.get(VERSION_HEADER) ?? '' };
-}
-
-/** POSTs `blob` over the revision `version`; resolves to the new revision. */
-export async function saveImage(path: string, blob: Blob, version: string): Promise<{ version: string }> {
-  const response = await fetch(`${path}?version=${encodeURIComponent(version)}`, {
-    method: 'POST', headers: { 'Content-Type': blob.type }, body: blob,
-  });
-  if (!response.ok) throw await failure(response);
-  return response.json();
-}
+/** An image document read from the route `load` and written to `save`, under `name`. */
+export const imageSource = (load: string, save: string, name: string): DocumentSource<Blob, LoadedImage> => ({
+  async load() {
+    const { version, ...image } = await loadImage(load);
+    return { content: image, version, name };
+  },
+  async save(blob, version) {
+    const response = await checked(await fetch(`${save}?version=${encodeURIComponent(version)}`, {
+      method: 'POST', headers: { 'Content-Type': blob.type }, body: blob,
+    }));
+    return response.json();
+  },
+});

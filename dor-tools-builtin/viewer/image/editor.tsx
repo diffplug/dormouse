@@ -2,10 +2,11 @@
  * above it, flattened at image resolution on save. It lays out to fill its
  * parent and owns no window-level listeners, so a page can host it whole or
  * as an overlay. Remount it (a new `key`) to load other pixels. */
-import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent, type ReactNode, type Ref } from 'react';
-import { EditorController, type Revision, type Tool } from './controller';
+import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent, type ReactNode, type Ref, type RefObject } from 'react';
+import type { DocumentEditor } from '../document-session';
+import { EditorController, MARKUP, type Revision, type Tool } from './controller';
 import { Icon, type IconName } from './icons';
-import { rasterFromBitmap, type EditableMime } from './io';
+import { rasterFromBitmap, type EditableMime, type LoadedImage } from './io';
 import { contrast, fontSize } from './objects';
 import { toHex, type Raster } from './pixels';
 import { pageTheme, subscribeTheme } from '../page-theme';
@@ -21,10 +22,6 @@ export interface ImageEditorHandle {
   revision(): Revision;
   /** Whether the editor still shows revision `mark`. */
   holds(mark: Revision): boolean;
-  /** Takes `mark` as what is on disk, for `onDirty`. */
-  markSaved(mark: Revision): void;
-  /** Saves through `onSave`, as the Save button does. */
-  save(): Promise<void>;
 }
 
 export interface ImageEditorProps {
@@ -33,20 +30,24 @@ export interface ImageEditorProps {
   name: string;
   /** The format a save encodes to: PNG, or JPEG at quality 0.92. */
   mime: EditableMime;
-  /** When given, the editor shows Save and saves the flattened image through it. */
-  onSave?(blob: Blob): Promise<void>;
-  /** Whether the editor differs from the last saved revision (`markSaved`, or a save through `onSave`). */
-  onDirty?(dirty: boolean): void;
   /** After every document change. */
   onChange?(): void;
-  /** When given, the editor shows Close; Esc with nothing else to back out of also calls it. */
-  onClose?(): void;
-  /** Handle Cmd/Ctrl+S inside the editor (only with `onSave`). */
-  saveShortcut?: boolean;
-  /** The host's own controls, at the toolbar's end. */
+  /** The host's own controls (its Save and Close), at the toolbar's end. */
   controls?: ReactNode;
-  autoFocus?: boolean;
+  /** The host's error, shown over the canvas. */
+  error?: string | null;
   ref?: Ref<ImageEditorHandle>;
+}
+
+/** The editor behind `ref` as a document session edits it; `show` mounts a
+ * fresh editor over loaded pixels. */
+export function editorDocument(ref: RefObject<ImageEditorHandle | null>, show: (image: LoadedImage, name: string) => void): DocumentEditor<Revision | null, Blob, LoadedImage> {
+  return {
+    snapshot: () => ref.current!.snapshot(),
+    mark: () => ref.current?.revision() ?? null,
+    holds: mark => !!mark && !!ref.current?.holds(mark),
+    apply: show,
+  };
 }
 
 interface ToolInfo { tool: Tool; key: string; label: string; icon: IconName; hint?: string }
@@ -75,71 +76,52 @@ const TOOL_GROUPS: ToolInfo[][] = [
   ],
 ];
 const SHORTCUTS: Record<string, Tool> = Object.fromEntries(TOOL_GROUPS.flat().map(t => [t.key, t.tool]));
-const MARKUP_TOOLS = new Set<Tool>(['select', 'arrow', 'rect', 'ellipse', 'text', 'callout', 'highlight', 'redact']);
 const SWATCHES = [
   ['#e5383b', 'Red'], ['#f77f00', 'Orange'], ['#ffd60a', 'Yellow'], ['#2dc653', 'Green'],
   ['#1e88e5', 'Blue'], ['#8e44ad', 'Purple'], ['#000000', 'Black'], ['#ffffff', 'White'],
 ] as const;
 
 const toRaster = (image: Raster | ImageBitmap): Raster => 'data' in image ? image : rasterFromBitmap(image);
-const message = (reason: unknown) => reason instanceof Error ? reason.message : String(reason);
 /** Toolbar buttons keep focus where it was, so Space and letters still reach the editor. */
 const keepFocus = (e: { preventDefault(): void }) => e.preventDefault();
 
-export function ImageEditor({ image, name, mime, onSave, onDirty, onChange, onClose, saveShortcut, controls, autoFocus = true, ref }: ImageEditorProps) {
+export function ImageEditor({ image, name, mime, onChange, controls, error, ref }: ImageEditorProps) {
   const [ctl] = useState(() => new EditorController(toRaster(image)));
   useSyncExternalStore(ctl.subscribe, ctl.getVersion);
   const theme = useSyncExternalStore(subscribeTheme, pageTheme);
   const root = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const stage = useRef<HTMLDivElement>(null);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
   const hexRef = useRef<HTMLButtonElement>(null);
 
-  ctl.hooks = { onChange, onDirty, focus: () => root.current?.focus({ preventScroll: true }) };
+  ctl.hooks = { onChange, focus: () => root.current?.focus({ preventScroll: true }) };
 
   useLayoutEffect(() => {
     const detach = ctl.attach(canvas.current!);
     const el = stage.current!;
-    const observer = new ResizeObserver(() => ctl.resize(el.clientWidth, el.clientHeight, window.devicePixelRatio || 1));
+    // Sized now, so the first paint already fits the image.
+    const resize = () => ctl.resize(el.clientWidth, el.clientHeight, window.devicePixelRatio || 1);
+    resize();
+    const observer = new ResizeObserver(resize);
     observer.observe(el);
     return () => { observer.disconnect(); detach(); };
   }, [ctl]);
   useEffect(() => { ctl.refreshTheme(); }, [ctl, theme]);
-  useEffect(() => { if (autoFocus) root.current?.focus({ preventScroll: true }); }, [autoFocus]);
-
-  async function save() {
-    if (!onSave || saving || !ctl.dirty) return;
-    setSaving(true);
-    setError(null);
-    try {
-      const mark = ctl.settle();
-      await onSave(await EditorController.encode(mark, mime));
-      ctl.markSaved(mark);
-    } catch (reason) { setError(message(reason)); } finally { setSaving(false); }
-  }
+  useEffect(() => { root.current?.focus({ preventScroll: true }); }, []);
 
   useImperativeHandle(ref, () => ({
-    snapshot() { const mark = ctl.settle(); return { content: EditorController.encode(mark, mime), mark }; },
+    snapshot() { const mark = ctl.settle(); return { content: ctl.encode(mark, mime), mark }; },
     revision: () => ctl.doc,
     holds: mark => ctl.holds(mark),
-    markSaved: mark => ctl.markSaved(mark),
-    save,
   }));
 
+  // Keys the editor leaves (Esc with nothing to back out of, Cmd/Ctrl+S) reach the host.
   function onKeyDown(e: KeyboardEvent) {
     const target = e.target as HTMLElement;
     if (target.tagName === 'TEXTAREA' || target.tagName === 'SELECT') return;
     if (target.tagName === 'INPUT' && ((target as HTMLInputElement).type !== 'range' || e.key.startsWith('Arrow'))) return;
-    if (saveShortcut && onSave && (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
-      e.preventDefault(); e.stopPropagation();
-      void save();
-      return;
-    }
-    if (ctl.key(e.nativeEvent, SHORTCUTS)) { e.preventDefault(); e.stopPropagation(); return; }
-    if (e.key === 'Escape' && onClose) { e.preventDefault(); onClose(); }
+    if (ctl.key(e.nativeEvent, SHORTCUTS)) { e.preventDefault(); e.stopPropagation(); }
   }
 
   async function copyHex(hex: string) {
@@ -154,11 +136,11 @@ export function ImageEditor({ image, name, mime, onSave, onDirty, onChange, onCl
     setTimeout(() => setCopied(null), 1500);
   }
 
-  const { tool, view, cursor, picked, sel, crop, text } = ctl;
+  const { tool, view, picked, sel, crop, text } = ctl;
   const selected = ctl.selected();
   const raster = ctl.raster();
   const hex = tool === 'eyedropper' && picked ? toHex(picked) : ctl.color;
-  const showWidth = MARKUP_TOOLS.has(tool) && (tool !== 'select' || !!selected);
+  const showWidth = MARKUP.has(tool) && (tool !== 'select' || !!selected);
 
   return (
     <div ref={root} className="image-editor" tabIndex={-1} onKeyDown={onKeyDown} onKeyUp={e => ctl.keyUp(e.nativeEvent)} aria-label={`Image editor: ${name}`}>
@@ -178,11 +160,7 @@ export function ImageEditor({ image, name, mime, onSave, onDirty, onChange, onCl
           <button type="button" className="ie-icon" aria-label="Undo" title="Undo [Cmd/Ctrl+Z]" disabled={!ctl.canUndo} onPointerDown={keepFocus} onClick={() => ctl.undo()}><Icon name="undo" /></button>
           <button type="button" className="ie-icon" aria-label="Redo" title="Redo [Shift+Cmd/Ctrl+Z]" disabled={!ctl.canRedo} onPointerDown={keepFocus} onClick={() => ctl.redo()}><Icon name="redo" /></button>
         </div>
-        <div className="ie-end">
-          {controls}
-          {onSave && <button type="button" className="ie-save" disabled={!ctl.dirty || saving} title="Save [Cmd/Ctrl+S]" onClick={() => void save()}>{saving ? 'Saving…' : 'Save'}</button>}
-          {onClose && <button type="button" className="ie-icon" aria-label="Close" title="Close [Esc]" onClick={onClose}><Icon name="close" /></button>}
-        </div>
+        <div className="ie-end">{controls}</div>
       </div>
       <div className="ie-bar ie-options">
         <div className="ie-group" role="group" aria-label="Color">
@@ -200,7 +178,7 @@ export function ImageEditor({ image, name, mime, onSave, onDirty, onChange, onCl
           <button ref={hexRef} type="button" className="ie-hex" title="Copy this color's hex" onClick={() => void copyHex(hex)}>
             <span className="ie-chip" style={{ background: hex.slice(0, 7) }} />{hex}
           </button>
-          <span className="ie-cursor" title="Cursor, in image pixels">{cursor ? `${cursor.x}, ${cursor.y}` : ''}</span>
+          <CursorReadout ctl={ctl} />
           <span title="Image size, in pixels">{raster.width} × {raster.height}</span>
           <span className="ie-zoom">
             <button type="button" aria-label="Zoom out" title="Zoom out [-]" onPointerDown={keepFocus} onClick={() => ctl.zoomStep(-1)}>−</button>
@@ -219,6 +197,12 @@ export function ImageEditor({ image, name, mime, onSave, onDirty, onChange, onCl
       {selected && <span className="ie-sr" aria-live="polite">{selected.kind} selected</span>}
     </div>
   );
+}
+
+/** The pixel under the pointer: re-renders alone as the pointer moves. */
+function CursorReadout({ ctl }: { ctl: EditorController }) {
+  const text = useSyncExternalStore(ctl.subscribeCursor, ctl.getCursorText);
+  return <span className="ie-cursor" title="Cursor, in image pixels">{text}</span>;
 }
 
 function ToolOptions({ ctl, showWidth }: { ctl: EditorController; showWidth: boolean }) {
