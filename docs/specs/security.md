@@ -74,6 +74,7 @@ Gaps rather than accepted risks: we intend to close them.
 - **The notarization password sits on a command line for up to half an hour** per architecture; the remedy is known and not yet done ([Desktop Releases](./security-ci.md#desktop-releases)).
 - **Hosted's three Workers share one Postgres role.** The relay and voice Workers query only their own tables and the entitlement's user row, but the role their database binding carries can write the account Worker's tables too, a user's verified email included; a restricted role per Worker would close it ([Relay boundary](./security-hosted.md#relay-boundary)).
 - **Pocket Home Screen camera verification requires real iOS hardware** ([Device verification](./remote-security-model.md#device-verification)).
+- **A Relay's user-verification setting reaches a Burrow only at enrollment.** Changing it later leaves enrolled Burrows on the old policy until they enroll again ([Trust boundary](./security-remote.md#trust-boundary)).
 - **A hand- or bot-edited lockfile skips the cooldown.** Nothing checks the age of a version a lockfile edit adopts ([Cooldown and alerts](./security-supply-chain.md#cooldown-and-alerts)).
 - **A bundled theme's disclosed version and license are unchecked.** A test pins which theme extensions are disclosed, not what each record says ([Disclosure](./security-supply-chain.md#disclosure)).
 
