@@ -166,10 +166,7 @@ export const TabMenu: Story = {
   parameters: { primedWorkspaces: primed(['Workspace 1', 'Deploys', 'Notes'], 1, undefined, [2]) },
   play: async () => {
     const tab = await requireElement<HTMLElement>(`[data-workspace-tab="${ws(1)}"]`, 'Deploys tab');
-    const box = tab.getBoundingClientRect();
-    tab.dispatchEvent(new MouseEvent('contextmenu', {
-      bubbles: true, cancelable: true, button: 2, clientX: box.left + 24, clientY: box.bottom - 4,
-    }));
+    tab.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 }));
     await requireElement('[role="menu"]', 'tab menu');
   },
 };
@@ -182,10 +179,7 @@ export const PinnedTabMenu: Story = {
   parameters: { layout: 'fullscreen', primedWorkspaces: primed(['Workspace 1', 'Deploys', 'Notes'], 1, undefined, [2]) },
   play: async () => {
     const tab = await requireElement<HTMLElement>(`[data-workspace-tab="${ws(2)}"]`, 'pinned tab');
-    const box = tab.getBoundingClientRect();
-    tab.dispatchEvent(new MouseEvent('contextmenu', {
-      bubbles: true, cancelable: true, button: 2, clientX: box.left + 24, clientY: box.bottom - 4,
-    }));
+    tab.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 }));
     await requireElement('[role="menu"] [data-workspace-menu-item="close"][aria-disabled="true"]', 'disabled close');
   },
 };

@@ -16,8 +16,6 @@ import {
   getWorkspacesSnapshot,
   isWindowRef,
   moveWorkspace,
-  renameWorkspace,
-  resumeAutoWorkspaceName,
   resolveWorkspaceRef,
   setActiveWorkspace,
   workspaceRefFor,
@@ -29,7 +27,7 @@ import { computeWorkspaceUnion } from '../../lib/workspace-union';
 import { awaitWallHandle, errorText, mountingRefusal, requestForWall, stringParam } from './dor-control-shared';
 import { attachSurfacePorts } from './surface-ports';
 import type { WallHandle } from './wall-handles';
-import { closeWorkspaceWithSurfaces, PINNED_CLOSE_REFUSAL, pinWorkspace, workspaceNeedsCloseConfirmation } from './workspace-lifecycle';
+import { closeWorkspaceWithSurfaces, nameWorkspace, pinWorkspace, workspaceCloseRefusal, workspaceNeedsCloseConfirmation } from './workspace-lifecycle';
 import type { DorControlParams, DorControlRequest } from './use-dor-control';
 
 /**
@@ -65,7 +63,7 @@ export function workspaceRows(): WorkspaceRow[] {
       id: workspace.id,
       name: workspace.name,
       auto: workspace.nameIsAuto,
-      pinned: workspace.pinned === true,
+      pinned: !!workspace.pinned,
       active: workspace.id === activeId,
       ringing: union.ringing,
       todo: union.todo,
@@ -215,19 +213,19 @@ export async function handleWorkspaceControl(detail: DorControlRequest): Promise
     case WORKSPACE_CONTROL_METHODS.rename: {
       const target = requireWorkspace(detail);
       if (!target) return;
-      if (params.auto === true) {
-        // Answers the outgoing name: the derived one is computed afterwards
-        // (`docs/specs/dor-cli.md` → "dor workspace").
-        resumeAutoWorkspaceName(target.id);
-        respondMutation('renamed', target);
-        return;
-      }
-      if (!name) {
+      const auto = params.auto === true;
+      if (!auto && !name) {
         detail.respond({ ok: false, error: 'name is required' });
         return;
       }
-      renameWorkspace(target.id, name);
-      respondMutation('renamed', target, name);
+      const refused = nameWorkspace(target.id, auto ? null : name!);
+      if (refused) {
+        detail.respond({ ok: false, error: `workspace '${target.ref}' was not renamed: ${refused}` });
+        return;
+      }
+      // `--auto` answers the outgoing name: the derived one is computed
+      // afterwards (`docs/specs/dor-cli.md` → "dor workspace").
+      respondMutation('renamed', target, auto ? undefined : name);
       return;
     }
 
@@ -322,13 +320,6 @@ export async function handleWorkspaceControl(detail: DorControlRequest): Promise
       const isCurrent = cancelPendingConfirmation();
       const target = requireWorkspace(detail);
       if (!target) return;
-      // Ahead of `--force`, which answers the close's confirmation: a pin is no
-      // confirmation, and only unpinning answers it (`docs/specs/dor-cli.md` →
-      // "dor workspace").
-      if (target.pinned === true) {
-        detail.respond({ ok: false, error: `workspace '${target.ref}' was not closed: ${PINNED_CLOSE_REFUSAL}` });
-        return;
-      }
       // A close is answered only once the Workspace's Wall is there to answer
       // for it: the Wall is what knows the member Surfaces, so closing past a
       // missing one would drop the Workspace with its Sessions still running
@@ -339,6 +330,14 @@ export async function handleWorkspaceControl(detail: DorControlRequest): Promise
       }
       if (!isCurrent()) {
         detail.respond({ ok: false, error: 'Workspace close was superseded by a newer close or move' });
+        return;
+      }
+      // Ahead of `--force`, which answers only the close's confirmation: a pin,
+      // a transfer, or another close is no question it can answer
+      // (`docs/specs/dor-cli.md` → "dor workspace").
+      const refused = workspaceCloseRefusal(target.id);
+      if (refused) {
+        detail.respond({ ok: false, error: `workspace '${target.ref}' was not closed: ${refused}` });
         return;
       }
       // Like `dor kill`, a command close raises no prompt: it refuses instead,

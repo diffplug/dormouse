@@ -67,7 +67,7 @@ import { DEFAULT_WORKSPACE_ID, type PersistedSurfaceRefs, type WorkspaceId } fro
 import { clearWorkspaceSurfaces, setWorkspaceSurfaces } from '../lib/workspace-surfaces';
 import { nextTodoMember } from '../lib/workspace-union';
 import { deriveDisplayedSurfaceLabel } from '../lib/session-label';
-import { getWorkspace, getWorkspacesSnapshot, isWorkspacePinned, setActiveWorkspace, subscribeToWorkspaces, workspaceRefFor } from '../lib/workspace-store';
+import { getWorkspace, getWorkspacesSnapshot, setActiveWorkspace, subscribeToWorkspaces, workspaceRefFor } from '../lib/workspace-store';
 import { awaitWallEmpty } from './wall/close-all';
 import { closeKind, type CloseKind } from './wall/close-kind';
 import { registerWallHandle, type WallHandle } from './wall/wall-handles';
@@ -1987,12 +1987,9 @@ export function Wall({
       publishMembership();
       return { surfaceRef, rollback };
     },
-    finishSurfaceMove: () => {
+    finishSurfaceMove: (options) => {
       movingSurfaceRef.current = false;
-      // An emptied Wall is discarded by the move, unless its Workspace is pinned:
-      // that one refills, as a kill of its last pane does (`docs/specs/layout.md`
-      // → "Moving Surfaces between Workspaces").
-      if (memberSurfaceIds().length || isWorkspacePinned(effectiveWorkspaceId)) refillEmptyTree();
+      if (memberSurfaceIds().length || options?.keepEmpty) refillEmptyTree();
     },
     focusSurface: (id, acknowledge) => {
       if (acknowledge) wallActionsRef.current.onFocusPane(id);

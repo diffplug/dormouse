@@ -77,7 +77,7 @@ import {
   getWorkspaceBootPlan,
   resetWorkspaceBootPlans,
 } from "dormouse-lib/components/wall/workspace-boot-plans";
-import { createWorkspace, getWorkspacesSnapshot, resetWorkspaces } from "dormouse-lib/lib/workspace-store";
+import { createWorkspace, getWorkspacesSnapshot, resetWorkspaces, setWorkspaces } from "dormouse-lib/lib/workspace-store";
 import {
   getWindowSnapshot,
   isWorkspaceTransferPending,
@@ -939,8 +939,17 @@ describe("a torn-out window's boot", () => {
 /** One scan of the strip, shared by the drop index, the caret, and the tear-out
  *  grab offset (`standalone/src/workspace-tabs.ts`). */
 describe("workspaceDropTarget", () => {
+  /** The store the strip renders: its order splits the tabs into groups. */
+  function model(unpinned: string[], pinned: string[] = []): void {
+    const workspaces = [...unpinned.map((id) => ({ id, name: id, nameIsAuto: false })),
+      ...pinned.map((id) => ({ id, name: id, nameIsAuto: false, pinned: true as const }))];
+    if (workspaces.length) setWorkspaces({ workspaces, activeId: workspaces[0].id });
+    else resetWorkspaces();
+  }
+
   function strip(count: number): void {
     document.body.innerHTML = "";
+    model(Array.from({ length: count }, (_, index) => `w${index}`));
     for (let index = 0; index < count; index += 1) {
       const tab = document.createElement("div");
       tab.dataset.workspaceTab = `w${index}`;
@@ -966,7 +975,7 @@ describe("workspaceDropTarget", () => {
     // ...and, when appending, the last tab, whose right edge it goes after.
     expect(workspaceDropTarget(900).rect?.right).toBe(300);
     strip(0);
-    expect(workspaceDropTarget(10)).toEqual({ index: undefined, rect: null, edge: "right" });
+    expect(workspaceDropTarget(10)).toEqual({ index: undefined, rect: null, edge: "left" });
   });
 
   /** `unpinned` tabs, then `+`, then `pinned` tabs in their group, 100px each,
@@ -977,6 +986,7 @@ describe("workspaceDropTarget", () => {
     strip.dataset.workspaceStrip = "";
     strip.getBoundingClientRect = () => ({ left: 0, right: 1000, width: 1000, height: 30 }) as DOMRect;
     document.body.append(strip);
+    model(Array.from({ length: unpinned }, (_, index) => `u${index}`), Array.from({ length: pinned }, (_, index) => `p${index}`));
     const box = (left: number) => () => ({ left, right: left + 100, width: 100, height: 24 }) as DOMRect;
     for (let index = 0; index < unpinned; index += 1) {
       const tab = document.createElement("div");
@@ -1013,7 +1023,7 @@ describe("workspaceDropTarget", () => {
     grouped(2, 0);
     expect(workspaceDropTarget(10, true)).toMatchObject({ index: undefined, rect: { right: 1000 }, edge: "right" });
     grouped(0, 2);
-    expect(workspaceDropTarget(400)).toEqual({ index: 0, rect: null, edge: "right" });
+    expect(workspaceDropTarget(400)).toMatchObject({ index: 0, rect: { left: 0 }, edge: "left" });
   });
 
   it("finds one Workspace's own tab, and answers null for one not rendered", () => {

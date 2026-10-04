@@ -9,7 +9,7 @@ import type { TerminalGrid } from '../../lib/terminal-transfer';
 import { forgetHelper, getHelper } from '../../lib/helper-terminal';
 import { releaseSession, serializeTerminal, getTerminalInstance } from '../../lib/terminal-registry';
 import { disposeAgentBrowserSurfaceController } from './agent-browser-surface-controller';
-import { pinnedField, type PersistedSession, type PersistedWorkspace, type WorkspaceId } from '../../lib/session-types';
+import { workspaceRecord, type PersistedSession, type PersistedWorkspace, type WorkspaceId } from '../../lib/session-types';
 import type { WorkspaceMeta } from '../../lib/workspace-store';
 import type { SaveOptions } from '../../lib/session-save';
 
@@ -109,7 +109,7 @@ export async function prepareWorkspaceTransfer(
     ...(tools && Object.keys(tools).length ? { tools } : {}),
     payload: {
       workspaceId: deps.workspaceId,
-      workspace: { id: deps.workspaceId, name: deps.naming.name, nameIsAuto: deps.naming.nameIsAuto, ...pinnedField(deps.naming), session },
+      workspace: workspaceRecord({ ...deps.naming, id: deps.workspaceId }, session),
       terminalIds,
       allIds,
     },

@@ -730,7 +730,7 @@ describe('tab context menu', () => {
   const item = (key: string) => document.querySelector<HTMLButtonElement>(`[data-workspace-menu-item="${key}"]`)!;
   const rightClick = async (id: string, init: MouseEventInit = {}) => {
     await act(async () => {
-      tabFor(id).dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: 40, clientY: 20, ...init }));
+      tabFor(id).dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, ...init }));
     });
   };
   const key = async (target: Element, init: KeyboardEventInit) => {
@@ -777,7 +777,7 @@ describe('tab context menu', () => {
     await key(menuEl()!, { key: 'Escape' });
 
     // 224px from 950 would run off the right: its right edge meets the tab's.
-    await rightClick('ws-2', { clientX: 10, clientY: 10 });
+    await rightClick('ws-2');
     expect(menuEl()!.style.left).toBe(`${950 + 60 - 224}px`);
   });
 
@@ -811,7 +811,7 @@ describe('tab context menu', () => {
     await rightClick(first);
     expect(item('pin').textContent).toBe('Unpin');
     expect(item('close').getAttribute('aria-disabled')).toBe('true');
-    expect(item('close').title).toMatch(/unpin to close/i);
+    expect(item('close').title).toBe('workspace is pinned; unpin it to close');
     await act(async () => { item('close').click(); });
     await act(async () => { await Promise.resolve(); });
     expect(closeAll).not.toHaveBeenCalled();

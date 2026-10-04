@@ -286,7 +286,7 @@ Source of truth: `Arrival` in `standalone/src-tauri/src/routing.rs`; `begin_arri
 
 **A pointer captured on a strip tab keeps delivering `pointermove` and `pointerup` outside the window**, so the gesture stays the webview's and Rust is only asked which window is under the cursor (`window_at_cursor`; rationale). **The release transfers there, or tears out when the cursor is over no window or over this window outside its own strip.**
 
-**Among windows containing the cursor the most recently focused wins** — the OS exposes no z-order. **The target decides the drop index, and its caret shows that slot**, both clamped into the dragged Workspace's tab group (`docs/specs/layout.md` → "Workspace tabs").
+**Among windows containing the cursor the most recently focused wins** — the OS exposes no z-order. **The target decides the drop index, and its caret shows that slot** (`docs/specs/layout.md` → "Workspace tabs").
 
 Source of truth: `window_at` in `standalone/src-tauri/src/routing.rs`; `standalone/src/workspace-drag.ts`.
 

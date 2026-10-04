@@ -3,6 +3,7 @@ import { isRecord } from './is-record';
 import { isToolKeyScope, isToolRender, type ToolKeyScope, type ToolRender } from './platform/tool-types';
 import { isBrowserViewportSetting, type BrowserViewportSetting } from 'dor-lib-common/browser-viewports';
 import type { SessionStatus } from './alert-manager';
+import type { WorkspaceMeta } from './workspace-store';
 import { isAlertPaused, type AlertEpisode } from './alert-episode';
 import { hasShellInputControls } from 'dor/commands/shell-quote';
 import {
@@ -149,9 +150,24 @@ export interface PersistedWorkspace {
   session: PersistedSession;
 }
 
-/** A record's `pinned` field: present only when the Workspace is pinned. */
-export function pinnedField(workspace: { pinned?: boolean }): { pinned?: true } {
-  return workspace.pinned === true ? { pinned: true } : {};
+/** A Workspace's persisted record: its identity and naming, `pinned` only when
+ *  set, and its session. Every record a Window builds goes through this. */
+export function workspaceRecord(
+  meta: { id: WorkspaceId; name: string; nameIsAuto: boolean; pinned?: boolean },
+  session: PersistedSession,
+): PersistedWorkspace {
+  return { id: meta.id, name: meta.name, nameIsAuto: meta.nameIsAuto, ...(meta.pinned ? { pinned: true } : {}), session };
+}
+
+/** The store's model of a persisted record: the inverse of `workspaceRecord`,
+ *  its delivery overrides read back out of the session. */
+export function metaFromRecord(record: PersistedWorkspace): WorkspaceMeta {
+  const { id, name, nameIsAuto, pinned, session } = record;
+  return {
+    id, name, nameIsAuto,
+    ...(pinned ? { pinned } : {}),
+    ...(session.alertDelivery ? { alertDelivery: session.alertDelivery } : {}),
+  };
 }
 
 /** Standalone Window snapshot. VS Code persists one bare Session per webview. */
@@ -395,7 +411,7 @@ export function readPersistedWindow(raw: unknown): PersistedWindow | null {
       if (!session) return null;
       seen.add(ws.id);
       const nameIsAuto = typeof ws.nameIsAuto === 'boolean' ? ws.nameIsAuto : isDefaultWorkspaceName(ws.name);
-      return { id: ws.id, name: ws.name, nameIsAuto, ...pinnedField(ws), session };
+      return workspaceRecord({ id: ws.id, name: ws.name, nameIsAuto, pinned: ws.pinned === true }, session);
     })
     .filter((ws): ws is PersistedWorkspace => ws !== null);
   if (workspaces.length === 0) return null;

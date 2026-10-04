@@ -75,26 +75,26 @@ afterEach(() => { cancelEditorClose(); vi.useRealTimers(); });
 
 describe("hit testing while dragging", () => {
   it("probes at most once per throttle window", async () => {
-    for (let i = 0; i < 10; i += 1) onDragOutsideWindow({ clientX: i, clientY: 100 });
+    for (let i = 0; i < 10; i += 1) onDragOutsideWindow({ clientX: i, clientY: 100 }, "ws-1");
     await settle();
     expect(probes()).toBe(1);
   });
 
   it("never probes for a pointer that has not moved", async () => {
-    onDragOutsideWindow({ clientX: 900, clientY: 8 });
+    onDragOutsideWindow({ clientX: 900, clientY: 8 }, "ws-1");
     await settle();
     expect(probes()).toBe(1);
     // A repeated move at the same point is not a new question, so it must not
     // cost a round trip once the throttle window is over.
     await throttleElapsed();
-    onDragOutsideWindow({ clientX: 900, clientY: 8 });
+    onDragOutsideWindow({ clientX: 900, clientY: 8 }, "ws-1");
     await settle();
     expect(probes()).toBe(1);
   });
 
   it("shows a caret in the window under the cursor and clears the one it left", async () => {
     hit = { label: "ws-2", x: 40, y: 8 };
-    onDragOutsideWindow({ clientX: 900, clientY: 8 });
+    onDragOutsideWindow({ clientX: 900, clientY: 8 }, "ws-1");
     await settle();
     expect(hovers()).toEqual([{ label: "ws-2", x: 40, y: 8, pinned: false }]);
 
@@ -102,21 +102,21 @@ describe("hit testing while dragging", () => {
     // the host only names the new one.
     hit = { label: "ws-3", x: 12, y: 8 };
     await throttleElapsed();
-    onDragOutsideWindow({ clientX: 1400, clientY: 8 });
+    onDragOutsideWindow({ clientX: 1400, clientY: 8 }, "ws-1");
     await settle();
     expect(lastHover()).toEqual({ label: "ws-3", x: 12, y: 8, pinned: false });
 
     // Over nothing at all.
     hit = null;
     await throttleElapsed();
-    onDragOutsideWindow({ clientX: 2000, clientY: 800 });
+    onDragOutsideWindow({ clientX: 2000, clientY: 800 }, "ws-1");
     await settle();
     expect(lastHover()).toEqual({ label: null, x: 0, y: 0, pinned: false });
   });
 
   it("follows the pointer across the target's tabs instead of lighting one caret", async () => {
     hit = { label: "ws-2", x: 10, y: 8 };
-    onDragOutsideWindow({ clientX: 900, clientY: 8 });
+    onDragOutsideWindow({ clientX: 900, clientY: 8 }, "ws-1");
     await settle();
     expect(hovers()).toHaveLength(1);
 
@@ -124,14 +124,14 @@ describe("hit testing while dragging", () => {
     // caret stays where the pointer first entered.
     hit = { label: "ws-2", x: 260, y: 8 };
     await throttleElapsed();
-    onDragOutsideWindow({ clientX: 1150, clientY: 8 });
+    onDragOutsideWindow({ clientX: 1150, clientY: 8 }, "ws-1");
     await settle();
     expect(lastHover()).toEqual({ label: "ws-2", x: 260, y: 8, pinned: false });
 
     // A pixel of travel inside the same slot is not worth an IPC hop.
     hit = { label: "ws-2", x: 261, y: 8 };
     await throttleElapsed();
-    onDragOutsideWindow({ clientX: 1151, clientY: 8 });
+    onDragOutsideWindow({ clientX: 1151, clientY: 8 }, "ws-1");
     await settle();
     expect(hovers()).toHaveLength(2);
   });
@@ -140,13 +140,13 @@ describe("hit testing while dragging", () => {
     // The leading edge alone never sees the resting position, which is the one
     // the caret must show and the one the drop uses.
     hit = { label: "ws-2", x: 10, y: 8 };
-    onDragOutsideWindow({ clientX: 900, clientY: 8 });
+    onDragOutsideWindow({ clientX: 900, clientY: 8 }, "ws-1");
     await settle();
     expect(probes()).toBe(1);
 
     // Inside the same throttle window, and then the pointer stops.
     hit = { label: "ws-2", x: 300, y: 8 };
-    onDragOutsideWindow({ clientX: 1190, clientY: 8 });
+    onDragOutsideWindow({ clientX: 1190, clientY: 8 }, "ws-1");
     await settle();
     expect(probes()).toBe(1);
 
@@ -157,7 +157,7 @@ describe("hit testing while dragging", () => {
 
   it("clears the caret when the pointer comes back over its own strip", async () => {
     hit = { label: "ws-2", x: 40, y: 8 };
-    onDragOutsideWindow({ clientX: 900, clientY: 8 });
+    onDragOutsideWindow({ clientX: 900, clientY: 8 }, "ws-1");
     await settle();
     expect(lastHover()).toEqual({ label: "ws-2", x: 40, y: 8, pinned: false });
 
@@ -179,7 +179,7 @@ describe("hit testing while dragging", () => {
 
   it("never shows a caret in its own window", async () => {
     hit = { label: "main", x: 40, y: 8 };
-    onDragOutsideWindow({ clientX: 100, clientY: 400 });
+    onDragOutsideWindow({ clientX: 100, clientY: 400 }, "ws-1");
     await settle();
     expect(hovers()).toEqual([]);
   });
@@ -338,7 +338,7 @@ describe("releasing the drag", () => {
 
   it("clears the hover caret on release", async () => {
     hit = { label: "ws-2", x: 40, y: 8 };
-    onDragOutsideWindow({ clientX: 900, clientY: 8 });
+    onDragOutsideWindow({ clientX: 900, clientY: 8 }, "ws-1");
     await settle();
     mocks.invoke.mockClear();
 
@@ -350,7 +350,7 @@ describe("releasing the drag", () => {
   it("ignores a probe that lands after the release", async () => {
     // A caret is lit, so the release has something to clear.
     hit = { label: "ws-2", x: 40, y: 8 };
-    onDragOutsideWindow({ clientX: 900, clientY: 8 });
+    onDragOutsideWindow({ clientX: 900, clientY: 8 }, "ws-1");
     await settle();
     expect(lastHover()).toEqual({ label: "ws-2", x: 40, y: 8, pinned: false });
 
@@ -363,7 +363,7 @@ describe("releasing the drag", () => {
       return new Promise((resolve) => { answerProbe = resolve; });
     });
     await throttleElapsed();
-    onDragOutsideWindow({ clientX: 1400, clientY: 8 });
+    onDragOutsideWindow({ clientX: 1400, clientY: 8 }, "ws-1");
     await settle();
 
     onDropOnOtherWindow("ws-1", { clientX: 1400, clientY: 8 }, true);
@@ -380,7 +380,7 @@ describe("releasing the drag", () => {
 
   it("clears the hover caret when the drag is abandoned", async () => {
     hit = { label: "ws-2", x: 40, y: 8 };
-    onDragOutsideWindow({ clientX: 900, clientY: 8 });
+    onDragOutsideWindow({ clientX: 900, clientY: 8 }, "ws-1");
     await settle();
     mocks.invoke.mockClear();
 

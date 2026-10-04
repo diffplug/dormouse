@@ -123,8 +123,8 @@ const askToProbe = throttleTrailing(() => {
 }, HIT_TEST_THROTTLE_MS);
 
 /** The pointer left this window's strip mid-drag, dragging `id`. */
-export function onDragOutsideWindow(point: StripDragPoint, id?: WorkspaceId): void {
-  if (id !== undefined) draggingPinned = isWorkspacePinned(id);
+export function onDragOutsideWindow(point: StripDragPoint, id: WorkspaceId): void {
+  draggingPinned = isWorkspacePinned(id);
   // A pointer that has not actually moved must not cost a round trip per
   // throttle window; a coalesced or repeated move reports the same point.
   if (lastPoint?.clientX === point.clientX && lastPoint?.clientY === point.clientY) return;

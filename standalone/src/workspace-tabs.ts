@@ -1,5 +1,6 @@
 import type { WorkspaceId } from "dormouse-lib/lib/session-types";
-import { workspaceTabElement, workspaceTabElements } from "dormouse-lib/components/workspace-tab-elements";
+import { workspaceStripElement, workspaceTabElement, workspaceTabElements } from "dormouse-lib/components/workspace-tab-elements";
+import { pinnedBoundary } from "dormouse-lib/lib/workspace-store";
 
 /**
  * One scan of this window's Workspace strip, shared by everything that has to
@@ -16,9 +17,8 @@ export interface WorkspaceDropTarget {
    *  the last tab means. */
   index: number | undefined;
   /** The box the caret draws against: the tab the drop goes before, else the
-   *  one it goes after (or the strip, at whose right end the first pinned tab
-   *  lands). Null when the arriving Workspace's group has nothing to draw
-   *  against. */
+   *  one it goes after, else — the arriving Workspace's group being empty —
+   *  the strip, at its start or (pinned) its right end. Null with no strip. */
   rect: DOMRect | null;
   /** Which edge of `rect` the caret takes. */
   edge: "left" | "right";
@@ -30,10 +30,10 @@ export interface WorkspaceDropTarget {
  * (`docs/specs/layout.md` → "Workspace tabs"): an unpinned arrival never lands
  * among pinned tabs, nor a pinned one among unpinned tabs.
  */
-export function workspaceDropTarget(x: number, pinned = false): WorkspaceDropTarget {
+export function workspaceDropTarget(x: number, pinned?: boolean): WorkspaceDropTarget {
+  // The tabs render in store order, so the store's boundary splits them too.
   const elements = workspaceTabElements();
-  const firstPinned = elements.findIndex((tab) => tab.closest("[data-workspace-pinned-group]") !== null);
-  const boundary = firstPinned === -1 ? elements.length : firstPinned;
+  const boundary = Math.min(pinnedBoundary(), elements.length);
   const [low, high] = pinned ? [boundary, elements.length] : [0, boundary];
   let index = elements.findIndex((tab) => {
     const rect = tab.getBoundingClientRect();
@@ -44,10 +44,7 @@ export function workspaceDropTarget(x: number, pinned = false): WorkspaceDropTar
   const at = index === elements.length ? undefined : index;
   if (index < high) return { index: at, rect: elements[index].getBoundingClientRect(), edge: "left" };
   if (high > low) return { index: at, rect: elements[high - 1].getBoundingClientRect(), edge: "right" };
-  // The group is empty: a pinned arrival lands at the strip's right end, an
-  // unpinned one at its start.
-  const strip = pinned ? document.querySelector<HTMLElement>("[data-workspace-strip]") : null;
-  return { index: at, rect: strip?.getBoundingClientRect() ?? null, edge: "right" };
+  return { index: at, rect: workspaceStripElement()?.getBoundingClientRect() ?? null, edge: pinned ? "right" : "left" };
 }
 
 /** One Workspace's tab box, or null when it is not rendered. */

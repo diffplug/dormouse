@@ -163,7 +163,7 @@ describe('workspace.pin', () => {
     expect(workspaceRows().map((row) => [row.id, row.pinned])).toEqual([['ws-2', false], [first, true]]);
   });
 
-  it('refuses while the Workspace transfers, leaving the pin as it was', async () => {
+  it('refuses a pin or a rename while the Workspace transfers, leaving both as they were', async () => {
     createWorkspace({ id: 'ws-2', name: 'build', activate: false });
     setWorkspaceTransferPending('ws-2', true);
     try {
@@ -171,6 +171,12 @@ describe('workspace.pin', () => {
       await handleWorkspaceControl(pin);
       expect(answer(pin)).toBe("workspace 'workspace:2' was not pinned: Workspace is transferring");
       expect(workspaceRows().find((row) => row.id === 'ws-2')?.pinned).toBe(false);
+      for (const params of [{ name: 'deploys' }, { auto: true }]) {
+        const rename = request('workspace.rename', { workspace: 'build', ...params });
+        await handleWorkspaceControl(rename);
+        expect(answer(rename)).toBe("workspace 'workspace:2' was not renamed: Workspace is transferring");
+      }
+      expect(workspaceRows().find((row) => row.id === 'ws-2')).toMatchObject({ name: 'build', auto: false });
     } finally {
       setWorkspaceTransferPending('ws-2', false);
     }

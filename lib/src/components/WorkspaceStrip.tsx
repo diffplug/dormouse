@@ -21,7 +21,7 @@ import { createWorkspaceStripDrag, type StripDragHost } from './workspace-strip-
 import { acquireChromeKeyboardLease } from './wall/chrome-keyboard-lease';
 import { getWallHandle } from './wall/wall-handles';
 import { useDialogKeyboardOwner } from './wall/wall-context';
-import { enterWorkspace, isWorkspaceCloseInFlight, requestWorkspaceClose, requestWorkspaceRename } from './wall/workspace-lifecycle';
+import { enterWorkspace, isWorkspaceCloseInFlight, nameWorkspace, requestWorkspaceClose, requestWorkspaceRename } from './wall/workspace-lifecycle';
 import { isWorkspaceTransferPending } from '../lib/window-session-aggregator';
 import { getActivitySnapshot, subscribeToActivity } from '../lib/terminal-registry';
 import { getWorkspaceSurfacesSnapshot, subscribeToWorkspaceSurfaces } from '../lib/workspace-surfaces';
@@ -39,13 +39,12 @@ import {
   createWorkspace,
   getWorkspacesSnapshot,
   moveWorkspace,
-  renameWorkspace,
-  resumeAutoWorkspaceName,
+  pinnedBoundary,
   setActiveWorkspace,
   subscribeToWorkspaces,
 } from '../lib/workspace-store';
 import type { WorkspaceId } from '../lib/session-types';
-import { revealWorkspaceTab } from './workspace-tab-elements';
+import { revealWorkspaceTab, workspaceStripAreas } from './workspace-tab-elements';
 
 /**
  * The Window's Workspace tabs. Store-driven end to end (Workspaces, membership,
@@ -84,7 +83,6 @@ export function WorkspaceStrip({
   const { renamingId, confirmation, moveError, menu } = useSyncExternalStore(subscribeToWorkspaceUi, getWorkspaceUiSnapshot);
   const [draggingId, setDraggingId] = useState<WorkspaceId | null>(null);
 
-  const stripRef = useRef<HTMLDivElement>(null);
   const tabElementsRef = useRef(new Map<WorkspaceId, HTMLElement>());
 
   // The editor, the confirmation, and the tab menu all sit outside every Wall,
@@ -142,8 +140,8 @@ export function WorkspaceStrip({
   // never submits (`submitUntouched` below), so opening it cannot pin an
   // auto-name (`docs/specs/layout.md` → "Workspace names").
   const finishRename = useCallback((id: WorkspaceId, value: string) => {
-    if (value.trim()) renameWorkspace(id, value);
-    else resumeAutoWorkspaceName(id);
+    // A Workspace that began a move while the editor was open keeps its name.
+    nameWorkspace(id, value.trim() ? value : null);
     setRenamingWorkspace(null);
   }, []);
   const cancelRename = useCallback(() => setRenamingWorkspace(null), []);
@@ -159,8 +157,7 @@ export function WorkspaceStrip({
     dragRef.current = createWorkspaceStripDrag({
       order: () => getWorkspacesSnapshot().workspaces.map((workspace) => workspace.id),
       tabElement: (id) => tabElementsRef.current.get(id) ?? null,
-      stripRects: () => [...(stripRef.current?.querySelectorAll<HTMLElement>('[data-workspace-strip-area]') ?? [])]
-        .map((area) => area.getBoundingClientRect()),
+      stripRects: () => workspaceStripAreas().map((area) => area.getBoundingClientRect()),
       move: (id, toIndex) => { moveWorkspace(id, toIndex); },
       setDragging: setDraggingId,
       onDragOutsideWindow: (point, id) => windowHooksRef.current.onDragOutsideWindow?.(point, id),
@@ -221,7 +218,7 @@ export function WorkspaceStrip({
         id={workspace.id}
         name={workspace.name}
         nameIsAuto={workspace.nameIsAuto}
-        pinned={workspace.pinned === true}
+        pinned={!!workspace.pinned}
         active={isActive}
         union={unionFor(workspace.id, isActive)}
         renaming={renamingId === workspace.id}
@@ -240,7 +237,8 @@ export function WorkspaceStrip({
       />
     );
   };
-  const pinned = workspaces.filter((workspace) => workspace.pinned);
+  const boundary = pinnedBoundary(workspaces);
+  const pinned = workspaces.slice(boundary);
   const menuWorkspace = menu ? workspaces.find((workspace) => workspace.id === menu.id) : undefined;
 
   // Unpinned tabs and `+` scroll and shrink; an empty spacer with a floor takes
@@ -249,12 +247,11 @@ export function WorkspaceStrip({
   // order is strip order.
   return (
     <div
-      ref={stripRef}
       data-workspace-strip
       className={clsx('flex min-w-0 flex-1 items-end gap-1.5', className)}
     >
       <div data-workspace-strip-area className="flex min-w-0 items-end gap-1.5 overflow-x-auto">
-        {workspaces.filter((workspace) => !workspace.pinned).map(renderTab)}
+        {workspaces.slice(0, boundary).map(renderTab)}
         <button
           type="button"
           data-workspace-new
@@ -397,8 +394,7 @@ const WorkspaceTab = memo(function WorkspaceTab({
       onAuxClick={(event) => {
         if (event.button !== 1) return;
         event.preventDefault();
-        // A pinned tab is never closed alone; the close verb refuses it too.
-        if (!pinned) onRequestClose(id);
+        onRequestClose(id);
       }}
       onContextMenu={(event) => {
         // The rename editor keeps the platform's own text menu.

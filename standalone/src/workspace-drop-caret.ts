@@ -33,12 +33,9 @@ function set(next: number | null): void {
 
 /** Where the tab would be inserted, as a viewport x, within the dragged
  *  Workspace's own group. */
-export function caretFor(point: { x: number; y: number; pinned?: boolean }): number | null {
-  const { rect, edge } = workspaceDropTarget(point.x, point.pinned === true);
-  // Nothing to draw against, so the caret sits at the strip's start.
-  if (!rect) {
-    return document.querySelector<HTMLElement>("[data-workspace-strip]")?.getBoundingClientRect().left ?? null;
-  }
+function caretFor(point: { x: number; y: number; pinned?: boolean }): number | null {
+  const { rect, edge } = workspaceDropTarget(point.x, point.pinned);
+  if (!rect) return null;
   return edge === "left" ? rect.left : rect.right;
 }
 

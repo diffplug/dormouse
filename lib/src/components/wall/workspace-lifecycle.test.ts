@@ -7,9 +7,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   closeWorkspaceWithSurfaces,
   enterWorkspace,
+  nameWorkspace,
   PINNED_CLOSE_REFUSAL,
+  pinWorkspace,
   requestWorkspaceClose,
+  requestWorkspaceRename,
 } from './workspace-lifecycle';
+import { setWorkspaceTransferPending } from '../../lib/window-session-aggregator';
 import { setPlatform } from '../../lib/platform';
 import { FakePtyAdapter } from '../../lib/platform/fake-adapter';
 import { _resetLabsSettingsForTesting, setDelayedKillSetting } from '../../lib/labs-settings';
@@ -233,7 +237,7 @@ describe('a pinned Workspace', () => {
     await vi.waitFor(() => expect(ids()).toEqual([first]));
   });
 
-  it('asks nothing and leaves another Workspace\'s pending question up', async () => {
+  it('asks nothing itself, and answers a pending question no as any refused close does', async () => {
     const [first] = ids();
     createWorkspace({ id: 'ws-2' });
     handleFor('ws-2', { needsCloseConfirmation: () => true });
@@ -242,8 +246,30 @@ describe('a pinned Workspace', () => {
     requestConfirmation({ id: first, char: 'a', answer });
     requestWorkspaceClose('ws-2');
     await Promise.resolve();
-    expect(getWorkspaceUiSnapshot().confirmation?.id).toBe(first);
-    expect(answer).not.toHaveBeenCalled();
+    expect(getWorkspaceUiSnapshot().confirmation).toBeNull();
+    expect(answer).toHaveBeenCalledExactlyOnceWith(false);
+  });
+
+  it('pinning supersedes a close already asking, and the transfer freezes the pin', async () => {
+    createWorkspace({ id: 'ws-2' });
+    handleFor('ws-2', { needsCloseConfirmation: () => true });
+    requestWorkspaceClose('ws-2');
+    await Promise.resolve();
+    const question = getWorkspaceUiSnapshot().confirmation!;
+    expect(question.id).toBe('ws-2');
+    expect(pinWorkspace('ws-2', true)).toBeNull();
+    expect(getWorkspaceUiSnapshot().confirmation).toBeNull();
+
+    setWorkspaceTransferPending('ws-2', true);
+    try {
+      expect(pinWorkspace('ws-2', false)).toBe('Workspace is transferring');
+      expect(nameWorkspace('ws-2', 'Renamed')).toBe('Workspace is transferring');
+      requestWorkspaceRename('ws-2');
+      expect(getWorkspaceUiSnapshot().renamingId).toBeNull();
+      expect(getWorkspacesSnapshot().workspaces.find((ws) => ws.id === 'ws-2')).toMatchObject({ pinned: true, name: 'Workspace 2' });
+    } finally {
+      setWorkspaceTransferPending('ws-2', false);
+    }
   });
 
   it('never becomes a Labs pending kill', async () => {

@@ -4,10 +4,11 @@ import { clsx } from 'clsx';
 import { OVERLAY_MAX_HEIGHT, POPUP_MENU_ITEM_CLASS, PopupButtonRow, portalToBody } from './design';
 import { useAnchoredMenu, useCloseOnOutsideAndEscape } from './use-anchored-menu';
 import { workspaceTabElement } from './workspace-tab-elements';
-import { pinWorkspace, requestWorkspaceClose, requestWorkspaceRename } from './wall/workspace-lifecycle';
+import { nameWorkspace, pinWorkspace, requestWorkspaceClose, requestWorkspaceRename, workspaceCloseRefusal } from './wall/workspace-lifecycle';
+import { stepFocus } from './focus-step';
 import { writeTextToClipboard } from '../lib/clipboard';
 import { closeWorkspaceMenu, type WorkspaceMenu } from '../lib/workspace-ui-store';
-import { resumeAutoWorkspaceName, workspaceRefFor, type WorkspaceMeta } from '../lib/workspace-store';
+import { workspaceRefFor, type WorkspaceMeta } from '../lib/workspace-store';
 import type { WorkspaceId } from '../lib/session-types';
 
 /** Fixed for the anchor's start/end flip; a long ref truncates. */
@@ -51,7 +52,7 @@ export function WorkspaceTabMenu({
   onMoveToNewWindow?: (id: WorkspaceId) => void;
 }) {
   const { id } = workspace;
-  const pinned = workspace.pinned === true;
+  const pinned = !!workspace.pinned;
   const menuRef = useRef<HTMLDivElement | null>(null);
   // What a mouse-opened menu hands focus back to: whatever held it before.
   const [opener] = useState(() => (document.activeElement instanceof HTMLElement ? document.activeElement : null));
@@ -67,7 +68,7 @@ export function WorkspaceTabMenu({
 
   const items: MenuItem[] = [
     { key: 'rename', label: 'Rename', restoresFocus: false, run: () => requestWorkspaceRename(id) },
-    ...(workspace.nameIsAuto ? [] : [{ key: 'auto-name', label: 'Use automatic name', run: () => resumeAutoWorkspaceName(id) }]),
+    ...(workspace.nameIsAuto ? [] : [{ key: 'auto-name', label: 'Use automatic name', run: () => { nameWorkspace(id, null); } }]),
     { key: 'pin', label: pinned ? 'Unpin' : 'Pin right', run: () => { pinWorkspace(id, !pinned); } },
     { key: 'copy-ref', label: 'Copy ref', hint: workspaceRefFor(id), run: () => { void writeTextToClipboard(workspaceRefFor(id)); } },
     ...(onMoveToNewWindow ? [{ key: 'new-window', label: 'Move to new window', run: () => onMoveToNewWindow(id) }] : []),
@@ -75,7 +76,7 @@ export function WorkspaceTabMenu({
       key: 'close',
       label: 'Close',
       separatorBefore: true,
-      disabledReason: pinned ? 'Pinned: unpin to close' : undefined,
+      disabledReason: workspaceCloseRefusal(id) ?? undefined,
       run: () => requestWorkspaceClose(id),
     },
   ];
@@ -101,13 +102,11 @@ export function WorkspaceTabMenu({
 
   const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     const rows = [...(menuRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? [])];
-    const index = rows.indexOf(document.activeElement as HTMLElement);
-    let next: number | null = null;
     switch (event.key) {
-      case 'ArrowDown': next = (index + 1) % rows.length; break;
-      case 'ArrowUp': next = (index - 1 + rows.length) % rows.length; break;
-      case 'Home': next = 0; break;
-      case 'End': next = rows.length - 1; break;
+      case 'ArrowDown': stepFocus(rows, 1); break;
+      case 'ArrowUp': stepFocus(rows, -1); break;
+      case 'Home': rows[0]?.focus({ preventScroll: true }); break;
+      case 'End': rows[rows.length - 1]?.focus({ preventScroll: true }); break;
       case 'Escape':
       case 'Tab':
         event.preventDefault();
@@ -120,7 +119,6 @@ export function WorkspaceTabMenu({
     }
     event.preventDefault();
     event.stopPropagation();
-    rows[next]?.focus({ preventScroll: true });
   };
 
   return portalToBody(
