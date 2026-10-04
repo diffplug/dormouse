@@ -20,7 +20,7 @@
 
 **Ownership is by file: every `docs/specs/security*.md` spec is in exactly one domain's scope**, declared as backticked repo paths in the bullet list under the `**Scope` line of its domain file in `.github/audit/`, and enforced by `scripts/spec-lint.mjs`; `docs/specs/security.md` -> "How the guarantees are checked" tabulates the assignment.
 
-**The separation is one of context, not of credential.** `AUDIT_PAT` is a step-level `env:` on the one job, so every subagent inherits it, and only the prompt tells `application-security` and `hosted` not to use it. A known gap, staged as `## Future` -> Credential separation.
+`AUDIT_PAT` is a step-level `env:` on the one job, so every subagent inherits it, and only the prompt tells `application-security` and `hosted` not to use it (`docs/specs/security.md` -> "Known gaps"); `## Future` -> Credential separation stages the fix.
 
 **Must pin the mechanical domains to Sonnet and the two code-reading domains — `application-security` and `hosted` — to Opus in CI and locally** (rationale).
 
@@ -79,7 +79,7 @@ Source of truth: `.github/audit/orchestrator.md`; the fragment contract in `.git
 - **FAIL IF** the reporting step accepts any domain verdict other than exact `VERDICT: PASS` as passing, fails to recognize a `VERDICT: FAIL` prefix as dissent, ignores an inconclusive domain, accepts a fragment with no completion sentinel as finished, or accepts status text other than literal `PASS`/`FAIL` (rationale).
 - **FAIL IF** the audit has been weakened in a way no bullet above names — e.g. the prompt no longer requires the qualitative pass, a `FAIL IF` can be ignored, the failure-reporting step that opens a `security-audit-failure` issue and exits non-zero has been removed, or the `AUDIT_PAT` pre-check is removed or bypassed. **This bullet is a judgement item, not a checklist.**
 
-Known gaps: PASS can be accepted without a merged report; default issue-list pagination can leave older failures open; quoted `VERDICT:` lines can flood the preserved head (rationale).
+The reporting step's known gaps are `docs/specs/security.md` -> "Known gaps" (rationale).
 
 Source of truth: `Surface result, file or close issue` in `.github/workflows/security-audit.yaml`; reporting, redaction, and local-runner regressions in `scripts/security-audit.test.mjs`.
 

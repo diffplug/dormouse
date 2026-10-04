@@ -35,22 +35,22 @@ The [tend](https://github.com/max-sixty/tend) agent harness runs as the GitHub u
 
 **The notifications poll widens its input.** `tend-notifications.yaml` alone takes its subjects from the bot's own unread feed, and its pre-check re-subscribes the bot to all repository activity (`PUT /repos/diffplug/dormouse/subscription`) every `*/15` cycle; its prompt decides whether to respond (rationale). On an undispatched thread the bot is still bounded by `author_association` tiering and the admin gate on `main`. **Never expect unwatching by hand to stick**: the lever is `tend-notifications.yaml`, not the Unwatch button.
 
-**Reachable repo-level secrets.** Every repo-level secret is reachable by any workflow the bot can author: `.github/workflows/argos.yml` is `pull_request`-triggered, and environment policies cannot tell a bot from a human contributor at the ref level. **Accepted for `ARGOS_TOKEN` and the unused `CHROMATIC_PROJECT_TOKEN` alone, with rotation as the mitigation** — each is scoped to one project; any other repo-level secret needs its own acceptance here. `OVSX_PAT` and `VSCE_PAT` live only in the `vscode-extension-publish` environment, which admits only admin-created `v*` tags.
+**Reachable repo-level secrets.** Every repo-level secret is reachable by any workflow the bot can author: `.github/workflows/argos.yml` is `pull_request`-triggered, and environment policies cannot tell a bot from a human contributor at the ref level. Accepted for `ARGOS_TOKEN` and the unused `CHROMATIC_PROJECT_TOKEN` alone, each scoped to one project (`docs/specs/security.md` -> "What is not defended"); any other repo-level secret needs its own acceptance there. `OVSX_PAT` and `VSCE_PAT` live only in the `vscode-extension-publish` environment, which admits only admin-created `v*` tags.
 
 **Never create an `ANTHROPIC_API_KEY` secret.** Every generated `tend-*.yaml` passes `anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}` to `max-sixty/tend/claude`; with no such secret it resolves empty and the harness uses `CLAUDE_CODE_OAUTH_TOKEN`. The input cannot be deleted locally, so the inventory `FAIL IF` below makes adding one a deliberate expansion of the bot's reach (rationale).
 
 **Org-level secrets.** An org secret shared with this repo is reachable exactly like a repo-level one but absent from this repo's own listing — `gh api repos/diffplug/dormouse/actions/organization-secrets` is the check. **None are visible today** (rationale); **must re-evaluate and name any that becomes visible before accepting it**, and the inventory `FAIL IF` admits none.
 
-**Upstream compromise.** Generated workflows reference `max-sixty/tend/claude@<version>` — a mutable **tag**, so upstream can change what our workflows execute with no commit here and `workflow-audit.yaml` seeing a byte-identical file. **Accepted residual** (rationale). **The version pin bounds deliberate upgrades, not a hostile upstream**; `uvx tend@latest` runs only at install and nightly regen, so a compromise of that path affects the next re-run, not in-flight workflows. `tend-mention` and `tend-notifications` also run `astral-sh/setup-uv`, whose `uv` interprets a `run:` step holding `TEND_BOT_TOKEN`; the generator pins that action by commit and the `uv` download by checksum.
+**Upstream compromise.** Generated workflows reference `max-sixty/tend/claude@<version>` — a mutable **tag**, so upstream can change what our workflows execute with no commit here and `workflow-audit.yaml` seeing a byte-identical file (`docs/specs/security.md` -> "What is not defended"; rationale). **The version pin bounds deliberate upgrades, not a hostile upstream**; `uvx tend@latest` runs only at install and nightly regen, so a compromise of that path affects the next re-run, not in-flight workflows. `tend-mention` and `tend-notifications` also run `astral-sh/setup-uv`, whose `uv` interprets a `run:` step holding `TEND_BOT_TOKEN`; the generator pins that action by commit and the `uv` download by checksum.
 
-**Audit visibility.** `.github/workflows/workflow-audit.yaml` walks nightly every commit touching `.github/workflows/`, `.config/tend.yaml`, `.github/audit/`, or `.vscode/` since its previous successful run, **across all branches**, so a workflow pushed to a feature branch is seen without a PR. **This enumeration and the job's `WINDOW` must name the same paths** (rationale). It reports the *unexplained*, classifying out four routine sources on independently checked provenance or content, each with an accepted residual:
+**Audit visibility.** `.github/workflows/workflow-audit.yaml` walks nightly every commit touching `.github/workflows/`, `.config/tend.yaml`, `.github/audit/`, or `.vscode/` since its previous successful run, **across all branches**, so a workflow pushed to a feature branch is seen without a PR. **This enumeration and the job's `WINDOW` must name the same paths** (rationale). It reports the *unexplained*, classifying out routine sources on independently checked provenance or content; each source's residual is `docs/specs/security.md` -> "What is not defended":
 
-| Source | Explained when | Residual |
-| --- | --- | --- |
-| Renovate pin bump | GitHub-signed, authored `renovate[bot]`, committed `web-flow`, associated only with Renovate PRs, changing only the ref of an already-referenced action (rationale) | the ref Renovate picked inside that action's repo |
-| tend regeneration | byte-for-byte reproducible from `uvx tend@<version> init` at the files' own header version, without touching `.config/tend.yaml` (rationale) | — |
-| clean merge | two-parent merge whose window paths equal `git merge-tree` of its parents | — |
-| admin push | the earliest ref update containing it in the repository activity log (last quarter, server-set timestamps) is an admin's `push` or `branch_creation`, or an admin's `force_push` whose replaced window commits are each admin-introduced; and no author or committer field names a bot (rationale) | a bot commit under a forged human author carried into an admin push that replaces nothing (cherry-pick, rebase to a new branch), or first pushed more than a quarter ago |
+| Source | Explained when |
+| --- | --- |
+| Renovate pin bump | GitHub-signed, authored `renovate[bot]`, committed `web-flow`, associated only with Renovate PRs, changing only the ref of an already-referenced action (rationale) |
+| tend regeneration | byte-for-byte reproducible from `uvx tend@<version> init` at the files' own header version, without touching `.config/tend.yaml` (rationale) |
+| clean merge | two-parent merge whose window paths equal `git merge-tree` of its parents |
+| admin push | the earliest ref update containing it in the repository activity log (last quarter, server-set timestamps) is an admin's `push` or `branch_creation`, or an admin's `force_push` whose replaced window commits are each admin-introduced; and no author or committer field names a bot (rationale) |
 
 - **Never treat a commit's own author or committer as evidence**: `TEND_BOT_TOKEN` is the credential in question. The pusher GitHub records is evidence; self-declared identity only ever refuses.
 - **Must report a commit whose earliest retained introduction is a PR merge**; that is the admin reviewing, not pushing.
@@ -60,10 +60,7 @@ The [tend](https://github.com/max-sixty/tend) agent harness runs as the GitHub u
 - **Never deduplicate by branch or file set**, or a later force-push of malicious content to the same files passes unremarked.
 - **Must key liveness on a successful run, not on an issue existing**; a silent run is the healthy steady state.
 
-**Two known evasions of the diff window, neither closed today:**
-
-- `git log --all --since` compares against the **committer date**, which the pusher sets: `GIT_COMMITTER_DATE=2020-01-01` hides a commit from every future window.
-- A branch pushed, run with repo-level secrets in scope, and deleted before the nightly fetch is in no window at all.
+The diff window's evasions are `docs/specs/security.md` -> "Known gaps".
 
 - **FAIL IF** `.github/workflows/workflow-audit.yaml` derives its lower bound from anything the pusher controls; it must stay the previous successful run's server-set `created_at` (rationale).
 - **FAIL IF** either admin-gating ruleset is missing or weakened. `Merge access` must target `~DEFAULT_BRANCH`, block exactly `creation`, `update`, and `deletion`, and carry admin (`RepositoryRole` actor `5`) as its sole bypass actor; `Tag operations` must target `~ALL` tags, block both `creation` and `update`, and carry the same admin-only bypass.
@@ -118,9 +115,9 @@ Source of truth: `hosted/scripts/setup-github.mjs`; `.github/workflows/hosted-pr
 | --- | --- | --- |
 | `TAURI_SIGNING_PRIVATE_KEY` | **env-only** | — |
 | `EV_SIGN_PIN` | **env-only** (`jsign --storepass env:EV_SIGN_PIN`) | the physical YubiKey |
-| `APPLE_SIGN_PASS` | argv — `xcrun notarytool` offers no environment form | none; a standalone credential, held on the command line up to half an hour per architecture |
+| `APPLE_SIGN_PASS` | argv — `xcrun notarytool` offers no environment form | none (`docs/specs/security.md` -> "Known gaps") |
 
-The `APPLE_SIGN_PASS` exposure is a known gap; its remedy is staged under `## Future` → Notarization credentials.
+Its remedy is staged under `## Future` → Notarization credentials.
 
 - **FAIL IF** `scripts/sign-and-deploy.sh` stops doing any of three things: verifying GitHub artifact attestations, verifying artifact SHA-256 manifests, or using PIV-backed Windows signing. Pinned by `scripts/sign-and-deploy.test.mjs`.
 - **FAIL IF** `TAURI_SIGNING_PRIVATE_KEY` is passed on a command line anywhere in `scripts/sign-and-deploy.sh` rather than through the environment, or `EV_SIGN_PIN` is passed literally to `jsign --storepass` instead of by environment-variable reference.

@@ -84,9 +84,3 @@
 **Why the worker is the second sanitizer.** The Relay used to be a second pair of eyes on notification text and cannot be one on ciphertext — it cannot sanitize what it cannot read — so a worker that renders what it decrypted without re-bounding it would leave the property with one enforcer instead of two.
 
 **Why the relay holds no state.** Only the Burrow knows whether a ceremony succeeded, so a gate, a challenge memory, or a notion of an authorized session on the Relay would be a second opinion nobody asked for. Routing an opaque envelope needs no notion of what a `DirectoryEntry` is, which is what makes a Relay-side protocol-v1 type import the leading indicator.
-
-## Revocation and the audit trail
-
-Both gaps are stated in this spec rather than left in a Future list for two reasons: the audit's qualitative pass should not keep rediscovering them as findings, and a reader deciding whether to run this needs to know that "revoke a device" is not currently something they can do quickly.
-
-The owner-local rejection logs are diagnostic fragments, not a complete or structured record of successful connects, attaches, or writes.

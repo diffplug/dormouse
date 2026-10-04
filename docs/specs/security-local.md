@@ -34,7 +34,7 @@ Notification text: `docs/specs/alert.md` -> "Text And Security".
 
 The attacker is the page inside a browser pane.
 
-**Known gap: Windows screenshots and pasted clipboard images inherit their parent's ACL** — private under the default per-user `%TEMP%`, exposed only when it (or the capture parent) is shared or loosened.
+Where Windows screenshots and pasted images land is a known gap (`docs/specs/security.md` -> "Known gaps").
 
 **Every listener the webview realm exposes to a framed page checks the sender's origin before it acts** — `IframePanel` against its own panel's proxy origin, the Wall's leader channel against any live grant (`docs/specs/dor-browser.md` -> "Iframe Shim"). **That separates a proxied frame from any other, never the injected shim from the page it runs in** (rationale).
 
@@ -51,9 +51,9 @@ Source of truth: `isProxyOrigin` in `lib/src/lib/iframe-proxy-registry.ts`, the 
 
 The attacker is another local account. The channel carries the whole Surface API — keystrokes into any Pane, its screen and scrollback back out, `dor kill` — and an app restart behind the running-work confirmation (`docs/specs/dor-cli.md` -> "Host Plumbing", "dor app").
 
-**A process running as the user is the user.** The socket bounds other local accounts, never the user's own: an agent holding `dor` has the power of the person at the keyboard, the local mirror of the remote rule (`docs/specs/security-remote.md` -> "Remote Control"; rationale).
+The socket bounds other local accounts, never a process running as the user (`docs/specs/security.md` -> "What is not defended"; rationale).
 
-**The server picks the path unguessably and hardens its directory before it binds.** POSIX: `<tmpdir>/dormouse-dor-<uid>/<8 random bytes>.sock`, inside a per-user directory `lstat`ed before the bind; one of ours that is merely loose is tightened, anything else stands the channel down. **Windows has a named pipe and no directory to harden**, and Dormouse applies no ACL there, so the name and the handshake are the whole of it. **Neither spelling may derive from the PID.**
+**The server picks the path unguessably and hardens its directory before it binds.** POSIX: `<tmpdir>/dormouse-dor-<uid>/<8 random bytes>.sock`, inside a per-user directory `lstat`ed before the bind; one of ours that is merely loose is tightened, anything else stands the channel down. Windows has a named pipe and no directory (`docs/specs/security.md` -> "What is not defended"). **Neither spelling may derive from the PID.**
 
 **The token never crosses the wire in either direction** — 24 CSPRNG bytes per host process, never written to disk, proven by HMAC-SHA256 over the peer's nonce under a per-direction domain and compared in constant time. **The server challenges first and proves its own half before the client sends any request**; a peer that fails its half is hung up on with no reply. **A peer that has not finished the handshake within 10 s is dropped** (`HANDSHAKE_BUDGET_MS`).
 
@@ -80,7 +80,7 @@ Dormouse binds loopback HTTP and WebSocket servers to render its own surfaces.
 - **FAIL IF** the browser-dev bridge drops any of its four gates — the per-run token, the loopback `Host` check, the `application/json` content-type required of every non-GET, and the exact-origin `access-control-allow-origin` — or the first three stop running together before routing. It is dev-only, but dispatches `pty_spawn` with caller-supplied `shell`, `args`, `cwd` and `env` on a maintainer or CI-agent machine (rationale).
 - **FAIL IF** the browser-dev Vite server permits cross-origin reads of token-bearing modules or disables its DNS-rebinding Host check. Pinned by `standalone/scripts/dev-agent-browser.test.mjs` (rationale).
 
-Header stripping does not isolate `document.cookie`: proxied scripts still share the loopback hostname's non-HttpOnly cookies across grant ports, a known gap (`docs/specs/security.md` -> "Known gaps"; rationale).
+What header stripping leaves shared is a known gap (`docs/specs/security.md` -> "Known gaps"; rationale).
 
 Source of truth: the shared rule and predicates — `isLoopbackHost`, `isOwnOrigin`, `isForeignOrigin` — in `lib/src/host/loopback-guard.ts`; `startDevVite` in `standalone/scripts/dev-run.mjs`.
 
@@ -90,7 +90,7 @@ Source of truth: the shared rule and predicates — `isLoopbackHost`, `isOwnOrig
 
 **FAIL IF** the file viewer exposes directory listings, arbitrary path reads/writes, or a file outside its opened-document grant and fixed shipped-editor assets. Grant construction permits only regular files, rejects symlinks escaping the canonical document directory, bounds static dependency discovery, and retains media/HTML descriptors. Text reads/saves revalidate the exact canonical file and reject symlink substitution; saves compare content revisions and file identity before atomic replacement. Only text viewers accept writes. The Markdown editor's grant adds regular image-format files at or under the document's canonical directory, opened per request by realpath and served with a `sandbox` CSP; its other writes create signature-checked images exclusively beside the document and rename such images within their own directory without replacing a file (`dor-tools-builtin/src/markdown-images.ts`), and its page renders document HTML only through `safeCreateDOM`'s allowlist in `dor-tools-builtin/viewer/markdown-safety.ts`. Viewer resources and editor workers are restricted by CSP to its own origin plus inline scripts/styles and data images, including through the iframe proxy; source text is JSON data, never executable markup. The viewer preserves upstream CSP (`docs/specs/dor-browser.md` → Iframe Renderer).
 
-**Must not describe the viewer CSP as confining active documents' navigation.** HTML/SVG scripts can navigate their frame to external URLs, including with granted contents; the resource policy is not a no-egress boundary. (rationale)
+What the viewer CSP leaves open is `docs/specs/security.md` -> "What is not defended" (rationale).
 
 **FAIL IF** the folder viewer, `dor-tools-builtin/src/folder-viewer.ts`, serves any request without the capability, `Host`, `Origin`, and response-header rules above, or accepts a POST whose `Origin` is absent, `null`, or not its own. `allowsFileViewerRequest` with `post` gates every route; a POST writes an OSC 367 `open`, which the host runs as `dor open` from that Tool.
 
@@ -125,9 +125,9 @@ The attacker is another local account reading disk; what the remote stack leaves
 
 **VS Code persists pane structure in VS Code's own storage** — `workspaceState` and `vscode.setState()` — so the modes there are VS Code's, not ours, and no transcript reaches either (`docs/specs/vscode.md` -> "Serialization and restore"). Dormouse also writes `recovery.json` in extension storage, mode `0600` on Unix: one rebuilt agent-resume invocation per Surface, no buffer, unlinked as it is read (`docs/compatible-agents.md` -> "Recovery record").
 
-**The VS Code peer-link token is a local credential at rest** — `burrow.peer-token` in the extension's global storage, written mode `0600` with `wx`, its socket directory re-checked on every contention round. **Neither control does anything on Windows** (rationale). **Dormouse applies no Windows DACL to the peer-link token, `recovery.json`, or the `tool-trust` receipts**; they inherit the extension storage ACL.
+**The VS Code peer-link token is a local credential at rest** — `burrow.peer-token` in the extension's global storage, written mode `0600` with `wx`, its socket directory re-checked on every contention round. Neither applies on Windows, nor to `recovery.json` or the `tool-trust` receipts (`docs/specs/security.md` -> "Known gaps"; rationale).
 
-**The standalone log is unprotected and names the control socket.** The log (`docs/specs/standalone.md` -> "Logging") is created and appended with no mode and no ACL, so it lands at the umask — readable by another local account wherever `<tmpdir>` is shared (rationale). No log call carries PTY bytes; the `dor` control socket path does. A gap, not an accepted risk.
+No standalone log call (`docs/specs/standalone.md` -> "Logging") carries PTY bytes; the log's exposure is `docs/specs/security.md` -> "Known gaps" (rationale).
 
 - **FAIL IF** `write_file_atomically` in `standalone/src-tauri/src/lib.rs` stops restricting the directory and the file it writes to the owning user on **every** platform `restrict_to_owner` has an arm for — `0700`/`0600` on unix, and on Windows a DACL protected from inheritance carrying exactly one ACE for the current user — or the mode stops reaching the temp file *before* any bytes are written, or **any** of its callers stops going through it. Enumerate them from the file rather than from this line: every writer under the state root is one, the legacy-transcript scrub and `arrivals.json` included. Pinned by the Rust tests in the same file (rationale).
 
@@ -153,7 +153,7 @@ Approval workflow, declaration and resolution belong to `docs/specs/dor-tool.md`
 
 **Must derive the grant key in the host**, using the canonical upstream URL or project-root folder; a renderer request cannot supply an arbitrary grant URL. **Must bound config reads and refuse repo-config symlinks on every host.** The user config may follow a dotfiles symlink; its opened descriptor must still be a bounded regular file.
 
-**An upstream grant trusts the claimed URL, not authenticated checkout provenance.** A supplied directory containing its own `.git/config` can claim an already-granted upstream; folder-only grants limit this sharing. **Must not describe the chrome gesture as a boundary against other processes running as the user**; the local account model is The dor control socket above.
+What an upstream grant trusts, and what the trust prompt does not bound, is `docs/specs/security.md` -> "What is not defended".
 
 **Must restrict announced ports to the designated command's Session process tree** (`docs/specs/dor-tool.md` → Serving). Process output may select among that tree's discovered ports; it cannot turn an ordinary terminal into a Tool.
 
