@@ -17,7 +17,7 @@ test('every entrypoint check compares real paths', () => {
     const lines = readFileSync(`${ROOT}/${file}`, 'utf8').split('\n');
     lines.forEach((line, i) => {
       const window = lines.slice(Math.max(0, i - 2), i + 3).join(' ');
-      if (line.includes('import.meta.url') && window.includes('process.argv[1]') && !window.includes('realpathSync(process.argv[1])')) {
+      if (!/^\s*(?:\/\/|\*|\/\*)/.test(line) && line.includes('import.meta.url') && window.includes('process.argv[1]') && !window.includes('realpathSync(process.argv[1])')) {
         unsafe.push(`${file}:${i + 1}: ${line.trim()}`);
       }
     });
