@@ -6,7 +6,7 @@ import { DEFAULT_ACTIVITY_STATE, getActivitySnapshot, getTerminalPaneStateSnapsh
 import { useAgentBrowserDisplayMode, useAgentBrowserScreenController } from './agent-browser-screen';
 import { BROWSER_DISPLAY_SLOT_PX, BrowserDisplayButton } from './BrowserDisplayIcon';
 import { isPreviewSlotParams } from './browser-surface';
-import { HEADER_CONTROL_SLOT_PX, PaneActionGroup, SplitButtons, TerminalContextButton } from './PaneActionButtons';
+import { BreakToolButton, HEADER_CONTROL_SLOT_PX, PaneActionGroup, SplitButtons, TerminalContextButton } from './PaneActionButtons';
 import { usePreviewKeep } from './preview-keep';
 import { shownToolFace, useHeldWhile, usePreviewSlotView } from './preview-transition';
 import { SessionTodoPill } from './SessionTodoPill';
@@ -37,13 +37,13 @@ export function ToolPaneHeader(props: PaneProps) {
 
 type ToolHeaderTier = 'full' | 'compact' | 'minimal' | 'tiny';
 /** The terminal header's boundaries, each with the leading controls it keeps
- *  reserved: splits and Display need both, minimize and kill Terminal Context
- *  alone (`docs/specs/layout.rationale.md`). */
+ *  reserved: splits and Display need all three, minimize and kill Terminal
+ *  Context and Break (`docs/specs/layout.rationale.md`). */
 const toolHeaderTier = (width: number): ToolHeaderTier => {
-  const withDisplay = terminalHeaderTier(width - HEADER_CONTROL_SLOT_PX - BROWSER_DISPLAY_SLOT_PX);
+  const withDisplay = terminalHeaderTier(width - 2 * HEADER_CONTROL_SLOT_PX - BROWSER_DISPLAY_SLOT_PX);
   if (withDisplay === 'full') return 'full';
   if (withDisplay !== 'tiny') return 'compact';
-  return terminalHeaderTier(width - HEADER_CONTROL_SLOT_PX) === 'tiny' ? 'tiny' : 'minimal';
+  return terminalHeaderTier(width - 2 * HEADER_CONTROL_SLOT_PX) === 'tiny' ? 'tiny' : 'minimal';
 };
 
 /** A serving Tool's header: its semantic name, never a browser's navigation
@@ -88,6 +88,8 @@ function ToolBrowserHeader({ id, title, params, switching }: PaneProps & { switc
         <BrowserDisplayButton mode={displayMode} onOpen={screen ? () => screen.actions.openModal() : undefined} />
       )}
       <TerminalContextButton surfaceId={id} />
+      {/* Hidden where the tiny tier leaves no room for it. */}
+      {tier !== 'tiny' && <BreakToolButton surfaceId={id} />}
       <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden">
         {rename.renaming ? rename.editor(name) : (
           // As on the terminal face, a preview's name is drag area, not a rename.

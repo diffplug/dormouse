@@ -142,7 +142,5 @@ A retained designation outlived its purpose (2026-10-03): `dor o` took over a pl
 
 Ned chose an end on command exit over an end on the next different command (2026-10-03): an exited Tool has nothing left to present, and the host's own interrupts need one hold anyway to keep them from ringing, so the same hold exempts them here.
 
-## Tool runs
-
-Kill stays Kill so it keeps coordinating with the deferred-kill restore window; Break is the separate, non-destructive gesture. Break splits into parts rather than stopping the run, because what users reach for is the page's browser chrome and renderer (a Storybook renderer swap, Back), which a plain browser Surface already has; Tool headers keep no navigation ([Pane header](layout.rationale.md)).
+Kill stays Kill so it keeps coordinating with the deferred-kill restore window; Break is the separate gesture. Break sits beside the Terminal Context control rather than Kill, and asks for the kill confirmation's letter, since an accidental Break has no rejoin (Ned, 2026-10-03). Break splits into parts rather than stopping the run, because what users reach for is the page's browser chrome and renderer (a Storybook renderer swap, Back), which a plain browser Surface already has; Tool headers keep no navigation ([Pane header](layout.rationale.md)).
 

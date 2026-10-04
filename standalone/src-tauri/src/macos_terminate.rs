@@ -11,10 +11,16 @@
 //! those triggers land in `request_quit` like every other one. The app-menu item
 //! and its `Cmd+Q` accelerator are handled separately, by the custom menu item
 //! `lib.rs` builds in place of `PredefinedMenuItem::quit`.
+//!
+//! The terminate is held (`NSTerminateLater`), never refused: a Cancel aborts a
+//! logout outright. AppKit's nested wait ignores tao's `[NSApp stop:]`, so every
+//! exit while held must answer through `answer_held` (docs/specs/standalone.md
+//! -> "Trigger interception"; rationale).
 
 use objc2::runtime::{AnyClass, AnyObject, Imp, Sel};
 use objc2::{ffi, msg_send, sel, MainThreadMarker};
 use objc2_app_kit::{NSApplication, NSApplicationTerminateReply};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
 use tauri::AppHandle;
 
@@ -22,6 +28,10 @@ use crate::{append_log, exit_after_cleanup, forget_restart, quit_approved, reque
 
 /// The handle the spliced method answers on behalf of. Set once, at `Ready`.
 static APP: OnceLock<AppHandle> = OnceLock::new();
+
+/// AppKit is parked in `terminate:` awaiting our reply. AppKit never asks again
+/// while one is pending, so at most one is held.
+static HELD: AtomicBool = AtomicBool::new(false);
 
 /// `NSUInteger (*)(id, SEL, id)` — the encoding AppKit expects for
 /// `applicationShouldTerminate:`. Informational for a direct `objc_msgSend`,
@@ -31,13 +41,11 @@ const SHOULD_TERMINATE_TYPES: &[u8] = b"L@:@\0";
 
 /// Our `applicationShouldTerminate:`.
 ///
-/// Answers `Cancel` and starts the flow the first time. The flow's own
-/// `app.exit(0)` never comes back through here — tao stops the run loop with
-/// `[NSApp stop:]`, not `terminate:` — so an approved pass is the OS asking
-/// again (Dock Quit, logout) while the exit waits on the bounded hand-back
-/// cleanup gate, and it answers `Now` once the gate permits. Panic-free by
-/// construction: every Rust panic aborts (`panic_policy`), and this runs
-/// inside AppKit's stack.
+/// Holds the terminate and starts the flow, whose exit or cancel answers it.
+/// An approved pass is the OS asking while an exit already under way waits on
+/// the bounded hand-back cleanup gate: `Now` once the gate permits, else held
+/// for the gate's own exit. Panic-free by construction: every Rust panic aborts
+/// (`panic_policy`), and this runs inside AppKit's stack.
 unsafe extern "C-unwind" fn should_terminate(
     _this: *mut AnyObject,
     _cmd: Sel,
@@ -47,19 +55,42 @@ unsafe extern "C-unwind" fn should_terminate(
         // Nothing is managed yet, so there is no session to lose.
         return NSApplicationTerminateReply::TerminateNow;
     };
-    if quit_approved(app) {
-        // A terminate the OS asked for never relaunches, whichever way this
-        // answers: a Cancel aborts a logout the gated exit must not undo.
+    let approved = quit_approved(app);
+    if approved && exit_after_cleanup(app) {
+        // A terminate the OS asked for never relaunches.
         forget_restart(app);
-        return if exit_after_cleanup(app) {
-            NSApplicationTerminateReply::TerminateNow
-        } else {
-            NSApplicationTerminateReply::TerminateCancel
-        };
+        return NSApplicationTerminateReply::TerminateNow;
     }
-    append_log("[quit] intercepted an AppKit terminate (Dock, logout, or script)");
-    request_quit(app, QuitIntent::default());
-    NSApplicationTerminateReply::TerminateCancel
+    // Held before the flow starts: a flow with no window to ask exits at once.
+    HELD.store(true, Ordering::SeqCst);
+    if !approved {
+        append_log("[quit] holding an AppKit terminate (Dock, logout, or script) for the quit flow");
+        request_quit(app, QuitIntent::default());
+    }
+    NSApplicationTerminateReply::TerminateLater
+}
+
+/// Answer a held terminate, if one is held, and say whether one was. Yes lets
+/// AppKit finish the exit (`applicationWillTerminate:` still raises
+/// `RunEvent::Exit`); No cancels it and the app keeps running.
+pub fn answer_held(app: &AppHandle, proceed: bool) -> bool {
+    if !HELD.swap(false, Ordering::SeqCst) {
+        return false;
+    }
+    if proceed {
+        // A terminate the OS asked for never relaunches.
+        forget_restart(app);
+    }
+    append_log(format!("[quit] answering the held AppKit terminate: {}", if proceed { "quit" } else { "cancel" }));
+    // Runs inline when already on the main thread, as both callers are.
+    if let Err(err) = app.run_on_main_thread(move || {
+        if let Some(mtm) = MainThreadMarker::new() {
+            NSApplication::sharedApplication(mtm).replyToApplicationShouldTerminate(proceed);
+        }
+    }) {
+        append_log(format!("[quit] could not answer the held AppKit terminate: {err}"));
+    }
+    true
 }
 
 /// Install the interception. Call once, from `RunEvent::Ready`, where tao's
