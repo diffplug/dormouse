@@ -121,6 +121,8 @@ function forEachChildRect(
   }
 }
 
+/** Degenerate geometry clamps to zero, never negative, in layout, node queries, and
+ *  sashes; gaps keep their configured width even when they alone exceed the span. */
 function nonnegativeRect(rect: Rect): Rect {
   return { ...rect, width: Math.max(0, rect.width), height: Math.max(0, rect.height) };
 }

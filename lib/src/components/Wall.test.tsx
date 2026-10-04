@@ -4,7 +4,8 @@
  * Integration smoke for the Wall on the Lath engine: it renders panes through
  * LathHost, splits/kills through the engine, and persists the Lath layout on save.
  * jsdom has no real layout, so this asserts structure (leaf count, save shape), not
- * geometry — the acceptance matrix in tiling-engine.md is the live gate.
+ * geometry — the Wall on Lath live acceptance list in
+ * TESTING_AND_MODIFICATION_GUIDE.md (§5) is the live gate.
  */
 import { act } from 'react';
 import { type Root } from 'react-dom/client';

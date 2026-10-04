@@ -705,7 +705,7 @@ describe('the webview’s half of the parse', () => {
 /**
  * Every PTY, alert and Burrow command the sidecar's bundle owns, as `main.js`
  * hands them over: the alerts see each PTY change in the order a host must
- * make it (`docs/specs/standalone.md` → "Alerts").
+ * make it (the `handleCommand` comment in `standalone/sidecar/main.js`).
  */
 describe('the sidecar host', () => {
   let host: SidecarHost;
