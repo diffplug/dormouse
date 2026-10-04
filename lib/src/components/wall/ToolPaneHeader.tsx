@@ -36,14 +36,14 @@ export function ToolPaneHeader(props: PaneProps) {
 }
 
 type ToolHeaderTier = 'full' | 'compact' | 'minimal' | 'tiny';
-/** The terminal header's boundaries, each with the leading controls it keeps
- *  reserved: splits and Display need both, minimize and kill Terminal Context
- *  alone (`docs/specs/layout.rationale.md`). */
+/** The terminal header's boundaries, each with the controls it keeps
+ *  reserved: splits and Display need all three, minimize and kill Terminal
+ *  Context and Break (`docs/specs/layout.rationale.md`). */
 const toolHeaderTier = (width: number): ToolHeaderTier => {
-  const withDisplay = terminalHeaderTier(width - HEADER_CONTROL_SLOT_PX - BROWSER_DISPLAY_SLOT_PX);
+  const withDisplay = terminalHeaderTier(width - 2 * HEADER_CONTROL_SLOT_PX - BROWSER_DISPLAY_SLOT_PX);
   if (withDisplay === 'full') return 'full';
   if (withDisplay !== 'tiny') return 'compact';
-  return terminalHeaderTier(width - HEADER_CONTROL_SLOT_PX) === 'tiny' ? 'tiny' : 'minimal';
+  return terminalHeaderTier(width - 2 * HEADER_CONTROL_SLOT_PX) === 'tiny' ? 'tiny' : 'minimal';
 };
 
 /** A serving Tool's header: its semantic name, never a browser's navigation
@@ -104,7 +104,7 @@ function ToolBrowserHeader({ id, title, params, switching }: PaneProps & { switc
       {!rename.renaming && (
         <>
           {tier === 'full' && <SplitButtons surfaceId={id} />}
-          <PaneActionGroup dirty={dirty} surfaceId={id} zoomed={zoomed} activeHeader={isActiveHeader} showMinimizeKill={tier !== 'tiny'} />
+          <PaneActionGroup dirty={dirty} breakable surfaceId={id} zoomed={zoomed} activeHeader={isActiveHeader} showMinimizeKill={tier !== 'tiny'} />
         </>
       )}
       {/* Where the tier or the rename editor hides Kill, the dot it carries sits at the right edge. */}

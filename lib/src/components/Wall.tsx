@@ -91,7 +91,7 @@ import {
   retainsLivePage,
   browserUrlFromParams,
   surfaceKindFromParams,
-  isPreviewSlotParams, isToolParams, matchesToolKey, namespacedToolKey, toolPendingFromParams,
+  isPreviewSlotParams, isToolParams, matchesToolKey, namespacedToolKey, toolFace, toolPendingFromParams,
 } from './wall/browser-surface';
 import { usePreviewSlotPin } from './wall/preview-slot';
 import { browserSurfaceUrl, hostPathDisplay, iframeRefusal } from './wall/browser-url';
@@ -111,7 +111,7 @@ import {
 } from './wall/lath-wall-engine';
 import type { LeafMeta } from '../lib/lath/persistence';
 import { useToolServing } from './wall/use-tool-serving';
-import { useToolRunEnd } from './wall/use-tool-run-end';
+import { endToolDesignation, useToolRunEnd } from './wall/use-tool-run-end';
 import { useToolReaper } from './wall/use-tool-reaper';
 import { rehydrateTool } from './wall/tool-reaper';
 import type { WallNav } from './wall/keyboard/types';
@@ -2301,6 +2301,36 @@ export function Wall({
         reference,
         title: hostPathDisplay(url, true),
       });
+    },
+    onBreakTool: async (id) => {
+      // docs/specs/dor-tool.md -> Run end: the Tool becomes the plain
+      // terminal it runs in, still running, and a serving page reopens —
+      // reloaded, at the URL on screen, in the renderer it used where this
+      // host has it — as an ordinary browser Surface beside it.
+      const params = lath.getMeta(id)?.params;
+      if (!isToolParams(params) || toolFace(params) === 'pending-approval') return;
+      // Consent just before the document goes; any change while asking abandons the Break.
+      if (!await confirmToolEditorsClose([id]) || lath.getMeta(id)?.params !== params) return;
+      const shownUrl = getAgentBrowserScreenController(id)?.chrome().url || browserUrlFromParams(params);
+      const mode = resolveRenderMode(params);
+      const cwd = getTerminalPaneState(id)?.cwd?.path;
+      if (terminalContextRef.current?.id === id) setTerminalContext(null);
+      endToolDesignation(lath, id);
+      if (!shownUrl) return;
+      const provider = parseRenderMode(mode).provider;
+      const reference = buildDorSurfaces().find((s) => s.id === id);
+      if (!reference) return;
+      const created = createContentSurface({
+        minimized: false,
+        preserveSource: true,
+        // A launch that fails takes its pane with it.
+        params: provider && hostSupportsBrowser(provider)
+          ? { surfaceType: 'browser', renderMode: mode, url: shownUrl, cwd, syncEngaged: false, launchFallback: 'close' satisfies LaunchFallback }
+          : { surfaceType: 'browser', renderMode: 'iframe', url: shownUrl },
+        reference,
+        title: hostPathDisplay(shownUrl, true),
+      });
+      if (created.ok) enterTerminalMode(created.value.id);
     },
     onBrowserLaunchFailed: (id, error) => {
       // The one liveness check every creator's fallback shares.

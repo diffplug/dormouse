@@ -1,5 +1,5 @@
 import { useContext } from 'react';
-import { ArrowLineDownIcon, ArrowsInIcon, ArrowsOutIcon, SplitHorizontalIcon, SplitVerticalIcon, TerminalIcon, XIcon } from '@phosphor-icons/react';
+import { ArrowLineDownIcon, ArrowsInIcon, ArrowsOutIcon, LinkBreakIcon, SplitHorizontalIcon, SplitVerticalIcon, TerminalIcon, XIcon } from '@phosphor-icons/react';
 import { TOOL_DIRTY_LABEL, ToolDirtyIndicator } from '../ToolDirtyIndicator';
 import { HeaderActionButton } from '../HeaderActionButton';
 import { chromeButton, paneZoomButtonClass } from '../design';
@@ -14,10 +14,13 @@ export type FocusHandlers = { onFocus?: () => void; onBlur?: () => void };
  * shortcut hints (`docs/specs/shortcuts.md`) are written once, and so the
  * browser header can render the pair on its own inside the popover.
  * `beforeAct` is that header's popover dismissal; the terminal passes none.
+ * `breakable` puts a Tool's Break between them (`docs/specs/dor-tool.md` ->
+ * Run end), Kill staying Kill.
  */
-export function MinimizeKillButtons({ surfaceId, dirty = false, beforeAct, onFocus, onBlur }: {
+export function MinimizeKillButtons({ surfaceId, dirty = false, breakable = false, beforeAct, onFocus, onBlur }: {
   surfaceId: string;
   dirty?: boolean;
+  breakable?: boolean;
   beforeAct?: () => void;
 } & FocusHandlers) {
   const actions = useContext(WallActionsContext);
@@ -29,6 +32,14 @@ export function MinimizeKillButtons({ surfaceId, dirty = false, beforeAct, onFoc
         ariaLabel="Minimize"
         tooltip="Minimize [m] or [d]"
       ><ArrowLineDownIcon size={14} /></HeaderActionButton>
+      {breakable && actions.onBreakTool && (
+        <HeaderActionButton
+          className={chromeButton()}
+          onClick={(e) => { e.stopPropagation(); beforeAct?.(); actions.onBreakTool?.(surfaceId); }}
+          ariaLabel="Break"
+          tooltip="Break into a plain terminal and a browser pane"
+        ><LinkBreakIcon size={14} /></HeaderActionButton>
+      )}
       <HeaderActionButton
         className="group/kill flex h-5 min-w-5 items-center justify-center rounded transition-colors hover:bg-error/10 hover:text-error"
         onClick={(e) => { e.stopPropagation(); beforeAct?.(); actions.onKill(surfaceId); }}
@@ -50,10 +61,11 @@ export function MinimizeKillButtons({ surfaceId, dirty = false, beforeAct, onFoc
  * when `showMinimizeKill` goes false and where that pair ends up.
  */
 export function PaneActionGroup({
-  surfaceId, zoomed, activeHeader, showMinimizeKill, dirty = false, className = 'ml-1', beforeAct, minimizeKillFocus,
+  surfaceId, zoomed, activeHeader, showMinimizeKill, dirty = false, breakable = false, className = 'ml-1', beforeAct, minimizeKillFocus,
 }: {
   surfaceId: string;
   dirty?: boolean;
+  breakable?: boolean;
   zoomed: boolean;
   activeHeader: boolean;
   showMinimizeKill: boolean;
@@ -70,7 +82,7 @@ export function PaneActionGroup({
         ariaLabel={zoomed ? 'Unzoom' : 'Zoom'}
         tooltip={zoomed ? 'Unzoom' : 'Zoom [z]'}
       >{zoomed ? <ArrowsInIcon size={14} /> : <ArrowsOutIcon size={14} />}</HeaderActionButton>
-      {showMinimizeKill && <MinimizeKillButtons surfaceId={surfaceId} dirty={dirty} beforeAct={beforeAct} {...minimizeKillFocus} />}
+      {showMinimizeKill && <MinimizeKillButtons surfaceId={surfaceId} dirty={dirty} breakable={breakable} beforeAct={beforeAct} {...minimizeKillFocus} />}
     </div>
   );
 }

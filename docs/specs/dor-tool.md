@@ -123,7 +123,9 @@ A Tool is designated for one run of its command, not for the life of its Surface
 
 **Must keep the designation while the host replaces a run**: an in-place restart (idle keyed match, `dor ensure --restart`, approval match), a preview retarget with its kept or restored retypes ([Preview slot](#preview-slot)), and a reap's stop until rehydrate ([Reaping](#reaping)). One host hold, set before the host's interrupt and released once the successor run starts or the host gives up, both exempts the end here and silences its command-exit alert (`docs/specs/alert.md` → Command-exit Track). A replacement the host gives up on ends the run; so does a rehydrate's failed run (Error tier).
 
-Source of truth: `useToolRunEnd` in `lib/src/components/wall/use-tool-run-end.ts`; `holdForHostInterrupt` in `lib/src/lib/tool-run-hold.ts`.
+**Must offer Break on a Tool's Pane header, beside Kill, which stays Kill** (`docs/specs/reopen.md`; rationale). Break releases the designation without ending the run: the Surface becomes a plain terminal still running the command, and a serving page reopens, reloaded at the URL on screen, in a new ordinary browser Surface split beside it and focused, with browser chrome and every renderer its host offers (`docs/specs/dor-browser.md`). A Tool not serving breaks into the terminal alone; pending approval offers no Break. A dirty Tool asks Save / Discard / Cancel first ([Closing unsaved Tools](#closing-unsaved-tools)); a preview slot's mark goes with the Tool, so the next preview opens a new slot.
+
+Source of truth: `useToolRunEnd` in `lib/src/components/wall/use-tool-run-end.ts`; `holdForHostInterrupt` in `lib/src/lib/tool-run-hold.ts`; `onBreakTool` in `lib/src/components/Wall.tsx`.
 
 ## Reaping
 
@@ -424,12 +426,6 @@ Source of truth: `PersistedToolMetadata` in `lib/src/lib/session-types.ts`; `cap
 - **Later** — `prespawn_*` beyond the dedupe literal: a computed key, and `prespawn_port`. Pocket/remote browser view (rides the browser-surface staging in `docs/specs/remote-api.md`; reserve the kind on the wire now). An in-pane terminal/browser strip (decide against the glossary's reserved multiple-Surfaces-per-Pane). A `boots: web` hint if the terminal flash grates. `--has terminal` / `--has browser` *filter flags* for `dor list`, whose rows already carry the fields.
 
 **Scope: open-folder** — the [Preview slot](#preview-slot)'s speed within the open rules: opt-in retarget without restart, built-in viewer first.
-
-### Tool runs
-
-**Scope: tool-run** — Break, the rest of designation per run ([Run end](#run-end)). (rationale)
-
-- **Must offer Break on a Tool's Pane header, beside Kill, which stays Kill** (`docs/specs/reopen.md`). Break releases the designation without ending the run: the Surface becomes a plain terminal still running the command, and a serving page moves to a new ordinary browser Surface split beside it and focused, with browser chrome and every renderer its host offers (`docs/specs/dor-browser.md`). A Tool not serving breaks into the terminal alone; pending approval offers no Break. A dirty Tool asks Save / Discard / Cancel first ([Closing unsaved Tools](#closing-unsaved-tools)); a preview slot's mark goes with the Tool, so the next preview opens a new slot.
 
 ### Open questions
 

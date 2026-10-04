@@ -8,7 +8,7 @@ import {
 import { ToolDirtyIndicator, useToolDirty } from '../ToolDirtyIndicator';
 import { HeaderActionButton } from '../HeaderActionButton';
 import { paneHeader, PREVIEW_LABEL_CLASS } from '../design';
-import { isPreviewSlotParams } from './browser-surface';
+import { isPreviewSlotParams, isToolParams, toolFace } from './browser-surface';
 import { usePreviewKeep } from './preview-keep';
 import { SessionTodoPill } from './SessionTodoPill';
 import { useHeaderTier } from './use-header-tier';
@@ -119,7 +119,9 @@ export function TerminalPaneHeader({ id, title, params, terminalContext = false 
   const isActiveHeader = mode === 'passthrough' && isSelected && windowFocused;
   const rename = usePaneRename(id);
   const tabRef = useRef<HTMLDivElement>(null);
-  const tier = useHeaderTier(tabRef, terminalHeaderTier, { reservePx: terminalContext ? HEADER_CONTROL_SLOT_PX : 0 });
+  // A Tool's terminal face, past approval, offers Break (docs/specs/dor-tool.md -> Run end).
+  const breakable = isToolParams(params) && toolFace(params) !== 'pending-approval';
+  const tier = useHeaderTier(tabRef, terminalHeaderTier, { reservePx: (terminalContext ? HEADER_CONTROL_SLOT_PX : 0) + (breakable ? HEADER_CONTROL_SLOT_PX : 0) });
   const compactOrWider = tier === 'full' || tier === 'compact';
   const tiny = tier === 'tiny';
   const keep = usePreviewKeep(id, preview);
@@ -190,7 +192,7 @@ export function TerminalPaneHeader({ id, title, params, terminalContext = false 
           {/* The title region clips via `overflow-hidden` so this group
               never has to (`docs/specs/layout.md` → "Pane header responsive
               sizing"). */}
-          <PaneActionGroup dirty={dirty} surfaceId={id} zoomed={zoomed} activeHeader={isActiveHeader} showMinimizeKill={!tiny} />
+          <PaneActionGroup dirty={dirty} breakable={breakable} surfaceId={id} zoomed={zoomed} activeHeader={isActiveHeader} showMinimizeKill={!tiny} />
         </>
       )}
       {/* Where the tier or the rename editor hides Kill, the dot it carries sits at the right edge. */}
