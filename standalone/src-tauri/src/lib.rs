@@ -936,6 +936,9 @@ fn init_log() {
     if let Some(parent) = path.parent() {
         let _ = create_dir_all(parent);
     }
+    // Keep the last run's log beside it, so a hang or forced restart leaves its
+    // evidence; a missing log (first launch) is fine.
+    let _ = std::fs::rename(path, path.with_extension("previous.log"));
 
     if let Ok(mut file) = OpenOptions::new()
         .create(true)
@@ -3439,6 +3442,10 @@ fn quit_cancel(
     guard(&windows.arrivals).cancel_deferred();
     let actions = guard(&state.machine).cancel();
     apply_quit_actions(&app, actions);
+    // A cancel refused mid-walk or after approval leaves the hold to the exit.
+    if !quit_walking(&app) && !quit_approved(&app) {
+        answer_held_terminate(&app, false);
+    }
 }
 
 // A non-last window finished its teardown: destroy it and start the next one.
@@ -3478,6 +3485,18 @@ fn quit_restart(app: AppHandle, requester: Option<String>) -> Result<bool, Strin
 fn relaunch_requested(app: &AppHandle) -> bool {
     app.try_state::<QuitState>()
         .is_some_and(|state| guard(&state.machine).relaunches())
+}
+
+/// Answer the OS terminate macOS holds for the flow, if any (§Trigger
+/// interception); whether one was held.
+#[cfg(target_os = "macos")]
+fn answer_held_terminate(app: &AppHandle, proceed: bool) -> bool {
+    macos_terminate::answer_held(app, proceed)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn answer_held_terminate(_app: &AppHandle, _proceed: bool) -> bool {
+    false
 }
 
 #[cfg(target_os = "macos")]
@@ -4398,12 +4417,13 @@ pub fn run() {
             }
             // A window-level exit request (§Trigger interception). The flow's own
             // app.exit(0) re-enters here with approved=true and passes; `code`
-            // (None = user-initiated) is deliberately ignored.
+            // (None = user-initiated) is deliberately ignored. Every exit lands
+            // here, watchdogs included, so a held OS terminate gets its Yes here.
             RunEvent::ExitRequested { api, .. } => {
                 if !quit_approved(app) {
                     api.prevent_exit();
                     request_quit(app, QuitIntent::default());
-                } else if !exit_after_cleanup(app) {
+                } else if !exit_after_cleanup(app) || answer_held_terminate(app, true) {
                     api.prevent_exit();
                 }
             }
@@ -5025,12 +5045,19 @@ mod tests {
         assert!(event.contains("!exit_after_cleanup(app)"));
         let gate = source.split("fn exit_after_cleanup").nth(1).unwrap().split("\n}").next().unwrap();
         assert!(gate.contains("if start_watchdog") && gate.contains("force_if_waiting") && gate.contains("QUIT_PHASE_TIMEOUT_MS"));
+        // A held OS terminate must be answered on every exit (all pass through
+        // this arm) and on cancel; refusing one aborts a logout outright
+        // (docs/specs/standalone.md -> "Trigger interception").
+        assert!(event.contains("answer_held_terminate(app, true)"));
+        let cancel = source.split("fn quit_cancel(").nth(1).unwrap().split("\n}").next().unwrap();
+        assert!(cancel.contains("answer_held_terminate(&app, false)"));
         let macos = include_str!("macos_terminate.rs");
-        let delegate = macos.split("if quit_approved(app) {").nth(1).unwrap().split("append_log(").next().unwrap();
-        assert!(delegate.contains("exit_after_cleanup(app)"));
-        assert!(delegate.contains("TerminateCancel"));
+        let delegate = macos.split("fn should_terminate(").nth(1).unwrap().split("\n}").next().unwrap();
+        assert!(delegate.contains("exit_after_cleanup(app)") && delegate.contains("TerminateLater"));
+        assert!(!delegate.contains("TerminateCancel"));
         // An OS terminate never relaunches (docs/specs/standalone.md -> "Restart").
         assert!(delegate.contains("forget_restart(app)"));
+        assert!(macos.split("pub fn answer_held(").nth(1).unwrap().split("\n}").next().unwrap().contains("forget_restart(app)"));
     }
 
     /// docs/specs/standalone.md -> "Restart".

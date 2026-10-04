@@ -15,7 +15,10 @@ import { FakePtyAdapter } from '../../lib/platform/fake-adapter';
 import type { PersistedSession } from '../../lib/session-types';
 import * as terminalRegistry from '../../lib/terminal-registry';
 import { _resetRunHoldsForTesting, holdForHostInterrupt, releaseRunHold } from '../../lib/tool-run-hold';
-import { mountWallHarness, reportRunning, type WallHarness } from './wall-test-utils';
+import * as toolEditor from '../../lib/tool-editor';
+import { recordToolDirty, resetToolDirty } from '../../lib/tool-dirty-store';
+import { cfg } from '../../cfg';
+import { mountWallHarness, registerStubScreen, reportRunning, STUB_CHROME, type WallHarness } from './wall-test-utils';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -32,19 +35,21 @@ const PARAMS = {
 
 let harness: WallHarness;
 let root: Root;
+let container: HTMLElement;
 let fake: FakePtyAdapter;
 
 beforeEach(() => {
   fake = new FakePtyAdapter();
   setPlatform(fake);
   harness = mountWallHarness();
-  ({ root } = harness);
+  ({ root, container } = harness);
 });
 
 afterEach(() => {
   harness.dispose();
   terminalRegistry.removeTerminalPaneState(ID);
   _resetRunHoldsForTesting();
+  resetToolDirty();
   vi.restoreAllMocks();
 });
 
@@ -68,11 +73,13 @@ const events = async (list: Parameters<typeof terminalRegistry.applyTerminalSema
 const finish = () => events([{ type: 'commandFinish', exitCode: 130 }, { type: 'promptStart' }]);
 const run = async (line: string) => { await act(async () => reportRunning(ID, line)); await harness.flush(); };
 
-async function leaf(): Promise<{ component: string; title: string; params?: Record<string, unknown> }> {
+type SavedLeaf = { component: string; title: string; params?: Record<string, unknown> };
+async function leaves(): Promise<Record<string, SavedLeaf>> {
   await act(async () => window.dispatchEvent(new Event('pagehide')));
   await harness.flush();
-  return (fake.getState() as PersistedSession & { lathLayout: { leafMeta: Record<string, never> } }).lathLayout.leafMeta[ID];
+  return (fake.getState() as PersistedSession & { lathLayout: { leafMeta: Record<string, SavedLeaf> } }).lathLayout.leafMeta;
 }
+const leaf = async (): Promise<SavedLeaf> => (await leaves())[ID];
 
 describe('Run end', () => {
   it('turns a Tool whose designated run ended into a plain terminal in place', async () => {
@@ -184,5 +191,98 @@ describe('Run end', () => {
     await act(async () => releaseRunHold(ID));
     await harness.flush();
     expect((await leaf()).component).toBe('terminal');
+  });
+});
+
+describe('Break', () => {
+  const SERVING = { ...PARAMS, url: 'http://127.0.0.1:6006/?path=/story/a', renderMode: 'iframe' };
+  const breakButton = () => container.querySelector<HTMLButtonElement>(`[data-pane-header-for="${ID}"] [aria-label="Break"]`);
+  const confirmTitle = () => Array.from(document.body.querySelectorAll('h2')).find(h => h.textContent === 'Confirm break') ?? null;
+  const press = async (key: string) => { await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true })); }); await harness.flush(); };
+  /** Break, then type the confirmation's letter. */
+  const clickBreak = async () => {
+    await act(async () => breakButton()!.click());
+    await harness.flush();
+    expect(confirmTitle()).not.toBeNull();
+    await press('q');
+  };
+  let pinned: string | null;
+  beforeEach(() => { pinned = cfg.killConfirm.char; cfg.killConfirm.char = 'q'; });
+  afterEach(() => { cfg.killConfirm.char = pinned; });
+
+  it('splits a serving Tool into its plain terminal, still running, and an ordinary browser pane on its page', async () => {
+    // Running before the Wall mounts, so serving keeps the page it framed.
+    act(() => reportRunning(ID, COMMAND));
+    await mountTool(SERVING);
+    expect(breakButton()).not.toBeNull();
+    await act(async () => breakButton()!.click());
+    await harness.flush();
+    expect(confirmTitle()?.parentElement?.textContent).toContain('its page opens in a browser pane beside it');
+    await press('q');
+    const saved = await leaves();
+    expect(saved[ID].component).toBe('terminal');
+    expect(terminalRegistry.getTerminalPaneState(ID).currentCommand?.rawCommandLine).toBe(COMMAND);
+    const pages = Object.entries(saved).filter(([id]) => id !== ID);
+    expect(pages).toHaveLength(1);
+    expect(pages[0][1]).toMatchObject({ component: 'browser', params: { surfaceType: 'browser', renderMode: 'iframe', url: SERVING.url } });
+  });
+
+  it.each([
+    ['the http(s) page on screen', 'http://127.0.0.1:6006/?path=/story/b', 'http://127.0.0.1:6006/?path=/story/b'],
+    ["the Tool's own URL behind an error page", 'chrome-error://chromewebdata/', SERVING.url],
+  ])('reopens %s', async (_, onScreen, expected) => {
+    act(() => reportRunning(ID, COMMAND));
+    await mountTool(SERVING);
+    const screen = registerStubScreen(ID, { chrome: { ...STUB_CHROME, url: onScreen } });
+    try {
+      await clickBreak();
+      const pages = Object.entries(await leaves()).filter(([id]) => id !== ID);
+      expect(pages[0]?.[1].params).toMatchObject({ url: expected });
+    } finally {
+      screen.dispose();
+    }
+  });
+
+  it('asks first, and Escape changes nothing', async () => {
+    act(() => reportRunning(ID, COMMAND));
+    await mountTool(SERVING);
+    await act(async () => breakButton()!.click());
+    await harness.flush();
+    expect(confirmTitle()).not.toBeNull();
+    await press('Escape');
+    const saved = await leaves();
+    expect(Object.keys(saved)).toEqual([ID]);
+    expect(saved[ID].component).toBe('tool');
+  });
+
+  it('breaks a Tool not serving into its terminal alone, saying so as it asks', async () => {
+    await mountTool();
+    await run(COMMAND);
+    await act(async () => breakButton()!.click());
+    await harness.flush();
+    expect(confirmTitle()?.parentElement?.textContent).toContain('It cannot become a Tool again.');
+    expect(confirmTitle()?.parentElement?.textContent).not.toContain('browser pane');
+    await press('q');
+    const saved = await leaves();
+    expect(Object.keys(saved)).toEqual([ID]);
+    expect(saved[ID].component).toBe('terminal');
+  });
+
+  it('asks a dirty Tool first, and a Cancel changes nothing', async () => {
+    // Running before the Wall mounts, so serving keeps the page it framed.
+    act(() => reportRunning(ID, COMMAND));
+    await mountTool(SERVING);
+    act(() => recordToolDirty(ID, true));
+    const asked = vi.spyOn(toolEditor, 'confirmToolEditorsClose').mockResolvedValue(false);
+    await clickBreak();
+    expect(asked).toHaveBeenCalledWith([ID]);
+    const saved = await leaves();
+    expect(Object.keys(saved)).toEqual([ID]);
+    expect(saved[ID].component).toBe('tool');
+  });
+
+  it('offers no Break while approval is pending', async () => {
+    await mountTool({ ...PARAMS, toolPending: { name: 'viewer', run: COMMAND, path: '/repo/dormouse.yml', projectRoot: '/repo', minimized: false, upstreamUrl: null } });
+    expect(breakButton()).toBeNull();
   });
 });

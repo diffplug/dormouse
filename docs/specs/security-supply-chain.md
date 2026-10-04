@@ -10,11 +10,13 @@ The runtime dependency surface is kept small: a dependency is added only when ne
 
 **Every dependency Dormouse *puts on a user's machine* is listed at [dormouse.sh/supply-chain](https://dormouse.sh/supply-chain).** The test is narrower than "everything a user runs" (rationale). Three inventories:
 
-- every npm dependency, direct and transitive
+- every npm dependency, direct and transitive, by section: Terminal, Built-in Tools, Relay
 - every cargo dependency, direct listed separately from transitive
 - the Node.js runtime bundled as a Tauri sidecar in the standalone app
 
 Every workspace is classified from its shipping route: a product root or runtime edge if Dormouse writes its files onto a user's disk, an exclusion only if it installs no artifact. The root and exclusion arrays document those routes beside their entries; the audit derives shipping independently from the builds.
+
+**Must disclose each npm release once, in the first section whose roots reach it**; an earlier section never enters a later section's root. **Never call the Built-in Tools optional or unshipped**: every install ships them inside `dor` (what their frame reaches: `docs/specs/security-local.md` → Local-file viewer). **Must merge a package's releases into one row per name and license**, taking author and homepage from the newest release that names them.
 
 **External binaries are outside this graph by construction** — the user's shell, and the CLIs `dor agent-browser` and `dor playwright` forward to (`npm i -g agent-browser`, `npm i -g @playwright/cli`; dependencies of nothing here, resolved off `PATH` or an override variable). **Dormouse instead ships nothing that pulls them in silently** (rationale).
 
@@ -34,7 +36,7 @@ The dependency lists are regenerated and committed with every production depende
 - **FAIL IF** the generator stops naming `dormouse-lib` as a root independently of workspace edges (rationale), names a root or exclusion by anything but its package name, or stops rejecting, before generating disclosure, an unclassified workspace or an exclusion reachable from a product root over runtime and optional edges (development edges do not count). The rejection is pinned by `website/scripts/dependency-workspaces.test.js`; the `dormouse-lib` root is not.
 - **FAIL IF** the disclosure omits the graph of a workspace whose files reach a user's disk, or excludes such a workspace. A judgement item: derive the routes from `pnpm-workspace.yaml` and the builds — the VSIX (`vscode-ext/package.json`), the Tauri bundle and its sidecar (`standalone/src-tauri/tauri.conf.json`, `standalone/vite.config.ts`), `dor`'s bundle (`dor/package.json`), and the self-host install (`deploy/local/`) — not the generator's arrays, which it enforces but cannot justify (rationale).
 
-Source of truth: `productDependencyFilters` / `excludedWorkspacePackages` / `optionalSiblingsAtSameVersion` in `website/scripts/generate-deps.js`; `assertWorkspaceCoverage` in `website/scripts/dependency-workspaces.js`; `getShippedCargoGraph` / `getCargoGitRepository` in `website/scripts/cargo-dependencies.js`.
+Source of truth: `productSections` / `productDependencyFilters` / `excludedWorkspacePackages` / `optionalSiblingsAtSameVersion` in `website/scripts/generate-deps.js`; `assertWorkspaceCoverage` in `website/scripts/dependency-workspaces.js`; `mergeReleases` in `website/scripts/dependency-rows.js`; `getShippedCargoGraph` / `getCargoGitRepository` in `website/scripts/cargo-dependencies.js`.
 
 ## Bundled runtime
 
