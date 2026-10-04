@@ -10,13 +10,15 @@
 
 **Every dependency Dormouse *puts on a user's machine* is listed at [dormouse.sh/supply-chain](https://dormouse.sh/supply-chain).** The test is narrower than "everything a user runs" (rationale). Three inventories:
 
-- every npm dependency, direct and transitive
+- every npm dependency, direct and transitive, by section: Terminal, Built-in Tools, Relay
 - every cargo dependency, direct listed separately from transitive
 - the Node.js runtime bundled as a Tauri sidecar in the standalone app
 
 **Must classify every workspace from its shipping route: a product root or runtime edge if Dormouse writes its files onto a user's disk, an exclusion only if it installs no artifact.** The root and exclusion arrays document those routes beside their entries; the audit derives shipping independently from the builds.
 
 **Must list `dormouse-lib` as a root independently of workspace edges** (rationale). **Must use package names for roots and exclusions.**
+
+**Must disclose each npm release once, in the first section whose roots reach it**; an earlier section never enters a later section's root. **Never call the Built-in Tools optional or unshipped**: every install ships them inside `dor` (what their frame reaches: `docs/specs/security-local.md` → Local-file viewer).
 
 **External binaries are outside this graph by construction** — the user's shell, and the `agent-browser` CLI `dor agent-browser` forwards to (`npm i -g agent-browser`, a dependency of nothing here, resolved off `PATH`). **Dormouse instead ships nothing that pulls them in silently** (rationale).
 
@@ -37,7 +39,7 @@
 - **FAIL IF** `.github/workflows/ci.yml` stops running that generator under that same install precondition, or stops failing on a diff (rationale).
 - **FAIL IF** the disclosure omits a shipped workspace's graph or excludes a shipped package. Derive shipping routes from `pnpm-workspace.yaml` and the builds, not the generator's arrays; the generator enforces classification, but cannot establish whether an exclusion is justified (rationale).
 
-Source of truth: `productDependencyFilters` / `excludedWorkspacePackages` / `optionalSiblingsAtSameVersion` in `website/scripts/generate-deps.js`; `assertWorkspaceCoverage` in `website/scripts/dependency-workspaces.js`; `getShippedCargoGraph` / `getCargoGitRepository` in `website/scripts/cargo-dependencies.js`.
+Source of truth: `productSections` / `productDependencyFilters` / `excludedWorkspacePackages` / `optionalSiblingsAtSameVersion` in `website/scripts/generate-deps.js`; `assertWorkspaceCoverage` in `website/scripts/dependency-workspaces.js`; `getShippedCargoGraph` / `getCargoGitRepository` in `website/scripts/cargo-dependencies.js`.
 
 ## Bundled runtime
 

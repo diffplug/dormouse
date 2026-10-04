@@ -20,14 +20,39 @@ const themeExtensionsPath = resolve(repoRoot, "lib/src/lib/themes/bundled-extens
 // and all, and `relay` is installed and run by a selfhoster (SELF_HOST.md) —
 // `web-push` in particular signs with a private key and makes outbound
 // requests. See docs/specs/security-supply-chain.md -> "Disclosure".
-const productDependencyFilters = [
-  "dor", // Staged on every Dormouse terminal's PATH.
-  "dormouse", // Installed VS Code extension (vscode-ext/package.json).
-  "dormouse-standalone", // Installed standalone frontend.
-  "dormouse-lib", // Compiled into both hosts; relative imports bypass the VSIX's dependency walk.
-  "dormouse-sidecar", // Tauri bundle.resources includes this node_modules tree.
-  "relay", // Built and installed by the selfhost runbook.
+//
+// Each section is disclosed as its own table, walked in this order: a package
+// belongs to the first section that reaches it, and a root of a later section is
+// not entered from an earlier one, so `dor` -> `dor-tools-builtin` leaves the
+// built-in Tools' graph to its own section.
+const productSections = [
+  {
+    id: "terminal",
+    roots: [
+      "dor", // Staged on every Dormouse terminal's PATH.
+      "dormouse", // Installed VS Code extension (vscode-ext/package.json).
+      "dormouse-standalone", // Installed standalone frontend.
+      "dormouse-lib", // Compiled into both hosts; relative imports bypass the VSIX's dependency walk.
+      "dormouse-sidecar", // Tauri bundle.resources includes this node_modules tree.
+    ],
+  },
+  {
+    id: "builtinTools",
+    roots: [
+      "dor-tools-builtin", // Bundled into `dor`'s runtime; its viewers load only when a built-in Tool opens a file.
+    ],
+  },
+  {
+    id: "relay",
+    roots: [
+      "relay", // Built and installed by the selfhost runbook.
+    ],
+  },
 ];
+const productDependencyFilters = productSections.flatMap((section) => section.roots);
+const sectionOfRoot = new Map(
+  productSections.flatMap((section) => section.roots.map((root) => [root, section.id])),
+);
 // These packages do not install an artifact on a user's disk. Any new workspace
 // requires classification here or a runtime edge from a product root.
 const excludedWorkspacePackages = [
@@ -119,6 +144,8 @@ const workspacePackagesByName = new Map(workspacePackages.map((workspacePackage)
   workspacePackage,
 ]));
 const productRoots = new Set(productDependencyFilters);
+/** The section being walked; every package first read during it belongs to it. */
+let currentSection = null;
 const externalPackages = new Map();
 const visitedExternalPackagePaths = new Set();
 const visitedWorkspacePackageNames = new Set();
@@ -132,15 +159,27 @@ const undescribedPackages = new Map();
 const listedPeople = new Map();
 
 /**
- * Identity of a disclosed package. Two installs of one name that agree on all
- * four fields are one row with two versions; a disagreement is two rows.
+ * Identity of a disclosed package. Two installs of one name in one section that
+ * agree on all four fields are one row with two versions; a disagreement is two
+ * rows.
  */
-function externalPackageKey({ name, license, author, homepage }) {
-  return [name, license ?? "", author ?? "", homepage ?? ""].join("\0");
+function externalPackageKey({ section, name, license, author, homepage }) {
+  return [section, name, license ?? "", author ?? "", homepage ?? ""].join("\0");
 }
 
+/**
+ * The section that first disclosed each `name@version`. pnpm installs one
+ * release at several paths when peer contexts differ, so the path walk alone
+ * would repeat a release under a later section.
+ */
+const releaseSections = new Map();
+
 function addExternalPackage(pkg) {
+  const release = `${pkg.name}@${pkg.version}`;
+  if ((releaseSections.get(release) ?? currentSection) !== currentSection) return;
+  releaseSections.set(release, currentSection);
   const identity = {
+    section: currentSection,
     name: pkg.name,
     license: pkg.license ?? null,
     author: formatAuthor(pkg.author),
@@ -175,6 +214,8 @@ function optionalSiblingsAtSameVersion(pkg, packageName) {
 
 function scanWorkspacePackage(name) {
   if (visitedWorkspacePackageNames.has(name)) return;
+  // Another section's root: that section walks it.
+  if (sectionOfRoot.has(name) && sectionOfRoot.get(name) !== currentSection) return;
   const workspacePackage = workspacePackagesByName.get(name);
   if (!workspacePackage) {
     throw new Error(`Workspace package "${name}" was not found`);
@@ -195,10 +236,10 @@ function scanDependency(fromDir, packageName, declaredBy) {
     const edge = missingDependency(declaredBy);
     if (edge === 'skip') return;
     if (edge === 'describe') {
-      undescribedPackages.set(
-        packageName,
-        optionalSiblingsAtSameVersion(declaredBy.pkg, packageName),
-      );
+      undescribedPackages.set(packageName, {
+        section: currentSection,
+        siblings: optionalSiblingsAtSameVersion(declaredBy.pkg, packageName),
+      });
       return;
     }
     throw new Error(`Could not resolve package.json for "${packageName}" from ${fromDir}`);
@@ -221,8 +262,9 @@ function scanDependencies(pkg, fromDir) {
   }
 }
 
-for (const packageName of productDependencyFilters) {
-  scanWorkspacePackage(packageName);
+for (const section of productSections) {
+  currentSection = section.id;
+  for (const packageName of section.roots) scanWorkspacePackage(packageName);
 }
 
 // Snapshotted before the loop writes to `externalPackages`, so nothing is ever
@@ -231,14 +273,14 @@ const describedPackagesByName = new Map();
 for (const pkg of externalPackages.values()) {
   if (!describedPackagesByName.has(pkg.name)) describedPackagesByName.set(pkg.name, pkg);
 }
-for (const [packageName, siblings] of undescribedPackages) {
+for (const [packageName, { section, siblings }] of undescribedPackages) {
   const sibling = siblings.map((name) => describedPackagesByName.get(name)).find(Boolean);
   if (!sibling) {
     throw new Error(
       `"${packageName}" is not installed and neither is any sibling declared beside it at the same version, so it cannot be described`,
     );
   }
-  const described = { ...sibling, name: packageName, versions: new Set(sibling.versions) };
+  const described = { ...sibling, section, name: packageName, versions: new Set(sibling.versions) };
   externalPackages.set(externalPackageKey(described), described);
 }
 
@@ -267,6 +309,7 @@ function normalizeLicense(license) {
 }
 
 const deps = [...externalPackages.values()].map((pkg) => ({
+  section: pkg.section,
   name: pkg.name,
   version: [...pkg.versions].sort().join(", "),
   license: normalizeLicense(pkg.license),
@@ -274,7 +317,8 @@ const deps = [...externalPackages.values()].map((pkg) => ({
   homepage: pkg.homepage,
 }));
 
-// Merge in bundled theme extensions from OpenVSX
+// Merge in bundled theme extensions from OpenVSX, compiled into lib and so
+// part of the terminal.
 const themeExtensions = JSON.parse(readFileSync(themeExtensionsPath, "utf-8"));
 
 // OpenVSX exposes VS Code's bundled default themes as several built-in
@@ -288,6 +332,7 @@ const vscodeBuiltInThemes = themeExtensions.filter(isVscodeBuiltInTheme);
 if (vscodeBuiltInThemes.length > 0) {
   const versions = [...new Set(vscodeBuiltInThemes.map((dep) => dep.version).filter(Boolean))].sort();
   deps.push({
+    section: "terminal",
     name: "VS Code built-in themes",
     version: versions.join(", "),
     license: "MIT",
@@ -302,6 +347,7 @@ deps.push(
   ...themeExtensions
     .filter((dep) => !isVscodeBuiltInTheme(dep))
     .map(({ name, version, license, author, homepage }) => ({
+      section: "terminal",
       name,
       version,
       license,
@@ -394,6 +440,10 @@ for (const dep of deps) {
 }
 
 deps.sort((a, b) => a.name.localeCompare(b.name));
+const npmDepsBySection = Object.fromEntries(productSections.map(({ id }) => [
+  id,
+  deps.filter((dep) => dep.section === id).map(({ section: _section, ...dep }) => dep),
+]));
 
 // Manual overrides for Cargo crates whose published Cargo.toml omits author or
 // homepage metadata. Keyed by crate name. libappindicator{,-sys} ship empty
@@ -509,10 +559,12 @@ function getBundledRuntimeDependencies() {
 
 const runtimeDeps = getBundledRuntimeDependencies();
 
-writeFileSync(npmOutPath, JSON.stringify(deps, null, 2) + "\n");
+writeFileSync(npmOutPath, JSON.stringify(npmDepsBySection, null, 2) + "\n");
 writeFileSync(cargoOutPath, JSON.stringify(cargoDeps, null, 2) + "\n");
 writeFileSync(runtimeOutPath, JSON.stringify(runtimeDeps, null, 2) + "\n");
-console.log(`Wrote ${deps.length} dependencies to src/data/dependencies-npm.json`);
+console.log(
+  `Wrote ${productSections.map(({ id }) => `${npmDepsBySection[id].length} ${id}`).join(", ")} npm dependencies to src/data/dependencies-npm.json`,
+);
 console.log(
   `Wrote ${cargoDeps.direct.length} direct and ${cargoDeps.transitive.length} transitive Cargo dependencies to src/data/dependencies-cargo.json`,
 );
