@@ -39,8 +39,7 @@ import {
 } from "../server/policy-constants";
 import { takeEnrollment, type Enrollment } from "./enrollment";
 import { CheckoutView, PLAN_NAMES, PlanSection, WelcomeView } from "./Billing";
-import { forgetCheckout } from "./checkout";
-import type { HostedRef } from "../../lib/src/lib/hosted-links";
+import { forgetCheckout, type CheckoutRef } from "./checkout";
 
 type Page = "enroll" | "checkout" | "welcome" | "account" | "login";
 const PATHS: Record<Page, string> = {
@@ -73,7 +72,7 @@ export function App({
   /** A pending `/checkout` (null for a link naming no plan), undefined for none. */
   checkout: Plan | null | undefined;
   /** The allowlisted ref that checkout's link carried (docs/specs/hosted.md -> "Metrics"). */
-  checkoutRef?: HostedRef;
+  checkoutRef?: CheckoutRef;
   /** The checkout operation Stripe returned to `/billing` with. */
   returned: string | null;
 }) {

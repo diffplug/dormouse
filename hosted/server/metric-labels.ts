@@ -69,6 +69,8 @@ export interface MetricRow {
 /** `GET /api/admin/metrics`. */
 export interface AdminMetricsBody {
   days: number;
+  /** Today's UTC date, `YYYY-MM-DD`, by the Worker's clock: the last day `recent` can hold. */
+  today: string;
   recent: MetricRow[];
   totals: Omit<MetricRow, "day">[];
   /** Founding purchases per cohort and the open one; null while billing is off. */

@@ -470,7 +470,8 @@ export default function Hosted({ checkoutOpen = CHECKOUT_OPEN }: { checkoutOpen?
   useEffect(() => {
     visit.current ??= { ref: takeVisitRef() };
     const { ref } = visit.current;
-    setCheckoutRef(isHostedRef(ref) ? ref : undefined);
+    // One off the allowlist goes on as `other`, so its checkout counts where its visit did.
+    setCheckoutRef(ref === undefined || isHostedRef(ref) ? ref : "other");
     const controller = new AbortController();
     void fetchCohort(controller.signal, ref).then(setCohort);
     return () => controller.abort();

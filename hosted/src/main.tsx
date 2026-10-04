@@ -19,7 +19,7 @@ function restoreTheme() {
 restoreTheme();
 preference.addEventListener("change", restoreTheme);
 const root = createRoot(document.getElementById("root")!);
-if (location.pathname === ADMIN_METRICS_PAGE) root.render(<AdminMetrics />);
+if (location.pathname.replace(/\/$/, "") === ADMIN_METRICS_PAGE) root.render(<AdminMetrics />);
 else {
   // Taken before anything renders; a later fragment change on `/enroll` is App's.
   const enrollment = takeEnrollment();

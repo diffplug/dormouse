@@ -280,10 +280,11 @@ async function countBilling(databaseUrl: string, setup: BillingSetup, events: St
       );
       if (checkout)
         await countMetric(databaseUrl, "checkout.completed", `${planLabel(checkout.plan)}:${checkout.ref ?? NO_REF}`);
-    } else if (event.type === "customer.subscription.deleted") {
+    } else if (event.type === "customer.subscription.deleted" && event.data.object.status === "canceled") {
       const subscription = event.data.object;
       const plan = planOfPrice(setup, subscription.items.data[0]?.price.id);
       const lived = (subscription.ended_at ?? 0) - subscription.start_date;
+      // As the cohort count reads a refund: ended at once within the window.
       // Cancelled at period end is a cancellation however short the period.
       const refunded = !subscription.cancel_at_period_end && lived < REFUND_DAYS * 86_400;
       await countMetric(databaseUrl, refunded ? "subscription.refunded" : "subscription.canceled", planLabel(plan));

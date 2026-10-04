@@ -13,10 +13,13 @@ const PENDING_MS = 10 * 60 * 1000;
 /** A pending checkout: its plan (null for a link naming none sold) and its link's allowlisted ref, counted when it starts (docs/specs/hosted.md -> "Metrics"). */
 export interface PendingCheckout {
   plan: Plan | null;
-  ref?: HostedRef;
+  ref?: CheckoutRef;
 }
 
-const refOf = (ref: unknown) => (isHostedRef(ref) ? ref : undefined);
+/** What a checkout link may carry: an allowlisted ref, or `other` for a visit that arrived with another. */
+export type CheckoutRef = HostedRef | "other";
+
+const refOf = (ref: unknown): CheckoutRef | undefined => (isHostedRef(ref) || ref === "other" ? ref : undefined);
 
 function remember(pending: PendingCheckout | null) {
   try {

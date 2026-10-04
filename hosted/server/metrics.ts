@@ -81,5 +81,5 @@ export async function readMetrics(databaseUrl: string): Promise<Omit<AdminMetric
       [],
     ),
   ]);
-  return { days: METRICS_DAYS, recent, totals };
+  return { days: METRICS_DAYS, today: new Date().toISOString().slice(0, 10), recent, totals };
 }

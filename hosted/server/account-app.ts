@@ -71,10 +71,12 @@ export function accountApp(
     fallback: (app) => app.get("*", (c) => c.env.ASSETS.fetch(c.req.raw)),
     scheduled: async (_controller, env) => {
       const databaseUrl = env.HYPERDRIVE.connectionString;
-      await sweepCheckoutRefs(databaseUrl).catch((error: Error) =>
-        console.error(`Checkout refs not swept: ${error.message}`),
-      );
-      await reconcileDue(billingSetup(env), databaseUrl, env.APP_ORIGIN);
+      await Promise.all([
+        sweepCheckoutRefs(databaseUrl).catch((error: Error) =>
+          console.error(`Checkout refs not swept: ${error.message}`),
+        ),
+        reconcileDue(billingSetup(env), databaseUrl, env.APP_ORIGIN),
+      ]);
     },
   });
 }

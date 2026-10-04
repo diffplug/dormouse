@@ -249,11 +249,11 @@ Each Worker counts what it serves into `dormouse_metrics_daily`: one row per UTC
 | Event | Label | Counted when |
 |---|---|---|
 | `account.created` | — | a login's session starts within `NEW_ACCOUNT_MS` of its account |
-| `login` | `github`, `google`, `microsoft`, `apple`, `email` | an OAuth callback or the emailed code sets a session cookie; linking never does |
+| `login` | a provider in `providerIds`, or `email` | an OAuth callback or the emailed code sets a session cookie; linking never does |
 | `checkout.started` | `plan:ref` | `POST /api/billing/checkout` answers 200 |
 | `checkout.completed` | `plan:ref` | the webhook processes `checkout.session.completed`, under the ref its checkout started with |
-| `subscription.refunded` | plan | the webhook processes `customer.subscription.deleted` for one cancelled at once within `REFUND_DAYS` of starting |
-| `subscription.canceled` | plan | the webhook processes any other `customer.subscription.deleted` |
+| `subscription.refunded` | plan | the webhook processes `customer.subscription.deleted` for a `canceled` one ended at once within `REFUND_DAYS` of starting, as the cohort count reads a refund |
+| `subscription.canceled` | plan | the webhook processes any other `canceled` one's deletion |
 | `enroll.approved` | — | an approval answers 204 |
 | `burrow.enrolled` | — | a poll redeems |
 | `voice.speak` | `ok`, `capped`, `error` | speak answers 200, 429, or 502 |
@@ -262,11 +262,11 @@ Each Worker counts what it serves into `dormouse_metrics_daily`: one row per UTC
 | `pocket.signin` | — | `signin/finish` mints a session |
 | `hosted_page.ref` | ref | the Hosted page's cohort read |
 
-- **Never store an identifier in a metrics row**: no user ID, email, address, user agent, or text; only the day, the event, a label from that event's fixed list (`METRIC_LABELS`), and the count. **Must count an unknown ref or plan as `other`**, and a visit or checkout naming no ref as `none`.
-- **Must take refs from `HOSTED_REFS` in `lib/src/lib/hosted-links.ts` alone**: every app, site, and README link into `/hosted` names its own, and the Hosted page forwards it (`docs/specs/pricing.md` -> "The Hosted page").
+- **Never store an identifier in a metrics row**: no user ID, email, address, user agent, or text; only the day, the event, a label from that event's fixed list (`METRIC_LABELS`), and the count. **Must count an unknown ref or plan as `other`**, and a visit or checkout naming no ref as `none`; the Hosted page carries an unknown visit ref to checkout as `other`.
+- **Must take refs from `HOSTED_REFS` in `lib/src/lib/hosted-links.ts` alone**: every link into `/hosted` from the app, the homepage, the Pocket playground, and the READMEs names its own, and the Hosted page forwards it (`docs/specs/pricing.md` -> "The Hosted page").
 - **Never let a metric fail or delay the request it counts**: it is written after the response through `waitUntil`, and a failure is only logged. **Must count a webhook event only once processed**, after its commit, never on redelivery.
 - **Must keep daily rows indefinitely**, since they describe no one. A checkout's ref (`dormouse_checkout_refs`) lives until its completion is counted, or `CHECKOUT_REF_DAYS`, swept by the account's Cron Trigger.
-- **Must answer `GET /api/admin/metrics` to the admin alone**: a cookie route under the exact-`Origin` rule, 401 without a login, 404 for any login whose verified email is not `ADMIN_EMAIL`. It answers the last 30 days' rows, all-time totals, and founding purchases per cohort with the open one; the account app's `/admin/metrics` renders it.
+- **Must answer `GET /api/admin/metrics` to the admin alone**: a cookie route under the exact-`Origin` rule, 401 without a login, 404 for any login whose verified email is not `ADMIN_EMAIL`. It answers the last `METRICS_DAYS` days' rows, all-time totals, and founding purchases per cohort with the open one; the account app's `/admin/metrics` renders it.
 
 Source of truth: `METRIC_LABELS` in `hosted/server/metric-labels.ts`; `recordMetric` in `hosted/server/metrics.ts`; `recordLogin` and `cookieAdmin` in `hosted/server/account-gate.ts`; `adminRoutes` in `hosted/server/admin.ts`; `hosted/server/dormouse-migrations/007_metrics.sql`; `AdminMetrics` in `hosted/src/AdminMetrics.tsx`. Pinned by `hosted/server/tests/metrics.test.ts` and `hosted/server/tests/billing.test.ts`.
 

@@ -58,19 +58,19 @@ export function AdminMetrics() {
 }
 
 function MetricsView({ metrics }: { metrics: AdminMetricsBody }) {
-  const { recent, totals, founding, days } = metrics;
+  const { recent, totals, founding, days, today } = metrics;
   const events = [...new Set(totals.map((row) => row.event))].sort();
   const dates = Array.from({ length: days }, (_, back) => {
-    const day = new Date();
+    const day = new Date(`${today}T00:00:00Z`);
     day.setUTCDate(day.getUTCDate() - (days - 1 - back));
     return day.toISOString().slice(0, 10);
   });
   // Each event's count per day, in one pass.
   const perDay = new Map<string, Map<string, number>>();
   for (const row of recent) {
-    const days = perDay.get(row.event) ?? new Map<string, number>();
-    days.set(row.day, (days.get(row.day) ?? 0) + row.count);
-    perDay.set(row.event, days);
+    const counts = perDay.get(row.event) ?? new Map<string, number>();
+    counts.set(row.day, (counts.get(row.day) ?? 0) + row.count);
+    perDay.set(row.event, counts);
   }
   const byRef = REF_LABELS.map((ref) => {
     const endsWith = (label: string) => label.endsWith(`:${ref}`);
