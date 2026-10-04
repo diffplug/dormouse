@@ -87,6 +87,11 @@
  *      once in the corpus, every other mention a bare pointer — and where a
  *      feature spec restates a security spec's `FAIL IF`, the `FAIL IF` keeps
  *      it.
+ *  20. No spec quotes a test title: a backticked or double-quoted span of
+ *      RESTATED_MIN_WORDS or more words is not, normalized as in check 19,
+ *      the title of an `it(` / `test(` call in a tracked test file. AGENTS.md
+ *      -> "House form for rules": cite the test file, never a title, which
+ *      renames silently.
  *
  * scripts/spec-lint-selftest.mjs plants one defect per finding check and
  * requires this lint to go red.
@@ -683,6 +688,31 @@ for (const spec of foldCheckedFiles) {
       }
     }
   });
+}
+
+// --- Check 20: no spec quotes a test title ----------------------------------
+// Only quoted spans are candidates: a rule phrased like the test named after
+// it is the test following the spec, not the spec quoting the test.
+const QUOTED_SPAN_RE = /`([^`\n]+)`|"([^"\n]+)"/g;
+const quotedSpans = foldCheckedFiles.flatMap((spec) => proseLines(spec).flatMap((line, i) =>
+  [...line.matchAll(QUOTED_SPAN_RE)]
+    .map((m) => ({ spec, line: i + 1, span: m[1] ?? m[2], key: normalized(m[1] ?? m[2]) }))
+    .filter((q) => q.key.split(' ').length >= RESTATED_MIN_WORDS)));
+if (quotedSpans.length > 0) {
+  const TEST_FILE_RE = /\.(?:test|spec|smoketest)\.[cm]?[jt]sx?$|(?:^|\/)tests?\/.*\.[cm]?[jt]sx?$/;
+  // `it('…')`, `test.each(…)("…")`, … — a template title with `${…}` is never quoted whole.
+  const TITLE_RE = /\b(?:it|test)(?:\.(?:only|skip|todo|concurrent|each\([^)]*\)))?\(\s*(['"`])((?:(?!\1)[^\\\n]|\\.)*)\1/g;
+  const titles = new Map();
+  for (const rel of trackedFiles().filter((f) => TEST_FILE_RE.test(f))) {
+    let text;
+    try { text = read(rel); } catch { continue; }
+    for (const m of text.matchAll(TITLE_RE)) titles.set(normalized(m[2]), rel);
+  }
+  for (const q of quotedSpans) {
+    if (titles.has(q.key)) {
+      problems.push(`${q.spec}:${q.line}: quotes the title of a test in ${titles.get(q.key)} ("${q.span}") — cite the test file, never a title`);
+    }
+  }
 }
 
 // -----------------------------------------------------------------------------
