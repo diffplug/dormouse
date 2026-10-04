@@ -6,15 +6,13 @@ import { AlarmSettingsSection } from './SettingsDialog';
 import { AlarmUpsellLine } from './AlarmUpsellLine';
 import type { AlertSink } from '../lib/alert-delivery-model';
 import type { AlarmUpsell } from '../lib/alarm-upsell';
-import { useAnchoredMenu } from './use-anchored-menu';
+import { useAnchoredMenu, useCloseOnOutsideAndEscape } from './use-anchored-menu';
 import { OVERLAY_VIEWPORT_MARGIN_PX } from '../lib/ui-geometry';
 
-/** How long the preview shows before it fades, and how long the fade takes. */
+/** How long the preview shows before it fades; also the grace after the line is let go. */
 const SHOW_MS = 2000;
 /** Long enough to read and reach the extra line. */
 const SHOW_WITH_UPSELL_MS = 6000;
-/** After the pointer or focus leaves the line, time to come back to it. */
-const SHOW_AFTER_HOLD_MS = 2000;
 const FADE_MS = 250;
 
 /** Remount for every toggle, including repeated clicks on the same setting,
@@ -22,15 +20,15 @@ const FADE_MS = 250;
 export function SettingsPreview({
   sink,
   anchor,
-  upsell = null,
+  upsell,
   onShowNetwork,
   onClose,
 }: {
   sink: AlertSink;
   anchor: HTMLElement;
   /** One live line under the inert section (`docs/specs/alert.md` -> "Settings dialog"). */
-  upsell?: AlarmUpsell | null;
-  onShowNetwork?: () => void;
+  upsell: AlarmUpsell | null;
+  onShowNetwork: () => void;
   onClose: () => void;
 }) {
   const { policy: settings } = useWorkspaceAlertPolicy();
@@ -53,7 +51,7 @@ export function SettingsPreview({
       setFading(false);
       return;
     }
-    const show = wasHeld.current ? SHOW_AFTER_HOLD_MS : upsell ? SHOW_WITH_UPSELL_MS : SHOW_MS;
+    const show = upsell && !wasHeld.current ? SHOW_WITH_UPSELL_MS : SHOW_MS;
     const fade = window.setTimeout(() => setFading(true), show);
     const close = window.setTimeout(onClose, show + FADE_MS);
     return () => {
@@ -62,23 +60,8 @@ export function SettingsPreview({
     };
   }, [held, upsell, onClose]);
 
-  // A live line can be dismissed. Capture phase, without stopping anything:
-  // the terminal swallows its own keys, and the Escape or click is still its.
-  useEffect(() => {
-    if (!upsell) return;
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
-    };
-    const closeOnPointerDown = (event: PointerEvent) => {
-      if (!(event.target instanceof Node && lineRef.current?.contains(event.target))) onClose();
-    };
-    window.addEventListener('keydown', closeOnEscape, true);
-    window.addEventListener('pointerdown', closeOnPointerDown, true);
-    return () => {
-      window.removeEventListener('keydown', closeOnEscape, true);
-      window.removeEventListener('pointerdown', closeOnPointerDown, true);
-    };
-  }, [upsell, onClose]);
+  // A live line can be dismissed; the Escape or press is still the terminal's.
+  useCloseOnOutsideAndEscape(upsell !== null, lineRef, onClose, { captureKeys: true });
 
   const label = sink === 'speech' ? 'Spoken alarms' : 'Push notifications';
   const enabled = sink === 'speech' ? settings.speakEnabled : settings.pushEnabled;
@@ -104,7 +87,7 @@ export function SettingsPreview({
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
         >
-          <AlarmUpsellLine upsell={upsell} onShowNetwork={onShowNetwork ?? onClose} onDone={onClose} />
+          <AlarmUpsellLine upsell={upsell} onShowNetwork={onShowNetwork} onDone={onClose} />
         </div>
       )}
     </div>,

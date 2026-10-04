@@ -453,7 +453,7 @@ describe('Baseboard alarm upsell', () => {
     expect(line()?.dataset.alarmUpsell).toBe('hosted-voice');
     expect(line()?.closest('[inert]')).toBeNull();
     // The inert copy of the section does not repeat the offer.
-    expect(preview()?.querySelector('[inert]')?.textContent).not.toContain('Get managed');
+    expect(preview()?.querySelector('[inert]')?.textContent).not.toContain('Hosted');
     expect(document.activeElement).toBe(terminalInput);
 
     // Up past a plain preview's life.

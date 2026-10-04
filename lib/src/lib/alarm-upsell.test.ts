@@ -15,7 +15,6 @@ const A_PHONE = { status: 'ready', devices: [{ label: 'iPhone' }] } as const;
 
 const facts = (overrides: Partial<AlarmUpsellFacts>): AlarmUpsellFacts => ({
   sink: 'speech',
-  turnedOn: true,
   membership: 'not-member',
   networkOff: false,
   push: NO_BURROW,
@@ -32,7 +31,7 @@ describe('chooseAlarmUpsell', () => {
   });
 
   it.each(['speech', 'push'] as const)('offers nothing for %s turned off or under Nothing', (sink) => {
-    expect(chooseAlarmUpsell(facts({ sink, turnedOn: false }))).toBeNull();
+    expect(takeAlarmUpsell(false, facts({ sink }))).toBeNull();
     expect(chooseAlarmUpsell(facts({ sink, networkOff: true }))).toBeNull();
   });
 
@@ -60,16 +59,16 @@ describe('claimAlarmUpsell', () => {
   afterEach(() => vi.unstubAllGlobals());
 
   it('allows one a day, across both toggles', () => {
-    expect(takeAlarmUpsell(facts({}), now)).toBe('hosted-voice');
-    expect(takeAlarmUpsell(facts({ sink: 'push' }), now + 1000)).toBeNull();
-    expect(takeAlarmUpsell(facts({}), now + DAY - 1)).toBeNull();
-    expect(takeAlarmUpsell(facts({ sink: 'push' }), now + DAY)).toBe('hosted-push');
+    expect(takeAlarmUpsell(true, facts({}), now)).toBe('hosted-voice');
+    expect(takeAlarmUpsell(true, facts({ sink: 'push' }), now + 1000)).toBeNull();
+    expect(takeAlarmUpsell(true, facts({}), now + DAY - 1)).toBeNull();
+    expect(takeAlarmUpsell(true, facts({ sink: 'push' }), now + DAY)).toBe('hosted-push');
   });
 
   it('spends nothing when no line is earned', () => {
-    expect(takeAlarmUpsell(facts({ turnedOn: false }), now)).toBeNull();
+    expect(takeAlarmUpsell(false, facts({}), now)).toBeNull();
     expect(localStorage.getItem(ALARM_UPSELL_SHOWN_AT_KEY)).toBeNull();
-    expect(takeAlarmUpsell(facts({}), now)).toBe('hosted-voice');
+    expect(takeAlarmUpsell(true, facts({}), now)).toBe('hosted-voice');
   });
 
   it('treats a clock set back past the last showing as a new day', () => {

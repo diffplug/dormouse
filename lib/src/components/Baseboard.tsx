@@ -37,11 +37,9 @@ import {
   updateAlertSettings,
 } from '../lib/terminal-registry';
 import { deriveDisplayedSurfaceLabel } from '../lib/session-label';
-import { getNetworkPolicySnapshot, subscribeToNetworkPolicy } from '../remote/burrow/network-policy-store';
-import { takeAlarmUpsell, type AlarmUpsell } from '../lib/alarm-upsell';
-import { getHostedMembership } from '../lib/hosted-membership';
-import { getPushDevices } from '../lib/push-devices';
-import { burrowLink } from '../remote/burrow/burrow-status-store';
+import { subscribeToNetworkPolicy } from '../remote/burrow/network-policy-store';
+import { currentAlarmUpsellFacts, takeAlarmUpsell, type AlarmUpsell } from '../lib/alarm-upsell';
+import type { TopicId } from './SettingsDialog';
 
 /** Shared by every baseboard-level button (DESIGN.md -> Navigation). */
 const BASEBOARD_BUTTON_BASE_CLASS = 'h-6 shrink-0 justify-center pb-px text-sm font-medium font-mono';
@@ -143,7 +141,7 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
   const rightClusterEl = useRef<HTMLDivElement>(null);
   const [rightClusterWidth, setRightClusterWidth] = useState(0);
   const layoutMetrics = useRef({ doorGap: 0, arrowWidth: 0 });
-  const [settingsOpen, setSettingsOpen] = useState<'application' | 'network' | 'workspace' | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState<{ dialog: 'application'; topic?: TopicId } | { dialog: 'workspace' } | null>(null);
   const workspaceSettingsTrigger = useRef<HTMLButtonElement | null>(null);
   const [settingsPreview, setSettingsPreview] = useState<{
     sink: AlertSink;
@@ -158,20 +156,12 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
     const patch = sink === 'speech' ? { speakEnabled: turnedOn } : { pushEnabled: turnedOn };
     if (workspaceId) setWorkspaceAlertDelivery(workspaceId, { ...overrides, ...patch });
     else updateAlertSettings(patch);
-    const network = getNetworkPolicySnapshot();
-    const upsell = takeAlarmUpsell({
-      sink,
-      turnedOn,
-      membership: getHostedMembership(),
-      networkOff: network.kind === 'ready' && network.network.policy.level === 'nothing',
-      push: getPushDevices(),
-      hasBurrowService: burrowLink() !== undefined,
-    });
+    const upsell = takeAlarmUpsell(turnedOn, currentAlarmUpsellFacts(sink));
     setSettingsPreview({ sink, anchor, upsell, sequence: ++previewSequence.current });
   };
   const showNetworkSettings = useCallback(() => {
     setSettingsPreview(null);
-    setSettingsOpen('network');
+    setSettingsOpen({ dialog: 'application', topic: 'network' });
   }, []);
 
   // Suppress command-mode key dispatch while the Settings dialog owns the
@@ -183,7 +173,7 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
     event.stopPropagation();
     workspaceSettingsTrigger.current = event.currentTarget;
     closeSettingsPreview();
-    setSettingsOpen('workspace');
+    setSettingsOpen({ dialog: 'workspace' });
   };
   const workspaceSettingsActions = {
     onContextMenu: openWorkspaceSettings,
@@ -444,7 +434,7 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
               data-open-settings="true"
               onClick={() => {
                 closeSettingsPreview();
-                setSettingsOpen('application');
+                setSettingsOpen({ dialog: 'application' });
               }}
             >
               <SlidersHorizontalIcon size={16} weight="bold" />
@@ -464,13 +454,13 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
         />
       )}
 
-      {(settingsOpen === 'application' || settingsOpen === 'network') && (
+      {settingsOpen?.dialog === 'application' && (
         <SettingsDialog
-          initialTopic={settingsOpen === 'network' ? 'network' : undefined}
+          initialTopic={settingsOpen.topic}
           onClose={() => setSettingsOpen(null)}
         />
       )}
-      {settingsOpen === 'workspace' && (
+      {settingsOpen?.dialog === 'workspace' && (
         <WorkspaceAlarmSettingsDialog onClose={() => {
           setSettingsOpen(null);
           workspaceSettingsTrigger.current?.focus();

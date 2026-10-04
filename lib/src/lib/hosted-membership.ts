@@ -3,19 +3,11 @@ import { getPlatform } from './platform';
 import type { ManagedVoicePort } from './platform/managed-voice-types';
 
 /**
- * Whether this machine's user is a Dormouse Hosted member, as the renderer
- * knows it (`docs/specs/alert.md` -> "Settings dialog"):
- *
- * - `member`: the account's subscription covers this machine;
- * - `not-member`: a Hosted build that is not covered;
- * - `unavailable`: no answer to give — a self-host build, a host with no
- *   Hosted mode, or a Hosted build whose host has not answered yet. Nothing
- *   about Hosted is offered on this answer.
- *
- * The one seam every Hosted offer in the renderer reads. Until desktop sign-in
- * feeds the account's entitlement here, it is derived from managed voice: only
- * a Hosted build's adapter carries a `managedVoice` port, and a saved voice
- * token is the only grant a desktop holds today.
+ * Whether this machine's user is a Dormouse Hosted member: `unavailable` is a
+ * build with no Hosted mode (self-host included) or a host that has not
+ * answered, on which nothing about Hosted is offered. The renderer's one
+ * membership seam; until desktop sign-in feeds it the account's entitlement it
+ * reads managed voice, whose port only a Hosted build carries.
  */
 export type HostedMembership = 'member' | 'not-member' | 'unavailable';
 

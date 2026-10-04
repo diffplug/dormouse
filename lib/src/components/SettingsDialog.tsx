@@ -14,7 +14,6 @@ import {
   Shortcut,
   UNDER_SWITCH_INDENT,
 } from './design';
-import { ExternalTextLink } from './ExternalTextLink';
 import { ThemePicker } from './ThemePicker';
 import { ShellPicker } from './ShellPicker';
 import { WatchedCommandList } from './WatchedCommandList';
@@ -22,8 +21,8 @@ import { NetworkPhones, NetworkSettings, NetworkUpdates } from './NetworkSetting
 import { useNetworkPolicy } from './remote-control-shared';
 import { PushTestButton, SpeakTestButton } from './AlarmTestButtons';
 import { ManagedVoiceSection, NetworkTopicLink, useManagedVoiceOffered } from './ManagedVoiceSection';
-import { HostedPushLink } from './AlarmUpsellLine';
-import { hostedPageUrl } from '../lib/hosted-links';
+import { HostedOfferLink } from './AlarmUpsellLine';
+import { chooseAlarmUpsell } from '../lib/alarm-upsell';
 import { useHostedMembership } from '../lib/hosted-membership';
 import { getPlatform } from '../lib/platform';
 import { getShellsSnapshot, subscribeToShells } from '../lib/shell-store';
@@ -252,6 +251,16 @@ export function SettingsDialog({ onClose, initialTopic }: { onClose: () => void;
     chooseTopic('network');
   };
 
+  // Opened at a topic: start there, before the first paint, with no animation.
+  // Mount only, so a later change of the prop cannot pull the reader back.
+  useLayoutEffect(() => {
+    const content = contentRef.current;
+    const section = initialTopic && content?.querySelector<HTMLElement>(`[data-settings-topic="${initialTopic}"]`);
+    if (!content || !section) return;
+    content.scrollTop = section.getBoundingClientRect().top - content.getBoundingClientRect().top - TOPIC_GAP_PX;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useLayoutEffect(() => {
     followScroll();
     const content = contentRef.current;
@@ -263,12 +272,6 @@ export function SettingsDialog({ onClose, initialTopic }: { onClose: () => void;
   }, [followScroll, visibleTopicIds]);
 
   useEffect(() => cancelScroll, [cancelScroll]);
-
-  // Mount only: a later change of the prop must not pull the reader back.
-  useEffect(() => {
-    if (initialTopic) scrollToTopic(initialTopic);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   return (
     <ModalFrame
@@ -489,12 +492,13 @@ export function AlarmSettingsSection({ sink, preview = false, onShowNetwork }: {
   const push = useSyncExternalStore(subscribeToPushDevices, getPushDevices);
   const hasBurrowService = getPlatform().burrow !== undefined;
   const managedVoiceOffered = useManagedVoiceOffered();
-  // Hosted offers show only to a Hosted build's non-member; the preview's
-  // live line carries them there (`AlarmUpsellLine`), never its inert copy.
-  const offerHosted = useHostedMembership() === 'not-member' && !preview;
   // Under Nothing the service sends no push and managed voice asks nothing
   // (`docs/specs/remote-network.md` -> "Policy"), so both lines say why.
   const networkOff = useNetworkPolicy()?.level === 'nothing';
+  const membership = useHostedMembership();
+  // The same offers as the Baseboard preview's live line, which carries them
+  // there instead of this inert copy.
+  const offer = preview ? null : chooseAlarmUpsell({ sink, membership, networkOff, push, hasBurrowService });
 
   // The brief preview uses the cached list: refreshing immediately publishes
   // loading, and the bridge reply may arrive after the preview has faded away.
@@ -517,14 +521,7 @@ export function AlarmSettingsSection({ sink, preview = false, onShowNetwork }: {
         {!managedVoiceOffered ? (
           <>
             Uses your browser or system voice.
-            {offerHosted ? (
-              <>
-                {' '}
-                <ExternalTextLink href={hostedPageUrl('voice')}>
-                  Get managed ElevenLabs voices.
-                </ExternalTextLink>
-              </>
-            ) : null}
+            {offer === 'hosted-voice' && <> <HostedOfferLink offer={offer} /></>}
           </>
         ) : networkOff ? (
           <>
@@ -557,12 +554,7 @@ export function AlarmSettingsSection({ sink, preview = false, onShowNetwork }: {
       ) : (
         <>
           {describePushTargets(push, hasBurrowService && !preview)}
-          {offerHosted && hasBurrowService && push.status === 'no-burrow' ? (
-            <>
-              {' '}
-              <HostedPushLink />
-            </>
-          ) : null}
+          {offer === 'hosted-push' && <> <HostedOfferLink offer={offer} /></>}
         </>
       )}
     </AlarmSinkSection>

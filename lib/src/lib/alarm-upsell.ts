@@ -1,7 +1,9 @@
 import type { AlertSink } from './alert-delivery-model';
-import type { HostedMembership } from './hosted-membership';
-import { getStorage } from './local-json-store';
-import type { PushDevicesState } from './push-devices';
+import { getHostedMembership, type HostedMembership } from './hosted-membership';
+import { loadJson, saveJson } from './local-json-store';
+import { getPushDevices, type PushDevicesState } from './push-devices';
+import { burrowLink } from '../remote/burrow/burrow-status-store';
+import { getNetworkPolicySnapshot, policyOf } from '../remote/burrow/network-policy-store';
 
 /**
  * The one extra line a Baseboard alarm toggle's preview may carry
@@ -15,8 +17,6 @@ export type AlarmUpsell = 'hosted-voice' | 'hosted-push' | 'set-up-phone';
 
 export interface AlarmUpsellFacts {
   sink: AlertSink;
-  /** The toggle turned its sink on. */
-  turnedOn: boolean;
   membership: HostedMembership;
   /** The network policy is Nothing, which sends no push and asks for no voice. */
   networkOff: boolean;
@@ -26,9 +26,12 @@ export interface AlarmUpsellFacts {
   hasBurrowService: boolean;
 }
 
-/** Which line this toggle earns, before the daily limit. */
+/**
+ * Which offer a sink earns, before the daily limit. The Settings dialog's
+ * Hosted links read it too, so the two never disagree.
+ */
 export function chooseAlarmUpsell(facts: AlarmUpsellFacts): AlarmUpsell | null {
-  if (!facts.turnedOn || facts.networkOff) return null;
+  if (facts.networkOff) return null;
   if (facts.sink === 'speech') return facts.membership === 'not-member' ? 'hosted-voice' : null;
   if (!facts.hasBurrowService) return null;
   const { status, devices } = facts.push;
@@ -43,29 +46,37 @@ export function chooseAlarmUpsell(facts: AlarmUpsellFacts): AlarmUpsell | null {
 /** When a line last showed, on this machine (every window shares the origin). */
 export const ALARM_UPSELL_SHOWN_AT_KEY = 'dormouse:alarm-upsell-shown-at';
 const DAY_MS = 24 * 60 * 60 * 1000;
+const isNumber = (value: unknown): value is number => typeof value === 'number';
 
 /**
  * Whether a line may show now, recording that it did. At most one a day across
  * both toggles; storage that cannot be read or written only means it shows.
  */
 export function claimAlarmUpsell(now: number = Date.now()): boolean {
-  try {
-    const last = Number(getStorage()?.getItem(ALARM_UPSELL_SHOWN_AT_KEY));
-    // A clock set back past the last showing counts as a new day.
-    if (last > 0 && now >= last && now - last < DAY_MS) return false;
-  } catch {
-    // Unreadable: show it.
-  }
-  try {
-    getStorage()?.setItem(ALARM_UPSELL_SHOWN_AT_KEY, String(now));
-  } catch {
-    // Unwritable: it may show again sooner.
-  }
+  const last = loadJson(ALARM_UPSELL_SHOWN_AT_KEY, 0, isNumber);
+  // A clock set back past the last showing counts as a new day.
+  if (last > 0 && now >= last && now - last < DAY_MS) return false;
+  saveJson(ALARM_UPSELL_SHOWN_AT_KEY, now);
   return true;
 }
 
-/** The line for this toggle, if it earns one and today's has not shown. */
-export function takeAlarmUpsell(facts: AlarmUpsellFacts, now?: number): AlarmUpsell | null {
-  const upsell = chooseAlarmUpsell(facts);
+/** The facts as the stores hold them now. */
+export function currentAlarmUpsellFacts(sink: AlertSink): AlarmUpsellFacts {
+  return {
+    sink,
+    membership: getHostedMembership(),
+    networkOff: policyOf(getNetworkPolicySnapshot())?.level === 'nothing',
+    push: getPushDevices(),
+    hasBurrowService: burrowLink() !== undefined,
+  };
+}
+
+/** The line for a toggle, if it turned its sink on, earns one, and today's has not shown. */
+export function takeAlarmUpsell(
+  turnedOn: boolean,
+  facts: AlarmUpsellFacts,
+  now?: number,
+): AlarmUpsell | null {
+  const upsell = turnedOn ? chooseAlarmUpsell(facts) : null;
   return upsell && claimAlarmUpsell(now) ? upsell : null;
 }

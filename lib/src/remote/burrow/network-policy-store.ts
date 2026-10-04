@@ -46,6 +46,11 @@ export function getNetworkPolicySnapshot(): NetworkPolicyStoreState {
   return snapshot;
 }
 
+/** The policy a snapshot holds, or `null` before the service answers or without one. */
+export function policyOf(state: NetworkPolicyStoreState): NetworkPolicy | null {
+  return state.kind === 'ready' ? state.network.policy : null;
+}
+
 export function subscribeToNetworkPolicy(listener: () => void): () => void {
   listeners.add(listener);
   if (listeners.size === 1) {
