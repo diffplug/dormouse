@@ -24,7 +24,7 @@ Source of truth: `dor/package.json`, `dor-tools-builtin/package.json`; `dor-tool
 
 **Must require a user Tool for PDFs**, including files named `README.pdf`. (rationale)
 
-**Must retain media/HTML grant descriptors until the Tool exits.** Refresh reads those files again; replacements and dependency-graph changes require restarting. Text editing follows [Editing files](#editing-files). **Must report a view that cannot be edited (not text, PNG, or JPEG) clean as it starts**, so closing it asks nothing (`docs/specs/reopen.md` → "Reopenable kinds"). Cold restore creates a fresh URL capability; Workspace movement keeps the live binding.
+**Must retain media/HTML grant descriptors until the Tool exits.** Refresh reads those files again; replacements and dependency-graph changes require restarting. Text editing follows [Editing files](#editing-files). **Must report a view that cannot be edited (not text or an [editable image](#image-editor)) clean as it starts**, so closing it asks nothing (`docs/specs/reopen.md` → "Reopenable kinds"). Cold restore creates a fresh URL capability; Workspace movement keeps the live binding.
 
 Source of truth: `runFileViewer` in `dor-tools-builtin/src/file-viewer.ts`; `fileViewerFormat` in `dor-tools-builtin/src/file-viewer-format.ts`. Tests: `dor-tools-builtin/test/file-viewer.test.mjs`.
 
@@ -57,8 +57,9 @@ Source of truth: `dor-tools-builtin/viewer/markdown.tsx`; `safeCreateDOM` in `do
 
 ## Image editor
 
-`builtin:file` edits PNG and JPEG, alone or over a [Markdown document](#markdown-editor); other image formats stay view-only.
+`builtin:file` edits PNG and JPEG, alone or over a [Markdown document](#markdown-editor).
 
+- **Must open other image formats, and a PNG or JPEG over 32 MiB at open, view-only.**
 - **Must save exactly the submitted bytes, at most 32 MiB**, under the revision, identity, permission, and replacement rules of [Editing files](#editing-files).
 - **Must refuse a save whose `Content-Type` or signature is not its extension's type** (415).
 - **Must send the revision as the `X-Dor-Version` response header and take it back as the save's `version` query parameter**, the body being the image bytes. The Markdown editor's in-place replacement shares this contract.

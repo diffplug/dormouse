@@ -24,10 +24,11 @@ export async function openImage(root: string, segments: string[]): Promise<{ fil
 }
 
 /** An image at or under `root` for replacement: its spelling stays under
- * `root` and must be its realpath, so no symlink below `root` is followed. */
+ * `root` and must be its realpath, so no symlink below `root` is followed;
+ * null when it is not, 404 when it is missing. */
 export async function editableImageFile(root: string, segments: string[]): Promise<StorePath | null> {
   const path = under(root, segments);
-  return await realpath(path).catch(() => null) === path ? storePath(path) : null;
+  return await realpath(path).catch(() => { throw new HttpError(404); }) === path ? storePath(path) : null;
 }
 
 /** Writes `name` in `root` exclusively; false when it exists. */

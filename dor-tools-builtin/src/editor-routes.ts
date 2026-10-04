@@ -15,6 +15,8 @@ export const TEXT_BOUND: SizeBound = { limit: 8 * 1024 * 1024, message: 'Text fi
 export const STALE_MESSAGE = 'The file changed on disk. Your edits are safe here; compare or reload before saving.';
 /** A save or read whose file is no longer at its path. */
 export const PATH_CHANGED_MESSAGE = 'The file path changed. Reopen it before saving.';
+/** An image the Markdown editor may read but not replace in place (`EditorStore.editableImage`). */
+export const NOT_IN_PLACE_MESSAGE = "This image can't be edited in place: its path goes through a symlink or is spelled differently from the file on disk.";
 
 /** A path an `EditorStore` reads or replaces, which only `storePath` mints. */
 export type StorePath = string & { readonly __storePath: unique symbol };
@@ -30,8 +32,9 @@ export interface EditorStore {
   /** Replaces `file` with `encode` of its current bytes while its revision is
    * still `version` (409 `STALE_MESSAGE` otherwise), at most `bound.limit` bytes. */
   replace(file: StorePath, version: string, bound: SizeBound, encode: (current: Uint8Array) => Uint8Array): Promise<{ version: string }>;
-  /** The file at `segments` under the document's folder when it is an existing
-   * file that may be replaced in place; else null. */
+  /** The file at `segments` under the document's folder when it may be
+   * replaced in place; null when it exists but its spelling is not its own
+   * path on disk; 404 when it is missing. */
   editableImage(segments: string[]): Promise<StorePath | null>;
   /** Writes `name` beside the document, never replacing; false when it exists. */
   create(name: string, bytes: Uint8Array): Promise<boolean>;
@@ -56,11 +59,12 @@ export interface EditorReply { body: string | Uint8Array; type: string; headers?
 
 export type EditorKind = 'text' | 'markdown' | 'image';
 
-/** The editor `builtin:file` or `builtin:code` opens for `path` in `format`;
- * null when it only views it. */
-export function editorKind(format: FileFormat, path: string): EditorKind | null {
+/** The editor `builtin:file` or `builtin:code` opens for `path` in `format`,
+ * `size` bytes at open; null when it only views it, as it does a PNG or JPEG
+ * past `IMAGE_BOUND`, which streams instead. */
+export function editorKind(format: FileFormat, path: string, size: number): EditorKind | null {
   if (format.text) return format.markdown ? 'markdown' : 'text';
-  return editableImageType(path) ? 'image' : null;
+  return editableImageType(path) && size <= IMAGE_BOUND.limit ? 'image' : null;
 }
 
 /** `route`, relative to the document's folder, as `/` segments when its
@@ -157,7 +161,7 @@ export function editorRoutes({ kind, file, name, store, onDirty }: {
     const mime = editableImageType(route);
     if (!mime) throw new HttpError(415, 'Only PNG and JPEG images can be edited.');
     const path = await store.editableImage(segments);
-    if (path === null) throw new HttpError(404);
+    if (path === null) throw new HttpError(404, NOT_IN_PLACE_MESSAGE);
     return { path, mime };
   };
   return async request => {

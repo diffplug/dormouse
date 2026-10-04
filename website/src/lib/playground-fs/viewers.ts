@@ -106,7 +106,7 @@ export class PlaygroundViewers {
     if (kind !== "file") return new Error(`not a file: ${input}`);
     const format = handler.format(target);
     if (!format) return new Error("unsupported file format; configure a user Tool association");
-    const editor = editorKind(format, target);
+    const editor = editorKind(format, target, this.fs.bytes(target)?.length ?? 0);
     // The HTML, media, and view-only image routes are not served here.
     if (!editor) return new Error("the playground's file viewer shows text, PNG, and JPEG files only");
     const root = parentOf(target);
@@ -194,7 +194,10 @@ export class PlaygroundViewers {
         fs.write(file, next);
         return { version: nextVersion };
       },
-      editableImage: async (segments) => fs.kind(under(segments)) === "file" ? storePath(under(segments)) : null,
+      editableImage: async (segments) => {
+        if (fs.kind(under(segments)) !== "file") throw new HttpError(404);
+        return storePath(under(segments));
+      },
       create: async (name, bytes) => {
         if (fs.kind(under([name]))) return false;
         fs.write(under([name]), bytes);

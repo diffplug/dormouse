@@ -88,7 +88,8 @@ test('builtin:code is an alternative only where it differs from builtin:file', (
   assert.deepEqual(['a.md', 'a.html', 'a.svg', 'a.ts', 'a.png', 'a.pdf'].map(code.offered), [true, true, true, false, false, false]);
   assert.equal(code.format('a.png'), null);
   assert.deepEqual(['a.md', 'a.ts', 'a.html', 'a.png', 'a.mp4'].map(builtinHandler('tool', 'builtin:file').describe),
-    ['Markdown editor', 'code editor', 'HTML preview', 'image viewer', 'media player']);
+    ['Markdown editor', 'code editor', 'HTML preview', 'image editor', 'media player']);
+  assert.equal(builtinHandler('tool', 'builtin:file').describe('a.gif'), 'image viewer');
 });
 
 test('known formats override source-name heuristics, PDFs never preview, and prototype keys are not formats', () => {
@@ -316,5 +317,25 @@ test('other image formats stay view-only', async () => {
     assert.equal((await get(viewer)).body, 'image');
     const post = await postBytes({ ...viewer, path: viewer.path.replace(/file\/[^/]+$/, 'view') }, 'save?version=x', PNG, 'image/png');
     assert.equal(post.status, 403, name);
+  }
+});
+
+test('a PNG or JPEG past the image bound opens view-only, streamed whole, and one at the bound in the editor', async () => {
+  const BOUND = 32 * 1024 * 1024;
+  const atBound = await start('at-bound.png', Buffer.concat([PNG, Buffer.alloc(BOUND - PNG.length)]));
+  assert.equal(atBound.editable, true);
+  assert.match(atBound.path, /\/view$/);
+  assert.equal((await get(atBound, atBound.path.replace(/view$/, 'source'))).status, 200);
+  for (const [name, signature] of [['big.png', PNG], ['big.jpg', JPEG]]) {
+    const viewer = await start(name, Buffer.concat([signature, Buffer.alloc(BOUND + 1 - signature.length)]));
+    // Not editable is what the `dor __view-file` entry reports clean as it starts.
+    assert.equal(viewer.editable, false, name);
+    assert.match(viewer.path, new RegExp(`/file/${name.replace('.', '\\.')}$`));
+    const head = await get(viewer, viewer.path, {}, 'HEAD');
+    assert.equal(head.status, 200, name);
+    assert.equal(head.headers['content-length'], String(BOUND + 1));
+    const view = { ...viewer, path: viewer.path.replace(/file\/[^/]+$/, 'view') };
+    assert.equal((await get(view)).status, 404, name);
+    assert.equal((await postBytes(view, 'save?version=x', PNG, 'image/png')).status, 403, name);
   }
 });

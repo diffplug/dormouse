@@ -135,9 +135,10 @@ export async function startFileViewer(input: string, { onDirty = () => {}, forma
   try {
     const main = await register(target, true);
     if (!main) throw new Error('not a supported regular file');
-    if (format.text) await textSize(main.file); // fail oversized text before announcing
-    // PNG and JPEG open in the image editor (docs/specs/dor-tools-builtin.md -> Image editor).
-    const kind = editorKind(format, target);
+    // Fails oversized text before announcing; a PNG or JPEG past the image
+    // bound streams view-only (docs/specs/dor-tools-builtin.md -> Image editor).
+    const size = format.text ? await textSize(main.file) : (await main.file.stat()).size;
+    const kind = editorKind(format, target, size);
     const editable = !!kind;
     const editor = kind && editorRoutes({ kind, file: storePath(target), name: basename(target), store: editorStore(root), onDirty });
     const viewer = await startCapabilityViewer({ csp: editable ? EDITOR_CSP : CSP, post: editable, chunked: true, unavailable: 'File preview unavailable', release: closeFiles,
@@ -153,7 +154,6 @@ export async function startFileViewer(input: string, { onDirty = () => {}, forma
           reply(res, 200, answer.body, answer.type);
           return;
         }
-        if (req.method === 'POST') throw new HttpError(404);
         if (editable && route.startsWith('assets/')) {
           const asset = await viewerAsset(route.slice('assets/'.length));
           reply(res, 200, asset.bytes, asset.mime);

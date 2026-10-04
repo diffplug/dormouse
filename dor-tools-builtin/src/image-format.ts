@@ -37,13 +37,7 @@ const PASTE_TYPES: Record<string, { ext: string; magic: (b: Uint8Array) => boole
 export const imageKind = (bytes: Uint8Array): string | undefined =>
   Object.keys(PASTE_TYPES).find(type => PASTE_TYPES[type].magic(bytes));
 
-/** The image types the image editor re-encodes; every other image is view-only. */
-const EDITABLE_IMAGES = new Set(['image/png', 'image/jpeg']);
-/** `path`'s type when its extension names an editable image (PNG or JPEG). */
-export function editableImageType(path: string): string | undefined {
-  const mime = fileViewerFormat(path)?.mime;
-  return mime && EDITABLE_IMAGES.has(mime) ? mime : undefined;
-}
+export { editableImageType } from './file-viewer-format.js';
 
 /** Whether `path`'s extension names an image format. */
 export const isImage = (path: string): boolean => !!fileViewerFormat(path)?.mime.startsWith('image/');

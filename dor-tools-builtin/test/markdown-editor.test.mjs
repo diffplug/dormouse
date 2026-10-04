@@ -6,7 +6,7 @@ import { request } from 'node:http';
 import { afterEach, beforeEach, test } from 'node:test';
 import { startFileViewer } from '../dist/file-viewer.js';
 import { editorStore } from '../dist/editor-store.js';
-import { pasteImage } from '../dist/editor-routes.js';
+import { NOT_IN_PLACE_MESSAGE, pasteImage } from '../dist/editor-routes.js';
 import { resolveInside } from '../dist/viewer-server.js';
 
 const PNG = Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108020000009077' + '53de0000000c4944415408d763f8cfc000000301010018dd8db00000000049454e44ae426082', 'hex');
@@ -195,11 +195,27 @@ test('in-place image saves follow no symlink, to the image or to a folder above 
   await symlink(join(docs, 'img'), join(docs, 'linked'));
   await symlink(join(root, 'outside.png'), join(docs, 'escape.png'));
   for (const path of ['alias.png', 'linked/a%20b.png', 'escape.png']) {
-    assert.equal((await edit(viewer, path)).status, 404, path);
+    const opened = await edit(viewer, path);
+    assert.equal(opened.status, 404, path);
+    // The overlay shows why, rather than a bare status.
+    assert.equal(opened.body.toString(), NOT_IN_PLACE_MESSAGE, path);
     assert.equal((await saveImage(viewer, path, version)).status, 404, path);
   }
+  const missing = await edit(viewer, 'missing.png');
+  assert.equal(missing.status, 404);
+  assert.equal(missing.body.toString(), '');
   // Reads still follow a symlink that stays inside the folder.
   assert.equal((await send(viewer, route(viewer, 'images/alias.png'))).status, 200);
   assert.ok((await readFile(join(docs, 'img', 'a b.png'))).equals(PNG));
   assert.ok((await readFile(join(root, 'outside.png'))).equals(PNG));
+});
+
+test('an image spelled differently from the file on disk is not edited in place', async t => {
+  if (!await realpath(join(docs, 'img', 'A B.png')).then(() => true, () => false)) { t.skip('case-sensitive volume'); return; }
+  const viewer = await start();
+  const opened = await edit(viewer, 'img/A%20B.png');
+  assert.equal(opened.status, 404);
+  assert.equal(opened.body.toString(), NOT_IN_PLACE_MESSAGE);
+  assert.equal((await saveImage(viewer, 'img/A%20B.png', 'x')).status, 404);
+  assert.ok((await readFile(join(docs, 'img', 'a b.png'))).equals(PNG));
 });
