@@ -290,7 +290,7 @@ function startService(): void {
     relay: bakedRelay(),
     // A Hosted sign-in hands managed voice its token; sign-out clears it, in
     // `SecretStorage`, which every window hears.
-    voiceCredential: bakedRelay().mode === 'hosted' ? bound.voiceCredential?.() : undefined,
+    voiceCredential: bound.voiceCredential?.(),
     // Building the factory loads nothing: the addon is opened inside the first
     // offer, if one ever comes (`native-direct-peer.ts`).
     createDirectPeer: createNativeDirectPeerFactory(),

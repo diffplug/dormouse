@@ -34,7 +34,6 @@ export interface StoredManagedVoice {
   token: string | null;
   voiceId: string;
 }
-type StoredConfig = StoredManagedVoice;
 
 /**
  * Where a host keeps managed voice's config: the sidecar's owner-only file
@@ -69,7 +68,7 @@ export function fileManagedVoiceStore(stateDir: string): ManagedVoiceStore {
   };
 }
 
-function normalizeStored(value: unknown): StoredConfig {
+function normalizeStored(value: unknown): StoredManagedVoice {
   const record = value && typeof value === 'object' ? value as Record<string, unknown> : {};
   return {
     token: isManagedVoiceToken(record.token) ? record.token : null,
@@ -146,11 +145,13 @@ export function createManagedVoiceHost(options: {
   networkAllowed: () => Promise<boolean>;
 }): {
   handle(command: unknown): Promise<unknown>;
-  credential: ManagedVoiceCredential;
+  /** What sign-in saves through; absent in a self-host build, which holds no token. */
+  credential: ManagedVoiceCredential | undefined;
   /**
-   * Another process changed the store (a sibling VS Code window): read it
-   * again, forget the clips and the refusal the old token earned, and
-   * announce the status.
+   * Another process may have changed the store (a sibling VS Code window):
+   * read it again, and announce what changed. A changed token forgets the
+   * clips and the refusal the old one earned; this window's own write, heard
+   * back, changes nothing.
    */
   invalidate(): void;
 } {
@@ -163,7 +164,7 @@ export function createManagedVoiceHost(options: {
   // every edit and speak is refused.
   const voice = hostedVoiceOrigin(options.relay);
   const speakUrl = voice === null ? null : voice + MANAGED_VOICE_SPEAK_PATH;
-  let loaded: Promise<StoredConfig> | null = null;
+  let loaded: Promise<StoredManagedVoice> | null = null;
   // Each edit reads, then rewrites the whole file: two at once would drop a field.
   const serialize = createSerialQueue();
   const clips = createClipCache();
@@ -171,7 +172,7 @@ export function createManagedVoiceHost(options: {
   /** Bumped by every token change, so a request that outlived its token caches nothing. */
   let tokenGeneration = 0;
 
-  const load = (): Promise<StoredConfig> => {
+  const load = (): Promise<StoredManagedVoice> => {
     loaded ??= (store ? store.read() : Promise.resolve(null)).then(normalizeStored, (error: unknown) => {
       // Never cached: the next read tries again.
       loaded = null;
@@ -187,11 +188,11 @@ export function createManagedVoiceHost(options: {
     notEntitled = false;
   };
 
-  const status = (config: StoredConfig): ManagedVoiceStatus =>
+  const status = (config: StoredManagedVoice): ManagedVoiceStatus =>
     ({ configured: config.token !== null, voiceId: config.voiceId, notEntitled });
 
   /** Store `changed` as `value`, then announce the result. Runs on `serialize`. */
-  async function save<K extends keyof StoredConfig>(changed: K, value: StoredConfig[K]): Promise<ManagedVoiceStatus> {
+  async function save<K extends keyof StoredManagedVoice>(changed: K, value: StoredManagedVoice[K]): Promise<ManagedVoiceStatus> {
     if (!store) throw new Error('no owner-only store');
     const next = { ...await load(), [changed]: value };
     await store.write(next, changed);
@@ -305,11 +306,15 @@ export function createManagedVoiceHost(options: {
   return {
     invalidate() {
       if (speakUrl === null) return;
+      const before = loaded;
       loaded = null;
-      forgetToken();
-      void load().then((config) => options.onStatus(status(config)), () => {});
+      void Promise.all([before?.catch(() => null) ?? null, load()]).then(([previous, next]) => {
+        if (previous?.token === next.token && previous.voiceId === next.voiceId) return;
+        if (previous?.token !== next.token) forgetToken();
+        options.onStatus(status(next));
+      }, () => {});
     },
-    credential: {
+    credential: speakUrl === null ? undefined : {
       async save(token) {
         if (!isManagedVoiceToken(token)) throw new Error('not a voice token');
         await setToken(token);

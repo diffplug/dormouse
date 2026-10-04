@@ -498,8 +498,8 @@ export function createSidecarHost(options: SidecarHostOptions): SidecarHost {
   });
   const service = new BurrowService({
     // A Hosted sign-in hands managed voice its token; sign-out clears it. A
-    // self-host build has no managed voice to hand one to.
-    voiceCredential: relay.mode === 'hosted' ? voice.credential : undefined,
+    // self-host build's host has no credential to hand one to.
+    voiceCredential: voice.credential,
     store,
     provider: bridge.provider,
     kind: 'standalone',
