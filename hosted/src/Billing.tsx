@@ -7,9 +7,9 @@ import {
 } from "../../website/src/lib/hosted-pricing";
 import type { BillingSummary, Plan, SurveyAnswers } from "./api";
 
-// The account pages billing adds (docs/specs/pricing.md -> "Checkout and the
-// account pages"). Prices come from the website's one owner of them; the
-// founding step from the server's open cohort.
+// The account pages billing adds (docs/specs/hosted.md -> "Billing"). Prices
+// come from the website's one owner of them; the founding step from the
+// server's open cohort.
 
 export const PLAN_NAMES: Record<Plan, string> = {
   monthly: HOSTED_MONTHLY.name,

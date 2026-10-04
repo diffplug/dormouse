@@ -3,7 +3,7 @@
 > - See `docs/specs/glossary.md` for Burrow / Client / Relay and Pane / Session vocabulary.
 > - **Owns:** the plans, the founding ladder, what a plan grants, how a desktop proves membership, the managed-voice boundary, and the content contract of the Hosted page.
 > - **Defers:** page chrome, rail, and link obligations to `docs/specs/website-docs.md` -> "Reference page chrome"; the Hosted Relay's accounts, enrollment, and entitlement, and managed voice's routes, to `docs/specs/hosted.md`; the cloud-hosted trust boundary to `docs/specs/security-remote.md` -> "Cloud-hosted mode"; alarm delivery to `docs/specs/alert.md` -> "Spoken alarms".
-> - **Status:** the Hosted page publishes the plans and the FAQ, and the account Worker's billing is built and off until Stripe is configured ([Checkout and entitlement](#checkout-and-entitlement)); the account pages, the site's buy links, and turning billing on are under [Future](#future).
+> - **Status:** the Hosted page publishes the plans and the FAQ, and checkout, the account pages, and the subscription entitlement are built and off until Stripe is configured ([Checkout and entitlement](#checkout-and-entitlement)); turning billing on and desktop sign-in are under [Future](#future).
 
 ## The Hosted page
 
@@ -13,7 +13,7 @@
 
 **Content, in order:** the plan cards, directly under the title and anchored `#pricing`; what a member gets, as prose; "Self-hosting stays free"; and a short FAQ — refunds and cancellation, the founding lock, who appears in the founders row, what happens if Hosted shuts down, and that team pricing goes by email to `teams@dormouse.sh`.
 
-**Prices, inclusions, and the FAQ are prerendered text**, and the page emits `Product` / `Offer` JSON-LD carrying one `Offer` per paid plan at its current price, so an assistant fetching the page can quote it. **Offers stay `PreOrder` while checkout is unbuilt.**
+**Prices, inclusions, and the FAQ are prerendered text**, and the page emits `Product` / `Offer` JSON-LD carrying one `Offer` per paid plan at its current price, so an assistant fetching the page can quote it. **Offers are `PreOrder` until `CHECKOUT_OPEN`, then `InStock`.**
 
 **Every price on the site has one owner**: the page, the structured data, and the tests read `website/src/lib/hosted-pricing.ts` rather than restating a number.
 
@@ -31,7 +31,7 @@ Three cards — Free, Hosted, Founding — side by side from `md` up, stacked in
 
 - **Mark the Hosted card with the accent border, never a surface of its own**, which would be a tint no docs token is derived against.
 - **The toggle defaults to Monthly**, the prerendered state; switching swaps the price, the billing line, and the buy target in place.
-- **A buy button opens the unbuilt-checkout notice** — the plan's name, that nothing was charged and no seat taken, and the devlog. **Never render a buy button that silently does nothing.**
+- **A buy button links to the account origin's `/checkout?plan=` once `CHECKOUT_OPEN`**, by checkout's plan names; until then it opens the unbuilt-checkout notice — the plan's name, that nothing was charged and no seat taken, and the devlog. **Never render a buy button that silently does nothing.**
 
 ### The founding card's live half
 
@@ -61,30 +61,30 @@ Prices in USD, and the merchant of record adds or includes tax by jurisdiction.
 - **The step is $10 per cohort of 100, fixed**, and the ladder's last step is the one below list — reaching list closes founding.
 - **Show the current price, the struck list price, and the seats left at that price — never the next step or how many cohorts remain.**
 
-Source of truth: `tiersOnSale`, `foundingTier`, and `pricingJsonLd` in `website/src/lib/hosted-pricing.ts`; `fetchCohort` in `website/src/lib/hosted-cohorts.ts`; `website/src/pages/Hosted.tsx`; the `/pricing` rule in `website/public/_redirects`, pinned by `checkPricingRedirect` in `scripts/public-docs-lint.mjs`. `website/src/pages/Hosted.test.tsx` pins the page contract.
+Source of truth: `tiersOnSale`, `foundingTier`, `CHECKOUT_OPEN`, and `pricingJsonLd` in `website/src/lib/hosted-pricing.ts`; `fetchCohort` in `website/src/lib/hosted-cohorts.ts`; `website/src/pages/Hosted.tsx`; the `/pricing` rule in `website/public/_redirects`, pinned by `checkPricingRedirect` in `scripts/public-docs-lint.mjs`. `website/src/pages/Hosted.test.tsx` pins the page contract.
 
 ## Checkout and entitlement
 
 Built on the account Worker and off until Stripe is configured; routes, bindings, and the cohort count: `docs/specs/hosted.md` -> "Billing".
 
 - **Stripe Managed Payments runs checkout, subscriptions, and the customer portal as merchant of record, through `@pgstencil/stripe`**, so tax is Stripe's. Dormouse never stores card data. A founding lock is a per-cohort Price; every past cohort's Price keeps granting the plan.
-- **Checkout belongs to a signed-in Hosted account**, so the subscription belongs to an account from its first event. The browser names a plan, never a Price.
+- **Checkout belongs to a signed-in Hosted account**, so the subscription belongs to an account from its first event. A buy link lands on the account origin's `/checkout`, which asks for sign-in first, then shows the plan and its price now before handing off to Stripe. The browser names a plan, never a Price.
 - **No trial**: the first payment is taken at checkout, and the 30-day refund is the trial.
 - **The entitlement is the account's subscription, read on the server on every voice and Relay request.** No licence, no offline verification, and no grace past what the subscription grants; a lapsed member's voices fall back to the system voice and its Burrows to `not-entitled`.
 - **One account covers every machine the member uses.** No device count, no seat count, no activation limit.
 - **A refund or chargeback ends the subscription**, so the next request is refused, and the seat returns to its cohort.
-- **The founders-row opt-in and the four Van Westendorp answers are stored per account**: too expensive to consider, too cheap to trust, expensive but would consider, a bargain, each optional. Their answers inform later list changes.
+- **Stripe's return shows the founders-row opt-in, unticked, to a founder**; the account page's Plan section can withdraw it at any time, beside Manage billing.
+- **The return also asks the four Van Westendorp questions**, optional and unsent until answered: too expensive to consider, too cheap to trust, expensive but would consider, a bargain. Their answers inform later list changes.
 
 ## Future
 
 **Scope: hosted-sales** — what remains, in staged order:
 
-1. **The account pages** ("Checkout and the account pages" below) and the site's buy links into them.
-2. **Desktop sign-in** by device code ("Checkout and the account pages").
-3. **Managed voice for members**: the disclosure, one voice per Pane.
-4. **Turning billing on**: the Stripe products, Prices, portal, and webhook, then the bindings (`docs/specs/hosted.md` -> "Billing"). The subscription admits members to the Hosted Relay (`docs/specs/hosted.md` -> "Relay"), so this is gated on the independent review `docs/specs/security-remote.md` -> "Cloud-hosted mode" requires.
-5. **Founder avatars** proxied onto this origin.
-6. **Renewal, cancellation, and refund** paths.
+1. **Desktop sign-in** by device code ("Desktop sign-in").
+2. **Managed voice for members**: the disclosure, one voice per Pane.
+3. **Turning billing on**: the Stripe products, Prices, portal, and webhook, then the bindings (`docs/specs/hosted.md` -> "Billing"), then `CHECKOUT_OPEN`. The subscription admits members to the Hosted Relay (`docs/specs/hosted.md` -> "Relay"), so this is gated on the independent review `docs/specs/security-remote.md` -> "Cloud-hosted mode" requires.
+4. **Founder avatars** proxied onto this origin.
+5. **Renewal, cancellation, and refund** paths.
 
 Team and enterprise tiers are never sold through this page. A free hosted tier is undecided — see [Open questions](#open-questions).
 
@@ -115,11 +115,8 @@ What each plan grants once checkout can sell it; [Published prices](#published-p
 - **The hosted Relay is part of the plan, never a second purchase**: the Relay reads the same subscription ([Checkout and entitlement](#checkout-and-entitlement)), so a member never signs up twice.
 - **Nothing shipped free is ever gated**: the terminal, `dor`, browser panes, the notepad, alerts with the system voice, the self-host Relay, and Pocket over a self-hosted Relay stay free, with no login.
 
-### Checkout and the account pages
+### Desktop sign-in
 
-- **A buy button lands on the account origin**, which asks for sign-in first, then shows the plan and its current price before handing off to Stripe.
-- **Founding checkout offers the founders-row opt-in, unticked**; the account can withdraw it at any time.
-- **The success page asks the four Van Westendorp questions**, optional and unsent until answered.
 - **A desktop signs in from Settings by device code**, the flow Burrow enrollment already runs (`docs/specs/hosted.md` -> "Burrow enrollment"). The approval mints a desktop credential the host keeps and never hands a webview. Sign-in is the only account surface in the free client.
 
 ### Managed voice

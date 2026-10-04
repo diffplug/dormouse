@@ -49,6 +49,16 @@ export const FOUNDING_LADDER: readonly number[] = Array.from(
  */
 export const FOUNDING_COHORTS_CLOSED = 0;
 
+/**
+ * Whether the buy buttons link to checkout on the Hosted account origin.
+ * False keeps the unbuilt-checkout notice and `PreOrder` offers; flip it once
+ * billing is on (docs/specs/hosted.md -> "Billing").
+ */
+export const CHECKOUT_OPEN = false;
+
+/** Where a buy button sends the buyer: the account origin's checkout page. */
+export const CHECKOUT_PAGE = "https://hosted.dormouse.sh/checkout";
+
 /** One purchasable plan, at the price it is on sale at today. */
 export type Tier = {
   id: "monthly" | "annual" | "founding";
@@ -93,6 +103,12 @@ export function foundingTier(): Tier {
   };
 }
 
+/** The checkout link for `tier`, by the plan name checkout sells it under. */
+export function checkoutUrl(tier: Tier): string {
+  const plan = tier.id === "annual" ? "yearly" : tier.id;
+  return `${CHECKOUT_PAGE}?plan=${plan}`;
+}
+
 /** Every paid plan on sale, in the order the page shows them. */
 export function tiersOnSale(): Tier[] {
   return [HOSTED_MONTHLY, HOSTED_YEARLY, foundingTier()];
@@ -103,11 +119,11 @@ export function tiersOnSale(): Tier[] {
  * page prints.
  *
  * Prerendered with the rest of the prices so an assistant fetching the page
- * can quote them without running the counters. Availability is `PreOrder`
- * until checkout opens — the buttons explain what is left to build, so
- * claiming `InStock` here would be the page's only false statement.
+ * can quote them without running the counters. Availability follows
+ * `checkoutOpen`: `PreOrder` while the buttons explain what is left to build,
+ * since claiming `InStock` then would be the page's only false statement.
  */
-export function pricingJsonLd(pageUrl: string): string {
+export function pricingJsonLd(pageUrl: string, checkoutOpen = CHECKOUT_OPEN): string {
   const data = {
     "@context": "https://schema.org",
     "@type": "Product",
@@ -123,7 +139,7 @@ export function pricingJsonLd(pageUrl: string): string {
       price: String(tier.price),
       priceCurrency: "USD",
       url: `${pageUrl}#pricing`,
-      availability: "https://schema.org/PreOrder",
+      availability: `https://schema.org/${checkoutOpen ? "InStock" : "PreOrder"}`,
       priceSpecification: {
         "@type": "UnitPriceSpecification",
         price: String(tier.price),
