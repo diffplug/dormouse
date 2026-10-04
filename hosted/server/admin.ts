@@ -3,10 +3,8 @@ import type { Context, Hono } from "hono";
 import { cookieAdmin } from "./account-gate";
 import { foundingSold, openCohort, withBilling } from "./billing";
 import type { BillingHost } from "./billing-routes";
+import { ADMIN_METRICS_PATH, type AdminMetricsBody } from "./metric-labels";
 import { readMetrics } from "./metrics";
-
-/** The admin metrics view's JSON: the account app's `/admin/metrics` reads it. */
-export const ADMIN_METRICS_PATH = "/api/admin/metrics";
 
 /**
  * The admin's metrics: the last 30 days' daily counts, all-time totals, and
@@ -25,6 +23,6 @@ export function adminRoutes(app: Hono<any>, host: (c: Context) => BillingHost) {
           return { sold, open: openCohort(sold) };
         }),
     ]);
-    return c.json({ ...metrics, founding });
+    return c.json({ ...metrics, founding } satisfies AdminMetricsBody);
   });
 }

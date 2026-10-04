@@ -1,25 +1,16 @@
 import { useEffect, useState } from "react";
-import { HOSTED_REFS } from "../../lib/src/lib/hosted-links";
-import { CHECKOUT_PLANS } from "../../website/src/lib/hosted-pricing";
-import type { MetricRow } from "../server/metrics";
+import { getAdminMetrics } from "./api";
+import { PLAN_LABELS, REF_LABELS, type AdminMetricsBody } from "../server/metric-labels";
 
 /** The admin's metrics view (docs/specs/hosted.md -> "Metrics"): the account app's `/admin/metrics`. */
 export const ADMIN_METRICS_PAGE = "/admin/metrics";
 
-interface Metrics {
-  days: number;
-  recent: MetricRow[];
-  totals: Omit<MetricRow, "day">[];
-  /** Founding purchases per cohort and the open one; null while billing is off. */
-  founding: { sold: number[]; open: { cohort: number; seatsLeft: number } | null } | null;
-}
+type Load = { state: "loading" } | { state: "refused" } | { state: "failed"; message: string } | { state: "ready"; metrics: AdminMetricsBody };
 
-type Load = { state: "loading" } | { state: "signed-out" } | { state: "refused" } | { state: "failed" } | { state: "ready"; metrics: Metrics };
+type Counted = { event: string; label: string; count: number };
 
-const REF_ROWS = [...Object.values(HOSTED_REFS), "other", "none"];
-
-/** The sum of `rows` matching `event`, and `label` when given. */
-const sum = (rows: readonly { event: string; label: string; count: number }[], event: string, label?: (l: string) => boolean) =>
+/** The sum of `rows` counting `event`, under a label `label` admits when given. */
+const sum = (rows: readonly Counted[], event: string, label?: (l: string) => boolean) =>
   rows.reduce((total, row) => (row.event === event && (!label || label(row.label)) ? total + row.count : total), 0);
 
 /** A bar as wide as `value` is of `max`. */
@@ -34,14 +25,10 @@ function Bar({ value, max }: { value: number; max: number }) {
 export function AdminMetrics() {
   const [load, setLoad] = useState<Load>({ state: "loading" });
   useEffect(() => {
-    void fetch("/api/admin/metrics", { credentials: "same-origin", cache: "no-store" })
-      .then(async (response) => {
-        if (response.status === 401) return setLoad({ state: "signed-out" });
-        if (response.status === 404) return setLoad({ state: "refused" });
-        if (!response.ok) return setLoad({ state: "failed" });
-        setLoad({ state: "ready", metrics: (await response.json()) as Metrics });
-      })
-      .catch(() => setLoad({ state: "failed" }));
+    getAdminMetrics().then(
+      (metrics) => setLoad(metrics ? { state: "ready", metrics } : { state: "refused" }),
+      (error: Error) => setLoad({ state: "failed", message: error.message }),
+    );
   }, []);
 
   return (
@@ -56,14 +43,12 @@ export function AdminMetrics() {
         <h1>Metrics</h1>
         {load.state === "loading" ? (
           <p className="intro">Loading…</p>
-        ) : load.state === "signed-out" ? (
-          <p className="intro">
-            <a href="/login">Sign in</a> as the admin, then open this page again.
-          </p>
         ) : load.state === "refused" ? (
-          <p className="intro">Not found.</p>
+          <p className="intro">
+            Only the admin sees this page. <a href="/login">Sign in</a> as the admin, then open it again.
+          </p>
         ) : load.state === "failed" ? (
-          <p className="error">Metrics are unavailable. Reload to try again.</p>
+          <p className="error">{load.message}</p>
         ) : (
           <MetricsView metrics={load.metrics} />
         )}
@@ -72,7 +57,7 @@ export function AdminMetrics() {
   );
 }
 
-function MetricsView({ metrics }: { metrics: Metrics }) {
+function MetricsView({ metrics }: { metrics: AdminMetricsBody }) {
   const { recent, totals, founding, days } = metrics;
   const events = [...new Set(totals.map((row) => row.event))].sort();
   const dates = Array.from({ length: days }, (_, back) => {
@@ -80,7 +65,14 @@ function MetricsView({ metrics }: { metrics: Metrics }) {
     day.setUTCDate(day.getUTCDate() - (days - 1 - back));
     return day.toISOString().slice(0, 10);
   });
-  const byRef = REF_ROWS.map((ref) => {
+  // Each event's count per day, in one pass.
+  const perDay = new Map<string, Map<string, number>>();
+  for (const row of recent) {
+    const days = perDay.get(row.event) ?? new Map<string, number>();
+    days.set(row.day, (days.get(row.day) ?? 0) + row.count);
+    perDay.set(row.event, days);
+  }
+  const byRef = REF_LABELS.map((ref) => {
     const endsWith = (label: string) => label.endsWith(`:${ref}`);
     return {
       ref,
@@ -89,7 +81,7 @@ function MetricsView({ metrics }: { metrics: Metrics }) {
       completed: sum(recent, "checkout.completed", endsWith),
     };
   }).filter((row) => row.visits || row.started || row.completed);
-  const byPlan = [...CHECKOUT_PLANS, "other"].map((plan) => {
+  const byPlan = PLAN_LABELS.map((plan) => {
     const startsWith = (label: string) => label.startsWith(`${plan}:`);
     return {
       plan,
@@ -192,7 +184,7 @@ function MetricsView({ metrics }: { metrics: Metrics }) {
           </thead>
           <tbody>
             {events.map((event) => {
-              const daily = dates.map((day) => sum(recent.filter((row) => row.day === day), event));
+              const daily = dates.map((day) => perDay.get(event)?.get(day) ?? 0);
               const peak = Math.max(...daily);
               const labels = totals.filter((row) => row.event === event && row.label !== "");
               return (

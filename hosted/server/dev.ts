@@ -11,10 +11,10 @@ import { EmailDev, SecureRandom, SystemTime } from "pgstencil";
 import { adminRoutes } from "./admin";
 import { stripeDevBilling } from "./billing-dev";
 import { BILLING_WEBHOOK_PATH, billingRoutes } from "./billing-routes";
-import { recordLogin } from "./metrics";
 import { authPolicy } from "./policy";
 import { migrations } from "./migrations";
 import { allowedDevRequest } from "./dev-host-guard";
+import { recordLogin } from "./account-gate";
 import { relayAccountRoutes, type RelayAccountHost } from "./relay-account";
 import { voiceTokenRoutes } from "./voice";
 

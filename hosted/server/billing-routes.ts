@@ -12,22 +12,16 @@ import {
   BillingError,
   foundingSold,
   openCohort,
+  planOfPrice,
   REFUND_DAYS,
   withBilling,
   type BillingSetup,
   type Plan,
 } from "./billing";
 import { accessSql, entitledSql, subscribedSql } from "./entitlement";
-import {
-  bestEffort,
-  countMetric,
-  NO_REF,
-  planLabel,
-  recordMetric,
-  refLabel,
-  rememberCheckoutRef,
-  type MetricEvent,
-} from "./metrics";
+import { HOSTED_REF_PARAM } from "../../lib/src/lib/hosted-links";
+import { NO_REF, planLabel, refLabel } from "./metric-labels";
+import { bestEffort, countMetric, recordMetric, rememberCheckoutRef } from "./metrics";
 
 /** What one request's account deployment provides to the billing routes. */
 export interface BillingHost extends AccountHost {
@@ -238,7 +232,7 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
   let cohorts: { at: number; status: number; text: string } | undefined;
   app.get(COHORT_ENDPOINT, async (c) => {
     // The Hosted page's one request: a visit, counted by the ref it arrived with.
-    recordMetric(c, host(c).databaseUrl, "hosted_page.ref", refLabel(c.req.query("ref")));
+    recordMetric(c, host(c).databaseUrl, "hosted_page.ref", refLabel(c.req.query(HOSTED_REF_PARAM)));
     const now = Date.now();
     if (!cohorts || now - cohorts.at >= COHORT_CACHE_MS) {
       const response = await billed(c, async (billing, setup) => {
@@ -272,7 +266,6 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
  * once within `REFUND_DAYS` of starting, else `subscription.canceled`.
  */
 async function countBilling(databaseUrl: string, setup: BillingSetup, events: Stripe.Event[]) {
-  const counted: [MetricEvent, string][] = [];
   for (const event of events) {
     if (event.type === "checkout.session.completed" && event.data.object.mode === "subscription") {
       const [checkout] = await queryDatabase<{ plan: string; ref: string | null }>(
@@ -285,24 +278,17 @@ async function countBilling(databaseUrl: string, setup: BillingSetup, events: St
         SELECT done.plan, (SELECT ref FROM forgotten) AS ref FROM done`,
         [event.data.object.id],
       );
-      if (checkout) counted.push(["checkout.completed", `${planLabel(checkout.plan)}:${checkout.ref ?? NO_REF}`]);
+      if (checkout)
+        await countMetric(databaseUrl, "checkout.completed", `${planLabel(checkout.plan)}:${checkout.ref ?? NO_REF}`);
     } else if (event.type === "customer.subscription.deleted") {
       const subscription = event.data.object;
-      const price = subscription.items.data[0]?.price.id;
-      const plan =
-        price === setup.monthly
-          ? "monthly"
-          : price === setup.yearly
-            ? "yearly"
-            : setup.founding.includes(price ?? "")
-              ? "founding"
-              : null;
+      const plan = planOfPrice(setup, subscription.items.data[0]?.price.id);
       const lived = (subscription.ended_at ?? 0) - subscription.start_date;
+      // Cancelled at period end is a cancellation however short the period.
       const refunded = !subscription.cancel_at_period_end && lived < REFUND_DAYS * 86_400;
-      counted.push([refunded ? "subscription.refunded" : "subscription.canceled", planLabel(plan)]);
+      await countMetric(databaseUrl, refunded ? "subscription.refunded" : "subscription.canceled", planLabel(plan));
     }
   }
-  for (const [event, label] of counted) await countMetric(databaseUrl, event, label);
 }
 
 /**

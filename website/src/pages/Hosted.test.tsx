@@ -268,12 +268,15 @@ describe("the buy buttons", () => {
     expect(location.pathname + location.search + location.hash).toBe("/hosted/#pricing");
   });
 
-  it("count an unknown ref as other, and never forward it to checkout", async () => {
+  it("name an unknown ref on the cohort read alone, never on checkout", async () => {
     history.replaceState(null, "", "/hosted/?ref=ada%40example.test");
     const el = await mount(async () => new Response("{}", { status: 404 }), true);
     const links = [...el.querySelectorAll('a[aria-label^="Buy "]')].map((a) => a.getAttribute("href"));
     expect(links).toEqual([`${CHECKOUT_PAGE}?plan=monthly`, `${CHECKOUT_PAGE}?plan=founding`]);
-    expect(vi.mocked(fetch).mock.calls.map(([url]) => String(url))).toEqual([`${COHORT_ENDPOINT}?ref=other`]);
+    // The server counts it as `other`.
+    expect(vi.mocked(fetch).mock.calls.map(([url]) => String(url))).toEqual([
+      `${COHORT_ENDPOINT}?ref=ada%40example.test`,
+    ]);
     expect(location.search).toBe("");
   });
 

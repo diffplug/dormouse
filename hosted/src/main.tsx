@@ -25,5 +25,7 @@ else {
   const enrollment = takeEnrollment();
   const checkout = takeCheckout();
   const returned = takeReturn();
-  root.render(<App enrollment={enrollment} checkout={checkout} returned={returned} />);
+  root.render(
+    <App enrollment={enrollment} checkout={checkout?.plan} checkoutRef={checkout?.ref} returned={returned} />,
+  );
 }

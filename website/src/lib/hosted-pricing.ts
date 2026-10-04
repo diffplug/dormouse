@@ -10,6 +10,9 @@
  * See docs/specs/pricing.md -> Published prices and -> The Hosted page.
  */
 
+// Relative, not `dormouse-lib`: Hosted bundles this module too.
+import { HOSTED_REF_PARAM } from "../../../lib/src/lib/hosted-links";
+
 /**
  * List prices, which the founding ladder climbs toward and is struck against.
  *
@@ -112,7 +115,7 @@ export function foundingTier(): Tier {
 
 /** The checkout link for `tier`, carrying the visit's allowlisted `ref` (docs/specs/pricing.md -> "The Hosted page"). */
 export const checkoutUrl = (tier: Tier, ref?: string) =>
-  `${CHECKOUT_PAGE}?plan=${tier.id}${ref ? `&ref=${ref}` : ""}`;
+  `${CHECKOUT_PAGE}?plan=${tier.id}${ref ? `&${HOSTED_REF_PARAM}=${ref}` : ""}`;
 
 /** Every paid plan on sale, in the order the page shows them. */
 export function tiersOnSale(): Tier[] {

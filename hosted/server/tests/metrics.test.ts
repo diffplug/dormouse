@@ -3,16 +3,9 @@ import { createTestContext } from "pgstencil/testing";
 import { queryDatabase } from "pgstencil/postgres";
 import { HOSTED_REFS } from "../../../lib/src/lib/hosted-links";
 import { migrations } from "../migrations";
-import {
-  METRIC_LABELS,
-  countMetric,
-  loginMethod,
-  metricLabel,
-  planLabel,
-  readMetrics,
-  refLabel,
-  type MetricEvent,
-} from "../metrics";
+import { loginMethod } from "../account-gate";
+import { METRIC_LABELS, metricLabel, planLabel, refLabel, type MetricEvent } from "../metric-labels";
+import { countMetric, readMetrics } from "../metrics";
 import { workerDatabases } from "./worker-roles";
 
 // docs/specs/hosted.md -> "Metrics": aggregate daily counts under fixed

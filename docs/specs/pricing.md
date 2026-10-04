@@ -15,7 +15,7 @@
 
 **Prices, inclusions, and the FAQ are prerendered text**, and the page emits `Product` / `Offer` JSON-LD carrying one `Offer` per paid plan at its current price, so an assistant fetching the page can quote it. **Offers are `PreOrder` until `CHECKOUT_OPEN`, then `InStock`.**
 
-**Must forward the `ref` a visit arrived with, and nothing else about it**: the page takes it off the address bar after hydration, names it on the cohort read (`other` for one off the allowlist), and carries an allowlisted one on its checkout links; no cookie, storage, or beacon. Counting and the allowlist: `docs/specs/hosted.md` -> "Metrics".
+**Must forward the `ref` a visit arrived with, and nothing else about it**: the page takes it off the address bar after hydration, names it on the cohort read, and carries it on its checkout links only when allowlisted; no cookie, storage, or beacon. Counting and the allowlist: `docs/specs/hosted.md` -> "Metrics".
 
 **Every price on the site has one owner**: the page, the structured data, and the tests read `website/src/lib/hosted-pricing.ts` rather than restating a number.
 

@@ -14,6 +14,8 @@
  */
 
 import { FOUNDING_COHORTS_CLOSED } from "./hosted-pricing";
+// Relative, not `dormouse-lib`: Hosted bundles this module too.
+import { HOSTED_REF_PARAM } from "../../../lib/src/lib/hosted-links";
 
 /** Where both come from, in one request: the account Worker's route on this origin. */
 export const COHORT_ENDPOINT = "/api/hosted/cohorts";
@@ -77,7 +79,7 @@ function founders(value: unknown): Founders | null {
 /** Reads the live half, telling the server the visit's `ref` (`takeVisitRef`), which it counts. */
 export async function fetchCohort(signal?: AbortSignal, ref?: string): Promise<Cohort> {
   try {
-    const url = ref ? `${COHORT_ENDPOINT}?ref=${encodeURIComponent(ref)}` : COHORT_ENDPOINT;
+    const url = ref ? `${COHORT_ENDPOINT}?${HOSTED_REF_PARAM}=${encodeURIComponent(ref)}` : COHORT_ENDPOINT;
     const response = await fetch(url, { signal, headers: { accept: "application/json" } });
     if (!response.ok) return { seatsLeft: null, founders: null };
     const body: unknown = await response.json();

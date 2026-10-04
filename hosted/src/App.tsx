@@ -40,6 +40,7 @@ import {
 import { takeEnrollment, type Enrollment } from "./enrollment";
 import { CheckoutView, PLAN_NAMES, PlanSection, WelcomeView } from "./Billing";
 import { forgetCheckout } from "./checkout";
+import type { HostedRef } from "../../lib/src/lib/hosted-links";
 
 type Page = "enroll" | "checkout" | "welcome" | "account" | "login";
 const PATHS: Record<Page, string> = {
@@ -65,11 +66,14 @@ const INTROS: Record<"welcome" | "account" | "login", string> = {
 export function App({
   enrollment,
   checkout,
+  checkoutRef,
   returned,
 }: {
   enrollment: Enrollment | null;
   /** A pending `/checkout` (null for a link naming no plan), undefined for none. */
   checkout: Plan | null | undefined;
+  /** The allowlisted ref that checkout's link carried (docs/specs/hosted.md -> "Metrics"). */
+  checkoutRef?: HostedRef;
   /** The checkout operation Stripe returned to `/billing` with. */
   returned: string | null;
 }) {
@@ -277,7 +281,7 @@ export function App({
       );
     });
   const buy = async (plan: Plan) => {
-    const url = await startCheckout(plan);
+    const url = await startCheckout(plan, checkoutRef);
     forgetCheckout();
     location.assign(url);
   };

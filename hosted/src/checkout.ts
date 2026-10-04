@@ -7,18 +7,20 @@ import { HOSTED_REF_PARAM, isHostedRef, type HostedRef } from "../../lib/src/lib
 // allowlisted ref the link carried, nothing else.
 const KEY = "dormouse-hosted-checkout";
 
-/** The allowlisted ref the pending checkout's link carried, counted when it starts (docs/specs/hosted.md -> "Metrics"). */
-let pendingRef: HostedRef | undefined;
-
-/** The ref {@link takeCheckout} found, for the checkout it starts. */
-export const checkoutRef = () => pendingRef;
-
 /** How long a pending plan waits for a provider sign-in to come back. */
 const PENDING_MS = 10 * 60 * 1000;
 
-function remember(plan: Plan | null) {
+/** A pending checkout: its plan (null for a link naming none sold) and its link's allowlisted ref, counted when it starts (docs/specs/hosted.md -> "Metrics"). */
+export interface PendingCheckout {
+  plan: Plan | null;
+  ref?: HostedRef;
+}
+
+const refOf = (ref: unknown) => (isHostedRef(ref) ? ref : undefined);
+
+function remember(pending: PendingCheckout | null) {
   try {
-    if (plan) sessionStorage.setItem(KEY, JSON.stringify({ plan, ref: pendingRef, at: Date.now() }));
+    if (pending?.plan) sessionStorage.setItem(KEY, JSON.stringify({ ...pending, at: Date.now() }));
     else sessionStorage.removeItem(KEY);
   } catch {
     // Without storage, provider sign-in returns to the account page instead.
@@ -30,24 +32,20 @@ function remember(plan: Plan | null) {
  * for a link naming no plan sold), or one a provider sign-in carried back to
  * `/account`; undefined when none is pending.
  */
-export function takeCheckout(): Plan | null | undefined {
+export function takeCheckout(): PendingCheckout | undefined {
   const { pathname, search } = location;
   if (pathname === "/checkout") {
     const query = new URLSearchParams(search);
     const plan = query.get("plan");
-    const ref = query.get(HOSTED_REF_PARAM);
-    pendingRef = isHostedRef(ref) ? ref : undefined;
-    const sold = isPlan(plan) ? plan : null;
-    remember(sold);
-    return sold;
+    const pending = { plan: isPlan(plan) ? plan : null, ref: refOf(query.get(HOSTED_REF_PARAM)) };
+    remember(pending);
+    return pending;
   }
   if (pathname !== "/account") return undefined;
   try {
     const { plan, ref, at } = JSON.parse(sessionStorage.getItem(KEY) ?? "{}");
     remember(null);
-    if (!isPlan(plan) || !(Date.now() - at < PENDING_MS)) return undefined;
-    pendingRef = isHostedRef(ref) ? ref : undefined;
-    return plan;
+    return isPlan(plan) && Date.now() - at < PENDING_MS ? { plan, ref: refOf(ref) } : undefined;
   } catch {
     return undefined;
   }

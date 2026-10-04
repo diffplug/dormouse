@@ -16,9 +16,9 @@ import {
   billingRoutes,
 } from "../billing-routes";
 import { DEV_FOUNDING_PRICES, stripeDevBilling } from "../billing-dev";
-import { ADMIN_METRICS_PATH } from "../admin";
+import { ADMIN_METRICS_PATH } from "../metric-labels";
 import { ADMIN_EMAIL } from "../entitlement";
-import { NEW_ACCOUNT_MS } from "../metrics";
+import { NEW_ACCOUNT_MS } from "../account-gate";
 import { VOICE_DAILY_CAP } from "../voice";
 import { migrations } from "../migrations";
 import {

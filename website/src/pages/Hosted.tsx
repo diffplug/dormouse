@@ -50,7 +50,8 @@ import {
   pricingJsonLd,
   type Tier,
 } from "../lib/hosted-pricing";
-import { takeVisitRef, type VisitRef } from "../lib/hosted-ref";
+import { takeVisitRef } from "../lib/hosted-ref";
+import { isHostedRef } from "dormouse-lib/lib/hosted-links";
 import { canonicalUrl, siteMeta, sitePath } from "../lib/site-meta";
 
 const PAGE_PATH = "/hosted";
@@ -159,17 +160,20 @@ function Price({ tier }: { tier: Pick<Tier, "price" | "per" | "listPrice"> }) {
   );
 }
 
-/** What a buy button does: open the unbuilt-checkout notice, or link to checkout carrying the visit's ref. */
-type OnBuy = ((tier: Tier) => void) | { ref?: string };
+/** What a buy button does: open the unbuilt-checkout notice, or null to link to checkout. */
+type OnBuy = ((tier: Tier) => void) | null;
+
+/** The cards' buy buttons: what they do, and the visit's allowlisted ref a checkout link carries. */
+type Buy = { onBuy: OnBuy; checkoutRef?: string };
 
 /**
  * "Buy" plus what it buys on the label a screen reader reads, since it hears
  * the buttons out of their cards.
  */
-function BuyButton({ tier, label, onBuy }: { tier: Tier; label: string; onBuy: OnBuy }) {
-  if (typeof onBuy !== "function")
+function BuyButton({ tier, label, onBuy, checkoutRef }: { tier: Tier; label: string } & Buy) {
+  if (!onBuy)
     return (
-      <a href={checkoutUrl(tier, onBuy.ref)} aria-label={`Buy ${tier.name}`} className={CARD_ACTION_CLASS}>
+      <a href={checkoutUrl(tier, checkoutRef)} aria-label={`Buy ${tier.name}`} className={CARD_ACTION_CLASS}>
         {label}
       </a>
     );
@@ -314,7 +318,7 @@ function FreeCard() {
   );
 }
 
-function HostedCard({ onBuy }: { onBuy: OnBuy }) {
+function HostedCard(buy: Buy) {
   // Monthly is the prerendered default: it is the reference price every other
   // number on the page is read against.
   const [yearly, setYearly] = useState(false);
@@ -330,7 +334,7 @@ function HostedCard({ onBuy }: { onBuy: OnBuy }) {
           ? "Two months free against monthly"
           : `Save $${YEARLY_SAVING} by paying yearly`
       }
-      action={<BuyButton tier={tier} label="Get Hosted" onBuy={onBuy} />}
+      action={<BuyButton tier={tier} label="Get Hosted" {...buy} />}
       footnote="30-day refund"
     >
       <Includes
@@ -347,7 +351,7 @@ function HostedCard({ onBuy }: { onBuy: OnBuy }) {
   );
 }
 
-function FoundingCard({ cohort, onBuy }: { cohort: Cohort; onBuy: OnBuy }) {
+function FoundingCard({ cohort, ...buy }: { cohort: Cohort } & Buy) {
   const tier = foundingTier();
   return (
     <PlanCard
@@ -359,7 +363,7 @@ function FoundingCard({ cohort, onBuy }: { cohort: Cohort; onBuy: OnBuy }) {
           ? `${cohort.seatsLeft} of ${FOUNDING_COHORT_SIZE} seats left at $${tier.price}`
           : null
       }
-      action={<BuyButton tier={tier} label="Become a founder" onBuy={onBuy} />}
+      action={<BuyButton tier={tier} label="Become a founder" {...buy} />}
       footnote="30-day refund"
     >
       <FoundersRow founders={cohort.founders} />
@@ -460,17 +464,18 @@ export default function Hosted({ checkoutOpen = CHECKOUT_OPEN }: { checkoutOpen?
   const [checkoutTodo, setCheckoutTodo] = useState<Tier | null>(null);
   const closeTodo = useCallback(() => setCheckoutTodo(null), []);
   // Taken once, after hydration: the prerendered links carry no ref.
-  const visit = useRef<VisitRef | null>(null);
-  const [ref, setRef] = useState<string>();
+  const visit = useRef<{ ref?: string } | null>(null);
+  const [checkoutRef, setCheckoutRef] = useState<string>();
 
   useEffect(() => {
-    visit.current ??= takeVisitRef();
-    setRef(visit.current.forwarded);
+    visit.current ??= { ref: takeVisitRef() };
+    const { ref } = visit.current;
+    setCheckoutRef(isHostedRef(ref) ? ref : undefined);
     const controller = new AbortController();
-    void fetchCohort(controller.signal, visit.current.counted).then(setCohort);
+    void fetchCohort(controller.signal, ref).then(setCohort);
     return () => controller.abort();
   }, []);
-  const onBuy: OnBuy = checkoutOpen ? { ref } : setCheckoutTodo;
+  const buy: Buy = { onBuy: checkoutOpen ? null : setCheckoutTodo, checkoutRef };
 
   return (
     <DocsLayout
@@ -492,8 +497,8 @@ export default function Hosted({ checkoutOpen = CHECKOUT_OPEN }: { checkoutOpen?
             in the same order on a phone. */}
         <div className="grid gap-4 md:grid-cols-3">
           <FreeCard />
-          <HostedCard onBuy={onBuy} />
-          <FoundingCard cohort={cohort} onBuy={onBuy} />
+          <HostedCard {...buy} />
+          <FoundingCard cohort={cohort} {...buy} />
         </div>
 
         <p className={`mt-5 text-sm ${MUTED_TEXT_CLASS}`}>

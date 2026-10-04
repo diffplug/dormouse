@@ -268,7 +268,7 @@ Each Worker counts what it serves into `dormouse_metrics_daily`: one row per UTC
 - **Must keep daily rows indefinitely**, since they describe no one. A checkout's ref (`dormouse_checkout_refs`) lives until its completion is counted, or `CHECKOUT_REF_DAYS`, swept by the account's Cron Trigger.
 - **Must answer `GET /api/admin/metrics` to the admin alone**: a cookie route under the exact-`Origin` rule, 401 without a login, 404 for any login whose verified email is not `ADMIN_EMAIL`. It answers the last 30 days' rows, all-time totals, and founding purchases per cohort with the open one; the account app's `/admin/metrics` renders it.
 
-Source of truth: `METRIC_LABELS`, `recordMetric`, and `recordLogin` in `hosted/server/metrics.ts`; `adminRoutes` in `hosted/server/admin.ts`; `cookieAdmin` in `hosted/server/account-gate.ts`; `hosted/server/dormouse-migrations/007_metrics.sql`; `AdminMetrics` in `hosted/src/AdminMetrics.tsx`. Pinned by `hosted/server/tests/metrics.test.ts` and `hosted/server/tests/billing.test.ts`.
+Source of truth: `METRIC_LABELS` in `hosted/server/metric-labels.ts`; `recordMetric` in `hosted/server/metrics.ts`; `recordLogin` and `cookieAdmin` in `hosted/server/account-gate.ts`; `adminRoutes` in `hosted/server/admin.ts`; `hosted/server/dormouse-migrations/007_metrics.sql`; `AdminMetrics` in `hosted/src/AdminMetrics.tsx`. Pinned by `hosted/server/tests/metrics.test.ts` and `hosted/server/tests/billing.test.ts`.
 
 ## Development and release
 
