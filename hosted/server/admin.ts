@@ -1,9 +1,3 @@
-// Rules: docs/specs/hosted.md -> "Managed voice".
+// The one address the entitlement keys on until billing ships
+// (hosted/server/entitlement.ts; docs/specs/hosted.md -> "Entitlement").
 export const ADMIN_EMAIL = "ned.twigg@diffplug.com";
-
-export function isAdmin(user: {
-  email?: unknown;
-  emailVerified?: unknown;
-}): boolean {
-  return user.emailVerified === true && user.email === ADMIN_EMAIL;
-}

@@ -26,12 +26,18 @@ import {
   relayRules,
   type RulesFor,
 } from "../headers";
-import { ADMIN_EMAIL } from "../admin";
-import { cookieAdmin } from "../account-gate";
+import { cookieEntitled } from "../account-gate";
 import { RECENT_LOGIN_REQUIRED, relayAccountRoutes } from "../relay-account";
 import type { RelayRoomRpc } from "../relay-room-contract";
 import { voiceApp } from "../voice-app";
 import { workerApp } from "../worker-app";
+
+// These gate tests run without a database: every login they present is
+// entitled, read through the seam rather than a `"user"` row.
+vi.mock(import("../entitlement"), async (actual) => ({
+  ...(await actual()),
+  entitled: async () => true,
+}));
 import {
   ENTRIES,
   NAMES,
@@ -499,11 +505,11 @@ test("the relay bundle reads no cookie and never asks auth", () => {
 test("the cookie gate refuses a presented foreign Origin on every method", async () => {
   const origin = "https://account.example.test";
   const app = new Hono();
-  const gate = cookieAdmin(
+  const gate = cookieEntitled(
     () => ({
       databaseUrl: "postgres://user:pass@127.0.0.1:9/none",
       auth: async () =>
-        Response.json({ user: { id: "admin", email: ADMIN_EMAIL, emailVerified: true }, session: {} }),
+        Response.json({ user: { id: "admin" }, session: {} }),
     }),
     () => new Response(null, { status: 403 }),
   );
@@ -526,7 +532,7 @@ test("the cookie gate needs no login creation time; approval reads it and fails 
     databaseUrl: "postgres://user:pass@127.0.0.1:9/none",
     auth: async () =>
       Response.json({
-        user: { id: "admin", email: ADMIN_EMAIL, emailVerified: true },
+        user: { id: "admin" },
         session: createdAt === undefined ? {} : { createdAt },
       }),
     approveLimit: {
@@ -539,10 +545,10 @@ test("the cookie gate needs no login creation time; approval reads it and fails 
     },
   });
   const origin = "https://account.example.test";
-  // The voice-token routes' gate admits the admin whatever `createdAt` says.
+  // The voice-token routes' gate admits an entitled login whatever `createdAt` says.
   for (const createdAt of [undefined, "garbage", new Date().toISOString()]) {
     const app = new Hono();
-    app.get("/gated", cookieAdmin(host(createdAt), () => new Response(null, { status: 403 })), (c) =>
+    app.get("/gated", cookieEntitled(host(createdAt), () => new Response(null, { status: 403 })), (c) =>
       c.json(c.get("login").userId),
     );
     const response = await app.request(`${origin}/gated`);

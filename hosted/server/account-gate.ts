@@ -2,7 +2,7 @@
 // docs/specs/security-hosted.md -> "Origin boundary".
 import type { Context, MiddlewareHandler } from "hono";
 import { queryDatabase } from "pgstencil/postgres";
-import { isAdmin } from "./admin";
+import { entitled } from "./entitlement";
 
 /** What one request's account deployment provides to its cookie routes. */
 export interface AccountHost {
@@ -33,10 +33,10 @@ export interface AccountLogin {
  * this origin, and a state-changing request must present one — same-site
  * pages, the relay and voice origins among them, share the login cookie —
  * then the Better Auth handler's `get-session` answers the login (401
- * without one), and only the verified admin passes (`refuse` answers anyone
- * else). Sets `login`.
+ * without one), and only an entitled account passes, read per request
+ * (`refuse` answers anyone else). Sets `login`.
  */
-export function cookieAdmin(
+export function cookieEntitled(
   host: (c: Context) => AccountHost,
   refuse: (c: Context) => Response,
 ): MiddlewareHandler<{ Variables: { login: AccountLogin } }> {
@@ -57,11 +57,11 @@ export function cookieAdmin(
     );
     if (!response.ok) throw new Error("Login lookup failed");
     const session = (await response.json()) as {
-      user?: { id: string; email?: unknown; emailVerified?: unknown };
+      user?: { id: string };
       session?: { createdAt?: unknown };
     } | null;
     if (!session?.user) return c.json({ message: "Sign in first." }, 401);
-    if (!isAdmin(session.user)) return refuse(c);
+    if (!(await entitled(host(c).databaseUrl, session.user.id))) return refuse(c);
     c.set("login", {
       userId: session.user.id,
       createdAt: session.session?.createdAt,
