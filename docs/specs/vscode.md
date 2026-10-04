@@ -270,6 +270,8 @@ Source of truth: `vscode-ext/src/peer-link.ts`; `vscode-ext/src/peer-link-protoc
 
 ## Future
 
+**Scope: vscode-native** — unordered: [Webview→host Surface-state channel](#webviewhost-surface-state-channel), [Context keys](#context-keys), [Commands](#commands), and [Other host integrations](#other-host-integrations).
+
 ### Webview→host Surface-state channel
 
 A webview→host Surface-state message would let the native-chrome union count browser-Surface TODOs, which the PTY-keyed `alert:state` cannot carry (`docs/specs/alert.md`, `docs/specs/transport.md`).

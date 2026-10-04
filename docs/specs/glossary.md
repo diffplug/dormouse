@@ -281,6 +281,8 @@ Remote-only vocabulary (**Viewer**, and the wire-level `DirectoryEntry` projecti
 
 ## Future
 
+**Scope: model-extensions** — unordered:
+
 - **Typed precondition errors.** The Liskov contract's enforcement: a gated call against the wrong state (e.g. `writePty` on a non-`Live` Process) fails with a typed error naming the violated precondition, replacing today's silent early return.
 - **Canopy — a VR Client.** The 3D/WebXR rendering lab (`docs/specs/webgl-text.md`) becomes a second [Client](#roles) beside Pocket, controlling a Burrow over the same protocol. Nothing of the Client half is built; canopy is Storybook-only.
 - **Dormouse Burrow — a headless Burrow.** A Burrow with no local UI, so a machine nobody sits at can still be paired with. It changes no role: the same enrollment, ACL, and pairing approval, with the approval surfaced somewhere other than a Wall.

@@ -127,6 +127,8 @@ The `APPLE_SIGN_PASS` exposure is a known gap; its remedy is staged under `## Fu
 
 ## Future
 
+**Scope: notarization-profile** — [Notarization credentials](#notarization-credentials).
+
 ### Notarization credentials
 
 Use `notarytool store-credentials` plus `--keychain-profile` to move password exposure to one short provisioning call instead of every submission. Update the release runbook and verify with live Apple credentials before promotion.

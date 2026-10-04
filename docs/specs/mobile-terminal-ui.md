@@ -121,7 +121,7 @@ Source of truth: `MobileTerminalUi` in `lib/src/components/MobileTerminalUi.tsx`
 
 ## Future
 
-Potential later additions:
+**Scope: mobile-backlog** — unprioritized:
 
 * Real recent commands and a Draft scratchpad (both reserves are placeholder copy today).
 * Dual-pane copy/paste.
