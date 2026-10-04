@@ -731,8 +731,9 @@ test("managed voice: only the verified admin mints, speaks, and revokes", async 
       body: { text: "Build passed.", model_id: "eleven_flash_v2_5" },
     },
   ]);
-  // A successful speech schedules one history sweep (undelayed in the test entry).
-  expect(await f.waitUntilCalls()).toBe(1);
+  // A successful speech schedules one history sweep (undelayed in the test
+  // entry), beside its metric (docs/specs/hosted.md -> "Metrics").
+  expect(await f.waitUntilCalls()).toBe(2);
   await vi.waitFor(() =>
     expect(f.elevenLabs.sweeps).toEqual([
       `https://api.elevenlabs.io/v1/history?page_size=${SPEECH_SWEEP_CAP}`,
@@ -807,8 +808,9 @@ test("managed voice: only the verified admin mints, speaks, and revokes", async 
     403,
   );
 
-  // No refused or failed speech (400, 401, 403, 429, 502) scheduled a sweep.
-  expect(await f.waitUntilCalls()).toBe(1);
+  // No refused or failed speech (400, 401, 403, 429, 502) scheduled a
+  // sweep: the two 502s and the 429 scheduled only their metrics.
+  expect(await f.waitUntilCalls()).toBe(5);
 
   for (const sameSite of SAME_SITE)
     expect(

@@ -1,5 +1,7 @@
 import type { CheckoutPlan as Plan } from "../../website/src/lib/hosted-pricing";
 import { providerIds, providerNames } from "../server/providers.js";
+import { ADMIN_METRICS_PATH, type AdminMetricsBody } from "../server/metric-labels";
+import type { CheckoutRef } from "./checkout";
 import type { ProviderId } from "../server/providers.js";
 
 export const providers = providerIds;
@@ -109,6 +111,14 @@ export async function revokeVoiceToken(id: string) {
     throw failed();
 }
 
+/** The admin's metrics; null for a login that is not the admin's, or none (docs/specs/hosted.md -> "Metrics"). */
+export async function getAdminMetrics(): Promise<AdminMetricsBody | null> {
+  const response = await request(ADMIN_METRICS_PATH, undefined, "Metrics are temporarily unavailable. Reload to try again.");
+  if (response.status === 401 || response.status === 404) return null;
+  if (!response.ok) throw failed();
+  return (await response.json()) as AdminMetricsBody;
+}
+
 export interface Computer {
   burrowId: string;
   enrolledAt: string;
@@ -200,8 +210,9 @@ const toStripe = async (response: Response) =>
 
 /** Throws while this deployment does not sell, and when signed out. */
 export const getBilling = async () => (await (await billing("")).json()) as BillingSummary;
-export const startCheckout = async (plan: Plan) =>
-  toStripe(await billing("/checkout", { method: "POST", body: JSON.stringify({ plan }) }));
+/** Starts checkout for `plan`, with the allowlisted ref its link carried. */
+export const startCheckout = async (plan: Plan, ref: CheckoutRef | undefined) =>
+  toStripe(await billing("/checkout", { method: "POST", body: JSON.stringify({ plan, ref }) }));
 export const confirmCheckout = async (checkout: string) =>
   (await (await billing("/confirm", { method: "POST", body: JSON.stringify({ checkout }) })).json()) as BillingSummary;
 export const openPortal = async () => toStripe(await billing("/portal", { method: "POST" }));

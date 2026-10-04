@@ -370,6 +370,10 @@ test("setup, sign-in, and a presence proof end to end, scoped to the account tha
   expect(signed.json).toMatchObject({ accountId: owner, passkeyPublicKey: phone.publicKey });
   const { sessionToken, expiresAt } = signed.json!;
   expect(Math.abs(expiresAt - (Date.now() + 12 * 3600_000))).toBeLessThan(60_000);
+  // Counted after the response, as a number and nothing else (docs/specs/hosted.md -> "Metrics").
+  await expect.poll(() => f.sql(`SELECT event, label, count::int FROM dormouse_metrics_daily`)).toEqual([
+    { event: "pocket.signin", label: "", count: 1 },
+  ]);
 
   expect(
     (await f.call("GET", API_ROUTES.burrows, { bearer: sessionToken })).json,
@@ -1169,6 +1173,9 @@ test("push end to end: a Burrow's sealed envelope reaches the push service encry
   });
   expect(sent.json).toEqual({ delivered: 1, expired: 0, unknown: 0, failed: 0 });
   expect(f.pushed).toHaveLength(1);
+  await expect
+    .poll(() => f.sql(`SELECT count::int FROM dormouse_metrics_daily WHERE event = 'push.sent'`))
+    .toEqual([{ count: 1 }]);
   const [request] = f.pushed;
   expect(request.url).toBe(phone.subscription.endpoint);
   expect(request.headers["content-encoding"]).toBe("aes128gcm");

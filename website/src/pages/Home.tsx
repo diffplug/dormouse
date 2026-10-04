@@ -24,6 +24,7 @@ import standaloneLatest from "@standalone-latest";
 import { prefersReducedMotion } from "dormouse-lib/lib/ui-geometry";
 import { SITE_CODE_CLASS, SITE_LINK_CLASS } from "../components/site-tokens";
 import { sitePath } from "../lib/site-meta";
+import { HOSTED_REFS, withHostedRef } from "dormouse-lib/lib/hosted-links";
 
 /** Multiplier on scroll required to drive the hero animation.
  *  1 = baseline, 2 = half as sensitive, 0.5 = twice as sensitive. */
@@ -834,7 +835,7 @@ export default function Home() {
               says exactly what that guarantees. The{" "}
               <a href={sitePath("/self-host")} className={SITE_LINK_CLASS}>self-host runbook</a>{" "}
               walks the whole install. If you would rather skip running it,
-              {" "}<a href={`${sitePath("/hosted")}#remote-control`} className={SITE_LINK_CLASS}>Dormouse Hosted</a>{" "}
+              {" "}<a href={withHostedRef(sitePath("/hosted"), HOSTED_REFS.home, "remote-control")} className={SITE_LINK_CLASS}>Dormouse Hosted</a>{" "}
               runs it for you.
             </p>
             <p className="text-lg leading-relaxed opacity-70">
@@ -1002,7 +1003,7 @@ export default function Home() {
               </div>
             </div>
             <p className="mt-7 text-lg">
-              <a href={sitePath("/hosted")} className={SITE_LINK_CLASS}>See what Dormouse Hosted costs</a>
+              <a href={withHostedRef(sitePath("/hosted"), HOSTED_REFS.home)} className={SITE_LINK_CLASS}>See what Dormouse Hosted costs</a>
             </p>
           </div>
         </section>
@@ -1107,7 +1108,7 @@ export default function Home() {
             <a href={sitePath("/dor")} className="underline hover:opacity-100">CLI reference</a>
             <a href={sitePath("/agent-skill")} className="underline hover:opacity-100">Agent skill</a>
             <a href={sitePath("/self-host")} className="underline hover:opacity-100">How to self-host</a>
-            <a href={sitePath("/hosted")} className="underline hover:opacity-100">Dormouse Hosted</a>
+            <a href={withHostedRef(sitePath("/hosted"), HOSTED_REFS.home)} className="underline hover:opacity-100">Dormouse Hosted</a>
             <a href={sitePath("/security")} className="underline hover:opacity-100">Security</a>
             <a href={sitePath("/privacy")} className="underline hover:opacity-100">Hosted privacy</a>
             <a href={sitePath("/terms")} className="underline hover:opacity-100">Hosted terms</a>

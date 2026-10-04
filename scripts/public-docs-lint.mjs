@@ -286,12 +286,13 @@ function checkRoutesToReferences() {
   // the guide owes nothing to the self-host runbook — lives on the entry it
   // applies to rather than as a set here.
   const README_OF = { guide: GUIDE, 'root-readme': ROOT_README };
-  // A link to the page itself, or to an anchor on it — in either spelling,
-  // because the host 308s the bare path to the trailing-slash one (`sitePath`
-  // in `website/src/lib/site-meta.ts`), so a document that writes the
-  // destination directly is as correct as one that writes the redirect.
+  // A link to the page itself, or to an anchor on it, with or without a query
+  // (a `ref` naming the link, docs/specs/hosted.md -> "Metrics") — in either
+  // spelling, because the host 308s the bare path to the trailing-slash one
+  // (`sitePath` in `website/src/lib/site-meta.ts`), so a document that writes
+  // the destination directly is as correct as one that writes the redirect.
   const satisfies = (href, path) =>
-    [path, `${path}/`].some((form) => href === form || href.startsWith(`${form}#`));
+    [path, `${path}/`].some((form) => href === form || href.startsWith(`${form}#`) || href.startsWith(`${form}?`));
   // Pages owing a README a link. Scoped past `homepage`, which the second half
   // checks — counting it here would leave this tripwire armed by a page whose
   // only obligation is on-site, so the README half could enforce nothing and

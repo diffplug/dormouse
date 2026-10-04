@@ -9,7 +9,7 @@
 
 | Worker | Origin | Serves | Holds |
 |---|---|---|---|
-| `dormouse-hosted` | `https://hosted.dormouse.sh` | the account frontend, `/api/auth/*`, `/api/providers`, `/api/ready`, voice tokens, the Relay's account routes ("Burrow enrollment"), billing ("Billing") | the login cookie, auth secrets, Hyperdrive, the approval rate limit, a binding to the relay's `RelayRoom`, the Stripe secrets |
+| `dormouse-hosted` | `https://hosted.dormouse.sh` | the account frontend, `/api/auth/*`, `/api/providers`, `/api/ready`, voice tokens, the Relay's account routes ("Burrow enrollment"), billing ("Billing"), the admin's metrics ("Metrics") | the login cookie, auth secrets, Hyperdrive, the approval rate limit, a binding to the relay's `RelayRoom`, the Stripe secrets |
 | `dormouse-relay` | `https://relay.dormouse.sh` | the Hosted Relay, its sockets, and Pocket ("Relay", "Relay sockets"), the one-time rendezvous and `/connect/` (`docs/specs/one-time.md` -> "Hosted rendezvous") | Hyperdrive, `OneTimeRoom`, `RelayRoom`, the one-time, sign-in, setup, and enrollment rate limits, `ACCOUNT_ORIGIN`, `RELAY_ENROLL_SECRET`, the VAPID pair |
 | `dormouse-voice` | `https://voice.dormouse.sh` | speak and the history sweep ("Managed voice") | `ELEVENLABS_API_KEY`, Hyperdrive |
 
@@ -17,7 +17,7 @@ Every Worker answers `/api/health`, 404s anything else under its non-page prefix
 
 **Must run committed Better Auth migrations before deploying code that needs them, never during a Worker request.** Postgres is reached through an uncached Hyperdrive binding.
 
-**Must grant `dormouse_relay` and `dormouse_voice` only what `hosted/server/runtime-roles.sql` lists, never default privileges**, so a new table needs a grant there; each reaches only its Worker's tables and the entitlement's user and subscription columns, and the relay inserts a sign-in's voice token ("Managed voice"). Both Workers still bind the account's role (`docs/specs/security.md` -> "Known gaps").
+**Must grant `dormouse_relay` and `dormouse_voice` only what `hosted/server/runtime-roles.sql` lists, never default privileges**, so a new table needs a grant there; each reaches only its Worker's tables, the metrics table ("Metrics"), and the entitlement's user and subscription columns, and the relay inserts a sign-in's voice token ("Managed voice"). Both Workers still bind the account's role (`docs/specs/security.md` -> "Known gaps").
 
 **Must install released core/auth packages from npm and commit their lockfile integrity hashes.** The installed packages' `dist/provenance.json` must name the same clean pgstencil commit; no runtime import depends on a sibling checkout. The auth migrations remain owned by the package; Dormouse's own tables migrate from `hosted/server/dormouse-migrations/`. **Never edit a merged migration**: a migrated database never reruns one, so append the next number (pinned by `hosted/server/tests/migrations.test.ts`).
 
@@ -56,7 +56,7 @@ Source of truth: `App` in `hosted/src/App.tsx`; `restoreTheme` in `hosted/src/ma
 **Must read the entitlement (`docs/specs/pricing.md` -> "Checkout and entitlement") on the server, per request, through one SQL predicate over the account's `"user"` row**, so a bearer and its owner's entitlement resolve in one query.
 
 - **Must entitle an account only while it holds exactly one current subscription, and that one is `active` before its period end or `trialing` before its trial end**, against the database's clock: `@pgstencil/stripe`'s `status()` access, so `past_due` is refused at once.
-- **Must entitle `ADMIN_EMAIL` as a standing comp** while it is the account's verified email, the only exception to "never email" ("Identity and login"); nothing else may key on an address.
+- **Must entitle `ADMIN_EMAIL` as a standing comp** while it is the account's verified email, the only exception to "never email" ("Identity and login"); nothing else may key on an address but the admin metrics view's gate, the same predicate ("Metrics").
 
 Source of truth: `entitledSql` and `entitled` in `hosted/server/entitlement.ts`; `cookieEntitled` in `hosted/server/account-gate.ts`.
 
@@ -221,13 +221,13 @@ The account Worker sells the plans `monthly`, `yearly`, and `founding` through `
 | Route | Credential | Success |
 |---|---|---|
 | `GET /api/billing` | login cookie | 200 `{ plan, active, until, renews, entitled, founder, founding }` from the synchronized rows; `plan` names a subscription Stripe still holds, `active` whether it grants access |
-| `POST /api/billing/checkout` | login cookie, exact `Origin`, JSON `{ plan }` | 200 `{ url }` of Stripe Checkout |
+| `POST /api/billing/checkout` | login cookie, exact `Origin`, JSON `{ plan, ref }`, `ref` optional ("Metrics") | 200 `{ url }` of Stripe Checkout |
 | `POST /api/billing/confirm` | login cookie, exact `Origin`, JSON `{ checkout }` | 200, the `GET` body |
 | `POST /api/billing/portal` | login cookie, exact `Origin` | 200 `{ url }` of the customer portal |
 | `PUT /api/billing/founder` | login cookie, exact `Origin`, JSON `{ shown, name }` | 204; 409 for an account with no current founding subscription |
 | `PUT /api/billing/survey` | login cookie, exact `Origin`, JSON of the four answers | 204 |
 | `POST /api/billing/webhook` | `Stripe-Signature` over the raw body | 200 once `webhook()` committed |
-| `GET /api/hosted/cohorts` | none | 200 `{ cohort, seatsLeft, founders: { total, shown } }` |
+| `GET /api/hosted/cohorts` | none; `?ref=` counted ("Metrics") | 200 `{ cohort, seatsLeft, founders: { total, shown } }` |
 
 Errors are JSON `{ message }`; the cookie routes answer 401 without a login and need no entitlement.
 
@@ -237,10 +237,38 @@ Errors are JSON `{ message }`; the cookie routes answer 401 without a login and 
 - **Must verify the signature over the raw body before any write**, cap the body at `WEBHOOK_BODY_BYTES` (413), and answer 2xx only once `webhook()` has committed; any other failure answers 503, which Stripe retries.
 - **Must answer from the cohort endpoint only the open cohort's index and seats (both absent once founding closes), the count of founding purchases, and the chosen names of opted-in current founders**, at most `MAX_SHOWN_FOUNDERS`, cached at most `COHORT_CACHE_MS`. **Must answer `SITE_ORIGIN` (`https://dormouse.sh`) this one `GET` path and 421 every other**, through the zone route `PRODUCTION` pins.
 - **Must resync, from the account's Cron Trigger every 10 minutes, every subscription still `active` or `trialing` past its period or trial end**, so a missed renewal webhook lapses a member until the next run at most; a failed resync fails the invocation, and an account that always fails cannot hold the others back.
-- **Must serve the account pages** `/checkout?plan=` (signed in, the plan and its price now, then Stripe), Stripe's return to `/billing?checkout=` (confirmed, then the founders-row opt-in and the survey for a completed checkout), and the account page's Plan section, which keeps Manage billing for a held subscription with a payment due. **May keep a pending checkout's plan name, and nothing else, in the tab's session storage** for a provider sign-in to return to.
+- **Must serve the account pages** `/checkout?plan=` (signed in, the plan and its price now, then Stripe), Stripe's return to `/billing?checkout=` (confirmed, then the founders-row opt-in and the survey for a completed checkout), and the account page's Plan section, which keeps Manage billing for a held subscription with a payment due. **May keep a pending checkout's plan name and its link's allowlisted `ref`, and nothing else, in the tab's session storage** for a provider sign-in to return to.
 - **Must keep a founder's opt-in as the name they chose to show** (`dormouse_founders`, deleted on withdrawal) and the survey as one set of answers per account (`dormouse_price_survey`), each answer whole dollars or null.
 
 Source of truth: `billingRoutes` and `reconcileDue` in `hosted/server/billing-routes.ts`; `billingSetup`, `openCohort`, and `withBilling` in `hosted/server/billing.ts`; `hosted/src/Billing.tsx` and `takeCheckout` in `hosted/src/checkout.ts`; `hosted/server/dormouse-migrations/006_billing_founders.sql`. Pinned by `hosted/server/tests/billing.test.ts`.
+
+## Metrics
+
+Each Worker counts what it serves into `dormouse_metrics_daily`: one row per UTC day, event, and label, holding a count.
+
+| Event | Label | Counted when |
+|---|---|---|
+| `account.created` | — | a login's session starts within `NEW_ACCOUNT_MS` of its account |
+| `login` | a provider in `providerIds`, or `email` | an OAuth callback or the emailed code sets a session cookie; linking never does |
+| `checkout.started` | `plan:ref` | `POST /api/billing/checkout` answers 200 |
+| `checkout.completed` | `plan:ref` | the webhook processes `checkout.session.completed`, under the ref its checkout started with |
+| `subscription.refunded` | plan | the webhook processes `customer.subscription.deleted` for a `canceled` one ended at once within `REFUND_DAYS` of starting, as the cohort count reads a refund |
+| `subscription.canceled` | plan | the webhook processes any other `canceled` one's deletion |
+| `enroll.approved` | — | an approval answers 204 |
+| `burrow.enrolled` | — | a poll redeems |
+| `voice.speak` | `ok`, `capped`, `error` | speak answers 200, 429, or 502 |
+| `voice.fallback-cap` | — | a speak spends the owner's last call of the day |
+| `push.sent` | — | per delivered push |
+| `pocket.signin` | — | `signin/finish` mints a session |
+| `hosted_page.ref` | ref | the Hosted page's cohort read |
+
+- **Never store an identifier in a metrics row**: no user ID, email, address, user agent, or text; only the day, the event, a label from that event's fixed list (`METRIC_LABELS`), and the count. **Must count an unknown ref or plan as `other`**, and a visit or checkout naming no ref as `none`; the Hosted page carries an unknown visit ref to checkout as `other`.
+- **Must take refs from `HOSTED_REFS` in `lib/src/lib/hosted-links.ts` alone**: every link into `/hosted` from the app, the homepage, the Pocket playground, and the READMEs names its own, and the Hosted page forwards it (`docs/specs/pricing.md` -> "The Hosted page").
+- **Never let a metric fail or delay the request it counts**: it is written after the response through `waitUntil`, and a failure is only logged. **Must count a webhook event only once processed**, after its commit, never on redelivery.
+- **Must keep daily rows indefinitely**, since they describe no one. A checkout's ref (`dormouse_checkout_refs`) lives until its completion is counted, or `CHECKOUT_REF_DAYS`, swept by the account's Cron Trigger.
+- **Must answer `GET /api/admin/metrics` to the admin alone**: a cookie route under the exact-`Origin` rule, 401 without a login, 404 for any login whose verified email is not `ADMIN_EMAIL`. It answers the last `METRICS_DAYS` days' rows, all-time totals, and founding purchases per cohort with the open one; the account app's `/admin/metrics` renders it.
+
+Source of truth: `METRIC_LABELS` in `hosted/server/metric-labels.ts`; `recordMetric` in `hosted/server/metrics.ts`; `recordLogin` and `cookieAdmin` in `hosted/server/account-gate.ts`; `adminRoutes` in `hosted/server/admin.ts`; `hosted/server/dormouse-migrations/007_metrics.sql`; `AdminMetrics` in `hosted/src/AdminMetrics.tsx`. Pinned by `hosted/server/tests/metrics.test.ts` and `hosted/server/tests/billing.test.ts`.
 
 ## Development and release
 

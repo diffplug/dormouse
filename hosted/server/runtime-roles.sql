@@ -67,6 +67,11 @@ GRANT USAGE ON SCHEMA pgstencil_billing TO dormouse_relay, dormouse_voice;
 GRANT SELECT (owner_id, status, period_end, trial_end)
   ON pgstencil_billing.subscriptions TO dormouse_relay, dormouse_voice;
 
+-- Both: their metrics' upsert-increment (hosted/server/metrics.ts), whose
+-- conflict needs the read. The rows are aggregate counts.
+GRANT SELECT, INSERT ON dormouse_metrics_daily TO dormouse_relay, dormouse_voice;
+GRANT UPDATE (count) ON dormouse_metrics_daily TO dormouse_relay, dormouse_voice;
+
 -- The relay Worker, its Cron sweep, and its RelayRoom's RelayRows.
 GRANT SELECT, INSERT ON dormouse_relay_burrows TO dormouse_relay;
 -- Only for the push subscribe's FOR KEY SHARE, which needs UPDATE on some

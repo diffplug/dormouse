@@ -3,7 +3,9 @@
 import type { Context, MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { queryDatabase } from "pgstencil/postgres";
-import { entitled } from "./entitlement";
+import { entitled, isAdmin } from "./entitlement";
+import { LOGIN_METHODS } from "./metric-labels";
+import { bestEffort, countMetric } from "./metrics";
 
 /** What one request's account deployment provides to its cookie routes. */
 export interface AccountHost {
@@ -37,6 +39,22 @@ export interface AccountLogin {
 
 type Gate = MiddlewareHandler<{ Variables: { login: AccountLogin } }>;
 
+/** `get-session`'s answer, as far as Hosted reads it. */
+interface SessionAnswer {
+  user?: { id: string; email?: unknown; createdAt?: unknown };
+  session?: { createdAt?: unknown };
+}
+
+/** The Better Auth handler's `get-session` for `cookie`, from `address`; null without a login. */
+async function sessionOf(host: AccountHost, origin: string, cookie?: string, address?: string) {
+  const headers = new Headers();
+  if (cookie) headers.set("cookie", cookie);
+  if (address) headers.set("cf-connecting-ip", address);
+  const response = await host.auth(new Request(new URL("/api/auth/get-session", origin), { headers }));
+  if (!response.ok) throw new Error("Login lookup failed");
+  return (await response.json()) as SessionAnswer | null;
+}
+
 /**
  * A presented `Origin` is exactly this origin, and a state-changing request
  * must present one — same-site pages, the relay and voice origins among
@@ -50,19 +68,7 @@ async function login(c: Context, host: AccountHost): Promise<AccountLogin | Resp
   const safe = c.req.method === "GET" || c.req.method === "HEAD";
   if (presented === undefined ? !safe : presented !== origin)
     return c.json({ message: "Invalid origin." }, 403);
-  const headers = new Headers();
-  for (const name of ["cookie", "cf-connecting-ip"]) {
-    const value = c.req.header(name);
-    if (value) headers.set(name, value);
-  }
-  const response = await host.auth(
-    new Request(new URL("/api/auth/get-session", origin), { headers }),
-  );
-  if (!response.ok) throw new Error("Login lookup failed");
-  const session = (await response.json()) as {
-    user?: { id: string; email?: unknown };
-    session?: { createdAt?: unknown };
-  } | null;
+  const session = await sessionOf(host, origin, c.req.header("cookie"), c.req.header("cf-connecting-ip"));
   if (!session?.user) return c.json({ message: "Sign in first." }, 401);
   return {
     userId: session.user.id,
@@ -84,20 +90,83 @@ export function cookieLogin(host: (c: Context) => AccountHost): Gate {
   };
 }
 
-/**
- * The account Worker's gate for an entitled account's cookie routes: the
- * origin and login checks, then only an entitled account passes, read per
- * request (`refuse` answers anyone else). Sets `login`.
- */
-export function cookieEntitled(
+/** A cookie gate admitting only a login whose account passes `admits`, read per request; `refuse` answers anyone else. */
+function cookieWhere(
   host: (c: Context) => AccountHost,
+  admits: (databaseUrl: string, userId: string) => Promise<boolean>,
   refuse: (c: Context) => Response,
 ): Gate {
   return async (c, next) => {
     const result = await login(c, host(c));
     if (result instanceof Response) return result;
-    if (!(await entitled(host(c).databaseUrl, result.userId))) return refuse(c);
+    if (!(await admits(host(c).databaseUrl, result.userId))) return refuse(c);
     c.set("login", result);
     await next();
   };
+}
+
+/**
+ * The account Worker's gate for an entitled account's cookie routes: the
+ * origin and login checks, then only an entitled account passes (`refuse`
+ * answers anyone else). Sets `login`.
+ */
+export const cookieEntitled = (host: (c: Context) => AccountHost, refuse: (c: Context) => Response) =>
+  cookieWhere(host, entitled, refuse);
+
+/**
+ * The gate for the admin's cookie routes: the origin and login checks, then
+ * only the admin (`adminSql`) passes; anyone else gets the API's 404, so the
+ * route does not announce itself. Sets `login`.
+ */
+export const cookieAdmin = (host: (c: Context) => AccountHost) =>
+  cookieWhere(host, isAdmin, (c) => c.json({ message: "Not found." }, 404));
+
+/** How soon after its account a login's session must start to count as the account's creation. */
+export const NEW_ACCOUNT_MS = 10_000;
+
+/**
+ * The method an auth response just logged in with: an OAuth callback or the
+ * emailed code that set a session cookie (as pgstencil's own
+ * `auth.login.succeeded` reads it); null for anything else, linking a
+ * provider included.
+ */
+export function loginMethod(request: Request, response: Response): string | null {
+  if (response.status >= 400) return null;
+  const path = new URL(request.url).pathname;
+  const method =
+    path === "/api/auth/sign-in/email-otp"
+      ? "email"
+      : path.startsWith("/api/auth/callback/")
+        ? path.slice("/api/auth/callback/".length)
+        : null;
+  if (!method || !LOGIN_METHODS.includes(method)) return null;
+  const session = response.headers
+    .getSetCookie()
+    .some((cookie) => cookie.includes(".session_token=") && !/max-age=0/i.test(cookie));
+  return session ? method : null;
+}
+
+/**
+ * Counts an auth response's login by method (docs/specs/hosted.md ->
+ * "Metrics") and, when its session started with its account,
+ * `account.created`: read back through `get-session` with the cookies it
+ * set, after the response.
+ */
+export function recordLogin(c: Context, host: AccountHost, request: Request, response: Response) {
+  const method = loginMethod(request, response);
+  if (!method) return;
+  const cookie = response.headers
+    .getSetCookie()
+    .map((set) => set.split(";")[0]!)
+    .join("; ");
+  bestEffort(
+    c,
+    "Login metrics",
+    (async () => {
+      await countMetric(host.databaseUrl, "login", method);
+      const read = await sessionOf(host, new URL(request.url).origin, cookie, request.headers.get("cf-connecting-ip") ?? undefined);
+      const gap = Date.parse(String(read?.session?.createdAt)) - Date.parse(String(read?.user?.createdAt));
+      if (gap >= 0 && gap < NEW_ACCOUNT_MS) await countMetric(host.databaseUrl, "account.created");
+    })(),
+  );
 }

@@ -5,7 +5,7 @@ import { FIELD_HINT, FIELD_LABEL, hostOf, useBusyAction, useMinutesLeft } from '
 import { ACCOUNT_PAGE_PATH, HOSTED_ACCOUNT_ORIGIN } from '../host/relay-origin';
 import type { HostedEnrollmentEndReason, HostedEnrollmentState } from '../host/remote/service-protocol';
 import { getPlatform } from '../lib/platform';
-import { hostedPricingUrl } from '../lib/hosted-links';
+import { hostedPricingUrl, type HostedRef } from '../lib/hosted-links';
 import { BURROW_IS_AN_APP } from '../remote/setup-copy';
 import { beginHostedEnrollment, cancelHostedEnrollment } from '../remote/burrow/burrow-status-store';
 
@@ -17,15 +17,12 @@ import { beginHostedEnrollment, cancelHostedEnrollment } from '../remote/burrow/
  * token, so both places render the one flow from here.
  */
 
-/** Where the plans are; linked wherever an account turns out to have none. */
-export const HOSTED_PRICING_URL = hostedPricingUrl();
-
 /** The words of every link to the plans. */
 export const PLANS_LABEL = 'See Hosted plans';
 
-/** The plans, linked wherever an account turns out to have none. */
-export function HostedPlansLink() {
-  return <ExternalTextLink href={HOSTED_PRICING_URL}>{PLANS_LABEL}</ExternalTextLink>;
+/** The plans, linked wherever an account turns out to have none, attributed to the place (`ref`) that links them. */
+export function HostedPlansLink({ plansRef }: { plansRef: HostedRef }) {
+  return <ExternalTextLink href={hostedPricingUrl(plansRef)}>{PLANS_LABEL}</ExternalTextLink>;
 }
 
 /** The begin button's words, everywhere sign-in starts. */
@@ -96,9 +93,12 @@ export function answerLostRemoval(burrowId: string | undefined): string {
 export function HostedEnrollmentEnded({
   ended,
   accountOrigin,
+  plansRef,
 }: {
   ended: Extract<HostedEnrollmentState, { status: 'ended' }>;
   accountOrigin: string | null;
+  /** Where its plans link says it came from. */
+  plansRef: HostedRef;
 }) {
   const lost = ended.reason === 'answer-lost';
   const page = lost ? accountPage(accountOrigin) : null;
@@ -109,7 +109,7 @@ export function HostedEnrollmentEnded({
       {ended.reason === 'failed' && ended.message ? <div className="mt-1 text-error">{ended.message}</div> : null}
       {ended.reason === 'not-entitled' ? (
         <div className="mt-1">
-          <HostedPlansLink />
+          <HostedPlansLink plansRef={plansRef} />
         </div>
       ) : null}
       {page ? (
@@ -138,11 +138,14 @@ export function HostedEnrollView({
   accountOrigin,
   suggestedLabel,
   askName = true,
+  plansRef,
 }: {
   enrollment: HostedEnrollmentState | null;
   accountOrigin: string | null;
   suggestedLabel: string;
   askName?: boolean;
+  /** Where an ended enrollment's plans link says it came from. */
+  plansRef: HostedRef;
 }) {
   const [label, setLabel] = useState(suggestedLabel);
   const { busy, error, run } = useBusyAction();
@@ -178,7 +181,7 @@ export function HostedEnrollView({
           {HOSTED_ENROLLMENT_REDEEMING_COPY}
         </div>
       ) : null}
-      {ended ? <HostedEnrollmentEnded ended={ended} accountOrigin={accountOrigin} /> : null}
+      {ended ? <HostedEnrollmentEnded ended={ended} accountOrigin={accountOrigin} plansRef={plansRef} /> : null}
       <form
         className="mt-1.5"
         hidden={waiting !== null || redeeming}

@@ -1,10 +1,13 @@
 import type { Context, ExecutionContext, Hono } from "hono";
 import { queryDatabase } from "pgstencil/postgres";
+import { adminRoutes } from "./admin";
 import { billingSetup } from "./billing";
 import { COHORT_ENDPOINT } from "../../website/src/lib/hosted-cohorts";
 import { billingRoutes, reconcileDue, type BillingHost } from "./billing-routes";
 import type { AccountEnv } from "./bindings";
 import { accountRules } from "./headers";
+import { recordLogin } from "./account-gate";
+import { sweepCheckoutRefs } from "./metrics";
 import { relayAccountRoutes, type RelayAccountHost } from "./relay-account";
 import { relayRoom } from "./relay-room-contract";
 import { voiceTokenRoutes } from "./voice";
@@ -45,12 +48,6 @@ export function accountApp(
         );
         return c.json({ ok }, ok ? 200 : 503);
       });
-      app.all("/api/auth/*", (c) =>
-        fetchAuth(c.req.raw, c.env, c.executionCtx),
-      );
-      app.get("/api/providers", (c) =>
-        fetchAuth(c.req.raw, c.env, c.executionCtx),
-      );
       const host = (c: Context<{ Bindings: AccountEnv }>): RelayAccountHost & BillingHost => ({
         databaseUrl: c.env.HYPERDRIVE.connectionString,
         auth: (request) => fetchAuth(request, c.env, c.executionCtx),
@@ -58,12 +55,28 @@ export function accountApp(
         closeBurrow: (userId, burrowId) => relayRoom(c.env.RELAY_ROOM, userId).closeBurrow(burrowId),
         setup: () => billingSetup(c.env),
       });
+      app.all("/api/auth/*", async (c) => {
+        const response = await fetchAuth(c.req.raw, c.env, c.executionCtx);
+        recordLogin(c, host(c), c.req.raw, response);
+        return response;
+      });
+      app.get("/api/providers", (c) =>
+        fetchAuth(c.req.raw, c.env, c.executionCtx),
+      );
       voiceTokenRoutes(app, host);
       relayAccountRoutes(app, host);
       billingRoutes(app, host);
+      adminRoutes(app, host);
     },
     fallback: (app) => app.get("*", (c) => c.env.ASSETS.fetch(c.req.raw)),
-    scheduled: (_controller, env) =>
-      reconcileDue(billingSetup(env), env.HYPERDRIVE.connectionString, env.APP_ORIGIN),
+    scheduled: async (_controller, env) => {
+      const databaseUrl = env.HYPERDRIVE.connectionString;
+      await Promise.all([
+        sweepCheckoutRefs(databaseUrl).catch((error: Error) =>
+          console.error(`Checkout refs not swept: ${error.message}`),
+        ),
+        reconcileDue(billingSetup(env), databaseUrl, env.APP_ORIGIN),
+      ]);
+    },
   });
 }

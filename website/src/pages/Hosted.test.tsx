@@ -259,6 +259,27 @@ describe("the buy buttons", () => {
     );
   });
 
+  it("forward an allowlisted ref into checkout and the cohort read, taking it off the address bar", async () => {
+    history.replaceState(null, "", "/hosted/?ref=home#pricing");
+    const el = await mount(async () => new Response("{}", { status: 404 }), true);
+    const links = [...el.querySelectorAll('a[aria-label^="Buy "]')].map((a) => a.getAttribute("href"));
+    expect(links).toEqual([`${CHECKOUT_PAGE}?plan=monthly&ref=home`, `${CHECKOUT_PAGE}?plan=founding&ref=home`]);
+    expect(vi.mocked(fetch).mock.calls.map(([url]) => String(url))).toEqual([`${COHORT_ENDPOINT}?ref=home`]);
+    expect(location.pathname + location.search + location.hash).toBe("/hosted/#pricing");
+  });
+
+  it("name an unknown ref on the cohort read, and only as other on checkout", async () => {
+    history.replaceState(null, "", "/hosted/?ref=ada%40example.test");
+    const el = await mount(async () => new Response("{}", { status: 404 }), true);
+    const links = [...el.querySelectorAll('a[aria-label^="Buy "]')].map((a) => a.getAttribute("href"));
+    expect(links).toEqual([`${CHECKOUT_PAGE}?plan=monthly&ref=other`, `${CHECKOUT_PAGE}?plan=founding&ref=other`]);
+    // The server counts it as `other`.
+    expect(vi.mocked(fetch).mock.calls.map(([url]) => String(url))).toEqual([
+      `${COHORT_ENDPOINT}?ref=ada%40example.test`,
+    ]);
+    expect(location.search).toBe("");
+  });
+
   it("make the offers InStock only once checkout opens", () => {
     const availability = (open: boolean) =>
       JSON.parse(pricingJsonLd("https://dormouse.sh/hosted", open)).offers.map(

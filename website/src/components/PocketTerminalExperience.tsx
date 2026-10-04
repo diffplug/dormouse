@@ -16,6 +16,7 @@ import { ChangelogRunner } from "../lib/changelog-runner";
 import { useRestoredTheme } from "dormouse-lib/lib/themes";
 
 import { WEBSITE_DEFAULT_THEME_ID } from "../lib/website-theme";
+import { HOSTED_REFS, withHostedRef } from "dormouse-lib/lib/hosted-links";
 
 type FakePtyAdapter = import("dormouse-lib/lib/platform/fake-adapter").FakePtyAdapter;
 type MobileGestureInputId = import("dormouse-lib/lib/mobile-gesture-menu").MobileGestureInputId;
@@ -32,7 +33,7 @@ const POCKET_AUTOSTART_COMMANDS = new Map<string, string>([
 ]);
 
 const GITHUB_URL = "https://github.com/diffplug/dormouse";
-const POCKET_NOTIFY_URL = "/hosted/#remote-control";
+const POCKET_NOTIFY_URL = withHostedRef("/hosted/", HOSTED_REFS.pocketPlayground, "remote-control");
 
 export function PocketTerminalExperience({
   interactive,

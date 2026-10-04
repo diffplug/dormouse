@@ -14,7 +14,11 @@ export type UpsellTopic = Extract<TopicId, 'notifications' | 'network'>;
  * `ManagedVoiceSection.tsx`), and where it goes: a Settings topic, or the
  * Hosted plans with the preview's attribution.
  */
-const ALARM_UPSELL: Record<AlarmUpsell, { lead?: string; action: string; topic?: UpsellTopic; ref?: HostedRef }> = {
+type UpsellAction = { lead?: string; action: string } & (
+  | { topic: UpsellTopic; ref?: never }
+  | { ref: HostedRef; topic?: never }
+);
+const ALARM_UPSELL: Record<AlarmUpsell, UpsellAction> = {
   'sign-in-voice': { action: `${SIGN_IN_LABEL} for a natural ElevenLabs voice`, topic: 'notifications' },
   'sign-in-push': { action: `${SIGN_IN_LABEL} to get push on your phone`, topic: 'network' },
   'plans-voice': { lead: NO_PLAN_COPY, action: PLANS_LABEL, ref: HOSTED_REFS.upsellVoice },
@@ -33,7 +37,8 @@ export function AlarmUpsellLine({ upsell, onShowSettings, onDone }: {
   /** The line did its job; the preview closes. */
   onDone: () => void;
 }) {
-  const { lead, action, topic, ref } = ALARM_UPSELL[upsell];
+  const offer = ALARM_UPSELL[upsell];
+  const { lead, action } = offer;
   return (
     <div className="mt-3 border-t border-border pt-2 text-sm leading-relaxed">
       {lead ? <span className="text-muted">{lead} </span> : null}
@@ -43,8 +48,8 @@ export function AlarmUpsellLine({ upsell, onShowSettings, onDone }: {
         className={`${TEXT_LINK_CLASS} text-left focus-visible:outline focus-visible:outline-1 focus-visible:outline-focus-ring`}
         onMouseDown={(event) => event.preventDefault()}
         onClick={() => {
-          if (topic) onShowSettings(topic);
-          else getPlatform().openExternal?.(hostedPricingUrl(ref));
+          if (offer.topic) onShowSettings(offer.topic);
+          else getPlatform().openExternal?.(hostedPricingUrl(offer.ref));
           onDone();
         }}
       >

@@ -16,6 +16,10 @@ import {
   billingRoutes,
 } from "../billing-routes";
 import { DEV_FOUNDING_PRICES, stripeDevBilling } from "../billing-dev";
+import { ADMIN_METRICS_PATH } from "../metric-labels";
+import { ADMIN_EMAIL } from "../entitlement";
+import { NEW_ACCOUNT_MS } from "../account-gate";
+import { VOICE_DAILY_CAP } from "../voice";
 import { migrations } from "../migrations";
 import {
   ORIGINS,
@@ -499,4 +503,119 @@ test("an account without a public email checks out, and Stripe Checkout collects
   expect(dev.requests.find((r) => r.path === "/v1/customers")!.body).toEqual({
     "metadata[pgstencil_owner]": "provider-only",
   });
+});
+
+test("metrics: logins and new accounts, checkouts by plan and ref, ended subscriptions, voice, the Relay, Hosted page visits, and the admin view", async ({
+  onTestFinished,
+}) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const sql = (text: string, values: unknown[] = []) => queryDatabase(f.database.url, text, values);
+  /** All-time count of `event` under `label`; every write lands after its response. */
+  const counted = async (event: string, label = "") =>
+    (
+      await queryDatabase<{ n: number }>(
+        f.database.url,
+        `SELECT coalesce(sum(count), 0)::int AS n FROM dormouse_metrics_daily WHERE event = $1 AND label = $2`,
+        [event, label],
+      )
+    )[0]!.n;
+
+  // A first login creates the account; a later one, past the window (and
+  // the code's one-minute resend cooldown), does not.
+  const member = f.browser();
+  await member.signIn("counted@example.test");
+  await expect.poll(() => counted("login", "email")).toBe(1);
+  await expect.poll(() => counted("account.created")).toBe(1);
+  f.time.advanceMilliseconds(Math.max(NEW_ACCOUNT_MS, 60_000) + 1);
+  await f.now();
+  await f.browser().signIn("counted@example.test");
+  await expect.poll(() => counted("login", "email")).toBe(2);
+  expect(await counted("account.created")).toBe(1);
+
+  // The Hosted page's visits, by the ref each arrived with.
+  for (const query of ["?ref=readme", "?ref=someone%40example.test", ""])
+    expect((await f.call(SITE_ORIGIN + COHORT_ENDPOINT + query)).status).toBe(200);
+  await expect.poll(() => counted("hosted_page.ref", "readme")).toBe(1);
+  await expect.poll(() => counted("hosted_page.ref", "other")).toBe(1);
+  await expect.poll(() => counted("hosted_page.ref", "none")).toBe(1);
+
+  // Checkout carries its ref from start to the webhook's completion, once.
+  const started = await member.request("/api/billing/checkout", {
+    method: "POST",
+    body: { plan: "founding", ref: "home" },
+  });
+  expect(started.status).toBe(200);
+  const { url } = (await started.json()) as { url: string };
+  await expect.poll(() => counted("checkout.started", "founding:home")).toBe(1);
+  await expect.poll(() => sql(`SELECT ref FROM dormouse_checkout_refs`)).toEqual([{ ref: "home" }]);
+  const subscription = f.dev.completeCheckout([...f.dev.checkouts.values()].find((s) => s.url === url)!.id);
+  const completion = f.dev.events.find((event) => event.type === "checkout.session.completed")!;
+  await f.deliver();
+  await expect.poll(() => counted("checkout.completed", "founding:home")).toBe(1);
+  await expect.poll(() => sql(`SELECT ref FROM dormouse_checkout_refs`)).toEqual([]);
+  // Stripe's redelivery of a processed event counts nothing again.
+  const { body, signature } = f.dev.signed(completion);
+  const again = await f.call(origin + BILLING_WEBHOOK_PATH, {
+    method: "POST",
+    headers: { "stripe-signature": signature, "content-type": "application/json" },
+    body,
+  });
+  expect(again.status).toBe(200);
+  await again.text();
+
+  // Voice: spoken, the call that spends the day's last, and the refusals after.
+  const { token } = (await (await member.request("/api/voice/tokens", { method: "POST" })).json()) as { token: string };
+  expect((await f.speak(token)).status).toBe(200);
+  await expect.poll(() => counted("voice.speak", "ok")).toBe(1);
+  await sql(`UPDATE dormouse_voice_usage SET count = $1`, [VOICE_DAILY_CAP - 1]);
+  expect((await f.speak(token)).status).toBe(200);
+  expect((await f.speak(token)).status).toBe(429);
+  await expect.poll(() => counted("voice.fallback-cap")).toBe(1);
+  await expect.poll(() => counted("voice.speak", "capped")).toBe(1);
+  expect(await counted("voice.speak", "ok")).toBe(2);
+
+  // The Relay: an approval, then the Burrow it enrolls.
+  const begun = (await f.burrowCall(API_ROUTES.burrowEnrollBegin, { origin: ORIGINS.relay })).json;
+  expect((await member.request("/api/relay/enrollments/approve", { method: "POST", body: { userCode: begun.userCode } })).status).toBe(204);
+  await expect.poll(() => counted("enroll.approved")).toBe(1);
+  expect((await f.burrowCall(API_ROUTES.burrowEnrollPoll, { deviceCode: begun.deviceCode })).json.status).toBe("enrolled");
+  await expect.poll(() => counted("burrow.enrolled")).toBe(1);
+
+  // An immediate cancellation within the refund window is a refund; one at period end, a cancellation.
+  f.dev.transition(subscription.id, "cancel");
+  await f.deliver();
+  await expect.poll(() => counted("subscription.refunded", "founding")).toBe(1);
+  const monthly = f.browser();
+  await monthly.signIn("monthly@example.test");
+  const { subscription: renewing } = await monthly.buy("monthly");
+  await expect.poll(() => counted("checkout.completed", "monthly:none")).toBe(1);
+  f.dev.transition(renewing.id, "cancel-at-period-end");
+  f.dev.transition(renewing.id, "cancel");
+  await f.deliver();
+  await expect.poll(() => counted("subscription.canceled", "monthly")).toBe(1);
+  expect(await counted("checkout.completed", "founding:home")).toBe(1);
+
+  // The admin view: the admin's alone, and announced to no one else.
+  expect((await f.browser().request(ADMIN_METRICS_PATH)).status).toBe(401);
+  expect((await member.request(ADMIN_METRICS_PATH)).status).toBe(404);
+  const admin = f.browser();
+  await admin.signIn(ADMIN_EMAIL);
+  expect((await admin.request(ADMIN_METRICS_PATH, { origin: SITE_ORIGIN })).status).toBe(403);
+  const view = await admin.request(ADMIN_METRICS_PATH);
+  expect(view.status).toBe(200);
+  const metrics = (await view.json()) as Record<string, any>;
+  expect(metrics.days).toBe(30);
+  expect(metrics.totals).toContainEqual({ event: "checkout.completed", label: "founding:home", count: 1 });
+  expect(metrics.recent).toContainEqual(
+    expect.objectContaining({ event: "subscription.refunded", label: "founding", count: 1 }),
+  );
+  expect(metrics.founding).toEqual({
+    sold: LADDER.map(() => 0),
+    open: { cohort: 0, seatsLeft: FOUNDING_COHORT_SIZE },
+  });
+  // No row names anyone.
+  const everything = JSON.stringify(await sql(`SELECT * FROM dormouse_metrics_daily`));
+  for (const who of ["counted@example.test", "monthly@example.test", ADMIN_EMAIL, "203.0.113.10"])
+    expect(everything).not.toContain(who);
 });
