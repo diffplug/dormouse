@@ -30,8 +30,7 @@
     "@xterm/xterm": "6.1.0-beta.304",
     "dormouse-lib": "workspace:*",
     "react": "^19.2.6",
-    "react-dom": "^19.2.6",
-    "tailwind-variants": "^3.2.2"
+    "react-dom": "^19.2.6"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.0",

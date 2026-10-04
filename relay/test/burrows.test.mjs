@@ -200,6 +200,29 @@ test('enrollment mirrors requireUserVerification to the Burrow, and omits it whe
   assert.equal('requireUserVerification' in uvOff, false);
 });
 
+test('every /ws/burrow connect re-delivers the UV demand first, so one set after enrollment still reaches the Burrow', async () => {
+  const on = await freshApp({ requireUserVerification: true });
+  const onServer = await startRelay(on);
+  const off = await freshApp();
+  const offServer = await startRelay(off);
+  try {
+    const { burrow, socket } = await connectBurrow(on.app, onServer);
+    assert.deepEqual(await socket.take(), { t: 'policy', requireUserVerification: true });
+    // A reconnect (the same enrollment) hears it again: the Relay never relies
+    // on what the Burrow kept from enrollment.
+    const again = wsConnect(`${onServer.wsUrl}${WS_ROUTES.burrow}?${WS_TOKEN_PARAM}=${burrow.burrowToken}`);
+    await again.ready;
+    assert.deepEqual(await again.take(), { t: 'policy', requireUserVerification: true });
+
+    // Off, nothing is sent: absent keeps whatever the Burrow already demands.
+    const { socket: quiet } = await connectBurrow(off.app, offServer);
+    assert.equal(await quiet.quiet(), true);
+  } finally {
+    await onServer.close();
+    await offServer.close();
+  }
+});
+
 test('only Burrow-enrollment rejection invokes the retained-request delay', async () => {
   let delayCalls = 0;
   const { app } = await freshApp({

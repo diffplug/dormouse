@@ -9,9 +9,9 @@
  * restored; the lint must go red on each and green again after.
  */
 
-import { copyFileSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { copyFileSync, readFileSync, writeFileSync, rmSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 
 import { repoRoot } from './lint-kit.mjs';
 import { check, INSTALLER } from './ps1-cmdlet-lint.mjs';
@@ -98,7 +98,7 @@ export function run() {
   return { failures, checked: DEFECTS.length };
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const { failures, checked } = run();
   if (failures.length > 0) {
     console.error('ps1-cmdlet-lint-selftest: a rule in ps1-cmdlet-lint.mjs is not load-bearing\n');

@@ -24,7 +24,7 @@ Why "the standalone adapters" and not "the standalone webview". The Wall's two p
 
 ## The dor control socket
 
-Why "a process running as the user is the user" is stated rather than assumed. A `0700` directory and a `0600` file stop another local *account*; neither stops a process already running under the user's own uid, which can read the socket path out of its own environment. The same limit is already stated for the Burrow ACL store in `docs/specs/security-remote.md`, and stating it here keeps an agent holding `dor` from being read as a lesser principal than the person at the keyboard.
+Why the socket's limit is stated rather than assumed. A `0700` directory and a `0600` file stop another local *account*; neither stops a process already running under the user's own uid, which can read the socket path out of its own environment. The same limit is already stated for the Burrow ACL store in `docs/specs/security-remote.md`, and stating it here keeps an agent holding `dor` from being read as a lesser principal than the person at the keyboard.
 
 Why the proof construction being hand-mirrored matters. `proveToken` and `proofMatches` exist twice, in `standalone/sidecar/dor-control-server.js` and `dor/src/control-client.ts`, and only the two proof *domains* are pinned across the copies by `lib/src/lib/mirrored-constants.test.ts`. A change to the HMAC construction or the comparison in one copy breaks the channel loudly; a change that weakens the comparison in both — a string compare for a `timingSafeEqual` — breaks nothing visible.
 

@@ -35,6 +35,7 @@ export function stubWallActions(overrides: Partial<WallActions> = {}): WallActio
     onSwapRenderMode: vi.fn(),
     resolveSurfaceRef: vi.fn((id: string) => id),
     onPinPreview: vi.fn(),
+    onBreakTool: vi.fn(),
     ...overrides,
   };
 }

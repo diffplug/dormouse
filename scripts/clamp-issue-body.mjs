@@ -7,8 +7,8 @@
  * Usage: node scripts/clamp-issue-body.mjs <file> [--note "<markdown>"]
  */
 
-import { readFileSync, writeFileSync } from 'node:fs';
-import { pathToFileURL } from 'node:url';
+import { readFileSync, writeFileSync, realpathSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 /** Well under GitHub's 65536-character ceiling, and past what anyone reads. */
 export const BODY_LIMIT = 32_000;
@@ -46,6 +46,6 @@ function main(argv) {
 }
 
 // Only when run as the CLI, so the self-test can import the pure function.
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   main(process.argv);
 }

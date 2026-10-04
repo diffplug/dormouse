@@ -96,7 +96,7 @@ Open a **draft pull request** with the entry, fixture, documentation, and verifi
 - **Must scan only output received after the mark taken before the first interrupt.** Never widen the scan into earlier output; buffer eviction may discard fresh output but must not promote stale output into the scan. (rationale)
 - **Must report each detected command immediately**, retaining earlier detections if a later target times out.
 
-Source of truth: `captureAgentRecovery` / `RecoveryHost` in `lib/src/host/recovery-capture.ts`; pinned by `lib/src/host/recovery-capture.test.ts`, including `captures Pi's double-press exit`.
+Source of truth: `captureAgentRecovery` / `RecoveryHost` in `lib/src/host/recovery-capture.ts`; pinned by `lib/src/host/recovery-capture.test.ts`.
 
 ### Detection
 
@@ -129,5 +129,7 @@ Source of truth: `createRecoveryStore` in `lib/src/host/recovery-store.ts`; `Pla
 Source of truth: `restoreSession` in `lib/src/lib/session-restore.ts`; `restoreTerminal` / `typeCommandWhenPromptReady` in `lib/src/lib/terminal-lifecycle.ts`; pinned by `lib/src/lib/session-restore.test.ts` and `lib/src/lib/terminal-registry.alert.test.ts`.
 
 ## Future
+
+**Scope: agent-startup-opt-out**
 
 If automatic agent startup becomes disruptive, expose an opt-out setting while retaining prompt-free recovery for users who enable it.

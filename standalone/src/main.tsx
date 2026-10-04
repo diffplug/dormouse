@@ -15,6 +15,7 @@ import { UpdateBanner } from "./UpdateBanner";
 import { UpdateDebugModal } from "./UpdateDebugModal";
 import { WorkspaceTeardownModalHost } from "./WorkspaceTeardownModal";
 import { AppBar } from "./AppBar";
+import { UiRestartBanner, UiWatchdogArm } from "./ui-watchdog";
 import {
   startUpdateCheck,
   useUpdateState,
@@ -174,9 +175,10 @@ async function bootstrap() {
   createRoot(document.getElementById("root")!).render(
     <StrictMode>
       <AppBar />
+      {!BROWSER_DEV_HOST && <UiWatchdogArm />}
       <App
         initialPlans={initialPlans}
-        baseboardNotice={<ConnectedUpdateBanner />}
+        baseboardNotice={<><UiRestartBanner /><ConnectedUpdateBanner /></>}
         dialogHost={<WorkspaceTeardownModalHost />}
         enableBurrow
         multiWorkspace

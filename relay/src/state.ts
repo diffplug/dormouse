@@ -252,7 +252,11 @@ abstract class JsonFileStore {
   }
 }
 
-/** The Relay-owned Burrow-enrollment credential stored in `setup-password.json`. */
+/**
+ * The Relay-owned Burrow-enrollment credential stored in `setup-password.json`.
+ * An installer contract: `deploy/local/install-{macos.sh,linux.sh,windows.ps1}`
+ * read `password` as 64-char hex, so its name and format cannot change alone.
+ */
 export interface StoredSetupPassword {
   readonly password: string;
   readonly createdAt: number;

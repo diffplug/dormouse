@@ -177,4 +177,6 @@ Source of truth: `explainTerminalTitle` / `cwdDisplay` in `lib/src/lib/terminal-
 
 ## Future
 
+**Scope: fish-integration**
+
 - **fish shell integration** — inject via `XDG_DATA_DIRS`: fish auto-sources `*/fish/vendor_conf.d/*.fish`, so the integration ships as a vendor conf file (env channel, as reliable as the `PATH` prepend). Until it lands, fish ≥ 4 reports `OSC 133` itself, command line included, and older fish uses the keystroke fallback.

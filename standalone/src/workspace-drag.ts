@@ -19,7 +19,9 @@ import { DOOR_TAB_HEIGHT_PX, DOOR_TAB_MAX_WIDTH_PX } from "dormouse-lib/componen
  *
  * A pointer captured on a tab keeps delivering `pointermove` and `pointerup`
  * outside the window (rationale), so the gesture is the webview's throughout
- * and the host is only asked where the cursor is.
+ * and the host is only asked where the cursor is. Its client coordinates run
+ * past the window's edges and go negative rather than clamping: never assume
+ * them in range.
  */
 
 /** The cursor probe is an IPC round trip; a pointermove is per frame. */

@@ -4,7 +4,7 @@
 
 ## Quit-time install
 
-**Why install runs last.** On Windows `install()` starts NSIS and then calls `std::process::exit` itself (`tauri-plugin-updater-2.11.0/src/updater.rs`, checked 2026-09), so starting it early interrupts teardown. This ordering originally protected persisted scrollback; what it protects now is the window's structure, which standalone does persist. The retained save/drain hooks and their completion semantics are explained in `docs/specs/standalone.rationale.md` → Quit flow.
+**Why install runs last.** On Windows `install()` starts NSIS and then calls `std::process::exit` itself (`tauri-plugin-updater-2.11.0/src/updater.rs`, checked 2026-09), so starting it early interrupts teardown. What it protects is the window's persisted structure; the save/drain hooks are `docs/specs/standalone.rationale.md` → Quit flow.
 
 **Why `updater:*` stayed scoped to `main`.** Widening it to every window was meant to cover a session whose `main` was closed. It covers nothing: only `main` runs the periodic check, so only `main` can be holding a download, and a `main`-less session has none to install whichever window the walk ends on. The grant gave up a structural guarantee — the install can only happen in the window torn down last — for a case that cannot arise. What that session needs is to be told before it happens, which is the close confirmation's discard warning.
 

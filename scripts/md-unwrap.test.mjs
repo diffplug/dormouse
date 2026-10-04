@@ -1,5 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { findings, unwrap } from './md-unwrap.mjs';
 
 const md = (...lines) => lines.join('\n');
@@ -124,4 +129,14 @@ test('MDX: ESM and JSX lines stay, prose inside and around them joins', () => {
   const output = unwrap(input, mdx);
   assert.equal(output, expected);
   assert.deepEqual(findings(output, mdx), []);
+});
+
+test('run through a symlink, the lint still checks and fails', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'md-unwrap-link-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  symlinkSync(fileURLToPath(new URL('./md-unwrap.mjs', import.meta.url)), join(dir, 'md-unwrap.mjs'));
+  writeFileSync(join(dir, 'wrapped.md'), md('One', 'paragraph.'));
+  const run = spawnSync(process.execPath, [join(dir, 'md-unwrap.mjs'), join(dir, 'wrapped.md')], { encoding: 'utf8' });
+  assert.equal(run.status, 1);
+  assert.match(run.stderr, /wrapped\.md:1: paragraph wrapped across 2 lines/);
 });

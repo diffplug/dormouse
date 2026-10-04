@@ -1,6 +1,7 @@
 import { chmod, cp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
+import { realpathSync } from 'node:fs';
 
 const scriptPath = fileURLToPath(import.meta.url);
 const scriptDir = dirname(scriptPath);
@@ -35,6 +36,6 @@ export async function stageDorCli(targetPath) {
   }
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   await stageDorCli(process.argv[2]);
 }

@@ -120,6 +120,7 @@ function Inline({ nodes }: { nodes: InlineNode[] }): ReactNode {
             href={node.href}
             title={node.title}
             className={LINK_CLASS}
+            // An external link always opens with rel="noopener noreferrer".
             {...(external ? { target: "_blank", rel: "noopener noreferrer" } : {})}
           >
             <Inline nodes={node.children} />

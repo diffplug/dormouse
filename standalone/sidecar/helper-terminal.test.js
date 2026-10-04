@@ -41,6 +41,31 @@ test('POSIX folder opening retains exit-error reporting', () => {
   });
 });
 
+// The directory is terminal-reported (OSC 7), so its name is program-chosen.
+test('macOS reveals the folder rather than opening it, so a bundle directory is never launched', () => {
+  let called = 0;
+  openNativeDirectory('/Users/me/clone/Evil.app', result => assert.equal(result, null), {
+    platform: 'darwin',
+    execFile(exe, args, _options, done) {
+      called++;
+      assert.equal(exe, 'open');
+      assert.deepEqual(args, ['-R', '/Users/me/clone/Evil.app']);
+      done(null);
+    },
+  });
+  assert.equal(called, 1);
+});
+
+test('Windows refuses a folder whose path Explorer would split at a comma', () => {
+  const results = [];
+  openNativeDirectory('C:\\clone\\x,\\Users\\me\\evil.exe', error => results.push(error), {
+    platform: 'win32',
+    spawn() { throw new Error('Explorer must not be launched'); },
+  });
+  assert.equal(results.length, 1);
+  assert.match(results[0].message, /comma/);
+});
+
 test('process inspection fails closed while ordinary port discovery remains fail-soft', async () => {
   const runtime = { platform: 'darwin', execFile() { throw new Error('ps failed'); } };
   assert.deepEqual(await getDescendantPids(42, runtime), [42]);

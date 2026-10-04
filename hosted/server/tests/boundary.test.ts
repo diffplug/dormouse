@@ -178,7 +178,7 @@ test.for(NAMES)(
       `http://${new URL(ORIGINS[name]).host}`,
     ];
     for (const origin of foreign)
-      for (const [method, path] of [...SERVED[name], ["GET", "/api/health"]]) {
+      for (const [method, path] of [...SERVED[name], ["GET", "/api/health"], ["GET", "/api/ready"]]) {
         const response = await send(name, origin + path, method);
         expect(response.status, `${method} ${origin}${path}`).toBe(421);
       }
@@ -200,7 +200,6 @@ const ABSENT: Record<Name, [string, string][]> = {
     ["GET", "/api/auth/get-session"],
     ["POST", "/api/auth/sign-out"],
     ["GET", "/api/providers"],
-    ["GET", "/api/ready"],
     ["GET", "/api/voice/tokens"],
     ["POST", "/api/voice/tokens"],
     ["DELETE", "/api/voice/tokens/00000000-0000-4000-8000-000000000000"],
@@ -217,7 +216,6 @@ const ABSENT: Record<Name, [string, string][]> = {
     ["GET", "/api/auth/csrf"],
     ["GET", "/api/auth/get-session"],
     ["GET", "/api/providers"],
-    ["GET", "/api/ready"],
     ["GET", "/api/voice/tokens"],
     ["POST", "/api/voice/tokens"],
     ["GET", "/api/voice/speak"],
@@ -251,6 +249,21 @@ test("the account answers /connect/ with its own shell and policy, never the pho
       ACCOUNT_POLICY,
     );
   }
+});
+
+test("readiness without a database binding is down, saying nothing more", async () => {
+  const app = workerApp({
+    bindings: (env) => env,
+    rules: relayRules,
+    ready: "SELECT 1 LIMIT 0",
+    unavailable: "unavailable",
+    routes: () => {},
+  });
+  const response = await app.fetch(new Request(ORIGINS.relay + "/api/ready"), {
+    APP_ORIGIN: ORIGINS.relay,
+  });
+  expect(response.status).toBe(503);
+  expect(await response.json()).toEqual({ ok: false });
 });
 
 test("each Worker caches only its own hashed assets as immutable", async () => {

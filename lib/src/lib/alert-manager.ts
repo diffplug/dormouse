@@ -1266,8 +1266,9 @@ export class AlertManager {
   }
 
   /**
-   * The host is about to stop this Session's run itself — a reap
-   * (`docs/specs/dor-tool.md` -> Reaping) — so its end is no news: forget the
+   * The host is about to stop this Session's run itself — a reap, an in-place
+   * restart, a preview retarget (`docs/specs/alert.md` -> Command-exit Track)
+   * — so its end is no news: forget the
    * run as a different command start would, without ringing. The ring and
    * TODO already owed stay.
    */

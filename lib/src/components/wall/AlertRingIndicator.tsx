@@ -74,6 +74,8 @@ export function AlertRingIndicator({ sessionId }: { sessionId: string }) {
             'absolute inset-0 bg-alarm-vs-terminal',
             TERMINAL_TOP_RADIUS_CLASS,
             TERMINAL_BOTTOM_RADIUS_CLASS,
+            // SPOKEN persists until the ring clears, an unbounded window, so it keeps
+            // the plain ring's light wash for the terminal text read through it.
             speaking ? 'opacity-20' : 'opacity-10',
           )}
         />

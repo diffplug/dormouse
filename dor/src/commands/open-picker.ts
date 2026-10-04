@@ -144,6 +144,8 @@ export function runFilePicker(options: PickerOptions): Promise<PickerChoice | nu
       if (file === undefined) return;
       // The chosen handler belongs to `handlerFile`; a query edit in the same
       // input chunk as Enter can change the file before a render resets it.
+      // The first handler is the default and opens without `--tool`, so a host
+      // refusing the handler read still leaves the file openable.
       const handler = handlerIndex > 0 && file === handlerFile ? handlerList()[handlerIndex] : undefined;
       finish(handler ? { file, tool: handler.tool } : { file });
     };

@@ -8,9 +8,10 @@
 export type ShellCommandKind = 'cmd' | 'posix' | 'powershell';
 
 /** Shell quotes cannot protect bytes that an interactive terminal interprets
- * as editing keys, escape sequences, or line submission before shell parsing. */
+ * as editing keys, escape sequences, or line submission before shell parsing.
+ * C1 is included: the line editor echoes it, and the echo drives the terminal. */
 export function hasShellInputControls(value: string): boolean {
-  return /[\x00-\x1f\x7f]/.test(value);
+  return /[\x00-\x1f\x7f-\x9f]/.test(value);
 }
 
 const POSIX_SAFE_ARG = /^[A-Za-z0-9_@%+=:,./-]+$/;

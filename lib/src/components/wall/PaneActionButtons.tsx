@@ -1,5 +1,5 @@
 import { useContext } from 'react';
-import { ArrowLineDownIcon, ArrowsInIcon, ArrowsOutIcon, SplitHorizontalIcon, SplitVerticalIcon, TerminalIcon, XIcon } from '@phosphor-icons/react';
+import { ArrowLineDownIcon, ArrowsInIcon, ArrowsOutIcon, LinkBreakIcon, SplitHorizontalIcon, SplitVerticalIcon, TerminalIcon, XIcon } from '@phosphor-icons/react';
 import { TOOL_DIRTY_LABEL, ToolDirtyIndicator } from '../ToolDirtyIndicator';
 import { HeaderActionButton } from '../HeaderActionButton';
 import { chromeButton, paneZoomButtonClass } from '../design';
@@ -100,6 +100,22 @@ export function SplitButtons({ surfaceId }: { surfaceId: string }) {
 /** The width a 20px header control, such as the one below, adds to a header:
  *  itself and the header's 6px gap. */
 export const HEADER_CONTROL_SLOT_PX = 26;
+
+/** A Tool's Break, beside its Terminal Context button: asks, then splits the
+ *  Tool into its plain terminal and a browser pane (`docs/specs/dor-tool.md` ->
+ *  Run end). Kill stays Kill. */
+export function BreakToolButton({ surfaceId }: { surfaceId: string }) {
+  const actions = useContext(WallActionsContext);
+  if (!actions.onBreakTool) return null;
+  return (
+    <HeaderActionButton
+      className={`${chromeButton()} shrink-0`}
+      onClick={(e) => { e.stopPropagation(); actions.onBreakTool?.(surfaceId); }}
+      ariaLabel="Break"
+      tooltip="Break into a plain terminal and a browser pane"
+    ><LinkBreakIcon size={14} /></HeaderActionButton>
+  );
+}
 
 /** Toggles a Tool's Terminal Context, which shows its primary terminal
  *  (`docs/specs/terminal-context.md` -> Tool context), from under the button. */

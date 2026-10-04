@@ -22,7 +22,8 @@
  * to go red.
  */
 
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
+import { realpathSync } from 'node:fs';
 
 import { readRepoFile } from './lint-kit.mjs';
 
@@ -98,7 +99,7 @@ export function check() {
   return { failures, checked };
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const { failures, checked } = check();
   if (failures.length > 0) {
     console.error(`ps1-cmdlet-lint: ${INSTALLER} calls something PowerShell cannot resolve\n`);

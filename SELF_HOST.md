@@ -213,7 +213,7 @@ The Relay has no account, no passkey, and no enrolled Burrow. Same sequence as `
 
 1. **The setup password.** Needed only if the step-2 offer card is gone or the Burrow is elsewhere: have the user run `manage show-password` in their own terminal, which warns before printing. Never ask for the value, and never print it into the conversation.
 
-2. **The Burrow.** On this same machine, launch the build made with `DORMOUSE_RELAY_ORIGIN` (Prerequisites), open **Settings → Network** (the baseboard's Settings button), and choose **My Relay only**: a new install starts at Nothing, which refuses enrollment (`docs/specs/remote-network.md` → "Policy"). While the offer is unspent, its card enrolls in one click; "Enroll with the setup password…" covers a spent offer or a Burrow on another machine (`docs/specs/relay.md` → "Remote control, in the Settings dialog"). Enrollment persists, so later launches connect on their own; the section then shows the Relay and its connection.
+2. **The Burrow.** On this same machine, launch the build made with `DORMOUSE_RELAY_ORIGIN` (Prerequisites), open **Settings → Network** (the baseboard's Settings button), and choose **My Relay only**: a new install's default refuses enrollment (`docs/specs/remote-network.md` → "Policy"). While the offer is unspent, its card enrolls in one click; "Enroll with the setup password…" covers a spent offer or a Burrow on another machine (`docs/specs/relay.md` → "Remote control, in the Settings dialog"). Enrollment persists, so later launches connect on their own; the section then shows the Relay and its connection.
 
    A Burrow that offers only "Enroll with hosted.dormouse.sh" is a stock build, not a Relay problem.
 

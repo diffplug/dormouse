@@ -86,6 +86,13 @@ function referencesOf(spec, text) {
 
 const proseOnly = (text) => proseLines(text).join('\n');
 
+// A size, duration, or ratio written into a spec's prose or tables (not a
+// backticked constant). AGENTS.md -> "What stays": presentation lives at the
+// code unless a peer must agree with it. A bare `s` after three or more digits
+// is a plural (`404s`, `1990s`), not a duration.
+const PRESENTATION_RE = /(?<![\w.])(?!\d{3,}s(?!\w))\d+(?:\.\d+)?\s?(?:px|ms|%|s|rem|em|fps)(?!\w)/g;
+const presentationValues = (line) => line.replace(/`[^`\n]*`/g, '').match(PRESENTATION_RE) ?? [];
+
 function proseCandidates(path, text) {
   const prose = proseOnly(text);
   const candidates = [];
@@ -109,6 +116,14 @@ function proseCandidates(path, text) {
     if (/\b(?:interface|type|enum)\b/.test(match[1])) {
       candidates.push({ kind: 'CANONICAL', line: lineOf(text, match.index), words: wordCount(match[1]), detail: 'current TypeScript shape' });
     }
+  }
+  if (!path.endsWith('.rationale.md')) {
+    prose.split('\n').forEach((line, index) => {
+      const values = presentationValues(line);
+      if (values.length > 0) {
+        candidates.push({ kind: 'PRESENTATION', line: index + 1, words: wordCount(line), detail: `presentation value(s) ${values.join(', ')}` });
+      }
+    });
   }
   text.split('\n').forEach((line, index) => {
     const tests = line.match(/[\w./-]+\.test\.[cm]?[jt]sx?/g) ?? [];
@@ -267,7 +282,7 @@ for (const report of reports) {
     if (hit.detail.includes('spec overlap')) return 0;
     if (hit.kind === 'CANONICAL') return 1;
     if (hit.detail.includes('test inventory') || hit.kind === 'POINTER') return 2;
-    if (hit.kind === 'RATIONALE') return 3;
+    if (hit.kind === 'RATIONALE' || hit.kind === 'PRESENTATION') return 3;
     if (hit.kind === 'MATRIX') return 4;
     if (hit.kind === 'LONG') return 5;
     return 6; // aggregate comment-density hints follow specific locations

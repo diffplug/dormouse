@@ -19,7 +19,7 @@
  * See docs/specs/website-docs.md.
  */
 
-import { existsSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
 import { readFile, readdir, writeFile, mkdir, copyFile, rm } from 'node:fs/promises';
 import { dirname, join, posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -582,7 +582,7 @@ const buildSelfHost = () =>
  * umbrella.
  */
 export const SECURITY_AUDIENCES = {
-  security: ['docs/specs/security-local.md', 'docs/specs/security-ci.md', 'docs/specs/security-audit.md'],
+  security: ['docs/specs/security-local.md', 'docs/specs/security-ci.md', 'docs/specs/security-audit.md', 'docs/specs/security-hosted.md'],
   'self-host': ['docs/specs/remote-security-model.md', 'docs/specs/security-remote.md', 'SELF_HOST.md'],
   'supply-chain': ['docs/specs/security-supply-chain.md'],
 };
@@ -927,7 +927,7 @@ async function main() {
   );
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   main().catch((error) => {
     console.error(`generate-docs failed: ${error.message}`);
     process.exit(1);

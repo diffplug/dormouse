@@ -1,9 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   callerStillPlaceable,
-  callerStillRunnable,
   isNakedToolInvocation,
-  toolRerunsInCaller,
   toolTakesOverCaller,
   type ToolTakeoverGate,
 } from './tool-takeover';
@@ -88,22 +86,6 @@ describe.each(['tool', 'open'] as const)('toolTakesOverCaller for dor %s', (verb
       expect(toolTakesOverCaller({ ...passing, ...override }), why).toBe(false);
     }
   });
-
-  it('re-runs in the caller only when the caller is that tool', () => {
-    expect(toolRerunsInCaller({ ...passing, kind: 'tool' })).toBe(true);
-    expect(toolRerunsInCaller(passing)).toBe(false);
-    expect(toolRerunsInCaller({ ...passing, kind: 'tool', rawCommandLine: 'claude' })).toBe(false);
-    expect(toolRerunsInCaller({ ...passing, kind: 'tool', oscDriven: false })).toBe(false);
-  });
-
-  // The pane already is the tool, so there is nothing to place and the tool
-  // re-runs in its own directory — as an `adopted` match from any pane does.
-  it('re-runs regardless of the conditions that only govern placement', () => {
-    for (const override of [{ cwdMatches: false }, { explicitSurface: true }, { minimized: true }, { visible: false }, { workspaceActive: false }]) {
-      expect(toolRerunsInCaller({ ...passing, kind: 'tool', ...override })).toBe(true);
-      expect(toolTakesOverCaller({ ...passing, ...override })).toBe(false);
-    }
-  });
 });
 
 // What each placement re-reads once the caller's shell is back at a prompt: the
@@ -131,9 +113,4 @@ describe('after the prompt wait', () => {
     }
   });
 
-  it('a re-run needs only the pane and its directory', () => {
-    expect(callerStillRunnable({ ...passing, kind: 'tool', helperPresent: true, workspaceActive: false })).toBe(true);
-    expect(callerStillRunnable({ ...passing, visible: false })).toBe(false);
-    expect(callerStillRunnable({ ...passing, cwdMatches: false })).toBe(false);
-  });
 });

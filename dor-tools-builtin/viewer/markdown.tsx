@@ -157,7 +157,8 @@ const tokenClasses = [syntaxHighlighting(classHighlighter)];
 const plugins = [
   capture(), markdownSafetyPlugin(), commentsPlugin(),
   headingsPlugin(), listsPlugin(), quotePlugin(), thematicBreakPlugin(), linkPlugin(), linkDialogPlugin(),
-  tablePlugin(), frontmatterPlugin(), markdownShortcutPlugin(),
+  // Unpadded tables: padding to aligned columns rewrites every row of a table when one cell changes.
+  tablePlugin({ tablePipeAlign: false }), frontmatterPlugin(), markdownShortcutPlugin(),
   imagePlugin({ imageUploadHandler: upload, imagePreviewHandler: previewUrl, disableImageResize: true, EditImageToolbar: ImageToolbar as FC }),
   codeBlockPlugin({ defaultCodeBlockLanguage: '', codeBlockEditorDescriptors: [mermaidDescriptor] }),
   codeMirrorPlugin({ codeBlockLanguages: {

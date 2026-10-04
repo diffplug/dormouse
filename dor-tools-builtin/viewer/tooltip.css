@@ -1,5 +1,5 @@
-/* A tooltip (./tooltip.ts): the app's raised surface (DESIGN.md -> Raised
- * surface) on the page's --vscode-* variables, the same tokens lib binds
+/* A tooltip (./tooltip.ts): the app's raised surface (DESIGN.md -> "Cards / Containers")
+ * on the page's --vscode-* variables, the same tokens lib binds
  * surface-raised, border, muted, and font-mono to; text-sm is 12px/16px.
  * MDXEditor's own toolbar tooltips (Radix) take the same surface. */
 .dor-tip,body .mdxeditor-popup-container [class*=_tooltipContent_]{padding:4px 8px;border:1px solid var(--vscode-panel-border,var(--vscode-editorWidget-border,color-mix(in srgb,CanvasText 22%,transparent)));border-radius:4px;background:var(--vscode-editorWidget-background,Canvas);color:var(--vscode-editor-foreground,CanvasText);box-shadow:0 4px 6px -1px rgb(0 0 0/.1),0 2px 4px -2px rgb(0 0 0/.1);font:12px/16px var(--vscode-editor-font-family,ui-monospace,Menlo,monospace)}

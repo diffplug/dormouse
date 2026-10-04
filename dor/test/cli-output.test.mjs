@@ -2075,6 +2075,33 @@ test('tool --list escapes control characters in repo text, in every output', asy
   assert.deepEqual(JSON.parse(json.stdout).tools, listing.tools);
 });
 
+test('tool and open escape control characters in the host answer, in every output', async () => {
+  const answer = { status: 'created', surfaceId: 's', surfaceRef: 'surface:9', command: 'run \u009b31m \u007f \u001b[2J', cwd: '/work/\u0085site', minimized: false, key: 'k\u009d' };
+  const client = fixtureClient();
+  client.toolSurface = async () => answer;
+  const controls = /[\x00-\x09\x0b-\x1f\x7f-\x9f]/;
+  for (const argv of [['tool', 'evil'], ['tool', '--json', 'evil'], ['open', 'a.md'], ['open', '--json', 'a.md']]) {
+    const result = await runCli(argv, { client, env: { PWD: '/work' } });
+    assert.equal(result.exitCode, 0, argv.join(' '));
+    assert.doesNotMatch(result.stdout, controls, argv.join(' '));
+    assert.match(result.stdout, /\\u009b31m/, argv.join(' '));
+    if (argv.includes('--json')) assert.equal(JSON.parse(result.stdout).command, answer.command);
+  }
+});
+
+test('list escapes control characters in Tool commands, titles, locations, and Workspace names', async () => {
+  const evil = { ...fixtureSurfaces[0], kind: 'tool', title: 'site\u009b31m', cwd: '/work/\u007fsite', command: 'run \u001b]52;c;x\u0007 \u0085' };
+  const client = fixtureClient([evil]);
+  client.listWorkspaces = async () => ({ workspaces: [{ ...fixtureWorkspaces[0], name: 'ws\u009d' }], windowRef: 'window:1' });
+  const controls = /[\x00-\x09\x0b-\x1f\x7f-\x9f]/;
+  for (const argv of [['list'], ['list', '--json'], ['list', '--workspaces'], ['list', '--workspaces', '--json']]) {
+    const result = await runCli(argv, { client });
+    assert.equal(result.exitCode, 0, argv.join(' '));
+    assert.doesNotMatch(result.stdout, controls, argv.join(' '));
+  }
+  assert.equal(JSON.parse((await runCli(['list', '--json'], { client })).stdout).surfaces[0].command, evil.command);
+});
+
 test('tool rejects an unknown option', async () => {
   await snapshot('tool-unknown-option', await runCli(['tool', '--nope', 'storybook'], { client: fixtureClient() }));
 });

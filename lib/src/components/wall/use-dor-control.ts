@@ -1,4 +1,5 @@
 import { moveSurface } from './surface-move';
+import { clearHoldLapse, holdForHostInterrupt } from '../../lib/tool-run-hold';
 import { recordToolDirty } from '../../lib/tool-dirty-store';
 import { createSerialQueue } from '../../host/remote/serial-queue';
 import { useCallback, useEffect, useRef, type MutableRefObject } from 'react';
@@ -40,8 +41,6 @@ import { errorText, stringParam } from './dor-control-shared';
 import { getAgentBrowserSurfaceController, handOverBrowserStream } from './agent-browser-surface-controller';
 import {
   callerStillPlaceable,
-  callerStillRunnable,
-  toolRerunsInCaller,
   toolTakesOverCaller,
   type ToolTakeoverGate,
 } from './tool-takeover';
@@ -466,6 +465,10 @@ async function interruptToPrompt(id: string, signal?: AbortSignal, timeoutMs = P
   // it guarantees we never fire Ctrl+C into a non-integration shell (e.g. cmd.exe
   // popping `Terminate batch job (Y/N)?`).
   if (!isPaneOscDriven(id)) return { ok: false, message: 'has no Dormouse shell integration to restart' };
+  // The interrupt is the host's own doing: never a command-exit ring or a
+  // push, and never the end of a Tool's designation (docs/specs/dor-tool.md ->
+  // Run end) until the host gives up on a successor.
+  holdForHostInterrupt(id);
   getPlatform().writePty(id, '\x03');
   const interrupted = await waitForTerminalState(
     id,
@@ -504,9 +507,7 @@ export async function restartSurfaceInPlace(
  * The take-over handshake (docs/specs/dor-tool.md -> Take-over): `dor` is the
  * pane's foreground process until the host answers it, so the command can only
  * be typed once its own shell is back at a prompt. A shell that never comes back
- * — or a pane killed while we wait — is left exactly as it was. Shared by the
- * take-over, which transforms the pane on the way in, and a keyed re-run in the
- * tool's own pane, which does not.
+ * — or a pane killed while we wait — is left exactly as it was.
  */
 async function runToolInCallerPane(
   lath: LathWallEngine,
@@ -514,9 +515,8 @@ async function runToolInCallerPane(
   tool: {
     command: string;
     cwd: string;
-    /** The tool leaf to become — omitted when the pane already is this tool and
-     *  is only re-running it. */
-    become?: { title: string; params: Record<string, unknown> };
+    /** The tool leaf the pane becomes. */
+    become: { title: string; params: Record<string, unknown> };
   },
   /** Re-read after the wait, not only before it: the Workspace can close or
    *  transfer and the pane can be killed, minimized, or moved while `dor` exits. */
@@ -534,7 +534,9 @@ async function runToolInCallerPane(
   // Whatever this Session framed or announced under its previous command is not
   // this run's: a stale OSC 367 would hand the tool that port, or re-key it.
   retireToolRun(lath, id);
-  if (tool.become) lath.store.setMeta(id, becomeToolMeta(meta, tool.become.title, tool.become.params));
+  // A lapse an earlier host restart left speaks for no Tool this pane becomes.
+  clearHoldLapse(id);
+  lath.store.setMeta(id, becomeToolMeta(meta, tool.become.title, tool.become.params));
   await typeToolCommand(id, tool.command, tool.cwd, signal);
 }
 
@@ -1585,40 +1587,22 @@ export function useDorControl({
             // request's directory, not the Surface's launch directory.
             const matchedCwd = matchState.cwd?.path ?? cwd;
             const matched = { command: matchedCommand, cwd: matchedCwd };
-            // A match that is the calling pane is the tool's own Surface — the
-            // place take-over makes normal to retype in. Its command is live
-            // only when the tool itself spawned this `dor`; otherwise `dor` is
-            // what its shell is running, so the tool is idle however its pane
-            // reads, and it re-runs in its own directory like any `adopted`
-            // match. Through the handshake, never `restartSurfaceInPlace`,
-            // whose Ctrl+C would kill the `dor` awaiting this answer.
+            // A match that is the calling pane, its command not running: only a
+            // host replacement leaves a Tool at its prompt (docs/specs/dor-tool.md
+            // -> Run end), and `dor` is what its shell runs now. Nothing can be
+            // typed behind it, and Ctrl+C would kill the `dor` awaiting this
+            // answer: say so instead of a misleading `existing`.
             if (match.id === callerId && !surfaceRunsCommand(matchState, matchedCommand, matchedCwd)) {
-              if (!callerGate || !toolRerunsInCaller(callerGate)) {
-                // Nothing can be typed behind a line that is not this
-                // invocation alone, and there is no survivor to reveal — the
-                // user is sitting in it. Say so instead of reporting a tool
-                // that is not running as `existing`.
-                detail.respond({
-                  ok: false,
-                  error: `surface '${surfaceRefForId(match.id)}' is this tool's own pane and its command is not running; re-run it by typing the invocation alone at its prompt`,
-                });
-                return;
-              }
-              revealSurface(match.id);
-              respondStanding('adopted', match.id, true, matched);
-              await runToolInCallerPane(
-                lath,
-                match.id,
-                { command: matchedCommand, cwd: matchedCwd },
-                () => !workspaceGone() && callerStillRunnable(readCallerGate(match.id, matchedCwd)),
-                detail.signal,
-              );
+              detail.respond({
+                ok: false,
+                error: `surface '${surfaceRefForId(match.id)}' is this tool's own pane, which Dormouse is restarting; try again once it runs`,
+              });
               return;
             }
-            // A dedicated Surface whose command exited is unambiguously free,
-            // so re-run in place rather than splitting — where `dor ensure`,
-            // aimed at arbitrary shells, would stop matching. A reaped one has
-            // no shell to type into: it rehydrates (docs/specs/dor-tool.md -> Reaping).
+            // A match idle only while the host replaces its run (an ended one is
+            // a plain terminal: docs/specs/dor-tool.md -> Run end) restarts in
+            // place rather than splitting. A reaped one has no shell to type
+            // into: it rehydrates (docs/specs/dor-tool.md -> Reaping).
             const idle = matchState.currentCommand === null;
             const rehydrated = rehydrateTool(lath, match.id);
             // Held like any launch until the command reports, so a queued

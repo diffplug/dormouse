@@ -1,5 +1,5 @@
-import { cpSync, existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { cpSync, existsSync, mkdirSync, rmSync, writeFileSync, realpathSync } from "node:fs";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   assertPocketShell,
@@ -52,7 +52,7 @@ export function stageRelay({ pocket, oneTime }, assets) {
 
 if (
   process.argv[1] &&
-  resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+  realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)
 ) {
   try {
     const scripts = stageRelay(

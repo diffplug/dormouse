@@ -2,10 +2,11 @@ import * as vscode from 'vscode';
 import * as ptyManager from './pty-manager';
 import { createAlertHost, type AlertRealm } from '../../lib/src/host/alert-host';
 import { alertedPty, createOwnerPtyStream } from '../../lib/src/host/owner-pty';
-import type {
-  TerminalColorProvider,
-  TerminalColors,
-  TerminalProtocolEvent,
+import {
+  parseTerminalColors,
+  type TerminalColorProvider,
+  type TerminalColors,
+  type TerminalProtocolEvent,
 } from '../../lib/src/lib/terminal-protocol';
 import type { ProcessedPtyChunk, ProcessedPtyStream } from '../../lib/src/lib/processed-pty-stream';
 import { normalizeExternalUri } from '../../lib/src/lib/external-links';
@@ -728,7 +729,7 @@ export function attachRouter(
         break;
       case 'dormouse:themeColors':
         // Webview reports its resolved terminal theme; cache for OSC color replies.
-        latestThemeColors = { foreground: msg.foreground, background: msg.background, cursor: msg.cursor };
+        latestThemeColors = parseTerminalColors(msg) ?? latestThemeColors;
         break;
       case 'dormouse:init': {
         // Webview has (re-)initialized — subscribe to live events.

@@ -16,6 +16,7 @@ export class TerminalWebglRenderer {
     if (this.attempted) return;
     this.attempted = true;
     this.markDom();
+    // The WebGL2 pre-check keeps jsdom runs from logging a getContext failure per terminal.
     if (!cfg.terminal.webglRenderer || typeof WebGL2RenderingContext === 'undefined') return;
 
     const existingCanvases = new Set(this.host.querySelectorAll('canvas'));

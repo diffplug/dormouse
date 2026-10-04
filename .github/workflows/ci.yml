@@ -159,7 +159,7 @@ jobs:
     # it. It is also the only check that runs the shipped bundle rather than
     # inspecting it — the VS Code webview's CSP is enforced by Chromium, so a
     # policy that blocks the app is invisible to every string-level test we have
-    # (docs/specs/vscode.md -> "CSP policy").
+    # (docs/specs/vscode.rationale.md -> "CSP policy").
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 

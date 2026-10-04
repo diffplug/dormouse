@@ -48,6 +48,7 @@ import {
 } from "../relay-api";
 import type { Client } from "../relay-auth";
 import { upsertSubscription } from "../relay-push";
+import { workerDatabases } from "./worker-roles";
 import {
   ENTRIES,
   ORIGINS,
@@ -78,6 +79,7 @@ interface Pushed {
 
 async function fixture({ bindings = {} }: { bindings?: Record<string, string | undefined> } = {}) {
   const context = await createTestContext({ migrations });
+  const databases = await workerDatabases(context.database.url);
   // The push services: every request is recorded, then answered by `answer`.
   const pushed: Pushed[] = [];
   let answer: (url: URL) => WorkerResponse | Promise<WorkerResponse> = () =>
@@ -93,7 +95,7 @@ async function fixture({ bindings = {} }: { bindings?: Record<string, string | u
           ...bindings,
         }).filter(([, value]) => value !== undefined),
       ) as Record<string, string>,
-      hyperdrives: { HYPERDRIVE: context.database.url },
+      hyperdrives: { HYPERDRIVE: databases.relay },
       serviceBindings: {
         ASSETS: () =>
           new WorkerResponse("<!doctype html>", {
@@ -308,7 +310,10 @@ async function fixture({ bindings = {} }: { bindings?: Record<string, string | u
       answer = respond;
     },
     entitle,
-    url: context.database.url,
+    /** The database as the relay Worker's role, for its code called directly. */
+    url: databases.relay,
+    /** The database as the migration role, for the account Worker's writes. */
+    ownerUrl: context.database.url,
     call,
     account,
     burrow,
@@ -831,7 +836,7 @@ test("a de-entitled account signs in to nothing, and its sessions answer as expi
     expect((await f.call(method, path, { bearer: sessionToken, body })).status, path).toBe(status);
 });
 
-test("every unauthenticated route that reaches Postgres is rate limited per address", async ({
+test("every unauthenticated route that reads or writes a row is rate limited per address", async ({
   onTestFinished,
 }) => {
   const f = await fixture();
@@ -1516,7 +1521,7 @@ test("a subscribe racing its Burrow's removal answers unknown burrow, never a da
 }) => {
   const f = await pushFixture();
   onTestFinished(f.close);
-  await withClient(f.url, async (remover) => {
+  await withClient(f.ownerUrl, async (remover) => {
     // The removal has deleted the row and not yet committed.
     await remover.query("BEGIN");
     await remover.query(`DELETE FROM dormouse_relay_burrows WHERE "burrowId" = $1`, [f.laptop.burrowId]);

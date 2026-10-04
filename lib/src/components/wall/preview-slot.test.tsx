@@ -258,8 +258,12 @@ describe('dor open --preview', () => {
   it('retargets the slot in place, keeping its Session, ref, and a default title up to date', async () => {
     await mountSlot();
     const ref = (await listRow('slot'))!.ref;
+    // The interrupt is the host's own: its exit is silenced before the Ctrl+C.
+    const silencedAt: number[] = [];
+    vi.spyOn(fake, 'alertSilenceRun').mockImplementation(id => { if (id === 'slot') silencedAt.push(typed.slot.length); });
     // Asked from another directory, the slot's shell still runs it where it is.
     const result = await answer(await request({ file: 'b.md', preview: true, cwd: '/repo/docs' }));
+    expect(silencedAt).toEqual([0]);
     expect(result).toMatchObject({ status: 'retargeted', surfaceId: 'slot', surfaceRef: ref, command: 'view /repo/b.md', cwd: '/repo', minimized: false });
     expect(typed.slot).toEqual(['\x03', 'view /repo/b.md\r']);
     expect(typed['pane-a']).toEqual([]);
@@ -328,13 +332,17 @@ describe('dor open --preview', () => {
     expect(typed.slot).toEqual([]);
   });
 
-  it('re-runs the slot in place when it shows the file but its command exited', async () => {
+  it('ends a slot whose command exited: a plain terminal, so the next preview opens a new slot', async () => {
     await mountSlot();
     act(() => returnToPrompt('slot'));
-    expect(await answer(await request({ file: 'a.md', preview: true }))).toMatchObject({ status: 'adopted', surfaceId: 'slot', command: 'view /repo/a.md', minimized: false });
-    expect(typed.slot).toEqual(['\x03', 'view /repo/a.md\r']);
-    expect(focusOf('pane-a')).toBe('true');
-    expect(await paramsOf('slot')).toMatchObject({ toolTarget: '/repo/a.md', toolPreview: true });
+    await flush();
+    // docs/specs/dor-tool.md -> Run end: the mark went with the Tool.
+    expect(await paramsOf('slot')).toBeUndefined();
+    expect(await listRow('slot')).not.toHaveProperty('preview');
+    const result = await answer(await request({ file: 'a.md', preview: true }));
+    expect(result).toMatchObject({ status: 'created', command: 'view /repo/a.md' });
+    expect(result.surfaceId).not.toBe('slot');
+    expect(typed.slot).toEqual([]);
   });
 
   it('re-runs the slot for its own file when that preview supersedes one still interrupting it', async () => {
@@ -667,12 +675,14 @@ describe('pinning the slot', () => {
     expect(await listRow('slot')).not.toHaveProperty('preview');
   });
 
-  it('re-runs and pins by open when the slot shows the file but its command exited', async () => {
+  it('places an open as if there were no slot once the slot\'s command exited', async () => {
     await mountSlot();
     act(() => returnToPrompt('slot'));
-    expect(await answer(await request({ file: 'a.md' }))).toMatchObject({ status: 'adopted', surfaceId: 'slot', command: 'view /repo/a.md' });
-    expect(typed.slot).toEqual(['\x03', 'view /repo/a.md\r']);
-    expect(await paramsOf('slot')).not.toHaveProperty('toolPreview');
+    await flush();
+    const result = await answer(await request({ file: 'a.md' }));
+    expect(result).toMatchObject({ status: 'created', command: 'view /repo/a.md' });
+    expect(result.surfaceId).not.toBe('slot');
+    expect(typed.slot).toEqual([]);
   });
 
   it('reveals a pinned Tool with the resolved key, leaving a slot showing the file under another Tool alone', async () => {
@@ -1165,7 +1175,11 @@ describe('a switching slot', () => {
     await waitUntil(runs('view /repo/b.md'));
     act(() => terminalRegistry.applyTerminalSemanticEvents('slot', [{ type: 'commandFinish', exitCode: 1 }]));
     expect(frames()).toHaveLength(0);
-    expect(terminalHalf().style.visibility).toBe('');
+    // The failed run ended the Tool: the slot is the plain terminal showing it
+    // (docs/specs/dor-tool.md -> Run end).
+    await flush();
+    expect(await paramsOf('slot')).toBeUndefined();
+    expect(inSlot('[data-testid="terminal-pane"]')).toHaveLength(1);
   });
 
   it.each([

@@ -337,3 +337,18 @@ test('one unfetchable tip does not cost its batch the others', t => {
   const result = f.classify(f.sha, {}, 'git cat-file -e');
   assert.equal(result.status, 0, result.stderr);
 });
+
+test('the lower bound comes only from a successful scheduled run on main', () => {
+  const jq = auditBlock.match(/workflow-audit\.yaml\/runs\?per_page=100" \\\n\s*--jq '([^']+)'/)?.[1];
+  assert.ok(jq, 'the SUCCESSES listing and its --jq filter');
+  const run = (conclusion, head_branch, event, created_at) => ({ conclusion, head_branch, event, created_at });
+  const listing = { workflow_runs: [
+    run('success', 'bot/evil', 'push', '2026-10-03T09:00:00Z'),
+    run('success', 'main', 'workflow_dispatch', '2026-10-03T08:00:00Z'),
+    run('success', 'bot/evil', 'schedule', '2026-10-03T07:30:00Z'),
+    run('failure', 'main', 'schedule', '2026-10-03T07:13:00Z'),
+    run('success', 'main', 'schedule', '2026-10-02T07:13:00Z'),
+  ] };
+  const out = execFileSync('jq', ['-r', jq], { input: JSON.stringify(listing) }).toString().trim();
+  assert.equal(out.split('\n')[0], '2026-10-02T07:13:00Z');
+});

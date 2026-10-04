@@ -159,7 +159,9 @@ function handleLine(line) {
     // A closed window's iframe views are gone with it: end their leases. The
     // shared host takes the same event for the Burrow and the alerts.
     if (event === 'burrow:windows' && Array.isArray(data?.labels)) retainIframeProxyOwners(data.labels.filter((label) => typeof label === 'string'));
-    // The PTY lifecycle and I/O, the alerts and the Burrow.
+    // The PTY lifecycle and I/O, the alerts and the Burrow. Offered every line
+    // before the switch below: the host owns the PTY commands the alerts must
+    // see, every alert, Burrow and managed-voice command, and the theme push.
     if (host.handleCommand(event, data)) return;
     switch (event) {
       case 'pty:mark': mgr.mark(data?.ids, data?.requestId); break;

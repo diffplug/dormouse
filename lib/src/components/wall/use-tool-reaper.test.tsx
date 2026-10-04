@@ -8,7 +8,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FakePtyAdapter, setPlatform } from '../../lib/platform';
-import { markToolReaped, resetToolReaps } from '../../lib/tool-reap-store';
+import { isToolReaped, markToolReaped, resetToolReaps } from '../../lib/tool-reap-store';
 import { createLathWallEngine, toolLeafMeta, type LathWallEngine } from './lath-wall-engine';
 import { useToolReaper } from './use-tool-reaper';
 import type { DooredItem } from './wall-types';
@@ -17,6 +17,7 @@ const reaper = vi.hoisted(() => ({
   stopTool: vi.fn(async () => true),
   rehydrateTool: vi.fn(() => null),
   toolReapIdleMs: () => 10_000,
+  toolReapBlocker: vi.fn((id: string): string | null => (isToolReaped(id) ? 'already reaped' : null)),
 }));
 vi.mock('./tool-reaper', () => reaper);
 
@@ -124,6 +125,27 @@ describe('useToolReaper', () => {
     reaper.rehydrateTool.mockClear();
     await act(async () => { finish(); });
     expect(reaper.rehydrateTool).toHaveBeenCalledWith(lath, ID);
+  });
+
+  it('never starts a stop for a Tool that may not be stopped', () => {
+    reaper.toolReapBlocker.mockReturnValueOnce('a preview slot');
+    render([], false);
+    act(() => { vi.advanceTimersByTime(IDLE_MS); });
+    expect(reaper.stopTool).not.toHaveBeenCalled();
+  });
+
+  it('asks a Tool whose stop fell through again next tick, not at once', async () => {
+    // Past a bound the stop never settles, so a regression fails here rather
+    // than spinning the microtask queue forever.
+    reaper.stopTool.mockImplementation(() =>
+      reaper.stopTool.mock.calls.length > 5 ? new Promise<boolean>(() => {}) : Promise.resolve(false));
+    render([], false);
+    act(() => { vi.advanceTimersByTime(IDLE_MS); });
+    await act(async () => {});
+    expect(reaper.stopTool).toHaveBeenCalledTimes(1);
+    act(() => { vi.advanceTimersByTime(IDLE_MS / 4); });
+    await act(async () => {});
+    expect(reaper.stopTool).toHaveBeenCalledTimes(2);
   });
 
   it('never rehydrates into a closing or transferring Workspace', () => {

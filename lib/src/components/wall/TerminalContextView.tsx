@@ -448,7 +448,8 @@ export function TerminalContextView(p: TerminalContextViewProps) {
       </div>
       <div className="@container flex min-h-0 flex-1 flex-col border-t border-border">
         <div aria-label={isTool ? 'Tool terminal status' : 'Helper terminal status'} className="flex h-9 shrink-0 items-center gap-3 whitespace-nowrap px-3">
-          <span className="hidden shrink-0 items-center gap-2 font-semibold @[48rem]:flex"><TerminalIcon size={15} />{isTool ? 'Tool terminal' : 'Helper terminal'}</span>
+          {/* Named at every width, so a Tool's own terminal never passes for a helper (docs/specs/terminal-context.md). */}
+          <span className="flex shrink-0 items-center gap-2 font-semibold"><TerminalIcon size={15} /><span className="@[48rem]:hidden">{isTool ? 'Tool' : 'Helper'}</span><span className="hidden @[48rem]:inline">{isTool ? 'Tool terminal' : 'Helper terminal'}</span></span>
           <div className="flex min-w-0 items-center gap-2 text-muted">{status.icon}<span className="truncate" title={statusLabel}>{statusLabel}</span>
             {!isTool && (status.reset ? <ContextAction label="Reset helper terminal" onClick={requestReset}><ArrowCounterClockwiseIcon size={13} />{resetAsks ? 'Reset…' : 'Reset'}</ContextAction> : <ContextAction label="Modify autorun command" onClick={() => { setCommand(p.defaultCommand ?? p.command); setDetail('modify'); }}><SlidersHorizontalIcon size={15} />Modify</ContextAction>)}
           </div>

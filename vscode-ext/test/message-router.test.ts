@@ -187,6 +187,27 @@ it('forwards a parse\'s Tool events in stream order only to the PTY owner', () =
   }
 });
 
+// The colour cache answers OSC 10/11/12 from the last whole theme push, exactly
+// as the sidecar's `setThemeColors` does (lib/src/host/remote/sidecar-entry.ts).
+it('drops a malformed theme push whole, keeping the last good one', () => {
+  const webview = fakeWebview();
+  const disposable = router.attachRouter(webview.channel, {});
+  const written: string[] = [];
+  ptys.onWrite = (_id, data) => void written.push(data);
+  try {
+    webview.send({ type: 'dormouse:init' });
+    webview.send({ type: 'dormouse:themeColors', foreground: '#ffffff', background: '#102030', cursor: '#abcdef' });
+    webview.send({ type: 'dormouse:themeColors', foreground: '#000000' } as never);
+    webview.send({ type: 'dormouse:themeColors', foreground: '#000000', background: 7, cursor: '#000000' } as never);
+    webview.send({ type: 'pty:spawn', id: 'pty-theme', options: { cwd: '/repo' } });
+    ptys.callbacks!.onData('pty-theme', '\x1b]10;?\x07\x1b]11;?\x07');
+    expect(written).toEqual([
+      '\x1b]10;rgb:ffff/ffff/ffff\x1b\\',
+      '\x1b]11;rgb:1010/2020/3030\x1b\\',
+    ]);
+  } finally { disposable.dispose(); }
+});
+
 describe('session flush', () => {
   it('waits for ordered host writes after the webview acknowledges its flush', async () => {
     vi.useFakeTimers();

@@ -6,9 +6,9 @@ import type {
   IdFormat,
   ParseResult,
 } from './types.js';
-import { errorLine, escapeControl, renderJson } from './terminal-text.js';
+import { errorLine } from './terminal-text.js';
 
-export { errorLine, printable, renderJson } from './terminal-text.js';
+export { errorLine, printable, renderJson, renderPrintableJson } from './terminal-text.js';
 
 export const stringParser = (input: string): string => input;
 
@@ -39,12 +39,6 @@ export function parseNonNegativeInt(input: string, flag: string): number {
   return value;
 }
 
-
-/** `renderJson` for repo text: `JSON.stringify` escapes only C0, so DEL and C1
- *  are escaped too, which leaves the parsed value unchanged. */
-export function renderPrintableJson(payload: unknown): string {
-  return renderJson(payload).replace(/[\x7f-\x9f]/g, escapeControl);
-}
 
 export function isIdFormat(value: string): value is IdFormat {
   return value === 'refs' || value === 'ids' || value === 'both';

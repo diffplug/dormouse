@@ -125,8 +125,6 @@ The Encoding API is available in every targeted runtime; narrow declarations in 
 
 **Why the mint runs before the enrollment request.** A successful `POST /api/burrow/enroll` appends a `burrows.json` row on the Relay and spends the installer's single-use token, and the Burrow can undo neither. Minting afterwards means a runtime that turns out to lack X25519 has already consumed the operator's one-shot credential and left a row nothing can use.
 
-**Why a halves mismatch keeps the Burrow down.** A private half that does not derive its recorded public half is a corrupt state file, but starting anyway would not present it as one: the Burrow would come up under a *different* identity than every paired Client has pinned, and each of those Clients would read the change as the Burrow-impersonation signal it is designed to raise. Only failing loudly at boot names the real fault.
-
 **Why the probe answers `false` instead of throwing.** Its callers are boot-path and pre-ceremony gates — the Burrow's start and Pocket's sign-in, setup, pairing and connection screens — where an exception is an unhandled rejection in a context with no error boundary. A missing WebCrypto (an insecure context, an old runtime) reads as "unsupported, show the upgrade requirement", the same answer as a curve the runtime rejects.
 
 ## Client static loss

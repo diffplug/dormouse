@@ -44,6 +44,19 @@ export type TerminalColorTarget = 'foreground' | 'background' | 'cursor';
 export type TerminalColors = Record<TerminalColorTarget, string>;
 
 /**
+ * A webview's theme push, or `null` unless all three colors are strings. A host
+ * drops a malformed push whole rather than half-applying it: a non-string color
+ * would reach the OSC reply formatter, and a missing one would silently answer
+ * from a different theme than its siblings.
+ */
+export function parseTerminalColors(value: unknown): TerminalColors | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const { foreground, background, cursor } = value as Partial<Record<TerminalColorTarget, unknown>>;
+  if (typeof foreground !== 'string' || typeof background !== 'string' || typeof cursor !== 'string') return null;
+  return { foreground, background, cursor };
+}
+
+/**
  * Resolves the active terminal theme color for an OSC 10/11/12 query, returned
  * as a CSS hex string (e.g. `#1e1e1e` / `#1e1e1eff` / `#abc`). Return `null` to
  * decline (the query is then forwarded to xterm.js unchanged).

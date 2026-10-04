@@ -91,6 +91,9 @@ export interface WallActions {
    *  Preview slot). A double-click on its Pane header, or Keep open in its
    *  terminal context. */
   onPinPreview?: (id: string) => void;
+  /** Break a Tool into its plain terminal and, if serving, an ordinary browser
+   *  Surface beside it (`docs/specs/dor-tool.md` -> Run end). */
+  onBreakTool?: (id: string) => void;
 }
 
 export const WallActionsContext = createContext<WallActions>({

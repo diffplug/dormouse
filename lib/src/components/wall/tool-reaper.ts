@@ -3,6 +3,7 @@
  * Tool that declared itself safe to stop, and start it again when it is shown.
  * `useToolReaper` decides when; this module is what a stop and a rehydrate do.
  */
+import { holdForHostInterrupt } from '../../lib/tool-run-hold';
 import { buildShellCommandForKind, shellCommandKind } from 'dor/commands/shell-quote';
 import { parseRenderMode } from 'dor-lib-common/browser-providers';
 import { getPlatform, PLATFORM_STRING } from '../../lib/platform';
@@ -97,7 +98,7 @@ export async function stopTool(lath: LathWallEngine, id: string): Promise<boolea
   let payload: string | null;
   try {
     // The stop is the host's own doing: never a command-exit ring or a push.
-    getPlatform().alertSilenceRun?.(id);
+    holdForHostInterrupt(id);
     getPlatform().writePty(id, '\x03');
     await waitFor(id, () => !registry.has(id) || getTerminalPaneState(id).currentCommand === null, TOOL_STOP_GRACE_MS);
     await new Promise(resolve => setTimeout(resolve, STOP_SETTLE_MS));

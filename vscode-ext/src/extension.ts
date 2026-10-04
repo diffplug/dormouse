@@ -266,13 +266,13 @@ export async function deactivate() {
   await captureAgentRecoveryCommands(extensionContext, 1200);
   await poppedOutClosed;
   // Save session state while PTYs are still alive — CWD queries need live
-  // processes. Must happen before gracefulKillAll.
+  // processes. Must happen before the graceful kill.
   step('flushing sessions from webview');
   await flushAllSessions(1000);
   step('refreshing session state from live PTYs');
   await refreshSavedSessionStateFromPtys(extensionContext, getAlertStates());
   step('graceful kill');
-  await ptyManager.gracefulKillAll(2000);
+  await ptyManager.gracefulKillLive(2000);
   ptyManager.killAll();
   step('done');
 }

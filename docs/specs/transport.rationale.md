@@ -30,6 +30,8 @@ Measured on macOS 27 with Claude Code 2.1.274 and Codex 0.154.0, 2026-09 (issue 
 
 **Why another terminal's identity is stripped.** A pane inherits the host's environment, and the host inherits whatever launched it. Fedora's `vte.sh` sees `VTE_VERSION` and emits an `OSC 777` notification after every command; `WT_SESSION`, `ConEmuANSI`, `TERM_FEATURES` and the Konsole and Ptyxis versions switch on cargo's `OSC 9;4` progress, so every build rang; `TMUX` / `STY` send tools to a multiplexer that is not there — Codex and Claude Code wrap their notifications in tmux's passthrough; and `CURSOR_TRACE_ID` makes Claude Code believe it runs in Cursor's terminal, which leaves it no notification channel (audit, 2026-09-23). `COLORFGBG` would contradict the background the OSC 11 answer reports.
 
+**Why `LC_TERMINAL` is set unconditionally.** Some shell integrations key off it rather than `TERM_PROGRAM`.
+
 **Why `COLORTERM` is set even though it is not iTerm2's.** The PTY is spawned as `xterm-256color` with no other depth hint, so env-sniffing tools — `supports-color` and everything built on it — quantize RGB output to the nearest palette entry.
 
 ## Reconnection protocol
@@ -56,7 +58,17 @@ Release-without-kill is a separate verb rather than a flag on the closure path b
 
 ## Message protocol
 
+**Why one alert manager per host process, beside the PTYs.** Each standalone window used to run its own `AlertManager` in its webview, fed from events the sidecar had already parsed. Three failures followed (audit, 2026-09-23): WKWebView throttles a background window's timers, so the detector, deferral and await timers of the window a completion should summon the user back to ran late; a reload started an empty manager and a live resume seeds nothing, so every ring and TODO in the window vanished; and a Workspace transfer had to snapshot ring, episode, detector deadlines and deferred notification into the transfer content. VS Code never had these, because its manager lived in the extension host beside the PTYs and the parse; moving standalone's there made the two hosts one module.
+
+**Why installing the responder is keyed by the link.** Each install adds a `status` subscription, and each arming under it adds pane-state, activity, and focus listeners with no handle left to remove them. A flag would be wrong because the platform adapter, not the module, is what owns a link.
+
 **The per-store tax.** Each app-global store relayed webview↔host this way costs one `PlatformAdapter` push method, an on/off listener pair, two `AlertCommand` ops and an event, and a host coordinator with its own subscribe/unsubscribe. Two are worth paying that twice for the directness; at a third, the keyed channel + key→normalizer registry is cheaper than another copy of the plumbing.
+
+## Persisted session types
+
+**Why the collector debounces on top of each Wall's own debounce.** Each Wall coalesces its own record; the second stage coalesces *across* Walls, so one window-wide event (a store change, a theme push, a burst of output in two Workspaces) becomes one host write rather than one per Workspace.
+
+**What a cwd probe costs.** On macOS `getCwd` is an `lsof` subprocess in the sidecar, on every debounced save and every 30 s heartbeat; per pane, and per Workspace in a quit flush that fans out to every Wall at once, it would be N spawns on the sidecar's only event loop.
 
 ## Retiring the transcripts already on disk
 
@@ -88,4 +100,4 @@ Release-without-kill is a separate verb rather than a flag on the closure path b
 
 **The phantom-running symptoms of a spawn failure with no exit.** A running header that never clears, a `countRunningSessions` that never returns to zero, and therefore a quit confirmation on every window close. Reached whenever a persisted or selected shell binary is gone.
 
-**What type-only ack matching did.** `interrupt` and `gracefulKillAll` time out on the teardown path, and the late ack from a timed-out call then resolved the *next* call of the same type the instant it was issued — so the second interrupt appeared to complete before the PTYs had seen it.
+**What type-only ack matching did.** `interrupt` and the graceful kill time out on the teardown path, and the late ack from a timed-out call then resolved the *next* call of the same type the instant it was issued — so the second interrupt appeared to complete before the PTYs had seen it.

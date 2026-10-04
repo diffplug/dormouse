@@ -67,11 +67,11 @@ Source of truth: `captureIframeTheme` / `connectIframeTheme` in `lib/src/lib/the
 
 Terminal content is orthogonal to the chrome: xterm.js reads terminal colors straight from `--vscode-*` in `getTerminalTheme()`, after the resolver materializes VSCode's terminal defaults (`RESOLUTION_RULES`).
 
-**`getTerminalTheme()` carries no per-key default** — `REGISTRY_DEFAULTS` is the one such table, and every shipping host materializes these keys first; an unset key is omitted so xterm.js applies its own. Two exceptions: the background/foreground pair, rostered under `DESIGN.md` → "Fixed Exceptions", and `cursor`, which falls back to the resolved foreground because **the three colors pushed to a DOM-less host must all be present** or the push is dropped whole.
+**`getTerminalTheme()` carries no per-key default** — `REGISTRY_DEFAULTS` is the one such table, and every shipping host materializes these keys first; an unset key is omitted so xterm.js applies its own. Two exceptions: the background/foreground pair, rostered under `DESIGN.md` → "Fixed Exceptions", and `cursor`, which falls back to the resolved foreground because **the three colors pushed to a DOM-less host must all be present** (a host drops a push missing any: `docs/specs/transport.md` → "Message protocol").
 
 Applying a theme updates existing terminals. **Adapters must use the `terminal-theme.ts` API directly** — it is not re-exported through the `terminal-registry` facade. Its `themeColorProvider` feeds the OSC 10/11/12 color-query answer.
 
-**The owner's parser consumes `OSC 10/11/12 ; ?` and answers `OSC <code> ; rgb:RRRR/GGGG/BBBB ST`** (8-bit channels doubled) from the active terminal theme (rationale). **Only the `?` (report) form is intercepted**; *set* requests pass through, and an unknown or unparseable theme falls the query through to xterm.js. A parser with a DOM reads the theme; one without has it pushed up ([vscode.md](vscode.md#osc-color-query-answering), [standalone.md](standalone.md#burrow-service)).
+**The owner's parser consumes `OSC 10/11/12 ; ?` and answers `OSC <code> ; rgb:RRRR/GGGG/BBBB ST`** (8-bit channels doubled) from the active terminal theme (rationale). **Only the `?` (report) form is intercepted**; *set* requests pass through, and an unknown or unparseable theme falls the query through to xterm.js. A parser with a DOM reads the theme; one without has it pushed up (`docs/specs/transport.md` → "Message protocol").
 
 Source of truth: `getTerminalTheme()` in `lib/src/lib/terminal-theme.ts`; `formatOscColorResponse` in `lib/src/lib/terminal-protocol.ts`.
 

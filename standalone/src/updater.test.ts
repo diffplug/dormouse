@@ -81,6 +81,7 @@ import {
   approveUpdate,
   dismissBanner,
   openChangelog,
+  openUrl,
   buildDebugReport,
   useUpdateState,
   hasPendingUpdate,
@@ -969,6 +970,12 @@ describe('updater', () => {
       await vi.advanceTimersByTimeAsync(0);
 
       expect(mocks.shellOpen).toHaveBeenCalledWith('https://dormouse.sh/changelog/after/0.4.0');
+    });
+
+    it('openUrl revalidates every URL it launches, as an adapter does', async () => {
+      openUrl('javascript:alert(1)', 'test');
+      await vi.advanceTimersByTimeAsync(0);
+      expect(mocks.shellOpen).not.toHaveBeenCalled();
     });
   });
 

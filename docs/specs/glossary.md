@@ -68,14 +68,14 @@ Workspace and Window are containers, not Session layers — they group Surfaces 
 | **Window** | One or more Workspaces; the OS frame (a standalone Tauri window) or the host frame (a VS Code window). A host may hold several, and a Workspace may move between them. Its **Tauri label is its persistence identity** — one snapshot per label (`docs/specs/standalone.md` → Windows). | host (Tauri / VS Code) |
 | **Workspace** | "A window's worth of panes": a `WorkspaceId`, a user-facing `name`, its Panes and Surfaces, and the layout arranging them (Lath snapshot + doors). Exactly one **Wall** renders one Workspace. | `lib/src/lib/workspace-store.ts` (the model), `lib/src/components/Wall.tsx` at render time; persisted per `docs/specs/transport.md` |
 
-How many Workspaces a Window shows at once is host-specific: standalone mounts every Wall and shows one (`docs/specs/layout.md` → Workspaces), VS Code maps each Workspace to its own webview (`docs/specs/vscode.md`).
+How many Workspaces a Window shows at once is host-specific: `docs/specs/layout.md` → "Conceptual model".
 
 ### Wall chrome
 
 | Term | Meaning |
 |---|---|
 | **Wall** | The component rendering one Workspace: its Panes plus the Baseboard (`lib/src/components/Wall.tsx`) |
-| **Baseboard** | The always-visible strip along the bottom of a Wall, holding Doors, the update notice, and the shortcut hint |
+| **Baseboard** | The always-visible strip along the bottom of a Wall that holds its Doors |
 | **Door** | A minimized Surface's tile on the Baseboard — the `Doored` View state |
 
 `docs/specs/layout.md` owns their placement, sizing, and interaction.
@@ -91,7 +91,7 @@ Remote control has exactly three roles. `docs/specs/remote-security-model.md` ow
 | Role | What it is | What it decides |
 |---|---|---|
 | **Burrow** | The app that owns terminal Surfaces and the processes behind them: the Standalone app, or the VS Code extension. **Two on one machine are two Burrows**, enrolled and paired separately, and Pocket lists them as two rows. | Every remote-access grant. Pairing approval and the ACL live here and nowhere else. |
-| **Client** | What controls a Burrow from somewhere else. **Pocket** is the phone Client (`docs/specs/pocket-app.md`); the **one-time page** Hosted serves is a Client for one session (`docs/specs/one-time.md`); Canopy is a future one (`## Future`). | Nothing on its own — a Client asks. |
+| **Client** | What controls a Burrow from somewhere else. **Pocket** is the phone Client (`docs/specs/pocket-app.md`); the **one-time page** Hosted serves is a Client for one session (`docs/specs/one-time.md`); a VR headset is a future one (`docs/specs/remote-api.md` → Future). | Nothing on its own — a Client asks. |
 | **Relay** | The coordinating server: accounts, presence, push fan-out, and an encrypted byte pipe between Client and Burrow (`docs/specs/relay.md`). **Dormouse Hosted** is the managed Relay; `SELF_HOST.md` runs your own. | Routing. It holds no terminal and no authorization. |
 
 **Hosted's one-time room is a rendezvous, not a fourth role**: it forwards only a one-time connection's handshake frames, then closes (`docs/specs/one-time.md` -> "Hosted rendezvous").
@@ -176,7 +176,7 @@ Transition rules in `docs/specs/alert.md`; the union is `SessionStatus` in `lib/
 | `Dirty` | Changes pending |
 | `Flushing` | Persistence write in flight |
 
-A monotonic generation counter, not a literal enum: `Dirty` means `gen > savedGen`, and **a `markDirty` racing a `Flushing` write leaves the tracker dirty** rather than losing the change. Source of truth: `lib/src/lib/session-dirty.ts`, driven by `lib/src/components/wall/use-session-persistence.ts`.
+A generation counter, not a literal enum; the save rule is `docs/specs/layout.md` → Session persistence.
 
 ## Transitions
 
@@ -281,6 +281,7 @@ Remote-only vocabulary (**Viewer**, and the wire-level `DirectoryEntry` projecti
 
 ## Future
 
+**Scope: model-extensions** — unordered:
+
 - **Typed precondition errors.** The Liskov contract's enforcement: a gated call against the wrong state (e.g. `writePty` on a non-`Live` Process) fails with a typed error naming the violated precondition, replacing today's silent early return.
-- **Canopy — a VR Client.** The 3D/WebXR rendering lab (`docs/specs/webgl-text.md`) becomes a second [Client](#roles) beside Pocket, controlling a Burrow over the same protocol. Nothing of the Client half is built; canopy is Storybook-only.
 - **Dormouse Burrow — a headless Burrow.** A Burrow with no local UI, so a machine nobody sits at can still be paired with. It changes no role: the same enrollment, ACL, and pairing approval, with the approval surfaced somewhere other than a Wall.

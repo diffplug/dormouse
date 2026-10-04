@@ -16,7 +16,7 @@ import { launchChromium } from './launch-chromium';
  * `webview-html.test.ts`, which pins the CSP contract against a *fixture* of
  * Vite's output. A fixture cannot notice that Vite started emitting a shape
  * nobody anticipated — which is exactly how the webview shipped blank for
- * thirteen days (`docs/specs/vscode.md` → "CSP policy"). Only running the real
+ * thirteen days (`docs/specs/vscode.rationale.md` → "CSP policy"). Only running the real
  * bundle under the real policy in a real engine closes that gap, because CSP
  * enforcement is the thing under test and no amount of string inspection
  * substitutes for it. jsdom is not an option: it does not enforce CSP at all.

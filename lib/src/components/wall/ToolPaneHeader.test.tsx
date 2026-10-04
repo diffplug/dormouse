@@ -12,6 +12,8 @@ import { setNativeFieldValue } from '../../lib/dom';
 import { recordToolDirty, resetToolDirty } from '../../lib/tool-dirty-store';
 import { applyTerminalSemanticEvents, removeTerminalPaneState, setTerminalUserTitle } from '../../lib/terminal-state-store';
 import { commitPreviewTransition, resetPreviewTransitions } from '../../lib/preview-transition-store';
+import * as terminalRegistry from '../../lib/terminal-registry';
+import { clearTerminalActivity, setTerminalActivity } from '../../lib/session-activity-store';
 import { setDevServerResolution } from './agent-browser-ports';
 import { beginSlotSwitch } from './preview-transition';
 import {
@@ -58,6 +60,7 @@ afterEach(() => {
   resetToolDirty();
   resetPreviewTransitions();
   removeTerminalPaneState(ID);
+  clearTerminalActivity(ID);
 });
 
 const context = { id: null, mounted: null, open: vi.fn(), close: vi.fn(), promote: vi.fn(), openPort: vi.fn() };
@@ -100,7 +103,7 @@ describe('ToolPaneHeader — a serving Tool', () => {
     renderHeader(SERVING);
     expect(header().className).toContain('bg-header-active-bg');
     expect(controls()).toEqual([
-      'agent-browser resizes with pane — change display', 'Terminal context',
+      'agent-browser resizes with pane — change display', 'Terminal context', 'Break',
       'Split left/right', 'Split top/bottom', 'Zoom', 'Minimize', 'Kill',
     ]);
     // The name sits after both, before the layout buttons.
@@ -112,6 +115,19 @@ describe('ToolPaneHeader — a serving Tool', () => {
     expect(container.querySelector('[role="button"]')).toBeNull();
     expect(container.textContent).not.toContain('localhost');
     expect(container.textContent).not.toContain(STUB_CHROME.key!);
+  });
+
+  it("shows its Session's TODO pill, which clears the TODO", () => {
+    act(() => setTerminalActivity(ID, { todo: true, notification: { title: 'Tool finished', body: null } }));
+    renderHeader(SERVING);
+    const pill = container.querySelector<HTMLButtonElement>(`[data-session-todo-for="${ID}"]`);
+    expect(pill?.getAttribute('aria-label')).toBe('Dismiss TODO: Tool finished');
+    // Between the name and the layout buttons, as on a terminal's header.
+    expect(name()!.compareDocumentPosition(pill!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(pill!.compareDocumentPosition(labelled('Split left/right')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const cleared = vi.spyOn(terminalRegistry, 'clearSessionTodo');
+    act(() => pill!.click());
+    expect(cleared).toHaveBeenCalledWith(ID);
   });
 
   it('opens its Terminal Context from under the button', () => {
@@ -158,12 +174,12 @@ describe('ToolPaneHeader — a serving Tool', () => {
     renderHeader(SERVING);
     act(() => recordToolDirty(ID, true));
     const steps: [number, (string | null)[]][] = [
-      [356, ['agent-browser resizes with pane — change display', 'Terminal context', 'Split left/right', 'Split top/bottom', 'Zoom', 'Minimize', 'Kill']],
-      [355, ['agent-browser resizes with pane — change display', 'Terminal context', 'Zoom', 'Minimize', 'Kill']],
-      [161, ['agent-browser resizes with pane — change display', 'Terminal context', 'Zoom', 'Minimize', 'Kill']],
-      [160, ['Terminal context', 'Zoom', 'Minimize', 'Kill']],
-      [125, ['Terminal context', 'Zoom', 'Minimize', 'Kill']],
-      [124, ['Terminal context', 'Zoom']],
+      [382, ['agent-browser resizes with pane — change display', 'Terminal context', 'Break', 'Split left/right', 'Split top/bottom', 'Zoom', 'Minimize', 'Kill']],
+      [381, ['agent-browser resizes with pane — change display', 'Terminal context', 'Break', 'Zoom', 'Minimize', 'Kill']],
+      [187, ['agent-browser resizes with pane — change display', 'Terminal context', 'Break', 'Zoom', 'Minimize', 'Kill']],
+      [186, ['Terminal context', 'Break', 'Zoom', 'Minimize', 'Kill']],
+      [151, ['Terminal context', 'Break', 'Zoom', 'Minimize', 'Kill']],
+      [150, ['Terminal context', 'Zoom']],
       [80, ['Terminal context', 'Zoom']],
     ];
     for (const [width, expected] of steps) {
@@ -319,7 +335,7 @@ describe('ToolPaneHeader — other faces', () => {
   });
 
   it('re-tiers when a port conflict comes and goes, though the header\'s width never changes', () => {
-    act(() => resizeHeader(110));
+    act(() => resizeHeader(136));
     renderHeader({ surfaceType: 'tool', command: 'pnpm dev' });
     expect(labelled('Kill')).not.toBeNull();
     renderHeader({ surfaceType: 'tool', command: 'pnpm dev', toolPortConflict: [3000, 4000] });
@@ -331,9 +347,9 @@ describe('ToolPaneHeader — other faces', () => {
 
   it('keeps the port-conflict face\'s minimize and kill to the Terminal Context button\'s narrowest boundary', () => {
     renderHeader({ surfaceType: 'tool', command: 'pnpm dev', toolPortConflict: [3000, 4000] });
-    act(() => resizeHeader(125));
+    act(() => resizeHeader(151));
     expect(labelled('Kill')).not.toBeNull();
-    act(() => resizeHeader(124));
+    act(() => resizeHeader(150));
     expect(labelled('Kill')).toBeNull();
     expect(labelled('Zoom')).not.toBeNull();
   });

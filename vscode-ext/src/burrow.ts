@@ -136,6 +136,7 @@ async function askBothTiers(
       ? remoteRequest(op, params, ownerPtyId)
       : bound.brokerRequest(op, params);
   }
+  // Local first: a duplicated id is shown from, and attaches to, the in-window owner.
   const [local, remote] = await Promise.all([
     bound.brokerRequest(op, params),
     remoteRequest(op, params),

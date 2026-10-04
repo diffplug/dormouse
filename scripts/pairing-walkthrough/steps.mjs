@@ -1150,7 +1150,7 @@ async function ringFromBurrow(ctx) {
 
 /**
  * Leave the wall and come back the way a phone comes back from a dropped socket
- * (`docs/specs/relay.md` → "Running it"): the Burrows view, then Connect.
+ * (`docs/specs/relay.md` → "Guardrails", no resume protocol): the Burrows view, then Connect.
  *
  * Also the only screenshot of the Burrows view with a row on it — every earlier
  * step passes straight through it.

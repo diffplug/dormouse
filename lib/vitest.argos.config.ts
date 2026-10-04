@@ -49,8 +49,8 @@ function storybookProject(browser: 'chromium' | 'webkit'): TestProjectInlineConf
 export default mergeConfig(
   viteConfig,
   defineConfig({
-    // Read by `lib/.storybook/preview.ts` to apply the same snapshot freezes as
-    // `isChromatic()`. A compile-time flag because the preview's freezes run at
+    // Read by `lib/.storybook/preview.ts` to apply its snapshot freezes. A
+    // compile-time flag because the preview's freezes run at
     // import, before any setup-file code could set a global.
     define: { __ARGOS_SNAPSHOT__: 'true' },
     test: { projects: [storybookProject('chromium'), storybookProject('webkit')] },

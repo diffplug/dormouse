@@ -2,6 +2,8 @@
 
 ## Trust boundary
 
+**What records an access today.** Each ACL record keeps `approvedAt` and `approvedBy`, and the owner-local logs report some rejections; those logs are diagnostic fragments, not a complete or structured record of connects, attaches, denials, or writes. That is why the missing audit trail is a known gap in `docs/specs/security.md`, not an accepted risk.
+
 **Why a Relay compromise buys no authorization.** A forged account, a forged presence stamp, and an injected ceremony frame all arrive in front of a Burrow that decrypts the request itself, recomputes the WebAuthn challenge from its *own* transcript, and checks its own ACL under the `ConnectionPolicy` recorded at enrollment. It cannot make the Burrow trust a Client the user never approved. On an established session every frame is authenticated under a `CipherState` from a handshake the Relay does not hold a key for, and the first invalid ciphertext destroys the session rather than resynchronizing. Web Push is no exception for confidentiality — the Burrow seals every notification to the recipient's own static and the Relay forwards ciphertext it holds no key for — and is one for freshness, which is accepted residual rather than a gap the seal closes.
 
 **Why the burrow-token edge exists.** A `burrowToken` mints setup tokens and a setup token is the only thing that registers an owner passkey, so account takeover is transitive rather than direct. That is deliberate: the QR *is* the credential, so whatever can mint one can be set up by one. It still buys no Burrow access for a structural reason — pairing runs Noise IK against an invitation keypair the Burrow generated locally and never sent anywhere, so the Burrow has no invitation to match a stolen setup token against.
@@ -84,9 +86,3 @@
 **Why the worker is the second sanitizer.** The Relay used to be a second pair of eyes on notification text and cannot be one on ciphertext — it cannot sanitize what it cannot read — so a worker that renders what it decrypted without re-bounding it would leave the property with one enforcer instead of two.
 
 **Why the relay holds no state.** Only the Burrow knows whether a ceremony succeeded, so a gate, a challenge memory, or a notion of an authorized session on the Relay would be a second opinion nobody asked for. Routing an opaque envelope needs no notion of what a `DirectoryEntry` is, which is what makes a Relay-side protocol-v1 type import the leading indicator.
-
-## Revocation and the audit trail
-
-Both gaps are stated in this spec rather than left in a Future list for two reasons: the audit's qualitative pass should not keep rediscovering them as findings, and a reader deciding whether to run this needs to know that "revoke a device" is not currently something they can do quickly.
-
-The owner-local rejection logs are diagnostic fragments, not a complete or structured record of successful connects, attaches, or writes.

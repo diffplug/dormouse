@@ -49,7 +49,7 @@ export function getTerminalTheme(): Record<string, string> {
     foreground,
     // Derived, not defaulted: `RESOLUTION_RULES` inherits the cursor from the
     // terminal foreground, and the three keys a DOM-less host is pushed
-    // (`setThemeColors` in lib/src/host/remote/sidecar-entry.ts) must all be
+    // (`parseTerminalColors` in lib/src/lib/terminal-protocol.ts) must all be
     // strings or the whole push is dropped.
     cursor: v('--vscode-terminalCursor-foreground', foreground),
   };

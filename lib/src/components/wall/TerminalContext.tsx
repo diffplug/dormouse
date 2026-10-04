@@ -64,7 +64,7 @@ export function TerminalContext({ id, title, closing, origin, warning: openWarni
     workspaceMove={source?.canMoveSurfaces ? <MoveWorkspaceAction id={id} sourceId={source.workspaceId} /> : undefined} titleSources={titleSources} cwd={cwd ? display(cwd) : 'Directory unknown'} helperCwd={helperCwd && display(helperCwd)} mismatch={mismatch}
     scan={scan} watchRule={offeredRule} watching={watchRule !== null} todo={activities.get(id)?.todo === true} notification={activities.get(id)?.notification}
     status={tool ? (state.currentCommand ? 'running' : 'completed') : helper?.status ?? 'waiting'} command={tool ? state.currentCommand?.rawCommandLine ?? state.lastCommand?.rawCommandLine ?? '' : helper?.command ?? defaultCommand} defaultCommand={defaultCommand} warning={warning}
-    explorerLabel={IS_MAC ? 'Open in Finder' : IS_WINDOWS ? 'Open in Explorer' : 'Open folder'} canExplore={!!platform.terminalContext && !!cwd && !cwd.isRemote}
+    explorerLabel={IS_MAC ? 'Reveal in Finder' : IS_WINDOWS ? 'Open in Explorer' : 'Open folder'} canExplore={!!platform.terminalContext && !!cwd && !cwd.isRemote}
     browserProviders={hostBrowserProviders()} canIframe={!!platform.createIframeProxyUrl}
     onClose={onClose} onCopyRef={() => copy(actions.resolveSurfaceRef(id))} onCopyPath={() => copy(cwd?.path ?? '')}
     onExplore={async () => { if (platform.terminalContext && cwd) await platform.terminalContext({ op: 'openDirectory', id, path: cwd.path }); }}
