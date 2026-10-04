@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getCargoGitRepository, getShippedCargoGraph } from "./cargo-dependencies.js";
+import { compareVersions, mergeReleases } from "./dependency-rows.js";
 import { assertWorkspaceCoverage, getDependencyNames, missingDependency } from "./dependency-workspaces.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -146,7 +147,8 @@ const workspacePackagesByName = new Map(workspacePackages.map((workspacePackage)
 const productRoots = new Set(productDependencyFilters);
 /** The section being walked; every package first read during it belongs to it. */
 let currentSection = null;
-const externalPackages = new Map();
+/** Every disclosed release, one entry per `name@version`, merged into rows on output. */
+const externalReleases = [];
 const visitedExternalPackagePaths = new Set();
 const visitedWorkspacePackageNames = new Set();
 /**
@@ -159,15 +161,6 @@ const undescribedPackages = new Map();
 const listedPeople = new Map();
 
 /**
- * Identity of a disclosed package. Two installs of one name in one section that
- * agree on all four fields are one row with two versions; a disagreement is two
- * rows.
- */
-function externalPackageKey({ section, name, license, author, homepage }) {
-  return [section, name, license ?? "", author ?? "", homepage ?? ""].join("\0");
-}
-
-/**
  * The section that first disclosed each `name@version`. pnpm installs one
  * release at several paths when peer contexts differ, so the path walk alone
  * would repeat a release under a later section.
@@ -178,23 +171,16 @@ function addExternalPackage(pkg) {
   const release = `${pkg.name}@${pkg.version}`;
   if ((releaseSections.get(release) ?? currentSection) !== currentSection) return;
   releaseSections.set(release, currentSection);
-  const identity = {
-    section: currentSection,
-    name: pkg.name,
-    license: pkg.license ?? null,
-    author: formatAuthor(pkg.author),
-    homepage: getHomepage(pkg),
-  };
   const people = formatPeople(pkg.contributors) ?? formatPeople(pkg.authors);
   if (people) listedPeople.set(pkg.name, people);
-  const key = externalPackageKey(identity);
-  const existing = externalPackages.get(key);
-  if (existing) {
-    existing.versions.add(pkg.version);
-    return;
-  }
-
-  externalPackages.set(key, { ...identity, versions: new Set([pkg.version]) });
+  externalReleases.push({
+    section: currentSection,
+    name: pkg.name,
+    version: pkg.version,
+    license: normalizeLicense(pkg.license),
+    author: formatAuthor(pkg.author),
+    homepage: getHomepage(pkg),
+  });
 }
 
 /**
@@ -267,21 +253,17 @@ for (const section of productSections) {
   for (const packageName of section.roots) scanWorkspacePackage(packageName);
 }
 
-// Snapshotted before the loop writes to `externalPackages`, so nothing is ever
+// Snapshotted before the loop writes to `externalReleases`, so nothing is ever
 // described from something that was itself described rather than read.
-const describedPackagesByName = new Map();
-for (const pkg of externalPackages.values()) {
-  if (!describedPackagesByName.has(pkg.name)) describedPackagesByName.set(pkg.name, pkg);
-}
+const readReleasesByName = Map.groupBy([...externalReleases], (release) => release.name);
 for (const [packageName, { section, siblings }] of undescribedPackages) {
-  const sibling = siblings.map((name) => describedPackagesByName.get(name)).find(Boolean);
+  const sibling = siblings.map((name) => readReleasesByName.get(name)).find(Boolean);
   if (!sibling) {
     throw new Error(
       `"${packageName}" is not installed and neither is any sibling declared beside it at the same version, so it cannot be described`,
     );
   }
-  const described = { ...sibling, section, name: packageName, versions: new Set(sibling.versions) };
-  externalPackages.set(externalPackageKey(described), described);
+  externalReleases.push(...sibling.map((release) => ({ ...release, section, name: packageName })));
 }
 
 // Within a single "A OR B OR ..." choice, move MIT to the front so the
@@ -308,14 +290,7 @@ function normalizeLicense(license) {
   return moveMitFirstInOrGroup(normalized);
 }
 
-const deps = [...externalPackages.values()].map((pkg) => ({
-  section: pkg.section,
-  name: pkg.name,
-  version: [...pkg.versions].sort().join(", "),
-  license: normalizeLicense(pkg.license),
-  author: pkg.author,
-  homepage: pkg.homepage,
-}));
+const deps = [...externalReleases];
 
 // Merge in bundled theme extensions from OpenVSX, compiled into lib and so
 // part of the terminal.
@@ -439,10 +414,12 @@ for (const dep of deps) {
   }
 }
 
-deps.sort((a, b) => a.name.localeCompare(b.name));
+// Merged after the overrides, so a release whose metadata needed one still
+// joins its siblings' row.
+const npmRows = mergeReleases(deps, ["section"]).sort(compareDependencyEntries);
 const npmDepsBySection = Object.fromEntries(productSections.map(({ id }) => [
   id,
-  deps.filter((dep) => dep.section === id).map(({ section: _section, ...dep }) => dep),
+  npmRows.filter((dep) => dep.section === id).map(({ section: _section, ...dep }) => dep),
 ]));
 
 // Manual overrides for Cargo crates whose published Cargo.toml omits author or
@@ -477,7 +454,7 @@ function cargoPackageEntry(pkg) {
 }
 
 function compareDependencyEntries(a, b) {
-  return a.name.localeCompare(b.name) || a.version.localeCompare(b.version);
+  return a.name.localeCompare(b.name) || compareVersions(a.version, b.version);
 }
 
 function getCargoMetadata() {
@@ -511,7 +488,7 @@ function getCargoDependencies() {
   const { directDeps, shippedIds } = getShippedCargoGraph(metadata);
   const directIds = new Set(directDeps.map((dep) => dep.pkg));
 
-  const direct = directDeps.map((dep) => {
+  const direct = mergeReleases(directDeps.map((dep) => {
     const pkg = packagesById.get(dep.pkg);
     if (!pkg) throw new Error(`Could not find Cargo package ${dep.pkg}`);
 
@@ -520,12 +497,13 @@ function getCargoDependencies() {
       ...cargoPackageEntry(pkg),
       declaredName: manifestDep?.rename || manifestDep?.name || dep.name.replaceAll("_", "-"),
     };
-  }).sort(compareDependencyEntries);
+  }), ["declaredName"]).sort(compareDependencyEntries);
 
-  const transitive = metadata.packages
-    .filter((pkg) => shippedIds.has(pkg.id) && !directIds.has(pkg.id))
-    .map(cargoPackageEntry)
-    .sort(compareDependencyEntries);
+  const transitive = mergeReleases(
+    metadata.packages
+      .filter((pkg) => shippedIds.has(pkg.id) && !directIds.has(pkg.id))
+      .map(cargoPackageEntry),
+  ).sort(compareDependencyEntries);
 
   return { direct, transitive };
 }

@@ -67,7 +67,15 @@ function DependencyTable({
 }) {
   return (
     <div className={TABLE_WRAP_CLASS}>
-      <table className={`${TABLE_CLASS} min-w-[760px] text-sm`}>
+      {/* Fixed columns: under auto layout one long version or SPDX expression
+          widened its column for every row and pushed Author out of view. */}
+      <table className={`${TABLE_CLASS} min-w-[760px] table-fixed text-sm`}>
+        <colgroup>
+          <col className="w-[30%]" />
+          <col className="w-[17%]" />
+          <col className="w-[20%]" />
+          <col className="w-[33%]" />
+        </colgroup>
         <thead>
           <tr className={TABLE_HEAD_ROW_CLASS}>
             <th className={TH_CLASS}>{nameLabel}</th>
@@ -79,17 +87,30 @@ function DependencyTable({
         <tbody>
           {deps.map((dep) => (
             <tr key={`${dep.name}@${dep.version}`} className={TABLE_ROW_CLASS}>
-              <td className="py-1.5 pr-4">
+              <td className="py-1.5 pr-4 break-words">
                 <DependencyName dep={dep} />
                 {dep.declaredName && dep.declaredName !== dep.name ? (
                   <div className={`font-mono text-xs ${MUTED_TEXT_CLASS}`}>{dep.declaredName}</div>
                 ) : null}
               </td>
-              <td className={`py-1.5 pr-4 font-mono whitespace-nowrap ${MUTED_TEXT_CLASS}`}>{dep.version}</td>
+              {/* A row merges every release of one package under one license,
+                  so each version gets its own line. */}
+              <td className={`py-1.5 pr-4 font-mono ${MUTED_TEXT_CLASS}`}>
+                {dep.version.split(", ").map((version) => {
+                  // Build metadata (`+spec-1.1.0`) gets its own small line.
+                  const [core, ...build] = version.split("+");
+                  return (
+                    <div key={version}>
+                      {core}
+                      {build.length > 0 ? <div className="text-xs break-all">+{build.join("+")}</div> : null}
+                    </div>
+                  );
+                })}
+              </td>
               {/* The cell already carries the muted colour, so an empty value
                   needs the fallback text and no wrapper of its own. */}
-              <td className={`py-1.5 pr-4 whitespace-nowrap ${MUTED_TEXT_CLASS}`}>{dep.license || "Unknown"}</td>
-              <td className={`py-1.5 ${MUTED_TEXT_CLASS}`}>{dep.author || "Unknown"}</td>
+              <td className={`py-1.5 pr-4 ${MUTED_TEXT_CLASS}`}>{dep.license || "Unknown"}</td>
+              <td className={`py-1.5 break-words ${MUTED_TEXT_CLASS}`}>{dep.author || "Unknown"}</td>
             </tr>
           ))}
         </tbody>

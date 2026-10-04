@@ -18,7 +18,7 @@
 
 **Must list `dormouse-lib` as a root independently of workspace edges** (rationale). **Must use package names for roots and exclusions.**
 
-**Must disclose each npm release once, in the first section whose roots reach it**; an earlier section never enters a later section's root. **Never call the Built-in Tools optional or unshipped**: every install ships them inside `dor` (what their frame reaches: `docs/specs/security-local.md` → Local-file viewer).
+**Must disclose each npm release once, in the first section whose roots reach it**; an earlier section never enters a later section's root. **Never call the Built-in Tools optional or unshipped**: every install ships them inside `dor` (what their frame reaches: `docs/specs/security-local.md` → Local-file viewer). **Must merge a package's releases into one row per name and license**, taking author and homepage from the newest release that names them.
 
 **External binaries are outside this graph by construction** — the user's shell, and the `agent-browser` CLI `dor agent-browser` forwards to (`npm i -g agent-browser`, a dependency of nothing here, resolved off `PATH`). **Dormouse instead ships nothing that pulls them in silently** (rationale).
 
@@ -39,7 +39,7 @@
 - **FAIL IF** `.github/workflows/ci.yml` stops running that generator under that same install precondition, or stops failing on a diff (rationale).
 - **FAIL IF** the disclosure omits a shipped workspace's graph or excludes a shipped package. Derive shipping routes from `pnpm-workspace.yaml` and the builds, not the generator's arrays; the generator enforces classification, but cannot establish whether an exclusion is justified (rationale).
 
-Source of truth: `productSections` / `productDependencyFilters` / `excludedWorkspacePackages` / `optionalSiblingsAtSameVersion` in `website/scripts/generate-deps.js`; `assertWorkspaceCoverage` in `website/scripts/dependency-workspaces.js`; `getShippedCargoGraph` / `getCargoGitRepository` in `website/scripts/cargo-dependencies.js`.
+Source of truth: `productSections` / `productDependencyFilters` / `excludedWorkspacePackages` / `optionalSiblingsAtSameVersion` in `website/scripts/generate-deps.js`; `assertWorkspaceCoverage` in `website/scripts/dependency-workspaces.js`; `mergeReleases` in `website/scripts/dependency-rows.js`; `getShippedCargoGraph` / `getCargoGitRepository` in `website/scripts/cargo-dependencies.js`.
 
 ## Bundled runtime
 
