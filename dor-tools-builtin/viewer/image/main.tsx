@@ -8,6 +8,7 @@ import { SaveButton } from '../save-button';
 import { Signal } from '../signal';
 import { editorDocument, ImageDocument, type ImageEditorHandle } from './editor';
 import { imageSource, type ImageLoad } from './io';
+import { installTooltips } from '../tooltip';
 import './page.css';
 
 let store: { doc: DocumentState; error: string | null } = { doc: loadingState, error: null };
@@ -31,7 +32,7 @@ function Controls() {
   return (
     <>
       <span className="page-state ie-optional" role="status">{stateLabel(doc)}</span>
-      <button type="button" title="Reload from disk" onClick={() => void session.reload()}>Reload</button>
+      <button type="button" data-tip="Reload from disk" onClick={() => void session.reload()}>Reload</button>
       <SaveButton state={doc} onSave={() => void session.save()} />
     </>
   );
@@ -48,6 +49,7 @@ function Pending() {
   return error ? <div className="page-error" role="alert">{error}</div> : <div className="page-state page-pending">Loading…</div>;
 }
 
+installTooltips();
 const root = createRoot(document.getElementById('root')!);
 root.render(<Pending />);
 void session.load();

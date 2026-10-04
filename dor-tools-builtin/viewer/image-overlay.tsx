@@ -69,9 +69,9 @@ export function ImageOverlay({ path, page, onSaved, onClose }: {
         ? <ImageDocument key={shown.key} ref={editor} load={shown.load} src={`${IMAGES_ROUTE}${pathRoute(path)}?v=${shown.key}`} name={name} error={error}
             onChange={() => doc.current?.changed()}
             controls={<>
-              <span className="image-overlay-name ie-optional" title={path}>{name}</span>
+              <span className="image-overlay-name ie-optional" data-tip={path}>{name}</span>
               {'edit' in shown.load && <OverlaySave saveState={saveState} onSave={() => void doc.current?.save()} />}
-              <button type="button" className="ie-icon" aria-label="Close" title="Close [Esc]" onClick={() => void close()}><Icon name="close" /></button>
+              <button type="button" className="ie-icon" aria-label="Close" data-tip="Close [Esc]" onClick={() => void close()}><Icon name="close" /></button>
             </>} />
         : <div className="image-overlay-pending">
             {error ? <span className="error" role="alert">{error}</span> : <span className="state">Loading {name}…</span>}

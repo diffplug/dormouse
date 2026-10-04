@@ -21,6 +21,7 @@ import { pageTheme, subscribeTheme } from './page-theme';
 import { mermaidDescriptor } from './mermaid-block';
 import { SaveButton } from './save-button';
 import { Signal } from './signal';
+import { installTooltips } from './tooltip';
 import './markdown.css';
 
 // Page state outside React, replaced whole on each change: the session reports
@@ -83,7 +84,7 @@ function ImageToolbar(props: EditImageToolbarProps) {
   const path = editor && editablePath(editor, props.nodeKey);
   return (
     <div className="md-image-toolbar">
-      {path && <button type="button" className="md-image-edit" title="Open in the image editor [double-click]" onClick={() => editImage(path)}>{iconFor('edit')}</button>}
+      {path && <button type="button" className="md-image-edit" data-tip="Open in the image editor [double-click]" onClick={() => editImage(path)}>{iconFor('edit')}</button>}
       <DefaultImageToolbar {...props} />
     </div>
   );
@@ -128,8 +129,8 @@ function Controls() {
   return (
     <div className="controls">
       <span className="state" role="status">{stateLabel(doc)}</span>
-      <button type="button" aria-pressed={panel} title="List and rename this document's images" onClick={() => update({ panel: !panel })}>Images{images.length ? ` (${images.length})` : ''}</button>
-      <button type="button" title="Reload from disk" onClick={() => void session.reload()}>Reload</button>
+      <button type="button" aria-pressed={panel} data-tip="List and rename this document's images" onClick={() => update({ panel: !panel })}>Images{images.length ? ` (${images.length})` : ''}</button>
+      <button type="button" data-tip="Reload from disk" onClick={() => void session.reload()}>Reload</button>
       <SaveButton className="save" state={doc} onSave={() => void session.save()} />
     </div>
   );
@@ -224,5 +225,6 @@ function Page({ markdown }: { markdown: string }) {
   return <><ErrorBanner /><Editor markdown={markdown} /><Overlays /></>;
 }
 
+installTooltips();
 const root = createRoot(document.getElementById('root')!);
 void session.load();

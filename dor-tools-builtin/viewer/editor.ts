@@ -18,6 +18,7 @@ import 'monaco-editor/esm/vs/basic-languages/ini/ini.contribution.js';
 import 'monaco-editor/esm/vs/basic-languages/dockerfile/dockerfile.contribution.js';
 import { documentPage, stateLabel, textSource } from './document-session';
 import { pageTheme } from './page-theme';
+import { installTooltips } from './tooltip';
 import './editor.css';
 
 monaco.languages.register({ id: 'json', extensions: ['.json', '.jsonl'] });
@@ -103,4 +104,5 @@ el('wrap').addEventListener('click', () => {
 });
 window.addEventListener('dormouse:theme', applyTheme);
 applyTheme();
+installTooltips();
 void session.load();
