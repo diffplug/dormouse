@@ -1458,6 +1458,8 @@ describe('Labs: a Workspace close that would ask, kept pending', () => {
     expect(replacement).not.toBe(only);
     await act(async () => { restorePendingKill(pendingKillKey('workspace', only)); });
     await act(async () => { await vi.waitFor(() => expect(getWorkspacesSnapshot().workspaces.map(ws => ws.id)).toEqual([only])); });
+    // Its going is no close of the user's, so Reopen has nothing to bring back.
+    expect(_reopenRecordsForTesting()).toHaveLength(0);
   });
 
   it('closes through every member Surface when finalized, then lets its Wall go', async () => {
