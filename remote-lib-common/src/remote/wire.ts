@@ -709,8 +709,27 @@ export type RelayToClientFrame =
   | { t: 'error'; error: string }
   | E2eRelayToClientFrame;
 
-/** Relay → burrow. Every frame addresses one Client by its Relay-assigned `clientId`. */
-export type RelayToBurrowFrame = { t: 'client-gone'; clientId: string } | E2eRelayToBurrowFrame;
+/**
+ * Relay → burrow: the Relay's current {@link BurrowEnrollResponse.requireUserVerification},
+ * the first frame on every `/ws/burrow` socket of a Relay that demands it, so
+ * a flag set after enrollment reaches Burrows already enrolled. Sent only when
+ * `true`. A Burrow only ever *raises* its own demand on it — the Relay is
+ * trusted with nothing, so a frame reporting less, or none, lowers nothing —
+ * and a Burrow that predates it ignores it.
+ */
+export interface RelayPolicyFrame {
+  t: 'policy';
+  requireUserVerification?: boolean;
+}
+
+/**
+ * Relay → burrow. Every frame but {@link RelayPolicyFrame} addresses one
+ * Client by its Relay-assigned `clientId`.
+ */
+export type RelayToBurrowFrame =
+  | { t: 'client-gone'; clientId: string }
+  | RelayPolicyFrame
+  | E2eRelayToBurrowFrame;
 
 /** Burrow → Relay. */
 export type BurrowFrame = E2eBurrowFrame;

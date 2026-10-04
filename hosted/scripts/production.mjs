@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { realpathSync } from "node:fs";
 import { required, cloudflare, hyperdriveOrigin, originsOf } from "./preview.mjs";
 import { relaySmoke, smokeAll } from "./preview-smoke.mjs";
 import {
@@ -178,7 +178,7 @@ export async function preflight(env, configs, api = cloudflare(env)) {
 }
 if (
   process.argv[1] &&
-  resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+  realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)
 ) {
   try {
     const configs = productionConfigs(await readConfigs(), process.env);

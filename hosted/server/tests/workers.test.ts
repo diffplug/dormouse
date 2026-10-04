@@ -41,6 +41,7 @@ import {
   type Name,
 } from "./bundle";
 import { limitOf, untilLimited } from "./rate-limit";
+import { workerDatabases } from "./worker-roles";
 
 const origin = ORIGINS.account;
 const voiceOrigin = ORIGINS.voice;
@@ -106,6 +107,7 @@ async function fixture(
   const context = await createTestContext({
     migrations: production === "preview" ? previewMigrations : migrations,
   });
+  const databases = await workerDatabases(context.database.url);
   const provider = await mockOAuthServer({
     betterAuth: true,
     now: production ? undefined : () => context.time.now(),
@@ -203,7 +205,7 @@ async function fixture(
               : testBundle)
         ).outputFiles![0].text,
         bindings,
-        database: context.database.url,
+        database: databases.account,
         // Vite's content-hashed build output, with the SPA fallback answering
         // every other path — including an unknown one under /assets/ — with the shell.
         assets: (request) =>
@@ -226,7 +228,7 @@ async function fixture(
           ACCOUNT_ORIGIN: origin,
           RELAY_ENROLL_SECRET: TEST_ENROLL_SECRET,
         },
-        database: context.database.url,
+        database: databases.relay,
         assets: () => new WorkerResponse("<!doctype html>", { headers: { "content-type": "text/html" } }),
         outboundService,
         routes: [`${new URL(ORIGINS.relay).host}/*`],
@@ -250,7 +252,7 @@ async function fixture(
             ]
           ).outputFiles![0].text,
           bindings: { ...bindings, APP_ORIGIN: voiceOrigin },
-          database: context.database.url,
+          database: databases.voice,
           outboundService,
         }),
       );

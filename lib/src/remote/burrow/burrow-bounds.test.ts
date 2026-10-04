@@ -23,6 +23,7 @@ import {
   MAX_ESTABLISHED_E2E_SESSIONS,
   MAX_E2E_CIPHERTEXT_LENGTH,
   MAX_CLIENT_ID_LENGTH,
+  MAX_PENDING_PAIRINGS,
   MAX_RELAY_TO_BURROW_FRAME_LENGTH,
   RELAY_PING,
   RELAY_PING_INTERVAL_MS,
@@ -38,7 +39,12 @@ import {
   type NoiseKeyPair,
   type PresenceBinding,
 } from 'remote-lib-common';
-import { BurrowRuntime, MAX_QUEUED_RELAY_FRAMES, MAX_QUEUED_RELAY_FRAME_CHARS } from './burrow-runtime';
+import {
+  BurrowRuntime,
+  MAX_PENDING_CONNECTION_HANDSHAKES,
+  MAX_QUEUED_RELAY_FRAMES,
+  MAX_QUEUED_RELAY_FRAME_CHARS,
+} from './burrow-runtime';
 import type { RemoteApiSessionLike } from './established-session';
 import type { BurrowEnrollment } from './enrollment';
 import type { PendingPairing } from './pairing-approval';
@@ -711,6 +717,54 @@ describe('BurrowRuntime bounds', () => {
   });
 
   // --- The reaper ----------------------------------------------------------
+
+  it('holds its pending-pairing cap: one more supersedes the oldest, and says so', async () => {
+    const opened: Array<{ inviteId: string; session: NoiseTransportSession }> = [];
+    for (let i = 0; i <= MAX_PENDING_PAIRINGS; i += 1) {
+      // One token per `init`, and the bucket sustains one per second.
+      clock.advance(1_000);
+      const invitation = await burrow.mintInvitation(
+        randomBase64Url(32),
+        clock.now() + DEFAULT_PAIRING_TTL_MS,
+      );
+      const session = await openPairingSession({
+        socket,
+        burrowId: enrollment.burrowId,
+        clientId: `p${i}`,
+        invitation,
+        clientStatic: await generateNoiseKeyPair(),
+      });
+      opened.push({ inviteId: invitation.inviteId, session: session! });
+    }
+    expect(burrow.trackedClientCount).toBe(MAX_PENDING_PAIRINGS);
+    // Answered: a person may be looking at the modal it removes.
+    expect(await readOutcome(socket, opened[0]!.session, 'pairing', opened[0]!.inviteId)).toEqual({
+      ok: false,
+      code: 'superseded',
+    });
+  });
+
+  it('holds its pending-connection cap: one more evicts the oldest, unanswered', async () => {
+    const connectionIds: string[] = [];
+    for (let i = 0; i <= MAX_PENDING_CONNECTION_HANDSHAKES; i += 1) {
+      clock.advance(1_000);
+      const connectionId = testRoutingId();
+      await openConnectionSession({
+        socket,
+        burrowId: enrollment.burrowId,
+        clientId: `k${i}`,
+        connectionId,
+        clientStatic: await generateNoiseKeyPair(),
+        burrowStaticPublicKey: enrollment.noiseStaticPublicKey!,
+      });
+      connectionIds.push(connectionId);
+    }
+    expect(burrow.trackedClientCount).toBe(MAX_PENDING_CONNECTION_HANDSHAKES);
+    // Its challenge went with it.
+    expect(burrow.pendingChallengeCount).toBe(MAX_PENDING_CONNECTION_HANDSHAKES);
+    // The evicted peer never authenticated, so it buys no reply.
+    expect(e2eFramesFor(socket, 'connection', connectionIds[0]!, 'transport')).toEqual([]);
+  });
 
   it('expires pending pairings and connections on the clock, with no frame to prompt it', async () => {
     const invitation = await burrow.mintInvitation(

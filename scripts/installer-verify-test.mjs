@@ -38,10 +38,10 @@
  */
 
 import { spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 
 import { readRepoFile, repoRoot } from './lint-kit.mjs';
 
@@ -409,7 +409,7 @@ export function run() {
   return { failures, checked };
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const { failures, checked } = run();
   if (failures.length > 0) {
     console.error('installer-verify-test: an installer decision came out wrong\n');

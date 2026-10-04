@@ -197,7 +197,7 @@ An `OSC 52` clipboard write from the inside program is never the clipboard. It b
 1. The owner's parser decodes the base64 as UTF-8, turns `\r\n` and `\r` into `\n`, and removes every other control character but tab. **Must drop, never truncate, a payload over `CLIPBOARD_OFFER_LIMIT` base64 characters** (rationale); a `?` read is never answered, and an empty or malformed write offers nothing. The sequence is consumed either way.
 2. The host sends it to the owning renderer as `terminal:clipboardOffer` (`docs/specs/transport.md` -> "Message protocol"); replay offers nothing (`docs/specs/terminal-escapes.md` -> "`pty:data` strip semantics").
 3. **Must accept an offer only into a pane whose selection the program owns** (§3.8), shadowed or open in the editor, the latest replacing any earlier; it goes with that selection.
-4. The editor then offers a fifth format, **From <program>** (the running command as WATCHING keys it, `docs/specs/alert.md`, else `program`), last in `f` order. **It has no scope**: choosing it returns to As selected, and `e` does nothing while it shows. Its marks still flip, and a nudge returns to Auto. **Never write an offer to the clipboard except as that format, chosen and copied by the user.**
+4. The editor then offers a fifth format, **From \<program\>** (the running command as WATCHING keys it, `docs/specs/alert.md`, else `program`), last in `f` order. **It has no scope**: choosing it returns to As selected, and `e` does nothing while it shows. Its marks still flip, and a nudge returns to Auto. **Never write an offer to the clipboard except as that format, chosen and copied by the user.**
 
 Source of truth: `parseOsc52` and `CLIPBOARD_OFFER_LIMIT` in `lib/src/lib/terminal-protocol.ts`, pinned by `lib/src/lib/terminal-protocol.test.ts`; `offerProgramCopy` in `lib/src/lib/mouse-selection.ts`, pinned by `lib/src/lib/mouse-selection.test.ts`; `editorFormats` in `lib/src/lib/copy-editor.ts`.
 
@@ -359,7 +359,7 @@ Source of truth: `normalizeExternalUri` in `lib/src/lib/external-links.ts` (pinn
 
 ## 9. Future
 
-Not implemented today; they may be added in response to user feedback.
+**Scope: mouse-clipboard-backlog** — unprioritized, each added on user feedback: [§9.1](#91-mouse-and-selection) and [§9.2](#92-paste).
 
 ### 9.1 Mouse and Selection
 

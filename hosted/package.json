@@ -10,6 +10,7 @@
     "db:migrate": "tsx server/db.ts migrate",
     "db:validate": "tsx server/db.ts validate",
     "db:status": "tsx server/db.ts status",
+    "db:roles": "tsx server/db.ts roles",
     "preview:worker": "wrangler dev --local --local-protocol https",
     "test:deploy": "node --test scripts/*.test.mjs",
     "test:miniflare": "vitest run server/tests/one-time.test.ts server/tests/boundary.test.ts server/tests/pocket.test.ts server/tests/relay-push.test.ts",
