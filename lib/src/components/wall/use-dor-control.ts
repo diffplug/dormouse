@@ -466,6 +466,8 @@ async function interruptToPrompt(id: string, signal?: AbortSignal, timeoutMs = P
   // it guarantees we never fire Ctrl+C into a non-integration shell (e.g. cmd.exe
   // popping `Terminate batch job (Y/N)?`).
   if (!isPaneOscDriven(id)) return { ok: false, message: 'has no Dormouse shell integration to restart' };
+  // The interrupt is the host's own doing: never a command-exit ring or a push.
+  getPlatform().alertSilenceRun?.(id);
   getPlatform().writePty(id, '\x03');
   const interrupted = await waitForTerminalState(
     id,

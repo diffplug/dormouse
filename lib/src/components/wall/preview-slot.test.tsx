@@ -258,8 +258,12 @@ describe('dor open --preview', () => {
   it('retargets the slot in place, keeping its Session, ref, and a default title up to date', async () => {
     await mountSlot();
     const ref = (await listRow('slot'))!.ref;
+    // The interrupt is the host's own: its exit is silenced before the Ctrl+C.
+    const silencedAt: number[] = [];
+    vi.spyOn(fake, 'alertSilenceRun').mockImplementation(id => { if (id === 'slot') silencedAt.push(typed.slot.length); });
     // Asked from another directory, the slot's shell still runs it where it is.
     const result = await answer(await request({ file: 'b.md', preview: true, cwd: '/repo/docs' }));
+    expect(silencedAt).toEqual([0]);
     expect(result).toMatchObject({ status: 'retargeted', surfaceId: 'slot', surfaceRef: ref, command: 'view /repo/b.md', cwd: '/repo', minimized: false });
     expect(typed.slot).toEqual(['\x03', 'view /repo/b.md\r']);
     expect(typed['pane-a']).toEqual([]);
