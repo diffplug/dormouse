@@ -31,7 +31,7 @@ Pane drag scopes: `docs/specs/tiling-engine.md` → "Hierarchical drag and drop"
 
 The header doubles as a drag handle: **a `pointerdown` past the drag threshold begins a Lath pane drag**; below it the header's own click behavior stands.
 
-**Never give a Tool navigation, an address, or a dev-server chip** (rationale). **Must keep every Tool header control inside the header's palette**, Terminal Context included. A serving Tool's header, left to right: Display (`docs/specs/dor-browser.md` → Browser Chrome); Terminal Context; its name (`docs/specs/dor-tool.md` → Naming), renamed as a terminal label is; flexible gap; split buttons (full only); the pane-action group. A port conflict's terminal header leads with Terminal Context; the terminal face, which shows that terminal, has none.
+**Never give a Tool navigation, an address, or a dev-server chip** (rationale). **Must keep every Tool header control inside the header's palette**, Terminal Context included. A serving Tool's header, left to right: Display (`docs/specs/dor-browser.md` → Browser Chrome); Terminal Context; its name (`docs/specs/dor-tool.md` → Naming), renamed as a terminal label is; its TODO pill (`docs/specs/alert.md` → Pane Header); flexible gap; split buttons (full only); the pane-action group. A port conflict's terminal header leads with Terminal Context; the terminal face, which shows that terminal, has none.
 
 A terminal header, left to right: derived label; TODO pill (compact+); flexible gap; mouse-reporting override icon (compact+, only while the inside program requests mouse reporting); split left/right, split top/bottom (full only); then the pane-action group: zoom/unzoom, minimize, kill.
 
