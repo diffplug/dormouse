@@ -110,7 +110,7 @@ export class FakePtyAdapter implements PlatformAdapter {
   managedVoice?: ManagedVoicePort;
 
   // Absent unless a page installs them: the website playground answers both
-  // from its read-only snapshot (docs/specs/tutorial.md -> Playground filesystem).
+  // from its in-memory filesystem (docs/specs/tutorial.md -> Playground filesystem).
   toolControl?: (request: ToolHostRequest) => Promise<ToolControlResult>;
   createIframeProxyUrl?: (targetUrl: string) => Promise<IframeProxyResult>;
 

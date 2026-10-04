@@ -4,14 +4,15 @@ import { createHash, randomBytes } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { saveFileOperations, type SaveFileOperations } from './atomic-save.js';
 import { HttpError } from './viewer-server.js';
+import { IMAGE_LIMIT, IMAGE_LIMIT_MESSAGE } from './image-format.js';
+
+export { IMAGE_LIMIT };
 
 export const TEXT_LIMIT = 8 * 1024 * 1024;
-/** Bound on one image's bytes: a paste, a read for editing, or a save. */
-export const IMAGE_LIMIT = 32 * 1024 * 1024;
 /** A size bound and the 413 message past it. */
 export interface SizeBound { limit: number; message: string }
 const TEXT_BOUND: SizeBound = { limit: TEXT_LIMIT, message: 'Text files are limited to 8 MiB.' };
-export const IMAGE_BOUND: SizeBound = { limit: IMAGE_LIMIT, message: 'Images are limited to 32 MiB.' };
+export const IMAGE_BOUND: SizeBound = { limit: IMAGE_LIMIT, message: IMAGE_LIMIT_MESSAGE };
 const UTF8_BOM = Buffer.from([0xef, 0xbb, 0xbf]);
 const tooLarge = (bound: SizeBound) => new HttpError(413, bound.message);
 const revision = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');

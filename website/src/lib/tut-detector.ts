@@ -24,6 +24,11 @@ interface MouseSelectionModule {
   getMouseSelectionSnapshot: () => Map<string, MouseSelectionState>;
 }
 
+/** The playground's viewers, which report each image pasted into a Markdown document. */
+interface PasteStoreModule {
+  subscribeToPastes: (listener: () => void) => () => void;
+}
+
 interface ThemeStoreModule {
   subscribeToActiveTheme: (listener: () => void) => () => void;
   getActiveThemeId: () => string;
@@ -39,6 +44,8 @@ export interface TutDetectorOptions {
   themeStore: ThemeStoreModule;
   /** The desktop's shells' command lines, which credit the `dor open` section. */
   commandStore?: CommandStoreModule;
+  /** The desktop's viewers, whose Markdown pastes credit `op-paste`. */
+  pasteStore?: PasteStoreModule;
 }
 
 export class TutDetector {
@@ -47,6 +54,7 @@ export class TutDetector {
   private mouseStore: MouseSelectionModule;
   private themeStore: ThemeStoreModule;
   private commandStore: CommandStoreModule | undefined;
+  private pasteStore: PasteStoreModule | undefined;
   private started = false;
   private currentMode: WallMode = "command";
   private currentPaneId: string | null = null;
@@ -60,9 +68,10 @@ export class TutDetector {
   private previousThemeId = '';
   private disposables: (() => void)[] = [];
 
-  constructor({ state, activityStore, mouseStore, themeStore, commandStore }: TutDetectorOptions) {
+  constructor({ state, activityStore, mouseStore, themeStore, commandStore, pasteStore }: TutDetectorOptions) {
     this.state = state;
     this.commandStore = commandStore;
+    this.pasteStore = pasteStore;
     this.activityStore = activityStore;
     this.mouseStore = mouseStore;
     this.themeStore = themeStore;
@@ -101,6 +110,7 @@ export class TutDetector {
       this.themeStore.subscribeToActiveTheme(() => this.processTheme()),
     );
     if (this.commandStore) this.disposables.push(watchDorOpen(this.state, this.commandStore));
+    if (this.pasteStore) this.disposables.push(this.pasteStore.subscribeToPastes(() => this.state.markComplete("op-paste")));
   }
 
   handleWallEvent(event: WallEvent): void {

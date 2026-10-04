@@ -7,10 +7,11 @@ import { playgroundIframeUrl, playgroundToolControl } from "./tool-control";
 import { PlaygroundViewers } from "./viewers";
 
 /**
- * Gives the desktop playground its read-only filesystem (docs/specs/tutorial.md
+ * Gives the desktop playground its in-memory filesystem (docs/specs/tutorial.md
  * -> Playground filesystem): installs the adapter's `toolControl` and
- * `createIframeProxyUrl`, and returns the shells' filesystem and the `dor`
- * program. The service worker registers when the first viewer starts.
+ * `createIframeProxyUrl`, and returns the shells' filesystem, the `dor`
+ * program, and the pastes the tutorial credits. The service worker registers
+ * when the first viewer starts.
  */
 export function installPlaygroundFs(adapter: FakePtyAdapter) {
   const fs = createPlaygroundFs();
@@ -23,6 +24,7 @@ export function installPlaygroundFs(adapter: FakePtyAdapter) {
     shellFs: { fs, cwd: PLAYGROUND_CWD },
     startDor: (terminalId: string, args: string[], cwd: string, onExit: (exitCode?: number) => void): InteractiveProgram =>
       startPlaygroundDor({ adapter, terminalId, args, cwd, fs, viewers, relay: connect, onExit }),
+    subscribeToPastes: (listener: () => void) => viewers.subscribeToPastes(listener),
     dispose: () => {
       delete adapter.toolControl;
       delete adapter.createIframeProxyUrl;

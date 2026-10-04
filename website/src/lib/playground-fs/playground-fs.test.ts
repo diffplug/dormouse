@@ -1,15 +1,31 @@
 import { execFileSync } from "node:child_process";
-import { describe, expect, it, vi } from "vitest";
+import { createHash } from "node:crypto";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { IMAGE_CSP, IMAGE_LIMIT, VERSION_HEADER } from "dor-tools-builtin/image-format";
 import { stateSequence } from "dor-tools-lib/osc";
 import { parseToolFile } from "dormouse-lib/host/tool-registry";
 import { createPlaygroundFs, PLAYGROUND_CWD, SNAPSHOT_FILES } from "./snapshot";
+import { respond, type RelayMessage } from "./sw-relay";
 import { playgroundIframeUrl, playgroundToolControl } from "./tool-control";
-import { READ_ONLY_ERROR, PlaygroundViewers, type ViewerRequest } from "./viewers";
-import { USER_CONFIG, VirtualFs } from "./vfs";
+import { PlaygroundViewers, type ViewerRequest, type ViewerResponse } from "./viewers";
+import { StockTree, USER_CONFIG, VirtualFs } from "./vfs";
 
 const README = `${PLAYGROUND_CWD}/README.md`;
-const get = (route: string, search = ""): ViewerRequest => ({ method: "GET", route, search, body: "" });
-const post = (route: string, body: unknown): ViewerRequest => ({ method: "POST", route, search: "", body: JSON.stringify(body) });
+const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
+const PNG_EDITED = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 4, 5, 6, 7]);
+const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 9]);
+const buffer = (bytes: Uint8Array) => bytes.slice().buffer;
+const sha256 = (data: string | Uint8Array) => createHash("sha256").update(data).digest("hex");
+const get = (route: string, search = ""): ViewerRequest => ({ method: "GET", route, search, contentType: "", body: new ArrayBuffer(0) });
+const post = (route: string, body: unknown): ViewerRequest =>
+  ({ method: "POST", route, search: "", contentType: "application/json", body: buffer(new TextEncoder().encode(JSON.stringify(body))) });
+const upload = (route: string, bytes: Uint8Array, contentType: string, search = ""): ViewerRequest =>
+  ({ method: "POST", route, search, contentType, body: buffer(bytes) });
+const text = (response: ViewerResponse | null) => {
+  const body = response!.body;
+  return typeof body === "string" ? body : new TextDecoder().decode(body);
+};
+const bytes = (response: ViewerResponse | null) => new Uint8Array(response!.body as ArrayBuffer);
 
 describe("the snapshot", () => {
   it("is exactly the tracked files of dor-tools-lib", () => {
@@ -46,6 +62,34 @@ describe("VirtualFs", () => {
     expect(fs.compacted("/home/demo/p", "a")).toBe("a/b");
     expect(fs.files("/home/demo/p")).toEqual(["a/b/c.txt", "y", "Z.md"]);
     expect(fs.list("/home/demo/p/y")).toBeNull();
+  });
+
+  it("keeps writes, renames, and whiteouts in its overlay, merged into every listing", () => {
+    const stock = new StockTree({ "/home/demo/p/a.md": "a", "/home/demo/p/b.png": "b" });
+    const fs = new VirtualFs(stock);
+    fs.write("/home/demo/p/a.md", "A");
+    fs.write("/home/demo/p/new.png", new Uint8Array([1, 2]));
+    fs.rename("/home/demo/p/b.png", "/home/demo/p/c.png");
+    expect(fs.read("/home/demo/p/a.md")).toBe("A");
+    expect(fs.bytes("/home/demo/p/new.png")).toEqual(new Uint8Array([1, 2]));
+    expect(fs.kind("/home/demo/p/b.png")).toBeNull();
+    expect(fs.read("/home/demo/p/c.png")).toBe("b");
+    expect(fs.files("/home/demo/p")).toEqual(["a.md", "c.png", "new.png"]);
+    fs.rename("/home/demo/p/c.png", "/home/demo/p/b.png");
+    expect(fs.files("/home/demo/p")).toEqual(["a.md", "b.png", "new.png"]);
+    expect(() => fs.write("/home/demo/nope/x", "x")).toThrow("no such directory");
+    expect(() => fs.write("/home/demo/p", "x")).toThrow("is a directory");
+
+    const fresh = new VirtualFs(stock);
+    expect(fresh.read("/home/demo/p/a.md")).toBe("a");
+    expect(fresh.files("/home/demo/p")).toEqual(["a.md", "b.png"]);
+  });
+
+  it("gives each playground filesystem its own overlay on the one snapshot", () => {
+    const written = createPlaygroundFs();
+    written.write(README, "# changed");
+    expect(written.read(README)).toBe("# changed");
+    expect(createPlaygroundFs().read(README)).toBe(SNAPSHOT_FILES["README.md"]);
   });
 });
 
@@ -91,54 +135,184 @@ describe("playgroundIframeUrl", () => {
 });
 
 describe("PlaygroundViewers", () => {
+  afterEach(() => { vi.useRealTimers(); });
+
   function harness() {
     const writes: [string, string][] = [];
-    const viewers = new PlaygroundViewers(createPlaygroundFs(), (id, data) => writes.push([id, data]), "https://dormouse.sh");
-    return { viewers, writes };
+    const fs = createPlaygroundFs();
+    const viewers = new PlaygroundViewers(fs, (id, data) => writes.push([id, data]), "https://dormouse.sh");
+    const open = (verb: string, args: string[], cwd = "/") => {
+      const viewer = viewers.open("t1", verb, args, cwd);
+      if (viewer instanceof Error) throw viewer;
+      return { ...viewer, handle: (request: ViewerRequest) => viewers.handle(viewer.token, request) };
+    };
+    return { fs, viewers, writes, open };
   }
 
-  it("serves the editor page instrumented under the editor policy, and the file as source", () => {
-    const { viewers } = harness();
-    const viewer = viewers.open("t1", "__view-file", [README], "/");
-    if (viewer instanceof Error) throw viewer;
+  it("serves the editor page instrumented under the editor policy, and the file as source at its sha256", async () => {
+    const { open } = harness();
+    const viewer = open("__view-file", [README]);
     expect(viewer.path).toBe(`/playground-fs/${viewer.token}/view`);
     expect(viewer.target).toBe(README);
-    const page = viewers.handle(viewer.token, get("view"))!;
+    const page = (await viewer.handle(get("view")))!;
     expect(page.headers["Content-Security-Policy"]).toContain("worker-src 'self'");
     expect(page.body).toContain("assets/markdown.js");
     expect(page.body).toContain("<script>");
-    expect(JSON.parse(viewers.handle(viewer.token, get("source"))!.body))
-      .toEqual({ text: SNAPSHOT_FILES["README.md"], version: "snapshot", name: "README.md" });
+    expect(JSON.parse(text(await viewer.handle(get("source")))))
+      .toEqual({ text: SNAPSHOT_FILES["README.md"], version: sha256(SNAPSHOT_FILES["README.md"]), name: "README.md" });
   });
 
-  it("refuses every write and reports dirty state to the viewer's terminal", () => {
-    const { viewers, writes } = harness();
-    const viewer = viewers.open("t1", "__view-file", [README], "/");
-    if (viewer instanceof Error) throw viewer;
-    for (const route of ["save", "image", "rename", "image-save/a.png"]) {
-      expect(viewers.handle(viewer.token, post(route, { text: "x", version: "snapshot" }))).toMatchObject({ status: 403, body: READ_ONLY_ERROR });
-    }
-    expect(viewers.handle(viewer.token, post("state", { dirty: true }))!.status).toBe(200);
+  it("saves text over its revision, refuses a stale one, and reports dirty state to the viewer's terminal", async () => {
+    const { fs, open, writes } = harness();
+    const viewer = open("__view-file", [README]);
+    const { version } = JSON.parse(text(await viewer.handle(get("source"))));
+    const saved = await viewer.handle(post("save", { text: "# saved", version }));
+    expect(saved).toMatchObject({ status: 200 });
+    expect(JSON.parse(text(saved))).toEqual({ version: sha256("# saved") });
+    expect(fs.read(README)).toBe("# saved");
+    expect(await viewer.handle(post("save", { text: "# stale", version }))).toMatchObject({ status: 409 });
+    expect(fs.read(README)).toBe("# saved");
+    expect(await viewer.handle(post("save", { text: 1, version }))).toMatchObject({ status: 400 });
+    expect((await viewer.handle(post("state", { dirty: true })))!.status).toBe(200);
     expect(writes).toEqual([["t1", stateSequence({ dirty: true })]]);
   });
 
-  it("lists a folder and sends select and activate as OSC 367 opens of absolute paths", () => {
-    const { viewers, writes } = harness();
-    const viewer = viewers.open("t2", "__view-folder", ["."], PLAYGROUND_CWD);
-    if (viewer instanceof Error) throw viewer;
-    const listing = JSON.parse(viewers.handle(viewer.token, get("list", "?dir=src"))!.body);
-    expect(listing.entries.map((entry: { name: string }) => entry.name)).toEqual(["frame.ts", "osc.ts", "protocol.ts", "sanitize.ts"]);
-    expect(viewers.handle(viewer.token, post("select", { path: "src/osc.ts" }))!.status).toBe(200);
-    expect(writes[0][1]).toContain(`"path":"${PLAYGROUND_CWD}/src/osc.ts","preview":true`);
-    expect(viewers.handle(viewer.token, get("list", "?dir=..%2F..")))!.toMatchObject({ status: 403 });
+  it("names a pasted image as the Node viewer does, beside the document, and reports the paste", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(2026, 9, 3, 14, 5, 9));
+    const { fs, viewers, open } = harness();
+    const pastes = vi.fn();
+    viewers.subscribeToPastes(pastes);
+    const viewer = open("__view-file", [README]);
+    const first = await viewer.handle(upload("image", PNG, "image/png"));
+    const second = await viewer.handle(upload("image", JPEG, "Image/JPEG; charset=x"));
+    expect(JSON.parse(text(first))).toEqual({ name: "image-20261003-140509.png" });
+    expect(JSON.parse(text(second))).toEqual({ name: "image-20261003-140509.jpg" });
+    expect(JSON.parse(text(await viewer.handle(upload("image", PNG, "image/png"))))).toEqual({ name: "image-20261003-140509-2.png" });
+    expect(pastes).toHaveBeenCalledTimes(3);
+    expect(fs.bytes(`${PLAYGROUND_CWD}/image-20261003-140509.png`)).toEqual(PNG);
+    expect(fs.list(PLAYGROUND_CWD)!.map((entry) => entry.name)).toContain("image-20261003-140509-2.png");
+    const shown = await viewer.handle(get("images/image-20261003-140509.png", "?v=2"));
+    expect(bytes(shown)).toEqual(PNG);
+    expect(shown!.headers).toMatchObject({ "Content-Type": "image/png", "Content-Security-Policy": IMAGE_CSP });
   });
 
-  it("answers nothing for a token it does not hold, or once closed", () => {
-    const { viewers } = harness();
-    const viewer = viewers.open("t3", "__view-error", [README, "gone"], "/");
-    if (viewer instanceof Error) throw viewer;
-    expect(viewers.handle(viewer.token, get(""))!.body).toContain("gone");
+  it("refuses a paste whose bytes are not its type, an unknown type, an oversize body, and a non-Markdown viewer", async () => {
+    const { fs, viewers, open } = harness();
+    const pastes = vi.fn();
+    viewers.subscribeToPastes(pastes);
+    const viewer = open("__view-file", [README]);
+    expect(await viewer.handle(upload("image", JPEG, "image/png"))).toMatchObject({ status: 415, body: "The pasted data is not a PNG image." });
+    expect(await viewer.handle(upload("image", PNG, "text/plain"))).toMatchObject({ status: 415 });
+    expect(await viewer.handle(upload("image", new Uint8Array(IMAGE_LIMIT + 1), "image/png"))).toMatchObject({ status: 413 });
+    const code = open("__view-code", [README]);
+    expect(await code.handle(upload("image", PNG, "image/png"))).toMatchObject({ status: 404 });
+    expect(pastes).not.toHaveBeenCalled();
+    expect(fs.files(PLAYGROUND_CWD).filter((name) => name.startsWith("image-"))).toEqual([]);
+  });
+
+  it("edits an image under the document at its revision through edit/ and image-save/", async () => {
+    const { fs, open } = harness();
+    fs.write(`${PLAYGROUND_CWD}/src/shot.png`, PNG);
+    const viewer = open("__view-file", [README]);
+    const opened = await viewer.handle(get("edit/src/shot.png"));
+    expect(bytes(opened)).toEqual(PNG);
+    const version = opened!.headers[VERSION_HEADER];
+    expect(version).toBe(sha256(PNG));
+    const query = `?version=${version}`;
+    expect(await viewer.handle(upload("image-save/src/shot.png", JPEG, "image/jpeg", query))).toMatchObject({ status: 415 });
+    expect(await viewer.handle(upload("image-save/src/shot.png", JPEG, "image/png", query))).toMatchObject({ status: 415 });
+    expect(await viewer.handle(upload("image-save/src/shot.png", PNG_EDITED, "image/png"))).toMatchObject({ status: 400 });
+    const saved = await viewer.handle(upload("image-save/src/shot.png", PNG_EDITED, "image/png", query));
+    expect(JSON.parse(text(saved))).toEqual({ version: sha256(PNG_EDITED) });
+    expect(bytes(await viewer.handle(get("images/src/shot.png")))).toEqual(PNG_EDITED);
+    expect(await viewer.handle(upload("image-save/src/shot.png", PNG, "image/png", query))).toMatchObject({ status: 409 });
+    expect(await viewer.handle(get("edit/../shot.png"))).toMatchObject({ status: 404 });
+    expect(await viewer.handle(get("edit/LICENSE.gif"))).toMatchObject({ status: 415 });
+  });
+
+  it("renames an image within its folder, never over another file", async () => {
+    const { fs, open } = harness();
+    fs.write(`${PLAYGROUND_CWD}/a.png`, PNG);
+    fs.write(`${PLAYGROUND_CWD}/b.png`, JPEG);
+    const viewer = open("__view-file", [README]);
+    expect(await viewer.handle(post("rename", { from: "a.png", to: "b.png" }))).toMatchObject({ status: 409, body: "b.png already exists." });
+    expect(await viewer.handle(post("rename", { from: "a.png", to: "src/a.png" }))).toMatchObject({ status: 400 });
+    expect(await viewer.handle(post("rename", { from: "a.png", to: ".a.png" }))).toMatchObject({ status: 400 });
+    expect(await viewer.handle(post("rename", { from: "a.png", to: "shot.png" }))).toMatchObject({ status: 200 });
+    expect(fs.kind(`${PLAYGROUND_CWD}/a.png`)).toBeNull();
+    expect(fs.bytes(`${PLAYGROUND_CWD}/shot.png`)).toEqual(PNG);
+  });
+
+  it("opens a PNG in the image editor, which saves over it, and refuses other binary formats", async () => {
+    const { fs, open, writes } = harness();
+    fs.write(`${PLAYGROUND_CWD}/shot.png`, PNG);
+    fs.write(`${PLAYGROUND_CWD}/anim.gif`, new Uint8Array([0x47, 0x49, 0x46, 0x38, 0x39, 0x61]));
+    const viewer = open("__view-file", ["shot.png"], PLAYGROUND_CWD);
+    expect(viewer.path).toBe(`/playground-fs/${viewer.token}/view`);
+    expect((await viewer.handle(get("view")))!.body).toContain("assets/image.js");
+    const source = await viewer.handle(get("source"));
+    expect(bytes(source)).toEqual(PNG);
+    expect(source!.headers[VERSION_HEADER]).toBe(sha256(PNG));
+    expect(await viewer.handle(upload("save", JPEG, "image/jpeg", `?version=${sha256(PNG)}`))).toMatchObject({ status: 415 });
+    expect(await viewer.handle(upload("save", PNG_EDITED, "image/png", `?version=${sha256(PNG)}`))).toMatchObject({ status: 200 });
+    expect(fs.bytes(`${PLAYGROUND_CWD}/shot.png`)).toEqual(PNG_EDITED);
+    expect(await viewer.handle(upload("image", PNG, "image/png"))).toMatchObject({ status: 404 });
+    expect((await viewer.handle(post("state", { dirty: false })))!.status).toBe(200);
+    expect(writes).toEqual([["t1", stateSequence({ dirty: false })]]);
+    expect(() => open("__view-file", ["anim.gif"], PLAYGROUND_CWD)).toThrow("text, PNG, and JPEG files only");
+  });
+
+  it("lists a folder and sends select and activate as OSC 367 opens of absolute paths", async () => {
+    const { fs, writes, open } = harness();
+    fs.write(`${PLAYGROUND_CWD}/src/new.ts`, "");
+    const viewer = open("__view-folder", ["."], PLAYGROUND_CWD);
+    const listing = JSON.parse(text(await viewer.handle(get("list", "?dir=src"))));
+    expect(listing.entries.map((entry: { name: string }) => entry.name)).toEqual(["frame.ts", "new.ts", "osc.ts", "protocol.ts", "sanitize.ts"]);
+    expect((await viewer.handle(post("select", { path: "src/osc.ts" })))!.status).toBe(200);
+    expect(writes[0][1]).toContain(`"path":"${PLAYGROUND_CWD}/src/osc.ts","preview":true`);
+    expect(await viewer.handle(get("list", "?dir=..%2F.."))).toMatchObject({ status: 403 });
+  });
+
+  it("answers nothing for a token it does not hold, or once closed", async () => {
+    const { viewers, open } = harness();
+    const viewer = open("__view-error", [README, "gone"]);
+    expect(text(await viewer.handle(get("")))).toContain("gone");
     viewers.close(viewer.token);
-    expect(viewers.handle(viewer.token, get(""))).toBeNull();
+    expect(await viewer.handle(get(""))).toBeNull();
+  });
+});
+
+describe("the window side of the viewer relay", () => {
+  it("carries a binary request body in and transfers a binary answer out", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(2026, 9, 3, 14, 5, 9));
+    const fs = createPlaygroundFs();
+    const viewers = new PlaygroundViewers(fs, () => {}, "https://dormouse.sh");
+    const viewer = viewers.open("t1", "__view-file", [README], "/");
+    if (viewer instanceof Error) throw viewer;
+    let transferred: unknown;
+    const ask = async (request: ViewerRequest) => {
+      const { port1, port2 } = new MessageChannel();
+      const answer = new Promise<ViewerResponse | null>((resolve) => { port2.onmessage = ({ data }) => resolve(data); });
+      const post = vi.spyOn(port1, "postMessage");
+      const message: RelayMessage = { type: "playground-fs-request", token: viewer.token, ...request };
+      await respond(viewers, message, port1);
+      transferred = post.mock.calls[0]?.[1];
+      try { return await answer; } finally { port1.close(); port2.close(); }
+    };
+    try {
+      expect(JSON.parse(text(await ask(upload("image", PNG, "image/png"))))).toEqual({ name: "image-20261003-140509.png" });
+      expect(transferred).toEqual([]);
+      const shown = await ask(get("images/image-20261003-140509.png"));
+      expect(shown!.body).toBeInstanceOf(ArrayBuffer);
+      expect(transferred).toEqual([expect.any(ArrayBuffer)]);
+      expect(bytes(shown)).toEqual(PNG);
+      // The transferred answer was a copy; the file keeps its bytes.
+      expect(fs.bytes(`${PLAYGROUND_CWD}/image-20261003-140509.png`)).toEqual(PNG);
+      expect(await ask(get("images/missing.png"))).toMatchObject({ status: 404 });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

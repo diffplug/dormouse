@@ -165,6 +165,7 @@ function PlaygroundDesktopExperience() {
         mouseStore: mouseSelection,
         themeStore: themes,
         commandStore: registry,
+        pasteStore: fsHost,
       });
       detectorRef.current = detector;
       detector.start();

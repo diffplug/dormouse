@@ -5,18 +5,14 @@ import { stateSequence } from 'dor-tools-lib/osc';
 import { fileViewerFormat, type FileFormat } from './file-viewer-format.js';
 import { announceViewer, contentType, HttpError, isInsideRoot, openRegularFile, pathSegments, readBody, readJsonBody, reply, startCapabilityViewer } from './viewer-server.js';
 import { EDITOR_CSP, editorPage, imagePage, markdownPage } from './editor-page.js';
-import { editableImageType, openImage, readImageInFolder, renameImage, saveImageFile, saveImageInFolder, writePastedImage } from './markdown-images.js';
+import { openImage, readImageInFolder, renameImage, saveImageFile, saveImageInFolder, writePastedImage } from './markdown-images.js';
 import { IMAGE_BOUND, IMAGE_LIMIT, readEditableFile, readEditableImage, readUpTo, saveEditableFile, TEXT_LIMIT } from './editable-file.js';
 import { viewerAsset } from './viewer-assets.js';
+import { editableImageType, IMAGE_CSP, PASTE_LIMIT_MESSAGE, VERSION_HEADER } from './image-format.js';
 
 const ASSET_LIMIT = 256;
 const CHUNK = 64 * 1024;
 const CSP = "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self'; font-src 'self'; connect-src 'self'; frame-src 'self'; object-src 'self'; base-uri 'self'; form-action 'none'";
-// An image the Markdown editor shows can be opened directly; it never runs as a document there.
-const IMAGE_CSP = "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:";
-/** The response header carrying an editable image's revision, which its save
- * echoes as the `version` query parameter. */
-const VERSION_HEADER = 'X-Dor-Version';
 type Resource = { file: FileHandle; mime: string };
 /** A bound on the grant itself: fatal even when reached through an optional asset. */
 class ViewerLimitError extends Error {}
@@ -170,7 +166,7 @@ export async function startFileViewer(input: string, { onDirty = () => {}, forma
         if (req.method === 'POST') {
           if (format.markdown && route === 'image') {
             // The image's own bytes, typed by Content-Type.
-            const bytes = await readBody(req, IMAGE_LIMIT, 'Pasted images are limited to 32 MiB.');
+            const bytes = await readBody(req, IMAGE_LIMIT, PASTE_LIMIT_MESSAGE);
             reply(res, 200, JSON.stringify({ name: await writePastedImage(root, contentType(req), bytes) }), 'application/json');
             return;
           }

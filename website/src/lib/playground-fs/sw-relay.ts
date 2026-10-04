@@ -1,6 +1,7 @@
-import { VIEWER_SCOPE, type PlaygroundViewers, type ViewerRequest } from "./viewers";
+import { VIEWER_SCOPE, type PlaygroundViewers, type ViewerRequest, type ViewerResponse } from "./viewers";
 
-interface RelayMessage extends ViewerRequest {
+/** What `public/playground-fs/sw.js` posts to every top-level window. */
+export interface RelayMessage extends ViewerRequest {
   type: "playground-fs-request";
   token: string;
 }
@@ -18,7 +19,7 @@ export async function connectViewerRelay(viewers: PlaygroundViewers): Promise<()
     const data = event.data as RelayMessage | undefined;
     const port = event.ports[0];
     if (data?.type !== "playground-fs-request" || !port) return;
-    port.postMessage(viewers.handle(data.token, data));
+    void respond(viewers, data, port);
   };
   container.addEventListener("message", onMessage);
   // The page is outside the worker's scope, so it is never controlled and
@@ -39,4 +40,17 @@ function activated(registration: ServiceWorkerRegistration): Promise<void> {
       else if (worker.state === "redundant") reject(new Error("the playground's service worker failed to start"));
     });
   });
+}
+
+/** Answers one relayed request on `port`, transferring a binary body; null
+ * (no answer) when this window holds no such viewer, or answering failed. */
+export async function respond(viewers: PlaygroundViewers, request: RelayMessage, port: MessagePort): Promise<void> {
+  let response: ViewerResponse | null;
+  try {
+    response = await viewers.handle(request.token, request);
+  } catch (error) {
+    console.error("playground viewer request failed", error);
+    response = null;
+  }
+  port.postMessage(response, response && typeof response.body !== "string" ? [response.body] : []);
 }

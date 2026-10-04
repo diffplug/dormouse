@@ -24,6 +24,7 @@ function makeDetectorHarness(initialActivitySnapshot = new Map<string, ActivityS
   let mouseSnapshot = new Map<string, MouseSelectionState>();
   let themeListener: (() => void) | null = null;
   let activeThemeId = "vscode.theme-defaults.dark_vs";
+  let pasteListener: (() => void) | null = null;
   const state = new TutorialState(DESKTOP_SECTIONS);
   const detector = new TutDetector({
     state,
@@ -62,6 +63,14 @@ function makeDetectorHarness(initialActivitySnapshot = new Map<string, ActivityS
         };
       },
     },
+    pasteStore: {
+      subscribeToPastes: (listener) => {
+        pasteListener = listener;
+        return () => {
+          pasteListener = null;
+        };
+      },
+    },
   });
 
   detector.start();
@@ -82,6 +91,7 @@ function makeDetectorHarness(initialActivitySnapshot = new Map<string, ActivityS
       mouseSnapshot = snapshot;
       mouseListener?.();
     },
+    paste: () => pasteListener?.(),
     setActiveThemeId: (id: string) => {
       activeThemeId = id;
       themeListener?.();
@@ -94,6 +104,17 @@ function makeDetectorHarness(initialActivitySnapshot = new Map<string, ActivityS
 }
 
 describe("TutDetector", () => {
+  it("credits op-paste when the playground viewers report a pasted image, until disposed", () => {
+    const { state, detector, paste } = makeDetectorHarness();
+    expect(state.isComplete("op-paste")).toBe(false);
+    paste();
+    expect(state.isComplete("op-paste")).toBe(true);
+    state.reset();
+    detector.dispose();
+    paste();
+    expect(state.isComplete("op-paste")).toBe(false);
+  });
+
   it("credits the first user text selection even when the pane has no prior mouse state", () => {
     const { state, setMouseSnapshot } = makeDetectorHarness();
 

@@ -2,30 +2,9 @@ import { constants } from 'node:fs';
 import { copyFile, link, lstat, open, realpath, rename, unlink, type FileHandle } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import { CONTROLS, fileViewerFormat } from './file-viewer-format.js';
+import { checkImageSave, editableImageType, isImage, PASTE_ATTEMPTS, PASTE_EXHAUSTED_MESSAGE, pastedImageExtension, pastedImageName } from './image-format.js';
 import { IMAGE_BOUND, readEditableImage, saveEditableBytes } from './editable-file.js';
 import { HttpError, isInsideRoot, openRegularFile, pathSegments } from './viewer-server.js';
-
-/** A pasted image's type, its file extension, and the signature its bytes must open with. */
-const PASTE_TYPES: Record<string, { ext: string; magic: (b: Buffer) => boolean }> = {
-  'image/png': { ext: 'png', magic: b => b.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) },
-  'image/jpeg': { ext: 'jpg', magic: b => b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff },
-  'image/gif': { ext: 'gif', magic: b => /^GIF8[79]a/.test(b.subarray(0, 6).toString('latin1')) },
-  'image/webp': { ext: 'webp', magic: b => b.subarray(0, 4).toString('latin1') === 'RIFF' && b.subarray(8, 12).toString('latin1') === 'WEBP' },
-};
-
-/** The `PASTE_TYPES` type whose signature `bytes` opens with, if any. */
-export const imageKind = (bytes: Buffer): string | undefined =>
-  Object.keys(PASTE_TYPES).find(type => PASTE_TYPES[type].magic(bytes));
-
-/** The image types the image editor re-encodes; every other image is view-only. */
-const EDITABLE_IMAGES = new Set(['image/png', 'image/jpeg']);
-/** `path`'s type when its extension names an editable image (PNG or JPEG). */
-export function editableImageType(path: string): string | undefined {
-  const mime = fileViewerFormat(path)?.mime;
-  return mime && EDITABLE_IMAGES.has(mime) ? mime : undefined;
-}
-
-const isImage = (path: string) => !!fileViewerFormat(path)?.mime.startsWith('image/');
 
 /** `route`, a `/`-separated path relative to `root`, as an absolute path when
  * its spelling stays inside `root` and names an image format; else 404. */
@@ -63,7 +42,7 @@ export async function readImageInFolder(root: string, route: string): Promise<{ 
 /** Saves `bytes` over `target`, an editable image of type `mime`, at revision
  * `version` when the request's `type` and the bytes' signature are both `mime`. */
 export async function saveImageFile(target: string, mime: string, type: string, bytes: Buffer, version: string): Promise<{ version: string }> {
-  if (type !== mime || imageKind(bytes) !== mime) throw new HttpError(415, `Save this image as ${mime === 'image/png' ? 'PNG' : 'JPEG'}.`);
+  checkImageSave(mime, type, bytes);
   return saveEditableBytes(target, bytes, version, IMAGE_BOUND);
 }
 
@@ -73,17 +52,12 @@ export async function saveImageInFolder(root: string, route: string, type: strin
   return saveImageFile(path, mime, type, bytes, version);
 }
 
-const pad = (n: number) => String(n).padStart(2, '0');
-const stamp = (d: Date) => `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
-
 /** Writes a pasted image beside the document as a new file, never replacing
  * one, and returns its name: `image-YYYYMMDD-HHMMSS[-N].<ext>`. */
 export async function writePastedImage(root: string, type: string, bytes: Buffer, now = new Date()): Promise<string> {
-  const kind = Object.prototype.hasOwnProperty.call(PASTE_TYPES, type) ? PASTE_TYPES[type] : undefined;
-  if (!kind) throw new HttpError(415, 'Paste a PNG, JPEG, GIF, or WebP image.');
-  if (!kind.magic(bytes)) throw new HttpError(415, `The pasted data is not a ${kind.ext.toUpperCase()} image.`);
-  for (let n = 1; n <= 100; n++) {
-    const name = `image-${stamp(now)}${n > 1 ? `-${n}` : ''}.${kind.ext}`;
+  const ext = pastedImageExtension(type, bytes);
+  for (let n = 1; n <= PASTE_ATTEMPTS; n++) {
+    const name = pastedImageName(now, n, ext);
     let file: FileHandle;
     try { file = await open(join(root, name), constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, 0o666); }
     catch (error) { if ((error as NodeJS.ErrnoException).code === 'EEXIST') continue; throw error; }
@@ -92,7 +66,7 @@ export async function writePastedImage(root: string, type: string, bytes: Buffer
     await file.close();
     return name;
   }
-  throw new HttpError(409, 'Too many images pasted this second.');
+  throw new HttpError(409, PASTE_EXHAUSTED_MESSAGE);
 }
 
 /** Renames an image at or under `root` within its own directory, never
