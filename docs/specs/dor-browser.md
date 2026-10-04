@@ -97,7 +97,7 @@ The host owns Resize with pane (rationale), answering each engagement — a choi
 | From -> To | Behavior |
 | --- | --- |
 | `iframe` or the other provider -> `agent-browser-*` / `playwright-*` | Swaps at once to a session-less pane whose controller launches at the current URL, headed for a popout (rationale). A failed launch restores the previous renderer in place (`launchFallback: { restore }`), even minimized: the embed, or the previous provider reopened in its own session, keeping its `key` (rationale). Inert without the capability; a non-http(s) `url` refuses the swap (`browserSurfaceUrl`). |
-| `agent-browser-screencast` <-> `agent-browser-popout` | Same Surface id and session, headed/headless relaunch; preserves only the active URL. |
+| `agent-browser-screencast` ↔ `agent-browser-popout` | Same Surface id and session, headed/headless relaunch; preserves only the active URL. |
 | `agent-browser-*` -> `iframe` | Uses canonical `params.url`; with multiple tabs, requires confirmation, since only the active tab survives. |
 
 Source of truth: `lib/src/components/wall/AgentBrowserScreenModal.tsx`, `offeredRenderModes` in `lib/src/components/wall/browser-automation.ts`, `onSwapRenderMode` in `lib/src/components/Wall.tsx`, `createViewportSync` in `lib/src/host/browser-sync.ts`.

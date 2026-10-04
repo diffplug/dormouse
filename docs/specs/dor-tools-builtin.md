@@ -45,7 +45,7 @@ Source of truth: `saveEditableFile` in `dor-tools-builtin/src/editable-file.ts`;
 `.md` and `.markdown` open in the bundled MDXEditor page; `.mdx` and other text stay in Monaco. Saving, reloading, and dirty reports follow [Editing files](#editing-files).
 
 - **Must support GFM tables, task lists, frontmatter, code blocks, fenced `mermaid` diagrams, and a whole-document source mode**, which opens with the error when the rich editor cannot parse a file. Mermaid stays on 11 (rationale).
-- **Must keep HTML comments verbatim and save with one final newline and the file's majority bullet and thematic-break marker**; the rest follows MDXEditor's serialization. Its normalization of loaded text is not an edit (rationale).
+- **Must keep HTML comments verbatim and save with one final newline, the file's majority bullet and thematic-break marker, and unpadded tables**; the rest follows MDXEditor's serialization. Its normalization of loaded text is not an edit (rationale).
 - **Never let document HTML reach the live DOM outside an allowlist** of tags and attributes, `href` limited to `http(s):`, `mailto:`, fragments, and scheme-less paths; saving keeps every original attribute, escaped, and HTML images serialize in an inert document. Mermaid runs with `securityLevel: 'strict'` (rationale).
 - **Must serve images on request from regular image-format files at or under the document's canonical directory**, by realpath, under a `sandbox` CSP. Nothing else loads, external URLs included.
 - **Must write a pasted or dropped PNG, JPEG, GIF, or WebP beside the document as a new `image-YYYYMMDD-HHMMSS[-N].<ext>`**, signature-checked, at most 32 MiB, never replacing a file; its reference is an unsaved edit.
