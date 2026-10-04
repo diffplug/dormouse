@@ -29,7 +29,7 @@
  * under. Extraction takes the LAST definition of a name, so it keeps working
  * if a helper ever exists twice — once in the installer body and once inside
  * the `MANAGE_EOF` heredoc. Today only `env_file_value` is defined twice, and
- * the two copies are checked identical: `owner_only`, `has_off_loopback` and
+ * the two copies are checked identical. `owner_only`, `has_off_loopback` and
  * `serve_proxies_root` are in the heredoc (the `manage` copy);
  * `create_release_stage`, `env_missing_keys`, `serve_state` and
  * `serve_root_target` are in the installer body.
