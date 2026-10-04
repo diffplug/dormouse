@@ -28,10 +28,10 @@ export function imageEditability(size: number, head: Uint8Array): Editability {
   if (frame && frame.width * frame.height > MAX_EDIT_PIXELS) {
     return { viewOnly: `View only: at ${frame.width} × ${frame.height} pixels, this image is past the editor's ${MAX_EDIT_PIXELS >> 20}-megapixel limit.` };
   }
-  const cicp = pngCicp(head);
-  if (cicp && HDR_TRANSFERS.has(cicp[1])) return { viewOnly: 'View only: HDR images are view only.' };
+  const cicp = pngCicp(head), meaning = cicp ? cicpMeaning(cicp) : null;
+  if (meaning?.hdr) return { viewOnly: 'View only: HDR images are view only.' };
   // Narrow-range (video) levels would show washed out, and a swatch would paint past them.
-  if (cicp && cicp[3] !== 1) return { viewOnly: 'View only: images with narrow-range (video) levels are view only.' };
+  if (meaning && !meaning.fullRange) return { viewOnly: 'View only: images with narrow-range (video) levels are view only.' };
   return { ok: true };
 }
 
@@ -40,13 +40,19 @@ export function imageEditability(size: number, head: Uint8Array): Editability {
 const SDR_TRANSFERS = new Set([1, 6, 13, 14, 15]);
 /** PQ and HLG: HDR, which no 8-bit canvas edits. */
 const HDR_TRANSFERS = new Set([16, 18]);
-/** Whether a PNG `cICP` chunk's data names full-range SDR, the only kind a
- * canvas shows as it means. */
-export const cicpSdr = (data: Uint8Array): boolean => data.length >= 4 && SDR_TRANSFERS.has(data[1]) && data[3] === 1;
+/** Display P3's color primaries code. */
+const P3_PRIMARIES = 12;
+
+/** What a PNG `cICP` chunk's data names, by ITU-T H.273: an HDR or SDR
+ * transfer (or neither), full-range levels, and Display P3's primaries. Only
+ * full-range SDR shows on a canvas as it means. */
+export function cicpMeaning(data: Uint8Array): { hdr: boolean; sdr: boolean; fullRange: boolean; p3: boolean } {
+  return { hdr: HDR_TRANSFERS.has(data[1]), sdr: SDR_TRANSFERS.has(data[1]), fullRange: data[3] === 1, p3: data[0] === P3_PRIMARIES };
+}
 
 /** The data of the `cICP` chunk in a PNG's `head`, which precedes its image
  * data; null without one, or when the head ends first. */
-export function pngCicp(b: Uint8Array): Uint8Array | null {
+function pngCicp(b: Uint8Array): Uint8Array | null {
   if (!isPng(b)) return null;
   const view = new DataView(b.buffer, b.byteOffset, b.byteLength);
   for (let at = 8; at + 8 <= b.length;) {

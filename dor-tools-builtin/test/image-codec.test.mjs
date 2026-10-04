@@ -8,7 +8,7 @@ import { load } from './bundle.mjs';
 const png = await load('../viewer/image/png.ts');
 const jpeg = await load('../viewer/image/jpeg.ts');
 const { cicpSpace, iccSpace } = await load('../viewer/image/icc.ts');
-const { over, decodeImage } = await load('../viewer/image/io.ts');
+const { over, decodeImage, asSaved, describe, saveType } = await load('../viewer/image/io.ts');
 /** `r` as PNG bytes, its parts joined. */
 const encode = async (r, keep) => new Uint8Array(Buffer.concat(await png.encodePng(r, keep)));
 /** `spliceIcc`'s parts, joined. */
@@ -153,7 +153,7 @@ test('gray, gray with alpha, 1-bit gray, and 16-bit gray with a color key decode
   assert.deepEqual(pixels((await png.decodePng(makePng(3, 1, 1, 0, [[0b10100000]]))).raster), [[255, 255, 255, 255], [0, 0, 0, 255], [255, 255, 255, 255]]);
   const sixteen = await png.decodePng(makePng(2, 1, 16, 0, [[0x12, 0x34, 0xff, 0xff]], [chunk('tRNS', [0x12, 0x34])]));
   assert.deepEqual(pixels(sixteen.raster), [[18, 18, 18, 0], [255, 255, 255, 255]]);
-  assert.match(sixteen.note, /16-bit/);
+  assert.deepEqual(sixteen.notes, [{ kind: 'depth16' }]);
   const rgbKey = await png.decodePng(makePng(2, 1, 8, 2, [[1, 2, 3, 1, 2, 4]], [chunk('tRNS', [0, 1, 0, 2, 0, 3])]));
   assert.deepEqual(pixels(rgbKey.raster), [[1, 2, 3, 0], [1, 2, 4, 255]]);
 });
@@ -349,58 +349,75 @@ test('an opaque raster round-trips exactly, its rows each taking the filter that
   assert.deepEqual(Array.from((await png.decodePng(bytes)).raster.data), Array.from(data));
 });
 
-/** `decodeImage` of `bytes` served as `type`, decoding PNGs in-process and
- * standing in `raster` for the browser's decoder. */
-const decodeAs = (bytes, type, raster = { width: 1, height: 1, data: new Uint8ClampedArray([9, 8, 7, 255]) }) =>
-  decodeImage(new Blob([bytes]), type, { png: png.decodePng, canvas: async () => raster });
+/** A source the browser's decoder read: `raster` and the color `jpeg.jpegColor` finds in `bytes`, if any. */
+const fromCanvas = (bytes, raster = { width: 1, height: 1, data: new Uint8ClampedArray([9, 8, 7, 255]) }) =>
+  ({ raster, ...bytes ? jpeg.jpegColor(bytes) : { space: 'srgb', keep: [], notes: [] } });
 /** The profile an `iCCP` chunk carries, inflated. */
 const iccpProfile = raw => { const data = chunks(Buffer.concat([SIGNATURE, raw]))[0].data; return inflateSync(data.subarray(data.indexOf(0) + 2)); };
+const mismatch = (from, to, droppedOther, lostAlpha) => ({ kind: 'formatMismatch', from, to, droppedOther, lostAlpha });
 
-test('a mislabeled image saves as its name\'s type, decoded by its content, its RGB profile carried across', async () => {
+test('a mislabeled image saves as its name\'s type, its RGB profile carried across', async () => {
   const profile = icc({ desc: 'Display P3' });
-  // PNG data named .jpg: its pixels from the PNG codec, its profile as JPEG segments, its other chunks dropped.
+  // PNG data named .jpg: its profile as JPEG segments, its other chunks dropped.
   const pngData = makePng(2, 1, 8, 6, [[1, 2, 3, 255, 4, 5, 6, 128]], [iccp(profile), chunk('pHYs', [0, 0, 0x16, 0x25, 0, 0, 0x16, 0x25, 1])]);
-  const asJpeg = (await decodeAs(pngData, 'image/jpeg')).edit;
-  assert.equal(asJpeg.mime, 'image/jpeg', 'the save route takes only the extension\'s type');
-  assert.deepEqual(Array.from(asJpeg.raster.data), [1, 2, 3, 255, 4, 5, 6, 128]);
-  assert.equal(asJpeg.colorSpace, 'display-p3');
+  const asJpeg = await asSaved(await png.decodePng(pngData), 'image/png', 'image/jpeg');
+  assert.equal(asJpeg.space, 'display-p3');
   assert.deepEqual(asJpeg.keep.map(k => [k[0], k[1]]), [[0xff, 0xe2]]);
   assert.deepEqual(Buffer.from(jpeg.iccProfile(asJpeg.keep)), profile);
-  assert.match(asJpeg.note, /holds PNG data; it saves as JPEG.*without its other metadata.*transparency/);
+  assert.deepEqual(asJpeg.notes, [mismatch('image/png', 'image/jpeg', true, true)]);
 
-  // JPEG data named .png: its pixels from the browser, its profile as an iCCP chunk.
+  // JPEG data named .png: its profile as an iCCP chunk.
   const jpegData = splice(JPEG, [iccSegment(1, 1, profile)]);
-  const asPng = (await decodeAs(jpegData, 'image/png')).edit;
-  assert.equal(asPng.mime, 'image/png');
-  assert.equal(asPng.colorSpace, 'display-p3');
+  const asPng = await asSaved(fromCanvas(jpegData), 'image/jpeg', 'image/png');
+  assert.equal(asPng.space, 'display-p3');
   assert.deepEqual(asPng.keep.map(k => Buffer.from(k).toString('latin1', 4, 8)), ['iCCP']);
   assert.deepEqual(iccpProfile(asPng.keep[0]), profile);
-  assert.match(asPng.note, /holds JPEG data; it saves as PNG/);
-  const saved = await png.decodePng(await encode(asPng.raster, asPng.keep));
+  assert.deepEqual(asPng.notes, [mismatch('image/jpeg', 'image/png', false, false)]);
+  const saved = await png.decodePng(await encode(fromCanvas().raster, asPng.keep));
   assert.equal(saved.space, 'display-p3', 'the saved PNG carries the profile');
 
   // The browser's decoder's other formats save as the name says too.
-  const gif = new Uint8Array(Buffer.from('GIF89a\x01\x00\x01\x00', 'latin1'));
-  const gifAsJpeg = (await decodeAs(gif, 'image/jpeg')).edit;
-  assert.equal(gifAsJpeg.mime, 'image/jpeg');
-  assert.match(gifAsJpeg.note, /holds GIF data; it saves as JPEG/);
+  assert.deepEqual((await asSaved(fromCanvas(), 'image/gif', 'image/jpeg')).notes, [mismatch('image/gif', 'image/jpeg', false, false)]);
 
   // Correctly named, the source's metadata stays verbatim and nothing is noted.
-  const same = (await decodeAs(jpegData, 'image/jpeg')).edit;
+  const same = await asSaved(fromCanvas(jpegData), 'image/jpeg', 'image/jpeg');
   assert.deepEqual(same.keep, jpeg.iccSegments(jpegData));
-  assert.equal(same.note, undefined);
+  assert.deepEqual(same.notes, []);
 });
 
-test('a JPEG\'s ICC profile is kept only when it describes RGB', async () => {
-  const cmyk = (await decodeAs(splice(JPEG, [iccSegment(1, 1, icc({ desc: 'U.S. Web Coated (SWOP) v2', space: 'CMYK' }))]), 'image/jpeg')).edit;
+test('a mislabeled PNG shows as sRGB when its Display P3 does not survive the untagged save', async () => {
+  const p3 = await png.decodePng(makePng(1, 1, 8, 2, [[1, 2, 3]], [chunk('cICP', [12, 13, 0, 1])]));
+  assert.equal(p3.space, 'display-p3');
+  const asJpeg = await asSaved(p3, 'image/png', 'image/jpeg');
+  assert.deepEqual([asJpeg.space, asJpeg.keep], ['srgb', []]);
+  assert.deepEqual(asJpeg.notes, [mismatch('image/png', 'image/jpeg', true, false)]);
+
+  // A profile past the 255 segments a JPEG numbers is not carried either.
+  const huge = Buffer.concat([icc({ desc: 'Display P3' }), Buffer.alloc(255 * 0xffff)]);
+  const tooBig = await asSaved({ ...fromCanvas(), space: 'display-p3', keep: [], profile: huge }, 'image/png', 'image/jpeg');
+  assert.equal(tooBig.space, 'srgb');
+  assert.equal(tooBig.keep.length + (tooBig.profile ? 1 : 0), 0, 'nothing carried');
+});
+
+test('save notes read as one line', () => {
+  assert.equal(describe([]), '');
+  assert.equal(describe([{ kind: 'depth16' }, { kind: 'profileDropped', space: 'GRAY' }, mismatch('image/png', 'image/jpeg', true, true)]),
+    'This 16-bit PNG saves at 8 bits per channel. The save drops this image\'s grayscale color profile, which does not describe RGB pixels. '
+    + 'This file holds PNG data; it saves as JPEG, as its name says, without its other metadata, losing its transparency.');
+  assert.equal(describe([{ kind: 'profileDropped', space: '' }, mismatch(undefined, 'image/png', false, false)]),
+    'The save drops this image\'s unreadable color profile. This file holds non-PNG data; it saves as PNG, as its name says.');
+});
+
+test('a JPEG\'s ICC profile is kept only when it describes RGB', () => {
+  const cmyk = jpeg.jpegColor(splice(JPEG, [iccSegment(1, 1, icc({ desc: 'U.S. Web Coated (SWOP) v2', space: 'CMYK' }))]));
   assert.deepEqual(cmyk.keep, [], 'a re-encode is YCbCr, which a CMYK profile does not describe');
-  assert.equal(cmyk.colorSpace, 'srgb');
-  assert.match(cmyk.note, /drops this JPEG's CMYK color profile/);
-  const gray = (await decodeAs(splice(JPEG, [iccSegment(1, 1, icc({ desc: 'Gray Gamma 2.2', space: 'GRAY' }))]), 'image/jpeg')).edit;
+  assert.equal(cmyk.space, 'srgb');
+  assert.deepEqual(cmyk.notes, [{ kind: 'profileDropped', space: 'CMYK' }]);
+  const gray = jpeg.jpegColor(splice(JPEG, [iccSegment(1, 1, icc({ desc: 'Gray Gamma 2.2', space: 'GRAY' }))]));
   assert.deepEqual(gray.keep, []);
-  assert.match(gray.note, /grayscale/);
-  const rgb = splice(JPEG, [iccSegment(1, 1, icc({ desc: 'Display P3' }))]);
-  assert.equal((await decodeAs(rgb, 'image/jpeg')).edit.keep.length, 1);
+  assert.deepEqual(gray.notes, [{ kind: 'profileDropped', space: 'GRAY' }]);
+  const rgb = jpeg.jpegColor(splice(JPEG, [iccSegment(1, 1, icc({ desc: 'Display P3' }))]));
+  assert.deepEqual([rgb.keep.length, rgb.space, rgb.notes], [1, 'display-p3', []]);
 });
 
 test('a PNG\'s iCCP is kept only when it describes RGB, as every save is', async () => {
@@ -408,7 +425,7 @@ test('a PNG\'s iCCP is kept only when it describes RGB, as every save is', async
   const decoded = await png.decodePng(makePng(2, 1, 8, 0, [[0, 200]], [gama, iccp(gray), srgb]));
   assert.deepEqual(decoded.keep.map(k => Buffer.from(k).toString('latin1', 4, 8)), ['gAMA', 'sRGB']);
   assert.equal(decoded.profile, undefined);
-  assert.match(decoded.note, /drops this PNG's grayscale color profile/);
+  assert.deepEqual(decoded.notes, [{ kind: 'profileDropped', space: 'GRAY' }]);
   const saved = chunks(await encode(decoded.raster, decoded.keep));
   assert.deepEqual(saved.map(c => c.type), ['IHDR', 'gAMA', 'sRGB', 'IDAT', 'IEND']);
 });
@@ -471,4 +488,12 @@ test('the PNG worker decodes and encodes, handing its buffers back', async () =>
 
   await self.onmessage({ data: { decode: new Uint8Array(8) } });
   assert.match(sent[2].message.error, /Not a PNG/);
+});
+
+test('a save writes the type its name gives, whatever its bytes hold', () => {
+  assert.equal(saveType('image/png', 'image/jpeg'), 'image/png');
+  assert.equal(saveType('image/jpeg', 'image/png'), 'image/jpeg');
+  assert.equal(saveType('image/jpeg', 'image/gif'), 'image/jpeg');
+  assert.equal(saveType('', 'image/jpeg'), 'image/jpeg');
+  assert.equal(saveType('', 'image/gif'), 'image/png');
 });

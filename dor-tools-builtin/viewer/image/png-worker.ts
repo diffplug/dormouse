@@ -8,15 +8,18 @@ import type { Raster } from './pixels';
 
 export type PngJob = { encode: { raster: Raster; keep: readonly Uint8Array[] } } | { decode: Uint8Array };
 
+/** Answers `result`, transferring the buffers under `parts`. */
+const reply = (result: unknown, parts: readonly ArrayBufferView[]) =>
+  postMessage({ result }, { transfer: [...new Set(parts.map(part => part.buffer as ArrayBuffer))] });
+
 self.onmessage = async ({ data }: MessageEvent<PngJob>) => {
   try {
     if ('decode' in data) {
       const png = await decodePng(data.decode);
-      const buffers = [png.raster.data, ...png.keep, ...png.profile ? [png.profile] : []].map(part => part.buffer as ArrayBuffer);
-      postMessage({ result: png }, { transfer: [...new Set(buffers)] });
+      reply(png, [png.raster.data, ...png.keep, ...png.profile ? [png.profile] : []]);
     } else {
       const parts = await encodePng(data.encode.raster, data.encode.keep);
-      postMessage({ result: parts }, { transfer: [...new Set(parts.map(part => part.buffer))] });
+      reply(parts, parts);
     }
   } catch (reason) {
     postMessage({ error: reason instanceof Error ? reason.message : String(reason) });

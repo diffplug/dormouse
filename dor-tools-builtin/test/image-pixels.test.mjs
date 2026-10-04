@@ -359,13 +359,14 @@ test('a thin stroke across a large raster keeps only the tiles it touched for un
     pieces.keep({ x: i, y: i, width: 1, height: 1 });
     px.fillRect(r, { x: i, y: i, width: 1, height: 1 }, RED);
   }
-  const drawn = Buffer.from(r.data), tiles = pieces.take();
+  const drawn = Buffer.from(r.data), tiles = pieces.take(), kept = tiles.map(t => t.pixels);
   assert.equal(tiles.reduce((n, t) => n + t.pixels.data.byteLength, 0), touched * tileBytes);
   h.commit({ raster: r, objects: [] }, { rect: { x: 0, y: 0, width: size, height: size }, tiles });
   assert.equal(h.canUndo, true, 'the stroke fits the history, charged its tiles');
 
   assert.deepEqual(h.undo(), { rect: { x: 0, y: 0, width: size, height: size } });
   assert.ok(Buffer.from(r.data).equals(original), 'undo restores every pixel');
+  assert.ok(tiles.every((t, i) => t.pixels === kept[i]), 'trading pixels in place, allocating no tile');
   assert.ok(h.redo());
   assert.ok(Buffer.from(r.data).equals(drawn), 'redo puts the stroke back');
   assert.ok(h.undo());

@@ -1,27 +1,44 @@
-/** Which canvas color space shows an image's raw values as its color
- * metadata means them: Display P3, or sRGB, which also stands in for a space
- * no canvas offers (an approximation: the saved pixels and profile stay
- * exact). No DOM, so Node tests load it. */
-import { cicpSdr } from '../../src/image-editability';
+/** An image's color metadata as the editor reads it, and which canvas color
+ * space shows its raw values as that metadata means them: Display P3, or
+ * sRGB, which also stands in for a space no canvas offers (an approximation:
+ * the saved pixels and profile stay exact). No DOM, so Node tests load it. */
+import { cicpMeaning } from '../../src/image-editability';
 import { ascii } from '../../src/image-format';
+
+/** Why a save will differ from its source beyond the edits; `describe` in
+ * `io.ts` words it. `space` is the ICC data color space (`GRAY`, `CMYK`),
+ * empty for an unreadable profile; `from` and `to` are image types. */
+export type SaveNote =
+  | { kind: 'depth16' }
+  | { kind: 'profileDropped'; space: string }
+  | { kind: 'browserDecoder' }
+  | { kind: 'formatMismatch'; from: string | undefined; to: string; droppedOther: boolean; lostAlpha: boolean };
+
+/** A decoded source's color, in its own format: the canvas space that shows
+ * it, the metadata a same-format save re-attaches verbatim (whole PNG chunks,
+ * or JPEG APP2 `ICC_PROFILE` segments), the RGB ICC profile among them that a
+ * save in the other format converts, and why a save will differ. */
+export interface SourceColor { space: PredefinedColorSpace; keep: Uint8Array[]; profile?: Uint8Array; notes: SaveNote[] }
+
+/** An ICC profile (null when unreadable) if its data color space (header
+ * bytes 16–19) is RGB, the only kind that describes the RGB pixels a save
+ * writes; else why a save drops it. */
+export function rgbProfile(icc: Uint8Array | null): { profile: Uint8Array } | { dropped: SaveNote } {
+  // Shorter than its 128-byte header, a profile is unreadable.
+  const space = icc && icc.length >= 128 ? ascii(icc, 16, 20).trim() : '';
+  return space === 'RGB' ? { profile: icc! } : { dropped: { kind: 'profileDropped', space } };
+}
 
 /** Display P3's primaries as an ICC profile's colorant tags hold them
  * (D50-adapted XYZ, red, green, then blue), for profiles whose description
  * does not name it. */
 const P3_COLORANTS = [0.5151, 0.2412, -0.0011, 0.2919, 0.6922, 0.0419, 0.1572, 0.0666, 0.7841];
 
-/** A PNG `cICP` chunk's space: Display P3 for primaries code 12 (ITU-T H.273)
- * at a full-range SDR transfer, else sRGB. */
-export const cicpSpace = (data: Uint8Array): PredefinedColorSpace => cicpSdr(data) && data[0] === 12 ? 'display-p3' : 'srgb';
-
-/** Whether an ICC profile's data color space (header bytes 16–19) is RGB, the
- * only kind that describes the RGB pixels a save writes. */
-export const iccRgb = (profile: Uint8Array): boolean => profile.length >= 128 && ascii(profile, 16, 20) === 'RGB ';
-/** Why a save drops `profile`, which is not `iccRgb` (or null, unreadable), from a `kind` file. */
-export function iccDropNote(profile: Uint8Array | null, kind: string): string {
-  const space = profile && profile.length >= 20 ? ascii(profile, 16, 20).trim() : '';
-  return space ? `The save drops this ${kind}'s ${space === 'GRAY' ? 'grayscale' : space} color profile, which does not describe RGB pixels.`
-    : `The save drops this ${kind}'s unreadable color profile.`;
+/** A PNG `cICP` chunk's space: Display P3 for its primaries at a full-range
+ * SDR transfer, else sRGB. */
+export function cicpSpace(data: Uint8Array): PredefinedColorSpace {
+  const { sdr, fullRange, p3 } = cicpMeaning(data);
+  return sdr && fullRange && p3 ? 'display-p3' : 'srgb';
 }
 
 /** An ICC profile's space, by its description and else by its primaries. */

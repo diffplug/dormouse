@@ -68,13 +68,25 @@ export class History {
   }
 }
 
-/** Puts a patch step's kept tiles on the raster, keeping the pixels each replaces. */
+/** One tile row in transit through `swap`, grown to the widest seen. */
+let scratch = new Uint8ClampedArray(0);
+
+/** Puts a patch step's kept tiles on the raster, keeping the pixels each
+ * replaces: each tile and its spot on the raster trade rows in place, so an
+ * undo or redo allocates no tile. */
 function swap({ from, patch }: Step): Applied {
   if (!patch) return {};
-  for (const tile of patch.tiles) {
-    const pixels = tile.pixels;
-    tile.pixels = crop(from.raster, tile.rect);
-    blit(from.raster, pixels, tile.rect.x, tile.rect.y);
+  const { data, width } = from.raster;
+  for (const { rect, pixels } of patch.tiles) {
+    const rowBytes = rect.width * 4;
+    if (scratch.length < rowBytes) scratch = new Uint8ClampedArray(rowBytes);
+    const row = scratch.subarray(0, rowBytes);
+    for (let y = 0; y < rect.height; y++) {
+      const at = ((rect.y + y) * width + rect.x) * 4, kept = pixels.data.subarray(y * rowBytes, (y + 1) * rowBytes);
+      row.set(data.subarray(at, at + rowBytes));
+      data.set(kept, at);
+      kept.set(row);
+    }
   }
   return { rect: patch.rect };
 }

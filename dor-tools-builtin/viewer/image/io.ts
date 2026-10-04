@@ -4,12 +4,12 @@
  * the editor shows the image view-only; a save POSTs the bytes with
  * `?version=` and answers `{version}`. */
 import { imageEditability } from '../../src/image-editability';
-import { imageKind, VERSION_HEADER } from '../../src/image-format';
+import { imageKind, imageTypeName, VERSION_HEADER } from '../../src/image-format';
 import { checked, type DocumentSource } from '../document-session';
-import { iccDropNote, iccRgb, iccSpace } from './icc';
-import { iccProfile, iccSegments, iccSegmentsOf, spliceIcc } from './jpeg';
-import type { Raster, Rect } from './pixels';
-import { iccpChunk, type DecodedPng } from './png';
+import { iccSpace, type SaveNote, type SourceColor } from './icc';
+import { iccSegmentsOf, jpegColor, spliceIcc } from './jpeg';
+import { isOpaque, type Raster, type Rect } from './pixels';
+import { iccpChunk } from './png';
 import type { PngJob } from './png-worker';
 
 export type EditableMime = 'image/png' | 'image/jpeg';
@@ -36,67 +36,85 @@ export type ImageLoad = { edit: LoadedImage } | { viewOnly: string };
 
 export const SRGB_PNG: ImageFormat = { mime: 'image/png', colorSpace: 'srgb', keep: [] };
 
-/** How `decodeImage` gets pixels: `png`, `decodePng`'s result, which may
- * refuse; `canvas`, through the browser's decoder. */
-export interface Decoders { png(bytes: Uint8Array): Promise<DecodedPng>; canvas(blob: Blob): Promise<Raster> }
-
-const NAMES: Record<string, string> = { 'image/png': 'PNG', 'image/jpeg': 'JPEG', 'image/gif': 'GIF', 'image/webp': 'WebP' };
+/** The type a save writes: the file's own, which its name gives (`type`, the
+ * route's Content-Type), whatever its bytes hold; bytes with no editable name
+ * keep their own format. */
+export const saveType = (type: string, content: string | undefined): EditableMime =>
+  type === 'image/png' || type === 'image/jpeg' ? type : content === 'image/jpeg' ? content : 'image/png';
 
 /** An image file's pixels: straight (unpremultiplied) RGBA exactly as stored,
- * upright by its EXIF orientation (which a save drops), decoded by content: a
- * PNG by the PNG codec on a worker; a JPEG, or a PNG the codec refuses, by a
- * canvas, which keeps a JPEG's raw values but may shift a semi-transparent PNG
- * pixel. It saves as `type`, the type its name gives (the route's
- * Content-Type), as the save route requires. Its color metadata carries over
- * only to the same format, else an RGB profile converts and the rest drops;
- * only an RGB profile describes the RGB pixels a save writes. The hosts leave
- * an image past the editor's bounds view-only before it gets here; the check
- * here backs them up. */
-export async function decodeImage(blob: Blob, type = blob.type, decoders: Decoders = { png: decodePngOffThread, canvas: canvasDecode }): Promise<ImageLoad> {
+ * decoded by content (`decodeContent`). It saves as `type`, the type its name
+ * gives (the route's Content-Type), as the save route requires, its color as
+ * `asSaved` carries it over. The hosts leave an image past the editor's bounds
+ * view-only before it gets here; the check here backs them up. */
+export async function decodeImage(blob: Blob, type = blob.type): Promise<ImageLoad> {
   const bytes = new Uint8Array(await blob.arrayBuffer());
   const editability = imageEditability(bytes.length, bytes);
   if ('viewOnly' in editability) return editability;
   const content = imageKind(bytes);
-  const mime: EditableMime = type === 'image/png' || type === 'image/jpeg' ? type : content === 'image/jpeg' ? content : 'image/png';
-  const source = await decodeContent(blob, bytes, content, decoders);
-  const notes = source.notes;
-  let keep = source.keep;
-  if (content !== mime) {
-    keep = !source.profile ? [] : mime === 'image/jpeg' ? iccSegmentsOf(source.profile) : [await iccpChunk(source.profile)];
-    // A PNG keeps at most one iCCP, which the profile converts; a JPEG keeps only its profile.
-    const dropped = content === 'image/png' && source.keep.length > (source.profile ? 1 : 0), lost = mime === 'image/jpeg' && !opaque(source.raster);
-    notes.push(`This file holds ${NAMES[content ?? ''] ?? `non-${NAMES[mime]}`} data; it saves as ${NAMES[mime]}, as its name says${dropped ? ', without its other metadata' : ''}${lost ? ', losing its transparency' : ''}.`);
-  }
-  return { edit: { raster: source.raster, mime, colorSpace: source.space, keep, note: notes.join(' ') || undefined } };
+  const mime = saveType(type, content);
+  const source = await decodeContent(blob, bytes, content);
+  const { space, keep, notes } = await asSaved(source, content, mime);
+  return { edit: { raster: source.raster, mime, colorSpace: space, keep, note: describe(notes) || undefined } };
 }
 
-/** `bytes` (`blob`'s) decoded by their `content` type: the pixels, display
- * space, color metadata in that format, its RGB profile, and notes. */
-async function decodeContent(blob: Blob, bytes: Uint8Array, content: string | undefined, decoders: Decoders) {
+/** A decoded source: its pixels and its color in its own format. */
+interface Decoded extends SourceColor { raster: Raster }
+
+/** `bytes` (`blob`'s) decoded by their `content` type. Every decoder hands
+ * back the pixels upright by the file's EXIF orientation, which a save then
+ * drops. A PNG decodes by the PNG codec on a worker; a JPEG, or a PNG the
+ * codec refuses, by a canvas, which keeps a JPEG's raw values but may shift a
+ * semi-transparent PNG pixel. */
+async function decodeContent(blob: Blob, bytes: Uint8Array, content: string | undefined): Promise<Decoded> {
   if (content === 'image/png') {
     try {
-      const png = await decoders.png(bytes);
-      return { ...png, notes: png.note ? [png.note] : [] };
+      return await decodePngOffThread(bytes);
     } catch {
-      return { raster: await decoders.canvas(blob), space: 'srgb' as const, keep: [], notes: ['Opened with the browser\'s decoder: saving may shift semi-transparent pixels and drops the color profile.'] };
+      return { raster: await canvasDecode(blob), space: 'srgb', keep: [], notes: [{ kind: 'browserDecoder' }] };
     }
   }
-  const raster = await decoders.canvas(blob);
-  if (content !== 'image/jpeg') return { raster, space: 'srgb' as const, keep: [], notes: [] };
-  let segments: Uint8Array[] = [];
-  try { segments = iccSegments(bytes); } catch { /* unreadable segments: decode untagged */ }
-  const profile = iccProfile(segments);
-  if (!profile || iccRgb(profile)) return { raster, space: profile ? iccSpace(profile) : 'srgb', keep: segments, profile: profile ?? undefined, notes: [] };
-  return { raster, space: 'srgb' as const, keep: [], notes: [iccDropNote(profile, 'JPEG')] };
+  const raster = await canvasDecode(blob);
+  return { raster, ...content === 'image/jpeg' ? jpegColor(bytes) : { space: 'srgb', keep: [], notes: [] } };
 }
 
-const opaque = (r: Raster) => {
-  for (let i = 3; i < r.data.length; i += 4) if (r.data[i] !== 255) return false;
-  return true;
-};
+/** `source`'s color, decoded from `content` data, as a save in `mime` keeps
+ * it. The same format keeps it verbatim; another carries over only an RGB
+ * profile, converted, and shows what survives. */
+export async function asSaved(source: Decoded, content: string | undefined, mime: EditableMime): Promise<SourceColor> {
+  if (content === mime) return source;
+  const keep = source.profile ? await profileAs(mime, source.profile) : [];
+  const profile = keep.length ? source.profile : undefined;
+  // A PNG keeps at most one iCCP, which the profile converts; a JPEG keeps only its profile.
+  const droppedOther = content === 'image/png' && source.keep.length > (source.profile ? 1 : 0);
+  const lostAlpha = mime === 'image/jpeg' && !isOpaque(source.raster);
+  return {
+    space: profile ? iccSpace(profile) : 'srgb', keep, profile,
+    notes: [...source.notes, { kind: 'formatMismatch', from: content, to: mime, droppedOther, lostAlpha }],
+  };
+}
+
+/** `profile` as `mime`'s color metadata: APP2 segments or an `iCCP` chunk. */
+const profileAs = async (mime: EditableMime, profile: Uint8Array): Promise<Uint8Array[]> =>
+  mime === 'image/jpeg' ? iccSegmentsOf(profile) : [await iccpChunk(profile)];
+
+/** `notes` as the text the editor shows; empty for none. */
+export function describe(notes: readonly SaveNote[]): string {
+  return notes.map(note => {
+    switch (note.kind) {
+      case 'depth16': return 'This 16-bit PNG saves at 8 bits per channel.';
+      case 'browserDecoder': return 'Opened with the browser\'s decoder: saving may shift semi-transparent pixels and drops the color profile.';
+      case 'profileDropped': return note.space
+        ? `The save drops this image's ${note.space === 'GRAY' ? 'grayscale' : note.space} color profile, which does not describe RGB pixels.`
+        : 'The save drops this image\'s unreadable color profile.';
+      case 'formatMismatch': return `This file holds ${note.from ? imageTypeName(note.from) : `non-${imageTypeName(note.to)}`} data; it saves as ${imageTypeName(note.to)}, as its name says`
+        + `${note.droppedOther ? ', without its other metadata' : ''}${note.lostAlpha ? ', losing its transparency' : ''}.`;
+    }
+  }).join(' ');
+}
 
 /** `decodePng` of `bytes`, which this takes, on a worker of its own. */
-const decodePngOffThread = (bytes: Uint8Array): Promise<DecodedPng> => pngWorker({ decode: bytes }, [bytes.buffer as ArrayBuffer]);
+const decodePngOffThread = (bytes: Uint8Array): Promise<Decoded> => pngWorker({ decode: bytes }, [bytes.buffer as ArrayBuffer]);
 
 /** The PNG worker's answer to `job`, which takes `transfer`. */
 function pngWorker<T>(job: PngJob, transfer: Transferable[]): Promise<T> {

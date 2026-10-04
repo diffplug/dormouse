@@ -1,7 +1,8 @@
 /** JPEG color profiles across a re-encode: the source's APP2 `ICC_PROFILE`
  * segments, spliced into the bytes a canvas encodes. No DOM, so Node tests load it. */
 import { jpegSegments, type JpegSegment } from '../../src/image-editability';
-import { ascii } from '../../src/image-format';
+import { ascii, latin1 } from '../../src/image-format';
+import { iccSpace, rgbProfile, type SourceColor } from './icc';
 
 type Bytes = Uint8Array<ArrayBuffer>;
 const ICC = 'ICC_PROFILE\0';
@@ -18,6 +19,17 @@ const isIcc = (bytes: Uint8Array, s: JpegSegment) => s.marker === 0xe2 && ascii(
 /** The APP2 `ICC_PROFILE` segments of a JPEG, whole and in order. */
 export function iccSegments(bytes: Uint8Array): Uint8Array[] {
   return segments(bytes).list.filter(s => isIcc(bytes, s)).map(s => bytes.slice(s.start, s.end));
+}
+
+/** A JPEG's color: its ICC segments, kept only when their profile describes
+ * RGB. Segments it cannot read leave it untagged. */
+export function jpegColor(bytes: Uint8Array): SourceColor {
+  let segments: Uint8Array[] = [];
+  try { segments = iccSegments(bytes); } catch { /* unreadable segments: decode untagged */ }
+  const icc = iccProfile(segments);
+  if (!icc) return { space: 'srgb', keep: [], notes: [] };
+  const rgb = rgbProfile(icc);
+  return 'profile' in rgb ? { space: iccSpace(icc), keep: segments, profile: icc, notes: [] } : { space: 'srgb', keep: [], notes: [rgb.dropped] };
 }
 
 /** The profile `iccSegments` carry, rejoined by their sequence numbers. */
@@ -40,7 +52,7 @@ export function iccSegmentsOf(profile: Uint8Array): Bytes[] {
     const part = profile.subarray(i * room, (i + 1) * room), length = 2 + ICC.length + 2 + part.length;
     const out = new Uint8Array(2 + length);
     out.set([0xff, 0xe2, length >> 8, length & 255]);
-    for (let k = 0; k < ICC.length; k++) out[4 + k] = ICC.charCodeAt(k);
+    out.set(latin1(ICC), 4);
     out.set([i + 1, count], 4 + ICC.length);
     out.set(part, 6 + ICC.length);
     return out;

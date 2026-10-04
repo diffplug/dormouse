@@ -25,6 +25,12 @@ export function clipRect(r: { width: number; height: number }, rect: Rect): Rect
   return x1 > x0 && y1 > y0 ? { x: x0, y: y0, width: x1 - x0, height: y1 - y0 } : null;
 }
 
+/** Whether every pixel is fully opaque. */
+export function isOpaque(r: Raster): boolean {
+  for (let i = 3; i < r.data.length; i += 4) if (r.data[i] !== 255) return false;
+  return true;
+}
+
 /** The pixel containing (x, y); null off the raster. */
 export function pixel(r: Raster, x: number, y: number): Rgba | null {
   x = Math.floor(x); y = Math.floor(y);

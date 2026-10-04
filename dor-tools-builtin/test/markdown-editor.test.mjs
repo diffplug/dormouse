@@ -103,6 +103,7 @@ test('pasted images become new files beside the document, checked against their 
   for (const origin of ['', 'null', 'https://elsewhere.test']) assert.equal((await paste(viewer, 'image/png', PNG, origin)).status, 403);
   assert.equal((await paste(viewer, 'image/svg+xml', Buffer.from('<svg/>'))).status, 415);
   assert.equal((await paste(viewer, 'image/png', JPEG)).status, 415);
+  assert.match((await paste(viewer, 'image/jpeg', PNG)).body.toString(), /not a JPEG image/);
   assert.equal((await paste(viewer, 'constructor', PNG)).status, 415);
   const notes = await start('notes.txt', 'plain');
   assert.equal((await paste(notes, 'image/png', PNG)).status, 404);

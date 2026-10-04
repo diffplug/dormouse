@@ -24,6 +24,8 @@ export const IMAGE_CSP = "sandbox; default-src 'none'; style-src 'unsafe-inline'
 
 /** `b[start, end)` as Latin-1 text. */
 export const ascii = (b: Uint8Array, start: number, end: number): string => String.fromCharCode(...b.subarray(start, end));
+/** Latin-1 text `s` as bytes: `ascii`'s inverse. */
+export const latin1 = (s: string): Uint8Array<ArrayBuffer> => Uint8Array.from(s, c => c.charCodeAt(0));
 /** The eight bytes every PNG opens with. */
 export const PNG_SIGNATURE: readonly number[] = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 /** Whether `b` opens with the PNG signature. */
@@ -31,17 +33,22 @@ export const isPng = (b: Uint8Array): boolean => PNG_SIGNATURE.every((byte, i) =
 /** Whether `b` opens with a JPEG's SOI and the marker after it. */
 export const isJpeg = (b: Uint8Array): boolean => b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff;
 
-/** A pasted image's type, its file extension, and the signature its bytes must open with. */
-const PASTE_TYPES: Record<string, { ext: string; magic: (b: Uint8Array) => boolean }> = {
-  'image/png': { ext: 'png', magic: isPng },
-  'image/jpeg': { ext: 'jpg', magic: isJpeg },
-  'image/gif': { ext: 'gif', magic: b => /^GIF8[79]a/.test(ascii(b, 0, 6)) },
-  'image/webp': { ext: 'webp', magic: b => ascii(b, 0, 4) === 'RIFF' && ascii(b, 8, 12) === 'WEBP' },
+interface PasteType { name: string; ext: string; magic: (b: Uint8Array) => boolean }
+/** A pasted image's type, the name a message gives it, its file extension, and the signature its bytes must open with. */
+const PASTE_TYPES: Record<string, PasteType> = {
+  'image/png': { name: 'PNG', ext: 'png', magic: isPng },
+  'image/jpeg': { name: 'JPEG', ext: 'jpg', magic: isJpeg },
+  'image/gif': { name: 'GIF', ext: 'gif', magic: b => /^GIF8[79]a/.test(ascii(b, 0, 6)) },
+  'image/webp': { name: 'WebP', ext: 'webp', magic: b => ascii(b, 0, 4) === 'RIFF' && ascii(b, 8, 12) === 'WEBP' },
 };
+const pasteType = (type: string): PasteType | undefined => Object.prototype.hasOwnProperty.call(PASTE_TYPES, type) ? PASTE_TYPES[type] : undefined;
 
 /** The `PASTE_TYPES` type whose signature `bytes` opens with, if any. */
 export const imageKind = (bytes: Uint8Array): string | undefined =>
   Object.keys(PASTE_TYPES).find(type => PASTE_TYPES[type].magic(bytes));
+
+/** The name messages give image type `type` (a `PASTE_TYPES` one), such as "JPEG". */
+export const imageTypeName = (type: string): string => pasteType(type)?.name ?? type;
 
 /** Whether `path`'s extension names an image format. */
 export const isImage = (path: string): boolean => !!fileViewerFormat(path)?.mime.startsWith('image/');
@@ -49,9 +56,9 @@ export const isImage = (path: string): boolean => !!fileViewerFormat(path)?.mime
 /** The file extension for a paste of Content-Type `type` whose bytes carry
  * that type's signature; else 415. */
 export function pastedImageExtension(type: string, bytes: Uint8Array): string {
-  const kind = Object.prototype.hasOwnProperty.call(PASTE_TYPES, type) ? PASTE_TYPES[type] : undefined;
+  const kind = pasteType(type);
   if (!kind) throw new HttpError(415, 'Paste a PNG, JPEG, GIF, or WebP image.');
-  if (!kind.magic(bytes)) throw new HttpError(415, `The pasted data is not a ${kind.ext.toUpperCase()} image.`);
+  if (!kind.magic(bytes)) throw new HttpError(415, `The pasted data is not a ${kind.name} image.`);
   return kind.ext;
 }
 
@@ -69,5 +76,5 @@ export function pastedImageName(now: Date, n: number, ext: string): string {
 /** Refuses a save over an editable image of type `mime` unless the request's
  * Content-Type `type` and the bytes' signature are both `mime`. */
 export function checkImageSave(mime: string, type: string, bytes: Uint8Array): void {
-  if (type !== mime || imageKind(bytes) !== mime) throw new HttpError(415, `Save this image as ${mime === 'image/png' ? 'PNG' : 'JPEG'}.`);
+  if (type !== mime || imageKind(bytes) !== mime) throw new HttpError(415, `Save this image as ${imageTypeName(mime)}.`);
 }
