@@ -62,7 +62,7 @@ A spec is the accurate reference for the current code: it states the invariants 
 - **`docs/specs/dor-cli.md`** — The `dor` CLI on every Dormouse terminal's `PATH`: bundling and env contract, `spawnAndCapture` rules, control-socket plumbing, the Surface handle model, the command set.
 - **`docs/specs/dor-browser.md`** — The browser surface: `BrowserPanel` with swappable `renderMode`, browser chrome, the agent-browser stack, the iframe proxy and CSP boundaries.
 - **`docs/specs/dor-tool.md`** — Dor Tools: the `tool` Surface — a terminal and a browser on one Session spine — its capability-gated verbs, OSC 367 contract, designation, trust, serving, and persistence.
-- **`docs/specs/dor-tools-builtin.md`** — The built-in Tools `builtin:file` (local-file viewer and text editor) and `builtin:folder`: formats, grants, disk saves, listings, and their runtime packaging.
+- **`docs/specs/dor-tools-builtin.md`** — The built-in Tools `builtin:file` (local-file viewer with text, Markdown, and image editors) and `builtin:folder`: formats, grants, disk saves, listings, and their runtime packaging.
 - **`docs/specs/dor-tools-lib.md`** — `dor-tools-lib`, the MIT Tool-protocol package: its license and dependency boundary, entry points, consumers, and the road to publishing 1.0.
 - **`docs/specs/vscode.md`** — VS Code: webview ↔ Workspace mapping, persistence ordering, CSP, the build (typecheck wiring, update policy, `engines.vscode` floor).
 - **`docs/specs/standalone.md`** — Tauri host: the Rust ↔ Node-sidecar bridge, boot sequence, AppBar, persistence, shutdown ordering, the build/dev workflow.
