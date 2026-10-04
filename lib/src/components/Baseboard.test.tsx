@@ -30,7 +30,7 @@ import { resetShellStore, seedShellStore } from '../lib/shell-store';
 import { resetPushDevices, setPushDevices, setPushDevicesRefresher } from '../lib/push-devices';
 import { clearTerminalActivity, setTerminalActivity } from '../lib/session-activity-store';
 import { createAlertEpisode } from '../lib/alert-episode';
-import { makeStubBurrowLink } from '../host/remote/test-burrow-link';
+import { enrolledStatus, makeStubBurrowLink, SELF_HOST_UNENROLLED_STATUS, UNENROLLED_STATUS } from '../host/remote/test-burrow-link';
 import { makeStubManagedVoicePort } from '../lib/platform/test-ports';
 import { networkPolicyResult, nothingPolicy } from '../remote/network-policy';
 
@@ -423,37 +423,47 @@ describe('Baseboard settings controls', () => {
 
 describe('Baseboard alarm upsell', () => {
   const openExternal = vi.fn();
+  const HOSTED_MEMBER = enrolledStatus({ relayMode: 'hosted', relayOrigin: UNENROLLED_STATUS.relayOrigin });
 
-  /** A Hosted build (a managed-voice port) unless `hosted` is false; with a Burrow service. */
-  async function renderWithPlatform({ hosted = true, member = false } = {}) {
+  /**
+   * A build whose Burrow service answers `status` — a Hosted one not signed in
+   * by default — with a managed-voice port unless `voice` is false (VS Code, a
+   * self-host build).
+   */
+  async function renderWithPlatform({ status = UNENROLLED_STATUS, voice = true, notEntitled = false } = {}) {
     const platform = await import('../lib/platform');
-    vi.spyOn(platform, 'getPlatform').mockReturnValue({
+    const adapter = {
       alertPublishSettings: vi.fn(),
       openExternal,
-      burrow: makeStubBurrowLink({}),
-      managedVoice: hosted ? makeStubManagedVoicePort(member) : undefined,
-    } as unknown as ReturnType<typeof platform.getPlatform>);
+      burrow: makeStubBurrowLink({ status }),
+      managedVoice: voice ? makeStubManagedVoicePort(status.enrolled, notEntitled) : undefined,
+    } as unknown as ReturnType<typeof platform.getPlatform>;
+    vi.spyOn(platform, 'getPlatform').mockReturnValue(adapter);
+    vi.spyOn(platform, 'getPlatformOrNull').mockReturnValue(adapter);
     await act(async () => root.render(<Baseboard items={[]} onReattach={() => {}} />));
   }
-  const toggle = (sink: 'speech' | 'push') =>
+  /** Toggle, then let the line's one status read land. */
+  const toggle = async (sink: 'speech' | 'push') => {
     act(() => container.querySelector<HTMLButtonElement>(`[data-alarm-setting="${sink}"]`)!.click());
+    await act(async () => {});
+  };
   const line = () => document.querySelector<HTMLButtonElement>('[data-alarm-upsell]');
   const preview = () => document.querySelector('[role="status"]');
+  // jsdom lays nothing out, so which topic Settings scrolls to is the stories' to pin.
+  const settingsOpen = () => document.querySelector('[role="dialog"]') !== null;
 
   beforeEach(() => openExternal.mockReset());
 
-  it('offers managed voice once, live and clickable without taking the keyboard', async () => {
+  it('points at signing in once, live and clickable without taking the keyboard', async () => {
     await renderWithPlatform();
     const terminalInput = document.createElement('textarea');
     container.appendChild(terminalInput);
     terminalInput.focus();
     vi.useFakeTimers();
-    toggle('speech');
+    await toggle('speech');
 
-    expect(line()?.dataset.alarmUpsell).toBe('hosted-voice');
+    expect(line()?.dataset.alarmUpsell).toBe('sign-in-voice');
     expect(line()?.closest('[inert]')).toBeNull();
-    // The inert copy of the section does not repeat the offer.
-    expect(preview()?.querySelector('[inert]')?.textContent).not.toContain('Hosted');
     expect(document.activeElement).toBe(terminalInput);
 
     // Up past a plain preview's life.
@@ -464,22 +474,24 @@ describe('Baseboard alarm upsell', () => {
     line()!.dispatchEvent(mouseDown);
     expect(mouseDown.defaultPrevented).toBe(true);
     act(() => line()!.click());
-    expect(openExternal).toHaveBeenCalledWith('https://dormouse.sh/hosted/?ref=upsell-voice#voice');
     expect(preview()).toBeNull();
+    expect(settingsOpen()).toBe(true);
+    expect(openExternal).not.toHaveBeenCalled();
 
     // Once a day, across both toggles.
-    toggle('speech');
-    toggle('speech');
+    act(() => document.querySelector<HTMLButtonElement>('[aria-label="Close"]')?.click());
+    await toggle('speech');
+    await toggle('speech');
     expect(line()).toBeNull();
     setPushDevices({ status: 'no-burrow', devices: [] });
-    toggle('push');
+    await toggle('push');
     expect(line()).toBeNull();
   });
 
   it('holds while hovered, then fades after the pointer leaves', async () => {
     await renderWithPlatform();
     vi.useFakeTimers();
-    toggle('speech');
+    await toggle('speech');
     const hold = line()!.parentElement!.parentElement!;
     act(() => hold.dispatchEvent(new PointerEvent('pointerover', { bubbles: true })));
     act(() => vi.advanceTimersByTime(10_000));
@@ -491,13 +503,13 @@ describe('Baseboard alarm upsell', () => {
 
   it('closes on Escape, or on a press anywhere but the line', async () => {
     await renderWithPlatform();
-    toggle('speech');
+    await toggle('speech');
     act(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })));
     expect(preview()).toBeNull();
 
-    toggle('speech');
+    await toggle('speech');
     localStorage.clear();
-    toggle('speech');
+    await toggle('speech');
     act(() => line()!.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })));
     expect(preview()).not.toBeNull();
     act(() => document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })));
@@ -507,41 +519,47 @@ describe('Baseboard alarm upsell', () => {
   it('never offers on turning off, nor to a member', async () => {
     applyAlertSettingsFromHost({ ...DEFAULT_ALERT_SETTINGS, speakEnabled: true });
     await renderWithPlatform();
-    toggle('speech');
+    await toggle('speech');
     expect(preview()).not.toBeNull();
     expect(line()).toBeNull();
 
     act(() => root.unmount());
     root = createRoot(container);
     applyAlertSettingsFromHost(DEFAULT_ALERT_SETTINGS);
-    await renderWithPlatform({ member: true });
-    toggle('speech');
+    await renderWithPlatform({ status: HOSTED_MEMBER });
+    await toggle('speech');
     expect(line()).toBeNull();
   });
 
-  it('offers Hosted push to a non-member with no Burrow enrolled', async () => {
-    setPushDevices({ status: 'no-burrow', devices: [] });
-    await renderWithPlatform();
-    toggle('push');
+  it('points a lapsed plan at the plans, with the offer named', async () => {
+    await renderWithPlatform({ status: HOSTED_MEMBER, notEntitled: true });
+    await toggle('speech');
+    expect(line()?.dataset.alarmUpsell).toBe('plans-voice');
     act(() => line()!.click());
-    expect(openExternal).toHaveBeenCalledWith('https://dormouse.sh/hosted/?ref=upsell-push#remote-control');
+    expect(openExternal).toHaveBeenCalledWith('https://dormouse.sh/hosted/?ref=upsell-voice#pricing');
   });
 
-  it('points a build with no Hosted mode at Settings → Network, never at Hosted', async () => {
+  it('points VS Code at signing in for push, but offers it no voice', async () => {
     setPushDevices({ status: 'no-burrow', devices: [] });
-    await renderWithPlatform({ hosted: false });
-    toggle('speech');
+    await renderWithPlatform({ voice: false });
+    await toggle('speech');
     expect(line()).toBeNull();
-    toggle('speech');
-    toggle('push');
+    await toggle('speech');
+    await toggle('push');
+    expect(line()?.dataset.alarmUpsell).toBe('sign-in-push');
+    act(() => line()!.click());
+    expect(settingsOpen()).toBe(true);
+  });
+
+  it('points a self-host build at Settings → Network, never at Hosted', async () => {
+    setPushDevices({ status: 'no-burrow', devices: [] });
+    await renderWithPlatform({ status: SELF_HOST_UNENROLLED_STATUS, voice: false });
+    await toggle('push');
     expect(line()?.dataset.alarmUpsell).toBe('set-up-phone');
     expect(preview()?.textContent).not.toContain('Hosted');
     act(() => line()!.click());
     expect(openExternal).not.toHaveBeenCalled();
-    expect(preview()).toBeNull();
-    const network = document.querySelector('[data-settings-topic="network"]');
-    expect(network).not.toBeNull();
-    expect(document.querySelector('[role="dialog"] [aria-current="location"]')?.getAttribute('title')).toBe('Network');
+    expect(settingsOpen()).toBe(true);
   });
 });
 

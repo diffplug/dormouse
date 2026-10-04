@@ -12,45 +12,42 @@ import { hostedPageUrl, HOSTED_REFS } from './hosted-links';
 import { networkOn } from '../host/remote/test-burrow-link';
 import { networkPolicyResult, nothingPolicy } from '../remote/network-policy';
 
-const NO_BURROW = { status: 'no-burrow', devices: [] } as const;
-const NO_PHONE = { status: 'ready', devices: [] } as const;
-const A_PHONE = { status: 'ready', devices: [{ label: 'iPhone' }] } as const;
-
 const facts = (overrides: Partial<AlarmUpsellFacts>): AlarmUpsellFacts => ({
   sink: 'speech',
-  membership: 'not-member',
+  membership: 'signed-out',
+  managedVoice: true,
   networkOff: false,
-  push: NO_BURROW,
-  hasBurrowService: true,
+  enrolled: false,
   ...overrides,
 });
 
 describe('chooseAlarmUpsell', () => {
-  it('offers managed voice only to a Hosted build\'s non-member', () => {
-    expect(chooseAlarmUpsell(facts({}))).toBe('hosted-voice');
-    expect(chooseAlarmUpsell(facts({ membership: 'member' }))).toBeNull();
-    // A self-host build, or one with no Hosted mode.
+  it('points speech at signing in, or at the plans, only where managed voice can play', () => {
+    expect(chooseAlarmUpsell(facts({}))).toBe('sign-in-voice');
+    expect(chooseAlarmUpsell(facts({ membership: 'no-plan' }))).toBe('plans-voice');
+    // VS Code until it plays managed voice, and a self-host build.
+    expect(chooseAlarmUpsell(facts({ managedVoice: false }))).toBeNull();
     expect(chooseAlarmUpsell(facts({ membership: 'unavailable' }))).toBeNull();
   });
 
-  it.each(['speech', 'push'] as const)('offers nothing for %s turned off or under Nothing', (sink) => {
-    expect(takeAlarmUpsell(false, facts({ sink }))).toBeNull();
+  it.each(['speech', 'push'] as const)('never offers %s to a member, or under Nothing or before the policy answers', (sink) => {
+    expect(chooseAlarmUpsell(facts({ sink, membership: 'member' }))).toBeNull();
     expect(chooseAlarmUpsell(facts({ sink, networkOff: true }))).toBeNull();
   });
 
-  it('offers Hosted push only when no Burrow is enrolled, to a non-member', () => {
+  it('points push at signing in when signed out, and at the plans when the plan lapsed', () => {
     const push = (overrides: Partial<AlarmUpsellFacts>) => chooseAlarmUpsell(facts({ sink: 'push', ...overrides }));
-    expect(push({})).toBe('hosted-push');
-    // Self-host, no Hosted mode, or a member: the Relay it has.
+    expect(push({})).toBe('sign-in-push');
+    // VS Code signs in through Remote control: no managed voice needed.
+    expect(push({ managedVoice: false })).toBe('sign-in-push');
+    // Removed from the account: enrolled still, and signing in again is the fix.
+    expect(push({ enrolled: true })).toBe('sign-in-push');
+    expect(push({ membership: 'no-plan', enrolled: true })).toBe('plans-push');
+    // A build without Hosted mode: the Relay it has, only while not enrolled.
     expect(push({ membership: 'unavailable' })).toBe('set-up-phone');
-    expect(push({ membership: 'member' })).toBe('set-up-phone');
-    // Enrolled: the device line already names the fix.
-    expect(push({ push: NO_PHONE })).toBeNull();
-    expect(push({ push: A_PHONE })).toBeNull();
-    expect(push({ push: { status: 'loading', devices: [] } })).toBeNull();
-    expect(push({ push: { status: 'error', devices: [] } })).toBeNull();
-    // No Burrow service (the website): nowhere to set one up.
-    expect(push({ hasBurrowService: false })).toBeNull();
+    expect(push({ membership: 'unavailable', enrolled: true })).toBeNull();
+    // No Burrow service (the website), or no answer: nowhere to set one up.
+    expect(push({ membership: 'unavailable', enrolled: null })).toBeNull();
   });
 });
 
@@ -62,16 +59,17 @@ describe('claimAlarmUpsell', () => {
   afterEach(() => vi.unstubAllGlobals());
 
   it('allows one a day, across both toggles', () => {
-    expect(takeAlarmUpsell(true, facts({}), now)).toBe('hosted-voice');
+    expect(takeAlarmUpsell(true, facts({}), now)).toBe('sign-in-voice');
     expect(takeAlarmUpsell(true, facts({ sink: 'push' }), now + 1000)).toBeNull();
     expect(takeAlarmUpsell(true, facts({}), now + DAY - 1)).toBeNull();
-    expect(takeAlarmUpsell(true, facts({ sink: 'push' }), now + DAY)).toBe('hosted-push');
+    expect(takeAlarmUpsell(true, facts({ sink: 'push' }), now + DAY)).toBe('sign-in-push');
   });
 
-  it('spends nothing when no line is earned', () => {
+  it('spends nothing on turning off, or when no line is earned', () => {
     expect(takeAlarmUpsell(false, facts({}), now)).toBeNull();
+    expect(takeAlarmUpsell(true, facts({ membership: 'member' }), now)).toBeNull();
     expect(localStorage.getItem(ALARM_UPSELL_SHOWN_AT_KEY)).toBeNull();
-    expect(takeAlarmUpsell(true, facts({}), now)).toBe('hosted-voice');
+    expect(takeAlarmUpsell(true, facts({}), now)).toBe('sign-in-voice');
   });
 
   it('treats a clock set back past the last showing as a new day', () => {
@@ -107,7 +105,7 @@ describe('networkOffOrUnknown', () => {
 
 describe('hostedPageUrl', () => {
   it('puts the ref ahead of the section', () => {
-    expect(hostedPageUrl('voice', HOSTED_REFS.upsellVoice)).toBe('https://dormouse.sh/hosted/?ref=upsell-voice#voice');
-    expect(hostedPageUrl('remote-control')).toBe('https://dormouse.sh/hosted/#remote-control');
+    expect(hostedPageUrl('pricing', HOSTED_REFS.upsellVoice)).toBe('https://dormouse.sh/hosted/?ref=upsell-voice#pricing');
+    expect(hostedPageUrl('pricing')).toBe('https://dormouse.sh/hosted/#pricing');
   });
 });

@@ -156,12 +156,20 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
     const patch = sink === 'speech' ? { speakEnabled: turnedOn } : { pushEnabled: turnedOn };
     if (workspaceId) setWorkspaceAlertDelivery(workspaceId, { ...overrides, ...patch });
     else updateAlertSettings(patch);
-    const upsell = takeAlarmUpsell(turnedOn, currentAlarmUpsellFacts(sink));
-    setSettingsPreview({ sink, anchor, upsell, sequence: ++previewSequence.current });
+    const sequence = ++previewSequence.current;
+    setSettingsPreview({ sink, anchor, upsell: null, sequence });
+    if (!turnedOn) return;
+    // Membership may take one read of the Burrow service, so the line joins
+    // the preview it was earned by, if that preview is still up.
+    void currentAlarmUpsellFacts(sink).then((facts) => {
+      if (previewSequence.current !== sequence) return;
+      const upsell = takeAlarmUpsell(turnedOn, facts);
+      if (upsell) setSettingsPreview((shown) => shown?.sequence === sequence ? { ...shown, upsell } : shown);
+    });
   };
-  const showNetworkSettings = useCallback(() => {
+  const showSettingsAt = useCallback((topic: TopicId) => {
     setSettingsPreview(null);
-    setSettingsOpen({ dialog: 'application', topic: 'network' });
+    setSettingsOpen({ dialog: 'application', topic });
   }, []);
 
   // Suppress command-mode key dispatch while the Settings dialog owns the
@@ -449,7 +457,7 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
           sink={settingsPreview.sink}
           anchor={settingsPreview.anchor}
           upsell={settingsPreview.upsell}
-          onShowNetwork={showNetworkSettings}
+          onShowSettings={showSettingsAt}
           onClose={closeSettingsPreview}
         />
       )}

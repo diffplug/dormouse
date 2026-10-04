@@ -3,7 +3,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { POPUP_SURFACE_CLASS } from './design';
 import { AlarmSettingsSection } from './SettingsDialog';
-import { AlarmUpsellLine } from './AlarmUpsellLine';
+import { AlarmUpsellLine, type UpsellTopic } from './AlarmUpsellLine';
 import type { AlertSink } from '../lib/alert-delivery-model';
 import type { AlarmUpsell } from '../lib/alarm-upsell';
 import { useAnchoredMenu, useCloseOnOutsideAndEscape } from './use-anchored-menu';
@@ -21,14 +21,14 @@ export function SettingsPreview({
   sink,
   anchor,
   upsell,
-  onShowNetwork,
+  onShowSettings,
   onClose,
 }: {
   sink: AlertSink;
   anchor: HTMLElement;
   /** One live line under the inert section (`docs/specs/alert.md` -> "Settings dialog"). */
   upsell: AlarmUpsell | null;
-  onShowNetwork: () => void;
+  onShowSettings: (topic: UpsellTopic) => void;
   onClose: () => void;
 }) {
   const { policy: settings } = useWorkspaceAlertPolicy();
@@ -87,7 +87,7 @@ export function SettingsPreview({
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
         >
-          <AlarmUpsellLine upsell={upsell} onShowNetwork={onShowNetwork} onDone={onClose} />
+          <AlarmUpsellLine upsell={upsell} onShowSettings={onShowSettings} onDone={onClose} />
         </div>
       )}
     </div>,

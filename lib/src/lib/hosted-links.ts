@@ -15,8 +15,8 @@ export const HOSTED_REFS = {
 } as const;
 export type HostedRef = typeof HOSTED_REFS[keyof typeof HOSTED_REFS];
 
-/** A section of the Hosted page; both ids are kept resolving by the page. */
-export type HostedSection = 'voice' | 'remote-control';
+/** A section of the Hosted page, each an id the page keeps resolving. */
+export type HostedSection = 'pricing' | 'voice' | 'remote-control';
 
 /** The Hosted page at `section`, with `ref` ahead of the fragment. */
 export function hostedPageUrl(section: HostedSection, ref?: HostedRef): string {

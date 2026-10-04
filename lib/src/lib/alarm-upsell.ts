@@ -1,45 +1,50 @@
 import type { AlertSink } from './alert-delivery-model';
-import { getHostedMembership, type HostedMembership } from './hosted-membership';
+import { membershipOf, readBurrowStanding, voiceStatus, type HostedMembership } from './hosted-membership';
 import { loadJson, saveJson } from './local-json-store';
-import { getPushDevices, type PushDevicesState } from './push-devices';
-import { burrowLink } from '../remote/burrow/burrow-status-store';
+import { getPlatformOrNull } from './platform';
 import { getNetworkPolicySnapshot, policyOf, type NetworkPolicyStoreState } from '../remote/burrow/network-policy-store';
 
 /**
  * The one extra line a Baseboard alarm toggle's preview may carry
  * (`docs/specs/alert.md` -> "Settings dialog"):
  *
- * - `hosted-voice`: spoken alarms could use a managed voice;
- * - `hosted-push`: push has no Burrow to send from, and Hosted would be one;
- * - `set-up-phone`: push has nowhere to go, and the fix is in Settings → Network.
+ * - `sign-in-voice` / `sign-in-push`: a Hosted build not signed in, pointed at
+ *   signing in — in Notifications' managed voice, or Network's Remote control;
+ * - `plans-voice` / `plans-push`: signed in with no plan, pointed at the plans;
+ * - `set-up-phone`: push has no Burrow enrolled in a build without Hosted
+ *   mode, pointed at Settings → Network.
  */
-export type AlarmUpsell = 'hosted-voice' | 'hosted-push' | 'set-up-phone';
+export type AlarmUpsell = 'sign-in-voice' | 'sign-in-push' | 'plans-voice' | 'plans-push' | 'set-up-phone';
 
 export interface AlarmUpsellFacts {
   sink: AlertSink;
   membership: HostedMembership;
+  /** This build can play managed voice: its adapter has a `managedVoice` port. */
+  managedVoice: boolean;
   /**
    * The network policy is Nothing, which sends no push and asks for no voice,
    * or a Burrow service has not said yet which policy it is.
    */
   networkOff: boolean;
-  /** The push-device list as the preview shows it, never refreshed for it. */
-  push: PushDevicesState;
-  /** A Burrow service is behind this webview, so Settings → Network can add a phone. */
-  hasBurrowService: boolean;
+  /**
+   * Whether this computer's Burrow is enrolled with a Relay, as its service
+   * answers; `null` without a service (the website) or an answer.
+   */
+  enrolled: boolean | null;
 }
 
-/** Which offer a sink earns, before the daily limit; the Settings dialog's Hosted links read it too. */
+/** Which offer a sink earns, before the daily limit. */
 export function chooseAlarmUpsell(facts: AlarmUpsellFacts): AlarmUpsell | null {
-  if (facts.networkOff) return null;
-  if (facts.sink === 'speech') return facts.membership === 'not-member' ? 'hosted-voice' : null;
-  if (!facts.hasBurrowService) return null;
-  // Not enrolled: a Hosted build's non-member is offered Hosted's Relay; every
-  // other build, and a member, is pointed at enrolling with the Relay it has.
-  // Enrolled with no device is no offer: the device line already names the
-  // fix, which may be a switch in Pocket on a phone already paired.
-  if (facts.push.status !== 'no-burrow') return null;
-  return facts.membership === 'not-member' ? 'hosted-push' : 'set-up-phone';
+  const { sink, membership } = facts;
+  if (facts.networkOff || membership === 'member') return null;
+  if (sink === 'speech') {
+    if (!facts.managedVoice) return null;
+    return membership === 'signed-out' ? 'sign-in-voice' : membership === 'no-plan' ? 'plans-voice' : null;
+  }
+  if (membership === 'no-plan') return 'plans-push';
+  if (membership === 'signed-out') return 'sign-in-push';
+  // Enrolled, push has a Relay, and the device line names what else is missing.
+  return facts.enrolled === false ? 'set-up-phone' : null;
 }
 
 /** When a line last showed, on this machine (every window shares the origin). */
@@ -66,14 +71,15 @@ export function networkOffOrUnknown(network: NetworkPolicyStoreState): boolean {
   return policy === null || policy.level === 'nothing';
 }
 
-/** The facts as the stores hold them now. */
-export function currentAlarmUpsellFacts(sink: AlertSink): AlarmUpsellFacts {
+/** The facts now; the standing may take one read of the Burrow service. */
+export async function currentAlarmUpsellFacts(sink: AlertSink): Promise<AlarmUpsellFacts> {
+  const standing = await readBurrowStanding();
   return {
     sink,
-    membership: getHostedMembership(),
+    membership: membershipOf(standing, voiceStatus()),
+    managedVoice: getPlatformOrNull()?.managedVoice !== undefined,
     networkOff: networkOffOrUnknown(getNetworkPolicySnapshot()),
-    push: getPushDevices(),
-    hasBurrowService: burrowLink() !== undefined,
+    enrolled: standing?.enrolled ?? null,
   };
 }
 

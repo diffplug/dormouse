@@ -5,6 +5,7 @@ import { FIELD_HINT, FIELD_LABEL, hostOf, useBusyAction, useMinutesLeft } from '
 import { ACCOUNT_PAGE_PATH, HOSTED_ACCOUNT_ORIGIN } from '../host/relay-origin';
 import type { HostedEnrollmentEndReason, HostedEnrollmentState } from '../host/remote/service-protocol';
 import { getPlatform } from '../lib/platform';
+import { hostedPageUrl } from '../lib/hosted-links';
 import { BURROW_IS_AN_APP } from '../remote/setup-copy';
 import { beginHostedEnrollment, cancelHostedEnrollment } from '../remote/burrow/burrow-status-store';
 
@@ -17,9 +18,7 @@ import { beginHostedEnrollment, cancelHostedEnrollment } from '../remote/burrow/
  */
 
 /** Where the plans are; linked wherever an account turns out to have none. */
-export const HOSTED_PRICING_URL = 'https://dormouse.sh/hosted/#pricing';
-/** The Hosted page's voice section, the spoken-alarm row's link where the build has no managed voice. */
-export const HOSTED_VOICE_URL = 'https://dormouse.sh/hosted/#voice';
+export const HOSTED_PRICING_URL = hostedPageUrl('pricing');
 
 /** The begin button's words, everywhere sign-in starts. */
 export const SIGN_IN_LABEL = 'Sign in to Dormouse Hosted';

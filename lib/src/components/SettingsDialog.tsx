@@ -20,10 +20,10 @@ import { WatchedCommandList } from './WatchedCommandList';
 import { NetworkPhones, NetworkSettings, NetworkUpdates } from './NetworkSettings';
 import { PushTestButton, SpeakTestButton } from './AlarmTestButtons';
 import { ManagedVoiceSection, NetworkTopicLink, useManagedVoiceOffered } from './ManagedVoiceSection';
-import { HostedOfferLink } from './AlarmUpsellLine';
-import { chooseAlarmUpsell, networkOffOrUnknown } from '../lib/alarm-upsell';
-import { getNetworkPolicySnapshot, policyOf, subscribeToNetworkPolicy } from '../remote/burrow/network-policy-store';
-import { useHostedMembership } from '../lib/hosted-membership';
+import { ExternalTextLink } from './ExternalTextLink';
+import { HOSTED_PRICING_URL } from './HostedSignIn';
+import { useNetworkPolicy } from './remote-control-shared';
+import { useHostedMembership, type HostedMembership } from '../lib/hosted-membership';
 import { getPlatform } from '../lib/platform';
 import { getShellsSnapshot, subscribeToShells } from '../lib/shell-store';
 import { getDelayedKillSetting, labsAvailable, setDelayedKillSetting, subscribeToLabsSettings } from '../lib/labs-settings';
@@ -42,6 +42,9 @@ import {
 
 const TITLE_ID = 'settings-dialog-title';
 
+/** What the push group says, and the preview's live line, where the plan lapsed. */
+export const NO_PUSH_PLAN_COPY = 'Your account has no Hosted plan, so no push is sent.';
+
 /** A picker row; `min-w-0` lets the picker's trigger truncate in a narrow dialog. */
 const PICKER_ROW = 'flex items-center gap-1.5 text-sm text-foreground [&>div]:min-w-0';
 
@@ -57,7 +60,9 @@ const PICKER_ROW = 'flex items-center gap-1.5 text-sm text-foreground [&>div]:mi
  * (`docs/specs/remote-security-model.md`), so there is no account-wide device
  * list to show and the copy must not imply one.
  */
-function describePushTargets(push: PushDevicesState, remoteControlBelow: boolean): string {
+function describePushTargets(push: PushDevicesState, remoteControlBelow: boolean, membership: HostedMembership): string {
+  // Signed in, the Relay refuses an account without a plan, so nothing below holds.
+  if (membership === 'no-plan') return NO_PUSH_PLAN_COPY;
   if (push.status === 'loading') return 'Looking for phones…';
   if (push.status === 'error') return 'Could not reach the Relay to list phones.';
   // The preview never shows Remote control, so it also omits "below".
@@ -68,6 +73,10 @@ function describePushTargets(push: PushDevicesState, remoteControlBelow: boolean
   // "below" has to key on the same seam the section gates on rather than on
   // `no-burrow`.
   if (push.status === 'no-burrow') {
+    // In a Hosted build, connecting to a Relay is signing in.
+    if (membership === 'signed-out') {
+      return remoteControlBelow ? 'Sign in to Dormouse Hosted below to send push.' : 'Sign in to Dormouse Hosted to send push.';
+    }
     return remoteControlBelow
       ? 'Connect this machine to a Dormouse Relay below to send push.'
       : 'Connect this machine to a Dormouse Relay to send push.';
@@ -495,12 +504,10 @@ export function AlarmSettingsSection({ sink, preview = false, onShowNetwork }: {
   const managedVoiceOffered = useManagedVoiceOffered();
   // Under Nothing the service sends no push and managed voice asks nothing
   // (`docs/specs/remote-network.md` -> "Policy"), so both lines say why.
-  const network = useSyncExternalStore(subscribeToNetworkPolicy, getNetworkPolicySnapshot);
-  const networkOff = policyOf(network)?.level === 'nothing';
-  const membership = useHostedMembership();
-  // The same offers as the Baseboard preview's live line, which carries them
-  // there instead of this inert copy.
-  const offer = preview ? null : chooseAlarmUpsell({ sink, membership, networkOff: networkOffOrUnknown(network), push, hasBurrowService });
+  const networkOff = useNetworkPolicy()?.level === 'nothing';
+  // The dialog only: the brief preview must not start the status poll, and
+  // its live line carries the offers instead (`AlarmUpsellLine`).
+  const membership = useHostedMembership(sink === 'push' && !preview);
 
   // The brief preview uses the cached list: refreshing immediately publishes
   // loading, and the bridge reply may arrive after the preview has faded away.
@@ -521,10 +528,7 @@ export function AlarmSettingsSection({ sink, preview = false, onShowNetwork }: {
         action={preview ? null : <SpeakTestButton />}
       >
         {!managedVoiceOffered ? (
-          <>
-            Uses your browser or system voice.
-            {offer === 'hosted-voice' && <> <HostedOfferLink offer={offer} /></>}
-          </>
+          'Uses your browser or system voice.'
         ) : networkOff ? (
           <>
             Managed voice is off while <NetworkTopicLink onShow={onShowNetwork} /> is set to Nothing,
@@ -555,8 +559,8 @@ export function AlarmSettingsSection({ sink, preview = false, onShowNetwork }: {
         <>Push is off while <NetworkTopicLink onShow={onShowNetwork} /> is set to Nothing.</>
       ) : (
         <>
-          {describePushTargets(push, hasBurrowService && !preview)}
-          {offer === 'hosted-push' && <> <HostedOfferLink offer={offer} /></>}
+          {describePushTargets(push, hasBurrowService && !preview, membership)}
+          {membership === 'no-plan' && <> <ExternalTextLink href={HOSTED_PRICING_URL}>See Hosted plans</ExternalTextLink></>}
         </>
       )}
     </AlarmSinkSection>

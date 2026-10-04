@@ -19,8 +19,7 @@ import type { BurrowConsoleStatus } from '../host/remote/service-protocol';
 import { networkPolicyResult, nothingPolicy } from '../remote/network-policy';
 import { HOSTED_PRICING_URL, SIGN_IN_LABEL } from './HostedSignIn';
 import { MANAGED_VOICE_DISCLOSURE, ManagedVoiceSection, NO_PLAN_COPY } from './ManagedVoiceSection';
-import { AlarmSettingsSection } from './SettingsDialog';
-import { makeStubBurrowLink } from '../host/remote/test-burrow-link';
+import { AlarmSettingsSection, NO_PUSH_PLAN_COPY } from './SettingsDialog';
 import { resetPushDevices } from '../lib/push-devices';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -155,22 +154,17 @@ describe('the spoken-alarm copy', () => {
   });
 });
 
-describe('the push group\'s Hosted offer', () => {
-  const OFFER = 'Get Pocket on your phone with Dormouse Hosted.';
-
+describe('the push group in a Hosted build', () => {
   it.each([
-    ['a Hosted build\'s non-member, not enrolled', { managed: true, configured: false, preview: false }, true],
-    ['a member', { managed: true, configured: true, preview: false }, false],
-    ['a build with no Hosted mode', { managed: false, configured: false, preview: false }, false],
-    ['the inert preview, whose live line carries it', { managed: true, configured: false, preview: true }, false],
-  ])('for %s', async (_label, { managed, configured, preview }, offered) => {
-    stored.token = configured ? TOKEN : null;
-    const adapter = Object.assign(new FakePtyAdapter(), {
-      burrow: makeStubBurrowLink({}),
-      ...(managed ? { managedVoice: makePort(false) } : {}),
-    });
-    setPlatform(adapter);
+    ['not signed in', UNENROLLED_STATUS, false, 'Sign in to Dormouse Hosted below to send push.'],
+    ['signed in with no plan', { ...SIGNED_IN, connection: 'not-entitled' }, false, NO_PUSH_PLAN_COPY],
+    // The brief preview reads no status; its live line carries the offer.
+    ['the inert preview', UNENROLLED_STATUS, true, 'Connect this machine to a Dormouse Relay to send push.'],
+  ] as const)('%s', async (_label, status, preview, copy) => {
+    setPlatform(Object.assign(new FakePtyAdapter(), { burrow: makeStubBurrowLink({ status }) }));
     await act(async () => root.render(<AlarmSettingsSection sink="push" preview={preview} />));
-    expect(text().includes(OFFER)).toBe(offered);
+    await act(async () => {});
+    expect(text()).toContain(copy);
+    expect(button('See Hosted plans') !== undefined).toBe(status.connection === 'not-entitled' && !preview);
   });
 });
