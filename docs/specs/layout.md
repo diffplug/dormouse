@@ -45,7 +45,7 @@ Source of truth: `TerminalPaneHeader` in `lib/src/components/wall/TerminalPaneHe
 
 **Must choose placement on opening and retain its side while usable. Never reposition in response to terminal output.** It goes beside the source where a usable candidate fits, else over the source's half opposite its visible terminal cursor; minimized panes do not count, and zoom uses single-pane placement. **Must remember a manual side choice per source for the mounted Wall's lifetime**, never on disk; an unavailable choice falls back automatically.
 
-**Must launch a port action from the overflow dropdown only on a choice from its open list.**
+**Must keep port actions on one line, overflowing into a dropdown that launches an action only on a choice from its open list.**
 
 **Must focus context controls on opening.** Explicit entry into the helper xterm gives it terminal keys, Escape there included. Escape from controls closes the innermost disclosure, then the context. Terminal clipboard routing uses the focused helper rather than the selected source.
 
@@ -102,7 +102,7 @@ A minimized session becomes a door, showing its label plus the alert badge clust
 
 ### Baseboard responsive sizing
 
-- **Never give Doors the width of the right cluster's fixed controls** (page count, notice, one-time indicator, the three buttons), **and never measure the overflow arrow into them**, since its presence is an output of the fit.
+- **Never give Doors the width of the right cluster's fixed controls** (page count, notice, one-time indicator, the three buttons), **and never measure the overflow arrow into that reserved width**, since its presence is an output of the fit.
 - **Must always show at least one Door**, even if it overflows; past that, Doors fit while room remains for an overflow arrow. A scrolled baseboard shows `← N more` and/or `N more →`; clicking one reveals one Door in that direction. One Door too long to fit between both arrows keeps both and truncates its title.
 - **An arrow hiding a ringing or TODO Door must say so**, visibly and in its accessible name. **Every arrow must reserve the width of the TODO one**, so the fit never depends on which Doors an arrow hides.
 - **Must reveal the selected Door when selection or membership changes**, without overriding manual overflow scrolling.

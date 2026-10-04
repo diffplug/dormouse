@@ -141,7 +141,8 @@ Source of truth: `LathHost` in `lib/src/components/wall/LathHost.tsx`.
 - Layers are discrete, never interpolated; adapters map `LATH_LAYER_TILED`, `LATH_LAYER_DYING`, and `LATH_LAYER_ELEVATED` to renderer z-order.
 - **A caller needing a rate must read `slope(t)` off the `Easing` `cubicBezier` returns (`LATH_EASING` for house motion)**, never differences of successive samples (rationale; [layout.md → Ring travel](layout.md#ring-travel) is the cautionary case).
 - A retarget mid-flight starts every leaf from its current interpolated frame, so motion is interruptible. Hand-placed geometry (sash commits, container resizes) snaps.
-- **Must prefer a parked leaf's held rect over an explicit enter hint, and an explicit hint over a derived one** (rationale); add/insert hints derive from the opposite placement edge, reattach hints from the opposite token edge.
+- **Must derive add/insert hints from the opposite placement edge, and reattach hints from the opposite token edge.**
+- **Must prefer a parked leaf's held rect over an explicit enter hint, and an explicit hint over a derived one** (rationale).
 - **Exit is two-phase**: `markDying` fades the leaf in place with its DOM still mounted, then `store.removeLeaf` commits before `disposeSession` and survivors tween into the space. **Must forget the surface ref only after the removal** (rationale). A second kill of a dying leaf is a no-op, and a dying leaf takes no pointer input.
 - Reduced motion is the same code path with zero duration (`motionIsInstant()`). **There is no CSS entrance/exit path.** **Must re-assert the current frames after every React commit while unsettled** (rationale).
 

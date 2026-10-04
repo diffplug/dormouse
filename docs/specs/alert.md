@@ -85,7 +85,7 @@ Source of truth: `setViewer` / `acknowledge` in `lib/src/lib/alert-manager.ts`; 
 
 Claimants get first refusal per Session in registration order; the first to return `true` claims the event and the rest are not offered it. **A claimed event must never ring, set TODO, or store an `ActivityNotification`** — it stops before the ring rules, where the echo window, holding, and the command-exit seen check live.
 
-**Must hold, never ring, a completion on an engaged Session**, whatever its source — engagement alone decides: the hold keeps the sources it would raise and the richest detail (Clearing And TODO), repeated holds merging, never public. Holding leaves a progress cycle alone.
+**Must hold, never ring, a completion that would ring an engaged Session**, whatever its source — engagement alone decides: the hold keeps the sources it would raise and the richest detail (Clearing And TODO), repeated holds merging, never public. Holding leaves a progress cycle alone.
 
 - A deferred report that comes due while engaged is held too; escalation rechecks recent output.
 - **Presence lapsing `idle` with focus unchanged must ring what was held**, each source by its unengaged path.
@@ -146,7 +146,7 @@ Absorption — absorb the summons, keep the receipt:
 - Absorption is per-signal, not per-Session: a human's own WATCHING rule on that Session still rings on the next settle.
 - **A failed await must absorb nothing.** A timeout, a death, or a cancel claims no completion, so a crashed orchestration cannot silently eat the human's signal.
 - **An await must never leave a TODO, nor clear a pre-existing one**, whether it parked before the report or after (rationale).
-- Claiming is delivery: once handed to an await the wait is settled and a later `cancel()` is a no-op — no release-after-claim, so the claim-to-read window is unacknowledged (rationale).
+- **Claiming must be delivery**: once handed to an await the wait is settled and a later `cancel()` is a no-op — no release-after-claim, so the claim-to-read window is unacknowledged (rationale).
 
 Every window derives from `cfg.alert`:
 
@@ -160,7 +160,7 @@ Every window derives from `cfg.alert`:
 - The ceiling's bound, `MAX_AWAIT_TIMEOUT_MS`: `docs/specs/dor-cli.md` -> "Deadlines And Cancellation" (rationale).
 - **Must reject a non-finite, non-positive, or over-ceiling request rather than clamping it** — it settles `cancelled`, absorbing nothing; the webview handler rejects the same values with a visible error.
 
-Several awaits may park on one Session, sharing one claimant: a completion goes to every await whose condition it satisfies, each resolving on the first qualifying signal after it registered.
+**Several awaits may park on one Session**, sharing one claimant: a completion goes to every await whose condition it satisfies, each resolving on the first qualifying signal after it registered.
 
 An await crosses from the renderer to the host process that holds the manager, and the wait itself never leaves the host:
 
@@ -178,7 +178,7 @@ sequenceDiagram
   R-->>D: resolved / timeout / died, or error if cancelled
 ```
 
-- **The host must answer exactly one `alert:awaitResult` per await, to the realm that parked it**, a cancel included. An `awaitId` already parked in that realm is ignored; a malformed `id` or `until` is answered `cancelled`.
+- **The host must answer exactly one `alert:awaitResult` per await, to the realm that parked it**, a cancel included. **Must ignore an `awaitId` already parked in that realm**; a malformed `id` or `until` is answered `cancelled`.
 - **A realm that ends — a disposed or recreated webview, a reloaded or closed window — must have everything it parked cancelled and answered by the host, synchronously** (rationale); a disposing adapter settles its own.
 - The fake adapter runs the same host in process. The Pocket phone adapter has no `dor` and protocol-v1 carries no await, so it settles every request `cancelled` at once.
 - An await survives a Workspace transfer: the manager never moves (Live Workspace transfer).

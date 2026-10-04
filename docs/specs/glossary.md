@@ -68,7 +68,7 @@ Workspace and Window are containers, not Session layers — they group Surfaces 
 | **Window** | One or more Workspaces; the OS frame (a standalone Tauri window) or the host frame (a VS Code window). A host may hold several, and a Workspace may move between them. Its **Tauri label is its persistence identity** — one snapshot per label (`docs/specs/standalone.md` → Windows). | host (Tauri / VS Code) |
 | **Workspace** | "A window's worth of panes": a `WorkspaceId`, a user-facing `name`, its Panes and Surfaces, and the layout arranging them (Lath snapshot + doors). Exactly one **Wall** renders one Workspace. | `lib/src/lib/workspace-store.ts` (the model), `lib/src/components/Wall.tsx` at render time; persisted per `docs/specs/transport.md` |
 
-How many Workspaces a Window shows at once is host-specific: `docs/specs/layout.md` → Workspaces.
+How many Workspaces a Window shows at once is host-specific: `docs/specs/layout.md` → "Conceptual model".
 
 ### Wall chrome
 
