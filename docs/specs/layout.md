@@ -11,7 +11,7 @@ A Wall renders one Workspace's Surfaces as Panes in Content or Doors on the Base
 
 ## Shell layout
 
-Two areas: Content, the tiling layout of Panes rendered by the Lath engine, and Baseboard, the bottom strip of Doors and shortcut hints, always present in the app shell.
+Two areas: Content, the tiling layout of Panes rendered by the Lath engine, and the Baseboard.
 
 Lath holds the geometry; the Wall holds selection (`selectedId` / `selectedType`), modes, and Activity + TODO state. Source of truth: `Wall` in `lib/src/components/Wall.tsx`.
 
