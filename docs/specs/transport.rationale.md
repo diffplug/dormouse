@@ -64,6 +64,12 @@ Release-without-kill is a separate verb rather than a flag on the closure path b
 
 **The per-store tax.** Each app-global store relayed webview↔host this way costs one `PlatformAdapter` push method, an on/off listener pair, two `AlertCommand` ops and an event, and a host coordinator with its own subscribe/unsubscribe. Two are worth paying that twice for the directness; at a third, the keyed channel + key→normalizer registry is cheaper than another copy of the plumbing.
 
+## Persisted session types
+
+**Why the collector debounces on top of each Wall's own debounce.** Each Wall coalesces its own record; the second stage coalesces *across* Walls, so one window-wide event (a store change, a theme push, a burst of output in two Workspaces) becomes one host write rather than one per Workspace.
+
+**What a cwd probe costs.** On macOS `getCwd` is an `lsof` subprocess in the sidecar, on every debounced save and every 30 s heartbeat; per pane, and per Workspace in a quit flush that fans out to every Wall at once, it would be N spawns on the sidecar's only event loop.
+
 ## Retiring the transcripts already on disk
 
 **The legacy blobs are real, not hypothetical.** Every pre-upgrade installation had a transcript-bearing snapshot in `workspaceState` or the standalone file store, so the drop-on-read in `readPersistedSession` and the orphan-temp sweep are live migration paths, not dead defensive code.
