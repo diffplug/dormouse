@@ -129,7 +129,7 @@ Source of truth: `BurrowRuntime.#onConnectionInit` / `#onConnectionTransport` / 
 - **The one-time modal never renders text the phone chose.** The phone picks the digits and the label both, so the Burrow shows a label only as a member of `ONE_TIME_DEVICE_LABELS`, and any other as `Phone browser` (rationale).
 - **One padded outcome.** `OneTimeOutcomeV1` success carries only the Burrow label — no Burrow static, no `deliveryId` — and a denial only one of `ONE_TIME_DENIAL_CODES` (`docs/specs/one-time.md` -> "Wire contract"), in the same fixed control message as [Pairing](#pairing)'s.
 - **Direct required: application data never crosses the rendezvous.** The outcome promotes the same session; the phone refuses protocol-v1 until both directions are direct, and an application message the Burrow decrypts off the rendezvous ends the session unread. A session with no direct path by `DIRECT_ONLY_DEADLINE_MS` ends at both ends; no relayed fallback.
-- **After the switch the direct channel, not the rendezvous, is the lifecycle authority** — for this ceremony alone, the carve-out from [remote-api.md](./remote-api.md) -> "Direct path"'s rule that the Relay stays the lifecycle authority, since no Relay carries it. Both ends close the rendezvous at the switch and ignore its loss; channel loss or the idle deadline ends the session, and nothing resumes.
+- **After the switch the direct channel, not the rendezvous, is the lifecycle authority** — for this ceremony alone, the carve-out from the relayed lifecycle rule (`docs/specs/security-remote.md` -> "Direct path"), since no Relay carries it. Both ends close the rendezvous at the switch and ignore its loss; channel loss or the idle deadline ends the session, and nothing resumes.
 - **The page Hosted serves at `/connect/` is a third trusted endpoint for every session confirmed through it**: the channel ends inside that page, so whoever controls Hosted's deploy pipeline or Cloudflare account can serve one that reads or drives the session, which Noise cannot prevent. **The rendezvous is trusted with nothing**, as the Relay is ([Residual metadata](#residual-metadata)).
 
 Source of truth: `OneTimeRuntime` in `lib/src/remote/burrow/one-time-runtime.ts`, `OneTimeClient` in `lib/src/remote/client/one-time-client.ts`, `oneTimeLinkPrologue` in `remote-lib-common/src/security/one-time-link.ts`, `e2eOneTimePrologue` in `remote-lib-common/src/security/noise-transport.ts`, `OneTimeRequestV1` / `OneTimeOutcomeV1` / `knownOneTimeDeviceLabel` in `remote-lib-common/src/security/e2e-ceremony.ts`. Pinned by `remote-lib-common/test/one-time-link.test.mjs`, `remote-lib-common/test/e2e-ceremony.test.mjs`, `lib/src/remote/burrow/one-time-runtime.test.ts`, and `lib/src/remote/client/one-time-e2e.test.ts`.
@@ -216,7 +216,7 @@ Source of truth: `remote-lib-common/src/security/direct-path.ts` (the signals, t
 - **ChaChaPoly is bundled** from an exactly pinned `@noble/ciphers` release (rationale). **The module header records the pin, the published audit, and what changed in the chacha path between the audited and the pinned release**; a version bump rewrites that note in the same commit.
 - **Every message — handshake and transport — is capped at 65,535 bytes** on write and read, the tag counted. The 96-bit nonce is `00000000 || little_endian_u64(n)` with `2^64-1` reserved, so **counter exhaustion is a hard error, never a wrap**, and **a failed decrypt does not advance the counter** (rationale).
 - **Any failure ends the session**: authentication or decryption failure, replay, gap, reordering, version mismatch, or counter exhaustion. Relay errors stay generic availability errors and never trigger a fallback.
-- **Conformance is proven against an independent implementation** (rationale): the vendored Cacophony vector matched byte for byte through both handshake messages, every transport message both ways, and the handshake hash, plus the RFC 7748 and RFC 8439 vectors. **No expected value may come from the production state machine.**
+- The conformance vectors (`docs/specs/security-remote.md` -> "Trust boundary"; rationale): the vendored Cacophony vector matched byte for byte through both handshake messages, every transport message both ways, and the handshake hash, plus the RFC 7748 and RFC 8439 vectors.
 - **The only test hook is ephemeral-key injection**; production callers never pass it.
 
 Source of truth: `remote-lib-common/src/security/noise.ts`, `remote-lib-common/src/security/noise-transport.ts`, pinned by `remote-lib-common/test/noise.test.mjs` against the attributed vector in `remote-lib-common/test/vectors/`.
@@ -227,7 +227,7 @@ Source of truth: `remote-lib-common/src/security/noise.ts`, `remote-lib-common/s
 
 - **A runtime that cannot mint one does not enroll, and the mint runs *before* the exchange**, since a successful `POST /api/burrow/enroll` is not undoable by the Burrow (rationale).
 - **Both halves, always.** `isEnrollment` rejects a missing half, a malformed encoding, or a wrong decoded length.
-- **Whatever consumes the static checks that the halves correspond** (`deriveNoiseStaticPublicKey`), and **a mismatch keeps the Burrow down**, loudly (rationale). An enrollment carrying no usable static reads as un-enrolled and the Settings dialog offers enrollment again — the entire Burrow-state version.
+- **Whatever consumes the static checks that the halves correspond** (`deriveNoiseStaticPublicKey`), failing loudly; what a mismatch does is `docs/specs/security-remote.md` -> "Trust boundary". An enrollment carrying no usable static reads as un-enrolled and the Settings dialog offers enrollment again — the entire Burrow-state version.
 - `BurrowRuntime` imports the private half **nonextractably**, never re-exports it, and the PKCS#8 in the state file is the only copy that leaves WebCrypto.
 
 **X25519 is probed, not assumed.** `probeNoiseSupport` runs one `generateKey` and one `deriveBits`, and **every rejection — a missing WebCrypto included — is `false`, never a throw** (rationale). **Runtimes are gated, not degraded**: Pocket runs the same probe before sign-in, setup, pairing, or connection and shows a fixed upgrade requirement on `false`, performing no remote operation ([pocket-app.md](./pocket-app.md)).
@@ -265,7 +265,7 @@ The checklist an auditor or a change reviewer verifies against, each property es
 
 ## Future
 
-Onboarding changes with security surface are staged in the **selfhost-onboarding** scope ([relay.md](./relay.md) `## Future`).
+**Scope: remote-trust-followups** — [Device verification](#device-verification) and [Revocation propagation](#revocation-propagation).
 
 ### Device verification
 

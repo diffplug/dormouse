@@ -204,5 +204,7 @@ Source of truth: `pocketContentSecurityPolicy` in `remote-lib-common/src/remote/
 
 ## Future
 
-1. **Dedupe the composition** — the website's `PocketTerminalExperience` and the Pocket shell (`PocketWall.tsx`) each wire `MobileTerminalUi` + `MobileWall` independently; extract the shared wiring so the two cannot drift.
+**Scope: pocket-polish**
+
+1. **Dedupe the composition** — the website's `PocketTerminalExperience` and the Pocket shell (`PocketWall.tsx`) each wire `MobileTerminalUi` + `MobileWall` independently; extract the shared wiring so they cannot drift.
 2. **Theme picker in Pocket** — the app restores the persisted theme but exposes no picker; add the shared `ThemePicker` (and its theme-debugger entry) once its dropdown is phone-friendly.

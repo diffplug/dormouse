@@ -89,7 +89,7 @@ stateDiagram-v2
 * **An end waits at most `DIRECT_HANDOFF_TIMEOUT_MS` after its own switch for the peer's.**
 * **A connection reporting `failed` or `closed` fails the channel at once; `disconnected` is waited out** for `DIRECT_DISCONNECTED_GRACE_MS`.
 
-**The Relay stays the lifecycle authority.** `client-gone`, `burrow-gone`, and either relay socket closing dispose the session, channel included, exactly as relayed; the idle deadline, keepalives, and every Burrow bound are path-agnostic ([remote-security-model.md](./remote-security-model.md) → Burrow bounds). A one-time session has no Relay; its authority after the switch is the channel ([remote-security-model.md](./remote-security-model.md) → One-time connection).
+`client-gone`, `burrow-gone`, and either relay socket closing dispose the session, channel included, exactly as relayed (`docs/specs/security-remote.md` -> "Direct path"); the idle deadline, keepalives, and every Burrow bound are path-agnostic ([remote-security-model.md](./remote-security-model.md) → Burrow bounds). A one-time session has no Relay; its authority after the switch is the channel ([remote-security-model.md](./remote-security-model.md) → One-time connection).
 
 **One peer connection per session**, created at the offer, closed on every disposal path, never existing before promotion. What Pocket shows of the path: [pocket-app.md](./pocket-app.md) → "The path the session takes".
 
@@ -202,6 +202,8 @@ Graded grants, layout mutations, and connected-viewer display with per-viewer di
 Reserved: For [Future](#future) items 2–3, clients must tolerate additive optional `inflight` and `blocks` fields on `TerminalAttachResult`.
 
 ## Future
+
+**Scope: remote-api-remainder** — the phone's and a VR headset's further capabilities, in the numbered stages below.
 
 One protocol, two consumption depths: the phone (protocol-v1) and a VR headset.
 

@@ -501,4 +501,6 @@ Source of truth: `standalone/scripts/dev-agent-browser.mjs`; `standalone/src/bro
 
 ## Future
 
+**Scope: siri-setting**
+
 - **A setting to allow the Siri affordance**, for users who want Siri in Dormouse. The override stays installed and `disallow` reads the setting, answering from `WKWebView`'s own implementation when it allows Siri: the runtime cannot remove a method, so toggling is a flag, not a second swap.
