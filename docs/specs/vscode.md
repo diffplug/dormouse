@@ -179,8 +179,8 @@ Source of truth: `vscode-ext/scripts/stage-native-direct.mjs`; `initBurrow` in `
 
 **Every window's extension host runs its own managed-voice host**, the one standalone's sidecar runs (`docs/specs/alert.md` -> "Managed voice"), answering its own webviews (`docs/specs/transport.md` -> "Managed voice"); its clip cache and refusal latch are per window.
 
-- **The token and the chosen voice live in `SecretStorage`, each under a key of its own**: the token is a bearer credential, and the voice rides there only because `secrets.onDidChange` reaches every window. **Every window re-reads on that change**, dropping its clips and latch, so a sign-in or sign-out the broker's Burrow service writes reaches all of them.
-- **The broker's service hands a sign-in's token to its own window's host** (`docs/specs/relay.md` -> "Burrow side"); a window without the service never writes the token.
+- **The token and the chosen voice live in `SecretStorage`, each under a key of its own**: the token is a bearer credential, and the voice rides there only because `secrets.onDidChange` reaches every window. **Every window re-reads on that change**, dropping its clips and latch when the token changed, so a sign-in or sign-out the broker's Burrow service writes reaches all of them.
+- **The broker's service hands a sign-in's token to its own window's host** (`docs/specs/relay.md` -> "Burrow side"); a window without the service writes the token only to forget it on a 401 (`docs/specs/alert.md` -> "Managed voice").
 - **A window asks the network policy at every speak**: the service in the broker, the stored policy elsewhere, a failed read counting as Nothing.
 - **The webview has the port only when the host says so**: `getWebviewHtml` sets `MANAGED_VOICE_GLOBAL` from the extension bundle's baked mode, which the webview bundle does not carry.
 

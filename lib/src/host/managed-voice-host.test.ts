@@ -326,8 +326,41 @@ describe('a store another process shares', () => {
     // Signed in again there: the old clip is not replayed.
     shared = { token: `dmv_${'C'.repeat(43)}`, voiceId: OTHER_VOICE };
     window.invalidate();
+    await vi.waitFor(() => expect(broadcasts.at(-1)).toEqual(idle(true, OTHER_VOICE)));
     await window.handle({ op: 'speak', text: 'build finished' });
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('a sibling’s sign-out heard while a save is out wins over the save’s earlier read', async () => {
+    let shared: Record<string, unknown> = {};
+    let release: (() => void) | null = null;
+    const store = {
+      read: async () => ({ ...shared }),
+      write: async (next: { token: string | null; voiceId: string }, changed: 'token' | 'voiceId') => {
+        if (changed === 'voiceId') await new Promise<void>((resolve) => { release = resolve; });
+        shared = { ...shared, [changed]: next[changed] };
+      },
+    };
+    const window = createManagedVoiceHost({
+      store,
+      onStatus: (status) => void broadcasts.push(status),
+      fetch: fetchMock as unknown as typeof fetch,
+      relay: { origin: DEFAULT_RELAY_ORIGIN, mode: 'hosted' },
+      networkAllowed: async () => true,
+    });
+    await window.credential!.save(TOKEN);
+    const configured = window.handle({ op: 'configure', update: { voiceId: OTHER_VOICE } });
+    await vi.waitFor(() => expect(release).not.toBeNull());
+
+    // A sibling window signed out while this one's voice write is out.
+    shared = { voiceId: shared.voiceId };
+    window.invalidate();
+    release!();
+    await configured;
+
+    await vi.waitFor(() => expect(broadcasts.at(-1)).toEqual(idle(false, OTHER_VOICE)));
+    expect(await window.handle({ op: 'speak', text: 'build finished' })).toEqual({ ok: false, reason: 'unconfigured' });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 

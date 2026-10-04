@@ -11,6 +11,7 @@ import { isAlertEvent } from '../../host/alert-protocol';
 import { readInjectedRecoveryCommands } from '../vscode-recovery-global';
 import { readInjectedManagedVoice } from '../vscode-managed-voice-global';
 import { createManagedVoicePortClient, type ManagedVoicePortClient } from './managed-voice-port';
+import { MANAGED_VOICE_REQUEST_TIMEOUT_MS } from './managed-voice-types';
 import { setDefaultShellOpts } from '../shell-defaults';
 import { setHostShown } from '../host-shown';
 import { embedderOrigins } from '../embedder-origins';
@@ -32,12 +33,8 @@ import type { VSCodeWorkbenchCommand } from '../vscode-keybindings';
  */
 const DETACHED = Symbol('detached');
 
-/**
- * How long a `voice:command` waits for the extension host: above the host's
- * own request bound (`MANAGED_VOICE_REQUEST_TIMEOUT_MS`), as Rust's
- * `MANAGED_VOICE_TIMEOUT` is for standalone, so the host's answer arrives first.
- */
-const MANAGED_VOICE_COMMAND_TIMEOUT_MS = 20_000;
+/** How long a `voice:command` waits for the extension host: past its own request bound. */
+const MANAGED_VOICE_COMMAND_TIMEOUT_MS = MANAGED_VOICE_REQUEST_TIMEOUT_MS + 5_000;
 
 /** The `alert*` platform methods, taken from the shared client in the constructor. */
 export interface VSCodeAdapter extends AlertClientMethods {}

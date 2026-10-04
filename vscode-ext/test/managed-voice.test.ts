@@ -73,10 +73,13 @@ describe('managed voice in the VS Code extension host', () => {
 
     const voiceId = MANAGED_VOICES[1]!.id;
     const brokerHeard = broker.statuses.length;
+    const siblingHeard = sibling.statuses.length;
     expect(await sibling.module.handleVoiceCommand({ op: 'configure', update: { voiceId } })).toMatchObject({ ok: true, voiceId });
     await vi.waitFor(() => expect(broker.statuses.at(-1)).toMatchObject({ configured: true, voiceId }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
     // Heard once: the choice changed nothing else, and the sibling's own write echoed nothing.
     expect(broker.statuses.length).toBe(brokerHeard + 1);
+    expect(sibling.statuses.length).toBe(siblingHeard + 1);
     // Writing the voice left the token the broker wrote.
     expect(values.get(broker.module.MANAGED_VOICE_TOKEN_KEY)).toBe(TOKEN);
 

@@ -13,6 +13,7 @@ import { hostedVoiceOrigin, type RelayBuild } from './relay-origin';
 import { createSerialQueue } from './remote/serial-queue';
 import {
   DEFAULT_MANAGED_VOICE_ID,
+  MANAGED_VOICE_REQUEST_TIMEOUT_MS,
   type ManagedVoiceConfigResult,
   type ManagedVoiceHostSpeakResult,
   type ManagedVoiceStatus,
@@ -20,8 +21,6 @@ import {
 
 export const MANAGED_VOICE_FILE = 'managed-voice.json';
 const MANAGED_VOICE_SPEAK_PATH = '/api/voice/speak';
-/** `docs/specs/alert.md` -> "Managed voice"; Rust's `MANAGED_VOICE_TIMEOUT` sits above it. */
-const MANAGED_VOICE_REQUEST_TIMEOUT_MS = 15_000;
 /** Hosted's own bound on `text`. */
 const MAX_TEXT_LENGTH = 200;
 /** `docs/specs/standalone.md` -> "Rust ↔ sidecar bridge". */
@@ -306,13 +305,18 @@ export function createManagedVoiceHost(options: {
   return {
     invalidate() {
       if (speakUrl === null) return;
-      const before = loaded;
-      loaded = null;
-      void Promise.all([before?.catch(() => null) ?? null, load()]).then(([previous, next]) => {
+      // On `serialize`, after any save in flight: a save that read before the
+      // sibling's change would otherwise cache its stale merge over this
+      // re-read, and this window's own write, heard back mid-save, would
+      // compare against the value it was replacing.
+      void serialize(async () => {
+        const previous = await loaded?.catch(() => null) ?? null;
+        loaded = null;
+        const next = await load();
         if (previous?.token === next.token && previous.voiceId === next.voiceId) return;
         if (previous?.token !== next.token) forgetToken();
         options.onStatus(status(next));
-      }, () => {});
+      }).catch(() => {});
     },
     credential: speakUrl === null ? undefined : {
       async save(token) {
