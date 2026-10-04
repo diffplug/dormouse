@@ -245,9 +245,9 @@ Source of truth: `dor/src/commands/open-target.ts`, `resolveOpenTargetArgs` in `
 
 **Must intercept `dor-embed-size` under either browser command before native passthrough.** Identity flags select one existing bound Surface; raw `--session` must match uniquely. No selection creates or restarts a browser. A provider mismatch fails with the matching full command name; sizing mutations require a screencast.
 
-**Must query without dimensions or a preset; otherwise apply the requested sizing and await its measurement.** JSON and text report Surface identity, provider, render mode, resolved intent, readiness, and actual width, height and DPR when available. A disconnected browser reports no invented dimensions. Dimensions and preset selection are mutually exclusive; `pane-sync` rejects a DPR override. Fail invalid settings and unsupported DPR before changing size.
+**Must query without dimensions or a preset; otherwise apply the requested sizing and await its measurement.** JSON and text report Surface identity, provider, render mode, resolved intent, readiness, and actual width, height and DPR when available. A disconnected browser reports no invented dimensions. Dimensions and preset selection are mutually exclusive; `pane-sync` rejects a DPR override. Fail invalid settings before changing size.
 
-**Must prepare a new managed browser's viewport before destination navigation**, keeping preparatory output out of native stdout. Live reuse and explicit native device/attachment choices keep their sizing. Configuration and provider semantics belong to `docs/specs/dor-browser.md` → Viewport presets; native `playwright open` still restarts its browser.
+**Must keep a new managed browser's viewport preparation out of native stdout**; when and how it is sized is `docs/specs/dor-browser.md` → Viewport presets. Native `playwright open` still restarts its browser.
 
 Source of truth: `runBrowserCli` in `dor/src/commands/browser-cli.ts`; `BrowserViewportRequest` / `BrowserViewportResponse` in `dor/src/commands/types.ts`.
 
@@ -256,7 +256,7 @@ Source of truth: `runBrowserCli` in `dor/src/commands/browser-cli.ts`; `BrowserV
 **Must intercept `dor agent-browser` and `dor playwright` before stricli parses provider arguments.** One runner drives both; `BROWSER_PROVIDERS` and its descriptors own what differs: session argv, navigation verbs, nonbinding/informational controls, and execution scope.
 
 - **Exactly one identity flag**: `--key` (default `default`), `--session`, or `--surface`, plus `--workspace`; any two fail. Except the Dormouse-owned `dor-embed-size`, arguments are forwarded to the provider; stdout, stderr and exit status pass through.
-- **Resolution is host-side**: a `--key` or `--surface` takes one `surface.resolveBrowser { provider, key | surface, proposed? }` round trip before the binary runs, answered with a binding `{ session, cwd?, binaryPath? }` (`docs/specs/dor-browser.md` → Managed identity). `proposed` — the caller's cwd and executable — rides only a command that may bind. `--session` and an informational command ask nothing. Outside Dormouse a key names its unscoped session itself; a `--surface` fails.
+- **Resolution is host-side**: a `--key` or `--surface` takes one `surface.resolveBrowser { provider, key | surface, proposed? }` round trip before the binary runs, answered with a binding `{ session, cwd?, binaryPath? }` (`docs/specs/dor-browser.md` → Managed identity). `proposed` — the caller's cwd and executable — rides only a command that may bind. `--session` and an informational command ask nothing. Outside Dormouse a `--surface` fails.
 - **After a command that may bind succeeds, `surface.browser { provider, key?, session, cwd, binaryPath, wsPort? }` opens or reuses its Surface**: `dor agent-browser` first reads the stream port itself (`docs/specs/dor-browser.md` → agent-browser), and the host reports Playwright's stream. **The call must wait past `BROWSER_REQUEST_TIMEOUT_MS`**, since the host's answer can queue behind a launch or close of the browser (rationale). A failure there adds a stderr warning without changing the command's success. **Exception: a fixed-DPR Playwright `open` binds before navigating**, and on a DPR mismatch kills a Surface it created and fails unopened.
 
 A `--surface` handle resolves against **listed** Surfaces ([Handle Model](#handle-model)), and the host applies two gates in order:
@@ -266,7 +266,7 @@ A `--surface` handle resolves against **listed** Surfaces ([Handle Model](#handl
 
 Neither gate covers a Surface whose launch has not yet named its session ([dor-browser.md](dor-browser.md) → Browser Connection); it fails as having no session yet.
 
-For a project-scoped provider: **must pass the bound cwd through `spawnAndCapture`'s optional cwd argument**; **never spawn a bound executable the provider's allowlist refuses**, since the binding comes back off persisted params — run the caller's own resolution instead, whose `DORMOUSE_PLAYWRIGHT_BIN` is the exact-match override; **must run the caller's own executable, with a stderr warning, when the bound one is gone**, and **must fail naming a bound cwd that no longer exists** rather than report the CLI missing.
+For a project-scoped provider: **must pass the bound cwd through `spawnAndCapture`'s optional cwd argument**; **never spawn a bound executable the provider's allowlist refuses**, since the binding comes back off persisted params — run the caller's own resolution instead; **must run the caller's own executable, with a stderr warning, when the bound one is gone**, and **must fail naming a bound cwd that no longer exists** rather than report the CLI missing.
 
 Source of truth: `runBrowserCli` in `dor/src/commands/browser-cli.ts`; `BROWSER_PROVIDERS` in `dor-lib-common/src/browser-providers.ts`; `requireBrowserSurface` in `lib/src/components/wall/use-dor-control.ts`.
 
