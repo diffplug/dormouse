@@ -1315,7 +1315,7 @@ describe('BurrowRuntime end-to-end ceremonies', () => {
     }
   });
 
-  it('ignores every frame that is not the e2e envelope or client-gone', async () => {
+  it('ignores the pre-cutover frame types', async () => {
     makeBurrow();
     for (const t of ['pair', 'pair-status', 'connect', 'connect2', 'msg']) {
       socket.receive({ t, clientId: 'c1', request: {}, query: {}, data: {} });

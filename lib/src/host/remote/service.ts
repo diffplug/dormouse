@@ -1624,7 +1624,7 @@ export class BurrowService {
   #persistRaisedPolicy(raisedBy: BurrowEnrollment): void {
     void this.#serialize(async () => {
       const current = this.#enrollment;
-      if (current?.burrowToken !== raisedBy.burrowToken) return;
+      if (this.#disposed || current?.burrowToken !== raisedBy.burrowToken) return;
       const raised = { ...current, requireUserVerification: true };
       try {
         await this.#store.saveEnrollment(raised);

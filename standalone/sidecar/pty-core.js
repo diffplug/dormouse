@@ -1169,7 +1169,7 @@ module.exports.getOpenPortsForPids = getOpenPortsForPids;
 /**
  * Directory validation belongs to context(); this only launches the native UI.
  * The path is terminal-reported (OSC 7), so any program names it: the opener
- * must show it and never run it.
+ * must never run a program it names.
  */
 function openNativeDirectory(nativePath, done, runtime = {}) {
   const platform = runtime.platform || process.platform;
