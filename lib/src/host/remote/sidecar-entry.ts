@@ -13,7 +13,7 @@
 
 import type { ProcessedPtyStream } from '../../lib/processed-pty-stream';
 import type { AlertManager, AlertState } from '../../lib/alert-manager';
-import type { TerminalColorProvider, TerminalColors } from '../../lib/terminal-protocol';
+import { parseTerminalColors, type TerminalColorProvider, type TerminalColors } from '../../lib/terminal-protocol';
 import { createAlertHost, type AlertRealm } from '../alert-host';
 import type { AlertEvents } from '../alert-protocol';
 import { bakedRelay } from '../relay-origin';
@@ -376,12 +376,7 @@ export function createSidecarSurfaceBridge(
     },
 
     setThemeColors(colors) {
-      const detail = colors as Partial<Record<keyof TerminalColors, unknown>> | null;
-      if (!detail) return;
-      const { foreground, background, cursor } = detail;
-      if (typeof foreground !== 'string') return;
-      if (typeof background !== 'string' || typeof cursor !== 'string') return;
-      themeColors = { foreground, background, cursor };
+      themeColors = parseTerminalColors(colors) ?? themeColors;
     },
 
     dispose() {
