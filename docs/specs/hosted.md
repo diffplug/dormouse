@@ -62,18 +62,17 @@ Source of truth: `entitledSql` and `entitled` in `hosted/server/entitlement.ts`;
 
 ## Managed voice
 
-A signed-in desktop exchanges its voice token for ElevenLabs speech in a voice of the curated set (`MANAGED_VOICES` in `remote-lib-common/src/remote/managed-voice.ts`). Signing in is the device-code enrollment ("Burrow enrollment"), whose redemption mints the token; the account Worker's token routes mint one by hand. The voice Worker serves speak.
+A signed-in desktop exchanges its voice token for ElevenLabs speech in a voice of the curated set (`MANAGED_VOICES` in `remote-lib-common/src/remote/managed-voice.ts`). Signing in is the device-code enrollment ("Burrow enrollment"), whose redemption is the only way a token is minted; the account Worker's token routes list and revoke them. The voice Worker serves speak.
 
 | Route | Credential | Success |
 |---|---|---|
 | `GET /api/voice/tokens` | login cookie | 200 `{ tokens }` |
-| `POST /api/voice/tokens` | login cookie, exact `Origin` | 201 `{ id, token, createdAt }` |
 | `DELETE /api/voice/tokens/:id` | login cookie, exact `Origin` | 204; 404 for another account's or an unknown ID |
 | `POST /api/voice/speak` | `Authorization: Bearer dmv_…`, JSON `{ text, voiceId }` | 200 `audio/mpeg`, `Cache-Control: no-store` |
 
 Errors are JSON `{ message }`. Cookie routes answer 401 without a login and 403 for an account not entitled ("Entitlement").
 
-**Must store only a token's SHA-256.** A token is `dmv_` plus base64url of 32 random bytes, returned only by the mint response: the account's `POST`, or the poll that redeems a sign-in. Revocation is permanent.
+**Must store only a token's SHA-256.** A token is `dmv_` plus base64url of 32 random bytes, returned only by the poll that redeems a sign-in. Revocation is permanent.
 
 **Must mint a sign-in's token in the statement that redeems it**, owned by the approver and naming the Burrow it enrolled (`hosted/server/dormouse-migrations/005_voice_token_burrow.sql`), so removing that computer from the account deletes its token, and the Burrow cap bounds them. The relay's role may insert those columns and nothing else of voice.
 
@@ -98,7 +97,7 @@ Source of truth: `hosted/server/voice.ts`; `hosted/server/voice-app.ts`; `mintVo
 
 ## Relay
 
-The relay Worker serves the self-host Relay's HTTP API to many accounts: the paths, shapes, statuses, and error strings of `docs/specs/relay.md` -> "HTTP API", "Setup tokens and the pairing QR", and "WebAuthn without a WebAuthn library", so a Burrow and Pocket cannot tell the two apart; both run the checks and bounds in `remote-lib-common/src/remote/relay-common.ts`. Assertions demand presence, not verification. Security checks: `docs/specs/security-hosted.md` -> "Relay boundary". Only the differences:
+The relay Worker serves the self-host Relay's HTTP API to many accounts: the paths, shapes, statuses, and error strings of `docs/specs/relay.md` -> "HTTP API", "Setup tokens and the pairing QR", and "WebAuthn without a WebAuthn library", so a Burrow and Pocket cannot tell the two apart; both run the checks and bounds in `remote-lib-common/src/remote/relay-common.ts`, and the enrollment cap in `remote-lib-common/src/remote/enrolled-computers.ts`. Assertions demand presence, not verification. Security checks: `docs/specs/security-hosted.md` -> "Relay boundary". Only the differences:
 
 | Route | On Hosted |
 |---|---|
@@ -272,7 +271,7 @@ Source of truth: `METRIC_LABELS` in `hosted/server/metric-labels.ts`; `recordMet
 
 ## Development and release
 
-**Must run local development with `dor tool hosted` inside Dormouse.** Its single loopback `http://localhost:<port>` origin serves Vite and Node auth on a disposable development database, with the voice token, Relay account, and billing routes (on StripeDev) but never speak, which every Hosted build reaches only at `https://voice.dormouse.sh`. Host, Origin, and Fetch Metadata checks guard the local captured-email inbox; no production entry imports an inbox or test-control handler. `dor tool one-time` runs the relay Worker on loopback without a database, so its Relay routes answer 503 (`docs/specs/one-time.md` -> "Dev loop").
+**Must run local development with `dor tool hosted` inside Dormouse.** Its single loopback `http://localhost:<port>` origin serves Vite and Node auth on a disposable development database, with the voice token, Relay account, and billing routes (on StripeDev) but never speak, which every Hosted build reaches only at `https://voice.dormouse.sh`. Host, Origin, and Fetch Metadata checks guard the local captured-email inbox; no production entry imports an inbox or test-control handler. **It also starts the relay Worker's dev loop attached to it** (`docs/specs/one-time.md` -> "Dev loop"): that development database through a local Hyperdrive and this origin as `ACCOUNT_ORIGIN`, so a dev Hosted Burrow build signs in by device code. `dor tool one-time` alone has no database, so its Relay routes answer 503.
 
 **Must verify the three production Worker bundles and run the consumer's integration suite before release.** Root `pnpm test` runs Hosted's deploy-script and Docker-free suites; `pnpm test:hosted` adds the suites that need Docker. Only test entries inject deterministic Better Auth. Simulated callbacks do not certify provider registrations; production acceptance requires real browser login with each enabled provider and email delivery.
 
@@ -310,4 +309,4 @@ Source of truth: `.github/workflows/hosted-production.yml`; `hosted/scripts/prod
 
 1. Deploy the configured providers and pass real production acceptance. pgstencil includes the Microsoft fix; personal and work/school callbacks need acceptance.
 2. Add per-browser login listing/revocation, sign-out-everywhere, and account recovery before broad paid use. Revisit the fixed 24-hour login lifetime for daily voice use.
-3. Managed voice for every member: per-account quotas, usage accounting, spending bounds beyond the fixed daily cap, and retiring the account page's hand-minted tokens.
+3. Managed voice for every member: per-account quotas, usage accounting, and spending bounds beyond the fixed daily cap.

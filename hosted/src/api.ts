@@ -2,6 +2,7 @@ import type { CheckoutPlan as Plan } from "../../website/src/lib/hosted-pricing"
 import { providerIds, providerNames } from "../server/providers.js";
 import { ADMIN_METRICS_PATH, type AdminMetricsBody } from "../server/metric-labels";
 import type { CheckoutRef } from "./checkout";
+import { NOT_ENTITLED_ERROR } from "../../remote-lib-common/src/remote/wire.ts";
 import type { ProviderId } from "../server/providers.js";
 
 export const providers = providerIds;
@@ -99,13 +100,6 @@ export async function getVoiceTokens(): Promise<VoiceToken[] | null> {
   if (!response.ok) throw failed();
   return ((await response.json()) as { tokens: VoiceToken[] }).tokens;
 }
-export async function createVoiceToken() {
-  const response = await voice("POST");
-  if (!response.ok) throw failed();
-  return (await response.json()) as Pick<VoiceToken, "id" | "createdAt"> & {
-    token: string;
-  };
-}
 export async function revokeVoiceToken(id: string) {
   if (!(await voice("DELETE", `/${encodeURIComponent(id)}`)).ok)
     throw failed();
@@ -150,13 +144,19 @@ export async function removeComputer(burrowId: string) {
   });
   if (!response.ok) throw await refused(response);
 }
+/** An approval refused because the account has no plan: the page offers the plans instead. */
+export class NoPlanError extends Error {}
 export async function approveEnrollment(userCode: string) {
   const response = await relay("/enrollments/approve", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ userCode }),
   });
-  if (!response.ok) throw await refused(response);
+  if (response.ok) return;
+  const error = await refused(response);
+  throw response.status === 403 && error.message === NOT_ENTITLED_ERROR
+    ? new NoPlanError(error.message)
+    : error;
 }
 
 /**

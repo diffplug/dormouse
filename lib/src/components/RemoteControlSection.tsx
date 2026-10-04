@@ -12,7 +12,7 @@ import {
   useBusyAction,
 } from './remote-control-shared';
 import { ExpiringCode } from './ScannableCode';
-import { BurrowNameField, HostedEnrollView, HostedEnrollmentEnded, SIGN_IN_LABEL, accountHost, accountPage } from './HostedSignIn';
+import { BurrowNameField, HostedEnrollView, HostedEnrollmentEnded, SIGN_IN_LABEL, accountHost, accountPage, listedAs } from './HostedSignIn';
 import {
   relayRefuses,
   type BurrowConsoleStatus,
@@ -832,7 +832,7 @@ function EnrolledView({
   enrollAgainError: string | null;
   onEnrollAgain: () => void;
 }) {
-  const { relayOrigin, accountOrigin, hostedEnrollment, connection, pairedClients } = status;
+  const { relayOrigin, accountOrigin, hostedEnrollment, connection, pairedClients, burrowId } = status;
   const { busy: ownBusy, error: ownError, run } = useBusyAction();
   const busy = ownBusy || enrollingAgain;
   const error = ownError ?? enrollAgainError;
@@ -870,6 +870,7 @@ function EnrolledView({
           <ExternalTextLink href={accountPageUrl}>
             Manage computers at {hostOf(accountPageUrl)}
           </ExternalTextLink>
+          {listedAs(burrowId)}
         </div>
       ) : null}
       {/* A second code redeemed onto an enrolled machine leaves a Burrow the

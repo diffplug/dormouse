@@ -165,7 +165,7 @@ export const HostedEnrollFailed: Story = {
           status: 'ended',
           reason: 'failed',
           message:
-            'keychain is locked Your account holds Burrow T7lzkkrPT8nx4m9zf90V4h, which this computer could ' +
+            'keychain is locked Your account holds Computer T7lzkkrP, which this computer could ' +
             'not keep; remove it at https://hosted.dormouse.sh/account.',
         },
       },

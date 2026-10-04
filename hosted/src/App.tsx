@@ -8,13 +8,13 @@ import {
 import {
   approveEnrollment,
   confirmCheckout,
-  createVoiceToken,
   getBilling,
   getAccounts,
   getComputers,
   getProviders,
   getSession,
   getVoiceTokens,
+  NoPlanError,
   openPortal,
   post,
   providerNames,
@@ -37,8 +37,20 @@ import {
   LOGIN_FRESH_AGE_MS,
   RECENT_LOGIN_WINDOW,
 } from "../server/policy-constants";
-import { takeEnrollment, type Enrollment } from "./enrollment";
-import { CheckoutView, PLAN_NAMES, PlanSection, WelcomeView } from "./Billing";
+import {
+  ADD_A_COMPUTER,
+  approvedNotice,
+  takeEnrollment,
+  type Enrollment,
+} from "./enrollment";
+import { computerName } from "../../remote-lib-common/src/remote/enrolled-computers.ts";
+import {
+  CheckoutView,
+  PLAN_NAMES,
+  PLANS_PAGE,
+  PlanSection,
+  WelcomeView,
+} from "./Billing";
 import { forgetCheckout, type CheckoutRef } from "./checkout";
 
 type Page = "enroll" | "checkout" | "welcome" | "account" | "login";
@@ -91,7 +103,6 @@ export function App({
   const [buying, setBuying] = useState(checkout);
   // Set once Stripe's return is confirmed: the welcome page shows.
   const [welcome, setWelcome] = useState(false);
-  const [minted, setMinted] = useState("");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
@@ -229,22 +240,14 @@ export function App({
       setSession(null);
       setAccounts([]);
       setComputers(null);
-      setMinted("");
+      // The code stays on the page; a no-plan refusal was this account's.
+      setEnrolling((shown) => shown && { code: shown.code });
       setEnterCode(false);
       setCode("");
       await refresh();
       setNotice(
         "Signed out of this browser. Your other devices stay signed in.",
       );
-    });
-  const mintToken = () =>
-    act("mint", async () => {
-      const { token, id, createdAt } = await createVoiceToken();
-      setMinted(token);
-      setVoiceTokens((tokens) => [
-        { id, createdAt, lastUsedAt: null, revokedAt: null },
-        ...(tokens ?? []),
-      ]);
     });
   const revokeToken = (id: string) =>
     act(`revoke-${id}`, async () => {
@@ -259,12 +262,19 @@ export function App({
     });
   const approve = (code: string) =>
     act("approve", async () => {
-      await approveEnrollment(code);
+      // The count before this approval: a full account keeps it until one is removed.
+      const enrolled = computers?.length ?? null;
+      try {
+        await approveEnrollment(code);
+      } catch (error) {
+        if (!(error instanceof NoPlanError)) throw error;
+        // Where the billing summary could not say so first.
+        setEnrolling((shown) => shown && { ...shown, noPlan: true });
+        return;
+      }
       clearEnrollment();
       await refresh();
-      setNotice(
-        `Approved ${code}. Dormouse on your computer finishes enrolling in a few seconds.`,
-      );
+      setNotice(approvedNotice(code, enrolled));
     });
   const clearEnrollment = () => {
     setEnrolling(null);
@@ -295,11 +305,6 @@ export function App({
     setBuying(undefined);
     setError("");
   };
-  const copyMinted = () =>
-    act("copy", async () => {
-      await navigator.clipboard.writeText(minted);
-      setNotice("Token copied. Paste it into Dormouse’s voice settings.");
-    });
   // The one page this state shows, and the address it keeps.
   const page: Page = enrolling
     ? "enroll"
@@ -321,6 +326,7 @@ export function App({
   const fresh =
     session &&
     Date.now() - Date.parse(session.session.createdAt) < LOGIN_FRESH_AGE_MS;
+  const noPlan = enrolling?.noPlan || billing?.entitled === false;
 
   return (
     <div className="shell">
@@ -374,32 +380,56 @@ export function App({
                 {enrolling.code ? (
                   <>
                     <p className="user-code">{enrolling.code}</p>
-                    <p>
-                      Approve only if Dormouse on your computer is showing this
-                      code right now.
-                    </p>
-                    {fresh ? (
-                      <button
-                        className="primary"
-                        disabled={!!busy}
-                        onClick={() => void approve(enrolling.code!)}
-                      >
-                        {busy === "approve" ? "Approving…" : "Approve"}
-                      </button>
-                    ) : (
+                    {noPlan ? (
                       <>
+                        <p>
+                          This account has no Hosted plan, so it cannot sign in
+                          a computer.
+                        </p>
                         <p className="help">
-                          Approving a computer needs a login from the last{" "}
-                          {RECENT_LOGIN_WINDOW}. Sign in again; this code stays
-                          on this page.
+                          <a href={PLANS_PAGE}>Choose a plan</a>, then open the
+                          link from Dormouse again to approve this code.
                         </p>
                         <button
-                          className="primary"
+                          type="button"
                           disabled={!!busy}
                           onClick={() => void signOut()}
                         >
-                          {busy === "logout" ? "Signing out…" : "Sign in again"}
+                          {busy === "logout"
+                            ? "Signing out…"
+                            : "Use another account"}
                         </button>
+                      </>
+                    ) : (
+                      <>
+                        <p>
+                          Approve only if Dormouse on your computer is showing
+                          this code right now.
+                        </p>
+                        {fresh ? (
+                          <button
+                            className="primary"
+                            disabled={!!busy}
+                            onClick={() => void approve(enrolling.code!)}
+                          >
+                            {busy === "approve" ? "Approving…" : "Approve"}
+                          </button>
+                        ) : (
+                          <>
+                            <p className="help">
+                              Approving a computer needs a login from the last{" "}
+                              {RECENT_LOGIN_WINDOW}. Sign in again; this code stays
+                              on this page.
+                            </p>
+                            <button
+                              className="primary"
+                              disabled={!!busy}
+                              onClick={() => void signOut()}
+                            >
+                              {busy === "logout" ? "Signing out…" : "Sign in again"}
+                            </button>
+                          </>
+                        )}
                       </>
                     )}
                   </>
@@ -440,7 +470,10 @@ export function App({
                 act={act}
                 onFounder={founder}
                 onSurvey={sendSurvey}
-                onDone={() => setWelcome(false)}
+                onDone={() => {
+                  setWelcome(false);
+                  setNotice("");
+                }}
               />
             ) : session ? (
               <>
@@ -523,19 +556,6 @@ export function App({
                       Signing in from Dormouse gives that computer its own
                       token; removing the computer below revokes it.
                     </p>
-                    {minted && (
-                      <div className="notice minted">
-                        <p>Copy this token now. You won’t see it again.</p>
-                        <code>{minted}</code>
-                        <button
-                          className="copy"
-                          disabled={!!busy}
-                          onClick={() => void copyMinted()}
-                        >
-                          Copy token
-                        </button>
-                      </div>
-                    )}
                     {voiceTokens.map((token) => (
                       <div className="method" key={token.id}>
                         <span>
@@ -561,13 +581,6 @@ export function App({
                         )}
                       </div>
                     ))}
-                    <button
-                      className="mint"
-                      disabled={!!busy}
-                      onClick={() => void mintToken()}
-                    >
-                      {busy === "mint" ? "Creating…" : "Create token"}
-                    </button>
                   </section>
                 )}
                 {computers && (
@@ -578,15 +591,12 @@ export function App({
                       voice and reach your phones through the Hosted Relay.
                     </p>
                     {computers.length === 0 && (
-                      <p className="help">
-                        No computers yet. Enroll one from Dormouse on that
-                        computer.
-                      </p>
+                      <p className="help">No computers yet. {ADD_A_COMPUTER}</p>
                     )}
                     {computers.map((computer) => (
                       <div className="method" key={computer.burrowId}>
                         <span>
-                          Computer {computer.burrowId.slice(0, 8)}
+                          {computerName(computer.burrowId)}
                           <span className="detail">
                             Enrolled{" "}
                             {new Date(computer.enrolledAt).toLocaleDateString()}
@@ -747,7 +757,7 @@ export function App({
                     then connect other providers from your account.
                   </p>
                 )}
-                {!enrolling && (
+                {page === "login" && (
                   <p className="footnote">
                     Hosted voice and remote control are not available yet.
                   </p>

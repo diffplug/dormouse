@@ -209,22 +209,6 @@ dd {
   display: block;
   font-size: 12px;
 }
-.minted {
-  margin-bottom: 16px;
-}
-.minted code {
-  display: block;
-  margin-bottom: 12px;
-  font: inherit;
-  overflow-wrap: anywhere;
-}
-.minted .copy {
-  background: var(--vscode-list-activeSelectionBackground);
-  color: var(--vscode-list-activeSelectionForeground);
-}
-.mint {
-  margin-top: 8px;
-}
 .enroll {
   margin-top: 0;
 }

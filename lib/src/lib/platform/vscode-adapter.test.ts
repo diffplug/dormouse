@@ -688,7 +688,7 @@ describe('VSCodeAdapter managed voice', () => {
     setPlatform(adapter);
     expect(managedVoicePort()).toBe(adapter.managedVoice);
     expect(chooseAlarmUpsell({
-      sink: 'speech', membership: 'signed-out', managedVoice: managedVoicePort() !== undefined, networkOff: false, enrolled: false,
+      sink: 'speech', membership: 'signed-out', managedVoice: managedVoicePort() !== undefined, enrolled: false,
     })).toBe('sign-in-voice');
   });
 

@@ -162,7 +162,7 @@ Source of truth: `OneTimeApp` in `lib/src/remote/one-time-app/OneTimeApp.tsx`; `
 
 ## Dev loop
 
-**`dor tool one-time` (root `pnpm dev:one-time`) runs the rendezvous and page on loopback, without Postgres**: the relay Worker under `wrangler dev --local` on `127.0.0.1`, at `PORT` or a fixed default, since a Burrow build bakes the origin in. Its config sets `APP_ORIGIN` to `http://localhost:<port>`, keeps the relay config's Durable Object, migration, and rate limits, and carries no route or production secret. It prints the dev Burrow build variables (`DORMOUSE_RELAY_ORIGIN`, `DORMOUSE_RELAY_IS_HOSTED=1`; `docs/specs/relay.md` -> "Relay origin").
+**`dor tool one-time` (root `pnpm dev:one-time`) runs the rendezvous and page on loopback, without Postgres**: the relay Worker under `wrangler dev --local` on `127.0.0.1`, at `PORT` or a fixed default, since a Burrow build bakes the origin in. Its config sets `APP_ORIGIN` to `http://localhost:<port>`, keeps the relay config's Durable Object, migration, and rate limits, and carries no route or production secret. It prints the dev Burrow build variables (`DORMOUSE_RELAY_ORIGIN`, `DORMOUSE_RELAY_IS_HOSTED=1`; `docs/specs/relay.md` -> "Relay origin"). **Started by the Hosted dev loop, with `HOSTED_DEV_ACCOUNT_ORIGIN` and `HOSTED_DEV_DATABASE_URL` together, it adds that `ACCOUNT_ORIGIN` and a local Hyperdrive over that database**, never production's, and announces no page, the account origin being the loop's (`docs/specs/hosted.md` -> "Development and release").
 
 Source of truth: `hosted/scripts/dev-one-time.mjs`.
 

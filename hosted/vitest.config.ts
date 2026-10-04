@@ -12,7 +12,7 @@ export default defineConfig({
     },
   },
   test: {
-    include: ["server/tests/**/*.test.ts"],
+    include: ["server/tests/**/*.test.ts", "src/**/*.test.ts"],
     testTimeout: 60000,
     hookTimeout: 120000,
     maxWorkers: 1,
