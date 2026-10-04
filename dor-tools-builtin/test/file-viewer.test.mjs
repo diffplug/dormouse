@@ -339,3 +339,20 @@ test('a PNG or JPEG past the image bound opens view-only, streamed whole, and on
     assert.equal((await postBytes(view, 'save?version=x', PNG, 'image/png')).status, 403, name);
   }
 });
+
+test('a PNG or JPEG whose header declares more pixels than the editor takes opens view-only, streamed', async () => {
+  const png = Buffer.from(PNG);
+  png.writeUInt32BE(9000, 16);
+  png.writeUInt32BE(9000, 20);
+  // A JPEG's frame header may sit behind other segments.
+  const app1 = Buffer.alloc(4 + 60000);
+  app1.set([0xff, 0xe1, 60002 >> 8, 60002 & 255]);
+  const sof = Buffer.from([0xff, 0xc0, 0, 11, 8, 9000 >> 8, 9000 & 255, 9000 >> 8, 9000 & 255, 1, 1, 0x11, 0]);
+  const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8]), app1, sof, Buffer.from([0xff, 0xd9])]);
+  for (const [name, bytes] of [['wide.png', png], ['wide.jpg', jpeg]]) {
+    const viewer = await start(name, bytes);
+    assert.equal(viewer.editable, false, name);
+    assert.match(viewer.path, new RegExp(`/file/${name.replace('.', '\\.')}$`));
+    assert.equal((await get(viewer, viewer.path, {}, 'HEAD')).headers['content-length'], String(bytes.length), name);
+  }
+});

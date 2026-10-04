@@ -1,21 +1,18 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { fileURLToPath } from 'node:url';
 import { crc32 as zlibCrc32, deflateSync, inflateSync } from 'node:zlib';
-import { build } from 'esbuild';
+import { imageEditability, jpegSize, MAX_EDIT_PIXELS, pngSize } from '../dist/image-editability.js';
+import { IMAGE_BOUND } from '../dist/image-format.js';
+import { load } from './bundle.mjs';
 
-// viewer/ is bundled for the browser, never compiled to dist, so the test bundles it too.
-async function load(path) {
-  const bundle = await build({
-    entryPoints: [fileURLToPath(new URL(path, import.meta.url))],
-    bundle: true, format: 'esm', platform: 'neutral', write: false, logLevel: 'silent',
-  });
-  return import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString('base64')}`);
-}
 const png = await load('../viewer/image/png.ts');
 const jpeg = await load('../viewer/image/jpeg.ts');
 const { iccSpace } = await load('../viewer/image/icc.ts');
-const { over, checkEditable, decodeImage, MAX_EDIT_PIXELS, TooLargeError } = await load('../viewer/image/io.ts');
+const { over, decodeImage } = await load('../viewer/image/io.ts');
+/** `r` as PNG bytes, its parts joined. */
+const encode = async (r, keep) => new Uint8Array(Buffer.concat(await png.encodePng(r, keep)));
+/** `spliceIcc`'s parts, joined. */
+const splice = (encoded, icc) => new Uint8Array(Buffer.concat(jpeg.spliceIcc(encoded, icc)));
 
 // PNGs built here with Node's zlib and CRC, independently of the codec under test.
 const SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
@@ -32,10 +29,22 @@ function ihdr(width, height, depth, colorType, interlace = 0) {
   b[8] = depth; b[9] = colorType; b[12] = interlace;
   return chunk('IHDR', b);
 }
-/** A PNG whose scanlines (each without its filter byte) are `rows`, all filter None. */
-function makePng(width, height, depth, colorType, rows, extra = []) {
-  const raw = Buffer.concat(rows.map(r => Buffer.concat([Buffer.from([0]), Buffer.from(r)])));
+/** A PNG whose scanlines (each without its filter byte) are `rows`, all
+ * filter None, or each filtered by `filters(y)` with `bpp` bytes per pixel. */
+function makePng(width, height, depth, colorType, rows, extra = [], { filters = () => 0, bpp = 1 } = {}) {
+  const raw = Buffer.concat(rows.map((r, y) => filterRow(filters(y), r, rows[y - 1], bpp)));
   return new Uint8Array(Buffer.concat([SIGNATURE, ihdr(width, height, depth, colorType), ...extra, chunk('IDAT', deflateSync(raw)), chunk('IEND', [])]));
+}
+/** PNG filter `f` of `row` (the row above `up`), with its filter byte: the
+ * spec's definitions, written independently of the codec under test. */
+function filterRow(f, row, up = [], bpp = 1) {
+  const a = i => i >= bpp ? row[i - bpp] : 0, b = i => up[i] ?? 0, c = i => i >= bpp ? up[i - bpp] ?? 0 : 0;
+  const paeth = i => {
+    const p = a(i) + b(i) - c(i), pa = Math.abs(p - a(i)), pb = Math.abs(p - b(i)), pc = Math.abs(p - c(i));
+    return pa <= pb && pa <= pc ? a(i) : pb <= pc ? b(i) : c(i);
+  };
+  const predict = [() => 0, a, b, i => (a(i) + b(i)) >> 1, paeth][f];
+  return Buffer.from([f, ...row.map((v, i) => (v - predict(i)) & 255)]);
 }
 /** Every chunk of `bytes`, each CRC checked against Node's. */
 function chunks(bytes) {
@@ -93,7 +102,7 @@ test('an RGBA raster with every alpha round-trips exactly, as RGBA with valid CR
   // Smooth rows too, so Sub, Up, Average, and Paeth each win some rows.
   for (let x = 0; x < width; x++) for (const y of [3, 4, 5]) data.set([x * 3, y * 7, x + y, 1 + x], (y * width + x) * 4);
   const raster = { width, height, data };
-  const bytes = await png.encodePng(raster);
+  const bytes = await encode(raster);
 
   const list = chunks(bytes);
   assert.deepEqual(list.map(c => c.type), ['IHDR', 'IDAT', 'IEND']);
@@ -112,13 +121,13 @@ test('an RGBA raster with every alpha round-trips exactly, as RGBA with valid CR
 
 test('an opaque raster encodes as RGB and decodes back exactly', async () => {
   const raster = { width: 3, height: 2, data: new Uint8ClampedArray([1, 2, 3, 255, 250, 128, 0, 255, 9, 9, 9, 255, 0, 0, 0, 255, 255, 255, 255, 255, 40, 50, 60, 255]) };
-  const bytes = await png.encodePng(raster);
+  const bytes = await encode(raster);
   assert.equal(chunks(bytes)[0].data[9], 2, 'color type RGB');
   assert.deepEqual(Array.from((await png.decodePng(bytes)).raster.data), Array.from(raster.data));
 });
 
 test('the decoder checks CRCs', async () => {
-  const bytes = await png.encodePng({ width: 1, height: 1, data: new Uint8ClampedArray([1, 2, 3, 4]) });
+  const bytes = await encode({ width: 1, height: 1, data: new Uint8ClampedArray([1, 2, 3, 4]) });
   bytes[bytes.length - 20] ^= 1; // inside IDAT's data
   await assert.rejects(png.decodePng(bytes), /corrupt/);
 });
@@ -168,7 +177,7 @@ test('color chunks and pHYs are copied verbatim; other metadata is dropped', asy
   const source = makePng(2, 1, 8, 6, [[1, 2, 3, 4, 5, 6, 7, 8]], [color, cicp, phys, chunk('tEXt', Buffer.from('Comment\0hi', 'latin1'))]);
   const decoded = await png.decodePng(source);
   assert.equal(decoded.space, 'display-p3');
-  const saved = chunks(await png.encodePng(decoded.raster, decoded.keep));
+  const saved = chunks(await encode(decoded.raster, decoded.keep));
   assert.deepEqual(saved.map(c => c.type), ['IHDR', 'iCCP', 'cICP', 'pHYs', 'IDAT', 'IEND']);
   assert.deepEqual(saved[1].raw, color);
   assert.deepEqual(saved[2].raw, cicp);
@@ -184,18 +193,21 @@ test('the display space comes from cICP, else the ICC description, else its prim
   assert.equal(iccSpace(icc({ mluc: 'Display P3' })), 'display-p3');
   assert.equal(iccSpace(icc({ mluc: 'sRGB IEC61966-2.1' })), 'srgb');
   assert.equal(iccSpace(icc({ desc: 'Color LCD', colorants: p3 })), 'display-p3');
-  assert.equal(iccSpace(icc({ desc: 'Adobe RGB (1998)', colorants: [0.6097, 0.3111, 0.0195, 0.2053, 0.6257, 0.0609, 0.1492, 0.0632, 0.7446] })), null);
+  assert.equal(iccSpace(icc({ desc: 'Adobe RGB (1998)', colorants: [0.6097, 0.3111, 0.0195, 0.2053, 0.6257, 0.0609, 0.1492, 0.0632, 0.7446] })), 'srgb', 'no canvas space: shown as sRGB');
   const space = async extra => (await png.decodePng(makePng(1, 1, 8, 0, [[0]], extra))).space;
   assert.equal(await space([iccp(icc({ desc: 'sRGB' })), chunk('cICP', [12, 13, 0, 1])]), 'display-p3', 'cICP wins');
   assert.equal(await space([iccp(icc({ desc: 'Display P3' }))]), 'display-p3');
   assert.equal(await space([chunk('sRGB', [0])]), 'srgb');
 });
 
-test('compositing a layer leaves the pixels it does not cover exact', () => {
-  const r = { width: 3, height: 1, data: new Uint8ClampedArray([10, 20, 30, 0, 200, 100, 50, 128, 1, 2, 3, 0]) };
-  const out = over(r, new Uint8ClampedArray([0, 0, 0, 0, 255, 0, 0, 255, 0, 0, 255, 102]));
-  assert.deepEqual(pixels(out), [[10, 20, 30, 0], [255, 0, 0, 255], [0, 0, 255, 102]]);
-  assert.deepEqual(Array.from(r.data.subarray(4, 8)), [200, 100, 50, 128], 'the source is untouched');
+test('compositing a layer over an area leaves the pixels it does not cover exact', () => {
+  const r = { width: 4, height: 2, data: new Uint8ClampedArray(32).map((_, i) => i * 7) };
+  r.data.set([10, 20, 30, 0, 200, 100, 50, 128, 1, 2, 3, 0], 16 + 4);
+  // A 3×1 layer over the second row, from its second pixel.
+  const out = over(r, { x: 1, y: 1, width: 3, height: 1 }, new Uint8ClampedArray([0, 0, 0, 0, 255, 0, 0, 255, 0, 0, 255, 102]));
+  assert.deepEqual(pixels(out).slice(5), [[10, 20, 30, 0], [255, 0, 0, 255], [0, 0, 255, 102]]);
+  assert.deepEqual(Array.from(out.data.subarray(0, 20)), Array.from(r.data.subarray(0, 20)), 'pixels outside the area stay exact');
+  assert.deepEqual(Array.from(r.data.subarray(24, 28)), [200, 100, 50, 128], 'the source is untouched');
 });
 
 /** A 2×2 baseline JPEG (macOS sips) with APP0, Exif APP1, and Photoshop APP13, but no ICC profile. */
@@ -229,35 +241,108 @@ function iccSegment(seq, count, payload) {
 
 test('a JPEG\'s ICC segments are spliced in after SOI and APP0, replacing the encoder\'s own', () => {
   const profile = icc({ desc: 'Display P3' });
-  const source = jpeg.spliceIcc(JPEG, [iccSegment(2, 2, profile.subarray(100)), iccSegment(1, 2, profile.subarray(0, 100))]);
+  const source = splice(JPEG, [iccSegment(2, 2, profile.subarray(100)), iccSegment(1, 2, profile.subarray(0, 100))]);
   const keep = jpeg.iccSegments(source);
   assert.equal(keep.length, 2);
   assert.deepEqual(Buffer.from(jpeg.iccProfile(keep)), profile, 'rejoined by sequence number');
   assert.equal(iccSpace(jpeg.iccProfile(keep)), 'display-p3');
 
   // An encoder's own (sRGB) profile gives way to the source's.
-  const encoded = jpeg.spliceIcc(JPEG, [iccSegment(1, 1, icc({ desc: 'sRGB' }))]);
-  const saved = jpeg.spliceIcc(encoded, keep);
+  const encoded = splice(JPEG, [iccSegment(1, 1, icc({ desc: 'sRGB' }))]);
+  const saved = splice(encoded, keep);
   const { list, scan } = markers(saved), original = markers(JPEG);
   assert.deepEqual(list.map(s => s.marker), [0xe0, 0xe2, 0xe2, ...original.list.slice(1).map(s => s.marker)]);
   assert.deepEqual(list.slice(1, 3).map(s => Array.from(s.bytes)), keep.map(s => Array.from(s)));
   assert.deepEqual(Buffer.from(saved.subarray(scan)), Buffer.from(JPEG.subarray(original.scan)), 'the scan and EOI are untouched');
-  assert.deepEqual(jpeg.spliceIcc(saved, []), JPEG, 'splicing nothing strips the profile');
+  assert.deepEqual(splice(saved, []), JPEG, 'splicing nothing strips the profile');
 });
 
-test('an image past the pixel bound is refused from its header, before anything decodes it', async () => {
+test('the editor leaves an image view-only past its byte or pixel bound, read from the header alone', async () => {
   // Headers alone: no pixel data follows.
   const pngHeader = (width, height) => makePng(width, height, 8, 6, []);
   const side = Math.sqrt(MAX_EDIT_PIXELS);
-  assert.deepEqual(png.pngSize(pngHeader(20000, 30)), { width: 20000, height: 30 });
-  assert.doesNotThrow(() => checkEditable(pngHeader(side, side)));
-  assert.throws(() => checkEditable(pngHeader(side, side + 1)), TooLargeError);
-  await assert.rejects(decodeImage(new Blob([pngHeader(20000, 20000)])), TooLargeError);
+  assert.deepEqual(pngSize(pngHeader(20000, 30)), { width: 20000, height: 30 });
+  assert.deepEqual(imageEditability(100, pngHeader(side, side)), { ok: true });
+  assert.match(imageEditability(100, pngHeader(side, side + 1)).viewOnly, /8192 × 8193 pixels.*64-megapixel/);
+  assert.match(imageEditability(IMAGE_BOUND.limit + 1, pngHeader(1, 1)).viewOnly, /32 MiB/);
+  assert.deepEqual(imageEditability(IMAGE_BOUND.limit, pngHeader(1, 1)), { ok: true });
+  // The page checks again before decoding, as a backstop.
+  assert.match((await decodeImage(new Blob([pngHeader(20000, 20000)]))).viewOnly, /64-megapixel/);
 
   const sof = markers(JPEG).list.find(s => s.marker === 0xc0), at = sof.bytes.byteOffset - JPEG.byteOffset;
-  assert.deepEqual(jpeg.jpegSize(JPEG), { height: (sof.bytes[5] << 8) | sof.bytes[6], width: (sof.bytes[7] << 8) | sof.bytes[8] });
+  assert.deepEqual(jpegSize(JPEG), { height: (sof.bytes[5] << 8) | sof.bytes[6], width: (sof.bytes[7] << 8) | sof.bytes[8] });
+  assert.equal(jpegSize(JPEG.subarray(0, at + 10)), null, 'a frame header cut short is unknown');
   const big = JPEG.slice();
   big.set([9000 >> 8, 9000 & 255, 8000 >> 8, 8000 & 255], at + 5);
-  assert.deepEqual(jpeg.jpegSize(big), { width: 8000, height: 9000 });
-  await assert.rejects(decodeImage(new Blob([big])), TooLargeError);
+  assert.match(imageEditability(big.length, big).viewOnly, /8000 × 9000/);
+  assert.match((await decodeImage(new Blob([big]))).viewOnly, /64-megapixel/);
+
+  // A frame header behind a large APP1 is found in the bytes that hold it; a
+  // head that ends first, mid-segment, reads as unknown and so editable.
+  const app1 = new Uint8Array(4 + 60000);
+  app1.set([0xff, 0xe1, 60002 >> 8, 60002 & 255]);
+  const padded = new Uint8Array(Buffer.concat([big.subarray(0, 2), app1, big.subarray(2)]));
+  assert.deepEqual(jpegSize(padded), { width: 8000, height: 9000 });
+  assert.equal(jpegSize(padded.subarray(0, 30000)), null);
+  assert.deepEqual(imageEditability(padded.length, padded.subarray(0, 30000)), { ok: true });
+});
+
+test('8-bit gray, gray with alpha, palette, and RGB rows decode through every filter, as do 16-bit and interlaced rows', async () => {
+  const width = 7, height = 10, filters = y => y % 5;
+  const value = (x, y, k) => (x * 37 + y * 101 + k * 53 + ((x * y) % 7) * 29) & 255;
+  const rows = channels => Array.from({ length: height }, (_, y) => Array.from({ length: width * channels }, (_, i) => value(Math.floor(i / channels), y, i % channels)));
+  const decoded = async (colorType, channels, extra = [], depth = 8) => {
+    const source = rows(channels * depth / 8);
+    return { source, pixels: pixels((await png.decodePng(makePng(width, height, depth, colorType, source, extra, { filters, bpp: channels * depth / 8 }))).raster) };
+  };
+  const at = (x, y) => y * width + x;
+
+  const gray = await decoded(0, 1, [chunk('tRNS', [0, value(3, 2, 0)])]);
+  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+    const g = gray.source[y][x];
+    assert.deepEqual(gray.pixels[at(x, y)], [g, g, g, g === value(3, 2, 0) ? 0 : 255], `gray ${x},${y}`);
+  }
+  const grayAlpha = await decoded(4, 2);
+  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+    const [g, a] = grayAlpha.source[y].slice(2 * x, 2 * x + 2);
+    assert.deepEqual(grayAlpha.pixels[at(x, y)], [g, g, g, a], `gray+alpha ${x},${y}`);
+  }
+  const rgb = await decoded(2, 3);
+  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) assert.deepEqual(rgb.pixels[at(x, y)], [...rgb.source[y].slice(3 * x, 3 * x + 3), 255], `RGB ${x},${y}`);
+  const wide = await decoded(2, 3, [], 16);
+  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+    const s = wide.source[y].slice(6 * x, 6 * x + 6);
+    assert.deepEqual(wide.pixels[at(x, y)], [0, 2, 4].map(i => Math.round(((s[i] << 8) | s[i + 1]) / 257)).concat(255), `16-bit ${x},${y}`);
+  }
+
+  // Every index below 256 is in this palette.
+  const palette = chunk('PLTE', Array.from({ length: 768 }, (_, i) => (i * 11) & 255)), trns = chunk('tRNS', [9, 8, 7]);
+  const indexed = await decoded(3, 1, [palette, trns]);
+  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+    const e = indexed.source[y][x];
+    assert.deepEqual(indexed.pixels[at(x, y)], [e * 3, e * 3 + 1, e * 3 + 2].map(i => (i * 11) & 255).concat(e < 3 ? [9, 8, 7][e] : 255), `palette ${x},${y}`);
+  }
+  await assert.rejects(png.decodePng(makePng(2, 1, 8, 3, [[0, 2]], [chunk('PLTE', [1, 2, 3, 4, 5, 6])])), /palette lacks/);
+});
+
+test('an opaque raster round-trips exactly, its rows each taking the filter that fits them', async () => {
+  const width = 41, height = 23, data = new Uint8ClampedArray(width * height * 4);
+  let seed = 3;
+  for (let i = 0; i < data.length; i++) data[i] = i % 4 === 3 ? 255 : ((seed = (Math.imul(seed, 1103515245) + 12345) & 0x7fffffff) >> 16) & 255;
+  const get = (x, y, c) => data[(y * width + x) * 4 + c];
+  // Rows each filter predicts exactly from the noise around them: a ramp
+  // (Sub), a copy (Up), the mean of left and up (Average), and Paeth's pick.
+  const predict = [(x, y, c) => get(x - 1, y, c) + 3, (x, y, c) => get(x, y - 1, c),
+    (x, y, c) => (get(x - 1, y, c) + get(x, y - 1, c)) >> 1,
+    (x, y, c) => { const a = get(x - 1, y, c), b = get(x, y - 1, c), d = get(x - 1, y - 1, c), p = a + b - d; return Math.abs(p - a) <= Math.abs(p - b) && Math.abs(p - a) <= Math.abs(p - d) ? a : Math.abs(p - b) <= Math.abs(p - d) ? b : d; }];
+  predict.forEach((f, k) => {
+    for (let x = 1; x < width; x++) for (let c = 0; c < 3; c++) data[((4 + 4 * k) * width + x) * 4 + c] = f(x, 4 + 4 * k, c) & 255;
+  });
+  const bytes = await encode({ width, height, data });
+  const list = chunks(bytes);
+  assert.equal(list[0].data[9], 2, 'color type RGB');
+  const raw = inflateSync(list[1].data), filters = new Set();
+  for (let y = 0; y < height; y++) filters.add(raw[y * (width * 3 + 1)]);
+  for (const f of [1, 2, 3, 4]) assert.ok(filters.has(f), `filter ${f} wins a row: ${[...filters]}`);
+  assert.deepEqual(Array.from((await png.decodePng(bytes)).raster.data), Array.from(data));
 });

@@ -11,8 +11,9 @@ import {
   type EditorKind, type EditorReply, type EditorRequest, type EditorStore,
 } from "dor-tools-builtin/editor-routes";
 import { ERROR_CSP, errorViewerPage } from "dor-tools-builtin/error-viewer-page";
-import { builtinHandler, fileViewerFormat, VIEW_ERROR_ARGV, viewerTitle } from "dor-tools-builtin/file-viewer-format";
+import { builtinHandler, editableImageType, fileViewerFormat, VIEW_ERROR_ARGV, viewerTitle } from "dor-tools-builtin/file-viewer-format";
 import { FOLDER_BODY_LIMIT, FOLDER_CSP, folderViewerPage } from "dor-tools-builtin/folder-viewer-page";
+import { imageEditability } from "dor-tools-builtin/image-editability";
 import { IMAGE_CSP, type SizeBound } from "dor-tools-builtin/image-format";
 import { HttpError, mediaType, parseJsonBody, pathSegments, viewerHeaders } from "dor-tools-builtin/viewer-http";
 import { openSequence, stateSequence } from "dor-tools-lib/osc";
@@ -106,9 +107,10 @@ export class PlaygroundViewers {
     if (kind !== "file") return new Error(`not a file: ${input}`);
     const format = handler.format(target);
     if (!format) return new Error("unsupported file format; configure a user Tool association");
-    const editor = editorKind(format, target, this.fs.bytes(target)?.length ?? 0);
+    const bytes = editableImageType(target) ? this.fs.bytes(target) : null;
+    const editor = editorKind(format, bytes && imageEditability(bytes.length, bytes));
     // The HTML, media, and view-only image routes are not served here.
-    if (!editor) return new Error("the playground's file viewer shows text, PNG, and JPEG files only");
+    if (!editor) return new Error("the playground's file viewer shows only text and the PNG and JPEG files the image editor opens");
     const root = parentOf(target);
     const routes = editorRoutes({
       kind: editor, file: storePath(target), name: viewerTitle(target), store: this.store(root),
@@ -194,9 +196,10 @@ export class PlaygroundViewers {
         fs.write(file, next);
         return { version: nextVersion };
       },
+      // No symlinks or case folding here, so every file is its own path.
       editableImage: async (segments) => {
-        if (fs.kind(under(segments)) !== "file") throw new HttpError(404);
-        return storePath(under(segments));
+        const bytes = fs.kind(under(segments)) === "file" ? fs.bytes(under(segments)) : null;
+        return bytes ? { path: storePath(under(segments)), size: bytes.length } : { refused: "missing" };
       },
       create: async (name, bytes) => {
         if (fs.kind(under([name]))) return false;

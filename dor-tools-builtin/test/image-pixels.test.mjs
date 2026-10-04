@@ -1,26 +1,10 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { fileURLToPath } from 'node:url';
-import { build } from 'esbuild';
+import { load, px, raster, WHITE } from './bundle.mjs';
 
-// viewer/ is bundled for the browser, never compiled to dist, so the test bundles it too.
-async function load(path) {
-  const bundle = await build({
-    entryPoints: [fileURLToPath(new URL(path, import.meta.url))],
-    bundle: true, format: 'esm', platform: 'neutral', write: false, logLevel: 'silent',
-  });
-  return import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString('base64')}`);
-}
-const px = await load('../viewer/image/pixels.ts');
 const { History, Pieces } = await load('../viewer/image/history.ts');
 
-const WHITE = [255, 255, 255, 255], BLACK = [0, 0, 0, 255], RED = [255, 0, 0, 255], BLUE = [0, 0, 255, 255];
-
-function raster(width, height, color = WHITE) {
-  const r = px.createRaster(width, height);
-  px.fillRect(r, { x: 0, y: 0, width, height }, color);
-  return r;
-}
+const BLACK = [0, 0, 0, 255], RED = [255, 0, 0, 255], BLUE = [0, 0, 255, 255];
 const at = (r, x, y) => px.pixel(r, x, y);
 /** Every pixel's color, packed into strings for whole-raster comparisons. */
 const colors = r => Array.from({ length: r.width * r.height }, (_, i) => r.data.slice(i * 4, i * 4 + 4).join(','));

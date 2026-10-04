@@ -6,8 +6,8 @@ import { createRoot } from 'react-dom/client';
 import { documentPage, loadingState, stateLabel, type DocumentState } from '../document-session';
 import { SaveButton } from '../save-button';
 import { Signal } from '../signal';
-import { editorDocument, ImageEditor, ImageViewOnly, type ImageEditorHandle } from './editor';
-import { imageSource, TooLargeError, type LoadedImage } from './io';
+import { editorDocument, ImageDocument, type ImageEditorHandle } from './editor';
+import { imageSource, type ImageLoad } from './io';
 import './page.css';
 
 let store: { doc: DocumentState; error: string | null } = { doc: loadingState, error: null };
@@ -18,11 +18,9 @@ const editor = createRef<ImageEditorHandle>();
 let loads = 0;
 
 // A reload mounts a fresh editor, so undo starts over.
-const session = documentPage().open(editorDocument(editor, (image, name) => {
+const session = documentPage().open(editorDocument(editor, (load, name) => {
   const key = ++loads;
-  root.render(image instanceof TooLargeError
-    ? <ImageViewOnly key={key} ref={editor} src={`source?v=${key}`} name={name} note={image.message} controls={<Controls />} />
-    : <Page key={key} image={image} name={name} />);
+  root.render(<Page key={key} load={load} name={name} src={`source?v=${key}`} />);
 }), {
   report(doc) { update({ doc }); },
   fail(error) { update({ error }); },
@@ -32,16 +30,16 @@ function Controls() {
   const doc = useStore(s => s.doc);
   return (
     <>
-      <span className="page-state" role="status">{stateLabel(doc)}</span>
+      <span className="page-state ie-optional" role="status">{stateLabel(doc)}</span>
       <button type="button" title="Reload from disk" onClick={() => void session.reload()}>Reload</button>
       <SaveButton state={doc} onSave={() => void session.save()} />
     </>
   );
 }
 
-function Page({ image, name }: { image: LoadedImage; name: string }) {
+function Page({ load, name, src }: { load: ImageLoad; name: string; src: string }) {
   const error = useStore(s => s.error);
-  return <ImageEditor ref={editor} image={image} name={name} error={error} onChange={session.changed} controls={<Controls />} />;
+  return <ImageDocument ref={editor} load={load} src={src} name={name} error={error} onChange={session.changed} controls={<Controls />} />;
 }
 
 /** Before the first load lands: its progress, or why it failed. */

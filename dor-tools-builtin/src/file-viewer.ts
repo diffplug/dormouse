@@ -2,7 +2,7 @@ import { realpath, type FileHandle } from 'node:fs/promises';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { basename, dirname, relative, resolve, sep } from 'node:path';
 import { stateSequence } from 'dor-tools-lib/osc';
-import { fileViewerFormat, type FileFormat } from './file-viewer-format.js';
+import { editableImageType, fileViewerFormat, type FileFormat } from './file-viewer-format.js';
 import { announceViewer, contentType, HttpError, isInsideRoot, openRegularFile, pathSegments, readBody, reply, startCapabilityViewer } from './viewer-server.js';
 import { EDITOR_CSP } from './editor-page.js';
 import { editorKind, editorRoutes, imagesRoute, storePath, TEXT_BOUND } from './editor-routes.js';
@@ -11,6 +11,7 @@ import { readUpTo } from './editable-file.js';
 import { editorStore } from './editor-store.js';
 import { viewerAsset } from './viewer-assets.js';
 import { IMAGE_CSP } from './image-format.js';
+import { EDITABILITY_HEAD, imageEditability } from './image-editability.js';
 
 const ASSET_LIMIT = 256;
 const CHUNK = 64 * 1024;
@@ -23,6 +24,13 @@ async function textSize(file: FileHandle): Promise<number> {
   const { size } = await file.stat();
   if (size > TEXT_BOUND.limit) throw new ViewerLimitError('text preview exceeds 8 MiB; configure a Tool for this file');
   return size;
+}
+
+/** The first `EDITABILITY_HEAD` bytes of `file`, which is `size` long. */
+async function head(file: FileHandle, size: number): Promise<Uint8Array> {
+  const bytes = Buffer.allocUnsafe(Math.min(size, EDITABILITY_HEAD));
+  const { bytesRead } = await file.read(bytes, 0, bytes.length, 0);
+  return bytes.subarray(0, bytesRead);
 }
 
 async function readText(file: FileHandle): Promise<string> {
@@ -135,10 +143,10 @@ export async function startFileViewer(input: string, { onDirty = () => {}, forma
   try {
     const main = await register(target, true);
     if (!main) throw new Error('not a supported regular file');
-    // Fails oversized text before announcing; a PNG or JPEG past the image
-    // bound streams view-only (docs/specs/dor-tools-builtin.md -> Image editor).
+    // Fails oversized text before announcing; a PNG or JPEG the editor leaves
+    // view-only streams (docs/specs/dor-tools-builtin.md -> Image editor).
     const size = format.text ? await textSize(main.file) : (await main.file.stat()).size;
-    const kind = editorKind(format, target, size);
+    const kind = editorKind(format, editableImageType(target) ? imageEditability(size, await head(main.file, size)) : null);
     const editable = !!kind;
     const editor = kind && editorRoutes({ kind, file: storePath(target), name: basename(target), store: editorStore(root), onDirty });
     const viewer = await startCapabilityViewer({ csp: editable ? EDITOR_CSP : CSP, post: editable, chunked: true, unavailable: 'File preview unavailable', release: closeFiles,

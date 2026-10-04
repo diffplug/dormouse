@@ -1,6 +1,6 @@
-import { createRef, useLayoutEffect, useMemo, useState, useSyncExternalStore, type ComponentType, type FC } from 'react';
+import { createRef, useMemo, useSyncExternalStore, type ComponentType, type FC } from 'react';
 import { createRoot } from 'react-dom/client';
-import { flushSync } from 'react-dom';
+import { createPortal, flushSync } from 'react-dom';
 import { $getNearestNodeFromDOMNode, $getNodeByKey, type LexicalEditor } from 'lexical';
 import { syntaxHighlighting } from '@codemirror/language';
 import { classHighlighter } from '@lezer/highlight';
@@ -201,26 +201,12 @@ function ErrorBanner() {
   return error ? <div className="error" role="alert">{error}</div> : null;
 }
 
-/** Where the images panel hangs: just under the toolbar, which wraps when the
- * page is narrow and moves down under an error. */
-function useBelowToolbar(): number | undefined {
-  const [top, setTop] = useState<number>();
-  useLayoutEffect(() => {
-    const root = document.getElementById('root')!, bar = root.querySelector('.mdxeditor-toolbar');
-    if (!bar) return;
-    const place = () => setTop(bar.getBoundingClientRect().bottom - root.getBoundingClientRect().top + 2);
-    place();
-    const observer = new ResizeObserver(place);
-    observer.observe(bar);
-    observer.observe(bar.closest('.mdxeditor') ?? root);
-    return () => observer.disconnect();
-  }, []);
-  return top;
-}
-
+/** The images panel, hung in the editor's content box: under the toolbar
+ * however it wraps, and under an error. */
 function Panel({ editor }: { editor: LexicalEditor }) {
   const { images, saved } = usePage();
-  return <ImagesPanel editor={editor} sources={images} saved={saved} onEdit={editImage} top={useBelowToolbar()} />;
+  const content = editor.getRootElement()?.closest('.mdxeditor-diff-source-wrapper');
+  return content ? createPortal(<ImagesPanel editor={editor} sources={images} saved={saved} onEdit={editImage} />, content) : null;
 }
 
 /** The images panel and the image editor overlay, above the editor. */

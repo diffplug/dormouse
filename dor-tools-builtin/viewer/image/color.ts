@@ -20,30 +20,25 @@ const parseHex = (hex: string): Rgba =>
 export function imageColors(space: PredefinedColorSpace, canvas = () => document.createElement('canvas')): ImageColors {
   if (space === 'srgb') return { toImage: parseHex, toSrgb: pixel => pixel };
   let ctx: CanvasRenderingContext2D | null = null;
-  const context = () => ctx ??= canvas().getContext('2d', { colorSpace: space, willReadFrequently: true })!;
+  /** The opaque color `paint` leaves in the canvas, read back in `read`, once per `key` in `cache`. */
+  const convert = (cache: Map<string, Rgba>, key: string, paint: (c: CanvasRenderingContext2D) => void, read: PredefinedColorSpace): Rgba => {
+    let out = cache.get(key);
+    if (!out) {
+      const c = ctx ??= canvas().getContext('2d', { colorSpace: space, willReadFrequently: true })!;
+      paint(c);
+      const [r, g, b] = c.getImageData(0, 0, 1, 1, { colorSpace: read }).data;
+      cache.set(key, out = [r, g, b, 255]);
+    }
+    return out;
+  };
   const toImage = new Map<string, Rgba>(), toSrgb = new Map<string, Rgba>();
   return {
-    toImage(hex) {
-      let out = toImage.get(hex);
-      if (!out) {
-        const c = context();
-        c.fillStyle = hex;
-        c.fillRect(0, 0, 1, 1);
-        const [r, g, b] = c.getImageData(0, 0, 1, 1, { colorSpace: space }).data;
-        toImage.set(hex, out = [r, g, b, 255]);
-      }
-      return out;
-    },
+    toImage: hex => convert(toImage, hex, c => { c.fillStyle = hex; c.fillRect(0, 0, 1, 1); }, space),
     toSrgb(pixel) {
-      const key = pixel.slice(0, 3).join();
-      let rgb = toSrgb.get(key);
-      if (!rgb) {
-        const c = context();
+      const [r, g, b] = convert(toSrgb, pixel.slice(0, 3).join(), c => {
         c.putImageData(new ImageData(new Uint8ClampedArray([pixel[0], pixel[1], pixel[2], 255]), 1, 1, { colorSpace: space }), 0, 0);
-        const [r, g, b] = c.getImageData(0, 0, 1, 1, { colorSpace: 'srgb' }).data;
-        toSrgb.set(key, rgb = [r, g, b, 255]);
-      }
-      return [rgb[0], rgb[1], rgb[2], pixel[3]];
+      }, 'srgb');
+      return [r, g, b, pixel[3]];
     },
   };
 }

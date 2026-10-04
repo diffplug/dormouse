@@ -28,10 +28,11 @@ export async function buildViewerAssets(outdir) {
       loader: { '.ttf': 'file', '.woff': 'file', '.woff2': 'file' }, assetNames: 'markdown-[name]-[hash]',
       define: { 'process.env.NODE_ENV': '"production"' },
     }),
-    // The image editor: `image.js` and `image.css`, no chunks.
+    // The image editor: `image.js` and `image.css`, no chunks, and its PNG
+    // encoder's worker, `image.worker.js`.
     build({
       absWorkingDir,
-      entryPoints: { image: 'viewer/image/main.tsx' },
+      entryPoints: { image: 'viewer/image/main.tsx', 'image.worker': 'viewer/image/png-worker.ts' },
       outdir, bundle: true, format: 'esm', platform: 'browser', alias,
       target: 'es2022', minify: true, jsx: 'automatic',
       define: { 'process.env.NODE_ENV': '"production"' },

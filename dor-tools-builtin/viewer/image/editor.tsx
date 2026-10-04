@@ -7,7 +7,7 @@ import { flushSync } from 'react-dom';
 import type { DocumentEditor } from '../document-session';
 import { EditorController, MARKUP, type Revision, type Tool } from './controller';
 import { Icon, type IconName } from './icons';
-import { decodeImage, TooLargeError, type LoadedImage } from './io';
+import type { ImageLoad, LoadedImage } from './io';
 import { contrast, fontSize } from './objects';
 import { createRaster, toHex } from './pixels';
 import { pageTheme, subscribeTheme } from '../page-theme';
@@ -38,18 +38,22 @@ export interface ImageEditorProps {
 }
 
 /** The editor behind `ref` as a document session edits it; `show` mounts a
- * fresh editor over the decoded file, or an `ImageViewOnly` for one too large
- * to decode, which is behind `ref` once it returns. */
-export function editorDocument(ref: RefObject<ImageEditorHandle | null>, show: (image: LoadedImage | TooLargeError, name: string) => void): DocumentEditor<Revision, Blob> {
+ * fresh `ImageDocument` over the loaded file, which is behind `ref` once it returns. */
+export function editorDocument(ref: RefObject<ImageEditorHandle | null>, show: (load: ImageLoad, name: string) => void): DocumentEditor<Revision, Blob, ImageLoad> {
   return {
     snapshot: () => ref.current!.snapshot(),
     mark: () => ref.current!.revision(),
     holds: mark => ref.current!.holds(mark),
-    async apply(blob, name) {
-      const image = await decodeImage(blob).catch(reason => { if (reason instanceof TooLargeError) return reason; throw reason; });
-      flushSync(() => show(image, name));
-    },
+    apply(load, name) { flushSync(() => show(load, name)); },
   };
+}
+
+/** A loaded image file: the editor over its pixels, or, for one the editor
+ * leaves view-only, the file from `src` (a same-origin route) with why. */
+export function ImageDocument({ load, src, ...props }: Omit<ImageEditorProps, 'image'> & { load: ImageLoad; src: string }) {
+  return 'viewOnly' in load
+    ? <ImageViewOnly ref={props.ref} src={src} name={props.name} note={load.viewOnly} controls={props.controls} />
+    : <ImageEditor {...props} image={load.edit} />;
 }
 
 /** The one revision of an image shown view-only: it never changes, so never needs a save. */
@@ -60,9 +64,9 @@ const VIEW_ONLY: ImageEditorHandle = {
   holds: () => true,
 };
 
-/** An image too large to edit: the file as the browser shows it, from `src`
- * (a same-origin route), with why it is view-only. */
-export function ImageViewOnly({ src, name, note, controls, ref }: { src: string; name: string; note: string; controls?: ReactNode; ref?: Ref<ImageEditorHandle> }) {
+/** An image the editor leaves view-only: the file as the browser shows it,
+ * from `src`, with why. */
+function ImageViewOnly({ src, name, note, controls, ref }: { src: string; name: string; note: string; controls?: ReactNode; ref?: Ref<ImageEditorHandle> }) {
   useImperativeHandle(ref, () => VIEW_ONLY);
   const root = useRef<HTMLDivElement>(null);
   // Focused like the editor, so its host's Esc reaches it.

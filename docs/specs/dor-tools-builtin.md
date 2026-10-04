@@ -7,7 +7,7 @@
 
 - **Must bundle the viewers and their runtime dependencies into `dist/runtime.js` in `dor-tools-builtin`**, without workspace or installed-package resolution at runtime. `dor`'s prebuild builds this package first.
 - **Must stage the runtime and its adjacent `viewer` assets together under `dor/dist/builtin`**. Both hosts copy that tree with the CLI; `viewerAsset` serves the files the build placed in it, by exact name, relative to the runtime module.
-- **Must keep `file-viewer-format`, the page builders (`editor-page`, `folder-viewer-page`, `error-viewer-page`) with their CSPs, `viewer-http`, `image-format`, and `editor-routes` free of Node runtime dependencies**: lib's renderer and host modules import the first, the website playground serves the pages and answers the editor routes with the last (`docs/specs/tutorial.md` → Playground filesystem), and every build of lib source maps `dor-tools-builtin/*` to this package's `src`, as it maps `dor/*`. `dor-tools-builtin/test/browser-shared.test.mjs` bundles them for a browser.
+- **Must keep `file-viewer-format`, the page builders (`editor-page`, `folder-viewer-page`, `error-viewer-page`) with their CSPs, `viewer-http`, `image-format`, `image-editability`, and `editor-routes` free of Node runtime dependencies**: lib's renderer and host modules import the first, the website playground serves the pages and answers the editor routes with the last (`docs/specs/tutorial.md` → Playground filesystem), and every build of lib source maps `dor-tools-builtin/*` to this package's `src`, as it maps `dor/*`. `dor-tools-builtin/test/browser-shared.test.mjs` bundles them for a browser.
 - **Must build the viewer assets through `buildViewerAssets`**, which the website runs into its own static tree.
 - **Must load the runtime only for valid `__view-*` invocations, in the launcher's process**, through a URL relative to `dor.js`. Other CLI commands never load the viewer implementation; `./runtime` exports only types, so a value import fails `dor`'s build.
 - **Must speak the Tool protocol through `dor-tools-lib`** (`docs/specs/dor-tools-lib.md`): the viewers announce and report with its `osc` encoders, and the editor answers the save channel with its `frame` client.
@@ -50,22 +50,22 @@ Source of truth: `saveText` / `StorePath` in `dor-tools-builtin/src/editor-route
 - **Must serve images on request from regular image-format files at or under the document's canonical directory**, by realpath, under a `sandbox` CSP. Nothing else loads, external URLs included.
 - **Must write a pasted or dropped PNG, JPEG, GIF, or WebP beside the document as a new `image-YYYYMMDD-HHMMSS[-N].<ext>`**, signature-checked, at most 32 MiB, never replacing a file; its reference is an unsaved edit.
 - **Must rename a listed image on disk at once**, to an image name in its own directory not starting with `.`, never replacing another file (case-only renames allowed); rewritten references are an unsaved edit.
-- **Must edit only a PNG or JPEG at or under the document's canonical directory whose spelled path is its realpath**, in the [Image editor](#image-editor) over the document. Its save leaves the source unchanged and reloads every display; closing it unsaved asks first.
+- **Must edit only a PNG or JPEG at or under the document's canonical directory whose spelled path is its realpath**, in the [Image editor](#image-editor) over the document, else view-only with why. Its save leaves the source unchanged and reloads every display; closing it unsaved asks first.
 - **Must report the Tool dirty while the document or open image is unsaved**; Cmd/Ctrl+S saves the one in front, and the close-prompt save writes both.
 
-Source of truth: `dor-tools-builtin/viewer/markdown.tsx`; `safeCreateDOM` in `dor-tools-builtin/viewer/markdown-safety.ts`; `editorRoutes` in `dor-tools-builtin/src/editor-routes.ts`; `openImage` / `editableImageFile` / `renameImage` in `dor-tools-builtin/src/markdown-images.ts`. Tests: `dor-tools-builtin/test/markdown-editor.test.mjs`.
+Source of truth: `dor-tools-builtin/viewer/markdown.tsx`; `safeCreateDOM` in `dor-tools-builtin/viewer/markdown-safety.ts`; `editorRoutes` in `dor-tools-builtin/src/editor-routes.ts`; `dor-tools-builtin/src/markdown-images.ts`. Tests: `dor-tools-builtin/test/markdown-editor.test.mjs`.
 
 ## Image editor
 
 `builtin:file` edits PNG and JPEG, alone or over a [Markdown document](#markdown-editor).
 
-- **Must open other image formats, a PNG or JPEG over 32 MiB at open, and one whose header declares over 64 megapixels view-only.**
+- **Must leave other formats, and a PNG or JPEG over 32 MiB or 64 megapixels, view-only, decided from its header before editing**: `builtin:file` streams it; the Markdown editor's `edit/` answers `{viewOnly: reason}`.
 - **Must save exactly the submitted bytes, at most 32 MiB**, under the revision, identity, permission, and replacement rules of [Editing files](#editing-files).
 - **Must refuse a save whose `Content-Type` or signature is not its extension's type** (415).
-- **Must send the revision as the `X-Dor-Version` response header and take it back as the save's `version` query parameter**, the image bytes as the body, as the Markdown editor's in-place replacement also does.
+- **Must send the revision as the `X-Dor-Version` response header and take it back as the save's `version` query parameter**, the image bytes as the body, in-place replacement included.
 - **Must submit every untouched PNG pixel exactly**, at 8 bits per channel, **with the source's PNG color chunks or JPEG ICC segments**, dropping EXIF and writing pixels upright.
 
-Source of truth: `editorRoutes` in `dor-tools-builtin/src/editor-routes.ts`; `replaceEditable` in `dor-tools-builtin/src/editable-file.ts`; `imagePage` in `dor-tools-builtin/src/editor-page.ts`; `decodeImage` / `encodeImage` in `dor-tools-builtin/viewer/image/io.ts`. Tests: `dor-tools-builtin/test/file-viewer.test.mjs`, `dor-tools-builtin/test/image-codec.test.mjs`.
+Source of truth: `editorRoutes` in `dor-tools-builtin/src/editor-routes.ts`; `imageEditability` in `dor-tools-builtin/src/image-editability.ts`; `decodeImage` / `encodeImage` in `dor-tools-builtin/viewer/image/io.ts`. Tests: `dor-tools-builtin/test/file-viewer.test.mjs`, `dor-tools-builtin/test/image-codec.test.mjs`.
 
 ## Code editor
 

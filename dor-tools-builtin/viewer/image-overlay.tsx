@@ -3,9 +3,9 @@
  * Markdown editor). While open, it is the page's front document. */
 import { useEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent } from 'react';
 import { confirmDiscard, loadingState, type DocumentPage, type DocumentState, type OpenDocument } from './document-session';
-import { editorDocument, ImageEditor, ImageViewOnly, type ImageEditorHandle } from './image/editor';
+import { editorDocument, ImageDocument, type ImageEditorHandle } from './image/editor';
 import { Icon } from './image/icons';
-import { imageSource, TooLargeError, type LoadedImage } from './image/io';
+import { imageSource, type ImageLoad } from './image/io';
 import { EDIT_ROUTE, IMAGE_SAVE_ROUTE, IMAGES_ROUTE } from '../src/image-format';
 import { pathRoute } from './images-panel';
 import { SaveButton } from './save-button';
@@ -29,7 +29,7 @@ export function ImageOverlay({ path, page, onSaved, onClose }: {
 }) {
   const name = path.slice(path.lastIndexOf('/') + 1);
   /** The file as last loaded, keyed so each load mounts a fresh editor. */
-  const [shown, setShown] = useState<{ image: LoadedImage | TooLargeError; key: number } | null>(null);
+  const [shown, setShown] = useState<{ load: ImageLoad; key: number } | null>(null);
   const [saveState] = useState(() => new SaveState());
   const [error, setError] = useState<string | null>(null);
   const editor = useRef<ImageEditorHandle>(null);
@@ -38,7 +38,7 @@ export function ImageOverlay({ path, page, onSaved, onClose }: {
 
   useEffect(() => {
     const route = pathRoute(path), source = imageSource(EDIT_ROUTE + route, IMAGE_SAVE_ROUTE + route, name);
-    const show = (image: LoadedImage | TooLargeError) => setShown(was => ({ image, key: (was?.key ?? 0) + 1 }));
+    const show = (load: ImageLoad) => setShown(was => ({ load, key: (was?.key ?? 0) + 1 }));
     const opened = page.open(editorDocument(editor, show), { report: state => saveState.set(state), fail: setError }, {
       ...source,
       async save(blob, version) {
@@ -63,17 +63,15 @@ export function ImageOverlay({ path, page, onSaved, onClose }: {
     void close();
   }
 
-  const closeButton = <button type="button" className="ie-icon" aria-label="Close" title="Close [Esc]" onClick={() => void close()}><Icon name="close" /></button>;
   return (
     <div className="image-overlay" role="dialog" aria-modal="true" aria-label={`Edit ${name}`} onKeyDown={onKeyDown}>
-      {shown?.image instanceof TooLargeError
-        ? <ImageViewOnly key={shown.key} ref={editor} src={`${IMAGES_ROUTE}${pathRoute(path)}?v=${shown.key}`} name={name} note={shown.image.message} controls={closeButton} />
-        : shown
-        ? <ImageEditor key={shown.key} ref={editor} image={shown.image} name={name} error={error} onChange={() => doc.current?.changed()}
+      {shown
+        ? <ImageDocument key={shown.key} ref={editor} load={shown.load} src={`${IMAGES_ROUTE}${pathRoute(path)}?v=${shown.key}`} name={name} error={error}
+            onChange={() => doc.current?.changed()}
             controls={<>
-              <span className="image-overlay-name" title={path}>{name}</span>
-              <OverlaySave saveState={saveState} onSave={() => void doc.current?.save()} />
-              {closeButton}
+              <span className="image-overlay-name ie-optional" title={path}>{name}</span>
+              {'edit' in shown.load && <OverlaySave saveState={saveState} onSave={() => void doc.current?.save()} />}
+              <button type="button" className="ie-icon" aria-label="Close" title="Close [Esc]" onClick={() => void close()}><Icon name="close" /></button>
             </>} />
         : <div className="image-overlay-pending">
             {error ? <span className="error" role="alert">{error}</span> : <span className="state">Loading {name}…</span>}

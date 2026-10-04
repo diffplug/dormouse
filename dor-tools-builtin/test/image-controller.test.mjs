@@ -1,16 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { fileURLToPath } from 'node:url';
-import { build } from 'esbuild';
-
-// viewer/ is bundled for the browser, never compiled to dist, so the test bundles it too.
-async function load(path) {
-  const bundle = await build({
-    entryPoints: [fileURLToPath(new URL(path, import.meta.url))],
-    bundle: true, format: 'esm', platform: 'neutral', write: false, logLevel: 'silent',
-  });
-  return import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString('base64')}`);
-}
+import { load, px, raster } from './bundle.mjs';
 
 // The canvas the controller paints is out of scope: a stand-in takes its
 // calls, and converts colors as a browser would between sRGB and Display P3
@@ -60,14 +50,6 @@ globalThis.getComputedStyle = () => ({ getPropertyValue: () => '' });
 
 const { EditorController } = await load('../viewer/image/controller.ts');
 const { imageColors } = await load('../viewer/image/color.ts');
-const px = await load('../viewer/image/pixels.ts');
-
-const WHITE = [255, 255, 255, 255];
-function raster(width, height, color = WHITE) {
-  const r = px.createRaster(width, height);
-  px.fillRect(r, { x: 0, y: 0, width, height }, color);
-  return r;
-}
 /** A controller over a white image, wired to a stand-in canvas whose
  * client coordinates are image pixels. */
 function editor(format) {
@@ -158,4 +140,19 @@ test('imageColors passes sRGB through and converts other spaces in a canvas of t
   assert.equal(count, 0, 'a converted color is cached');
   assert.deepEqual(p3.toSrgb([234, 51, 35, 128]), [255, 0, 0, 128], 'alpha is kept');
   assert.equal(made, 1);
+});
+
+test('a pending label enables Undo, which takes it back and leaves it to redo', () => {
+  const { ctl, click } = editor();
+  ctl.setTool('text');
+  click(2, 2);
+  assert.equal(ctl.canUndo, false, 'an empty label changes nothing');
+  ctl.setText('hi');
+  assert.equal(ctl.canUndo, true);
+  ctl.undo();
+  assert.equal(ctl.text, null);
+  assert.deepEqual(ctl.doc.objects, []);
+  assert.equal(ctl.canRedo, true);
+  ctl.redo();
+  assert.deepEqual(ctl.doc.objects.map(s => s.text), ['hi']);
 });

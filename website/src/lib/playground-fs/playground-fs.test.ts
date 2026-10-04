@@ -15,6 +15,8 @@ const README = `${PLAYGROUND_CWD}/README.md`;
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
 const PNG_EDITED = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 4, 5, 6, 7]);
 const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 9]);
+/** A PNG header declaring 9000 × 9000 pixels, past the image editor's bound. */
+const HUGE_PNG = new Uint8Array([...PNG.subarray(0, 8), 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0x23, 0x28, 0, 0, 0x23, 0x28, 8, 6, 0, 0, 0]);
 const sha256 = (data: string | Uint8Array) => createHash("sha256").update(data).digest("hex");
 const encode = (text: string) => new TextEncoder().encode(text);
 const get = (route: string, search = ""): ViewerRequest => ({ method: "GET", route, search, contentType: "", body: new Blob() });
@@ -230,6 +232,12 @@ describe("PlaygroundViewers", () => {
     expect(await viewer.handle(upload("image-save/src/shot.png", PNG, "image/png", query))).toMatchObject({ status: 409 });
     expect(await viewer.handle(get("edit/../shot.png"))).toMatchObject({ status: 404 });
     expect(await viewer.handle(get("edit/LICENSE.gif"))).toMatchObject({ status: 415 });
+    expect(await viewer.handle(get("edit/src/missing.png"))).toMatchObject({ status: 404 });
+    // One past the editor's pixel bound opens view-only, with why.
+    fs.write(`${PLAYGROUND_CWD}/src/huge.png`, HUGE_PNG);
+    const huge = (await viewer.handle(get("edit/src/huge.png")))!;
+    expect(huge).toMatchObject({ status: 200, headers: { "Content-Type": "application/json" } });
+    expect(JSON.parse(await text(huge)).viewOnly).toMatch(/9000 × 9000 pixels/);
   });
 
   it("renames an image within its folder, never over another file", async () => {
@@ -261,7 +269,9 @@ describe("PlaygroundViewers", () => {
     expect(await viewer.handle(upload("image", PNG, "image/png"))).toMatchObject({ status: 404 });
     expect((await viewer.handle(post("state", { dirty: false })))!.status).toBe(200);
     expect(writes).toEqual([["t1", stateSequence({ dirty: false })]]);
-    expect(() => open("__view-file", ["anim.gif"], PLAYGROUND_CWD)).toThrow("text, PNG, and JPEG files only");
+    expect(() => open("__view-file", ["anim.gif"], PLAYGROUND_CWD)).toThrow("PNG and JPEG files the image editor opens");
+    fs.write(`${PLAYGROUND_CWD}/huge.png`, HUGE_PNG);
+    expect(() => open("__view-file", ["huge.png"], PLAYGROUND_CWD)).toThrow("PNG and JPEG files the image editor opens");
   });
 
   it("hashes each stored value once: a save hashes only its new bytes", async () => {

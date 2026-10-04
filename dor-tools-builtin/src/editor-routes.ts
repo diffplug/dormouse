@@ -3,9 +3,10 @@
  * files, Markdown editor, Image editor): one route table per editor kind, over
  * an `EditorStore` that owns every filesystem check. Browser-safe. */
 import { editorPage, imagePage, markdownPage } from './editor-page.js';
-import type { FileFormat } from './file-viewer-format.js';
+import { editableImageType, type FileFormat } from './file-viewer-format.js';
+import { imageEditability, type Editability } from './image-editability.js';
 import {
-  checkImageSave, EDIT_ROUTE, editableImageType, IMAGE_BOUND, IMAGE_CSP, IMAGE_SAVE_ROUTE, IMAGES_ROUTE, isImage, PASTE_ATTEMPTS, PASTE_BOUND,
+  checkImageSave, EDIT_ROUTE, IMAGE_BOUND, IMAGE_CSP, IMAGE_SAVE_ROUTE, IMAGES_ROUTE, isImage, PASTE_ATTEMPTS, PASTE_BOUND,
   PASTE_EXHAUSTED_MESSAGE, pastedImageExtension, pastedImageName, type SizeBound, VERSION_HEADER,
 } from './image-format.js';
 import { HttpError, parseJsonBody, pathSegments } from './viewer-http.js';
@@ -15,7 +16,7 @@ export const TEXT_BOUND: SizeBound = { limit: 8 * 1024 * 1024, message: 'Text fi
 export const STALE_MESSAGE = 'The file changed on disk. Your edits are safe here; compare or reload before saving.';
 /** A save or read whose file is no longer at its path. */
 export const PATH_CHANGED_MESSAGE = 'The file path changed. Reopen it before saving.';
-/** An image the Markdown editor may read but not replace in place (`EditorStore.editableImage`). */
+/** Why the Markdown editor shows an image it may read but not replace in place (`EditorStore.editableImage`). */
 export const NOT_IN_PLACE_MESSAGE = "This image can't be edited in place: its path goes through a symlink or is spelled differently from the file on disk.";
 
 /** A path an `EditorStore` reads or replaces, which only `storePath` mints. */
@@ -24,18 +25,23 @@ export type StorePath = string & { readonly __storePath: unique symbol };
  * it vetted. Never a page-supplied path, so writes reach nothing else. */
 export const storePath = (path: string): StorePath => path as StorePath;
 
+/** An image `EditorStore.editableImage` found: its path and size when it may
+ * be replaced in place, else why not. */
+export type InPlaceImage = { path: StorePath; size: number } | { refused: 'missing' | 'not-in-place' };
+
 /** Where an editor's files live. Each method enforces its containment, and
- * throws `HttpError` for a refusal. */
+ * throws `HttpError` for a refusal; `editableImage` names its refusal, whose
+ * status and message are the route's. */
 export interface EditorStore {
   /** A file's exact bytes and their sha256 revision; 413 with `bound.message` past `bound.limit`. */
   read(file: StorePath, bound: SizeBound): Promise<{ bytes: Uint8Array; version: string }>;
   /** Replaces `file` with `encode` of its current bytes while its revision is
    * still `version` (409 `STALE_MESSAGE` otherwise), at most `bound.limit` bytes. */
   replace(file: StorePath, version: string, bound: SizeBound, encode: (current: Uint8Array) => Uint8Array): Promise<{ version: string }>;
-  /** The file at `segments` under the document's folder when it may be
-   * replaced in place; null when it exists but its spelling is not its own
-   * path on disk; 404 when it is missing. */
-  editableImage(segments: string[]): Promise<StorePath | null>;
+  /** The regular file at `segments` under the document's folder when it may be
+   * replaced in place; `not-in-place` when its spelling is not its own path on
+   * disk; `missing` when it is not there or leaves the folder. */
+  editableImage(segments: string[]): Promise<InPlaceImage>;
   /** Writes `name` beside the document, never replacing; false when it exists. */
   create(name: string, bytes: Uint8Array): Promise<boolean>;
   /** Moves the file at `from` to `to`, both under the document's folder in
@@ -59,12 +65,13 @@ export interface EditorReply { body: string | Uint8Array; type: string; headers?
 
 export type EditorKind = 'text' | 'markdown' | 'image';
 
-/** The editor `builtin:file` or `builtin:code` opens for `path` in `format`,
- * `size` bytes at open; null when it only views it, as it does a PNG or JPEG
- * past `IMAGE_BOUND`, which streams instead. */
-export function editorKind(format: FileFormat, path: string, size: number): EditorKind | null {
+/** The editor `builtin:file` or `builtin:code` opens for a file in `format`,
+ * whose `imageEditability` is `image` when it is a PNG or JPEG; null when it
+ * only views it, as it does an image `image` leaves view-only, which streams
+ * instead. */
+export function editorKind(format: FileFormat, image: Editability | null): EditorKind | null {
   if (format.text) return format.markdown ? 'markdown' : 'text';
-  return editableImageType(path) && size <= IMAGE_BOUND.limit ? 'image' : null;
+  return image && 'ok' in image ? 'image' : null;
 }
 
 /** `route`, relative to the document's folder, as `/` segments when its
@@ -155,14 +162,28 @@ export function editorRoutes({ kind, file, name, store, onDirty }: {
       return store.replace(target.path, version, IMAGE_BOUND, () => bytes);
     }));
   };
-  /** A PNG or JPEG under the document's folder, replaceable in place. */
-  const editableImage = async (route: string): Promise<ImageTarget> => {
+  /** A PNG or JPEG under the document's folder that may be replaced in
+   * place, or why the editor shows it view-only; 415 for another type, 404
+   * when it is missing. */
+  const inPlaceImage = async (route: string): Promise<ImageTarget & { size: number } | { viewOnly: string }> => {
     const segments = imageSegments(route);
     const mime = editableImageType(route);
     if (!mime) throw new HttpError(415, 'Only PNG and JPEG images can be edited.');
-    const path = await store.editableImage(segments);
-    if (path === null) throw new HttpError(404, NOT_IN_PLACE_MESSAGE);
-    return { path, mime };
+    const found = await store.editableImage(segments);
+    if ('path' in found) return { path: found.path, mime, size: found.size };
+    if (found.refused === 'missing') throw new HttpError(404);
+    return { viewOnly: NOT_IN_PLACE_MESSAGE };
+  };
+  /** The Markdown editor's image to edit: its bytes and revision, or, as
+   * JSON, why the editor shows it view-only (`imageEditability`). */
+  const imageToEdit = async (route: string): Promise<EditorReply> => {
+    const target = await inPlaceImage(route);
+    if ('viewOnly' in target) return json(target);
+    const bySize = imageEditability(target.size, new Uint8Array(0));
+    if ('viewOnly' in bySize) return json(bySize);
+    const file = await store.read(target.path, IMAGE_BOUND);
+    const byHeader = imageEditability(file.bytes.length, file.bytes);
+    return 'viewOnly' in byHeader ? json(byHeader) : image(file, target.mime);
   };
   return async request => {
     const { route } = request;
@@ -183,7 +204,11 @@ export function editorRoutes({ kind, file, name, store, onDirty }: {
         if (!await store.rename(from, to)) throw new HttpError(409, `${to[to.length - 1]} already exists.`);
         return json({});
       }
-      if (kind === 'markdown' && route.startsWith(IMAGE_SAVE_ROUTE)) return imageSave(request, await editableImage(route.slice(IMAGE_SAVE_ROUTE.length)));
+      if (kind === 'markdown' && route.startsWith(IMAGE_SAVE_ROUTE)) {
+        const target = await inPlaceImage(route.slice(IMAGE_SAVE_ROUTE.length));
+        if ('viewOnly' in target) throw new HttpError(404, target.viewOnly);
+        return imageSave(request, target);
+      }
       if (ownImage && route === 'save') return imageSave(request, ownImage);
       if (route !== 'save' && route !== 'state') throw new HttpError(404);
       // JSON escapes a byte as at most six (`\u00XX`).
@@ -201,10 +226,7 @@ export function editorRoutes({ kind, file, name, store, onDirty }: {
       return { body: (kind === 'image' ? imagePage : kind === 'markdown' ? markdownPage : editorPage)(name), type: 'text/html; charset=utf-8' };
     }
     if (route === 'source') return ownImage ? image(await store.read(file, IMAGE_BOUND), ownImage.mime) : json({ ...await readText(store, file), name });
-    if (kind === 'markdown' && route.startsWith(EDIT_ROUTE)) {
-      const target = await editableImage(route.slice(EDIT_ROUTE.length));
-      return image(await store.read(target.path, IMAGE_BOUND), target.mime);
-    }
+    if (kind === 'markdown' && route.startsWith(EDIT_ROUTE)) return imageToEdit(route.slice(EDIT_ROUTE.length));
     return null;
   };
 }

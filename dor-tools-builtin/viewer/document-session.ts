@@ -5,9 +5,9 @@ export interface DocumentState { loaded: boolean; dirty: boolean; saving: boolea
 /** A document's state before its first load lands. */
 export const loadingState: DocumentState = { loaded: false, dirty: false, saving: false };
 
-/** One editor's view of an opened document, whose contents are `Content`:
- * the file's text, or an image's bytes. */
-export interface DocumentEditor<Mark, Content = string> {
+/** One editor's view of an opened document, whose contents are `Content`
+ * (the file's text, or an image's bytes) and arrive as `Loaded`. */
+export interface DocumentEditor<Mark, Content = string, Loaded = Content> {
   /** The contents to save and a mark naming the revision they came from. */
   snapshot(): { content: Content | Promise<Content>; mark: Mark };
   /** The current revision's mark, when naming it is cheaper than a snapshot. */
@@ -15,12 +15,12 @@ export interface DocumentEditor<Mark, Content = string> {
   /** Whether the editor still holds the revision `mark` names. */
   holds(mark: Mark): boolean;
   /** Replaces the editor's contents with the file's. */
-  apply(content: Content, name: string): void | Promise<void>;
+  apply(content: Loaded, name: string): void | Promise<void>;
 }
 
-/** How a page reads and writes a document's contents. */
-export interface DocumentSource<Content> {
-  load(): Promise<{ content: Content; version: string; name: string }>;
+/** How a page reads a document's contents (as `Loaded`) and writes them. */
+export interface DocumentSource<Content, Loaded = Content> {
+  load(): Promise<{ content: Loaded; version: string; name: string }>;
   /** Writes `content` over revision `version`; resolves to the new revision. */
   save(content: Content, version: string): Promise<{ version: string }>;
 }
@@ -98,7 +98,7 @@ export interface OpenDocument {
 
 export interface DocumentPage {
   /** Opens a document in front of the page's others. */
-  open<Mark, Content = string>(editor: DocumentEditor<Mark, Content>, view: DocumentView, source: DocumentSource<Content>): OpenDocument;
+  open<Mark, Content = string, Loaded = Content>(editor: DocumentEditor<Mark, Content, Loaded>, view: DocumentView, source: DocumentSource<Content, Loaded>): OpenDocument;
 }
 
 /** A built-in editor page (docs/specs/dor-tools-builtin.md -> Editing files)
@@ -163,8 +163,8 @@ export function documentPage(): DocumentPage {
   };
 }
 
-function openDocument<Mark, Content>(editor: DocumentEditor<Mark, Content>, view: DocumentView,
-  source: DocumentSource<Content>, onReport: () => void, onClose: () => void): OpenDocument {
+function openDocument<Mark, Content, Loaded>(editor: DocumentEditor<Mark, Content, Loaded>, view: DocumentView,
+  source: DocumentSource<Content, Loaded>, onReport: () => void, onClose: () => void): OpenDocument {
   let version = '';
   let saved: { mark: Mark } | undefined;
   let saving: Promise<void> | null = null;

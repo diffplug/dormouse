@@ -195,10 +195,13 @@ export class EditorController {
     return edit.commit();
   }
 
-  get canUndo() { return !!this.floating || this.history.canUndo; }
-  /** False while a floating selection or a changed label is pending: landing
-   * either is a new edit, which drops the redo steps. Undo cancels a float. */
-  get canRedo() { return this.history.canRedo && !this.floating && !this.textPending(); }
+  /** Whether a floating selection or a label that would change the document
+   * is pending, which `settle` would commit. */
+  private get pending() { return !!this.floating || this.textPending(); }
+  /** Undo cancels a pending float, and lands then undoes a pending label. */
+  get canUndo() { return this.pending || this.history.canUndo; }
+  /** False while an edit is pending: landing it is a new edit, which drops the redo steps. */
+  get canRedo() { return this.history.canRedo && !this.pending; }
   undo() {
     if (this.drag) return;
     this.finishText(true);
@@ -232,10 +235,13 @@ export class EditorController {
     this.landFloat(true);
     return this.doc;
   }
-  /** False while an edit is pending, which `settle` would commit. */
-  holds(revision: Revision) { return this.doc === revision && !this.floating && !this.textPending(); }
+  /** False while an edit is pending. */
+  holds(revision: Revision) { return this.doc === revision && !this.pending; }
 
   // --- Tools and styles ---------------------------------------------------
+
+  /** The swatch as a pixel tool writes it, in the image's color space. */
+  private get paintColor(): Rgba { return this.colors.toImage(this.color); }
 
   setTool(tool: Tool) {
     if (tool === this.tool) return;
@@ -568,7 +574,7 @@ export class EditorController {
       case 'brush': return e.altKey ? (this.pick(p), null) : this.brushDown(p, e);
       case 'bucket': {
         if (e.altKey) { this.pick(p); return null; }
-        const color = this.colors.toImage(this.color), region = px.floodRegion(this.doc.raster, p.x, p.y, color, this.tolerance);
+        const color = this.paintColor, region = px.floodRegion(this.doc.raster, p.x, p.y, color, this.tolerance);
         if (region) this.edit(region.rect, r => { px.fillSelection(r, region.rect, region.mask, color); });
         return null;
       }
@@ -725,7 +731,7 @@ export class EditorController {
 
   /** Paints the document's raster in place, one segment per move. */
   private brushDown(p: Point, e: PointerEvent): Drag {
-    const edit = this.pixelEdit(), color = this.colors.toImage(this.color), size = this.brushSize;
+    const edit = this.pixelEdit(), color = this.paintColor, size = this.brushSize;
     const brush = px.stamp(size, this.brushShape);
     let last = e.shiftKey && this.lastBrush ? this.lastBrush : p;
     const stroke = (a: Point, b: Point) => {
@@ -928,14 +934,17 @@ export class EditorController {
    * values, which a 2D canvas's premultiplied alpha would not. */
   encode(doc: Doc): Promise<Blob> {
     const { raster, objects } = doc;
-    if (!objects.length || !raster.width || !raster.height) return encodeImage(raster, this.format);
-    // Objects draw onto a clear layer, in the view's color space so their CSS
-    // colors match what it shows, and composite over the raw pixels.
+    const area = objects.length ? px.clipRect(raster, objects.map(ob.inkBounds).reduce<Rect | null>(px.unionRect, null)!) : null;
+    if (!area) return encodeImage(raster, this.format);
+    // Objects draw onto a clear layer over just the area they cover, in the
+    // view's color space so their CSS colors match what it shows, and
+    // composite over the raw pixels.
     const canvas = document.createElement('canvas');
-    canvas.width = raster.width; canvas.height = raster.height;
+    canvas.width = area.width; canvas.height = area.height;
     const ctx = this.context(canvas);
+    ctx.translate(-area.x, -area.y);
     for (const shape of objects) ob.drawShape(ctx, shape);
-    return encodeImage(over(raster, ctx.getImageData(0, 0, raster.width, raster.height).data), this.format);
+    return encodeImage(over(raster, area, ctx.getImageData(0, 0, area.width, area.height).data), this.format, true);
   }
 
   // --- Painting -----------------------------------------------------------

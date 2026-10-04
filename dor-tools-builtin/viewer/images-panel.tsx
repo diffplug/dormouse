@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { $getRoot, $isElementNode, type LexicalEditor, type LexicalNode } from 'lexical';
 import { $isImageNode, type ImageNode } from '@mdxeditor/editor';
-import { editableImageType, IMAGES_ROUTE } from '../src/image-format';
+import { editableImageType } from '../src/file-viewer-format';
+import { IMAGES_ROUTE } from '../src/image-format';
 import { message, request } from './document-session';
 
 /** A relative image `src` as the `/`-separated path the viewer serves under
@@ -93,9 +94,9 @@ function ImageRow({ src, editor, saved, onEdit }: { src: string; editor: Lexical
 /** Every image the document shows; local ones rename on disk at once, and
  * their links in the document change with the next save. PNG and JPEG open
  * in the image editor through `onEdit`. */
-export function ImagesPanel({ editor, sources, saved, onEdit, top }: { editor: LexicalEditor; sources: string[]; saved: SavedImages; onEdit(path: string): void; top?: number }) {
+export function ImagesPanel({ editor, sources, saved, onEdit }: { editor: LexicalEditor; sources: string[]; saved: SavedImages; onEdit(path: string): void }) {
   return (
-    <section className="images-panel" aria-label="Images" style={{ top }}>
+    <section className="images-panel" aria-label="Images">
       {sources.length
         ? <ul>{sources.map(src => <ImageRow key={src} src={src} editor={editor} saved={saved} onEdit={onEdit} />)}</ul>
         : <p>No images. Paste one to save it beside this file.</p>}

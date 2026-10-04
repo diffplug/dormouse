@@ -22,13 +22,19 @@ export const IMAGES_ROUTE = 'images/';
 // An image the Markdown editor shows can be opened directly; it never runs as a document there.
 export const IMAGE_CSP = "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:";
 
-const ascii = (b: Uint8Array, start: number, end: number) => String.fromCharCode(...b.subarray(start, end));
-const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+/** `b[start, end)` as Latin-1 text. */
+export const ascii = (b: Uint8Array, start: number, end: number): string => String.fromCharCode(...b.subarray(start, end));
+/** The eight bytes every PNG opens with. */
+export const PNG_SIGNATURE: readonly number[] = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+/** Whether `b` opens with the PNG signature. */
+export const isPng = (b: Uint8Array): boolean => PNG_SIGNATURE.every((byte, i) => b[i] === byte);
+/** Whether `b` opens with a JPEG's SOI and the marker after it. */
+export const isJpeg = (b: Uint8Array): boolean => b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff;
 
 /** A pasted image's type, its file extension, and the signature its bytes must open with. */
 const PASTE_TYPES: Record<string, { ext: string; magic: (b: Uint8Array) => boolean }> = {
-  'image/png': { ext: 'png', magic: b => PNG_SIGNATURE.every((byte, i) => b[i] === byte) },
-  'image/jpeg': { ext: 'jpg', magic: b => b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff },
+  'image/png': { ext: 'png', magic: isPng },
+  'image/jpeg': { ext: 'jpg', magic: isJpeg },
   'image/gif': { ext: 'gif', magic: b => /^GIF8[79]a/.test(ascii(b, 0, 6)) },
   'image/webp': { ext: 'webp', magic: b => ascii(b, 0, 4) === 'RIFF' && ascii(b, 8, 12) === 'WEBP' },
 };
@@ -36,8 +42,6 @@ const PASTE_TYPES: Record<string, { ext: string; magic: (b: Uint8Array) => boole
 /** The `PASTE_TYPES` type whose signature `bytes` opens with, if any. */
 export const imageKind = (bytes: Uint8Array): string | undefined =>
   Object.keys(PASTE_TYPES).find(type => PASTE_TYPES[type].magic(bytes));
-
-export { editableImageType } from './file-viewer-format.js';
 
 /** Whether `path`'s extension names an image format. */
 export const isImage = (path: string): boolean => !!fileViewerFormat(path)?.mime.startsWith('image/');

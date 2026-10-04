@@ -194,13 +194,18 @@ test('in-place image saves follow no symlink, to the image or to a folder above 
   await symlink(join(docs, 'img', 'a b.png'), join(docs, 'alias.png'));
   await symlink(join(docs, 'img'), join(docs, 'linked'));
   await symlink(join(root, 'outside.png'), join(docs, 'escape.png'));
-  for (const path of ['alias.png', 'linked/a%20b.png', 'escape.png']) {
+  for (const path of ['alias.png', 'linked/a%20b.png']) {
+    // The overlay shows it view-only, with why.
     const opened = await edit(viewer, path);
-    assert.equal(opened.status, 404, path);
-    // The overlay shows why, rather than a bare status.
-    assert.equal(opened.body.toString(), NOT_IN_PLACE_MESSAGE, path);
-    assert.equal((await saveImage(viewer, path, version)).status, 404, path);
+    assert.equal(opened.status, 200, path);
+    assert.deepEqual(JSON.parse(opened.body), { viewOnly: NOT_IN_PLACE_MESSAGE }, path);
+    const saved = await saveImage(viewer, path, version);
+    assert.equal(saved.status, 404, path);
+    assert.equal(saved.body.toString(), NOT_IN_PLACE_MESSAGE, path);
   }
+  // A symlink leaving the folder grants nothing.
+  assert.equal((await edit(viewer, 'escape.png')).status, 404);
+  assert.equal((await saveImage(viewer, 'escape.png', version)).status, 404);
   const missing = await edit(viewer, 'missing.png');
   assert.equal(missing.status, 404);
   assert.equal(missing.body.toString(), '');
@@ -214,8 +219,25 @@ test('an image spelled differently from the file on disk is not edited in place'
   if (!await realpath(join(docs, 'img', 'A B.png')).then(() => true, () => false)) { t.skip('case-sensitive volume'); return; }
   const viewer = await start();
   const opened = await edit(viewer, 'img/A%20B.png');
-  assert.equal(opened.status, 404);
-  assert.equal(opened.body.toString(), NOT_IN_PLACE_MESSAGE);
+  assert.equal(opened.status, 200);
+  assert.deepEqual(JSON.parse(opened.body), { viewOnly: NOT_IN_PLACE_MESSAGE });
   assert.equal((await saveImage(viewer, 'img/A%20B.png', 'x')).status, 404);
   assert.ok((await readFile(join(docs, 'img', 'a b.png'))).equals(PNG));
+});
+
+test('an image past the editor\'s byte or pixel bound opens view-only in the overlay, with why', async () => {
+  const viewer = await start();
+  // A header declaring 9000 × 9000 pixels; no pixel data follows.
+  const huge = Buffer.from(PNG);
+  huge.writeUInt32BE(9000, 16);
+  huge.writeUInt32BE(9000, 20);
+  await writeFile(join(docs, 'huge.png'), huge);
+  await writeFile(join(docs, 'heavy.png'), Buffer.concat([PNG, Buffer.alloc(32 * 1024 * 1024)]));
+  for (const [path, reason] of [['huge.png', /9000 × 9000 pixels/], ['heavy.png', /32 MiB/]]) {
+    const opened = await edit(viewer, path);
+    assert.equal(opened.status, 200, path);
+    assert.equal(opened.headers['content-type'], 'application/json', path);
+    assert.match(JSON.parse(opened.body).viewOnly, reason, path);
+    assert.equal((await send(viewer, route(viewer, `images/${path}`))).status, 200, path);
+  }
 });

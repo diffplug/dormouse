@@ -63,6 +63,13 @@ export function bounds(shape: Shape): Rect {
   }
 }
 
+/** `bounds` grown to hold every pixel drawing `shape` touches: its stroke,
+ * arrowhead, highlighter band, or glyph outlines. */
+export function inkBounds(shape: Shape): Rect {
+  const b = bounds(shape), pad = Math.max(arrowHead(shape.width), highlightWidth(shape.width), fontSize(shape.width) / 3) + 2;
+  return { x: b.x - pad, y: b.y - pad, width: b.width + 2 * pad, height: b.height + 2 * pad };
+}
+
 export function normalize(r: Rect): Rect {
   return { x: Math.min(r.x, r.x + r.width), y: Math.min(r.y, r.y + r.height), width: Math.abs(r.width), height: Math.abs(r.height) };
 }
