@@ -62,6 +62,7 @@ const CASES = [
   ['check 12: a bare file name in Source of truth', SPEC, '\nSource of truth: `lint-kit.mjs`.\n'],
   ['check 12: a bare file name under a punctuated lead-in', SPEC, '\nSource of truth, all in `lib/src/lib/`: `Wall.tsx`.\n'],
   ['check 12: a symbol the named file lacks', SPEC, '\nSource of truth: `noSuchSymbolXyz` in `scripts/lint-kit.mjs`.\n'],
+  ['check 12: a symbol the named file lacks, in prose outside Source of truth', SPEC, '\nThe guard is `noSuchSymbolXyz` in `scripts/lint-kit.mjs`.\n'],
   ['check 13: a quoted citation of a heading that does not exist', SOURCE, `\n// ${spec('layout.md')} -> "No Such Heading"\n`],
   ['check 13: a later heading in a quoted list that does not exist', SOURCE, `\n// ${spec('layout.md')} -> "Modes", "Workspaces" and "No Such Heading"\n`],
   ['check 13: a quoted heading that wraps onto the next line and does not exist', SOURCE, `\n// ${spec('layout.md')} -> "No Such\n// Heading"\n`],

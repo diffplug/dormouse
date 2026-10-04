@@ -47,9 +47,10 @@
  *      rationale file fails.
  *  12. A `Source of truth` paragraph, however its lead-in is punctuated,
  *      names at least one repo path check 4 can verify, never a bare file
- *      name (`Wall.tsx` dodges check 4 and rots silently), and every `symbol`
- *      it places `in` a file exists in that file. `Source of truth (<name>
- *      repo):` points outside this repo and is left alone.
+ *      name (`Wall.tsx` dodges check 4 and rots silently). `Source of truth
+ *      (<name> repo):` points outside this repo and is left alone. And
+ *      anywhere in a spec's prose, not only there, every `` `symbol` in
+ *      `path` `` pointer names a symbol that path's file contains.
  *  13. Every citation of a spec section — `docs/specs/<name>.md -> "Heading"`,
  *      `→ Heading`, `§Heading`, or `` `## Future` `` — in a tracked source
  *      file or spec names a spec that exists and a heading (quoted forms may
@@ -451,14 +452,24 @@ for (const spec of foldCheckedFiles) {
         problems.push(`${spec}:${i + 1}: Source of truth names a bare file name \`${t}\` — use the full repo path`);
       }
     }
-    for (const m of para.matchAll(SYMBOLS_IN_FILE_RE)) {
-      const src = checkablePath(m[2]) ? readIfExists(m[2]) : null;
-      if (src === null) continue; // not a repo path, or check 4 reports it missing
+  });
+}
+// Symbols placed in a file, anywhere in a spec's prose: a pointer outside
+// `Source of truth` rots the same way. Rationale files are history, and may
+// name what is gone. A directory, or a path check 4 reports missing, is skipped.
+const sourceOf = memo((path) => {
+  try { return checkablePath(path) ? readIfExists(path) : null; } catch { return null; }
+});
+for (const rel of allFiles.filter((f) => !hasRationale.has(f))) {
+  proseLines(rel).forEach((line, i) => {
+    for (const m of line.matchAll(SYMBOLS_IN_FILE_RE)) {
+      const src = sourceOf(m[2]);
+      if (src === null) continue;
       for (const sym of [...m[1].matchAll(TICK_RE)].map((x) => x[1])) {
         if (!IDENT_RE.test(sym)) continue;
         const leaf = sym.replace(/\(\)$/, '').split(/[.#]/).pop();
         if (!src.includes(leaf)) {
-          problems.push(`${spec}:${i + 1}: Source of truth places \`${sym}\` in \`${m[2]}\`, which does not contain it`);
+          problems.push(`${rel}:${i + 1}: places \`${sym}\` in \`${m[2]}\`, which does not contain it`);
         }
       }
     }
