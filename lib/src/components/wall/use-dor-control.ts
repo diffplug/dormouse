@@ -1,4 +1,5 @@
 import { moveSurface } from './surface-move';
+import { holdForHostInterrupt } from '../../lib/tool-run-hold';
 import { recordToolDirty } from '../../lib/tool-dirty-store';
 import { createSerialQueue } from '../../host/remote/serial-queue';
 import { useCallback, useEffect, useRef, type MutableRefObject } from 'react';
@@ -466,8 +467,10 @@ async function interruptToPrompt(id: string, signal?: AbortSignal, timeoutMs = P
   // it guarantees we never fire Ctrl+C into a non-integration shell (e.g. cmd.exe
   // popping `Terminate batch job (Y/N)?`).
   if (!isPaneOscDriven(id)) return { ok: false, message: 'has no Dormouse shell integration to restart' };
-  // The interrupt is the host's own doing: never a command-exit ring or a push.
-  getPlatform().alertSilenceRun?.(id);
+  // The interrupt is the host's own doing: never a command-exit ring or a
+  // push, and never the end of a Tool's designation (docs/specs/dor-tool.md ->
+  // Run end) until the host gives up on a successor.
+  holdForHostInterrupt(id);
   getPlatform().writePty(id, '\x03');
   const interrupted = await waitForTerminalState(
     id,

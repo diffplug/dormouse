@@ -111,6 +111,7 @@ import {
 } from './wall/lath-wall-engine';
 import type { LeafMeta } from '../lib/lath/persistence';
 import { useToolServing } from './wall/use-tool-serving';
+import { useToolRunEnd } from './wall/use-tool-run-end';
 import { useToolReaper } from './wall/use-tool-reaper';
 import { rehydrateTool } from './wall/tool-reaper';
 import type { WallNav } from './wall/keyboard/types';
@@ -1745,6 +1746,7 @@ export function Wall({
   // A tool grows its browser when its command starts serving.
   const toolsPaused = useCallback(() => closingWorkspaceRef.current || isWorkspaceTransferPending(effectiveWorkspaceId), [effectiveWorkspaceId]);
   useToolServing({ lath, doorsRef, paused: toolsPaused });
+  useToolRunEnd({ lath, doorsRef, paused: toolsPaused });
   useToolReaper({ lath, doors, doorsRef, active, paused: toolsPaused });
 
   const previewSlot = usePreviewSlotPin(lath);

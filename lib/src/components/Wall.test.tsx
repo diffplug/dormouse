@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { dispatchDorControlRequest } from '../lib/platform/dor-control-dispatch';
 import { SURFACE_CONTROL_METHODS } from 'dor/protocol';
 import { sessionForKey } from 'dor-lib-common/browser-providers';
+import { _resetRunHoldsForTesting, holdForHostInterrupt } from '../lib/tool-run-hold';
 import { Wall } from './Wall';
 import * as helpers from '../lib/helper-terminal';
 import * as agentBrowserScreen from './wall/agent-browser-screen';
@@ -2833,7 +2834,11 @@ describe('Wall on the Lath engine', () => {
       act(() => {
         fake.spawnPty(id);
         terminalRegistry.seedTerminalManualCwd(id, '/repo');
-        finish(command);
+        // An idle keyed match lasts only while the host replaces its run
+        // (docs/specs/dor-tool.md -> Run end): seed one mid-replacement.
+        reportRunning(id, command);
+        holdForHostInterrupt(id);
+        terminalRegistry.applyTerminalSemanticEvents(id, [{ type: 'commandFinish', exitCode: 0 }, { type: 'promptStart' }]);
       });
       const oldRun = terminalRegistry.getTerminalPaneState(id).lastCommand!.id;
       fake.setInputHandler(id, data => {
@@ -2863,6 +2868,7 @@ describe('Wall on the Lath engine', () => {
       await act(async () => { controller.abort(); await new Promise(resolve => setTimeout(resolve, 125)); });
       fake.clearInputHandler(id);
       act(() => terminalRegistry.removeTerminalPaneState(id));
+      _resetRunHoldsForTesting();
     }
   });
 
@@ -3012,7 +3018,7 @@ describe('Wall on the Lath engine', () => {
   it.each([
     { kind: 'powershell' as const, defaultShell: '/bin/bash', command: "& 'program path' 'it''s.txt'" },
     { kind: 'posix' as const, defaultShell: 'pwsh.exe', command: "'program path' 'it'\\''s.txt'" },
-  ])('quotes takeover and keyed rerun for the existing $kind Session after changing defaults', async ({ kind, defaultShell, command }) => {
+  ])('quotes takeover for the existing $kind Session after changing defaults, and again once its Tool has ended', async ({ kind, defaultShell, command }) => {
     const controller = new AbortController();
     const typed: string[] = [];
     vi.spyOn(terminalRegistry, 'getTerminalShellKind').mockImplementation(id => id === 'pane-a' ? kind : null);
@@ -3024,7 +3030,9 @@ describe('Wall on the Lath engine', () => {
       act(() => fake.spawnPty('pane-a'));
       fake.setInputHandler('pane-a', data => typed.push(data));
       terminalRegistry.seedTerminalManualCwd('pane-a', '/repo');
-      for (const status of ['takeover', 'adopted']) {
+      // The first run ends, so the pane is a plain terminal again and the
+      // second invocation takes it over afresh (docs/specs/dor-tool.md -> Run end).
+      for (const [index, status] of ['takeover', 'takeover'].entries()) {
         act(() => reportRunning('pane-a', 'dor tool storybook'));
         const respond = vi.fn();
         await act(async () => window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
@@ -3039,7 +3047,8 @@ describe('Wall on the Lath engine', () => {
         expect(typed.at(-1)).toBe(`${command}\r`);
         act(() => {
           reportRunning('pane-a', command);
-          terminalRegistry.applyTerminalSemanticEvents('pane-a', [{ type: 'commandFinish', exitCode: 0 }, { type: 'promptStart' }]);
+          // The second run keeps going, so its Tool persists below.
+          if (index === 0) terminalRegistry.applyTerminalSemanticEvents('pane-a', [{ type: 'commandFinish', exitCode: 0 }, { type: 'promptStart' }]);
         });
         await act(async () => { await new Promise(resolve => setTimeout(resolve, 150)); });
       }
