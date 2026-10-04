@@ -20,7 +20,7 @@
       "name": "objc2-app-kit",
       "version": "0.3.2",
       "license": "MIT OR Zlib OR Apache-2.0",
-      "author": null,
+      "author": "Mads Marquart",
       "homepage": "https://github.com/madsmtm/objc2",
       "declaredName": "objc2-app-kit"
     },
@@ -28,7 +28,7 @@
       "name": "objc2-foundation",
       "version": "0.3.2",
       "license": "MIT",
-      "author": null,
+      "author": "Mads Marquart",
       "homepage": "https://github.com/madsmtm/objc2",
       "declaredName": "objc2-foundation"
     },
@@ -92,7 +92,7 @@
       "name": "windows",
       "version": "0.62.2",
       "license": "MIT OR Apache-2.0",
-      "author": null,
+      "author": "Microsoft",
       "homepage": "https://github.com/microsoft/windows-rs",
       "declaredName": "windows"
     }
@@ -235,7 +235,7 @@
       "name": "bs58",
       "version": "0.5.1",
       "license": "MIT OR Apache-2.0",
-      "author": null,
+      "author": "bs58-rs contributors",
       "homepage": "https://github.com/Nullus157/bs58-rs"
     },
     {
@@ -305,7 +305,7 @@
       "name": "cargo-platform",
       "version": "0.1.9",
       "license": "MIT OR Apache-2.0",
-      "author": null,
+      "author": "The Rust Project Developers",
       "homepage": "https://github.com/rust-lang/cargo"
     },
     {
@@ -354,7 +354,7 @@
       "name": "chrono",
       "version": "0.4.44",
       "license": "MIT OR Apache-2.0",
-      "author": null,
+      "author": "Kang Seonghoon and contributors",
       "homepage": "https://github.com/chronotope/chrono"
     },
     {
@@ -417,14 +417,14 @@
       "name": "crossbeam-channel",
       "version": "0.5.15",
       "license": "MIT OR Apache-2.0",
-      "author": null,
+      "author": "The Crossbeam Project Developers",
       "homepage": "https://github.com/crossbeam-rs/crossbeam/tree/master/crossbeam-channel"
     },
     {
       "name": "crossbeam-utils",
       "version": "0.8.21",
       "license": "MIT OR Apache-2.0",
-      "author": null,
+      "author": "The Crossbeam Project Developers",
       "homepage": "https://github.com/crossbeam-rs/crossbeam/tree/master/crossbeam-utils"
     },
     {
@@ -578,7 +578,7 @@
       "name": "dpi",
       "version": "0.1.2",
       "license": "Apache-2.0 AND MIT",
-      "author": null,
+      "author": "The winit contributors",
       "homepage": "https://github.com/rust-windowing/winit"
     },
     {
@@ -648,7 +648,7 @@
       "name": "equivalent",
       "version": "1.0.2",
       "license": "MIT OR Apache-2.0",
-      "author": null,
+      "author": "The indexmap contributors",
       "homepage": "https://github.com/indexmap-rs/equivalent"
     },
     {
@@ -697,7 +697,7 @@
       "name": "find-msvc-tools",
       "version": "0.1.9",
       "license": "MIT OR Apache-2.0",
-      "author": null,
+      "author": "Alex Crichton",
       "homepage": "https://github.com/rust-lang/cc-rs"
     },
     {
@@ -753,56 +753,56 @@
       "name": "futures-channel",
       "version": "0.3.32",
       "license": "MIT OR Apache-2.0",
-      "author": null,
+      "author": "Alex Crichton, The Tokio Authors",
       "homepage": "https://rust-lang.github.io/futures-rs"
     },
     {
       "name": "futures-core",
       "version": "0.3.32",
       "license": "MIT OR Apache-2.0",
-      "author": null,
+      "author": "Alex Crichton, The Tokio Authors",
       "homepage": "https://rust-lang.github.io/futures-rs"
     },
     {
       "name": "futures-executor",
       "version": "0.3.32",
       "license": "MIT OR Apache-2.0",
-      "author": null,
+      "author": "Alex Crichton, The Tokio Authors",
       "homepage": "https://rust-lang.github.io/futures-rs"
     },
     {
       "name": "futures-io",
       "version": "0.3.32",
       "license": "MIT OR Apache-2.0",
-      "author": null,
+      "author": "Alex Crichton, The Tokio Authors",
       "homepage": "https://rust-lang.github.io/futures-rs"
     },
     {
       "name": "futures-macro",
       "version": "0.3.32",
       "license": "MIT OR Apache-2.0",
-      "author": null,
+      "author": "Alex Crichton, The Tokio Authors",
       "homepage": "https://rust-lang.github.io/futures-rs"
     },
     {
       "name": "futures-sink",
       "version": "0.3.32",
       "license": "MIT OR Apache-2.0",
-      "author": null,
+      "author": "Alex Crichton, The Tokio Authors",
       "homepage": "https://rust-lang.github.io/futures-rs"
     },
     {
       "name": "futures-task",
       "version": "0.3.32",
       "license": "MIT OR Apache-2.0",
-      "author": null,
+      "author": "Alex Crichton, The Tokio Authors",
       "homepage": "https://rust-lang.github.io/futures-rs"
     },
     {
       "name": "futures-util",
       "version": "0.3.32",
       "license": "MIT OR Apache-2.0",
-      "author": null,
+      "author": "Alex Crichton, The Tokio Authors",
       "homepage": "https://rust-lang.github.io/futures-rs"
     },
     {
@@ -1005,7 +1005,7 @@
       "name": "hyper-rustls",
       "version": "0.27.9",
       "license": "MIT OR Apache-2.0 OR ISC",
-      "author": null,
+      "author": "Joseph Birr-Pixton",
       "homepage": "https://github.com/rustls/hyper-rustls"
     },
     {
@@ -1110,7 +1110,7 @@
       "name": "indexmap",
       "version": "1.9.3, 2.14.0",
       "license": "MIT OR Apache-2.0",
-      "author": null,
+      "author": "The indexmap contributors",
       "homepage": "https://github.com/indexmap-rs/indexmap"
     },
     {
@@ -1152,7 +1152,7 @@
       "name": "javascriptcore-rs",
       "version": "1.1.2",
       "license": "MIT",
-      "author": null,
+      "author": "The Gtk-rs Project Developers, Tauri Programme within The Commons Conservancy",
       "homepage": "https://github.com/tauri-apps/javascriptcore-rs"
     },
     {
@@ -1173,7 +1173,7 @@
       "name": "jni-macros",
       "version": "0.22.4",
       "license": "MIT OR Apache-2.0",
-      "author": null,
+      "author": "jni team",
       "homepage": "https://github.com/jni-rs/jni-rs"
     },
     {
@@ -1236,7 +1236,7 @@
       "name": "libc",
       "version": "0.2.189",
       "license": "MIT OR Apache-2.0",
-      "author": null,
+      "author": "The Rust Project Developers",
       "homepage": "https://github.com/rust-lang/libc"
     },
     {
@@ -1341,7 +1341,7 @@
       "name": "muda",
       "version": "0.19.1",
       "license": "MIT OR Apache-2.0",
-      "author": null,
+      "author": "Tauri Programme within The Commons Conservancy",
       "homepage": "https://github.com/tauri-apps/muda"
     },
     {
@@ -1369,7 +1369,7 @@
       "name": "nix",
       "version": "0.31.3",
       "license": "MIT",
-      "author": null,
+      "author": "Carl Lerche and nix-rust Authors",
       "homepage": "https://github.com/nix-rust/nix"
     },
     {
@@ -1404,49 +1404,49 @@
       "name": "objc2-cloud-kit",
       "version": "0.3.2",
       "license": "MIT OR Zlib OR Apache-2.0",
-      "author": null,
+      "author": "Mads Marquart",
       "homepage": "https://github.com/madsmtm/objc2"
     },
     {
       "name": "objc2-core-data",
       "version": "0.3.2",
       "license": "MIT OR Zlib OR Apache-2.0",
-      "author": null,
+      "author": "Mads Marquart",
       "homepage": "https://github.com/madsmtm/objc2"
     },
     {
       "name": "objc2-core-foundation",
       "version": "0.3.2",
       "license": "MIT OR Zlib OR Apache-2.0",
-      "author": null,
+      "author": "Mads Marquart",
       "homepage": "https://github.com/madsmtm/objc2"
     },
     {
       "name": "objc2-core-graphics",
       "version": "0.3.2",
       "license": "MIT OR Zlib OR Apache-2.0",
-      "author": null,
+      "author": "Mads Marquart",
       "homepage": "https://github.com/madsmtm/objc2"
     },
     {
       "name": "objc2-core-image",
       "version": "0.3.2",
       "license": "MIT OR Zlib OR Apache-2.0",
-      "author": null,
+      "author": "Mads Marquart",
       "homepage": "https://github.com/madsmtm/objc2"
     },
     {
       "name": "objc2-core-location",
       "version": "0.3.2",
       "license": "MIT OR Zlib OR Apache-2.0",
-      "author": null,
+      "author": "Mads Marquart",
       "homepage": "https://github.com/madsmtm/objc2"
     },
     {
       "name": "objc2-core-text",
       "version": "0.3.2",
       "license": "MIT OR Zlib OR Apache-2.0",
-      "author": null,
+      "author": "Mads Marquart",
       "homepage": "https://github.com/madsmtm/objc2"
     },
     {
@@ -1467,42 +1467,42 @@
       "name": "objc2-io-surface",
       "version": "0.3.2",
       "license": "MIT OR Zlib OR Apache-2.0",
-      "author": null,
+      "author": "Mads Marquart",
       "homepage": "https://github.com/madsmtm/objc2"
     },
     {
       "name": "objc2-osa-kit",
       "version": "0.3.2",
       "license": "MIT OR Zlib OR Apache-2.0",
-      "author": null,
+      "author": "Mads Marquart",
       "homepage": "https://github.com/madsmtm/objc2"
     },
     {
       "name": "objc2-quartz-core",
       "version": "0.3.2",
       "license": "MIT OR Zlib OR Apache-2.0",
-      "author": null,
+      "author": "Mads Marquart",
       "homepage": "https://github.com/madsmtm/objc2"
     },
     {
       "name": "objc2-ui-kit",
       "version": "0.3.2",
       "license": "MIT OR Zlib OR Apache-2.0",
-      "author": null,
+      "author": "Mads Marquart",
       "homepage": "https://github.com/madsmtm/objc2"
     },
     {
       "name": "objc2-user-notifications",
       "version": "0.3.2",
       "license": "MIT OR Zlib OR Apache-2.0",
-      "author": null,
+      "author": "Mads Marquart",
       "homepage": "https://github.com/madsmtm/objc2"
     },
     {
       "name": "objc2-web-kit",
       "version": "0.3.2",
       "license": "MIT OR Zlib OR Apache-2.0",
-      "author": null,
+      "author": "Mads Marquart",
       "homepage": "https://github.com/madsmtm/objc2"
     },
     {
@@ -1628,7 +1628,7 @@
       "name": "pin-project-lite",
       "version": "0.2.17",
       "license": "MIT OR Apache-2.0",
-      "author": null,
+      "author": "Taiki Endo",
       "homepage": "https://github.com/taiki-e/pin-project-lite"
     },
     {
@@ -1705,7 +1705,7 @@
       "name": "quick-xml",
       "version": "0.39.4",
       "license": "MIT",
-      "author": null,
+      "author": "Johann Tuffe",
       "homepage": "https://github.com/tafia/quick-xml"
     },
     {
@@ -1719,7 +1719,7 @@
       "name": "r-efi",
       "version": "5.3.0, 6.0.0",
       "license": "MIT OR Apache-2.0 OR LGPL-2.1-or-later",
-      "author": null,
+      "author": "Red Hat, Inc., Microsoft Corporation, David Rheinsberg",
       "homepage": "https://github.com/r-efi/r-efi/wiki"
     },
     {
@@ -1789,14 +1789,14 @@
       "name": "ring",
       "version": "0.17.14",
       "license": "Apache-2.0 AND ISC",
-      "author": null,
+      "author": "Brian Smith",
       "homepage": "https://github.com/briansmith/ring"
     },
     {
       "name": "rustc_version",
       "version": "0.4.1",
       "license": "MIT OR Apache-2.0",
-      "author": null,
+      "author": "The Rust Project Developers",
       "homepage": "https://github.com/djc/rustc-version-rs"
     },
     {
@@ -1817,42 +1817,42 @@
       "name": "rustls",
       "version": "0.23.40",
       "license": "MIT OR Apache-2.0 OR ISC",
-      "author": null,
+      "author": "Joseph Birr-Pixton",
       "homepage": "https://github.com/rustls/rustls"
     },
     {
       "name": "rustls-native-certs",
       "version": "0.8.3",
       "license": "MIT OR Apache-2.0 OR ISC",
-      "author": null,
+      "author": "Joseph Birr-Pixton",
       "homepage": "https://github.com/rustls/rustls-native-certs"
     },
     {
       "name": "rustls-pki-types",
       "version": "1.14.1",
       "license": "MIT OR Apache-2.0",
-      "author": null,
+      "author": "Dirkjan Ochtman",
       "homepage": "https://github.com/rustls/pki-types"
     },
     {
       "name": "rustls-platform-verifier",
       "version": "0.7.0",
       "license": "MIT OR Apache-2.0",
-      "author": null,
+      "author": "1Password",
       "homepage": "https://github.com/rustls/rustls-platform-verifier"
     },
     {
       "name": "rustls-platform-verifier-android",
       "version": "0.1.1",
       "license": "MIT OR Apache-2.0",
-      "author": null,
+      "author": "1Password",
       "homepage": "https://github.com/rustls/rustls-platform-verifier"
     },
     {
       "name": "rustls-webpki",
       "version": "0.103.13",
       "license": "ISC",
-      "author": null,
+      "author": "Brian Smith",
       "homepage": "https://github.com/rustls/webpki"
     },
     {
@@ -1957,7 +1957,7 @@
       "name": "serde_spanned",
       "version": "0.6.9, 1.1.1",
       "license": "MIT OR Apache-2.0",
-      "author": null,
+      "author": "toml-rs contributors",
       "homepage": "https://github.com/toml-rs/toml"
     },
     {
@@ -2097,14 +2097,14 @@
       "name": "softbuffer",
       "version": "0.4.8",
       "license": "MIT OR Apache-2.0",
-      "author": null,
+      "author": "Kirill Chibisov",
       "homepage": "https://github.com/rust-windowing/softbuffer"
     },
     {
       "name": "soup3",
       "version": "0.5.0",
       "license": "MIT",
-      "author": null,
+      "author": "The Gtk-rs Project Developers",
       "homepage": "https://gitlab.gnome.org/World/Rust/soup3-rs"
     },
     {
@@ -2356,7 +2356,7 @@
       "name": "tokio-rustls",
       "version": "0.26.4",
       "license": "MIT OR Apache-2.0",
-      "author": null,
+      "author": "quininer kel",
       "homepage": "https://github.com/rustls/tokio-rustls"
     },
     {
@@ -2391,14 +2391,14 @@
       "name": "toml_parser",
       "version": "1.1.2+spec-1.1.0",
       "license": "MIT OR Apache-2.0",
-      "author": null,
+      "author": "toml-rs contributors",
       "homepage": "https://github.com/toml-rs/toml"
     },
     {
       "name": "toml_writer",
       "version": "1.1.1+spec-1.1.0",
       "license": "MIT OR Apache-2.0",
-      "author": null,
+      "author": "toml-rs contributors",
       "homepage": "https://github.com/toml-rs/toml"
     },
     {
@@ -2454,7 +2454,7 @@
       "name": "tray-icon",
       "version": "0.24.1",
       "license": "MIT OR Apache-2.0",
-      "author": null,
+      "author": "Tauri Programme within The Commons Conservancy",
       "homepage": "https://github.com/tauri-apps/tray-icon"
     },
     {
@@ -2622,7 +2622,7 @@
       "name": "wasip2",
       "version": "1.0.3+wasi-0.2.9",
       "license": "MIT OR Apache-2.0 WITH LLVM-exception OR Apache-2.0",
-      "author": null,
+      "author": "The Bytecode Alliance",
       "homepage": "https://github.com/bytecodealliance/wasi-rs"
     },
     {
@@ -2685,42 +2685,42 @@
       "name": "webkit2gtk",
       "version": "2.0.2",
       "license": "MIT",
-      "author": null,
+      "author": "Antoni Boucher, The Gtk-rs Project Developers",
       "homepage": "https://github.com/tauri-apps/webkit2gtk-rs"
     },
     {
       "name": "webkit2gtk-sys",
       "version": "2.0.2",
       "license": "MIT",
-      "author": null,
+      "author": "Antoni Boucher",
       "homepage": "https://github.com/tauri-apps/webkit2gtk-rs"
     },
     {
       "name": "webpki-root-certs",
       "version": "1.0.7",
       "license": "CDLA-Permissive-2.0",
-      "author": null,
+      "author": "The rustls contributors",
       "homepage": "https://github.com/rustls/webpki-roots"
     },
     {
       "name": "webview2-com",
       "version": "0.38.2",
       "license": "MIT",
-      "author": null,
+      "author": "Bill Avery",
       "homepage": "https://github.com/wravery/webview2-rs"
     },
     {
       "name": "webview2-com-macros",
       "version": "0.8.1",
       "license": "MIT",
-      "author": null,
+      "author": "Bill Avery",
       "homepage": "https://github.com/wravery/webview2-rs"
     },
     {
       "name": "webview2-com-sys",
       "version": "0.38.2",
       "license": "MIT",
-      "author": null,
+      "author": "Bill Avery",
       "homepage": "https://github.com/wravery/webview2-rs"
     },
     {
@@ -2825,7 +2825,7 @@
       "name": "windows-collections",
       "version": "0.2.0, 0.3.2",
       "license": "MIT OR Apache-2.0",
-      "author": null,
+      "author": "Microsoft",
       "homepage": "https://github.com/microsoft/windows-rs"
     },
     {
@@ -2839,21 +2839,21 @@
       "name": "windows-future",
       "version": "0.2.1, 0.3.2",
       "license": "MIT OR Apache-2.0",
-      "author": null,
+      "author": "Microsoft",
       "homepage": "https://github.com/microsoft/windows-rs"
     },
     {
       "name": "windows-implement",
       "version": "0.60.2",
       "license": "MIT OR Apache-2.0",
-      "author": null,
+      "author": "Microsoft",
       "homepage": "https://github.com/microsoft/windows-rs"
     },
     {
       "name": "windows-interface",
       "version": "0.59.3",
       "license": "MIT OR Apache-2.0",
-      "author": null,
+      "author": "Microsoft",
       "homepage": "https://github.com/microsoft/windows-rs"
     },
     {
@@ -2867,14 +2867,14 @@
       "name": "windows-numerics",
       "version": "0.2.0, 0.3.1",
       "license": "MIT OR Apache-2.0",
-      "author": null,
+      "author": "Microsoft",
       "homepage": "https://github.com/microsoft/windows-rs"
     },
     {
       "name": "windows-registry",
       "version": "0.6.1",
       "license": "MIT OR Apache-2.0",
-      "author": null,
+      "author": "Microsoft",
       "homepage": "https://github.com/microsoft/windows-rs"
     },
     {
@@ -2916,14 +2916,14 @@
       "name": "windows-version",
       "version": "0.1.7",
       "license": "MIT OR Apache-2.0",
-      "author": null,
+      "author": "Microsoft",
       "homepage": "https://github.com/microsoft/windows-rs"
     },
     {
       "name": "winnow",
       "version": "0.5.40, 0.7.15, 1.0.3",
       "license": "MIT",
-      "author": null,
+      "author": "Ed Page and nom contributors",
       "homepage": "https://github.com/winnow-rs/winnow"
     },
     {

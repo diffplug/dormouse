@@ -423,11 +423,78 @@ const npmDepsBySection = Object.fromEntries(productSections.map(({ id }) => [
 ]));
 
 // Manual overrides for Cargo crates whose published Cargo.toml omits author or
-// homepage metadata. Keyed by crate name. libappindicator{,-sys} ship empty
-// `authors`/`homepage`/`repository`, so cargo metadata yields null for both.
+// homepage metadata. Keyed by crate name. Cargo deprecated `authors`, so newer
+// crates ship none; a missing entry fails generation, as for npm above.
+// libappindicator{,-sys} ship empty `authors`/`homepage`/`repository`, so cargo
+// metadata yields null for both.
 const cargoMissingAuthor = {
   "libappindicator": "Tauri Apps Contributors",
   "libappindicator-sys": "Tauri Apps Contributors",
+  // Holders named in each crate's LICENSE, COPYRIGHT, or AUTHORS file.
+  "chrono": "Kang Seonghoon and contributors",
+  "crossbeam-channel": "The Crossbeam Project Developers",
+  "crossbeam-utils": "The Crossbeam Project Developers",
+  "find-msvc-tools": "Alex Crichton",
+  "futures-channel": "Alex Crichton, The Tokio Authors",
+  "futures-core": "Alex Crichton, The Tokio Authors",
+  "futures-executor": "Alex Crichton, The Tokio Authors",
+  "futures-io": "Alex Crichton, The Tokio Authors",
+  "futures-macro": "Alex Crichton, The Tokio Authors",
+  "futures-sink": "Alex Crichton, The Tokio Authors",
+  "futures-task": "Alex Crichton, The Tokio Authors",
+  "futures-util": "Alex Crichton, The Tokio Authors",
+  "hyper-rustls": "Joseph Birr-Pixton",
+  "javascriptcore-rs": "The Gtk-rs Project Developers, Tauri Programme within The Commons Conservancy",
+  "libc": "The Rust Project Developers",
+  "muda": "Tauri Programme within The Commons Conservancy",
+  "nix": "Carl Lerche and nix-rust Authors",
+  "quick-xml": "Johann Tuffe",
+  "r-efi": "Red Hat, Inc., Microsoft Corporation, David Rheinsberg",
+  "ring": "Brian Smith",
+  "rustc_version": "The Rust Project Developers",
+  "rustls": "Joseph Birr-Pixton",
+  "rustls-native-certs": "Joseph Birr-Pixton",
+  "rustls-pki-types": "Dirkjan Ochtman",
+  "rustls-platform-verifier": "1Password",
+  "rustls-platform-verifier-android": "1Password",
+  "rustls-webpki": "Brian Smith",
+  "serde_spanned": "toml-rs contributors",
+  "softbuffer": "Kirill Chibisov",
+  "soup3": "The Gtk-rs Project Developers",
+  "tokio-rustls": "quininer kel",
+  "toml_parser": "toml-rs contributors",
+  "toml_writer": "toml-rs contributors",
+  "tray-icon": "Tauri Programme within The Commons Conservancy",
+  "webkit2gtk": "Antoni Boucher, The Gtk-rs Project Developers",
+  "webkit2gtk-sys": "Antoni Boucher",
+  "windows": "Microsoft",
+  "windows-collections": "Microsoft",
+  "windows-future": "Microsoft",
+  "windows-implement": "Microsoft",
+  "windows-interface": "Microsoft",
+  "windows-numerics": "Microsoft",
+  "windows-registry": "Microsoft",
+  "windows-version": "Microsoft",
+  // No holder in the crate's files: its project or maintainer. bs58's LICENSE
+  // names "The roaring-rs developers", a copy-paste from another project.
+  "bs58": "bs58-rs contributors",
+  "cargo-platform": "The Rust Project Developers",
+  "dpi": "The winit contributors",
+  "equivalent": "The indexmap contributors",
+  "indexmap": "The indexmap contributors",
+  "jni-macros": "jni team",
+  "pin-project-lite": "Taiki Endo",
+  "wasip2": "The Bytecode Alliance",
+  "webpki-root-certs": "The rustls contributors",
+  "webview2-com": "Bill Avery",
+  "webview2-com-macros": "Bill Avery",
+  "webview2-com-sys": "Bill Avery",
+  "winnow": "Ed Page and nom contributors",
+};
+// objc2's framework crates (objc2-app-kit, objc2-foundation, ...) name no
+// author; the core `objc2` crate names Mads Marquart.
+const cargoMissingAuthorPrefixes = {
+  "objc2-": "Mads Marquart",
 };
 const cargoMissingHomepage = {
   "libappindicator": "https://github.com/tauri-apps/libappindicator-rs",
@@ -448,7 +515,10 @@ function cargoPackageEntry(pkg) {
     name: pkg.name,
     version: pkg.version,
     license: normalizeLicense(pkg.license),
-    author: formatCargoAuthor(pkg.authors) ?? cargoMissingAuthor[pkg.name] ?? null,
+    author: formatCargoAuthor(pkg.authors)
+      ?? cargoMissingAuthor[pkg.name]
+      ?? Object.entries(cargoMissingAuthorPrefixes).find(([prefix]) => pkg.name.startsWith(prefix))?.[1]
+      ?? null,
     homepage: getCargoHomepage(pkg) ?? cargoMissingHomepage[pkg.name] ?? null,
   };
 }
@@ -509,6 +579,12 @@ function getCargoDependencies() {
 }
 
 const cargoDeps = getCargoDependencies();
+for (const dep of [...cargoDeps.direct, ...cargoDeps.transitive]) {
+  if (!dep.author) {
+    console.error(`ERROR: crate "${dep.name}" has no author. Add it to cargoMissingAuthor in generate-deps.js`);
+    process.exit(1);
+  }
+}
 
 // Bundled runtime: the standalone app ships a Node.js binary as a Tauri
 // sidecar (see standalone/src-tauri/build.rs). Its version is pinned exactly in
