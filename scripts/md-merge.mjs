@@ -28,10 +28,10 @@
  * already contains MORE or END, gets Git's own line merge instead.
  */
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 
 /** Ends a sentence line whose paragraph continues on the next line. */
 export const MORE = '\x1f';
@@ -258,7 +258,7 @@ async function main([basePath, oursPath, theirsPath, markerSize, path = '', base
   process.exit(conflicts > 0 ? 1 : 0);
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   main(process.argv.slice(2)).catch((error) => {
     console.error(`md-merge: ${error.message}`);
     process.exit(255);

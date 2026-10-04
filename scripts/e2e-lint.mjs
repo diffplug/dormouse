@@ -49,9 +49,9 @@
  * re-introduces each forbidden thing in turn and requires this lint to fail.
  */
 
-import { existsSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 
 import { readRepoFile, repoRoot, trackedFiles } from './lint-kit.mjs';
 
@@ -778,7 +778,7 @@ export function check() {
   return { failures, checked };
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const { failures, checked } = check();
   if (failures.length > 0) {
     console.error(`e2e-lint: the end-to-end boundary no longer holds what ${SECURITY_SPEC} requires\n`);

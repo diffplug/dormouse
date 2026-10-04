@@ -1,9 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { mergeMarkdown, mergeSentences, MORE } from './md-merge.mjs';
 
@@ -133,6 +133,15 @@ function repo(t, driver) {
 
 test('git merges through the driver', (t) => {
   const { status, text } = repo(t, `node ${JSON.stringify(DRIVER)} %O %A %B %L %P %S %X %Y`);
+  assert.equal(status, 0);
+  assert.equal(text, BASE.replace('Bravo two.', 'Bravo TWO.').replace('Charlie three.', 'Charlie THREE.'));
+});
+
+test('git merges through the driver reached by a symlink', (t) => {
+  const link = join(mkdtempSync(join(tmpdir(), 'md-merge-link-')), 'md-merge.mjs');
+  t.after(() => rmSync(dirname(link), { recursive: true, force: true }));
+  symlinkSync(DRIVER, link);
+  const { status, text } = repo(t, `node ${JSON.stringify(link)} %O %A %B %L %P %S %X %Y`);
   assert.equal(status, 0);
   assert.equal(text, BASE.replace('Bravo two.', 'Bravo TWO.').replace('Charlie three.', 'Charlie THREE.'));
 });
