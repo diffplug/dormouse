@@ -24,8 +24,9 @@
  *   md-merge.mjs %O %A %B %L %P %S %X %Y
  *
  * and reads the result from %A: exit 0 when clean, 1 on conflicts, above 128
- * when the merge itself failed. Input this driver cannot parse, or a side that
- * already contains MORE or END, gets Git's own line merge instead.
+ * when the merge itself failed. Input this driver cannot parse, a side that
+ * already contains MORE or END, or a worktree without its dependencies (no
+ * `pnpm install` yet) gets Git's own line merge instead, with a warning.
  */
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync, realpathSync } from 'node:fs';
@@ -210,14 +211,15 @@ function renderConflict({ ours, base, theirs }, { markerSize, labels, conflictSt
 
 /**
  * Merge three markdown texts sentence by sentence. Returns the merged text and
- * its conflict count; `sentences` is false when it fell back to a line merge.
+ * its conflict count; on a fall back to a line merge, `fallback` says why.
  */
 export async function mergeMarkdown({ base, ours, theirs, mdx = false, markerSize = 7, labels = ['ours', 'base', 'theirs'], conflictStyle = 'merge' }) {
+  let fallback = 'a side already holds a sentence-split marker';
   if (![base, ours, theirs].some((text) => text.includes(MORE) || text.includes(END))) {
     let kit = null;
-    try { kit = await import('./md-unwrap.mjs'); } catch { /* dependencies missing: line merge below */ }
     let split = null;
-    try { split = kit && [base, ours, theirs].map((text) => splitSentences(text, mdx, kit)); } catch { /* unparseable */ }
+    try { kit = await import('./md-unwrap.mjs'); } catch { fallback = 'its parser is not installed; run `pnpm install`'; }
+    try { split = kit && [base, ours, theirs].map((text) => splitSentences(text, mdx, kit)); } catch (error) { fallback = `a side does not parse (${error.message})`; }
     if (split) {
       const merged = mergeFile(split[0], split[1], split[2], ['--diff3', `--marker-size=${WIDE}`, '-L', 'o', '-L', 'b', '-L', 't']);
       const out = [];
@@ -232,12 +234,11 @@ export async function mergeMarkdown({ base, ours, theirs, mdx = false, markerSiz
         conflicts++;
       }
       out.push(...rejoin(flow));
-      return { text: out.join('\n'), conflicts, sentences: true };
+      return { text: out.join('\n'), conflicts };
     }
   }
   const style = conflictStyle === 'diff3' || conflictStyle === 'zdiff3' ? [`--${conflictStyle}`] : [];
-  const fallback = mergeFile(base, ours, theirs, [...style, `--marker-size=${markerSize}`, ...labels.flatMap((label) => ['-L', label])]);
-  return { ...fallback, sentences: false };
+  return { ...mergeFile(base, ours, theirs, [...style, `--marker-size=${markerSize}`, ...labels.flatMap((label) => ['-L', label])]), fallback };
 }
 
 async function main([basePath, oursPath, theirsPath, markerSize, path = '', baseLabel, oursLabel, theirsLabel]) {
@@ -245,7 +246,7 @@ async function main([basePath, oursPath, theirsPath, markerSize, path = '', base
   const labels = [oursLabel, baseLabel, theirsLabel].every(given) ? [oursLabel, baseLabel, theirsLabel] : undefined;
   const conflictStyle = spawnSync('git', ['config', 'merge.conflictStyle'], { encoding: 'utf8' }).stdout.trim() || undefined;
   const read = (file) => readFileSync(file, 'utf8');
-  const { text, conflicts } = await mergeMarkdown({
+  const { text, conflicts, fallback } = await mergeMarkdown({
     base: read(basePath),
     ours: read(oursPath),
     theirs: read(theirsPath),
@@ -254,6 +255,7 @@ async function main([basePath, oursPath, theirsPath, markerSize, path = '', base
     labels,
     conflictStyle,
   });
+  if (fallback) console.error(`md-merge: merged ${path || 'markdown'} line by line: ${fallback}`);
   writeFileSync(oursPath, text);
   process.exit(conflicts > 0 ? 1 : 0);
 }

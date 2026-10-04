@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -14,7 +14,7 @@ const BASE = md('# Title', '', 'Alpha one. Bravo two. Charlie three. Delta four.
 
 async function clean(base, ours, theirs, options) {
   const result = await mergeMarkdown({ base, ours, theirs, ...options });
-  assert.equal(result.sentences, true);
+  assert.equal(result.fallback, undefined);
   assert.equal(result.conflicts, 0, result.text);
   return result.text;
 }
@@ -107,7 +107,7 @@ test('every tracked markdown file survives an unchanged merge byte for byte', as
 test('a side that already holds a split marker gets a line merge', async () => {
   const odd = BASE.replace('Alpha', `Al${MORE}pha`);
   const result = await mergeMarkdown({ base: odd, ours: odd, theirs: odd });
-  assert.equal(result.sentences, false);
+  assert.equal(result.fallback, 'a side already holds a sentence-split marker');
   assert.equal(result.text, odd);
 });
 
@@ -128,7 +128,7 @@ function repo(t, driver) {
   writeFileSync(join(dir, 'doc.md'), BASE.replace('Bravo two.', 'Bravo TWO.'));
   git('commit', '-qam', 'main');
   const merge = git('merge', '-q', '--no-edit', 'topic');
-  return { status: merge.status, text: readFileSync(join(dir, 'doc.md'), 'utf8') };
+  return { status: merge.status, stderr: merge.stderr, text: readFileSync(join(dir, 'doc.md'), 'utf8') };
 }
 
 test('git merges through the driver', (t) => {
@@ -152,6 +152,16 @@ test('without the driver defined, or on a branch without the script, git merges 
     assert.equal(status, 1);
     assert.match(text, /^<<<<<<< HEAD\nAlpha one\. Bravo TWO\. Charlie three\. Delta four\.\n=======\n/m);
   }
+});
+
+test('a driver without its installed parser merges by line and says why', (t) => {
+  const bare = mkdtempSync(join(tmpdir(), 'md-merge-bare-'));
+  t.after(() => rmSync(bare, { recursive: true, force: true }));
+  for (const name of ['md-merge.mjs', 'md-unwrap.mjs']) copyFileSync(fileURLToPath(new URL(`./${name}`, import.meta.url)), join(bare, name));
+  const { status, stderr, text } = repo(t, `node ${JSON.stringify(join(bare, 'md-merge.mjs'))} %O %A %B %L %P %S %X %Y`);
+  assert.equal(status, 1);
+  assert.match(stderr, /md-merge: merged doc\.md line by line: its parser is not installed; run `pnpm install`/);
+  assert.match(text, /^<<<<<<< HEAD$/m);
 });
 
 /** The driver command scripts/setup-git.mjs installs, read back from a scratch repo. */
