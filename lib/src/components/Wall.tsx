@@ -2311,7 +2311,7 @@ export function Wall({
       const params = lath.getMeta(id)?.params;
       if (!isToolParams(params) || toolFace(params) === 'pending-approval' || !nav.hasPane(id) || lath.isDying(id)) return;
       exitTerminalMode();
-      setConfirmKill({ id, char: randomKillChar(), action: 'break' });
+      setConfirmKill({ id, char: randomKillChar(), action: 'break', serving: browserUrlFromParams(params) !== null });
     },
     onBrowserLaunchFailed: (id, error) => {
       // The one liveness check every creator's fallback shares.

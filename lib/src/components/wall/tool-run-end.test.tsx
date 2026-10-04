@@ -215,7 +215,10 @@ describe('Break', () => {
     act(() => reportRunning(ID, COMMAND));
     await mountTool(SERVING);
     expect(breakButton()).not.toBeNull();
-    await clickBreak();
+    await act(async () => breakButton()!.click());
+    await harness.flush();
+    expect(confirmTitle()?.parentElement?.textContent).toContain('its page opens in a browser pane beside it');
+    await press('q');
     const saved = await leaves();
     expect(saved[ID].component).toBe('terminal');
     expect(terminalRegistry.getTerminalPaneState(ID).currentCommand?.rawCommandLine).toBe(COMMAND);
@@ -252,10 +255,14 @@ describe('Break', () => {
     expect(saved[ID].component).toBe('tool');
   });
 
-  it('breaks a Tool not serving into its terminal alone', async () => {
+  it('breaks a Tool not serving into its terminal alone, saying so as it asks', async () => {
     await mountTool();
     await run(COMMAND);
-    await clickBreak();
+    await act(async () => breakButton()!.click());
+    await harness.flush();
+    expect(confirmTitle()?.parentElement?.textContent).toContain('It cannot become a Tool again.');
+    expect(confirmTitle()?.parentElement?.textContent).not.toContain('browser pane');
+    await press('q');
     const saved = await leaves();
     expect(Object.keys(saved)).toEqual([ID]);
     expect(saved[ID].component).toBe('terminal');
