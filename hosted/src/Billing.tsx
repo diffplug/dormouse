@@ -120,11 +120,11 @@ function PlanLine({ summary }: { summary: BillingSummary }) {
     <div className="method">
       <span>
         {PLAN_NAMES[summary.plan]}
-        {summary.until && (
-          <span className="detail">
-            {summary.renews ? "Renews" : "Ends"} {date(summary.until)}
-          </span>
-        )}
+        <span className="detail">
+          {!summary.active
+            ? "A payment is due. Update your card in Manage billing."
+            : summary.until && `${summary.renews ? "Renews" : "Ends"} ${date(summary.until)}`}
+        </span>
       </span>
     </div>
   );

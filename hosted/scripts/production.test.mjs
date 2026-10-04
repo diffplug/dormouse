@@ -218,7 +218,7 @@ test("live verification retries the relay and voice while their domains come up,
 test("the history sweep's cron is the voice Worker's, the relay's sweeps its expired rows, and the account's resyncs billing", () => {
   assert.deepEqual(configs.voice.triggers, { crons: ["*/5 * * * *"] });
   assert.deepEqual(configs.relay.triggers, { crons: ["0 * * * *"] });
-  assert.deepEqual(configs.account.triggers, { crons: ["30 * * * *"] });
+  assert.deepEqual(configs.account.triggers, { crons: ["*/10 * * * *"] });
 });
 test("the Durable Objects are the relay's, each rate limit its Worker's, and Durable Object migrations are append-only", () => {
   assert.deepEqual(configs.relay.durable_objects, {

@@ -37,6 +37,8 @@ export const COHORT_CACHE_MS = 60_000;
 export const BILLING_WEBHOOK_PATH = "/api/billing/webhook";
 
 const CHECKOUT_ID = /^[A-Za-z0-9_-]{1,64}$/;
+/** Subscription statuses Stripe has finished with (pgstencil's `missing` included). */
+const ENDED = ["canceled", "incomplete_expired", "missing"];
 // A shown name: no control characters, nothing a row could not print.
 const SHOWN_NAME = /^[^\p{Cc}\p{Cf}\p{Zl}\p{Zp}]{1,64}$/u;
 const SURVEY = ["tooExpensive", "tooCheap", "expensive", "bargain"] as const;
@@ -76,7 +78,7 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
 
   /**
    * The account's plan as the account app shows it, from the synchronized
-   * rows: webhooks, confirm, and the hourly resync keep them current.
+   * rows: webhooks, confirm, and the cron resync keep them current.
    */
   const summary = async (c: Context, billing: Billing<Plan>, setup: BillingSetup, userId: string) => {
     const [status, account, sold] = await Promise.all([
@@ -87,10 +89,14 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
       foundingSold(billing, setup),
     ]);
     const [row] = account.rows;
+    // A subscription Stripe still holds, paid up or not: its owner manages it
+    // in the portal (a failed card included) and cannot check out again.
+    const held = !!status.subscription && !ENDED.includes(status.subscription.status);
     return c.json({
-      plan: status.access ? status.plan : null,
-      until: status.access ? status.accessUntil : null,
-      renews: status.access && !status.subscription?.cancel_at_period_end,
+      plan: held ? status.plan : null,
+      active: status.access,
+      until: held ? status.accessUntil : null,
+      renews: held && !status.subscription?.cancel_at_period_end,
       entitled: row?.entitled === true,
       founder: row?.founder ?? null,
       founding: openCohort(sold),
@@ -234,8 +240,10 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
 
 /**
  * The account Worker's Cron Trigger: resyncs from Stripe every subscription
- * whose paid period or trial ends within the hour, so a missed renewal
- * webhook never lapses a member. At most `limit` accounts a run.
+ * still `active` or `trialing` whose period or trial has ended, so a missed
+ * renewal webhook lapses a member until the next run at most. At most
+ * `limit` accounts a run, picked at random so one that always fails cannot
+ * hold the rest back.
  */
 export async function reconcileDue(
   setup: BillingSetup | null,
@@ -247,8 +255,8 @@ export async function reconcileDue(
   const due = await queryDatabase<{ owner: string }>(
     databaseUrl,
     `SELECT owner_id AS owner FROM pgstencil_billing.subscriptions s
-    WHERE status IN ('active', 'trialing') AND NOT ${accessSql("s", "now() + interval '1 hour'")}
-    GROUP BY owner_id ORDER BY min(period_end) LIMIT $1`,
+    WHERE status IN ('active', 'trialing') AND NOT ${accessSql("s")}
+    GROUP BY owner_id ORDER BY random() LIMIT $1`,
     [limit],
   );
   if (!due.length) return;

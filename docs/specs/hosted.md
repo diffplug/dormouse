@@ -55,8 +55,8 @@ Source of truth: `App` in `hosted/src/App.tsx`; `restoreTheme` in `hosted/src/ma
 
 **Must read the entitlement (`docs/specs/pricing.md` -> "Checkout and entitlement") on the server, per request, through one SQL predicate over the account's `"user"` row**, so a bearer and its owner's entitlement resolve in one query.
 
-- **An account is entitled while it holds exactly one current subscription, and that one is `active` before its period end or `trialing` before its trial end**, against the database's clock: `@pgstencil/stripe`'s `status()` access, so `past_due` is refused at once.
-- **`ADMIN_EMAIL` is a standing comp** while it is the account's verified email, the only exception to "never email" ("Identity and login"); nothing else may key on an address.
+- **Must entitle an account only while it holds exactly one current subscription, and that one is `active` before its period end or `trialing` before its trial end**, against the database's clock: `@pgstencil/stripe`'s `status()` access, so `past_due` is refused at once.
+- **Must entitle `ADMIN_EMAIL` as a standing comp** while it is the account's verified email, the only exception to "never email" ("Identity and login"); nothing else may key on an address.
 
 Source of truth: `entitledSql` and `entitled` in `hosted/server/entitlement.ts`; `cookieEntitled` in `hosted/server/account-gate.ts`.
 
@@ -220,7 +220,7 @@ The account Worker sells the plans `monthly`, `yearly`, and `founding` through `
 
 | Route | Credential | Success |
 |---|---|---|
-| `GET /api/billing` | login cookie | 200 `{ plan, until, renews, entitled, founder, founding }` from the synchronized rows |
+| `GET /api/billing` | login cookie | 200 `{ plan, active, until, renews, entitled, founder, founding }` from the synchronized rows; `plan` names a subscription Stripe still holds, `active` whether it grants access |
 | `POST /api/billing/checkout` | login cookie, exact `Origin`, JSON `{ plan }` | 200 `{ url }` of Stripe Checkout |
 | `POST /api/billing/confirm` | login cookie, exact `Origin`, JSON `{ checkout }` | 200, the `GET` body |
 | `POST /api/billing/portal` | login cookie, exact `Origin` | 200 `{ url }` of the customer portal |
@@ -231,13 +231,13 @@ The account Worker sells the plans `monthly`, `yearly`, and `founding` through `
 
 Errors are JSON `{ message }`; the cookie routes answer 401 without a login and need no entitlement.
 
-- **Billing is off, not half-working**, without all five bindings — the secrets `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET`, the vars `STRIPE_PRICE_MONTHLY`, `STRIPE_PRICE_YEARLY`, and `STRIPE_PRICES_FOUNDING` (cohort order): every billing route answers 503 `CHECKOUT_CLOSED` and the cron does nothing. **Must refuse a ladder whose length differs from `FOUNDING_LADDER`** in `website/src/lib/hosted-pricing.ts`, the one owner of prices. Previews never bill; the dev loop bills on StripeDev, which takes no card.
+- **Must turn billing off, not half-working**, without all five bindings — the secrets `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET`, the vars `STRIPE_PRICE_MONTHLY`, `STRIPE_PRICE_YEARLY`, and `STRIPE_PRICES_FOUNDING` (cohort order): every billing route answers 503 `CHECKOUT_CLOSED` and the cron does nothing. **Must refuse a ladder whose length differs from `FOUNDING_LADDER`** in `website/src/lib/hosted-pricing.ts`, the one owner of prices. Previews never bill; the dev loop bills on StripeDev, which takes no card.
 - **Never take a Price, customer, owner, quantity, or return URL from a request**: checkout takes a plan name, the owner is the login, and Stripe returns to `/billing`. An account without a public email checks out with Stripe Checkout collecting one. A checkout left open for another plan is expired first.
 - **Must offer founding at the open cohort's Price**: the highest ladder step with a completed purchase, or the next once it holds `FOUNDING_COHORT_SIZE`; 409 once the ladder is full. A purchase counts unless it ended within `REFUND_DAYS` of starting, so a refund returns its seat only when the subscription is canceled at once in Stripe.
 - **Must verify the signature over the raw body before any write**, cap the body at `WEBHOOK_BODY_BYTES` (413), and answer 2xx only once `webhook()` has committed; any other failure answers 503, which Stripe retries.
-- **The cohort endpoint answers only the open cohort's index and seats (both absent once founding closes), the count of founding purchases, and the chosen names of opted-in current founders**, at most `MAX_SHOWN_FOUNDERS`, from a per-isolate cache of `COHORT_CACHE_MS`. **Must answer `SITE_ORIGIN` (`https://dormouse.sh`) this one `GET` path and 421 every other**, through the zone route `PRODUCTION` pins.
-- **Must resync, from the account's hourly Cron Trigger, every subscription whose paid period or trial ends within the hour**, so a missed renewal webhook never lapses a member; a failed resync fails the invocation.
-- **The account pages** are `/checkout?plan=` (signed in, the plan and its price now, then Stripe), Stripe's return to `/billing?checkout=` (confirmed, then the founders-row opt-in and the survey), and the account page's Plan section. **May keep a pending checkout's plan name, and nothing else, in the tab's session storage**, so a provider sign-in returns to it.
+- **Must answer from the cohort endpoint only the open cohort's index and seats (both absent once founding closes), the count of founding purchases, and the chosen names of opted-in current founders**, at most `MAX_SHOWN_FOUNDERS`, cached at most `COHORT_CACHE_MS`. **Must answer `SITE_ORIGIN` (`https://dormouse.sh`) this one `GET` path and 421 every other**, through the zone route `PRODUCTION` pins.
+- **Must resync, from the account's Cron Trigger every 10 minutes, every subscription still `active` or `trialing` past its period or trial end**, so a missed renewal webhook lapses a member until the next run at most; a failed resync fails the invocation, and an account that always fails cannot hold the others back.
+- **Must serve the account pages** `/checkout?plan=` (signed in, the plan and its price now, then Stripe), Stripe's return to `/billing?checkout=` (confirmed, then the founders-row opt-in and the survey for a completed checkout), and the account page's Plan section, which keeps Manage billing for a held subscription with a payment due. **May keep a pending checkout's plan name, and nothing else, in the tab's session storage** for a provider sign-in to return to.
 - **Must keep a founder's opt-in as the name they chose to show** (`dormouse_founders`, deleted on withdrawal) and the survey as one set of answers per account (`dormouse_price_survey`), each answer whole dollars or null.
 
 Source of truth: `billingRoutes` and `reconcileDue` in `hosted/server/billing-routes.ts`; `billingSetup`, `openCohort`, and `withBilling` in `hosted/server/billing.ts`; `hosted/src/Billing.tsx` and `takeCheckout` in `hosted/src/checkout.ts`; `hosted/server/dormouse-migrations/006_billing_founders.sql`. Pinned by `hosted/server/tests/billing.test.ts`.

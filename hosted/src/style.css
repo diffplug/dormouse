@@ -276,6 +276,7 @@ footer span {
 .check input {
   width: auto;
   min-height: 0;
+  accent-color: var(--vscode-focusBorder);
 }
 .founder button,
 form > button:last-child {
@@ -283,7 +284,4 @@ form > button:last-child {
 }
 .terms {
   margin-top: 16px;
-}
-.check input {
-  accent-color: var(--vscode-focusBorder);
 }

@@ -5,9 +5,12 @@ import { isCheckoutPlan as isPlan, type CheckoutPlan as Plan } from "../../websi
 // leaves the page, in this tab's session storage: a plan name, nothing else.
 const KEY = "dormouse-hosted-checkout";
 
+/** How long a pending plan waits for a provider sign-in to come back. */
+const PENDING_MS = 10 * 60 * 1000;
+
 function remember(plan: Plan | null) {
   try {
-    if (plan) sessionStorage.setItem(KEY, plan);
+    if (plan) sessionStorage.setItem(KEY, JSON.stringify({ plan, at: Date.now() }));
     else sessionStorage.removeItem(KEY);
   } catch {
     // Without storage, provider sign-in returns to the account page instead.
@@ -29,8 +32,9 @@ export function takeCheckout(): Plan | null | undefined {
   }
   if (pathname !== "/account") return undefined;
   try {
-    const plan = sessionStorage.getItem(KEY);
-    return isPlan(plan) ? plan : undefined;
+    const { plan, at } = JSON.parse(sessionStorage.getItem(KEY) ?? "{}");
+    remember(null);
+    return isPlan(plan) && Date.now() - at < PENDING_MS ? plan : undefined;
   } catch {
     return undefined;
   }

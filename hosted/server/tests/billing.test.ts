@@ -193,7 +193,7 @@ async function fixture({ billing = true } = {}) {
     const fetcher = (await worker.getWorker(wrangler.account.name)) as unknown as {
       scheduled(options: { cron: string }): Promise<{ outcome: string }>;
     };
-    return fetcher.scheduled({ cron: "30 * * * *" });
+    return fetcher.scheduled({ cron: "*/10 * * * *" });
   };
   return {
     ...context,
@@ -277,7 +277,7 @@ test("checkout to webhook to entitlement: voice and the Relay admit a member, an
     body: { checkout: session.metadata!.pgstencil_operation },
   });
   expect(confirmed.status).toBe(200);
-  expect(await confirmed.json()).toMatchObject({ plan: "monthly", entitled: true, renews: true });
+  expect(await confirmed.json()).toMatchObject({ plan: "monthly", active: true, entitled: true, renews: true });
   expect((await member.request("/api/billing/confirm", { method: "POST", body: { checkout: "unknown" } })).status).toBe(404);
 
   // Voice: mint and speak.
@@ -298,6 +298,8 @@ test("checkout to webhook to entitlement: voice and the Relay admit a member, an
   f.dev.transition(subscription.id, "payment-failed");
   await f.deliver();
   expect((await f.speak(token)).status).toBe(403);
+  // The plan stays on the account page, so its owner can fix the card.
+  expect(await member.summary()).toMatchObject({ plan: "monthly", active: false, entitled: false });
   f.dev.transition(subscription.id, "renew");
   await f.deliver();
   expect((await f.speak(token)).status).toBe(200);
@@ -317,7 +319,7 @@ test("checkout to webhook to entitlement: voice and the Relay admit a member, an
   ).toEqual([{ owner_id: userId, status: "canceled" }]);
 });
 
-test("a missed renewal webhook is repaired by the hourly resync before the member is refused", async ({
+test("a missed renewal webhook is repaired by the next resync", async ({
   onTestFinished,
 }) => {
   const f = await fixture();

@@ -74,10 +74,10 @@
     }
   ],
   "triggers": {
-    // Billing's resync of subscriptions whose period ends within the hour
-    // (`reconcileDue`); a no-op while billing is off.
+    // Billing's resync of subscriptions whose paid period has ended
+    // (`reconcileDue`); no database read while billing is off.
     "crons": [
-      "30 * * * *"
+      "*/10 * * * *"
     ]
   },
   "observability": {

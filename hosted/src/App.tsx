@@ -134,8 +134,11 @@ export function App({
         // Stripe's return: confirm the checkout it names, then welcome.
         if (returned)
           await act("confirm", async () => {
-            setBilling(await confirmCheckout(returned));
-            setWelcome(true);
+            const summary = await confirmCheckout(returned);
+            setBilling(summary);
+            // An open, expired, or still-processing checkout bought nothing yet.
+            if (summary.plan) setWelcome(true);
+            else setNotice("That checkout is not complete. Nothing was charged.");
           });
       })
       .catch((error) => setError(error.message))

@@ -164,7 +164,10 @@ export type { Plan };
 
 /** `GET /api/billing`: the account's plan (docs/specs/hosted.md -> "Billing"). */
 export interface BillingSummary {
+  /** The plan of the subscription Stripe holds, paid up or not. */
   plan: Plan | null;
+  /** Whether it grants access now; false while a payment is due. */
+  active: boolean;
   /** When the paid period ends. */
   until: string | null;
   /** False once cancelled to end at `until`. */
