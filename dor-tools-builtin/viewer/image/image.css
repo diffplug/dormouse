@@ -26,6 +26,7 @@
 .ie-slider input{width:90px;accent-color:var(--vscode-button-background,Highlight)}
 .ie-value{min-width:2.5ch;text-align:right;font-variant-numeric:tabular-nums;opacity:.8}
 .ie-hint{opacity:.65;white-space:nowrap}
+.ie-note{min-width:0;padding-left:8px;overflow:hidden;text-overflow:ellipsis}
 .ie-segmented{display:inline-flex;gap:1px}
 .ie-status{display:flex;align-items:center;gap:10px;margin-left:auto;padding-left:8px;white-space:nowrap;font-variant-numeric:tabular-nums}
 .ie-status>span{opacity:.8}

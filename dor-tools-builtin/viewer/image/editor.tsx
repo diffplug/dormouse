@@ -25,7 +25,7 @@ export interface ImageEditorHandle {
 
 export interface ImageEditorProps {
   /** The pixels to edit, read once at mount, and the format a save encodes
-   * to: PNG, or JPEG at quality 0.92. */
+   * to: PNG, or JPEG at quality 0.92, with the file's color metadata. */
   image: LoadedImage;
   name: string;
   /** After every document change. */
@@ -86,7 +86,7 @@ const SWATCHES = [
 const keepFocus = (e: { preventDefault(): void }) => e.preventDefault();
 
 export function ImageEditor({ image, name, onChange, controls, error, ref }: ImageEditorProps) {
-  const [ctl] = useState(() => new EditorController(image.raster));
+  const [ctl] = useState(() => new EditorController(image.raster, image));
   useSyncExternalStore(ctl.subscribe, ctl.getVersion);
   const theme = useSyncExternalStore(subscribeTheme, pageTheme);
   const root = useRef<HTMLDivElement>(null);
@@ -111,7 +111,7 @@ export function ImageEditor({ image, name, onChange, controls, error, ref }: Ima
   useEffect(() => { root.current?.focus({ preventScroll: true }); }, []);
 
   useImperativeHandle(ref, () => ({
-    snapshot() { const mark = ctl.settle(); return { content: ctl.encode(mark, image.mime), mark }; },
+    snapshot() { const mark = ctl.settle(); return { content: ctl.encode(mark), mark }; },
     revision: () => ctl.doc,
     holds: mark => ctl.holds(mark),
   }));
@@ -173,6 +173,7 @@ export function ImageEditor({ image, name, onChange, controls, error, ref }: Ima
           </label>
         </div>
         <ToolOptions ctl={ctl} showWidth={showWidth} />
+        {image.note && <span className="ie-hint ie-note" title={image.note}>{image.note}</span>}
         <div className="ie-status" role="status">
           {copied && <span>{copied}</span>}
           <button ref={hexRef} type="button" className="ie-hex" title="Copy this color's hex" onClick={() => void copyHex(hex)}>

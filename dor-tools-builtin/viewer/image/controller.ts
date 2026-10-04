@@ -7,6 +7,7 @@ import * as ob from './objects';
 import type { Shape } from './objects';
 import { History, Pieces, type Applied, type Doc, type Patch } from './history';
 import { center, clampView, fitView, stepZoom, zoomAt, type View } from './view';
+import { encodeImage, over, SRGB_PNG, type ImageFormat } from './io';
 import { Signal } from '../signal';
 
 export type Tool =
@@ -44,7 +45,10 @@ interface TextEdit { id: string | null; x: number; y: number; text: string }
 
 const hexToRgba = (hex: string): Rgba =>
   [parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16), 255];
-const imageData = (r: Raster) => new ImageData(r.data as Uint8ClampedArray<ArrayBuffer>, r.width, r.height);
+/** The raster's raw values, tagged with the color space they are in, so a
+ * canvas in that space takes them unconverted. */
+const imageData = (r: Raster, colorSpace: PredefinedColorSpace) =>
+  new ImageData(r.data as Uint8ClampedArray<ArrayBuffer>, r.width, r.height, { colorSpace });
 const inside = (r: Rect, p: Point) => p.x >= r.x && p.y >= r.y && p.x < r.x + r.width && p.y < r.y + r.height;
 const floatRect = (f: Floating): Rect => ({ x: f.x, y: f.y, width: f.pixels.width, height: f.pixels.height });
 /** The handle in `list` within grabbing distance of `p`. */
@@ -113,7 +117,9 @@ export class EditorController {
   /** The raster size the view last laid out, to refit a fitted view when it changes. */
   private shownSize: { width: number; height: number };
 
-  constructor(raster: Raster) {
+  /** `format` is what a save keeps from the opened file; its color space is
+   * the one every canvas here shows the raster in. */
+  constructor(raster: Raster, private readonly format: ImageFormat = SRGB_PNG) {
     this.shownSize = { width: raster.width, height: raster.height };
     this.history = new History({ raster, objects: [] });
   }
@@ -386,7 +392,7 @@ export class EditorController {
   /** Takes over `canvas`'s input and painting; returns the detach. */
   attach(canvas: HTMLCanvasElement): () => void {
     this.canvas = canvas;
-    this.ctx = canvas.getContext('2d');
+    this.ctx = this.context(canvas);
     this.refreshTheme();
     const on = <K extends keyof HTMLElementEventMap>(type: K, fn: (e: HTMLElementEventMap[K]) => void, options?: AddEventListenerOptions) => {
       canvas.addEventListener(type, fn as EventListener, options);
@@ -897,19 +903,19 @@ export class EditorController {
 
   // --- Output -------------------------------------------------------------
 
-  /** The document flattened at image resolution: raster, then objects in order. */
-  encode(doc: Doc, mime: string): Promise<Blob> {
+  /** The document flattened at image resolution, raster then objects in order,
+   * in the opened file's format. Pixels no object covers keep their exact
+   * values, which a 2D canvas's premultiplied alpha would not. */
+  encode(doc: Doc): Promise<Blob> {
+    const { raster, objects } = doc;
+    if (!objects.length || !raster.width || !raster.height) return encodeImage(raster, this.format);
+    // Objects draw onto a clear layer, in the view's color space so their CSS
+    // colors match what it shows, and composite over the raw pixels.
     const canvas = document.createElement('canvas');
-    canvas.width = doc.raster.width; canvas.height = doc.raster.height;
-    const ctx = canvas.getContext('2d')!;
-    // The view's copy already holds the shown raster's pixels.
-    if (doc.raster === this.shownRaster) ctx.drawImage(this.rasterCanvas, 0, 0);
-    else ctx.putImageData(imageData(doc.raster), 0, 0);
-    for (const shape of doc.objects) ob.drawShape(ctx, shape);
-    return new Promise((resolve, reject) => canvas.toBlob(
-      blob => blob ? resolve(blob) : reject(new Error('This image could not be encoded.')),
-      mime, mime === 'image/jpeg' ? 0.92 : undefined,
-    ));
+    canvas.width = raster.width; canvas.height = raster.height;
+    const ctx = this.context(canvas);
+    for (const shape of objects) ob.drawShape(ctx, shape);
+    return encodeImage(over(raster, ctx.getImageData(0, 0, raster.width, raster.height).data), this.format);
   }
 
   // --- Painting -----------------------------------------------------------
@@ -925,11 +931,16 @@ export class EditorController {
     if (this.shownRaster !== r) {
       this.shownRaster = r;
       if (c.width !== r.width || c.height !== r.height) { c.width = r.width; c.height = r.height; }
-      c.getContext('2d')!.putImageData(imageData(r), 0, 0);
+      this.context(c).putImageData(imageData(r, this.format.colorSpace), 0, 0);
       return;
     }
     const d = dirty && px.clipRect(r, dirty);
-    if (d) c.getContext('2d')!.putImageData(imageData(r), 0, 0, d.x, d.y, d.width, d.height);
+    if (d) this.context(c).putImageData(imageData(r, this.format.colorSpace), 0, 0, d.x, d.y, d.width, d.height);
+  }
+
+  /** `c`'s 2D context, in the image's color space (fixed by the first call). */
+  private context(c: HTMLCanvasElement): CanvasRenderingContext2D {
+    return c.getContext('2d', { colorSpace: this.format.colorSpace })!;
   }
 
   private draw() {
@@ -952,7 +963,7 @@ export class EditorController {
       if (this.shownFloat !== f.pixels) {
         this.shownFloat = f.pixels;
         this.floatCanvas.width = f.pixels.width; this.floatCanvas.height = f.pixels.height;
-        this.floatCanvas.getContext('2d')!.putImageData(imageData(f.pixels), 0, 0);
+        this.context(this.floatCanvas).putImageData(imageData(f.pixels, this.format.colorSpace), 0, 0);
       }
       ctx.drawImage(this.floatCanvas, sx(f.x), sy(f.y), f.pixels.width * z, f.pixels.height * z);
     }
