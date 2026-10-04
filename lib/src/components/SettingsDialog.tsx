@@ -22,7 +22,8 @@ import { PushTestButton, SpeakTestButton } from './AlarmTestButtons';
 import { ManagedVoiceSection, NetworkTopicLink, NO_PUSH_PLAN_COPY, useManagedVoiceOffered } from './ManagedVoiceSection';
 import { HostedPlansLink, SIGN_IN_LABEL } from './HostedSignIn';
 import { useNetworkPolicy } from './remote-control-shared';
-import { useHostedMembership, type HostedMembership } from '../lib/hosted-membership';
+import { managedVoicePort, membershipOf, useHostedMembership, type HostedMembership } from '../lib/hosted-membership';
+import { readBurrowStatusOnce } from '../remote/burrow/burrow-status-store';
 import { getPlatform } from '../lib/platform';
 import { getShellsSnapshot, subscribeToShells } from '../lib/shell-store';
 import { getDelayedKillSetting, labsAvailable, setDelayedKillSetting, subscribeToLabsSettings } from '../lib/labs-settings';
@@ -58,8 +59,10 @@ const PICKER_ROW = 'flex items-center gap-1.5 text-sm text-foreground [&>div]:mi
  * list to show and the copy must not imply one.
  */
 function describePushTargets(push: PushDevicesState, remoteControlBelow: boolean, membership: HostedMembership): string {
-  // Signed in, the Relay refuses an account without a plan, so nothing below holds.
+  // Hosted's Relay refuses an account without a plan, and a computer removed
+  // from it, whatever the device list last said.
   if (membership === 'no-plan') return NO_PUSH_PLAN_COPY;
+  if (membership === 'signed-out') return `${SIGN_IN_LABEL}${remoteControlBelow ? ' below' : ''} to send push.`;
   if (push.status === 'loading') return 'Looking for phones…';
   if (push.status === 'error') return 'Could not reach the Relay to list phones.';
   // The preview never shows Remote control, so it also omits "below".
@@ -70,10 +73,6 @@ function describePushTargets(push: PushDevicesState, remoteControlBelow: boolean
   // "below" has to key on the same seam the section gates on rather than on
   // `no-burrow`.
   if (push.status === 'no-burrow') {
-    // In a Hosted build, connecting to a Relay is signing in.
-    if (membership === 'signed-out') {
-      return `${SIGN_IN_LABEL}${remoteControlBelow ? ' below' : ''} to send push.`;
-    }
     return remoteControlBelow
       ? 'Connect this machine to a Dormouse Relay below to send push.'
       : 'Connect this machine to a Dormouse Relay to send push.';
@@ -107,6 +106,8 @@ const TOPIC_LABEL_OF = Object.fromEntries(
 export const TOPIC_GAP_PX = 16;
 /** A slower, consistent pace than the browser's native smooth scrolling. */
 export const SETTINGS_SCROLL_MS = 700;
+/** How long a dialog opened at a topic keeps that topic in view as content above it loads. */
+const SETTLE_MS = 2000;
 
 /** Search the mounted controls themselves so descriptions, options, and live
  * command/device names have no second copy to drift. Hidden groups stay mounted
@@ -167,7 +168,7 @@ export function SettingsDialog({ onClose, initialTopic }: { onClose: () => void;
   const searchRef = useRef<HTMLInputElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const scrollFrame = useRef<number | null>(null);
-  const [topic, setTopic] = useState<TopicId>(initialTopic ?? 'general');
+  const [topic, setTopic] = useState<TopicId>('general');
   const [hoveredTopic, setHoveredTopic] = useState<TopicId | null>(null);
   const [above, setAbove] = useState(false);
   const [below, setBelow] = useState(false);
@@ -223,6 +224,12 @@ export function SettingsDialog({ onClose, initialTopic }: { onClose: () => void;
     if (scrollFrame.current !== null) cancelAnimationFrame(scrollFrame.current);
     scrollFrame.current = null;
   }, []);
+  /** The topic opened at, held in view for a moment while the sections above it load. */
+  const settling = useRef<{ id: TopicId; until: number } | null>(null);
+  const takeOverScroll = useCallback(() => {
+    settling.current = null;
+    cancelScroll();
+  }, [cancelScroll]);
 
   const scrollToTopic = useCallback((id: TopicId | null) => {
     cancelScroll();
@@ -262,11 +269,17 @@ export function SettingsDialog({ onClose, initialTopic }: { onClose: () => void;
     followScroll();
     const content = contentRef.current;
     if (!content) return;
-    const observer = new ResizeObserver(followScroll);
+    const observer = new ResizeObserver(() => {
+      followScroll();
+      // Sections above the chosen topic still filling in (a status read
+      // landing) would push it away once the scroll has finished.
+      const target = settling.current;
+      if (target && scrollFrame.current === null && performance.now() < target.until) scrollToTopic(target.id);
+    });
     observer.observe(content);
     content.querySelectorAll('[data-settings-topic]').forEach((section) => observer.observe(section));
     return () => observer.disconnect();
-  }, [followScroll, visibleTopicIds]);
+  }, [followScroll, scrollToTopic, visibleTopicIds]);
 
   useEffect(() => cancelScroll, [cancelScroll]);
 
@@ -277,6 +290,7 @@ export function SettingsDialog({ onClose, initialTopic }: { onClose: () => void;
     const id = pendingTopic.current;
     if (!id || !visibleTopicIds.split(',').includes(id)) return;
     pendingTopic.current = undefined;
+    settling.current = { id, until: performance.now() + SETTLE_MS };
     scrollToTopic(id);
   }, [visibleTopicIds, scrollToTopic]);
 
@@ -371,9 +385,9 @@ export function SettingsDialog({ onClose, initialTopic }: { onClose: () => void;
             onPointerLeave={() => setHoveredTopic(null)}
             onScroll={followScroll}
             // The user's own input takes over from a chosen topic.
-            onWheel={cancelScroll}
-            onPointerDown={cancelScroll}
-            onKeyDown={cancelScroll}
+            onWheel={takeOverScroll}
+            onPointerDown={takeOverScroll}
+            onKeyDown={takeOverScroll}
             className="min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain scroll-smooth px-3 py-4 break-words sm:px-6 [&_label]:flex-wrap"
           >
             {searching && (
@@ -552,9 +566,7 @@ export function AlarmSettingsSection({ sink, preview = false, onShowNetwork }: {
       {networkOff ? (
         <>Push is off while <NetworkTopicLink onShow={onShowNetwork} /> is set to Nothing.</>
       ) : (
-        // The brief preview must not start the status poll; its live line
-        // carries the offers instead (`AlarmUpsellLine`).
-        preview ? describePushTargets(push, false, 'unavailable') : <PushTargets push={push} hasBurrowService={hasBurrowService} />
+        preview ? <PreviewPushTargets push={push} /> : <PushTargets push={push} hasBurrowService={hasBurrowService} />
       )}
     </AlarmSinkSection>
   );
@@ -563,12 +575,30 @@ export function AlarmSettingsSection({ sink, preview = false, onShowNetwork }: {
 /** The dialog's push device line, which reads where this machine stands with Hosted. */
 function PushTargets({ push, hasBurrowService }: { push: PushDevicesState; hasBurrowService: boolean }) {
   const membership = useHostedMembership();
+  // Until the service says where this machine stands, the line cannot say which Relay.
+  if (hasBurrowService && membership === null) return <>Looking for phones…</>;
   return (
     <>
-      {describePushTargets(push, hasBurrowService, membership)}
+      {describePushTargets(push, hasBurrowService, membership ?? 'unavailable')}
       {membership === 'no-plan' && <> <HostedPlansLink /></>}
     </>
   );
+}
+
+/**
+ * The preview's push device line: one read of where this machine stands,
+ * never the dialog's status poll. Its live line carries the offers.
+ */
+function PreviewPushTargets({ push }: { push: PushDevicesState }) {
+  const [membership, setMembership] = useState<HostedMembership>('unavailable');
+  useEffect(() => {
+    let live = true;
+    void readBurrowStatusOnce().then((status) => {
+      if (live) setMembership(membershipOf(status, managedVoicePort()?.status() ?? null));
+    });
+    return () => { live = false; };
+  }, []);
+  return <>{describePushTargets(push, false, membership)}</>;
 }
 
 /**

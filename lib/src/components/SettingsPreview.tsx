@@ -51,6 +51,8 @@ export function SettingsPreview({
       setFading(false);
       return;
     }
+    // A line that arrives as the preview fades brings it back.
+    setFading(false);
     const show = upsell && !wasHeld.current ? SHOW_WITH_UPSELL_MS : SHOW_MS;
     const fade = window.setTimeout(() => setFading(true), show);
     const close = window.setTimeout(onClose, show + FADE_MS);

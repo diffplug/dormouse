@@ -50,6 +50,8 @@ export function chooseAlarmUpsell(facts: AlarmUpsellFacts): AlarmUpsell | null {
 /** When a line last showed, on this machine (every window shares the origin). */
 export const ALARM_UPSELL_SHOWN_AT_KEY = 'dormouse:alarm-upsell-shown-at';
 const DAY_MS = 24 * 60 * 60 * 1000;
+/** Past the plain preview's life, so a later answer has no preview left to join. */
+const STATUS_READ_MS = 2500;
 const isNumber = (value: unknown): value is number => typeof value === 'number';
 
 /** Whether today's line has shown. Storage that cannot be read means it has not. */
@@ -77,14 +79,18 @@ export async function takeAlarmUpsell(
   stillShown: () => boolean = () => true,
   now: number = Date.now(),
 ): Promise<AlarmUpsell | null> {
-  const managedVoice = managedVoicePort() !== undefined;
+  const port = managedVoicePort();
   const networkOff = networkOffOrUnknown(getNetworkPolicySnapshot());
-  if (networkOff || (sink === 'speech' && !managedVoice) || alarmUpsellShownToday(now)) return null;
-  const status = await readBurrowStatusOnce();
+  if (networkOff || (sink === 'speech' && !port) || alarmUpsellShownToday(now)) return null;
+  // Bounded: an answer later than the preview's life is no use to it.
+  const status = await Promise.race([
+    readBurrowStatusOnce(),
+    new Promise<null>((resolve) => setTimeout(() => resolve(null), STATUS_READ_MS)),
+  ]);
   const upsell = chooseAlarmUpsell({
     sink,
-    membership: membershipOf(status, managedVoicePort()?.status() ?? null),
-    managedVoice,
+    membership: membershipOf(status, port?.status() ?? null),
+    managedVoice: port !== undefined,
     networkOff,
     enrolled: status?.enrolled ?? null,
   });

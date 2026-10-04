@@ -1,5 +1,5 @@
 import type { AlarmUpsell } from '../lib/alarm-upsell';
-import { hostedPageUrl, HOSTED_REFS, type HostedRef } from '../lib/hosted-links';
+import { hostedPricingUrl, HOSTED_REFS, type HostedRef } from '../lib/hosted-links';
 import { TEXT_LINK_CLASS } from './ExternalTextLink';
 import { NO_PLAN_COPY, NO_PUSH_PLAN_COPY } from './ManagedVoiceSection';
 import type { TopicId } from './SettingsDialog';
@@ -44,7 +44,7 @@ export function AlarmUpsellLine({ upsell, onShowSettings, onDone }: {
         onMouseDown={(event) => event.preventDefault()}
         onClick={() => {
           if (topic) onShowSettings(topic);
-          else getPlatform().openExternal?.(hostedPageUrl('pricing', ref));
+          else getPlatform().openExternal?.(hostedPricingUrl(ref));
           onDone();
         }}
       >

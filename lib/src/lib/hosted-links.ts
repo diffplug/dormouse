@@ -15,10 +15,7 @@ export const HOSTED_REFS = {
 } as const;
 export type HostedRef = typeof HOSTED_REFS[keyof typeof HOSTED_REFS];
 
-/** A section of the Hosted page the app links, each an id the page keeps resolving. */
-export type HostedSection = 'pricing';
-
-/** The Hosted page at `section`, with `ref` ahead of the fragment. */
-export function hostedPageUrl(section: HostedSection, ref?: HostedRef): string {
-  return `${HOSTED_PAGE_URL}${ref ? `?ref=${ref}` : ''}#${section}`;
+/** The Hosted page's plans, with `ref` ahead of the fragment. */
+export function hostedPricingUrl(ref?: HostedRef): string {
+  return `${HOSTED_PAGE_URL}${ref ? `?ref=${ref}` : ''}#pricing`;
 }

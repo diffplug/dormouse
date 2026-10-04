@@ -7,7 +7,7 @@ import {
   type AlarmUpsellFacts,
 } from './alarm-upsell';
 import { installLocalStorageStub } from './test-local-storage';
-import { hostedPageUrl, HOSTED_REFS } from './hosted-links';
+import { hostedPricingUrl, HOSTED_REFS } from './hosted-links';
 import { networkOn } from '../host/remote/test-burrow-link';
 import { networkPolicyResult, nothingPolicy } from '../remote/network-policy';
 
@@ -91,9 +91,9 @@ describe('networkOffOrUnknown', () => {
   });
 });
 
-describe('hostedPageUrl', () => {
+describe('hostedPricingUrl', () => {
   it('puts the ref ahead of the section', () => {
-    expect(hostedPageUrl('pricing', HOSTED_REFS.upsellVoice)).toBe('https://dormouse.sh/hosted/?ref=upsell-voice#pricing');
-    expect(hostedPageUrl('pricing')).toBe('https://dormouse.sh/hosted/#pricing');
+    expect(hostedPricingUrl(HOSTED_REFS.upsellVoice)).toBe('https://dormouse.sh/hosted/?ref=upsell-voice#pricing');
+    expect(hostedPricingUrl()).toBe('https://dormouse.sh/hosted/#pricing');
   });
 });

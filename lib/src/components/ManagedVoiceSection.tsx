@@ -2,7 +2,7 @@ import { useState, useSyncExternalStore } from 'react';
 import { INLINE_ACTION_CLASS, SELECT_CLASS, modalActionButton } from './design';
 import { ExternalTextLink } from './ExternalTextLink';
 import { HostedEnrollView, HostedPlansLink, accountHost, accountPage } from './HostedSignIn';
-import { membershipOf, useManagedVoiceStatus } from '../lib/hosted-membership';
+import { standingOf, useManagedVoiceStatus } from '../lib/hosted-membership';
 import { DisconnectConfirm, removedCopy } from './RemoteControlSection';
 import { FIELD_LABEL, useBusyAction, useNetworkPolicy } from './remote-control-shared';
 import type { BurrowConsoleStatus } from '../host/remote/service-protocol';
@@ -129,7 +129,7 @@ function SignedIn({ status, voice, port, signingInAgain, onSignInAgain }: {
   const [confirming, setConfirming] = useState(false);
   const page = accountPage(status.accountOrigin);
   // Enrolled, so signed out only by removal.
-  const membership = membershipOf(status, voice);
+  const membership = standingOf(status, voice);
   const lapsed = membership === 'no-plan';
   const removed = membership === 'signed-out';
 

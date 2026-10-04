@@ -20,7 +20,7 @@ import { networkPolicyResult, nothingPolicy } from '../remote/network-policy';
 import { HOSTED_PRICING_URL, SIGN_IN_LABEL } from './HostedSignIn';
 import { MANAGED_VOICE_DISCLOSURE, ManagedVoiceSection, NO_PLAN_COPY, NO_PUSH_PLAN_COPY } from './ManagedVoiceSection';
 import { AlarmSettingsSection } from './SettingsDialog';
-import { resetPushDevices } from '../lib/push-devices';
+import { resetPushDevices, setPushDevices } from '../lib/push-devices';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -158,13 +158,18 @@ describe('the push group in a Hosted build', () => {
   it.each([
     ['not signed in', UNENROLLED_STATUS, false, 'Sign in to Dormouse Hosted below to send push.'],
     ['signed in with no plan', { ...SIGNED_IN, connection: 'not-entitled' }, false, NO_PUSH_PLAN_COPY],
-    // The brief preview reads no status; its live line carries the offer.
-    ['the inert preview', UNENROLLED_STATUS, true, 'Connect this machine to a Dormouse Relay to send push.'],
+    // The brief preview reads the status once, and its live line carries the plans.
+    ['the inert preview', UNENROLLED_STATUS, true, 'Sign in to Dormouse Hosted to send push.'],
+    ['the inert preview with no plan', { ...SIGNED_IN, connection: 'not-entitled' }, true, NO_PUSH_PLAN_COPY],
+    ['a removed computer, whatever the device list said', { ...SIGNED_IN, connection: 'removed' }, false, 'Sign in to Dormouse Hosted below to send push.'],
   ] as const)('%s', async (_label, status, preview, copy) => {
+    // A list the Relay's refusal makes stale: no push reaches it.
+    setPushDevices({ status: 'ready', devices: [{ label: 'iPhone' }] });
     setPlatform(Object.assign(new FakePtyAdapter(), { burrow: makeStubBurrowLink({ status }) }));
     await act(async () => root.render(<AlarmSettingsSection sink="push" preview={preview} />));
     await act(async () => {});
     expect(text()).toContain(copy);
+    expect(text()).not.toContain('Push will be sent');
     expect(button('See Hosted plans') !== undefined).toBe(status.connection === 'not-entitled' && !preview);
   });
 });

@@ -19,15 +19,22 @@ import { getBurrowStatusSnapshot, subscribeToBurrowStatus } from '../remote/burr
  */
 export type HostedMembership = 'member' | 'signed-out' | 'no-plan' | 'unavailable';
 
-/** The standing a Burrow status and managed voice's status give. */
+/** Where an account stands, whichever Relay the build was baked for. */
+export function standingOf(
+  status: Pick<BurrowConsoleStatus, 'enrolled' | 'connection'>,
+  voice: ManagedVoiceStatus | null,
+): Exclude<HostedMembership, 'unavailable'> {
+  if (!status.enrolled || status.connection === 'removed') return 'signed-out';
+  if (status.connection === 'not-entitled' || voice?.notEntitled === true) return 'no-plan';
+  return 'member';
+}
+
+/** The standing a Burrow status and managed voice's status give, in a Hosted build. */
 export function membershipOf(
   status: Pick<BurrowConsoleStatus, 'relayMode' | 'enrolled' | 'connection'> | null,
   voice: ManagedVoiceStatus | null,
 ): HostedMembership {
-  if (!status || status.relayMode !== 'hosted') return 'unavailable';
-  if (!status.enrolled || status.connection === 'removed') return 'signed-out';
-  if (status.connection === 'not-entitled' || voice?.notEntitled === true) return 'no-plan';
-  return 'member';
+  return status?.relayMode === 'hosted' ? standingOf(status, voice) : 'unavailable';
 }
 
 /** Managed voice's port, which only a build that can play it carries. */
@@ -42,9 +49,13 @@ export function useManagedVoiceStatus(port: ManagedVoicePort | undefined): Manag
   return useSyncExternalStore(subscribe, snapshot);
 }
 
-/** The standing, live: subscribing polls the Burrow service while mounted, as Settings already does. */
-export function useHostedMembership(): HostedMembership {
+/**
+ * The standing, live: subscribing polls the Burrow service while mounted, as
+ * Settings already does. `null` while a service has yet to answer.
+ */
+export function useHostedMembership(): HostedMembership | null {
   const burrow = useSyncExternalStore(subscribeToBurrowStatus, getBurrowStatusSnapshot);
   const voice = useManagedVoiceStatus(managedVoicePort());
+  if (burrow.kind === 'loading') return null;
   return membershipOf(burrow.kind === 'ready' ? burrow.status : null, voice);
 }

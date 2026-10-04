@@ -5,7 +5,7 @@ import { FIELD_HINT, FIELD_LABEL, hostOf, useBusyAction, useMinutesLeft } from '
 import { ACCOUNT_PAGE_PATH, HOSTED_ACCOUNT_ORIGIN } from '../host/relay-origin';
 import type { HostedEnrollmentEndReason, HostedEnrollmentState } from '../host/remote/service-protocol';
 import { getPlatform } from '../lib/platform';
-import { hostedPageUrl } from '../lib/hosted-links';
+import { hostedPricingUrl } from '../lib/hosted-links';
 import { BURROW_IS_AN_APP } from '../remote/setup-copy';
 import { beginHostedEnrollment, cancelHostedEnrollment } from '../remote/burrow/burrow-status-store';
 
@@ -18,7 +18,7 @@ import { beginHostedEnrollment, cancelHostedEnrollment } from '../remote/burrow/
  */
 
 /** Where the plans are; linked wherever an account turns out to have none. */
-export const HOSTED_PRICING_URL = hostedPageUrl('pricing');
+export const HOSTED_PRICING_URL = hostedPricingUrl();
 
 /** The words of every link to the plans. */
 export const PLANS_LABEL = 'See Hosted plans';
