@@ -10,13 +10,11 @@ The keep is judged by the burst's first press, so a double-click inside a rename
 
 Tools carry no navigation, address, or dev-server chip (Ned, 2026-09-29): a Tool is named for what it is, and a page it serves is not somewhere to navigate from, so that chrome stays with plain browser Surfaces. Its Terminal Context button had sat beside the header, outside its palette, and showed a different background.
 
-A serving preview's header changed size on every switch (standalone, 2026-09-29) because its name was the dev-server chip. The chip names a pane only once the Window's port scan resolves the page's loopback port: 600 ms of debounce, then a scan at idle. Each retarget starts a viewer on a new port, and the switch's hold ended when the new document loaded, before that scan. The chip unmounted and the address, in `text-sm font-medium` where the chip is `text-xs`, widened to the whole `localhost:<port>/<path>`; once the scan landed the chip returned and the address shrank to its path. The Wall harness in `lib/src/components/wall/preview-slot.test.tsx`, run against that header, stepped through `chip(b.md:6006) + url(/)`, `url(localhost:7007)`, then `chip(… :7007) + url(/)`. A name from params changes once, with the retarget, so nothing needs holding.
+A serving preview's header changed size on every switch while its name was the dev-server chip (standalone, 2026-09-29): the chip names a pane only once the Window's port scan resolves the page's loopback port (600 ms of debounce, then a scan at idle), which landed after the switch's hold had ended, so the address widened to the whole `localhost:<port>/<path>` and shrank back. A name from params changes once, with the retarget, so nothing needs holding.
 
 ## Pane header responsive sizing
 
 A viewport breakpoint says nothing about a narrow split inside a wide window: at a 1200px viewport every control stayed rendered in a 103px pane and overflowed into its neighbor (innerdogfood QC, 2026-09). Measuring the header and moving fixed controls together keeps long keys and renderer chips from pushing minimize/kill into a neighboring pane; quantizing the measurement to a tier keeps the header from re-rendering on every frame of a sash drag or tween.
-
-In the same run, real clicks exposed premature popup dismissal before the action ran. After repair, Zoom reached 716×403 pixels, Unzoom returned to the compact header, Reload worked, and Display retained modal focus. Header buttons stayed within their panes at the final 1200×800 viewport.
 
 Terminal border-box thresholds of 293/173 pixels preserve the former 280/160 content-box thresholds plus 13 pixels of horizontal padding. A content box can clamp to zero in a visible tiny leaf; treating that as hidden retained the full tier. Positive border-box width distinguishes that case from a hidden leaf.
 
@@ -32,11 +30,7 @@ xterm.js paints only its own rendered surface, and integer row fitting leaves a 
 
 ## Alarm overlay
 
-**Why the wash sits below the header.** `--color-alarm-vs-terminal` is picked for contrast against the *terminal body*, so it carries no contrast guarantee over the header band.
-
 **Why a perimeter ring rather than an inset border.** An inset border at the leaf's edge covers nothing, and a ring below the header would break the one-rounded-rectangle read that is the point of the treatment.
-
-**Why `SPOKEN` keeps the light wash.** It persists until the ring clears, an unbounded window, so its wash stays as light as the plain ring's to keep terminal text readable through it.
 
 **Why header popovers are not a factor.** Every one — pane context menu, title candidates, notification preview, rename warning — portals to `document.body` with `position: fixed`, so it renders in the root stacking context above the whole wall regardless of leaf z-indices.
 
@@ -49,10 +43,6 @@ xterm.js paints only its own rendered surface, and integer row fitting leaves a 
 **Why a move confirms for iframes but not for agent-browser Surfaces.** An agent-browser Surface's session lives in the host process; the target window reconnects its viewer and the page is as it was. A plain iframe is a document inside the source webview, and no API carries a document between webviews — the alternative, keeping every Workspace in its own native child webview and reparenting it, was prototyped on a vendored Tauri fork and rejected for the fork (2026-09). The confirmation is the kill's typed letter rather than a button because what is lost is as gone as a killed process, and the same gesture already means that.
 
 **Why an inactive Wall is inert before it is hidden.** During the outgoing fade the Wall remains visible beneath its successor. `inert` removes its focusability immediately, before `visibility: hidden` takes effect.
-
-**Why the strip's reorder drag does not capture the pointer on press.** A captured pointer retargets the following `click` to the capture element, so capturing on `pointerdown` swallowed the activate button's click and no tab could be activated by mouse (found in the browser-dev harness, 2026-09). Capture is only useful once the gesture is a drag, which is where it now happens.
-
-**Why the close confirmation anchors to the Wall, not the tab.** `ModalOverlay` centers inside the target's box and does not clamp to the viewport, so a 24px tab at the top of the window left the dialog clipped. Every Wall shares one grid cell, so the anchor lands in the same place whether or not that Workspace is visible.
 
 **Why the modal hosts are gated rather than hoisted.** Each calls `useDialogKeyboardOwner`, which reads the *active* Wall's `DialogKeyboardContext`; hoisting them above `WorkspaceWindow` would leave them with no coordinator to suppress command-mode dispatch through. The cost is that a modal's React-local state resets on a switch — accepted, since every modal that matters keeps its state in a store.
 
@@ -75,8 +65,6 @@ xterm.js paints only its own rendered surface, and integer row fitting leaves a 
 **What the shared focus tail costs.** Building a layout by repeated splits means re-entering command mode between each one. Control-plane creation is exempt so a script does not fight the user's focus.
 
 ## Selection overlay
-
-The passthrough `solid` variant replaced an original `border: 1px solid ${color}` CSS border, placed pixel-identically — centerline `strokeWidth/2` inside the div edge — so moving both variants onto one SVG renderer changed no geometry.
 
 **The inflate arithmetic.** With `SELECTION_RING_INFLATE_PX` at 4, the 1px passthrough border spans [3px, 4px] from the pane edge — dead centre of the 7px gutter, on whole pixels because the gutter is odd. That is the whole reason `PANE_GUTTER_PX` is odd.
 
@@ -114,8 +102,6 @@ Pane headers re-render on every activity, terminal-state, and palette change. An
 
 **DOM-renderer cost.** The DOM renderer emits one `<span>` per style run per row, so a TUI that paints every cell its own truecolor collapses to one span-with-inline-style *per cell*, rebuilt every frame. On a 99×25 pane that is ~1150 elements of style recalc plus layout per frame: measured in Safari 26.5 (2026-08), a single such pane held the whole page at ~110ms/frame (~9fps) while the rest of the app was idle. The same pane on the WebGL renderer holds a locked 60fps (16.6ms, zero frames over 25ms).
 
-**Why the `WebGL2RenderingContext` pre-check exists.** Without it every terminal in a jsdom unit run logs a `getContext` failure before the swallowed constructor throw, which buries real output.
-
 **Context budget.** The per-page live-context cap was measured at 16 in Safari 26.5, evicted oldest-first. The `onContextLoss` → dispose-the-addon → DOM-fallback path was verified live by exhausting the budget and watching the demoted panes keep painting.
 
 **Atlas sharing.** Stock addon-webgl already caches rasterized atlas canvases by font metrics/options, DPR, texture limits, glyph mode, and foreground/background/ANSI colors; terminal columns and rows are absent from the key. Each renderer uploads its own texture copy into its own WebGL context. A reattached terminal reuses the atlas while another compatible renderer owns it; no extra Dormouse cache is needed. Sharing GPU textures would require a different rendering architecture using one context across terminals.
@@ -145,8 +131,6 @@ Terminal entrance motion starts at a collapsed edge. Throttling still exposes se
 ## Kill (two-phase fade + tween reclaim)
 
 **Why the selected-pane check is re-read live.** Navigate away from a dying selected pane and the tail must not yank selection back onto a survivor; navigate onto a dying pane and the tail must adopt a survivor rather than leave selection dangling on a removed leaf. A flag captured when the kill started answers only the first case.
-
-**Which callers hit which branch.** The header kill button is always a selected-pane kill, since clicking the header selects the pane before the button's click handler runs. The not-selected cases in practice are `dor kill` of a background surface and ensure's throwaway teardown.
 
 ## Auto-spawn refill
 

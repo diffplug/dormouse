@@ -76,8 +76,6 @@
 
 ## WATCHING Track
 
-**Why candidate history expires on arrival rather than only on its timers.** The marked `dormouse.workspaces-2` alert (2026-09-09) followed 218 seconds of silence and two chunks 62 ms apart: unconfirmed candidate history outlived its timers, which run late in hidden views, and let that short burst confirm BUSY. Measuring the gap between accepted chunks keeps idle time from counting as sustained work.
-
 **Why WATCHING keys on the command rather than the Session.** Turning alerts on while `claude` runs is a statement about `claude`, not about the pane that happened to be focused. A per-Session enable would have to be re-established by hand in every new pane, which is the opposite of what the gesture means.
 
 **Why the alert state is retired before the PTY is killed.** A data chunk is enough to create a Session's entry, so killing first leaves output already in flight to rebuild an entry — and a `QuiesceDetector` that nothing will ever dispose. Raw output and resizes are exactly what a dying PTY emits; a semantic or protocol event may revive an id, because an id may be handed to a replacement pane and its first reported command start is evidence that somebody is home.
@@ -175,12 +173,6 @@ Guarding only completion leaves a stale `start` free to replace the active utter
 ## Pane Header
 
 **Why a helper tracks its command before promotion.** A helper dropped every semantic event, so one promoted while running `claude` had no command watch until its next command: no WATCHING, and no command-exit arm (audit, 2026-09-23). Command state alerts no one by itself; only dispatch and publishing have to wait for promotion.
-
-**Why `SPEAKING` may pulse unbounded and `SPOKEN` may not.** An utterance is seconds long and stops on its own, so the pulse it carries is self-bounding. `SPOKEN` persists until the ring clears, so animating it would be exactly the per-Session animation with no end that bounding the burst exists to remove.
-
-**Why `cfg.alert.ringingPaused` suppresses the pulse.** It is the visual-snapshot freeze that pins the alarm; even a bounded animation could otherwise snapshot at an arbitrary phase during its first 2.6 seconds.
-
-**Why the unlabelled treatment pulses once per episode.** An infinite per-Session animation is expensive, and the whole-Pane treatment covers far more surface than the retired bell icon did. With four focused panes wearing an infinite animation, three minutes cost 6.89 MB of embedder memory, 1,127 style recalculations, and 3.99 seconds of renderer CPU; pausing only those animations in the same loaded document reduced that to 0.13 MB, two recalculations, and 0.025 seconds. After bounding the burst, two consecutive three-minute windows each had zero live animations, one recalculation, under 0.40 MB of non-cumulative embedder drift, and at most 0.024 seconds of renderer CPU (measured in Chrome 150, 2026-09). A handful of cycles preserves the entry cue without leaving an animation running for the lifetime of an unattended alert. The episode — not a ring source — is the key because the episode is the summons the sinks already work from: a second source joining the ring enriches an alarm the user was already shown, and re-flashing the whole Pane for it would read as a new alarm. Running the burst off `episode.startedAt` rather than from mount makes the CSS clock a property of the episode, so minimize → reattach or a Workspace switch lands past an expired burst instead of replaying it. A Session BEL-ing in a loop still cannot restart the burst, because a source joining an active ring does not open a new one.
 
 ## Text And Security
 
