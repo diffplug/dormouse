@@ -133,7 +133,7 @@ describe('ManagedVoiceSection', () => {
   it('signs out after confirming, which is the Burrow’s local Disconnect', async () => {
     const { command } = await render({ status: SIGNED_IN });
     expect(text()).toContain('Remove this computer at hosted.dormouse.sh');
-    expect(text()).toContain(`where it is ${computerName(SIGNED_IN.burrowId!)}.`);
+    expect(text()).toContain(`where this computer is ${computerName(SIGNED_IN.burrowId!)}.`);
     await act(async () => button('Sign out')!.click());
     expect(text()).toContain('Remote control signs out too');
     expect(command).not.toHaveBeenCalledWith('clearEnrollment');

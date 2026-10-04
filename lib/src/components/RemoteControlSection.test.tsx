@@ -490,7 +490,7 @@ describe('RemoteControlSection', () => {
     };
     await render();
     // The name the account page lists it under, so the person knows which row is this one.
-    expect(text()).toContain(`where this one is ${computerName(enrolled().burrowId!)}`);
+    expect(text()).toContain(`where this computer is ${computerName(enrolled().burrowId!)}`);
     await act(async () => buttonLabelled('Manage computers at hosted.dormouse.sh')!.click());
     expect(openExternal).toHaveBeenCalledWith('https://hosted.dormouse.sh/account');
     await act(async () => root.unmount());

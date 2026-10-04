@@ -99,8 +99,6 @@ export function App({
   // The enrollment awaiting approval, in memory only: through sign-in and
   // back, never into storage (docs/specs/hosted.md -> "Burrow enrollment").
   const [enrolling, setEnrolling] = useState(enrollment);
-  // Approval refused for want of a plan, where the billing summary could not say so first.
-  const [approveNoPlan, setApproveNoPlan] = useState(false);
   // Null while this deployment does not sell, or before sign-in.
   const [billing, setBilling] = useState<BillingSummary | null>(null);
   const [buying, setBuying] = useState(checkout);
@@ -280,7 +278,8 @@ export function App({
         await approveEnrollment(code);
       } catch (error) {
         if (!(error instanceof NoPlanError)) throw error;
-        setApproveNoPlan(true);
+        // Where the billing summary could not say so first.
+        setEnrolling((shown) => shown && { ...shown, noPlan: true });
         return;
       }
       clearEnrollment();
@@ -289,7 +288,6 @@ export function App({
     });
   const clearEnrollment = () => {
     setEnrolling(null);
-    setApproveNoPlan(false);
     setError("");
   };
   const removeOne = (burrowId: string) =>
@@ -343,7 +341,7 @@ export function App({
   const fresh =
     session &&
     Date.now() - Date.parse(session.session.createdAt) < LOGIN_FRESH_AGE_MS;
-  const noPlan = approveNoPlan || billing?.entitled === false;
+  const noPlan = enrolling?.noPlan || billing?.entitled === false;
 
   return (
     <div className="shell">
@@ -409,33 +407,35 @@ export function App({
                         </p>
                       </>
                     ) : (
-                      <p>
-                        Approve only if Dormouse on your computer is showing
-                        this code right now.
-                      </p>
-                    )}
-                    {noPlan ? null : fresh ? (
-                      <button
-                        className="primary"
-                        disabled={!!busy}
-                        onClick={() => void approve(enrolling.code!)}
-                      >
-                        {busy === "approve" ? "Approving…" : "Approve"}
-                      </button>
-                    ) : (
                       <>
-                        <p className="help">
-                          Approving a computer needs a login from the last{" "}
-                          {RECENT_LOGIN_WINDOW}. Sign in again; this code stays
-                          on this page.
+                        <p>
+                          Approve only if Dormouse on your computer is showing
+                          this code right now.
                         </p>
-                        <button
-                          className="primary"
-                          disabled={!!busy}
-                          onClick={() => void signOut()}
-                        >
-                          {busy === "logout" ? "Signing out…" : "Sign in again"}
-                        </button>
+                        {fresh ? (
+                          <button
+                            className="primary"
+                            disabled={!!busy}
+                            onClick={() => void approve(enrolling.code!)}
+                          >
+                            {busy === "approve" ? "Approving…" : "Approve"}
+                          </button>
+                        ) : (
+                          <>
+                            <p className="help">
+                              Approving a computer needs a login from the last{" "}
+                              {RECENT_LOGIN_WINDOW}. Sign in again; this code stays
+                              on this page.
+                            </p>
+                            <button
+                              className="primary"
+                              disabled={!!busy}
+                              onClick={() => void signOut()}
+                            >
+                              {busy === "logout" ? "Signing out…" : "Sign in again"}
+                            </button>
+                          </>
+                        )}
                       </>
                     )}
                   </>
@@ -783,7 +783,7 @@ export function App({
                     then connect other providers from your account.
                   </p>
                 )}
-                {!enrolling && buying === undefined && (
+                {page === "login" && (
                   <p className="footnote">
                     Hosted voice and remote control are not available yet.
                   </p>

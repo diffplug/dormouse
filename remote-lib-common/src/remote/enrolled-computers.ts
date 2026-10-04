@@ -1,7 +1,7 @@
 /**
  * An account's enrolled Burrows as a person sees them: how many it may hold,
- * and the name the account page lists each under and the desktop shows for
- * itself, so the two can be matched (`docs/specs/hosted.md` -> "Burrow
+ * the name the account page lists each under and the desktop shows for
+ * itself, so the two can be matched, and the desktop button that adds one (`docs/specs/hosted.md` -> "Burrow
  * enrollment").
  *
  * Imports nothing, so the account frontend takes it without the rest of this
@@ -28,3 +28,6 @@ export const MAX_ENROLLED_BURROWS = 32;
 export function computerName(burrowId: string): string {
   return `Computer ${burrowId.slice(0, 8)}`;
 }
+
+/** The desktop button that signs a computer in, which the account page tells a person to press. */
+export const HOSTED_SIGN_IN_LABEL = 'Sign in to Dormouse Hosted';
