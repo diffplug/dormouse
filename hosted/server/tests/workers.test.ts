@@ -428,6 +428,9 @@ async function fixture(
         method: "POST",
         body: time,
       }),
+    /** `name`'s `/api/ready`; the relay and voice run as their own roles. */
+    ready: async (name: "relay" | "voice") =>
+      (await (name === "voice" ? voice() : relay())).dispatchFetch(ORIGINS[name] + "/api/ready"),
     /** Background passes the voice Worker scheduled so far; the test entry only. */
     waitUntilCalls: async () =>
       Number(
@@ -591,6 +594,27 @@ test("same-site requests fail, the sibling Workers' included; production exclude
     'ALTER TABLE "session" DROP COLUMN "emailAuthenticated"',
   );
   expect((await browser.request("/api/ready")).status).toBe(503);
+});
+
+test("the relay and voice are ready only while their own roles hold the grants their lookups need", async ({
+  onTestFinished,
+}) => {
+  const f = await fixture(true);
+  onTestFinished(f.close);
+  const status = async (name: "relay" | "voice") => {
+    const response = await f.ready(name);
+    // Up or down, and nothing about why.
+    expect(await response.json(), name).toEqual({ ok: response.status === 200 });
+    return response.status;
+  };
+  expect(await status("relay")).toBe(200);
+  expect(await status("voice")).toBe(200);
+  // A grant gone from one role fails that Worker's readiness alone.
+  await queryDatabase(f.database.url, "REVOKE SELECT ON dormouse_relay_sessions FROM dormouse_relay");
+  expect(await status("relay")).toBe(503);
+  expect(await status("voice")).toBe(200);
+  await queryDatabase(f.database.url, 'REVOKE SELECT ("emailVerified") ON "user" FROM dormouse_voice');
+  expect(await status("voice")).toBe(503);
 });
 
 test("an enabled provider missing its credential fails closed with the secure headers", async ({

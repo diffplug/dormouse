@@ -1,4 +1,5 @@
 import { Hono, type ExecutionContext } from "hono";
+import { queryDatabase } from "pgstencil/postgres";
 import type { WorkerEnv } from "./bindings";
 import { secureHeaders, type RulesFor } from "./headers";
 
@@ -66,4 +67,23 @@ export function workerApp<E extends WorkerEnv>({
         scheduled(controller, bindings(env), ctx),
     }),
   };
+}
+
+/**
+ * `/api/ready`: 200 once `sql` runs through the Worker's Hyperdrive, else 503,
+ * the cause never answered. `sql` reads no row (`LIMIT 0`) and names only what
+ * the Worker's own role is granted, so a missing grant or an unreachable
+ * database fails it.
+ */
+export function readyRoute<E extends { HYPERDRIVE: { connectionString: string } }>(
+  app: Hono<{ Bindings: E }>,
+  sql: string,
+) {
+  app.get("/api/ready", async (c) => {
+    const ok = await queryDatabase(c.env.HYPERDRIVE.connectionString, sql).then(
+      () => true,
+      () => false,
+    );
+    return c.json({ ok }, ok ? 200 : 503);
+  });
 }
