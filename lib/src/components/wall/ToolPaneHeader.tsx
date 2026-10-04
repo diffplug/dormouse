@@ -2,13 +2,14 @@ import { useContext, useRef, useSyncExternalStore } from 'react';
 import { clsx } from 'clsx';
 import { ToolDirtyIndicator, useToolDirty } from '../ToolDirtyIndicator';
 import { paneHeader, PREVIEW_LABEL_CLASS } from '../design';
-import { getTerminalPaneStateSnapshot, subscribeToTerminalPaneState } from '../../lib/terminal-registry';
+import { DEFAULT_ACTIVITY_STATE, getActivitySnapshot, getTerminalPaneStateSnapshot, subscribeToActivity, subscribeToTerminalPaneState } from '../../lib/terminal-registry';
 import { useAgentBrowserDisplayMode, useAgentBrowserScreenController } from './agent-browser-screen';
 import { BROWSER_DISPLAY_SLOT_PX, BrowserDisplayButton } from './BrowserDisplayIcon';
 import { isPreviewSlotParams } from './browser-surface';
 import { HEADER_CONTROL_SLOT_PX, PaneActionGroup, SplitButtons, TerminalContextButton } from './PaneActionButtons';
 import { usePreviewKeep } from './preview-keep';
 import { shownToolFace, useHeldWhile, usePreviewSlotView } from './preview-transition';
+import { SessionTodoPill } from './SessionTodoPill';
 import { TerminalPaneHeader, terminalHeaderTier } from './TerminalPaneHeader';
 import { toolSemanticName } from './tool-name';
 import { useHeaderTier } from './use-header-tier';
@@ -57,6 +58,9 @@ function ToolBrowserHeader({ id, title, params, switching }: PaneProps & { switc
   const actions = useContext(WallActionsContext);
   const context = useContext(TerminalContextContext);
   const isActiveHeader = mode === 'passthrough' && selectedId === id && windowFocused;
+  // The Tool's Session rings and keeps TODOs while its browser shows, so the
+  // pill rides this face too (`docs/specs/layout.md` -> Pane header).
+  const activity = useSyncExternalStore(subscribeToActivity, getActivitySnapshot).get(id) ?? DEFAULT_ACTIVITY_STATE;
   const userTitle = useSyncExternalStore(subscribeToTerminalPaneState, () => getTerminalPaneStateSnapshot().get(id)?.titleCandidates.user?.title ?? null);
   const name = toolSemanticName(params, userTitle) ?? title ?? id;
   const screen = useAgentBrowserScreenController(id);
@@ -84,7 +88,7 @@ function ToolBrowserHeader({ id, title, params, switching }: PaneProps & { switc
         <BrowserDisplayButton mode={displayMode} onOpen={screen ? () => screen.actions.openModal() : undefined} />
       )}
       <TerminalContextButton surfaceId={id} />
-      <div className="flex min-w-0 flex-1 items-center overflow-hidden">
+      <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden">
         {rename.renaming ? rename.editor(name) : (
           // As on the terminal face, a preview's name is drag area, not a rename.
           <span
@@ -95,6 +99,7 @@ function ToolBrowserHeader({ id, title, params, switching }: PaneProps & { switc
             title={preview ? 'Preview' : undefined}
           >{name}</span>
         )}
+        <SessionTodoPill id={id} activity={activity} shown={tier === 'full' || tier === 'compact'} />
       </div>
       {!rename.renaming && (
         <>
