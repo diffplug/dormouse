@@ -20,8 +20,10 @@ export interface StripDragHost {
   order(): WorkspaceId[];
   /** The tab element for a Workspace, or null when it is not rendered. */
   tabElement(id: WorkspaceId): HTMLElement | null;
-  /** The strip's own box, for deciding the pointer has left it. */
-  stripRect(): DOMRect | null;
+  /** The strip's tab areas — the scrolling tabs, the pinned group — for
+   *  deciding the pointer has left it. The empty space between them is not the
+   *  strip. */
+  stripRects(): DOMRect[];
   /** Commit a reorder (the store's `moveWorkspace`). */
   move(id: WorkspaceId, toIndex: number): void;
   /** Which Workspace is being dragged, for the dimmed tab. Null ends the drag. */
@@ -131,13 +133,13 @@ export function createWorkspaceStripDrag(host: StripDragHost): WorkspaceStripDra
     }
   }
 
-  /** Whether the pointer is over the strip. Null when there is no strip box to
-   *  compare against, which is neither in nor out. */
+  /** Whether the pointer is over one of the strip's tab areas. Null when there
+   *  is no box to compare against, which is neither in nor out. */
   function insideStrip(event: PointerEvent): boolean | null {
-    const strip = host.stripRect();
-    if (!strip) return null;
-    return event.clientX >= strip.left && event.clientX <= strip.right
-      && event.clientY >= strip.top && event.clientY <= strip.bottom;
+    const areas = host.stripRects();
+    if (areas.length === 0) return null;
+    return areas.some((area) => event.clientX >= area.left && event.clientX <= area.right
+      && event.clientY >= area.top && event.clientY <= area.bottom);
   }
 
   function onPointerUp(event: PointerEvent): void {

@@ -969,9 +969,14 @@ describe("workspaceDropTarget", () => {
     expect(workspaceDropTarget(10)).toEqual({ index: undefined, rect: null, edge: "right" });
   });
 
-  /** `unpinned` tabs, then `+`, then `pinned` tabs in their group, 100px each. */
+  /** `unpinned` tabs, then `+`, then `pinned` tabs in their group, 100px each,
+   *  in a strip ending at 1000. */
   function grouped(unpinned: number, pinned: number): void {
     document.body.innerHTML = "";
+    const strip = document.createElement("div");
+    strip.dataset.workspaceStrip = "";
+    strip.getBoundingClientRect = () => ({ left: 0, right: 1000, width: 1000, height: 30 }) as DOMRect;
+    document.body.append(strip);
     const box = (left: number) => () => ({ left, right: left + 100, width: 100, height: 24 }) as DOMRect;
     for (let index = 0; index < unpinned; index += 1) {
       const tab = document.createElement("div");
@@ -1004,9 +1009,9 @@ describe("workspaceDropTarget", () => {
     expect(workspaceDropTarget(900, true)).toMatchObject({ index: undefined, rect: { right: 420 }, edge: "right" });
   });
 
-  it("puts the caret after + for the first pinned tab, and at the strip start for the first unpinned", () => {
+  it("puts the caret at the strip's right end for the first pinned tab, and at its start for the first unpinned", () => {
     grouped(2, 0);
-    expect(workspaceDropTarget(10, true)).toMatchObject({ index: undefined, rect: { right: 220 }, edge: "right" });
+    expect(workspaceDropTarget(10, true)).toMatchObject({ index: undefined, rect: { right: 1000 }, edge: "right" });
     grouped(0, 2);
     expect(workspaceDropTarget(400)).toEqual({ index: 0, rect: null, edge: "right" });
   });

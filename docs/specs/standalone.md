@@ -108,7 +108,7 @@ Every quit trigger is driven through the webview quit orchestrator (§Quit flow)
 
 Source of truth: `standalone/src/AppBar.tsx`.
 
-The AppBar is the draggable titlebar: the Workspace strip, then the window controls on Windows and Linux (macOS draws native traffic lights). **Never put a shell picker here**: the shell is the Settings dialog's Shell row (`lib/src/components/ShellPicker.tsx`; what a changed pick spawns: `docs/specs/layout.md` -> "Session lifecycle and terminal registry"); the theme picker's placement is `docs/specs/theme.md` → "Where the user picks a theme". The strip is `docs/specs/layout.md` → Workspace tabs; its indicators `docs/specs/alert.md` → Workspace union.
+The AppBar is the draggable titlebar: the Workspace strip across its width, its pinned group flush against the right end, then the window controls on Windows and Linux (macOS draws native traffic lights). **Must make the strip's space before its pinned group the window-drag region, never a tab or button.** **Never put a shell picker here**: the shell is the Settings dialog's Shell row (`lib/src/components/ShellPicker.tsx`; what a changed pick spawns: `docs/specs/layout.md` -> "Session lifecycle and terminal registry"); the theme picker's placement is `docs/specs/theme.md` → "Where the user picks a theme". The strip is `docs/specs/layout.md` → Workspace tabs; its indicators `docs/specs/alert.md` → Workspace union.
 
 ### Application menu
 

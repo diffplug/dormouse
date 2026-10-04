@@ -16,8 +16,9 @@ export interface WorkspaceDropTarget {
    *  the last tab means. */
   index: number | undefined;
   /** The box the caret draws against: the tab the drop goes before, else the
-   *  one it goes after (or `+`, for the first pinned tab). Null when the
-   *  arriving Workspace's group has nothing to draw against. */
+   *  one it goes after (or the strip, at whose right end the first pinned tab
+   *  lands). Null when the arriving Workspace's group has nothing to draw
+   *  against. */
   rect: DOMRect | null;
   /** Which edge of `rect` the caret takes. */
   edge: "left" | "right";
@@ -43,10 +44,10 @@ export function workspaceDropTarget(x: number, pinned = false): WorkspaceDropTar
   const at = index === elements.length ? undefined : index;
   if (index < high) return { index: at, rect: elements[index].getBoundingClientRect(), edge: "left" };
   if (high > low) return { index: at, rect: elements[high - 1].getBoundingClientRect(), edge: "right" };
-  // The group is empty: a pinned arrival lands just after `+`, an unpinned one
-  // at the strip's start.
-  const plus = pinned ? workspaceTabElement(null) : null;
-  return { index: at, rect: plus?.getBoundingClientRect() ?? null, edge: "right" };
+  // The group is empty: a pinned arrival lands at the strip's right end, an
+  // unpinned one at its start.
+  const strip = pinned ? document.querySelector<HTMLElement>("[data-workspace-strip]") : null;
+  return { index: at, rect: strip?.getBoundingClientRect() ?? null, edge: "right" };
 }
 
 /** One Workspace's tab box, or null when it is not rendered. */

@@ -686,6 +686,12 @@ it('keeps a move refusal visible and releases the keyboard when dismissed', asyn
 });
 
 describe('pinned tabs', () => {
+  it('hands the host the spacer between + and the pinned group, and nothing else', async () => {
+    await render(<WorkspaceStrip spacerAttributes={{ 'data-tauri-drag-region': true }} />);
+    const claimed = [...container.querySelectorAll<HTMLElement>('[data-tauri-drag-region]')];
+    expect(claimed).toEqual([container.querySelector('[data-workspace-strip-spacer]')]);
+  });
+
   it('groups pinned tabs after +, with no close button, and middle-click closes nothing', async () => {
     const first = getWorkspacesSnapshot().workspaces[0].id;
     await act(async () => {
@@ -696,9 +702,10 @@ describe('pinned tabs', () => {
     stubHandle('ws-2', { closeAll });
     await render();
     const strip = container.querySelector('[data-workspace-strip]')!;
-    const order = [...strip.querySelectorAll<HTMLElement>('[data-workspace-tab], [data-workspace-new]')]
-      .map((element) => element.dataset.workspaceTab ?? '+');
-    expect(order).toEqual([first, 'ws-3', '+', 'ws-2']);
+    const order = [...strip.querySelectorAll<HTMLElement>('[data-workspace-tab], [data-workspace-new], [data-workspace-strip-spacer]')]
+      .map((element) => element.dataset.workspaceTab ?? ('workspaceNew' in element.dataset ? '+' : 'spacer'));
+    // The empty spacer pushes the pinned group flush against the strip's right end.
+    expect(order).toEqual([first, 'ws-3', '+', 'spacer', 'ws-2']);
     expect(tabFor('ws-2').closest('[data-workspace-pinned-group]')).not.toBeNull();
     expect(tabFor('ws-2').querySelector('[data-workspace-tab-pinned]')).not.toBeNull();
     expect(activateButton('ws-2').getAttribute('aria-label')).toBe('Notes, pinned');

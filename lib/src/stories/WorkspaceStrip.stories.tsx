@@ -52,7 +52,7 @@ function StripStory({ width = 640, busyIndex, todoLabels, tearsOut = false }: {
 
   return (
     <div className="bg-app-bg text-app-fg flex h-[30px] items-end" style={{ width }}>
-      <WorkspaceStrip className="min-w-0 pl-1.75" onMoveToNewWindow={tearsOut ? () => {} : undefined} />
+      <WorkspaceStrip className="self-stretch px-1.75" onMoveToNewWindow={tearsOut ? () => {} : undefined} />
     </div>
   );
 }

@@ -62,6 +62,7 @@ export function WorkspaceStrip({
   onDropOnOtherWindow,
   onDragCancelled,
   onMoveToNewWindow,
+  spacerAttributes,
 }: {
   className?: string;
   /** The three cross-Window drag hooks (`StripDragHost`). A composition with no
@@ -73,6 +74,9 @@ export function WorkspaceStrip({
   /** The tab menu's Move to new window: the host's tear-out. A host with one
    *  window supplies none, and the menu offers no such row. */
   onMoveToNewWindow?: (id: WorkspaceId) => void;
+  /** Attributes for the empty space between `+` and the pinned group, which
+   *  the host may claim (the standalone title bar's window-drag region). */
+  spacerAttributes?: Record<`data-${string}`, string | boolean>;
 }) {
   const { workspaces, activeId } = useSyncExternalStore(subscribeToWorkspaces, getWorkspacesSnapshot);
   const membership = useSyncExternalStore(subscribeToWorkspaceSurfaces, getWorkspaceSurfacesSnapshot);
@@ -155,7 +159,8 @@ export function WorkspaceStrip({
     dragRef.current = createWorkspaceStripDrag({
       order: () => getWorkspacesSnapshot().workspaces.map((workspace) => workspace.id),
       tabElement: (id) => tabElementsRef.current.get(id) ?? null,
-      stripRect: () => stripRef.current?.getBoundingClientRect() ?? null,
+      stripRects: () => [...(stripRef.current?.querySelectorAll<HTMLElement>('[data-workspace-strip-area]') ?? [])]
+        .map((area) => area.getBoundingClientRect()),
       move: (id, toIndex) => { moveWorkspace(id, toIndex); },
       setDragging: setDraggingId,
       onDragOutsideWindow: (point, id) => windowHooksRef.current.onDragOutsideWindow?.(point, id),
@@ -238,16 +243,17 @@ export function WorkspaceStrip({
   const pinned = workspaces.filter((workspace) => workspace.pinned);
   const menuWorkspace = menu ? workspaces.find((workspace) => workspace.id === menu.id) : undefined;
 
-  // Unpinned tabs and `+` scroll; the pinned group after them never does, so it
-  // stays in view however many tabs the strip holds. The store keeps the list
-  // partitioned, so DOM order is strip order.
+  // Unpinned tabs and `+` scroll and shrink; an empty spacer with a floor takes
+  // the rest of the strip's width, so the pinned group sits flush against its
+  // right end and never scrolls. The store keeps the list partitioned, so DOM
+  // order is strip order.
   return (
     <div
       ref={stripRef}
       data-workspace-strip
-      className={clsx('flex min-w-0 items-end gap-1.5', className)}
+      className={clsx('flex min-w-0 flex-1 items-end gap-1.5', className)}
     >
-      <div className="flex min-w-0 items-end gap-1.5 overflow-x-auto">
+      <div data-workspace-strip-area className="flex min-w-0 items-end gap-1.5 overflow-x-auto">
         {workspaces.filter((workspace) => !workspace.pinned).map(renderTab)}
         <button
           type="button"
@@ -260,8 +266,9 @@ export function WorkspaceStrip({
           <PlusIcon size={12} weight="bold" aria-hidden="true" />
         </button>
       </div>
+      <div {...spacerAttributes} data-workspace-strip-spacer className="min-w-8 flex-1 self-stretch" />
       {pinned.length > 0 && (
-        <div data-workspace-pinned-group className="flex shrink-0 items-end gap-1.5">
+        <div data-workspace-strip-area data-workspace-pinned-group className="flex shrink-0 items-end gap-1.5">
           {pinned.map(renderTab)}
         </div>
       )}

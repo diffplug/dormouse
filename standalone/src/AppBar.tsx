@@ -156,15 +156,19 @@ export function AppBar() {
       {/* On macOS, native traffic lights are shown by titleBarStyle "Overlay" —
           we just leave padding on the left (pl-[78px]) to avoid overlapping them. */}
 
-      {/* The Workspace strip: after the traffic lights on macOS, at the start of
-          the bar on Windows/Linux. The spacer after it is the drag target, with
-          a floor so it survives any tab count — the strip scrolls into what is
-          left rather than growing over it. Tauri matches `data-tauri-drag-region`
-          on the event target alone, so no tab or tab button may carry it — that
-          is what leaves a press on a tab free to activate, rename, or reorder. */}
-      <div className="flex min-w-0 items-end self-stretch pl-1.75">
+      {/* The Workspace strip fills the bar: after the traffic lights on macOS,
+          at the start of the bar on Windows/Linux, its pinned group flush
+          against the right end (before the window controls). The empty space
+          it leaves between `+` and the pinned group is the drag target, with a
+          floor so it survives any tab count — the unpinned tabs scroll into
+          what is left rather than growing over it. Tauri matches
+          `data-tauri-drag-region` on the event target alone, so no tab or tab
+          button may carry it — that is what leaves a press on a tab free to
+          activate, rename, or reorder. */}
+      <div data-tauri-drag-region className="flex min-w-0 flex-1 items-end self-stretch px-1.75">
         <WorkspaceStrip
-          className="min-w-0"
+          className="self-stretch"
+          spacerAttributes={{ 'data-tauri-drag-region': true }}
           onDragOutsideWindow={BROWSER_DEV ? undefined : onDragOutsideWindow}
           onDragBackInsideStrip={BROWSER_DEV ? undefined : onDragBackInsideStrip}
           onDropOnOtherWindow={BROWSER_DEV ? undefined : onDropOnOtherWindow}
@@ -172,7 +176,6 @@ export function AppBar() {
           onMoveToNewWindow={BROWSER_DEV ? undefined : moveWorkspaceToNewWindow}
         />
       </div>
-      <div data-tauri-drag-region className="min-w-8 flex-1 self-stretch" />
       <DropCaret />
 
       {/* Theme and shell selection live in the Settings dialog at the
