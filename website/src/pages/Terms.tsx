@@ -38,7 +38,7 @@ export const TERMS_SECTIONS: PolicySection[] = [
     <p>A founding badge is cosmetic. It grants nothing beyond the plan itself.</p>
   </> },
   { id: "fair-use", title: "Fair use", body: <>
-    <p>Managed voices have a daily limit per subscriber, sized for spoken alarms rather than general text-to-speech. Past it, Dormouse speaks in your system voice until the next day. The Relay likewise limits how many computers (currently 32), sessions, and requests one account can use, as protection against abuse.</p>
+    <p>Managed voices have a daily limit per subscriber, sized for spoken alarms rather than general text-to-speech. Past it, Dormouse speaks in your system voice until the next day. The Relay likewise applies anti-abuse limits to the sessions and requests one account can make.</p>
     <p>Use managed voices only through Dormouse, for its alarms. Do not extract, resell, or redistribute the audio service or your credentials.</p>
   </> },
   { id: "acceptable-use", title: "Acceptable use", body: <>
