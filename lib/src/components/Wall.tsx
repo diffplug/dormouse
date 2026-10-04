@@ -2311,7 +2311,9 @@ export function Wall({
       if (!isToolParams(params) || toolFace(params) === 'pending-approval') return;
       // Consent just before the document goes; any change while asking abandons the Break.
       if (!await confirmToolEditorsClose([id]) || lath.getMeta(id)?.params !== params) return;
-      const shownUrl = getAgentBrowserScreenController(id)?.chrome().url || browserUrlFromParams(params);
+      // Only an http(s) page reopens, as a swap judges it; a transient or error
+      // page on screen falls back to the Tool's own URL.
+      const shownUrl = browserSurfaceUrl(getAgentBrowserScreenController(id)?.chrome().url ?? '') ?? browserUrlFromParams(params);
       const mode = resolveRenderMode(params);
       const cwd = getTerminalPaneState(id)?.cwd?.path;
       if (terminalContextRef.current?.id === id) setTerminalContext(null);

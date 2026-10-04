@@ -17,7 +17,7 @@ import * as terminalRegistry from '../../lib/terminal-registry';
 import { _resetRunHoldsForTesting, holdForHostInterrupt, releaseRunHold } from '../../lib/tool-run-hold';
 import * as toolEditor from '../../lib/tool-editor';
 import { recordToolDirty, resetToolDirty } from '../../lib/tool-dirty-store';
-import { mountWallHarness, reportRunning, type WallHarness } from './wall-test-utils';
+import { mountWallHarness, registerStubScreen, reportRunning, STUB_CHROME, type WallHarness } from './wall-test-utils';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -210,6 +210,22 @@ describe('Break', () => {
     const pages = Object.entries(saved).filter(([id]) => id !== ID);
     expect(pages).toHaveLength(1);
     expect(pages[0][1]).toMatchObject({ component: 'browser', params: { surfaceType: 'browser', renderMode: 'iframe', url: SERVING.url } });
+  });
+
+  it.each([
+    ['the http(s) page on screen', 'http://127.0.0.1:6006/?path=/story/b', 'http://127.0.0.1:6006/?path=/story/b'],
+    ["the Tool's own URL behind an error page", 'chrome-error://chromewebdata/', SERVING.url],
+  ])('reopens %s', async (_, onScreen, expected) => {
+    act(() => reportRunning(ID, COMMAND));
+    await mountTool(SERVING);
+    const screen = registerStubScreen(ID, { chrome: { ...STUB_CHROME, url: onScreen } });
+    try {
+      await clickBreak();
+      const pages = Object.entries(await leaves()).filter(([id]) => id !== ID);
+      expect(pages[0]?.[1].params).toMatchObject({ url: expected });
+    } finally {
+      screen.dispose();
+    }
   });
 
   it('breaks a Tool not serving into its terminal alone', async () => {
