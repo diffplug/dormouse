@@ -17,7 +17,7 @@ Every Worker answers `/api/health` and `/api/ready`, 404s anything else under it
 
 **Must run committed Better Auth migrations before deploying code that needs them, never during a Worker request.** Postgres is reached through an uncached Hyperdrive binding, one per Worker.
 
-**Must grant `dormouse_relay` and `dormouse_voice` only what `hosted/server/runtime-roles.sql` lists, never default privileges**, so a new table needs a grant there; each reaches only its Worker's tables and the entitlement's user columns. **Must bind each production Worker to its own Hyperdrive connecting as its role**: account `dormouse_app`, relay `dormouse_relay`, voice `dormouse_voice` (`HYPERDRIVES` in `hosted/scripts/production.mjs`).
+**Must grant `dormouse_relay` and `dormouse_voice` only what `hosted/server/runtime-roles.sql` lists, never default privileges**, so a new table needs a grant there; each reaches only its Worker's tables and the entitlement's user columns. **Must bind each production Worker to its own Hyperdrive connecting as its role**: account `dormouse_app`, relay `dormouse_relay`, voice `dormouse_voice` (`PRODUCTION` in `hosted/scripts/production.mjs`).
 
 **Must install released core/auth packages from npm and commit their lockfile integrity hashes.** The installed packages' `dist/provenance.json` must name the same clean pgstencil commit; no runtime import depends on a sibling checkout. The auth migrations remain owned by the package; Dormouse's own tables migrate from `hosted/server/dormouse-migrations/`. **Never edit a merged migration**: a migrated database never reruns one, so append the next number (pinned by `hosted/server/tests/migrations.test.ts`).
 

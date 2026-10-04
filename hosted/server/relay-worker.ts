@@ -6,7 +6,7 @@ import { pocketRoutes } from "./pocket";
 import { OWNER_COLUMNS } from "./relay-auth";
 import { relayApiRoutes, sweepExpired } from "./relay-api";
 import { relaySocketRoutes } from "./relay-sockets";
-import { readyRoute, workerApp } from "./worker-app";
+import { workerApp } from "./worker-app";
 
 /**
  * The relay Worker, `dormouse-relay` on `relay.dormouse.sh`: the Hosted Relay's
@@ -22,14 +22,11 @@ export default workerApp<RelayEnv>({
   bindings: relayBindings,
   rules: relayRules,
   nonPagePrefixes: RELAY_NON_PAGE_PREFIXES,
+  // A session lookup's shape: the role's own table and the entitlement's columns.
+  ready: `SELECT s."userId", ${OWNER_COLUMNS}
+    FROM dormouse_relay_sessions s JOIN "user" u ON u.id = s."userId" LIMIT 0`,
   unavailable: "The relay is temporarily unavailable. Please try again.",
   routes(app) {
-    // A session lookup's shape: the role's own table and the entitlement's columns.
-    readyRoute(
-      app,
-      `SELECT s."userId", ${OWNER_COLUMNS}
-      FROM dormouse_relay_sessions s JOIN "user" u ON u.id = s."userId" LIMIT 0`,
-    );
     relayApiRoutes(app);
     relaySocketRoutes(app);
     oneTimeRoutes(app);

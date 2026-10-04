@@ -5,8 +5,8 @@ import { secureHeaders, type RulesFor } from "./headers";
 
 /**
  * What all three Workers share (`docs/specs/hosted.md` -> "Application
- * boundary"): the secure headers, the bindings mapper, the 421 gate, `/api/health`,
- * the 404 tails, and `onError`. Each entry mounts only its own routes, between
+ * boundary"): the secure headers, the bindings mapper, the 421 gate, `/api/health`
+ * and `/api/ready`, the 404 tails, and `onError`. Each entry mounts only its own routes, between
  * the gate and the tails, and its `fallback` after them. A Cron Trigger's
  * `scheduled` sees the same mapped bindings a route does.
  */
@@ -14,6 +14,7 @@ export function workerApp<E extends WorkerEnv>({
   bindings,
   rules,
   nonPagePrefixes = ["/api"],
+  ready,
   routes,
   fallback,
   scheduled,
@@ -25,6 +26,12 @@ export function workerApp<E extends WorkerEnv>({
   rules: RulesFor;
   /** Prefixes whose unmatched paths 404 ahead of `fallback`; `/api` by default. */
   nonPagePrefixes?: readonly string[];
+  /**
+   * `/api/ready`'s query: it reads no row (`LIMIT 0`) and names only what the
+   * Worker's own role is granted, so a missing grant or an unreachable
+   * database answers 503, the cause never told. Without one, no readiness.
+   */
+  ready?: string;
   routes: (app: Hono<{ Bindings: E }>) => void;
   /** Answers what nothing else did; without one, Hono's 404. */
   fallback?: (app: Hono<{ Bindings: E }>) => void;
@@ -54,6 +61,14 @@ export function workerApp<E extends WorkerEnv>({
   app.get("/api/health", (c) =>
     c.json({ ok: true, revision: c.env.BUILD_SHA ?? null }),
   );
+  if (ready)
+    app.get("/api/ready", async (c) => {
+      const ok = await queryDatabase(c.env.HYPERDRIVE!.connectionString, ready).then(
+        () => true,
+        () => false,
+      );
+      return c.json({ ok }, ok ? 200 : 503);
+    });
   for (const prefix of nonPagePrefixes)
     app.all(`${prefix}/*`, (c) => c.json({ message: "Not found." }, 404));
   app.all("/dev/*", (c) => c.notFound());
@@ -69,21 +84,3 @@ export function workerApp<E extends WorkerEnv>({
   };
 }
 
-/**
- * `/api/ready`: 200 once `sql` runs through the Worker's Hyperdrive, else 503,
- * the cause never answered. `sql` reads no row (`LIMIT 0`) and names only what
- * the Worker's own role is granted, so a missing grant or an unreachable
- * database fails it.
- */
-export function readyRoute<E extends { HYPERDRIVE: { connectionString: string } }>(
-  app: Hono<{ Bindings: E }>,
-  sql: string,
-) {
-  app.get("/api/ready", async (c) => {
-    const ok = await queryDatabase(c.env.HYPERDRIVE.connectionString, sql).then(
-      () => true,
-      () => false,
-    );
-    return c.json({ ok }, ok ? 200 : 503);
-  });
-}

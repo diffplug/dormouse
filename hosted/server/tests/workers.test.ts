@@ -41,7 +41,7 @@ import {
   type Name,
 } from "./bundle";
 import { limitOf, untilLimited } from "./rate-limit";
-import { workerDatabases } from "./worker-roles";
+import { RUNTIME_ROLES, workerDatabases } from "./worker-roles";
 
 const origin = ORIGINS.account;
 const voiceOrigin = ORIGINS.voice;
@@ -610,10 +610,10 @@ test("the relay and voice are ready only while their own roles hold the grants t
   expect(await status("relay")).toBe(200);
   expect(await status("voice")).toBe(200);
   // A grant gone from one role fails that Worker's readiness alone.
-  await queryDatabase(f.database.url, "REVOKE SELECT ON dormouse_relay_sessions FROM dormouse_relay");
+  await queryDatabase(f.database.url, `REVOKE SELECT ON dormouse_relay_sessions FROM ${RUNTIME_ROLES.relay}`);
   expect(await status("relay")).toBe(503);
   expect(await status("voice")).toBe(200);
-  await queryDatabase(f.database.url, 'REVOKE SELECT ("emailVerified") ON "user" FROM dormouse_voice');
+  await queryDatabase(f.database.url, `REVOKE SELECT ("emailVerified") ON "user" FROM ${RUNTIME_ROLES.voice}`);
   expect(await status("voice")).toBe(503);
 });
 

@@ -4,7 +4,7 @@ import { accountRules } from "./headers";
 import { relayAccountRoutes, type RelayAccountHost } from "./relay-account";
 import { relayRoom } from "./relay-room-contract";
 import { voiceTokenRoutes } from "./voice";
-import { readyRoute, workerApp } from "./worker-app";
+import { workerApp } from "./worker-app";
 
 /**
  * The account Worker (`hosted.dormouse.sh`): auth, providers, readiness,
@@ -24,10 +24,10 @@ export function accountApp(
   return workerApp<AccountEnv>({
     bindings,
     rules: accountRules,
+    ready: 'SELECT "singleSession", "emailAuthenticated" FROM "session" LIMIT 0',
     unavailable: "Sign-in is temporarily unavailable. Please try again.",
     routes(app) {
       configure?.(app);
-      readyRoute(app, 'SELECT "singleSession", "emailAuthenticated" FROM "session" LIMIT 0');
       app.all("/api/auth/*", (c) =>
         fetchAuth(c.req.raw, c.env, c.executionCtx),
       );

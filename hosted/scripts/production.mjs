@@ -14,23 +14,30 @@ import {
 
 /**
  * Each Worker's production name and origin, pinned here so an edited config
- * cannot redirect production or stand in for a sibling.
+ * cannot redirect production or stand in for a sibling, and its Hyperdrive:
+ * the GitHub variable naming it and the Postgres role it must connect as —
+ * the relay's and voice's created by `hosted/server/runtime-roles.sql`, the
+ * account's by hand (hosted/README.md).
  */
 export const PRODUCTION = {
-  account: { name: "dormouse-hosted", origin: "https://hosted.dormouse.sh" },
-  relay: { name: "dormouse-relay", origin: "https://relay.dormouse.sh" },
-  voice: { name: "dormouse-voice", origin: "https://voice.dormouse.sh" },
-};
-
-/**
- * Each Worker's production Hyperdrive: the GitHub variable naming it, and the
- * Postgres role it must connect as — the relay's and voice's created by
- * `hosted/server/runtime-roles.sql`, the account's by hand (hosted/README.md).
- */
-export const HYPERDRIVES = {
-  account: { variable: "HYPERDRIVE_ID", user: "dormouse_app" },
-  relay: { variable: "RELAY_HYPERDRIVE_ID", user: "dormouse_relay" },
-  voice: { variable: "VOICE_HYPERDRIVE_ID", user: "dormouse_voice" },
+  account: {
+    name: "dormouse-hosted",
+    origin: "https://hosted.dormouse.sh",
+    hyperdrive: "HYPERDRIVE_ID",
+    role: "dormouse_app",
+  },
+  relay: {
+    name: "dormouse-relay",
+    origin: "https://relay.dormouse.sh",
+    hyperdrive: "RELAY_HYPERDRIVE_ID",
+    role: "dormouse_relay",
+  },
+  voice: {
+    name: "dormouse-voice",
+    origin: "https://voice.dormouse.sh",
+    hyperdrive: "VOICE_HYPERDRIVE_ID",
+    role: "dormouse_voice",
+  },
 };
 
 /** A production variable or secret, or an error naming it. */
@@ -40,7 +47,7 @@ export function productionConfig(base, env, worker) {
   const identity = PRODUCTION[worker];
   assert.ok(identity, `Unknown Worker ${worker}`);
   assert.match(required(env, "BUILD_SHA"), /^[a-f0-9]{40}$/);
-  assert.match(required(env, "CLOUDFLARE_ACCOUNT_ID"), /^[a-f0-9]{32}$/);
+  assert.match(need(env, "CLOUDFLARE_ACCOUNT_ID"), /^[a-f0-9]{32}$/);
   assert.equal(base.name, identity.name);
   assert.equal(base.vars.APP_ORIGIN, identity.origin);
   // The relay's enrollment links name production's account, and only it.
@@ -61,7 +68,7 @@ export function productionConfig(base, env, worker) {
   if (base.assets)
     config.assets = { ...base.assets, directory: fromStage(base.assets.directory) };
   if (base.hyperdrive) {
-    const { variable } = HYPERDRIVES[worker];
+    const variable = identity.hyperdrive;
     const id = need(env, variable);
     assert.match(id, /^[a-f0-9]{32}$/, `${variable} must be a Hyperdrive ID`);
     assert.notEqual(id, "0".repeat(32), `Provision production Hyperdrive first: ${variable}`);
@@ -78,7 +85,7 @@ export function productionConfigs(bases, env) {
       productionConfig(bases[worker], env, worker),
     ]),
   );
-  const variables = Object.values(HYPERDRIVES).map(({ variable }) => variable);
+  const variables = Object.values(PRODUCTION).map(({ hyperdrive }) => hyperdrive);
   assert.equal(
     new Set(variables.map((variable) => env[variable])).size,
     variables.length,
@@ -170,7 +177,7 @@ export async function verifyPackages() {
  */
 export async function preflight(env, configs, api = cloudflare(env)) {
   const origin = hyperdriveOrigin(need(env, "DATABASE_URL"));
-  for (const [worker, { user }] of Object.entries(HYPERDRIVES))
+  for (const [worker, { role }] of Object.entries(PRODUCTION))
     for (const { id } of configs[worker].hyperdrive) {
       const { result } = await api(`hyperdrive/configs/${id}`);
       const name = `${configs[worker].name}'s Hyperdrive`;
@@ -195,7 +202,7 @@ export async function preflight(env, configs, api = cloudflare(env)) {
         origin.user,
         `${name} must not connect as the migration role`,
       );
-      assert.equal(result.origin.user, user, `${name} must connect as ${user}`);
+      assert.equal(result.origin.user, role, `${name} must connect as ${role}`);
     }
   for (const [script, secrets] of Object.entries(requiredSecrets(configs))) {
     const { result: bindings } = await api(`workers/scripts/${script}/secrets`);

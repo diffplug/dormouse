@@ -1,7 +1,7 @@
 import type { VoiceEnv } from "./bindings";
 import { NO_PAGE_RULES } from "./headers";
-import { elevenLabs, speakRoute, sweepOnCron } from "./voice";
-import { readyRoute, workerApp } from "./worker-app";
+import { TOKEN_OWNER, elevenLabs, speakRoute, sweepOnCron } from "./voice";
+import { workerApp } from "./worker-app";
 
 /**
  * The voice Worker (`voice.dormouse.sh`): readiness, bearer-token speech, and
@@ -15,14 +15,10 @@ export function voiceApp(
   return workerApp<VoiceEnv>({
     bindings,
     rules: () => NO_PAGE_RULES,
+    // Speak's token lookup: the role's own table and the entitlement's columns.
+    ready: `${TOKEN_OWNER} LIMIT 0`,
     unavailable: "Managed voice is temporarily unavailable. Please try again.",
     routes(app) {
-      // Speak's token lookup: the role's own table and the entitlement's columns.
-      readyRoute(
-        app,
-        `SELECT t.id, t."userId", u.email, u."emailVerified"
-        FROM dormouse_voice_tokens t JOIN "user" u ON u.id = t."userId" LIMIT 0`,
-      );
       speakRoute(app, (c) => {
         const key = c.env.ELEVENLABS_API_KEY;
         return {

@@ -9,6 +9,9 @@ import { accountQuery, cookieAdmin, type AccountHost } from "./account-gate";
 
 export const VOICE_DAILY_CAP = 500;
 const TOKEN = /^dmv_[A-Za-z0-9_-]{43}$/;
+/** Speak's token lookup, its owner's entitlement columns joined, before its WHERE. */
+export const TOKEN_OWNER = `SELECT t.id, t."userId", u.email, u."emailVerified"
+  FROM dormouse_voice_tokens t JOIN "user" u ON u.id = t."userId"`;
 const VOICE_ID = /^[A-Za-z0-9]{1,64}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const MAX_BODY = 4096;
@@ -129,9 +132,7 @@ export function speakRoute(app: Hono<any>, host: (c: Context) => SpeakHost) {
         email: string;
         emailVerified: boolean;
       }>(
-        `SELECT t.id, t."userId", u.email, u."emailVerified"
-        FROM dormouse_voice_tokens t JOIN "user" u ON u.id = t."userId"
-        WHERE t.hash = $1 AND t."revokedAt" IS NULL`,
+        `${TOKEN_OWNER} WHERE t.hash = $1 AND t."revokedAt" IS NULL`,
         [digest(bearer)],
       );
       if (!owner) return tokenRequired(c);

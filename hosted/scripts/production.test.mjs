@@ -22,7 +22,10 @@ const env = {
 const configs = productionConfigs(bases, env);
 /** An `assert` failure's message: ours, then Node's diff. */
 const failure = (message) => ({ message: new RegExp(`^${RegExp.escape(message)}(\\n|$)`) });
-/** Each Worker's Hyperdrive variable and the role it must connect as. */
+/**
+ * Each Worker's Hyperdrive variable and the role it must connect as, stated
+ * here rather than read from `PRODUCTION`, so an edit there fails a test.
+ */
 const HYPERDRIVES = {
   account: ["HYPERDRIVE_ID", "dormouse_app"],
   relay: ["RELAY_HYPERDRIVE_ID", "dormouse_relay"],
