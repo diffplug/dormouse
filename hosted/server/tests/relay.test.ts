@@ -48,6 +48,7 @@ import {
 } from "../relay-api";
 import type { Client } from "../relay-auth";
 import { upsertSubscription } from "../relay-push";
+import { workerDatabases } from "./worker-roles";
 import {
   ENTRIES,
   ORIGINS,
@@ -78,6 +79,7 @@ interface Pushed {
 
 async function fixture({ bindings = {} }: { bindings?: Record<string, string | undefined> } = {}) {
   const context = await createTestContext({ migrations });
+  const databases = await workerDatabases(context.database.url);
   // The push services: every request is recorded, then answered by `answer`.
   const pushed: Pushed[] = [];
   let answer: (url: URL) => WorkerResponse | Promise<WorkerResponse> = () =>
@@ -93,7 +95,7 @@ async function fixture({ bindings = {} }: { bindings?: Record<string, string | u
           ...bindings,
         }).filter(([, value]) => value !== undefined),
       ) as Record<string, string>,
-      hyperdrives: { HYPERDRIVE: context.database.url },
+      hyperdrives: { HYPERDRIVE: databases.relay },
       serviceBindings: {
         ASSETS: () =>
           new WorkerResponse("<!doctype html>", {
@@ -309,6 +311,8 @@ async function fixture({ bindings = {} }: { bindings?: Record<string, string | u
     },
     entitle,
     url: context.database.url,
+    /** The database as the relay Worker's role, for its code called directly. */
+    relayUrl: databases.relay,
     call,
     account,
     burrow,
@@ -752,7 +756,7 @@ test("restoring a setup token that has since expired never evicts a live one", a
       .map((row) => row.tokenHash)
       .sort();
   const restore = (token: string, expiresAt: Date) =>
-    withClient(f.url, (db) =>
+    withClient(f.relayUrl, (db) =>
       restoreSetupToken(db, token, { burrowId: laptop.burrowId, userId: owner, expiresAt }),
     );
   await restore(randomSecret(), new Date(Date.now() - 1000));
@@ -781,7 +785,7 @@ test("a setup token that expires while its restore waits on the lock is not rest
     await holder.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [
       `dormouse-relay:dormouse_relay_setup_tokens:${laptop.burrowId}`,
     ]);
-    const restoring = withClient(f.url, (db) =>
+    const restoring = withClient(f.relayUrl, (db) =>
       restoreSetupToken(db, randomSecret(), { burrowId: laptop.burrowId, userId: owner, expiresAt }),
     );
     await new Promise((resolve) => setTimeout(resolve, expiresAt.getTime() - Date.now() + 500));
@@ -1537,7 +1541,7 @@ test("a capped write that waited on its lock is stamped after the write it follo
    * second. Answers both results.
    */
   async function interleaved<T>(write: (db: Client) => Promise<T>) {
-    return withClient(f.url, async (db) => {
+    return withClient(f.relayUrl, async (db) => {
       let began!: () => void;
       let go!: () => void;
       const begun = new Promise<void>((resolve) => (began = resolve));
@@ -1555,7 +1559,7 @@ test("a capped write that waited on its lock is stamped after the write it follo
       const waited = write(paused);
       await begun;
       await new Promise((resolve) => setTimeout(resolve, 50));
-      const first = await withClient(f.url, write);
+      const first = await withClient(f.relayUrl, write);
       go();
       return { first, waited: await waited };
     });
