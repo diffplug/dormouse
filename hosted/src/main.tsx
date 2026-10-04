@@ -1,6 +1,7 @@
 import { createRoot } from "react-dom/client";
 import { applyTheme } from "../../lib/src/lib/themes/apply";
 import { getBundledThemes } from "../../lib/src/lib/themes/store";
+import { ADMIN_METRICS_PAGE, AdminMetrics } from "./AdminMetrics";
 import { App } from "./App";
 import { takeCheckout, takeReturn } from "./checkout";
 import { takeEnrollment } from "./enrollment";
@@ -17,10 +18,12 @@ function restoreTheme() {
 }
 restoreTheme();
 preference.addEventListener("change", restoreTheme);
-// Taken before anything renders; a later fragment change on `/enroll` is App's.
-const enrollment = takeEnrollment();
-const checkout = takeCheckout();
-const returned = takeReturn();
-createRoot(document.getElementById("root")!).render(
-  <App enrollment={enrollment} checkout={checkout} returned={returned} />,
-);
+const root = createRoot(document.getElementById("root")!);
+if (location.pathname === ADMIN_METRICS_PAGE) root.render(<AdminMetrics />);
+else {
+  // Taken before anything renders; a later fragment change on `/enroll` is App's.
+  const enrollment = takeEnrollment();
+  const checkout = takeCheckout();
+  const returned = takeReturn();
+  root.render(<App enrollment={enrollment} checkout={checkout} returned={returned} />);
+}

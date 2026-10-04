@@ -285,3 +285,56 @@ form > button:last-child {
 .terms {
   margin-top: 16px;
 }
+/* The admin metrics view: wider, for its tables. */
+main.wide {
+  width: min(100%, 960px);
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+th,
+td {
+  text-align: left;
+  vertical-align: top;
+  padding: 6px 12px 6px 0;
+  border-bottom: 1px solid var(--vscode-list-inactiveSelectionBackground);
+}
+thead th {
+  font-weight: 600;
+}
+tbody th {
+  font-weight: 400;
+}
+.bar {
+  display: inline-block;
+  width: 96px;
+  height: 8px;
+  margin-left: 8px;
+  vertical-align: middle;
+  background: var(--vscode-list-inactiveSelectionBackground);
+}
+.bar span,
+.daily span {
+  display: block;
+  height: 100%;
+  background: var(--vscode-list-activeSelectionBackground);
+}
+.daily {
+  display: flex;
+  align-items: flex-end;
+  gap: 1px;
+  width: 240px;
+  height: 24px;
+}
+.daily span {
+  flex: 1;
+  min-height: 1px;
+}
+@media (max-width: 540px) {
+  table {
+    display: block;
+    overflow-x: auto;
+  }
+}
