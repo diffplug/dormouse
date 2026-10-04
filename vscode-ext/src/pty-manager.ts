@@ -512,9 +512,15 @@ export function interrupt(ids: string[], timeoutMs = 400): Promise<void> {
   return awaitChildAck({ type: 'interrupt', ids }, 'interruptDone', timeoutMs);
 }
 
+/**
+ * SIGTERM every PTY this extension host still has alive and wait for their exits
+ * and final output. `pty-core` only ever kills an explicit set, so the ids are
+ * named here: this pty-host serves one window, and every live PTY in it is ours.
+ */
 export function gracefulKillAll(timeoutMs = 2000): Promise<void> {
+  const ids = [...ptyBuffers].filter(([, entry]) => entry.alive).map(([id]) => id);
   // Extra margin beyond the pty-host's own timeout.
-  return awaitChildAck({ type: 'gracefulKillAll', timeout: timeoutMs }, 'gracefulKillDone', timeoutMs + 500);
+  return awaitChildAck({ type: 'gracefulKill', ids, timeout: timeoutMs }, 'gracefulKillDone', timeoutMs + 500);
 }
 
 export function killAll(): void {

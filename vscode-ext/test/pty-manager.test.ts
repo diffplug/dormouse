@@ -64,6 +64,24 @@ describe('PTY manager lifetime and buffers', () => {
     expect(manager.getScrollbackSince('pane-a', data.length)).toBe('end');
   });
 
+  it('gracefully kills every live PTY by id and resolves on its own ack', async () => {
+    const { manager, child } = await startManager();
+    manager.spawn('pane-b');
+    manager.spawn('pane-c');
+    manager.spawn('pane-d');
+    child.emit('message', { type: 'exit', id: 'pane-c', exitCode: 0 });
+    manager.kill('pane-d');
+    let settled = false;
+    const done = manager.gracefulKillAll(2000).then(() => { settled = true; });
+    const request = child.send.mock.calls.at(-1)![0];
+    expect(request).toMatchObject({ type: 'gracefulKill', ids: ['pane-a', 'pane-b'], timeout: 2000 });
+    child.emit('message', { type: 'gracefulKillDone', requestId: 'someone-else' });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    child.emit('message', { type: 'gracefulKillDone', requestId: request.requestId });
+    await done;
+  });
+
   it('forwards a Burrow repaint to the PTY child that owns all size writers', async () => {
     const { manager, child } = await startManager();
     manager.resize('pane-a', 80, 24, true);
