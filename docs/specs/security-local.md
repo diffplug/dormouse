@@ -134,7 +134,7 @@ Source of truth: `SESSION_STATE_KEY` in `vscode-ext/src/session-state.ts`, `ensu
 
 ## Terminal context directory actions
 
-- **FAIL IF** a context directory argument, or a terminal-reported directory Workspace auto-naming hands the host's git lookup (`docs/specs/layout.md` → "Workspace names"), reaches a process without being validated as an existing absolute directory and passed as its canonical path in one argument with no shell interpretation; a context directory action goes through the external-URL allowlist rather than this validation; or a VS Code per-terminal context request or helper ownership update leaves the owning router.
+- **FAIL IF** a context directory argument, or a terminal-reported directory Workspace auto-naming hands the host's git lookup (`docs/specs/layout.md` → "Workspace names"), reaches a process without being validated as an existing absolute directory and passed as its canonical path in one argument with no shell interpretation; a context directory action goes through the external-URL allowlist rather than this validation; the native opener runs a program the path names (macOS reveals with `open -R`; Windows refuses a path Explorer would split); or a VS Code per-terminal context request or helper ownership update leaves the owning router.
 
 Source of truth: `context` in `standalone/sidecar/pty-core.js`; `attachRouter` in `vscode-ext/src/message-router.ts`; `lookupGitDir` in `lib/src/host/git-info.ts`.
 

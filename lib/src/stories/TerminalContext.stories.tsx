@@ -107,7 +107,7 @@ function ContextPrototype({ scenario, initialDetail = null, paneWidth, paneHeigh
         scan={scenario === 'scanFailed' ? { status: 'failed' } : { status: 'loaded', entries: scenario === 'noPorts' ? [] : ports }}
         watchRule="pnpm" watching={watching} todo={todo} notification={scenario === 'notification' ? { title: 'Tests complete', body: '341 passed, 0 failed' } : null}
         status={preserved ? 'preserved' : scenario === 'running' ? 'running' : scenario === 'autorunOff' ? 'off' : 'completed'} command={command}
-        explorerLabel="Open in Finder" canExplore browserProviders={bothProviders ? ['agent-browser', 'playwright'] : ['agent-browser']} canIframe initialDetail={initialDetail}
+        explorerLabel="Reveal in Finder" canExplore browserProviders={bothProviders ? ['agent-browser', 'playwright'] : ['agent-browser']} canIframe initialDetail={initialDetail}
         onClose={() => {}} onCopyRef={() => {}} onCopyPath={() => {}} onExplore={() => {}} onPort={() => {
           if (scenario === 'launchPending') return new Promise<void>(() => {});
           if (scenario === 'launchFailed') throw new Error("agent-browser binary not found ('agent-browser' was not found)");
