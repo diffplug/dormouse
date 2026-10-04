@@ -1184,13 +1184,12 @@ function openNativeDirectory(nativePath, done, runtime = {}) {
     const finish = error => { if (!settled) { settled = true; done(error); } };
     child.once('error', finish);
     child.once('spawn', () => { child.unref(); finish(null); });
-  } else if (platform === 'darwin') {
-    // `open` launches a bundle directory (`.app`, `.prefPane`, ...) instead of
-    // showing it; `-R` only ever reveals, for a plain folder too.
-    (runtime.execFile || execFile)('open', ['-R', nativePath], { windowsHide: true }, done);
   } else {
-    // xdg-open hands any directory to the inode/directory handler.
-    (runtime.execFile || execFile)('xdg-open', [nativePath], { windowsHide: true }, done);
+    // `open` launches a bundle directory (`.app`, `.prefPane`, ...) instead of
+    // showing it, so macOS reveals (`-R`), a plain folder too; xdg-open hands
+    // any directory to the inode/directory handler.
+    const [exe, args] = platform === 'darwin' ? ['open', ['-R', nativePath]] : ['xdg-open', [nativePath]];
+    (runtime.execFile || execFile)(exe, args, { windowsHide: true }, done);
   }
 }
 module.exports.openNativeDirectory = openNativeDirectory;

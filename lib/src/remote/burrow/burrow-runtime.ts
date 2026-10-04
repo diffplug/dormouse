@@ -331,11 +331,7 @@ export interface BurrowOptions {
    * networks").
    */
   onPathRefused?: (refusal: PathRefusal) => void;
-  /**
-   * The Relay raised this Burrow's demand to user verification past what its
-   * enrollment holds ({@link RelayPolicyFrame}). Already enforced when called;
-   * the owner persists it so a restart keeps it.
-   */
+  /** The Relay raised the UV demand ({@link RelayPolicyFrame}); already enforced, for the owner to persist. */
   onPolicyRaised?: () => void;
 }
 
@@ -1073,11 +1069,7 @@ export class BurrowRuntime {
     this.#enqueue(frame, raw.length);
   }
 
-  /**
-   * Only ever up. The Relay is trusted with nothing, so a frame reporting
-   * less, or nothing, leaves the demand where enrollment or an earlier raise
-   * put it (`docs/specs/remote-security-model.md` → Passkeys).
-   */
+  /** Only ever up ({@link RelayPolicyFrame}). */
   #raisePolicy(frame: RelayPolicyFrame): void {
     if (frame.requireUserVerification !== true || this.#policy.requireUserVerification) return;
     this.#policy = { ...this.#policy, requireUserVerification: true };

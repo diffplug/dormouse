@@ -1606,7 +1606,7 @@ export class BurrowService {
       onInvitationChanged: (inviteId, state, outcome) =>
         this.#emitInvitation(inviteId, state, outcome),
       onPathRefused: (refusal) => this.#recordPathRefusal(refusal),
-      onPolicyRaised: () => void this.#persistRaisedPolicy(enrollment),
+      onPolicyRaised: () => this.#persistRaisedPolicy(enrollment),
       probeStanding: () => probeBurrowStanding({ enrollment, fetch: this.#fetch }),
       now: this.#now,
     });
@@ -1618,13 +1618,13 @@ export class BurrowService {
    * Keep the Relay's raise to user verification across restarts, onto the
    * enrollment whose Burrow heard it — and only while that is still this
    * machine's enrollment, so a raise queued behind a clear or a re-enroll
-   * writes nothing. A failed save is retried by the next connect's raise; the
-   * running Burrow already enforces it.
+   * writes nothing. The running Burrow already enforces it; a failed save is
+   * retried by the raise after the next start.
    */
-  #persistRaisedPolicy(raisedBy: BurrowEnrollment): Promise<void> {
-    return this.#serialize(async () => {
+  #persistRaisedPolicy(raisedBy: BurrowEnrollment): void {
+    void this.#serialize(async () => {
       const current = this.#enrollment;
-      if (current?.burrowToken !== raisedBy.burrowToken || current.requireUserVerification) return;
+      if (current?.burrowToken !== raisedBy.burrowToken) return;
       const raised = { ...current, requireUserVerification: true };
       try {
         await this.#store.saveEnrollment(raised);

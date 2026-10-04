@@ -1167,6 +1167,10 @@ export function createApp(config: AppConfig): CreatedApp {
   // Auth rides the `token` query param (browsers cannot set WS headers). A bad
   // token short-circuits with 401 here, so `injectWebSocket` never upgrades it.
 
+  // The first frame of every Burrow socket while UV is demanded (RelayPolicyFrame).
+  const burrowPolicy: RelayPolicyFrame | undefined = config.requireUserVerification
+    ? { t: 'policy', requireUserVerification: true }
+    : undefined;
   app.get(
     WS_ROUTES.burrow,
     async (c, next) => {
@@ -1183,12 +1187,9 @@ export function createApp(config: AppConfig): CreatedApp {
       let unwatch = () => {};
       return {
         onOpen: (_evt, ws) => {
-          // Re-delivered on every connect, ahead of anything routed, so a flag
-          // set after this Burrow enrolled still reaches it (relay.md).
-          if (config.requireUserVerification) {
-            ws.send(JSON.stringify({ t: 'policy', requireUserVerification: true } satisfies RelayPolicyFrame));
-          }
-          conn = hub.registerBurrow(burrow.burrowId, ws);
+          // On every connect, so a flag set after this Burrow enrolled still
+          // reaches it (relay.md).
+          conn = hub.registerBurrow(burrow.burrowId, ws, burrowPolicy);
           const registered = conn;
           unwatch = watchLiveness(ws, () => hub.unregisterBurrow(registered));
         },

@@ -973,7 +973,7 @@ describe('start', () => {
     release();
     await cleared;
     // Past every serialized task the raise could have queued.
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await settle();
     expect(store.enrollment).toBeNull();
   });
 
