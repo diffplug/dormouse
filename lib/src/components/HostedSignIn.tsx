@@ -5,6 +5,7 @@ import { FIELD_HINT, FIELD_LABEL, hostOf, useBusyAction, useMinutesLeft } from '
 import { ACCOUNT_PAGE_PATH, HOSTED_ACCOUNT_ORIGIN } from '../host/relay-origin';
 import type { HostedEnrollmentEndReason, HostedEnrollmentState } from '../host/remote/service-protocol';
 import { getPlatform } from '../lib/platform';
+import { hostedPricingUrl } from '../lib/hosted-links';
 import { BURROW_IS_AN_APP } from '../remote/setup-copy';
 import { beginHostedEnrollment, cancelHostedEnrollment } from '../remote/burrow/burrow-status-store';
 
@@ -17,9 +18,15 @@ import { beginHostedEnrollment, cancelHostedEnrollment } from '../remote/burrow/
  */
 
 /** Where the plans are; linked wherever an account turns out to have none. */
-export const HOSTED_PRICING_URL = 'https://dormouse.sh/hosted/#pricing';
-/** The Hosted page's voice section, the spoken-alarm row's link where the build has no managed voice. */
-export const HOSTED_VOICE_URL = 'https://dormouse.sh/hosted/#voice';
+export const HOSTED_PRICING_URL = hostedPricingUrl();
+
+/** The words of every link to the plans. */
+export const PLANS_LABEL = 'See Hosted plans';
+
+/** The plans, linked wherever an account turns out to have none. */
+export function HostedPlansLink() {
+  return <ExternalTextLink href={HOSTED_PRICING_URL}>{PLANS_LABEL}</ExternalTextLink>;
+}
 
 /** The begin button's words, everywhere sign-in starts. */
 export const SIGN_IN_LABEL = 'Sign in to Dormouse Hosted';
@@ -102,7 +109,7 @@ export function HostedEnrollmentEnded({
       {ended.reason === 'failed' && ended.message ? <div className="mt-1 text-error">{ended.message}</div> : null}
       {ended.reason === 'not-entitled' ? (
         <div className="mt-1">
-          <ExternalTextLink href={HOSTED_PRICING_URL}>See Hosted plans</ExternalTextLink>
+          <HostedPlansLink />
         </div>
       ) : null}
       {page ? (

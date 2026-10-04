@@ -38,6 +38,8 @@ import {
 } from '../lib/terminal-registry';
 import { deriveDisplayedSurfaceLabel } from '../lib/session-label';
 import { subscribeToNetworkPolicy } from '../remote/burrow/network-policy-store';
+import { takeAlarmUpsell, type AlarmUpsell } from '../lib/alarm-upsell';
+import type { TopicId } from './SettingsDialog';
 
 /** Shared by every baseboard-level button (DESIGN.md -> Navigation). */
 const BASEBOARD_BUTTON_BASE_CLASS = 'h-6 shrink-0 justify-center pb-px text-sm font-medium font-mono';
@@ -139,19 +141,39 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
   const rightClusterEl = useRef<HTMLDivElement>(null);
   const [rightClusterWidth, setRightClusterWidth] = useState(0);
   const layoutMetrics = useRef({ doorGap: 0, arrowWidth: 0 });
-  const [settingsOpen, setSettingsOpen] = useState<'application' | 'workspace' | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState<{ dialog: 'application'; topic?: TopicId } | { dialog: 'workspace' } | null>(null);
   const workspaceSettingsTrigger = useRef<HTMLButtonElement | null>(null);
-  const [settingsPreview, setSettingsPreview] = useState<{ sink: AlertSink; anchor: HTMLElement; sequence: number } | null>(null);
+  const [settingsPreview, setSettingsPreview] = useState<{
+    sink: AlertSink;
+    anchor: HTMLElement;
+    upsell: AlarmUpsell | null;
+    sequence: number;
+  } | null>(null);
   const previewSequence = useRef(0);
-  const closeSettingsPreview = useCallback(() => setSettingsPreview(null), []);
+  const closeSettingsPreview = useCallback(() => {
+    // An offer still being decided for the closed preview is then never shown, nor spent.
+    previewSequence.current++;
+    setSettingsPreview(null);
+  }, []);
   const toggleAlarm = (sink: AlertSink, anchor: HTMLElement) => {
-    const patch = sink === 'speech'
-      ? { speakEnabled: !settings.speakEnabled }
-      : { pushEnabled: !settings.pushEnabled };
+    const turnedOn = sink === 'speech' ? !settings.speakEnabled : !settings.pushEnabled;
+    const patch = sink === 'speech' ? { speakEnabled: turnedOn } : { pushEnabled: turnedOn };
     if (workspaceId) setWorkspaceAlertDelivery(workspaceId, { ...overrides, ...patch });
     else updateAlertSettings(patch);
-    setSettingsPreview({ sink, anchor, sequence: ++previewSequence.current });
+    const sequence = ++previewSequence.current;
+    setSettingsPreview({ sink, anchor, upsell: null, sequence });
+    if (!turnedOn) return;
+    // The offer may take one read of the Burrow service, so the line joins
+    // the preview it was earned by, if that preview is still up.
+    const stillShown = () => previewSequence.current === sequence;
+    void takeAlarmUpsell(sink, stillShown).then((upsell) => {
+      if (upsell) setSettingsPreview((shown) => shown && { ...shown, upsell });
+    });
   };
+  const showSettingsAt = useCallback((topic: TopicId) => {
+    closeSettingsPreview();
+    setSettingsOpen({ dialog: 'application', topic });
+  }, [closeSettingsPreview]);
 
   // Suppress command-mode key dispatch while the Settings dialog owns the
   // keyboard, so typing a timeout doesn't trigger pane shortcuts.
@@ -162,7 +184,7 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
     event.stopPropagation();
     workspaceSettingsTrigger.current = event.currentTarget;
     closeSettingsPreview();
-    setSettingsOpen('workspace');
+    setSettingsOpen({ dialog: 'workspace' });
   };
   const workspaceSettingsActions = {
     onContextMenu: openWorkspaceSettings,
@@ -423,7 +445,7 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
               data-open-settings="true"
               onClick={() => {
                 closeSettingsPreview();
-                setSettingsOpen('application');
+                setSettingsOpen({ dialog: 'application' });
               }}
             >
               <SlidersHorizontalIcon size={16} weight="bold" />
@@ -437,16 +459,19 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
           key={settingsPreview.sequence}
           sink={settingsPreview.sink}
           anchor={settingsPreview.anchor}
+          upsell={settingsPreview.upsell}
+          onShowSettings={showSettingsAt}
           onClose={closeSettingsPreview}
         />
       )}
 
-      {settingsOpen === 'application' && (
+      {settingsOpen?.dialog === 'application' && (
         <SettingsDialog
+          initialTopic={settingsOpen.topic}
           onClose={() => setSettingsOpen(null)}
         />
       )}
-      {settingsOpen === 'workspace' && (
+      {settingsOpen?.dialog === 'workspace' && (
         <WorkspaceAlarmSettingsDialog onClose={() => {
           setSettingsOpen(null);
           workspaceSettingsTrigger.current?.focus();

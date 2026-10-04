@@ -14,15 +14,16 @@ import {
   Shortcut,
   UNDER_SWITCH_INDENT,
 } from './design';
-import { ExternalTextLink } from './ExternalTextLink';
 import { ThemePicker } from './ThemePicker';
 import { ShellPicker } from './ShellPicker';
 import { WatchedCommandList } from './WatchedCommandList';
 import { NetworkPhones, NetworkSettings, NetworkUpdates } from './NetworkSettings';
-import { useNetworkPolicy } from './remote-control-shared';
 import { PushTestButton, SpeakTestButton } from './AlarmTestButtons';
-import { HOSTED_VOICE_URL } from './HostedSignIn';
-import { ManagedVoiceSection, NetworkTopicLink, useManagedVoiceOffered } from './ManagedVoiceSection';
+import { ManagedVoiceSection, NetworkTopicLink, NO_PUSH_PLAN_COPY, useManagedVoiceOffered } from './ManagedVoiceSection';
+import { HostedPlansLink, SIGN_IN_LABEL } from './HostedSignIn';
+import { useNetworkPolicy } from './remote-control-shared';
+import { managedVoicePort, membershipOf, useHostedMembership, type HostedMembership } from '../lib/hosted-membership';
+import { readBurrowStatusOnce } from '../remote/burrow/burrow-status-store';
 import { getPlatform } from '../lib/platform';
 import { getShellsSnapshot, subscribeToShells } from '../lib/shell-store';
 import { getDelayedKillSetting, labsAvailable, setDelayedKillSetting, subscribeToLabsSettings } from '../lib/labs-settings';
@@ -41,6 +42,7 @@ import {
 
 const TITLE_ID = 'settings-dialog-title';
 
+
 /** A picker row; `min-w-0` lets the picker's trigger truncate in a narrow dialog. */
 const PICKER_ROW = 'flex items-center gap-1.5 text-sm text-foreground [&>div]:min-w-0';
 
@@ -56,7 +58,11 @@ const PICKER_ROW = 'flex items-center gap-1.5 text-sm text-foreground [&>div]:mi
  * (`docs/specs/remote-security-model.md`), so there is no account-wide device
  * list to show and the copy must not imply one.
  */
-function describePushTargets(push: PushDevicesState, remoteControlBelow: boolean): string {
+function describePushTargets(push: PushDevicesState, remoteControlBelow: boolean, membership: HostedMembership): string {
+  // Hosted's Relay refuses an account without a plan, and a computer removed
+  // from it, whatever the device list last said.
+  if (membership === 'no-plan') return NO_PUSH_PLAN_COPY;
+  if (membership === 'signed-out') return `${SIGN_IN_LABEL}${remoteControlBelow ? ' below' : ''} to send push.`;
   if (push.status === 'loading') return 'Looking for phones…';
   if (push.status === 'error') return 'Could not reach the Relay to list phones.';
   // The preview never shows Remote control, so it also omits "below".
@@ -89,7 +95,7 @@ const TOPICS = [
   { id: 'network', label: 'Network', icon: GlobeIcon, groups: ['network', 'phones', 'updates'] },
   { id: 'labs', label: 'Labs', icon: FlaskIcon, groups: ['delayedKill'] },
 ] as const;
-type TopicId = typeof TOPICS[number]['id'];
+export type TopicId = typeof TOPICS[number]['id'];
 type GroupId = typeof TOPICS[number]['groups'][number];
 /** Search matches a group by its topic's label as well as its own text. */
 const TOPIC_LABEL_OF = Object.fromEntries(
@@ -100,6 +106,8 @@ const TOPIC_LABEL_OF = Object.fromEntries(
 export const TOPIC_GAP_PX = 16;
 /** A slower, consistent pace than the browser's native smooth scrolling. */
 export const SETTINGS_SCROLL_MS = 700;
+/** How long a dialog opened at a topic keeps that topic in view as content above it loads. */
+const SETTLE_MS = 2000;
 
 /** Search the mounted controls themselves so descriptions, options, and live
  * command/device names have no second copy to drift. Hidden groups stay mounted
@@ -151,8 +159,8 @@ function TopicSection({ id, hidden, children }: { id: TopicId; hidden: boolean; 
   );
 }
 
-/** App-global settings. */
-export function SettingsDialog({ onClose }: { onClose: () => void }) {
+/** App-global settings, opened at `initialTopic` (General by default). */
+export function SettingsDialog({ onClose, initialTopic }: { onClose: () => void; initialTopic?: TopicId }) {
   const watched = useSyncExternalStore(subscribeToWatchedCommands, getWatchedCommandsSnapshot);
   const settings = useSyncExternalStore(subscribeToAlertSettings, getAlertSettings);
   const shellState = useSyncExternalStore(subscribeToShells, getShellsSnapshot);
@@ -216,6 +224,12 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
     if (scrollFrame.current !== null) cancelAnimationFrame(scrollFrame.current);
     scrollFrame.current = null;
   }, []);
+  /** The topic opened at, held in view for a moment while the sections above it load. */
+  const settling = useRef<{ id: TopicId; until: number } | null>(null);
+  const takeOverScroll = useCallback(() => {
+    settling.current = null;
+    cancelScroll();
+  }, [cancelScroll]);
 
   const scrollToTopic = useCallback((id: TopicId | null) => {
     cancelScroll();
@@ -250,17 +264,35 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
     chooseTopic('network');
   };
 
+
   useLayoutEffect(() => {
     followScroll();
     const content = contentRef.current;
     if (!content) return;
-    const observer = new ResizeObserver(followScroll);
+    const observer = new ResizeObserver(() => {
+      followScroll();
+      // Sections above the chosen topic still filling in (a status read
+      // landing) would push it away once the scroll has finished.
+      const target = settling.current;
+      if (target && scrollFrame.current === null && performance.now() < target.until) scrollToTopic(target.id);
+    });
     observer.observe(content);
     content.querySelectorAll('[data-settings-topic]').forEach((section) => observer.observe(section));
     return () => observer.disconnect();
-  }, [followScroll, visibleTopicIds]);
+  }, [followScroll, scrollToTopic, visibleTopicIds]);
 
   useEffect(() => cancelScroll, [cancelScroll]);
+
+  // Opened at a topic: go there once it is shown, which waits for the search
+  // index to fill; once only, so the reader is never pulled back.
+  const pendingTopic = useRef(initialTopic);
+  useEffect(() => {
+    const id = pendingTopic.current;
+    if (!id || !visibleTopicIds.split(',').includes(id)) return;
+    pendingTopic.current = undefined;
+    settling.current = { id, until: performance.now() + SETTLE_MS };
+    scrollToTopic(id);
+  }, [visibleTopicIds, scrollToTopic]);
 
   return (
     <ModalFrame
@@ -353,9 +385,9 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
             onPointerLeave={() => setHoveredTopic(null)}
             onScroll={followScroll}
             // The user's own input takes over from a chosen topic.
-            onWheel={cancelScroll}
-            onPointerDown={cancelScroll}
-            onKeyDown={cancelScroll}
+            onWheel={takeOverScroll}
+            onPointerDown={takeOverScroll}
+            onKeyDown={takeOverScroll}
             className="min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain scroll-smooth px-3 py-4 break-words sm:px-6 [&_label]:flex-wrap"
           >
             {searching && (
@@ -504,12 +536,7 @@ export function AlarmSettingsSection({ sink, preview = false, onShowNetwork }: {
         action={preview ? null : <SpeakTestButton />}
       >
         {!managedVoiceOffered ? (
-          <>
-            Uses your browser or system voice.{' '}
-            <ExternalTextLink href={HOSTED_VOICE_URL}>
-              Get managed ElevenLabs voices.
-            </ExternalTextLink>
-          </>
+          'Uses your browser or system voice.'
         ) : networkOff ? (
           <>
             Managed voice is off while <NetworkTopicLink onShow={onShowNetwork} /> is set to Nothing,
@@ -539,10 +566,39 @@ export function AlarmSettingsSection({ sink, preview = false, onShowNetwork }: {
       {networkOff ? (
         <>Push is off while <NetworkTopicLink onShow={onShowNetwork} /> is set to Nothing.</>
       ) : (
-        describePushTargets(push, hasBurrowService && !preview)
+        preview ? <PreviewPushTargets push={push} /> : <PushTargets push={push} hasBurrowService={hasBurrowService} />
       )}
     </AlarmSinkSection>
   );
+}
+
+/** The dialog's push device line, which reads where this machine stands with Hosted. */
+function PushTargets({ push, hasBurrowService }: { push: PushDevicesState; hasBurrowService: boolean }) {
+  const membership = useHostedMembership();
+  // Until the service says where this machine stands, the line cannot say which Relay.
+  if (hasBurrowService && membership === null) return <>Looking for phones…</>;
+  return (
+    <>
+      {describePushTargets(push, hasBurrowService, membership ?? 'unavailable')}
+      {membership === 'no-plan' && <> <HostedPlansLink /></>}
+    </>
+  );
+}
+
+/**
+ * The preview's push device line: one read of where this machine stands,
+ * never the dialog's status poll. Its live line carries the offers.
+ */
+function PreviewPushTargets({ push }: { push: PushDevicesState }) {
+  const [membership, setMembership] = useState<HostedMembership>('unavailable');
+  useEffect(() => {
+    let live = true;
+    void readBurrowStatusOnce().then((status) => {
+      if (live) setMembership(membershipOf(status, managedVoicePort()?.status() ?? null));
+    });
+    return () => { live = false; };
+  }, []);
+  return <>{describePushTargets(push, false, membership)}</>;
 }
 
 /**

@@ -158,7 +158,7 @@ export const PushNoBurrow: Story = {
  * The other `no-burrow`: a build that *does* have a Burrow service, which simply has
  * not enrolled. Same push status as `PushNoBurrow`, but here the Network
  * section renders beneath — so this is the one whose copy may say "below", and
- * the pair is what keeps that word honest.
+ * the pair is what keeps that word honest. A Hosted build connects by signing in.
  */
 export const PushNotEnrolled: Story = {
   parameters: {
@@ -169,7 +169,7 @@ export const PushNotEnrolled: Story = {
   },
   play: async ({ canvasElement }) => {
     await selectTopic('Notifications')({ canvasElement });
-    await dialog(canvasElement).findByText(/Relay below to send push/);
+    await dialog(canvasElement).findByText('Sign in to Dormouse Hosted below to send push.');
   },
 };
 

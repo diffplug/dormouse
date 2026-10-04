@@ -12,12 +12,15 @@ import { getPlatform } from '../lib/platform';
  * out, so importing it there put ~4.4KB of terminal fixtures into the docs
  * website's bundle for a two-line link.
  */
+/** An inline prose link's look. */
+export const TEXT_LINK_CLASS = 'text-foreground underline underline-offset-2 hover:text-muted';
+
 export function ExternalTextLink({ href, children }: { href: string; children: ReactNode }) {
   return (
     <button
       type="button"
       onClick={() => getPlatform().openExternal?.(href)}
-      className="text-foreground underline underline-offset-2 hover:text-muted"
+      className={TEXT_LINK_CLASS}
     >
       {children}
     </button>

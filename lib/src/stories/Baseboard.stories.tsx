@@ -1,10 +1,12 @@
 import type { ReactNode } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
-import { expect, fireEvent, userEvent, within } from 'storybook/test';
+import { expect, fireEvent, userEvent, waitFor, within } from 'storybook/test';
 import { Baseboard } from '../components/Baseboard';
 import { WorkspaceIdContext } from '../components/wall/wall-context';
 import type { DoorChip } from '../components/Wall';
 import { createTerminalPaneState, type TerminalPaneState } from '../lib/terminal-state';
+import { waitForPrimedState } from './settle-terminals';
+import { enrolledStatus, SELF_HOST_UNENROLLED_STATUS, UNENROLLED_STATUS } from '../host/remote/test-burrow-link';
 
 const BASE_TIME = 1_700_000_000_000;
 
@@ -267,3 +269,85 @@ export const OneTimePhoneConnected: Story = {
     await expect(canvas.getByRole('button', { name: 'End the one-time connection' })).toBeVisible();
   },
 };
+
+/**
+ * Turning an alarm on can add one live line to the toggle's preview
+ * (`docs/specs/alert.md` -> "Settings dialog"). Each story turns one on.
+ */
+function alarmUpsellStory(sink: 'speech' | 'push', upsell: string, parameters: Record<string, unknown>): Story {
+  return {
+    args: { items: [] },
+    parameters: { ...parameters, docs: { story: { inline: false, height: '260px' } } },
+    decorators: [
+      (Story) => (
+        // At the bottom, as in a window, so the preview opens above.
+        <div style={{ width: 640, marginTop: 'auto' }}>
+          <Story />
+        </div>
+      ),
+    ],
+    play: async ({ canvasElement }) => {
+      await waitForPrimedState();
+      const body = within(canvasElement.ownerDocument.body);
+      await userEvent.click(body.getByRole('button', { name: sink === 'speech' ? 'Spoken alarms' : 'Push notifications' }));
+      // The line joins once the Burrow service has said where this machine stands.
+      await waitFor(() => expect(canvasElement.ownerDocument.querySelector(`[data-alarm-upsell="${upsell}"]`)).toBeVisible());
+    },
+  };
+}
+
+const HOSTED_SIGNED_IN = enrolledStatus({ relayMode: 'hosted', relayOrigin: UNENROLLED_STATUS.relayOrigin });
+/** The push group's inert text in the preview; which line shows reads the Burrow's status. */
+const NO_BURROW_ENROLLED = { status: 'no-burrow', devices: [] };
+
+/** A Hosted build not signed in turns spoken alarms on. */
+export const AlarmUpsellSignInVoice = alarmUpsellStory('speech', 'sign-in-voice', {
+  primedManagedVoice: { configured: false },
+  primedBurrow: { status: UNENROLLED_STATUS },
+});
+
+/** Not signed in, push on, in a build with no managed-voice port: Remote control signs it in. */
+export const AlarmUpsellSignInPush = alarmUpsellStory('push', 'sign-in-push', {
+  primedBurrow: { status: UNENROLLED_STATUS },
+  primedPushDevices: NO_BURROW_ENROLLED,
+});
+
+/** Signed in, and speak said the account has no plan. */
+export const AlarmUpsellPlansVoice = alarmUpsellStory('speech', 'plans-voice', {
+  primedManagedVoice: { configured: true, notEntitled: true },
+  primedBurrow: { status: HOSTED_SIGNED_IN },
+});
+
+/** Signed in, and the Relay refuses the account for having no plan. */
+export const AlarmUpsellPlansPush = alarmUpsellStory('push', 'plans-push', {
+  primedBurrow: { status: { ...HOSTED_SIGNED_IN, connection: 'not-entitled' } },
+});
+
+/** A self-host build with no Burrow enrolled: no word of Hosted. */
+export const AlarmUpsellSetUpPhone = alarmUpsellStory('push', 'set-up-phone', {
+  primedBurrow: { status: SELF_HOST_UNENROLLED_STATUS },
+  primedPushDevices: NO_BURROW_ENROLLED,
+});
+
+/** Press a story's line; Settings opens and scrolls to `topic`. */
+function opensTopic(story: Story, upsell: string, topic: 'Notifications' | 'Network'): Story {
+  return {
+    ...story,
+    play: async (context) => {
+      await story.play!(context);
+      const document = context.canvasElement.ownerDocument;
+      await userEvent.click(document.querySelector<HTMLElement>(`[data-alarm-upsell="${upsell}"]`)!);
+      const dialog = within(document.body).getByRole('dialog', { name: 'Settings' });
+      await waitFor(() => expect(within(dialog).getByRole('button', { name: topic })).toHaveAttribute('aria-current', 'location'), { timeout: 3000 });
+      const section = dialog.querySelector(`[data-settings-topic="${topic.toLowerCase()}"]`)!;
+      const content = dialog.querySelector('#settings-content')!;
+      await waitFor(() => expect(Math.abs(section.getBoundingClientRect().top - content.getBoundingClientRect().top)).toBeLessThan(40), { timeout: 3000 });
+    },
+  };
+}
+
+/** Signing in for managed voice happens in Notifications. */
+export const AlarmUpsellOpensNotifications = opensTopic(AlarmUpsellSignInVoice, 'sign-in-voice', 'Notifications');
+
+/** Setting up a phone happens in Network. */
+export const AlarmUpsellOpensNetwork = opensTopic(AlarmUpsellSetUpPhone, 'set-up-phone', 'Network');

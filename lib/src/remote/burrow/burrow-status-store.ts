@@ -261,6 +261,30 @@ function hostedEnrollmentOf(value: unknown): HostedEnrollmentState | null {
   };
 }
 
+/** The service's answer as this build reads it: its `hostedEnrollment` normalized. */
+function statusOf(status: BurrowConsoleStatus): BurrowConsoleStatus {
+  // `hostedEnrollment` is the one field a newer broker in another VS Code
+  // window may extend (`docs/specs/vscode.md` → "Peer surfaces").
+  return { ...status, hostedEnrollment: hostedEnrollmentOf(status.hostedEnrollment) };
+}
+
+/**
+ * The status now, for a caller that holds no subscription: the one a
+ * subscriber's poll holds, else one read, which publishes nothing. `null`
+ * without a service, or on any failure.
+ */
+export async function readBurrowStatusOnce(): Promise<BurrowConsoleStatus | null> {
+  if (state.kind === 'ready') return state.status;
+  const active = burrowLink();
+  if (!active) return null;
+  try {
+    const status = (await active.command('status')) as BurrowConsoleStatus | null;
+    return status ? statusOf(status) : null;
+  } catch {
+    return null;
+  }
+}
+
 async function readBurrowStatus(): Promise<void> {
   const active = burrowLink();
   if (!active) {
@@ -271,13 +295,7 @@ async function readBurrowStatus(): Promise<void> {
   try {
     const status = (await active.command('status')) as BurrowConsoleStatus | null;
     if (mine !== generation) return;
-    // `hostedEnrollment` is the one field a newer broker in another VS Code
-    // window may extend (`docs/specs/vscode.md` → "Peer surfaces").
-    setState(
-      status
-        ? { kind: 'ready', status: { ...status, hostedEnrollment: hostedEnrollmentOf(status.hostedEnrollment) } }
-        : UNSUPPORTED,
-    );
+    setState(status ? { kind: 'ready', status: statusOf(status) } : UNSUPPORTED);
   } catch (error) {
     if (mine !== generation) return;
     // A status already read stands, and the next tick retries: publishing one
