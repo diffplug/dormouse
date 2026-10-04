@@ -34,7 +34,7 @@ Each guarantee names its owning rule and automated checks. The [nightly audit](#
 | **Push, when enabled, cannot be aimed back into the tailnet.** | [What crosses the boundary](./security-remote.md#what-crosses-the-boundary) | `relay/test/push-endpoint.test.mjs` |
 | **Every dependency Dormouse puts on a user's machine is disclosed** at [dormouse.sh/supply-chain](https://dormouse.sh/supply-chain), and a change without the disclosure fails CI. | [Disclosure](./security-supply-chain.md#disclosure) | `.github/workflows/ci.yml` |
 | **The bundled runtime is the version disclosed.** The build verifies the binary against the pin. | [Bundled runtime](./security-supply-chain.md#bundled-runtime) | `standalone/src-tauri/build.rs` |
-| **Dependency adoption has at least a 24-hour cooldown**, except audited pgstencil releases approved with 2FA. | [Cooldown and alerts](./security-supply-chain.md#cooldown-and-alerts) | audit |
+| **Renovate and pnpm adopt a dependency release only after at least a 24-hour cooldown**, except audited pgstencil releases approved with 2FA. | [Cooldown and alerts](./security-supply-chain.md#cooldown-and-alerts) | audit |
 | **Merging to `main` and creating a tag are admin-only**, and every workflow this repository authors pins its actions by commit. | [GitHub Actions Policies](./security-ci.md#github-actions-policies) | audit |
 | **The bot maintainer cannot merge, tag, or read a release secret**, and its token never enters its own environment. | [Automated Maintainer (tend)](./security-ci.md#automated-maintainer-tend) | `.github/workflows/workflow-audit.yaml`, nightly |
 | **Publishing the extension takes a second human's approval.** | [VS Code Extension Releases](./security-ci.md#vs-code-extension-releases) | audit |
@@ -74,6 +74,7 @@ Gaps rather than accepted risks: we intend to close them.
 - **The notarization password sits on a command line for up to half an hour** per architecture; the remedy is known and not yet done ([Desktop Releases](./security-ci.md#desktop-releases)).
 - **Hosted's three Workers share one Postgres role.** The relay and voice Workers query only their own tables and the entitlement's user row, but the role their database binding carries can write the account Worker's tables too, a user's verified email included; a restricted role per Worker would close it ([Relay boundary](./security-hosted.md#relay-boundary)).
 - **Pocket Home Screen camera verification requires real iOS hardware** ([Device verification](./remote-security-model.md#device-verification)).
+- **A hand- or bot-edited lockfile skips the cooldown.** Nothing checks the age of a version a lockfile edit adopts ([Cooldown and alerts](./security-supply-chain.md#cooldown-and-alerts)).
 - **A bundled theme's disclosed version and license are unchecked.** A test pins which theme extensions are disclosed, not what each record says ([Disclosure](./security-supply-chain.md#disclosure)).
 
 ## How the guarantees are checked
