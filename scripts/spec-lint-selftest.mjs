@@ -72,6 +72,9 @@ const CASES = [
   ['check 13: an unbackticked citation of a missing spec, from a spec', SPEC, `\nSee ${spec('no-such-spec.md')} -> "Heading" for more.\n`],
   ['check 14: a rule stated in a rationale file', RATIONALE, '\n**Never plant rules here.**\n'],
   ['check 17: an audited rule outside a security spec', NON_SECURITY_SPEC, '\n- **FAIL IF** this rule is audited by nobody.\n'],
+  ['check 18: a Future that opens without a named scope', SPEC, '\n## Future\n\nA wish nobody staged.\n'],
+  ['check 18: a scope that lists nothing before the next heading', SPEC, '\n## Future\n\n**Scope: planted-empty**\n\n### Planted\n\nText.\n'],
+  ['check 18: a scope whose lead introduces a list that is not there', SPEC, '\n## Future\n\n**Scope: planted-intro** — in order:\n\n**Scope: planted-next** — one item.\n'],
   ['check 9: a map beside a Source of truth pointer', SPEC, '\n## Files\n\n| Entrypoint | Role |\n|---|---|\n| `scripts/lint-kit.mjs` | Lint plumbing. |\n\nSource of truth: `countWords` in `scripts/spec-md.mjs`.\n'],
 ];
 

@@ -203,6 +203,8 @@ Reserved: For [Future](#future) items 2–3, clients must tolerate additive opti
 
 ## Future
 
+**Scope: remote-api-remainder** — the phone's and a VR headset's further capabilities, in the numbered stages below.
+
 One protocol, two consumption depths: the phone (protocol-v1) and a VR headset.
 
 | Capability              | Phone            | VR (future)      |

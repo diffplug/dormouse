@@ -451,5 +451,7 @@ Robustness: Sessions ring independently; an exited Session may keep ringing unti
 
 ## Future
 
+**Scope: wider-presence**
+
 - **Presence across VS Code windows.** A window's presence holds back only its own extension host's pushes; the peer link could share it.
 - **OS-level idle time.** A user working in another application counts as away; the machine's input idle time could hold a push until they leave the computer.

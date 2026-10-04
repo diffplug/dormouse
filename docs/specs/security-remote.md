@@ -174,6 +174,8 @@ Source of truth: `collectDirectorySnapshot` in `lib/src/remote/burrow/directory-
 
 ## Future
 
+**Scope: cloud-hosted-review** — [Cloud-hosted mode](#cloud-hosted-mode).
+
 ### Cloud-hosted mode
 
 Hosted's admin-entitled routing is implemented (`docs/specs/security-hosted.md` -> "Relay boundary"). Broad paid activation remains staged; its review must cover these operator responsibilities:

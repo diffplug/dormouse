@@ -84,6 +84,8 @@ Pinned by `hosted/server/tests/artifacts.test.ts`, `hosted/server/tests/workers.
 
 ## Future
 
+**Scope: hosted-acceptance**
+
 **Live production acceptance**: verify Hyperdrive and role values that `preflight` reads, and Cloudflare script injection excluded for the Hosted hostname (`hosted/README.md`). Recorded configuration proves neither live controls nor browser acceptance.
 
 Public voice and Relay need abuse, authorization, data-disclosure, and recovery checks, and paid use independent remote-model review; `docs/specs/hosted.md` owns the staged work.

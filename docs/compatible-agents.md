@@ -130,4 +130,6 @@ Source of truth: `restoreSession` in `lib/src/lib/session-restore.ts`; `restoreT
 
 ## Future
 
+**Scope: agent-startup-opt-out**
+
 If automatic agent startup becomes disruptive, expose an opt-out setting while retaining prompt-free recovery for users who enable it.

@@ -265,7 +265,7 @@ The checklist an auditor or a change reviewer verifies against, each property es
 
 ## Future
 
-Onboarding changes with security surface are staged in the **selfhost-onboarding** scope ([relay.md](./relay.md) `## Future`).
+**Scope: remote-trust-followups** — [Device verification](#device-verification) and [Revocation propagation](#revocation-propagation).
 
 ### Device verification
 

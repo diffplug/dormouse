@@ -75,6 +75,12 @@
  *      spec. AGENTS.md -> "House form for rules" states it; check 16 proves
  *      each security spec has an auditor, so an audited rule written anywhere
  *      else is claimed by nobody and silently never run.
+ *  18. `## Future` opens with a named scope (`**Scope: X**` leading the
+ *      first line of content), design-stage specs included, and every scope
+ *      lists at least one item — inline after its lead, or below it — before
+ *      the next scope or heading. A lead ending in `:` introduces a list and
+ *      lists nothing itself. AGENTS.md -> "Named scopes": unbuilt work is a
+ *      cut someone can stage, not an unowned wishlist.
  *
  * scripts/spec-lint-selftest.mjs plants one defect per finding check and
  * requires this lint to go red.
@@ -624,6 +630,29 @@ for (const rel of allFiles) {
       `${rel}:${i + 1}: a "**FAIL IF**" rule outside docs/specs/security*.md — no audit domain ` +
       'claims this file, so nothing runs it (AGENTS.md -> "House form for rules")',
     );
+  });
+}
+
+// --- Check 18: Future opens with a named scope, and no scope is empty ---------
+const SCOPE_LEAD_RE = /^\*\*Scope: [a-z0-9-]+\*\*/;
+for (const spec of foldCheckedFiles) {
+  const fold = headings(spec).find((h) => h.level === 2 && /^(\d+\.\s*)?Future$/i.test(h.title));
+  if (!fold) continue;
+  const lines = proseLines(spec);
+  const first = lines.findIndex((l, i) => i >= fold.line && l.trim() !== '');
+  if (first !== -1 && !SCOPE_LEAD_RE.test(lines[first])) {
+    problems.push(`${spec}:${first + 1}: "## ${fold.title}" opens without a "**Scope: X**" lead (AGENTS.md -> "Named scopes")`);
+  }
+  lines.forEach((line, i) => {
+    if (i < fold.line) return;
+    const lead = SCOPE_LEAD_RE.exec(line);
+    if (!lead) return;
+    const inline = line.slice(lead[0].length).replace(/^[\s—–:.-]+/, '').trim();
+    if (inline && !inline.endsWith(':')) return;
+    const next = lines.slice(i + 1).find((l) => l.trim() !== '');
+    if (next === undefined || SCOPE_LEAD_RE.test(next) || /^#{1,6}\s/.test(next)) {
+      problems.push(`${spec}:${i + 1}: ${lead[0]} lists no item before the next scope or heading`);
+    }
   });
 }
 

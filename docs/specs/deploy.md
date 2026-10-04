@@ -198,4 +198,6 @@ See `docs/specs/hosted.md` -> "Production releases" for the Hosted pipeline and 
 
 ## Future
 
+**Scope: download-analytics**
+
 **Analytics-backed download URLs.** The GitHub release URLs could move to `dormouse.sh/download/...` behind Cloudflare R2. Changing website links and manifest bundle URLs needs no app update while the manifest endpoint remains stable.
