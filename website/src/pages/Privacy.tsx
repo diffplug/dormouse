@@ -25,6 +25,7 @@ export const PRIVACY_SECTIONS: PolicySection[] = [
   { id: "use", title: "How we use it", body: <>
     <p>We use this information to create and recognize your account, verify sign-in, connect methods you explicitly select, send requested sign-in codes, prevent abuse, troubleshoot failures, and answer support requests. We discard provider access, refresh, and identity tokens after identity verification rather than storing them in your account.</p>
     <p>We do not sell Hosted account information, use it for targeted advertising, or use it to train general-purpose AI models. Signing in does not subscribe you to a newsletter. The account site uses necessary authentication and security cookies and does not load marketing analytics.</p>
+    <p>We measure use of the service only as aggregate daily counts: sign-ins by method, checkouts and subscriptions by plan, spoken alarms and push notifications sent, and which Dormouse link a visit to the Hosted page came from, which those links name in their address. No count records an account, email address, IP address, or browser information, so there are no per-person analytics, and we keep the daily counts indefinitely.</p>
   </> },
   { id: "providers", title: "Who processes the information", body: <>
     <p>Cloudflare runs the account website and API. Neon stores the account database. Postmark delivers sign-in emails and processes their recipients, contents, and delivery records. GitHub stores encrypted database-backup artifacts. These providers process information needed to provide their services to us.</p>
