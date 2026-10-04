@@ -6,6 +6,7 @@ import {
 } from "pgstencil/database";
 import { migrations } from "./migrations";
 import { previewMigrations } from "./preview-migrations";
+import { applyRuntimeRoles } from "./runtime-roles";
 const url = process.env.DATABASE_URL;
 if (!url)
   throw new Error(
@@ -22,4 +23,5 @@ else if (action === "status") {
   console.table(
     files.map((file) => ({ name: file.name, applied: applied.has(file.name) })),
   );
-} else throw new Error("Use migrate, validate or status.");
+} else if (action === "roles") await applyRuntimeRoles(url);
+else throw new Error("Use migrate, validate, status or roles.");

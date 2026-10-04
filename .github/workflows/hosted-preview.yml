@@ -134,6 +134,10 @@ jobs:
         run: pnpm --filter dormouse-hosted db:migrate --preview && pnpm --filter dormouse-hosted db:validate --preview
         env:
           DATABASE_URL: ${{ steps.database.outputs.db_url }}
+      - name: Apply the relay and voice Workers' Postgres roles and grants on this PR's database
+        run: pnpm --filter dormouse-hosted db:roles
+        env:
+          DATABASE_URL: ${{ steps.database.outputs.db_url }}
       - name: Deploy the account, relay, and voice Workers and Hyperdrive
         id: deploy
         run: pnpm --filter dormouse-hosted preview:deploy
