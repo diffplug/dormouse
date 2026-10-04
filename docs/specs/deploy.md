@@ -19,12 +19,7 @@ Source of truth: `create_release` in `scripts/sign-and-deploy.sh`; `publish-vsco
 
 ## Release checklist
 
-**Must ship a desktop release that carries, or changes, the one-time link
-version only after Hosted production serves that version** — its rendezvous
-routes and its `/connect/` page (`docs/specs/one-time.md` -> "Link"): run
-`.github/workflows/hosted-production.yml` first and confirm its live
-verification passed, `oneTimeSmoke` included. **Hosted must never stop serving
-a link version a shipped Burrow emits.**
+**Must ship a desktop release that carries, or changes, the one-time link version only after Hosted production serves that version** — its rendezvous routes and its `/connect/` page (`docs/specs/one-time.md` -> "Link"): run `.github/workflows/hosted-production.yml` first and confirm its live verification passed, `oneTimeSmoke` included. **Hosted must never stop serving a link version a shipped Burrow emits.**
 
 Human-driven, in order:
 
@@ -53,12 +48,24 @@ Source of truth: `scripts/bump-version.sh`; `on.push.tags` in `.github/workflows
 
 **Must apply production OS and updater signatures locally** — Windows OS signing uses a physical PIV key, macOS a local Developer ID certificate.
 
-- **Stage 1 (CI)** — build, attest, and upload the unsigned artifacts: the three Tauri bundles and the `.vsix`, which Stage 2 verifies but never signs.
-- **Stage 2 (local, `sign-and-deploy.sh`)** — verify, sign, and release.
+```mermaid
+flowchart LR
+  tag[push vX.Y.Z] --> bs[build-standalone] & bv[build-vscode] & sa[security-audit]
+  bs & bv & sa --> pv[publish-vscode] --> mp[Marketplace + OpenVSX]
+  pv -. run succeeded .-> dl
+  subgraph local [sign-and-deploy.sh]
+    dl[download, verify] --> sm[sign-mac] --> nz[notarize] --> su[sign-updates]
+    dl --> sw[sign-win] --> su --> rel[GitHub Release]
+    su --> man[standalone-latest.json]
+  end
+  man -- commit, promote --> web[release branch]
+```
+
+Stage 1 (CI) builds, attests, and uploads the unsigned artifacts, the `.vsix` included, which Stage 2 verifies but never signs.
 
 ## Stage 1: CI workflow
 
-Triggered by tag push `v*`: `build-standalone`, `build-vscode`, and `security-audit` run in parallel, then `publish-vscode` once all three succeed. Matrix targets, pnpm/Node versions, and step ordering live in [.github/workflows/release.yml](../../.github/workflows/release.yml).
+Matrix targets, pnpm/Node versions, and step ordering live in [.github/workflows/release.yml](../../.github/workflows/release.yml).
 
 Environment protection, secret placement, and token permissions follow `docs/specs/security-ci.md` → "GitHub Actions Policies", "Automated Maintainer (tend)", and "VS Code Extension Releases".
 
@@ -96,7 +103,7 @@ Downloaded CI artifacts must pass three checks before any signing step:
 2. `gh attestation verify` proves the manifest was attested by `.github/workflows/release.yml` in `diffplug/dormouse`, for `refs/tags/vX.Y.Z`, at the exact commit SHA the local tag resolves to.
 3. `sha256sum -c` (or `shasum -a 256 -c`) proves every downloaded file the manifest lists still has the hash CI recorded before upload.
 
-**Must attest the manifest** (rationale). **Must re-verify cached artifacts and require a successful release workflow before every signing, notarization, or release subcommand**, then restore executable modes only in fresh working copies. CI run selection matches both tag and commit, including when every download is cached.
+**Must attest the manifest** (rationale). **Must re-verify cached artifacts and require a successful release workflow before every signing, notarization, or release subcommand**, then restore executable modes only in fresh working copies. That run includes the reviewer-gated `publish-vscode`, so the extension is approved and published before any desktop signing starts. CI run selection matches both tag and commit, including when every download is cached.
 
 **Never select release artifacts with a broad `find | head`** — use strict expected paths or exactly-one matching. Release upload rejects unexpected local files or existing remote asset names.
 
@@ -190,5 +197,7 @@ Source of truth: `create_release` in `scripts/sign-and-deploy.sh`; `website/scri
 See `docs/specs/hosted.md` -> "Production releases" for the Hosted pipeline and `hosted/README.md` for provisioning and operator commands. A desktop release waits on Hosted for the one-time link version ([Release checklist](#release-checklist)).
 
 ## Future
+
+**Scope: download-analytics**
 
 **Analytics-backed download URLs.** The GitHub release URLs could move to `dormouse.sh/download/...` behind Cloudflare R2. Changing website links and manifest bundle URLs needs no app update while the manifest endpoint remains stable.

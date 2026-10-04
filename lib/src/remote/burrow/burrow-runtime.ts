@@ -56,6 +56,7 @@ import {
   type PairingOutcomeV1,
   type PresenceBinding,
   type SealedPushV1,
+  type RelayPolicyFrame,
   type RelayToBurrowFrame,
 } from 'remote-lib-common';
 import type { BurrowEnrollment } from './enrollment';
@@ -330,14 +331,20 @@ export interface BurrowOptions {
    * networks").
    */
   onPathRefused?: (refusal: PathRefusal) => void;
+  /** The Relay raised the UV demand ({@link RelayPolicyFrame}); already enforced, for the owner to persist. */
+  onPolicyRaised?: () => void;
 }
+
+/** What waits on the frame chain: the policy frame is applied on arrival. */
+type QueuedRelayFrame = Exclude<RelayToBurrowFrame, RelayPolicyFrame>;
 
 const INITIAL_BACKOFF_MS = 1_000;
 const MAX_BACKOFF_MS = 30_000;
 
 export class BurrowRuntime {
   readonly #enrollment: BurrowEnrollment;
-  readonly #policy: ConnectionPolicy;
+  #policy: ConnectionPolicy;
+  readonly #onPolicyRaised: () => void;
   #acl: BurrowAcl;
   readonly #saveApproval = createSerialQueue();
   readonly #challenges: ChallengeIssuer;
@@ -388,14 +395,14 @@ export class BurrowRuntime {
    * connection `init` arriving before `start()`'s import settles must await the
    * same import rather than race a second one or be dropped.
    */
-  #noiseStatic: Promise<NoiseKeyPair | null> | null = null;
+  #noiseStatic: Promise<NoiseKeyPair> | null = null;
 
   /**
    * Frames are handled one at a time, in arrival order. Every `e2e` step awaits
    * WebCrypto, so unchained handlers would let a pipelined `transport` overtake
    * the `init` that has to create its session.
    */
-  readonly #frames: Array<{ frame: RelayToBurrowFrame; chars: number }> = [];
+  readonly #frames: Array<{ frame: QueuedRelayFrame; chars: number }> = [];
   #frameChars = 0;
   // Kept across socket teardown: repeated reconnects must not accumulate
   // in-flight crypto operations while an old one is still awaiting WebCrypto.
@@ -456,11 +463,13 @@ export class BurrowRuntime {
     this.#policy = {
       rpId: options.enrollment.rpId,
       origin: options.enrollment.origin,
-      // Mirrored from the Relay at enrollment. Both sides must demand the
-      // same thing: the Burrow is the final authority, so a Relay enforcing UV
-      // while the Burrow does not would leave the weaker verifier deciding.
+      // Mirrored from the Relay at enrollment, and raised by its policy frame
+      // on any later connect. Both sides must demand the same thing: the Burrow
+      // is the final authority, so a Relay enforcing UV while the Burrow does
+      // not would leave the weaker verifier deciding.
       requireUserVerification: options.enrollment.requireUserVerification ?? false,
     };
+    this.#onPolicyRaised = options.onPolicyRaised ?? (() => {});
     this.#now = options.now ?? (() => Date.now());
     this.#initTokens = new TokenBucket({
       capacity: E2E_INIT_BURST,
@@ -497,9 +506,8 @@ export class BurrowRuntime {
   }
 
   /**
-   * Seal one push plaintext to one paired Client, or `null` when this Burrow has
-   * no usable Noise static. The private key never leaves this class, which is
-   * why the delivery path asks rather than borrowing it
+   * Seal one push plaintext to one paired Client. The private key never leaves
+   * this class, which is why the delivery path asks rather than borrowing it
    * (`docs/specs/remote-security-model.md` -> Push sealing).
    *
    * Answers `null` rather than throwing on a corrupt `clientStaticPublicKey`,
@@ -511,7 +519,6 @@ export class BurrowRuntime {
     plaintext: Uint8Array,
   ): Promise<SealedPushV1 | null> {
     const noiseStatic = await this.#loadNoiseStatic();
-    if (!noiseStatic) return null;
     try {
       return await sealPush({
         burrowStaticPrivateKey: noiseStatic.privateKey,
@@ -773,31 +780,20 @@ export class BurrowRuntime {
     this.#backoffMs = INITIAL_BACKOFF_MS;
     // Kicked off here so the import is normally settled before the first frame;
     // the connection path awaits the same promise, so a race costs a wait
-    // rather than a dropped handshake.
-    void this.#loadNoiseStatic();
+    // rather than a dropped handshake. A failure surfaces at that await.
+    this.#loadNoiseStatic().catch(() => {});
     this.#connect();
   }
 
   /**
-   * Import the enrolled Noise static once, nonextractably.
-   *
-   * Resolves `null` rather than rejecting when there is nothing usable: the
-   * service refuses to start a Burrow whose halves disagree
-   * (`lib/src/host/remote/service.ts`), so reaching that here means the state
-   * file changed underneath us, and a connection that finds no static simply
-   * never answers.
+   * Import the enrolled Noise static once, nonextractably. The service starts
+   * no Burrow whose halves do not correspond (`lib/src/host/remote/service.ts`),
+   * so this imports what it already checked.
    */
-  #loadNoiseStatic(): Promise<NoiseKeyPair | null> {
+  #loadNoiseStatic(): Promise<NoiseKeyPair> {
     this.#noiseStatic ??= (async () => {
-      const pkcs8 = this.#enrollment.noiseStaticPrivateKey;
-      const publicKey = this.#enrollment.noiseStaticPublicKey;
-      if (pkcs8 === undefined || publicKey === undefined) return null;
-      try {
-        return { privateKey: await importNoiseStaticPrivateKey(pkcs8), publicKey: fromBase64Url(publicKey) };
-      } catch (error) {
-        console.warn('[burrow] could not import the Noise static key', error);
-        return null;
-      }
+      const { noiseStaticPrivateKey: pkcs8, noiseStaticPublicKey: publicKey } = this.#enrollment;
+      return { privateKey: await importNoiseStaticPrivateKey(pkcs8), publicKey: fromBase64Url(publicKey) };
     })();
     return this.#noiseStatic;
   }
@@ -1047,6 +1043,12 @@ export class BurrowRuntime {
       return;
     }
     if (!frame || typeof (frame as { t?: unknown }).t !== 'string') return;
+    if (frame.t === 'policy') {
+      // Applied on arrival rather than queued: it only ever tightens, so the
+      // sooner it holds the better, and it is the first frame the Relay sends.
+      this.#raisePolicy(frame);
+      return;
+    }
     if (frame.t === 'client-gone') {
       // Bounded before it is used as a map key: the relay chooses it, and this
       // is the only frame that reaches the map without the `e2e` guard.
@@ -1067,13 +1069,20 @@ export class BurrowRuntime {
     this.#enqueue(frame, raw.length);
   }
 
+  /** Only ever up ({@link RelayPolicyFrame}). */
+  #raisePolicy(frame: RelayPolicyFrame): void {
+    if (frame.requireUserVerification !== true || this.#policy.requireUserVerification) return;
+    this.#policy = { ...this.#policy, requireUserVerification: true };
+    this.#onPolicyRaised();
+  }
+
   /**
    * Bound both retained strings and per-frame bookkeeping before queueing.
    * Overflow ends the whole socket synchronously: skipping a transport frame
    * would desynchronize its Noise nonce, and waiting for `close` would still
    * admit buffered messages. The ordinary close policy handles reconnection.
    */
-  #enqueue(frame: RelayToBurrowFrame, chars: number): void {
+  #enqueue(frame: QueuedRelayFrame, chars: number): void {
     if (
       this.#frames.length >= MAX_QUEUED_RELAY_FRAMES ||
       this.#frameChars + chars > MAX_QUEUED_RELAY_FRAME_CHARS
@@ -1274,17 +1283,6 @@ export class BurrowRuntime {
       this.#finishPairing(clientId, 'invitation-expired');
       return;
     }
-    const burrowStaticPublicKey = this.#enrollment.noiseStaticPublicKey;
-    if (burrowStaticPublicKey === undefined) {
-      // There is nothing for the Client to pin. Writing a record here would
-      // authorize a Client whose very next connection cannot complete IK
-      // against a static this Burrow does not have — a pairing into a dead end,
-      // reported as success. The service refuses to start such a Burrow
-      // (`lib/src/host/remote/service.ts`), so this is the belt to that brace.
-      console.warn('[burrow] refusing to pair: this Burrow has no Noise static to present');
-      this.#finishPairing(clientId, 'burrow-error');
-      return;
-    }
     if (!constantTimeEqual(utf8Encode(code), utf8Encode(pending.approval.code))) {
       this.#finishPairing(clientId, 'confirmation-mismatch');
       return;
@@ -1318,7 +1316,7 @@ export class BurrowRuntime {
         if (this.#clients.get(clientId)?.pairing !== pending) return;
         this.#sendPairingOutcome(clientId, pending, {
           ok: true,
-          burrowStaticPublicKey,
+          burrowStaticPublicKey: this.#enrollment.noiseStaticPublicKey,
           burrowLabel: boundedBurrowLabel(this.#enrollment.label),
           accountId: record.accountId,
           passkeyCredentialId: record.passkeyCredentialId,
@@ -1381,8 +1379,14 @@ export class BurrowRuntime {
     if (!state || !pending) return;
     state.pairing = undefined;
     // Always `consumed`: reaching here means a phone completed message 1
-    // against this invitation, whatever ended the ceremony afterwards.
-    this.#retireInvitation(pending.inviteId, 'consumed', outcome);
+    // against this invitation, whatever ended the ceremony afterwards. An
+    // invitation the mint cap already evicted was reported `consumed` then, with
+    // no outcome; the ceremony's outcome is still reported now.
+    if (this.#invitations.has(pending.inviteId)) {
+      this.#retireInvitation(pending.inviteId, 'consumed', outcome);
+    } else if (outcome) {
+      this.#onInvitationChanged(pending.inviteId, 'consumed', outcome);
+    }
     this.#dismissApproval(clientId);
     this.#pruneClient(clientId);
   }
@@ -1418,7 +1422,6 @@ export class BurrowRuntime {
     // a flood decide when this Burrow does WebCrypto.
     if (!this.#spendInitToken()) return;
     const staticKeyPair = await this.#loadNoiseStatic();
-    if (!staticKeyPair) return;
     let session: NoiseTransportSession;
     let message2: Uint8Array;
     let clientStaticPublicKey: string;
@@ -1603,7 +1606,7 @@ export class BurrowRuntime {
           burrowId: this.#enrollment.burrowId,
           send,
           // Bounded again rather than trusted: a record off disk may have been
-          // written by an older build or by hand, and this is shown on a pane.
+          // written by hand, and this is shown on a pane.
           label: boundedPairingLabel(label),
           end: () => this.#disposeEstablished(clientId, { goodbye: true, only: e2e }),
         }),

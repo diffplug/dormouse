@@ -9,13 +9,19 @@ export interface ConfirmKill {
   id: string;
   char: string;
   exit?: KillExit;
+  /** What the letter confirms: a kill, or a Tool's Break
+   *  (`docs/specs/dor-tool.md` -> Run end), which the same gate guards. */
+  action?: 'kill' | 'break';
+  /** A Break's Tool had a page to reopen beside its terminal. */
+  serving?: boolean;
 }
 
 export const KILL_SHAKE_MS = 400;
 export const KILL_CONFIRM_MS = 220;
 
-// Excludes both kill shortcuts ('x' and 'k') so a double-tap can't accept itself.
-const KILL_CONFIRM_CHARS = 'abcdefghijlmnopqrstuvwyz';
+// Excludes both kill shortcuts ('x' and 'k') so a double-tap can't accept itself,
+// and Reopen's 'u', so reaching to undo an earlier close never confirms this one.
+const KILL_CONFIRM_CHARS = 'abcdefghijlmnopqrstvwyz';
 export function randomKillChar(): string {
   return cfg.killConfirm.char ?? KILL_CONFIRM_CHARS[Math.floor(Math.random() * KILL_CONFIRM_CHARS.length)];
 }
@@ -96,6 +102,12 @@ export function KillConfirmOverlay({ confirmKill, paneElements, onCancel }: {
       onCancel={onCancel}
       exit={confirmKill.exit}
       targetElement={panelEl}
+      {...(confirmKill.action === 'break' ? {
+        title: 'Confirm break',
+        detail: confirmKill.serving
+          ? 'This Tool becomes a plain terminal, still running; its page opens in a browser pane beside it. They cannot be rejoined.'
+          : 'This Tool becomes a plain terminal, still running. It cannot become a Tool again.',
+      } : {})}
     />
   );
 }

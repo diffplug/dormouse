@@ -26,7 +26,7 @@ import { createAlertClient } from '../alert-client';
 import type { AlertStateDetail } from '../../lib/platform/types';
 import { DEFAULT_MANAGED_VOICE_ID } from '../../lib/platform/managed-voice-types';
 
-const HOLD: SurfaceHold = { holder: 'session-a', label: 'iPhone', lease: '1' };
+const HOLD: SurfaceHold = { holder: 'session-a', label: 'iPhone', lease: '1', serviceId: 'service-1' };
 
 let sent: Array<{ event: string; data: unknown }>;
 let written: Array<{ id: string; data: string }>;
@@ -133,6 +133,17 @@ describe('asking the webview', () => {
     expect(await pending).toEqual([{ surfaceId: 'in-main' }, { surfaceId: 'in-ws-2' }]);
   });
 
+  it('lists windows in label order, whichever answers first', async () => {
+    // Arrival order changes collect to collect; a phone grouping by Workspace
+    // would see its headers swap places on every refresh.
+    bridge.setWindows(['main', 'ws-2']);
+    const pending = bridge.provider.collectDirectory();
+    const ask = asks()[0]!;
+    answer(ask, [{ surfaceId: 'in-ws-2' }], 'ws-2');
+    answer(ask, [{ surfaceId: 'in-main' }], 'main');
+    expect(await pending).toEqual([{ surfaceId: 'in-main' }, { surfaceId: 'in-ws-2' }]);
+  });
+
   it('a second answer from one window cannot settle the ask', async () => {
     vi.useFakeTimers();
     bridge.setWindows(['main', 'ws-2']);
@@ -170,6 +181,18 @@ describe('asking the webview', () => {
     // The second window went away without answering.
     bridge.setWindows(['main']);
     expect(await pending).toEqual([{ surfaceId: 'in-main' }]);
+  });
+
+  it('the last window closing settles every ask', async () => {
+    vi.useFakeTimers();
+    bridge.setWindows(['main']);
+    const pending = bridge.provider.collectDirectory();
+    let settled = false;
+    void pending.then(() => { settled = true; });
+    bridge.setWindows([]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(settled).toBe(true);
+    expect(await pending).toEqual([]);
   });
 
   it('a window opening mid-fan-out never received the ask, so it is not waited on', async () => {
@@ -367,6 +390,13 @@ describe('PTYs', () => {
     bridge.provider.writePty('pty-1', report);
     expect(written).toEqual([{ id: 'pty-1', data: report }]);
     expect(alerts.getState('pty-1')).toMatchObject({ status: 'ALERT_RINGING', todo: false });
+  });
+
+  // The webview holds `untouched`, which decides whether closing asks
+  // (docs/specs/layout.md → "Kill confirmation"); mouse reports count, as local ones do.
+  it.each(['ls\r', '\x1b[<0;10;5M'])('tells the webview a Client wrote %j', (data) => {
+    bridge.provider.writePty('pty-1', data);
+    expect(emitted('terminal:clientInput')).toEqual([{ id: 'pty-1' }]);
   });
 
   it('gives a Client\'s repaint bounce the resize grace', () => {
@@ -675,7 +705,7 @@ describe('the webview’s half of the parse', () => {
 /**
  * Every PTY, alert and Burrow command the sidecar's bundle owns, as `main.js`
  * hands them over: the alerts see each PTY change in the order a host must
- * make it (`docs/specs/standalone.md` → "Alerts").
+ * make it (the `handleCommand` comment in `standalone/sidecar/main.js`).
  */
 describe('the sidecar host', () => {
   let host: SidecarHost;

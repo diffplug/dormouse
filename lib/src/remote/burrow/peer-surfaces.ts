@@ -5,7 +5,7 @@
  */
 
 import { clampTerminalDimension, type DirectoryEntry } from 'remote-lib-common';
-import { serviceIdOf, type BurrowStatusEvent } from '../../host/remote/service-protocol';
+import type { BurrowStatusEvent } from '../../host/remote/service-protocol';
 import { getPlatform } from '../../lib/platform';
 import type { BurrowLink } from '../../lib/platform/types';
 import { subscribeToActivity } from '../../lib/session-activity-store';
@@ -17,7 +17,10 @@ import {
   subscribeToSizeHolds,
 } from '../../lib/size-hold-store';
 import { isHelperSession, registry } from '../../lib/terminal-store';
+import { isPendingKillSession } from '../../lib/pending-kills';
 import { subscribeToTerminalPaneState } from '../../lib/terminal-state-store';
+import { subscribeToWorkspaces } from '../../lib/workspace-store';
+import { subscribeToWorkspaceSurfaces } from '../../lib/workspace-surfaces';
 import type { SurfaceHold } from './burrow-surface-provider';
 import { collectDirectorySnapshot } from './directory-collect';
 import { armWhile } from './enrolled-gate';
@@ -37,8 +40,7 @@ export interface PeerSurfaceParams {
   rows?: number;
   /**
    * Who takes the size (`attach`, `resize`), or which hold to give back
-   * (`release`). Absent from a Burrow older than holds, whose attach then sizes
-   * the pane without holding it.
+   * (`release`).
    */
   hold?: SurfaceHold;
 }
@@ -79,10 +81,9 @@ function answerPeers<K extends keyof PeerOps>(
 function holdOf(value: unknown): SurfaceHold | null {
   const hold = value as Partial<Record<keyof SurfaceHold, unknown>> | null | undefined;
   if (typeof hold?.holder !== 'string' || typeof hold.label !== 'string') return null;
-  if (typeof hold.lease !== 'string') return null;
+  if (typeof hold.lease !== 'string' || typeof hold.serviceId !== 'string') return null;
   const { holder, label, lease, serviceId } = hold;
-  // A malformed instance id is read as none: such a hold is kept, never dropped.
-  return typeof serviceId === 'string' ? { holder, label, lease, serviceId } : { holder, label, lease };
+  return { holder, label, lease, serviceId };
 }
 
 /**
@@ -107,7 +108,8 @@ function driveOwnSurface({
   rows,
   hold,
 }: PeerSurfaceParams): PeerSurfaceResult[] {
-  const entry = isHelperSession(surfaceId) ? undefined : registry.get(surfaceId);
+  // A pending kill is out of the user's sight, so out of every Client's too.
+  const entry = isHelperSession(surfaceId) || isPendingKillSession(surfaceId) ? undefined : registry.get(surfaceId);
   if (!entry) return [];
 
   const term = entry.terminal;
@@ -194,11 +196,11 @@ export function installPeerSurfaceResponder(): void {
   // here — a broker window that closed, a sidecar that restarted — is gone, and
   // its releases with it (`docs/specs/remote-api.md` → "Size authority").
   link.on('status', (data) => {
-    const serviceId = serviceIdOf(data as Partial<BurrowStatusEvent> | null);
+    const serviceId = (data as BurrowStatusEvent | null)?.serviceId;
     if (serviceId) dropSizeHoldsFromOtherServices(serviceId);
   });
   // Announcing is not free — one crossing per pane-state change, activity
-  // change, and focus move — so it is armed only while something can reach
+  // change, focus move, and Workspace change — so it is armed only while something can reach
   // these terminals: an enrolled Burrow, or a one-time phone (`enrolled-gate.ts`).
   armWhile(link, { serving: () => {
     let armed = true;
@@ -219,6 +221,10 @@ export function installPeerSurfaceResponder(): void {
     };
     const unsubscribePaneState = subscribeToTerminalPaneState(notifyDirectory);
     const unsubscribeActivity = subscribeToActivity(notifyDirectory);
+    // A switch, rename, create, close, or reorder; and membership, which a
+    // Surface or Workspace moving between Windows changes on both sides.
+    const unsubscribeWorkspaces = subscribeToWorkspaces(notifyDirectory);
+    const unsubscribeMembership = subscribeToWorkspaceSurfaces(notifyDirectory);
     const hasDocument = typeof document !== 'undefined';
     if (hasDocument) {
       document.addEventListener('focusin', notifyDirectory);
@@ -228,6 +234,8 @@ export function installPeerSurfaceResponder(): void {
       armed = false;
       unsubscribePaneState();
       unsubscribeActivity();
+      unsubscribeWorkspaces();
+      unsubscribeMembership();
       if (!hasDocument) return;
       document.removeEventListener('focusin', notifyDirectory);
       document.removeEventListener('focusout', notifyDirectory);

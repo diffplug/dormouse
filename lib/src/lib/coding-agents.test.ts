@@ -37,7 +37,7 @@ describe('coding agent integrations', () => {
       expect(detectResumeCommand(`${invocation}\n`)).toBe(`${label} ${ID}`);
       expect(normalizeResumeCommand(invocation)).toBe(`${label} ${ID}`);
     }
-    for (const invocation of [label, `${label}=`, `${label} -bad`, `${label} $(whoami)`,
+    for (const invocation of [label, `${label}=`, `${label} -bad`, `${label} and`, `${label} ${ID.slice(0, 13)}`, `${label} $(whoami)`,
       `${label} ${ID}; echo bad`, `${label} ${ID} --extra`, `prefix-${label} ${ID}`]) {
       expect(normalizeResumeCommand(invocation), invocation).toBeNull();
     }
@@ -46,9 +46,10 @@ describe('coding agent integrations', () => {
   });
 
   it('keeps Cursor executable aliases distinct and chooses the newest hint', () => {
-    expect(detectResumeCommand('cursor-agent --resume=older\ragent --resume=newer\n'))
-      .toBe('agent --resume newer');
-    expect(detectResumeCommand('agent --resume=older\rcursor-agent --resume=newer\n'))
-      .toBe('cursor-agent --resume newer');
+    const older = '11111111-1111-4111-8111-111111111111';
+    expect(detectResumeCommand(`cursor-agent --resume=${older}\ragent --resume=${ID}\n`))
+      .toBe(`agent --resume ${ID}`);
+    expect(detectResumeCommand(`agent --resume=${older}\rcursor-agent --resume=${ID}\n`))
+      .toBe(`cursor-agent --resume ${ID}`);
   });
 });

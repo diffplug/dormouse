@@ -1,8 +1,10 @@
 import { build } from 'esbuild';
 import { fileURLToPath } from 'node:url';
+import { buildViewerAssets } from './build-viewer.mjs';
 
 // Runs after tsc: the self-contained Node runtime replaces tsc's re-export
-// `dist/runtime.js`, and the Monaco page lands beside it in `dist/viewer`.
+// `dist/runtime.js`, and the Monaco and Markdown pages land beside it in
+// `dist/viewer`, whose files `viewerAsset` serves by name.
 const absWorkingDir = fileURLToPath(new URL('../', import.meta.url));
 await Promise.all([
   build({
@@ -12,10 +14,5 @@ await Promise.all([
     target: 'node24',
     banner: { js: "import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);" },
   }),
-  build({
-    absWorkingDir,
-    entryPoints: { editor: 'viewer/editor.ts', 'editor.worker': 'node_modules/monaco-editor/esm/vs/editor/editor.worker.js' },
-    outdir: 'dist/viewer', bundle: true, format: 'esm', platform: 'browser',
-    target: 'es2022', minify: true, loader: { '.ttf': 'file' }, assetNames: '[name]',
-  }),
+  buildViewerAssets(fileURLToPath(new URL('../dist/viewer/', import.meta.url))),
 ]);

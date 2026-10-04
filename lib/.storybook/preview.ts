@@ -1,5 +1,4 @@
 import type { Preview } from '@storybook/react';
-import isChromatic from 'chromatic/isChromatic';
 import { useEffect, useLayoutEffect, StrictMode } from 'react';
 import { createElement } from 'react';
 import '../src/theme.css';
@@ -86,15 +85,8 @@ const fakePlatform = initPlatform('fake');
 /** Defined only by `lib/vitest.argos.config.ts`; absent in the real Storybook. */
 declare const __ARGOS_SNAPSHOT__: true | undefined;
 
-/** A visual-snapshot run — Chromatic or Argos — that must render deterministically.
- *
- *  Ask `isChromatic()`, never the user agent: Chromatic only rewrites the UA on
- *  its Chrome runner, and identifies every other browser (Safari, Firefox, Edge)
- *  with a `chromatic=true` query parameter instead. A UA sniff therefore left
- *  every guard below OFF in Safari — an alarm pulsing on a 650ms infinite loop, a
- *  blinking cursor, terminals on WebGL, and mid-tween pane geometry — which is
- *  what made the Safari snapshots unstable while Chrome's stayed clean. */
-const visualSnapshot = isChromatic() || typeof __ARGOS_SNAPSHOT__ !== 'undefined';
+/** An Argos visual-snapshot run, which must render deterministically. */
+const visualSnapshot = typeof __ARGOS_SNAPSHOT__ !== 'undefined';
 
 // Pin animations at T=0 for deterministic snapshots.
 if (visualSnapshot) {
@@ -152,6 +144,8 @@ const DYNAMIC_PALETTE_VARS = [
   '--color-alarm-vs-door',
   '--color-alarm-vs-terminal',
 ] as const;
+// Falls back to the first bundled theme, so a renamed or removed bundle cannot
+// leave stories without theme vars.
 const PREFERRED_STORYBOOK_THEME = 'Light (Visual Studio)';
 const FIRST_STORYBOOK_THEME = Object.keys(VSCODE_THEMES)[0] ?? '';
 const DEFAULT_STORYBOOK_THEME = VSCODE_THEMES[PREFERRED_STORYBOOK_THEME]
@@ -251,8 +245,7 @@ const preview: Preview = {
   parameters: {
     layout: 'fullscreen',
     // Argos otherwise shrinks the body to fit-content at 2x zoom, collapsing every
-    // fullscreen layout into a sliver; capture the page at the viewport width,
-    // as Chromatic does.
+    // fullscreen layout into a sliver; capture the page at the viewport width.
     argos: { fitToContent: false },
   },
   globalTypes: {

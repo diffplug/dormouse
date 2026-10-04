@@ -32,6 +32,12 @@ function Global:__dormouse_633_osc([string]$body) {
 	return "$($Global:__dormouse_633_esc)]633;$body$($Global:__dormouse_633_bel)"
 }
 
+# A rehydrated Tool's payload belongs to its first command alone
+# (docs/specs/dor-tool.md -> Reaping); no later command inherits it.
+function Global:__dormouse_633_clear_dehydrate {
+	Remove-Item Env:DORMOUSE_DEHYDRATE -ErrorAction SilentlyContinue
+}
+
 # Preserve the user's prompt so we can chain to it. `$function:prompt` is the
 # prompt as it stands after the profile ran; if the user defined none, this is
 # PowerShell's built-in default.
@@ -59,7 +65,7 @@ function Global:__dormouse_633_escape([string]$value) {
 	$value = $value.Replace("`n", '\x0a')
 	$value = $value.Replace("`r", '\x0d')
 	# BEL, ESC (which begins ST) and the C1 ST end an OSC string and so must not
-	# survive; docs/specs/terminal-escapes.md -> OSC 633 has the why. Escaping
+	# survive; docs/specs/terminal-state.md -> "Shell-integration injection" has the why. Escaping
 	# costs nothing here because the parser decodes \xNN back. Written as char
 	# codes rather than `a/`e so this still works on Windows PowerShell 5.1, where
 	# `e does not exist.
@@ -128,6 +134,7 @@ function Global:prompt() {
 		if ($Global:__dormouse_633_command_running) {
 			$result += __dormouse_633_osc "D;$exitCode"
 			$Global:__dormouse_633_command_running = $false
+			__dormouse_633_clear_dehydrate
 		}
 	} else {
 		# No PSReadLine: report the whole previous command (E/C/D) from history,
@@ -139,6 +146,7 @@ function Global:prompt() {
 			$result += __dormouse_633_osc "E;$(__dormouse_633_escape $lastHistory.CommandLine)"
 			$result += __dormouse_633_osc 'C'
 			$result += __dormouse_633_osc "D;$exitCode"
+			__dormouse_633_clear_dehydrate
 		}
 		# Clear the -1 sentinel on every render (history ids start at 1, so 0 never
 		# matches a real command) so the first real command is reported next prompt.

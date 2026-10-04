@@ -70,30 +70,9 @@
 
 ## The direct path
 
-macOS library validation decides which process may load the addon. Run under
-VS Code's main `Code` binary (`ELECTRON_RUN_AS_NODE=1`), `dlopen` of
-`node_datachannel.node` fails with "mapping process and mapped file
-(non-platform) have different Team IDs". Under `Code Helper (Plugin)` — the
-binary extension hosts run in, entitled
-`com.apple.security.cs.disable-library-validation` — the same file loads and
-two in-process peers complete a data-channel round trip, both from the
-installed package and from the staged `dist/node_modules` tree (measured on
-VS Code with Electron 42.10.0, macOS arm64, 2026-09).
+macOS library validation decides which process may load the addon. Run under VS Code's main `Code` binary (`ELECTRON_RUN_AS_NODE=1`), `dlopen` of `node_datachannel.node` fails with "mapping process and mapped file (non-platform) have different Team IDs". Under `Code Helper (Plugin)` — the binary extension hosts run in, entitled `com.apple.security.cs.disable-library-validation` — the same file loads and two in-process peers complete a data-channel round trip, both from the installed package and from the staged `dist/node_modules` tree (measured on VS Code with Electron 42.10.0, macOS arm64, 2026-09).
 
-The platform packages come from a scoped `pnpm deploy` because the wider
-switches reach too far: `supportedArchitectures` in `pnpm-workspace.yaml` is
-workspace-wide, and `pnpm install --os/--cpu` in the release job would fetch
-every platform's esbuild, lightningcss, workerd, and sharp as well. A first
-version fetched the tarballs from the registry itself and checked them against
-a regex over `pnpm-lock.yaml`; it ignored the configured registry, which pnpm 12
-does not export to scripts. `--libc glibc` did not drop the musl packages on a
-macOS host, hence copying only the declared platform packages.
-
-## Peer surfaces
-
-**Why installing the responder is keyed by the link.** Each install adds a `status` subscription, and each arming under it adds pane-state, activity, and focus listeners with no handle left to remove them. A flag would be wrong because the platform adapter, not the module, is what owns a link.
-
-**Why a late answer invalidates instead of being dropped** (the rule is `docs/specs/remote-api.md` → Directory; every ask bridge shares it). It arrives after the Burrow has already rendered a directory missing whatever that answerer owns — an empty picker on a machine that does have terminals — and nothing can re-open a settled request. Without the invalidation an idle machine has no other reason to re-collect, so the phone's picker stays wrong indefinitely.
+The platform packages come from a scoped `pnpm deploy` because the wider switches reach too far: `supportedArchitectures` in `pnpm-workspace.yaml` is workspace-wide, and `pnpm install --os/--cpu` in the release job would fetch every platform's esbuild, lightningcss, workerd, and sharp as well. A first version fetched the tarballs from the registry itself and checked them against a regex over `pnpm-lock.yaml`; it ignored the configured registry, which pnpm 12 does not export to scripts. `--libc glibc` did not drop the musl packages on a macOS host, hence copying only the declared platform packages.
 
 ## Peer surfaces across windows
 
@@ -103,7 +82,7 @@ macOS host, hence copying only the declared platform packages.
 
 **Why a result is never broadcast when a route exists.** Ids are globally unique, so broadcasting another window's answer settles nothing anywhere — and it puts that window's Burrow state in front of webviews that never asked for it.
 
-**Why `pushDevices` answers `null` instead of refusing.** When an un-enrolled window refused the read-only commands, the Settings dialog reported an unreachable server on machines that had simply never enrolled.
+**What the broadcast buys.** Unambiguous settling is only half of it: the same fan-out lets a losing window forward a command to the broker window and receive the answer back.
 
 ## Build and development
 

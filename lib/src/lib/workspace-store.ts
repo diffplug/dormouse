@@ -1,3 +1,4 @@
+import { getPendingKills } from './pending-kills';
 import { normalizeAlertDeliveryOverrides, sameAlertDeliveryOverrides, type AlertDeliveryOverrides } from './alert-delivery-model';
 import { parseWorkspaceRef } from 'dor/protocol';
 import { DEFAULT_WORKSPACE_ID, DEFAULT_WORKSPACE_NAME, isDefaultWorkspaceName, type WorkspaceId } from './session-types';
@@ -129,8 +130,9 @@ export function workspaceRefNumber(id: WorkspaceId): number | null {
   return match ? Number(match[1]) : null;
 }
 
-/** Positions exist only on hosts without an application-wide registry. */
-function refsArePositional(): boolean {
+/** Positions exist only on hosts without an application-wide registry; every
+ *  other host's {@link workspaceRefFor} is unique across its Windows. */
+export function refsArePositional(): boolean {
   return !registryInstalled;
 }
 
@@ -333,6 +335,10 @@ export function resolveWorkspaceRef(ref: string): WorkspaceRefResolution {
       return { ok: false, message: `workspace target '${target}' matched multiple Workspaces: ${candidates}` };
     }
   }
+  // Off the strip on its way to a kill (`docs/specs/reopen.md`).
+  const pending = getPendingKills().find(kill => kill.kind === 'workspace'
+    && (number !== null ? workspaceRefNumber(kill.id) === number : kill.id === name || kill.title === name));
+  if (pending) return { ok: false, message: `workspace '${target}' is a pending kill` };
   return { ok: false, message: `unknown workspace target '${target}'` };
 }
 

@@ -228,7 +228,7 @@ function openPickerMenu(name: RegExp) {
 /**
  * The theme dropdown open. It renders `position: fixed` off the trigger rect
  * rather than absolutely, because the dialog surface is `overflow-y-auto` and
- * would otherwise clip the menu (`docs/specs/theme.md`).
+ * would otherwise clip the menu (`docs/specs/theme.rationale.md`).
  */
 export const ThemeMenuOpen: Story = {
   parameters: {

@@ -17,7 +17,7 @@ import {
   type ScreenRegistration,
 } from './agent-browser-screen';
 import { isToolParams, toolScopeFromParams } from './browser-surface';
-import { builtinFor } from 'dor-tools-builtin/file-viewer-format';
+import { builtinHandler } from 'dor-tools-builtin/file-viewer-format';
 import { connectIframeTheme } from '../../lib/themes/iframe-theme';
 import { connectToolEditor, withToolEditorConsent } from '../../lib/tool-editor';
 import { offeredRenderModes } from './browser-automation';
@@ -29,9 +29,11 @@ import { browserSurfaceUrl, hostPathDisplay, iframeRefusal } from './browser-url
 // "Iframe Renderer"). Everything else a local dev tool needs is granted;
 // allow-same-origin is safe because the frame's origin (the loopback proxy, or
 // the upstream itself on a host with no proxy) is never same-origin with the
-// host webview. **The raw fallback is not the trusted case** — it is the one
-// with no proxy in front of it at all, so it gets the same sandbox rather than
-// none.
+// host webview — except the website playground's first-party viewer pages,
+// which it serves from its own origin over a fixed snapshot
+// (docs/specs/tutorial.md -> Playground filesystem). **The raw fallback is not
+// the trusted case** — it is the one with no proxy in front of it at all, so it
+// gets the same sandbox rather than none.
 const IFRAME_SANDBOX = 'allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads';
 // Permissions-Policy for the framed page. `dor iframe` takes any http(s) URL,
 // not only a loopback dev server, and a desktop webview often has no per-site
@@ -202,12 +204,24 @@ export function IframePanel({ id, title, params, onReady }: PaneProps & {
   // accurate focus model, and real error pages. Reachability is diagnosed by
   // the proxy and shown as a served page inside the frame.
   const [resolution, setResolution] = useState<Resolution>(() => (sourceUrl ? { kind: 'resolving' } : { kind: 'empty' }));
+  // This mounted view's lease on its proxy grant (docs/specs/dor-browser.md →
+  // "Iframe Proxy Leases"): Reload, Back and Forward keep the grant and its
+  // origin, and unmounting — a kill, a swap, a transfer — ends it. Minted by
+  // the effect that releases it, so a released id is never asked for again:
+  // StrictMode's mount, unmount, mount gets a second lease, and no transport
+  // can deliver a create of the first after its release.
+  const [lease, setLease] = useState<string | null>(null);
+  useEffect(() => {
+    const minted = `${id}#${globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2)}`;
+    setLease(minted);
+    return () => getPlatform().releaseIframeProxy?.(minted);
+  }, [id]);
   useEffect(() => {
     if (!isTool || resolution.kind !== 'proxied' || !iframeRef.current) return;
     return connectIframeTheme(iframeRef.current, resolution.origin);
   }, [isTool, resolution]);
   useEffect(() => {
-    if (!isTool || params.toolName !== builtinFor(false).kind || toolScopeFromParams(params) !== 'builtin'
+    if (!isTool || !builtinHandler('kind', params.toolName)?.editor || toolScopeFromParams(params) !== 'builtin'
       || resolution.kind !== 'proxied' || !iframeRef.current) return;
     return connectToolEditor(id, String(params.toolTarget ?? title), iframeRef.current, resolution.origin);
   }, [id, isTool, params?.toolName, params?.toolScope, params?.toolTarget, title, resolution]);
@@ -234,9 +248,11 @@ export function IframePanel({ id, title, params, onReady }: PaneProps & {
       setResolution({ kind: 'raw', src: sourceUrl });
       return;
     }
-    let cancelled = false;
     setResolution({ kind: 'resolving' });
-    createProxy(sourceUrl).then(
+    // The lease arrives with the first effect pass.
+    if (lease === null) return;
+    let cancelled = false;
+    createProxy(sourceUrl, lease).then(
       (result: IframeProxyResult) => {
         if (cancelled) return;
         if (result.ok) setResolution({ kind: 'proxied', src: result.url, origin: originOf(result.url) });
@@ -247,7 +263,7 @@ export function IframePanel({ id, title, params, onReady }: PaneProps & {
       },
     );
     return () => { cancelled = true; };
-  }, [sourceUrl, reloadNonce]);
+  }, [sourceUrl, reloadNonce, lease]);
 
   // Register a screen controller so the embed surface shows the unified
   // browser chrome (URL + the far-left chip → Display modal) and can swap back

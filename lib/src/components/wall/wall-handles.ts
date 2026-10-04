@@ -1,5 +1,6 @@
 import type { LeafMeta } from '../../lib/lath/persistence';
 import type { PersistedSession } from '../../lib/session-types';
+import type { SurfaceReopenRecord } from '../../lib/reopen-stack';
 import type { BrowserAutomationProvider } from 'dor-lib-common/browser-providers';
 import type { WorkspaceId } from '../../lib/session-types';
 import type { SaveOptions } from '../../lib/session-save';
@@ -29,8 +30,15 @@ export interface WallHandle {
   finishSurfaceMove(): void;
   focusSurface(id: string, acknowledge: boolean): void;
   showMoveNotice(id: string, text: string): void;
+  /** A brief notice on the pane the user is on: the Window's answer to a verb
+   *  with nothing to act on. */
+  showNotice(text: string): void;
+  /** Rebuild a closed Surface here (`docs/specs/reopen.md`); `focus` selects it. */
+  reopenSurface(record: SurfaceReopenRecord, focus: boolean): { id: string; ref: string };
   /** This Workspace's record now, with no cwd probe. */
   serializeNow(): PersistedSession;
+  /** The same, each cwd as its Session last reported it: a reopen record. */
+  serializeReported(): PersistedSession;
   workspaceId: WorkspaceId;
   /** The Wall's member Surfaces: visible panes ∪ Doors. */
   surfaceIds(): string[];
@@ -46,10 +54,9 @@ export interface WallHandle {
    *  launching, which a `--key` elsewhere in the Window must not mint again
    *  (docs/specs/dor-browser.md → "Managed identity"). */
   browserSessions(provider: BrowserAutomationProvider): string[];
-  /** Any member terminal Session the user has typed into (the close confirmation
-   *  gate, alongside `runningCount`). */
-  hasTouchedSurfaces(): boolean;
-  runningCount(): number;
+  /** Any member a user close would confirm (`closeKind` in
+   *  `lib/src/components/wall/close-kind.ts`): the Workspace close gate. */
+  needsCloseConfirmation(): boolean;
   /** Dirty reports consumed only by Tool-designated members, including Doors. */
   dirtyToolIds(): string[];
   /** Leave command selection on chrome and focus a live pane. */
@@ -129,13 +136,15 @@ export function stubWallHandle(workspaceId: WorkspaceId, overrides: Partial<Wall
     finishSurfaceMove: () => {},
     focusSurface: () => {},
     showMoveNotice: () => {},
+    showNotice: () => {},
+    reopenSurface: () => { throw new Error('Reopen is unavailable'); },
     serializeNow: () => ({ version: 3, panes: [] }),
+    serializeReported: () => ({ version: 3, panes: [] }),
     surfaceIds: () => [],
     ownsSurface: () => false,
     iframeSurfaceRefs: () => [],
     browserSessions: () => [],
-    hasTouchedSurfaces: () => false,
-    runningCount: () => 0,
+    needsCloseConfirmation: () => false,
     dirtyToolIds: () => [],
     enterSelectedPane: () => {},
     enterCommandMode: () => {},

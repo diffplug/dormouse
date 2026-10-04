@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from 'react';
 import { bakedRelayMode } from 'dormouse-lib/host/relay-origin';
+import { normalizeExternalUri } from 'dormouse-lib/lib/external-links';
 import { isRecord } from 'dormouse-lib/lib/is-record';
 import { loadJson, saveJson } from 'dormouse-lib/lib/local-json-store';
 import { getPlatformOrNull, IS_WINDOWS, PLATFORM_STRING } from 'dormouse-lib/lib/platform';
@@ -11,13 +12,20 @@ import type { Update } from '@tauri-apps/plugin-updater';
 const GITHUB_REPO_URL = 'https://github.com/diffplug/dormouse';
 const BROWSER_DEV_HOST = Boolean(import.meta.env.VITE_DORMOUSE_BROWSER_DEV_HOST);
 
-function openUrl(url: string, context: string): void {
+/** Every launch revalidates, as an adapter's `openExternal` does
+ *  (docs/specs/security-local.md -> "Terminal output"). */
+export function openUrl(url: string, context: string): void {
+  const normalized = normalizeExternalUri(url);
+  if (normalized === null) {
+    console.error(`[updater] Refused to open ${context}: not an openable URL`);
+    return;
+  }
   if (BROWSER_DEV_HOST) {
-    window.open(url, '_blank', 'noopener,noreferrer');
+    window.open(normalized, '_blank', 'noopener,noreferrer');
     return;
   }
   import('@tauri-apps/plugin-shell')
-    .then(({ open }) => open(url))
+    .then(({ open }) => open(normalized))
     .catch((e) => console.error(`[updater] Failed to open ${context}:`, e));
 }
 
@@ -176,6 +184,11 @@ function remindIfDue(now: number): void {
   setState({ status: 'check-due', days: Math.floor(age / DAY_MS) });
 }
 
+/** The update the user approved — downloading, or downloaded and pending — if any. */
+function approvedUpdate(): Update | null {
+  return pendingUpdate ?? (downloadPromise ? availableUpdate : null);
+}
+
 /**
  * One check, automatic or asked for; a second asker joins it. A success is
  * recorded, and an update it finds is offered for approval.
@@ -187,6 +200,13 @@ function performCheck(): Promise<Update | null> {
       const update = await checkForUpdate();
       const now = Date.now();
       saveCheckRecord({ since: now, remindedAt: null, ...peekCheckRecord(), checkedAt: now });
+      // An approval made while this check was in flight owns this session's
+      // update: the handle it is downloading or holds must not be replaced.
+      const approved = approvedUpdate();
+      if (update && approved) {
+        if (update !== approved) void update.close().catch(() => {});
+        return approved;
+      }
       if (update) {
         // One still unapproved is replaced, and its handle let go.
         const replaced = availableUpdate;
@@ -416,8 +436,7 @@ async function runUpdateCheck(): Promise<void> {
   const policy = await readNetworkPolicy();
   // A manual approval during the delay or the policy read owns this session's
   // update; checking again would offer it for approval a second time.
-  const approved = pendingUpdate !== null || downloadPromise !== null;
-  if (policy && checksForUpdates(policy) && !approved) {
+  if (policy && checksForUpdates(policy) && !approvedUpdate()) {
     // An update found is offered by `performCheck`.
     await performCheck().catch((e) => console.error('[updater] Check failed:', e));
   }

@@ -41,19 +41,44 @@ test('POSIX folder opening retains exit-error reporting', () => {
   });
 });
 
-test('process inspection fails closed while ordinary port discovery remains fail-soft', () => {
-  const runtime = { platform: 'darwin', execFileSync() { throw new Error('ps failed'); } };
-  assert.deepEqual(getDescendantPids(42, runtime), [42]);
-  assert.throws(() => getDescendantPids(42, { ...runtime, strict: true }), /inspect/);
+// The directory is terminal-reported (OSC 7), so its name is program-chosen.
+test('macOS reveals the folder rather than opening it, so a bundle directory is never launched', () => {
+  let called = 0;
+  openNativeDirectory('/Users/me/clone/Evil.app', result => assert.equal(result, null), {
+    platform: 'darwin',
+    execFile(exe, args, _options, done) {
+      called++;
+      assert.equal(exe, 'open');
+      assert.deepEqual(args, ['-R', '/Users/me/clone/Evil.app']);
+      done(null);
+    },
+  });
+  assert.equal(called, 1);
 });
 
-test('strict inspection requires the terminal process to appear in the process table', () => {
+test('Windows refuses a folder whose path Explorer would split at a comma', () => {
+  const results = [];
+  openNativeDirectory('C:\\clone\\x,\\Users\\me\\evil.exe', error => results.push(error), {
+    platform: 'win32',
+    spawn() { throw new Error('Explorer must not be launched'); },
+  });
+  assert.equal(results.length, 1);
+  assert.match(results[0].message, /comma/);
+});
+
+test('process inspection fails closed while ordinary port discovery remains fail-soft', async () => {
+  const runtime = { platform: 'darwin', execFile() { throw new Error('ps failed'); } };
+  assert.deepEqual(await getDescendantPids(42, runtime), [42]);
+  await assert.rejects(getDescendantPids(42, { ...runtime, strict: true }), /inspect/);
+});
+
+test('strict inspection requires the terminal process to appear in the process table', async () => {
   for (const output of ['', 'invalid response', '1 0\n123 1']) {
-    const runtime = { platform: 'darwin', execFileSync() { return output; } };
-    assert.deepEqual(getDescendantPids(42, runtime), [42]);
-    assert.throws(() => getDescendantPids(42, { ...runtime, strict: true }), /inspect/);
+    const runtime = { platform: 'darwin', execFile() { return output; } };
+    assert.deepEqual(await getDescendantPids(42, runtime), [42]);
+    await assert.rejects(getDescendantPids(42, { ...runtime, strict: true }), /inspect/);
   }
-  assert.deepEqual(getDescendantPids(42, { platform: 'darwin', strict: true, execFileSync() { return '42 1\n43 42'; } }), [42, 43]);
+  assert.deepEqual(await getDescendantPids(42, { platform: 'darwin', strict: true, execFile() { return '42 1\n43 42'; } }), [42, 43]);
 });
 
 test('helper ownership survives a live listing and promotion preserves the PTY and replay', () => {
@@ -70,12 +95,15 @@ test('helper ownership survives a live listing and promotion preserves the PTY a
   manager.spawn('parent');
   manager.spawn('helper', { helper: { parentId: 'parent', command: 'git status' } });
   assert.deepEqual(decisions, [['parent', false], ['helper', true]]);
+  assert.equal(manager.getHelperParentId('helper'), 'parent');
+  assert.equal(manager.getHelperParentId('parent'), undefined);
   spawned[1].output('unsaved editor text');
   manager.list();
   assert.deepEqual(events.findLast(e => e.event === 'list').data.ptys[1].helper, { parentId: 'parent', command: 'git status' });
   assert.equal(events.findLast(e => e.event === 'replay').data.data, 'unsaved editor text');
   manager.context({ op: 'promote', id: 'helper' }, 'promote-1');
   assert.deepEqual(decisions.at(-1), ['helper', false]);
+  assert.equal(manager.getHelperParentId('helper'), undefined);
   manager.list();
   assert.equal(events.findLast(e => e.event === 'list').data.ptys[1].helper, undefined);
   assert.equal(spawned.length, 2);

@@ -1,6 +1,5 @@
 import { isHelperSession } from '../../lib/terminal-store';
-import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react';
-import { createPortal } from 'react-dom';
+import { useContext, useMemo, useRef, useSyncExternalStore } from 'react';
 import { clsx } from 'clsx';
 import {
   CursorClickIcon,
@@ -8,12 +7,12 @@ import {
 } from '@phosphor-icons/react';
 import { ToolDirtyIndicator, useToolDirty } from '../ToolDirtyIndicator';
 import { HeaderActionButton } from '../HeaderActionButton';
-import { HEADER_PILL_CLASS, paneHeader, POPUP_SURFACE_CLASS, PREVIEW_LABEL_CLASS } from '../design';
-import { isPreviewSlotParams } from './browser-surface';
+import { paneHeader, PREVIEW_LABEL_CLASS } from '../design';
+import { isPreviewSlotParams, isToolParams, toolFace } from './browser-surface';
 import { usePreviewKeep } from './preview-keep';
-import { TodoSpotlight, useTodoPillContent } from '../TodoPillBody';
+import { SessionTodoPill } from './SessionTodoPill';
 import { useHeaderTier } from './use-header-tier';
-import { HEADER_CONTROL_SLOT_PX, PaneActionGroup, SplitButtons, TerminalContextButton } from './PaneActionButtons';
+import { BreakToolButton, HEADER_CONTROL_SLOT_PX, PaneActionGroup, SplitButtons, TerminalContextButton } from './PaneActionButtons';
 import type { PaneProps } from './pane-props';
 import { toolSemanticName } from './tool-name';
 import { usePaneRename } from './use-pane-rename';
@@ -23,7 +22,6 @@ import {
   subscribeToMouseSelection,
 } from '../../lib/mouse-selection';
 import {
-  clearSessionTodo,
   DEFAULT_ACTIVITY_STATE,
   getActivitySnapshot,
   getTerminalPaneStateSnapshot,
@@ -57,9 +55,6 @@ export const terminalHeaderTier = (width: number): TerminalHeaderTier =>
       : width > 98 ? 'minimal'
         : 'tiny';
 
-const TODO_PREVIEW_GAP = 6;
-const TODO_PREVIEW_MARGIN = 8;
-
 export function TerminalPaneHeader({ id, title, params, terminalContext = false }: PaneProps & {
   /** Lead with the Tool's Terminal Context button (`ToolPaneHeader`). */
   terminalContext?: boolean;
@@ -73,6 +68,9 @@ export function TerminalPaneHeader({ id, title, params, terminalContext = false 
   const context = useContext(TerminalContextContext);
   const activityStates = useSyncExternalStore(subscribeToActivity, getActivitySnapshot);
   const terminalStates = useSyncExternalStore(subscribeToTerminalPaneState, getTerminalPaneStateSnapshot);
+  // Primitive selectors, never the store's map: it is replaced on every drag
+  // and hover update, so a whole-map subscription would rerender every header
+  // (docs/specs/mouse-and-clipboard.md §7).
   const showMouseIcon = useSyncExternalStore(
     subscribeToMouseSelection, () => getMouseSelectionState(id).mouseReporting !== 'none',
   );
@@ -121,25 +119,12 @@ export function TerminalPaneHeader({ id, title, params, terminalContext = false 
   const isActiveHeader = mode === 'passthrough' && isSelected && windowFocused;
   const rename = usePaneRename(id);
   const tabRef = useRef<HTMLDivElement>(null);
-  const tier = useHeaderTier(tabRef, terminalHeaderTier, { reservePx: terminalContext ? HEADER_CONTROL_SLOT_PX : 0 });
-  const [todoPreviewRect, setTodoPreviewRect] = useState<DOMRect | null>(null);
-  const todoPill = useTodoPillContent(activity.todo);
+  // A Tool's terminal face, past approval, offers Break (docs/specs/dor-tool.md -> Run end).
+  const breakable = isToolParams(params) && toolFace(params) !== 'pending-approval';
+  const tier = useHeaderTier(tabRef, terminalHeaderTier, { reservePx: (terminalContext ? HEADER_CONTROL_SLOT_PX : 0) + (breakable ? HEADER_CONTROL_SLOT_PX : 0) });
   const compactOrWider = tier === 'full' || tier === 'compact';
   const tiny = tier === 'tiny';
-  const showTodoPill = todoPill.visible && compactOrWider;
-  const todoNotificationPreview = formatNotificationPreview(activity.notification);
-  const todoPreviewId = `todo-notification-preview-${id}`;
   const keep = usePreviewKeep(id, preview);
-
-  const closeTodoPreview = useCallback(() => setTodoPreviewRect(null), []);
-  const openTodoPreview = useCallback((button: HTMLButtonElement) => {
-    if (!activity.notification) return;
-    setTodoPreviewRect(button.getBoundingClientRect());
-  }, [activity.notification]);
-
-  useEffect(() => {
-    if (!activity.notification) setTodoPreviewRect(null);
-  }, [activity.notification]);
 
   return (
     <div
@@ -157,6 +142,7 @@ export function TerminalPaneHeader({ id, title, params, terminalContext = false 
       }}
     >
       {terminalContext && <TerminalContextButton surfaceId={id} />}
+      {breakable && !tiny && <BreakToolButton surfaceId={id} />}
       <div className="flex flex-1 min-w-0 items-center gap-1.5 overflow-hidden">
         {rename.renaming ? rename.editor(label.primary) : (
           // A preview's label is drag area, not a rename: its double-click
@@ -177,31 +163,7 @@ export function TerminalPaneHeader({ id, title, params, terminalContext = false 
             )}
           </span>
         )}
-        {showTodoPill && (
-          <button
-            type="button"
-            data-session-todo-for={id}
-            data-flourishing={todoPill.flourishing ? 'true' : 'false'}
-            className={`todo-pill-shell relative ${HEADER_PILL_CLASS}`}
-            aria-label={todoNotificationPreview ? `Dismiss TODO: ${todoNotificationPreview}` : 'Dismiss TODO'}
-            aria-describedby={todoPreviewRect && activity.notification ? todoPreviewId : undefined}
-            aria-hidden={todoPill.flourishing ? true : undefined}
-            onMouseDown={(e) => e.stopPropagation()}
-            onMouseEnter={(e) => openTodoPreview(e.currentTarget)}
-            onMouseLeave={closeTodoPreview}
-            onFocus={(e) => openTodoPreview(e.currentTarget)}
-            onBlur={closeTodoPreview}
-            onClick={(e) => {
-              e.stopPropagation();
-              closeTodoPreview();
-              clearSessionTodo(id);
-            }}
-          >
-            {todoPill.body}
-            {/* Over the border too, so the wash takes the pill's own outline. */}
-            <TodoSpotlight surfaceId={id} className="-inset-px rounded" />
-          </button>
-        )}
+        <SessionTodoPill id={id} activity={activity} shown={compactOrWider} />
       </div>
       {!rename.renaming && (
         <>
@@ -234,83 +196,9 @@ export function TerminalPaneHeader({ id, title, params, terminalContext = false 
           <PaneActionGroup dirty={dirty} surfaceId={id} zoomed={zoomed} activeHeader={isActiveHeader} showMinimizeKill={!tiny} />
         </>
       )}
-      {todoPreviewRect && activity.notification && context.id !== id && (
-        <TodoNotificationPreview
-          id={todoPreviewId}
-          notification={activity.notification}
-          anchorRect={todoPreviewRect}
-        />
-      )}
       {/* Where the tier or the rename editor hides Kill, the dot it carries sits at the right edge. */}
       {(tiny || rename.renaming) && <ToolDirtyIndicator dirty={dirty} />}
       {rename.warning}
     </div>
   );
-}
-
-function TodoNotificationPreview({
-  id,
-  notification,
-  anchorRect,
-}: {
-  id: string;
-  notification: { title: string | null; body: string | null };
-  anchorRect: DOMRect;
-}) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [style, setStyle] = useState<CSSProperties>({
-    position: 'fixed',
-    left: anchorRect.left,
-    top: anchorRect.bottom + TODO_PREVIEW_GAP,
-  });
-
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const rect = el.getBoundingClientRect();
-    const top = anchorRect.bottom + TODO_PREVIEW_GAP;
-    const maxLeft = Math.max(TODO_PREVIEW_MARGIN, window.innerWidth - rect.width - TODO_PREVIEW_MARGIN);
-    setStyle({
-      position: 'fixed',
-      left: Math.min(Math.max(anchorRect.left, TODO_PREVIEW_MARGIN), maxLeft),
-      top,
-      maxHeight: Math.max(48, window.innerHeight - top - TODO_PREVIEW_MARGIN),
-    });
-  }, [anchorRect]);
-
-  return createPortal(
-    <div
-      ref={ref}
-      id={id}
-      role="tooltip"
-      className={`${POPUP_SURFACE_CLASS} max-w-80 px-2.5 py-2 text-sm leading-snug`}
-      style={style}
-    >
-      {notification.title && (
-        <div className="font-medium break-words">{notification.title}</div>
-      )}
-      {notification.body && (
-        <div
-          className="mt-1 whitespace-pre-wrap break-words text-muted"
-          style={{
-            display: '-webkit-box',
-            WebkitBoxOrient: 'vertical',
-            WebkitLineClamp: 3,
-            overflow: 'hidden',
-          }}
-        >
-          {notification.body}
-        </div>
-      )}
-    </div>,
-    document.body,
-  );
-}
-
-function formatNotificationPreview(notification: { title: string | null; body: string | null } | null): string | undefined {
-  if (!notification) return undefined;
-  const parts = [notification.title, notification.body].filter((part): part is string => !!part);
-  if (parts.length === 0) return undefined;
-  const preview = parts.join('\n');
-  return preview.length > 512 ? `${preview.slice(0, 509)}...` : preview;
 }

@@ -43,7 +43,7 @@ export function stripMouseReportsFromInput(data: string): string {
 
 // Baseline for a dead replay only; a live process still owns its modes. The
 // mouse-encoding resets are parser-only (`terminal.modes` does not expose them).
-// See docs/specs/terminal-escapes.md §Replay-time mode-reset tail.
+// See docs/specs/transport.md §Replay-time mode-reset tail (Dormouse-emitted).
 export const REPLAY_MODE_RESET =
   `${ESC}?1049l${ESC}?47l${ESC}?1047l` + // exit alt-screen (current + legacy variants)
   `${ESC}?9l${ESC}?1000l${ESC}?1002l${ESC}?1003l` + // disable mouse tracking

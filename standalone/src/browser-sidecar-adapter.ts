@@ -45,12 +45,14 @@ import { getTerminalTheme, onTerminalThemeChange } from "dormouse-lib/lib/termin
 import { parseReplay } from "dormouse-lib/lib/platform/replay-parse";
 import type { TerminalSemanticEvent } from "dormouse-lib/lib/terminal-state";
 import { applyTerminalSemanticEvents } from "dormouse-lib/lib/terminal-state-store";
+import { markSessionTouched } from "dormouse-lib/lib/terminal-store";
 import type { DorControlCancelPayload, DorControlRequestPayload } from "dor/protocol";
 import {
   cancelDorControlRequest,
   dispatchDorControlRequest,
 } from "dormouse-lib/lib/platform/dor-control-dispatch";
 import { BrowserSidecarHost } from "./browser-sidecar-host";
+import { IframeLeaseOrder } from '../../lib/src/lib/platform/iframe-lease-order';
 
 const errMessage = (err: unknown): string => err instanceof Error ? err.message : String(err);
 
@@ -58,6 +60,8 @@ const errMessage = (err: unknown): string => err instanceof Error ? err.message 
 export interface BrowserSidecarAdapter extends AlertClientMethods {}
 
 export class BrowserSidecarAdapter implements PlatformAdapter {
+  readonly offersLabs = true;
+  readonly reapsTools = true;
   private dataHandlers = new Set<(detail: PtyDataDetail) => void>();
   private exitHandlers = new Set<(detail: { id: string; exitCode: number }) => void>();
   private listHandlers = new Set<(detail: PtyListDetail) => void>();
@@ -85,6 +89,9 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
     this.host.send("alert_command", { payload });
   });
 
+  /** Iframe lease messages in order over the bridge's separate requests. */
+  private readonly leaseOrder = new IframeLeaseOrder();
+
   constructor(private readonly host: BrowserSidecarHost) {
     Object.assign(this, this.alerts.methods);
     // See TauriAdapter: the sidecar parses and has no DOM, so it is told the
@@ -96,11 +103,14 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
     // drops `this` and makes the internal `this.host` access throw. The VS Code
     // adapter binds for the same reason; mirror it so any call style is safe.
     this.createIframeProxyUrl = this.createIframeProxyUrl.bind(this);
+    this.releaseIframeProxy = this.releaseIframeProxy.bind(this);
     this.toolControl = this.toolControl.bind(this);
   }
 
   async init(): Promise<void> {
     await this.host.init();
+    // As TauriAdapter: a reloaded page's leases go before this page takes any.
+    this.leaseOrder.reset = this.host.invoke("iframe_release_proxy", { lease: null }).catch(() => {});
     this.unlistenHost = this.host.onEvent(({ event, data }) => this.handleHostEvent(event, data));
     // The SSE stream is the only way the alerts' events reach this adapter,
     // and whatever the sidecar sent while it was down is lost: `sync` has the
@@ -245,15 +255,20 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
     }
   }
 
-  async createIframeProxyUrl(targetUrl: string): Promise<IframeProxyResult> {
+  async createIframeProxyUrl(targetUrl: string, lease?: string): Promise<IframeProxyResult> {
     try {
-      return await this.host.invoke("iframe_create_proxy_url", {
+      return await this.leaseOrder.create(lease, () => this.host.invoke<IframeProxyResult>("iframe_create_proxy_url", {
         target: targetUrl,
         embedderOrigins: embedderOrigins(),
-      });
+        lease: lease ?? null,
+      }));
     } catch (err) {
       return { ok: false, reason: "unreachable", detail: errMessage(err) };
     }
+  }
+
+  releaseIframeProxy(lease: string): void {
+    this.leaseOrder.release(lease, () => this.host.send("iframe_release_proxy", { lease }));
   }
 
   readonly browserProviders = BROWSER_PROVIDER_IDS;
@@ -337,6 +352,8 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
     } else if (event === "terminal:clipboardOffer") {
       const { id, text } = data as { id: string; text: string };
       offerProgramCopy(id, text);
+    } else if (event === "terminal:clientInput") {
+      markSessionTouched((data as { id: string }).id);
     } else if (event === "pty:exit") {
       const payload = data as { id: string; exitCode: number };
       for (const handler of this.exitHandlers) handler(payload);

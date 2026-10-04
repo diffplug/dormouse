@@ -29,6 +29,7 @@ describe('Tool argv safety', () => {
   it('rejects control-bearing argument-list configuration but preserves literal shell scripts', () => {
     const parse = (run: string | string[]) => parseToolFile(JSON.stringify({ tools: { viewer: { run } } }), { path: '/repo/dormouse.yml', dir: '/repo', scope: 'repo' });
     expect(() => parse(['viewer', 'first\nsecond'])).toThrow('terminal control characters');
+    expect(() => parse(['viewer', 'a\u009b31m'])).toThrow('terminal control characters');
     expect(parse('echo first\necho second').tools.get('viewer')?.run).toBe('echo first\necho second');
   });
 
@@ -36,6 +37,7 @@ describe('Tool argv safety', () => {
     const targetEntry = { ...entry, run: ['viewer', '$TARGET'] };
     await expect(resolveToolInput(targetEntry, { ...context, args: ['\x15printf unwanted\n#'] })).rejects.toThrow('terminal control characters');
     await expect(resolveToolInput(targetEntry, { ...context, cwd: '/repo/\tpath', args: ['file.txt'] })).rejects.toThrow('terminal control characters');
+    await expect(resolveToolInput(targetEntry, { ...context, args: ['a\u0085b.txt'] })).rejects.toThrow('terminal control characters');
   });
 
   it.skipIf(process.platform === 'win32')('rejects controls hidden behind an ordinary symlink name', async () => {

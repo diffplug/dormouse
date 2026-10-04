@@ -16,7 +16,6 @@ import {
   deriveNoiseStaticPublicKey,
   formatPairingInvitationUrl,
   isSetupTokenResponse,
-  mintNoiseStaticKeyPair,
   parseLinkFragment,
   randomBase64Url,
   type BurrowEnrollBeginResponse,
@@ -434,6 +433,26 @@ export function suggestedBurrowLabel(kind: BurrowKind): string {
 }
 
 /**
+ * The service's mirror of the pending pairings, keyed by clientId. Bounded,
+ * like the runtime's own map: this one is mirrored to the webview in full on
+ * every change, so an unbounded queue costs quadratic bridge traffic on top of
+ * the memory. `BurrowRuntime` evicts on its side too; both are capped because
+ * either can be fed independently, and a cap that only one of them honors is
+ * not a cap.
+ */
+export function enqueuePending(pairings: Map<string, PendingPairing>, pending: PendingPairing): void {
+  // Coalesce by clientId before counting: a re-sent pair replaces its own
+  // entry, at the back, and evicts no one else's.
+  pairings.delete(pending.clientId);
+  while (pairings.size >= MAX_PENDING_PAIRINGS) {
+    const oldest = pairings.keys().next();
+    if (oldest.done) break;
+    pairings.delete(oldest.value);
+  }
+  pairings.set(pending.clientId, pending);
+}
+
+/**
  * A Hosted enrollment awaiting approval. The device code and the Noise static
  * stay here, in this process; `status` carries the rest
  * ({@link HostedEnrollmentState}).
@@ -721,8 +740,17 @@ export class BurrowService {
     if (this.#relay.mode !== 'self-host') throw new Error(this.#hostedEnrollmentRefusal());
     await this.#networkPolicy();
     this.#refuseNothing();
-    this.#refuseOtherOrigin((params as { relayUrl?: unknown }).relayUrl);
-    return this.#enrollWith({ password: params.password }, params.label);
+    return this.#enrollWith({ password: params.password }, this.#labelFrom(params));
+  }
+
+  /**
+   * The name to keep for this machine: the one typed, trimmed, or the suggested
+   * one when none was. Resolved before any exchange, since the console hook
+   * passes whatever it was given and an enrollment is never stored without one.
+   */
+  #labelFrom(params: { label?: unknown } | undefined): string {
+    const named = typeof params?.label === 'string' ? params.label.trim() : '';
+    return named || suggestedBurrowLabel(this.#kind);
   }
 
   /**
@@ -739,20 +767,6 @@ export class BurrowService {
   }
 
   /**
-   * An older webview still names the Relay — `enroll`'s `relayUrl`, or
-   * `enrollOffer`'s echoed `origin` — and one naming any but the baked origin
-   * is refused, rather than enrolled with this build's Relay instead.
-   */
-  #refuseOtherOrigin(named: unknown): void {
-    if (named === undefined) return;
-    if (typeof named === 'string' && isRelayOrigin(named, this.#relay.origin)) return;
-    throw new Error(
-      `This Dormouse enrolls only with ${this.#relay.origin}, the Relay it was built for, ` +
-        `not ${String(named)}.`,
-    );
-  }
-
-  /**
    * One-click enrollment from the offer an installer left on this machine
    * (`docs/specs/relay.md` → "Remote control, in the Settings dialog").
    */
@@ -760,7 +774,6 @@ export class BurrowService {
     if (this.#relay.mode !== 'self-host') throw new Error(this.#hostedEnrollmentRefusal());
     await this.#networkPolicy();
     this.#refuseNothing();
-    this.#refuseOtherOrigin((params as { origin?: unknown }).origin);
     // Re-read at the click, and refused before the token leaves the machine
     // unless it names the one Relay this build enrolls with.
     const offer = await readUsableOffer(this.#relay, this.#readOffer);
@@ -770,7 +783,7 @@ export class BurrowService {
           'redeemed already. Re-run the installer to mint a new one, or enroll with the setup password.',
       );
     }
-    return await this.#enrollWith({ enrollToken: offer.token }, params.label);
+    return await this.#enrollWith({ enrollToken: offer.token }, this.#labelFrom(params));
   }
 
   /**
@@ -802,9 +815,9 @@ export class BurrowService {
     onSaved?: () => void,
   ): Promise<void> {
     if (!isRelayOrigin(enrollment.origin, this.#relay.origin)) {
-      // An older Relay, which ignores the request's `origin` and so enrolled a
-      // Burrow built for another: nothing is persisted here, and the row it
-      // appended is named for the operator (docs/specs/relay.md → "Relay origin").
+      // A Relay answering for another origin than the one the request named:
+      // nothing is persisted here, and the row it appended is named for the
+      // operator (docs/specs/relay.md → "Relay origin").
       const mismatch = originMismatchMessage(enrollment.origin, this.#relay.origin);
       throw new Error(leftBehind ? `${mismatch} ${leftBehind}` : mismatch);
     }
@@ -846,8 +859,7 @@ export class BurrowService {
    */
   async #beginHostedEnrollment(params: HostedEnrollParams | undefined): Promise<HostedEnrollmentState> {
     if (this.#relay.mode === 'self-host') throw new Error(SELF_HOST_DEVICE_CODE_REFUSAL);
-    const named = typeof params?.label === 'string' ? params.label.trim() : '';
-    const label = named || suggestedBurrowLabel(this.#kind);
+    const label = this.#labelFrom(params);
     await this.#networkPolicy();
     this.#refuseNothing();
     this.#refuseEnrolled();
@@ -1288,7 +1300,7 @@ export class BurrowService {
       directPeering: directPeeringFor(policy, this.#createDirectPeer),
       // The name the phone shows: the one this machine enrolled under, else the
       // one the enrollment form would have suggested.
-      burrowLabel: this.#enrollment?.label || suggestedBurrowLabel(this.#kind),
+      burrowLabel: this.#enrollment?.label ?? suggestedBurrowLabel(this.#kind),
       requestApproval: (request) => this.#requestOneTimeApproval(runtime, request),
       dismissApproval: () => this.#dismissOneTimeApproval(runtime),
       onChange: (next) => this.#onOneTimeChanged(runtime, next),
@@ -1534,64 +1546,33 @@ export class BurrowService {
   // --- Burrow lifecycle ---
 
   /**
-   * The Noise static gate. **A Burrow without a usable one does not start**, and
-   * so reads as un-enrolled with the Settings dialog offering enrollment again —
-   * that is the entire Burrow-state version
-   * (`docs/specs/remote-security-model.md` → Burrow identity).
-   *
-   * Two cases, and they end differently on purpose:
-   *
-   * - **Absent** is an enrollment from before the field existed. Minting is
-   *   never retried once it has failed, so a gate without this backfill would
-   *   un-enroll a machine over one transient failure. The mint is persisted
-   *   before the Burrow starts, so it survives the next launch.
-   * - **Present but not corresponding** is a corrupt or hand-edited state file.
-   *   Starting anyway would present a Burrow identity every paired Client reads as
-   *   *changed*, which looks like a different machine rather than the local
-   *   damage it is — so it stays down, loudly, naming the store.
+   * The Noise static gate. **A Burrow whose halves do not correspond does not
+   * start**, and so reads as un-enrolled with the Settings dialog offering
+   * enrollment again — that is the entire Burrow-state version
+   * (`docs/specs/remote-security-model.md` → Burrow identity). Such a state
+   * file is corrupt or hand-edited: starting anyway would present a Burrow
+   * identity every paired Client reads as *changed*, which looks like a
+   * different machine rather than the local damage it is — so it stays down,
+   * loudly, naming the store.
    */
-  async #enrolledWithNoiseStatic(enrollment: BurrowEnrollment): Promise<BurrowEnrollment | null> {
+  async #hasUsableNoiseStatic(enrollment: BurrowEnrollment): Promise<boolean> {
     const { noiseStaticPrivateKey, noiseStaticPublicKey } = enrollment;
-    if (noiseStaticPrivateKey !== undefined && noiseStaticPublicKey !== undefined) {
-      try {
-        if ((await deriveNoiseStaticPublicKey(noiseStaticPrivateKey)) === noiseStaticPublicKey) {
-          return enrollment;
-        }
-      } catch {
-        // Falls through to the same refusal: a private half that will not import
-        // is as unusable as one that names a different public point.
-      }
-      console.warn(
-        `[burrow] the stored Noise static for ${enrollment.burrowId} does not match its public half; ` +
-          'this machine\'s remote-control state is corrupt. Enroll again to replace it.',
-      );
-      return null;
-    }
-    let material;
     try {
-      material = await mintNoiseStaticKeyPair();
-    } catch (error) {
-      console.warn('[burrow] could not mint this machine\'s Noise static key', error);
-      return null;
+      if ((await deriveNoiseStaticPublicKey(noiseStaticPrivateKey)) === noiseStaticPublicKey) return true;
+    } catch {
+      // Falls through to the same refusal: a private half that will not import
+      // is as unusable as one that names a different public point.
     }
-    const backfilled: BurrowEnrollment = {
-      ...enrollment,
-      noiseStaticPrivateKey: material.privateKeyPkcs8,
-      noiseStaticPublicKey: material.publicKey,
-    };
-    // A disposed service saves nothing: a successor may already hold its own.
-    if (this.#disposed) return null;
-    // Persisted first, for the reason enrollment persists first: a Burrow running
-    // on an identity no restart can recover is one every paired Client would
-    // have to pair with again after a reboot.
-    await this.#store.saveEnrollment(backfilled);
-    return backfilled;
+    console.warn(
+      `[burrow] the stored Noise static for ${enrollment.burrowId} does not match its public half; ` +
+        'this machine\'s remote-control state is corrupt. Enroll again to replace it.',
+    );
+    return false;
   }
 
-  async #startBurrow(incoming: BurrowEnrollment): Promise<void> {
+  async #startBurrow(enrollment: BurrowEnrollment): Promise<void> {
     if (this.#disposed) return;
-    const enrollment = await this.#enrolledWithNoiseStatic(incoming);
-    if (!enrollment || this.#disposed) return;
+    if (!(await this.#hasUsableNoiseStatic(enrollment)) || this.#disposed) return;
     // Never two. Callers are serialized (see `#serialize`), but a Burrow left in
     // `#burrow` here would be dropped without its socket being closed, so the
     // replacement is explicit rather than implied by the assignment below.
@@ -1625,11 +1606,34 @@ export class BurrowService {
       onInvitationChanged: (inviteId, state, outcome) =>
         this.#emitInvitation(inviteId, state, outcome),
       onPathRefused: (refusal) => this.#recordPathRefusal(refusal),
+      onPolicyRaised: () => this.#persistRaisedPolicy(enrollment),
       probeStanding: () => probeBurrowStanding({ enrollment, fetch: this.#fetch }),
       now: this.#now,
     });
     this.#burrow.start();
     this.#emitStatus();
+  }
+
+  /**
+   * Keep the Relay's raise to user verification across restarts, onto the
+   * enrollment whose Burrow heard it — and only while that is still this
+   * machine's enrollment, so a raise queued behind a clear or a re-enroll
+   * writes nothing. The running Burrow already enforces it; a failed save is
+   * retried by the raise after the next start.
+   */
+  #persistRaisedPolicy(raisedBy: BurrowEnrollment): void {
+    void this.#serialize(async () => {
+      const current = this.#enrollment;
+      if (this.#disposed || current?.burrowToken !== raisedBy.burrowToken) return;
+      const raised = { ...current, requireUserVerification: true };
+      try {
+        await this.#store.saveEnrollment(raised);
+      } catch (error) {
+        console.warn('[burrow] could not persist the Relay\'s user-verification demand', error);
+        return;
+      }
+      this.#enrollment = raised;
+    });
   }
 
   /**
@@ -1730,18 +1734,7 @@ export class BurrowService {
   // --- Pairing queue ---
 
   #enqueuePairing(pending: PendingPairing): void {
-    // Bounded, like the controller's own map: this one is mirrored to the
-    // webview in full on every change, so an unbounded queue costs quadratic
-    // bridge traffic on top of the memory. `BurrowRuntime` evicts on its side too;
-    // both are capped because either can be fed independently, and a cap that
-    // only one of them honors is not a cap.
-    while (this.#pairings.size >= MAX_PENDING_PAIRINGS) {
-      const oldest = this.#pairings.keys().next();
-      if (oldest.done) break;
-      this.#pairings.delete(oldest.value);
-    }
-    // Coalesce by clientId: a re-sent pair for the same client replaces the old.
-    this.#pairings.set(pending.clientId, pending);
+    enqueuePending(this.#pairings, pending);
     this.#emitQueue();
   }
 

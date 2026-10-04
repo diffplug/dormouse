@@ -5,6 +5,7 @@ import { Hono } from "hono";
 import { Miniflare, Response as WorkerResponse } from "miniflare";
 import { createTestContext } from "pgstencil/testing";
 import { queryDatabase } from "pgstencil/postgres";
+import { workerDatabases } from "./worker-roles";
 import {
   API_ROUTES,
   MAX_RELAY_CLIENT_SOCKETS,
@@ -110,6 +111,7 @@ let wsBase: string;
 
 beforeAll(async () => {
   context = await createTestContext({ migrations });
+  const databases = await workerDatabases(context.database.url);
   relay = new Miniflare({
     ...miniflareOptions(
       "relay",
@@ -120,7 +122,7 @@ beforeAll(async () => {
           ACCOUNT_ORIGIN: ORIGINS.account,
           RELAY_ENROLL_SECRET: TEST_ENROLL_SECRET,
         },
-        hyperdrives: { HYPERDRIVE: context.database.url },
+        hyperdrives: { HYPERDRIVE: databases.relay },
         serviceBindings: {
           ASSETS: () =>
             new WorkerResponse("<!doctype html>", { headers: { "content-type": "text/html" } }),

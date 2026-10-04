@@ -20,8 +20,7 @@ The command is dependency-free and advisory. Its thresholds intentionally favor 
 ## Review one cluster
 
 1. Read each spec and its paired rationale. Review every behavior-bearing section, including sections with no advisory hit; follow implementation imports and check both spec claims against code and relevant code branches against the spec.
-2. Inspect every resolved reference. Resolve any reported file-like reference manually; ambiguity often means the pointer itself can be clearer.
-   A `Files` / `Code Map` section should offer useful entrypoints to follow through imports, while section-local `Source of truth:` pointers locate particular rules. Keep both when they serve those distinct jobs; check map paths and role descriptions against code without requiring exhaustive coverage or a map in every spec.
+2. Inspect every resolved reference. Resolve any reported file-like reference manually; ambiguity often means the pointer itself can be clearer. A spec navigates by a `Files` / `Code Map` section or by section-local `Source of truth:` pointers, never both (spec-lint check 9); either names the entrypoints a reader follows through imports. Check map paths and role descriptions against code without requiring exhaustive coverage or a map in every spec.
 3. Give each hit one disposition:
 
    - `KEEP` — a non-obvious invariant or local constraint is already at its useful home.
@@ -30,6 +29,8 @@ The command is dependency-free and advisory. Its thresholds intentionally favor 
    - `RATIONALE` — move durable evidence or rejected alternatives under the paired heading.
    - `MATRIX` — merge parallel cases into one table, precedence ladder, or flow.
    - `CANONICAL` — let generated help, a type, constant, registry, or test own an exact shape.
+
+   A `PRESENTATION` hit — a size, duration, or ratio in a spec's prose or tables — is `CUT` to the code that carries it unless a peer, another deploy, or an older build must agree with it (AGENTS.md -> "What stays").
 
 4. Apply only high-confidence edits. Preserve invariants, edge cases, message direction, cross-package ownership, and the `## Future` fold.
 5. Run `node scripts/spec-lint.mjs`, relevant focused tests, and `git diff --check`. Re-baseline a changed spec with `node scripts/spec-lint.mjs --ratchet <spec>`.

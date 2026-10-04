@@ -21,6 +21,7 @@ import type { AlertSink } from '../lib/alert-delivery-model';
 import { SettingsPreview } from './SettingsPreview';
 import { Door } from './Door';
 import { OneTimeIndicator } from './OneTimeIndicator';
+import { RetainedPagesIndicator } from './RetainedPagesIndicator';
 import { DoorElementsContext, SelectedIdContext, useDialogKeyboardOwner } from './wall/wall-context';
 import type { DoorChip, DooredItem } from './wall/wall-types';
 import { IS_MAC } from '../lib/platform';
@@ -337,7 +338,8 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
       ref={containerRef}
       className="flex h-7 shrink-0 items-end gap-1.5 bg-app-bg px-1.75 pt-1"
     >
-      {/* Hidden measurement pass — doors + the widest overflow arrow */}
+      {/* Hidden measurement pass — doors + the widest overflow arrow. Overflow
+          counts are assumed single-digit, so `9` measures every arrow. */}
       <div ref={measureEl} className="absolute -left-[9999px] flex gap-1.5" aria-hidden>
         {items.map(item => <Door key={item.id} {...doorProps(item)} />)}
       </div>
@@ -376,6 +378,8 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
         )}
 
         <div ref={rightClusterEl} className="flex shrink-0 items-end gap-1.5">
+          <RetainedPagesIndicator count={items.filter((item) => item.livePage).length} />
+
           {notice}
 
           <OneTimeIndicator />

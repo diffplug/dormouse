@@ -13,7 +13,7 @@ const clipboard = require('./clipboard-ops');
 const { createDorControlServer } = require('./dor-control-server');
 // Built from lib/src/host/iframe-proxy.ts (shared with the VS Code host) by
 // scripts/build-sidecar-proxy.mjs. See docs/specs/dor-browser.md.
-const { createIframeProxyUrl } = require('./iframe-proxy.cjs');
+const { createIframeProxyUrl, releaseIframeProxyLease, retainIframeProxyOwners } = require('./iframe-proxy.cjs');
 const { createToolHost } = require('./tool-host.cjs');
 const { gitInfo } = require('./git-info.cjs');
 // Same pattern: lib/src/host/browser-host.ts is the single source of truth for
@@ -95,13 +95,15 @@ const toolHost = createToolHost({ stateDir: process.env.DORMOUSE_STATE_DIR });
 // there and go back only once the channel is actually listening. A lost bind
 // (a squatted Windows pipe name, an unsafe socket directory) is not fatal to
 // PTY work, but it must not leave Dormouse handing the token, and the surface
-// API it opens, to whoever won the path. See docs/specs/dor-cli.md.
+// API it opens, to whoever won the path. See docs/specs/security-local.md ->
+// "The dor control socket".
 const dorControlToken = process.env.DORMOUSE_CONTROL_TOKEN;
 delete process.env.DORMOUSE_CONTROL_TOKEN;
 delete process.env.DORMOUSE_CONTROL_SOCKET;
 
 const dorControl = createDorControlServer({
   token: dorControlToken,
+  getHelperParentId: mgr.getHelperParentId,
   send,
 });
 
@@ -154,7 +156,12 @@ rl.on('line', (line) => {
 function handleLine(line) {
   try {
     const { event, data } = JSON.parse(line);
-    // The PTY lifecycle and I/O, the alerts and the Burrow.
+    // A closed window's iframe views are gone with it: end their leases. The
+    // shared host takes the same event for the Burrow and the alerts.
+    if (event === 'burrow:windows' && Array.isArray(data?.labels)) retainIframeProxyOwners(data.labels.filter((label) => typeof label === 'string'));
+    // The PTY lifecycle and I/O, the alerts and the Burrow. Offered every line
+    // before the switch below: the host owns the PTY commands the alerts must
+    // see, every alert, Burrow and managed-voice command, and the theme push.
     if (host.handleCommand(event, data)) return;
     switch (event) {
       case 'pty:mark': mgr.mark(data?.ids, data?.requestId); break;
@@ -175,7 +182,8 @@ function handleLine(line) {
           recovery.beginCapture();
           const count = await captureAgentRecovery({
             liveIds: () => mgr.liveIds(),
-            // One press, and the caller decides about a second: `mgr.interrupt`
+            resize: (id, cols, rows) => mgr.resize(id, cols, rows),
+            // One press, and the caller decides about any more: `mgr.interrupt`
             // writes synchronously, so the ack is immediate.
             interrupt: async (ids) => { mgr.interrupt(ids); },
             receivedChars: (id) => mgr.receivedChars(id),
@@ -215,8 +223,13 @@ function handleLine(line) {
             // Validated inside the proxy (`normalizeEmbedderOrigins`); an
             // unusable chain costs the shim, never a wider grant.
             embedderOrigins: data.embedderOrigins,
+            // Owner stamped by Rust: the asking window.
+            lease: data.lease,
           }),
         }));
+        break;
+      case 'iframe:releaseProxy':
+        if (typeof data?.owner === 'string') releaseIframeProxyLease(data.owner, typeof data.id === 'string' ? data.id : undefined);
         break;
       case 'browser:request':
         // Frames never ride this JSON-lines stdio, which PTY traffic shares:
@@ -254,7 +267,8 @@ async function shutdown() {
   shuttingDown = true;
   // Close any headed pop-out windows so quitting never orphans a real Chrome
   // window (spec → "Pop-Out" lifecycle). Bounded so a hung agent-browser
-  // can't wedge the exit; mirrors the VS Code host's deactivate().
+  // can't wedge the exit; mirrors the VS Code host's deactivate(). Must stay
+  // inside Rust's `shutdown_sidecar_and_wait` grace (~2.5s) in lib.rs.
   try {
     await Promise.race([
       browserHost.close(),

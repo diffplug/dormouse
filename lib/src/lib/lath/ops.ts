@@ -23,7 +23,10 @@ import {
   replaceAtPath,
   structureFingerprint,
 } from './model';
-import { type LayoutOpts, autoEdge, minSpan, nodeRectAtPath } from './layout';
+import { type LayoutOpts, allocateChildSpans, autoEdge, minSpan, nodeRectAtPath } from './layout';
+
+import { type DropTarget, materializeTarget, targetByLeafSet } from './drop-target';
+export type { DropTarget } from './drop-target';
 
 type SplitNode = Extract<LathNode, { kind: 'split' }>;
 
@@ -52,11 +55,6 @@ export type RestoreToken = {
   fingerprint: string | null;
 };
 
-/** A resolved drop, produced by hit-testing. */
-export type DropTarget =
-  | { kind: 'edge'; path: number[]; edge: Edge }
-  | { kind: 'swap'; leaf: LeafId };
-
 function mkLeaf(id: LeafId): LathNode {
   return { kind: 'leaf', id };
 }
@@ -70,26 +68,6 @@ function findSplitPathByFingerprint(tree: LathTree, fingerprint: string): number
       return;
     }
     node.children.forEach((child, i) => walk(child.node, [...path, i]));
-  };
-  if (tree.root) walk(tree.root, []);
-  return result;
-}
-
-function findPathByLeafSet(tree: LathTree, target: Set<LeafId>): number[] | null {
-  if (target.size === 0) return null;
-  let result: number[] | null = null;
-  const eq = (s: Set<LeafId>): boolean => s.size === target.size && [...s].every((x) => target.has(x));
-  const walk = (node: LathNode, path: number[]): Set<LeafId> => {
-    let set: Set<LeafId>;
-    if (node.kind === 'leaf') set = new Set([node.id]);
-    else {
-      set = new Set();
-      node.children.forEach((c, i) => {
-        for (const id of walk(c.node, [...path, i])) set.add(id);
-      });
-    }
-    if (eq(set) && (result === null || path.length < result.length)) result = path;
-    return set;
   };
   if (tree.root) walk(tree.root, []);
   return result;
@@ -203,11 +181,12 @@ export function restore(
     }
 
     if (token.siblingLeafIds && token.siblingLeafIds.length > 1 && token.siblingFingerprint) {
-      const siblingPath = findPathByLeafSet(tree, new Set(token.siblingLeafIds));
-      if (siblingPath !== null) {
-        const sibling = nodeAtPath(tree, siblingPath);
+      const siblingTarget = targetByLeafSet(tree, new Set(token.siblingLeafIds), token.edge);
+      const resolved = siblingTarget && materializeTarget(tree, siblingTarget);
+      if (resolved) {
+        const sibling = nodeAtPath(resolved.tree, resolved.path);
         if (sibling && structureFingerprint(sibling) === token.siblingFingerprint) {
-          const r = insert(tree, token.leafId, { kind: 'edge', path: siblingPath, edge: token.edge }, token.weight);
+          const r = insert(tree, token.leafId, siblingTarget, token.weight);
           if (r.ok) return { tree: r.tree, ok: true, tier: 'exact' };
         }
       }
@@ -252,12 +231,15 @@ export function swap(tree: LathTree, a: LeafId, b: LeafId): { tree: LathTree; ok
   return { tree: { root }, ok: true };
 }
 
-/** Insert leaf `newId` (raw weight `w`, the moved leaf's carried weight) beside the
- *  node at `targetPath`, at that node's parent level. Sibling insert when the parent
- *  runs along the edge axis (renormalized alongside current siblings); otherwise nest
- *  the target under a new split (target keeps the `1 - w` complement). `normalize`
- *  extends/flattens as directions dictate. */
-function insertBesideNode(tree: LathTree, targetPath: number[], edge: Edge, newId: LeafId, w: number): LathTree {
+/** Insert leaf `newId` (weight `w`) beside the node at `targetPath`, at that node's
+ *  parent level. Sibling insert when the parent runs along the edge axis: renormalized
+ *  alongside the current siblings, or with `keepSiblings` the siblings share the
+ *  remaining `1 - w` (a reorder within the leaf's own split). Otherwise nest the target
+ *  under a new split (target keeps the `1 - w` complement). `normalize` extends/flattens
+ *  as directions dictate. */
+function insertBesideNode(
+  tree: LathTree, targetPath: number[], edge: Edge, newId: LeafId, w: number, keepSiblings = false,
+): LathTree {
   const axis = edgeAxis(edge);
   const before = edgeIsBefore(edge);
   const newLeaf = mkLeaf(newId);
@@ -278,7 +260,8 @@ function insertBesideNode(tree: LathTree, targetPath: number[], edge: Edge, newI
   const idx = targetPath[targetPath.length - 1];
   const parent = nodeAtPath(tree, parentPath);
   if (parent && parent.kind === 'split' && parent.dir === axis) {
-    const children = parent.children.slice();
+    const scale = keepSiblings ? 1 - w : 1;
+    const children = parent.children.map((child) => ({ node: child.node, weight: child.weight * scale }));
     children.splice(before ? idx : idx + 1, 0, { node: newLeaf, weight: w });
     const newParent: LathNode = { kind: 'split', dir: axis, children: normalizeWeights(children) };
     return { root: normalize(replaceAtPath(root, parentPath, newParent)) };
@@ -302,20 +285,32 @@ function insertBesideNode(tree: LathTree, targetPath: number[], edge: Edge, newI
  *  public half of `move`: `move` = weight + `remove` + re-find path + `insert`. A
  *  `swap` target, an already-present `id`, an empty tree, or a path off the tree all
  *  reject with `ok: false`. The weight is clamped into `(0, 1)` so any caller value
- *  yields a valid tree. */
+ *  except NaN yields a valid tree; NaN is rejected. */
 export function insert(
   tree: LathTree,
   id: LeafId,
   target: DropTarget,
   weight = 0.5,
 ): { tree: LathTree; ok: boolean } {
-  if (target.kind === 'swap') return { tree, ok: false };
+  return insertImpl(tree, id, target, weight, false);
+}
+
+function insertImpl(
+  tree: LathTree, id: LeafId, target: DropTarget, weight: number, keepSiblings: boolean,
+): { tree: LathTree; ok: boolean } {
+  if (target.kind === 'swap' || Number.isNaN(weight)) return { tree, ok: false };
   if (tree.root === null) return { tree, ok: false };
   if (findLeafPath(tree, id) !== null) return { tree, ok: false };
-  if (nodeAtPath(tree, target.path) === null) return { tree, ok: false };
+  const resolved = materializeTarget(tree, target);
+  if (!resolved) return { tree, ok: false };
   const eps = 1e-6;
   const w = Math.min(Math.max(weight, eps), 1 - eps);
-  return { tree: insertBesideNode(tree, target.path, target.edge, id, w), ok: true };
+  return { tree: insertBesideNode(resolved.tree, resolved.path, target.edge, id, w, keepSiblings), ok: true };
+}
+
+function sameLeafSet(a: LeafId[], b: LeafId[]): boolean {
+  const set = new Set(b);
+  return a.length === set.size && a.every((l) => set.has(l));
 }
 
 /** Move a leaf to a drop target as one op (no token). A `swap` target defers to
@@ -330,34 +325,35 @@ export function move(tree: LathTree, id: LeafId, target: DropTarget): { tree: La
 
   const idPath = findLeafPath(tree, id);
   if (idPath === null) return { tree, ok: false };
-  const targetNode = nodeAtPath(tree, target.path);
-  if (targetNode === null) return { tree, ok: false };
+  const resolved = materializeTarget(tree, target);
+  if (!resolved) return { tree, ok: false };
+  const targetNode = nodeAtPath(resolved.tree, resolved.path)!;
 
   const targetLeaves = leaves({ root: targetNode });
   // The dragged leaf is the whole target subtree / its only descendant leaf — nothing to be beside.
   if (targetLeaves.length === 1 && targetLeaves[0] === id) return { tree, ok: false };
 
-  const w = idPath.length === 0 ? 1 : (nodeAtPath(tree, idPath.slice(0, -1)) as SplitNode).children[idPath[idPath.length - 1]].weight;
+  const parent = idPath.length === 0 ? null : (nodeAtPath(tree, idPath.slice(0, -1)) as SplitNode);
+  const w = parent ? parent.children[idPath[idPath.length - 1]].weight : 1;
 
   const t2 = remove(tree, id).tree;
 
   const targetSet = new Set(targetLeaves.filter((l) => l !== id));
-  let insertPath = findPathByLeafSet(t2, targetSet);
-  if (insertPath === null) {
-    // Rare: the target subtree dissolved (its split flattened as the removal collapsed a
-    // neighbor). Degrade to inserting beside the target's first surviving leaf.
-    const anchor = targetLeaves.find((l) => l !== id);
-    insertPath = anchor !== undefined ? findLeafPath(t2, anchor) : null;
-    if (insertPath === null) return { tree, ok: false };
-  }
-
-  const r = insert(t2, id, { kind: 'edge', path: insertPath, edge: target.edge }, w);
+  const destination = targetByLeafSet(t2, targetSet, target.edge);
+  if (!destination) return { tree, ok: false };
+  // Back into its own split: the siblings keep their proportions, so a reorder or a drop
+  // at the leaf's existing boundary changes no other pane. Elsewhere it shares as an insert.
+  const at = materializeTarget(t2, destination);
+  const container = at && at.path.length > 0 ? nodeAtPath(at.tree, at.path.slice(0, -1)) : null;
+  const ownSplit = parent !== null && container?.kind === 'split' && container.dir === parent.dir
+    && sameLeafSet(leaves({ root: container }), leaves({ root: parent }).filter((l) => l !== id));
+  const r = insertImpl(t2, id, destination, w, ownSplit);
   return r.ok ? r : { tree, ok: false };
 }
 
-/** Adjust the two weights adjacent to `boundary` (children `boundary` and
- *  `boundary + 1`) of the split at `splitPath` by `deltaPx`, converted through the
- *  split's laid-out available span. The delta clamps to the feasible range (neither
+/** Move the visible sash adjacent to `boundary` (children `boundary` and
+ *  `boundary + 1`) at `splitPath` by `deltaPx`, rebasing the split on its rendered
+ *  child spans so minimum clamping cannot redistribute the motion. The delta clamps to the feasible range (neither
  *  child below its recursive `minSpan`) rather than failing; a fully-clamped no-op is
  *  still `ok: true`. Streams during a sash drag — pass the ORIGINAL tree each frame
  *  with a cumulative delta and commit the final result on pointerup. Invalid path,
@@ -372,7 +368,9 @@ export function resize(
 ): { tree: LathTree; ok: boolean } {
   const node = nodeAtPath(tree, splitPath);
   if (!node || node.kind !== 'split') return { tree, ok: false };
-  if (boundary < 0 || boundary >= node.children.length - 1) return { tree, ok: false };
+  if (!Number.isInteger(boundary) || boundary < 0 || boundary >= node.children.length - 1 || !Number.isFinite(deltaPx)) {
+    return { tree, ok: false };
+  }
 
   const splitRect = nodeRectAtPath(tree, rect, opts, splitPath);
   if (!splitRect) return { tree, ok: false };
@@ -380,32 +378,29 @@ export function resize(
   const available = span - opts.gap * (node.children.length - 1);
   if (available <= 0) return { tree, ok: false };
 
+  // Resize the boundary the user can SEE. Stored weights may differ from the
+  // waterfilled, pixel-rounded allocation; applying a delta to them causes dead
+  // travel at a minimum and makes unrelated boundaries jump.
+  const spans = allocateChildSpans(node.children, span, opts, node.dir);
   const a = boundary;
   const b = boundary + 1;
-  const wa = node.children[a].weight;
-  const wb = node.children[b].weight;
-  const pairSum = wa + wb;
-  const minA = minSpan(node.children[a].node, node.dir, opts) / available;
-  const minB = minSpan(node.children[b].node, node.dir, opts) / available;
-
-  let newWa: number;
+  const pairSpan = spans[a] + spans[b];
+  const minA = minSpan(node.children[a].node, node.dir, opts);
+  const minB = minSpan(node.children[b].node, node.dir, opts);
   const lo = minA;
-  const hi = pairSum - minB;
-  if (lo > hi) {
-    // Neither min fits in the pair's budget — split proportionally to the mins.
-    newWa = minA + minB > 0 ? pairSum * (minA / (minA + minB)) : pairSum / 2;
-  } else {
-    newWa = Math.min(Math.max(wa + deltaPx / available, lo), hi);
-  }
-  // A `minLeaf` of 0 permits a 0px child, but the tree's weight > 0 invariant does
-  // not — keep both weights strictly positive (they still round to 0px in layout).
-  const eps = 1e-4 * pairSum;
-  newWa = Math.min(Math.max(newWa, eps), pairSum - eps);
-  const newWb = pairSum - newWa;
-
-  const children = node.children.slice();
-  children[a] = { node: node.children[a].node, weight: newWa };
-  children[b] = { node: node.children[b].node, weight: newWb };
+  const hi = pairSpan - minB;
+  // In an overconstrained pair the layout already owns the min-proportional
+  // allocation. A clamped/no-motion gesture must not change its stored proportions.
+  const nextA = lo <= hi ? Math.min(Math.max(spans[a] + deltaPx, lo), hi) : spans[a];
+  if (nextA === spans[a]) return { tree: { root: tree.root }, ok: true };
+  spans[a] = nextA;
+  spans[b] = pairSpan - nextA;
+  // Rebase this split on its visible allocation so waterfill cannot redistribute
+  // the drag into a third child. A zero-pixel pane retains a positive weight.
+  const children = normalizeWeights(node.children.map((child, i) => ({
+    node: child.node,
+    weight: Math.max(spans[i], 1e-6),
+  })));
   const newNode: LathNode = { kind: 'split', dir: node.dir, children };
   return { tree: { root: normalize(replaceAtPath(tree.root as LathNode, splitPath, newNode)) }, ok: true };
 }

@@ -18,8 +18,8 @@ import {
 } from './quit-confirm-store';
 
 /**
- * The window-close and quit teardown dialog (docs/specs/standalone.md §Quit
- * flow, "Confirmation dialog"): the typed-letter confirmation, the progress
+ * The window-close and quit teardown dialog (docs/specs/standalone.md -> "Quit
+ * protocol"): the typed-letter confirmation, the progress
  * overlay. Mounted through Wall's
  * `dialogHost` slot. Command-mode suppression is the store's chrome keyboard
  * lease, held for every phase. Store-connected shell + presentational modal,
@@ -56,7 +56,8 @@ export function WorkspaceTeardownModal({
   intent?: QuitConfirmIntent;
 }) {
   const progressRef = useRef<HTMLParagraphElement>(null);
-  // Live count — the dialog stays open even if it drops to 0 (see spec).
+  // Live count. The dialog stays open even if it drops to 0: a zero count
+  // never closes it by itself.
   const { requester } = intent;
   const getRunningCount = useCallback(() => quitRunningWork({ requester }), [requester]);
   const runningCount = useSyncExternalStore(subscribeToTerminalPaneState, getRunningCount);
@@ -74,7 +75,10 @@ export function WorkspaceTeardownModal({
   }
   const names = workspaceNames.join(', ');
   const scope = names ? `Workspaces: ${names}. ` : '';
-  const count = hasRunning ? `${runningCount} running command${runningCount === 1 ? '' : 's'} will be stopped.` : 'No commands are still running.';
+  // A window close with nothing running may still ask because Reopen could not
+  // bring it back: a shell someone typed into, or a Surface no reopen rebuilds.
+  const idle = intent.unreopenable ? 'Reopen cannot bring this window back.' : 'No commands are still running.';
+  const count = hasRunning ? `${runningCount} running command${runningCount === 1 ? '' : 's'} will be stopped.` : idle;
   const update = intent.discardsUpdate ? ' The downloaded update will be discarded.' : '';
   // A quit captures agent resumes; a window close ends its Sessions for good.
   const resume = intent.kind === 'quit' ? ' Supported agent sessions resume when Dormouse reopens.' : '';

@@ -300,15 +300,17 @@ describe('folder rules and preview handlers', () => {
   const rules = (...lines: string[]) => parse(`${VIEWER}open:\n${lines.map(line => `  - ${line}\n`).join('')}`, USER).open;
 
   it('accepts the built-in handler of each rule\'s kind, for its tool and its preview', () => {
-    expect(rules('{match: "*.📁", tool: "builtin:folder", preview: viewer}', '{match: "*.md", tool: viewer, preview: "builtin:file"}')).toEqual([
+    expect(rules('{match: "*.📁", tool: "builtin:folder", preview: viewer}', '{match: "*.md", tool: viewer, preview: "builtin:file"}', '{match: "*.html", tool: "builtin:code"}')).toEqual([
       { match: '*.📁', tool: 'builtin:folder', preview: 'viewer' },
       { match: '*.md', tool: 'viewer', preview: 'builtin:file' },
+      { match: '*.html', tool: 'builtin:code' },
     ]);
   });
 
   it.each([
     ['{match: "*.📁", tool: "builtin:file"}', "open rule '*.📁' names builtin:file as its tool, which opens files, but a pattern ending in .📁 matches only folders"],
     ['{match: "*.📁", tool: viewer, preview: "builtin:file"}', "open rule '*.📁' names builtin:file as its preview"],
+    ['{match: "*.📁", tool: "builtin:code"}', "open rule '*.📁' names builtin:code as its tool, which opens files"],
     ['{match: "*", tool: "builtin:folder"}', "open rule '*' names builtin:folder as its tool, which opens folders, but only a pattern ending in .📁 matches folders"],
     ['{match: "*.md", tool: viewer, preview: "builtin:folder"}', "open rule '*.md' names builtin:folder as its preview"],
   ])('rejects a built-in handler of the other kind: %s', (rule, message) => {

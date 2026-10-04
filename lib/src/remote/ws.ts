@@ -39,19 +39,15 @@ export const realTimer: RemoteTimer = (run, delayMs) => {
 /**
  * A relay socket's heartbeat (`docs/specs/relay.md` -> "Routing"): a
  * {@link RELAY_PING} every {@link RELAY_PING_INTERVAL_MS} while it runs. With
- * `onDead`, once a pong has arrived on the socket, a ping still unanswered when
- * the next one is due ends the socket through it; until then nothing is
- * enforced, so a Relay that never answers costs nothing. Without `onDead` it
- * only keeps the path alive: a one-time rendezvous is bounded by its own
- * deadlines.
+ * `onDead`, a ping still unanswered when the next one is due ends the socket
+ * through it. Without `onDead` it only keeps the path alive: a one-time
+ * rendezvous is bounded by its own deadlines.
  */
 export class RelayHeartbeat {
   readonly #ws: RemoteWebSocket;
   readonly #setTimer: RemoteTimer;
   readonly #onDead: (() => void) | null;
   #cancel: (() => void) | null = null;
-  /** A pong has arrived on this socket: from now on each ping must be answered. */
-  #enforced = false;
   #answered = true;
 
   constructor(ws: RemoteWebSocket, setTimer: RemoteTimer, onDead?: () => void) {
@@ -67,7 +63,6 @@ export class RelayHeartbeat {
    */
   read(data: unknown): boolean {
     if (data !== RELAY_PONG) return false;
-    this.#enforced = true;
     this.#answered = true;
     return true;
   }
@@ -90,7 +85,7 @@ export class RelayHeartbeat {
   #arm(): void {
     this.#cancel = this.#setTimer(() => {
       this.#cancel = null;
-      if (this.#onDead && this.#enforced && !this.#answered) {
+      if (this.#onDead && !this.#answered) {
         this.#onDead();
         return;
       }

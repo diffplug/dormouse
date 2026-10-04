@@ -1,10 +1,11 @@
 import { moveSurface } from './surface-move';
+import { clearHoldLapse, holdForHostInterrupt } from '../../lib/tool-run-hold';
 import { recordToolDirty } from '../../lib/tool-dirty-store';
 import { createSerialQueue } from '../../host/remote/serial-queue';
 import { useCallback, useEffect, useRef, type MutableRefObject } from 'react';
 import { getPlatform, PLATFORM_STRING } from '../../lib/platform';
 import { currentWindowRef, getActiveWorkspaceId } from '../../lib/workspace-store';
-import type { WorkspaceId } from '../../lib/session-types';
+import { DEFAULT_WORKSPACE_ID, type WorkspaceId } from '../../lib/session-types';
 import type { DorControlRequestPayload, DorControlResult } from 'dor/protocol';
 import { SURFACE_CONTROL_METHODS, unsupportedControlMethodMessage } from 'dor/protocol';
 import type {
@@ -17,6 +18,7 @@ import type {
 } from 'dor/commands/types';
 import { hasBrowser, hasTerminal, PREVIEW_SUPERSEDED_ERROR } from 'dor/commands/types';
 import { MAX_AWAIT_TIMEOUT_MS } from '../../lib/alert-manager';
+import { pendingSurfaceRefusal } from '../../lib/pending-kills';
 import type { OpenPort, PtyDataDetail } from '../../lib/platform/types';
 import type { ToolKeyScope, ToolRender } from '../../lib/platform/tool-types';
 import { buildShellCommandForKind, hasShellInputControls, shellCommandKind } from 'dor/commands/shell-quote';
@@ -27,6 +29,7 @@ import {
   getTerminalPaneState,
   getTerminalShellKind,
   isPaneOscDriven,
+  markSessionTouched,
   subscribeToTerminalPaneState,
 } from '../../lib/terminal-registry';
 import { stripTerminalControls } from '../../lib/terminal-controls';
@@ -38,8 +41,6 @@ import { errorText, stringParam } from './dor-control-shared';
 import { getAgentBrowserSurfaceController, handOverBrowserStream } from './agent-browser-surface-controller';
 import {
   callerStillPlaceable,
-  callerStillRunnable,
-  toolRerunsInCaller,
   toolTakesOverCaller,
   type ToolTakeoverGate,
 } from './tool-takeover';
@@ -76,6 +77,7 @@ import { listenerUrlsByPort } from './port-url';
 import { becomeToolMeta, dorDirectionForEdge, toolLeafMeta, type LathWallEngine } from './lath-wall-engine';
 import type { WallNav } from './keyboard/types';
 import { toolCommandFromParams } from '../../lib/session-save';
+import { rehydrateTool } from './tool-reaper';
 import { VIEW_ERROR_ARGV } from 'dor-tools-builtin/file-viewer-format';
 import type { LeafMeta } from '../../lib/lath/persistence';
 import type { DooredItem } from './wall-types';
@@ -119,6 +121,8 @@ export type DorControlParams = {
   args?: unknown;
   global?: unknown;
   file?: unknown;
+  /** `tool.openHandlers`: the file the picker asks about. */
+  target?: unknown;
   tool?: unknown;
   setting?: unknown;
   initialViewport?: unknown;
@@ -142,6 +146,9 @@ export type DorControlRequest = Omit<DorControlRequestPayload, 'params'> & {
    *  may make and whose failure shows in the preview slot. Never set by a
    *  control-socket request. */
   oscOpen?: true;
+  /** The default placement reference when it is not the caller: a helper's
+   *  source this Wall holds (`requestForWall` in `dor-control-shared.ts`). */
+  placementSurfaceId?: string;
 };
 
 /** Outcome of {@link EnsureBrowserSurface}: the fields the caller maps onto
@@ -169,6 +176,7 @@ type EnsureBrowserSurface = (args: {
    *  terminal refreshing an existing surface). */
   reference: () => ParseResult<DorSurface>;
   minimized?: boolean;
+  preserveSource?: boolean;
 }) => EnsureBrowserSurfaceResult;
 
 /**
@@ -253,10 +261,11 @@ function resolveSurfaceTarget(
   surfaces: DorSurface[],
   target: string | undefined,
   callerSurfaceId: string | undefined,
+  workspaceId: WorkspaceId,
 ): ParseResult<DorSurface> {
   // A caller this Wall does not hold never reaches here as one: the router
-  // drops it before dispatching (`dor-control-router.ts`), so an omitted target
-  // falls back to this Workspace's focused Surface.
+  // drops it before dispatching (`requestForWall`), so an omitted target falls
+  // back to this Workspace's focused Surface.
   const resolvedTarget = target ?? callerSurfaceId ?? 'surface:focused';
   const classified = classifySurfaceTarget(resolvedTarget);
   const matches = surfaces.filter((surface) => matchesTarget(classified, surface, callerSurfaceId));
@@ -269,7 +278,9 @@ function resolveSurfaceTarget(
   }
   const fallback = !target && !callerSurfaceId ? (surfaces[0] ?? null) : null;
   if (fallback) return { ok: true, value: fallback };
-  return { ok: false, message: `surface '${resolvedTarget}' was not found` };
+  const named = classified.kind === 'ref' ? { ref: classified.ref } : classified.kind === 'stable' ? { id: classified.id } : null;
+  const pending = named && pendingSurfaceRefusal(resolvedTarget, named, workspaceId);
+  return { ok: false, message: pending ?? `surface '${resolvedTarget}' was not found` };
 }
 
 function booleanParam(value: unknown): boolean {
@@ -454,6 +465,10 @@ async function interruptToPrompt(id: string, signal?: AbortSignal, timeoutMs = P
   // it guarantees we never fire Ctrl+C into a non-integration shell (e.g. cmd.exe
   // popping `Terminate batch job (Y/N)?`).
   if (!isPaneOscDriven(id)) return { ok: false, message: 'has no Dormouse shell integration to restart' };
+  // The interrupt is the host's own doing: never a command-exit ring or a
+  // push, and never the end of a Tool's designation (docs/specs/dor-tool.md ->
+  // Run end) until the host gives up on a successor.
+  holdForHostInterrupt(id);
   getPlatform().writePty(id, '\x03');
   const interrupted = await waitForTerminalState(
     id,
@@ -492,9 +507,7 @@ export async function restartSurfaceInPlace(
  * The take-over handshake (docs/specs/dor-tool.md -> Take-over): `dor` is the
  * pane's foreground process until the host answers it, so the command can only
  * be typed once its own shell is back at a prompt. A shell that never comes back
- * — or a pane killed while we wait — is left exactly as it was. Shared by the
- * take-over, which transforms the pane on the way in, and a keyed re-run in the
- * tool's own pane, which does not.
+ * — or a pane killed while we wait — is left exactly as it was.
  */
 async function runToolInCallerPane(
   lath: LathWallEngine,
@@ -502,9 +515,8 @@ async function runToolInCallerPane(
   tool: {
     command: string;
     cwd: string;
-    /** The tool leaf to become — omitted when the pane already is this tool and
-     *  is only re-running it. */
-    become?: { title: string; params: Record<string, unknown> };
+    /** The tool leaf the pane becomes. */
+    become: { title: string; params: Record<string, unknown> };
   },
   /** Re-read after the wait, not only before it: the Workspace can close or
    *  transfer and the pane can be killed, minimized, or moved while `dor` exits. */
@@ -522,7 +534,9 @@ async function runToolInCallerPane(
   // Whatever this Session framed or announced under its previous command is not
   // this run's: a stale OSC 367 would hand the tool that port, or re-key it.
   retireToolRun(lath, id);
-  if (tool.become) lath.store.setMeta(id, becomeToolMeta(meta, tool.become.title, tool.become.params));
+  // A lapse an earlier host restart left speaks for no Tool this pane becomes.
+  clearHoldLapse(id);
+  lath.store.setMeta(id, becomeToolMeta(meta, tool.become.title, tool.become.params));
   await typeToolCommand(id, tool.command, tool.cwd, signal);
 }
 
@@ -664,7 +678,7 @@ export function useDorControl({
      *  terminal but renders both capabilities. */
     leafMeta?: LeafMeta;
     /** Create the leaf but stage no shell and spawn no PTY — a pane awaiting
-     *  approval (docs/specs/dor-tool.md -> Trust rule 3). */
+     *  approval (docs/specs/dor-tool.md -> Trust rule 2). */
     deferTerminal?: boolean;
     /** Lay the leaf out even beside a Door reference, which otherwise makes
      *  it a Door. */
@@ -676,6 +690,7 @@ export function useDorControl({
     reference: DorSurface;
     title: string;
     focusNeutral?: boolean;
+    preserveSource?: boolean;
   }) => ParseResult<{ id: string; ref: string; status: 'created' | 'replaced' }>;
   /** A Wall closure in flight. */
   isClosingSurface: (id: string) => boolean;
@@ -714,12 +729,12 @@ export function useDorControl({
   const resolveVisibleSurface = useCallback((
     target: string | undefined,
     callerSurfaceId: string | undefined,
-  ): ParseResult<DorSurface> => resolveSurfaceTarget(buildDorSurfaces(), target, callerSurfaceId), [buildDorSurfaces]);
+  ): ParseResult<DorSurface> => resolveSurfaceTarget(buildDorSurfaces(), target, callerSurfaceId, workspaceScope() ?? DEFAULT_WORKSPACE_ID), [buildDorSurfaces, workspaceScope]);
 
   const resolveListedSurface = useCallback((
     target: string | undefined,
     callerSurfaceId: string | undefined,
-  ): ParseResult<DorSurface> => resolveSurfaceTarget(buildDorSurfaceList(), target, callerSurfaceId), [buildDorSurfaceList]);
+  ): ParseResult<DorSurface> => resolveSurfaceTarget(buildDorSurfaceList(), target, callerSurfaceId, workspaceScope() ?? DEFAULT_WORKSPACE_ID), [buildDorSurfaceList, workspaceScope]);
 
   // The shared prelude of every handler that acts on an existing surface
   // (send / read / await / kill / resolve*): a target surface is required and
@@ -966,6 +981,7 @@ export function useDorControl({
     initialViewport,
     reference,
     minimized = false,
+    preserveSource,
   }) => {
     const refreshedParams = {
       nativeIdentity,
@@ -1011,6 +1027,7 @@ export function useDorControl({
         ...refreshedParams,
       },
       reference: target.value,
+      preserveSource,
       title,
       // `dor agent-browser` opens the screencast in the background; caller keeps focus.
       focusNeutral: true,
@@ -1040,10 +1057,25 @@ export function useDorControl({
       return;
     }
 
+    // New work goes beside the target, else the caller or a helper's source,
+    // else focus. A source that is hidden, or disappears while lookup waits,
+    // fails rather than falling back to focus, as does a closing target.
+    const resolvePlacement = (resolve: typeof resolveListedSurface): ParseResult<DorSurface> => {
+      const explicit = stringParam(params.surface);
+      const result = resolve(explicit ?? detail.placementSurfaceId, detail.surfaceId);
+      if (!result.ok && explicit === undefined && detail.placementSurfaceId) {
+        return { ok: false, message: 'The helper source Surface is not available for placement' };
+      }
+      if (result.ok && !isTargetable(result.value.id)) {
+        return { ok: false, message: 'The placement Surface is closing' };
+      }
+      return result;
+    };
+
     // Resolve the split reference surface across listed Surfaces. A minimized
     // reference is valid: the Wall creates the new split as a sibling Door.
     const resolveSplitTarget = () => {
-      const target = resolveListedSurface(stringParam(params.surface), detail.surfaceId);
+      const target = resolvePlacement(resolveListedSurface);
       if (!target.ok) {
         detail.respond({ ok: false, error: target.message });
         return null;
@@ -1093,6 +1125,8 @@ export function useDorControl({
         direction,
         minimized: booleanParam(params.minimized),
         reference: resolved.target,
+        // The invoking directory, like `dor ensure`; `--surface` only places.
+        cwd: stringParam(params.cwd),
         // The CLI computes the focus intent — a bare `dor split` steals focus;
         // a `--` tail or an initial command does not — and sends it as
         // focusNeutral. Honor it.
@@ -1272,6 +1306,7 @@ export function useDorControl({
             case 'trust-recorded':
             case 'browser-config':
             case 'list':
+            case 'open-handlers':
               // Only the ops that ask for these produce them; a lookup never does.
               detail.respond({ ok: false, error: 'unexpected tool host response' });
               return;
@@ -1361,7 +1396,7 @@ export function useDorControl({
                 focusNeutral: true,
                 // No shell until a human approves: `createSplitSurface` would
                 // otherwise stage shell opts and, on some paths, spawn the PTY
-                // outright (docs/specs/dor-tool.md -> Trust rule 3).
+                // outright (docs/specs/dor-tool.md -> Trust rule 2).
                 deferTerminal: true,
                 leafMeta: toolLeafMeta(lookup.name, {
                   surfaceType: 'tool',
@@ -1522,7 +1557,9 @@ export function useDorControl({
         });
         if (decision.kind === 'existing') {
           if (decision.pin) previewSlot.pin(decision.id);
-          respondStanding('existing', decision.id, revealSurface(decision.id, { focusNeutral: decision.quiet }));
+          // A reaped match starts again (docs/specs/dor-tool.md -> Reaping).
+          const rehydrated = rehydrateTool(lath, decision.id) !== null;
+          respondStanding(rehydrated ? 'adopted' : 'existing', decision.id, revealSurface(decision.id, { focusNeutral: decision.quiet }));
           return;
         }
         if (decision.kind === 'retarget') {
@@ -1550,41 +1587,32 @@ export function useDorControl({
             // request's directory, not the Surface's launch directory.
             const matchedCwd = matchState.cwd?.path ?? cwd;
             const matched = { command: matchedCommand, cwd: matchedCwd };
-            // A match that is the calling pane is the tool's own Surface — the
-            // place take-over makes normal to retype in. Its command is live
-            // only when the tool itself spawned this `dor`; otherwise `dor` is
-            // what its shell is running, so the tool is idle however its pane
-            // reads, and it re-runs in its own directory like any `adopted`
-            // match. Through the handshake, never `restartSurfaceInPlace`,
-            // whose Ctrl+C would kill the `dor` awaiting this answer.
+            // A match that is the calling pane, its command not running: only a
+            // host replacement leaves a Tool at its prompt (docs/specs/dor-tool.md
+            // -> Run end), and `dor` is what its shell runs now. Nothing can be
+            // typed behind it, and Ctrl+C would kill the `dor` awaiting this
+            // answer: say so instead of a misleading `existing`.
             if (match.id === callerId && !surfaceRunsCommand(matchState, matchedCommand, matchedCwd)) {
-              if (!callerGate || !toolRerunsInCaller(callerGate)) {
-                // Nothing can be typed behind a line that is not this
-                // invocation alone, and there is no survivor to reveal — the
-                // user is sitting in it. Say so instead of reporting a tool
-                // that is not running as `existing`.
-                detail.respond({
-                  ok: false,
-                  error: `surface '${surfaceRefForId(match.id)}' is this tool's own pane and its command is not running; re-run it by typing the invocation alone at its prompt`,
-                });
-                return;
-              }
-              revealSurface(match.id);
-              respondStanding('adopted', match.id, true, matched);
-              await runToolInCallerPane(
-                lath,
-                match.id,
-                { command: matchedCommand, cwd: matchedCwd },
-                () => !workspaceGone() && callerStillRunnable(readCallerGate(match.id, matchedCwd)),
-                detail.signal,
-              );
+              detail.respond({
+                ok: false,
+                error: `surface '${surfaceRefForId(match.id)}' is this tool's own pane, which Dormouse is restarting; try again once it runs`,
+              });
               return;
             }
-            // A dedicated Surface whose command exited is unambiguously free,
-            // so re-run in place rather than splitting — where `dor ensure`,
-            // aimed at arbitrary shells, would stop matching.
+            // A match idle only while the host replaces its run (an ended one is
+            // a plain terminal: docs/specs/dor-tool.md -> Run end) restarts in
+            // place rather than splitting. A reaped one has no shell to type
+            // into: it rehydrates (docs/specs/dor-tool.md -> Reaping).
             const idle = matchState.currentCommand === null;
-            if (idle) {
+            const rehydrated = rehydrateTool(lath, match.id);
+            // Held like any launch until the command reports, so a queued
+            // request for this key finds it running.
+            if (rehydrated) {
+              if (await waitForNewToolCommand(match.id, rehydrated.command, rehydrated.cwd, detail.signal) !== 'ready') {
+                detail.respond({ ok: false, error: `surface '${surfaceRefForId(match.id)}' command did not restart` });
+                return;
+              }
+            } else if (idle) {
               const restarted = await restartSurfaceInPlace(match.id, matchedCommand, matchedCwd, detail.signal, { acceptCompletedRun: true });
               if (!restarted.ok) {
                 detail.respond({
@@ -1815,6 +1843,9 @@ export function useDorControl({
       }
       const target = requireTerminalSurface(params.surface, detail);
       if (!target) return;
+      // Input someone chose to send: an untouched shell it reaches is no longer
+      // one a close may take without asking (docs/specs/layout.md → "Kill confirmation").
+      markSessionTouched(target.id);
       getPlatform().writePty(target.id, input, { paced: true });
       detail.respond({
         ok: true,
@@ -1859,9 +1890,8 @@ export function useDorControl({
         detail.respond({ ok: false, error: `invalid await condition '${String(until)}'` });
         return;
       }
-      // The host re-checks this, but a bad ceiling there settles `cancelled`
-      // silently (no response ever reaches the caller); rejecting here turns
-      // that into a visible error.
+      // The host re-checks this and answers a bad ceiling as a settled
+      // `cancelled`; rejecting here names what was wrong instead.
       const timeoutMs = numberParam(params.timeoutMs);
       if (timeoutMs === undefined || timeoutMs <= 0 || timeoutMs > MAX_AWAIT_TIMEOUT_MS) {
         detail.respond({ ok: false, error: `timeoutMs must be a positive number no greater than ${MAX_AWAIT_TIMEOUT_MS}` });
@@ -1970,7 +2000,7 @@ export function useDorControl({
         detail.respond({ ok: false, error: `${refusal} — open it with dor agent-browser open ${url}` });
         return;
       }
-      const target = resolveVisibleSurface(stringParam(params.surface), detail.surfaceId);
+      const target = resolvePlacement(resolveVisibleSurface);
       if (!target.ok) {
         detail.respond({ ok: false, error: target.message });
         return;
@@ -1979,6 +2009,7 @@ export function useDorControl({
         minimized: booleanParam(params.minimized),
         params: { surfaceType: 'browser', renderMode: 'iframe', url },
         reference: target.value,
+        preserveSource: !!detail.helperParentId,
         title: hostPathDisplay(url, true),
         // `dor iframe` opens the embed in the background; caller keeps focus.
         focusNeutral: true,
@@ -2227,7 +2258,8 @@ export function useDorControl({
         // agent-browser's is its session; every host answer names one.
         nativeIdentity: status.nativeIdentity ?? session,
         minimized: booleanParam(params.minimized),
-        reference: () => resolveVisibleSurface(stringParam(params.surface), detail.surfaceId),
+        reference: () => resolvePlacement(resolveVisibleSurface),
+        preserveSource: !!detail.helperParentId,
       });
       if (!result.ok) {
         detail.respond({ ok: false, error: result.message });
@@ -2281,7 +2313,7 @@ export function useDorControl({
       if (entries.length > 1) {
         detail.respond({
           ok: false,
-          error: `surface '${target.ref}' is serving multiple ports (${entries.map((entry) => entry.port).join(', ')}); open one explicitly, e.g. http://localhost:${entries[0].port}`,
+          error: `surface '${target.ref}' is serving multiple ports (${entries.map((entry) => entry.port).join(', ')}); open one explicitly, e.g. ${entries[0].url}`,
         });
         return;
       }

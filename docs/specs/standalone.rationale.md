@@ -10,8 +10,6 @@
 
 ## Alerts
 
-**Why one manager per host process, beside the PTYs.** Each window used to run its own `AlertManager` in its webview, fed from events the sidecar had already parsed. Three failures followed from where it lived (audit, 2026-09-23): WKWebView throttles a background window's timers, so the detector, deferral and await timers of a window the user was not looking at ran late — exactly the window a completion should summon them back to; a reload started the webview with an empty manager and a live resume seeds nothing, so every ring and TODO in the window vanished; and a Workspace transfer had to snapshot the ring, its episode, the detector deadlines and the deferred notification into the transfer content, resume them in the target, and bind a replay token so the since-mark replay's reports fired once. VS Code never had these, because its manager lives in the extension host beside the PTYs and the parse. Moving standalone's there made the two hosts one shape, now one module (`createAlertHost`): the parse feeds one manager in stream order, the Burrow's remote writes reach it in the same process, and a window is only a viewer whose state is routed to it.
-
 **Why an await's answer names its window.** Routed by the Session's `id` it would reach the Session's owner, not the window that parked it, and a `requestId` is what Rust's invoke matcher swallows. It was broadcast at first, each adapter matching its own random `awaitId`; `forWindow` routes it the way `pty:list` is routed, so no other window sees it (2026-09).
 
 ## Windows node subsystem
@@ -36,6 +34,10 @@
 
 **Why a failed read must not be memoized.** The read errors that are neither `ENOENT` nor a parse failure — EACCES, EIO, a handle held open on Windows — say nothing about what the file holds; answering them empty, or caching that emptiness, lets the next save overwrite unseen state with nothing, since every change is a read-modify-write of the whole file.
 
+## Application menu
+
+WKWebView performs native edits (cut, copy, paste, select all) only through the application's Edit menu; with none, Cmd+C/X/V did nothing inside Tool iframes, whose keys Dormouse's own JS never sees. Tested in the dev build on macOS (2026-10): a chord whose keydown the page cancels never reaches the menu item, so the terminal and Dormouse's fields keep their JS handling without a double paste. WebView2 and WebKitGTK edit natively without a menu, and on those platforms menu accelerators would take Ctrl+C from the terminal before the page saw it.
+
 ## Siri affordance
 
 **What it cost.** On 2026-09-28 the unified log showed Dormouse dwelling 707 times and building the affordance's host window 478 times in one day; no other app did either more than once. The same `NSCampoLightweightUIController` raised the assertion behind that week's macOS 27.0 crashes: a mouse-entered event reaching a tracking area it had just torn down.
@@ -57,22 +59,11 @@ In a real build the same day, with the xterm textarea focused and typed into, a 
 
 ## Routing
 
-Rust routes rather than the webview filtering, because a webview cannot be
-trusted to drop another window's bytes: it would still have received them, and
-`pty:data` is the hot path.
+Rust routes rather than the webview filtering, because a webview cannot be trusted to drop another window's bytes: it would still have received them, and `pty:data` is the hot path.
 
-Tauri delivers an `emit_to` event to **any** listener registered with the default
-`Any` target — `match_any_or_filter` in its event listener short-circuits before
-the target filter runs — and the JS `listen()` registers exactly that. The first
-two-window build therefore had each window taking the other's `pty:list` at boot
-and adopting its PTYs as unowned, which corrupted both snapshots; nothing
-errored. Measured against tauri 2.11.5, 2026-09.
+Tauri delivers an `emit_to` event to **any** listener registered with the default `Any` target — `match_any_or_filter` in its event listener short-circuits before the target filter runs — and the JS `listen()` registers exactly that. The first two-window build therefore had each window taking the other's `pty:list` at boot and adopting its PTYs as unowned, which corrupted both snapshots; nothing errored. Measured against tauri 2.11.5, 2026-09.
 
-An unowned id was broadcast at first, on the reasoning that "an id nobody minted
-is not a routing decision anyone can make". It is: every PTY in this process is
-minted in `pty_spawn`, so an unowned id is one whose window went away, and the
-broadcast reached every sibling's AlertManager — which rang, and offered a TODO,
-for a pane none of them showed.
+An unowned id was broadcast at first, on the reasoning that "an id nobody minted is not a routing decision anyone can make". It is: every PTY in this process is minted in `pty_spawn`, so an unowned id is one whose window went away, and the broadcast reached every sibling's AlertManager — which rang, and offered a TODO, for a pane none of them showed.
 
 **Why an exited PTY stays owned.** Ownership used to end at the exit, since nothing more was emitted for a dead PTY. The sidecar's manager publishes `alert:state` for it whenever the user acts on the exited pane — a dismiss, a TODO cleared — and a line for an unowned id is dropped, so the pane would ring until it was closed. An exit before a transfer's mark used to end the marking phase and go to the target, so the `pty:marked` behind it went there too, and the source — which serializes the pane at that line — never saw its mark (2026-09).
 
@@ -80,143 +71,43 @@ for a pane none of them showed.
 
 ## What a window's `Destroyed` settles
 
-Tauri removes a label from `webview_windows()` only when the window is actually
-destroyed, not when `destroy()` is called. `finish_window_close` pushed the
-sidecar's window list right after `destroy()`, so the list it computed still
-named the window that was going away, and the Burrow's ask collector then waited
-that window's whole `ASK_BUDGET_MS` on every subsequent ask. The same ordering
-made the quit machine's `forget_window` fire before the label was gone.
+Tauri removes a label from `webview_windows()` only when the window is actually destroyed, not when `destroy()` is called. `finish_window_close` pushed the sidecar's window list right after `destroy()`, so the list it computed still named the window that was going away, and the Burrow's ask collector then waited that window's whole `ASK_BUDGET_MS` on every subsequent ask. The same ordering made the quit machine's `forget_window` fire before the label was gone.
 
 ## Boot and geometry
 
-The flush thread ran `window.scale_factor()` while holding the rect cache. Off
-the main thread both that and `is_minimized()` post to the event loop and block
-on the reply, and the main thread reaches the same cache from `window_at_cursor`
-— which a cross-window drag calls ~16 times a second. `refresh_rect` takes the
-scale rather than the window so the shape cannot come back by accident.
+`tauri-plugin-window-state` would have been a second store answering "which windows exist", a new Cargo *and* npm dependency riding the disclosure regeneration and the cooldown, and it still would not have done the boot enumeration — which is already Rust's job, beside the snapshots it reads.
 
-The flush also cleared its "a thread is coming" flag after taking the dirty set
-rather than with it. A `Moved` landing in that gap was marked dirty and then saw
-the flag still set, so it scheduled nothing — and a window whose last move is its
-final position simply never had that position written.
-
-`tauri-plugin-window-state` would have been a second store answering "which
-windows exist", a new Cargo *and* npm dependency riding the disclosure
-regeneration and the cooldown, and it still would not have done the boot
-enumeration — which is already Rust's job, beside the snapshots it reads.
-
-The cap is a ceiling on one launch, not a limit on how many windows may exist:
-the excess snapshots stay on disk untouched, so raising the cap restores them.
+The cap is a ceiling on one launch, not a limit on how many windows may exist: the excess snapshots stay on disk untouched, so raising the cap restores them.
 
 ## Transfer
 
-The `adopt_ready` hop exists because the alternative is a race with no safe
-side. If Rust listed and replayed as part of the transfer, the target's
-collector might not be armed yet and the replay would be lost; if the target
-armed first and asked for the whole Window, it would take every sibling's PTY.
-Asking for exactly the suppressed set, only once the collector exists, has
-neither failure.
+The `adopt_ready` hop exists because the alternative is a race with no safe side. If Rust listed and replayed as part of the transfer, the target's collector might not be armed yet and the replay would be lost; if the target armed first and asked for the whole Window, it would take every sibling's PTY. Asking for exactly the suppressed set, only once the collector exists, has neither failure.
 
-The suppression window is what makes "no duplicate, no loss" true. `pty-core`
-appends to its replay buffer synchronously before it emits, and Rust's single
-reader thread processes sidecar lines in order — so a chunk emitted between the
-ownership move and the replay is dropped once and present in the replay exactly
-once (`pty-core.test.js`, "a chunk emitted just before list([id]) appears in the
-replay exactly once").
+The suppression window is what makes "no duplicate, no loss" true. `pty-core` appends to its replay buffer synchronously before it emits, and Rust's single reader thread processes sidecar lines in order — so a chunk emitted between the ownership move and the replay is dropped once and present in the replay exactly once (`pty-core.test.js`, "a chunk emitted just before list([id]) appears in the replay exactly once").
 
-It fails open after 5 s rather than closed: a transfer whose `adopt_ready` never
-arrived would otherwise silence its panes for the rest of the session, and
-duplicated bytes are recoverable where a dead pane is not. That fail-open is now
-scoped to suppressions no arrival record claims, which is the same argument with
-the "never arrived" case actually detectable — an arrival that is genuinely stuck
-ends at `adopt_failed` or at the target's `Destroyed`, not at a timer.
+It fails open after 5 s rather than closed: a transfer whose `adopt_ready` never arrived would otherwise silence its panes for the rest of the session, and duplicated bytes are recoverable where a dead pane is not. That fail-open is now scoped to suppressions no arrival record claims, which is the same argument with the "never arrived" case actually detectable — an arrival that is genuinely stuck ends at `adopt_failed` or at the target's `Destroyed`, not at a timer.
 
 ## Arrival queue
 
 A target whose `adopt_done` is refused already has the arrival payload needed to release its Sessions. Preparing a new transfer first re-entered Tool startup checks and could throw while ownership was already back at the source; unwinding directly also avoids sending `adopt_failed` for that retired arrival.
 
-**Why the mark is stamped in the stream rather than asked for.** A mark fetched
-by request answers at some instant the sidecar chose, while the source's xterm
-stands at whatever `pty:data` had reached it — two clocks nothing aligns, so a
-serialization taken against a fetched mark either repeats or loses the bytes
-between them. A `marked` line written into the same stdout as the data is
-ordered with it by construction: the sidecar's reader is one thread, Rust's
-reader is one thread, and the webview's event queue is one queue. The one gap
-left is the parser's incomplete-sequence buffer, which can hold bytes older
-than the mark past it; that tail is the same class of cut the bounded replay
-always made, and the target's parser resynchronizes on the next ground byte
-(2026-09).
+**Why the mark is stamped in the stream rather than asked for.** A mark fetched by request answers at some instant the sidecar chose, while the source's xterm stands at whatever `pty:data` had reached it — two clocks nothing aligns, so a serialization taken against a fetched mark either repeats or loses the bytes between them. A `marked` line written into the same stdout as the data is ordered with it by construction: the sidecar's reader is one thread, Rust's reader is one thread, and the webview's event queue is one queue. The one gap left is the parser's incomplete-sequence buffer, which can hold bytes older than the mark past it; that tail is the same class of cut the bounded replay always made, and the target's parser resynchronizes on the next ground byte (2026-09).
 
+**Why a hand-back replays since the mark, and only the marked ids.** The first hand-back returned the ids unsuppressed and silent: the source's xterm stood at the mark, and every byte from there to the hand-back had gone to a target that never mounted it — dropped while suppressed, or painted in a webview that then closed. The since-mark replay is the arrival's own second half aimed back at the source, which is why it rides the same `pty:requestInit` and the same suppression-lifting `pty:replay` path rather than a new message. An id the content did not mark has no such gap: the source either saw every byte live or serialized the whole buffer it still holds, and the sidecar's only answer for an unmarked id is that whole buffer again (2026-09).
 
+**Why one keyed record.** The first build emitted `workspace-arriving` straight at the target; a window torn out seconds earlier, or one restoring at launch, had no listener yet, so the payload went nowhere while the source dropped its tab, leaving live Sessions owned by a window with no pane for them. Queueing fixed delivery but not bookkeeping: the suppression map, the departure list, the boot list and the sweep each held a piece of the arrival and inferred the rest, so `adopt_ready` resumed two arrivals over each other, one landing released every Workspace a source had sent, the sweep lifted a live arrival's suppression on a slow boot, and a boot list placed arriving shells as loose panes. The record keyed by `workspaceId` fixed all five at once.
 
-**Why a hand-back replays since the mark, and only the marked ids.** The first
-hand-back returned the ids unsuppressed and silent: the source's xterm stood at
-the mark, and every byte from there to the hand-back had gone to a target that
-never mounted it — dropped while suppressed, or painted in a webview that then
-closed. The since-mark replay is the arrival's own second half aimed back at the
-source, which is why it rides the same `pty:requestInit` and the same
-suppression-lifting `pty:replay` path rather than a new message. An id the
-content did not mark has no such gap: the source either saw every byte live or
-serialized the whole buffer it still holds, and the sidecar's only answer for
-an unmarked id is that whole buffer again (2026-09).
+Two phases rather than one, because the target can genuinely refuse. A release at the invoke was safe only while nothing could go wrong between the invoke and the mount; closing the target mid-arrival made the Workspace's Sessions live and ownerless. Holding the source's state until `workspace-departed` costs a transferring Workspace being briefly absent from the snapshot — deliberate, since the alternative is both windows persisting it and a relaunch restoring it twice.
 
-The first build emitted `workspace-arriving` straight at the target. A window
-torn out seconds earlier, or one restoring at launch, has no listener yet and is
-a perfectly ordinary drop target — the payload went nowhere, and because the
-departure was announced in the same breath, the source dropped its tab too. The
-Workspace's Sessions were then alive, owned by a window with no pane for them.
+`take_arrivals` stopped consuming for the same reason: consuming made the drain the point of no return, and a webview that drained and then failed had nothing left to fall back on. With the record settling at `adopt_done` the drain is idempotent, and a reload mid-arrival finds its Workspace again instead of losing it. The webview's `adopting` set is what makes repeated drains safe.
 
-Queueing fixed the delivery but not the bookkeeping, and the follow-up review
-found five symptoms of one gap: the arrival was not a single keyed thing. The
-suppression map, the departure list, the boot list and the sweep each held a
-piece and each inferred the rest, so `adopt_ready` answered with "everything
-suppressed for this window" (two arrivals resumed over each other), a departure
-announced every Workspace a source had sent to that window (one landing released
-them all), the sweep could lift a live arrival's suppression on a slow boot, and
-a boot list placed an arriving Workspace's shells as loose panes. The record
-keyed by `workspaceId` is the fix for all five at once, which is why it is one
-change rather than five.
-
-Two phases rather than one, because the target can genuinely refuse. A release at
-the invoke was safe only while nothing could go wrong between the invoke and the
-mount; closing the target mid-arrival made the Workspace's Sessions live and
-ownerless. Holding the source's state until `workspace-departed` costs a
-transferring Workspace being briefly absent from the snapshot — deliberate, since
-the alternative is both windows persisting it and a relaunch restoring it twice.
-
-`take_arrivals` stopped consuming for the same reason: consuming made the drain
-the point of no return, and a webview that drained and then failed had nothing
-left to fall back on. With the record settling at `adopt_done` the drain is
-idempotent, and a reload mid-arrival finds its Workspace again instead of losing
-it. The webview's `adopting` set is what makes repeated drains safe.
-
-The pending-arrival record is its own file rather than an entry staged into a
-snapshot. The first durability attempt wrote the arriving Workspace into the
-target's `sessions/<label>.json` at the invoke and it failed two ways. A torn-out
-window then had a snapshot before it opened, and `bootFromTearOut` reads "this
-window has a snapshot" as "this is an ordinary restore": the new window
-cold-restored the staged copy over fresh shells, drained the arrival, and threw
-`Duplicate Workspace id` adopting the real one — the tear-out was handed back and
-both windows persisted the id. And for a transfer into a live window the staged
-entry did not survive to adoption: `getWindowSnapshot` iterates the target's
-store, which does not hold the Workspace yet, so the target's next debounced
-flush (500 ms after any change, inside the 3 s arrival timeout) rewrote its file
-without it. A file neither webview writes has neither problem, and merging it at
-boot is the only moment no flush can race it.
+The pending-arrival record is its own file rather than an entry staged into a snapshot. The first durability attempt wrote the arriving Workspace into the target's `sessions/<label>.json` at the invoke and it failed two ways. A torn-out window then had a snapshot before it opened, and `bootFromTearOut` reads "this window has a snapshot" as "this is an ordinary restore": the new window cold-restored the staged copy over fresh shells, drained the arrival, and threw `Duplicate Workspace id` adopting the real one — the tear-out was handed back and both windows persisted the id. And for a transfer into a live window the staged entry did not survive to adoption: `getWindowSnapshot` iterates the target's store, which does not hold the Workspace yet, so the target's next debounced flush (500 ms after any change, inside the 3 s arrival timeout) rewrote its file without it. A file neither webview writes has neither problem, and merging it at boot is the only moment no flush can race it.
 
 ## Dragging a Workspace between windows
 
-Spiked before the drag was built, because it was the one unverified platform
-assumption and the fallback (a Rust `cursor_position()` polling loop driven by
-the source's own pointer events) was a different design.
+Spiked before the drag was built, because it was the one unverified platform assumption and the fallback (a Rust `cursor_position()` polling loop driven by the source's own pointer events) was a different design.
 
-A WKWebView pointer captured on an element keeps receiving `pointermove` and
-`pointerup` far outside the window, with client coordinates that run past the
-edges and negative rather than clamping — measured against macOS 26.6 / WKWebView,
-2026-09, by synthesizing an AppKit drag whose later points fall outside a
-400×300 window and reading the page's own event log: `down` inside the element,
-then moves at client x 600 and (900, −152), then the release. So the gesture
-stays the webview's throughout and no polling loop is needed.
+A WKWebView pointer captured on an element keeps receiving `pointermove` and `pointerup` far outside the window, with client coordinates that run past the edges and negative rather than clamping — measured against macOS 26.6 / WKWebView, 2026-09, by synthesizing an AppKit drag whose later points fall outside a 400×300 window and reading the page's own event log: `down` inside the element, then moves at client x 600 and (900, −152), then the release. So the gesture stays the webview's throughout and no polling loop is needed.
 
 ## Persistence
 
@@ -230,56 +121,23 @@ stays the webview's throughout and no polling loop is needed.
 
 **What the teardown flush lost.** The pre-Rust path flushed the session on teardown into WebKit `localStorage` and lost the final debounce/heartbeat window; awaiting the write pipeline to disk (`drainSessionSaves`) recovers it, which a last fire-and-forget save would not.
 
-**What a record build costs.** `getCwd` is a synchronous `execFileSync('lsof', …)` in the sidecar on macOS (`getCwdForPid` in `standalone/sidecar/pty-core.js`), one round trip per terminal pane, on every debounced save and every 30 s heartbeat. That price is why the dirty triggers are keyed to the owning Workspace: an unkeyed trigger would make every idle Workspace pay it whenever any Workspace moved.
-
-**Why a timed-out boot list is asked again rather than acted on.** `timedOut` is the whole difference between "the host holds nothing" and "the host never answered", and `resumeOrRestoreFrom` cannot tell them apart — it cold-restores over the second, starting a second set of shells on top of the ones still running. The arrival path already refused rather than restore; the ordinary boot path had no such guard, and a launch slower than the 500 ms budget (a cold sidecar behind an antivirus scan, a laptop waking) is exactly when it bites. A retry is cheap in the case that matters and free in every other: an empty list still resolves the moment it arrives.
-
-**Why the aggregator debounces on top of the Wall's own debounce.** Each Wall already coalesces its own record; the second stage coalesces *across* Walls, so one window-wide event (a store change, a theme push, a burst of output in two Workspaces) becomes one host write rather than one per Workspace.
-
 **Why debug keeps a state subtree as well as the wrapper identifier.** The native dev wrapper already selects a stable per-worktree Tauri identifier, including a separate Burrow store. Raw Tauri dev bypasses that wrapper and can use the installed identifier; the subtree protects its session and recovery files without changing where that identifier’s enrollment lives. Older debug builds used the identifier root directly, so their snapshots need targeted transcript migration after the split. Deleting those snapshots could remove installed layouts for a raw-dev launch.
 
 ## Trigger interception
 
-**Why the app menu's Quit item is custom.** Tauri hands
-`PredefinedMenuItem::quit` to muda, whose macOS implementation sends
-`terminate:` to `NSApp` (`muda-0.19.1/src/platform_impl/macos/mod.rs`); tao's app
-delegate implements `applicationWillTerminate:` and nothing else
-(`tao-0.35.2/src/platform_impl/macos/app_delegate.rs`), so no
-`RunEvent::ExitRequested` is ever raised for it. The same hole swallowed the
-Dock's Quit item, `osascript`, logout and restart. Cheap while a quit was only a
-confirmation; expensive once quit captures agent recovery and writes the final
-snapshot.
+**Why the app menu's Quit item is custom.** Tauri hands `PredefinedMenuItem::quit` to muda, whose macOS implementation sends `terminate:` to `NSApp` (`muda-0.19.1/src/platform_impl/macos/mod.rs`); tao's app delegate implements `applicationWillTerminate:` and nothing else (`tao-0.35.2/src/platform_impl/macos/app_delegate.rs`), so no `RunEvent::ExitRequested` is ever raised for it. The same hole swallowed the Dock's Quit item, `osascript`, logout and restart. Cheap while a quit was only a confirmation; expensive once quit captures agent recovery and writes the final snapshot.
 
-`applicationShouldTerminate:` is added to the *live* delegate's class rather than
-to a delegate of our own, because replacing `NSApp.delegate` would take tao's
-window and application callbacks with it. `class_addMethod` refuses when the
-class already implements the selector, which is the signal that a tao upgrade
-has started handling this itself.
+`applicationShouldTerminate:` is added to the *live* delegate's class rather than to a delegate of our own, because replacing `NSApp.delegate` would take tao's window and application callbacks with it. `class_addMethod` refuses when the class already implements the selector, which is the signal that a tao upgrade has started handling this itself.
+
+**Why hold, never refuse.** `NSTerminateCancel` reaches loginwindow as `userCanceledErr`, which aborts a logout or restart outright: on 2026-10-03 a restart reached Dormouse after loginwindow had begun quitting the other apps, Dormouse answered Cancel to start its own flow, and the session sat half logged out — no Dock, no Mission Control, apps launching without windows — until the restart was cancelled by hand half an hour later (loginwindow: `kAEAnswer event with a userCanceledErr`, `Got a valid appname : Dormouse Terminal`). `NSTerminateLater` is AppKit's documented way to finish work first, and loginwindow waits for it. Measured with a probe app on macOS 27.0.1, 2026-10: while held, AppKit runs a nested loop in `NSModalPanelRunLoopMode` until `replyToApplicationShouldTerminate:`; a second terminate never reaches the delegate; the reply only records the answer and AppKit acts once the nested loop regains control; No returns the app to the default mode; and `[NSApp stop:]` with tao's dummy event does **not** end the nested loop — the app hangs, which is why every exit while held must reply instead. tao's observers, timer and wake source are in `kCFRunLoopCommonModes` (`tao` fork `observer.rs`, `event_loop.rs`), so the flow keeps running inside the nested loop; Yes ends in `applicationWillTerminate:`, which tao turns into `LoopDestroyed` and tauri-runtime-wry into `RunEvent::Exit`, so the sidecar shutdown still runs.
 
 ## Quit flow
 
-**Why the two teardown flows arbitrate.** They are independent machines that
-share one single-slot confirm store, and the store simply returned when a second
-`openQuitConfirm` arrived. The second flow's context was never settled, so its
-`phase` stayed `confirming` for the life of the window: a quit that met an open
-close dialog never voted, and Rust's phase-2 wait is unbounded by design because
-it waits on a human. The broadcast `quit-cancelled` made it worse by dismissing
-whichever dialog was open — including a close's — without telling its flow.
+**Why the two teardown flows arbitrate.** They are independent machines that share one single-slot confirm store, and the store simply returned when a second `openQuitConfirm` arrived. The second flow's context was never settled, so its `phase` stayed `confirming` for the life of the window: a quit that met an open close dialog never voted, and Rust's phase-2 wait is unbounded by design because it waits on a human. The broadcast `quit-cancelled` made it worse by dismissing whichever dialog was open — including a close's — without telling its flow.
 
-Arbitrating fixed the dialog and left the vote: a quit meeting a *committed*
-close acked and stopped, which is the same unbounded wait reached by a different
-route. Voting is right because the window really is ending.
+Arbitrating fixed the dialog and left the vote: a quit meeting a *committed* close acked and stopped, which is the same unbounded wait reached by a different route. Voting is right because the window really is ending.
 
-**Why the walk ends on `main`, and why the grant to every window was reverted.**
-Widening `updater:*` to every window was meant to cover a session whose `main`
-was closed. It covers nothing: only `main` runs the periodic check, so only
-`main` can be holding a downloaded update, and a `main`-less session has none to
-install whichever window goes last. The grant traded a structural guarantee — the
-install can only happen in the window torn down last — for a case that cannot
-arise. What that session does need is to be told, which is the close
-confirmation's "this throws away the downloaded update" arm. The periodic check
-stays in `main` because it is a timer, not a capability, and one per window would
-be N checks against the endpoint.
+**Why the walk ends on `main`, and why the grant to every window was reverted.** Widening `updater:*` to every window was meant to cover a session whose `main` was closed. It covers nothing: only `main` runs the periodic check, so only `main` can be holding a downloaded update, and a `main`-less session has none to install whichever window goes last. The grant traded a structural guarantee — the install can only happen in the window torn down last — for a case that cannot arise. What that session does need is to be told, which is the close confirmation's "this throws away the downloaded update" arm. The periodic check stays in `main` because it is a timer, not a capability, and one per window would be N checks against the endpoint.
 
 **Why the teardown ordering survived the transcript removal.** Flush → graceful kill → flush → drain was built to capture the final scrollback of dying terminals into the persisted session. The transcripts are gone, but the shape is still what makes the *structure* correct: the first flush reads cwds while the shells are alive, and the second catches whatever changed as they died, retaining the earlier cwd for a PTY `getCwd` can no longer answer.
 
@@ -287,21 +145,9 @@ be N checks against the endpoint.
 
 ## Restart
 
-**Why not `AppHandle::request_restart`.** It raises `ExitRequested` with
-`RESTART_EXIT_CODE`, and `ExitRequestApi::prevent_exit` ignores that code
-(`tauri-2.11.5/src/app.rs`). A restart would slip past the unapproved-exit guard
-and the hand-back cleanup gate, and the watchdog and `Destroyed` exits, which
-call `app.exit(0)`, would drop the relaunch. Relaunching from `RunEvent::Exit`
-keeps one exit path. That exit stops tao's run loop with `[NSApp stop:]`, never
-`terminate:` (`tao-0.35.2/src/platform_impl/macos/app_state.rs`), so the spliced
-`applicationShouldTerminate:` sees only OS-initiated terminates. Checked
-2026-09.
+**Why not `AppHandle::request_restart`.** It raises `ExitRequested` with `RESTART_EXIT_CODE`, and `ExitRequestApi::prevent_exit` ignores that code (`tauri-2.11.5/src/app.rs`). A restart would slip past the unapproved-exit guard and the hand-back cleanup gate, and the watchdog and `Destroyed` exits, which call `app.exit(0)`, would drop the relaunch. Relaunching from `RunEvent::Exit` keeps one exit path. That exit stops tao's run loop with `[NSApp stop:]`, never `terminate:` (`tao-0.35.2/src/platform_impl/macos/app_state.rs`), so the spliced `applicationShouldTerminate:` sees only OS-initiated terminates. Checked 2026-09.
 
-**Why the refusals.** Under `tauri dev` the relaunched binary outlives the CLI
-and the Vite server it loads from. `tauri::process::restart` just calls `exit(0)`
-when `current_binary` fails — on macOS, for a path through a symlink
-(`tauri-utils-2.9.3/src/platform/starting_binary.rs`) — so the check turns a
-silent quit into an answer.
+**Why the refusals.** Under `tauri dev` the relaunched binary outlives the CLI and the Vite server it loads from. `tauri::process::restart` just calls `exit(0)` when `current_binary` fails — on macOS, for a path through a symlink (`tauri-utils-2.9.3/src/platform/starting_binary.rs`) — so the check turns a silent quit into an answer.
 
 ## Objective-C exceptions
 

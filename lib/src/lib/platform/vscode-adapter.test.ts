@@ -1,6 +1,9 @@
 import { getToolDirty, resetToolDirty } from '../tool-dirty-store';
 import { getToolAnnounce, resetToolAnnounces } from '../tool-announce-store';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { openPortRequestTimeoutMs } from './types';
+import { hostShown, setHostShown } from '../host-shown';
+import { registry, type TerminalEntry } from '../terminal-store';
 
 const terminalStateStoreMocks = vi.hoisted(() => ({
   applyTerminalSemanticEvents: vi.fn(),
@@ -279,6 +282,17 @@ describe('VSCodeAdapter PTY exit handling', () => {
 
     expect(terminalStateStoreMocks.applyTerminalSemanticEvents).toHaveBeenCalledTimes(1);
     expect(terminalStateStoreMocks.applyTerminalSemanticEvents).toHaveBeenCalledWith('pane-1', events);
+  });
+
+  it('counts a remote Client\'s input as touching the Session', () => {
+    registry.set('pane-1', { untouched: true } as TerminalEntry);
+    try {
+      void new VSCodeAdapter();
+      windowTarget.dispatchEvent(hostMessage({ type: 'terminal:clientInput', id: 'pane-1' }));
+      expect(registry.get('pane-1')?.untouched).toBe(false);
+    } finally {
+      registry.delete('pane-1');
+    }
   });
 
   it('round-trips host-parsed semantic events through JSON to the webview adapter', () => {
@@ -605,6 +619,20 @@ describe('VSCodeAdapter port deadline', () => {
     windowTarget.dispatchEvent(hostMessage({ type: 'pty:openPorts', requestId: request.requestId, ports }));
     expect(await answer).toEqual(ports);
   });
+
+  it('budgets a batched request for every id it names', async () => {
+    vi.useFakeTimers();
+    const adapter = new VSCodeAdapter();
+    const ids = Array.from({ length: 20 }, (_, index) => `pane-${index}`);
+    const answer = adapter.getOpenPortsMany(ids);
+    const request = postMessage.mock.calls.at(-1)![0];
+    expect(request).toMatchObject({ type: 'pty:getOpenPortsMany', ids });
+    // Past a single request's budget, inside twenty ids' worth.
+    await vi.advanceTimersByTimeAsync(openPortRequestTimeoutMs(1, 2) + 1000);
+    const ports = { 'pane-0': [{ address: '127.0.0.1', port: 5173, pid: 1 }] };
+    windowTarget.dispatchEvent(hostMessage({ type: 'pty:openPortsMany', requestId: request.requestId, ports }));
+    expect(await answer).toEqual(ports);
+  });
 });
 
 describe('VSCodeAdapter host capabilities', () => {
@@ -615,5 +643,21 @@ describe('VSCodeAdapter host capabilities', () => {
     expect([adapter.hostOwnsTheme, adapter.hostOwnsShells, adapter.hostOwnsUpdates]).toEqual([true, true, true]);
     // The Marketplace updates the extension, so Settings → Network names it.
     expect(adapter.updates).toBeUndefined();
+  });
+});
+
+describe('VSCodeAdapter webview visibility', () => {
+  beforeEach(stubWebviewEnv);
+  afterEach(() => {
+    setHostShown(true);
+    vi.unstubAllGlobals();
+  });
+
+  it('reports the webview hidden and shown as the extension says', () => {
+    new VSCodeAdapter();
+    windowTarget.dispatchEvent(hostMessage({ type: 'dormouse:shown', shown: false }));
+    expect(hostShown()).toBe(false);
+    windowTarget.dispatchEvent(hostMessage({ type: 'dormouse:shown', shown: true }));
+    expect(hostShown()).toBe(true);
   });
 });

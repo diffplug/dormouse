@@ -4,13 +4,16 @@
  * Integration smoke for the Wall on the Lath engine: it renders panes through
  * LathHost, splits/kills through the engine, and persists the Lath layout on save.
  * jsdom has no real layout, so this asserts structure (leaf count, save shape), not
- * geometry — the acceptance matrix in tiling-engine.md is the live gate.
+ * geometry — the Wall on Lath live acceptance list in
+ * TESTING_AND_MODIFICATION_GUIDE.md (§5) is the live gate.
  */
 import { act } from 'react';
 import { type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { dispatchDorControlRequest } from '../lib/platform/dor-control-dispatch';
 import { SURFACE_CONTROL_METHODS } from 'dor/protocol';
 import { sessionForKey } from 'dor-lib-common/browser-providers';
+import { _resetRunHoldsForTesting, holdForHostInterrupt, releaseRunHold } from '../lib/tool-run-hold';
 import { Wall } from './Wall';
 import * as helpers from '../lib/helper-terminal';
 import * as agentBrowserScreen from './wall/agent-browser-screen';
@@ -25,7 +28,7 @@ import type { BrowserRequest, BrowserResult } from '../lib/platform/browser-auto
 import type { PersistedSession } from '../lib/session-types';
 import * as terminalRegistry from '../lib/terminal-registry';
 import { UNNAMED_PANEL_TITLE } from '../lib/terminal-registry';
-import { pendingShellOpts } from '../lib/terminal-store';
+import { pendingShellOpts, registry, type TerminalEntry } from '../lib/terminal-store';
 import { createTerminalPaneState, type TerminalPaneState } from '../lib/terminal-state';
 import { getWallHandle, listWallHandles, registerWallHandle, stubWallHandle } from './wall/wall-handles';
 import { installBrowserHost, mountWallHarness, reportRunning, waitUntil, type WallHarness } from './wall/wall-test-utils';
@@ -2832,7 +2835,11 @@ describe('Wall on the Lath engine', () => {
       act(() => {
         fake.spawnPty(id);
         terminalRegistry.seedTerminalManualCwd(id, '/repo');
-        finish(command);
+        // An idle keyed match lasts only while the host replaces its run
+        // (docs/specs/dor-tool.md -> Run end): seed one mid-replacement.
+        reportRunning(id, command);
+        holdForHostInterrupt(id);
+        terminalRegistry.applyTerminalSemanticEvents(id, [{ type: 'commandFinish', exitCode: 0 }, { type: 'promptStart' }]);
       });
       const oldRun = terminalRegistry.getTerminalPaneState(id).lastCommand!.id;
       fake.setInputHandler(id, data => {
@@ -2862,6 +2869,7 @@ describe('Wall on the Lath engine', () => {
       await act(async () => { controller.abort(); await new Promise(resolve => setTimeout(resolve, 125)); });
       fake.clearInputHandler(id);
       act(() => terminalRegistry.removeTerminalPaneState(id));
+      _resetRunHoldsForTesting();
     }
   });
 
@@ -2977,6 +2985,23 @@ describe('Wall on the Lath engine', () => {
     });
   });
 
+  it('counts dor send as input, so a kill of the shell it reached confirms', async () => {
+    registry.set('pane-a', { untouched: true, terminal: { focus() {}, blur() {} } } as unknown as TerminalEntry);
+    try {
+      await act(async () => root.render(<Wall initialPaneIds={['pane-a', 'pane-b']} initialMode="command" />));
+      await flush();
+      await act(async () => window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
+        method: SURFACE_CONTROL_METHODS.send, params: { surface: 'surface:1', input: 'export X=1\r' }, respond: vi.fn(),
+      } })));
+      await act(async () => {
+        container.querySelector<HTMLButtonElement>('[data-lath-leaf="pane-a"] button[aria-label="Kill"]')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      });
+      expect(Array.from(document.body.querySelectorAll('h2')).some(h => h.textContent === 'Confirm kill')).toBe(true);
+    } finally {
+      registry.delete('pane-a');
+    }
+  });
+
   it('rejects anonymous Tool argv containing terminal editing controls before launching', async () => {
     await act(async () => root.render(<Wall initialPaneIds={['pane-a']} />));
     await flush();
@@ -2994,7 +3019,7 @@ describe('Wall on the Lath engine', () => {
   it.each([
     { kind: 'powershell' as const, defaultShell: '/bin/bash', command: "& 'program path' 'it''s.txt'" },
     { kind: 'posix' as const, defaultShell: 'pwsh.exe', command: "'program path' 'it'\\''s.txt'" },
-  ])('quotes takeover and keyed rerun for the existing $kind Session after changing defaults', async ({ kind, defaultShell, command }) => {
+  ])('quotes takeover for the existing $kind Session after changing defaults, and again once its Tool has ended', async ({ kind, defaultShell, command }) => {
     const controller = new AbortController();
     const typed: string[] = [];
     vi.spyOn(terminalRegistry, 'getTerminalShellKind').mockImplementation(id => id === 'pane-a' ? kind : null);
@@ -3006,7 +3031,13 @@ describe('Wall on the Lath engine', () => {
       act(() => fake.spawnPty('pane-a'));
       fake.setInputHandler('pane-a', data => typed.push(data));
       terminalRegistry.seedTerminalManualCwd('pane-a', '/repo');
-      for (const status of ['takeover', 'adopted']) {
+      // An earlier `dor ensure --restart` here left a lapsed hold, which must
+      // not end the Tool a takeover makes before its command runs.
+      holdForHostInterrupt('pane-a');
+      releaseRunHold('pane-a');
+      // The first run ends, so the pane is a plain terminal again and the
+      // second invocation takes it over afresh (docs/specs/dor-tool.md -> Run end).
+      for (const [index, status] of ['takeover', 'takeover'].entries()) {
         act(() => reportRunning('pane-a', 'dor tool storybook'));
         const respond = vi.fn();
         await act(async () => window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
@@ -3016,12 +3047,20 @@ describe('Wall on the Lath engine', () => {
         await waitUntil(() => respond.mock.calls.length > 0);
         expect(respond).toHaveBeenCalledWith(expect.objectContaining({ result: expect.objectContaining({ status, command }) }));
         const before = typed.length;
-        act(() => promptBack('pane-a'));
+        // `dor` finishes, as a real shell reports it, and its prompt returns.
+        act(() => terminalRegistry.applyTerminalSemanticEvents('pane-a', [{ type: 'commandFinish', exitCode: 0 }, { type: 'promptStart' }]));
         await waitUntil(() => typed.length > before);
         expect(typed.at(-1)).toBe(`${command}\r`);
+        // A pane-state event before the typed command reports: the takeover
+        // has ended nothing yet, lapse or not.
+        act(() => terminalRegistry.applyTerminalSemanticEvents('pane-a', [{ type: 'title', title: { title: 'zsh', source: 'osc2', updatedAt: Date.now() } }]));
+        await act(async () => window.dispatchEvent(new Event('pagehide')));
+        await flush();
+        expect((fake.getState() as PersistedSession).panes.find(pane => pane.id === 'pane-a')).toMatchObject({ surfaceType: 'tool' });
         act(() => {
           reportRunning('pane-a', command);
-          terminalRegistry.applyTerminalSemanticEvents('pane-a', [{ type: 'commandFinish', exitCode: 0 }, { type: 'promptStart' }]);
+          // The second run keeps going, so its Tool persists below.
+          if (index === 0) terminalRegistry.applyTerminalSemanticEvents('pane-a', [{ type: 'commandFinish', exitCode: 0 }, { type: 'promptStart' }]);
         });
         await act(async () => { await new Promise(resolve => setTimeout(resolve, 150)); });
       }
@@ -3035,6 +3074,7 @@ describe('Wall on the Lath engine', () => {
       await act(async () => { controller.abort(); await new Promise(resolve => setTimeout(resolve, 125)); });
       fake.clearInputHandler('pane-a');
       act(() => terminalRegistry.removeTerminalPaneState('pane-a'));
+      _resetRunHoldsForTesting();
     }
   });
 
@@ -3601,6 +3641,44 @@ describe('Wall on the Lath engine', () => {
     await kill('pane-a');
     expect(confirmKillOverlay()).not.toBeNull();
     expect(container.querySelector('[data-lath-leaf="pane-a"]')).not.toBeNull();
+  });
+
+  /** pane-a is an untouched shell owning a helper whose own entry is `helperEntry`. */
+  function untouchedShellWithHelper(helperEntry: Partial<TerminalEntry>): () => void {
+    registry.set('pane-a', { untouched: true, terminal: { focus() {}, blur() {} } } as unknown as TerminalEntry);
+    registry.set('helper-a', helperEntry as TerminalEntry);
+    const helper: helpers.HelperTerminal = { id: 'helper-a', parentId: 'pane-a', command: '', status: 'off' };
+    vi.spyOn(helpers, 'getHelper').mockImplementation(id => id === 'pane-a' ? helper : undefined);
+    vi.spyOn(helpers, 'helperHasWork').mockResolvedValue(false);
+    vi.spyOn(helpers, 'closeHelperParent').mockImplementation(() => {});
+    return () => { registry.delete('pane-a'); registry.delete('helper-a'); };
+  }
+
+  it('confirms killing an untouched shell whose helper holds user input', async () => {
+    const cleanup = untouchedShellWithHelper({ untouched: false, helperBusy: false });
+    try {
+      await act(async () => root.render(<Wall initialPaneIds={['pane-a', 'pane-b']} initialMode="command" />));
+      await flush();
+      await act(async () => {
+        container.querySelector<HTMLButtonElement>('[data-lath-leaf="pane-a"] button[aria-label="Kill"]')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      });
+      await flush();
+      expect(confirmKillOverlay()).not.toBeNull();
+      expect(getWallHandle(DEFAULT_WORKSPACE_ID)!.needsCloseConfirmation()).toBe(true);
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('closes a Workspace whose only shell is untouched, with an idle untouched helper, without confirming', async () => {
+    const cleanup = untouchedShellWithHelper({ untouched: true, helperBusy: false });
+    try {
+      await act(async () => root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />));
+      await flush();
+      expect(getWallHandle(DEFAULT_WORKSPACE_ID)!.needsCloseConfirmation()).toBe(false);
+    } finally {
+      cleanup();
+    }
   });
 
   /** Minimize pane-a beside pane-b (the Door stays selected) and press the kill key on it. */
@@ -4462,4 +4540,126 @@ it.each(['Shift', 'Meta'])('cancels an interrupted %s leader without leaving pas
   await press(modifier, 1);
   await press(modifier, 2);
   expect(container.querySelector('[data-session-id="pane-a"]')?.getAttribute('data-focused')).toBe('false');
+});
+
+describe('dor from helper terminals', () => {
+  async function issue(method: string, params: Record<string, unknown> = {}, helperParentId = 'pane-a') {
+    const respond = vi.fn();
+    await act(async () => dispatchDorControlRequest({
+      requestId: `helper-${method}`, surfaceId: 'helper-a', helperParentId, method, params,
+    }, respond));
+    await flush();
+    return respond;
+  }
+  const expectStatus = (respond: ReturnType<typeof vi.fn>, status: string, extra = {}) =>
+    expect(respond).toHaveBeenCalledWith(expect.objectContaining({ result: expect.objectContaining({ status, ...extra }) }));
+
+  it('splits from the source using the helper directory, while helpers remain absent from discovery', async () => {
+    await act(async () => root.render(<Wall initialPaneIds={['pane-a', 'pane-b']} />));
+    terminalRegistry.seedTerminalManualCwd('pane-a', '/source');
+    const response = await issue('surface.split', { direction: 'right', cwd: '/helper', focusNeutral: true });
+    const created = response.mock.calls[0][0].result.surfaceId;
+    expect(pendingShellOpts.get(created)?.cwd).toBe('/helper');
+    expect(leafCount()).toBe(3);
+    const listed = await issue('surface.list');
+    expect(listed.mock.calls[0][0].result.surfaces.map((s: { id: string }) => s.id))
+      .toEqual(expect.arrayContaining(['pane-a', 'pane-b', created]));
+    expect(listed.mock.calls[0][0].result.surfaces.some((s: { id: string }) => s.id === 'helper-a')).toBe(false);
+  });
+
+  it('names the helper source when it is hidden instead of placing beside focus', async () => {
+    await act(async () => root.render(<Wall initialPaneIds={['pane-a', 'pane-b']} />));
+    act(() => container.querySelector<HTMLButtonElement>('[data-lath-leaf="pane-a"] [aria-label="Minimize"]')!.click());
+    await flush();
+    const response = await issue('surface.iframe', { url: 'http://localhost:8080' });
+    expect(response).toHaveBeenCalledWith({ ok: false, error: 'The helper source Surface is not available for placement' });
+    expect(leafCount()).toBe(1);
+  });
+
+  it('preserves an untouched placement target when creating an iframe', async () => {
+    await act(async () => root.render(<Wall initialPaneIds={['pane-a']} />));
+    const response = await issue('surface.iframe', { url: 'http://localhost:8080' });
+    expectStatus(response, 'created');
+    expect(leafCount()).toBe(2);
+    expect(container.querySelector('[data-session-id="pane-a"]')).not.toBeNull();
+  });
+
+  it('preserves an explicitly selected untouched target in a foreign Workspace', async () => {
+    await act(async () => root.render(<Wall initialPaneIds={['pane-a']} />));
+    const response = await issue('surface.iframe', { url: 'http://localhost:8080', workspace: 'workspace:1', surface: 'pane-a' }, 'foreign-parent');
+    expectStatus(response, 'created');
+    expect(leafCount()).toBe(2);
+  });
+
+  it.each(['agent-browser', 'playwright'] as const)('creates and reuses a %s browser without replacing the source', async provider => {
+    hostBrowsers();
+    await act(async () => root.render(<Wall initialPaneIds={['pane-a']} />));
+    const params = { provider, key: 'helper-browser', session: 'helper-browser', cwd: '/helper',
+      initialViewport: { mode: 'fixed', width: 800, height: 600, deviceScaleFactor: 1 } };
+    const response = await issue('surface.browser', params);
+    await waitUntil(() => response.mock.calls.length > 0);
+    expectStatus(response, 'created');
+    const second = await issue('surface.browser', params);
+    await waitUntil(() => second.mock.calls.length > 0);
+    expectStatus(second, 'existing');
+    expect(leafCount()).toBe(2);
+  });
+
+  it.each(['surface.read', 'surface.send', 'surface.await', 'surface.kill', 'surface.move', 'surface.resolveOpen', 'surface.resolveBrowser', 'surface.split'])(
+    'rejects explicit helper self for %s before the handler can act', async method => {
+      await act(async () => root.render(<Wall initialPaneIds={['pane-a']} />));
+      const response = await issue(method, { surface: 'surface:self' });
+      expect(response).toHaveBeenCalledWith({ ok: false, error: expect.stringContaining('not public Surface targets') });
+      expect(leafCount()).toBe(1);
+    },
+  );
+
+  it.each(['tool', 'open', 'preview'] as const)('places a new %s in a separate pane, even if the helper was promoted before lookup finished', async verb => {
+    // The origin was captured while auxiliary. By dispatch its Session is a
+    // primary leaf, with a naked invocation eligible for takeover otherwise.
+    Object.assign(fake, { toolControl: vi.fn(async () => okToolLookup(null)) });
+    const controller = new AbortController();
+    await act(async () => root.render(<Wall initialPaneIds={['pane-a', 'helper-a']} />));
+    terminalRegistry.seedTerminalManualCwd('helper-a', '/repo');
+    reportRunning('helper-a', verb === 'tool' ? 'dor tool storybook' : 'dor open README.md');
+    const response = vi.fn();
+    await act(async () => window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
+      requestId: 'helper-tool', method: 'surface.tool', surfaceId: 'helper-a', helperParentId: 'pane-a',
+      params: { cwd: '/repo', ...(verb === 'tool' ? { name: 'storybook' } : { file: '/repo/README.md', preview: verb === 'preview' }) },
+      signal: controller.signal, respond: response,
+    } })));
+    await flush();
+    const created = Array.from(container.querySelectorAll('[data-lath-leaf]')).map(el => el.getAttribute('data-lath-leaf')!)
+      .find(id => id !== 'pane-a' && id !== 'helper-a');
+    try {
+      expect(created).toBeDefined();
+      act(() => promptBack(created!));
+      await waitUntil(() => response.mock.calls.length > 0);
+      expectStatus(response, 'created', { surfaceId: created });
+      expect(container.querySelector('[data-session-id="helper-a"]')).not.toBeNull();
+    } finally { await act(async () => { controller.abort(); }); }
+  });
+
+  it('reuses an ordinary ensure match from a helper', async () => {
+    await act(async () => root.render(<Wall initialPaneIds={['pane-a']} />));
+    act(() => {
+      terminalRegistry.applyTerminalSemanticEvents('pane-a', [{ type: 'cwd', cwd: terminalRegistry.cwdFromOsc633('/helper')! }]);
+      reportRunning('pane-a', 'pnpm dev');
+    });
+    const response = await issue('surface.ensure', { command: ['pnpm', 'dev'], cwd: '/helper' });
+    expect(response).toHaveBeenCalledWith(expect.objectContaining({ result: expect.objectContaining({ status: 'existing', surfaceId: 'pane-a' }) }));
+    expect(leafCount()).toBe(1);
+  });
+});
+
+it('starts a split in the invoking directory, inheriting its reference only without one', async () => {
+  await act(async () => root.render(<Wall initialPaneIds={['pane-a']} />));
+  act(() => terminalRegistry.applyTerminalSemanticEvents('pane-a', [{ type: 'cwd', cwd: terminalRegistry.cwdFromOsc633('/source')! }]));
+  for (const [cwd, expected] of [['/invoked', '/invoked'], [undefined, '/source']] as const) {
+    const respond = vi.fn();
+    await act(async () => dispatchDorControlRequest({ requestId: `split-${expected}`, surfaceId: 'pane-a',
+      method: 'surface.split', params: { direction: 'right', cwd, surface: 'pane-a', focusNeutral: true } }, respond));
+    await flush();
+    expect(pendingShellOpts.get(respond.mock.calls[0][0].result.surfaceId)?.cwd).toBe(expected);
+  }
 });

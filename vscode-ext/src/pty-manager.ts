@@ -1,5 +1,5 @@
 import type { HelperIdentity, TerminalContextRequest, TerminalContextInfo } from '../../lib/src/lib/terminal-context-types';
-import { fork, ChildProcess, type Serializable } from 'child_process';
+import { fork, ChildProcess } from 'child_process';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { randomBytes } from 'crypto';
@@ -21,6 +21,8 @@ export interface PtySpawnOptions {
   cwd?: string;
   shell?: string;
   args?: string[];
+  /** A rehydrated Tool's `DORMOUSE_DEHYDRATE` (docs/specs/dor-tool.md -> Reaping). */
+  dehydrate?: string;
 }
 
 // The pty host forwards the dor wire payloads verbatim over IPC.
@@ -46,6 +48,8 @@ interface PtyBufferEntry {
 
 const MAX_BUFFER_CHARS = 1_000_000;
 const ptyBuffers = new Map<string, PtyBufferEntry>();
+// Tombstones: a killed id is never resumable, so late output the child still
+// sends for it must not recreate a buffer. Cleared when `spawn` reuses the id.
 const killedPtyIds = new Set<string>();
 
 function trimChunks(chunks: string[], totalChars: number): number {
@@ -108,6 +112,15 @@ export function getBufferedPtys(): Map<string, { alive: boolean; exitCode?: numb
     result.set(id, { alive: entry.alive, exitCode: entry.exitCode, shell: entry.shell });
   }
   return result;
+}
+
+/**
+ * Every PTY this extension host still has alive. An exited one stays buffered
+ * until `kill()`, but can neither take a `^C` nor exit again, so no teardown
+ * step should wait on it.
+ */
+export function liveIds(): string[] {
+  return [...ptyBuffers].filter(([, entry]) => entry.alive).map(([id]) => id);
 }
 
 /**
@@ -275,6 +288,7 @@ function ensureChild(extensionPath: string): ChildProcess {
         listener({
           requestId: msg.requestId,
           surfaceId: msg.surfaceId,
+          helperParentId: msg.helperParentId,
           method: msg.method,
           params: msg.params,
           timeoutMs: msg.timeoutMs,
@@ -374,6 +388,7 @@ export function spawn(id: string, options?: PtySpawnOptions): void {
     args: options?.args,
     env: dorEnv,
     helper: options?.helper,
+    dehydrate: options?.dehydrate,
   });
 }
 
@@ -439,8 +454,15 @@ export function getCwd(id: string): Promise<string | null> {
 }
 
 export function getOpenPorts(id: string): Promise<OpenPort[]> {
-  return requestChild<{ ports?: OpenPort[] }>({ type: 'getOpenPorts', id }, (msg) => msg.type === 'openPorts' && msg.id === id, openPortRequestTimeoutMs(1))
-    .then((msg) => msg.ports || [], () => []);
+  return getOpenPortsMany([id]).then((ports) => ports[id] ?? []);
+}
+
+let openPortsSequence = 0;
+/** Every id's ports from one pty-host scan (`docs/specs/transport.md` -> "Port scan deadlines"). */
+export function getOpenPortsMany(ids: string[]): Promise<Record<string, OpenPort[]>> {
+  const requestId = `ports-${++openPortsSequence}`;
+  return requestChild<{ ports?: Record<string, OpenPort[]> }>({ type: 'getOpenPortsMany', ids, requestId }, (msg) => msg.type === 'openPortsMany' && msg.requestId === requestId, openPortRequestTimeoutMs(ids.length))
+    .then((msg) => msg.ports || {}, () => ({}));
 }
 
 export function write(id: string, data: string, options: WritePtyOptions = {}): void {
@@ -471,22 +493,29 @@ let ackRequestSeq = 0;
  * issued. The caller would then act on an interrupt whose `^C` had not been
  * written yet — deciding the next second press against a state that never
  * happened. The pty-host echoes `requestId` on both acks.
+ *
+ * Sent through the ready queue like every other message, so it reaches the
+ * child behind any spawn still queued there and finds that PTY. A child that
+ * exits first can never ack, so its exit ends the wait too.
  */
 function awaitChildAck(msg: Record<string, unknown>, ackType: string, timeoutMs: number): Promise<void> {
   return new Promise((resolve) => {
-    if (!child?.connected) { resolve(); return; }
+    const target = child;
+    if (!target?.connected) { resolve(); return; }
     const requestId = `ack-${++ackRequestSeq}`;
     const finish = () => {
       clearTimeout(timeout);
-      child?.off('message', handler);
+      target.off('message', handler);
+      target.off('exit', finish);
       resolve();
     };
     const timeout = setTimeout(finish, timeoutMs);
     const handler = (reply: any) => {
       if (reply.type === ackType && reply.requestId === requestId) finish();
     };
-    child.on('message', handler);
-    child.send({ ...msg, requestId } as Serializable);
+    target.on('message', handler);
+    target.on('exit', finish);
+    sendToChild({ ...msg, requestId });
   });
 }
 
@@ -499,9 +528,14 @@ export function interrupt(ids: string[], timeoutMs = 400): Promise<void> {
   return awaitChildAck({ type: 'interrupt', ids }, 'interruptDone', timeoutMs);
 }
 
-export function gracefulKillAll(timeoutMs = 2000): Promise<void> {
+/**
+ * SIGTERM every PTY this extension host still has alive and wait for their exits
+ * and final output. `pty-core` only ever kills an explicit set, so the ids are
+ * named here: this pty-host serves one window, and every live PTY in it is ours.
+ */
+export function gracefulKillLive(timeoutMs = 2000): Promise<void> {
   // Extra margin beyond the pty-host's own timeout.
-  return awaitChildAck({ type: 'gracefulKillAll', timeout: timeoutMs }, 'gracefulKillDone', timeoutMs + 500);
+  return awaitChildAck({ type: 'gracefulKill', ids: liveIds(), timeout: timeoutMs }, 'gracefulKillDone', timeoutMs + 500);
 }
 
 export function killAll(): void {

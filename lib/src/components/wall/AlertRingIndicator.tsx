@@ -62,7 +62,9 @@ export function AlertRingIndicator({ sessionId }: { sessionId: string }) {
         aria-atomic="true"
         aria-label={ALERT_RING_LABEL[row].pane}
         // Stacking context and geometry only; the wash strengths live on the
-        // child below — see `docs/specs/layout.md` -> Alarm overlay.
+        // child below as element opacity over the solid alarm colour, never a
+        // color-alpha utility: its `color-mix()` is unsupported by the standalone
+        // Safari 15 / Chrome 105 targets (`docs/specs/layout.md` -> Alarm overlay).
         className={clsx(layer, 'z-[19]')}
       >
         <div
@@ -72,6 +74,8 @@ export function AlertRingIndicator({ sessionId }: { sessionId: string }) {
             'absolute inset-0 bg-alarm-vs-terminal',
             TERMINAL_TOP_RADIUS_CLASS,
             TERMINAL_BOTTOM_RADIUS_CLASS,
+            // SPOKEN persists until the ring clears, an unbounded window, so it keeps
+            // the plain ring's light wash for the terminal text read through it.
             speaking ? 'opacity-20' : 'opacity-10',
           )}
         />

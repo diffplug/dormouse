@@ -7,7 +7,6 @@ import { closeBrowserSessions, setBrowserShellRuntime } from './agent-browser-ho
 import { serveWebview } from './webview-messaging';
 import { log } from './log';
 import { initToolHost } from './tool-host';
-import { forgetRetiredState } from './retired-state';
 import { captureAgentRecoveryCommands, mergeAlertStates, refreshSavedSessionStateFromPtys, takeRecoveryCommands } from './session-state';
 import { readPersistedSession } from '../../lib/src/lib/session-types';
 import { workspaceTitle } from './workspace-chrome';
@@ -68,6 +67,7 @@ function setupPanel(
     // Reflect this panel's Workspace union onto the editor-tab title
     // (`<title> 🔔 [TODO]`). Icon stays the Dormouse mascot.
     onUnion: (union) => { panel.title = workspaceTitle(union); },
+    shown: { current: () => panel.visible, onDidChange: panel.onDidChangeViewState },
     // Panels persist via vscode.setState() (per-panel, managed by VS Code).
     // Don't write to workspaceState — that's for the WebviewView only.
   });
@@ -78,9 +78,6 @@ export function activate(context: vscode.ExtensionContext) {
   // Storage location only; nothing binds a socket until there is a Burrow to run
   // (burrow.ts).
   initPeerLink(context);
-  // Whatever the Host→Burrow rename stranded, deleted unread and once
-  // (`retired-state.ts`).
-  void forgetRetiredState(context);
   context.subscriptions.push({ dispose: () => void disposePeerLink() });
   // The Burrow runs here, in the extension host that owns the PTYs — in
   // whichever window wins the bind (burrow.ts).
@@ -269,13 +266,13 @@ export async function deactivate() {
   await captureAgentRecoveryCommands(extensionContext, 1200);
   await poppedOutClosed;
   // Save session state while PTYs are still alive — CWD queries need live
-  // processes. Must happen before gracefulKillAll.
+  // processes. Must happen before the graceful kill.
   step('flushing sessions from webview');
   await flushAllSessions(1000);
   step('refreshing session state from live PTYs');
   await refreshSavedSessionStateFromPtys(extensionContext, getAlertStates());
   step('graceful kill');
-  await ptyManager.gracefulKillAll(2000);
+  await ptyManager.gracefulKillLive(2000);
   ptyManager.killAll();
   step('done');
 }

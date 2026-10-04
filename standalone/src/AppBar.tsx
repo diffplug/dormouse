@@ -17,7 +17,7 @@ type AppWindow = {
 };
 
 /** The browser-dev harness has no windows at all, so it gets no window ops and
- *  no cross-window drag (docs/specs/transport.md → "Standalone browser-dev
+ *  no cross-window drag (docs/specs/standalone.md → "Standalone browser-dev
  *  harness"). */
 const BROWSER_DEV = !!import.meta.env.VITE_DORMOUSE_BROWSER_DEV_HOST;
 
@@ -175,7 +175,7 @@ export function AppBar() {
       <DropCaret />
 
       {/* Theme and shell selection live in the Settings dialog at the
-          bottom-right of the window (docs/specs/theme.md,
+          bottom-right of the window (docs/specs/layout.md -> Baseboard,
           docs/specs/standalone.md), so the titlebar carries only the
           native-style window controls on Windows/Linux. */}
       {!IS_MAC && <WinControls />}

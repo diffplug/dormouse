@@ -9,7 +9,7 @@ import { gzipSync } from 'node:zlib';
 
 const CORE = '@xterm/xterm';
 const FORK = '@diffplug/xterm-addon-webgl-sdf';
-const ADDONS = ['fit', 'image', 'unicode-graphemes', 'webgl'].map((n) => `@xterm/addon-${n}`);
+const ADDONS = ['fit', 'image', 'serialize', 'unicode-graphemes', 'webgl'].map((n) => `@xterm/addon-${n}`);
 const oldCore = '6.1.0-beta.12';
 const newCore = '7.1.0-beta.12';
 const forkVersion = '0.20.0-sdf12.0';
@@ -26,12 +26,12 @@ function archive(manifest) {
   return gzipSync(Buffer.concat([header, data, Buffer.alloc((512 - data.length % 512) % 512 + 1024)]));
 }
 
-function run(args, { manifest = {}, missingRelease = false, mismatchPeer = false, standalone = pins } = {}) {
+function run(args, { manifest = {}, missingRelease = false, mismatchPeer = false, lib = pins, standalone = pins } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'xterm-bump-'));
   try {
     for (const dir of ['scripts', 'lib', 'standalone', 'canopy']) mkdirSync(join(root, dir));
     copyFileSync(new URL('./xterm-bump.mjs', import.meta.url), join(root, 'scripts/xterm-bump.mjs'));
-    for (const [dir, dependencies] of Object.entries({ lib: pins, standalone, canopy: { [CORE]: newCore, [FORK]: 'old-url', '@xterm/addon-webgl': '1.0.0-beta.2' } })) {
+    for (const [dir, dependencies] of Object.entries({ lib, standalone, canopy: { [CORE]: newCore, [FORK]: 'old-url', '@xterm/addon-webgl': '1.0.0-beta.2' } })) {
       writeFileSync(join(root, dir, 'package.json'), JSON.stringify({ dependencies }, null, 2));
     }
     const versions = { [CORE]: { [oldCore]: { gitHead: 'old-commit' }, [newCore]: { gitHead: 'new-commit' } } };
@@ -94,6 +94,13 @@ for (const [label, options, reason] of [
 test('default bump repairs standalone when lib already has the newest coherent set', () => {
   const result = run([], { standalone: { ...pins, [CORE]: oldCore } });
   assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(result.packages.standalone, pins);
+});
+test('default bump repins every addon lib depends on', () => {
+  const stale = { ...pins, '@xterm/addon-serialize': '1.0.0-beta.1' };
+  const result = run([], { lib: stale, standalone: stale });
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(result.packages.lib, pins);
   assert.deepEqual(result.packages.standalone, pins);
 });
 test('default dry-run preserves standalone drift', () => {

@@ -42,29 +42,37 @@ Successive startup listeners can appear in different scan ticks. One unchanged t
 
 A hardcoded Storybook port can disagree with the port it obtains under contention, while Vite with strict-port behavior can fail entirely. Discovery therefore checks the Session process tree. An OSC can cross SSH, but the current host scan still requires a locally discoverable listener.
 
-Every preview-slot retarget of a serving Tool (the built-in file viewer, `builtin:folder`, a web viewer) otherwise waits up to one 1.5-second poll before its browser frames (2026-09). The `serve` announcement already names the port, so scanning when it arrives removes most of that wait without trusting it any further. Its first form ran a full tick per announcement (2026-09-28): every unbound Tool was scanned again milliseconds after the poll, which autobind counted as its unchanged tick, so a boot's first listener could frame before the next one bound.
+Every preview-slot retarget of a serving Tool (the built-in file viewer, `builtin:folder`, a web viewer) otherwise waits up to one 1.5-second poll before its browser frames (2026-09). The `serve` announcement already names the port, so scanning when it arrives removes most of that wait without trusting it any further. A full tick per announcement (2026-09-28) let autobind count a rescan milliseconds after the poll as its unchanged tick, so the scan covers the announcing Tool alone.
 
 ## Lifecycle
 
-### September 2026 innerdogfood QC record
-
-The `dor-tool-qc` run (from `4c7f9012`, on the real standalone sidecar, staged
-CLI, PTYs, and iframe proxy) exercised project approval, keyed reuse, serving,
-open-rule dispatch, and the built-in viewer's formats and failures. Two findings
-constrain later edits: at that baseline the Tools feature flag could reject
-creation and standalone `dor open` split, both since superseded by
-always-enabled Tools and eligible inline opening; and Chromium's native PDF
-plugin failed inside the normal iframe sandbox (see
-`docs/specs/dor-tools-builtin.rationale.md` → File viewer). The
-run did not cover Tool transfer, native-window movement, native Tauri/VS Code
-rendering, Windows shells, or cold restore. The reusable recipe is
-`docs/testing/dor-tool-qc.md`.
-
 The September 2026 integration reuses Terminal Context for the Tool's primary terminal. The auxiliary helper's automatic refresh, Reset, and Promote semantics do not describe a serving command, whose Session also owns the browser and remote terminal identity. Sharing the presentation avoids introducing a second navigation mechanism or a second shell.
+
+## Reaping
+
+Clean or unreported state cannot mean "safe to stop" (decided 2026-10-03). Most Tools report no `state` at all, and a viewer that reports clean can still hold what no args restore: a REPL's variables, a tree's expansion, a half-run job. Reaping such a Tool would lose work while its pane looked intact. The Tool is the only party that knows, so it opts in, and `dehydrate: true` is the opt-in: a stateless Tool announces it and emits nothing, and its args are its whole state. `persist: "never"` lets a run that opted in withdraw for a stretch (a long job) by announcing again, since announcements are last-write-wins.
+
+Ctrl+C is the graceful-stop signal because it is the one stop every host can already deliver. SIGTERM to the PTY leader reaches the shell, which an interactive shell ignores; node-pty exposes neither the foreground process group nor the master fd to signal it; Windows has no SIGTERM for console programs. Writing `\x03` to the PTY makes the line discipline (or ConPTY's `CTRL_C_EVENT`) deliver an interrupt to the foreground job, which Node surfaces as `SIGINT` on both. The preview slot's retarget already relies on it (Preview slot). Unverified on a Windows machine as of 2026-10-03.
+
+The default threshold, 30 minutes, trades a boot against memory. A rehydrate costs a cold start (seconds for a dev server), and the payload keeps the Tool's own state, so a premature reap costs little; Edge's sleeping tabs, which restore pages without any payload, default to 2 hours with 5 minutes as their shortest setting. Switching Workspaces within a task takes minutes; one left over a meeting is parked work. Output resets the clock because a Tool still printing (a watcher rebuilding on save) is in use even when unseen.
+
+The environment carries the payload rather than the typed command: a `VAR=value cmd` prefix has no PowerShell spelling, applies only to the first command of a shell-string `run`, lands the JSON in shell history and the echoed line, and breaks command matching against the stored command. Spawn environment reaches every later command in that shell, a retargeted preview slot's included, so the integration scripts unset it at the first command's finish. WSL shells do not inherit it (no `WSLENV` entry), so they rehydrate from args.
+
+The payload stays in memory because the snapshot holds structure, never process state (`docs/specs/transport.md` → What is persisted), and a payload written there would outlive the run that vouched for it. The `reaped` mark does persist: without it a resume drops a pane whose PTY is gone as a stale save, and a cold restore would boot every reaped Tool of every hidden Workspace at once.
+
+The ladder has no retype (decided 2026-10-03, PR #961 review): no shipped Tool needs one — `readDehydrated` answers null for a bad value, and `builtin:folder` skips paths it no longer has — and a draft that retyped misfired: a user's Ctrl+C during startup (exit 130) relaunched the Tool, and a Tool whose args fail printed its error twice.
+
+The stop silences the run's command-exit watch first. Observed in the innerdogfood harness (2026-10-03): a folder viewer launched while engaged had its exit seen, so the reap's Ctrl+C rang `COMMAND_EXIT` while it sat Doored, and the rehydrate carried that ring back as a TODO; a push or spoken alarm would have announced the host's own housekeeping.
+
+A preview slot is excluded because its retarget interrupts and retypes in place (Preview slot), which a Session with no shell cannot take. A Tool with an auxiliary helper keeps a second shell alive anyway, and killing the parent would orphan it.
 
 ## Naming
 
 A name read from a browser or terminal passes through whatever those show mid-switch: the dev-server chip that named serving Tools went chip, bare address, chip on every preview retarget (`docs/specs/layout.rationale.md` → Pane header, 2026-09-29). The dedupe key is what tells two Surfaces of one Tool apart, so its elements beyond the name are what the name adds; an absolute path's last component is usually the checkout or file it scopes to.
+
+## CLI
+
+Routing `dor tool` to a native editor on one host would change its result from a Surface handle to a host-specific side effect. Native file opening remains a separate operation.
 
 ## Opening local files
 
@@ -94,12 +102,6 @@ Supersession stops once a retarget has typed its command. A newer preview interr
 
 Observed live in the innerdogfood harness (2026-09-28), a retarget without a hold went: the old browser retired at once, the pane flipped to its terminal face (`^C`, a prompt, the typed command), the new frame appeared as a white blank, then the new document painted, while the header label passed through the terminal's derived titles and the dev-server chip came and went.
 
-A screenshot of the old view is not the ghost for an iframe: a cross-origin frame's pixels cannot be read from the parent. None is needed either, since a loaded document stays painted after its server exits and CSS blurs a cross-origin frame. The blur is a `backdrop-filter` overlay, not the ghost's own `filter`: live in Chromium (2026-09-28), `filter: blur` sampled transparent pixels past the pane edge and rimmed a white page dark, while the backdrop's edges stayed clean. WebKit's edge handling is unobserved. A screencast's last frame is copied canvas to canvas, so nothing is encoded on the main thread as the preview arrives (a JPEG `toDataURL` of the device-resolution frame did that) and no pixels are read; keeping its live view would hold a session the retarget has closed.
-
-Dimming was rejected (Ned, 2026-09-28): a dim reads differently on light and dark themes, and on a dark theme a dimmed page barely changes. Blur alone reads the same on both.
-
-A built-in viewer prints only its `OSC 2` title and `OSC 367 serve`, so OSC-only output never ends a switch before its browser paints. The shell's echo of the typed command can arrive in the chunk that starts it, so the echo does not count as output either.
-
 ## Terminal links
 
 xterm.js 6.1.0-beta.304 activates a link on every `mouseup` whose press began on that link, passing the `mouseup`. A two-press double-click sent to Chromium over CDP activated with `detail` 1, then 2 (2026-09-28). `agent-browser dblclick` sends a single press with click count 2, so it activates once and cannot probe this. A triple-click's third activation would be another `dor open`, starting an unkeyed Tool twice.
@@ -107,8 +109,6 @@ xterm.js 6.1.0-beta.304 activates a link on every `mouseup` whose press began on
 The display-text rule replaces the dialog's consent: the path the click opens is the text clicked. Output that can run `dor open` gains nothing from a link; output that cannot, such as a remote shell over ssh, names its own host in `ls --hyperlink`, which the host check refuses. OSC 7 locality (`isRemoteFileHost` in `lib/src/lib/terminal-state.ts`) differs: it treats every named host as remote, this machine's name included, while a link naming this machine opens, since `ls --hyperlink` names the local host too.
 
 ## Take-over
-
-User input queued before injection can complete ahead of the Tool. A changed completion id alone releases the queue too early; matching the command and its start directory distinguishes the requested launch while accepting a Tool that finishes between polls.
 
 An accepted takeover has already answered the CLI and promised its placement. Switching Workspaces while the shell returns to its prompt changes presentation without changing ownership of that shell; abandoning the launch then silently loses a successful request. Initial visibility still distinguishes a human's invocation from background placement, while the post-prompt checks protect the live Session and Workspace.
 
@@ -118,15 +118,13 @@ An accepted takeover has already answered the CLI and promised its placement. Sw
 
 ## Security
 
-Hostile text printed by the designated command can contain an announcement. The current process-tree check limits port selection to that Session's discovered listeners; browser content still executes under the existing renderer boundaries. Earlier text describing arbitrary local-port selection did not match the scan implementation.
+Hostile text printed by the designated command can contain an announcement. The current process-tree check limits port selection to that Session's discovered listeners; browser content still executes under the existing renderer boundaries.
 
 ## Persistence and hosts
 
 A Tool may take over a PowerShell Session even while the selected default is Bash, and the selected default may change before restart. Its already-quoted command string cannot safely move between those shells. Retaining resolved argv preserves literal filenames and lets cold restore quote for its actual shell without retaining an obsolete shell executable.
 
 A derived URL or browser daemon binding belongs to one execution. Reusing it after cold restore can connect a Tool to another process that obtained the old port. The saved command and declaration metadata are sufficient to start again and discover the new endpoint.
-
-Routing `dor tool` to a native editor on one host would change its result from a Surface handle to a host-specific side effect. Native file opening remains a separate operation.
 
 A Workspace transfer carries the live browser binding separately from its durable record. The arrival record can reach disk while the windows coordinate, whereas the content channel stays in memory; reusing the saved-record projection alone would reopen a Tool browser and lose its current page state. Pending approvals and unfinished browser startup still own asynchronous work in the source window, so the move waits for the user to resolve the approval or retry after startup.
 
@@ -137,3 +135,12 @@ JSON escaping can double the source length of a valid path, so a field within it
 ## Closing unsaved Tools
 
 Host save request ids restart at 1 on a replacement connection. A completion that reads the current frame connection can therefore acknowledge a new request after reconnect, permitting closure before the new save finishes. The accepted host object distinguishes connection generations even when a reconnect repeats its nonce.
+
+## Run end
+
+A retained designation outlived its purpose (2026-10-03): `dor o` took over a plain terminal, the viewer exited, and the pane looked and behaved like an ordinary shell, yet its Terminal Context, still in Tool mode, showed the pane's own terminal. Claude, then `ls`, appeared live in what read as the helper slot, with no Reset or Promote and the "Tool terminal" label hidden below 48rem. The app log showed no helper PTY spawned all afternoon until the user moved to a fresh pane.
+
+Ned chose an end on command exit over an end on the next different command (2026-10-03): an exited Tool has nothing left to present, and the host's own interrupts need one hold anyway to keep them from ringing, so the same hold exempts them here.
+
+Kill stays Kill so it keeps coordinating with the deferred-kill restore window; Break is the separate gesture. Break sits beside the Terminal Context control rather than Kill, and asks for the kill confirmation's letter, since an accidental Break has no rejoin (Ned, 2026-10-03). Break splits into parts rather than stopping the run, because what users reach for is the page's browser chrome and renderer (a Storybook renderer swap, Back), which a plain browser Surface already has; Tool headers keep no navigation ([Pane header](layout.rationale.md)).
+

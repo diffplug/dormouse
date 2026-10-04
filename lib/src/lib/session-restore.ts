@@ -1,10 +1,25 @@
 import type { LathNode } from './lath/model';
-import { type LathPersistedLayout, isLathPersistedLayout } from './lath/persistence';
+import { type LathPersistedLayout, type LeafMeta, isLathPersistedLayout } from './lath/persistence';
 import type { PlatformAdapter } from './platform/types';
 import { PLATFORM_STRING } from './platform';
 import { buildShellCommandForKind, shellCommandKind } from 'dor/commands/shell-quote';
-import { carrySurfaceRefs, readPersistedSession, type PersistedDoor, type PersistedSession, type PersistedSurfaceRefs } from './session-types';
-import { getDefaultShellOpts, restoreBrowserSurfaceTodo, restoreTerminal } from './terminal-registry';
+import { carrySurfaceRefs, readPersistedSession, type PersistedDoor, type PersistedPane, type PersistedSession, type PersistedSurfaceRefs } from './session-types';
+import { createReapedTerminal, getDefaultShellOpts, restoreBrowserSurfaceTodo, restoreTerminal, setTerminalActivity } from './terminal-registry';
+import { markToolReaped } from './tool-reap-store';
+
+/** Whether `pane` is a Tool saved while reaped, which this host restores with
+ *  no process (`docs/specs/dor-tool.md` -> Reaping). */
+export function isReapedToolPane(platform: PlatformAdapter, pane: PersistedPane): boolean {
+  return platform.reapsTools === true && pane.surfaceType === 'tool' && pane.tool?.reaped === true;
+}
+
+/** Rebuild a reaped Tool's Session with no PTY, its alert shown and kept for
+ *  the rehydrate's spawn, which starts it from bare args when it is seen. */
+export function restoreReapedTool(pane: PersistedPane): void {
+  createReapedTerminal(pane.id, { cwd: pane.cwd, title: pane.title, shell: getDefaultShellOpts()?.shell, untouched: pane.untouched });
+  if (pane.alert) setTerminalActivity(pane.id, pane.alert);
+  markToolReaped(pane.id, { payload: null, cwd: pane.cwd, alert: pane.alert ?? null });
+}
 
 export interface RestoredSession {
   paneIds: string[];
@@ -32,22 +47,72 @@ export interface RestoreSources {
   savedSession?: PersistedSession | null;
 }
 
+/** The saved string belongs to the previous Session's shell. Preserve literal
+ *  commands, but quote saved argv anew for the shell this restore will spawn. */
+function requoteToolCommand(pane: PersistedPane): PersistedPane {
+  if (pane.surfaceType !== 'tool' || !pane.tool?.argv) return pane;
+  const kind = shellCommandKind(getDefaultShellOpts()?.shell, PLATFORM_STRING);
+  return { ...pane, command: buildShellCommandForKind(kind, pane.tool.argv) };
+}
+
+/** A Tool leaf's params carry the command its pane re-runs. */
+function withToolCommand(params: Record<string, unknown> | undefined, pane: PersistedPane): Record<string, unknown> | undefined {
+  return pane.surfaceType === 'tool' && pane.tool?.argv
+    ? { ...params, command: pane.command, toolArgv: pane.tool.argv } : params;
+}
+
+/**
+ * One pane's cold restore: a new Session for a terminal or Tool, the TODO for a
+ * browser, whose page the layout recreates. Reopen rebuilds a closed Surface
+ * through the same path (`docs/specs/reopen.md`), with no agent to resume.
+ */
+function restorePane(pane: PersistedPane, resumeCommand: string | null): void {
+  // Browser surfaces have no PTY or xterm; the persisted layout recreates them
+  // (docs/specs/transport.md). Calling restoreTerminal here would mint a stray
+  // PTY + xterm for the pane id that never gets mounted.
+  if (pane.surfaceType === 'browser') {
+    restoreBrowserSurfaceTodo(pane);
+    return;
+  }
+  const shellOpts = getDefaultShellOpts();
+  restoreTerminal(pane.id, {
+    cwd: pane.cwd,
+    title: pane.title,
+    shell: shellOpts?.shell,
+    args: shellOpts?.args,
+    untouched: pane.untouched,
+    // The fresh PTY inherits the pane's persisted TODO: the host seeds it at
+    // the spawn. Restore-only: a live resume still has the host's own state
+    // (docs/specs/alert.md -> "Persist only").
+    alert: pane.alert,
+    // A tool command is durable, approved Session state and wins over the
+    // host's unrelated single-use agent recovery channel.
+    ...(pane.surfaceType === 'tool'
+      ? { command: pane.command ?? null, requireIntegration: true, resumeCommand: null }
+      : { resumeCommand }),
+  });
+}
+
+/**
+ * Rebuild a closed Surface as `id`: its pane restored as cold start would,
+ * and the leaf meta to lay it out with.
+ */
+export function reopenPane(id: string, pane: PersistedPane, meta: LeafMeta): LeafMeta {
+  const requoted = requoteToolCommand({ ...pane, id });
+  restorePane(requoted, null);
+  return { ...meta, params: withToolCommand(meta.params, requoted) };
+}
+
 export function restoreSession(platform: PlatformAdapter, sources: RestoreSources = {}): RestoredSession | null {
   const saved = readPersistedSession(sources.savedSession !== undefined
     ? sources.savedSession
     : platform.getState());
   if (!saved || !saved.panes || saved.panes.length === 0) return null;
-  const shellOpts = getDefaultShellOpts();
-  const shellKind = shellCommandKind(shellOpts?.shell, PLATFORM_STRING);
-  // The saved string belongs to the previous Session's shell. Preserve literal
-  // commands, but quote saved argv anew for the shell this restore will spawn.
-  const panes = saved.panes.map(pane => pane.surfaceType === 'tool' && pane.tool?.argv
-    ? { ...pane, command: buildShellCommandForKind(shellKind, pane.tool.argv) } : pane);
+  const panes = saved.panes.map(requoteToolCommand);
   const panesById = new Map(panes.map(pane => [pane.id, pane]));
   const doors = (saved.doors ?? []).map(door => {
     const pane = panesById.get(door.id);
-    return pane?.surfaceType === 'tool' && pane.tool?.argv
-      ? { ...door, params: { ...door.params, command: pane.command, toolArgv: pane.tool.argv } } : door;
+    return pane ? { ...door, params: withToolCommand(door.params, pane) } : door;
   });
   const doorIds = new Set(doors.map((item) => item.id));
   const visiblePanes = panes.filter((pane) => !doorIds.has(pane.id));
@@ -59,9 +124,8 @@ export function restoreSession(platform: PlatformAdapter, sources: RestoreSource
   if (lathLayout) {
     const leafMeta = { ...lathLayout.leafMeta };
     for (const pane of visiblePanes) {
-      if (pane.surfaceType !== 'tool' || !pane.tool?.argv) continue;
       const meta = leafMeta[pane.id];
-      leafMeta[pane.id] = { ...meta, params: { ...meta.params, command: pane.command, toolArgv: pane.tool.argv } };
+      leafMeta[pane.id] = { ...meta, params: withToolCommand(meta.params, pane) };
     }
     lathLayout = { ...lathLayout, leafMeta };
   }
@@ -91,29 +155,11 @@ export function restoreSession(platform: PlatformAdapter, sources: RestoreSource
   const recoveryCommands = platform.getRecoveryCommands?.() ?? {};
 
   for (const pane of panes) {
-    // Browser surfaces have no PTY or xterm; the persisted layout recreates them
-    // (docs/specs/transport.md). Calling restoreTerminal here would mint a stray
-    // PTY + xterm for the pane id that never gets mounted.
-    if (pane.surfaceType === 'browser') {
-      restoreBrowserSurfaceTodo(pane);
+    if (isReapedToolPane(platform, pane)) {
+      restoreReapedTool(pane);
       continue;
     }
-    restoreTerminal(pane.id, {
-      cwd: pane.cwd,
-      title: pane.title,
-      shell: shellOpts?.shell,
-      args: shellOpts?.args,
-      untouched: pane.untouched,
-      // The fresh PTY inherits the pane's persisted TODO: the host seeds it at
-      // the spawn. Restore-only: a live resume still has the host's own state
-      // (docs/specs/alert.md -> "Persist only").
-      alert: pane.alert,
-      // A tool command is durable, approved Session state and wins over the
-      // host's unrelated single-use agent recovery channel.
-      ...(pane.surfaceType === 'tool'
-        ? { command: pane.command ?? null, requireIntegration: true, resumeCommand: null }
-        : { resumeCommand: recoveryCommands[pane.id] ?? null }),
-    });
+    restorePane(pane, recoveryCommands[pane.id] ?? null);
   }
 
   return {

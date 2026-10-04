@@ -8,6 +8,8 @@
  * does, which is exactly the behavior the close-code policy turns on.
  */
 
+import { RELAY_PING, RELAY_PONG } from 'remote-lib-common';
+
 import type { RemoteWebSocket } from './ws';
 
 /**
@@ -42,6 +44,11 @@ export class FakeSocket implements RemoteWebSocket {
   /** Every message sent that is not JSON: the relay heartbeat's pings. */
   readonly texts: string[] = [];
   /**
+   * Whether an open socket answers each heartbeat ping with the pong, as every
+   * Relay does. A test of a Relay that stops answering turns it off.
+   */
+  answersPings = true;
+  /**
    * Called with every frame this socket is asked to send. The seam the relay
    * stub (`test-relay.ts`) bridges two of these sockets through; without it a
    * test would have to poll {@link sent}, which turns a routing rule into a
@@ -60,6 +67,7 @@ export class FakeSocket implements RemoteWebSocket {
       frame = JSON.parse(data) as Record<string, unknown>;
     } catch {
       this.texts.push(data);
+      if (this.answersPings && this.readyState === 1 && data === RELAY_PING) this.receiveRaw(RELAY_PONG);
       return;
     }
     this.sent.push(frame);

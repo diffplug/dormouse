@@ -22,11 +22,12 @@ import { layout, sashes } from '../../lib/lath/layout';
 import { LATH_LAYER_DYING, LATH_LAYER_ELEVATED, LATH_LAYER_TILED } from '../../lib/lath/animator';
 import { type DropTarget, resize } from '../../lib/lath/ops';
 import { useFocusRingColor } from '../../lib/themes/use-focus-ring-color';
-import { ELEVATED_PANE_SHADOW, PANE_HEADER_HEIGHT_PX, TERMINAL_SELECTION_BORDER_RADIUS } from '../design';
+import { ELEVATED_PANE_SHADOW, PANE_HEADER_HEIGHT_PX } from '../design';
 import type { PaneProps } from './pane-props';
 import { type LeafMeta, LATH_LAYOUT_OPTS } from './lath-wall-store';
 import { nowMs, type LathWallEngine } from './lath-wall-engine';
-import { type DragController, createDragController } from './lath-drag-controller';
+import { type DragController, type DragPreview, createDragController } from './lath-drag-controller';
+import { LathDropPreview } from './LathDropPreview';
 import { TerminalPanel } from './TerminalPanel';
 import { BrowserPanel } from './BrowserPanel';
 import { ToolPanel } from './ToolPanel';
@@ -50,7 +51,9 @@ const Z_ZOOMED = 40;
 /** The drop-preview overlay floats above every tiled/dying leaf (a drag can't start
  *  while a leaf is zoomed, so it never competes with `Z_ZOOMED`). */
 const Z_PREVIEW = 45;
-/** Reveal half a pane header of tiled layout around an elevated zoomed pane. */
+/** Reveal half a pane header of tiled layout around an elevated zoomed pane: the thin
+ *  perimeter plus the shadow read as "floating above the wall", not replacing it, so
+ *  the user trusts unzoom to put everything back. */
 export const LATH_ZOOM_MARGIN = PANE_HEADER_HEIGHT_PX / 2;
 /** Soft app-chrome halo separates the elevated pane from tiled content below. */
 export const LATH_ZOOM_SHADOW = ELEVATED_PANE_SHADOW;
@@ -281,7 +284,7 @@ export function LathHost({
   lath: LathWallEngine;
   /** Wall commits the resize (as an op proposal) once the drag ends. */
   onCommitResize: (splitPath: number[], boundary: number, deltaPx: number) => void;
-  /** focusin inside a leaf's subtree (embed self-focus adoption, acceptance row 8). */
+  /** focusin inside a leaf's subtree (embed self-focus adoption). */
   onLeafFocused?: (id: string) => void;
   /** A pane drag crossed its threshold — the Wall applies its selection policy. */
   onDragStart?: (id: string) => void;
@@ -357,14 +360,14 @@ export function LathHost({
   // Wall sets `externalDrag`, carrying the press point). Both feed the same core
   // `hitTest` and render one preview overlay. ---
 
-  // Everything the once-built controller reads through: the latest store snapshot + Wall
-  // callbacks, re-mirrored each render so it always sees current values.
-  const latestRef = useRef({ snapshot, onDragStart, onProposeMove, onProposeMinimize, onExternalDrop, workspaceDrag });
-  latestRef.current = { snapshot, onDragStart, onProposeMove, onProposeMinimize, onExternalDrop, workspaceDrag };
+  // Wall callbacks are mirrored each render; the controller reads the store
+  // directly so a synchronous commit cannot race a release.
+  const latestRef = useRef({ onDragStart, onProposeMove, onProposeMinimize, onExternalDrop, workspaceDrag });
+  latestRef.current = { onDragStart, onProposeMove, onProposeMinimize, onExternalDrop, workspaceDrag };
 
   // The current preview overlay rect (null → no overlay). The dragged leaf itself is
   // dimmed imperatively; only this rect is React state.
-  const [dragPreview, setDragPreview] = useState<Rect | null>(null);
+  const [dragPreview, setDragPreview] = useState<DragPreview | null>(null);
   // Set when a real drag ends so the click the browser synthesizes on pointerup does
   // not re-fire header/door click behavior; cleared by the click suppressor (or a tick).
   const suppressNextClickRef = useRef(false);
@@ -399,6 +402,7 @@ export function LathHost({
   if (dragControllerRef.current === null) {
     dragControllerRef.current = createDragController({
       latestRef,
+      getSnapshot: store.getSnapshot,
       containerRef,
       rectRef,
       leafElsRef,
@@ -444,23 +448,42 @@ export function LathHost({
         onCommitResize(d.splitPath, d.boundary, d.delta);
       }
     };
-    const onUp = () => end(true);
+    const onUp = (e: PointerEvent) => {
+      const d = dragRef.current;
+      if (d) d.delta = d.dir === 'row' ? e.clientX - d.startX : e.clientY - d.startY;
+      end(true);
+    };
+    const onCancel = () => end(false);
+    // Paths belong to the drag-start tree. A live structural change invalidates
+    // the gesture, while metadata writes remain harmless.
+    const unsubscribe = store.subscribe(() => {
+      const d = dragRef.current;
+      const current = store.getSnapshot();
+      if (d && (current.tree !== d.tree || current.zoomedId !== null)) end(false);
+    });
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') end(false); // cancel: revert the preview, commit nothing
     };
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onCancel);
+    window.addEventListener('blur', onCancel);
     window.addEventListener('keydown', onKey);
     return () => {
       if (rafId !== null) cancelAnimationFrame(rafId);
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onCancel);
+      window.removeEventListener('blur', onCancel);
+      unsubscribe();
       window.removeEventListener('keydown', onKey);
     };
-  }, [dragging, onCommitResize]);
+  }, [dragging, onCommitResize, store]);
 
   const activeTree = preview ?? snapshot.tree;
   const { targets: frames, layers } = presentationTargets(activeTree, rect, snapshot.zoomedId);
+  const previewFramesRef = useRef(frames);
+  previewFramesRef.current = frames;
   const contextSource = terminalContext && frames.get(terminalContext.id);
   const contextMeta = terminalContext && snapshot.leafMeta.get(terminalContext.id);
   const sashList = sashes(activeTree, rect, LATH_LAYOUT_OPTS);
@@ -556,6 +579,14 @@ export function LathHost({
   const applyFrames = useCallback(
     (t: number) => {
       const paint = animator.framesAt(t);
+      // A live sash owns geometry, including when a previous layout is still
+      // tweening. Keep those animation ticks from overwriting the drag preview.
+      if (dragRef.current) {
+        for (const [id, rect] of previewFramesRef.current) {
+          const frame = paint.get(id);
+          if (frame && !animator.isDying(id)) paint.set(id, { ...frame, rect });
+        }
+      }
       for (const [id, el] of leafElsRef.current) {
         const f = paint.get(id);
         if (!f) continue; // not tracked (e.g. just-removed) — leave React's styles
@@ -563,16 +594,19 @@ export function LathHost({
         el.style.top = `${f.rect.y}px`;
         el.style.width = `${f.rect.width}px`;
         el.style.height = `${f.rect.height}px`;
-        el.style.opacity = f.opacity >= 1 ? '' : `${f.opacity}`;
+        const opacity = dragController.opacityFor(id, f.opacity);
+        el.style.opacity = opacity >= 1 ? '' : `${opacity}`;
         el.style.zIndex = `${zIndexForLayer(f.layer)}`;
         el.style.boxShadow = f.layer >= LATH_LAYER_ELEVATED ? LATH_ZOOM_SHADOW : '';
         // Elevated zoom is interactive; only the animator's dying state makes a
         // pane inert while it fades.
         el.style.pointerEvents = animator.isDying(id) ? 'none' : '';
       }
+      // Inside the paint, before `pump` calls `notifyFrames`, so the selection ring
+      // measures the Terminal Context helper where it was just painted.
       lath.placeContext(paint);
     },
-    [animator, lath],
+    [animator, lath, dragController],
   );
 
   // The single tick body and the loop's entry point (from the retarget effects and the
@@ -723,6 +757,10 @@ export function LathHost({
             className="lath-sash"
             style={style}
             onPointerDown={(e) => {
+              if (e.button !== 0 || dragRef.current) return;
+              const current = store.getSnapshot();
+              // The displayed sash belongs to this render, not a newer tree.
+              if (current.tree !== snapshot.tree || current.zoomedId !== null) return;
               if (dragController.hasDrag()) return; // a pane drag has the pointer
               e.preventDefault();
               (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
@@ -749,24 +787,7 @@ export function LathHost({
           multiPane={!snapshot.zoomedId && frames.size > 1} preferences={contextPreferences.current} />
       )}
 
-      {/* Drop-preview overlay: the exact rect the current candidate would commit to,
-          painted in the selection color (translucent fill + solid border). */}
-      {dragPreview && (
-        <div
-          data-lath-drop-preview=""
-          className="lath-drop-preview"
-          style={{
-            left: dragPreview.x,
-            top: dragPreview.y,
-            width: dragPreview.width,
-            height: dragPreview.height,
-            zIndex: Z_PREVIEW,
-            border: `1px solid ${selectionColor}`,
-            borderRadius: TERMINAL_SELECTION_BORDER_RADIUS,
-            backgroundColor: `color-mix(in srgb, ${selectionColor} 22%, transparent)`,
-          }}
-        />
-      )}
+      {dragPreview && <LathDropPreview preview={dragPreview} wall={rect} color={selectionColor} zIndex={Z_PREVIEW} />}
     </div>
   );
   return (

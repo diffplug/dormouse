@@ -165,6 +165,9 @@ export interface SpawnPtyOptions {
   args?: string[];
   helper?: HelperIdentity;
   alert?: PersistedAlertState;
+  /** A rehydrated Tool's `DORMOUSE_DEHYDRATE`, set on this spawn alone
+   *  (`docs/specs/dor-tool.md` -> Reaping). */
+  dehydrate?: string;
 }
 
 export interface WritePtyOptions {
@@ -225,6 +228,12 @@ export interface PlatformAdapter {
   hostOwnsShells?: boolean;
 
   /**
+   * Whether Settings offers Labs (`docs/specs/reopen.md` → "Labs: No-confirm
+   * delayed kill"). Absent reads as `false`; only the Standalone adapters set it.
+   */
+  offersLabs?: boolean;
+
+  /**
    * Whether the host updates Dormouse itself, so Settings → Network offers no
    * update check of its own. Absent reads as `false`.
    *
@@ -275,13 +284,12 @@ export interface PlatformAdapter {
   getOpenPorts(id: string): Promise<OpenPort[]>;
   /**
    * One answer per id, for a whole listing at once (`dor list --ports`, and
-   * `--all` across every Workspace). Present where a host can resolve many in
-   * one scan, for the reason `getCwds` is: standalone walks the process table
-   * and the socket table synchronously on the sidecar's only event loop, so N
-   * terminals must cost one pass rather than N. Absent falls back to
-   * `getOpenPorts` per id.
+   * `--all` across every Workspace) or a Dev-Server Chip / Tool serving pass.
+   * Every host answers from one scan, for the reason `getCwds` is: each scan
+   * spawns process-table and socket-table subprocesses, so N terminals must
+   * cost one pass rather than N. An id absent from the answer was not scanned.
    */
-  getOpenPortsMany?(ids: string[]): Promise<Record<string, OpenPort[]>>;
+  getOpenPortsMany(ids: string[]): Promise<Record<string, OpenPort[]>>;
 
   // Clipboard support for file references and raw images.
   readClipboardFilePaths(): Promise<string[] | null>;
@@ -311,16 +319,25 @@ export interface PlatformAdapter {
   // Renderer"). Stands up a loopback proxy in front of a `dor iframe` target and
   // returns the proxy URL the panel should frame, or a structured reason it
   // could not. Absent on hosts with no process to run a proxy (e.g. the web
-  // host), where the panel falls back to a raw, uninstrumented `<iframe>`.
-  createIframeProxyUrl?(targetUrl: string): Promise<IframeProxyResult>;
+  // host), where the panel falls back to a raw, uninstrumented `<iframe>`;
+  // the desktop playground answers only for its own virtual viewers.
+  // `lease` names the mounted view holding the grant: it keeps the grant, and
+  // its origin, until `releaseIframeProxy` (docs/specs/dor-browser.md →
+  // "Iframe Proxy Leases").
+  createIframeProxyUrl?(targetUrl: string, lease?: string): Promise<IframeProxyResult>;
+  releaseIframeProxy?(lease: string): void;
 
   // Dor Tools (see docs/specs/dor-tool.md). Two operations behind one method:
   // resolve a tool name against the nearest dormouse.yml, and record a trust
   // decision a human made in Dormouse's own chrome. Both need a filesystem, so
   // this is absent on hosts with none (the web demo), where `dor tool <name>`
-  // reports that the host cannot read a tool file. `dor tool -- <command>`
+  // reports that the host cannot read a tool file; the desktop playground
+  // answers `open` from its read-only snapshot. `dor tool -- <command>`
   // needs none of it and works everywhere.
   toolControl?(request: ToolHostRequest): Promise<ToolControlResult>;
+  /** This host stops idle Tools and restarts them with `SpawnPtyOptions.dehydrate`
+   *  (`docs/specs/dor-tool.md` -> Reaping). Absent where no process runs. */
+  readonly reapsTools?: boolean;
 
   // The repository holding each local directory, for Workspace auto-naming
   // (docs/specs/layout.md → "Workspace names"). Absent on a host with no local
@@ -348,6 +365,11 @@ export interface PlatformAdapter {
   /** Hosts that hand Workspaces between windows stamp marks; returns the
    *  unsubscribe. Absent on hosts with one window. */
   onPtyMarked?(handler: (detail: PtyMarkedDetail) => void): () => void;
+  /** Reopen the newest window closed with everything reopenable, when it
+   *  closed after `newerThan` (ms since the epoch), in a new window; resolves
+   *  whether one opened (`docs/specs/reopen.md`). Absent on hosts with one
+   *  window. */
+  reopenClosedWindow?(newerThan: number): Promise<boolean>;
   /** Hand a Workspace to another window — a label, or `'new'` for one torn out
    *  — through the host's transfer (`docs/specs/standalone.md` → Transfer),
    *  `index` naming its slot in the target's strip (appended without one).
@@ -389,6 +411,9 @@ export interface PlatformAdapter {
   alertAcknowledge(id: string): void;
   alertToggleTodo(id: string): void;
   alertClearTodo(id: string): void;
+  /** A reap is about to stop the Session's run: its end rings nothing, and its
+   *  TODO stays (`docs/specs/dor-tool.md` -> Reaping). */
+  alertSilenceRun?(id: string): void;
   /**
    * Park until the Session finishes what it is doing (`docs/specs/alert.md` ->
    * Await), for `dor await`. The host owns the wake condition, the grace

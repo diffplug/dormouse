@@ -4,8 +4,12 @@ import { awaitWallHandle, mountingRefusal } from './dor-control-shared';
 import { getWallHandle } from './wall-handles';
 import { forgetWorkspaceSession, isWorkspaceTransferPending } from '../../lib/window-session-aggregator';
 import { cancelPendingConfirmation, dismissWorkspaceUi, requestConfirmation, setRenamingWorkspace, type WorkspaceConfirmation } from '../../lib/workspace-ui-store';
-import { closeWorkspace, getActiveWorkspaceId, getWorkspacesSnapshot, setActiveWorkspace, workspaceRefFor } from '../../lib/workspace-store';
-import type { WorkspaceId } from '../../lib/session-types';
+import { closeWorkspace, createWorkspace, getActiveWorkspaceId, getWorkspacesSnapshot, moveWorkspace, setActiveWorkspace, workspaceRefFor } from '../../lib/workspace-store';
+import { addPendingKill } from '../../lib/pending-kills';
+import { getHelper, helperHasWork } from '../../lib/helper-terminal';
+import { isDelayedKillEnabled } from '../../lib/labs-settings';
+import type { PersistedSession, WorkspaceId } from '../../lib/session-types';
+import { pushReopenRecord, type WorkspaceReopenRecord } from '../../lib/reopen-stack';
 import type { WorkspaceCloseMode } from './wall-types';
 import { confirmToolEditorsClose, UNSAVED_TOOL_REFUSAL } from '../../lib/tool-editor';
 
@@ -16,11 +20,10 @@ import { confirmToolEditorsClose, UNSAVED_TOOL_REFUSAL } from '../../lib/tool-ed
  * these open; it decides nothing.
  */
 
-/** Whether closing this Workspace asks first: it holds a Surface the user has
- *  typed into, or a running Session. */
+/** Whether closing this Workspace asks first: any member is one whose own
+ *  close would ask (`docs/specs/layout.md` → "Workspace lifecycle"). */
 export function workspaceNeedsCloseConfirmation(id: WorkspaceId): boolean {
-  const handle = getWallHandle(id);
-  return !!handle && (handle.hasTouchedSurfaces() || handle.runningCount() > 0);
+  return getWallHandle(id)?.needsCloseConfirmation() ?? false;
 }
 
 /** A click on `+` waits for the fresh Wall before focusing its terminal. */
@@ -89,25 +92,38 @@ export async function closeWorkspaceWithSurfaces(
     const editors = handle.dirtyToolIds();
     if (editors.length && (mode === 'silent' || !await confirmToolEditorsClose(editors))) return UNSAVED_TOOL_REFUSAL;
     if (!isCurrent()) return 'Workspace close was superseded by a newer close or move';
+    // Reopenable only whole: one member whose own close would ask leaves no
+    // record, so the record is taken before any member closes.
+    const record = handle.needsCloseConfirmation() ? null : workspaceReopenRecord(id, handle.serializeReported());
     const refusal = await handle.closeAll(editors);
     if (refusal) {
       // A refusal returns to its prompt if the user navigated away during close.
       if (mode === 'prompt') setActiveWorkspace(id);
       return refusal;
     }
-    let closed = false;
-    // Mount a replacement Wall before selecting its tab, including the last close.
-    flushSync(() => { closed = closeWorkspace(id); });
-    if (!closed) return 'Workspace no longer exists';
-    forgetWorkspaceSession(id);
-    // Clear only this Workspace's chrome: a stranded editor or confirmation
-    // holds the keyboard lease after its Workspace disappears.
-    dismissWorkspaceUi(id);
-    if (mode === 'prompt') getWallHandle(getActiveWorkspaceId())?.selectWorkspaceTab();
+    if (!dropFromStrip(id, mode === 'prompt')) return 'Workspace no longer exists';
+    if (record) pushReopenRecord(record);
     return null;
   } finally {
     closeInFlight = false;
   }
+}
+
+/**
+ * Take a Workspace off the strip — the store selects a successor, or a fresh
+ * replacement — with its record and chrome. False when it was already gone.
+ */
+function dropFromStrip(id: WorkspaceId, selectSuccessor: boolean): boolean {
+  let closed = false;
+  // Mount a replacement Wall before selecting its tab, including the last close.
+  flushSync(() => { closed = closeWorkspace(id); });
+  if (!closed) return false;
+  forgetWorkspaceSession(id);
+  // Clear only this Workspace's chrome: a stranded editor or confirmation
+  // holds the keyboard lease after its Workspace disappears.
+  dismissWorkspaceUi(id);
+  if (selectSuccessor) getWallHandle(getActiveWorkspaceId())?.selectWorkspaceTab();
+  return true;
 }
 
 /**
@@ -133,6 +149,11 @@ async function closeOnceWallRegisters(id: WorkspaceId, isCurrent: () => boolean)
   if (closeInFlight || isWorkspaceTransferPending(id)) return;
   if (!handle) return;
   if (workspaceNeedsCloseConfirmation(id)) {
+    // Running helper work refuses a close outright; it is no pending kill.
+    if (isDelayedKillEnabled() && !await helpersHaveWork(handle.surfaceIds())) {
+      if (isCurrent() && !closeInFlight) pendWorkspace(id);
+      return;
+    }
     // An immediate close reveals the Workspace itself.
     setActiveWorkspace(id);
     handle.selectWorkspaceTab();
@@ -140,6 +161,76 @@ async function closeOnceWallRegisters(id: WorkspaceId, isCurrent: () => boolean)
     return;
   }
   await closeWorkspaceWithSurfaces(id);
+}
+
+/**
+ * Workspaces off the strip whose Walls must stay mounted: pending kills, and
+ * ones finalizing until their Surfaces are disposed (`docs/specs/glossary.md`
+ * → "Invariants" I4). `WorkspaceWindow` renders these beside the strip's.
+ */
+let held: readonly WorkspaceId[] = [];
+const heldListeners = new Set<() => void>();
+
+function setHeld(next: readonly WorkspaceId[]): void {
+  held = next;
+  for (const listener of heldListeners) listener();
+}
+
+export function getHeldWorkspaces(): readonly WorkspaceId[] {
+  return held;
+}
+
+export function subscribeToHeldWorkspaces(listener: () => void): () => void {
+  heldListeners.add(listener);
+  return () => { heldListeners.delete(listener); };
+}
+
+/**
+ * A Workspace close that would ask, under Labs: the tab leaves the strip at
+ * once while its Wall stays mounted and inactive, until its countdown closes
+ * it or the user restores it (`docs/specs/reopen.md` → "Labs: No-confirm
+ * delayed kill").
+ */
+async function helpersHaveWork(ids: readonly string[]): Promise<boolean> {
+  const helpers = ids.flatMap(id => getHelper(id) ?? []);
+  const busy = await Promise.all(helpers.map(helper => helperHasWork(helper).catch(() => true)));
+  return busy.includes(true);
+}
+
+function pendWorkspace(id: WorkspaceId): void {
+  const { workspaces } = getWorkspacesSnapshot();
+  const index = workspaces.findIndex(workspace => workspace.id === id);
+  if (index < 0) return;
+  const meta = workspaces[index];
+  setHeld([...held, id]);
+  // Its record goes with it: nothing pending survives a restart.
+  dropFromStrip(id, true);
+  // The last Workspace leaving left a fresh replacement in its place.
+  const replacement = workspaces.length === 1 ? getActiveWorkspaceId() : null;
+  const release = () => setHeld(held.filter(heldId => heldId !== id));
+  const restore = (focus: boolean) => {
+    createWorkspace({ ...meta, activate: focus });
+    moveWorkspace(id, index);
+    release();
+    // Back on the strip: its record is written again.
+    void getWallHandle(id)?.flushPersistence();
+    if (focus) getWallHandle(id)?.selectWorkspaceTab();
+    // A replacement nobody has used goes again, as if it never came.
+    const unused = replacement !== null ? getWallHandle(replacement) : null;
+    if (unused && unused.surfaceIds().length <= 1 && !unused.needsCloseConfirmation()) void closeWorkspaceWithSurfaces(replacement!, 'silent');
+  };
+  addPendingKill({ kind: 'workspace', id, workspaceId: id, title: meta.name, label: 'Workspace' }, {
+    restore,
+    finalize: async (teardown) => {
+      const handle = getWallHandle(id);
+      // Unsaved Tool edits are discarded: the pending kill was the decision.
+      const refusal = handle ? await handle.closeAll(handle.dirtyToolIds()) : null;
+      // Work that refuses to close (a helper's) brings the Workspace back to
+      // say so, except when the window is going anyway.
+      if (refusal && !teardown) restore(false);
+      else release();
+    },
+  });
 }
 
 /** The typed close question; the key is ignored while the Workspace transfers. */
@@ -151,6 +242,14 @@ export function workspaceCloseConfirmation(id: WorkspaceId, char = randomKillCha
     canConfirm: () => !isWorkspaceTransferPending(id),
     answer: accepted => { if (accepted) void closeWorkspaceWithSurfaces(id); },
   };
+}
+
+function workspaceReopenRecord(id: WorkspaceId, session: PersistedSession): WorkspaceReopenRecord | null {
+  const { workspaces } = getWorkspacesSnapshot();
+  const index = workspaces.findIndex(workspace => workspace.id === id);
+  if (index < 0) return null;
+  const { name, nameIsAuto } = workspaces[index];
+  return { kind: 'workspace', closedAt: Date.now(), workspace: { id, name, nameIsAuto, session }, index };
 }
 
 /** Open the strip's inline rename editor on a Workspace. */

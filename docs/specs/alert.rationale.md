@@ -36,7 +36,7 @@
 
 **Why hold instead of drop.** A completion on an engaged Session used to be discarded, so a report the user never acted on was lost once they walked away — the permission prompt under Engagement is the recorded case. Holding keeps the summons owed without ringing a pane the user is looking at: acting on it answers it, and walking away rings it.
 
-**Why dropping on an explicit disengage may be a mistake.** Moving focus to another pane, or leaving the window, is a deliberate act by someone who was looking at the completion, so ringing it then would summon them for something they just saw (decision, 2026-09-23). It also forgets a prompt the user glanced at and clicked away from to look something up. If that proves common, escalating on every disengage and letting the acknowledged-state check absorb the repeat is the alternative.
+**Why an explicit disengage drops a held completion, and the doubt about it.** Moving focus to another pane, or leaving the window, is a deliberate act by someone who was looking at the completion, so ringing it then would summon them for something they just saw (decision, 2026-09-23). It also forgets a prompt the user glanced at and clicked away from to look something up. If that proves common, escalating on every disengage and letting the acknowledged-state check absorb the repeat is the alternative.
 
 **Why nothing is decided at the point of detection.** Dispatching before suppression lets an observer see the three-second `npm test` that finished attended and would never have rung anyone. A seam firing only the events a human would have been shown could not serve `dor await` at all.
 
@@ -75,8 +75,6 @@
 **Why an ended realm's awaits are cancelled, and answered synchronously.** A caller that can no longer be answered would otherwise go on absorbing completions the human would have been shown. Synchronously, because in VS Code the cancelled outcome would arrive a microtask after the router stopped posting and be dropped, leaving `dor` blocked on a reply that never comes. A standalone reload keeps its window label, so the window says `hello` rather than the host inferring a new realm from a label list that never changed.
 
 ## WATCHING Track
-
-**Why candidate history expires on arrival rather than only on its timers.** The marked `dormouse.workspaces-2` alert (2026-09-09) followed 218 seconds of silence and two chunks 62 ms apart: unconfirmed candidate history outlived its timers, which run late in hidden views, and let that short burst confirm BUSY. Measuring the gap between accepted chunks keeps idle time from counting as sustained work.
 
 **Why WATCHING keys on the command rather than the Session.** Turning alerts on while `claude` runs is a statement about `claude`, not about the pane that happened to be focused. A per-Session enable would have to be re-established by hand in every new pane, which is the opposite of what the gesture means.
 
@@ -166,27 +164,15 @@ Guarding only completion leaves a stale `start` free to replace the active utter
 
 ## Push notifications
 
-**Why the device-list fetch is lazy and its store is not.** The fetch is Burrow machinery and rides the lazily-imported `RemotePairingModalHost` chunk; the store and its refresh fence stay in the common bundle because the Settings dialog reads them in every host, so disarming is one call on the store.
-
 **Why `toPushText` is not `toSpokenText`.** The angle-bracket rule exists only because WebKit's synthesizer wedges on them (Spoken alarms); an OS notification has no such failure, and instead has bidi and zero-width formatting that can visually reorder or hide text.
 
 **Why the Burrow, not the Relay, chooses recipients.** A revoked Client keeps its subscription row on the Relay, nothing propagating a revocation today (`docs/specs/remote-security-model.md` → Future), so a Relay picking recipients from its own rows would keep pushing Pane labels to a de-authorized phone.
 
 **Why the Burrow does not ask which devices are subscribed first.** The Relay intersects the Burrow's targets with its own subscriptions regardless, so the target set is identical either way; asking first would cost the alarm a second round trip.
 
-## Settings dialog
-
-**Why the device line always says something.** A push that silently goes nowhere is indistinguishable from a broken one, so each cause is worth its own message rather than an empty list.
-
 ## Pane Header
 
 **Why a helper tracks its command before promotion.** A helper dropped every semantic event, so one promoted while running `claude` had no command watch until its next command: no WATCHING, and no command-exit arm (audit, 2026-09-23). Command state alerts no one by itself; only dispatch and publishing have to wait for promotion.
-
-**Why `SPEAKING` may pulse unbounded and `SPOKEN` may not.** An utterance is seconds long and stops on its own, so the pulse it carries is self-bounding. `SPOKEN` persists until the ring clears, so animating it would be exactly the per-Session animation with no end that bounding the burst exists to remove.
-
-**Why `cfg.alert.ringingPaused` suppresses the pulse.** It is the visual-snapshot freeze that pins the alarm; even a bounded animation could otherwise snapshot at an arbitrary phase during its first 2.6 seconds.
-
-**Why the unlabelled treatment pulses once per episode.** An infinite per-Session animation is expensive, and the whole-Pane treatment covers far more surface than the retired bell icon did. With four focused panes wearing an infinite animation, three minutes cost 6.89 MB of embedder memory, 1,127 style recalculations, and 3.99 seconds of renderer CPU; pausing only those animations in the same loaded document reduced that to 0.13 MB, two recalculations, and 0.025 seconds. After bounding the burst, two consecutive three-minute windows each had zero live animations, one recalculation, under 0.40 MB of non-cumulative embedder drift, and at most 0.024 seconds of renderer CPU (measured in Chrome 150, 2026-09). A handful of cycles preserves the entry cue without leaving an animation running for the lifetime of an unattended alert. The episode — not a ring source — is the key because the episode is the summons the sinks already work from: a second source joining the ring enriches an alarm the user was already shown, and re-flashing the whole Pane for it would read as a new alarm. Running the burst off `episode.startedAt` rather than from mount makes the CSS clock a property of the episode, so minimize → reattach or a Workspace switch lands past an expired burst instead of replaying it. A Session BEL-ing in a loop still cannot restart the burst, because a source joining an active ring does not open a new one.
 
 ## Text And Security
 
@@ -194,7 +180,7 @@ Guarding only completion leaves a stale `start` free to replace the active utter
 
 ## Live Workspace transfer
 
-Nothing moves because the manager and the delivery scheduler left the standalone windows for the host process (`docs/specs/standalone.rationale.md` → Alerts; Alarm settings).
+Nothing moves because the manager and the delivery scheduler left the standalone windows for the host process (`docs/specs/transport.rationale.md` → "Message protocol"; Alarm settings).
 
 ## Workspace union
 

@@ -22,6 +22,13 @@ import {
 // accepts, because it is also the routing id every `e2e` envelope carries.
 const BURROW_ID = 'S6kyjjqOS7mw3l8ye89U3g';
 
+/** The fields every stored enrollment carries beside what the Relay answered. */
+const LOCAL = {
+  label: 'Laptop',
+  noiseStaticPublicKey: toBase64Url(new Uint8Array(32)),
+  noiseStaticPrivateKey: toBase64Url(new Uint8Array(48)),
+};
+
 // Only the minter is faked, and only where a test asks for it; everything else
 // in the package stays real so the guards under test are the shipped ones.
 vi.mock('remote-lib-common', async (importOriginal) => {
@@ -360,11 +367,11 @@ describe('burrow enrollment', () => {
     // at the mint (`relay/src/state.ts`).
     for (const burrowId of ['burrow-abc', '', `${BURROW_ID}A`, BURROW_ID.slice(0, 21), `${BURROW_ID}==`]) {
       expect(
-        isEnrollment({ relayUrl: 's', burrowId, burrowToken: 't', origin: 'o', rpId: 'r' }),
+        isEnrollment({ relayUrl: 's', burrowId, burrowToken: 't', origin: 'o', rpId: 'r', ...LOCAL }),
       ).toBe(false);
     }
     expect(
-      isEnrollment({ relayUrl: 's', burrowId: BURROW_ID, burrowToken: 't', origin: 'o', rpId: 'r' }),
+      isEnrollment({ relayUrl: 's', burrowId: BURROW_ID, burrowToken: 't', origin: 'o', rpId: 'r', ...LOCAL }),
     ).toBe(true);
 
     // And the exchange fails naming the field rather than persisting one.
@@ -401,23 +408,25 @@ describe('burrow enrollment', () => {
     );
   });
 
-  it('takes both halves of the Noise static or neither, never one', () => {
-    // A record written before the field existed must keep loading; one half
-    // alone is a truncated write or a hand-edited file, and a Burrow that
-    // believed it had an identity it cannot use is worse than one that knows
-    // it has none.
+  it('takes both halves of the Noise static, never one or none', () => {
+    // A missing half is a truncated write or a hand-edited file, and a Burrow
+    // that believed it had an identity it cannot use is worse than one that
+    // knows it has none.
     const base = {
       relayUrl: 's',
       burrowId: BURROW_ID,
       burrowToken: 't',
       origin: 'o',
       rpId: 'r',
+      label: 'Laptop',
     };
-    const noiseStaticPublicKey = toBase64Url(new Uint8Array(32));
-    const noiseStaticPrivateKey = toBase64Url(new Uint8Array(48));
+    const { noiseStaticPublicKey, noiseStaticPrivateKey } = LOCAL;
 
-    expect(isEnrollment(base)).toBe(true);
+    expect(isEnrollment(base)).toBe(false);
     expect(isEnrollment({ ...base, noiseStaticPublicKey, noiseStaticPrivateKey })).toBe(true);
+    // The label is the operator's answer, kept beside every enrollment.
+    expect(isEnrollment({ ...base, label: undefined, noiseStaticPublicKey, noiseStaticPrivateKey })).toBe(false);
+    expect(isEnrollment({ ...base, label: ' ', noiseStaticPublicKey, noiseStaticPrivateKey })).toBe(false);
     expect(isEnrollment({ ...base, noiseStaticPublicKey })).toBe(false);
     expect(isEnrollment({ ...base, noiseStaticPrivateKey })).toBe(false);
     // Well-formed base64url of the right decoded length: the value goes

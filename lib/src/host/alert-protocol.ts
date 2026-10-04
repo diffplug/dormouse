@@ -25,6 +25,8 @@ export type AlertCommand =
    *  (`createAlertDeliveryScheduler`). */
   | { op: 'sessions'; sessions: Record<string, AlertSessionInfo> }
   | { op: 'acknowledge' | 'dismiss' | 'toggleTodo' | 'clearTodo'; id: string }
+  /** A reap stops this Session's run: its end rings nothing (`docs/specs/dor-tool.md` -> Reaping). */
+  | { op: 'silenceRun'; id: string }
   | { op: 'await'; awaitId: string; id: string; until: AwaitUntil; timeoutMs: number }
   | { op: 'awaitCancel'; awaitId: string };
 

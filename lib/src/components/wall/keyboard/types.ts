@@ -47,11 +47,13 @@ export interface WallKeyboardCtx {
   exitTerminalMode: () => void;
   minimizePane: (id: string) => void;
   /** Open the terminal context for a pane, revealed from `origin`
-   *  (`docs/specs/layout.md` -> Header context menu). */
+   *  (`.terminal-context-enter` in `lib/src/theme.css`). */
   openTerminalContext: (id: string, origin: { x: number; y: number }) => void;
   /** The kill gesture: `requestKill` in `lib/src/components/Wall.tsx` decides
    *  between reattach, immediate closure, and the confirm overlay. */
   requestKill: (id: string) => void;
+  /** The Reopen verb (`reopenClosed` in `lib/src/components/wall/reopen.ts`). */
+  reopenClosed: () => void;
   acceptKill: () => void;
   rejectKill: () => void;
   setRenamingPaneId: Dispatch<SetStateAction<string | null>>;

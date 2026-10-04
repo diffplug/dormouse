@@ -2,7 +2,8 @@
  * The impure half of the directory: reads the live terminal registry, pane
  * state store, and activity store to produce the `DirectoryEntry[]` the phone's
  * picker renders. It projects registered terminal Surfaces except helper
- * Sessions, including a Tool's terminal while its browser face is displayed.
+ * Sessions, including a Tool's terminal while its browser face is displayed,
+ * and every Workspace's — a hidden Wall's terminals stay registered.
  * Standalone browser/iframe Surfaces never enter the xterm registry.
  */
 
@@ -16,14 +17,36 @@ import {
   resolveDisplayPrimary,
 } from '../../lib/terminal-registry';
 import { isHelperSession, registry } from '../../lib/terminal-store';
-import { buildDirectorySnapshot, type DirectoryPaneInput } from './directory';
+import { getWorkspacesSnapshot, refsArePositional, workspaceRefFor } from '../../lib/workspace-store';
+import { getWorkspaceSurfacesSnapshot } from '../../lib/workspace-surfaces';
+import { pendingKillSessionIds } from '../../lib/pending-kills';
+import { buildDirectorySnapshot, type DirectoryPaneInput, type DirectoryWorkspaceInput } from './directory';
+
+/**
+ * This Window's Workspaces in strip order, or none where a ref is only a strip
+ * position: every Window answers the same directory, so a positional ref would
+ * merge one Window's Workspace with another's (VS Code's webviews, each a
+ * `workspace:1`).
+ */
+function collectWorkspaces(): DirectoryWorkspaceInput[] {
+  if (refsArePositional()) return [];
+  const { workspaces, activeId } = getWorkspacesSnapshot();
+  const membership = getWorkspaceSurfacesSnapshot();
+  return workspaces.map((workspace) => ({
+    ref: workspaceRefFor(workspace.id),
+    name: workspace.name,
+    active: workspace.id === activeId,
+    surfaceIds: membership.get(workspace.id) ?? [],
+  }));
+}
 
 export function collectDirectorySnapshot(): DirectoryEntry[] {
   const paneStates = getTerminalPaneStateSnapshot();
   const activityStates = getActivitySnapshot();
   const appTitleForPane = buildAppTitleResolver(paneStates, activityStates);
 
-  const ids = [...registry.keys()].filter((id) => !isHelperSession(id));
+  const pending = new Set(pendingKillSessionIds());
+  const ids = [...registry.keys()].filter((id) => !isHelperSession(id) && !pending.has(id));
   // Reuse these per-pane states in the map below rather than re-fetching (each
   // miss would allocate a fresh default twice).
   const allPanes = ids.map((id) => getTerminalPaneState(id));
@@ -65,5 +88,5 @@ export function collectDirectorySnapshot(): DirectoryEntry[] {
     };
   });
 
-  return buildDirectorySnapshot(inputs);
+  return buildDirectorySnapshot(inputs, collectWorkspaces());
 }

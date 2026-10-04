@@ -90,8 +90,8 @@ export interface AlertPushDeps {
   /** The Burrow's active ACL records — the authority on who may be reached. */
   readonly activeRecords: () => readonly BurrowAclRecord[];
   /**
-   * Seal one plaintext to one paired Client's static, or `null` when this Burrow
-   * has no usable Noise static. A capability, never the key
+   * Seal one plaintext to one paired Client's static, or `null` when that
+   * Client's static will not seal. A capability, never the key
    * (`docs/specs/remote-security-model.md` -> Push sealing).
    */
   readonly seal: (
@@ -177,7 +177,7 @@ export async function sendPush(
     if (sealed) recipients.push({ deliveryId: record.deliveryId, sealed });
   }
   if (recipients.length === 0) {
-    // A Burrow with records but no usable static reaches nobody, and silently
+    // Records none of which would seal reach nobody, and silently
     // would be indistinguishable from having no phones paired.
     console.warn('burrow: no push could be sealed for any paired device');
     return { targeted: 0, delivered: 0, failed: 0 };

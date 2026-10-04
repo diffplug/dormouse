@@ -1265,6 +1265,23 @@ export class AlertManager {
     return result;
   }
 
+  /**
+   * The host is about to stop this Session's run itself — a reap, an in-place
+   * restart, a preview retarget (`docs/specs/alert.md` -> Command-exit Track)
+   * — so its end is no news: forget the
+   * run as a different command start would, without ringing. The ring and
+   * TODO already owed stay.
+   */
+  silenceRun(id: string): void {
+    const entry = this.entries.get(id);
+    if (!entry) return;
+    entry.commandExitWatch = null;
+    entry.pendingCommandLine = null;
+    entry.progress = null;
+    entry.detector.reset();
+    this.notify(id);
+  }
+
   /** Completely remove alert state for a PTY (used when PTY is destroyed) */
   remove(id: string): void {
     this.discard(id);

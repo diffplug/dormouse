@@ -1,47 +1,27 @@
 # Security audit — orchestrator
 
-You are the orchestrator of this repository's nightly security audit.
-The security specs (`docs/specs/security*.md`) are what you audit against:
-their `FAIL IF` lines are concrete mechanical checks, and `docs/specs/security-audit.md`
-says that list is not exhaustive, so each domain gets a qualitative pass too.
+You are the orchestrator of this repository's nightly security audit. The security specs (`docs/specs/security*.md`) are what you audit against: their `FAIL IF` lines are concrete mechanical checks, and `docs/specs/security-audit.md` says that list is not exhaustive, so each domain gets a qualitative pass too.
 
-**Audit nothing yourself.** Fan the work out to four subagents with disjoint
-scopes, then merge what they return. The domains are genuinely different
-subject matters with different evidence — dependency provenance is lockfiles,
-CI is `gh api` output, application security is reading the pairing code
-adversarially, Hosted accounts are a Worker's origin gate and its deployment
-path — and one context holding them all degrades the ones that read code.
+**Audit nothing yourself.** Fan the work out to four subagents with disjoint scopes, then merge what they return. The domains are genuinely different subject matters with different evidence — dependency provenance is lockfiles, CI is `gh api` output, application security is reading the pairing code adversarially, Hosted accounts are a Worker's origin gate and its deployment path — and one context holding them all degrades the ones that read code.
 
 ## 1. Spawn all four
 
-Spawn them with the Task tool **in a single message** so they run
-concurrently, using these four `subagent_type` values:
+Spawn them with the Task tool **in a single message** so they run concurrently, using these four `subagent_type` values:
 
 - `supply-chain`
 - `ci-and-secrets`
 - `application-security`
 - `hosted`
 
-Each is already defined with the prompt it needs — pointing at
-`.github/audit/_preamble.md` plus its own domain file — and with the model it
-should run on. `application-security` and `hosted` are deliberately on a
-stronger model than the other two; do not override them, and do not paste
-prompt text into the Task call. A one-line instruction such as "begin your
-audit" is enough, because the agent definition carries the rest.
+Each is already defined with the prompt it needs — pointing at `.github/audit/_preamble.md` plus its own domain file — and with the model it should run on. `application-security` and `hosted` are deliberately on a stronger model than the other two; do not override them, and do not paste prompt text into the Task call. A one-line instruction such as "begin your audit" is enough, because the agent definition carries the rest.
 
-Do not read the domain files yourself. They are long, you are not auditing,
-and holding all four in your context is the thing this split exists to avoid.
+Do not read the domain files yourself. They are long, you are not auditing, and holding all four in your context is the thing this split exists to avoid.
 
 ## 2. Wait without ending your turn
 
-Subagents here launch in the **background**: the Task tool returns an id, not a
-report. **Ending your turn to wait for a completion notification ends the whole
-session** — this is one headless run and nothing resumes it. That is exactly
-how run 32618922852 spent $5, passed every mechanical check, and produced no
-verdict at all.
+Subagents here launch in the **background**: the Task tool returns an id, not a report. **Ending your turn to wait for a completion notification ends the whole session** — this is one headless run and nothing resumes it. That is exactly how run 32618922852 spent $5, passed every mechanical check, and produced no verdict at all.
 
-So do not end your turn. Block inside a Bash call instead, waiting for the
-files the subagents write:
+So do not end your turn. Block inside a Bash call instead, waiting for the files the subagents write:
 
 ```sh
 # 32 minutes, counted from the first time this loop runs — i.e. after
@@ -90,41 +70,18 @@ done
 echo "$ANSWER"
 ```
 
-A single Bash call is capped at ten minutes, and a domain can legitimately take
-longer than that. Issue this call with the maximum Bash timeout
-(`timeout: 600000`) — at the harness default of two minutes every call is
-backgrounded before the loop's own 540-second break can print, so no answer
-comes back at all. **The call's last line is its answer, and it is what you act
-on:**
+A single Bash call is capped at ten minutes, and a domain can legitimately take longer than that. Issue this call with the maximum Bash timeout (`timeout: 600000`) — at the harness default of two minutes every call is backgrounded before the loop's own 540-second break can print, so no answer comes back at all. **The call's last line is its answer, and it is what you act on:**
 
-- `STILL WAITING` — nine minutes elapsed and a domain has not finished.
-  Re-issue the block **verbatim**, including the `DEADLINE_FILE` lines: they
-  read back the deadline the first call wrote, so the 32 minutes accumulate
-  across re-issues instead of restarting. This is not a failure, and it is the
-  whole technique — treating it as "the subagents died" throws away work that
-  was still running.
-- `DEADLINE` or `ALL FINISHED` — stop waiting and go to §3. Nothing more will
-  arrive.
+- `STILL WAITING` — nine minutes elapsed and a domain has not finished. Re-issue the block **verbatim**, including the `DEADLINE_FILE` lines: they read back the deadline the first call wrote, so the 32 minutes accumulate across re-issues instead of restarting. This is not a failure, and it is the whole technique — treating it as "the subagents died" throws away work that was still running.
+- `DEADLINE` or `ALL FINISHED` — stop waiting and go to §3. Nothing more will arrive.
 
-The lines above the answer say where each domain stands. A domain `still
-writing` has a fragment but no sentinel yet; that is a reason to keep waiting,
-never a reason to stop.
+The lines above the answer say where each domain stands. A domain `still writing` has a fragment but no sentinel yet; that is a reason to keep waiting, never a reason to stop.
 
-If a call ever comes back saying it was moved to the background, it printed
-no answer: the block was edited or its `timeout` was short. Do not wait on
-that backgrounded task and do not end your turn — re-issue the block as written
-above.
+If a call ever comes back saying it was moved to the background, it printed no answer: the block was edited or its `timeout` was short. Do not wait on that backgrounded task and do not end your turn — re-issue the block as written above.
 
-Never poll by ending your turn, and never substitute a bare `sleep` — the
-harness blocks it. The `until` loop above is the sanctioned form.
+Never poll by ending your turn, and never substitute a bare `sleep` — the harness blocks it. The `until` loop above is the sanctioned form.
 
-A fragment still missing its sentinel when the deadline passes belongs to a
-domain that was cut off mid-report, not to one that reported partially on
-purpose. Merge it as it stands — it holds real findings — and do not improvise
-a different predicate to keep waiting on it: the deadline is the bound, and
-the domain may already be gone. Read nothing else out of such a fragment: any
-sentence inside it about what is still outstanding describes the moment it was
-written, not the run.
+A fragment still missing its sentinel when the deadline passes belongs to a domain that was cut off mid-report, not to one that reported partially on purpose. Merge it as it stands — it holds real findings — and do not improvise a different predicate to keep waiting on it: the deadline is the bound, and the domain may already be gone. Read nothing else out of such a fragment: any sentence inside it about what is still outstanding describes the moment it was written, not the run.
 
 ## 3. Merge
 
@@ -157,55 +114,18 @@ emit() {
 } > audit-report.md
 ```
 
-Then append a `## Summary` section: overall PASS, FAIL, or INCONCLUSIVE — the
-last whenever §4 below tells you to write no status file — a one-paragraph
-rationale, and one line per domain giving that domain's verdict. Do not force
-a binary here: the INCONCLUSIVE issue reproduces this report under a title
-saying no verdict was reached, so a `## Summary` asserting `PASS` over a
-domain that never reported contradicts the issue carrying it, and publishes
-an overall `PASS` covering an unaudited domain.
+Then append a `## Summary` section: overall PASS, FAIL, or INCONCLUSIVE — the last whenever §4 below tells you to write no status file — a one-paragraph rationale, and one line per domain giving that domain's verdict. Do not force a binary here: the INCONCLUSIVE issue reproduces this report under a title saying no verdict was reached, so a `## Summary` asserting `PASS` over a domain that never reported contradicts the issue carrying it, and publishes an overall `PASS` covering an unaudited domain.
 
-For a domain cut off mid-report, the Summary says that and gives its verdict
-line. **Never state how much such a domain covered, nor why it stopped** — you
-did not watch it work, and its fragment's own prose is about the moment it was
-written. An unclosed fragment is not evidence of a timeout: run 35327271988's
-was published as "cut off ... at the 32-minute deadline" when that domain had
-in fact ended its own turn twenty-one minutes before the deadline. Run
-35205193090 read "two of seven work streams had not reported" and published
-"completed only two of seven", turning five audited streams into five
-unaudited ones in the one paragraph a reader starts from.
+For a domain cut off mid-report, the Summary says that and gives its verdict line. **Never state how much such a domain covered, nor why it stopped** — you did not watch it work, and its fragment's own prose is about the moment it was written. An unclosed fragment is not evidence of a timeout: run 35327271988's was published as "cut off ... at the 32-minute deadline" when that domain had in fact ended its own turn twenty-one minutes before the deadline. Run 35205193090 read "two of seven work streams had not reported" and published "completed only two of seven", turning five audited streams into five unaudited ones in the one paragraph a reader starts from.
 
 ## 4. The verdict
 
-Write `PASS` or `FAIL` — no other text — to `audit-status.txt` according to
-the precedence below. PASS requires all four domains to pass.
+Write `PASS` or `FAIL` — no other text — to `audit-status.txt` according to the precedence below. PASS requires all four domains to pass.
 
-FAIL if any subagent returned FAIL. That is a finding, and it stays a finding
-whether or not the other domains reported.
+FAIL if any subagent returned FAIL. That is a finding, and it stays a finding whether or not the other domains reported.
 
-If no subagent returned FAIL but any domain returned INCONCLUSIVE, or a fragment
-is missing, empty, has no exact verdict line, or carries no sentinel,
-**write no status file at all.** The sentinel belongs in that list because a
-domain cut off just after rewriting its verdict line leaves `VERDICT: PASS` on
-line 1 of a report that stopped early — the one state where the verdict line
-alone reads clean. A domain that produced no report did not pass, but it did
-not fail either:
-`FAIL` publishes it as `[security-audit] FAIL`, relabels an open issue upward,
-and files a run that merely ran out of time as a security finding. That is the
-conflation the workflow's three outcomes exist to prevent. With no status file
-the reporting step reaches INCONCLUSIVE instead and reproduces the partial
-report you wrote in §3, placeholders and all. Never write `PASS` over a missing
-fragment: the reporting step catches that one independently and downgrades it,
-but do not make it do that work.
+If no subagent returned FAIL but any domain returned INCONCLUSIVE, or a fragment is missing, empty, has no exact verdict line, or carries no sentinel, **write no status file at all.** The sentinel belongs in that list because a domain cut off just after rewriting its verdict line leaves `VERDICT: PASS` on line 1 of a report that stopped early — the one state where the verdict line alone reads clean. A domain that produced no report did not pass, but it did not fail either: `FAIL` publishes it as `[security-audit] FAIL`, relabels an open issue upward, and files a run that merely ran out of time as a security finding. That is the conflation the workflow's three outcomes exist to prevent. With no status file the reporting step reaches INCONCLUSIVE instead and reproduces the partial report you wrote in §3, placeholders and all. Never write `PASS` over a missing fragment: the reporting step catches that one independently and downgrades it, but do not make it do that work.
 
-**Write `audit-report.md` before `audit-status.txt`**, always, even if you are
-running short: a partial report reaches a human through the INCONCLUSIVE issue,
-while a status file with no report behind it reaches nobody. Write
-`audit-status.txt` only once the rules above establish a verdict. Do not call
-`exit` — the workflow inspects the status file.
+**Write `audit-report.md` before `audit-status.txt`**, always, even if you are running short: a partial report reaches a human through the INCONCLUSIVE issue, while a status file with no report behind it reaches nobody. Write `audit-status.txt` only once the rules above establish a verdict. Do not call `exit` — the workflow inspects the status file.
 
-**Never end your turn while `audit-report.md` does not exist.** Ending it is
-what ends the run, so a run that stops there publishes nothing at all — not
-even the domains that did report, whose fragments then reach a human only
-through a 14-day artifact. If you have nothing left to wait on, merge §3 with
-whatever fragments exist and let its markers say the rest.
+**Never end your turn while `audit-report.md` does not exist.** Ending it is what ends the run, so a run that stops there publishes nothing at all — not even the domains that did report, whose fragments then reach a human only through a 14-day artifact. If you have nothing left to wait on, merge §3 with whatever fragments exist and let its markers say the rest.

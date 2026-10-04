@@ -15,12 +15,11 @@
  * security spec, which headroom alone cannot promise, so it picks the same way
  * from the specs that qualify. Check 15 is a number rather than a pattern: its
  * case removes a paired rationale file instead of planting text.
- * `scripts/lint-kit.mjs` owns the edit-and-restore. Valid-form cases also keep
- * optional navigation maps compatible with targeted implementation pointers.
+ * `scripts/lint-kit.mjs` owns the edit-and-restore.
  */
 
 import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { execFileSync, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { makeSelftest, readRepoFile, repoRoot } from './lint-kit.mjs';
@@ -50,6 +49,23 @@ const SOURCE = 'standalone/scripts/clean-dev-sidecar.mjs'; // a comment appended
 // the citation check, which scans every tracked source file, this one included.
 const spec = (name) => ['docs/specs', name].join('/');
 
+// Check 19 restates real bolded clauses from other specs in SPEC: one of six
+// written words must go red, as must nothing cited by quotation or shorter
+// than six words as written (one that only normalizing stretches to six).
+const writtenWords = (text) => text.trim().split(/\s+/).length;
+const normalizedWords = (text) => text.toLowerCase().replace(/[\p{P}\p{S}]/gu, ' ').trim().split(/\s+/).length;
+const BOLDS = BY_HEADROOM.filter((f) => f !== SPEC)
+  .flatMap((f) => [...readRepoFile(f).matchAll(/\*\*([^*\n`"]+)\*\*/g)].map((m) => ({ spec: f, clause: m[1] })));
+const RESTATED = BOLDS.find((b) => writtenWords(b.clause) >= 6);
+const STRETCHED = BOLDS.find((b) => writtenWords(b.clause) === 5 && normalizedWords(b.clause) >= 6);
+assert.ok(RESTATED && STRETCHED, 'check 19 needs a bolded clause of six written words, and one of five that normalizes to six');
+
+// Check 20 needs a real test title to quote.
+const TITLED_TEST = 'scripts/md-unwrap.test.mjs';
+const TEST_TITLE = [...readRepoFile(TITLED_TEST).matchAll(/\b(?:it|test)\(\s*'([^'\n]+)'/g)]
+  .map((m) => m[1]).find((title) => title.split(/\s+/).length >= 8);
+assert.ok(TEST_TITLE, `check 20 needs a test title of eight or more words in ${TITLED_TEST}`);
+
 const EXTERNAL_SPEC = ['docs', 'compatible-agents.md'].join('/');
 const EXTERNAL_RATIONALE = EXTERNAL_SPEC.replace(/\.md$/, '.rationale.md');
 
@@ -63,44 +79,70 @@ const CASES = [
   ['check 12: a bare file name in Source of truth', SPEC, '\nSource of truth: `lint-kit.mjs`.\n'],
   ['check 12: a bare file name under a punctuated lead-in', SPEC, '\nSource of truth, all in `lib/src/lib/`: `Wall.tsx`.\n'],
   ['check 12: a symbol the named file lacks', SPEC, '\nSource of truth: `noSuchSymbolXyz` in `scripts/lint-kit.mjs`.\n'],
+  ['check 12: a symbol the named file lacks, in prose outside Source of truth', SPEC, '\nThe guard is `noSuchSymbolXyz` in `scripts/lint-kit.mjs`.\n'],
   ['check 13: a quoted citation of a heading that does not exist', SOURCE, `\n// ${spec('layout.md')} -> "No Such Heading"\n`],
+  ['check 13: a later heading in a quoted list that does not exist', SOURCE, `\n// ${spec('layout.md')} -> "Modes", "Workspaces" and "No Such Heading"\n`],
+  ['check 13: a quoted heading that wraps onto the next line and does not exist', SOURCE, `\n// ${spec('layout.md')} -> "No Such\n// Heading"\n`],
   ['check 13: an unquoted citation of a heading that does not exist', SOURCE, `\n// ${spec('layout.md')} -> No Such Heading Here.\n`],
   ['check 13: a numbered section that does not exist', SOURCE, `\n// ${spec('mouse-and-clipboard.md')} §8.99\n`],
   ['check 13: a citation of a spec that does not exist', SOURCE, `\n// ${spec('no-such-spec.md')} -> "Heading"\n`],
   ['check 13: an unbackticked citation of a missing spec, from a spec', SPEC, `\nSee ${spec('no-such-spec.md')} -> "Heading" for more.\n`],
   ['check 14: a rule stated in a rationale file', RATIONALE, '\n**Never plant rules here.**\n'],
   ['check 17: an audited rule outside a security spec', NON_SECURITY_SPEC, '\n- **FAIL IF** this rule is audited by nobody.\n'],
+  ['check 18: a Future that opens without a named scope', SPEC, '\n## Future\n\nA wish nobody staged.\n'],
+  ['check 18: a scope that lists nothing before the next heading', SPEC, '\n## Future\n\n**Scope: planted-empty**\n\n### Planted\n\nText.\n'],
+  ['check 18: a scope whose lead introduces a list that is not there', SPEC, '\n## Future\n\n**Scope: planted-intro** — in order:\n\n**Scope: planted-next** — one item.\n'],
+  ['check 19: a bolded clause from another spec restated without its bold', SPEC, `\nAs elsewhere: ${RESTATED.clause.toUpperCase()}\n`],
+  ['check 20: a quoted test title', SPEC, `\nPinned by \`${TEST_TITLE}\`.\n`],
+  ['check 9: a map beside a Source of truth pointer', SPEC, '\n## Files\n\n| Entrypoint | Role |\n|---|---|\n| `scripts/lint-kit.mjs` | Lint plumbing. |\n\nSource of truth: `countWords` in `scripts/spec-md.mjs`.\n'],
 ];
 
 const selftest = makeSelftest('spec-lint.mjs', '.spec-selftest.bak');
 
-// A one-entry map deliberately omits the file named by the local pointer:
-// maps are navigation aids, not exhaustive implementation inventories.
-// Run both supported headings, and prove map paths still get checked.
+// Check 9 must also pass a map alone: the fixture renames SPEC's own pointers
+// out of the way, and runs each heading spelling the lint accepts. A missing
+// map path must still fail check 4.
 const originalSpec = readRepoFile(SPEC);
 const specPath = join(repoRoot, SPEC);
-for (const heading of ['Files', 'Code Map']) {
-  const map = `\n## ${heading}\n\n| Entrypoint | Role |\n|---|---|\n| \`scripts/lint-kit.mjs\` | Lint plumbing. |\n\n## Map pointer fixture\n\nSource of truth: \`countWords\` in \`scripts/spec-md.mjs\`.\n`;
+const pointerless = originalSpec.replace(/Source of truth/g, 'Implemented in');
+const runSpecLint = () => spawnSync('node', [join(repoRoot, 'scripts/spec-lint.mjs')], { encoding: 'utf8' });
+for (const heading of ['## Files', '### Code map']) {
+  const map = `\n${heading}\n\n| Entrypoint | Role |\n|---|---|\n| \`scripts/lint-kit.mjs\` | Lint plumbing. |\n`;
   try {
-    writeFileSync(specPath, originalSpec + map);
-    execFileSync('node', [join(repoRoot, 'scripts/spec-lint.mjs')], { stdio: 'pipe' });
-    writeFileSync(specPath, originalSpec + map.replace('scripts/lint-kit.mjs', 'scripts/no-such-map-entry.mjs'));
-    const result = spawnSync('node', [join(repoRoot, 'scripts/spec-lint.mjs')], { encoding: 'utf8' });
+    writeFileSync(specPath, pointerless + map);
+    let result = runSpecLint();
+    assert.equal(result.status, 0, `${heading}: a map alone must pass lint\n${result.stdout}${result.stderr}`);
+    writeFileSync(specPath, pointerless + map.replace('scripts/lint-kit.mjs', 'scripts/no-such-map-entry.mjs'));
+    result = runSpecLint();
     assert.equal(result.status, 1, `${heading}: a missing map path must fail lint`);
     assert.match(result.stdout + result.stderr, /path does not exist -> scripts\/no-such-map-entry\.mjs/, `${heading}: require the map path diagnostic`);
   } finally {
     writeFileSync(specPath, originalSpec);
   }
 }
-console.log('spec-lint-selftest: OK (Files / Code Map coexist with pointers; partial maps pass and missing paths fail)');
+console.log('spec-lint-selftest: OK (check 9 passes a map alone; a missing map path fails)');
 
 for (const [name, target, text] of CASES) {
   selftest.withAppended(target, text, `${name}\n      planting this in ${target} stays green — spec-lint cannot see it`);
 }
 
+// Check 19's exemptions: each must leave the lint green.
+selftest.withAppendedOutput(
+  SPEC,
+  `\nSee ${RESTATED.spec} -> "${RESTATED.clause}".\n`,
+  'spec-lint: OK',
+  'check 19: a quoted citation of another spec\'s bolded clause is a pointer, not a restatement',
+);
+selftest.withAppendedOutput(
+  SPEC,
+  `\nAs elsewhere: ${STRETCHED.clause}\n`,
+  'spec-lint: OK',
+  'check 19: a clause under six written words is not a finding, however normalizing splits it',
+);
+
 selftest.withMutation(
   EXTERNAL_SPEC,
-  (path) => writeFileSync(path, readRepoFile(EXTERNAL_SPEC).replace(/^> See.*glossary[^\n]*\n/m, '')),
+  (path) => writeFileSync(path, readRepoFile(EXTERNAL_SPEC).replace(/^> (?:- )?See.*glossary[^\n]*\n/m, '')),
   'check 5: an external spec without its glossary front matter',
 );
 

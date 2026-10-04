@@ -114,7 +114,11 @@ describe('BurrowRuntime end-to-end ceremonies', () => {
 
   function makeBurrow(
     loadAcl: () => BurrowAclRecord[] = () => [],
-    options: { withSession?: boolean; saveAcl?: BurrowOptions['saveAcl'] } = {},
+    options: {
+      withSession?: boolean;
+      saveAcl?: BurrowOptions['saveAcl'];
+      onPolicyRaised?: BurrowOptions['onPolicyRaised'];
+    } = {},
   ): BurrowRuntime {
     const withSession = options.withSession ?? true;
     const created = new BurrowRuntime({
@@ -128,6 +132,7 @@ describe('BurrowRuntime end-to-end ceremonies', () => {
       requestApproval: (pending) => approvals.push(pending),
       dismissApproval: (clientId) => dismissed.push(clientId),
       onInvitationChanged: recordInvitation,
+      onPolicyRaised: options.onPolicyRaised,
       createSession: withSession
         ? ({ send }) => {
             const entry = { handled: [] as unknown[], disposed: false, send };
@@ -1216,6 +1221,24 @@ describe('BurrowRuntime end-to-end ceremonies', () => {
     ).toHaveLength(1);
   });
 
+  it('still reports the outcome of a ceremony whose invitation was evicted', async () => {
+    // Eviction spends the code but not the ceremony a phone is mid-way
+    // through; how that ends is the person's to hear either way.
+    makeBurrow();
+    const scanned = await requestPairing('c1', await newAuthenticator());
+    for (let i = 0; i < MAX_TOKENS_PER_BURROW; i += 1) await mintInvitation();
+    invitationEvents.length = 0;
+    clock += DEFAULT_PAIRING_TTL_MS + 1;
+    sendE2e('c2', 'pairing', scanned.invitation.inviteId, 'init', toBase64Url(new Uint8Array(96)));
+    await settle();
+
+    expect(invitationEvents).toContainEqual({
+      inviteId: scanned.invitation.inviteId,
+      state: 'consumed',
+      outcome: 'expired',
+    });
+  });
+
   it('stands down for good on a displacement close', async () => {
     makeBurrow();
     socket.closeWith(WS_CLOSE_BURROW_REPLACED);
@@ -1246,7 +1269,53 @@ describe('BurrowRuntime end-to-end ceremonies', () => {
     }
   });
 
-  it('ignores every frame that is not the e2e envelope or client-gone', async () => {
+  it('raises its UV demand on the Relay\'s policy frame, and nothing lowers it again', async () => {
+    const raised = vi.fn();
+    makeBurrow(() => [], { onPolicyRaised: raised });
+    // Enrolled without UV, and a Relay reporting none raises nothing: a
+    // presence-only passkey pairs.
+    socket.receive({ t: 'policy' });
+    socket.receive({ t: 'policy', requireUserVerification: false });
+    expect(raised).not.toHaveBeenCalled();
+    const authenticator = await createTestAuthenticator({ rpId: RP_ID, origin: ORIGIN, userVerified: false });
+    const { invitation, clientStatic, session, code } = await requestPairing('c1', authenticator);
+    approvals[0]!.approve(code);
+    expect(await outcome(session, 'pairing', invitation.inviteId)).toMatchObject({ ok: true });
+
+    // The operator turned UV on after enrollment; the Relay says so on connect.
+    socket.receive({ t: 'policy', requireUserVerification: true });
+    expect(raised).toHaveBeenCalledTimes(1);
+    expect(await attemptConnection('c1', clientStatic, authenticator)).toEqual({
+      ok: false,
+      code: 'presence-rejected',
+    });
+
+    // A Relay reporting less (or reporting it again) changes nothing.
+    socket.receive({ t: 'policy' });
+    socket.receive({ t: 'policy', requireUserVerification: false });
+    socket.receive({ t: 'policy', requireUserVerification: true });
+    expect(raised).toHaveBeenCalledTimes(1);
+    expect(await attemptConnection('c1', clientStatic, authenticator)).toEqual({
+      ok: false,
+      code: 'presence-rejected',
+    });
+  });
+
+  it('keeps its enrolled UV demand when the Relay reports none', async () => {
+    const enrolled = enrollment;
+    enrollment = { ...enrolled, requireUserVerification: true };
+    try {
+      makeBurrow();
+      socket.receive({ t: 'policy', requireUserVerification: false });
+      const authenticator = await createTestAuthenticator({ rpId: RP_ID, origin: ORIGIN, userVerified: false });
+      await requestPairing('c1', authenticator);
+      expect(approvals).toEqual([]);
+    } finally {
+      enrollment = enrolled;
+    }
+  });
+
+  it('ignores the pre-cutover frame types', async () => {
     makeBurrow();
     for (const t of ['pair', 'pair-status', 'connect', 'connect2', 'msg']) {
       socket.receive({ t, clientId: 'c1', request: {}, query: {}, data: {} });
@@ -1311,44 +1380,6 @@ describe('BurrowRuntime end-to-end ceremonies', () => {
     }
     await settle();
     expect(burrow.trackedClientCount).toBe(0);
-  });
-
-  it('refuses to pair when this Burrow has no Noise static to present', async () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const created = new BurrowRuntime({
-      // Every other field is a real enrollment; only the static is missing,
-      // which is the state a corrupt store leaves behind.
-      enrollment: {
-        ...enrollment,
-        noiseStaticPrivateKey: undefined,
-        noiseStaticPublicKey: undefined,
-      },
-      reconnect: false,
-      createWebSocket: () => (socket = new FakeSocket()),
-      loadAcl: () => [],
-      saveAcl: (_burrowId, records) => {
-        savedRecords = [...records];
-      },
-      requestApproval: (pending) => approvals.push(pending),
-      dismissApproval: (clientId) => dismissed.push(clientId),
-      onInvitationChanged: recordInvitation,
-      now: () => clock,
-    });
-    created.start();
-    socket.open();
-    burrow = created;
-    burrows.push(created);
-
-    const { invitation, session, code } = await requestPairing('c1', await newAuthenticator());
-    approvals[0]!.approve(code);
-    // A record written here would authorize a Client that could never complete
-    // a connection IK, and its `burrowStaticPublicKey` pin would be empty.
-    expect(await outcome(session, 'pairing', invitation.inviteId)).toEqual({
-      ok: false,
-      code: 'burrow-error',
-    });
-    expect(savedRecords).toEqual([]);
-    warn.mockRestore();
   });
 
   it('drops a frame whose routing values are out of shape, before any crypto', async () => {

@@ -4,11 +4,9 @@
 
 ## Bundling And PATH
 
-The CLI's control client needs Node types, but the renderer imports CLI protocol and shell helpers as values. A browser-platform bundle check rejects Node imports in those helpers and their dependencies without splitting the CLI into separate TypeScript projects.
+The CLI's control client needs Node types, but the renderer imports CLI protocol and shell helpers as values. A browser-platform bundle check rejects Node imports in those helpers and their dependencies without splitting the CLI into separate TypeScript projects. The website playground runs the whole CLI that way, so every command's parsing, help, and output are the real ones; one `CliHost` holds everything that needs the machine, and the type checker makes the playground answer each capability, even if only with `UNSUPPORTED IN PLAYGROUND`.
 
 **What a missing `ELECTRON_RUN_AS_NODE` looks like.** Under VS Code `DORMOUSE_NODE` is the editor's Electron binary — Node only when that variable is set, and terminals routinely strip it from the ambient env. Without it Electron launches its GUI, ignores the script, and exits 0: no error, no output, success exit code, reading as "the command did nothing" rather than as a launcher bug.
-
-**Why the standalone's bundled node is GUI-subsystem.** A console-subsystem node pops a stray terminal window every time Rust spawns the sidecar, so the bundled binary is patched to the GUI subsystem — and that same patch leaves it no console to inherit.
 
 **What a verbatim path looks like.** cmd.exe fails with "The system cannot find the path specified.", naming neither the launcher nor the prefix that caused it. Tauri's `resource_dir()` returns a verbatim prefix in the bundled and dev layouts alike, so the standalone host strips it once at the boundary (`resolve_sidecar_path`) and every derived path stays plain.
 
@@ -22,84 +20,21 @@ The CLI's control client needs Node types, but the renderer imports CLI protocol
 
 **The two Windows spawn failures cross-spawn absorbs.** Node's `spawn` does not consult `PATHEXT`, so a bare `agent-browser` ENOENTs instead of resolving the `agent-browser.cmd` shim npm/vfox installs (on POSIX that file is a real executable with a shebang); and Node ≥22 refuses to spawn `.cmd`/`.bat` without a shell (the CVE-2024-27980 hardening), so the resolved absolute `.cmd` EINVALs too. Neither failure has a POSIX counterpart.
 
-**Why the bare name is a code-execution primitive on Windows.** cross-spawn
-delegates resolution to `which`, whose Windows branch prepends `process.cwd()`
-to the search path (`which@2.0.2/which.js:19-21`, comment *"windows always
-checks the cwd first"*), and its `.cmd`-shim path re-emits the **bare** name
-into `cmd.exe` (`cross-spawn@7.0.6/lib/parse.js:36,48-59`), which resolves the
-cwd first as well. `dor` inherits the pane's cwd, so before this rule a cloned
-repository containing `agent-browser.cmd` executed on the next `dor agent-browser` — and
-`dor skill` mandates `dor agent-browser` for every page view. The 2026-09-19 security audit
-([run 35432996343](https://github.com/diffplug/dormouse/actions/runs/35432996343))
-raised it as its one BLOCKER: the hijack needs a *legitimate* install present,
-because `browserBinaryIsMissing` refuses to spawn when the PATH walk finds
-nothing. The same audit named three sidecar sites spawning system binaries by
-bare name (`standalone/sidecar/pty-core.js`, `standalone/sidecar/clipboard-ops.js`)
-whose cwd is the app directory rather than a user's repository;
-`pty-core.js`'s `%SystemRoot%\System32` join is the pattern those should follow.
+**Why the bare name is a code-execution primitive on Windows.** cross-spawn delegates resolution to `which`, whose Windows branch prepends `process.cwd()` to the search path (`which@2.0.2/which.js:19-21`, comment *"windows always checks the cwd first"*), and its `.cmd`-shim path re-emits the **bare** name into `cmd.exe` (`cross-spawn@7.0.6/lib/parse.js:36,48-59`), which resolves the cwd first as well. `dor` inherits the pane's cwd, so before this rule a cloned repository containing `agent-browser.cmd` executed on the next `dor agent-browser` — and `dor skill` mandates `dor agent-browser` for every page view. The 2026-09-19 security audit ([run 35432996343](https://github.com/diffplug/dormouse/actions/runs/35432996343)) raised it as its one BLOCKER: the hijack needs a *legitimate* install present, because `browserBinaryIsMissing` refuses to spawn when the PATH walk finds nothing. The same audit named three sidecar sites spawning system binaries by bare name (`standalone/sidecar/pty-core.js`, `standalone/sidecar/clipboard-ops.js`) whose cwd is the app directory rather than a user's repository; `pty-core.js`'s `%SystemRoot%\System32` join is the pattern those should follow.
 
-**What promoting the walk to the spawn target changed.** Before it, the walk
-only proved the install present and travelled to the host as a hint, so its
-divergence from `which` was inert: a fixed `.cmd`/`.exe`/`.bat` order and a bare
-`existsSync`. Once it decides what runs, both diverge observably — a directory
-holding `agent-browser.exe` and `agent-browser.cmd` would switch which one runs,
-and a non-executable file or directory named `agent-browser` earlier on `PATH`
-would fail EACCES/EISDIR where `which` walked past it to the real install (that
-one is not Windows-specific). A second round found that `which@2`'s fallback list
-is npm's `.EXE;.CMD;.BAT;.COM` rather than `cmd.exe`'s `.COM;.EXE;.BAT;.CMD`, so
-copying the shell's order inverts `.com`-vs-`.exe` and `.bat`-vs-`.cmd`; that
-`which` uses `||` rather than `??` for it, so an empty `PATHEXT` falls back
-instead of yielding no candidates; and that it unshifts an empty extension when
-the command contains a `.`, so `agent-browser.exe` is searched as itself. All
-four are `getPathInfo` in `which/which.js`, read at 2.0.2. A third round caught
-the invariant stating the opposite of the fix in the case that motivated it —
-`which`'s Windows branch prepends `process.cwd()`, so an unscoped "select the
-file `which` would" licenses the hijack — and that the X_OK probe was unpinned
-because `statSync().isFile()` already rejected the directory the test shadowed
-with. All three rounds were review findings on the fix, before it merged.
+**What promoting the walk to the spawn target changed.** Before it, the walk only proved the install present and travelled to the host as a hint, so its divergence from `which` was inert: a fixed `.cmd`/`.exe`/`.bat` order and a bare `existsSync`. Once it decides what runs, both diverge observably — a directory holding `agent-browser.exe` and `agent-browser.cmd` would switch which one runs, and a non-executable file or directory named `agent-browser` earlier on `PATH` would fail EACCES/EISDIR where `which` walked past it to the real install (that one is not Windows-specific). A second round found that `which@2`'s fallback list is npm's `.EXE;.CMD;.BAT;.COM` rather than `cmd.exe`'s `.COM;.EXE;.BAT;.CMD`, so copying the shell's order inverts `.com`-vs-`.exe` and `.bat`-vs-`.cmd`; that `which` uses `||` rather than `??` for it, so an empty `PATHEXT` falls back instead of yielding no candidates; and that it unshifts an empty extension when the command contains a `.`, so `agent-browser.exe` is searched as itself. All four are `getPathInfo` in `which/which.js`, read at 2.0.2. A third round caught the invariant stating the opposite of the fix in the case that motivated it — `which`'s Windows branch prepends `process.cwd()`, so an unscoped "select the file `which` would" licenses the hijack — and that the X_OK probe was unpinned because `statSync().isFile()` already rejected the directory the test shadowed with. All three rounds were review findings on the fix, before it merged.
 
 **What a missing `windowsHide` looks like.** cross-spawn routes `.cmd` shims through `cmd.exe`, which owns a real console window, and the browser host's crisp-capture loop spawns one per changed stream frame — a live page flickers focus-stealing windows several times a second.
 
 **Why none of the `exit`-vs-`close` trouble surfaced on macOS.** The `agent-browser` daemon double-forks and detaches from the inherited fds, so `close` fires normally; only on Windows, where the daemon holds the parent's stdout/stderr pipes for its whole life, does a `close`-only wait hang forever.
 
-**Why byte chunks are not text boundaries.** In a subprocess regression on
-macOS in 2026-09, writing the bytes of `🐭` and `€` across separate pipe chunks
-produced `���` on both streams when each chunk was converted with `String`.
-Node's stream decoder holds incomplete UTF-8 sequences until the next chunk;
-the caller receives the command's text regardless of pipe chunking.
+**Why byte chunks are not text boundaries.** In a subprocess regression on macOS in 2026-09, writing the bytes of `🐭` and `€` across separate pipe chunks produced `���` on both streams when each chunk was converted with `String`. Node's stream decoder holds incomplete UTF-8 sequences until the next chunk; the caller receives the command's text regardless of pipe chunking.
 
-**Why settling the promise does not finish the CLI.** A subprocess reproduction
-on macOS in 2026-09 resolved capture at 279 ms but kept its caller alive until a
-pipe-inheriting descendant exited at 3054 ms. The `dor` entry point sets
-`process.exitCode` rather than forcing exit, so open read handles defeat the
-exit-grace fallback. In the long-lived host, their data listeners also keep
-appending daemon output after the result is immutable. Neither caller reads
-those bytes; capture owns the read ends and releases them at settlement.
+**Why settling the promise does not finish the CLI.** A subprocess reproduction on macOS in 2026-09 resolved capture at 279 ms but kept its caller alive until a pipe-inheriting descendant exited at 3054 ms. The `dor` entry point sets `process.exitCode` rather than forcing exit, so open read handles defeat the exit-grace fallback. In the long-lived host, their data listeners also keep appending daemon output after the result is immutable. Neither caller reads those bytes; capture owns the read ends and releases them at settlement.
 
-**The daemon owns its remaining output lifetime.** Agent-browser 0.31.1 already
-expects its spawning CLI to drop the read end after startup: its
-[daemon setup](https://github.com/vercel-labs/agent-browser/blob/v0.31.1/cli/src/native/daemon.rs)
-redirects Unix stderr to a log or `/dev/null`, and daemon diagnostics discard
-write errors. Closing capture's read ends does not signal or kill descendants;
-a descendant that continues writing must tolerate a closed output sink.
+**The daemon owns its remaining output lifetime.** Agent-browser 0.31.1 already expects its spawning CLI to drop the read end after startup: its [daemon setup](https://github.com/vercel-labs/agent-browser/blob/v0.31.1/cli/src/native/daemon.rs) redirects Unix stderr to a log or `/dev/null`, and daemon diagnostics discard write errors. Closing capture's read ends does not signal or kill descendants; a descendant that continues writing must tolerate a closed output sink.
 
 A Windows reproduction in 2026-10 (Node 22.22.3, cross-spawn 7.0.6) passed a literal percent-delimited environment expression unchanged through simple and npm-shaped global/local batch shims. The earlier claim that forwarded arguments contain no such expression did not describe browser passthrough; bypassing the shared shim escaping would reintroduce expansion.
-
-## Control-channel security
-
-**Who the threat is.** Not the network — the channel is a local socket or named pipe. The attacker is a second account on the same box, or any process running as the user; interposing inherits the whole verb set at once — keystrokes in, screen and scrollback out, pane destroyed.
-
-**Where the 8-byte socket name comes from.** macOS caps `sun_path` near 104 bytes and its `os.tmpdir()` already spends ~50, so the per-uid directory plus a 16-byte random component would not fit. Both spellings then use the same length; only the POSIX one is constrained.
-
-**What mutual proof buys.** Whoever merely bound the path receives the client's
-nonce and a client proof tied to the squatter's challenge, but no token or
-Surface request. That proof is not replayable against the real server's fresh
-random challenge. The server proves knowledge of the token before the client
-releases its request; it does not prove itself before receiving the client proof.
-
-**Why a failed handshake gets no reply at all.** A wrong answer and a port scan get the same nothing: any distinguishable response tells a prober a Dormouse control endpoint is at that path, exactly what the random name is spent hiding.
-
-**Why the token stops at the process that owns the server.** PTY work has to survive a dead control channel, so exiting the host is not the answer. But a host that kept handing `DORMOUSE_CONTROL_TOKEN` to every shell after a failed bind would feed both clients and their bearer credential to whoever won the race for the path or pipe name. Withholding it degrades safely instead: nothing dials a stranger.
 
 ## Current Implemented Commands
 

@@ -103,13 +103,17 @@ export class RelayHub {
    * this on disconnect alone is not enough; because the displaced socket's
    * `close` is a no-op here, the drop has to happen at replacement time too.
    *
+   * `first` goes out before the socket is routable, so nothing routed can
+   * overtake it.
+   *
    * The eviction is announced with {@link WS_CLOSE_BURROW_REPLACED} rather than a
    * plain close so the evicted Burrow can tell it apart from a network drop: it
    * stands down on this code instead of backing off and reconnecting, which
    * would evict the replacement and start an endless swap.
    */
-  registerBurrow(burrowId: string, socket: RelaySocket): BurrowConn {
+  registerBurrow(burrowId: string, socket: RelaySocket, first?: RelayToBurrowFrame): BurrowConn {
     const conn: BurrowConn = { burrowId, socket };
+    if (first) this.#toBurrow(conn, first);
     const existing = this.#burrows.get(burrowId);
     this.#burrows.set(burrowId, conn);
     if (existing) {
@@ -226,8 +230,8 @@ export class RelayHub {
     if (this.#clients.get(client.clientId) !== client) return;
     if (answeredPing(client.socket, raw)) return;
     // The envelope the end-to-end protocol rides in: an `init` binds, and
-    // everything after it is forwarded within that binding (relay.md ->
-    // Relay). Never decoded here.
+    // everything after it is forwarded within that binding
+    // (`docs/specs/relay.md` -> "Routing"). Never decoded here.
     const read = readClientFrame(raw);
     if ('error' in read) {
       this.#toClient(client, read.error);

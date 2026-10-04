@@ -1,7 +1,7 @@
 import { PREVIEW_SUPERSEDED_ERROR } from 'dor/commands/types';
 import { SURFACE_CONTROL_METHODS } from 'dor/protocol';
 import { requestExternalLinkConfirmation } from './external-link-confirmation';
-import { localFileLinkPreviewPath } from './external-links';
+import { decodeFileLink, localFileLinkPreviewPath } from './external-links';
 import { getPlatform } from './platform';
 import { dispatchDorControlRequest } from './platform/dor-control-dispatch';
 import { normalizeFileUriPath } from './terminal-state';
@@ -31,9 +31,10 @@ export function activateTerminalLink(
   const ownPreview = !preview && lastPreview?.id === id && lastPreview.uri === uri ? lastPreview : null;
   if (preview) lastPreview = null;
   const path = localFileLinkPreviewPath(uri, displayText);
+  const source = { surfaceId: id, cwd: linkCwd(id, path ?? decodeFileLink(uri)?.path) };
   // Only a host that resolves open rules can answer.
   if (path === null || !getPlatform().toolControl) {
-    requestExternalLinkConfirmation(uri, displayText);
+    requestExternalLinkConfirmation(uri, displayText, source);
     return;
   }
   // A triple-click's third click would open the file again, unkeyed Tools twice.
@@ -44,12 +45,18 @@ export function activateTerminalLink(
     requestId: `link-${crypto.randomUUID()}`,
     surfaceId: id,
     method: SURFACE_CONTROL_METHODS.tool,
-    params: { file: uri, preview, cwd: getInheritableCwd(id) ?? directoryOf(normalizeFileUriPath(path)) },
+    params: { file: uri, preview, cwd: source.cwd },
   }, (response) => {
     if (response.ok || response.error === PREVIEW_SUPERSEDED_ERROR || ownPreview?.failed) return;
     if (record) record.failed = true;
-    requestExternalLinkConfirmation(uri, displayText);
+    requestExternalLinkConfirmation(uri, displayText, source);
   });
+}
+
+/** The click's directory, kept across confirmation and viewer selection: the
+ *  Session's CWD, else the linked file's own. The host still validates the link. */
+function linkCwd(id: string, path: string | undefined): string | undefined {
+  return getInheritableCwd(id) ?? (path === undefined ? undefined : directoryOf(normalizeFileUriPath(path)));
 }
 
 /** The parent of a native path with `/` separators; a root keeps its slash,

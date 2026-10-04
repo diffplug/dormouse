@@ -43,6 +43,7 @@ vi.mock('../../remote/burrow/enrollment', async (importOriginal) => {
 });
 import {
   API_ROUTES,
+  MAX_PENDING_PAIRINGS,
   NOT_ENTITLED_ERROR,
   ONE_TIME_WS_ROUTES,
   ORIGIN_MISMATCH_ERROR,
@@ -59,6 +60,7 @@ import {
   type BurrowAclRecord,
 } from 'remote-lib-common';
 import type { BurrowEnrollment } from '../../remote/burrow/enrollment';
+import type { PendingPairing } from '../../remote/burrow/pairing-approval';
 import type {
   BurrowSurfaceProvider,
   SurfaceHold,
@@ -91,7 +93,13 @@ import {
 import { createEphemeralBurrowStateStore, type BurrowStateStore } from './burrow-state-store';
 import { DEFAULT_RELAY_ORIGIN } from '../relay-origin';
 import type { BurrowDirectPeerFactory } from './native-direct-peer';
-import { BurrowService, enrollVerificationUrl, type BurrowServiceOptions } from './service';
+import {
+  BurrowService,
+  enqueuePending,
+  enrollVerificationUrl,
+  suggestedBurrowLabel,
+  type BurrowServiceOptions,
+} from './service';
 import { ANYWHERE_ON, LAN, LOCAL_ON, RELAY_ON } from './test-burrow-link';
 import { idleOneTimeState, isOneTimeState } from './service-protocol';
 import type {
@@ -113,9 +121,8 @@ const ORIGIN = 'https://relay.example.ts.net';
 const HOSTED_ORIGIN = DEFAULT_RELAY_ORIGIN;
 
 /**
- * The enrollment every case runs on, with a **real** Noise static: without one
- * the service backfills and persists a fresh key on start, which is its own
- * case below rather than a hidden write under every other.
+ * The enrollment every case runs on, with a **real** Noise static: the service
+ * checks that its halves correspond before it starts a Burrow.
  */
 let ENROLLMENT: BurrowEnrollment;
 
@@ -235,8 +242,8 @@ let setupTokenMalformed: boolean;
 /** The `origin` the fake Relay's enroll answer reports; its own URL's by default. */
 let enrollReportedOrigin: string | null;
 /**
- * Whether the fake Relay refuses a request naming another origin, as a current
- * one does; off, it is an older Relay that ignores the field.
+ * Whether the fake Relay refuses a request naming another origin, as a
+ * conforming one does; off, it answers for its own origin regardless.
  */
 let relayChecksOrigin: boolean;
 /** What the fake Relay puts in `expiresAt`; a test moves it to expire one. */
@@ -619,22 +626,6 @@ describe('enroll', () => {
     expect(sockets).toHaveLength(1);
   });
 
-  it('refuses an older webview naming another Relay, rather than enrolling this one', async () => {
-    createService();
-    const result = await command('enroll', {
-      relayUrl: 'https://relay.example.com',
-      password: 'setup',
-      label: 'Laptop',
-    });
-
-    expect(result.error).toContain('https://relay.example.com');
-    expect(result.error).toContain(ORIGIN);
-    expect(requests).toEqual([]);
-    // Naming this build's own Relay, however spelled, is no refusal.
-    expect((await command('enroll', { relayUrl: `${ORIGIN}/`, password: 'setup', label: 'Laptop' })).result)
-      .toEqual({ burrowId: BURROW_ID });
-  });
-
   it('is refused by a Relay served from another origin, which saves nothing', async () => {
     // A Relay whose DORMOUSE_ORIGIN is not the origin this build was made for
     // would send every phone somewhere else; the mismatch is named, both ways.
@@ -652,9 +643,26 @@ describe('enroll', () => {
     expect(statusEvents()).toEqual([]);
   });
 
-  it('refuses what an older Relay enrolled for another origin, naming the row it left', async () => {
-    // It ignores the request's `origin`, so its `burrows.json` already holds a
-    // row nobody has the token for.
+  it('names a console call with no label by the suggested one, before the exchange', async () => {
+    // `window.dormouseBurrow.enroll(password)` passes whatever it was given;
+    // an enrollment is never stored without a label, so it is resolved before
+    // the one request that spends the credential.
+    createService();
+    const result = await command('enroll', { password: 'setup' });
+
+    expect(result.result).toEqual({ burrowId: BURROW_ID });
+    expect(requests).toHaveLength(1);
+    expect(store.enrollment?.label).toBe(suggestedBurrowLabel('vscode'));
+
+    offer = OFFER;
+    createService();
+    expect((await command('enrollOffer', { label: '   ' })).result).toEqual({ burrowId: BURROW_ID });
+    expect(store.enrollment?.label).toBe(suggestedBurrowLabel('vscode'));
+  });
+
+  it('refuses what a Relay enrolled for another origin, naming the row it left', async () => {
+    // It answered for an origin the request did not name, so its
+    // `burrows.json` already holds a row nobody has the token for.
     relayChecksOrigin = false;
     enrollReportedOrigin = 'https://relay.example.com';
     createService();
@@ -790,18 +798,25 @@ describe('enrollOffer', () => {
     expect(result.error).toContain(ORIGIN);
     expect(store.enrollment).toBeNull();
   });
-
-  it('refuses an older webview echoing another origin', async () => {
-    offer = OFFER;
-    createService();
-    const result = await command('enrollOffer', { origin: 'https://relay.example.com', label: 'Laptop' });
-
-    expect(result.error).toContain('https://relay.example.com');
-    expect(requests).toEqual([]);
-  });
 });
 
 describe('start', () => {
+  it('keeps a Burrow whose Noise static halves disagree down, loudly, touching nothing', async () => {
+    // A corrupt or hand-edited state file: starting would present an identity
+    // every paired Client reads as changed (docs/specs/remote-security-model.md
+    // → Burrow identity).
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const other = await mintNoiseStaticKeyPair();
+    const corrupt = { ...ENROLLMENT, noiseStaticPublicKey: other.publicKey };
+    createService({ enrollment: corrupt });
+    await service.start();
+
+    expect(sockets).toEqual([]);
+    expect(store.enrollment).toEqual(corrupt);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('does not match its public half'));
+    warn.mockRestore();
+  });
+
   it('reads an enrollment for another origin as none, loudly, and keeps it on disk', async () => {
     // Enrolled by another build — a stock one, or one baked for a Relay that
     // moved. Nothing connects to it, and switching back restores it
@@ -933,6 +948,35 @@ describe('start', () => {
     ]);
   });
 
+  it('persists a UV demand the Relay raised after enrollment, so a restart keeps it', async () => {
+    createService({ enrollment: ENROLLMENT });
+    await service.start();
+    sockets[0]!.open();
+    sockets[0]!.receive({ t: 'policy', requireUserVerification: true });
+    await vi.waitFor(() => expect(store.enrollment).toEqual({ ...ENROLLMENT, requireUserVerification: true }));
+  });
+
+  it('writes no raise onto an enrollment cleared while it waited', async () => {
+    createService({ enrollment: ENROLLMENT });
+    await service.start();
+    sockets[0]!.open();
+    // The delete is in flight, the Burrow still running, when the Relay speaks.
+    let release!: () => void;
+    const clear = store.clearEnrollment;
+    store.clearEnrollment = async () => {
+      await new Promise<void>((resolve) => (release = resolve));
+      await clear();
+    };
+    const cleared = command('clearEnrollment');
+    await vi.waitFor(() => expect(release).toBeTypeOf('function'));
+    sockets[0]!.receive({ t: 'policy', requireUserVerification: true });
+    release();
+    await cleared;
+    // Past every serialized task the raise could have queued.
+    await settle();
+    expect(store.enrollment).toBeNull();
+  });
+
   it('clearEnrollment stops the Burrow and forgets it, keeping the records', async () => {
     createService({ enrollment: ENROLLMENT, acl: { [BURROW_ID]: [aclRecord('device-1')] } });
     await service.start();
@@ -1035,6 +1079,35 @@ describe('status events', () => {
     createService();
     await command('enroll', { password: 'setup', label: 'Laptop' });
     expect(statusEvents()).toEqual([true]);
+  });
+});
+
+describe('enqueuePending', () => {
+  const request = (clientId: string): PendingPairing => ({ clientId }) as PendingPairing;
+  const full = () => {
+    const queue = new Map<string, PendingPairing>();
+    for (let i = 0; i < MAX_PENDING_PAIRINGS; i += 1) enqueuePending(queue, request(`c${i}`));
+    return queue;
+  };
+
+  it('holds the cap: one more evicts the oldest', () => {
+    const queue = full();
+    enqueuePending(queue, request('late'));
+    expect([...queue.keys()]).toEqual([
+      ...Array.from({ length: MAX_PENDING_PAIRINGS - 1 }, (_, i) => `c${i + 1}`),
+      'late',
+    ]);
+  });
+
+  it('coalesces a re-sent request before evicting, so it displaces only its own entry', () => {
+    const queue = full();
+    const resent = request('c3');
+    enqueuePending(queue, resent);
+    expect(queue.size).toBe(MAX_PENDING_PAIRINGS);
+    expect(queue.has('c0')).toBe(true);
+    // The newer request queues behind the ones already waiting.
+    expect([...queue.keys()].at(-1)).toBe('c3');
+    expect(queue.get('c3')).toBe(resent);
   });
 });
 
@@ -2469,25 +2542,6 @@ describe('network policy', () => {
         expect(requests).toEqual([]);
         expect(sockets).toEqual([]);
       });
-    });
-
-    it('saves no backfilled Noise static for a dispose() that lands during its mint', async () => {
-      const { noiseStaticPrivateKey: _private, noiseStaticPublicKey: _public, ...legacy } = ENROLLMENT;
-      createService({ enrollment: legacy });
-      const subtle = globalThis.crypto.subtle;
-      const generateKey = subtle.generateKey.bind(subtle) as (...args: unknown[]) => Promise<unknown>;
-      const mint = vi.spyOn(subtle, 'generateKey').mockImplementation(((...args: unknown[]) => {
-        service.dispose();
-        return generateKey(...args);
-      }) as typeof subtle.generateKey);
-      try {
-        await service.start();
-        expect(mint).toHaveBeenCalled();
-      } finally {
-        mint.mockRestore();
-      }
-      expect(store.enrollment).toEqual(legacy);
-      expect(sockets).toEqual([]);
     });
 
     it('rejects anything but an exact policy this build offers, changing nothing', async () => {

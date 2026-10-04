@@ -3,7 +3,8 @@ import { execFileSync } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getCargoGitRepository, getShippedCargoGraph } from "./cargo-dependencies.js";
-import { assertWorkspaceCoverage, getDependencyNames } from "./dependency-workspaces.js";
+import { compareVersions, mergeReleases } from "./dependency-rows.js";
+import { assertWorkspaceCoverage, getDependencyNames, missingDependency } from "./dependency-workspaces.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, "../..");
@@ -20,14 +21,39 @@ const themeExtensionsPath = resolve(repoRoot, "lib/src/lib/themes/bundled-extens
 // and all, and `relay` is installed and run by a selfhoster (SELF_HOST.md) —
 // `web-push` in particular signs with a private key and makes outbound
 // requests. See docs/specs/security-supply-chain.md -> "Disclosure".
-const productDependencyFilters = [
-  "dor", // Staged on every Dormouse terminal's PATH.
-  "dormouse", // Installed VS Code extension (vscode-ext/package.json).
-  "dormouse-standalone", // Installed standalone frontend.
-  "dormouse-lib", // Compiled into both hosts; relative imports bypass the VSIX's dependency walk.
-  "dormouse-sidecar", // Tauri bundle.resources includes this node_modules tree.
-  "relay", // Built and installed by the selfhost runbook.
+//
+// Each section is disclosed as its own table, walked in this order: a package
+// belongs to the first section that reaches it, and a root of a later section is
+// not entered from an earlier one, so `dor` -> `dor-tools-builtin` leaves the
+// built-in Tools' graph to its own section.
+const productSections = [
+  {
+    id: "terminal",
+    roots: [
+      "dor", // Staged on every Dormouse terminal's PATH.
+      "dormouse", // Installed VS Code extension (vscode-ext/package.json).
+      "dormouse-standalone", // Installed standalone frontend.
+      "dormouse-lib", // Compiled into both hosts; relative imports bypass the VSIX's dependency walk.
+      "dormouse-sidecar", // Tauri bundle.resources includes this node_modules tree.
+    ],
+  },
+  {
+    id: "builtinTools",
+    roots: [
+      "dor-tools-builtin", // Bundled into `dor`'s runtime; its viewers load only when a built-in Tool opens a file.
+    ],
+  },
+  {
+    id: "relay",
+    roots: [
+      "relay", // Built and installed by the selfhost runbook.
+    ],
+  },
 ];
+const productDependencyFilters = productSections.flatMap((section) => section.roots);
+const sectionOfRoot = new Map(
+  productSections.flatMap((section) => section.roots.map((root) => [root, section.id])),
+);
 // These packages do not install an artifact on a user's disk. Any new workspace
 // requires classification here or a runtime edge from a product root.
 const excludedWorkspacePackages = [
@@ -85,6 +111,13 @@ function formatAuthor(author) {
   return author.name || author.email || author.url || null;
 }
 
+/** Names from a `contributors` or `authors` array, for a package without `author`. */
+function formatPeople(people) {
+  if (!Array.isArray(people)) return null;
+  const names = [...new Set(people.map(formatAuthor).filter(Boolean))];
+  return names.length ? names.join(", ") : null;
+}
+
 function normalizeRepositoryUrl(repository) {
   const repositoryUrl = typeof repository === "string" ? repository : repository?.url;
   if (!repositoryUrl) return null;
@@ -111,8 +144,10 @@ const workspacePackagesByName = new Map(workspacePackages.map((workspacePackage)
   workspacePackage.pkg.name,
   workspacePackage,
 ]));
-const productRoots = new Set(productDependencyFilters);
-const externalPackages = new Map();
+/** The section being walked; every package first read during it belongs to it. */
+let currentSection = null;
+/** Every disclosed release, one entry per `name@version`, merged into rows on output. */
+const externalReleases = [];
 const visitedExternalPackagePaths = new Set();
 const visitedWorkspacePackageNames = new Set();
 /**
@@ -121,30 +156,20 @@ const visitedWorkspacePackageNames = new Set();
  * docs/specs/security-supply-chain.md -> "Disclosure".
  */
 const undescribedPackages = new Map();
-
-/**
- * Identity of a disclosed package. Two installs of one name that agree on all
- * four fields are one row with two versions; a disagreement is two rows.
- */
-function externalPackageKey({ name, license, author, homepage }) {
-  return [name, license ?? "", author ?? "", homepage ?? ""].join("\0");
-}
+/** Each package's `contributors` (or `authors`), the last resort for its author. */
+const listedPeople = new Map();
 
 function addExternalPackage(pkg) {
-  const identity = {
+  const people = formatPeople(pkg.contributors) ?? formatPeople(pkg.authors);
+  if (people) listedPeople.set(pkg.name, people);
+  externalReleases.push({
+    section: currentSection,
     name: pkg.name,
-    license: pkg.license ?? null,
+    version: pkg.version,
+    license: normalizeLicense(pkg.license),
     author: formatAuthor(pkg.author),
     homepage: getHomepage(pkg),
-  };
-  const key = externalPackageKey(identity);
-  const existing = externalPackages.get(key);
-  if (existing) {
-    existing.versions.add(pkg.version);
-    return;
-  }
-
-  externalPackages.set(key, { ...identity, versions: new Set([pkg.version]) });
+  });
 }
 
 /**
@@ -164,6 +189,8 @@ function optionalSiblingsAtSameVersion(pkg, packageName) {
 
 function scanWorkspacePackage(name) {
   if (visitedWorkspacePackageNames.has(name)) return;
+  // Another section's root: that section walks it.
+  if (sectionOfRoot.has(name) && sectionOfRoot.get(name) !== currentSection) return;
   const workspacePackage = workspacePackagesByName.get(name);
   if (!workspacePackage) {
     throw new Error(`Workspace package "${name}" was not found`);
@@ -181,21 +208,15 @@ function scanDependency(fromDir, packageName, declaredBy) {
 
   const packageJsonPath = getPackageJsonPath(fromDir, packageName);
   if (!packageJsonPath) {
-    // Absent by design rather than under-reported, in one of two ways. An
-    // optional dependency of an external package ships to nobody: the Tauri
-    // bundle copies `standalone/sidecar/node_modules`, and pnpm puts a package
-    // there only if that manifest declares it — the addon's own list also names
-    // builds this project never releases (android, musl). An optional
-    // dependency a product root declares itself does ship, on the platform that
-    // can hold it, so it is described from a sibling below. Anything else
-    // missing is still a hard error.
-    if (declaredBy.optional) {
-      if (declaredBy.isProductRoot) {
-        undescribedPackages.set(
-          packageName,
-          optionalSiblingsAtSameVersion(declaredBy.pkg, packageName),
-        );
-      }
+    const edge = missingDependency(declaredBy);
+    if (edge === 'skip') return;
+    // The first section to reach it keeps it, as `firstSectionReleases` does.
+    if (edge === 'describe' && undescribedPackages.has(packageName)) return;
+    if (edge === 'describe') {
+      undescribedPackages.set(packageName, {
+        section: currentSection,
+        siblings: optionalSiblingsAtSameVersion(declaredBy.pkg, packageName),
+      });
       return;
     }
     throw new Error(`Could not resolve package.json for "${packageName}" from ${fromDir}`);
@@ -211,31 +232,29 @@ function scanDependency(fromDir, packageName, declaredBy) {
 }
 
 function scanDependencies(pkg, fromDir) {
-  const isProductRoot = productRoots.has(pkg.name);
+  const isProductRoot = sectionOfRoot.has(pkg.name);
+  const isWorkspace = workspacePackagesByName.has(pkg.name);
   for (const { name, optional } of getDependencyNames(pkg)) {
-    scanDependency(fromDir, name, { pkg, optional, isProductRoot });
+    scanDependency(fromDir, name, { pkg, optional, isWorkspace, isProductRoot });
   }
 }
 
-for (const packageName of productDependencyFilters) {
-  scanWorkspacePackage(packageName);
+for (const section of productSections) {
+  currentSection = section.id;
+  for (const packageName of section.roots) scanWorkspacePackage(packageName);
 }
 
-// Snapshotted before the loop writes to `externalPackages`, so nothing is ever
+// Grouped before the loop writes to `externalReleases`, so nothing is ever
 // described from something that was itself described rather than read.
-const describedPackagesByName = new Map();
-for (const pkg of externalPackages.values()) {
-  if (!describedPackagesByName.has(pkg.name)) describedPackagesByName.set(pkg.name, pkg);
-}
-for (const [packageName, siblings] of undescribedPackages) {
-  const sibling = siblings.map((name) => describedPackagesByName.get(name)).find(Boolean);
+const readReleasesByName = Map.groupBy(externalReleases, (release) => release.name);
+for (const [packageName, { section, siblings }] of undescribedPackages) {
+  const sibling = siblings.map((name) => readReleasesByName.get(name)).find(Boolean);
   if (!sibling) {
     throw new Error(
       `"${packageName}" is not installed and neither is any sibling declared beside it at the same version, so it cannot be described`,
     );
   }
-  const described = { ...sibling, name: packageName, versions: new Set(sibling.versions) };
-  externalPackages.set(externalPackageKey(described), described);
+  externalReleases.push(...sibling.map((release) => ({ ...release, section, name: packageName })));
 }
 
 // Within a single "A OR B OR ..." choice, move MIT to the front so the
@@ -262,15 +281,26 @@ function normalizeLicense(license) {
   return moveMitFirstInOrGroup(normalized);
 }
 
-const deps = [...externalPackages.values()].map((pkg) => ({
-  name: pkg.name,
-  version: [...pkg.versions].sort().join(", "),
-  license: normalizeLicense(pkg.license),
-  author: pkg.author,
-  homepage: pkg.homepage,
-}));
+/**
+ * Each `name@version` once, in the first section that reached it. pnpm installs
+ * one release at several paths when peer contexts differ, so the path walk
+ * alone would repeat it under a later section. A described release cannot
+ * collide with a read one: it is described because it is not installed.
+ */
+function firstSectionReleases(releases) {
+  const seen = new Set();
+  return releases.filter(({ name, version }) => {
+    const release = `${name}@${version}`;
+    if (seen.has(release)) return false;
+    seen.add(release);
+    return true;
+  });
+}
 
-// Merge in bundled theme extensions from OpenVSX
+const deps = firstSectionReleases(externalReleases);
+
+// Merge in bundled theme extensions from OpenVSX, compiled into lib and so
+// part of the terminal.
 const themeExtensions = JSON.parse(readFileSync(themeExtensionsPath, "utf-8"));
 
 // OpenVSX exposes VS Code's bundled default themes as several built-in
@@ -281,11 +311,12 @@ const isVscodeBuiltInTheme = (dep) =>
   (dep.name === "Default Themes (built-in)" || dep.name.endsWith(" Theme (built-in)"));
 
 const vscodeBuiltInThemes = themeExtensions.filter(isVscodeBuiltInTheme);
-if (vscodeBuiltInThemes.length > 0) {
-  const versions = [...new Set(vscodeBuiltInThemes.map((dep) => dep.version).filter(Boolean))].sort();
+// One release per version, which `mergeReleases` folds into one row.
+for (const version of new Set(vscodeBuiltInThemes.map((dep) => dep.version).filter(Boolean))) {
   deps.push({
+    section: "terminal",
     name: "VS Code built-in themes",
-    version: versions.join(", "),
+    version,
     license: "MIT",
     author: "Microsoft Corporation",
     homepage: "https://github.com/microsoft/vscode/tree/main/extensions",
@@ -298,6 +329,7 @@ deps.push(
   ...themeExtensions
     .filter((dep) => !isVscodeBuiltInTheme(dep))
     .map(({ name, version, license, author, homepage }) => ({
+      section: "terminal",
       name,
       version,
       license,
@@ -309,68 +341,179 @@ deps.push(
 // Manual overrides for dependencies missing license or author in their metadata
 const missingLicense = {
   "Solarized & Selenized": "MIT",
+  // Declared in the legacy `licenses` array.
+  "format": "MIT",
+  // Stated only in its LICENSE file.
+  "khroma": "MIT",
 };
 const missingAuthor = {
-  // DefinitelyTyped publishes these names in `contributors`, not `author`.
-  "@types/trusted-types": "Jakub Vrana, Damien Engels, Emanuel Tesar, Bjarki, Sebastian Silbermann",
   "@hono/node-ws": "Hono middleware contributors",
-  // The addon ships a `contributors` array rather than npm's singular `author`
-  // field, and its prebuilt platform packages carry neither.
+  "@mdxeditor/gurx": "Petyo Ivanov",
+  "@preact/signals-core": "Preact Team",
+  // node-datachannel's prebuilt platform packages carry no author or contributors.
   "@node-datachannel/darwin-arm64": "Murat Doğan, Paul-Louis Ageneau",
   "@node-datachannel/darwin-x64": "Murat Doğan, Paul-Louis Ageneau",
   "@node-datachannel/linux-arm64-gnu": "Murat Doğan, Paul-Louis Ageneau",
   "@node-datachannel/linux-x64-gnu": "Murat Doğan, Paul-Louis Ageneau",
   "@node-datachannel/win32-arm64-msvc": "Murat Doğan, Paul-Louis Ageneau",
   "@node-datachannel/win32-x64-msvc": "Murat Doğan, Paul-Louis Ageneau",
-  "node-datachannel": "Murat Doğan, Paul-Louis Ageneau",
   "@tauri-apps/api": "Tauri Apps Contributors",
   "@tauri-apps/plugin-shell": "Tauri Apps Contributors",
   "@tauri-apps/plugin-updater": "Tauri Apps Contributors",
   "@xterm/xterm": "Christopher Jeffrey, SourceLair Private Company, xterm.js authors",
-  // Both ship an `authors` array rather than npm's singular `author` field.
-  "@zxing/browser": "David Werth, Luiz Barni",
-  "@zxing/library": "Adrian Toșcă, David Werth, Luiz Barni",
+  // nodeca's port of Python's argparse, under the PSF license.
+  "argparse": "nodeca, Python Software Foundation",
   "atomically": "Fabio Spampinato",
   "inherits": "Isaac Z. Schlueter",
+  "lexical": "Meta Platforms, Inc. and affiliates",
   "minimalistic-assert": "Calvin Metcalf",
   "ms": "Vercel, Inc.",
   "node-addon-api": "Node.js API collaborators",
   "pngjs": "pngjs contributors",
+  "prop-types": "Meta Platforms, Inc. and affiliates",
   "react": "Meta Platforms, Inc. and affiliates",
   "react-dom": "Meta Platforms, Inc. and affiliates",
+  "react-is": "Meta Platforms, Inc. and affiliates",
   "scheduler": "Meta Platforms, Inc. and affiliates",
   "stubborn-fs": "Fabio Spampinato",
   "stubborn-utils": "Fabio Spampinato",
   "tailwindcss": "Tailwind Labs, Inc.",
   "when-exit": "Fabio Spampinato",
+  // Holders named only in each package's LICENSE file.
+  "@braintree/sanitize-url": "Braintree",
+  "acorn": "Acorn contributors",
+  "acorn-jsx": "Ingvar Stepanyan",
+  "cose-base": "iVis@Bilkent",
+  "cytoscape": "The Cytoscape Consortium",
+  "cytoscape-cose-bilkent": "The Cytoscape Consortium",
+  "diff": "Kevin Decker",
+  "es-toolkit": "Viva Republica, Inc.",
+  "katex": "Khan Academy and other contributors",
+  "khroma": "Fabio Spampinato, Andrew Maney",
+  "layout-base": "iVis@Bilkent",
+  "uuid": "Robert Kieffer and other contributors",
+  "uvu": "Luke Edwards",
 };
-for (const dep of deps) {
-  if (!dep.license) {
-    const override = missingLicense[dep.name];
-    if (!override) {
-      console.error(`ERROR: "${dep.name}" has no license. Add it to missingLicense in generate-deps.js`);
-      process.exit(1);
-    }
-    dep.license = override;
-  }
-  if (!dep.author) {
-    const override = missingAuthor[dep.name];
-    if (!override) {
-      console.error(`ERROR: "${dep.name}" has no author. Add it to missingAuthor in generate-deps.js`);
-      process.exit(1);
-    }
-    dep.author = override;
-  }
+// Every package under these scopes names its holder only in its LICENSE.
+const missingAuthorScopes = {
+  "@chevrotain/": "Shahar Soel",
+  "@lexical/": "Meta Platforms, Inc. and affiliates",
+  "@radix-ui/": "WorkOS",
+};
+// Packages whose metadata names neither `homepage` nor `repository`, by scope.
+const missingHomepageScopes = {
+  "@radix-ui/": "https://www.radix-ui.com/",
+};
+/** The value of the first `prefix` key that `name` starts with. */
+function byPrefix(table, name) {
+  return Object.entries(table).find(([prefix]) => name.startsWith(prefix))?.[1];
 }
 
-deps.sort((a, b) => a.name.localeCompare(b.name));
+/** Fills a missing `field` from `override`, or fails generation naming `table`. */
+function requireField(dep, field, override, table) {
+  if (dep[field]) return;
+  if (!override) {
+    console.error(`ERROR: "${dep.name}" has no ${field}. Add it to ${table} in generate-deps.js`);
+    process.exit(1);
+  }
+  dep[field] = override;
+}
+
+for (const dep of deps) {
+  requireField(dep, "license", missingLicense[dep.name], "missingLicense");
+  requireField(
+    dep,
+    "author",
+    missingAuthor[dep.name] ?? byPrefix(missingAuthorScopes, dep.name) ?? listedPeople.get(dep.name),
+    "missingAuthor",
+  );
+  requireField(dep, "homepage", byPrefix(missingHomepageScopes, dep.name), "missingHomepageScopes");
+}
+
+// Merged after the overrides, so a release whose metadata needed one still
+// joins its siblings' row.
+const npmRowsBySection = Map.groupBy(
+  mergeReleases(deps, ["section"]).sort(compareDependencyEntries),
+  (row) => row.section,
+);
+const npmDepsBySection = Object.fromEntries(productSections.map(({ id }) => [
+  id,
+  (npmRowsBySection.get(id) ?? []).map(({ section: _section, ...row }) => row),
+]));
 
 // Manual overrides for Cargo crates whose published Cargo.toml omits author or
-// homepage metadata. Keyed by crate name. libappindicator{,-sys} ship empty
-// `authors`/`homepage`/`repository`, so cargo metadata yields null for both.
+// homepage metadata. Keyed by crate name. Cargo deprecated `authors`, so newer
+// crates ship none; a missing entry fails generation, as for npm above.
+// libappindicator{,-sys} ship empty `authors`/`homepage`/`repository`, so cargo
+// metadata yields null for both.
 const cargoMissingAuthor = {
   "libappindicator": "Tauri Apps Contributors",
   "libappindicator-sys": "Tauri Apps Contributors",
+  // Holders named in each crate's LICENSE, COPYRIGHT, or AUTHORS file.
+  "chrono": "Kang Seonghoon and contributors",
+  "crossbeam-channel": "The Crossbeam Project Developers",
+  "crossbeam-utils": "The Crossbeam Project Developers",
+  "find-msvc-tools": "Alex Crichton",
+  "futures-channel": "Alex Crichton, The Tokio Authors",
+  "futures-core": "Alex Crichton, The Tokio Authors",
+  "futures-executor": "Alex Crichton, The Tokio Authors",
+  "futures-io": "Alex Crichton, The Tokio Authors",
+  "futures-macro": "Alex Crichton, The Tokio Authors",
+  "futures-sink": "Alex Crichton, The Tokio Authors",
+  "futures-task": "Alex Crichton, The Tokio Authors",
+  "futures-util": "Alex Crichton, The Tokio Authors",
+  "hyper-rustls": "Joseph Birr-Pixton",
+  "javascriptcore-rs": "The Gtk-rs Project Developers, Tauri Programme within The Commons Conservancy",
+  "libc": "The Rust Project Developers",
+  "muda": "Tauri Programme within The Commons Conservancy",
+  "nix": "Carl Lerche and nix-rust Authors",
+  "quick-xml": "Johann Tuffe",
+  "r-efi": "Red Hat, Inc., Microsoft Corporation, David Rheinsberg",
+  "ring": "Brian Smith",
+  "rustc_version": "The Rust Project Developers",
+  "rustls": "Joseph Birr-Pixton",
+  "rustls-native-certs": "Joseph Birr-Pixton",
+  "rustls-pki-types": "Dirkjan Ochtman",
+  "rustls-platform-verifier": "1Password",
+  "rustls-platform-verifier-android": "1Password",
+  "rustls-webpki": "Brian Smith",
+  "serde_spanned": "toml-rs contributors",
+  "softbuffer": "Kirill Chibisov",
+  "soup3": "The Gtk-rs Project Developers",
+  "tokio-rustls": "quininer kel",
+  "toml_parser": "toml-rs contributors",
+  "toml_writer": "toml-rs contributors",
+  "tray-icon": "Tauri Programme within The Commons Conservancy",
+  "webkit2gtk": "Antoni Boucher, The Gtk-rs Project Developers",
+  "webkit2gtk-sys": "Antoni Boucher",
+  "windows": "Microsoft",
+  "windows-collections": "Microsoft",
+  "windows-future": "Microsoft",
+  "windows-implement": "Microsoft",
+  "windows-interface": "Microsoft",
+  "windows-numerics": "Microsoft",
+  "windows-registry": "Microsoft",
+  "windows-version": "Microsoft",
+  // No holder in the crate's files: its project or maintainer. bs58's LICENSE
+  // names "The roaring-rs developers", a copy-paste from another project.
+  "bs58": "bs58-rs contributors",
+  "cargo-platform": "The Rust Project Developers",
+  "dpi": "The winit contributors",
+  "equivalent": "The indexmap contributors",
+  "indexmap": "The indexmap contributors",
+  "jni-macros": "jni team",
+  "pin-project-lite": "Taiki Endo",
+  "wasip2": "The Bytecode Alliance",
+  "webpki-root-certs": "The rustls contributors",
+  "webview2-com": "Bill Avery",
+  "webview2-com-macros": "Bill Avery",
+  "webview2-com-sys": "Bill Avery",
+  "winnow": "Ed Page and nom contributors",
+};
+// objc2's framework crates (objc2-app-kit, objc2-foundation, ...) name no
+// author; the core `objc2` crate names Mads Marquart.
+const cargoMissingAuthorPrefixes = {
+  "objc2-": "Mads Marquart",
 };
 const cargoMissingHomepage = {
   "libappindicator": "https://github.com/tauri-apps/libappindicator-rs",
@@ -391,13 +534,16 @@ function cargoPackageEntry(pkg) {
     name: pkg.name,
     version: pkg.version,
     license: normalizeLicense(pkg.license),
-    author: formatCargoAuthor(pkg.authors) ?? cargoMissingAuthor[pkg.name] ?? null,
+    author: formatCargoAuthor(pkg.authors)
+      ?? cargoMissingAuthor[pkg.name]
+      ?? byPrefix(cargoMissingAuthorPrefixes, pkg.name)
+      ?? null,
     homepage: getCargoHomepage(pkg) ?? cargoMissingHomepage[pkg.name] ?? null,
   };
 }
 
 function compareDependencyEntries(a, b) {
-  return a.name.localeCompare(b.name) || a.version.localeCompare(b.version);
+  return a.name.localeCompare(b.name) || compareVersions(a.versions[0], b.versions[0]);
 }
 
 function getCargoMetadata() {
@@ -431,7 +577,7 @@ function getCargoDependencies() {
   const { directDeps, shippedIds } = getShippedCargoGraph(metadata);
   const directIds = new Set(directDeps.map((dep) => dep.pkg));
 
-  const direct = directDeps.map((dep) => {
+  const direct = mergeReleases(directDeps.map((dep) => {
     const pkg = packagesById.get(dep.pkg);
     if (!pkg) throw new Error(`Could not find Cargo package ${dep.pkg}`);
 
@@ -440,17 +586,21 @@ function getCargoDependencies() {
       ...cargoPackageEntry(pkg),
       declaredName: manifestDep?.rename || manifestDep?.name || dep.name.replaceAll("_", "-"),
     };
-  }).sort(compareDependencyEntries);
+  }), ["declaredName"]).sort(compareDependencyEntries);
 
-  const transitive = metadata.packages
-    .filter((pkg) => shippedIds.has(pkg.id) && !directIds.has(pkg.id))
-    .map(cargoPackageEntry)
-    .sort(compareDependencyEntries);
+  const transitive = mergeReleases(
+    metadata.packages
+      .filter((pkg) => shippedIds.has(pkg.id) && !directIds.has(pkg.id))
+      .map(cargoPackageEntry),
+  ).sort(compareDependencyEntries);
 
   return { direct, transitive };
 }
 
 const cargoDeps = getCargoDependencies();
+for (const dep of [...cargoDeps.direct, ...cargoDeps.transitive]) {
+  requireField(dep, "author", null, "cargoMissingAuthor");
+}
 
 // Bundled runtime: the standalone app ships a Node.js binary as a Tauri
 // sidecar (see standalone/src-tauri/build.rs). Its version is pinned exactly in
@@ -469,7 +619,7 @@ function getBundledRuntimeDependencies() {
   return [
     {
       name: "Node.js",
-      version: nodeVersion,
+      versions: [nodeVersion],
       license: "MIT and bundled component licenses",
       author: "OpenJS Foundation and Node.js contributors",
       homepage: "https://github.com/nodejs/node",
@@ -479,10 +629,12 @@ function getBundledRuntimeDependencies() {
 
 const runtimeDeps = getBundledRuntimeDependencies();
 
-writeFileSync(npmOutPath, JSON.stringify(deps, null, 2) + "\n");
+writeFileSync(npmOutPath, JSON.stringify(npmDepsBySection, null, 2) + "\n");
 writeFileSync(cargoOutPath, JSON.stringify(cargoDeps, null, 2) + "\n");
 writeFileSync(runtimeOutPath, JSON.stringify(runtimeDeps, null, 2) + "\n");
-console.log(`Wrote ${deps.length} dependencies to src/data/dependencies-npm.json`);
+console.log(
+  `Wrote ${productSections.map(({ id }) => `${npmDepsBySection[id].length} ${id}`).join(", ")} npm dependencies to src/data/dependencies-npm.json`,
+);
 console.log(
   `Wrote ${cargoDeps.direct.length} direct and ${cargoDeps.transitive.length} transitive Cargo dependencies to src/data/dependencies-cargo.json`,
 );

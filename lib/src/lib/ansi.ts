@@ -16,7 +16,7 @@ export const CURSOR_HOME = `${ESC}H`;
 export const fg = (code: number): string => `${ESC}${code}m`;
 
 // Alt-screen toggles paired with full clear + cursor visibility flips.
-// Use these for full-screen TUIs (tut, ascii-splash) so exiting restores
+// Use these for full-screen TUIs (tutorial, ascii-splash) so exiting restores
 // whatever was on screen before.
 export const ENTER_ALT_SCREEN = `${ESC}?1049h${CLEAR_SCREEN}${CURSOR_HOME}${ESC}?25l`;
 export const LEAVE_ALT_SCREEN = `${CLEAR_SCREEN}${CURSOR_HOME}${ESC}?25h${ESC}?1049l`;
@@ -29,4 +29,5 @@ export const MOUSE_DISABLE = `${ESC}?1003l${ESC}?1002l${ESC}?1000l${ESC}?1006l`;
 
 // Stylized `user@dormouse:~$ ` prompt used by the playground shell and
 // by canned scenarios so they look the same.
-export const PROMPT = `${fg(32)}user${RESET}@${fg(36)}dormouse${RESET}:${BOLD}${fg(34)}~${RESET}$ `;
+export const promptFor = (dir: string): string => `${fg(32)}user${RESET}@${fg(36)}dormouse${RESET}:${BOLD}${fg(34)}${dir}${RESET}$ `;
+export const PROMPT = promptFor('~');

@@ -44,7 +44,8 @@ function terminalRole(face: ToolFace, transition: PreviewTransition | null): Rol
   return reveals ? 'revealing' : 'hidden';
 }
 
-/** Keep hidden capability bodies sized. The primary xterm moves into the leaf's
+/** Keep hidden capability bodies sized (`visibility` and `inert`, never
+ * `display: none`). The primary xterm moves into the leaf's
  * context overlay while it is open; TerminalPanel then renders no second view.
  * The Session registry retains that xterm throughout the move. */
 function Half({ face, state, className, children }: {

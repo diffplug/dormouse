@@ -30,7 +30,7 @@ const insideDormouse = Boolean(process.env.DORMOUSE_SURFACE_ID);
 // Only the token: the sidecar picks the control socket path itself (hardened
 // per-user directory on POSIX, unguessable pipe name on Windows) and reports it
 // on its own stderr as `[dor-control] listening on …`, which this harness
-// forwards. See docs/specs/dor-cli.md -> Control-channel security.
+// forwards. See docs/specs/security-local.md -> "The dor control socket".
 //
 // A real bearer credential: it goes into the environment of every shell this
 // harness spawns, and holding it is full access to the `dor` control API
@@ -127,6 +127,9 @@ const fireAndForget = {
   // label this harness simulates, as Rust stamps the invoking window's
   // (`alert_command` in src-tauri/src/lib.rs).
   alert_command: ({ payload }) => writeSidecar('alert:command', { ...payload, window: HARNESS_WINDOW }),
+  // Owned by the one window, as Rust stamps the invoking window's
+  // (`iframe_release_proxy` in src-tauri/src/lib.rs).
+  iframe_release_proxy: ({ lease }) => writeSidecar('iframe:releaseProxy', { owner: HARNESS_WINDOW, id: lease ?? null }),
   kill_sidecar_now: () => shutdown(),
 };
 
@@ -142,7 +145,11 @@ const invokeMap = {
   read_clipboard_file_paths: () => requestSidecar('clipboard:readFiles', {}, 'clipboard:files', (data) => data.paths ?? null),
   read_clipboard_image_as_file_path: () => requestSidecar('clipboard:readImage', {}, 'clipboard:image', (data) => data.path ?? null),
   read_clipboard_text: () => requestSidecar('clipboard:readText', {}, 'clipboard:text', (data) => data.text ?? null),
-  iframe_create_proxy_url: ({ target, embedderOrigins }) => requestSidecar('iframe:createProxyUrl', { target, embedderOrigins }, 'iframe:proxyUrl', (data) => data.result),
+  // Invoked at boot, so the release lands before this page's first lease.
+  iframe_release_proxy: async ({ lease }) => { writeSidecar('iframe:releaseProxy', { owner: HARNESS_WINDOW, id: lease ?? null }); return null; },
+  iframe_create_proxy_url: ({ target, embedderOrigins, lease }) => requestSidecar('iframe:createProxyUrl', {
+    target, embedderOrigins, ...(typeof lease === 'string' ? { lease: { owner: HARNESS_WINDOW, id: lease } } : {}),
+  }, 'iframe:proxyUrl', (data) => data.result),
   // Managed voice, the passthrough `managed_voice` in src-tauri/src/lib.rs;
   // 20_000 mirrors its MANAGED_VOICE_TIMEOUT.
   managed_voice: ({ payload }) =>

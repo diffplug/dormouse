@@ -97,25 +97,34 @@ const LS_CLASSIFIER_RE = /[/*@=|>]$/;
  * `EADME.md` does not.
  */
 export function localFileLinkPreviewPath(uri: string, displayText: string): string | null {
+  const link = decodeFileLink(uri);
+  if (!link || (link.host !== '' && !PLAIN_HOSTNAME_RE.test(link.host))) return null;
+  const { path } = link;
+  if (CONTROL_CHARACTER_RE.test(path)) return null;
+  const names = (text: string) => text !== '' && (path === text || path.endsWith(`/${text}`));
+  const text = displayText.trim();
+  return names(text) || names(text.replace(LS_CLASSIFIER_RE, '')) ? path : null;
+}
+
+/** A `file:` URI's host and decoded path, a folder's trailing `/` removed;
+ *  undefined for any other or undecodable URI. Nothing here is validated. */
+export function decodeFileLink(uri: string): { host: string; path: string } | undefined {
   let url: URL;
   try {
     url = new URL(uri);
   } catch {
-    return null;
+    return undefined;
   }
-  if (url.protocol !== 'file:' || (url.host !== '' && !PLAIN_HOSTNAME_RE.test(url.host))) return null;
+  if (url.protocol !== 'file:') return undefined;
   let path: string;
   try {
     path = decodeURIComponent(url.pathname);
   } catch {
-    return null;
+    return undefined;
   }
-  if (CONTROL_CHARACTER_RE.test(path)) return null;
   // A folder's URI may end in `/`; its name never does.
   if (path.length > 1 && path.endsWith('/')) path = path.slice(0, -1);
-  const names = (text: string) => text !== '' && (path === text || path.endsWith(`/${text}`));
-  const text = displayText.trim();
-  return names(text) || names(text.replace(LS_CLASSIFIER_RE, '')) ? path : null;
+  return { host: url.host, path };
 }
 
 function normalizeForMatch(value: string): string {

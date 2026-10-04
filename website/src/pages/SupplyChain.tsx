@@ -7,7 +7,6 @@ import DocsLayout from "../components/DocsLayout";
 import {
   LINK_CLASS,
   MUTED_TEXT_CLASS,
-  SCROLL_MT_CLASS,
   TABLE_CLASS,
   TABLE_HEAD_ROW_CLASS,
   TABLE_ROW_CLASS,
@@ -35,7 +34,8 @@ const link = tv({ base: LINK_CLASS });
 
 type PackageDependency = {
   name: string;
-  version: string;
+  /** Every release of this package under one license, oldest first. */
+  versions: string[];
   license: string | null;
   author: string | null;
   homepage: string | null;
@@ -58,16 +58,26 @@ function DependencyName({ dep }: { dep: PackageDependency }) {
 
 /** `declaredName` differs from `name` only when a Cargo manifest renames the
  *  crate; every other source leaves it undefined. */
+type DependencyRow = PackageDependency & { declaredName?: string };
+
 function DependencyTable({
   nameLabel,
   deps,
 }: {
   nameLabel: string;
-  deps: readonly (PackageDependency & { declaredName?: string })[];
+  deps: readonly DependencyRow[];
 }) {
   return (
     <div className={TABLE_WRAP_CLASS}>
-      <table className={`${TABLE_CLASS} min-w-[760px] text-sm`}>
+      {/* Fixed columns: under auto layout one long version or SPDX expression
+          widened its column for every row and pushed Author out of view. */}
+      <table className={`${TABLE_CLASS} min-w-[760px] table-fixed text-sm`}>
+        <colgroup>
+          <col className="w-[30%]" />
+          <col className="w-[17%]" />
+          <col className="w-[20%]" />
+          <col className="w-[33%]" />
+        </colgroup>
         <thead>
           <tr className={TABLE_HEAD_ROW_CLASS}>
             <th className={TH_CLASS}>{nameLabel}</th>
@@ -78,18 +88,29 @@ function DependencyTable({
         </thead>
         <tbody>
           {deps.map((dep) => (
-            <tr key={`${dep.name}@${dep.version}`} className={TABLE_ROW_CLASS}>
-              <td className="py-1.5 pr-4">
+            <tr key={`${dep.name}@${dep.versions[0]}`} className={TABLE_ROW_CLASS}>
+              <td className="py-1.5 pr-4 break-words">
                 <DependencyName dep={dep} />
                 {dep.declaredName && dep.declaredName !== dep.name ? (
                   <div className={`font-mono text-xs ${MUTED_TEXT_CLASS}`}>{dep.declaredName}</div>
                 ) : null}
               </td>
-              <td className={`py-1.5 pr-4 font-mono whitespace-nowrap ${MUTED_TEXT_CLASS}`}>{dep.version}</td>
+              <td className={`py-1.5 pr-4 font-mono ${MUTED_TEXT_CLASS}`}>
+                {dep.versions.map((version) => {
+                  // Build metadata (`+spec-1.1.0`) gets its own small line.
+                  const [core, ...build] = version.split("+");
+                  return (
+                    <div key={version}>
+                      {core}
+                      {build.length > 0 ? <div className="text-xs break-all">+{build.join("+")}</div> : null}
+                    </div>
+                  );
+                })}
+              </td>
               {/* The cell already carries the muted colour, so an empty value
                   needs the fallback text and no wrapper of its own. */}
-              <td className={`py-1.5 pr-4 whitespace-nowrap ${MUTED_TEXT_CLASS}`}>{dep.license || "Unknown"}</td>
-              <td className={`py-1.5 ${MUTED_TEXT_CLASS}`}>{dep.author || "Unknown"}</td>
+              <td className={`py-1.5 pr-4 ${MUTED_TEXT_CLASS}`}>{dep.license || "Unknown"}</td>
+              <td className={`py-1.5 break-words ${MUTED_TEXT_CLASS}`}>{dep.author || "Unknown"}</td>
             </tr>
           ))}
         </tbody>
@@ -99,54 +120,117 @@ function DependencyTable({
 }
 
 type SupplyChainSection = {
+  /** Anchor the rail links, and the heading's id. */
+  id: string;
+  title: string;
+  description: string;
+  nameLabel: string;
+  deps: readonly DependencyRow[];
+};
+
+type SupplyChainProduct = {
   /** Anchor the rail links, and the `<h2>`'s id. */
   id: string;
   title: string;
-  count: number;
-  description: string;
-  table: ReactNode;
+  description: ReactNode;
+  /** The product's headline count in the summary row, and what it counts. */
+  summary: { count: number; detail: string };
+  sections: readonly SupplyChainSection[];
 };
 
 /**
- * The page's sections, in order.
+ * The page's products and their inventory sections, in order, matching the
+ * generator's sections (website/scripts/generate-deps.js).
  *
  * One owner for the heading a reader sees, the anchor it carries, and the
  * table under it, so the rail cannot name a section the page has renamed or
  * dropped. Anchors are spelled out rather than slugged from the title, so
- * rewording a heading does not silently break a link someone saved.
+ * rewording a heading does not silently break a link someone saved; the
+ * Terminal's keep the ids they had before the page was split by product.
  */
-const SECTIONS: readonly SupplyChainSection[] = [
+const PRODUCTS: readonly SupplyChainProduct[] = [
   {
-    id: "bundled-runtime",
-    title: "Bundled Runtime",
-    count: runtimeDeps.length,
+    id: "terminal",
+    title: "Dormouse Terminal",
     description:
-      "The Standalone app ships a bundled NodeJS, which bundles other components under their own licenses.\nThe VS Code extension bundles no runtime — it runs on the editor's own Electron Node.",
-    table: <DependencyTable nameLabel="Package" deps={runtimeDeps} />,
+      "Every install: the VS Code extension or the Standalone app, and the dor CLI they put on each terminal's PATH.",
+    summary: {
+      count: npmDeps.terminal.length,
+      detail: `npm packages, plus ${cargoDeps.direct.length + cargoDeps.transitive.length} Cargo crates and Node.js ${runtimeDeps[0].versions[0]}`,
+    },
+    sections: [
+      {
+        id: "bundled-runtime",
+        title: "Bundled Runtime",
+        description:
+          "The Standalone app ships a bundled NodeJS, which bundles other components under their own licenses.\nThe VS Code extension bundles no runtime — it runs on the editor's own Electron Node.",
+        nameLabel: "Package",
+        deps: runtimeDeps,
+      },
+      {
+        id: "npm-dependencies",
+        title: "npm Dependencies",
+        description:
+          "Runtime npm packages used by the Standalone app, the VS Code extension, and the dor CLI, plus the bundled themes.",
+        nameLabel: "Package",
+        deps: npmDeps.terminal,
+      },
+      {
+        id: "direct-cargo-dependencies",
+        title: "Direct Cargo Dependencies",
+        description:
+          "Crates declared directly in standalone/src-tauri/Cargo.toml, including build and target-specific dependencies.",
+        nameLabel: "Crate",
+        deps: cargoDeps.direct,
+      },
+      {
+        id: "transitive-cargo-dependencies",
+        title: "Transitive Cargo Dependencies",
+        description:
+          "Every crate the direct dependencies pull into the locked Tauri build graph, including build-time and platform-specific crates that aren't all linked into the final binary.",
+        nameLabel: "Package",
+        deps: cargoDeps.transitive,
+      },
+    ],
   },
   {
-    id: "npm-dependencies",
-    title: "npm Dependencies",
-    count: npmDeps.length,
+    id: "builtin-tools",
+    title: "Built-in Tools",
     description:
-      "Runtime npm packages used by the Standalone app, the VS Code extension, and the Relay you run yourself to pair a phone with your laptop.",
-    table: <DependencyTable nameLabel="Package" deps={npmDeps} />,
+      "The file viewer and editors behind dor open — Monaco, the Markdown editor, and Mermaid diagrams. They ship with every install, inside the dor CLI, but their code runs only when you open a file with a built-in Tool, in that Tool's frame, whose server hands out only the files you opened (and, for Markdown, images in and below the document's folder).",
+    summary: { count: npmDeps.builtinTools.length, detail: "npm packages" },
+    sections: [
+      {
+        id: "builtin-tools-npm-dependencies",
+        title: "npm Dependencies",
+        description: "Runtime npm packages of the built-in Tools that the Terminal does not already use.",
+        nameLabel: "Package",
+        deps: npmDeps.builtinTools,
+      },
+    ],
   },
   {
-    id: "direct-cargo-dependencies",
-    title: "Direct Cargo Dependencies",
-    count: cargoDeps.direct.length,
-    description:
-      "Crates declared directly in standalone/src-tauri/Cargo.toml, including build and target-specific dependencies.",
-    table: <DependencyTable nameLabel="Crate" deps={cargoDeps.direct} />,
-  },
-  {
-    id: "transitive-cargo-dependencies",
-    title: "Transitive Cargo Dependencies",
-    count: cargoDeps.transitive.length,
-    description:
-      "Every crate the direct dependencies pull into the locked Tauri build graph, including build-time and platform-specific crates that aren't all linked into the final binary.",
-    table: <DependencyTable nameLabel="Package" deps={cargoDeps.transitive} />,
+    id: "relay",
+    title: "Self-hosted Relay",
+    description: (
+      <>
+        Installed only if you run your own Relay to pair a phone with your laptop, by the{" "}
+        <a href={`${sitePath("/self-host")}#what-the-installer-does`} className={link()}>
+          self-host runbook
+        </a>
+        .
+      </>
+    ),
+    summary: { count: npmDeps.relay.length, detail: "npm packages" },
+    sections: [
+      {
+        id: "relay-npm-dependencies",
+        title: "npm Dependencies",
+        description: "Runtime npm packages of the Relay that the sections above do not already list.",
+        nameLabel: "Package",
+        deps: npmDeps.relay,
+      },
+    ],
   },
 ];
 
@@ -170,26 +254,41 @@ export const SUPPLY_CHAIN_TOC: TocEntry[] = [
     text: "Supply-chain guarantees",
     children: CONTRACT_SECTIONS.map(({ id, text }) => ({ id, text, children: [] })),
   },
-  ...SECTIONS.map((section) => ({
-    id: section.id,
-    text: section.title,
-    children: [],
+  ...PRODUCTS.map((product) => ({
+    id: product.id,
+    text: product.title,
+    // A product with one table needs no entry below its own.
+    children: product.sections.length > 1
+      ? product.sections.map((section) => ({ id: section.id, text: section.title, children: [] }))
+      : [],
   })),
 ];
 
 function DependencySection({ section }: { section: SupplyChainSection }) {
   return (
-    <section className="mt-12">
+    <section className="mt-8">
       <div className="mb-4 flex flex-col gap-1 border-b border-[var(--color-text)]/10 pb-3 md:flex-row md:items-end md:justify-between">
         <div>
           <div className="flex items-baseline gap-2">
-            <h2 id={section.id} className={`${SCROLL_MT_CLASS} font-display text-xl`}>{section.title}</h2>
-            <div className={`font-mono text-md ${MUTED_TEXT_CLASS}`}>({section.count})</div>
+            <AnchoredHeading id={section.id} depth={3} spacing="">{section.title}</AnchoredHeading>
+            <div className={`font-mono text-md ${MUTED_TEXT_CLASS}`}>({section.deps.length})</div>
           </div>
           <p className={`text-sm whitespace-pre-line ${MUTED_TEXT_CLASS}`}>{section.description}</p>
         </div>
       </div>
-      {section.table}
+      <DependencyTable nameLabel={section.nameLabel} deps={section.deps} />
+    </section>
+  );
+}
+
+function ProductSection({ product }: { product: SupplyChainProduct }) {
+  return (
+    <section>
+      <AnchoredHeading id={product.id}>{product.title}</AnchoredHeading>
+      <p className={`text-base mb-2 ${MUTED_TEXT_CLASS}`}>{product.description}</p>
+      {product.sections.map((section) => (
+        <DependencySection key={section.id} section={section} />
+      ))}
     </section>
   );
 }
@@ -221,12 +320,9 @@ export default function SupplyChain() {
         </div>
       ))}
       <p className={`text-base mb-2 ${MUTED_TEXT_CLASS}`}>
-        The optional Relay — needed only for phone push notifications,
-        installed by the{" "}
-        <a href={`${sitePath("/self-host")}#what-the-installer-does`} className={link()}>
-          self-host runbook
-        </a>{" "}
-        — is included in the inventory below.
+        The inventory is split by what you install. Every install gets the Terminal and the
+        built-in Tools; the Relay only if you host one yourself. A package an earlier section
+        already lists is not repeated.
       </p>
 
       <p className={`text-base mb-2 ${MUTED_TEXT_CLASS}`}>
@@ -252,22 +348,17 @@ export default function SupplyChain() {
         and their transitive dependencies, which power this marketing site but don't ship in the app, so they're not listed below.
       </p>
       <div className="grid gap-3 border-y border-[var(--color-text)]/10 py-4 text-sm md:grid-cols-3">
-        <div>
-          <div className="font-mono text-2xl">{npmDeps.length}</div>
-          <div className={MUTED_TEXT_CLASS}>npm packages (direct and transitive)</div>
-        </div>
-        <div>
-          <div className="font-mono text-2xl">{cargoDeps.direct.length}</div>
-          <div className={MUTED_TEXT_CLASS}>Cargo crates (direct)</div>
-        </div>
-        <div>
-          <div className="font-mono text-2xl">{cargoDeps.transitive.length}</div>
-          <div className={MUTED_TEXT_CLASS}>Cargo crates (transitive)</div>
-        </div>
+        {PRODUCTS.map(({ id, title, summary }) => (
+          <div key={id}>
+            <div className="font-mono text-2xl">{summary.count}</div>
+            <div>{title}</div>
+            <div className={MUTED_TEXT_CLASS}>{summary.detail}</div>
+          </div>
+        ))}
       </div>
 
-      {SECTIONS.map((section) => (
-        <DependencySection key={section.id} section={section} />
+      {PRODUCTS.map((product) => (
+        <ProductSection key={product.id} product={product} />
       ))}
     </DocsLayout>
   );

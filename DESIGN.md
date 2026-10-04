@@ -154,9 +154,7 @@ Every literal color the Host-Theme-Only Rule below permits, in full. Each is her
 
 ## 3. Typography
 
-**Display Font:** none (no display tier).
-**Body Font:** `var(--vscode-editor-font-family)`.
-**Label/Mono Font:** same as body. Sans and mono resolve to the same VSCode editor font.
+**Display Font:** none (no display tier). **Body Font:** `var(--vscode-editor-font-family)`. **Label/Mono Font:** same as body. Sans and mono resolve to the same VSCode editor font.
 
 **Character:** monospace, the user's own editor face. The system has no opinion about Cascadia vs. SF Mono vs. JetBrains Mono vs. Fira Code; whatever is set in the editor is what Dormouse uses, including ligature settings. This is the typographic equivalent of the host-theme rule.
 
@@ -200,7 +198,7 @@ Doors are the pane-header indicators on the baseboard. The most signature compon
 - **Dimensions:** `h-6` (24px), `min-w-[68px]`, `max-w-[220px]`; the button pads `px-2.5` (10px), with `gap-2` between its glyph, title, and badges.
 - **Type:** `text-sm font-medium font-mono`.
 - **Content:** leading browser-display icon cluster on a browser Surface (`size={12}` each, `gap-0.5` — a wide robot plus the presentation glyph, or the presentation glyph alone for `iframe`; named in the Door's accessible name, `docs/specs/dor-browser.md` → Browser Chrome); truncated title; optional TODO pill (`text-xs font-semibold tracking-[0.08em]`, success-tinted when flourishing).
-- **Alarm:** one 2px inset overlay (`--color-alarm-vs-door`) draws the edge for both the unlabelled ring, where it flashes once on arrival, and `SPOKEN`, which persists until the ring clears and adds a speaker icon *beside* the TODO pill instead of evicting it. `SPEAKING` instead inverts and pulses the whole Door and takes the badge slot for its speaker-plus-label, for one utterance. Both speech states carry a speaker icon (shape, not color); all three name the state in the accessible name. The row inventory is `docs/specs/layout.md` → Alarm overlay.
+- **Alarm:** one 2px inset overlay (`--color-alarm-vs-door`) draws the edge for both the unlabelled ring, where it flashes once on arrival, and `SPOKEN`, which persists until the ring clears and adds a speaker icon *beside* the TODO pill instead of evicting it. `SPEAKING` instead inverts and pulses the whole Door and takes the badge slot for its speaker-plus-label, for one utterance. Both speech states carry a speaker icon (shape, not color); all three name the state in the accessible name. The row inventory is `alertRingRow` in `lib/src/components/alert-ring.tsx`; the overlay's layering is `docs/specs/layout.md` → Alarm overlay.
 - **Hover/Focus:** no decorative hover on the door itself; the focus state is conveyed by the parent pane's selection ring, not by a per-door treatment. The door is a labelled `role="group"` wrapper with one button that reattaches.
 
 ### Buttons
@@ -241,7 +239,7 @@ The system uses **raised surfaces**, not "cards." There are no nested cards. The
 ### Navigation
 
 The system has no traditional product top-nav. Three surfaces play navigational roles:
-- **Workspace strip** (standalone app bar, top): Door geometry, pane-header palettes, and the gradients seating the selected tab against the Wall and fading the rest into the app ground — `docs/specs/layout.md` → Workspace tabs. Union indicators belong to `docs/specs/alert.md` → Workspace union; VS Code uses its native chrome (`docs/specs/vscode.md`).
+- **Workspace strip** (standalone app bar, top): Door geometry, pane-header palettes, and the gradients seating the selected tab against the Wall and fading the rest into the app ground — `TAB_WALL_JOIN_GRADIENT` and the shared Door/tab constants in `lib/src/components/design.tsx`. Union indicators belong to `docs/specs/alert.md` → Workspace union; VS Code uses its native chrome (`docs/specs/vscode.md`).
 - **Baseboard** (bottom of the app): horizontal strip of doors representing minimized panes plus chrome action buttons. Doors are the primary navigation affordance to a minimized terminal. Buttons use `chromeButton` with 24px height, muted text, and `hover:text-foreground`; Settings icons use square buttons with 2px gaps, while labeled overflow buttons keep horizontal padding.
 - **Pane Header (TerminalPaneHeader)**: the tab-replacing strip at the top of each pane. Lath is a headless tiling engine with no tab-bar chrome of its own; the React header IS the tab.
 
@@ -262,13 +260,13 @@ The most distinctive motion in the system. Implemented as `clip-path` reveals, n
 - **Reduced-motion:** all of the above are nulled.
 
 #### Marching Ants (Command Mode)
-The selection ring around the focused pane in command mode is an SVG with `stroke-dasharray` and a `marching-ants` keyframe that increments `stroke-dashoffset` by `var(--march-offset)`. Color: `var(--color-focus-ring)`. It is the visual signature of "you are now in command mode," so it marches for as long as command mode lasts, pausing only while a Workspace title is being edited, the window is unfocused, or the user prefers reduced motion (timing in `docs/specs/layout.md` → Selection overlay). The ring stays crisp while travelling; motion reads instead from soft directional bands drawn behind each edge, sized by how fast that edge is moving across itself.
+The selection ring around the focused pane in command mode is an SVG with `stroke-dasharray` and a `marching-ants` keyframe that increments `stroke-dashoffset` by `var(--march-offset)`. Color: `var(--color-focus-ring)`. It is the visual signature of "you are now in command mode," so it marches for as long as command mode lasts, pausing only while a Workspace title is being edited, the window is unfocused, or the user prefers reduced motion (timing in `marchingAnts` in `lib/src/cfg.ts`). The ring stays crisp while travelling; motion reads instead from soft directional bands drawn behind each edge, sized by how fast that edge is moving across itself.
 
 #### Focus Ring Travel & Header Crossfade
 When selection moves between panes/doors, the focus ring **glides** to the new target over 220ms (`FOCUS_MOTION_MS`, half the pane-motion duration) on the house curve `cubic-bezier(0.22, 1, 0.36, 1)`, and the source/destination pane headers crossfade their active/inactive palette over the same 220ms (`HEADER_PALETTE_TRANSITION_CLASS` in `design.tsx`), so the two read as one gesture. The ring's rect is a per-frame JS tween (`rect-tween.ts`), not a CSS transition; same-identity re-measures (sash drag, window resize, animator frames) snap 1:1, and a pane↔door move lerps the corner radii so the shape never pops. Reduced motion nulls both: the ring snaps and the header palette swaps instantly.
 
 #### Copy Editor Travel
-The copy editor's moves and resizes ease on the focus ring's duration and curve (`FOCUS_MOTION_MS`, `rect-tween.ts` driven by `rect-motion.ts`); `docs/specs/mouse-and-clipboard.md` §4.5 owns when.
+The copy editor's moves and resizes ease on the focus ring's duration and curve (`FOCUS_MOTION_MS`, `rect-tween.ts` driven by `rect-motion.ts`, which owns when it snaps instead).
 
 ## 6. Do's and Don'ts
 

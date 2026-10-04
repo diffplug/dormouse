@@ -31,7 +31,9 @@ export const ACCENT_HOVER_TEXT_CLASS = "hover:text-[var(--docs-accent)]";
 export const ACCENT_HOVER_BORDER_CLASS = "hover:border-[var(--docs-accent)]";
 export const ACCENT_BORDER_CLASS = "border-[var(--docs-accent)]";
 
-/** Accent-derived text corrected against an accent-tinted action surface. */
+/** Accent-derived text corrected against an accent-tinted action surface —
+ *  against the stronger hover tint, so it clears WCAG AA at rest and on hover
+ *  (both pinned in website/src/lib/docs-accent.test.ts). */
 export const ACTION_TEXT_CLASS = "text-[var(--docs-button-text)]";
 
 /** Opaque secondary text, derived per active theme to retain body-text AA. */

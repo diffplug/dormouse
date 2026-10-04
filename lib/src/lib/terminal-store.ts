@@ -69,7 +69,25 @@ export interface PendingShellOpts {
 }
 
 export const registry = new Map<string, TerminalEntry>();
-/** Helper Sessions are private to their source: excluded from alerts, `dor`, remote projections, and cross-pane derivations. */
+
+/** Whether a helper Session may hold running work: anything short of the
+ *  host's answer that it is idle, unless it has exited. */
+export function helperMayBeBusy(entry: TerminalEntry): boolean {
+  return !entry.exited && entry.helperBusy !== false;
+}
+
+/** Human input reached this Session: it is no longer `untouched`, which is
+ *  what lets a close skip its confirmation (`docs/specs/layout.md` → "Kill
+ *  confirmation"). Here, beside the registry, so a host adapter can call it
+ *  without the terminal lifecycle. */
+export function markSessionTouched(id: string): void {
+  const entry = registry.get(id);
+  if (!entry) return;
+  entry.inputVersion = (entry.inputVersion ?? 0) + 1;
+  entry.untouched = false;
+  if (entry.helper) entry.helperBusy = undefined;
+}
+/** Helper Sessions are private to their source: excluded from alerts, public `dor` targets, remote projections, and cross-pane derivations. */
 export const isHelperSession = (id: string): boolean => !!registry.get(id)?.helper;
 export const pendingShellOpts = new Map<string, PendingShellOpts>();
 

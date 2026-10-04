@@ -8,6 +8,7 @@ import { deriveSessionLabels } from './session-label';
 import { getTerminalPaneStateSnapshot, subscribeToTerminalPaneState } from './terminal-state-store';
 import { getWorkspace, getWorkspacesSnapshot } from './workspace-store';
 import { getWorkspaceSurfacesSnapshot } from './workspace-surfaces';
+import { getPendingKills, pendingKillSessionIds } from './pending-kills';
 
 /**
  * This realm's half of ring delivery (`docs/specs/alert.md` -> Alarm
@@ -22,6 +23,7 @@ import { getWorkspaceSurfacesSnapshot } from './workspace-surfaces';
 export const LABEL_PUBLISH_THROTTLE_MS = 2_000;
 
 const NO_OVERRIDES: AlertDeliveryOverrides = {};
+const SILENCED: AlertDeliveryOverrides = { speakEnabled: false, pushEnabled: false };
 
 export function startAlertDelivery(): () => void {
   const platform = getPlatform();
@@ -69,7 +71,8 @@ function publishAlertSessions(send: (sessions: Record<string, AlertSessionInfo>)
   function flush(): void {
     timer = null;
     const surfaces = getWorkspaceSurfacesSnapshot();
-    const next = [surfaces, getWorkspacesSnapshot(), getTerminalPaneStateSnapshot(), getActivitySnapshot()];
+    const pending = getPendingKills();
+    const next = [surfaces, getWorkspacesSnapshot(), getTerminalPaneStateSnapshot(), getActivitySnapshot(), pending];
     if (next.every((input, index) => input === inputs[index])) return;
     inputs = next;
 
@@ -83,6 +86,7 @@ function publishAlertSessions(send: (sessions: Record<string, AlertSessionInfo>)
     const published = new Map<string, AlertSessionInfo>();
     let changed = false;
     for (const [workspaceId, ids] of surfaces) {
+      if (pending.some(kill => kill.kind === 'workspace' && kill.id === workspaceId)) continue;
       const overrides = getWorkspace(workspaceId)?.alertDelivery ?? NO_OVERRIDES;
       for (const id of ids) {
         const prior = sent.get(id);
@@ -91,6 +95,14 @@ function publishAlertSessions(send: (sessions: Record<string, AlertSessionInfo>)
         published.set(id, same ? prior : { label, overrides });
         if (!same) changed = true;
       }
+    }
+    // A pending kill rings nobody: published silenced, so whatever it armed is
+    // consumed rather than delivered (`docs/specs/reopen.md`).
+    for (const id of pendingKillSessionIds()) {
+      const prior = sent.get(id);
+      const same = prior !== undefined && sameAlertDeliveryOverrides(prior.overrides, SILENCED);
+      published.set(id, same ? prior : { label: prior?.label ?? labels.get(id) ?? 'terminal', overrides: SILENCED });
+      if (!same) changed = true;
     }
     if (!changed && published.size === sent.size) return;
     sent = published;

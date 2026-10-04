@@ -7,7 +7,6 @@
  * flip under the user (`docs/specs/dor-tool.md` -> Security).
  */
 import { useEffect, useRef } from 'react';
-import { getPlatform } from '../../lib/platform';
 import { getTerminalPaneState } from '../../lib/terminal-registry';
 import {
   browserUrlFromParams,
@@ -18,6 +17,7 @@ import {
   toolPortConflictFromParams,
 } from './browser-surface';
 import { listenerUrlsByPort } from './port-url';
+import { openPortsByTerminal } from './surface-ports';
 import { getToolAnnounce, subscribeToToolAnnounces } from '../../lib/tool-announce-store';
 import { forgetToolReports } from '../../lib/tool-events';
 import { validToolServePath } from 'dor-tools-lib/osc';
@@ -42,7 +42,8 @@ function toolNameFromParams(params: Record<string, unknown>): string | null {
   return typeof name === 'string' ? name : null;
 }
 
-function toolLeaves(lath: LathWallEngine, doors: DooredItem[]): ToolLeaf[] {
+/** Every Tool leaf this Wall owns, visible or Doored. */
+export function toolLeaves(lath: LathWallEngine, doors: readonly DooredItem[]): ToolLeaf[] {
   const leaves: ToolLeaf[] = [];
   for (const pane of lath.listPanes()) {
     if (isToolParams(pane.params)) leaves.push({ id: pane.id, params: pane.params });
@@ -102,8 +103,6 @@ export function useToolServing({
   const observedRuns = useRef<Map<string, string | null>>(new Map());
 
   useEffect(() => {
-    const platform = getPlatform();
-    if (!platform.getOpenPorts) return;
     let cancelled = false;
 
     /** One scan pass over every tool leaf, or over `only` — the leaves an
@@ -181,21 +180,18 @@ export function useToolServing({
       }
 
       if (scanning.length === 0 || cancelled || paused()) return;
-      // One scan per leaf, all in flight together: each shells out (lsof /
-      // PowerShell), so running them in series would make a Workspace of tools
-      // take that cost times the number of tools on every poll.
-      const scans = await Promise.all(
-        // A scan that fails is a scan that finds nothing yet.
-        scanning.map(({ leaf }) => platform.getOpenPorts!(leaf.id).catch(() => null)),
-      );
+      // One batched scan for every leaf: each scan shells out (lsof /
+      // PowerShell), so one per tool would multiply that cost on every poll.
+      const portsById = await openPortsByTerminal(scanning.map(({ leaf }) => leaf.id));
 
       // Pass two: apply each verdict, re-checking the state every scan was
       // decided against — the awaits above gave the Surface time to be killed,
       // moved, or handed a different command.
       for (let index = 0; index < scanning.length; index += 1) {
         if (cancelled || paused()) return;
-        const ports = scans[index];
-        if (ports === null) continue;
+        // A scan that fails is a scan that finds nothing yet.
+        const ports = portsById[scanning[index].leaf.id];
+        if (!ports) continue;
         const { leaf, run, announcedPort, announcedPath } = scanning[index];
         if (!lath.getMeta(leaf.id) || getTerminalPaneState(leaf.id).currentCommand?.id !== run.id) continue;
         const entries = listenerUrlsByPort(ports);

@@ -75,3 +75,21 @@ test('changed selection resolves a newly present untracked referenced source', t
   assert.deepEqual(reports.map(report => report.spec), ['docs/specs/example.md']);
   assert.ok(reports[0].references.includes('src/new.ts'));
 });
+
+test('a source pointer is measured in the files it names', t => {
+  const { root, run } = fixture(t);
+  for (const name of ['a', 'b', 'c', 'd', 'e']) writeFileSync(join(root, `src/${name}.ts`), 'export {};\n');
+  const pointer = (names) => 'Source of truth: ' + names.map(name => `\x60${name}\x60 in \x60src/${name}.ts\x60`).join('; ') + '.\n';
+  appendFileSync(join(root, 'docs/specs/example.md'), '\n' + pointer(['a', 'b', 'c', 'd']) + '\n' + pointer(['a', 'b', 'c', 'd', 'e']));
+  const hits = run().specs.find(report => report.spec === 'docs/specs/example.md').prose.filter(hit => hit.kind === 'POINTER');
+  assert.deepEqual(hits.map(hit => [hit.line, hit.detail]), [[7, '5-file source pointer']]);
+});
+
+test('a presentation value in spec prose is a hit; one in a backticked constant, a rationale, or a code fence is not', t => {
+  const { root, run } = fixture(t);
+  appendFileSync(join(root, 'docs/specs/example.md'), '\nThe Door fades over 150 ms and insets 3px.\n\nThe bound is \x60RETRY = 500ms\x60; the Relay answers 404s.\n\n```\npadding: 4px\n```\n');
+  appendFileSync(join(root, 'docs/specs/example.rationale.md'), '\nMeasured at 16 ms per frame.\n');
+  const report = run().specs.find(report => report.spec === 'docs/specs/example.md');
+  assert.deepEqual(report.prose.filter(hit => hit.kind === 'PRESENTATION').map(hit => [hit.line, hit.detail]), [[5, 'presentation value(s) 150 ms, 3px']]);
+  assert.deepEqual(report.rationale.prose.filter(hit => hit.kind === 'PRESENTATION'), []);
+});

@@ -26,7 +26,7 @@ import {
 import { getWorkspaceSurfacesSnapshot } from '../../lib/workspace-surfaces';
 import { cancelPendingConfirmation } from '../../lib/workspace-ui-store';
 import { computeWorkspaceUnion } from '../../lib/workspace-union';
-import { awaitWallHandle, errorText, mountingRefusal, stringParam } from './dor-control-shared';
+import { awaitWallHandle, errorText, mountingRefusal, requestForWall, stringParam } from './dor-control-shared';
 import { attachSurfacePorts } from './surface-ports';
 import type { WallHandle } from './wall-handles';
 import { closeWorkspaceWithSurfaces, workspaceNeedsCloseConfirmation } from './workspace-lifecycle';
@@ -91,7 +91,7 @@ function askWall(
       resolve(response);
     };
     try {
-      const running = handle.handleDorControl({ ...detail, params, respond }) as unknown;
+      const running = handle.handleDorControl({ ...requestForWall(handle, detail), params, respond }) as unknown;
       if (running instanceof Promise) void running.catch((error) => respond({ ok: false, error: errorText(error) }));
     } catch (error) {
       respond({ ok: false, error: errorText(error) });
@@ -321,7 +321,7 @@ export async function handleWorkspaceControl(detail: DorControlRequest): Promise
       if (params.force !== true && workspaceNeedsCloseConfirmation(target.id)) {
         detail.respond({
           ok: false,
-          error: `workspace '${target.ref}' holds running or touched Surfaces; pass --force to close it`,
+          error: `workspace '${target.ref}' holds Surfaces Reopen cannot restore; pass --force to close it`,
         });
         return;
       }

@@ -43,18 +43,16 @@ export interface BurrowEnrollment {
    *
    * **Local only.** It is delivered to a Client inside the encrypted pairing and
    * connection outcomes and nowhere else; the Relay never stores or sees it
-   * in an enrollment request. Optional because an enrollment persisted before
-   * this field existed must keep loading rather than reading as un-enrolled.
+   * in an enrollment request.
    */
-  label?: string;
+  label: string;
   /**
    * The Burrow's `ConnectionPolicy.requireUserVerification`, mirrored from the
    * Relay at enrollment so the two cannot disagree about what a valid
    * assertion is.
    *
-   * Optional, and absent means `false`: an enrollment persisted by an older
-   * build has no such field, and it must keep loading rather than being
-   * rejected as malformed.
+   * Optional, and absent means `false`: it is persisted only when the Relay
+   * sent it.
    */
   requireUserVerification?: boolean;
   /**
@@ -63,13 +61,11 @@ export interface BurrowEnrollment {
    *
    * **The Relay never receives it** — the enroll request body is unchanged —
    * and it lives only where the enrollment lives, which is owner-only storage
-   * on both burrows (`docs/specs/security-remote.md` → "Credentials at rest"). Optional today
-   * because an enrollment persisted before this field existed must keep
-   * loading; the service backfills a missing static before starting.
+   * on both burrows (`docs/specs/security-remote.md` → "Credentials at rest").
    */
-  noiseStaticPrivateKey?: string;
+  noiseStaticPrivateKey: string;
   /** The raw 32-byte public half of that static, base64url. */
-  noiseStaticPublicKey?: string;
+  noiseStaticPublicKey: string;
 }
 
 /**
@@ -93,7 +89,9 @@ export function isEnrollment(value: unknown): value is BurrowEnrollment {
     typeof v.burrowToken === 'string' &&
     typeof v.origin === 'string' &&
     typeof v.rpId === 'string' &&
-    (v.label === undefined || typeof v.label === 'string') &&
+    // Non-blank: phones show it as this Burrow's name.
+    typeof v.label === 'string' &&
+    v.label.trim() !== '' &&
     // Optional — absent is the documented default. Present-but-wrong-typed is
     // still a rejection: a store that round-trips `"false"` as truthy would be
     // the silent disagreement this field exists to prevent.
@@ -103,17 +101,15 @@ export function isEnrollment(value: unknown): value is BurrowEnrollment {
 }
 
 /**
- * **Both halves of the Noise static, or neither.** Absent is an enrollment
- * from before the field existed; one half alone is a truncated write or a
- * hand-edited file, and accepting it would leave a Burrow that believes it has
- * an identity it cannot use. What a well-formed half looks like is
- * `isNoiseStaticMaterial`'s to say — the value goes straight to `importKey`
- * from a file writable by anything running as this user.
+ * **Both halves of the Noise static, well-formed.** A missing half is a
+ * truncated write or a hand-edited file, and accepting it would leave a Burrow
+ * that believes it has an identity it cannot use. What a well-formed half looks
+ * like is `isNoiseStaticMaterial`'s to say — the value goes straight to
+ * `importKey` from a file writable by anything running as this user.
  */
 function hasValidNoiseStatic(v: Record<string, unknown>): boolean {
   const privateKey = v.noiseStaticPrivateKey;
   const publicKey = v.noiseStaticPublicKey;
-  if (privateKey === undefined && publicKey === undefined) return true;
   if (typeof privateKey !== 'string' || typeof publicKey !== 'string') return false;
   return isNoiseStaticMaterial(publicKey, privateKey);
 }

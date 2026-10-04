@@ -5,6 +5,7 @@ import type { PlatformAdapter } from './platform/types';
 import { browserPersistedPane, isToolCommandArgv, readPersistedSession, toPersistedAlertState, type PersistedDoor, type PersistedPane, type PersistedSession, type PersistedSurfaceRefs, type PersistedToolMetadata, type PersistedSurfaceType } from './session-types';
 import { getActivity, getLivePersistedAlertState, getTerminalPaneState, isUntouched } from './terminal-registry';
 import { UNNAMED_PANEL_TITLE } from './terminal-state';
+import { isToolReaped } from './tool-reap-store';
 
 /**
  * Where a save reads its previous record from and where it writes the new one.
@@ -59,7 +60,7 @@ async function probeCwds(
 }
 
 /** The Surfaces whose cwd a save probes: every non-browser pane and Door. */
-function cwdSurfaceIds(panes: SavePaneInput[], doors: PersistedDoor[]): string[] {
+export function cwdSurfaceIds(panes: SavePaneInput[], doors: PersistedDoor[]): string[] {
   const browser = new Map<string, boolean>();
   for (const pane of panes) browser.set(pane.id, pane.surfaceType === 'browser');
   for (const door of doors) browser.set(door.id, door.component === 'browser');
@@ -114,7 +115,7 @@ export function assemblePersistedSession(
   for (const pane of panes) {
     allPanes.set(pane.id, {
       id: pane.id,
-      title: persistedVisiblePaneTitle(pane.title),
+      title: pane.surfaceType === 'tool' ? persistedToolTitle(pane.id) : persistedVisiblePaneTitle(pane.title),
       surfaceType: pane.surfaceType ?? 'terminal',
       params: pane.params,
     });
@@ -151,7 +152,8 @@ export function assemblePersistedSession(
     };
     if (pane.surfaceType !== 'tool') return terminalPane;
     const command = toolCommandFromParams(pane.params) ?? previousPane?.command;
-    const tool = toolMetadataFromParams(pane.params) ?? previousPane?.tool;
+    const metadata = toolMetadataFromParams(pane.params) ?? previousPane?.tool;
+    const tool = metadata && withReapedMark(metadata, isToolReaped(pane.id));
     return {
       ...terminalPane,
       surfaceType: 'tool',
@@ -197,6 +199,15 @@ export function toolCommandFromParams(params: Record<string, unknown> | undefine
   return typeof command === 'string' && command.trim() ? command : null;
 }
 
+/** The live reaped mark, never the payload, which stays in memory
+ *  (`docs/specs/dor-tool.md` -> Reaping). */
+function withReapedMark(tool: PersistedToolMetadata, reaped: boolean): PersistedToolMetadata {
+  if ((tool.reaped === true) === reaped) return tool;
+  const next = { ...tool };
+  delete next.reaped;
+  return reaped ? { ...next, reaped: true } : next;
+}
+
 function toolMetadataFromParams(params: Record<string, unknown> | undefined): PersistedToolMetadata | null {
   if (!params) return null;
   const name = typeof params.toolName === 'string' && params.toolName ? params.toolName : undefined;
@@ -220,7 +231,15 @@ function persistedVisiblePaneTitle(title: string): string {
 }
 
 function persistedDoorTitle(id: string, fallback: string, component: string | undefined): string {
+  if (component === 'tool') return persistedToolTitle(id);
   const userTitle = getTerminalPaneState(id).titleCandidates.user?.title.trim();
   if (userTitle) return userTitle;
   return component && component !== 'terminal' ? persistedVisiblePaneTitle(fallback) : UNNAMED_PANEL_TITLE;
+}
+
+/** Only a user's rename of a Tool persists: a restored title is a user title,
+ *  and the URL its browser layer last showed would hide the title its program
+ *  announces again when it reruns. */
+function persistedToolTitle(id: string): string {
+  return getTerminalPaneState(id).titleCandidates.user?.title.trim() || UNNAMED_PANEL_TITLE;
 }

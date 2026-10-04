@@ -2,11 +2,12 @@ import { DEFAULT_WORKSPACE_ID, readPersistedSession } from '../../lib/session-ty
 import { useCallback, useEffect, useMemo, useRef, type RefObject } from 'react';
 import { pasteFilePaths } from '../../lib/clipboard';
 import { getPlatform } from '../../lib/platform';
-import { assemblePersistedSession, buildPersistedSession, saveSession, type SaveOptions, type SaveSink } from '../../lib/session-save';
+import { assemblePersistedSession, buildPersistedSession, cwdSurfaceIds, saveSession, type SaveOptions, type SaveSink } from '../../lib/session-save';
 import { createSessionDirtyTracker } from '../../lib/session-dirty';
 import { previousWorkspaceSession, publishWorkspaceSession, workspaceSessionRevision, SESSION_SAVE_DEBOUNCE_MS } from '../../lib/window-session-aggregator';
 import { getWorkspace, setWorkspaceAlertDelivery, subscribeToWorkspaces, hasWorkspace } from '../../lib/workspace-store';
 import {
+  getInheritableCwd,
   subscribeToActivity,
   subscribeToTerminalPaneState,
   UNNAMED_PANEL_TITLE,
@@ -27,6 +28,10 @@ export interface SessionPersistenceHandle {
   /** This Workspace's record now, with no cwd probe: what a Surface move
    *  publishes in the same synchronous run as its ownership change. */
   serializeNow: () => PersistedSession;
+  /** This Workspace's record now, each cwd as its Session last reported it,
+   *  narrowed to the members `include` keeps: what a reopen record carries
+   *  (`docs/specs/reopen.md`). */
+  serializeReported: (include?: (id: string) => boolean) => PersistedSession;
 }
 
 export function useSessionPersistence({
@@ -151,6 +156,17 @@ export function useSessionPersistence({
     return assemblePersistedSession(
       panes, doors, lathLayout, surfaceRefs?.refs, surfaceRefs?.next,
       sink?.previous() ?? null, null, saveOptions().alertDelivery,
+    );
+  }, [collect, sink, saveOptions]);
+
+  const serializeReported = useCallback((include: (id: string) => boolean = () => true): PersistedSession => {
+    const collected = collect();
+    const panes = collected.panes.filter(pane => include(pane.id));
+    const doors = collected.doors.filter(door => include(door.id));
+    const cwds = Object.fromEntries(cwdSurfaceIds(panes, doors).map(id => [id, getInheritableCwd(id) ?? null]));
+    return assemblePersistedSession(
+      panes, doors, collected.lathLayout, collected.surfaceRefs?.refs, collected.surfaceRefs?.next,
+      sink?.previous() ?? null, cwds, saveOptions().alertDelivery,
     );
   }, [collect, sink, saveOptions]);
 
@@ -335,5 +351,5 @@ export function useSessionPersistence({
     activeRef,
   ]);
 
-  return { flush: flushSessionSave, serialize, serializeNow };
+  return { flush: flushSessionSave, serialize, serializeNow, serializeReported };
 }

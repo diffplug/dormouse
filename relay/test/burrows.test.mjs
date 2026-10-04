@@ -23,6 +23,7 @@ import { BURROW_ENROLL_ATTEMPT_REFILL_MS } from '../dist/app.js';
 import { BurrowStore } from '../dist/state.js';
 
 import {
+  ORIGIN,
   RP_ID,
   connectBurrow,
   enrollBurrow,
@@ -60,7 +61,7 @@ test('enroll happy path returns burrow credentials and policy', async () => {
 
 test('enroll rejects a wrong password', async () => {
   const { app } = await freshApp();
-  const res = await post(app, API_ROUTES.burrowEnroll, { password: 'wrong' });
+  const res = await post(app, API_ROUTES.burrowEnroll, { password: 'wrong', origin: ORIGIN });
   assert.equal(res.status, 401);
 });
 
@@ -189,8 +190,7 @@ test('a burrow socket opens with a real enrollment token', async () => {
 test('enrollment mirrors requireUserVerification to the Burrow, and omits it when off', async () => {
   // The flag has to travel: the Burrow is the final authority on an assertion,
   // so a Relay that demands UV while the Burrow does not leaves the weaker
-  // verifier deciding access. Absent means false, which is what an older Burrow
-  // reading a newer Relay — or either reading an older one — must see.
+  // verifier deciding access. Absent means false.
   const on = await freshApp({ requireUserVerification: true });
   const { body: uvOn } = await enrollBurrow(on.app);
   assert.equal(uvOn.requireUserVerification, true);
@@ -198,6 +198,29 @@ test('enrollment mirrors requireUserVerification to the Burrow, and omits it whe
   const off = await freshApp();
   const { body: uvOff } = await enrollBurrow(off.app);
   assert.equal('requireUserVerification' in uvOff, false);
+});
+
+test('every /ws/burrow connect re-delivers the UV demand first, so one set after enrollment still reaches the Burrow', async () => {
+  const on = await freshApp({ requireUserVerification: true });
+  const onServer = await startRelay(on);
+  const off = await freshApp();
+  const offServer = await startRelay(off);
+  try {
+    const { burrow, socket } = await connectBurrow(on.app, onServer);
+    assert.deepEqual(await socket.take(), { t: 'policy', requireUserVerification: true });
+    // A reconnect (the same enrollment) hears it again: the Relay never relies
+    // on what the Burrow kept from enrollment.
+    const again = wsConnect(`${onServer.wsUrl}${WS_ROUTES.burrow}?${WS_TOKEN_PARAM}=${burrow.burrowToken}`);
+    await again.ready;
+    assert.deepEqual(await again.take(), { t: 'policy', requireUserVerification: true });
+
+    // Off, nothing is sent: absent keeps whatever the Burrow already demands.
+    const { socket: quiet } = await connectBurrow(off.app, offServer);
+    assert.equal(await quiet.quiet(), true);
+  } finally {
+    await onServer.close();
+    await offServer.close();
+  }
 });
 
 test('only Burrow-enrollment rejection invokes the retained-request delay', async () => {
@@ -226,7 +249,7 @@ test('only Burrow-enrollment rejection invokes the retained-request delay', asyn
   assert.equal((await post(app, API_ROUTES.setupBegin, { setupToken: 'unknown' })).status, 401);
   assert.equal(delayCalls, 0);
 
-  assert.equal((await post(app, API_ROUTES.burrowEnroll, { password: 'wrong' })).status, 401);
+  assert.equal((await post(app, API_ROUTES.burrowEnroll, { password: 'wrong', origin: ORIGIN })).status, 401);
   assert.equal(delayCalls, 1);
 });
 
@@ -288,6 +311,6 @@ test('enrollment is capped, and the refusal names the remedy', async () => {
 test('the enrollment cap is checked after the credential, never before', async () => {
   // A caller that has proved nothing must not learn from the refusal whether
   // the Relay is full.
-  const res = await post(await appAtBurrowCap(), API_ROUTES.burrowEnroll, { password: 'wrong' });
+  const res = await post(await appAtBurrowCap(), API_ROUTES.burrowEnroll, { password: 'wrong', origin: ORIGIN });
   assert.equal(res.status, 401);
 });

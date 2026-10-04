@@ -86,7 +86,14 @@ function referencesOf(spec, text) {
 
 const proseOnly = (text) => proseLines(text).join('\n');
 
-function proseCandidates(text) {
+// A size, duration, or ratio written into a spec's prose or tables (not a
+// backticked constant). AGENTS.md -> "What stays": presentation lives at the
+// code unless a peer must agree with it. A bare `s` after three or more digits
+// is a plural (`404s`, `1990s`), not a duration.
+const PRESENTATION_RE = /(?<![\w.])(?!\d{3,}s(?!\w))\d+(?:\.\d+)?\s?(?:px|ms|%|s|rem|em|fps)(?!\w)/g;
+const presentationValues = (line) => line.replace(/`[^`\n]*`/g, '').match(PRESENTATION_RE) ?? [];
+
+function proseCandidates(path, text) {
   const prose = proseOnly(text);
   const candidates = [];
   let offset = 0;
@@ -110,11 +117,22 @@ function proseCandidates(text) {
       candidates.push({ kind: 'CANONICAL', line: lineOf(text, match.index), words: wordCount(match[1]), detail: 'current TypeScript shape' });
     }
   }
+  if (!path.endsWith('.rationale.md')) {
+    prose.split('\n').forEach((line, index) => {
+      const values = presentationValues(line);
+      if (values.length > 0) {
+        candidates.push({ kind: 'PRESENTATION', line: index + 1, words: wordCount(line), detail: `presentation value(s) ${values.join(', ')}` });
+      }
+    });
+  }
   text.split('\n').forEach((line, index) => {
     const tests = line.match(/[\w./-]+\.test\.[cm]?[jt]sx?/g) ?? [];
     if (tests.length >= 2) candidates.push({ kind: 'CUT', line: index + 1, words: wordCount(line), detail: `${tests.length}-file test inventory` });
-    if (/^Source of truth:/.test(line) && line.length >= 220) {
-      candidates.push({ kind: 'POINTER', line: index + 1, words: wordCount(line), detail: `${line.length}-character source pointer` });
+    // A pointer names the entrypoints a reader follows through imports, so it
+    // is measured in files named, not in characters or words.
+    const files = /^Source of truth\b/.test(line) ? referencesOf(path, line).refs.length : 0;
+    if (files >= 5) {
+      candidates.push({ kind: 'POINTER', line: index + 1, words: wordCount(line), detail: `${files}-file source pointer` });
     }
   });
   const lines = prose.split('\n');
@@ -217,13 +235,13 @@ let reports = specFiles.map((spec) => {
   const rationaleReferences = rationaleText === null ? { refs: [], unresolved: [] } : referencesOf(rationalePath, rationaleText);
   const refs = [...new Set([...specReferences.refs, ...rationaleReferences.refs])].sort();
   const unresolved = [...new Set([...specReferences.unresolved, ...rationaleReferences.unresolved])].sort();
-  const prose = proseCandidates(text);
+  const prose = proseCandidates(spec, text);
   const rationale = rationaleText === null ? null : {
     path: rationalePath,
     words: wordCount(rationaleText),
     references: rationaleReferences.refs,
     unresolved: rationaleReferences.unresolved,
-    prose: proseCandidates(rationaleText),
+    prose: proseCandidates(rationalePath, rationaleText),
   };
   const code = codeCandidates(text + '\n' + (rationaleText ?? ''), refs);
   return {
@@ -264,7 +282,7 @@ for (const report of reports) {
     if (hit.detail.includes('spec overlap')) return 0;
     if (hit.kind === 'CANONICAL') return 1;
     if (hit.detail.includes('test inventory') || hit.kind === 'POINTER') return 2;
-    if (hit.kind === 'RATIONALE') return 3;
+    if (hit.kind === 'RATIONALE' || hit.kind === 'PRESENTATION') return 3;
     if (hit.kind === 'MATRIX') return 4;
     if (hit.kind === 'LONG') return 5;
     return 6; // aggregate comment-density hints follow specific locations

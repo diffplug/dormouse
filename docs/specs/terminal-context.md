@@ -1,9 +1,8 @@
 # Terminal context
 
-> See `docs/specs/glossary.md` for Surface / Session / Pane vocabulary.
-> This spec owns the helper terminal lifecycle and global autorun preference.
-> Layout owns context composition and input focus; terminal-state owns shell
-> semantics; alert owns suppression; transport owns live recovery.
+> - See `docs/specs/glossary.md` for Surface / Session / Pane vocabulary.
+> - This spec owns the helper terminal lifecycle and global autorun preference.
+> - Layout owns context composition and input focus; terminal-state owns shell semantics; alert owns suppression; transport owns live recovery; dor-cli owns helper-origin `dor` commands.
 
 ## Helper lifecycle
 
@@ -19,7 +18,7 @@
 
 **Must carry one status line per helper state**, offering Reset in place of Modify only for user-touched or exited helpers.
 
-**Must make Reset an explicit discard**, confirming loss of scrollback, unfinished input, running programs, and unsaved edits. Cancellation changes nothing; confirmation disposes the old helper and launches a fresh one using the source's current directory and current global setting. Stale timers cannot write to the replacement.
+**Must make Reset an explicit discard**, confirming loss of scrollback, unfinished input, running programs, and unsaved edits; under Labs it asks nothing and the old helper becomes a pending kill (`docs/specs/reopen.md` → "Labs: No-confirm delayed kill"). Cancellation changes nothing; confirmation disposes the old helper and launches a fresh one using the source's current directory and current global setting. Stale timers cannot write to the replacement.
 
 Source of truth: `openHelper` / `helperHasWork` / `disposeHelper` / `closeHelperParent` in `lib/src/lib/helper-terminal.ts`; `markSessionTouched` / `parkElement` in `lib/src/lib/terminal-lifecycle.ts`; `HELPER_STATUS` — the state, its status line, and whether it offers Reset — in `lib/src/components/wall/TerminalContextView.tsx`. Tests: `lib/src/lib/helper-terminal.test.ts`.
 
@@ -57,7 +56,7 @@ Source of truth: `context` in `standalone/sidecar/pty-core.js`; `terminalContext
 
 **Must suppress xterm's auto-revealed scrollbar in visual snapshots**, while retaining terminal scrolling and layout.
 
-**Must fit every control inside the panel at its minimum width, label included.** Port action overflow follows `docs/specs/layout.md` → "Header context menu". The gallery's play check measures each button against the panel and against its own box.
+**Must name the panel's terminal, Tool or helper, at every width.** **Must fit every control inside the panel at its minimum width, label included.** Port action overflow follows `docs/specs/layout.md` → "Header context menu". The gallery's play check measures each button against the panel and against its own box.
 
 Source of truth: `TerminalContextView` in `lib/src/components/wall/TerminalContextView.tsx`; `lib/src/stories/TerminalContext.stories.tsx` supplies sample output; `lib/src/stories/Wall.stories.tsx` exercises the live helper. `lib/src/stories/HelperPlacement.stories.tsx` checks rendered placement and real xterm input/focus retention; the gallery checks narrow controls and always-visible details. `visualSnapshot` in `lib/.storybook/preview.ts` suppresses scrollbar paint. Tests: `lib/src/lib/platform/fake-adapter-helper.test.ts`.
 
@@ -65,7 +64,7 @@ The Window-host workspace picker follows `docs/specs/layout.md` → Moving Surfa
 
 ## Tool context
 
-**Must show a Tool's primary Session in Terminal Context instead of creating an auxiliary helper.** Reuse the title, directory, port, and alert presentation, showing Tool command status without helper Modify, Reset, or Promote controls; a preview slot's adds Keep open (`docs/specs/layout.md` → Pane header). Pending approval cannot open context.
+**Must show a Tool's primary Session in Terminal Context instead of creating an auxiliary helper**; one whose run ended is a plain terminal with a helper (`docs/specs/dor-tool.md` → Run end). Reuse the title, directory, port, and alert presentation, showing Tool command status without helper Modify, Reset, or Promote controls; a preview slot's adds Keep open (`docs/specs/layout.md` → Pane header). Pending approval cannot open context.
 
 **Must focus the Tool terminal instance directly**, bypassing its browser Surface focus handle.
 
@@ -75,4 +74,4 @@ Source of truth: `TerminalContext` in `lib/src/components/wall/TerminalContext.t
 
 ## Future
 
-Pocket context composition, remote helper creation, and SSH integration are unbuilt.
+**Scope: remote-context** — Pocket context composition, remote helper creation, and SSH integration.

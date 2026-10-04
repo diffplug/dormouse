@@ -81,6 +81,7 @@ import {
   approveUpdate,
   dismissBanner,
   openChangelog,
+  openUrl,
   buildDebugReport,
   useUpdateState,
   hasPendingUpdate,
@@ -165,6 +166,33 @@ describe('updater', () => {
     await vi.advanceTimersByTimeAsync(0);
 
     expect(mocks.check).toHaveBeenCalledOnce();
+    expect(readBannerState()).toEqual({ status: 'downloaded', version: '0.5.0' });
+  });
+
+  it('keeps an approval made while the delayed launch check is in flight', async () => {
+    const offered = makeUpdate('0.5.0');
+    const found = makeUpdate('0.5.0');
+    let answerCheck!: (value: typeof found) => void;
+    let finishDownload!: () => void;
+    offered.download.mockImplementation(() => new Promise<void>(resolve => { finishDownload = resolve; }));
+    mocks.check.mockResolvedValueOnce(offered);
+    startUpdateCheck();
+    await vi.advanceTimersByTimeAsync(0);
+    checkNow();
+    await vi.advanceTimersByTimeAsync(0);
+    mocks.check.mockImplementationOnce(() => new Promise(resolve => { answerCheck = resolve; }));
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(mocks.check).toHaveBeenCalledTimes(2);
+
+    approveUpdate();
+    answerCheck(found);
+    await vi.advanceTimersByTimeAsync(0);
+    finishDownload();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(offered.close).not.toHaveBeenCalled();
+    expect(found.close).toHaveBeenCalledOnce();
+    expect(hasPendingUpdate()).toBe(true);
     expect(readBannerState()).toEqual({ status: 'downloaded', version: '0.5.0' });
   });
 
@@ -942,6 +970,12 @@ describe('updater', () => {
       await vi.advanceTimersByTimeAsync(0);
 
       expect(mocks.shellOpen).toHaveBeenCalledWith('https://dormouse.sh/changelog/after/0.4.0');
+    });
+
+    it('openUrl revalidates every URL it launches, as an adapter does', async () => {
+      openUrl('javascript:alert(1)', 'test');
+      await vi.advanceTimersByTimeAsync(0);
+      expect(mocks.shellOpen).not.toHaveBeenCalled();
     });
   });
 

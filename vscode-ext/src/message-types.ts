@@ -12,12 +12,13 @@ import type { BurrowCommand, BurrowResult } from '../../lib/src/host/remote/serv
 // Messages from webview → extension host
 export type WebviewMessage =
   | { type: 'pty:context'; request: TerminalContextRequest; requestId: string }
-  | { type: 'pty:spawn'; id: string; options?: { cols?: number; rows?: number; cwd?: string; shell?: string; args?: string[]; helper?: HelperIdentity; alert?: PersistedAlertState } }
+  | { type: 'pty:spawn'; id: string; options?: { cols?: number; rows?: number; cwd?: string; shell?: string; args?: string[]; helper?: HelperIdentity; alert?: PersistedAlertState; dehydrate?: string } }
   | { type: 'pty:input'; id: string; data: string; paced?: boolean; userInput?: true }
   | { type: 'pty:resize'; id: string; cols: number; rows: number }
   | { type: 'pty:kill'; id: string }
   | { type: 'pty:getCwd'; id: string; requestId?: string }
   | { type: 'pty:getOpenPorts'; id: string; requestId?: string }
+  | { type: 'pty:getOpenPortsMany'; ids: string[]; requestId?: string }
   | { type: 'pty:getShells'; requestId?: string }
   | { type: 'clipboard:readFiles'; requestId: string }
   | { type: 'clipboard:readImage'; requestId: string }
@@ -25,7 +26,8 @@ export type WebviewMessage =
   | { type: 'dormouse:runWorkbenchCommand'; command: VSCodeWorkbenchCommand }
   // Validated host-side, so the webview's shape is not trusted here.
   | { type: 'browser:request'; request: unknown; requestId: string }
-  | { type: 'iframe:createProxyUrl'; url: string; embedderOrigins: string[]; requestId: string }
+  | { type: 'iframe:createProxyUrl'; url: string; embedderOrigins: string[]; lease?: string; requestId: string }
+  | { type: 'iframe:releaseProxy'; lease: string }
   | { type: 'tool:control'; request: ToolHostRequest; requestId: string }
   // Peer surfaces: the Burrow runs in the extension host, but the terminals
   // live in whichever webview opened them. See docs/specs/vscode.md → "Peer
@@ -57,7 +59,7 @@ export type ExtensionMessage =
   | { type: 'pty:contextResult'; result: TerminalContextInfo; requestId: string }
   // `textData` is the chunk with string-control payloads removed, for the
   // prompt heuristic. Omitted when it would equal `data` — the common case —
-  // so this never doubles the bytes on the wire (docs/specs/transport.md).
+  // so this never doubles the bytes on the wire.
   | { type: 'pty:data'; id: string; data: string; textData?: string }
   | { type: 'pty:exit'; id: string; exitCode: number }
   // A parse's Tool announcements, state and command-start resets, in stream order.
@@ -65,10 +67,13 @@ export type ExtensionMessage =
   | { type: 'terminal:semanticEvents'; id: string; events: TerminalSemanticEvent[] }
   // An OSC 52 write the copy editor may offer; never the clipboard itself.
   | { type: 'terminal:clipboardOffer'; id: string; text: string }
+  /** A remote Client wrote to this Session; the webview holds its `untouched` flag. */
+  | { type: 'terminal:clientInput'; id: string }
   | { type: 'pty:list'; ptys: PtyInfo[] }
   | { type: 'pty:replay'; id: string; data: string }
   | { type: 'pty:cwd'; id: string; cwd: string | null; requestId?: string }
   | { type: 'pty:openPorts'; id: string; ports: OpenPort[]; requestId?: string }
+  | { type: 'pty:openPortsMany'; ports: Record<string, OpenPort[]>; requestId?: string }
   | { type: 'pty:shells'; shells: Array<{ name: string; path: string; args: string[] }>; requestId?: string }
   | { type: 'clipboard:files'; paths: string[] | null; requestId: string }
   | { type: 'clipboard:image'; path: string | null; requestId: string }
@@ -90,6 +95,7 @@ export type ExtensionMessage =
     }
   | { type: 'dormouse:selectedShell'; shell?: string; args?: string[] }
   | { type: 'dormouse:openThemeDebugger' }
+  | { type: 'dormouse:shown'; shown: boolean }
   | { type: 'dormouse:flushSessionSave'; requestId: string }
   | ({ type: 'dor:controlRequest' } & DorControlRequestPayload)
   | ({ type: 'dor:controlCancel' } & DorControlCancelPayload)

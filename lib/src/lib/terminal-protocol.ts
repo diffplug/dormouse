@@ -1,4 +1,4 @@
-import { parseToolAnnounce, parseToolOpen, parseToolState, type ToolAnnounce, type ToolOpen, type ToolState } from 'dor-tools-lib/osc';
+import { parseToolAnnounce, parseToolDehydrate, parseToolOpen, parseToolState, type ToolAnnounce, type ToolDehydrate, type ToolOpen, type ToolState } from 'dor-tools-lib/osc';
 import type { ActivityNotification, ProtocolProgressUpdate } from './alert-manager';
 import { parseColor } from './css-color';
 import { sanitizeClipboardText, sanitizeCommandLine, sanitizeText, truncateText } from './osc-sanitize';
@@ -30,6 +30,9 @@ export type TerminalProtocolEvent =
   | { kind: 'toolState'; state: ToolState }
   /** A request, not a report: acted on live, never reconstructed from replay. */
   | { kind: 'toolOpen'; open: ToolOpen }
+  /** A stopping Tool's restore payload: kept only during its reap, never from
+   *  replay (`docs/specs/dor-tool.md` -> Reaping). */
+  | { kind: 'toolDehydrate'; dehydrate: ToolDehydrate }
   | { kind: 'progress'; progress: ProtocolProgressUpdate }
   | { kind: 'response'; data: string }
   | { kind: 'semantic'; event: TerminalSemanticEvent };
@@ -39,6 +42,19 @@ export type TerminalColorTarget = 'foreground' | 'background' | 'cursor';
 
 /** A resolved value for each queryable terminal color, as CSS color strings. */
 export type TerminalColors = Record<TerminalColorTarget, string>;
+
+/**
+ * A webview's theme push, or `null` unless all three colors are strings. A host
+ * drops a malformed push whole rather than half-applying it: a non-string color
+ * would reach the OSC reply formatter, and a missing one would silently answer
+ * from a different theme than its siblings.
+ */
+export function parseTerminalColors(value: unknown): TerminalColors | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const { foreground, background, cursor } = value as Partial<Record<TerminalColorTarget, unknown>>;
+  if (typeof foreground !== 'string' || typeof background !== 'string' || typeof cursor !== 'string') return null;
+  return { foreground, background, cursor };
+}
 
 /**
  * Resolves the active terminal theme color for an OSC 10/11/12 query, returned
@@ -98,7 +114,7 @@ const BODY_LIMIT = 4096;
 // *retained*: it is re-tokenized on every header derivation and is the key
 // `dor ensure --restart` matches on, and its decoding actively re-introduces
 // control characters that the emit-side escaping had removed
-// (`docs/specs/terminal-escapes.md`). See `commandLineEvents`.
+// (`docs/specs/terminal-state.md` → Shell-integration injection). See `commandLineEvents`.
 const COMMAND_LINE_LIMIT = 2048;
 /** The longest `OSC 52` payload offered, in base64 characters; longer is
  *  dropped. Under {@link OSC_INCOMPLETE_LIMIT} with room for the introducer, so
@@ -115,7 +131,7 @@ const OSC_CONSUMED_IDS = new Set(['0', '2', '7', '9', '10', '11', '12', '50', '5
 const OSC1337_FORWARDED = ['File=', 'MultipartFile=', 'FilePart=', 'FileEnd', 'ReportCellSize'] as const;
 const TERMINAL_BELL_NOTIFICATION: ActivityNotification = { source: 'BEL', title: 'Terminal bell', body: null };
 // Mirrors ITERM2_COMPAT_VERSION in standalone/sidecar/pty-core.js — pinned by
-// mirrored-constants.test.ts (terminal-escapes.md: one compatibility version
+// mirrored-constants.test.ts (transport.md: one compatibility version
 // across env and device responses).
 export const ITERM2_COMPAT_VERSION = '3.6.6';
 export const ITERM2_DEVICE_ATTRIBUTES_RESPONSE = `\x1bP>|iTerm2 ${ITERM2_COMPAT_VERSION}\x1b\\`;
@@ -319,7 +335,9 @@ export class TerminalProtocolParser {
       const state = parseToolState(payload);
       if (state) return [{ kind: 'toolState', state }];
       const open = parseToolOpen(payload);
-      return open ? [{ kind: 'toolOpen', open }] : [];
+      if (open) return [{ kind: 'toolOpen', open }];
+      const dehydrate = parseToolDehydrate(payload);
+      return dehydrate ? [{ kind: 'toolDehydrate', dehydrate }] : [];
     }
     if (content === '52' || content.startsWith('52;')) return parseOsc52(content);
     const colorResponse = this.parseColorQuery(content);
@@ -527,7 +545,7 @@ function applyTerminalReport(sink: TerminalProtocolAlertSink, id: string, event:
 }
 
 /**
- * The Tool announcement, state, open and command-start events the renderer
+ * The Tool announcement, state, open, dehydrate and command-start events the renderer
  * acts on, in stream order: what a parse site forwards to the renderer that
  * holds the Tool stores (`applyLiveToolEvents`). Reports stay with the owner's
  * `AlertManager`, and a response is the owner's alone to write.
@@ -536,7 +554,7 @@ export function collectTerminalToolEvents(
   events: readonly TerminalProtocolEvent[],
 ): TerminalProtocolEvent[] {
   return events.filter((event) => event.kind === 'toolAnnounce' || event.kind === 'toolState' || event.kind === 'toolOpen'
-    || isProtocolCommandStart(event));
+    || event.kind === 'toolDehydrate' || isProtocolCommandStart(event));
 }
 
 export function collectTerminalProtocolResponses(events: TerminalProtocolEvent[]): string[] {
@@ -724,7 +742,7 @@ function parseOsc133CommandLine(params: string): TerminalProtocolEvent[] {
 
 /**
  * The `commandLine` event for a shell-reported command line, from `OSC 633 ; E`
- * or `OSC 133 ; C` alike (`docs/specs/terminal-escapes.md`): bounded *before*
+ * or `OSC 133 ; C` alike (`docs/specs/terminal-state.md` → "Supported OSC Inputs"): bounded *before*
  * `decode` to `COMMAND_LINE_LIMIT * encodedWidth` source code points, with
  * multipliers 4 for OSC 633 / shell-quoted input and 12 for percent-encoded
  * UTF-8. The decoded value is capped separately at `COMMAND_LINE_LIMIT`, so

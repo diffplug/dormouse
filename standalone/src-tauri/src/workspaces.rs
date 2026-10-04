@@ -106,7 +106,7 @@ fn parse_target(target: &str) -> Target<'_> {
         .strip_prefix("workspace:")
         .unwrap_or(target.trim())
         .trim();
-    // Mirrors `POSITIONAL_WORKSPACE_REF` in `dor/src/protocol.ts`: a ref is a
+    // Mirrors `NUMERIC_WORKSPACE_REF` in `dor/src/protocol.ts`: a ref is a
     // digit run with no leading zero, so a Workspace named "007" stays a name
     // rather than routing as `workspace:7`.
     match bare.parse::<u64>() {
@@ -264,7 +264,7 @@ mod tests {
             vec![entry("workspace-7", "Build", true), entry("workspace-8", "0", false)],
         );
         report(&mut registry, "ws-2", vec![entry("workspace-9", "007", true)]);
-        // `POSITIONAL_WORKSPACE_REF` reads neither as a ref, so each routes to
+        // `NUMERIC_WORKSPACE_REF` reads neither as a ref, so each routes to
         // the window holding the Workspace so named, never to `workspace-7`.
         assert_eq!(window_of(&registry, "007"), Some("ws-2"));
         assert_eq!(window_of(&registry, "workspace:007"), Some("ws-2"));

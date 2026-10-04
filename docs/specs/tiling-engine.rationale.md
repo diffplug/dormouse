@@ -2,9 +2,9 @@
 
 > Informative companion to [tiling-engine.md](tiling-engine.md): the evidence and dead-approach history behind its rules, keyed by that spec's headings (AGENTS.md → "What, not why"). Nothing here is normative.
 
-## Why
+## Principles and non-goals
 
-Lath is named for the strips hidden behind a plaster wall. The five taxes dockview-react charged, and what Lath does instead:
+Lath replaced dockview-react, whose broader model charged five taxes:
 
 **Activation conflated user intent with engine mechanics.** `onDidActivePanelChange` fired identically for clicks, drags, focus adoption, and every programmatic mutation, so a "programmatic-activation" tag existed purely to reconstruct intent the engine had thrown away. Rendering was coupled to the same signal — a pane rendered only once it was its group's active panel, which forced an add-active-then-hand-back dance behind every focus-neutral surface creation. With no activation events, selection policy lives at each mutation site with nothing to mute.
 
@@ -16,17 +16,19 @@ Lath is named for the strips hidden behind a plaster wall. The five taxes dockvi
 
 **Dormouse already kept a shadow model.** DOM neighbor inspection, layout snapshots carrying structure signatures, and spatial navigation doing rect math over group elements — the app continuously re-derived the tree dockview owned but did not usefully share. Lath's pure `neighbors()` / `layout()` queries replaced that DOM math.
 
-## Core model
-
-**Why the zoomed leaf stops short of the wall edge.** The inset is half a pane header (15px of the 30px `PANE_HEADER_HEIGHT_PX`), leaving the tiled panes visible as a thin perimeter. That exposed border, plus the blurred app-background-colored shadow LathHost paints while the leaf is elevated, reads as "floating above the wall" rather than "replaced the wall" — the user has to believe unzoom will put everything back.
-
 ## Operations
 
 **Why speculative evaluation is free.** Every op is a pure function over an immutable tree: running one and laying out the result costs no commit, no notify, no cleanup, and the discarded tree is garbage. Under an engine that mutated in place, both the per-frame sash re-layout and the preview-that-is-the-committed-rect would have needed a snapshot-and-rollback dance.
 
 ## Hierarchical drag and drop
 
-**Why duplicate ancestor candidates exist to be filtered.** Removing the dragged leaf frequently collapses the column it came from, and once the flatten invariant runs, an `edge` target at the ancestor level and the same edge at its surviving child level lay out identically. Both are legitimate ops with distinct descriptors and only the committed result coincides, so the filter compares committed layouts, not targets: a descriptor-level dedupe would keep both and hand the user two wheel stops that look the same.
+**Flexible scopes without a new tree format.** A flat row already models any number of children. The missing expression was a temporary rectangle spanning adjacent children: forcing that group into the stored tree conflicts with same-direction flattening. A child range captures the drop scope without making split history observable. Removing a pane can dissolve an old subtree into siblings; resolving the entire surviving leaf set retains the chosen rectangle.
+
+**Slides, not the wheel.** Scopes were first cycled with the scroll wheel, one level per wheel event. A trackpad flick sends dozens of wheel events including momentum, so on a trackpad (most users) the chosen scope was effectively random; contiguous ranges also multiplied the stops, from 2 to 4, 9, and 16 for 4-, 6-, and 8-pane rows. A slide names its span directly, and evaluating one scope per frame costs about 0.27ms on an 80-pane row (measured in Node 24, 2026-10), where enumerating every range cost about 98ms.
+
+**Equal spans resolve to the innermost.** With the flatten invariant, scopes sharing a line and a span differ only in the new pane's perpendicular size, never in arrangement, so one of them stands for all.
+
+**Pausing anchors the slide.** A pane drag starts on its header, inside its top band, and moving it sideways crosses every other header's top band. Anchoring on contact would stretch a group from the dragged pane on every such sweep; anchoring on a pause leaves quick sweeps naming one pane at a time.
 
 **The header-press quirk.** A pane drag starts from a `pointerdown` the header has already handled as a click, so the pane is selected and in passthrough by the time the 5px threshold trips. Suppressing it would mean deferring the header's own click until the gesture resolves, and the end state is the one a drag wants anyway — the dragged pane is the selected pane.
 
@@ -61,27 +63,3 @@ Unbounded parking preserves unsaved iframe state; a ninth minimized browser prev
 **Why the surface ref is forgotten only after the removal commits.** A fading leaf is still in `listPanes()` for the length of the exit animation, so a `dor` projection built in that window would re-mint a ref for it — an early delete would not stick, leaving projection and tree disagreeing until the next commit.
 
 **Why a no-deps layout effect re-asserts the current frames.** Animator frames are applied imperatively to the leaf divs, while React independently keeps rendering each div at its *target* geometry, so any unrelated commit mid-tween rewrites the inline styles back to the target and snaps the animation. Re-asserting after every commit costs one style write and removes the whole class of "some other state change made the tween jump."
-
-## Testing
-
-**What the live acceptance run covered.** Beyond walking every matrix row live through the standalone agent-browser harness, the run frame-sampled the motion rows (row 11's freeze-and-fade plus survivor tween, with a second kill fired 200ms into the first; row 6's shrink-to-corner and its top-left refill) and compared preview against commit pixel-exactly at leaf, column, and root depth (row 12). The observables are independent of engine internals.
-
-| # | Flow | Expected observable |
-| --- | --- | --- |
-| 1 | Type into the selected terminal | Keystrokes echo; `dor list` marks it `*` (focused) |
-| 2 | `dor iframe <url>` / `dor ensure` from a touched terminal | Surface created in the background; caller keeps DOM focus (`document.activeElement` stays its xterm textarea) and selection; follow-up typing lands |
-| 3 | Click between panes (body and header), both directions | Selection and focus follow the click; passthrough entered |
-| 4 | `dor kill` of a background surface | Surface removed; caller's selection, focus, and typing all survive (focus is never lost, not healed) |
-| 5 | Kill the selected pane (`dor kill` self or confirm flow) | Selection adopts a survivor; typing works there |
-| 6 | Minimize the last pane | Door created and selected; auto-spawn fills the Wall; door keeps selection through the spawn |
-| 7 | Click a door | Reattach at original position when structure allows (exact tier); pane selected |
-| 8 | Embedded page focuses itself (iframe surface) | Selection moves onto that pane — visible jump, same as a click; never a silent desync |
-| 9 | Zoom toggle on a pane | Pane rises, expands to the 15px-inset wall rect, then shrinks and lowers on return; layout identical after |
-| 10 | Restart the app (harness re-open) | Layout, doors, titles, and params restored |
-| 11 | Kill with animation | Fade in place, survivors tween into the space; a second kill mid-tween retargets cleanly; reduced-motion instant |
-| 12 | Drag a pane to a leaf edge, an ancestor edge, and center | Split beside pane/column/row or swap; preview matches commit; dragging while a door is selected selects the dragged pane |
-| 13 | Drag a pane onto the baseboard; drag a door out | Minimize with token; restore at the hit-tested position |
-
-Row 8's counterpart guard — a background `dor` command never yanks cross-frame
-focus out of the host editor — is checked against VS Code rather than the
-innerdogfood harness.

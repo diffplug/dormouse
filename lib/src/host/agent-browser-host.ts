@@ -34,6 +34,7 @@ import { isAllowedAgentBrowserBinary } from '../lib/agent-browser-binary';
 import { parseAgentBrowserTabs } from '../lib/agent-browser-tab';
 import { CAPTURE_JPEG_QUALITY, type BrowserResult, type ViewerInput, type ViewerState } from '../lib/platform/browser-automation';
 import type { BrowserAct, BrowserProvider, LiveBrowser, ProviderBinding } from './browser-host';
+import { CAPTURE_TIMEOUT_MS } from './browser-capture';
 import { measuredViewport, type MeasuredViewport, type Upstream, type ViewerSink } from './browser-viewer';
 
 const SESSION_ARGS = BROWSER_PROVIDERS['agent-browser'].sessionArgs;
@@ -77,9 +78,7 @@ function cliError(result: CliResult): string {
 }
 
 // A capture can queue behind a page-loading `open` for the CLI's whole 25s
-// action timeout; past this it is wedged, and killed so it cannot pin the
-// host's capture join. Every adapter has stopped waiting by then anyway.
-const CAPTURE_TIMEOUT_MS = 30_000;
+// action timeout; past the host's capture bound it is wedged, and killed.
 const STREAM_PORT_READ_ATTEMPTS = 4;
 const STREAM_PORT_READ_DELAY_MS = 150;
 const PORT_PROBE_TIMEOUT_MS = 500;

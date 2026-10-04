@@ -1,15 +1,11 @@
 # Pocket App Architecture
 
-> See `docs/specs/glossary.md` for Session / Pane vocabulary.
-> How the phone client (Dormouse Pocket) is structured and deployed. The
-> protocol is [remote-api.md](./remote-api.md); the selfhost Relay is
-> [relay.md](./relay.md).
+> - See `docs/specs/glossary.md` for Session / Pane vocabulary.
+> - How the phone client (Dormouse Pocket) is structured and deployed. The protocol is [remote-api.md](./remote-api.md); the selfhost Relay is [relay.md](./relay.md); key and pairing rules are [remote-security-model.md](./remote-security-model.md).
 
 ## The seam: the remote session is a platform adapter
 
-`lib` renders every Dormouse surface through a `PlatformAdapter`, whose PTY core
-— `requestInit`/`onPtyList` resume path included — maps one-to-one onto the
-remote-api v1 terminal protocol:
+`lib` renders every Dormouse surface through a `PlatformAdapter`, whose PTY core — `requestInit`/`onPtyList` resume path included — maps one-to-one onto the remote-api v1 terminal protocol:
 
 | PlatformAdapter          | remote-api                              |
 | ------------------------ | --------------------------------------- |
@@ -20,661 +16,195 @@ remote-api v1 terminal protocol:
 | `resizePty`              | `terminal.resize`                       |
 | `onPtyExit`              | `terminal.closed`                       |
 
-Pocket is therefore:
+Pocket is:
 
 > auth screens + `MobileTerminalUi`/`MobileWall` + **`RemotePtyAdapter`**
 
-— the composition [mobile-terminal-ui.md](./mobile-terminal-ui.md) owns, proved
-out on `FakePtyAdapter` by
-`website/src/components/PocketTerminalExperience.tsx`.
+— the composition [mobile-terminal-ui.md](./mobile-terminal-ui.md) owns, which the website also wires on `FakePtyAdapter` (`website/src/components/PocketTerminalExperience.tsx`). **Everything outside the PTY core no-ops or is absent** — `getCwd` → null, shells/clipboard empty, alerts inert, `alertAwait` settling `cancelled` rather than never resolving.
 
-`Phase` in `lib/src/remote/pocket-app/App.tsx` owns screen state; `ConnectedView`
-wraps `PocketWall`. **Everything outside the PTY core no-ops or is absent** —
-`getCwd` → null, shells/clipboard empty, alerts inert, `alertAwait` settling
-`cancelled` rather than never resolving.
+**Scanning is the only way in** — no setup password, no typed credential; the code on the computer's screen is both account setup and pairing.
 
-**Scanning is the only way in** — no setup password, no typed credential; the
-code on the computer's screen is both account setup and pairing. A first run
-leads with the scanner; a browser holding a passkey leads with sign-in and keeps
-the scan beside it (rationale). **Prior use is stored passkey material**
-(`PocketClient.hasPriorUse`), re-derived every render (rationale).
+**A QR the native camera opened is origin bootstrap only.** The `#pair?` fragment is erased before the first render, parsed or not; nothing is retained, no call is made, the token is not spent, and the auth screen asks for a scan from inside Pocket. **An installed iOS Pocket can never receive a scanned hash** — Camera opens Safari, a different partition. (rationale)
 
-**The local record must not lag the registration, nor outlive a refusal**:
-`setup` caches the public key between `registerPasskey` and `finish`, and a
-`finish` the Relay *answered* by rejecting clears it. **Blocked site data costs
-persistence, not the visit** — `localStoragePocketStorage` mirrors writes in
-memory and reads the mirror first. (rationale)
+**The scanner reads a code as data**: it never navigates, and camera or pasted text goes to `parsePairingInvitationUrl` ([relay.md](./relay.md) owns the grammar) (rationale). **The invitation lives in memory only**, cleared on every terminal outcome.
 
-**A QR the native camera opened is origin bootstrap only.** The `#pair?`
-fragment is erased with `history.replaceState` before the first render, parsed or
-not; nothing is retained, no call is made, the token is not spent. All it keeps
-is a flag leading the auth screen with *Scan again from inside Dormouse Pocket*.
-(rationale)
+**After the parse.**
 
-**The scanner reads a code as data.** `ScanInvitation` lazy-loads
-`@zxing/browser` for a rear-camera scan (iOS has no `BarcodeDetector`), never
-navigates, and hands the text to `parsePairingInvitationUrl`
-([relay.md](./relay.md) owns the grammar); a paste field feeds the same parser
-(rationale).
+```mermaid
+flowchart TD
+  T{session token?}
+  T -- no --> U{prior passkey use?}
+  U -- no --> G["setup({ setupToken }), signin"]
+  U -- yes --> I[signin]
+  I -- 404 --> G
+  I -- ok --> R[POST /api/setup/retire]
+  T -- yes --> R
+  R & I & G -- fails --> X[abort]
+  R --> P[pair]
+  G --> P
+  P -- approved --> C[connect]
+```
 
-* **A `null` parse is one of two fixed lines**: a code that would have parsed
-  before it expired says so; everything else — a foreign-origin invitation
-  included — is not a setup code for this Relay. `pairingInvitationExpired`
-  re-runs that same parser at the epoch, so the grammar has no second copy.
-* **The camera tracks stop on every way out** — accepted, cancelled, errored,
-  unmounted, and on a start that finished after the screen was gone. **A refused
-  permission and an unusable camera each get their own line**, and no other
-  failure does; both leave paste working.
-* **The invitation lives in memory-only ceremony state**, cleared on every
-  terminal outcome.
+**A phone that registers nothing spends the code at `POST /api/setup/retire`**, so a photographed QR cannot register a passkey afterwards. **Only a sign-in refused 404 falls back to registering** (rationale). Pairing runs per [remote-security-model.md](./remote-security-model.md) → Pairing, and **the two digits go on screen before the outcome is known and stay until it lands**. **Cancelling closes the relay socket** and reports nothing. (rationale) **A refused token is reported, never folded away**: `SETUP_TOKEN_INVALID_ERROR` becomes `SetupTokenInvalidError`, whose recovery is a new code on the computer.
 
-**After the parse.** A browser with no usable passkey registers one with the
-scanned token (`setup({ setupToken })`) and signs in; one that already holds a
-passkey signs in if it must, then **spends the code at `POST /api/setup/retire`**
-so a photographed QR cannot register a passkey afterwards — a refusal aborts.
-Then the per-Burrow static is minted, Noise IK runs against the invitation key, and
-**the two digits go on screen before the outcome is known and stay until it
-lands** ([remote-security-model.md](./remote-security-model.md) → Pairing).
-**Cancelling closes the relay socket** and reports nothing. (rationale)
+**Runtimes are gated, not degraded**: `probeNoiseSupport` runs before sign-in, setup, pairing, or connection; `false` renders a fixed upgrade requirement instead.
 
-* **Sign-in stays offered on a first run** — a synced passkey may be the better
-  path.
-* **A passkey the authenticator already holds outranks an empty store**:
-  `excludeCredentials` refusing (`PasskeyAlreadyRegisteredError`) proves this
-  device can sign in, so sign-in leads. (rationale)
-* **A registered passkey is named `Dormouse Pocket (<rpId>)`**, self-host and
-  Hosted alike, for the platform's passkey manager; the account id the Relay
-  answered is only its `user.id`.
-* **A refused token is reported, never folded away**:
-  `SETUP_TOKEN_INVALID_ERROR` — expired, spent, or minted by a since-revoked
-  Burrow — becomes `SetupTokenInvalidError`, whose message is the recovery: show a
-  new code on the computer.
-* **An installed iOS Pocket can never receive a scanned hash** — Camera opens
-  Safari, a different partition, and the install launches at its own start URL.
-  (rationale)
+**Pocket hides `MobileWall`'s local Kill affordance**: v1 grants no phone-side kill or layout authority (rationale).
 
-**Runtimes are gated, not degraded**: `probeNoiseSupport` runs before sign-in,
-setup, pairing, or connection, and `false` renders a fixed upgrade requirement,
-performing no remote operation
-([remote-security-model.md](./remote-security-model.md) → Burrow identity).
+**An inline image crosses the relay as the ordered `terminal.data` messages its PTY chunks produce**, reassembled by Pocket's own xterm, which loads ImageAddon wherever the terminal's `inlineImages` setting is on. **Nothing coalesces them and no size gates them** (rationale); each is bounded only by what the Burrow feeds its parser ([remote-api.md](./remote-api.md) → Terminal surfaces).
 
-**Pocket hides `MobileWall`'s local Kill affordance** (`showKillButton={false}`):
-v1 grants no phone-side kill or layout authority (rationale).
+**Must drop an entire `terminal.data` projection pair if either projection has invalid base64url or UTF-8**, then continue accepting later data.
 
-**An inline image crosses the relay as the ordered `terminal.data` messages its
-PTY chunks produce**, reassembled by Pocket's own xterm — panes are built through
-the same `createXtermHost`, so ImageAddon is loaded wherever the terminal's
-`inlineImages` setting is on, as it is by default. **Nothing coalesces them and
-no size gates them** (rationale); each is bounded only by what the Burrow feeds
-its parser ([remote-api.md](./remote-api.md) → Terminal surfaces).
+`RemotePtyAdapter` exposes the adapter-specific `setActivePane(id)`: v1 allows one attachment per session, so pane switching is detach → attach. **Writes and resizes for a non-attached pane are dropped, but the latest resize for a pane being attached is kept**: its attach or a `terminal.resize` after it carries that size (rationale). **A refused `terminal.resize` after the attach never fails `setActivePane`.** Badges for non-attached panes come from `directory.watch` without attaching.
 
-**Must drop an entire `terminal.data` projection pair if either projection has
-invalid base64url or UTF-8**, then continue accepting later data. Pinned by
-`lib/src/remote/client/remote-adapter.test.ts`.
+* **Must normalize dimensions before sending or caching them.**
+* **Must settle fire-and-forget PTY failures and release subscriptions that arrive after disposal**; a disposed adapter never restarts or delivers events.
+* **Must serialize attachment transitions**, completing stale detaches before another attachment to the same surface starts.
+* **Must close an authorized connection when `hello` or adapter initialization fails, or the wall's current attachment fails; report on the Burrows list.**
+* **`PtyInfo.alive` is `entry.alive`, never derived from `entry.exitCode`** — the latter is the last command's shell-integration status.
+* **An absent `terminal.closed` exit code maps to `-1`, not `0`** — the local path's sentinel.
+* **Exited surfaces stay in the directory** with `alive:false`, so the wall filters them out of selectable sessions and the active-pane default.
 
-`RemotePtyAdapter` exposes the adapter-specific `setActivePane(id)`: v1 allows
-one attachment per session, so pane switching is detach → attach, whose repaint
-(resize) redraws the screen. **Writes and resizes for a non-attached pane are
-dropped**, since the Burrow rejects them, **but the latest resize for a pane
-being attached is kept**: its attach or a `terminal.resize` after it carries
-that size (rationale). **A refused `terminal.resize` after the attach never
-fails `setActivePane`**: the wall ends the session on a failed one. Badges for
-non-attached panes come from `directory.watch` without attaching.
+**The pinned record picks a row's primary action.** The Burrows view lists the `KnownBurrowV1` records (no record, no row), stamped online from `GET /api/burrows`, offering Connect alone or **Pair again** alone. **Nothing asks the Burrow**: only an authenticated `pairing-required` outcome moves a row, dropping local authorization without discarding the pin (rationale). **Remove** tombstones the delivery id before deleting the record.
 
-**Must normalize dimensions before sending or caching them.** **Must settle
-fire-and-forget PTY failures and release subscriptions that arrive after
-disposal.** A disposed adapter never restarts or delivers events. Pinned by
-`lib/src/remote/client/remote-adapter.test.ts`.
-**Must serialize attachment transitions**, completing stale detaches before
-another attachment to the same surface starts.
+**A record of the signed-in account the Relay's list no longer names is removed**, marked only off a `GET /api/burrows` that succeeded; a listed offline Burrow, and another account's record, keep the offline row. **Must bind removal checks to the account that started the list read.** Its row reads `BURROW_REMOVED_COPY` for the deployment Pocket read (`docs/specs/remote-network.md` -> "Anywhere") and offers **Forget** alone, which is Remove. **A Connect answered `BURROW_UNAVAILABLE_MESSAGE` re-reads the list**, showing that copy instead where the Burrow is gone; a failed re-read keeps the original.
 
-**Must close an authorized connection when `hello` or adapter initialization
-fails, or the wall's current attachment fails; report on the Burrows list.**
-Pinned by `lib/src/remote/pocket-app/App.scan.test.tsx`.
-
-Three details the table leaves implicit:
-
-- **`PtyInfo.alive` is `entry.alive`, never derived from `entry.exitCode`** —
-  the latter is the last command's shell-integration status, not PTY-process
-  liveness.
-- **An absent `terminal.closed` exit code maps to `-1`, not `0`** — the local
-  path's sentinel; `0` would paint a signal-only kill as success.
-- **Exited surfaces stay in the directory** with `alive:false` as history, so the
-  wall filters them out of selectable sessions and the active-pane default.
-
-**The pinned record picks a row's primary action.** The Burrows view — titled
-**Burrows** (rationale) — lists the `KnownBurrowV1` records (no record, no row),
-labeled from the record and stamped online from `GET /api/burrows`, offering
-Connect alone or **Pair again** alone, never a Connect that can only fail.
-**Nothing asks the Burrow**: only an authenticated
-`pairing-required` outcome moves a row, dropping local authorization without
-discarding the pin (rationale). Each row carries **Remove**, which tombstones the
-delivery id before deleting the record; the list carries **Scan a setup code**.
-Pairing continues into connecting.
-
-**A record of the signed-in account the Relay's list no longer names is
-removed**, marked only off a `GET /api/burrows` that succeeded; a listed
-offline Burrow, and another account's record, keep the offline row.
-**Must bind removal checks to the account that started the list read.** Its
-row reads `BURROW_REMOVED_COPY` for the deployment Pocket read
-(`docs/specs/remote-network.md` -> "Anywhere") and offers **Forget** alone,
-which is Remove. **A Connect answered `BURROW_UNAVAILABLE_MESSAGE` re-reads the
-list**, showing that copy instead where the Burrow is gone; a failed re-read
-keeps the original.
-
-Source of truth: `PlatformAdapter` in `lib/src/lib/platform/types.ts`;
-`Phase`, `SetupOrSignin` / `BurrowsView` / `ConnectedView` and the `probeNoiseSupport`
-gate in `lib/src/remote/pocket-app/App.tsx`; `PairingCodeView` in
-`lib/src/remote/pocket-app/views.tsx`; `mountRemoteWall` in
-`lib/src/remote/pocket-app/remote-wall.ts`;
-`lib/src/remote/pocket-app/PocketWall.tsx`;
-`lib/src/remote/pocket-app/pair-link.ts`;
-`lib/src/remote/pocket-app/ScanInvitation.tsx`; `PocketClient.pair` in
-`lib/src/remote/client/pocket-client.ts`; `passkeyUserName` in
-`lib/src/remote/client/webauthn.ts`; `RemotePtyAdapter` in
-`lib/src/remote/client/remote-adapter.ts`; `attachableDirectoryEntries` in
-`lib/src/remote/pocket-app/wall-model.ts`.
+Source of truth: `PlatformAdapter` in `lib/src/lib/platform/types.ts`; `App` in `lib/src/remote/pocket-app/App.tsx`; `ScanInvitation` in `lib/src/remote/pocket-app/ScanInvitation.tsx`; `takePairingHash` in `lib/src/remote/pocket-app/pair-link.ts`; `PocketClient` in `lib/src/remote/client/pocket-client.ts`; `RemotePtyAdapter` in `lib/src/remote/client/remote-adapter.ts`.
 
 ## Design system and theming
 
-**All of Pocket — the auth screens included — renders on the shared themeable
-design system** (`--color-*` tokens over `--vscode-*`; [theme.md](./theme.md),
-`DESIGN.md`), never the website's separate "homepage" system
-(`website/src/index.css`). **No Pocket-specific palette**: a theme change
-re-skins auth screens and wall together.
+**All of Pocket — the auth screens included — renders on the shared themeable design system** (`--color-*` tokens over `--vscode-*`; [theme.md](./theme.md), `DESIGN.md`), never the website's separate "homepage" system (`website/src/index.css`). **No Pocket-specific palette**: a theme change re-skins auth screens and wall together.
 
-**The theme is restored before first paint** by `main.tsx` calling
-`restorePocketTheme()` (rationale), defaulting to Kimbie Dark, the homepage brand
-theme; `PocketWall` repeats it idempotently through `usePocketTheme()` for
-isolated consumers (stories), or repeats the restore its caller hands it. **That default is one shared `POCKET_THEME_ID`**
-the website playground imports, so it cannot drift. Restoring also syncs
-document-level chrome no in-app burrow needs — root `color-scheme` and the
-`<meta name="theme-color">` tint — from the applied theme's type and resolved
-`sideBar.background`; the static meta values in `lib/pocket/index.html` are
-pre-boot placeholders.
+**The theme is restored before first paint** (rationale), defaulting to `POCKET_THEME_ID`, which the website playground imports so the two cannot drift. Restoring also syncs the document-level chrome — root `color-scheme` and the `<meta name="theme-color">` tint — from the applied theme.
 
-The chrome draws only on theme.md's three list pairs: page = app, header band =
-active-header (the "titlebar", doubling as the primary-action tone), burrow rows =
-inactive-header. Secondary text and hairlines (dividers, the `outline` button)
-are alpha on the owning pair's foreground; presence is intensity — an offline row
-drops to `opacity-55`, with no online badge, border, `surface-raised`, or
-`muted`. **The one status color is `text-error`**, delineated by a red inset
-hairline because panel-border is transparent in many themes.
-
-**Two phone-specific exceptions to `DESIGN.md`'s Two-Step Rule, kept narrow**:
-form inputs use 16px text, and chrome type runs a step larger than desktop (13px
-body, 11–12px secondary) with taller touch targets (44px block actions, 36px row
-actions). (rationale)
-
-Source of truth: `pkButton` / `PK` in
-`lib/src/remote/pocket-app/pocket-chrome.tsx`,
-`lib/src/remote/pocket-app/App.tsx`, `restorePocketTheme` / `usePocketTheme` /
-`POCKET_THEME_ID` in `lib/src/remote/pocket-app/pocket-theme.ts`,
-`lib/src/remote/pocket-app/main.tsx`, `lib/pocket/index.html`.
+Source of truth: `restorePocketTheme` in `lib/src/remote/pocket-app/pocket-theme.ts`; `PK` in `lib/src/remote/pocket-app/pocket-chrome.tsx`.
 
 ## Installable web app
 
-Pocket ships a web app manifest and a service worker: installable to a home
-screen, able to receive Web Push while backgrounded or closed.
+Pocket ships a web app manifest and a service worker: installable to a home screen, able to receive Web Push while backgrounded or closed.
 
-**Must request iOS push permission from a user gesture in a Home Screen web
-app.** Pocket declares `display: standalone`; installation is manual.
-**Must ship manifest icons and `apple-touch-icon`**, which takes precedence on
-iOS (rationale).
+**Must request iOS push permission from a user gesture in a Home Screen web app.** Pocket declares `display: standalone`; installation is manual. **Must ship manifest icons and `apple-touch-icon`**, which takes precedence on iOS (rationale). The manifest and icons are checked-in source under `lib/pocket/public/`, each referenced by an absolute root path.
 
-**The manifest and icons must be checked-in source under `lib/pocket/public/`**,
-which Vite copies verbatim, each referenced by an absolute root path:
-`emptyOutDir` wipes `lib/dist-pocket` on every app build, so nothing may be
-dropped in by hand.
+**The worker is built, not copied.** It decrypts sealed pushes ([remote-security-model.md](./remote-security-model.md) -> Push sealing), so it imports the shared crypto, the IndexedDB records, and `boundedPushText` rather than mirroring them. It is one classic IIFE at the stable, unhashed `/sw.js`, registered with `scope: '/'` and **no `type: 'module'`**. **A worker that is not one classic self-contained script fails the build**: `lib/scripts/assert-pocket-worker.mjs` runs last in `build:pocket`, which root `pnpm build` runs (rationale).
 
-**The worker is built, not copied.** It decrypts sealed pushes
-([remote-security-model.md](./remote-security-model.md) -> Push sealing), so it
-imports the shared crypto, the IndexedDB records, and `boundedPushText` rather
-than mirroring them. `lib/vite.sw.config.ts` bundles it as one classic IIFE at
-the stable, unhashed `dist-pocket/sw.js`, after the app build and with
-`emptyOutDir: false`; registration stays `register('/sw.js', { scope: '/' })`
-with **no `type: 'module'`**, pinned by `service-worker.test.ts`. **A worker that
-is not one classic self-contained script fails the build**:
-`lib/scripts/assert-pocket-worker.mjs` runs last in `build:pocket` and owns the
-exact refusals (rationale). **Root `pnpm build` runs `build:pocket`**, so CI
-checks a real bundler output (rationale).
-`dev:pocket` bundles the same config in memory per `/sw.js` request (rationale).
+- **The worker caches nothing and registers no `fetch` handler** (rationale). It handles `push`, `notificationclick`, and `install`/`activate` to take over immediately (`skipWaiting` + `clients.claim`) — nothing else.
+- **Every delivery ends in a notification.** `userVisibleOnly: true` promises it (rationale), so a push with no payload, an unknown `burrowId`, a `pairing-required` record, a failed decrypt, or malformed plaintext shows the generic content-free notice rather than returning early. What does decrypt is re-validated and re-bounded here ([alert.md](./alert.md) -> Push notifications owns the rule).
+- **Registration is best-effort and never awaited**: a failure warns and boot continues (rationale) — ordinary without support and on an insecure origin, since service workers need a secure context.
+- **Must focus an existing app window on notification click, preserving its screen, or open `/` if none exists.** Pushes carry no Pane navigation target.
 
-- **The worker caches nothing and registers no `fetch` handler** (rationale). It
-  handles `push`, `notificationclick`, and `install`/`activate` to take over
-  immediately (`skipWaiting` + `clients.claim`) — nothing else.
-- **Every delivery ends in a notification.** `userVisibleOnly: true` promises it
-  (rationale), so a push with no payload, an unknown `burrowId`, a
-  `pairing-required` record, a failed decrypt, or malformed plaintext shows the
-  generic content-free notice rather than returning early. What does decrypt is
-  re-validated and re-bounded here ([alert.md](./alert.md) -> Push notifications
-  owns the rule). **A `showNotification` the UA refuses is retried once with
-  that generic notice, then swallowed**, so the handler never rejects out of
-  `waitUntil`. Pinned by
-  `lib/src/remote/pocket-app/sw.test.ts`.
-- **Registration is best-effort and never awaited**: a failure warns and boot
-  continues (rationale) — ordinary without support and on an insecure origin,
-  since service workers need a secure context (`localhost` exempt), as WebAuthn
-  does (Deployment, below).
-- **Must focus an existing app window on notification click, preserving its
-  screen, or open `/` if none exists.** Pushes carry no Pane navigation target.
+**The installed app is a separate storage partition from the browser tab** — iOS Safari and a Home Screen web app share no cookies, `localStorage`, or IndexedDB — so the install mints its own per-Burrow statics and is a *different Client*, **needing its own pairing approval on each Burrow**. (rationale) **The two cannot be merged**, so Pocket suggests a label naming the mode at pairing — `Dormouse Pocket (Home Screen)` versus `Dormouse Pocket (browser)` — for the laptop's approval modal and Alarm settings to tell them apart.
 
-**The installed app is a separate storage partition from the browser tab** —
-cookies, `localStorage`, and IndexedDB are not shared between iOS Safari and a
-Home Screen web app — so the install mints its own per-Burrow statics and is a
-*different Client*. **It therefore needs its own pairing approval on each Burrow**
-([remote-security-model.md](./remote-security-model.md)). (rationale)
+**Signing in *is* enough to ask.** `SigninFinishResponse` returns the asserted passkey's public key, which a Client needs to build a presence proof, so a profile that never registered can still pair (rationale); holding that public key authorizes nothing ([remote-security-model.md](./remote-security-model.md) -> Client statics). **If the cached copy disappears mid-session, Pocket clears the session token and returns to sign-in** (`PasskeyUnavailableError`).
 
-**Signing in *is* enough to ask.** `SigninFinishResponse` returns the asserted
-passkey's public key, which a Client needs to build a presence proof, so a
-profile that never registered can still pair (rationale); holding that public key
-authorizes nothing ([remote-security-model.md](./remote-security-model.md) ->
-Client statics). **If
-the cached copy disappears mid-session, Pocket clears the session token and
-returns to sign-in** (`PasskeyUnavailableError`); the verified response restores
-it on any profile.
-
-**Pocket states the order on the screen that leads with the scan**, above the
-action rather than after it: install to the Home Screen **first**, then scan and
-approve the pairing on the machine — everything partition-bound is minted from
-there, the passkey and each per-Burrow static. **Push is not named there**,
-since whether it works at all depends on the Relay's push config; the Burrows
-view's notice and push rows gate on that.
-
-**One phone can hold two Client identities, so Pocket names the mode in the label
-it suggests at pairing** — `Dormouse Pocket (Home Screen)` versus
-`Dormouse Pocket (browser)` — so the laptop's approval modal and the Alarm
-settings dialog can tell them apart. **They cannot be merged**: separate Client
-statics are separate delivery targets.
-
-Source of truth: `lib/pocket/public/manifest.webmanifest`;
-`lib/src/remote/pocket-app/sw.ts` with `lib/vite.sw.config.ts`;
-`registerPushServiceWorker` in `lib/src/remote/pocket-app/service-worker.ts`;
-`PASSKEY_UNAVAILABLE_MESSAGE` / `PocketClient.signin` in
-`lib/src/remote/client/pocket-client.ts`; `deviceLabel` in
-`lib/src/remote/pocket-app/views.tsx`.
+Source of truth: `lib/pocket/public/manifest.webmanifest`; `lib/src/remote/pocket-app/sw.ts` with `lib/vite.sw.config.ts`; `registerPushServiceWorker` in `lib/src/remote/pocket-app/service-worker.ts`; `deviceLabel` in `lib/src/remote/pocket-app/views.tsx`.
 
 ### Detecting install state, and what cannot be detected
 
-Installed means `navigator.standalone === true` (iOS) or the standard
-`(display-mode: standalone)` media query. **Availability is evaluated in this
-order, and every unavailable result is named in the UI:**
+Installed means `navigator.standalone === true` (iOS) or the standard `(display-mode: standalone)` media query. **Push availability is evaluated in this order, and every unavailable result is named in the UI**: `needs-install` (`navigator.standalone` exists but the app is not installed — first, since iOS tabs omit the APIs below), `unsupported` (no service worker, `Notification`, or `PushManager`), `no-worker` (the registration failed or resolved empty), `denied`, then `ready`.
 
-| Result | Condition | UI consequence |
-|---|---|---|
-| `needs-install` | `navigator.standalone` exists but the app is not installed; checked before capability probes, since iOS tabs omit those APIs | Explain Home Screen install above the scan action, and again on the Burrows view unless push is `disabled` there; with no prompt API it stays advice — a tab must still scan |
-| `unsupported` | Service workers, `Notification`, or `PushManager` unavailable after the install gate | Explain that this browser cannot receive push |
-| `no-worker` | The tracked registration failed or resolved empty, commonly on an insecure origin | Explain the worker failure |
-| `denied` | Notification permission is denied | Direct the user to browser settings |
-| `ready` | Worker and APIs exist and permission is not denied | Offer the registration action |
+**Never parse the user-agent:** iPadOS reports as a Mac; `navigator.standalone`'s presence is the install-required signal. **A tab cannot detect the installed app**, so the copy allows for "already installed, wrong window."
 
-`needsHomeScreenInstall` exports that predicate alone, so the auth gate awaits no
-push machinery.
+**Push is asked for once per device, on one card on the Burrows view, never from the wall or a Burrow row**: the prompt and the `PushSubscription` are scope-wide, and only the Relay's rows are per `(burrowId, deliveryId)` ([relay.md](./relay.md) → State files). Its tap subscribes the browser, then registers every paired Burrow.
 
-**Never parse the user-agent:** iPadOS reports as a Mac; `navigator.standalone`'s
-presence is the install-required signal, absent on macOS Safari. **A tab cannot
-detect the installed app** — the partitions share no signal — so the copy allows
-for "already installed, wrong window."
+**Which Burrows this device is registered with is read from the Relay on entering the Burrows list**, never tracked locally (rationale). **The readback is by capability, never by identity** (rationale): `POST /api/push/subscriptions/query` presents this browser's own delivery ids and reports only on those ([relay.md](./relay.md) → Web Push). `POST /api/push/subscribe` answers with the same thing — every Burrow this device is registered with after the mutation — so **both are complete answers, never deltas**: only which is newer.
 
-**Both the availability check and the subscribe path await the tracked
-registration promise**, never `navigator.serviceWorker.ready`, which never
-settles after a failed registration.
+**A Relay row is necessary but not sufficient for "push on".** Pocket also checks that permission is still granted, that the scope holds a `PushSubscription` minted for the Relay's current VAPID key, and that it points at the registered address; any of the four failing re-offers Enable, and the Relay omits such rows too ([relay.md](./relay.md) → Web Push).
 
-**The Relay's VAPID public key is prefetched before Pocket offers Enable**, in
-an explicit config state (`loading`, `ready`, `disabled`, or `error`): a failed
-fetch offers Retry, which only caches the key, and the next tap reveals Enable.
-**Permission is requested on that separate, fresh tap** — a network round trip
-can consume an iOS gesture's transient activation. (rationale)
+**Pocket records a SHA-256 digest of the address each time the Relay accepts a registration** (`dormouse-pocket:push-endpoint`) and compares it on open (rationale) — a digest, since the address is a bearer capability. **One key per device, not per Burrow.** **Absent reads as no opinion, not as a mismatch**, so a device that predates the record, or whose storage was cleared, is not forced to re-register.
 
-Browser availability and Burrow registration are separate states: the
-`PushSubscription` belongs to the service-worker scope, the Relay's rows to
-`(burrowId, deliveryId)` ([relay.md](./relay.md) → State files).
+**Repair waits for the next app open, never a `pushsubscriptionchange` handler in `sw.js`**: a worker cannot obtain a session token, and **unattended re-registration would need a long-lived credential** [remote-security-model.md](./remote-security-model.md) does not grant.
 
-**Push is asked for once per device, on one card, on the Burrows view** — the
-prompt and the subscription it mints are scope-wide; the per-Burrow rows are
-bookkeeping. The card reads the paired Burrows as a set — **Enable push
-notifications** while any lacks a row, one **Push notifications on.** line once
-all have one — and its tap subscribes the browser, then registers every paired
-Burrow, repairing a rotated endpoint at once. **Each response commits as it
-lands**, so a loop that fails partway keeps what it registered. **Never offer
-push from the wall or a Burrow row.** The row states **Push on** beside its
-pair state — the card carries no per-Burrow signal.
+**Registering another Burrow, or retrying that POST, reuses the scope's existing `PushSubscription`** when its `applicationServerKey` matches the Relay's VAPID key byte-for-byte; a new endpoint is minted only when the key differs (rationale). **When it does rotate, the Relay drops that device's other Burrow rows in the same mutation** and its response lists what survived, which makes a committed POST whose response was lost self-repairing (rationale).
 
-Every card state is one pure predicate over (paired set, registrations,
-availability, config); `needs-install` is the one it declines to render, since
-`InstallNotice` is the push card for that state.
+**Obsolete delivery mappings are retired, durably.** A `pairing-required` transition, a re-pair that mints a new id, and an explicit **Remove** each write the old `{ burrowId, deliveryId }` to `PendingDeliveryDeletionV1` *before* the record forgets it (rationale), then call the idempotent deletion route; tombstones retry until a Relay answer clears them. **This deletes the delivery row alone** — never the scope's shared `PushSubscription`, and never another Burrow's row.
 
-**Which Burrows this device is registered with is read from the Relay on entering
-the Burrows list**, never tracked locally, and the connect neither refetches nor
-drops it (rationale). **The readback is by capability, never by identity**
-(rationale):
-`POST /api/push/subscriptions/query` presents this browser's own delivery ids and
-reports only on those ([relay.md](./relay.md) → Web Push).
-`POST /api/push/subscribe` answers with the same thing — every Burrow this device
-is registered with after the mutation — so **both are complete answers, never
-deltas**: only which is newer. One run token drops any read a newer load, or a
-completed registration, already overtook. **A read in flight or failed never
-settles at empty on its own behalf**: the card re-offers its idempotent Enable.
-(rationale)
-
-**A Relay row is necessary but not sufficient for Push notifications on.**
-Pocket also checks that permission is still granted, that the scope holds a
-`PushSubscription` minted for the Relay's current VAPID key, and that it points
-at the registered address; any of the four failing re-exposes Enable, and the
-Relay omits such rows too ([relay.md](./relay.md) → Web Push).
-
-**Pocket records a SHA-256 digest of the address each time the Relay accepts a
-registration** (`dormouse-pocket:push-endpoint`, beside the `:passkey:` cache)
-and compares it on open (rationale) — a digest, not the address, since it is a
-bearer capability. **One key per device, not per Burrow**: one scope holds one
-subscription. **Absent reads as no opinion, not as a mismatch**, so a device that
-predates the record, or whose storage was cleared, is not forced to re-register.
-
-**Repair waits for the next app open, never a `pushsubscriptionchange` handler in
-`sw.js`**: a worker cannot obtain a session token — it lives in `PocketClient`
-memory behind a fresh WebAuthn assertion, and a worker has no
-`navigator.credentials`. **Unattended re-registration would need a long-lived
-credential** [remote-security-model.md](./remote-security-model.md) does not
-grant.
-
-**Registering another Burrow, or retrying that POST, reuses the scope's existing
-`PushSubscription`** when its `applicationServerKey` matches the Relay's VAPID
-key byte-for-byte; a new endpoint is minted only when the key differs
-(rationale). **When it does rotate, the Relay drops that device's other Burrow
-rows in the same mutation** and its response lists what survived, which makes a
-committed POST whose response was lost self-repairing (rationale).
-
-**`subscribeToPushInBrowser` reports that replacement through a *required*
-callback**, fired the moment the old address stops being valid, before the new
-one is minted (rationale). Its one job is the UI: Pocket stops claiming **Push
-notifications on** for every Burrow at that instant.
-
-**Obsolete delivery mappings are retired, durably.** A `pairing-required`
-transition, a re-pair that mints a new id, and an explicit **Remove** each write
-the old `{ burrowId, deliveryId }` to `PendingDeliveryDeletionV1` *before* the
-record forgets it (rationale), then call the idempotent deletion route.
-Tombstones retry after sign-in, on every entry to the Burrows list, and before
-registering a replacement, and clear only on a Relay answer. **This deletes the
-delivery row alone** — never the scope's shared `PushSubscription`, and never
-another Burrow's row.
-
-Source of truth: `isInstalledWebApp` in
-`lib/src/remote/client/install-state.ts`; `requiresInstallForPush` /
-`needsHomeScreenInstall` / `getPushAvailability` / `hasCurrentPushSubscription` /
-`subscribeToPushInBrowser` in `lib/src/remote/client/push-subscribe.ts`;
-`InstallFirstNotice` / `InstallNotice` / `PushNotice` / `pushNoticeState` /
-`onEnablePush` in `lib/src/remote/pocket-app/App.tsx`;
-`PocketClient.listPushSubscribedBurrows` / `subscribeToPush` /
-`retirePendingDeletions` / `forgetBurrow` in
-`lib/src/remote/client/pocket-client.ts`;
-`lib/src/remote/pocket-app/service-worker.ts`; `pushEndpointFingerprint` in
-`remote-lib-common/src/security/push.ts`; `PushSubscriptionStore.upsert` and
-`vapidPublicKey` in `relay/src/state.ts`; `relay/src/app.ts`.
+Source of truth: `getPushAvailability` / `subscribeToPushInBrowser` in `lib/src/remote/client/push-subscribe.ts`; `pushNoticeState` in `lib/src/remote/pocket-app/App.tsx`; `PocketClient.subscribeToPush` / `retirePendingDeletions` in `lib/src/remote/client/pocket-client.ts`; `pushEndpointFingerprint` in `remote-lib-common/src/security/push.ts`.
 
 ## What Pocket stores
 
-**Must have a successful current-page storage probe before a scan starts
-registration, sign-in, token retirement, or pairing** — one probe per page,
-shared in flight, cached only on success and only in memory, and invalidated by
-any later production store or key-generation failure. **Must probe native
-storage first and encrypted storage only if native fails**, on fresh disposable
-keys in Pocket's own record shape, selecting a format only once it survives
-reopen and identical key agreement. **Both formats failing shows a storage
-compatibility error without resetting pairing data**, pointing at
-`/diagnostics/index.html`. (rationale)
-**Must identify the failed probe stage and an allowlisted exception name;
-never display browser exception messages or key material.**
-**Must keep the separate-key experiment out of pairing preflight.**
+**Must have a successful current-page storage probe before a scan starts registration, sign-in, token retirement, or pairing**, selecting the Client static format per [remote-security-model.md](./remote-security-model.md) → Client statics. The probe is shared in flight, cached only on success and only in memory, and invalidated by any later store or key-generation failure. **Both formats failing shows a storage compatibility error without resetting pairing data**, pointing at `/diagnostics/index.html`; **it names the failed probe stage and an allowlisted exception name, never a browser exception message or key material.** (rationale)
 
-**Must use metadata-only summaries for listing, push registration/queries,
-removal, and re-pair identity checks.** `getSummary` and `listSummaries` omit key
-material without decryption or import, so a corrupt key blocks none of them;
-connection and push decryption use full records.
+**Must use metadata-only summaries for listing, push registration and queries, removal, and re-pair identity checks**, so a corrupt key blocks none of them; connection and push decryption use full records. **A connection-record read failure shows fixed retry/scan text, never browser exception details, and changes no authorization**: a fresh scan keeps the Burrow pin and requires fresh approval. (rationale)
 
-**Must report connection-record read failures with fixed retry/scan recovery
-text, never browser exception details or authorization changes.** A fresh scan
-keeps the Burrow pin and requires fresh approval; a read failure grants nothing.
+**Page and worker decode both formats.** **The encrypted envelope (`aes-gcm-x25519-v1`, its context string included) is a persisted format**, so every later build must read it; **older builds cannot**, and rollback means a compatible build or pairing again.
 
-**Must use the selected format for new keys and decode both formats in the
-shared page/worker store.** The encrypted format stores AES-GCM ciphertext,
-a nonextractable per-key AES-256 key, a random 96-bit IV, and authenticated
-domain/Burrow/public-key context. Generate and encrypt before the ceremony,
-persist only after approval, and re-import X25519 nonextractably. Preserve its
-envelope across authorization rewrites; reject corruption without generating a
-replacement. Native records stay native. Older builds cannot read encrypted
-records; rollback requires returning to a compatible build or pairing again.
+**One module owns the IndexedDB name, its version, its upgrade, and every open** (rationale). `dormouse-pocket` is at **v4**: `known-burrows` (`KnownBurrowV1`, keyed by `burrowId`) and `pending-deletions` (`PendingDeliveryDeletionV1`, keyed `burrowId:deliveryId`); every earlier version upgrades to that shape. **A version bump is a compatibility event: it must never empty `pending-deletions` for a store already at v4**, which would discard owed deletions. **`navigator.storage.persist()` is requested best-effort**: a browser that refuses gets ordinary eviction-prone storage, which re-pairing survives ([remote-security-model.md](./remote-security-model.md) → Client static loss).
 
-Source of truth: `requirePocketKeyStorage` in `lib/src/remote/client/pocket-db.ts`;
-tests: `lib/src/remote/client/pocket-key-storage.test.ts`,
-`lib/src/remote/client/pocket-encrypted-storage.test.ts`,
-`lib/src/remote/pocket-app/App.scan.test.tsx`.
+**A `KnownBurrowV1` is this Client's whole authorization state** for one Burrow. **`localStorage` holds only the `:passkey:` cache and the `:push-endpoint` digest.**
 
-**One module owns the IndexedDB name, its version, its upgrade, and every open**
-(rationale). `dormouse-pocket` is at **v4**: `known-burrows` (`KnownBurrowV1`, keyed
-by `burrowId`) and `pending-deletions` (`PendingDeliveryDeletionV1`, keyed
-`burrowId:deliveryId`). **Must upgrade v1–v3 by creating missing stores, dropping
-`device-key` and `known-hosts`, and emptying `pending-deletions`** (rationale).
-**`navigator.storage.persist()` is requested once before the first write, and
-never throws**: a browser with no storage manager, or one that refuses, gets
-ordinary eviction-prone storage, which re-pairing survives
-([remote-security-model.md](./remote-security-model.md) → Client static loss).
-
-**A `KnownBurrowV1` is this Client's whole authorization state** — the pinned Burrow
-static, the per-Burrow X25519 private half decoded to a nonextractable `CryptoKey` beside
-its raw public point, the paired passkey identifiers, and either
-`{ paired, deliveryId }` or `pairing-required`. **Only the private half is a key
-object**: a `NoiseKeyPair` wants the public half as raw bytes (rationale).
-**`localStorage`
-holds only the `:passkey:` cache and the `:push-endpoint` digest** — the
-`:paired:` markers those records replaced are swept once at boot.
-
-Source of truth: `lib/src/remote/client/pocket-db.ts`, `purgeLegacyPairedMarkers`
-in `lib/src/remote/client/pocket-client.ts`.
+Source of truth: `requirePocketKeyStorage` in `lib/src/remote/client/pocket-db.ts`; `generatePocketKeyPair` in `lib/src/remote/client/pocket-private-key.ts`.
 
 ## Serving the built bundle
 
-Content types need no special-casing: `serveStatic` already answers
-`application/manifest+json` for `.webmanifest` and `text/javascript` for `sw.js`.
+**Caching is set explicitly.** Vite content-hashes everything it emits into `assets/`, so those are `immutable`; everything else — `index.html`, the built `sw.js`, and the `public/` passthroughs at the root — is `no-cache`: revalidate before use, not never store, and load-bearing (rationale). Two rules make it hold:
 
-**Caching is set explicitly.** Vite content-hashes everything it emits into
-`assets/`, so those are `immutable`; everything else — `index.html`, the built
-`sw.js`, and the `public/` passthroughs at the root — is `no-cache`: revalidate
-before use, not never store, and load-bearing, because `emptyOutDir` deletes the
-previous build's hashed assets (rationale). Two rules make it hold:
+- **The class comes from the request path** (`/assets/` or not), never the platform-shaped resolved path (rationale).
+- **The SPA fallback overrides that class with the shell's, and 404s under `/assets/`**: the shell is never an answer to a subresource miss. (rationale)
 
-- **The class comes from the request path** (`/assets/` or not), never the
-  platform-shaped resolved path (rationale). The header is staged on the context
-  *before* `serveStatic` runs, since its `onFound` hook fires after the Response
-  is built and cannot add to it.
-- **The SPA fallback overrides that staged class, and 404s under `/assets/`.** A
-  response's cache policy describes the response, and the shell is never a useful
-  answer to a subresource miss. (rationale)
+The Hosted Relay serves the same bundle by the same rules (`docs/specs/hosted.md` -> "Relay").
 
-The Hosted Relay serves the same bundle by the same rules
-(`docs/specs/hosted.md` -> "Relay").
-
-Source of truth: `registerPocketServing` in `relay/src/app.ts`; `pocketRoutes` in
-`hosted/server/pocket.ts`. Both built HTML shells are checked by
-`assertPocketShell` in `lib/scripts/assert-pocket-worker.mjs`.
+Source of truth: `registerPocketServing` in `relay/src/app.ts`; `pocketRoutes` in `hosted/server/pocket.ts`. Both built HTML shells are checked by `assertPocketShell` in `lib/scripts/assert-pocket-worker.mjs`.
 
 ### The capability harness
 
-**Must serve the opt-in capability harness at `/diagnostics/index.html`**, built
-from `lib/pocket/diagnostics/` as a second Pocket HTML entry with its own
-manifest identity and start URL. Four rules make its evidence worth anything:
+**Must serve the opt-in capability harness at `/diagnostics/index.html`**, built from `lib/pocket/diagnostics/` as a second Pocket HTML entry with its own manifest identity and start URL. Four rules make its evidence worth anything:
 
-- **Never read pairing data, open a production database, request passkeys or
-  media permissions, or upload results**; reports omit key material.
-- **Must use the production key codec, authenticated context included**, for the
-  encrypted round-trip and restart tests. API presence is observational and
-  certifies no platform, so a report states which browser/app context it
-  measured; a crypto-storage pass requires reopening and using the key.
-- **Must retain a restart checkpoint only on explicit preparation**, in a
-  diagnostic-only database, until explicit cleanup; verification needs a new page
-  instance and derives the saved expected result with the recovered key.
+- **Never read pairing data, open a production database, request passkeys or media permissions, or upload results**; reports omit key material.
+- **Must use the production key codec, authenticated context included**, for the encrypted round-trip and restart tests. API presence is observational and certifies no platform, so a report states which browser/app context it measured; a crypto-storage pass requires reopening and using the key.
+- **Must retain a restart checkpoint only on explicit preparation**, in a diagnostic-only database, until explicit cleanup; verification needs a new page instance and derives the saved expected result with the recovered key.
 - **Never claim a page reload proves process termination.**
 
-**Must identify harness v3 production-format reports and reject legacy restart
-checkpoints with explicit cleanup/reprepare instructions**, never silently
-reclassifying experimental evidence; the v1 production envelope and context are
-preserved. Pinned by `lib/src/remote/client/capability-harness.test.ts`.
+**Must identify harness v3 production-format reports and reject legacy restart checkpoints with explicit cleanup/reprepare instructions**, never silently reclassifying experimental evidence. (rationale)
 
-Source of truth: `runCapabilities` in `lib/pocket/diagnostics/capabilities.js`;
-UI: `lib/pocket/diagnostics/page.js`; restart: `verifyRestart` in
-`lib/pocket/diagnostics/restart.js`; codec: `generatePocketKeyPair` /
-`loadPocketPrivateKey` in `lib/src/remote/client/pocket-private-key.ts`.
+Source of truth: `runCapabilities` in `lib/pocket/diagnostics/capabilities.js`.
 
 ## A backgrounded phone loses its Burrow session
 
-**While a connection is established and the page is visible, Pocket sends one
-fixed-size keepalive every `E2E_KEEPALIVE_INTERVAL_MS` (30 s)** on the Noise
-session; hiding the page pauses them, and returning sends one immediately before
-resuming the interval. **Hidden means paused, not slowed**: a backgrounded tab
-has its timers throttled or suspended outright. (rationale)
+**While a connection is established and the page is visible, Pocket sends one fixed-size keepalive every `E2E_KEEPALIVE_INTERVAL_MS` (30 s)** on the Noise session; hiding the page pauses them, and returning sends one immediately before resuming the interval. (rationale)
 
-The Burrow disposes any session it has not decrypted a Client message on for
-`ESTABLISHED_E2E_IDLE_TIMEOUT_MS` (120 s — four intervals;
-[remote-security-model.md](./remote-security-model.md) → Burrow bounds). **A phone
-suspended for longer than that comes back to no session**, and reconnecting costs
-a fresh Noise handshake and one WebAuthn prompt. (rationale)
+The Burrow disposes any session it has not decrypted a Client message on for `ESTABLISHED_E2E_IDLE_TIMEOUT_MS` ([remote-security-model.md](./remote-security-model.md) → Burrow bounds), so **a phone suspended for longer comes back to no session**, and reconnecting costs a fresh Noise handshake and one WebAuthn prompt (rationale). **Pocket runs the same deadline against its own last send**, before a keepalive and before every request, and reports burrow loss when it passes: the reap's goodbye may never be read, and the relay socket to the *Relay* stays open. (rationale)
 
-**Pocket runs the same deadline against its own last send**, before a keepalive
-and before every request, and reports burrow loss when it passes. **A reap's
-goodbye cannot be relied on** — a suspended page may never read it — and this
-Client's relay socket is to the *Relay*, so it stays open. (rationale)
+**The Burrow's goodbye is burrow loss** — its idle reap, a newer session from this same Client static, or the person at the computer taking a pane back ([remote-api.md](./remote-api.md) → Transport): the phone leaves the wall exactly as it does for a `burrow-gone`, and stays paired.
 
-**The Burrow's goodbye is burrow loss** — its idle reap, a newer session from
-this same Client static, or the person at the computer taking a pane back
-([remote-api.md](./remote-api.md) → Transport): the phone leaves the wall
-exactly as it does for a `burrow-gone`, and stays paired. Pinned by `leaves the
-wall when the Burrow ends a relayed session, rather than freezing` in
-`lib/src/remote/client/pocket-client.test.ts`.
-
-Source of truth: `ClientSessionCore.sendKeepalive` / `#reapedByBurrow` and the
-injected timer, clock, and visibility seams in
-`lib/src/remote/client/session-core.ts`.
+Source of truth: `ClientSessionCore` in `lib/src/remote/client/session-core.ts`.
 
 ## The path the session takes
 
-**Pocket offers a direct path once the connection outcome says `ok`**, over the
-browser's own `RTCPeerConnection` (ICE servers by deployment, read before
-every Connect and pairing: [remote-network.md](./remote-network.md) →
-Anywhere), and keeps the session
-on the relay when the browser has none or the Burrow declines
-([remote-api.md](./remote-api.md) → Direct path owns the whole protocol) —
-**unless the outcome says `directOnly`**, where the connect answers only once
-the direct path carries the session
-([remote-network.md](./remote-network.md) → Local networks).
+**Pocket offers a direct path once the connection outcome says `ok`**, over the browser's own `RTCPeerConnection` (ICE servers by deployment, read before every Connect and pairing: [remote-network.md](./remote-network.md) → Anywhere), and keeps the session on the relay when the browser has none or the Burrow declines ([remote-api.md](./remote-api.md) → Direct path owns the whole protocol) — **unless the outcome says `directOnly`**, where the connect answers only once the direct path carries the session ([remote-network.md](./remote-network.md) → Local networks).
 
-**Must retire the previous session — its peer, its channel, and its pending
-requests — immediately before the replacement's connection request goes out, and
-never report burrow loss for it.** The Burrow closes the old channel at
-promotion, and on a direct path that close travels peer-to-peer while the
-outcome travels over the relay, so it can arrive first and fail the
-replacement's own waiter. **Never earlier than that**: a presence proof the user
-dismisses, or a handshake that fails, leaves a working session untouched, and a
-replacement refused after the request has gone leaves none. Pinned by
-`preserves a replacement connection when the old channel closes before its
-outcome arrives` and `leaves a working session alone when the replacement never
-reaches the Burrow` in `lib/src/remote/client/pocket-client.test.ts`.
+**Must retire the previous session — its peer, its channel, and its pending requests — immediately before the replacement's connection request goes out, and never report burrow loss for it**: the old channel's close can otherwise arrive first and fail the replacement's waiter. **Never earlier than that**: a presence proof the user dismisses, or a handshake that fails, leaves a working session untouched, and a replacement refused after the request has gone leaves none.
 
-**Must label the connected header with the live path, `relay` or `direct`,
-without status colours**, keeping fallback reasons in hover text. **Must pass
-only a `DirectRelayCause` to Pocket, never runtime failure text**;
-`TRANSPORT_RELAY_CAUSES` owns the displayed sentences. **Must treat a channel
-failure after the switch as Burrow loss**, returning to the list and requiring
-a fresh handshake and WebAuthn prompt; before the switch, a session permitting relay stays relayed.
+**Must label the connected header with the live path, `relay` or `direct`, without status colours**, keeping fallback reasons in hover text. **Must pass only a `DirectRelayCause` to Pocket, never runtime failure text**; `TRANSPORT_RELAY_CAUSES` owns the displayed sentences. After the switch, a channel failure ends the session (remote-api.md → Direct path): Pocket returns to the list, and reconnecting costs a fresh handshake and WebAuthn prompt.
 
-Source of truth: `PocketClient.connect` in
-`lib/src/remote/client/pocket-client.ts`; `deploymentDirectPeer` in
-`lib/src/remote/pocket-app/deployment.ts`; `ClientSessionCore.transportPath` /
-`setOnTransportChanged` in `lib/src/remote/client/session-core.ts`; `TRANSPORT_PATH_LABELS` /
-`TRANSPORT_RELAY_CAUSES` / `transportTitle` in
-`lib/src/remote/pocket-app/views.tsx`.
+Source of truth: `PocketClient.connect` in `lib/src/remote/client/pocket-client.ts`; `deploymentDirectPeer` in `lib/src/remote/pocket-app/deployment.ts`; `TRANSPORT_RELAY_CAUSES` in `lib/src/remote/pocket-app/views.tsx`.
 
 ## An expired session drops to sign-in
 
-Sessions live only in the Relay's memory ([relay.md](./relay.md)), so they end
-on their 12h expiry *and* on every Relay restart, while the passkey and
-paired Burrow records in IndexedDB outlive both. **Pocket therefore treats a
-dead session as actionable, not reportable** (rationale): `PocketClient` clears
-its in-memory token and throws `SessionExpiredError`; the app tears down any live
-adapter and returns to sign-in carrying that message. One passkey prompt restores
-the Burrows list, pairing and push registration intact.
+Sessions expire ([relay.md](./relay.md)) and, on a self-host Relay, also end on every restart, while the passkey and paired Burrow records outlive both; Hosted also ends the session of an account no longer entitled (`docs/specs/hosted.md` -> "Relay"). **Pocket therefore treats a dead session as actionable, not reportable** (rationale): `PocketClient` clears its in-memory token and throws `SessionExpiredError`; the app tears down any live adapter and returns to sign-in carrying that message. One passkey prompt restores the Burrows list, pairing and push registration intact.
 
-Two details this depends on:
+- **The trigger is the session gate specifically**, matched on the shared `UNAUTHORIZED_ERROR` from `remote-lib-common/src/remote/wire.ts` — a refused setup token answers 401 too. (rationale)
+- **A rejected relay upgrade carries no status**, so `openSocket` asks an authenticated route what happened: a 401 there means expiry, anything else leaves it an ordinary socket failure.
 
-- **The trigger is the session gate specifically**, matched on the shared
-  `UNAUTHORIZED_ERROR` from `remote-lib-common/src/remote/wire.ts` — a 401 alone
-  is ambiguous, since a refused setup token answers 401 too (as
-  `SetupTokenInvalidError`). (rationale)
-- **A rejected relay upgrade carries no status.** The browser surfaces it as a
-  bare `error` event, so `openSocket` asks an authenticated route what happened:
-  a 401 there means expiry, anything else leaves it an ordinary socket failure.
-
-Source of truth: `SessionExpiredError` in
-`lib/src/remote/client/pocket-client.ts`, `run` in
-`lib/src/remote/pocket-app/App.tsx`.
+Source of truth: `SessionExpiredError` in `lib/src/remote/client/pocket-client.ts`.
 
 ## Deployment: same-origin, always
 
-**The Pocket app is always served same-origin with its API.** WebAuthn binds
-passkeys to the serving origin, and Chrome's Private Network Access rules block
-public-site → private-network fetches. Pocket holds itself to it by construction
-— an empty API base, a `wsBase` from `location.origin` — and the Relay enforces
-it: a registration or assertion whose `clientDataJSON.origin` is
-not the configured origin is rejected ([relay.md](./relay.md);
-rationale); the Relay emits no cross-origin grant
-([security-remote.md](./security-remote.md#cross-origin-access)). **The bundle
-mounts at the origin root, never under a path prefix**: the manifest's
-`start_url`/`scope`, the worker's registration scope, and the shell's
-manifest/icon links are all root-absolute. The one-time page reuses Pocket's
-screens and wall but not this rule: it has no manifest or worker, and mounts at
-Hosted's `/connect/` (`docs/specs/one-time.md` -> "Phone page").
+**The Pocket app is always served same-origin with its API**: WebAuthn binds passkeys to the serving origin, and Chrome's Private Network Access rules block public-site → private-network fetches. Pocket holds itself to it by construction — an empty API base, a `wsBase` from `location.origin` — and the Relay enforces it: a registration or assertion whose `clientDataJSON.origin` is not the configured origin is rejected ([relay.md](./relay.md); rationale); the Relay emits no cross-origin grant ([security-remote.md](./security-remote.md#cross-origin-access)). **The bundle mounts at the origin root, never under a path prefix**: the manifest's `start_url`/`scope`, the worker's registration scope, and the shell's manifest/icon links are all root-absolute. The one-time page reuses Pocket's screens and wall but not this rule (`docs/specs/one-time.md` -> "Phone page").
 
-**The origin is served with a Content-Security-Policy**, the defense in depth
-around the active XSS `docs/specs/security.md` -> "What is not defended" names (rationale).
-Every source is the app's own origin
-(`default-src 'self'`, with `frame-ancestors`, `base-uri` and `object-src`
-`'none'`), with three loosenings:
-
-* **`style-src 'unsafe-inline'`**, because the shell carries a pre-paint
-  `<style>` and React writes `style` attributes — a hash covers the first but not
-  the second.
-* **`connect-src` names the WebSocket origin explicitly** — the origin with
-  the scheme swapped — rather than resting on `'self'` (rationale). It can
-  only ever be this deployment's own relay.
-* **`img-src` also admits `data:` and `blob:`, `media-src` `blob:`**; every
-  other directive is `'self'`.
-
-**`script-src` stays `'self'` plus `'wasm-unsafe-eval'`
-([terminal-escapes.md](./terminal-escapes.md#inline-graphics)), with no nonce
-pipeline**, and the build keeps earning it: `assertPocketShell`
-fails `build:pocket` on any inline `<script>` body or off-origin `src`/`href`
-in the emitted `index.html`. (rationale)
+**The origin is served with a Content-Security-Policy**, the defense in depth around the active XSS `docs/specs/security.md` -> "What is not defended" names (rationale). **Every source is the app's own origin** (`default-src 'self'`, with `frame-ancestors`, `base-uri` and `object-src` `'none'`), **loosened only by** `style-src 'unsafe-inline'`, the WebSocket origin named in `connect-src` (rationale), `data:`/`blob:` images, and `blob:` media. **`script-src` stays `'self'` plus `'wasm-unsafe-eval'` ([layout.md](./layout.md#inline-graphics)), with no nonce pipeline**: `assertPocketShell` fails `build:pocket` on any inline `<script>` body or off-origin `src`/`href` in the emitted `index.html`. (rationale)
 
 One lib-owned bundle, two deployments:
 
-* **Selfhost:** the Relay serves the bundle (`lib/dist-pocket`);
-  selfhost auth never depends on dormouse.sh existing.
-* **Hosted:** the relay Worker serves it at the root of `relay.dormouse.sh`
-  beside the Hosted Relay's routes (`docs/specs/hosted.md` -> "Relay"); rpId is
-  that host. The staging adds `deployment.json`, which tells the bundle Hosted
-  serves it ([remote-network.md](./remote-network.md) → Anywhere).
+* **Selfhost:** the Relay serves the bundle (`lib/dist-pocket`); selfhost auth never depends on dormouse.sh existing.
+* **Hosted:** the relay Worker serves it at the root of `relay.dormouse.sh` beside the Hosted Relay's routes (`docs/specs/hosted.md` -> "Relay"); rpId is that host. The staging adds `deployment.json`, which tells the bundle Hosted serves it ([remote-network.md](./remote-network.md) → Anywhere).
 
-**The website stays fully static — playground and marketing pages — in both
-worlds**, sharing all terminal UI through `lib` and never duplicating Pocket
-code.
+**The website stays fully static — playground and marketing pages — in both worlds**, sharing all terminal UI through `lib` and never duplicating Pocket code.
 
-Source of truth: `pocketContentSecurityPolicy` in
-`remote-lib-common/src/remote/relay-common.ts`, `assertPocketShell` in
-`lib/scripts/assert-pocket-worker.mjs`.
+Source of truth: `pocketContentSecurityPolicy` in `remote-lib-common/src/remote/relay-common.ts`.
 
 ## Future
 
-1. **Dedupe the composition** — the website's `PocketTerminalExperience` and the
-   Pocket shell (`PocketWall.tsx`) each wire `MobileTerminalUi` + `MobileWall`
-   independently; extract the shared wiring so the two cannot drift.
-2. **Theme picker in Pocket** — the app restores the persisted theme but exposes
-   no picker; add the shared `ThemePicker` (and its theme-debugger entry) once
-   its dropdown is phone-friendly.
+**Scope: pocket-polish**
+
+1. **Dedupe the composition** — the website's `PocketTerminalExperience` and the Pocket shell (`PocketWall.tsx`) each wire `MobileTerminalUi` + `MobileWall` independently; extract the shared wiring so they cannot drift.
+2. **Theme picker in Pocket** — the app restores the persisted theme but exposes no picker; add the shared `ThemePicker` (and its theme-debugger entry) once its dropdown is phone-friendly.

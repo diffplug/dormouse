@@ -16,9 +16,13 @@ import {
   handOverBrowserStream,
 } from './agent-browser-surface-controller';
 import type { RenderMode } from './agent-browser-screen';
-import { ModeContext, PaneWriteContext, SelectedIdContext, WallActionsContext, WorkspaceActiveContext, type PaneWriteActions } from './wall-context';
+import { ModeContext, PaneWriteContext, SelectedIdContext, WallActionsContext, WorkspaceActiveContext, ZoomedIdContext, type PaneWriteActions } from './wall-context';
+import { setHostShown } from '../../lib/host-shown';
 import { installBrowserHost, stubWallActions as stubActions } from './wall-test-utils';
 import { encodeViewerFrame } from '../../lib/platform/browser-automation';
+
+// Any test host counts as a Mac for the forwarder's ⌘A exemption.
+vi.mock('../../lib/select-all', () => ({ isMacSelectAll: (e: KeyboardEvent) => e.type === 'keydown' && e.metaKey && e.key === 'a' }));
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -582,23 +586,27 @@ describe('AgentBrowserPanel visibility parking', () => {
     setVisible: (visible: boolean) => void;
     setParked: (parked: boolean) => void;
     setWorkspaceActive: (active: boolean) => void;
+    setZoomed: (zoomedId: string | null) => void;
   }> {
     setDocumentHidden(false); // mount on-screen
-    const render = (parked: boolean, workspaceActive = true) => {
+    const render = (parked: boolean, workspaceActive = true, zoomedId: string | null = null) => {
       root.render(
         <StrictMode>
           <WorkspaceActiveContext.Provider value={workspaceActive}>
-            <PaneWriteContext.Provider value={paneWriteFor(() => {})}>
-              <WallActionsContext.Provider value={stubActions()}>
-                <AgentBrowserPanel {...paneProps('ab-panel', params)} parked={parked} />
-              </WallActionsContext.Provider>
-            </PaneWriteContext.Provider>
+            <ZoomedIdContext.Provider value={zoomedId}>
+              <PaneWriteContext.Provider value={paneWriteFor(() => {})}>
+                <WallActionsContext.Provider value={stubActions()}>
+                  <AgentBrowserPanel {...paneProps('ab-panel', params)} parked={parked} />
+                </WallActionsContext.Provider>
+              </PaneWriteContext.Provider>
+            </ZoomedIdContext.Provider>
           </WorkspaceActiveContext.Provider>
         </StrictMode>,
       );
     };
     await act(async () => { render(false); });
     return {
+      setZoomed: (zoomedId) => { render(false, true, zoomedId); },
       setVisible: (visible) => {
         setDocumentHidden(!visible);
         document.dispatchEvent(new Event('visibilitychange'));
@@ -676,6 +684,41 @@ describe('AgentBrowserPanel visibility parking', () => {
     await act(async () => { setWorkspaceActive(true); });
     await act(async () => { await vi.advanceTimersByTimeAsync(0); });
     expect(streamSockets(4321).length).toBeGreaterThan(before);
+    expect(liveStreamSocket(4321)?.readyState).toBe(1);
+  });
+
+  it('parks a pane another leaf is zoomed over, never the zoomed one', async () => {
+    const { setZoomed } = await renderVisibilityPanel({
+      surfaceType: 'browser', session: 'browser-session', stream: 4321,
+    });
+    const socket = liveStreamSocket(4321);
+    const before = streamSockets(4321).length;
+
+    await act(async () => { setZoomed('ab-panel'); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(HIDDEN_PARK_DELAY_MS + 50); });
+    expect(socket?.readyState).toBe(1);
+
+    await act(async () => { setZoomed('other-pane'); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(HIDDEN_PARK_DELAY_MS + 50); });
+    expect(socket?.readyState).toBe(3);
+    expect(streamSockets(4321).length).toBe(before);
+
+    await act(async () => { setZoomed(null); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(liveStreamSocket(4321)?.readyState).toBe(1);
+  });
+
+  it('parks a pane whose webview the host reports hidden', async () => {
+    await renderVisibilityPanel({ surfaceType: 'browser', session: 'browser-session', stream: 4321 });
+    const socket = liveStreamSocket(4321);
+    try {
+      await act(async () => { setHostShown(false); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(HIDDEN_PARK_DELAY_MS + 50); });
+      expect(socket?.readyState).toBe(3);
+    } finally {
+      await act(async () => { setHostShown(true); });
+    }
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
     expect(liveStreamSocket(4321)?.readyState).toBe(1);
   });
 
@@ -865,6 +908,16 @@ describe('AgentBrowserPanel canvas input forwarding', () => {
     await renderWithMode('passthrough', 'ab-panel', true);
     await press();
     expect(sentKeyEvents().length).toBeGreaterThan(whileHidden);
+  });
+
+  it('still forwards a Cmd+A the Wall cancelled only to stop a native select-all', async () => {
+    const host = installBrowserHost();
+    await renderWithMode('passthrough', 'ab-panel');
+    // As the Wall's earlier capture listener leaves it.
+    const selectAll = new KeyboardEvent('keydown', { key: 'a', metaKey: true, bubbles: true, cancelable: true });
+    selectAll.preventDefault();
+    await act(async () => { window.dispatchEvent(selectAll); });
+    expect(host.requests('edit')).toEqual([expect.objectContaining({ edit: 'selectAll' })]);
   });
 });
 

@@ -1,0 +1,5 @@
+# Reflow commits `git blame` should look through. GitHub reads this file;
+# locally: git config blame.ignoreRevsFile .git-blame-ignore-revs
+
+# Unwrap every markdown paragraph onto one line
+377f84e03106e853d232f01db5d5e1bf6eba4e49

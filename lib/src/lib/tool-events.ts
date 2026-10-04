@@ -2,6 +2,7 @@ import type { TerminalProtocolEvent } from './terminal-protocol';
 import { clearToolAnnounce, recordToolAnnounce } from './tool-announce-store';
 import { recordToolDirty } from './tool-dirty-store';
 import { dispatchToolOpens } from './tool-open-requests';
+import { offerToolDehydrate } from './tool-reap-store';
 
 /** A parsed OSC start, the boundary at which a Session's previous run ends. */
 export function isProtocolCommandStart(event: TerminalProtocolEvent): boolean {
@@ -29,8 +30,10 @@ export function recordToolEvents(id: string, events: readonly TerminalProtocolEv
 }
 
 /** A live parse's Tool events: recorded as replay's are, then the `open`
- *  requests only live output makes (`docs/specs/dor-tool.md` -> OSC 367). */
+ *  requests and `dehydrate` payloads only live output makes
+ *  (`docs/specs/dor-tool.md` -> OSC 367). */
 export function applyLiveToolEvents(id: string, events: readonly TerminalProtocolEvent[]): void {
   recordToolEvents(id, events);
+  for (const event of events) if (event.kind === 'toolDehydrate') offerToolDehydrate(id, event.dehydrate.payload);
   dispatchToolOpens(id, events);
 }

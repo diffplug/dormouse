@@ -10,13 +10,11 @@ The keep is judged by the burst's first press, so a double-click inside a rename
 
 Tools carry no navigation, address, or dev-server chip (Ned, 2026-09-29): a Tool is named for what it is, and a page it serves is not somewhere to navigate from, so that chrome stays with plain browser Surfaces. Its Terminal Context button had sat beside the header, outside its palette, and showed a different background.
 
-A serving preview's header changed size on every switch (standalone, 2026-09-29) because its name was the dev-server chip. The chip names a pane only once the Window's port scan resolves the page's loopback port: 600 ms of debounce, then a scan at idle. Each retarget starts a viewer on a new port, and the switch's hold ended when the new document loaded, before that scan. The chip unmounted and the address, in `text-sm font-medium` where the chip is `text-xs`, widened to the whole `localhost:<port>/<path>`; once the scan landed the chip returned and the address shrank to its path. The Wall harness in `lib/src/components/wall/preview-slot.test.tsx`, run against that header, stepped through `chip(b.md:6006) + url(/)`, `url(localhost:7007)`, then `chip(… :7007) + url(/)`. A name from params changes once, with the retarget, so nothing needs holding.
+A serving preview's header changed size on every switch while its name was the dev-server chip (standalone, 2026-09-29): the chip names a pane only once the Window's port scan resolves the page's loopback port (600 ms of debounce, then a scan at idle), which landed after the switch's hold had ended, so the address widened to the whole `localhost:<port>/<path>` and shrank back. A name from params changes once, with the retarget, so nothing needs holding.
 
 ## Pane header responsive sizing
 
 A viewport breakpoint says nothing about a narrow split inside a wide window: at a 1200px viewport every control stayed rendered in a 103px pane and overflowed into its neighbor (innerdogfood QC, 2026-09). Measuring the header and moving fixed controls together keeps long keys and renderer chips from pushing minimize/kill into a neighboring pane; quantizing the measurement to a tier keeps the header from re-rendering on every frame of a sash drag or tween.
-
-In the same run, real clicks exposed premature popup dismissal before the action ran. After repair, Zoom reached 716×403 pixels, Unzoom returned to the compact header, Reload worked, and Display retained modal focus. Header buttons stayed within their panes at the final 1200×800 viewport.
 
 Terminal border-box thresholds of 293/173 pixels preserve the former 280/160 content-box thresholds plus 13 pixels of horizontal padding. A content box can clamp to zero in a visible tiny leaf; treating that as hidden retained the full tier. Positive border-box width distinguishes that case from a hidden leaf.
 
@@ -24,15 +22,13 @@ The minimal boundary keeps the pane-action group and its 5-pixel right padding i
 
 The browser's 94-pixel boundary is the former 72 plus the zoom button and its gap, zoom having moved into the group. Its collapsed root is `gap-0.5 px-1`, already counted, so it needs no equivalent correction. A 102-pixel variant reserved an unsaved-change dot, which only a Tool reports; it went with the Tool's own header (2026-09-29).
 
-A serving Tool's boundaries follow the same rule over its elements (derived 2026-09-29): 13 pixels of padding, 12 for the dot where the tiny tier hides Kill (elsewhere the dot rides in Kill and the 12 go to the name), Display up to 36 (robot, 2-pixel gap, presentation glyph, then its gap), Terminal Context 26, and the group's 74 with its gap. Display yields at 161, where those leave the name no width; minimize and kill at 125, 36 narrower. Full is the terminal's 293 plus both leading controls, 355. The tiny header needs 81 pixels, inside Lath's 100-pixel minimum leaf. Without a popover the Tool reaches everything it drops through zoom, as a terminal does.
+A serving Tool's boundaries follow the same rule over its elements (derived 2026-09-29): 13 pixels of padding, 12 for the dot where the tiny tier hides Kill (elsewhere the dot rides in Kill and the 12 go to the name), Display up to 36 (robot, 2-pixel gap, presentation glyph, then its gap), Terminal Context 26, Break 26 (added 2026-10-03), and the group's 74 with its gap. Display yields at 187, where those leave the name no width; Break, minimize, and kill at 151, 36 narrower. Full is the terminal's 293 plus Display, Terminal Context, and Break, 381. The tiny header needs 81 pixels, inside Lath's 100-pixel minimum leaf. Without a popover the Tool reaches everything it drops through zoom, as a terminal does.
 
 ## Pane body
 
 xterm.js paints only its own rendered surface, and integer row fitting leaves a sub-row remainder at the bottom of the pane: a host background differing from the terminal screen shows as a stripe under the last row, and an unclipped host squares off the rounded bottom corners.
 
 ## Alarm overlay
-
-**Why the wash sits below the header.** `--color-alarm-vs-terminal` is picked for contrast against the *terminal body*, so it carries no contrast guarantee over the header band.
 
 **Why a perimeter ring rather than an inset border.** An inset border at the leaf's edge covers nothing, and a ring below the header would break the one-rounded-rectangle read that is the point of the treatment.
 
@@ -47,10 +43,6 @@ xterm.js paints only its own rendered surface, and integer row fitting leaves a 
 **Why a move confirms for iframes but not for agent-browser Surfaces.** An agent-browser Surface's session lives in the host process; the target window reconnects its viewer and the page is as it was. A plain iframe is a document inside the source webview, and no API carries a document between webviews — the alternative, keeping every Workspace in its own native child webview and reparenting it, was prototyped on a vendored Tauri fork and rejected for the fork (2026-09). The confirmation is the kill's typed letter rather than a button because what is lost is as gone as a killed process, and the same gesture already means that.
 
 **Why an inactive Wall is inert before it is hidden.** During the outgoing fade the Wall remains visible beneath its successor. `inert` removes its focusability immediately, before `visibility: hidden` takes effect.
-
-**Why the strip's reorder drag does not capture the pointer on press.** A captured pointer retargets the following `click` to the capture element, so capturing on `pointerdown` swallowed the activate button's click and no tab could be activated by mouse (found in the browser-dev harness, 2026-09). Capture is only useful once the gesture is a drag, which is where it now happens.
-
-**Why the close confirmation anchors to the Wall, not the tab.** `ModalOverlay` centers inside the target's box and does not clamp to the viewport, so a 24px tab at the top of the window left the dialog clipped. Every Wall shares one grid cell, so the anchor lands in the same place whether or not that Workspace is visible.
 
 **Why the modal hosts are gated rather than hoisted.** Each calls `useDialogKeyboardOwner`, which reads the *active* Wall's `DialogKeyboardContext`; hoisting them above `WorkspaceWindow` would leave them with no coordinator to suppress command-mode dispatch through. The cost is that a modal's React-local state resets on a switch — accepted, since every modal that matters keeps its state in a store.
 
@@ -73,8 +65,6 @@ xterm.js paints only its own rendered surface, and integer row fitting leaves a 
 **What the shared focus tail costs.** Building a layout by repeated splits means re-entering command mode between each one. Control-plane creation is exempt so a script does not fight the user's focus.
 
 ## Selection overlay
-
-The passthrough `solid` variant replaced an original `border: 1px solid ${color}` CSS border, placed pixel-identically — centerline `strokeWidth/2` inside the div edge — so moving both variants onto one SVG renderer changed no geometry.
 
 **The inflate arithmetic.** With `SELECTION_RING_INFLATE_PX` at 4, the 1px passthrough border spans [3px, 4px] from the pane edge — dead centre of the 7px gutter, on whole pixels because the gutter is odd. That is the whole reason `PANE_GUTTER_PX` is odd.
 
@@ -112,15 +102,27 @@ Pane headers re-render on every activity, terminal-state, and palette change. An
 
 **DOM-renderer cost.** The DOM renderer emits one `<span>` per style run per row, so a TUI that paints every cell its own truecolor collapses to one span-with-inline-style *per cell*, rebuilt every frame. On a 99×25 pane that is ~1150 elements of style recalc plus layout per frame: measured in Safari 26.5 (2026-08), a single such pane held the whole page at ~110ms/frame (~9fps) while the rest of the app was idle. The same pane on the WebGL renderer holds a locked 60fps (16.6ms, zero frames over 25ms).
 
-**Why the `WebGL2RenderingContext` pre-check exists.** Without it every terminal in a jsdom unit run logs a `getContext` failure before the swallowed constructor throw, which buries real output.
-
 **Context budget.** The per-page live-context cap was measured at 16 in Safari 26.5, evicted oldest-first. The `onContextLoss` → dispose-the-addon → DOM-fallback path was verified live by exhausting the budget and watching the demoted panes keep painting.
 
 **Atlas sharing.** Stock addon-webgl already caches rasterized atlas canvases by font metrics/options, DPR, texture limits, glyph mode, and foreground/background/ANSI colors; terminal columns and rows are absent from the key. Each renderer uploads its own texture copy into its own WebGL context. A reattached terminal reuses the atlas while another compatible renderer owns it; no extra Dormouse cache is needed. Sharing GPU textures would require a different rendering architecture using one context across terminals.
 
-**Why image support loads before the renderer.** An ImageAddon registers protocol handlers and draws into canvas layers separate from the text renderer; its renderer hook removes those layers during a WebGL/DOM swap and the next image render recreates them. Loading it only at mount would lose graphics emitted while a Session was minimized — unlike the GL context, which no minimized pane needs. The limits themselves are `docs/specs/terminal-escapes.rationale.md` -> "Inline graphics".
+**Why image support loads before the renderer.** An ImageAddon registers protocol handlers and draws into canvas layers separate from the text renderer; its renderer hook removes those layers during a WebGL/DOM swap and the next image render recreates them. Loading it only at mount would lose graphics emitted while a Session was minimized — unlike the GL context, which no minimized pane needs. The limits themselves are under "Inline graphics" below.
 
 **Verification status.** In the standalone browser-dev harness (Chromium 150, 2026-09), 24 unmount/remount cycles explicitly lost every old context, retained the same terminal buffer, selection, and grid, emitted zero terminal resize events, and reused a second mounted terminal’s atlas canvas. Inline-image storage survived the swap and its layer repainted. The lifecycle change has not been verified inside Tauri’s WKWebView; the performance measurements above are Safari 26.5.
+
+## Inline graphics
+
+**Why the memory ceilings are below the addon's defaults.** ImageAddon storage is per Terminal instance, while Dormouse keeps minimized Sessions and their xterm instances alive. The upstream 128 MB cache and 16,777,216-pixel ceiling can therefore multiply across every visible and minimized pane. The 8,388,608-pixel ceiling admits a 3840×2160 image while halving the addon's worst decode-buffer footprint.
+
+**Why `storageLimit` is 34 and not 32.** The addon derives cache capacity as `storageLimit / 4 * 1e6` pixels, so the cache must be at least `pixelLimit` × 4 bytes (33.55 MB) or admitting one full-size image evicts every other image in that Session and still exceeds the budget. 34 MB is the smallest round value that clears it; the two constants move together.
+
+**Why the per-sequence byte caps are stated rather than inherited.** 33,554,432 bytes (32 MiB) for SIXEL, IIP, and Kitty and a 4,096-colour `sixelPaletteLimit` are not raises: they are `@xterm/addon-image@0.10.0-beta.301`'s own defaults, as are `enableSizeReports`, `showPlaceholder`, and the three `*Support` flags (verified against the pinned package's `DEFAULT_OPTIONS`; only `pixelLimit` and `storageLimit` differ from it). Restating them pins one encoded-size bound to reason about, so an addon bump that lowers a default cannot silently start rejecting a 4K PNG at the sequence boundary before the pixel ceiling can judge it. Decoded memory is bounded by the pixel and storage ceilings above regardless of encoded size.
+
+**Why the addon loads eagerly rather than on the first image.** `ImageAddon.activate` answers DA1 with `62;4;9;22` (the `4` advertising SIXEL), registers XTSMGRAPHICS, and turns on the `CSI 14/16/18 t` size reports. A program probes those, decides, and only then sends pixels, so a Session that waited for image bytes would already have told it there is no graphics support and the bytes would never arrive. Keying activation on the probes instead is correct but buys little: `CSI c` is the ordinary "is this a real terminal" query most TUIs send at startup. What a Session actually pays eagerly is the handler registrations plus one sixel WASM instance — the module is compiled once per page, the sixel canvas starts empty, and the base64/QOI decoder memory and image storage are allocated on first use — so `cfg.terminal.inlineImages` is an on/off lever rather than a deferral.
+
+**Why there is no page-global image budget.** `storageLimit` is per Terminal and Sessions outlive unmount, so the configured ceiling multiplies by pane count on paper. Measured, it does not: ImageAddon retains an image only while its tiles are live in the buffer, and deletes it when they are overwritten or scroll out of scrollback. A 600x300 pane showing a 1-megapixel image held 0.7 MB — the rendered area, not the source — and a 200x50-cell pane packed with forty such images held 3.1 MB, because each one overwrote its predecessor's tiles. Scrolling the image past a 1,000-line scrollback dropped the pane to 0 MB. So retained image memory tracks what is on screen and in scrollback, at a few MB per pane, and a registry-level LRU would be re-solving what buffer liveness already does. The 34 MB ceiling is a backstop, not a working set. (Measured in Chrome 152, 2026-09; the addon's accounting counts source pixels, so `storageUsage` is an upper bound on the real cost.)
+
+**Why the WebAssembly grant is every host's problem, not the VS Code webview's.** The decoder is instantiated from `ImageAddon.activate()`, so it compiles when a Session is created rather than when an image arrives: a host whose policy omits the grant fails at boot with SIXEL silently dead thereafter, while IIP and Kitty — which decode through the browser's own image pipeline — keep working, so the gap does not present as "images are broken". All three shipped hosts load the addon from the same `createXtermHost`, which is why one omission would be a per-host bug rather than a shared one.
 
 ## Animations
 
@@ -129,8 +131,6 @@ Terminal entrance motion starts at a collapsed edge. Throttling still exposes se
 ## Kill (two-phase fade + tween reclaim)
 
 **Why the selected-pane check is re-read live.** Navigate away from a dying selected pane and the tail must not yank selection back onto a survivor; navigate onto a dying pane and the tail must adopt a survivor rather than leave selection dangling on a removed leaf. A flag captured when the kill started answers only the first case.
-
-**Which callers hit which branch.** The header kill button is always a selected-pane kill, since clicking the header selects the pane before the button's click handler runs. The not-selected cases in practice are `dor kill` of a background surface and ensure's throwaway teardown.
 
 ## Auto-spawn refill
 

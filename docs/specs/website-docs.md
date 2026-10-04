@@ -1,55 +1,16 @@
 # Website Documentation
 
-> See `docs/specs/glossary.md` for canonical Surface / Session / Pane
-> vocabulary used by the public product guide and browser workflow.
+> - See `docs/specs/glossary.md` for canonical Surface / Session / Pane vocabulary used by the public product guide and browser workflow.
+> - Owns the public references on dormouse.sh and the off-site product guide.
+> - The page list is `DOCS_PAGES` in `website/src/lib/docs-pages.ts`; the repository files a route publishes are `SITE_ROUTES` in `website/scripts/generate-docs.js`.
 
-The following references are generated from canonical sources.
-
-```text
-/dor                dor CLI reference
-/compatible-agents  supported agents and contribution guide
-/agent-skill        exact bundled agent skill
-/self-host          the SELF_HOST.md runbook, minus its withheld halves
-/security           the security spec, every section of it
-```
-
-`/docs` is an entrypoint rather than a page: it redirects to the page
-`DOCS_DEFAULT_PATH` names (see [Reference page chrome](#reference-page-chrome)),
-and the marketing nav's desktop **Docs** link is the only public link to it. The
-general product guide is `vscode-ext/README.md`, published through the
-Marketplace, Open VSX, and GitHub rather than through this site; the machinery
-that once rendered it at `/docs` is retained and still runs (see
-[Canonical product guide](#canonical-product-guide)).
-
-| Surface | Purpose | Canonical content |
-| --- | --- | --- |
-| Homepage | Product marketing, visual proof, conversion, and the way in to every reference | `website/src/pages/Home.tsx` |
-| Marketplace and Open VSX | Extension discovery, evaluation, and basic onboarding | `vscode-ext/README.md` plus public metadata in `vscode-ext/package.json` |
-| `/dor` | Complete CLI reference | Help snapshots in `dor/test/snapshots/help/`, verified against the built CLI |
-| `/compatible-agents` | Agent recovery, watching, and contributions | `docs/compatible-agents.md` |
-| `/agent-skill` | Agent-facing operating guide | Exact `dor/skill.md` |
-| `/self-host` | Running your own Relay | The runbook half of `SELF_HOST.md` |
-| `/hosted` | The Hosted account, and what the one paid service grants and costs | `website/src/pages/Hosted.tsx`, priced from `website/src/lib/hosted-pricing.ts` |
-| `/security` | What Dormouse guarantees and how it is checked | Every section of `docs/specs/security.md`, minus title and front matter; its rows split across three pages |
-| `/privacy`, `/terms` | Standalone Hosted account policies outside Docs | `website/src/pages/Privacy.tsx`, `website/src/pages/Terms.tsx` |
-| GitHub root | Repository overview and contributor entry point | Root `README.md` |
-
-Internal specs remain maintainer references, the one exception being the
-security spec, published whole. Public docs are otherwise written from shipped
-behavior above each spec's fold and do not expose host plumbing, internal state
-shapes, or staged `## Future` material.
+Internal specs are maintainer references; only the security spec is published, whole. Public docs describe shipped behavior above each spec's fold and never expose host plumbing, internal state shapes, or staged `## Future` material.
 
 ## Canonical product guide
 
-`vscode-ext/README.md` is the single authored source for the general product
-guide. It works without prose forks in the VS Code Marketplace, Open VSX, and
-GitHub.
+`vscode-ext/README.md` is the single authored source for the general product guide, published without prose forks by the VS Code Marketplace, Open VSX, and GitHub. It has no page on this site; its build-time parse is owned by [Generated documentation boundary](#generated-documentation-boundary) (rationale).
 
-The guide has no page on this site; its build-time parse is owned by [Generated documentation boundary](#generated-documentation-boundary) (rationale).
-
-The guide is written for a VS Code user, because every channel that publishes
-it is an extension listing or the extension's folder on GitHub; the standalone
-app gets one section pointing at its download. Its sections are:
+The guide addresses a VS Code user; the standalone app gets one section pointing at its download. Its sections, which `checkGuideSections` reads from this fence:
 
 ```text
 ## Tmux with browsers
@@ -66,42 +27,23 @@ app gets one section pointing at its download. Its sections are:
 ## Links
 ```
 
-Content invariants, enforced by the public-doc lint where mechanically
-checkable and by review otherwise:
+Content invariants, checked by review unless a check is named:
 
-- The alert explanation matches [alert.md](alert.md). Terminal notification
-  protocols and unattended command exit ring with zero configuration,
-  independent of WATCHING, whose defaults follow `docs/specs/alert.md` → WATCHING Track
-  and which needs `OSC 633` / `OSC 133` shell integration. The guide must not promise that
-  every quiet Pane is automatically marked done after a fixed interval.
+- The alert explanation matches [alert.md](alert.md): notification protocols and unattended command exit ring with zero configuration, independent of WATCHING; command exit needs `OSC 633` / `OSC 133` boundaries, and WATCHING the reported command line (`docs/specs/alert.md` → WATCHING Track). The guide must not promise that every quiet Pane is automatically marked done after a fixed interval.
 - Pocket is described only as shipped or explicitly in development.
-- Browser Surfaces are explained to match [dor-browser.md](dor-browser.md)
-  without exposing persisted params, controller registries, proxy plumbing, or
-  future renderers.
-- VS Code command names in getting started exist in `vscode-ext/package.json`.
-- Detailed CLI behavior links to `/dor`; the complete agent operating guide
-  links to `/agent-skill`; the Hosted service page links to `/hosted`.
-- The guide renders no `TODO:` placeholders and no copied internal future
-  design.
+- Browser Surfaces are explained to match [dor-browser.md](dor-browser.md) without exposing persisted params, controller registries, proxy plumbing, or future renderers.
+- VS Code command names in getting started exist in `vscode-ext/package.json` (`checkVsCodeCommands`).
+- Detailed CLI behavior links to `/dor`; the complete agent operating guide links to `/agent-skill`; the Hosted service page links to `/hosted` (`checkRoutesToReferences`).
+- The guide renders no `TODO:` placeholders and no copied internal future design.
 
 ### Marketplace and Open VSX constraints
 
-The extension-root README is the packaged listing body, so the canonical guide
-stays within Marketplace-compatible Markdown:
+The extension-root README is the packaged listing body, so the canonical guide stays within Marketplace-compatible Markdown:
 
 - It does not depend on React, JavaScript, custom CSS, or website-only layout.
-- User-provided SVG images are not allowed; content uses raster media or an
-  approved badge provider.
-- Media is **repo-relative local files under `vscode-ext/images/`**, referenced
-  the way GitHub expects (`images/hero.jpg`). The Markdown stays the source of
-  truth and ordinary GitHub authoring works: drop a file in and link it. It is
-  `images/` and never `media/`: `vscode-ext/media/` is the webview bundle's
-  Vite output directory, emptied on every extension build, so anything
-  committed there is deleted by the next `pnpm build:vscode`.
-  **Never** reference remote media, `github.com/user-attachments` URLs least of
-  all (rationale).
-
-Each renderer resolves those relative paths as follows:
+- User-provided SVG images are not allowed; content uses raster media or an approved badge provider.
+- Media is **repo-relative local files under `vscode-ext/images/`**, referenced the way GitHub expects (`images/hero.jpg`) — never `vscode-ext/media/`, which the extension build empties. **Never** reference remote media, `github.com/user-attachments` URLs least of all (rationale).
+- The same content renders usefully in Open VSX and GitHub Markdown.
 
 | Renderer | How `images/x.gif` resolves |
 | --- | --- |
@@ -110,227 +52,87 @@ Each renderer resolves those relative paths as follows:
 | Marketplace / Open VSX | `vsce --baseImagesUrl https://dormouse.sh/guide` rewrites both Markdown images **and** raw `<img src>` attributes at package time |
 | `dormouse.sh` | The generator copies `vscode-ext/images/` to `public/guide/images/`, which is what `--baseImagesUrl` above resolves against |
 
-**The guide spells site links absolutely** (`https://dormouse.sh/dor`),
-because every channel that publishes it renders it away from this origin;
-`localizeSiteLinks` turns them back into served paths on the site
-([rendering contract](#markdown-rendering-contract) op 5).
+**Must pass** `--baseImagesUrl` on every `vsce` or `ovsx` invocation that builds a VSIX from source, rather than letting either infer a base (rationale); `checkImageBaseUrl` pins them to `SITE_IMAGE_BASE`, exempting a `--packagePath` republish.
 
-Reserved: because the generator guarantees it, same-site hrefs reach
-`MarkdownDocument` root-relative, and the renderer's external-link test is a
-bare scheme check. A new documentation source rendered through that component
-— the revived guide page under **Scope: guide-page-return** included — must run
-through `localizeSiteLinks` too, or its site links will open in a new tab
-pointed at production.
+**Never** write to `public/guide/` from anything but the generator, which replaces its `images/` directory each build (rationale). Hand-authored assets stay at `public/` root.
 
-**Must pass** `--baseImagesUrl` on every `vsce` or `ovsx` invocation that
-builds a VSIX from source, rather than letting either infer a base (rationale);
-`checkImageBaseUrl` pins them to `SITE_IMAGE_BASE`, exempting a `--packagePath`
-republish.
+**The guide spells site links absolutely** (`https://dormouse.sh/dor`); `localizeSiteLinks` turns them back into served paths on the site ([rendering contract](#markdown-rendering-contract) op 5).
 
-**Never** write to `public/guide/` from anything but the generator, which
-replaces its `images/` directory each build (rationale). Hand-authored assets stay at
-`public/` root, where git tracks them.
-- The same content renders usefully in Open VSX and GitHub Markdown.
+Reserved: because the generator guarantees it, same-site hrefs reach `MarkdownDocument` root-relative, and the renderer's external-link test is a bare scheme check. A new documentation source rendered through that component — the revived guide page under **Scope: guide-page-return** included — must run through `localizeSiteLinks` too, or its site links will open in a new tab pointed at production.
 
-The listing's discovery contract also includes `displayName`, `description`,
-icon, category, keywords, homepage, repository, and issue URL in
-`vscode-ext/package.json`. A major guide rewrite reviews those fields at the
-same time.
-
-Source constraints: the official VS Code
-[publishing guide](https://code.visualstudio.com/api/working-with-extensions/publishing-extension#marketplace-integration)
-and
-[Marketplace presentation guide](https://code.visualstudio.com/api/references/extension-manifest#marketplace-presentation-tips).
+A major guide rewrite also reviews the listing's discovery fields in `vscode-ext/package.json` against the official [publishing guide](https://code.visualstudio.com/api/working-with-extensions/publishing-extension#marketplace-integration) and [Marketplace presentation guide](https://code.visualstudio.com/api/references/extension-manifest#marketplace-presentation-tips).
 
 ## Markdown parsing
 
-**Must reject unsupported Markdown with `UnsupportedMarkdownError`, never silently degrade it.** The parser is in-repo and dependency-free; public-doc lint reports parsing failures.
+**Must reject unsupported Markdown with `UnsupportedMarkdownError`, never silently degrade it.**
 
 **May accept raw HTML only through the parser's `<img>` attribute allowlist, with a relative or `https:` source.** Other tags or attributes fail. Standalone HTML comments are dropped; inline comments fail (rationale).
 
 **Must assign unique GitHub-style heading ids, reserving authored and generated numeric suffixes alike and replacing each space individually.** `website/scripts/docs-parser.test.js` pins slug collisions.
 
-**Must retain ordered-list starts and blank-separated paragraphs within their own list item.** `website/scripts/generate-docs.test.js` pins the published first-run setup sequence; `website/src/components/MarkdownDocument.test.tsx` pins resumed numbering. **Must interpret backslash escapes only before ASCII punctuation**, preserving ordinary path characters.
+**Must retain ordered-list starts and blank-separated paragraphs within their own list item.** **Must interpret backslash escapes only before ASCII punctuation**, preserving ordinary path characters.
 
-Source of truth: `IMG_ALLOWED_ATTRS`, `parseMarkdown`, `parseInline`, and `createSlugger` in `website/scripts/docs-parser.js`.
+Source of truth: `parseMarkdown` and `createSlugger` in `website/scripts/docs-parser.js`.
 
 ## Markdown rendering contract
 
-The website build reads each Markdown source and retains its headings,
-paragraphs, lists, links, tables, code, and images in source order. The website
-delta is structural:
+Every Markdown source keeps its content in source order; `buildDocument` applies the structural delta to the guide and every document `SITE_ROUTES` publishes:
 
-1. Omit the README's top-level `# Dormouse`; a page shell supplies its own
-   title.
+1. Omit the source's top-level `#` title; a page shell supplies its own.
 2. Generate an on-page table of contents from the remaining headings.
 3. Assign stable, unique heading ids with one checked slugger.
-4. Resolve links into the repository: to the page that publishes the file
-   where one exists (`SITE_ROUTES`), otherwise to the canonical file on GitHub,
-   keeping the fragment.
-5. Rewrite links pointing back at this site to the **served** root-relative
-   path: origin dropped, `sitePath`'s trailing slash added unless the path
-   already carries one or an extension, query and fragment verbatim — so
-   `https://dormouse.sh/dor#agent-browser` becomes
-   `/dor/#agent-browser`. Only exact-origin matches are rewritten.
-6. Render the subset using the marketing website's typography, spacing, links,
-   code blocks, tables, and responsive raster-media treatment.
-7. Add the shared site header and footer.
-8. Mark same-site and external navigation appropriately.
+4. Resolve links into the repository: to the page that publishes the file where one exists (`SITE_ROUTES`), otherwise to the canonical file on GitHub, keeping the fragment.
+5. Rewrite links pointing back at this site to the **served** root-relative path: origin dropped, `sitePath`'s trailing slash added unless the path already carries one or an extension, query and fragment verbatim — so `https://dormouse.sh/dor#agent-browser` becomes `/dor/#agent-browser`. Only exact-origin matches are rewritten.
 
-Operations 1–5 live in the generator; 6–8 live in the page components.
-Operations 1–5 run in `buildDocument`, so they apply to the guide, which has no
-page today, the self-host runbook, and the security spec. `dor/skill.md` is
-exempt from operation 5 and asserted instead
-([`/agent-skill` guide](#agent-skill-guide)).
+`dor/skill.md` does not pass through `buildDocument`: it is asserted free of site links instead ([`/agent-skill` guide](#agent-skill-guide)).
 
-**Never** publish a relative repository link as-is; `resolveRepoLinks` sends it
-to the publishing page or the canonical file and fails the build when the
-target does not exist, and `assertRouteFragments` fails it when a fragment into
-a published page names no heading that page renders. A source keeps its
-repo-relative link, which spec-lint verifies down to the fragment as it cannot
-for a URL. Known gap: `assertRouteFragments` skips query-bearing links.
+**Never** publish a relative repository link as-is; `resolveRepoLinks` sends it to the publishing page or the canonical file and fails the build when the target does not exist, and `assertRouteFragments` fails it when a fragment into a published page names no heading that page renders. A source keeps its repo-relative link, which spec-lint verifies down to the fragment. Known gap: `assertRouteFragments` skips query-bearing links.
 
-**Never** use a regular expression to turn a canonical source's prose into
-site prose. Channel-specific differences are explicit entries in one fixed
-delta table per document — `DOCS_DELTA` for the guide, `SELF_HOST_DELTA` for
-the runbook, `SECURITY_DELTA` for the security spec. Each entry names exactly
-one source target and fails the build when its target matches zero blocks or
-more than one. Fuzzy text and line-number patches are forbidden.
+**Never** use a regular expression or a line-number patch to turn a canonical source's prose into site prose. Channel-specific differences are explicit entries in one fixed delta table per document (`*_DELTA`), each naming exactly one source target and failing the build when its target matches zero blocks or more than one.
 
 **Must remove a withheld section with all its subsections, stopping at the next same-depth or shallower heading.**
 
-**Must** leave no `#anchor` link pointing at a heading the delta removed.
 **Must redirect withheld-section links to the canonical file on GitHub and fail generation on remaining dangling anchors.**
 
-The renderer preserves selectable code, authored image alt text, safe
-external-link attributes, mobile table access, and mobile-width media and prose
-without horizontal overflow — an inline code span offers a break at each of its
-separators. **Never** let such a hint change what the span's `textContent`
-yields, so a path still pastes into a shell. No HTML string is ever injected —
-`dangerouslySetInnerHTML` is absent.
+Tables, media, and prose fit a phone's width without horizontal overflow, an inline code span offering a break at each of its separators (rationale). **Never** let such a hint change what the span's `textContent` yields, so a path still pastes into a shell. **Never** inject an HTML string.
 
-Source of truth: `buildDocument`, `applyDelta`, `resolveRemovedAnchors`,
-`assertAnchorsResolve`, `resolveRepoLinks`, `assertRouteFragments`, and
-`localizeSiteLinks` in `website/scripts/generate-docs.js`; `MarkdownDocument`
-and `CodeSpan` in `website/src/components/MarkdownDocument.tsx`.
+Source of truth: `buildDocument` in `website/scripts/generate-docs.js`; `MarkdownDocument` in `website/src/components/MarkdownDocument.tsx`.
 
 ## Per-page head tags
 
-`website/src/lib/site-meta.ts` builds every page's title, description,
-canonical, and social cards. The root route calls it with the homepage's copy;
-a page overrides by exporting `meta` and calling it with its own.
+`siteMeta` in `website/src/lib/site-meta.ts` builds every page's title, description, canonical, and social cards; a page exports `meta` calling it with its own.
 
-**Never** hardcode one of those in `root.tsx`'s `<head>`: a `<head>` tag is
-emitted before `<Meta />`, so a page with its own `meta` ships two `<title>`
-elements and crawlers read the first (rationale). **Must** give every
-prerendered page a canonical on its own path, carrying the trailing slash the
-host redirects to. **Never** claim one from a route served through the SPA
-fallback — the client `<Meta />` appends rather than replaces, so a second
-canonical joins the fallback's and both are discarded; `siteMeta`'s
-`indexable: false` sends `robots: noindex, follow` instead.
-`checkPageHeadTags` and `checkSiteOrigin` pin the first two;
-`ChangelogAfter.tsx` is the only route under the third.
+**Never** hardcode one of those in `root.tsx`'s `<head>`, which is emitted before `<Meta />` (rationale). **Must** give every prerendered page a canonical on its own path, carrying the trailing slash the host redirects to. **Never** claim one from a route served through the SPA fallback, where the client `<Meta />` appends a second canonical (rationale); `siteMeta`'s `indexable: false` sends `robots: noindex, follow` instead. `checkPageHeadTags` and `checkSiteOrigin` pin the first two.
 
-**Every in-site link spells that served path** — `sitePath` in components, the
-generator's rewrites in reference prose — so no reader lands on a redirect.
-Exempt: `/` with its anchors, and the `/docs` entrypoint, which names no page.
-`<Link to>` never leaves the client, so it is unaffected.
-`checkInSiteHrefsAreServed` pins it.
+**Every in-site link spells that served path** — `sitePath` in components, the generator's rewrites in reference prose — so no reader lands on a redirect. Exempt: `/` with its anchors, and the `/docs` entrypoint, which names no page. `checkInSiteHrefsAreServed` pins it.
 
 ## Reference page chrome
 
-`DOCS_PAGES` pages use `DocsLayout` for header, rail, `h1`, intro, and
-prev/next. `/hosted` follows `/self-host`. **Must place “Compatible agents”
-immediately after “dor CLI reference”.**
+**Each page's `linkedFrom` names every document owing it a link** — the two READMEs and the homepage — so the obligation is registry-driven, never inferred from the path. `checkRoutesToReferences` reads it.
 
-**Each page's `linkedFrom` names every document owing it a link** — the two
-READMEs and the homepage — so the obligation is registry-driven, never inferred
-from the path. The changelog names none; the rail and the updater's deep link
-are its way in. `checkRoutesToReferences` reads it.
+**The rail is the only table of contents**, and **must** agree with the page's heading outline a screen reader navigates (`website/src/pages/DorDocs.test.tsx`).
 
-**Must title `/self-host` “How to self-host” and `/hosted` “Dormouse Hosted”
-in chrome and metadata while keeping URLs stable.**
+**`/docs` is an entrypoint, not an index.** It redirects with a 302 to the page `DOCS_DEFAULT_PATH` names (rationale); there is no page at `/docs` itself, and `checkDocsEntrypoint` keeps the redirect and the constant agreeing. Reference pages live at the top level (`/dor`, `/security`) with stable URLs, and each old `/docs/<page>` URL keeps a 301 in `_redirects` because READMEs and external links carry it. **Never give a page a slug that `website/src/routes.ts` or `website/public/` already serves.**
 
-**The rail is the only table of contents.** List all pages; expand only current
-sections.
+These pages follow the reader's theme, through `DocsLayout`; the rest of the site does not.
 
-**The page list never shrinks; the expanded sections scroll.** The rail is a
-bounded flex column whose section list is the only part that gives up space, so
-everything shows when it fits and the page list stays reachable when it does
-not. `/dor` nests its subcommands under one `Commands` heading rather than
-listing every command beside the handful of entries elsewhere. A reader on a screen reader
-navigates the outline rather than the rail, so **must** keep the two agreeing:
-the commands render a level below that heading, and their own labels a level
-below them again (`website/src/pages/DorDocs.test.tsx`).
+**Docs text must clear WCAG AA against the surface carrying it, call-to-action text both at rest and on hover; never dim text with opacity** (rationale). `website/src/lib/docs-accent.test.ts` pins the derived colors across bundled themes; `checkNoDimmedDocsText` pins the call sites, allowlisting what is not text.
 
-**`/docs` is an entrypoint, not an index.** It redirects to the page
-`DOCS_DEFAULT_PATH` names — a 302, because the target is a judgement call we
-expect to revisit and a 301 outlives it in readers' caches. There is no page at
-`/docs` itself, and `checkDocsEntrypoint` keeps the redirect and the constant
-saying the same thing. Reference pages live at the top level (`/dor`,
-`/security`), and each old `/docs/<page>` URL keeps a 301 in `_redirects` because
-it is in READMEs and external links. **Never give a page a slug that
-`website/src/routes.ts` or `website/public/` already serves.** `Docs` joins the marketing nav on desktop only; on a
-phone the docs are reached from the homepage's own links.
-
-**These pages follow the reader's theme; the rest of the site does not.** They
-are long-form reading, so `DocsLayout` restores a theme and gives the `compact`
-`ThemePicker` two placements: floating bottom right at `lg`, opening upward, and
-inline at the end of the mobile docs bar below that, opening downward
-([theme.md](./theme.md) → Where the user picks a theme). The `docs-themed` body
-class redefines the site's own `--color-*` tokens from the applied
-`--vscode-*`, and only `DocsLayout` adds it, so the homepage keeps its black.
-The changelog and the supply chain joined that rule when they joined the rail,
-which is why their links moved off caramel.
-
-**Prose links take the picked theme's `accent`, contrast-corrected — never
-brand caramel, never `--vscode-textLink-foreground`** (rationale). Caramel
-stays where the reader cannot retheme it — the wordmark, the header, the
-homepage — and is the fallback before a theme applies.
-
-**Must derive docs call-to-action text against its strongest accent-tinted
-state and clear WCAG AA both at rest and on hover** (rationale).
-
-**Muted reference text uses an opaque foreground-derived color that clears
-WCAG AA against the surface carrying it; never dim text with opacity**
-(rationale). `docsMutedTextForSurfaces` and `website/src/lib/docs-accent.test.ts` pin
-the base and every registered tinted surface composition across bundled themes;
-`checkNoDimmedDocsText` pins the call sites, allowlisting what is not text. **Must follow transitive relative imports with repository-relative paths on every platform.** `scripts/docs-surfaces.test.mjs` pins the graph traversal.
-
-**Must prompt a reader to pick a theme until they answer, and dismiss both
-responsive placements together.** Picking one and closing the prompt both count.
-Keyed on the website's own `dormouse:docs-theme-prompt-dismissed`, because
-`dormouse:active-theme` cannot answer it: restoring writes that key too.
-
-**Must keep** prerendered and first-client prompt markup independent of
-`localStorage`, then reconcile after hydration. Until then the prompt stays
-hidden, so a returning reader never sees dismissed UI flash. Pinned by
-`website/src/components/DocsThemeControl.test.tsx`.
+Source of truth: `DOCS_PAGES` in `website/src/lib/docs-pages.ts`; `DocsLayout` in `website/src/components/DocsLayout.tsx`; `website/public/_redirects`.
 
 ## `/hosted`
 
-`docs/specs/pricing.md` -> "The Hosted page" owns what it says and sells; this
-section owns its place on the site.
+`docs/specs/pricing.md` -> "The Hosted page" owns what it says and sells; this section owns its place on the site.
 
 **Must describe the account service and link its account app, privacy policy, and terms.**
-Source of truth: `Hosted` in `website/src/pages/Hosted.tsx`.
 
-**Must describe the managed Relay as Pocket's Relay:** terminals stay on an
-awake, online computer, and self-hosting remains.
-`NotifySignupForm` exposes the `nedshed.dev` devlog handoff and keeps email per
-tab. **Must use native required-email validation.**
-`website/src/components/NotifySignupForm.test.tsx` pins all three.
+**Must describe the managed Relay as Pocket's Relay:** terminals stay on an awake, online computer, and self-hosting remains. `NotifySignupForm` exposes the `nedshed.dev` devlog handoff and keeps email per tab. **Must use native required-email validation.** `website/src/components/NotifySignupForm.test.tsx` pins all three.
 
-**Must open `/self-host` with the Relay boundary:** Dormouse needs none;
-remote features require a configured Relay and otherwise make no network
-requests; it links `/hosted`. **`/hosted` opens with its plan cards** instead,
-and its managed Relay section discloses metadata, labels the review pending,
-and links the model. `website/src/lib/docs-rail.test.tsx` pins both.
+**Must open `/self-host` with the Relay boundary:** Dormouse needs none; remote features require a configured Relay and otherwise make no network requests; it links `/hosted`. **`/hosted` opens with its plan cards** instead, and its managed Relay section discloses metadata, labels the review pending, and links the model. `website/src/lib/docs-rail.test.tsx` pins both.
 
-**Must also link it from** Pocket marketing/tutorial, self-host docs, and the
-speech and remote-control settings; `linkedFrom` owns the rest. `/pricing`
-301-redirects here rather than becoming a page, pinned by
-`checkPricingRedirect` in `scripts/public-docs-lint.mjs`.
+**Must also link it from** Pocket marketing/tutorial, self-host docs, and the speech and remote-control settings; `linkedFrom` owns the rest. `/pricing` 301-redirects here rather than becoming a page, pinned by `checkPricingRedirect` in `scripts/public-docs-lint.mjs`.
+
+Source of truth: `Hosted` in `website/src/pages/Hosted.tsx`; `HostingRequirementNotice` in `website/src/components/HostingRequirementNotice.tsx`.
 
 ## Hosted policies
 
@@ -340,105 +142,60 @@ Source of truth: `HostedPolicyLayout` in `website/src/components/HostedPolicyLay
 
 ## `/dor` reference
 
-The CLI page consumes the Markdown snapshots generated by
-`dor/test/cli-help.test.mjs`. The root help snapshot owns command order and
-inventory. That existing test remains responsible for proving every command's
-snapshot equals real help output.
+The CLI page consumes the Markdown snapshots generated by `dor/test/cli-help.test.mjs`, which proves every snapshot equals real help output. The root help snapshot owns command order and inventory.
 
 **Must retain `#targeting`, `#surface-handles`, `#dor`, `#commands`, and one anchor per canonical command snapshot filename.** `dor agent-browser` links to `#agent-browser`.
 
-The targeting and Surface-handle introduction is extracted from the matching
-sections of `dor/skill.md`; it is not re-authored in the website.
+The targeting and Surface-handle introduction is extracted from the matching sections of `dor/skill.md`, never re-authored in the website.
 
-Each command section renders its title and invocation, usage as copyable
-monospace lines, normally wrapped descriptive prose, separate examples and
-text/JSON output blocks, responsive flag and argument definition tables, and a
-collapsed disclosure containing the original help byte for byte.
+**Must preserve unclassified help as ordered prose and reconstruct each shipped snapshot byte for byte from parsed source slices**; generation fails on a snapshot set that disagrees with the root inventory, and never silently discards source text.
 
-**Must preserve unclassified help as ordered prose and reconstruct each shipped snapshot byte for byte from parsed source slices.** The parser owns marker recognition and aligned definition-row parsing; `website/scripts/help-parser.test.js` pins their boundaries and wrapped descriptions.
-
-Generation fails on a malformed snapshot envelope, duplicate command id, missing
-or extra snapshot, or root inventory mismatch. Semantic parsing may fall back to
-prose but never silently discards source text.
-
-Source of truth: `buildCli` and `CLI_COMMANDS_SECTION` in `website/scripts/generate-docs.js`; `parseSnapshot`, `parseHelp`, and `definitionRows` in `website/scripts/help-parser.js`; `DorCommandReference` in `website/src/components/DorCommandReference.tsx`.
+Source of truth: `buildCli` in `website/scripts/generate-docs.js`; `parseHelp` in `website/scripts/help-parser.js`; `DorDocs` in `website/src/pages/DorDocs.tsx`.
 
 ## `/compatible-agents` guide
 
-**Must publish `docs/compatible-agents.md` with `COMPATIBLE_AGENTS_DELTA` removing its title, spec front matter, “Recovery contract (maintainers)” section, and `## Future`.** Links into withheld sections resolve to the canonical file on GitHub. **Must keep its supported-agent table aligned with
-`CODING_AGENTS` in `lib/src/lib/coding-agents.ts`**, pinned by
-`compatible agents` in `website/scripts/generate-docs.test.js`.
+**Must publish `docs/compatible-agents.md` with `COMPATIBLE_AGENTS_DELTA` removing its title, spec front matter, “Recovery contract (maintainers)” section, and `## Future`.** **Must keep its supported-agent table aligned with `CODING_AGENTS` in `lib/src/lib/coding-agents.ts`**, pinned by `website/scripts/generate-docs.test.js`.
 
-Source of truth: `generateDocs` in `website/scripts/generate-docs.js`.
+Source of truth: `COMPATIBLE_AGENTS_DELTA` in `website/scripts/generate-docs.js`; `CompatibleAgentsDocs` in `website/src/pages/CompatibleAgentsDocs.tsx`.
 
 ## `/agent-skill` guide
 
-**Must render `dor/skill.md` exactly, adding only page chrome:** table of contents, stable heading ids, styled code, copy buttons for `dor skill` and `dor skill --install`, and contextual CLI links. **Never emit the unused raw skill Markdown into browser data.** An independent re-parse compares the generated headings and ids.
+**Must render `dor/skill.md` exactly, adding only page chrome and contextual links into `/dor` derived from its headings**; generation fails on a command heading with no matching anchor. **Never emit the unused raw skill Markdown into browser data.**
 
-**Must derive contextual CLI links from skill headings.** Backticked `dor <command>` tokens select the first spelling with a matching CLI section, labelled by the first authored spelling. Targeting and Surface handles match by heading prefix and link to the corresponding CLI introductions. Generation fails on missing or ambiguous introduction headings, or a command heading with no matching anchor.
+**Never inject website URLs into the bundled skill; must reject links to the website's origin rather than rewriting them** (rationale). Known gap: the current prefix check misses bare-origin, case, default-port, and protocol-relative spellings.
 
-**Never inject website URLs into the bundled skill; must reject links to the website's origin rather than rewriting them** (rationale). Known gap: the current prefix check misses bare-origin, case, default-port, and protocol-relative spellings. `buildCli` reuses the same intro block objects, so a site URL in the skill would also reach `/dor`.
-
-Source of truth: `buildSkill`, `assertNoSiteLinks`, and `linkSkillHeadings` in `website/scripts/generate-docs.js`; `AgentSkillDocs` in `website/src/pages/AgentSkillDocs.tsx`.
-Tests: `website/scripts/generate-docs.test.js`.
+Source of truth: `buildSkill` in `website/scripts/generate-docs.js`; `AgentSkillDocs` in `website/src/pages/AgentSkillDocs.tsx`.
 
 ## `/self-host` runbook
 
-`SELF_HOST.md` stays canonical in the repository and is published from there.
-It has two consumers that outrank the website: an assistant reads it in a
-checkout (`read @SELF_HOST.md and walk me through it`), and
-`scripts/deploy-lint.mjs` audits its Installer contract against
-`deploy/local/`. A second copy under `website/` would be a second file to keep
-true about how a server is installed.
+**Never keep a second copy of `SELF_HOST.md` under `website/`**; the page publishes the canonical file (rationale). `SELF_HOST_DELTA` withholds its `#` title, its opening blockquote, and the sections addressed to the assistant or to a maintainer, each rule carrying its own `reason`.
 
-The file is two documents in one, and `SELF_HOST_DELTA` publishes only the
-first: it withholds the `#` title, the opening blockquote, and the three
-sections addressed to the assistant or to a maintainer, each rule carrying its
-own `reason`. What survives is the runbook — prerequisites, what the installer
-does, the definition of done, the six checkpoints, official references,
-troubleshooting boundaries, and keeping the relay up while the laptop sleeps.
+**Must** keep every withheld section present in `SELF_HOST.md`: a delta rule matching nothing fails the build, so renaming one is a decision, never a silent republication.
 
-**Must preserve published subsections and withhold removed subsections.**
-`website/scripts/generate-docs.test.js`.
+Above the runbook the page renders the security spec's self-host rows from `docs.security.json` ([`/security` spec](#security-spec)).
 
-**Must** keep every withheld section present in `SELF_HOST.md`. `applyDelta`
-owns this: a rule matching nothing fails the build naming the rule, so a
-renamed section is a decision rather than a silent republication of what the
-delta meant to hold back.
-
-Above the runbook the page renders the security spec's self-host rows and
-bullets — guarantees, what is not defended, known gaps — from
-`docs.security.json` ([`/security` spec](#security-spec)), then the
-disclosure link and the advice to use an assistant.
+Source of truth: `SELF_HOST_DELTA` in `website/scripts/generate-docs.js`; `SelfHostDocs` in `website/src/pages/SelfHostDocs.tsx`.
 
 ## `/security` spec
 
-`docs/specs/security.md` stays canonical in `docs/specs/` because it is a spec:
-`scripts/spec-lint.mjs` budgets it like any other, and the nightly audit reads
-it as the contract it audits against. `SECURITY_DELTA` withholds the `#` title
-and the front-matter blockquote — the page shell supplies both — and nothing
-else.
+`docs/specs/security.md` stays canonical in `docs/specs/`, budgeted by spec-lint and read by the nightly audit. `SECURITY_DELTA` withholds its `#` title and front-matter blockquote and nothing else.
 
-**Must** publish every section. A reader deciding whether to run this is owed
-the gaps and the undefended edges beside the guarantees, so **the spec may
-carry no `## Future` heading and no `Reserved:` paragraph**; `checkSecurityFold`
-pins that, and staged material has to be withheld by a delta rule before it can
-exist in the file.
+**Must** publish every section, so **the spec may carry no `## Future` heading and no `Reserved:` paragraph**; `checkSecurityFold` pins that, and staged material has to be withheld by a delta rule before it can exist there.
 
-**Must** render the guarantees table and the two lists by audience, from
-`docs.security.json`, never restated: `securityAudiences` splits each entry by
-the spec its links name — `security-local.md`, `security-ci.md`, and
-`security-audit.md` to this page; `remote-security-model.md`,
-`security-remote.md`, and `SELF_HOST.md` to `/self-host`;
-`security-supply-chain.md` to `/supply-chain` — and an entry naming no spec, a
-spec in no group, or two groups fails the build. `audienceBlocks` gives this
-page its own audience's three blocks with every other block whole, so the spec
-file on GitHub is the one place every entry appears together. All three pages
-cross-link in prose, this page's callout naming where the other two audiences
-are, and each specialized page links
-`/security#how-the-guarantees-are-checked`;
-`website/src/pages/security-pages.test.tsx` pins the rendered entries and the
-links.
+**Must** render the guarantees table and the two lists by audience, from `docs.security.json`, never restated: `securityAudiences` splits each entry by the spec its links name, and an entry naming no spec, a spec in no group, or two groups fails the build.
+
+```mermaid
+flowchart LR
+  SEC[docs/specs/security.md] -->|SECURITY_DELTA| J[docs.security.json]
+  J -->|security| P1["/security"]
+  J -->|self-host| P2["/self-host"]
+  J -->|supply-chain| P3["/supply-chain"]
+  SH[SELF_HOST.md] -->|SELF_HOST_DELTA| JS[docs.selfhost.json] --> P2
+```
+
+The spec file on GitHub is the one place every entry appears together. The three pages cross-link, and each specialized page links `/security#how-the-guarantees-are-checked`; `website/src/pages/security-pages.test.tsx` pins the entries and links.
+
+Source of truth: `SECURITY_DELTA`, `SECURITY_AUDIENCES` (spec → audience), and `securityAudiences` in `website/scripts/generate-docs.js`; `SecurityDocs` in `website/src/pages/SecurityDocs.tsx`.
 
 ## Generated documentation boundary
 
@@ -446,113 +203,35 @@ links.
 
 **Must parse and validate the unpublished product guide and sync its media without emitting its data.** Reserved: **Scope: guide-page-return** restores that write. **Must strip `BUILD_ONLY_FIELDS` from emitted results while retaining them in memory for tests and public-doc lint.**
 
-The generated data carries Markdown block/heading inventories after explicit deltas, semantic CLI nodes with exact raw help, and skill blocks with validated contextual links. **Never import Node-based Dor command implementations into browser pages.**
+**Never import Node-based Dor command implementations into browser pages.**
 
 **Must run generation from website `predev`, `pretest`, and `prebuild`, and reproduce output from a clean checkout.**
 
-Source of truth: `generateDocs`, `PUBLISHED_PAGES`, `BUILD_ONLY_FIELDS`, `publishable`, and `main` in `website/scripts/generate-docs.js`; scripts in `website/package.json`; generated paths in `.gitignore`.
+Source of truth: `generateDocs` and `main` in `website/scripts/generate-docs.js`; scripts in `website/package.json`; generated paths in `.gitignore`.
 
 ## Homepage browser proof
 
-The **Browsers for you (and your agents)** section in
-`website/src/pages/Home.tsx` shows a terminal-to-browser transcript followed by
-a browser Surface preview, and links to `/dor#agent-browser` and
-`/agent-skill`.
+The **Browsers for you (and your agents)** section in `website/src/pages/Home.tsx` links to `/dor#agent-browser` and `/agent-skill`.
 
-The transcript is **authored literals in `Home.tsx`, not generated or tested**,
-so it can drift from real output with nothing to catch it (rationale). Two
-mitigations bound that drift: command *syntax* matches
-`dor/test/snapshots/help/`, which is tested against the real CLI, and output
-uses notation the CLI itself documents — `created surface:N  "<command>"` from
-`dor ensure`'s text output, the resolution arrow from `dor agent-browser`'s own examples —
-rather than invented formatting. **Must mark the block authored and untested in
-a source comment.**
-
-Desktop and mobile presentations keep the terminal and browser relationship
-legible, selectable, and accessible without requiring animation.
+Its terminal-to-browser transcript is authored literals, not generated or tested (rationale): command *syntax* matches `dor/test/snapshots/help/`, and output uses only notation the CLI itself documents. **Must mark the block authored and untested in a source comment.**
 
 ## Root README
 
-Root `README.md` is shorter than the canonical product guide and does not
-duplicate it. It carries a product image and one-sentence cross-platform
-description, playground/Marketplace/Open VSX/standalone links, links to every
-published reference, a concise current feature summary, contributor setup and
-repository structure
-with links to `AGENTS.md` and the internal specs, and license and supply-chain
-links.
-
-GitHub-specific development material lives here and is audited against current
-package scripts and architecture. Staged implementation plans are not presented
-as shipped behavior.
+Root `README.md` is shorter than the canonical product guide and does not duplicate it, and never presents staged plans as shipped behavior. Its development material is reviewed against current package scripts.
 
 ## Public-doc validation
 
-**Must typecheck the website before its tests.** `website/package.json` runs
-`tsc --noEmit` before Vitest, including the playground adapters and generated-doc
-consumers.
+**Must typecheck the website before its tests.** `website/package.json` runs `tsc --noEmit` before Vitest.
 
-`scripts/public-docs-lint.mjs`, invoked by root `pnpm test` after the spec
-lint, checks the rules above mechanically; each rule names its own check, and
-the lint's header comment is the inventory. The rules with no other home:
+`scripts/public-docs-lint.mjs` (root `pnpm test`) checks the rules above mechanically; each rule names its own check. The rules with no other home:
 
-- **No public source renders a `TODO:` placeholder** — the two READMEs and
-  every Markdown page `SITE_ROUTES` publishes. A pending image may wait in an
-  HTML comment.
-- **Public links use canonical HTTPS URLs, and a local link resolves** — read
-  off the parsed tree, so a link-shaped string in a code span is not a link.
-  `SELF_HOST.md` and the security spec get only the HTTPS half; spec-lint
-  already resolves their relative links and validates their fragments.
-- **Every page whose `linkedFrom` names a README is linked from it**, as an
-  exact URL, so the `/docs` entrypoint cannot stand in for a page under a
-  prefix test. The guide owes no link to `/self-host` or `/security`:
-  it is a Marketplace listing for the editor extension, and neither running a
-  Relay nor auditing the repository is part of installing one.
-- **The homepage links every page whose `linkedFrom` names it**, root-relatively,
-  because a rewritten section can strand a page's only link.
-- **No page is served under `/docs`, and the homepage links none there**:
-  `checkNoDocsPrefixPages` fails on a `DOCS_PAGES` path or a homepage href
-  starting with `/docs`, which can only be the entrypoint or a legacy 301.
+- **No public source renders a `TODO:` placeholder** — the two READMEs and every Markdown page `SITE_ROUTES` publishes. A pending image may wait in an HTML comment.
+- **Public links use canonical HTTPS URLs, and a local link resolves**. `SELF_HOST.md` and the security spec get only the HTTPS half; spec-lint already resolves their relative links.
+- **Every page whose `linkedFrom` names a README is linked from it**, as an exact URL. The guide owes no link to `/self-host` or `/security`: neither running a Relay nor auditing the repository is part of installing an editor extension.
+- **The homepage links every page whose `linkedFrom` names it**, root-relatively.
+- **No page is served under `/docs`, and the homepage links none there**: `checkNoDocsPrefixPages` fails on a `DOCS_PAGES` path or a homepage href starting with `/docs`, which can only be the entrypoint or a legacy 301.
 
-Each check is isolated, so one malformed source reports its own failure instead
-of aborting the run and hiding every other problem behind a stack trace.
-
-Nuanced product prose is not checked with phrase blacklists. When a public
-feature section changes, review compares it with its owning implementation
-spec.
-
-## Code map
-
-| File | Role |
-| --- | --- |
-| `vscode-ext/README.md` | The canonical product guide; published off-site, parsed here |
-| `SELF_HOST.md` | The self-host runbook and Installer contract; the runbook half is published |
-| `docs/specs/security.md` | The security spec; every section publishes, its rows split across three pages |
-| `docs/compatible-agents.md` | The agent guide and recovery contract; the public guide publishes at `/compatible-agents` |
-| `vscode-ext/package.json` | Listing metadata and VS Code command inventory |
-| `README.md` | Repository and contributor entry point |
-| `vscode-ext/images/` | Guide media; the generator copies it to `public/guide/images/`, which the Marketplace listing loads from |
-| `dor/skill.md` | The bundled agent skill, rendered exactly at `/agent-skill` |
-| `dor/test/snapshots/help/` | Tested CLI help, the source for `/dor` |
-| `website/src/lib/site-meta.ts` | Every page's title, description, canonical, and social cards |
-| `website/src/lib/docs-pages.ts` | The rail's pages and their order; routes, prerender, rail, and lint all read it |
-| `website/src/pages/Changelog.tsx`, `website/src/pages/SupplyChain.tsx` | Rail pages deriving their own sections |
-| `website/public/_redirects` | The `/docs` entrypoint and the changelog SPA fallback |
-| `website/src/routes.ts`, `website/src/components/SiteHeader.tsx` | The published routes and the marketing nav, which carries `Docs` on desktop |
-| `website/scripts/docs-parser.js` | Markdown subset parser, slugger, `<img>` allowlist |
-| `website/scripts/help-parser.js` | Narrow CLI-help parser with losslessness |
-| `website/scripts/generate-docs.js` | Codegen: the delta tables, `buildDocument`, `localizeSiteLinks`, `resolveRemovedAnchors`, `resolveRepoLinks` and `SITE_ROUTES`, `assertRouteFragments`, `securityAudiences` and `audienceBlocks`, `linkSkillHeadings` |
-| `website/src/components/MarkdownDocument.tsx` | Renders parsed Markdown blocks |
-| `website/src/components/DocsLayout.tsx` | Docs chrome: header, the rail and its mobile drawer, prev/next, theme restore |
-| `website/src/components/DocsThemeControl.tsx` | The picker's two placements and its first-visit prompt |
-| `website/src/lib/docs-accent.ts` | The themed text colors, contrast-corrected per rendered surface |
-| `website/src/lib/docs-theme.ts` | Default docs theme, and whether the reader has chosen |
-| `website/src/components/DorCommandReference.tsx` | One CLI command section |
-| `website/src/pages/DorDocs.tsx` | `/dor` |
-| `website/src/pages/AgentSkillDocs.tsx` | `/agent-skill` |
-| `website/src/pages/CompatibleAgentsDocs.tsx` | `/compatible-agents` |
-| `website/src/pages/SelfHostDocs.tsx`, `website/src/pages/Hosted.tsx`; `website/src/components/HostingRequirementNotice.tsx` | The two hosting choices and their shared server boundary |
-| `website/src/pages/SecurityDocs.tsx` | `/security` |
-| `scripts/public-docs-lint.mjs` | Public-doc validation |
+When a public feature section changes, review compares it with its owning implementation spec; prose is not checked with phrase blacklists.
 
 ## Future
 
@@ -560,30 +239,12 @@ spec.
 
 Remaining work, in staged order:
 
-1. **VSIX packaging verification.** Inspect the packaged README and media
-   inventory as part of release, so a listing cannot ship with a broken image
-   or an unretained local asset. Packaging already passes `--baseImagesUrl`,
-   and `vscode-ext/.vscodeignore` already retains `README.md`, `icon.png`, and
-   `images/`; only the inspection is missing.
-2. **Live listing verification.** After publication, inspect the rendered
-   Marketplace and Open VSX pages, and preview the root README under GitHub
-   Markdown. If packaged or live README inspection becomes a release step,
-   [deploy.md](deploy.md) owns that release ordering and verification.
-3. **Promote public-doc contracts.** Move the contracts that constrain CLI help
-   text and VS Code command titles into [dor-cli.md](dor-cli.md) and
-   [vscode.md](vscode.md), so a change there sees the public-doc consequence
-   without reading this spec. Public wording alone does not change a behavior
-   spec when it accurately describes already-shipped behavior.
+1. **VSIX packaging verification.** Inspect the packaged README and media inventory as part of release, so a listing cannot ship with a broken image or an unretained local asset.
+2. **Live listing verification.** After publication, inspect the rendered Marketplace and Open VSX pages, and preview the root README under GitHub Markdown. If packaged or live README inspection becomes a release step, [deploy.md](deploy.md) owns that release ordering and verification.
+3. **Promote public-doc contracts.** Move the contracts that constrain CLI help text and VS Code command titles into [dor-cli.md](dor-cli.md) and [vscode.md](vscode.md), so a change there sees the public-doc consequence without reading this spec. Public wording alone does not change a behavior spec when it accurately describes already-shipped behavior.
 
 **Scope: guide-page-return**
 
-A hosted rendering of the general product guide was built, shipped at `/docs`,
-and then withdrawn — the guide reads well enough where it is already published,
-and the page did not earn its place in the site's navigation. The pipeline is
-whole, not a stub: `buildGuide` runs on every build, and only the write of its
-data file was dropped once nothing imported it.
+A hosted rendering of the general product guide was built, shipped at `/docs`, and then withdrawn — the guide reads well enough where it is already published, and the page did not earn its place in the site's navigation. The pipeline is whole, not a stub: `buildGuide` runs on every build, and only the write of its data file was dropped once nothing imported it.
 
-Reviving it needs a page component, an entry in `docs-pages.ts`, and
-`PUBLISHED_PAGES` gaining `guide` — not new pipeline work. Whoever does it should first answer the question that removed
-the page: what this rendering gives a reader that the Marketplace and GitHub
-renderings do not.
+Reviving it needs a page component, an entry in `docs-pages.ts`, and `PUBLISHED_PAGES` gaining `guide` — not new pipeline work. Whoever does it should first answer the question that removed the page: what this rendering gives a reader that the Marketplace and GitHub renderings do not.

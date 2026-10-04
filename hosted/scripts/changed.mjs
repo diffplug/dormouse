@@ -1,5 +1,4 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { readFileSync, realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 // Shared build inputs can change Hosted without editing its directory: the
@@ -23,7 +22,7 @@ export function touchesHosted(paths) {
 }
 if (
   process.argv[1] &&
-  resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+  realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)
 )
   console.log(
     `hosted=${touchesHosted(readFileSync(process.argv[2], "utf8").split("\n"))}`,

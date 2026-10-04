@@ -81,6 +81,7 @@ import type {
   ReauthBeginResponse,
   ReauthFinishRequest,
   ReauthFinishResponse,
+  RelayPolicyFrame,
   SealedPushPayload,
   SetupBeginRequest,
   SetupBeginResponse,
@@ -737,10 +738,11 @@ export function createApp(config: AppConfig): CreatedApp {
   app.post(API_ROUTES.burrowEnroll, async (c) => {
     const body = await readJson<BurrowEnrollRequest>(c);
     // A Burrow built for another origin would send every phone there, so it is
-    // refused before the credential is read — nothing spent, nothing appended.
-    // Absent is an older Burrow, which enrolls as before.
+    // refused before the credential is read — nothing spent, nothing appended:
+    // a body naming none is malformed, one naming another a mismatch.
     const claimed: unknown = body?.origin;
-    if (claimed !== undefined && normalizeOrigin(claimed) !== origin) {
+    if (typeof claimed !== 'string') return c.json({ error: 'origin must be a string' }, 400);
+    if (normalizeOrigin(claimed) !== origin) {
       const mismatch: BurrowEnrollOriginMismatch = { error: ORIGIN_MISMATCH_ERROR, origin };
       return c.json(mismatch, 409);
     }
@@ -1165,6 +1167,10 @@ export function createApp(config: AppConfig): CreatedApp {
   // Auth rides the `token` query param (browsers cannot set WS headers). A bad
   // token short-circuits with 401 here, so `injectWebSocket` never upgrades it.
 
+  // The first frame of every Burrow socket while UV is demanded (RelayPolicyFrame).
+  const burrowPolicy: RelayPolicyFrame | undefined = config.requireUserVerification
+    ? { t: 'policy', requireUserVerification: true }
+    : undefined;
   app.get(
     WS_ROUTES.burrow,
     async (c, next) => {
@@ -1181,7 +1187,9 @@ export function createApp(config: AppConfig): CreatedApp {
       let unwatch = () => {};
       return {
         onOpen: (_evt, ws) => {
-          conn = hub.registerBurrow(burrow.burrowId, ws);
+          // On every connect, so a flag set after this Burrow enrolled still
+          // reaches it (relay.md).
+          conn = hub.registerBurrow(burrow.burrowId, ws, burrowPolicy);
           const registered = conn;
           unwatch = watchLiveness(ws, () => hub.unregisterBurrow(registered));
         },

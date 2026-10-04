@@ -85,6 +85,22 @@ test('concurrent captures join one, a concurrent control shares its CDP attachme
   expect(browser.close).toHaveBeenCalledTimes(1);
 });
 
+test('a CDP capture that never answers fails at its bound, and the next starts afresh', async () => {
+  await pw({ op: 'attach' });
+  vi.useFakeTimers();
+  try {
+    cdp.send.mockImplementation((method: string) => method === 'Page.captureScreenshot' ? new Promise(() => {}) : Promise.resolve({}));
+    const wedged = capture();
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(await wedged).toBe(false);
+    cdp.send.mockResolvedValue({ data: 'aGVsbG8=' });
+    expect(await capture()).toBe(true);
+    expect(cdp.send.mock.calls.filter(([method]) => method === 'Page.captureScreenshot')).toHaveLength(2);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
 test('an explicit different DPR is refused before resizing', async () => {
   page.setViewportSize = vi.fn(async () => {});
   const result = await pw({ op: 'viewport', width: 390, height: 844, dpr: 2 });

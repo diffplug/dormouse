@@ -1,31 +1,16 @@
 # Pairing walkthrough
 
-Drives the self-host setup → pairing story against the **real** Relay and the
-**real** Burrow, in real browsers, and leaves every screenshot, log and captured
-image behind in one run directory.
+Drives the self-host setup → pairing story against the **real** Relay and the **real** Burrow, in real browsers, and leaves every screenshot, log and captured image behind in one run directory.
 
-The whole loop, in one command: a Relay, a Burrow enrolling through its own form,
-a QR on the laptop's screen read by a phone's camera, a passkey, two digits typed
-back on the laptop — and then a command typed on the phone whose output the
-laptop's filesystem is holding half a second later. Every claim it makes is
-checked on the side that cannot fake it: the file the laptop's shell wrote, the
-authenticator's own `signCount`, the Burrow's alert arriving in the phone's session
-list.
+The whole loop, in one command: a Relay, a Burrow enrolling through its own form, a QR on the laptop's screen read by a phone's camera, a passkey, two digits typed back on the laptop — and then a command typed on the phone whose output the laptop's filesystem is holding half a second later. Every claim it makes is checked on the side that cannot fake it: the file the laptop's shell wrote, the authenticator's own `signCount`, the Burrow's alert arriving in the phone's session list.
 
-It is a development tool, not a test. **The run is deliberately not wired into
-`pnpm test` or any CI workflow**: it wants Chrome, `ffmpeg`, and several
-minutes. `proc.test.mjs`, which pins the line plumbing and needs none of them,
-is.
+It is a development tool, not a test. **The run is deliberately not wired into `pnpm test` or any CI workflow**: it wants Chrome, `ffmpeg`, and several minutes. `proc.test.mjs`, which pins the line plumbing and needs none of them, is.
 
 ```sh
 node scripts/pairing-walkthrough/run.mjs
 ```
 
-This file is the operator's guide — what to run, what you get, and what it does
-not cover. Why each step is done the way it is lives in a comment at the code
-that does it: `run.mjs` (the loop and teardown), `steps.mjs` (every step and its
-selectors), `ab.mjs` (`agent-browser`), `chrome.mjs` (the Pocket browser),
-`cdp.mjs` (the raw CDP socket), `qr.mjs` (pixels), `proc.mjs` (processes/ports).
+This file is the operator's guide — what to run, what you get, and what it does not cover. Why each step is done the way it is lives in a comment at the code that does it: `run.mjs` (the loop and teardown), `steps.mjs` (every step and its selectors), `ab.mjs` (`agent-browser`), `chrome.mjs` (the Pocket browser), `cdp.mjs` (the raw CDP socket), `qr.mjs` (pixels), `proc.mjs` (processes/ports).
 
 ## Prerequisites
 
@@ -37,39 +22,21 @@ selectors), `ab.mjs` (`agent-browser`), `chrome.mjs` (the Pocket browser),
 | `ffmpeg` on `PATH` | Every pixel operation: crop, upscale, Y4M. Override with `FFMPEG_BIN`. |
 | `pnpm install` already run | The Relay, the Burrow and the QR decoder all come from the workspace. |
 
-Every line about `agent-browser` and Chrome here was probed against
-`agent-browser` 0.31.1 and Chrome for Testing 150, not assumed.
+Every line about `agent-browser` and Chrome here was probed against `agent-browser` 0.31.1 and Chrome for Testing 150, not assumed.
 
 ## Scenarios
 
-`--scenario <name>` picks which ending the run drives: `happy` (the default),
-`wrong-code`, `denied`, and `expired-code`. They share the first six steps —
-everything up to the scan is the same code on every path — so a scenario is only
-ever the last step or two, named for it in *Steps* below, and the differences are
-all in what the laptop and the phone say afterwards. What a green run of each
-proves is one sentence per scenario in `steps.mjs`, printed at startup and
-recorded in `summary.json` as `expect`.
+`--scenario <name>` picks which ending the run drives: `happy` (the default), `wrong-code`, `denied`, and `expired-code`. They share the first six steps — everything up to the scan is the same code on every path — so a scenario is only ever the last step or two, named for it in *Steps* below, and the differences are all in what the laptop and the phone say afterwards. What a green run of each proves is one sentence per scenario in `steps.mjs`, printed at startup and recorded in `summary.json` as `expect`.
 
-**Every artifact of a scenario other than `happy` is prefixed with the
-scenario's name** — screenshots, text captures, logs, proof files — so several
-scenarios can share one `--out` without overwriting each other's evidence.
+**Every artifact of a scenario other than `happy` is prefixed with the scenario's name** — screenshots, text captures, logs, proof files — so several scenarios can share one `--out` without overwriting each other's evidence.
 
-`wrong-code` and `denied` both check an *absence* — that nothing was paired —
-which the count cannot show the instant a decision lands, since the section
-re-reads its status on a 2 s poll. Each therefore waits a poll cycle out before
-believing the count.
+`wrong-code` and `denied` both check an *absence* — that nothing was paired — which the count cannot show the instant a decision lands, since the section re-reads its status on a 2 s poll. Each therefore waits a poll cycle out before believing the count.
 
-`expired-code` never scans anything, so it stops one step short of the others
-and its two codes go in through the paste field beside the viewfinder. Both are
-the Burrow's own live code re-issued through the shipped emitter — never by
-splicing the fragment, which is positional and carries no field names — so what
-the phone refuses is a code that Burrow could have minted.
+`expired-code` never scans anything, so it stops one step short of the others and its two codes go in through the paste field beside the viewfinder. Both are the Burrow's own live code re-issued through the shipped emitter — never by splicing the fragment, which is positional and carries no field names — so what the phone refuses is a code that Burrow could have minted.
 
 ## Steps
 
-`--until <step>` stops after the step it names, and must name a step of the
-chosen scenario; the default is that scenario's last, so a bare run does all of
-it.
+`--until <step>` stops after the step it names, and must name a step of the chosen scenario; the default is that scenario's last, so a bare run does all of it.
 
 | # | Step | What happens |
 | --- | --- | --- |
@@ -85,20 +52,11 @@ it.
 | 8′ | `cancel` | (`denied`) Presses the modal's Cancel and waits for the panel to report it; same two checks. → `09-burrow-cancelled.png`, `10-pocket-cancelled.png` |
 | 7′ | `dead-code` | (`expired-code`) Replaces the camera's Y4M with a blank frame, opens the scanner, and pastes the Burrow's own code re-issued twice — once stamped with a 2023 expiry, once for another origin as well. Waits for the phone's own sentence each time, and checks the two differ. → `06-pocket-expired.png`, `07-pocket-foreign.png` |
 
-Everything a later step needs from an earlier one is on `ctx.state` —
-`burrowBrowser`, `pocketBrowser`, `pocketAuth` (the live CDP session holding the
-authenticator), `relayHandle`, `invitationUrl`, `pairingCode`, and `signCount`
-— or in `summary.json`.
+Everything a later step needs from an earlier one is on `ctx.state` — `burrowBrowser`, `pocketBrowser`, `pocketAuth` (the live CDP session holding the authenticator), `relayHandle`, `invitationUrl`, `pairingCode`, and `signCount` — or in `summary.json`.
 
-Per-step milliseconds land in `summary.json`. With warm builds the whole run is
-about 15 s, of which the Burrow's boot is a third and step 8 is under 3 s; a cold
-`lib/dist-pocket` adds however long that build takes.
+Per-step milliseconds land in `summary.json`. With warm builds the whole run is about 15 s, of which the Burrow's boot is a third and step 8 is under 3 s; a cold `lib/dist-pocket` adds however long that build takes.
 
-Nothing in step 8 is driven around the product. The digits go into the modal's
-own field, the confirm button is clicked while `disabled` is still the modal's to
-decide, and **Pocket is never told to connect**: approving on the laptop is what
-ends the ceremony, and the phone lands on the terminal by itself. A run that had
-to tap something there would have found a bug.
+Nothing in step 8 is driven around the product. The digits go into the modal's own field, the confirm button is clicked while `disabled` is still the modal's to decide, and **Pocket is never told to connect**: approving on the laptop is what ends the ceremony, and the phone lands on the terminal by itself. A run that had to tap something there would have found a bug.
 
 ## Options
 
@@ -111,16 +69,11 @@ to tap something there would have found a bug.
 | `--machine-name <n>` | `Walkthrough Mac` | The name the Burrow enrolls under. |
 | `--keep` | off | Leave everything running when the run ends — including a failed one, which is when poking by hand is most useful. Ctrl-C stops it. |
 
-`--skip-build` skips the Pocket build, so **a change under
-`lib/src/remote/pocket-app/` or `lib/src/remote/client/` will not be in the run**
-— Pocket is served built from `lib/dist-pocket`. The Burrow's own webview code
-(`lib/src/**`) hot-reloads through Vite either way, and `lib/src/host/**` is
-re-staged into the sidecar at every launch.
+`--skip-build` skips the Pocket build, so **a change under `lib/src/remote/pocket-app/` or `lib/src/remote/client/` will not be in the run** — Pocket is served built from `lib/dist-pocket`. The Burrow's own webview code (`lib/src/**`) hot-reloads through Vite either way, and `lib/src/host/**` is re-staged into the sidecar at every launch.
 
 ## Artifacts
 
-Everything lands in the run directory, whose path is printed at the start and
-at the end. **Nothing is written into the repo.**
+Everything lands in the run directory, whose path is printed at the start and at the end. **Nothing is written into the repo.**
 
 ```
 relay.log            the Relay's whole stdout/stderr
@@ -141,15 +94,11 @@ reconnect-proof.txt   the same again, after leaving the wall and connecting back
 summary.json          per-step status and timing, plus the run's facts
 ```
 
-**Every `NN-name.png` has an `NN-name.txt` beside it** holding the page's
-visible text at that moment, with anything announced (`role="alert"`,
-`aria-live`) repeated under a rule. A pass that critiques the copy a user meets
-on this path cannot read a PNG; this is its raw material.
+**Every `NN-name.png` has an `NN-name.txt` beside it** holding the page's visible text at that moment, with anything announced (`role="alert"`, `aria-live`) repeated under a rule. A pass that critiques the copy a user meets on this path cannot read a PNG; this is its raw material.
 
 ### Warnings a green run leaves behind
 
-Three, every time. None is a symptom of anything, and a run that lacks them is
-not healthier than one that has them.
+Three, every time. None is a symptom of anything, and a run that lacks them is not healthier than one that has them.
 
 | Where | What | Why |
 | --- | --- | --- |
@@ -157,87 +106,33 @@ not healthier than one that has them.
 | `pocket-console.log`, twice | `Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute` | `@zxing/browser` reading camera frames; not ours to set, and one decode per run is not a performance question. |
 | `relay.log`, `burrow.log` | `[ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL] … Command failed with signal "SIGTERM"` | The last line of a clean teardown. `pnpm` reports a SIGTERMed child as a failed script; the harness sent that signal on purpose. |
 
-`summary.json` also carries what only a run can know: the decoded pairing URL
-and how much of its TTL was left, the round trip from Enter to the file the
-laptop's shell wrote (`terminal.roundTripMs`, ~220 ms here), the Enter-to-alarm
-time, and the authenticator's `signCount` after each ceremony. `options` holds
-what the run chose for itself. The setup password is not among them — the
-Relay mints its own, and a `--keep` run is signed into by hand with the
-`password` in `<run>/relay-state/setup-password.json`.
+`summary.json` also carries what only a run can know: the decoded pairing URL and how much of its TTL was left, the round trip from Enter to the file the laptop's shell wrote (`terminal.roundTripMs`, ~220 ms here), the Enter-to-alarm time, and the authenticator's `signCount` after each ceremony. `options` holds what the run chose for itself. The setup password is not among them — the Relay mints its own, and a `--keep` run is signed into by hand with the `password` in `<run>/relay-state/setup-password.json`.
 
 ## State isolation
 
-A walkthrough that starts half-enrolled is not a walkthrough, so both sides get
-a store of their own. The *why* of each is at the code; what it means for you:
+A walkthrough that starts half-enrolled is not a walkthrough, so both sides get a store of their own. The *why* of each is at the code; what it means for you:
 
-- **Relay** — `DORMOUSE_STATE_DIR` is set to `<run>/relay-state`, so the
-  default `./data` in the repo is neither read nor written.
-- **Burrow** — nothing to set; `standalone/scripts/dev-agent-browser.mjs` already
-  uses a per-pid temp directory. The path it picked is in `summary.json` as
-  `burrowStateDir`.
-- **The Burrow's browser** — a fresh agent-browser session per run, torn down with
-  its daemon at the end. `close --all` is never used: it would take down every
-  other agent-browser session on the machine.
-- **Pocket's browser** — a Chrome of its own under `<run>/pocket-profile`, in its
-  own agent-browser session (`<session>-pocket`), torn down the same way. It has
-  to be a separate browser rather than a second tab: this is the *phone*, and its
-  passkeys, its IndexedDB records and its service worker are the state the whole
-  ceremony is about.
+- **Relay** — `DORMOUSE_STATE_DIR` is set to `<run>/relay-state`, so the default `./data` in the repo is neither read nor written.
+- **Burrow** — nothing to set; `standalone/scripts/dev-agent-browser.mjs` already uses a per-pid temp directory. The path it picked is in `summary.json` as `burrowStateDir`.
+- **The Burrow's browser** — a fresh agent-browser session per run, torn down with its daemon at the end. `close --all` is never used: it would take down every other agent-browser session on the machine.
+- **Pocket's browser** — a Chrome of its own under `<run>/pocket-profile`, in its own agent-browser session (`<session>-pocket`), torn down the same way. It has to be a separate browser rather than a second tab: this is the *phone*, and its passkeys, its IndexedDB records and its service worker are the state the whole ceremony is about.
 
 ## Ports
 
-The Relay, Burrow harness, and Pocket Chrome bind OS-assigned ports. The run
-reads the Relay's origin before staging the Burrow's allowed origins, and opens
-Pocket at that same origin. Vite reports its app URL; Chrome reports its debugging
-port through `DevToolsActivePort` in the run's own profile. No port is probed and
-released before its owner binds it.
+The Relay, Burrow harness, and Pocket Chrome bind OS-assigned ports. The run reads the Relay's origin before staging the Burrow's allowed origins, and opens Pocket at that same origin. Vite reports its app URL; Chrome reports its debugging port through `DevToolsActivePort` in the run's own profile. No port is probed and released before its owner binds it.
 
-`localhost`, never `127.0.0.1` — WebAuthn's secure-context rule and the `rpId`
-the Relay derives from its own origin
-([`docs/specs/relay.md`](../../docs/specs/relay.md) → Running it).
+`localhost`, never `127.0.0.1` — WebAuthn's secure-context rule and the `rpId` the Relay derives from its own origin ([`docs/specs/relay.md`](../../docs/specs/relay.md) → Configuration).
 
-Every listener a run starts binds loopback only — the Relay is pinned with
-`DORMOUSE_BIND_HOST=127.0.0.1`, the Burrow bridge and both Chrome debugging ports
-already are, and a step that adds one holds to the same rule
-([`docs/specs/relay.md`](../../docs/specs/relay.md) → Configuration).
+Every listener a run starts binds loopback only — the Relay is pinned with `DORMOUSE_BIND_HOST=127.0.0.1`, the Burrow bridge and both Chrome debugging ports already are, and a step that adds one holds to the same rule ([`docs/specs/relay.md`](../../docs/specs/relay.md) → Configuration).
 
 ## Known limitations
 
-- **`06-scanner.png` shows an empty viewfinder.** The shot is taken the instant
-  the scanner mounts, and behind a fake camera the decode lands under a second
-  later — so there is no moment at which the screen is both still the scanner
-  and showing a frame. The decode is proved by the code screen, not by this.
-- **`ffmpeg` and `agent-browser` are assumed present**, not probed for; a
-  missing binary surfaces as an `ENOENT` from the step that first needs it.
-- **The invitation URL is read off React's fiber.** The panel draws the code and
-  nothing else, so there is no text node to read. A miss is not fatal — the run
-  falls back to the decoded value and says so in `summary.json`
-  (`qr.fromDom: false`) — but it is an internal, and a React upgrade can break
-  it. A `data-` attribute on the product's `QrCode` would retire it.
-- **The QR is captured at scale 1**, which is 2–3 pixels per module. That is
-  near any decoder's floor, so a crop that misses is retried against a
-  nearest-neighbour enlargement (`qr-large.png`) — closer to what a phone camera
-  sees than the raw crop is, but worth knowing when a decode gets marginal.
-- **Push is off**, because a loopback origin has no routable VAPID subject
-  ([`docs/specs/relay.md`](../../docs/specs/relay.md) → Configuration). So the
-  Burrows view's card reads *Push notifications are off · This Relay has push
-  notifications turned off* (`13-pocket-burrows.txt`), the alarm settings say no
-  paired phone has push on, and **the whole delivery-keyed push path — Enable,
-  the sealed payload, the worker's notification — is untested here.** Only the
-  in-session ring is.
-- **Nothing on this path is a phone.** The Client is a desktop Chrome at a
-  phone-shaped viewport with a virtual authenticator: no real biometrics, no iOS,
-  no Home Screen install, and therefore neither the partition warning nor the
-  two-scan native-camera story. `needsHomeScreenInstall` is false here, so
-  `InstallFirstNotice` and `InstallNotice` never render — they are Storybook
-  coverage only.
-- **The Burrow is attended throughout**, since its webview is the focused page.
-  Alert behavior that depends on the user having walked away (the inactivity
-  timeout, spoken alerts, deferral until quiet) is therefore not exercised.
-- **The Pocket browser is launched by the harness, not by `agent-browser`.**
-  `agent-browser --args` can carry launch flags, so it could be — see the head
-  of `chrome.mjs` for what the harness gets by owning the process instead.
-- **Concurrent runs need separate worktrees for build output.** Each run has its
-  own Relay state, ports, browser sessions, and default artifact directory, but
-  Burrow staging still writes into the worktree. Explicit `--out` directories
-  must be distinct for concurrent runs of the same scenario.
+- **`06-scanner.png` shows an empty viewfinder.** The shot is taken the instant the scanner mounts, and behind a fake camera the decode lands under a second later — so there is no moment at which the screen is both still the scanner and showing a frame. The decode is proved by the code screen, not by this.
+- **`ffmpeg` and `agent-browser` are assumed present**, not probed for; a missing binary surfaces as an `ENOENT` from the step that first needs it.
+- **The invitation URL is read off React's fiber.** The panel draws the code and nothing else, so there is no text node to read. A miss is not fatal — the run falls back to the decoded value and says so in `summary.json` (`qr.fromDom: false`) — but it is an internal, and a React upgrade can break it. A `data-` attribute on the product's `QrCode` would retire it.
+- **The QR is captured at scale 1**, which is 2–3 pixels per module. That is near any decoder's floor, so a crop that misses is retried against a nearest-neighbour enlargement (`qr-large.png`) — closer to what a phone camera sees than the raw crop is, but worth knowing when a decode gets marginal.
+- **Push is off**, because a loopback origin has no routable VAPID subject ([`docs/specs/relay.md`](../../docs/specs/relay.md) → Configuration). So the Burrows view's card reads *Push notifications are off · This Relay has push notifications turned off* (`13-pocket-burrows.txt`), the alarm settings say no paired phone has push on, and **the whole delivery-keyed push path — Enable, the sealed payload, the worker's notification — is untested here.** Only the in-session ring is.
+- **Nothing on this path is a phone.** The Client is a desktop Chrome at a phone-shaped viewport with a virtual authenticator: no real biometrics, no iOS, no Home Screen install, and therefore neither the partition warning nor the two-scan native-camera story. `needsHomeScreenInstall` is false here, so `InstallFirstNotice` and `InstallNotice` never render — they are Storybook coverage only.
+- **The Burrow is attended throughout**, since its webview is the focused page. Alert behavior that depends on the user having walked away (the inactivity timeout, spoken alerts, deferral until quiet) is therefore not exercised.
+- **The Pocket browser is launched by the harness, not by `agent-browser`.** `agent-browser --args` can carry launch flags, so it could be — see the head of `chrome.mjs` for what the harness gets by owning the process instead.
+- **Concurrent runs need separate worktrees for build output.** Each run has its own Relay state, ports, browser sessions, and default artifact directory, but Burrow staging still writes into the worktree. Explicit `--out` directories must be distinct for concurrent runs of the same scenario.

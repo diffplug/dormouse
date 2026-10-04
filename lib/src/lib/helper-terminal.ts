@@ -1,6 +1,9 @@
 import { getPlatform } from './platform';
 import { registry } from './terminal-store';
 import { disposeSession, getOrCreateTerminal, parkElement, setPendingShellOpts } from './terminal-lifecycle';
+import { addPendingKill } from './pending-kills';
+import { isDelayedKillEnabled } from './labs-settings';
+import type { WorkspaceId } from './session-types';
 import { getDefaultShellOpts } from './shell-defaults';
 import { getInheritableCwd, getTerminalPaneState, isPaneOscDriven, seedLaunchedCommand } from './terminal-state-store';
 import { DEFAULT_HELPER_COMMAND, type HelperIdentity } from './terminal-context-types';
@@ -73,10 +76,13 @@ function watchHelper(helper: HelperTerminal, launchCwd?: string): void {
 /** Recover a live helper PTY whose source also survived. Replays do not prove
  *  absence of user input, so recovery always disarms autorun. */
 export function restoreHelper(id: string, identity: HelperIdentity): void {
-  const helper: HelperTerminal = { ...identity, id, status: 'preserved' };
-  helpers.set(identity.parentId, helper);
-  watchHelper(helper);
   parkElement(id);
+  installHelper({ ...identity, id, status: 'preserved' });
+}
+
+function installHelper(helper: HelperTerminal): void {
+  helpers.set(helper.parentId, helper);
+  watchHelper(helper);
   notifyHelpers();
 }
 
@@ -111,6 +117,49 @@ export function disposeHelper(parentId: string): void {
   if (helper.promoting) throw new Error('Helper promotion is in progress');
   forgetHelper(parentId);
   disposeSession(helper.id);
+}
+
+/**
+ * Take the parent's helper off it without ending its Session — a Reset made a
+ * pending kill (`docs/specs/reopen.md`). The caller owns the returned helper:
+ * {@link reattachHelper} puts it back, `disposeSession` ends it.
+ */
+export function detachHelper(parentId: string): HelperTerminal | undefined {
+  const helper = helpers.get(parentId);
+  if (!helper || helper.promoting) return undefined;
+  forgetHelper(parentId);
+  return helper;
+}
+
+/** Put a detached helper back on its parent, ending the one that replaced it.
+ *  False when the parent has closed, or the replacement holds anything a
+ *  discard would lose: user input, a running command, a promotion. */
+export function reattachHelper(helper: HelperTerminal): boolean {
+  const { parentId } = helper;
+  if (!parentIsOpen(parentId) || !registry.has(helper.id)) return false;
+  const replacement = helpers.get(parentId);
+  const entry = replacement && registry.get(replacement.id);
+  if (replacement && (replacement.promoting || entry?.untouched === false || getTerminalPaneState(replacement.id).currentCommand)) return false;
+  if (replacement) disposeHelper(parentId);
+  installHelper(helper);
+  return true;
+}
+
+/**
+ * Discard a parent's helper for a fresh one. Under Labs the old one is a
+ * pending kill instead, which a restore puts back in place of the fresh one
+ * (`docs/specs/reopen.md` → "Labs: No-confirm delayed kill").
+ */
+export function resetHelper(parentId: string, parent: { workspaceId: WorkspaceId; title: string; ref: string }): void {
+  if (!isDelayedKillEnabled()) { disposeHelper(parentId); return; }
+  const old = detachHelper(parentId);
+  if (!old) return;
+  addPendingKill({ kind: 'helper', id: old.id, workspaceId: parent.workspaceId, ref: parent.ref, surfaceId: old.parentId, title: parent.title, label: 'Helper' }, {
+    // A closed parent, or a replacement with work of its own, refuses: the old
+    // helper stays pending, its countdown untouched, until it finalizes.
+    restore: () => reattachHelper(old),
+    finalize: () => disposeSession(old.id),
+  });
 }
 
 /** Parents torn down while their registry entry lingers for the kill fade; a

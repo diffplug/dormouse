@@ -691,6 +691,19 @@ describe('AlertManager in isolation', () => {
     });
   });
 
+  // A prompt boundary with no finish event (an OSC 133 emitter that skips D)
+  // still ends the command: alert.md -> "Command-exit Track".
+  it('rings at a prompt boundary that arrives without a finish event', () => {
+    const id = 'command-exit-prompt';
+
+    armCommandExit(manager, id);
+    manager.applyTerminalSemanticEvents(id, [{ type: 'promptStart' }]);
+    expect(manager.getState(id)).toMatchObject({
+      status: 'ALERT_RINGING',
+      notification: { source: 'COMMAND_EXIT', title: 'Command finished', body: 'pnpm build' },
+    });
+  });
+
   // `docs/specs/alert.md` -> Public State.
   it('a second source joining mid-episode keeps the episode id', () => {
     const id = 'episode-cross-track';
@@ -737,6 +750,20 @@ describe('AlertManager in isolation', () => {
     const second = manager.getState(id).episode;
     expect(second?.id).toBeTruthy();
     expect(second?.id).not.toBe(first!.id);
+  });
+
+  // `docs/specs/dor-tool.md` -> Reaping: the host stops the run itself.
+  it('rings nothing for a run a reap silenced, keeping the TODO owed', () => {
+    const id = 'command-exit-reaped';
+
+    armCommandExit(manager, id);
+    manager.toggleTodo(id);
+    manager.silenceRun(id);
+    expect(manager.getState(id).status).not.toBe('COMMAND_EXIT_ARMED');
+
+    finishCommand(manager, id);
+    manager.onExit(id, 130);
+    expect(manager.getState(id)).toMatchObject({ status: 'WATCHING_DISABLED', todo: true });
   });
 
   it('finishes an armed command-exit watch when the PTY exits without commandFinish', () => {

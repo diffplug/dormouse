@@ -16,7 +16,7 @@ import { isRecord, sanitizeText } from './sanitize.js';
 /** Cap on the whole payload before parsing. A tool's announcement is a handful
  *  of fields; anything larger is a mistake or an attack, and JSON.parse on
  *  unbounded terminal output is not something to offer. */
-const PAYLOAD_LIMIT = 4096;
+export const TOOL_PAYLOAD_LIMIT = 4096;
 const NAME_LIMIT = 200;
 const KEY_ELEMENT_LIMIT = 512;
 const KEY_ELEMENTS_LIMIT = 8;
@@ -32,9 +32,11 @@ export type ToolAnnounce = {
    *  Surface, because a late collision between two Surfaces that both hold work
    *  cannot be resolved by killing either. */
   key: string[] | null;
-  /** Reserved for D2: the tool can produce a dehydrate payload on graceful stop. */
+  /** The run is safe to stop: its args alone restart it correctly, and on
+   *  the graceful-stop signal it may emit a `dehydrate` payload for fidelity
+   *  (`docs/specs/dor-tool.md` -> Reaping). */
   dehydrate: boolean;
-  /** Reserved for D1/D2 restart policy. */
+  /** `never` vetoes reaping this run; `respawn` is the default. */
   persist: 'respawn' | 'never' | null;
 };
 
@@ -66,7 +68,7 @@ function readKey(value: unknown): string[] | null {
 export function parseToolPayload(content: string, verb: string): Record<string, unknown> | null {
   if (!content.startsWith(`${verb};`)) return null;
   const raw = content.slice(verb.length + 1);
-  if (raw.length === 0 || raw.length > PAYLOAD_LIMIT) return null;
+  if (raw.length === 0 || raw.length > TOOL_PAYLOAD_LIMIT) return null;
   try {
     const payload: unknown = JSON.parse(raw);
     return isRecord(payload) ? payload : null;
@@ -75,8 +77,7 @@ export function parseToolPayload(content: string, verb: string): Record<string, 
   }
 }
 
-/** Parse a `serve` announcement; `content` is everything after `367;`.
- *  `dehydrate` is D2's verb; parsed as unknown here rather than half-honored. */
+/** Parse a `serve` announcement; `content` is everything after `367;`. */
 export function parseToolAnnounce(content: string): ToolAnnounce | null {
   const record = parseToolPayload(content, 'serve');
   if (!record) return null;
@@ -94,8 +95,10 @@ export function parseToolAnnounce(content: string): ToolAnnounce | null {
     dehydrate: record.dehydrate === true,
     persist: record.persist === 'never' ? 'never' : record.persist === 'respawn' ? 'respawn' : null,
   };
-  // An announcement that says nothing actionable is not an announcement.
-  if (announce.port === null && announce.name === null && announce.key === null) return null;
+  // An announcement that says nothing actionable is not an announcement. A
+  // reaping declaration alone is actionable: a terminal-only Tool has no port.
+  if (announce.port === null && announce.name === null && announce.key === null
+    && !announce.dehydrate && announce.persist === null) return null;
   return announce;
 }
 
@@ -135,13 +138,31 @@ export function parseToolOpen(content: string): ToolOpen | null {
   return { path: record.path, preview: record.preview === true };
 }
 
+export interface ServeOptions {
+  /** The port to frame; omitted by a terminal-only Tool declaring only how it stops. */
+  port?: number;
+  /** The same-origin path to open on `port`. */
+  path?: string;
+  /** Safe to stop: args alone restart this run, and it may emit
+   *  `dehydrateSequence` on the graceful-stop signal (Ctrl+C / `SIGINT`). */
+  dehydrate?: boolean;
+  /** `never` vetoes reaping this run. */
+  persist?: 'respawn' | 'never';
+}
+
 /** The `serve` announcement a Tool writes once its server listens: the port to
- * frame and, optionally, the same-origin path to open on it. Throws on a value
- * the host would ignore. */
-export function serveSequence({ port, path }: { port: number; path?: string }): string {
-  if (readPort(port) === null) throw new RangeError(`not a TCP port: ${port}`);
-  if (path !== undefined && !validToolServePath(path)) throw new RangeError(`not a same-origin path: ${JSON.stringify(path)}`);
-  return sequence('serve', path === undefined ? { port, v: 1 } : { port, path, v: 1 });
+ * frame and, optionally, the same-origin path to open on it, and whether the
+ * host may stop it while idle. Throws on a value the host would ignore. */
+export function serveSequence({ port, path, dehydrate, persist }: ServeOptions): string {
+  if (port !== undefined && readPort(port) === null) throw new RangeError(`not a TCP port: ${port}`);
+  if (path !== undefined && (port === undefined || !validToolServePath(path))) throw new RangeError(`not a same-origin path: ${JSON.stringify(path)}`);
+  if (dehydrate !== undefined && typeof dehydrate !== 'boolean') throw new TypeError('dehydrate must be a boolean');
+  if (persist !== undefined && persist !== 'respawn' && persist !== 'never') throw new RangeError(`not a persist policy: ${JSON.stringify(persist)}`);
+  if (port === undefined && dehydrate !== true && persist === undefined) throw new RangeError('a serve announcement must state a port or how the Tool stops');
+  return sequence('serve', {
+    ...(port !== undefined ? { port } : {}), ...(path !== undefined ? { path } : {}),
+    ...(dehydrate !== undefined ? { dehydrate } : {}), ...(persist !== undefined ? { persist } : {}), v: 1,
+  });
 }
 
 /** The `state` report a Tool writes whenever its unsaved state changes. */
@@ -159,10 +180,55 @@ export function openSequence({ path, preview = false }: { path: string; preview?
   return sequence('open', { v: 1, path, preview });
 }
 
-function sequence(verb: string, payload: object): string {
+/** The environment variable a rehydrated Tool reads its payload from. */
+export const DEHYDRATE_ENV = 'DORMOUSE_DEHYDRATE';
+
+export interface ToolDehydrate {
+  /** The whole payload as the Tool emitted it: what `DEHYDRATE_ENV` carries. */
+  payload: string;
+}
+
+/** Parse a `dehydrate` payload; `content` is everything after `367;`. The host
+ * checks only its version and bound: the state is the Tool's own business,
+ * handed back verbatim (`docs/specs/dor-tool.md` -> Reaping). */
+export function parseToolDehydrate(content: string): ToolDehydrate | null {
+  const state = dehydratedState(content);
+  return state === null ? null : { payload: content.slice('dehydrate;'.length) };
+}
+
+/** A v1 `dehydrate` payload's state, or null. */
+function dehydratedState(content: string): unknown {
+  const record = parseToolPayload(content, 'dehydrate');
+  return record && record.v === 1 && record.state !== undefined ? record.state : null;
+}
+
+/** The `dehydrate` payload a Tool writes on the graceful-stop signal, just
+ * before it exits: small JSON it reads back with `readDehydrated` when the
+ * host restarts it. Never a document — the host refuses one past its limit,
+ * and the Tool then restarts from its args alone. */
+export function dehydrateSequence(state: unknown): string {
+  if (state === undefined || state === null) throw new TypeError('dehydrate state must be a JSON value other than null');
+  return sequence('dehydrate', { v: 1, state }, escapeC1);
+}
+
+/** JSON leaves DEL and the C1 controls raw, and a C1 ST inside a string would
+ *  end the sequence early; the state is the Tool's own, so escape rather than
+ *  refuse (docs/specs/dor-tool.rationale.md -> OSC 367). */
+function escapeC1(raw: string): string {
+  return raw.replace(/[\u007f-\u009f]/g, c => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`);
+}
+
+/** The state a rehydrated Tool was handed — pass `process.env.DORMOUSE_DEHYDRATE`
+ * — or null for none: a missing, malformed, oversized, or unknown-version value
+ * means start from args alone, never fail. */
+export function readDehydrated<T = unknown>(value: string | undefined): T | null {
+  return typeof value === 'string' ? dehydratedState(`dehydrate;${value}`) as T | null : null;
+}
+
+function sequence(verb: string, payload: object, encode: (raw: string) => string = raw => raw): string {
   // JSON escaping can expand a field beyond its own bound. The host caps the
   // serialized payload before parsing, so never emit a sequence it will ignore.
-  const raw = JSON.stringify(payload);
-  if (raw.length > PAYLOAD_LIMIT) throw new RangeError('Tool payload exceeds its serialized size limit');
+  const raw = encode(JSON.stringify(payload));
+  if (raw.length > TOOL_PAYLOAD_LIMIT) throw new RangeError('Tool payload exceeds its serialized size limit');
   return `\x1b]367;${verb};${raw}\x07`;
 }

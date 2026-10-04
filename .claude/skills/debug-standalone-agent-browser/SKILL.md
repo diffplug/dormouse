@@ -138,10 +138,7 @@ For click targeting, see **Clicking a link inside the screencast** above (1:1 ca
 
 ## What To Watch
 
-The high-rate `[ab-panel]` viewer-socket console diagnostics are **off by
-default** — they fire per stream event. Enable them before a run and reload (the
-flag is read once, on the first log); the same flag has the host log each viewer
-socket's rates every 5 s:
+The high-rate `[ab-panel]` viewer-socket console diagnostics are **off by default** — they fire per stream event. Enable them before a run and reload (the flag is read once, on the first log); the same flag has the host log each viewer socket's rates every 5 s:
 
 ```js
 localStorage.setItem('dormouse.flags.abDebugLogs', 'true'); // then reload

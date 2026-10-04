@@ -137,7 +137,7 @@ JSON output:
     },
     parameters: {
       flags: {
-        force: { kind: 'boolean', brief: 'Close even when the Workspace holds running or touched Surfaces.', optional: true, withNegated: false },
+        force: { kind: 'boolean', brief: 'Close even when the Workspace holds Surfaces Reopen cannot restore.', optional: true, withNegated: false },
         json: { kind: 'boolean', brief: 'Print JSON output.', optional: true, withNegated: false },
         window: { kind: 'parsed', parse: stringParser, brief: 'move: the window to move to (a label, or "new").', optional: true, placeholder: 'label' },
         index: { kind: 'parsed', parse: (value) => parseNonNegativeInt(value, '--index'), brief: 'move: the 0-based strip position to move to.', optional: true, placeholder: 'n' },

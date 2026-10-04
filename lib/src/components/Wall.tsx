@@ -44,10 +44,8 @@ import {
   getTerminalPaneState,
   getTerminalPaneStateSnapshot,
   getActivitySnapshot,
-  isUntouched,
   getOrCreateTerminal,
   getTerminalInstance,
-  countRunningSessionsIn,
   setTerminalUserTitle,
   UNNAMED_PANEL_TITLE,
 } from '../lib/terminal-registry';
@@ -69,12 +67,18 @@ import { DEFAULT_WORKSPACE_ID, type PersistedSurfaceRefs, type WorkspaceId } fro
 import { clearWorkspaceSurfaces, setWorkspaceSurfaces } from '../lib/workspace-surfaces';
 import { nextTodoMember } from '../lib/workspace-union';
 import { deriveDisplayedSurfaceLabel } from '../lib/session-label';
-import { getWorkspace, getWorkspacesSnapshot, subscribeToWorkspaces, workspaceRefFor } from '../lib/workspace-store';
+import { getWorkspace, getWorkspacesSnapshot, setActiveWorkspace, subscribeToWorkspaces, workspaceRefFor } from '../lib/workspace-store';
 import { awaitWallEmpty } from './wall/close-all';
+import { closeKind, type CloseKind } from './wall/close-kind';
 import { registerWallHandle, type WallHandle } from './wall/wall-handles';
 import { prepareWorkspaceTransfer } from './wall/workspace-transfer';
 import { installDorControlRouter } from './wall/dor-control-router';
-import type { DropTarget, RestoreToken } from '../lib/lath/ops';
+import { reopenClosed } from './wall/reopen';
+import { addPendingKill, finalizePendingKills, isOwnPendingKill, pendingKillKey, restorePendingKill, type PendingKill } from '../lib/pending-kills';
+import { isDelayedKillEnabled } from '../lib/labs-settings';
+import { remove as removeFromTree, type DropTarget, type RestoreToken } from '../lib/lath/ops';
+import { pushReopenRecord, type SurfaceReopenRecord } from '../lib/reopen-stack';
+import { reopenPane } from '../lib/session-restore';
 import type { Edge } from '../lib/lath/model';
 import { useDynamicPalette } from '../lib/themes/use-dynamic-palette';
 import {
@@ -84,10 +88,10 @@ import {
   toolBrowserLaunchParams,
   type LaunchFallback,
   browserDisplayModeFromParams,
+  retainsLivePage,
   browserUrlFromParams,
-  isBrowserParams,
   surfaceKindFromParams,
-  isPreviewSlotParams, isToolParams, matchesToolKey, namespacedToolKey, toolPendingFromParams,
+  isPreviewSlotParams, isToolParams, matchesToolKey, namespacedToolKey, toolFace, toolPendingFromParams,
 } from './wall/browser-surface';
 import { usePreviewSlotPin } from './wall/preview-slot';
 import { browserSurfaceUrl, hostPathDisplay, iframeRefusal } from './wall/browser-url';
@@ -103,9 +107,13 @@ import {
   shouldParkOnMinimize,
   edgeForDorDirection,
   directionForArrow,
+  persistableLeafMeta,
 } from './wall/lath-wall-engine';
 import type { LeafMeta } from '../lib/lath/persistence';
 import { useToolServing } from './wall/use-tool-serving';
+import { endToolDesignation, useToolRunEnd } from './wall/use-tool-run-end';
+import { useToolReaper } from './wall/use-tool-reaper';
+import { rehydrateTool } from './wall/tool-reaper';
 import type { WallNav } from './wall/keyboard/types';
 import { useWallKeyboard } from './wall/use-wall-keyboard';
 import { useSessionPersistence } from './wall/use-session-persistence';
@@ -167,6 +175,9 @@ export type { WallActions } from './wall/wall-context';
 export { SelectionRing } from './wall/SelectionRing';
 export { roundedRectPath } from '../lib/ring-geometry';
 export { TerminalPaneHeader } from './wall/TerminalPaneHeader';
+
+/** What a pending kill's entry calls each kind of Surface. */
+const SURFACE_KIND_LABEL = { terminal: 'Terminal', tool: 'Tool', browser: 'Browser' } as const;
 
 function persistedPanelTitle(title: string | null | undefined): string {
   const trimmed = title?.trim();
@@ -326,15 +337,13 @@ export function Wall({
   const lathRef = useRef<LathWallEngine | null>(null);
   if (lathRef.current === null) lathRef.current = createLathWallEngine();
   const lath = lathRef.current;
-  /** An untouched *shell* — the only thing the kill-without-confirm and
-   *  replace-in-place shortcuts may take. A Tool is never one: input to either
-   *  of its capabilities is input to the Tool (docs/specs/dor-tool.md → The
-   *  tool capability set). */
-  const isUntouchedShell = (id: string): boolean =>
-    isUntouched(id) && !isToolParams(lath.getMeta(id)?.params);
+  /** What a user close of this Surface does (`closeKind`). A Tool is never a
+   *  trivial close: input to either of its capabilities is input to the Tool
+   *  (docs/specs/dor-tool.md → The tool capability set). */
+  const closeKindOf = (id: string): CloseKind => closeKind(id, lath.getMeta(id)?.params);
   /** A blank shell may be replaced in place; one that owns a helper is not blank
    *  (docs/specs/terminal-context.md → Helper lifecycle). */
-  const isReplaceableShell = (id: string): boolean => isUntouchedShell(id) && !getHelper(id);
+  const isReplaceableShell = (id: string): boolean => closeKindOf(id) === 'trivial' && !getHelper(id);
   const restoredLathLayoutRef = useRef(restoredLathLayout);
   const dorSurfaceRefsRef = useRef<Map<string, string> | null>(null);
   const nextDorSurfaceRefIndexRef = useRef(1);
@@ -468,7 +477,7 @@ export function Wall({
     const meta = lath.store.getSnapshot().leafMeta;
     return doorsRef.current.map((door) => {
       const leaf = meta.get(door.id);
-      return `${leaf?.title ?? ''}\u0001${surfaceKindFromParams(leaf?.params)}\u0001${browserDisplayModeFromParams(leaf?.params) ?? ''}\u0001${isPreviewSlotParams(leaf?.params)}`;
+      return `${leaf?.title ?? ''}\u0001${surfaceKindFromParams(leaf?.params)}\u0001${browserDisplayModeFromParams(leaf?.params) ?? ''}\u0001${isPreviewSlotParams(leaf?.params)}\u0001${retainsLivePage(leaf?.params)}`;
     }).join('\u0000');
   });
   // The Baseboard's chips: the runtime Doors plus the store's current fallback title
@@ -482,6 +491,7 @@ export function Wall({
         kind: surfaceKindFromParams(meta?.params),
         browserDisplay: browserDisplayModeFromParams(meta?.params),
         ...(isPreviewSlotParams(meta?.params) ? { preview: true } : {}),
+        ...(retainsLivePage(meta?.params) ? { livePage: true } : {}),
       };
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `doorDisplayMetadata` is the store read
@@ -672,6 +682,33 @@ export function Wall({
     setTerminalContext({ id, warning });
   }, []);
 
+  /** Selection after the selected Surface is killed: in command mode, the next
+   *  surviving Door of a kill gesture's neighbors, else the first live pane. */
+  const selectAfterKill = useCallback((doorNeighbors: string[] | null): void => {
+    const nextDoor = modeRef.current === 'command' && doorNeighbors
+      ? doorNeighbors.find(neighbor => doorsRef.current.some(door => door.id === neighbor)) ?? doorsRef.current[0]?.id
+      : null;
+    if (nextDoor) { selectDoor(nextDoor); return; }
+    const survivorId = lath.listPanes()[0]?.id ?? null;
+    if (survivorId) selectPane(survivorId);
+    else setSelectedId(null);
+  }, [selectDoor, selectPane, lath]);
+
+  /** Kill a Surface with no pane: a Door, or a pending kill. */
+  const disposeDetached = useCallback((id: string): void => {
+    closeBrowserSurface(id, lath.getMeta(id)?.params);
+    // Drop the meta the store kept for it and, if it was parked, unmount the
+    // DOM (and any iframe document still running inside it) with it.
+    lath.store.forgetLeaf(id);
+    // Dispose the session/registry entry — this stops the PTY and makes a
+    // still-armed typeCommandWhenPromptReady exit via its `!registry.has(id)`
+    // check, so a late OSC signal can't type the command into a dead surface.
+    disposeSession(id);
+    clearLocalSurfaceActivity(id);
+    forgetSurfaceRef(id);
+    fireEvent({ type: 'kill', id });
+  }, [fireEvent, forgetSurfaceRef, lath]);
+
   /** Tear a Surface down after its helper guard. */
   const killPaneImmediately = useCallback((id: string): void => {
     closeHelperParent(id);
@@ -688,25 +725,11 @@ export function Wall({
       // teardown lands here: the throwaway was created straight into a door.
       const door = doorsRef.current.find(d => d.id === id);
       if (!door) return;
-      closeBrowserSurface(id, lath.getMeta(id)?.params);
-      // Destroy the Door: drop the meta the store kept for it and, if it was parked,
-      // unmount the DOM (and any iframe document still running inside it) with it.
-      lath.store.forgetLeaf(id);
-      // Dispose the session/registry entry — this stops the PTY and makes a
-      // still-armed typeCommandWhenPromptReady exit via its `!registry.has(id)`
-      // check, so a late OSC signal can't type the command into a dead surface.
-      disposeSession(id);
       removeDoor(id);
-      // Guard: no current caller kills a selected door (ensure's throwaway is
-      // never selected), but if one did, fall back to a visible pane.
-      if (selectedIdRef.current === id && selectedTypeRef.current === 'door') {
-        const survivorId = lath.listPanes()[0]?.id ?? null;
-        if (survivorId) selectPane(survivorId);
-        else setSelectedId(null);
-      }
-      clearLocalSurfaceActivity(id);
-      forgetSurfaceRef(id);
-      fireEvent({ type: 'kill', id });
+      // A kill gesture on the selected Door hands selection to its next
+      // surviving neighbor, as a revealed Door's kill does below.
+      if (selectedIdRef.current === id && selectedTypeRef.current === 'door') selectAfterKill(doorNeighbors);
+      disposeDetached(id);
       return;
     }
     // Close its browser session and release the client-side controller
@@ -736,19 +759,24 @@ export function Wall({
       // `listPanes()`, so an earlier delete would let a `dor` projection re-mint a
       // fresh ref for the dying pane.
       forgetSurfaceRef(id);
-      if (wasSelectedPane) {
-        const nextDoor = modeRef.current === 'command' && doorNeighbors
-          ? doorNeighbors.find(neighbor => doorsRef.current.some(door => door.id === neighbor)) ?? doorsRef.current[0]?.id
-          : null;
-        if (nextDoor) { selectDoor(nextDoor); return; }
-        const survivorId = lath.listPanes()[0]?.id ?? null;
-        if (survivorId) selectPane(survivorId);
-        else setSelectedId(null);
-      }
+      if (wasSelectedPane) selectAfterKill(doorNeighbors);
     }, exitMs);
     clearLocalSurfaceActivity(id);
     fireEvent({ type: 'kill', id });
-  }, [fireEvent, forgetSurfaceRef, removeDoor, selectPane, selectDoor, lath, nav]);
+  }, [fireEvent, forgetSurfaceRef, removeDoor, selectAfterKill, disposeDetached, lath, nav]);
+
+  /** This Wall's own pending Surfaces and helpers. */
+  const ownPendingKill = (kill: PendingKill): boolean => isOwnPendingKill(kill, effectiveWorkspaceId);
+
+  /** Make a close that would ask a pending kill instead (set below, once
+   *  restoring has what it needs). */
+  const pendKillRef = useRef<(id: string) => void>(() => {});
+  /** Break, once its confirmation is accepted (`docs/specs/dor-tool.md` -> Run end). */
+  const breakToolRef = useRef<(id: string) => Promise<void>>(async () => {});
+
+  /** Push the reopen record of a Surface about to close (set below, once the
+   *  serializer exists). */
+  const pushSurfaceRecordRef = useRef<(id: string) => void>(() => {});
 
   /**
    * A permanent Surface closure checks helper work before teardown
@@ -765,6 +793,9 @@ export function Wall({
       if (refused) { revealRefusal(id, refused); return refused; }
       if (isToolDirty(id, lath.getMeta(id)?.params)
         && !(editors === 'ask' ? await confirmToolEditorsClose([id]) : editors.includes(id))) return UNSAVED_TOOL_REFUSAL;
+      // Decided now, from the state the kill leaves behind; a Workspace close
+      // leaves one record for all its members instead.
+      if (!closingWorkspaceRef.current && closeKindOf(id) === 'reopenable') pushSurfaceRecordRef.current(id);
       killPaneImmediately(id);
       return null;
     } finally {
@@ -790,14 +821,21 @@ export function Wall({
           id,
           neighbors: [...doorsRef.current.slice(index + 1), ...doorsRef.current.slice(0, index).reverse()].map(item => item.id),
         };
-        handleReattachRef.current(door, { enterPassthrough: false, afterRestore: isUntouchedShell(id) ? 'close' : 'confirm-kill' });
+        // Only a confirmation needs the pane; any other close takes the Door
+        // as it is, so a reopen puts it back on the Baseboard.
+        if (closeKindOf(id) !== 'confirm') void closeSurface(id, 'ask');
+        else if (isDelayedKillEnabled()) pendKillRef.current(id);
+        else handleReattachRef.current(door, { enterPassthrough: false, afterRestore: 'confirm-kill' });
         return;
       }
       // The helper inspection below can outlive the Surface (an exit, a `dor
       // kill`); a confirm overlay for a gone pane would never clear itself.
       if (!nav.hasPane(id) || lath.isDying(id)) return;
       doorKillReturnRef.current = null;
-      if (isUntouchedShell(id)) { void closeSurface(id); return; }
+      // `ask`: a Tool that turns dirty during the helper check prompts rather
+      // than refusing a gesture in silence.
+      if (closeKindOf(id) !== 'confirm') { void closeSurface(id, 'ask'); return; }
+      if (isDelayedKillEnabled()) { pendKillRef.current(id); return; }
       setConfirmKill({ id, char: randomKillChar() });
     };
     if (!getHelper(id)) { stage(); return; }
@@ -814,7 +852,8 @@ export function Wall({
     // `isDying` guard in killPaneImmediately is the second line of defense.)
     confirmKillRef.current = staged;
     setConfirmKill(staged);
-    void closeSurface(ck.id, 'ask');
+    if (ck.action === 'break') void breakToolRef.current(ck.id);
+    else void closeSurface(ck.id, 'ask');
     confirmTimerRef.current = setTimeout(() => setConfirmKill(null), KILL_CONFIRM_MS);
   }, [closeSurface]);
 
@@ -866,9 +905,10 @@ export function Wall({
     }
   }, [selectDoor, lath]);
 
-  const addMinimizedSplitDoor = useCallback((referenceId: string, item: DooredItem, select: boolean) => {
-    const index = doorsRef.current.findIndex((door) => door.id === referenceId);
-    const insertAt = index >= 0 ? index + 1 : doorsRef.current.length;
+  /** Put a Door on the Baseboard at `index` (clamped), selecting it in command
+   *  mode when asked. */
+  const insertDoorAt = useCallback((index: number, item: DooredItem, select: boolean) => {
+    const insertAt = Math.min(index, doorsRef.current.length);
     const nextDoors = [
       ...doorsRef.current.slice(0, insertAt),
       item,
@@ -882,6 +922,11 @@ export function Wall({
       selectDoor(item.id);
     }
   }, [selectDoor]);
+
+  const addMinimizedSplitDoor = useCallback((referenceId: string, item: DooredItem, select: boolean) => {
+    const index = doorsRef.current.findIndex((door) => door.id === referenceId);
+    insertDoorAt(index >= 0 ? index + 1 : doorsRef.current.length, item, select);
+  }, [insertDoorAt]);
 
   /** Exit terminal mode */
   const exitTerminalMode = useCallback(() => {
@@ -947,11 +992,7 @@ export function Wall({
   );
 
   /** A member whose live document cannot leave its webview: a move reopens it. */
-  const isIframeSurface = useCallback((id: string): boolean => {
-    const params = lath.getMeta(id)?.params;
-    return (isBrowserParams(params) || (isToolParams(params) && browserUrlFromParams(params) !== null))
-      && resolveRenderMode(params) === 'iframe';
-  }, [lath]);
+  const isIframeSurface = useCallback((id: string): boolean => retainsLivePage(lath.getMeta(id)?.params), [lath]);
 
   /** The members whose live document a move between Windows cannot carry, by
    *  the ref a `dor` caller can act on. */
@@ -1076,6 +1117,34 @@ export function Wall({
     workspaceId,
   });
 
+  // --- Reopen (docs/specs/reopen.md) ---
+  /** A record's meta reopens pinned: a newer preview may hold the slot by then
+   *  (docs/specs/dor-tool.md → Preview slot). */
+  const reopenableLeafMeta = (meta: LeafMeta): LeafMeta => {
+    const persistable = persistableLeafMeta(meta);
+    if (!persistable.params || !('toolPreview' in persistable.params)) return persistable;
+    const { toolPreview: _preview, ...params } = persistable.params;
+    return { ...persistable, params };
+  };
+  pushSurfaceRecordRef.current = (id: string) => {
+    // A Surface already fading out was recorded by the close that started it.
+    if (lath.isDying(id)) return;
+    const meta = lath.getMeta(id);
+    const [pane] = persistence.serializeReported(member => member === id).panes;
+    if (!meta || !pane) return;
+    const index = doorsRef.current.findIndex(door => door.id === id);
+    const token = index < 0 ? removeFromTree(lath.store.getSnapshot().tree, id).token : null;
+    if (index < 0 && !token) return;
+    pushReopenRecord({
+      kind: 'surface',
+      closedAt: Date.now(),
+      workspaceId: effectiveWorkspaceId,
+      pane,
+      meta: reopenableLeafMeta(meta),
+      placement: token ? { kind: 'pane', token } : { kind: 'door', index, token: doorsRef.current[index].token },
+    });
+  };
+
   /**
    * Close every Surface in this Workspace, each through the same coordinator a
    * manual close uses (helper guard → kill). Resolves null once the Wall is
@@ -1085,6 +1154,8 @@ export function Wall({
   const closeAll = useCallback(async (editors: readonly string[] = []): Promise<string | null> => {
     closingWorkspaceRef.current = true;
     cancelContextPortLaunches();
+    // Nothing pending outlives the Wall that holds it.
+    finalizePendingKills(ownPendingKill);
     await collapseWorkspace(effectiveWorkspaceId);
     // Walked until nothing new turns up rather than over one snapshot: a member
     // pane's `dor` request can create a Surface during the awaits, and one
@@ -1141,7 +1212,8 @@ export function Wall({
       ? sel
       : lath.listPanes()[0]?.id;
     const r = token ? lath.store.restoreLeaf(meta, token, { fallbackRef }) : { ok: false };
-    // No token (or no fallback was possible — empty tree): make the leaf the root.
+    // No token, or no tier applied: add it the way a new pane is added (beside
+    // the last leaf, or as the root of an empty tree).
     if (!r.ok) lath.store.addLeaf(id, meta, null);
   }, [lath]);
 
@@ -1173,9 +1245,7 @@ export function Wall({
         // Guard against removal between scheduling and execution.
         if (!nav.hasPane(item.id)) return;
         focusSession(item.id, false);
-        if (afterRestore === 'close') {
-          void closeSurfaceRef.current(item.id);
-        } else if (afterRestore === 'confirm-kill') {
+        if (afterRestore === 'confirm-kill') {
           setConfirmKill({ id: item.id, char: randomKillChar() });
         } else if (typeof afterRestore === 'object' && afterRestore.type === 'replace-terminal') {
           // Atomic identity swap in place — no transient add/remove.
@@ -1193,6 +1263,77 @@ export function Wall({
   }, [selectPane, removeDoor, removeDoorAndSelect, restoreFromToken, enterTerminalMode, forgetSurfaceRef, showShellSpawnNotice, lath, nav]);
   const handleReattachRef = useRef(handleReattach);
   handleReattachRef.current = handleReattach;
+
+  /**
+   * Rebuild a closed Surface from its record as a new Surface with a new ref
+   * (glossary I10): where it sat, a Pane beside the selected pane when its
+   * neighbors are gone. `focus` selects it as a reopen gesture does.
+   */
+  const reopenSurface = useCallback((record: SurfaceReopenRecord, focus: boolean): { id: string; ref: string } => {
+    const id = generatePaneId();
+    const meta = reopenPane(id, record.pane, record.meta);
+    const ref = surfaceRefForId(id);
+    const { placement } = record;
+    if (placement.kind === 'door') {
+      lath.store.addDoor(id, meta);
+      insertDoorAt(placement.index, { id, token: { ...(placement.token as RestoreToken), leafId: id } }, focus);
+    } else {
+      restoreFromToken(id, meta, { ...placement.token, leafId: id });
+      if (focus) enterTerminalMode(id);
+    }
+    return { id, ref };
+  }, [generatePaneId, surfaceRefForId, restoreFromToken, enterTerminalMode, insertDoorAt, lath]);
+
+  /**
+   * A pending kill (`docs/specs/reopen.md` → "Labs: No-confirm delayed kill"):
+   * the Surface leaves the layout as a minimize does — its token kept, a page
+   * parked, its process Live — with no Door; restoring puts the same Surface
+   * back, and finalizing takes today's kill path.
+   */
+  pendKillRef.current = (id: string) => {
+    const meta = lath.getMeta(id);
+    if (!meta) return;
+    setTerminalContext(current => current?.id === id ? null : current);
+    const doorIndex = doorsRef.current.findIndex(door => door.id === id);
+    const doorNeighbors = doorKillReturnRef.current?.id === id ? doorKillReturnRef.current.neighbors : null;
+    doorKillReturnRef.current = null;
+    const wasSelected = selectedIdRef.current === id;
+    let token: RestoreToken | null;
+    if (doorIndex >= 0) {
+      token = doorsRef.current[doorIndex].token as RestoreToken;
+      removeDoor(id);
+    } else {
+      token = lath.store.doorLeaf(id, { park: shouldParkOnMinimize(meta) }).token;
+      if (!token) return;
+    }
+    if (wasSelected) selectAfterKill(doorNeighbors);
+    const kind = surfaceKindFromParams(meta.params);
+    addPendingKill({
+      kind: 'surface',
+      id,
+      workspaceId: effectiveWorkspaceId,
+      ref: surfaceRefForId(id),
+      title: deriveDisplayedSurfaceLabel(kind, id, persistedPanelTitle(meta.title)),
+      label: SURFACE_KIND_LABEL[kind],
+    }, {
+      restore: (focus) => {
+        // Its Workspace went pending after it did: that comes back first, or
+        // this would return to a Wall nobody can see.
+        restorePendingKill(pendingKillKey('workspace', effectiveWorkspaceId), focus);
+        if (focus) setActiveWorkspace(effectiveWorkspaceId);
+        if (doorIndex >= 0) {
+          insertDoorAt(doorIndex, { id, token }, focus);
+          return;
+        }
+        restoreFromToken(id, lath.getMeta(id) ?? meta, token);
+        if (focus) enterTerminalMode(id);
+      },
+      finalize: () => {
+        closeHelperParent(id);
+        disposeDetached(id);
+      },
+    });
+  };
 
   /** A Door click, or a pin in its popover: reattach into passthrough, a human
    *  gesture that acknowledges the Session. */
@@ -1333,7 +1474,7 @@ export function Wall({
     focusNeutral?: boolean;
     /** Create the leaf but stage no shell and spawn no PTY. `dor tool` uses it
      *  for a pane awaiting approval: nothing from the repo may run until a human
-     *  chooses (docs/specs/dor-tool.md -> Trust rule 3). */
+     *  chooses (docs/specs/dor-tool.md -> Trust rule 2). */
     deferTerminal?: boolean;
     /** Lay the leaf out even beside a Door reference, which otherwise makes it
      *  a Door: a pending approval, a preview slot. */
@@ -1353,8 +1494,8 @@ export function Wall({
     }
 
     const newId = generatePaneId();
-    // An explicit cwd (dor ensure --cwd, defaulting to the caller's directory)
-    // wins; otherwise inherit the reference pane's local cwd as dor split does.
+    // An explicit cwd (the invoking directory `dor ensure` and `dor split`
+    // send) wins; otherwise inherit the reference pane's local cwd.
     const inheritedCwd = cwd ?? getInheritableCwd(referenceId);
 
     if (deferTerminal) {
@@ -1606,7 +1747,10 @@ export function Wall({
 
   // --- dor control plane (the `dor` CLI's webview handler) ---
   // A tool grows its browser when its command starts serving.
-  useToolServing({ lath, doorsRef, paused: useCallback(() => closingWorkspaceRef.current || isWorkspaceTransferPending(effectiveWorkspaceId), [effectiveWorkspaceId]) });
+  const toolsPaused = useCallback(() => closingWorkspaceRef.current || isWorkspaceTransferPending(effectiveWorkspaceId), [effectiveWorkspaceId]);
+  useToolServing({ lath, doorsRef, paused: toolsPaused });
+  useToolRunEnd({ lath, doorsRef, paused: toolsPaused });
+  useToolReaper({ lath, doors, doorsRef, active, paused: toolsPaused });
 
   const previewSlot = usePreviewSlotPin(lath);
   const { findSurfaceByParams, updateSurfaceParams, handleDorControl } = useDorControl({
@@ -1701,7 +1845,11 @@ export function Wall({
           if (closingWorkspaceRef.current || isWorkspaceTransferPending(effectiveWorkspaceId)
             || !lath.getMeta(match.id) || lath.isDying(match.id) || isClosingSurface(match.id)) return;
           const state = getTerminalPaneState(match.id);
-          if (state.currentCommand === null) {
+          const rehydrated = rehydrateTool(lath, match.id);
+          if (rehydrated) {
+            if (await waitForNewToolCommand(match.id, rehydrated.command, rehydrated.cwd) !== 'ready') showShellSpawnNotice(match.id, 'command did not restart');
+          }
+          else if (state.currentCommand === null) {
             const matchedCommand = lath.getMeta(match.id)?.params?.command;
             const command = typeof matchedCommand === 'string' ? matchedCommand : toolRunCommand(resolved.run, match.id);
             const restarted = await restartSurfaceInPlace(match.id, command, state.cwd?.path ?? cwd, undefined, { acceptCompletedRun: true });
@@ -1848,20 +1996,21 @@ export function Wall({
       else enterTerminalMode(id);
     },
     showMoveNotice: (id, text) => showShellSpawnNotice(id, text, 8000),
+    showNotice: (text) => {
+      const id = livePaneId();
+      if (id) showShellSpawnNotice(id, text);
+    },
+    reopenSurface,
     serializeNow: persistence.serializeNow,
+    serializeReported: () => persistence.serializeReported(),
 
     surfaceIds: memberSurfaceIds,
     ownsSurface,
     iframeSurfaceRefs,
     browserSessions,
-    hasTouchedSurfaces: () => memberSurfaceIds().some((id) => {
-      // A browser Surface has no "untouched" notion and always holds a page, so
-      // it counts; so does a Tool, before its terminal exists to be asked. A
-      // terminal counts once its Session exists and has input.
-      if (!surfaceHasTerminal(id) || isToolParams(lath.getMeta(id)?.params)) return true;
-      return getTerminalInstance(id) !== null && !isReplaceableShell(id);
-    }),
-    runningCount: () => countRunningSessionsIn(memberSurfaceIds()),
+    // A shell whose Session has not spawned yet has nothing to lose.
+    needsCloseConfirmation: () => memberSurfaceIds().some(id => closeKindOf(id) === 'confirm'
+      && !(surfaceKindFromParams(lath.getMeta(id)?.params) === 'terminal' && getTerminalInstance(id) === null)),
     dirtyToolIds: () => memberSurfaceIds().filter(id => isToolDirty(id, lath.getMeta(id)?.params)),
     enterSelectedPane: () => {
       const id = livePaneId();
@@ -1883,14 +2032,18 @@ export function Wall({
       return meta ? deriveDisplayedSurfaceLabel(surfaceKindFromParams(meta.params), next, persistedPanelTitle(meta.title)) : null;
     },
     flushPersistence: (options) => persistence.flush(options),
-    prepareWorkspaceTransfer: () => prepareWorkspaceTransfer({
+    prepareWorkspaceTransfer: () => {
+      // No pending kill follows a Workspace to its destination.
+      finalizePendingKills(ownPendingKill);
+      return prepareWorkspaceTransfer({
       workspaceId: effectiveWorkspaceId,
       naming: getWorkspace(effectiveWorkspaceId) ?? { name: '', nameIsAuto: false },
       serialize: persistence.serialize,
       surfaceIds: memberSurfaceIds,
       hasTerminal: surfaceHasTerminal,
       captureTools: () => captureToolParams(lath, memberSurfaceIds()),
-    }),
+      });
+    },
     closeAll,
     handleDorControl,
   };
@@ -1908,6 +2061,7 @@ export function Wall({
       unregister();
       releaseRouter();
       clearWorkspaceSurfaces(handle.workspaceId);
+      finalizePendingKills(kill => isOwnPendingKill(kill, handle.workspaceId));
     };
   }, []);
 
@@ -2151,6 +2305,14 @@ export function Wall({
         title: hostPathDisplay(url, true),
       });
     },
+    onBreakTool: (id: string) => {
+      // As Kill does: the confirm keystroke must reach the Wall, not the pane's
+      // xterm. Break always asks, since nothing rejoins what it splits.
+      const params = lath.getMeta(id)?.params;
+      if (!isToolParams(params) || toolFace(params) === 'pending-approval' || !nav.hasPane(id) || lath.isDying(id)) return;
+      exitTerminalMode();
+      setConfirmKill({ id, char: randomKillChar(), action: 'break', serving: browserUrlFromParams(params) !== null });
+    },
     onBrowserLaunchFailed: (id, error) => {
       // The one liveness check every creator's fallback shares.
       const params = lath.getMeta(id)?.params;
@@ -2178,6 +2340,8 @@ export function Wall({
   }), [previewSlot, addSplitPanel, minimizePane, enterTerminalMode, exitTerminalMode, requestKill, replaceSurface, buildDorSurfaces, createContentSurface, surfaceRefForId, resolveToolApproval, lath, nav]);
   const openContextPort = useCallback(async (id: string, entry: PortUrlEntry, mode: PortMode): Promise<void> => {
     const opening = terminalContextRef.current;
+    // Success dismisses only the context that asked; a failed or cancelled
+    // launch leaves it open, and a later context that replaced it stays.
     const dismiss = () => {
       if (terminalContextRef.current !== opening) return;
       cancelContextPortLaunches();
@@ -2195,6 +2359,8 @@ export function Wall({
     const provider = parseRenderMode(mode).provider;
     // Keep the persisted agent-browser suffix from before multiple providers.
     const key = `${id}:${entry.port}:${provider === 'agent-browser' ? 'agent' : provider ?? 'iframe'}`;
+    // Requests for one target run one at a time: a second waits for the first,
+    // then reuses what it placed.
     const pending = contextPortLaunches.current.get(key);
     if (pending) {
       await pending.done;
@@ -2244,6 +2410,39 @@ export function Wall({
       if (contextPortLaunches.current.get(key) === launch) contextPortLaunches.current.delete(key);
     }
   }, [buildDorSurfaces, findSurfaceByParams, createContentSurface, enterTerminalMode, revealSurface, updateSurfaceParams, generatePaneId, lath, nav, cancelContextPortLaunches]);
+  breakToolRef.current = async (id: string) => {
+    // docs/specs/dor-tool.md -> Run end: the Tool becomes the plain
+    // terminal it runs in, still running, and a serving page reopens —
+    // reloaded, at the URL on screen, in the renderer it used where this
+    // host has it — as an ordinary browser Surface beside it.
+    const params = lath.getMeta(id)?.params;
+    if (!isToolParams(params) || toolFace(params) === 'pending-approval') return;
+    // Consent just before the document goes; any change while asking abandons the Break.
+    if (!await confirmToolEditorsClose([id]) || lath.getMeta(id)?.params !== params) return;
+    // Only an http(s) page reopens, as a swap judges it; a transient or error
+    // page on screen falls back to the Tool's own URL.
+    const shownUrl = browserSurfaceUrl(getAgentBrowserScreenController(id)?.chrome().url ?? '') ?? browserUrlFromParams(params);
+    const mode = resolveRenderMode(params);
+    const cwd = getTerminalPaneState(id)?.cwd?.path;
+    if (terminalContextRef.current?.id === id) setTerminalContext(null);
+    endToolDesignation(lath, id);
+    if (!shownUrl) return;
+    const provider = parseRenderMode(mode).provider;
+    const reference = buildDorSurfaces().find((s) => s.id === id);
+    if (!reference) return;
+    const created = createContentSurface({
+      minimized: false,
+      preserveSource: true,
+      // A launch that fails takes its pane with it.
+      params: provider && hostSupportsBrowser(provider)
+        ? { surfaceType: 'browser', renderMode: mode, url: shownUrl, cwd, syncEngaged: false, launchFallback: 'close' satisfies LaunchFallback }
+        : { surfaceType: 'browser', renderMode: 'iframe', url: shownUrl },
+      reference,
+      title: hostPathDisplay(shownUrl, true),
+    });
+    if (created.ok) enterTerminalMode(created.value.id);
+  };
+
   const contextActions = useMemo(() => ({
     id: contextSourceId,
     mounted: terminalContext,
@@ -2310,6 +2509,7 @@ export function Wall({
     minimizePane,
     openTerminalContext: (id, origin) => contextActions.open(id, { origin }),
     requestKill,
+    reopenClosed: () => { void reopenClosed({ gesture: true }); },
     acceptKill,
     rejectKill,
     setRenamingPaneId,
@@ -2317,7 +2517,7 @@ export function Wall({
   });
 
   // LathHost surfaces `focusin` inside a leaf as an op proposal (embed self-focus
-  // adoption, acceptance row 8): passthrough → enter the leaf if selection differs;
+  // adoption): passthrough → enter the leaf if selection differs;
   // command → move selection onto it.
   const onLeafFocused = useCallback((id: string) => {
     if (modeRef.current === 'passthrough') {

@@ -84,12 +84,33 @@ test('the file entry titles itself, announces its port and path, serves the stag
     assert.equal((await call(viewer, viewer.path)).status, 200);
     // The separately staged runtime reads its assets beside itself.
     const prefix = viewer.path.replace(/view$/, '');
-    for (const name of ['editor.js', 'editor.css', 'editor.worker.js']) {
+    for (const name of ['editor.js', 'editor.css', 'editor.worker.js', 'markdown.js', 'markdown.css']) {
       assert.equal((await call(viewer, `${prefix}assets/${name}`)).status, 200, name);
     }
     await terminates(child, viewer);
   } finally {
     if (child.exitCode === null && child.signalCode === null) {
+      const exited = once(child, 'exit');
+      child.kill('SIGKILL');
+      await exited;
+    }
+  }
+});
+
+// Unknown is not clean (docs/specs/dor-tool.md -> Unsaved changes): a view
+// that cannot change says so itself, while an editor reports once it loads.
+test('the file entry reports a read-only view clean at once, and leaves an editor to report itself', { timeout: 10_000 }, async () => {
+  const clean = '\x1b]367;state;{"v":1,"dirty":false}\x07';
+  const image = join(root, 'pixel.png');
+  await writeFile(image, Buffer.from('89504e470d0a1a0a', 'hex'));
+  const text = join(root, 'notes.txt');
+  await writeFile(text, 'notes');
+  for (const [file, reports] of [[image, true], [text, false]]) {
+    const { child, read } = await spawnViewer('__view-file', file);
+    try {
+      await new Promise(resolve => setTimeout(resolve, 50));
+      assert.equal(read().includes(clean), reports, JSON.stringify(read()));
+    } finally {
       const exited = once(child, 'exit');
       child.kill('SIGKILL');
       await exited;

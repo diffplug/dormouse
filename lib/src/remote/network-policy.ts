@@ -55,7 +55,7 @@ export interface NetworkPolicyResult {
   /**
    * The last direct-only session the path ended, this service run, until
    * dismissed (`docs/specs/remote-network.md` -> "Local networks"); absent with
-   * none, and from a broker older than the field.
+   * none.
    */
   refusal?: PathRefusal;
 }

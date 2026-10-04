@@ -7,6 +7,9 @@ pnpm-workspace.yaml
 icon.svg
 *.vsix
 *.ts
+# Also ships the zsh shell-integration dotfiles (dist/shell-integration/.z*).
+# Nothing asserts they are packaged; dropped, zsh silently degrades to the
+# keystroke fallback.
 !dist/**
 !media/**
 !images/**

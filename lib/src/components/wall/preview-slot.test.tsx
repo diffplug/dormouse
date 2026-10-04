@@ -18,7 +18,7 @@ import * as terminalRegistry from '../../lib/terminal-registry';
 import { recordToolDirty, resetToolDirty } from '../../lib/tool-dirty-store';
 import { pendingShellOpts } from '../../lib/terminal-store';
 import { doubleClick, mountWallHarness, reportRunning, waitUntil, type WallHarness } from './wall-test-utils';
-import { getExternalLinkConfirmationSnapshot } from '../../lib/external-link-confirmation';
+import { clearExternalLinkConfirmation, getExternalLinkConfirmationSnapshot } from '../../lib/external-link-confirmation';
 import { activateTerminalLink } from '../../lib/terminal-link-activation';
 import { applyLiveToolEvents } from '../../lib/tool-events';
 import { parseReplay } from '../../lib/platform/replay-parse';
@@ -61,6 +61,7 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => { requests.abort(); await new Promise(resolve => setTimeout(resolve, 125)); });
   harness.dispose();
+  clearExternalLinkConfirmation();
   for (const id of sessions) {
     fake.clearInputHandler(id);
     pendingShellOpts.delete(id);
@@ -257,8 +258,12 @@ describe('dor open --preview', () => {
   it('retargets the slot in place, keeping its Session, ref, and a default title up to date', async () => {
     await mountSlot();
     const ref = (await listRow('slot'))!.ref;
+    // The interrupt is the host's own: its exit is silenced before the Ctrl+C.
+    const silencedAt: number[] = [];
+    vi.spyOn(fake, 'alertSilenceRun').mockImplementation(id => { if (id === 'slot') silencedAt.push(typed.slot.length); });
     // Asked from another directory, the slot's shell still runs it where it is.
     const result = await answer(await request({ file: 'b.md', preview: true, cwd: '/repo/docs' }));
+    expect(silencedAt).toEqual([0]);
     expect(result).toMatchObject({ status: 'retargeted', surfaceId: 'slot', surfaceRef: ref, command: 'view /repo/b.md', cwd: '/repo', minimized: false });
     expect(typed.slot).toEqual(['\x03', 'view /repo/b.md\r']);
     expect(typed['pane-a']).toEqual([]);
@@ -327,13 +332,17 @@ describe('dor open --preview', () => {
     expect(typed.slot).toEqual([]);
   });
 
-  it('re-runs the slot in place when it shows the file but its command exited', async () => {
+  it('ends a slot whose command exited: a plain terminal, so the next preview opens a new slot', async () => {
     await mountSlot();
     act(() => returnToPrompt('slot'));
-    expect(await answer(await request({ file: 'a.md', preview: true }))).toMatchObject({ status: 'adopted', surfaceId: 'slot', command: 'view /repo/a.md', minimized: false });
-    expect(typed.slot).toEqual(['\x03', 'view /repo/a.md\r']);
-    expect(focusOf('pane-a')).toBe('true');
-    expect(await paramsOf('slot')).toMatchObject({ toolTarget: '/repo/a.md', toolPreview: true });
+    await flush();
+    // docs/specs/dor-tool.md -> Run end: the mark went with the Tool.
+    expect(await paramsOf('slot')).toBeUndefined();
+    expect(await listRow('slot')).not.toHaveProperty('preview');
+    const result = await answer(await request({ file: 'a.md', preview: true }));
+    expect(result).toMatchObject({ status: 'created', command: 'view /repo/a.md' });
+    expect(result.surfaceId).not.toBe('slot');
+    expect(typed.slot).toEqual([]);
   });
 
   it('re-runs the slot for its own file when that preview supersedes one still interrupting it', async () => {
@@ -666,12 +675,14 @@ describe('pinning the slot', () => {
     expect(await listRow('slot')).not.toHaveProperty('preview');
   });
 
-  it('re-runs and pins by open when the slot shows the file but its command exited', async () => {
+  it('places an open as if there were no slot once the slot\'s command exited', async () => {
     await mountSlot();
     act(() => returnToPrompt('slot'));
-    expect(await answer(await request({ file: 'a.md' }))).toMatchObject({ status: 'adopted', surfaceId: 'slot', command: 'view /repo/a.md' });
-    expect(typed.slot).toEqual(['\x03', 'view /repo/a.md\r']);
-    expect(await paramsOf('slot')).not.toHaveProperty('toolPreview');
+    await flush();
+    const result = await answer(await request({ file: 'a.md' }));
+    expect(result).toMatchObject({ status: 'created', command: 'view /repo/a.md' });
+    expect(result.surfaceId).not.toBe('slot');
+    expect(typed.slot).toEqual([]);
   });
 
   it('reveals a pinned Tool with the resolved key, leaving a slot showing the file under another Tool alone', async () => {
@@ -934,6 +945,35 @@ describe('an OSC 367 open', () => {
 });
 
 describe('a terminal link', () => {
+  const openFileButton = () => [...document.body.querySelectorAll('button')].find(button => button.textContent === 'Open file')!;
+
+  it('confirms a labelled link through the real Wall and pins its existing preview', async () => {
+    await mountSlot();
+    fake.toolControl = vi.fn(async request => request.op === 'open-handlers'
+      ? { status: 'open-handlers' as const, handlers: { handlers: [{ tool: 'viewer', description: 'view', reason: 'open rule' }], config: '/config/dormouse.yml' } }
+      : openLookup('a.md'));
+    await act(async () => activateTerminalLink('pane-a', { detail: 1 }, 'file:///repo/a.md', '[Report]'));
+    expect(getExternalLinkConfirmationSnapshot()).not.toBeNull();
+    expect(fake.toolControl).toHaveBeenCalledTimes(1);
+    await act(async () => openFileButton().click());
+    await waitUntil(() => getExternalLinkConfirmationSnapshot() === null);
+    expect(fake.toolControl).toHaveBeenLastCalledWith({ op: 'open', target: 'file:///repo/a.md', cwd: '/repo', tool: undefined });
+    expect(container.querySelector('[data-lath-leaf="slot"] .italic')).toBeNull();
+    expect(container.querySelectorAll('[data-lath-leaf]')).toHaveLength(2);
+  });
+
+  it('reports a closed source instead of opening next to an unrelated terminal', async () => {
+    await mountSlot();
+    fake.toolControl = vi.fn(async () => ({ status: 'open-handlers' as const, handlers: { handlers: [], config: '/config/dormouse.yml' } }));
+    await act(async () => activateTerminalLink('closed-pane', { detail: 1 }, 'file:///repo/a.md', '[Report]'));
+    await act(async () => openFileButton().click());
+    await waitUntil(() => document.body.querySelector('[role="alert"]') !== null);
+    expect(getExternalLinkConfirmationSnapshot()).not.toBeNull();
+    expect(document.body.querySelector('[role="alert"]')?.textContent).toBe('The originating terminal is no longer available.');
+    expect(fake.toolControl).toHaveBeenCalledTimes(1);
+    expect(container.querySelectorAll('[data-lath-leaf]')).toHaveLength(2);
+  });
+
   it('previews a local file link on a click and pins it on a double-click', async () => {
     const toolControl = await mountSlot();
     // The host resolves a link's URL to the file it names.
@@ -1135,7 +1175,11 @@ describe('a switching slot', () => {
     await waitUntil(runs('view /repo/b.md'));
     act(() => terminalRegistry.applyTerminalSemanticEvents('slot', [{ type: 'commandFinish', exitCode: 1 }]));
     expect(frames()).toHaveLength(0);
-    expect(terminalHalf().style.visibility).toBe('');
+    // The failed run ended the Tool: the slot is the plain terminal showing it
+    // (docs/specs/dor-tool.md -> Run end).
+    await flush();
+    expect(await paramsOf('slot')).toBeUndefined();
+    expect(inSlot('[data-testid="terminal-pane"]')).toHaveLength(1);
   });
 
   it.each([

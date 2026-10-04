@@ -15,6 +15,15 @@ import { setTerminalActivity, clearTerminalActivity } from '../../lib/session-ac
 import { createAlertEpisode } from '../../lib/alert-episode';
 import { registry, type TerminalEntry } from '../../lib/terminal-store';
 import { clearSizeHold, getSizeHolds, holdSize } from '../../lib/size-hold-store';
+import {
+  installWorkspaceIdPool,
+  renameWorkspace,
+  resetWorkspaceIdPool,
+  resetWorkspaces,
+  setActiveWorkspace,
+  setWorkspaces,
+} from '../../lib/workspace-store';
+import { resetWorkspaceSurfaces, setWorkspaceSurfaces } from '../../lib/workspace-surfaces';
 import { installPeerSurfaceResponder } from './peer-surfaces';
 import { takeBackSize } from './take-back';
 
@@ -29,7 +38,7 @@ class ServicePlatform {
   notified = 0;
   /** What `status` answers — the gate the notify sources arm on. */
   enrolled = true;
-  /** Absent, as a broker from before one-time connections answers, unless a case sets it. */
+  /** What `status` answers for `serving`: `enrolled`, unless a case sets it. */
   serving: boolean | undefined = undefined;
 
   /** Every non-`status` command this webview sent, with its params. */
@@ -40,7 +49,7 @@ class ServicePlatform {
   readonly burrow = {
     command: async (cmd: string, params?: unknown) => {
       if (cmd === 'status') {
-        return { enrolled: this.enrolled, ...(this.serving === undefined ? {} : { serving: this.serving }) };
+        return { enrolled: this.enrolled, serving: this.serving ?? this.enrolled };
       }
       this.commands.push({ cmd, params });
       return this.commandResult(cmd);
@@ -265,8 +274,78 @@ describe('surface responder', () => {
   });
 });
 
+describe('Workspaces in the directory', () => {
+  /** A Window of two Workspaces, `web` shown and `api` hidden behind it. */
+  function twoWorkspaces(): void {
+    registerSurface('api-shell');
+    registerSurface('web-shell');
+    setWorkspaces({
+      workspaces: [
+        { id: 'workspace-4', name: 'api', nameIsAuto: false },
+        { id: 'workspace-9', name: 'web', nameIsAuto: true },
+      ],
+      activeId: 'workspace-9',
+    });
+    setWorkspaceSurfaces('workspace-4', ['api-shell']);
+    setWorkspaceSurfaces('workspace-9', ['web-shell']);
+  }
+
+  const answered = () =>
+    (platform.answer('directory', {}) as Array<{ surfaceId: string; workspace?: unknown }>)
+      .map(({ surfaceId, workspace }) => ({ surfaceId, workspace }));
+
+  beforeEach(async () => {
+    // Standalone's registry: refs are minted numbers, unique across Windows.
+    await installWorkspaceIdPool(async () => []);
+  });
+
+  afterEach(() => {
+    resetWorkspaceIdPool();
+    resetWorkspaces();
+    resetWorkspaceSurfaces();
+  });
+
+  it('lists a hidden Workspace’s terminals, naming every entry’s Workspace', () => {
+    twoWorkspaces();
+    expect(answered()).toEqual([
+      { surfaceId: 'api-shell', workspace: { ref: 'workspace:4', name: 'api', active: false } },
+      { surfaceId: 'web-shell', workspace: { ref: 'workspace:9', name: 'web', active: true } },
+    ]);
+  });
+
+  it('names no Workspace where a ref is only a strip position', () => {
+    // VS Code: every webview is its own `workspace:1`, so naming it would merge
+    // one window's terminals with another's on the phone.
+    resetWorkspaceIdPool();
+    twoWorkspaces();
+    expect(answered()).toEqual([
+      { surfaceId: 'api-shell', workspace: undefined },
+      { surfaceId: 'web-shell', workspace: undefined },
+    ]);
+  });
+
+  it('tells the Burrow when a Workspace is switched, renamed, or gains a member', async () => {
+    twoWorkspaces();
+    await armed();
+    await Promise.resolve();
+    const before = platform.notified;
+
+    setActiveWorkspace('workspace-4');
+    await Promise.resolve();
+    expect(platform.notified).toBe(before + 1);
+
+    renameWorkspace('workspace-9', 'frontend');
+    await Promise.resolve();
+    expect(platform.notified).toBe(before + 2);
+
+    setWorkspaceSurfaces('workspace-4', ['api-shell', 'web-shell']);
+    await Promise.resolve();
+    expect(platform.notified).toBe(before + 3);
+  });
+});
+
 describe('size holds', () => {
-  const PHONE = { holder: 'session-a', label: 'iPhone', lease: '1' };
+  const PHONE = { holder: 'session-a', label: 'iPhone', lease: '1', serviceId: 'service-1' };
   /** A hold as the pane records it: as the Burrow named it, with the size it set. */
   const held = <T extends object>(hold: T, cols: number, rows: number) => ({ ...hold, cols, rows });
 
@@ -285,7 +364,7 @@ describe('size holds', () => {
     const phone = held(PHONE, 51, 14);
     expect(getSizeHolds('surface-1')).toEqual([phone]);
 
-    const later = { holder: 'session-b', label: 'Pixel', lease: '4' };
+    const later = { holder: 'session-b', label: 'Pixel', lease: '4', serviceId: 'service-1' };
     platform.answer('surfaceOp', { surfaceId: 'surface-1', op: 'resize', cols: 40, rows: 20, hold: later });
     expect(getSizeHolds('surface-1')).toEqual([phone, held(later, 40, 20)]);
     expect(heldAtResize).toEqual([[phone], [phone, held(later, 40, 20)]]);
@@ -307,9 +386,9 @@ describe('size holds', () => {
     expect(getSizeHolds('surface-1')).toEqual([]);
     // Nor from a hold of the wrong shape: a peer window is another build.
     for (const hold of [
-      { holder: 'a', label: 7, lease: '1' },
-      { holder: 'a', label: 'iPhone' },
-      { label: 'iPhone', lease: '1' },
+      { holder: 'a', label: 7, lease: '1', serviceId: 's' },
+      { holder: 'a', label: 'iPhone', serviceId: 's' },
+      { label: 'iPhone', lease: '1', serviceId: 's' },
     ]) {
       platform.answer('surfaceOp', { surfaceId: 'surface-1', op: 'attach', cols: 51, rows: 14, hold });
       expect(getSizeHolds('surface-1')).toEqual([]);
@@ -332,7 +411,7 @@ describe('size holds', () => {
   it('keeps each holder’s hold until that holder releases it', () => {
     registerSurface('surface-1');
     platform.answer('surfaceOp', { surfaceId: 'surface-1', op: 'attach', cols: 51, rows: 14, hold: PHONE });
-    const later = { holder: 'session-b', label: 'Pixel', lease: '1' };
+    const later = { holder: 'session-b', label: 'Pixel', lease: '1', serviceId: 'service-1' };
     platform.answer('surfaceOp', { surfaceId: 'surface-1', op: 'attach', cols: 40, rows: 20, hold: later });
 
     platform.answer('surfaceOp', { surfaceId: 'surface-1', op: 'release', hold: later });
@@ -347,7 +426,7 @@ describe('size holds', () => {
     platform.answer('surfaceOp', { surfaceId: 'surface-1', op: 'attach', cols: 51, rows: 14, hold: PHONE });
     // The size that holder last set, not the one it attached at.
     platform.answer('surfaceOp', { surfaceId: 'surface-1', op: 'resize', cols: 60, rows: 30, hold: PHONE });
-    const later = { holder: 'session-b', label: 'Pixel', lease: '1' };
+    const later = { holder: 'session-b', label: 'Pixel', lease: '1', serviceId: 'service-1' };
     platform.answer('surfaceOp', { surfaceId: 'surface-1', op: 'attach', cols: 40, rows: 20, hold: later });
     expect(terminal).toMatchObject({ cols: 40, rows: 20 });
 
@@ -398,7 +477,7 @@ describe('size holds', () => {
   it('takes a pane back from every session holding it', async () => {
     registerSurface('surface-1');
     holdSize('surface-1', held(PHONE, 80, 24));
-    holdSize('surface-1', { holder: 'session-b', label: 'Pixel', lease: '1', cols: 80, rows: 24 });
+    holdSize('surface-1', { holder: 'session-b', label: 'Pixel', lease: '1', serviceId: 'service-1', cols: 80, rows: 24 });
     platform.commandResult = () => ({ ended: true });
 
     await takeBackSize('surface-1');
@@ -421,7 +500,7 @@ describe('size holds', () => {
 
     // A newer holder that arrived while the command was in flight keeps the pane.
     holdSize('surface-1', held(PHONE, 80, 24));
-    const later = { holder: 'session-b', label: 'Pixel', lease: '1', cols: 80, rows: 24 };
+    const later = { holder: 'session-b', label: 'Pixel', lease: '1', serviceId: 'service-1', cols: 80, rows: 24 };
     platform.commandResult = () => {
       holdSize('surface-1', later);
       return { ended: true };
@@ -434,23 +513,17 @@ describe('size holds', () => {
     registerSurface('surface-1');
     registerSurface('surface-2');
     const gone = { ...PHONE, serviceId: 'service-1' };
-    // An older Burrow's hold names no instance, and is never dropped for it.
-    const legacy = { holder: 'session-c', label: 'iPad', lease: '1' };
     platform.answer('surfaceOp', { surfaceId: 'surface-1', op: 'attach', cols: 51, rows: 14, hold: gone });
     platform.answer('surfaceOp', { surfaceId: 'surface-2', op: 'attach', cols: 51, rows: 14, hold: gone });
-    platform.answer('surfaceOp', { surfaceId: 'surface-2', op: 'attach', cols: 51, rows: 14, hold: legacy });
-    expect(getSizeHolds('surface-1')).toEqual([held(gone, 51, 14)]);
 
-    // A broker older than the field names none, and the service that took
-    // them is still the one speaking: nothing is dropped.
-    platform.emit({ name: 'status', enrolled: true, serving: true });
+    // The service that took them is still the one speaking: nothing is dropped.
     platform.emit({ name: 'status', enrolled: true, serving: true, serviceId: 'service-1' });
     expect(getSizeHolds('surface-1')).toEqual([held(gone, 51, 14)]);
-    expect(getSizeHolds('surface-2')).toEqual([held(gone, 51, 14), held(legacy, 51, 14)]);
+    expect(getSizeHolds('surface-2')).toEqual([held(gone, 51, 14)]);
 
     platform.emit({ name: 'status', enrolled: false, serving: true, serviceId: 'service-2' });
     expect(getSizeHolds('surface-1')).toEqual([]);
-    expect(getSizeHolds('surface-2')).toEqual([held(legacy, 51, 14)]);
+    expect(getSizeHolds('surface-2')).toEqual([]);
 
     // What the new instance's sessions take, it keeps.
     const current = { holder: 'session-b', label: 'Pixel', lease: '1', serviceId: 'service-2' };
@@ -459,14 +532,15 @@ describe('size holds', () => {
     expect(getSizeHolds('surface-1')).toEqual([held(current, 40, 20)]);
   });
 
-  it('reads a malformed service instance as none, keeping its hold', () => {
-    registerSurface('surface-1');
-    platform.answer('surfaceOp', {
-      surfaceId: 'surface-1', op: 'attach', cols: 51, rows: 14, hold: { ...PHONE, serviceId: 7 },
-    });
-    expect(getSizeHolds('surface-1')).toEqual([held(PHONE, 51, 14)]);
-    platform.emit({ name: 'status', enrolled: true, serving: true, serviceId: 'service-2' });
-    expect(getSizeHolds('surface-1')).toEqual([held(PHONE, 51, 14)]);
+  it('sizes without holding for a hold that names no service instance', () => {
+    const terminal = registerSurface('surface-1');
+    for (const serviceId of [7, undefined]) {
+      platform.answer('surfaceOp', {
+        surfaceId: 'surface-1', op: 'attach', cols: 51, rows: 14, hold: { ...PHONE, serviceId },
+      });
+      expect(getSizeHolds('surface-1')).toEqual([]);
+    }
+    expect(terminal.resize).toHaveBeenCalledWith(51, 14);
   });
 
   it('sends nothing for a pane nobody holds', async () => {

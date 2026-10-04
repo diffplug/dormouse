@@ -1,491 +1,153 @@
 # Dormouse Standalone (Tauri) Integration Spec
 
-> See `docs/specs/glossary.md` for Session / Surface / Pane / Door vocabulary.
-> Owns the standalone-specific layer: the Tauri windows, the Rust ↔ sidecar bridge, the AppBar, persistence at the adapter boundary, shutdown ordering, logging, and the build/dev workflow.
-> Defers the protocol it speaks — PTY lifecycle, message contracts, persisted-session types, adapter-agnostic invariants — to `docs/specs/transport.md`.
-> Evidence and dead approaches: [standalone.rationale.md](standalone.rationale.md).
-
-## Code Map
-
-Start at the runtime boundary involved, then follow its imports and dispatch:
-
-| Entrypoint | Role |
-|---|---|
-| `standalone/src/main.tsx` | Webview bootstrap, adapter selection, and app composition. |
-| `standalone/src/tauri-adapter.ts` | Shared frontend's Tauri command/event bridge. |
-| `standalone/src-tauri/src/lib.rs` | Native app entry, sidecar supervision, and command registration. |
-| `standalone/sidecar/main.js` | JSON-lines command dispatch into PTY and shared host modules. |
-| `standalone/src/window-restore.ts` | Per-Workspace boot planning over one live-PTY list. |
-| `standalone/src/quit.ts` | Webview quit orchestration and updater handoff. |
-| `standalone/src-tauri/src/routing.rs` | Which window a sidecar event belongs to, and the label bookkeeping. |
-| `standalone/src/workspace-move.ts` | Both halves of a Workspace moving between windows. |
+> - See `docs/specs/glossary.md` for Session / Surface / Pane / Door vocabulary.
+> - Owns the standalone-specific layer: the Tauri windows, the Rust ↔ sidecar bridge, the AppBar, persistence at the adapter boundary, shutdown ordering, logging, and the build/dev workflow.
+> - Defers the protocol it speaks — PTY lifecycle, message contracts, persisted-session types, adapter-agnostic invariants, and every rule it shares with VS Code — to `docs/specs/transport.md`.
 
 ## Architecture
 
-**Rust stays thin**: it spawns and supervises the sidecar, bridges the webview to
-it, and owns the OS-integration edges (window events, menu, file drop, dock icon,
-logging) plus the session file store. All real logic runs in the Node sidecar, on
-the same `lib/src/host/` modules the VS Code host runs — `build-sidecar-proxy.mjs`
-bundles them into the sidecar's `.cjs` copies, so the two hosts cannot drift.
+```mermaid
+flowchart LR
+  W[Webview per window: TauriAdapter] -- invoke --> R[Rust]
+  R -- "emit_to (§Routing)" --> W
+  R -- JSON lines on stdin --> P[Node sidecar]
+  P -- JSON lines on stdout --> R
+  P -. stderr .-> R
+  R --> L[(dormouse.log)]
+  D[dor in a pane] -- control socket --> P
+  P -- /ws/burrow --> X[(Relay)]
+```
+
+**Rust stays thin**: besides the bridge, only the OS-integration edges (window events, menu, file drop, dock icon, logging) and the session file store. All real logic runs in the sidecar, on the same `lib/src/host/` modules the VS Code host runs — `build-sidecar-proxy.mjs` bundles them into the sidecar's `.cjs` copies, so the two hosts cannot drift.
 
 ## Boot sequence
 
-Source of truth: `standalone/src/main.tsx` (`bootstrap()`).
+Source of truth: `bootstrap` in `standalone/src/main.tsx`, whose comments carry the step order. The ordering invariants:
 
-1. `setWindowLabel(await resolveWindowLabel())` **first**: every window-keyed Rust
-   command and `isMainWindow()` below read it.
-2. Pick the platform: `BrowserSidecarAdapter` when `VITE_DORMOUSE_BROWSER_DEV_HOST`
-   is set (§Standalone browser-dev harness), else `TauriAdapter`.
-3. `setPlatform(platform)`, then `await platform.init()` **before** the restore —
-   init registers the listeners resume replay arrives on and hydrates the session
-   cache (§Persistence).
-4. `installPeerSurfaceResponder()` **after `init()`, never before** (§Burrow
-   service) — the responder seeds itself with a `status` command that the adapter
-   must already have listeners for (rationale).
-5. `getAvailableShells()` **without awaiting**, so its webview → Rust → sidecar
-   round trip overlaps steps 6–7.
-6. Tauri branch only: `initQuitFlow(platform)`, `initWindowClose(platform)` — the
-   listener §Per-window close's ack watchdog waits on — and
-   `setQuitConfirmGate(openQuitConfirm)` (§Quit flow).
-7. `initAlertStateReceiver()`, `restoreActiveTheme()` (`docs/specs/theme.md`).
-8. `seedShellStore` on the awaited shell list — restores the persisted selection
-   (`dormouse:selected-shell`) and publishes it via `setDefaultShellOpts`, the
-   default-shell slot for split/spawn/restore (`docs/specs/layout.md`).
-   **Awaited**: seeding must finish before the Wall mounts, so the first restored
-   pane already spawns with that shell.
-9. Tauri branch only: `bootFromTearOut(platform)` and `initDropCaret()`, then
-   `restoreWindowOrFresh(platform)` for every window a tear-out did not answer —
-   the per-Workspace boot (§Persistence) over the priority-based recovery from
-   `docs/specs/transport.md`. **`armWorkspaceMoves()` runs strictly after that
-   restore**, since arming drains whatever was dropped on this window while it
-   booted and the restore installs the Workspace store wholesale (§Arrival queue).
-10. `startUpdateCheck()` **in `main` only** (`docs/specs/auto-update.md`) — the
-    window `capabilities/main-only.json` scopes `updater:default` to — then render
-    `AppBar` + `App` with `multiWorkspace` — one Wall per Workspace
-    (`docs/specs/layout.md` → Workspaces) — and `enableBurrow`, the mount gate for
-    the lazily-imported Burrow UI chunk (§Burrow service); the Burrow itself runs
-    in the sidecar regardless. `<ConnectedUpdateBanner />` rides the
-    `baseboardNotice` slot, `<WorkspaceTeardownModalHost />` the `dialogHost` slot;
-    both go to the visible Workspace's Wall.
+1. **The window label is resolved first**: every window-keyed Rust command and `isMainWindow()` read it.
+2. **`platform.updates` is set in `main` only**, before `setPlatform` (`docs/specs/auto-update.md`).
+3. **`await platform.init()` precedes the restore and `installPeerSurfaceResponder()`**: init registers the listeners resume replay and the responder's seeding `status` answer arrive on, and hydrates the session cache (§Persistence; rationale).
+4. **The shell store is seeded, awaited, before the restore and the Wall mount**, so the first restored pane spawns with the persisted shell (`docs/specs/layout.md`).
+5. Tauri only, a tear-out boot is tried; otherwise, in both hosts, `restoreWindowOrFresh`. **`armWorkspaceMoves()` runs strictly after that restore**, since arming drains whatever was dropped on this window while it booted (§Arrival queue).
+6. **`startUpdateCheck()` runs in `main` only** (§Windows).
 
-**Must display fatal bootstrap errors with a reload action**, for both Tauri and
-the browser harness, instead of leaving a blank window.
+**Must display fatal bootstrap errors with a reload action**, for both Tauri and the browser harness, instead of leaving a blank window.
 
 ## Rust ↔ sidecar bridge
 
-Source of truth: `standalone/src-tauri/src/lib.rs` (`SidecarState`, the
-`#[tauri::command]` set, `resolve_sidecar_path`) and
-`standalone/sidecar/main.js` (the dispatch table).
+Source of truth: `standalone/src-tauri/src/lib.rs` (`SidecarState`, the `#[tauri::command]` set) and `standalone/sidecar/main.js` (the dispatch table); `TauriAdapter` in `standalone/src/tauri-adapter.ts`.
 
-The sidecar speaks JSON-lines over stdio: commands in on stdin, events out on
-stdout. **stdout is the protocol** — sidecar diagnostics go to stderr, which Rust
-appends to the log file.
-
-Webview → Rust is Tauri invokes; the `#[tauri::command]` set and `TauriAdapter`
-own the exact command list, most of them thin sidecar forwarders. Two carve-outs
-are *not* forwarded:
-
-| Not forwarded | Handled | Why |
-|---|---|---|
-| `load_session` / `save_session` | Rust | the per-window session file is Rust's store (§Persistence) |
-| the `clipboard` readers (Windows only) | Rust (`clipboard_win.rs`) | native Win32 reads (`docs/specs/mouse-and-clipboard.md` §8.6) |
+**stdout is the protocol**: sidecar diagnostics go to stderr. Most invokes are thin sidecar forwarders; two carve-outs are handled in Rust: `load_session` / `save_session` (§Persistence) and the Windows `clipboard` readers (`clipboard_win.rs`; `docs/specs/mouse-and-clipboard.md` §8.6).
 
 **Managed-voice audio is the one byte payload that rides the pipe**, as base64 in its `voice:result` line (rationale; `docs/specs/transport.md` → "Managed voice").
 
-Request/response commands block on the sidecar's reply under a timeout.
-`OPEN_PORT_TIMEOUT_MS` and `OPEN_PORT_TIMEOUT_PER_ID_MS` in `lib.rs` mirror the
-constants in `lib/src/lib/platform/types.ts` (and `standalone/sidecar/pty-core.js`);
-`lib/src/lib/mirrored-constants.test.ts` pins the copies together.
+**A blocking command must be async** — `#[tauri::command(async)]` or a plain `#[tauri::command]` over an `async fn`. Tauri runs a sync command on the main thread, where waiting on the sidecar or the arrival-journal lock stops the webview painting for the whole round trip (rationale). **The three clipboard readers included**: their non-Windows branches round-trip through the sidecar. A source-scanning test in `lib.rs` enforces it.
 
-**A blocking command must be async** — `#[tauri::command(async)]` or a plain
-`#[tauri::command]` over an `async fn`, which the guard below accepts equally.
-Tauri runs a *sync* command on the main thread, where the `recv_timeout` inside
-`request_from_sidecar` / `request_from_sidecar_timeout` stops the webview painting
-for the whole round trip, up to `BROWSER_REQUEST_TIMEOUT` (40s) (rationale). **The
-three clipboard readers included**: their non-Windows branches round-trip through
-the sidecar, and the declaration is per command, not per branch. A unit test in
-`lib.rs` scans the source and fails on any command that reaches the blocking
-helpers in neither form.
-
-`pty_graceful_kill` (`TauriAdapter.gracefulKillPtys`) SIGTERMs the calling
-window's live PTYs (§Windows) and awaits the sidecar's `gracefulKillDone` (echoing the request's
-`requestId`; bounded at `timeout + 1.5s`). It resolves one 50 ms grace tick after
-the last PTY exits — so ConPTY's late final flush still lands — or at the timeout
-for SIGTERM-ignoring programs. **Must forward final output during that grace
-period**; the sidecar retains no scrollback. The quit flow's graceful teardown
-calls it (§Quit flow), pinned by `standalone/sidecar/pty-core.test.js`.
-
-Sidecar events (`pty:*`, dor control requests, async results) are emitted to the
-webview, where `TauriAdapter` converts dor control requests into the
-`dormouse:control-request` CustomEvent that `Wall` handles
-(`docs/specs/dor-cli.md`, Host Plumbing — including the sidecar env:
-`DORMOUSE_NODE`, `DORMOUSE_CLI_*`, `DORMOUSE_CONTROL_*`).
-
-`resolve_sidecar_path` strips Windows `\\?\` verbatim prefixes from
-`resource_dir()` once at the boundary so every derived path is plain
-(`docs/specs/dor-cli.md`, Bundling And PATH).
+**`pty_graceful_kill` must forward final output during its grace**, resolving once the last target has exited or at its timeout; under ConPTY the SIGTERM is an immediate kill. **The sidecar keeps each PTY's latest 200,000 UTF-16 code units for replay.** Pinned by `standalone/sidecar/pty-core.test.js`. `dor` control plumbing and the sidecar env: `docs/specs/dor-cli.md` → Host Plumbing.
 
 ### Burrow service
 
-The Burrow — relay socket, enrollment, ACL, pairing ceremony, remote-api v1
-— runs **in the sidecar**, never the webview (`docs/specs/relay.md` → "Burrow
-side"): the same
-`BurrowService` the VS Code extension host runs, bound by
-`lib/src/host/remote/sidecar-entry.ts` and bundled to `sidecar/burrow.cjs`
-(§Build and development). **Nothing the webview says can widen access** (`docs/specs/remote-security-model.md`).
+The Burrow — relay socket, enrollment, ACL, pairing ceremony, remote-api v1 — runs **in the sidecar**, never the webview (`docs/specs/relay.md` → "Burrow side"): the same `BurrowService` the VS Code extension host runs, bundled to `sidecar/burrow.cjs`.
 
-**State.** Rust creates the app-data directory, locks it owner-only, and passes it
-as `DORMOUSE_STATE_DIR` (§Persistence, "Rust file store"); `FileBurrowStateStore`
-keeps enrollment and ACL there as **one** `burrow.json`, so a write is one atomic
-rename (rationale), and the network policy beside it (`docs/specs/remote-network.md`
-→ "Policy"), both 0600 in a 0700 directory via temp-then-rename. `burrowToken` is
-a bearer credential and **never enters a webview realm**. Against the shared store contract (`docs/specs/relay.md` → "Burrow side"):
+**State.** Rust creates the app-data directory owner-only and passes it as `DORMOUSE_STATE_DIR` (§Persistence); `FileBurrowStateStore` keeps enrollment and ACL there as **one** `burrow.json`, so a write is one atomic rename (rationale), with the network policy beside it (`docs/specs/remote-network.md` → "Policy"). `burrowToken` is a bearer credential and **never enters a webview realm**. Against the shared store contract (`docs/specs/relay.md` → "Burrow side"):
 
-- **Reads fail closed.** Only `ENOENT` and a read-but-unparseable file answer
-  empty — but the network policy's unparseable file reads as Nothing, never
-  empty (`docs/specs/remote-network.md` → "Policy"); the parse failure warns.
-  Any other read error is neither answered nor memoized — the load rejects and
-  takes the save behind it with it (rationale). A later read recovers.
-- **The in-memory view advances only after the rename succeeds.** Re-tightening a
-  directory Rust already created is best-effort; failing the save over it would
-  lose the Burrow instead.
-- **`persistent` is declared, never inferred.** With no state directory — Rust
-  passes an empty value when it cannot create one — the fallback store still
-  *holds* both values in memory, warns once, and reports `persistent: false`. The
-  browser dev harness is *not* this case: its per-run temp directory makes a dev
-  enrollment live and die with the run.
+- **Reads fail closed.** Only `ENOENT` and an unparseable file answer empty — but the network policy's unparseable file reads as Nothing (`docs/specs/remote-network.md` → "Policy"). Any other read error is neither answered nor memoized: the load rejects, taking the save behind it (rationale).
+- **The in-memory view advances only after the rename succeeds.**
+- **`persistent` is declared, never inferred.** With no state directory (Rust passes an empty value) the store holds both values in memory, warns once, and reports `persistent: false`. The browser harness is not this case: its per-run temp directory makes a dev enrollment live and die with the run.
 
-**The direct path.** The sidecar answers a `direct-offer`
-(`docs/specs/remote-api.md` → Transport → "Direct path") over
-`node-datachannel`'s W3C polyfill, as the VS Code extension host does
-(`docs/specs/vscode.md` → "The direct path"). **A sidecar package's transitive dependencies
-do not ship** — the Tauri bundle copies `standalone/sidecar/node_modules` and
-nothing else — so the addon's platform package and `detect-libc` are declared in
-`standalone/sidecar/package.json` directly — the addon's six platform packages
-under `optionalDependencies`, since only one installs anywhere. **Every entry
-that manifest declares, under either key, stays `external` to `burrow.cjs`**,
-the `external` list being derived from those keys rather than listed beside
-them. The build fails if the
-manifest stops declaring the addon, and asserts from esbuild's metafile that
-none of those packages was inlined: the addon resolves its `.node`
-relative to its own `__dirname`, and inlining would move that out of the
-installed package.
+**The direct path.** The sidecar answers a `direct-offer` (`docs/specs/remote-api.md` → Transport → "Direct path") over `node-datachannel`. **A sidecar package's transitive dependencies do not ship** — the bundle copies `standalone/sidecar/node_modules` alone — so the addon, its platform packages and `detect-libc` are declared in `standalone/sidecar/package.json` directly, and **every entry it declares stays `external` to `burrow.cjs`**, since the addon resolves its `.node` beside its own `__dirname`. Source of truth: `assertNothingInlined` in `standalone/scripts/build-sidecar-proxy.mjs`.
 
-Source of truth: `standalone/sidecar/package.json`,
-`lib/src/host/remote/native-direct-peer.ts`, `assertNothingInlined` in
-`standalone/scripts/build-sidecar-proxy.mjs`.
+**The bridge.** Webview → sidecar is one passthrough invoke, `burrow_command(payload)`; sidecar → webview is `burrow:result`, `burrow:ask` and `burrow:event`. **The correlation field is `burrowRequestId`, never `requestId`**: Rust swallows any sidecar line whose `data.requestId` matches a pending invoke (rationale).
 
-**The bridge.** Webview → sidecar is one generic passthrough invoke,
-`burrow_command(payload)`, writing `{"event":"burrow:command",
-"data":payload}` to stdin for `createSidecarHost`. Sidecar →
-webview is three ordinary stdout events — `burrow:result`, `burrow:ask`,
-`burrow:event` — forwarded by Rust's generic `handle.emit`. **The correlation
-field is `burrowRequestId`, never `requestId`**: Rust swallows any sidecar line whose
-`data.requestId` matches a pending invoke (rationale). Everything above those
-shapes is the shared `link-client.ts` (`docs/specs/transport.md` → Message
-protocol).
+**Asks and answers.** What the sidecar cannot know — a pane's name, its focus, its xterm size — it asks over `burrow:ask`, and `lib/src/remote/burrow/peer-surfaces.ts` answers naming the ask's `burrowRequestId`.
 
-**Asks and answers.** What the sidecar cannot know — a pane's name, its focus, its
-xterm size — it asks over `burrow:ask`, and
-`lib/src/remote/burrow/peer-surfaces.ts` answers as an ordinary `answer` command
-naming the ask's own `burrowRequestId`. **An ask collects one answer per window**
-and concatenates them: each window sees only its own Workspaces, so a directory
-built from the first answer would omit every other window's panes. **The
-collector is keyed by which window answered, never by how many have** — Rust
-stamps the sending window's label on every `burrow:command` it forwards — so a
-window answering twice can settle nothing and contributes its panes once. **Rust
-pushes the live window labels** (`burrow:windows`) at setup and on every window
-create and destroy, and **dropping one settles the asks that window can no longer
-answer**; an ask in flight is only ever *narrowed*, since a window that opened
-after it never received it. **An ask naming a `surfaceId` goes to that Surface's
-owner alone** — `attach`, `resize`, and `release` act on the pane they reach, and fanned out
-they ask every other window to resize one it does not hold — and Rust names the
-window it delivered to (`burrow:askDelivered`) so the collector settles on that
-one answer instead of spending the budget on windows the ask never reached. `ASK_BUDGET_MS` (1s) still bounds the whole fan-out,
-and whatever did answer is still the best available snapshot.
+- Rust stamps the sending window's label on every `burrow:command`, which keys an ask's answers per window (`docs/specs/transport.md` → "Message protocol"); they concatenate in label order.
+- **Rust pushes the live window labels** (`burrow:windows`) at setup and on every window create and destroy; **dropping one settles the asks that window can no longer answer**. An ask in flight is only ever narrowed.
+- **An ask naming a `surfaceId` goes to that Surface's owner alone** — `attach`, `resize` and `release` act on the pane they reach — and Rust names the window it delivered to (`burrow:askDelivered`) so the collector settles on that one answer.
 
-**An answer for an ask the bridge no longer holds invalidates the directory**
-rather than being dropped (`docs/specs/remote-api.md` → Directory).
+**The sidecar owns the parse**, standalone's only one (`docs/specs/terminal-escapes.md` → Parsing location): a `pty-core` `data` event reaches the webview as `pty:data`, `terminal:semanticEvents` and `terminal:toolEvents`, never raw, and every attached Client and the `AlertManager` read the same parse. The colour push it answers OSC queries from (`pty_theme_colors` → `pty:themeColors`): `docs/specs/transport.md` → "Message protocol".
 
-**The sidecar owns the parse**, standalone's only one
-(`docs/specs/terminal-escapes.md` → Parsing location, which owns the rules): a
-`pty-core` `data` event reaches the webview as the `pty:data`,
-`terminal:semanticEvents` and `terminal:toolEvents` the bridge emits, never
-raw, and every attached Client and the app's `AlertManager` (§Alerts) read the
-same parse. **The webview pushes its
-resolved terminal colours** (`pty_theme_colors` → `pty:themeColors`) because this
-process has no DOM; **null before the first push falls a colour query through to
-xterm.js**, and **a malformed push is ignored, never half-applied.**
+**A remote sink must never break the local pipe**: a throw in the tap is logged and every `pty:*` event still goes out. **A spawn or an exit retires that PTY generation's parser**, so a half-read sequence cannot splice onto the next one.
 
-**A remote sink must never break the local pipe.** The tap sits inside
-`pty-core`'s event callback in `main.js` and is wrapped: a throw is logged to
-stderr and every non-`data` `pty:*` event goes out either way. Inside the parse,
-**each sink is guarded, and so is the reply write ahead of them** — a PTY that
-died since the read throws — so nothing can cost the webview its `pty:data`.
-Exit codes are
-retained so a stream installed after surface resolution can replay liveness
-before attach acknowledgement, and **a spawn or an exit retires that PTY
-generation's parser** so a half-read sequence cannot splice onto the next one.
-
-Source of truth: `lib/src/host/remote/service.ts`,
-`createSidecarSurfaceBridge` / `createSidecarHost` in
-`lib/src/host/remote/sidecar-entry.ts`, `standalone/sidecar/main.js` (the tap),
-`burrow_command` / `burrow_state_dir` / `pty_theme_colors` in
-`standalone/src-tauri/src/lib.rs`.
+Source of truth: `createSidecarHost` in `lib/src/host/remote/sidecar-entry.ts`; `standalone/sidecar/main.js` (the tap); `burrow_command` / `burrow_state_dir` in `standalone/src-tauri/src/lib.rs`.
 
 ### Alerts
 
-The sidecar runs the alerts' host role (`docs/specs/alert.md`), the same
-`createAlertHost` VS Code's extension host runs, beside the PTYs and the parse
-that feeds it: one `AlertManager`, every window a realm under its label
-(rationale).
+The sidecar is the alert host (`docs/specs/transport.md` → "Message protocol"), each window a realm under its label.
 
-- **Must offer every stdin line to `createSidecarHost`'s `handleCommand` before
-  `main.js` dispatches it**: it owns the PTY commands the alerts must see —
-  spawn, input, resize, kill, reap, `pty:requestInit` — every alert, Burrow, and
-  managed-voice command, the theme push.
-- **Webview → sidecar is one passthrough, `alert_command(payload)`**, and **Rust
-  stamps the invoking window's label on it as `window`**, over any the payload
-  claimed, exactly as on `burrow_command`. **An unstamped `alert:command` is
-  ignored.** Human input rides `pty_write`'s `userInput` instead
-  (`docs/specs/alert.md` → Engagement).
-- **`hello` at adapter init ends the label's previous realm**, a reload keeping
-  the label; **a label gone from `burrow:windows` ends its realm too.**
-- **An await's answer carries `forWindow`**, the label that parked it, which
-  Rust routes it to — **never a Session `id`**, which would route it to that
-  Session's owner, **nor a `requestId`**, which Rust swallows (rationale).
-- **`alert:speak` carries its Session's `id`**, which Rust routes it by.
-- **Must re-send each listed Session's `alert:state` behind the answer to
-  `pty:requestInit`**: a reloaded window and an arriving Workspace learn their
-  rings and TODOs nowhere else. **A `sync` re-sends only the Sessions its
-  window names**, each to its owner, and both stores' snapshots **with
-  `forWindow`**.
-- **Rust passes a spawn's `options.alert` through opaque**
-  (`a_spawn_carries_its_persisted_alert_to_the_sidecar`); the sidecar seeds from
-  it (`docs/specs/alert.md` → Public State) and strips it before `pty-core`.
-- **`pty-core` is the one source of helper status**, reporting each spawn's
-  validation and each successful promotion through `onHelper`.
+- **Webview → sidecar is one passthrough, `alert_command(payload)`, and Rust stamps the invoking window's label on it as `window`**, over any the payload claimed. **An unstamped `alert:command` is ignored.** Human input rides `pty_write`'s `userInput` instead (`docs/specs/alert.md` → Engagement).
+- `hello` at adapter init ends the label's previous realm, a reload keeping the label; a label gone from `burrow:windows` ends its realm too.
+- **An await's answer carries `forWindow`**, the label that parked it — **never a Session `id`**, which would route it to that Session's owner, **nor a `requestId`**, which Rust swallows (rationale).
+- A `sync`'s store snapshots carry `forWindow`; its Sessions' `alert:state` goes to each one's owner.
+- **Rust passes a spawn's `options.alert` through opaque**; the sidecar seeds from it (`docs/specs/alert.md` → Public State) and strips it before `pty-core`.
 
-Source of truth: `createSidecarHost` in `lib/src/host/remote/sidecar-entry.ts`;
-`create` in `standalone/sidecar/pty-core.js`; `alert_command` /
-`forward_stamped` / `stamped_message` / `pty_input_message` /
-`pty_spawn_message` in
-`standalone/src-tauri/src/lib.rs`. Pinned by `the sidecar host` in
-`lib/src/host/remote/sidecar-entry.test.ts` and
-`standalone/src/sidecar-adapters.test.ts`.
+Source of truth: `createSidecarHost` in `lib/src/host/remote/sidecar-entry.ts`; `alert_command` / `forward_stamped` in `standalone/src-tauri/src/lib.rs`.
 
 ### Windows node subsystem
 
-On Windows the app carries **two** subsystem variants of the same `node.exe`,
-because the sidecar and the `dor` CLI have opposite console requirements:
+On Windows the app carries **two** subsystem variants of the same `node.exe`:
 
-- **The sidecar must run under a GUI-subsystem node**, or Win11's DefTerm handoff
-  flashes a stray Windows Terminal window behind Dormouse (rationale). `build.rs`
-  patches the bundled `node.exe` at build time (`force_windows_gui_subsystem`),
-  and the sidecar's explicit piped stdio works fine under it.
-- **`dor` must run under a console-subsystem copy.** A GUI-subsystem node does not
-  attach to an *inherited* console, so it silently drops everything `dor` prints
-  inside a shell's ConPTY (rationale). `start_sidecar` derives the copy once
-  (`resolve_dor_node_path` →
-  `ensure_console_subsystem_node`, flipping the PE subsystem byte back, cached in
-  app-local data and re-derived when the bundled node's size changes) and points
-  `DORMOUSE_NODE` at it. `dor` always runs inside an existing pseudo-console, so
-  that copy can never cause a stray window.
+- **The sidecar must run under a GUI-subsystem node**, or Win11's DefTerm handoff flashes a stray Windows Terminal window behind Dormouse (rationale). `build.rs` patches the bundled `node.exe` (`force_windows_gui_subsystem`).
+- **`dor` must run under a console-subsystem copy**, or it silently drops everything it prints inside a shell's ConPTY (rationale). `start_sidecar` derives the copy (`resolve_dor_node_path`) and points `DORMOUSE_NODE` at it.
+- **Never leave the GUI node's directory on a pane's PATH**: a bare `node` in a dev pane would be console-less (rationale). `start_sidecar` passes it as `DORMOUSE_GUI_NODE_DIR`; the sidecar strips it from each pane's PATH.
 
-- **Never leave the GUI node's directory on a pane's PATH.** `cargo run` puts it
-  there for DLL resolution, so a bare `node` in a dev pane would get a
-  console-less one and fail silently in both directions (rationale).
-  `start_sidecar` passes it as `DORMOUSE_GUI_NODE_DIR`; the sidecar strips it
-  from each pane's PATH.
-
-The byte-flip lives in `standalone/src-tauri/src/pe_subsystem.rs`, shared with
-`build.rs`, so the load-bearing PE offsets are in one place; the mechanism is in
-the comments at `force_windows_gui_subsystem` and `resolve_dor_node_path`.
-
-Source of truth: `withoutGuiNodeDir` in `standalone/sidecar/pty-core.js`,
-pinned by `resolveSpawnConfig drops the GUI node directory from a pane PATH on
-win32` in `standalone/sidecar/pty-core.test.js`.
+Source of truth: `standalone/src-tauri/src/pe_subsystem.rs`; `withoutGuiNodeDir` in `standalone/sidecar/pty-core.js`.
 
 ## Sidecar lifecycle
 
 Source of truth: `standalone/sidecar/main.js`. Browser cleanup is pinned by `standalone/sidecar/shutdown.test.js`.
 
-Shutdown (`sidecar:shutdown` message, stdin EOF, or SIGTERM) is **idempotent and
-ordered**:
+**Shutdown** (`sidecar:shutdown`, stdin EOF, or SIGTERM) **is idempotent**, and **its browser-host cleanup must finish inside Rust's `shutdown_sidecar_and_wait` grace**, after which Rust kills the process group (`docs/specs/dor-browser.md` owns the teardown contract); disposing the host settles every outstanding ask before the PTYs are killed.
 
-1. **Must await the browser host's cleanup under one 1.5s deadline**
-   (`browserHost.close()`, which closes Playwright's only once its lazily
-   required host exists); `docs/specs/dor-browser.md` owns the teardown
-   contract.
-2. Close the dor control socket.
-3. `host.dispose()`: the alerts (§Alerts), then the Burrow service, dropping
-   the relay socket and settling every outstanding ask so nothing waits on a
-   webview that is going away.
-4. `mgr.killAll()` (all PTYs), then `process.exit(0)`.
+**A parent-PID watchdog self-triggers shutdown if the Tauri process disappears**: stdin EOF is not always delivered on a force-kill, and an orphaned sidecar blocks the NSIS installer (`docs/specs/auto-update.md` → "Sidecar teardown on Windows").
 
-**A parent-PID watchdog polls every 2s** and self-triggers shutdown if the Tauri
-process disappears: stdin EOF is not always delivered when the host is
-force-killed, and an orphaned sidecar keeps `conpty.node`/`conpty.dll` loaded and
-blocks the NSIS installer (`docs/specs/auto-update.md`, Sidecar teardown on
-Windows).
-
-Burrow-side ordering: every quit trigger is driven through the webview quit
-orchestrator (§Quit flow, which owns the teardown/install/exit sequence); Tauri's
-`RunEvent::Exit` then runs `shutdown_sidecar_and_wait` as a final backstop
-(harmless post-teardown — the PTY map is already empty, so `killAll` no-ops).
+Every quit trigger is driven through the webview quit orchestrator (§Quit flow); Tauri's `RunEvent::Exit` then runs `shutdown_sidecar_and_wait` as a final backstop.
 
 ## AppBar
 
 Source of truth: `standalone/src/AppBar.tsx`.
 
-The AppBar is the draggable titlebar region, carrying left to right the
-**Workspace strip** and — Windows/Linux only, since macOS gets native traffic
-lights from `titleBarStyle: "Overlay"` and left padding instead — the window
-controls (minimize / maximize / close via `@tauri-apps/api/window`, dimmed by
-window-focus tracking). **Neither a theme picker nor a shell picker belongs here**:
-both live in the Settings dialog at the bottom-right of the window
-(`docs/specs/theme.md`).
-
-The strip's gestures and appearance are `docs/specs/layout.md` → Workspace tabs;
-its indicators are `docs/specs/alert.md` → Workspace union.
-
-- **Never put `data-tauri-drag-region` on a tab or anything inside one.** Tauri
-  matches that attribute on the event target alone, so a tab carrying it would
-  drag the window instead of activating, renaming, or reordering. **A dedicated
-  spacer after the strip carries it, with a minimum width**, so the window stays
-  draggable at every tab count and the strip scrolls into what is left.
-- `onDragOutsideWindow` / `onDropOnOtherWindow` carry the drag past the strip's
-  own edge (§Tear-out, and dragging between windows); the browser-dev harness
-  supplies neither, because it has no windows.
-
-Source of truth: `WorkspaceStrip` in `lib/src/components/WorkspaceStrip.tsx`;
-`createWorkspaceStripDrag` in `lib/src/components/workspace-strip-drag.ts`.
-
-Shell selection lives in the Settings dialog's **Shell** row
-(`lib/src/components/ShellPicker.tsx` over `lib/src/lib/shell-store.ts`), hidden
-when fewer than two shells were detected or when the host owns shell selection
-itself (`hostOwnsShells`, VS Code). Picking one persists the choice in
-`localStorage` under the shell's full identity, publishes it via
-`setDefaultShellOpts`, and dispatches `dormouse:new-terminal` with
-`replaceUntouched: true, announce: true` (`docs/specs/layout.md` → "Session
-lifecycle and terminal registry", Shell selection replacement) — after dismissing
-the dialog, so the replacement takes keyboard focus on the next animation frame.
-Edge cases:
-
-- A legacy path-only selection restores the first matching entry and gains the
-  full identity on the next choice.
-- Re-picking the visible fallback records that explicit choice without spawning a
-  redundant terminal.
-- Re-seeding an unchanged detected list is a no-op: it preserves an interactive
-  selection but also skips re-reading the persisted key (`seedShellStore`'s
-  comment carries what that costs Storybook).
+The AppBar is the draggable titlebar: the Workspace strip, then the window controls on Windows and Linux (macOS draws native traffic lights). **Never put a shell picker here**: the shell is the Settings dialog's Shell row (`lib/src/components/ShellPicker.tsx`; what a changed pick spawns: `docs/specs/layout.md` -> "Session lifecycle and terminal registry"); the theme picker's placement is `docs/specs/theme.md` → "Where the user picks a theme". The strip is `docs/specs/layout.md` → Workspace tabs; its indicators `docs/specs/alert.md` → Workspace union.
 
 ### Application menu
 
 Source of truth: the `.menu(...)` builder in `standalone/src-tauri/src/lib.rs`.
 
-The app replaces Tauri's default menu with a macOS-only App submenu (about /
-services / hide / hide-others / quit) and a Window submenu (minimize / maximize /
-close, plus a macOS-only fullscreen toggle). **Must keep the fullscreen item** —
-it and its Ctrl+Cmd+F are the only exit from native fullscreen when AppKit does
-not reveal the overlay title bar's traffic lights. **No Edit submenu** — its predefined Paste item binds Cmd+V natively and
-would fire alongside the terminal's own DOM-level Cmd+V handling
-(`docs/specs/mouse-and-clipboard.md` §8.2). macOS therefore delivers Cmd+C/X/V to
-the webview as plain keydowns and WKWebView performs no native edit, in Dormouse's
-own text fields too; JS supplies their clipboard
-(`docs/specs/mouse-and-clipboard.md` §8.9). **A new menu item must not claim a
-chord the webview already handles.**
+The app replaces Tauri's default menu with macOS-only App, File, and Edit submenus and a Window submenu; File holds Reopen Closed (`docs/specs/reopen.md` → "Reopen verb"). **Must keep the macOS fullscreen item**: it and its Ctrl+Cmd+F are the only exit from native fullscreen when AppKit does not reveal the traffic lights.
+
+- **Must keep the Edit submenu on macOS**, Tool iframes' only clipboard path (rationale).
+- **Must cancel the keydown of any chord the page handles**, so the menu item skips it (rationale): `docs/specs/mouse-and-clipboard.md` §3.9, §8.2, §8.9.
+- **Never add an Edit submenu on Windows or Linux** (rationale).
 
 ## Siri affordance
 
-**Never show macOS's Siri affordance in a Dormouse webview** (rationale).
-`install` answers NO to `allowsWritingToolsAffordance` on wry's `WKWebView`
-subclass, never on `WKWebView` itself, once at `RunEvent::Ready`; the override
-is class-wide, so it covers every window, text field, and browser pane.
+**Never show macOS's Siri affordance in a Dormouse webview** (rationale): `install` answers NO to `allowsWritingToolsAffordance` class-wide on wry's `WKWebView` subclass, covering every window and browser pane.
 
-Source of truth: `install` in `standalone/src-tauri/src/macos_siri_affordance.rs`,
-pinned by `suppresses_the_webview_subclass_only`.
+Source of truth: `install` in `standalone/src-tauri/src/macos_siri_affordance.rs`.
 
 ## Windows
 
-**Several windows, each with several Workspaces, over one sidecar**
-(`docs/specs/glossary.md`). The sidecar has no window concept, so **Rust owns
-the map from PTY to window** and every stdout line passes through it.
+**Several windows, each with several Workspaces, over one sidecar** (`docs/specs/glossary.md`). The sidecar has no window concept, so **Rust owns the map from PTY to window** and every stdout line passes through it.
 
-**The label is the window's persistence identity**: `main` for the first window
-(fixed in `tauri.conf.json`), `ws-<n>` for every later one, seeded above every
-live label, every `sessions/ws-*.json` on disk, and retained arrival-journal
-endpoints so a new window cannot claim a saved or pending identity. Journal-only
-labels reserve numbers without opening windows (`saved_windows` and
-`a_retained_arrival_reserves_both_window_labels_without_opening_them` in
-`standalone/src-tauri/src/lib.rs`). `standalone/scripts/tauri-conf.test.mjs` pins the
-label.
+**The label is the window's persistence identity**: `main` for the first window (fixed in `tauri.conf.json`), `ws-<n>` for every later one, numbered above every live label, every `sessions/ws-*.json` on disk, and every retained arrival-journal endpoint, so a new window cannot claim a saved or pending identity. Journal-only labels reserve numbers without opening windows.
 
-**Every new window is cloned from `app.windows[0]`** (`window_config`, then
-`WebviewWindowBuilder::from_config`), so `titleBarStyle`, `hiddenTitle`,
-`dragDropEnabled`, `backgroundThrottling` and the CSP carry across with no
-second copy of any of them.
+**Every new window is cloned from `app.windows[0]`**, so its window settings and CSP carry across with no second copy.
 
-**Never let a window's webview throttle or suspend in the background**:
-`app.windows[0]` sets `"backgroundThrottling": "disabled"` (macOS 14+; a no-op
-on Windows and Linux; rationale). Pinned by `every_window_disables_background_throttling` in
-`standalone/src-tauri/src/lib.rs` and `standalone/scripts/tauri-conf.test.mjs`.
+**Never let a window's webview throttle or suspend in the background**: `app.windows[0]` sets `"backgroundThrottling": "disabled"` (macOS 14+; a no-op on Windows and Linux; rationale).
 
-**Capabilities are split**: `default.json` covers `main` and the `ws-*` glob,
-and `main-only.json` scopes `updater:default` and `core:app:allow-version` to `main`,
-which structurally enforces that the install runs in the window the walk tears
-down last (`docs/specs/auto-update.md`). Custom commands need no capability
-entry. `standalone/scripts/tauri-conf.test.mjs` pins both.
+**Capabilities are split**: `default.json` covers `main` and the `ws-*` glob, and `main-only.json` scopes `updater:default` and `core:app:allow-version` to `main`, which structurally enforces that the install runs in the window the walk tears down last (`docs/specs/auto-update.md`). `standalone/scripts/tauri-conf.test.mjs` pins the label, the throttling, and both capabilities.
 
 ### Workspace registry
 
-**Rust holds the union of every window's Workspaces**, since each webview's
-store (`lib/src/lib/workspace-store.ts`) sees only its own. Each window reports
-its list on every change, coalesced per microtask, and the union is broadcast as
-`dormouse://workspaces` with a monotonic `revision`; a webview drops a snapshot
-behind the one it holds.
+**Rust holds the union of every window's Workspaces**, since each webview's store (`lib/src/lib/workspace-store.ts`) sees only its own. Each window reports its list on every change, and the union is broadcast as `dormouse://workspaces` with a monotonic `revision`; a webview drops a snapshot behind the one it holds.
 
-- **Must mint numbered ids only in Rust**, `workspace-<n>` off one counter, handed to a
-  webview in blocks (`workspace_reserve_ids`) so a create mints synchronously.
-  The ref `workspace:<n>` is the id's number, so it never renumbers and never
-  collides across windows; an unused reservation is a gap, nothing more.
-- **Must allow boot and creation when reservation fails**, using opaque UUID
-  ids; log the failure. **Must retain those opaque IDs and refs for their lifetime**,
-  even after reservation recovers. Canonical refs follow
-  `docs/specs/dor-cli.md` → "Handle Model" (`lib/src/lib/workspace-store.test.ts`).
-- **Must seed the counter above every id named by a snapshot or retained arrival-journal record**,
-  and above every id a window reports. Pinned by
-  `an_unreadable_source_retains_the_record_without_changing_the_target` in
-  `standalone/src-tauri/src/lib.rs`.
-  Never below 2: `workspace-1` is a bare Wall's only Workspace.
-- **A `dor` request naming a Workspace or Window routes to the window holding
-  it** (§Routing precedence). A target the registry cannot place — one no
-  window reports, or a name two windows carry — falls through to the caller's
-  window, which refuses a name duplicated there and otherwise resolves its own,
-  so a local Workspace wins. **A target routes as a number only when it reads
-  as `POSITIONAL_WORKSPACE_REF`** (`dor/src/protocol.ts`); `007` and `0` are
-  names (`a_number_with_a_leading_zero_is_a_name`).
-- **Must log a rejected Workspace report and retry on the next store notification.**
-  A stale failed attempt cannot invalidate a newer report’s cache. Pinned by
-  `retries a failed report on the next store notification with the same final entries`
-  and `does not invalidate a newer same-shaped report when an older attempt fails`
-  in `standalone/src/workspace-registry.test.ts`.
-- **Must keep numbered and opaque refs consistent across Rust, the webview, and
-  the browser harness.** Shared cases pin `refs_match_the_shared_host_grammar` in
-  `standalone/src-tauri/src/workspaces.rs`,
-  `shares canonical numbered and opaque refs with Rust and the browser harness`
-  in `standalone/src/workspace-registry.test.ts`, and
-  `registry seeds reservations above restored IDs and mirrors canonical workspace refs`
-  in `standalone/scripts/dev-agent-browser.test.mjs`.
-- **`Destroyed` forgets the window's entries** and broadcasts.
+- **Must mint numbered ids only in Rust**, `workspace-<n>` off one counter, handed to a webview in blocks (`workspace_reserve_ids`) so a create mints synchronously. The ref `workspace:<n>` is the id's number, so it never renumbers and never collides across windows.
+- **Must allow boot and creation when reservation fails**, using opaque UUID ids, and **retain those ids and refs for their lifetime**, even after reservation recovers (`docs/specs/dor-cli.md` → "Handle Model").
+- **Must seed the counter above every id named by a snapshot, a retained arrival-journal record, or a window's report**, and never below 2: `workspace-1` is a bare Wall's only Workspace.
+- **A `dor` request naming a Workspace or Window routes to the window holding it** (§Routing). A target the registry cannot place — one no window reports, or a name two windows carry — falls through to the caller's window, which refuses a name duplicated there and otherwise resolves its own. **A target routes as a number only when it reads as `NUMERIC_WORKSPACE_REF`** (`dor/src/protocol.ts`); `007` and `0` are names.
+- **Must keep numbered and opaque refs consistent across Rust, the webview, and the browser harness**: `standalone/scripts/workspace-ref-cases.json` holds the shared cases.
 
-Source of truth: `standalone/src-tauri/src/workspaces.rs`;
-`saved_windows` / `workspace_reserve_ids` / `workspace_report` / `workspace_registry` in
-`standalone/src-tauri/src/lib.rs`; `installWorkspaceRegistry` in
-`standalone/src/workspace-registry.ts`; `installWorkspaceIdPool` /
-`workspaceRefFor` in `lib/src/lib/workspace-store.ts`. Pinned by the tests in
-`standalone/src-tauri/src/workspaces.rs` and
-`an_explicit_target_routes_to_the_window_holding_it`.
+Source of truth: `standalone/src-tauri/src/workspaces.rs`; `installWorkspaceRegistry` in `standalone/src/workspace-registry.ts`.
 
 ### Routing
 
@@ -499,570 +161,185 @@ Source of truth: `standalone/src-tauri/src/workspaces.rs`;
 | `pty:marked` | `data.id` | the window showing it; the id then falls silent until its replay |
 | `pty:list` | `data.forWindow` | the window that asked |
 | `alert:*` | `data.forWindow`, then `data.id` | that window; else the window showing the Session; neither → every window |
-| `dor:controlRequest` | `params.workspace`, `params.window`, `data.surfaceId` | in that precedence: the window holding the named Workspace (§Workspace registry), the named window, the caller's Surface's owner; none → the focused window |
+| `dor:controlRequest` | `params.workspace`, `params.window`, `data.surfaceId` | in that precedence: the window holding the named Workspace (§Workspace registry), the named window, the caller's Surface's owner; none → the most recently focused window (a never-focused one last), **never all** |
 | `dor:controlCancel` | `data.requestId` | the window its request went to; unknown → every window |
 | `burrow:ask` | `data.params.surfaceId` | its owner; a Surface with no PTY here, or an ask naming none, → every window (§Burrow service) |
 | `voice:result` | — | nowhere: only one that outlived its invoke gets here |
 | everything else | — | every window |
 
-- **Ownership is minted only in `pty_spawn`**, dropped by `pty_kill` or the
-  window going away, and reassigned by a transfer. **Never dropped by an exit,
-  nor does an exit end a transfer's marking phase**: the exited pane is still
-  shown, its `alert:state` must still reach it, and the sidecar marks an exited
-  id like a live one (rationale; `an_exited_pty_stays_owned_until_it_is_killed`,
-  `an_exit_before_the_mark_leaves_the_transfer_to_finish`). Minting also clears
-  any suppression left under that id: no replay is coming for a fresh PTY.
-  `pty_kill` drops the owner before the sidecar removes the Session's alert
-  entry, so the removal's state reaches no window.
-- **A PTY event no window owns is dropped, and the shell is reaped.** An
-  unowned id is one whose window went away, and a broadcast would hand every
-  sibling state for a pane none of them shows. `Destroyed` sends `pty:reap` for
-  whatever the departing window still owned — the close ack-timeout path killed
-  nothing — and the sidecar removes those Sessions' alert entries and SIGTERMs
-  them. **The quit teardown's `pty:gracefulKill` removes no entry**: windows
-  still show those PTYs (`an_orphan_reap_removes_the_sessions_it_kills`).
-- **A `dor` request naming a Surface no window owns is answered with an error**
-  — `No Dormouse window owns surface '<id>'` — never handed to a sibling, since
-  acting on the wrong terminal is worse than failing.
-- **`pty_request_init`, `pty_graceful_kill` and `capture_agent_recovery` target
-  the invoking window's own PTYs**, and take no ids at all: a window tearing down
-  must not interrupt or kill a sibling's terminals, and a set it could name is a
-  set it could name wrong. `pty_request_init` further excludes what an arrival
-  claims (§Arrival queue).
-- **A `dor` cancel follows its request**: only the window handling it holds the
-  subscription, watch or completion claim the cancel releases. Rust remembers
-  which window took each `requestId` and forgets it on the response.
-- **Every webview listener names its own window.** Tauri delivers an `emit_to`
-  event to any listener registered with the default `Any` target, so a bare
-  `listen` would take every other window's traffic and make this whole table
-  decoration (rationale). `listenToWindow` in
-  `standalone/src/window-label.ts` is the only caller of the event API, pinned
-  by `standalone/scripts/window-listeners.test.mjs`.
-- **The focus order is the fallback owner** for a `dor` request naming no
-  Surface, and the drag hit test's stand-in for a z-order the OS does not expose.
+- **Ownership is minted only in `pty_spawn`**, dropped by `pty_kill` or the window going away, and reassigned by a transfer. **Never dropped by an exit, nor does an exit end a transfer's marking phase** (rationale). Minting clears any suppression left under that id. `pty_kill` drops the owner before the sidecar removes the Session's alert entry, so the removal's state reaches no window.
+- **A PTY event no window owns is dropped, and the shell is reaped** (rationale). `Destroyed` sends `pty:reap` for whatever the departing window still owned; the sidecar removes those Sessions' alert entries and SIGTERMs them. **The quit teardown's `pty:gracefulKill` removes no entry**: windows still show those PTYs.
+- **A `dor` request naming a Surface no window owns is answered with an error**, never handed to a sibling.
+- **`pty_request_init`, `pty_graceful_kill` and `capture_agent_recovery` target the invoking window's own PTYs and take no ids**: a window tearing down must never touch a sibling's terminals. Each also excludes what an arrival claims (§Arrival queue).
+- **Every webview listener names its own window**: Tauri delivers an `emit_to` event to any listener with the default `Any` target (rationale). `listenToWindow` in `standalone/src/window-label.ts` is the only caller of the event API, pinned by `standalone/scripts/window-listeners.test.mjs`.
 
-Source of truth: `route` / `showing` in `standalone/src-tauri/src/routing.rs`;
-`dispatch_sidecar_event` / `pty_reap_message` in `standalone/src-tauri/src/lib.rs`.
+Source of truth: `route` in `standalone/src-tauri/src/routing.rs`; `dispatch_sidecar_event` in `standalone/src-tauri/src/lib.rs`.
 
 ### Boot and geometry
 
-**Boot reopens every window `sessions/` names**, `main` first (already up from
-the config) then each `ws-<n>` in numeric order, capped at
-`MAX_RESTORED_WINDOWS` (8) with the excess logged and left on disk. **An
-unreadable snapshot still opens its window** — the webview boots fresh, which is
-a window the user can use rather than one they lost. **`main` is focused last**,
-so it comes up in front. **A session naming no `main` relaunches with a fresh,
-empty `main`** — the config creates it unconditionally — focused last, in front
-of the restored `ws-*` windows.
+**Boot reopens every window `sessions/` names**, `main` first then each `ws-<n>` in numeric order, capped at `MAX_RESTORED_WINDOWS` with the excess logged and left on disk (rationale). **An unreadable snapshot still opens its window**, booting fresh. **`main` is focused last**, so it comes up in front; **a session naming no `main` relaunches with a fresh, empty one**.
 
-**Geometry is a sibling of the snapshot**, `sessions/<label>.geometry.json`,
-written through the same `write_file_atomically` and debounced past the flood a
-window drag produces; `main`'s box is re-applied to the window the config
-created. No `tauri-plugin-window-state` (rationale).
+**Geometry is a sibling of the snapshot**, `sessions/<label>.geometry.json`, written through the same atomic writer, debounced, and re-applied at boot. No `tauri-plugin-window-state` (rationale).
 
-**The live box is cached from the window events themselves** — `Moved` and
-`Resized` carry it — and read from that cache by both the debounced write and
-the cross-window drag hit test, which probes ~16 times a second. The platform is
-asked only once per window at creation, and for the minimized and scale-factor
-checks in the debounce flush.
-
-- **Never ask the platform anything while holding the rect cache.** Off the main
-  thread `scale_factor()` and `is_minimized()` park on the event loop, which the
-  main thread may be driving while it waits inside `window_at_cursor` for that
-  same lock. The flush reads both first and hands the scale to `refresh_rect`,
-  whose signature takes no window at all.
-- **The flush slot is released in the same step as the drain.** A `Moved` landing
-  between the two was marked dirty with no thread left to write it — and that
-  move is exactly a window's final position.
-- **Must recheck the save refusal under the journal lock before writing
-  geometry.** The flush reads the window and rect first; a close in between
-  removed the file (§Per-window close), and the write would put it back
-  (`a_geometry_flush_captured_before_close_cannot_recreate_removed_geometry`).
-
-Source of truth: `CachedRect` / `GeometryState` / `note_geometry` / `write_open_window_geometry` /
-`restore_windows` in `standalone/src-tauri/src/lib.rs`; the sequencing is pinned
-by `the_geometry_flush_slot_is_released_with_the_drain`.
+Source of truth: `note_geometry` / `restore_windows` in `standalone/src-tauri/src/lib.rs`.
 
 ### What a window's `Destroyed` settles
 
-**Must clear label-keyed ownership, registry, geometry, and close state in the
-`Destroyed` arm**, when Tauri has removed the window from `webview_windows()`.
-**Must remove incoming arrivals from the reap before killing orphaned PTYs**;
-the source still holds those Sessions. Hand-backs run in a blocking worker that
-reports completion on the main thread. **Must defer every approved exit until all
-such workers have completed**, including exit requested through the quit walk
-or Tauri/AppKit (`every_approved_exit_path_checks_cleanup`;
-`quit_waits_for_every_destroyed_window_handback` in
-`standalone/src-tauri/src/quit_state.rs` pins the counter). **Must force an
-approved exit after `QUIT_PHASE_TIMEOUT_MS` waiting for cleanup**, logging the
-timeout; a stalled disk operation or completion callback cannot trap the app
-(`stalled_cleanup_cannot_block_an_approved_exit_forever`). The arm updates the
-quit machine and sends the remaining live labels to the sidecar; the Burrow’s
-ask collector must never wait for a window that cannot answer.
+**Must clear label-keyed ownership, registry, geometry, and close state in the `Destroyed` arm**, when Tauri has removed the window from `webview_windows()` (rationale), and send the remaining live labels to the sidecar. **Must remove incoming arrivals from the reap before killing orphaned PTYs**; the source still holds those Sessions. **Must defer every approved exit until every hand-back worker has completed**, on every exit path, and **force it after `QUIT_PHASE_TIMEOUT_MS`**, logging the timeout, so a stalled disk operation cannot trap the app.
 
-Source of truth: `CleanupGate` and `WindowEvent::Destroyed` in
-`standalone/src-tauri/src/lib.rs`.
+Source of truth: `CleanupGate` and `WindowEvent::Destroyed` in `standalone/src-tauri/src/lib.rs`.
 
 ### Per-window close
 
-**Closing a window with siblings alive ends that window alone**; only the last
-window's close is the quit. Rust prevents the close and emits
-`dormouse://window-close-requested`; the webview acks (a ~2 s watchdog closes it
-anyway if that listener is dead), asks about *its own* running work, attempts snapshot removal, kills its PTYs, and calls back
-`close_window`.
+**Closing a window with siblings alive ends that window alone**; only the last window's close is the quit, and on macOS too.
 
-- **Must attempt to remove the blob before killing this Window's PTYs** — geometry
-  and temp sibling included; successful removal prevents reopening
-  (`docs/specs/transport.md` → "The governing rule"). Removal failures are logged and close proceeds; an old snapshot may reopen.
-- **It runs no agent-recovery capture**: nothing is coming back.
-- **A cancelled close retires its watchdog's token and never reuses it**: the
-  next close on that window is a fresh seq, so a watchdog still sleeping on the
-  cancelled one cannot destroy the window under the second dialog
-  (`a_cleared_close_never_hands_its_seq_to_the_next_request`).
-- **It confirms on a pending download as well as on running work.** An approved,
-  downloaded update lives in this webview's memory, so closing the window throws
-  it away and nothing else can install it (`docs/specs/auto-update.md`).
-- **Must refuse every later save for a closing label**, so a PTY exit cannot recreate its snapshot. **Both close paths
-  set that refusal** — the webview's own `remove_window_session`, and
-  `finish_window_close` for the ack-timeout path, where the webview never ran at
-  all. **Must keep that refusal for the process lifetime**, geometry writes
-  included: a save dispatched before `Destroyed` can reach the disk lock after
-  it, and no label is reused within a process
-  (`a_closed_window_refuses_saves_for_the_process_lifetime`).
-- **`close_window` is the one Rust half both endings share** — a deliberate close
-  and a window whose last Workspace moved away (§Transfer) — because what
-  separates them is entirely what the webview did before calling it.
-- **macOS keeps its rule**: closing the last window quits.
+1. Rust prevents the close and emits `dormouse://window-close-requested`.
+2. The webview acks; a watchdog closes the window anyway if that listener is dead.
+3. It asks when any of *its own* Workspaces' closes would (`docs/specs/reopen.md` → "Workspaces and windows"), and hands Rust a reopen record when it asked nothing.
+4. It removes its snapshot, kills its PTYs, and calls back `close_window`.
 
-**The ack and confirm gates are one shared flow with the quit**
-(`createTeardownFlow` in `standalone/src/teardown-flow.ts`); what differs is only
-the step past them — a quit votes and waits its turn in the walk, a close tears
-down at once.
+- **Must attempt to remove the blob, geometry and temp sibling included, before killing this Window's PTYs** (`docs/specs/transport.md` → "The governing rule"). A removal failure is logged and the close proceeds.
+- **It runs no agent-recovery capture**: nothing resumes; Reopen rebuilds.
+- **It confirms on a pending download as well**: the download lives in this webview, so nothing else can install it (`docs/specs/auto-update.md`).
+- **Must refuse every later save for a closing label, geometry included, for the process lifetime.** Both the webview's `remove_window_session` and the ack-timeout path's `finish_window_close` set it; no label is reused within a process.
+- **`close_window` is the one Rust half both endings share** — a deliberate close and a window whose last Workspace moved away (§Transfer).
 
-**Arbitration.** They are two machines over one window, one dialog and one
-human, and **a second flow is never refused in silence**: an unsettled context
-parks its own flow and leaves its host waiting out a decision that cannot come.
+**The ack and confirm gates are one shared flow with the quit** (`createTeardownFlow` in `standalone/src/teardown-flow.ts`): a quit votes and waits its turn in the walk, a close tears down at once.
+
+**Arbitration.** **A second flow is never refused in silence**: an unsettled context parks its flow and leaves its host waiting on a decision that cannot come.
 
 | Arriving | Holder | Outcome |
 |---|---|---|
 | quit | a close still on its dialog | the close is cancelled (`window_close_cancel`); the quit takes over |
-| quit | any committed flow | the quit acks and **votes** — this window is ending anyway, and a window that never votes holds the machine in `Voting` with no dialog to answer |
+| quit | any committed flow | the quit acks and **votes**, since this window is ending anyway |
 | close | a quit, in any state | refused at once with `window_close_cancel`; the window stays |
 
-**A quit cancelled elsewhere drops only a quit's dialog**, never this window's
-own close question. The confirm store cancels any context it cannot open, as the
-backstop. Both orderings are pinned by
-`standalone/src/teardown-arbiter.test.ts`.
+**A quit cancelled elsewhere drops only a quit's dialog**, never this window's own close question. Pinned by `standalone/src/teardown-arbiter.test.ts`.
 
-Source of truth: `standalone/src/window-close.ts`; `request_window_close` /
-`finish_window_close` in `standalone/src-tauri/src/lib.rs`.
+Source of truth: `standalone/src/window-close.ts`; `request_window_close` / `finish_window_close` in `standalone/src-tauri/src/lib.rs`.
 
 ### Transfer
 
 Dirty Tool consent: `docs/specs/dor-tool.md` → Closing unsaved Tools.
 
-**A Workspace moves between windows without ending anything.** No process is killed: a move is not a closure.
+A Workspace moves between windows without ending anything (`docs/specs/transport.md` → "Transferring a Workspace"); the protocol and every failure path are §Arrival queue. Presentation is `docs/specs/layout.md` → Workspace motion.
 
-The protocol and every failure path are §Arrival queue; what a move *is*:
+- **A window whose last Workspace left closes itself**, with no confirmation and no kill.
+- **Must collapse the source only after `workspace-departed` confirms adoption, before committing its release and removing its tab or closing its Window.** `standalone/src/workspace-move.test.ts` pins this order.
+- **A pane's helper Session travels with it**, directly after its source, which lets the target's resume re-parent it; nothing else in the payload names it.
+- **A Workspace that comes back must mount from the record it brought**, never the plan it first booted with.
 
-- **A window whose last Workspace left closes itself**, with no confirmation and no kill: nothing ended.
-- **Must collapse the source only after `workspace-departed` confirms adoption, before committing its release and removing its tab or closing its Window.** The pending guard spans the animation; `workspace-move.test.ts` pins this order. Presentation is `docs/specs/layout.md` → Workspace motion.
-- **A pane's helper Session travels with it.** A helper is not a member Surface,
-  so nothing else in the payload names it, and one left behind is a leaked shell
-  plus a stray pane on the source's next reload. It rides directly after its
-  source, which is what lets the target's resume re-parent it.
-- **An arrival whose PTYs never answer is refused, never cold-restored.** A
-  timed-out collection is not a collection that found nothing: those shells are
-  still running, and restoring from the record would start a second set over
-  them (`docs/specs/transport.md` → "Reconnection").
-- **A Workspace that comes back must mount from the record it brought**, never
-  the plan it first booted with, or a fresh pane lands over the Sessions that
-  just arrived.
-
-Source of truth: `prepareWorkspaceTransfer` in
-`lib/src/components/wall/workspace-transfer.ts`, `standalone/src/workspace-move.ts`,
-`transfer_workspace` in `standalone/src-tauri/src/lib.rs`.
-
-Tool transfer follows `docs/specs/dor-tool.md` → Persistence and hosts.
-
-Alert state and alarm delivery follow `docs/specs/alert.md` → Live Workspace transfer.
+Source of truth: `prepareWorkspaceTransfer` in `lib/src/components/wall/workspace-transfer.ts`, `standalone/src/workspace-move.ts`, `transfer_workspace` in `standalone/src-tauri/src/lib.rs`.
 
 ### Tear-out
 
-**A tear-out opens the window positioned so the dragged tab lands under the
-cursor**, at the source window's size. Its first flush writes
-`sessions/ws-<n>.json`, and from there it is an ordinary restorable window.
-Everything else is the transfer above.
+**A tear-out opens the window positioned so the dragged tab lands under the cursor**, at the source window's size. Its first flush writes `sessions/ws-<n>.json`; everything else is the transfer above.
 
 ### Arrival queue
 
-**An arrival is one transaction keyed by `workspaceId`**, carrying the source's
-`{ workspaceId, workspace, terminalIds, allIds }` — `allIds` naming every
-member Surface, browser ones included — under Rust's own `from` / `to`. Rust holds the record from the
-source's invoke until the target adopts the Workspace or dies, and every step
-below reads that record rather than inferring itself from the suppression map.
+**An arrival is one transaction keyed by `workspaceId`**, carrying the source's Workspace, its `terminalIds`, and `allIds` naming every member Surface, under Rust's own `from` / `to`. Rust holds the record from the source's invoke until the target adopts the Workspace or dies, and every step reads that record rather than inferring it from the suppression map (rationale). The mark-and-replay split is `docs/specs/transport.md` → "Transferring a Workspace".
 
-1. **Source** prepares the Workspace, touching nothing, and invokes
-   `transfer_workspace` / `open_workspace_window`. **Must return preparation refusals as `{ moved: false, reason }` without changing ownership.** On `Ok` it marks the Workspace
-   **transferring**: the Wall stays mounted, nothing is
-   released, and `getWindowSnapshot` omits it.
-2. **Rust** journals the arrival (below), then reassigns `terminalIds` to the target, keeps routing their output to
-   the source, and asks the sidecar to stamp a `pty:marked` line per id; at that
-   line the id's suppression begins, until its replay has been emitted to the
-   target. The source serializes each buffer at its mark and invokes
-   `transfer_workspace_content`, which attaches the content to the record and
-   only then nudges the target with `workspace-arriving` carrying nothing — or,
-   for a tear-out, builds the new window, whose boot pulls a payload that is
-   complete (`docs/specs/transport.md` → "Transferring a Workspace";
-   rationale). **An arrival without content is not drainable**
-   (`an_arrival_is_drainable_only_once_its_content_landed`).
-3. **Target** drains with `take_arrivals` and, per arrival, arms its collector
-   *before* calling `adopt_ready(workspaceId)` — the hop that removes the whole
-   "arrived before armed" class of bug (rationale). Rust answers
-   `pty:requestInit` with **that arrival's ids and no others**; `pty:list` and
-   each `pty:replay` echo the collector's token. The target resumes over them,
-   mounts the Workspace at the payload’s index, else the drop index.
-   **Never spawns or kills**: the Sessions' alert state never left the
-   sidecar, whose answer to that `pty:requestInit` re-sends it (§Alerts;
-   `docs/specs/alert.md` → Live Workspace transfer).
-4. **Target adopted** invokes `adopt_done(workspaceId)`. Rust retires the record,
-   clears pending marks and suppression so live output routes to the target,
-   and emits `workspace-departed` for
-   **that Workspace alone** to its own source.
-5. **Source** commits on `workspace-departed`: releases every Session (never
-   kills one), drops the helper, closes the Workspace, and closes
-   the window if it was the last one (§Transfer).
+```mermaid
+sequenceDiagram
+  participant S as Source webview
+  participant R as Rust
+  participant P as Sidecar
+  participant T as Target webview
+  S->>R: transfer_workspace / open_workspace_window
+  Note over R: begin_arrival: journal, then owner := target
+  R->>P: pty:mark {ids}
+  P-->>S: pty:marked {id, mark}
+  Note over R: drop id's output until target replay
+  S->>R: transfer_workspace_content (buffers at marks)
+  R-->>T: workspace-arriving (tear-out: build window)
+  T->>R: take_arrivals, then adopt_ready
+  R->>P: pty:requestInit {ids, marks, requestId}
+  P-->>T: pty:list, pty:replay since mark, alert:state
+  alt adopted
+    T->>R: adopt_done
+    R-->>S: workspace-departed
+  else adopt_failed, Destroyed, window not built, or ARRIVAL_MAX
+    R-->>S: workspace-arrival-failed {replayIds}
+    R->>P: pty:requestInit {forWindow: source, marked ids}
+    P-->>S: pty:replay since mark
+  end
+```
 
-- **Nothing is released before the target has adopted it.** The target can refuse
-  the arrival or close before taking it, and a Workspace released at the invoke
-  had no Sessions and no window that owned them.
-- **A transferring Workspace is in no snapshot its source writes, and neither
-  end's teardown kills or interrupts its shells.** They belong to the target by
-  ownership from the invoke, and the target's `pty_graceful_kill` and
-  `capture_agent_recovery` exclude every id an arrival claims (`boot_list_ids`),
-  since the source is still showing them. A quit or a close in the gap would
-  otherwise persist the same Workspace in two windows, or kill it under the
-  source.
-- **Must await `adopt_done` before installing a torn-out Window; refusal releases
-  its resumed Sessions and boots fresh.**
-- **A refused `adopt_done` unwinds the mount.** The `ARRIVAL_MAX` watchdog has
-  already handed the shells back and the source kept the Workspace, so the
-  target releases its Sessions (never kills them) and closes
-  the Workspace rather than leaving it live and persisted in two windows. **Must unwind from the received payload without preparing another move.**
-- **Must remove this window's unmounted semantic and Activity state when arrival
-  collection times out**, and kill nothing: the source goes on showing those
-  Sessions. Source of truth: `discardArrival` in
-  `standalone/src/workspace-move.ts`.
-- **A refused arrival hands the shells back.** The target's `adopt_failed`
-  (a `planArrival` timeout, a missing list, a mount error) and a target
-  `Destroyed` with the arrival still queued both return `terminalIds` to the
-  source unsuppressed (`a_target_closing_mid_arrival_hands_its_shells_back`),
-  drop the record, and emit `workspace-arrival-failed`; the
-  source clears **transferring** and the Workspace is simply still there. With
-  both ends gone the shells are reaped rather than left owned by a dead label.
-- **Must change transfer ownership and source routing under one routing lock**,
-  so output before the mark always reaches the source
-  (`transfer_ownership_and_source_routing_change_together`).
-- **Must reject a repeated move while that Workspace is in flight**, preserving
-  the first attempt’s content and recovery state. Async continuations act only
-  on their own attempt (`keeps the first move recoverable when the same tab is
-  dropped twice` in `standalone/src/workspace-move.test.ts`). **Must await the
-  host's hand-back when source content capture fails**, keeping the Workspace
-  in flight until routing returns (`recovers serialization failure through host
-  hand-back before another move`).
-- **A hand-back replays what the marked ids missed.** From an id's mark to the
-  hand-back every byte went to the target, or nowhere, so `hand_back_arrival`
-  returns each id the content marked to the source *suppressed* and asks the
-  sidecar for `outputSince(mark)` scoped to the source (`requestId`
-  `handback-<workspaceId>`); that replay lifts the suppression and lands in the
-  existing xterms (`acceptHandBackReplay`).
-  **Must record source cuts at `pty:marked`, retaining them through target
-  replay and natural PTY exit until settlement, and carry replay ids in the failure event**; content
-  submission and the source invoke reply may both still be pending. **Must discard
-  cuts on explicit kill**; an exited PTY is still owned (§Routing), so a
-  hand-back returns it to the source like a live one
-  (`a_pty_exit_keeps_its_cut_until_the_arrival_settles`).
-  **Must apply a handed-back PTY’s exit status after its replay**, leaving its
-  existing pane dead with no running command
-  (`settles the replayed command when a marked buffer belongs to an exited PTY` in
-  `standalone/src/tauri-adapter.test.ts`). An id the
-  sidecar never stamped goes straight back: a whole-buffer
-  replay would paint it twice (`a_hand_back_replays_only_the_marked_ids`;
-  rationale).
-- **`planArrival` never throws into `bootstrap()`.** A refused sole arrival on
-  the boot path renders a fresh one-pane Workspace, never a blank window.
-- **`take_arrivals` does not consume.** The record settles at `adopt_done`, so a
-  webview that drains at boot and again when its listener is installed cannot
-  lose a Workspace to a drain that happened too early; the webview dedupes by id.
-- **A window with a snapshot boots as itself**, mounting whatever was dropped on
-  it mid-boot over the restore rather than instead of it.
-- **`AWAITING_REPLAY_MAX` fails open only for suppressions no arrival claims.** A
-  cold boot slower than it would otherwise have a real arrival's shells
-  unsilenced into a window that has not resumed them yet.
-- **A boot's `pty_request_init` excludes every id an arrival claims.** Ownership
-  moves at the invoke, so those shells would otherwise be listed as top-level
-  panes beside the Workspace about to mount them.
-- **`begin_arrival` records the arrival in `sessions/arrivals.json` before
-  ownership moves** — a JSON array of `{ workspaceId, from, to, workspace,
-  settled }`, never an entry in either window's snapshot (rationale). **A failed
-  write must refuse the move with nothing changed**; the write runs outside
-  `arrivals`, so admission is rechecked after it and a refusal withdraws the
-  record (`a_failed_arrival_journal_refuses_the_move_with_nothing_changed`); the tombstone rules below read `settled`. **Must retain an adopted record until target
-  and source snapshots both reflect the move**, marking it settled at
-  `adopt_done` and checking after each `save_session` or source-window close
-  (`adoption_keeps_the_journal_until_both_snapshots_are_durable`). **Must reverse
-  the durable destination on hand-back and retain the record until both
-  snapshots reflect the return** (`a_hand_back_is_recovered_in_the_source_before_its_next_flush`). Failed settlement-marker or hand-back writes are logged and do not block live adoption or return.
-  **Must tombstone settled arrivals into a deliberately closed Window until
-  both snapshots omit them**, including during boot recovery
-  (`closing_an_adopted_target_never_resurrects_either_copy`).
-  A record left at boot is merged into its recorded destination before `restore_windows` — a tear-out target gets a file
-  holding just it, active; a source snapshot still naming the id loses it, an
-  emptied one is removed — so the Workspace restores once, with fresh shells,
-  and successful records are deleted; **must retain failed records for retry
-  and roll back the target if trimming the source fails**. **Must preserve a
-  settled arrival’s newer target record during boot recovery**
-  (`an_arrival_record_round_trips_until_it_is_forgotten`,
-  `a_leftover_arrival_boots_into_an_existing_target_snapshot`,
-  `a_leftover_arrival_boots_into_a_tear_out_targets_new_snapshot`,
-  `a_leftover_arrival_leaves_a_source_snapshot_that_still_names_it`,
-  `the_arrivals_file_is_gone_after_the_boot_merge`).
-- **Must run journal I/O and its lock waits off the main thread**, including
-  transfer/settlement/close commands and destroyed-window cleanup
-  (`blocking_commands_run_off_the_main_thread`).
-- **An arrival unadopted after `ARRIVAL_MAX` is handed back** by a watchdog armed
-  at `begin_arrival`, retiring only the record it was armed for (`queued_at`):
-  a target alive but wedged never reaches `adopt_failed` or `Destroyed`, and the
-  source would otherwise stay transferring with its shells silent for good
-  (`an_expiry_retires_only_the_record_it_was_armed_for`).
+- **Must return preparation refusals as `{ moved: false, reason }` without changing ownership.** On `Ok` the source marks the Workspace **transferring**: still mounted, nothing released, omitted from `getWindowSnapshot`.
+- **An arrival without content is not drainable.**
+- **The target arms its collector before `adopt_ready`** (rationale), and `pty:requestInit` names **that arrival's ids and no others**. The target mounts the Workspace at the payload's index, else the drop index, and **never spawns or kills**.
+- **`workspace-departed` names that Workspace alone.** Only then does the source release it (`docs/specs/transport.md` → "Transferring a Workspace") and close it, and its window if it was the last.
+- **A transferring Workspace is in no snapshot its source writes, and neither end's teardown kills or interrupts its shells**: the target's `pty_graceful_kill` and `capture_agent_recovery` exclude every id an arrival claims (`boot_list_ids`), and so does a boot's `pty_request_init`.
+- **Must await `adopt_done` before installing a torn-out Window; refusal releases its resumed Sessions and boots fresh.** **A refused `adopt_done` unwinds the mount** from the received payload, releasing (never killing) and closing the Workspace, without preparing another move (rationale).
+- **A refused arrival hands the shells back**: Rust drops the record and the source clears **transferring**. With both ends gone the shells are reaped.
+- **An arrival unadopted after `ARRIVAL_MAX` is handed back** by a watchdog armed at `begin_arrival`, retiring only the record it was armed for.
+- **A hand-back replays what the marked ids missed** (rationale): each marked id stays suppressed until its since-mark replay lands in the source's existing xterm; an id never stamped goes straight back. **Must retain source cuts from `pty:marked` through target replay and natural exit until settlement, and discard them on explicit kill.** **Must apply a handed-back PTY's exit status after its replay**, leaving its pane dead with no running command.
+- **`take_arrivals` does not consume**; the record settles at `adopt_done` and the webview dedupes by id (rationale).
+- **`AWAITING_REPLAY_MAX` fails open only for suppressions no arrival claims** (rationale).
+- **`begin_arrival` journals the arrival in `sessions/arrivals.json` before ownership moves**, never in either window's snapshot (rationale); **a failed write refuses the move with nothing changed**. **Must retain the record until both snapshots reflect the outcome** — marked settled at adoption, its durable destination reversed on hand-back — and **tombstone settled arrivals into a deliberately closed Window until both snapshots omit them**; failed writes are logged and block nothing live.
+- **A record left at boot merges into its recorded destination before `restore_windows`**, so the Workspace restores once, with fresh shells. **Must retain a failed merge's record for retry, roll back the target if trimming the source fails, and preserve a settled arrival's newer target record.**
 
-Source of truth: `Arrival` / `sweep_awaiting` / `expire_arrival` / `boot_list_ids` in
-`standalone/src-tauri/src/routing.rs`; `begin_arrival` / `adopt_ready` /
-`adopt_done` / `adopt_failed` / `hand_back_arrival` / `record_arrival_on_disk` /
-`forget_arrival_on_disk` / `restore_arrivals` in
-`standalone/src-tauri/src/lib.rs`; `standalone/src/workspace-move.ts`;
-`markWorkspaceTransferring` in `lib/src/lib/window-session-aggregator.ts`.
-Pinned by `standalone/src/workspace-move.test.ts`, the disk tests in
-`standalone/src-tauri/src/lib.rs`, and the arrival tests in
-`standalone/src-tauri/src/routing.rs`.
+Source of truth: `Arrival` in `standalone/src-tauri/src/routing.rs`; `begin_arrival` / `restore_arrivals` in `standalone/src-tauri/src/lib.rs`; `standalone/src/workspace-move.ts`; `markWorkspaceTransferring` in `lib/src/lib/window-session-aggregator.ts`.
 
 ### Dragging a Workspace between windows
 
-**A pointer captured on a strip tab keeps delivering `pointermove` and
-`pointerup` outside the window**, so the gesture stays the webview's and the
-host is only asked where the cursor is (rationale). Past the strip edge the host
-throttles a `window_at_cursor` probe (~60 ms) and lights a drop caret in
-whichever window is under it; **the release transfers there, or tears out when
-the cursor is over no window or over this window outside its own strip**.
+**A pointer captured on a strip tab keeps delivering `pointermove` and `pointerup` outside the window**, so the gesture stays the webview's and Rust is only asked which window is under the cursor (`window_at_cursor`; rationale). **The release transfers there, or tears out when the cursor is over no window or over this window outside its own strip.**
 
-**Among windows containing the cursor the most recently focused wins** — the OS
-exposes no z-order — and the caret is what makes a wrong guess visible before
-the release. **The target decides the drop index**: it alone knows its own tabs.
+**Among windows containing the cursor the most recently focused wins** — the OS exposes no z-order. **The target decides the drop index.**
 
-- **The throttle probes the trailing edge too**: the leading one never sees where
-  the pointer came to rest, which is the position the drop uses.
-- **A probe answering after the gesture is ignored**, or it re-lights a caret in
-  a window the drag has already left, where it would burn until the next one.
-- **The caret clears when the pointer comes back over its own strip**, where the
-  live reorder takes the gesture back.
-- **Never assume in-range pointer coordinates.** A captured pointer keeps
-  reporting client coordinates past the window's edges and negative rather than
-  clamping (rationale).
-
-Source of truth: `window_at` in `standalone/src-tauri/src/routing.rs`;
-`standalone/src/workspace-drag.ts`; `standalone/src/workspace-drop-caret.ts`.
+Source of truth: `window_at` in `standalone/src-tauri/src/routing.rs`; `standalone/src/workspace-drag.ts`.
 
 ## Persistence
 
-One `PersistedWindow` per window, restored on the next launch
-(`docs/specs/transport.md` → "The governing rule", which owns the rule). The
-webview owns the composition: each Workspace's Wall publishes its
-`PersistedSession` to the Window aggregator, whose one debounced writer is
-`TauriAdapter.saveWindowState` (`docs/specs/transport.md` → "Persisted session
-types"). `getWindowState` is the boot reader, and it **parses the blob once** —
-the store behind it is a boot-seeded cache and every later write comes through
-`saveWindowState`. The bare-Session `saveState` / `getState` pair answers nothing
-on either standalone adapter, because the stored blob is a Window and every
-shared reader of `getState` wants a Session. Source of truth: `windowStateSlot` in
-`standalone/src/window-recovery.ts`.
+**One `PersistedWindow` per window, every Workspace in it**, restored on the next launch (`docs/specs/transport.md` → "The governing rule"). The Window collector's writer is `TauriAdapter.saveWindowState`; `getWindowState` is the boot reader. Collector and cwd probes: `docs/specs/transport.md` → "Persisted session types". Source of truth: `windowStateSlot` in `standalone/src/window-recovery.ts`.
 
-**Boot restores per Workspace off one live-PTY list.** `restoreWindowOrFresh`
-seeds the aggregator, installs the Workspaces and the
-writer, then runs one `collectLivePtys` and plans each Workspace from its own saved
-record. Reload and relaunch are the same path with a different list: nothing wires
-`shutdown()` to `beforeunload`, so a reload's PTYs are still there and partition by
-saved pane id, while a relaunch's list is empty and every Workspace cold-restores
-into fresh shells at its saved cwds.
+**Boot restores per Workspace off one live-PTY list.** Reload and relaunch are the same path: nothing wires `shutdown()` to `beforeunload`, so a reload's PTYs partition by saved pane id, while a relaunch's list is empty and every Workspace cold-restores at its saved cwds. **A live PTY no saved Workspace names goes to the active Workspace**, except a helper, which goes to the Workspace holding its source.
 
-- **A live PTY no saved Workspace names goes to the active Workspace**, which is
-  the only one that can hold it — **except a helper**, which is never a persisted
-  pane and so is always unnamed. **A helper is routed to the Workspace holding its
-  source**, resolving parents across the whole live list before any slicing; one
-  landing anywhere else is resumed as an ordinary pane and its stray id voids that
-  Workspace's whole saved layout.
-- **A restore that throws degrades to a fresh Window and overwrites the blob.**
-  Installing the Workspaces is the step that can reject a stored blob outright, and
-  a throw at boot would leave nothing rendered, on this launch and every later one.
-- **A fresh Window mints its first Workspace's id**, rather than taking the lib's
-  `DEFAULT_WORKSPACE_ID`, which every window would otherwise start on: a second
-  window opened after the first one closed would write a blob naming a Workspace
-  id already live in another window's blob, and the next launch would meet the
-  same id twice and refuse the whole restore. A bare Wall — one Window's whole
-  application — keeps the default id, from `wrapSessionInWindow`'s default
-  parameter in `lib/src/lib/session-types.ts`.
+Source of truth: `restoreWindowOrFresh` in `standalone/src/window-restore.ts`.
 
-Source of truth: `restoreWindowOrFresh` / `routeUnownedPtys` in
-`standalone/src/window-restore.ts`.
+**Nothing is deleted at boot but orphaned session temp files and what the arrival merge settles** (`docs/specs/transport.md` → "Retiring the transcripts already on disk").
 
-**Every Workspace saving at the same moment costs one `pty_get_cwds`.** A flush
-fans out to every Wall at once, so both adapters put their cwd probe behind
-`coalesceCwds` (`standalone/src/coalesce-cwds.ts`), which folds the calls arriving
-in one microtask into a single invoke — the same batching `getCwdsForPids` already
-does one layer down, extended across the callers.
+**Never back the session blob with WebKit `localStorage`** — a WAL that grows without bound (rationale). The blob rides the `SessionKeyValueStore` seam over the Rust-backed `standalone/src/tauri-session-store.ts`. Theme selection still persists on `localStorage` (`docs/specs/theme.md`).
 
-**A listing that spans terminals costs one `pty_get_open_ports_many`.** Both
-adapters carry it, and the sidecar answers every id from one process-table read
-and one socket scan (`getOpenPortsForPids`) — the scans are synchronous on its
-only event loop, so a `dor list --ports` across Workspaces must not multiply them
-by its row count (`docs/specs/dor-cli.md` → "Current Implemented Commands").
-**Must follow `docs/specs/transport.md` → "Port scan deadlines" for both port commands.**
-The macOS and Windows socket scans run under
-`OPEN_PORT_TIMEOUT_MS + OPEN_PORT_TIMEOUT_PER_ID_MS × ids`, and the command waits
-that plus the process-table read's `OPEN_PORT_TIMEOUT_MS` and IPC margin — one terminal's cap
-never bounds the whole Window (`open_ports_many_timeout` in
-`standalone/src-tauri/src/lib.rs`). **A macOS socket scan keeps the rows `lsof`
-printed before a non-zero exit** — a pid gone mid-batch would otherwise empty
-every terminal's answer, as `getCwdsForPids` already guards.
-
-**Nothing is deleted at boot but orphaned session temp files**
-(`docs/specs/transport.md` → "Retiring the transcripts already on disk"). **The
-harness mirrors this answer** (§Standalone browser-dev harness), in
-`localStorage` and a per-run temp state directory.
-
-**Never back the session blob with WebKit `localStorage`** — a WAL that grows
-without bound (rationale). The blob rides the `SessionKeyValueStore` seam instead,
-over the Rust-backed `standalone/src/tauri-session-store.ts`. Theme selection
-still persists on `localStorage` (`docs/specs/theme.md`) — tiny and rarely
-written.
-
-**Rust file store.** `save_session(window, state)` / `load_session(window)`
-(`lib.rs`) persist the blob as one atomic file per Tauri window,
-`<state root>/sessions/<label>.json`:
+**Rust file store.** `save_session` / `load_session` persist the blob as one atomic file per Tauri window, `<state root>/sessions/<label>.json`:
 
 - **The label is sanitized** so it cannot escape the directory.
-- **Temp-then-rename**, so a crash cannot truncate the previous snapshot. The temp
-  file is fsynced before the rename and, on unix only, the sessions directory
-  *after* it, best-effort (rationale).
-- **Window identity is implicit**: each command keys by the invoking
-  `tauri::Window`'s `label()`, so the frontend stays window-agnostic and every
-  window (`ws-2`, …) persists to its own file rather than rewriting a sibling's.
-- No WAL to grow, and rewriting the same path bounds the on-disk size to one
-  blob (rationale).
-- **The writer removes its own temp file on every error path**, so only a crash
-  can leave one behind.
-- Per-window cleanup follows §Per-window close; only the boot merge otherwise deletes a snapshot
-  (§Arrival queue).
-- **Must sweep orphan session temp files once at boot** in the active sessions
-  directory and, for debug builds, the legacy `<app_data_dir>/sessions` directory.
-  `SESSION_TEMP_SUFFIX` is pinned against the writer by
-  `session_temp_suffix_matches_what_the_writer_leaves`.
-  Transcript migration follows `docs/specs/transport.md` → "Retiring the transcripts already on disk".
+- **Temp-then-rename**, the temp file fsynced first and, on unix, the directory after, best-effort (rationale). **The writer removes its own temp file on every error path**, so only a crash leaves one.
+- **Window identity is implicit**: each command keys by the invoking window's label, so the frontend stays window-agnostic.
+- Only §Per-window close and the boot merge (§Arrival queue) delete a snapshot.
 
-Source of truth: `write_file_with_permissions` in `standalone/src-tauri/src/lib.rs`.
+**Must use `<app_data_dir>/dev` as the debug state root and `<app_data_dir>` for release builds** (rationale), and **keep Burrow state directly under the identifier's `app_data_dir`**. **Rust passes the sidecar its two directories by environment**, each created owner-only first and empty when it could not be: `DORMOUSE_STATE_DIR` (the Burrow store, `app_data_dir`) and `DORMOUSE_RECOVERY_DIR` (the state root, so a dev run's record cannot reach the installed app). The browser-dev harness sets both to its per-run temp directory. Source of truth: `state_root_from` / `prepare_owner_only_dir` in `standalone/src-tauri/src/lib.rs`.
 
-**Must use `<app_data_dir>/dev` as the debug state root and `<app_data_dir>` for
-release builds** (rationale). `app_data_dir()` follows the Tauri identifier;
-`pnpm dev:standalone` already supplies a distinct per-worktree identifier
-(§Build and development). The subtree also isolates session/recovery state when
-raw Tauri dev bypasses that wrapper. **Must keep Burrow state directly under that identifier’s `app_data_dir`**.
-Source of truth: `state_root_from` and `sweep_session_roots` in
-`standalone/src-tauri/src/lib.rs`.
+**The session store is owner-only before any bytes are written** (`docs/specs/security-local.md` -> "Persisted state"; rationale). **Must abort a snapshot save if either permission change fails**, preserving the previous snapshot. **Must withhold a state directory whose restriction fails**, logging a `WARNING` naming the path; the Burrow store and recovery record then stay in memory.
 
-**Rust passes the sidecar its two directories by environment**, each created
-owner-only first and each an empty string when it could not be:
-`DORMOUSE_STATE_DIR` (the Burrow store, `app_data_dir`) and
-`DORMOUSE_RECOVERY_DIR` (the recovery record, the state root — so a dev run's
-record cannot reach the installed app). The browser-dev harness sets both to its
-own per-run temp directory. Source of truth: `prepare_owner_only_dir` / `recovery_state_dir` in
-`standalone/src-tauri/src/lib.rs`.
+**Must await the store pipeline before exiting**, under the quit timeout (§Quit flow; rationale): `drainSessionSaves` resolves when it goes idle, a rejected write included. Drain is a completion barrier, not a guarantee of successful persistence.
 
-**Must restrict the session store to the owner before any bytes are written**
-(`docs/specs/security-local.md` -> "Persisted state"; rationale).
-`restrict_to_owner` sets `0700` on the directory and `0600` on the temp file
-*first*, since the rename preserves its mode; on Windows, where a unix mode is a
-silent no-op, it applies a protected single-entry DACL instead (mechanism in its
-doc comment). `burrow_state_dir` locks the sidecar's state directory with the
-same call and relies on it reaching a file that already *existed*, which
-`restrict_to_owner_leaves_one_owner_only_ace` pins (rationale). **Must abort a snapshot save if either permission change fails**, preserving the previous snapshot. **Must withhold a state directory whose restriction fails**, logging a `WARNING` naming the path; the Burrow store and recovery record then stay in memory (`burrow_directory_permission_failure_disables_durable_state`). Pinned by `session_permission_failures_preserve_previous_snapshot_without_writing_bytes` and `session_write_tightens_directory_and_existing_temp_file`.
-
-**Boot + the synchronous-read constraint.** `getState()` is synchronous —
-cold-start restore reads it before React mounts — but a Tauri `invoke` is async, so
-`TauriSessionStore` keeps an in-memory write-through cache: `TauriAdapter.init()`
-`hydrate`s it from `load_session` (§Boot sequence), `getItem` reads it
-synchronously, `setItem` updates it and forwards to `save_session` asynchronously,
-coalescing bursts to at most one in-flight write (latest value wins). Mirrors the
-VS Code adapter's host-injected seed (`docs/specs/vscode.md`).
-
-Dirty tracking is shared frontend behavior (`docs/specs/layout.md` → Session persistence).
-**Must skip an unchanged store write only when that value is queued or saved.**
-An idle failed write remains retryable even though the read cache already holds
-its value; pinned by `tauri-session-store.test.ts`.
-
-Source of truth: `TauriSessionStore.setItem` in `standalone/src/tauri-session-store.ts`.
-
-**Must await the store pipeline before exiting**, under the quit timeout
-(§Quit flow; rationale). `drainSessionSaves` awaits `TauriSessionStore.drain()`,
-which resolves when the write pipeline goes idle, including after a rejected
-write; failed writes are logged. With Session persistence disabled, the pipeline
-is already idle. Drain is a completion barrier, not a guarantee of successful
-disk persistence.
+Source of truth: `TauriSessionStore` in `standalone/src/tauri-session-store.ts`.
 
 ### Agent recovery
 
-**Must run shared capture and record ownership in the sidecar**, under `docs/compatible-agents.md`. Rust bridges `capture_agent_recovery` and `take_recovery_commands` asynchronously. **Must answer both through `respondAsync`**, returning `{ error }` on throws rather than stranding the invoke.
+**Must run shared capture and record ownership in the sidecar**, under `docs/compatible-agents.md`. **`capture_agent_recovery` and `take_recovery_commands` answer `{ error }` on a throw** rather than stranding the invoke.
 
 - **Must store the record at `<state root>/recovery.json`.**
-- **Must claim the saved Window's pane ids across all its Workspaces from `TauriAdapter.init()`.** Init starts the claim without awaiting it; boot awaits `recoveryReady` only on the branch that can cold-restore.
-- **Must restrict capture to the closing Window's eligible PTYs**, following Teardown ordering and Transfer.
+- **Must claim the saved Window's pane ids across all its Workspaces from `TauriAdapter.init()`**; boot awaits `recoveryReady` only on the branch that can cold-restore.
+- **Must restrict capture to the closing Window's eligible PTYs** (§Teardown ordering, §Arrival queue).
 - **Never capture in the browser-dev harness**; it claims records but reloads resume live PTYs.
 
-Source of truth: `pty:captureRecovery` / `recovery:take` in `standalone/sidecar/main.js`; `TauriAdapter` in `standalone/src/tauri-adapter.ts`.
+Source of truth: `pty:captureRecovery` / `recovery:take` in `standalone/sidecar/main.js`.
 
 ## Quit flow
 
 Tool close consent: `docs/specs/dor-tool.md` → Closing unsaved Tools.
 
-Source of truth: `standalone/src-tauri/src/lib.rs` (`QuitState`, `request_quit`,
-the `quit_ack` / `quit_progress` / `quit_cancel` / `quit_proceed` commands, the `CloseRequested` /
-`ExitRequested` arms) and `standalone/src/quit.ts` (the webview orchestrator).
+Source of truth: `QuitMachine` in `standalone/src-tauri/src/quit_state.rs`; `standalone/src/quit.ts` (the webview orchestrator).
 
-**Must intercept every quit trigger in Rust** and run the webview teardown
-before exiting (rationale).
+**Must intercept every quit trigger in Rust** and run the webview teardown before exiting (rationale).
 
-**Every window votes before any window is torn down.** A cancel in the last
-window could otherwise not put back the windows already destroyed
-(rationale). Rust asks them all, and only once they all agree walks them one
-teardown at a time. Source of truth: `QuitMachine` in
-`standalone/src-tauri/src/quit_state.rs`.
+**Every window votes before any window is torn down** (rationale); the walk then tears them down one at a time.
 
-| Phase | What happens |
-|---|---|
-| Voting | every window acks, asks about its own running work, and calls `quit_vote` — or `quit_cancel`, which tells every window and destroys nothing |
-| Walking | the `dormouse://quit-teardown` event reaches one window at a time, **`main` last**; each hands on with `quit_window_done`, and the last one installs and calls `quit_proceed` |
-
-- **A cancel is refused once the walk starts**: the first window is already gone.
-- **A window that leaves outside the flow is forgotten**, so its vote is never
-  waited on and the walk advances past it. **A flow that runs out of windows
-  exits** rather than leaving a process with none, and so does a trigger that
-  finds none: parked in `Voting` it would have no window to vote and refuse
-  every later exit.
-- **A quit keeps every window's snapshot on disk** — that is what a relaunch
-  restores from, and the whole difference from a per-window close. **A Workspace
-  in transfer is in no snapshot until its target publishes it, and neither end's
-  teardown kills its shells** (§Arrival queue). A quit mid-transfer restores it
-  at most once: from the target once it has published it, or from a source
-  handed it back because the target was destroyed first; a source torn down
-  before its target adopts leaves it in no snapshot.
+- **A cancel is refused once the walk starts**, and **the walk tears `main` down last**.
+- **A window that leaves outside the flow is forgotten**, its vote never waited on. **A flow that runs out of windows exits.**
+- **A quit keeps every window's snapshot on disk** — the whole difference from a per-window close. A quit mid-transfer restores the Workspace at most once: from the target once it has published it, or from a source handed it back; a source torn down before its target adopts leaves it in no snapshot (§Arrival queue).
 
 ### Trigger interception
 
@@ -1070,309 +347,120 @@ Every trigger funnels into `request_quit(app)`:
 
 | Arm | Fired by | Guard |
 |---|---|---|
-| `WindowEvent::CloseRequested` | the window close button | `api.prevent_close()` unless the quit is approved. Refused outright while the walk is running: a window taken out from under its own teardown leaves the walk emitting to a dead label. Only the **last** window's close is a quit; every other one is a per-window close (§Windows) |
-| `RunEvent::ExitRequested` | a window-level exit request | `api.prevent_exit()` unless approved and cleared by the bounded cleanup gate (§What a window's `Destroyed` settles). The event's `code` is ignored |
-| the app menu's Quit item | the menu, and its `Cmd+Q` accelerator | a **custom** `MenuItem`, never `PredefinedMenuItem::quit`, whose event calls `request_quit`; muda wires the predefined one straight to AppKit's `terminate:` (macOS; rationale) |
-| `applicationShouldTerminate:` | the Dock's Quit, `osascript`, logout, restart | spliced onto tao's live delegate class at `Ready`, answering `NSTerminateCancel` and starting the flow; a terminate the OS re-sends after approval gets `NSTerminateNow` once cleared by the bounded cleanup gate (§What a window's `Destroyed` settles; macOS; rationale). The flow's own `app.exit(0)` never arrives here |
+| `WindowEvent::CloseRequested` | the window close button | `api.prevent_close()` unless approved; refused outright while the walk runs. Only the **last** window's close is a quit (§Per-window close) |
+| `RunEvent::ExitRequested` | a window-level exit request | `api.prevent_exit()` unless approved and cleared by the cleanup gate (§What a window's `Destroyed` settles); its `code` is ignored |
+| the app menu's Quit item | the menu and its `Cmd+Q` | a **custom** `MenuItem`, never `PredefinedMenuItem::quit` (macOS; rationale) |
+| `applicationShouldTerminate:` | the Dock's Quit, `osascript`, logout, restart | spliced onto tao's live delegate class at `Ready`, holding it (`NSTerminateLater`) and starting the flow; after approval, `NSTerminateNow` once the cleanup gate clears (macOS; rationale) |
 | the `quit_restart` command | the update notice's "Restart now", `dor app restart` | `request_quit` with the restart intent (§Restart) |
+
+**Never refuse an OS terminate**; that aborts the whole logout (rationale). **Must answer a held terminate on every exit and on `quit_cancel`**, or the app hangs.
 
 Source of truth: `standalone/src-tauri/src/macos_terminate.rs`.
 
 ### Quit protocol
 
-**The ack / vote / progress / proceed / cancel protocol.** `request_quit` clears
-every window's `acked`, bumps `seq`, and broadcasts `dormouse://quit-requested`.
-It **must leave a walk in flight alone** — a repeat
-trigger fired mid-teardown must not send the machine back to voting, or the fresh
-watchdog drops into the unbounded vote wait and stops bounding the teardown that
-is running. It **must keep every vote already cast**: a committed window answers
-the repeat with an ack alone, so clearing its vote would hold the machine in
-voting with no dialog left to answer (`a_repeat_trigger_while_voting_keeps_the_votes_already_cast`).
-Each window's orchestrator (registered by `initQuitFlow`, Tauri-only) responds:
+`request_quit` clears every window's `acked`, bumps `seq`, and broadcasts `dormouse://quit-requested`; **it must leave a walk in flight alone and keep every vote already cast**. Each window's orchestrator (`initQuitFlow`):
 
-1. **Always `quit_ack`** first (fire-and-catch), so phase 1 stands down even if
-   the orchestrator then dedupes the event out.
-2. **`quit_vote`** when this window is ready — immediately on an all-idle quit,
-   or after the user confirms. **A vote is not a
-   teardown**: nothing anywhere may be destroyed until every window has agreed.
-3. **`quit_progress`** when its own `quit-teardown` arrives, bumping a
-   `progress` counter. Sent again at the install phase boundary.
-4. The teardown (below), then **`quit_window_done`** — or **`quit_proceed`** in
-   the last window, which sets `approved` and calls `app.exit(0)`.
-5. A confirmation-dialog cancel (below) calls **`quit_cancel`** — bumps `seq`, invalidating the live watchdog,
-   tells every window to drop its dialog, and leaves the app running. **Nothing
-   else cancels**: a Quit anyway must reach teardown with the watchdog still armed.
+1. **always `quit_ack`s first**, even if it then dedupes the event out;
+2. **`quit_vote`s** when ready — at once when all-idle, else after the user confirms; **a vote is not a teardown**;
+3. `quit_progress`es when its own `quit-teardown` arrives and at the install phase boundary;
+4. tears down (§Teardown ordering), then `quit_window_done`, or `quit_proceed` in the last window, which approves and calls `app.exit(0)`;
+5. on a dialog cancel, calls `quit_cancel`, which bumps `seq` and drops every window's dialog. **Nothing else cancels.**
 
-A cloned-`AppHandle` **watchdog** thread keeps quit bounded against a dead or
-wedged webview, in three phases:
+A **watchdog** thread keeps quit bounded against a dead or wedged webview:
 
 | Phase | State | Budget |
 |---|---|---|
-| 1 — ack | some window has not acked | ~2 s; a listener is dead ⇒ log and `app.exit(0)` |
-| 2 — voting | acked, no window walking yet | **none** — a window may be parked on its confirmation dialog waiting on a human, who must never be force-quit out from under it. Only `quit_proceed` (`approved`) or `quit_cancel`/repeat-trigger (`seq` bump) ends the wait |
-| 3 — walking | one window tearing down | **per phase**, ~14 s, refreshed by its `quit_progress` bumps *and* by the walk advancing to the next window, so each phase and each window gets its own budget; no progress for the budget ⇒ log and exit |
+| 1 — ack | some window has not acked | short; a listener is dead ⇒ log and `app.exit(0)` |
+| 2 — voting | acked, no window walking yet | **none** — a window may be waiting on a human, who must never be force-quit; only approval or a `seq` bump ends it |
+| 3 — walking | one window tearing down | `QUIT_PHASE_TIMEOUT_MS` per phase, refreshed by `quit_progress` and by the walk advancing; no progress ⇒ log and exit |
 
-Approved exits from these watchdogs also pass the bounded cleanup gate
-(§What a window’s `Destroyed` settles).
+**Phase 3's budget must exceed the webview's teardown ceiling and the install phase's sidecar-kill cap** (`docs/specs/auto-update.md` → "Sidecar teardown on Windows"); `lib/src/lib/mirrored-constants.test.ts` pins the ceiling, nothing pins the install phase. Watchdog exits also pass the cleanup gate.
 
-Phase 3's budget comfortably exceeds the webview's own teardown ceiling. Each
-watchdog captures the `seq` it was spawned for, so a **repeated quit trigger** —
-which bumps `seq`, spawns a fresh watchdog and re-emits — leaves the stale one to
-exit without acting: the user's escape hatch if the webview acked then wedged.
+**Must use the Workspace typed-letter confirmation for window close and quit**, naming every Workspace in the window, hidden ones included. It opens for running Sessions; an all-idle quit proceeds without a prompt. The letter rule is `docs/specs/layout.md` → Workspaces.
 
-**Must use the Workspace typed-letter confirmation for window close and quit**,
-naming every Workspace in the window, including hidden ones. The gate opens for
-running Sessions; an all-idle quit proceeds without a prompt. **A quit's prompt
-says supported agent sessions resume when Dormouse reopens** (§Agent recovery);
-a window close's never does, since it runs no capture. Window close also
-asks before discarding a pending download (§Per-window close).
+- **Must cancel an unconfirmed request if Workspace membership changes**; switching and reordering preserve it.
+- **Must exclude transfers from host teardown.** An app quit queues while any arrival is pending, a native window close while that window is an arrival endpoint, and each retries through normal confirmation once the transfer settles; quit supersedes queued closes. **Must refuse new transfers while app quit or either endpoint's close is queued, confirming, or tearing down**, both decided under one lock (`ArrivalQueue`).
 
-- **Must keep one letter per request across Workspace switches and repeat quit
-  triggers.** `WorkspaceKillConfirm` supplies the key rule defined in
-  `docs/specs/layout.md` → Workspaces.
-- **Must leave the prompt open when its running count reaches zero.**
-- **Must cancel an unconfirmed request if Workspace membership changes**, so a
-  transfer cannot leave approval addressing a different set. Switching and
-  reordering preserve it.
-- **Must clear competing Workspace close/move/rename prompts when opening the
-  gate, preserving transfer guards.** A full-window overlay covers the strip;
-  its keyboard lease lasts through confirmation and teardown.
-- **Must exclude transfers from host teardown.** Queue app quit while any arrival
-  is pending, and native window close while that window is an arrival endpoint;
-  automatically retry through normal confirmation once the relevant transfer
-  settles. Repeated requests coalesce; quit supersedes queued closes, and
-  cancellation or window destruction retires applicable queued requests.
-  **Must refuse new transfers while app quit or either endpoint’s close is
-  queued, confirming, or tearing down.** Both are decided under one lock
-  (`ArrivalQueue`). Pinned by
-  `deferred_quit_and_close_requests_wait_for_membership_then_run_once` in
-  `standalone/src-tauri/src/quit_state.rs`, and
-  `transfers_cannot_change_membership_after_close_or_quit_confirmation_begins` and
-  `begin_arrival_journals_then_admits_under_the_arrivals_lock_before_queueing` in
-  `standalone/src-tauri/src/lib.rs`.
-- **Must collect votes before killing any window's Sessions.** Confirmation
-  consumes its callback once; a noninteractive full-window progress overlay
-  remains through voting, recovery, persistence, and teardown. All-idle
-  requests acquire the same overlay and keyboard lease before voting.
-
-Source of truth: `openQuitConfirm` in `standalone/src/quit-confirm-store.ts`;
-`WorkspaceTeardownModalHost` in `standalone/src/WorkspaceTeardownModal.tsx`;
-`WorkspaceKillConfirm` in `lib/src/components/WorkspaceKillConfirm.tsx`.
-Pinned by `holds an all-idle window through voting until another window cancels`
-in `standalone/src/quit.test.ts`,
-`holds one keyboard lease through commitment and releases it on matching dismissal`
-in `standalone/src/quit-confirm-store.test.ts`,
-`blocks the entire window during confirmation and while waiting for other votes`
-and `retains the letter across host remount and names hidden workspaces` in
-`standalone/src/WorkspaceTeardownModal.test.ts`, and
-`ignores repeat Cmd+Q, other modified letters, and bare modifiers` in
-`lib/src/components/WorkspaceKillConfirm.test.tsx`.
+Source of truth: `openQuitConfirm` in `standalone/src/quit-confirm-store.ts`; `WorkspaceTeardownModalHost` in `standalone/src/WorkspaceTeardownModal.tsx`. Cross-window voting is pinned by `standalone/src/quit.test.ts`.
 
 ### Teardown ordering
 
-**`runQuitTeardown`.** **Every step is individually
-bounded** so a stall cannot wedge quit, and the whole is wrapped in a ceiling
-**derived from the sum of those bounds, never a literal** — one below the sum
-aborts the final save of a slow teardown instead of guarding a wedged one. The two
-steps that reach the sidecar cost their own budget *plus* Rust's round-trip margin,
-so both terms count (`QUIT_TEARDOWN_CEILING_MS` in `standalone/src/quit.ts`; pinned by
-`lib/src/lib/mirrored-constants.test.ts`). The steps are:
+**Every step of `runQuitTeardown` is individually bounded, and the whole sits under a ceiling derived from the sum of those bounds, never a literal**, counting Rust's round-trip margin for the two steps that reach the sidecar (`QUIT_TEARDOWN_CEILING_MS` in `standalone/src/quit.ts`; pinned by `lib/src/lib/mirrored-constants.test.ts`). The steps:
 
-1. `captureAgentRecovery` — **this window's PTYs**, and **first**, because an agent's resume invocation exists
-   only between the interrupt and the kill and is the one thing here that cannot be
-   reconstructed afterwards (§Agent recovery). **A failed capture must not abort the
-   steps behind it.**
-2. `requestSessionFlush` — save while PTYs are alive, so CWDs are fresh.
-3. `gracefulKillPtys` — SIGTERM **this window's** PTYs, resolving early once all exit and
-   their final output has had a grace tick to reach the webview (§Rust ↔ sidecar
-   bridge).
-4. `requestSessionFlush({ probeCwd: false })` — flush the post-exit Session state.
-   **Must skip the cwd probe and retain the previously persisted CWD**: every
-   probe against a dead PTY answers null and is discarded for that value anyway
-   (`docs/specs/transport.md` → "Persisted session types").
-5. `flushWindowSession` — the Workspaces' records become one Window blob
-   (`docs/specs/transport.md` → "Persisted session types"); a debounce timer still
-   pending at exit would otherwise lose the final save. **Bounded like the rest,
-   its term in the ceiling**, though both writers are synchronous today.
-6. `drainSessionSaves` — await the store pipeline becoming idle or its timeout
-   (§Persistence).
-7. **In the last window only**, if an update is pending, a fresh `quit_progress`
-   then `installPendingUpdate()` — strictly *after* the completed save
-   (`docs/specs/auto-update.md`); Rust's phase-3 watchdog backstops a hung
-   installer.
-8. **Always** `quit_window_done`, or `quit_proceed` in the last window (in
-   `finally`, even on throw/timeout).
-
-**Windows note.** node-pty's `kill('SIGTERM')` is an immediate kill under ConPTY,
-so step 3 terminates promptly there, retaining the same final-output grace tick.
-
-**Dev-mode note.** The browser-dev harness has no Rust quit interception, and the
-flow never initializes there (§Boot sequence, step 6).
+1. `captureAgentRecovery` — **first**, since an agent's resume invocation exists only between the interrupt and the kill (§Agent recovery; rationale). **A failed capture must not abort the steps behind it.**
+2. `requestSessionFlush` — while PTYs are alive, so CWDs are fresh.
+3. `gracefulKillPtys` — this window's PTYs (§Rust ↔ sidecar bridge).
+4. `requestSessionFlush({ probeCwd: false })` — the post-exit state (`docs/specs/transport.md` → "Persisted session types"; rationale).
+5. `flushWindowSession` — the one Window blob, bounded like the rest.
+6. `drainSessionSaves` (§Persistence).
+7. **In the last window only**, if an update is pending, a fresh `quit_progress` then `installPendingUpdate()`, strictly after the save (`docs/specs/auto-update.md`); the phase-3 watchdog backstops a hung installer.
+8. **Always** `quit_window_done`, or `quit_proceed` in the last window, in `finally`.
 
 ### Restart
 
-A restart is a quit that relaunches: the same vote, confirmation and teardown,
-with only the exit changed.
+A restart is a quit that relaunches: the same vote, confirmation and teardown, with only the exit changed.
 
-- **The trigger that leaves `Idle` unapproved fixes the intent** — whether to
-  relaunch, and the requesting Surface. A repeat trigger keeps it, a cancel
-  clears it, and a quit queued behind a transfer carries it (`ArrivalQueue`).
-  `quit_restart` answers whether the quit it landed in relaunches — `false` when
-  it joined a plain quit.
-- **A restart asks exactly what a quit asks** (§Quit flow), so
-  `dormouse://quit-requested` carries only `{ requester }`, never whether the
-  quit relaunches.
-- **The requester never counts as running work in the restart's confirmation**
-  (`quitRunningWork`): it is the `dor app restart` still waiting on its answer.
-  Every other running Session still asks, and Workspace and window closes count
-  everything.
-- **Every approved exit stays `app.exit(0)`; the relaunch runs in
-  `RunEvent::Exit`, after `shutdown_sidecar_and_wait`**, as `cleanup_before_exit`
-  then `tauri::process::restart`, which on macOS re-reads `Info.plist`, so a
-  bundle replaced in place starts as the new version. **Never
-  `AppHandle::request_restart`** (rationale).
-- **Must clear the restart intent when macOS re-sends an OS terminate after approval**, so logout
-  never relaunches.
-- **`quit_restart` refuses a debug build and an executable
-  `tauri::process::current_binary` cannot resolve**, where `restart` would exit
-  without relaunching (rationale).
-- A Windows quit holding an update relaunches by its installer instead
-  (`docs/specs/auto-update.md` → "Platform behavior at quit").
+- **The trigger that leaves `Idle` unapproved fixes the intent** — whether to relaunch, and the requesting Surface. A repeat trigger keeps it, a cancel clears it, and a quit queued behind a transfer carries it. `quit_restart` answers whether the quit it landed in relaunches — `false` when it joined a plain quit.
+- **`dormouse://quit-requested` carries only `{ requester }`**: a restart asks exactly what a quit asks.
+- **The requester never counts as running work in the restart's confirmation** (`quitRunningWork`); every other running Session still asks, and Workspace and window closes count everything.
+- **Every approved exit stays `app.exit(0)`; the relaunch runs in `RunEvent::Exit`, after `shutdown_sidecar_and_wait`**, via `tauri::process::restart`, which on macOS re-reads `Info.plist`, so a bundle replaced in place starts as the new version. **Never `AppHandle::request_restart`** (rationale).
+- **Must clear the restart intent when macOS re-sends an OS terminate after approval**, so logout never relaunches.
+- **`quit_restart` refuses a debug build and an executable `tauri::process::current_binary` cannot resolve** (rationale).
+- A Windows quit holding an update relaunches by its installer instead (`docs/specs/auto-update.md` → "Platform behavior at quit").
 
-Source of truth: `quit_restart`, `relaunch_requested` and the `RunEvent::Exit`
-arm in `standalone/src-tauri/src/lib.rs`; `QuitIntent`, `QuitMachine::request` and
-`ArrivalQueue::defer_quit` in `standalone/src-tauri/src/quit_state.rs`;
-`quitRunningWork` in `standalone/src/quit-confirm-store.ts`. Pinned by the
-restart-intent tests in `standalone/src-tauri/src/quit_state.rs`,
-`a_restart_relaunches_only_after_the_sidecar_shuts_down` in
-`standalone/src-tauri/src/lib.rs`, and the requester and copy cases in
-`standalone/src/quit.test.ts` and `standalone/src/WorkspaceTeardownModal.test.ts`.
+Source of truth: `quit_restart` in `standalone/src-tauri/src/lib.rs`; `QuitIntent` in `standalone/src-tauri/src/quit_state.rs`.
 
 ## File drop
 
-The `WindowEvent::DragDrop` handler in `lib.rs` emits the dropped paths as
-`dormouse://files-dropped`; `TauriAdapter` fans that out to `onFilesDropped` for
-the Wall. The whole path is **inert today**: `tauri.conf.json` sets
-`dragDropEnabled: false`, so the native handler never fires. Behavior and
-status: `docs/specs/mouse-and-clipboard.md` (§8.7 Drag-to-Paste).
+The `WindowEvent::DragDrop` handler emits the dropped paths as `dormouse://files-dropped`, which `TauriAdapter` fans out to `onFilesDropped`. The path is **inert today**: `tauri.conf.json` sets `dragDropEnabled: false`. Behavior: `docs/specs/mouse-and-clipboard.md` (§8.7 Drag-to-Paste).
 
 ## Logging
 
-Windows release builds use the GUI subsystem, so nothing streams to a launching
-terminal. The Rust backend appends sidecar stderr, malformed stdout diagnostics,
-and its own diagnostics to a log file: `%LOCALAPPDATA%\Dormouse Terminal\dormouse.log` on
-Windows, `$TMPDIR/dormouse.log` elsewhere, overridable via `DORMOUSE_LOG_FILE`.
+Windows release builds use the GUI subsystem, so nothing streams to a launching terminal. Rust appends sidecar stderr, malformed stdout, and its own diagnostics to `%LOCALAPPDATA%\Dormouse Terminal\dormouse.log` on Windows, `$TMPDIR/dormouse.log` elsewhere, overridable via `DORMOUSE_LOG_FILE`. Startup keeps the previous run's log as `dormouse.previous.log`.
 
-**Must bound updater debug-log reads to the final 10,000 bytes**, dropping a
-leading partial UTF-8 character. `read_update_log` runs off the main thread. The
-log resets at app startup and grows during the run.
-
-Source of truth: `init_log` / `read_update_log` in `standalone/src-tauri/src/lib.rs`;
-`read_utf8_tail` in `standalone/src-tauri/src/log_tail.rs`, pinned by
-`reads_only_the_budget_even_when_the_log_grows`.
+Source of truth: `init_log` / `read_update_log` in `standalone/src-tauri/src/lib.rs`.
 
 ## Objective-C exceptions
 
-**Must let an Objective-C exception that AppKit raises beneath a tao callback,
-such as the `sendEvent:` override, unwind to AppKit**, whose event loop reports
-it and keeps running. Both halves are
-required; either alone still aborts with "panic in a function that cannot
-unwind" (rationale):
+**Must let an Objective-C exception that AppKit raises beneath a tao callback, such as the `sendEvent:` override, unwind to AppKit**, whose event loop reports it and keeps running. Both halves are required (rationale):
 
 - **Must build release with `panic = "unwind"`.**
-- **Must take tao from the `diffplug/tao` fork** through `[patch.crates-io]`:
-  its Apple callbacks are `extern "C-unwind"` where upstream's are
-  `extern "C"`. One fork branch per patched release (`dormouse-0.35` is
-  `tao-v0.35.2` plus that commit); `tao-macros` comes from the same rev so one
-  copy resolves. **Must rebase the commit onto the new release when tauri moves
-  tao**, since an unused `[patch]` only warns; drop the patch once tauri depends
-  on a tao carrying tauri-apps/tao#1354.
+- **Must take tao from the `diffplug/tao` fork** through `[patch.crates-io]`, whose Apple callbacks are `extern "C-unwind"`: one fork branch per patched release (`dormouse-0.35` is `tao-v0.35.2` plus that commit), `tao-macros` from the same rev. **Must rebase the commit onto the new release when tauri moves tao**, since an unused `[patch]` only warns; drop the patch once tauri depends on a tao carrying tauri-apps/tao#1354.
 
-**Rust panics still abort**: `abort_on_panic`, installed first in `run`, runs
-the default hook, then `std::process::abort`. **An exception raised inside the
-Tauri event handler still aborts**, at the `catch_unwind` tao runs it under
-(rationale).
+**Rust panics still abort** (`abort_on_panic`, installed first in `run`). **An exception raised inside the Tauri event handler still aborts** (rationale).
 
-Source of truth: `abort_on_panic` in `standalone/src-tauri/src/panic_policy.rs`;
-`[profile.release]` and `[patch.crates-io]` in `standalone/src-tauri/Cargo.toml`.
-Pinned by `standalone/src-tauri/tests/objc_exception_unwinds.rs` and the
-`panic_policy` tests.
+Source of truth: `abort_on_panic` in `standalone/src-tauri/src/panic_policy.rs`; `[patch.crates-io]` in `standalone/src-tauri/Cargo.toml`. Pinned by `standalone/src-tauri/tests/objc_exception_unwinds.rs`.
 
 ## Build and development
 
-Source of truth: `standalone/package.json` (package scripts),
-`standalone/src-tauri/tauri.conf.json` (`build`, `bundle.resources`), and the root
-`package.json` for the `dev:standalone` and `innerdogfood` orchestration;
-`runDev` in `standalone/scripts/dev-standalone.mjs`;
-`SELF_HOST_BUILD_CONFIG` in `standalone/scripts/tauri.mjs`;
-`standalone/scripts/clean-dev-sidecar.mjs`.
+Source of truth: `standalone/package.json`, `standalone/src-tauri/tauri.conf.json`, and the root `package.json` for `dev:standalone` and `innerdogfood`; `runDev` in `standalone/scripts/dev-standalone.mjs`.
 
-- `stage` = `stage:dor-cli` (build + stage the dor CLI, `docs/specs/dor-cli.md`)
-  plus `stage:sidecar-proxy` (`build-sidecar-proxy.mjs` bundles the
-  `lib/src/host/` sources into the sidecar `.cjs` files).
-- `tauri dev` stages `stage:dev`, as `pnpm innerdogfood` does, then runs
-  `runDev` below; other subcommands reach the Tauri CLI unstaged, `build`
-  staging via `beforeBuildCommand`. The sidecar bundle (a dev build under
-  `--dev`) and the webview bake `DORMOUSE_RELAY_ORIGIN` (`docs/specs/relay.md`
-  → "Relay origin"); the webview CSP has no relay sources
-  (`standalone/scripts/tauri-conf.test.mjs`).
-- **A self-host `tauri build` overlays no updater endpoint and no updater
-  artifacts**, so the binary cannot reach `dormouse.sh` and needs no signing
-  key. Pinned by `standalone/scripts/dev-standalone.test.mjs`.
-- The Tauri bundle ships the whole sidecar via the `../sidecar/**/*` resources
-  glob — including node-pty's prebuilds + bundled ConPTY and the
-  shell-integration scripts (`docs/specs/terminal-escapes.md`).
-- **Must start native dev with Vite on an OS-assigned loopback port and pass its
-  bound URL to Tauri**, with `beforeDevCommand` disabled in a per-run overlay.
-  Direct `pnpm exec tauri dev` keeps
-  `tauri.conf.json`'s defaults. HMR shares Vite's listener, including when
-  `TAURI_DEV_HOST` is inherited; inherited browser-dev settings never enable
-  browser mode.
-- **May pin Vite with `DORMOUSE_BROWSER_DEV_VITE_PORT`; an occupied port must fail
-  without stopping its owner.**
-- **Must close Vite and the owned Tauri process tree on startup failure, exit,
-  SIGINT, SIGTERM or SIGHUP.**
-  POSIX shutdown escalates to SIGKILL after three seconds; Windows terminates
-  the owned tree with `taskkill /T /F`.
-- **Must key the native dev Tauri identifier to the canonical worktree path**, so
-  parallel worktrees and the installed app never share app data. The default log is
-  `<worktree>/standalone/src-tauri/target/dormouse-dev.log`, overridden by
-  `DORMOUSE_LOG_FILE`. Pinned by `standalone/scripts/dev-standalone.test.mjs`.
-- **Must limit Windows pre-dev cleanup to sidecars executing from this worktree's
-  default debug directory; never kill a listener by port.**
-- **Must re-stage and restart after changing sidecar, staged CLI, or bundled host
-  sources.** Frontend edits hot-reload; Tauri watches Rust.
-- `pnpm innerdogfood` runs the sidecar + webview in a normal browser via the
-  browser-dev harness instead of the Tauri WebView (below).
-- **May point a dev build at a local `pnpm dev:hosted`** — the origin it prints,
-  with `DORMOUSE_RELAY_IS_HOSTED=1` — to speak managed voice through it; it
-  answers no other `Host` (`docs/specs/security-local.md` -> "Persisted state").
+- **The sidecar bundle and the webview bake `DORMOUSE_RELAY_ORIGIN`** (`docs/specs/relay.md` → "Relay origin"); the webview CSP has no relay sources (`standalone/scripts/tauri-conf.test.mjs`).
+- **A self-host `tauri build` overlays no updater endpoint and no updater artifacts**, so the binary cannot reach `dormouse.sh` and needs no signing key. Pinned by `standalone/scripts/dev-standalone.test.mjs`.
+- The bundle ships the whole sidecar via the `../sidecar/**/*` resources glob, including node-pty's prebuilds + bundled ConPTY and the shell-integration scripts (`docs/specs/theme.md` -> "OSC color queries on Windows require the bundled ConPTY", `docs/specs/terminal-state.md` -> "Shell-integration injection").
+- **Must start native dev with Vite on an OS-assigned loopback port** (`DORMOUSE_BROWSER_DEV_VITE_PORT` may pin it) **and key the Tauri identifier to the canonical worktree path**, so parallel worktrees and the installed app never share a port or app data. The default log is `<worktree>/standalone/src-tauri/target/dormouse-dev.log`.
+- **Never stop another process to free a port**: an occupied pinned port fails, and Windows pre-dev cleanup touches only sidecars executing from this worktree's default debug directory, never a listener by port.
+- **May point a dev build at a local `pnpm dev:hosted`** — the origin it prints, with `DORMOUSE_RELAY_IS_HOSTED=1` — to speak managed voice through it; it answers no other `Host` (`docs/specs/security-local.md` -> "Persisted state").
 
 ### Standalone browser-dev harness
 
-`pnpm innerdogfood` starts the standalone sidecar directly, a localhost-only HTTP bridge, and Vite with `VITE_DORMOUSE_BROWSER_DEV_HOST`, then opens the app URL in an `agent-browser` session. The browser build uses `BrowserSidecarAdapter` instead of `TauriAdapter` whenever that env var is present.
+`pnpm innerdogfood` starts the standalone sidecar directly, a localhost-only HTTP bridge, and Vite with `VITE_DORMOUSE_BROWSER_DEV_HOST`, then opens the app in an `agent-browser` session; that env var selects `BrowserSidecarAdapter`. Inside Dormouse, `dor tool innerdogfood` starts and shows it.
 
-- **Must bind OS-assigned ports for Vite and the HTTP bridge by default**, as native dev does; only a direct `pnpm exec tauri dev` keeps `tauri.conf.json`'s `1420` (above).
-- **Must derive the default browser key from the canonical worktree path**, stable across restarts. **Must open through `dor agent-browser` when `DORMOUSE_SURFACE_ID` is set**, otherwise through `agent-browser`; print the actual app URL, the browser identity it passed, and the command to drive it. **Must print a `--key` as a key, never as a session**: only the Workspace that will hold the browser can namespace one (`docs/specs/dor-browser.md` → "Managed identity"). **Must leave the browser to the Tool when its own terminal is a Tool** and no session is pinned, printing the Tool's handle; the Tool frames the announced Vite port. Inside Dormouse, `dor tool innerdogfood` starts and shows the harness.
+- **Must bind OS-assigned ports for Vite and the HTTP bridge by default**, and **derive the default browser key from the canonical worktree path**, so parallel worktrees are isolated. `DORMOUSE_BROWSER_DEV_VITE_PORT` / `DORMOUSE_BROWSER_DEV_HOST_PORT` and `DORMOUSE_BROWSER_DEV_AB_SESSION` may pin them, at the caller's own isolation risk; an occupied pinned port fails startup.
+- **Must open through `dor agent-browser` when `DORMOUSE_SURFACE_ID` is set**, otherwise `agent-browser`, and print the app URL, the bridge token, the browser identity, and the command to drive it. **Must print a `--key` as a key, never as a session** (`docs/specs/dor-browser.md` → "Managed identity"). **Must leave the browser to the Tool when its own terminal is a Tool** and no session is pinned, printing the Tool's handle.
 - **Must give its sidecar a private `AGENT_BROWSER_SOCKET_DIR`**, since the inner app names managed sessions as the installed app does; the harness's own browser keeps the caller's.
-- **May pin ports with `DORMOUSE_BROWSER_DEV_VITE_PORT` / `DORMOUSE_BROWSER_DEV_HOST_PORT` and the session with `DORMOUSE_BROWSER_DEV_AB_SESSION`.** An occupied pinned port fails startup; `0` requests an OS-assigned port. Explicit overrides are the caller's isolation responsibility.
-- **Must await Vite's own listener before opening the browser and use the actual ports for bridge authentication and CORS.** **Must close the bridge and Vite and terminate owned sidecar and browser-launch children on startup failure or shutdown**, escalating to SIGKILL after three seconds. Pinned by `standalone/scripts/dev-agent-browser.test.mjs`.
 
-The bridge is a transport shim over the same sidecar protocol, not a second PTY implementation: fire-and-forget commands `POST /__dormouse_dev_host/send`, request/response commands `POST /__dormouse_dev_host/invoke`, host→webview events as SSE on `GET /__dormouse_dev_host/events`, and browser console output mirrored to `POST /__dormouse_dev_host/console` so one terminal shows sidecar, Vite, and in-browser logs together. The Burrow rides it too, on the message names in `docs/specs/transport.md` → "Message protocol", so the harness runs a real Burrow against a per-run temp state directory (§Burrow service).
+The bridge is a transport shim over the same sidecar protocol, not a second PTY implementation: `POST /__dormouse_dev_host/send` and `/invoke`, host→webview events as SSE on `GET /__dormouse_dev_host/events`, and browser console output mirrored to `POST /__dormouse_dev_host/console`. The Burrow rides it too, against a per-run temp state directory.
 
-**The harness must keep logging the Burrow state directory in a form the pairing walkthrough parses**, which is how the walkthrough records that path before enrollment; pinned by `lib/src/lib/mirrored-constants.test.ts`.
+**The bridge is authenticated**: its gates are `docs/specs/security-local.md` -> "Loopback Listeners". The token is per-run, attached by `BrowserSidecarHost.url()` alone, and **never the `dor` control-API `controlToken`** (rationale); **the CORS origin is never `*`** (rationale). **A CORS preflight is the one carve-out**: `OPTIONS` answers `204` with the CORS headers before the token check.
 
-**The bridge is authenticated, and loopback is not what makes it safe** — it dispatches `pty_spawn` with caller-supplied `shell`, `args`, `cwd` and `env`, so reaching it is arbitrary command execution as the developer. Four rules hold **before routing and before any body read**, each argued in `dev-host-guard.mjs`'s comments: **every request carries `?t=<token>`**, a per-run credential baked into the `VITE_DORMOUSE_BROWSER_DEV_HOST` URL that `BrowserSidecarHost.url()` alone attaches and that is never the `dor` control-API `controlToken` (rationale); **`Host` must be `127.0.0.1:<port>` or `localhost:<port>`**; **non-GET requests must be `application/json`**; and **`access-control-allow-origin` names the Vite origin exactly, never `*`** (rationale), on every response including the SSE stream.
+The harness **may omit** native-only desktop chrome but **must preserve** every `PlatformAdapter` contract the app uses, the sidecar's alerts included (stamped with the one label it simulates, `main`), so a rule that holds only across the host boundary is exercised. **`BrowserSidecarHost.init()` resolves on the SSE stream being open**, so a seed cannot precede the stream that carries its reply; after a reconnect the adapter sends `sync`. It **must mirror** standalone's Session-persistence answer — one `PersistedWindow` per window in `localStorage`, and the same agent-recovery claim against a per-run temp state directory — and never captures (§Agent recovery). **Tauri APIs must not be required at static module-evaluation time** when `VITE_DORMOUSE_BROWSER_DEV_HOST` is set.
 
-**A CORS preflight is the one carve-out**: an `OPTIONS` answers `204` carrying those headers *before* the token check, since it can never present the non-GET content type the gate demands. **Any other unauthorized caller gets the same `404 not found` as an unknown path**, so the port does not identify itself. The harness prints the token and a ready-made `curl` on startup.
-
-The harness **may omit** native-only desktop chrome (window controls, update checks) but **must preserve** every `PlatformAdapter` contract the app uses — PTY, control-request, clipboard, iframe-proxy, Burrow, agent-browser, Playwright, and the sidecar's alerts (`alert_command` in, stamped with the one window label the harness simulates, `main`; their events back; §Alerts) — so a rule that only holds across the host boundary is exercised rather than answered by a private copy. **`BrowserSidecarHost.init()` resolves on the SSE stream being open, not on its construction**, so a seed cannot precede the stream that carries its reply; **must let retryable connection failures reconnect within the open timeout**; after a reconnect the adapter sends `sync`, since whatever the sidecar sent while the stream was down is gone (`resolves on the stream's open event, not on construction` in `standalone/src/browser-sidecar-host.test.ts`; `asks the sidecar to sync when the event stream reconnects` in `standalone/src/browser-sidecar-adapter.test.ts`). Fatal startup handling follows §Boot sequence. It **must mirror** standalone's Session-persistence answer (`docs/specs/transport.md` → "The governing rule"): one `PersistedWindow` per window, in `localStorage` rather than the Rust file store, and the same agent-recovery *claim* against a per-run temp state directory. **The harness must never capture**: a reload there is a live resume over PTYs that survive it, and capture is a quit-only step (§Agent recovery). **Tauri APIs must not be required at static module-evaluation time** when `VITE_DORMOUSE_BROWSER_DEV_HOST` is set — a normal browser loads the page, not the Tauri WebView.
-
-Source of truth: `standalone/scripts/dev-agent-browser.mjs`, `standalone/scripts/dev-run.mjs`, `standalone/scripts/dev-host-guard.mjs`, `standalone/src/browser-sidecar-host.ts`, `standalone/src/browser-sidecar-adapter.ts`; `stepBurrow` in `scripts/pairing-walkthrough/steps.mjs`; `sessionForKey` in `dor-lib-common/src/browser-providers.ts`.
+Source of truth: `standalone/scripts/dev-agent-browser.mjs`; `standalone/src/browser-sidecar-adapter.ts`.
 
 ## Future
 
-- **A setting to allow the Siri affordance**, for users who want Siri in
-  Dormouse. The override stays installed and `disallow` reads the setting,
-  answering from `WKWebView`'s own implementation when it allows Siri: the
-  runtime cannot remove a method, so toggling is a flag, not a second swap.
+**Scope: siri-setting**
+
+- **A setting to allow the Siri affordance**, for users who want Siri in Dormouse. The override stays installed and `disallow` reads the setting, answering from `WKWebView`'s own implementation when it allows Siri: the runtime cannot remove a method, so toggling is a flag, not a second swap.

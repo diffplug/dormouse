@@ -112,6 +112,13 @@ export function becomeToolMeta(meta: LeafMeta, title: string, params: Record<str
   return toolLeafMeta(meta.title === UNNAMED_PANEL_TITLE || meta.title === previousTitle ? title : meta.title, params);
 }
 
+/** The terminal leaf a Tool becomes in place once its designation ends
+ *  (`docs/specs/dor-tool.md` -> Run end): a user rename outlives it, and any
+ *  other title — the Tool's default, a page's — falls back to unnamed. */
+export function becomeTerminalMeta(meta: LeafMeta, userTitle: string | null): LeafMeta {
+  return terminalLeafMeta(userTitle !== null && meta.title === userTitle ? userTitle : UNNAMED_PANEL_TITLE);
+}
+
 /**
  * A tool's browser is derived, never restored: its port is whatever the command
  * bound *this* run, so a persisted `url` would frame a dead address — and a
@@ -126,7 +133,7 @@ export function persistableLeafMeta(meta: LeafMeta): LeafMeta {
   // it a tool would restore a pane that spawns a shell in a repo nobody
   // approved, with no gesture at all — and the prompt cannot be restored either,
   // since the grant it was asking for was never made
-  // (`docs/specs/dor-tool.md` -> Trust rule 3).
+  // (`docs/specs/dor-tool.md` -> Trust rule 2).
   if (meta.params.toolPending !== undefined) {
     return { component: 'terminal', tabComponent: 'terminal', title: meta.title };
   }

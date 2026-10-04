@@ -12,7 +12,7 @@
 
 import { buildCommand, type FlagParametersForType } from '@stricli/core';
 import type {
-  CliEnv,
+  CliOptions,
   Command,
   DorCommandContext,
   IdFormat,
@@ -32,7 +32,8 @@ import {
   parseIdFormat,
   parsePositiveInt,
   renderHandle,
-  renderJson,
+  printable,
+  renderPrintableJson,
   requireControlClient,
   stringParser,
   workspaceFlag,
@@ -201,7 +202,7 @@ async function runListCommand(
       ...(flags.window === undefined ? {} : { window: flags.window }),
     });
     const env = context.options.env ?? {};
-    const filtered = applyListFilters(response, flags, env);
+    const filtered = applyListFilters(response, flags, context.options);
     const idFormat = flags.idFormat ?? 'refs';
     const stdout = flags.json === true
       ? renderListJson(filtered, env, includePorts)
@@ -248,9 +249,9 @@ function checkScopeFlags(flags: ListFlags): { ok: true } | { ok: false; message:
 function applyListFilters(
   response: ListSurfacesResponse,
   flags: ListFlags,
-  env: CliEnv,
+  options: CliOptions,
 ): ListSurfacesResponse {
-  const cwd = flags.cwd === undefined ? undefined : callerWorkingDirectory(flags.cwd, env);
+  const cwd = flags.cwd === undefined ? undefined : callerWorkingDirectory(flags.cwd, options);
   return {
     ...response,
     surfaces: response.surfaces.filter((surface) => (
@@ -263,8 +264,10 @@ function applyListFilters(
   };
 }
 
+// Titles, locations, commands, and Workspace names carry PTY, page, and repo
+// text, so every listing escapes C0, DEL, and C1 before it reaches a terminal.
 function surfaceLocation(surface: Surface): string {
-  return surface.cwd ?? surface.url ?? '';
+  return printable(surface.cwd ?? surface.url ?? '');
 }
 
 /**
@@ -286,7 +289,7 @@ function renderListText(
   // Workspace keeps its header**, even one no row survived: the listing says
   // which Workspaces there are, and the JSON payload lists them all either way.
   const groups = response.workspaces.map((workspace) => [
-    `${workspace.ref}  ${workspace.name}${workspace.active ? '  [active]' : ''}`,
+    `${workspace.ref}  ${printable(workspace.name)}${workspace.active ? '  [active]' : ''}`,
     ...response.surfaces.flatMap((surface, index) => (
       surface.workspaceRef === workspace.ref ? [`  ${rows[index]}`] : []
     )),
@@ -342,7 +345,7 @@ function surfaceRows(
         : []),
     ];
 
-    return `${marker} ${handle}  ${kind}  ${renderMode}  ${view}  ${location}  ${surface.title}${tagTrailer(tags)}`.trimEnd();
+    return `${marker} ${handle}  ${kind}  ${renderMode}  ${view}  ${location}  ${printable(surface.title)}${tagTrailer(tags)}`.trimEnd();
   });
 
   return lines;
@@ -353,19 +356,20 @@ function renderWorkspacesText(response: ListWorkspacesResponse): string {
   const rows = response.workspaces;
   if (rows.length === 0) return '';
   const refWidth = Math.max(...rows.map((row) => row.ref.length));
-  const nameWidth = Math.max(...rows.map((row) => row.name.length));
-  const lines = rows.map((row) => {
+  const names = rows.map((row) => printable(row.name));
+  const nameWidth = Math.max(...names.map((name) => name.length));
+  const lines = rows.map((row, index) => {
     const tags = [
       ...attentionTags(row),
       ...(row.count > 0 ? [`[attention ${row.count}]`] : []),
     ];
-    return `${row.active ? '*' : ' '} ${row.ref.padEnd(refWidth)}  ${row.name.padEnd(nameWidth)}${tagTrailer(tags)}`.trimEnd();
+    return `${row.active ? '*' : ' '} ${row.ref.padEnd(refWidth)}  ${names[index].padEnd(nameWidth)}${tagTrailer(tags)}`.trimEnd();
   });
   return `${lines.join('\n')}\n`;
 }
 
 function renderWorkspacesJson(response: ListWorkspacesResponse): string {
-  return renderJson({
+  return renderPrintableJson({
     workspaces: response.workspaces.map(renderWorkspaceJson),
     window_ref: response.windowRef,
   });
@@ -416,7 +420,7 @@ function renderListJson(
       node_path: env.DORMOUSE_NODE ?? null,
     },
   };
-  return renderJson(payload);
+  return renderPrintableJson(payload);
 }
 
 function renderSurfaceJson(

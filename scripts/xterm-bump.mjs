@@ -28,12 +28,10 @@ import { gunzipSync } from 'node:zlib';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const CORE = '@xterm/xterm';
-const ADDONS = [
-  '@xterm/addon-fit',
-  '@xterm/addon-image',
-  '@xterm/addon-unicode-graphemes',
-  '@xterm/addon-webgl',
-];
+// Every addon lib pins: xterm-lint holds each one to the core, so a hand-kept
+// list leaves a newly added addon on the old core.
+const ADDONS = Object.keys(JSON.parse(readFileSync(join(ROOT, 'lib/package.json'), 'utf-8')).dependencies)
+  .filter((name) => name.startsWith('@xterm/addon-'));
 const FORK_ADDON = '@diffplug/xterm-addon-webgl-sdf';
 const UPSTREAM_REPO = 'xtermjs/xterm.js';
 

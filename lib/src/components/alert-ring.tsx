@@ -72,7 +72,14 @@ const burstKey = (source: AlertRingBurstSource): string =>
   'id' in source ? source.id : String(source.startedAt);
 
 /** Everything one alarm element needs to move for `row`, bundled so the class,
- *  the remount key, and the clock can never be applied apart. */
+ *  the remount key, and the clock can never be applied apart.
+ *
+ *  The unlabelled ring pulses one bounded burst per episode: an infinite
+ *  per-Session animation cost four focused panes 6.89 MB of embedder memory and
+ *  3.99 s of renderer CPU over three minutes (Chrome 150, 2026-09). `SPEAKING`
+ *  pulses for its utterance, which ends on its own; `SPOKEN` lasts until the ring
+ *  clears, so it never pulses. Keying on the episode, not a ring source, means a
+ *  source joining an active ring enriches it without re-flashing the Pane. */
 function alertRingBurstProps(row: AlertRingState, source: AlertRingBurstSource): AlertRingBurstProps {
   const bounded = row === 'ringing';
   const className = row === 'spoken' ? '' : alarmPulseClass(bounded);

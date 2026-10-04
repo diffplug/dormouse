@@ -24,6 +24,8 @@ export type DoorChip = DooredItem & {
   browserDisplay?: BrowserDisplayMode;
   /** The Workspace's preview slot (`docs/specs/dor-tool.md` -> Preview slot). */
   preview?: boolean;
+  /** Its page stays live while minimized (`retainsLivePage`). */
+  livePage?: boolean;
 };
 
 /** The visible-pane projection (`lath.listPanes()`). Shared by the Wall helpers,
@@ -47,7 +49,6 @@ export type WorkspaceCloseMode = 'prompt' | 'silent';
 
 export type DoorAfterRestoreAction =
   | 'confirm-kill'
-  | 'close'
   | {
       type: 'replace-terminal';
       newId: string;

@@ -4,6 +4,7 @@ import { useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncE
 import { clsx } from 'clsx';
 import { TERMINAL_BOTTOM_RADIUS_CLASS } from '../design';
 import { isEditableTarget } from '../../lib/dom';
+import { isMacSelectAll } from '../../lib/select-all';
 import type { RenderMode } from './agent-browser-screen';
 import { tabDisplayTitle } from './browser-url';
 import { resolveRenderMode } from './browser-surface';
@@ -141,10 +142,10 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [controller, paneWrite, id]);
 
-  // Feed effective on-screen visibility (foreground window, and not a parked leaf)
-  // so the controller can park a hidden pane after the debounce. A minimized
-  // screencast stays mounted and connected but stops pulling frames.
-  const visible = useSurfaceVisibility(parked);
+  // Feed effective on-screen visibility (foreground window, not a parked leaf,
+  // not under a zoomed one) so the controller can park a hidden pane after the
+  // debounce. A minimized screencast stays mounted but stops pulling frames.
+  const visible = useSurfaceVisibility(parked, id);
   useEffect(() => {
     controller.setVisible(visible);
   }, [controller, visible]);
@@ -304,7 +305,9 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
   useEffect(() => {
     if (!interactive) return;
     const forward = (e: KeyboardEvent) => {
-      if (!interactiveRef.current || e.defaultPrevented) return;
+      // The Wall cancels ⌘A only to stop a native select-all of its UI
+      // (docs/specs/mouse-and-clipboard.md → "3.9 Select All"); the page still takes it.
+      if (!interactiveRef.current || (e.defaultPrevented && !isMacSelectAll(e))) return;
       const el = elRef.current;
       if (el && e.target instanceof Node && el.contains(e.target)) return;
       // A screen modal (or any dialog) renders outside the pane element, so the

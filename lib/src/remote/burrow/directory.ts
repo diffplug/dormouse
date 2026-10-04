@@ -5,7 +5,7 @@
  * registry, xterm, or the DOM.
  */
 
-import type { DirectoryEntry } from 'remote-lib-common';
+import type { DirectoryEntry, DirectoryWorkspace } from 'remote-lib-common';
 import type { TerminalPaneState } from '../../lib/terminal-state';
 
 /** Everything one directory entry needs, already resolved from the live stores. */
@@ -46,6 +46,36 @@ export function buildDirectoryEntry(input: DirectoryPaneInput): DirectoryEntry {
   };
 }
 
-export function buildDirectorySnapshot(inputs: readonly DirectoryPaneInput[]): DirectoryEntry[] {
-  return inputs.map(buildDirectoryEntry);
+/** One Workspace of the answering Window, as the directory needs it. */
+export interface DirectoryWorkspaceInput extends DirectoryWorkspace {
+  /** Its member Surfaces (panes ∪ Doors). */
+  surfaceIds: readonly string[];
+}
+
+/**
+ * The entries in `workspaces` order — the Window's strip order — each naming
+ * its Workspace, and within one Workspace in `inputs` order. A pane no
+ * Workspace claims (its Wall has not published yet) follows, ungrouped. With no
+ * `workspaces` — a host whose refs are not unique across Windows — the entries
+ * stay in `inputs` order and name none.
+ */
+export function buildDirectorySnapshot(
+  inputs: readonly DirectoryPaneInput[],
+  workspaces: readonly DirectoryWorkspaceInput[] = [],
+): DirectoryEntry[] {
+  const owner = new Map<string, number>();
+  workspaces.forEach((workspace, index) => {
+    for (const id of workspace.surfaceIds) if (!owner.has(id)) owner.set(id, index);
+  });
+  return inputs
+    .map((input) => ({ input, index: owner.get(input.surfaceId) ?? workspaces.length }))
+    // Stable, so each Workspace keeps the inputs' own order.
+    .sort((a, b) => a.index - b.index)
+    .map(({ input, index }) => {
+      const entry = buildDirectoryEntry(input);
+      const workspace = workspaces[index];
+      if (!workspace) return entry;
+      const { ref, name, active } = workspace;
+      return { ...entry, workspace: { ref, name, active } };
+    });
 }

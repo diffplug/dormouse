@@ -10,10 +10,12 @@ import { createAlertClient, type AlertClientMethods } from '../../host/alert-cli
 import { isAlertEvent } from '../../host/alert-protocol';
 import { readInjectedRecoveryCommands } from '../vscode-recovery-global';
 import { setDefaultShellOpts } from '../shell-defaults';
+import { setHostShown } from '../host-shown';
 import { embedderOrigins } from '../embedder-origins';
 import {
   applyTerminalSemanticEvents,
 } from '../terminal-state-store';
+import { markSessionTouched } from '../terminal-store';
 import { getTerminalTheme, onTerminalThemeChange } from '../terminal-theme';
 import { HOST_MESSAGE_TOKEN_FIELD, isHostMessage, readHostMessageToken } from '../vscode-message-token';
 import { parseReplay } from './replay-parse';
@@ -32,6 +34,7 @@ const DETACHED = Symbol('detached');
 export interface VSCodeAdapter extends AlertClientMethods {}
 
 export class VSCodeAdapter implements PlatformAdapter {
+  readonly reapsTools = true;
   // VS Code owns the theme here: it provides --vscode-* itself and has its own
   // theme UI, so Dormouse hides the Settings dialog's Theme row.
   readonly hostOwnsTheme = true;
@@ -80,6 +83,7 @@ export class VSCodeAdapter implements PlatformAdapter {
     // Called through a detached reference, which would otherwise drop `this`
     // and throw on the internal `requestResponse`.
     this.createIframeProxyUrl = this.createIframeProxyUrl.bind(this);
+    this.releaseIframeProxy = this.releaseIframeProxy.bind(this);
 
     // Seed the default shell from the extension-injected global so that
     // the first terminal on startup (which spawns synchronously on Wall
@@ -94,7 +98,7 @@ export class VSCodeAdapter implements PlatformAdapter {
     // The extension-host parser has no DOM, so it can't read the theme to answer
     // OSC 10/11/12 color queries. Push the resolved colors up whenever the theme
     // changes (initial push happens in requestInit) so it can — matching the
-    // standalone frontend adapter. See docs/specs/terminal-escapes.md.
+    // standalone frontend adapter. See docs/specs/vscode.md -> "OSC color query answering".
     onTerminalThemeChange(() => this.pushThemeColors());
 
     window.addEventListener('message', (event: MessageEvent) => {
@@ -129,6 +133,8 @@ export class VSCodeAdapter implements PlatformAdapter {
         applyTerminalSemanticEvents(msg.id, msg.events ?? []);
       } else if (msg.type === 'terminal:clipboardOffer') {
         if (typeof msg.text === 'string') offerProgramCopy(msg.id, msg.text);
+      } else if (msg.type === 'terminal:clientInput') {
+        markSessionTouched(msg.id);
       } else if (msg.type === 'dormouse:flushSessionSave') {
         for (const handler of this.flushRequestHandlers) {
           handler({ requestId: msg.requestId });
@@ -148,6 +154,8 @@ export class VSCodeAdapter implements PlatformAdapter {
         }));
       } else if (msg.type === 'dormouse:selectedShell') {
         setDefaultShellOpts(msg.shell ? { shell: msg.shell, args: msg.args } : null);
+      } else if (msg.type === 'dormouse:shown') {
+        setHostShown(msg.shown !== false);
       } else if (msg.type === 'dormouse:openThemeDebugger') {
         window.dispatchEvent(new CustomEvent('dormouse:openThemeDebugger'));
       } else if (msg.type === 'dor:controlRequest') {
@@ -281,6 +289,15 @@ export class VSCodeAdapter implements PlatformAdapter {
     return result ?? [];
   }
 
+  async getOpenPortsMany(ids: string[]): Promise<Record<string, OpenPort[]>> {
+    const result = await this.requestResponse<Record<string, OpenPort[]>>(
+      'pty:getOpenPortsMany', 'pty:openPortsMany', { ids },
+      (msg) => msg.ports as Record<string, OpenPort[]>,
+      openPortRequestTimeoutMs(ids.length, 2),
+    );
+    return result ?? {};
+  }
+
   readClipboardFilePaths(): Promise<string[] | null> {
     return this.requestResponse<string[] | null>(
       'clipboard:readFiles', 'clipboard:files', {},
@@ -324,18 +341,22 @@ export class VSCodeAdapter implements PlatformAdapter {
     return result ?? { status: 'error', message: 'tool request timed out' };
   }
 
-  async createIframeProxyUrl(url: string): Promise<IframeProxyResult> {
+  async createIframeProxyUrl(url: string, lease?: string): Promise<IframeProxyResult> {
     // The extension host stands up the loopback proxy and serves the bytes (see
     // iframe-proxy-host.ts). On timeout, report unreachable so the panel shows a
     // hint rather than hanging on a never-loading frame.
     const result = await this.requestResponse<IframeProxyResult>(
       // The webview's ancestor chain is only knowable here: it decides who may
       // frame the proxy (`lib/src/lib/embedder-origins.ts`).
-      'iframe:createProxyUrl', 'iframe:proxyUrl', { url, embedderOrigins: embedderOrigins() },
+      'iframe:createProxyUrl', 'iframe:proxyUrl', { url, embedderOrigins: embedderOrigins(), ...(lease ? { lease } : {}) },
       (msg) => msg.result,
       5000,
     );
     return result ?? { ok: false, reason: 'unreachable', detail: 'iframe proxy request timed out' };
+  }
+
+  releaseIframeProxy(lease: string): void {
+    this.vscode.postMessage({ type: 'iframe:releaseProxy', lease });
   }
 
   onPtyData(handler: (detail: PtyDataDetail) => void): void {

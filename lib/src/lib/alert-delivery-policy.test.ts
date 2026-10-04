@@ -27,6 +27,18 @@ function workspace() {
 }
 
 describe('workspace delivery policy', () => {
+  it('silences a pending kill, whatever its Workspace says', async () => {
+    const { addPendingKill, _resetPendingKillsForTesting } = await import('./pending-kills');
+    workspace();
+    expect(getSessionAlertPolicy('pane').speakEnabled).toBe(true);
+    addPendingKill({ kind: 'surface', id: 'pane', workspaceId: 'ws', title: 't', label: 'Terminal' }, { restore: () => {}, finalize: () => {} });
+    try {
+      expect(getSessionAlertPolicy('pane')).toMatchObject({ speakEnabled: false, pushEnabled: false });
+    } finally {
+      _resetPendingKillsForTesting();
+    }
+  });
+
   it('keeps absent fields inherited and rejects malformed overrides', () => {
     expect(normalizeAlertDeliveryOverrides({ speakEnabled: 'false', pushDelayMs: NaN, speakDelayMs: -2, other: true }))
       .toEqual({ speakDelayMs: 1000 });

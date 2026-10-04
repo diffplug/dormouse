@@ -14,7 +14,7 @@ In September 2026, both production installations use `createAskSurfaceProvider`:
 
 ## Transport
 
-**Why the goodbye exists.** Before it, a Burrow that disposed a relayed session told the Client nothing: no Burrow→Relay frame drops a client, the Client's requests carry no timeout, and its keepalives keep its own idle clock fresh, so a relayed phone whose session was taken back froze with every keystroke dropped until it was reloaded. A direct session already learned of it, from its channel closing. The goodbye is a control message rather than a protocol-v1 event so it reaches a Client below the remote-api layer, where burrow loss is reported, and so an older Client — which ignores unknown control shapes — is no worse off than before.
+**Why the goodbye exists.** Before it, a Burrow that disposed a relayed session told the Client nothing: no Burrow→Relay frame drops a client, the Client's requests carry no timeout, and its keepalives keep its own idle clock fresh, so a relayed phone whose session was taken back froze with every keystroke dropped until it was reloaded. A direct session already learned of it, from its channel closing. The goodbye is a control message rather than a protocol-v1 event so it reaches a Client below the remote-api layer, where burrow loss is reported.
 
 **Why a switched channel waits for the goodbye.** A channel closed in the tick that sent the goodbye takes the association down with whatever was still queued or buffered — `RTCPeerConnection.close()` flushes nothing — so behind a burst of output the goodbye was dropped (review, 2026-09) and the phone read channel loss: Pocket's "connection lost" rather than "The computer ended this session", a one-time phone still connecting `ONE_TIME_DIRECT_FAILED_MESSAGE` rather than its ended copy. The wait is bounded because a goodbye stuck behind that much output only costs the phone the wording; the relay needs none, since its send lands on the socket before the dispose.
 
@@ -47,6 +47,12 @@ In September 2026, both production installations use `createAskSurfaceProvider`:
 **Why a collect carries a generation.** Collects overlap whenever something changes during a slow provider round trip, and they can settle in either order — so without one the stale answer lands last and blanks the picker until the next change.
 
 **Why duplicate `surfaceId`s collapse instead of both being listed.** The same cold-restore id collision as §The provider seam, one level up: two identical rows would make a picker keyed by `surfaceId` a lottery over which window an attach actually reaches.
+
+**Why `workspace` is withheld where refs are strip positions.** Every answerer's entries meet in one listing. VS Code's webviews each call themselves `workspace:1` "Workspace 1", so naming them would file every window's terminals under one header; withheld, the Client lists them flat, as before. Standalone's refs come from one application-wide counter, so they stay distinct across its Windows.
+
+**Why entry order carries the Workspace order.** Each Window answers with entries only — the peer answer stays one `DirectoryEntry` per pane across builds (`docs/specs/vscode.md` -> "Peer surfaces") — so sending entries in strip order gives the Client the Burrow's order without a second shape on the ask bridge.
+
+**Why a late answer invalidates instead of being dropped.** It arrives after the Burrow has already rendered a directory missing whatever that answerer owns — an empty picker on a machine that does have terminals — and nothing can re-open a settled request. Without the invalidation an idle machine has no other reason to re-collect, so the phone's picker stays wrong indefinitely.
 
 ## Terminal surfaces
 

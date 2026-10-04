@@ -13,7 +13,7 @@
 
 import type { ProcessedPtyStream } from '../../lib/processed-pty-stream';
 import type { AlertManager, AlertState } from '../../lib/alert-manager';
-import type { TerminalColorProvider, TerminalColors } from '../../lib/terminal-protocol';
+import { parseTerminalColors, type TerminalColorProvider, type TerminalColors } from '../../lib/terminal-protocol';
 import { createAlertHost, type AlertRealm } from '../alert-host';
 import type { AlertEvents } from '../alert-protocol';
 import { bakedRelay } from '../relay-origin';
@@ -25,11 +25,7 @@ import type {
 } from '../../remote/burrow/burrow-surface-provider';
 import { createAskSurfaceProvider } from './ask-surface-provider';
 import { createNativeDirectPeerFactory, disposeNativeDirectPeers } from './native-direct-peer';
-import {
-  createEphemeralBurrowStateStore,
-  FileBurrowStateStore,
-  forgetRetiredState,
-} from './burrow-state-store';
+import { createEphemeralBurrowStateStore, FileBurrowStateStore } from './burrow-state-store';
 import { BurrowService } from './service';
 import {
   ASK_BUDGET_MS,
@@ -94,8 +90,10 @@ export function createSidecarSurfaceBridge(
   options: SidecarSurfaceBridgeOptions,
 ): SidecarSurfaceBridge {
   interface PendingAsk {
-    /** Every answering window's results, concatenated. */
-    results: unknown[];
+    /** Each answering window's results, by label. Concatenated in label order
+     *  at settle, never arrival order, so a directory lists the same windows
+     *  in the same order on every collect. */
+    results: Map<string, unknown[]>;
     /** The windows this ask went to that have not answered yet. A window
      *  answering nothing still empties its entry: what settles the ask is having
      *  heard from everyone, not having found anything. Only ever SHRINKS — a
@@ -118,12 +116,13 @@ export function createSidecarSurfaceBridge(
     const burrowRequestId = `ask-${++askSeq}`;
     return new Promise((resolve) => {
       const pending: PendingAsk = {
-        results: [],
+        results: new Map(),
         awaiting: new Set(windows),
         settle: () => {
           clearTimeout(timer);
           asks.delete(burrowRequestId);
-          resolve(pending.results);
+          const labels = [...pending.results.keys()].sort();
+          resolve(labels.flatMap((label) => pending.results.get(label)!));
         },
       };
       const timer = setTimeout(() => {
@@ -194,7 +193,12 @@ export function createSidecarSurfaceBridge(
   const pty = alertedPty(options.alerts, options.mgr);
 
   const { provider, notifyDirectoryChanged } = createAskSurfaceProvider(ask, {
-    writePty: pty.writeClientInput,
+    // The webview holds the `untouched` flag a close reads, so it hears of the
+    // input too (docs/specs/layout.md → "Kill confirmation").
+    writePty(id, data) {
+      pty.writeClientInput(id, data);
+      options.send('terminal:clientInput', { id });
+    },
     resizePty: pty.resize,
 
     streamPty(ptyId, sink) {
@@ -273,14 +277,20 @@ export function createSidecarSurfaceBridge(
       // Not awaited: either this window already answered, or it opened after the
       // ask went out and never received it. Its results are not this snapshot's.
       if (!pending.awaiting.delete(from)) return;
-      if (Array.isArray(params.results)) pending.results.push(...params.results);
+      if (Array.isArray(params.results)) pending.results.set(from, params.results);
       if (pending.awaiting.size === 0) pending.settle();
     },
 
     setWindows(labels) {
       if (!Array.isArray(labels)) return;
       const live = labels.filter((label): label is string => typeof label === 'string');
-      if (live.length === 0) return;
+      // No window left: nothing outstanding can be answered, so it settles with
+      // what it has. The set itself is kept, never emptied (a later ask still
+      // has a window to wait on, and the next push replaces it).
+      if (live.length === 0) {
+        for (const pending of [...asks.values()]) pending.settle();
+        return;
+      }
       windows = new Set(live);
       // Re-evaluate what is already out: a window that closed mid-fan-out can
       // never answer, and must not hold an ask open to its whole budget.
@@ -366,12 +376,7 @@ export function createSidecarSurfaceBridge(
     },
 
     setThemeColors(colors) {
-      const detail = colors as Partial<Record<keyof TerminalColors, unknown>> | null;
-      if (!detail) return;
-      const { foreground, background, cursor } = detail;
-      if (typeof foreground !== 'string') return;
-      if (typeof background !== 'string' || typeof cursor !== 'string') return;
-      themeColors = { foreground, background, cursor };
+      themeColors = parseTerminalColors(colors) ?? themeColors;
     },
 
     dispose() {
@@ -474,9 +479,6 @@ export function createSidecarHost(options: SidecarHostOptions): SidecarHost {
   const store = options.stateDir
     ? new FileBurrowStateStore(options.stateDir)
     : createEphemeralBurrowStateStore((message) => console.error(message));
-  // Boot work, not read work: nothing waits on it, and nothing reads what it
-  // deletes (`burrow-state-store.ts`).
-  if (options.stateDir) void forgetRetiredState(options.stateDir);
 
   const bridge = createSidecarSurfaceBridge({ send, mgr, alerts });
   const pty = alertedPty(alerts, mgr);
@@ -601,7 +603,7 @@ export function createSidecarHost(options: SidecarHostOptions): SidecarHost {
           );
           return true;
         // The webview's resolved terminal theme, so the parser here can answer
-        // OSC 10/11/12 (docs/specs/terminal-escapes.md → Supported OSCs).
+        // OSC 10/11/12 (docs/specs/theme.md → Terminal color contract).
         case 'pty:themeColors':
           bridge.setThemeColors(data);
           return true;

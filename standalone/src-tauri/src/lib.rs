@@ -150,6 +150,32 @@ struct WindowState {
     /// The next `workspace-<n>`, seeded above every id on disk at setup and
     /// handed out in blocks so a webview can mint synchronously.
     next_workspace: AtomicU64,
+    /// Windows closed with everything reopenable, newest first
+    /// (docs/specs/reopen.md). Memory only: a quit forgets them.
+    closed_windows: Mutex<Vec<ClosedWindow>>,
+}
+
+/// What Reopen rebuilds a closed window from: the snapshot its webview built
+/// with fresh ids, and where it sat.
+#[derive(Debug, Clone, PartialEq)]
+struct ClosedWindow {
+    snapshot: String,
+    geometry: Option<WindowGeometry>,
+    /// The webview's clock, so it compares with that window's own records.
+    closed_at: f64,
+}
+
+/// As many closed windows as a Window keeps closed Surfaces.
+const CLOSED_WINDOW_CAP: usize = 20;
+
+fn push_closed(stack: &mut Vec<ClosedWindow>, closed: ClosedWindow) {
+    stack.insert(0, closed);
+    stack.truncate(CLOSED_WINDOW_CAP);
+}
+
+/// The newest closed window, if it closed after `newer_than`.
+fn take_closed_newer_than(stack: &mut Vec<ClosedWindow>, newer_than: f64) -> Option<ClosedWindow> {
+    if stack.first()?.closed_at > newer_than { Some(stack.remove(0)) } else { None }
 }
 
 impl RoutingState {
@@ -299,6 +325,16 @@ impl WindowState {
         };
         guard(&self.focus_order).retain(|entry| entry != label);
         (lost, owned)
+    }
+
+    /// A window opened: last in the focus order until it is focused, so a
+    /// window nobody has clicked into still answers `Route::Focused` once every
+    /// focused one has closed, rather than that request reaching every window.
+    fn note_window(&self, label: &str) {
+        let mut order = guard(&self.focus_order);
+        if !order.iter().any(|entry| entry == label) {
+            order.push(label.to_string());
+        }
     }
 
     fn touch_focus(&self, label: &str) {
@@ -561,7 +597,8 @@ const QUIT_ACK_TIMEOUT_MS: u64 = 2_000;
 // sum of all teardown work. Sits above the webview's own teardown
 // ceiling (docs/specs/standalone.md §Quit flow) — `QUIT_TEARDOWN_CEILING_MS` in
 // `standalone/src/quit.ts`, pinned under this by
-// `lib/src/lib/mirrored-constants.test.ts`.
+// `lib/src/lib/mirrored-constants.test.ts`. Also above `kill_sidecar_and_wait`'s
+// ~5s cap, which the Windows install phase awaits under one refresh.
 const QUIT_PHASE_TIMEOUT_MS: u64 = 14_000;
 const QUIT_POLL_STEP_MS: u64 = 500;
 // A per-window close whose webview never acks: its listener is dead, so close it.
@@ -899,6 +936,9 @@ fn init_log() {
     if let Some(parent) = path.parent() {
         let _ = create_dir_all(parent);
     }
+    // Keep the last run's log beside it, so a hang or forced restart leaves its
+    // evidence; a missing log (first launch) is fine.
+    let _ = std::fs::rename(path, path.with_extension("previous.log"));
 
     if let Ok(mut file) = OpenOptions::new()
         .create(true)
@@ -961,6 +1001,9 @@ struct PtySpawnOptions {
     /// A cold restore's persisted alert state, seeded by the sidecar's
     /// AlertManager behind the spawn. Opaque here, like `helper`.
     alert: Option<JsonValue>,
+    /// A rehydrated Tool's `DORMOUSE_DEHYDRATE` value; the PTY core bounds it
+    /// (docs/specs/dor-tool.md -> Reaping). Opaque here.
+    dehydrate: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -1140,7 +1183,7 @@ fn pty_resize(state: tauri::State<'_, SidecarState>, id: String, cols: u16, rows
 }
 
 // The webview's resolved terminal colors, so the sidecar's parser can answer
-// OSC 10/11/12 (docs/specs/terminal-escapes.md). Opaque here: the shape belongs
+// OSC 10/11/12 (docs/specs/theme.md). Opaque here: the shape belongs
 // to the parser at the other end, and Rust has no reason to know it.
 #[tauri::command]
 fn pty_theme_colors(state: tauri::State<'_, SidecarState>, colors: JsonValue) {
@@ -1433,23 +1476,44 @@ fn take_recovery_commands(
 // the shared lib/src/host/iframe-proxy.ts; this only bridges the request.
 #[tauri::command(async)]
 fn iframe_create_proxy_url(
+    window: tauri::Window,
     state: tauri::State<'_, SidecarState>,
     target: String,
     // The webview's own ancestor chain, which is what decides who may frame the
     // proxy. Forwarded verbatim and validated in the proxy itself
     // (`normalizeEmbedderOrigins`), so this stays a bridge and nothing more.
     embedder_origins: Option<Vec<String>>,
+    // The mounted view's lease id; its owner is this window, which only Rust
+    // can name (docs/specs/dor-browser.md → "Iframe Proxy Leases").
+    lease: Option<String>,
 ) -> Result<JsonValue, String> {
-    let response = request_from_sidecar_timeout(
-        &state,
-        "iframe:createProxyUrl",
-        serde_json::json!({
-            "target": target,
-            "embedderOrigins": embedder_origins.unwrap_or_default(),
-        }),
-        Duration::from_secs(5),
-    )?;
+    let mut data = serde_json::json!({
+        "target": target,
+        "embedderOrigins": embedder_origins.unwrap_or_default(),
+    });
+    if let Some(id) = lease {
+        data["lease"] = serde_json::json!({ "owner": window.label(), "id": id });
+    }
+    let response =
+        request_from_sidecar_timeout(&state, "iframe:createProxyUrl", data, Duration::from_secs(5))?;
     Ok(response.get("result").cloned().unwrap_or(JsonValue::Null))
+}
+
+// Ends this window's lease `lease`, or every lease it holds — what a webview
+// does as it boots, for any a page it replaced never released.
+#[tauri::command]
+fn iframe_release_proxy(
+    window: tauri::Window,
+    state: tauri::State<'_, SidecarState>,
+    lease: Option<String>,
+) {
+    send_to_sidecar(
+        &state,
+        sidecar_line(
+            "iframe:releaseProxy",
+            serde_json::json!({ "owner": window.label(), "id": lease }),
+        ),
+    );
 }
 
 // The repository holding each directory, for Workspace auto-naming, answered by
@@ -2361,6 +2425,11 @@ fn build_window(
     // The only platform read of this window's box: from here the `Moved` /
     // `Resized` payloads keep the cache current (§Boot and geometry).
     seed_geometry(app, label);
+    // Only while it still exists: a window destroyed before this line has
+    // already been dropped from the order, and must not come back as a target.
+    if let (Some(state), Some(_)) = (app.try_state::<WindowState>(), app.get_webview_window(label)) {
+        state.note_window(label);
+    }
     Ok(())
 }
 
@@ -3207,6 +3276,53 @@ fn take_arrivals(window: tauri::Window, windows: tauri::State<'_, WindowState>) 
     routing::arrival_payloads(&guard(&windows.arrivals), window.label())
 }
 
+/// A closing window whose close asked nothing leaves its snapshot here, built
+/// with fresh ids, for Reopen (docs/specs/reopen.md); its geometry is the cached box.
+#[tauri::command]
+fn push_closed_window(
+    window: tauri::Window,
+    windows: tauri::State<'_, WindowState>,
+    geometry: tauri::State<'_, GeometryState>,
+    snapshot: String,
+    closed_at: f64,
+) {
+    let geometry = geometry.refresh_rect(window.label(), None).map(CachedRect::to_logical);
+    push_closed(&mut guard(&windows.closed_windows), ClosedWindow { snapshot, geometry, closed_at });
+}
+
+/// Reopen the newest closed window in a new one, when it closed after
+/// `newer_than` — the asking window's own newest record. The new window finds
+/// the snapshot on disk and restores it as any window boots.
+#[tauri::command(async)]
+fn reopen_closed_window(
+    app: AppHandle,
+    windows: tauri::State<'_, WindowState>,
+    newer_than: f64,
+) -> Result<bool, String> {
+    let Some(closed) = take_closed_newer_than(&mut guard(&windows.closed_windows), newer_than) else {
+        return Ok(false);
+    };
+    let label = next_window_label(&windows);
+    let opened = sessions_dir(&app).and_then(|dir| {
+        {
+            let _disk = guard(&ARRIVAL_DISK_LOCK);
+            write_session_to(&dir, &label, &closed.snapshot)?;
+        }
+        append_log(format!("[window] reopening a closed window as {label}"));
+        build_window(&app, &label, closed.geometry).inspect_err(|_| {
+            // No window to own it: a snapshot left behind would open at the next launch.
+            let _disk = guard(&ARRIVAL_DISK_LOCK);
+            let _ = remove_session_from(&dir, &label);
+        })
+    });
+    if let Err(err) = opened {
+        // Kept for a later attempt rather than lost with the failure.
+        push_closed(&mut guard(&windows.closed_windows), closed);
+        return Err(err);
+    }
+    Ok(true)
+}
+
 /// Remove this window's persisted snapshot and stop it being written again.
 #[tauri::command]
 async fn remove_window_session(window: tauri::Window) -> Result<(), String> {
@@ -3326,6 +3442,10 @@ fn quit_cancel(
     guard(&windows.arrivals).cancel_deferred();
     let actions = guard(&state.machine).cancel();
     apply_quit_actions(&app, actions);
+    // A cancel refused mid-walk or after approval leaves the hold to the exit.
+    if !quit_walking(&app) && !quit_approved(&app) {
+        answer_held_terminate(&app, false);
+    }
 }
 
 // A non-last window finished its teardown: destroy it and start the next one.
@@ -3367,6 +3487,18 @@ fn relaunch_requested(app: &AppHandle) -> bool {
         .is_some_and(|state| guard(&state.machine).relaunches())
 }
 
+/// Answer the OS terminate macOS holds for the flow, if any (§Trigger
+/// interception); whether one was held.
+#[cfg(target_os = "macos")]
+fn answer_held_terminate(app: &AppHandle, proceed: bool) -> bool {
+    macos_terminate::answer_held(app, proceed)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn answer_held_terminate(_app: &AppHandle, _proceed: bool) -> bool {
+    false
+}
+
 #[cfg(target_os = "macos")]
 fn forget_restart(app: &AppHandle) {
     if let Some(state) = app.try_state::<QuitState>() {
@@ -3406,7 +3538,8 @@ fn close_window(app: AppHandle, window: tauri::Window) {
 // Normal app quit should let the Node sidecar run its shutdown handler first:
 // that handler closes headed agent-browser pop-out windows before killing PTYs.
 // If the sidecar is wedged, fall back to the same hard kill path so quit remains
-// bounded.
+// bounded. The grace must exceed the sidecar's 1.5s browser-cleanup deadline
+// (`shutdown` in standalone/sidecar/main.js).
 fn shutdown_sidecar_and_wait(state: &SidecarState) {
     const POLL_INTERVAL: Duration = Duration::from_millis(20);
     const MAX_POLLS: u32 = 125;
@@ -3457,7 +3590,7 @@ fn shutdown_sidecar_and_wait(state: &SidecarState) {
 // and can't hang, whereas the job-object `wait()` consumes a completion-port
 // message the reaper thread may already have drained (e.g. if the sidecar had
 // crashed earlier), which would block forever. The ~5s cap means a wedged
-// sidecar can't stall quit indefinitely.
+// sidecar can't stall quit indefinitely. Must stay under `QUIT_PHASE_TIMEOUT_MS`.
 fn kill_sidecar_and_wait(child: &SharedChild) {
     // Poll for exit at this cadence, up to ~5s total (MAX_POLLS × POLL_INTERVAL).
     const POLL_INTERVAL: Duration = Duration::from_millis(20);
@@ -3916,15 +4049,19 @@ fn start_sidecar(app: &AppHandle) -> Result<SidecarState, String> {
 /// carries one; nothing else can ever raise this id.
 const QUIT_MENU_ITEM_ID: &str = "dormouse-quit";
 
+/// The File menu's Reopen Closed item (docs/specs/reopen.md → Reopen verb).
+/// macOS only: a menu accelerator fires before the webview sees the key, so
+/// it works in passthrough; on Windows and Linux `Ctrl+Shift+T` would take a
+/// key programs read as `Ctrl+T`.
+const REOPEN_MENU_ITEM_ID: &str = "dormouse-reopen-closed";
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     panic_policy::abort_on_panic();
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
-        // Replace Tauri's default menu, which binds Cmd+V to a native Paste
-        // action that fights with the webview's DOM keydown handler. The
-        // terminal owns Cmd+C / Cmd+V / Cmd+X in JS (see `Wall.tsx`).
+        // Replace Tauri's default menu (docs/specs/standalone.md -> Application menu).
         .menu(|handle| {
             #[cfg(target_os = "macos")]
             let pkg = handle.package_info();
@@ -3962,6 +4099,34 @@ pub fn run() {
                     )?,
                 ],
             )?));
+            #[cfg(target_os = "macos")]
+            items.push(Box::new(Submenu::with_items(
+                handle,
+                "File",
+                true,
+                &[&MenuItem::with_id(
+                    handle,
+                    REOPEN_MENU_ITEM_ID,
+                    "Reopen Closed",
+                    true,
+                    Some("CmdOrCtrl+Shift+T"),
+                )?],
+            )?));
+            #[cfg(target_os = "macos")]
+            items.push(Box::new(Submenu::with_items(
+                handle,
+                "Edit",
+                true,
+                &[
+                    &PredefinedMenuItem::undo(handle, None)?,
+                    &PredefinedMenuItem::redo(handle, None)?,
+                    &PredefinedMenuItem::separator(handle)?,
+                    &PredefinedMenuItem::cut(handle, None)?,
+                    &PredefinedMenuItem::copy(handle, None)?,
+                    &PredefinedMenuItem::paste(handle, None)?,
+                    &PredefinedMenuItem::select_all(handle, None)?,
+                ],
+            )?));
             items.push(Box::new(Submenu::with_items(
                 handle,
                 "Window",
@@ -3985,6 +4150,11 @@ pub fn run() {
         .on_menu_event(|app, event| {
             if event.id() == QUIT_MENU_ITEM_ID {
                 request_quit(app, QuitIntent::default());
+            } else if event.id() == REOPEN_MENU_ITEM_ID {
+                // The focused window reopens: its own stack, or a closed window.
+                if let Some(label) = app.try_state::<WindowState>().and_then(|state| state.focused()) {
+                    let _ = app.emit_to(label.as_str(), "dormouse://reopen-closed", ());
+                }
             }
         })
         .on_window_event(|window, event| {
@@ -4192,6 +4362,7 @@ pub fn run() {
             capture_agent_recovery,
             take_recovery_commands,
             iframe_create_proxy_url,
+            iframe_release_proxy,
             tool_control,
             managed_voice,
             git_info,
@@ -4221,6 +4392,8 @@ pub fn run() {
             workspace_report,
             workspace_registry,
             remove_window_session,
+            push_closed_window,
+            reopen_closed_window,
             window_at_cursor,
             hover_workspace_target,
             get_available_shells,
@@ -4244,12 +4417,13 @@ pub fn run() {
             }
             // A window-level exit request (§Trigger interception). The flow's own
             // app.exit(0) re-enters here with approved=true and passes; `code`
-            // (None = user-initiated) is deliberately ignored.
+            // (None = user-initiated) is deliberately ignored. Every exit lands
+            // here, watchdogs included, so a held OS terminate gets its Yes here.
             RunEvent::ExitRequested { api, .. } => {
                 if !quit_approved(app) {
                     api.prevent_exit();
                     request_quit(app, QuitIntent::default());
-                } else if !exit_after_cleanup(app) {
+                } else if !exit_after_cleanup(app) || answer_held_terminate(app, true) {
                     api.prevent_exit();
                 }
             }
@@ -4669,6 +4843,16 @@ mod tests {
         assert_eq!(line["data"]["options"]["alert"], alert);
     }
 
+    /// A rehydrated Tool's payload rides its spawn whole; dropping the field
+    /// here would silently rehydrate every Tool from bare args.
+    #[test]
+    fn a_spawn_carries_a_rehydrated_tools_payload_to_the_sidecar() {
+        let options: super::PtySpawnOptions =
+            serde_json::from_value(serde_json::json!({ "dehydrate": "{\"v\":1,\"state\":[1]}" })).unwrap();
+        let line = parse_line(&super::pty_spawn_message("t1", Some(&options)));
+        assert_eq!(line["data"]["options"]["dehydrate"], "{\"v\":1,\"state\":[1]}");
+    }
+
     #[test]
     fn adoption_without_a_mark_routes_live_output_to_the_target() {
         let windows = super::WindowState::default();
@@ -4684,6 +4868,21 @@ mod tests {
         assert!(state.transfer_marks.is_empty());
         let registry = super::workspaces::Registry::default();
         assert!(matches!(super::routing::route("pty:data", &serde_json::json!({"id": "t1", "data": "live"}), &state.view(&registry)), super::routing::Route::EmitTo("ws-2")));
+    }
+
+    #[test]
+    fn a_window_never_focused_still_takes_unanchored_requests() {
+        let windows = super::WindowState::default();
+        windows.touch_focus("main");
+        windows.note_window("ws-2");
+        windows.note_window("ws-3");
+        windows.touch_focus("ws-3");
+        // Opening is not focusing: ws-3 stays ahead of the never-focused ws-2.
+        windows.note_window("ws-3");
+        assert_eq!(windows.focused().as_deref(), Some("ws-3"));
+        windows.drop_window("ws-3");
+        windows.drop_window("main");
+        assert_eq!(windows.focused().as_deref(), Some("ws-2"));
     }
 
     #[test]
@@ -4846,12 +5045,19 @@ mod tests {
         assert!(event.contains("!exit_after_cleanup(app)"));
         let gate = source.split("fn exit_after_cleanup").nth(1).unwrap().split("\n}").next().unwrap();
         assert!(gate.contains("if start_watchdog") && gate.contains("force_if_waiting") && gate.contains("QUIT_PHASE_TIMEOUT_MS"));
+        // A held OS terminate must be answered on every exit (all pass through
+        // this arm) and on cancel; refusing one aborts a logout outright
+        // (docs/specs/standalone.md -> "Trigger interception").
+        assert!(event.contains("answer_held_terminate(app, true)"));
+        let cancel = source.split("fn quit_cancel(").nth(1).unwrap().split("\n}").next().unwrap();
+        assert!(cancel.contains("answer_held_terminate(&app, false)"));
         let macos = include_str!("macos_terminate.rs");
-        let delegate = macos.split("if quit_approved(app) {").nth(1).unwrap().split("append_log(").next().unwrap();
-        assert!(delegate.contains("exit_after_cleanup(app)"));
-        assert!(delegate.contains("TerminateCancel"));
+        let delegate = macos.split("fn should_terminate(").nth(1).unwrap().split("\n}").next().unwrap();
+        assert!(delegate.contains("exit_after_cleanup(app)") && delegate.contains("TerminateLater"));
+        assert!(!delegate.contains("TerminateCancel"));
         // An OS terminate never relaunches (docs/specs/standalone.md -> "Restart").
         assert!(delegate.contains("forget_restart(app)"));
+        assert!(macos.split("pub fn answer_held(").nth(1).unwrap().split("\n}").next().unwrap().contains("forget_restart(app)"));
     }
 
     /// docs/specs/standalone.md -> "Restart".
@@ -5424,6 +5630,23 @@ mod tests {
             super::routing::restorable_labels(&names),
             vec!["main".to_string(), "ws-2".to_string()]
         );
+    }
+
+    /// Reopen takes the newest closed window only when it closed after the
+    /// asking window's own newest record; at most 20 are kept.
+    #[test]
+    fn closed_windows_reopen_newest_first_and_only_when_newer() {
+        use super::{push_closed, take_closed_newer_than, ClosedWindow};
+        let closed = |n: u32| ClosedWindow { snapshot: format!("w{n}"), geometry: None, closed_at: f64::from(n) };
+        let mut stack = Vec::new();
+        for n in 1..=25 {
+            push_closed(&mut stack, closed(n));
+        }
+        assert_eq!(stack.len(), 20);
+        assert_eq!(take_closed_newer_than(&mut stack, 25.0), None);
+        assert_eq!(take_closed_newer_than(&mut stack, 24.0).map(|w| w.snapshot), Some("w25".into()));
+        assert_eq!(take_closed_newer_than(&mut stack, 0.0).map(|w| w.snapshot), Some("w24".into()));
+        assert_eq!(stack.last().map(|w| w.snapshot.as_str()), Some("w6"));
     }
 
     /// The cached box is fed by the window events alone, and it is what both the

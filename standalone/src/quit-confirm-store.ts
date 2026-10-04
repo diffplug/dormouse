@@ -9,7 +9,7 @@ import type { TeardownConfirmContext } from "./teardown-flow";
  * Module store backing the quit-confirmation dialog. The quit orchestrator's
  * gate (`openQuitConfirm`, wired via `setQuitConfirmGate` in bootstrap) opens
  * it; `<WorkspaceTeardownModalHost>` renders off the phase. Behavior:
- * docs/specs/standalone.md §Quit flow, "Confirmation dialog".
+ * docs/specs/standalone.md -> "Quit protocol".
  */
 
 export type QuitConfirmPhase = "open" | "quitting";
@@ -25,6 +25,9 @@ export interface QuitConfirmIntent {
    *  the download lives in the webview, so nothing else can install it
    *  (docs/specs/auto-update.md). Never set on a quit, which installs it. */
   discardsUpdate?: boolean;
+  /** This window holds something Reopen could not rebuild, so closing it loses
+   *  it for good (docs/specs/reopen.md). Only ever set on a window close. */
+  unreopenable?: boolean;
   /** The Surface that asked for a restart, which never counts as running work
    *  here (docs/specs/standalone.md → "Restart"). Only ever set on a quit. */
   requester?: string | null;
@@ -118,6 +121,8 @@ export function openQuitConfirm(ctx: TeardownConfirmContext, next: QuitConfirmIn
   }
   activeCtx = ctx;
   intent = next;
+  // One letter per request: a Workspace switch or a repeat quit trigger never
+  // re-rolls it (the orchestrator does not re-invoke this gate while it is up).
   confirmChar = randomKillChar();
   phase = "open";
   ownDialog();

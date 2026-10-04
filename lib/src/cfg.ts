@@ -10,7 +10,7 @@ export const cfg = {
     cycleDuration: 0.4,
     /** Stroke width in px. */
     strokeWidth: 2,
-    /** When true, animation is frozen at T=0 (for deterministic Chromatic snapshots). */
+    /** When true, animation is frozen at T=0 (for deterministic visual snapshots). */
     paused: false,
   },
   alert: {
@@ -31,15 +31,15 @@ export const cfg = {
      * wait to ring on inactivity. Keep these effects coupled; there is no separate
      * minimum command runtime (product decision, 2026-09-24). */
     echoWindow: 750,
-    /** When true, the ALERT_RINGING alarm pulse animations are frozen at T=0 (for deterministic Chromatic snapshots). */
+    /** When true, the ALERT_RINGING alarm pulse animations are frozen at T=0 (for deterministic visual snapshots). */
     ringingPaused: false,
   },
   terminal: {
-    /** xterm cursor blink. Disabled under Chromatic so the cursor renders as a
+    /** xterm cursor blink. Disabled in visual snapshots so the cursor renders as a
      *  stable solid block rather than being captured mid-blink (non-deterministic). */
     cursorBlink: true,
     /** Render terminals through `@xterm/addon-webgl` instead of xterm's DOM
-     *  renderer. Disabled under Chromatic: the GPU path paints into a `<canvas>`,
+     *  renderer. Disabled in visual snapshots: the GPU path paints into a `<canvas>`,
      *  which snapshots as an opaque bitmap subject to driver differences, whereas
      *  the DOM renderer emits styled spans that diff deterministically. Turning it
      *  off also gives a way to A/B the renderer when diagnosing a rendering bug
@@ -50,14 +50,14 @@ export const cfg = {
      *  first image: the addon answers the DA1 / XTSMGRAPHICS / cell-size probes
      *  a program uses to decide whether to send one at all, so a Session that
      *  loads it late has already advertised no graphics support
-     *  (`docs/specs/terminal-escapes.md` → Inline graphics). Turning it off
+     *  (`docs/specs/layout.md` → Inline graphics). Turning it off
      *  drops that decode path for untrusted PTY bytes and its per-Session
      *  handlers. */
     inlineImages: true,
   },
   layout: {
     /** When false, Lath pane geometry changes (split / restore / kill / drag) apply
-     *  instantly with no tween. Disabled under Chromatic: a mid-tween split resizes
+     *  instantly with no tween. Disabled in visual snapshots: a mid-tween split resizes
      *  panes through many transient widths (briefly near-zero), and xterm's DOM
      *  renderer can latch onto one of those frames and leave a pane painted blank or
      *  clipped (`user@dormouse:~$` → `user@do`) even after the geometry settles.
@@ -72,7 +72,7 @@ export const cfg = {
   },
   overlays: {
     /** ms before the illegal-rename warning dismisses itself. 0 disables the
-     *  timer entirely — what Chromatic uses, because a popover that removes
+     *  timer entirely — what visual snapshots use, because a popover that removes
      *  itself three seconds after the play function ends is present or absent
      *  in the capture depending on how loaded the runner is. */
     warningAutoDismissMs: 3_000,

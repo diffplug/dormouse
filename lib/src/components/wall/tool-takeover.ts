@@ -7,6 +7,7 @@
  * facts, this decides, and the handshake that follows is the handler's.
  */
 import type { SurfaceKind } from 'dor/commands/types';
+import { canonicalDorVerb } from 'dor/protocol';
 import { commandProgramName, primaryCommandTokens } from '../../lib/terminal-state';
 
 /** Shell syntax that can make one line more than one command: separators,
@@ -16,7 +17,7 @@ const COMPOUND_SYNTAX = /[;&|<>()`\n\r]/;
 
 /**
  * Whether the shell reported running exactly one command and that command is
- * the requested `dor` verb — the human-intent signal, not a security boundary
+ * the requested `dor` verb or its alias — the human-intent signal, not a security boundary
  * (`docs/specs/dor-tool.md` -> Take-over). Case folds on the launcher, which is
  * a filename; the requested verb must match exactly.
  */
@@ -24,7 +25,7 @@ export function isNakedToolInvocation(rawCommandLine: string | null | undefined,
   const line = rawCommandLine?.trim();
   if (!line || COMPOUND_SYNTAX.test(line)) return false;
   const [launcher, commandVerb] = primaryCommandTokens(line);
-  return commandVerb === verb && commandProgramName(launcher ?? '').toLowerCase() === 'dor';
+  return canonicalDorVerb(commandVerb ?? '') === verb && commandProgramName(launcher ?? '').toLowerCase() === 'dor';
 }
 
 /** What the placement rule reads. Every field is already known to the handler. */
@@ -91,20 +92,4 @@ export function callerStillPlaceable(gate: ToolTakeoverGate): boolean {
     && gate.cwdMatches
     && gate.kind === 'terminal'
     && !gate.helperPresent;
-}
-
-/**
- * Whether a keyed match on the calling pane re-runs there. The caller is then
- * the tool's own Surface, so the placement conditions above are moot — there is
- * nothing to place, and the tool re-runs in its own directory, exactly as an
- * `adopted` match from any other pane does.
- */
-export function toolRerunsInCaller(gate: ToolTakeoverGate): boolean {
-  return gate.kind === 'tool' && callerTypedTool(gate);
-}
-
-/** What a re-run re-reads after the prompt wait: the pane survived it, in the
- *  directory the tool was answered with. */
-export function callerStillRunnable(gate: ToolTakeoverGate): boolean {
-  return gate.visible && gate.cwdMatches;
 }

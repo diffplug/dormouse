@@ -2,10 +2,11 @@ import * as vscode from 'vscode';
 import * as ptyManager from './pty-manager';
 import { createAlertHost, type AlertRealm } from '../../lib/src/host/alert-host';
 import { alertedPty, createOwnerPtyStream } from '../../lib/src/host/owner-pty';
-import type {
-  TerminalColorProvider,
-  TerminalColors,
-  TerminalProtocolEvent,
+import {
+  parseTerminalColors,
+  type TerminalColorProvider,
+  type TerminalColors,
+  type TerminalProtocolEvent,
 } from '../../lib/src/lib/terminal-protocol';
 import type { ProcessedPtyChunk, ProcessedPtyStream } from '../../lib/src/lib/processed-pty-stream';
 import { normalizeExternalUri } from '../../lib/src/lib/external-links';
@@ -17,7 +18,7 @@ import type { WebviewMessage, ExtensionMessage } from './message-types';
 import type { DorControlRequest } from './pty-manager';
 import { dorWorkspaceRefusal } from './dor-workspace-guard';
 import { runBrowserRequest } from './agent-browser-host';
-import { createIframeProxyUrl } from './iframe-proxy-host';
+import { createIframeProxyUrl, releaseIframeProxyLease } from './iframe-proxy-host';
 import { toolControl } from './tool-host';
 import type { ToolHostRequest } from '../../lib/src/lib/platform/types';
 import { ASK_BUDGET_MS } from '../../lib/src/host/remote/service-protocol';
@@ -107,6 +108,7 @@ configureBurrow({
  */
 function writeClientInput(ptyId: string, data: string): void {
   alertedPtys.writeClientInput(ptyId, data);
+  for (const listener of clientInputListeners) listener(ptyId);
 }
 
 function resizeForClient(ptyId: string, cols: number, rows: number, repaint?: boolean): void {
@@ -223,6 +225,7 @@ type SemanticEventsListener = (id: string, events: TerminalSemanticEvent[]) => v
 const semanticEventsListeners = new Set<SemanticEventsListener>();
 const toolEventsListeners = new Set<(id: string, events: TerminalProtocolEvent[]) => void>();
 const clipboardOfferListeners = new Set<(id: string, text: string) => void>();
+const clientInputListeners = new Set<(id: string) => void>();
 
 export function onProcessedPtyData(listener: ProcessedDataListener): () => void {
   processedDataListeners.add(listener);
@@ -351,10 +354,18 @@ export function attachRouter(
     // (owned-PTY alert state, or a PTY claimed/released). The host reflects it
     // onto native chrome (tab title / view badge). See docs/specs/vscode.md.
     onUnion?: (union: WorkspaceUnion) => void;
+    // Whether VS Code shows this webview. A retained hidden webview is not
+    // promised a `hidden` page, so the webview is told, on (re)initializing
+    // and on each change (docs/specs/dor-browser.md → "Resource Policy").
+    shown?: { current(): boolean; onDidChange: vscode.Event<unknown> };
   },
 ): vscode.Disposable {
   const reconnect = options?.reconnect ?? false;
   const killOnDispose = options?.killOnDispose ?? false;
+  // Only a router whose PTYs outlive it (the WebviewView's) leaves live PTYs
+  // unowned, so only such a router claims them back at `dormouse:init`; a
+  // panel kills its own.
+  const adoptOrphans = !killOnDispose;
   // Also this webview's realm of the alerts, so one webview's blur never
   // touches another's (docs/specs/alert.md → Engagement).
   const routerId = `router-${++nextRouterId}`;
@@ -363,6 +374,16 @@ export function attachRouter(
   // the webview requires (docs/specs/vscode.md → "Webview message
   // authentication"). A raw `vscode.Webview` never reaches this scope.
   const post = (message: ExtensionMessage): Thenable<boolean> => channel.post(message);
+  // `onDidChangeViewState` also fires on focus and column moves: post changes.
+  let sentShown: boolean | undefined;
+  const postShown = (always = false) => {
+    if (!options?.shown) return;
+    const shown = options.shown.current();
+    if (!always && shown === sentShown) return;
+    sentShown = shown;
+    void post({ type: 'dormouse:shown', shown } satisfies ExtensionMessage);
+  };
+  const shownDisposable = options?.shown?.onDidChange(() => postShown());
 
   // Track which PTY IDs were spawned (or reconnected) through this webview
   const ownedPtyIds = new Set<string>();
@@ -457,6 +478,7 @@ export function attachRouter(
       type: 'dor:controlRequest',
       requestId: request.requestId,
       surfaceId: request.surfaceId,
+      helperParentId: request.helperParentId,
       method: request.method,
       params: request.params ?? {},
     } satisfies ExtensionMessage).then(
@@ -496,6 +518,10 @@ export function attachRouter(
       if (ownedPtyIds.has(id)) post({ type: 'terminal:clipboardOffer', id, text } satisfies ExtensionMessage);
     };
     clipboardOfferListeners.add(onClipboardOffer);
+    const onClientInput = (id: string) => {
+      if (ownedPtyIds.has(id)) post({ type: 'terminal:clientInput', id } satisfies ExtensionMessage);
+    };
+    clientInputListeners.add(onClientInput);
     const removeSemanticListener = onTerminalSemanticEvents((id, events) => {
       if (!ownedPtyIds.has(id)) return;
       post({ type: 'terminal:semanticEvents', id, events } satisfies ExtensionMessage);
@@ -521,6 +547,7 @@ export function attachRouter(
       removeSemanticListener();
       toolEventsListeners.delete(onToolEvents);
       clipboardOfferListeners.delete(onClipboardOffer);
+      clientInputListeners.delete(onClientInput);
       removeExitListener();
       removeAlertListener();
       removeSpeakListener();
@@ -583,6 +610,11 @@ export function attachRouter(
       case 'pty:getOpenPorts':
         ptyManager.getOpenPorts(msg.id).then((ports) => {
           post({ type: 'pty:openPorts', id: msg.id, ports, requestId: msg.requestId } satisfies ExtensionMessage);
+        });
+        break;
+      case 'pty:getOpenPortsMany':
+        ptyManager.getOpenPortsMany(msg.ids).then((ports) => {
+          post({ type: 'pty:openPortsMany', ports, requestId: msg.requestId } satisfies ExtensionMessage);
         });
         break;
       case 'pty:getShells':
@@ -650,6 +682,8 @@ export function attachRouter(
           // Validated host-side (`normalizeEmbedderOrigins`); an unusable chain
           // costs the shim, never a wider grant.
           Array.isArray(msg.embedderOrigins) ? msg.embedderOrigins : [],
+          // The lease is this webview's: its owner is this router.
+          msg.lease === undefined ? undefined : { owner: routerId, id: msg.lease },
         ).then(
           (result) => post({
             type: 'iframe:proxyUrl', requestId: msg.requestId, result,
@@ -659,6 +693,9 @@ export function attachRouter(
             result: { ok: false, reason: 'unreachable', detail: err?.message ?? String(err) },
           } satisfies ExtensionMessage),
         );
+        break;
+      case 'iframe:releaseProxy':
+        if (typeof msg.lease === 'string') releaseIframeProxyLease(routerId, msg.lease);
         break;
       case 'peer:answer': {
         // Every webview answers, so "nobody owns it" settles immediately
@@ -692,15 +729,17 @@ export function attachRouter(
         break;
       case 'dormouse:themeColors':
         // Webview reports its resolved terminal theme; cache for OSC color replies.
-        latestThemeColors = { foreground: msg.foreground, background: msg.background, cursor: msg.cursor };
+        latestThemeColors = parseTerminalColors(msg) ?? latestThemeColors;
         break;
       case 'dormouse:init': {
         // Webview has (re-)initialized — subscribe to live events.
         // Tear down previous subscriptions first (webview was destroyed and recreated).
         disconnectWebview?.();
         disconnectWebview = connectWebview();
-        // Recreated content is a new realm.
+        // Recreated content is a new realm, and holds no iframe view yet.
         alertHost.endRealm(routerId);
+        releaseIframeProxyLease(routerId);
+        postShown(true);
 
         // Re-publish the currently-selected shell so split-spawns in the
         // freshly-mounted webview know what to use.
@@ -734,9 +773,9 @@ export function attachRouter(
           }
         }
 
-        // Also claim unowned PTYs (from disposed routers / other webviews)
+        // Also claim the PTYs a disposed view left unowned.
         for (const [id, info] of ptys) {
-          if (!globalOwnedPtyIds.has(id)) {
+          if (adoptOrphans && !globalOwnedPtyIds.has(id)) {
             claim(id);
             reconnectable.set(id, info);
           }
@@ -757,10 +796,9 @@ export function attachRouter(
           const data = previouslyOwned.has(id)
             ? ptyManager.getScrollback(id)
             : ptyManager.getReplayData(id);
-          if (data) {
-            const replay: ExtensionMessage = { type: 'pty:replay', id, data };
-            post(replay);
-          }
+          // One per listed PTY, empty or not: the collector finishes on a
+          // replay for each, and would otherwise wait out its timeout.
+          post({ type: 'pty:replay', id, data: data ?? '' } satisfies ExtensionMessage);
         }
         for (const [id] of reconnectable) {
           const alertState = alertManager.getState(id);
@@ -822,6 +860,8 @@ export function attachRouter(
         if (request.pending.size === 0) request.settle();
       }
       alertHost.endRealm(routerId);
+      releaseIframeProxyLease(routerId);
+      shownDisposable?.dispose();
       removeWatchedCommandListener();
       removeAlertSettingsListener();
       resolveAllFlushRequests();
