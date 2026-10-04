@@ -148,3 +148,100 @@ export async function approveEnrollment(userCode: string) {
   });
   if (!response.ok) throw await refused(response);
 }
+
+export const PLANS = ["monthly", "yearly", "founding"] as const;
+export type Plan = (typeof PLANS)[number];
+export const isPlan = (value: unknown): value is Plan =>
+  PLANS.includes(value as Plan);
+
+/** `GET /api/billing`: the account's plan (docs/specs/hosted.md -> "Billing"). */
+export interface BillingSummary {
+  plan: Plan | null;
+  /** When the paid period ends. */
+  until: string | null;
+  /** False once cancelled to end at `until`. */
+  renews: boolean;
+  entitled: boolean;
+  /** The name shown in the founders row, or null when not shown. */
+  founder: string | null;
+  /** The open founding cohort, null once founding has closed. */
+  founding: { cohort: number; seatsLeft: number } | null;
+}
+/** The four Van Westendorp answers, whole dollars a year, each optional. */
+export interface SurveyAnswers {
+  tooExpensive: number | null;
+  tooCheap: number | null;
+  expensive: number | null;
+  bargain: number | null;
+}
+
+/** Billing's own call: its 503 says checkout is not open, in words for this page. */
+async function billing(path: string, init: RequestInit = {}): Promise<Response> {
+  let response: Response;
+  try {
+    response = await fetch(`/api/billing${path}`, {
+      ...init,
+      credentials: "same-origin",
+      cache: "no-store",
+      headers: init.body ? { "content-type": "application/json" } : undefined,
+    });
+  } catch {
+    throw new Error("Could not connect. Check your connection and try again.");
+  }
+  if (!response.ok) throw await refused(response);
+  return response;
+}
+/** A Stripe page to send the browser to: https, or StripeDev on loopback in the dev loop. */
+function stripePage(url: string): string {
+  const page = new URL(url);
+  if (
+    page.protocol !== "https:" &&
+    !(location.protocol === "http:" && page.hostname === "127.0.0.1")
+  )
+    throw failed();
+  return page.href;
+}
+/** Null while this deployment does not sell. */
+export async function getBilling(): Promise<BillingSummary | null> {
+  const response = await fetch("/api/billing", {
+    credentials: "same-origin",
+    cache: "no-store",
+  }).catch(() => null);
+  if (!response || response.status === 503 || response.status === 401) return null;
+  if (!response.ok) throw await refused(response);
+  return (await response.json()) as BillingSummary;
+}
+/** The open founding cohort, read from the public endpoint; null when unknown or closed. */
+export async function getCohort(): Promise<number | null> {
+  const response = await fetch("/api/hosted/cohorts", { cache: "no-store" }).catch(() => null);
+  if (!response?.ok) return null;
+  const { cohort } = (await response.json()) as { cohort?: unknown };
+  return typeof cohort === "number" ? cohort : null;
+}
+export async function startCheckout(plan: Plan): Promise<string> {
+  const response = await billing("/checkout", {
+    method: "POST",
+    body: JSON.stringify({ plan }),
+  });
+  return stripePage(((await response.json()) as { url: string }).url);
+}
+export async function confirmCheckout(checkout: string): Promise<BillingSummary> {
+  const response = await billing("/confirm", {
+    method: "POST",
+    body: JSON.stringify({ checkout }),
+  });
+  return (await response.json()) as BillingSummary;
+}
+export async function openPortal(): Promise<string> {
+  const response = await billing("/portal", { method: "POST" });
+  return stripePage(((await response.json()) as { url: string }).url);
+}
+export async function setFounder(name: string | null) {
+  await billing("/founder", {
+    method: "PUT",
+    body: JSON.stringify(name === null ? { shown: false } : { shown: true, name }),
+  });
+}
+export async function sendSurvey(answers: SurveyAnswers) {
+  await billing("/survey", { method: "PUT", body: JSON.stringify(answers) });
+}

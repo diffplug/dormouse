@@ -1,4 +1,5 @@
 import { createServer } from "node:http";
+import { fileURLToPath } from "node:url";
 import type { AddressInfo } from "node:net";
 import { once } from "node:events";
 import { getRequestListener } from "@hono/node-server";
@@ -7,6 +8,10 @@ import { createServer as createViteServer, type ViteDevServer } from "vite";
 import { createAuthApp } from "@pgstencil/auth/better-auth";
 import { developmentDatabase } from "pgstencil/database";
 import { EmailDev, SystemTime } from "pgstencil";
+import { createStripeDev } from "@pgstencil/stripe/testing";
+import { FOUNDING_LADDER } from "../../website/src/lib/hosted-pricing";
+import { SYSTEM_CLOCK, type BillingSetup } from "./billing";
+import { BILLING_WEBHOOK_PATH, billingRoutes } from "./billing-routes";
 import { authPolicy } from "./policy";
 import { migrations } from "./migrations";
 import { allowedDevRequest } from "./dev-host-guard";
@@ -70,6 +75,26 @@ const host: RelayAccountHost = {
 };
 voiceTokenRoutes(app, () => host);
 relayAccountRoutes(app, () => host);
+// Billing against StripeDev: a local Stripe stand-in whose checkout page takes
+// no card and charges nothing, its state beside the development database.
+const founding = FOUNDING_LADDER.map((price) => `price_dev_founding_${price}`);
+const stripeDev = await createStripeDev(
+  SYSTEM_CLOCK.time,
+  SYSTEM_CLOCK.random,
+  fileURLToPath(new URL("../.pgstencil/stripe-dev.json", import.meta.url)),
+  { recurring: Object.fromEntries(founding.map((price) => [price, "year" as const])) },
+);
+stripeDev.setWebhookTarget(origin + BILLING_WEBHOOK_PATH);
+const billing: BillingSetup = {
+  secretKey: "sk_test_dormouse_local_only",
+  webhookSecret: stripeDev.webhookSecret,
+  live: false,
+  monthly: stripeDev.prices.monthly,
+  yearly: stripeDev.prices.yearly,
+  founding,
+  stripe: stripeDev.stripe,
+};
+billingRoutes(app, () => ({ ...host, setup: () => billing, clock: SYSTEM_CLOCK }));
 // No speak: a Hosted build speaks only at the fixed voice origin, so no
 // Dormouse build could reach one here.
 app.all("*", (c) => auth.app.fetch(c.req.raw));
@@ -88,7 +113,7 @@ ready = {
   vite,
 };
 console.log(
-  `Dormouse Hosted: ${origin}\nLocal email inbox: ${origin}/api/dev/emails\nEmail stays local; OAuth is disabled in this development entry.`,
+  `Dormouse Hosted: ${origin}\nLocal email inbox: ${origin}/api/dev/emails\nEmail stays local; OAuth is disabled in this development entry.\nCheckout: ${origin}/checkout?plan=founding (StripeDev at ${stripeDev.origin}; no card, no charge)`,
 );
 /** A `ratelimits` binding's stand-in: `perMinute` per key per wall-clock minute. */
 function devLimit(perMinute: number): RateLimit {
@@ -112,6 +137,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const)
     server.close();
     await vite.close();
     await auth.close();
+    await stripeDev.close();
     email.close();
     process.exit(0);
   });

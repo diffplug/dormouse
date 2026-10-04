@@ -7,27 +7,47 @@ import {
 } from "react";
 import {
   approveEnrollment,
+  confirmCheckout,
   createVoiceToken,
+  getBilling,
   getAccounts,
   getComputers,
   getProviders,
   getSession,
   getVoiceTokens,
+  openPortal,
   post,
   providerNames,
   removeComputer,
   revokeVoiceToken,
+  sendSurvey,
+  setFounder,
   social,
+  startCheckout,
   type Account,
+  type BillingSummary,
   type Computer,
+  type Plan,
   type Provider,
   type Session,
   type VoiceToken,
 } from "./api";
 import { LOGIN_FRESH_AGE_MS, RECENT_LOGIN_WINDOW } from "../server/policy-constants";
 import { takeEnrollment, type Enrollment } from "./enrollment";
+import { CheckoutView, PLAN_NAMES, PlanSection, WelcomeView } from "./Billing";
+import { forgetCheckout } from "./checkout";
 
-export function App({ enrollment }: { enrollment: Enrollment | null }) {
+export function App({
+  enrollment,
+  checkout,
+  returned,
+}: {
+  enrollment: Enrollment | null;
+  /** A pending `/checkout` (null for a link naming no plan), undefined for none. */
+  checkout: Plan | null | undefined;
+  /** The checkout operation Stripe returned to `/billing` with. */
+  returned: string | null;
+}) {
   const [session, setSession] = useState<Session | null>(null);
   const [enabled, setEnabled] = useState<Provider[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -42,6 +62,20 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
   const setEnrolling = (next: Enrollment | null) => {
     enrollingRef.current = next;
     setEnrollingState(next);
+  };
+  // Null while this deployment does not sell, or before sign-in.
+  const [billing, setBilling] = useState<BillingSummary | null>(null);
+  const [buying, setBuyingState] = useState(checkout);
+  // Set once Stripe's return is confirmed: the welcome page shows.
+  const [welcome, setWelcomeState] = useState(false);
+  const pageRef = useRef({ buying: checkout, welcome: false });
+  const setBuying = (next: Plan | null | undefined) => {
+    pageRef.current.buying = next;
+    setBuyingState(next);
+  };
+  const setWelcome = (next: boolean) => {
+    pageRef.current.welcome = next;
+    setWelcomeState(next);
   };
   const [minted, setMinted] = useState("");
   const [loading, setLoading] = useState(true);
@@ -65,29 +99,49 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
       getProviders(),
     ]);
     // A failed list hides its section, never the account page.
-    const [linked, tokens, enrolled] = current
+    const [linked, tokens, enrolled, plan] = current
       ? await Promise.all([
           getAccounts(),
           getVoiceTokens().catch(() => null),
           getComputers().catch(() => null),
+          getBilling().catch(() => null),
         ])
-      : [[], null, null];
+      : [[], null, null, null];
     if (generation !== refreshGeneration.current) return;
     setSession(current);
     setEnabled(providers);
     setAccounts(linked);
     setVoiceTokens(tokens);
     setComputers(enrolled);
+    setBilling(plan);
+    const { buying, welcome } = pageRef.current;
     history.replaceState(
       null,
       "",
-      enrollingRef.current ? "/enroll" : current ? "/account" : "/login",
+      enrollingRef.current
+        ? "/enroll"
+        : buying !== undefined
+          ? `/checkout${buying ? `?plan=${buying}` : ""}`
+          : welcome
+            ? "/billing"
+            : current
+              ? "/account"
+              : "/login",
     );
   }, []);
   useEffect(() => {
     // An auth callback's query parameters (`?error=`) never stay in history.
     history.replaceState(null, "", location.pathname);
     void refresh()
+      .then(async () => {
+        // Stripe's return: confirm the checkout it names, then welcome.
+        if (returned)
+          await act("confirm", async () => {
+            setBilling(await confirmCheckout(returned));
+            setWelcome(true);
+            history.replaceState(null, "", "/billing");
+          });
+      })
       .catch((error) => setError(error.message))
       .finally(() => {
         setLoading(false);
@@ -224,6 +278,27 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
           null,
       );
     });
+  const buy = async (plan: Plan) => {
+    const url = await startCheckout(plan);
+    forgetCheckout();
+    location.assign(url);
+  };
+  const portal = async () => location.assign(await openPortal());
+  const founder = async (name: string | null) => {
+    await setFounder(name);
+    setBilling((summary) => summary && { ...summary, founder: name });
+    setNotice(name === null ? "You are no longer shown in the founders row." : `Shown in the founders row as ${name}.`);
+  };
+  const declineCheckout = () => {
+    forgetCheckout();
+    setBuying(undefined);
+    setError("");
+    history.replaceState(null, "", session ? "/account" : "/login");
+  };
+  const leaveWelcome = () => {
+    setWelcome(false);
+    history.replaceState(null, "", "/account");
+  };
   const copyMinted = () =>
     act("copy", async () => {
       await navigator.clipboard.writeText(minted);
@@ -247,9 +322,13 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
         <h1>
           {enrolling
             ? "Approve a computer"
-            : session
-              ? "Your account"
-              : "Sign in to Dormouse Hosted"}
+            : buying !== undefined
+              ? "Subscribe to Dormouse Hosted"
+              : welcome && session
+                ? "Welcome to Dormouse Hosted"
+                : session
+                  ? "Your account"
+                  : "Sign in to Dormouse Hosted"}
         </h1>
         <p className="intro">
           {enrolling
@@ -258,9 +337,15 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
               : session
                 ? "Dormouse on your computer asked to join this account."
                 : "Sign in to approve the computer that sent you here."
-            : session
-              ? "Manage how you sign in."
-              : "One account for Dormouse’s hosted services."}
+            : buying !== undefined
+              ? session
+                ? "Check the plan, then pay on Stripe."
+                : `Sign in first, so your ${buying ? `${PLAN_NAMES[buying]} ` : ""}subscription belongs to your account.`
+              : welcome && session
+                ? "Your subscription is active."
+                : session
+                  ? "Manage your plan and how you sign in."
+                  : "One account for Dormouse’s hosted services."}
         </p>
         {loading ? (
           <p role="status">Checking your account…</p>
@@ -337,6 +422,26 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
                       : "Sign in"}
                 </button>
               </section>
+            ) : buying !== undefined && session ? (
+              <CheckoutView
+                plan={buying}
+                summary={billing}
+                busy={busy}
+                act={act}
+                onBuy={buy}
+                onPortal={portal}
+                onDecline={declineCheckout}
+              />
+            ) : welcome && session && billing ? (
+              <WelcomeView
+                summary={billing}
+                defaultName={session.user.name}
+                busy={busy}
+                act={act}
+                onFounder={founder}
+                onSurvey={async (answers) => sendSurvey(answers)}
+                onDone={leaveWelcome}
+              />
             ) : session ? (
               <>
                 <dl className="identity">
@@ -350,6 +455,16 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
                     Use a connected provider to sign in. This account has no
                     email recovery method.
                   </p>
+                )}
+                {billing && (
+                  <PlanSection
+                    summary={billing}
+                    defaultName={session.user.name}
+                    busy={busy}
+                    act={act}
+                    onPortal={portal}
+                    onFounder={founder}
+                  />
                 )}
                 <section aria-labelledby="methods">
                   <h2 id="methods">Sign-in methods</h2>
@@ -406,8 +521,7 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
                     <h2 id="voice">Voice tokens</h2>
                     <p className="help">
                       Signing in from Dormouse gives that computer its own
-                      token; removing the computer below revokes it. Managed
-                      voice is in admin-only testing.
+                      token; removing the computer below revokes it.
                     </p>
                     {minted && (
                       <div className="notice minted">
@@ -462,7 +576,6 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
                     <p className="help">
                       Computers signed in to this account speak with managed
                       voice and reach your phones through the Hosted Relay.
-                      Both are in admin-only testing.
                     </p>
                     {computers.length === 0 && (
                       <p className="help">
@@ -502,7 +615,7 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
                     {busy === "logout" ? "Signing out…" : "Sign out"}
                   </button>
                 </section>
-                {!(voiceTokens && computers) && (
+                {!billing && !(voiceTokens && computers) && (
                   <p className="footnote">
                     {voiceTokens
                       ? "Remote control is"

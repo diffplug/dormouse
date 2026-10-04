@@ -266,3 +266,24 @@ footer span {
     gap: 8px;
   }
 }
+.check {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  margin: 8px 0 0;
+}
+.check input {
+  width: auto;
+  min-height: 0;
+}
+.founder button,
+form > button:last-child {
+  margin-top: 12px;
+}
+.terms {
+  margin-top: 16px;
+}
+.check input {
+  accent-color: var(--vscode-focusBorder);
+}

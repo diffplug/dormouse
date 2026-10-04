@@ -16,8 +16,8 @@ test("provider allowlist fails closed on typos and partial credentials", () => {
 });
 test("local inbox is guarded against rebinding and cross-origin requests", () => {
   const origin = "http://localhost:5188";
-  const check = (headers: IncomingMessage["headers"]) =>
-    allowedDevRequest({ headers } as IncomingMessage, origin);
+  const check = (headers: IncomingMessage["headers"], method = "GET", url = "/api/dev/emails") =>
+    allowedDevRequest({ headers, method, url } as IncomingMessage, origin);
   expect(check({ host: "localhost:5188" })).toBe(true);
   expect(check({ host: "attacker.test:5188" })).toBe(false);
   expect(check({ host: "localhost:5188", origin: "https://dormouse.sh" })).toBe(
@@ -26,6 +26,13 @@ test("local inbox is guarded against rebinding and cross-origin requests", () =>
   expect(
     check({ host: "localhost:5188", "sec-fetch-site": "cross-site" }),
   ).toBe(false);
+  // StripeDev's page returns the browser to /billing, and only that navigation crosses.
+  const crossing = { host: "localhost:5188", "sec-fetch-site": "cross-site", "sec-fetch-mode": "navigate" };
+  expect(check(crossing, "GET", "/billing?checkout=x")).toBe(true);
+  expect(check(crossing, "GET", "/api/dev/emails")).toBe(false);
+  expect(check(crossing, "POST", "/billing")).toBe(false);
+  expect(check({ ...crossing, "sec-fetch-mode": "cors" }, "GET", "/billing")).toBe(false);
+  expect(check({ ...crossing, origin: "http://127.0.0.1:9" }, "GET", "/billing")).toBe(false);
 });
 // The account screen and the packed adapter gate on the same window; nothing
 // else would notice a pgstencil bump moving one of them.
