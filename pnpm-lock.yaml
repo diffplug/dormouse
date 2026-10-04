@@ -162,6 +162,11 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+overrides:
+  pgstencil: file:vendor/pgstencil-0.3.0.tgz
+  '@pgstencil/auth': file:vendor/pgstencil-auth-0.3.0.tgz
+  '@pgstencil/stripe': file:vendor/pgstencil-stripe-0.3.0.tgz
+
 importers:
 
   .:
@@ -327,8 +332,11 @@ importers:
         specifier: ^2.0.10
         version: 2.1.1(hono@4.13.9)
       '@pgstencil/auth':
-        specifier: ^0.2.1
-        version: 0.2.1(hono@4.13.9)(kysely@0.29.6)(pg@8.23.0)(pgstencil@0.2.1(kysely@0.29.6)(supports-color@10.2.2))(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(vitest@5.0.2)
+        specifier: file:../vendor/pgstencil-auth-0.3.0.tgz
+        version: file:vendor/pgstencil-auth-0.3.0.tgz(hono@4.13.9)(kysely@0.29.6)(pg@8.23.0)(pgstencil@file:vendor/pgstencil-0.3.0.tgz(kysely@0.29.6)(supports-color@10.2.2))(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(vitest@5.0.2)
+      '@pgstencil/stripe':
+        specifier: file:../vendor/pgstencil-stripe-0.3.0.tgz
+        version: file:vendor/pgstencil-stripe-0.3.0.tgz(kysely@0.29.6)(pgstencil@file:vendor/pgstencil-0.3.0.tgz(kysely@0.29.6)(supports-color@10.2.2))(stripe@22.6.2(@types/node@24.19.0))
       hono:
         specifier: ^4.13.8
         version: 4.13.9
@@ -336,8 +344,8 @@ importers:
         specifier: ^0.29.5
         version: 0.29.6
       pgstencil:
-        specifier: ^0.2.1
-        version: 0.2.1(kysely@0.29.6)(supports-color@10.2.2)
+        specifier: file:../vendor/pgstencil-0.3.0.tgz
+        version: file:vendor/pgstencil-0.3.0.tgz(kysely@0.29.6)(supports-color@10.2.2)
       react:
         specifier: ^19.2.6
         version: 19.3.0
@@ -347,6 +355,9 @@ importers:
       remote-lib-common:
         specifier: workspace:*
         version: link:../remote-lib-common
+      stripe:
+        specifier: ^22.6.1
+        version: 22.6.2(@types/node@24.19.0)
     devDependencies:
       '@types/node':
         specifier: ^24.13.6
@@ -2982,13 +2993,23 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@pgstencil/auth@0.2.1':
-    resolution: {integrity: sha512-B5Wu035642KEr0V/VJf+C0MMM9PiAGvpXF9VTeKeiTnBifYQIkO9Cks+RLPiO2laxdBWLlNxo6RDVbjLaIiufA==}
+  '@pgstencil/auth@file:vendor/pgstencil-auth-0.3.0.tgz':
+    resolution: {integrity: sha512-CwcTsyt06WjMzEfPAN8ydzRpczyU8/3n14svl4QLcxjAtNVTVL8Wovn6E3Ikwycr0CsbULiweEtK8/bZOQcy3w==, tarball: file:vendor/pgstencil-auth-0.3.0.tgz}
+    version: 0.3.0
     engines: {node: '>=24'}
     peerDependencies:
       hono: ^4.13.7
       kysely: ^0.29.5
-      pgstencil: ^0.2.1
+      pgstencil: ^0.3.0
+
+  '@pgstencil/stripe@file:vendor/pgstencil-stripe-0.3.0.tgz':
+    resolution: {integrity: sha512-eDRnpYGhSla5JiIKwWMan7ErC/EypzRZPNZTRaULBiIkiXQJ+1nTQAwEj3p2HLanVokEwiS0ig/vcicTu+AC3A==, tarball: file:vendor/pgstencil-stripe-0.3.0.tgz}
+    version: 0.3.0
+    engines: {node: '>=24'}
+    peerDependencies:
+      kysely: ^0.29.5
+      pgstencil: ^0.3.0
+      stripe: ^22.6.1
 
   '@phosphor-icons/react@2.1.10':
     resolution: {integrity: sha512-vt8Tvq8GLjheAZZYa+YG/pW7HDbov8El/MANW8pOAz4eGxrwhnbfrQZq0Cp4q8zBEu8NIhHdnr+r8thnfRSNYA==}
@@ -6924,8 +6945,9 @@ packages:
   pgpass@1.0.5:
     resolution: {integrity: sha512-FdW9r/jQZhSeohs1Z3sI1yxFQNFvMcnmfuj4WBMUTxOrAyLMaTcE1aAMBiTlbMNaXvBCQuVi0R7hd8udDSP7ug==}
 
-  pgstencil@0.2.1:
-    resolution: {integrity: sha512-Rvap6rNjtJfncsZUvM97BQwPsvOoi5lpg0R8a+r+PJOmAKh0UfwLNaoV2iONqJxSnZtSa5A+n6xPQ2ojyA1qdw==}
+  pgstencil@file:vendor/pgstencil-0.3.0.tgz:
+    resolution: {integrity: sha512-USK6qJa80zSZnbdzsx7tBqpdfLgXJbONUdoCOR21cJxJGHRcIWL6VyODGtjdN7/8ZzQivFQe23XDyLnkHPyRqQ==, tarball: file:vendor/pgstencil-0.3.0.tgz}
+    version: 0.3.0
     engines: {node: '>=24'}
     peerDependencies:
       kysely: ^0.29.5
@@ -7474,6 +7496,15 @@ packages:
   strip-json-comments@2.0.1:
     resolution: {integrity: sha512-4gB8na07fecVVkOI6Rs4e7T6NOTki5EmL7TUduTs6bu3EdnSycntVJ4re8kgZA+wx9IueI2Y11bfbgwtzuE0KQ==}
     engines: {node: '>=0.10.0'}
+
+  stripe@22.6.2:
+    resolution: {integrity: sha512-PwRE2scocvXqDKPiskMa5vRJEAEkq46W69XyUYmAwrNSLr675lQnfqLwnsndAWizwgihOWw/irLmoFRo3ez7ew==}
+    engines: {node: '>=18'}
+    peerDependencies:
+      '@types/node': '>=18'
+    peerDependenciesMeta:
+      '@types/node':
+        optional: true
 
   structured-source@4.0.0:
     resolution: {integrity: sha512-qGzRFNJDjFieQkl/sVOI2dUjHKRyL9dAJi2gCPGJLbJHBIkyOHxjuocpIEfbLioX+qSJpvbYdT49/YCdMznKxA==}
@@ -10245,14 +10276,14 @@ snapshots:
   '@oxc-resolver/binding-win32-x64-msvc@11.21.2':
     optional: true
 
-  '@pgstencil/auth@0.2.1(hono@4.13.9)(kysely@0.29.6)(pg@8.23.0)(pgstencil@0.2.1(kysely@0.29.6)(supports-color@10.2.2))(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(vitest@5.0.2)':
+  '@pgstencil/auth@file:vendor/pgstencil-auth-0.3.0.tgz(hono@4.13.9)(kysely@0.29.6)(pg@8.23.0)(pgstencil@file:vendor/pgstencil-0.3.0.tgz(kysely@0.29.6)(supports-color@10.2.2))(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(vitest@5.0.2)':
     dependencies:
       better-auth: 1.7.6(pg@8.23.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(vitest@5.0.2)
       hono: 4.13.9
       jose: 6.2.12
       kysely: 0.29.6
       openid-client: 6.8.8
-      pgstencil: 0.2.1(kysely@0.29.6)(supports-color@10.2.2)
+      pgstencil: file:vendor/pgstencil-0.3.0.tgz(kysely@0.29.6)(supports-color@10.2.2)
     transitivePeerDependencies:
       - '@lynx-js/react'
       - '@opentelemetry/api'
@@ -10273,6 +10304,12 @@ snapshots:
       - svelte
       - vitest
       - vue
+
+  '@pgstencil/stripe@file:vendor/pgstencil-stripe-0.3.0.tgz(kysely@0.29.6)(pgstencil@file:vendor/pgstencil-0.3.0.tgz(kysely@0.29.6)(supports-color@10.2.2))(stripe@22.6.2(@types/node@24.19.0))':
+    dependencies:
+      kysely: 0.29.6
+      pgstencil: file:vendor/pgstencil-0.3.0.tgz(kysely@0.29.6)(supports-color@10.2.2)
+      stripe: 22.6.2(@types/node@24.19.0)
 
   '@phosphor-icons/react@2.1.10(react-dom@19.3.0(react@19.3.0))(react@19.3.0)':
     dependencies:
@@ -14339,7 +14376,7 @@ snapshots:
     dependencies:
       split2: 4.2.0
 
-  pgstencil@0.2.1(kysely@0.29.6)(supports-color@10.2.2):
+  pgstencil@file:vendor/pgstencil-0.3.0.tgz(kysely@0.29.6)(supports-color@10.2.2):
     dependencies:
       cheerio: 1.2.0
       kysely: 0.29.6
@@ -15057,6 +15094,10 @@ snapshots:
 
   strip-json-comments@2.0.1:
     optional: true
+
+  stripe@22.6.2(@types/node@24.19.0):
+    optionalDependencies:
+      '@types/node': 24.19.0
 
   structured-source@4.0.0:
     dependencies:

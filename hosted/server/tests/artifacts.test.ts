@@ -21,7 +21,9 @@ test("Hosted declares every peer of the installed pgstencil packages", () => {
   }
 });
 
-test("the lockfile resolves every pgstencil package from npm", () => {
+// TEMP: pgstencil 0.3.0 is unreleased and installed from vendor/, so this must
+// fail until the commit that vendors it is dropped and 0.3.0 comes from npm.
+test.fails("the lockfile resolves every pgstencil package from npm", () => {
   const lockfile = readFileSync("../pnpm-lock.yaml", "utf8");
   const lines = lockfile.split("\n");
   for (const [name, entry] of packages) {
