@@ -155,7 +155,7 @@ Arbitrating fixed the dialog and left the vote: a quit meeting a *committed* clo
 
 **Why a script evaluation.** A page-side timer is throttled when a window is hidden, and a host-side `evaluateJavaScript` is not; its completion handler is one round trip, where an event plus an `invoke` answer was two. The probe's clock starts on the host main thread, because a native modal there delays delivery, not the page. A window minimized for three minutes was never restarted (2026-10-03).
 
-**Why 5 s.** Chosen 2026-10-03 over 30 s: the legitimate long stalls — the restore, first render, a reload — happen before the page arms, and a restart costs only state that lives in the webview alone.
+**Why 5 s.** Chosen 2026-10-03 over 30 s, accepting that a restart loses state that lives in the webview alone, unsaved Tool edits included. The restore, first render, and a reload happen before the page arms. Stalls after arming still can: cross-origin Tool and `dor iframe` pages run in the page's WebContent process (one process served three Tool iframes during the 2026-10-03 hang), so a page blocking for 5 s, or a large file a viewer parses synchronously, restarts the whole UI. The 30 s repeat threshold keeps a stall that recurs on every boot from becoming a restart loop.
 
 ## Objective-C exceptions
 

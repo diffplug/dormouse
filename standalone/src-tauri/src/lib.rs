@@ -1747,11 +1747,7 @@ fn send_ui_probes(app: &AppHandle, labels: Vec<String>) {
 #[cfg(target_os = "macos")]
 fn restart_hung_webviews(app: &AppHandle, labels: &[String]) {
     use ui_watchdog::macos;
-    append_log(format!(
-        "[ui-watchdog] {} did not answer for {}s; restarting",
-        labels.join(", "),
-        ui_watchdog::HANG_AFTER.as_secs()
-    ));
+    append_log(format!("[ui-watchdog] {} did not answer; restarting", labels.join(", ")));
     // Windows of one WebContent process hang together: sample and kill it once.
     let mut by_pid: std::collections::BTreeMap<i32, Vec<String>> = Default::default();
     for label in labels {

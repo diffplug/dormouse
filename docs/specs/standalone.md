@@ -426,7 +426,7 @@ macOS release builds restart a page whose main thread stops answering, onto the 
 
 - **Must probe with a script evaluation**, whose completion fires only once the page's main thread has run it, never with a page-side timer or listener. The page arms with `ui_watchdog_arm` (§Boot sequence); a page that starts loading, or a destroyed window, is disarmed until its successor arms.
 - **Must count a page's silence only from when the host main thread sent the probe**, and never across a host stall, a sleep, a quit, or the window's own close.
-- **A page silent for 5 s is restarted**: its WebContent process is sampled into `hangs/` under the state root, then SIGKILLed, and Tauri's default terminate handler reloads it onto its PTYs (§Persistence). **Must not register `on_web_content_process_terminate`**, which replaces that reload. Windows sharing the process restart with it.
+- **A page silent for 5 s is restarted, or for 30 s when restarted in the last 5 min** (rationale): its WebContent process is sampled into `hangs/` under the state root, then SIGKILLed, and Tauri's default terminate handler reloads it onto its PTYs (§Persistence). **Must not register `on_web_content_process_terminate`**, which replaces that reload. Windows sharing the process restart with it.
 - **The reloaded page says so once** in the Baseboard, with the sample's path; the host log records every restart.
 
 Source of truth: `start_ui_watchdog` in `standalone/src-tauri/src/lib.rs`; `Watchdog` in `standalone/src-tauri/src/ui_watchdog.rs`; `UiWatchdogArm` in `standalone/src/ui-watchdog.tsx`.

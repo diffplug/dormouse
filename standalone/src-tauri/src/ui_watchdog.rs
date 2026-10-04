@@ -9,6 +9,10 @@ use std::time::{Duration, Instant};
 
 /// A page this long without answering a probe is hung.
 pub const HANG_AFTER: Duration = Duration::from_secs(5);
+/// A page restarted within `REPEAT_WINDOW` gets this long instead, so one that
+/// stalls past `HANG_AFTER` on every boot is not restarted in a loop.
+pub const HANG_AFTER_REPEAT: Duration = Duration::from_secs(30);
+pub const REPEAT_WINDOW: Duration = Duration::from_secs(5 * 60);
 /// How often the watchdog thread wakes to probe and judge.
 pub const TICK: Duration = Duration::from_secs(1);
 /// A tick this late, by either clock, means the host was descheduled or the
@@ -43,6 +47,8 @@ pub struct Watchdog {
     windows: BTreeMap<String, Probe>,
     /// Restarted windows whose reloaded page has not armed yet.
     notices: HashMap<String, RestartNotice>,
+    /// When each window was last judged hung.
+    last_hung: HashMap<String, Instant>,
 }
 
 impl Watchdog {
@@ -63,6 +69,7 @@ impl Watchdog {
     pub fn forget(&mut self, label: &str) {
         self.windows.remove(label);
         self.notices.remove(label);
+        self.last_hung.remove(label);
     }
 
     pub fn answered(&mut self, label: &str) {
@@ -104,16 +111,23 @@ impl Watchdog {
         }
     }
 
-    /// The windows silent for `HANG_AFTER`, disarmed: each is restarted once,
-    /// and arms again from its reloaded page.
+    /// The windows silent for their threshold, disarmed: each is restarted
+    /// once, and arms again from its reloaded page.
     pub fn hung(&mut self, now: Instant) -> Vec<String> {
         let mut hung = Vec::new();
-        self.windows.retain(|label, probe| match probe {
-            Probe::Sent(at) if now.saturating_duration_since(*at) >= HANG_AFTER => {
-                hung.push(label.clone());
-                false
+        let last_hung = &mut self.last_hung;
+        self.windows.retain(|label, probe| {
+            let Probe::Sent(at) = probe else { return true };
+            let repeat = last_hung
+                .get(label)
+                .is_some_and(|last| now.saturating_duration_since(*last) < REPEAT_WINDOW);
+            let threshold = if repeat { HANG_AFTER_REPEAT } else { HANG_AFTER };
+            if now.saturating_duration_since(*at) < threshold {
+                return true;
             }
-            _ => true,
+            last_hung.insert(label.clone(), now);
+            hung.push(label.clone());
+            false
         });
         hung
     }
@@ -271,6 +285,26 @@ mod tests {
         let t1 = t0 + HANG_AFTER;
         assert_eq!(probed(&mut watchdog, t1), ["main"]);
         assert!(watchdog.hung(t1 + HANG_AFTER - Duration::from_millis(1)).is_empty());
+    }
+
+    #[test]
+    fn a_window_restarted_recently_gets_the_longer_threshold() {
+        let mut watchdog = Watchdog::default();
+        watchdog.arm("main");
+        let t0 = Instant::now();
+        probed(&mut watchdog, t0);
+        assert_eq!(watchdog.hung(t0 + HANG_AFTER), ["main"]);
+        // The reloaded page stalls again at once: not a loop of restarts.
+        watchdog.arm("main");
+        let t1 = t0 + HANG_AFTER;
+        probed(&mut watchdog, t1);
+        assert!(watchdog.hung(t1 + HANG_AFTER).is_empty());
+        assert_eq!(watchdog.hung(t1 + HANG_AFTER_REPEAT), ["main"]);
+        // Past the window, a hang is judged at the short threshold again.
+        watchdog.arm("main");
+        let t2 = t1 + HANG_AFTER_REPEAT + REPEAT_WINDOW;
+        probed(&mut watchdog, t2);
+        assert_eq!(watchdog.hung(t2 + HANG_AFTER), ["main"]);
     }
 
     #[test]
