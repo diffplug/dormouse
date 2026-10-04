@@ -21,8 +21,10 @@ import { WatchedCommandList } from './WatchedCommandList';
 import { NetworkPhones, NetworkSettings, NetworkUpdates } from './NetworkSettings';
 import { useNetworkPolicy } from './remote-control-shared';
 import { PushTestButton, SpeakTestButton } from './AlarmTestButtons';
-import { HOSTED_VOICE_URL } from './HostedSignIn';
 import { ManagedVoiceSection, NetworkTopicLink, useManagedVoiceOffered } from './ManagedVoiceSection';
+import { HostedPushLink } from './AlarmUpsellLine';
+import { hostedPageUrl } from '../lib/hosted-links';
+import { useHostedMembership } from '../lib/hosted-membership';
 import { getPlatform } from '../lib/platform';
 import { getShellsSnapshot, subscribeToShells } from '../lib/shell-store';
 import { getDelayedKillSetting, labsAvailable, setDelayedKillSetting, subscribeToLabsSettings } from '../lib/labs-settings';
@@ -89,7 +91,7 @@ const TOPICS = [
   { id: 'network', label: 'Network', icon: GlobeIcon, groups: ['network', 'phones', 'updates'] },
   { id: 'labs', label: 'Labs', icon: FlaskIcon, groups: ['delayedKill'] },
 ] as const;
-type TopicId = typeof TOPICS[number]['id'];
+export type TopicId = typeof TOPICS[number]['id'];
 type GroupId = typeof TOPICS[number]['groups'][number];
 /** Search matches a group by its topic's label as well as its own text. */
 const TOPIC_LABEL_OF = Object.fromEntries(
@@ -151,8 +153,8 @@ function TopicSection({ id, hidden, children }: { id: TopicId; hidden: boolean; 
   );
 }
 
-/** App-global settings. */
-export function SettingsDialog({ onClose }: { onClose: () => void }) {
+/** App-global settings, opened at `initialTopic` (General by default). */
+export function SettingsDialog({ onClose, initialTopic }: { onClose: () => void; initialTopic?: TopicId }) {
   const watched = useSyncExternalStore(subscribeToWatchedCommands, getWatchedCommandsSnapshot);
   const settings = useSyncExternalStore(subscribeToAlertSettings, getAlertSettings);
   const shellState = useSyncExternalStore(subscribeToShells, getShellsSnapshot);
@@ -160,7 +162,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const searchRef = useRef<HTMLInputElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const scrollFrame = useRef<number | null>(null);
-  const [topic, setTopic] = useState<TopicId>('general');
+  const [topic, setTopic] = useState<TopicId>(initialTopic ?? 'general');
   const [hoveredTopic, setHoveredTopic] = useState<TopicId | null>(null);
   const [above, setAbove] = useState(false);
   const [below, setBelow] = useState(false);
@@ -261,6 +263,12 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   }, [followScroll, visibleTopicIds]);
 
   useEffect(() => cancelScroll, [cancelScroll]);
+
+  // Mount only: a later change of the prop must not pull the reader back.
+  useEffect(() => {
+    if (initialTopic) scrollToTopic(initialTopic);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <ModalFrame
@@ -481,6 +489,9 @@ export function AlarmSettingsSection({ sink, preview = false, onShowNetwork }: {
   const push = useSyncExternalStore(subscribeToPushDevices, getPushDevices);
   const hasBurrowService = getPlatform().burrow !== undefined;
   const managedVoiceOffered = useManagedVoiceOffered();
+  // Hosted offers show only to a Hosted build's non-member; the preview's
+  // live line carries them there (`AlarmUpsellLine`), never its inert copy.
+  const offerHosted = useHostedMembership() === 'not-member' && !preview;
   // Under Nothing the service sends no push and managed voice asks nothing
   // (`docs/specs/remote-network.md` -> "Policy"), so both lines say why.
   const networkOff = useNetworkPolicy()?.level === 'nothing';
@@ -505,10 +516,15 @@ export function AlarmSettingsSection({ sink, preview = false, onShowNetwork }: {
       >
         {!managedVoiceOffered ? (
           <>
-            Uses your browser or system voice.{' '}
-            <ExternalTextLink href={HOSTED_VOICE_URL}>
-              Get managed ElevenLabs voices.
-            </ExternalTextLink>
+            Uses your browser or system voice.
+            {offerHosted ? (
+              <>
+                {' '}
+                <ExternalTextLink href={hostedPageUrl('voice')}>
+                  Get managed ElevenLabs voices.
+                </ExternalTextLink>
+              </>
+            ) : null}
           </>
         ) : networkOff ? (
           <>
@@ -539,7 +555,15 @@ export function AlarmSettingsSection({ sink, preview = false, onShowNetwork }: {
       {networkOff ? (
         <>Push is off while <NetworkTopicLink onShow={onShowNetwork} /> is set to Nothing.</>
       ) : (
-        describePushTargets(push, hasBurrowService && !preview)
+        <>
+          {describePushTargets(push, hasBurrowService && !preview)}
+          {offerHosted && hasBurrowService && push.status === 'no-burrow' ? (
+            <>
+              {' '}
+              <HostedPushLink />
+            </>
+          ) : null}
+        </>
       )}
     </AlarmSinkSection>
   );

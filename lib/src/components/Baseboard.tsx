@@ -37,7 +37,11 @@ import {
   updateAlertSettings,
 } from '../lib/terminal-registry';
 import { deriveDisplayedSurfaceLabel } from '../lib/session-label';
-import { subscribeToNetworkPolicy } from '../remote/burrow/network-policy-store';
+import { getNetworkPolicySnapshot, subscribeToNetworkPolicy } from '../remote/burrow/network-policy-store';
+import { takeAlarmUpsell, type AlarmUpsell } from '../lib/alarm-upsell';
+import { getHostedMembership } from '../lib/hosted-membership';
+import { getPushDevices } from '../lib/push-devices';
+import { burrowLink } from '../remote/burrow/burrow-status-store';
 
 /** Shared by every baseboard-level button (DESIGN.md -> Navigation). */
 const BASEBOARD_BUTTON_BASE_CLASS = 'h-6 shrink-0 justify-center pb-px text-sm font-medium font-mono';
@@ -139,19 +143,36 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
   const rightClusterEl = useRef<HTMLDivElement>(null);
   const [rightClusterWidth, setRightClusterWidth] = useState(0);
   const layoutMetrics = useRef({ doorGap: 0, arrowWidth: 0 });
-  const [settingsOpen, setSettingsOpen] = useState<'application' | 'workspace' | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState<'application' | 'network' | 'workspace' | null>(null);
   const workspaceSettingsTrigger = useRef<HTMLButtonElement | null>(null);
-  const [settingsPreview, setSettingsPreview] = useState<{ sink: AlertSink; anchor: HTMLElement; sequence: number } | null>(null);
+  const [settingsPreview, setSettingsPreview] = useState<{
+    sink: AlertSink;
+    anchor: HTMLElement;
+    upsell: AlarmUpsell | null;
+    sequence: number;
+  } | null>(null);
   const previewSequence = useRef(0);
   const closeSettingsPreview = useCallback(() => setSettingsPreview(null), []);
   const toggleAlarm = (sink: AlertSink, anchor: HTMLElement) => {
-    const patch = sink === 'speech'
-      ? { speakEnabled: !settings.speakEnabled }
-      : { pushEnabled: !settings.pushEnabled };
+    const turnedOn = sink === 'speech' ? !settings.speakEnabled : !settings.pushEnabled;
+    const patch = sink === 'speech' ? { speakEnabled: turnedOn } : { pushEnabled: turnedOn };
     if (workspaceId) setWorkspaceAlertDelivery(workspaceId, { ...overrides, ...patch });
     else updateAlertSettings(patch);
-    setSettingsPreview({ sink, anchor, sequence: ++previewSequence.current });
+    const network = getNetworkPolicySnapshot();
+    const upsell = takeAlarmUpsell({
+      sink,
+      turnedOn,
+      membership: getHostedMembership(),
+      networkOff: network.kind === 'ready' && network.network.policy.level === 'nothing',
+      push: getPushDevices(),
+      hasBurrowService: burrowLink() !== undefined,
+    });
+    setSettingsPreview({ sink, anchor, upsell, sequence: ++previewSequence.current });
   };
+  const showNetworkSettings = useCallback(() => {
+    setSettingsPreview(null);
+    setSettingsOpen('network');
+  }, []);
 
   // Suppress command-mode key dispatch while the Settings dialog owns the
   // keyboard, so typing a timeout doesn't trigger pane shortcuts.
@@ -437,12 +458,15 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
           key={settingsPreview.sequence}
           sink={settingsPreview.sink}
           anchor={settingsPreview.anchor}
+          upsell={settingsPreview.upsell}
+          onShowNetwork={showNetworkSettings}
           onClose={closeSettingsPreview}
         />
       )}
 
-      {settingsOpen === 'application' && (
+      {(settingsOpen === 'application' || settingsOpen === 'network') && (
         <SettingsDialog
+          initialTopic={settingsOpen === 'network' ? 'network' : undefined}
           onClose={() => setSettingsOpen(null)}
         />
       )}

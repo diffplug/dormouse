@@ -20,6 +20,8 @@ import { networkPolicyResult, nothingPolicy } from '../remote/network-policy';
 import { HOSTED_PRICING_URL, SIGN_IN_LABEL } from './HostedSignIn';
 import { MANAGED_VOICE_DISCLOSURE, ManagedVoiceSection, NO_PLAN_COPY } from './ManagedVoiceSection';
 import { AlarmSettingsSection } from './SettingsDialog';
+import { makeStubBurrowLink } from '../host/remote/test-burrow-link';
+import { resetPushDevices } from '../lib/push-devices';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -61,6 +63,7 @@ beforeEach(() => {
 afterEach(async () => {
   // Unmounting drops the stores' last subscriber, which resets them.
   await act(async () => root.unmount());
+  resetPushDevices();
   container.remove();
 });
 
@@ -138,13 +141,36 @@ describe('ManagedVoiceSection', () => {
 });
 
 describe('the spoken-alarm copy', () => {
+  // No port is a build with no Hosted mode (self-host, VS Code, the website),
+  // which never links Hosted.
   it.each([
-    ['no port', false, 'Get managed ElevenLabs voices.'],
-    ['a Hosted build’s port', true, 'Uses managed voice while this computer is signed in to Dormouse Hosted'],
-  ])('with %s', async (_label, port, copy) => {
+    ['no port', false, 'Uses your browser or system voice.', 'Hosted'],
+    ['a Hosted build’s port', true, 'Uses managed voice while this computer is signed in to Dormouse Hosted', 'Get managed'],
+  ])('with %s', async (_label, port, copy, absent) => {
     const adapter = new FakePtyAdapter();
     setPlatform(port ? Object.assign(adapter, { managedVoice: makeStubManagedVoicePort(false) }) : adapter);
     await act(async () => root.render(<AlarmSettingsSection sink="speech" />));
     expect(text()).toContain(copy);
+    expect(text()).not.toContain(absent);
+  });
+});
+
+describe('the push group\'s Hosted offer', () => {
+  const OFFER = 'Get Pocket on your phone with Dormouse Hosted.';
+
+  it.each([
+    ['a Hosted build\'s non-member, not enrolled', { managed: true, configured: false, preview: false }, true],
+    ['a member', { managed: true, configured: true, preview: false }, false],
+    ['a build with no Hosted mode', { managed: false, configured: false, preview: false }, false],
+    ['the inert preview, whose live line carries it', { managed: true, configured: false, preview: true }, false],
+  ])('for %s', async (_label, { managed, configured, preview }, offered) => {
+    stored.token = configured ? TOKEN : null;
+    const adapter = Object.assign(new FakePtyAdapter(), {
+      burrow: makeStubBurrowLink({}),
+      ...(managed ? { managedVoice: makePort(false) } : {}),
+    });
+    setPlatform(adapter);
+    await act(async () => root.render(<AlarmSettingsSection sink="push" preview={preview} />));
+    expect(text().includes(OFFER)).toBe(offered);
   });
 });

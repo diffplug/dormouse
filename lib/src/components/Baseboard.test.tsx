@@ -421,6 +421,130 @@ describe('Baseboard settings controls', () => {
   });
 });
 
+describe('Baseboard alarm upsell', () => {
+  const openExternal = vi.fn();
+
+  /** A Hosted build (a managed-voice port) unless `hosted` is false; with a Burrow service. */
+  async function renderWithPlatform({ hosted = true, member = false } = {}) {
+    const platform = await import('../lib/platform');
+    vi.spyOn(platform, 'getPlatform').mockReturnValue({
+      alertPublishSettings: vi.fn(),
+      openExternal,
+      burrow: makeStubBurrowLink({}),
+      managedVoice: hosted ? makeStubManagedVoicePort(member) : undefined,
+    } as unknown as ReturnType<typeof platform.getPlatform>);
+    await act(async () => root.render(<Baseboard items={[]} onReattach={() => {}} />));
+  }
+  const toggle = (sink: 'speech' | 'push') =>
+    act(() => container.querySelector<HTMLButtonElement>(`[data-alarm-setting="${sink}"]`)!.click());
+  const line = () => document.querySelector<HTMLButtonElement>('[data-alarm-upsell]');
+  const preview = () => document.querySelector('[role="status"]');
+
+  beforeEach(() => openExternal.mockReset());
+
+  it('offers managed voice once, live and clickable without taking the keyboard', async () => {
+    await renderWithPlatform();
+    const terminalInput = document.createElement('textarea');
+    container.appendChild(terminalInput);
+    terminalInput.focus();
+    vi.useFakeTimers();
+    toggle('speech');
+
+    expect(line()?.dataset.alarmUpsell).toBe('hosted-voice');
+    expect(line()?.closest('[inert]')).toBeNull();
+    // The inert copy of the section does not repeat the offer.
+    expect(preview()?.querySelector('[inert]')?.textContent).not.toContain('Get managed');
+    expect(document.activeElement).toBe(terminalInput);
+
+    // Up past a plain preview's life.
+    act(() => vi.advanceTimersByTime(2500));
+    expect(preview()?.classList.contains('opacity-100')).toBe(true);
+
+    const mouseDown = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
+    line()!.dispatchEvent(mouseDown);
+    expect(mouseDown.defaultPrevented).toBe(true);
+    act(() => line()!.click());
+    expect(openExternal).toHaveBeenCalledWith('https://dormouse.sh/hosted/?ref=upsell-voice#voice');
+    expect(preview()).toBeNull();
+
+    // Once a day, across both toggles.
+    toggle('speech');
+    toggle('speech');
+    expect(line()).toBeNull();
+    setPushDevices({ status: 'no-burrow', devices: [] });
+    toggle('push');
+    expect(line()).toBeNull();
+  });
+
+  it('holds while hovered, then fades after the pointer leaves', async () => {
+    await renderWithPlatform();
+    vi.useFakeTimers();
+    toggle('speech');
+    const hold = line()!.parentElement!.parentElement!;
+    act(() => hold.dispatchEvent(new PointerEvent('pointerover', { bubbles: true })));
+    act(() => vi.advanceTimersByTime(10_000));
+    expect(preview()?.classList.contains('opacity-100')).toBe(true);
+    act(() => hold.dispatchEvent(new PointerEvent('pointerout', { bubbles: true })));
+    act(() => vi.advanceTimersByTime(2250));
+    expect(preview()).toBeNull();
+  });
+
+  it('closes on Escape, or on a press anywhere but the line', async () => {
+    await renderWithPlatform();
+    toggle('speech');
+    act(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })));
+    expect(preview()).toBeNull();
+
+    toggle('speech');
+    localStorage.clear();
+    toggle('speech');
+    act(() => line()!.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })));
+    expect(preview()).not.toBeNull();
+    act(() => document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })));
+    expect(preview()).toBeNull();
+  });
+
+  it('never offers on turning off, nor to a member', async () => {
+    applyAlertSettingsFromHost({ ...DEFAULT_ALERT_SETTINGS, speakEnabled: true });
+    await renderWithPlatform();
+    toggle('speech');
+    expect(preview()).not.toBeNull();
+    expect(line()).toBeNull();
+
+    act(() => root.unmount());
+    root = createRoot(container);
+    applyAlertSettingsFromHost(DEFAULT_ALERT_SETTINGS);
+    await renderWithPlatform({ member: true });
+    toggle('speech');
+    expect(line()).toBeNull();
+  });
+
+  it('offers Hosted push to a non-member with no Burrow enrolled', async () => {
+    setPushDevices({ status: 'no-burrow', devices: [] });
+    await renderWithPlatform();
+    toggle('push');
+    act(() => line()!.click());
+    expect(openExternal).toHaveBeenCalledWith('https://dormouse.sh/hosted/?ref=upsell-push#remote-control');
+  });
+
+  it('points a build with no Hosted mode at Settings → Network, never at Hosted', async () => {
+    setPushDevices({ status: 'no-burrow', devices: [] });
+    await renderWithPlatform({ hosted: false });
+    toggle('speech');
+    expect(line()).toBeNull();
+    toggle('speech');
+    toggle('push');
+    expect(line()?.dataset.alarmUpsell).toBe('set-up-phone');
+    expect(preview()?.textContent).not.toContain('Hosted');
+    act(() => line()!.click());
+    expect(openExternal).not.toHaveBeenCalled();
+    expect(preview()).toBeNull();
+    const network = document.querySelector('[data-settings-topic="network"]');
+    expect(network).not.toBeNull();
+    expect(document.querySelector('[role="dialog"] [aria-current="location"]')?.getAttribute('title')).toBe('Network');
+  });
+});
+
 describe('Baseboard one-time connection', () => {
   it('shows a connected phone in the measured right cluster, after the notice', async () => {
     const platform = await import('../lib/platform');
