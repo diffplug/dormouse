@@ -143,7 +143,7 @@ Each row names the code and the spec section that must change with it. Spec lint
 
 | Concern | Code | Spec |
 |---|---|---|
-| Strip look, tabs, menus, rename, indicators | `lib/src/components/WorkspaceStrip.tsx`, `workspace-strip-drag.ts`, stories in `lib/src/stories/` | `docs/specs/layout.md` → Workspaces; `standalone.md` → AppBar; `alert.md` → Workspace union |
+| Strip look, tabs, menus, rename, indicators | `lib/src/components/WorkspaceStrip.tsx`, `workspace-strip-drag.ts`, stories in `lib/src/stories/` | look: `lib/src/components/design.tsx`; behavior: `docs/specs/layout.md` → Workspaces; `standalone.md` → AppBar; `alert.md` → Workspace union |
 | Shared Workspace kill confirmation and iframe move gate | `lib/src/components/WorkspaceKillConfirm.tsx` ("Confirm kill workspace"), `lib/src/components/WorkspaceStrip.tsx` (`confirmation`), `standalone/src/WorkspaceTeardownModal.tsx` (window close / app quit), `lib/src/lib/workspace-ui-store.ts` | `layout.md` → Workspaces; `standalone.md` → Quit protocol |
 | Command-mode Workspace keys (`1`–`9`, `Enter`, `,`, `x`/`k` on a tab) | `lib/src/components/wall/keyboard/handle-workspace-shortcuts.ts` | `layout.md` → Keyboard shortcuts (command mode), `shortcuts.md` |
 | Composition, active/hidden Wall, input gating | `lib/src/components/WorkspaceWindow.tsx`, `Wall.tsx` (`WorkspaceActiveContext`) | `layout.md` → Workspaces |

@@ -435,7 +435,7 @@ Only the owner's header shows Unzoom, and only the owner's control toggles zoom 
 
 ### Spawn (new pane reveal)
 
-Enter motion: `docs/specs/tiling-engine.md` → "Animation". Shell-selection replacement's notice reuse after a Surface move: `docs/specs/dor-cli.md` -> "Handle Model".
+Enter motion: `docs/specs/tiling-engine.md` → "Animation". Shell-selection replacement shows a transient notice over the resulting pane; its reuse after a Surface move: `docs/specs/dor-cli.md` -> "Handle Model".
 
 ### Kill (two-phase fade + tween reclaim)
 
