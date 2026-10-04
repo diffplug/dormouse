@@ -409,4 +409,4 @@ Source of truth: `deploy/local/install-macos.sh`, `deploy/local/install-windows.
 
 ## Future
 
-**Scope: relay-origin-migration** — re-binding the passkey and enrollments after a Tailscale node rename. The revocation UI is staged in [remote-security-model.md](./remote-security-model.md) `## Future`.
+**Scope: relay-origin-migration** — re-binding the passkey and enrollments after a Tailscale node rename. Relay-pushed revocation is staged in [remote-security-model.md](./remote-security-model.md) `## Future`.

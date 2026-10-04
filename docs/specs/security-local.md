@@ -17,7 +17,7 @@ The attacker is any program writing to a PTY.
 
 **Unsupported escape sequences must fail inertly** — consumed or ignored, with no visible garbage, clipboard, file, focus, or privilege effect (rationale).
 
-**Notification text is untrusted terminal output**: sanitized at protocol-parse time, rendered as plain text and never as markup, re-bounded by a second pass before speech or push (`docs/specs/alert.md` -> "Text And Security").
+Notification text: `docs/specs/alert.md` -> "Text And Security".
 
 **The `OSC 633` terminator escape is emit-side**, in the shipped shell-integration scripts — the parser scans raw bytes and cannot defend it (`docs/specs/terminal-state.md` -> "Shell-integration injection"; rationale).
 

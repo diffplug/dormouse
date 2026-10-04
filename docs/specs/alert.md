@@ -439,6 +439,8 @@ A Door is display-only for alert state and exposes no Door-specific alert menu:
 
 ## Text And Security
 
+Notification text is untrusted terminal output.
+
 - Treat all text as plain text: never interpret ANSI, OSC, HTML, Markdown, URLs, paths, or emoji shortcodes as markup.
 - **Sanitize at protocol-parse time** (`sanitizeText` in `lib/src/lib/terminal-protocol.ts`), bounded and control-stripped like every retained value (`docs/specs/terminal-state.md` → "Supported OSC Inputs"); every notification stored from a live PTY has been through that pass, generated `WATCHING` and progress titles included via the sanitized command line. `normalizeActivityNotification` in `lib/src/lib/alert-manager.ts` is only a *shape* check on top — known `source`, string-or-null fields, trimmed, at least one non-empty — so the cold-restore path (`seed`) re-accepts a persisted blob without re-applying the cap or the control strip (rationale).
 - Keep only one `ActivityNotification` rather than unbounded history, and cap/expire incomplete OSC 99 parser state.

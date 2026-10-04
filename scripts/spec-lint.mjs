@@ -49,7 +49,8 @@
  *      names at least one repo path check 4 can verify, never a bare file
  *      name (`Wall.tsx` dodges check 4 and rots silently). `Source of truth
  *      (<name> repo):` points outside this repo and is left alone. And
- *      anywhere in a spec's prose, not only there, every `` `symbol` in
+ *      anywhere in the prose of a spec, AGENTS.md, or SECURITY.md (not a
+ *      rationale file), not only there, every `` `symbol` in
  *      `path` `` pointer names a symbol that path's file contains.
  *  13. Every citation of a spec section — `docs/specs/<name>.md -> "Heading"`,
  *      `→ Heading`, `§Heading`, or `` `## Future` `` — in a tracked source
@@ -79,16 +80,17 @@
  *      first line of content), design-stage specs included, and every scope
  *      lists at least one item — inline after its lead, or below it — before
  *      the next scope or heading. A lead ending in `:` introduces a list and
- *      lists nothing itself. AGENTS.md -> "Named scopes": unbuilt work is a
- *      cut someone can stage, not an unowned wishlist.
- *  19. A bolded clause of RESTATED_MIN_WORDS or more words in one spec appears
- *      in no other spec's prose, bolded or not, once case, punctuation, and
- *      markup are normalized away. AGENTS.md -> "What, not why": each rule
- *      once in the corpus, every other mention a bare pointer — and where a
- *      feature spec restates a security spec's `FAIL IF`, the `FAIL IF` keeps
- *      it.
+ *      lists nothing itself. AGENTS.md -> "Named scopes": every unbuilt item
+ *      belongs to a named scope; order is the scope's to state.
+ *  19. A bolded clause of RESTATED_MIN_WORDS or more written words in one spec
+ *      appears in no other spec's prose, bolded or not, once case,
+ *      punctuation, and markup are normalized away; a sanctioned
+ *      `-> "Heading"` citation (check 13) is not prose. AGENTS.md -> "What,
+ *      not why": each rule once in the corpus, every other mention a bare
+ *      pointer — and where a feature spec restates a security spec's
+ *      `FAIL IF`, the `FAIL IF` keeps it.
  *  20. No spec quotes a test title: a backticked or double-quoted span of
- *      RESTATED_MIN_WORDS or more words is not, normalized as in check 19,
+ *      RESTATED_MIN_WORDS or more written words is not, normalized as in check 19,
  *      the title of an `it(` / `test(` call in a tracked test file. AGENTS.md
  *      -> "House form for rules": cite the test file, never a title, which
  *      renames silently.
@@ -479,7 +481,7 @@ for (const spec of foldCheckedFiles) {
     }
   });
 }
-// Symbols placed in a file, anywhere in a spec's prose: a pointer outside
+// Symbols placed in a file, anywhere in a non-rationale file's prose: a pointer outside
 // `Source of truth` rots the same way. Rationale files are history, and may
 // name what is gone. A directory, or a path check 4 reports missing, is skipped.
 for (const rel of allFiles.filter((f) => !rationaleFiles.includes(f))) {
@@ -677,7 +679,12 @@ for (const spec of foldCheckedFiles) {
 // specs may share without either restating a rule.
 const RESTATED_MIN_WORDS = 6;
 const normalized = (text) => text.toLowerCase().replace(/[\p{P}\p{S}]/gu, ' ').replace(/\s+/g, ' ').trim();
-const specProse = new Map(foldCheckedFiles.map((f) => [f, ` ${normalized(proseLines(f).join('\n'))} `]));
+// Counted as written, before normalizing splits `half-working` or `Pi's` in two.
+const writtenWords = (text) => text.trim().split(/\s+/).length;
+// A quoted citation (`-> "A", "B" and "C"`) names a heading or bolded phrase
+// on purpose — check 13 verifies it — so it is not a restatement.
+const QUOTED_CITATION_RE = /(?:->|→)\s*"[^"\n]*"(?:\s*(?:,\s*(?:and\s+|or\s+)?|and\s+|or\s+)"[^"\n]*")*/g;
+const specProse = new Map(foldCheckedFiles.map((f) => [f, ` ${normalized(proseLines(f).join('\n').replace(QUOTED_CITATION_RE, ' '))} `]));
 // Every run of RESTATED_MIN_WORDS words -> the specs containing it, so a
 // clause is substring-searched only in specs that share its opening words.
 const specsWithRun = new Map();
@@ -692,9 +699,9 @@ for (const [spec, prose] of specProse) {
 for (const spec of foldCheckedFiles) {
   proseLines(spec).forEach((line, i) => {
     for (const m of line.matchAll(BOLD_RE)) {
+      if (writtenWords(m[1]) < RESTATED_MIN_WORDS) continue;
       const clause = normalized(m[1]);
       const words = clause.split(' ');
-      if (words.length < RESTATED_MIN_WORDS) continue;
       for (const other of specsWithRun.get(words.slice(0, RESTATED_MIN_WORDS).join(' ')) ?? []) {
         if (other !== spec && specProse.get(other).includes(` ${clause} `)) {
           problems.push(
@@ -724,7 +731,7 @@ for (const spec of foldCheckedFiles) {
       const span = m[1] ?? m[2];
       const key = normalized(span);
       const test = testTitles.get(key);
-      if (test && key.split(' ').length >= RESTATED_MIN_WORDS) {
+      if (test && writtenWords(span) >= RESTATED_MIN_WORDS) {
         problems.push(`${spec}:${i + 1}: quotes the title of a test in ${test} ("${span}") — cite the test file, never a title`);
       }
     }

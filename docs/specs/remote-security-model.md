@@ -227,7 +227,7 @@ Source of truth: `remote-lib-common/src/security/noise.ts`, `remote-lib-common/s
 
 - **A runtime that cannot mint one does not enroll, and the mint runs *before* the exchange**, since a successful `POST /api/burrow/enroll` is not undoable by the Burrow (rationale).
 - **Both halves, always.** `isEnrollment` rejects a missing half, a malformed encoding, or a wrong decoded length.
-- **Whatever consumes the static checks that the halves correspond** (`deriveNoiseStaticPublicKey`), failing loudly; what a mismatch does is `docs/specs/security-remote.md` -> "Trust boundary" (rationale). An enrollment carrying no usable static reads as un-enrolled and the Settings dialog offers enrollment again — the entire Burrow-state version.
+- **Whatever consumes the static checks that the halves correspond** (`deriveNoiseStaticPublicKey`), failing loudly; what a mismatch does is `docs/specs/security-remote.md` -> "Trust boundary". An enrollment carrying no usable static reads as un-enrolled and the Settings dialog offers enrollment again — the entire Burrow-state version.
 - `BurrowRuntime` imports the private half **nonextractably**, never re-exports it, and the PKCS#8 in the state file is the only copy that leaves WebCrypto.
 
 **X25519 is probed, not assumed.** `probeNoiseSupport` runs one `generateKey` and one `deriveBits`, and **every rejection — a missing WebCrypto included — is `false`, never a throw** (rationale). **Runtimes are gated, not degraded**: Pocket runs the same probe before sign-in, setup, pairing, or connection and shows a fixed upgrade requirement on `false`, performing no remote operation ([pocket-app.md](./pocket-app.md)).
