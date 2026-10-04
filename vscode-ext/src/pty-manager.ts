@@ -1,5 +1,5 @@
 import type { HelperIdentity, TerminalContextRequest, TerminalContextInfo } from '../../lib/src/lib/terminal-context-types';
-import { fork, ChildProcess, type Serializable } from 'child_process';
+import { fork, ChildProcess } from 'child_process';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { randomBytes } from 'crypto';
@@ -114,7 +114,11 @@ export function getBufferedPtys(): Map<string, { alive: boolean; exitCode?: numb
   return result;
 }
 
-/** Every PTY this extension host still has alive; an exited one stays buffered until `kill()`. */
+/**
+ * Every PTY this extension host still has alive. An exited one stays buffered
+ * until `kill()`, but can neither take a `^C` nor exit again, so no teardown
+ * step should wait on it.
+ */
 export function liveIds(): string[] {
   return [...ptyBuffers].filter(([, entry]) => entry.alive).map(([id]) => id);
 }
@@ -489,22 +493,29 @@ let ackRequestSeq = 0;
  * issued. The caller would then act on an interrupt whose `^C` had not been
  * written yet — deciding the next second press against a state that never
  * happened. The pty-host echoes `requestId` on both acks.
+ *
+ * Sent through the ready queue like every other message, so it reaches the
+ * child behind any spawn still queued there and finds that PTY. A child that
+ * exits first can never ack, so its exit ends the wait too.
  */
 function awaitChildAck(msg: Record<string, unknown>, ackType: string, timeoutMs: number): Promise<void> {
   return new Promise((resolve) => {
-    if (!child?.connected) { resolve(); return; }
+    const target = child;
+    if (!target?.connected) { resolve(); return; }
     const requestId = `ack-${++ackRequestSeq}`;
     const finish = () => {
       clearTimeout(timeout);
-      child?.off('message', handler);
+      target.off('message', handler);
+      target.off('exit', finish);
       resolve();
     };
     const timeout = setTimeout(finish, timeoutMs);
     const handler = (reply: any) => {
       if (reply.type === ackType && reply.requestId === requestId) finish();
     };
-    child.on('message', handler);
-    child.send({ ...msg, requestId } as Serializable);
+    target.on('message', handler);
+    target.on('exit', finish);
+    sendToChild({ ...msg, requestId });
   });
 }
 
@@ -522,7 +533,7 @@ export function interrupt(ids: string[], timeoutMs = 400): Promise<void> {
  * and final output. `pty-core` only ever kills an explicit set, so the ids are
  * named here: this pty-host serves one window, and every live PTY in it is ours.
  */
-export function gracefulKillAll(timeoutMs = 2000): Promise<void> {
+export function gracefulKillLive(timeoutMs = 2000): Promise<void> {
   // Extra margin beyond the pty-host's own timeout.
   return awaitChildAck({ type: 'gracefulKill', ids: liveIds(), timeout: timeoutMs }, 'gracefulKillDone', timeoutMs + 500);
 }

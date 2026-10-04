@@ -72,7 +72,7 @@ describe('PTY manager lifetime and buffers', () => {
     child.emit('message', { type: 'exit', id: 'pane-c', exitCode: 0 });
     manager.kill('pane-d');
     let settled = false;
-    const done = manager.gracefulKillAll(2000).then(() => { settled = true; });
+    const done = manager.gracefulKillLive(2000).then(() => { settled = true; });
     const request = child.send.mock.calls.at(-1)![0];
     expect(request).toMatchObject({ type: 'gracefulKill', ids: ['pane-a', 'pane-b'], timeout: 2000 });
     child.emit('message', { type: 'gracefulKillDone', requestId: 'someone-else' });
@@ -80,6 +80,30 @@ describe('PTY manager lifetime and buffers', () => {
     expect(settled).toBe(false);
     child.emit('message', { type: 'gracefulKillDone', requestId: request.requestId });
     await done;
+  });
+
+  it('queues a graceful kill behind a spawn the child is not ready for', async () => {
+    const child = new FakeChild();
+    mocks.fork.mockReturnValue(child);
+    const manager = await import('../src/pty-manager');
+    manager.setExtensionPath('/extension');
+    manager.spawn('pane-a');
+    void manager.gracefulKillLive(2000);
+    expect(child.send).not.toHaveBeenCalled();
+    child.emit('message', { type: 'ready' });
+    expect(child.send.mock.calls.map(([msg]) => msg.type)).toEqual(['spawn', 'gracefulKill']);
+  });
+
+  it('stops waiting for an ack once the child exits', async () => {
+    vi.useFakeTimers();
+    try {
+      const { manager, child } = await startManager();
+      let settled = false;
+      void manager.gracefulKillLive(2000).then(() => { settled = true; });
+      child.emit('exit', 1);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(settled).toBe(true);
+    } finally { vi.useRealTimers(); }
   });
 
   it('forwards a Burrow repaint to the PTY child that owns all size writers', async () => {
