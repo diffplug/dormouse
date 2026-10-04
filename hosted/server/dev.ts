@@ -8,8 +8,10 @@ import { createServer as createViteServer, type ViteDevServer } from "vite";
 import { createAuthApp } from "@pgstencil/auth/better-auth";
 import { developmentDatabase } from "pgstencil/database";
 import { EmailDev, SecureRandom, SystemTime } from "pgstencil";
+import { adminRoutes } from "./admin";
 import { stripeDevBilling } from "./billing-dev";
 import { BILLING_WEBHOOK_PATH, billingRoutes } from "./billing-routes";
+import { recordLogin } from "./metrics";
 import { authPolicy } from "./policy";
 import { migrations } from "./migrations";
 import { allowedDevRequest } from "./dev-host-guard";
@@ -80,10 +82,16 @@ const { dev: stripeDev, setup: billing } = await stripeDevBilling(
   fileURLToPath(new URL("../.pgstencil/stripe-dev.json", import.meta.url)),
 );
 stripeDev.setWebhookTarget(origin + BILLING_WEBHOOK_PATH);
-billingRoutes(app, () => ({ ...host, setup: () => billing }));
+const billingHost = () => ({ ...host, setup: () => billing });
+billingRoutes(app, billingHost);
+adminRoutes(app, billingHost);
 // No speak: a Hosted build speaks only at the fixed voice origin, so no
 // Dormouse build could reach one here.
-app.all("*", (c) => auth.app.fetch(c.req.raw));
+app.all("*", async (c) => {
+  const response = await auth.app.fetch(c.req.raw);
+  recordLogin(c, host, c.req.raw, response);
+  return response;
+});
 const vite = await createViteServer({
   server: {
     middlewareMode: true,

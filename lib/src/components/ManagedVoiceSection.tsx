@@ -7,6 +7,7 @@ import { DisconnectConfirm, removedCopy } from './RemoteControlSection';
 import { FIELD_LABEL, useBusyAction, useNetworkPolicy } from './remote-control-shared';
 import type { BurrowConsoleStatus } from '../host/remote/service-protocol';
 import { getPlatform } from '../lib/platform';
+import { HOSTED_REFS } from '../lib/hosted-links';
 import {
   MANAGED_VOICES,
   type ManagedVoiceConfigResult,
@@ -107,6 +108,7 @@ export function ManagedVoiceSection({ onShowNetwork }: { onShowNetwork?: () => v
               accountOrigin={status.accountOrigin}
               suggestedLabel={status.suggestedLabel}
               askName={false}
+              plansRef={HOSTED_REFS.settingsVoice}
             />
           )}
         </>
@@ -145,7 +147,7 @@ function SignedIn({ status, voice, port, signingInAgain, onSignInAgain }: {
         <div className="text-error">{removedCopy(status)}</div>
       ) : lapsed ? (
         <div className="text-foreground">
-          {NO_PLAN_COPY} <HostedPlansLink />
+          {NO_PLAN_COPY} <HostedPlansLink plansRef={HOSTED_REFS.settingsVoice} />
         </div>
       ) : (
         <div className="text-foreground">Signed in to Dormouse Hosted.</div>

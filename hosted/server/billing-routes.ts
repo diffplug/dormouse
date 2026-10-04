@@ -1,6 +1,6 @@
-// Rules: docs/specs/hosted.md -> "Billing"; docs/specs/pricing.md ->
+// Rules: docs/specs/hosted.md -> "Billing" and "Metrics"; docs/specs/pricing.md ->
 // "Checkout and entitlement" and "The founding card's live half".
-import type { Billing } from "@pgstencil/stripe";
+import type { Billing, Stripe } from "@pgstencil/stripe";
 import type { Context, Hono } from "hono";
 import { sql } from "kysely";
 import { queryDatabase } from "pgstencil/postgres";
@@ -12,11 +12,22 @@ import {
   BillingError,
   foundingSold,
   openCohort,
+  REFUND_DAYS,
   withBilling,
   type BillingSetup,
   type Plan,
 } from "./billing";
 import { accessSql, entitledSql, subscribedSql } from "./entitlement";
+import {
+  bestEffort,
+  countMetric,
+  NO_REF,
+  planLabel,
+  recordMetric,
+  refLabel,
+  rememberCheckoutRef,
+  type MetricEvent,
+} from "./metrics";
 
 /** What one request's account deployment provides to the billing routes. */
 export interface BillingHost extends AccountHost {
@@ -109,7 +120,8 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
 
   app.post("/api/billing/checkout", small, gate, async (c) => {
     const { userId, email } = c.get("login");
-    const plan = (await readJson<{ plan?: unknown }>(c))?.plan;
+    const body = await readJson<{ plan?: unknown; ref?: unknown }>(c);
+    const plan = body?.plan;
     if (!isCheckoutPlan(plan)) return c.json({ message: "Choose monthly, yearly, or founding." }, 400);
     // A provider-only account has no public email: Stripe Checkout asks for one.
     return billed(c, async (billing) => {
@@ -121,7 +133,13 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
         .where("status", "in", ["pending", "open"])
         .executeTakeFirst();
       if (other && other.plan !== plan) await billing.cancelCheckout(userId);
-      const { url } = await billing.checkout(userId, email, plan);
+      const { id, url } = await billing.checkout(userId, email, plan);
+      // Which link brought the buyer, by allowlisted ref, kept until the
+      // checkout completes so the completion counts by it too.
+      const ref = refLabel(body?.ref);
+      const databaseUrl = host(c).databaseUrl;
+      recordMetric(c, databaseUrl, "checkout.started", `${plan}:${ref}`);
+      bestEffort(c, "Checkout ref", rememberCheckoutRef(databaseUrl, id, ref));
       return c.json({ url });
     });
   });
@@ -201,8 +219,15 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
       const signature = c.req.header("stripe-signature");
       if (!signature) return c.json({ message: "Missing signature." }, 400);
       const body = await c.req.text();
-      return billed(c, async (billing) => {
-        await billing.webhook(body, signature);
+      return billed(c, async (billing, setup) => {
+        // Only events this delivery processed, never a redelivery, and counted
+        // after the commit: a metric never fails the webhook.
+        const processed: Stripe.Event[] = [];
+        await billing.webhook(body, signature, async (event) => {
+          processed.push(event);
+        });
+        if (processed.length)
+          bestEffort(c, "Billing metrics", countBilling(host(c).databaseUrl, setup, processed));
         return c.json({ received: true });
       });
     },
@@ -212,6 +237,8 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
   // text: a Response, and a promise its I/O settles, belong to one request.
   let cohorts: { at: number; status: number; text: string } | undefined;
   app.get(COHORT_ENDPOINT, async (c) => {
+    // The Hosted page's one request: a visit, counted by the ref it arrived with.
+    recordMetric(c, host(c).databaseUrl, "hosted_page.ref", refLabel(c.req.query("ref")));
     const now = Date.now();
     if (!cohorts || now - cohorts.at >= COHORT_CACHE_MS) {
       const response = await billed(c, async (billing, setup) => {
@@ -236,6 +263,46 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
     }
     return c.body(cohorts.text, cohorts.status as 200, { "content-type": "application/json" });
   });
+}
+
+/**
+ * Counts what processed webhook events did: a completed checkout by plan and
+ * the ref it started under (whose row it then forgets), and an ended
+ * subscription by plan, as `subscription.refunded` when it was cancelled at
+ * once within `REFUND_DAYS` of starting, else `subscription.canceled`.
+ */
+async function countBilling(databaseUrl: string, setup: BillingSetup, events: Stripe.Event[]) {
+  const counted: [MetricEvent, string][] = [];
+  for (const event of events) {
+    if (event.type === "checkout.session.completed" && event.data.object.mode === "subscription") {
+      const [checkout] = await queryDatabase<{ plan: string; ref: string | null }>(
+        databaseUrl,
+        `WITH done AS (
+          SELECT c.id, c.plan FROM pgstencil_billing.checkouts c WHERE c.session_id = $1
+        ), forgotten AS (
+          DELETE FROM dormouse_checkout_refs r USING done WHERE r."checkoutId" = done.id RETURNING r.ref
+        )
+        SELECT done.plan, (SELECT ref FROM forgotten) AS ref FROM done`,
+        [event.data.object.id],
+      );
+      if (checkout) counted.push(["checkout.completed", `${planLabel(checkout.plan)}:${checkout.ref ?? NO_REF}`]);
+    } else if (event.type === "customer.subscription.deleted") {
+      const subscription = event.data.object;
+      const price = subscription.items.data[0]?.price.id;
+      const plan =
+        price === setup.monthly
+          ? "monthly"
+          : price === setup.yearly
+            ? "yearly"
+            : setup.founding.includes(price ?? "")
+              ? "founding"
+              : null;
+      const lived = (subscription.ended_at ?? 0) - subscription.start_date;
+      const refunded = !subscription.cancel_at_period_end && lived < REFUND_DAYS * 86_400;
+      counted.push([refunded ? "subscription.refunded" : "subscription.canceled", planLabel(plan)]);
+    }
+  }
+  for (const [event, label] of counted) await countMetric(databaseUrl, event, label);
 }
 
 /**

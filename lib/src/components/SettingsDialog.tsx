@@ -25,6 +25,7 @@ import { useNetworkPolicy } from './remote-control-shared';
 import { managedVoicePort, membershipOf, useHostedMembership, type HostedMembership } from '../lib/hosted-membership';
 import { readBurrowStatusOnce } from '../remote/burrow/burrow-status-store';
 import { getPlatform } from '../lib/platform';
+import { HOSTED_REFS } from '../lib/hosted-links';
 import { getShellsSnapshot, subscribeToShells } from '../lib/shell-store';
 import { getDelayedKillSetting, labsAvailable, setDelayedKillSetting, subscribeToLabsSettings } from '../lib/labs-settings';
 import { PENDING_KILL_MS } from '../lib/pending-kills';
@@ -580,7 +581,7 @@ function PushTargets({ push, hasBurrowService }: { push: PushDevicesState; hasBu
   return (
     <>
       {describePushTargets(push, hasBurrowService, membership ?? 'unavailable')}
-      {membership === 'no-plan' && <> <HostedPlansLink /></>}
+      {membership === 'no-plan' && <> <HostedPlansLink plansRef={HOSTED_REFS.settingsPush} /></>}
     </>
   );
 }

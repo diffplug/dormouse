@@ -1,10 +1,11 @@
-// Rules: docs/specs/hosted.md -> "Managed voice".
+// Rules: docs/specs/hosted.md -> "Managed voice" and "Metrics".
 import type { Context, Hono } from "hono";
 import { digest } from "@pgstencil/auth/security";
 import { withClient } from "pgstencil/postgres";
 import { isManagedVoiceId, isManagedVoiceToken, parseBearer } from "remote-lib-common";
 import { accountQuery, cookieEntitled, type AccountHost } from "./account-gate";
 import { entitledSql } from "./entitlement";
+import { recordMetric } from "./metrics";
 import { mintVoiceToken } from "./voice-token";
 
 export const VOICE_DAILY_CAP = 500;
@@ -165,12 +166,18 @@ export function speakRoute(app: Hono<any>, host: (c: Context) => SpeakHost) {
         RETURNING count`,
         [owner.userId, owner.id, VOICE_DAILY_CAP],
       );
-      if (!counted.rows.length)
+      if (!counted.rows.length) {
+        recordMetric(c, databaseUrl, "voice.speak", "capped");
         return fail(
           c,
           429,
           "Daily voice limit reached. It resets at 00:00 UTC.",
         );
+      }
+      // The call that spends the last of the day: the account's alarms fall
+      // back to the system voice until 00:00 UTC.
+      if (Number(counted.rows[0].count) === VOICE_DAILY_CAP)
+        recordMetric(c, databaseUrl, "voice.fallback-cap");
       return { synthesize, voiceId, spoken };
     });
     if (!("spoken" in speech)) return speech;
@@ -181,8 +188,10 @@ export function speakRoute(app: Hono<any>, host: (c: Context) => SpeakHost) {
       .catch(() => null);
     if (!upstream?.ok || !upstream.body) {
       await upstream?.body?.cancel().catch(() => {});
+      recordMetric(c, databaseUrl, "voice.speak", "error");
       return fail(c, 502, "The voice service did not respond. Try again.");
     }
+    recordMetric(c, databaseUrl, "voice.speak", "ok");
     return new Response(upstream.body, {
       headers: { "content-type": "audio/mpeg", "cache-control": "no-store" },
     });

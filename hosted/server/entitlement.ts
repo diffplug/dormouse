@@ -8,6 +8,13 @@ export const ADMIN_EMAIL = "ned.twigg@diffplug.com";
 if (!/^[^'\\]+$/.test(ADMIN_EMAIL)) throw new Error("ADMIN_EMAIL cannot be inlined into SQL");
 
 /**
+ * Whether the `"user"` row aliased `user` is the admin: `ADMIN_EMAIL`, verified.
+ * The entitlement's standing comp, and the gate on the admin metrics view.
+ */
+export const adminSql = (user = "u") =>
+  `(${user}."emailVerified" IS TRUE AND ${user}.email = '${ADMIN_EMAIL}')`;
+
+/**
  * The statuses `@pgstencil/stripe` counts as a current subscription; access
  * needs exactly one of them (its `status()`).
  */
@@ -32,8 +39,7 @@ export const accessSql = (s = "s", at = "now()") =>
  * dogfooding never holds a subscription.
  */
 export function entitledSql(user = "u"): string {
-  return `((${user}."emailVerified" IS TRUE AND ${user}.email = '${ADMIN_EMAIL}')
-    OR ${subscribedSql(`${user}.id`)})`;
+  return `(${adminSql(user)} OR ${subscribedSql(`${user}.id`)})`;
 }
 
 /**
@@ -47,12 +53,18 @@ export function subscribedSql(owner: string, prices?: string): string {
     FROM pgstencil_billing.subscriptions s WHERE s.owner_id = ${owner}), false)`;
 }
 
-/** Whether `userId` is entitled now, read from `databaseUrl` in one query. */
-export async function entitled(databaseUrl: string, userId: string): Promise<boolean> {
-  const [row] = await queryDatabase<{ entitled: boolean }>(
+/** Whether `userId` passes `predicate` (an SQL boolean over `u`) now, read from `databaseUrl` in one query. */
+async function holds(databaseUrl: string, userId: string, predicate: string): Promise<boolean> {
+  const [row] = await queryDatabase<{ holds: boolean }>(
     databaseUrl,
-    `SELECT ${entitledSql()} AS entitled FROM "user" u WHERE u.id = $1`,
+    `SELECT ${predicate} AS holds FROM "user" u WHERE u.id = $1`,
     [userId],
   );
-  return row?.entitled === true;
+  return row?.holds === true;
 }
+
+/** Whether `userId` is entitled now. */
+export const entitled = (databaseUrl: string, userId: string) => holds(databaseUrl, userId, entitledSql());
+
+/** Whether `userId` is the admin now. */
+export const isAdmin = (databaseUrl: string, userId: string) => holds(databaseUrl, userId, adminSql());

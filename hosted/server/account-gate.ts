@@ -3,7 +3,7 @@
 import type { Context, MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { queryDatabase } from "pgstencil/postgres";
-import { entitled } from "./entitlement";
+import { entitled, isAdmin } from "./entitlement";
 
 /** What one request's account deployment provides to its cookie routes. */
 export interface AccountHost {
@@ -84,20 +84,33 @@ export function cookieLogin(host: (c: Context) => AccountHost): Gate {
   };
 }
 
-/**
- * The account Worker's gate for an entitled account's cookie routes: the
- * origin and login checks, then only an entitled account passes, read per
- * request (`refuse` answers anyone else). Sets `login`.
- */
-export function cookieEntitled(
+/** A cookie gate admitting only a login whose account passes `admits`, read per request; `refuse` answers anyone else. */
+function cookieWhere(
   host: (c: Context) => AccountHost,
+  admits: (databaseUrl: string, userId: string) => Promise<boolean>,
   refuse: (c: Context) => Response,
 ): Gate {
   return async (c, next) => {
     const result = await login(c, host(c));
     if (result instanceof Response) return result;
-    if (!(await entitled(host(c).databaseUrl, result.userId))) return refuse(c);
+    if (!(await admits(host(c).databaseUrl, result.userId))) return refuse(c);
     c.set("login", result);
     await next();
   };
 }
+
+/**
+ * The account Worker's gate for an entitled account's cookie routes: the
+ * origin and login checks, then only an entitled account passes (`refuse`
+ * answers anyone else). Sets `login`.
+ */
+export const cookieEntitled = (host: (c: Context) => AccountHost, refuse: (c: Context) => Response) =>
+  cookieWhere(host, entitled, refuse);
+
+/**
+ * The gate for the admin's cookie routes: the origin and login checks, then
+ * only the admin (`adminSql`) passes; anyone else gets the API's 404, so the
+ * route does not announce itself. Sets `login`.
+ */
+export const cookieAdmin = (host: (c: Context) => AccountHost) =>
+  cookieWhere(host, isAdmin, (c) => c.json({ message: "Not found." }, 404));

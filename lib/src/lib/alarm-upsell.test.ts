@@ -94,6 +94,6 @@ describe('networkOffOrUnknown', () => {
 describe('hostedPricingUrl', () => {
   it('puts the ref ahead of the section', () => {
     expect(hostedPricingUrl(HOSTED_REFS.upsellVoice)).toBe('https://dormouse.sh/hosted/?ref=upsell-voice#pricing');
-    expect(hostedPricingUrl()).toBe('https://dormouse.sh/hosted/#pricing');
+    expect(hostedPricingUrl(HOSTED_REFS.settingsPush)).toBe('https://dormouse.sh/hosted/?ref=settings-push#pricing');
   });
 });

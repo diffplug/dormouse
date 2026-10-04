@@ -8,6 +8,7 @@ import {
 } from "remote-lib-common";
 import { accountQuery, cookieEntitled, jsonBodyLimit, type AccountHost } from "./account-gate";
 import { ENROLLMENT_TTL_MS, LOGIN_FRESH_AGE_MS, RECENT_LOGIN_WINDOW } from "./policy-constants";
+import { recordMetric } from "./metrics";
 
 /** What one request's account deployment provides to the Relay's account routes. */
 export type RelayAccountHost = AccountHost & {
@@ -69,7 +70,9 @@ export function relayAccountRoutes(app: Hono<any>, host: (c: Context) => RelayAc
           [userCode, login.userId, ENROLLMENT_TTL_MS],
         )
       ).length > 0;
-    return approved ? c.body(null, 204) : c.json({ message: ALREADY_APPROVED }, 409);
+    if (!approved) return c.json({ message: ALREADY_APPROVED }, 409);
+    recordMetric(c, host(c).databaseUrl, "enroll.approved");
+    return c.body(null, 204);
   });
 
   app.get("/api/relay/burrows", gate, async (c) => {
