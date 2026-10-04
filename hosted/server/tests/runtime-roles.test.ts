@@ -90,7 +90,12 @@ const EXPECTED: Record<Worker, string[]> = {
     "dormouse_voice_tokens.burrowId: INSERT",
     "dormouse_voice_tokens.hash: INSERT",
     "dormouse_voice_tokens.userId: INSERT",
+    "schema pgstencil_billing: USAGE",
     "schema public: USAGE",
+    "subscriptions.owner_id: SELECT",
+    "subscriptions.period_end: SELECT",
+    "subscriptions.status: SELECT",
+    "subscriptions.trial_end: SELECT",
     "user.email: SELECT",
     "user.emailVerified: SELECT",
     "user.id: SELECT",
@@ -104,7 +109,12 @@ const EXPECTED: Record<Worker, string[]> = {
     "dormouse_voice_tokens.userId: SELECT",
     "dormouse_voice_usage.count: UPDATE",
     "dormouse_voice_usage: INSERT, SELECT",
+    "schema pgstencil_billing: USAGE",
     "schema public: USAGE",
+    "subscriptions.owner_id: SELECT",
+    "subscriptions.period_end: SELECT",
+    "subscriptions.status: SELECT",
+    "subscriptions.trial_end: SELECT",
     "user.email: SELECT",
     "user.emailVerified: SELECT",
     "user.id: SELECT",
@@ -127,9 +137,22 @@ const outcome = (worker: Worker, text: string) =>
     (error: { code?: string }) => error.code,
   );
 
+/** Billing beyond the entitlement's subscription columns, refused to both roles. */
+const BILLING_REFUSED = [
+  `SELECT customer_id FROM pgstencil_billing.accounts`,
+  `SELECT price_id FROM pgstencil_billing.subscriptions`,
+  `SELECT id FROM pgstencil_billing.checkouts`,
+  `UPDATE pgstencil_billing.subscriptions SET status = status`,
+  `SELECT name FROM dormouse_founders`,
+  `SELECT bargain FROM dormouse_price_survey`,
+];
+
 test("the relay's role is refused the account's tables, the user row's other columns and writes, voice but a token's mint, and Burrow removal", async () => {
   // It does log in, and reads what the entitlement check reads.
   expect(await outcome("relay", `SELECT id, email, "emailVerified" FROM "user"`)).toBe("ok");
+  expect(
+    await outcome("relay", `SELECT owner_id, status, period_end, trial_end FROM pgstencil_billing.subscriptions`),
+  ).toBe("ok");
   for (const text of [
     `SELECT * FROM "session"`,
     `SELECT * FROM account`,
@@ -145,6 +168,7 @@ test("the relay's role is refused the account's tables, the user row's other col
     `UPDATE dormouse_relay_burrows SET "userId" = "userId"`,
     `INSERT INTO dormouse_relay_enrollment_approvals ("userCode", "userId", "expiresAt") VALUES ('x', 'x', now())`,
     `CREATE TABLE dormouse_relay_extra (id int)`,
+    ...BILLING_REFUSED,
   ])
     expect([text, await outcome("relay", text)]).toEqual([text, "42501"]);
 });
@@ -163,6 +187,7 @@ test("the voice role is refused the relay's tables, the account's, and its token
     `UPDATE dormouse_voice_tokens SET "revokedAt" = NULL`,
     `INSERT INTO dormouse_voice_tokens ("userId", hash) VALUES ('x', 'x')`,
     `DELETE FROM dormouse_voice_usage`,
+    ...BILLING_REFUSED,
   ])
     expect([text, await outcome("voice", text)]).toEqual([text, "42501"]);
 });

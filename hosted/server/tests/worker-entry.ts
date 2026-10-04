@@ -1,8 +1,11 @@
 import { DevTime, DevRandom } from "pgstencil";
 import { deterministicScope } from "@pgstencil/auth/better-auth-testing";
-import worker from "../worker";
+import { accountWorker } from "../worker";
 const time = new DevTime();
-const scope = { time, random: new DevRandom("dormouse-hosted-test") };
+const random = new DevRandom("dormouse-hosted-test");
+const scope = { time, random };
+// Billing runs on the same test clock, so StripeDev's signed events verify.
+const worker = accountWorker({ time, random: new DevRandom("dormouse-hosted-billing") });
 export default {
   fetch(
     request: Request,
@@ -19,4 +22,5 @@ export default {
       worker.fetch(request, env, ctx),
     );
   },
+  scheduled: worker.scheduled,
 };

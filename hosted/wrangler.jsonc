@@ -12,6 +12,12 @@
     {
       "pattern": "hosted.dormouse.sh",
       "custom_domain": true
+    },
+    // The Hosted page's cohort endpoint, same-origin on the marketing site
+    // (`SITE_ORIGIN`); the Worker answers that origin nothing else.
+    {
+      "pattern": "dormouse.sh/api/hosted/*",
+      "zone_name": "dormouse.sh"
     }
   ],
   "assets": {
@@ -68,9 +74,11 @@
     }
   ],
   "triggers": {
-    // Empty, never absent: an absent `triggers` leaves a deployed schedule in
-    // place, and the history sweep's moved to the voice Worker.
-    "crons": []
+    // Billing's resync of subscriptions whose period ends within the hour
+    // (`reconcileDue`); a no-op while billing is off.
+    "crons": [
+      "30 * * * *"
+    ]
   },
   "observability": {
     "enabled": false

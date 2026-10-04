@@ -1,4 +1,5 @@
 import type { BetterAuthWorkerBindings } from "@pgstencil/auth/better-auth-workers";
+import type { BillingEnv } from "./billing";
 import { exactOrigin } from "./headers";
 import { providerBindings } from "./policy";
 import type { RelayRoomRpc } from "./relay-room-contract";
@@ -18,8 +19,8 @@ interface Assets {
   fetch(request: Request): Promise<Response>;
 }
 
-/** `hosted.dormouse.sh`: the account frontend, auth, and voice-token minting. */
-export interface AccountEnv extends BetterAuthWorkerBindings, WorkerEnv {
+/** `hosted.dormouse.sh`: the account frontend, auth, voice-token minting, and billing. */
+export interface AccountEnv extends BetterAuthWorkerBindings, WorkerEnv, BillingEnv {
   ASSETS: Assets;
   /** Enrollment approvals, per account. */
   RELAY_APPROVE_LIMIT: RateLimit;
@@ -72,10 +73,15 @@ export const accountBindings = (env: AccountEnv): AccountEnv => ({
   EMAIL_FROM: env.EMAIL_FROM,
   POSTMARK_SERVER_TOKEN: env.POSTMARK_SERVER_TOKEN,
   BUILD_SHA: env.BUILD_SHA,
+  STRIPE_SECRET_KEY: env.STRIPE_SECRET_KEY,
+  STRIPE_WEBHOOK_SECRET: env.STRIPE_WEBHOOK_SECRET,
+  STRIPE_PRICE_MONTHLY: env.STRIPE_PRICE_MONTHLY,
+  STRIPE_PRICE_YEARLY: env.STRIPE_PRICE_YEARLY,
+  STRIPE_PRICES_FOUNDING: env.STRIPE_PRICES_FOUNDING,
   ...providerBindings(env as unknown as Record<string, unknown>),
 });
 
-/** Ignores stale production, OAuth, and mail bindings on an existing preview Worker. */
+/** Ignores stale production, OAuth, mail, and Stripe bindings on an existing preview Worker: billing is off. */
 export const accountPreviewBindings = (env: AccountEnv): AccountEnv => ({
   HYPERDRIVE: env.HYPERDRIVE,
   ASSETS: env.ASSETS,

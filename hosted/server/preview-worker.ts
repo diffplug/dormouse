@@ -1,5 +1,6 @@
 import { createBetterAuthWorker } from "@pgstencil/auth/better-auth-workers";
 import { accountApp } from "./account-app";
+import { SYSTEM_CLOCK } from "./billing";
 import { accountPreviewBindings, type AccountEnv } from "./bindings";
 import { authPolicy } from "./policy";
 import { postgresInbox, inboxPage, messagePage } from "./preview-inbox";
@@ -12,6 +13,7 @@ const auth = createBetterAuthWorker<AccountEnv>({
 export default accountApp(
   auth.fetch,
   accountPreviewBindings,
+  SYSTEM_CLOCK,
   (app) => {
     app.get("/api/dev/emails", async (c) =>
       c.json(await postgresInbox(c.env.HYPERDRIVE.connectionString).all()),
