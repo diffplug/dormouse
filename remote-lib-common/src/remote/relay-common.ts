@@ -94,7 +94,7 @@ export const WS_CLOSE_IDLE_REASON = 'no response to heartbeat';
  */
 export const RELAY_IDLE_TIMEOUT_MS = 3 * RELAY_PING_INTERVAL_MS;
 
-/** Sessions live 12 hours (relay.md: "hours-scale TTL"). */
+/** Sessions live 12 hours (`docs/specs/relay.md` -> "HTTP API"). */
 export const RELAY_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 
 /**
