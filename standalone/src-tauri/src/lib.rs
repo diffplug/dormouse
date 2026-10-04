@@ -3439,6 +3439,7 @@ fn quit_cancel(
     guard(&windows.arrivals).cancel_deferred();
     let actions = guard(&state.machine).cancel();
     apply_quit_actions(&app, actions);
+    answer_held_terminate(&app, false);
 }
 
 // A non-last window finished its teardown: destroy it and start the next one.
@@ -3478,6 +3479,18 @@ fn quit_restart(app: AppHandle, requester: Option<String>) -> Result<bool, Strin
 fn relaunch_requested(app: &AppHandle) -> bool {
     app.try_state::<QuitState>()
         .is_some_and(|state| guard(&state.machine).relaunches())
+}
+
+/// Answer the OS terminate macOS holds for the flow, if any (§Trigger
+/// interception); whether one was held.
+#[cfg(target_os = "macos")]
+fn answer_held_terminate(app: &AppHandle, proceed: bool) -> bool {
+    macos_terminate::answer_held(app, proceed)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn answer_held_terminate(_app: &AppHandle, _proceed: bool) -> bool {
+    false
 }
 
 #[cfg(target_os = "macos")]
@@ -4398,12 +4411,15 @@ pub fn run() {
             }
             // A window-level exit request (§Trigger interception). The flow's own
             // app.exit(0) re-enters here with approved=true and passes; `code`
-            // (None = user-initiated) is deliberately ignored.
+            // (None = user-initiated) is deliberately ignored. Every exit lands
+            // here, watchdogs included, so this is where a terminate AppKit is
+            // holding gets its Yes: AppKit then finishes the exit, and
+            // `RunEvent::Exit` still runs, from `applicationWillTerminate:`.
             RunEvent::ExitRequested { api, .. } => {
                 if !quit_approved(app) {
                     api.prevent_exit();
                     request_quit(app, QuitIntent::default());
-                } else if !exit_after_cleanup(app) {
+                } else if !exit_after_cleanup(app) || answer_held_terminate(app, true) {
                     api.prevent_exit();
                 }
             }
@@ -5028,9 +5044,26 @@ mod tests {
         let macos = include_str!("macos_terminate.rs");
         let delegate = macos.split("if quit_approved(app) {").nth(1).unwrap().split("append_log(").next().unwrap();
         assert!(delegate.contains("exit_after_cleanup(app)"));
-        assert!(delegate.contains("TerminateCancel"));
         // An OS terminate never relaunches (docs/specs/standalone.md -> "Restart").
         assert!(delegate.contains("forget_restart(app)"));
+    }
+
+    /// A refused OS terminate aborts a logout outright, and a held one survives
+    /// only if every exit and the cancel answer it (docs/specs/standalone.md ->
+    /// "Trigger interception").
+    #[test]
+    fn a_held_os_terminate_is_answered_on_every_exit_and_on_cancel() {
+        let macos = include_str!("macos_terminate.rs");
+        let delegate = macos.split("unsafe extern \"C-unwind\" fn should_terminate").nth(1).unwrap().split("\n}").next().unwrap();
+        assert!(!delegate.contains("TerminateCancel"));
+        assert!(delegate.contains("TerminateLater"));
+        let source = include_str!("lib.rs").split("#[cfg(test)]").next().unwrap();
+        // Every app.exit(0) — the flow's, the watchdogs', the forced gate's —
+        // passes through this arm, so answering here covers them all.
+        let event = source.split("RunEvent::ExitRequested { api, .. } => {").nth(1).unwrap().split("RunEvent::Exit =>").next().unwrap();
+        assert!(event.contains("answer_held_terminate(app, true)"));
+        let cancel = source.split("fn quit_cancel(").nth(1).unwrap().split("\n}").next().unwrap();
+        assert!(cancel.contains("answer_held_terminate(&app, false)"));
     }
 
     /// docs/specs/standalone.md -> "Restart".
