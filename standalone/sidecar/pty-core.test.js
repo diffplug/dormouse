@@ -874,6 +874,43 @@ test('gracefulKill resolves early after exits and a final output grace tick', as
   assert.ok(Date.now() - started < 5_000);
 });
 
+test('gracefulKill stops a PTY whose kill(signal) throws, as node-pty does on Windows', async () => {
+  // Models node-pty's WindowsTerminal: `kill(signal)` throws "Signals not
+  // supported on windows.", and only the argument-less ConPTY close stops it.
+  const listeners = {};
+  const closes = [];
+  const fakePty = {
+    pid: 7,
+    onData(handler) { listeners.data = handler; },
+    onExit(handler) { listeners.exit = handler; },
+    resize() {},
+    write() {},
+    kill(signal) {
+      if (signal) throw new Error('Signals not supported on windows.');
+      closes.push(signal);
+      setTimeout(() => listeners.exit({ exitCode: 0 }), 10);
+    },
+  };
+
+  let resolveDone;
+  const done = new Promise((resolve) => { resolveDone = resolve; });
+  const mgr = create((event) => {
+    if (event === 'gracefulKillDone') resolveDone('done');
+  }, { spawn() { return fakePty; } });
+
+  mgr.spawn('pane-1');
+  mgr.gracefulKill(['pane-1'], 60_000, 'req-1');
+  const outcome = await Promise.race([
+    done,
+    new Promise((resolve) => setTimeout(() => resolve('still waiting'), 2_000)),
+  ]);
+
+  // The PTY got a stop it accepts, and the wait ended on its exit rather than
+  // sitting out the timeout.
+  assert.equal(closes.length, 1);
+  assert.equal(outcome, 'done');
+});
+
 test('gracefulKill with nothing live waits one grace tick', async () => {
   const events = [];
   let resolveDone;
