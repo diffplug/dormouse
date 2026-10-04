@@ -19,9 +19,8 @@ import { ShellPicker } from './ShellPicker';
 import { WatchedCommandList } from './WatchedCommandList';
 import { NetworkPhones, NetworkSettings, NetworkUpdates } from './NetworkSettings';
 import { PushTestButton, SpeakTestButton } from './AlarmTestButtons';
-import { ManagedVoiceSection, NetworkTopicLink, useManagedVoiceOffered } from './ManagedVoiceSection';
-import { ExternalTextLink } from './ExternalTextLink';
-import { HOSTED_PRICING_URL } from './HostedSignIn';
+import { ManagedVoiceSection, NetworkTopicLink, NO_PUSH_PLAN_COPY, useManagedVoiceOffered } from './ManagedVoiceSection';
+import { HostedPlansLink, SIGN_IN_LABEL } from './HostedSignIn';
 import { useNetworkPolicy } from './remote-control-shared';
 import { useHostedMembership, type HostedMembership } from '../lib/hosted-membership';
 import { getPlatform } from '../lib/platform';
@@ -42,8 +41,6 @@ import {
 
 const TITLE_ID = 'settings-dialog-title';
 
-/** What the push group says, and the preview's live line, where the plan lapsed. */
-export const NO_PUSH_PLAN_COPY = 'Your account has no Hosted plan, so no push is sent.';
 
 /** A picker row; `min-w-0` lets the picker's trigger truncate in a narrow dialog. */
 const PICKER_ROW = 'flex items-center gap-1.5 text-sm text-foreground [&>div]:min-w-0';
@@ -75,7 +72,7 @@ function describePushTargets(push: PushDevicesState, remoteControlBelow: boolean
   if (push.status === 'no-burrow') {
     // In a Hosted build, connecting to a Relay is signing in.
     if (membership === 'signed-out') {
-      return remoteControlBelow ? 'Sign in to Dormouse Hosted below to send push.' : 'Sign in to Dormouse Hosted to send push.';
+      return `${SIGN_IN_LABEL}${remoteControlBelow ? ' below' : ''} to send push.`;
     }
     return remoteControlBelow
       ? 'Connect this machine to a Dormouse Relay below to send push.'
@@ -505,9 +502,6 @@ export function AlarmSettingsSection({ sink, preview = false, onShowNetwork }: {
   // Under Nothing the service sends no push and managed voice asks nothing
   // (`docs/specs/remote-network.md` -> "Policy"), so both lines say why.
   const networkOff = useNetworkPolicy()?.level === 'nothing';
-  // The dialog only: the brief preview must not start the status poll, and
-  // its live line carries the offers instead (`AlarmUpsellLine`).
-  const membership = useHostedMembership(sink === 'push' && !preview);
 
   // The brief preview uses the cached list: refreshing immediately publishes
   // loading, and the bridge reply may arrive after the preview has faded away.
@@ -558,12 +552,22 @@ export function AlarmSettingsSection({ sink, preview = false, onShowNetwork }: {
       {networkOff ? (
         <>Push is off while <NetworkTopicLink onShow={onShowNetwork} /> is set to Nothing.</>
       ) : (
-        <>
-          {describePushTargets(push, hasBurrowService && !preview, membership)}
-          {membership === 'no-plan' && <> <ExternalTextLink href={HOSTED_PRICING_URL}>See Hosted plans</ExternalTextLink></>}
-        </>
+        // The brief preview must not start the status poll; its live line
+        // carries the offers instead (`AlarmUpsellLine`).
+        preview ? describePushTargets(push, false, 'unavailable') : <PushTargets push={push} hasBurrowService={hasBurrowService} />
       )}
     </AlarmSinkSection>
+  );
+}
+
+/** The dialog's push device line, which reads where this machine stands with Hosted. */
+function PushTargets({ push, hasBurrowService }: { push: PushDevicesState; hasBurrowService: boolean }) {
+  const membership = useHostedMembership();
+  return (
+    <>
+      {describePushTargets(push, hasBurrowService, membership)}
+      {membership === 'no-plan' && <> <HostedPlansLink /></>}
+    </>
   );
 }
 

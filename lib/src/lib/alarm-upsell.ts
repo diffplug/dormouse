@@ -1,8 +1,8 @@
 import type { AlertSink } from './alert-delivery-model';
-import { membershipOf, readBurrowStanding, voiceStatus, type HostedMembership } from './hosted-membership';
+import { managedVoicePort, membershipOf, type HostedMembership } from './hosted-membership';
 import { loadJson, saveJson } from './local-json-store';
-import { getPlatformOrNull } from './platform';
 import { getNetworkPolicySnapshot, policyOf, type NetworkPolicyStoreState } from '../remote/burrow/network-policy-store';
+import { readBurrowStatusOnce } from '../remote/burrow/burrow-status-store';
 
 /**
  * The one extra line a Baseboard alarm toggle's preview may carry
@@ -52,16 +52,11 @@ export const ALARM_UPSELL_SHOWN_AT_KEY = 'dormouse:alarm-upsell-shown-at';
 const DAY_MS = 24 * 60 * 60 * 1000;
 const isNumber = (value: unknown): value is number => typeof value === 'number';
 
-/**
- * Whether a line may show now, recording that it did. At most one a day across
- * both toggles; storage that cannot be read or written only means it shows.
- */
-export function claimAlarmUpsell(now: number = Date.now()): boolean {
+/** Whether today's line has shown. Storage that cannot be read means it has not. */
+export function alarmUpsellShownToday(now: number = Date.now()): boolean {
   const last = loadJson(ALARM_UPSELL_SHOWN_AT_KEY, 0, isNumber);
   // A clock set back past the last showing counts as a new day.
-  if (last > 0 && now >= last && now - last < DAY_MS) return false;
-  saveJson(ALARM_UPSELL_SHOWN_AT_KEY, now);
-  return true;
+  return last > 0 && now >= last && now - last < DAY_MS;
 }
 
 /** Nothing, or not answered yet by a Burrow service that will answer. */
@@ -71,24 +66,29 @@ export function networkOffOrUnknown(network: NetworkPolicyStoreState): boolean {
   return policy === null || policy.level === 'nothing';
 }
 
-/** The facts now; the standing may take one read of the Burrow service. */
-export async function currentAlarmUpsellFacts(sink: AlertSink): Promise<AlarmUpsellFacts> {
-  const standing = await readBurrowStanding();
-  return {
+/**
+ * The line a toggle that turned `sink` on earns, if today's has not shown and
+ * its preview is `stillShown` once decided, recording that it showed. The
+ * cheap answers come first, so a toggle that can earn nothing never asks the
+ * Burrow service where this machine stands.
+ */
+export async function takeAlarmUpsell(
+  sink: AlertSink,
+  stillShown: () => boolean = () => true,
+  now: number = Date.now(),
+): Promise<AlarmUpsell | null> {
+  const managedVoice = managedVoicePort() !== undefined;
+  const networkOff = networkOffOrUnknown(getNetworkPolicySnapshot());
+  if (networkOff || (sink === 'speech' && !managedVoice) || alarmUpsellShownToday(now)) return null;
+  const status = await readBurrowStatusOnce();
+  const upsell = chooseAlarmUpsell({
     sink,
-    membership: membershipOf(standing, voiceStatus()),
-    managedVoice: getPlatformOrNull()?.managedVoice !== undefined,
-    networkOff: networkOffOrUnknown(getNetworkPolicySnapshot()),
-    enrolled: standing?.enrolled ?? null,
-  };
-}
-
-/** The line for a toggle, if it turned its sink on, earns one, and today's has not shown. */
-export function takeAlarmUpsell(
-  turnedOn: boolean,
-  facts: AlarmUpsellFacts,
-  now?: number,
-): AlarmUpsell | null {
-  const upsell = turnedOn ? chooseAlarmUpsell(facts) : null;
-  return upsell && claimAlarmUpsell(now) ? upsell : null;
+    membership: membershipOf(status, managedVoicePort()?.status() ?? null),
+    managedVoice,
+    networkOff,
+    enrolled: status?.enrolled ?? null,
+  });
+  if (!upsell || !stillShown()) return null;
+  saveJson(ALARM_UPSELL_SHOWN_AT_KEY, now);
+  return upsell;
 }

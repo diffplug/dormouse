@@ -427,8 +427,7 @@ describe('Baseboard alarm upsell', () => {
 
   /**
    * A build whose Burrow service answers `status` — a Hosted one not signed in
-   * by default — with a managed-voice port unless `voice` is false (VS Code, a
-   * self-host build).
+   * by default — with a managed-voice port unless `voice` is false.
    */
   async function renderWithPlatform({ status = UNENROLLED_STATUS, voice = true, notEntitled = false } = {}) {
     const platform = await import('../lib/platform');
@@ -483,7 +482,6 @@ describe('Baseboard alarm upsell', () => {
     await toggle('speech');
     await toggle('speech');
     expect(line()).toBeNull();
-    setPushDevices({ status: 'no-burrow', devices: [] });
     await toggle('push');
     expect(line()).toBeNull();
   });
@@ -539,8 +537,7 @@ describe('Baseboard alarm upsell', () => {
     expect(openExternal).toHaveBeenCalledWith('https://dormouse.sh/hosted/?ref=upsell-voice#pricing');
   });
 
-  it('points VS Code at signing in for push, but offers it no voice', async () => {
-    setPushDevices({ status: 'no-burrow', devices: [] });
+  it('offers a build with no managed-voice port sign-in for push, and no voice line', async () => {
     await renderWithPlatform({ voice: false });
     await toggle('speech');
     expect(line()).toBeNull();
@@ -552,7 +549,6 @@ describe('Baseboard alarm upsell', () => {
   });
 
   it('points a self-host build at Settings → Network, never at Hosted', async () => {
-    setPushDevices({ status: 'no-burrow', devices: [] });
     await renderWithPlatform({ status: SELF_HOST_UNENROLLED_STATUS, voice: false });
     await toggle('push');
     expect(line()?.dataset.alarmUpsell).toBe('set-up-phone');

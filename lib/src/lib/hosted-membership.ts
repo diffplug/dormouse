@@ -1,12 +1,8 @@
 import { useCallback, useSyncExternalStore } from 'react';
 import { getPlatformOrNull } from './platform';
-import type { ManagedVoiceStatus } from './platform/managed-voice-types';
+import type { ManagedVoicePort, ManagedVoiceStatus } from './platform/managed-voice-types';
 import type { BurrowConsoleStatus } from '../host/remote/service-protocol';
-import {
-  burrowLink,
-  getBurrowStatusSnapshot,
-  subscribeToBurrowStatus,
-} from '../remote/burrow/burrow-status-store';
+import { getBurrowStatusSnapshot, subscribeToBurrowStatus } from '../remote/burrow/burrow-status-store';
 
 /**
  * This machine's standing with Dormouse Hosted (`docs/specs/alert.md` ->
@@ -23,64 +19,32 @@ import {
  */
 export type HostedMembership = 'member' | 'signed-out' | 'no-plan' | 'unavailable';
 
-export type StandingFields = Pick<BurrowConsoleStatus, 'relayMode' | 'enrolled' | 'connection'>;
-
 /** The standing a Burrow status and managed voice's status give. */
-export function membershipOf(status: StandingFields | null, voice: ManagedVoiceStatus | null): HostedMembership {
+export function membershipOf(
+  status: Pick<BurrowConsoleStatus, 'relayMode' | 'enrolled' | 'connection'> | null,
+  voice: ManagedVoiceStatus | null,
+): HostedMembership {
   if (!status || status.relayMode !== 'hosted') return 'unavailable';
   if (!status.enrolled || status.connection === 'removed') return 'signed-out';
   if (status.connection === 'not-entitled' || voice?.notEntitled === true) return 'no-plan';
   return 'member';
 }
 
-/** Managed voice's status now, `null` without a port or before its host answers. */
-export function voiceStatus(): ManagedVoiceStatus | null {
-  return getPlatformOrNull()?.managedVoice?.status() ?? null;
+/** Managed voice's port, which only a build that can play it carries. */
+export function managedVoicePort(): ManagedVoicePort | undefined {
+  return getPlatformOrNull()?.managedVoice;
 }
 
-/**
- * The Burrow service's standing now, for a caller outside React: the status
- * the Settings dialog's subscription holds, else one read of the service,
- * which publishes nothing. `null` without a service, or on any failure.
- */
-export async function readBurrowStanding(): Promise<StandingFields | null> {
-  const snapshot = getBurrowStatusSnapshot();
-  if (snapshot.kind === 'ready') return snapshot.status;
-  const link = burrowLink();
-  if (!link) return null;
-  try {
-    const status = (await link.command('status')) as Partial<StandingFields> | null;
-    const known =
-      !!status &&
-      typeof status.enrolled === 'boolean' &&
-      (status.relayMode === 'hosted' || status.relayMode === 'self-host') &&
-      typeof status.connection === 'string';
-    return known ? (status as StandingFields) : null;
-  } catch {
-    return null;
-  }
+/** The port's cached status; `null` without a port or before the host answers. */
+export function useManagedVoiceStatus(port: ManagedVoicePort | undefined): ManagedVoiceStatus | null {
+  const subscribe = useCallback((listener: () => void) => port?.subscribe(listener) ?? (() => {}), [port]);
+  const snapshot = useCallback(() => port?.status() ?? null, [port]);
+  return useSyncExternalStore(subscribe, snapshot);
 }
 
-/** The standing now, for a caller outside React. */
-export async function readHostedMembership(): Promise<HostedMembership> {
-  return membershipOf(await readBurrowStanding(), voiceStatus());
-}
-
-const ignore = () => () => {};
-const NO_STATUS = { kind: 'unsupported' } as const;
-
-/**
- * The standing, live: subscribing polls the Burrow service while mounted, as
- * Settings already does. Not `active`, it subscribes to nothing and answers
- * `unavailable`.
- */
-export function useHostedMembership(active = true): HostedMembership {
-  const burrow = useSyncExternalStore(
-    active ? subscribeToBurrowStatus : ignore,
-    active ? getBurrowStatusSnapshot : () => NO_STATUS,
-  );
-  const port = getPlatformOrNull()?.managedVoice;
-  const subscribeVoice = useCallback((listener: () => void) => port?.subscribe(listener) ?? (() => {}), [port]);
-  const voice = useSyncExternalStore(subscribeVoice, voiceStatus);
+/** The standing, live: subscribing polls the Burrow service while mounted, as Settings already does. */
+export function useHostedMembership(): HostedMembership {
+  const burrow = useSyncExternalStore(subscribeToBurrowStatus, getBurrowStatusSnapshot);
+  const voice = useManagedVoiceStatus(managedVoicePort());
   return membershipOf(burrow.kind === 'ready' ? burrow.status : null, voice);
 }

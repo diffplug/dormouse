@@ -3,7 +3,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 vi.mock('./platform', () => ({ getPlatform: vi.fn(), getPlatformOrNull: vi.fn() }));
 
 import { getPlatform, getPlatformOrNull } from './platform';
-import { membershipOf, readHostedMembership } from './hosted-membership';
+import { membershipOf } from './hosted-membership';
+import { readBurrowStatusOnce } from '../remote/burrow/burrow-status-store';
 import { makeStubManagedVoicePort } from './platform/test-ports';
 import type { PlatformAdapter } from './platform/types';
 import {
@@ -12,7 +13,6 @@ import {
   SELF_HOST_UNENROLLED_STATUS,
   UNENROLLED_STATUS,
 } from '../host/remote/test-burrow-link';
-import type { BurrowConsoleStatus } from '../host/remote/service-protocol';
 
 const HOSTED_MEMBER = enrolledStatus({ relayMode: 'hosted', relayOrigin: UNENROLLED_STATUS.relayOrigin });
 
@@ -52,25 +52,20 @@ describe('membershipOf', () => {
   });
 });
 
-describe('readHostedMembership', () => {
-  it('is unavailable before a platform, or without a Burrow service', async () => {
+describe('readBurrowStatusOnce', () => {
+  it('is null before a platform, without a Burrow service, or when the service cannot answer', async () => {
     withPlatform(null);
-    expect(await readHostedMembership()).toBe('unavailable');
+    expect(await readBurrowStatusOnce()).toBeNull();
     withPlatform({});
-    expect(await readHostedMembership()).toBe('unavailable');
-  });
-
-  it('asks the Burrow service once — VS Code included, which has no managed voice', async () => {
-    withPlatform({ burrow: makeStubBurrowLink({ status: UNENROLLED_STATUS }) });
-    expect(await readHostedMembership()).toBe('signed-out');
-    withPlatform({ burrow: makeStubBurrowLink({ status: HOSTED_MEMBER }) });
-    expect(await readHostedMembership()).toBe('member');
-  });
-
-  it('is unavailable when the service cannot answer, or answers a shape it does not know', async () => {
+    expect(await readBurrowStatusOnce()).toBeNull();
     withPlatform({ burrow: makeStubBurrowLink({ statusError: 'down' }) });
-    expect(await readHostedMembership()).toBe('unavailable');
-    withPlatform({ burrow: makeStubBurrowLink({ status: { relayMode: 'hosted' } as BurrowConsoleStatus }) });
-    expect(await readHostedMembership()).toBe('unavailable');
+    expect(await readBurrowStatusOnce()).toBeNull();
+  });
+
+  it('asks the Burrow service once, with or without a managed-voice port', async () => {
+    withPlatform({ burrow: makeStubBurrowLink({ status: UNENROLLED_STATUS }) });
+    expect(membershipOf(await readBurrowStatusOnce(), null)).toBe('signed-out');
+    withPlatform({ burrow: makeStubBurrowLink({ status: HOSTED_MEMBER }) });
+    expect(membershipOf(await readBurrowStatusOnce(), null)).toBe('member');
   });
 });

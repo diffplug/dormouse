@@ -1,7 +1,8 @@
-import { useCallback, useState, useSyncExternalStore } from 'react';
+import { useState, useSyncExternalStore } from 'react';
 import { INLINE_ACTION_CLASS, SELECT_CLASS, modalActionButton } from './design';
 import { ExternalTextLink } from './ExternalTextLink';
-import { HOSTED_PRICING_URL, HostedEnrollView, accountHost, accountPage } from './HostedSignIn';
+import { HostedEnrollView, HostedPlansLink, accountHost, accountPage } from './HostedSignIn';
+import { membershipOf, useManagedVoiceStatus } from '../lib/hosted-membership';
 import { DisconnectConfirm, removedCopy } from './RemoteControlSection';
 import { FIELD_LABEL, useBusyAction, useNetworkPolicy } from './remote-control-shared';
 import type { BurrowConsoleStatus } from '../host/remote/service-protocol';
@@ -34,6 +35,8 @@ export const MANAGED_VOICE_DISCLOSURE =
 
 /** What a member whose plan lapsed reads, where the relay socket or speak said so. */
 export const NO_PLAN_COPY = 'Your account has no Hosted plan, so alarms use your system voice.';
+/** Its twin for push, in the push group and the Baseboard preview's line. */
+export const NO_PUSH_PLAN_COPY = 'Your account has no Hosted plan, so no push is sent.';
 
 /**
  * Where Settings → Network is named from another topic: a link to it inside the
@@ -46,13 +49,6 @@ export function NetworkTopicLink({ onShow }: { onShow?: () => void }) {
       Network
     </button>
   );
-}
-
-/** The port's cached status; `null` without a port or before the host answers. */
-function useManagedVoiceStatus(port: ManagedVoicePort | undefined): ManagedVoiceStatus | null {
-  const subscribe = useCallback((listener: () => void) => port?.subscribe(listener) ?? (() => {}), [port]);
-  const snapshot = useCallback(() => port?.status() ?? null, [port]);
-  return useSyncExternalStore(subscribe, snapshot);
 }
 
 /** Whether this build offers managed voice at all: a Hosted desktop build's port. */
@@ -132,8 +128,10 @@ function SignedIn({ status, voice, port, signingInAgain, onSignInAgain }: {
   const busy = ownBusy || signingInAgain;
   const [confirming, setConfirming] = useState(false);
   const page = accountPage(status.accountOrigin);
-  const lapsed = status.connection === 'not-entitled' || voice?.notEntitled === true;
-  const removed = status.connection === 'removed';
+  // Enrolled, so signed out only by removal.
+  const membership = membershipOf(status, voice);
+  const lapsed = membership === 'no-plan';
+  const removed = membership === 'signed-out';
 
   const choose = (voiceId: string) =>
     void run(async () => {
@@ -147,7 +145,7 @@ function SignedIn({ status, voice, port, signingInAgain, onSignInAgain }: {
         <div className="text-error">{removedCopy(status)}</div>
       ) : lapsed ? (
         <div className="text-foreground">
-          {NO_PLAN_COPY} <ExternalTextLink href={HOSTED_PRICING_URL}>See Hosted plans</ExternalTextLink>
+          {NO_PLAN_COPY} <HostedPlansLink />
         </div>
       ) : (
         <div className="text-foreground">Signed in to Dormouse Hosted.</div>

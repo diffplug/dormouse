@@ -38,7 +38,7 @@ import {
 } from '../lib/terminal-registry';
 import { deriveDisplayedSurfaceLabel } from '../lib/session-label';
 import { subscribeToNetworkPolicy } from '../remote/burrow/network-policy-store';
-import { currentAlarmUpsellFacts, takeAlarmUpsell, type AlarmUpsell } from '../lib/alarm-upsell';
+import { takeAlarmUpsell, type AlarmUpsell } from '../lib/alarm-upsell';
 import type { TopicId } from './SettingsDialog';
 
 /** Shared by every baseboard-level button (DESIGN.md -> Navigation). */
@@ -150,7 +150,11 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
     sequence: number;
   } | null>(null);
   const previewSequence = useRef(0);
-  const closeSettingsPreview = useCallback(() => setSettingsPreview(null), []);
+  const closeSettingsPreview = useCallback(() => {
+    // An offer still being decided for the closed preview is then never shown, nor spent.
+    previewSequence.current++;
+    setSettingsPreview(null);
+  }, []);
   const toggleAlarm = (sink: AlertSink, anchor: HTMLElement) => {
     const turnedOn = sink === 'speech' ? !settings.speakEnabled : !settings.pushEnabled;
     const patch = sink === 'speech' ? { speakEnabled: turnedOn } : { pushEnabled: turnedOn };
@@ -159,18 +163,17 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
     const sequence = ++previewSequence.current;
     setSettingsPreview({ sink, anchor, upsell: null, sequence });
     if (!turnedOn) return;
-    // Membership may take one read of the Burrow service, so the line joins
+    // The offer may take one read of the Burrow service, so the line joins
     // the preview it was earned by, if that preview is still up.
-    void currentAlarmUpsellFacts(sink).then((facts) => {
-      if (previewSequence.current !== sequence) return;
-      const upsell = takeAlarmUpsell(turnedOn, facts);
-      if (upsell) setSettingsPreview((shown) => shown?.sequence === sequence ? { ...shown, upsell } : shown);
+    const stillShown = () => previewSequence.current === sequence;
+    void takeAlarmUpsell(sink, stillShown).then((upsell) => {
+      if (upsell) setSettingsPreview((shown) => shown && { ...shown, upsell });
     });
   };
   const showSettingsAt = useCallback((topic: TopicId) => {
-    setSettingsPreview(null);
+    closeSettingsPreview();
     setSettingsOpen({ dialog: 'application', topic });
-  }, []);
+  }, [closeSettingsPreview]);
 
   // Suppress command-mode key dispatch while the Settings dialog owns the
   // keyboard, so typing a timeout doesn't trigger pane shortcuts.

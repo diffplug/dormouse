@@ -297,6 +297,7 @@ function alarmUpsellStory(sink: 'speech' | 'push', upsell: string, parameters: R
 }
 
 const HOSTED_SIGNED_IN = enrolledStatus({ relayMode: 'hosted', relayOrigin: UNENROLLED_STATUS.relayOrigin });
+/** The push group's inert text in the preview; which line shows reads the Burrow's status. */
 const NO_BURROW_ENROLLED = { status: 'no-burrow', devices: [] };
 
 /** A Hosted build not signed in turns spoken alarms on. */
@@ -305,7 +306,7 @@ export const AlarmUpsellSignInVoice = alarmUpsellStory('speech', 'sign-in-voice'
   primedBurrow: { status: UNENROLLED_STATUS },
 });
 
-/** Not signed in, push on: VS Code too, which signs in through Remote control. */
+/** Not signed in, push on, in a build with no managed-voice port: Remote control signs it in. */
 export const AlarmUpsellSignInPush = alarmUpsellStory('push', 'sign-in-push', {
   primedBurrow: { status: UNENROLLED_STATUS },
   primedPushDevices: NO_BURROW_ENROLLED,

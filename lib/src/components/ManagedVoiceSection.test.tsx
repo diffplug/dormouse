@@ -18,8 +18,8 @@ import { DEFAULT_RELAY_ORIGIN } from '../host/relay-origin';
 import type { BurrowConsoleStatus } from '../host/remote/service-protocol';
 import { networkPolicyResult, nothingPolicy } from '../remote/network-policy';
 import { HOSTED_PRICING_URL, SIGN_IN_LABEL } from './HostedSignIn';
-import { MANAGED_VOICE_DISCLOSURE, ManagedVoiceSection, NO_PLAN_COPY } from './ManagedVoiceSection';
-import { AlarmSettingsSection, NO_PUSH_PLAN_COPY } from './SettingsDialog';
+import { MANAGED_VOICE_DISCLOSURE, ManagedVoiceSection, NO_PLAN_COPY, NO_PUSH_PLAN_COPY } from './ManagedVoiceSection';
+import { AlarmSettingsSection } from './SettingsDialog';
 import { resetPushDevices } from '../lib/push-devices';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;

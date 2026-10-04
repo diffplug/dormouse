@@ -2,9 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   ALARM_UPSELL_SHOWN_AT_KEY,
   chooseAlarmUpsell,
-  claimAlarmUpsell,
+  alarmUpsellShownToday,
   networkOffOrUnknown,
-  takeAlarmUpsell,
   type AlarmUpsellFacts,
 } from './alarm-upsell';
 import { installLocalStorageStub } from './test-local-storage';
@@ -25,7 +24,7 @@ describe('chooseAlarmUpsell', () => {
   it('points speech at signing in, or at the plans, only where managed voice can play', () => {
     expect(chooseAlarmUpsell(facts({}))).toBe('sign-in-voice');
     expect(chooseAlarmUpsell(facts({ membership: 'no-plan' }))).toBe('plans-voice');
-    // VS Code until it plays managed voice, and a self-host build.
+    // Any build whose adapter has no managed-voice port, a self-host one included.
     expect(chooseAlarmUpsell(facts({ managedVoice: false }))).toBeNull();
     expect(chooseAlarmUpsell(facts({ membership: 'unavailable' }))).toBeNull();
   });
@@ -38,7 +37,7 @@ describe('chooseAlarmUpsell', () => {
   it('points push at signing in when signed out, and at the plans when the plan lapsed', () => {
     const push = (overrides: Partial<AlarmUpsellFacts>) => chooseAlarmUpsell(facts({ sink: 'push', ...overrides }));
     expect(push({})).toBe('sign-in-push');
-    // VS Code signs in through Remote control: no managed voice needed.
+    // Push needs no managed-voice port: Remote control signs in anywhere.
     expect(push({ managedVoice: false })).toBe('sign-in-push');
     // Removed from the account: enrolled still, and signing in again is the fix.
     expect(push({ enrolled: true })).toBe('sign-in-push');
@@ -51,45 +50,34 @@ describe('chooseAlarmUpsell', () => {
   });
 });
 
-describe('claimAlarmUpsell', () => {
+describe('alarmUpsellShownToday', () => {
   const DAY = 24 * 60 * 60 * 1000;
   const now = 1_800_000_000_000;
 
   beforeEach(() => installLocalStorageStub());
   afterEach(() => vi.unstubAllGlobals());
 
-  it('allows one a day, across both toggles', () => {
-    expect(takeAlarmUpsell(true, facts({}), now)).toBe('sign-in-voice');
-    expect(takeAlarmUpsell(true, facts({ sink: 'push' }), now + 1000)).toBeNull();
-    expect(takeAlarmUpsell(true, facts({}), now + DAY - 1)).toBeNull();
-    expect(takeAlarmUpsell(true, facts({ sink: 'push' }), now + DAY)).toBe('sign-in-push');
-  });
-
-  it('spends nothing on turning off, or when no line is earned', () => {
-    expect(takeAlarmUpsell(false, facts({}), now)).toBeNull();
-    expect(takeAlarmUpsell(true, facts({ membership: 'member' }), now)).toBeNull();
-    expect(localStorage.getItem(ALARM_UPSELL_SHOWN_AT_KEY)).toBeNull();
-    expect(takeAlarmUpsell(true, facts({}), now)).toBe('sign-in-voice');
+  it('holds for a day after a showing', () => {
+    expect(alarmUpsellShownToday(now)).toBe(false);
+    localStorage.setItem(ALARM_UPSELL_SHOWN_AT_KEY, String(now));
+    expect(alarmUpsellShownToday(now + DAY - 1)).toBe(true);
+    expect(alarmUpsellShownToday(now + DAY)).toBe(false);
   });
 
   it('treats a clock set back past the last showing as a new day', () => {
-    expect(claimAlarmUpsell(now)).toBe(true);
-    expect(claimAlarmUpsell(now - 1000)).toBe(true);
+    localStorage.setItem(ALARM_UPSELL_SHOWN_AT_KEY, String(now));
+    expect(alarmUpsellShownToday(now - 1000)).toBe(false);
   });
 
-  it('shows when storage cannot be read or written', () => {
+  it('has not shown when storage cannot be read, or holds a malformed record', () => {
+    localStorage.setItem(ALARM_UPSELL_SHOWN_AT_KEY, 'soon');
+    expect(alarmUpsellShownToday(now)).toBe(false);
     vi.stubGlobal('localStorage', {
       getItem: () => { throw new Error('blocked'); },
       setItem: () => { throw new Error('blocked'); },
       removeItem: () => {},
     });
-    expect(claimAlarmUpsell(now)).toBe(true);
-    expect(claimAlarmUpsell(now)).toBe(true);
-  });
-
-  it('shows over a malformed record', () => {
-    localStorage.setItem(ALARM_UPSELL_SHOWN_AT_KEY, 'soon');
-    expect(claimAlarmUpsell(now)).toBe(true);
+    expect(alarmUpsellShownToday(now)).toBe(false);
   });
 });
 

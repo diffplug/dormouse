@@ -20,6 +20,14 @@ import { beginHostedEnrollment, cancelHostedEnrollment } from '../remote/burrow/
 /** Where the plans are; linked wherever an account turns out to have none. */
 export const HOSTED_PRICING_URL = hostedPageUrl('pricing');
 
+/** The words of every link to the plans. */
+export const PLANS_LABEL = 'See Hosted plans';
+
+/** The plans, linked wherever an account turns out to have none. */
+export function HostedPlansLink() {
+  return <ExternalTextLink href={HOSTED_PRICING_URL}>{PLANS_LABEL}</ExternalTextLink>;
+}
+
 /** The begin button's words, everywhere sign-in starts. */
 export const SIGN_IN_LABEL = 'Sign in to Dormouse Hosted';
 
@@ -101,7 +109,7 @@ export function HostedEnrollmentEnded({
       {ended.reason === 'failed' && ended.message ? <div className="mt-1 text-error">{ended.message}</div> : null}
       {ended.reason === 'not-entitled' ? (
         <div className="mt-1">
-          <ExternalTextLink href={HOSTED_PRICING_URL}>See Hosted plans</ExternalTextLink>
+          <HostedPlansLink />
         </div>
       ) : null}
       {page ? (
