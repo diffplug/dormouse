@@ -5,9 +5,9 @@ import { realpathSync } from "node:fs";
 import { vapidKeysFrom } from "./vapid.mjs";
 import { WORKERS, deployWorkers, fromStage, readConfigs } from "./workers.mjs";
 
-export function required(env, name) {
+export function required(env, name, section = "Provision PR previews") {
   if (!env[name])
-    throw new Error(`Missing ${name}; see hosted/README.md -> Provision PR previews`);
+    throw new Error(`Missing ${name}; see hosted/README.md -> ${section}`);
   return env[name];
 }
 

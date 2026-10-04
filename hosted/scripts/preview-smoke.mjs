@@ -74,6 +74,16 @@ export async function healthSmoke(origin, sha, fetcher = fetch) {
 }
 
 /**
+ * A relay or voice Worker reaches Postgres as its deployment binds it: its
+ * `/api/ready` runs a query only its own role's grants admit.
+ */
+export async function readySmoke(origin, fetcher = fetch) {
+  const response = await smokeRequest(fetcher, origin + "/api/ready", {});
+  await response.body?.cancel();
+  assert.equal(response.status, 200, `${origin} must reach Postgres through its Hyperdrive`);
+}
+
+/**
  * The relay answers a VAPID key from `/api/push/config`. Cloudflare exposes a
  * Worker secret's name and never its value, so preflight sees only that both
  * halves exist; a pair that does not match turns push off, and fails here.
@@ -292,10 +302,10 @@ async function retrying(limit, what, check, { retryMs, wait }) {
 }
 
 /**
- * The relay's smoke: its revision, then its push config and its one-time
- * rendezvous, each retried on its own up to `attempts`, `retryMs` apart, so a
- * passed revision never runs again and neither later check runs on a relay that
- * did not pass.
+ * The relay's smoke: its revision, then its readiness, its push config, and
+ * its one-time rendezvous, each retried on its own up to `attempts`, `retryMs`
+ * apart, so a passed check never runs again and no later check runs on a relay
+ * that did not pass.
  */
 export async function relaySmoke(
   origin,
@@ -310,13 +320,14 @@ export async function relaySmoke(
 ) {
   const retry = { retryMs, wait };
   await retrying(attempts, origin, () => healthSmoke(origin, sha, fetcher), retry);
+  await retrying(attempts, `${origin} ready`, () => readySmoke(origin, fetcher), retry);
   await retrying(attempts, `${origin} push`, () => pushConfigSmoke(origin, fetcher), retry);
   await retrying(attempts, `${origin} one-time`, () => oneTime(origin), retry);
 }
 
 /**
- * Every Worker's smoke: the account's auth boundary, the voice's revision, and
- * `relaySmoke` — never waiting on the account, so an account failure hides no
+ * Every Worker's smoke: the account's auth boundary, the voice's revision then
+ * readiness, and `relaySmoke` — never waiting on the account, so an account failure hides no
  * relay one. The three run concurrently, each retrying on its own up to its
  * `attempts` (one count for all, or `{ account, relay, voice }`), `retryMs`
  * apart. Every part settles before the smoke fails, and the failure names each
@@ -342,7 +353,10 @@ export async function smokeAll(
     retrying(limit("account"), account, () =>
       smoke(account, sha, fetcher, preview, providers), retry),
     relaySmoke(relay, sha, { fetcher, oneTime, attempts: limit("relay"), retryMs, wait }),
-    retrying(limit("voice"), voice, () => healthSmoke(voice, sha, fetcher), retry),
+    (async () => {
+      await retrying(limit("voice"), voice, () => healthSmoke(voice, sha, fetcher), retry);
+      await retrying(limit("voice"), `${voice} ready`, () => readySmoke(voice, fetcher), retry);
+    })(),
   ]);
   const failures = results.flatMap((result) =>
     result.status === "rejected" ? [result.reason] : [],
