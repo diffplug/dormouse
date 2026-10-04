@@ -1,5 +1,5 @@
 import { useCallback, useState, useSyncExternalStore } from 'react';
-import { INLINE_ACTION_CLASS, modalActionButton } from './design';
+import { INLINE_ACTION_CLASS, SELECT_CLASS, modalActionButton } from './design';
 import { ExternalTextLink } from './ExternalTextLink';
 import { HOSTED_PRICING_URL, HostedEnrollView, accountHost, accountPage } from './HostedSignIn';
 import { DisconnectConfirm, removedCopy } from './RemoteControlSection';
@@ -19,7 +19,6 @@ import {
 } from '../remote/burrow/burrow-status-store';
 
 const HINT = 'mt-1 text-sm leading-relaxed text-muted';
-const SELECT = 'min-w-0 rounded border border-input-border bg-input-bg p-1 text-sm text-foreground';
 
 const REFUSAL: Record<Exclude<ManagedVoiceConfigResult, { ok: true }>['reason'], string> = {
   'invalid-voice': 'That voice is not one Dormouse Hosted offers.',
@@ -163,7 +162,7 @@ function SignedIn({ status, voice, port, signingInAgain, onSignInAgain }: {
           <span className={FIELD_LABEL}>Voice</span>
           <select
             aria-label="Managed voice"
-            className={SELECT}
+            className={SELECT_CLASS}
             value={voice.voiceId}
             disabled={busy}
             onChange={(event) => choose(event.target.value)}

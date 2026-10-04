@@ -2781,6 +2781,8 @@ describe('Hosted enrollment', () => {
     const voice = { save: vi.fn(async (_token: string) => {}), clear: vi.fn(async () => {}) };
     hosted(undefined, { voiceCredential: voice });
     await service.start();
+    // Start found no enrollment, so it cleared what no sign-in holds.
+    voice.clear.mockClear();
     await command('beginHostedEnrollment', { label: 'Work laptop' });
     const answer = enrolledAnswer();
     polls.push({ ...answer, body: { ...answer.body, voiceToken } });
@@ -2795,6 +2797,13 @@ describe('Hosted enrollment', () => {
     await command('clearEnrollment');
     expect(voice.clear).toHaveBeenCalledOnce();
     expect(store.enrollment).toBeNull();
+  });
+
+  it('clears a voice token held with no enrollment at start', async () => {
+    const voice = { save: vi.fn(async (_token: string) => {}), clear: vi.fn(async () => {}) };
+    hosted(undefined, { voiceCredential: voice });
+    await service.start();
+    expect(voice.clear).toHaveBeenCalledOnce();
   });
 
   it('enrolls without managed voice when the answer carries no token of its shape', async () => {

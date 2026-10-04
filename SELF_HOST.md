@@ -215,7 +215,7 @@ The Relay has no account, no passkey, and no enrolled Burrow. Same sequence as `
 
 2. **The Burrow.** On this same machine, launch the build made with `DORMOUSE_RELAY_ORIGIN` (Prerequisites), open **Settings → Network** (the baseboard's Settings button), and choose **My Relay only**: a new install's default refuses enrollment (`docs/specs/remote-network.md` → "Policy"). While the offer is unspent, its card enrolls in one click; "Enroll with the setup password…" covers a spent offer or a Burrow on another machine (`docs/specs/relay.md` → "Remote control, in the Settings dialog"). Enrollment persists, so later launches connect on their own; the section then shows the Relay and its connection.
 
-   A Burrow that offers only "Enroll with hosted.dormouse.sh" is a stock build, not a Relay problem.
+   A Burrow that offers only "Sign in to Dormouse Hosted" is a stock build, not a Relay problem.
 
 3. **The phone, and only then the code.** On the phone, open `https://<laptop>.<tailnet>.ts.net` in Safari and confirm it leads with **Scan a setup code**. For push, add Pocket to the Home Screen and pair inside the installed app (`docs/specs/pocket-app.md` → Installable web app). **A setup code is live for five minutes**, so that first load — bundle, service worker, Home Screen install — must not happen inside the window. With the phone waiting on that screen, press **Set up a phone** in **Settings → Network**; scanning or pasting the code creates the passkey and signs them in, bound to this exact origin, with no password typed on the phone.
 

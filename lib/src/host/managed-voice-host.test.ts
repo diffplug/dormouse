@@ -171,6 +171,13 @@ describe('speak', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it('forgets a token Hosted no longer knows, so Settings asks for a fresh sign-in', async () => {
+    fetchMock.mockResolvedValue(new Response('{}', { status: 401 }));
+    expect(await host.handle({ op: 'speak', text: 'x' })).toEqual({ ok: false, reason: 'HTTP 401' });
+    expect(broadcasts.at(-1)).toEqual(idle(false));
+    expect(JSON.parse(await readFile(join(dir, MANAGED_VOICE_FILE), 'utf8')).token).toBeNull();
+  });
+
   it.each([400, 401, 403, 429, 502])('reports HTTP %i as a failure', async (status) => {
     fetchMock.mockResolvedValue(new Response(JSON.stringify({ message: 'no' }), { status }));
     expect(await host.handle({ op: 'speak', text: 'x' })).toEqual({ ok: false, reason: `HTTP ${status}` });
@@ -260,6 +267,23 @@ describe('speak', () => {
     fetchMock.mockImplementation(async () => audioResponse());
     expect(await host.handle({ op: 'speak', text: 'build finished' })).toMatchObject({ ok: true });
     expect(broadcasts.at(-1)).toEqual(idle(true));
+  });
+
+  it('lets an answer for a replaced token neither latch a refusal nor cache a clip', async () => {
+    const answers: Array<(response: Response) => void> = [];
+    fetchMock.mockImplementation(() => new Promise<Response>((resolve) => void answers.push(resolve)));
+    const refused = host.handle({ op: 'speak', text: 'build finished' });
+    const spoken = host.handle({ op: 'speak', text: 'tests failed' });
+    await vi.waitFor(() => expect(answers).toHaveLength(2));
+    // Signed in again while both are out.
+    await host.credential.save(`dmv_${'C'.repeat(43)}`);
+    answers[0]!(new Response('{}', { status: 403 }));
+    answers[1]!(audioResponse());
+    await Promise.all([refused, spoken]);
+    expect(broadcasts.at(-1)).toEqual(idle(true));
+    fetchMock.mockImplementation(async () => audioResponse());
+    await host.handle({ op: 'speak', text: 'tests failed' });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
   it('refuses empty or over-long text', async () => {

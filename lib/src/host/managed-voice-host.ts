@@ -192,6 +192,9 @@ export function createManagedVoiceHost(options: {
   }
 
   async function request(speakUrl: string, text: string): Promise<ManagedVoiceHostSpeakResult> {
+    // Before the read: a token change while it is out must not let this
+    // request's answer cache a clip or latch a refusal against the new token.
+    const generation = tokenGeneration;
     const config = await load().catch(() => null);
     if (!config) return { ok: false, reason: 'config unreadable' };
     if (!config.token) return { ok: false, reason: 'unconfigured' };
@@ -200,7 +203,6 @@ export function createManagedVoiceHost(options: {
     // A hit makes no request. Skipped while Hosted says the plan lapsed, so a
     // lapsed member hears the system voice and the next request can learn
     // the plan is back.
-    const generation = tokenGeneration;
     const cached = notEntitled ? undefined : clips.get(config.voiceId, trimmed);
     if (cached !== undefined) return { ok: true, audioBase64: cached };
 
@@ -222,7 +224,12 @@ export function createManagedVoiceHost(options: {
       if (!response.ok || mime !== 'audio/mpeg' || declared > MAX_AUDIO_BYTES) {
         // Hosted's `{ message }` body is never needed.
         await response.body?.cancel().catch(() => {});
-        if (response.status === 403) await noteEntitled(false);
+        if (generation === tokenGeneration) {
+          if (response.status === 403) await noteEntitled(false);
+          // Revoked or unknown — the computer removed at the account page:
+          // forgotten, so Settings asks for a fresh sign-in.
+          if (response.status === 401) await setToken(null).catch(() => {});
+        }
         return { ok: false, reason: response.ok ? `unexpected ${mime ?? 'body'}` : `HTTP ${response.status}` };
       }
       const reader = response.body?.getReader();
@@ -241,9 +248,11 @@ export function createManagedVoiceHost(options: {
       }
       if (size === 0) return { ok: false, reason: 'empty audio' };
       const audioBase64 = Buffer.concat(chunks, size).toString('base64');
-      await noteEntitled(true);
       // Only for the token that asked: a sign-out meanwhile cleared the cache.
-      if (generation === tokenGeneration) clips.set(config.voiceId, trimmed, audioBase64);
+      if (generation === tokenGeneration) {
+        await noteEntitled(true);
+        clips.set(config.voiceId, trimmed, audioBase64);
+      }
       return { ok: true, audioBase64 };
     } catch {
       return { ok: false, reason: signal.aborted ? 'timeout' : 'network' };

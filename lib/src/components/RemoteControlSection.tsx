@@ -12,8 +12,7 @@ import {
   useBusyAction,
 } from './remote-control-shared';
 import { ExpiringCode } from './ScannableCode';
-import { BurrowNameField, HostedEnrollView, HostedEnrollmentEnded, SIGN_IN_LABEL, accountHost } from './HostedSignIn';
-import { ACCOUNT_PAGE_PATH } from '../host/relay-origin';
+import { BurrowNameField, HostedEnrollView, HostedEnrollmentEnded, SIGN_IN_LABEL, accountHost, accountPage } from './HostedSignIn';
 import {
   relayRefuses,
   type BurrowConsoleStatus,
@@ -853,6 +852,7 @@ function EnrolledView({
    * rendered to nobody.
    */
   const reportInPanel = setup.state?.phase === 'finished';
+  const accountPageUrl = accountPage(accountOrigin);
 
   return (
     <div className="mt-1.5 text-sm leading-relaxed">
@@ -863,10 +863,10 @@ function EnrolledView({
           ? 'No phone has paired with this machine yet.'
           : `${pairedClients} paired ${pairedClients === 1 ? 'phone' : 'phones'}.`}
       </div>
-      {accountOrigin !== null ? (
+      {accountPageUrl ? (
         <div className="mt-0.5 text-muted">
-          <ExternalTextLink href={`${accountOrigin}${ACCOUNT_PAGE_PATH}`}>
-            Manage computers at {hostOf(accountOrigin)}
+          <ExternalTextLink href={accountPageUrl}>
+            Manage computers at {hostOf(accountPageUrl)}
           </ExternalTextLink>
         </div>
       ) : null}

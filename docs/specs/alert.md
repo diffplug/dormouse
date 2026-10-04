@@ -348,7 +348,7 @@ Every rule above holds for both engines.
 - **Must send exactly the `toSpokenText` label and the member's voice id**, never terminal content, a notification body, or a Session id.
 - **Never let the voice token reach a renderer**; the host adds it to the request (rationale), and only the Burrow service's sign-in writes it (`docs/specs/relay.md` -> "Burrow side"). Where it may go: `docs/specs/security-local.md` → "Persisted state".
 - **Must bound the host request** at `MANAGED_VOICE_REQUEST_TIMEOUT_MS` (inside `SPEECH_ENGINE_TIMEOUT_MS`, so a fallback still fits) and `MAX_AUDIO_BYTES`, accepting only `audio/mpeg`, and store only a token of the `dmv_…` shape and a voice of the curated set (`MANAGED_VOICES`).
-- **Must cache clips by voice and text in the host's memory, bounded in count and bytes, never persisted**; a hit makes no request, and a token change empties it. **A 403 latches `notEntitled`**, which bypasses the cache until a speak succeeds, so a lapsed member hears the system voice.
+- **Must cache clips by voice and text in the host's memory, bounded in count and bytes, never persisted**; a hit makes no request, and a token change empties it. **A 403 latches `notEntitled`**, which bypasses the cache until a speak succeeds, so a lapsed member hears the system voice; **a 401 forgets the token**. An answer to an older token changes nothing.
 
 Source of truth: `withFallback` in `lib/src/lib/speech-engine.ts`; `createManagedVoiceEngine` in `lib/src/lib/managed-voice-engine.ts`; `createManagedVoiceHost` in `lib/src/host/managed-voice-host.ts`; `MANAGED_VOICES` in `remote-lib-common/src/remote/managed-voice.ts`.
 

@@ -655,6 +655,11 @@ export class BurrowService {
     await this.#networkPolicy();
     const enrollment = await loadEnrollmentFor(this.#store, this.#relay.origin);
     if (enrollment) await this.#startBurrow(enrollment);
+    // A voice token is a sign-in's, and means nothing without its enrollment:
+    // one pasted before sign-in existed, or outliving a cleared enrollment.
+    else await this.#voiceCredential?.clear().catch((error: unknown) => {
+      console.warn('[burrow] could not clear the managed-voice token', error);
+    });
   }
 
   /** Stop the Burrow, end any one-time connection, and forget the connection-scoped state. */
