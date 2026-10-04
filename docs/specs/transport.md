@@ -180,7 +180,7 @@ Source of truth: `ManagedVoicePort` in `lib/src/lib/platform/managed-voice-types
 
 - **A Workspace with neither a published nor a boot-seeded session is dropped rather than written empty**, so a mid-boot snapshot cannot blank a restored Workspace.
 - **A Workspace's save compares against its own previous record** — seeded from disk until its Wall publishes — never the Window's active one, or a dead PTY's retained cwd and alert would come from the wrong Workspace.
-- **Reordering, renaming, or switching the active Workspace writes too.** **Always write `nameIsAuto`**; lacking it, only a `Workspace <n>` name is auto.
+- **Reordering, renaming, pinning, or switching the active Workspace writes too.** **Always write `nameIsAuto`**; lacking it, only a `Workspace <n>` name is auto. **Write `pinned` only when true**, in every record a Window builds.
 - **Must publish both Workspace records in one synchronous step with a Surface move's ownership change**, unprobed and behind one Window write (`pagehide` included), fencing saves collected before or during the change and retaining a departed Session's previous cwd/alert in the destination.
 - **VS Code does not use the collector** — each webview persists one bare `PersistedSession`, its single Workspace, through its own per-surface state API (`docs/specs/vscode.md`).
 
