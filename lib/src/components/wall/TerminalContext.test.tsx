@@ -29,7 +29,7 @@ beforeEach(() => {
   setPlatform(new FakePtyAdapter()); ensureResizeObserver();
   container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
   props = { title: 'pnpm dev', surfaceRef: 'surface:3', cwd: '~/repo', titleSources: [{ source: 'OSC 2', value: 'pnpm dev', note: 'Used' }], scan: { status: 'loaded', entries: [port(5173)] },
-    watchRule: 'pnpm', watching: false, todo: false, status: 'completed', command: 'git status', explorerLabel: 'Open in Finder', canExplore: true, browserProviders: ['agent-browser', 'playwright'], canIframe: true,
+    watchRule: 'pnpm', watching: false, todo: false, status: 'completed', command: 'git status', explorerLabel: 'Reveal in Finder', canExplore: true, browserProviders: ['agent-browser', 'playwright'], canIframe: true,
     onClose: vi.fn(), onCopyRef: vi.fn(), onCopyPath: vi.fn(), onExplore: vi.fn(), onWatch: vi.fn(), onTodo: vi.fn(), onPort: vi.fn(), onModify: vi.fn(async () => {}), onReset: vi.fn(async () => {}), onPromote: vi.fn(async () => {}),
     children: <div data-helper-terminal="helper"><textarea aria-label="Helper input" /></div> };
 });
@@ -52,13 +52,13 @@ it('keeps the opening action focused and Escape available while suppressing repe
   let finish!: () => void;
   props.onExplore = vi.fn(() => new Promise<void>(resolve => { finish = resolve; }));
   render();
-  const launch = button('Open in Finder');
+  const launch = button('Reveal in Finder');
   act(() => launch.focus());
-  await click('Open in Finder');
+  await click('Reveal in Finder');
   expect(launch.disabled).toBe(false);
   expect(launch.getAttribute('aria-disabled')).toBe('true');
   expect(document.activeElement).toBe(launch);
-  await click('Open in Finder');
+  await click('Reveal in Finder');
   expect(props.onExplore).toHaveBeenCalledOnce();
   act(() => launch.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
   expect(props.onClose).toHaveBeenCalledOnce();
@@ -89,7 +89,7 @@ it('keeps a pending port action focused, blocks repeats, and clears feedback on 
 
 it('uses labeled title, directory and port actions without a redundant heading', () => {
   render(); expect(container.querySelector('h1,h2,h3')).toBeNull();
-  for (const label of ['Explain this title', 'Copy absolute path', 'Open in Finder', 'Open in system browser', 'Open in iframe embed', 'Open in agent-browser screencast', 'Open in agent-browser popout']) expect(button(label)).not.toBeNull();
+  for (const label of ['Explain this title', 'Copy absolute path', 'Reveal in Finder', 'Open in system browser', 'Open in iframe embed', 'Open in agent-browser screencast', 'Open in agent-browser popout']) expect(button(label)).not.toBeNull();
   expect(container.querySelector('select')).toBeNull();
 });
 it.each(['system', 'iframe', 'agent-browser-screencast', 'agent-browser-popout'] as const)('dispatches the selected port to %s', async mode => {
@@ -202,16 +202,16 @@ it('drops the explorer label, and its busy text, before truncating the directory
   const resize = (next: number) => act(() => { width = next; observers.forEach(notify => notify()); });
   try {
     render();
-    expect(button('Open in Finder').textContent).toContain('open in Finder');
+    expect(button('Reveal in Finder').textContent).toContain('reveal in Finder');
     resize(250);
-    expect(button('Open in Finder').textContent).not.toContain('open in Finder');
+    expect(button('Reveal in Finder').textContent).not.toContain('reveal in Finder');
     props.onExplore = vi.fn(() => new Promise<void>(() => {}));
     render();
-    await click('Open in Finder');
-    expect(button('Open in Finder').getAttribute('aria-busy')).toBe('true');
-    expect(button('Open in Finder').textContent).toBe('');
+    await click('Reveal in Finder');
+    expect(button('Reveal in Finder').getAttribute('aria-busy')).toBe('true');
+    expect(button('Reveal in Finder').textContent).toBe('');
     resize(300);
-    expect(button('Open in Finder').textContent).toContain('open in Finder');
+    expect(button('Reveal in Finder').textContent).toContain('reveal in Finder');
   } finally { client.mockRestore(); offset.mockRestore(); vi.unstubAllGlobals(); }
 });
 

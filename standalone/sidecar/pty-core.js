@@ -1166,10 +1166,17 @@ async function getOpenPortsForPids(rootPids, runtime = {}) {
 
 module.exports.getOpenPortsForPids = getOpenPortsForPids;
 
-/** Directory validation belongs to context(); this only launches the native UI. */
+/**
+ * Directory validation belongs to context(); this only launches the native UI.
+ * The path is terminal-reported (OSC 7), so any program names it: the opener
+ * must show it and never run it.
+ */
 function openNativeDirectory(nativePath, done, runtime = {}) {
   const platform = runtime.platform || process.platform;
   if (platform === 'win32') {
+    // Explorer splits its command line at commas, and a file it is handed it
+    // runs, so `C:\x,\Users\me\evil.exe` would launch `\Users\me\evil.exe`.
+    if (nativePath.includes(',')) return done(new Error('Explorer cannot open a path containing a comma'));
     // Explorer is a shell UI: acknowledge process launch, not its lifetime or
     // exit status. Keep OS-level launch errors visible to the caller.
     const child = (runtime.spawn || spawn)('explorer.exe', [nativePath], { windowsHide: true, stdio: 'ignore' });
@@ -1177,8 +1184,13 @@ function openNativeDirectory(nativePath, done, runtime = {}) {
     const finish = error => { if (!settled) { settled = true; done(error); } };
     child.once('error', finish);
     child.once('spawn', () => { child.unref(); finish(null); });
+  } else if (platform === 'darwin') {
+    // `open` launches a bundle directory (`.app`, `.prefPane`, ...) instead of
+    // showing it; `-R` only ever reveals, for a plain folder too.
+    (runtime.execFile || execFile)('open', ['-R', nativePath], { windowsHide: true }, done);
   } else {
-    (runtime.execFile || execFile)(platform === 'darwin' ? 'open' : 'xdg-open', [nativePath], { windowsHide: true }, done);
+    // xdg-open hands any directory to the inode/directory handler.
+    (runtime.execFile || execFile)('xdg-open', [nativePath], { windowsHide: true }, done);
   }
 }
 module.exports.openNativeDirectory = openNativeDirectory;
