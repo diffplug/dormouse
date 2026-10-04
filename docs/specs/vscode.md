@@ -85,7 +85,7 @@ The colour push (`dormouse:themeColors`): `docs/specs/transport.md` → "Message
 
 ## CSP policy
 
-The policy starts from `default-src 'none'`; each grant below names what needs it. Every other grant is `webview.cspSource` alone (`style-src`, `font-src`, `img-src`, `connect-src`), plus `data: blob:` images and the loopback `ws:` below; nothing else.
+The policy starts from `default-src 'none'`; each grant below names what needs it. Every other grant is `webview.cspSource` alone (`style-src`, `font-src`, `img-src`, `connect-src`), plus `data: blob:` images, `media-src blob:` for managed voice's clip ("Managed voice"), and the loopback `ws:` below; nothing else.
 
 **`frame-src` is loopback-only**: `dor iframe` frames its target through the transparent proxy the extension host stands up, so the only origin ever embedded is loopback on an OS-assigned port (`docs/specs/dor-browser.md`).
 
@@ -174,6 +174,17 @@ Source of truth: `vscode-ext/src/burrow.ts`, `ensurePeerNet` in `vscode-ext/src/
 **One universal VSIX carries every platform's addon**: the build `pnpm deploy`s the extension's production closure for every os and cpu, verified against `pnpm-lock.yaml` (rationale), and stages the addon, its dependencies, and the platform packages `vscode-ext/package.json` declares under `optionalDependencies` into `dist/node_modules`. `node-pty`'s one package carries every prebuild. **Keep the addon `external` to `dist/extension.js`**, which the build asserts.
 
 Source of truth: `vscode-ext/scripts/stage-native-direct.mjs`; `initBurrow` in `vscode-ext/src/burrow.ts`; `createNativeDirectPeerFactory` in `lib/src/host/remote/native-direct-peer.ts`; `assertNothingInlined` in `scripts/assert-not-inlined.mjs`.
+
+## Managed voice
+
+**Every window's extension host runs its own managed-voice host**, the one standalone's sidecar runs (`docs/specs/alert.md` -> "Managed voice"), answering its own webviews (`docs/specs/transport.md` -> "Managed voice"); its clip cache and refusal latch are per window.
+
+- **The token and the chosen voice live in `SecretStorage`, each under a key of its own**: the token is a bearer credential, and the voice rides there only because `secrets.onDidChange` reaches every window. **Every window re-reads on that change**, dropping its clips and latch, so a sign-in or sign-out the broker's Burrow service writes reaches all of them.
+- **The broker's service hands a sign-in's token to its own window's host** (`docs/specs/relay.md` -> "Burrow side"); a window without the service never writes the token.
+- **A window asks the network policy at every speak**: the service in the broker, the stored policy elsewhere, a failed read counting as Nothing.
+- **The webview has the port only when the host says so**: `getWebviewHtml` sets `MANAGED_VOICE_GLOBAL` from the extension bundle's baked mode, which the webview bundle does not carry.
+
+Source of truth: `vscode-ext/src/managed-voice.ts`; `readInjectedManagedVoice` in `lib/src/lib/vscode-managed-voice-global.ts`; `VSCodeAdapter` in `lib/src/lib/platform/vscode-adapter.ts`; pinned by `vscode-ext/test/managed-voice.test.ts`.
 
 ## Peer surfaces
 

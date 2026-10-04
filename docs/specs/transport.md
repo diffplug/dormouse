@@ -154,17 +154,17 @@ OSC parsing and stripping for those rows: `docs/specs/terminal-escapes.md` → "
 
 ### Managed voice
 
-**Managed voice is one optional adapter member**, `managedVoice?: ManagedVoicePort`, present only in a Hosted standalone build (Tauri and the browser-dev harness); VS Code, Pocket, the website, and a self-host build omit it. Behavior: `docs/specs/alert.md` → "Managed voice".
+**Managed voice is one optional adapter member**, `managedVoice?: ManagedVoicePort`, present only in a Hosted desktop build — standalone (Tauri and the browser-dev harness) and VS Code (`docs/specs/vscode.md` -> "Managed voice"); Pocket, the website, and a self-host build omit it. Behavior: `docs/specs/alert.md` → "Managed voice".
 
-| Direction | Standalone carrier | Payload |
-| --- | --- | --- |
-| Webview → host | `managed_voice { payload }` → sidecar `voice:command` | op `status`, `configure` (the voice only), or `speak` |
-| Host → webview | sidecar `voice:result` → invoke result | that op's answer |
-| Host → every webview | sidecar `voice:status` | the status after each change: a saved voice, sign-in, sign-out, or the `notEntitled` latch |
+| Direction | Standalone carrier | VS Code carrier | Payload |
+| --- | --- | --- | --- |
+| Webview → host | `managed_voice { payload }` → sidecar `voice:command` | `voice:command { payload, requestId }` | op `status`, `configure` (the voice only), or `speak` |
+| Host → webview | sidecar `voice:result` → invoke result | `voice:result { requestId, result }` | that op's answer |
+| Host → every webview | sidecar `voice:status` | `voice:status { status }`, the window's webviews | the status after each change: a saved voice, sign-in, sign-out, or the `notEntitled` latch |
 
 **Every window caches the status**: it asks `status` once its `voice:status` listener is live, and again when the harness's event stream reconnects, then takes each broadcast; **an answer never overrides a broadcast that arrived after its request**.
 
-Source of truth: `ManagedVoicePort` in `lib/src/lib/platform/managed-voice-types.ts`; `createManagedVoicePort` in `standalone/src/managed-voice-port.ts`; `createManagedVoiceHost` in `lib/src/host/managed-voice-host.ts`.
+Source of truth: `ManagedVoicePort` in `lib/src/lib/platform/managed-voice-types.ts`; `createManagedVoicePortClient` in `lib/src/lib/platform/managed-voice-port.ts`; `createManagedVoiceHost` in `lib/src/host/managed-voice-host.ts`.
 
 ## Persisted session types
 
