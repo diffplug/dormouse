@@ -8,6 +8,7 @@
 import { act } from 'react';
 import { type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { SURFACE_CONTROL_METHODS } from 'dor/protocol';
 import { Wall } from '../Wall';
 import { setPlatform } from '../../lib/platform';
 import { FakePtyAdapter } from '../../lib/platform/fake-adapter';
@@ -136,6 +137,29 @@ describe('Run end', () => {
     const silenced = vi.spyOn(fake, 'alertSilenceRun');
     holdForHostInterrupt(ID);
     expect(silenced).toHaveBeenCalledWith(ID);
+  });
+
+  it('refuses its own pane a keyed invocation mid-replacement, then ends once that command finishes', async () => {
+    const storybook = { surfaceType: 'tool', command: 'pnpm storybook', cwd: '/repo', toolName: 'storybook', toolKey: ['storybook', '/repo'], toolRender: 'iframe', toolPort: 'announced' };
+    Object.assign(fake, { toolControl: vi.fn(async () => ({
+      status: 'ok', projectRoot: '/repo', path: '/repo/dormouse.yml', name: 'storybook', run: 'pnpm storybook', render: 'iframe', port: 'announced', key: ['/repo'], warnings: [],
+    })) });
+    await mountTool(storybook);
+    act(() => terminalRegistry.seedTerminalManualCwd(ID, '/repo'));
+    await run('pnpm storybook');
+    holdForHostInterrupt(ID);
+    await finish();
+    // Typed into the pane before the host's retype: `dor` is what its shell runs.
+    await run('dor tool storybook');
+    const respond = vi.fn();
+    await act(async () => window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
+      method: SURFACE_CONTROL_METHODS.tool, surfaceId: ID, params: { name: 'storybook', cwd: '/repo' }, signal: new AbortController().signal, respond,
+    } })));
+    await vi.waitFor(() => expect(respond).toHaveBeenCalled());
+    expect(respond.mock.calls[0][0]).toMatchObject({ ok: false, error: expect.stringContaining("is this tool's own pane") });
+    expect((await leaf()).component).toBe('tool');
+    await finish();
+    expect((await leaf()).component).toBe('terminal');
   });
 
   it('ends the run once the host gives up on a successor', async () => {
