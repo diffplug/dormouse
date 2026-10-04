@@ -1,7 +1,7 @@
 import { withClient } from "pgstencil/postgres";
 import { applyRuntimeRoles, RUNTIME_ROLES } from "../runtime-roles";
 
-type Worker = keyof typeof RUNTIME_ROLES;
+export type Worker = keyof typeof RUNTIME_ROLES;
 
 /** Roles are cluster-wide: these exist only in pgstencil's local test container. */
 const password = (role: string) => `${role}-local-only`;
@@ -17,15 +17,19 @@ function asWorker(url: string, worker: Worker) {
 
 /**
  * Applies `runtime-roles.sql` to the test database at `url` (the migration
- * role's), lets each role log in, and answers each Worker's URL as its role:
- * what its `HYPERDRIVE` binding carries, so every query a suite drives must
- * hold its grant.
+ * role's), lets each role log in, and answers the URL each Worker's
+ * `HYPERDRIVE` binding carries: the account's as the migration role, the
+ * relay's and voice's as their own, so every query a suite drives through
+ * them must hold its grant.
  */
-export async function workerDatabases(url: string): Promise<Record<Worker, string>> {
+export async function workerDatabases(url: string): Promise<Record<Worker | "account", string>> {
   await applyRuntimeRoles(url);
-  await withClient(url, async (client) => {
-    for (const role of Object.values(RUNTIME_ROLES))
-      await client.query(`ALTER ROLE ${role} LOGIN PASSWORD '${password(role)}'`);
-  });
-  return { relay: asWorker(url, "relay"), voice: asWorker(url, "voice") };
+  await withClient(url, (client) =>
+    client.query(
+      Object.values(RUNTIME_ROLES)
+        .map((role) => `ALTER ROLE ${role} LOGIN PASSWORD '${password(role)}';`)
+        .join("\n"),
+    ),
+  );
+  return { account: url, relay: asWorker(url, "relay"), voice: asWorker(url, "voice") };
 }

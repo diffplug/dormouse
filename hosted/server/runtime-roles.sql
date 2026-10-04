@@ -8,11 +8,12 @@
 -- 42501 under hosted/server/tests. Column lists narrow a grant to the columns
 -- the code reads or writes.
 --
--- Applied by `pnpm --filter dormouse-hosted db:roles` as the migration role,
--- after every migration, on each run: one transaction, idempotent. It creates
--- a missing role NOLOGIN and never alters an existing one, so LOGIN and a
--- password set out of band survive; it then revokes everything either role
--- holds in the schema and grants exactly the list. Never put a password here.
+-- Applied as the migration role by `db:migrate`, after every migration, and
+-- alone by `db:roles`: one transaction, idempotent. It creates a missing role
+-- NOLOGIN, refuses one holding a role attribute or membership, and never
+-- alters an existing one, so LOGIN and a password set out of band survive; it
+-- then revokes everything either role holds in the schema and grants exactly
+-- the list. Never put a password here.
 
 BEGIN;
 

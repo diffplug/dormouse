@@ -107,7 +107,6 @@ async function fixture(
   const context = await createTestContext({
     migrations: production === "preview" ? previewMigrations : migrations,
   });
-  // The account Worker connects as the migration role; the relay and voice as their own.
   const databases = await workerDatabases(context.database.url);
   const provider = await mockOAuthServer({
     betterAuth: true,
@@ -206,7 +205,7 @@ async function fixture(
               : testBundle)
         ).outputFiles![0].text,
         bindings,
-        database: context.database.url,
+        database: databases.account,
         // Vite's content-hashed build output, with the SPA fallback answering
         // every other path — including an unknown one under /assets/ — with the shell.
         assets: (request) =>

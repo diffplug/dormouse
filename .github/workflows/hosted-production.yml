@@ -88,10 +88,6 @@ jobs:
         run: pnpm --filter dormouse-hosted db:migrate && pnpm --filter dormouse-hosted db:validate
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-      - name: Apply the relay and voice Workers' Postgres roles and grants
-        run: pnpm --filter dormouse-hosted db:roles
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
       - name: Deploy the relay and verify its rendezvous, then the voice and account Workers
         run: node hosted/scripts/production.mjs deploy
         env:

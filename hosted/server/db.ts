@@ -16,7 +16,12 @@ const files = await readMigrations(
   process.argv.includes("--preview") ? previewMigrations : migrations,
 );
 const action = process.argv[2];
-if (action === "migrate") await migrate(url, files);
+// Every migration is followed by the roles file, so a new table is never
+// reachable before its grants are reasserted.
+if (action === "migrate") {
+  await migrate(url, files);
+  await applyRuntimeRoles(url);
+}
 else if (action === "validate") await validateMigrations(url, files);
 else if (action === "status") {
   const applied = new Set(await appliedMigrations(url));
