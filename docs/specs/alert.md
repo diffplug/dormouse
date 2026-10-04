@@ -255,7 +255,7 @@ Command-exit alerting consumes normalized semantic command events from `docs/spe
 - **Armed is derived, never stored**: a seen command running while the Session is not engaged — public `COMMAND_EXIT_ARMED`, published on every engagement edge.
 - When the same command finishes — **a prompt boundary with no finish event counts, with no exit code** — or the PTY exits before a finish event, **ring only when** it was seen and the Session is not engaged; engaged, the exit is held (Completion events). **Never gate the ring on how long the command ran** (rationale).
 - The `exit` source carries the `COMMAND_EXIT` notification: the summarized command and its exit code.
-- A different command start, Session destruction, or the host's own interrupt (a reap, restart, or preview retarget: `docs/specs/dor-tool.md`) clears the watch without ringing.
+- A different command start, Session destruction, or the host's own interrupt (a reap, restart, or preview retarget: `docs/specs/dor-tool.md` → Run end) clears the watch without ringing.
 
 Source of truth: `dispatchCompletion` in `lib/src/lib/alert-manager.ts`; `resolveCommandStart` in `lib/src/lib/terminal-state.ts`.
 
