@@ -43,6 +43,7 @@ vi.mock('../../remote/burrow/enrollment', async (importOriginal) => {
 });
 import {
   API_ROUTES,
+  MAX_PENDING_PAIRINGS,
   NOT_ENTITLED_ERROR,
   ONE_TIME_WS_ROUTES,
   ORIGIN_MISMATCH_ERROR,
@@ -59,6 +60,7 @@ import {
   type BurrowAclRecord,
 } from 'remote-lib-common';
 import type { BurrowEnrollment } from '../../remote/burrow/enrollment';
+import type { PendingPairing } from '../../remote/burrow/pairing-approval';
 import type {
   BurrowSurfaceProvider,
   SurfaceHold,
@@ -91,7 +93,13 @@ import {
 import { createEphemeralBurrowStateStore, type BurrowStateStore } from './burrow-state-store';
 import { DEFAULT_RELAY_ORIGIN } from '../relay-origin';
 import type { BurrowDirectPeerFactory } from './native-direct-peer';
-import { BurrowService, enrollVerificationUrl, suggestedBurrowLabel, type BurrowServiceOptions } from './service';
+import {
+  BurrowService,
+  enqueuePending,
+  enrollVerificationUrl,
+  suggestedBurrowLabel,
+  type BurrowServiceOptions,
+} from './service';
 import { ANYWHERE_ON, LAN, LOCAL_ON, RELAY_ON } from './test-burrow-link';
 import { idleOneTimeState, isOneTimeState } from './service-protocol';
 import type {
@@ -1071,6 +1079,35 @@ describe('status events', () => {
     createService();
     await command('enroll', { password: 'setup', label: 'Laptop' });
     expect(statusEvents()).toEqual([true]);
+  });
+});
+
+describe('enqueuePending', () => {
+  const request = (clientId: string): PendingPairing => ({ clientId }) as PendingPairing;
+  const full = () => {
+    const queue = new Map<string, PendingPairing>();
+    for (let i = 0; i < MAX_PENDING_PAIRINGS; i += 1) enqueuePending(queue, request(`c${i}`));
+    return queue;
+  };
+
+  it('holds the cap: one more evicts the oldest', () => {
+    const queue = full();
+    enqueuePending(queue, request('late'));
+    expect([...queue.keys()]).toEqual([
+      ...Array.from({ length: MAX_PENDING_PAIRINGS - 1 }, (_, i) => `c${i + 1}`),
+      'late',
+    ]);
+  });
+
+  it('coalesces a re-sent request before evicting, so it displaces only its own entry', () => {
+    const queue = full();
+    const resent = request('c3');
+    enqueuePending(queue, resent);
+    expect(queue.size).toBe(MAX_PENDING_PAIRINGS);
+    expect(queue.has('c0')).toBe(true);
+    // The newer request queues behind the ones already waiting.
+    expect([...queue.keys()].at(-1)).toBe('c3');
+    expect(queue.get('c3')).toBe(resent);
   });
 });
 
