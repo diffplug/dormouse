@@ -931,11 +931,24 @@ fn log_file() -> Option<&'static Mutex<File>> {
     .as_ref()
 }
 
+/// `dormouse.log` -> `dormouse.previous.log`: where startup keeps the last run's
+/// log, so a hang or forced restart leaves its evidence behind.
+fn previous_log_path(path: &Path) -> PathBuf {
+    let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    let name = match path.extension() {
+        Some(ext) => format!("{stem}.previous.{}", ext.to_string_lossy()),
+        None => format!("{stem}.previous"),
+    };
+    path.with_file_name(name)
+}
+
 fn init_log() {
     let path = log_path();
     if let Some(parent) = path.parent() {
         let _ = create_dir_all(parent);
     }
+    // Replaces the run before last; a missing log (first launch) is fine.
+    let _ = std::fs::rename(path, previous_log_path(path));
 
     if let Ok(mut file) = OpenOptions::new()
         .create(true)
@@ -5064,6 +5077,13 @@ mod tests {
         assert!(event.contains("answer_held_terminate(app, true)"));
         let cancel = source.split("fn quit_cancel(").nth(1).unwrap().split("\n}").next().unwrap();
         assert!(cancel.contains("answer_held_terminate(&app, false)"));
+    }
+
+    #[test]
+    fn the_previous_log_sits_beside_the_log() {
+        assert_eq!(super::previous_log_path(Path::new("/tmp/dormouse.log")), Path::new("/tmp/dormouse.previous.log"));
+        assert_eq!(super::previous_log_path(Path::new("/tmp/dormouse-dev.log")), Path::new("/tmp/dormouse-dev.previous.log"));
+        assert_eq!(super::previous_log_path(Path::new("/tmp/log")), Path::new("/tmp/log.previous"));
     }
 
     /// docs/specs/standalone.md -> "Restart".
