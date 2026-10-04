@@ -81,6 +81,12 @@
  *      the next scope or heading. A lead ending in `:` introduces a list and
  *      lists nothing itself. AGENTS.md -> "Named scopes": unbuilt work is a
  *      cut someone can stage, not an unowned wishlist.
+ *  19. A bolded clause of RESTATED_MIN_WORDS or more words in one spec appears
+ *      in no other spec's prose, bolded or not, once case, punctuation, and
+ *      markup are normalized away. AGENTS.md -> "What, not why": each rule
+ *      once in the corpus, every other mention a bare pointer — and where a
+ *      feature spec restates a security spec's `FAIL IF`, the `FAIL IF` keeps
+ *      it.
  *
  * scripts/spec-lint-selftest.mjs plants one defect per finding check and
  * requires this lint to go red.
@@ -652,6 +658,29 @@ for (const spec of foldCheckedFiles) {
     const next = lines.slice(i + 1).find((l) => l.trim() !== '');
     if (next === undefined || SCOPE_LEAD_RE.test(next) || /^#{1,6}\s/.test(next)) {
       problems.push(`${spec}:${i + 1}: ${lead[0]} lists no item before the next scope or heading`);
+    }
+  });
+}
+
+// --- Check 19: a bolded clause is stated in one spec only --------------------
+// Shorter bold runs are labels and slogans ("Must", "Known gaps"), which two
+// specs may share without either restating a rule.
+const RESTATED_MIN_WORDS = 6;
+const normalized = (text) => text.toLowerCase().replace(/[\p{P}\p{S}]/gu, ' ').replace(/\s+/g, ' ').trim();
+const specProse = new Map(foldCheckedFiles.map((f) => [f, ` ${normalized(proseLines(f).join('\n'))} `]));
+for (const spec of foldCheckedFiles) {
+  proseLines(spec).forEach((line, i) => {
+    for (const m of line.matchAll(/\*\*([^*\n]+)\*\*/g)) {
+      const clause = normalized(m[1]);
+      if (clause.split(' ').length < RESTATED_MIN_WORDS) continue;
+      for (const [other, prose] of specProse) {
+        if (other !== spec && prose.includes(` ${clause} `)) {
+          problems.push(
+            `${spec}:${i + 1}: bolded "${m[1]}" is restated in ${other} — keep it in the spec that owns it ` +
+            '(a `FAIL IF` over a feature spec) and point there (AGENTS.md -> "What, not why")',
+          );
+        }
+      }
     }
   });
 }

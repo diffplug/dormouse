@@ -80,7 +80,7 @@ Dormouse binds loopback HTTP and WebSocket servers to render its own surfaces.
 - **FAIL IF** the browser-dev bridge drops any of its four gates — the per-run token, the loopback `Host` check, the `application/json` content-type required of every non-GET, and the exact-origin `access-control-allow-origin` — or the first three stop running together before routing. It is dev-only, but dispatches `pty_spawn` with caller-supplied `shell`, `args`, `cwd` and `env` on a maintainer or CI-agent machine (rationale).
 - **FAIL IF** the browser-dev Vite server permits cross-origin reads of token-bearing modules or disables its DNS-rebinding Host check. Pinned by `standalone/scripts/dev-agent-browser.test.mjs` (rationale).
 
-**Cookie-authenticated iframe pages are unsupported.** Header stripping does not isolate `document.cookie`: proxied scripts still share the loopback hostname's non-HttpOnly cookies across grant ports. This remains a browser-pane isolation gap (rationale).
+Header stripping does not isolate `document.cookie`: proxied scripts still share the loopback hostname's non-HttpOnly cookies across grant ports, a known gap (`docs/specs/security.md` -> "Known gaps"; rationale).
 
 Source of truth: the shared rule and predicates — `isLoopbackHost`, `isOwnOrigin`, `isForeignOrigin` — in `lib/src/host/loopback-guard.ts`; `startDevVite` in `standalone/scripts/dev-run.mjs`.
 

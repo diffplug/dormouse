@@ -49,6 +49,12 @@ const SOURCE = 'standalone/scripts/clean-dev-sidecar.mjs'; // a comment appended
 // the citation check, which scans every tracked source file, this one included.
 const spec = (name) => ['docs/specs', name].join('/');
 
+// Check 19 needs a real bolded clause from another spec to restate in SPEC.
+const RESTATED = BY_HEADROOM.filter((f) => f !== SPEC)
+  .flatMap((f) => [...readRepoFile(f).matchAll(/\*\*([^*\n`]+)\*\*/g)].map((m) => m[1]))
+  .find((clause) => clause.trim().split(/\s+/).length >= 8);
+assert.ok(RESTATED, 'check 19 needs a bolded clause of eight or more words to restate');
+
 const EXTERNAL_SPEC = ['docs', 'compatible-agents.md'].join('/');
 const EXTERNAL_RATIONALE = EXTERNAL_SPEC.replace(/\.md$/, '.rationale.md');
 
@@ -75,6 +81,7 @@ const CASES = [
   ['check 18: a Future that opens without a named scope', SPEC, '\n## Future\n\nA wish nobody staged.\n'],
   ['check 18: a scope that lists nothing before the next heading', SPEC, '\n## Future\n\n**Scope: planted-empty**\n\n### Planted\n\nText.\n'],
   ['check 18: a scope whose lead introduces a list that is not there', SPEC, '\n## Future\n\n**Scope: planted-intro** — in order:\n\n**Scope: planted-next** — one item.\n'],
+  ['check 19: a bolded clause from another spec restated without its bold', SPEC, `\nAs elsewhere: ${RESTATED.toUpperCase()}\n`],
   ['check 9: a map beside a Source of truth pointer', SPEC, '\n## Files\n\n| Entrypoint | Role |\n|---|---|\n| `scripts/lint-kit.mjs` | Lint plumbing. |\n\nSource of truth: `countWords` in `scripts/spec-md.mjs`.\n'],
 ];
 

@@ -164,7 +164,7 @@ These are the two real gaps in the shipped model, and they are gaps rather than 
 
 **Revocation has no mechanism.** `BurrowAcl.revokeClient` / `revokePasskey` have no production callers, no relay frame carries a revocation, and there is no management UI. Revoking a lost phone means hand-editing JSON on the Burrow **and restarting it**: a running `BurrowRuntime` holds the ACL snapshot it started with, and the restart both reloads it and, by dropping the relay socket, ends every established session. Relay-pushed propagation is staged in `docs/specs/remote-security-model.md` -> "Future" (Revocation propagation).
 
-**There is no structured audit trail covering connects, attaches, denials, or writes.** The ACL records `approvedAt` / `approvedBy`; owner-local logs report some rejections. A self-hoster cannot answer "did anyone connect to my laptop last night".
+No structured audit trail exists (`docs/specs/security.md` -> "Known gaps"): the ACL records `approvedAt` / `approvedBy`; owner-local logs report some rejections. A self-hoster cannot answer "did anyone connect to my laptop last night".
 
 ## Auxiliary helpers
 
