@@ -145,7 +145,7 @@ Source of truth: the message schema in `vscode-ext/src/message-types.ts` (`Webvi
 | Host → webview | `terminal:clipboardOffer` | One decoded `OSC 52` write, offered to the copy editor (`docs/specs/mouse-and-clipboard.md` §4.6). |
 | Host → webview | `terminal:clientInput` | A remote Client wrote to this Session, which is no longer untouched (`docs/specs/layout.md` → "Kill confirmation"). |
 | Webview → host | `pty:spawn` | `options.alert`: a cold-restored pane's persisted alert state (`docs/specs/alert.md` → Public State). |
-| Webview → host | `dormouse:themeColors` (VS Code) / `pty_theme_colors` (standalone) | Resolved foreground / background / cursor, so the owner's parser can answer OSC 10/11/12. |
+| Webview → host | `dormouse:themeColors` (VS Code) / `pty_theme_colors` (standalone) | Resolved foreground / background / cursor, so the owner's parser can answer OSC 10/11/12. **A malformed push is dropped whole, never half-applied.** |
 | Host → webview | `pty:replay` | Buffered raw output; the webview's one-shot parse of it is the only re-parse there is. |
 
 **Every `alert*` verb is one `alert:command { command }` to the host** — in standalone the `alert_command` invoke, stamped with its window (`docs/specs/standalone.md` → "Alerts") — and **every answer one of the `alert:*` events, named and shaped alike in both hosts** (`AlertCommand` / `AlertEvents` in `lib/src/host/alert-protocol.ts`). **The host revalidates every command**, the settings blob that becomes its timers included (`normalizeAlertSettings`). An await's messages are `docs/specs/alert.md` → Await. **`sync` re-sends only the realm its named Sessions' `alert:state` and both stores' snapshots, ending nothing.**
