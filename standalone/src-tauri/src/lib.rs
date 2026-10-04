@@ -13,7 +13,7 @@ mod workspaces;
 mod macos_terminate;
 #[cfg(target_os = "macos")]
 mod macos_siri_affordance;
-use quit_state::{ArrivalQueue, CleanupGate, CloseMachine, QuitAction, QuitIntent, QuitMachine, QuitPhase};
+use quit_state::{ArrivalQueue, CleanupGate, CloseMachine, QuitAction, QuitIntent, QuitMachine};
 use routing::{Route, RouteView};
 use std::{
     collections::{HashMap, HashSet},
@@ -1657,36 +1657,18 @@ fn read_clipboard_text(
 }
 
 /// docs/specs/standalone.md §UI watchdog.
-#[derive(Default)]
-struct UiWatchdogState {
-    watchdog: Mutex<ui_watchdog::Watchdog>,
-    /// Per window, what its reloaded page shows; taken once.
-    notices: Mutex<HashMap<String, ui_watchdog::RestartNotice>>,
-}
+type UiWatchdog = Mutex<ui_watchdog::Watchdog>;
 
-/// The page booted and answers `dormouse://ui-probe` from now on.
+/// The page's first render committed: watch it from now on. Answers whether the
+/// watchdog restarted it, once.
 #[tauri::command]
-fn ui_watchdog_arm(window: tauri::Window, state: tauri::State<'_, UiWatchdogState>) {
-    guard(&state.watchdog).arm(window.label());
-}
-
-#[tauri::command]
-fn ui_probe_answer(window: tauri::Window, state: tauri::State<'_, UiWatchdogState>) {
-    guard(&state.watchdog).answered(window.label());
-}
-
-/// Whether the watchdog restarted this window's page, once.
-#[tauri::command]
-fn take_ui_restart_notice(
-    window: tauri::Window,
-    state: tauri::State<'_, UiWatchdogState>,
-) -> Option<ui_watchdog::RestartNotice> {
-    guard(&state.notices).remove(window.label())
+fn ui_watchdog_arm(window: tauri::Window, state: tauri::State<'_, UiWatchdog>) -> Option<ui_watchdog::RestartNotice> {
+    guard(&state).arm(window.label())
 }
 
 /// Probe every armed page each tick and restart the ones that stopped
-/// answering. A quit stands the watchdog down: it tears pages down on its own
-/// schedule, with its own watchdogs.
+/// answering. A quit, or a window's own close, tears its page down on its own
+/// schedule with its own watchdogs, so the count stands still meanwhile.
 #[cfg(target_os = "macos")]
 fn start_ui_watchdog(app: &AppHandle) {
     if !ui_watchdog::enabled(env::var("DORMOUSE_UI_WATCHDOG").ok().as_deref()) {
@@ -1695,6 +1677,8 @@ fn start_ui_watchdog(app: &AppHandle) {
     }
     let app = app.clone();
     std::thread::spawn(move || {
+        let watchdog = app.state::<UiWatchdog>();
+        let quit = app.state::<QuitState>();
         let mut last = (Instant::now(), SystemTime::now());
         loop {
             std::thread::sleep(ui_watchdog::TICK);
@@ -1704,26 +1688,26 @@ fn start_ui_watchdog(app: &AppHandle) {
             let stalled = now.0.saturating_duration_since(last.0) > ui_watchdog::STALL
                 || now.1.duration_since(last.1).map_or(true, |gap| gap > ui_watchdog::STALL);
             last = now;
-            let now = now.0;
-            let Some(state) = app.try_state::<UiWatchdogState>() else { continue };
-            let quitting = app.try_state::<QuitState>().is_some_and(|quit| {
-                let machine = guard(&quit.machine);
-                machine.approved || machine.phase != QuitPhase::Idle
-            });
+            let quitting = !guard(&quit.machine).idle();
             let (hung, due) = {
-                let mut watchdog = guard(&state.watchdog);
+                let mut watchdog = guard(&watchdog);
                 if stalled || quitting {
-                    watchdog.restart_counts();
-                    (Vec::new(), Vec::new())
-                } else {
-                    (watchdog.hung(now), watchdog.queue_probes())
+                    watchdog.restart_counts(|_| true);
+                    continue;
                 }
+                let close = guard(&quit.close);
+                watchdog.restart_counts(|label| close.active(label));
+                drop(close);
+                (watchdog.hung(now.0), watchdog.queue_probes())
             };
             if !hung.is_empty() {
-                restart_hung_webviews(&app, &hung);
+                // Off this thread: sampling takes seconds, and the other
+                // windows are still watched meanwhile.
+                let app = app.clone();
+                std::thread::spawn(move || restart_hung_webviews(&app, &hung));
             }
-            for label in due {
-                send_ui_probe(&app, label);
+            if !due.is_empty() {
+                send_ui_probes(&app, due);
             }
         }
     });
@@ -1732,16 +1716,28 @@ fn start_ui_watchdog(app: &AppHandle) {
 #[cfg(not(target_os = "macos"))]
 fn start_ui_watchdog(_app: &AppHandle) {}
 
-/// The page's clock starts when the main thread sends the probe, not when it
-/// is queued: a host main thread held by a native modal is not the page's hang.
+/// One main-thread hop for every due page. The clock starts there, not when
+/// the probe was queued: a main thread held by a native modal is not the
+/// page's hang. The probe is a script evaluation, whose completion runs only
+/// once the page's own main thread has run it, so a stuck page never answers.
 #[cfg(target_os = "macos")]
-fn send_ui_probe(app: &AppHandle, label: String) {
+fn send_ui_probes(app: &AppHandle, labels: Vec<String>) {
     let handle = app.clone();
     let _ = app.run_on_main_thread(move || {
-        let Some(state) = handle.try_state::<UiWatchdogState>() else { return };
-        let sent = guard(&state.watchdog).sent(&label, Instant::now());
-        if sent {
-            let _ = handle.emit_to(label.as_str(), "dormouse://ui-probe", ());
+        let watchdog = handle.state::<UiWatchdog>();
+        for label in labels {
+            let Some(window) = handle.get_webview_window(&label) else { continue };
+            if !guard(&watchdog).sent(&label, Instant::now()) {
+                continue;
+            }
+            let answer = handle.clone();
+            let _ = window.eval_with_callback("1", move |result| {
+                // Only a page that ran the script answers "1"; a failed
+                // evaluation (a killed or navigating page) answers "".
+                if result == "1" {
+                    guard(&answer.state::<UiWatchdog>()).answered(&label);
+                }
+            });
         }
     });
 }
@@ -1765,29 +1761,24 @@ fn restart_hung_webviews(app: &AppHandle, labels: &[String]) {
         }
     }
     let dir = state_root(app).ok().map(|root| root.join("hangs"));
+    let watchdog = app.state::<UiWatchdog>();
     for (pid, labels) in by_pid {
-        let sample = dir.as_ref().and_then(|dir| {
+        let sample_path = dir.as_ref().and_then(|dir| {
             create_dir_all(dir).ok()?;
             let path = dir.join(format!("{}-{pid}.sample.txt", log_timestamp()));
-            macos::sample(pid, &path).then_some(path)
+            macos::sample(pid, &path).then(|| path.display().to_string())
         });
         let killed = macos::kill(pid);
         append_log(format!(
             "[ui-watchdog] WebContent {pid} ({}): sample {}; {}",
             labels.join(", "),
-            sample.as_ref().map_or("not taken".to_string(), |path| path.display().to_string()),
+            sample_path.as_deref().unwrap_or("not taken"),
             if killed { "killed" } else { "kill failed" }
         ));
-        if !killed {
-            continue;
-        }
-        if let Some(state) = app.try_state::<UiWatchdogState>() {
-            let mut notices = guard(&state.notices);
+        if killed {
+            let mut watchdog = guard(&watchdog);
             for label in labels {
-                notices.insert(label, ui_watchdog::RestartNotice {
-                    seconds: ui_watchdog::HANG_AFTER.as_secs(),
-                    sample_path: sample.as_ref().map(|path| path.display().to_string()),
-                });
+                watchdog.restarted(label, ui_watchdog::RestartNotice { sample_path: sample_path.clone() });
             }
         }
     }
@@ -2904,8 +2895,7 @@ fn transfer_admitted(
     from: &str,
     to: &str,
 ) -> bool {
-    machine.phase == quit_state::QuitPhase::Idle
-        && !machine.approved
+    machine.idle()
         && !arrivals.blocks_transfer(from, to)
         && [from, to].into_iter().all(|label| !close.active(label) && !closing.contains(label))
 }
@@ -4283,8 +4273,8 @@ pub fn run() {
         // arms once it boots (§UI watchdog).
         .on_page_load(|webview, payload| {
             if payload.event() == tauri::webview::PageLoadEvent::Started {
-                if let Some(state) = webview.app_handle().try_state::<UiWatchdogState>() {
-                    guard(&state.watchdog).disarm(webview.label());
+                if let Some(watchdog) = webview.app_handle().try_state::<UiWatchdog>() {
+                    guard(&watchdog).disarm(webview.label());
                 }
             }
         })
@@ -4341,9 +4331,8 @@ pub fn run() {
                 // run off-thread behind the approved-exit gate.
                 WindowEvent::Destroyed => {
                     let label = window.label().to_string();
-                    if let Some(state) = app.try_state::<UiWatchdogState>() {
-                        guard(&state.watchdog).disarm(&label);
-                        guard(&state.notices).remove(&label);
+                    if let Some(watchdog) = app.try_state::<UiWatchdog>() {
+                        guard(&watchdog).forget(&label);
                     }
                     let lost = if let Some(state) = app.try_state::<WindowState>() {
                         // Drop label-keyed ownership synchronously; only the
@@ -4426,7 +4415,7 @@ pub fn run() {
             // Quit-interception state (docs/specs/standalone.md §Quit flow).
             app.manage(QuitState::default());
 
-            app.manage(UiWatchdogState::default());
+            app.manage(UiWatchdog::default());
             start_ui_watchdog(app.handle());
 
             // A crash between a snapshot's temp write and its rename leaves a
@@ -4543,8 +4532,6 @@ pub fn run() {
             save_session,
             browser_request,
             ui_watchdog_arm,
-            ui_probe_answer,
-            take_ui_restart_notice,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Dormouse")

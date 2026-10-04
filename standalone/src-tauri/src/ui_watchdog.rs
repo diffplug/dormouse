@@ -2,9 +2,9 @@
 //! page stops answering is restarted onto the live sidecar.
 //!
 //! `Watchdog` is pure over its own state, like `routing`; `lib.rs` holds the
-//! lock, sends the probes, and calls `recover` with what `hung` returns.
+//! lock, sends the probes, and restarts what `hung` returns.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::time::{Duration, Instant};
 
 /// A page this long without answering a probe is hung.
@@ -29,22 +29,40 @@ enum Probe {
     Sent(Instant),
 }
 
+/// What a restarted window's page shows once it boots again.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestartNotice {
+    /// The `sample` of the hung process, when one was taken.
+    pub sample_path: Option<String>,
+}
+
 #[derive(Debug, Default)]
 pub struct Watchdog {
     /// Armed windows only: a window is absent until its page reports it booted.
-    windows: HashMap<String, Probe>,
+    windows: BTreeMap<String, Probe>,
+    /// Restarted windows whose reloaded page has not armed yet.
+    notices: HashMap<String, RestartNotice>,
 }
 
 impl Watchdog {
-    /// The page booted and listens for probes.
-    pub fn arm(&mut self, label: &str) {
+    /// The page booted and is watched from now on; answers its restart notice,
+    /// once.
+    pub fn arm(&mut self, label: &str) -> Option<RestartNotice> {
         self.windows.insert(label.to_string(), Probe::Idle);
+        self.notices.remove(label)
     }
 
-    /// The page is going away (a navigation, a reload, a closed window): its
-    /// next realm arms again once it boots.
+    /// The page is going away (a navigation or a reload): its next realm arms
+    /// again once it boots.
     pub fn disarm(&mut self, label: &str) {
         self.windows.remove(label);
+    }
+
+    /// The window is gone.
+    pub fn forget(&mut self, label: &str) {
+        self.windows.remove(label);
+        self.notices.remove(label);
     }
 
     pub fn answered(&mut self, label: &str) {
@@ -55,19 +73,18 @@ impl Watchdog {
 
     /// The windows due a probe, now marked queued.
     pub fn queue_probes(&mut self) -> Vec<String> {
-        let mut due: Vec<String> = Vec::new();
-        for (label, probe) in &mut self.windows {
-            if *probe == Probe::Idle {
+        self.windows
+            .iter_mut()
+            .filter(|(_, probe)| **probe == Probe::Idle)
+            .map(|(label, probe)| {
                 *probe = Probe::Queued;
-                due.push(label.clone());
-            }
-        }
-        due.sort();
-        due
+                label.clone()
+            })
+            .collect()
     }
 
     /// The main thread sent the probe it was handed; false when it was dropped
-    /// meanwhile (answered by a stale probe, disarmed, or restarted).
+    /// meanwhile (a stall, a disarm, or a restart).
     pub fn sent(&mut self, label: &str, at: Instant) -> bool {
         match self.windows.get_mut(label) {
             Some(probe) if *probe == Probe::Queued => {
@@ -78,27 +95,32 @@ impl Watchdog {
         }
     }
 
-    /// Start every window's count over: the silence was not theirs.
-    pub fn restart_counts(&mut self) {
-        for probe in self.windows.values_mut() {
-            *probe = Probe::Idle;
+    /// Start these windows' counts over: their silence is not theirs.
+    pub fn restart_counts(&mut self, held: impl Fn(&str) -> bool) {
+        for (label, probe) in &mut self.windows {
+            if held(label) {
+                *probe = Probe::Idle;
+            }
         }
     }
 
     /// The windows silent for `HANG_AFTER`, disarmed: each is restarted once,
     /// and arms again from its reloaded page.
     pub fn hung(&mut self, now: Instant) -> Vec<String> {
-        let mut hung: Vec<String> = self
-            .windows
-            .iter()
-            .filter(|(_, probe)| matches!(probe, Probe::Sent(at) if now.saturating_duration_since(*at) >= HANG_AFTER))
-            .map(|(label, _)| label.clone())
-            .collect();
-        hung.sort();
-        for label in &hung {
-            self.windows.remove(label);
-        }
+        let mut hung = Vec::new();
+        self.windows.retain(|label, probe| match probe {
+            Probe::Sent(at) if now.saturating_duration_since(*at) >= HANG_AFTER => {
+                hung.push(label.clone());
+                false
+            }
+            _ => true,
+        });
         hung
+    }
+
+    /// The window's page was restarted: its successor shows `notice`.
+    pub fn restarted(&mut self, label: String, notice: RestartNotice) {
+        self.notices.insert(label, notice);
     }
 }
 
@@ -110,15 +132,6 @@ pub fn enabled(env: Option<&str>) -> bool {
         Some("0") => false,
         _ => !cfg!(debug_assertions),
     }
-}
-
-/// What a restarted window's page shows once it boots again.
-#[derive(Debug, Clone, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RestartNotice {
-    pub seconds: u64,
-    /// The `sample` of the hung process, when one was taken.
-    pub sample_path: Option<String>,
 }
 
 #[cfg(target_os = "macos")]
@@ -135,6 +148,7 @@ pub mod macos {
     /// The WebContent process behind `label`'s webview, through WKWebView's
     /// `_webProcessIdentifier` (no public API names it). None when the window
     /// is gone, the selector is missing, or the main thread did not answer.
+    /// Never call it from the main thread, which it waits on.
     pub fn web_process_id(app: &AppHandle, label: &str) -> Option<i32> {
         let window = app.get_webview_window(label)?;
         let (tx, rx) = mpsc::channel();
@@ -246,13 +260,14 @@ mod tests {
     }
 
     #[test]
-    fn an_answer_starts_the_count_over() {
+    fn only_the_silent_window_is_hung_and_an_answer_starts_the_count_over() {
         let mut watchdog = Watchdog::default();
         watchdog.arm("main");
+        watchdog.arm("ws-1");
         let t0 = Instant::now();
         probed(&mut watchdog, t0);
         watchdog.answered("main");
-        assert!(watchdog.hung(t0 + HANG_AFTER).is_empty());
+        assert_eq!(watchdog.hung(t0 + HANG_AFTER), ["ws-1"]);
         let t1 = t0 + HANG_AFTER;
         assert_eq!(probed(&mut watchdog, t1), ["main"]);
         assert!(watchdog.hung(t1 + HANG_AFTER - Duration::from_millis(1)).is_empty());
@@ -271,16 +286,16 @@ mod tests {
     }
 
     #[test]
-    fn a_host_stall_starts_every_count_over() {
+    fn restarting_counts_spares_only_the_held_windows() {
         let mut watchdog = Watchdog::default();
         watchdog.arm("main");
         watchdog.arm("ws-1");
         let t0 = Instant::now();
         probed(&mut watchdog, t0);
-        watchdog.restart_counts();
-        assert!(!watchdog.sent("main", t0), "a probe from before the stall no longer counts");
-        assert!(watchdog.hung(t0 + HANG_AFTER).is_empty());
-        assert_eq!(watchdog.queue_probes(), ["main", "ws-1"]);
+        watchdog.restart_counts(|label| label == "ws-1");
+        assert!(!watchdog.sent("ws-1", t0), "a probe from before the hold no longer counts");
+        assert_eq!(watchdog.hung(t0 + HANG_AFTER), ["main"]);
+        assert_eq!(watchdog.queue_probes(), ["ws-1"]);
     }
 
     #[test]
@@ -296,15 +311,15 @@ mod tests {
     }
 
     #[test]
-    fn only_the_silent_window_is_hung() {
+    fn a_restart_notice_reaches_the_next_arm_once_unless_the_window_is_gone() {
+        let notice = RestartNotice { sample_path: Some("/tmp/s.txt".into()) };
         let mut watchdog = Watchdog::default();
-        watchdog.arm("main");
-        watchdog.arm("ws-1");
-        let t0 = Instant::now();
-        probed(&mut watchdog, t0);
-        watchdog.answered("main");
-        assert_eq!(watchdog.hung(t0 + HANG_AFTER), ["ws-1"]);
-        assert_eq!(watchdog.queue_probes(), ["main"]);
+        watchdog.restarted("main".into(), notice.clone());
+        assert_eq!(watchdog.arm("main"), Some(notice.clone()));
+        assert_eq!(watchdog.arm("main"), None);
+        watchdog.restarted("ws-1".into(), notice);
+        watchdog.forget("ws-1");
+        assert_eq!(watchdog.arm("ws-1"), None);
     }
 
     #[test]

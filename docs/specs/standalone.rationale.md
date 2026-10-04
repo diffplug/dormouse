@@ -153,7 +153,7 @@ Arbitrating fixed the dialog and left the vote: a quit meeting a *committed* clo
 
 **Why sample, then kill.** The sample is the only evidence a release hang leaves, and only while the process lives. `_webProcessIdentifier` is private WKWebView API (present on macOS 27, checked with `respondsToSelector:` before use); no public API names the process.
 
-**Why a listener, not a heartbeat.** A page-side timer is throttled when a window is hidden, and a host-side `evaluateJavaScript` probe is not. The probe's clock starts on the host main thread, because a native modal there delays delivery, not the page.
+**Why a script evaluation.** A page-side timer is throttled when a window is hidden, and a host-side `evaluateJavaScript` is not; its completion handler is one round trip, where an event plus an `invoke` answer was two. The probe's clock starts on the host main thread, because a native modal there delays delivery, not the page. A window minimized for three minutes was never restarted (2026-10-03).
 
 **Why 5 s.** Chosen 2026-10-03 over 30 s: the legitimate long stalls — the restore, first render, a reload — happen before the page arms, and a restart costs only state that lives in the webview alone.
 

@@ -15,7 +15,7 @@ import { UpdateBanner } from "./UpdateBanner";
 import { UpdateDebugModal } from "./UpdateDebugModal";
 import { WorkspaceTeardownModalHost } from "./WorkspaceTeardownModal";
 import { AppBar } from "./AppBar";
-import { UiRestartBanner, armUiWatchdog } from "./ui-watchdog";
+import { UiRestartBanner, UiWatchdogArm } from "./ui-watchdog";
 import {
   startUpdateCheck,
   useUpdateState,
@@ -175,6 +175,7 @@ async function bootstrap() {
   createRoot(document.getElementById("root")!).render(
     <StrictMode>
       <AppBar />
+      {!BROWSER_DEV_HOST && <UiWatchdogArm />}
       <App
         initialPlans={initialPlans}
         baseboardNotice={<><UiRestartBanner /><ConnectedUpdateBanner /></>}
@@ -184,9 +185,6 @@ async function bootstrap() {
       />
     </StrictMode>,
   );
-  // Strictly after the restore and first render (docs/specs/standalone.md →
-  // "UI watchdog").
-  void armUiWatchdog();
 }
 
 void bootstrap().catch((error: unknown) => {
