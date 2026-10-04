@@ -435,12 +435,17 @@ export interface BurrowEnrollPollRequest {
  * redemption is single-use. `redeemed` answers every later poll of that code
  * until the approval expires: an earlier poll enrolled `burrowId`, whose answer
  * never reached this one, and which the account must remove.
+ *
+ * `enrolled` also carries the signed-in desktop's managed-voice token, minted
+ * with the Burrow and revoked with it (`docs/specs/hosted.md` -> "Managed
+ * voice"). The Burrow holds it to `isManagedVoiceToken` and enrolls without
+ * one that fails, so an approval is never stranded over it.
  */
 export type BurrowEnrollPollResponse =
   | { status: 'pending' }
   | { status: 'expired' }
   | { status: 'redeemed'; burrowId: string }
-  | { status: 'enrolled'; enrollment: BurrowEnrollResponse };
+  | { status: 'enrolled'; enrollment: BurrowEnrollResponse; voiceToken: string };
 
 /**
  * A poll answer of a known status, `redeemed` naming a routing-id-shaped

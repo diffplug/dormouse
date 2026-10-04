@@ -31,6 +31,7 @@ import {
   type EnrollmentStatic,
 } from '../../remote/burrow/enrollment';
 import type { BurrowSurfaceProvider } from '../../remote/burrow/burrow-surface-provider';
+import type { ManagedVoiceCredential } from '../managed-voice-host';
 import { burrowFetch, describingFetchFailures, probeBurrowStanding } from '../../remote/burrow/burrow-fetch';
 import type { PendingPairing } from '../../remote/burrow/pairing-approval';
 import {
@@ -161,6 +162,13 @@ export interface BurrowServiceOptions {
   readOffer?: () => Promise<EnrollmentOffer | null>;
   /** This machine's interfaces, for `networkPolicy`; injected by the tests. */
   listInterfaces?: () => NetworkInterfaceInfo[];
+  /**
+   * Where a Hosted sign-in keeps the managed-voice token its redemption
+   * carries, and what sign-out clears (`docs/specs/hosted.md` -> "Managed
+   * voice"): the standalone sidecar's managed-voice host. Absent where the
+   * host has no managed voice (VS Code), which drops the token.
+   */
+  voiceCredential?: ManagedVoiceCredential;
 }
 
 /**
@@ -490,6 +498,7 @@ export class BurrowService {
   readonly #now: () => number;
   readonly #readOffer: () => Promise<EnrollmentOffer | null>;
   readonly #listInterfaces: () => NetworkInterfaceInfo[];
+  readonly #voiceCredential: ManagedVoiceCredential | undefined;
 
   #burrow: BurrowRuntime | null = null;
   /**
@@ -611,6 +620,7 @@ export class BurrowService {
     this.#now = options.now ?? (() => Date.now());
     this.#readOffer = options.readOffer ?? (() => readEnrollmentOffer());
     this.#listInterfaces = options.listInterfaces ?? listNetworkInterfaces;
+    this.#voiceCredential = options.voiceCredential;
   }
 
   /**
@@ -976,7 +986,7 @@ export class BurrowService {
     );
     // Held whatever happened while the poll was out: see the method.
     if (answer.status === 'enrolled') {
-      await this.#redeemHostedEnrollment(run, answer.enrollment);
+      await this.#redeemHostedEnrollment(run, answer.enrollment, answer.voiceToken);
       return;
     }
     if (this.#enrollRun !== run) return;
@@ -1027,7 +1037,11 @@ export class BurrowService {
    * the Burrow the account must remove (a console warning once disposed,
    * there being nothing left to show it).
    */
-  async #redeemHostedEnrollment(run: HostedEnrollmentRun, enrollment: BurrowEnrollment): Promise<void> {
+  async #redeemHostedEnrollment(
+    run: HostedEnrollmentRun,
+    enrollment: BurrowEnrollment,
+    voiceToken: string | null,
+  ): Promise<void> {
     if (this.#enrollRun === run) {
       if (run.timer) clearTimeout(run.timer);
       run.timer = null;
@@ -1046,11 +1060,16 @@ export class BurrowService {
             `This computer was already enrolled as Burrow ${this.#enrollment.burrowId} when another code was approved.`,
           );
         }
-        await this.#adoptEnrollment(enrollment, undefined, () => {
-          saved = true;
-          // Retain the persisted identity even if startup's ACL read fails.
-          this.#enrollment = enrollment;
-        });
+        try {
+          await this.#adoptEnrollment(enrollment, undefined, () => {
+            saved = true;
+            // Retain the persisted identity even if startup's ACL read fails.
+            this.#enrollment = enrollment;
+          });
+        } finally {
+          // Signed in once the enrollment is saved, whether or not it started.
+          if (saved && voiceToken !== null) await this.#saveVoiceCredential(voiceToken);
+        }
       });
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
@@ -1174,7 +1193,20 @@ export class BurrowService {
     this.#stopBurrow();
     this.#enrollment = null;
     this.#emitStatus();
+    // Signing out of Hosted: the enrollment's managed voice goes with it. The
+    // account keeps both until the computer is removed there
+    // (`docs/specs/hosted.md` -> "Managed voice").
+    await this.#voiceCredential?.clear().catch((error: unknown) => {
+      console.warn('[burrow] could not clear the managed-voice token', error);
+    });
     return {};
+  }
+
+  /** Keep a sign-in's voice token where managed voice reads it; a failure leaves voice unconfigured. */
+  async #saveVoiceCredential(token: string): Promise<void> {
+    await this.#voiceCredential?.save(token).catch((error: unknown) => {
+      console.warn('[burrow] could not save the managed-voice token', error);
+    });
   }
 
   /**

@@ -60,6 +60,7 @@ import { allowed } from "./one-time";
 import { ENROLLMENT_TTL_MS } from "./policy-constants";
 import { relayRoom } from "./relay-room-contract";
 import { relayPushRoutes } from "./relay-push";
+import { mintVoiceToken } from "./voice-token";
 import {
   OWNER_COLUMNS,
   database,
@@ -507,6 +508,9 @@ export function relayApiRoutes(app: Hono<{ Bindings: RelayEnv }>) {
       if (!owner.entitled) return c.json({ error: NOT_ENTITLED_ERROR }, 403);
       const burrowId = randomBase64Url(E2E_ID_BYTE_LENGTH);
       const burrowToken = randomBase64Url(RELAY_BEARER_BYTE_LENGTH);
+      // The signed-in desktop's managed voice, minted with its Burrow and
+      // revoked with it (docs/specs/hosted.md -> "Managed voice").
+      const voiceToken = mintVoiceToken();
       const outcome = await locked(db, `burrows:${owner.userId}`, async () => {
         const {
           rows: [{ enrolled }],
@@ -517,8 +521,9 @@ export function relayApiRoutes(app: Hono<{ Bindings: RelayEnv }>) {
         // A full account keeps the approval, so a poll after a removal enrolls.
         if (enrolled >= MAX_ENROLLED_BURROWS) return "full";
         // Single-use: the approval is marked redeemed in the statement that
-        // enrolls its Burrow, owned by exactly its approver, so two polls
-        // cannot mint two; the marked row stays until it expires.
+        // enrolls its Burrow, owned by exactly its approver, and mints its
+        // voice token, so two polls cannot mint two; the marked row stays
+        // until it expires.
         const { rowCount } = await db.query(
           `WITH spent AS (
             UPDATE dormouse_relay_enrollment_approvals
@@ -526,10 +531,14 @@ export function relayApiRoutes(app: Hono<{ Bindings: RelayEnv }>) {
             WHERE "userCode" = $1 AND "userId" = $2 AND "expiresAt" > ${LOCKED_NOW}
               AND "redeemedAt" IS NULL
             RETURNING "userId"
+          ), enrolled AS (
+            INSERT INTO dormouse_relay_burrows ("burrowId", "userId", "tokenHash")
+            SELECT $3, "userId", $4 FROM spent
+            RETURNING "burrowId", "userId"
           )
-          INSERT INTO dormouse_relay_burrows ("burrowId", "userId", "tokenHash")
-          SELECT $3, "userId", $4 FROM spent`,
-          [userCode, owner.userId, burrowId, digest(burrowToken)],
+          INSERT INTO dormouse_voice_tokens ("userId", hash, "burrowId")
+          SELECT "userId", $5, "burrowId" FROM enrolled`,
+          [userCode, owner.userId, burrowId, digest(burrowToken), digest(voiceToken)],
         );
         if (rowCount) return "enrolled";
         // Lost to a poll that redeemed it while this one waited on the lock,
@@ -561,6 +570,7 @@ export function relayApiRoutes(app: Hono<{ Bindings: RelayEnv }>) {
         // The Burrow enforces `origin`/`rpId` as its ConnectionPolicy; Hosted
         // demands presence, not verification, so no `requireUserVerification`.
         enrollment: { burrowId, burrowToken, origin: c.env.APP_ORIGIN, rpId: rpIdOf(c.env) },
+        voiceToken,
       });
     });
   });

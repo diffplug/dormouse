@@ -760,6 +760,8 @@ test("managed voice: only the verified admin mints, speaks, and revokes", async 
     { text: "x".repeat(201), voiceId },
     { ...hi, voiceId: "../v1/voices" },
     { ...hi, voiceId: "x".repeat(65) },
+    // Well-formed, but no voice of the curated set.
+    { ...hi, voiceId: "AZnzlk1XvdvUeBnXmlld" },
   ])
     expect((await admin.speak(token, body)).status).toBe(400);
   for (const bad of [undefined, "dmv_unknown", "dmv_" + "A".repeat(43)])

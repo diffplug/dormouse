@@ -4,150 +4,146 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { setPlatform } from '../lib/platform';
+import { getPlatform, setPlatform } from '../lib/platform';
 import { FakePtyAdapter } from '../lib/platform/fake-adapter';
-import type { ManagedVoiceConfigUpdate, ManagedVoicePort, ManagedVoiceStatus } from '../lib/platform/managed-voice-types';
-import { ManagedVoiceSection } from './ManagedVoiceSection';
+import { MANAGED_VOICES } from '../lib/platform/managed-voice-types';
+import { makeStubManagedVoicePort } from '../lib/platform/test-ports';
+import {
+  UNENROLLED_STATUS,
+  enrolledStatus,
+  makeStubBurrowLink,
+  type PrimedBurrow,
+} from '../host/remote/test-burrow-link';
+import { DEFAULT_RELAY_ORIGIN } from '../host/relay-origin';
+import type { BurrowConsoleStatus } from '../host/remote/service-protocol';
+import { networkPolicyResult, nothingPolicy } from '../remote/network-policy';
+import { HOSTED_PRICING_URL, SIGN_IN_LABEL } from './HostedSignIn';
+import { MANAGED_VOICE_DISCLOSURE, ManagedVoiceSection, NO_PLAN_COPY } from './ManagedVoiceSection';
 import { AlarmSettingsSection } from './SettingsDialog';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
-const TOKEN = `dmv_${'B'.repeat(43)}`;
 let container: HTMLDivElement;
 let root: Root;
-let stored: { token: string | null; voiceId: string };
-let updates: ManagedVoiceConfigUpdate[];
-
-/** The host's cached status, updated and announced on every saved edit. */
-function makePort(offerSetup = true): ManagedVoicePort {
-  const snapshot = (): ManagedVoiceStatus => ({ configured: stored.token !== null, voiceId: stored.voiceId });
-  let status = snapshot();
-  const listeners = new Set<() => void>();
-  return {
-    offerSetup,
-    status: () => status,
-    subscribe: (listener) => {
-      listeners.add(listener);
-      return () => void listeners.delete(listener);
-    },
-    configure: async (update) => {
-      updates.push(update);
-      if ('token' in update) {
-        if (update.token !== null && !update.token?.startsWith('dmv_')) return { ok: false, reason: 'invalid-token' };
-        stored.token = update.token ?? null;
-      }
-      if (update.voiceId) stored.voiceId = update.voiceId;
-      status = snapshot();
-      for (const listener of listeners) listener();
-      return { ok: true, ...status };
-    },
-    speak: vi.fn(),
-  };
-}
 
 const text = () => container.textContent ?? '';
-const button = (label: string) => [...container.querySelectorAll('button')].find(b => b.textContent === label)!;
-const input = (type: string) => container.querySelector<HTMLInputElement>(`input[type="${type}"]`)!;
+const button = (label: string) =>
+  [...container.querySelectorAll('button')].find((b) => b.textContent?.trim() === label);
 
-function type(el: HTMLInputElement, value: string) {
-  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
-  setter.call(el, value);
-  el.dispatchEvent(new Event('input', { bubbles: true }));
-}
+/** A Hosted build signed in: the Burrow enrolled with Hosted and connected. */
+const SIGNED_IN: BurrowConsoleStatus = enrolledStatus({
+  relayOrigin: DEFAULT_RELAY_ORIGIN,
+  relayMode: 'hosted',
+  accountOrigin: 'https://hosted.dormouse.sh',
+});
 
-async function render(adapter: FakePtyAdapter) {
+/** Render with a managed-voice port and a Burrow service, recording every command it hears. */
+async function render(
+  primed: PrimedBurrow,
+  voice = makeStubManagedVoicePort(true),
+  onShowNetwork?: () => void,
+) {
+  const link = makeStubBurrowLink(primed);
+  const command = vi.spyOn(link, 'command');
+  const adapter = Object.assign(new FakePtyAdapter(), { managedVoice: voice, burrow: link });
   setPlatform(adapter);
-  await act(async () => root.render(<ManagedVoiceSection />));
+  await act(async () => root.render(<ManagedVoiceSection onShowNetwork={onShowNetwork} />));
   await act(async () => {});
+  return { command, voice };
 }
 
 beforeEach(() => {
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
-  stored = { token: null, voiceId: 'defaultVoice' };
-  updates = [];
 });
 
 afterEach(async () => {
+  // Unmounting drops the stores' last subscriber, which resets them.
   await act(async () => root.unmount());
   container.remove();
 });
 
 describe('ManagedVoiceSection', () => {
-  it('renders nothing where the host has no managed voice', async () => {
-    await render(new FakePtyAdapter());
+  it('renders nothing where the build has no managed voice', async () => {
+    setPlatform(new FakePtyAdapter());
+    await act(async () => root.render(<ManagedVoiceSection />));
     expect(container.innerHTML).toBe('');
   });
 
-  it('stays hidden on a public build until a token is configured', async () => {
-    await render(Object.assign(new FakePtyAdapter(), { managedVoice: makePort(false) }));
-    expect(container.innerHTML).toBe('');
+  it('states what leaves the machine, then signs in with the suggested name, no paste field', async () => {
+    const { command } = await render({ status: UNENROLLED_STATUS }, makeStubManagedVoicePort(false));
+    expect(text()).toContain(MANAGED_VOICE_DISCLOSURE);
+    expect(text()).toContain('no deletion time is guaranteed');
+    expect(container.querySelector('input')).toBeNull();
+
+    await act(async () => button(SIGN_IN_LABEL)!.click());
+    expect(command).toHaveBeenCalledWith('beginHostedEnrollment', { label: UNENROLLED_STATUS.suggestedLabel });
   });
 
-  it('shows on a public build once a token is configured', async () => {
-    stored.token = TOKEN;
-    await render(Object.assign(new FakePtyAdapter(), { managedVoice: makePort(false) }));
-    expect(text()).toContain('Voice token configured.');
-    await act(async () => button('Clear token').click());
-    await act(async () => {});
-    // Cleared on a public build: the section goes away with the token.
-    expect(container.innerHTML).toBe('');
+  it('under Nothing, explains and points at Network rather than signing in', async () => {
+    const onShowNetwork = vi.fn();
+    const { command } = await render(
+      { status: UNENROLLED_STATUS, network: networkPolicyResult(nothingPolicy(), 'hosted', []) },
+      makeStubManagedVoicePort(false),
+      onShowNetwork,
+    );
+    expect(text()).toContain('Choose Local networks or Anywhere there to sign in.');
+    expect(button(SIGN_IN_LABEL)).toBeUndefined();
+    await act(async () => button('Network')!.click());
+    expect(onShowNetwork).toHaveBeenCalledOnce();
+    expect(command).not.toHaveBeenCalledWith('beginHostedEnrollment', expect.anything());
   });
 
-  it('states what is sent before a token is configured, and never echoes the token back', async () => {
-    const adapter = Object.assign(new FakePtyAdapter(), { managedVoice: makePort() });
-    await render(adapter);
-    expect(text()).toContain('Only the spoken pane label and voice id are sent to voice.dormouse.sh');
-    expect(text()).toContain("ElevenLabs' copy is usually deleted within seconds");
-
-    await act(async () => type(input('password'), TOKEN));
-    await act(async () => button('Use managed voice').click());
-    await act(async () => {});
-
-    expect(updates).toEqual([{ token: TOKEN }]);
-    expect(text()).toContain('Voice token configured.');
-    expect(container.innerHTML).not.toContain(TOKEN);
-    expect(container.querySelector('input[type="password"]')).toBeNull();
+  it('signed in, picks a voice from the curated set', async () => {
+    const { voice } = await render({ status: SIGNED_IN });
+    expect(text()).toContain('Signed in to Dormouse Hosted.');
+    const select = container.querySelector<HTMLSelectElement>('select[aria-label="Managed voice"]')!;
+    expect([...select.options].map((option) => option.value)).toEqual(MANAGED_VOICES.map((v) => v.id));
+    const configure = vi.spyOn(voice, 'configure');
+    await act(async () => {
+      select.value = MANAGED_VOICES[2]!.id;
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    expect(configure).toHaveBeenCalledWith({ voiceId: MANAGED_VOICES[2]!.id });
   });
 
-  it('shows the refusal for a malformed token', async () => {
-    await render(Object.assign(new FakePtyAdapter(), { managedVoice: makePort() }));
-    await act(async () => type(input('password'), 'sk-nope'));
-    await act(async () => button('Use managed voice').click());
-    await act(async () => {});
-    expect(text()).toContain('That is not a voice token');
+  it.each([
+    ['the relay socket', { status: { ...SIGNED_IN, connection: 'not-entitled' as const } }, false],
+    ['speak', { status: SIGNED_IN }, true],
+  ])('says the account has no plan when %s refuses it', async (_by, primed, notEntitled) => {
+    await render(primed, makeStubManagedVoicePort(true, notEntitled));
+    expect(text()).toContain(NO_PLAN_COPY);
+    const openExternal = vi.fn();
+    Object.assign(getPlatform(), { openExternal });
+    await act(async () => button('See Hosted plans')!.click());
+    expect(openExternal).toHaveBeenCalledWith(HOSTED_PRICING_URL);
   });
 
-  it('clears a configured token', async () => {
-    stored.token = TOKEN;
-    await render(Object.assign(new FakePtyAdapter(), { managedVoice: makePort() }));
-    await act(async () => button('Clear token').click());
-    await act(async () => {});
-    expect(updates).toEqual([{ token: null }]);
-    expect(input('password')).toBeTruthy();
+  it('asks a computer signed in before managed voice to sign in again', async () => {
+    await render({ status: SIGNED_IN }, makeStubManagedVoicePort(false));
+    expect(text()).toContain('Sign out and sign in again to use it.');
+    expect(container.querySelector('select')).toBeNull();
   });
 
-  it('commits the voice id on Enter, not per keystroke', async () => {
-    await render(Object.assign(new FakePtyAdapter(), { managedVoice: makePort() }));
-    const field = container.querySelector<HTMLInputElement>('input:not([type])')!;
-    expect(field.value).toBe('defaultVoice');
-    await act(async () => type(field, 'other1'));
-    expect(updates).toEqual([]);
-    await act(async () => field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
-    await act(async () => {});
-    expect(updates).toEqual([{ voiceId: 'other1' }]);
+  it('signs out after confirming, which is the Burrow’s local Disconnect', async () => {
+    const { command } = await render({ status: SIGNED_IN });
+    expect(text()).toContain('Remove this computer at hosted.dormouse.sh');
+    await act(async () => button('Sign out')!.click());
+    expect(text()).toContain('Remote control signs out too');
+    expect(command).not.toHaveBeenCalledWith('clearEnrollment');
+    await act(async () => button('Sign out')!.click());
+    expect(command).toHaveBeenCalledWith('clearEnrollment');
   });
 });
 
 describe('the spoken-alarm copy', () => {
   it.each([
-    ['no port', undefined, 'Get managed ElevenLabs voices.'],
-    ['a public build with no token', false, 'Get managed ElevenLabs voices.'],
-    ['a port that offers setup', true, 'Uses managed voice while a voice token is saved'],
-  ])('with %s', async (_label, offerSetup, copy) => {
+    ['no port', false, 'Get managed ElevenLabs voices.'],
+    ['a Hosted build’s port', true, 'Uses managed voice while this computer is signed in to Dormouse Hosted'],
+  ])('with %s', async (_label, port, copy) => {
     const adapter = new FakePtyAdapter();
-    setPlatform(offerSetup === undefined ? adapter : Object.assign(adapter, { managedVoice: makePort(offerSetup) }));
+    setPlatform(port ? Object.assign(adapter, { managedVoice: makeStubManagedVoicePort(false) }) : adapter);
     await act(async () => root.render(<AlarmSettingsSection sink="speech" />));
     expect(text()).toContain(copy);
   });

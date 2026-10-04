@@ -1,26 +1,35 @@
 /**
  * Managed voice shapes shared by the webview and the Node host module
- * (`docs/specs/transport.md` -> "Managed voice"). Dependency-free so
- * `lib/src/host/` can import it without the browser-typed `platform/types` graph.
+ * (`docs/specs/transport.md` -> "Managed voice"). Free of the browser-typed
+ * `platform/types` graph so `lib/src/host/` can import it; the curated voice
+ * set is `remote-lib-common`'s, which the voice Worker checks against too.
  */
 
-/** ElevenLabs premade "Rachel"; the Settings voice id field may override it. */
-export const DEFAULT_MANAGED_VOICE_ID = '21m00Tcm4TlvDq8ikWAM';
+export { DEFAULT_MANAGED_VOICE_ID, MANAGED_VOICES, type ManagedVoice } from 'remote-lib-common';
 
 export interface ManagedVoiceStatus {
+  /** A voice token is held: this desktop signed in to Dormouse Hosted with managed voice. */
   configured: boolean;
+  /** The member default, always one of `MANAGED_VOICES`. */
   voiceId: string;
+  /**
+   * Hosted refused the held token as not entitled (403), and nothing has
+   * spoken since. Memory only: a restart learns it again at the next speak.
+   */
+  notEntitled: boolean;
 }
 
-/** `token: null` clears it; an absent key leaves that field alone. */
+/**
+ * What the webview may change: the default voice. **Never the token**, which
+ * only the Burrow service's sign-in writes and sign-out clears.
+ */
 export interface ManagedVoiceConfigUpdate {
-  token?: string | null;
-  voiceId?: string;
+  voiceId: string;
 }
 
 export type ManagedVoiceConfigResult =
   | ({ ok: true } & ManagedVoiceStatus)
-  | { ok: false; reason: 'invalid-token' | 'invalid-voice' | 'unavailable' };
+  | { ok: false; reason: 'invalid-voice' | 'unavailable' };
 
 /** The host's `speak` answer on the wire: `audio/mpeg` as base64. */
 export type ManagedVoiceHostSpeakResult =
@@ -33,8 +42,6 @@ export type ManagedVoiceSpeakResult =
   | { ok: false; reason: string };
 
 export interface ManagedVoicePort {
-  /** Show the Settings setup even with no token saved (dev builds). */
-  offerSetup: boolean;
   /** The host's last broadcast status; `null` until the first arrives. */
   status(): ManagedVoiceStatus | null;
   /** Called after every change to `status()`. */

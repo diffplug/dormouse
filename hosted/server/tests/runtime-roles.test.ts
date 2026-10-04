@@ -87,6 +87,9 @@ const EXPECTED: Record<Worker, string[]> = {
     "dormouse_relay_push_subscriptions: DELETE, INSERT, SELECT",
     "dormouse_relay_sessions: DELETE, INSERT, SELECT",
     "dormouse_relay_setup_tokens: DELETE, INSERT, SELECT",
+    "dormouse_voice_tokens.burrowId: INSERT",
+    "dormouse_voice_tokens.hash: INSERT",
+    "dormouse_voice_tokens.userId: INSERT",
     "schema public: USAGE",
     "user.email: SELECT",
     "user.emailVerified: SELECT",
@@ -124,7 +127,7 @@ const outcome = (worker: Worker, text: string) =>
     (error: { code?: string }) => error.code,
   );
 
-test("the relay's role is refused the account's tables, the user row's other columns and writes, voice, and Burrow removal", async () => {
+test("the relay's role is refused the account's tables, the user row's other columns and writes, voice but a token's mint, and Burrow removal", async () => {
   // It does log in, and reads what the entitlement check reads.
   expect(await outcome("relay", `SELECT id, email, "emailVerified" FROM "user"`)).toBe("ok");
   for (const text of [
@@ -134,6 +137,9 @@ test("the relay's role is refused the account's tables, the user row's other col
     `UPDATE "user" SET email = email`,
     `UPDATE "user" SET "emailVerified" = true`,
     `SELECT id FROM dormouse_voice_tokens`,
+    `UPDATE dormouse_voice_tokens SET "revokedAt" = now()`,
+    `DELETE FROM dormouse_voice_tokens`,
+    `INSERT INTO dormouse_voice_tokens ("userId", hash, "revokedAt") VALUES ('x', 'x', now())`,
     `INSERT INTO dormouse_voice_usage ("userId", day, count) VALUES ('x', now()::date, 0)`,
     `DELETE FROM dormouse_relay_burrows`,
     `UPDATE dormouse_relay_burrows SET "userId" = "userId"`,

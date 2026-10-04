@@ -485,7 +485,20 @@ export function createSidecarHost(options: SidecarHostOptions): SidecarHost {
 
   // Read once, here: the Burrow and managed voice take the same baked pair.
   const relay = bakedRelay();
+  const voice = createManagedVoiceHost({
+    stateDir: options.stateDir,
+    // Unaddressed, so Rust hands it to every window.
+    onStatus: (status) => send('voice:status', status),
+    log: (message) => console.error(message),
+    relay,
+    // The service holds the network policy; managed voice is its second choke
+    // point (`docs/specs/remote-network.md` → "Policy"). Late-bound: asked
+    // only at a speak, once the service below exists.
+    networkAllowed: () => service.networkAllowed(),
+  });
   const service = new BurrowService({
+    // A Hosted sign-in hands managed voice its token; sign-out clears it.
+    voiceCredential: voice.credential,
     store,
     provider: bridge.provider,
     kind: 'standalone',
@@ -498,17 +511,6 @@ export function createSidecarHost(options: SidecarHostOptions): SidecarHost {
   });
   void service.start().catch((error: unknown) => {
     console.error(`[burrow] failed to start: ${String(error)}`);
-  });
-
-  const voice = createManagedVoiceHost({
-    stateDir: options.stateDir,
-    // Unaddressed, so Rust hands it to every window.
-    onStatus: (status) => send('voice:status', status),
-    log: (message) => console.error(message),
-    relay,
-    // The service holds the network policy; managed voice is its second choke
-    // point (`docs/specs/remote-network.md` → "Policy").
-    networkAllowed: () => service.networkAllowed(),
   });
 
   function handleBurrowCommand(data: unknown): void {

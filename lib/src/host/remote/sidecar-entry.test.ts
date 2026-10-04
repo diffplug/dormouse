@@ -24,7 +24,7 @@ import { AlertManager, type AlertState } from '../../lib/alert-manager';
 import { REPORT } from '../../lib/alert-manager-test-utils';
 import { createAlertClient } from '../alert-client';
 import type { AlertStateDetail } from '../../lib/platform/types';
-import { DEFAULT_MANAGED_VOICE_ID } from '../../lib/platform/managed-voice-types';
+import { DEFAULT_MANAGED_VOICE_ID, MANAGED_VOICES } from '../../lib/platform/managed-voice-types';
 
 const HOLD: SurfaceHold = { holder: 'session-a', label: 'iPhone', lease: '1', serviceId: 'service-1' };
 
@@ -957,7 +957,7 @@ describe('the sidecar host', () => {
     await vi.waitFor(() => {
       expect(out.find((line) => line.event === 'voice:result')?.data).toEqual({
         requestId: 'req-1',
-        result: { configured: false, voiceId: DEFAULT_MANAGED_VOICE_ID },
+        result: { configured: false, voiceId: DEFAULT_MANAGED_VOICE_ID, notEntitled: false },
       });
     });
   });
@@ -966,9 +966,10 @@ describe('the sidecar host', () => {
     const stateDir = await mkdtemp(join(tmpdir(), 'sidecar-voice-'));
     const saving = createSidecarHost({ send: (event, data) => void out.push({ event, data }), mgr: {} as never, stateDir });
     try {
-      saving.handleCommand('voice:command', { op: 'configure', update: { voiceId: 'abc123' }, requestId: 'req-2' });
+      const voiceId = MANAGED_VOICES[1]!.id;
+      saving.handleCommand('voice:command', { op: 'configure', update: { voiceId }, requestId: 'req-2' });
       await vi.waitFor(() => {
-        expect(out.find((line) => line.event === 'voice:status')?.data).toEqual({ configured: false, voiceId: 'abc123' });
+        expect(out.find((line) => line.event === 'voice:status')?.data).toEqual({ configured: false, voiceId, notEntitled: false });
       });
     } finally {
       saving.dispose();
