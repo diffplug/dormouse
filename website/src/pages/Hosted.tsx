@@ -634,9 +634,9 @@ export default function Hosted({ checkoutOpen = CHECKOUT_OPEN }: { checkoutOpen?
           <FaqEntry question="Who appears in the founders row?">
             Only founders who tick the box at checkout; it starts unticked, and you can
             take yourself out from your account at any time. Everyone else counts toward
-            the number at the end of the row. It shows the name each founder chose and
-            never a sign-in provider's picture, so loading the page never tells GitHub or
-            Google you visited.
+            the number at the end of the row. It shows the initial of the name each founder
+            chose and never a sign-in provider's picture, so loading the page never tells
+            GitHub or Google you visited.
           </FaqEntry>
           <FaqEntry question="What if Dormouse Hosted shuts down?">
             The Relay is source-available and the{" "}

@@ -242,6 +242,8 @@ export function App({
       setSession(null);
       setAccounts([]);
       setComputers(null);
+      // The code stays on the page; a no-plan refusal was this account's.
+      setEnrolling((shown) => shown && { code: shown.code });
       setMinted("");
       setEnterCode(false);
       setCode("");
@@ -405,6 +407,15 @@ export function App({
                           <a href={PLANS_PAGE}>Choose a plan</a>, then open the
                           link from Dormouse again to approve this code.
                         </p>
+                        <button
+                          type="button"
+                          disabled={!!busy}
+                          onClick={() => void signOut()}
+                        >
+                          {busy === "logout"
+                            ? "Signing out…"
+                            : "Use another account"}
+                        </button>
                       </>
                     ) : (
                       <>
