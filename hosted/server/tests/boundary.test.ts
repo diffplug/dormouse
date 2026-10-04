@@ -28,7 +28,8 @@ import {
 } from "../headers";
 import { cookieEntitled } from "../account-gate";
 import { SITE_ORIGIN } from "../account-app";
-import { BILLING_WEBHOOK_PATH, CHECKOUT_CLOSED, COHORT_PATH } from "../billing-routes";
+import { COHORT_ENDPOINT } from "../../../website/src/lib/hosted-cohorts";
+import { BILLING_WEBHOOK_PATH, CHECKOUT_CLOSED } from "../billing-routes";
 import { RECENT_LOGIN_REQUIRED, relayAccountRoutes } from "../relay-account";
 import type { RelayRoomRpc } from "../relay-room-contract";
 import { voiceApp } from "../voice-app";
@@ -226,7 +227,7 @@ const ABSENT: Record<Name, [string, string][]> = {
     ["DELETE", "/api/voice/tokens/00000000-0000-4000-8000-000000000000"],
     ...ACCOUNT_RELAY,
     ...ACCOUNT_BILLING,
-    ["GET", COHORT_PATH],
+    ["GET", COHORT_ENDPOINT],
     ["POST", "/api/voice/speak"],
     // The self-host installers' probe; neither a Burrow nor Pocket asks Hosted for it.
     ["GET", "/api/hello"],
@@ -250,7 +251,7 @@ const ABSENT: Record<Name, [string, string][]> = {
     ...RELAY_API,
     ...ACCOUNT_RELAY,
     ...ACCOUNT_BILLING,
-    ["GET", COHORT_PATH],
+    ["GET", COHORT_ENDPOINT],
     ["GET", WS_ROUTES.burrow],
     ["GET", WS_ROUTES.client],
   ],
@@ -270,19 +271,19 @@ test.for(NAMES)("%s: serves only its own routes", async (name) => {
 
 test("the account answers the site origin the cohort endpoint alone, and its siblings never", async () => {
   // Billing is off here (no Stripe bindings), so the endpoint answers before any database.
-  const cohorts = await send("account", SITE_ORIGIN + COHORT_PATH);
+  const cohorts = await send("account", SITE_ORIGIN + COHORT_ENDPOINT);
   expect([cohorts.status, await cohorts.json()]).toEqual([503, { message: CHECKOUT_CLOSED }]);
   expect(cohorts.headers.get("content-security-policy")).toBe(ACCOUNT_POLICY);
   for (const [method, path] of [
-    ["HEAD", COHORT_PATH],
-    ["POST", COHORT_PATH],
-    ["GET", `${COHORT_PATH}/`],
+    ["HEAD", COHORT_ENDPOINT],
+    ["POST", COHORT_ENDPOINT],
+    ["GET", `${COHORT_ENDPOINT}/`],
     ["GET", "/api/hosted/other"],
     ...ACCOUNT_BILLING,
   ])
     expect((await send("account", SITE_ORIGIN + path, method)).status, `${method} ${path}`).toBe(421);
   for (const name of ["relay", "voice"] as const)
-    expect((await send(name, SITE_ORIGIN + COHORT_PATH)).status, name).toBe(421);
+    expect((await send(name, SITE_ORIGIN + COHORT_ENDPOINT)).status, name).toBe(421);
   expect(outbound).toEqual([]);
 });
 

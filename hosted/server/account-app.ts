@@ -1,7 +1,8 @@
 import type { Context, ExecutionContext, Hono } from "hono";
 import { queryDatabase } from "pgstencil/postgres";
-import { billingSetup, type Clock } from "./billing";
-import { COHORT_PATH, billingRoutes, reconcileDue, type BillingHost } from "./billing-routes";
+import { billingSetup } from "./billing";
+import { COHORT_ENDPOINT } from "../../website/src/lib/hosted-cohorts";
+import { billingRoutes, reconcileDue, type BillingHost } from "./billing-routes";
 import type { AccountEnv } from "./bindings";
 import { accountRules } from "./headers";
 import { relayAccountRoutes, type RelayAccountHost } from "./relay-account";
@@ -16,7 +17,7 @@ export const SITE_ORIGIN = "https://dormouse.sh";
  * The account Worker (`hosted.dormouse.sh`): auth, providers, readiness,
  * voice-token minting, the Relay's account routes, billing, and the
  * frontend. The production and preview entries differ only in `fetchAuth`'s
- * mail and in `bindings`; a test entry also supplies its `clock`.
+ * mail and in `bindings`.
  */
 export function accountApp(
   fetchAuth: (
@@ -25,14 +26,13 @@ export function accountApp(
     ctx: ExecutionContext,
   ) => Response | Promise<Response>,
   bindings: (env: AccountEnv) => AccountEnv,
-  clock: Clock,
   configure?: (app: Hono<{ Bindings: AccountEnv }>) => void,
 ) {
   return workerApp<AccountEnv>({
     bindings,
     rules: accountRules,
     unavailable: "Sign-in is temporarily unavailable. Please try again.",
-    site: { origin: SITE_ORIGIN, paths: [COHORT_PATH] },
+    site: { origin: SITE_ORIGIN, paths: [COHORT_ENDPOINT] },
     routes(app) {
       configure?.(app);
       app.get("/api/ready", async (c) => {
@@ -57,7 +57,6 @@ export function accountApp(
         approveLimit: c.env.RELAY_APPROVE_LIMIT,
         closeBurrow: (userId, burrowId) => relayRoom(c.env.RELAY_ROOM, userId).closeBurrow(burrowId),
         setup: () => billingSetup(c.env),
-        clock,
       });
       voiceTokenRoutes(app, host);
       relayAccountRoutes(app, host);
@@ -65,6 +64,6 @@ export function accountApp(
     },
     fallback: (app) => app.get("*", (c) => c.env.ASSETS.fetch(c.req.raw)),
     scheduled: (_controller, env) =>
-      reconcileDue(billingSetup(env), env.HYPERDRIVE.connectionString, clock, env.APP_ORIGIN),
+      reconcileDue(billingSetup(env), env.HYPERDRIVE.connectionString, env.APP_ORIGIN),
   });
 }

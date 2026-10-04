@@ -2,28 +2,26 @@
 // "Checkout and entitlement" and "The founding card's live half".
 import type { Billing } from "@pgstencil/stripe";
 import type { Context, Hono } from "hono";
-import { bodyLimit } from "hono/body-limit";
+import { sql } from "kysely";
 import { queryDatabase } from "pgstencil/postgres";
 import { readJson } from "remote-lib-common";
-import { MAX_SHOWN_FOUNDERS } from "../../website/src/lib/hosted-cohorts";
-import { accountQuery, cookieLogin, type AccountHost } from "./account-gate";
+import { COHORT_ENDPOINT, MAX_SHOWN_FOUNDERS } from "../../website/src/lib/hosted-cohorts";
+import { isCheckoutPlan } from "../../website/src/lib/hosted-pricing";
+import { accountQuery, cookieLogin, jsonBodyLimit, type AccountHost } from "./account-gate";
 import {
   BillingError,
-  PLANS,
   foundingSold,
   openCohort,
   withBilling,
   type BillingSetup,
-  type Clock,
   type Plan,
 } from "./billing";
-import { entitled } from "./entitlement";
+import { accessSql, entitledSql, subscribedSql } from "./entitlement";
 
 /** What one request's account deployment provides to the billing routes. */
 export interface BillingHost extends AccountHost {
   /** The deployment's billing setup, null while billing is off; throws when misconfigured. */
   setup(): BillingSetup | null;
-  clock: Clock;
 }
 
 /** The billing routes' answer while a deployment has no Stripe configuration. */
@@ -35,22 +33,16 @@ export const WEBHOOK_BODY_BYTES = 1024 * 1024;
 /** How long one isolate reuses its cohort answer. */
 export const COHORT_CACHE_MS = 60_000;
 
-/** The webhook's and the cohort endpoint's paths. */
+/** Stripe's webhook path. */
 export const BILLING_WEBHOOK_PATH = "/api/billing/webhook";
-export const COHORT_PATH = "/api/hosted/cohorts";
 
 const CHECKOUT_ID = /^[A-Za-z0-9_-]{1,64}$/;
 // A shown name: no control characters, nothing a row could not print.
 const SHOWN_NAME = /^[^\p{Cc}\p{Cf}\p{Zl}\p{Zp}]{1,64}$/u;
 const SURVEY = ["tooExpensive", "tooCheap", "expensive", "bargain"] as const;
 
-const isPlan = (value: unknown): value is Plan => PLANS.includes(value as Plan);
-
-/** Whether founder row `f` holds a current subscription on a founding Price (`$1`): `status()`'s access, in SQL. */
-const CURRENT_FOUNDER = `EXISTS (SELECT FROM pgstencil_billing.subscriptions s
-  WHERE s.owner_id = f."userId" AND s.price_id = ANY($1)
-    AND ((s.status = 'active' AND s.period_end > now())
-      OR (s.status = 'trialing' AND s.trial_end > now())))`;
+/** Whether founder row `f` is a current founder: subscribed on a founding Price (`$1`). */
+const CURRENT_FOUNDER = subscribedSql(`f."userId"`, "$1");
 
 /**
  * The billing routes on the account origin: the cookie routes a signed-in
@@ -60,10 +52,8 @@ const CURRENT_FOUNDER = `EXISTS (SELECT FROM pgstencil_billing.subscriptions s
  */
 export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost) {
   const gate = cookieLogin(host);
-  const small = bodyLimit({
-    maxSize: 4096,
-    onError: (c) => c.json({ message: "Request too large." }, 413),
-  });
+  const small = jsonBodyLimit(4096);
+  const closed = (c: Context) => c.json({ message: CHECKOUT_CLOSED }, 503);
 
   /** Runs `action` with this deployment's `Billing`; 503 while billing is off, a `BillingError` as its status. */
   const billed = async (
@@ -72,14 +62,10 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
   ) => {
     const deployment = host(c);
     const setup = deployment.setup();
-    if (!setup) return c.json({ message: CHECKOUT_CLOSED }, 503);
+    if (!setup) return closed(c);
     try {
-      return await withBilling(
-        setup,
-        deployment.databaseUrl,
-        deployment.clock,
-        new URL(c.req.url).origin,
-        (billing) => action(billing, setup),
+      return await withBilling(setup, deployment.databaseUrl, new URL(c.req.url).origin, (billing) =>
+        action(billing, setup),
       );
     } catch (error) {
       if (error instanceof BillingError)
@@ -88,37 +74,37 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
     }
   };
 
-  /** The account's plan as the account app shows it, after a resync from Stripe. */
-  const summary = (c: Context, userId: string) =>
-    billed(c, async (billing, setup) => {
-      const customer = await billing.db
-        .selectFrom("accounts")
-        .select("customer_id")
-        .where("owner_id", "=", userId)
-        .executeTakeFirst();
-      if (customer?.customer_id) await billing.reconcile(userId);
-      const status = await billing.status(userId);
-      const [founder] = await accountQuery<{ name: string }>(
-        host(c),
-        `SELECT name FROM dormouse_founders WHERE "userId" = $1`,
-        [userId],
-      );
-      return c.json({
-        plan: status.access ? status.plan : null,
-        until: status.access ? status.accessUntil : null,
-        renews: status.access && !status.subscription?.cancel_at_period_end,
-        entitled: await entitled(host(c).databaseUrl, userId),
-        founder: founder?.name ?? null,
-        founding: openCohort(await foundingSold(billing, setup)),
-      });
+  /**
+   * The account's plan as the account app shows it, from the synchronized
+   * rows: webhooks, confirm, and the hourly resync keep them current.
+   */
+  const summary = async (c: Context, billing: Billing<Plan>, setup: BillingSetup, userId: string) => {
+    const [status, account, sold] = await Promise.all([
+      billing.status(userId),
+      sql<{ entitled: boolean; founder: string | null }>`SELECT ${sql.raw(entitledSql())} AS entitled,
+        (SELECT name FROM dormouse_founders WHERE "userId" = u.id) AS founder
+        FROM "user" u WHERE u.id = ${userId}`.execute(billing.db),
+      foundingSold(billing, setup),
+    ]);
+    const [row] = account.rows;
+    return c.json({
+      plan: status.access ? status.plan : null,
+      until: status.access ? status.accessUntil : null,
+      renews: status.access && !status.subscription?.cancel_at_period_end,
+      entitled: row?.entitled === true,
+      founder: row?.founder ?? null,
+      founding: openCohort(sold),
     });
+  };
 
-  app.get("/api/billing", gate, (c) => summary(c, c.get("login").userId));
+  app.get("/api/billing", gate, (c) =>
+    billed(c, (billing, setup) => summary(c, billing, setup, c.get("login").userId)),
+  );
 
   app.post("/api/billing/checkout", small, gate, async (c) => {
     const { userId, email } = c.get("login");
     const plan = (await readJson<{ plan?: unknown }>(c))?.plan;
-    if (!isPlan(plan)) return c.json({ message: "Choose monthly, yearly, or founding." }, 400);
+    if (!isCheckoutPlan(plan)) return c.json({ message: "Choose monthly, yearly, or founding." }, 400);
     // A provider-only account has no public email: Stripe Checkout asks for one.
     return billed(c, async (billing) => {
       // A checkout left open for another plan gives way to this one.
@@ -139,11 +125,11 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
     const checkout = (await readJson<{ checkout?: unknown }>(c))?.checkout;
     if (typeof checkout !== "string" || !CHECKOUT_ID.test(checkout))
       return c.json({ message: "Checkout not found." }, 404);
-    const confirmed = await billed(c, async (billing) => {
+    return billed(c, async (billing, setup) => {
+      // A complete checkout resyncs from Stripe before the summary reads.
       await billing.confirmCheckout(userId, checkout);
-      return c.body(null, 204);
+      return summary(c, billing, setup, userId);
     });
-    return confirmed.status === 204 ? summary(c, userId) : confirmed;
   });
 
   app.post("/api/billing/portal", gate, (c) =>
@@ -162,7 +148,7 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
     if (body?.shown !== true || !SHOWN_NAME.test(name))
       return c.json({ message: "Give a name of 1 to 64 characters to show." }, 400);
     const setup = host(c).setup();
-    if (!setup) return c.json({ message: CHECKOUT_CLOSED }, 503);
+    if (!setup) return closed(c);
     const [row] = await accountQuery<{ userId: string }>(
       host(c),
       `INSERT INTO dormouse_founders ("userId", name)
@@ -204,10 +190,7 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
   // committed; an unexpected failure throws to `onError`'s 503, which Stripe retries.
   app.post(
     BILLING_WEBHOOK_PATH,
-    bodyLimit({
-      maxSize: WEBHOOK_BODY_BYTES,
-      onError: (c) => c.json({ message: "Request too large." }, 413),
-    }),
+    jsonBodyLimit(WEBHOOK_BODY_BYTES),
     async (c) => {
       const signature = c.req.header("stripe-signature");
       if (!signature) return c.json({ message: "Missing signature." }, 400);
@@ -219,31 +202,33 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
     },
   );
 
-  // The founding card's live half, unauthenticated and cached per isolate.
-  let cohorts: { at: number; body: unknown } | undefined;
-  app.get(COHORT_PATH, async (c) => {
-    const deployment = host(c);
-    const now = deployment.clock.time.now().getTime();
-    if (cohorts && now - cohorts.at < COHORT_CACHE_MS && now >= cohorts.at)
-      return c.json(cohorts.body);
-    return billed(c, async (billing, setup) => {
-      const sold = await foundingSold(billing, setup);
-      const open = openCohort(sold);
-      const shown = await queryDatabase<{ name: string }>(
-        deployment.databaseUrl,
-        `SELECT f.name FROM dormouse_founders f WHERE ${CURRENT_FOUNDER}
-        ORDER BY f."shownSince", f."userId" LIMIT ${MAX_SHOWN_FOUNDERS}`,
-        [setup.founding],
-      );
-      const body = {
-        // Which cohort the seats belong to, so a page prerendered at another
-        // price can drop them; absent with the seats once founding closes.
-        ...(open && { cohort: open.cohort, seatsLeft: open.seatsLeft }),
-        founders: { total: sold.reduce((sum, count) => sum + count, 0), shown },
-      };
-      cohorts = { at: now, body };
-      return c.json(body);
-    });
+  // The founding card's live half, unauthenticated and cached per isolate as
+  // text: a Response, and a promise its I/O settles, belong to one request.
+  let cohorts: { at: number; status: number; text: string } | undefined;
+  app.get(COHORT_ENDPOINT, async (c) => {
+    const now = Date.now();
+    if (!cohorts || now - cohorts.at >= COHORT_CACHE_MS) {
+      const response = await billed(c, async (billing, setup) => {
+        const [sold, shown] = await Promise.all([
+          foundingSold(billing, setup),
+          accountQuery<{ name: string }>(
+            host(c),
+            `SELECT f.name FROM dormouse_founders f WHERE ${CURRENT_FOUNDER}
+            ORDER BY f."shownSince", f."userId" LIMIT ${MAX_SHOWN_FOUNDERS}`,
+            [setup.founding],
+          ),
+        ]);
+        const open = openCohort(sold);
+        return c.json({
+          // Which cohort the seats belong to, so a page prerendered at another
+          // price can drop them; absent with the seats once founding closes.
+          ...(open && { cohort: open.cohort, seatsLeft: open.seatsLeft }),
+          founders: { total: sold.reduce((sum, count) => sum + count, 0), shown },
+        });
+      });
+      cohorts = { at: now, status: response.status, text: await response.text() };
+    }
+    return c.body(cohorts.text, cohorts.status as 200, { "content-type": "application/json" });
   });
 }
 
@@ -255,21 +240,20 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
 export async function reconcileDue(
   setup: BillingSetup | null,
   databaseUrl: string,
-  clock: Clock,
   origin: string,
   limit = 20,
 ) {
   if (!setup) return;
   const due = await queryDatabase<{ owner: string }>(
     databaseUrl,
-    `SELECT owner_id AS owner FROM pgstencil_billing.subscriptions
-    WHERE (status = 'active' AND period_end < now() + interval '1 hour')
-      OR (status = 'trialing' AND trial_end < now() + interval '1 hour')
+    `SELECT owner_id AS owner FROM pgstencil_billing.subscriptions s
+    WHERE status IN ('active', 'trialing') AND NOT ${accessSql("s", "now() + interval '1 hour'")}
     GROUP BY owner_id ORDER BY min(period_end) LIMIT $1`,
     [limit],
   );
+  if (!due.length) return;
   const failed: unknown[] = [];
-  await withBilling(setup, databaseUrl, clock, origin, async (billing) => {
+  await withBilling(setup, databaseUrl, origin, async (billing) => {
     for (const { owner } of due)
       await billing.reconcile(owner).catch((error: unknown) => failed.push(error));
   });

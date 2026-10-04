@@ -7,10 +7,8 @@ import { Hono } from "hono";
 import { createServer as createViteServer, type ViteDevServer } from "vite";
 import { createAuthApp } from "@pgstencil/auth/better-auth";
 import { developmentDatabase } from "pgstencil/database";
-import { EmailDev, SystemTime } from "pgstencil";
-import { createStripeDev } from "@pgstencil/stripe/testing";
-import { FOUNDING_LADDER } from "../../website/src/lib/hosted-pricing";
-import { SYSTEM_CLOCK, type BillingSetup } from "./billing";
+import { EmailDev, SecureRandom, SystemTime } from "pgstencil";
+import { stripeDevBilling } from "./billing-dev";
 import { BILLING_WEBHOOK_PATH, billingRoutes } from "./billing-routes";
 import { authPolicy } from "./policy";
 import { migrations } from "./migrations";
@@ -75,26 +73,14 @@ const host: RelayAccountHost = {
 };
 voiceTokenRoutes(app, () => host);
 relayAccountRoutes(app, () => host);
-// Billing against StripeDev: a local Stripe stand-in whose checkout page takes
-// no card and charges nothing, its state beside the development database.
-const founding = FOUNDING_LADDER.map((price) => `price_dev_founding_${price}`);
-const stripeDev = await createStripeDev(
-  SYSTEM_CLOCK.time,
-  SYSTEM_CLOCK.random,
+// Billing against StripeDev, its state beside the development database.
+const { dev: stripeDev, setup: billing } = await stripeDevBilling(
+  new SystemTime(),
+  new SecureRandom(),
   fileURLToPath(new URL("../.pgstencil/stripe-dev.json", import.meta.url)),
-  { recurring: Object.fromEntries(founding.map((price) => [price, "year" as const])) },
 );
 stripeDev.setWebhookTarget(origin + BILLING_WEBHOOK_PATH);
-const billing: BillingSetup = {
-  secretKey: "sk_test_dormouse_local_only",
-  webhookSecret: stripeDev.webhookSecret,
-  live: false,
-  monthly: stripeDev.prices.monthly,
-  yearly: stripeDev.prices.yearly,
-  founding,
-  stripe: stripeDev.stripe,
-};
-billingRoutes(app, () => ({ ...host, setup: () => billing, clock: SYSTEM_CLOCK }));
+billingRoutes(app, () => ({ ...host, setup: () => billing }));
 // No speak: a Hosted build speaks only at the fixed voice origin, so no
 // Dormouse build could reach one here.
 app.all("*", (c) => auth.app.fetch(c.req.raw));

@@ -1,9 +1,10 @@
-import { useState, type FormEvent } from "react";
+import { useState, type FormEvent, type ReactNode } from "react";
 import {
   FOUNDING_LADDER,
   HOSTED_MONTHLY,
   HOSTED_YEARLY,
   LIST_ANNUAL,
+  foundingTier,
 } from "../../website/src/lib/hosted-pricing";
 import type { BillingSummary, Plan, SurveyAnswers } from "./api";
 
@@ -14,7 +15,7 @@ import type { BillingSummary, Plan, SurveyAnswers } from "./api";
 export const PLAN_NAMES: Record<Plan, string> = {
   monthly: HOSTED_MONTHLY.name,
   yearly: HOSTED_YEARLY.name,
-  founding: "Founding",
+  founding: foundingTier().name,
 };
 
 /** What `plan` costs now, or null for founding once it has closed. */
@@ -31,6 +32,15 @@ const date = (iso: string) => new Date(iso).toLocaleDateString();
 interface Shared {
   busy: string;
   act: (label: string, action: () => Promise<void>) => Promise<void>;
+}
+
+/** Opens the customer portal. */
+function PortalButton({ busy, act, onPortal, primary }: Shared & { onPortal: () => Promise<void>; primary?: boolean }) {
+  return (
+    <button className={primary ? "primary" : undefined} disabled={!!busy} onClick={() => void act("portal", onPortal)}>
+      {busy === "portal" ? "Opening…" : "Manage billing"}
+    </button>
+  );
 }
 
 /** `/checkout?plan=`: the plan and its price now, then Stripe. */
@@ -50,53 +60,34 @@ export function CheckoutView({
   onPortal: () => Promise<void>;
   onDecline: () => void;
 }) {
-  const decline = (
-    <button type="button" className="text-button" disabled={!!busy} onClick={onDecline}>
-      Not now
-    </button>
-  );
-  if (!plan)
-    return (
-      <section className="enroll">
-        <p>
-          This link names no plan. See <a href={PLANS_PAGE}>the plans</a>.
-        </p>
-        {decline}
-      </section>
-    );
-  if (!summary)
-    return (
-      <section className="enroll">
-        <p>Checkout is not open yet. Nothing was charged.</p>
-        {decline}
-      </section>
-    );
-  if (summary.plan)
-    return (
-      <section className="enroll">
-        <p>
-          This account already has {PLAN_NAMES[summary.plan]}. Change or cancel it in
-          Manage billing.
-        </p>
-        <button className="primary" disabled={!!busy} onClick={() => void act("portal", onPortal)}>
-          {busy === "portal" ? "Opening…" : "Manage billing"}
-        </button>
-        {decline}
-      </section>
-    );
-  const price = priceOf(plan, summary.founding?.cohort ?? null);
-  if (!price)
-    return (
-      <section className="enroll">
-        <p>
-          Founding has closed. {HOSTED_YEARLY.name} is ${HOSTED_YEARLY.price} a year;
-          see <a href={PLANS_PAGE}>the plans</a>.
-        </p>
-        {decline}
-      </section>
-    );
-  return (
+  const page = (body: ReactNode, action?: ReactNode) => (
     <section className="enroll">
+      {body}
+      {action}
+      <button type="button" className="text-button" disabled={!!busy} onClick={onDecline}>
+        Not now
+      </button>
+    </section>
+  );
+  const price = plan && priceOf(plan, summary?.founding?.cohort ?? null);
+  if (!plan) return page(<p>This link names no plan. See <a href={PLANS_PAGE}>the plans</a>.</p>);
+  if (!summary) return page(<p>Checkout is not open yet. Nothing was charged.</p>);
+  if (summary.plan)
+    return page(
+      <p>
+        This account already has {PLAN_NAMES[summary.plan]}. Change or cancel it in Manage billing.
+      </p>,
+      <PortalButton busy={busy} act={act} onPortal={onPortal} primary />,
+    );
+  if (!price)
+    return page(
+      <p>
+        Founding has closed. {HOSTED_YEARLY.name} is ${HOSTED_YEARLY.price} a year; see{" "}
+        <a href={PLANS_PAGE}>the plans</a>.
+      </p>,
+    );
+  return page(
+    <>
       <dl className="identity">
         <dt>Plan</dt>
         <dd>{PLAN_NAMES[plan]}</dd>
@@ -107,11 +98,10 @@ export function CheckoutView({
         No trial: you pay today, cancel any time, and every plan has a 30-day
         refund.{plan === "founding" && " The founding price stays yours while the subscription does."}
       </p>
-      <button className="primary" disabled={!!busy} onClick={() => void act("buy", () => onBuy(plan))}>
-        {busy === "buy" ? "Opening Stripe…" : "Continue to payment"}
-      </button>
-      {decline}
-    </section>
+    </>,
+    <button className="primary" disabled={!!busy} onClick={() => void act("buy", () => onBuy(plan))}>
+      {busy === "buy" ? "Opening Stripe…" : "Continue to payment"}
+    </button>,
   );
 }
 
@@ -203,16 +193,11 @@ function SurveyForm({
   act,
   onSend,
 }: Shared & { onSend: (answers: SurveyAnswers) => Promise<void> }) {
-  const [values, setValues] = useState<Record<keyof SurveyAnswers, string>>({
-    tooExpensive: "",
-    tooCheap: "",
-    expensive: "",
-    bargain: "",
-  });
+  const [values, setValues] = useState<Partial<Record<keyof SurveyAnswers, string>>>({});
   const [sent, setSent] = useState(false);
   const answers = Object.fromEntries(
-    QUESTIONS.map(([key]) => [key, values[key] === "" ? null : Number(values[key])]),
-  ) as unknown as SurveyAnswers;
+    QUESTIONS.map(([key]) => [key, values[key] ? Number(values[key]) : null]),
+  ) as Record<keyof SurveyAnswers, number | null>;
   const answered = Object.values(answers).some((answer) => answer !== null);
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -238,7 +223,7 @@ function SurveyForm({
             min={0}
             max={100000}
             step={1}
-            value={values[key]}
+            value={values[key] ?? ""}
             disabled={!!busy}
             onChange={(event) => setValues({ ...values, [key]: event.target.value })}
           />
@@ -305,11 +290,7 @@ export function PlanSection({
     <section aria-labelledby="plan">
       <h2 id="plan">Plan</h2>
       <PlanLine summary={summary} />
-      {summary.plan && (
-        <button disabled={!!busy} onClick={() => void act("portal", onPortal)}>
-          {busy === "portal" ? "Opening…" : "Manage billing"}
-        </button>
-      )}
+      {summary.plan && <PortalButton busy={busy} act={act} onPortal={onPortal} />}
       {summary.plan === "founding" && (
         <FounderForm shown={summary.founder} defaultName={defaultName} busy={busy} act={act} onSave={onFounder} />
       )}

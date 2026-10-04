@@ -1,4 +1,5 @@
-import { isPlan, type Plan } from "./api";
+import { BILLING_RETURN_PATH } from "../server/policy-constants";
+import { isCheckoutPlan as isPlan, type CheckoutPlan as Plan } from "../../website/src/lib/hosted-pricing";
 
 // The plan a `/checkout?plan=` link asks for survives provider sign-in, which
 // leaves the page, in this tab's session storage: a plan name, nothing else.
@@ -40,8 +41,8 @@ export const forgetCheckout = () => remember(null);
 
 /** The checkout operation Stripe's return names (`/billing?checkout=`), taken off the address bar. */
 export function takeReturn(): string | null {
-  if (location.pathname !== "/billing") return null;
+  if (location.pathname !== BILLING_RETURN_PATH) return null;
   const checkout = new URLSearchParams(location.search).get("checkout");
-  history.replaceState(null, "", "/billing");
+  history.replaceState(null, "", BILLING_RETURN_PATH);
   return checkout;
 }

@@ -1,6 +1,7 @@
 // Rules: docs/specs/hosted.md -> "Managed voice", "Burrow enrollment", and
 // "Billing"; docs/specs/security-hosted.md -> "Origin boundary".
 import type { Context, MiddlewareHandler } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import { queryDatabase } from "pgstencil/postgres";
 import { entitled } from "./entitlement";
 
@@ -17,6 +18,10 @@ export const accountQuery = <Row extends Record<string, unknown>>(
   text: string,
   values: unknown[],
 ) => queryDatabase<Row>(host.databaseUrl, text, values);
+
+/** A body limit answering the account's JSON 413. */
+export const jsonBodyLimit = (maxSize: number) =>
+  bodyLimit({ maxSize, onError: (c) => c.json({ message: "Request too large." }, 413) });
 
 /** The login a cookie route acts for. */
 export interface AccountLogin {

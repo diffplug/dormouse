@@ -220,7 +220,7 @@ The account Worker sells the plans `monthly`, `yearly`, and `founding` through `
 
 | Route | Credential | Success |
 |---|---|---|
-| `GET /api/billing` | login cookie | 200 `{ plan, until, renews, entitled, founder, founding }`, resynced from Stripe |
+| `GET /api/billing` | login cookie | 200 `{ plan, until, renews, entitled, founder, founding }` from the synchronized rows |
 | `POST /api/billing/checkout` | login cookie, exact `Origin`, JSON `{ plan }` | 200 `{ url }` of Stripe Checkout |
 | `POST /api/billing/confirm` | login cookie, exact `Origin`, JSON `{ checkout }` | 200, the `GET` body |
 | `POST /api/billing/portal` | login cookie, exact `Origin` | 200 `{ url }` of the customer portal |

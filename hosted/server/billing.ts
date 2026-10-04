@@ -1,21 +1,20 @@
 // Rules: docs/specs/hosted.md -> "Billing".
 import { Billing, BillingError, Stripe, type BillingDB } from "@pgstencil/stripe";
-import { SecureRandom, SystemTime, type RandomSource, type Time } from "pgstencil";
+import { SecureRandom, SystemTime } from "pgstencil";
 import { connectDatabase } from "pgstencil/postgres";
 import {
   FOUNDING_COHORT_SIZE,
   FOUNDING_LADDER,
+  type CheckoutPlan,
 } from "../../website/src/lib/hosted-pricing";
+import { BILLING_RETURN_PATH } from "./policy-constants";
 
 /** The plans checkout sells, by the names a buy link and `status()` use. */
-export const PLANS = ["monthly", "yearly", "founding"] as const;
-export type Plan = (typeof PLANS)[number];
+export type Plan = CheckoutPlan;
 
 /** A refund inside this window, which also cancels, returns the seat to its cohort. */
 export const REFUND_DAYS = 30;
 
-/** Where Stripe returns the browser: checkout success and cancel, and the portal. */
-export const BILLING_RETURN_PATH = "/billing";
 
 /** The account Worker's billing bindings; billing is off unless all are set. */
 export interface BillingEnv {
@@ -27,14 +26,9 @@ export interface BillingEnv {
   STRIPE_PRICES_FOUNDING?: string;
 }
 
-/** The clock and randomness billing runs on: the system's, or a test's. */
-export interface Clock {
-  time: Time;
-  random: RandomSource;
-}
-
-/** Every deployed entry's clock. */
-export const SYSTEM_CLOCK: Clock = { time: new SystemTime(), random: new SecureRandom() };
+// The system clock: a test bundle's injected `Date` scopes it to the test's.
+const time = new SystemTime();
+const random = new SecureRandom();
 
 /** A deployment's billing configuration, read from its bindings. */
 export interface BillingSetup {
@@ -120,7 +114,6 @@ export async function foundingSold(billing: Billing<Plan>, setup: BillingSetup) 
 export async function withBilling<T>(
   setup: BillingSetup,
   databaseUrl: string,
-  clock: Clock,
   origin: string,
   action: (billing: Billing<Plan>) => Promise<T>,
 ): Promise<T> {
@@ -133,8 +126,8 @@ export async function withBilling<T>(
           httpClient: Stripe.createFetchHttpClient(),
           maxNetworkRetries: 1,
         }),
-      clock.time,
-      clock.random,
+      time,
+      random,
       {
         prices: {
           monthly: setup.monthly,

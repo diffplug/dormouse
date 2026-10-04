@@ -14,23 +14,37 @@ if (!/^[^'\\]+$/.test(ADMIN_EMAIL)) throw new Error("ADMIN_EMAIL cannot be inlin
 const CURRENT = `'trialing', 'active', 'past_due', 'unpaid', 'paused', 'incomplete'`;
 
 /**
+ * Whether subscription row `s` grants access at `at`: `active` before its
+ * period end or `trialing` before its trial end, as `status()` reads it.
+ */
+export const accessSql = (s = "s", at = "now()") =>
+  `((${s}.status = 'active' AND ${s}.period_end > ${at})
+    OR (${s}.status = 'trialing' AND ${s}.trial_end > ${at}))`;
+
+/**
  * The entitlement (docs/specs/pricing.md -> "Checkout and entitlement"): a
  * SQL boolean over the `"user"` row aliased `user`, so a query that resolves
  * a bearer resolves its owner's entitlement in the same statement.
  *
  * A subscription grants it as `@pgstencil/stripe`'s `status()` grants access:
- * exactly one current subscription, and it `active` before its period end or
- * `trialing` before its trial end, read against the database's clock. The
- * verified `ADMIN_EMAIL` is a standing comp, so Dormouse's own dogfooding
- * never holds a subscription.
+ * exactly one current subscription, and it granting access by the database's
+ * clock. The verified `ADMIN_EMAIL` is a standing comp, so Dormouse's own
+ * dogfooding never holds a subscription.
  */
 export function entitledSql(user = "u"): string {
-  const owned = `FROM pgstencil_billing.subscriptions s WHERE s.owner_id = ${user}.id`;
   return `((${user}."emailVerified" IS TRUE AND ${user}.email = '${ADMIN_EMAIL}')
-    OR ((SELECT count(*) ${owned} AND s.status IN (${CURRENT})) = 1
-      AND EXISTS (SELECT ${owned}
-        AND ((s.status = 'active' AND s.period_end > now())
-          OR (s.status = 'trialing' AND s.trial_end > now())))))`;
+    OR ${subscribedSql(`${user}.id`)})`;
+}
+
+/**
+ * Whether `owner` holds exactly one current subscription and it grants
+ * access, as `status()` decides; with `prices`, an SQL array, only one on
+ * those Prices counts.
+ */
+export function subscribedSql(owner: string, prices?: string): string {
+  const granting = prices ? `${accessSql()} AND s.price_id = ANY(${prices})` : accessSql();
+  return `coalesce((SELECT count(*) FILTER (WHERE s.status IN (${CURRENT})) = 1 AND bool_or(${granting})
+    FROM pgstencil_billing.subscriptions s WHERE s.owner_id = ${owner}), false)`;
 }
 
 /** Whether `userId` is entitled now, read from `databaseUrl` in one query. */

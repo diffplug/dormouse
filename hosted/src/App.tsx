@@ -32,10 +32,35 @@ import {
   type Session,
   type VoiceToken,
 } from "./api";
-import { LOGIN_FRESH_AGE_MS, RECENT_LOGIN_WINDOW } from "../server/policy-constants";
+import {
+  BILLING_RETURN_PATH,
+  LOGIN_FRESH_AGE_MS,
+  RECENT_LOGIN_WINDOW,
+} from "../server/policy-constants";
 import { takeEnrollment, type Enrollment } from "./enrollment";
 import { CheckoutView, PLAN_NAMES, PlanSection, WelcomeView } from "./Billing";
 import { forgetCheckout } from "./checkout";
+
+type Page = "enroll" | "checkout" | "welcome" | "account" | "login";
+const PATHS: Record<Page, string> = {
+  enroll: "/enroll",
+  checkout: "/checkout",
+  welcome: BILLING_RETURN_PATH,
+  account: "/account",
+  login: "/login",
+};
+const TITLES: Record<Page, string> = {
+  enroll: "Approve a computer",
+  checkout: "Subscribe to Dormouse Hosted",
+  welcome: "Welcome to Dormouse Hosted",
+  account: "Your account",
+  login: "Sign in to Dormouse Hosted",
+};
+const INTROS: Record<"welcome" | "account" | "login", string> = {
+  welcome: "Your subscription is active.",
+  account: "Manage your plan and how you sign in.",
+  login: "One account for Dormouse’s hosted services.",
+};
 
 export function App({
   enrollment,
@@ -57,26 +82,12 @@ export function App({
   const [computers, setComputers] = useState<Computer[] | null>(null);
   // The enrollment awaiting approval, in memory only: through sign-in and
   // back, never into storage (docs/specs/hosted.md -> "Burrow enrollment").
-  const [enrolling, setEnrollingState] = useState(enrollment);
-  const enrollingRef = useRef(enrolling);
-  const setEnrolling = (next: Enrollment | null) => {
-    enrollingRef.current = next;
-    setEnrollingState(next);
-  };
+  const [enrolling, setEnrolling] = useState(enrollment);
   // Null while this deployment does not sell, or before sign-in.
   const [billing, setBilling] = useState<BillingSummary | null>(null);
-  const [buying, setBuyingState] = useState(checkout);
+  const [buying, setBuying] = useState(checkout);
   // Set once Stripe's return is confirmed: the welcome page shows.
-  const [welcome, setWelcomeState] = useState(false);
-  const pageRef = useRef({ buying: checkout, welcome: false });
-  const setBuying = (next: Plan | null | undefined) => {
-    pageRef.current.buying = next;
-    setBuyingState(next);
-  };
-  const setWelcome = (next: boolean) => {
-    pageRef.current.welcome = next;
-    setWelcomeState(next);
-  };
+  const [welcome, setWelcome] = useState(false);
   const [minted, setMinted] = useState("");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState("");
@@ -114,20 +125,6 @@ export function App({
     setVoiceTokens(tokens);
     setComputers(enrolled);
     setBilling(plan);
-    const { buying, welcome } = pageRef.current;
-    history.replaceState(
-      null,
-      "",
-      enrollingRef.current
-        ? "/enroll"
-        : buying !== undefined
-          ? `/checkout${buying ? `?plan=${buying}` : ""}`
-          : welcome
-            ? "/billing"
-            : current
-              ? "/account"
-              : "/login",
-    );
   }, []);
   useEffect(() => {
     // An auth callback's query parameters (`?error=`) never stay in history.
@@ -139,7 +136,6 @@ export function App({
           await act("confirm", async () => {
             setBilling(await confirmCheckout(returned));
             setWelcome(true);
-            history.replaceState(null, "", "/billing");
           });
       })
       .catch((error) => setError(error.message))
@@ -267,7 +263,6 @@ export function App({
   const clearEnrollment = () => {
     setEnrolling(null);
     setError("");
-    history.replaceState(null, "", session ? "/account" : "/login");
   };
   const removeOne = (burrowId: string) =>
     act(`remove-${burrowId}`, async () => {
@@ -293,17 +288,30 @@ export function App({
     forgetCheckout();
     setBuying(undefined);
     setError("");
-    history.replaceState(null, "", session ? "/account" : "/login");
-  };
-  const leaveWelcome = () => {
-    setWelcome(false);
-    history.replaceState(null, "", "/account");
   };
   const copyMinted = () =>
     act("copy", async () => {
       await navigator.clipboard.writeText(minted);
       setNotice("Token copied. Paste it into Dormouse’s voice settings.");
     });
+  // The one page this state shows, and the address it keeps.
+  const page: Page = enrolling
+    ? "enroll"
+    : buying !== undefined
+      ? "checkout"
+      : !session
+        ? "login"
+        : welcome && billing
+          ? "welcome"
+          : "account";
+  useEffect(() => {
+    if (loading) return;
+    const path =
+      page === "checkout"
+        ? `/checkout${buying ? `?plan=${buying}` : ""}`
+        : PATHS[page];
+    history.replaceState(null, "", path);
+  }, [loading, page, buying]);
   const fresh =
     session &&
     Date.now() - Date.parse(session.session.createdAt) < LOGIN_FRESH_AGE_MS;
@@ -319,33 +327,19 @@ export function App({
         </a>
       </header>
       <main>
-        <h1>
-          {enrolling
-            ? "Approve a computer"
-            : buying !== undefined
-              ? "Subscribe to Dormouse Hosted"
-              : welcome && session
-                ? "Welcome to Dormouse Hosted"
-                : session
-                  ? "Your account"
-                  : "Sign in to Dormouse Hosted"}
-        </h1>
+        <h1>{TITLES[page]}</h1>
         <p className="intro">
-          {enrolling
-            ? !enrolling.code
+          {page === "enroll"
+            ? !enrolling!.code
               ? "This link cannot be approved."
               : session
                 ? "Dormouse on your computer asked to join this account."
                 : "Sign in to approve the computer that sent you here."
-            : buying !== undefined
+            : page === "checkout"
               ? session
                 ? "Check the plan, then pay on Stripe."
                 : `Sign in first, so your ${buying ? `${PLAN_NAMES[buying]} ` : ""}subscription belongs to your account.`
-              : welcome && session
-                ? "Your subscription is active."
-                : session
-                  ? "Manage your plan and how you sign in."
-                  : "One account for Dormouse’s hosted services."}
+              : INTROS[page]}
         </p>
         {loading ? (
           <p role="status">Checking your account…</p>
@@ -422,9 +416,9 @@ export function App({
                       : "Sign in"}
                 </button>
               </section>
-            ) : buying !== undefined && session ? (
+            ) : page === "checkout" && session ? (
               <CheckoutView
-                plan={buying}
+                plan={buying ?? null}
                 summary={billing}
                 busy={busy}
                 act={act}
@@ -432,15 +426,15 @@ export function App({
                 onPortal={portal}
                 onDecline={declineCheckout}
               />
-            ) : welcome && session && billing ? (
+            ) : page === "welcome" ? (
               <WelcomeView
-                summary={billing}
-                defaultName={session.user.name}
+                summary={billing!}
+                defaultName={session!.user.name}
                 busy={busy}
                 act={act}
                 onFounder={founder}
-                onSurvey={async (answers) => sendSurvey(answers)}
-                onDone={leaveWelcome}
+                onSurvey={sendSurvey}
+                onDone={() => setWelcome(false)}
               />
             ) : session ? (
               <>

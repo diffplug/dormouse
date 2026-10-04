@@ -1,3 +1,4 @@
+import type { CheckoutPlan as Plan } from "../../website/src/lib/hosted-pricing";
 import { providerIds, providerNames } from "../server/providers.js";
 import type { ProviderId } from "../server/providers.js";
 
@@ -67,10 +68,9 @@ export async function social(provider: Provider, linking: boolean) {
     linking ? "link-social" : "sign-in/social",
     { provider },
   );
-  const url = new URL(result.url);
-  if (url.protocol !== "https:")
-    throw new Error("Sign-in is temporarily unavailable. Please try again.");
-  window.location.assign(url.href);
+  window.location.assign(
+    awayTo(result.url, "Sign-in is temporarily unavailable. Please try again."),
+  );
 }
 
 export interface VoiceToken {
@@ -149,10 +149,18 @@ export async function approveEnrollment(userCode: string) {
   if (!response.ok) throw await refused(response);
 }
 
-export const PLANS = ["monthly", "yearly", "founding"] as const;
-export type Plan = (typeof PLANS)[number];
-export const isPlan = (value: unknown): value is Plan =>
-  PLANS.includes(value as Plan);
+/**
+ * A page off this origin to send the browser to (a provider's sign-in,
+ * Stripe's): https only, but for StripeDev on loopback in the dev loop.
+ */
+function awayTo(url: string, refused: string): string {
+  const page = new URL(url);
+  const devStripe = location.protocol === "http:" && page.hostname === "127.0.0.1";
+  if (page.protocol !== "https:" && !devStripe) throw new Error(refused);
+  return page.href;
+}
+
+export type { Plan };
 
 /** `GET /api/billing`: the account's plan (docs/specs/hosted.md -> "Billing"). */
 export interface BillingSummary {
@@ -175,67 +183,25 @@ export interface SurveyAnswers {
   bargain: number | null;
 }
 
-/** Billing's own call: its 503 says checkout is not open, in words for this page. */
 async function billing(path: string, init: RequestInit = {}): Promise<Response> {
-  let response: Response;
-  try {
-    response = await fetch(`/api/billing${path}`, {
-      ...init,
-      credentials: "same-origin",
-      cache: "no-store",
-      headers: init.body ? { "content-type": "application/json" } : undefined,
-    });
-  } catch {
-    throw new Error("Could not connect. Check your connection and try again.");
-  }
+  const response = await request(
+    `/api/billing${path}`,
+    init.body ? { ...init, headers: { "content-type": "application/json" } } : init,
+    "Billing is temporarily unavailable. Try again.",
+  );
   if (!response.ok) throw await refused(response);
   return response;
 }
-/** A Stripe page to send the browser to: https, or StripeDev on loopback in the dev loop. */
-function stripePage(url: string): string {
-  const page = new URL(url);
-  if (
-    page.protocol !== "https:" &&
-    !(location.protocol === "http:" && page.hostname === "127.0.0.1")
-  )
-    throw failed();
-  return page.href;
-}
-/** Null while this deployment does not sell. */
-export async function getBilling(): Promise<BillingSummary | null> {
-  const response = await fetch("/api/billing", {
-    credentials: "same-origin",
-    cache: "no-store",
-  }).catch(() => null);
-  if (!response || response.status === 503 || response.status === 401) return null;
-  if (!response.ok) throw await refused(response);
-  return (await response.json()) as BillingSummary;
-}
-/** The open founding cohort, read from the public endpoint; null when unknown or closed. */
-export async function getCohort(): Promise<number | null> {
-  const response = await fetch("/api/hosted/cohorts", { cache: "no-store" }).catch(() => null);
-  if (!response?.ok) return null;
-  const { cohort } = (await response.json()) as { cohort?: unknown };
-  return typeof cohort === "number" ? cohort : null;
-}
-export async function startCheckout(plan: Plan): Promise<string> {
-  const response = await billing("/checkout", {
-    method: "POST",
-    body: JSON.stringify({ plan }),
-  });
-  return stripePage(((await response.json()) as { url: string }).url);
-}
-export async function confirmCheckout(checkout: string): Promise<BillingSummary> {
-  const response = await billing("/confirm", {
-    method: "POST",
-    body: JSON.stringify({ checkout }),
-  });
-  return (await response.json()) as BillingSummary;
-}
-export async function openPortal(): Promise<string> {
-  const response = await billing("/portal", { method: "POST" });
-  return stripePage(((await response.json()) as { url: string }).url);
-}
+const toStripe = async (response: Response) =>
+  awayTo(((await response.json()) as { url: string }).url, "That did not work. Reload the page and try again.");
+
+/** Throws while this deployment does not sell, and when signed out. */
+export const getBilling = async () => (await (await billing("")).json()) as BillingSummary;
+export const startCheckout = async (plan: Plan) =>
+  toStripe(await billing("/checkout", { method: "POST", body: JSON.stringify({ plan }) }));
+export const confirmCheckout = async (checkout: string) =>
+  (await (await billing("/confirm", { method: "POST", body: JSON.stringify({ checkout }) })).json()) as BillingSummary;
+export const openPortal = async () => toStripe(await billing("/portal", { method: "POST" }));
 export async function setFounder(name: string | null) {
   await billing("/founder", {
     method: "PUT",

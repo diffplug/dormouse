@@ -3,13 +3,13 @@ import { fileURLToPath } from "node:url";
 
 // Shared build inputs can change Hosted without editing its directory: the
 // theme the account frontend imports, the whole Pocket bundle and one-time
-// phone page the relay stages, and the website's price and cohort modules
-// billing reads. Whole packages and directories, never a
+// phone page the relay stages, and the website's `hosted-*` price and cohort
+// modules billing and the account pages read. Whole packages and directories, never a
 // hand-picked subset of Pocket's import graph, so a new import cannot slip past.
 export function touchesHosted(paths) {
   return paths.some(
     (path) =>
-      /^(?:hosted\/|remote-lib-common\/|dor-lib-common\/|lib\/(?:src|pocket|one-time)\/|lib\/vite[^/]*\.config\.ts$|lib\/tsconfig[^/]*\.json$|\.github\/workflows\/hosted-[^/]+\.yml$)/.test(
+      /^(?:hosted\/|website\/src\/lib\/hosted-|remote-lib-common\/|dor-lib-common\/|lib\/(?:src|pocket|one-time)\/|lib\/vite[^/]*\.config\.ts$|lib\/tsconfig[^/]*\.json$|\.github\/workflows\/hosted-[^/]+\.yml$)/.test(
         path,
       ) ||
       [
@@ -18,8 +18,6 @@ export function touchesHosted(paths) {
         "pnpm-workspace.yaml",
         "lib/package.json",
         "lib/scripts/assert-pocket-worker.mjs",
-        "website/src/lib/hosted-pricing.ts",
-        "website/src/lib/hosted-cohorts.ts",
       ].includes(path),
   );
 }

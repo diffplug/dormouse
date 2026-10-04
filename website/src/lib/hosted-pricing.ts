@@ -59,9 +59,16 @@ export const CHECKOUT_OPEN = false;
 /** Where a buy button sends the buyer: the account origin's checkout page. */
 export const CHECKOUT_PAGE = "https://hosted.dormouse.sh/checkout";
 
+/** The plans on sale, by the names checkout sells under, which a buy link and the account Worker share. */
+export const CHECKOUT_PLANS = ["monthly", "yearly", "founding"] as const;
+export type CheckoutPlan = (typeof CHECKOUT_PLANS)[number];
+export const isCheckoutPlan = (value: unknown): value is CheckoutPlan =>
+  CHECKOUT_PLANS.includes(value as CheckoutPlan);
+
 /** One purchasable plan, at the price it is on sale at today. */
 export type Tier = {
-  id: "monthly" | "annual" | "founding";
+  /** The plan checkout sells it under. */
+  id: CheckoutPlan;
   /** What the buy button and the checkout notice call it. */
   name: string;
   /** What the buyer pays today, in whole US dollars. */
@@ -84,7 +91,7 @@ export const HOSTED_MONTHLY: Tier = {
 };
 
 export const HOSTED_YEARLY: Tier = {
-  id: "annual",
+  id: "yearly",
   name: "Hosted yearly",
   price: LIST_ANNUAL,
   per: "/year",
@@ -103,11 +110,8 @@ export function foundingTier(): Tier {
   };
 }
 
-/** The checkout link for `tier`, by the plan name checkout sells it under. */
-export function checkoutUrl(tier: Tier): string {
-  const plan = tier.id === "annual" ? "yearly" : tier.id;
-  return `${CHECKOUT_PAGE}?plan=${plan}`;
-}
+/** The checkout link for `tier`. */
+export const checkoutUrl = (tier: Tier) => `${CHECKOUT_PAGE}?plan=${tier.id}`;
 
 /** Every paid plan on sale, in the order the page shows them. */
 export function tiersOnSale(): Tier[] {

@@ -2,20 +2,20 @@ import { test, expect } from "vitest";
 import { Hono } from "hono";
 import { fileURLToPath } from "node:url";
 import { Miniflare, Response as WorkerResponse } from "miniflare";
-import { createStripeDev } from "@pgstencil/stripe/testing";
 import { createTestContext } from "pgstencil/testing";
 import { queryDatabase } from "pgstencil/postgres";
 import { API_ROUTES, NOT_ENTITLED_ERROR } from "remote-lib-common";
 import { FOUNDING_COHORT_SIZE, FOUNDING_LADDER } from "../../../website/src/lib/hosted-pricing";
 import { SITE_ORIGIN } from "../account-app";
+import { COHORT_ENDPOINT } from "../../../website/src/lib/hosted-cohorts";
 import { billingSetup, openCohort } from "../billing";
 import {
   BILLING_WEBHOOK_PATH,
   CHECKOUT_CLOSED,
   COHORT_CACHE_MS,
-  COHORT_PATH,
   billingRoutes,
 } from "../billing-routes";
+import { DEV_FOUNDING_PRICES, stripeDevBilling } from "../billing-dev";
 import { migrations } from "../migrations";
 import {
   ORIGINS,
@@ -32,7 +32,7 @@ import { workerDatabases } from "./worker-roles";
 // StripeDev answering for api.stripe.com.
 
 const origin = ORIGINS.account;
-const LADDER = FOUNDING_LADDER.map((price) => `price_founding_${price}`);
+const LADDER = DEV_FOUNDING_PRICES;
 const accountBundle = bundleWorker("server/tests/worker-entry.ts", [
   fileURLToPath(import.meta.resolve("@pgstencil/auth/better-auth-testing")),
 ]);
@@ -43,9 +43,7 @@ async function fixture({ billing = true } = {}) {
   // The entitlement reads the database's clock, so the test clock starts at it.
   const context = await createTestContext({ migrations, now: new Date().toISOString() });
   const databases = await workerDatabases(context.database.url);
-  const dev = await createStripeDev(context.time, context.random, undefined, {
-    recurring: Object.fromEntries(LADDER.map((price) => [price, "year" as const])),
-  });
+  const { dev, setup } = await stripeDevBilling(context.time, context.random);
   const outboundService = async (request: Request) => {
     const url = new URL(request.url);
     if (url.href === "https://api.postmarkapp.com/email") {
@@ -70,11 +68,11 @@ async function fixture({ billing = true } = {}) {
   };
   const stripe = billing
     ? {
-        STRIPE_SECRET_KEY: "sk_test_dormouse_local_only",
-        STRIPE_WEBHOOK_SECRET: dev.webhookSecret,
-        STRIPE_PRICE_MONTHLY: dev.prices.monthly,
-        STRIPE_PRICE_YEARLY: dev.prices.yearly,
-        STRIPE_PRICES_FOUNDING: LADDER.join(","),
+        STRIPE_SECRET_KEY: setup.secretKey,
+        STRIPE_WEBHOOK_SECRET: setup.webhookSecret,
+        STRIPE_PRICE_MONTHLY: setup.monthly,
+        STRIPE_PRICE_YEARLY: setup.yearly,
+        STRIPE_PRICES_FOUNDING: setup.founding.join(","),
       }
     : {};
   const worker = new Miniflare(
@@ -131,7 +129,10 @@ async function fixture({ billing = true } = {}) {
   function browser() {
     const jar = new Map<string, string>();
     let csrf = "";
-    const request = async (path: string, init: { method?: string; body?: unknown; origin?: string | null } = {}) => {
+    const request = async (
+      path: string,
+      init: { method?: string; body?: unknown; origin?: string | null; headers?: Record<string, string> } = {},
+    ) => {
       const response = await call(new URL(path, origin).href, {
         method: init.method ?? "GET",
         headers: {
@@ -139,6 +140,7 @@ async function fixture({ billing = true } = {}) {
           "cf-connecting-ip": "203.0.113.10",
           "content-type": "application/json",
           ...(init.origin !== null && { origin: init.origin ?? origin }),
+          ...init.headers,
         },
         ...(init.body !== undefined && { body: JSON.stringify(init.body) }),
       });
@@ -150,23 +152,7 @@ async function fixture({ billing = true } = {}) {
     };
     const auth = async (path: string, body: unknown) => {
       csrf ||= ((await (await request("/api/auth/csrf")).json()) as { csrf: string }).csrf;
-      return call(origin + "/api/auth/" + path, {
-        method: "POST",
-        headers: {
-          cookie: [...jar].map(([k, v]) => `${k}=${v}`).join("; "),
-          "cf-connecting-ip": "203.0.113.10",
-          origin,
-          "content-type": "application/json",
-          "x-csrf-token": csrf,
-        },
-        body: JSON.stringify(body),
-      }).then((response) => {
-        for (const cookie of response.headers.getSetCookie()) {
-          const pair = cookie.split(";")[0]!;
-          jar.set(pair.slice(0, pair.indexOf("=")), pair.slice(pair.indexOf("=") + 1));
-        }
-        return response;
-      });
+      return request("/api/auth/" + path, { method: "POST", body, headers: { "x-csrf-token": csrf } });
     };
     const signIn = async (address: string) => {
       expect((await auth("email-otp/send-verification-otp", { email: address, type: "sign-in" })).status).toBe(200);
@@ -355,7 +341,7 @@ test("founding: the open cohort's Price at checkout, its seats and opted-in foun
   const f = await fixture();
   onTestFinished(f.close);
   const cohorts = async (at = SITE_ORIGIN) => {
-    const response = await f.call(at + COHORT_PATH);
+    const response = await f.call(at + COHORT_ENDPOINT);
     expect(response.status).toBe(200);
     return response.json();
   };
@@ -368,7 +354,7 @@ test("founding: the open cohort's Price at checkout, its seats and opted-in foun
   // Only the cohort path answers on the site origin.
   for (const path of ["/api/billing", "/api/auth/csrf", "/api/hosted/other", "/"])
     expect((await f.call(SITE_ORIGIN + path)).status, path).toBe(421);
-  expect((await f.call(SITE_ORIGIN + COHORT_PATH, { method: "POST" })).status).toBe(421);
+  expect((await f.call(SITE_ORIGIN + COHORT_ENDPOINT, { method: "POST" })).status).toBe(421);
 
   const ada = f.browser();
   await ada.signIn("ada@example.test");
@@ -483,15 +469,13 @@ test("the webhook takes only Stripe's signed body; checkout takes only this orig
     const response = await visitor.request(path, { method, ...(method === "POST" && { body: { plan: "monthly" } }) });
     expect([path, response.status, await response.json()]).toEqual([path, 503, { message: CHECKOUT_CLOSED }]);
   }
-  expect((await off.call(SITE_ORIGIN + COHORT_PATH)).status).toBe(503);
+  expect((await off.call(SITE_ORIGIN + COHORT_ENDPOINT)).status).toBe(503);
   expect((await off.scheduled()).outcome).toBe("ok");
 });
 
 test("an account without a public email checks out, and Stripe Checkout collects one", async ({ onTestFinished }) => {
   const context = await createTestContext({ migrations });
-  const dev = await createStripeDev(context.time, context.random, undefined, {
-    recurring: Object.fromEntries(LADDER.map((price) => [price, "year" as const])),
-  });
+  const { dev, setup } = await stripeDevBilling(context.time, context.random);
   onTestFinished(async () => {
     await dev.close();
     await context.close();
@@ -501,16 +485,7 @@ test("an account without a public email checks out, and Stripe Checkout collects
   billingRoutes(app, () => ({
     databaseUrl: context.database.url,
     auth: async () => Response.json({ user: { id: "provider-only", email: null }, session: {} }),
-    setup: () => ({
-      secretKey: "sk_test_dormouse_local_only",
-      webhookSecret: dev.webhookSecret,
-      live: false,
-      monthly: dev.prices.monthly,
-      yearly: dev.prices.yearly,
-      founding: LADDER,
-      stripe: dev.stripe,
-    }),
-    clock: context,
+    setup: () => setup,
   }));
   const response = await app.request(`${origin}/api/billing/checkout`, {
     method: "POST",
