@@ -3,7 +3,7 @@ import { getHostedMembership, type HostedMembership } from './hosted-membership'
 import { loadJson, saveJson } from './local-json-store';
 import { getPushDevices, type PushDevicesState } from './push-devices';
 import { burrowLink } from '../remote/burrow/burrow-status-store';
-import { getNetworkPolicySnapshot, policyOf } from '../remote/burrow/network-policy-store';
+import { getNetworkPolicySnapshot, policyOf, type NetworkPolicyStoreState } from '../remote/burrow/network-policy-store';
 
 /**
  * The one extra line a Baseboard alarm toggle's preview may carry
@@ -18,7 +18,10 @@ export type AlarmUpsell = 'hosted-voice' | 'hosted-push' | 'set-up-phone';
 export interface AlarmUpsellFacts {
   sink: AlertSink;
   membership: HostedMembership;
-  /** The network policy is Nothing, which sends no push and asks for no voice. */
+  /**
+   * The network policy is Nothing, which sends no push and asks for no voice,
+   * or a Burrow service has not said yet which policy it is.
+   */
   networkOff: boolean;
   /** The push-device list as the preview shows it, never refreshed for it. */
   push: PushDevicesState;
@@ -26,21 +29,17 @@ export interface AlarmUpsellFacts {
   hasBurrowService: boolean;
 }
 
-/**
- * Which offer a sink earns, before the daily limit. The Settings dialog's
- * Hosted links read it too, so the two never disagree.
- */
+/** Which offer a sink earns, before the daily limit; the Settings dialog's Hosted links read it too. */
 export function chooseAlarmUpsell(facts: AlarmUpsellFacts): AlarmUpsell | null {
   if (facts.networkOff) return null;
   if (facts.sink === 'speech') return facts.membership === 'not-member' ? 'hosted-voice' : null;
   if (!facts.hasBurrowService) return null;
-  const { status, devices } = facts.push;
   // Not enrolled: a Hosted build's non-member is offered Hosted's Relay; every
   // other build, and a member, is pointed at enrolling with the Relay it has.
-  if (status === 'no-burrow') return facts.membership === 'not-member' ? 'hosted-push' : 'set-up-phone';
-  // Enrolled, so already on a Relay: what is missing is the phone.
-  if (status === 'ready' && devices.length === 0) return 'set-up-phone';
-  return null;
+  // Enrolled with no device is no offer: the device line already names the
+  // fix, which may be a switch in Pocket on a phone already paired.
+  if (facts.push.status !== 'no-burrow') return null;
+  return facts.membership === 'not-member' ? 'hosted-push' : 'set-up-phone';
 }
 
 /** When a line last showed, on this machine (every window shares the origin). */
@@ -60,12 +59,19 @@ export function claimAlarmUpsell(now: number = Date.now()): boolean {
   return true;
 }
 
+/** Nothing, or not answered yet by a Burrow service that will answer. */
+export function networkOffOrUnknown(network: NetworkPolicyStoreState): boolean {
+  if (network.kind === 'unsupported') return false;
+  const policy = policyOf(network);
+  return policy === null || policy.level === 'nothing';
+}
+
 /** The facts as the stores hold them now. */
 export function currentAlarmUpsellFacts(sink: AlertSink): AlarmUpsellFacts {
   return {
     sink,
     membership: getHostedMembership(),
-    networkOff: policyOf(getNetworkPolicySnapshot())?.level === 'nothing',
+    networkOff: networkOffOrUnknown(getNetworkPolicySnapshot()),
     push: getPushDevices(),
     hasBurrowService: burrowLink() !== undefined,
   };

@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
-import { expect, fireEvent, userEvent, within } from 'storybook/test';
+import { expect, fireEvent, userEvent, waitFor, within } from 'storybook/test';
 import { Baseboard } from '../components/Baseboard';
 import { WorkspaceIdContext } from '../components/wall/wall-context';
 import type { DoorChip } from '../components/Wall';
@@ -312,3 +312,18 @@ export const AlarmUpsellSetUpPhone = alarmUpsellStory('push', 'set-up-phone', {
   primedBurrow: {},
   primedPushDevices: { status: 'no-burrow', devices: [] },
 });
+
+/** Its line opens Settings scrolled to Network, where a phone is set up. */
+export const AlarmUpsellOpensNetwork: Story = {
+  ...AlarmUpsellSetUpPhone,
+  play: async (context) => {
+    await AlarmUpsellSetUpPhone.play!(context);
+    const document = context.canvasElement.ownerDocument;
+    await userEvent.click(document.querySelector<HTMLElement>('[data-alarm-upsell="set-up-phone"]')!);
+    const dialog = within(document.body).getByRole('dialog', { name: 'Settings' });
+    await waitFor(() => expect(within(dialog).getByRole('button', { name: 'Network' })).toHaveAttribute('aria-current', 'location'), { timeout: 3000 });
+    const network = dialog.querySelector('[data-settings-topic="network"]')!;
+    const content = dialog.querySelector('#settings-content')!;
+    await waitFor(() => expect(Math.abs(network.getBoundingClientRect().top - content.getBoundingClientRect().top)).toBeLessThan(40), { timeout: 3000 });
+  },
+};

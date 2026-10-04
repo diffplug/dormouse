@@ -3,11 +3,14 @@ import {
   ALARM_UPSELL_SHOWN_AT_KEY,
   chooseAlarmUpsell,
   claimAlarmUpsell,
+  networkOffOrUnknown,
   takeAlarmUpsell,
   type AlarmUpsellFacts,
 } from './alarm-upsell';
 import { installLocalStorageStub } from './test-local-storage';
 import { hostedPageUrl, HOSTED_REFS } from './hosted-links';
+import { networkOn } from '../host/remote/test-burrow-link';
+import { networkPolicyResult, nothingPolicy } from '../remote/network-policy';
 
 const NO_BURROW = { status: 'no-burrow', devices: [] } as const;
 const NO_PHONE = { status: 'ready', devices: [] } as const;
@@ -41,8 +44,8 @@ describe('chooseAlarmUpsell', () => {
     // Self-host, no Hosted mode, or a member: the Relay it has.
     expect(push({ membership: 'unavailable' })).toBe('set-up-phone');
     expect(push({ membership: 'member' })).toBe('set-up-phone');
-    // Enrolled, so on a Relay already: only the phone is missing.
-    expect(push({ push: NO_PHONE })).toBe('set-up-phone');
+    // Enrolled: the device line already names the fix.
+    expect(push({ push: NO_PHONE })).toBeNull();
     expect(push({ push: A_PHONE })).toBeNull();
     expect(push({ push: { status: 'loading', devices: [] } })).toBeNull();
     expect(push({ push: { status: 'error', devices: [] } })).toBeNull();
@@ -89,6 +92,16 @@ describe('claimAlarmUpsell', () => {
   it('shows over a malformed record', () => {
     localStorage.setItem(ALARM_UPSELL_SHOWN_AT_KEY, 'soon');
     expect(claimAlarmUpsell(now)).toBe(true);
+  });
+});
+
+describe('networkOffOrUnknown', () => {
+  it('holds every offer until a Burrow service has answered, and under Nothing', () => {
+    expect(networkOffOrUnknown({ kind: 'unsupported' })).toBe(false);
+    expect(networkOffOrUnknown({ kind: 'loading' })).toBe(true);
+    expect(networkOffOrUnknown({ kind: 'error', message: 'x' })).toBe(true);
+    expect(networkOffOrUnknown({ kind: 'ready', network: networkOn('hosted') })).toBe(false);
+    expect(networkOffOrUnknown({ kind: 'ready', network: networkPolicyResult(nothingPolicy(), 'hosted', []) })).toBe(true);
   });
 });
 

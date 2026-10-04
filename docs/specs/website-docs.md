@@ -130,7 +130,7 @@ Source of truth: `DOCS_PAGES` in `website/src/lib/docs-pages.ts`; `DocsLayout` i
 
 **Must open `/self-host` with the Relay boundary:** Dormouse needs none; remote features require a configured Relay and otherwise make no network requests; it links `/hosted`. **`/hosted` opens with its plan cards** instead, and its managed Relay section discloses metadata, labels the review pending, and links the model. `website/src/lib/docs-rail.test.tsx` pins both.
 
-**Must also link it from** Pocket marketing/tutorial, self-host docs, and the speech and remote-control settings; `linkedFrom` owns the rest. `/pricing` 301-redirects here rather than becoming a page, pinned by `checkPricingRedirect` in `scripts/public-docs-lint.mjs`.
+**Must also link it from** Pocket marketing/tutorial, self-host docs, the remote-control settings, and the speech and push settings where `docs/specs/alert.md` -> "Settings dialog" offers Hosted; `linkedFrom` owns the rest. `/pricing` 301-redirects here rather than becoming a page, pinned by `checkPricingRedirect` in `scripts/public-docs-lint.mjs`.
 
 Source of truth: `Hosted` in `website/src/pages/Hosted.tsx`; `HostingRequirementNotice` in `website/src/components/HostingRequirementNotice.tsx`.
 

@@ -18,11 +18,11 @@ import { ThemePicker } from './ThemePicker';
 import { ShellPicker } from './ShellPicker';
 import { WatchedCommandList } from './WatchedCommandList';
 import { NetworkPhones, NetworkSettings, NetworkUpdates } from './NetworkSettings';
-import { useNetworkPolicy } from './remote-control-shared';
 import { PushTestButton, SpeakTestButton } from './AlarmTestButtons';
 import { ManagedVoiceSection, NetworkTopicLink, useManagedVoiceOffered } from './ManagedVoiceSection';
 import { HostedOfferLink } from './AlarmUpsellLine';
-import { chooseAlarmUpsell } from '../lib/alarm-upsell';
+import { chooseAlarmUpsell, networkOffOrUnknown } from '../lib/alarm-upsell';
+import { getNetworkPolicySnapshot, policyOf, subscribeToNetworkPolicy } from '../remote/burrow/network-policy-store';
 import { useHostedMembership } from '../lib/hosted-membership';
 import { getPlatform } from '../lib/platform';
 import { getShellsSnapshot, subscribeToShells } from '../lib/shell-store';
@@ -251,15 +251,6 @@ export function SettingsDialog({ onClose, initialTopic }: { onClose: () => void;
     chooseTopic('network');
   };
 
-  // Opened at a topic: start there, before the first paint, with no animation.
-  // Mount only, so a later change of the prop cannot pull the reader back.
-  useLayoutEffect(() => {
-    const content = contentRef.current;
-    const section = initialTopic && content?.querySelector<HTMLElement>(`[data-settings-topic="${initialTopic}"]`);
-    if (!content || !section) return;
-    content.scrollTop = section.getBoundingClientRect().top - content.getBoundingClientRect().top - TOPIC_GAP_PX;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   useLayoutEffect(() => {
     followScroll();
@@ -272,6 +263,16 @@ export function SettingsDialog({ onClose, initialTopic }: { onClose: () => void;
   }, [followScroll, visibleTopicIds]);
 
   useEffect(() => cancelScroll, [cancelScroll]);
+
+  // Opened at a topic: go there once it is shown, which waits for the search
+  // index to fill; once only, so the reader is never pulled back.
+  const pendingTopic = useRef(initialTopic);
+  useEffect(() => {
+    const id = pendingTopic.current;
+    if (!id || !visibleTopicIds.split(',').includes(id)) return;
+    pendingTopic.current = undefined;
+    scrollToTopic(id);
+  }, [visibleTopicIds, scrollToTopic]);
 
   return (
     <ModalFrame
@@ -494,11 +495,12 @@ export function AlarmSettingsSection({ sink, preview = false, onShowNetwork }: {
   const managedVoiceOffered = useManagedVoiceOffered();
   // Under Nothing the service sends no push and managed voice asks nothing
   // (`docs/specs/remote-network.md` -> "Policy"), so both lines say why.
-  const networkOff = useNetworkPolicy()?.level === 'nothing';
+  const network = useSyncExternalStore(subscribeToNetworkPolicy, getNetworkPolicySnapshot);
+  const networkOff = policyOf(network)?.level === 'nothing';
   const membership = useHostedMembership();
   // The same offers as the Baseboard preview's live line, which carries them
   // there instead of this inert copy.
-  const offer = preview ? null : chooseAlarmUpsell({ sink, membership, networkOff, push, hasBurrowService });
+  const offer = preview ? null : chooseAlarmUpsell({ sink, membership, networkOff: networkOffOrUnknown(network), push, hasBurrowService });
 
   // The brief preview uses the cached list: refreshing immediately publishes
   // loading, and the bridge reply may arrive after the preview has faded away.
