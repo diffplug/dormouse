@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { Miniflare, Response as WorkerResponse } from "miniflare";
 import { createTestContext } from "pgstencil/testing";
 import { queryDatabase } from "pgstencil/postgres";
-import { API_ROUTES, NOT_ENTITLED_ERROR } from "remote-lib-common";
+import { API_ROUTES, DEFAULT_MANAGED_VOICE_ID, NOT_ENTITLED_ERROR } from "remote-lib-common";
 import { FOUNDING_COHORT_SIZE, FOUNDING_LADDER } from "../../../website/src/lib/hosted-pricing";
 import { SITE_ORIGIN } from "../account-app";
 import { COHORT_ENDPOINT } from "../../../website/src/lib/hosted-cohorts";
@@ -186,7 +186,7 @@ async function fixture({ billing = true } = {}) {
     call(ORIGINS.voice + "/api/voice/speak", {
       method: "POST",
       headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
-      body: JSON.stringify({ text: "Build finished", voiceId: "abc" }),
+      body: JSON.stringify({ text: "Build finished", voiceId: DEFAULT_MANAGED_VOICE_ID }),
     });
   /** The account Worker's Cron Trigger, run now. */
   const scheduled = async () => {
