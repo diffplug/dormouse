@@ -71,9 +71,11 @@ export function useToolReaper({
         if (since === undefined) outOfSight.set(id, since = now);
         // Never on the minimize or switch itself: the clock starts there.
         if (now - Math.max(since, lastOutput.get(id) ?? 0) < idleMs || paused()) continue;
-        // `stopTool` declines whatever is not safe to stop.
+        // `stopTool` declines whatever is not safe to stop, answering at once:
+        // re-evaluating after a refusal would refuse again, a microtask loop
+        // that starves the webview. The next tick asks again.
         // Once stopped, a Tool shown meanwhile starts again at once.
-        if (!isToolReaped(id)) void stopTool(lath, id).then(() => evaluate.current());
+        if (!isToolReaped(id)) void stopTool(lath, id).then((stopped) => { if (stopped) evaluate.current(); });
       }
     };
 
