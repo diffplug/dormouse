@@ -1,5 +1,5 @@
 import { moveSurface } from './surface-move';
-import { holdForHostInterrupt } from '../../lib/tool-run-hold';
+import { clearHoldLapse, holdForHostInterrupt } from '../../lib/tool-run-hold';
 import { recordToolDirty } from '../../lib/tool-dirty-store';
 import { createSerialQueue } from '../../host/remote/serial-queue';
 import { useCallback, useEffect, useRef, type MutableRefObject } from 'react';
@@ -534,6 +534,8 @@ async function runToolInCallerPane(
   // Whatever this Session framed or announced under its previous command is not
   // this run's: a stale OSC 367 would hand the tool that port, or re-key it.
   retireToolRun(lath, id);
+  // A lapse an earlier host restart left speaks for no Tool this pane becomes.
+  clearHoldLapse(id);
   lath.store.setMeta(id, becomeToolMeta(meta, tool.become.title, tool.become.params));
   await typeToolCommand(id, tool.command, tool.cwd, signal);
 }
