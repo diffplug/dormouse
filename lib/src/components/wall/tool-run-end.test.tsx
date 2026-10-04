@@ -133,7 +133,7 @@ describe('Run end', () => {
     expect(silenced).toHaveBeenCalledWith(ID);
   });
 
-  it('refuses its own pane a keyed invocation mid-replacement, then ends once that command finishes', async () => {
+  it('refuses its own pane a keyed invocation mid-replacement, ending only if the host then gives up', async () => {
     const storybook = { surfaceType: 'tool', command: 'pnpm storybook', cwd: '/repo', toolName: 'storybook', toolKey: ['storybook', '/repo'], toolRender: 'iframe', toolPort: 'announced' };
     Object.assign(fake, { toolControl: vi.fn(async () => ({
       status: 'ok', projectRoot: '/repo', path: '/repo/dormouse.yml', name: 'storybook', run: 'pnpm storybook', render: 'iframe', port: 'announced', key: ['/repo'], warnings: [],
@@ -151,6 +151,25 @@ describe('Run end', () => {
     } })));
     await vi.waitFor(() => expect(respond).toHaveBeenCalled());
     expect(respond.mock.calls[0][0]).toMatchObject({ ok: false, error: expect.stringContaining("is this tool's own pane") });
+    expect((await leaf()).component).toBe('tool');
+    // The host's retype, queued behind `dor`, would run next: still a Tool.
+    await finish();
+    expect((await leaf()).component).toBe('tool');
+    // No successor came: the host gives up, and the run has ended.
+    await act(async () => releaseRunHold(ID));
+    await harness.flush();
+    expect((await leaf()).component).toBe('terminal');
+  });
+
+  it('ends the Tool at a command the user typed behind a replacement the host then gave up on', async () => {
+    await mountTool();
+    await run(COMMAND);
+    holdForHostInterrupt(ID);
+    await finish();
+    // Typed into the pane, so the host skips its retype (docs/specs/dor-tool.md -> Preview slot).
+    await run('ls');
+    await act(async () => releaseRunHold(ID));
+    await harness.flush();
     expect((await leaf()).component).toBe('tool');
     await finish();
     expect((await leaf()).component).toBe('terminal');

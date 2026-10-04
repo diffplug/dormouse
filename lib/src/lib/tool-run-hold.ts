@@ -24,6 +24,9 @@ interface Hold {
 }
 
 const holds = new Map<string, Hold>();
+/** Sessions whose replacement the host gave up on: whatever its shell last
+ *  finished, the designated run has ended. */
+const lapsed = new Set<string>();
 const listeners = new Set<(id: string) => void>();
 
 /** Call just before the host's own interrupt of `id`'s run. */
@@ -31,6 +34,7 @@ export function holdForHostInterrupt(id: string): void {
   getPlatform().alertSilenceRun?.(id);
   const state = getTerminalPaneState(id);
   clearTimeout(holds.get(id)?.timer);
+  lapsed.delete(id);
   holds.set(id, {
     current: state.currentCommand?.id ?? null,
     last: state.lastCommand?.id ?? null,
@@ -48,13 +52,25 @@ export function isRunHeld(id: string): boolean {
   return !lastCommand || lastCommand.id === hold.last || lastCommand.id === hold.current;
 }
 
-/** The host gave up waiting for a successor: what ended has ended. */
+/** The host gave up waiting for a successor: what ended has ended, even
+ *  behind a command the user typed meanwhile. */
 export function releaseRunHold(id: string): void {
   const hold = holds.get(id);
   if (!hold) return;
   clearTimeout(hold.timer);
   holds.delete(id);
+  lapsed.add(id);
   for (const listener of listeners) listener(id);
+}
+
+/** Whether `id`'s last host replacement lapsed with no designated run since. */
+export function isHoldLapsed(id: string): boolean {
+  return lapsed.has(id);
+}
+
+/** A designated run started, or the Tool ended: a lapse no longer speaks. */
+export function clearHoldLapse(id: string): void {
+  lapsed.delete(id);
 }
 
 export function subscribeToRunHolds(listener: (id: string) => void): () => void {
@@ -66,4 +82,5 @@ export function subscribeToRunHolds(listener: (id: string) => void): () => void 
 export function _resetRunHoldsForTesting(): void {
   for (const hold of holds.values()) clearTimeout(hold.timer);
   holds.clear();
+  lapsed.clear();
 }
