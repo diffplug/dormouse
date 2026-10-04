@@ -126,6 +126,20 @@ describe('useToolReaper', () => {
     expect(reaper.rehydrateTool).toHaveBeenCalledWith(lath, ID);
   });
 
+  it('asks a Tool that declined to stop again next tick, not at once', async () => {
+    // Past a bound the stop never settles, so a regression fails here rather
+    // than spinning the microtask queue forever.
+    reaper.stopTool.mockImplementation(() =>
+      reaper.stopTool.mock.calls.length > 5 ? new Promise<boolean>(() => {}) : Promise.resolve(false));
+    render([], false);
+    act(() => { vi.advanceTimersByTime(IDLE_MS); });
+    await act(async () => {});
+    expect(reaper.stopTool).toHaveBeenCalledTimes(1);
+    act(() => { vi.advanceTimersByTime(IDLE_MS / 4); });
+    await act(async () => {});
+    expect(reaper.stopTool).toHaveBeenCalledTimes(2);
+  });
+
   it('never rehydrates into a closing or transferring Workspace', () => {
     markToolReaped(ID, { payload: null, cwd: null, alert: null });
     paused = true;
