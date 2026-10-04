@@ -117,14 +117,31 @@ body .mdxeditor-source-editor .cm-scroller{line-height:1.35}
 
 .images-panel{position:absolute;top:34px;right:6px;z-index:5;width:min(360px,calc(100% - 12px));max-height:60%;overflow:auto;padding:6px;background:var(--vscode-editorWidget-background,Canvas);color:var(--vscode-editor-foreground,CanvasText);border:1px solid var(--vscode-widget-border,var(--baseBorder,GrayText));border-radius:4px;box-shadow:0 4px 14px rgba(0,0,0,.25);font-size:12px}
 .images-panel ul{list-style:none;margin:0;padding:0;display:grid;gap:4px}
-.images-panel li{display:grid;grid-template-columns:40px 1fr;grid-auto-rows:auto;align-items:center;column-gap:8px}
+.images-panel li{display:grid;grid-template-columns:40px 1fr auto;grid-auto-rows:auto;align-items:center;column-gap:8px}
 .images-panel img{grid-row:span 3;width:40px;height:30px;object-fit:contain;background:var(--baseBgSubtle);border-radius:2px}
-.images-panel .image-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:inherit;font-family:var(--vscode-editor-font-family,monospace);color:inherit;background:var(--vscode-input-background,transparent);border:1px solid var(--vscode-input-border,transparent);border-radius:2px;padding:2px 4px}
+.images-panel .image-name{grid-column:2;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:inherit;font-family:var(--vscode-editor-font-family,monospace);color:inherit;background:var(--vscode-input-background,transparent);border:1px solid var(--vscode-input-border,transparent);border-radius:2px;padding:2px 4px}
 .images-panel span.image-name{background:none;border-color:transparent;opacity:.7}
 .images-panel .image-folder{grid-column:2;opacity:.6;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .images-panel .image-error{grid-column:2;color:var(--vscode-errorForeground,CanvasText);font-size:11px}
+.images-panel .image-edit{grid-column:3;grid-row:1;font:inherit;font-size:12px;color:inherit;border:0;background:transparent;padding:2px 7px;border-radius:3px;cursor:pointer}
+.images-panel .image-edit:hover{background:var(--baseBgHover)}
 .images-panel p{margin:4px 2px}
 .images-panel .hint{opacity:.6;font-size:11px}
+
+/* An image's toolbar in the document: Edit, then MDXEditor's own buttons. */
+.md-image-toolbar{position:absolute;top:0;right:0;z-index:1;display:flex;align-items:center;gap:var(--spacing-1);padding:var(--spacing-1);background:var(--baseBase);border-bottom-left-radius:var(--radius-base)}
+.md-image-toolbar>div{position:static;padding:0;background:none}
+.md-image-edit{all:unset;box-sizing:border-box;color:var(--baseText);cursor:default}
+.md-image-edit:hover{color:var(--baseTextContrast)}
+.md-image-edit svg{display:block}
+.md-image-edit:focus-visible{outline:1px solid var(--vscode-focusBorder,Highlight)}
+
+/* The image editor over the whole page. */
+.image-overlay{position:absolute;inset:0;z-index:10;display:flex;flex-direction:column;background:var(--vscode-editor-background,Canvas)}
+.image-overlay-name{opacity:.65;font-size:11px;max-width:24ch;overflow:hidden;text-overflow:ellipsis;margin-right:2px}
+.image-overlay-pending{display:flex;align-items:center;gap:8px;padding:6px 12px}
+.image-overlay-pending .state{opacity:.65}
+.image-overlay-pending button{margin-left:auto;font:inherit;font-size:12px;color:inherit;border:0;background:transparent;padding:3px 7px;border-radius:3px;cursor:pointer}
 
 dialog{max-width:min(420px,90vw);border:1px solid var(--vscode-focusBorder,GrayText);padding:20px;background:var(--vscode-editorWidget-background,Canvas);color:var(--vscode-editor-foreground,CanvasText);font:inherit}
 dialog h2{font-size:14px;margin:0 0 8px}dialog p{margin:0 0 16px}dialog form>div{display:flex;justify-content:flex-end;gap:8px}

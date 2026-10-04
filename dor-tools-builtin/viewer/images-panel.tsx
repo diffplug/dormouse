@@ -13,10 +13,20 @@ export function localImagePath(src: string): string | null {
   return parts.length && !parts.some(part => part === '..' || part === '') ? parts.join('/') : null;
 }
 
+/** Whether the image editor can open `path`, a `localImagePath`: PNG and JPEG. */
+export const editableImage = (path: string | null): path is string => !!path && /\.(png|jpe?g)$/i.test(path);
+
+/** How many times each local image was saved from this page; its URL carries
+ * the count so every display loads the new pixels. The server ignores the query. */
+const saves = new Map<string, number>();
+export const imageSaved = (path: string) => { saves.set(path, (saves.get(path) ?? 0) + 1); };
+
 /** The URL the page loads a document image from. */
 export const imageUrl = (src: string) => {
   const path = localImagePath(src);
-  return path === null ? src : `images/${path.split('/').map(encodeURIComponent).join('/')}`;
+  if (path === null) return src;
+  const count = saves.get(path);
+  return `images/${path.split('/').map(encodeURIComponent).join('/')}${count ? `?v=${count}` : ''}`;
 };
 
 /** The document's image nodes; call within a read or update. */
@@ -41,7 +51,7 @@ function renamedSource(src: string, name: string): string {
   return folder + (/%[\da-f]{2}/i.test(base.slice(folder.length)) ? encodeURIComponent(name) : name);
 }
 
-function ImageRow({ src, editor }: { src: string; editor: LexicalEditor }) {
+function ImageRow({ src, editor, onEdit }: { src: string; editor: LexicalEditor; onEdit(path: string): void }) {
   const path = localImagePath(src);
   const name = path?.split('/').pop() ?? src;
   const folder = path?.slice(0, -name.length) ?? '';
@@ -70,6 +80,7 @@ function ImageRow({ src, editor }: { src: string; editor: LexicalEditor }) {
               if (event.key === 'Enter') { event.preventDefault(); void commit(); }
               if (event.key === 'Escape') { event.preventDefault(); setDraft(name); setState({}); }
             }} />}
+      {editableImage(path) && <button type="button" className="image-edit" title={`Edit ${name}`} onClick={() => onEdit(path)}>Edit</button>}
       {folder && <span className="image-folder" title={path!}>{folder}</span>}
       {state.error && <span className="image-error" role="alert">{state.error}</span>}
     </li>
@@ -77,12 +88,13 @@ function ImageRow({ src, editor }: { src: string; editor: LexicalEditor }) {
 }
 
 /** Every image the document shows; local ones rename on disk at once, and
- * their links in the document change with the next save. */
-export function ImagesPanel({ editor, sources }: { editor: LexicalEditor; sources: string[] }) {
+ * their links in the document change with the next save. PNG and JPEG open
+ * in the image editor through `onEdit`. */
+export function ImagesPanel({ editor, sources, onEdit }: { editor: LexicalEditor; sources: string[]; onEdit(path: string): void }) {
   return (
     <section className="images-panel" aria-label="Images">
       {sources.length
-        ? <ul>{sources.map(src => <ImageRow key={src} src={src} editor={editor} />)}</ul>
+        ? <ul>{sources.map(src => <ImageRow key={src} src={src} editor={editor} onEdit={onEdit} />)}</ul>
         : <p>No images. Paste one to save it beside this file.</p>}
       <p className="hint">Renaming moves the file now; save to keep this document's links.</p>
     </section>

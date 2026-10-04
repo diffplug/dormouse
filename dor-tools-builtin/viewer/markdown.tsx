@@ -1,11 +1,11 @@
-import { createRef, useMemo, useSyncExternalStore } from 'react';
+import { createRef, useMemo, useSyncExternalStore, type ComponentType, type FC } from 'react';
 import { createRoot } from 'react-dom/client';
 import { flushSync } from 'react-dom';
-import type { LexicalEditor } from 'lexical';
+import { $getNearestNodeFromDOMNode, $getNodeByKey, type LexicalEditor } from 'lexical';
 import { syntaxHighlighting } from '@codemirror/language';
 import { classHighlighter } from '@lezer/highlight';
 import {
-  ImageNode,
+  $isImageNode, editImageToolbarComponent$, iconComponentFor$, ImageNode, imagePreviewHandler$, useCellValue,
   BlockTypeSelect, BoldItalicUnderlineToggles, codeBlockPlugin, codeMirrorPlugin, CodeToggle, CreateLink, diffSourcePlugin,
   DiffSourceToggleWrapper, frontmatterPlugin, headingsPlugin, imagePlugin, InsertCodeBlock, InsertTable, InsertThematicBreak,
   linkDialogPlugin, linkPlugin, listsPlugin, ListsToggle, markdownShortcutPlugin, MDXEditor, quotePlugin, realmPlugin,
@@ -13,7 +13,8 @@ import {
 } from '@mdxeditor/editor';
 import '@mdxeditor/editor/style.css';
 import { documentSession, stateLabel, type DocumentState } from './document-session';
-import { imageSources, imageUrl, ImagesPanel } from './images-panel';
+import { editableImage, imageSaved, imageSources, imageUrl, ImagesPanel, localImagePath } from './images-panel';
+import { ImageOverlay } from './image-overlay';
 import { commentsPlugin } from './markdown-comments';
 import { markdownSafetyPlugin } from './markdown-safety';
 import { pageTheme, subscribeTheme } from './page-theme';
@@ -22,8 +23,9 @@ import './markdown.css';
 
 // Page state outside React, replaced whole on each change: the session reports
 // into it, the editor's image nodes feed it, and components subscribe.
-let store: { doc: DocumentState; error: string | null; images: string[]; panel: boolean; editor: LexicalEditor | null } =
-  { doc: { loaded: false, dirty: false, saving: false }, error: null, images: [], panel: false, editor: null };
+// `editing` is the image open in the editor overlay; `saves` counts its saves.
+let store: { doc: DocumentState; error: string | null; images: string[]; panel: boolean; editor: LexicalEditor | null; editing: string | null; saves: number } =
+  { doc: { loaded: false, dirty: false, saving: false }, error: null, images: [], panel: false, editor: null, editing: null, saves: 0 };
 const listeners = new Set<() => void>();
 const update = (change: Partial<typeof store>) => { store = { ...store, ...change }; for (const listener of listeners) listener(); };
 const subscribe = (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; };
@@ -52,8 +54,45 @@ const session = documentSession<string>({
   fail(error) { update({ error }); },
 });
 
+/** The document's source for the image node `key`, when the image editor can open it. */
+function editablePath(editor: LexicalEditor, key: string): string | null {
+  const path = editor.getEditorState().read(() => { const node = $getNodeByKey(key); return $isImageNode(node) ? localImagePath(node.getSrc()) : null; });
+  return editableImage(path) ? path : null;
+}
+
+/** Opens a PNG or JPEG under the document's folder in the image editor overlay. */
+const editImage = (path: string) => update({ editing: path });
+
+/** After an image save: every display of it loads the new file, and the document's source stays as it is. */
+function refreshImage(path: string) {
+  imageSaved(path);
+  // A new handler makes each image node resolve its URL again.
+  realm?.pub(imagePreviewHandler$, async (src: string) => imageUrl(src));
+  update({ saves: store.saves + 1 });
+}
+
+/** MDXEditor's own image toolbar (delete, settings), which it does not export; read before `imagePlugin` replaces it. */
+let DefaultImageToolbar: ComponentType<EditImageToolbarProps> = () => null;
+type EditImageToolbarProps = { nodeKey: string; imageSource: string; initialImagePath: string | null; title: string; alt: string; width?: number | 'inherit'; height?: number | 'inherit' };
+
+function ImageToolbar(props: EditImageToolbarProps) {
+  const iconFor = useCellValue(iconComponentFor$);
+  const editor = useCellValue(rootEditor$);
+  const path = editor && editablePath(editor, props.nodeKey);
+  return (
+    <div className="md-image-toolbar">
+      {path && <button type="button" className="md-image-edit" title="Open in the image editor [double-click]" onClick={() => editImage(path)}>{iconFor('edit')}</button>}
+      <DefaultImageToolbar {...props} />
+    </div>
+  );
+}
+
 const capture = realmPlugin({
-  init(r) { realm = r; },
+  init(r) {
+    realm = r;
+    const toolbar = r.getValue(editImageToolbarComponent$) as ComponentType<EditImageToolbarProps>;
+    if (toolbar !== ImageToolbar) DefaultImageToolbar = toolbar;
+  },
   postInit(r) {
     const editor = r.getValue(rootEditor$);
     if (!editor) return;
@@ -61,6 +100,16 @@ const capture = realmPlugin({
     // Only image nodes change the list, so typing does not walk the document.
     editor.registerMutationListener(ImageNode, refresh, { skipInitialization: true });
     refresh();
+    const open = (event: MouseEvent) => {
+      if (!(event.target instanceof HTMLImageElement)) return;
+      const key = editor.read(() => $getNearestNodeFromDOMNode(event.target as Node)?.getKey());
+      const path = key && editablePath(editor, key);
+      if (path) { event.preventDefault(); editImage(path); }
+    };
+    editor.registerRootListener((element, previous) => {
+      previous?.removeEventListener('dblclick', open);
+      element?.addEventListener('dblclick', open);
+    });
   },
 });
 
@@ -101,11 +150,12 @@ function Toolbar() {
 // Stable `tok-*` classes on code tokens, colored per theme in markdown.css.
 const tokenClasses = [syntaxHighlighting(classHighlighter)];
 
+// `imagePlugin` types `EditImageToolbar` without the props it passes.
 const plugins = [
   capture(), markdownSafetyPlugin(), commentsPlugin(),
   headingsPlugin(), listsPlugin(), quotePlugin(), thematicBreakPlugin(), linkPlugin(), linkDialogPlugin(),
   tablePlugin(), frontmatterPlugin(), markdownShortcutPlugin(),
-  imagePlugin({ imageUploadHandler: upload, imagePreviewHandler: async src => imageUrl(src), disableImageResize: true }),
+  imagePlugin({ imageUploadHandler: upload, imagePreviewHandler: async src => imageUrl(src), disableImageResize: true, EditImageToolbar: ImageToolbar as FC }),
   codeBlockPlugin({ defaultCodeBlockLanguage: '', codeBlockEditorDescriptors: [mermaidDescriptor] }),
   codeMirrorPlugin({ codeBlockLanguages: {
     '': 'Plain text', sh: 'Shell', bash: 'Bash', js: 'JavaScript', jsx: 'JSX', ts: 'TypeScript', tsx: 'TSX', json: 'JSON',
@@ -127,7 +177,7 @@ function markdownStyle(markdown: string) {
 
 function Page({ markdown }: { markdown: string }) {
   const theme = useSyncExternalStore(subscribeTheme, pageTheme);
-  const { error, images, panel, editor } = usePage();
+  const { error, images, panel, editor, editing } = usePage();
   const style = useMemo(() => markdownStyle(markdown), [markdown]);
   return (
     <>
@@ -149,7 +199,9 @@ function Page({ markdown }: { markdown: string }) {
           session.fail(`Showing source: the rich editor cannot parse this file (${reason}).`);
         }}
       />
-      {panel && editor && <ImagesPanel editor={editor} sources={images} />}
+      {panel && editor && <ImagesPanel editor={editor} sources={images} onEdit={editImage} />}
+      {editing && <ImageOverlay key={editing} path={editing} session={session} onSaved={refreshImage}
+        onClose={() => { update({ editing: null }); editorRef.current?.focus(); }} />}
     </>
   );
 }

@@ -68,6 +68,8 @@ test('serves images at or under the document folder, sandboxed, and nothing else
   assert.equal(image.headers['content-type'], 'image/png');
   assert.ok(image.body.equals(PNG));
   assert.match(image.headers['content-security-policy'], /^sandbox;/);
+  // The page's cache-busting query after an image save names the same file.
+  assert.ok((await send(viewer, route(viewer, 'images/img/a%20b.png?v=2'))).body.equals(PNG));
   assert.equal((await send(viewer, route(viewer, 'images/secret.txt'))).status, 404);
   // URL parsing removes a literal `..`; an encoded slash reaches the segment check.
   assert.equal((await send(viewer, route(viewer, 'images/../outside.png'))).status, 404);

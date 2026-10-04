@@ -50,13 +50,14 @@ Source of truth: `saveEditableFile` in `dor-tools-builtin/src/editable-file.ts`;
 - **Must serve images on request from regular image-format files at or under the document's canonical directory**, by realpath, under a `sandbox` CSP. Nothing else loads, external URLs included.
 - **Must write a pasted or dropped PNG, JPEG, GIF, or WebP beside the document as a new `image-YYYYMMDD-HHMMSS[-N].<ext>`**, signature-checked, at most 32 MiB, never replacing a file; its reference is an unsaved edit.
 - **Must rename a listed image on disk at once**, to an image name in its own directory not starting with `.`, never replacing another file (case-only renames allowed); rewritten references are an unsaved edit.
-- **Must replace a PNG or JPEG at or under the document's canonical directory only when its spelled path is its realpath**, following no symlink below it, as the [Image editor](#image-editor) saves; reads for editing share the rule.
+- **Must edit only a PNG or JPEG at or under the document's canonical directory whose spelled path is its realpath**, in the [Image editor](#image-editor) over the document. Its save leaves the source unchanged and reloads every display; closing it unsaved asks first.
+- **Must report the Tool dirty while the document or open image is unsaved**; Cmd/Ctrl+S saves the one in front, and the close-prompt save writes both.
 
 Source of truth: `dor-tools-builtin/viewer/markdown.tsx`; `safeCreateDOM` in `dor-tools-builtin/viewer/markdown-safety.ts`; `openImage` / `writePastedImage` / `renameImage` / `saveImageInFolder` in `dor-tools-builtin/src/markdown-images.ts`. Tests: `dor-tools-builtin/test/markdown-editor.test.mjs`.
 
 ## Image editor
 
-`builtin:file` edits PNG and JPEG; other image formats stay view-only.
+`builtin:file` edits PNG and JPEG, alone or over a [Markdown document](#markdown-editor); other image formats stay view-only.
 
 - **Must save exactly the submitted bytes, at most 32 MiB**, under the revision, identity, permission, and replacement rules of [Editing files](#editing-files).
 - **Must refuse a save whose `Content-Type` or signature is not its extension's type** (415).

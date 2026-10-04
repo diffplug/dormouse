@@ -46,13 +46,22 @@ export const message = (reason: unknown) => reason instanceof Error ? reason.mes
 export const stateLabel = ({ loaded, dirty, saving }: DocumentState) =>
   !loaded ? 'Loading…' : saving ? 'Saving…' : dirty ? 'Unsaved' : 'Saved';
 
-/** Asks through the page's `#confirm` dialog before a reload discards edits. */
-export function confirmDiscard(): Promise<boolean> {
-  const dialog = document.getElementById('confirm') as HTMLDialogElement;
+/** Asks through `dialog` (the page's `#confirm`, before a reload) whether to
+ * discard edits: true when its form closes it with the value `discard`. */
+export function confirmDiscard(dialog = document.getElementById('confirm') as HTMLDialogElement): Promise<boolean> {
   dialog.returnValue = 'cancel';
   const answer = new Promise<boolean>(resolve => dialog.addEventListener('close', () => resolve(dialog.returnValue === 'discard'), { once: true }));
   dialog.showModal();
   return answer;
+}
+
+/** A second document a page edits in front of its own, as the Markdown page's
+ * image overlay. While it is in front, Cmd/Ctrl+S saves it instead, the Tool
+ * is dirty while either document is, and the host's close-prompt save writes both. */
+export interface FrontDocument {
+  dirty(): boolean;
+  /** Rejects when the document could not be saved. */
+  save(): Promise<void>;
 }
 
 /** Loads, saves, and reports one document for a built-in editor page
@@ -69,21 +78,30 @@ export function documentSession<Mark, Content = string>(editor: DocumentEditor<M
   let saving: Promise<void> | null = null;
   let lastDirty: boolean | undefined;
   let stateQueue = Promise.resolve();
+  let front: FrontDocument | null = null;
   const fail = (reason: unknown) => view.fail(message(reason));
   const dirty = () => !!saved && !editor.holds(saved.mark);
+  /** What the Tool reports: this document or the one in front has unsaved edits. */
+  const toolDirty = () => dirty() || !!front?.dirty();
   const current = () => editor.mark ? editor.mark() : editor.snapshot().mark;
   // The host's close prompt saves through this channel (docs/specs/dor-tool.md -> Closing unsaved Tools).
   const host = connectToolFrame({
-    dirty: () => saved ? dirty() : undefined,
-    save: () => save().catch(reason => { fail(reason); throw reason; }),
+    dirty: () => saved ? toolDirty() : undefined,
+    async save() {
+      // In turn: the viewer takes one save at a time.
+      const errors: unknown[] = [];
+      await save().catch(reason => { fail(reason); errors.push(reason); });
+      await front?.save().catch(reason => { errors.push(reason); });
+      if (errors.length) throw errors[0];
+    },
   });
 
   function report() {
-    const changed = dirty();
-    view.report({ loaded: !!saved, dirty: changed, saving: saving !== null });
+    view.report({ loaded: !!saved, dirty: dirty(), saving: saving !== null });
     // Post immediately so the preview is pinned before a second selection can
     // replace it. The ordered OSC reports also cover automated browser renders.
     host.report();
+    const changed = toolDirty();
     if (changed !== lastDirty) {
       lastDirty = changed;
       stateQueue = stateQueue.then(() => request('state', { dirty: changed })).then(() => {}, fail);
@@ -112,11 +130,13 @@ export function documentSession<Mark, Content = string>(editor: DocumentEditor<M
   // Capture phase: runs before the editor, and outside it too.
   window.addEventListener('keydown', event => {
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') {
-      event.preventDefault(); void save().catch(fail);
+      event.preventDefault();
+      if (front) void front.save().catch(() => {}); // the front document shows its own errors
+      else void save().catch(fail);
     }
   }, true);
   window.addEventListener('beforeunload', event => {
-    if (window.parent === window && dirty()) { event.preventDefault(); event.returnValue = ''; }
+    if (window.parent === window && toolDirty()) { event.preventDefault(); event.returnValue = ''; }
   });
   return {
     load: () => load().catch(fail),
@@ -127,8 +147,13 @@ export function documentSession<Mark, Content = string>(editor: DocumentEditor<M
       view.fail(null);
       await load().catch(fail);
     },
-    /** Call after every edit. */
+    /** Call after every edit, and when the front document's dirty state changes. */
     changed: report,
+    /** Puts `document` in front of this one, or takes it away (null). */
+    front(document: FrontDocument | null) {
+      front = document;
+      if (saved) report();
+    },
     /** Takes the editor's contents as the saved revision: for an editor's own
      * normalization of the text it loaded, before any edit. */
     rebase() {
