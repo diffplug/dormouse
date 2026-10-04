@@ -231,6 +231,10 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
           token: ${{ secrets.TEND_BOT_TOKEN }}
+
+      - run: node scripts/setup-git.mjs
+        name: Define the markdown merge driver
+        if: steps.check.outputs.count != '0' || steps.check.outputs.conflict_count != '0' || github.event_name == 'workflow_dispatch'
       - uses: max-sixty/tend/claude@0.3.6
         if: steps.check.outputs.count != '0' || steps.check.outputs.conflict_count != '0' || github.event_name == 'workflow_dispatch'
         with:
