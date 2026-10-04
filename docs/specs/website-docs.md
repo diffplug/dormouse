@@ -33,7 +33,7 @@ Content invariants, checked by review unless a check is named:
 - Pocket is described only as shipped or explicitly in development.
 - Browser Surfaces are explained to match [dor-browser.md](dor-browser.md) without exposing persisted params, controller registries, proxy plumbing, or future renderers.
 - VS Code command names in getting started exist in `vscode-ext/package.json` (`checkVsCodeCommands`).
-- Detailed CLI behavior links to `/dor`; the complete agent operating guide links to `/agent-skill`; the hosted-services preview links to `/hosted`.
+- Detailed CLI behavior links to `/dor`; the complete agent operating guide links to `/agent-skill`; the hosted-services preview links to `/hosted` (`checkRoutesToReferences`).
 - The guide carries no copied internal future design.
 
 ### Marketplace and Open VSX constraints
@@ -168,7 +168,7 @@ Source of truth: `buildSkill` in `website/scripts/generate-docs.js`; `AgentSkill
 
 **Never keep a second copy of `SELF_HOST.md` under `website/`**; the page publishes the canonical file (rationale). `SELF_HOST_DELTA` withholds its `#` title, its opening blockquote, and the sections addressed to the assistant or to a maintainer, each rule carrying its own `reason`.
 
-Renaming a withheld `SELF_HOST.md` section therefore fails the build: a decision, never a silent republication.
+**Must** keep every withheld section present in `SELF_HOST.md`: a delta rule matching nothing fails the build, so renaming one is a decision, never a silent republication.
 
 Above the runbook the page renders the security spec's self-host rows from `docs.security.json` ([`/security` spec](#security-spec)).
 
@@ -215,7 +215,7 @@ Its terminal-to-browser transcript is authored literals, not generated or tested
 
 ## Root README
 
-Root `README.md` is shorter than the canonical product guide and does not duplicate it, and never presents staged plans as shipped behavior.
+Root `README.md` is shorter than the canonical product guide and does not duplicate it, and never presents staged plans as shipped behavior. Its development material is reviewed against current package scripts.
 
 ## Public-doc validation
 

@@ -53,7 +53,7 @@ Five JSON files, named because hand-editing them is the revocation mechanism (Gu
 - `burrows.json` — `[{ burrowId, burrowToken, enrolledAt }]`; **no label**: the Relay keeps no name for a Burrow
 - `push-subscriptions.json` — push rows (below)
 - `vapid.json` — only when env configures no keypair
-- `setup-password.json`
+- `setup-password.json` — `{ password, createdAt }`; the installers read `password` (`SELF_HOST.md`)
 
 **Must refuse a malformed singleton record** (`account.json`, `vapid.json`, `setup-password.json`) rather than mint over it as first boot.
 
@@ -274,7 +274,7 @@ Source of truth: `remote-lib-common/src/security/noise-transport.ts`.
 
 **The enroll request carries the baked origin**, which a Relay served from another refuses ("HTTP API"). **The Burrow refuses a reported `origin` other than its own before persisting**, naming the `burrows.json` row left behind.
 
-**The build fails on both silent failure modes**, a bad variable and a bundle the `define` did not reach (rationale). The standalone webview bakes the same pair.
+**The build must fail on both silent failure modes**, a bad variable and a bundle the `define` did not reach (rationale). The standalone webview bakes the same pair.
 
 **Enrollment and Burrow-authenticated push fetches must use `redirect: 'error'`**: Node does not re-check a redirect target, so following one could carry the setup password, a device code, the `burrowToken`, or notification metadata to another origin.
 
@@ -350,7 +350,7 @@ Source of truth: `lib/src/components/RemoteControlSection.tsx`; `lib/src/remote/
 
 ## Running it
 
-1. **Relay + Pocket**: `pnpm dev:relay` builds both, binds loopback, and prints the origin to use for the Burrow, enrollment, and Pocket; `PORT=3000 pnpm dev:relay` keeps it across restarts. A real phone needs `DORMOUSE_ORIGIN` set to a TLS origin. On localhost push is off ("Web Push") unless `DORMOUSE_VAPID_SUBJECT` supplies a contact.
+1. **Relay + Pocket**: `pnpm dev:relay` builds both, binds loopback, and prints the origin to use for the Burrow, enrollment, and Pocket; `PORT=3000 pnpm dev:relay` keeps it across restarts. A real phone needs `DORMOUSE_ORIGIN` set to a TLS origin. On localhost push is off ("Web Push") unless `DORMOUSE_VAPID_SUBJECT` supplies a contact. Its state is this worktree's (`DEV_STATE_DIR`) whatever the cwd, never the installed app's: a `DORMOUSE_STATE_DIR` equal to `DORMOUSE_RECOVERY_DIR`, which an older Dormouse leaks into its panes, reads as unset.
 2. **Burrow**: a dev build baked with that origin ("Relay origin"), e.g. `DORMOUSE_RELAY_ORIGIN=http://localhost:3000 pnpm dev:standalone`, enrolled with the `password` from the generated `setup-password.json`. `node relay/scripts/fake-burrow.mjs <origin>` is a headless stand-in that prints a pairing URL and auto-approves.
 3. **Phone**: open the Relay origin there, then set up a phone from the laptop (`docs/specs/pocket-app.md`).
 
