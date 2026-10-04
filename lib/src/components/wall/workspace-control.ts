@@ -20,6 +20,7 @@ import {
   resumeAutoWorkspaceName,
   resolveWorkspaceRef,
   setActiveWorkspace,
+  setWorkspacePinned,
   workspaceRefFor,
   type ResolvedWorkspace,
 } from '../../lib/workspace-store';
@@ -29,7 +30,7 @@ import { computeWorkspaceUnion } from '../../lib/workspace-union';
 import { awaitWallHandle, errorText, mountingRefusal, requestForWall, stringParam } from './dor-control-shared';
 import { attachSurfacePorts } from './surface-ports';
 import type { WallHandle } from './wall-handles';
-import { closeWorkspaceWithSurfaces, workspaceNeedsCloseConfirmation } from './workspace-lifecycle';
+import { closeWorkspaceWithSurfaces, PINNED_CLOSE_REFUSAL, workspaceNeedsCloseConfirmation } from './workspace-lifecycle';
 import type { DorControlParams, DorControlRequest } from './use-dor-control';
 
 /**
@@ -50,6 +51,7 @@ export type WindowControlParams = DorControlParams & {
   index?: unknown;
   dangerouslyDestroyIframePageState?: unknown;
   auto?: unknown;
+  pinned?: unknown;
 };
 
 /** This Window's Workspaces in strip order, each with its union status. */
@@ -64,6 +66,7 @@ export function workspaceRows(): WorkspaceRow[] {
       id: workspace.id,
       name: workspace.name,
       auto: workspace.nameIsAuto,
+      pinned: workspace.pinned === true,
       active: workspace.id === activeId,
       ringing: union.ringing,
       todo: union.todo,
@@ -237,6 +240,19 @@ export async function handleWorkspaceControl(detail: DorControlRequest): Promise
       return;
     }
 
+    case WORKSPACE_CONTROL_METHODS.pin: {
+      const target = requireWorkspace(detail);
+      if (!target) return;
+      if (typeof params.pinned !== 'boolean') {
+        detail.respond({ ok: false, error: 'pinned is required' });
+        return;
+      }
+      // Idempotent: pinning a pinned Workspace answers as if it had pinned it.
+      setWorkspacePinned(target.id, params.pinned);
+      respondMutation(params.pinned ? 'pinned' : 'unpinned', target);
+      return;
+    }
+
     case WORKSPACE_CONTROL_METHODS.move: {
       const toWindow = stringParam(params.toWindow)?.trim();
       const isCurrent = toWindow !== undefined && !isWindowRef(toWindow) ? cancelPendingConfirmation() : () => true;
@@ -303,6 +319,13 @@ export async function handleWorkspaceControl(detail: DorControlRequest): Promise
       const isCurrent = cancelPendingConfirmation();
       const target = requireWorkspace(detail);
       if (!target) return;
+      // Ahead of `--force`, which answers the close's confirmation: a pin is no
+      // confirmation, and only unpinning answers it (`docs/specs/dor-cli.md` →
+      // "dor workspace").
+      if (target.pinned === true) {
+        detail.respond({ ok: false, error: `workspace '${target.ref}' was not closed: ${PINNED_CLOSE_REFUSAL}` });
+        return;
+      }
       // A close is answered only once the Workspace's Wall is there to answer
       // for it: the Wall is what knows the member Surfaces, so closing past a
       // missing one would drop the Workspace with its Sessions still running

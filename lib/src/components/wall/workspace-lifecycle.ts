@@ -4,7 +4,7 @@ import { awaitWallHandle, mountingRefusal } from './dor-control-shared';
 import { getWallHandle } from './wall-handles';
 import { forgetWorkspaceSession, isWorkspaceTransferPending } from '../../lib/window-session-aggregator';
 import { cancelPendingConfirmation, dismissWorkspaceUi, requestConfirmation, setRenamingWorkspace, type WorkspaceConfirmation } from '../../lib/workspace-ui-store';
-import { closeWorkspace, createWorkspace, getActiveWorkspaceId, getWorkspacesSnapshot, moveWorkspace, setActiveWorkspace, workspaceRefFor } from '../../lib/workspace-store';
+import { closeWorkspace, createWorkspace, getActiveWorkspaceId, getWorkspacesSnapshot, isWorkspacePinned, moveWorkspace, setActiveWorkspace, workspaceRefFor } from '../../lib/workspace-store';
 import { addPendingKill } from '../../lib/pending-kills';
 import { getHelper, helperHasWork } from '../../lib/helper-terminal';
 import { isDelayedKillEnabled } from '../../lib/labs-settings';
@@ -52,8 +52,17 @@ export async function activateWorkspaceTab(id: WorkspaceId): Promise<void> {
 
 const CLOSE_IN_FLIGHT_REFUSAL = 'another Workspace is closing';
 
+/** Why a pinned Workspace stays open: only its Window's close takes it
+ *  (`docs/specs/layout.md` → "Workspace tabs"). */
+export const PINNED_CLOSE_REFUSAL = 'workspace is pinned; unpin it to close';
+
 /** Serialize closure and successor selection across the Window. */
 let closeInFlight = false;
+
+/** Whether a Workspace close is running anywhere in this Window. */
+export function isWorkspaceCloseInFlight(): boolean {
+  return closeInFlight;
+}
 
 /**
  * Close every member Surface through the closure coordinator, then drop the
@@ -76,6 +85,7 @@ export async function closeWorkspaceWithSurfaces(
   mode: WorkspaceCloseMode = 'prompt',
 ): Promise<string | null> {
   const isCurrent = cancelPendingConfirmation();
+  if (isWorkspacePinned(id)) return PINNED_CLOSE_REFUSAL;
   if (isWorkspaceTransferPending(id)) return 'Workspace is transferring';
   if (closeInFlight) return CLOSE_IN_FLIGHT_REFUSAL;
   const handle = getWallHandle(id);
@@ -128,9 +138,11 @@ function dropFromStrip(id: WorkspaceId, selectSuccessor: boolean): boolean {
 
 /**
  * Begin closing a Workspace. Reveal it first; work raises the typed
- * confirmation, otherwise close immediately.
+ * confirmation, otherwise close immediately. A pinned Workspace ignores the
+ * gesture outright, asking nothing.
  */
 export function requestWorkspaceClose(id: WorkspaceId): void {
+  if (isWorkspacePinned(id)) return;
   const isCurrent = cancelPendingConfirmation();
   if (closeInFlight || isWorkspaceTransferPending(id)) return;
   void closeOnceWallRegisters(id, isCurrent);
@@ -146,12 +158,13 @@ export function requestWorkspaceClose(id: WorkspaceId): void {
 async function closeOnceWallRegisters(id: WorkspaceId, isCurrent: () => boolean): Promise<void> {
   const handle = await awaitWallHandle(id);
   if (!isCurrent()) return;
-  if (closeInFlight || isWorkspaceTransferPending(id)) return;
+  // Pinned during the registration gap: neither a pending kill nor a question.
+  if (closeInFlight || isWorkspaceTransferPending(id) || isWorkspacePinned(id)) return;
   if (!handle) return;
   if (workspaceNeedsCloseConfirmation(id)) {
     // Running helper work refuses a close outright; it is no pending kill.
     if (isDelayedKillEnabled() && !await helpersHaveWork(handle.surfaceIds())) {
-      if (isCurrent() && !closeInFlight) pendWorkspace(id);
+      if (isCurrent() && !closeInFlight && !isWorkspacePinned(id)) pendWorkspace(id);
       return;
     }
     // An immediate close reveals the Workspace itself.

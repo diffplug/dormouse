@@ -13,6 +13,7 @@ import {
   setActiveWorkspace,
   resumeAutoWorkspaceName,
   setAutoWorkspaceName,
+  setWorkspacePinned,
   setWorkspaces,
   subscribeToWorkspaces,
   resolveWorkspaceRef,
@@ -197,6 +198,76 @@ describe('workspace-store', () => {
     expect(moveWorkspace('missing', 0)).toBe(false);
     // Reordering never changes which Workspace is active.
     expect(getActiveWorkspaceId()).toBe('ws-3');
+  });
+
+  describe('pinned group', () => {
+    const ids = () => getWorkspacesSnapshot().workspaces.map((w) => w.id);
+    const pinned = () => getWorkspacesSnapshot().workspaces.filter((w) => w.pinned).map((w) => w.id);
+
+    it('pinning moves a Workspace to the left edge of the pinned group; unpinning to the end of the unpinned one', () => {
+      createWorkspace({ id: 'ws-2' });
+      createWorkspace({ id: 'ws-3' });
+      createWorkspace({ id: 'ws-4' });
+      expect(setWorkspacePinned('ws-2', true)).toBe(true);
+      expect(ids()).toEqual([DEFAULT_WORKSPACE_ID, 'ws-3', 'ws-4', 'ws-2']);
+      expect(setWorkspacePinned(DEFAULT_WORKSPACE_ID, true)).toBe(true);
+      expect(ids()).toEqual(['ws-3', 'ws-4', DEFAULT_WORKSPACE_ID, 'ws-2']);
+      expect(pinned()).toEqual([DEFAULT_WORKSPACE_ID, 'ws-2']);
+      // No change, no notification.
+      expect(setWorkspacePinned('ws-2', true)).toBe(false);
+      expect(setWorkspacePinned('missing', true)).toBe(false);
+      expect(setWorkspacePinned('ws-2', false)).toBe(true);
+      expect(ids()).toEqual(['ws-3', 'ws-4', 'ws-2', DEFAULT_WORKSPACE_ID]);
+      // Unpinned carries no field at all, so a persisted record omits it.
+      expect(getWorkspacesSnapshot().workspaces.find((w) => w.id === 'ws-2')).not.toHaveProperty('pinned');
+      // Pinning never changes which Workspace is active.
+      expect(getActiveWorkspaceId()).toBe('ws-4');
+    });
+
+    it('creates an unpinned Workspace before the pinned group, and a pinned one at its left edge', () => {
+      setWorkspacePinned(DEFAULT_WORKSPACE_ID, true);
+      createWorkspace({ id: 'ws-2' });
+      createWorkspace({ id: 'ws-3', pinned: true, activate: false });
+      createWorkspace({ id: 'ws-4' });
+      expect(ids()).toEqual(['ws-2', 'ws-4', 'ws-3', DEFAULT_WORKSPACE_ID]);
+      expect(pinned()).toEqual(['ws-3', DEFAULT_WORKSPACE_ID]);
+    });
+
+    it('clamps a move within the moved Workspace\'s own group', () => {
+      createWorkspace({ id: 'ws-2' });
+      createWorkspace({ id: 'ws-3', pinned: true });
+      createWorkspace({ id: 'ws-4', pinned: true });
+      expect(ids()).toEqual([DEFAULT_WORKSPACE_ID, 'ws-2', 'ws-4', 'ws-3']);
+      // Past the boundary in either direction stops at the group's edge.
+      expect(moveWorkspace(DEFAULT_WORKSPACE_ID, 99)).toBe(true);
+      expect(ids()).toEqual(['ws-2', DEFAULT_WORKSPACE_ID, 'ws-4', 'ws-3']);
+      expect(moveWorkspace('ws-3', 0)).toBe(true);
+      expect(ids()).toEqual(['ws-2', DEFAULT_WORKSPACE_ID, 'ws-3', 'ws-4']);
+      expect(moveWorkspace('ws-3', 1)).toBe(false);
+      expect(pinned()).toEqual(['ws-3', 'ws-4']);
+    });
+
+    it('setWorkspaces stably partitions a list out of order', () => {
+      setWorkspaces({
+        workspaces: [
+          { id: 'a', name: 'A', nameIsAuto: false, pinned: true },
+          { id: 'b', name: 'B', nameIsAuto: false },
+          { id: 'c', name: 'C', nameIsAuto: false, pinned: true },
+          { id: 'd', name: 'D', nameIsAuto: false },
+        ],
+        activeId: 'a',
+      });
+      expect(ids()).toEqual(['b', 'd', 'a', 'c']);
+      expect(getActiveWorkspaceId()).toBe('a');
+    });
+
+    it('closing the last unpinned Workspace leaves the pinned ones, with no replacement', () => {
+      createWorkspace({ id: 'ws-2', pinned: true });
+      setActiveWorkspace(DEFAULT_WORKSPACE_ID);
+      expect(closeWorkspace(DEFAULT_WORKSPACE_ID)).toBe(true);
+      expect(ids()).toEqual(['ws-2']);
+      expect(getActiveWorkspaceId()).toBe('ws-2');
+    });
   });
 
   it('workspace refs are the minted id number under a registry, and survive a reorder', async () => {

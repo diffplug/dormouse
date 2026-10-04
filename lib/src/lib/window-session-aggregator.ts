@@ -1,5 +1,5 @@
 import { getWorkspacesSnapshot, subscribeToWorkspaces } from './workspace-store';
-import type { PersistedSession, PersistedWindow, PersistedWorkspace, WorkspaceId } from './session-types';
+import { pinnedField, type PersistedSession, type PersistedWindow, type PersistedWorkspace, type WorkspaceId } from './session-types';
 
 /**
  * Collects each Workspace's latest `PersistedSession` into one `PersistedWindow`
@@ -147,7 +147,7 @@ export function getWindowSnapshot(): PersistedWindow {
     const session = previousWorkspaceSession(workspace.id);
     if (!session) continue;
     const { alertDelivery: _old, ...saved } = session;
-    collected.push({ id: workspace.id, name: workspace.name, nameIsAuto: workspace.nameIsAuto, session: {
+    collected.push({ id: workspace.id, name: workspace.name, nameIsAuto: workspace.nameIsAuto, ...pinnedField(workspace), session: {
       ...saved, ...(workspace.alertDelivery ? { alertDelivery: workspace.alertDelivery } : {}),
     } });
   }

@@ -689,6 +689,20 @@ describe("the target half", () => {
     expect(getWorkspacesSnapshot().workspaces[0]?.id).toBe(WORKSPACE_ID);
   });
 
+  it("lands a pinned arrival in this window's pinned group, clamping the slot it names", async () => {
+    createWorkspace({ id: "ws-here", name: "Here" });
+    createWorkspace({ id: "ws-pinned", name: "Notes", pinned: true });
+    const pinnedPayload = payload();
+    arrivals = [{ ...pinnedPayload, workspace: { ...pinnedPayload.workspace, pinned: true }, index: 0 } as WorkspaceTransferPayload];
+
+    initWorkspaceMoves(fakePlatform());
+    await settle();
+
+    const workspaces = getWorkspacesSnapshot().workspaces;
+    expect(workspaces.map((w) => w.id).slice(-2)).toEqual([WORKSPACE_ID, "ws-pinned"]);
+    expect(workspaces.find((w) => w.id === WORKSPACE_ID)?.pinned).toBe(true);
+  });
+
   it("hands the Workspace back when the host never answers, rather than restarting live shells", async () => {
     // A timed-out collection is not a collection that found no PTYs: those
     // shells are still running, and a cold restore would start a second set.
@@ -855,6 +869,13 @@ describe("a torn-out window's boot", () => {
     expect(Object.keys(plans ?? {})).toEqual([WORKSPACE_ID]);
     // The window has no snapshot yet; its Workspace comes from the payload.
     expect(getWorkspacesSnapshot().workspaces.map((workspace) => workspace.name)).toEqual(["Deploys"]);
+  });
+
+  it("keeps the torn-out Workspace's pin", async () => {
+    const pinnedPayload = payload();
+    arrivals = [{ ...pinnedPayload, workspace: { ...pinnedPayload.workspace, pinned: true } }];
+    await bootFromTearOut(fakePlatform());
+    expect(getWorkspacesSnapshot().workspaces.map((workspace) => workspace.pinned)).toEqual([true]);
   });
 
   it("boots fresh without installing a refused tear-out or retaining its Sessions", async () => {

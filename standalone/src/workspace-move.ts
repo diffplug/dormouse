@@ -37,7 +37,7 @@ import {
 } from "dormouse-lib/lib/workspace-store";
 import type { PlatformAdapter, PtyInfo, PtyReplayDetail } from "dormouse-lib/lib/platform/types";
 import type { TerminalGrid } from "dormouse-lib/lib/terminal-transfer";
-import type { WorkspaceId } from "dormouse-lib/lib/session-types";
+import { pinnedField, type WorkspaceId } from "dormouse-lib/lib/session-types";
 import { installWindowPersistence } from "./window-restore";
 import { listenToWindow } from "./window-label";
 import { workspaceDropTarget } from "./workspace-tabs";
@@ -495,7 +495,9 @@ async function adoptWorkspace(platform: PlatformAdapter, payload: MovePayload): 
     // tabs, which is why a drag sends a point rather than an index — else the
     // end.
     const index = payload.index ?? (payload.at ? workspaceDropTarget(payload.at.x).index : undefined);
-    createWorkspace({ id, name, nameIsAuto: payload.workspace.nameIsAuto, alertDelivery: session.alertDelivery });
+    // A pinned Workspace arrives pinned, in this window's pinned group, and the
+    // index below clamps within that group.
+    createWorkspace({ id, name, nameIsAuto: payload.workspace.nameIsAuto, pinned: payload.workspace.pinned === true, alertDelivery: session.alertDelivery });
     if (index !== undefined) moveWorkspace(id, index);
     setActiveWorkspace(id);
     // Last, and only now: it is what tells the source to let the Workspace go.
@@ -602,7 +604,7 @@ export async function bootFromTearOut(platform: PlatformAdapter): Promise<WallBo
   // Nothing on disk yet: this window's first aggregator flush writes its
   // snapshot, and from there it is an ordinary restorable window. After the
   // plan, so a refused arrival leaves no half-installed Window behind.
-  installWindowPersistence(platform, { version: 1, workspaces: [{ id, name, nameIsAuto, session }], activeWorkspaceId: id });
+  installWindowPersistence(platform, { version: 1, workspaces: [{ id, name, nameIsAuto, ...pinnedField(first.workspace), session }], activeWorkspaceId: id });
   publishWorkspaceSession(id, session);
   adopting.delete(id);
   // A second Workspace dropped on this window between the tear-out and this

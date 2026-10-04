@@ -7,8 +7,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   closeWorkspaceWithSurfaces,
   enterWorkspace,
+  PINNED_CLOSE_REFUSAL,
   requestWorkspaceClose,
 } from './workspace-lifecycle';
+import { setPlatform } from '../../lib/platform';
+import { FakePtyAdapter } from '../../lib/platform/fake-adapter';
+import { _resetLabsSettingsForTesting, setDelayedKillSetting } from '../../lib/labs-settings';
+import { getPendingKills } from '../../lib/pending-kills';
 import { registerWallHandle, resetWallHandles, stubWallHandle, type WallHandle } from './wall-handles';
 import { cancelPendingConfirmation, getWorkspaceUiSnapshot, requestConfirmation, resetWorkspaceUi, setRenamingWorkspace } from '../../lib/workspace-ui-store';
 import {
@@ -18,6 +23,7 @@ import {
   getWorkspacesSnapshot,
   resetWorkspaces,
   setActiveWorkspace,
+  setWorkspacePinned,
 } from '../../lib/workspace-store';
 import { recordToolDirty, resetToolDirty } from '../../lib/tool-dirty-store';
 import { cancelEditorClose, decideEditorClose, getEditorClosePrompt, UNSAVED_TOOL_REFUSAL } from '../../lib/tool-editor';
@@ -204,6 +210,59 @@ it('answers a pending confirmation no when a close is requested', () => {
   expect(getWorkspaceUiSnapshot().confirmation).toBeNull();
 });
 
+describe('a pinned Workspace', () => {
+  afterEach(() => _resetLabsSettingsForTesting());
+
+  it('refuses every close verb, a silent one included, without touching a Surface', async () => {
+    const [first] = ids();
+    createWorkspace({ id: 'ws-2' });
+    const closeAll = vi.fn(async () => null);
+    handleFor('ws-2', { closeAll });
+    setWorkspacePinned('ws-2', true);
+
+    expect(await closeWorkspaceWithSurfaces('ws-2')).toBe(PINNED_CLOSE_REFUSAL);
+    expect(await closeWorkspaceWithSurfaces('ws-2', 'silent')).toBe(PINNED_CLOSE_REFUSAL);
+    requestWorkspaceClose('ws-2');
+    await Promise.resolve();
+    expect(closeAll).not.toHaveBeenCalled();
+    expect(ids()).toEqual([first, 'ws-2']);
+
+    // Unpinned, the same gesture closes it.
+    setWorkspacePinned('ws-2', false);
+    requestWorkspaceClose('ws-2');
+    await vi.waitFor(() => expect(ids()).toEqual([first]));
+  });
+
+  it('asks nothing and leaves another Workspace\'s pending question up', async () => {
+    const [first] = ids();
+    createWorkspace({ id: 'ws-2' });
+    handleFor('ws-2', { needsCloseConfirmation: () => true });
+    setWorkspacePinned('ws-2', true);
+    const answer = vi.fn();
+    requestConfirmation({ id: first, char: 'a', answer });
+    requestWorkspaceClose('ws-2');
+    await Promise.resolve();
+    expect(getWorkspaceUiSnapshot().confirmation?.id).toBe(first);
+    expect(answer).not.toHaveBeenCalled();
+  });
+
+  it('never becomes a Labs pending kill', async () => {
+    const fake = new FakePtyAdapter();
+    Object.assign(fake, { offersLabs: true });
+    setPlatform(fake);
+    setDelayedKillSetting(true);
+    const [first] = ids();
+    createWorkspace({ id: 'ws-2' });
+    handleFor('ws-2', { needsCloseConfirmation: () => true });
+    // Pinned while the gesture waits out the Wall's registration gap.
+    requestWorkspaceClose('ws-2');
+    setWorkspacePinned('ws-2', true);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(getPendingKills()).toEqual([]);
+    expect(ids()).toEqual([first, 'ws-2']);
+    expect(getWorkspaceUiSnapshot().confirmation).toBeNull();
+  });
+});
 
 describe('enterWorkspace', () => {
   it.each([false, true])('waits for the new Wall and respects navigation away: %s', async navigatedAway => {

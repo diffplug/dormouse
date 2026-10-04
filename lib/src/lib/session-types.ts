@@ -143,7 +143,15 @@ export interface PersistedWorkspace {
   /** Always written. A blob from before auto-naming lacks it, and reads a
    *  default name as auto, any other as user-set. */
   nameIsAuto: boolean;
+  /** Written only when true; absent reads as unpinned
+   *  (`docs/specs/layout.md` → "Workspace tabs"). */
+  pinned?: true;
   session: PersistedSession;
+}
+
+/** A record's `pinned` field: present only when the Workspace is pinned. */
+export function pinnedField(workspace: { pinned?: boolean }): { pinned?: true } {
+  return workspace.pinned === true ? { pinned: true } : {};
 }
 
 /** Standalone Window snapshot. VS Code persists one bare Session per webview. */
@@ -387,7 +395,7 @@ export function readPersistedWindow(raw: unknown): PersistedWindow | null {
       if (!session) return null;
       seen.add(ws.id);
       const nameIsAuto = typeof ws.nameIsAuto === 'boolean' ? ws.nameIsAuto : isDefaultWorkspaceName(ws.name);
-      return { id: ws.id, name: ws.name, nameIsAuto, session };
+      return { id: ws.id, name: ws.name, nameIsAuto, ...pinnedField(ws), session };
     })
     .filter((ws): ws is PersistedWorkspace => ws !== null);
   if (workspaces.length === 0) return null;

@@ -28,7 +28,13 @@ export function handlePaneNavigation(
     navHistory.current = null;
     if (dir === 'ArrowDown') ctx.returnToPane();
     else if (dir === 'ArrowLeft' || dir === 'ArrowRight') {
-      const ids = [...getWorkspacesSnapshot().workspaces.map(workspace => workspace.id), null];
+      // The strip's own order: unpinned tabs, `+` (null), then the pinned group.
+      const { workspaces } = getWorkspacesSnapshot();
+      const ids = [
+        ...workspaces.filter(workspace => !workspace.pinned).map(workspace => workspace.id),
+        null,
+        ...workspaces.filter(workspace => workspace.pinned).map(workspace => workspace.id),
+      ];
       const index = ids.indexOf(workspaceIdOfSelection(currentType, sid));
       const next = index + (dir === 'ArrowLeft' ? -1 : 1);
       if (index >= 0 && next >= 0 && next < ids.length) ctx.selectWorkspace(ids[next]);
