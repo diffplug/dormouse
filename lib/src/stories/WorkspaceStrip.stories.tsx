@@ -25,7 +25,7 @@ function primed(names: string[], activeIndex: number, membership?: Record<number
  *  preview decorator writes before first render (the strip reads the store on
  *  its first) and clears after. */
 function StripStory({ width = 640, busyIndex, todoLabels, tearsOut = false }: {
-  width?: number;
+  width?: number | string;
   busyIndex?: number;
   /** Stands in for a host with windows, which offers Move to new window. */
   tearsOut?: boolean;
@@ -158,9 +158,9 @@ export const PinnedOverflow: Story = {
   },
 };
 
-/** Right-click (or Shift+F10 on a focused tab) opens the tab's menu at the
- *  pointer. A user-set name offers Use automatic name; a host with windows
- *  offers Move to new window. */
+/** Right-click (or Shift+F10 on a focused tab) opens the tab's menu under it,
+ *  left edges aligned. A user-set name offers Use automatic name; a host with
+ *  windows offers Move to new window. */
 export const TabMenu: Story = {
   args: { tearsOut: true },
   parameters: { primedWorkspaces: primed(['Workspace 1', 'Deploys', 'Notes'], 1, undefined, [2]) },
@@ -174,9 +174,12 @@ export const TabMenu: Story = {
   },
 };
 
-/** A pinned tab's menu: Unpin, and a Close that says to unpin first. */
+/** A pinned tab's menu: Unpin, and a Close that says to unpin first. At the
+ *  window's right end there is no room for it to the tab's right, so its right
+ *  edge meets the tab's. */
 export const PinnedTabMenu: Story = {
-  parameters: { primedWorkspaces: primed(['Workspace 1', 'Deploys', 'Notes'], 1, undefined, [2]) },
+  args: { width: '100vw' },
+  parameters: { layout: 'fullscreen', primedWorkspaces: primed(['Workspace 1', 'Deploys', 'Notes'], 1, undefined, [2]) },
   play: async () => {
     const tab = await requireElement<HTMLElement>(`[data-workspace-tab="${ws(2)}"]`, 'pinned tab');
     const box = tab.getBoundingClientRect();

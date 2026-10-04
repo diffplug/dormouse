@@ -15,11 +15,10 @@ export interface WorkspaceConfirmation {
   answer: (accepted: boolean) => void;
 }
 
-/** An open tab context menu: its Workspace, the viewport point it opens at,
- *  and whether a key opened it, which is what it hands focus back to. */
+/** An open tab context menu: its Workspace, and whether a key opened it,
+ *  which is what it hands focus back to. */
 export interface WorkspaceMenu {
   id: WorkspaceId;
-  at: { x: number; y: number };
   keyboard: boolean;
 }
 

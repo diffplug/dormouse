@@ -96,11 +96,11 @@ export function WorkspaceStrip({
 
   // Never over an open rename editor or a pending question, and never for a
   // Workspace already on its way out (`docs/specs/layout.md` → "Workspace tabs").
-  const openMenu = useCallback((id: WorkspaceId, at: { x: number; y: number }, keyboard: boolean) => {
+  const openMenu = useCallback((id: WorkspaceId, keyboard: boolean) => {
     const ui = getWorkspaceUiSnapshot();
     if (ui.renamingId !== null || ui.confirmation !== null) return;
     if (isWorkspaceTransferPending(id) || isWorkspaceCloseInFlight()) return;
-    openWorkspaceMenu({ id, at, keyboard });
+    openWorkspaceMenu({ id, keyboard });
   }, []);
 
   const activate = useCallback((id: WorkspaceId) => {
@@ -274,7 +274,7 @@ export function WorkspaceStrip({
       )}
       {menu && menuWorkspace && (
         <WorkspaceTabMenu
-          key={`${menu.id}:${menu.at.x}:${menu.at.y}`}
+          key={menu.id}
           menu={menu}
           workspace={menuWorkspace}
           onMoveToNewWindow={onMoveToNewWindow}
@@ -306,9 +306,6 @@ export function WorkspaceStrip({
     </div>
   );
 }
-
-/** The keyboard-opened menu's gap below its tab. */
-const MENU_GAP_PX = 4;
 
 /** Memoized: every callback below is stable and takes the Workspace id, so a tab
  *  re-renders only when its own name, state, or union changes. */
@@ -351,9 +348,9 @@ const WorkspaceTab = memo(function WorkspaceTab({
   onFinishRename: (id: WorkspaceId, value: string) => void;
   onCancelRename: () => void;
   onRequestClose: (id: WorkspaceId) => void;
-  /** Open the tab's context menu at a viewport point; `keyboard` when a key
-   *  opened it, so Escape hands focus back to the tab. */
-  onOpenMenu: (id: WorkspaceId, at: { x: number; y: number }, keyboard: boolean) => void;
+  /** Open the tab's context menu under it; `keyboard` when a key opened it,
+   *  so Escape hands focus back to the tab. */
+  onOpenMenu: (id: WorkspaceId, keyboard: boolean) => void;
   onPress: (id: WorkspaceId, event: ReactPointerEvent<HTMLElement>) => void;
   wasDragged: () => boolean;
 }) {
@@ -407,14 +404,13 @@ const WorkspaceTab = memo(function WorkspaceTab({
         // The rename editor keeps the platform's own text menu.
         if (renaming) return;
         event.preventDefault();
-        onOpenMenu(id, { x: event.clientX, y: event.clientY }, false);
+        onOpenMenu(id, false);
       }}
       onKeyDown={(event) => {
         if (renaming || !(event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10'))) return;
         event.preventDefault();
         event.stopPropagation();
-        const box = event.currentTarget.getBoundingClientRect();
-        onOpenMenu(id, { x: box.left, y: box.bottom + MENU_GAP_PX }, true);
+        onOpenMenu(id, true);
       }}
     >
       {renaming ? (

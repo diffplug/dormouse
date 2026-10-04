@@ -1,15 +1,17 @@
-import { useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { flushSync } from 'react-dom';
 import { clsx } from 'clsx';
-import { MODAL_LAYERS, OVERLAY_MAX_HEIGHT, POPUP_MENU_ITEM_CLASS, PopupButtonRow, portalToBody, useMeasuredElementRect } from './design';
-import { useCloseOnOutsideAndEscape } from './use-anchored-menu';
+import { OVERLAY_MAX_HEIGHT, POPUP_MENU_ITEM_CLASS, PopupButtonRow, portalToBody } from './design';
+import { useAnchoredMenu, useCloseOnOutsideAndEscape } from './use-anchored-menu';
 import { workspaceTabElement } from './workspace-tab-elements';
 import { pinWorkspace, requestWorkspaceClose, requestWorkspaceRename } from './wall/workspace-lifecycle';
 import { writeTextToClipboard } from '../lib/clipboard';
-import { clampOverlayPosition } from '../lib/ui-geometry';
 import { closeWorkspaceMenu, type WorkspaceMenu } from '../lib/workspace-ui-store';
 import { resumeAutoWorkspaceName, workspaceRefFor, type WorkspaceMeta } from '../lib/workspace-store';
 import type { WorkspaceId } from '../lib/session-types';
+
+/** Fixed for the anchor's start/end flip; a long ref truncates. */
+const MENU_WIDTH_PX = 224;
 
 interface MenuItem {
   key: string;
@@ -51,11 +53,14 @@ export function WorkspaceTabMenu({
   const { id } = workspace;
   const pinned = workspace.pinned === true;
   const menuRef = useRef<HTMLDivElement | null>(null);
-  const [menuEl, setMenuEl] = useState<HTMLDivElement | null>(null);
-  const rect = useMeasuredElementRect(menuEl);
   // What a mouse-opened menu hands focus back to: whatever held it before.
   const [opener] = useState(() => (document.activeElement instanceof HTMLElement ? document.activeElement : null));
   const anchorRef = useRef<HTMLElement | null>(workspaceTabElement(id));
+  // Under the tab, left edges aligned, or right edges where the menu would run
+  // off the window's right (a pinned tab at the title bar's end).
+  const { setTriggerEl, setMenuEl, menuStyle } = useAnchoredMenu(true, MENU_WIDTH_PX, { align: 'auto' });
+  useLayoutEffect(() => setTriggerEl(anchorRef.current), [setTriggerEl]);
+  const placed = menuStyle.visibility !== 'hidden';
 
   const restoreFocus = () => (menu.keyboard ? tabButton(id) : opener)?.focus({ preventScroll: true });
   useCloseOnOutsideAndEscape(true, menuRef, closeWorkspaceMenu, anchorRef);
@@ -85,14 +90,14 @@ export function WorkspaceTabMenu({
     if (item.restoresFocus !== false) restoreFocus();
   };
 
-  // Focus the first row once the menu is measured and visible: a hidden element
+  // Focus the first row once the menu is placed and visible: a hidden element
   // cannot take focus.
   const focused = useRef(false);
   useLayoutEffect(() => {
-    if (!rect || focused.current) return;
+    if (!placed || focused.current) return;
     focused.current = true;
     menuRef.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus({ preventScroll: true });
-  }, [rect]);
+  }, [placed]);
 
   const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     const rows = [...(menuRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? [])];
@@ -118,21 +123,14 @@ export function WorkspaceTabMenu({
     rows[next]?.focus({ preventScroll: true });
   };
 
-  const style: CSSProperties = {
-    zIndex: MODAL_LAYERS.app,
-    ...(rect
-      ? clampOverlayPosition({ left: menu.at.x, top: menu.at.y, width: rect.width, height: rect.height })
-      : { position: 'fixed', left: 0, top: 0, visibility: 'hidden' }),
-  };
-
   return portalToBody(
     <PopupButtonRow
       ref={(element: HTMLDivElement | null) => { menuRef.current = element; setMenuEl(element); }}
       role="menu"
       aria-label={`${workspace.name} actions`}
       data-workspace-menu-for={id}
-      className={clsx('min-w-44 flex-col py-1', OVERLAY_MAX_HEIGHT.popover)}
-      style={style}
+      className={clsx('flex-col py-1', OVERLAY_MAX_HEIGHT.popover)}
+      style={menuStyle}
       onKeyDown={onKeyDown}
       // A keyboard-opened menu takes focus before the browser's own context
       // menu event lands on it.
@@ -153,7 +151,7 @@ export function WorkspaceTabMenu({
             onClick={() => activate(item)}
           >
             <span className="min-w-0 flex-1 truncate">{item.label}</span>
-            {item.hint && <span className="shrink-0 pl-4 text-muted">{item.hint}</span>}
+            {item.hint && <span className="min-w-0 shrink truncate pl-4 text-muted">{item.hint}</span>}
           </button>
         </div>
       ))}

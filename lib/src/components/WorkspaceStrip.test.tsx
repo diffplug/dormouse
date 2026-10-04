@@ -737,7 +737,7 @@ describe('tab context menu', () => {
     await act(async () => { target.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init })); });
   };
 
-  it('opens at the pointer with its rows in order, holding the chrome keyboard lease', async () => {
+  it('opens with its rows in order, holding the chrome keyboard lease', async () => {
     const first = getWorkspacesSnapshot().workspaces[0].id;
     await render();
     await rightClick(first);
@@ -753,6 +753,32 @@ describe('tab context menu', () => {
     await act(async () => { document.body.dispatchEvent(pointer('pointerdown', { button: 0 })); });
     expect(menuEl()).toBeNull();
     expect(chromeKeyboardHeld()).toBe(false);
+  });
+
+  it('opens under its tab, left edges aligned, or right edges aligned at the window\'s right end', async () => {
+    const first = getWorkspacesSnapshot().workspaces[0].id;
+    await act(async () => { createWorkspace({ id: 'ws-2', name: 'Notes', pinned: true }); });
+    await render();
+    // jsdom lays nothing out: a tab near the left, and a pinned one at the
+    // window's right end (innerWidth 1024).
+    const boxes: Record<string, { left: number; width: number }> = { [first]: { left: 100, width: 80 }, 'ws-2': { left: 950, width: 60 } };
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const box = this.dataset.workspaceTab ? boxes[this.dataset.workspaceTab] : undefined;
+      const left = box?.left ?? 0;
+      const width = box?.width ?? 0;
+      return { left, right: left + width, width, top: 6, bottom: 30, height: 24, x: left, y: 6, toJSON: () => ({}) } as DOMRect;
+    });
+    Object.defineProperty(window, 'innerWidth', { value: 1024, configurable: true });
+
+    // The pointer's position plays no part.
+    await rightClick(first, { clientX: 600, clientY: 300 });
+    expect(menuEl()!.style.left).toBe('100px');
+    expect(menuEl()!.style.top).toBe('34px');
+    await key(menuEl()!, { key: 'Escape' });
+
+    // 224px from 950 would run off the right: its right edge meets the tab's.
+    await rightClick('ws-2', { clientX: 10, clientY: 10 });
+    expect(menuEl()!.style.left).toBe(`${950 + 60 - 224}px`);
   });
 
   it('offers Use automatic name only for a user-set name, and Move to new window only from a host that tears out', async () => {

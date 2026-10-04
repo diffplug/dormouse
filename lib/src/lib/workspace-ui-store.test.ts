@@ -53,7 +53,7 @@ it.each([
 });
 
 it('the tab menu yields to a rename, a confirmation, any close or move starting, and its own Workspace leaving', () => {
-  const menu = { id: 'a', at: { x: 1, y: 2 }, keyboard: false };
+  const menu = { id: 'a', keyboard: false };
   const yields: Array<() => void> = [
     () => setRenamingWorkspace('b'),
     () => requestConfirmation({ id: 'b', char: 'q', answer: vi.fn() }),
