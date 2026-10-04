@@ -120,7 +120,7 @@ The attacker is another local account reading disk; what the remote stack leaves
 
 **Standalone writes `recovery.json` beside its sessions directory**, under the state root, owner-only: one rebuilt agent-resume invocation per Surface, never a buffer, unlinked as it is read (`docs/compatible-agents.md` -> "Recovery record").
 
-**The managed-voice token is a bearer credential at rest**, written only by a Hosted sign-in — `managed-voice.json` beside the Burrow's enrollment in the state dir, `0700`/`0600`, under the owner-only DACL `burrow_state_dir` applies on Windows before the sidecar spawns (rationale); `docs/specs/alert.md` → "Managed voice" keeps it from any webview. Where the token may go is `docs/specs/security-remote.md` -> "Relay origin".
+**The managed-voice token is a bearer credential at rest**, written only by a Hosted sign-in — in VS Code, `SecretStorage` beside the enrollment (`docs/specs/vscode.md` -> "Managed voice"); in standalone, `managed-voice.json` beside the Burrow's enrollment in the state dir, `0700`/`0600`, under the owner-only DACL `burrow_state_dir` applies on Windows before the sidecar spawns (rationale); `docs/specs/alert.md` → "Managed voice" keeps it from any webview. Where the token may go is `docs/specs/security-remote.md` -> "Relay origin".
 
 **VS Code persists pane structure in VS Code's own storage** — `workspaceState` and `vscode.setState()` — so the modes there are VS Code's, not ours, and no transcript reaches either (`docs/specs/vscode.md` -> "Serialization and restore"). Dormouse also writes `recovery.json` in extension storage, mode `0600` on Unix: one rebuilt agent-resume invocation per Surface, no buffer, unlinked as it is read (`docs/compatible-agents.md` -> "Recovery record").
 

@@ -38,6 +38,7 @@ import {
 } from '../terminal-protocol';
 import { HOST_MESSAGE_TOKEN_FIELD, HOST_MESSAGE_TOKEN_GLOBAL } from '../vscode-message-token';
 import { VSCodeAdapter } from './vscode-adapter';
+import { MANAGED_VOICE_GLOBAL } from '../vscode-managed-voice-global';
 import { BROWSER_REQUEST_TIMEOUT_MS } from './browser-automation';
 
 /** Stand-in for the per-boot token the extension host injects at webview boot. */
@@ -659,5 +660,39 @@ describe('VSCodeAdapter webview visibility', () => {
     expect(hostShown()).toBe(false);
     windowTarget.dispatchEvent(hostMessage({ type: 'dormouse:shown', shown: true }));
     expect(hostShown()).toBe(true);
+  });
+});
+
+describe('VSCodeAdapter managed voice', () => {
+  beforeEach(stubWebviewEnv);
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+  });
+
+  const voiceCommands = () =>
+    postMessage.mock.calls.map((call) => call[0]).filter((message) => message.type === 'voice:command');
+
+  it('has no port unless the host says this build has managed voice', () => {
+    expect(new VSCodeAdapter().managedVoice).toBeUndefined();
+    expect(voiceCommands()).toEqual([]);
+  });
+
+  it('asks the host for its status once listening, and takes each broadcast', async () => {
+    vi.stubGlobal(MANAGED_VOICE_GLOBAL, true);
+    const adapter = new VSCodeAdapter();
+    const [ask] = voiceCommands();
+    expect(ask).toMatchObject({ payload: { op: 'status' } });
+    windowTarget.dispatchEvent(hostMessage({
+      type: 'voice:result', requestId: ask.requestId, result: { configured: false, voiceId: 'v1', notEntitled: false },
+    }));
+    await vi.waitFor(() => expect(adapter.managedVoice!.status()).toEqual({ configured: false, voiceId: 'v1', notEntitled: false }));
+
+    windowTarget.dispatchEvent(hostMessage({ type: 'voice:status', status: { configured: true, voiceId: 'v1', notEntitled: false } }));
+    expect(adapter.managedVoice!.status()).toMatchObject({ configured: true });
+    // A forged broadcast, without the host's token, changes nothing.
+    windowTarget.dispatchEvent(hostMessage({ type: 'voice:status', status: { configured: false, voiceId: 'v1' } }, 'forged'));
+    expect(adapter.managedVoice!.status()).toMatchObject({ configured: true });
   });
 });

@@ -55,7 +55,7 @@ function useManagedVoiceStatus(port: ManagedVoicePort | undefined): ManagedVoice
   return useSyncExternalStore(subscribe, snapshot);
 }
 
-/** Whether this build offers managed voice at all: a Hosted standalone build's port. */
+/** Whether this build offers managed voice at all: a Hosted desktop build's port. */
 export function useManagedVoiceOffered(): boolean {
   return getPlatform().managedVoice !== undefined;
 }
@@ -70,7 +70,7 @@ export function useManagedVoiceConfigured(): boolean {
  * "Settings dialog"): signing in to Dormouse Hosted, which is this computer's
  * Hosted enrollment ({@link HostedEnrollView}, shared with Remote control),
  * then the member's voice and Sign out. Renders nothing in a build without
- * managed voice — a self-host build, VS Code.
+ * managed voice — a self-host build.
  */
 export function ManagedVoiceSection({ onShowNetwork }: { onShowNetwork?: () => void }) {
   const port = getPlatform().managedVoice;

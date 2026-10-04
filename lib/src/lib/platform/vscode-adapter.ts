@@ -9,6 +9,9 @@ import { createBurrowLinkClient } from '../../host/remote/link-client';
 import { createAlertClient, type AlertClientMethods } from '../../host/alert-client';
 import { isAlertEvent } from '../../host/alert-protocol';
 import { readInjectedRecoveryCommands } from '../vscode-recovery-global';
+import { readInjectedManagedVoice } from '../vscode-managed-voice-global';
+import { createManagedVoicePortClient, type ManagedVoicePortClient } from './managed-voice-port';
+import { MANAGED_VOICE_REQUEST_TIMEOUT_MS } from './managed-voice-types';
 import { setDefaultShellOpts } from '../shell-defaults';
 import { setHostShown } from '../host-shown';
 import { embedderOrigins } from '../embedder-origins';
@@ -29,6 +32,9 @@ import type { VSCodeWorkbenchCommand } from '../vscode-keybindings';
  * "no reply came".
  */
 const DETACHED = Symbol('detached');
+
+/** How long a `voice:command` waits for the extension host: past its own request bound. */
+const MANAGED_VOICE_COMMAND_TIMEOUT_MS = MANAGED_VOICE_REQUEST_TIMEOUT_MS + 5_000;
 
 /** The `alert*` platform methods, taken from the shared client in the constructor. */
 export interface VSCodeAdapter extends AlertClientMethods {}
@@ -75,6 +81,15 @@ export class VSCodeAdapter implements PlatformAdapter {
   });
 
   readonly burrow: BurrowLink = this.burrowClient.link;
+
+  // Managed voice lives in this window's extension host, beside the token it
+  // keeps (`vscode-ext/src/managed-voice.ts`); this webview plays what it
+  // fetches. Present only in a Hosted build, which the host says at boot.
+  readonly managedVoice: ManagedVoicePortClient | undefined = readInjectedManagedVoice()
+    ? createManagedVoicePortClient((payload) =>
+        this.requestResponse('voice:command', 'voice:result', { payload }, (msg) => msg.result, MANAGED_VOICE_COMMAND_TIMEOUT_MS),
+      )
+    : undefined;
 
   constructor() {
     this.vscode = acquireVsCodeApi();
@@ -174,8 +189,12 @@ export class VSCodeAdapter implements PlatformAdapter {
         this.burrowClient.onResult(msg.payload);
       } else if (msg.type === 'burrow:event') {
         this.burrowClient.onEvent(msg.payload);
+      } else if (msg.type === 'voice:status') {
+        this.managedVoice?.receiveStatus(msg.status);
       }
     });
+    // The `voice:status` listener above is live, so the first ask cannot miss a broadcast.
+    this.managedVoice?.refresh();
   }
 
   private nextRequestId = 0;
