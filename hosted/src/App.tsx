@@ -15,6 +15,7 @@ import {
   getProviders,
   getSession,
   getVoiceTokens,
+  NoPlanError,
   openPortal,
   post,
   providerNames,
@@ -37,8 +38,20 @@ import {
   LOGIN_FRESH_AGE_MS,
   RECENT_LOGIN_WINDOW,
 } from "../server/policy-constants";
-import { takeEnrollment, type Enrollment } from "./enrollment";
-import { CheckoutView, PLAN_NAMES, PlanSection, WelcomeView } from "./Billing";
+import {
+  ADD_A_COMPUTER,
+  approvedNotice,
+  takeEnrollment,
+  type Enrollment,
+} from "./enrollment";
+import { computerName } from "../../remote-lib-common/src/remote/enrolled-computers.ts";
+import {
+  CheckoutView,
+  PLAN_NAMES,
+  PLANS_PAGE,
+  PlanSection,
+  WelcomeView,
+} from "./Billing";
 import { forgetCheckout, type CheckoutRef } from "./checkout";
 
 type Page = "enroll" | "checkout" | "welcome" | "account" | "login";
@@ -86,6 +99,8 @@ export function App({
   // The enrollment awaiting approval, in memory only: through sign-in and
   // back, never into storage (docs/specs/hosted.md -> "Burrow enrollment").
   const [enrolling, setEnrolling] = useState(enrollment);
+  // Approval refused for want of a plan, where the billing summary could not say so first.
+  const [approveNoPlan, setApproveNoPlan] = useState(false);
   // Null while this deployment does not sell, or before sign-in.
   const [billing, setBilling] = useState<BillingSummary | null>(null);
   const [buying, setBuying] = useState(checkout);
@@ -259,15 +274,22 @@ export function App({
     });
   const approve = (code: string) =>
     act("approve", async () => {
-      await approveEnrollment(code);
+      // The count before this approval: a full account keeps it until one is removed.
+      const enrolled = computers?.length ?? null;
+      try {
+        await approveEnrollment(code);
+      } catch (error) {
+        if (!(error instanceof NoPlanError)) throw error;
+        setApproveNoPlan(true);
+        return;
+      }
       clearEnrollment();
       await refresh();
-      setNotice(
-        `Approved ${code}. Dormouse on your computer finishes enrolling in a few seconds.`,
-      );
+      setNotice(approvedNotice(code, enrolled));
     });
   const clearEnrollment = () => {
     setEnrolling(null);
+    setApproveNoPlan(false);
     setError("");
   };
   const removeOne = (burrowId: string) =>
@@ -298,7 +320,7 @@ export function App({
   const copyMinted = () =>
     act("copy", async () => {
       await navigator.clipboard.writeText(minted);
-      setNotice("Token copied. Paste it into Dormouse’s voice settings.");
+      setNotice("Token copied.");
     });
   // The one page this state shows, and the address it keeps.
   const page: Page = enrolling
@@ -321,6 +343,7 @@ export function App({
   const fresh =
     session &&
     Date.now() - Date.parse(session.session.createdAt) < LOGIN_FRESH_AGE_MS;
+  const noPlan = approveNoPlan || billing?.entitled === false;
 
   return (
     <div className="shell">
@@ -374,11 +397,24 @@ export function App({
                 {enrolling.code ? (
                   <>
                     <p className="user-code">{enrolling.code}</p>
-                    <p>
-                      Approve only if Dormouse on your computer is showing this
-                      code right now.
-                    </p>
-                    {fresh ? (
+                    {noPlan ? (
+                      <>
+                        <p>
+                          This account has no Hosted plan, so it cannot sign in
+                          a computer.
+                        </p>
+                        <p className="help">
+                          <a href={PLANS_PAGE}>Choose a plan</a>, then open the
+                          link from Dormouse again to approve this code.
+                        </p>
+                      </>
+                    ) : (
+                      <p>
+                        Approve only if Dormouse on your computer is showing
+                        this code right now.
+                      </p>
+                    )}
+                    {noPlan ? null : fresh ? (
                       <button
                         className="primary"
                         disabled={!!busy}
@@ -440,7 +476,10 @@ export function App({
                 act={act}
                 onFounder={founder}
                 onSurvey={sendSurvey}
-                onDone={() => setWelcome(false)}
+                onDone={() => {
+                  setWelcome(false);
+                  setNotice("");
+                }}
               />
             ) : session ? (
               <>
@@ -578,15 +617,12 @@ export function App({
                       voice and reach your phones through the Hosted Relay.
                     </p>
                     {computers.length === 0 && (
-                      <p className="help">
-                        No computers yet. Enroll one from Dormouse on that
-                        computer.
-                      </p>
+                      <p className="help">No computers yet. {ADD_A_COMPUTER}</p>
                     )}
                     {computers.map((computer) => (
                       <div className="method" key={computer.burrowId}>
                         <span>
-                          Computer {computer.burrowId.slice(0, 8)}
+                          {computerName(computer.burrowId)}
                           <span className="detail">
                             Enrolled{" "}
                             {new Date(computer.enrolledAt).toLocaleDateString()}
@@ -747,7 +783,7 @@ export function App({
                     then connect other providers from your account.
                   </p>
                 )}
-                {!enrolling && (
+                {!enrolling && buying === undefined && (
                   <p className="footnote">
                     Hosted voice and remote control are not available yet.
                   </p>
