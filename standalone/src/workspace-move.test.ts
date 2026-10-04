@@ -703,6 +703,18 @@ describe("the target half", () => {
     expect(workspaces.find((w) => w.id === WORKSPACE_ID)?.pinned).toBe(true);
   });
 
+  it("lands a pinned arrival with no slot at the end of this window's pinned group", async () => {
+    createWorkspace({ id: "ws-here", name: "Here" });
+    createWorkspace({ id: "ws-pinned", name: "Notes", pinned: true });
+    const pinnedPayload = payload();
+    arrivals = [{ ...pinnedPayload, workspace: { ...pinnedPayload.workspace, pinned: true } }];
+
+    initWorkspaceMoves(fakePlatform());
+    await settle();
+
+    expect(getWorkspacesSnapshot().workspaces.map((w) => w.id).slice(-2)).toEqual(["ws-pinned", WORKSPACE_ID]);
+  });
+
   it("hands the Workspace back when the host never answers, rather than restarting live shells", async () => {
     // A timed-out collection is not a collection that found no PTYs: those
     // shells are still running, and a cold restore would start a second set.

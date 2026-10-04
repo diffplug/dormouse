@@ -496,9 +496,9 @@ async function adoptWorkspace(platform: PlatformAdapter, payload: MovePayload): 
     // end.
     const index = payload.index ?? (payload.at ? workspaceDropTarget(payload.at.x, payload.workspace.pinned).index : undefined);
     // A pinned Workspace arrives pinned, in this window's pinned group, and the
-    // index below clamps within that group.
+    // index below clamps within that group: no index is that group's end.
     createWorkspace(metaFromRecord(payload.workspace));
-    if (index !== undefined) moveWorkspace(id, index);
+    moveWorkspace(id, index ?? Number.MAX_SAFE_INTEGER);
     setActiveWorkspace(id);
     // Last, and only now: it is what tells the source to let the Workspace go.
     // Awaited, because a refusal is the one signal that the transaction was
