@@ -290,7 +290,7 @@ Source of truth: `window_at` in `standalone/src-tauri/src/routing.rs`; `standalo
 
 ## Persistence
 
-**One `PersistedWindow` per window, every Workspace in it**, restored on the next launch (`docs/specs/transport.md` → "The governing rule"). The Window collector's writer (`docs/specs/transport.md` → "Persisted session types") is `TauriAdapter.saveWindowState`; `getWindowState` is the boot reader. Source of truth: `windowStateSlot` in `standalone/src/window-recovery.ts`.
+**One `PersistedWindow` per window, every Workspace in it**, restored on the next launch (`docs/specs/transport.md` → "The governing rule"). The Window collector's writer is `TauriAdapter.saveWindowState`; `getWindowState` is the boot reader. Collector and cwd probes: `docs/specs/transport.md` → "Persisted session types". Source of truth: `windowStateSlot` in `standalone/src/window-recovery.ts`.
 
 **Boot restores per Workspace off one live-PTY list.** Reload and relaunch are the same path: nothing wires `shutdown()` to `beforeunload`, so a reload's PTYs partition by saved pane id, while a relaunch's list is empty and every Workspace cold-restores at its saved cwds. **A live PTY no saved Workspace names goes to the active Workspace**, except a helper, which goes to the Workspace holding its source.
 

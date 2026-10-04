@@ -70,7 +70,7 @@ Source of truth: `ITERM2_COMPAT_VERSION` in `standalone/sidecar/pty-core.js` and
 1. The visible or deserialized webview calls `requestInit` (VS Code: `{ type: 'dormouse:init' }`) under a fresh token.
 2. The host answers `pty:list` (one `PtyInfo` per owned PTY), then one `pty:replay` for each, empty or not, then `alert:state` for each.
 3. Listed PTYs resume with their launch shells (consumer: `docs/specs/mouse-and-clipboard.md` -> "8.6 Paste Content"), saved minimized ones as Doors; an empty list cold-restores.
-4. With no answer in time, a collector given `retryTimeoutMs` asks once more (rationale), then reports `timedOut`: an arrival refuses (`docs/specs/standalone.md` → "Arrival queue"), a boot cold-restores.
+4. With no answer in time, a collector given `retryTimeoutMs` asks once more (rationale), then reports `timedOut`: an arrival refuses, since its shells are still running; a boot cold-restores.
 
 **A collection finishes only on its own answer**: a host serving several windows echoes the `requestInit` token on the `pty:list` and every `pty:replay` behind it, and the collector ignores a different one (rationale). **An answer carrying no token is taken** — the hosts that echo none (VS Code, Pocket, the website) run one collector per JS realm. **A collection that timed out is not one that found no PTYs** (`LivePtys`): restoring over it starts a second set of shells. **`resumeOrRestore` and `restoreWindow` give `retryTimeoutMs` only when the saved session names a terminal pane.** Source of truth: `collectLivePtys` in `lib/src/lib/reconnect.ts`.
 

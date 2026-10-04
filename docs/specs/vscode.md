@@ -85,7 +85,7 @@ The colour push (`dormouse:themeColors`): `docs/specs/transport.md` → "Message
 
 ## CSP policy
 
-The policy starts from `default-src 'none'`; each grant below names what needs it.
+The policy starts from `default-src 'none'`; each grant below names what needs it. Every other grant is `webview.cspSource` alone (`style-src`, `font-src`, `img-src`, `connect-src`), plus `data: blob:` images and the loopback `ws:` below; nothing else.
 
 **`frame-src` is loopback-only**: `dor iframe` frames its target through the transparent proxy the extension host stands up, so the only origin ever embedded is loopback on an OS-assigned port (`docs/specs/dor-browser.md`).
 
@@ -103,6 +103,8 @@ The policy starts from `default-src 'none'`; each grant below names what needs i
 **Keep `'strict-dynamic'`** even though no experiment shows it load-bearing (rationale): it is the mechanism CSP specifies for "a script the nonce vouched for may load more".
 
 **`'wasm-unsafe-eval'` permits WebAssembly compilation and nothing else** — `eval` stays blocked. What needs it is [layout.md](layout.md#inline-graphics). (rationale)
+
+**A CSP change is proven in a real webview** (`vscode-ext/test/webview-boot.smoketest.ts`), never by string inspection (rationale).
 
 Source of truth: `getWebviewHtml` in `vscode-ext/src/webview-html.ts`, pinned by `vscode-ext/test/webview-html.test.ts` and `vscode-ext/test/webview-boot.smoketest.ts`; `assertRelayOriginBaked` in `scripts/relay-origin.mjs`, `bakedRelay` in `lib/src/host/relay-origin.ts`.
 
