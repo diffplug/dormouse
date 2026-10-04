@@ -1,7 +1,7 @@
 # Reopen and delayed kill
 
-> See `docs/specs/glossary.md` for Surface / Session / Pane / Door vocabulary.
-> This spec owns which user closes confirm, reopening closed Surfaces, Workspaces, and windows, and the Labs delayed-kill mode. `docs/specs/layout.md` → "Kill confirmation" owns the confirmation's interaction; `docs/specs/dor-tool.md` → "Unsaved changes" owns Tool dirty state.
+> - See `docs/specs/glossary.md` for Surface / Session / Pane / Door vocabulary.
+> - This spec owns which user closes confirm, reopening closed Surfaces, Workspaces, and windows, and the Labs delayed-kill mode. `docs/specs/layout.md` → "Kill confirmation" owns the confirmation's interaction; `docs/specs/dor-tool.md` → "Unsaved changes" owns Tool dirty state.
 
 ## The rule
 

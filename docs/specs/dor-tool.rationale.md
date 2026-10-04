@@ -48,17 +48,7 @@ Every preview-slot retarget of a serving Tool (the built-in file viewer, `builti
 
 ### September 2026 innerdogfood QC record
 
-The `dor-tool-qc` run (from `4c7f9012`, on the real standalone sidecar, staged
-CLI, PTYs, and iframe proxy) exercised project approval, keyed reuse, serving,
-open-rule dispatch, and the built-in viewer's formats and failures. Two findings
-constrain later edits: at that baseline the Tools feature flag could reject
-creation and standalone `dor open` split, both since superseded by
-always-enabled Tools and eligible inline opening; and Chromium's native PDF
-plugin failed inside the normal iframe sandbox (see
-`docs/specs/dor-tools-builtin.rationale.md` → File viewer). The
-run did not cover Tool transfer, native-window movement, native Tauri/VS Code
-rendering, Windows shells, or cold restore. The reusable recipe is
-`docs/testing/dor-tool-qc.md`.
+The `dor-tool-qc` run (from `4c7f9012`, on the real standalone sidecar, staged CLI, PTYs, and iframe proxy) exercised project approval, keyed reuse, serving, open-rule dispatch, and the built-in viewer's formats and failures. Two findings constrain later edits: at that baseline the Tools feature flag could reject creation and standalone `dor open` split, both since superseded by always-enabled Tools and eligible inline opening; and Chromium's native PDF plugin failed inside the normal iframe sandbox (see `docs/specs/dor-tools-builtin.rationale.md` → File viewer). The run did not cover Tool transfer, native-window movement, native Tauri/VS Code rendering, Windows shells, or cold restore. The reusable recipe is `docs/testing/dor-tool-qc.md`.
 
 The September 2026 integration reuses Terminal Context for the Tool's primary terminal. The auxiliary helper's automatic refresh, Reset, and Promote semantics do not describe a serving command, whose Session also owns the browser and remote terminal identity. Sharing the presentation avoids introducing a second navigation mechanism or a second shell.
 

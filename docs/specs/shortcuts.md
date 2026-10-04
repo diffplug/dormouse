@@ -1,8 +1,8 @@
 # Keyboard Shortcuts
 
-> See `docs/specs/glossary.md` for the Session / Pane / Door / baseboard vocabulary and the two mode names used in every row.
-> Behavior belongs to [layout.md](layout.md) (modes, kill/rename, navigation, header menu), [mouse-and-clipboard.md](mouse-and-clipboard.md) (selection, copy, paste), [dor-browser.md](dor-browser.md) (browser surfaces), [tiling-engine.md](tiling-engine.md) (drag gestures) and [vscode.md](vscode.md) (the workbench mirror) — change it there first, then sync here.
-> Bindings dispatched before layout's passthrough gate fire in both modes; the rest are command-mode only ([layout.md](layout.md#keyboard-shortcuts-command-mode) owns dispatch order and the dialog gate).
+> - See `docs/specs/glossary.md` for the Session / Pane / Door / baseboard vocabulary and the two mode names used in every row.
+> - Behavior belongs to [layout.md](layout.md) (modes, kill/rename, navigation, header menu), [mouse-and-clipboard.md](mouse-and-clipboard.md) (selection, copy, paste), [dor-browser.md](dor-browser.md) (browser surfaces), [tiling-engine.md](tiling-engine.md) (drag gestures) and [vscode.md](vscode.md) (the workbench mirror) — change it there first, then sync here.
+> - Bindings dispatched before layout's passthrough gate fire in both modes; the rest are command-mode only ([layout.md](layout.md#keyboard-shortcuts-command-mode) owns dispatch order and the dialog gate).
 
 ## Mode switching
 

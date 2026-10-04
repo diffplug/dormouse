@@ -1,10 +1,8 @@
 # Dormouse VS Code Integration Spec
 
-> See `docs/specs/glossary.md` for Session / Surface / Pane / Door vocabulary.
->
-> Owns the VS Code-specific layer: panel/view registration, persistence APIs, theme integration, CSP, the peer link between windows, build, and dream-architecture commands.
->
-> Defers to `docs/specs/transport.md` — PTY lifecycle, buffering, reconnection, the message protocol, persisted-session types, and every adapter-agnostic invariant — for all sections below.
+> - See `docs/specs/glossary.md` for Session / Surface / Pane / Door vocabulary.
+> - Owns the VS Code-specific layer: panel/view registration, persistence APIs, theme integration, CSP, the peer link between windows, build, and dream-architecture commands.
+> - Defers to `docs/specs/transport.md` — PTY lifecycle, buffering, reconnection, the message protocol, persisted-session types, and every adapter-agnostic invariant — for all sections below.
 
 ## What's built
 

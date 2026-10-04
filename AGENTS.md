@@ -6,12 +6,11 @@ A mouse-friendly multitasking terminal built with pnpm, react, typescript, vite,
 
 ```
 pnpm install     # install deps
+pnpm setup:git   # once per clone: merge markdown sentence by sentence
 pnpm build       # build lib, vscode extension, Pocket, website, and Hosted
 ```
 
-**Inside Dormouse, run `innerdogfood`** — `dor tool innerdogfood`.
-The Tool shows the harness in its own pane and prints the command to drive it
-(`docs/specs/standalone.md` → "Standalone browser-dev harness").
+**Inside Dormouse, run `innerdogfood`** — `dor tool innerdogfood`. The Tool shows the harness in its own pane and prints the command to drive it (`docs/specs/standalone.md` → "Standalone browser-dev harness").
 
 ## Worktrees
 
@@ -106,7 +105,7 @@ When code covered by a spec changes, change the spec. Where two specs overlap (p
 
 Generated help and canonical types own syntax and shape, and a spec never restates them; a spec also states the contract of a consumer that does not exist yet. Navigation maps use full repo paths with short role descriptions. Protocols, command orchestration, and cross-package boundaries state direction and scope. Docs-only compression spot-checks referenced symbols, message directions, and root-vs-package script ownership against code before committing.
 
-**Front matter.** Every spec using Session / Pane / Door / baseboard / passthrough vocabulary opens with a `> See \`docs/specs/glossary.md\` for ...` blockquote (exemplars: `layout.md`, `alert.md`, `terminal-state.md`); introducing that vocabulary into a spec without the callout adds it in the same edit. The callout licenses glossary terms bare — never re-explain them locally. The opening blockquotes are the front matter: the callout plus, where useful, one line each for what the spec owns, what it defers and to whom, and what to read first. Ownership is stated there once, never re-disclaimed per section.
+**Front matter.** Every spec using Session / Pane / Door / baseboard / passthrough vocabulary opens with a `See \`docs/specs/glossary.md\` for ...` callout (exemplars: `layout.md`, `alert.md`, `terminal-state.md`); introducing that vocabulary into a spec without the callout adds it in the same edit. The callout licenses glossary terms bare — never re-explain them locally. The front matter is one blockquote under the title, one `> - ` bullet per entry: the callout plus, where useful, what the spec owns, what it defers and to whom, and what to read first; a lone entry is a plain `> ` line. Ownership is stated there once, never re-disclaimed per section.
 
 ### Spec lifecycle
 
@@ -133,6 +132,9 @@ Six sibling lints run in `pnpm test`. Five enforce one invariant a spec states i
 
 `scripts/spec-lint-selftest.mjs` plants one defect per finding check in the spec lint. The `deploy`, `e2e`, and `loopback` lints carry self-tests that mutate each rule in whichever direction it points: a present-control rule has its control deleted (and, for exact-count rules, a copy added), a `forbidden` rule has the banned text appended. `scripts/e2e-lint-selftest.mjs` is mostly the second kind; `scripts/deploy-lint-selftest.mjs` mostly the first. Either way the lint must go red. **A rule added to one of these lints without its self-test case is not enforced** — it is a claim that something is checked. They share plumbing, and only that, through `scripts/lint-kit.mjs`. `scripts/installer-verify-test.mjs` (also `pnpm lint:deploy`) runs the installer shell helpers lint can only read, extracted from the shipped files; `scripts/ps1-cmdlet-lint-selftest.mjs` carries the `ps1-cmdlet` lint's mutations. `pnpm test` also runs `scripts/clamp-issue-body-selftest.mjs`, the test for `scripts/clamp-issue-body.mjs` (the helper the audit workflows use to keep an issue body postable); it lives at the repo root because its callers do.
 
+## Markdown
+
+**Must write each markdown paragraph and list item on one source line**, in every tracked `*.md` and `*.mdx`: a newline is a block boundary, never a wrap, and never a hard line break. `scripts/md-unwrap.mjs` (`pnpm lint:md`, part of `pnpm test`) enforces it; `node scripts/md-unwrap.mjs --fix` joins wrapped paragraphs. `pnpm setup:git` makes `scripts/md-merge.mjs` this clone's merge driver for them, so edits to different sentences of one paragraph merge; a conflict leaves its sentences one per line for `--fix` to rejoin once resolved.
 
 ## Design
 
@@ -144,11 +146,7 @@ See [PRODUCT.md](PRODUCT.md) for users, brand personality, and aesthetic directi
 4. **No chrome, all content** — Minimize UI chrome. Terminals are the content.
 5. **Theme-adaptive** — Never hardcode colors. Support light and dark from day one.
 
-The concrete type scale, color strategy (surfaces, foregrounds, header palette, dynamic door bg, selection ring), and shared chrome constants live in
-[`lib/src/components/design.tsx`](lib/src/components/design.tsx) — read it
-before adding or changing any `text-*`, `bg-*`, `text-color-*`, or border
-class anywhere in `lib/src/`. `docs/specs/theme.md` → "Runtime model" owns how
-the token files are split; `DESIGN.md` → "Don't" owns what adding one costs.
+The concrete type scale, color strategy (surfaces, foregrounds, header palette, dynamic door bg, selection ring), and shared chrome constants live in [`lib/src/components/design.tsx`](lib/src/components/design.tsx) — read it before adding or changing any `text-*`, `bg-*`, `text-color-*`, or border class anywhere in `lib/src/`. `docs/specs/theme.md` → "Runtime model" owns how the token files are split; `DESIGN.md` → "Don't" owns what adding one costs.
 
 <!-- dor-skill:begin — managed by `dor skill --install`; edits inside are overwritten -->
 ## Running inside Dormouse

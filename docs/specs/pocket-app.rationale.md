@@ -32,11 +32,7 @@
 
 ## Installable web app
 
-**iOS icon and display support.** WebKit documents manifest icon support since
-iOS 15.4, with `apple-touch-icon` taking precedence, and both `standalone` and
-`fullscreen` display modes. Pocket retains its existing assets and standalone
-mode. [WebKit's iOS Web Push guidance](https://webkit.org/blog/13878/web-push-for-web-apps-on-ios-and-ipados/)
-(verified 2026-09).
+**iOS icon and display support.** WebKit documents manifest icon support since iOS 15.4, with `apple-touch-icon` taking precedence, and both `standalone` and `fullscreen` display modes. Pocket retains its existing assets and standalone mode. [WebKit's iOS Web Push guidance](https://webkit.org/blog/13878/web-push-for-web-apps-on-ios-and-ipados/) (verified 2026-09).
 
 **Why a non-classic worker fails the build rather than a test.** A module-syntax worker installs on nothing, and push is the one feature no desktop path exercises — a regression would ship silently and surface only as a phone that stopped receiving notifications. The same reasoning puts `build:pocket` inside the root `pnpm build`: the assertion's own fixtures prove the assertion works, not that a real bundler output passes it. `emptyOutDir: false` on the worker config keeps the app build's clean from wiping the `sw.js` emitted beside it; `dev:pocket` re-bundles that config per request so the dev server serves what production would emit.
 
@@ -68,47 +64,19 @@ mode. [WebKit's iOS Web Push guidance](https://webkit.org/blog/13878/web-push-fo
 
 ## What Pocket stores
 
-Repeated scans measured the same browser compatibility while delaying each
-attempt; a page-local successful promise shares that work without persisting an
-assumption across app restarts. Actual writes can still fail after any probe,
-so store failures invalidate the cache. Separate-key probing cannot select a
-production format and now remains only in the diagnostic tool.
+Repeated scans measured the same browser compatibility while delaying each attempt; a page-local successful promise shares that work without persisting an assumption across app restarts. Actual writes can still fail after any probe, so store failures invalidate the cache. Separate-key probing cannot select a production format and now remains only in the diagnostic tool.
 
-Burrow listing and push-subscription queries formerly decrypted every stored
-key despite using metadata alone. Besides duplicate work, this prevented
-listing/removing a record with a damaged envelope. Summary reads omit the
-private-key field without interpreting it.
+Burrow listing and push-subscription queries formerly decrypted every stored key despite using metadata alone. Besides duplicate work, this prevented listing/removing a record with a damaged envelope. Summary reads omit the private-key field without interpreting it.
 
-A connection-record read failure can be transient database unavailability or
-an undecodable key, not evidence of Burrow revocation. The fixed error points
-to retry or the existing Scan a setup code action. That action preserves the
-pin and requires fresh approval, while marking every read failure as pairing
-required would conflate local availability with an authenticated denial.
+A connection-record read failure can be transient database unavailability or an undecodable key, not evidence of Burrow revocation. The fixed error points to retry or the existing Scan a setup code action. That action preserves the pin and requires fresh approval, while marking every read failure as pairing required would conflate local availability with an authenticated denial.
 
-The operator confirmed successful production pairing on the affected iPhone on
-September 11, 2026 after installing the encrypted fallback. No Android hardware
-was tested in this investigation; the retained harness measures the device on
-which it runs rather than selecting behavior from a user-agent string.
+The operator confirmed successful production pairing on the affected iPhone on September 11, 2026 after installing the encrypted fallback. No Android hardware was tested in this investigation; the retained harness measures the device on which it runs rather than selecting behavior from a user-agent string.
 
-The encrypted representation keeps a per-key AES key beside its ciphertext in
-the same record, so a committed record is sufficient for a fresh page or worker.
-Runtime keys have a weakly held encrypted representation; reads restore that
-association, preventing an authorization-only update from trying the broken
-native X25519 serialization again. Neither database version nor store layout
-changes; v4 native records remain readable without migration. The security
-tradeoff and device restart evidence are in remote-security-model, Client statics.
+The encrypted representation keeps a per-key AES key beside its ciphertext in the same record, so a committed record is sufficient for a fresh page or worker. Runtime keys have a weakly held encrypted representation; reads restore that association, preventing an authorization-only update from trying the broken native X25519 serialization again. Neither database version nor store layout changes; v4 native records remain readable without migration. The security tradeoff and device restart evidence are in remote-security-model, Client statics.
 
-The iOS 26.6.1 pairing failure reported in September 2026 occurred after local
-approval, at the IndexedDB write. WebKit evaluates the inline key path on a
-deserialized clone, so a failed embedded-key clone can look like a missing
-`burrowId`. WebKit bug 312279 reports X25519 key storage returning null.
-Generation and agreement alone do not test persistence; reopening and using the
-stored key detects silent readback failure as well as a rejected write.
+The iOS 26.6.1 pairing failure reported in September 2026 occurred after local approval, at the IndexedDB write. WebKit evaluates the inline key path on a deserialized clone, so a failed embedded-key clone can look like a missing `burrowId`. WebKit bug 312279 reports X25519 key storage returning null. Generation and agreement alone do not test persistence; reopening and using the stored key detects silent readback failure as well as a rejected write.
 
-The phone subsequently reported `write-record / DataError` in the disposable
-database. Testing a separately stored key distinguishes an inline-key check
-failure from broken key deserialization; an explicit key can bypass the former
-while hiding the latter until readback. This diagnostic does not migrate records.
+The phone subsequently reported `write-record / DataError` in the disposable database. Testing a separately stored key distinguishes an inline-key check failure from broken key deserialization; an explicit key can bypass the former while hiding the latter until readback. This diagnostic does not migrate records.
 
 **Why one module owns every IndexedDB open.** Two modules opening the same database can disagree about the version, and a connection held open across an upgrade blocks it indefinitely. Centralizing name, version, upgrade and open makes both states unreachable rather than merely unlikely.
 
@@ -122,22 +90,9 @@ while hiding the latter until readback. This diagnostic does not migrate records
 
 ## The capability harness
 
-Harness v1/v2 encrypted tests were experimental look-alikes without production
-AAD. Their restart results established primitive persistence, not the shipped
-envelope. Harness v3 imports the production codec through the same Vite build
-as Pocket and rejects the old checkpoint schema instead of upgrading its
-evidence. On September 11, 2026, the operator's new Home Screen v3 checkpoint
-prepared at 17:14:19 UTC passed at 17:17:44 UTC: production format,
-authenticated context, retained key, and a new page instance. This followed
-the requested phone-restart sequence; the page itself cannot prove an OS reboot.
+Harness v1/v2 encrypted tests were experimental look-alikes without production AAD. Their restart results established primitive persistence, not the shipped envelope. Harness v3 imports the production codec through the same Vite build as Pocket and rejects the old checkpoint schema instead of upgrading its evidence. On September 11, 2026, the operator's new Home Screen v3 checkpoint prepared at 17:14:19 UTC passed at 17:17:44 UTC: production format, authenticated context, retained key, and a new page instance. This followed the requested phone-restart sequence; the page itself cannot prove an OS reboot.
 
-Measured on iPhone 15 Pro, Safari 26.6.1, September 2026: X25519 generation
-worked, but structured cloning failed, inline IndexedDB writes raised DataError,
-and explicit-key reads returned null. AES-GCM, Ed25519, and P-256 passed all
-three storage/clone tests; AES-encrypted X25519 bytes also passed. A connection
-reopen does not prove app-restart persistence, so the separate restart test
-retains only a disposable checkpoint. Its page-instance check rules out an
-in-memory retry, not OS process restoration; the user supplies that evidence.
+Measured on iPhone 15 Pro, Safari 26.6.1, September 2026: X25519 generation worked, but structured cloning failed, inline IndexedDB writes raised DataError, and explicit-key reads returned null. AES-GCM, Ed25519, and P-256 passed all three storage/clone tests; AES-encrypted X25519 bytes also passed. A connection reopen does not prove app-restart persistence, so the separate restart test retains only a disposable checkpoint. Its page-instance check rules out an in-memory retry, not OS process restoration; the user supplies that evidence.
 
 ## A backgrounded phone loses its Burrow session
 

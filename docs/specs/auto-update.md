@@ -1,6 +1,7 @@
 # Auto-Update Spec
 
-> See `docs/specs/glossary.md` for Baseboard / Door vocabulary. Owns the standalone updater's lifecycle; the release pipeline that publishes the update manifest it fetches is `docs/specs/deploy.md`, and the quit orchestrator that drives the install is `docs/specs/standalone.md` §Quit flow.
+> - See `docs/specs/glossary.md` for Baseboard / Door vocabulary.
+> - Owns the standalone updater's lifecycle; the release pipeline that publishes the update manifest it fetches is `docs/specs/deploy.md`, and the quit orchestrator that drives the install is `docs/specs/standalone.md` §Quit flow.
 
 The standalone app checks for updates on launch, where the network policy allows it, and prompts in the Baseboard. **Nothing is downloaded or installed until the user approves that prompt**; the download then runs in the background, the install at quit.
 

@@ -402,8 +402,7 @@ for (const rel of Object.keys(budgets)) {
 
 // --- Check 11: (rationale) markers sit under a heading the rationale keys -----
 // The marker is the word `rationale` as an item of a parenthetical —
-// `(rationale)`, `(rationale; …)`, `(…; rationale)` — on whichever line the
-// wrap put it.
+// `(rationale)`, `(rationale; …)`, `(…; rationale)`.
 const MARKER_RE = /(?:^|[(;])\s*rationale\s*[;)]/;
 for (const spec of rationaleCheckedSpecs) {
   const rat = spec.replace(/\.md$/, '.rationale.md');

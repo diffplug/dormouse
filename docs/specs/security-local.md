@@ -1,8 +1,9 @@
 # Local Security
 
-> See `docs/specs/glossary.md` for Pane, Session, and the Surface model; this spec uses them bare.
-> Owns the boundaries a user of the local application has: terminal output, browser panes, `dor`, loopback listeners, the network policy's Nothing, and what persists on disk. Defers every mechanism to the spec named at its rule, and the network boundary to `docs/specs/security-remote.md`.
-> Read `docs/specs/security.md` first; `docs/specs/security-audit.md` says how the `FAIL IF` lines here are run.
+> - See `docs/specs/glossary.md` for Pane, Session, and the Surface model; this spec uses them bare.
+> - Owns the boundaries a user of the local application has: terminal output, browser panes, `dor`, loopback listeners, the network policy's Nothing, and what persists on disk.
+> - Defers every mechanism to the spec named at its rule, and the network boundary to `docs/specs/security-remote.md`.
+> - Read `docs/specs/security.md` first; `docs/specs/security-audit.md` says how the `FAIL IF` lines here are run.
 
 ## Terminal output
 
@@ -12,29 +13,15 @@ The attacker is any program writing to a PTY.
 
 **Never let untrusted PTY output write the clipboard or access a file**: consume `OSC 50` and unsupported `OSC 1337`; consume `OSC 52`, which only offers its text to the copy editor over the user's own drag, copied when the user picks it (`docs/specs/mouse-and-clipboard.md` §4.6). **Inline images carry their own bytes**: no path is resolved, ImageAddon dropping any non-`inline=1` transfer (`docs/specs/layout.md` -> "Inline graphics").
 
-**An `OSC 8` hyperlink opens only after a confirmation dialog**, except a local
-`file:` link whose display text names its target, which previews through the
-user's `open` rules (`docs/specs/dor-tool.md` -> "Terminal links"); a target whose
-display text names a different host gets **no open action at all**
-(`docs/specs/mouse-and-clipboard.md` -> "OSC 8 hyperlinks"). **Must revalidate
-every external-URL launch through `normalizeExternalUri`**, consent
-notwithstanding (VS Code's in the extension host); file opens use
-`docs/specs/dor-tool.md` -> "Opening local files".
+**An `OSC 8` hyperlink opens only after a confirmation dialog**, except a local `file:` link whose display text names its target, which previews through the user's `open` rules (`docs/specs/dor-tool.md` -> "Terminal links"); a target whose display text names a different host gets **no open action at all** (`docs/specs/mouse-and-clipboard.md` -> "OSC 8 hyperlinks"). **Must revalidate every external-URL launch through `normalizeExternalUri`**, consent notwithstanding (VS Code's in the extension host); file opens use `docs/specs/dor-tool.md` -> "Opening local files".
 
-**Unsupported escape sequences must fail inertly** — consumed or ignored, with
-no visible garbage, clipboard, file, focus, or privilege effect
-(rationale).
+**Unsupported escape sequences must fail inertly** — consumed or ignored, with no visible garbage, clipboard, file, focus, or privilege effect (rationale).
 
-**Notification text is untrusted terminal output**: sanitized at protocol-parse
-time, rendered as plain text and never as markup, re-bounded by a second pass
-before speech or push (`docs/specs/alert.md` -> "Text And Security").
+**Notification text is untrusted terminal output**: sanitized at protocol-parse time, rendered as plain text and never as markup, re-bounded by a second pass before speech or push (`docs/specs/alert.md` -> "Text And Security").
 
-**The `OSC 633` terminator escape is emit-side**, in the shipped
-shell-integration scripts — the parser scans raw bytes and cannot defend it
-(`docs/specs/terminal-state.md` -> "Shell-integration injection"; rationale).
+**The `OSC 633` terminator escape is emit-side**, in the shipped shell-integration scripts — the parser scans raw bytes and cannot defend it (`docs/specs/terminal-state.md` -> "Shell-integration injection"; rationale).
 
-**Must confine output to the screen, Session state, and bounded terminal reports** — rendered text/images, alerts, titles, prompt/command boundaries, CWD, and `OSC 8` — except a running designated Tool's OSC 367 `open`, gated below, and a stopping Tool's `dehydrate`, which reaches only its own next run (`docs/specs/dor-tool.md` → Reaping). **The PTY-boundary parser writes exactly three answer families**: `OSC 10/11/12 ; ?` color, `OSC 99` capability, `CSI > q` device. xterm.js and ImageAddon answer cursor, device, focus, size, and graphics reports
-(`docs/specs/transport.md` -> "Report filtering on the input side").
+**Must confine output to the screen, Session state, and bounded terminal reports** — rendered text/images, alerts, titles, prompt/command boundaries, CWD, and `OSC 8` — except a running designated Tool's OSC 367 `open`, gated below, and a stopping Tool's `dehydrate`, which reaches only its own next run (`docs/specs/dor-tool.md` → Reaping). **The PTY-boundary parser writes exactly three answer families**: `OSC 10/11/12 ; ?` color, `OSC 99` capability, `CSI > q` device. xterm.js and ImageAddon answer cursor, device, focus, size, and graphics reports (`docs/specs/transport.md` -> "Report filtering on the input side").
 
 - **FAIL IF** `TerminalProtocolParser` in `lib/src/lib/terminal-protocol.ts` stops consuming `OSC 52` or `OSC 50`, or a parse site stops running it before `pty:data` leaves it (rationale). Pinned by `lib/src/lib/terminal-protocol.test.ts`.
 - **FAIL IF** an `OSC 52` payload can reach the clipboard except as the copy editor's program format the user chose and copied, is retained unbounded or with control characters other than newline and tab, or is accepted into a pane with no shadowed drag: `parseOsc52` and `CLIPBOARD_OFFER_LIMIT` in `lib/src/lib/terminal-protocol.ts`, `offerProgramCopy` in `lib/src/lib/mouse-selection.ts`, `copySelection` in `lib/src/lib/copy-selection.ts`. Pinned by `lib/src/lib/terminal-protocol.test.ts`, `lib/src/lib/mouse-selection.test.ts`, and `lib/src/lib/copy-editor.test.ts`.
@@ -47,67 +34,30 @@ shell-integration scripts — the parser scans raw bytes and cannot defend it
 
 The attacker is the page inside a browser pane.
 
-**Known gap: Windows screenshots and pasted clipboard images inherit their
-parent's ACL** — private under the default per-user `%TEMP%`, exposed only when
-it (or the capture parent) is shared or loosened.
+**Known gap: Windows screenshots and pasted clipboard images inherit their parent's ACL** — private under the default per-user `%TEMP%`, exposed only when it (or the capture parent) is shared or loosened.
 
-**Every listener the webview realm exposes to a framed page checks the sender's
-origin before it acts** — `IframePanel` against its own panel's proxy origin, the
-Wall's leader channel against any live grant (`docs/specs/dor-browser.md` ->
-"Iframe Shim"). **That separates a proxied frame from any other, never the
-injected shim from the page it runs in** (rationale).
+**Every listener the webview realm exposes to a framed page checks the sender's origin before it acts** — `IframePanel` against its own panel's proxy origin, the Wall's leader channel against any live grant (`docs/specs/dor-browser.md` -> "Iframe Shim"). **That separates a proxied frame from any other, never the injected shim from the page it runs in** (rationale).
 
-**A framed page cannot forge a *host* message.** The VS Code webview
-authenticates every host→webview message with a per-boot token minted at serve
-time into the nonce-gated boot script, unreadable cross-origin, and the guard
-fails closed when no token was injected (`docs/specs/vscode.md` -> "Webview
-message authentication"). **The standalone adapters have no forgeable inbox**:
-host events arrive over Tauri IPC, never `window.postMessage`.
+**A framed page cannot forge a *host* message.** The VS Code webview authenticates every host→webview message with a per-boot token minted at serve time into the nonce-gated boot script, unreadable cross-origin, and the guard fails closed when no token was injected (`docs/specs/vscode.md` -> "Webview message authentication"). **The standalone adapters have no forgeable inbox**: host events arrive over Tauri IPC, never `window.postMessage`.
 
-**Each injected shim hop must address only its proxy origin and the embedder
-chain's innermost origin, never `'*'`.** Nested frames relay the three pane-level
-messages through same-origin parents; their document-level locations stop there.
-With no usable chain the proxy injects
-nothing and strips no framing header (`docs/specs/dor-browser.md` -> "Iframe
-Host Capability And CSP"). What it grants a *caller* is [Loopback
-Listeners](#loopback-listeners)'s business.
+**Each injected shim hop must address only its proxy origin and the embedder chain's innermost origin, never `'*'`.** Nested frames relay the three pane-level messages through same-origin parents; their document-level locations stop there. With no usable chain the proxy injects nothing and strips no framing header (`docs/specs/dor-browser.md` -> "Iframe Host Capability And CSP"). What it grants a *caller* is [Loopback Listeners](#loopback-listeners)'s business.
 
 - **FAIL IF** an injected shim targets anything but its proxy origin or the embedder chain's innermost origin, relays a nested `location`, a foreign-origin message, or an unregistered message, or the proxy uses a chain it did not validate in full: `iframeShim` and `normalizeEmbedderOrigins` in `lib/src/host/iframe-proxy-rewrite.ts`, applied in `lib/src/host/iframe-proxy.ts`. Pinned by `lib/src/host/iframe-proxy-rewrite.test.ts` and `lib/src/host/iframe-proxy.test.ts`.
 - **FAIL IF** a `VSCodeAdapter` host-channel listener acts on a message before `isHostMessage` (`lib/src/lib/vscode-message-token.ts`) accepts it, or the token stops being minted per serve and attached only by `WebviewChannel.post` in `vscode-ext/src/webview-messaging.ts`: `dor:controlRequest` is one of the shapes a framed page could otherwise claim. The proxy-origin listeners above are guarded by origin, not the token. Pinned by `lib/src/lib/platform/vscode-adapter.test.ts`.
 
-Source of truth: `isProxyOrigin` in `lib/src/lib/iframe-proxy-registry.ts`, the
-per-panel check in `lib/src/components/wall/IframePanel.tsx`;
-`lib/src/host/private-capture-dir.ts`, `standalone/sidecar/clipboard-ops.js`,
-`standalone/src-tauri/src/clipboard_win.rs`.
+Source of truth: `isProxyOrigin` in `lib/src/lib/iframe-proxy-registry.ts`, the per-panel check in `lib/src/components/wall/IframePanel.tsx`; `lib/src/host/private-capture-dir.ts`, `standalone/sidecar/clipboard-ops.js`, `standalone/src-tauri/src/clipboard_win.rs`.
 
 ## The dor control socket
 
-The attacker is another local account. The channel carries the whole Surface API
-— keystrokes into any Pane, its screen and scrollback back out, `dor kill` — and
-an app restart behind the running-work confirmation (`docs/specs/dor-cli.md` ->
-"Host Plumbing", "dor app").
+The attacker is another local account. The channel carries the whole Surface API — keystrokes into any Pane, its screen and scrollback back out, `dor kill` — and an app restart behind the running-work confirmation (`docs/specs/dor-cli.md` -> "Host Plumbing", "dor app").
 
-**A process running as the user is the user.** The socket bounds other local
-accounts, never the user's own: an agent holding `dor` has the power of the
-person at the keyboard, the local mirror of the remote rule
-(`docs/specs/security-remote.md` -> "Remote Control"; rationale).
+**A process running as the user is the user.** The socket bounds other local accounts, never the user's own: an agent holding `dor` has the power of the person at the keyboard, the local mirror of the remote rule (`docs/specs/security-remote.md` -> "Remote Control"; rationale).
 
-**The server picks the path unguessably and hardens its directory before it
-binds.** POSIX: `<tmpdir>/dormouse-dor-<uid>/<8 random bytes>.sock`, inside a
-per-user directory `lstat`ed before the bind; one of ours that is merely loose is
-tightened, anything else stands the channel down. **Windows has a named pipe and
-no directory to harden**, and Dormouse applies no ACL there, so the name and the
-handshake are the whole of it. **Neither spelling may derive from the PID.**
+**The server picks the path unguessably and hardens its directory before it binds.** POSIX: `<tmpdir>/dormouse-dor-<uid>/<8 random bytes>.sock`, inside a per-user directory `lstat`ed before the bind; one of ours that is merely loose is tightened, anything else stands the channel down. **Windows has a named pipe and no directory to harden**, and Dormouse applies no ACL there, so the name and the handshake are the whole of it. **Neither spelling may derive from the PID.**
 
-**The token never crosses the wire in either direction** — 24 CSPRNG bytes per
-host process, never written to disk, proven by HMAC-SHA256 over the peer's nonce
-under a per-direction domain and compared in constant time. **The server
-challenges first and proves its own half before the client sends any request**;
-a peer that fails its half is hung up on with no reply. **A peer that has not finished the handshake within 10 s is dropped** (`HANDSHAKE_BUDGET_MS`).
+**The token never crosses the wire in either direction** — 24 CSPRNG bytes per host process, never written to disk, proven by HMAC-SHA256 over the peer's nonce under a per-direction domain and compared in constant time. **The server challenges first and proves its own half before the client sends any request**; a peer that fails its half is hung up on with no reply. **A peer that has not finished the handshake within 10 s is dropped** (`HANDSHAKE_BUDGET_MS`).
 
-**A lost bind stands the channel down rather than weakening it**: both hosts
-delete the two control variables at startup and re-attach them to spawned shells
-only once the bind reports ready.
+**A lost bind stands the channel down rather than weakening it**: both hosts delete the two control variables at startup and re-attach them to spawned shells only once the bind reports ready.
 
 - **FAIL IF** `ensureControlDir` in `standalone/sidecar/dor-control-server.js` stops requiring all four of a real directory, not a symlink, owned by this uid, at exactly mode `0700`, or `resolveControlSocketPath` stops refusing to name a socket when that predicate fails. Pinned by `standalone/sidecar/dor-control-server.test.js`.
 - **FAIL IF** the raw token reaches a socket, or either side compares a proof with anything but the SHA-256-then-`timingSafeEqual` of `proofMatches`. The construction is hand-mirrored between `standalone/sidecar/dor-control-server.js` and `dor/src/control-client.ts`; only the two proof domains are pinned across the copies, by `lib/src/lib/mirrored-constants.test.ts` (rationale).
@@ -116,10 +66,7 @@ only once the bind reports ready.
 
 Dormouse binds loopback HTTP and WebSocket servers to render its own surfaces.
 
-**A loopback bind is not an access control.** `127.0.0.1` keeps out the network, but
-the attacker that matters is a page open in the user's own browser, which reaches
-loopback exactly as easily as our webview does; **an ephemeral port is not a secret
-either** (rationale).
+**A loopback bind is not an access control.** `127.0.0.1` keeps out the network, but the attacker that matters is a page open in the user's own browser, which reaches loopback exactly as easily as our webview does; **an ephemeral port is not a secret either** (rationale).
 
 **Never grant an unrecognized caller anything it could not obtain directly from the upstream.** Listeners check their loopback name and recognize callers; the iframe proxy admits strangers but declines to vouch. **Use URL tokens only where the listener owns the page URL**, as the browser-dev harness does; iframe proxies cannot preserve them through upstream routing and subresources (rationale).
 
@@ -135,9 +82,7 @@ either** (rationale).
 
 **Cookie-authenticated iframe pages are unsupported.** Header stripping does not isolate `document.cookie`: proxied scripts still share the loopback hostname's non-HttpOnly cookies across grant ports. This remains a browser-pane isolation gap (rationale).
 
-Source of truth: the shared rule and predicates — `isLoopbackHost`, `isOwnOrigin`,
-`isForeignOrigin` — in `lib/src/host/loopback-guard.ts`;
-`startDevVite` in `standalone/scripts/dev-run.mjs`.
+Source of truth: the shared rule and predicates — `isLoopbackHost`, `isOwnOrigin`, `isForeignOrigin` — in `lib/src/host/loopback-guard.ts`; `startDevVite` in `standalone/scripts/dev-run.mjs`.
 
 ### Local-file viewer
 
@@ -168,51 +113,25 @@ The exposure is traffic the user never chose, which under Nothing is none. `docs
 
 ## Persisted state
 
-The attacker is another local account reading disk; what the remote stack leaves
-behind is `docs/specs/security-remote.md` -> "Credentials at rest".
+The attacker is another local account reading disk; what the remote stack leaves behind is `docs/specs/security-remote.md` -> "Credentials at rest".
 
-**Standalone's session store is owner-only before any bytes are written** —
-every window snapshot, its geometry sibling, and the arrival journal
-(`docs/specs/standalone.md` -> "Persistence", "Boot and geometry", "Arrival queue"), on every platform. The same
-helper locks the whole standalone app-data directory before the sidecar spawns.
+**Standalone's session store is owner-only before any bytes are written** — every window snapshot, its geometry sibling, and the arrival journal (`docs/specs/standalone.md` -> "Persistence", "Boot and geometry", "Arrival queue"), on every platform. The same helper locks the whole standalone app-data directory before the sidecar spawns.
 
-**No writer persists scrollback** (`docs/specs/transport.md` -> "What is
-persisted", "Retiring the transcripts already on disk"). Snapshots older versions
-left behind do carry transcripts (rationale).
+**No writer persists scrollback** (`docs/specs/transport.md` -> "What is persisted", "Retiring the transcripts already on disk"). Snapshots older versions left behind do carry transcripts (rationale).
 
-**Standalone writes `recovery.json` beside its sessions directory**, under the
-state root, owner-only: one rebuilt agent-resume invocation per Surface, never a
-buffer, unlinked as it is read (`docs/compatible-agents.md` -> "Recovery record").
+**Standalone writes `recovery.json` beside its sessions directory**, under the state root, owner-only: one rebuilt agent-resume invocation per Surface, never a buffer, unlinked as it is read (`docs/compatible-agents.md` -> "Recovery record").
 
 **The managed-voice token is a bearer credential at rest** — `managed-voice.json` beside the Burrow's enrollment in the state dir, `0700`/`0600`, under the owner-only DACL `burrow_state_dir` applies on Windows before the sidecar spawns (rationale); `docs/specs/alert.md` → "Managed voice" keeps it from any webview. **The token must go only to `hostedVoiceOrigin`'s answer**, never following a redirect (`redirect: 'error'`); a self-host build, answered `null`, sends it nowhere (`docs/specs/relay.md` -> "Relay origin").
 
-**VS Code persists pane structure in VS Code's own storage** — `workspaceState`
-and `vscode.setState()` — so the modes there are VS Code's, not ours, and no
-transcript reaches either (`docs/specs/vscode.md` -> "Serialization and
-restore"). Dormouse also writes `recovery.json` in extension storage, mode `0600`
-on Unix: one rebuilt agent-resume invocation per Surface, no buffer, unlinked as
-it is read (`docs/compatible-agents.md` -> "Recovery record").
+**VS Code persists pane structure in VS Code's own storage** — `workspaceState` and `vscode.setState()` — so the modes there are VS Code's, not ours, and no transcript reaches either (`docs/specs/vscode.md` -> "Serialization and restore"). Dormouse also writes `recovery.json` in extension storage, mode `0600` on Unix: one rebuilt agent-resume invocation per Surface, no buffer, unlinked as it is read (`docs/compatible-agents.md` -> "Recovery record").
 
-**The VS Code peer-link token is a local credential at rest** —
-`burrow.peer-token` in the extension's global storage, written mode `0600`
-with `wx`, its socket directory re-checked on every contention round. **Neither
-control does anything on Windows** (rationale). **Dormouse applies no Windows
-DACL to the peer-link token, `recovery.json`, or the `tool-trust` receipts**;
-they inherit the extension storage ACL.
+**The VS Code peer-link token is a local credential at rest** — `burrow.peer-token` in the extension's global storage, written mode `0600` with `wx`, its socket directory re-checked on every contention round. **Neither control does anything on Windows** (rationale). **Dormouse applies no Windows DACL to the peer-link token, `recovery.json`, or the `tool-trust` receipts**; they inherit the extension storage ACL.
 
-**The standalone log is unprotected and names the control socket.** The log
-(`docs/specs/standalone.md` -> "Logging") is created and appended with no mode
-and no ACL, so it lands at the umask — readable by another local account
-wherever `<tmpdir>` is shared (rationale). No log call carries PTY bytes; the
-`dor` control socket path does. A gap, not an accepted risk.
+**The standalone log is unprotected and names the control socket.** The log (`docs/specs/standalone.md` -> "Logging") is created and appended with no mode and no ACL, so it lands at the umask — readable by another local account wherever `<tmpdir>` is shared (rationale). No log call carries PTY bytes; the `dor` control socket path does. A gap, not an accepted risk.
 
 - **FAIL IF** `write_file_atomically` in `standalone/src-tauri/src/lib.rs` stops restricting the directory and the file it writes to the owning user on **every** platform `restrict_to_owner` has an arm for — `0700`/`0600` on unix, and on Windows a DACL protected from inheritance carrying exactly one ACE for the current user — or the mode stops reaching the temp file *before* any bytes are written, or **any** of its callers stops going through it. Enumerate them from the file rather than from this line: every writer under the state root is one, the legacy-transcript scrub and `arrivals.json` included. Pinned by the Rust tests in the same file (rationale).
 
-Source of truth: `SESSION_STATE_KEY` in `vscode-ext/src/session-state.ts`,
-`ensureToken` in `vscode-ext/src/peer-link.ts`, `default_log_path` in
-`standalone/src-tauri/src/lib.rs`, `createManagedVoiceHost` in
-`lib/src/host/managed-voice-host.ts`, `hostedVoiceOrigin` in
-`lib/src/host/relay-origin.ts`.
+Source of truth: `SESSION_STATE_KEY` in `vscode-ext/src/session-state.ts`, `ensureToken` in `vscode-ext/src/peer-link.ts`, `default_log_path` in `standalone/src-tauri/src/lib.rs`, `createManagedVoiceHost` in `lib/src/host/managed-voice-host.ts`, `hostedVoiceOrigin` in `lib/src/host/relay-origin.ts`.
 
 ## Terminal context directory actions
 

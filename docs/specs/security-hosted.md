@@ -1,8 +1,9 @@
 # Hosted account security
 
-> See `docs/specs/glossary.md` for Burrow, Client, and Relay vocabulary.
-> Owns the security checks of Hosted's three Workers, account, relay, and voice. Defers identity behavior and the Worker split to `docs/specs/hosted.md` and terminal access to `docs/specs/remote-security-model.md`.
-> Read `docs/specs/security.md` first; live production controls and real-provider acceptance still require verification.
+> - See `docs/specs/glossary.md` for Burrow, Client, and Relay vocabulary.
+> - Owns the security checks of Hosted's three Workers, account, relay, and voice.
+> - Defers identity behavior and the Worker split to `docs/specs/hosted.md` and terminal access to `docs/specs/remote-security-model.md`.
+> - Read `docs/specs/security.md` first; live production controls and real-provider acceptance still require verification.
 
 ## Origin boundary
 

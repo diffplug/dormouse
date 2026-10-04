@@ -1,9 +1,9 @@
 # Tiling Engine (Lath)
 
-> See [glossary.md](glossary.md) for the Surface model, the `Window ⊃ Workspace ⊃ Pane ⊃ Surface` hierarchy, and the Pane / Door / baseboard / passthrough vocabulary used here.
-> **Owns** the engine internals: the pure core under `lib/src/lib/lath/` (model, layout, ops, animator, hit-testing) plus the Wall binding with native motion and hierarchical DnD. Lath replaced dockview-react; that dependency is gone.
-> **Defers** the interaction model on top to [layout.md](layout.md): selection, focus, modes, session lifecycle.
-> Evidence behind the rules: [tiling-engine.rationale.md](tiling-engine.rationale.md).
+> - See [glossary.md](glossary.md) for the Surface model, the `Window ⊃ Workspace ⊃ Pane ⊃ Surface` hierarchy, and the Pane / Door / baseboard / passthrough vocabulary used here.
+> - **Owns** the engine internals: the pure core under `lib/src/lib/lath/` (model, layout, ops, animator, hit-testing) plus the Wall binding with native motion and hierarchical DnD. Lath replaced dockview-react; that dependency is gone.
+> - **Defers** the interaction model on top to [layout.md](layout.md): selection, focus, modes, session lifecycle.
+> - Evidence behind the rules: [tiling-engine.rationale.md](tiling-engine.rationale.md).
 
 ## Why
 

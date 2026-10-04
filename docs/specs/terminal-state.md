@@ -1,7 +1,8 @@
 # Terminal CWD and Command State
 
-> See `docs/specs/glossary.md` for Session vocabulary. Owns the per-Session terminal semantic state that layout and grouping consume, and the shell integration that reports it.
-> **Defers:** alert/TODO behavior and the notification OSCs (OSC 9 / 9;4 / 99 / 777 / BEL) to `docs/specs/alert.md`; the escape-sequence registry and parsing-location rules to `docs/specs/terminal-escapes.md`.
+> - See `docs/specs/glossary.md` for Session vocabulary.
+> - Owns the per-Session terminal semantic state that layout and grouping consume, and the shell integration that reports it.
+> - **Defers:** alert/TODO behavior and the notification OSCs (OSC 9 / 9;4 / 99 / 777 / BEL) to `docs/specs/alert.md`; the escape-sequence registry and parsing-location rules to `docs/specs/terminal-escapes.md`.
 
 **`cwd` means "the shell/session reported this directory"** — not the internal CWD of a foreground program. **A command snapshots `cwdAtStart` at start**; grouping and header disambiguation use that snapshot while it runs.
 
@@ -13,11 +14,7 @@
 - **`ShellActivity` is not `isRunning`** — the shell process keeps running; what matters is whether a foreground command is active.
 - **Terminal title is a label override, never a command lifecycle signal.** `titleCandidates` keeps the latest value per channel with its own timestamp — the only store of it — so app, shell, and user sources stay independently inspectable; a later title never erases another source's candidate.
 
-**Must transfer semantic state and OSC-driven status at the stream mark, before
-applying the destination's since-mark replay.** Screen serialization carries no
-command lifecycle; newer replay events still win, including command finish.
-Source of truth: `snapshotTerminalState` / `restoreTransferredTerminalState` in
-`lib/src/lib/terminal-state-store.ts`; tested in `standalone/src/workspace-move.test.ts`.
+**Must transfer semantic state and OSC-driven status at the stream mark, before applying the destination's since-mark replay.** Screen serialization carries no command lifecycle; newer replay events still win, including command finish. Source of truth: `snapshotTerminalState` / `restoreTransferredTerminalState` in `lib/src/lib/terminal-state-store.ts`; tested in `standalone/src/workspace-move.test.ts`.
 
 ## Normalized Events
 

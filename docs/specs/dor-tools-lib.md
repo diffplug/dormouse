@@ -1,7 +1,7 @@
 # Dor Tools Library
 
-> See `docs/specs/glossary.md` for Session / Pane vocabulary.
-> Owns `dor-tools-lib`, the MIT package that Tools and their hosts share for the Tool integration protocol: its license and dependency boundary, entry points, and consumers. The wire rules it implements belong to `docs/specs/dor-tool.md` → OSC 367, Unsaved changes, and Closing unsaved Tools.
+> - See `docs/specs/glossary.md` for Session / Pane vocabulary.
+> - Owns `dor-tools-lib`, the MIT package that Tools and their hosts share for the Tool integration protocol: its license and dependency boundary, entry points, and consumers. The wire rules it implements belong to `docs/specs/dor-tool.md` → OSC 367, Unsaved changes, and Closing unsaved Tools.
 
 ## Package
 

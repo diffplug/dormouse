@@ -1,8 +1,8 @@
 # Network policy and remote transport
 
-> See `docs/specs/glossary.md` for Burrow, Client, Relay, and Session vocabulary.
-> Owns the network policy — the one setting that decides every connection Dormouse opens on its own — the transport each level allows, and Settings → Network, where it is chosen. Authorization belongs to `docs/specs/remote-security-model.md`, the wire to `docs/specs/remote-api.md`, the one-time runtime to `docs/specs/one-time.md`, and the updater to `docs/specs/auto-update.md`.
-> Read `docs/specs/remote-security-model.md` -> "Direct path" first.
+> - See `docs/specs/glossary.md` for Burrow, Client, Relay, and Session vocabulary.
+> - Owns the network policy — the one setting that decides every connection Dormouse opens on its own — the transport each level allows, and Settings → Network, where it is chosen. Authorization belongs to `docs/specs/remote-security-model.md`, the wire to `docs/specs/remote-api.md`, the one-time runtime to `docs/specs/one-time.md`, and the updater to `docs/specs/auto-update.md`.
+> - Read `docs/specs/remote-security-model.md` -> "Direct path" first.
 
 ## Policy
 

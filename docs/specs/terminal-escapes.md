@@ -1,9 +1,8 @@
 # Terminal Escape Sequence Registry
 
-> See `docs/specs/glossary.md` for the Session vocabulary used when a row talks about replay or resumed Sessions.
-
-> **Owns:** the exhaustive registry — every sequence Dormouse parses, answers, or ignores has one row below — plus the string-control framing, the parse sites, and the strip/replay rules.
-> **Defers** each row's behavior to the spec its row names.
+> - See `docs/specs/glossary.md` for the Session vocabulary used when a row talks about replay or resumed Sessions.
+> - **Owns:** the exhaustive registry — every sequence Dormouse parses, answers, or ignores has one row below — plus the string-control framing, the parse sites, and the strip/replay rules.
+> - **Defers** each row's behavior to the spec its row names.
 
 ## Families
 

@@ -1,10 +1,8 @@
 # Terminal Mouse and Clipboard Behavior Specification
 
-> See `docs/specs/glossary.md` for Session / Pane vocabulary. This spec uses it for the pane-level scoping of mouse regime, override state, and selection.
-
-> Owns terminal selection, copy, paste, link activation, and mouse override across platforms; for a Tool, only while its terminal is forward. Header placement: `docs/specs/layout.md`; sequence registry: `docs/specs/terminal-escapes.md`.
-
-> Sections are numbered for cross-spec reference (`§8.6` etc.); the numbers are stable, so append rather than renumber.
+> - See `docs/specs/glossary.md` for Session / Pane vocabulary. This spec uses it for the pane-level scoping of mouse regime, override state, and selection.
+> - Owns terminal selection, copy, paste, link activation, and mouse override across platforms; for a Tool, only while its terminal is forward. Header placement: `docs/specs/layout.md`; sequence registry: `docs/specs/terminal-escapes.md`.
+> - Sections are numbered for cross-spec reference (`§8.6` etc.); the numbers are stable, so append rather than renumber.
 
 ---
 

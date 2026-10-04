@@ -105,7 +105,7 @@ for (const [name, target, text] of CASES) {
 
 selftest.withMutation(
   EXTERNAL_SPEC,
-  (path) => writeFileSync(path, readRepoFile(EXTERNAL_SPEC).replace(/^> See.*glossary[^\n]*\n/m, '')),
+  (path) => writeFileSync(path, readRepoFile(EXTERNAL_SPEC).replace(/^> (?:- )?See.*glossary[^\n]*\n/m, '')),
   'check 5: an external spec without its glossary front matter',
 );
 

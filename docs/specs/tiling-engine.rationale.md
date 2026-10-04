@@ -88,6 +88,4 @@ Unbounded parking preserves unsaved iframe state; a ninth minimized browser prev
 | 12 | Drag a pane to a leaf edge, an ancestor edge, and center | Split beside pane/column/row or swap; preview matches commit; dragging while a door is selected selects the dragged pane |
 | 13 | Drag a pane onto the baseboard; drag a door out | Minimize with token; restore at the hit-tested position |
 
-Row 8's counterpart guard — a background `dor` command never yanks cross-frame
-focus out of the host editor — is checked against VS Code rather than the
-innerdogfood harness.
+Row 8's counterpart guard — a background `dor` command never yanks cross-frame focus out of the host editor — is checked against VS Code rather than the innerdogfood harness.

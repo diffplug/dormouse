@@ -43,19 +43,11 @@ Source of truth: `PlaygroundDesktop` in `website/src/pages/PlaygroundDesktop.tsx
 
 ### Pocket gesture opening screen
 
-**Must credit both edge-scroll directions (`gn-scroll`), then all four arrows
-(`gn-arrows`), then Enter, then Escape, each only once its predecessor is
-complete**; an arrow sent before scrolling completes does not count.
-**Must clear partial direction counts on tutorial reset.** Keyboard input and
-native wheels never grant gesture credit.
+**Must credit both edge-scroll directions (`gn-scroll`), then all four arrows (`gn-arrows`), then Enter, then Escape, each only once its predecessor is complete**; an arrow sent before scrolling completes does not count. **Must clear partial direction counts on tutorial reset.** Keyboard input and native wheels never grant gesture credit.
 
-**Must capture the mouse only on this screen**, where vertical wheels scroll its
-starfield, and **must stop animation and release capture on leaving or
-disposal.** Reduced motion disables idle animation, retaining scroll movement.
+**Must capture the mouse only on this screen**, where vertical wheels scroll its starfield, and **must stop animation and release capture on leaving or disposal.** Reduced motion disables idle animation, retaining scroll movement.
 
-Source of truth: `TutRunner` and `GestureStarfield` in
-`website/src/lib/tut-runner.ts`; `GESTURE_NAVIGATION_SECTION` in
-`website/src/lib/tut-items.ts`.
+Source of truth: `TutRunner` and `GestureStarfield` in `website/src/lib/tut-runner.ts`; `GESTURE_NAVIGATION_SECTION` in `website/src/lib/tut-items.ts`.
 
 ## Menu and navigation behavior
 

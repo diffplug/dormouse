@@ -86,7 +86,7 @@ function referencesOf(spec, text) {
 
 const proseOnly = (text) => proseLines(text).join('\n');
 
-function proseCandidates(text) {
+function proseCandidates(path, text) {
   const prose = proseOnly(text);
   const candidates = [];
   let offset = 0;
@@ -113,8 +113,11 @@ function proseCandidates(text) {
   text.split('\n').forEach((line, index) => {
     const tests = line.match(/[\w./-]+\.test\.[cm]?[jt]sx?/g) ?? [];
     if (tests.length >= 2) candidates.push({ kind: 'CUT', line: index + 1, words: wordCount(line), detail: `${tests.length}-file test inventory` });
-    if (/^Source of truth:/.test(line) && line.length >= 220) {
-      candidates.push({ kind: 'POINTER', line: index + 1, words: wordCount(line), detail: `${line.length}-character source pointer` });
+    // A pointer names the entrypoints a reader follows through imports, so it
+    // is measured in files named, not in characters or words.
+    const files = /^Source of truth\b/.test(line) ? referencesOf(path, line).refs.length : 0;
+    if (files >= 5) {
+      candidates.push({ kind: 'POINTER', line: index + 1, words: wordCount(line), detail: `${files}-file source pointer` });
     }
   });
   const lines = prose.split('\n');
@@ -217,13 +220,13 @@ let reports = specFiles.map((spec) => {
   const rationaleReferences = rationaleText === null ? { refs: [], unresolved: [] } : referencesOf(rationalePath, rationaleText);
   const refs = [...new Set([...specReferences.refs, ...rationaleReferences.refs])].sort();
   const unresolved = [...new Set([...specReferences.unresolved, ...rationaleReferences.unresolved])].sort();
-  const prose = proseCandidates(text);
+  const prose = proseCandidates(spec, text);
   const rationale = rationaleText === null ? null : {
     path: rationalePath,
     words: wordCount(rationaleText),
     references: rationaleReferences.refs,
     unresolved: rationaleReferences.unresolved,
-    prose: proseCandidates(rationaleText),
+    prose: proseCandidates(rationalePath, rationaleText),
   };
   const code = codeCandidates(text + '\n' + (rationaleText ?? ''), refs);
   return {

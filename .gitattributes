@@ -9,3 +9,8 @@
 *.bat text eol=crlf
 # The POSIX `dor` launcher (no extension) must stay LF.
 dor/bin/dor text eol=lf
+
+# Markdown merges sentence by sentence once `pnpm setup:git` defines this
+# driver (scripts/md-merge.mjs); until then Git merges these files by line.
+*.md merge=md-sentences
+*.mdx merge=md-sentences

@@ -1,7 +1,8 @@
 # CI and Release Security
 
-> Owns the posture of GitHub Actions, the bot maintainer, and the two release paths — what each identity can reach and what stays admin-gated. Defers the release procedure and the secrets table to `docs/specs/deploy.md` -> "Environment / secrets", and the audit machinery to `docs/specs/security-audit.md`.
-> Read `docs/specs/security.md` first; `docs/specs/security-audit.md` says how the `FAIL IF` lines here are run.
+> - Owns the posture of GitHub Actions, the bot maintainer, and the two release paths — what each identity can reach and what stays admin-gated.
+> - Defers the release procedure and the secrets table to `docs/specs/deploy.md` -> "Environment / secrets", and the audit machinery to `docs/specs/security-audit.md`.
+> - Read `docs/specs/security.md` first; `docs/specs/security-audit.md` says how the `FAIL IF` lines here are run.
 
 ## GitHub Actions Policies
 
