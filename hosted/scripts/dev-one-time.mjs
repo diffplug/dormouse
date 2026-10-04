@@ -56,26 +56,55 @@ export function devOrigin(port) {
 export const DEV_ENROLL_SECRET = "dormouse-relay-local-development-only";
 
 /**
+ * The Hosted dev loop this run is part of, or null on its own: `pnpm
+ * dev:hosted` starts this script with the account origin that approves codes
+ * and its development database, so device-code sign-in redeems locally. Both
+ * or neither.
+ */
+export function hostedAttachment(env) {
+  const accountOrigin = env.HOSTED_DEV_ACCOUNT_ORIGIN || undefined;
+  const databaseUrl = env.HOSTED_DEV_DATABASE_URL || undefined;
+  if (!accountOrigin && !databaseUrl) return null;
+  if (!accountOrigin || !databaseUrl)
+    throw new Error("HOSTED_DEV_ACCOUNT_ORIGIN and HOSTED_DEV_DATABASE_URL are set together.");
+  return { accountOrigin, databaseUrl };
+}
+
+/**
  * The Wrangler config the loop runs, written beside the staged page.
  * Allowlisted from `hosted/wrangler.relay.jsonc` like the preview's: the relay
  * entry, the rendezvous's Durable Object, migration, and rate limits, and the
  * assets binding over the staging folder — never a route or a production
  * secret, so it cannot answer for production. Its enrollment secret is
- * {@link DEV_ENROLL_SECRET}, fixed and public.
+ * {@link DEV_ENROLL_SECRET}, fixed and public. Attached to the Hosted dev loop
+ * ({@link hostedAttachment}), it also names that account origin and reaches
+ * its database through a local Hyperdrive, never production's.
  */
-export function devConfig(base, port) {
+export function devConfig(base, port, attached = null) {
   return {
     name: `${base.name}-dev`,
     main: "../../server/relay-worker.ts",
     compatibility_date: base.compatibility_date,
     compatibility_flags: base.compatibility_flags,
     assets: { ...base.assets, directory: "./assets" },
-    vars: { APP_ORIGIN: devOrigin(port), RELAY_ENROLL_SECRET: DEV_ENROLL_SECRET },
+    vars: {
+      APP_ORIGIN: devOrigin(port),
+      RELAY_ENROLL_SECRET: DEV_ENROLL_SECRET,
+      ...(attached && { ACCOUNT_ORIGIN: attached.accountOrigin }),
+    },
+    ...(attached && {
+      hyperdrive: [
+        { binding: "HYPERDRIVE", id: LOCAL_HYPERDRIVE_ID, localConnectionString: attached.databaseUrl },
+      ],
+    }),
     durable_objects: base.durable_objects,
     migrations: base.migrations,
     ratelimits: base.ratelimits,
   };
 }
+
+/** A Hyperdrive id `wrangler dev --local` requires and never looks up. */
+export const LOCAL_HYPERDRIVE_ID = "local-development";
 
 /** One GET through the Worker, as a browser on the loopback origin sends it. */
 function status(port, path) {
@@ -111,13 +140,14 @@ async function waitFor(what, ready, timeoutMs) {
 async function main() {
   const port = devPort(process.env);
   const origin = devOrigin(port);
+  const attached = hostedAttachment(process.env);
   const base = parseConfig(readFileSync(resolve(hosted, "wrangler.relay.jsonc"), "utf8"));
   const pageDir = resolve(devDir, "assets", PAGE_PATH.slice(1));
   // A page left by an earlier run would satisfy the first wait below.
   rmSync(devDir, { recursive: true, force: true });
   mkdirSync(pageDir, { recursive: true });
   const configPath = resolve(devDir, "wrangler.json");
-  writeFileSync(configPath, JSON.stringify(devConfig(base, port), null, 2) + "\n");
+  writeFileSync(configPath, JSON.stringify(devConfig(base, port, attached), null, 2) + "\n");
 
   // Each package's own bin shim, which execs its tool, so a signal reaches it.
   const run = (name, args, cwd) => {
@@ -172,9 +202,12 @@ async function main() {
       // A local origin counts as Hosted only in a dev build
       // (docs/specs/relay.md -> "Relay origin").
       "  DORMOUSE_RELAY_IS_HOSTED=1",
+      ...(attached ? [`Its device-code sign-in approves at ${attached.accountOrigin}.`] : []),
       "",
     ].join("\n"),
   );
+  // Under `pnpm dev:hosted` the account origin is the page the loop serves.
+  if (attached) return;
   // OSC 367 (docs/specs/dor-tool.md -> OSC 367): frame this port's page, not
   // Wrangler's inspector, which the same process tree also binds.
   process.stdout.write(

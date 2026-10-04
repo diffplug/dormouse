@@ -15,6 +15,8 @@ dor tool hosted
 
 Outside Dormouse, use `pnpm dev:hosted` and open the `http://localhost:<port>` URL it prints. Request a code for a test address and read it at `/api/dev/emails` on that same origin. No real mail is sent, and the development database is isolated by the worktree path; `docs/specs/hosted.md` -> "Development and release" owns what the local entry serves and what production omits. The port is OS-assigned unless you set `PORT`. Do not share this local inbox publicly. The local origin serves the voice token routes but not speak: a Hosted build speaks only at `https://voice.dormouse.sh` (`docs/specs/hosted.md` -> "Development and release").
 
+The same command starts the relay Worker on this database at `http://localhost:8787` (or `RELAY_PORT`), approving codes at the account origin, so a dev desktop build signs in by device code end to end: `DORMOUSE_RELAY_IS_HOSTED=1 DORMOUSE_RELAY_ORIGIN=http://localhost:8787 pnpm innerdogfood`, choose Local networks or Anywhere in Settings → Network, press Sign in to Dormouse Hosted, and approve the code at the account origin. Approving needs a plan; buy one first at `/checkout?plan=monthly` on StripeDev. Don't also run `dor tool one-time` on the same port.
+
 ```sh
 pnpm test:hosted
 pnpm build:hosted
