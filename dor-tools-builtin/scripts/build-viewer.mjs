@@ -1,6 +1,7 @@
 import { build } from 'esbuild';
 import { rm } from 'node:fs/promises';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
+import { realpathSync } from 'node:fs';
 
 const absWorkingDir = fileURLToPath(new URL('../', import.meta.url));
 // From source, as the website's Vite build resolves it: the website builds
@@ -32,7 +33,7 @@ export async function buildViewerAssets(outdir) {
 }
 
 // `node scripts/build-viewer.mjs <outdir>`
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   if (!process.argv[2]) throw new Error('usage: build-viewer.mjs <outdir>');
   await buildViewerAssets(process.argv[2]);
 }

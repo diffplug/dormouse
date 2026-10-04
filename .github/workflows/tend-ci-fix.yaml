@@ -42,6 +42,9 @@ jobs:
           fetch-tags: true
           token: ${{ secrets.TEND_BOT_TOKEN }}
 
+      - run: node scripts/setup-git.mjs
+        name: Define the markdown merge driver
+
       - uses: max-sixty/tend/claude@0.3.6
         with:
           github_token: ${{ secrets.TEND_BOT_TOKEN }}

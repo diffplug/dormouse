@@ -34,6 +34,8 @@ A fork PR's tree reaches the agent's copy-on-write view while the privileged `pu
 
 Trusted runner steps receive the real `TEND_BOT_TOKEN` and Anthropic credentials and provision the credential-injecting proxy; setup strips the checkout credential before the separate, non-sudo agent starts (rationale).
 
+**Must limit `.config/tend.yaml`'s `setup:` to `node scripts/setup-git.mjs` on the base-tree checkout**, which runs with those credentials present: it uses Node built-ins only, and the `md-sentences` merge driver it defines executes PR code only inside the agent's own merges, since no trusted runner step merges, rebases, or cherry-picks.
+
 **Bot collaborator authority.** `dormouse-bot` is a direct repo collaborator with `push` permission and org-enforced 2FA; `TEND_BOT_TOKEN` carries the scopes `repo`, `workflow`, `notifications`, `write:discussion`, `gist`, and `user`. `workflow`, required to regenerate `tend-*.yaml`, also lets the harness add arbitrary workflow files. **Ref-protection rulesets restrict where bot commits land but do not gate workflow execution on feature branches.**
 
 **The notifications poll widens its input.** `tend-notifications.yaml` alone takes its subjects from the bot's own unread feed, and its pre-check re-subscribes the bot to all repository activity (`PUT /repos/diffplug/dormouse/subscription`) every `*/15` cycle; its prompt decides whether to respond (rationale). On an undispatched thread the bot is still bounded by `author_association` tiering and the admin gate on `main`. Unwatching by hand does not stick: the lever is `tend-notifications.yaml`, not the Unwatch button.

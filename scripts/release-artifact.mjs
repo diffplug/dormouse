@@ -1,6 +1,6 @@
-import { chmodSync, lstatSync, readFileSync, readdirSync } from 'node:fs';
-import { join, resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { chmodSync, lstatSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 function relativePath(path) {
   if (!path || path.split('/').some(part => !part || part === '.' || part === '..') || /[\\\r\n:]/.test(path)) {
@@ -64,7 +64,7 @@ export function restoreExecutables(root) {
   for (const path of verifyInventory(root)) chmodSync(join(root, path), 0o755);
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
     const [command, root] = process.argv.slice(2);
     if (!root || !['verify', 'restore'].includes(command)) throw new Error('Usage: release-artifact.mjs verify|restore ARTIFACT_DIR');
