@@ -6,7 +6,7 @@
 
 ## Disclosure
 
-**Keep the runtime dependency surface small: add a dependency only when it is necessary**, and justify each change against its supply-chain risk.
+The runtime dependency surface is kept small: a dependency is added only when necessary, each change justified against its supply-chain risk.
 
 **Every dependency Dormouse *puts on a user's machine* is listed at [dormouse.sh/supply-chain](https://dormouse.sh/supply-chain).** The test is narrower than "everything a user runs" (rationale). Three inventories:
 
@@ -14,15 +14,11 @@
 - every cargo dependency, direct listed separately from transitive
 - the Node.js runtime bundled as a Tauri sidecar in the standalone app
 
-**Must classify every workspace from its shipping route: a product root or runtime edge if Dormouse writes its files onto a user's disk, an exclusion only if it installs no artifact.** The root and exclusion arrays document those routes beside their entries; the audit derives shipping independently from the builds.
-
-**Must list `dormouse-lib` as a root independently of workspace edges** (rationale). **Must use package names for roots and exclusions.**
+Every workspace is classified from its shipping route: a product root or runtime edge if Dormouse writes its files onto a user's disk, an exclusion only if it installs no artifact. The root and exclusion arrays document those routes beside their entries; the audit derives shipping independently from the builds.
 
 **External binaries are outside this graph by construction** — the user's shell, and the `agent-browser` CLI `dor agent-browser` forwards to (`npm i -g agent-browser`, a dependency of nothing here, resolved off `PATH`). **Dormouse instead ships nothing that pulls them in silently** (rationale).
 
-**Regenerate and commit the dependency lists whenever a production dependency is added, removed, or upgraded** (rationale).
-
-**Must reject unclassified workspaces and exclusions reachable from a product root before generating disclosure.** Runtime and optional edges count; development edges do not. `website/scripts/dependency-workspaces.test.js` pins coverage.
+The dependency lists are regenerated and committed with every production dependency change (rationale).
 
 **Cargo discloses build edges but not dev edges, and a git-patched crate at its fork.** `website/scripts/cargo-dependencies.test.js` pins both.
 
@@ -35,6 +31,7 @@
 
 - **FAIL IF** `node website/scripts/generate-deps.js` changes `website/src/data/dependencies-npm.json`, `website/src/data/dependencies-cargo.json`, or `website/src/data/dependencies-runtime.json` when run against a clean working tree after `pnpm install --frozen-lockfile` (rationale).
 - **FAIL IF** `.github/workflows/ci.yml` stops running that generator under that same install precondition, or stops failing on a diff (rationale).
+- **FAIL IF** the generator stops naming `dormouse-lib` as a root independently of workspace edges (rationale), names a root or exclusion by anything but its package name, or stops rejecting, before generating disclosure, an unclassified workspace or an exclusion reachable from a product root over runtime and optional edges (development edges do not count). Pinned by `website/scripts/dependency-workspaces.test.js`.
 - **FAIL IF** the disclosure omits a shipped workspace's graph or excludes a shipped package. Derive shipping routes from `pnpm-workspace.yaml` and the builds, not the generator's arrays; the generator enforces classification, but cannot establish whether an exclusion is justified (rationale).
 
 Source of truth: `productDependencyFilters` / `excludedWorkspacePackages` / `optionalSiblingsAtSameVersion` in `website/scripts/generate-deps.js`; `assertWorkspaceCoverage` in `website/scripts/dependency-workspaces.js`; `getShippedCargoGraph` / `getCargoGitRepository` in `website/scripts/cargo-dependencies.js`.
@@ -48,10 +45,11 @@ Source of truth: `productDependencyFilters` / `excludedWorkspacePackages` / `opt
 - **The pin is deliberate and manual** — no automated ecosystem tracks it; workflows that do not bundle the runtime may track the same pinned major.
 - Locally, pnpm honours `devEngines` (`onFail: "download"`) so scripts run under the pinned Node; CI drives `actions/setup-node` from the same field through `node-version-file: package.json` (rationale).
 
-**Must check the Windows runtime version before changing its PE Subsystem field from console (3) to GUI (2).** Only that two-byte field is patched (`docs/specs/standalone.md -> "Windows node subsystem"`; rationale).
+The Windows runtime's PE Subsystem field is patched from console (3) to GUI (2) (`docs/specs/standalone.md -> "Windows node subsystem"`; rationale).
 
 - **FAIL IF** the root `package.json` is missing `devEngines.runtime.version`, or its value is not an exact `MAJOR.MINOR.PATCH` Node.js version — a bare major such as `24` is not acceptable.
 - **FAIL IF** `standalone/src-tauri/build.rs` no longer runs `--version` on the binary it is about to bundle and fails the build unless it matches `package.json`'s `devEngines.runtime.version`, or if the check is skipped for any configuration the release matrix builds. One deliberate skip is permitted: `verify_node_version` cannot execute a foreign-arch binary, so it warns and returns when `host != target` — acceptable only while every entry in `release.yml`'s standalone matrix is host-native; a cross-compiled entry ships an unverified runtime and fails this check.
+- **FAIL IF** `standalone/src-tauri/build.rs` patches the Windows runtime before `verify_node_version` has checked it, changes anything but its two-byte PE Subsystem field, or patches a starting value other than console (3).
 - **FAIL IF** the `build-standalone` job in `.github/workflows/release.yml` does not install the pinned runtime via `node-version-file: package.json`, **or** the root `package.json` gains a `volta.node` or `engines.node` field — alternate version declarations are forbidden (rationale). Other jobs may pin `node-version` inline since their interpreter is never bundled.
 
 Source of truth: `bundle_node_runtime` / `verify_node_version` in `standalone/src-tauri/build.rs`; `getBundledRuntimeDependencies` in `website/scripts/generate-deps.js`.

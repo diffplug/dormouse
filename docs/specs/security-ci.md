@@ -6,12 +6,14 @@
 
 ## GitHub Actions Policies
 
-**Must pin every action by commit hash, not version tag, in every workflow this repository authors**; Renovate updates the hashes. The one exception is `max-sixty/tend/claude` in `tend-*.yaml`, generated upstream with a version-tag pin (see "Upstream compromise").
+Renovate updates the commit pins; the generated `tend-*.yaml` pin `max-sixty/tend/claude` by version tag (see "Upstream compromise").
 
-**Agent-managed workflows are `tend-*.yaml`, `.github/workflows/workflow-audit.yaml`, and `.github/workflows/security-audit.yaml`.** They are exempt from the two rules below because they must modify issues, PRs, or code, or fetch an OIDC token; "Automated Maintainer (tend)" bounds their scope.
+**Agent-managed workflows are `tend-*.yaml`, `.github/workflows/workflow-audit.yaml`, and `.github/workflows/security-audit.yaml`.** They are exempt from the `pull_request_target` and write-permission rules below because they must modify issues, PRs, or code, or fetch an OIDC token; "Automated Maintainer (tend)" bounds their scope.
 
-**Release audit dispatch.** The `security-audit` job in `.github/workflows/release.yml` holds `actions: write` and **may use it solely to** dispatch `security-audit.yaml` on the release tag and watch that run, gating the VS Code publish on the result (rationale). That token may start or cancel workflow runs in this repo, but cannot reach env-scoped secrets, merge to `main`, or push tags, and `release.yml` runs only on admin-gated `v*` tags.
+**Release audit dispatch.** The `security-audit` job in `.github/workflows/release.yml` holds `actions: write` to dispatch `security-audit.yaml` on the release tag and watch that run, gating the VS Code publish on the result (rationale). That token can start or cancel workflow runs in this repo, but cannot reach env-scoped secrets, merge to `main`, or push tags, and `release.yml` runs only on admin-gated `v*` tags.
 
+- **FAIL IF** a workflow under `.github/workflows/` references an action by anything but a commit hash, except `max-sixty/tend/claude` in `tend-*.yaml`.
+- **FAIL IF** the `security-audit` job in `.github/workflows/release.yml` uses its `actions: write` for anything but dispatching `security-audit.yaml` on the release tag and watching that run.
 - **FAIL IF** `pull_request_target` appears as an `on:` trigger in any `.github/workflows/**` file other than `tend-*.yaml`. A mention in a comment is not a violation.
 - **FAIL IF** a non-agent-managed workflow has **effective** write permissions other than the release provenance permissions `id-token: write` and `attestations: write`, or the `actions: write` granted to the `security-audit` job in `release.yml` (see "Release audit dispatch"). Effective as in the agent-managed bullet below.
 
@@ -25,25 +27,25 @@ The [tend](https://github.com/max-sixty/tend) agent harness runs as the GitHub u
 | `CLAUDE_CODE_OAUTH_TOKEN` | Anthropic API-credit abuse | the bot account's spend limit |
 | `ARGOS_TOKEN`, the unused `CHROMATIC_PROJECT_TOKEN` | corrupted snapshot testing, a replaced Storybook deploy | rotation; abuse is visible in each service's own dashboard |
 
-**Assume a prompt injection can push a workflow that sends a repo-level secret to an external URL.** The harness reads PR descriptions, diffs, issue text, comments, and CI logs, all attacker-influenceable; admin-gated release paths stay sealed, but a workflow on a bot-pushed feature branch executes with repo-level secrets in scope.
+A prompt injection can push a workflow that sends a repo-level secret to an external URL: the harness reads PR descriptions, diffs, issue text, comments, and CI logs, all attacker-influenceable; admin-gated release paths stay sealed, but a workflow on a bot-pushed feature branch executes with repo-level secrets in scope.
 
-**Must revert the project-instruction paths (`CLAUDE.md`, `AGENTS.md`, `.claude/`, `.mcp.json`) from the reviewed base branch before the agent starts on a fork PR**, whose tree reaches the agent's copy-on-write view while the privileged `pull_request_target` workspace holds the base tree. tend's `shared/steps/restore-sensitive-config.sh` does it, so **that control's completeness is a property of the pinned upstream version** — hence the `0.1.19` floor below (rationale).
+A fork PR's tree reaches the agent's copy-on-write view while the privileged `pull_request_target` workspace holds the base tree, so tend's `shared/steps/restore-sensitive-config.sh` reverts the project-instruction paths (`CLAUDE.md`, `AGENTS.md`, `.claude/`, `.mcp.json`) from the reviewed base branch before the agent starts; **that control's completeness is a property of the pinned upstream version** (rationale).
 
-**Must keep real `TEND_BOT_TOKEN` and Anthropic credentials out of the agent's environment, disk, and `.git/config`.** Trusted runner steps receive them and provision the credential-injecting proxy; setup strips the checkout credential before the separate, non-sudo agent starts (rationale).
+Trusted runner steps receive the real `TEND_BOT_TOKEN` and Anthropic credentials and provision the credential-injecting proxy; setup strips the checkout credential before the separate, non-sudo agent starts (rationale).
 
 **Bot collaborator authority.** `dormouse-bot` is a direct repo collaborator with `push` permission and org-enforced 2FA; `TEND_BOT_TOKEN` carries the scopes `repo`, `workflow`, `notifications`, `write:discussion`, `gist`, and `user`. `workflow`, required to regenerate `tend-*.yaml`, also lets the harness add arbitrary workflow files. **Ref-protection rulesets restrict where bot commits land but do not gate workflow execution on feature branches.**
 
-**The notifications poll widens its input.** `tend-notifications.yaml` alone takes its subjects from the bot's own unread feed, and its pre-check re-subscribes the bot to all repository activity (`PUT /repos/diffplug/dormouse/subscription`) every `*/15` cycle; its prompt decides whether to respond (rationale). On an undispatched thread the bot is still bounded by `author_association` tiering and the admin gate on `main`. **Never expect unwatching by hand to stick**: the lever is `tend-notifications.yaml`, not the Unwatch button.
+**The notifications poll widens its input.** `tend-notifications.yaml` alone takes its subjects from the bot's own unread feed, and its pre-check re-subscribes the bot to all repository activity (`PUT /repos/diffplug/dormouse/subscription`) every `*/15` cycle; its prompt decides whether to respond (rationale). On an undispatched thread the bot is still bounded by `author_association` tiering and the admin gate on `main`. Unwatching by hand does not stick: the lever is `tend-notifications.yaml`, not the Unwatch button.
 
 **Reachable repo-level secrets.** Every repo-level secret is reachable by any workflow the bot can author: `.github/workflows/argos.yml` is `pull_request`-triggered, and environment policies cannot tell a bot from a human contributor at the ref level. Accepted for `ARGOS_TOKEN` and the unused `CHROMATIC_PROJECT_TOKEN` alone, each scoped to one project (`docs/specs/security.md` -> "What is not defended"); any other repo-level secret needs its own acceptance there. `OVSX_PAT` and `VSCE_PAT` live only in the `vscode-extension-publish` environment, which admits only admin-created `v*` tags.
 
-**Never create an `ANTHROPIC_API_KEY` secret.** Every generated `tend-*.yaml` passes `anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}` to `max-sixty/tend/claude`; with no such secret it resolves empty and the harness uses `CLAUDE_CODE_OAUTH_TOKEN`. The input cannot be deleted locally, so the inventory `FAIL IF` below makes adding one a deliberate expansion of the bot's reach (rationale).
+No `ANTHROPIC_API_KEY` secret exists. Every generated `tend-*.yaml` passes `anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}` to `max-sixty/tend/claude`; with no such secret it resolves empty and the harness uses `CLAUDE_CODE_OAUTH_TOKEN`. The input cannot be deleted locally, so the inventory `FAIL IF` below makes adding one a deliberate expansion of the bot's reach (rationale).
 
-**Org-level secrets.** An org secret shared with this repo is reachable exactly like a repo-level one but absent from this repo's own listing — `gh api repos/diffplug/dormouse/actions/organization-secrets` is the check. **None are visible today** (rationale); **must re-evaluate and name any that becomes visible before accepting it**, and the inventory `FAIL IF` admits none.
+**Org-level secrets.** An org secret shared with this repo is reachable exactly like a repo-level one but absent from this repo's own listing — `gh api repos/diffplug/dormouse/actions/organization-secrets` is the check. **None are visible today** (rationale); the inventory `FAIL IF` admits none, so one that becomes visible fails until it is evaluated and named.
 
 **Upstream compromise.** Generated workflows reference `max-sixty/tend/claude@<version>` — a mutable **tag**, so upstream can change what our workflows execute with no commit here and `workflow-audit.yaml` seeing a byte-identical file (`docs/specs/security.md` -> "What is not defended"; rationale). **The version pin bounds deliberate upgrades, not a hostile upstream**; `uvx tend@latest` runs only at install and nightly regen, so a compromise of that path affects the next re-run, not in-flight workflows. `tend-mention` and `tend-notifications` also run `astral-sh/setup-uv`, whose `uv` interprets a `run:` step holding `TEND_BOT_TOKEN`; the generator pins that action by commit and the `uv` download by checksum.
 
-**Audit visibility.** `.github/workflows/workflow-audit.yaml` walks nightly every commit touching `.github/workflows/`, `.config/tend.yaml`, `.github/audit/`, or `.vscode/` since its previous successful run, **across all branches**, so a workflow pushed to a feature branch is seen without a PR. **This enumeration and the job's `WINDOW` must name the same paths** (rationale). It reports the *unexplained*, classifying out routine sources on independently checked provenance or content; each source's residual is `docs/specs/security.md` -> "What is not defended":
+**Audit visibility.** `.github/workflows/workflow-audit.yaml` walks nightly every commit touching `.github/workflows/`, `.config/tend.yaml`, `.github/audit/`, or `.vscode/` since its previous successful run, **across all branches**, so a workflow pushed to a feature branch is seen without a PR. (rationale) It reports the *unexplained*, classifying out routine sources on independently checked provenance or content; each source's residual is `docs/specs/security.md` -> "What is not defended":
 
 | Source | Explained when |
 | --- | --- |
@@ -52,13 +54,11 @@ The [tend](https://github.com/max-sixty/tend) agent harness runs as the GitHub u
 | clean merge | two-parent merge whose window paths equal `git merge-tree` of its parents |
 | admin push | the earliest ref update containing it in the repository activity log (last quarter, server-set timestamps) is an admin's `push` or `branch_creation`, or an admin's `force_push` whose replaced window commits are each admin-introduced; and no author or committer field names a bot (rationale) |
 
-- **Never treat a commit's own author or committer as evidence**: `TEND_BOT_TOKEN` is the credential in question. The pusher GitHub records is evidence; self-declared identity only ever refuses.
-- **Must report a commit whose earliest retained introduction is a PR merge**; that is the admin reviewing, not pushing.
-- **Must report classifier errors and ambiguity as unexplained commits.**
+- **FAIL IF** `WINDOW` in `.github/workflows/workflow-audit.yaml` names other paths than the four above, or the walk stops covering all branches (rationale).
+- **FAIL IF** a commit's own author or committer explains it: `TEND_BOT_TOKEN` is the credential in question, so the pusher GitHub records is evidence and self-declared identity only ever refuses.
+- **FAIL IF** the audit stops reporting a commit whose earliest retained introduction is a PR merge (the admin reviewing, not pushing), a commit already merged to `main` (rationale), or a classifier error or ambiguity, each as unexplained.
 - **FAIL IF** tend regeneration materializes anything except regular `.config/tend.yaml` and workflow YAML blobs from the audited commit. Pinned by `scripts/workflow-audit.test.mjs` (rationale).
-- **Must still report commits already merged to `main`** (rationale).
-- **Never deduplicate by branch or file set**, or a later force-push of malicious content to the same files passes unremarked.
-- **Must key liveness on a successful run, not on an issue existing**; a silent run is the healthy steady state.
+- **FAIL IF** the audit deduplicates by branch or file set, which lets a later force-push of malicious content to the same files pass unremarked, or keys liveness on anything but a successful run, such as an issue existing; a silent run is the healthy steady state.
 
 The diff window's evasions are `docs/specs/security.md` -> "Known gaps".
 
@@ -80,7 +80,8 @@ The diff window's evasions are `docs/specs/security.md` -> "Known gaps".
 - **FAIL IF** `.github/workflows/workflow-audit.yaml` is missing, disabled, or has not produced a successful run in the last 48 hours. Treat one skipped run as a signal rather than as slack in the window (rationale).
 - **FAIL IF** Renovate's `github-actions` manager can update `.github/workflows/tend-*.yaml`; the tend generator owns every dependency pin (rationale).
 - **FAIL IF** any `tend-*.yaml` pins `max-sixty/tend` below `0.1.19`, the release that pins instruction files by glob at any depth (rationale).
-- **FAIL IF** any `tend-*.yaml` workflow uses an unpinned action reference (e.g. `@main`, no version). Tag pins are accepted inside `tend-*.yaml` alone; every other workflow — agent-managed or not — must SHA-pin per "GitHub Actions Policies".
+- **FAIL IF** the pinned `max-sixty/tend/claude` starts the agent on a fork PR before reverting the project-instruction paths, or hands the agent's environment, disk, or `.git/config` the real `TEND_BOT_TOKEN` or an Anthropic credential; read its `claude/action.yaml` and `restore-sensitive-config.sh` at the tag the workflows pin (rationale).
+- **FAIL IF** any `tend-*.yaml` references `max-sixty/tend/claude` unpinned (e.g. `@main`, no version). Every other action reference is "GitHub Actions Policies"'s.
 - **FAIL IF** any job in an agent-managed workflow has **effective** `GITHUB_TOKEN` permissions beyond `contents: write`, `pull-requests: write`, `issues: write`, `id-token: write`, `actions: read`, or any `read` permission. Effective, not declared: apply job permissions over workflow permissions over the repository default; omitted scopes in an explicit block become `none` (rationale).
 - **FAIL IF** `default_workflow_permissions` for this repository is not `read`, or `can_approve_pull_request_reviews` is not `false` (`gh api repos/diffplug/dormouse/actions/permissions/workflow`) — the backstop for every permission bullet in this spec (rationale).
 
@@ -88,7 +89,7 @@ Source of truth: `packageRules` in `.github/renovate.json`; `.github/workflows/w
 
 ## Hosted Deployments
 
-**Must keep Hosted credentials in dedicated environments.** `hosted-production` and `hosted-release-tag` admit only `main`; `hosted-preview` admits only `main` and `refs/pull/*/merge`. All require Ned or Edgar's review with administrator bypass disabled; self-review is allowed. Preview approval authorizes the PR code to receive test-resource credentials only.
+Hosted credentials live in dedicated environments. `hosted-production` and `hosted-release-tag` admit only `main`; `hosted-preview` admits only `main` and `refs/pull/*/merge`. All require Ned or Edgar's review with administrator bypass disabled; self-review is allowed. Preview approval authorizes the PR code to receive test-resource credentials only.
 
 - **FAIL IF** a Hosted environment lacks those branch restrictions, required reviewers, or disabled administrator bypass; inspect all three environments and their deployment policies.
 - **FAIL IF** Hosted credentials appear at repository/org scope, or production credentials appear in `hosted-preview`; inspect GitHub secret placement.
@@ -99,7 +100,7 @@ Source of truth: `hosted/scripts/setup-github.mjs`; `.github/workflows/hosted-pr
 
 ## VS Code Extension Releases
 
-**Must require human approval from an account other than the triggering account** before GitHub Actions publishes the extension, with administrator bypass disabled; `VSCE_PAT` and `OVSX_PAT` live only in that protected environment.
+GitHub Actions publishes the extension only after human approval from an account other than the triggering account, with administrator bypass disabled; `VSCE_PAT` and `OVSX_PAT` live only in that protected environment.
 
 - **FAIL IF** `vscode-extension-publish` lacks nonempty required reviewers, `prevent_self_review: true`, or `can_admins_bypass: false`; read that environment through the GitHub API.
 - **FAIL IF** `.github/workflows/release.yml` is missing the `vscode-extension-publish` environment on the VS Code publish job, or if `VSCE_PAT` / `OVSX_PAT` are referenced anywhere under `.github/workflows/**` from a job not bound to that environment. The second clause is repo-wide on purpose (rationale).
@@ -107,7 +108,7 @@ Source of truth: `hosted/scripts/setup-github.mjs`; `.github/workflows/hosted-pr
 
 ## Desktop Releases
 
-**Production signing is local, never in CI.** GitHub Actions builds unsigned artifacts, publishes attestations and hash manifests, and uploads them; `scripts/sign-and-deploy.sh` **must verify the CI artifact attestations and the recorded SHA-256 hashes before signing**, then signs each platform locally (Windows Authenticode needs a physical YubiKey and the signing PIN; macOS signing and notarization run locally too) and uploads the release assets. **CI must never hold the production Tauri updater private key**: CI uses an ephemeral key, and **Tauri updater signing is applied locally after OS signing**, so the updater signs the bundles users download. Procedure: `docs/specs/deploy.md` -> "Two-stage pipeline".
+**Production signing is local, never in CI.** GitHub Actions builds unsigned artifacts, publishes attestations and hash manifests, and uploads them; `scripts/sign-and-deploy.sh` verifies the CI artifact attestations and the recorded SHA-256 hashes before signing, then signs each platform locally (Windows Authenticode needs a physical YubiKey and the signing PIN; macOS signing and notarization run locally too) and uploads the release assets. CI never holds the production Tauri updater private key: it uses an ephemeral key, and **Tauri updater signing is applied locally after OS signing**, so the updater signs the bundles users download. Procedure: `docs/specs/deploy.md` -> "Two-stage pipeline".
 
 **Signing credentials and argv.** Three secrets reach `scripts/sign-and-deploy.sh` through the environment; argv is readable via `ps` by any process on the machine for the lifetime of a call (rationale).
 
