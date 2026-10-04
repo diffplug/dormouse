@@ -188,7 +188,7 @@ Guarding only completion leaves a stale `start` free to replace the active utter
 
 ## Live Workspace transfer
 
-Nothing moves because the manager and the delivery scheduler left the standalone windows for the host process (`docs/specs/standalone.rationale.md` → Alerts; Alarm settings).
+Nothing moves because the manager and the delivery scheduler left the standalone windows for the host process (`docs/specs/transport.rationale.md` → "Message protocol"; Alarm settings).
 
 ## Workspace union
 
