@@ -1987,9 +1987,9 @@ export function Wall({
       publishMembership();
       return { surfaceRef, rollback };
     },
-    finishSurfaceMove: () => {
+    finishSurfaceMove: (options) => {
       movingSurfaceRef.current = false;
-      if (memberSurfaceIds().length) refillEmptyTree();
+      if (memberSurfaceIds().length || options?.keepEmpty) refillEmptyTree();
     },
     focusSurface: (id, acknowledge) => {
       if (acknowledge) wallActionsRef.current.onFocusPane(id);

@@ -64,7 +64,8 @@ function applyPrimedWorkspaces(primed: PrimedWorkspaces | undefined): void {
   const activeId = primed.activeId ?? primed.workspaces[0]?.id;
   const same = current.activeId === activeId
     && current.workspaces.length === primed.workspaces.length
-    && current.workspaces.every((ws, i) => ws.id === primed.workspaces[i].id && ws.name === primed.workspaces[i].name);
+    && current.workspaces.every((ws, i) => ws.id === primed.workspaces[i].id && ws.name === primed.workspaces[i].name
+      && (ws.pinned === true) === (primed.workspaces[i].pinned === true));
   if (same) return;
   setWorkspaces({ workspaces: primed.workspaces, activeId });
   resetWorkspaceSurfaces();
