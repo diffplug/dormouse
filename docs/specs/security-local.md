@@ -124,7 +124,7 @@ The attacker is another local account reading disk; what the remote stack leaves
 
 **VS Code persists pane structure in VS Code's own storage** — `workspaceState` and `vscode.setState()` — so the modes there are VS Code's, not ours, and no transcript reaches either (`docs/specs/vscode.md` -> "Serialization and restore"). Dormouse also writes `recovery.json` in extension storage, mode `0600` on Unix: one rebuilt agent-resume invocation per Surface, no buffer, unlinked as it is read (`docs/compatible-agents.md` -> "Recovery record").
 
-**The VS Code peer-link token is a local credential at rest** — `burrow.peer-token` in the extension's global storage, written mode `0600` with `wx`, its socket directory re-checked on every contention round. Neither applies on Windows, nor to `recovery.json` or the `tool-trust` receipts (`docs/specs/security.md` -> "Known gaps"; rationale).
+**The VS Code peer-link token is a local credential at rest** — `burrow.peer-token` in the extension's global storage, written mode `0600` with `wx`, its socket directory re-checked on every contention round. Neither control does anything on Windows, and Dormouse applies no Windows DACL to the peer-link token, `recovery.json`, or the `tool-trust` receipts (`docs/specs/security.md` -> "Known gaps"; rationale).
 
 No standalone log call (`docs/specs/standalone.md` -> "Logging") carries PTY bytes; the log's exposure is `docs/specs/security.md` -> "Known gaps" (rationale).
 
