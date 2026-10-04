@@ -1,0 +1,13 @@
+/* The standalone image page: the editor fills the pane under any error line. */
+:root{color-scheme:light dark}
+html,body{height:100%;margin:0;overflow:hidden}
+body{background:var(--vscode-editor-background,Canvas);color:var(--vscode-editor-foreground,CanvasText);font:var(--vscode-font-size,13px)/1.4 var(--vscode-font-family,system-ui,sans-serif)}
+#root{height:100%;display:flex;flex-direction:column}
+.page-error{padding:6px 12px;color:var(--vscode-errorForeground,CanvasText);background:var(--vscode-sideBar-background,Canvas);white-space:pre-wrap;flex:none}
+.page-state{opacity:.65;font-size:11px;white-space:nowrap;margin-right:2px}
+dialog{max-width:min(420px,90vw);border:1px solid var(--vscode-focusBorder,GrayText);padding:20px;background:var(--vscode-editorWidget-background,Canvas);color:var(--vscode-editor-foreground,CanvasText);font:inherit}
+dialog h2{font-size:14px;margin:0 0 8px}dialog p{margin:0 0 16px}dialog form>div{display:flex;justify-content:flex-end;gap:8px}
+dialog button{font:inherit;font-size:12px;color:inherit;border:0;background:transparent;padding:3px 7px;border-radius:3px;cursor:pointer}
+dialog button:hover{background:color-mix(in srgb,currentColor 10%,transparent)}
+
+.page-pending{padding:8px 12px}

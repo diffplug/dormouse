@@ -37,7 +37,7 @@ let loads = 0;
 const session = documentSession<string>({
   snapshot() {
     const markdown = editorRef.current!.getMarkdown();
-    return { text: markdown ? `${markdown}\n` : '', mark: markdown };
+    return { content: markdown ? `${markdown}\n` : '', mark: markdown };
   },
   holds: mark => editorRef.current?.getMarkdown() === mark,
   async apply(text) {

@@ -7,7 +7,7 @@ const absWorkingDir = fileURLToPath(new URL('../', import.meta.url));
 // these assets from a checkout where dor-tools-lib has no dist yet.
 const alias = { 'dor-tools-lib': fileURLToPath(new URL('../../dor-tools-lib/src', import.meta.url)) };
 
-/** Bundles the Monaco and Markdown pages' assets into `outdir`, which
+/** Bundles the Monaco, Markdown, and image pages' assets into `outdir`, which
  * `viewerAsset` serves by name; the website playground builds its own copy. */
 export async function buildViewerAssets(outdir) {
   // Chunk names carry content hashes; a stale one would still be served.
@@ -26,6 +26,14 @@ export async function buildViewerAssets(outdir) {
       outdir, bundle: true, format: 'esm', platform: 'browser', splitting: true, alias,
       target: 'es2022', minify: true, jsx: 'automatic', chunkNames: 'markdown-[hash]',
       loader: { '.ttf': 'file', '.woff': 'file', '.woff2': 'file' }, assetNames: 'markdown-[name]-[hash]',
+      define: { 'process.env.NODE_ENV': '"production"' },
+    }),
+    // The image editor: `image.js` and `image.css`, no chunks.
+    build({
+      absWorkingDir,
+      entryPoints: { image: 'viewer/image/main.tsx' },
+      outdir, bundle: true, format: 'esm', platform: 'browser', alias,
+      target: 'es2022', minify: true, jsx: 'automatic',
       define: { 'process.env.NODE_ENV': '"production"' },
     }),
   ]);

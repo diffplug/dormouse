@@ -3,14 +3,24 @@ import { connectToolFrame } from 'dor-tools-lib/frame';
 /** What the page shows: whether a document is loaded, has unsaved edits, or is saving. */
 export interface DocumentState { loaded: boolean; dirty: boolean; saving: boolean }
 
-/** One editor's view of the opened document. */
-export interface DocumentEditor<Mark> {
-  /** The text to save and a mark naming the revision it came from. */
-  snapshot(): { text: string; mark: Mark };
+/** One editor's view of the opened document, whose contents are `Content`
+ * (the file's text, or an image's bytes). */
+export interface DocumentEditor<Mark, Content = string> {
+  /** The contents to save and a mark naming the revision they came from. */
+  snapshot(): { content: Content | Promise<Content>; mark: Mark };
+  /** The current revision's mark, when naming it is cheaper than a snapshot. */
+  mark?(): Mark;
   /** Whether the editor still holds the revision `mark` names. */
   holds(mark: Mark): boolean;
-  /** Replaces the editor's contents with the file's `text`. */
-  apply(text: string, name: string): void | Promise<void>;
+  /** Replaces the editor's contents with the file's. */
+  apply(content: Content, name: string): void | Promise<void>;
+}
+
+/** How a page reads and writes its document's contents. */
+export interface DocumentSource<Content> {
+  load(): Promise<{ content: Content; version: string; name: string }>;
+  /** Writes `content` over revision `version`; resolves to the new revision. */
+  save(content: Content, version: string): Promise<{ version: string }>;
 }
 
 export async function request(path: string, body?: unknown) {
@@ -20,6 +30,15 @@ export async function request(path: string, body?: unknown) {
   if (!response.ok) throw new Error(await response.text() || `Request failed (${response.status})`);
   return response.json();
 }
+
+/** A text document: `source` and `save` carry it as JSON. */
+export const textSource: DocumentSource<string> = {
+  async load() {
+    const { text, version, name } = await request('source');
+    return { content: text, version, name };
+  },
+  save: (text, version) => request('save', { text, version }),
+};
 
 export const message = (reason: unknown) => reason instanceof Error ? reason.message : String(reason);
 
@@ -40,11 +59,11 @@ export function confirmDiscard(): Promise<boolean> {
  * (docs/specs/dor-tools-builtin.md -> Editing files): revision-checked saves on
  * Save or Cmd/Ctrl+S, dirty state reported to the containing iframe at once
  * and to the Tool's OSC 367 stream in order. */
-export function documentSession<Mark>(editor: DocumentEditor<Mark>, view: {
+export function documentSession<Mark, Content = string>(editor: DocumentEditor<Mark, Content>, view: {
   report(state: DocumentState): void;
   /** Shows `text` as the page's error, or clears it when null. */
   fail(text: string | null): void;
-}) {
+}, source: DocumentSource<Content> = textSource as unknown as DocumentSource<Content>) {
   let version = '';
   let saved: { mark: Mark } | undefined;
   let saving: Promise<void> | null = null;
@@ -52,6 +71,7 @@ export function documentSession<Mark>(editor: DocumentEditor<Mark>, view: {
   let stateQueue = Promise.resolve();
   const fail = (reason: unknown) => view.fail(message(reason));
   const dirty = () => !!saved && !editor.holds(saved.mark);
+  const current = () => editor.mark ? editor.mark() : editor.snapshot().mark;
   // The host's close prompt saves through this channel (docs/specs/dor-tool.md -> Closing unsaved Tools).
   const host = connectToolFrame({
     dirty: () => saved ? dirty() : undefined,
@@ -72,9 +92,9 @@ export function documentSession<Mark>(editor: DocumentEditor<Mark>, view: {
   async function save() {
     if (saving) return saving;
     if (!dirty()) return;
-    const { text, mark } = editor.snapshot();
+    const { content, mark } = editor.snapshot();
     view.fail(null);
-    saving = request('save', { text, version }).then(result => {
+    saving = Promise.resolve(content).then(body => source.save(body, version)).then(result => {
       version = result.version;
       saved = { mark }; // Undo restores this revision; newer edits stay dirty.
     }).finally(() => { saving = null; report(); });
@@ -82,10 +102,10 @@ export function documentSession<Mark>(editor: DocumentEditor<Mark>, view: {
     return saving;
   }
   async function load() {
-    const source = await request('source');
-    version = source.version;
-    await editor.apply(source.text, source.name);
-    saved = { mark: editor.snapshot().mark };
+    const file = await source.load();
+    version = file.version;
+    await editor.apply(file.content, file.name);
+    saved = { mark: current() };
     report();
   }
 
@@ -113,7 +133,7 @@ export function documentSession<Mark>(editor: DocumentEditor<Mark>, view: {
      * normalization of the text it loaded, before any edit. */
     rebase() {
       if (!saved || saving) return;
-      saved = { mark: editor.snapshot().mark };
+      saved = { mark: current() };
       report();
     },
     fail,

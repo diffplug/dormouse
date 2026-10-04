@@ -41,7 +41,7 @@ let appliedTheme = '';
 const session = documentSession<number>({
   snapshot() {
     model.pushStackElement(); // Further typing must be undoable back to this save.
-    return { text: model.getValue(), mark: model.getAlternativeVersionId() };
+    return { content: model.getValue(), mark: model.getAlternativeVersionId() };
   },
   holds: mark => model.getAlternativeVersionId() === mark,
   apply(text, name) {
