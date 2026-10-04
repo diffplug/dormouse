@@ -150,6 +150,8 @@ export interface WorkspaceRow {
   name: string;
   /** Derived from its terminals rather than set by a user. */
   auto: boolean;
+  /** Pinned right: in the strip's right-hand group, and never closed alone. */
+  pinned: boolean;
   active: boolean;
   ringing: boolean;
   todo: boolean;
@@ -187,6 +189,13 @@ export interface CloseWorkspaceRequest {
   window?: string;
 }
 
+/** Pin a Workspace right, or unpin it. */
+export interface PinWorkspaceRequest {
+  workspace: string;
+  pinned: boolean;
+  window?: string;
+}
+
 export interface SwitchWorkspaceRequest {
   workspace: string;
   window?: string;
@@ -209,7 +218,7 @@ export interface MoveWorkspaceRequest {
  *  Workspace it did it to. `workspaceRef` is positional, so for `close` it is
  *  the ref the Workspace had. */
 export interface WorkspaceMutationResponse {
-  status: 'created' | 'renamed' | 'closed' | 'active' | 'moved';
+  status: 'created' | 'renamed' | 'closed' | 'active' | 'moved' | 'pinned' | 'unpinned';
   workspaceId: string;
   workspaceRef: string;
   name: string;
@@ -604,6 +613,7 @@ export interface ControlClient {
   renameWorkspace(request: RenameWorkspaceRequest): Promise<WorkspaceMutationResponse>;
   closeWorkspace(request: CloseWorkspaceRequest): Promise<WorkspaceMutationResponse>;
   switchWorkspace(request: SwitchWorkspaceRequest): Promise<WorkspaceMutationResponse>;
+  pinWorkspace(request: PinWorkspaceRequest): Promise<WorkspaceMutationResponse>;
   moveWorkspace(request: MoveWorkspaceRequest): Promise<WorkspaceMutationResponse>;
   restartApp(): Promise<AppRestartResponse>;
   reopenClosed(): Promise<ReopenResponse>;

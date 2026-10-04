@@ -3498,7 +3498,8 @@ fn window_at_cursor(
 
 /// Show (or clear) another window's drop caret while a tab is dragged over it.
 /// The previously hovered window is always cleared, so a caret can never be
-/// left behind in a window the pointer has since left.
+/// left behind in a window the pointer has since left. `pinned` says which of
+/// the target's tab groups the caret keeps to.
 #[tauri::command]
 fn hover_workspace_target(
     app: AppHandle,
@@ -3506,6 +3507,7 @@ fn hover_workspace_target(
     label: Option<String>,
     x: f64,
     y: f64,
+    pinned: Option<bool>,
 ) {
     let mut current = guard(&windows.hover_target);
     if current.as_deref() != label.as_deref() {
@@ -3518,7 +3520,7 @@ fn hover_workspace_target(
         let _ = app.emit_to(
             label.as_str(),
             "dormouse://workspace-drop-hover",
-            serde_json::json!({ "x": x, "y": y }),
+            serde_json::json!({ "x": x, "y": y, "pinned": pinned.unwrap_or(false) }),
         );
     }
 }

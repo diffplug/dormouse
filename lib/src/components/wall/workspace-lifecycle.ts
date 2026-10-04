@@ -4,11 +4,11 @@ import { awaitWallHandle, mountingRefusal } from './dor-control-shared';
 import { getWallHandle } from './wall-handles';
 import { forgetWorkspaceSession, isWorkspaceTransferPending } from '../../lib/window-session-aggregator';
 import { cancelPendingConfirmation, dismissWorkspaceUi, requestConfirmation, setRenamingWorkspace, type WorkspaceConfirmation } from '../../lib/workspace-ui-store';
-import { closeWorkspace, createWorkspace, getActiveWorkspaceId, getWorkspacesSnapshot, moveWorkspace, setActiveWorkspace, workspaceRefFor } from '../../lib/workspace-store';
+import { closeWorkspace, createWorkspace, getActiveWorkspaceId, getWorkspacesSnapshot, isWorkspacePinned, moveWorkspace, renameWorkspace, resumeAutoWorkspaceName, setActiveWorkspace, setWorkspacePinned, workspaceRefFor } from '../../lib/workspace-store';
 import { addPendingKill } from '../../lib/pending-kills';
 import { getHelper, helperHasWork } from '../../lib/helper-terminal';
 import { isDelayedKillEnabled } from '../../lib/labs-settings';
-import type { PersistedSession, WorkspaceId } from '../../lib/session-types';
+import { workspaceRecord, type PersistedSession, type WorkspaceId } from '../../lib/session-types';
 import { pushReopenRecord, type WorkspaceReopenRecord } from '../../lib/reopen-stack';
 import type { WorkspaceCloseMode } from './wall-types';
 import { confirmToolEditorsClose, UNSAVED_TOOL_REFUSAL } from '../../lib/tool-editor';
@@ -51,9 +51,34 @@ export async function activateWorkspaceTab(id: WorkspaceId): Promise<void> {
 }
 
 const CLOSE_IN_FLIGHT_REFUSAL = 'another Workspace is closing';
+const TRANSFERRING_REFUSAL = 'Workspace is transferring';
+
+/** Why a pinned Workspace stays open: only its Window's close takes it
+ *  (`docs/specs/layout.md` → "Workspace tabs"). */
+export const PINNED_CLOSE_REFUSAL = 'workspace is pinned; unpin it to close';
 
 /** Serialize closure and successor selection across the Window. */
 let closeInFlight = false;
+
+/** Whether a Workspace close is running anywhere in this Window. */
+export function isWorkspaceCloseInFlight(): boolean {
+  return closeInFlight;
+}
+
+/** Why this Workspace cannot start closing now, or null: every close verb and
+ *  the tab menu's Close ask this one question. */
+export function workspaceCloseRefusal(id: WorkspaceId): string | null {
+  if (isWorkspacePinned(id)) return PINNED_CLOSE_REFUSAL;
+  if (isWorkspaceTransferPending(id)) return TRANSFERRING_REFUSAL;
+  if (closeInFlight) return CLOSE_IN_FLIGHT_REFUSAL;
+  return null;
+}
+
+/** Why a Workspace's name or pin cannot change now, or null: one in flight to
+ *  another Window carries the metadata it had when the move began. */
+export function workspaceMetadataRefusal(id: WorkspaceId): string | null {
+  return isWorkspaceTransferPending(id) ? TRANSFERRING_REFUSAL : null;
+}
 
 /**
  * Close every member Surface through the closure coordinator, then drop the
@@ -76,8 +101,8 @@ export async function closeWorkspaceWithSurfaces(
   mode: WorkspaceCloseMode = 'prompt',
 ): Promise<string | null> {
   const isCurrent = cancelPendingConfirmation();
-  if (isWorkspaceTransferPending(id)) return 'Workspace is transferring';
-  if (closeInFlight) return CLOSE_IN_FLIGHT_REFUSAL;
+  const refused = workspaceCloseRefusal(id);
+  if (refused) return refused;
   const handle = getWallHandle(id);
   if (!handle) return mountingRefusal(workspaceRefFor(id));
   closeInFlight = true;
@@ -128,11 +153,12 @@ function dropFromStrip(id: WorkspaceId, selectSuccessor: boolean): boolean {
 
 /**
  * Begin closing a Workspace. Reveal it first; work raises the typed
- * confirmation, otherwise close immediately.
+ * confirmation, otherwise close immediately. A refused one (pinned,
+ * transferring, or behind another close) is dropped unannounced.
  */
 export function requestWorkspaceClose(id: WorkspaceId): void {
   const isCurrent = cancelPendingConfirmation();
-  if (closeInFlight || isWorkspaceTransferPending(id)) return;
+  if (workspaceCloseRefusal(id)) return;
   void closeOnceWallRegisters(id, isCurrent);
 }
 
@@ -145,8 +171,7 @@ export function requestWorkspaceClose(id: WorkspaceId): void {
  */
 async function closeOnceWallRegisters(id: WorkspaceId, isCurrent: () => boolean): Promise<void> {
   const handle = await awaitWallHandle(id);
-  if (!isCurrent()) return;
-  if (closeInFlight || isWorkspaceTransferPending(id)) return;
+  if (!isCurrent() || workspaceCloseRefusal(id)) return;
   if (!handle) return;
   if (workspaceNeedsCloseConfirmation(id)) {
     // Running helper work refuses a close outright; it is no pending kill.
@@ -248,11 +273,37 @@ function workspaceReopenRecord(id: WorkspaceId, session: PersistedSession): Work
   const { workspaces } = getWorkspacesSnapshot();
   const index = workspaces.findIndex(workspace => workspace.id === id);
   if (index < 0) return null;
-  const { name, nameIsAuto } = workspaces[index];
-  return { kind: 'workspace', closedAt: Date.now(), workspace: { id, name, nameIsAuto, session }, index };
+  return { kind: 'workspace', closedAt: Date.now(), workspace: workspaceRecord(workspaces[index], session), index };
 }
 
-/** Open the strip's inline rename editor on a Workspace. */
+/**
+ * Pin a Workspace right, or unpin it: the tab menu's row and `dor workspace
+ * pin` / `unpin`. Resolves the refusal's message, else null.
+ */
+export function pinWorkspace(id: WorkspaceId, pinned: boolean): string | null {
+  // Supersedes a close's question or preparation, as a close or move does.
+  cancelPendingConfirmation();
+  const refused = workspaceMetadataRefusal(id);
+  if (refused) return refused;
+  setWorkspacePinned(id, pinned);
+  return null;
+}
+
+/**
+ * Name a Workspace, or with `null` hand its name back to auto-naming: the
+ * strip's rename editor, the tab menu, and `dor workspace rename`. Resolves the
+ * refusal's message, else null.
+ */
+export function nameWorkspace(id: WorkspaceId, name: string | null): string | null {
+  const refused = workspaceMetadataRefusal(id);
+  if (refused) return refused;
+  if (name === null) resumeAutoWorkspaceName(id);
+  else renameWorkspace(id, name);
+  return null;
+}
+
+/** Open the strip's inline rename editor on a Workspace, unless its name
+ *  cannot change now. */
 export function requestWorkspaceRename(id: WorkspaceId): void {
-  setRenamingWorkspace(id);
+  if (!workspaceMetadataRefusal(id)) setRenamingWorkspace(id);
 }

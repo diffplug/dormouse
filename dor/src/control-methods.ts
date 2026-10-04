@@ -25,6 +25,7 @@ import type {
   RenameWorkspaceRequest,
   MoveWorkspaceRequest,
   SwitchWorkspaceRequest,
+  PinWorkspaceRequest,
   WorkspaceMutationResponse,
   ReadSurfaceRequest,
   ReadSurfaceResponse,
@@ -175,6 +176,10 @@ export abstract class MethodControlClient implements ControlClient {
 
   switchWorkspace(request: SwitchWorkspaceRequest): Promise<WorkspaceMutationResponse> {
     return this.request<WorkspaceMutationResponse>(WORKSPACE_CONTROL_METHODS.switch, request);
+  }
+
+  pinWorkspace(request: PinWorkspaceRequest): Promise<WorkspaceMutationResponse> {
+    return this.request<WorkspaceMutationResponse>(WORKSPACE_CONTROL_METHODS.pin, request);
   }
 
   // A move between windows serializes every terminal and waits for the target

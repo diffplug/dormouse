@@ -1,7 +1,10 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import {
   cancelPendingConfirmation,
+  closeWorkspaceMenu,
   dismissWorkspaceUi,
+  openWorkspaceMenu,
+  setRenamingWorkspace,
   getWorkspaceUiSnapshot,
   requestConfirmation,
   resetWorkspaceUi,
@@ -47,4 +50,27 @@ it.each([
   expect(answer).toHaveBeenCalledExactlyOnceWith(false);
   expect(emitted).toHaveBeenCalledTimes(1);
   expect(getWorkspaceUiSnapshot().confirmation).toBeNull();
+});
+
+it('the tab menu yields to a rename, a confirmation, any close or move starting, and its own Workspace leaving', () => {
+  const menu = { id: 'a', keyboard: false };
+  const yields: Array<() => void> = [
+    () => setRenamingWorkspace('b'),
+    () => requestConfirmation({ id: 'b', char: 'q', answer: vi.fn() }),
+    () => cancelPendingConfirmation(),
+    () => dismissWorkspaceUi('a'),
+    () => closeWorkspaceMenu(),
+  ];
+  for (const yieldTo of yields) {
+    resetWorkspaceUi();
+    openWorkspaceMenu(menu);
+    expect(getWorkspaceUiSnapshot().menu).toBe(menu);
+    yieldTo();
+    expect(getWorkspaceUiSnapshot().menu).toBeNull();
+  }
+  // Another Workspace leaving keeps it.
+  resetWorkspaceUi();
+  openWorkspaceMenu(menu);
+  dismissWorkspaceUi('b');
+  expect(getWorkspaceUiSnapshot().menu).toBe(menu);
 });

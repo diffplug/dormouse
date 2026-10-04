@@ -118,7 +118,7 @@ describe("quit-confirm store", () => {
     setWorkspaceMoveError({ id: 'workspace-1', reason: 'Wait for the Tool browser to connect' });
     setWorkspaceTransferPending('workspace-1', true);
     openQuitConfirm(makeCtx());
-    expect(getWorkspaceUiSnapshot()).toEqual({ confirmation: null, renamingId: null, moveError: null });
+    expect(getWorkspaceUiSnapshot()).toEqual({ confirmation: null, renamingId: null, moveError: null, menu: null });
     expect(answer).toHaveBeenCalledExactlyOnceWith(false);
     expect(isWorkspaceTransferPending('workspace-1')).toBe(true);
     expect(chromeKeyboardHeld()).toBe(true);
