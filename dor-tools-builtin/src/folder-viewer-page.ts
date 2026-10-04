@@ -7,6 +7,8 @@ type Ordered = { dir: boolean; folded: string; entry: { name: string } };
 export const byDisplayOrder = (a: Ordered, b: Ordered): number =>
   Number(!a.dir) - Number(!b.dir) || compare(a.folded, b.folded) || compare(a.entry.name, b.entry.name);
 
+/** The largest JSON body a folder viewer's POST accepts. */
+export const FOLDER_BODY_LIMIT = 8 * 1024;
 export const FOLDER_CSP = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'";
 
 const STYLE = `

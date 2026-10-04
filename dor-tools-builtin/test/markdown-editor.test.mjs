@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, readdir, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, posix, win32 } from 'node:path';
 import { request } from 'node:http';
 import { afterEach, beforeEach, test } from 'node:test';
 import { startFileViewer } from '../dist/file-viewer.js';
-import { editorStore } from '../dist/editable-file.js';
+import { editorStore } from '../dist/editor-store.js';
 import { pasteImage } from '../dist/editor-routes.js';
+import { resolveInside } from '../dist/viewer-server.js';
 
 const PNG = Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108020000009077' + '53de0000000c4944415408d763f8cfc000000301010018dd8db00000000049454e44ae426082', 'hex');
 const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0x10]);
@@ -83,6 +84,13 @@ test('serves images at or under the document folder, sandboxed, and nothing else
   assert.equal((await send(viewer, route(viewer, 'file/doc.md'))).status, 200);
   const notes = await start('notes.txt', 'plain');
   assert.equal((await send(notes, route(notes, 'images/img/a%20b.png'))).status, 404);
+});
+
+test('an image path resolves under its folder, and on Windows never through a drive or stream colon', () => {
+  assert.equal(resolveInside('/docs', ['img', 'a:b.png'], posix), '/docs/img/a:b.png');
+  assert.equal(resolveInside('C:\\docs', ['img', 'a.png'], win32), 'C:\\docs\\img\\a.png');
+  assert.equal(resolveInside('C:\\docs', ['D:a.png'], win32), null);
+  assert.equal(resolveInside('C:\\docs', ['img', 'a.png:hidden'], win32), null);
 });
 
 test('pasted images become new files beside the document, checked against their type', async () => {

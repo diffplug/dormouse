@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { constants } from 'node:fs';
 import { open, type FileHandle } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { isAbsolute, relative, sep } from 'node:path';
+import * as nodePath from 'node:path';
 import { allowsFileViewerRequest } from './file-viewer-loopback-guard.js';
 import { HttpError, mediaType, parseJsonBody, viewerAnnouncement, viewerHeaders } from './viewer-http.js';
 
@@ -46,10 +46,22 @@ export async function openRegularFile(path: string): Promise<FileHandle> {
   return file;
 }
 
+type PathModule = Pick<nodePath.PlatformPath, 'isAbsolute' | 'relative' | 'resolve' | 'sep'>;
+
 /** Whether the absolute `path` is `root` or under it. */
-export function isInsideRoot(root: string, path: string): boolean {
+export function isInsideRoot(root: string, path: string, { isAbsolute, relative, sep }: PathModule = nodePath): boolean {
   const rel = relative(root, path);
   return !(isAbsolute(rel) || rel === '..' || rel.startsWith(`..${sep}`));
+}
+
+/** `segments` (as `pathSegments` gives them) under the absolute `root`, as an
+ * absolute path when its spelling stays there; else null. On Windows a `:`
+ * spells a drive-relative path or an alternate data stream, so no segment
+ * holds one. Containment of what it names is decided on the realpath. */
+export function resolveInside(root: string, segments: string[], path: PathModule = nodePath): string | null {
+  if (path.sep === '\\' && segments.some(segment => segment.includes(':'))) return null;
+  const resolved = path.resolve(root, ...segments);
+  return isInsideRoot(root, resolved, path) ? resolved : null;
 }
 
 

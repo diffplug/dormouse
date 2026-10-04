@@ -7,17 +7,16 @@
  */
 import { EDITOR_CSP } from "dor-tools-builtin/editor-page";
 import {
-  editorKind, editorRoutes, imageSegments, PATH_CHANGED_MESSAGE, STALE_MESSAGE,
-  type EditorKind, type EditorRequest, type EditorStore,
+  editorKind, editorRoutes, imagesRoute, PATH_CHANGED_MESSAGE, STALE_MESSAGE, storePath,
+  type EditorKind, type EditorReply, type EditorRequest, type EditorStore,
 } from "dor-tools-builtin/editor-routes";
 import { ERROR_CSP, errorViewerPage } from "dor-tools-builtin/error-viewer-page";
 import { builtinHandler, fileViewerFormat, VIEW_ERROR_ARGV, viewerTitle } from "dor-tools-builtin/file-viewer-format";
-import { FOLDER_CSP, folderViewerPage } from "dor-tools-builtin/folder-viewer-page";
-import { IMAGE_CSP, IMAGES_ROUTE, type SizeBound } from "dor-tools-builtin/image-format";
-import { HttpError, mediaType, pathSegments, viewerHeaders } from "dor-tools-builtin/viewer-http";
+import { FOLDER_BODY_LIMIT, FOLDER_CSP, folderViewerPage } from "dor-tools-builtin/folder-viewer-page";
+import { IMAGE_CSP, type SizeBound } from "dor-tools-builtin/image-format";
+import { HttpError, mediaType, parseJsonBody, pathSegments, viewerHeaders } from "dor-tools-builtin/viewer-http";
 import { openSequence, stateSequence } from "dor-tools-lib/osc";
 import { instrumentHtml } from "dormouse-lib/host/iframe-proxy-rewrite";
-import { isRecord } from "dormouse-lib/lib/is-record";
 import { bytesOf, parentOf, type FileData, type VirtualFs } from "./vfs";
 
 /** Every viewer URL starts here; the service worker's scope. */
@@ -54,7 +53,7 @@ const CSP: Record<Viewer["kind"], string> = { editor: EDITOR_CSP, folder: FOLDER
 /** A started viewer: the token its URLs carry, and what `serveSequence` announces. */
 export interface ViewerAnnouncement { token: string; path: string; target: string }
 
-type Reply = { status: number; body: string | Uint8Array; type: string; headers?: Record<string, string> };
+type Reply = EditorReply & { status: number };
 const reply = (status: number, body: string | Uint8Array, type: string): Reply => ({ status, body, type });
 const json = (value: unknown): Reply => reply(200, JSON.stringify(value), "application/json");
 const html = (page: string): Reply => reply(200, page, "text/html; charset=utf-8");
@@ -65,12 +64,20 @@ async function sha256(bytes: Uint8Array): Promise<string> {
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
+/** A request body's bytes; 413 with `message` past `limit`, as the Node viewers' `readBody`. */
+async function bodyBytes(body: Blob, limit: number, message = ""): Promise<Uint8Array> {
+  if (body.size > limit) throw new HttpError(413, message);
+  return new Uint8Array(await body.arrayBuffer());
+}
+
 /** One window's viewers, keyed by an unguessable token in their URL. */
 export class PlaygroundViewers {
   private readonly viewers = new Map<string, Viewer>();
   private readonly pasteListeners = new Set<() => void>();
-  /** The revision of each file's data as last hashed, so a save hashes only its new bytes. */
-  private readonly revisions = new Map<string, { data: FileData; version: string }>();
+  /** The revision of each stored value as hashed, so a save hashes only its new bytes;
+   * a replaced buffer's entry goes with it. Strings are the stock tree's. */
+  private readonly byteRevisions = new WeakMap<Uint8Array, string>();
+  private readonly textRevisions = new Map<string, string>();
 
   constructor(
     private readonly fs: VirtualFs,
@@ -104,7 +111,7 @@ export class PlaygroundViewers {
     if (!editor) return new Error("the playground's file viewer shows text, PNG, and JPEG files only");
     const root = parentOf(target);
     const routes = editorRoutes({
-      kind: editor, file: target, name: viewerTitle(target), store: this.store(root),
+      kind: editor, file: storePath(target), name: viewerTitle(target), store: this.store(root),
       onDirty: (dirty) => this.write(terminalId, stateSequence({ dirty })),
     });
     return this.add({ terminalId, kind: "editor", editor, root, routes }, "view", target);
@@ -143,18 +150,16 @@ export class PlaygroundViewers {
   private async editorRoute(viewer: Extract<Viewer, { kind: "editor" }>, { method, route, search, contentType, body }: ViewerRequest): Promise<Reply> {
     const request: EditorRequest = {
       method, route, query: new URLSearchParams(search), contentType: mediaType(contentType),
-      body: async (bound: SizeBound) => {
-        if (body.size > bound.limit) throw new HttpError(413, bound.message);
-        return new Uint8Array(await body.arrayBuffer());
-      },
+      body: (bound: SizeBound) => bodyBytes(body, bound.limit, bound.message),
     };
     const answer = await viewer.routes(request);
     if (answer) {
       const { body } = answer;
       return { status: 200, ...answer, body: typeof body === "string" && answer.type.startsWith("text/html") ? instrumentHtml(body, this.embedderOrigin) : body };
     }
-    if (viewer.editor !== "markdown" || !route.startsWith(IMAGES_ROUTE)) throw new HttpError(404);
-    const path = [viewer.root, ...imageSegments(route.slice(IMAGES_ROUTE.length))].join("/");
+    const segments = imagesRoute(viewer.editor, route);
+    if (!segments) throw new HttpError(404);
+    const path = [viewer.root, ...segments].join("/");
     const bytes = this.fs.bytes(path);
     if (!bytes) throw new HttpError(404);
     // An image the Markdown editor shows never runs as a document.
@@ -176,21 +181,20 @@ export class PlaygroundViewers {
     return {
       read: async (file, bound) => {
         const { data, bytes } = current(file, bound, new HttpError(404));
-        return { bytes, version: await this.revision(file, data) };
+        return { bytes, version: await this.revision(data, bytes) };
       },
       replace: async (file, version, bound, encode) => {
         const { data: before, bytes } = current(file, bound, new HttpError(409, PATH_CHANGED_MESSAGE));
-        if (await this.revision(file, before) !== version) throw new HttpError(409, STALE_MESSAGE);
+        if (await this.revision(before, bytes) !== version) throw new HttpError(409, STALE_MESSAGE);
         const next = encode(bytes);
         if (next.length > bound.limit) throw new HttpError(413, bound.message);
-        const nextVersion = await sha256(next);
+        const nextVersion = await this.revision(next, next);
         // A save that landed while this one hashed wins; this one is now stale.
         if (fs.data(file) !== before) throw new HttpError(409, STALE_MESSAGE);
         fs.write(file, next);
-        this.revisions.set(file, { data: next, version: nextVersion });
         return { version: nextVersion };
       },
-      editableImage: async (segments) => fs.kind(under(segments)) === "file" ? under(segments) : null,
+      editableImage: async (segments) => fs.kind(under(segments)) === "file" ? storePath(under(segments)) : null,
       create: async (name, bytes) => {
         if (fs.kind(under([name]))) return false;
         fs.write(under([name]), bytes);
@@ -208,19 +212,21 @@ export class PlaygroundViewers {
     };
   }
 
-  /** The sha256 revision of `data`, stored at `path`, hashed once per stored value. */
-  private async revision(path: string, data: FileData): Promise<string> {
-    const cached = this.revisions.get(path);
-    if (cached?.data === data) return cached.version;
-    const version = await sha256(bytesOf(data));
-    this.revisions.set(path, { data, version });
+  /** The sha256 revision of the stored `data`, whose bytes are `bytes`, hashed once per stored value. */
+  private async revision(data: FileData, bytes: Uint8Array): Promise<string> {
+    const cached = typeof data === "string" ? this.textRevisions.get(data) : this.byteRevisions.get(data);
+    if (cached !== undefined) return cached;
+    const version = await sha256(bytes);
+    if (typeof data === "string") this.textRevisions.set(data, version);
+    else this.byteRevisions.set(data, version);
     return version;
   }
 
-  private async folderRoute(viewer: Extract<Viewer, { kind: "folder" }>, { method, route, search, body }: ViewerRequest): Promise<Reply> {
+  private async folderRoute(viewer: Extract<Viewer, { kind: "folder" }>, { method, route, search, contentType, body }: ViewerRequest): Promise<Reply> {
     if (method === "POST") {
       if (route !== "select" && route !== "activate") throw new HttpError(404);
-      const path = parseJson(await body.text())?.path;
+      const data = await parseJsonBody(mediaType(contentType), FOLDER_BODY_LIMIT, (limit) => bodyBytes(body, limit));
+      const path = (data as { path?: unknown } | null)?.path;
       if (typeof path !== "string" || !path) throw new HttpError(400);
       this.write(viewer.terminalId, openSequence({ path: this.inside(viewer.root, path), preview: route === "select" }));
       return json({ ok: true, status: "sent" });
@@ -243,14 +249,5 @@ export class PlaygroundViewers {
     const path = [root, ...parts].join("/");
     if (!this.fs.kind(path)) throw new HttpError(404, "no such entry");
     return path;
-  }
-}
-
-function parseJson(body: string): Record<string, unknown> | null {
-  try {
-    const value: unknown = JSON.parse(body);
-    return isRecord(value) ? value : null;
-  } catch {
-    return null;
   }
 }

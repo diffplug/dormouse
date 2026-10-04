@@ -4,14 +4,13 @@ import type { IncomingMessage } from 'node:http';
 import { join } from 'node:path';
 import { resolveBinaryPath, spawnAndCapture } from 'dor-lib-common';
 import { DEHYDRATE_ENV, dehydrateSequence, openSequence, readDehydrated, validToolOpenPath } from 'dor-tools-lib/osc';
-import { byDisplayOrder, FOLDER_CSP, folderViewerPage } from './folder-viewer-page.js';
-import { announceViewer, HttpError, isInsideRoot, pathSegments, readJsonBody, reply, startCapabilityViewer } from './viewer-server.js';
+import { byDisplayOrder, FOLDER_BODY_LIMIT, FOLDER_CSP, folderViewerPage } from './folder-viewer-page.js';
+import { announceViewer, HttpError, isInsideRoot, pathSegments, readJsonBody, reply, resolveInside, startCapabilityViewer } from './viewer-server.js';
 
 /** Entries one listing returns. */
 const ENTRY_LIMIT = 5000;
 /** Names one listing reads to choose them: a bound on its memory. */
 const READ_LIMIT = 100_000;
-const BODY_LIMIT = 8 * 1024;
 const GIT_TIMEOUT_MS = 5000;
 const GIT_OUTPUT_LIMIT = 4 * 1024 * 1024;
 
@@ -88,11 +87,12 @@ export async function startFolderViewer(
 
   /** The canonical path the page-supplied POSIX path `rel` names: it must
    * exist, and be the root or inside it. */
-  async function resolveInside(rel: string): Promise<string> {
+  async function existingInside(rel: string): Promise<string> {
     const parts = rel === '' ? [] : pathSegments(rel, { strict: true });
-    if (!parts) throw new HttpError(403, 'invalid path');
+    const path = parts && resolveInside(root, parts);
+    if (!path) throw new HttpError(403, 'invalid path');
     let canonical: string;
-    try { canonical = await realpath(join(root, ...parts)); } catch { throw new HttpError(404, 'no such entry'); }
+    try { canonical = await realpath(path); } catch { throw new HttpError(404, 'no such entry'); }
     if (!isInsideRoot(root, canonical)) throw new HttpError(403, 'outside the folder');
     return canonical;
   }
@@ -111,7 +111,7 @@ export async function startFolderViewer(
   }
 
   async function list(rel: string): Promise<{ entries: FolderEntry[]; truncated: boolean }> {
-    const dir = await resolveInside(rel);
+    const dir = await existingInside(rel);
     const handle = await opendir(dir, { bufferSize: 512 }).catch(() => { throw new HttpError(404, 'not a directory'); });
     const dirents: Dirent[] = [];
     let truncated = false;
@@ -162,7 +162,7 @@ export async function startFolderViewer(
   }
 
   async function requestedPath(req: IncomingMessage): Promise<string> {
-    const path = (await readJsonBody(req, BODY_LIMIT) as { path?: unknown } | null)?.path;
+    const path = (await readJsonBody(req, FOLDER_BODY_LIMIT) as { path?: unknown } | null)?.path;
     if (typeof path !== 'string' || !path) throw new HttpError(400);
     return path;
   }
@@ -172,11 +172,11 @@ export async function startFolderViewer(
       const url = new URL(req.url!, 'http://localhost');
       const name = url.pathname.startsWith(prefix) ? url.pathname.slice(prefix.length) : undefined;
       if (req.method === 'POST' && name === 'state') {
-        view = readFolderViewState(await readJsonBody(req, BODY_LIMIT)) ?? view;
+        view = readFolderViewState(await readJsonBody(req, FOLDER_BODY_LIMIT)) ?? view;
         reply(res, 200, '{"ok":true}', 'application/json');
       } else if (req.method === 'POST') {
         if (name !== 'select' && name !== 'activate') throw new HttpError(404);
-        const target = await resolveInside(await requestedPath(req));
+        const target = await existingInside(await requestedPath(req));
         reply(res, 200, JSON.stringify(await open(target, name === 'select')), 'application/json');
       } else if (name === 'state') {
         reply(res, 200, JSON.stringify(view), 'application/json');

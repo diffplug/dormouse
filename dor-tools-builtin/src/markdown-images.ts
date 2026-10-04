@@ -1,23 +1,23 @@
 import { constants } from 'node:fs';
 import { copyFile, link, lstat, open, realpath, rename, unlink, type FileHandle } from 'node:fs/promises';
-import { basename, dirname, join, resolve } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { fileViewerFormat } from './file-viewer-format.js';
-import { imageSegments } from './editor-routes.js';
+import { storePath, type StorePath } from './editor-routes.js';
 import { isImage } from './image-format.js';
-import { HttpError, isInsideRoot, openRegularFile } from './viewer-server.js';
+import { HttpError, isInsideRoot, openRegularFile, resolveInside } from './viewer-server.js';
 
-/** `segments`, relative to `root`, as an absolute path when it stays inside
- * `root` (a Windows drive-relative segment such as `D:x.png` leaves it); else 404. */
+/** `resolveInside`, or 404. */
 function under(root: string, segments: string[]): string {
-  const path = resolve(root, ...segments);
-  if (!isInsideRoot(root, path)) throw new HttpError(404);
+  const path = resolveInside(root, segments);
+  if (path === null) throw new HttpError(404);
   return path;
 }
 
-/** A regular image file at or under `root` (by realpath) for reading; the
- * caller closes it. A symlink whose target leaves `root` grants nothing. */
-export async function openImage(root: string, route: string): Promise<{ file: FileHandle; mime: string }> {
-  const canonical = await realpath(under(root, imageSegments(route))).catch(() => { throw new HttpError(404); });
+/** A regular image file at `segments` (as `imagesRoute` gives them) at or
+ * under `root` (by realpath) for reading; the caller closes it. A symlink
+ * whose target leaves `root` grants nothing. */
+export async function openImage(root: string, segments: string[]): Promise<{ file: FileHandle; mime: string }> {
+  const canonical = await realpath(under(root, segments)).catch(() => { throw new HttpError(404); });
   if (!isInsideRoot(root, canonical) || !isImage(canonical)) throw new HttpError(404);
   const file = await openRegularFile(canonical).catch(() => { throw new HttpError(404); });
   return { file, mime: fileViewerFormat(canonical)!.mime };
@@ -25,9 +25,9 @@ export async function openImage(root: string, route: string): Promise<{ file: Fi
 
 /** An image at or under `root` for replacement: its spelling stays under
  * `root` and must be its realpath, so no symlink below `root` is followed. */
-export async function editableImageFile(root: string, segments: string[]): Promise<string | null> {
+export async function editableImageFile(root: string, segments: string[]): Promise<StorePath | null> {
   const path = under(root, segments);
-  return await realpath(path).catch(() => null) === path ? path : null;
+  return await realpath(path).catch(() => null) === path ? storePath(path) : null;
 }
 
 /** Writes `name` in `root` exclusively; false when it exists. */

@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { FOLDER_BODY_LIMIT } from "dor-tools-builtin/folder-viewer-page";
 import { IMAGE_BOUND, IMAGE_CSP, VERSION_HEADER } from "dor-tools-builtin/image-format";
 import { stateSequence } from "dor-tools-lib/osc";
 import { parseToolFile } from "dormouse-lib/host/tool-registry";
@@ -288,6 +289,11 @@ describe("PlaygroundViewers", () => {
     expect(listing.entries.map((entry: { name: string }) => entry.name)).toEqual(["frame.ts", "new.ts", "osc.ts", "protocol.ts", "sanitize.ts"]);
     expect((await viewer.handle(post("select", { path: "src/osc.ts" })))!.status).toBe(200);
     expect(writes[0][1]).toContain(`"path":"${PLAYGROUND_CWD}/src/osc.ts","preview":true`);
+    // The same body rules as the Node folder viewer's.
+    expect(await viewer.handle({ ...post("select", { path: "src/osc.ts" }), contentType: "text/plain" })).toMatchObject({ status: 415 });
+    expect(await viewer.handle(post("select", { path: "x".repeat(FOLDER_BODY_LIMIT) }))).toMatchObject({ status: 413 });
+    expect(await viewer.handle({ ...post("select", {}), body: new Blob(["{"]) })).toMatchObject({ status: 400 });
+    expect(writes).toHaveLength(1);
     expect(await viewer.handle(get("list", "?dir=..%2F.."))).toMatchObject({ status: 403 });
   });
 

@@ -2,26 +2,13 @@ import { constants } from 'node:fs';
 import { open, realpath, unlink, type FileHandle } from 'node:fs/promises';
 import { createHash, randomBytes } from 'node:crypto';
 import { dirname, join } from 'node:path';
-import { saveFileOperations, type SaveFileOperations } from './atomic-save.js';
+import type { SaveFileOperations } from './atomic-save.js';
 import { HttpError } from './viewer-server.js';
-import { PATH_CHANGED_MESSAGE, STALE_MESSAGE, type EditorStore } from './editor-routes.js';
+import { PATH_CHANGED_MESSAGE, STALE_MESSAGE } from './editor-routes.js';
 import type { SizeBound } from './image-format.js';
-import { createImage, editableImageFile, renameImage } from './markdown-images.js';
 
 const tooLarge = (bound: SizeBound) => new HttpError(413, bound.message);
 const revision = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
-
-/** The local filesystem as the file viewer's `EditorStore`: the opened
- * document and the images under its folder `root`. */
-export function editorStore(root: string, operations: SaveFileOperations = saveFileOperations): EditorStore {
-  return {
-    read: async (file, bound) => { const { bytes, version } = await readEditable(file, bound); return { bytes, version }; },
-    replace: (file, version, bound, encode) => replaceEditable(file, version, bound, encode, operations),
-    editableImage: segments => editableImageFile(root, segments),
-    create: (name, bytes) => createImage(root, name, bytes),
-    rename: (from, to) => renameImage(root, from, to),
-  };
-}
 
 /** The first `size + 1` bytes of `file`; a longer result than `size` means it grew. */
 export async function readUpTo(file: FileHandle, size: number): Promise<Buffer> {
@@ -37,7 +24,7 @@ export async function readUpTo(file: FileHandle, size: number): Promise<Buffer> 
 
 /** Only the canonical, explicitly opened document can be written. Revalidate
  * the path and descriptor each time; a symlink substitution grants nothing. */
-async function readEditable(target: string, bound: SizeBound) {
+export async function readEditable(target: string, bound: SizeBound) {
   if (await realpath(target) !== target) throw new HttpError(409, PATH_CHANGED_MESSAGE);
   const file = await open(target, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
   try {
@@ -56,7 +43,7 @@ async function readEditable(target: string, bound: SizeBound) {
 /** Optimistic concurrency: write and flush a sibling, recheck contents
  * and identity, then replace atomically. No arbitrary destination or force API.
  * Like other local editors, this cannot lock out an uncooperative writer. */
-async function replaceEditable(target: string, version: string, bound: SizeBound, encode: (current: Uint8Array) => Uint8Array, operations: SaveFileOperations) {
+export async function replaceEditable(target: string, version: string, bound: SizeBound, encode: (current: Uint8Array) => Uint8Array, operations: SaveFileOperations) {
   const current = await readEditable(target, bound);
   if (current.version !== version) throw new HttpError(409, STALE_MESSAGE);
   const bytes = encode(current.bytes);

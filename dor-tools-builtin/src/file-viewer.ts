@@ -5,11 +5,12 @@ import { stateSequence } from 'dor-tools-lib/osc';
 import { fileViewerFormat, type FileFormat } from './file-viewer-format.js';
 import { announceViewer, contentType, HttpError, isInsideRoot, openRegularFile, pathSegments, readBody, reply, startCapabilityViewer } from './viewer-server.js';
 import { EDITOR_CSP } from './editor-page.js';
-import { editorKind, editorRoutes, TEXT_BOUND } from './editor-routes.js';
+import { editorKind, editorRoutes, imagesRoute, storePath, TEXT_BOUND } from './editor-routes.js';
 import { openImage } from './markdown-images.js';
-import { editorStore, readUpTo } from './editable-file.js';
+import { readUpTo } from './editable-file.js';
+import { editorStore } from './editor-store.js';
 import { viewerAsset } from './viewer-assets.js';
-import { IMAGE_CSP, IMAGES_ROUTE } from './image-format.js';
+import { IMAGE_CSP } from './image-format.js';
 
 const ASSET_LIMIT = 256;
 const CHUNK = 64 * 1024;
@@ -138,7 +139,7 @@ export async function startFileViewer(input: string, { onDirty = () => {}, forma
     // PNG and JPEG open in the image editor (docs/specs/dor-tools-builtin.md -> Image editor).
     const kind = editorKind(format, target);
     const editable = !!kind;
-    const editor = kind && editorRoutes({ kind, file: target, name: basename(target), store: editorStore(root), onDirty });
+    const editor = kind && editorRoutes({ kind, file: storePath(target), name: basename(target), store: editorStore(root), onDirty });
     const viewer = await startCapabilityViewer({ csp: editable ? EDITOR_CSP : CSP, post: editable, chunked: true, unavailable: 'File preview unavailable', release: closeFiles,
       route: async (req, res, prefix) => {
         let route: string;
@@ -160,8 +161,9 @@ export async function startFileViewer(input: string, { onDirty = () => {}, forma
         }
         const resource = resources.get(route);
         if (resource) { await stream(req, res, resource); return; }
-        if (kind !== 'markdown' || !route.startsWith(IMAGES_ROUTE)) throw new HttpError(404);
-        const image = await openImage(root, route.slice(IMAGES_ROUTE.length));
+        const segments = imagesRoute(kind, route);
+        if (!segments) throw new HttpError(404);
+        const image = await openImage(root, segments);
         try {
           res.setHeader('Content-Security-Policy', IMAGE_CSP);
           await stream(req, res, image);

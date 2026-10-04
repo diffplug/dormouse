@@ -6,7 +6,7 @@ import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { beforeEach, afterEach, test } from 'node:test';
 import { saveFileOperations, windowsReplaceCommand } from '../dist/atomic-save.js';
-import { editorStore } from '../dist/editable-file.js';
+import { editorStore } from '../dist/editor-store.js';
 import { readText, saveText } from '../dist/editor-routes.js';
 let root, file;
 beforeEach(async () => { root=await realpath(await mkdtemp(join(tmpdir(),'dor-save-platform-'))); file=join(root,'source.txt'); await writeFile(file,'original'); });
@@ -25,19 +25,17 @@ test('the Windows replacement passes paths as environment data, never script tex
   assert.equal(command.env.DORMOUSE_SAVE_BACKUP,backup);
 });
 
-const readEditableFile=file=>readText(editorStore(root),file);
-const saveEditableFile=(file,text,version,operations)=>saveText(editorStore(root,operations),file,text,version);
 const saveFiles=async()=>(await readdir(root)).filter(name=>name.startsWith('.dor-save-'));
 
 test('a native replacement sharing failure preserves the old file and retains the draft', { skip:process.platform!=='win32', timeout:15000 }, async () => {
-  const source=await readEditableFile(file);
+  const source=await readText(editorStore(root),file);
   const script='$ErrorActionPreference="Stop"; $f=[IO.File]::Open($env:DORMOUSE_LOCK_TEST_TARGET,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::ReadWrite); [Console]::Out.WriteLine("ready"); [Console]::Out.Flush(); [Console]::ReadLine() | Out-Null; $f.Dispose()';
   const binary=win32.join(process.env.SystemRoot||process.env.SYSTEMROOT||'C:\\Windows','System32/WindowsPowerShell/v1.0/powershell.exe');
   const child=spawn(binary,['-NoLogo','-NoProfile','-NonInteractive','-EncodedCommand',Buffer.from(script,'utf16le').toString('base64')],{env:{...process.env,DORMOUSE_LOCK_TEST_TARGET:file},stdio:['pipe','pipe','pipe'],windowsHide:true});
   const exited=once(child,'exit');
   try {
     await Promise.race([once(child.stdout,'data'),exited.then(()=>{throw new Error('lock helper exited');})]);
-    await assert.rejects(saveEditableFile(file,'new',source.version), /could not be confirmed/);
+    await assert.rejects(saveText(editorStore(root),file,'new',source.version), /could not be confirmed/);
     assert.equal(await readFile(file,'utf8'),'original');
     const drafts=(await saveFiles()).filter(name=>name.endsWith('.tmp'));
     assert.equal(drafts.length,1);
@@ -47,16 +45,16 @@ test('a native replacement sharing failure preserves the old file and retains th
 
 for (const partial of ['target-missing', 'committed-without-confirmation']) {
   test('retains both versions after a native-like ' + partial + ' replacement outcome', async () => {
-    const source=await readEditableFile(file);
+    const source=await readText(editorStore(root),file);
     let draft, original;
-    await assert.rejects(saveEditableFile(file,'new',source.version,{
+    await assert.rejects(saveText(editorStore(root,{
       async replace(temporary,target,backup) {
         draft=temporary; original=backup;
         await rename(target,backup);
         if (partial==='committed-without-confirmation') await rename(temporary,target);
         throw new Error('native partial replacement or lost completion');
       },
-    }),error=>error.status===500&&error.message.includes(draft));
+    }),file,'new',source.version),error=>error.status===500&&error.message.includes(draft));
     assert.equal(await readFile(original,'utf8'),'original');
     if (partial==='target-missing') {
       await assert.rejects(readFile(file),{code:'ENOENT'});
@@ -67,10 +65,10 @@ for (const partial of ['target-missing', 'committed-without-confirmation']) {
 }
 
 test('a confirmed replacement removes the draft and the backup', async () => {
-  const source=await readEditableFile(file);
-  await saveEditableFile(file,'new',source.version,{
+  const source=await readText(editorStore(root),file);
+  await saveText(editorStore(root,{
     async replace(temporary,target,backup) { await rename(target,backup); await rename(temporary,target); },
-  });
+  }),file,'new',source.version);
   assert.equal(await readFile(file,'utf8'),'new');
   assert.deepEqual(await saveFiles(),[]);
 });
