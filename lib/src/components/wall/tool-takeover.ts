@@ -93,19 +93,3 @@ export function callerStillPlaceable(gate: ToolTakeoverGate): boolean {
     && gate.kind === 'terminal'
     && !gate.helperPresent;
 }
-
-/**
- * Whether a keyed match on the calling pane re-runs there. The caller is then
- * the tool's own Surface, so the placement conditions above are moot — there is
- * nothing to place, and the tool re-runs in its own directory, exactly as an
- * `adopted` match from any other pane does.
- */
-export function toolRerunsInCaller(gate: ToolTakeoverGate): boolean {
-  return gate.kind === 'tool' && callerTypedTool(gate);
-}
-
-/** What a re-run re-reads after the prompt wait: the pane survived it, in the
- *  directory the tool was answered with. */
-export function callerStillRunnable(gate: ToolTakeoverGate): boolean {
-  return gate.visible && gate.cwdMatches;
-}

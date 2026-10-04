@@ -11,16 +11,17 @@ import { isRunHeld, subscribeToRunHolds } from '../../lib/tool-run-hold';
 /**
  * Whether a Tool's designated run has ended with its Session alive
  * (`docs/specs/dor-tool.md` -> Run end): its shell is back at a prompt after a
- * finished run of the designated command, and the host is not replacing that
- * run. A Tool booting, awaiting approval, or taking over its caller has
- * finished no such run; a reaped or stopping one has no live shell to return.
+ * finished run of the designated command — or after any command, once that run
+ * was `seenRunning` — and the host is not replacing that run. A Tool booting,
+ * awaiting approval, or taking over its caller has finished no such run; a
+ * reaped or stopping one has no live shell to return.
  */
-export function toolRunEnded(id: string, params: unknown): boolean {
+export function toolRunEnded(id: string, params: unknown, seenRunning = false): boolean {
   if (!isToolParams(params) || params.toolPending !== undefined) return false;
   if (isToolReaped(id) || isToolStopping(id) || isRunHeld(id)) return false;
   if (registry.get(id)?.exited) return false;
   const { currentCommand, lastCommand } = getTerminalPaneState(id);
-  return currentCommand === null && lastCommand !== null && lastCommand.rawCommandLine === params.command;
+  return currentCommand === null && lastCommand !== null && (seenRunning || lastCommand.rawCommandLine === params.command);
 }
 
 /** The Tool becomes the plain terminal it runs in, in place: same Session,
@@ -42,11 +43,17 @@ export function useToolRunEnd({ lath, doorsRef, paused }: {
   paused: () => boolean;
 }): void {
   useEffect(() => {
+    // Tools seen running their designated command: a command typed behind a
+    // host replacement, then finished, still leaves an ended run.
+    const seenRunning = new Set<string>();
     const check = (changed?: string) => {
       if (paused()) return;
       for (const leaf of toolLeaves(lath, doorsRef.current)) {
         if (changed !== undefined && leaf.id !== changed) continue;
-        if (toolRunEnded(leaf.id, leaf.params)) endToolDesignation(lath, leaf.id);
+        if (getTerminalPaneState(leaf.id).currentCommand?.rawCommandLine === leaf.params.command) seenRunning.add(leaf.id);
+        if (!toolRunEnded(leaf.id, leaf.params, seenRunning.has(leaf.id))) continue;
+        seenRunning.delete(leaf.id);
+        endToolDesignation(lath, leaf.id);
       }
     };
     const unsubscribeState = subscribeToTerminalPaneState(check);

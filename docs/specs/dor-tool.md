@@ -33,7 +33,7 @@ Source of truth: `surfaceKindFromParams` in `lib/src/components/wall/browser-sur
 - **Must warn when a repo-local key omits `$PROJECT_ROOT`, or a `$TARGET` run has a key without `$TARGET`.** Allow intentional cross-checkout or cross-file dedupe.
 - **Must reject `$PROJECT_ROOT` in user configuration**, which has no project root.
 
-**Must pass named-tool inputs as argument values, never substitute them into a shell-command string.** String `run` accepts no arguments and remains literal shell syntax. List `run` expands `$TARGET`, `$CWD`, and `$PROJECT_ROOT` within elements; a whole `$ARGS` element expands all input arguments. Without `$ARGS` or `$TARGET` in the list, append the inputs. **Must quote argv for the destination Session's shell**, using the current default only for new Sessions; takeover stores that quoted command for reruns.
+**Must pass named-tool inputs as argument values, never substitute them into a shell-command string.** String `run` accepts no arguments and remains literal shell syntax. List `run` expands `$TARGET`, `$CWD`, and `$PROJECT_ROOT` within elements; a whole `$ARGS` element expands all input arguments. Without `$ARGS` or `$TARGET` in the list, append the inputs. **Must quote argv for the destination Session's shell**, using the current default only for new Sessions; takeover stores that quoted command for restarts.
 
 **Must require exactly one existing local regular file or directory when `$TARGET` appears in the run list or dedupe key.** Resolve relative paths against the invocation CWD and follow symlinks to a canonical absolute path before substitution and reuse. **Must accept a `file:` URL only when its host is empty, `localhost`, or this machine's name** (case-insensitive, either side in its short form before the first dot); reject other URLs, missing paths, and every other file kind (fifo, socket, device). Validate run and key inputs before showing approval. Input control-character restrictions belong to `docs/specs/security-local.md` → Dor Tool configuration.
 
@@ -48,7 +48,7 @@ Source of truth: `createToolHost` in `lib/src/host/tool-host.ts`; `parseToolFile
 - **Must namespace keys by the host-resolved Tool name**; runtime output supplies scope elements, never another Tool's namespace.
 - **Must dedupe within the answering Workspace.** `--workspace` uses the routing in `docs/specs/dor-cli.md` → Handle Model.
 - **Must serialize every Tool launch request and approval completion in the renderer through one queue**, not per key, so two requests never both create a match.
-- **Must reveal a live matching Tool and report `existing` without sending input.** An idle match restarts its stored command in its own directory and reports `adopted`; a failed restart reports an error.
+- **Must reveal a live matching Tool and report `existing` without sending input.** A match idle while the host replaces its run ([Run end](#run-end)) restarts its stored command in its own directory and reports `adopted`; a failed restart reports an error.
 - **Must reuse and reveal a matching pending approval Surface unless `--fresh` is set**, matching Tool name, project root, CWD, arguments, and fresh intent; preserve its approval state and report `pending`.
 - **Must apply runtime re-keys only to the announcing Tool**, without merging Surfaces, transferring state, or killing either side of a collision. (rationale)
 - A marked preview slot never matches ([Preview slot](#preview-slot)).
@@ -119,7 +119,7 @@ Source of truth: `ToolPanel` in `lib/src/components/wall/ToolPanel.tsx`.
 
 A Tool is designated for one run of its command, not for the life of its Surface.
 
-**Must turn a Tool whose designated run ended into a plain terminal in place**: the user's Ctrl+C or quit, a crash, a failed boot, a suspend (the shell's prompt is the only signal; a resumed run is an ordinary terminal's, its announcements inert as [OSC 367](#osc-367) has them). Keep the Session id, Surface ref, scrollback, and a user rename; retire the browser, announcements, and unsaved state ([Serving](#serving)); drop a preview mark. Only a finished run of the designated command ends it, including one that starts and finishes in one output chunk; booting, pending approval, and a takeover waiting for its prompt have ended nothing. It then persists as a terminal, keyed reuse never matches it, and Terminal Context gives it a helper (`docs/specs/terminal-context.md` → Tool context). (rationale)
+**Must turn a Tool whose designated run ended into a plain terminal in place**: the user's Ctrl+C or quit, a crash, a failed boot, a suspend (the shell's prompt is the only signal; a resumed run is an ordinary terminal's, its announcements inert as [OSC 367](#osc-367) has them). Keep the Session id, Surface ref, scrollback, and a user rename; retire the browser, announcements, and unsaved state ([Serving](#serving)); drop a preview mark. Only a finished run ends it: the designated command's, including one that starts and finishes in one output chunk, or any command after the designated one was seen running; booting, pending approval, and a takeover waiting for its prompt have ended nothing. It then persists as a terminal, keyed reuse never matches it, and Terminal Context gives it a helper (`docs/specs/terminal-context.md` → Tool context). (rationale)
 
 **Must keep the designation while the host replaces a run**: an in-place restart (idle keyed match, `dor ensure --restart`, approval match), a preview retarget with its kept or restored retypes ([Preview slot](#preview-slot)), and a reap's stop until rehydrate ([Reaping](#reaping)). One host hold, set before the host's interrupt and released once the successor run starts or the host gives up, both exempts the end here and silences its command-exit alert (`docs/specs/alert.md` → Command-exit Track). A replacement the host gives up on ends the run; so does a rehydrate's failed run (Error tier).
 
@@ -327,10 +327,10 @@ sequenceDiagram
   participant W as Wall
   Sh->>D: runs dor tool alone
   D->>W: surface.tool
-  W-->>D: takeover or adopted
+  W-->>D: takeover
   D->>Sh: prints the handle, exits
   Sh-->>W: back at a prompt
-  W->>W: recheck, then become the Tool if takeover
+  W->>W: recheck, then become the Tool
   W->>Sh: type the command
 ```
 
@@ -338,12 +338,11 @@ sequenceDiagram
 
 - **Must leave the caller unchanged on prompt timeout or cancellation**, and recheck transfer/closing state, pane membership, CWD, kind, and helper presence after the wait. **Must complete an accepted takeover after switching Workspaces** without changing the active Workspace. (rationale)
 - **Must retain the Session id, Surface ref, scrollback, and any user rename** through the transformation.
-- **Must rerun a keyed match in the caller through the same answer/prompt handshake**, reporting `adopted`, when its line is standalone and integrated. Never interrupt the waiting `dor` process. Placement flags do not relocate an existing match; run in its current directory.
-- **Must report an error when the caller is the keyed match but its command line cannot be typed behind**, instead of reporting a misleading `existing` result.
+- **Must report an error when the caller is its own keyed match and that match is not running**, instead of reporting a misleading `existing` result.
 - **May interleave user keystrokes arriving between the prompt and command injection.**
 - **Must include already-owned background listeners in the usual process-tree scan.** [Serving](#serving) owns selection.
 
-Source of truth: `toolTakesOverCaller` / `toolRerunsInCaller` in `lib/src/components/wall/tool-takeover.ts`; `runToolInCallerPane` in `lib/src/components/wall/use-dor-control.ts`.
+Source of truth: `toolTakesOverCaller` in `lib/src/components/wall/tool-takeover.ts`; `runToolInCallerPane` in `lib/src/components/wall/use-dor-control.ts`.
 
 ## OSC 367
 
