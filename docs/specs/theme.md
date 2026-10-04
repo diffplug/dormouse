@@ -67,7 +67,7 @@ Source of truth: `captureIframeTheme` / `connectIframeTheme` in `lib/src/lib/the
 
 Terminal content is orthogonal to the chrome: xterm.js reads terminal colors straight from `--vscode-*` in `getTerminalTheme()`, after the resolver materializes VSCode's terminal defaults (`RESOLUTION_RULES`).
 
-**`getTerminalTheme()` carries no per-key default** — `REGISTRY_DEFAULTS` is the one such table, and every shipping host materializes these keys first; an unset key is omitted so xterm.js applies its own. Two exceptions: the background/foreground pair, rostered under `DESIGN.md` → "Fixed Exceptions", and `cursor`, which falls back to the resolved foreground because **the three colors pushed to a DOM-less host must all be present**: the sidecar drops a push missing any of them whole (`setThemeColors` in `lib/src/host/remote/sidecar-entry.ts`).
+**`getTerminalTheme()` carries no per-key default** — `REGISTRY_DEFAULTS` is the one such table, and every shipping host materializes these keys first; an unset key is omitted so xterm.js applies its own. Two exceptions: the background/foreground pair, rostered under `DESIGN.md` → "Fixed Exceptions", and `cursor`, which falls back to the resolved foreground because **the three colors pushed to a DOM-less host must all be present** (a host drops a push missing any: `docs/specs/transport.md` → "Message protocol").
 
 Applying a theme updates existing terminals. **Adapters must use the `terminal-theme.ts` API directly** — it is not re-exported through the `terminal-registry` facade. Its `themeColorProvider` feeds the OSC 10/11/12 color-query answer.
 

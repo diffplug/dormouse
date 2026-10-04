@@ -136,7 +136,7 @@ Source of truth: the message schema in `vscode-ext/src/message-types.ts` (`Webvi
 | Host → webview | `terminal:clipboardOffer` | One decoded `OSC 52` write, offered to the copy editor (`docs/specs/mouse-and-clipboard.md` §4.6). |
 | Host → webview | `terminal:clientInput` | A remote Client wrote to this Session, which is no longer untouched (`docs/specs/layout.md` → "Kill confirmation"). |
 | Webview → host | `pty:spawn` | `options.alert`: a cold-restored pane's persisted alert state (`docs/specs/alert.md` → Public State). |
-| Webview → host | `dormouse:themeColors` (VS Code) / `pty_theme_colors` (standalone) | Resolved foreground / background / cursor, at `requestInit` and on every terminal-theme change. |
+| Webview → host | `dormouse:themeColors` (VS Code) / `pty_theme_colors` (standalone) | Resolved foreground / background / cursor, at `requestInit` and on every terminal-theme change. **A malformed push is dropped whole, never half-applied.** |
 | Host → webview | `pty:replay` | Buffered raw output; the webview's one-shot parse of it is the only re-parse there is. |
 
 **Each PTY owner runs one alert host** (`createAlertHost`) beside its parse, fed regardless of webview visibility and outliving every webview (rationale). **Each webview is a realm of it, ended when the webview re-initializes or goes away**; what an ended realm settles: `docs/specs/alert.md` → Await.
