@@ -38,10 +38,9 @@ let portPresent: boolean;
 let configured: boolean | null;
 
 const port: ManagedVoicePort = {
-  offerSetup: true,
-  status: () => (configured === null ? null : { configured, voiceId: 'v' }),
+  status: () => (configured === null ? null : { configured, voiceId: 'v', notEntitled: false }),
   subscribe: () => () => {},
-  configure: async () => ({ ok: true, configured: true, voiceId: 'v' }),
+  configure: async () => ({ ok: true, configured: true, voiceId: 'v', notEntitled: false }),
   speak: (text) => new Promise((resolve) => speaks.push({ text, resolve })),
 };
 

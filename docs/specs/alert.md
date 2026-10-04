@@ -345,10 +345,12 @@ Every rule above holds for both engines.
 - **A host may speak only at its build's voice origin; a self-host build's has none** and makes no request (`docs/specs/relay.md` → "Relay origin"), nor does any host under the network policy's `nothing` (`docs/specs/remote-network.md` → "Policy").
 - **Must fall back to Web Speech for the same utterance, inside the same attempt, on any failure before managed audio starts** — `unconfigured`, offline, non-2xx, host timeout, undecodable or refused playback. **Never play both**: audio that started and then failed ends the attempt instead (rationale). Nothing is retried.
 - `speaking` / `spoken` follow the audio element's `playing` / `ended`. **Cut-off and teardown must stop the audio**; a request still in flight runs out in the host and its answer is ignored.
-- **Never let the voice token reach a renderer**; the host adds it to the request (rationale). Where it may go: `docs/specs/security-local.md` → "Persisted state".
-- **Must bound the host request** at `MANAGED_VOICE_REQUEST_TIMEOUT_MS` (inside `SPEECH_ENGINE_TIMEOUT_MS`, so a fallback still fits) and `MAX_AUDIO_BYTES`, accepting only `audio/mpeg`, and validate the token (`dmv_…`) and voice id grammar before storing either.
+- **Must send exactly the `toSpokenText` label and the member's voice id**, never terminal content, a notification body, or a Session id.
+- **Never let the voice token reach a renderer**; the host adds it to the request (rationale), and only the Burrow service's sign-in writes it (`docs/specs/relay.md` -> "Burrow side"). Where it may go: `docs/specs/security-local.md` → "Persisted state".
+- **Must bound the host request** at `MANAGED_VOICE_REQUEST_TIMEOUT_MS` (inside `SPEECH_ENGINE_TIMEOUT_MS`, so a fallback still fits) and `MAX_AUDIO_BYTES`, accepting only `audio/mpeg`, and store only a token of the `dmv_…` shape and a voice of the curated set (`MANAGED_VOICES`).
+- **Must cache clips by voice and text in the host's memory, bounded in count and bytes, never persisted**; a hit makes no request, and a token change empties it. **A 403 latches `notEntitled`**, which bypasses the cache until a speak succeeds, so a lapsed member hears the system voice; **a 401 forgets the token**. An answer to an older token changes nothing.
 
-Source of truth: `withFallback` in `lib/src/lib/speech-engine.ts`; `createManagedVoiceEngine` in `lib/src/lib/managed-voice-engine.ts`; `createManagedVoiceHost` in `lib/src/host/managed-voice-host.ts`.
+Source of truth: `withFallback` in `lib/src/lib/speech-engine.ts`; `createManagedVoiceEngine` in `lib/src/lib/managed-voice-engine.ts`; `createManagedVoiceHost` in `lib/src/host/managed-voice-host.ts`; `MANAGED_VOICES` in `remote-lib-common/src/remote/managed-voice.ts`.
 
 ### Push notifications
 
@@ -371,10 +373,10 @@ Opened by the baseboard's Settings button. Its Activity and Notifications topics
 - A baseboard alarm button toggles only its own setting, as an override for that Workspace; components without a Workspace scope edit application defaults. **Must open a separate Workspace alert dialog from either button's right-click or focused `Shift+F10`/`ContextMenu`**, only with a Workspace scope, preserving per-field inheritance and reset-all.
 - The watched-command list removes rules and cannot add one — creating a rule stays the terminal context of a Pane running the command. It is the only place a rule set on a since-closed Pane can be removed.
 - **The push group's device line must name every device a push would reach**, and otherwise say why there is none.
-- **The Managed voice group must never show the token**, and states what is sent to Hosted, and how long ElevenLabs keeps it, before one is saved. It is hidden without `managedVoice`, which a self-host build's adapter omits, and hidden unless the port offers setup (`offerSetup`, a dev build's adapter) or a token is already configured, managed voice being an admin-only test slice; wherever it shows, the speech row names managed voice instead of linking the `/hosted` preview ([website-docs.md](./website-docs.md) -> `/hosted` preview).
+- **The Managed voice group is shown wherever the adapter has `managedVoice`**, which a self-host build's omits; there the speech row names managed voice instead of linking the `/hosted` preview ([website-docs.md](./website-docs.md) -> `/hosted` preview). **Must state what is sent to Hosted, and that ElevenLabs' copy has no guaranteed deletion time, before the sign-in that enables it.** Signing in is the Hosted enrollment Remote control runs (`HostedEnrollView`); under Nothing it explains and links Network instead, changing no policy. Signed in, it offers the curated voices and Sign out (the enrollment's Disconnect), or, where the relay socket or speak says the plan lapsed, the plans. **No control takes a token.**
 - Each sink carries a test control, usable while the sink is off: the test sound goes through the shared speech queue and selected voice, reporting admission or an unavailable backend, never Session delivery state; the test push takes the real Burrow→ACL→Relay path and distinguishes no targets, zero, partial, and full delivery, hidden without a Burrow service.
 
-Source of truth: `SettingsDialog` in `lib/src/components/SettingsDialog.tsx`; `WorkspaceAlarmSettingsDialog` in `lib/src/components/WorkspaceAlarmSettings.tsx`; `Baseboard` in `lib/src/components/Baseboard.tsx`.
+Source of truth: `SettingsDialog` in `lib/src/components/SettingsDialog.tsx`; `ManagedVoiceSection` in `lib/src/components/ManagedVoiceSection.tsx`; `WorkspaceAlarmSettingsDialog` in `lib/src/components/WorkspaceAlarmSettings.tsx`; `Baseboard` in `lib/src/components/Baseboard.tsx`.
 
 ## Workspace union
 

@@ -7,7 +7,7 @@ import {
   normalizeEnrollUserCode,
   readJson,
 } from "remote-lib-common";
-import { accountQuery, cookieAdmin, type AccountHost } from "./account-gate";
+import { accountQuery, cookieEntitled, type AccountHost } from "./account-gate";
 import { ENROLLMENT_TTL_MS, LOGIN_FRESH_AGE_MS, RECENT_LOGIN_WINDOW } from "./policy-constants";
 
 /** What one request's account deployment provides to the Relay's account routes. */
@@ -30,7 +30,7 @@ export const ALREADY_APPROVED = "That code is already approved.";
  * `/api/*` catch-all.
  */
 export function relayAccountRoutes(app: Hono<any>, host: (c: Context) => RelayAccountHost) {
-  const gate = cookieAdmin(host, (c) => c.json({ message: NOT_ENTITLED_ERROR }, 403));
+  const gate = cookieEntitled(host, (c) => c.json({ message: NOT_ENTITLED_ERROR }, 403));
 
   const small = bodyLimit({
     maxSize: 1024,

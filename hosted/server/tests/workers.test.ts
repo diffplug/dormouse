@@ -19,7 +19,7 @@ import {
   mockOAuthServer,
 } from "./oauth-server";
 import type { Session } from "../../src/api";
-import { ADMIN_EMAIL } from "../admin";
+import { ADMIN_EMAIL } from "../entitlement";
 import { CRON_SWEEP_CAP, SPEECH_SWEEP_CAP, VOICE_DAILY_CAP } from "../voice";
 import { ALREADY_APPROVED, RECENT_LOGIN_REQUIRED } from "../relay-account";
 import {
@@ -760,6 +760,8 @@ test("managed voice: only the verified admin mints, speaks, and revokes", async 
     { text: "x".repeat(201), voiceId },
     { ...hi, voiceId: "../v1/voices" },
     { ...hi, voiceId: "x".repeat(65) },
+    // Well-formed, but no voice of the curated set.
+    { ...hi, voiceId: "AZnzlk1XvdvUeBnXmlld" },
   ])
     expect((await admin.speak(token, body)).status).toBe(400);
   for (const bad of [undefined, "dmv_unknown", "dmv_" + "A".repeat(43)])

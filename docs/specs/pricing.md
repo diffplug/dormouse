@@ -3,7 +3,7 @@
 > - See `docs/specs/glossary.md` for Burrow / Client / Relay and Pane / Session vocabulary.
 > - **Owns:** the plans, the founding ladder, what a plan grants, how a desktop proves membership, the managed-voice boundary, and the content contract of the Hosted page.
 > - **Defers:** page chrome, rail, and link obligations to `docs/specs/website-docs.md` -> "Reference page chrome"; the Hosted Relay's accounts, enrollment, and entitlement, and managed voice's routes, to `docs/specs/hosted.md`; the cloud-hosted trust boundary to `docs/specs/security-remote.md` -> "Cloud-hosted mode"; alarm delivery to `docs/specs/alert.md` -> "Spoken alarms".
-> - **Status:** the Hosted page publishes the plans and the FAQ; everything that takes money — checkout, the entitlement, managed voice, the hosted Relay — is under [Future](#future).
+> - **Status:** the Hosted page publishes the plans and the FAQ, and a desktop signs in to Hosted for managed voice (`docs/specs/hosted.md` -> "Managed voice"); everything that takes money — checkout, the subscription as the entitlement, the hosted Relay — is under [Future](#future).
 
 ## The Hosted page
 
@@ -66,8 +66,8 @@ Source of truth: `tiersOnSale`, `foundingTier`, and `pricingJsonLd` in `website/
 **Scope: hosted-sales** — what remains, in staged order:
 
 1. **The cohort endpoint** the page already calls: the open cohort's seats and the opted-in founders, avatars proxied onto this origin.
-2. **Checkout and entitlement**: purchase, the subscription as the account's entitlement, desktop sign-in, revocation.
-3. **Managed voice for members**: the subscription replacing the admin gate (`docs/specs/hosted.md` -> "Managed voice"), the disclosure, one voice per Pane.
+2. **Checkout and entitlement**: purchase, the subscription as the account's entitlement, revocation.
+3. **Managed voice for members**: the subscription replacing the admin-only entitlement (`docs/specs/hosted.md` -> "Entitlement"), one voice per Pane.
 4. **Hosted Relay inclusion**: the subscription as the Relay's entitlement (`docs/specs/hosted.md` -> "Relay"), gated on the independent review `docs/specs/security-remote.md` -> "Cloud-hosted mode" requires.
 5. **Renewal, cancellation, and refund** paths.
 
@@ -107,16 +107,14 @@ What each plan grants once checkout can sell it; [Published prices](#published-p
 - **Founding checkout offers the founders-row opt-in, unticked**; the account can withdraw it at any time.
 - **The success page asks the four Van Westendorp questions**, optional and unsent until answered: too expensive to consider, too cheap to trust, expensive but would consider, a bargain. Their answers inform later list changes.
 - **The entitlement is the account's subscription, read on the server on every voice and Relay request.** No licence, no offline verification, and no grace past what the subscription grants; a lapsed member's voices fall back to the system voice and its Burrows to `not-entitled`.
-- **A desktop signs in from Settings by device code**, the flow Burrow enrollment already runs (`docs/specs/hosted.md` -> "Burrow enrollment"). The approval mints a desktop credential the host keeps and never hands a webview. Sign-in is the only account surface in the free client.
+- **Sign-in is the only account surface in the free client** (`docs/specs/hosted.md` -> "Managed voice").
 - **One account covers every machine the member uses.** No device count, no seat count, no activation limit.
 - **A refund or chargeback ends the subscription**, so the next request is refused, and the seat returns to its cohort.
 
 ### Managed voice
 
-- **Dormouse operates the endpoint and holds the vendor key** (ElevenLabs). A request carries the desktop credential, a voice id, and the text; the response is audio.
-- **What leaves the machine is exactly the sanitized spoken label and the voice id** — the `toSpokenText` output in `lib/src/lib/alert-speech.ts`, never terminal content, never a notification body, never a Session id. **Disclose this in the enable flow before the first request**, honoring the promise the Hosted page makes.
-- **Cache clips by voice and text on the client** and regenerate only when the label changes; a cache hit makes no request. **Fair use is a daily request cap per member**; past it, the system voice speaks.
-- **The system voice is the fallback**, for offline, unentitled, endpoint error, or cap: same delivery rules, same cut-off on attend, never silence because the service failed. Delivery identity, queueing, and cut-off stay owned by `docs/specs/alert.md` -> "Spoken alarms".
+What is built — the endpoint, the disclosure, the clip cache, the daily cap, and the fallback — is `docs/specs/hosted.md` -> "Managed voice" and `docs/specs/alert.md` -> "Managed voice".
+
 - **One voice per Pane.** The member default applies everywhere; a per-Pane override is persisted with the pane's settings and follows the Session through minimize and restore. Doors and headers show nothing new.
 - **Pocket speaks only in the foreground** — a web app cannot voice a background push — so the desktop is the primary voice sink. A native Pocket is out of scope here.
 
@@ -131,4 +129,4 @@ What each plan grants once checkout can sell it; [Published prices](#published-p
 ### Open questions
 
 - A free hosted tier, no card. It is the only way a stock binary can try Pocket, since the shipped bundle reaches only `*.dormouse.sh` (`docs/specs/relay.md` -> "Relay origin").
-- The curated voice set and whether members may bring their own ElevenLabs voice id.
+- Whether members may bring their own ElevenLabs voice id beyond the curated set.

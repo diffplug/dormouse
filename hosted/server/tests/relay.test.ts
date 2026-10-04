@@ -23,6 +23,7 @@ import {
   sealPush,
   utf8Encode,
   isEnrollUserCode,
+  isManagedVoiceToken,
   isRelayBearer,
   toBase64Url,
   verifyPresenceProof,
@@ -34,7 +35,7 @@ import {
   randomSecret,
   registrationClientData,
 } from "../../../remote-lib-common/test/harness/actors.mjs";
-import { ADMIN_EMAIL } from "../admin";
+import { ADMIN_EMAIL } from "../entitlement";
 import { migrations } from "../migrations";
 import { ENROLLMENT_TTL_MS } from "../policy-constants";
 import {
@@ -905,13 +906,22 @@ test("a device-code enrollment: begin stores nothing, pending until approved, th
   await f.approve(begun.userCode, owner);
   const enrolled = await f.poll(begun.deviceCode);
   expect(enrolled.status).toBe(200);
-  const { enrollment } = enrolled.json as { enrollment: Record<string, string> };
+  const { enrollment, voiceToken } = enrolled.json as {
+    enrollment: Record<string, string>;
+    voiceToken: string;
+  };
   expect(enrolled.json).toEqual({
     status: "enrolled",
     enrollment: { burrowId: enrollment.burrowId, burrowToken: enrollment.burrowToken, origin, rpId },
+    voiceToken,
   });
   expect(await f.sql(`SELECT "burrowId", "userId", "tokenHash" FROM dormouse_relay_burrows`)).toEqual([
     { burrowId: enrollment.burrowId, userId: owner, tokenHash: digest(enrollment.burrowToken) },
+  ]);
+  // The signed-in desktop's voice token, minted with the Burrow, stored as its hash.
+  expect(isManagedVoiceToken(voiceToken)).toBe(true);
+  expect(await f.sql(`SELECT "userId", hash, "burrowId", "revokedAt" FROM dormouse_voice_tokens`)).toEqual([
+    { userId: owner, hash: digest(voiceToken), burrowId: enrollment.burrowId, revokedAt: null },
   ]);
   // Spent: the approval stays, marked with the Burrow it minted, so a poll
   // whose answer was lost learns it was redeemed; nothing redeems twice.
@@ -921,8 +931,10 @@ test("a device-code enrollment: begin stores nothing, pending until approved, th
   // Naming the Burrow it minted, for the Burrow to tell the account to remove.
   expect((await f.poll(begun.deviceCode)).json).toEqual({ status: "redeemed", burrowId: enrollment.burrowId });
   expect((await f.mint(enrollment.burrowToken)).status).toBe(200);
-  // Removing the Burrow never makes its approval redeemable again.
+  // Removing the Burrow never makes its approval redeemable again, and
+  // revokes its voice token with it.
   await f.sql(`DELETE FROM dormouse_relay_burrows`);
+  expect(await f.sql(`SELECT count(*)::int AS n FROM dormouse_voice_tokens`)).toEqual([{ n: 0 }]);
   expect((await f.poll(begun.deviceCode)).json).toEqual({ status: "redeemed", burrowId: enrollment.burrowId });
   expect(await f.sql(`SELECT count(*)::int AS n FROM dormouse_relay_burrows`)).toEqual([{ n: 0 }]);
   // Expired, the marker is swept with the rest.

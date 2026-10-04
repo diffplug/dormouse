@@ -38,6 +38,9 @@ import {
   HOSTED_ENROLLMENT_CODE_LABEL,
   HOSTED_ENROLLMENT_ENDED_COPY,
   HOSTED_ENROLLMENT_REDEEMING_COPY,
+  SIGN_IN_LABEL,
+} from './HostedSignIn';
+import {
   NOT_ENTITLED_COPY,
   PAIRING_OUTCOME_LABEL,
   RemoteControlSection,
@@ -345,7 +348,7 @@ describe('RemoteControlSection', () => {
     expect(hostedForm().hidden).toBe(false);
     await type('input:not([type])', 'Work laptop');
 
-    await act(async () => buttonLabelled('Enroll with hosted.dormouse.sh')!.click());
+    await act(async () => buttonLabelled(SIGN_IN_LABEL)!.click());
 
     expect(link.command).toHaveBeenCalledWith('beginHostedEnrollment', { label: 'Work laptop' });
     expect(codeShown()).toBe('23AB-YZ9K');
@@ -379,8 +382,8 @@ describe('RemoteControlSection', () => {
     };
     await render();
 
-    expect(text()).toContain('That account already has as many computers as it can enroll.');
-    await act(async () => buttonLabelled('Remove one')!.click());
+    expect(text()).toContain('That account already has as many computers as it can sign in.');
+    await act(async () => buttonLabelled('Remove one at hosted.dormouse.sh')!.click());
     expect(openExternal).toHaveBeenCalledWith('https://hosted.dormouse.sh/account');
   });
 
@@ -472,7 +475,7 @@ describe('RemoteControlSection', () => {
     };
     await render();
     await openPersistent();
-    await act(async () => buttonLabelled('Enroll with hosted.dormouse.sh')!.click());
+    await act(async () => buttonLabelled(SIGN_IN_LABEL)!.click());
     expect(text()).toContain('Settings → Network is set to Nothing');
   });
 
@@ -517,7 +520,7 @@ describe('RemoteControlSection', () => {
     expect(typedForm().textContent).toContain(SELF_HOST_RELAY_ORIGIN);
     // The origin is named, never typed: no field for it.
     expect(container.querySelector('input[type="url"]')).toBeNull();
-    expect(buttonLabelled('Enroll with hosted.dormouse.sh')).toBeUndefined();
+    expect(buttonLabelled(SIGN_IN_LABEL)).toBeUndefined();
     expect(buttonLabelled('Connect')).toBeTruthy();
   });
 

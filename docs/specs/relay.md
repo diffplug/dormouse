@@ -309,6 +309,7 @@ Source of truth: `resolveRelayOrigin` and `assertRelayOriginBaked` in `scripts/r
 - **Must stop polling** on the Relay's `expired`, at this machine's own deadline (the clocks being separate), on Cancel, on disposal, and under `nothing`. **A full account polls on**, the Relay keeping the approval. **A poll with no answer or a 5xx retries; a 429 also widens the interval**, capped at `MAX_ENROLL_POLL_INTERVAL_S`; any other refusal ends the run.
 - **Must hold a redemption that lands after Cancel or a new begin**: the Relay has spent and recorded it. When it cannot be held, the failure names the Burrow and the account page to remove it at.
 - **Must retain an enrollment whose save succeeded when startup fails**, reporting restart guidance, never removal advice.
+- **Must hand a redemption's voice token to managed voice in-process, once the enrollment is saved, and never to a webview or the store**; a token not of its shape is dropped and the enrollment kept. **`clearEnrollment` clears it, as does a start that finds no enrollment**, so Disconnect is signing out (`docs/specs/hosted.md` -> "Managed voice").
 
 **Relay socket policy**: one socket at a time, reconnected with backoff after any close except these, which latch a state, dispose the Burrow's sessions, and arm no timer until `start()` (an explicit `reconnect()` or a fresh start) (rationale):
 
