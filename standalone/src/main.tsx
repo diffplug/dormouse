@@ -15,6 +15,7 @@ import { UpdateBanner } from "./UpdateBanner";
 import { UpdateDebugModal } from "./UpdateDebugModal";
 import { WorkspaceTeardownModalHost } from "./WorkspaceTeardownModal";
 import { AppBar } from "./AppBar";
+import { UiRestartBanner, armUiWatchdog } from "./ui-watchdog";
 import {
   startUpdateCheck,
   useUpdateState,
@@ -176,13 +177,16 @@ async function bootstrap() {
       <AppBar />
       <App
         initialPlans={initialPlans}
-        baseboardNotice={<ConnectedUpdateBanner />}
+        baseboardNotice={<><UiRestartBanner /><ConnectedUpdateBanner /></>}
         dialogHost={<WorkspaceTeardownModalHost />}
         enableBurrow
         multiWorkspace
       />
     </StrictMode>,
   );
+  // Strictly after the restore and first render (docs/specs/standalone.md →
+  // "UI watchdog").
+  void armUiWatchdog();
 }
 
 void bootstrap().catch((error: unknown) => {

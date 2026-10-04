@@ -147,6 +147,16 @@ Arbitrating fixed the dialog and left the vote: a quit meeting a *committed* clo
 
 **Why the refusals.** Under `tauri dev` the relaunched binary outlives the CLI and the Vite server it loads from. `tauri::process::restart` just calls `exit(0)` when `current_binary` fails — on macOS, for a path through a symlink (`tauri-utils-2.9.3/src/platform/starting_binary.rs`) — so the check turns a silent quit into an answer.
 
+## UI watchdog
+
+**The hang.** 2026-10-03, a dogfood build: WebContent at 100% CPU with the sidecar and every PTY idle. `sample` showed one `DOMTimer` firing into a `performMicrotaskCheckpoint` that never returned: the Tool reaper re-asking a Tool that declined to stop (fixed in #992). Nothing could name the JavaScript: the frames are unsymbolicated JIT, SIP blocks a debugger on the Apple-signed XPC service, and release webviews are not inspectable. `kill` (SIGTERM) left the process running; `kill -9` brought the window back on its live shells, with no work lost.
+
+**Why sample, then kill.** The sample is the only evidence a release hang leaves, and only while the process lives. `_webProcessIdentifier` is private WKWebView API (present on macOS 27, checked with `respondsToSelector:` before use); no public API names the process.
+
+**Why a listener, not a heartbeat.** A page-side timer is throttled when a window is hidden, and a host-side `evaluateJavaScript` probe is not. The probe's clock starts on the host main thread, because a native modal there delays delivery, not the page.
+
+**Why 5 s.** Chosen 2026-10-03 over 30 s: the legitimate long stalls — the restore, first render, a reload — happen before the page arms, and a restart costs only state that lives in the webview alone.
+
 ## Objective-C exceptions
 
 **The crash.** Six aborts of installed 1.1.0 builds, 2026-09-21 to 2026-09-28 on macOS 27.0 (26A428), all `EXC_CRASH (SIGABRT)` on the main thread with one stack shape. The binary is stripped, so the frame was matched by disassembly: tao's `sendEvent:` override (the `NSKeyUp` + Command test), whose LSDA maps the landing pad taken to its `objc_msgSendSuper(sendEvent:)` call, the pad calling `panic_cannot_unwind`. For each crash still in log retention (three), the unified log shows `[com.apple.AppKit:CampoLightweightUI] Mouse entered.` then `*** Assertion failure in NSCampoLightweightUIController.m:1429` about 1 ms before the abort: an AppKit race in the Siri affordance for selected text, raised beneath `[super sendEvent:]`. An abort in the landing pad, rather than an uncaught-exception report, means the unwinder's search phase had found a handler above the frame, so AppKit would have caught it.
