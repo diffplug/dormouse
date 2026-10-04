@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { DEFAULT_PAIRING_TTL_MS } from 'remote-lib-common';
+import { DEFAULT_PAIRING_TTL_MS, computerName } from 'remote-lib-common';
 import { ModalReviewBlock, TextInput, modalActionButton } from './design';
 import { ExternalTextLink } from './ExternalTextLink';
 import { OneTimeConnection } from './OneTimeConnection';
@@ -832,7 +832,7 @@ function EnrolledView({
   enrollAgainError: string | null;
   onEnrollAgain: () => void;
 }) {
-  const { relayOrigin, accountOrigin, hostedEnrollment, connection, pairedClients } = status;
+  const { relayOrigin, accountOrigin, hostedEnrollment, connection, pairedClients, burrowId } = status;
   const { busy: ownBusy, error: ownError, run } = useBusyAction();
   const busy = ownBusy || enrollingAgain;
   const error = ownError ?? enrollAgainError;
@@ -870,6 +870,7 @@ function EnrolledView({
           <ExternalTextLink href={accountPageUrl}>
             Manage computers at {hostOf(accountPageUrl)}
           </ExternalTextLink>
+          {burrowId ? `, where this one is ${computerName(burrowId)}` : null}
         </div>
       ) : null}
       {/* A second code redeemed onto an enrolled machine leaves a Burrow the

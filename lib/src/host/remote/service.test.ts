@@ -2680,7 +2680,7 @@ describe('Hosted enrollment', () => {
 
   /** The sentence a redemption this machine could not keep ends with. */
   const stranded = (burrowId: string) =>
-    `Your account holds Burrow ${burrowId}, which this computer could not keep; remove it at https://hosted.dormouse.sh/account.`;
+    `Your account holds Computer ${burrowId.slice(0, 8)}, which this computer could not keep; remove it at https://hosted.dormouse.sh/account.`;
 
   async function hostedEnrollment(): Promise<unknown> {
     return ((await command('status')).result as BurrowConsoleStatus).hostedEnrollment;
@@ -3098,7 +3098,7 @@ describe('Hosted enrollment', () => {
     hosted({ enrollment: ENROLLMENT });
     await service.start();
     expect((await command('beginHostedEnrollment', { label: 'x' })).error).toContain(
-      `already enrolled as Burrow ${BURROW_ID}`,
+      `already enrolled as Computer ${BURROW_ID.slice(0, 8)}`,
     );
     expect(requests).toEqual([]);
   });

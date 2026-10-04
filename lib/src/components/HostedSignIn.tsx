@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { computerName } from 'remote-lib-common';
 import { TextInput, modalActionButton } from './design';
 import { ExternalTextLink } from './ExternalTextLink';
 import { FIELD_HINT, FIELD_LABEL, hostOf, useBusyAction, useMinutesLeft } from './remote-control-shared';
@@ -85,7 +86,7 @@ export function accountPage(accountOrigin: string | null): string | null {
 /** What a lost answer asks of the person: the Burrow it enrolled, named where the service knows it. */
 export function answerLostRemoval(burrowId: string | undefined): string {
   return burrowId
-    ? `Remove Burrow ${burrowId} from your account, then sign in again.`
+    ? `Remove ${computerName(burrowId)} from your account, then sign in again.`
     : 'Remove the computer it added from your account, then sign in again.';
 }
 

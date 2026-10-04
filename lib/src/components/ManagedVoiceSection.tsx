@@ -1,4 +1,5 @@
 import { useState, useSyncExternalStore } from 'react';
+import { computerName } from 'remote-lib-common';
 import { INLINE_ACTION_CLASS, SELECT_CLASS, modalActionButton } from './design';
 import { ExternalTextLink } from './ExternalTextLink';
 import { HostedEnrollView, HostedPlansLink, accountHost, accountPage } from './HostedSignIn';
@@ -203,7 +204,7 @@ function SignedIn({ status, voice, port, signingInAgain, onSignInAgain }: {
       {page && !removed ? (
         <p className={HINT}>
           Signing out is local. <ExternalTextLink href={page}>Remove this computer at {accountHost(status.accountOrigin)}</ExternalTextLink>{' '}
-          to revoke it there.
+          to revoke it there{status.burrowId ? `, where it is ${computerName(status.burrowId)}` : ''}.
         </p>
       ) : null}
     </div>

@@ -4,6 +4,7 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { computerName } from 'remote-lib-common';
 import { getPlatform, setPlatform } from '../lib/platform';
 import { FakePtyAdapter } from '../lib/platform/fake-adapter';
 import { MANAGED_VOICES } from '../lib/platform/managed-voice-types';
@@ -132,6 +133,7 @@ describe('ManagedVoiceSection', () => {
   it('signs out after confirming, which is the Burrow’s local Disconnect', async () => {
     const { command } = await render({ status: SIGNED_IN });
     expect(text()).toContain('Remove this computer at hosted.dormouse.sh');
+    expect(text()).toContain(`where it is ${computerName(SIGNED_IN.burrowId!)}.`);
     await act(async () => button('Sign out')!.click());
     expect(text()).toContain('Remote control signs out too');
     expect(command).not.toHaveBeenCalledWith('clearEnrollment');
