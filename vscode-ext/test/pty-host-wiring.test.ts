@@ -14,8 +14,6 @@ const managerSource = read('../src/pty-manager.ts');
 
 const { create } = createRequire(import.meta.url)('../../lib/pty-core.cjs');
 
-const handledTypes = () => [...hostSource.matchAll(/case '([\w:]+)':/g)].map((m) => m[1]);
-
 describe('pty-host wiring', () => {
   it('reaches pty-core only through functions it exports', () => {
     const mgr = create(() => {}, { spawn() { throw new Error('unused'); } });
@@ -27,7 +25,8 @@ describe('pty-host wiring', () => {
   it('handles every message type pty-manager sends, and no other', () => {
     const sent = [...new Set([...managerSource.matchAll(/\btype: '([\w:]+)'/g)].map((m) => m[1]))];
     expect(sent.length).toBeGreaterThan(0);
-    expect(new Set(handledTypes())).toEqual(new Set(sent));
+    const handled = [...hostSource.matchAll(/case '([\w:]+)':/g)].map((m) => m[1]);
+    expect(new Set(handled)).toEqual(new Set(sent));
   });
 
   it('hands the graceful kill the ids the extension host names', () => {

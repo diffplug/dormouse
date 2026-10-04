@@ -147,7 +147,7 @@ export async function captureAgentRecoveryCommands(
     // Exited PTYs are kept in the buffer map until `kill()`, and one can neither
     // receive a `^C` nor ever yield a hint — including them would scan them on
     // every tick and permanently defeat the capture's early exit.
-    liveIds: () => [...ptyManager.getBufferedPtys()].filter(([, e]) => e.alive).map(([id]) => id),
+    liveIds: ptyManager.liveIds,
     resize: (id, cols, rows) => ptyManager.resize(id, cols, rows),
     interrupt: (ids) => ptyManager.interrupt(ids),
     receivedChars: (id) => ptyManager.getScrollbackReceived(id),

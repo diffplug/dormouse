@@ -114,6 +114,11 @@ export function getBufferedPtys(): Map<string, { alive: boolean; exitCode?: numb
   return result;
 }
 
+/** Every PTY this extension host still has alive; an exited one stays buffered until `kill()`. */
+export function liveIds(): string[] {
+  return [...ptyBuffers].filter(([, entry]) => entry.alive).map(([id]) => id);
+}
+
 /**
  * The current lifetime record for one PTY, without copying every buffer entry.
  * Natural exits remain recorded until the pane is disposed or a new generation
@@ -518,9 +523,8 @@ export function interrupt(ids: string[], timeoutMs = 400): Promise<void> {
  * named here: this pty-host serves one window, and every live PTY in it is ours.
  */
 export function gracefulKillAll(timeoutMs = 2000): Promise<void> {
-  const ids = [...ptyBuffers].filter(([, entry]) => entry.alive).map(([id]) => id);
   // Extra margin beyond the pty-host's own timeout.
-  return awaitChildAck({ type: 'gracefulKill', ids, timeout: timeoutMs }, 'gracefulKillDone', timeoutMs + 500);
+  return awaitChildAck({ type: 'gracefulKill', ids: liveIds(), timeout: timeoutMs }, 'gracefulKillDone', timeoutMs + 500);
 }
 
 export function killAll(): void {
