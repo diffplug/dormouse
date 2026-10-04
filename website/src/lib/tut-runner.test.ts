@@ -491,7 +491,7 @@ describe("TutRunner snapshots", () => {
 
       expect(lastFrame()).toContain("GAME OVER");
       expect(lastFrame()).toContain("Read about Dormouse Pocket  [p]");
-      expect(lastFrame()).not.toContain("Dormouse Hosted updates");
+      expect(lastFrame()).not.toContain("Read about Dormouse Hosted");
 
       sendKeys("p");
       expect(onOpenPocket).toHaveBeenCalledTimes(1);
@@ -517,7 +517,7 @@ describe("TutRunner snapshots", () => {
       vi.advanceTimersByTime(3000);
 
       expect(lastFrame()).toContain("GAME OVER");
-      expect(lastFrame()).toContain("Dormouse Hosted updates [n]");
+      expect(lastFrame()).toContain("Read about Dormouse Hosted  [n]");
       expect(lastFrame()).not.toContain("Read about Dormouse Pocket");
 
       sendKeys("n");
