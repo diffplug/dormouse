@@ -2,7 +2,7 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { contextTeeth, TerminalContextView, type TerminalContextViewProps } from './TerminalContextView';
+import { contextTeeth, teethCount, TerminalContextView, type TerminalContextViewProps } from './TerminalContextView';
 import { TERMINAL_CONTEXT_TEETH_PX } from '../design';
 import { TerminalPaneHeader } from './TerminalPaneHeader';
 import { TerminalPanel } from './TerminalPanel';
@@ -439,33 +439,32 @@ it('offers Keep open only for a preview slot, as a focusable button that keeps f
 });
 
 it('cuts 90° teeth corner to corner along the edge facing the source', () => {
-  const { outline, clip } = contextTeeth('left', 300, 200);
-  const points = outline.slice(1).split(' L').map(point => point.split(',').map(Number));
-  expect(points[0]).toEqual([TERMINAL_CONTEXT_TEETH_PX, 0]);
-  expect(points.at(-1)).toEqual([TERMINAL_CONTEXT_TEETH_PX, 200]);
-  // Tips on the outer edge, each half a tooth from its valleys: a right angle at every point.
-  for (let k = 1; k < points.length; k += 2) {
-    expect(points[k][0]).toBe(0);
-    expect(points[k + 1][1] - points[k][1]).toBe(TERMINAL_CONTEXT_TEETH_PX);
-  }
-  // The clip reaches past the other three sides for the halo, never past the teeth.
-  const xs = clip.slice('polygon('.length, -1).split(', ').map(point => parseFloat(point));
-  expect([Math.min(...xs), Math.max(...xs)]).toEqual([0, 316]);
-  expect(contextTeeth('bottom', 300, 200).outline.startsWith('M0,190 L')).toBe(true);
+  expect(teethCount(200)).toBe(200 / (2 * TERMINAL_CONTEXT_TEETH_PX));
+  const { clip, path, viewBox } = contextTeeth('left', 4);
+  // In a strip one tooth deep and one unit per tooth: valleys at the depth, tips at the edge, half a tooth apart.
+  expect(viewBox).toBe(`0 0 ${TERMINAL_CONTEXT_TEETH_PX} 4`);
+  const D = TERMINAL_CONTEXT_TEETH_PX;
+  expect(path).toBe(`M${D},0 L0,0.5 L${D},1 L0,1.5 L${D},2 L0,2.5 L${D},3 L0,3.5 L${D},4`);
+  // The clip keeps the halo past the other three sides, never past the tips.
+  expect(clip).toContain('calc(100% + 16px) calc(0% - 16px)');
+  expect(clip).toContain('0px 87.5%');
+  expect(clip).not.toMatch(/(^|[(,]\s*)-\d/);
+  expect(contextTeeth('bottom', 1).path).toBe(`M0,0 L0.5,${D} L1,0`);
+  expect(contextTeeth('bottom', 1).clip).toContain(`50% calc(100% - 0px)`);
 });
 
-it('faces its teeth toward the source and carries each row into them', () => {
+it('faces its teeth toward the source and carries the terminal ground into them', () => {
   props.placement = { side: 'right', available: ['right'], onChange: vi.fn() };
   render();
   const context = container.querySelector<HTMLElement>('[data-terminal-context]')!;
   expect(context.dataset.contextTeeth).toBe('left');
-  const status = container.querySelector<HTMLElement>('[aria-label="Helper terminal status"]')!;
-  expect(status.style.borderLeft).toBe(`${TERMINAL_CONTEXT_TEETH_PX}px solid transparent`);
-  expect(status.style.borderRight).toBe('0px solid transparent');
+  const ground = container.querySelector<HTMLElement>('[aria-label="Helper terminal status"]')!.parentElement!;
+  expect(ground.style.borderLeft).toBe(`${TERMINAL_CONTEXT_TEETH_PX}px solid transparent`);
+  expect(ground.style.borderRight).toBe('');
   props.placement = undefined;
   render();
   expect(context.dataset.contextTeeth).toBeUndefined();
-  expect(context.querySelector('svg path.fill-none')).toBeNull();
+  expect(ground.style.borderLeft).toBe('');
 });
 
 it('always shows context details alongside the helper', () => {

@@ -58,7 +58,8 @@ body {
 }
 
 .lath-host .lath-leaf[data-receded]::after {
-  opacity: 0.6;
+  /* The strong modal backdrop's strength (`modalOverlay` in design.tsx). */
+  opacity: 0.55;
 }
 
 @media (prefers-reduced-motion: reduce) {

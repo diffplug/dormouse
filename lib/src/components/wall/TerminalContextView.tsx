@@ -11,6 +11,7 @@ import { displayModeFor, type RenderMode } from './agent-browser-screen';
 import type { HelperStatus } from '../../lib/helper-terminal';
 import { WindowFocusedContext } from './wall-context';
 import { motionIsInstant } from '../../lib/ui-geometry';
+import { oppositeEdge } from '../../lib/lath/model';
 import type { ContextPlacement, ContextSide } from './terminal-context-placement';
 import { messageOf } from '../../lib/errors';
 import { anchoredTarget, isComposingKey } from '../../lib/dom';
@@ -283,11 +284,12 @@ function PortLaunchActions({ providers, canIframe, onPort }: {
   const labels = actions.map(action => action.text).join('|');
   // A pending action shows "opening…", so each action reserves at least that.
   useRowFit(root, measures, (width, gap, [rest, opening, ...faces]) => {
-    setFloor(hiddenPending ? opening : rest);
+    const trigger = hiddenPending ? opening : rest;
+    setFloor(trigger);
     const widths = faces.map(face => Math.max(face, opening));
     const total = widths.reduce((sum, value) => sum + value, 0) + Math.max(0, widths.length - 1) * gap;
     if (total <= width) { setVisible(widths.length); return; }
-    let used = hiddenPending ? opening : rest;
+    let used = trigger;
     let count = 0;
     for (const value of widths) {
       if (used + gap + value > width) break;
@@ -349,52 +351,61 @@ function PlacementIcon({ side }: { side: ContextSide }) {
  *  that JS owns: the exit length the removal timer must match, and the corner radius. */
 const SURFACE_STYLE = { '--context-exit-duration': `${TERMINAL_CONTEXT_EXIT_MS}ms`, '--context-radius': TERMINAL_SELECTION_BORDER_RADIUS } as CSSProperties;
 
-const OPPOSITE: Record<ContextSide, ContextSide> = { left: 'right', right: 'left', top: 'bottom', bottom: 'top' };
 const SIDE_NAME: Record<ContextSide, 'Left' | 'Right' | 'Top' | 'Bottom'> = { left: 'Left', right: 'Right', top: 'Top', bottom: 'Bottom' };
-const CORNERS: Record<ContextSide, string[]> = {
-  left: ['TopLeft', 'BottomLeft'], right: ['TopRight', 'BottomRight'], top: ['TopLeft', 'TopRight'], bottom: ['BottomLeft', 'BottomRight'],
-};
 /** Past `ELEVATED_PANE_SHADOW`'s reach, so the teeth's clip keeps the halo on the other three sides. */
 const HALO_PX = 16;
+const DEPTH = TERMINAL_CONTEXT_TEETH_PX;
+/** The teeth's outline strip: `DEPTH` thick along `edge`. */
+const stripStyle = (edge: ContextSide): CSSProperties => edge === 'left' || edge === 'right'
+  ? { [edge]: 0, top: 0, width: DEPTH, height: '100%' } : { [edge]: 0, left: 0, width: '100%', height: DEPTH };
 
-/** 90° teeth cut corner to corner along `edge` of a `width`×`height` panel, tips on the
- *  panel's outer edge and valleys `TERMINAL_CONTEXT_TEETH_PX` inside it. `clip` keeps the
- *  halo everywhere else; `outline` strokes the teeth, which the clip would cut in half. */
-export function contextTeeth(edge: ContextSide, width: number, height: number): { clip: string; outline: string } {
-  const depth = TERMINAL_CONTEXT_TEETH_PX;
+/** How many 90° teeth fit along an edge `length` long; the geometry below depends on nothing else. */
+export const teethCount = (length: number) => Math.max(1, Math.round(length / (2 * DEPTH)));
+
+/** `count` 90° teeth cut corner to corner along `edge`, tips on the panel's outer edge and
+ *  valleys `TERMINAL_CONTEXT_TEETH_PX` inside it, relative to the box so a resize that keeps
+ *  the count needs no recut. `clip` keeps the halo on the other three sides; `path` strokes
+ *  the teeth, which the clip would cut in half, in a `DEPTH`-thick strip `viewBox` stretched
+ *  along the edge. */
+export function contextTeeth(edge: ContextSide, count: number): { clip: string; path: string; viewBox: string } {
   const vertical = edge === 'left' || edge === 'right';
-  const along = vertical ? height : width;
-  const across = vertical ? width : height;
-  const count = Math.max(1, Math.round(along / (2 * depth)));
-  const step = along / count;
-  // Drawn with the teeth on the left (x across from the tips, y along the edge), then turned to `edge`.
-  const teeth: [number, number][] = [[depth, 0]];
-  for (let k = 0; k < count; k++) teeth.push([0, (k + 0.5) * step], [depth, (k + 1) * step]);
-  const turn = ([x, y]: [number, number]): [number, number] =>
-    edge === 'left' ? [x, y] : edge === 'right' ? [width - x, y] : edge === 'top' ? [y, x] : [y, height - x];
-  const px = (points: [number, number][]) => points.map(turn).map(([x, y]) => `${+x.toFixed(2)}px ${+y.toFixed(2)}px`);
-  const clip: [number, number][] = [[depth, -HALO_PX], [across + HALO_PX, -HALO_PX], [across + HALO_PX, along + HALO_PX], [depth, along + HALO_PX], ...teeth.slice().reverse()];
-  return { clip: `polygon(${px(clip).join(', ')})`, outline: `M${teeth.map(turn).map(([x, y]) => `${+x.toFixed(2)},${+y.toFixed(2)}`).join(' L')}` };
+  const near = edge === 'left' || edge === 'top';
+  // Across: px in from the tips, or 'far' past the opposite side. Along: a fraction of the edge plus px.
+  const across = (px: number | 'far') => px === 'far' ? (near ? `calc(100% + ${HALO_PX}px)` : `-${HALO_PX}px`) : near ? `${px}px` : `calc(100% - ${px}px)`;
+  const along = (fraction: number, px = 0) => {
+    const percent = `${+(fraction * 100).toFixed(4)}%`;
+    return px ? `calc(${percent} ${px < 0 ? '-' : '+'} ${Math.abs(px)}px)` : percent;
+  };
+  const point = (a: string, b: string) => vertical ? `${a} ${b}` : `${b} ${a}`;
+  const teeth: [number, number][] = [[DEPTH, 0]];
+  for (let k = 0; k < count; k++) teeth.push([0, k + 0.5], [DEPTH, k + 1]);
+  const clip = [
+    point(across(DEPTH), along(0, -HALO_PX)), point(across('far'), along(0, -HALO_PX)),
+    point(across('far'), along(1, HALO_PX)), point(across(DEPTH), along(1, HALO_PX)),
+    ...teeth.slice().reverse().map(([x, y]) => point(across(x), along(y / count))),
+  ];
+  // In the strip, x runs across from the tips and y along in teeth.
+  const strip = teeth.map(([x, y]) => near ? [x, y] : [DEPTH - x, y]).map(([x, y]) => vertical ? `${x},${y}` : `${y},${x}`);
+  return { clip: `polygon(${clip.join(', ')})`, path: `M${strip.join(' L')}`, viewBox: vertical ? `0 0 ${DEPTH} ${count}` : `0 0 ${count} ${DEPTH}` };
 }
 
-/** Recuts the teeth whenever the panel resizes, writing the clip and outline directly
- *  so LathHost's per-frame placement never re-renders the context. */
-function useTeeth(panel: RefObject<HTMLElement | null>, outline: RefObject<SVGPathElement | null>, edge: ContextSide | undefined) {
+/** Recounts the teeth as the panel resizes; LathHost resizes it every animation frame,
+ *  but the count, and so the geometry, changes only every tooth. */
+function useTeethCount(panel: RefObject<HTMLElement | null>, edge: ContextSide | undefined) {
+  const [count, setCount] = useState(0);
   useLayoutEffect(() => {
     const element = panel.current;
     if (!element || !edge) return;
-    const cut = () => {
-      const { offsetWidth: width, offsetHeight: height } = element;
-      if (!width || !height) return;
-      const teeth = contextTeeth(edge, width, height);
-      element.style.clipPath = teeth.clip;
-      outline.current?.setAttribute('d', teeth.outline);
+    const recount = () => {
+      const length = edge === 'left' || edge === 'right' ? element.offsetHeight : element.offsetWidth;
+      if (length) setCount(teethCount(length));
     };
-    cut();
-    const observer = new ResizeObserver(cut);
+    recount();
+    const observer = new ResizeObserver(recount);
     observer.observe(element);
-    return () => { observer.disconnect(); element.style.clipPath = ''; };
-  }, [panel, outline, edge]);
+    return () => observer.disconnect();
+  }, [panel, edge]);
+  return count;
 }
 
 /** Freeze the reveal as it stands so an interrupted entrance contracts from what
@@ -413,7 +424,6 @@ export function TerminalContextView(p: TerminalContextViewProps) {
   const surface = useRef<HTMLElement>(null);
   const panel = useRef<HTMLDivElement>(null);
   const content = useRef<HTMLDivElement>(null);
-  const outline = useRef<SVGPathElement>(null);
   // Offsets of the opening pointer inside the surface; the keyframes clamp them.
   useLayoutEffect(() => {
     const element = surface.current;
@@ -463,17 +473,10 @@ export function TerminalContextView(p: TerminalContextViewProps) {
   const statusLabel = isTool ? (p.status === 'running' ? `Running ${p.command.replace(/\s+/g, ' ')}…` : 'At prompt') : status.label(p.command);
   const placement = p.placement;
   // The edge facing the source is cut into teeth that reach over it (DESIGN.md → "Terminal Context Teeth").
-  const teeth = placement && OPPOSITE[placement.side];
-  useTeeth(panel, outline, teeth);
-  const reach = (side: ContextSide) => (side === teeth ? TERMINAL_CONTEXT_TEETH_PX : 0);
-  /** A row with its own background carries it into the teeth beside it. */
-  const fill = (...sides: ContextSide[]) => Object.fromEntries(sides.map(side => [`border${SIDE_NAME[side]}`, `${reach(side)}px solid transparent`])) as CSSProperties;
-  const diagnosticInset: CSSProperties = { marginLeft: 12 + reach('left'), marginRight: 12 + reach('right') };
-  const panelStyle: CSSProperties = { boxShadow: ELEVATED_PANE_SHADOW };
-  if (teeth) {
-    Object.assign(panelStyle, { [`border${SIDE_NAME[teeth]}Width`]: 0 });
-    for (const corner of CORNERS[teeth]) Object.assign(panelStyle, { [`border${corner}Radius`]: 0 });
-  }
+  const teeth = placement && oppositeEdge(placement.side);
+  const count = useTeethCount(panel, teeth);
+  const shape = teeth && count ? contextTeeth(teeth, count) : undefined;
+  const reach = (side: ContextSide) => (side === teeth ? DEPTH : 0);
   return <section ref={surface} aria-label="Terminal context" data-terminal-context tabIndex={-1} inert={p.closing} aria-hidden={p.closing || undefined} style={SURFACE_STYLE} data-context-side={placement?.side} data-context-teeth={teeth}
     className={`${motionClass} ${p.closing ? 'pointer-events-none' : ''} absolute inset-0 font-mono text-sm text-foreground outline-none`}
     onContextMenu={event => event.preventDefault()}
@@ -486,7 +489,8 @@ export function TerminalContextView(p: TerminalContextViewProps) {
       }
       if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); if (detail) setDetail(null); else close(); }
     }}>
-    <div ref={panel} className={`${TERMINAL_CONTEXT_SURFACE_CLASS} absolute inset-0 flex flex-col overflow-hidden`} style={panelStyle}>
+    <div ref={panel} className={`${TERMINAL_CONTEXT_SURFACE_CLASS} absolute inset-0 flex flex-col overflow-hidden`}
+      style={{ boxShadow: ELEVATED_PANE_SHADOW, clipPath: shape?.clip, ...teeth && { [`border${SIDE_NAME[teeth]}Width`]: 0 } }}>
     <div ref={content} className="terminal-context-content flex min-h-0 flex-1 flex-col">
       <div className="shrink-0 max-h-[45%] overflow-auto pb-1" style={{ paddingLeft: 8 + reach('left'), paddingRight: 4 + reach('right'), paddingTop: reach('top') }}>
         <HeaderRow workspaceMove={p.workspaceMove} surfaceRef={p.surfaceRef} onExplain={() => setDetail('title')} onCopyRef={() => attempt(p.onCopyRef)} actions={<>
@@ -520,10 +524,12 @@ export function TerminalContextView(p: TerminalContextViewProps) {
         </div></div>
         {p.notification && <div className="mb-1 ml-6 mt-1 border-l-2 border-border py-1 pl-3"><div>{p.notification.title}</div><div className="whitespace-pre-wrap text-muted">{p.notification.body}</div></div>}
       </div>
-      <div className="@container flex min-h-0 flex-1 flex-col">
-        {/* In the terminal's own background between hairlines: the helper's label, not a second header. */}
-        <div aria-label={isTool ? 'Tool terminal status' : 'Helper terminal status'} style={fill('left', 'right')}
-          className="flex h-7 shrink-0 items-center gap-3 whitespace-nowrap bg-terminal-bg px-3 shadow-[inset_0_1px_0_var(--color-border),inset_0_-1px_0_var(--color-border)]">
+      {/* The terminal ground, carried into the teeth beside and below it. */}
+      <div className="@container flex min-h-0 flex-1 flex-col bg-terminal-bg"
+        style={teeth && teeth !== 'top' ? { [`border${SIDE_NAME[teeth]}`]: `${DEPTH}px solid transparent` } : undefined}>
+        {/* Between hairlines: the helper's label, not a second header. */}
+        <div aria-label={isTool ? 'Tool terminal status' : 'Helper terminal status'}
+          className="flex h-7 shrink-0 items-center gap-3 whitespace-nowrap px-3 shadow-[inset_0_1px_0_var(--color-border),inset_0_-1px_0_var(--color-border)]">
           {/* Named at every width, so a Tool's own terminal never passes for a helper (docs/specs/terminal-context.md). */}
           <span className="flex shrink-0 items-center gap-2 font-semibold"><TerminalIcon size={15} /><span className="@[48rem]:hidden">{isTool ? 'Tool' : 'Helper'}</span><span className="hidden @[48rem]:inline">{isTool ? 'Tool terminal' : 'Helper terminal'}</span></span>
           <div className="flex min-w-0 items-center gap-2 text-muted">{status.icon}<span className="truncate" title={statusLabel}>{statusLabel}</span></div>
@@ -534,9 +540,9 @@ export function TerminalContextView(p: TerminalContextViewProps) {
             {!isTool && <ContextAction label="Move this terminal into a new pane" busy={busy} onClick={() => void submit(p.onPromote)}><ArrowLineUpIcon size={15} />Promote</ContextAction>}
           </div>
         </div>
-        {p.mismatch && <ContextDiagnostic style={diagnosticInset} className="my-2 flex max-h-[40%] min-h-0 shrink items-start gap-2 overflow-auto border-l-4 border-error bg-error/10 px-3 py-2"><WarningIcon size={18} weight="fill" className="shrink-0 text-error" /><div className="min-w-0 break-words"><div className="font-semibold">Helper directory differs from parent</div><div className="mt-1 grid grid-cols-[4rem_minmax(0,1fr)] gap-x-2"><span className="text-muted">Helper</span><strong>{p.helperCwd}</strong><span className="text-muted">Parent</span><span>{p.cwd}</span></div></div></ContextDiagnostic>}
-        {(p.warning || (!detail && error)) && <ContextDiagnostic style={diagnosticInset} className="my-2 max-h-[40%] min-h-0 shrink overflow-auto break-words border-l-4 border-error bg-error/10 px-3 py-2">{p.warning || error}</ContextDiagnostic>}
-        <div className="min-h-16 flex-1 bg-terminal-bg text-terminal-fg" style={fill('left', 'right', 'bottom')}>{p.children}</div>
+        {p.mismatch && <ContextDiagnostic className="mx-3 my-2 flex max-h-[40%] min-h-0 shrink items-start gap-2 overflow-auto border-l-4 border-error bg-error/10 px-3 py-2"><WarningIcon size={18} weight="fill" className="shrink-0 text-error" /><div className="min-w-0 break-words"><div className="font-semibold">Helper directory differs from parent</div><div className="mt-1 grid grid-cols-[4rem_minmax(0,1fr)] gap-x-2"><span className="text-muted">Helper</span><strong>{p.helperCwd}</strong><span className="text-muted">Parent</span><span>{p.cwd}</span></div></div></ContextDiagnostic>}
+        {(p.warning || (!detail && error)) && <ContextDiagnostic className="mx-3 my-2 max-h-[40%] min-h-0 shrink overflow-auto break-words border-l-4 border-error bg-error/10 px-3 py-2">{p.warning || error}</ContextDiagnostic>}
+        <div className="min-h-16 flex-1 bg-terminal-bg text-terminal-fg">{p.children}</div>
       </div>
     {detail && <div className="absolute inset-0 z-10 bg-app-bg/35" onClick={() => setDetail(null)}><div ref={detailRoot} role="dialog" aria-modal="true" aria-label={DETAILS[detail].label} className={`${POPUP_SURFACE_CLASS} absolute inset-x-3 top-3 max-h-[calc(100%-1.5rem)] overflow-auto p-4`} onClick={e => e.stopPropagation()}>
       <div className="mb-3 flex items-center justify-between font-semibold"><span>{DETAILS[detail].heading}</span><ContextAction label="Close details" onClick={() => setDetail(null)} muted><XIcon size={14} /></ContextAction></div>
@@ -545,6 +551,7 @@ export function TerminalContextView(p: TerminalContextViewProps) {
     </div></div>}
     </div>
     </div>
-    {teeth && <svg aria-hidden="true" className="pointer-events-none absolute inset-0 size-full overflow-visible"><path ref={outline} className="fill-none stroke-foreground/20" /></svg>}
+    {teeth && shape && <svg aria-hidden="true" viewBox={shape.viewBox} preserveAspectRatio="none"
+      className="pointer-events-none absolute overflow-visible" style={stripStyle(teeth)}><path d={shape.path} vectorEffect="non-scaling-stroke" className="fill-none stroke-foreground/20" /></svg>}
   </section>;
 }

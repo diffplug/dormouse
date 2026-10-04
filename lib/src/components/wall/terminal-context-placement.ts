@@ -6,7 +6,7 @@ export type ContextPlacement = { rect: Rect; side: ContextSide; available: Conte
 const SIDES: ContextSide[] = ['right', 'left', 'bottom', 'top'];
 /** Adjacent helpers overlap the source only by their teeth, which the rect includes. */
 const OVERLAP = TERMINAL_CONTEXT_TEETH_PX;
-/** Above helpers only graze the source title, extending upward over peer headers instead. */
+/** Above helpers extend upward over peer headers rather than further over the source. */
 const ABOVE_EXTENSION = 32;
 // Compact source/directory/status chrome plus a useful terminal viewport.
 const MIN_WIDTH = 280;
