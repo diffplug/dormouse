@@ -18,6 +18,7 @@ const { default: Hosted } = await import("./Hosted");
 const { COHORT_ENDPOINT, MAX_SHOWN_FOUNDERS } = await import("../lib/hosted-cohorts");
 const {
   FOUNDING_COHORT_SIZE,
+  FOUNDING_COHORTS_CLOSED,
   HOSTED_MONTHLY,
   HOSTED_YEARLY,
   LIST_ANNUAL,
@@ -150,9 +151,18 @@ const mountCohort = (body: unknown) =>
 
 describe("the founding card's live half", () => {
   it("fills in the seats left after hydration", async () => {
-    const el = await mountCohort({ seatsLeft: 73 });
+    const el = await mountCohort({ cohort: FOUNDING_COHORTS_CLOSED, seatsLeft: 73 });
     expect(el.textContent).toContain(`73 of ${FOUNDING_COHORT_SIZE} seats left at $${foundingTier().price}`);
   });
+
+  // A cohort closed since the deploy: the seats are the next price's, not this one's.
+  it.each([FOUNDING_COHORTS_CLOSED + 1, undefined, String(FOUNDING_COHORTS_CLOSED)])(
+    "drops seats of cohort %j, not the prerendered price's",
+    async (cohort) => {
+      const el = await mountCohort({ cohort, seatsLeft: 73 });
+      expect(el.textContent).not.toContain("seats left");
+    },
+  );
 
   it("draws opted-in founders, then +N for everyone else", async () => {
     const el = await mountCohort({

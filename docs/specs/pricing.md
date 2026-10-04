@@ -3,13 +3,13 @@
 > - See `docs/specs/glossary.md` for Burrow / Client / Relay and Pane / Session vocabulary.
 > - **Owns:** the plans, the founding ladder, what a plan grants, how a desktop proves membership, the managed-voice boundary, and the content contract of the Hosted page.
 > - **Defers:** page chrome, rail, and link obligations to `docs/specs/website-docs.md` -> "Reference page chrome"; the Hosted Relay's accounts, enrollment, and entitlement, and managed voice's routes, to `docs/specs/hosted.md`; the cloud-hosted trust boundary to `docs/specs/security-remote.md` -> "Cloud-hosted mode"; alarm delivery to `docs/specs/alert.md` -> "Spoken alarms".
-> - **Status:** the Hosted page publishes the plans and the FAQ, and a desktop signs in to Hosted for managed voice (`docs/specs/hosted.md` -> "Managed voice"); everything that takes money — checkout, the subscription as the entitlement, the hosted Relay — is under [Future](#future).
+> - **Status:** the Hosted page publishes the plans and the FAQ, and the account Worker's billing is built and off until Stripe is configured ([Checkout and entitlement](#checkout-and-entitlement)); the account pages, the site's buy links, and turning billing on are under [Future](#future).
 
 ## The Hosted page
 
 **`/hosted` is canonical, titled "Dormouse Hosted"; `/pricing` 301-redirects to it.** The header nav and the rail label do not change: the tool is free and open source, and Hosted is the optional service with a price, so pricing is a section of the Hosted page, never a page of its own.
 
-**Settings is the front door.** Its sign-in, in Notifications' managed voice and Network's Remote control, starts membership on the desktop; the playground tutorial lands on `/hosted#voice`, and the plan cards sit within one screen of that anchor. An account with no plan is linked to `#pricing` from Settings and from the baseboard alarm buttons' offers (`docs/specs/alert.md` -> "Settings dialog"). `#remote-control` and `#voice` keep resolving as section ids.
+**Settings is the front door.** The spoken-alarm row's managed-voice link and the playground tutorial land on `/hosted#voice`, and the plan cards sit within one screen of that anchor. `#remote-control` and `#voice` keep resolving as section ids.
 
 **Content, in order:** the plan cards, directly under the title and anchored `#pricing`; what a member gets, as prose; "Self-hosting stays free"; and a short FAQ — refunds and cancellation, the founding lock, who appears in the founders row, what happens if Hosted shuts down, and that team pricing goes by email to `teams@dormouse.sh`.
 
@@ -37,10 +37,12 @@ Three cards — Free, Hosted, Founding — side by side from `md` up, stacked in
 
 Seats left in the open cohort and the founders row load after hydration from one endpoint; the price beside them is prerendered.
 
-- **Count seats on the server** from the billing provider behind a cache of at most 60 seconds, never on the client and never stored. **Never show a count for a closed cohort.**
+- **Count seats on the server** from the billing provider behind a cache of at most 60 seconds, never on the client and never stored. **Never show a count for a closed cohort**: the endpoint names the cohort its seats belong to, and the page drops the seats unless that is the cohort its price was prerendered at.
 - **Show a founder only if they opted in at checkout**; the box starts unticked and the account can untick it. Every other founder counts toward the `+N` that ends the row, as does everyone past the row's cap.
-- **Must serve avatars from this origin, never the OAuth provider**, so loading the page tells no provider about the reader. The client draws an initial for any avatar that is not a same-origin path, or that fails to load.
+- **Never send an OAuth provider's avatar**, so loading the page tells no provider about the reader: the endpoint sends names only, and the client draws an initial for any avatar that is not a same-origin path, or that fails to load. Reserved: avatars proxied onto this origin ([Future](#future)).
 - **The page prerenders without the endpoint**: the seats line is reserved and the row absent; an unreachable endpoint, a non-2xx, or a malformed field drops only that field, never an error. **A cohort closing raises the price at the next deploy.**
+
+The endpoint and its cache: `docs/specs/hosted.md` -> "Billing".
 
 **Every existing link keeps working unchanged**: the `linkedFrom` obligations, the root README, `vscode-ext/README.md`, the Settings dialog's voice link, and the hosting notice all already point at `/hosted`. `docs/specs/website-docs.md` -> "Reference page chrome" owns the mechanics.
 
@@ -61,15 +63,28 @@ Prices in USD, and the merchant of record adds or includes tax by jurisdiction.
 
 Source of truth: `tiersOnSale`, `foundingTier`, and `pricingJsonLd` in `website/src/lib/hosted-pricing.ts`; `fetchCohort` in `website/src/lib/hosted-cohorts.ts`; `website/src/pages/Hosted.tsx`; the `/pricing` rule in `website/public/_redirects`, pinned by `checkPricingRedirect` in `scripts/public-docs-lint.mjs`. `website/src/pages/Hosted.test.tsx` pins the page contract.
 
+## Checkout and entitlement
+
+Built on the account Worker and off until Stripe is configured; routes, bindings, and the cohort count: `docs/specs/hosted.md` -> "Billing".
+
+- **Stripe Managed Payments runs checkout, subscriptions, and the customer portal as merchant of record, through `@pgstencil/stripe`**, so tax is Stripe's. Dormouse never stores card data. A founding lock is a per-cohort Price; every past cohort's Price keeps granting the plan.
+- **Checkout belongs to a signed-in Hosted account**, so the subscription belongs to an account from its first event. The browser names a plan, never a Price.
+- **No trial**: the first payment is taken at checkout, and the 30-day refund is the trial.
+- **The entitlement is the account's subscription, read on the server on every voice and Relay request.** No licence, no offline verification, and no grace past what the subscription grants; a lapsed member's voices fall back to the system voice and its Burrows to `not-entitled`.
+- **One account covers every machine the member uses.** No device count, no seat count, no activation limit.
+- **A refund or chargeback ends the subscription**, so the next request is refused, and the seat returns to its cohort.
+- **The founders-row opt-in and the four Van Westendorp answers are stored per account**: too expensive to consider, too cheap to trust, expensive but would consider, a bargain, each optional. Their answers inform later list changes.
+
 ## Future
 
 **Scope: hosted-sales** — what remains, in staged order:
 
-1. **The cohort endpoint** the page already calls: the open cohort's seats and the opted-in founders, avatars proxied onto this origin.
-2. **Checkout and entitlement**: purchase, the subscription as the account's entitlement, revocation.
-3. **Managed voice for members**: the subscription replacing the admin-only entitlement (`docs/specs/hosted.md` -> "Entitlement"), one voice per Pane.
-4. **Hosted Relay inclusion**: the subscription as the Relay's entitlement (`docs/specs/hosted.md` -> "Relay"), gated on the independent review `docs/specs/security-remote.md` -> "Cloud-hosted mode" requires.
-5. **Renewal, cancellation, and refund** paths.
+1. **The account pages** ("Checkout and the account pages" below) and the site's buy links into them.
+2. **Desktop sign-in** by device code ("Checkout and the account pages").
+3. **Managed voice for members**: the disclosure, one voice per Pane.
+4. **Turning billing on**: the Stripe products, Prices, portal, and webhook, then the bindings (`docs/specs/hosted.md` -> "Billing"). The subscription admits members to the Hosted Relay (`docs/specs/hosted.md` -> "Relay"), so this is gated on the independent review `docs/specs/security-remote.md` -> "Cloud-hosted mode" requires.
+5. **Founder avatars** proxied onto this origin.
+6. **Renewal, cancellation, and refund** paths.
 
 Team and enterprise tiers are never sold through this page. A free hosted tier is undecided — see [Open questions](#open-questions).
 
@@ -97,24 +112,22 @@ What each plan grants once checkout can sell it; [Published prices](#published-p
 | Founding badge | live for founding |
 
 - **The plan never grants team or enterprise capability** — org accounts, SSO, SCIM, BYOT, audit export.
-- **The hosted Relay is part of the plan, never a second purchase.** Reserved: the **hosted-sales** scope reads the plan from the Hosted account's subscription ("Checkout and entitlement"), so a member never signs up twice.
+- **The hosted Relay is part of the plan, never a second purchase**: the Relay reads the same subscription ([Checkout and entitlement](#checkout-and-entitlement)), so a member never signs up twice.
 - **Nothing shipped free is ever gated**: the terminal, `dor`, browser panes, the notepad, alerts with the system voice, the self-host Relay, and Pocket over a self-hosted Relay stay free, with no login.
 
-### Checkout and entitlement
+### Checkout and the account pages
 
-- **Stripe Managed Payments runs checkout, subscriptions, and the customer portal as merchant of record, through `@pgstencil/stripe`**, so tax is Stripe's. Dormouse never stores card data. A founding lock is a per-cohort Price; cohort counts come from the billing provider's completed subscriptions.
-- **Checkout starts from a Hosted account**: a buy button lands on the account origin, which asks for sign-in first, so the subscription belongs to an account from its first event.
+- **A buy button lands on the account origin**, which asks for sign-in first, then shows the plan and its current price before handing off to Stripe.
 - **Founding checkout offers the founders-row opt-in, unticked**; the account can withdraw it at any time.
-- **The success page asks the four Van Westendorp questions**, optional and unsent until answered: too expensive to consider, too cheap to trust, expensive but would consider, a bargain. Their answers inform later list changes.
-- **The entitlement is the account's subscription, read on the server on every voice and Relay request.** No licence, no offline verification, and no grace past what the subscription grants; a lapsed member's voices fall back to the system voice and its Burrows to `not-entitled`.
-- **Sign-in is the only account surface in the free client** (`docs/specs/hosted.md` -> "Managed voice").
-- **One account covers every machine the member uses.** No device count, no seat count, no activation limit.
-- **A refund or chargeback ends the subscription**, so the next request is refused, and the seat returns to its cohort.
+- **The success page asks the four Van Westendorp questions**, optional and unsent until answered.
+- **A desktop signs in from Settings by device code**, the flow Burrow enrollment already runs (`docs/specs/hosted.md` -> "Burrow enrollment"). The approval mints a desktop credential the host keeps and never hands a webview. Sign-in is the only account surface in the free client.
 
 ### Managed voice
 
-What is built — the endpoint, the disclosure, the clip cache, the daily cap, and the fallback — is `docs/specs/hosted.md` -> "Managed voice" and `docs/specs/alert.md` -> "Managed voice".
-
+- **Dormouse operates the endpoint and holds the vendor key** (ElevenLabs). A request carries the desktop credential, a voice id, and the text; the response is audio.
+- **What leaves the machine is exactly the sanitized spoken label and the voice id** — the `toSpokenText` output in `lib/src/lib/alert-speech.ts`, never terminal content, never a notification body, never a Session id. **Disclose this in the enable flow before the first request**, honoring the promise the Hosted page makes.
+- **Cache clips by voice and text on the client** and regenerate only when the label changes; a cache hit makes no request. **Fair use is a daily request cap per member**; past it, the system voice speaks.
+- **The system voice is the fallback**, for offline, unentitled, endpoint error, or cap: same delivery rules, same cut-off on attend, never silence because the service failed. Delivery identity, queueing, and cut-off stay owned by `docs/specs/alert.md` -> "Spoken alarms".
 - **One voice per Pane.** The member default applies everywhere; a per-Pane override is persisted with the pane's settings and follows the Session through minimize and restore. Doors and headers show nothing new.
 - **Pocket speaks only in the foreground** — a web app cannot voice a background push — so the desktop is the primary voice sink. A native Pocket is out of scope here.
 
@@ -124,9 +137,8 @@ What is built — the endpoint, the disclosure, the clip cache, the daily cap, a
 - **30-day refund on every plan.** A refund revokes.
 - **A failed founding renewal gets 30 days of grace before the lock is lost.**
 - **A subscription is personal and non-transferable.**
-- **No trial**: the 30-day refund is the trial.
 
 ### Open questions
 
 - A free hosted tier, no card. It is the only way a stock binary can try Pocket, since the shipped bundle reaches only `*.dormouse.sh` (`docs/specs/relay.md` -> "Relay origin").
-- Whether members may bring their own ElevenLabs voice id beyond the curated set.
+- The curated voice set and whether members may bring their own ElevenLabs voice id.
