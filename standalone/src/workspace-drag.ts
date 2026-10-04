@@ -165,12 +165,30 @@ export function onDropOnOtherWindow(
   // the caret this is about to clear.
   endGesture();
   if (insideStrip) return;
+  // Probed fresh rather than reusing the throttled answer: up to
+  // HIT_TEST_THROTTLE_MS of pointer travel could otherwise choose the window.
+  moveOutOfWindow(id, probe);
+}
+
+/**
+ * The tab menu's Move to new window: the tear-out a drag released over no
+ * window makes, behind the same consents (`docs/specs/layout.md` → "Workspace
+ * tabs").
+ */
+export function moveWorkspaceToNewWindow(id: WorkspaceId): void {
+  moveOutOfWindow(id, async () => null);
+}
+
+/**
+ * Move a Workspace out of this window — into the window `destination` answers
+ * with, or a new one when it answers none or this one — once the user has
+ * settled its dirty editors and, for an iframe, typed the move's letter.
+ */
+function moveOutOfWindow(id: WorkspaceId, destination: () => Promise<CursorHit | null>): void {
   const isCurrent = cancelPendingConfirmation();
   const grab = grabOffset(id);
   void (async () => {
-    // Probed fresh rather than reusing the throttled answer: up to
-    // HIT_TEST_THROTTLE_MS of pointer travel could otherwise choose the window.
-    const hit = await probe();
+    const hit = await destination();
     if (!isCurrent()) return;
     const handle = getWallHandle(id);
     const dirtyEditors = handle?.dirtyToolIds() ?? [];

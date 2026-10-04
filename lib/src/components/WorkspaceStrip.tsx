@@ -10,9 +10,10 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from 'react';
 import { clsx } from 'clsx';
-import { PlusIcon, XIcon } from '@phosphor-icons/react';
+import { PlusIcon, PushPinIcon, XIcon } from '@phosphor-icons/react';
 import { InlineEditInput } from './wall/InlineEditInput';
 import { WorkspaceKillConfirm } from './WorkspaceKillConfirm';
+import { WorkspaceTabMenu } from './WorkspaceTabMenu';
 import { useTodoPillContent } from './TodoPillBody';
 import { AlertRingInset, useAlertRingBurst } from './alert-ring';
 import { AUTO_NAME_CLASS, chromeButton, DOOR_TAB_CLASS, HEADER_PALETTE_TRANSITION_CLASS, ModalFrame, modalActionButton, OVERLAY_MAX_HEIGHT, TAB_INACTIVE_FADE_STYLE, TERMINAL_TOP_RADIUS_CLASS, TODO_PILL_TRACKING_CLASS } from './design';
@@ -20,13 +21,15 @@ import { createWorkspaceStripDrag, type StripDragHost } from './workspace-strip-
 import { acquireChromeKeyboardLease } from './wall/chrome-keyboard-lease';
 import { getWallHandle } from './wall/wall-handles';
 import { useDialogKeyboardOwner } from './wall/wall-context';
-import { enterWorkspace, requestWorkspaceClose, requestWorkspaceRename } from './wall/workspace-lifecycle';
+import { enterWorkspace, isWorkspaceCloseInFlight, requestWorkspaceClose, requestWorkspaceRename } from './wall/workspace-lifecycle';
+import { isWorkspaceTransferPending } from '../lib/window-session-aggregator';
 import { getActivitySnapshot, subscribeToActivity } from '../lib/terminal-registry';
 import { getWorkspaceSurfacesSnapshot, subscribeToWorkspaceSurfaces } from '../lib/workspace-surfaces';
 import { computeWorkspaceUnion, type WorkspaceUnion } from '../lib/workspace-union';
 import { spotlightTodo } from '../lib/todo-spotlight';
 import {
   getWorkspaceUiSnapshot,
+  openWorkspaceMenu,
   settleConfirmation,
   setWorkspaceMoveError,
   setRenamingWorkspace,
@@ -58,6 +61,7 @@ export function WorkspaceStrip({
   onDragBackInsideStrip,
   onDropOnOtherWindow,
   onDragCancelled,
+  onMoveToNewWindow,
 }: {
   className?: string;
   /** The three cross-Window drag hooks (`StripDragHost`). A composition with no
@@ -66,19 +70,34 @@ export function WorkspaceStrip({
   onDragBackInsideStrip?: StripDragHost['onDragBackInsideStrip'];
   onDropOnOtherWindow?: StripDragHost['onDropOnOtherWindow'];
   onDragCancelled?: StripDragHost['onDragCancelled'];
+  /** The tab menu's Move to new window: the host's tear-out. A host with one
+   *  window supplies none, and the menu offers no such row. */
+  onMoveToNewWindow?: (id: WorkspaceId) => void;
 }) {
   const { workspaces, activeId } = useSyncExternalStore(subscribeToWorkspaces, getWorkspacesSnapshot);
   const membership = useSyncExternalStore(subscribeToWorkspaceSurfaces, getWorkspaceSurfacesSnapshot);
   const activity = useSyncExternalStore(subscribeToActivity, getActivitySnapshot);
-  const { renamingId, confirmation, moveError } = useSyncExternalStore(subscribeToWorkspaceUi, getWorkspaceUiSnapshot);
+  const { renamingId, confirmation, moveError, menu } = useSyncExternalStore(subscribeToWorkspaceUi, getWorkspaceUiSnapshot);
   const [draggingId, setDraggingId] = useState<WorkspaceId | null>(null);
 
   const stripRef = useRef<HTMLDivElement>(null);
   const tabElementsRef = useRef(new Map<WorkspaceId, HTMLElement>());
 
-  // The editor and the confirmation both sit outside every Wall, so a
-  // capture-phase command-mode shortcut would still fire behind them.
-  useDialogKeyboardOwner(renamingId !== null || confirmation !== null || moveError !== null, acquireChromeKeyboardLease);
+  // The editor, the confirmation, and the tab menu all sit outside every Wall,
+  // so a capture-phase command-mode shortcut would still fire behind them.
+  useDialogKeyboardOwner(
+    renamingId !== null || confirmation !== null || moveError !== null || menu !== null,
+    acquireChromeKeyboardLease,
+  );
+
+  // Never over an open rename editor or a pending question, and never for a
+  // Workspace already on its way out (`docs/specs/layout.md` → "Workspace tabs").
+  const openMenu = useCallback((id: WorkspaceId, at: { x: number; y: number }, keyboard: boolean) => {
+    const ui = getWorkspaceUiSnapshot();
+    if (ui.renamingId !== null || ui.confirmation !== null) return;
+    if (isWorkspaceTransferPending(id) || isWorkspaceCloseInFlight()) return;
+    openWorkspaceMenu({ id, at, keyboard });
+  }, []);
 
   const activate = useCallback((id: WorkspaceId) => {
     getWallHandle(id)?.enterCommandMode();
@@ -189,47 +208,71 @@ export function WorkspaceStrip({
     return next;
   };
 
+  const renderTab = (workspace: (typeof workspaces)[number]) => {
+    const isActive = workspace.id === activeId;
+    return (
+      <WorkspaceTab
+        key={workspace.id}
+        id={workspace.id}
+        name={workspace.name}
+        nameIsAuto={workspace.nameIsAuto}
+        pinned={workspace.pinned === true}
+        active={isActive}
+        union={unionFor(workspace.id, isActive)}
+        renaming={renamingId === workspace.id}
+        dragging={draggingId === workspace.id}
+        registerElement={registerElement}
+        onActivate={activate}
+        onEnterNextTodo={enterNextTodo}
+        onPeekNextTodo={peekNextTodo}
+        onStartRename={requestWorkspaceRename}
+        onFinishRename={finishRename}
+        onCancelRename={cancelRename}
+        onRequestClose={requestWorkspaceClose}
+        onOpenMenu={openMenu}
+        onPress={press}
+        wasDragged={drag.dragged}
+      />
+    );
+  };
+  const pinned = workspaces.filter((workspace) => workspace.pinned);
+  const menuWorkspace = menu ? workspaces.find((workspace) => workspace.id === menu.id) : undefined;
+
+  // Unpinned tabs and `+` scroll; the pinned group after them never does, so it
+  // stays in view however many tabs the strip holds. The store keeps the list
+  // partitioned, so DOM order is strip order.
   return (
     <div
       ref={stripRef}
       data-workspace-strip
-      className={clsx('flex min-w-0 items-end gap-1.5 overflow-x-auto', className)}
+      className={clsx('flex min-w-0 items-end gap-1.5', className)}
     >
-      {workspaces.map((workspace) => {
-        const isActive = workspace.id === activeId;
-        return (
-          <WorkspaceTab
-            key={workspace.id}
-            id={workspace.id}
-            name={workspace.name}
-            nameIsAuto={workspace.nameIsAuto}
-            active={isActive}
-            union={unionFor(workspace.id, isActive)}
-            renaming={renamingId === workspace.id}
-            dragging={draggingId === workspace.id}
-            registerElement={registerElement}
-            onActivate={activate}
-            onEnterNextTodo={enterNextTodo}
-            onPeekNextTodo={peekNextTodo}
-            onStartRename={requestWorkspaceRename}
-            onFinishRename={finishRename}
-            onCancelRename={cancelRename}
-            onRequestClose={requestWorkspaceClose}
-            onPress={press}
-            wasDragged={drag.dragged}
-          />
-        );
-      })}
-      <button
-        type="button"
-        data-workspace-new
-        className={chromeButton({ kind: 'icon', class: 'mb-0.5 shrink-0' })}
-        aria-label="New workspace"
-        title="New workspace"
-        onClick={() => { void enterWorkspace(createWorkspace().id); }}
-      >
-        <PlusIcon size={12} weight="bold" aria-hidden="true" />
-      </button>
+      <div className="flex min-w-0 items-end gap-1.5 overflow-x-auto">
+        {workspaces.filter((workspace) => !workspace.pinned).map(renderTab)}
+        <button
+          type="button"
+          data-workspace-new
+          className={chromeButton({ kind: 'icon', class: 'mb-0.5 shrink-0' })}
+          aria-label="New workspace"
+          title="New workspace"
+          onClick={() => { void enterWorkspace(createWorkspace().id); }}
+        >
+          <PlusIcon size={12} weight="bold" aria-hidden="true" />
+        </button>
+      </div>
+      {pinned.length > 0 && (
+        <div data-workspace-pinned-group className="flex shrink-0 items-end gap-1.5">
+          {pinned.map(renderTab)}
+        </div>
+      )}
+      {menu && menuWorkspace && (
+        <WorkspaceTabMenu
+          key={`${menu.id}:${menu.at.x}:${menu.at.y}`}
+          menu={menu}
+          workspace={menuWorkspace}
+          onMoveToNewWindow={onMoveToNewWindow}
+        />
+      )}
       {/* Rename owns its input until it ends, and the confirmation waits behind
           it; a refusal waits behind both (`docs/specs/layout.md` → "Workspace
           lifecycle"). */}
@@ -257,12 +300,16 @@ export function WorkspaceStrip({
   );
 }
 
+/** The keyboard-opened menu's gap below its tab. */
+const MENU_GAP_PX = 4;
+
 /** Memoized: every callback below is stable and takes the Workspace id, so a tab
  *  re-renders only when its own name, state, or union changes. */
 const WorkspaceTab = memo(function WorkspaceTab({
   id,
   name,
   nameIsAuto,
+  pinned,
   active,
   union,
   renaming,
@@ -275,12 +322,15 @@ const WorkspaceTab = memo(function WorkspaceTab({
   onFinishRename,
   onCancelRename,
   onRequestClose,
+  onOpenMenu,
   onPress,
   wasDragged,
 }: {
   id: WorkspaceId;
   name: string;
   nameIsAuto: boolean;
+  /** Pinned right: no `×`, and a pin where it would be. */
+  pinned: boolean;
   active: boolean;
   union: WorkspaceUnion;
   renaming: boolean;
@@ -294,6 +344,9 @@ const WorkspaceTab = memo(function WorkspaceTab({
   onFinishRename: (id: WorkspaceId, value: string) => void;
   onCancelRename: () => void;
   onRequestClose: (id: WorkspaceId) => void;
+  /** Open the tab's context menu at a viewport point; `keyboard` when a key
+   *  opened it, so Escape hands focus back to the tab. */
+  onOpenMenu: (id: WorkspaceId, at: { x: number; y: number }, keyboard: boolean) => void;
   onPress: (id: WorkspaceId, event: ReactPointerEvent<HTMLElement>) => void;
   wasDragged: () => boolean;
 }) {
@@ -306,8 +359,9 @@ const WorkspaceTab = memo(function WorkspaceTab({
     showAlarmInset ? 'ringing' : null,
     union.ringingSince === null ? null : { startedAt: union.ringingSince },
   );
+  const named = pinned ? `${name}, pinned` : name;
   const label = (showAlarmInset || showTodoPill) && union.count > 0
-    ? `${name}, ${union.count} needing attention` : name;
+    ? `${named}, ${union.count} needing attention` : named;
   // The pill's destination depends on the Wall's selection, which renders
   // nothing here, so it is read as the pointer or focus arrives and after each
   // click moves it on.
@@ -339,7 +393,21 @@ const WorkspaceTab = memo(function WorkspaceTab({
       onAuxClick={(event) => {
         if (event.button !== 1) return;
         event.preventDefault();
-        onRequestClose(id);
+        // A pinned tab is never closed alone; the close verb refuses it too.
+        if (!pinned) onRequestClose(id);
+      }}
+      onContextMenu={(event) => {
+        // The rename editor keeps the platform's own text menu.
+        if (renaming) return;
+        event.preventDefault();
+        onOpenMenu(id, { x: event.clientX, y: event.clientY }, false);
+      }}
+      onKeyDown={(event) => {
+        if (renaming || !(event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10'))) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const box = event.currentTarget.getBoundingClientRect();
+        onOpenMenu(id, { x: box.left, y: box.bottom + MENU_GAP_PX }, true);
       }}
     >
       {renaming ? (
@@ -358,10 +426,11 @@ const WorkspaceTab = memo(function WorkspaceTab({
             type="button"
             className={clsx(
               'flex h-full min-w-0 flex-1 items-center overflow-hidden pl-2.5 text-left',
-              showTodoPill || active ? 'pr-1' : 'pr-2.5',
+              showTodoPill || active || pinned ? 'pr-1' : 'pr-2.5',
             )}
             aria-label={label}
             title={label}
+            aria-description="Right-click or press Shift+F10 for workspace actions."
             aria-current={active ? 'true' : undefined}
             onClick={() => {
               if (wasDragged()) return;
@@ -386,7 +455,7 @@ const WorkspaceTab = memo(function WorkspaceTab({
                 'transition-colors hover:bg-current/10 active:bg-current/20',
                 // Current-coloured, as a theme's focus ring can match the active tab.
                 'focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1 focus-visible:outline-current',
-                !active && 'mr-1.5',
+                !active && !pinned && 'mr-1.5',
               )}
               data-flourishing={todoPill.flourishing ? 'true' : 'false'}
               aria-label={`Next TODO in ${name}`}
@@ -404,7 +473,12 @@ const WorkspaceTab = memo(function WorkspaceTab({
           )}
         </>
       )}
-      {active && !renaming && (
+      {pinned && !renaming && (
+        <span data-workspace-tab-pinned className="flex h-full shrink-0 items-center pl-0.5 pr-2 opacity-65" aria-hidden="true">
+          <PushPinIcon size={11} weight="fill" />
+        </span>
+      )}
+      {active && !pinned && !renaming && (
         <button
           type="button"
           data-workspace-tab-close={id}

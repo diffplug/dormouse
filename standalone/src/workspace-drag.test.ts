@@ -24,6 +24,7 @@ import {
   onDragCancelled,
   onDragOutsideWindow,
   onDropOnOtherWindow,
+  moveWorkspaceToNewWindow,
   _resetWorkspaceDragForTesting,
 } from "./workspace-drag";
 import { _setWindowLabelForTesting } from "./window-label";
@@ -171,6 +172,30 @@ describe("hit testing while dragging", () => {
     onDragOutsideWindow({ clientX: 100, clientY: 400 });
     await settle();
     expect(hovers()).toEqual([]);
+  });
+});
+
+describe("the tab menu's Move to new window", () => {
+  it("tears out without asking where the cursor is", async () => {
+    moveWorkspaceToNewWindow("ws-1");
+    await settle();
+    expect(probes()).toBe(0);
+    expect(mocks.tearOutWorkspace).toHaveBeenCalledWith("ws-1", expect.objectContaining({ x: 90, y: 12 }), []);
+    expect(mocks.transferWorkspaceTo).not.toHaveBeenCalled();
+  });
+
+  it("asks the iframe question a drag asks, and answers a pending one no", async () => {
+    const answer = vi.fn();
+    requestConfirmation({ id: "ws-other", char: "q", answer });
+    registerWallHandle(stubWallHandle("ws-1", { iframeSurfaceRefs: () => ["surface:4"] }));
+    moveWorkspaceToNewWindow("ws-1");
+    expect(answer).toHaveBeenCalledExactlyOnceWith(false);
+    await settle();
+    const pending = getWorkspaceUiSnapshot().confirmation;
+    expect(pending).toMatchObject({ id: "ws-1", title: "Move and lose page state?" });
+    expect(mocks.tearOutWorkspace).not.toHaveBeenCalled();
+    settleConfirmation(pending!, true);
+    expect(mocks.tearOutWorkspace).toHaveBeenCalledWith("ws-1", expect.any(Object), []);
   });
 });
 

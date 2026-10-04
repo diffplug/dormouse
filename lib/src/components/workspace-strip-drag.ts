@@ -175,7 +175,9 @@ export function createWorkspaceStripDrag(host: StripDragHost): WorkspaceStripDra
 
   return {
     press(id, event) {
-      if (event.button !== 0 || dragId !== null) return;
+      // A context-menu press never drags: macOS reports Control-click, which
+      // opens the tab menu, as the primary button.
+      if (event.button !== 0 || event.ctrlKey || dragId !== null) return;
       dragId = id;
       pointerId = event.pointerId;
       startIndex = host.order().indexOf(id);

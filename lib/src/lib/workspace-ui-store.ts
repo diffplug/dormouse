@@ -15,6 +15,14 @@ export interface WorkspaceConfirmation {
   answer: (accepted: boolean) => void;
 }
 
+/** An open tab context menu: its Workspace, the viewport point it opens at,
+ *  and whether a key opened it, which is what it hands focus back to. */
+export interface WorkspaceMenu {
+  id: WorkspaceId;
+  at: { x: number; y: number };
+  keyboard: boolean;
+}
+
 /**
  * The Workspace strip's transient UI states, held outside it because the
  * Workspace verbs open them from outside any component (`docs/specs/layout.md`
@@ -29,9 +37,12 @@ export interface WorkspaceUiState {
   confirmation: WorkspaceConfirmation | null;
   /** A refused move stays visible until dismissed or retried. */
   moveError: { id: WorkspaceId; reason: string } | null;
+  /** The open tab context menu. It yields to everything else here: a rename,
+   *  a confirmation, and any close or move starting dismiss it. */
+  menu: WorkspaceMenu | null;
 }
 
-const EMPTY: WorkspaceUiState = { renamingId: null, confirmation: null, moveError: null };
+const EMPTY: WorkspaceUiState = { renamingId: null, confirmation: null, moveError: null, menu: null };
 
 let state: WorkspaceUiState = EMPTY;
 let confirmationGeneration = 0;
@@ -56,7 +67,15 @@ export function getWorkspaceUiSnapshot(): WorkspaceUiState {
 
 export function setRenamingWorkspace(id: WorkspaceId | null): void {
   if (state.renamingId === id) return;
-  emit({ ...state, renamingId: id });
+  emit({ ...state, renamingId: id, menu: id === null ? state.menu : null });
+}
+
+export function openWorkspaceMenu(menu: WorkspaceMenu): void {
+  emit({ ...state, menu });
+}
+
+export function closeWorkspaceMenu(): void {
+  if (state.menu) emit({ ...state, menu: null });
 }
 
 /** Ask `next`, first answering any pending confirmation no. */
@@ -65,18 +84,18 @@ export function requestConfirmation(next: WorkspaceConfirmation): void {
   const previous = state.confirmation;
   state = { ...state, confirmation: null };
   previous?.answer(false);
-  emit({ ...state, confirmation: next });
+  emit({ ...state, confirmation: next, menu: null });
 }
 
-/** Close and move verbs call this as they start. Answer the pending question no;
- *  the returned guard prevents asynchronous preparation from raising an older
+/** Close and move verbs call this as they start. Answer the pending question no
+ *  and dismiss the tab menu; the returned guard prevents asynchronous preparation from raising an older
  *  question or acting after a newer verb starts, even when no question was up. */
 export function cancelPendingConfirmation(): () => boolean {
   const generation = ++confirmationGeneration;
   const previous = state.confirmation;
-  if (previous) {
-    emit({ ...state, confirmation: null });
-    previous.answer(false);
+  if (previous || state.menu) {
+    emit({ ...state, confirmation: null, menu: null });
+    previous?.answer(false);
   }
   return () => generation === confirmationGeneration;
 }
@@ -104,12 +123,13 @@ export function resetWorkspaceUi(): void {
 
 /** Forget only the departing Workspace's chrome, preserving sibling dialogs. */
 export function dismissWorkspaceUi(id: WorkspaceId): void {
-  const { renamingId, confirmation, moveError } = state;
-  if (renamingId !== id && confirmation?.id !== id && moveError?.id !== id) return;
+  const { renamingId, confirmation, moveError, menu } = state;
+  if (renamingId !== id && confirmation?.id !== id && moveError?.id !== id && menu?.id !== id) return;
   emit({
     renamingId: renamingId === id ? null : renamingId,
     confirmation: confirmation?.id === id ? null : confirmation,
     moveError: moveError?.id === id ? null : moveError,
+    menu: menu?.id === id ? null : menu,
   });
   if (confirmation?.id === id) confirmation.answer(false);
 }

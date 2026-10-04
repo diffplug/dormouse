@@ -9,9 +9,11 @@ import { requireElement, waitForPrimedState } from './settle-terminals';
  *  membership and stub handle all name the same ones. */
 const ws = (index: number) => `story-ws-${index + 1}`;
 
-function primed(names: string[], activeIndex: number, membership?: Record<number, string[]>) {
+/** `pinned` lists positions to pin; list them last, as the store keeps them
+ *  (`docs/specs/layout.md` → "Workspace tabs"). */
+function primed(names: string[], activeIndex: number, membership?: Record<number, string[]>, pinned: number[] = []) {
   return {
-    workspaces: names.map((name, index) => ({ id: ws(index), name })),
+    workspaces: names.map((name, index) => ({ id: ws(index), name, ...(pinned.includes(index) ? { pinned: true } : {}) })),
     activeId: ws(activeIndex),
     membership: Object.fromEntries(
       Object.entries(membership ?? {}).map(([index, ids]) => [ws(Number(index)), ids]),
@@ -22,9 +24,11 @@ function primed(names: string[], activeIndex: number, membership?: Record<number
 /** The Workspace model comes from `parameters.primedWorkspaces`, which the
  *  preview decorator writes before first render (the strip reads the store on
  *  its first) and clears after. */
-function StripStory({ width = 640, busyIndex, todoLabels }: {
+function StripStory({ width = 640, busyIndex, todoLabels, tearsOut = false }: {
   width?: number;
   busyIndex?: number;
+  /** Stands in for a host with windows, which offers Move to new window. */
+  tearsOut?: boolean;
   /** By position: what a Workspace's TODO pill says its click selects. */
   todoLabels?: Record<number, string>;
 }) {
@@ -48,7 +52,7 @@ function StripStory({ width = 640, busyIndex, todoLabels }: {
 
   return (
     <div className="bg-app-bg text-app-fg flex h-[30px] items-end" style={{ width }}>
-      <WorkspaceStrip className="min-w-0 pl-1.75" />
+      <WorkspaceStrip className="min-w-0 pl-1.75" onMoveToNewWindow={tearsOut ? () => {} : undefined} />
     </div>
   );
 }
@@ -137,5 +141,48 @@ export const MoveRefused: Story = {
     await requireElement('[data-workspace-tab]', 'workspace tab');
     setWorkspaceMoveError({ id: ws(1), reason: 'Approve or decline pending Tools before moving this Workspace' });
     await requireElement('#workspace-move-error', 'move refusal');
+  },
+};
+
+/** Pinned right: after `+`, with a pin where `×` would be, never closeable
+ *  alone (`docs/specs/layout.md` → "Workspace tabs"). */
+export const Pinned: Story = {
+  parameters: { primedWorkspaces: primed(['Agents', 'Build', 'Notes', 'Docs'], 2, undefined, [2, 3]) },
+};
+
+/** The unpinned tabs scroll and shrink; the pinned group stays in view. */
+export const PinnedOverflow: Story = {
+  args: { width: 420 },
+  parameters: {
+    primedWorkspaces: primed(['Workspace 1', 'Deploys', 'Agents', 'Builds', 'Scratch', 'Notes'], 1, undefined, [5]),
+  },
+};
+
+/** Right-click (or Shift+F10 on a focused tab) opens the tab's menu at the
+ *  pointer. A user-set name offers Use automatic name; a host with windows
+ *  offers Move to new window. */
+export const TabMenu: Story = {
+  args: { tearsOut: true },
+  parameters: { primedWorkspaces: primed(['Workspace 1', 'Deploys', 'Notes'], 1, undefined, [2]) },
+  play: async () => {
+    const tab = await requireElement<HTMLElement>(`[data-workspace-tab="${ws(1)}"]`, 'Deploys tab');
+    const box = tab.getBoundingClientRect();
+    tab.dispatchEvent(new MouseEvent('contextmenu', {
+      bubbles: true, cancelable: true, button: 2, clientX: box.left + 24, clientY: box.bottom - 4,
+    }));
+    await requireElement('[role="menu"]', 'tab menu');
+  },
+};
+
+/** A pinned tab's menu: Unpin, and a Close that says to unpin first. */
+export const PinnedTabMenu: Story = {
+  parameters: { primedWorkspaces: primed(['Workspace 1', 'Deploys', 'Notes'], 1, undefined, [2]) },
+  play: async () => {
+    const tab = await requireElement<HTMLElement>(`[data-workspace-tab="${ws(2)}"]`, 'pinned tab');
+    const box = tab.getBoundingClientRect();
+    tab.dispatchEvent(new MouseEvent('contextmenu', {
+      bubbles: true, cancelable: true, button: 2, clientX: box.left + 24, clientY: box.bottom - 4,
+    }));
+    await requireElement('[role="menu"] [data-workspace-menu-item="close"][aria-disabled="true"]', 'disabled close');
   },
 };

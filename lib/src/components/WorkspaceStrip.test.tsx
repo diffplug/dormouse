@@ -684,3 +684,205 @@ it('keeps a move refusal visible and releases the keyboard when dismissed', asyn
   expect(getWorkspaceUiSnapshot().moveError).toBeNull();
   expect(chromeKeyboardHeld()).toBe(false);
 });
+
+describe('pinned tabs', () => {
+  it('groups pinned tabs after +, with no close button, and middle-click closes nothing', async () => {
+    const first = getWorkspacesSnapshot().workspaces[0].id;
+    await act(async () => {
+      createWorkspace({ id: 'ws-2', name: 'Notes', pinned: true });
+      createWorkspace({ id: 'ws-3', name: 'Build' });
+    });
+    const closeAll = vi.fn(async () => null);
+    stubHandle('ws-2', { closeAll });
+    await render();
+    const strip = container.querySelector('[data-workspace-strip]')!;
+    const order = [...strip.querySelectorAll<HTMLElement>('[data-workspace-tab], [data-workspace-new]')]
+      .map((element) => element.dataset.workspaceTab ?? '+');
+    expect(order).toEqual([first, 'ws-3', '+', 'ws-2']);
+    expect(tabFor('ws-2').closest('[data-workspace-pinned-group]')).not.toBeNull();
+    expect(tabFor('ws-2').querySelector('[data-workspace-tab-pinned]')).not.toBeNull();
+    expect(activateButton('ws-2').getAttribute('aria-label')).toBe('Notes, pinned');
+
+    // Active, and still no ×.
+    await act(async () => { activateButton('ws-2').click(); });
+    expect(tabFor('ws-2').dataset.workspaceTabActive).toBe('true');
+    expect(tabFor('ws-2').querySelector('[data-workspace-tab-close]')).toBeNull();
+    await act(async () => {
+      tabFor('ws-2').dispatchEvent(new MouseEvent('auxclick', { bubbles: true, cancelable: true, button: 1 }));
+    });
+    await act(async () => { await Promise.resolve(); });
+    expect(closeAll).not.toHaveBeenCalled();
+    expect(tabs()).toHaveLength(3);
+  });
+});
+
+describe('tab context menu', () => {
+  const menuEl = () => document.querySelector<HTMLElement>('[role="menu"]');
+  const items = () => [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+  const itemKeys = () => items().map((item) => item.dataset.workspaceMenuItem);
+  const item = (key: string) => document.querySelector<HTMLButtonElement>(`[data-workspace-menu-item="${key}"]`)!;
+  const rightClick = async (id: string, init: MouseEventInit = {}) => {
+    await act(async () => {
+      tabFor(id).dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: 40, clientY: 20, ...init }));
+    });
+  };
+  const key = async (target: Element, init: KeyboardEventInit) => {
+    await act(async () => { target.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init })); });
+  };
+
+  it('opens at the pointer with its rows in order, holding the chrome keyboard lease', async () => {
+    const first = getWorkspacesSnapshot().workspaces[0].id;
+    await render();
+    await rightClick(first);
+    expect(menuEl()).not.toBeNull();
+    // Auto-named, so no Use automatic name; one window, so no Move to new window.
+    expect(itemKeys()).toEqual(['rename', 'pin', 'copy-ref', 'close']);
+    expect(item('copy-ref').textContent).toContain('workspace:1');
+    expect(menuEl()!.querySelector('[role="separator"]')).not.toBeNull();
+    expect(chromeKeyboardHeld()).toBe(true);
+    expect(document.activeElement).toBe(items()[0]);
+
+    // An outside press dismisses it and releases the keyboard.
+    await act(async () => { document.body.dispatchEvent(pointer('pointerdown', { button: 0 })); });
+    expect(menuEl()).toBeNull();
+    expect(chromeKeyboardHeld()).toBe(false);
+  });
+
+  it('offers Use automatic name only for a user-set name, and Move to new window only from a host that tears out', async () => {
+    await act(async () => { createWorkspace({ id: 'ws-2', name: 'Deploys' }); });
+    const tearOut = vi.fn();
+    await render(<WorkspaceStrip onMoveToNewWindow={tearOut} />);
+    await rightClick('ws-2');
+    expect(itemKeys()).toEqual(['rename', 'auto-name', 'pin', 'copy-ref', 'new-window', 'close']);
+    await act(async () => { item('auto-name').click(); });
+    expect(getWorkspacesSnapshot().workspaces.find((ws) => ws.id === 'ws-2')?.nameIsAuto).toBe(true);
+    expect(menuEl()).toBeNull();
+
+    await rightClick('ws-2');
+    await act(async () => { item('new-window').click(); });
+    expect(tearOut).toHaveBeenCalledExactlyOnceWith('ws-2');
+  });
+
+  it('pins right and unpins, and a pinned tab\'s Close is inert and says why', async () => {
+    const first = getWorkspacesSnapshot().workspaces[0].id;
+    await act(async () => { createWorkspace({ id: 'ws-2' }); });
+    const closeAll = vi.fn(async () => null);
+    stubHandle(first, { closeAll });
+    await render();
+    await rightClick(first);
+    expect(item('pin').textContent).toBe('Pin right');
+    await act(async () => { item('pin').click(); });
+    expect(getWorkspacesSnapshot().workspaces.map((ws) => [ws.id, ws.pinned === true])).toEqual([['ws-2', false], [first, true]]);
+    expect(tabFor(first).closest('[data-workspace-pinned-group]')).not.toBeNull();
+
+    await rightClick(first);
+    expect(item('pin').textContent).toBe('Unpin');
+    expect(item('close').getAttribute('aria-disabled')).toBe('true');
+    expect(item('close').title).toMatch(/unpin to close/i);
+    await act(async () => { item('close').click(); });
+    await act(async () => { await Promise.resolve(); });
+    expect(closeAll).not.toHaveBeenCalled();
+    // Inert: the menu stays up.
+    expect(menuEl()).not.toBeNull();
+
+    await act(async () => { item('pin').click(); });
+    expect(getWorkspacesSnapshot().workspaces.map((ws) => [ws.id, ws.pinned === true])).toEqual([['ws-2', false], [first, false]]);
+  });
+
+  it('closes an unpinned Workspace through the close verb, and renames through the editor', async () => {
+    await act(async () => { createWorkspace({ id: 'ws-2' }); });
+    const closeAll = vi.fn(async () => null);
+    stubHandle('ws-2', { closeAll });
+    await render();
+    await rightClick('ws-2');
+    await act(async () => { item('rename').click(); });
+    expect(getWorkspaceUiSnapshot().renamingId).toBe('ws-2');
+    expect(menuEl()).toBeNull();
+    // Never over the open editor.
+    await rightClick('ws-2');
+    expect(menuEl()).toBeNull();
+    await act(async () => {
+      container.querySelector('[data-workspace-rename-for="ws-2"]')!
+        .dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+
+    await rightClick('ws-2');
+    await act(async () => { item('close').click(); });
+    await act(async () => { await Promise.resolve(); });
+    expect(closeAll).toHaveBeenCalled();
+  });
+
+  it('copies the Workspace ref', async () => {
+    const writeText = vi.fn(async () => {});
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    await act(async () => { createWorkspace({ id: 'ws-2' }); });
+    await render();
+    await rightClick('ws-2');
+    await act(async () => { item('copy-ref').click(); });
+    expect(writeText).toHaveBeenCalledWith('workspace:2');
+  });
+
+  it('opens from Shift+F10 or the ContextMenu key, walks its rows by arrow, and Escape hands focus back to the tab', async () => {
+    const first = getWorkspacesSnapshot().workspaces[0].id;
+    await render();
+    for (const init of [{ key: 'F10', shiftKey: true }, { key: 'ContextMenu' }]) {
+      activateButton(first).focus();
+      await key(activateButton(first), init);
+      expect(menuEl()).not.toBeNull();
+      expect(document.activeElement).toBe(items()[0]);
+      await key(menuEl()!, { key: 'ArrowUp' });
+      expect(document.activeElement).toBe(items().at(-1));
+      await key(menuEl()!, { key: 'ArrowDown' });
+      expect(document.activeElement).toBe(items()[0]);
+      await key(menuEl()!, { key: 'End' });
+      expect(document.activeElement).toBe(items().at(-1));
+      await key(menuEl()!, { key: 'Escape' });
+      expect(menuEl()).toBeNull();
+      expect(document.activeElement).toBe(activateButton(first));
+    }
+  });
+
+  it('hands focus back to the pinned tab where it lands after a keyboard Pin right', async () => {
+    const first = getWorkspacesSnapshot().workspaces[0].id;
+    await act(async () => { createWorkspace({ id: 'ws-2', activate: false }); });
+    await render();
+    activateButton(first).focus();
+    await key(activateButton(first), { key: 'ContextMenu' });
+    await act(async () => { item('pin').click(); });
+    expect(tabFor(first).closest('[data-workspace-pinned-group]')).not.toBeNull();
+    expect(document.activeElement).toBe(activateButton(first));
+  });
+
+  it('never opens for a Workspace on its way to another window, and goes when its Workspace does', async () => {
+    await act(async () => { createWorkspace({ id: 'ws-2' }); });
+    await render();
+    setWorkspaceTransferPending('ws-2', true);
+    await rightClick('ws-2');
+    expect(menuEl()).toBeNull();
+    setWorkspaceTransferPending('ws-2', false);
+    await rightClick('ws-2');
+    expect(menuEl()).not.toBeNull();
+    await act(async () => { dismissWorkspaceUi('ws-2'); });
+    expect(menuEl()).toBeNull();
+  });
+
+  it('never starts a reorder from a right press or a macOS Control-click', async () => {
+    const first = getWorkspacesSnapshot().workspaces[0].id;
+    await act(async () => { createWorkspace({ id: 'ws-2' }); });
+    await render();
+    const order = () => getWorkspacesSnapshot().workspaces.map((workspace) => workspace.id);
+    const boxes = new Map(order().map((id, index) => [id, { left: index * 100, width: 100 }]));
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const box = this.dataset.workspaceTab ? boxes.get(this.dataset.workspaceTab) : undefined;
+      const left = box?.left ?? 0;
+      const width = box?.width ?? 300;
+      return { left, right: left + width, width, top: 0, bottom: 24, height: 24, x: left, y: 0, toJSON: () => ({}) } as DOMRect;
+    });
+    for (const init of [{ button: 2 }, { button: 0, ctrlKey: true }]) {
+      await act(async () => { tabFor(first).dispatchEvent(pointer('pointerdown', { clientX: 50, clientY: 12, ...init })); });
+      await act(async () => { window.dispatchEvent(pointer('pointermove', { clientX: 160, clientY: 12 })); });
+      await act(async () => { window.dispatchEvent(pointer('pointerup', { clientX: 160, clientY: 12 })); });
+      expect(order()).toEqual([first, 'ws-2']);
+    }
+  });
+});

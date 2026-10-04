@@ -3,7 +3,7 @@ import { MinusIcon, CornersOutIcon, CornersInIcon, XIcon } from '@phosphor-icons
 import { PANE_GUTTER_PX, PopupButtonRow, TAB_WALL_JOIN_GRADIENT, chromeButton } from '../../lib/src/components/design';
 import { WorkspaceStrip } from '../../lib/src/components/WorkspaceStrip';
 import { IS_MAC } from '../../lib/src/lib/platform';
-import { onDragBackInsideStrip, onDragCancelled, onDragOutsideWindow, onDropOnOtherWindow } from './workspace-drag';
+import { moveWorkspaceToNewWindow, onDragBackInsideStrip, onDragCancelled, onDragOutsideWindow, onDropOnOtherWindow } from './workspace-drag';
 import { getDropCaretX, subscribeDropCaret } from './workspace-drop-caret';
 
 type AppWindow = {
@@ -169,6 +169,7 @@ export function AppBar() {
           onDragBackInsideStrip={BROWSER_DEV ? undefined : onDragBackInsideStrip}
           onDropOnOtherWindow={BROWSER_DEV ? undefined : onDropOnOtherWindow}
           onDragCancelled={BROWSER_DEV ? undefined : onDragCancelled}
+          onMoveToNewWindow={BROWSER_DEV ? undefined : moveWorkspaceToNewWindow}
         />
       </div>
       <div data-tauri-drag-region className="min-w-8 flex-1 self-stretch" />

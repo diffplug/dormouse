@@ -160,6 +160,9 @@ export function useCloseOnOutsideAndEscape(
   open: boolean,
   ref: RefObject<HTMLElement | null>,
   onClose: () => void,
+  /** What a scroll must move to close the menu, when the menu itself is
+   *  positioned away from its trigger (a portal); defaults to `ref`. */
+  anchor?: RefObject<HTMLElement | null>,
 ) {
   useEffect(() => {
     if (!open) return;
@@ -174,7 +177,7 @@ export function useCloseOnOutsideAndEscape(
       if (event.key === 'Escape') onClose();
     };
     const closeOnScroll = (event: Event) => {
-      const root = ref.current;
+      const root = (anchor ?? ref).current;
       // Only a scroller the trigger sits inside can move it. `document` is
       // itself a Node containing everything, so viewport scrolling — which the
       // DOM dispatches at the Document — satisfies this too.
@@ -190,5 +193,5 @@ export function useCloseOnOutsideAndEscape(
       window.removeEventListener('keydown', closeOnEscape);
       window.removeEventListener('scroll', closeOnScroll, true);
     };
-  }, [open, ref, onClose]);
+  }, [open, ref, onClose, anchor]);
 }

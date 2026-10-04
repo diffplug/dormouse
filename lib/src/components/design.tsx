@@ -224,6 +224,11 @@ export const popupButton = tv({
 
 export type PopupButtonVariants = VariantProps<typeof popupButton>;
 
+/** One row of a popup menu inside a `PopupButtonRow` (the shell picker, the
+ *  Workspace tab menu). Keyboard focus takes the hover wash, so arrow keys show
+ *  where they are; a disabled row stays focusable and reads as unavailable. */
+export const POPUP_MENU_ITEM_CLASS = 'flex w-full items-center gap-2 whitespace-nowrap px-3 py-1.5 text-left text-sm text-foreground transition-colors not-aria-disabled:hover:bg-foreground/10 focus-visible:bg-foreground/10 focus-visible:outline-none aria-disabled:cursor-not-allowed aria-disabled:text-muted';
+
 export interface ModalRect {
   top: number;
   left: number;
