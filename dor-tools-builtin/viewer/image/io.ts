@@ -5,9 +5,9 @@
 import { VERSION_HEADER } from '../../src/image-format';
 import { checked, type DocumentSource } from '../document-session';
 import { iccSpace } from './icc';
-import { iccProfile, iccSegments, spliceIcc } from './jpeg';
+import { iccProfile, iccSegments, jpegSize, spliceIcc } from './jpeg';
 import type { Raster } from './pixels';
-import { decodePng, encodePng, isPng } from './png';
+import { decodePng, encodePng, isPng, pngSize } from './png';
 
 export type EditableMime = 'image/png' | 'image/jpeg';
 
@@ -30,13 +30,37 @@ export interface LoadedImage extends ImageFormat {
 
 export const SRGB_PNG: ImageFormat = { mime: 'image/png', colorSpace: 'srgb', keep: [] };
 
+/** The most pixels the editor decodes: 8192 × 8192, a 256 MiB RGBA raster.
+ * Editing holds several copies (the raster, the canvas showing it, a save's
+ * encode, an undo step), so about 1 GiB at this bound, within what a browser
+ * tab is allowed; a 20000 × 20000 image would need 1.6 GB per copy. A
+ * 61-megapixel camera photo and an 8K screenshot fit under it. */
+export const MAX_EDIT_PIXELS = 1 << 26;
+
+/** An image past `MAX_EDIT_PIXELS`, which the editor shows view-only. */
+export class TooLargeError extends Error {
+  constructor(readonly width: number, readonly height: number) {
+    super(`View only: at ${width} × ${height} pixels, this image is past the editor's ${MAX_EDIT_PIXELS / (1 << 20)}-megapixel limit.`);
+  }
+}
+
+/** Refuses an image whose header declares more than `MAX_EDIT_PIXELS`,
+ * before anything decodes it. */
+export function checkEditable(bytes: Uint8Array): void {
+  let size: { width: number; height: number } | null = null;
+  try { size = isPng(bytes) ? pngSize(bytes) : bytes[0] === 0xff && bytes[1] === 0xd8 ? jpegSize(bytes) : null; } catch { /* unreadable: the decoder says why */ }
+  if (size && size.width * size.height > MAX_EDIT_PIXELS) throw new TooLargeError(size.width, size.height);
+}
+
 /** An image file's pixels: straight (unpremultiplied) RGBA exactly as stored,
  * with its color metadata. PNGs go through the PNG codec; a JPEG, or a PNG the
  * codec refuses, through a canvas, which keeps a JPEG's raw values but may
  * shift a semi-transparent PNG pixel. A JPEG's pixels are turned upright by its
- * EXIF orientation, which a save then drops. */
+ * EXIF orientation, which a save then drops. Throws `TooLargeError` past
+ * `MAX_EDIT_PIXELS`. */
 export async function decodeImage(blob: Blob): Promise<LoadedImage> {
   const bytes = new Uint8Array(await blob.arrayBuffer());
+  checkEditable(bytes);
   if (isPng(bytes)) {
     try {
       const png = await decodePng(bytes);

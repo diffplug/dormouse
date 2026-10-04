@@ -93,9 +93,9 @@ function ImageRow({ src, editor, saved, onEdit }: { src: string; editor: Lexical
 /** Every image the document shows; local ones rename on disk at once, and
  * their links in the document change with the next save. PNG and JPEG open
  * in the image editor through `onEdit`. */
-export function ImagesPanel({ editor, sources, saved, onEdit }: { editor: LexicalEditor; sources: string[]; saved: SavedImages; onEdit(path: string): void }) {
+export function ImagesPanel({ editor, sources, saved, onEdit, top }: { editor: LexicalEditor; sources: string[]; saved: SavedImages; onEdit(path: string): void; top?: number }) {
   return (
-    <section className="images-panel" aria-label="Images">
+    <section className="images-panel" aria-label="Images" style={{ top }}>
       {sources.length
         ? <ul>{sources.map(src => <ImageRow key={src} src={src} editor={editor} saved={saved} onEdit={onEdit} />)}</ul>
         : <p>No images. Paste one to save it beside this file.</p>}

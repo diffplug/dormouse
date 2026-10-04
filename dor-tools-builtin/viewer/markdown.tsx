@@ -1,4 +1,4 @@
-import { createRef, useMemo, useSyncExternalStore, type ComponentType, type FC } from 'react';
+import { createRef, useLayoutEffect, useMemo, useState, useSyncExternalStore, type ComponentType, type FC } from 'react';
 import { createRoot } from 'react-dom/client';
 import { flushSync } from 'react-dom';
 import { $getNearestNodeFromDOMNode, $getNodeByKey, type LexicalEditor } from 'lexical';
@@ -201,12 +201,34 @@ function ErrorBanner() {
   return error ? <div className="error" role="alert">{error}</div> : null;
 }
 
+/** Where the images panel hangs: just under the toolbar, which wraps when the
+ * page is narrow and moves down under an error. */
+function useBelowToolbar(): number | undefined {
+  const [top, setTop] = useState<number>();
+  useLayoutEffect(() => {
+    const root = document.getElementById('root')!, bar = root.querySelector('.mdxeditor-toolbar');
+    if (!bar) return;
+    const place = () => setTop(bar.getBoundingClientRect().bottom - root.getBoundingClientRect().top + 2);
+    place();
+    const observer = new ResizeObserver(place);
+    observer.observe(bar);
+    observer.observe(bar.closest('.mdxeditor') ?? root);
+    return () => observer.disconnect();
+  }, []);
+  return top;
+}
+
+function Panel({ editor }: { editor: LexicalEditor }) {
+  const { images, saved } = usePage();
+  return <ImagesPanel editor={editor} sources={images} saved={saved} onEdit={editImage} top={useBelowToolbar()} />;
+}
+
 /** The images panel and the image editor overlay, above the editor. */
 function Overlays() {
-  const { images, panel, editor, editing, saved } = usePage();
+  const { panel, editor, editing } = usePage();
   return (
     <>
-      {panel && editor && <ImagesPanel editor={editor} sources={images} saved={saved} onEdit={editImage} />}
+      {panel && editor && <Panel editor={editor} />}
       {editing && <ImageOverlay key={editing} path={editing} page={page} onSaved={refreshImage} onClose={closeImage} />}
     </>
   );

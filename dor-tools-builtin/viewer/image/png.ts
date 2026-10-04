@@ -30,6 +30,13 @@ const ADAM7 = [[0, 0, 8, 8], [0, 4, 8, 8], [4, 0, 8, 4], [0, 2, 4, 4], [2, 0, 4,
 
 export const isPng = (b: Uint8Array) => SIGNATURE.every((byte, i) => b[i] === byte);
 
+/** The size a PNG's IHDR declares, read without decoding; null without one. */
+export function pngSize(b: Uint8Array): { width: number; height: number } | null {
+  if (!isPng(b) || b.length < 24 || String.fromCharCode(...b.subarray(12, 16)) !== 'IHDR') return null;
+  const view = new DataView(b.buffer, b.byteOffset, b.byteLength);
+  return { width: view.getUint32(16), height: view.getUint32(20) };
+}
+
 const CRC_TABLE = Uint32Array.from({ length: 256 }, (_, n) => {
   for (let k = 0; k < 8; k++) n = n & 1 ? 0xedb88320 ^ (n >>> 1) : n >>> 1;
   return n;

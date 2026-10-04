@@ -8,6 +8,7 @@ import type { Shape } from './objects';
 import { History, Pieces, type Applied, type Doc, type Patch } from './history';
 import { center, clampView, fitView, stepZoom, zoomAt, type View } from './view';
 import { encodeImage, over, SRGB_PNG, type ImageFormat } from './io';
+import { imageColors, type ImageColors } from './color';
 import { Signal } from '../signal';
 
 export type Tool =
@@ -43,8 +44,6 @@ interface PixelSelection { rect: Rect; mask?: Mask; outline?: readonly Point[]; 
 interface Drag { move(p: Point, e: PointerEvent): void; up(p: Point, e: PointerEvent): void; cancel?(): void }
 interface TextEdit { id: string | null; x: number; y: number; text: string }
 
-const hexToRgba = (hex: string): Rgba =>
-  [parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16), 255];
 /** The raster's raw values, tagged with the color space they are in, so a
  * canvas in that space takes them unconverted. */
 const imageData = (r: Raster, colorSpace: PredefinedColorSpace) =>
@@ -80,6 +79,7 @@ export class EditorController {
   ruler: { a: Point; b: Point } | null = null;
   seam: { axis: 'x' | 'y'; from: number; to: number; mode: SeamMode } | null = null;
   text: TextEdit | null = null;
+  /** The eyedropper's last pixel, as sRGB. */
   picked: Rgba | null = null;
   view: View = { zoom: 1, x: 0, y: 0, fit: true };
   /** Bumped on every change the chrome shows. */
@@ -116,12 +116,14 @@ export class EditorController {
   private readonly zoomChanges = new Signal();
   /** The raster size the view last laid out, to refit a fitted view when it changes. */
   private shownSize: { width: number; height: number };
+  private readonly colors: ImageColors;
 
   /** `format` is what a save keeps from the opened file; its color space is
    * the one every canvas here shows the raster in. */
   constructor(raster: Raster, private readonly format: ImageFormat = SRGB_PNG) {
     this.shownSize = { width: raster.width, height: raster.height };
     this.history = new History({ raster, objects: [] });
+    this.colors = imageColors(format.colorSpace);
   }
 
   // --- Document -----------------------------------------------------------
@@ -194,7 +196,9 @@ export class EditorController {
   }
 
   get canUndo() { return !!this.floating || this.history.canUndo; }
-  get canRedo() { return this.history.canRedo; }
+  /** False while a floating selection or a changed label is pending: landing
+   * either is a new edit, which drops the redo steps. Undo cancels a float. */
+  get canRedo() { return this.history.canRedo && !this.floating && !this.textPending(); }
   undo() {
     if (this.drag) return;
     this.finishText(true);
@@ -208,9 +212,8 @@ export class EditorController {
     this.afterHistory(this.history.undo());
   }
   redo() {
-    if (this.drag) return;
+    if (this.drag || !this.canRedo) return;
     this.finishText(true);
-    this.landFloat(true);
     this.afterHistory(this.history.redo());
   }
   private afterHistory(applied: Applied | null) {
@@ -229,7 +232,8 @@ export class EditorController {
     this.landFloat(true);
     return this.doc;
   }
-  holds(revision: Revision) { return this.doc === revision && !this.floating; }
+  /** False while an edit is pending, which `settle` would commit. */
+  holds(revision: Revision) { return this.doc === revision && !this.floating && !this.textPending(); }
 
   // --- Tools and styles ---------------------------------------------------
 
@@ -295,9 +299,9 @@ export class EditorController {
   }
   clearSelection() { this.landFloat(true); this.sel = null; this.refresh(); }
   private pick(p: Point) {
-    const c = px.pixel(this.doc.raster, p.x, p.y);
-    if (!c) return;
-    const color = px.toHex([c[0], c[1], c[2], 255]);
+    const raw = px.pixel(this.doc.raster, p.x, p.y);
+    if (!raw) return;
+    const c = this.colors.toSrgb(raw), color = px.toHex([c[0], c[1], c[2], 255]);
     if (color === this.color && this.picked && px.toHex(this.picked) === px.toHex(c)) return;
     this.picked = c;
     this.color = color;
@@ -314,15 +318,31 @@ export class EditorController {
       : { id: null, x: p.x, y: p.y - ob.fontSize(this.width) * 0.6, text: '' };
     this.refresh();
   }
-  setText(text: string) { if (this.text) this.text = { ...this.text, text }; }
+  setText(text: string) {
+    if (!this.text) return;
+    const was = this.textPending();
+    this.text = { ...this.text, text };
+    // A label that would change the document makes it unsaved as it is typed.
+    if (this.textPending() !== was) { this.changed(); this.notify(); }
+  }
+  /** The open label's text as it would land, and the label it edits. */
+  private textLanding(t: TextEdit) {
+    const old = t.id ? this.doc.objects.find(s => s.id === t.id) : undefined;
+    return { value: t.text.replace(/\s+$/, ''), old: old?.kind === 'text' ? old : undefined };
+  }
+  /** Whether keeping the open label would change the document. */
+  private textPending(): boolean {
+    if (!this.text) return false;
+    const { value, old } = this.textLanding(this.text);
+    return old ? value !== old.text : !this.text.id && !!value;
+  }
   /** Ends the inline label editor, keeping its text or discarding the edit. */
   finishText(keep: boolean) {
     const t = this.text;
     if (!t) return;
     this.text = null;
-    const value = t.text.replace(/\s+$/, ''), objects = this.doc.objects;
-    const old = t.id ? objects.find(s => s.id === t.id) : undefined;
-    if (keep && old?.kind === 'text') {
+    const { value, old } = this.textLanding(t), objects = this.doc.objects;
+    if (keep && old) {
       if (!value) return this.setObjects(objects.filter(s => s.id !== old.id));
       if (value !== old.text) return this.setObjects(objects.map(s => s.id === old.id ? { ...old, text: value } : s));
     } else if (keep && !t.id && value) {
@@ -548,7 +568,7 @@ export class EditorController {
       case 'brush': return e.altKey ? (this.pick(p), null) : this.brushDown(p, e);
       case 'bucket': {
         if (e.altKey) { this.pick(p); return null; }
-        const color = hexToRgba(this.color), region = px.floodRegion(this.doc.raster, p.x, p.y, color, this.tolerance);
+        const color = this.colors.toImage(this.color), region = px.floodRegion(this.doc.raster, p.x, p.y, color, this.tolerance);
         if (region) this.edit(region.rect, r => { px.fillSelection(r, region.rect, region.mask, color); });
         return null;
       }
@@ -705,7 +725,7 @@ export class EditorController {
 
   /** Paints the document's raster in place, one segment per move. */
   private brushDown(p: Point, e: PointerEvent): Drag {
-    const edit = this.pixelEdit(), color = hexToRgba(this.color), size = this.brushSize;
+    const edit = this.pixelEdit(), color = this.colors.toImage(this.color), size = this.brushSize;
     const brush = px.stamp(size, this.brushShape);
     let last = e.shiftKey && this.lastBrush ? this.lastBrush : p;
     const stroke = (a: Point, b: Point) => {

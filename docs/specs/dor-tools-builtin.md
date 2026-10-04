@@ -59,12 +59,13 @@ Source of truth: `dor-tools-builtin/viewer/markdown.tsx`; `safeCreateDOM` in `do
 
 `builtin:file` edits PNG and JPEG, alone or over a [Markdown document](#markdown-editor).
 
-- **Must open other image formats, and a PNG or JPEG over 32 MiB at open, view-only.**
+- **Must open other image formats, a PNG or JPEG over 32 MiB at open, and one whose header declares over 64 megapixels view-only.**
 - **Must save exactly the submitted bytes, at most 32 MiB**, under the revision, identity, permission, and replacement rules of [Editing files](#editing-files).
 - **Must refuse a save whose `Content-Type` or signature is not its extension's type** (415).
-- **Must send the revision as the `X-Dor-Version` response header and take it back as the save's `version` query parameter**, the body being the image bytes. The Markdown editor's in-place replacement shares this contract.
+- **Must send the revision as the `X-Dor-Version` response header and take it back as the save's `version` query parameter**, the image bytes as the body, as the Markdown editor's in-place replacement also does.
+- **Must submit every untouched PNG pixel exactly**, at 8 bits per channel, **with the source's PNG color chunks or JPEG ICC segments**, dropping EXIF and writing pixels upright.
 
-Source of truth: `editorRoutes` in `dor-tools-builtin/src/editor-routes.ts`; `replaceEditable` in `dor-tools-builtin/src/editable-file.ts`; `imagePage` in `dor-tools-builtin/src/editor-page.ts`. Tests: `dor-tools-builtin/test/file-viewer.test.mjs`.
+Source of truth: `editorRoutes` in `dor-tools-builtin/src/editor-routes.ts`; `replaceEditable` in `dor-tools-builtin/src/editable-file.ts`; `imagePage` in `dor-tools-builtin/src/editor-page.ts`; `decodeImage` / `encodeImage` in `dor-tools-builtin/viewer/image/io.ts`. Tests: `dor-tools-builtin/test/file-viewer.test.mjs`, `dor-tools-builtin/test/image-codec.test.mjs`.
 
 ## Code editor
 

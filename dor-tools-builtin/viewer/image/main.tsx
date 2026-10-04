@@ -6,8 +6,8 @@ import { createRoot } from 'react-dom/client';
 import { documentPage, loadingState, stateLabel, type DocumentState } from '../document-session';
 import { SaveButton } from '../save-button';
 import { Signal } from '../signal';
-import { editorDocument, ImageEditor, type ImageEditorHandle } from './editor';
-import { imageSource, type LoadedImage } from './io';
+import { editorDocument, ImageEditor, ImageViewOnly, type ImageEditorHandle } from './editor';
+import { imageSource, TooLargeError, type LoadedImage } from './io';
 import './page.css';
 
 let store: { doc: DocumentState; error: string | null } = { doc: loadingState, error: null };
@@ -18,7 +18,12 @@ const editor = createRef<ImageEditorHandle>();
 let loads = 0;
 
 // A reload mounts a fresh editor, so undo starts over.
-const session = documentPage().open(editorDocument(editor, (image, name) => root.render(<Page key={++loads} image={image} name={name} />)), {
+const session = documentPage().open(editorDocument(editor, (image, name) => {
+  const key = ++loads;
+  root.render(image instanceof TooLargeError
+    ? <ImageViewOnly key={key} ref={editor} src={`source?v=${key}`} name={name} note={image.message} controls={<Controls />} />
+    : <Page key={key} image={image} name={name} />);
+}), {
   report(doc) { update({ doc }); },
   fail(error) { update({ error }); },
 }, imageSource('source', 'save', document.title));

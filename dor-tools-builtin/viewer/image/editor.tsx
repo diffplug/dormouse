@@ -7,9 +7,9 @@ import { flushSync } from 'react-dom';
 import type { DocumentEditor } from '../document-session';
 import { EditorController, MARKUP, type Revision, type Tool } from './controller';
 import { Icon, type IconName } from './icons';
-import { decodeImage, type LoadedImage } from './io';
+import { decodeImage, TooLargeError, type LoadedImage } from './io';
 import { contrast, fontSize } from './objects';
-import { toHex } from './pixels';
+import { createRaster, toHex } from './pixels';
 import { pageTheme, subscribeTheme } from '../page-theme';
 import './image.css';
 
@@ -38,17 +38,44 @@ export interface ImageEditorProps {
 }
 
 /** The editor behind `ref` as a document session edits it; `show` mounts a
- * fresh editor over the decoded file, which is behind `ref` once it returns. */
-export function editorDocument(ref: RefObject<ImageEditorHandle | null>, show: (image: LoadedImage, name: string) => void): DocumentEditor<Revision, Blob> {
+ * fresh editor over the decoded file, or an `ImageViewOnly` for one too large
+ * to decode, which is behind `ref` once it returns. */
+export function editorDocument(ref: RefObject<ImageEditorHandle | null>, show: (image: LoadedImage | TooLargeError, name: string) => void): DocumentEditor<Revision, Blob> {
   return {
     snapshot: () => ref.current!.snapshot(),
     mark: () => ref.current!.revision(),
     holds: mark => ref.current!.holds(mark),
     async apply(blob, name) {
-      const image = await decodeImage(blob);
+      const image = await decodeImage(blob).catch(reason => { if (reason instanceof TooLargeError) return reason; throw reason; });
       flushSync(() => show(image, name));
     },
   };
+}
+
+/** The one revision of an image shown view-only: it never changes, so never needs a save. */
+const VIEW_ONLY_REVISION: Revision = { raster: createRaster(0, 0), objects: [] };
+const VIEW_ONLY: ImageEditorHandle = {
+  snapshot() { throw new Error('This image is view-only.'); },
+  revision: () => VIEW_ONLY_REVISION,
+  holds: () => true,
+};
+
+/** An image too large to edit: the file as the browser shows it, from `src`
+ * (a same-origin route), with why it is view-only. */
+export function ImageViewOnly({ src, name, note, controls, ref }: { src: string; name: string; note: string; controls?: ReactNode; ref?: Ref<ImageEditorHandle> }) {
+  useImperativeHandle(ref, () => VIEW_ONLY);
+  const root = useRef<HTMLDivElement>(null);
+  // Focused like the editor, so its host's Esc reaches it.
+  useEffect(() => { root.current?.focus({ preventScroll: true }); }, []);
+  return (
+    <div ref={root} className="image-editor" tabIndex={-1} aria-label={`${name}, view only`}>
+      <div className="ie-bar">
+        <span className="ie-view-note" role="note">{note}</span>
+        <div className="ie-end">{controls}</div>
+      </div>
+      <div className="ie-stage ie-view-only"><img src={src} alt={name} /></div>
+    </div>
+  );
 }
 
 interface ToolInfo { tool: Tool; key: string; label: string; icon: IconName; hint?: string }
@@ -175,12 +202,12 @@ export function ImageEditor({ image, name, onChange, controls, error, ref }: Ima
         <ToolOptions ctl={ctl} showWidth={showWidth} />
         {image.note && <span className="ie-hint ie-note" title={image.note}>{image.note}</span>}
         <div className="ie-status" role="status">
-          {copied && <span>{copied}</span>}
+          {copied && <span className="ie-copied">{copied}</span>}
           <button ref={hexRef} type="button" className="ie-hex" title="Copy this color's hex" onClick={() => void copyHex(hex)}>
-            <span className="ie-chip" style={{ background: hex.slice(0, 7) }} />{hex}
+            <span className="ie-chip" style={{ background: hex.slice(0, 7) }} /><span className="ie-hex-text">{hex}</span>
           </button>
           <CursorReadout ctl={ctl} />
-          <span title="Image size, in pixels">{raster.width} × {raster.height}</span>
+          <span className="ie-size" title="Image size, in pixels">{raster.width} × {raster.height}</span>
           <ZoomControls ctl={ctl} />
         </div>
       </div>

@@ -1,5 +1,6 @@
 /** JPEG color profiles across a re-encode: the source's APP2 `ICC_PROFILE`
- * segments, spliced into the bytes a canvas encodes. No DOM, so Node tests load it. */
+ * segments, spliced into the bytes a canvas encodes; and the frame size, read
+ * before decoding. No DOM, so Node tests load it. */
 
 type Bytes = Uint8Array<ArrayBuffer>;
 const ICC = 'ICC_PROFILE\0';
@@ -20,6 +21,16 @@ function segments(bytes: Uint8Array): { list: Segment[]; rest: number } {
     list.push({ marker, start: at, end });
     at = end;
   }
+}
+
+/** The frame size a JPEG's SOF header declares, or null when it has none
+ * (or leaves its height to a later DNL marker). */
+export function jpegSize(bytes: Uint8Array): { width: number; height: number } | null {
+  // SOF0–SOF15, less DHT (C4), JPG (C8), and DAC (CC).
+  const sof = segments(bytes).list.find(s => s.marker >= 0xc0 && s.marker <= 0xcf && s.marker !== 0xc4 && s.marker !== 0xc8 && s.marker !== 0xcc);
+  if (!sof || sof.end - sof.start < 9) return null;
+  const at = sof.start + 5, height = (bytes[at] << 8) | bytes[at + 1], width = (bytes[at + 2] << 8) | bytes[at + 3];
+  return width && height ? { width, height } : null;
 }
 
 const isIcc = (bytes: Uint8Array, s: Segment) =>

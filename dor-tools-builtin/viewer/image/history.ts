@@ -73,34 +73,47 @@ function swap({ from, patch }: Step): Applied {
   return { rect };
 }
 
-/** The pixels an in-place edit of `raster` changes, kept rectangle by
- * rectangle just before they change: undo needs no copy of the whole raster. */
+/** The pixels an in-place edit of `raster` changes, each kept once, just
+ * before it first changes, a tile at a time: memory follows the area the edit
+ * touched however often it touches it, and undo needs no copy of the whole raster. */
 export class Pieces {
-  private readonly kept: { rect: Rect; pixels: Raster }[] = [];
-  constructor(private readonly raster: Raster) {}
+  /** Each touched tile's pixels as the edit found them, by tile index. */
+  private readonly kept = new Map<number, { rect: Rect; pixels: Raster }>();
+  private readonly columns: number;
+  constructor(private readonly raster: Raster, private readonly tile = 64) {
+    this.columns = Math.ceil(raster.width / tile);
+  }
 
   /** Keeps `rect`'s pixels; call before changing them. Returns `rect`
    * clipped to the raster, or null when it is off it. */
   keep(rect: Rect): Rect | null {
-    const clipped = clipRect(this.raster, rect);
-    if (clipped) this.kept.push({ rect: clipped, pixels: crop(this.raster, clipped) });
+    const clipped = clipRect(this.raster, rect), t = this.tile;
+    if (!clipped) return null;
+    for (let ty = Math.floor(clipped.y / t); ty * t < clipped.y + clipped.height; ty++) {
+      for (let tx = Math.floor(clipped.x / t); tx * t < clipped.x + clipped.width; tx++) {
+        const index = ty * this.columns + tx;
+        // A tile kept earlier holds its pixels from before any change.
+        if (this.kept.has(index)) continue;
+        const at = clipRect(this.raster, { x: tx * t, y: ty * t, width: t, height: t })!;
+        this.kept.set(index, { rect: at, pixels: crop(this.raster, at) });
+      }
+    }
     return clipped;
   }
-  /** `rect`'s pixels as they were before the edit. Pieces overlap, and the
-   * first to hold a pixel kept it unchanged, so it goes on last. */
+  /** The bytes kept so far. */
+  get bytes(): number {
+    let n = 0;
+    for (const { pixels } of this.kept.values()) n += pixels.data.byteLength;
+    return n;
+  }
+  /** `rect`'s pixels as they were before the edit. */
   before(rect: Rect): Raster {
     const out = crop(this.raster, rect);
-    for (let i = this.kept.length - 1; i >= 0; i--) {
-      const { rect: at, pixels } = this.kept[i];
-      blit(out, pixels, at.x - rect.x, at.y - rect.y);
-    }
+    for (const { rect: at, pixels } of this.kept.values()) blit(out, pixels, at.x - rect.x, at.y - rect.y);
     return out;
   }
   /** Puts back every pixel the edit changed. */
   restore(): void {
-    for (let i = this.kept.length - 1; i >= 0; i--) {
-      const { rect, pixels } = this.kept[i];
-      blit(this.raster, pixels, rect.x, rect.y);
-    }
+    for (const { rect, pixels } of this.kept.values()) blit(this.raster, pixels, rect.x, rect.y);
   }
 }

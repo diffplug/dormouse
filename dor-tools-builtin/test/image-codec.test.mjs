@@ -15,7 +15,7 @@ async function load(path) {
 const png = await load('../viewer/image/png.ts');
 const jpeg = await load('../viewer/image/jpeg.ts');
 const { iccSpace } = await load('../viewer/image/icc.ts');
-const { over } = await load('../viewer/image/io.ts');
+const { over, checkEditable, decodeImage, MAX_EDIT_PIXELS, TooLargeError } = await load('../viewer/image/io.ts');
 
 // PNGs built here with Node's zlib and CRC, independently of the codec under test.
 const SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
@@ -243,4 +243,21 @@ test('a JPEG\'s ICC segments are spliced in after SOI and APP0, replacing the en
   assert.deepEqual(list.slice(1, 3).map(s => Array.from(s.bytes)), keep.map(s => Array.from(s)));
   assert.deepEqual(Buffer.from(saved.subarray(scan)), Buffer.from(JPEG.subarray(original.scan)), 'the scan and EOI are untouched');
   assert.deepEqual(jpeg.spliceIcc(saved, []), JPEG, 'splicing nothing strips the profile');
+});
+
+test('an image past the pixel bound is refused from its header, before anything decodes it', async () => {
+  // Headers alone: no pixel data follows.
+  const pngHeader = (width, height) => makePng(width, height, 8, 6, []);
+  const side = Math.sqrt(MAX_EDIT_PIXELS);
+  assert.deepEqual(png.pngSize(pngHeader(20000, 30)), { width: 20000, height: 30 });
+  assert.doesNotThrow(() => checkEditable(pngHeader(side, side)));
+  assert.throws(() => checkEditable(pngHeader(side, side + 1)), TooLargeError);
+  await assert.rejects(decodeImage(new Blob([pngHeader(20000, 20000)])), TooLargeError);
+
+  const sof = markers(JPEG).list.find(s => s.marker === 0xc0), at = sof.bytes.byteOffset - JPEG.byteOffset;
+  assert.deepEqual(jpeg.jpegSize(JPEG), { height: (sof.bytes[5] << 8) | sof.bytes[6], width: (sof.bytes[7] << 8) | sof.bytes[8] });
+  const big = JPEG.slice();
+  big.set([9000 >> 8, 9000 & 255, 8000 >> 8, 8000 & 255], at + 5);
+  assert.deepEqual(jpeg.jpegSize(big), { width: 8000, height: 9000 });
+  await assert.rejects(decodeImage(new Blob([big])), TooLargeError);
 });

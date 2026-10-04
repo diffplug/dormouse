@@ -321,17 +321,34 @@ test('history keeps patches and replaced rasters within its byte limit, oldest f
 });
 
 test('pieces give back the pixels an edit touched, the first keep of each pixel winning', () => {
-  const r = raster(5, 5), original = colors(r), pieces = new Pieces(r);
-  // Overlapping segments, each kept just before it is painted, as a brush stroke does.
-  assert.deepEqual(pieces.keep({ x: 1, y: 1, width: 2, height: 2 }), { x: 1, y: 1, width: 2, height: 2 });
-  px.fillRect(r, { x: 1, y: 1, width: 2, height: 2 }, RED);
-  assert.deepEqual(pieces.keep({ x: 2, y: 2, width: 9, height: 9 }), { x: 2, y: 2, width: 3, height: 3 });
-  px.fillRect(r, { x: 2, y: 2, width: 3, height: 3 }, BLUE);
-  assert.equal(pieces.keep({ x: 7, y: 7, width: 2, height: 2 }), null);
+  // One tile over the whole raster, and tiles smaller than the touches.
+  for (const tile of [64, 2]) {
+    const r = raster(5, 5), original = colors(r), pieces = new Pieces(r, tile);
+    // Overlapping segments, each kept just before it is painted, as a brush stroke does.
+    assert.deepEqual(pieces.keep({ x: 1, y: 1, width: 2, height: 2 }), { x: 1, y: 1, width: 2, height: 2 });
+    px.fillRect(r, { x: 1, y: 1, width: 2, height: 2 }, RED);
+    assert.deepEqual(pieces.keep({ x: 2, y: 2, width: 9, height: 9 }), { x: 2, y: 2, width: 3, height: 3 });
+    px.fillRect(r, { x: 2, y: 2, width: 3, height: 3 }, BLUE);
+    assert.equal(pieces.keep({ x: 7, y: 7, width: 2, height: 2 }), null);
 
-  assert.deepEqual(colors(pieces.before({ x: 0, y: 0, width: 5, height: 5 })), original);
-  const inner = pieces.before({ x: 2, y: 2, width: 2, height: 2 });
-  assert.deepEqual(colors(inner), Array(4).fill(WHITE.join(',')));
+    assert.deepEqual(colors(pieces.before({ x: 0, y: 0, width: 5, height: 5 })), original, `tile ${tile}`);
+    const inner = pieces.before({ x: 2, y: 2, width: 2, height: 2 });
+    assert.deepEqual(colors(inner), Array(4).fill(WHITE.join(',')));
+    pieces.restore();
+    assert.deepEqual(colors(r), original);
+  }
+});
+
+test('pieces keep each pixel once, however often a stroke touches it', () => {
+  // A long scribble with a wide brush: every segment's box overlaps the last.
+  const r = raster(256, 256), original = colors(r), pieces = new Pieces(r);
+  for (let i = 0; i < 2000; i++) {
+    const x = Math.round(96 + 64 * Math.sin(i / 40)), y = Math.round(96 + 64 * Math.cos(i / 55));
+    pieces.keep({ x, y, width: 64, height: 64 });
+    px.fillRect(r, { x, y, width: 64, height: 64 }, i % 2 ? RED : BLUE);
+  }
+  assert.ok(pieces.bytes <= r.data.byteLength, `kept ${pieces.bytes} bytes for a ${r.data.byteLength}-byte raster`);
+  assert.deepEqual(colors(pieces.before({ x: 0, y: 0, width: 256, height: 256 })), original);
   pieces.restore();
   assert.deepEqual(colors(r), original);
 });

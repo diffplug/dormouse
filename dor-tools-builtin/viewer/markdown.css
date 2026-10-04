@@ -36,11 +36,12 @@ body .mdxeditor-diff-source-wrapper{flex:1;min-height:0;display:flex;flex-direct
 body .mdxeditor-rich-text-editor,body .mdxeditor-source-editor{flex:1;min-height:0}
 body .mdxeditor-root-contenteditable{height:100%;overflow:auto}
 
-/* Toolbar: one dense row, matching the Monaco page's header. */
-body .mdxeditor-toolbar{border-radius:0;padding:2px 6px;gap:2px;min-height:32px;box-shadow:inset 0 -1px var(--baseLine);flex:none}
+/* Toolbar: one dense row, matching the Monaco page's header; when narrow it
+ * wraps, so the page's own controls (state, Reload, Save) never scroll away. */
+body .mdxeditor-toolbar{border-radius:0;padding:2px 6px;gap:2px;min-height:32px;box-shadow:inset 0 -1px var(--baseLine);flex:none;flex-wrap:wrap}
 body .mdxeditor-toolbar svg{width:18px;height:18px}
 body .mdxeditor-toolbar button{padding:2px}
-.controls{display:flex;align-items:center;gap:4px;margin-left:auto;padding-left:8px;white-space:nowrap}
+.controls{display:flex;align-items:center;gap:4px;margin-left:auto;padding-left:8px;white-space:nowrap;flex:none}
 .controls .state{opacity:.65;font-size:11px;margin-right:4px}
 .controls button,.mermaid-bar button,dialog button{font:inherit;font-size:12px;color:inherit;border:0;background:transparent;padding:3px 7px;border-radius:3px;cursor:pointer;white-space:nowrap}
 .controls button:hover,.mermaid-bar button:hover,dialog button:hover{background:var(--baseBgHover)}
@@ -115,7 +116,7 @@ body .mdxeditor-source-editor .cm-scroller{line-height:1.35}
 .mermaid-diagram svg{max-width:100%;height:auto}
 .mermaid-error{margin:0;padding:6px 8px;font-family:var(--font-mono);font-size:12px;white-space:pre-wrap;color:var(--vscode-errorForeground,CanvasText)}
 
-.images-panel{position:absolute;top:34px;right:6px;z-index:5;width:min(360px,calc(100% - 12px));max-height:60%;overflow:auto;padding:6px;background:var(--vscode-editorWidget-background,Canvas);color:var(--vscode-editor-foreground,CanvasText);border:1px solid var(--vscode-widget-border,var(--baseBorder,GrayText));border-radius:4px;box-shadow:0 4px 14px rgba(0,0,0,.25);font-size:12px}
+.images-panel{position:absolute;right:6px;z-index:5;width:min(360px,calc(100% - 12px));max-height:60%;overflow:auto;padding:6px;background:var(--vscode-editorWidget-background,Canvas);color:var(--vscode-editor-foreground,CanvasText);border:1px solid var(--vscode-widget-border,var(--baseBorder,GrayText));border-radius:4px;box-shadow:0 4px 14px rgba(0,0,0,.25);font-size:12px}
 .images-panel ul{list-style:none;margin:0;padding:0;display:grid;gap:4px}
 .images-panel li{display:grid;grid-template-columns:40px 1fr auto;grid-auto-rows:auto;align-items:center;column-gap:8px}
 .images-panel img{grid-row:span 3;width:40px;height:30px;object-fit:contain;background:var(--baseBgSubtle);border-radius:2px}
@@ -139,6 +140,8 @@ body .mdxeditor-source-editor .cm-scroller{line-height:1.35}
 /* The image editor over the whole page. */
 .image-overlay{position:absolute;inset:0;z-index:10;display:flex;flex-direction:column;background:var(--vscode-editor-background,Canvas)}
 .image-overlay-name{opacity:.65;font-size:11px;max-width:24ch;overflow:hidden;text-overflow:ellipsis;margin-right:2px}
+@container (max-width:760px){.image-overlay-name{max-width:12ch}}
+@container (max-width:640px){.image-overlay-name{display:none}}
 .image-overlay-pending{display:flex;align-items:center;gap:8px;padding:6px 12px}
 .image-overlay-pending .state{opacity:.65}
 .image-overlay-pending button{margin-left:auto;font:inherit;font-size:12px;color:inherit;border:0;background:transparent;padding:3px 7px;border-radius:3px;cursor:pointer}

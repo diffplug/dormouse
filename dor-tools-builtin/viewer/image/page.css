@@ -11,3 +11,5 @@ dialog button{font:inherit;font-size:12px;color:inherit;border:0;background:tran
 dialog button:hover{background:color-mix(in srgb,currentColor 10%,transparent)}
 
 .page-pending{padding:8px 12px}
+/* Save's own enabled state says whether there are edits once the row is tight. */
+@container (max-width:640px){.page-state{display:none}}
