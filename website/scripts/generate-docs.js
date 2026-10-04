@@ -582,7 +582,7 @@ const buildSelfHost = () =>
  * umbrella.
  */
 export const SECURITY_AUDIENCES = {
-  security: ['docs/specs/security-local.md', 'docs/specs/security-ci.md', 'docs/specs/security-audit.md'],
+  security: ['docs/specs/security-local.md', 'docs/specs/security-ci.md', 'docs/specs/security-audit.md', 'docs/specs/security-hosted.md'],
   'self-host': ['docs/specs/remote-security-model.md', 'docs/specs/security-remote.md', 'SELF_HOST.md'],
   'supply-chain': ['docs/specs/security-supply-chain.md'],
 };

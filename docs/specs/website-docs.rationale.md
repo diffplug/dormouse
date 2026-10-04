@@ -22,12 +22,6 @@ The SPA-fallback rule came from the fix making things briefly worse. `/changelog
 
 `/docs` redirects with a 302 rather than a 301 because its target is a judgement call expected to be revisited, and a 301 outlives it in readers' caches.
 
-Brand caramel measures 5.56:1 on the site's black but 3.43–3.78:1 on every bundled light theme, which is why prose links could not keep it once the docs pages started following the reader's theme.
-
-`--vscode-textLink-foreground` looked like the replacement and was not: none of the 11 bundled themes defines `textLink.foreground`, so the variable always resolves to the colour registry's default for the theme's *kind*. Every dark theme shared one blue.
-
-The theme's own `accent` varies per theme but cannot be used raw — measured against each theme's `--vscode-editor-background`, 7 of the 11 fall below 4.5:1 and four carry alpha. Hence the correction, which walks the accent toward whichever of white or black contrasts more and stops at the first step that clears the threshold. Direction is measured rather than taken from a luminance midpoint, which is not where the contrast crossover sits: `#808080` needs to darken, and a luminance test sends it toward white.
-
 Muted reference text originally used `opacity-50` through `opacity-80` over the picked foreground. On Solarized Light that reduced 5.03:1 base contrast to 2.01:1–3.40:1, including the Hosted signup disclosure. Several dark themes failed too. The opaque derived token walks the foreground toward its background only while the rounded returned color stays at or above 4.5:1. The base page, foreground-tinted cards, and caramel-tinted notes therefore derive separate muted tokens against the surfaces that actually carry them. Code spans share one token derived against all three places their own tint can stack: the base page, a card, or a note; deriving it against the base alone measured 4.16:1 in a card and 4.24:1 in a note on the site palette.
 
 The signup action originally reused the corrected link color on 10% and 20% tints of itself. Those composites pulled every bundled theme below AA, so its foreground is corrected against the stronger hover tint and checked on both.

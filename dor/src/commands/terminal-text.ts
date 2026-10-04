@@ -24,10 +24,17 @@ export function renderJson(payload: unknown): string {
   return `${JSON.stringify(payload, null, 2)}\n`;
 }
 
-/** What `dor tool` and `dor open` print for the host's answer. */
+/** `renderJson` for repo text: `JSON.stringify` escapes only C0, so DEL and C1
+ *  are escaped too, which leaves the parsed value unchanged. */
+export function renderPrintableJson(payload: unknown): string {
+  return renderJson(payload).replace(/[\x7f-\x9f]/g, escapeControl);
+}
+
+/** What `dor tool` and `dor open` print for the host's answer. Its command and
+ *  cwd come from repo config, so every output escapes C0, DEL, and C1. */
 export function renderToolResponse(response: ToolSurfaceResponse, json: boolean): string {
   if (json) {
-    return renderJson({
+    return renderPrintableJson({
       status: response.status,
       surface_id: response.surfaceId,
       surface_ref: response.surfaceRef,
@@ -37,7 +44,7 @@ export function renderToolResponse(response: ToolSurfaceResponse, json: boolean)
       key: response.key,
     });
   }
-  return `${response.status} ${response.surfaceRef}  ${JSON.stringify(response.command)}\n`;
+  return `${printable(`${response.status} ${response.surfaceRef}  ${JSON.stringify(response.command)}`)}\n`;
 }
 
 // The prerelease-style build tag: `<version>+<N>` when the build carries commits

@@ -51,7 +51,9 @@ const Z_ZOOMED = 40;
 /** The drop-preview overlay floats above every tiled/dying leaf (a drag can't start
  *  while a leaf is zoomed, so it never competes with `Z_ZOOMED`). */
 const Z_PREVIEW = 45;
-/** Reveal half a pane header of tiled layout around an elevated zoomed pane. */
+/** Reveal half a pane header of tiled layout around an elevated zoomed pane: the thin
+ *  perimeter plus the shadow read as "floating above the wall", not replacing it, so
+ *  the user trusts unzoom to put everything back. */
 export const LATH_ZOOM_MARGIN = PANE_HEADER_HEIGHT_PX / 2;
 /** Soft app-chrome halo separates the elevated pane from tiled content below. */
 export const LATH_ZOOM_SHADOW = ELEVATED_PANE_SHADOW;
@@ -600,6 +602,8 @@ export function LathHost({
         // pane inert while it fades.
         el.style.pointerEvents = animator.isDying(id) ? 'none' : '';
       }
+      // Inside the paint, before `pump` calls `notifyFrames`, so the selection ring
+      // measures the Terminal Context helper where it was just painted.
       lath.placeContext(paint);
     },
     [animator, lath, dragController],

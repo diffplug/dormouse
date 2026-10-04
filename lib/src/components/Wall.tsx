@@ -111,6 +111,7 @@ import {
 } from './wall/lath-wall-engine';
 import type { LeafMeta } from '../lib/lath/persistence';
 import { useToolServing } from './wall/use-tool-serving';
+import { useToolRunEnd } from './wall/use-tool-run-end';
 import { useToolReaper } from './wall/use-tool-reaper';
 import { rehydrateTool } from './wall/tool-reaper';
 import type { WallNav } from './wall/keyboard/types';
@@ -1745,6 +1746,7 @@ export function Wall({
   // A tool grows its browser when its command starts serving.
   const toolsPaused = useCallback(() => closingWorkspaceRef.current || isWorkspaceTransferPending(effectiveWorkspaceId), [effectiveWorkspaceId]);
   useToolServing({ lath, doorsRef, paused: toolsPaused });
+  useToolRunEnd({ lath, doorsRef, paused: toolsPaused });
   useToolReaper({ lath, doors, doorsRef, active, paused: toolsPaused });
 
   const previewSlot = usePreviewSlotPin(lath);
@@ -2327,6 +2329,8 @@ export function Wall({
   }), [previewSlot, addSplitPanel, minimizePane, enterTerminalMode, exitTerminalMode, requestKill, replaceSurface, buildDorSurfaces, createContentSurface, surfaceRefForId, resolveToolApproval, lath, nav]);
   const openContextPort = useCallback(async (id: string, entry: PortUrlEntry, mode: PortMode): Promise<void> => {
     const opening = terminalContextRef.current;
+    // Success dismisses only the context that asked; a failed or cancelled
+    // launch leaves it open, and a later context that replaced it stays.
     const dismiss = () => {
       if (terminalContextRef.current !== opening) return;
       cancelContextPortLaunches();
@@ -2344,6 +2348,8 @@ export function Wall({
     const provider = parseRenderMode(mode).provider;
     // Keep the persisted agent-browser suffix from before multiple providers.
     const key = `${id}:${entry.port}:${provider === 'agent-browser' ? 'agent' : provider ?? 'iframe'}`;
+    // Requests for one target run one at a time: a second waits for the first,
+    // then reuses what it placed.
     const pending = contextPortLaunches.current.get(key);
     if (pending) {
       await pending.done;
