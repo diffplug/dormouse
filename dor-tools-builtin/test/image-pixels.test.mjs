@@ -12,7 +12,7 @@ async function load(path) {
   return import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString('base64')}`);
 }
 const px = await load('../viewer/image/pixels.ts');
-const { History } = await load('../viewer/image/history.ts');
+const { History, Pieces } = await load('../viewer/image/history.ts');
 
 const WHITE = [255, 255, 255, 255], BLACK = [0, 0, 0, 255], RED = [255, 0, 0, 255], BLUE = [0, 0, 255, 255];
 
@@ -24,6 +24,12 @@ function raster(width, height, color = WHITE) {
 const at = (r, x, y) => px.pixel(r, x, y);
 /** Every pixel's color, packed into strings for whole-raster comparisons. */
 const colors = r => Array.from({ length: r.width * r.height }, (_, i) => r.data.slice(i * 4, i * 4 + 4).join(','));
+/** The bucket: fills the flood region, returning its bounds. */
+function floodFill(r, x, y, color, tolerance) {
+  const region = px.floodRegion(r, x, y, color, tolerance);
+  if (region) px.fillSelection(r, region.rect, region.mask, color);
+  return region?.rect ?? null;
+}
 
 test('pixel and toHex read the eyedropper color', () => {
   const r = raster(2, 2);
@@ -37,17 +43,17 @@ test('pixel and toHex read the eyedropper color', () => {
 test('flood fill takes exactly the seed color at tolerance 0, and near colors within tolerance', () => {
   const r = raster(5, 1);
   px.fillRect(r, { x: 2, y: 0, width: 1, height: 1 }, [250, 255, 255, 255]);
-  assert.deepEqual(px.floodFill(r, 0, 0, RED, 0), { x: 0, y: 0, width: 2, height: 1 });
+  assert.deepEqual(floodFill(r, 0, 0, RED, 0), { x: 0, y: 0, width: 2, height: 1 });
   assert.deepEqual(at(r, 2, 0), [250, 255, 255, 255]);
   assert.deepEqual(at(r, 3, 0), WHITE);
 
   const s = raster(5, 1);
   px.fillRect(s, { x: 2, y: 0, width: 1, height: 1 }, [250, 255, 255, 255]);
-  assert.deepEqual(px.floodFill(s, 0, 0, RED, 5), { x: 0, y: 0, width: 5, height: 1 });
+  assert.deepEqual(floodFill(s, 0, 0, RED, 5), { x: 0, y: 0, width: 5, height: 1 });
   assert.ok(colors(s).every(c => c === RED.join(',')));
   const t = raster(3, 1);
   px.fillRect(t, { x: 1, y: 0, width: 1, height: 1 }, [249, 255, 255, 255]);
-  px.floodFill(t, 0, 0, RED, 5);
+  floodFill(t, 0, 0, RED, 5);
   assert.deepEqual(at(t, 2, 0), WHITE, 'the tolerance is against the seed, not a neighbor');
 });
 
@@ -56,7 +62,7 @@ test('flood fill is 4-connected, stays inside walls, and reports the filled boun
   const r = raster(7, 7);
   px.fillRect(r, { x: 1, y: 1, width: 5, height: 5 }, BLACK);
   px.fillRect(r, { x: 2, y: 2, width: 3, height: 3 }, WHITE);
-  assert.deepEqual(px.floodFill(r, 3, 3, RED), { x: 2, y: 2, width: 3, height: 3 });
+  assert.deepEqual(floodFill(r, 3, 3, RED), { x: 2, y: 2, width: 3, height: 3 });
   assert.deepEqual(at(r, 0, 0), WHITE);
   assert.deepEqual(at(r, 1, 1), BLACK);
 
@@ -64,20 +70,30 @@ test('flood fill is 4-connected, stays inside walls, and reports the filled boun
   const d = raster(2, 2);
   px.fillRect(d, { x: 1, y: 0, width: 1, height: 1 }, BLACK);
   px.fillRect(d, { x: 0, y: 1, width: 1, height: 1 }, BLACK);
-  assert.deepEqual(px.floodFill(d, 0, 0, RED), { x: 0, y: 0, width: 1, height: 1 });
+  assert.deepEqual(floodFill(d, 0, 0, RED), { x: 0, y: 0, width: 1, height: 1 });
   assert.deepEqual(at(d, 1, 1), WHITE);
 
   // The outside field wraps around the ring to every edge.
-  assert.deepEqual(px.floodFill(r, 0, 0, BLUE), { x: 0, y: 0, width: 7, height: 7 });
+  assert.deepEqual(floodFill(r, 0, 0, BLUE), { x: 0, y: 0, width: 7, height: 7 });
   assert.deepEqual(at(r, 6, 6), BLUE);
 });
 
 test('flood fill is a no-op off the raster or on a seed already the fill color', () => {
   const r = raster(3, 3, RED);
   const before = colors(r);
-  assert.equal(px.floodFill(r, 1, 1, RED, 0), null);
-  assert.equal(px.floodFill(r, -1, 1, BLUE, 0), null);
-  assert.equal(px.floodFill(r, 3, 0, BLUE, 0), null);
+  assert.equal(floodFill(r, 1, 1, RED, 0), null);
+  assert.equal(floodFill(r, -1, 1, BLUE, 0), null);
+  assert.equal(floodFill(r, 3, 0, BLUE, 0), null);
+  assert.deepEqual(colors(r), before);
+});
+
+test('floodRegion finds the region without painting it, so its pixels can be kept first', () => {
+  const r = raster(4, 2);
+  px.fillRect(r, { x: 2, y: 0, width: 1, height: 2 }, BLACK);
+  const before = colors(r);
+  const region = px.floodRegion(r, 0, 0, RED);
+  assert.deepEqual(region.rect, { x: 0, y: 0, width: 2, height: 2 });
+  assert.deepEqual(Array.from(region.mask), [1, 1, 0, 0, 1, 1, 0, 0]);
   assert.deepEqual(colors(r), before);
 });
 
@@ -85,7 +101,7 @@ test('flood fill covers a 4000×4000 maze-like image without overflowing the sta
   const size = 4000, r = raster(size, size);
   // Vertical walls with alternating gaps make one long serpentine region.
   for (let x = 1; x < size; x += 2) px.fillRect(r, { x, y: (x >> 1) % 2 ? 0 : 1, width: 1, height: size - 1 }, BLACK);
-  const bounds = px.floodFill(r, 0, 0, RED);
+  const bounds = floodFill(r, 0, 0, RED);
   assert.deepEqual(bounds, { x: 0, y: 0, width: size, height: size });
   assert.deepEqual(at(r, size - 2, size - 1), RED);
   assert.deepEqual(at(r, size - 1, size - 1), RED, 'the last wall\'s gap');
@@ -95,7 +111,7 @@ test('flood fill covers a 4000×4000 maze-like image without overflowing the sta
 test('drawLine writes only full target-color pixels and connects endpoints diagonally', () => {
   for (const [size, shape] of [[1, 'square'], [3, 'square'], [4, 'round'], [5, 'round']]) {
     const r = px.createRaster(20, 20);
-    px.drawLine(r, 2.6, 3.2, 15, 11, size, RED, shape);
+    px.drawLine(r, 2.6, 3.2, 15, 11, px.stamp(size, shape), RED);
     for (const c of colors(r)) assert.ok(c === '0,0,0,0' || c === RED.join(','), `${size} ${shape}: ${c}`);
     assert.deepEqual(at(r, 2, 3), RED);
     assert.deepEqual(at(r, 15, 11), RED);
@@ -103,27 +119,40 @@ test('drawLine writes only full target-color pixels and connects endpoints diago
 
   // A one-pixel diagonal is exactly the diagonal: each step moves on both axes.
   const d = px.createRaster(6, 6);
-  px.drawLine(d, 0, 0, 5, 5, 1, RED);
+  px.drawLine(d, 0, 0, 5, 5, px.stamp(1, 'square'), RED);
   const painted = colors(d).flatMap((c, i) => c === '0,0,0,0' ? [] : [[i % 6, Math.floor(i / 6)]]);
   assert.deepEqual(painted, [[0, 0], [1, 1], [2, 2], [3, 3], [4, 4], [5, 5]]);
 
   // A shallow line has one pixel per column with no gaps.
   const s = px.createRaster(10, 4);
-  px.drawLine(s, 9, 3, 0, 0, 1, RED);
+  px.drawLine(s, 9, 3, 0, 0, px.stamp(1, 'square'), RED);
   for (let x = 0; x < 10; x++) assert.equal([0, 1, 2, 3].filter(y => at(s, x, y)[3]).length, 1, `column ${x}`);
 });
 
 test('drawLine stamps square and round brushes and clips at the edges', () => {
   const square = px.createRaster(5, 5), round = px.createRaster(5, 5);
-  px.drawLine(square, 2, 2, 2, 2, 3, RED, 'square');
-  px.drawLine(round, 2, 2, 2, 2, 3, RED, 'round');
+  px.drawLine(square, 2, 2, 2, 2, px.stamp(3, 'square'), RED);
+  px.drawLine(round, 2, 2, 2, 2, px.stamp(3, 'round'), RED);
   assert.equal(colors(square).filter(c => c !== '0,0,0,0').length, 9);
   assert.equal(colors(round).filter(c => c !== '0,0,0,0').length, 5);
   assert.equal(at(round, 1, 1)[3], 0);
 
   const edge = px.createRaster(3, 3);
-  px.drawLine(edge, -5, 1, 10, 1, 1, RED);
+  px.drawLine(edge, -5, 1, 10, 1, px.stamp(1, 'square'), RED);
   assert.deepEqual([0, 1, 2].map(x => at(edge, x, 1)), [RED, RED, RED]);
+});
+
+test('drawLine returns the rectangle it painted, clipped, and null when it painted nothing', () => {
+  for (const [size, shape] of [[1, 'square'], [4, 'square'], [5, 'round']]) {
+    const r = px.createRaster(20, 20);
+    const painted = px.drawLine(r, 3, 15, 12.5, 6, px.stamp(size, shape), RED);
+    const xs = [], ys = [];
+    colors(r).forEach((c, i) => { if (c !== '0,0,0,0') { xs.push(i % 20); ys.push(Math.floor(i / 20)); } });
+    const x = Math.min(...xs), y = Math.min(...ys);
+    assert.deepEqual(painted, { x, y, width: Math.max(...xs) - x + 1, height: Math.max(...ys) - y + 1 }, `${size} ${shape}`);
+  }
+  assert.deepEqual(px.drawLine(px.createRaster(4, 4), -3, 1, 1, 1, px.stamp(3, 'square'), RED), { x: 0, y: 0, width: 3, height: 3 });
+  assert.equal(px.drawLine(px.createRaster(4, 4), -9, -9, -5, -5, px.stamp(3, 'square'), RED), null);
 });
 
 test('polygonMask selects the pixels whose centers fall inside a triangle', () => {
@@ -134,7 +163,7 @@ test('polygonMask selects the pixels whose centers fall inside a triangle', () =
   assert.equal(px.polygonMask(4, 4, [{ x: 0, y: 0 }, { x: 4, y: 4 }]).some(Boolean), false);
 });
 
-test('lifting a selection fills the hole with the ring\'s dominant color', () => {
+test('erasing a selection fills the hole with the ring\'s dominant color', () => {
   // A blue 2×2 square on white, with one red pixel in the ring around it.
   const r = raster(6, 6);
   px.fillRect(r, { x: 2, y: 2, width: 2, height: 2 }, BLUE);
@@ -143,27 +172,31 @@ test('lifting a selection fills the hole with the ring\'s dominant color', () =>
   const rect = { x: 2, y: 2, width: 2, height: 2 };
   assert.deepEqual(px.dominantBorderColor(r, rect), WHITE);
 
-  const lifted = px.liftSelection(r, rect);
-  assert.deepEqual(lifted.at, rect);
-  assert.deepEqual(colors(lifted.pixels), Array(4).fill(BLUE.join(',')));
+  const lifted = px.copyRegion(r, rect);
+  px.eraseSelection(r, rect);
+  assert.deepEqual(colors(lifted), Array(4).fill(BLUE.join(',')));
   assert.deepEqual([at(r, 2, 2), at(r, 3, 3)], [WHITE, WHITE]);
   assert.deepEqual(at(r, 1, 1), RED);
 
   // Pasting the lift back elsewhere moves it; a lasso lift is transparent outside its mask.
-  px.paste(r, lifted.pixels, 4, 4);
+  px.paste(r, lifted, 4, 4);
   assert.deepEqual(at(r, 5, 5), BLUE);
   const s = raster(4, 4, BLUE);
   px.fillRect(s, { x: 0, y: 0, width: 4, height: 1 }, RED);
   px.fillRect(s, { x: 1, y: 1, width: 1, height: 1 }, BLACK);
-  const mask = px.polygonMask(4, 4, [{ x: 1, y: 1 }, { x: 4, y: 1 }, { x: 1, y: 4 }]);
-  const tri = px.liftSelection(s, px.maskBounds(mask, 4, 4), mask);
+  const mask = px.polygonMask(4, 4, [{ x: 1, y: 1 }, { x: 4, y: 1 }, { x: 1, y: 4 }]), bounds = px.maskBounds(mask, 4, 4);
+  const tri = px.copyRegion(s, bounds, mask);
+  px.eraseSelection(s, bounds, mask);
   assert.deepEqual(at(s, 1, 1), BLUE, 'the ring outside a lasso includes the unselected bounding-box pixels');
-  assert.deepEqual(at(tri.pixels, 0, 0), BLACK);
-  assert.deepEqual([tri.pixels.width, tri.pixels.height], [2, 2]);
-  assert.deepEqual(at(tri.pixels, 0, 1), BLUE);
-  assert.equal(at(tri.pixels, 1, 1)[3], 0);
+  assert.deepEqual(at(tri, 0, 0), BLACK);
+  assert.deepEqual([tri.width, tri.height], [2, 2]);
+  assert.deepEqual(at(tri, 0, 1), BLUE);
+  assert.equal(at(tri, 1, 1)[3], 0);
   assert.deepEqual(at(s, 2, 2), BLUE, 'unmasked pixels stay');
   assert.equal(px.dominantBorderColor(s, { x: 0, y: 0, width: 4, height: 4 }), null);
+  const all = raster(2, 2, RED);
+  px.eraseSelection(all, { x: 0, y: 0, width: 2, height: 2 });
+  assert.ok(colors(all).every(c => c === '0,0,0,0'), 'with no ring, the hole is transparent');
 });
 
 test('insertSeam opens a band of replicated edge pixels and removeSeam takes it back', () => {
@@ -222,6 +255,7 @@ test('blit copies every pixel, transparent ones too, clipped to the raster; unio
   assert.deepEqual(at(r, 0, 0), [0, 0, 0, 0]);
   px.blit(r, src, 5, 0);
   assert.deepEqual(px.unionRect({ x: 1, y: 2, width: 2, height: 1 }, { x: 0, y: 4, width: 1, height: 1 }), { x: 0, y: 2, width: 3, height: 3 });
+  assert.deepEqual(px.unionRect(null, { x: 1, y: 2, width: 3, height: 4 }), { x: 1, y: 2, width: 3, height: 4 });
 });
 
 /** An in-place edit of `doc`'s raster, filling `rect` with `color`, committed as a patch. */
@@ -229,7 +263,7 @@ function patchFill(history, rect, color) {
   const r = history.current.raster, before = px.crop(r, rect);
   px.fillRect(r, rect, color);
   const doc = { raster: r, objects: history.current.objects };
-  history.commit(doc, { rect, before, after: px.crop(r, rect) });
+  history.commit(doc, { rect, before });
   return doc;
 }
 
@@ -242,22 +276,24 @@ test('history undoes and redoes in-place patches and whole-raster replacements i
   h.commit(cropped);
   const after = colors(cropped.raster);
 
-  assert.ok(h.undo());
+  assert.deepEqual(h.undo(), {}, 'a replaced raster comes back whole');
   assert.equal(h.current, filled);
   assert.deepEqual([at(h.current.raster, 0, 0), at(h.current.raster, 1, 1), at(h.current.raster, 3, 3)], [RED, BLUE, BLUE]);
-  assert.ok(h.undo());
+  assert.deepEqual(h.undo(), { rect: { x: 1, y: 1, width: 3, height: 3 } }, 'a patch reports the rectangle it changed');
   assert.equal(h.current, painted);
   assert.deepEqual([at(h.current.raster, 1, 1), at(h.current.raster, 3, 3)], [RED, WHITE]);
   assert.ok(h.undo());
   assert.equal(h.current, original);
   assert.ok(colors(h.current.raster).every(c => c === WHITE.join(',')));
-  assert.equal(h.undo(), false);
+  assert.equal(h.undo(), null);
 
-  assert.ok(h.redo() && h.redo() && h.redo());
+  assert.deepEqual(h.redo(), { rect: { x: 0, y: 0, width: 2, height: 2 } });
+  assert.deepEqual([at(h.current.raster, 1, 1), at(h.current.raster, 2, 2)], [RED, WHITE]);
+  assert.ok(h.redo() && h.redo());
   assert.equal(h.current, cropped);
   assert.deepEqual(colors(h.current.raster), after);
   assert.deepEqual(at(filled.raster, 3, 3), BLUE, 'the replaced raster holds its last revision');
-  assert.equal(h.redo(), false);
+  assert.equal(h.redo(), null);
 
   // A new edit after an undo drops the redo.
   h.undo();
@@ -266,8 +302,8 @@ test('history undoes and redoes in-place patches and whole-raster replacements i
 });
 
 test('history keeps patches and replaced rasters within its byte limit, oldest first', () => {
-  // Each 1×1 patch holds 8 bytes (before and after); a replaced 4×4 raster, 64.
-  const h = new History({ raster: raster(4, 4), objects: [] }, 24);
+  // Each 1×1 patch holds 4 bytes, one side of it at a time; a replaced 4×4 raster, 64.
+  const h = new History({ raster: raster(4, 4), objects: [] }, 12);
   for (const x of [0, 1, 2, 3]) patchFill(h, { x, y: 0, width: 1, height: 1 }, RED);
   let undos = 0;
   while (h.undo()) undos++;
@@ -282,4 +318,20 @@ test('history keeps patches and replaced rasters within its byte limit, oldest f
   assert.equal(big.canUndo, true);
   big.undo();
   assert.equal(big.canUndo, false, 'the replaced raster went first once over the limit');
+});
+
+test('pieces give back the pixels an edit touched, the first keep of each pixel winning', () => {
+  const r = raster(5, 5), original = colors(r), pieces = new Pieces(r);
+  // Overlapping segments, each kept just before it is painted, as a brush stroke does.
+  assert.deepEqual(pieces.keep({ x: 1, y: 1, width: 2, height: 2 }), { x: 1, y: 1, width: 2, height: 2 });
+  px.fillRect(r, { x: 1, y: 1, width: 2, height: 2 }, RED);
+  assert.deepEqual(pieces.keep({ x: 2, y: 2, width: 9, height: 9 }), { x: 2, y: 2, width: 3, height: 3 });
+  px.fillRect(r, { x: 2, y: 2, width: 3, height: 3 }, BLUE);
+  assert.equal(pieces.keep({ x: 7, y: 7, width: 2, height: 2 }), null);
+
+  assert.deepEqual(colors(pieces.before({ x: 0, y: 0, width: 5, height: 5 })), original);
+  const inner = pieces.before({ x: 2, y: 2, width: 2, height: 2 });
+  assert.deepEqual(colors(inner), Array(4).fill(WHITE.join(',')));
+  pieces.restore();
+  assert.deepEqual(colors(r), original);
 });

@@ -10,39 +10,26 @@ export type EditableMime = 'image/png' | 'image/jpeg';
 /** An image file as the editor opens it. */
 export interface LoadedImage { raster: Raster; mime: EditableMime }
 
-/** The pixels of an image file, exactly as stored (no premultiplication or
- * color conversion where the browser honors the request). The page's CSP has
- * no `blob:` images, so this decodes without an `<img>`. */
-async function decodeImage(blob: Blob): Promise<Raster> {
+/** An image file's pixels, exactly as stored (no premultiplication or color
+ * conversion where the browser honors the request), and the format a save
+ * keeps. The page's CSP has no `blob:` images, so this decodes without an `<img>`. */
+export async function decodeImage(blob: Blob): Promise<LoadedImage> {
   const bitmap = await createImageBitmap(blob, { premultiplyAlpha: 'none', colorSpaceConversion: 'none' });
-  try { return rasterFromBitmap(bitmap); } finally { bitmap.close(); }
+  try {
+    const { width, height } = bitmap, canvas = document.createElement('canvas');
+    canvas.width = width; canvas.height = height;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
+    ctx.drawImage(bitmap, 0, 0);
+    return { raster: { width, height, data: ctx.getImageData(0, 0, width, height).data }, mime: blob.type === 'image/jpeg' ? 'image/jpeg' : 'image/png' };
+  } finally { bitmap.close(); }
 }
 
-export function rasterFromBitmap(bitmap: ImageBitmap): Raster {
-  const canvas = document.createElement('canvas');
-  canvas.width = bitmap.width; canvas.height = bitmap.height;
-  const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
-  ctx.drawImage(bitmap, 0, 0);
-  const { data } = ctx.getImageData(0, 0, bitmap.width, bitmap.height);
-  return { width: bitmap.width, height: bitmap.height, data };
-}
-
-/** GETs and decodes an editable image, with the revision it is at. */
-async function loadImage(path: string): Promise<LoadedImage & { version: string }> {
-  const response = await checked(await fetch(path, { cache: 'no-store' }));
-  const blob = await response.blob();
-  return {
-    raster: await decodeImage(blob),
-    mime: blob.type === 'image/jpeg' ? 'image/jpeg' : 'image/png',
-    version: response.headers.get(VERSION_HEADER) ?? '',
-  };
-}
-
-/** An image document read from the route `load` and written to `save`, under `name`. */
-export const imageSource = (load: string, save: string, name: string): DocumentSource<Blob, LoadedImage> => ({
+/** An image document read from the route `load` and written to `save`, under
+ * `name`: its bytes, which the editor decodes. */
+export const imageSource = (load: string, save: string, name: string): DocumentSource<Blob> => ({
   async load() {
-    const { version, ...image } = await loadImage(load);
-    return { content: image, version, name };
+    const response = await checked(await fetch(load, { cache: 'no-store' }));
+    return { content: await response.blob(), version: response.headers.get(VERSION_HEADER) ?? '', name };
   },
   async save(blob, version) {
     const response = await checked(await fetch(`${save}?version=${encodeURIComponent(version)}`, {

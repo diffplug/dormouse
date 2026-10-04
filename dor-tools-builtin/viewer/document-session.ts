@@ -2,10 +2,12 @@ import { connectToolFrame } from 'dor-tools-lib/frame';
 
 /** What the page shows: whether a document is loaded, has unsaved edits, or is saving. */
 export interface DocumentState { loaded: boolean; dirty: boolean; saving: boolean }
+/** A document's state before its first load lands. */
+export const loadingState: DocumentState = { loaded: false, dirty: false, saving: false };
 
-/** One editor's view of an opened document. It saves `Content` (the file's
- * text, or an image's bytes) and is given `Loaded` (the same, or decoded pixels). */
-export interface DocumentEditor<Mark, Content = string, Loaded = Content> {
+/** One editor's view of an opened document, whose contents are `Content`:
+ * the file's text, or an image's bytes. */
+export interface DocumentEditor<Mark, Content = string> {
   /** The contents to save and a mark naming the revision they came from. */
   snapshot(): { content: Content | Promise<Content>; mark: Mark };
   /** The current revision's mark, when naming it is cheaper than a snapshot. */
@@ -13,18 +15,19 @@ export interface DocumentEditor<Mark, Content = string, Loaded = Content> {
   /** Whether the editor still holds the revision `mark` names. */
   holds(mark: Mark): boolean;
   /** Replaces the editor's contents with the file's. */
-  apply(content: Loaded, name: string): void | Promise<void>;
+  apply(content: Content, name: string): void | Promise<void>;
 }
 
 /** How a page reads and writes a document's contents. */
-export interface DocumentSource<Content, Loaded = Content> {
-  load(): Promise<{ content: Loaded; version: string; name: string }>;
+export interface DocumentSource<Content> {
+  load(): Promise<{ content: Content; version: string; name: string }>;
   /** Writes `content` over revision `version`; resolves to the new revision. */
   save(content: Content, version: string): Promise<{ version: string }>;
 }
 
 /** Where a page shows one document's state and errors. */
 export interface DocumentView {
+  /** Shows the document's state, each time it changes. */
   report(state: DocumentState): void;
   /** Shows `text` as the document's error, or clears it when null. */
   fail(text: string | null): void;
@@ -54,8 +57,6 @@ export const textSource: DocumentSource<string> = {
 
 export const message = (reason: unknown) => reason instanceof Error ? reason.message : String(reason);
 
-export const sameState = (a: DocumentState, b: DocumentState) => a.loaded === b.loaded && a.dirty === b.dirty && a.saving === b.saving;
-
 /** The status the pages show beside Save. */
 export const stateLabel = ({ loaded, dirty, saving }: DocumentState) =>
   !loaded ? 'Loading…' : saving ? 'Saving…' : dirty ? 'Unsaved' : 'Saved';
@@ -74,7 +75,7 @@ export function confirmDiscard(dialog = document.getElementById('confirm') as HT
 export interface OpenDocument {
   /** Whether the first load has landed. */
   loaded(): boolean;
-  /** Whether the editor moved off the saved revision. */
+  /** Whether the editor had moved off the saved revision when it last reported. */
   dirty(): boolean;
   /** Reads the file into the editor; shows a failure. */
   load(): Promise<void>;
@@ -97,8 +98,7 @@ export interface OpenDocument {
 
 export interface DocumentPage {
   /** Opens a document in front of the page's others. */
-  open<Mark, Content = string, Loaded = Content>(editor: DocumentEditor<Mark, Content, Loaded>, view: DocumentView,
-    source: DocumentSource<Content, Loaded>): OpenDocument;
+  open<Mark, Content = string>(editor: DocumentEditor<Mark, Content>, view: DocumentView, source: DocumentSource<Content>): OpenDocument;
 }
 
 /** A built-in editor page (docs/specs/dor-tools-builtin.md -> Editing files)
@@ -108,7 +108,8 @@ export interface DocumentPage {
  * containing iframe at once and to the Tool's OSC 367 stream in order; the
  * host's close-prompt save writes them all. */
 export function documentPage(): DocumentPage {
-  /** The page's own document first; the last is in front. */
+  /** The page's own document first; the last is in front. Each one's
+   * `dirty()` is as it last reported, so the page reads no editor here. */
   const documents: OpenDocument[] = [];
   let lastDirty: boolean | undefined;
   let stateQueue = Promise.resolve();
@@ -162,17 +163,20 @@ export function documentPage(): DocumentPage {
   };
 }
 
-function openDocument<Mark, Content, Loaded>(editor: DocumentEditor<Mark, Content, Loaded>, view: DocumentView,
-  source: DocumentSource<Content, Loaded>, onReport: () => void, onClose: () => void): OpenDocument {
+function openDocument<Mark, Content>(editor: DocumentEditor<Mark, Content>, view: DocumentView,
+  source: DocumentSource<Content>, onReport: () => void, onClose: () => void): OpenDocument {
   let version = '';
   let saved: { mark: Mark } | undefined;
   let saving: Promise<void> | null = null;
+  /** As last reported; undefined before the first report. */
+  let shown: DocumentState | undefined;
   const fail = (reason: unknown) => view.fail(message(reason));
   const dirty = () => !!saved && !editor.holds(saved.mark);
   const current = () => editor.mark ? editor.mark() : editor.snapshot().mark;
 
   function report() {
-    view.report({ loaded: !!saved, dirty: dirty(), saving: saving !== null });
+    const state = { loaded: !!saved, dirty: dirty(), saving: saving !== null };
+    if (!shown || state.loaded !== shown.loaded || state.dirty !== shown.dirty || state.saving !== shown.saving) view.report(shown = state);
     onReport();
   }
   function write(): Promise<void> {
@@ -189,15 +193,16 @@ function openDocument<Mark, Content, Loaded>(editor: DocumentEditor<Mark, Conten
   }
   async function load() {
     const file = await source.load();
-    version = file.version;
     await editor.apply(file.content, file.name);
+    // After applying: a file the editor cannot take leaves the revision its contents came from.
+    version = file.version;
     saved = { mark: current() };
     report();
   }
 
   return {
     loaded: () => !!saved,
-    dirty,
+    dirty: () => !!shown?.dirty,
     load: () => load().catch(fail),
     save: () => write().catch(() => {}),
     write,

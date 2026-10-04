@@ -65,7 +65,7 @@ const session = documentPage().open<number>({
   },
 }, {
   report(state) {
-    saveButton.disabled = !state.loaded || !state.dirty || state.saving;
+    saveButton.disabled = !state.dirty || state.saving;
     el('state').textContent = stateLabel(state);
   },
   fail(text) {

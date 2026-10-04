@@ -5,8 +5,9 @@ import * as px from './pixels';
 import type { Mask, Point, Raster, Rect, Rgba } from './pixels';
 import * as ob from './objects';
 import type { Shape } from './objects';
-import { History, type Doc, type Patch } from './history';
+import { History, Pieces, type Applied, type Doc, type Patch } from './history';
 import { center, clampView, fitView, stepZoom, zoomAt, type View } from './view';
+import { Signal } from '../signal';
 
 export type Tool =
   | 'select' | 'arrow' | 'rect' | 'ellipse' | 'text' | 'callout' | 'highlight' | 'redact' | 'crop'
@@ -24,31 +25,34 @@ const ZOOM_KEYS = new Map<string, (c: EditorController) => void>([
   ['0', c => c.fit()], ['1', c => c.actualSize()], ['=', c => c.zoomStep(1)], ['+', c => c.zoomStep(1)], ['-', c => c.zoomStep(-1)],
 ]);
 
-/** Pixels lifted off the raster, shown at (x, y) above `base` until committed.
- * `base` is the document's raster, or a private copy differing from it within `changed`. */
-interface Floating { pixels: Raster; x: number; y: number; base: Raster; changed?: Rect }
+/** One in-place edit of the document's raster, undone as one step. */
+interface PixelEdit {
+  /** Keeps `rect`'s pixels, then lets `paint` change them and shows the
+   * change: within the rectangle `paint` returns, when it returns one. */
+  touch(rect: Rect, paint: (r: Raster) => Rect | null | undefined): void;
+  /** Records the edit for undo; false when it changed nothing. */
+  commit(): boolean;
+  /** Puts back every pixel the edit changed. */
+  cancel(): void;
+}
+/** Pixels lifted off the raster, shown at (x, y) above it until committed;
+ * `edit` holds what the raster under them changed since (the hole, any stamps). */
+interface Floating { pixels: Raster; x: number; y: number; edit: PixelEdit }
 interface PixelSelection { rect: Rect; mask?: Mask; outline?: readonly Point[]; floating?: Floating }
 interface Drag { move(p: Point, e: PointerEvent): void; up(p: Point, e: PointerEvent): void; cancel?(): void }
 interface TextEdit { id: string | null; x: number; y: number; text: string }
 
-const cloneRaster = (r: Raster): Raster => ({ width: r.width, height: r.height, data: r.data.slice() });
 const hexToRgba = (hex: string): Rgba =>
   [parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16), 255];
 const imageData = (r: Raster) => new ImageData(r.data as Uint8ClampedArray<ArrayBuffer>, r.width, r.height);
 const inside = (r: Rect, p: Point) => p.x >= r.x && p.y >= r.y && p.x < r.x + r.width && p.y < r.y + r.height;
+const floatRect = (f: Floating): Rect => ({ x: f.x, y: f.y, width: f.pixels.width, height: f.pixels.height });
 /** The handle in `list` within grabbing distance of `p`. */
 const handleAt = <H extends Point>(list: readonly H[], p: Point, slop: number) => list.find(h => Math.hypot(h.x - p.x, h.y - p.y) <= slop * 1.5);
 /** (dx, dy) along its longer axis only, when `lock` (⇧ held). */
 const lockAxis = (dx: number, dy: number, lock: boolean): [number, number] =>
   !lock ? [dx, dy] : Math.abs(dx) > Math.abs(dy) ? [dx, 0] : [0, dy];
 const samePoint = (a: Point | null, b: Point | null) => a?.x === b?.x && a?.y === b?.y;
-
-/** Listeners to one kind of change, for `useSyncExternalStore`. */
-class Signal {
-  private readonly listeners = new Set<() => void>();
-  subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
-  emit() { for (const listener of this.listeners) listener(); }
-}
 
 /** Snaps `q` to the nearest 45° from `a`. */
 function snap45(a: Point, q: Point): Point {
@@ -105,6 +109,7 @@ export class EditorController {
   private shownFloat: Raster | null = null;
   private readonly changes = new Signal();
   private readonly cursorMoves = new Signal();
+  private readonly zoomChanges = new Signal();
   /** The raster size the view last laid out, to refit a fitted view when it changes. */
   private shownSize: { width: number; height: number };
 
@@ -118,13 +123,15 @@ export class EditorController {
   get doc(): Doc { return this.history.current; }
   get floating(): Floating | null { return this.sel?.floating ?? null; }
   objects(): readonly Shape[] { return this.live ?? this.doc.objects; }
-  raster(): Raster { return this.floating?.base ?? this.doc.raster; }
   selected(): Shape | undefined { return this.selectedId ? this.objects().find(s => s.id === this.selectedId) : undefined; }
 
   subscribe = this.changes.subscribe;
   getVersion = () => this.version;
   subscribeCursor = this.cursorMoves.subscribe;
   getCursorText = () => this.cursorText;
+  /** For the zoom readout: changes only with the zoom or fit. */
+  subscribeZoom = this.zoomChanges.subscribe;
+  getView = () => this.view;
   private notify() { this.version++; this.changes.emit(); }
   /** Re-renders the chrome and repaints the canvas. */
   private refresh() { this.notify(); this.paint(); }
@@ -147,11 +154,37 @@ export class EditorController {
   private setRaster(raster: Raster, objects = this.doc.objects) {
     if (raster.width && raster.height) this.commit({ raster, objects });
   }
-  /** Commits an edit made in place to the document's raster, which changed
-   * only `rect` (clipped) from `before`; the caller has synced the view. */
-  private commitPatch(rect: Rect, before: Raster) {
-    const r = this.doc.raster;
-    this.commit({ raster: r, objects: this.doc.objects }, { rect, before, after: px.crop(r, rect) });
+  /** Starts an in-place edit of the document's raster: every pixel change
+   * comes through one, so the view's copy and the undo history follow it. */
+  private pixelEdit(): PixelEdit {
+    const r = this.doc.raster, pieces = new Pieces(r);
+    let dirty: Rect | null = null;
+    return {
+      touch: (rect, paint) => {
+        const kept = pieces.keep(rect);
+        if (!kept) return;
+        const painted = paint(r);
+        const changed = painted === undefined ? kept : painted;
+        if (!changed) return;
+        dirty = px.unionRect(dirty, changed);
+        this.syncRaster(r, changed);
+      },
+      commit: () => {
+        if (!dirty) return false;
+        this.commit({ raster: r, objects: this.doc.objects }, { rect: dirty, before: pieces.before(dirty) });
+        return true;
+      },
+      cancel: () => {
+        pieces.restore();
+        this.syncRaster(r, dirty);
+      },
+    };
+  }
+  /** A one-shot `pixelEdit`; false when it changed nothing. */
+  private edit(rect: Rect, paint: (r: Raster) => Rect | null | undefined) {
+    const edit = this.pixelEdit();
+    edit.touch(rect, paint);
+    return edit.commit();
   }
 
   get canUndo() { return !!this.floating || this.history.canUndo; }
@@ -162,18 +195,24 @@ export class EditorController {
     const f = this.floating;
     if (f) {
       this.sel = null;
-      this.syncRaster(this.doc.raster, f.changed, f.base);
+      f.edit.cancel();
       this.afterDoc();
       return;
     }
-    // Undo patches the raster in place: the view uploads it whole.
-    if (this.history.undo()) { this.sel = null; this.crop = null; this.shownRaster = null; this.afterDoc(); }
+    this.afterHistory(this.history.undo());
   }
   redo() {
     if (this.drag) return;
     this.finishText(true);
     this.landFloat(true);
-    if (this.history.redo()) { this.sel = null; this.crop = null; this.shownRaster = null; this.afterDoc(); }
+    this.afterHistory(this.history.redo());
+  }
+  private afterHistory(applied: Applied | null) {
+    if (!applied) return;
+    this.sel = null;
+    this.crop = null;
+    this.syncRaster(this.doc.raster, applied.rect);
+    this.afterDoc();
   }
 
   /** Commits pending edits and names the revision a save would write. */
@@ -220,11 +259,8 @@ export class EditorController {
     if (!sel) return false;
     // A floating selection's pixels go; the hole their lift filled stays.
     if (sel.floating) { this.landFloat(false); return true; }
-    const r = this.doc.raster, before = px.crop(r, sel.rect), lifted = px.liftSelection(r, sel.rect, sel.mask);
     this.sel = null;
-    if (!lifted) { this.refresh(); return true; }
-    this.syncRaster(r, lifted.at);
-    this.commitPatch(lifted.at, before);
+    if (!this.edit(sel.rect, r => { px.eraseSelection(r, sel.rect, sel.mask); })) this.refresh();
     return true;
   }
   selectAll() {
@@ -242,26 +278,18 @@ export class EditorController {
     this.setRaster(px.crop(this.doc.raster, c), this.doc.objects.map(s => ob.move(s, -c.x, -c.y)));
   }
   cancelCrop() { this.crop = null; this.refresh(); }
-  /** Ends a floating selection, committing its base with the floating pixels
-   * pasted where they are (`keep`) or dropped, and clears the selection. */
+  /** Ends a floating selection, committing the raster under it with the
+   * floating pixels pasted where they are (`keep`) or dropped, and clears the selection. */
   private landFloat(keep: boolean) {
     const f = this.floating;
     if (!f) return;
     this.sel = null;
-    const r = this.doc.raster, at = { x: f.x, y: f.y, width: f.pixels.width, height: f.pixels.height };
-    const area = keep ? (f.changed ? px.unionRect(f.changed, at) : at) : f.changed;
-    const rect = area && px.clipRect(r, area);
-    if (!rect) { this.afterDoc(); return; }
-    const before = px.crop(r, rect);
-    // In place: the base is the document's raster, or a private copy of it.
-    if (keep) px.paste(f.base, f.pixels, f.x, f.y);
-    if (f.base !== r) px.blit(r, px.crop(f.base, rect), rect.x, rect.y);
-    this.syncRaster(r, rect, f.base);
-    this.commitPatch(rect, before);
+    if (keep) f.edit.touch(floatRect(f), r => { px.paste(r, f.pixels, f.x, f.y); });
+    if (!f.edit.commit()) this.afterDoc();
   }
   clearSelection() { this.landFloat(true); this.sel = null; this.refresh(); }
   private pick(p: Point) {
-    const c = px.pixel(this.raster(), p.x, p.y);
+    const c = px.pixel(this.doc.raster, p.x, p.y);
     if (!c) return;
     const color = px.toHex([c[0], c[1], c[2], 255]);
     if (color === this.color && this.picked && px.toHex(this.picked) === px.toHex(c)) return;
@@ -321,8 +349,9 @@ export class EditorController {
     const r = this.doc.raster, c = this.canvas, { zoom, fit } = this.view;
     this.view = c ? clampView(view, r.width, r.height, c.width, c.height) : view;
     this.paint();
-    // The chrome shows the zoom and fit, and an open label editor follows the image.
-    if (this.view.zoom !== zoom || this.view.fit !== fit || this.text) this.notify();
+    if (this.view.zoom !== zoom || this.view.fit !== fit) this.zoomChanges.emit();
+    // An open label editor follows the image.
+    if (this.text) this.notify();
   }
   fit() {
     const r = this.doc.raster, c = this.canvas;
@@ -434,7 +463,7 @@ export class EditorController {
   // A move re-renders no chrome: drags that change it notify themselves.
   private onPointerMove = (e: PointerEvent) => {
     if (!e.isPrimary) return;
-    const p = this.toImage(e), r = this.raster(), was = this.cursor;
+    const p = this.toImage(e), r = this.doc.raster, was = this.cursor;
     this.setCursor(p.x >= 0 && p.y >= 0 && p.x < r.width && p.y < r.height ? { x: Math.floor(p.x), y: Math.floor(p.y) } : null);
     if (this.drag) { this.drag.move(p, e); this.paint(); }
     else if (HOVER.has(this.tool) && !samePoint(was, this.cursor)) this.paint();
@@ -513,9 +542,8 @@ export class EditorController {
       case 'brush': return e.altKey ? (this.pick(p), null) : this.brushDown(p, e);
       case 'bucket': {
         if (e.altKey) { this.pick(p); return null; }
-        const r = this.doc.raster, before = cloneRaster(r);
-        const filled = px.floodFill(r, p.x, p.y, hexToRgba(this.color), this.tolerance);
-        if (filled) { this.syncRaster(r, filled); this.commitPatch(filled, px.crop(before, filled)); }
+        const color = hexToRgba(this.color), region = px.floodRegion(this.doc.raster, p.x, p.y, color, this.tolerance);
+        if (region) this.edit(region.rect, r => { px.fillSelection(r, region.rect, region.mask, color); });
         return null;
       }
       case 'eyedropper':
@@ -669,56 +697,39 @@ export class EditorController {
     };
   }
 
-  /** Paints the document's raster in place, keeping a copy to undo or cancel from. */
+  /** Paints the document's raster in place, one segment per move. */
   private brushDown(p: Point, e: PointerEvent): Drag {
-    const r = this.doc.raster, before = cloneRaster(r), color = hexToRgba(this.color);
-    const size = this.brushSize, shape = this.brushShape;
+    const edit = this.pixelEdit(), color = hexToRgba(this.color), size = this.brushSize;
+    const brush = px.stamp(size, this.brushShape);
     let last = e.shiftKey && this.lastBrush ? this.lastBrush : p;
-    let touched: Rect | null = null;
     const stroke = (a: Point, b: Point) => {
-      px.drawLine(r, a.x, a.y, b.x, b.y, size, color, shape);
       const x = Math.floor(Math.min(a.x, b.x)) - size, y = Math.floor(Math.min(a.y, b.y)) - size;
-      const rect = px.clipRect(r, { x, y, width: Math.floor(Math.max(a.x, b.x)) + size + 1 - x, height: Math.floor(Math.max(a.y, b.y)) + size + 1 - y });
-      if (!rect) return;
-      this.syncRaster(r, rect);
-      touched = touched ? px.unionRect(touched, rect) : rect;
+      edit.touch({ x, y, width: Math.floor(Math.max(a.x, b.x)) + size + 1 - x, height: Math.floor(Math.max(a.y, b.y)) + size + 1 - y },
+        r => px.drawLine(r, a.x, a.y, b.x, b.y, brush, color));
     };
     stroke(last, p);
     last = p;
     return {
       move: q => { stroke(last, q); last = q; },
-      up: () => {
-        this.lastBrush = last;
-        if (touched) this.commitPatch(touched, px.crop(before, touched));
-      },
-      cancel: () => {
-        if (!touched) return;
-        px.blit(r, px.crop(before, touched), touched.x, touched.y);
-        this.syncRaster(r, touched);
-      },
+      up: () => { this.lastBrush = last; edit.commit(); },
+      cancel: () => edit.cancel(),
     };
   }
 
   private inSelection(p: Point): boolean {
     const s = this.sel;
     if (!s) return false;
-    const f = s.floating;
-    return inside(f ? { x: f.x, y: f.y, width: f.pixels.width, height: f.pixels.height } : s.rect, p);
+    return inside(s.floating ? floatRect(s.floating) : s.rect, p);
   }
   /** Lifts the selection into a floating copy: a move fills the hole, a duplicate leaves it. */
   private lift(duplicate: boolean): Floating | null {
     const s = this.sel;
     if (!s) return null;
     if (s.floating) return s.floating;
-    const r = this.doc.raster;
-    let floating: Floating;
-    if (duplicate) floating = { pixels: px.copyRegion(r, s.rect, s.mask), x: s.rect.x, y: s.rect.y, base: r };
-    else {
-      const base = cloneRaster(r), lifted = px.liftSelection(base, s.rect, s.mask);
-      if (!lifted) return null;
-      floating = { pixels: lifted.pixels, x: lifted.at.x, y: lifted.at.y, base, changed: lifted.at };
-      this.syncRaster(base, lifted.at, r);
-    }
+    const r = this.doc.raster, at = px.clipRect(r, s.rect);
+    if (!at) return null;
+    const floating: Floating = { pixels: px.copyRegion(r, at, s.mask), x: at.x, y: at.y, edit: this.pixelEdit() };
+    if (!duplicate) floating.edit.touch(at, raster => { px.eraseSelection(raster, at, s.mask); });
     this.sel = { ...s, floating };
     this.changed();
     return floating;
@@ -733,19 +744,11 @@ export class EditorController {
   private selectionDown(p: Point, e: PointerEvent): Drag | null {
     const s = this.sel;
     if (s && this.inSelection(p)) {
-      let f = s.floating;
-      if (f && e.altKey) {
-        // ⌥-drag on a floating selection stamps a copy where it is and keeps moving;
-        // the stamp goes into the base, copied first when it is the document's raster.
-        const stamp = { x: f.x, y: f.y, width: f.pixels.width, height: f.pixels.height };
-        const base = f.base === this.doc.raster ? cloneRaster(f.base) : f.base;
-        px.paste(base, f.pixels, f.x, f.y);
-        this.syncRaster(base, stamp, f.base);
-        f = { ...f, base, changed: f.changed ? px.unionRect(f.changed, stamp) : stamp };
-        this.sel = { ...s, floating: f };
-      } else if (!f) f = this.lift(e.altKey) ?? undefined;
-      if (!f) return null;
-      const float = f, ox = f.x, oy = f.y;
+      const float = s.floating ?? this.lift(e.altKey);
+      if (!float) return null;
+      // ⌥-drag on a floating selection stamps a copy where it is and keeps moving.
+      if (s.floating && e.altKey) float.edit.touch(floatRect(float), r => { px.paste(r, float.pixels, float.x, float.y); });
+      const ox = float.x, oy = float.y;
       return {
         move: (q, ev) => {
           const [dx, dy] = lockAxis(Math.round(q.x - p.x), Math.round(q.y - p.y), ev.shiftKey);
@@ -915,19 +918,15 @@ export class EditorController {
     if (!this.frame && this.canvas) this.frame = requestAnimationFrame(() => { this.frame = 0; this.draw(); });
   }
   /** Copies raster pixels into the canvas the view scales: just `dirty` when
-   * `r` is shown, or was copied from `from`, the shown raster, and differs from
-   * it only there; else all of them. Every in-place change to the shown raster
+   * `r` is shown, else all of them. Every in-place change to the shown raster
    * comes through here, so the copy always matches it. */
-  private syncRaster(r: Raster, dirty?: Rect | null, from?: Raster) {
+  private syncRaster(r: Raster, dirty?: Rect | null) {
     const c = this.rasterCanvas;
     if (this.shownRaster !== r) {
-      const derived = !!from && from === this.shownRaster && from.width === r.width && from.height === r.height;
       this.shownRaster = r;
-      if (!derived) {
-        if (c.width !== r.width || c.height !== r.height) { c.width = r.width; c.height = r.height; }
-        c.getContext('2d')!.putImageData(imageData(r), 0, 0);
-        return;
-      }
+      if (c.width !== r.width || c.height !== r.height) { c.width = r.width; c.height = r.height; }
+      c.getContext('2d')!.putImageData(imageData(r), 0, 0);
+      return;
     }
     const d = dirty && px.clipRect(r, dirty);
     if (d) c.getContext('2d')!.putImageData(imageData(r), 0, 0, d.x, d.y, d.width, d.height);
@@ -939,7 +938,7 @@ export class EditorController {
     const dpr = this.dpr, W = canvas.width, H = canvas.height;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, W, H);
-    const r = this.raster();
+    const r = this.doc.raster;
     this.syncRaster(r);
     const z = this.view.zoom, ox = Math.round(this.view.x), oy = Math.round(this.view.y);
     const sx = (x: number) => ox + x * z, sy = (y: number) => oy + y * z;

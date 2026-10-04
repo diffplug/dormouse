@@ -53,8 +53,9 @@ export function fillRect(r: Raster, rect: Rect, color: Rgba): void {
   }
 }
 
-/** The smallest rectangle holding both. */
-export function unionRect(a: Rect, b: Rect): Rect {
+/** The smallest rectangle holding both; `b` when there is no `a`. */
+export function unionRect(a: Rect | null | undefined, b: Rect): Rect {
+  if (!a) return b;
   const x = Math.min(a.x, b.x), y = Math.min(a.y, b.y);
   return { x, y, width: Math.max(a.x + a.width, b.x + b.width) - x, height: Math.max(a.y + a.height, b.y + b.height) - y };
 }
@@ -108,8 +109,13 @@ export function paste(dst: Raster, src: Raster, x: number, y: number): void {
   }
 }
 
-/** Offsets of a `size`-pixel brush around its anchor; round drops corners. */
-function stamp(size: number, shape: 'square' | 'round'): [number, number][] {
+/** A brush tip: the pixel offsets it covers around its anchor, all within
+ * `size` pixels from `start` on each axis. */
+export interface Stamp { offsets: readonly (readonly [number, number])[]; start: number; size: number }
+
+/** A `size`-pixel brush tip; round drops corners. */
+export function stamp(size: number, shape: 'square' | 'round'): Stamp {
+  size = Math.max(1, Math.round(size));
   const start = -Math.floor((size - 1) / 2), half = size / 2, limit = half * half - 0.5;
   const offsets: [number, number][] = [];
   for (let j = 0; j < size; j++) {
@@ -118,44 +124,46 @@ function stamp(size: number, shape: 'square' | 'round'): [number, number][] {
       if (shape === 'square' || size <= 2 || dx * dx + dy * dy <= limit) offsets.push([start + i, start + j]);
     }
   }
-  return offsets;
+  return { offsets, start, size };
 }
 
 /** A Bresenham line from the pixel containing (x0, y0) to the one containing
- * (x1, y1), stamping a brush at every step; diagonal steps keep it connected. */
-export function drawLine(
-  r: Raster, x0: number, y0: number, x1: number, y1: number,
-  size: number, color: Rgba, shape: 'square' | 'round' = 'square',
-): void {
-  const brush = stamp(Math.max(1, Math.round(size)), shape);
+ * (x1, y1), stamping `brush` at every step; diagonal steps keep it connected.
+ * Returns the rectangle it painted, clipped; null when that is off the raster. */
+export function drawLine(r: Raster, x0: number, y0: number, x1: number, y1: number, brush: Stamp, color: Rgba): Rect | null {
   let x = Math.floor(x0), y = Math.floor(y0);
   const tx = Math.floor(x1), ty = Math.floor(y1);
+  const painted = clipRect(r, {
+    x: Math.min(x, tx) + brush.start, y: Math.min(y, ty) + brush.start,
+    width: Math.abs(tx - x) + brush.size, height: Math.abs(ty - y) + brush.size,
+  });
   const dx = Math.abs(tx - x), dy = -Math.abs(ty - y), sx = x < tx ? 1 : -1, sy = y < ty ? 1 : -1;
   let err = dx + dy;
   for (;;) {
-    for (const [ox, oy] of brush) {
+    for (const [ox, oy] of brush.offsets) {
       const px = x + ox, py = y + oy;
       if (px >= 0 && py >= 0 && px < r.width && py < r.height) put(r.data, (py * r.width + px) * 4, color);
     }
-    if (x === tx && y === ty) return;
+    if (x === tx && y === ty) return painted;
     const e2 = 2 * err;
     if (e2 >= dy) { err += dy; x += sx; }
     if (e2 <= dx) { err += dx; y += sy; }
   }
 }
 
-/** Fills the 4-connected region around (x, y) whose pixels are each within
- * `tolerance` of the seed on every channel (0 = exact). Returns the bounds it
- * filled; null off the raster, or when the seed already is `color` at tolerance 0. */
-export function floodFill(r: Raster, x: number, y: number, color: Rgba, tolerance = 0): Rect | null {
+/** The 4-connected region around (x, y) whose pixels are each within
+ * `tolerance` of the seed on every channel (0 = exact), as a mask and its
+ * bounds; it changes nothing. Null off the raster, or when the seed already is
+ * `color` at tolerance 0, so filling would change nothing. */
+export function floodRegion(r: Raster, x: number, y: number, color: Rgba, tolerance = 0): { rect: Rect; mask: Mask } | null {
   x = Math.floor(x); y = Math.floor(y);
   const { width, height, data } = r;
   if (x < 0 || y < 0 || x >= width || y >= height) return null;
   const seed = pixel(r, x, y)!;
   if (tolerance <= 0 && seed.every((v, k) => v === color[k])) return null;
-  const visited = new Uint8Array(width * height);
+  const mask = new Uint8Array(width * height);
   const matches = (p: number) => {
-    if (visited[p]) return false;
+    if (mask[p]) return false;
     const i = p * 4;
     return Math.abs(data[i] - seed[0]) <= tolerance && Math.abs(data[i + 1] - seed[1]) <= tolerance
       && Math.abs(data[i + 2] - seed[2]) <= tolerance && Math.abs(data[i + 3] - seed[3]) <= tolerance;
@@ -170,7 +178,7 @@ export function floodFill(r: Raster, x: number, y: number, color: Rgba, toleranc
     let left = p - base, right = left;
     while (left > 0 && matches(base + left - 1)) left--;
     while (right < width - 1 && matches(base + right + 1)) right++;
-    for (let i = left; i <= right; i++) { visited[base + i] = 1; put(data, (base + i) * 4, color); }
+    mask.fill(1, base + left, base + right + 1);
     minX = Math.min(minX, left); maxX = Math.max(maxX, right);
     minY = Math.min(minY, row); maxY = Math.max(maxY, row);
     for (const next of [row - 1, row + 1]) {
@@ -183,7 +191,7 @@ export function floodFill(r: Raster, x: number, y: number, color: Rgba, toleranc
       }
     }
   }
-  return { x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1 };
+  return { rect: { x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1 }, mask };
 }
 
 /** The pixels whose centers lie inside the polygon, by the even-odd rule. */
@@ -251,22 +259,18 @@ export function dominantBorderColor(r: Raster, rect: Rect, mask?: Mask): Rgba | 
 }
 
 /** Paints the selection (`rect`, narrowed by `mask`) with `color`. */
-export function fillHole(r: Raster, rect: Rect, mask: Mask | undefined, color: Rgba): void {
+export function fillSelection(r: Raster, rect: Rect, mask: Mask | undefined, color: Rgba): void {
   const c = clipRect(r, rect);
   if (c) for (let y = c.y; y < c.y + c.height; y++) {
     for (let x = c.x; x < c.x + c.width; x++) if (!mask || mask[y * r.width + x]) put(r.data, (y * r.width + x) * 4, color);
   }
 }
 
-/** Cuts the selection out of `r`: returns its pixels (transparent outside
- * `mask`) and where they sat, and fills the hole with the ring's dominant
- * color, or transparent when there is no ring. Null when the selection is off the raster. */
-export function liftSelection(r: Raster, rect: Rect, mask?: Mask): { pixels: Raster; at: Rect } | null {
-  const at = clipRect(r, rect);
-  if (!at) return null;
-  const pixels = copyRegion(r, at, mask);
-  fillHole(r, at, mask, dominantBorderColor(r, at, mask) ?? [0, 0, 0, 0]);
-  return { pixels, at };
+/** Fills the selection (`rect`, narrowed by `mask`) with the dominant color of
+ * the ring around it, or transparent when there is no ring: the hole a moved or
+ * deleted selection leaves. */
+export function eraseSelection(r: Raster, rect: Rect, mask?: Mask): void {
+  fillSelection(r, rect, mask, dominantBorderColor(r, rect, mask) ?? [0, 0, 0, 0]);
 }
 
 /** A copy of `r` with `amount` columns (`x`) or rows (`y`) opened before index

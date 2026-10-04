@@ -3,16 +3,15 @@
  * parent and owns no window-level listeners, so a page can host it whole or
  * as an overlay. Remount it (a new `key`) to load other pixels. */
 import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent, type ReactNode, type Ref, type RefObject } from 'react';
+import { flushSync } from 'react-dom';
 import type { DocumentEditor } from '../document-session';
 import { EditorController, MARKUP, type Revision, type Tool } from './controller';
 import { Icon, type IconName } from './icons';
-import { rasterFromBitmap, type EditableMime, type LoadedImage } from './io';
+import { decodeImage, type LoadedImage } from './io';
 import { contrast, fontSize } from './objects';
-import { toHex, type Raster } from './pixels';
+import { toHex } from './pixels';
 import { pageTheme, subscribeTheme } from '../page-theme';
 import './image.css';
-
-export type { Revision } from './controller';
 
 export interface ImageEditorHandle {
   /** Commits pending edits (a floating selection, an open label) and starts
@@ -25,11 +24,10 @@ export interface ImageEditorHandle {
 }
 
 export interface ImageEditorProps {
-  /** The pixels to edit; read once, at mount. */
-  image: Raster | ImageBitmap;
+  /** The pixels to edit, read once at mount, and the format a save encodes
+   * to: PNG, or JPEG at quality 0.92. */
+  image: LoadedImage;
   name: string;
-  /** The format a save encodes to: PNG, or JPEG at quality 0.92. */
-  mime: EditableMime;
   /** After every document change. */
   onChange?(): void;
   /** The host's own controls (its Save and Close), at the toolbar's end. */
@@ -40,13 +38,16 @@ export interface ImageEditorProps {
 }
 
 /** The editor behind `ref` as a document session edits it; `show` mounts a
- * fresh editor over loaded pixels. */
-export function editorDocument(ref: RefObject<ImageEditorHandle | null>, show: (image: LoadedImage, name: string) => void): DocumentEditor<Revision | null, Blob, LoadedImage> {
+ * fresh editor over the decoded file, which is behind `ref` once it returns. */
+export function editorDocument(ref: RefObject<ImageEditorHandle | null>, show: (image: LoadedImage, name: string) => void): DocumentEditor<Revision, Blob> {
   return {
     snapshot: () => ref.current!.snapshot(),
-    mark: () => ref.current?.revision() ?? null,
-    holds: mark => !!mark && !!ref.current?.holds(mark),
-    apply: show,
+    mark: () => ref.current!.revision(),
+    holds: mark => ref.current!.holds(mark),
+    async apply(blob, name) {
+      const image = await decodeImage(blob);
+      flushSync(() => show(image, name));
+    },
   };
 }
 
@@ -81,12 +82,11 @@ const SWATCHES = [
   ['#1e88e5', 'Blue'], ['#8e44ad', 'Purple'], ['#000000', 'Black'], ['#ffffff', 'White'],
 ] as const;
 
-const toRaster = (image: Raster | ImageBitmap): Raster => 'data' in image ? image : rasterFromBitmap(image);
 /** Toolbar buttons keep focus where it was, so Space and letters still reach the editor. */
 const keepFocus = (e: { preventDefault(): void }) => e.preventDefault();
 
-export function ImageEditor({ image, name, mime, onChange, controls, error, ref }: ImageEditorProps) {
-  const [ctl] = useState(() => new EditorController(toRaster(image)));
+export function ImageEditor({ image, name, onChange, controls, error, ref }: ImageEditorProps) {
+  const [ctl] = useState(() => new EditorController(image.raster));
   useSyncExternalStore(ctl.subscribe, ctl.getVersion);
   const theme = useSyncExternalStore(subscribeTheme, pageTheme);
   const root = useRef<HTMLDivElement>(null);
@@ -111,7 +111,7 @@ export function ImageEditor({ image, name, mime, onChange, controls, error, ref 
   useEffect(() => { root.current?.focus({ preventScroll: true }); }, []);
 
   useImperativeHandle(ref, () => ({
-    snapshot() { const mark = ctl.settle(); return { content: ctl.encode(mark, mime), mark }; },
+    snapshot() { const mark = ctl.settle(); return { content: ctl.encode(mark, image.mime), mark }; },
     revision: () => ctl.doc,
     holds: mark => ctl.holds(mark),
   }));
@@ -136,9 +136,9 @@ export function ImageEditor({ image, name, mime, onChange, controls, error, ref 
     setTimeout(() => setCopied(null), 1500);
   }
 
-  const { tool, view, picked, sel, crop, text } = ctl;
+  const { tool, picked, sel, crop, text } = ctl;
   const selected = ctl.selected();
-  const raster = ctl.raster();
+  const raster = ctl.doc.raster;
   const hex = tool === 'eyedropper' && picked ? toHex(picked) : ctl.color;
   const showWidth = MARKUP.has(tool) && (tool !== 'select' || !!selected);
 
@@ -180,12 +180,7 @@ export function ImageEditor({ image, name, mime, onChange, controls, error, ref 
           </button>
           <CursorReadout ctl={ctl} />
           <span title="Image size, in pixels">{raster.width} × {raster.height}</span>
-          <span className="ie-zoom">
-            <button type="button" aria-label="Zoom out" title="Zoom out [-]" onPointerDown={keepFocus} onClick={() => ctl.zoomStep(-1)}>−</button>
-            <button type="button" title="Actual pixels [1]: one image pixel per screen pixel" onPointerDown={keepFocus} onClick={() => ctl.actualSize()}>{Math.round(view.zoom * 100)}%</button>
-            <button type="button" aria-label="Zoom in" title="Zoom in [+]" onPointerDown={keepFocus} onClick={() => ctl.zoomStep(1)}>+</button>
-            <button type="button" aria-pressed={view.fit} title="Fit to the pane [0]" onPointerDown={keepFocus} onClick={() => ctl.fit()}>Fit</button>
-          </span>
+          <ZoomControls ctl={ctl} />
         </div>
       </div>
       {error && <div className="ie-error" role="alert">{error}</div>}
@@ -203,6 +198,19 @@ export function ImageEditor({ image, name, mime, onChange, controls, error, ref 
 function CursorReadout({ ctl }: { ctl: EditorController }) {
   const text = useSyncExternalStore(ctl.subscribeCursor, ctl.getCursorText);
   return <span className="ie-cursor" title="Cursor, in image pixels">{text}</span>;
+}
+
+/** The zoom readout and its buttons: re-render alone as the zoom changes. */
+function ZoomControls({ ctl }: { ctl: EditorController }) {
+  const { zoom, fit } = useSyncExternalStore(ctl.subscribeZoom, ctl.getView);
+  return (
+    <span className="ie-zoom">
+      <button type="button" aria-label="Zoom out" title="Zoom out [-]" onPointerDown={keepFocus} onClick={() => ctl.zoomStep(-1)}>−</button>
+      <button type="button" title="Actual pixels [1]: one image pixel per screen pixel" onPointerDown={keepFocus} onClick={() => ctl.actualSize()}>{Math.round(zoom * 100)}%</button>
+      <button type="button" aria-label="Zoom in" title="Zoom in [+]" onPointerDown={keepFocus} onClick={() => ctl.zoomStep(1)}>+</button>
+      <button type="button" aria-pressed={fit} title="Fit to the pane [0]" onPointerDown={keepFocus} onClick={() => ctl.fit()}>Fit</button>
+    </span>
+  );
 }
 
 function ToolOptions({ ctl, showWidth }: { ctl: EditorController; showWidth: boolean }) {

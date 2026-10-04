@@ -9,16 +9,18 @@ import {
   BlockTypeSelect, BoldItalicUnderlineToggles, codeBlockPlugin, codeMirrorPlugin, CodeToggle, CreateLink, diffSourcePlugin,
   DiffSourceToggleWrapper, frontmatterPlugin, headingsPlugin, imagePlugin, InsertCodeBlock, InsertTable, InsertThematicBreak,
   linkDialogPlugin, linkPlugin, listsPlugin, ListsToggle, markdownShortcutPlugin, MDXEditor, quotePlugin, realmPlugin,
-  rootEditor$, Separator, viewMode$, tablePlugin, thematicBreakPlugin, toolbarPlugin, UndoRedo, type MDXEditorMethods, type Realm,
+  rootEditor$, Separator, viewMode$, tablePlugin, thematicBreakPlugin, toolbarPlugin, UndoRedo, type MDXEditorMethods, type MDXEditorProps, type Realm,
 } from '@mdxeditor/editor';
 import '@mdxeditor/editor/style.css';
-import { checked, documentPage, sameState, stateLabel, textSource, type DocumentState } from './document-session';
+import { checked, documentPage, loadingState, stateLabel, textSource, type DocumentState } from './document-session';
 import { editableImage, imageSources, imageUrl, ImagesPanel, localImagePath, type SavedImages } from './images-panel';
 import { ImageOverlay } from './image-overlay';
 import { commentsPlugin } from './markdown-comments';
 import { markdownSafetyPlugin } from './markdown-safety';
 import { pageTheme, subscribeTheme } from './page-theme';
 import { mermaidDescriptor } from './mermaid-block';
+import { SaveButton } from './save-button';
+import { Signal } from './signal';
 import './markdown.css';
 
 // Page state outside React, replaced whole on each change: the session reports
@@ -26,11 +28,10 @@ import './markdown.css';
 // `editing` is the image open in the editor overlay; `saved` holds the
 // revision of each image saved from it.
 let store: { doc: DocumentState; error: string | null; images: string[]; panel: boolean; editor: LexicalEditor | null; editing: string | null; saved: SavedImages } =
-  { doc: { loaded: false, dirty: false, saving: false }, error: null, images: [], panel: false, editor: null, editing: null, saved: {} };
-const listeners = new Set<() => void>();
-const update = (change: Partial<typeof store>) => { store = { ...store, ...change }; for (const listener of listeners) listener(); };
-const subscribe = (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; };
-const usePage = () => useSyncExternalStore(subscribe, () => store);
+  { doc: loadingState, error: null, images: [], panel: false, editor: null, editing: null, saved: {} };
+const changes = new Signal();
+const update = (change: Partial<typeof store>) => { store = { ...store, ...change }; changes.emit(); };
+const usePage = () => useSyncExternalStore(changes.subscribe, () => store);
 const editorRef = createRef<MDXEditorMethods>();
 let realm: Realm | undefined;
 let loads = 0;
@@ -50,9 +51,7 @@ const session = page.open<string>({
     await new Promise(resolve => setTimeout(resolve));
   },
 }, {
-  report(doc) {
-    if (!sameState(doc, store.doc)) update({ doc });
-  },
+  report(doc) { update({ doc }); },
   fail(error) { update({ error }); },
 }, textSource);
 
@@ -131,7 +130,7 @@ function Controls() {
       <span className="state" role="status">{stateLabel(doc)}</span>
       <button type="button" aria-pressed={panel} title="List and rename this document's images" onClick={() => update({ panel: !panel })}>Images{images.length ? ` (${images.length})` : ''}</button>
       <button type="button" title="Reload from disk" onClick={() => void session.reload()}>Reload</button>
-      <button type="button" className="save" disabled={!doc.loaded || !doc.dirty || doc.saving} title="Save [Cmd/Ctrl+S]" onClick={() => void session.save()}>Save</button>
+      <SaveButton className="save" state={doc} onSave={() => void session.save()} />
     </div>
   );
 }
@@ -178,35 +177,43 @@ function markdownStyle(markdown: string) {
   return { bullet, rule: count(/^\*{3,}[ \t]*$/gm) > count(/^-{3,}[ \t]*$/gm) ? '*' as const : '-' as const };
 }
 
-function Page({ markdown }: { markdown: string }) {
+// The editor's own reformatting of loaded text is not an edit.
+const onEditorChange: MDXEditorProps['onChange'] = (_, normalize) => { if (normalize) session.rebase(); else session.changed(); };
+const onEditorError: MDXEditorProps['onError'] = ({ error: reason }) => {
+  realm?.pub(viewMode$, 'source');
+  session.fail(`Showing source: the rich editor cannot parse this file (${reason}).`);
+};
+const closeImage = () => { update({ editing: null }); editorRef.current?.focus(); };
+
+/** The rich editor; it follows only the theme, so page state changes leave it be. */
+function Editor({ markdown }: { markdown: string }) {
   const theme = useSyncExternalStore(subscribeTheme, pageTheme);
-  const { error, images, panel, editor, editing, saved } = usePage();
   const style = useMemo(() => markdownStyle(markdown), [markdown]);
   return (
+    <MDXEditor ref={editorRef} markdown={markdown} plugins={plugins} toMarkdownOptions={style}
+      className={theme.dark ? 'dark-theme' : 'light-theme'} contentEditableClassName="prose" spellCheck
+      onChange={onEditorChange} onError={onEditorError} />
+  );
+}
+
+function ErrorBanner() {
+  const { error } = usePage();
+  return error ? <div className="error" role="alert">{error}</div> : null;
+}
+
+/** The images panel and the image editor overlay, above the editor. */
+function Overlays() {
+  const { images, panel, editor, editing, saved } = usePage();
+  return (
     <>
-      {error && <div className="error" role="alert">{error}</div>}
-      <MDXEditor
-        ref={editorRef}
-        markdown={markdown}
-        plugins={plugins}
-        toMarkdownOptions={style}
-        className={theme.dark ? 'dark-theme' : 'light-theme'}
-        contentEditableClassName="prose"
-        spellCheck
-        onChange={(_, normalize) => {
-          // The editor's own reformatting of loaded text is not an edit.
-          if (normalize) session.rebase(); else session.changed();
-        }}
-        onError={({ error: reason }) => {
-          realm?.pub(viewMode$, 'source');
-          session.fail(`Showing source: the rich editor cannot parse this file (${reason}).`);
-        }}
-      />
       {panel && editor && <ImagesPanel editor={editor} sources={images} saved={saved} onEdit={editImage} />}
-      {editing && <ImageOverlay key={editing} path={editing} page={page} onSaved={refreshImage}
-        onClose={() => { update({ editing: null }); editorRef.current?.focus(); }} />}
+      {editing && <ImageOverlay key={editing} path={editing} page={page} onSaved={refreshImage} onClose={closeImage} />}
     </>
   );
+}
+
+function Page({ markdown }: { markdown: string }) {
+  return <><ErrorBanner /><Editor markdown={markdown} /><Overlays /></>;
 }
 
 const root = createRoot(document.getElementById('root')!);
