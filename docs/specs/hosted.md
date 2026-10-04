@@ -17,11 +17,13 @@ Every Worker answers `/api/health`, 404s anything else under its non-page prefix
 
 **Must run committed Better Auth migrations before deploying code that needs them, never during a Worker request.** Postgres is reached through an uncached Hyperdrive binding.
 
+**Must grant `dormouse_relay` and `dormouse_voice` only what `hosted/server/runtime-roles.sql` lists**, which each release applies after migrating: their Worker's tables and the entitlement's user columns, never default privileges, so a new table needs a grant there. Both Workers still bind the account's role (`docs/specs/security.md` -> "Known gaps").
+
 **Must install released core/auth packages from npm and commit their lockfile integrity hashes.** The installed packages' `dist/provenance.json` must name the same clean pgstencil commit; no runtime import depends on a sibling checkout. The auth migrations remain owned by the package; Dormouse's own tables migrate from `hosted/server/dormouse-migrations/`. **Never edit a merged migration**: a migrated database never reruns one, so append the next number (pinned by `hosted/server/tests/migrations.test.ts`).
 
 **Must declare every peer dependency of the installed packages in `hosted/package.json`**, so they share Hosted's copy and Renovate updates them.
 
-Source of truth: `WORKERS` in `hosted/scripts/workers.mjs`; `workerApp` in `hosted/server/worker-app.ts`; `hosted/server/bindings.ts`; `hosted/wrangler.jsonc`, `hosted/wrangler.relay.jsonc`, `hosted/wrangler.voice.jsonc`; `verifyPackages` in `hosted/scripts/production.mjs`. Pinned by `hosted/server/tests/boundary.test.ts`.
+Source of truth: `WORKERS` in `hosted/scripts/workers.mjs`; `workerApp` in `hosted/server/worker-app.ts`; `hosted/server/bindings.ts`; `hosted/wrangler.jsonc`, `hosted/wrangler.relay.jsonc`, `hosted/wrangler.voice.jsonc`; `verifyPackages` in `hosted/scripts/production.mjs`; `hosted/server/runtime-roles.sql`. Pinned by `hosted/server/tests/boundary.test.ts` and `hosted/server/tests/runtime-roles.test.ts`.
 
 ## Identity and login
 
