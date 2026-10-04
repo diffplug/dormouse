@@ -405,8 +405,9 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
                   <section aria-labelledby="voice">
                     <h2 id="voice">Voice tokens</h2>
                     <p className="help">
-                      A token lets Dormouse desktop speak with managed voice.
-                      Managed voice is in admin-only testing.
+                      Signing in from Dormouse gives that computer its own
+                      token; removing the computer below revokes it. Managed
+                      voice is in admin-only testing.
                     </p>
                     {minted && (
                       <div className="notice minted">
@@ -459,9 +460,9 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
                   <section aria-labelledby="computers">
                     <h2 id="computers">Computers</h2>
                     <p className="help">
-                      Computers enrolled to this account can reach your phones
-                      through the Hosted Relay. Remote control is in admin-only
-                      testing.
+                      Computers signed in to this account speak with managed
+                      voice and reach your phones through the Hosted Relay.
+                      Both are in admin-only testing.
                     </p>
                     {computers.length === 0 && (
                       <p className="help">
