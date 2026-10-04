@@ -354,7 +354,7 @@ export type ModalSurfaceVariants = VariantProps<typeof modalSurface>;
 /** The terminal context floats over its source pane: the modal surface with an
  *  edge that stays visible in dark themes. Its exit length is mirrored into CSS
  *  as `--context-exit-duration` (docs/specs/layout.md → "Header context menu"). */
-export const TERMINAL_CONTEXT_SURFACE_CLASS = modalSurface({ padding: 'none', elevation: 'modal', class: 'z-[1000] border-foreground/20' });
+export const TERMINAL_CONTEXT_SURFACE_CLASS = modalSurface({ padding: 'none', elevation: 'modal', class: 'border-foreground/20' });
 export const TERMINAL_CONTEXT_EXIT_MS = 180;
 /** Depth of the terminal context's teeth on the edge facing its source: the panel's whole
  *  overlap with the source, so placement and the view must agree (DESIGN.md → "Terminal
