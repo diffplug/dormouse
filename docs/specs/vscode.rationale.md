@@ -24,8 +24,6 @@
 
 **How a CSP failure presents, and what caught the last one** (2026-08). Remote from its cause: a blank panel, or a render error naming a chunk that is sitting on disk. Nothing reaches an extension-host log and the extension activates normally, so the only direct evidence either way is a CSP violation in the webview console (**Developer: Open Webview Developer Tools**) — which is all the code-split failure produced, `script-src-elem` violations and a blank panel. Reproducing that pre-fix document makes `webview-boot.smoketest.ts` fail on all four of its assertions with exactly those violations.
 
-**Why a fixture is not enough.** `webview-html.test.ts` can prove the transform right only for the Vite output it was handed; it cannot notice Vite emitting a shape nobody anticipated. That is the gap `webview-boot.smoketest.ts` exists to cover.
-
 **`'strict-dynamic'` could not be shown load-bearing by experiment.** With the `<meta property="csp-nonce">` in place, Vite's runtime preload helper nonces the `<link>` it injects ahead of a lazy `import()`, which populates the module map and lets the import resolve — including with `build.modulePreload` disabled (2026-08). That is an emergent interaction between a bundler's preload helper and the module map, not a policy guarantee.
 
 **Why the WebAssembly grant is `'wasm-unsafe-eval'` and not the token the error names.** Chromium reports the block as `'unsafe-eval' is not an allowed source of script`, and that token would indeed unblock it — while also re-enabling `eval`, `new Function`, and string timers for the whole document. `'wasm-unsafe-eval'` grants compilation and nothing else. It surfaced exactly where it should have, as `webview-boot.smoketest.ts` catching `CompileError: WebAssembly.instantiate() ...` on the first push of the inline-images branch (2026-09); no unit test could have, since CSP enforcement is the thing under test. An engine that does not know the token ignores it, leaving the pre-token behaviour rather than a regression.
@@ -67,8 +65,6 @@
 **Why a mid-contention command waits rather than being refused.** While the contention runs the window is neither broker nor client, and a bind plus a handshake is not instant. Refusing there would tell an enrolled machine's webview it has no Burrow seconds before it gets one, and the gates that arm on that answer (`enrolled-gate.ts`) would stay down.
 
 **Where the `WebSocket` boundary falls.** `globalThis.WebSocket` arrived in Node 22, and VS Code 1.92 — the floor `engines.vscode` declares — shipped Node 20.14 (its release notes, July 2024), so an older extension host has no global to use.
-
-**Why `pushDevices` answers `null` instead of refusing.** When an un-enrolled window refused the read-only commands, the Settings dialog reported an unreachable server on machines that had simply never enrolled.
 
 ## The direct path
 
