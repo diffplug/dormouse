@@ -966,7 +966,49 @@ describe("workspaceDropTarget", () => {
     // ...and, when appending, the last tab, whose right edge it goes after.
     expect(workspaceDropTarget(900).rect?.right).toBe(300);
     strip(0);
-    expect(workspaceDropTarget(10)).toEqual({ index: undefined, rect: null });
+    expect(workspaceDropTarget(10)).toEqual({ index: undefined, rect: null, edge: "right" });
+  });
+
+  /** `unpinned` tabs, then `+`, then `pinned` tabs in their group, 100px each. */
+  function grouped(unpinned: number, pinned: number): void {
+    document.body.innerHTML = "";
+    const box = (left: number) => () => ({ left, right: left + 100, width: 100, height: 24 }) as DOMRect;
+    for (let index = 0; index < unpinned; index += 1) {
+      const tab = document.createElement("div");
+      tab.dataset.workspaceTab = `u${index}`;
+      tab.getBoundingClientRect = box(index * 100);
+      document.body.append(tab);
+    }
+    const plus = document.createElement("button");
+    plus.dataset.workspaceNew = "";
+    plus.getBoundingClientRect = () => ({ left: unpinned * 100, right: unpinned * 100 + 20, width: 20, height: 20 }) as DOMRect;
+    document.body.append(plus);
+    const group = document.createElement("div");
+    group.dataset.workspacePinnedGroup = "";
+    for (let index = 0; index < pinned; index += 1) {
+      const tab = document.createElement("div");
+      tab.dataset.workspaceTab = `p${index}`;
+      tab.getBoundingClientRect = box(unpinned * 100 + 20 + index * 100);
+      group.append(tab);
+    }
+    document.body.append(group);
+  }
+
+  it("keeps an unpinned arrival out of the pinned group, and a pinned one out of the unpinned", () => {
+    grouped(2, 2); // u0 0–100, u1 100–200, + 200–220, p0 220–320, p1 320–420
+    // Over the pinned tabs, an unpinned arrival lands after the last unpinned tab.
+    expect(workspaceDropTarget(400)).toMatchObject({ index: 2, rect: { right: 200 }, edge: "right" });
+    expect(workspaceDropTarget(10)).toMatchObject({ index: 0, rect: { left: 0 }, edge: "left" });
+    // Over the unpinned tabs, a pinned arrival lands at the pinned group's left edge.
+    expect(workspaceDropTarget(10, true)).toMatchObject({ index: 2, rect: { left: 220 }, edge: "left" });
+    expect(workspaceDropTarget(900, true)).toMatchObject({ index: undefined, rect: { right: 420 }, edge: "right" });
+  });
+
+  it("puts the caret after + for the first pinned tab, and at the strip start for the first unpinned", () => {
+    grouped(2, 0);
+    expect(workspaceDropTarget(10, true)).toMatchObject({ index: undefined, rect: { right: 220 }, edge: "right" });
+    grouped(0, 2);
+    expect(workspaceDropTarget(400)).toEqual({ index: 0, rect: null, edge: "right" });
   });
 
   it("finds one Workspace's own tab, and answers null for one not rendered", () => {

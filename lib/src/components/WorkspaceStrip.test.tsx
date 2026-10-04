@@ -866,6 +866,19 @@ describe('tab context menu', () => {
     expect(menuEl()).toBeNull();
   });
 
+  it('pins nothing once its Workspace has begun transferring', async () => {
+    await act(async () => { createWorkspace({ id: 'ws-2' }); });
+    await render();
+    await rightClick('ws-2');
+    setWorkspaceTransferPending('ws-2', true);
+    try {
+      await act(async () => { item('pin').click(); });
+      expect(getWorkspacesSnapshot().workspaces.find((ws) => ws.id === 'ws-2')?.pinned).toBeUndefined();
+    } finally {
+      setWorkspaceTransferPending('ws-2', false);
+    }
+  });
+
   it('never starts a reorder from a right press or a macOS Control-click', async () => {
     const first = getWorkspacesSnapshot().workspaces[0].id;
     await act(async () => { createWorkspace({ id: 'ws-2' }); });

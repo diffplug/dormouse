@@ -15,20 +15,38 @@ export interface WorkspaceDropTarget {
   /** The index a drop takes. Undefined appends, which is also what a drop past
    *  the last tab means. */
   index: number | undefined;
-  /** The box the caret draws against — the tab at `index`, or the last one when
-   *  appending. Null when the strip has no tabs at all. */
+  /** The box the caret draws against: the tab the drop goes before, else the
+   *  one it goes after (or `+`, for the first pinned tab). Null when the
+   *  arriving Workspace's group has nothing to draw against. */
   rect: DOMRect | null;
+  /** Which edge of `rect` the caret takes. */
+  edge: "left" | "right";
 }
 
-/** Where a drop at viewport `x` lands in this window's strip. */
-export function workspaceDropTarget(x: number): WorkspaceDropTarget {
+/**
+ * Where a drop at viewport `x` lands in this window's strip, clamped into the
+ * arriving Workspace's own group as the store clamps the drop itself
+ * (`docs/specs/layout.md` → "Workspace tabs"): an unpinned arrival never lands
+ * among pinned tabs, nor a pinned one among unpinned tabs.
+ */
+export function workspaceDropTarget(x: number, pinned = false): WorkspaceDropTarget {
   const elements = workspaceTabElements();
-  for (const [index, tab] of elements.entries()) {
+  const firstPinned = elements.findIndex((tab) => tab.closest("[data-workspace-pinned-group]") !== null);
+  const boundary = firstPinned === -1 ? elements.length : firstPinned;
+  const [low, high] = pinned ? [boundary, elements.length] : [0, boundary];
+  let index = elements.findIndex((tab) => {
     const rect = tab.getBoundingClientRect();
-    if (x < rect.left + rect.width / 2) return { index, rect };
-  }
-  const last = elements[elements.length - 1];
-  return { index: undefined, rect: last ? last.getBoundingClientRect() : null };
+    return x < rect.left + rect.width / 2;
+  });
+  if (index === -1) index = elements.length;
+  index = Math.max(low, Math.min(high, index));
+  const at = index === elements.length ? undefined : index;
+  if (index < high) return { index: at, rect: elements[index].getBoundingClientRect(), edge: "left" };
+  if (high > low) return { index: at, rect: elements[high - 1].getBoundingClientRect(), edge: "right" };
+  // The group is empty: a pinned arrival lands just after `+`, an unpinned one
+  // at the strip's start.
+  const plus = pinned ? workspaceTabElement(null) : null;
+  return { index: at, rect: plus?.getBoundingClientRect() ?? null, edge: "right" };
 }
 
 /** One Workspace's tab box, or null when it is not rendered. */

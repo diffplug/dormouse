@@ -29,6 +29,7 @@ import {
 } from "./workspace-drag";
 import { _setWindowLabelForTesting } from "./window-label";
 import { registerWallHandle, resetWallHandles, stubWallHandle } from "dormouse-lib/components/wall/wall-handles";
+import { createWorkspace, resetWorkspaces } from "dormouse-lib/lib/workspace-store";
 import { cancelPendingConfirmation, getWorkspaceUiSnapshot, requestConfirmation, resetWorkspaceUi, settleConfirmation } from "dormouse-lib/lib/workspace-ui-store";
 
 import { cancelEditorClose, decideEditorClose, getEditorClosePrompt } from "dormouse-lib/lib/tool-editor";
@@ -95,7 +96,7 @@ describe("hit testing while dragging", () => {
     hit = { label: "ws-2", x: 40, y: 8 };
     onDragOutsideWindow({ clientX: 900, clientY: 8 });
     await settle();
-    expect(hovers()).toEqual([{ label: "ws-2", x: 40, y: 8 }]);
+    expect(hovers()).toEqual([{ label: "ws-2", x: 40, y: 8, pinned: false }]);
 
     // Moved onto a different window: Rust clears the previous caret itself, so
     // the host only names the new one.
@@ -103,14 +104,14 @@ describe("hit testing while dragging", () => {
     await throttleElapsed();
     onDragOutsideWindow({ clientX: 1400, clientY: 8 });
     await settle();
-    expect(lastHover()).toEqual({ label: "ws-3", x: 12, y: 8 });
+    expect(lastHover()).toEqual({ label: "ws-3", x: 12, y: 8, pinned: false });
 
     // Over nothing at all.
     hit = null;
     await throttleElapsed();
     onDragOutsideWindow({ clientX: 2000, clientY: 800 });
     await settle();
-    expect(lastHover()).toEqual({ label: null, x: 0, y: 0 });
+    expect(lastHover()).toEqual({ label: null, x: 0, y: 0, pinned: false });
   });
 
   it("follows the pointer across the target's tabs instead of lighting one caret", async () => {
@@ -125,7 +126,7 @@ describe("hit testing while dragging", () => {
     await throttleElapsed();
     onDragOutsideWindow({ clientX: 1150, clientY: 8 });
     await settle();
-    expect(lastHover()).toEqual({ label: "ws-2", x: 260, y: 8 });
+    expect(lastHover()).toEqual({ label: "ws-2", x: 260, y: 8, pinned: false });
 
     // A pixel of travel inside the same slot is not worth an IPC hop.
     hit = { label: "ws-2", x: 261, y: 8 };
@@ -151,20 +152,29 @@ describe("hit testing while dragging", () => {
 
     await throttleElapsed();
     expect(probes()).toBe(2);
-    expect(lastHover()).toEqual({ label: "ws-2", x: 300, y: 8 });
+    expect(lastHover()).toEqual({ label: "ws-2", x: 300, y: 8, pinned: false });
   });
 
   it("clears the caret when the pointer comes back over its own strip", async () => {
     hit = { label: "ws-2", x: 40, y: 8 };
     onDragOutsideWindow({ clientX: 900, clientY: 8 });
     await settle();
-    expect(lastHover()).toEqual({ label: "ws-2", x: 40, y: 8 });
+    expect(lastHover()).toEqual({ label: "ws-2", x: 40, y: 8, pinned: false });
 
     // The in-strip reorder takes the gesture back; a caret left burning in the
     // other window claims a drop that is no longer going to happen.
     onDragBackInsideStrip();
     await settle();
-    expect(lastHover()).toEqual({ label: null, x: 0, y: 0 });
+    expect(lastHover()).toEqual({ label: null, x: 0, y: 0, pinned: false });
+  });
+
+  it("tells the target the dragged Workspace is pinned, so its caret keeps to the pinned group", async () => {
+    createWorkspace({ id: "ws-pinned", pinned: true });
+    hit = { label: "ws-2", x: 40, y: 8 };
+    onDragOutsideWindow({ clientX: 900, clientY: 8 }, "ws-pinned");
+    await settle();
+    expect(lastHover()).toEqual({ label: "ws-2", x: 40, y: 8, pinned: true });
+    resetWorkspaces();
   });
 
   it("never shows a caret in its own window", async () => {
@@ -334,7 +344,7 @@ describe("releasing the drag", () => {
 
     onDropOnOtherWindow("ws-1", { clientX: 900, clientY: 8 }, true);
     await settle();
-    expect(hovers()[0]).toEqual({ label: null, x: 0, y: 0 });
+    expect(hovers()[0]).toEqual({ label: null, x: 0, y: 0, pinned: false });
   });
 
   it("ignores a probe that lands after the release", async () => {
@@ -342,7 +352,7 @@ describe("releasing the drag", () => {
     hit = { label: "ws-2", x: 40, y: 8 };
     onDragOutsideWindow({ clientX: 900, clientY: 8 });
     await settle();
-    expect(lastHover()).toEqual({ label: "ws-2", x: 40, y: 8 });
+    expect(lastHover()).toEqual({ label: "ws-2", x: 40, y: 8, pinned: false });
 
     // A probe is an IPC round trip that can outlive the gesture. Park one.
     let answerProbe!: (hit: { label: string; x: number; y: number } | null) => void;
@@ -358,7 +368,7 @@ describe("releasing the drag", () => {
 
     onDropOnOtherWindow("ws-1", { clientX: 1400, clientY: 8 }, true);
     await settle();
-    expect(lastHover()).toEqual({ label: null, x: 0, y: 0 });
+    expect(lastHover()).toEqual({ label: null, x: 0, y: 0, pinned: false });
     const cleared = hovers().length;
 
     // The stale answer arrives — and must not re-light a caret in a window the
@@ -378,7 +388,7 @@ describe("releasing the drag", () => {
     // burning in the window the pointer happened to be over.
     onDragCancelled();
     await settle();
-    expect(hovers()[0]).toEqual({ label: null, x: 0, y: 0 });
+    expect(hovers()[0]).toEqual({ label: null, x: 0, y: 0, pinned: false });
     expect(mocks.transferWorkspaceTo).not.toHaveBeenCalled();
     expect(mocks.tearOutWorkspace).not.toHaveBeenCalled();
   });

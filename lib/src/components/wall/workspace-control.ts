@@ -20,7 +20,6 @@ import {
   resumeAutoWorkspaceName,
   resolveWorkspaceRef,
   setActiveWorkspace,
-  setWorkspacePinned,
   workspaceRefFor,
   type ResolvedWorkspace,
 } from '../../lib/workspace-store';
@@ -30,7 +29,7 @@ import { computeWorkspaceUnion } from '../../lib/workspace-union';
 import { awaitWallHandle, errorText, mountingRefusal, requestForWall, stringParam } from './dor-control-shared';
 import { attachSurfacePorts } from './surface-ports';
 import type { WallHandle } from './wall-handles';
-import { closeWorkspaceWithSurfaces, PINNED_CLOSE_REFUSAL, workspaceNeedsCloseConfirmation } from './workspace-lifecycle';
+import { closeWorkspaceWithSurfaces, PINNED_CLOSE_REFUSAL, pinWorkspace, workspaceNeedsCloseConfirmation } from './workspace-lifecycle';
 import type { DorControlParams, DorControlRequest } from './use-dor-control';
 
 /**
@@ -248,7 +247,11 @@ export async function handleWorkspaceControl(detail: DorControlRequest): Promise
         return;
       }
       // Idempotent: pinning a pinned Workspace answers as if it had pinned it.
-      setWorkspacePinned(target.id, params.pinned);
+      const refusal = pinWorkspace(target.id, params.pinned);
+      if (refusal) {
+        detail.respond({ ok: false, error: `workspace '${target.ref}' was not ${params.pinned ? 'pinned' : 'unpinned'}: ${refusal}` });
+        return;
+      }
       respondMutation(params.pinned ? 'pinned' : 'unpinned', target);
       return;
     }

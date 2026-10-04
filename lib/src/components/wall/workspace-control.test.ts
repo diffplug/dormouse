@@ -17,7 +17,7 @@ import {
 import { clearTerminalActivity, setTerminalActivity } from '../../lib/session-activity-store';
 import { createAlertEpisode } from '../../lib/alert-episode';
 import { resetWorkspaceSurfaces, setWorkspaceSurfaces } from '../../lib/workspace-surfaces';
-import { resetWindowSessionAggregator } from '../../lib/window-session-aggregator';
+import { resetWindowSessionAggregator, setWorkspaceTransferPending } from '../../lib/window-session-aggregator';
 import { getWorkspaceUiSnapshot, requestConfirmation, resetWorkspaceUi } from '../../lib/workspace-ui-store';
 import { setPlatform } from '../../lib/platform';
 import type { OpenPort, PlatformAdapter } from '../../lib/platform/types';
@@ -161,6 +161,19 @@ describe('workspace.pin', () => {
     await handleWorkspaceControl(unpin);
     expect(answer(unpin)).toMatchObject({ status: 'unpinned', workspaceId: 'ws-2' });
     expect(workspaceRows().map((row) => [row.id, row.pinned])).toEqual([['ws-2', false], [first, true]]);
+  });
+
+  it('refuses while the Workspace transfers, leaving the pin as it was', async () => {
+    createWorkspace({ id: 'ws-2', name: 'build', activate: false });
+    setWorkspaceTransferPending('ws-2', true);
+    try {
+      const pin = request('workspace.pin', { workspace: 'build', pinned: true });
+      await handleWorkspaceControl(pin);
+      expect(answer(pin)).toBe("workspace 'workspace:2' was not pinned: Workspace is transferring");
+      expect(workspaceRows().find((row) => row.id === 'ws-2')?.pinned).toBe(false);
+    } finally {
+      setWorkspaceTransferPending('ws-2', false);
+    }
   });
 
   it('requires a target and a boolean', async () => {

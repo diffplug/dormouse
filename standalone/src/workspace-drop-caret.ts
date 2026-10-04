@@ -31,18 +31,19 @@ function set(next: number | null): void {
   for (const listener of listeners) listener();
 }
 
-/** Where the tab would be inserted, as a viewport x. */
-function caretFor(point: { x: number; y: number }): number | null {
-  const { index, rect } = workspaceDropTarget(point.x);
-  // An empty strip has no tab to draw against, so the caret sits at its start.
+/** Where the tab would be inserted, as a viewport x, within the dragged
+ *  Workspace's own group. */
+export function caretFor(point: { x: number; y: number; pinned?: boolean }): number | null {
+  const { rect, edge } = workspaceDropTarget(point.x, point.pinned === true);
+  // Nothing to draw against, so the caret sits at the strip's start.
   if (!rect) {
     return document.querySelector<HTMLElement>("[data-workspace-strip]")?.getBoundingClientRect().left ?? null;
   }
-  return index === undefined ? rect.right : rect.left;
+  return edge === "left" ? rect.left : rect.right;
 }
 
 export function initDropCaret(): void {
-  void listenToWindow<{ x: number; y: number } | null>("dormouse://workspace-drop-hover", (event) => {
+  void listenToWindow<{ x: number; y: number; pinned?: boolean } | null>("dormouse://workspace-drop-hover", (event) => {
     set(event.payload ? caretFor(event.payload) : null);
   });
 }

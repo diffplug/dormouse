@@ -158,7 +158,7 @@ export function WorkspaceStrip({
       stripRect: () => stripRef.current?.getBoundingClientRect() ?? null,
       move: (id, toIndex) => { moveWorkspace(id, toIndex); },
       setDragging: setDraggingId,
-      onDragOutsideWindow: (point) => windowHooksRef.current.onDragOutsideWindow?.(point),
+      onDragOutsideWindow: (point, id) => windowHooksRef.current.onDragOutsideWindow?.(point, id),
       onDragBackInsideStrip: () => windowHooksRef.current.onDragBackInsideStrip?.(),
       onDropOnOtherWindow: (id, point, insideStrip) =>
         windowHooksRef.current.onDropOnOtherWindow?.(id, point, insideStrip),

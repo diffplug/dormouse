@@ -4,7 +4,7 @@ import { awaitWallHandle, mountingRefusal } from './dor-control-shared';
 import { getWallHandle } from './wall-handles';
 import { forgetWorkspaceSession, isWorkspaceTransferPending } from '../../lib/window-session-aggregator';
 import { cancelPendingConfirmation, dismissWorkspaceUi, requestConfirmation, setRenamingWorkspace, type WorkspaceConfirmation } from '../../lib/workspace-ui-store';
-import { closeWorkspace, createWorkspace, getActiveWorkspaceId, getWorkspacesSnapshot, isWorkspacePinned, moveWorkspace, setActiveWorkspace, workspaceRefFor } from '../../lib/workspace-store';
+import { closeWorkspace, createWorkspace, getActiveWorkspaceId, getWorkspacesSnapshot, isWorkspacePinned, moveWorkspace, setActiveWorkspace, setWorkspacePinned, workspaceRefFor } from '../../lib/workspace-store';
 import { addPendingKill } from '../../lib/pending-kills';
 import { getHelper, helperHasWork } from '../../lib/helper-terminal';
 import { isDelayedKillEnabled } from '../../lib/labs-settings';
@@ -263,6 +263,17 @@ function workspaceReopenRecord(id: WorkspaceId, session: PersistedSession): Work
   if (index < 0) return null;
   const { name, nameIsAuto } = workspaces[index];
   return { kind: 'workspace', closedAt: Date.now(), workspace: { id, name, nameIsAuto, session }, index };
+}
+
+/**
+ * Pin a Workspace right, or unpin it: the tab menu's row and `dor workspace
+ * pin` / `unpin`. Refused while it transfers, whose payload already carries the
+ * pin it had; the refusal's message, else null.
+ */
+export function pinWorkspace(id: WorkspaceId, pinned: boolean): string | null {
+  if (isWorkspaceTransferPending(id)) return 'Workspace is transferring';
+  setWorkspacePinned(id, pinned);
+  return null;
 }
 
 /** Open the strip's inline rename editor on a Workspace. */

@@ -4,11 +4,11 @@ import { clsx } from 'clsx';
 import { MODAL_LAYERS, OVERLAY_MAX_HEIGHT, POPUP_MENU_ITEM_CLASS, PopupButtonRow, portalToBody, useMeasuredElementRect } from './design';
 import { useCloseOnOutsideAndEscape } from './use-anchored-menu';
 import { workspaceTabElement } from './workspace-tab-elements';
-import { requestWorkspaceClose, requestWorkspaceRename } from './wall/workspace-lifecycle';
+import { pinWorkspace, requestWorkspaceClose, requestWorkspaceRename } from './wall/workspace-lifecycle';
 import { writeTextToClipboard } from '../lib/clipboard';
 import { clampOverlayPosition } from '../lib/ui-geometry';
 import { closeWorkspaceMenu, type WorkspaceMenu } from '../lib/workspace-ui-store';
-import { resumeAutoWorkspaceName, setWorkspacePinned, workspaceRefFor, type WorkspaceMeta } from '../lib/workspace-store';
+import { resumeAutoWorkspaceName, workspaceRefFor, type WorkspaceMeta } from '../lib/workspace-store';
 import type { WorkspaceId } from '../lib/session-types';
 
 interface MenuItem {
@@ -63,7 +63,7 @@ export function WorkspaceTabMenu({
   const items: MenuItem[] = [
     { key: 'rename', label: 'Rename', restoresFocus: false, run: () => requestWorkspaceRename(id) },
     ...(workspace.nameIsAuto ? [] : [{ key: 'auto-name', label: 'Use automatic name', run: () => resumeAutoWorkspaceName(id) }]),
-    { key: 'pin', label: pinned ? 'Unpin' : 'Pin right', run: () => { setWorkspacePinned(id, !pinned); } },
+    { key: 'pin', label: pinned ? 'Unpin' : 'Pin right', run: () => { pinWorkspace(id, !pinned); } },
     { key: 'copy-ref', label: 'Copy ref', hint: workspaceRefFor(id), run: () => { void writeTextToClipboard(workspaceRefFor(id)); } },
     ...(onMoveToNewWindow ? [{ key: 'new-window', label: 'Move to new window', run: () => onMoveToNewWindow(id) }] : []),
     {

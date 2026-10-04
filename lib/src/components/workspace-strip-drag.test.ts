@@ -49,7 +49,7 @@ describe('crossing the strip edge', () => {
     expect(backInside).not.toHaveBeenCalled();
 
     window.dispatchEvent(pointer('pointermove', 900, 300));
-    expect(outside).toHaveBeenCalledWith({ clientX: 900, clientY: 300 });
+    expect(outside).toHaveBeenCalledWith({ clientX: 900, clientY: 300 }, 'w1');
 
     // Back over its own strip: the live reorder takes the gesture back, and a
     // caret the host lit in another window is stale from here.

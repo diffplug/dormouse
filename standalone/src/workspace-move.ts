@@ -494,7 +494,7 @@ async function adoptWorkspace(platform: PlatformAdapter, payload: MovePayload): 
     // the one under the pointer's release — this window alone knows its own
     // tabs, which is why a drag sends a point rather than an index — else the
     // end.
-    const index = payload.index ?? (payload.at ? workspaceDropTarget(payload.at.x).index : undefined);
+    const index = payload.index ?? (payload.at ? workspaceDropTarget(payload.at.x, payload.workspace.pinned === true).index : undefined);
     // A pinned Workspace arrives pinned, in this window's pinned group, and the
     // index below clamps within that group.
     createWorkspace({ id, name, nameIsAuto: payload.workspace.nameIsAuto, pinned: payload.workspace.pinned === true, alertDelivery: session.alertDelivery });

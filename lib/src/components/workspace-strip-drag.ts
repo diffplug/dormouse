@@ -26,8 +26,8 @@ export interface StripDragHost {
   move(id: WorkspaceId, toIndex: number): void;
   /** Which Workspace is being dragged, for the dimmed tab. Null ends the drag. */
   setDragging(id: WorkspaceId | null): void;
-  /** The pointer left the window's strip entirely. */
-  onDragOutsideWindow?(point: StripDragPoint): void;
+  /** The pointer left the window's strip entirely, dragging `id`. */
+  onDragOutsideWindow?(point: StripDragPoint, id: WorkspaceId): void;
   /** …and came back over it. The live reorder takes the gesture back, so a drop
    *  caret the host lit in another window is stale from here. */
   onDragBackInsideStrip?(): void;
@@ -109,7 +109,7 @@ export function createWorkspaceStripDrag(host: StripDragHost): WorkspaceStripDra
     const inside = insideStrip(event);
     if (inside === false) {
       outsideStrip = true;
-      host.onDragOutsideWindow?.({ clientX: event.clientX, clientY: event.clientY });
+      host.onDragOutsideWindow?.({ clientX: event.clientX, clientY: event.clientY }, dragId);
     } else if (inside === true && outsideStrip) {
       outsideStrip = false;
       host.onDragBackInsideStrip?.();
