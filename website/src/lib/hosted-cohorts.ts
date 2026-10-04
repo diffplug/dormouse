@@ -74,9 +74,11 @@ function founders(value: unknown): Founders | null {
   return { total: all, shown: valid };
 }
 
-export async function fetchCohort(signal?: AbortSignal): Promise<Cohort> {
+/** Reads the live half, telling the server the visit's `ref` (`takeVisitRef`), which it counts. */
+export async function fetchCohort(signal?: AbortSignal, ref?: string): Promise<Cohort> {
   try {
-    const response = await fetch(COHORT_ENDPOINT, { signal, headers: { accept: "application/json" } });
+    const url = ref ? `${COHORT_ENDPOINT}?ref=${encodeURIComponent(ref)}` : COHORT_ENDPOINT;
+    const response = await fetch(url, { signal, headers: { accept: "application/json" } });
     if (!response.ok) return { seatsLeft: null, founders: null };
     const body: unknown = await response.json();
     if (typeof body !== "object" || body === null) return { seatsLeft: null, founders: null };

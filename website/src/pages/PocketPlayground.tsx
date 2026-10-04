@@ -8,6 +8,7 @@ import { ThemePicker } from "dormouse-lib/components/ThemePicker";
 import { useRestoredTheme } from "dormouse-lib/lib/themes";
 import { POCKET_PLAYGROUND_PATH, usePreferredPlayground } from "../lib/playground-routing";
 import { sitePath } from "../lib/site-meta";
+import { HOSTED_REFS, withHostedRef } from "dormouse-lib/lib/hosted-links";
 import { SITE_LINK_CLASS } from "../components/site-tokens";
 
 function MobilePocketPlaygroundPage() {
@@ -49,7 +50,7 @@ function DesktopPocketPlaygroundPage() {
           </p>
           <p className="mb-4 text-lg leading-relaxed opacity-70">
             Run your own Relay, or{" "}
-            <a href={`${sitePath("/hosted")}#remote-control`} className={SITE_LINK_CLASS}>
+            <a href={withHostedRef(sitePath("/hosted"), HOSTED_REFS.pocketPlayground, "remote-control")} className={SITE_LINK_CLASS}>
               let me run one for you with Dormouse Hosted
             </a>. Your terminal still runs on your awake, online computer; Hosted removes
             the server setup and maintenance.

@@ -110,8 +110,9 @@ export function foundingTier(): Tier {
   };
 }
 
-/** The checkout link for `tier`. */
-export const checkoutUrl = (tier: Tier) => `${CHECKOUT_PAGE}?plan=${tier.id}`;
+/** The checkout link for `tier`, carrying the visit's allowlisted `ref` (docs/specs/pricing.md -> "The Hosted page"). */
+export const checkoutUrl = (tier: Tier, ref?: string) =>
+  `${CHECKOUT_PAGE}?plan=${tier.id}${ref ? `&ref=${ref}` : ""}`;
 
 /** Every paid plan on sale, in the order the page shows them. */
 export function tiersOnSale(): Tier[] {

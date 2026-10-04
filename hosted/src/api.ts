@@ -1,5 +1,6 @@
 import type { CheckoutPlan as Plan } from "../../website/src/lib/hosted-pricing";
 import { providerIds, providerNames } from "../server/providers.js";
+import { checkoutRef } from "./checkout";
 import type { ProviderId } from "../server/providers.js";
 
 export const providers = providerIds;
@@ -200,8 +201,9 @@ const toStripe = async (response: Response) =>
 
 /** Throws while this deployment does not sell, and when signed out. */
 export const getBilling = async () => (await (await billing("")).json()) as BillingSummary;
+/** Starts checkout for `plan`, with the ref its link carried (`checkoutRef`). */
 export const startCheckout = async (plan: Plan) =>
-  toStripe(await billing("/checkout", { method: "POST", body: JSON.stringify({ plan }) }));
+  toStripe(await billing("/checkout", { method: "POST", body: JSON.stringify({ plan, ref: checkoutRef() }) }));
 export const confirmCheckout = async (checkout: string) =>
   (await (await billing("/confirm", { method: "POST", body: JSON.stringify({ checkout }) })).json()) as BillingSummary;
 export const openPortal = async () => toStripe(await billing("/portal", { method: "POST" }));

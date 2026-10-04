@@ -16,7 +16,7 @@ A multitasking terminal for VS Code and the desktop — a real tiling layout, tm
 - [Compatible agents](https://dormouse.sh/compatible-agents) — conversation recovery, watching, and contributing an agent integration
 - [Agent skill](https://dormouse.sh/agent-skill) — the operating guide Dormouse bundles for coding agents
 - [Self-host](https://dormouse.sh/self-host) — run the coordinating Relay on your own tailnet
-- [Hosted](https://dormouse.sh/hosted/) — managed Relay and ElevenLabs voice, from $10 a month
+- [Hosted](https://dormouse.sh/hosted/?ref=readme) — managed Relay and ElevenLabs voice, from $10 a month
 - [Security](https://dormouse.sh/security) — what Dormouse guarantees, what it does not, and how that is checked
 
 ## Features
