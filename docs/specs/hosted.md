@@ -62,18 +62,17 @@ Source of truth: `entitledSql` and `entitled` in `hosted/server/entitlement.ts`;
 
 ## Managed voice
 
-A signed-in desktop exchanges its voice token for ElevenLabs speech in a voice of the curated set (`MANAGED_VOICES` in `remote-lib-common/src/remote/managed-voice.ts`). Signing in is the device-code enrollment ("Burrow enrollment"), whose redemption mints the token; the account Worker's token routes mint one by hand. The voice Worker serves speak.
+A signed-in desktop exchanges its voice token for ElevenLabs speech in a voice of the curated set (`MANAGED_VOICES` in `remote-lib-common/src/remote/managed-voice.ts`). Signing in is the device-code enrollment ("Burrow enrollment"), whose redemption is the only way a token is minted; the account Worker's token routes list and revoke them. The voice Worker serves speak.
 
 | Route | Credential | Success |
 |---|---|---|
 | `GET /api/voice/tokens` | login cookie | 200 `{ tokens }` |
-| `POST /api/voice/tokens` | login cookie, exact `Origin` | 201 `{ id, token, createdAt }` |
 | `DELETE /api/voice/tokens/:id` | login cookie, exact `Origin` | 204; 404 for another account's or an unknown ID |
 | `POST /api/voice/speak` | `Authorization: Bearer dmv_…`, JSON `{ text, voiceId }` | 200 `audio/mpeg`, `Cache-Control: no-store` |
 
 Errors are JSON `{ message }`. Cookie routes answer 401 without a login and 403 for an account not entitled ("Entitlement").
 
-**Must store only a token's SHA-256.** A token is `dmv_` plus base64url of 32 random bytes, returned only by the mint response: the account's `POST`, or the poll that redeems a sign-in. Revocation is permanent.
+**Must store only a token's SHA-256.** A token is `dmv_` plus base64url of 32 random bytes, returned only by the poll that redeems a sign-in. Revocation is permanent.
 
 **Must mint a sign-in's token in the statement that redeems it**, owned by the approver and naming the Burrow it enrolled (`hosted/server/dormouse-migrations/005_voice_token_burrow.sql`), so removing that computer from the account deletes its token, and the Burrow cap bounds them. The relay's role may insert those columns and nothing else of voice.
 
@@ -310,4 +309,4 @@ Source of truth: `.github/workflows/hosted-production.yml`; `hosted/scripts/prod
 
 1. Deploy the configured providers and pass real production acceptance. pgstencil includes the Microsoft fix; personal and work/school callbacks need acceptance.
 2. Add per-browser login listing/revocation, sign-out-everywhere, and account recovery before broad paid use. Revisit the fixed 24-hour login lifetime for daily voice use.
-3. Managed voice for every member: per-account quotas, usage accounting, spending bounds beyond the fixed daily cap, and retiring the account page's hand-minted tokens.
+3. Managed voice for every member: per-account quotas, usage accounting, and spending bounds beyond the fixed daily cap.

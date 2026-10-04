@@ -21,6 +21,7 @@ import {
 import type { Session } from "../../src/api";
 import { ADMIN_EMAIL } from "../entitlement";
 import { CRON_SWEEP_CAP, SPEECH_SWEEP_CAP, VOICE_DAILY_CAP } from "../voice";
+import { mintVoiceToken } from "../voice-token";
 import { ALREADY_APPROVED, RECENT_LOGIN_REQUIRED } from "../relay-account";
 import {
   API_ROUTES,
@@ -388,8 +389,16 @@ async function fixture(
         },
         body: typeof body === "string" ? body : JSON.stringify(body),
       });
-    const mint = async () =>
-      (await (await tokens("POST")).json()) as { id: string; token: string };
+    /** A voice token for this browser's account, stored as a sign-in's redemption stores one. */
+    const mint = async () => {
+      const token = mintVoiceToken();
+      const [{ id }] = await queryDatabase<{ id: string }>(
+        context.database.url,
+        `INSERT INTO dormouse_voice_tokens ("userId", hash) VALUES ($1, $2) RETURNING id`,
+        [(await session())!.user.id, digest(token)],
+      );
+      return { id, token };
+    };
     /** The account's Relay routes, from this origin unless `from` names another. */
     const approve = (userCode: unknown, from = origin) =>
       request("/api/relay/enrollments/approve", {
@@ -679,7 +688,7 @@ test("preview runs cloud smoke against real auth, ignores stale providers, and p
 const voiceId = "21m00Tcm4TlvDq8ikWAM";
 const hi = { text: "hi", voiceId };
 
-test("managed voice: only the verified admin mints, speaks, and revokes", async ({
+test("managed voice: only the verified admin lists, speaks, and revokes", async ({
   onTestFinished,
 }) => {
   const f = await fixture();
@@ -689,30 +698,14 @@ test("managed voice: only the verified admin mints, speaks, and revokes", async 
   expect((await admin.tokens("GET")).status).toBe(401);
   await other.email("other@example.test");
   expect((await other.tokens("GET")).status).toBe(403);
-  expect((await other.tokens("POST")).status).toBe(403);
   await admin.email(ADMIN_EMAIL);
   expect(await (await admin.tokens("GET")).json()).toEqual({ tokens: [] });
-  // A same-site page — a sibling Worker's included — carries the cookie but not this origin.
-  for (const sameSite of SAME_SITE)
-    expect(
-      (
-        await admin.request("/api/voice/tokens", {
-          method: "POST",
-          headers: { origin: sameSite },
-        })
-      ).status,
-      sameSite,
-    ).toBe(403);
-
-  const minted = await admin.tokens("POST");
-  expect(minted.status).toBe(201);
-  const { id, token } = (await minted.json()) as { id: string; token: string };
-  expect(token).toMatch(/^dmv_[A-Za-z0-9_-]{43}$/);
-  const stored = await queryDatabase<{ hash: string }>(
-    f.database.url,
-    "SELECT hash FROM dormouse_voice_tokens",
-  );
-  expect(stored).toEqual([{ hash: digest(token) }]);
+  // Hand-minting is retired: only a sign-in's redemption stores a token.
+  expect((await admin.tokens("POST")).status).toBe(404);
+  const { id, token } = await admin.mint();
+  expect((await (await admin.tokens("GET")).json()) as { tokens: { id: string }[] }).toMatchObject({
+    tokens: [{ id }],
+  });
 
   const spoken = await admin.speak(token, {
     text: "  Build passed.  ",
@@ -838,7 +831,6 @@ test("managed voice: only the verified admin mints, speaks, and revokes", async 
     [ADMIN_EMAIL],
   );
   expect((await admin.tokens("GET")).status).toBe(403);
-  expect((await admin.tokens("POST")).status).toBe(403);
   expect(
     (await admin.speak(second.token, hi)).status,
   ).toBe(403);

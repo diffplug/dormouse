@@ -6,7 +6,6 @@ import { isManagedVoiceId, isManagedVoiceToken, parseBearer } from "remote-lib-c
 import { accountQuery, cookieEntitled, type AccountHost } from "./account-gate";
 import { entitledSql } from "./entitlement";
 import { recordMetric } from "./metrics";
-import { mintVoiceToken } from "./voice-token";
 
 export const VOICE_DAILY_CAP = 500;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -62,8 +61,8 @@ const badBody = (c: Context) =>
   fail(c, 400, "Send JSON with text and voiceId.");
 
 /**
- * Registers the account's /api/voice/tokens routes; call before any /api/*
- * catch-all.
+ * Registers the account's /api/voice/tokens routes, listing and revoking: a
+ * sign-in's redemption is the only mint. Call before any /api/* catch-all.
  */
 export function voiceTokenRoutes(
   app: Hono<any>,
@@ -80,17 +79,6 @@ export function voiceTokenRoutes(
       [c.get("login").userId],
     );
     return c.json({ tokens });
-  });
-
-  app.post("/api/voice/tokens", cookieGate, async (c) => {
-    const token = mintVoiceToken();
-    const [row] = await accountQuery<{ id: string; createdAt: Date }>(
-      host(c),
-      `INSERT INTO dormouse_voice_tokens ("userId", hash) VALUES ($1, $2)
-      RETURNING id, "createdAt"`,
-      [c.get("login").userId, digest(token)],
-    );
-    return c.json({ id: row.id, token, createdAt: row.createdAt }, 201);
   });
 
   app.delete("/api/voice/tokens/:id", cookieGate, async (c) => {

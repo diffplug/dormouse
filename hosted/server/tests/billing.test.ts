@@ -249,6 +249,21 @@ test("billing is off without every Stripe binding, and refuses a ladder the page
   expect(() => billingSetup({ ...env, STRIPE_PRICE_YEARLY: "price_m" })).toThrow(/distinct/);
 });
 
+/** Sign a computer in as Dormouse does: begin, approve as `member`, and redeem. */
+async function enroll(
+  f: Awaited<ReturnType<typeof fixture>>,
+  member: ReturnType<Awaited<ReturnType<typeof fixture>>["browser"]>,
+): Promise<{ burrowToken: string; voiceToken: string }> {
+  const begun = (await f.burrowCall(API_ROUTES.burrowEnrollBegin, { origin: ORIGINS.relay })).json;
+  expect(
+    (await member.request("/api/relay/enrollments/approve", { method: "POST", body: { userCode: begun.userCode } }))
+      .status,
+  ).toBe(204);
+  const enrolled = await f.burrowCall(API_ROUTES.burrowEnrollPoll, { deviceCode: begun.deviceCode });
+  expect(enrolled.json.status).toBe("enrolled");
+  return { burrowToken: enrolled.json.enrollment.burrowToken, voiceToken: enrolled.json.voiceToken };
+}
+
 test("checkout to webhook to entitlement: voice and the Relay admit a member, and refuse once the subscription ends", async ({
   onTestFinished,
 }) => {
@@ -260,7 +275,7 @@ test("checkout to webhook to entitlement: voice and the Relay admit a member, an
   expect((await member.request("/api/billing/checkout", { method: "POST", body: { plan: "monthly" } })).status).toBe(401);
   const userId = await member.signIn("member@example.test");
   expect(await member.summary()).toMatchObject({ plan: null, entitled: false, founder: null });
-  expect((await member.request("/api/voice/tokens", { method: "POST" })).status).toBe(403);
+  expect((await member.request("/api/voice/tokens")).status).toBe(403);
 
   // The browser names a plan, never a Price.
   for (const plan of ["price_dev_monthly", "annual", "", 7])
@@ -284,19 +299,10 @@ test("checkout to webhook to entitlement: voice and the Relay admit a member, an
   expect(await confirmed.json()).toMatchObject({ plan: "monthly", active: true, entitled: true, renews: true });
   expect((await member.request("/api/billing/confirm", { method: "POST", body: { checkout: "unknown" } })).status).toBe(404);
 
-  // Voice: mint and speak.
-  const minted = await member.request("/api/voice/tokens", { method: "POST" });
-  expect(minted.status).toBe(201);
-  const { token } = (await minted.json()) as { token: string };
-  expect((await f.speak(token)).status).toBe(200);
-
-  // The Relay: approve a device code, and the Burrow enrolls and mints a setup token.
-  const begun = (await f.burrowCall(API_ROUTES.burrowEnrollBegin, { origin: ORIGINS.relay })).json;
-  expect((await member.request("/api/relay/enrollments/approve", { method: "POST", body: { userCode: begun.userCode } })).status).toBe(204);
-  const enrolled = await f.burrowCall(API_ROUTES.burrowEnrollPoll, { deviceCode: begun.deviceCode });
-  expect(enrolled.json.status).toBe("enrolled");
-  const { burrowToken } = enrolled.json.enrollment;
+  // Sign-in: approve a device code; the Burrow enrolls, mints a setup token, and speaks.
+  const { burrowToken, voiceToken: token } = await enroll(f, member);
   expect((await f.burrowCall(API_ROUTES.burrowSetupToken, undefined, burrowToken)).status).toBe(200);
+  expect((await f.speak(token)).status).toBe(200);
 
   // A failed renewal refuses at once: no grace past what the subscription grants.
   f.dev.transition(subscription.id, "payment-failed");
@@ -316,7 +322,7 @@ test("checkout to webhook to entitlement: voice and the Relay admit a member, an
     status: 403,
     json: { error: NOT_ENTITLED_ERROR },
   });
-  expect((await member.request("/api/voice/tokens", { method: "POST" })).status).toBe(403);
+  expect((await member.request("/api/voice/tokens")).status).toBe(403);
   expect(await member.summary()).toMatchObject({ plan: null, entitled: false });
   expect(
     await queryDatabase(f.database.url, `SELECT owner_id, status FROM pgstencil_billing.subscriptions`),
@@ -331,7 +337,7 @@ test("a missed renewal webhook is repaired by the next resync", async ({
   const member = f.browser();
   await member.signIn("renewing@example.test");
   const { subscription } = await member.buy("yearly");
-  const token = ((await (await member.request("/api/voice/tokens", { method: "POST" })).json()) as { token: string }).token;
+  const { voiceToken: token } = await enroll(f, member);
   // Stripe renewed, but the webhook never arrived; the stored period has ended.
   f.dev.transition(subscription.id, "renew");
   f.dev.events.length = 0;
@@ -564,8 +570,16 @@ test("metrics: logins and new accounts, checkouts by plan and ref, ended subscri
   expect(again.status).toBe(200);
   await again.text();
 
+  // The Relay: an approval, then the Burrow it enrolls, which brings its voice token.
+  const begun = (await f.burrowCall(API_ROUTES.burrowEnrollBegin, { origin: ORIGINS.relay })).json;
+  expect((await member.request("/api/relay/enrollments/approve", { method: "POST", body: { userCode: begun.userCode } })).status).toBe(204);
+  await expect.poll(() => counted("enroll.approved")).toBe(1);
+  const enrolled = (await f.burrowCall(API_ROUTES.burrowEnrollPoll, { deviceCode: begun.deviceCode })).json;
+  expect(enrolled.status).toBe("enrolled");
+  await expect.poll(() => counted("burrow.enrolled")).toBe(1);
+
   // Voice: spoken, the call that spends the day's last, and the refusals after.
-  const { token } = (await (await member.request("/api/voice/tokens", { method: "POST" })).json()) as { token: string };
+  const token: string = enrolled.voiceToken;
   expect((await f.speak(token)).status).toBe(200);
   await expect.poll(() => counted("voice.speak", "ok")).toBe(1);
   await sql(`UPDATE dormouse_voice_usage SET count = $1`, [VOICE_DAILY_CAP - 1]);
@@ -574,13 +588,6 @@ test("metrics: logins and new accounts, checkouts by plan and ref, ended subscri
   await expect.poll(() => counted("voice.fallback-cap")).toBe(1);
   await expect.poll(() => counted("voice.speak", "capped")).toBe(1);
   expect(await counted("voice.speak", "ok")).toBe(2);
-
-  // The Relay: an approval, then the Burrow it enrolls.
-  const begun = (await f.burrowCall(API_ROUTES.burrowEnrollBegin, { origin: ORIGINS.relay })).json;
-  expect((await member.request("/api/relay/enrollments/approve", { method: "POST", body: { userCode: begun.userCode } })).status).toBe(204);
-  await expect.poll(() => counted("enroll.approved")).toBe(1);
-  expect((await f.burrowCall(API_ROUTES.burrowEnrollPoll, { deviceCode: begun.deviceCode })).json.status).toBe("enrolled");
-  await expect.poll(() => counted("burrow.enrolled")).toBe(1);
 
   // An immediate cancellation within the refund window is a refund; one at period end, a cancellation.
   f.dev.transition(subscription.id, "cancel");

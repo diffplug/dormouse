@@ -100,13 +100,6 @@ export async function getVoiceTokens(): Promise<VoiceToken[] | null> {
   if (!response.ok) throw failed();
   return ((await response.json()) as { tokens: VoiceToken[] }).tokens;
 }
-export async function createVoiceToken() {
-  const response = await voice("POST");
-  if (!response.ok) throw failed();
-  return (await response.json()) as Pick<VoiceToken, "id" | "createdAt"> & {
-    token: string;
-  };
-}
 export async function revokeVoiceToken(id: string) {
   if (!(await voice("DELETE", `/${encodeURIComponent(id)}`)).ok)
     throw failed();

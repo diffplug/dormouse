@@ -8,7 +8,6 @@ import {
 import {
   approveEnrollment,
   confirmCheckout,
-  createVoiceToken,
   getBilling,
   getAccounts,
   getComputers,
@@ -104,7 +103,6 @@ export function App({
   const [buying, setBuying] = useState(checkout);
   // Set once Stripe's return is confirmed: the welcome page shows.
   const [welcome, setWelcome] = useState(false);
-  const [minted, setMinted] = useState("");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
@@ -244,22 +242,12 @@ export function App({
       setComputers(null);
       // The code stays on the page; a no-plan refusal was this account's.
       setEnrolling((shown) => shown && { code: shown.code });
-      setMinted("");
       setEnterCode(false);
       setCode("");
       await refresh();
       setNotice(
         "Signed out of this browser. Your other devices stay signed in.",
       );
-    });
-  const mintToken = () =>
-    act("mint", async () => {
-      const { token, id, createdAt } = await createVoiceToken();
-      setMinted(token);
-      setVoiceTokens((tokens) => [
-        { id, createdAt, lastUsedAt: null, revokedAt: null },
-        ...(tokens ?? []),
-      ]);
     });
   const revokeToken = (id: string) =>
     act(`revoke-${id}`, async () => {
@@ -317,11 +305,6 @@ export function App({
     setBuying(undefined);
     setError("");
   };
-  const copyMinted = () =>
-    act("copy", async () => {
-      await navigator.clipboard.writeText(minted);
-      setNotice("Token copied.");
-    });
   // The one page this state shows, and the address it keeps.
   const page: Page = enrolling
     ? "enroll"
@@ -573,19 +556,6 @@ export function App({
                       Signing in from Dormouse gives that computer its own
                       token; removing the computer below revokes it.
                     </p>
-                    {minted && (
-                      <div className="notice minted">
-                        <p>Copy this token now. You won’t see it again.</p>
-                        <code>{minted}</code>
-                        <button
-                          className="copy"
-                          disabled={!!busy}
-                          onClick={() => void copyMinted()}
-                        >
-                          Copy token
-                        </button>
-                      </div>
-                    )}
                     {voiceTokens.map((token) => (
                       <div className="method" key={token.id}>
                         <span>
@@ -611,13 +581,6 @@ export function App({
                         )}
                       </div>
                     ))}
-                    <button
-                      className="mint"
-                      disabled={!!busy}
-                      onClick={() => void mintToken()}
-                    >
-                      {busy === "mint" ? "Creating…" : "Create token"}
-                    </button>
                   </section>
                 )}
                 {computers && (
