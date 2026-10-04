@@ -62,7 +62,7 @@ Source of truth: `entitledSql` and `entitled` in `hosted/server/entitlement.ts`;
 
 ## Managed voice
 
-A signed-in desktop exchanges its voice token for ElevenLabs speech in a voice of the curated set (`MANAGED_VOICES` in `remote-lib-common/src/remote/managed-voice.ts`). Signing in is the device-code enrollment ("Burrow enrollment"), whose redemption mints the token; the account Worker's token routes are the admin test path. The voice Worker serves speak.
+A signed-in desktop exchanges its voice token for ElevenLabs speech in a voice of the curated set (`MANAGED_VOICES` in `remote-lib-common/src/remote/managed-voice.ts`). Signing in is the device-code enrollment ("Burrow enrollment"), whose redemption mints the token; the account Worker's token routes mint one by hand. The voice Worker serves speak.
 
 | Route | Credential | Success |
 |---|---|---|

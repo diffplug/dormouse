@@ -1,7 +1,7 @@
 // Rules: docs/specs/hosted.md -> "Entitlement".
 import { queryDatabase } from "pgstencil/postgres";
 
-/** The one address the entitlement keys on until billing ships. */
+/** The standing comp: Dormouse's own dogfooding account, entitled without a subscription. */
 export const ADMIN_EMAIL = "ned.twigg@diffplug.com";
 
 // Inlined into SQL below, so it may never carry a quote or a backslash.

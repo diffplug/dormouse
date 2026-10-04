@@ -3,13 +3,13 @@
 > - See `docs/specs/glossary.md` for Burrow / Client / Relay and Pane / Session vocabulary.
 > - **Owns:** the plans, the founding ladder, what a plan grants, how a desktop proves membership, the managed-voice boundary, and the content contract of the Hosted page.
 > - **Defers:** page chrome, rail, and link obligations to `docs/specs/website-docs.md` -> "Reference page chrome"; the Hosted Relay's accounts, enrollment, and entitlement, and managed voice's routes, to `docs/specs/hosted.md`; the cloud-hosted trust boundary to `docs/specs/security-remote.md` -> "Cloud-hosted mode"; alarm delivery to `docs/specs/alert.md` -> "Spoken alarms".
-> - **Status:** the Hosted page publishes the plans and the FAQ, and checkout, the account pages, and the subscription entitlement are built and off until Stripe is configured ([Checkout and entitlement](#checkout-and-entitlement)); turning billing on and desktop sign-in are under [Future](#future).
+> - **Status:** the Hosted page publishes the plans and the FAQ, a desktop signs in to Hosted for managed voice (`docs/specs/hosted.md` -> "Managed voice"), and checkout, the account pages, and the subscription as the entitlement are built and off until Stripe is configured ([Checkout and entitlement](#checkout-and-entitlement)); turning billing on is under [Future](#future).
 
 ## The Hosted page
 
 **`/hosted` is canonical, titled "Dormouse Hosted"; `/pricing` 301-redirects to it.** The header nav and the rail label do not change: the tool is free and open source, and Hosted is the optional service with a price, so pricing is a section of the Hosted page, never a page of its own.
 
-**Settings is the front door.** The spoken-alarm row's managed-voice link and the playground tutorial land on `/hosted#voice`, and the plan cards sit within one screen of that anchor. `#remote-control` and `#voice` keep resolving as section ids.
+**Settings is the front door.** Its sign-in, in Notifications' managed voice and Network's Remote control, starts membership on the desktop; the playground tutorial lands on `/hosted#voice`, and the plan cards sit within one screen of that anchor. An account with no plan is linked to `#pricing` from Settings and from the baseboard alarm buttons' offers (`docs/specs/alert.md` -> "Settings dialog"). `#remote-control` and `#voice` keep resolving as section ids.
 
 **Content, in order:** the plan cards, directly under the title and anchored `#pricing`; what a member gets, as prose; "Self-hosting stays free"; and a short FAQ — refunds and cancellation, the founding lock, who appears in the founders row, what happens if Hosted shuts down, and that team pricing goes by email to `teams@dormouse.sh`.
 
@@ -72,6 +72,7 @@ Built on the account Worker and off until Stripe is configured; routes, bindings
 - **No trial**: the first payment is taken at checkout, and the 30-day refund is the trial.
 - **The entitlement is the account's subscription, read on the server on every voice and Relay request.** No licence, no offline verification, and no grace past what the subscription grants; a lapsed member's voices fall back to the system voice and its Burrows to `not-entitled`.
 - **One account covers every machine the member uses.** No device count, no seat count, no activation limit.
+- **Sign-in is the only account surface in the free client** (`docs/specs/hosted.md` -> "Managed voice").
 - **A refund or chargeback ends the subscription**, so the next request is refused, and the seat returns to its cohort.
 - **Stripe's return shows the founders-row opt-in, unticked, to a founder**; the account page's Plan section can withdraw it at any time, beside Manage billing.
 - **The return also asks the four Van Westendorp questions**, optional and unsent until answered: too expensive to consider, too cheap to trust, expensive but would consider, a bargain. Their answers inform later list changes.
@@ -80,11 +81,10 @@ Built on the account Worker and off until Stripe is configured; routes, bindings
 
 **Scope: hosted-sales** — what remains, in staged order:
 
-1. **Desktop sign-in** by device code ("Desktop sign-in").
-2. **Managed voice for members**: the disclosure, one voice per Pane.
-3. **Turning billing on**: the Stripe products, Prices, portal, and webhook, then the bindings (`docs/specs/hosted.md` -> "Billing"), then `CHECKOUT_OPEN`. The subscription admits members to the Hosted Relay (`docs/specs/hosted.md` -> "Relay"), so this is gated on the independent review `docs/specs/security-remote.md` -> "Cloud-hosted mode" requires.
-4. **Founder avatars** proxied onto this origin.
-5. **Renewal, cancellation, and refund** paths.
+1. **Managed voice for members**: one voice per Pane.
+2. **Turning billing on**: the Stripe products, Prices, portal, and webhook, then the bindings (`docs/specs/hosted.md` -> "Billing"), then `CHECKOUT_OPEN`. The subscription admits members to the Hosted Relay (`docs/specs/hosted.md` -> "Relay"), so this is gated on the independent review `docs/specs/security-remote.md` -> "Cloud-hosted mode" requires.
+3. **Founder avatars** proxied onto this origin.
+4. **Renewal, cancellation, and refund** paths.
 
 Team and enterprise tiers are never sold through this page. A free hosted tier is undecided — see [Open questions](#open-questions).
 
@@ -115,16 +115,10 @@ What each plan grants once checkout can sell it; [Published prices](#published-p
 - **The hosted Relay is part of the plan, never a second purchase**: the Relay reads the same subscription ([Checkout and entitlement](#checkout-and-entitlement)), so a member never signs up twice.
 - **Nothing shipped free is ever gated**: the terminal, `dor`, browser panes, the notepad, alerts with the system voice, the self-host Relay, and Pocket over a self-hosted Relay stay free, with no login.
 
-### Desktop sign-in
-
-- **A desktop signs in from Settings by device code**, the flow Burrow enrollment already runs (`docs/specs/hosted.md` -> "Burrow enrollment"). The approval mints a desktop credential the host keeps and never hands a webview. Sign-in is the only account surface in the free client.
-
 ### Managed voice
 
-- **Dormouse operates the endpoint and holds the vendor key** (ElevenLabs). A request carries the desktop credential, a voice id, and the text; the response is audio.
-- **What leaves the machine is exactly the sanitized spoken label and the voice id** — the `toSpokenText` output in `lib/src/lib/alert-speech.ts`, never terminal content, never a notification body, never a Session id. **Disclose this in the enable flow before the first request**, honoring the promise the Hosted page makes.
-- **Cache clips by voice and text on the client** and regenerate only when the label changes; a cache hit makes no request. **Fair use is a daily request cap per member**; past it, the system voice speaks.
-- **The system voice is the fallback**, for offline, unentitled, endpoint error, or cap: same delivery rules, same cut-off on attend, never silence because the service failed. Delivery identity, queueing, and cut-off stay owned by `docs/specs/alert.md` -> "Spoken alarms".
+What is built — the endpoint, the disclosure, the clip cache, the daily cap, and the fallback — is `docs/specs/hosted.md` -> "Managed voice" and `docs/specs/alert.md` -> "Managed voice".
+
 - **One voice per Pane.** The member default applies everywhere; a per-Pane override is persisted with the pane's settings and follows the Session through minimize and restore. Doors and headers show nothing new.
 - **Pocket speaks only in the foreground** — a web app cannot voice a background push — so the desktop is the primary voice sink. A native Pocket is out of scope here.
 
@@ -138,4 +132,4 @@ What each plan grants once checkout can sell it; [Published prices](#published-p
 ### Open questions
 
 - A free hosted tier, no card. It is the only way a stock binary can try Pocket, since the shipped bundle reaches only `*.dormouse.sh` (`docs/specs/relay.md` -> "Relay origin").
-- The curated voice set and whether members may bring their own ElevenLabs voice id.
+- Whether members may bring their own ElevenLabs voice id beyond the curated set.
