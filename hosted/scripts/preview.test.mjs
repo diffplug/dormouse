@@ -187,6 +187,14 @@ test("Hyperdrive uses a direct URL and decodes credentials without logging them"
     /direct/,
   );
   assert.throws(() => hyperdriveOrigin("https://example.com"));
+  // A connection parameter that would move pg_dump, the migrations, or the
+  // client off the authority this compares is refused, never ignored.
+  for (const key of ["host", "hostaddr", "port", "dbname", "user", "password", "service"])
+    assert.throws(
+      () => hyperdriveOrigin(`postgres://test:pw@ep-test.neon.tech/neondb?sslmode=require&${key}=other`),
+      new RegExp(`DATABASE_URL must not set ${key}`),
+      key,
+    );
 });
 
 test("Cloudflare errors omit provider bodies, and missing deletions are idempotent", async () => {

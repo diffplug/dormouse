@@ -251,6 +251,21 @@ test("the account answers /connect/ with its own shell and policy, never the pho
   }
 });
 
+test("readiness without a database binding is down, saying nothing more", async () => {
+  const app = workerApp({
+    bindings: (env) => env,
+    rules: relayRules,
+    ready: "SELECT 1 LIMIT 0",
+    unavailable: "unavailable",
+    routes: () => {},
+  });
+  const response = await app.fetch(new Request(ORIGINS.relay + "/api/ready"), {
+    APP_ORIGIN: ORIGINS.relay,
+  });
+  expect(response.status).toBe(503);
+  expect(await response.json()).toEqual({ ok: false });
+});
+
 test("each Worker caches only its own hashed assets as immutable", async () => {
   const [pocket, phone] = HASHED_FILES;
   const cache = (response: { headers: { get(name: string): string | null } }) =>

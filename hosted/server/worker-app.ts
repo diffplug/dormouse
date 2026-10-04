@@ -63,10 +63,13 @@ export function workerApp<E extends WorkerEnv>({
   );
   if (ready)
     app.get("/api/ready", async (c) => {
-      const ok = await queryDatabase(c.env.HYPERDRIVE!.connectionString, ready).then(
-        () => true,
-        () => false,
-      );
+      // A missing binding is down like an unreachable database, inside the chain.
+      const ok = await Promise.resolve()
+        .then(() => queryDatabase(c.env.HYPERDRIVE!.connectionString, ready))
+        .then(
+          () => true,
+          () => false,
+        );
       return c.json({ ok }, ok ? 200 : 503);
     });
   for (const prefix of nonPagePrefixes)

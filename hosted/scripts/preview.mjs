@@ -116,6 +116,11 @@ export function hyperdriveOrigin(connectionString) {
     throw new Error("DATABASE_URL must be a direct Postgres connection URL");
   if (url.hostname.includes("-pooler."))
     throw new Error("Hyperdrive needs the direct Neon URL");
+  // libpq and pg read these from the query too, so a URL setting one would
+  // reach another database than the authority this answers.
+  for (const key of ["host", "hostaddr", "port", "dbname", "user", "password", "service"])
+    if (url.searchParams.has(key))
+      throw new Error(`DATABASE_URL must not set ${key} in its query`);
   return {
     scheme: "postgres",
     host: url.hostname,

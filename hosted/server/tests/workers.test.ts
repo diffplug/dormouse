@@ -615,6 +615,11 @@ test("the relay and voice are ready only while their own roles hold the grants t
   expect(await status("voice")).toBe(200);
   await queryDatabase(f.database.url, `REVOKE SELECT ("emailVerified") ON "user" FROM ${RUNTIME_ROLES.voice}`);
   expect(await status("voice")).toBe(503);
+  // Speak's WHERE columns count too: a lookup that cannot filter cannot speak.
+  await queryDatabase(f.database.url, `GRANT SELECT ("emailVerified") ON "user" TO ${RUNTIME_ROLES.voice}`);
+  expect(await status("voice")).toBe(200);
+  await queryDatabase(f.database.url, `REVOKE SELECT (hash) ON dormouse_voice_tokens FROM ${RUNTIME_ROLES.voice}`);
+  expect(await status("voice")).toBe(503);
 });
 
 test("an enabled provider missing its credential fails closed with the secure headers", async ({

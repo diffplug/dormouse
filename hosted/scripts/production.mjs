@@ -46,7 +46,7 @@ const need = (env, name) => required(env, name, "Deployment credentials in GitHu
 export function productionConfig(base, env, worker) {
   const identity = PRODUCTION[worker];
   assert.ok(identity, `Unknown Worker ${worker}`);
-  assert.match(required(env, "BUILD_SHA"), /^[a-f0-9]{40}$/);
+  assert.match(need(env, "BUILD_SHA"), /^[a-f0-9]{40}$/);
   assert.match(need(env, "CLOUDFLARE_ACCOUNT_ID"), /^[a-f0-9]{32}$/);
   assert.equal(base.name, identity.name);
   assert.equal(base.vars.APP_ORIGIN, identity.origin);

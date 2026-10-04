@@ -15,8 +15,9 @@ export function voiceApp(
   return workerApp<VoiceEnv>({
     bindings,
     rules: () => NO_PAGE_RULES,
-    // Speak's token lookup: the role's own table and the entitlement's columns.
-    ready: `${TOKEN_OWNER} LIMIT 0`,
+    // Speak's token lookup, its WHERE columns included: the role's own table
+    // and the entitlement's columns.
+    ready: `${TOKEN_OWNER} WHERE t.hash IS NULL AND t."revokedAt" IS NULL LIMIT 0`,
     unavailable: "Managed voice is temporarily unavailable. Please try again.",
     routes(app) {
       speakRoute(app, (c) => {
