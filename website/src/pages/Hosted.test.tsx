@@ -17,11 +17,15 @@ vi.mock("dormouse-lib/lib/themes", () => ({
 const { default: Hosted } = await import("./Hosted");
 const { COHORT_ENDPOINT, MAX_SHOWN_FOUNDERS } = await import("../lib/hosted-cohorts");
 const {
+  CHECKOUT_OPEN,
+  CHECKOUT_PAGE,
   FOUNDING_COHORT_SIZE,
+  FOUNDING_COHORTS_CLOSED,
   HOSTED_MONTHLY,
   HOSTED_YEARLY,
   LIST_ANNUAL,
   foundingTier,
+  pricingJsonLd,
   tiersOnSale,
 } = await import("../lib/hosted-pricing");
 
@@ -31,13 +35,13 @@ let root: Root | null = null;
 let container: HTMLDivElement | null = null;
 
 /** Mounts the page with `fetch` answering the seat endpoint however `respond` says. */
-async function mount(respond: (url: string) => Promise<Response>) {
+async function mount(respond: (url: string) => Promise<Response>, checkoutOpen?: boolean) {
   vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => respond(String(input))));
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
   await act(async () => {
-    root?.render(<Hosted />);
+    root?.render(<Hosted checkoutOpen={checkoutOpen} />);
   });
   return container;
 }
@@ -150,9 +154,18 @@ const mountCohort = (body: unknown) =>
 
 describe("the founding card's live half", () => {
   it("fills in the seats left after hydration", async () => {
-    const el = await mountCohort({ seatsLeft: 73 });
+    const el = await mountCohort({ cohort: FOUNDING_COHORTS_CLOSED, seatsLeft: 73 });
     expect(el.textContent).toContain(`73 of ${FOUNDING_COHORT_SIZE} seats left at $${foundingTier().price}`);
   });
+
+  // A cohort closed since the deploy: the seats are the next price's, not this one's.
+  it.each([FOUNDING_COHORTS_CLOSED + 1, undefined, String(FOUNDING_COHORTS_CLOSED)])(
+    "drops seats of cohort %j, not the prerendered price's",
+    async (cohort) => {
+      const el = await mountCohort({ cohort, seatsLeft: 73 });
+      expect(el.textContent).not.toContain("seats left");
+    },
+  );
 
   it("draws opted-in founders, then +N for everyone else", async () => {
     const el = await mountCohort({
@@ -225,6 +238,34 @@ describe("the buy buttons", () => {
     expect(dialog?.textContent).toContain("Checkout is not wired up yet");
     expect(dialog?.textContent).toContain(HOSTED_MONTHLY.name);
     expect(dialog?.textContent).toContain("You have not been charged");
+  });
+
+  it("stay closed in the shipped build", () => {
+    // Flipped only once billing is on; the notice and `PreOrder` go with it.
+    expect(CHECKOUT_OPEN).toBe(false);
+  });
+
+  it("link to checkout on the account origin once it opens, by checkout's plan names", async () => {
+    const el = await mount(async () => new Response("{}", { status: 404 }), true);
+    const links = [...el.querySelectorAll('a[aria-label^="Buy "]')].map((a) => a.getAttribute("href"));
+    expect(links).toEqual([`${CHECKOUT_PAGE}?plan=monthly`, `${CHECKOUT_PAGE}?plan=founding`]);
+    expect(buyButtons(el)).toHaveLength(0);
+    const yearly = [...el.querySelectorAll("button")].find((b) => b.textContent === "Yearly")!;
+    await act(async () => {
+      yearly.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(el.querySelector('[aria-label="Buy Hosted yearly"]')?.getAttribute("href")).toBe(
+      `${CHECKOUT_PAGE}?plan=yearly`,
+    );
+  });
+
+  it("make the offers InStock only once checkout opens", () => {
+    const availability = (open: boolean) =>
+      JSON.parse(pricingJsonLd("https://dormouse.sh/hosted", open)).offers.map(
+        (offer: { availability: string }) => offer.availability,
+      );
+    expect(new Set(availability(false))).toEqual(new Set(["https://schema.org/PreOrder"]));
+    expect(new Set(availability(true))).toEqual(new Set(["https://schema.org/InStock"]));
   });
 
   it("close on Escape", async () => {

@@ -32,7 +32,7 @@ It serves `http://localhost:8787` (or `PORT`) and prints the `DORMOUSE_RELAY_ORI
 
 ## Update pgstencil
 
-`hosted/package.json` installs released `pgstencil` and `@pgstencil/auth` from npm. They share a version and Hosted declares their peer dependencies. Approved pgstencil releases are exempt from the pnpm and Renovate cooldowns because the release workflow requires a passing security audit, stages the archives, and requires a maintainer's 2FA approval before publishing.
+`hosted/package.json` installs released `pgstencil`, `@pgstencil/auth`, and `@pgstencil/stripe` from npm. They share a version and Hosted declares their peer dependencies. Approved pgstencil releases are exempt from the pnpm and Renovate cooldowns because the release workflow requires a passing security audit, stages the archives, and requires a maintainer's 2FA approval before publishing.
 
 Run `pnpm install` and re-run Hosted's integration tests after an update. The production preflight reads `dist/provenance.json` from the installed packages and requires matching clean commits. `docs/specs/security-hosted.md` -> "Deployment boundary" owns the upstream audit check. For an unreleased change, pack pgstencil in a clean checkout and use a temporary pnpm override on a branch.
 
@@ -198,6 +198,23 @@ rm vapid.json
 The public half is public (`GET /api/push/config` serves it); the private half signs every push. Both are required for a production deploy: preflight refuses a relay Worker missing either. Cloudflare exposes a secret's name, never its value, so preflight cannot tell whether the two match; the relay answers push off for a pair that does not, and the release's live verification fails unless `/api/push/config` answers the key. Rotating the pair makes every phone's subscription stale until Pocket re-registers it, so rotate only on compromise. Previews derive their own pair and never need this one.
 
 Configure the sender and enable each ready provider in `OAUTH_PROVIDERS` in `wrangler.jsonc`, comma separated, reviewed in a PR. The checked-in file enables GitHub, Google, Microsoft, and Apple; `docs/specs/hosted.md` -> "Identity and login" owns what a name and a credential pair do and do not enable. Facebook is outside this milestone.
+
+### Billing
+
+Billing stays off until all five Stripe bindings are set; `docs/specs/hosted.md` -> "Billing" owns what each route does. Turning it on is paid activation, which `docs/specs/security-remote.md` -> "Cloud-hosted mode" gates on its review. In the Stripe account, with Managed Payments enabled:
+
+1. Create one product, Dormouse Hosted, and its recurring USD Prices: $10 monthly, $100 yearly, and one yearly Price per `FOUNDING_LADDER` step in `website/src/lib/hosted-pricing.ts` ($50, $60, $70, $80, $90). No trial on any of them.
+2. Configure the customer portal for payment-method updates, invoices, and cancellation at period end, restricted to these Prices; leave plan switching off. Set failed-payment retries to cancel the subscription after 30 days, which is the founding lock's grace (`docs/specs/pricing.md` -> "Renewal, cancellation, refund").
+3. Add the webhook endpoint `https://hosted.dormouse.sh/api/billing/webhook` at the installed SDK's `STRIPE_API_VERSION`, sending `customer.subscription.*`, `checkout.session.*`, and `invoice.*`.
+4. Put the Price ids in `wrangler.jsonc` `vars`, reviewed in a PR: `STRIPE_PRICE_MONTHLY`, `STRIPE_PRICE_YEARLY`, and `STRIPE_PRICES_FOUNDING` (comma-separated, cohort order). A ladder of any other length leaves billing answering 503.
+5. Load the two secrets on the account Worker, a restricted key if Managed Payments accepts one:
+
+```sh
+pnpm exec wrangler secret put STRIPE_SECRET_KEY
+pnpm exec wrangler secret put STRIPE_WEBHOOK_SECRET
+```
+
+Refund from the Stripe dashboard and **cancel the subscription immediately** in the same visit: a refund alone neither ends access nor returns a founding seat. Confirm checkout, the webhook, and the portal once in a Stripe sandbox with test keys before live keys; StripeDev records but does not model Managed Payments. Watch for failed webhook events (`pgstencil_billing.events` rows with `failed`) and failed account cron invocations.
 
 ## Release
 

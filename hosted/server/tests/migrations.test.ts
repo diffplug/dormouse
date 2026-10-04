@@ -15,6 +15,7 @@ const PINNED: Record<string, string> = {
   "004_relay_enrollment_redeemed.sql":
     "dd36852ac3efbdc7f0dc2b9ee449f8f213c3c63982c4ab176a27e4a19e08a74d",
   "005_voice_token_burrow.sql": "ccb395314dd49f9b5c72560121994fd7a21d349580c0d746d0d380e29d0aefec",
+  "006_billing_founders.sql": "4e9f6b8f86eec407cfc4a6864557893639e87930051a4265c3b72ac25b09679a",
 };
 
 const directory = new URL("../dormouse-migrations/", import.meta.url);

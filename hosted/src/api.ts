@@ -1,3 +1,4 @@
+import type { CheckoutPlan as Plan } from "../../website/src/lib/hosted-pricing";
 import { providerIds, providerNames } from "../server/providers.js";
 import type { ProviderId } from "../server/providers.js";
 
@@ -67,10 +68,9 @@ export async function social(provider: Provider, linking: boolean) {
     linking ? "link-social" : "sign-in/social",
     { provider },
   );
-  const url = new URL(result.url);
-  if (url.protocol !== "https:")
-    throw new Error("Sign-in is temporarily unavailable. Please try again.");
-  window.location.assign(url.href);
+  window.location.assign(
+    awayTo(result.url, "Sign-in is temporarily unavailable. Please try again."),
+  );
 }
 
 export interface VoiceToken {
@@ -147,4 +147,70 @@ export async function approveEnrollment(userCode: string) {
     body: JSON.stringify({ userCode }),
   });
   if (!response.ok) throw await refused(response);
+}
+
+/**
+ * A page off this origin to send the browser to (a provider's sign-in,
+ * Stripe's): https only, but for StripeDev on loopback in the dev loop.
+ */
+function awayTo(url: string, refused: string): string {
+  const page = new URL(url);
+  const devStripe = location.protocol === "http:" && page.hostname === "127.0.0.1";
+  if (page.protocol !== "https:" && !devStripe) throw new Error(refused);
+  return page.href;
+}
+
+export type { Plan };
+
+/** `GET /api/billing`: the account's plan (docs/specs/hosted.md -> "Billing"). */
+export interface BillingSummary {
+  /** The plan of the subscription Stripe holds, paid up or not. */
+  plan: Plan | null;
+  /** Whether it grants access now; false while a payment is due. */
+  active: boolean;
+  /** When the paid period ends. */
+  until: string | null;
+  /** False once cancelled to end at `until`. */
+  renews: boolean;
+  entitled: boolean;
+  /** The name shown in the founders row, or null when not shown. */
+  founder: string | null;
+  /** The open founding cohort, null once founding has closed. */
+  founding: { cohort: number; seatsLeft: number } | null;
+}
+/** The four Van Westendorp answers, whole dollars a year, each optional. */
+export interface SurveyAnswers {
+  tooExpensive: number | null;
+  tooCheap: number | null;
+  expensive: number | null;
+  bargain: number | null;
+}
+
+async function billing(path: string, init: RequestInit = {}): Promise<Response> {
+  const response = await request(
+    `/api/billing${path}`,
+    init.body ? { ...init, headers: { "content-type": "application/json" } } : init,
+    "Billing is temporarily unavailable. Try again.",
+  );
+  if (!response.ok) throw await refused(response);
+  return response;
+}
+const toStripe = async (response: Response) =>
+  awayTo(((await response.json()) as { url: string }).url, "That did not work. Reload the page and try again.");
+
+/** Throws while this deployment does not sell, and when signed out. */
+export const getBilling = async () => (await (await billing("")).json()) as BillingSummary;
+export const startCheckout = async (plan: Plan) =>
+  toStripe(await billing("/checkout", { method: "POST", body: JSON.stringify({ plan }) }));
+export const confirmCheckout = async (checkout: string) =>
+  (await (await billing("/confirm", { method: "POST", body: JSON.stringify({ checkout }) })).json()) as BillingSummary;
+export const openPortal = async () => toStripe(await billing("/portal", { method: "POST" }));
+export async function setFounder(name: string | null) {
+  await billing("/founder", {
+    method: "PUT",
+    body: JSON.stringify(name === null ? { shown: false } : { shown: true, name }),
+  });
+}
+export async function sendSurvey(answers: SurveyAnswers) {
+  await billing("/survey", { method: "PUT", body: JSON.stringify(answers) });
 }

@@ -19,4 +19,7 @@ export default {
       worker.fetch(request, env, ctx),
     );
   },
+  // On the same test clock, so billing's resync reads the time `fetch` does.
+  scheduled: (...args: Parameters<NonNullable<typeof worker.scheduled>>) =>
+    deterministicScope.run(scope, () => worker.scheduled!(...args)),
 };

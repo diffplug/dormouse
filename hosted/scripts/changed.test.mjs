@@ -35,6 +35,8 @@ test("Hosted and shared inputs trigger previews; unrelated application changes d
     "remote-lib-common/package.json",
     "remote-lib-common/test/harness/actors.mjs",
     "lib/tsconfig.app.json",
+    "website/src/lib/hosted-pricing.ts",
+    "website/src/lib/hosted-cohorts.ts",
   ])
     assert.equal(touchesHosted([path]), true, path);
   for (const path of [

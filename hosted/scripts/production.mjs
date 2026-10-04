@@ -17,7 +17,12 @@ import {
  * cannot redirect production or stand in for a sibling.
  */
 export const PRODUCTION = {
-  account: { name: "dormouse-hosted", origin: "https://hosted.dormouse.sh" },
+  account: {
+    name: "dormouse-hosted",
+    origin: "https://hosted.dormouse.sh",
+    // The Hosted page's cohort endpoint, which the Worker answers alone on that origin.
+    siteRoutes: [{ pattern: "dormouse.sh/api/hosted/*", zone_name: "dormouse.sh" }],
+  },
   relay: { name: "dormouse-relay", origin: "https://relay.dormouse.sh" },
   voice: { name: "dormouse-voice", origin: "https://voice.dormouse.sh" },
 };
@@ -32,9 +37,11 @@ export function productionConfig(base, env, worker) {
   // The relay's enrollment links name production's account, and only it.
   if (worker === "relay")
     assert.equal(base.vars.ACCOUNT_ORIGIN, PRODUCTION.account.origin);
-  // The canonical domain alone: no public alias, candidate, or preview URL.
+  // The canonical domain, and the account's pinned site route: no public
+  // alias, candidate, or preview URL.
   assert.deepEqual(base.routes, [
     { pattern: new URL(identity.origin).host, custom_domain: true },
+    ...(identity.siteRoutes ?? []),
   ]);
   assert.equal(base.workers_dev, false);
   assert.equal(base.preview_urls, false);
@@ -122,7 +129,7 @@ export function productionSmoke(configs, sha, options = {}) {
 }
 export async function verifyPackages() {
   const commits = [];
-  for (const name of ["pgstencil", "@pgstencil/auth/better-auth"]) {
+  for (const name of ["pgstencil", "@pgstencil/auth/better-auth", "@pgstencil/stripe"]) {
     // Resolve the installed entrypoint, then read the provenance beside it.
     const entry = import.meta.resolve(name);
     const provenance = JSON.parse(
@@ -140,9 +147,8 @@ export async function verifyPackages() {
     );
     commits.push(provenance.commit);
   }
-  assert.equal(
-    commits[0],
-    commits[1],
+  assert.ok(
+    commits.every((commit) => commit === commits[0]),
     "Production requires accepted, clean pgstencil provenance",
   );
 }

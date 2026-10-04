@@ -27,6 +27,9 @@ import {
   type RulesFor,
 } from "../headers";
 import { cookieEntitled } from "../account-gate";
+import { SITE_ORIGIN } from "../account-app";
+import { COHORT_ENDPOINT } from "../../../website/src/lib/hosted-cohorts";
+import { BILLING_WEBHOOK_PATH, CHECKOUT_CLOSED } from "../billing-routes";
 import { RECENT_LOGIN_REQUIRED, relayAccountRoutes } from "../relay-account";
 import type { RelayRoomRpc } from "../relay-room-contract";
 import { voiceApp } from "../voice-app";
@@ -126,6 +129,17 @@ const ACCOUNT_RELAY: [string, string][] = [
   ["DELETE", "/api/relay/burrows/AAAAAAAAAAAAAAAAAAAAAA"],
 ];
 
+/** Billing's routes, which only the account serves. */
+const ACCOUNT_BILLING: [string, string][] = [
+  ["GET", "/api/billing"],
+  ["POST", "/api/billing/checkout"],
+  ["POST", "/api/billing/confirm"],
+  ["POST", "/api/billing/portal"],
+  ["PUT", "/api/billing/founder"],
+  ["PUT", "/api/billing/survey"],
+  ["POST", BILLING_WEBHOOK_PATH],
+];
+
 /** A route each Worker serves, as method and path. */
 const SERVED: Record<Name, [string, string][]> = {
   account: [
@@ -134,6 +148,7 @@ const SERVED: Record<Name, [string, string][]> = {
     ["GET", "/api/voice/tokens"],
     ["POST", "/api/voice/tokens"],
     ...ACCOUNT_RELAY,
+    ...ACCOUNT_BILLING,
     ["GET", "/login"],
   ],
   relay: [
@@ -211,6 +226,8 @@ const ABSENT: Record<Name, [string, string][]> = {
     ["POST", "/api/voice/tokens"],
     ["DELETE", "/api/voice/tokens/00000000-0000-4000-8000-000000000000"],
     ...ACCOUNT_RELAY,
+    ...ACCOUNT_BILLING,
+    ["GET", COHORT_ENDPOINT],
     ["POST", "/api/voice/speak"],
     // The self-host installers' probe; neither a Burrow nor Pocket asks Hosted for it.
     ["GET", "/api/hello"],
@@ -233,6 +250,8 @@ const ABSENT: Record<Name, [string, string][]> = {
     ["GET", "/login"],
     ...RELAY_API,
     ...ACCOUNT_RELAY,
+    ...ACCOUNT_BILLING,
+    ["GET", COHORT_ENDPOINT],
     ["GET", WS_ROUTES.burrow],
     ["GET", WS_ROUTES.client],
   ],
@@ -247,6 +266,24 @@ test.for(NAMES)("%s: serves only its own routes", async (name) => {
       `${method} ${path}`,
     ).toBe(name === "account" ? ACCOUNT_POLICY : RUNS_NOTHING_POLICY);
   }
+  expect(outbound).toEqual([]);
+});
+
+test("the account answers the site origin the cohort endpoint alone, and its siblings never", async () => {
+  // Billing is off here (no Stripe bindings), so the endpoint answers before any database.
+  const cohorts = await send("account", SITE_ORIGIN + COHORT_ENDPOINT);
+  expect([cohorts.status, await cohorts.json()]).toEqual([503, { message: CHECKOUT_CLOSED }]);
+  expect(cohorts.headers.get("content-security-policy")).toBe(ACCOUNT_POLICY);
+  for (const [method, path] of [
+    ["HEAD", COHORT_ENDPOINT],
+    ["POST", COHORT_ENDPOINT],
+    ["GET", `${COHORT_ENDPOINT}/`],
+    ["GET", "/api/hosted/other"],
+    ...ACCOUNT_BILLING,
+  ])
+    expect((await send("account", SITE_ORIGIN + path, method)).status, `${method} ${path}`).toBe(421);
+  for (const name of ["relay", "voice"] as const)
+    expect((await send(name, SITE_ORIGIN + COHORT_ENDPOINT)).status, name).toBe(421);
   expect(outbound).toEqual([]);
 });
 
@@ -373,6 +410,12 @@ test("each bindings mapper passes only what its Worker uses", () => {
     RELAY_ENROLL_POLL_LIMIT: {} as RateLimit,
     RELAY_APPROVE_LIMIT: {} as RateLimit,
     ACCOUNT_ORIGIN: "https://account.example.test",
+    // Billing's, which only the production account reads.
+    STRIPE_SECRET_KEY: "sk_test_x",
+    STRIPE_WEBHOOK_SECRET: "whsec_x",
+    STRIPE_PRICE_MONTHLY: "price_m",
+    STRIPE_PRICE_YEARLY: "price_y",
+    STRIPE_PRICES_FOUNDING: "price_f",
   };
   const keys = (bindings: object) => Object.keys(bindings).sort();
   expect(keys(accountBindings(env))).toEqual(
@@ -388,6 +431,11 @@ test("each bindings mapper passes only what its Worker uses", () => {
       "POSTMARK_SERVER_TOKEN",
       "RELAY_APPROVE_LIMIT",
       "RELAY_ROOM",
+      "STRIPE_PRICES_FOUNDING",
+      "STRIPE_PRICE_MONTHLY",
+      "STRIPE_PRICE_YEARLY",
+      "STRIPE_SECRET_KEY",
+      "STRIPE_WEBHOOK_SECRET",
     ].sort(),
   );
   expect(accountPreviewBindings(env)).toEqual({

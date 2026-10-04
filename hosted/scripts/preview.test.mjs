@@ -427,6 +427,7 @@ test("the smoke runs its parts concurrently, retries each alone, and checks the 
       );
     if (pathname === "/api/auth/get-session") return Response.json(null);
     if (pathname === "/api/providers") return Response.json([]);
+    if (pathname === "/api/billing") return Response.json({ message: "Sign in first." }, { status: 401 });
     if (init.method === "POST") return new Response(null, { status: 403 });
     if (pathname === "/login")
       return new Response("<html></html>", { headers: { "content-type": "text/html" } });

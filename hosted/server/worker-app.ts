@@ -17,6 +17,7 @@ export function workerApp<E extends WorkerEnv>({
   fallback,
   scheduled,
   unavailable,
+  site,
 }: {
   /** The only bindings that reach the routes. */
   bindings: (env: E) => E;
@@ -34,6 +35,11 @@ export function workerApp<E extends WorkerEnv>({
   ) => Promise<void>;
   /** `onError`'s message. */
   unavailable: string;
+  /**
+   * Another origin this Worker answers, for exactly these `GET` paths
+   * (the account's cohort endpoint on the marketing site); 421 for any other.
+   */
+  site?: { origin: string; paths: readonly string[] };
 }) {
   const app = new Hono<{ Bindings: E }>();
   secureHeaders(app, rules);
@@ -45,7 +51,10 @@ export function workerApp<E extends WorkerEnv>({
   });
   app.use("*", async (c, next) => {
     // A candidate/preview hostname, or a sibling Worker's, must never act as an alias for this one.
-    if (new URL(c.req.url).origin !== c.env.APP_ORIGIN)
+    const origin = new URL(c.req.url).origin;
+    const sited =
+      origin === site?.origin && c.req.method === "GET" && site.paths.includes(c.req.path);
+    if (origin !== c.env.APP_ORIGIN && !sited)
       return c.json({ message: "Unknown origin." }, 421);
     await next();
   });

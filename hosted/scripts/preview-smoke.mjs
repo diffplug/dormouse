@@ -150,7 +150,8 @@ export async function smoke(
   assert.equal(rejected.status, 403);
   for (const path of ["/dev/emails", "/api/dev/emails"])
     assert.equal((await request(path)).status, preview ? 200 : 404, path);
-  assert.equal((await request("/api/billing")).status, 404);
+  // Billing's routes want a login, whether or not the deployment sells.
+  assert.equal((await request("/api/billing")).status, 401);
   assert.equal((await request("/__test/time")).status, 404);
   for (const provider of preview ? [] : expectedProviders) {
     const started = await request("/api/auth/sign-in/social", {

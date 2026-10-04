@@ -43,7 +43,16 @@ peerDependencyRules:
     # node-ws release widens the range; `relay/test/*.test.mjs` covers the relay
     # sockets that would break first.
     "@hono/node-ws>@hono/node-server": ^2.0.0
+  # TEMP (with `overrides` below): a file: override satisfies no semver peer range.
+  allowAny:
+    - pgstencil
 minimumReleaseAge: 1440
 minimumReleaseAgeExclude:
   - pgstencil
   - "@pgstencil/*"
+# TEMP: the unreleased pgstencil 0.3.0 (named plans), packed from diffplug/pgstencil
+# named-plans at dab7292. Drop this block and vendor/ once 0.3.0 is on npm.
+overrides:
+  pgstencil: file:vendor/pgstencil-0.3.0.tgz
+  '@pgstencil/auth': file:vendor/pgstencil-auth-0.3.0.tgz
+  '@pgstencil/stripe': file:vendor/pgstencil-stripe-0.3.0.tgz
