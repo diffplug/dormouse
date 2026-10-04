@@ -28,9 +28,11 @@
  * copy — and driven under the same `set -euo pipefail` those scripts run
  * under. Extraction takes the LAST definition of a name, so it keeps working
  * if a helper ever exists twice — once in the installer body and once inside
- * the `MANAGE_EOF` heredoc. Today each is defined once: `has_off_loopback` and
- * `serve_proxies_root` in the heredoc (the `manage` copy), `env_missing_keys`,
- * `serve_state` and `serve_root_target` in the installer body.
+ * the `MANAGE_EOF` heredoc. Today only `env_file_value` is defined twice, and
+ * the two copies are checked identical: `owner_only`, `has_off_loopback` and
+ * `serve_proxies_root` are in the heredoc (the `manage` copy);
+ * `create_release_stage`, `env_missing_keys`, `serve_state` and
+ * `serve_root_target` are in the installer body.
  *
  * Windows is not covered: `Invoke-Verify` and the Serve ladder both match
  * against strings they have already captured, and nothing in CI can run
@@ -60,9 +62,9 @@ function headerComment(text) {
 }
 
 /**
- * One shell function, taken from `text` by name. The last definition wins: the
- * installer body and the `manage` heredoc both define several of these, and
- * the one under test is always the installed copy.
+ * One shell function, taken from `text` by name. The last definition wins: a
+ * helper the installer body and the `manage` heredoc both define is tested as
+ * the installed copy.
  */
 function extractFunction(text, name) {
   const lines = text.split('\n');

@@ -808,9 +808,10 @@ export function Wall({
 
   /**
    * The kill gesture on a Surface, from the header, the keyboard, or a Door: a
-   * Door reattaches first, an untouched shell closes at once, anything else
-   * stages the confirm overlay. A source whose helper has running work is
-   * revealed with the reason instead, and nothing is staged.
+   * close that would not confirm (`closeKindOf`) runs at once, a Door's in
+   * place; one that would goes pending under Labs delayed kill, else stages the
+   * confirm overlay (a Door reattaching first). A source whose helper has
+   * running work is revealed with the reason instead, and nothing is staged.
    */
   const requestKill = useCallback((id: string) => {
     const stage = () => {
