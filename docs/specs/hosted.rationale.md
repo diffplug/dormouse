@@ -24,7 +24,12 @@ Three origins (decided 2026-09-30):
 
 - Deploy order (2026-09-30): the account's `v2` deletes the `OneTimeRoom` namespace the relay's `v1` replaces, and a deployed migration is a rollback floor. Deploying the account first would make the deletion permanent before the replacement is known to deploy; with the relay first, a failed relay deploy stops the release before the account changes.
 - Relay smoke before the account (2026-10-01): a relay deploy can succeed while its custom domain or rendezvous does not serve, and the full smoke runs only after the account deployed, so by then `v2` had already deleted the old room. Smoking the relay right after its deploy keeps the deletion behind a proven replacement.
+- Relay readiness before the account (2026-10-03): the relay connects as `dormouse_relay`, and a grant the role lacks fails only the queries that need it, which the revision, push, and rendezvous checks never run. `/api/ready` runs the session lookup's shape, so a role that cannot log in, or lacks that lookup's grants, stops the release before the voice or account deploys; the rest of the grants are pinned by `hosted/server/tests/runtime-roles.test.ts`, not the release.
 - Smoke attempts (2026-09-30): the first release after the split attaches `relay.dormouse.sh` and `voice.dormouse.sh` as new custom domains, and a new certificate can take longer to issue than the health GET's six five-second retries. Repeating a relay or voice smoke sends only GETs and WebSockets on a fresh room, so it replays no POST; the account smoke's POSTs keep it at one attempt.
+
+## PR previews
+
+- One owner-role Hyperdrive per PR (decided 2026-10-03): a Hyperdrive per role would triple each PR's Hyperdrives against a preview-account limit nobody has measured, and the grants are exercised where they can fail a PR, in `hosted/server/tests`, which binds the relay and voice Workers to their roles.
 
 ## Relay
 
@@ -38,7 +43,7 @@ Caps (2026-09-30):
 
 Sweep interval (2026-09-30): hourly, not the voice sweep's five minutes. Each pass opens a Postgres connection, which wakes a suspended Neon compute; expired rows are refused on read whatever their age, so the sweep only bounds storage, and an hour of sign-in challenges is the per-address limit times an hour per address.
 
-Rate limits (2026-09-30): `signin/*` and `setup/begin`/`finish` are the unauthenticated routes that reach Postgres. A ceremony's two routes share one budget, so 30 a minute per address is 15 ceremonies, far above one person's retries and enough that a burst costs Postgres little. Like the one-time limits, they are keyed per address (an IPv6 /64), so they bound one caller, not a botnet.
+Rate limits (2026-09-30): `signin/*` and `setup/begin`/`finish` are the unauthenticated routes that read or write a row; `/api/ready` reaches Postgres too, as the account's has since launch, but reads none. A ceremony's two routes share one budget, so 30 a minute per address is 15 ceremonies, far above one person's retries and enough that a burst costs Postgres little. Like the one-time limits, they are keyed per address (an IPv6 /64), so they bound one caller, not a botnet.
 
 Push (2026-10-01):
 

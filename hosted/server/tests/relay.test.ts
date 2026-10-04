@@ -836,7 +836,7 @@ test("a de-entitled account signs in to nothing, and its sessions answer as expi
     expect((await f.call(method, path, { bearer: sessionToken, body })).status, path).toBe(status);
 });
 
-test("every unauthenticated route that reaches Postgres is rate limited per address", async ({
+test("every unauthenticated route that reads or writes a row is rate limited per address", async ({
   onTestFinished,
 }) => {
   const f = await fixture();

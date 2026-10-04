@@ -5,9 +5,9 @@ import { realpathSync } from "node:fs";
 import { vapidKeysFrom } from "./vapid.mjs";
 import { WORKERS, deployWorkers, fromStage, readConfigs } from "./workers.mjs";
 
-export function required(env, name) {
+export function required(env, name, section = "Provision PR previews") {
   if (!env[name])
-    throw new Error(`Missing ${name}; see hosted/README.md -> Provision PR previews`);
+    throw new Error(`Missing ${name}; see hosted/README.md -> ${section}`);
   return env[name];
 }
 
@@ -116,6 +116,11 @@ export function hyperdriveOrigin(connectionString) {
     throw new Error("DATABASE_URL must be a direct Postgres connection URL");
   if (url.hostname.includes("-pooler."))
     throw new Error("Hyperdrive needs the direct Neon URL");
+  // libpq and pg read these from the query too, so a URL setting one would
+  // reach another database than the authority this answers.
+  for (const key of ["host", "hostaddr", "port", "dbname", "user", "password", "service"])
+    if (url.searchParams.has(key))
+      throw new Error(`DATABASE_URL must not set ${key} in its query`);
   return {
     scheme: "postgres",
     host: url.hostname,
