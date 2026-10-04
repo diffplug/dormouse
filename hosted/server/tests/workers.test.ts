@@ -19,7 +19,7 @@ import {
   mockOAuthServer,
 } from "./oauth-server";
 import type { Session } from "../../src/api";
-import { ADMIN_EMAIL } from "../admin";
+import { ADMIN_EMAIL } from "../entitlement";
 import { CRON_SWEEP_CAP, SPEECH_SWEEP_CAP, VOICE_DAILY_CAP } from "../voice";
 import { ALREADY_APPROVED, RECENT_LOGIN_REQUIRED } from "../relay-account";
 import {

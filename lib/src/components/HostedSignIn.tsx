@@ -18,6 +18,8 @@ import { beginHostedEnrollment, cancelHostedEnrollment } from '../remote/burrow/
 
 /** Where the plans are; linked wherever an account turns out to have none. */
 export const HOSTED_PRICING_URL = 'https://dormouse.sh/hosted/#pricing';
+/** The Hosted page's voice section, the spoken-alarm row's link where the build has no managed voice. */
+export const HOSTED_VOICE_URL = 'https://dormouse.sh/hosted/#voice';
 
 /** The begin button's words, everywhere sign-in starts. */
 export const SIGN_IN_LABEL = 'Sign in to Dormouse Hosted';

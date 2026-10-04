@@ -26,7 +26,6 @@ import type {
 } from '../remote/burrow/burrow-runtime';
 import { SCAN_LABEL, SETUP_BUTTON } from '../remote/setup-copy';
 import {
-  beginHostedEnrollment,
   cancelHostedEnrollment,
   clearBurrowEnrollment,
   enrollOfferBurrow,
@@ -35,6 +34,7 @@ import {
   mintSetupQr,
   reconnectBurrow,
   refreshBurrowStatus,
+  signInAgain,
   subscribeToBurrowStatus,
   subscribeToInvitation,
 } from '../remote/burrow/burrow-status-store';
@@ -502,11 +502,7 @@ function RelayChoices({ status }: { status: BurrowConsoleStatus }) {
   // error live here, above both views: a begin refused after the clear still
   // has somewhere to say so.
   const enrollAgain = useBusyAction();
-  const onEnrollAgain = () =>
-    void enrollAgain.run(async () => {
-      await clearBurrowEnrollment();
-      await beginHostedEnrollment(status.suggestedLabel);
-    });
+  const onEnrollAgain = () => void enrollAgain.run(() => signInAgain(status.suggestedLabel));
   return (
     <div className="mt-1.5 text-sm leading-relaxed">
       <div className="text-muted">Control this Dormouse from your phone.</div>
@@ -756,20 +752,25 @@ function OfferCard({
  * Disconnecting's second step, which the first click asks for: it drops every
  * paired phone until they pair again. Local only — the enrollment is forgotten
  * here and the Relay is not asked — so it is offered under Nothing too
- * ({@link HeldEnrollment}).
+ * ({@link HeldEnrollment}). Managed voice's Sign out is the same step under
+ * its own `label` and `warning`.
  */
-function DisconnectConfirm({ busy, run, onDone, hosted = false }: {
+export function DisconnectConfirm({
+  busy,
+  run,
+  onDone,
+  label = 'Disconnect',
+  warning = 'Paired phones will need to pair again.',
+}: {
   busy: boolean;
-  /** Disconnecting from Dormouse Hosted signs this computer out, managed voice included. */
-  hosted?: boolean;
   run: (action: () => Promise<void>) => Promise<boolean>;
   onDone: () => void;
+  label?: string;
+  warning?: string;
 }) {
   return (
     <>
-      <span className="text-xs text-muted">
-        Paired phones will need to pair again{hosted ? ', and this computer signs out of Dormouse Hosted' : ''}.
-      </span>
+      <span className="text-xs text-muted">{warning}</span>
       <button
         type="button"
         disabled={busy}
@@ -781,7 +782,7 @@ function DisconnectConfirm({ busy, run, onDone, hosted = false }: {
           })
         }
       >
-        Disconnect
+        {label}
       </button>
       <button type="button" disabled={busy} className={modalActionButton()} onClick={onDone}>
         Cancel
@@ -914,7 +915,11 @@ function EnrolledView({
           <DisconnectConfirm
             busy={busy}
             run={run}
-            hosted={status.relayMode === 'hosted'}
+            warning={
+              status.relayMode === 'hosted'
+                ? 'Paired phones will need to pair again, and this computer signs out of Dormouse Hosted.'
+                : undefined
+            }
             onDone={() => setConfirmingDisconnect(false)}
           />
         ) : (

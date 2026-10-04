@@ -35,7 +35,7 @@ import {
   randomSecret,
   registrationClientData,
 } from "../../../remote-lib-common/test/harness/actors.mjs";
-import { ADMIN_EMAIL } from "../admin";
+import { ADMIN_EMAIL } from "../entitlement";
 import { migrations } from "../migrations";
 import { ENROLLMENT_TTL_MS } from "../policy-constants";
 import {

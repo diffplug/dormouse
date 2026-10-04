@@ -1068,7 +1068,11 @@ export class BurrowService {
           });
         } finally {
           // Signed in once the enrollment is saved, whether or not it started.
-          if (saved && voiceToken !== null) await this.#saveVoiceCredential(voiceToken);
+          if (saved && voiceToken !== null) {
+            await this.#voiceCredential?.save(voiceToken).catch((error: unknown) => {
+              console.warn('[burrow] could not save the managed-voice token', error);
+            });
+          }
         }
       });
     } catch (error) {
@@ -1200,13 +1204,6 @@ export class BurrowService {
       console.warn('[burrow] could not clear the managed-voice token', error);
     });
     return {};
-  }
-
-  /** Keep a sign-in's voice token where managed voice reads it; a failure leaves voice unconfigured. */
-  async #saveVoiceCredential(token: string): Promise<void> {
-    await this.#voiceCredential?.save(token).catch((error: unknown) => {
-      console.warn('[burrow] could not save the managed-voice token', error);
-    });
   }
 
   /**

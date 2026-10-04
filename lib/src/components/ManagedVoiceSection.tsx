@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
+import { useCallback, useState, useSyncExternalStore } from 'react';
 import { INLINE_ACTION_CLASS, modalActionButton } from './design';
 import { ExternalTextLink } from './ExternalTextLink';
 import { HOSTED_PRICING_URL, HostedEnrollView, accountHost, accountPage } from './HostedSignIn';
-import { removedCopy } from './RemoteControlSection';
+import { DisconnectConfirm, removedCopy } from './RemoteControlSection';
 import { FIELD_LABEL, useBusyAction, useNetworkPolicy } from './remote-control-shared';
 import type { BurrowConsoleStatus } from '../host/remote/service-protocol';
 import { getPlatform } from '../lib/platform';
@@ -13,10 +13,8 @@ import {
   type ManagedVoiceStatus,
 } from '../lib/platform/managed-voice-types';
 import {
-  beginHostedEnrollment,
-  clearBurrowEnrollment,
   getBurrowStatusSnapshot,
-  refreshBurrowStatus,
+  signInAgain,
   subscribeToBurrowStatus,
 } from '../remote/burrow/burrow-status-store';
 
@@ -80,11 +78,10 @@ export function ManagedVoiceSection({ onShowNetwork }: { onShowNetwork?: () => v
   const voice = useManagedVoiceStatus(port);
   const burrow = useSyncExternalStore(subscribeToBurrowStatus, getBurrowStatusSnapshot);
   const networkOff = useNetworkPolicy()?.level === 'nothing';
-
-  // Another window may have signed in since this dialog last opened.
-  useEffect(() => {
-    if (port) void refreshBurrowStatus();
-  }, [port]);
+  // Sign in again spans the flip from signed in to not, so its busy and error
+  // live here, above both views: a begin refused after the clear still has
+  // somewhere to say so.
+  const signInAgainAction = useBusyAction();
 
   if (!port) return null;
   const status = burrow.kind === 'ready' ? burrow.status : null;
@@ -94,7 +91,13 @@ export function ManagedVoiceSection({ onShowNetwork }: { onShowNetwork?: () => v
       <div className="text-sm text-foreground">Managed voice</div>
       <p className={HINT}>{MANAGED_VOICE_DISCLOSURE}</p>
       {status === null ? null : status.enrolled ? (
-        <SignedIn status={status} voice={voice} port={port} />
+        <SignedIn
+          status={status}
+          voice={voice}
+          port={port}
+          signingInAgain={signInAgainAction.busy}
+          onSignInAgain={() => void signInAgainAction.run(() => signInAgain(status.suggestedLabel))}
+        />
       ) : (
         <>
           <p className={HINT}>Dormouse Hosted members hear alarms in a natural ElevenLabs voice.</p>
@@ -113,27 +116,31 @@ export function ManagedVoiceSection({ onShowNetwork }: { onShowNetwork?: () => v
           )}
         </>
       )}
+      {signInAgainAction.error ? <div className="mt-1.5 text-sm text-error">{signInAgainAction.error}</div> : null}
     </div>
   );
 }
 
 /** Signed in: the plan's standing, the voice, and Sign out. */
-function SignedIn({ status, voice, port }: {
+function SignedIn({ status, voice, port, signingInAgain, onSignInAgain }: {
   status: BurrowConsoleStatus;
   voice: ManagedVoiceStatus | null;
   port: ManagedVoicePort;
+  signingInAgain: boolean;
+  onSignInAgain: () => void;
 }) {
-  const { busy, error, run } = useBusyAction();
+  const { busy: ownBusy, error, run } = useBusyAction();
+  const busy = ownBusy || signingInAgain;
   const [confirming, setConfirming] = useState(false);
-  const [refusal, setRefusal] = useState<string | null>(null);
   const page = accountPage(status.accountOrigin);
   const lapsed = status.connection === 'not-entitled' || voice?.notEntitled === true;
   const removed = status.connection === 'removed';
 
-  const choose = async (voiceId: string): Promise<void> => {
-    const result = await port.configure({ voiceId });
-    setRefusal(result.ok ? null : REFUSAL[result.reason]);
-  };
+  const choose = (voiceId: string) =>
+    void run(async () => {
+      const result = await port.configure({ voiceId });
+      if (!result.ok) throw new Error(REFUSAL[result.reason]);
+    });
 
   return (
     <div className="mt-2 text-sm leading-relaxed">
@@ -158,7 +165,8 @@ function SignedIn({ status, voice, port }: {
             aria-label="Managed voice"
             className={SELECT}
             value={voice.voiceId}
-            onChange={(event) => void choose(event.target.value)}
+            disabled={busy}
+            onChange={(event) => choose(event.target.value)}
           >
             {MANAGED_VOICES.map((option) => (
               <option key={option.id} value={option.id}>
@@ -168,42 +176,25 @@ function SignedIn({ status, voice, port }: {
           </select>
         </label>
       ) : null}
-      {refusal ?? error ? <div className="mt-1.5 text-error">{refusal ?? error}</div> : null}
+      {error ? <div className="mt-1.5 text-error">{error}</div> : null}
       <div className="mt-2 flex flex-wrap items-center gap-2">
         {removed ? (
           <button
             type="button"
             disabled={busy}
             className={modalActionButton({ tone: 'primary' })}
-            onClick={() =>
-              void run(async () => {
-                await clearBurrowEnrollment();
-                await beginHostedEnrollment(status.suggestedLabel);
-              })
-            }
+            onClick={onSignInAgain}
           >
-            Sign in again
+            {signingInAgain ? 'Getting a code…' : 'Sign in again'}
           </button>
         ) : confirming ? (
-          <>
-            <span className="text-xs text-muted">
-              Remote control signs out too: paired phones will need to pair again.
-            </span>
-            <button
-              type="button"
-              disabled={busy}
-              className={modalActionButton({ tone: 'primary' })}
-              onClick={() => void run(async () => {
-                await clearBurrowEnrollment();
-                setConfirming(false);
-              })}
-            >
-              Sign out
-            </button>
-            <button type="button" disabled={busy} className={modalActionButton()} onClick={() => setConfirming(false)}>
-              Cancel
-            </button>
-          </>
+          <DisconnectConfirm
+            busy={busy}
+            run={run}
+            onDone={() => setConfirming(false)}
+            label="Sign out"
+            warning="Remote control signs out too: paired phones will need to pair again."
+          />
         ) : (
           <button type="button" disabled={busy} className={modalActionButton()} onClick={() => setConfirming(true)}>
             Sign out

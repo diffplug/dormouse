@@ -301,7 +301,6 @@ describe('the build it runs in', () => {
 
     expect(await selfHost.handle({ op: 'status' })).toEqual(idle(false));
     await expect(selfHost.credential.save(TOKEN)).rejects.toThrow();
-    await selfHost.credential.clear();
     expect(await selfHost.handle({ op: 'configure', update: { voiceId: OTHER_VOICE } })).toEqual({
       ok: false,
       reason: 'unavailable',

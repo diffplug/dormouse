@@ -5,7 +5,7 @@
  */
 
 /** A voice token: `dmv_` plus base64url of 32 random bytes, unpadded. */
-export const MANAGED_VOICE_TOKEN_PATTERN = /^dmv_[A-Za-z0-9_-]{43}$/;
+const MANAGED_VOICE_TOKEN_PATTERN = /^dmv_[A-Za-z0-9_-]{43}$/;
 
 /** Whether `value` has a voice token's shape. */
 export function isManagedVoiceToken(value: unknown): value is string {

@@ -1,6 +1,8 @@
 // Rules: docs/specs/hosted.md -> "Entitlement".
 import { queryDatabase } from "pgstencil/postgres";
-import { ADMIN_EMAIL } from "./admin";
+
+/** The one address the entitlement keys on until billing ships. */
+export const ADMIN_EMAIL = "ned.twigg@diffplug.com";
 
 // Inlined into SQL below, so it may never carry a quote or a backslash.
 if (!/^[^'\\]+$/.test(ADMIN_EMAIL)) throw new Error("ADMIN_EMAIL cannot be inlined into SQL");

@@ -127,6 +127,8 @@ export function createManagedVoiceHost(options: {
   const serialize = createSerialQueue();
   const clips = createClipCache();
   let notEntitled = false;
+  /** Bumped by every token change, so a request that outlived its token caches nothing. */
+  let tokenGeneration = 0;
 
   const load = (): Promise<StoredConfig> => {
     loaded ??= (async () => {
@@ -174,11 +176,8 @@ export function createManagedVoiceHost(options: {
 
   /** A changed token forgets every clip and every refusal the old one earned. */
   const setToken = (token: string | null) => serialize(async () => {
-    // A self-host build holds no token, so it has none to clear.
-    if (speakUrl === null) {
-      if (token === null) return;
-      throw new Error('this build has no managed voice');
-    }
+    if (speakUrl === null) throw new Error('this build has no managed voice');
+    tokenGeneration++;
     clips.clear();
     notEntitled = false;
     await save((config) => ({ ...config, token }));
@@ -201,6 +200,7 @@ export function createManagedVoiceHost(options: {
     // A hit makes no request. Skipped while Hosted says the plan lapsed, so a
     // lapsed member hears the system voice and the next request can learn
     // the plan is back.
+    const generation = tokenGeneration;
     const cached = notEntitled ? undefined : clips.get(config.voiceId, trimmed);
     if (cached !== undefined) return { ok: true, audioBase64: cached };
 
@@ -243,7 +243,7 @@ export function createManagedVoiceHost(options: {
       const audioBase64 = Buffer.concat(chunks, size).toString('base64');
       await noteEntitled(true);
       // Only for the token that asked: a sign-out meanwhile cleared the cache.
-      if ((await load().catch(() => null))?.token === config.token) clips.set(config.voiceId, trimmed, audioBase64);
+      if (generation === tokenGeneration) clips.set(config.voiceId, trimmed, audioBase64);
       return { ok: true, audioBase64 };
     } catch {
       return { ok: false, reason: signal.aborted ? 'timeout' : 'network' };

@@ -21,6 +21,7 @@ import { WatchedCommandList } from './WatchedCommandList';
 import { NetworkPhones, NetworkSettings, NetworkUpdates } from './NetworkSettings';
 import { useNetworkPolicy } from './remote-control-shared';
 import { PushTestButton, SpeakTestButton } from './AlarmTestButtons';
+import { HOSTED_VOICE_URL } from './HostedSignIn';
 import { ManagedVoiceSection, NetworkTopicLink, useManagedVoiceOffered } from './ManagedVoiceSection';
 import { getPlatform } from '../lib/platform';
 import { getShellsSnapshot, subscribeToShells } from '../lib/shell-store';
@@ -39,7 +40,6 @@ import {
 } from '../lib/terminal-registry';
 
 const TITLE_ID = 'settings-dialog-title';
-const HOSTED_VOICE_URL = 'https://dormouse.sh/hosted/#voice';
 
 /** A picker row; `min-w-0` lets the picker's trigger truncate in a narrow dialog. */
 const PICKER_ROW = 'flex items-center gap-1.5 text-sm text-foreground [&>div]:min-w-0';

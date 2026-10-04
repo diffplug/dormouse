@@ -497,8 +497,9 @@ export function createSidecarHost(options: SidecarHostOptions): SidecarHost {
     networkAllowed: () => service.networkAllowed(),
   });
   const service = new BurrowService({
-    // A Hosted sign-in hands managed voice its token; sign-out clears it.
-    voiceCredential: voice.credential,
+    // A Hosted sign-in hands managed voice its token; sign-out clears it. A
+    // self-host build has no managed voice to hand one to.
+    voiceCredential: relay.mode === 'hosted' ? voice.credential : undefined,
     store,
     provider: bridge.provider,
     kind: 'standalone',

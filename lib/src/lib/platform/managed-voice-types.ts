@@ -5,7 +5,7 @@
  * set is `remote-lib-common`'s, which the voice Worker checks against too.
  */
 
-export { DEFAULT_MANAGED_VOICE_ID, MANAGED_VOICES, type ManagedVoice } from 'remote-lib-common';
+export { DEFAULT_MANAGED_VOICE_ID, MANAGED_VOICES } from 'remote-lib-common';
 
 export interface ManagedVoiceStatus {
   /** A voice token is held: this desktop signed in to Dormouse Hosted with managed voice. */
