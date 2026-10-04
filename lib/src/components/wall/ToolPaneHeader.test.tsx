@@ -12,6 +12,8 @@ import { setNativeFieldValue } from '../../lib/dom';
 import { recordToolDirty, resetToolDirty } from '../../lib/tool-dirty-store';
 import { applyTerminalSemanticEvents, removeTerminalPaneState, setTerminalUserTitle } from '../../lib/terminal-state-store';
 import { commitPreviewTransition, resetPreviewTransitions } from '../../lib/preview-transition-store';
+import * as terminalRegistry from '../../lib/terminal-registry';
+import { clearTerminalActivity, setTerminalActivity } from '../../lib/session-activity-store';
 import { setDevServerResolution } from './agent-browser-ports';
 import { beginSlotSwitch } from './preview-transition';
 import {
@@ -58,6 +60,7 @@ afterEach(() => {
   resetToolDirty();
   resetPreviewTransitions();
   removeTerminalPaneState(ID);
+  clearTerminalActivity(ID);
 });
 
 const context = { id: null, mounted: null, open: vi.fn(), close: vi.fn(), promote: vi.fn(), openPort: vi.fn() };
@@ -112,6 +115,19 @@ describe('ToolPaneHeader — a serving Tool', () => {
     expect(container.querySelector('[role="button"]')).toBeNull();
     expect(container.textContent).not.toContain('localhost');
     expect(container.textContent).not.toContain(STUB_CHROME.key!);
+  });
+
+  it("shows its Session's TODO pill, which clears the TODO", () => {
+    act(() => setTerminalActivity(ID, { todo: true, notification: { title: 'Tool finished', body: null } }));
+    renderHeader(SERVING);
+    const pill = container.querySelector<HTMLButtonElement>(`[data-session-todo-for="${ID}"]`);
+    expect(pill?.getAttribute('aria-label')).toBe('Dismiss TODO: Tool finished');
+    // Between the name and the layout buttons, as on a terminal's header.
+    expect(name()!.compareDocumentPosition(pill!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(pill!.compareDocumentPosition(labelled('Split left/right')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const cleared = vi.spyOn(terminalRegistry, 'clearSessionTodo');
+    act(() => pill!.click());
+    expect(cleared).toHaveBeenCalledWith(ID);
   });
 
   it('opens its Terminal Context from under the button', () => {

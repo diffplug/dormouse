@@ -56,7 +56,7 @@ Source of truth: `context` in `standalone/sidecar/pty-core.js`; `terminalContext
 
 **Must suppress xterm's auto-revealed scrollbar in visual snapshots**, while retaining terminal scrolling and layout.
 
-**Must fit every control inside the panel at its minimum width, label included.** Port action overflow follows `docs/specs/layout.md` → "Header context menu". The gallery's play check measures each button against the panel and against its own box.
+**Must name the panel's terminal, Tool or helper, at every width.** **Must fit every control inside the panel at its minimum width, label included.** Port action overflow follows `docs/specs/layout.md` → "Header context menu". The gallery's play check measures each button against the panel and against its own box.
 
 Source of truth: `TerminalContextView` in `lib/src/components/wall/TerminalContextView.tsx`; `lib/src/stories/TerminalContext.stories.tsx` supplies sample output; `lib/src/stories/Wall.stories.tsx` exercises the live helper. `lib/src/stories/HelperPlacement.stories.tsx` checks rendered placement and real xterm input/focus retention; the gallery checks narrow controls and always-visible details. `visualSnapshot` in `lib/.storybook/preview.ts` suppresses scrollbar paint. Tests: `lib/src/lib/platform/fake-adapter-helper.test.ts`.
 
@@ -64,7 +64,7 @@ The Window-host workspace picker follows `docs/specs/layout.md` → Moving Surfa
 
 ## Tool context
 
-**Must show a Tool's primary Session in Terminal Context instead of creating an auxiliary helper.** Reuse the title, directory, port, and alert presentation, showing Tool command status without helper Modify, Reset, or Promote controls; a preview slot's adds Keep open (`docs/specs/layout.md` → Pane header). Pending approval cannot open context.
+**Must show a Tool's primary Session in Terminal Context instead of creating an auxiliary helper**; one whose run ended is a plain terminal with a helper (`docs/specs/dor-tool.md` → Run end). Reuse the title, directory, port, and alert presentation, showing Tool command status without helper Modify, Reset, or Promote controls; a preview slot's adds Keep open (`docs/specs/layout.md` → Pane header). Pending approval cannot open context.
 
 **Must focus the Tool terminal instance directly**, bypassing its browser Surface focus handle.
 

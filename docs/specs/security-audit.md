@@ -17,7 +17,7 @@
 
 The CI audit fans out to four subagents, each owning a disjoint share of the tree; a domain may read outside its share — `application-security` runs the repo's own lints — but owns nothing there (rationale).
 
-**Ownership is by file: every `docs/specs/security*.md` spec is in exactly one domain's scope**, declared as backticked repo paths in the bullet list under the `**Scope` line of its domain file in `.github/audit/`, and enforced by `scripts/spec-lint.mjs`; `docs/specs/security.md` -> "How the guarantees are checked" tabulates the assignment.
+**Ownership is by file: every `docs/specs/security*.md` spec, its `.rationale.md` aside, is in exactly one domain's scope**, declared as backticked repo paths in the bullet list under the `**Scope` line of its domain file in `.github/audit/`, and enforced by `scripts/spec-lint.mjs`; `docs/specs/security.md` -> "How the guarantees are checked" tabulates the assignment.
 
 `AUDIT_PAT` is a step-level `env:` on the one job, so every subagent inherits it, and only the prompt tells `application-security` and `hosted` not to use it (`docs/specs/security.md` -> "Known gaps"); `## Future` -> Credential separation stages the fix.
 
@@ -25,7 +25,7 @@ CI and the local runner share the prompts and their scopes in `.github/audit/` (
 
 **The qualitative scopes are stated by subtraction, so adding a directory cannot orphan it** (rationale). `application-security` takes the remainder, worked out from `ls -A` rather than from a list. **Dotfile directories are named explicitly wherever they land**, and **the subtraction is recursive**: where a domain claims a subdirectory rather than a whole tree, the rest of that tree belongs to `application-security`.
 
-- **FAIL IF** a `docs/specs/security*.md` spec is in no domain's scope, or in two, or a scope names a file that does not exist (rationale).
+- **FAIL IF** a `docs/specs/security*.md` spec (not a `.rationale.md`) is in no domain's scope, or in two, or a scope names a file that does not exist (rationale).
 - **FAIL IF** `.github/audit/orchestrator.md` lets the orchestrator audit anything itself (rationale).
 - **FAIL IF** the audit stops fanning out to a dedicated `application-security` subagent scoped to `docs/specs/security-local.md` and `docs/specs/security-remote.md`, or to a dedicated `hosted` subagent scoped to `docs/specs/security-hosted.md`, or either scope is merged back into a context that also carries another domain (rationale).
 - **FAIL IF** `application-security` or `hosted` does not run on Opus and the mechanical domains on Sonnet, the stronger model on the code-reading domains, in **both** `.github/workflows/security-audit.yaml`'s `claude_args` — its `--model` sets the floor and its `--agents` raises those two domains — and `scripts/security-audit-local.sh` (rationale).
@@ -39,11 +39,12 @@ Source of truth: the `**Scope` and `## Qualitative pass` sections of each domain
 
 **Subagents launch in the background**, so an agent that ends its turn to await a completion notification is finished: an orchestrator ends the whole run, a delegating domain ships what it has (rationale). `.github/audit/orchestrator.md` and `.github/audit/_preamble.md` own the procedure; these are the invariants the workflow depends on:
 
-- **The job's `timeout-minutes: 40` stays above the orchestrator's 32-minute wait deadline** (rationale).
-- **Each domain appends to its own fragment as it determines each result**, and the fragments upload with the transcript, so an orchestrator that dies mid-merge still ships what the domains found. `AUDIT_FRAGMENTS` in `.github/workflows/security-audit.yaml` names the four.
+- The job's timeout stays above the orchestrator's wait deadline (rationale).
+- **Each domain appends to its own fragment as it determines each result**, and the fragments upload with the transcript, so an orchestrator that dies mid-merge still ships what the domains found.
 - **A fragment opens `VERDICT: INCONCLUSIVE` and closes with the literal `<!-- END OF REPORT -->`**, its verdict rewritten once at the end. **The sentinel, not existence, is what a reader treats as finished** (rationale).
 
 - **FAIL IF** the orchestrator prompt stops requiring a non-turn-ending wait — a Bash `until` loop over the fragments' sentinels, **breaking on its own sub-cap under the Bash cap the workflow sets** so every call ends by printing its answer, re-issued under a bounded 32-minute deadline **persisted to a file** (`$RUNNER_TEMP/audit-deadline`) rather than recomputed from `now`. That cap is `BASH_DEFAULT_TIMEOUT_MS` in `.github/workflows/security-audit.yaml`, set above the loop's 540-second break (rationale).
+- **FAIL IF** the audit job's `timeout-minutes` in `.github/workflows/security-audit.yaml` is not above the orchestrator's persisted wait deadline (rationale), or `AUDIT_FRAGMENTS` there stops naming every domain's fragment.
 - **FAIL IF** the prompt permits ending the turn without `audit-report.md` (rationale).
 - **FAIL IF** a domain prompt lets findings be held for a write-up at the end, lets a domain that delegates end its turn or background its wait loop, or the wait, the merge, or the verdict treats existence rather than the sentinel as a domain having reported (rationale).
 - **FAIL IF** the orchestrator can report `PASS` while a subagent left no report fragment — nor `FAIL`, unless some domain actually returned one: the prompt writes no status file when a fragment is missing and no domain failed, routing an audit that ran out of time to INCONCLUSIVE. Both exit non-zero and hold the release gate shut (rationale).

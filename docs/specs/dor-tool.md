@@ -11,7 +11,7 @@ Source of truth: `surface.tool` in `lib/src/components/wall/use-dor-control.ts`.
 
 ## The tool capability set
 
-**Must designate the Surface as `tool` before its command starts serving.** A Tool has terminal and browser capabilities, including while booting, awaiting approval, showing a port conflict, or resting at a prompt after command exit; browser operations still require the renderer and session they operate on.
+**Must designate the Surface as `tool` before its command starts serving.** A Tool has terminal and browser capabilities for one run of its command ([Run end](#run-end)), including while booting, awaiting approval, or showing a port conflict. Browser operations still require the renderer/session they operate on.
 
 - **Must retain the Session id, public Surface ref, and terminal across serving and renderer changes**, which are changes within one Surface.
 - **Never offer or apply a renderer swap outside a Tool's declarable `render` values** ([Declaring tools](#declaring-tools)), in the Display modal or `onSwapRenderMode` (rationale).
@@ -33,7 +33,7 @@ Source of truth: `surfaceKindFromParams` in `lib/src/components/wall/browser-sur
 - **Must warn when a repo-local key omits `$PROJECT_ROOT`, or a `$TARGET` run has a key without `$TARGET`**, still allowing intentional cross-checkout or cross-file dedupe.
 - **Must reject `$PROJECT_ROOT` in user configuration**, which has no project root.
 
-**Must pass named-tool inputs as argument values, never substitute them into a shell-command string.** String `run` accepts no arguments and remains literal shell syntax. List `run` expands `$TARGET`, `$CWD`, and `$PROJECT_ROOT` within elements; a whole `$ARGS` element expands all input arguments; without `$ARGS` or `$TARGET` the inputs are appended. **Must quote argv for the destination Session's shell**, using the current default only for new Sessions; takeover stores that quoted command for reruns.
+**Must pass named-tool inputs as argument values, never substitute them into a shell-command string.** String `run` accepts no arguments and remains literal shell syntax. List `run` expands `$TARGET`, `$CWD`, and `$PROJECT_ROOT` within elements; a whole `$ARGS` element expands all input arguments; without `$ARGS` or `$TARGET` the inputs are appended. **Must quote argv for the destination Session's shell**, using the current default only for new Sessions; takeover stores that quoted command for restarts.
 
 **Must require exactly one existing local regular file or directory when `$TARGET` appears in the run list or dedupe key**, resolving a relative path against the invocation CWD and following symlinks to a canonical absolute path before substitution and reuse. **Must accept a `file:` URL only when its host is empty, `localhost`, or this machine's name** (case-insensitive, either side in its short form before the first dot); reject other URLs, missing paths, and every other file kind (fifo, socket, device). Run and key inputs are validated before approval shows.
 
@@ -48,9 +48,9 @@ Source of truth: `createToolHost` in `lib/src/host/tool-host.ts`; `parseToolFile
 - **Must namespace keys by the host-resolved Tool name**; runtime output supplies scope elements, never another Tool's namespace.
 - **Must dedupe within the answering Workspace**; `--workspace` uses the routing in `docs/specs/dor-cli.md` → Handle Model.
 - **Must serialize every Tool launch request and approval completion in the renderer through one queue**, not per key, so two requests never both create a match.
-- **Must reveal a live matching Tool and report `existing` without sending input**; an idle match restarts its stored command in its own directory, reporting `adopted` or the restart's error.
-- **Must reuse and reveal a matching pending approval Surface unless `--fresh` is set**, matching Tool name, project root, CWD, arguments, and fresh intent, preserving its approval state and reporting `pending`.
-- **Must apply runtime re-keys only to the announcing Tool**, without merging Surfaces, transferring state, or killing either side of a collision (rationale).
+- **Must reveal a live matching Tool and report `existing` without sending input.** A match idle while the host replaces its run ([Run end](#run-end)) restarts its stored command in its own directory and reports `adopted`; a failed restart reports an error.
+- **Must reuse and reveal a matching pending approval Surface unless `--fresh` is set**, matching Tool name, project root, CWD, arguments, and fresh intent; preserve its approval state and report `pending`.
+- **Must apply runtime re-keys only to the announcing Tool**, without merging Surfaces, transferring state, or killing either side of a collision. (rationale)
 - A marked preview slot never matches ([Preview slot](#preview-slot)).
 
 Source of truth: `surface.tool` in `lib/src/components/wall/use-dor-control.ts`; `namespacedToolKey` in `lib/src/components/wall/browser-surface.ts`.
@@ -99,13 +99,32 @@ Source of truth: `useToolServing` in `lib/src/components/wall/use-tool-serving.t
 
 ## Lifecycle
 
-**Must create a shell-hosted PTY and type the command only after integration readiness.** An unsupported shell fails before launch; integration timeout or cancellation closes the temporary Surface. Command exit, or a different command, retires the browser resources; a re-run of the stored command may serve again in the same Surface. A kill settles the helper guard before PTY and browser teardown.
+**Must create a shell-hosted PTY and type the command only after integration readiness.** An unsupported shell fails before launch; integration timeout or cancellation closes the temporary Surface.
 
-**Must show the full terminal before serving and after command exit**, except while a preview slot switch holds a browser ghost ([Switching the slot](#switching-the-slot)). A serving Tool shows its browser, kept mounted while Terminal Context reveals the same primary terminal (`docs/specs/terminal-context.md` → Tool context; rationale); a port conflict's explanation takes the browser half. Pending approval mounts neither capability.
+| Transition | Result |
+| --- | --- |
+| Spawn | Terminal visible; Tool identity already established |
+| Serving | Browser becomes visible in the same Surface |
+| Port conflict | Explanation occupies the browser half; terminal remains available |
+| Designated run ends | The Surface becomes a plain terminal ([Run end](#run-end)) |
+| Host replaces the run | Same Surface serves the successor ([Run end](#run-end)) |
+| Kill | Helper guard settles before PTY/browser teardown |
+
+**Must show the full terminal before serving**, except while a preview slot switch holds a browser ghost ([Switching the slot](#switching-the-slot)). A serving Tool shows its browser, kept mounted while Terminal Context reveals the same primary terminal (`docs/specs/terminal-context.md` → Tool context; rationale); a port conflict's explanation takes the browser half. Pending approval mounts neither capability.
 
 **Must hide Tools in inactive Workspaces and minimized leaves without unmounting.**
 
 Source of truth: `ToolPanel` in `lib/src/components/wall/ToolPanel.tsx`.
+
+## Run end
+
+A Tool is designated for one run of its command, not for the life of its Surface.
+
+**Must turn a Tool whose designated run ended into a plain terminal in place**: the user's Ctrl+C or quit, a crash, a failed boot, a suspend (the shell's prompt is the only signal; a resumed run is an ordinary terminal's, its announcements inert as [OSC 367](#osc-367) has them). Keep the Session id, Surface ref, scrollback, and a user rename; retire the browser, announcements, and unsaved state ([Serving](#serving)); drop a preview mark. Only a finished run ends it: the designated command's, including one that starts and finishes in one output chunk, or any command once a host replacement has lapsed; booting, pending approval, and a takeover waiting for its prompt have ended nothing. It then persists as a terminal, keyed reuse never matches it, and Terminal Context gives it a helper (`docs/specs/terminal-context.md` → Tool context). (rationale)
+
+**Must keep the designation while the host replaces a run**: an in-place restart (idle keyed match, `dor ensure --restart`, approval match), a preview retarget with its kept or restored retypes ([Preview slot](#preview-slot)), and a reap's stop until rehydrate ([Reaping](#reaping)). One host hold, set before the host's interrupt and released once the successor run starts or the host gives up, both exempts the end here and silences its command-exit alert (`docs/specs/alert.md` → Command-exit Track). A replacement the host gives up on ends the run; so does a rehydrate's failed run (Error tier).
+
+Source of truth: `useToolRunEnd` in `lib/src/components/wall/use-tool-run-end.ts`; `holdForHostInterrupt` in `lib/src/lib/tool-run-hold.ts`.
 
 ## Reaping
 
@@ -115,11 +134,17 @@ A reap stops an idle Tool's Session, shell included; rehydrate starts it again i
 
 **Must reap only after 30 minutes continuously out of sight and without PTY output** — Doored, in an inactive Workspace, or in a hidden webview (rationale): never on the minimize or switch itself, and never for memory pressure. The stop:
 
-1. Silence the run's command-exit alert (rationale), then write Ctrl+C to the PTY, the graceful-stop signal on every platform; ConPTY delivers it as `CTRL_C_EVENT` (rationale).
+1. Hold the run ([Run end](#run-end)), then write Ctrl+C to the PTY, the graceful-stop signal on every platform; ConPTY delivers it as `CTRL_C_EVENT` (rationale).
 2. Keep the last `dehydrate` payload the run emits from then until the kill; none earlier counts.
 3. Kill the PTY at the prompt or after a grace, whichever comes first, so a hung Tool blocks nothing.
 
-**Must rehydrate a reaped Tool when it becomes visible, or when `dor tool` or `dor open` matches it** (reporting `adopted`), never into a closing or transferring Workspace: a fresh shell in the run's directory, the saved command typed as cold restore types it ([Persistence and hosts](#persistence-and-hosts)), with `DORMOUSE_DEHYDRATE` holding the captured payload, or bare args when none was captured. A failing run's output stays above the prompt, never retyped (rationale).
+**Must rehydrate a reaped Tool when it becomes visible, or when `dor tool` or `dor open` matches it** (reporting `adopted`), never into a closing or transferring Workspace: a fresh shell in the run's directory, the saved command typed as cold restore types it ([Persistence and hosts](#persistence-and-hosts)). It degrades in tiers:
+
+| Tier | When |
+| --- | --- |
+| Dehydrated | A payload was captured: `DORMOUSE_DEHYDRATE` holds it |
+| Bare args | No payload was captured |
+| Error | The run fails: its output stays above the prompt, never retyped, and the Surface is a plain terminal ([Run end](#run-end); rationale) |
 
 - **Must hand the payload to the rehydrated run alone**: the host sets `DORMOUSE_DEHYDRATE` on that spawn and strips an inherited one from every other, and shell integration unsets it when the first command finishes (rationale).
 - **Must keep the payload in renderer memory, never on disk** (rationale). A `reaped` mark in Tool metadata persists, so a resume, cold restore, or Workspace transfer keeps the Tool reaped, to rehydrate from bare args when shown.
@@ -278,7 +303,7 @@ Source of truth: `activateTerminalLink` in `lib/src/lib/terminal-link-activation
 | Placement | Neither `--surface` nor `--minimize` supplied |
 | Helper | No existing auxiliary helper; preserve it by splitting |
 
-**Must retain Tool designation after its command exits.** Takeover is one-shot per Surface: a later invocation from that prompt splits unless keyed reuse finds a match, and the same keyed Tool reruns in place through the handshake below.
+A taken-over Surface is a Tool for one run ([Run end](#run-end)): once that run ends, a later invocation from its prompt takes the plain terminal over afresh.
 
 ```mermaid
 sequenceDiagram
@@ -287,10 +312,10 @@ sequenceDiagram
   participant W as Wall
   Sh->>D: runs dor tool alone
   D->>W: surface.tool
-  W-->>D: takeover or adopted
+  W-->>D: takeover
   D->>Sh: prints the handle, exits
   Sh-->>W: back at a prompt
-  W->>W: recheck, then become the Tool if takeover
+  W->>W: recheck, then become the Tool
   W->>Sh: type the command
 ```
 
@@ -298,12 +323,11 @@ sequenceDiagram
 
 - **Must leave the caller unchanged on prompt timeout or cancellation**, rechecking transfer/closing state, pane membership, CWD, kind, and helper presence after the wait. **Must complete an accepted takeover after switching Workspaces** without changing the active Workspace (rationale).
 - **Must retain the Session id, Surface ref, scrollback, and any user rename** through the transformation.
-- **Must rerun a keyed match in the caller through the same handshake**, reporting `adopted`, when its line is standalone and integrated, never interrupting the waiting `dor` process. Placement flags do not relocate an existing match, which runs in its current directory.
-- **Must report an error when the caller is the keyed match but its command line cannot be typed behind**, never a misleading `existing`.
+- **Must report an error when the caller is its own keyed match and that match is not running**, instead of reporting a misleading `existing` result.
 - **May interleave user keystrokes arriving between the prompt and command injection.**
 - **Must include already-owned background listeners in the usual process-tree scan**; [Serving](#serving) owns selection.
 
-Source of truth: `toolTakesOverCaller` / `toolRerunsInCaller` in `lib/src/components/wall/tool-takeover.ts`; `runToolInCallerPane` in `lib/src/components/wall/use-dor-control.ts`.
+Source of truth: `toolTakesOverCaller` in `lib/src/components/wall/tool-takeover.ts`; `runToolInCallerPane` in `lib/src/components/wall/use-dor-control.ts`.
 
 ## OSC 367
 
@@ -378,6 +402,12 @@ Source of truth: `PersistedToolMetadata` in `lib/src/lib/session-types.ts`; `cap
 - **Later** — `prespawn_*` beyond the dedupe literal: a computed key, and `prespawn_port`. Pocket/remote browser view (rides the browser-surface staging in `docs/specs/remote-api.md`; reserve the kind on the wire now). An in-pane terminal/browser strip (decide against the glossary's reserved multiple-Surfaces-per-Pane). A `boots: web` hint if the terminal flash grates. `--has terminal` / `--has browser` *filter flags* for `dor list`, whose rows already carry the fields.
 
 **Scope: open-folder** — the [Preview slot](#preview-slot)'s speed within the open rules: opt-in retarget without restart, built-in viewer first.
+
+### Tool runs
+
+**Scope: tool-run** — Break, the rest of designation per run ([Run end](#run-end)). (rationale)
+
+- **Must offer Break on a Tool's Pane header, beside Kill, which stays Kill** (`docs/specs/reopen.md`). Break releases the designation without ending the run: the Surface becomes a plain terminal still running the command, and a serving page moves to a new ordinary browser Surface split beside it and focused, with browser chrome and every renderer its host offers (`docs/specs/dor-browser.md`). A Tool not serving breaks into the terminal alone; pending approval offers no Break. A dirty Tool asks Save / Discard / Cancel first ([Closing unsaved Tools](#closing-unsaved-tools)); a preview slot's mark goes with the Tool, so the next preview opens a new slot.
 
 ### Open questions
 

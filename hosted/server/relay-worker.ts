@@ -10,8 +10,10 @@ import { workerApp } from "./worker-app";
 /**
  * The relay Worker, `dormouse-relay` on `relay.dormouse.sh`: the Hosted Relay's
  * routes and Pocket at the root, the one-time rendezvous, and its `/connect/`
- * page. It holds no auth secret and never asks auth; Hyperdrive reaches only
- * its own tables and the entitlement's user row. Its PR previews run this
+ * page. It holds no auth secret and never asks auth; it queries only its own
+ * tables and the entitlement's user row, though its Hyperdrive role, shared
+ * with the other two Workers, could reach more (docs/specs/security.md ->
+ * "Known gaps"). Its PR previews run this
  * entry too: the mapper passes nothing a preview lacks, and a preview has no
  * Cron Trigger.
  */
