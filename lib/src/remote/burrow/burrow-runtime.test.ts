@@ -114,7 +114,11 @@ describe('BurrowRuntime end-to-end ceremonies', () => {
 
   function makeBurrow(
     loadAcl: () => BurrowAclRecord[] = () => [],
-    options: { withSession?: boolean; saveAcl?: BurrowOptions['saveAcl'] } = {},
+    options: {
+      withSession?: boolean;
+      saveAcl?: BurrowOptions['saveAcl'];
+      onPolicyRaised?: BurrowOptions['onPolicyRaised'];
+    } = {},
   ): BurrowRuntime {
     const withSession = options.withSession ?? true;
     const created = new BurrowRuntime({
@@ -128,6 +132,7 @@ describe('BurrowRuntime end-to-end ceremonies', () => {
       requestApproval: (pending) => approvals.push(pending),
       dismissApproval: (clientId) => dismissed.push(clientId),
       onInvitationChanged: recordInvitation,
+      onPolicyRaised: options.onPolicyRaised,
       createSession: withSession
         ? ({ send }) => {
             const entry = { handled: [] as unknown[], disposed: false, send };
@@ -1261,6 +1266,52 @@ describe('BurrowRuntime end-to-end ceremonies', () => {
       burrow.start();
       expect(socket).not.toBe(latchedSocket);
       expect(burrow.status).toBe('connecting');
+    }
+  });
+
+  it('raises its UV demand on the Relay\'s policy frame, and nothing lowers it again', async () => {
+    const raised = vi.fn();
+    makeBurrow(() => [], { onPolicyRaised: raised });
+    // Enrolled without UV, and a Relay reporting none raises nothing: a
+    // presence-only passkey pairs.
+    socket.receive({ t: 'policy' });
+    socket.receive({ t: 'policy', requireUserVerification: false });
+    expect(raised).not.toHaveBeenCalled();
+    const authenticator = await createTestAuthenticator({ rpId: RP_ID, origin: ORIGIN, userVerified: false });
+    const { invitation, clientStatic, session, code } = await requestPairing('c1', authenticator);
+    approvals[0]!.approve(code);
+    expect(await outcome(session, 'pairing', invitation.inviteId)).toMatchObject({ ok: true });
+
+    // The operator turned UV on after enrollment; the Relay says so on connect.
+    socket.receive({ t: 'policy', requireUserVerification: true });
+    expect(raised).toHaveBeenCalledTimes(1);
+    expect(await attemptConnection('c1', clientStatic, authenticator)).toEqual({
+      ok: false,
+      code: 'presence-rejected',
+    });
+
+    // A Relay reporting less (or reporting it again) changes nothing.
+    socket.receive({ t: 'policy' });
+    socket.receive({ t: 'policy', requireUserVerification: false });
+    socket.receive({ t: 'policy', requireUserVerification: true });
+    expect(raised).toHaveBeenCalledTimes(1);
+    expect(await attemptConnection('c1', clientStatic, authenticator)).toEqual({
+      ok: false,
+      code: 'presence-rejected',
+    });
+  });
+
+  it('keeps its enrolled UV demand when the Relay reports none', async () => {
+    const enrolled = enrollment;
+    enrollment = { ...enrolled, requireUserVerification: true };
+    try {
+      makeBurrow();
+      socket.receive({ t: 'policy', requireUserVerification: false });
+      const authenticator = await createTestAuthenticator({ rpId: RP_ID, origin: ORIGIN, userVerified: false });
+      await requestPairing('c1', authenticator);
+      expect(approvals).toEqual([]);
+    } finally {
+      enrollment = enrolled;
     }
   });
 

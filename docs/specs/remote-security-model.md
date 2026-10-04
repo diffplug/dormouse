@@ -31,7 +31,7 @@ Every pairing and every connection carries one WebAuthn assertion, verified by t
 
 > **Passkeys are user credentials, not device identities** — synchronization puts one passkey on many physical devices and changes nothing here (rationale).
 
-**Presence, or verification.** The default demand is the authenticator's user-*presence* flag; `DORMOUSE_REQUIRE_USER_VERIFICATION=true` raises it to user *verification*, mirrored by the Relay into every Burrow's enrollment response and copied by the Burrow into its policy. **Both verifiers must demand the same thing** (rationale). Pocket asks `userVerification: 'preferred'` either way, so platform authenticators prompt for biometrics in practice — convention, not a guarantee.
+**Presence, or verification.** The default demand is the authenticator's user-*presence* flag; `DORMOUSE_REQUIRE_USER_VERIFICATION=true` raises it to user *verification*, mirrored by the Relay into every Burrow's enrollment response and again on every connect, and copied by the Burrow into its policy. **A Burrow must never lower it** on a Relay's word; lowering takes a re-enrollment. **Both verifiers must demand the same thing** (rationale). Pocket asks `userVerification: 'preferred'` either way, so platform authenticators prompt for biometrics in practice — convention, not a guarantee.
 
 **The Burrow stores only a hash of each paired passkey's public key**, checked against the full key presented inside the channel, so a compromised Relay cannot substitute a passkey. **The Relay likewise verifies against its own *stored* key**, never one a request carries. **Only ES256 (ECDSA P-256 / SHA-256) is accepted**, the mandatory-to-implement WebAuthn algorithm.
 

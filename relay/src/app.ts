@@ -81,6 +81,7 @@ import type {
   ReauthBeginResponse,
   ReauthFinishRequest,
   ReauthFinishResponse,
+  RelayPolicyFrame,
   SealedPushPayload,
   SetupBeginRequest,
   SetupBeginResponse,
@@ -1182,6 +1183,11 @@ export function createApp(config: AppConfig): CreatedApp {
       let unwatch = () => {};
       return {
         onOpen: (_evt, ws) => {
+          // Re-delivered on every connect, ahead of anything routed, so a flag
+          // set after this Burrow enrolled still reaches it (relay.md).
+          if (config.requireUserVerification) {
+            ws.send(JSON.stringify({ t: 'policy', requireUserVerification: true } satisfies RelayPolicyFrame));
+          }
           conn = hub.registerBurrow(burrow.burrowId, ws);
           const registered = conn;
           unwatch = watchLiveness(ws, () => hub.unregisterBurrow(registered));

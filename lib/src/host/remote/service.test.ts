@@ -940,6 +940,35 @@ describe('start', () => {
     ]);
   });
 
+  it('persists a UV demand the Relay raised after enrollment, so a restart keeps it', async () => {
+    createService({ enrollment: ENROLLMENT });
+    await service.start();
+    sockets[0]!.open();
+    sockets[0]!.receive({ t: 'policy', requireUserVerification: true });
+    await vi.waitFor(() => expect(store.enrollment).toEqual({ ...ENROLLMENT, requireUserVerification: true }));
+  });
+
+  it('writes no raise onto an enrollment cleared while it waited', async () => {
+    createService({ enrollment: ENROLLMENT });
+    await service.start();
+    sockets[0]!.open();
+    // The delete is in flight, the Burrow still running, when the Relay speaks.
+    let release!: () => void;
+    const clear = store.clearEnrollment;
+    store.clearEnrollment = async () => {
+      await new Promise<void>((resolve) => (release = resolve));
+      await clear();
+    };
+    const cleared = command('clearEnrollment');
+    await vi.waitFor(() => expect(release).toBeTypeOf('function'));
+    sockets[0]!.receive({ t: 'policy', requireUserVerification: true });
+    release();
+    await cleared;
+    // Past every serialized task the raise could have queued.
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(store.enrollment).toBeNull();
+  });
+
   it('clearEnrollment stops the Burrow and forgets it, keeping the records', async () => {
     createService({ enrollment: ENROLLMENT, acl: { [BURROW_ID]: [aclRecord('device-1')] } });
     await service.start();

@@ -80,6 +80,8 @@ export interface TestAuthenticator {
 export async function createTestAuthenticator(options: {
   rpId: string;
   origin: string;
+  /** False for an authenticator that proves presence only. */
+  userVerified?: boolean;
 }): Promise<TestAuthenticator> {
   const keyPair = await subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, [
     'sign',
@@ -98,7 +100,7 @@ export async function createTestAuthenticator(options: {
       );
       const rpIdHash = await sha256(utf8Encode(options.rpId));
       signCount += 1;
-      const flags = 0x01 | 0x04; // user present + user verified
+      const flags = 0x01 | (options.userVerified === false ? 0 : 0x04); // user present (+ user verified)
       const authenticatorData = concatBytes(
         rpIdHash,
         Uint8Array.of(

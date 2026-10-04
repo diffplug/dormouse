@@ -25,7 +25,7 @@ Production configuration (`pnpm --filter relay start`, containers, installers):
 | `DORMOUSE_STATE_DIR` | The JSON state files. Default `./data`. |
 | `DORMOUSE_POCKET_DIR` | The built Pocket app served at `/*`. Default `lib/dist-pocket` resolved from the compiled Relay's own location, never the cwd (rationale). |
 | `PORT` | Default 3000. Blank reads as unset; `PORT=0` is a `ConfigError` (rationale). |
-| `DORMOUSE_REQUIRE_USER_VERIFICATION` | Only `true`, trimmed, demands a user-verified assertion for sign-in and re-auth (rationale); mirrored to every Burrow as `ConnectionPolicy.requireUserVerification` (`docs/specs/security-remote.md` -> "Trust boundary"). |
+| `DORMOUSE_REQUIRE_USER_VERIFICATION` | Only `true`, trimmed, demands a user-verified assertion for sign-in and re-auth (rationale); mirrored to every Burrow as `ConnectionPolicy.requireUserVerification`, at enrollment and in a `policy` frame opening every `/ws/burrow` socket (`docs/specs/security-remote.md` -> "Trust boundary"). |
 | `DORMOUSE_BIND_HOST` | Interface to listen on; unset binds every interface (below). |
 | `DORMOUSE_VAPID_PUBLIC_KEY` / `DORMOUSE_VAPID_PRIVATE_KEY` | Web Push keypair, both or neither; a missing, malformed, or mismatched pair exits at startup. Unset, one is minted into `vapid.json` on first boot. |
 | `DORMOUSE_VAPID_SUBJECT` | RFC 8292 contact, defaulted from `DORMOUSE_ORIGIN` ("Web Push"); an invalid value exits at startup. |
@@ -174,7 +174,7 @@ Source of truth: `relay/src/push-endpoint.ts`; `relay/src/push.ts`, including `a
 
 The Relay routes JSON envelopes between Client and Burrow sockets (`@hono/node-ws`). **`clientId` is a Relay-assigned secret** stamped onto every Burrow-bound frame so the Burrow can address replies, and never sent to a Client.
 
-**The `e2e` envelope is the whole surface.** Four `t: 'e2e'` frames: Client→Relay, Relay→Burrow with `clientId` stamped, Burrow→Relay, Relay→Client with `burrowId` stamped from the socket. A Burrow handles exactly these and `client-gone`, ignoring anything else; any other Client frame type is answered with an `error` and reaches no Burrow.
+**The `e2e` envelope is the whole surface.** Four `t: 'e2e'` frames: Client→Relay, Relay→Burrow with `clientId` stamped, Burrow→Relay, Relay→Client with `burrowId` stamped from the socket. A Burrow handles exactly these, `client-gone`, and `policy`, ignoring anything else; any other Client frame type is answered with an `error` and reaches no Burrow.
 
 - **An `init` binds** the Client socket to the named Burrow, replacing any binding; a different, live, previously bound Burrow gets `client-gone` first.
 - **A `transport` frame is forwarded only within that binding**, in either direction; one outside it is dropped.

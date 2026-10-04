@@ -358,7 +358,7 @@ export const RULES = [
     files: FRAME_MODULES,
     // The tags of the Relay-readable protocol this replaced. A reader for one
     // is a path a hostile relay could still drive; the shipped set is `e2e`,
-    // `burrow-gone`, `error`, and `client-gone`.
+    // `burrow-gone`, `error`, `client-gone`, and `policy`.
     pattern:
       /['"](?:pair|pair-status|connect|connect2|msg|pair-result|challenge|decision|setup-token-redeemed)['"]/g,
     violationFile: 'relay/src/relay.ts',

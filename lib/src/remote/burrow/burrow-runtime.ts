@@ -56,6 +56,7 @@ import {
   type PairingOutcomeV1,
   type PresenceBinding,
   type SealedPushV1,
+  type RelayPolicyFrame,
   type RelayToBurrowFrame,
 } from 'remote-lib-common';
 import type { BurrowEnrollment } from './enrollment';
@@ -330,14 +331,24 @@ export interface BurrowOptions {
    * networks").
    */
   onPathRefused?: (refusal: PathRefusal) => void;
+  /**
+   * The Relay raised this Burrow's demand to user verification past what its
+   * enrollment holds ({@link RelayPolicyFrame}). Already enforced when called;
+   * the owner persists it so a restart keeps it.
+   */
+  onPolicyRaised?: () => void;
 }
+
+/** What waits on the frame chain: the policy frame is applied on arrival. */
+type QueuedRelayFrame = Exclude<RelayToBurrowFrame, RelayPolicyFrame>;
 
 const INITIAL_BACKOFF_MS = 1_000;
 const MAX_BACKOFF_MS = 30_000;
 
 export class BurrowRuntime {
   readonly #enrollment: BurrowEnrollment;
-  readonly #policy: ConnectionPolicy;
+  #policy: ConnectionPolicy;
+  readonly #onPolicyRaised: () => void;
   #acl: BurrowAcl;
   readonly #saveApproval = createSerialQueue();
   readonly #challenges: ChallengeIssuer;
@@ -395,7 +406,7 @@ export class BurrowRuntime {
    * WebCrypto, so unchained handlers would let a pipelined `transport` overtake
    * the `init` that has to create its session.
    */
-  readonly #frames: Array<{ frame: RelayToBurrowFrame; chars: number }> = [];
+  readonly #frames: Array<{ frame: QueuedRelayFrame; chars: number }> = [];
   #frameChars = 0;
   // Kept across socket teardown: repeated reconnects must not accumulate
   // in-flight crypto operations while an old one is still awaiting WebCrypto.
@@ -456,11 +467,13 @@ export class BurrowRuntime {
     this.#policy = {
       rpId: options.enrollment.rpId,
       origin: options.enrollment.origin,
-      // Mirrored from the Relay at enrollment. Both sides must demand the
-      // same thing: the Burrow is the final authority, so a Relay enforcing UV
-      // while the Burrow does not would leave the weaker verifier deciding.
+      // Mirrored from the Relay at enrollment, and raised by its policy frame
+      // on any later connect. Both sides must demand the same thing: the Burrow
+      // is the final authority, so a Relay enforcing UV while the Burrow does
+      // not would leave the weaker verifier deciding.
       requireUserVerification: options.enrollment.requireUserVerification ?? false,
     };
+    this.#onPolicyRaised = options.onPolicyRaised ?? (() => {});
     this.#now = options.now ?? (() => Date.now());
     this.#initTokens = new TokenBucket({
       capacity: E2E_INIT_BURST,
@@ -1034,6 +1047,12 @@ export class BurrowRuntime {
       return;
     }
     if (!frame || typeof (frame as { t?: unknown }).t !== 'string') return;
+    if (frame.t === 'policy') {
+      // Applied on arrival rather than queued: it only ever tightens, so the
+      // sooner it holds the better, and it is the first frame the Relay sends.
+      this.#raisePolicy(frame);
+      return;
+    }
     if (frame.t === 'client-gone') {
       // Bounded before it is used as a map key: the relay chooses it, and this
       // is the only frame that reaches the map without the `e2e` guard.
@@ -1055,12 +1074,23 @@ export class BurrowRuntime {
   }
 
   /**
+   * Only ever up. The Relay is trusted with nothing, so a frame reporting
+   * less, or nothing, leaves the demand where enrollment or an earlier raise
+   * put it (`docs/specs/remote-security-model.md` → Passkeys).
+   */
+  #raisePolicy(frame: RelayPolicyFrame): void {
+    if (frame.requireUserVerification !== true || this.#policy.requireUserVerification) return;
+    this.#policy = { ...this.#policy, requireUserVerification: true };
+    this.#onPolicyRaised();
+  }
+
+  /**
    * Bound both retained strings and per-frame bookkeeping before queueing.
    * Overflow ends the whole socket synchronously: skipping a transport frame
    * would desynchronize its Noise nonce, and waiting for `close` would still
    * admit buffered messages. The ordinary close policy handles reconnection.
    */
-  #enqueue(frame: RelayToBurrowFrame, chars: number): void {
+  #enqueue(frame: QueuedRelayFrame, chars: number): void {
     if (
       this.#frames.length >= MAX_QUEUED_RELAY_FRAMES ||
       this.#frameChars + chars > MAX_QUEUED_RELAY_FRAME_CHARS
