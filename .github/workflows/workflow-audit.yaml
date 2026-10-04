@@ -2,7 +2,7 @@ name: workflow-audit
 
 # Nightly audit of every commit touching .github/workflows/,
 # .config/tend.yaml, .github/audit/, .vscode/, or the markdown merge driver
-# (.gitattributes, scripts/setup-git.mjs, scripts/md-merge.mjs). Surfaces changes from feature branches and direct
+# (.gitattributes, scripts/setup-git.mjs, scripts/md-merge.mjs, scripts/md-unwrap.mjs). Surfaces changes from feature branches and direct
 # pushes, not just the main branch — so a bot push that adds a new
 # workflow file gets a visible issue even if it never opens a PR.
 #
@@ -119,9 +119,9 @@ jobs:
           # folder — the same persistence-on-checkout shape a workflow gives,
           # reached without touching .github/.
           #
-          # .gitattributes, scripts/setup-git.mjs, and scripts/md-merge.mjs are
-          # in the window because the `md-sentences` merge driver runs the
-          # checked-out tree's md-merge.mjs: merging main into a bot branch on a
+          # .gitattributes, scripts/setup-git.mjs, scripts/md-merge.mjs, and the
+          # md-unwrap.mjs it imports are in the window because the `md-sentences`
+          # merge driver runs the checked-out tree's copies: merging main into a bot branch on a
           # maintainer's clone executes that branch's copy.
           #
           # The security specs (docs/specs/security*.md) are deliberately NOT in
@@ -160,7 +160,7 @@ jobs:
           # and silently matches nothing under a shell that does not word-split.
           # `"${WINDOW[@]}"` means the same thing everywhere and needs no
           # exemption from shellcheck.
-          WINDOW=(.github/workflows/ .config/tend.yaml .github/audit/ .vscode/ .gitattributes scripts/setup-git.mjs scripts/md-merge.mjs)
+          WINDOW=(.github/workflows/ .config/tend.yaml .github/audit/ .vscode/ .gitattributes scripts/setup-git.mjs scripts/md-merge.mjs scripts/md-unwrap.mjs)
           # DERIVED, never hand-maintained: element 0 is the workflows tree, and
           # this is everything else — the half both classifiers must refuse
           # rather than inspect, since each only ever content-checks
