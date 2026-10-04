@@ -1,7 +1,8 @@
 name: workflow-audit
 
 # Nightly audit of every commit touching .github/workflows/,
-# .config/tend.yaml, .github/audit/, or .vscode/. Surfaces changes from feature branches and direct
+# .config/tend.yaml, .github/audit/, .vscode/, or the markdown merge driver
+# (.gitattributes, scripts/setup-git.mjs, scripts/md-merge.mjs). Surfaces changes from feature branches and direct
 # pushes, not just the main branch — so a bot push that adds a new
 # workflow file gets a visible issue even if it never opens a PR.
 #
@@ -10,7 +11,7 @@ name: workflow-audit
 # earlier.
 #
 # Gap-resistant: the "since" lower bound comes from the previous
-# successful run's API timestamp, so a failed run leaves the lower bound
+# successful scheduled run on main's API timestamp, so a failed run leaves the lower bound
 # unchanged rather than skipping commits.
 #
 # Reports the *unexplained*. Four routine sources are classified and
@@ -89,9 +90,13 @@ jobs:
           # The `status=success` filter served a stale listing (newest success
           # 2026-09-03 on 2026-09-28, 10-01, and 10-02, despite daily successes),
           # re-reporting weeks of already-audited commits.
+          # Only a scheduled run on main counts: a bot-pushed branch can carry a
+          # workflow-audit.yaml of its own (an `on: push` that exits 0), or a
+          # dispatch can run one, and that success would otherwise move the
+          # lower bound past commits nobody audited.
           SUCCESSES=$(gh api --paginate \
             "/repos/$GITHUB_REPOSITORY/actions/workflows/workflow-audit.yaml/runs?per_page=100" \
-            --jq '.workflow_runs[] | select(.conclusion == "success") | .created_at')
+            --jq '.workflow_runs[] | select(.conclusion == "success" and .head_branch == "main" and .event == "schedule") | .created_at')
           SINCE=${SUCCESSES%%$'\n'*}
           if [ -z "$SINCE" ]; then
             SINCE=$(date -u -d '25 hours ago' --iso-8601=seconds)
@@ -113,6 +118,11 @@ jobs:
           # `"runOn": "folderOpen"`, which executes when a maintainer opens the
           # folder — the same persistence-on-checkout shape a workflow gives,
           # reached without touching .github/.
+          #
+          # .gitattributes, scripts/setup-git.mjs, and scripts/md-merge.mjs are
+          # in the window because the `md-sentences` merge driver runs the
+          # checked-out tree's md-merge.mjs: merging main into a bot branch on a
+          # maintainer's clone executes that branch's copy.
           #
           # The security specs (docs/specs/security*.md) are deliberately NOT in
           # the window, though SECURITY.md was briefly. Two reasons, and the second is why the first is not enough
@@ -150,7 +160,7 @@ jobs:
           # and silently matches nothing under a shell that does not word-split.
           # `"${WINDOW[@]}"` means the same thing everywhere and needs no
           # exemption from shellcheck.
-          WINDOW=(.github/workflows/ .config/tend.yaml .github/audit/ .vscode/)
+          WINDOW=(.github/workflows/ .config/tend.yaml .github/audit/ .vscode/ .gitattributes scripts/setup-git.mjs scripts/md-merge.mjs)
           # DERIVED, never hand-maintained: element 0 is the workflows tree, and
           # this is everything else — the half both classifiers must refuse
           # rather than inspect, since each only ever content-checks
