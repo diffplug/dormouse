@@ -1,9 +1,9 @@
 # Pricing
 
 > - See `docs/specs/glossary.md` for Burrow / Client / Relay and Pane / Session vocabulary.
-> - **Owns:** the plans, the founding ladder, what a plan grants, the licence the clients verify, the managed-voice boundary, and the content contract of the Hosted page.
+> - **Owns:** the plans, the founding ladder, what a plan grants, how a desktop proves membership, the managed-voice boundary, and the content contract of the Hosted page.
 > - **Defers:** page chrome, rail, and link obligations to `docs/specs/website-docs.md` -> "Reference page chrome"; the Hosted Relay's accounts, enrollment, and entitlement, and managed voice's routes, to `docs/specs/hosted.md`; the cloud-hosted trust boundary to `docs/specs/security-remote.md` -> "Cloud-hosted mode"; alarm delivery to `docs/specs/alert.md` -> "Spoken alarms".
-> - **Status:** the Hosted page publishes the plans and the FAQ; everything that takes money — checkout, the licence, managed voice, the hosted Relay — is under [Future](#future).
+> - **Status:** the Hosted page publishes the plans and the FAQ; everything that takes money — checkout, the entitlement, managed voice, the hosted Relay — is under [Future](#future).
 
 ## The Hosted page
 
@@ -26,7 +26,7 @@ Three cards — Free, Hosted, Founding — side by side from `md` up, stacked in
 | Card | Above the price | Price line | Includes | Action |
 |---|---|---|---|---|
 | Free | the terminal's licence | $0, no account, no card | Pocket over a self-hosted Relay, spoken alarms in the system voice, no network request unless a Relay is chosen | Download |
-| Hosted | Monthly / Yearly toggle | the toggled price | the managed Relay, managed voices, one licence for every machine | Get Hosted |
+| Hosted | Monthly / Yearly toggle | the toggled price | the managed Relay, managed voices, one account for every machine | Get Hosted |
 | Founding | the lock | founding price, list struck beside it | everything in Hosted, the badge and the founders row | Become a founder |
 
 - **Mark the Hosted card with the accent border, never a surface of its own**, which would be a tint no docs token is derived against.
@@ -66,9 +66,9 @@ Source of truth: `tiersOnSale`, `foundingTier`, and `pricingJsonLd` in `website/
 **Scope: hosted-sales** — what remains, in staged order:
 
 1. **The cohort endpoint** the page already calls: the open cohort's seats and the opted-in founders, avatars proxied onto this origin.
-2. **Checkout and licences**: purchase, the signed licence, activation in Settings, verification, grace, revocation.
-3. **Managed voice for members**: the licence replacing the admin gate (`docs/specs/hosted.md` -> "Managed voice"), the disclosure, one voice per Pane.
-4. **Hosted Relay inclusion**: the licence as the Relay's entitlement (`docs/specs/hosted.md` -> "Relay"), gated on the independent review `docs/specs/security-remote.md` -> "Cloud-hosted mode" requires.
+2. **Checkout and entitlement**: purchase, the subscription as the account's entitlement, desktop sign-in, revocation.
+3. **Managed voice for members**: the subscription replacing the admin gate (`docs/specs/hosted.md` -> "Managed voice"), the disclosure, one voice per Pane.
+4. **Hosted Relay inclusion**: the subscription as the Relay's entitlement (`docs/specs/hosted.md` -> "Relay"), gated on the independent review `docs/specs/security-remote.md` -> "Cloud-hosted mode" requires.
 5. **Renewal, cancellation, and refund** paths.
 
 Team and enterprise tiers are never sold through this page. A free hosted tier is undecided — see [Open questions](#open-questions).
@@ -97,24 +97,23 @@ What each plan grants once checkout can sell it; [Published prices](#published-p
 | Founding badge | live for founding |
 
 - **The plan never grants team or enterprise capability** — org accounts, SSO, SCIM, BYOT, audit export.
-- **The hosted Relay is part of the plan, never a second purchase.** Reserved: the **hosted-sales** scope reads the plan from the licence below rather than minting a second account.
+- **The hosted Relay is part of the plan, never a second purchase.** Reserved: the **hosted-sales** scope reads the plan from the Hosted account's subscription ("Checkout and entitlement"), so a member never signs up twice.
 - **Nothing shipped free is ever gated**: the terminal, `dor`, browser panes, the notepad, alerts with the system voice, the self-host Relay, and Pocket over a self-hosted Relay stay free, with no login.
 
-### Checkout and licence
+### Checkout and entitlement
 
-- **Stripe Managed Payments runs checkout, subscriptions, and the customer portal as merchant of record**, so tax is Stripe's. Dormouse never stores card data. A founding lock is a per-cohort Price, cohort counts come from the checkout-completed webhook, and the licence below is minted on that webhook, since Stripe issues none.
+- **Stripe Managed Payments runs checkout, subscriptions, and the customer portal as merchant of record, through `@pgstencil/stripe`**, so tax is Stripe's. Dormouse never stores card data. A founding lock is a per-cohort Price; cohort counts come from the billing provider's completed subscriptions.
+- **Checkout starts from a Hosted account**: a buy button lands on the account origin, which asks for sign-in first, so the subscription belongs to an account from its first event.
 - **Founding checkout offers the founders-row opt-in, unticked**; the account can withdraw it at any time.
-- **Checkout yields one signed licence**: an Ed25519-signed token carrying the tier, the cohort, the locked price, the issue time, and an expiry at the period end. The licence is shown once on the success page and emailed.
 - **The success page asks the four Van Westendorp questions**, optional and unsent until answered: too expensive to consider, too cheap to trust, expensive but would consider, a bargain. Their answers inform later list changes.
-- **Activation is a paste field in Settings**, beside the spoken-alarm row whose link today points at `/hosted#voice`. That field is the only account surface in the free client.
-- **The client verifies offline** against an embedded public key and refreshes online at most once a day. **Grace is 30 days past expiry** when the refresh cannot reach the server; after grace the client reverts to free behavior silently — voices fall back to the system voice, and the client mentions the lapse at most once per session.
-- **One licence covers every machine the member uses.** No device count, no seat count, no activation limit.
-- **A refund or chargeback revokes**: the server marks the licence, the next refresh disables it, and the seat returns to its cohort.
-- **The licence is the identity the hosted Relay will accept.** Reserved: the **hosted-sales** scope makes this licence the entitlement Burrow enrollment checks (`docs/specs/hosted.md` -> "Burrow enrollment"), so a member never signs up twice.
+- **The entitlement is the account's subscription, read on the server on every voice and Relay request.** No licence, no offline verification, and no grace past what the subscription grants; a lapsed member's voices fall back to the system voice and its Burrows to `not-entitled`.
+- **A desktop signs in from Settings by device code**, the flow Burrow enrollment already runs (`docs/specs/hosted.md` -> "Burrow enrollment"). The approval mints a desktop credential the host keeps and never hands a webview. Sign-in is the only account surface in the free client.
+- **One account covers every machine the member uses.** No device count, no seat count, no activation limit.
+- **A refund or chargeback ends the subscription**, so the next request is refused, and the seat returns to its cohort.
 
 ### Managed voice
 
-- **Dormouse operates the endpoint and holds the vendor key** (ElevenLabs). A request carries the licence, a voice id, and the text; the response is audio.
+- **Dormouse operates the endpoint and holds the vendor key** (ElevenLabs). A request carries the desktop credential, a voice id, and the text; the response is audio.
 - **What leaves the machine is exactly the sanitized spoken label and the voice id** — the `toSpokenText` output in `lib/src/lib/alert-speech.ts`, never terminal content, never a notification body, never a Session id. **Disclose this in the enable flow before the first request**, honoring the promise the Hosted page makes.
 - **Cache clips by voice and text on the client** and regenerate only when the label changes; a cache hit makes no request. **Fair use is a daily request cap per member**; past it, the system voice speaks.
 - **The system voice is the fallback**, for offline, unentitled, endpoint error, or cap: same delivery rules, same cut-off on attend, never silence because the service failed. Delivery identity, queueing, and cut-off stay owned by `docs/specs/alert.md` -> "Spoken alarms".
@@ -126,7 +125,8 @@ What each plan grants once checkout can sell it; [Published prices](#published-p
 - **Every plan auto-renews; cancel any time; access runs to period end.**
 - **30-day refund on every plan.** A refund revokes.
 - **A failed founding renewal gets 30 days of grace before the lock is lost.**
-- **A licence is personal and non-transferable.**
+- **A subscription is personal and non-transferable.**
+- **No trial**: the 30-day refund is the trial.
 
 ### Open questions
 

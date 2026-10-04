@@ -328,7 +328,7 @@ function HostedCard({ onBuy }: { onBuy: (tier: Tier) => void }) {
             notifications on your phone — we’ll run the server for you
           </>,
           "High-quality ElevenLabs speech synthesis",
-          "One license for your whole personal fleet of machines",
+          "One account for your whole personal fleet of machines",
         ]}
       />
     </PlanCard>
@@ -365,7 +365,7 @@ function FoundingCard({ cohort, onBuy }: { cohort: Cohort; onBuy: (tier: Tier) =
  * What a buy button does until checkout ships.
  *
  * Deliberately loud about being unfinished: the prices are real and the plan
- * is specified, but purchase, the licence, and activation are a later stage,
+ * is specified, but purchase and desktop sign-in are a later stage,
  * and a button that quietly did nothing would read as a bug.
  */
 function CheckoutTodo({ tier, onClose }: { tier: Tier; onClose: () => void }) {
@@ -406,8 +406,8 @@ function CheckoutTodo({ tier, onClose }: { tier: Tier; onClose: () => void }) {
           Checkout is not wired up yet
         </h2>
         <p className={`mt-4 leading-relaxed ${MUTED_TEXT_CLASS}`}>
-          {tier.name} is priced and specified, but nothing here takes payment: purchase,
-          the signed license, and activation are the next stage of work. You have not been
+          {tier.name} is priced and specified, but nothing here takes payment: purchase
+          and signing in from the app are the next stage of work. You have not been
           charged, and no seat has been taken.
         </p>
         <p className={`mt-4 leading-relaxed ${MUTED_TEXT_CLASS}`}>
@@ -599,7 +599,7 @@ export default function Hosted() {
           <FaqEntry question="Refunds and cancellation?">
             30 days, on every plan. Monthly, yearly, and founding all auto-renew and
             you can cancel any time — access runs to the end of the period you paid for. A
-            refund revokes the license and returns the seat to its cohort.
+            refund ends access and returns the seat to its cohort.
           </FaqEntry>
           <FaqEntry question="What exactly does a founding price lock?">
             The price you paid, for as long as the subscription stays active. It survives
