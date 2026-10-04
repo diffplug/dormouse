@@ -30,6 +30,8 @@ The command is dependency-free and advisory. Its thresholds intentionally favor 
    - `MATRIX` — merge parallel cases into one table, precedence ladder, or flow.
    - `CANONICAL` — let generated help, a type, constant, registry, or test own an exact shape.
 
+   A `PRESENTATION` hit — a size, duration, or ratio in a spec's prose or tables — is `CUT` to the code that carries it unless a peer, another deploy, or an older build must agree with it (AGENTS.md -> "What stays").
+
 4. Apply only high-confidence edits. Preserve invariants, edge cases, message direction, cross-package ownership, and the `## Future` fold.
 5. Run `node scripts/spec-lint.mjs`, relevant focused tests, and `git diff --check`. Re-baseline a changed spec with `node scripts/spec-lint.mjs --ratchet <spec>`.
 6. Commit a coherent cluster so reviewers can distinguish mechanical compression from behavior changes.

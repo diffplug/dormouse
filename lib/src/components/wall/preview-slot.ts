@@ -20,6 +20,7 @@ import { stringParam } from './dor-control-shared';
 import { becomeToolMeta, type LathWallEngine } from './lath-wall-engine';
 import type { LeafMeta } from './lath-wall-store';
 import { retireToolRun } from './use-tool-serving';
+import { clearHoldLapse } from '../../lib/tool-run-hold';
 
 /** The canonical path an `open` gave this Tool, or null for a named Tool. */
 export function toolTargetFromParams(params: unknown): string | null {
@@ -109,6 +110,8 @@ export function retargetToolLeaf(
   pin?: PreviewSlotPin['pin'],
 ): void {
   retireToolRun(lath, id);
+  // The old Tool's lapse, if any, speaks for no run of the new one.
+  clearHoldLapse(id);
   const meta = lath.getMeta(id);
   if (!meta) return;
   const kept = Object.fromEntries(Object.entries(meta.params ?? {}).filter(([name]) => !TOOL_IDENTITY_PARAMS.has(name)));

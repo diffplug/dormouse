@@ -79,7 +79,9 @@ export function WorkspaceWindow({
 
   return (
     // One grid cell holds every Wall, so each keeps the same box whether or not
-    // it is the visible one. The strip anchors its close confirmation here.
+    // it is the visible one. The strip anchors its close confirmation here, not on
+    // its tab: ModalOverlay centers in its target's box without clamping to the
+    // viewport, so a tab-anchored dialog was clipped at the top of the window.
     <RingHandoffContext.Provider value={ringHandoff}>
       <div
         data-workspace-content

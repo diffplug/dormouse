@@ -121,7 +121,7 @@ A walkthrough that starts half-enrolled is not a walkthrough, so both sides get 
 
 The Relay, Burrow harness, and Pocket Chrome bind OS-assigned ports. The run reads the Relay's origin before staging the Burrow's allowed origins, and opens Pocket at that same origin. Vite reports its app URL; Chrome reports its debugging port through `DevToolsActivePort` in the run's own profile. No port is probed and released before its owner binds it.
 
-`localhost`, never `127.0.0.1` — WebAuthn's secure-context rule and the `rpId` the Relay derives from its own origin ([`docs/specs/relay.md`](../../docs/specs/relay.md) → Running it).
+`localhost`, never `127.0.0.1` — WebAuthn's secure-context rule and the `rpId` the Relay derives from its own origin ([`docs/specs/relay.md`](../../docs/specs/relay.md) → Configuration).
 
 Every listener a run starts binds loopback only — the Relay is pinned with `DORMOUSE_BIND_HOST=127.0.0.1`, the Burrow bridge and both Chrome debugging ports already are, and a step that adds one holds to the same rule ([`docs/specs/relay.md`](../../docs/specs/relay.md) → Configuration).
 
