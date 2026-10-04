@@ -10,8 +10,6 @@
 
 ## Alerts
 
-**Why one manager per host process, beside the PTYs.** Each window used to run its own `AlertManager` in its webview, fed from events the sidecar had already parsed. Three failures followed from where it lived (audit, 2026-09-23): WKWebView throttles a background window's timers, so the detector, deferral and await timers of a window the user was not looking at ran late — exactly the window a completion should summon them back to; a reload started the webview with an empty manager and a live resume seeds nothing, so every ring and TODO in the window vanished; and a Workspace transfer had to snapshot the ring, its episode, the detector deadlines and the deferred notification into the transfer content, resume them in the target, and bind a replay token so the since-mark replay's reports fired once. VS Code never had these, because its manager lives in the extension host beside the PTYs and the parse. Moving standalone's there made the two hosts one shape, now one module (`createAlertHost`): the parse feeds one manager in stream order, the Burrow's remote writes reach it in the same process, and a window is only a viewer whose state is routed to it.
-
 **Why an await's answer names its window.** Routed by the Session's `id` it would reach the Session's owner, not the window that parked it, and a `requestId` is what Rust's invoke matcher swallows. It was broadcast at first, each adapter matching its own random `awaitId`; `forWindow` routes it the way `pty:list` is routed, so no other window sees it (2026-09).
 
 ## Windows node subsystem

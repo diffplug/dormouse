@@ -53,7 +53,7 @@ Sidecar events reach the webview, where `TauriAdapter` converts dor control requ
 
 ### Burrow service
 
-The Burrow — relay socket, enrollment, ACL, pairing ceremony, remote-api v1 — runs **in the sidecar**, never the webview (`docs/specs/relay.md` → "Burrow side"): the same `BurrowService` the VS Code extension host runs, bundled to `sidecar/burrow.cjs`. **Nothing the webview says can widen access** (`docs/specs/remote-security-model.md`).
+The Burrow — relay socket, enrollment, ACL, pairing ceremony, remote-api v1 — runs **in the sidecar**, never the webview (`docs/specs/relay.md` → "Burrow side"): the same `BurrowService` the VS Code extension host runs, bundled to `sidecar/burrow.cjs`.
 
 **State.** Rust creates the app-data directory owner-only and passes it as `DORMOUSE_STATE_DIR` (§Persistence); `FileBurrowStateStore` keeps enrollment and ACL there as **one** `burrow.json`, so a write is one atomic rename (rationale), with the network policy beside it (`docs/specs/remote-network.md` → "Policy"). `burrowToken` is a bearer credential and **never enters a webview realm**. Against the shared store contract (`docs/specs/relay.md` → "Burrow side"):
 
@@ -67,12 +67,11 @@ The Burrow — relay socket, enrollment, ACL, pairing ceremony, remote-api v1 �
 
 **Asks and answers.** What the sidecar cannot know — a pane's name, its focus, its xterm size — it asks over `burrow:ask`, and `lib/src/remote/burrow/peer-surfaces.ts` answers naming the ask's `burrowRequestId`.
 
-- **An ask collects one answer per window** and concatenates them in label order, **keyed by which window answered, never by how many have**: Rust stamps the sending window's label on every `burrow:command`, so a window answering twice contributes once.
+- Rust stamps the sending window's label on every `burrow:command`, which keys an ask's answers per window (`docs/specs/transport.md` → "Message protocol"); they concatenate in label order.
 - **Rust pushes the live window labels** (`burrow:windows`) at setup and on every window create and destroy; **dropping one settles the asks that window can no longer answer**. An ask in flight is only ever narrowed.
-- **An ask naming a `surfaceId` goes to that Surface's owner alone** — `attach`, `resize` and `release` act on the pane they reach — and Rust names the window it delivered to (`burrow:askDelivered`) so the collector settles on that one answer. `ASK_BUDGET_MS` bounds the whole fan-out; whatever answered is the best available snapshot.
-- A late answer: `docs/specs/remote-api.md` -> "Directory".
+- **An ask naming a `surfaceId` goes to that Surface's owner alone** — `attach`, `resize` and `release` act on the pane they reach — and Rust names the window it delivered to (`burrow:askDelivered`) so the collector settles on that one answer.
 
-**The sidecar owns the parse**, standalone's only one (`docs/specs/terminal-escapes.md` → Parsing location): a `pty-core` `data` event reaches the webview as `pty:data`, `terminal:semanticEvents` and `terminal:toolEvents`, never raw, and every attached Client and the `AlertManager` read the same parse. **The webview pushes its resolved terminal colours** (`pty_theme_colors` → `pty:themeColors`) because the sidecar has no DOM; **null before the first push falls a colour query through to xterm.js**, and **a malformed push is ignored, never half-applied.**
+**The sidecar owns the parse**, standalone's only one (`docs/specs/terminal-escapes.md` → Parsing location): a `pty-core` `data` event reaches the webview as `pty:data`, `terminal:semanticEvents` and `terminal:toolEvents`, never raw, and every attached Client and the `AlertManager` read the same parse. The colour push it answers OSC queries from (`pty_theme_colors` → `pty:themeColors`): `docs/specs/transport.md` → "Message protocol".
 
 **A remote sink must never break the local pipe**: a throw in the tap is logged and every `pty:*` event still goes out. **A spawn or an exit retires that PTY generation's parser**, so a half-read sequence cannot splice onto the next one.
 
@@ -80,14 +79,13 @@ Source of truth: `createSidecarHost` in `lib/src/host/remote/sidecar-entry.ts`; 
 
 ### Alerts
 
-The sidecar runs the alerts' host role (`docs/specs/alert.md`), the same `createAlertHost` VS Code's extension host runs: one `AlertManager`, every window a realm under its label (rationale).
+The sidecar is the alert host (`docs/specs/transport.md` → "Message protocol"), each window a realm under its label.
 
 - **Must offer every stdin line to `createSidecarHost`'s `handleCommand` before `main.js` dispatches it**: it owns the PTY commands the alerts must see, every alert, Burrow and managed-voice command, and the theme push.
 - **Webview → sidecar is one passthrough, `alert_command(payload)`, and Rust stamps the invoking window's label on it as `window`**, over any the payload claimed. **An unstamped `alert:command` is ignored.** Human input rides `pty_write`'s `userInput` instead (`docs/specs/alert.md` → Engagement).
-- **`hello` at adapter init ends the label's previous realm**, a reload keeping the label; **a label gone from `burrow:windows` ends its realm too.**
+- `hello` at adapter init ends the label's previous realm, a reload keeping the label; a label gone from `burrow:windows` ends its realm too.
 - **An await's answer carries `forWindow`**, the label that parked it — **never a Session `id`**, which would route it to that Session's owner, **nor a `requestId`**, which Rust swallows (rationale).
-- **`alert:speak` carries its Session's `id`**, which Rust routes it by.
-- **Must re-send each listed Session's `alert:state` behind the answer to `pty:requestInit`**: a reloaded window and an arriving Workspace learn their rings and TODOs nowhere else. **A `sync` re-sends only the Sessions its window names**, each to its owner, and both stores' snapshots **with `forWindow`**.
+- A `sync`'s store snapshots carry `forWindow`; its Sessions' `alert:state` goes to each one's owner.
 - **Rust passes a spawn's `options.alert` through opaque**; the sidecar seeds from it (`docs/specs/alert.md` → Public State) and strips it before `pty-core`.
 - **`pty-core` is the one source of helper status**, reporting each spawn's validation and each successful promotion through `onHelper`.
 

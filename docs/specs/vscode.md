@@ -10,8 +10,7 @@ The shared frontend runs in the bottom-panel `WebviewView` and independent edito
 
 ### Invariants (VS Code-specific)
 
-- **Alert state is global**: one module-level alert host (`createAlertHost` in `message-router.ts`) is shared by every router, survives router disposal, and is fed by PTY data whatever the webview's visibility.
-- **Each router is one realm of it**, under its `routerId` (`docs/specs/alert.md` → Engagement). **Must end the realm on router disposal and on a `dormouse:init` re-init** (`endRealm`): recreated content is a new realm.
+- The alert host (`docs/specs/transport.md` → "Message protocol") is module-level in `message-router.ts`, shared by every router; a router's realm is its `routerId`, ended on router disposal and on a `dormouse:init` re-init.
 - **Never let a resuming router steal another webview's PTYs**: each router's `ownedPtyIds` is enforced by the module-level `globalOwnedPtyIds`.
 - **Every save path must merge current alert states through `toPersistedAlertState`** — the frontend's periodic `dormouse:saveState` and the backend's deactivate refresh (`refreshSavedSessionStateFromPtys`) alike, so the two produce consistent state: missing the merge reverts alert state on restore, passing live state persists transient fields.
 - **A Session's alert state follows its PTY**: `pty:spawn` claims the id before starting its alert state over from `options.alert`, so the seeded state reaches the claiming webview, and **every kill removes the entry**. **Must reserve a closing router's PTYs until its deferred kills finish**, so another router cannot claim them during CWD work.
@@ -29,16 +28,11 @@ Source of truth: `attachRouter` in `vscode-ext/src/message-router.ts`, pinned by
 
 The extension host is the platform host of `docs/specs/transport.md` → "PTY lifecycle": `pty-manager.ts` forks the pty-host child, the `WebviewView` and each `WebviewPanel` are the webviews, and each router owns its own PTY ids.
 
-- Hiding or toggling the Dormouse panel neither kills its PTYs nor destroys sessions.
 - **Closing an editor-tab `WebviewPanel` kills that panel's owned PTYs** (`killOnDispose`), and VS Code discards the tab's per-panel state. **Disposing the `WebviewView` releases its router and leaves the PTYs alive** for its next router alone.
 - Each VS Code window gets its own extension host, and therefore its own pty-host child.
 - **Must cap each PTY's replay and scrollback at 1,000,000 characters**, replay clearing on first read; **a pty-host child crash reports every live PTY exited and keeps its buffer**, ignoring a replaced child's late output and exits.
 
 ### Workspaces
-
-> See `docs/specs/glossary.md` for the Workspace / Window containers and `docs/specs/alert.md` for the union status.
->
-> Union reflection onto native chrome is always-on. The Window persistence container is standalone-only; VS Code keeps one bare `PersistedSession` per webview.
 
 **One webview is one Workspace.** The bottom-panel `WebviewView` ("Dormouse") is the default Workspace; each `dormouse.open` editor-tab `WebviewPanel` is an independent Workspace. VS Code — not Dormouse — owns their tabs, creation, and closing, so **Dormouse adds no create/rename/close affordances here**: the webview mounts a bare `<Wall>` (`docs/specs/layout.md` → Workspaces). A Workspace's Surfaces are the terminal Sessions its router's `ownedPtyIds` hold plus the browser Surfaces rendered in it.
 
@@ -99,7 +93,7 @@ VS Code is the only host that supplies `--vscode-*` itself, so `lib/src/main.tsx
 
 ### OSC color query answering
 
-PTY parsing happens in the **extension host**, which has no DOM, so **the webview pushes its resolved colors up**: `dormouse:themeColors { foreground, background, cursor }` on `requestInit` and on every terminal-theme change. `message-router.ts` caches the latest push and feeds every PTY's parser through a `TerminalColorProvider`, answering `OSC 10/11/12 ; ?` exactly as the standalone sidecar does ([theme.md](theme.md#terminal-color-contract)). **Before the first push, or for an unparseable color, the query falls through to xterm.js.** Windows also needs `useConptyDll: true` ([theme.md](theme.md#osc-color-queries-on-windows-require-the-bundled-conpty)). Source of truth: `pushThemeColors` in `lib/src/lib/platform/vscode-adapter.ts`.
+The colour push (`dormouse:themeColors`): `docs/specs/transport.md` → "Message protocol"; `message-router.ts` caches the latest for every PTY's parser. Windows also needs `useConptyDll: true` (`docs/specs/theme.md` → "OSC color queries on Windows require the bundled ConPTY").
 
 ### CSP policy
 
@@ -153,7 +147,7 @@ Source of truth: `serveWebview` in `vscode-ext/src/webview-messaging.ts`, `VSCod
 
 ### Burrow: a service in the extension host
 
-The shared `BurrowService` (`docs/specs/relay.md` → "Burrow side", which owns the webview's responder-plus-UI split and the store contract) runs in the extension host; VS Code's part is where its state lives, which window runs it, and what the webviews still do. **Nothing a webview says can widen access** (`docs/specs/remote-security-model.md`).
+The shared `BurrowService` (`docs/specs/relay.md` → "Burrow side", which owns the webview's responder-plus-UI split and the store contract) runs in the extension host; VS Code's part is where its state lives, which window runs it, and what the webviews still do.
 
 **The store.** **The enrollment** (`{ relayUrl, burrowId, burrowToken, origin, rpId, label }` plus this machine's Noise static) **goes to `SecretStorage`** (OS keychain), since `burrowToken` and the static's private half grant `/ws/burrow` and this Burrow's identity; **the ACL — public keys plus each Client's push `deliveryId` — and the network policy go to `globalState`** (`docs/specs/remote-network.md` → "Policy"). All are global rather than workspace-scoped: a Burrow identity belongs to the machine, not a folder.
 
@@ -234,9 +228,7 @@ The service owns the PTYs but not the *view* of them: each webview is its own JS
 | PTY stream | One window-wide keyed registry distributes already-processed data/exit. | Opaque routed handles select one peer; `subscribe` is reference-counted, streaming the same processed data/exit. |
 | Burrow command | This window calls its service, broadcasting the uniquely correlated result to its webviews. | `command` goes to the broker, `commandResult` returns only to its origin window, `uiEvent` broadcasts. |
 
-**Every webview installs the responder**, broker or not; it carries none of the relay, enrollment, or pairing machinery. **Installing must be idempotent per link** (rationale).
-
-**Each webview counts once**: a duplicate answer cannot contribute the same panes twice. A late answer: `docs/specs/remote-api.md` -> "Directory".
+Every webview, broker or not, installs the responder (`docs/specs/transport.md` → "Message protocol"); it carries none of the relay, enrollment, or pairing machinery.
 
 **A peer answer belongs to the authenticated broker socket that asked for it**: if that broker disappears mid-fan-out the answer is dropped even when this window has already connected to a replacement, since **request ids restart per broker**. A rejected fan-out contributes an empty answer. **Nothing in an answer but its `ptyId` (`routedPtyId`) is interpreted below the Burrow.**
 
