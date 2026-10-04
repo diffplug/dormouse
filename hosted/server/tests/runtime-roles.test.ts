@@ -2,8 +2,8 @@ import { test, expect, beforeAll, afterAll } from "vitest";
 import { createTestContext } from "pgstencil/testing";
 import { queryDatabase, withClient } from "pgstencil/postgres";
 import { migrations } from "../migrations";
-import { applyRuntimeRoles, RUNTIME_ROLES } from "../runtime-roles";
-import { workerDatabases, type Worker } from "./worker-roles";
+import { applyRuntimeRoles, runtimeRolesSql } from "../runtime-roles";
+import { RUNTIME_ROLES, workerDatabases, type Worker } from "./worker-roles";
 
 // `hosted/server/runtime-roles.sql` in real Postgres: what each restricted role
 // may touch, exactly. The relay and voice suites run their Workers on these
@@ -22,7 +22,8 @@ afterAll(async () => {
 });
 
 /**
- * Every privilege `role` holds on a relation outside the system schemas, its
+ * Every privilege `role` holds on this database, its schemas, and each relation
+ * outside the system schemas, its
  * memberships and PUBLIC's included: `table: PRIVS` for table-wide ones, and
  * `table.column: PRIVS` for those it holds on a column alone.
  */
@@ -54,6 +55,9 @@ async function privileges(role: string) {
       SELECT 'schema ' || n.nspname, p.privilege FROM schemas n
       CROSS JOIN unnest(ARRAY['USAGE', 'CREATE']) AS p(privilege)
       WHERE has_schema_privilege($1, n.oid, p.privilege)
+      UNION ALL
+      SELECT 'database', p.privilege FROM unnest(ARRAY['CREATE', 'CONNECT', 'TEMPORARY']) AS p(privilege)
+      WHERE has_database_privilege($1, current_database(), p.privilege)
     )
     SELECT entry || ': ' || string_agg(privilege, ', ' ORDER BY privilege) AS entry
     FROM held GROUP BY entry ORDER BY entry`,
@@ -65,6 +69,8 @@ async function privileges(role: string) {
 /** Each role's {@link privileges}: exactly what `runtime-roles.sql` grants. */
 const EXPECTED: Record<Worker, string[]> = {
   relay: [
+    // PUBLIC's defaults.
+    "database: CONNECT, TEMPORARY",
     "dormouse_relay_burrows.enrolledAt: UPDATE",
     "dormouse_relay_burrows: INSERT, SELECT",
     "dormouse_relay_challenges: DELETE, INSERT, SELECT",
@@ -87,6 +93,7 @@ const EXPECTED: Record<Worker, string[]> = {
     "user.id: SELECT",
   ],
   voice: [
+    "database: CONNECT, TEMPORARY",
     "dormouse_voice_tokens.hash: SELECT",
     "dormouse_voice_tokens.id: SELECT",
     "dormouse_voice_tokens.lastUsedAt: UPDATE",
@@ -157,28 +164,48 @@ test("the voice role is refused the relay's tables, the account's, and its token
 test("reapplying revokes a grant made since, and keeps a role's login and password", async () => {
   await queryDatabase(context.database.url, `GRANT ALL ON ALL TABLES IN SCHEMA public TO dormouse_relay`);
   await queryDatabase(context.database.url, `GRANT SELECT (name) ON "user" TO dormouse_voice`);
+  await queryDatabase(context.database.url, `GRANT CREATE ON DATABASE "${context.database.name}" TO dormouse_voice`);
   const loosened = await held();
   expect(loosened.relay).toContain("session: DELETE, INSERT, MAINTAIN, REFERENCES, SELECT, TRIGGER, TRUNCATE, UPDATE");
   expect(loosened.voice).toContain("user.name: SELECT");
+  expect(loosened.voice).toContain("database: CONNECT, CREATE, TEMPORARY");
   await applyRuntimeRoles(context.database.url);
   expect(await held()).toEqual(EXPECTED);
   // The test harness set LOGIN and a password; the reapply left both.
   expect(await outcome("relay", "SELECT 1")).toBe("ok");
 });
 
-test("the roles file refuses a role holding power of its own or inherited", async () => {
-  for (const [role, loosen, restore] of [
-    ["dormouse_voice", "GRANT pg_read_all_data TO dormouse_voice", "REVOKE pg_read_all_data FROM dormouse_voice"],
-    ["dormouse_relay", "ALTER ROLE dormouse_relay CREATEDB", "ALTER ROLE dormouse_relay NOCREATEDB"],
-  ]) {
-    await queryDatabase(context.database.url, loosen);
+/**
+ * Runs the roles file's statements, without its own BEGIN and COMMIT, in a
+ * transaction `prepare` starts and that always rolls back: roles are
+ * cluster-wide, so nothing done here may outlive it.
+ */
+const rolledBack = (prepare: string[]) =>
+  withClient(context.database.url, async (db) => {
+    await db.query("BEGIN");
     try {
-      await expect(applyRuntimeRoles(context.database.url)).rejects.toThrow(
-        `Role ${role} has privileges beyond`,
-      );
+      for (const text of prepare) await db.query(text);
+      await db.query((await runtimeRolesSql()).replace(/^(BEGIN|COMMIT);$/gm, ""));
     } finally {
-      await queryDatabase(context.database.url, restore);
+      await db.query("ROLLBACK");
     }
-  }
-  await applyRuntimeRoles(context.database.url);
+  });
+
+test("the roles file refuses a role holding power of its own or inherited", async () => {
+  for (const [role, loosen] of [
+    ["dormouse_voice", "GRANT pg_read_all_data TO dormouse_voice"],
+    ["dormouse_relay", "ALTER ROLE dormouse_relay CREATEDB"],
+  ])
+    await expect(rolledBack([loosen])).rejects.toThrow(`Role ${role} has privileges beyond`);
+});
+
+test("once both roles exist, a migration role without CREATEROLE reapplies the file", async () => {
+  await expect(
+    // Owning the tables as a member of their owner, as a migration role does,
+    // holds no role attribute: membership never passes superuser on.
+    rolledBack([
+      `CREATE ROLE dormouse_roles_probe NOCREATEROLE IN ROLE "${new URL(context.database.url).username}"`,
+      "SET LOCAL ROLE dormouse_roles_probe",
+    ]),
+  ).resolves.toBeUndefined();
 });

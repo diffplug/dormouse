@@ -16,8 +16,8 @@ const files = await readMigrations(
   process.argv.includes("--preview") ? previewMigrations : migrations,
 );
 const action = process.argv[2];
-// Every migration is followed by the roles file, so a new table is never
-// reachable before its grants are reasserted.
+// Every migration is followed by the roles file, so the grants always match
+// the schema just migrated; a failure there leaves the migration committed.
 if (action === "migrate") {
   await migrate(url, files);
   await applyRuntimeRoles(url);
