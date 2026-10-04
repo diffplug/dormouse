@@ -125,6 +125,15 @@ User-run results are recorded under "Transfer findings" below. Items marked **WK
 - Relaunch: both windows and their Workspaces come back; the interrupted agent resumes on its own.
 - `dor app restart` (packaged build) asks what Cmd+Q asks — the requesting pane aside — then relaunches into whatever bundle is installed.
 
+**Wall on Lath (live acceptance, standalone agent-browser harness)**
+- Type into the selected terminal: keystrokes echo, `dor list` marks it `*`. `dor iframe <url>` / `dor ensure` from a touched terminal creates in the background; the caller keeps DOM focus, selection, and typing.
+- Click between panes (body and header) both ways: selection and focus follow, passthrough entered. `dor kill` of a background Surface leaves the caller's selection, focus, and typing intact; killing the selected pane adopts a survivor.
+- Minimize the last pane: the Door is created and selected, auto-spawn fills the Wall, the Door keeps selection. Click a Door: it reattaches at its original position where structure allows.
+- An iframe that focuses itself moves selection onto its pane, as a click would (in VS Code, a background `dor` command never yanks focus out of the editor).
+- Zoom: the pane rises to the inset wall rect and returns with the layout identical. Restart: layout, Doors, titles, and params restored.
+- Kill with animation: fade in place, survivors tween; a second kill mid-tween retargets cleanly; reduced motion is instant. Frame-sample the shrink-to-corner of a last-pane kill and its top-left refill.
+- Drag a pane to a leaf edge, an ancestor edge, and a center: preview matches the commit pixel-exactly at leaf, column, and root depth; dragging while a Door is selected selects the dragged pane. Drag a pane onto the baseboard (minimize with token) and a Door out (restore at the hit-tested position).
+
 **Harness alert stores**
 - In `innerdogfood`, toggle a watched command and change alarm settings: they survive a page reload (they now live in the sidecar).
 
