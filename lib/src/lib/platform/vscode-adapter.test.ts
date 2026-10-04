@@ -679,6 +679,19 @@ describe('VSCodeAdapter managed voice', () => {
     expect(voiceCommands()).toEqual([]);
   });
 
+  it('is the port the Hosted offers read, so a Hosted VS Code build is offered managed voice', async () => {
+    vi.stubGlobal(MANAGED_VOICE_GLOBAL, true);
+    const adapter = new VSCodeAdapter();
+    const { setPlatform } = await import('./index');
+    const { managedVoicePort } = await import('../hosted-membership');
+    const { chooseAlarmUpsell } = await import('../alarm-upsell');
+    setPlatform(adapter);
+    expect(managedVoicePort()).toBe(adapter.managedVoice);
+    expect(chooseAlarmUpsell({
+      sink: 'speech', membership: 'signed-out', managedVoice: managedVoicePort() !== undefined, networkOff: false, enrolled: false,
+    })).toBe('sign-in-voice');
+  });
+
   it('asks the host for its status once listening, and takes each broadcast', async () => {
     vi.stubGlobal(MANAGED_VOICE_GLOBAL, true);
     const adapter = new VSCodeAdapter();
