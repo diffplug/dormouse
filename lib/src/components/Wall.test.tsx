@@ -12,7 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { dispatchDorControlRequest } from '../lib/platform/dor-control-dispatch';
 import { SURFACE_CONTROL_METHODS } from 'dor/protocol';
 import { sessionForKey } from 'dor-lib-common/browser-providers';
-import { _resetRunHoldsForTesting, holdForHostInterrupt } from '../lib/tool-run-hold';
+import { _resetRunHoldsForTesting, holdForHostInterrupt, releaseRunHold } from '../lib/tool-run-hold';
 import { Wall } from './Wall';
 import * as helpers from '../lib/helper-terminal';
 import * as agentBrowserScreen from './wall/agent-browser-screen';
@@ -3030,6 +3030,10 @@ describe('Wall on the Lath engine', () => {
       act(() => fake.spawnPty('pane-a'));
       fake.setInputHandler('pane-a', data => typed.push(data));
       terminalRegistry.seedTerminalManualCwd('pane-a', '/repo');
+      // An earlier `dor ensure --restart` here left a lapsed hold, which must
+      // not end the Tool a takeover makes before its command runs.
+      holdForHostInterrupt('pane-a');
+      releaseRunHold('pane-a');
       // The first run ends, so the pane is a plain terminal again and the
       // second invocation takes it over afresh (docs/specs/dor-tool.md -> Run end).
       for (const [index, status] of ['takeover', 'takeover'].entries()) {
@@ -3042,9 +3046,16 @@ describe('Wall on the Lath engine', () => {
         await waitUntil(() => respond.mock.calls.length > 0);
         expect(respond).toHaveBeenCalledWith(expect.objectContaining({ result: expect.objectContaining({ status, command }) }));
         const before = typed.length;
-        act(() => promptBack('pane-a'));
+        // `dor` finishes, as a real shell reports it, and its prompt returns.
+        act(() => terminalRegistry.applyTerminalSemanticEvents('pane-a', [{ type: 'commandFinish', exitCode: 0 }, { type: 'promptStart' }]));
         await waitUntil(() => typed.length > before);
         expect(typed.at(-1)).toBe(`${command}\r`);
+        // A pane-state event before the typed command reports: the takeover
+        // has ended nothing yet, lapse or not.
+        act(() => terminalRegistry.applyTerminalSemanticEvents('pane-a', [{ type: 'title', title: { title: 'zsh', source: 'osc2', updatedAt: Date.now() } }]));
+        await act(async () => window.dispatchEvent(new Event('pagehide')));
+        await flush();
+        expect((fake.getState() as PersistedSession).panes.find(pane => pane.id === 'pane-a')).toMatchObject({ surfaceType: 'tool' });
         act(() => {
           reportRunning('pane-a', command);
           // The second run keeps going, so its Tool persists below.
@@ -3062,6 +3073,7 @@ describe('Wall on the Lath engine', () => {
       await act(async () => { controller.abort(); await new Promise(resolve => setTimeout(resolve, 125)); });
       fake.clearInputHandler('pane-a');
       act(() => terminalRegistry.removeTerminalPaneState('pane-a'));
+      _resetRunHoldsForTesting();
     }
   });
 

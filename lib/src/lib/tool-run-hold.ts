@@ -68,7 +68,9 @@ export function isHoldLapsed(id: string): boolean {
   return lapsed.has(id);
 }
 
-/** A designated run started, or the Tool ended: a lapse no longer speaks. */
+/** A designated run started, the Tool ended, or the Session became a Tool
+ *  anew: a lapse no longer speaks. Every hold lapses into this set when its
+ *  timer fires, successful or not; only a Tool reads it. */
 export function clearHoldLapse(id: string): void {
   lapsed.delete(id);
 }
