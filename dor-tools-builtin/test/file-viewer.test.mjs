@@ -88,7 +88,7 @@ test('builtin:code is an alternative only where it differs from builtin:file', (
   assert.deepEqual(['a.md', 'a.html', 'a.svg', 'a.ts', 'a.png', 'a.pdf'].map(code.offered), [true, true, true, false, false, false]);
   assert.equal(code.format('a.png'), null);
   assert.deepEqual(['a.md', 'a.ts', 'a.html', 'a.png', 'a.mp4'].map(builtinHandler('tool', 'builtin:file').describe),
-    ['Markdown editor', 'code editor', 'HTML preview', 'image editor', 'media player']);
+    ['Markdown editor', 'code editor', 'HTML preview', 'image viewer and editor', 'media player']);
   assert.equal(builtinHandler('tool', 'builtin:file').describe('a.gif'), 'image viewer');
 });
 

@@ -316,3 +316,29 @@ export function removeSeam(r: Raster, axis: 'x' | 'y', from: number, to: number)
   out.data.set(data.subarray(b * stride), a * stride);
   return out;
 }
+
+/** `r` turned upright by EXIF orientation `o` (1–8): mirrored for 2 and 4,
+ * turned half a turn for 3, transposed for 5, a quarter turn clockwise for 6,
+ * transverse for 7, and a quarter turn counterclockwise for 8. `r` itself for
+ * 1 or an unknown value. */
+export function orient(r: Raster, o: number): Raster {
+  const { width: w, height: h, data } = r;
+  /** The index of the source pixel output pixel (x, y) takes. */
+  const from: Record<number, (x: number, y: number) => number> = {
+    2: (x, y) => y * w + (w - 1 - x),
+    3: (x, y) => (h - 1 - y) * w + (w - 1 - x),
+    4: (x, y) => (h - 1 - y) * w + x,
+    5: (x, y) => x * w + y,
+    6: (x, y) => (h - 1 - x) * w + y,
+    7: (x, y) => (h - 1 - x) * w + (w - 1 - y),
+    8: (x, y) => x * w + (w - 1 - y),
+  };
+  const at = from[o];
+  if (!at) return r;
+  // Whole pixels at a time, through 32-bit views, which need an aligned start.
+  const aligned = data.byteOffset % 4 ? data.slice() : data, src = new Uint32Array(aligned.buffer, aligned.byteOffset, w * h);
+  const out = o >= 5 ? createRaster(h, w) : createRaster(w, h);
+  const dst = new Uint32Array(out.data.buffer);
+  for (let y = 0, i = 0; y < out.height; y++) for (let x = 0; x < out.width; x++, i++) dst[i] = src[at(x, y)];
+  return out;
+}

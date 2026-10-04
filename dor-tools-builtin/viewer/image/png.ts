@@ -5,11 +5,11 @@
  * standard PNG; 16-bit samples round to 8 bits. It encodes 8-bit RGB, or RGBA
  * when any pixel is not opaque. No DOM, so Node tests load it. */
 import { ascii, isPng, PNG_SIGNATURE } from '../../src/image-format';
-import type { Raster } from './pixels';
-import { cicpSpace, iccSpace } from './icc';
+import { orient, type Raster } from './pixels';
+import { cicpSpace, iccDropNote, iccRgb, iccSpace } from './icc';
 
 type Bytes = Uint8Array<ArrayBuffer>;
-/** The ancillary chunks a save keeps. */
+/** The ancillary chunks a save keeps; an `iCCP` only with an RGB profile. */
 const KEPT = new Set(['iCCP', 'sRGB', 'gAMA', 'cHRM', 'cICP', 'pHYs']);
 /** Past this many pixels the codec declines, as a canvas would. */
 const MAX_PIXELS = 1 << 27;
@@ -158,7 +158,30 @@ function expandRow(colorType: number, row: Uint8Array, out: Uint8Array, o: numbe
   }
 }
 
-export async function decodePng(bytes: Uint8Array) {
+/** The EXIF orientation (1–8) a TIFF-structured `eXIf` holds in its first
+ * IFD; 1 when it holds none or cannot be read. */
+export function exifOrientation(tiff: Uint8Array): number {
+  if (tiff.length < 8) return 1;
+  const little = tiff[0] === 0x49 && tiff[1] === 0x49;
+  if (!little && !(tiff[0] === 0x4d && tiff[1] === 0x4d)) return 1;
+  const view = new DataView(tiff.buffer, tiff.byteOffset, tiff.byteLength), ifd = view.getUint32(4, little);
+  if (ifd + 2 > tiff.length) return 1;
+  for (let i = 0, at = ifd + 2, n = view.getUint16(ifd, little); i < n && at + 12 <= tiff.length; i++, at += 12) {
+    // Tag 0x0112, a SHORT.
+    if (view.getUint16(at, little) === 0x0112 && view.getUint16(at + 2, little) === 3) {
+      const o = view.getUint16(at + 8, little);
+      return o >= 1 && o <= 8 ? o : 1;
+    }
+  }
+  return 1;
+}
+
+/** A PNG's pixels upright by its `eXIf` orientation, the chunks a save keeps,
+ * its display space, its RGB ICC profile (`profile`, inflated), and why a save
+ * will differ beyond the edits (`note`). */
+export interface DecodedPng { raster: Raster; space: PredefinedColorSpace; keep: Uint8Array[]; profile?: Uint8Array; note?: string }
+
+export async function decodePng(bytes: Uint8Array): Promise<DecodedPng> {
   const chunks = readChunks(bytes), ihdr = chunks[0];
   if (ihdr?.type !== 'IHDR' || ihdr.data.length !== 13) throw new Error('The PNG has no header.');
   const h = new DataView(ihdr.data.buffer, ihdr.data.byteOffset, 13);
@@ -168,12 +191,19 @@ export async function decodePng(bytes: Uint8Array) {
   if (!width || !height || width * height > MAX_PIXELS) throw new Error('The PNG is too large to edit.');
 
   const find = (type: string) => chunks.find(c => c.type === type)?.data;
-  const plte = find('PLTE'), trns = find('tRNS'), cicp = find('cICP'), iccp = find('iCCP');
+  const plte = find('PLTE'), trns = find('tRNS'), cicp = find('cICP'), iccp = find('iCCP'), exif = find('eXIf');
   if (colorType === 3 && !plte) throw new Error('The PNG has no palette.');
+  const notes: string[] = [];
+  if (depth === 16) notes.push('This 16-bit PNG saves at 8 bits per channel.');
+  // A save writes RGB, which a gray (or unreadable) profile does not describe.
+  let profile: Uint8Array | undefined;
+  if (iccp) {
+    const icc = await inflate([iccp.subarray(iccp.indexOf(0) + 2)], 64 << 20, false).catch(() => null);
+    if (icc && iccRgb(icc)) profile = icc;
+    else notes.push(iccDropNote(icc, 'PNG'));
+  }
   // A space no canvas offers shows as sRGB; the saved pixels and profile stay exact.
-  const space: PredefinedColorSpace = cicp ? cicpSpace(cicp)
-    : iccp ? await inflate([iccp.subarray(iccp.indexOf(0) + 2)], 64 << 20, false).then(iccSpace, () => 'srgb' as const)
-    : 'srgb';
+  const space: PredefinedColorSpace = cicp ? cicpSpace(cicp) : profile ? iccSpace(profile) : 'srgb';
 
   const passes = interlace ? ADAM7 : [[0, 0, 1, 1]], bits = channels * depth, bpp = Math.max(1, bits >> 3);
   const sizes = passes.map(([r0, c0, dr, dc]) => {
@@ -242,9 +272,10 @@ export async function decodePng(bytes: Uint8Array) {
       }
     });
   }
-  const keep = chunks.filter(c => KEPT.has(c.type)).map(c => c.raw.slice());
-  const data = new Uint8ClampedArray(out.buffer);
-  return { raster: { width, height, data } satisfies Raster, space, keep, note: depth === 16 ? 'This 16-bit PNG saves at 8 bits per channel.' : undefined };
+  const keep = chunks.filter(c => KEPT.has(c.type) && (c.type !== 'iCCP' || profile)).map(c => c.raw.slice());
+  // Upright, as a browser shows it; a save then drops the eXIf.
+  const raster = orient({ width, height, data: new Uint8ClampedArray(out.buffer) }, exif ? exifOrientation(exif) : 1);
+  return { raster, space, keep, profile, note: notes.join(' ') || undefined };
 }
 
 function chunk(type: string, data: Uint8Array): Bytes {
@@ -254,6 +285,17 @@ function chunk(type: string, data: Uint8Array): Bytes {
   out.set(data, 8);
   view.setUint32(8 + data.length, crc32(out.subarray(4, 8 + data.length)));
   return out;
+}
+
+/** An `iCCP` chunk carrying `profile`, for a save whose source held the
+ * profile some other way. */
+export async function iccpChunk(profile: Uint8Array): Promise<Bytes> {
+  const compressed = await new Response(new Blob([profile as Bytes]).stream().pipeThrough(new CompressionStream('deflate'))).arrayBuffer();
+  const data = new Uint8Array(13 + compressed.byteLength);
+  // The profile's name, its terminator, then compression method 0.
+  for (let i = 0; i < 11; i++) data[i] = 'ICC profile'.charCodeAt(i);
+  data.set(new Uint8Array(compressed), 13);
+  return chunk('iCCP', data);
 }
 
 /** `r` as a PNG's parts, in order, with `keep` (whole chunks from a decoded

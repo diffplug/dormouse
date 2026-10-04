@@ -1,21 +1,24 @@
 /** Undo and redo over editor documents. A revision's identity names it (the
  * save's dirty mark). A size-preserving pixel edit changes the current raster
- * in place and keeps only the rectangle it changed, as the other side of the
- * step has it; other edits replace the raster, keeping the old one whole. The
+ * in place and keeps only the tiles it touched, as the other side of the step
+ * has them; other edits replace the raster, keeping the old one whole. The
  * current revision's raster always holds that revision's pixels. */
 import { blit, clipRect, crop, type Raster, type Rect } from './pixels';
 import type { Shape } from './objects';
 
 export interface Doc { readonly raster: Raster; readonly objects: readonly Shape[] }
-/** The pixels one in-place edit changed: `before` covers `rect`. */
-export interface Patch { rect: Rect; before: Raster }
+/** Pixels kept from a raster: `pixels` covers `rect`. */
+export interface Tile { rect: Rect; pixels: Raster }
+/** The pixels one in-place edit changed, within `rect`: `tiles` hold every
+ * one of them as it was before, and may hold unchanged pixels too. */
+export interface Patch { rect: Rect; tiles: readonly Tile[] }
 /** What an undo or redo changed: in place within `rect`, or else the raster or objects whole. */
 export interface Applied { rect?: Rect }
 
-/** One step between consecutive revisions. A patch's `pixels` hold its
- * rectangle as the revision the step leads away from has it: `from`'s while
- * the step can be undone, `to`'s once it was. */
-interface Step { from: Doc; to: Doc; patch?: { rect: Rect; pixels: Raster }; bytes: number }
+/** One step between consecutive revisions. A patch's tiles hold their pixels
+ * as the revision the step leads away from has them: `from`'s while the step
+ * can be undone, `to`'s once it was. */
+interface Step { from: Doc; to: Doc; patch?: Patch; bytes: number }
 
 /** Bytes kept for undo; the oldest steps go first past it. */
 const HISTORY_BYTES = 256 * 1024 * 1024;
@@ -31,14 +34,15 @@ export class History {
   get canUndo() { return this.past.length > 0; }
   get canRedo() { return this.future.length > 0; }
 
-  /** Makes `doc` current. With `patch`, the caller already changed the current
-   * raster in place (`doc.raster` is it), within `patch.rect` from `patch.before`. */
+  /** Makes `doc` current. With `patch`, which this takes, the caller already
+   * changed the current raster in place (`doc.raster` is it). */
   commit(doc: Doc, patch?: Patch): void {
     if (doc === this.current) return;
     const from = this.current;
-    // A replaced raster is kept whole, charged to the step that leaves it.
-    const bytes = patch ? patch.before.data.byteLength : doc.raster !== from.raster ? from.raster.data.byteLength : 0;
-    this.past.push({ from, to: doc, patch: patch && { rect: patch.rect, pixels: patch.before }, bytes });
+    // A patch is charged its tiles; a replaced raster is kept whole, charged to the step that leaves it.
+    const bytes = patch ? patch.tiles.reduce((n, t) => n + t.pixels.data.byteLength, 0)
+      : doc.raster !== from.raster ? from.raster.data.byteLength : 0;
+    this.past.push({ from, to: doc, patch, bytes });
     this.bytes += bytes;
     this.current = doc;
     this.future = [];
@@ -64,13 +68,15 @@ export class History {
   }
 }
 
-/** Puts a patch step's kept pixels on the raster, keeping the ones they replace. */
+/** Puts a patch step's kept tiles on the raster, keeping the pixels each replaces. */
 function swap({ from, patch }: Step): Applied {
   if (!patch) return {};
-  const { rect, pixels } = patch;
-  patch.pixels = crop(from.raster, rect);
-  blit(from.raster, pixels, rect.x, rect.y);
-  return { rect };
+  for (const tile of patch.tiles) {
+    const pixels = tile.pixels;
+    tile.pixels = crop(from.raster, tile.rect);
+    blit(from.raster, pixels, tile.rect.x, tile.rect.y);
+  }
+  return { rect: patch.rect };
 }
 
 /** The pixels an in-place edit of `raster` changes, each kept once, just
@@ -78,7 +84,7 @@ function swap({ from, patch }: Step): Applied {
  * touched however often it touches it, and undo needs no copy of the whole raster. */
 export class Pieces {
   /** Each touched tile's pixels as the edit found them, by tile index. */
-  private readonly kept = new Map<number, { rect: Rect; pixels: Raster }>();
+  private readonly kept = new Map<number, Tile>();
   private readonly columns: number;
   constructor(private readonly raster: Raster, private readonly tile = 64) {
     this.columns = Math.ceil(raster.width / tile);
@@ -100,17 +106,12 @@ export class Pieces {
     }
     return clipped;
   }
-  /** The bytes kept so far. */
-  get bytes(): number {
-    let n = 0;
-    for (const { pixels } of this.kept.values()) n += pixels.data.byteLength;
-    return n;
-  }
-  /** `rect`'s pixels as they were before the edit. */
-  before(rect: Rect): Raster {
-    const out = crop(this.raster, rect);
-    for (const { rect: at, pixels } of this.kept.values()) blit(out, pixels, at.x - rect.x, at.y - rect.y);
-    return out;
+  /** Hands over the kept tiles, the pixels as the edit found them, for a
+   * `Patch`; this then keeps none. */
+  take(): Tile[] {
+    const tiles = [...this.kept.values()];
+    this.kept.clear();
+    return tiles;
   }
   /** Puts back every pixel the edit changed. */
   restore(): void {

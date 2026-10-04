@@ -56,7 +56,7 @@ function describeFile(path: string): string {
   if (format.markdown) return 'Markdown editor';
   if (format.text) return 'code editor';
   if (format.mime.startsWith('text/html')) return 'HTML preview';
-  if (format.mime.startsWith('image/')) return editableImageType(path) ? 'image editor' : 'image viewer';
+  if (format.mime.startsWith('image/')) return editableImageType(path) ? 'image viewer and editor' : 'image viewer';
   if (/^(audio|video)\//.test(format.mime)) return 'media player';
   return 'file viewer';
 }

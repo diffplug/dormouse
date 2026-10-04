@@ -156,3 +156,25 @@ test('a pending label enables Undo, which takes it back and leaves it to redo', 
   ctl.redo();
   assert.deepEqual(ctl.doc.objects.map(s => s.text), ['hi']);
 });
+
+test('the host hears an edit becoming pending and ending, as when Escape discards a label or a lift starts a float', () => {
+  const { ctl, click } = editor();
+  let reports = 0;
+  ctl.hooks = { onChange: () => reports++ };
+  ctl.setTool('text');
+  const saved = ctl.doc;
+  click(2, 2);
+  ctl.setText('hi');
+  assert.equal(reports, 1);
+  ctl.finishText(false);
+  assert.equal(ctl.holds(saved), true, 'nothing landed');
+  assert.equal(reports, 2, 'the host hears the label go, so it is saved again');
+
+  ctl.selectAll();
+  ctl.nudge(1, 0);
+  assert.equal(ctl.holds(saved), false);
+  assert.equal(reports, 3, 'a floating selection is pending');
+  ctl.undo();
+  assert.equal(ctl.holds(saved), true);
+  assert.equal(reports, 4, 'and its cancel is heard');
+});

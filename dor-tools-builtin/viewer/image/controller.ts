@@ -117,12 +117,15 @@ export class EditorController {
   /** The raster size the view last laid out, to refit a fitted view when it changes. */
   private shownSize: { width: number; height: number };
   private readonly colors: ImageColors;
+  /** The document and pending state the host last heard of. */
+  private heard: { doc: Doc; pending: boolean };
 
   /** `format` is what a save keeps from the opened file; its color space is
    * the one every canvas here shows the raster in. */
   constructor(raster: Raster, private readonly format: ImageFormat = SRGB_PNG) {
     this.shownSize = { width: raster.width, height: raster.height };
     this.history = new History({ raster, objects: [] });
+    this.heard = { doc: this.history.current, pending: false };
     this.colors = imageColors(format.colorSpace);
   }
 
@@ -140,12 +143,21 @@ export class EditorController {
   /** For the zoom readout: changes only with the zoom or fit. */
   subscribeZoom = this.zoomChanges.subscribe;
   getView = () => this.view;
-  private notify() { this.version++; this.changes.emit(); }
+  /** Re-renders the chrome, first telling the host when the document, or
+   * whether an edit is pending (which a save would land), changed since it
+   * last heard: the one place either is reported. */
+  private notify() {
+    this.version++;
+    const doc = this.doc, pending = this.pending;
+    if (doc !== this.heard.doc || pending !== this.heard.pending) {
+      this.heard = { doc, pending };
+      this.hooks.onChange?.();
+    }
+    this.changes.emit();
+  }
   /** Re-renders the chrome and repaints the canvas. */
   private refresh() { this.notify(); this.paint(); }
 
-  /** Reports a document change to the host. */
-  private changed() { this.hooks.onChange?.(); }
   private commit(doc: Doc, patch?: Patch) {
     this.history.commit(doc, patch);
     this.afterDoc();
@@ -155,7 +167,6 @@ export class EditorController {
     this.shownSize = { width: r.width, height: r.height };
     if (this.view.fit && (shown.width !== r.width || shown.height !== r.height)) this.fit();
     if (this.selectedId && !this.doc.objects.some(s => s.id === this.selectedId)) this.selectedId = null;
-    this.changed();
     this.refresh();
   }
   private setObjects(objects: readonly Shape[]) { this.commit({ raster: this.doc.raster, objects }); }
@@ -179,7 +190,8 @@ export class EditorController {
       },
       commit: () => {
         if (!dirty) return false;
-        this.commit({ raster: r, objects: this.doc.objects }, { rect: dirty, before: pieces.before(dirty) });
+        this.commit({ raster: r, objects: this.doc.objects }, { rect: dirty, tiles: pieces.take() });
+        dirty = null;
         return true;
       },
       cancel: () => {
@@ -329,7 +341,7 @@ export class EditorController {
     const was = this.textPending();
     this.text = { ...this.text, text };
     // A label that would change the document makes it unsaved as it is typed.
-    if (this.textPending() !== was) { this.changed(); this.notify(); }
+    if (this.textPending() !== was) this.notify();
   }
   /** The open label's text as it would land, and the label it edits. */
   private textLanding(t: TextEdit) {
@@ -763,7 +775,6 @@ export class EditorController {
     const floating: Floating = { pixels: px.copyRegion(r, at, s.mask), x: at.x, y: at.y, edit: this.pixelEdit() };
     if (!duplicate) floating.edit.touch(at, raster => { px.eraseSelection(raster, at, s.mask); });
     this.sel = { ...s, floating };
-    this.changed();
     return floating;
   }
   /** Moves the selection by whole pixels, lifting it first. */

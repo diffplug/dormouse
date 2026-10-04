@@ -247,7 +247,7 @@ function patchFill(history, rect, color) {
   const r = history.current.raster, before = px.crop(r, rect);
   px.fillRect(r, rect, color);
   const doc = { raster: r, objects: history.current.objects };
-  history.commit(doc, { rect, before });
+  history.commit(doc, { rect, tiles: [{ rect, pixels: before }] });
   return doc;
 }
 
@@ -304,6 +304,13 @@ test('history keeps patches and replaced rasters within its byte limit, oldest f
   assert.equal(big.canUndo, false, 'the replaced raster went first once over the limit');
 });
 
+/** `rect`'s pixels in `r` with `tiles` (taken from `Pieces`) put back over them. */
+function before(r, tiles, rect) {
+  const out = px.crop(r, rect);
+  for (const t of tiles) px.blit(out, t.pixels, t.rect.x - rect.x, t.rect.y - rect.y);
+  return out;
+}
+
 test('pieces give back the pixels an edit touched, the first keep of each pixel winning', () => {
   // One tile over the whole raster, and tiles smaller than the touches.
   for (const tile of [64, 2]) {
@@ -315,11 +322,15 @@ test('pieces give back the pixels an edit touched, the first keep of each pixel 
     px.fillRect(r, { x: 2, y: 2, width: 3, height: 3 }, BLUE);
     assert.equal(pieces.keep({ x: 7, y: 7, width: 2, height: 2 }), null);
 
-    assert.deepEqual(colors(pieces.before({ x: 0, y: 0, width: 5, height: 5 })), original, `tile ${tile}`);
-    const inner = pieces.before({ x: 2, y: 2, width: 2, height: 2 });
-    assert.deepEqual(colors(inner), Array(4).fill(WHITE.join(',')));
     pieces.restore();
-    assert.deepEqual(colors(r), original);
+    assert.deepEqual(colors(r), original, `tile ${tile}`);
+    // The same strokes again, over the pixels already kept.
+    px.fillRect(r, { x: 1, y: 1, width: 2, height: 2 }, RED);
+    px.fillRect(r, { x: 2, y: 2, width: 3, height: 3 }, BLUE);
+    const tiles = pieces.take();
+    assert.deepEqual(colors(before(r, tiles, { x: 0, y: 0, width: 5, height: 5 })), original, `tile ${tile}`);
+    assert.deepEqual(colors(before(r, tiles, { x: 2, y: 2, width: 2, height: 2 })), Array(4).fill(WHITE.join(',')));
+    assert.deepEqual(pieces.take(), [], 'taken tiles are handed over');
   }
 });
 
@@ -331,8 +342,50 @@ test('pieces keep each pixel once, however often a stroke touches it', () => {
     pieces.keep({ x, y, width: 64, height: 64 });
     px.fillRect(r, { x, y, width: 64, height: 64 }, i % 2 ? RED : BLUE);
   }
-  assert.ok(pieces.bytes <= r.data.byteLength, `kept ${pieces.bytes} bytes for a ${r.data.byteLength}-byte raster`);
-  assert.deepEqual(colors(pieces.before({ x: 0, y: 0, width: 256, height: 256 })), original);
   pieces.restore();
   assert.deepEqual(colors(r), original);
+  const bytes = pieces.take().reduce((n, t) => n + t.pixels.data.byteLength, 0);
+  assert.ok(bytes <= r.data.byteLength, `kept ${bytes} bytes for a ${r.data.byteLength}-byte raster`);
+});
+
+test('a thin stroke across a large raster keeps only the tiles it touched for undo, and undoes and redoes exactly', () => {
+  // A corner-to-corner diagonal: its bounds are the whole raster, its tiles one row's worth.
+  const size = 2048, r = raster(size, size), original = Buffer.from(r.data);
+  const tileBytes = 64 * 64 * 4, touched = size / 64;
+  // Room for the touched tiles twice over, and a sixteenth of the raster.
+  const h = new History({ raster: r, objects: [] }, 2 * touched * tileBytes);
+  const pieces = new Pieces(r);
+  for (let i = 0; i < size; i++) {
+    pieces.keep({ x: i, y: i, width: 1, height: 1 });
+    px.fillRect(r, { x: i, y: i, width: 1, height: 1 }, RED);
+  }
+  const drawn = Buffer.from(r.data), tiles = pieces.take();
+  assert.equal(tiles.reduce((n, t) => n + t.pixels.data.byteLength, 0), touched * tileBytes);
+  h.commit({ raster: r, objects: [] }, { rect: { x: 0, y: 0, width: size, height: size }, tiles });
+  assert.equal(h.canUndo, true, 'the stroke fits the history, charged its tiles');
+
+  assert.deepEqual(h.undo(), { rect: { x: 0, y: 0, width: size, height: size } });
+  assert.ok(Buffer.from(r.data).equals(original), 'undo restores every pixel');
+  assert.ok(h.redo());
+  assert.ok(Buffer.from(r.data).equals(drawn), 'redo puts the stroke back');
+  assert.ok(h.undo());
+  assert.ok(Buffer.from(r.data).equals(original), 'and undo again');
+});
+
+test('orient turns pixels upright for every EXIF orientation', () => {
+  // A 3×2 raster whose pixels name their own position; each row below is the
+  // upright picture's rows, as a viewer shows the orientation.
+  const r = px.createRaster(3, 2);
+  for (let i = 0; i < 6; i++) r.data.set([i, 0, 0, 255], i * 4);
+  const shown = o => { const out = px.orient(r, o); return { size: [out.width, out.height], rows: Array.from({ length: out.height }, (_, y) => Array.from({ length: out.width }, (_, x) => px.pixel(out, x, y)[0])) }; };
+  // Source rows: [0 1 2] / [3 4 5].
+  assert.deepEqual(shown(1), { size: [3, 2], rows: [[0, 1, 2], [3, 4, 5]] });
+  assert.deepEqual(shown(2), { size: [3, 2], rows: [[2, 1, 0], [5, 4, 3]] });
+  assert.deepEqual(shown(3), { size: [3, 2], rows: [[5, 4, 3], [2, 1, 0]] });
+  assert.deepEqual(shown(4), { size: [3, 2], rows: [[3, 4, 5], [0, 1, 2]] });
+  assert.deepEqual(shown(5), { size: [2, 3], rows: [[0, 3], [1, 4], [2, 5]] });
+  assert.deepEqual(shown(6), { size: [2, 3], rows: [[3, 0], [4, 1], [5, 2]] }, 'a quarter turn clockwise');
+  assert.deepEqual(shown(7), { size: [2, 3], rows: [[5, 2], [4, 1], [3, 0]] });
+  assert.deepEqual(shown(8), { size: [2, 3], rows: [[2, 5], [1, 4], [0, 3]] }, 'a quarter turn counterclockwise');
+  assert.equal(px.orient(r, 0), r, 'an unknown orientation leaves it');
 });

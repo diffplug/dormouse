@@ -48,24 +48,24 @@ Source of truth: `saveText` / `StorePath` in `dor-tools-builtin/src/editor-route
 - **Must keep HTML comments verbatim and save with one final newline and the file's majority bullet and thematic-break marker**; the rest follows MDXEditor's serialization. Its normalization of loaded text is not an edit (rationale).
 - **Never let document HTML reach the live DOM outside an allowlist** of tags and attributes, `href` limited to `http(s):`, `mailto:`, fragments, and scheme-less paths; saving keeps every original attribute, escaped, and HTML images serialize in an inert document. Mermaid runs with `securityLevel: 'strict'` (rationale).
 - **Must serve images on request from regular image-format files at or under the document's canonical directory**, by realpath, under a `sandbox` CSP. Nothing else loads, external URLs included.
-- **Must write a pasted or dropped PNG, JPEG, GIF, or WebP beside the document as a new `image-YYYYMMDD-HHMMSS[-N].<ext>`**, signature-checked, at most 32 MiB, never replacing a file; its reference is an unsaved edit.
+- **Must write a pasted or dropped PNG, JPEG, GIF, or WebP beside the document as a new `image-YYYYMMDD-HHMMSS[-N].<ext>`**, signature-checked, within the paste bound, never replacing a file; its reference is an unsaved edit.
 - **Must rename a listed image on disk at once**, to an image name in its own directory not starting with `.`, never replacing another file (case-only renames allowed); rewritten references are an unsaved edit.
 - **Must edit only a PNG or JPEG at or under the document's canonical directory whose spelled path is its realpath**, in the [Image editor](#image-editor) over the document, else view-only with why. Its save leaves the source unchanged and reloads every display; closing it unsaved asks first.
 - **Must report the Tool dirty while the document or open image is unsaved**; Cmd/Ctrl+S saves the one in front, and the close-prompt save writes both.
 
-Source of truth: `dor-tools-builtin/viewer/markdown.tsx`; `safeCreateDOM` in `dor-tools-builtin/viewer/markdown-safety.ts`; `editorRoutes` in `dor-tools-builtin/src/editor-routes.ts`; `dor-tools-builtin/src/markdown-images.ts`. Tests: `dor-tools-builtin/test/markdown-editor.test.mjs`.
+Source of truth: `dor-tools-builtin/viewer/markdown.tsx`; `safeCreateDOM` in `dor-tools-builtin/viewer/markdown-safety.ts`; `editorRoutes` in `dor-tools-builtin/src/editor-routes.ts`; `PASTE_BOUND` in `dor-tools-builtin/src/image-format.ts`; `dor-tools-builtin/src/markdown-images.ts`. Tests: `dor-tools-builtin/test/markdown-editor.test.mjs`.
 
 ## Image editor
 
 `builtin:file` edits PNG and JPEG, alone or over a [Markdown document](#markdown-editor).
 
-- **Must leave other formats, and a PNG or JPEG over 32 MiB or 64 megapixels, view-only, decided from its header before editing**: `builtin:file` streams it; the Markdown editor's `edit/` answers `{viewOnly: reason}`.
-- **Must save exactly the submitted bytes, at most 32 MiB**, under the revision, identity, permission, and replacement rules of [Editing files](#editing-files).
-- **Must refuse a save whose `Content-Type` or signature is not its extension's type** (415).
+- **Must leave other formats, a PNG or JPEG past the byte or pixel bound, and an HDR or narrow-range PNG view-only, decided from its header before editing**: `builtin:file` streams it; the Markdown editor's `edit/` answers `{viewOnly: reason}`.
+- **Must save exactly the submitted bytes, within the byte bound**, under the revision, identity, permission, and replacement rules of [Editing files](#editing-files).
+- **Must refuse a save whose `Content-Type` or signature is not its extension's type** (415); the page saves that type, decoding by content.
 - **Must send the revision as the `X-Dor-Version` response header and take it back as the save's `version` query parameter**, the image bytes as the body, in-place replacement included.
-- **Must submit every untouched PNG pixel exactly**, at 8 bits per channel, **with the source's PNG color chunks or JPEG ICC segments**, dropping EXIF and writing pixels upright.
+- **Must submit every untouched PNG pixel exactly**, at 8 bits per channel, **with the source's color metadata only in its own format, never a non-RGB ICC profile**; an RGB profile converts. EXIF is dropped, pixels written upright.
 
-Source of truth: `editorRoutes` in `dor-tools-builtin/src/editor-routes.ts`; `imageEditability` in `dor-tools-builtin/src/image-editability.ts`; `decodeImage` / `encodeImage` in `dor-tools-builtin/viewer/image/io.ts`. Tests: `dor-tools-builtin/test/file-viewer.test.mjs`, `dor-tools-builtin/test/image-codec.test.mjs`.
+Source of truth: `editorRoutes` in `dor-tools-builtin/src/editor-routes.ts`; `imageEditability` / `MAX_EDIT_PIXELS` in `dor-tools-builtin/src/image-editability.ts`; `IMAGE_BOUND` in `dor-tools-builtin/src/image-format.ts`; `decodeImage` / `encodeImage` in `dor-tools-builtin/viewer/image/io.ts`. Tests: `dor-tools-builtin/test/file-viewer.test.mjs`, `dor-tools-builtin/test/image-codec.test.mjs`.
 
 ## Code editor
 

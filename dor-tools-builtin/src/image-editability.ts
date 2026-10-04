@@ -19,15 +19,43 @@ export type Editability = { ok: true } | { viewOnly: string };
 
 /** Whether the editor opens an image of `size` bytes whose file starts with
  * `head` (its first `EDITABILITY_HEAD` bytes, or more), or why it shows it
- * view-only. A header it cannot read counts as editable; the decoder then says
- * what is wrong. */
+ * view-only: past the byte or pixel bound, or a PNG whose `cICP` is HDR or
+ * narrow-range. A header it cannot read counts as editable; the decoder then
+ * says what is wrong. */
 export function imageEditability(size: number, head: Uint8Array): Editability {
   if (size > IMAGE_BOUND.limit) return { viewOnly: `View only: this image is past the editor's ${IMAGE_BOUND.limit >> 20} MiB limit.` };
   const frame = pngSize(head) ?? jpegSize(head);
   if (frame && frame.width * frame.height > MAX_EDIT_PIXELS) {
     return { viewOnly: `View only: at ${frame.width} × ${frame.height} pixels, this image is past the editor's ${MAX_EDIT_PIXELS >> 20}-megapixel limit.` };
   }
+  const cicp = pngCicp(head);
+  if (cicp && HDR_TRANSFERS.has(cicp[1])) return { viewOnly: 'View only: HDR images are view only.' };
+  // Narrow-range (video) levels would show washed out, and a swatch would paint past them.
+  if (cicp && cicp[3] !== 1) return { viewOnly: 'View only: images with narrow-range (video) levels are view only.' };
   return { ok: true };
+}
+
+/** cICP transfer characteristics (ITU-T H.273) a canvas shows as SDR: BT.709,
+ * BT.601, sRGB, and BT.2020 at 10 and 12 bits. */
+const SDR_TRANSFERS = new Set([1, 6, 13, 14, 15]);
+/** PQ and HLG: HDR, which no 8-bit canvas edits. */
+const HDR_TRANSFERS = new Set([16, 18]);
+/** Whether a PNG `cICP` chunk's data names full-range SDR, the only kind a
+ * canvas shows as it means. */
+export const cicpSdr = (data: Uint8Array): boolean => data.length >= 4 && SDR_TRANSFERS.has(data[1]) && data[3] === 1;
+
+/** The data of the `cICP` chunk in a PNG's `head`, which precedes its image
+ * data; null without one, or when the head ends first. */
+export function pngCicp(b: Uint8Array): Uint8Array | null {
+  if (!isPng(b)) return null;
+  const view = new DataView(b.buffer, b.byteOffset, b.byteLength);
+  for (let at = 8; at + 8 <= b.length;) {
+    const length = view.getUint32(at), type = ascii(b, at + 4, at + 8);
+    if (type === 'IDAT' || type === 'IEND') return null;
+    if (type === 'cICP') return length === 4 && at + 12 <= b.length ? b.subarray(at + 8, at + 12) : null;
+    at += 12 + length;
+  }
+  return null;
 }
 
 /** The size a PNG's IHDR declares; null without one. */

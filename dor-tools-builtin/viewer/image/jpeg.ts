@@ -29,6 +29,24 @@ export function iccProfile(icc: readonly Uint8Array[]): Uint8Array | null {
   return out;
 }
 
+/** `profile` as APP2 `ICC_PROFILE` segments, for a save whose source held it
+ * some other way: as many as its size needs, numbered from 1; none past the
+ * 255 a sequence number counts. */
+export function iccSegmentsOf(profile: Uint8Array): Bytes[] {
+  // A segment's length field counts itself, the identifier, and the sequence bytes.
+  const room = 0xffff - 2 - ICC.length - 2, count = Math.ceil(profile.length / room);
+  if (count > 255) return [];
+  return Array.from({ length: count }, (_, i) => {
+    const part = profile.subarray(i * room, (i + 1) * room), length = 2 + ICC.length + 2 + part.length;
+    const out = new Uint8Array(2 + length);
+    out.set([0xff, 0xe2, length >> 8, length & 255]);
+    for (let k = 0; k < ICC.length; k++) out[4 + k] = ICC.charCodeAt(k);
+    out.set([i + 1, count], 4 + ICC.length);
+    out.set(part, 6 + ICC.length);
+    return out;
+  });
+}
+
 /** `encoded` with its own ICC segments replaced by `icc`, placed after SOI and
  * the JFIF APP0 header that follows it, when there is one: the file's parts, in order. */
 export function spliceIcc(encoded: Uint8Array, icc: readonly Uint8Array[]): Bytes[] {

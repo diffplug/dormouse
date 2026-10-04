@@ -7,7 +7,7 @@ import { load } from './bundle.mjs';
 
 const png = await load('../viewer/image/png.ts');
 const jpeg = await load('../viewer/image/jpeg.ts');
-const { iccSpace } = await load('../viewer/image/icc.ts');
+const { cicpSpace, iccSpace } = await load('../viewer/image/icc.ts');
 const { over, decodeImage } = await load('../viewer/image/io.ts');
 /** `r` as PNG bytes, its parts joined. */
 const encode = async (r, keep) => new Uint8Array(Buffer.concat(await png.encodePng(r, keep)));
@@ -60,8 +60,9 @@ function chunks(bytes) {
 }
 const pixels = r => Array.from({ length: r.width * r.height }, (_, i) => Array.from(r.data.subarray(i * 4, i * 4 + 4)));
 
-/** An ICC profile holding just a description tag (v2 `desc` or v4 `mluc`) or colorants. */
-function icc({ desc, mluc, colorants }) {
+/** An ICC profile holding just a description tag (v2 `desc` or v4 `mluc`) or
+ * colorants, for data color space `space`. */
+function icc({ desc, mluc, colorants, space = 'RGB ' }) {
   const tags = [];
   if (desc) {
     const t = Buffer.alloc(12 + desc.length + 1);
@@ -81,6 +82,7 @@ function icc({ desc, mluc, colorants }) {
     tags.push([sig, t]);
   });
   const header = Buffer.alloc(132 + 12 * tags.length);
+  header.write(space, 16, 'latin1');
   header.write('acsp', 36, 'latin1');
   header.writeUInt32BE(tags.length, 128);
   let offset = header.length;
@@ -345,4 +347,128 @@ test('an opaque raster round-trips exactly, its rows each taking the filter that
   for (let y = 0; y < height; y++) filters.add(raw[y * (width * 3 + 1)]);
   for (const f of [1, 2, 3, 4]) assert.ok(filters.has(f), `filter ${f} wins a row: ${[...filters]}`);
   assert.deepEqual(Array.from((await png.decodePng(bytes)).raster.data), Array.from(data));
+});
+
+/** `decodeImage` of `bytes` served as `type`, decoding PNGs in-process and
+ * standing in `raster` for the browser's decoder. */
+const decodeAs = (bytes, type, raster = { width: 1, height: 1, data: new Uint8ClampedArray([9, 8, 7, 255]) }) =>
+  decodeImage(new Blob([bytes]), type, { png: png.decodePng, canvas: async () => raster });
+/** The profile an `iCCP` chunk carries, inflated. */
+const iccpProfile = raw => { const data = chunks(Buffer.concat([SIGNATURE, raw]))[0].data; return inflateSync(data.subarray(data.indexOf(0) + 2)); };
+
+test('a mislabeled image saves as its name\'s type, decoded by its content, its RGB profile carried across', async () => {
+  const profile = icc({ desc: 'Display P3' });
+  // PNG data named .jpg: its pixels from the PNG codec, its profile as JPEG segments, its other chunks dropped.
+  const pngData = makePng(2, 1, 8, 6, [[1, 2, 3, 255, 4, 5, 6, 128]], [iccp(profile), chunk('pHYs', [0, 0, 0x16, 0x25, 0, 0, 0x16, 0x25, 1])]);
+  const asJpeg = (await decodeAs(pngData, 'image/jpeg')).edit;
+  assert.equal(asJpeg.mime, 'image/jpeg', 'the save route takes only the extension\'s type');
+  assert.deepEqual(Array.from(asJpeg.raster.data), [1, 2, 3, 255, 4, 5, 6, 128]);
+  assert.equal(asJpeg.colorSpace, 'display-p3');
+  assert.deepEqual(asJpeg.keep.map(k => [k[0], k[1]]), [[0xff, 0xe2]]);
+  assert.deepEqual(Buffer.from(jpeg.iccProfile(asJpeg.keep)), profile);
+  assert.match(asJpeg.note, /holds PNG data; it saves as JPEG.*without its other metadata.*transparency/);
+
+  // JPEG data named .png: its pixels from the browser, its profile as an iCCP chunk.
+  const jpegData = splice(JPEG, [iccSegment(1, 1, profile)]);
+  const asPng = (await decodeAs(jpegData, 'image/png')).edit;
+  assert.equal(asPng.mime, 'image/png');
+  assert.equal(asPng.colorSpace, 'display-p3');
+  assert.deepEqual(asPng.keep.map(k => Buffer.from(k).toString('latin1', 4, 8)), ['iCCP']);
+  assert.deepEqual(iccpProfile(asPng.keep[0]), profile);
+  assert.match(asPng.note, /holds JPEG data; it saves as PNG/);
+  const saved = await png.decodePng(await encode(asPng.raster, asPng.keep));
+  assert.equal(saved.space, 'display-p3', 'the saved PNG carries the profile');
+
+  // The browser's decoder's other formats save as the name says too.
+  const gif = new Uint8Array(Buffer.from('GIF89a\x01\x00\x01\x00', 'latin1'));
+  const gifAsJpeg = (await decodeAs(gif, 'image/jpeg')).edit;
+  assert.equal(gifAsJpeg.mime, 'image/jpeg');
+  assert.match(gifAsJpeg.note, /holds GIF data; it saves as JPEG/);
+
+  // Correctly named, the source's metadata stays verbatim and nothing is noted.
+  const same = (await decodeAs(jpegData, 'image/jpeg')).edit;
+  assert.deepEqual(same.keep, jpeg.iccSegments(jpegData));
+  assert.equal(same.note, undefined);
+});
+
+test('a JPEG\'s ICC profile is kept only when it describes RGB', async () => {
+  const cmyk = (await decodeAs(splice(JPEG, [iccSegment(1, 1, icc({ desc: 'U.S. Web Coated (SWOP) v2', space: 'CMYK' }))]), 'image/jpeg')).edit;
+  assert.deepEqual(cmyk.keep, [], 'a re-encode is YCbCr, which a CMYK profile does not describe');
+  assert.equal(cmyk.colorSpace, 'srgb');
+  assert.match(cmyk.note, /drops this JPEG's CMYK color profile/);
+  const gray = (await decodeAs(splice(JPEG, [iccSegment(1, 1, icc({ desc: 'Gray Gamma 2.2', space: 'GRAY' }))]), 'image/jpeg')).edit;
+  assert.deepEqual(gray.keep, []);
+  assert.match(gray.note, /grayscale/);
+  const rgb = splice(JPEG, [iccSegment(1, 1, icc({ desc: 'Display P3' }))]);
+  assert.equal((await decodeAs(rgb, 'image/jpeg')).edit.keep.length, 1);
+});
+
+test('a PNG\'s iCCP is kept only when it describes RGB, as every save is', async () => {
+  const gray = icc({ desc: 'Gray Gamma 2.2', space: 'GRAY' }), srgb = chunk('sRGB', [0]), gama = chunk('gAMA', [0, 0, 0xb1, 0x8f]);
+  const decoded = await png.decodePng(makePng(2, 1, 8, 0, [[0, 200]], [gama, iccp(gray), srgb]));
+  assert.deepEqual(decoded.keep.map(k => Buffer.from(k).toString('latin1', 4, 8)), ['gAMA', 'sRGB']);
+  assert.equal(decoded.profile, undefined);
+  assert.match(decoded.note, /drops this PNG's grayscale color profile/);
+  const saved = chunks(await encode(decoded.raster, decoded.keep));
+  assert.deepEqual(saved.map(c => c.type), ['IHDR', 'gAMA', 'sRGB', 'IDAT', 'IEND']);
+});
+
+/** An `eXIf` chunk holding orientation `o`, big- or little-endian. */
+function exif(o, little = false) {
+  const b = Buffer.alloc(26), u16 = (v, at) => little ? b.writeUInt16LE(v, at) : b.writeUInt16BE(v, at), u32 = (v, at) => little ? b.writeUInt32LE(v, at) : b.writeUInt32BE(v, at);
+  b.write(little ? 'II' : 'MM', 0, 'latin1'); u16(42, 2); u32(8, 4);
+  u16(1, 8); u16(0x0112, 10); u16(3, 12); u32(1, 14); u16(o, 18);
+  return chunk('eXIf', b);
+}
+
+test('a PNG\'s eXIf orientation turns its pixels upright, and a save writes them so without it', async () => {
+  // Gray 3×2, rows [10 20 30] / [40 50 60].
+  const shown = async extra => {
+    const { raster: r } = await png.decodePng(makePng(3, 2, 8, 0, [[10, 20, 30], [40, 50, 60]], extra));
+    return { size: [r.width, r.height], rows: Array.from({ length: r.height }, (_, y) => Array.from({ length: r.width }, (_, x) => r.data[(y * r.width + x) * 4])), r };
+  };
+  assert.deepEqual((await shown([exif(3)])).rows, [[60, 50, 40], [30, 20, 10]]);
+  const six = await shown([exif(6)]);
+  assert.deepEqual([six.size, six.rows], [[2, 3], [[40, 10], [50, 20], [60, 30]]], 'a quarter turn clockwise');
+  const eight = await shown([exif(8, true)]);
+  assert.deepEqual([eight.size, eight.rows], [[2, 3], [[30, 60], [20, 50], [10, 40]]], 'a quarter turn counterclockwise, little-endian');
+
+  const saved = await encode(six.r, (await png.decodePng(makePng(3, 2, 8, 0, [[10, 20, 30], [40, 50, 60]], [exif(6)]))).keep);
+  assert.ok(!chunks(saved).some(c => c.type === 'eXIf'), 'the save drops eXIf');
+  assert.deepEqual(Array.from((await png.decodePng(saved)).raster.data), Array.from(six.r.data), 'and holds the upright pixels');
+});
+
+test('only a full-range SDR cICP shows as its space; an HDR or narrow-range PNG is view-only', async () => {
+  assert.equal(cicpSpace(new Uint8Array([12, 13, 0, 1])), 'display-p3');
+  assert.equal(cicpSpace(new Uint8Array([12, 1, 0, 1])), 'display-p3');
+  assert.equal(cicpSpace(new Uint8Array([12, 16, 0, 1])), 'srgb', 'PQ is not SDR');
+  assert.equal(cicpSpace(new Uint8Array([12, 13, 0, 0])), 'srgb', 'narrow range');
+  assert.equal(cicpSpace(new Uint8Array([12, 8, 0, 1])), 'srgb', 'linear: no canvas space');
+
+  const header = cicp => makePng(4, 4, 16, 2, [], [chunk('cICP', cicp)]);
+  assert.match(imageEditability(100, header([9, 16, 0, 1])).viewOnly, /HDR/, 'PQ');
+  assert.match(imageEditability(100, header([9, 18, 0, 1])).viewOnly, /HDR/, 'HLG');
+  assert.match(imageEditability(100, header([12, 13, 0, 0])).viewOnly, /narrow-range/);
+  assert.deepEqual(imageEditability(100, header([12, 13, 0, 1])), { ok: true });
+  assert.deepEqual(imageEditability(100, header([1, 8, 0, 1])), { ok: true }, 'another SDR transfer shows approximately');
+  assert.match((await decodeImage(new Blob([header([9, 16, 0, 1])]))).viewOnly, /HDR/, 'the page checks again');
+});
+
+test('the PNG worker decodes and encodes, handing its buffers back', async () => {
+  const sent = [];
+  globalThis.self = {};
+  globalThis.postMessage = (message, options) => sent.push({ message, transfer: options?.transfer });
+  await load('../viewer/image/png-worker.ts');
+  const source = makePng(2, 1, 8, 6, [[1, 2, 3, 4, 5, 6, 7, 8]], [iccp(icc({ desc: 'Display P3' }))]);
+  await self.onmessage({ data: { decode: source } });
+  const { result } = sent[0].message;
+  assert.deepEqual(Array.from(result.raster.data), [1, 2, 3, 4, 5, 6, 7, 8]);
+  assert.equal(result.space, 'display-p3');
+  assert.ok(sent[0].transfer.includes(result.raster.data.buffer), 'the raster is transferred');
+
+  await self.onmessage({ data: { encode: { raster: result.raster, keep: result.keep } } });
+  assert.equal((await png.decodePng(new Uint8Array(Buffer.concat(sent[1].message.result)))).space, 'display-p3');
+
+  await self.onmessage({ data: { decode: new Uint8Array(8) } });
+  assert.match(sent[2].message.error, /Not a PNG/);
 });
