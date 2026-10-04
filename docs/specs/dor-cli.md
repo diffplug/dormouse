@@ -307,6 +307,8 @@ Source of truth: `toolCommand` in `dor/src/commands/tool.ts`; `openCommand` in `
 
 ## Future
 
+**Scope: dor-cli-next** — unordered:
+
 - **Surface a dead control channel in the UI.** A lost bind leaves one `[dor-control]` line on the host's stderr, and all a user sees is `dor` reporting "Dormouse control endpoint is not available in this terminal yet" — which reads like a startup race rather than a channel that will never come up. Open design question: where the visible notice goes, given that the Baseboard carrying the standalone update notice (`docs/specs/auto-update.md`) has no VS Code counterpart. The plumbing exists — both hosts already know the outcome at `ready` (see [Control-channel security](#control-channel-security)).
 
 - **`dor skill` follow-ons** — skill-ecosystem publication (plugin marketplaces, npm) distributes the bootstrap stub, never a copy of the content. A user-level `--global` install variant waits until a story needs it.

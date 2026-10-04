@@ -390,6 +390,8 @@ A moved iframe Surface remounts at its saved URL after consent: `docs/specs/layo
 
 ## Future
 
+**Scope: dor-browser-next** — unordered, plus [Daemon-owned crisp captures](#daemon-owned-crisp-captures):
+
 - Stable agent-browser profile/state persistence so pop-out preserves logins, cookies, tabs, DOM state, and scroll.
 - Upstream support for stream keyboard `commands`, replacing the host edit workaround and enabling undo/redo.
 - General per-surface teardown hook for future Dormouse-owned backend processes; agent-browser surfaces already dispose their controller on kill/swap, and iframe views release their leases.

@@ -58,6 +58,8 @@ Source of truth: `canopy/src/GlTerminal.stories.tsx`, `canopy/README.md`.
 
 ## Future
 
+**Scope: sdf-next** — unordered:
+
 - **MSDF (multi-channel signed distance fields)** — sharper corners than single-channel SDF, which rounds them at extreme magnification. Needs outlines rather than canvas rasterization, so font-file access: a build-time bundled default font (e.g. msdf-atlas-gen) with the runtime SDF path as fallback for uncovered glyphs, or per-host runtime font-byte discovery (Tauri/sidecar can read font files; browsers mostly cannot). The texel layout is already reserved for it; the shader gains a `median(r,g,b)` branch.
 - **SDF decorated cells** — decorated text blurs under magnification while underline/strikethrough/overline stay on the raster path. Fix by composing decoration distance fields with the glyph field, or by drawing decorations analytically in the shader.
 - **Fork release automation** — a GitHub Action on the fork that attaches the addon tarball on tag, plus a scheduled upstream-master merge PR into `sdf`.

@@ -488,6 +488,8 @@ A store commit that empties the tree (last pane killed or minimized) spawns one 
 
 ## Future
 
+**Scope: webgl-rearm** — [Re-arming the WebGL renderer after context loss](#re-arming-the-webgl-renderer-after-context-loss).
+
 ### Re-arming the WebGL renderer after context loss
 
 A mounted pane that loses its WebGL context ([Renderer](#renderer)) stays on the DOM renderer until it is unmounted and mounted again, even once other panes close and free budget. The eviction order is also backwards for a tiling terminal: browsers evict *oldest-first*, but the pane that most deserves the GPU is the focused one.

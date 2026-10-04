@@ -409,6 +409,4 @@ Source of truth: `deploy/local/install-macos.sh`, `deploy/local/install-windows.
 
 ## Future
 
-**Scope: selfhost-onboarding** — collapse self-host first-run friction. The first run is now *run installer → click Enroll → scan QR → approve*, with nothing typed on the phone (Setup tokens, Remote control, [pocket-app.md](./pocket-app.md)); the setup password enrolls Burrows only, and every phone-side item is done. One settled decision constrains what is left: the stock binary reaches only the default origin ("Relay origin") — self-hosting keeps requiring a source build, deliberately, so nothing may depend on a stock build reaching another. Nor is a resume token staged — every new session requires fresh WebAuthn presence, by design ([remote-security-model.md](./remote-security-model.md) -> Presence proofs).
-
-Unstaged but adjacent: origin migration (re-binding the passkey and enrollments after a Tailscale node rename), and the revocation UI staged in [remote-security-model.md](./remote-security-model.md) `## Future`.
+**Scope: relay-origin-migration** — re-binding the passkey and enrollments after a Tailscale node rename. Relay-pushed revocation is staged in [remote-security-model.md](./remote-security-model.md) `## Future`.

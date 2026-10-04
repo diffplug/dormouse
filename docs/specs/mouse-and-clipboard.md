@@ -359,7 +359,7 @@ Source of truth: `normalizeExternalUri` in `lib/src/lib/external-links.ts` (pinn
 
 ## 9. Future
 
-Not implemented today; they may be added in response to user feedback.
+**Scope: mouse-clipboard-backlog** — unprioritized, each added on user feedback: [§9.1](#91-mouse-and-selection) and [§9.2](#92-paste).
 
 ### 9.1 Mouse and Selection
 

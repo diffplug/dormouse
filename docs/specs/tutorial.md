@@ -136,6 +136,8 @@ Source of truth: `WallEvent` in `lib/src/components/wall/wall-types.ts`, emitted
 
 ## Future
 
+**Scope: tutorial-coverage**
+
 Two `tut-boxed` scenarios close the playground's `docs/specs/mouse-and-clipboard.md` coverage gaps, needing no section change:
 
 1. **`SCENARIO_BRACKETED_PASTE_TUI`** — closes [§8.5](mouse-and-clipboard.md#85-bracketed-paste). Emits `\x1b[?2004h` and an idle ANSI-framed view.

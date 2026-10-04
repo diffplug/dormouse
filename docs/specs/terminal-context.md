@@ -74,4 +74,4 @@ Source of truth: `TerminalContext` in `lib/src/components/wall/TerminalContext.t
 
 ## Future
 
-Pocket context composition, remote helper creation, and SSH integration are unbuilt.
+**Scope: remote-context** — Pocket context composition, remote helper creation, and SSH integration.
