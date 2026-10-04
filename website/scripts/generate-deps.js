@@ -393,6 +393,10 @@ const missingAuthorScopes = {
   "@lexical/": "Meta Platforms, Inc. and affiliates",
   "@radix-ui/": "WorkOS",
 };
+// Packages whose metadata names neither `homepage` nor `repository`, by scope.
+const missingHomepageScopes = {
+  "@radix-ui/": "https://www.radix-ui.com/",
+};
 for (const dep of deps) {
   if (!dep.license) {
     const override = missingLicense[dep.name];
@@ -411,6 +415,14 @@ for (const dep of deps) {
       process.exit(1);
     }
     dep.author = override;
+  }
+  if (!dep.homepage) {
+    const override = Object.entries(missingHomepageScopes).find(([scope]) => dep.name.startsWith(scope))?.[1];
+    if (!override) {
+      console.error(`ERROR: "${dep.name}" has no homepage. Add its scope to missingHomepageScopes in generate-deps.js`);
+      process.exit(1);
+    }
+    dep.homepage = override;
   }
 }
 
