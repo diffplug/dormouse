@@ -45,6 +45,8 @@ export interface BillingSetup {
   yearly: string;
   /** One Price per `FOUNDING_LADDER` step, in cohort order. */
   founding: readonly string[];
+  /** The dev loop's StripeDev client in place of Stripe's API; never from bindings. */
+  stripe?: Stripe;
 }
 
 const PRICE = /^price_[A-Za-z0-9_]{1,200}$/;
@@ -126,10 +128,11 @@ export async function withBilling<T>(
   try {
     const billing = new Billing<Plan>(
       db,
-      new Stripe(setup.secretKey, {
-        httpClient: Stripe.createFetchHttpClient(),
-        maxNetworkRetries: 1,
-      }),
+      setup.stripe ??
+        new Stripe(setup.secretKey, {
+          httpClient: Stripe.createFetchHttpClient(),
+          maxNetworkRetries: 1,
+        }),
       clock.time,
       clock.random,
       {

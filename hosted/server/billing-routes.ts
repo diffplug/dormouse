@@ -119,9 +119,7 @@ export function billingRoutes(app: Hono<any>, host: (c: Context) => BillingHost)
     const { userId, email } = c.get("login");
     const plan = (await readJson<{ plan?: unknown }>(c))?.plan;
     if (!isPlan(plan)) return c.json({ message: "Choose monthly, yearly, or founding." }, 400);
-    // Stripe's receipts and the refund promise need a mailbox.
-    if (email === null)
-      return c.json({ message: "Sign in with an email address to subscribe." }, 409);
+    // A provider-only account has no public email: Stripe Checkout asks for one.
     return billed(c, async (billing) => {
       // A checkout left open for another plan gives way to this one.
       const other = await billing.db

@@ -1,4 +1,5 @@
 import { test, expect } from "vitest";
+import { Hono } from "hono";
 import { fileURLToPath } from "node:url";
 import { Miniflare, Response as WorkerResponse } from "miniflare";
 import { createStripeDev } from "@pgstencil/stripe/testing";
@@ -8,7 +9,13 @@ import { API_ROUTES, NOT_ENTITLED_ERROR } from "remote-lib-common";
 import { FOUNDING_COHORT_SIZE, FOUNDING_LADDER } from "../../../website/src/lib/hosted-pricing";
 import { SITE_ORIGIN } from "../account-app";
 import { billingSetup, openCohort } from "../billing";
-import { BILLING_WEBHOOK_PATH, CHECKOUT_CLOSED, COHORT_CACHE_MS, COHORT_PATH } from "../billing-routes";
+import {
+  BILLING_WEBHOOK_PATH,
+  CHECKOUT_CLOSED,
+  COHORT_CACHE_MS,
+  COHORT_PATH,
+  billingRoutes,
+} from "../billing-routes";
 import { migrations } from "../migrations";
 import {
   ORIGINS,
@@ -478,4 +485,41 @@ test("the webhook takes only Stripe's signed body; checkout takes only this orig
   }
   expect((await off.call(SITE_ORIGIN + COHORT_PATH)).status).toBe(503);
   expect((await off.scheduled()).outcome).toBe("ok");
+});
+
+test("an account without a public email checks out, and Stripe Checkout collects one", async ({ onTestFinished }) => {
+  const context = await createTestContext({ migrations });
+  const dev = await createStripeDev(context.time, context.random, undefined, {
+    recurring: Object.fromEntries(LADDER.map((price) => [price, "year" as const])),
+  });
+  onTestFinished(async () => {
+    await dev.close();
+    await context.close();
+  });
+  // The routes in Node on StripeDev's client, for a login whose email is null.
+  const app = new Hono();
+  billingRoutes(app, () => ({
+    databaseUrl: context.database.url,
+    auth: async () => Response.json({ user: { id: "provider-only", email: null }, session: {} }),
+    setup: () => ({
+      secretKey: "sk_test_dormouse_local_only",
+      webhookSecret: dev.webhookSecret,
+      live: false,
+      monthly: dev.prices.monthly,
+      yearly: dev.prices.yearly,
+      founding: LADDER,
+      stripe: dev.stripe,
+    }),
+    clock: context,
+  }));
+  const response = await app.request(`${origin}/api/billing/checkout`, {
+    method: "POST",
+    headers: { origin, "content-type": "application/json" },
+    body: JSON.stringify({ plan: "yearly" }),
+  });
+  expect(response.status).toBe(200);
+  // No email is sent, so Stripe's hosted page asks the buyer for one.
+  expect(dev.requests.find((r) => r.path === "/v1/customers")!.body).toEqual({
+    "metadata[pgstencil_owner]": "provider-only",
+  });
 });
