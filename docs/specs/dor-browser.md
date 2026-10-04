@@ -21,7 +21,7 @@ Source of truth: `BROWSER_PROVIDERS` and `parseRenderMode` in `dor-lib-common/sr
 
 Invariants on the flat persisted `BrowserPanelParams`:
 
-- `renderMode` is canonical: an absent one resolves to `iframe`, never to a live agent-browser. Only params may omit it; a live `ScreenSnapshot` always carries one.
+- **Must treat `renderMode` as canonical, resolving an absent one to `iframe`, never to a live agent-browser.** Only params may omit it; a live `ScreenSnapshot` always carries one.
 - `url` is the canonical target across render swaps and relaunches. Agent-browser mirrors the newest http(s) active tab URL into it, and the host relaunches at nothing else; iframe persists only navigations Dormouse chrome initiated.
 - **Must keep persisted browser params flat** — `browserViewport` stores resolved sizing, `launchFallback` may carry restore params — and derive popped-out presentation from `renderMode`, never a separate flag.
 - **Never carry a stream in params**: the stream a launch, `attach`, or `dor` hands over goes straight to the Surface's controller (rationale).
@@ -74,7 +74,7 @@ Source of truth: `lib/src/components/wall/use-dev-server-ports.ts`, `servesLoopb
 
 ## Pane Context Menu Connect
 
-**Must scan once per context opening**, with the per-port URL selection of `docs/specs/dor-cli.md` → Browser Open Target Resolution, and offer system browser, iframe, and each provider's screencast and popout for the selected port; a failed scan is distinct from no listeners. Opening from context always preserves the source terminal, even an untouched one.
+**Must scan once per context opening**, with the per-port URL selection of `docs/specs/dor-cli.md` → Browser Open Target Resolution, and offer system browser, iframe, and each provider's screencast and popout for the selected port; a failed scan is distinct from no listeners. **Must always preserve the source terminal when opening from context**, even an untouched one.
 
 **Must reuse targets per source, port, and provider**: a provider's screencast and popout share a browser session, and a reuse is one `setRenderMode(mode, { url })` intent to the Surface's controller, so a mode switch relaunches at the port's page rather than racing a navigation into it (rationale). Minimized targets are reattached, closed ones recreated.
 
@@ -147,11 +147,11 @@ Source of truth: `browserLaunchEnv` in `lib/src/host/browser-launch-env.ts`, `cr
 ### Managed identity
 
 - **Must match `--key <name>` against `[A-Za-z0-9._-]+`**, since it becomes part of a session name and so a filesystem path; the default is `--key default`. Identity-flag exclusivity: `docs/specs/dor-cli.md` → "Browser Surface Addressing".
-- A key names the Surface of that provider holding it in the answering Wall, whose stored binding — session, cwd, executable — the command runs with, so a Surface keeps its session however keys were named when it was made.
-- A key no Surface holds is minted `dormouse.<scope>.<name>`, scoped by the stable id of the Workspace that will hold the browser, so a strip reorder renames nothing. A bare Wall (a VS Code webview, the website, Pocket) has no Workspace id and mints a scope of its own for its life, so two webviews' `--key default` are two browsers (rationale). A key's concurrent first commands share one reservation of the caller's cwd and executable (`BrowserBindingReservations`). **Never mint a session a Surface anywhere in the Window holds, or the provider's reservation of another key**: take the first free `.2`, `.3`, … suffix (rationale).
-- Only the answering Workspace can name a key, so `dor` resolves it host-side (`docs/specs/dor-cli.md` → "Browser Surface Addressing") and names `dormouse.1.<name>` itself only with no control endpoint at all, outside Dormouse, where `dor` is a pure passthrough. **Never fall back CLI-side when the host refuses a managed invocation**, a passthrough verb included: that would name the wrong Workspace's browser, so the refusal fails the command before the binary runs (`docs/specs/dor-cli.md` → "Handle Model").
-- GUI-spawned sessions use `dormouse.1.gui-<hex>`, minted host-wide, which no `--key` names; `--surface <handle>` reaches them. The host answers only for a Surface its provider renders: an `iframe` Surface has no session to drive.
-- One browser maps to one Surface, found by its host-reported native identity (agent-browser: the session; Playwright: installation, project scope and session, which a raw `--session` shares across one project's subdirectories). A command for a browser that has a Surface hands its stream over, refreshes `binaryPath` and reuses the pane — not an invariant: a Surface killed or render-swapped mid-command leaves the trailing request to mint a fresh pane (rationale).
+- **Must resolve a key to the Surface of that provider holding it in the answering Wall**, whose stored binding — session, cwd, executable — the command runs with, so a Surface keeps its session however keys were named when it was made.
+- **Must mint a key no Surface holds as `dormouse.<scope>.<name>`**, scoped by the stable id of the Workspace that will hold the browser, so a strip reorder renames nothing. **Must give a bare Wall (a VS Code webview, the website, Pocket), which has no Workspace id, a scope of its own for its life**, so two webviews' `--key default` are two browsers (rationale). A key's concurrent first commands share one reservation of the caller's cwd and executable (`BrowserBindingReservations`). **Never mint a session a Surface anywhere in the Window holds, or the provider's reservation of another key**: take the first free `.2`, `.3`, … suffix (rationale).
+- **Must let only the answering Workspace name a key**, so `dor` resolves it host-side (`docs/specs/dor-cli.md` → "Browser Surface Addressing") and names `dormouse.1.<name>` itself only with no control endpoint at all, outside Dormouse, where `dor` is a pure passthrough. **Never fall back CLI-side when the host refuses a managed invocation**, a passthrough verb included: that would name the wrong Workspace's browser, so the refusal fails the command before the binary runs (`docs/specs/dor-cli.md` → "Handle Model").
+- **Must name GUI-spawned sessions `dormouse.1.gui-<hex>`, minted host-wide**, which no `--key` names; `--surface <handle>` reaches them. **Must answer only for a Surface its provider renders**: an `iframe` Surface has no session to drive.
+- **Must map one browser to one Surface**, found by its host-reported native identity (agent-browser: the session; Playwright: installation, project scope and session, which a raw `--session` shares across one project's subdirectories). A command for a browser that has a Surface hands its stream over, refreshes `binaryPath` and reuses the pane — not an invariant: a Surface killed or render-swapped mid-command leaves the trailing request to mint a fresh pane (rationale).
 
 Source of truth: `sessionForKey` in `dor-lib-common/src/browser-providers.ts`, `runBrowserCli` in `dor/src/commands/browser-cli.ts`, `BrowserBindingReservations` in `lib/src/components/wall/browser-binding-reservations.ts`, `ensureBrowserSurface` in `lib/src/components/wall/use-dor-control.ts`.
 
@@ -175,7 +175,7 @@ Source of truth: `lib/src/components/wall/agent-browser-surface-controller.ts` (
 
 **Must reach a browser from the webview only through its host's viewer socket**, never a daemon's stream or CDP: one loopback listener in the host serves a socket per Surface onto the browser at the stream `view` names. Its upgrade gate and upstream dials are `docs/specs/security-local.md` → "Loopback Listeners".
 
-- **Must send state only on change, and current state to a connecting socket**, except `sync`, which answers each size sent (rationale).
+- **Must send state only on change, and current state to a connecting socket**, except `sync`, which answers each size sent, and agent-browser's `url`, a commit edge sent even when unchanged, since a reload commits the same URL (rationale).
 - **Must report a browser that goes on its own as `status { connected: false }` before its socket closes**, ending a headless pane and auto-reverting a headed one seen connected; a headed browser left with no page is gone after a grace (rationale). A launch or close of the browser ends every socket on it.
 - A headed socket carries no frames. Others paint changed stream frames provisionally, replaced by a host device-resolution capture once the page rests (rationale). **Must spend one host-wide capture budget across all sockets**, with every provider's capture bounded (rationale).
 
@@ -285,7 +285,7 @@ Source of truth: `lib/src/components/wall/IframePanel.tsx`, `lib/src/host/iframe
 
 **Must take every mounted `IframePanel`'s grant under a lease** it mints, held under an owner the host transport names (VS Code router, standalone window label), never the webview.
 
-- A leased grant has no idle TTL and is never evicted. It ends, with every connection and upgraded pipe, when its lease is released (unmount), its owner reinitializes or ends, or the lease moves to another upstream origin (rationale).
+- **Never give a leased grant an idle TTL or evict it.** It ends, with every connection and upgraded pipe, when its lease is released (unmount), its owner reinitializes or ends, or the lease moves to another upstream origin (rationale).
 - The same lease, upstream origin and embedder chain reuse the grant, so Reload, Back and Forward keep the page's origin and storage.
 - **Must bound leases by `MAX_IFRAME_LEASES`**; past it a new one is refused, never made room for.
 

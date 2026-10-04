@@ -13,7 +13,7 @@ On launch the updater, in order:
 2. Reads the network policy over the Burrow link and, where it allows (`docs/specs/remote-network.md` → "Updates"), calls `check()`: no update is silent, an update raises the approval prompt.
 3. Shows the reminder if due, recording `remindedAt`.
 
-**Must skip that `check()` once an update is approved**, including through Check now, and drop its result if approval lands while it runs. The reminder is re-evaluated periodically while the app runs, reading no policy and never checking, never over an undismissed notice or before the clock is set. **Only approval starts the background `download()`**; a failed download leaves the update available, so a second approval retries, and only a successful one makes it pending.
+**Must skip that `check()` once an update is approved**, including through Check now, and drop its result if approval lands while it runs. The reminder is re-evaluated periodically while the app runs, reading no policy and never checking, never over an undismissed notice or before the clock is set. Version-lookup, check, and download failures are logged. **Only approval starts the background `download()`**; a failed download leaves the update available, so a second approval retries, and only a successful one makes it pending.
 
 Check now (`checkNow()`) joins a check in flight, and shows an approved update's progress instead of checking, which would offer it for approval twice. **Must record `checkedAt` on every successful check**, automatic or asked for (§localStorage).
 
