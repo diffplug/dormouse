@@ -406,8 +406,7 @@ Where it surfaces is host-specific:
 
 ### Pane Header
 
-A terminal's or Tool's header, on either face, shows a fixed-text `TODO` pill when `todo === true`, a hover/focus notification preview when TODO has `notification`, and the terminal context opened by right-click or by `a`.
-**Never tint a ringing Session's header**: the Pane overlay already outlines it.
+A terminal's or Tool's header, on either face, shows a fixed-text `TODO` pill when `todo === true`, a hover/focus notification preview when TODO has `notification`, and the terminal context opened by right-click or by `a`. **Never tint a ringing Session's header**: the Pane overlay already outlines it.
 
 - **`a` on the selected Pane in command mode must dismiss a ringing Session and open the terminal context, whatever the status; it never edits a WATCHING rule.**
 - **Must offer user additions to WATCHING only in the terminal context** ("Watch all `<key>` commands"), whenever a foreground command has a watch key — naming the bare runner rule instead when one already covers the running script — and removals there or in Settings. Removing a rule drops it for every Session running that command.
