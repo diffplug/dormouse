@@ -5,7 +5,7 @@ import { getPlatform } from '../lib/platform';
 
 /** The one wording of each offer, shared by the preview line and Settings. */
 export const ALARM_UPSELL_COPY: Record<AlarmUpsell, string> = {
-  'hosted-voice': 'Hear alarms in an ElevenLabs voice with Dormouse Hosted',
+  'hosted-voice': 'ElevenLabs voices come with Dormouse Hosted',
   'hosted-push': 'Get Pocket on your phone with Dormouse Hosted',
   'set-up-phone': 'Set up a phone in Settings → Network',
 };

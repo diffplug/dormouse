@@ -5,6 +5,7 @@ import { Baseboard } from '../components/Baseboard';
 import { WorkspaceIdContext } from '../components/wall/wall-context';
 import type { DoorChip } from '../components/Wall';
 import { createTerminalPaneState, type TerminalPaneState } from '../lib/terminal-state';
+import { waitForPrimedState } from './settle-terminals';
 
 const BASE_TIME = 1_700_000_000_000;
 
@@ -267,3 +268,47 @@ export const OneTimePhoneConnected: Story = {
     await expect(canvas.getByRole('button', { name: 'End the one-time connection' })).toBeVisible();
   },
 };
+
+/**
+ * Turning an alarm on can add one live line to the toggle's preview
+ * (`docs/specs/alert.md` -> "Settings dialog"). Each story turns one on.
+ */
+function alarmUpsellStory(sink: 'speech' | 'push', upsell: string, parameters: Record<string, unknown>): Story {
+  return {
+    args: { items: [] },
+    parameters: { ...parameters, docs: { story: { inline: false, height: '260px' } } },
+    decorators: [
+      (Story) => (
+        // At the bottom, as in a window, so the preview opens above.
+        <div style={{ width: 640, marginTop: 'auto' }}>
+          <Story />
+        </div>
+      ),
+    ],
+    play: async ({ canvasElement }) => {
+      await waitForPrimedState();
+      const body = within(canvasElement.ownerDocument.body);
+      await userEvent.click(body.getByRole('button', { name: sink === 'speech' ? 'Spoken alarms' : 'Push notifications' }));
+      const line = canvasElement.ownerDocument.querySelector(`[data-alarm-upsell="${upsell}"]`);
+      await expect(line).toBeVisible();
+    },
+  };
+}
+
+/** A Hosted build's non-member turns spoken alarms on. */
+export const AlarmUpsellHostedVoice = alarmUpsellStory('speech', 'hosted-voice', {
+  primedManagedVoice: { configured: false },
+});
+
+/** A Hosted build's non-member, not enrolled with a Relay, turns push on. */
+export const AlarmUpsellHostedPush = alarmUpsellStory('push', 'hosted-push', {
+  primedManagedVoice: { configured: false },
+  primedBurrow: {},
+  primedPushDevices: { status: 'no-burrow', devices: [] },
+});
+
+/** A build with no Hosted mode, or a member, with no phone to push to. */
+export const AlarmUpsellSetUpPhone = alarmUpsellStory('push', 'set-up-phone', {
+  primedBurrow: {},
+  primedPushDevices: { status: 'no-burrow', devices: [] },
+});

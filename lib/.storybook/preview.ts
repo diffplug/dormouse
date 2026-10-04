@@ -44,6 +44,7 @@ import type { ShellEntry } from '../src/lib/shell-defaults';
 import { getWorkspacesSnapshot, resetWorkspaces, setWorkspaces, type WorkspaceMeta } from '../src/lib/workspace-store';
 import { resetWorkspaceSurfaces, setWorkspaceSurfaces } from '../src/lib/workspace-surfaces';
 import { resetWorkspaceUi } from '../src/lib/workspace-ui-store';
+import { ALARM_UPSELL_SHOWN_AT_KEY } from '../src/lib/alarm-upsell';
 
 /** `parameters.primedWorkspaces`: the Window a Workspace story renders. */
 interface PrimedWorkspaces {
@@ -370,6 +371,8 @@ const preview: Preview = {
 
       // A picker story's selection must not change later stories' theme restore.
       window.localStorage.removeItem('dormouse:active-theme');
+      // Nor may one story's alarm-toggle offer spend the next one's day.
+      window.localStorage.removeItem(ALARM_UPSELL_SHOWN_AT_KEY);
 
       // Installed themes normally arrive from OpenVSX and live in localStorage,
       // which every story shares — so a story that wants them names them, and
