@@ -2,3048 +2,3971 @@
   "direct": [
     {
       "name": "getrandom",
-      "version": "0.4.3",
       "license": "MIT OR Apache-2.0",
       "author": "The Rand Project Developers",
       "homepage": "https://github.com/rust-random/getrandom",
-      "declaredName": "getrandom"
+      "declaredName": "getrandom",
+      "versions": [
+        "0.4.3"
+      ]
     },
     {
       "name": "objc2",
-      "version": "0.6.4",
       "license": "MIT",
       "author": "Mads Marquart <mads@marquart.dk>",
       "homepage": "https://github.com/madsmtm/objc2",
-      "declaredName": "objc2"
+      "declaredName": "objc2",
+      "versions": [
+        "0.6.4"
+      ]
     },
     {
       "name": "objc2-app-kit",
-      "version": "0.3.2",
       "license": "MIT OR Zlib OR Apache-2.0",
       "author": "Mads Marquart",
       "homepage": "https://github.com/madsmtm/objc2",
-      "declaredName": "objc2-app-kit"
+      "declaredName": "objc2-app-kit",
+      "versions": [
+        "0.3.2"
+      ]
     },
     {
       "name": "objc2-foundation",
-      "version": "0.3.2",
       "license": "MIT",
       "author": "Mads Marquart",
       "homepage": "https://github.com/madsmtm/objc2",
-      "declaredName": "objc2-foundation"
+      "declaredName": "objc2-foundation",
+      "versions": [
+        "0.3.2"
+      ]
     },
     {
       "name": "process-wrap",
-      "version": "10.0.1",
       "license": "MIT OR Apache-2.0",
       "author": "Félix Saparelli <felix@passcod.name>",
       "homepage": "https://github.com/watchexec/process-wrap",
-      "declaredName": "process-wrap"
+      "declaredName": "process-wrap",
+      "versions": [
+        "10.0.1"
+      ]
     },
     {
       "name": "serde",
-      "version": "1.0.229",
       "license": "MIT OR Apache-2.0",
       "author": "Erick Tryzelaar <erick.tryzelaar@gmail.com>, David Tolnay <dtolnay@gmail.com>",
       "homepage": "https://serde.rs",
-      "declaredName": "serde"
+      "declaredName": "serde",
+      "versions": [
+        "1.0.229"
+      ]
     },
     {
       "name": "serde_json",
-      "version": "1.0.151",
       "license": "MIT OR Apache-2.0",
       "author": "Erick Tryzelaar <erick.tryzelaar@gmail.com>, David Tolnay <dtolnay@gmail.com>",
       "homepage": "https://github.com/serde-rs/json",
-      "declaredName": "serde_json"
+      "declaredName": "serde_json",
+      "versions": [
+        "1.0.151"
+      ]
     },
     {
       "name": "tauri",
-      "version": "2.11.6",
       "license": "MIT OR Apache-2.0",
       "author": "Tauri Programme within The Commons Conservancy",
       "homepage": "https://tauri.app/",
-      "declaredName": "tauri"
+      "declaredName": "tauri",
+      "versions": [
+        "2.11.6"
+      ]
     },
     {
       "name": "tauri-build",
-      "version": "2.6.3",
       "license": "MIT OR Apache-2.0",
       "author": "Tauri Programme within The Commons Conservancy",
       "homepage": "https://tauri.app/",
-      "declaredName": "tauri-build"
+      "declaredName": "tauri-build",
+      "versions": [
+        "2.6.3"
+      ]
     },
     {
       "name": "tauri-plugin-shell",
-      "version": "2.3.6",
       "license": "MIT OR Apache-2.0",
       "author": "Tauri Programme within The Commons Conservancy",
       "homepage": "https://github.com/tauri-apps/plugins-workspace",
-      "declaredName": "tauri-plugin-shell"
+      "declaredName": "tauri-plugin-shell",
+      "versions": [
+        "2.3.6"
+      ]
     },
     {
       "name": "tauri-plugin-updater",
-      "version": "2.12.0",
       "license": "MIT OR Apache-2.0",
       "author": "Tauri Programme within The Commons Conservancy",
       "homepage": "https://github.com/tauri-apps/plugins-workspace",
-      "declaredName": "tauri-plugin-updater"
+      "declaredName": "tauri-plugin-updater",
+      "versions": [
+        "2.12.0"
+      ]
     },
     {
       "name": "windows",
-      "version": "0.62.2",
       "license": "MIT OR Apache-2.0",
       "author": "Microsoft",
       "homepage": "https://github.com/microsoft/windows-rs",
-      "declaredName": "windows"
+      "declaredName": "windows",
+      "versions": [
+        "0.62.2"
+      ]
     }
   ],
   "transitive": [
     {
       "name": "adler2",
-      "version": "2.0.1",
       "license": "MIT OR 0BSD OR Apache-2.0",
       "author": "Jonas Schievink <jonasschievink@gmail.com>, oyvindln <oyvindln@users.noreply.github.com>",
-      "homepage": "https://github.com/oyvindln/adler2"
+      "homepage": "https://github.com/oyvindln/adler2",
+      "versions": [
+        "2.0.1"
+      ]
     },
     {
       "name": "aho-corasick",
-      "version": "1.1.4",
       "license": "MIT OR Unlicense",
       "author": "Andrew Gallant <jamslam@gmail.com>",
-      "homepage": "https://github.com/BurntSushi/aho-corasick"
+      "homepage": "https://github.com/BurntSushi/aho-corasick",
+      "versions": [
+        "1.1.4"
+      ]
     },
     {
       "name": "alloc-no-stdlib",
-      "version": "2.0.4",
       "license": "BSD-3-Clause",
       "author": "Daniel Reiter Horn <danielrh@dropbox.com>",
-      "homepage": "https://github.com/dropbox/rust-alloc-no-stdlib"
+      "homepage": "https://github.com/dropbox/rust-alloc-no-stdlib",
+      "versions": [
+        "2.0.4"
+      ]
     },
     {
       "name": "alloc-stdlib",
-      "version": "0.2.2",
       "license": "BSD-3-Clause",
       "author": "Daniel Reiter Horn <danielrh@dropbox.com>",
-      "homepage": "https://github.com/dropbox/rust-alloc-no-stdlib"
+      "homepage": "https://github.com/dropbox/rust-alloc-no-stdlib",
+      "versions": [
+        "0.2.2"
+      ]
     },
     {
       "name": "android_system_properties",
-      "version": "0.1.5",
       "license": "MIT OR Apache-2.0",
       "author": "Nicolas Silva <nical@fastmail.com>",
-      "homepage": "https://github.com/nical/android_system_properties"
+      "homepage": "https://github.com/nical/android_system_properties",
+      "versions": [
+        "0.1.5"
+      ]
     },
     {
       "name": "anyhow",
-      "version": "1.0.102",
       "license": "MIT OR Apache-2.0",
       "author": "David Tolnay <dtolnay@gmail.com>",
-      "homepage": "https://github.com/dtolnay/anyhow"
+      "homepage": "https://github.com/dtolnay/anyhow",
+      "versions": [
+        "1.0.102"
+      ]
     },
     {
       "name": "arbitrary",
-      "version": "1.4.2",
       "license": "MIT OR Apache-2.0",
       "author": "The Rust-Fuzz Project Developers, Nick Fitzgerald <fitzgen@gmail.com>, Manish Goregaokar <manishsmail@gmail.com>, Simonas Kazlauskas <arbitrary@kazlauskas.me>, Brian L. Troutwine <brian@troutwine.us>, Corey Farwell <coreyf@rwell.org>",
-      "homepage": "https://github.com/rust-fuzz/arbitrary/"
+      "homepage": "https://github.com/rust-fuzz/arbitrary/",
+      "versions": [
+        "1.4.2"
+      ]
     },
     {
       "name": "atk",
-      "version": "0.18.2",
       "license": "MIT",
       "author": "The gtk-rs Project Developers",
-      "homepage": "https://gtk-rs.org/"
+      "homepage": "https://gtk-rs.org/",
+      "versions": [
+        "0.18.2"
+      ]
     },
     {
       "name": "atk-sys",
-      "version": "0.18.2",
       "license": "MIT",
       "author": "The gtk-rs Project Developers",
-      "homepage": "https://gtk-rs.org/"
+      "homepage": "https://gtk-rs.org/",
+      "versions": [
+        "0.18.2"
+      ]
     },
     {
       "name": "atomic-waker",
-      "version": "1.1.2",
       "license": "MIT OR Apache-2.0",
       "author": "Stjepan Glavina <stjepang@gmail.com>, Contributors to futures-rs",
-      "homepage": "https://github.com/smol-rs/atomic-waker"
+      "homepage": "https://github.com/smol-rs/atomic-waker",
+      "versions": [
+        "1.1.2"
+      ]
     },
     {
       "name": "autocfg",
-      "version": "1.5.0",
       "license": "MIT OR Apache-2.0",
       "author": "Josh Stone <cuviper@gmail.com>",
-      "homepage": "https://github.com/cuviper/autocfg"
+      "homepage": "https://github.com/cuviper/autocfg",
+      "versions": [
+        "1.5.0"
+      ]
     },
     {
       "name": "base64",
-      "version": "0.21.7, 0.22.1",
       "license": "MIT OR Apache-2.0",
       "author": "Marshall Pierce <marshall@mpierce.org>",
-      "homepage": "https://github.com/marshallpierce/rust-base64"
+      "homepage": "https://github.com/marshallpierce/rust-base64",
+      "versions": [
+        "0.21.7",
+        "0.22.1"
+      ]
     },
     {
       "name": "bit-set",
-      "version": "0.8.0",
       "license": "MIT OR Apache-2.0",
       "author": "Alexis Beingessner <a.beingessner@gmail.com>",
-      "homepage": "https://github.com/contain-rs/bit-set"
+      "homepage": "https://github.com/contain-rs/bit-set",
+      "versions": [
+        "0.8.0"
+      ]
     },
     {
       "name": "bit-vec",
-      "version": "0.8.0",
       "license": "MIT OR Apache-2.0",
       "author": "Alexis Beingessner <a.beingessner@gmail.com>",
-      "homepage": "https://github.com/contain-rs/bit-vec"
+      "homepage": "https://github.com/contain-rs/bit-vec",
+      "versions": [
+        "0.8.0"
+      ]
     },
     {
       "name": "bitflags",
-      "version": "1.3.2, 2.11.1",
       "license": "MIT OR Apache-2.0",
       "author": "The Rust Project Developers",
-      "homepage": "https://github.com/bitflags/bitflags"
+      "homepage": "https://github.com/bitflags/bitflags",
+      "versions": [
+        "1.3.2",
+        "2.11.1"
+      ]
     },
     {
       "name": "block-buffer",
-      "version": "0.10.4",
       "license": "MIT OR Apache-2.0",
       "author": "RustCrypto Developers",
-      "homepage": "https://github.com/RustCrypto/utils"
+      "homepage": "https://github.com/RustCrypto/utils",
+      "versions": [
+        "0.10.4"
+      ]
     },
     {
       "name": "block2",
-      "version": "0.6.2",
       "license": "MIT",
       "author": "Mads Marquart <mads@marquart.dk>",
-      "homepage": "https://github.com/madsmtm/objc2"
+      "homepage": "https://github.com/madsmtm/objc2",
+      "versions": [
+        "0.6.2"
+      ]
     },
     {
       "name": "brotli",
-      "version": "8.0.2",
       "license": "BSD-3-Clause AND MIT",
       "author": "Daniel Reiter Horn <danielrh@dropbox.com>, The Brotli Authors",
-      "homepage": "https://github.com/dropbox/rust-brotli"
+      "homepage": "https://github.com/dropbox/rust-brotli",
+      "versions": [
+        "8.0.2"
+      ]
     },
     {
       "name": "brotli-decompressor",
-      "version": "5.0.0",
       "license": "MIT OR BSD-3-Clause",
       "author": "Daniel Reiter Horn <danielrh@dropbox.com>, The Brotli Authors",
-      "homepage": "https://github.com/dropbox/rust-brotli-decompressor"
+      "homepage": "https://github.com/dropbox/rust-brotli-decompressor",
+      "versions": [
+        "5.0.0"
+      ]
     },
     {
       "name": "bs58",
-      "version": "0.5.1",
       "license": "MIT OR Apache-2.0",
       "author": "bs58-rs contributors",
-      "homepage": "https://github.com/Nullus157/bs58-rs"
+      "homepage": "https://github.com/Nullus157/bs58-rs",
+      "versions": [
+        "0.5.1"
+      ]
     },
     {
       "name": "bumpalo",
-      "version": "3.20.2",
       "license": "MIT OR Apache-2.0",
       "author": "Nick Fitzgerald <fitzgen@gmail.com>",
-      "homepage": "https://github.com/fitzgen/bumpalo"
+      "homepage": "https://github.com/fitzgen/bumpalo",
+      "versions": [
+        "3.20.2"
+      ]
     },
     {
       "name": "bytemuck",
-      "version": "1.25.0",
       "license": "MIT OR Zlib OR Apache-2.0",
       "author": "Lokathor <zefria@gmail.com>",
-      "homepage": "https://github.com/Lokathor/bytemuck"
+      "homepage": "https://github.com/Lokathor/bytemuck",
+      "versions": [
+        "1.25.0"
+      ]
     },
     {
       "name": "byteorder",
-      "version": "1.5.0",
       "license": "MIT OR Unlicense",
       "author": "Andrew Gallant <jamslam@gmail.com>",
-      "homepage": "https://github.com/BurntSushi/byteorder"
+      "homepage": "https://github.com/BurntSushi/byteorder",
+      "versions": [
+        "1.5.0"
+      ]
     },
     {
       "name": "bytes",
-      "version": "1.11.1",
       "license": "MIT",
       "author": "Carl Lerche <me@carllerche.com>, Sean McArthur <sean@seanmonstar.com>",
-      "homepage": "https://github.com/tokio-rs/bytes"
+      "homepage": "https://github.com/tokio-rs/bytes",
+      "versions": [
+        "1.11.1"
+      ]
     },
     {
       "name": "cairo-rs",
-      "version": "0.18.5",
       "license": "MIT",
       "author": "The gtk-rs Project Developers",
-      "homepage": "https://gtk-rs.org/"
+      "homepage": "https://gtk-rs.org/",
+      "versions": [
+        "0.18.5"
+      ]
     },
     {
       "name": "cairo-sys-rs",
-      "version": "0.18.2",
       "license": "MIT",
       "author": "The gtk-rs Project Developers",
-      "homepage": "https://gtk-rs.org/"
+      "homepage": "https://gtk-rs.org/",
+      "versions": [
+        "0.18.2"
+      ]
     },
     {
       "name": "camino",
-      "version": "1.2.2",
       "license": "MIT OR Apache-2.0",
       "author": "Without Boats <saoirse@without.boats>, Ashley Williams <ashley666ashley@gmail.com>, Steve Klabnik <steve@steveklabnik.com>, Rain <rain@sunshowers.io>",
-      "homepage": "https://github.com/camino-rs/camino"
+      "homepage": "https://github.com/camino-rs/camino",
+      "versions": [
+        "1.2.2"
+      ]
     },
     {
       "name": "cargo_metadata",
-      "version": "0.19.2",
       "license": "MIT",
       "author": "Oliver Schneider <git-spam-no-reply9815368754983@oli-obk.de>",
-      "homepage": "https://github.com/oli-obk/cargo_metadata"
+      "homepage": "https://github.com/oli-obk/cargo_metadata",
+      "versions": [
+        "0.19.2"
+      ]
     },
     {
       "name": "cargo_toml",
-      "version": "0.22.3",
       "license": "MIT OR Apache-2.0",
       "author": "Kornel <kornel@geekhood.net>",
-      "homepage": "https://lib.rs/cargo_toml"
+      "homepage": "https://lib.rs/cargo_toml",
+      "versions": [
+        "0.22.3"
+      ]
     },
     {
       "name": "cargo-platform",
-      "version": "0.1.9",
       "license": "MIT OR Apache-2.0",
       "author": "The Rust Project Developers",
-      "homepage": "https://github.com/rust-lang/cargo"
+      "homepage": "https://github.com/rust-lang/cargo",
+      "versions": [
+        "0.1.9"
+      ]
     },
     {
       "name": "cc",
-      "version": "1.2.62",
       "license": "MIT OR Apache-2.0",
       "author": "Alex Crichton <alex@alexcrichton.com>",
-      "homepage": "https://github.com/rust-lang/cc-rs"
+      "homepage": "https://github.com/rust-lang/cc-rs",
+      "versions": [
+        "1.2.62"
+      ]
     },
     {
       "name": "cesu8",
-      "version": "1.1.0",
       "license": "MIT OR Apache-2.0",
       "author": "Eric Kidd <git@randomhacks.net>",
-      "homepage": "https://github.com/emk/cesu8-rs"
+      "homepage": "https://github.com/emk/cesu8-rs",
+      "versions": [
+        "1.1.0"
+      ]
     },
     {
       "name": "cfb",
-      "version": "0.7.3",
       "license": "MIT",
       "author": "Matthew D. Steele <mdsteele@alum.mit.edu>",
-      "homepage": "https://github.com/mdsteele/rust-cfb"
+      "homepage": "https://github.com/mdsteele/rust-cfb",
+      "versions": [
+        "0.7.3"
+      ]
     },
     {
       "name": "cfg_aliases",
-      "version": "0.2.1",
       "license": "MIT",
       "author": "Zicklag <zicklag@katharostech.com>",
-      "homepage": "https://github.com/katharostech/cfg_aliases"
+      "homepage": "https://github.com/katharostech/cfg_aliases",
+      "versions": [
+        "0.2.1"
+      ]
     },
     {
       "name": "cfg-expr",
-      "version": "0.15.8",
       "license": "MIT OR Apache-2.0",
       "author": "Embark <opensource@embark-studios.com>, Jake Shadle <jake.shadle@embark-studios.com>",
-      "homepage": "https://github.com/EmbarkStudios/cfg-expr"
+      "homepage": "https://github.com/EmbarkStudios/cfg-expr",
+      "versions": [
+        "0.15.8"
+      ]
     },
     {
       "name": "cfg-if",
-      "version": "1.0.4",
       "license": "MIT OR Apache-2.0",
       "author": "Alex Crichton <alex@alexcrichton.com>",
-      "homepage": "https://github.com/rust-lang/cfg-if"
+      "homepage": "https://github.com/rust-lang/cfg-if",
+      "versions": [
+        "1.0.4"
+      ]
     },
     {
       "name": "chrono",
-      "version": "0.4.44",
       "license": "MIT OR Apache-2.0",
       "author": "Kang Seonghoon and contributors",
-      "homepage": "https://github.com/chronotope/chrono"
+      "homepage": "https://github.com/chronotope/chrono",
+      "versions": [
+        "0.4.44"
+      ]
     },
     {
       "name": "combine",
-      "version": "4.6.7",
       "license": "MIT",
       "author": "Markus Westerlind <marwes91@gmail.com>",
-      "homepage": "https://github.com/Marwes/combine"
+      "homepage": "https://github.com/Marwes/combine",
+      "versions": [
+        "4.6.7"
+      ]
     },
     {
       "name": "cookie",
-      "version": "0.18.1",
       "license": "MIT OR Apache-2.0",
       "author": "Sergio Benitez <sb@sergio.bz>, Alex Crichton <alex@alexcrichton.com>",
-      "homepage": "https://github.com/SergioBenitez/cookie-rs"
+      "homepage": "https://github.com/SergioBenitez/cookie-rs",
+      "versions": [
+        "0.18.1"
+      ]
     },
     {
       "name": "core-foundation",
-      "version": "0.9.4, 0.10.1",
       "license": "MIT OR Apache-2.0",
       "author": "The Servo Project Developers",
-      "homepage": "https://github.com/servo/core-foundation-rs"
+      "homepage": "https://github.com/servo/core-foundation-rs",
+      "versions": [
+        "0.9.4",
+        "0.10.1"
+      ]
     },
     {
       "name": "core-foundation-sys",
-      "version": "0.8.7",
       "license": "MIT OR Apache-2.0",
       "author": "The Servo Project Developers",
-      "homepage": "https://github.com/servo/core-foundation-rs"
+      "homepage": "https://github.com/servo/core-foundation-rs",
+      "versions": [
+        "0.8.7"
+      ]
     },
     {
       "name": "core-graphics",
-      "version": "0.25.0",
       "license": "MIT OR Apache-2.0",
       "author": "The Servo Project Developers",
-      "homepage": "https://github.com/servo/core-foundation-rs"
+      "homepage": "https://github.com/servo/core-foundation-rs",
+      "versions": [
+        "0.25.0"
+      ]
     },
     {
       "name": "core-graphics-types",
-      "version": "0.2.0",
       "license": "MIT OR Apache-2.0",
       "author": "The Servo Project Developers",
-      "homepage": "https://github.com/servo/core-foundation-rs"
+      "homepage": "https://github.com/servo/core-foundation-rs",
+      "versions": [
+        "0.2.0"
+      ]
     },
     {
       "name": "cpufeatures",
-      "version": "0.2.17",
       "license": "MIT OR Apache-2.0",
       "author": "RustCrypto Developers",
-      "homepage": "https://github.com/RustCrypto/utils"
+      "homepage": "https://github.com/RustCrypto/utils",
+      "versions": [
+        "0.2.17"
+      ]
     },
     {
       "name": "crc32fast",
-      "version": "1.5.0",
       "license": "MIT OR Apache-2.0",
       "author": "Sam Rijs <srijs@airpost.net>, Alex Crichton <alex@alexcrichton.com>",
-      "homepage": "https://github.com/srijs/rust-crc32fast"
+      "homepage": "https://github.com/srijs/rust-crc32fast",
+      "versions": [
+        "1.5.0"
+      ]
     },
     {
       "name": "crossbeam-channel",
-      "version": "0.5.15",
       "license": "MIT OR Apache-2.0",
       "author": "The Crossbeam Project Developers",
-      "homepage": "https://github.com/crossbeam-rs/crossbeam/tree/master/crossbeam-channel"
+      "homepage": "https://github.com/crossbeam-rs/crossbeam/tree/master/crossbeam-channel",
+      "versions": [
+        "0.5.15"
+      ]
     },
     {
       "name": "crossbeam-utils",
-      "version": "0.8.21",
       "license": "MIT OR Apache-2.0",
       "author": "The Crossbeam Project Developers",
-      "homepage": "https://github.com/crossbeam-rs/crossbeam/tree/master/crossbeam-utils"
+      "homepage": "https://github.com/crossbeam-rs/crossbeam/tree/master/crossbeam-utils",
+      "versions": [
+        "0.8.21"
+      ]
     },
     {
       "name": "crypto-common",
-      "version": "0.1.7",
       "license": "MIT OR Apache-2.0",
       "author": "RustCrypto Developers",
-      "homepage": "https://github.com/RustCrypto/traits"
+      "homepage": "https://github.com/RustCrypto/traits",
+      "versions": [
+        "0.1.7"
+      ]
     },
     {
       "name": "cssparser",
-      "version": "0.36.0",
       "license": "MPL-2.0",
       "author": "Simon Sapin <simon.sapin@exyr.org>",
-      "homepage": "https://github.com/servo/rust-cssparser"
+      "homepage": "https://github.com/servo/rust-cssparser",
+      "versions": [
+        "0.36.0"
+      ]
     },
     {
       "name": "cssparser-macros",
-      "version": "0.6.1",
       "license": "MPL-2.0",
       "author": "Simon Sapin <simon.sapin@exyr.org>",
-      "homepage": "https://github.com/servo/rust-cssparser"
+      "homepage": "https://github.com/servo/rust-cssparser",
+      "versions": [
+        "0.6.1"
+      ]
     },
     {
       "name": "ctor",
-      "version": "0.8.0",
       "license": "MIT OR Apache-2.0",
       "author": "Matt Mastracci <matthew@mastracci.com>",
-      "homepage": "https://github.com/mmastrac/rust-ctor"
+      "homepage": "https://github.com/mmastrac/rust-ctor",
+      "versions": [
+        "0.8.0"
+      ]
     },
     {
       "name": "ctor-proc-macro",
-      "version": "0.0.7",
       "license": "MIT OR Apache-2.0",
       "author": "Matt Mastracci <matthew@mastracci.com>",
-      "homepage": "https://github.com/mmastrac/rust-ctor"
+      "homepage": "https://github.com/mmastrac/rust-ctor",
+      "versions": [
+        "0.0.7"
+      ]
     },
     {
       "name": "darling",
-      "version": "0.23.0",
       "license": "MIT",
       "author": "Ted Driggs <ted.driggs@outlook.com>",
-      "homepage": "https://github.com/TedDriggs/darling"
+      "homepage": "https://github.com/TedDriggs/darling",
+      "versions": [
+        "0.23.0"
+      ]
     },
     {
       "name": "darling_core",
-      "version": "0.23.0",
       "license": "MIT",
       "author": "Ted Driggs <ted.driggs@outlook.com>",
-      "homepage": "https://github.com/TedDriggs/darling"
+      "homepage": "https://github.com/TedDriggs/darling",
+      "versions": [
+        "0.23.0"
+      ]
     },
     {
       "name": "darling_macro",
-      "version": "0.23.0",
       "license": "MIT",
       "author": "Ted Driggs <ted.driggs@outlook.com>",
-      "homepage": "https://github.com/TedDriggs/darling"
+      "homepage": "https://github.com/TedDriggs/darling",
+      "versions": [
+        "0.23.0"
+      ]
     },
     {
       "name": "dbus",
-      "version": "0.9.11",
       "license": "MIT OR Apache-2.0",
       "author": "David Henningsson <diwic@ubuntu.com>",
-      "homepage": "https://github.com/diwic/dbus-rs"
+      "homepage": "https://github.com/diwic/dbus-rs",
+      "versions": [
+        "0.9.11"
+      ]
     },
     {
       "name": "deranged",
-      "version": "0.5.8",
       "license": "MIT OR Apache-2.0",
       "author": "Jacob Pratt <jacob@jhpratt.dev>",
-      "homepage": "https://github.com/jhpratt/deranged"
+      "homepage": "https://github.com/jhpratt/deranged",
+      "versions": [
+        "0.5.8"
+      ]
     },
     {
       "name": "derive_arbitrary",
-      "version": "1.4.2",
       "license": "MIT OR Apache-2.0",
       "author": "The Rust-Fuzz Project Developers, Nick Fitzgerald <fitzgen@gmail.com>, Manish Goregaokar <manishsmail@gmail.com>, Andre Bogus <bogusandre@gmail.com>, Corey Farwell <coreyf@rwell.org>",
-      "homepage": "https://github.com/rust-fuzz/arbitrary"
+      "homepage": "https://github.com/rust-fuzz/arbitrary",
+      "versions": [
+        "1.4.2"
+      ]
     },
     {
       "name": "derive_more",
-      "version": "2.1.1",
       "license": "MIT",
       "author": "Jelte Fennema <github-tech@jeltef.nl>",
-      "homepage": "https://github.com/JelteF/derive_more"
+      "homepage": "https://github.com/JelteF/derive_more",
+      "versions": [
+        "2.1.1"
+      ]
     },
     {
       "name": "derive_more-impl",
-      "version": "2.1.1",
       "license": "MIT",
       "author": "Jelte Fennema <github-tech@jeltef.nl>",
-      "homepage": "https://github.com/JelteF/derive_more"
+      "homepage": "https://github.com/JelteF/derive_more",
+      "versions": [
+        "2.1.1"
+      ]
     },
     {
       "name": "digest",
-      "version": "0.10.7",
       "license": "MIT OR Apache-2.0",
       "author": "RustCrypto Developers",
-      "homepage": "https://github.com/RustCrypto/traits"
+      "homepage": "https://github.com/RustCrypto/traits",
+      "versions": [
+        "0.10.7"
+      ]
     },
     {
       "name": "dirs",
-      "version": "6.0.0",
       "license": "MIT OR Apache-2.0",
       "author": "Simon Ochsenreither <simon@ochsenreither.de>",
-      "homepage": "https://github.com/soc/dirs-rs"
+      "homepage": "https://github.com/soc/dirs-rs",
+      "versions": [
+        "6.0.0"
+      ]
     },
     {
       "name": "dirs-sys",
-      "version": "0.5.0",
       "license": "MIT OR Apache-2.0",
       "author": "Simon Ochsenreither <simon@ochsenreither.de>",
-      "homepage": "https://github.com/dirs-dev/dirs-sys-rs"
+      "homepage": "https://github.com/dirs-dev/dirs-sys-rs",
+      "versions": [
+        "0.5.0"
+      ]
     },
     {
       "name": "dispatch2",
-      "version": "0.3.1",
       "license": "MIT OR Zlib OR Apache-2.0",
       "author": "Mads Marquart <mads@marquart.dk>, Mary <mary@mary.zone>",
-      "homepage": "https://github.com/madsmtm/objc2"
+      "homepage": "https://github.com/madsmtm/objc2",
+      "versions": [
+        "0.3.1"
+      ]
     },
     {
       "name": "displaydoc",
-      "version": "0.2.5",
       "license": "MIT OR Apache-2.0",
       "author": "Jane Lusby <jlusby@yaah.dev>",
-      "homepage": "https://github.com/yaahc/displaydoc"
+      "homepage": "https://github.com/yaahc/displaydoc",
+      "versions": [
+        "0.2.5"
+      ]
     },
     {
       "name": "dlopen2",
-      "version": "0.8.2",
       "license": "MIT",
       "author": "Szymon Wieloch <szymon.wieloch@gmail.com>, Ahmed Masud <ahmed.masud@saf.ai>, OpenByte <development.openbyte@gmail.com>",
-      "homepage": "https://github.com/OpenByteDev/dlopen2"
+      "homepage": "https://github.com/OpenByteDev/dlopen2",
+      "versions": [
+        "0.8.2"
+      ]
     },
     {
       "name": "dlopen2_derive",
-      "version": "0.4.3",
       "license": "MIT",
       "author": "Szymon Wieloch <szymon.wieloch@gmail.com>, OpenByte <development.openbyte@gmail.com>",
-      "homepage": "https://github.com/OpenByteDev/dlopen2"
+      "homepage": "https://github.com/OpenByteDev/dlopen2",
+      "versions": [
+        "0.4.3"
+      ]
     },
     {
       "name": "dom_query",
-      "version": "0.27.0",
       "license": "MIT",
       "author": "niklak <morgenpurple@gmail.com>, importcjj <importcjj@gmail.com>",
-      "homepage": "https://github.com/niklak/dom_query"
+      "homepage": "https://github.com/niklak/dom_query",
+      "versions": [
+        "0.27.0"
+      ]
     },
     {
       "name": "dpi",
-      "version": "0.1.2",
       "license": "Apache-2.0 AND MIT",
       "author": "The winit contributors",
-      "homepage": "https://github.com/rust-windowing/winit"
+      "homepage": "https://github.com/rust-windowing/winit",
+      "versions": [
+        "0.1.2"
+      ]
     },
     {
       "name": "dtoa",
-      "version": "1.0.11",
       "license": "MIT OR Apache-2.0",
       "author": "David Tolnay <dtolnay@gmail.com>",
-      "homepage": "https://github.com/dtolnay/dtoa"
+      "homepage": "https://github.com/dtolnay/dtoa",
+      "versions": [
+        "1.0.11"
+      ]
     },
     {
       "name": "dtoa-short",
-      "version": "0.3.5",
       "license": "MPL-2.0",
       "author": "Xidorn Quan <me@upsuper.org>",
-      "homepage": "https://github.com/upsuper/dtoa-short"
+      "homepage": "https://github.com/upsuper/dtoa-short",
+      "versions": [
+        "0.3.5"
+      ]
     },
     {
       "name": "dtor",
-      "version": "0.3.0",
       "license": "MIT OR Apache-2.0",
       "author": "Matt Mastracci <matthew@mastracci.com>",
-      "homepage": "https://github.com/mmastrac/rust-ctor"
+      "homepage": "https://github.com/mmastrac/rust-ctor",
+      "versions": [
+        "0.3.0"
+      ]
     },
     {
       "name": "dtor-proc-macro",
-      "version": "0.0.6",
       "license": "MIT OR Apache-2.0",
       "author": "Matt Mastracci <matthew@mastracci.com>",
-      "homepage": "https://github.com/mmastrac/rust-ctor"
+      "homepage": "https://github.com/mmastrac/rust-ctor",
+      "versions": [
+        "0.0.6"
+      ]
     },
     {
       "name": "dunce",
-      "version": "1.0.5",
       "license": "CC0-1.0 OR MIT-0 OR Apache-2.0",
       "author": "Kornel <kornel@geekhood.net>",
-      "homepage": "https://lib.rs/crates/dunce"
+      "homepage": "https://lib.rs/crates/dunce",
+      "versions": [
+        "1.0.5"
+      ]
     },
     {
       "name": "dyn-clone",
-      "version": "1.0.20",
       "license": "MIT OR Apache-2.0",
       "author": "David Tolnay <dtolnay@gmail.com>",
-      "homepage": "https://github.com/dtolnay/dyn-clone"
+      "homepage": "https://github.com/dtolnay/dyn-clone",
+      "versions": [
+        "1.0.20"
+      ]
     },
     {
       "name": "embed_plist",
-      "version": "1.2.2",
       "license": "MIT OR Apache-2.0",
       "author": "Nikolai Vazquez <hello@nikolaivazquez.com>",
-      "homepage": "https://github.com/nvzqz/embed-plist-rs"
+      "homepage": "https://github.com/nvzqz/embed-plist-rs",
+      "versions": [
+        "1.2.2"
+      ]
     },
     {
       "name": "embed-resource",
-      "version": "3.0.9",
       "license": "MIT",
       "author": "наб <nabijaczleweli@nabijaczleweli.xyz>, Cat Plus Plus <piotrlegnica@piotrl.pl>, Liigo <liigo@qq.com>, azyobuzin <azyobuzin@users.sourceforge.jp>, Peter Atashian <retep998@gmail.com>, pravic <ehysta@gmail.com>, Gabriel Majeri <gabriel.majeri6@gmail.com>, SonnyX, Johan Andersson <repi@repi.se>, Jordan Poles <jpdev.noreply@gmail.com>, MSxDOS <melcodos@gmail.com>, Jim McGrath <jimmc2@gmail.com>, roblabla <unfiltered@roblab.la>, Jasper Bekkers <jasper@traverseresearch.nl>, Richard Markiewicz <rmarkiewicz@devolutions.net>, Emerson de Freitas Barcelos <emersonfxbx@gmail.com>, Li Keqing <me@kaze.ai>, Alexis Bourget <alexis.bourget@gmail.com>, Michael Farrell <micolous+git@gmail.com>, Jacob Okamoto <oko@oko.io>, Marijn Suijten <marijn@traverseresearch.nl>, Lucas Nogueira <lucas@tauri.app>, CharlesChen0823 <yongchen0823@gmail.com>, Daniel Schaefer <dhs@frame.work>, Rene Leonhardt, ssrlive, Kan-Ru Chen <kanru@kanru.info>, Tony <legendmastertony@gmail.com>",
-      "homepage": "https://github.com/nabijaczleweli/rust-embed-resource"
+      "homepage": "https://github.com/nabijaczleweli/rust-embed-resource",
+      "versions": [
+        "3.0.9"
+      ]
     },
     {
       "name": "encoding_rs",
-      "version": "0.8.35",
       "license": "(MIT OR Apache-2.0) AND BSD-3-Clause",
       "author": "Henri Sivonen <hsivonen@hsivonen.fi>",
-      "homepage": "https://docs.rs/encoding_rs/"
+      "homepage": "https://docs.rs/encoding_rs/",
+      "versions": [
+        "0.8.35"
+      ]
     },
     {
       "name": "equivalent",
-      "version": "1.0.2",
       "license": "MIT OR Apache-2.0",
       "author": "The indexmap contributors",
-      "homepage": "https://github.com/indexmap-rs/equivalent"
+      "homepage": "https://github.com/indexmap-rs/equivalent",
+      "versions": [
+        "1.0.2"
+      ]
     },
     {
       "name": "erased-serde",
-      "version": "0.4.10",
       "license": "MIT OR Apache-2.0",
       "author": "David Tolnay <dtolnay@gmail.com>",
-      "homepage": "https://github.com/dtolnay/erased-serde"
+      "homepage": "https://github.com/dtolnay/erased-serde",
+      "versions": [
+        "0.4.10"
+      ]
     },
     {
       "name": "errno",
-      "version": "0.3.14",
       "license": "MIT OR Apache-2.0",
       "author": "Chris Wong <lambda.fairy@gmail.com>, Dan Gohman <dev@sunfishcode.online>",
-      "homepage": "https://github.com/lambda-fairy/rust-errno"
+      "homepage": "https://github.com/lambda-fairy/rust-errno",
+      "versions": [
+        "0.3.14"
+      ]
     },
     {
       "name": "fastrand",
-      "version": "2.4.1",
       "license": "MIT OR Apache-2.0",
       "author": "Stjepan Glavina <stjepang@gmail.com>",
-      "homepage": "https://github.com/smol-rs/fastrand"
+      "homepage": "https://github.com/smol-rs/fastrand",
+      "versions": [
+        "2.4.1"
+      ]
     },
     {
       "name": "fdeflate",
-      "version": "0.3.7",
       "license": "MIT OR Apache-2.0",
       "author": "The image-rs Developers",
-      "homepage": "https://github.com/image-rs/fdeflate"
+      "homepage": "https://github.com/image-rs/fdeflate",
+      "versions": [
+        "0.3.7"
+      ]
     },
     {
       "name": "field-offset",
-      "version": "0.3.6",
       "license": "MIT OR Apache-2.0",
       "author": "Diggory Blake <diggsey@googlemail.com>",
-      "homepage": "https://github.com/Diggsey/rust-field-offset"
+      "homepage": "https://github.com/Diggsey/rust-field-offset",
+      "versions": [
+        "0.3.6"
+      ]
     },
     {
       "name": "filetime",
-      "version": "0.2.29",
       "license": "MIT OR Apache-2.0",
       "author": "Alex Crichton <alex@alexcrichton.com>",
-      "homepage": "https://github.com/alexcrichton/filetime"
+      "homepage": "https://github.com/alexcrichton/filetime",
+      "versions": [
+        "0.2.29"
+      ]
     },
     {
       "name": "find-msvc-tools",
-      "version": "0.1.9",
       "license": "MIT OR Apache-2.0",
       "author": "Alex Crichton",
-      "homepage": "https://github.com/rust-lang/cc-rs"
+      "homepage": "https://github.com/rust-lang/cc-rs",
+      "versions": [
+        "0.1.9"
+      ]
     },
     {
       "name": "flate2",
-      "version": "1.1.9",
       "license": "MIT OR Apache-2.0",
       "author": "Alex Crichton <alex@alexcrichton.com>, Josh Triplett <josh@joshtriplett.org>",
-      "homepage": "https://github.com/rust-lang/flate2-rs"
+      "homepage": "https://github.com/rust-lang/flate2-rs",
+      "versions": [
+        "1.1.9"
+      ]
     },
     {
       "name": "fnv",
-      "version": "1.0.7",
       "license": "MIT OR Apache-2.0",
       "author": "Alex Crichton <alex@alexcrichton.com>",
-      "homepage": "https://github.com/servo/rust-fnv"
+      "homepage": "https://github.com/servo/rust-fnv",
+      "versions": [
+        "1.0.7"
+      ]
     },
     {
       "name": "foldhash",
-      "version": "0.2.0",
       "license": "Zlib",
       "author": "Orson Peters <orsonpeters@gmail.com>",
-      "homepage": "https://github.com/orlp/foldhash"
+      "homepage": "https://github.com/orlp/foldhash",
+      "versions": [
+        "0.2.0"
+      ]
     },
     {
       "name": "foreign-types",
-      "version": "0.5.0",
       "license": "MIT OR Apache-2.0",
       "author": "Steven Fackler <sfackler@gmail.com>",
-      "homepage": "https://github.com/sfackler/foreign-types"
+      "homepage": "https://github.com/sfackler/foreign-types",
+      "versions": [
+        "0.5.0"
+      ]
     },
     {
       "name": "foreign-types-macros",
-      "version": "0.2.3",
       "license": "MIT OR Apache-2.0",
       "author": "Steven Fackler <sfackler@gmail.com>",
-      "homepage": "https://github.com/sfackler/foreign-types"
+      "homepage": "https://github.com/sfackler/foreign-types",
+      "versions": [
+        "0.2.3"
+      ]
     },
     {
       "name": "foreign-types-shared",
-      "version": "0.3.1",
       "license": "MIT OR Apache-2.0",
       "author": "Steven Fackler <sfackler@gmail.com>",
-      "homepage": "https://github.com/sfackler/foreign-types"
+      "homepage": "https://github.com/sfackler/foreign-types",
+      "versions": [
+        "0.3.1"
+      ]
     },
     {
       "name": "form_urlencoded",
-      "version": "1.2.2",
       "license": "MIT OR Apache-2.0",
       "author": "The rust-url developers",
-      "homepage": "https://github.com/servo/rust-url"
+      "homepage": "https://github.com/servo/rust-url",
+      "versions": [
+        "1.2.2"
+      ]
     },
     {
       "name": "futures-channel",
-      "version": "0.3.32",
       "license": "MIT OR Apache-2.0",
       "author": "Alex Crichton, The Tokio Authors",
-      "homepage": "https://rust-lang.github.io/futures-rs"
+      "homepage": "https://rust-lang.github.io/futures-rs",
+      "versions": [
+        "0.3.32"
+      ]
     },
     {
       "name": "futures-core",
-      "version": "0.3.32",
       "license": "MIT OR Apache-2.0",
       "author": "Alex Crichton, The Tokio Authors",
-      "homepage": "https://rust-lang.github.io/futures-rs"
+      "homepage": "https://rust-lang.github.io/futures-rs",
+      "versions": [
+        "0.3.32"
+      ]
     },
     {
       "name": "futures-executor",
-      "version": "0.3.32",
       "license": "MIT OR Apache-2.0",
       "author": "Alex Crichton, The Tokio Authors",
-      "homepage": "https://rust-lang.github.io/futures-rs"
+      "homepage": "https://rust-lang.github.io/futures-rs",
+      "versions": [
+        "0.3.32"
+      ]
     },
     {
       "name": "futures-io",
-      "version": "0.3.32",
       "license": "MIT OR Apache-2.0",
       "author": "Alex Crichton, The Tokio Authors",
-      "homepage": "https://rust-lang.github.io/futures-rs"
+      "homepage": "https://rust-lang.github.io/futures-rs",
+      "versions": [
+        "0.3.32"
+      ]
     },
     {
       "name": "futures-macro",
-      "version": "0.3.32",
       "license": "MIT OR Apache-2.0",
       "author": "Alex Crichton, The Tokio Authors",
-      "homepage": "https://rust-lang.github.io/futures-rs"
+      "homepage": "https://rust-lang.github.io/futures-rs",
+      "versions": [
+        "0.3.32"
+      ]
     },
     {
       "name": "futures-sink",
-      "version": "0.3.32",
       "license": "MIT OR Apache-2.0",
       "author": "Alex Crichton, The Tokio Authors",
-      "homepage": "https://rust-lang.github.io/futures-rs"
+      "homepage": "https://rust-lang.github.io/futures-rs",
+      "versions": [
+        "0.3.32"
+      ]
     },
     {
       "name": "futures-task",
-      "version": "0.3.32",
       "license": "MIT OR Apache-2.0",
       "author": "Alex Crichton, The Tokio Authors",
-      "homepage": "https://rust-lang.github.io/futures-rs"
+      "homepage": "https://rust-lang.github.io/futures-rs",
+      "versions": [
+        "0.3.32"
+      ]
     },
     {
       "name": "futures-util",
-      "version": "0.3.32",
       "license": "MIT OR Apache-2.0",
       "author": "Alex Crichton, The Tokio Authors",
-      "homepage": "https://rust-lang.github.io/futures-rs"
+      "homepage": "https://rust-lang.github.io/futures-rs",
+      "versions": [
+        "0.3.32"
+      ]
     },
     {
       "name": "gdk",
-      "version": "0.18.2",
       "license": "MIT",
       "author": "The gtk-rs Project Developers",
-      "homepage": "https://gtk-rs.org/"
+      "homepage": "https://gtk-rs.org/",
+      "versions": [
+        "0.18.2"
+      ]
     },
     {
       "name": "gdk-pixbuf",
-      "version": "0.18.5",
       "license": "MIT",
       "author": "The gtk-rs Project Developers",
-      "homepage": "https://gtk-rs.org/"
+      "homepage": "https://gtk-rs.org/",
+      "versions": [
+        "0.18.5"
+      ]
     },
     {
       "name": "gdk-pixbuf-sys",
-      "version": "0.18.0",
       "license": "MIT",
       "author": "The gtk-rs Project Developers",
-      "homepage": "https://gtk-rs.org/"
+      "homepage": "https://gtk-rs.org/",
+      "versions": [
+        "0.18.0"
+      ]
     },
     {
       "name": "gdk-sys",
-      "version": "0.18.2",
       "license": "MIT",
       "author": "The gtk-rs Project Developers",
-      "homepage": "https://gtk-rs.org/"
+      "homepage": "https://gtk-rs.org/",
+      "versions": [
+        "0.18.2"
+      ]
     },
     {
       "name": "gdkwayland-sys",
-      "version": "0.18.2",
       "license": "MIT",
       "author": "The gtk-rs Project Developers",
-      "homepage": "https://gtk-rs.org/"
+      "homepage": "https://gtk-rs.org/",
+      "versions": [
+        "0.18.2"
+      ]
     },
     {
       "name": "gdkx11",
-      "version": "0.18.2",
       "license": "MIT",
       "author": "The gtk-rs Project Developers",
-      "homepage": "https://gtk-rs.org/"
+      "homepage": "https://gtk-rs.org/",
+      "versions": [
+        "0.18.2"
+      ]
     },
     {
       "name": "gdkx11-sys",
-      "version": "0.18.2",
       "license": "MIT",
       "author": "The gtk-rs Project Developers",
-      "homepage": "https://gtk-rs.org/"
+      "homepage": "https://gtk-rs.org/",
+      "versions": [
+        "0.18.2"
+      ]
     },
     {
       "name": "generic-array",
-      "version": "0.14.7",
       "license": "MIT",
       "author": "Bartłomiej Kamiński <fizyk20@gmail.com>, Aaron Trent <novacrazy@gmail.com>",
-      "homepage": "https://github.com/fizyk20/generic-array.git"
+      "homepage": "https://github.com/fizyk20/generic-array.git",
+      "versions": [
+        "0.14.7"
+      ]
     },
     {
       "name": "getrandom",
-      "version": "0.2.17, 0.3.4",
       "license": "MIT OR Apache-2.0",
       "author": "The Rand Project Developers",
-      "homepage": "https://github.com/rust-random/getrandom"
+      "homepage": "https://github.com/rust-random/getrandom",
+      "versions": [
+        "0.2.17",
+        "0.3.4"
+      ]
     },
     {
       "name": "gio",
-      "version": "0.18.4",
       "license": "MIT",
       "author": "The gtk-rs Project Developers",
-      "homepage": "https://gtk-rs.org/"
+      "homepage": "https://gtk-rs.org/",
+      "versions": [
+        "0.18.4"
+      ]
     },
     {
       "name": "gio-sys",
-      "version": "0.18.1",
       "license": "MIT",
       "author": "The gtk-rs Project Developers",
-      "homepage": "https://gtk-rs.org/"
+      "homepage": "https://gtk-rs.org/",
+      "versions": [
+        "0.18.1"
+      ]
     },
     {
       "name": "glib",
-      "version": "0.18.5",
       "license": "MIT",
       "author": "The gtk-rs Project Developers",
-      "homepage": "https://gtk-rs.org/"
+      "homepage": "https://gtk-rs.org/",
+      "versions": [
+        "0.18.5"
+      ]
     },
     {
       "name": "glib-macros",
-      "version": "0.18.5",
       "license": "MIT",
       "author": "The gtk-rs Project Developers",
-      "homepage": "https://gtk-rs.org/"
+      "homepage": "https://gtk-rs.org/",
+      "versions": [
+        "0.18.5"
+      ]
     },
     {
       "name": "glib-sys",
-      "version": "0.18.1",
       "license": "MIT",
       "author": "The gtk-rs Project Developers",
-      "homepage": "https://gtk-rs.org/"
+      "homepage": "https://gtk-rs.org/",
+      "versions": [
+        "0.18.1"
+      ]
     },
     {
       "name": "glob",
-      "version": "0.3.3",
       "license": "MIT OR Apache-2.0",
       "author": "The Rust Project Developers",
-      "homepage": "https://github.com/rust-lang/glob"
+      "homepage": "https://github.com/rust-lang/glob",
+      "versions": [
+        "0.3.3"
+      ]
     },
     {
       "name": "gobject-sys",
-      "version": "0.18.0",
       "license": "MIT",
       "author": "The gtk-rs Project Developers",
-      "homepage": "https://gtk-rs.org/"
+      "homepage": "https://gtk-rs.org/",
+      "versions": [
+        "0.18.0"
+      ]
     },
     {
       "name": "gtk",
-      "version": "0.18.2",
       "license": "MIT",
       "author": "The gtk-rs Project Developers",
-      "homepage": "https://gtk-rs.org/"
+      "homepage": "https://gtk-rs.org/",
+      "versions": [
+        "0.18.2"
+      ]
     },
     {
       "name": "gtk-sys",
-      "version": "0.18.2",
       "license": "MIT",
       "author": "The gtk-rs Project Developers",
-      "homepage": "https://gtk-rs.org/"
+      "homepage": "https://gtk-rs.org/",
+      "versions": [
+        "0.18.2"
+      ]
     },
     {
       "name": "gtk3-macros",
-      "version": "0.18.2",
       "license": "MIT",
       "author": "The gtk-rs Project Developers",
-      "homepage": "https://gtk-rs.org/"
+      "homepage": "https://gtk-rs.org/",
+      "versions": [
+        "0.18.2"
+      ]
     },
     {
       "name": "hashbrown",
-      "version": "0.12.3, 0.17.1",
       "license": "MIT OR Apache-2.0",
       "author": "Amanieu d'Antras <amanieu@gmail.com>",
-      "homepage": "https://github.com/rust-lang/hashbrown"
+      "homepage": "https://github.com/rust-lang/hashbrown",
+      "versions": [
+        "0.12.3",
+        "0.17.1"
+      ]
     },
     {
       "name": "heck",
-      "version": "0.4.1, 0.5.0",
       "license": "MIT OR Apache-2.0",
       "author": "Without Boats <woboats@gmail.com>",
-      "homepage": "https://github.com/withoutboats/heck"
+      "homepage": "https://github.com/withoutboats/heck",
+      "versions": [
+        "0.4.1",
+        "0.5.0"
+      ]
     },
     {
       "name": "hex",
-      "version": "0.4.3",
       "license": "MIT OR Apache-2.0",
       "author": "KokaKiwi <kokakiwi@kokakiwi.net>",
-      "homepage": "https://github.com/KokaKiwi/rust-hex"
+      "homepage": "https://github.com/KokaKiwi/rust-hex",
+      "versions": [
+        "0.4.3"
+      ]
     },
     {
       "name": "html5ever",
-      "version": "0.38.0",
       "license": "MIT OR Apache-2.0",
       "author": "The html5ever Project Developers",
-      "homepage": "https://github.com/servo/html5ever"
+      "homepage": "https://github.com/servo/html5ever",
+      "versions": [
+        "0.38.0"
+      ]
     },
     {
       "name": "http",
-      "version": "1.4.0",
       "license": "MIT OR Apache-2.0",
       "author": "Alex Crichton <alex@alexcrichton.com>, Carl Lerche <me@carllerche.com>, Sean McArthur <sean@seanmonstar.com>",
-      "homepage": "https://github.com/hyperium/http"
+      "homepage": "https://github.com/hyperium/http",
+      "versions": [
+        "1.4.0"
+      ]
     },
     {
       "name": "http-body",
-      "version": "1.0.1",
       "license": "MIT",
       "author": "Carl Lerche <me@carllerche.com>, Lucio Franco <luciofranco14@gmail.com>, Sean McArthur <sean@seanmonstar.com>",
-      "homepage": "https://github.com/hyperium/http-body"
+      "homepage": "https://github.com/hyperium/http-body",
+      "versions": [
+        "1.0.1"
+      ]
     },
     {
       "name": "http-body-util",
-      "version": "0.1.3",
       "license": "MIT",
       "author": "Carl Lerche <me@carllerche.com>, Lucio Franco <luciofranco14@gmail.com>, Sean McArthur <sean@seanmonstar.com>",
-      "homepage": "https://github.com/hyperium/http-body"
+      "homepage": "https://github.com/hyperium/http-body",
+      "versions": [
+        "0.1.3"
+      ]
     },
     {
       "name": "httparse",
-      "version": "1.10.1",
       "license": "MIT OR Apache-2.0",
       "author": "Sean McArthur <sean@seanmonstar.com>",
-      "homepage": "https://github.com/seanmonstar/httparse"
+      "homepage": "https://github.com/seanmonstar/httparse",
+      "versions": [
+        "1.10.1"
+      ]
     },
     {
       "name": "hyper",
-      "version": "1.9.0",
       "license": "MIT",
       "author": "Sean McArthur <sean@seanmonstar.com>",
-      "homepage": "https://hyper.rs"
+      "homepage": "https://hyper.rs",
+      "versions": [
+        "1.9.0"
+      ]
     },
     {
       "name": "hyper-rustls",
-      "version": "0.27.9",
       "license": "MIT OR Apache-2.0 OR ISC",
       "author": "Joseph Birr-Pixton",
-      "homepage": "https://github.com/rustls/hyper-rustls"
+      "homepage": "https://github.com/rustls/hyper-rustls",
+      "versions": [
+        "0.27.9"
+      ]
     },
     {
       "name": "hyper-util",
-      "version": "0.1.20",
       "license": "MIT",
       "author": "Sean McArthur <sean@seanmonstar.com>",
-      "homepage": "https://hyper.rs"
+      "homepage": "https://hyper.rs",
+      "versions": [
+        "0.1.20"
+      ]
     },
     {
       "name": "iana-time-zone",
-      "version": "0.1.65",
       "license": "MIT OR Apache-2.0",
       "author": "Andrew Straw <strawman@astraw.com>, René Kijewski <rene.kijewski@fu-berlin.de>, Ryan Lopopolo <rjl@hyperbo.la>",
-      "homepage": "https://github.com/strawlab/iana-time-zone"
+      "homepage": "https://github.com/strawlab/iana-time-zone",
+      "versions": [
+        "0.1.65"
+      ]
     },
     {
       "name": "iana-time-zone-haiku",
-      "version": "0.1.2",
       "license": "MIT OR Apache-2.0",
       "author": "René Kijewski <crates.io@k6i.de>",
-      "homepage": "https://github.com/strawlab/iana-time-zone"
+      "homepage": "https://github.com/strawlab/iana-time-zone",
+      "versions": [
+        "0.1.2"
+      ]
     },
     {
       "name": "ico",
-      "version": "0.5.0",
       "license": "MIT",
       "author": "Matthew D. Steele <mdsteele@alum.mit.edu>",
-      "homepage": "https://github.com/mdsteele/rust-ico"
+      "homepage": "https://github.com/mdsteele/rust-ico",
+      "versions": [
+        "0.5.0"
+      ]
     },
     {
       "name": "icu_collections",
-      "version": "2.2.0",
       "license": "Unicode-3.0",
       "author": "The ICU4X Project Developers",
-      "homepage": "https://icu4x.unicode.org"
+      "homepage": "https://icu4x.unicode.org",
+      "versions": [
+        "2.2.0"
+      ]
     },
     {
       "name": "icu_locale_core",
-      "version": "2.2.0",
       "license": "Unicode-3.0",
       "author": "The ICU4X Project Developers",
-      "homepage": "https://icu4x.unicode.org"
+      "homepage": "https://icu4x.unicode.org",
+      "versions": [
+        "2.2.0"
+      ]
     },
     {
       "name": "icu_normalizer",
-      "version": "2.2.0",
       "license": "Unicode-3.0",
       "author": "The ICU4X Project Developers",
-      "homepage": "https://icu4x.unicode.org"
+      "homepage": "https://icu4x.unicode.org",
+      "versions": [
+        "2.2.0"
+      ]
     },
     {
       "name": "icu_normalizer_data",
-      "version": "2.2.0",
       "license": "Unicode-3.0",
       "author": "The ICU4X Project Developers",
-      "homepage": "https://icu4x.unicode.org"
+      "homepage": "https://icu4x.unicode.org",
+      "versions": [
+        "2.2.0"
+      ]
     },
     {
       "name": "icu_properties",
-      "version": "2.2.0",
       "license": "Unicode-3.0",
       "author": "The ICU4X Project Developers",
-      "homepage": "https://icu4x.unicode.org"
+      "homepage": "https://icu4x.unicode.org",
+      "versions": [
+        "2.2.0"
+      ]
     },
     {
       "name": "icu_properties_data",
-      "version": "2.2.0",
       "license": "Unicode-3.0",
       "author": "The ICU4X Project Developers",
-      "homepage": "https://icu4x.unicode.org"
+      "homepage": "https://icu4x.unicode.org",
+      "versions": [
+        "2.2.0"
+      ]
     },
     {
       "name": "icu_provider",
-      "version": "2.2.0",
       "license": "Unicode-3.0",
       "author": "The ICU4X Project Developers",
-      "homepage": "https://icu4x.unicode.org"
+      "homepage": "https://icu4x.unicode.org",
+      "versions": [
+        "2.2.0"
+      ]
     },
     {
       "name": "ident_case",
-      "version": "1.0.1",
       "license": "MIT OR Apache-2.0",
       "author": "Ted Driggs <ted.driggs@outlook.com>",
-      "homepage": "https://github.com/TedDriggs/ident_case"
+      "homepage": "https://github.com/TedDriggs/ident_case",
+      "versions": [
+        "1.0.1"
+      ]
     },
     {
       "name": "idna",
-      "version": "1.1.0",
       "license": "MIT OR Apache-2.0",
       "author": "The rust-url developers",
-      "homepage": "https://github.com/servo/rust-url/"
+      "homepage": "https://github.com/servo/rust-url/",
+      "versions": [
+        "1.1.0"
+      ]
     },
     {
       "name": "idna_adapter",
-      "version": "1.2.2",
       "license": "MIT OR Apache-2.0",
       "author": "The rust-url developers",
-      "homepage": "https://docs.rs/crate/idna_adapter/latest"
+      "homepage": "https://docs.rs/crate/idna_adapter/latest",
+      "versions": [
+        "1.2.2"
+      ]
     },
     {
       "name": "indexmap",
-      "version": "1.9.3, 2.14.0",
       "license": "MIT OR Apache-2.0",
       "author": "The indexmap contributors",
-      "homepage": "https://github.com/indexmap-rs/indexmap"
+      "homepage": "https://github.com/indexmap-rs/indexmap",
+      "versions": [
+        "1.9.3",
+        "2.14.0"
+      ]
     },
     {
       "name": "infer",
-      "version": "0.19.0",
       "license": "MIT",
       "author": "Bojan <dbojan@gmail.com>",
-      "homepage": "https://github.com/bojand/infer"
+      "homepage": "https://github.com/bojand/infer",
+      "versions": [
+        "0.19.0"
+      ]
     },
     {
       "name": "ipnet",
-      "version": "2.12.0",
       "license": "MIT OR Apache-2.0",
       "author": "Kris Price <kris@krisprice.nz>",
-      "homepage": "https://github.com/krisprice/ipnet"
+      "homepage": "https://github.com/krisprice/ipnet",
+      "versions": [
+        "2.12.0"
+      ]
     },
     {
       "name": "is-docker",
-      "version": "0.2.0",
       "license": "MIT",
       "author": "Sean Larkin <TheLarkInn@users.noreply.github.com>",
-      "homepage": "https://github.com/TheLarkInn/is-docker"
+      "homepage": "https://github.com/TheLarkInn/is-docker",
+      "versions": [
+        "0.2.0"
+      ]
     },
     {
       "name": "is-wsl",
-      "version": "0.4.0",
       "license": "MIT",
       "author": "Sean Larkin <TheLarkInn@users.noreply.github.com>",
-      "homepage": "https://github.com/TheLarkInn/is-wsl"
+      "homepage": "https://github.com/TheLarkInn/is-wsl",
+      "versions": [
+        "0.4.0"
+      ]
     },
     {
       "name": "itoa",
-      "version": "1.0.18",
       "license": "MIT OR Apache-2.0",
       "author": "David Tolnay <dtolnay@gmail.com>",
-      "homepage": "https://github.com/dtolnay/itoa"
+      "homepage": "https://github.com/dtolnay/itoa",
+      "versions": [
+        "1.0.18"
+      ]
     },
     {
       "name": "javascriptcore-rs",
-      "version": "1.1.2",
       "license": "MIT",
       "author": "The Gtk-rs Project Developers, Tauri Programme within The Commons Conservancy",
-      "homepage": "https://github.com/tauri-apps/javascriptcore-rs"
+      "homepage": "https://github.com/tauri-apps/javascriptcore-rs",
+      "versions": [
+        "1.1.2"
+      ]
     },
     {
       "name": "javascriptcore-rs-sys",
-      "version": "1.1.1",
       "license": "MIT",
       "author": "The Gtk-rs Project Developers",
-      "homepage": "https://github.com/tauri-apps/javascriptcore-rs"
+      "homepage": "https://github.com/tauri-apps/javascriptcore-rs",
+      "versions": [
+        "1.1.1"
+      ]
     },
     {
       "name": "jni",
-      "version": "0.21.1, 0.22.4",
       "license": "MIT OR Apache-2.0",
       "author": "jni team",
-      "homepage": "https://github.com/jni-rs/jni-rs"
+      "homepage": "https://github.com/jni-rs/jni-rs",
+      "versions": [
+        "0.21.1",
+        "0.22.4"
+      ]
     },
     {
       "name": "jni-macros",
-      "version": "0.22.4",
       "license": "MIT OR Apache-2.0",
       "author": "jni team",
-      "homepage": "https://github.com/jni-rs/jni-rs"
+      "homepage": "https://github.com/jni-rs/jni-rs",
+      "versions": [
+        "0.22.4"
+      ]
     },
     {
       "name": "jni-sys",
-      "version": "0.3.1, 0.4.1",
       "license": "MIT OR Apache-2.0",
       "author": "Steven Fackler <sfackler@gmail.com>, Robert Bragg <robert@sixbynine.org>",
-      "homepage": "https://github.com/jni-rs/jni-sys"
+      "homepage": "https://github.com/jni-rs/jni-sys",
+      "versions": [
+        "0.3.1",
+        "0.4.1"
+      ]
     },
     {
       "name": "jni-sys-macros",
-      "version": "0.4.1",
       "license": "MIT OR Apache-2.0",
       "author": "Robert Bragg <robert@sixbynine.org>",
-      "homepage": "https://github.com/jni-rs/jni-sys"
+      "homepage": "https://github.com/jni-rs/jni-sys",
+      "versions": [
+        "0.4.1"
+      ]
     },
     {
       "name": "js-sys",
-      "version": "0.3.98",
       "license": "MIT OR Apache-2.0",
       "author": "The wasm-bindgen Developers",
-      "homepage": "https://wasm-bindgen.github.io/wasm-bindgen/"
+      "homepage": "https://wasm-bindgen.github.io/wasm-bindgen/",
+      "versions": [
+        "0.3.98"
+      ]
     },
     {
       "name": "json-patch",
-      "version": "3.0.1",
       "license": "MIT OR Apache-2.0",
       "author": "Ivan Dubrov <dubrov.ivan@gmail.com>",
-      "homepage": "https://github.com/idubrov/json-patch"
+      "homepage": "https://github.com/idubrov/json-patch",
+      "versions": [
+        "3.0.1"
+      ]
     },
     {
       "name": "jsonptr",
-      "version": "0.6.3",
       "license": "MIT OR Apache-2.0",
       "author": "chance dinkins, André Sá de Mello <codasm@pm.me>",
-      "homepage": "https://github.com/chanced/jsonptr"
+      "homepage": "https://github.com/chanced/jsonptr",
+      "versions": [
+        "0.6.3"
+      ]
     },
     {
       "name": "keyboard-types",
-      "version": "0.7.0",
       "license": "MIT OR Apache-2.0",
       "author": "Pyfisch <pyfisch@posteo.org>",
-      "homepage": "https://github.com/pyfisch/keyboard-types"
+      "homepage": "https://github.com/pyfisch/keyboard-types",
+      "versions": [
+        "0.7.0"
+      ]
     },
     {
       "name": "libappindicator",
-      "version": "0.9.0",
       "license": "MIT OR Apache-2.0",
       "author": "Tauri Apps Contributors",
-      "homepage": "https://github.com/tauri-apps/libappindicator-rs"
+      "homepage": "https://github.com/tauri-apps/libappindicator-rs",
+      "versions": [
+        "0.9.0"
+      ]
     },
     {
       "name": "libappindicator-sys",
-      "version": "0.9.0",
       "license": "MIT OR Apache-2.0",
       "author": "Tauri Apps Contributors",
-      "homepage": "https://github.com/tauri-apps/libappindicator-rs"
+      "homepage": "https://github.com/tauri-apps/libappindicator-rs",
+      "versions": [
+        "0.9.0"
+      ]
     },
     {
       "name": "libc",
-      "version": "0.2.189",
       "license": "MIT OR Apache-2.0",
       "author": "The Rust Project Developers",
-      "homepage": "https://github.com/rust-lang/libc"
+      "homepage": "https://github.com/rust-lang/libc",
+      "versions": [
+        "0.2.189"
+      ]
     },
     {
       "name": "libdbus-sys",
-      "version": "0.2.7",
       "license": "MIT OR Apache-2.0",
       "author": "David Henningsson <diwic@ubuntu.com>",
-      "homepage": "https://github.com/diwic/dbus-rs"
+      "homepage": "https://github.com/diwic/dbus-rs",
+      "versions": [
+        "0.2.7"
+      ]
     },
     {
       "name": "libloading",
-      "version": "0.7.4",
       "license": "ISC",
       "author": "Simonas Kazlauskas <libloading@kazlauskas.me>",
-      "homepage": "https://github.com/nagisa/rust_libloading/"
+      "homepage": "https://github.com/nagisa/rust_libloading/",
+      "versions": [
+        "0.7.4"
+      ]
     },
     {
       "name": "libredox",
-      "version": "0.1.16",
       "license": "MIT",
       "author": "4lDO2 <4lDO2@protonmail.com>",
-      "homepage": "https://gitlab.redox-os.org/redox-os/libredox.git"
+      "homepage": "https://gitlab.redox-os.org/redox-os/libredox.git",
+      "versions": [
+        "0.1.16"
+      ]
     },
     {
       "name": "linux-raw-sys",
-      "version": "0.12.1",
       "license": "MIT OR Apache-2.0 WITH LLVM-exception OR Apache-2.0",
       "author": "Dan Gohman <dev@sunfishcode.online>",
-      "homepage": "https://github.com/sunfishcode/linux-raw-sys"
+      "homepage": "https://github.com/sunfishcode/linux-raw-sys",
+      "versions": [
+        "0.12.1"
+      ]
     },
     {
       "name": "litemap",
-      "version": "0.8.2",
       "license": "Unicode-3.0",
       "author": "The ICU4X Project Developers",
-      "homepage": "https://github.com/unicode-org/icu4x"
+      "homepage": "https://github.com/unicode-org/icu4x",
+      "versions": [
+        "0.8.2"
+      ]
     },
     {
       "name": "lock_api",
-      "version": "0.4.14",
       "license": "MIT OR Apache-2.0",
       "author": "Amanieu d'Antras <amanieu@gmail.com>",
-      "homepage": "https://github.com/Amanieu/parking_lot"
+      "homepage": "https://github.com/Amanieu/parking_lot",
+      "versions": [
+        "0.4.14"
+      ]
     },
     {
       "name": "log",
-      "version": "0.4.29",
       "license": "MIT OR Apache-2.0",
       "author": "The Rust Project Developers",
-      "homepage": "https://github.com/rust-lang/log"
+      "homepage": "https://github.com/rust-lang/log",
+      "versions": [
+        "0.4.29"
+      ]
     },
     {
       "name": "markup5ever",
-      "version": "0.38.0",
       "license": "MIT OR Apache-2.0",
       "author": "The html5ever Project Developers",
-      "homepage": "https://github.com/servo/html5ever"
+      "homepage": "https://github.com/servo/html5ever",
+      "versions": [
+        "0.38.0"
+      ]
     },
     {
       "name": "memchr",
-      "version": "2.8.0",
       "license": "MIT OR Unlicense",
       "author": "Andrew Gallant <jamslam@gmail.com>, bluss",
-      "homepage": "https://github.com/BurntSushi/memchr"
+      "homepage": "https://github.com/BurntSushi/memchr",
+      "versions": [
+        "2.8.0"
+      ]
     },
     {
       "name": "memoffset",
-      "version": "0.9.1",
       "license": "MIT",
       "author": "Gilad Naaman <gilad.naaman@gmail.com>",
-      "homepage": "https://github.com/Gilnaa/memoffset"
+      "homepage": "https://github.com/Gilnaa/memoffset",
+      "versions": [
+        "0.9.1"
+      ]
     },
     {
       "name": "mime",
-      "version": "0.3.17",
       "license": "MIT OR Apache-2.0",
       "author": "Sean McArthur <sean@seanmonstar.com>",
-      "homepage": "https://github.com/hyperium/mime"
+      "homepage": "https://github.com/hyperium/mime",
+      "versions": [
+        "0.3.17"
+      ]
     },
     {
       "name": "minisign-verify",
-      "version": "0.2.5",
       "license": "MIT",
       "author": "Frank Denis <github@pureftpd.org>",
-      "homepage": "https://github.com/jedisct1/rust-minisign-verify"
+      "homepage": "https://github.com/jedisct1/rust-minisign-verify",
+      "versions": [
+        "0.2.5"
+      ]
     },
     {
       "name": "miniz_oxide",
-      "version": "0.8.9",
       "license": "MIT OR Zlib OR Apache-2.0",
       "author": "Frommi <daniil.liferenko@gmail.com>, oyvindln <oyvindln@users.noreply.github.com>, Rich Geldreich richgel99@gmail.com",
-      "homepage": "https://github.com/Frommi/miniz_oxide/tree/master/miniz_oxide"
+      "homepage": "https://github.com/Frommi/miniz_oxide/tree/master/miniz_oxide",
+      "versions": [
+        "0.8.9"
+      ]
     },
     {
       "name": "mio",
-      "version": "1.2.0",
       "license": "MIT",
       "author": "Carl Lerche <me@carllerche.com>, Thomas de Zeeuw <thomasdezeeuw@gmail.com>, Tokio Contributors <team@tokio.rs>",
-      "homepage": "https://github.com/tokio-rs/mio"
+      "homepage": "https://github.com/tokio-rs/mio",
+      "versions": [
+        "1.2.0"
+      ]
     },
     {
       "name": "muda",
-      "version": "0.19.1",
       "license": "MIT OR Apache-2.0",
       "author": "Tauri Programme within The Commons Conservancy",
-      "homepage": "https://github.com/tauri-apps/muda"
+      "homepage": "https://github.com/tauri-apps/muda",
+      "versions": [
+        "0.19.1"
+      ]
     },
     {
       "name": "ndk",
-      "version": "0.9.0",
       "license": "MIT OR Apache-2.0",
       "author": "The Rust Mobile contributors",
-      "homepage": "https://github.com/rust-mobile/ndk"
+      "homepage": "https://github.com/rust-mobile/ndk",
+      "versions": [
+        "0.9.0"
+      ]
     },
     {
       "name": "ndk-sys",
-      "version": "0.6.0+11769913",
       "license": "MIT OR Apache-2.0",
       "author": "The Rust Windowing contributors",
-      "homepage": "https://github.com/rust-mobile/ndk"
+      "homepage": "https://github.com/rust-mobile/ndk",
+      "versions": [
+        "0.6.0+11769913"
+      ]
     },
     {
       "name": "new_debug_unreachable",
-      "version": "1.0.6",
       "license": "MIT",
       "author": "Matt Brubeck <mbrubeck@limpet.net>, Jonathan Reem <jonathan.reem@gmail.com>",
-      "homepage": "https://github.com/mbrubeck/rust-debug-unreachable"
+      "homepage": "https://github.com/mbrubeck/rust-debug-unreachable",
+      "versions": [
+        "1.0.6"
+      ]
     },
     {
       "name": "nix",
-      "version": "0.31.3",
       "license": "MIT",
       "author": "Carl Lerche and nix-rust Authors",
-      "homepage": "https://github.com/nix-rust/nix"
+      "homepage": "https://github.com/nix-rust/nix",
+      "versions": [
+        "0.31.3"
+      ]
     },
     {
       "name": "num_enum",
-      "version": "0.7.6",
       "license": "MIT OR BSD-3-Clause OR Apache-2.0",
       "author": "Daniel Wagner-Hall <dawagner@gmail.com>, Daniel Henry-Mantilla <daniel.henry.mantilla@gmail.com>, Vincent Esche <regexident@gmail.com>",
-      "homepage": "https://github.com/illicitonion/num_enum"
+      "homepage": "https://github.com/illicitonion/num_enum",
+      "versions": [
+        "0.7.6"
+      ]
     },
     {
       "name": "num_enum_derive",
-      "version": "0.7.6",
       "license": "MIT OR BSD-3-Clause OR Apache-2.0",
       "author": "Daniel Wagner-Hall <dawagner@gmail.com>, Daniel Henry-Mantilla <daniel.henry.mantilla@gmail.com>, Vincent Esche <regexident@gmail.com>",
-      "homepage": "https://github.com/illicitonion/num_enum"
+      "homepage": "https://github.com/illicitonion/num_enum",
+      "versions": [
+        "0.7.6"
+      ]
     },
     {
       "name": "num-conv",
-      "version": "0.2.2",
       "license": "MIT OR Apache-2.0",
       "author": "Jacob Pratt <jacob@jhpratt.dev>",
-      "homepage": "https://github.com/jhpratt/num-conv"
+      "homepage": "https://github.com/jhpratt/num-conv",
+      "versions": [
+        "0.2.2"
+      ]
     },
     {
       "name": "num-traits",
-      "version": "0.2.19",
       "license": "MIT OR Apache-2.0",
       "author": "The Rust Project Developers",
-      "homepage": "https://github.com/rust-num/num-traits"
+      "homepage": "https://github.com/rust-num/num-traits",
+      "versions": [
+        "0.2.19"
+      ]
     },
     {
       "name": "objc2-cloud-kit",
-      "version": "0.3.2",
       "license": "MIT OR Zlib OR Apache-2.0",
       "author": "Mads Marquart",
-      "homepage": "https://github.com/madsmtm/objc2"
+      "homepage": "https://github.com/madsmtm/objc2",
+      "versions": [
+        "0.3.2"
+      ]
     },
     {
       "name": "objc2-core-data",
-      "version": "0.3.2",
       "license": "MIT OR Zlib OR Apache-2.0",
       "author": "Mads Marquart",
-      "homepage": "https://github.com/madsmtm/objc2"
+      "homepage": "https://github.com/madsmtm/objc2",
+      "versions": [
+        "0.3.2"
+      ]
     },
     {
       "name": "objc2-core-foundation",
-      "version": "0.3.2",
       "license": "MIT OR Zlib OR Apache-2.0",
       "author": "Mads Marquart",
-      "homepage": "https://github.com/madsmtm/objc2"
+      "homepage": "https://github.com/madsmtm/objc2",
+      "versions": [
+        "0.3.2"
+      ]
     },
     {
       "name": "objc2-core-graphics",
-      "version": "0.3.2",
       "license": "MIT OR Zlib OR Apache-2.0",
       "author": "Mads Marquart",
-      "homepage": "https://github.com/madsmtm/objc2"
+      "homepage": "https://github.com/madsmtm/objc2",
+      "versions": [
+        "0.3.2"
+      ]
     },
     {
       "name": "objc2-core-image",
-      "version": "0.3.2",
       "license": "MIT OR Zlib OR Apache-2.0",
       "author": "Mads Marquart",
-      "homepage": "https://github.com/madsmtm/objc2"
+      "homepage": "https://github.com/madsmtm/objc2",
+      "versions": [
+        "0.3.2"
+      ]
     },
     {
       "name": "objc2-core-location",
-      "version": "0.3.2",
       "license": "MIT OR Zlib OR Apache-2.0",
       "author": "Mads Marquart",
-      "homepage": "https://github.com/madsmtm/objc2"
+      "homepage": "https://github.com/madsmtm/objc2",
+      "versions": [
+        "0.3.2"
+      ]
     },
     {
       "name": "objc2-core-text",
-      "version": "0.3.2",
       "license": "MIT OR Zlib OR Apache-2.0",
       "author": "Mads Marquart",
-      "homepage": "https://github.com/madsmtm/objc2"
+      "homepage": "https://github.com/madsmtm/objc2",
+      "versions": [
+        "0.3.2"
+      ]
     },
     {
       "name": "objc2-encode",
-      "version": "4.1.0",
       "license": "MIT",
       "author": "Mads Marquart <mads@marquart.dk>",
-      "homepage": "https://github.com/madsmtm/objc2"
+      "homepage": "https://github.com/madsmtm/objc2",
+      "versions": [
+        "4.1.0"
+      ]
     },
     {
       "name": "objc2-exception-helper",
-      "version": "0.1.1",
       "license": "MIT OR Zlib OR Apache-2.0",
       "author": "Mads Marquart <mads@marquart.dk>",
-      "homepage": "https://github.com/madsmtm/objc2"
+      "homepage": "https://github.com/madsmtm/objc2",
+      "versions": [
+        "0.1.1"
+      ]
     },
     {
       "name": "objc2-io-surface",
-      "version": "0.3.2",
       "license": "MIT OR Zlib OR Apache-2.0",
       "author": "Mads Marquart",
-      "homepage": "https://github.com/madsmtm/objc2"
+      "homepage": "https://github.com/madsmtm/objc2",
+      "versions": [
+        "0.3.2"
+      ]
     },
     {
       "name": "objc2-osa-kit",
-      "version": "0.3.2",
       "license": "MIT OR Zlib OR Apache-2.0",
       "author": "Mads Marquart",
-      "homepage": "https://github.com/madsmtm/objc2"
+      "homepage": "https://github.com/madsmtm/objc2",
+      "versions": [
+        "0.3.2"
+      ]
     },
     {
       "name": "objc2-quartz-core",
-      "version": "0.3.2",
       "license": "MIT OR Zlib OR Apache-2.0",
       "author": "Mads Marquart",
-      "homepage": "https://github.com/madsmtm/objc2"
+      "homepage": "https://github.com/madsmtm/objc2",
+      "versions": [
+        "0.3.2"
+      ]
     },
     {
       "name": "objc2-ui-kit",
-      "version": "0.3.2",
       "license": "MIT OR Zlib OR Apache-2.0",
       "author": "Mads Marquart",
-      "homepage": "https://github.com/madsmtm/objc2"
+      "homepage": "https://github.com/madsmtm/objc2",
+      "versions": [
+        "0.3.2"
+      ]
     },
     {
       "name": "objc2-user-notifications",
-      "version": "0.3.2",
       "license": "MIT OR Zlib OR Apache-2.0",
       "author": "Mads Marquart",
-      "homepage": "https://github.com/madsmtm/objc2"
+      "homepage": "https://github.com/madsmtm/objc2",
+      "versions": [
+        "0.3.2"
+      ]
     },
     {
       "name": "objc2-web-kit",
-      "version": "0.3.2",
       "license": "MIT OR Zlib OR Apache-2.0",
       "author": "Mads Marquart",
-      "homepage": "https://github.com/madsmtm/objc2"
+      "homepage": "https://github.com/madsmtm/objc2",
+      "versions": [
+        "0.3.2"
+      ]
     },
     {
       "name": "once_cell",
-      "version": "1.21.4",
       "license": "MIT OR Apache-2.0",
       "author": "Aleksey Kladov <aleksey.kladov@gmail.com>",
-      "homepage": "https://github.com/matklad/once_cell"
+      "homepage": "https://github.com/matklad/once_cell",
+      "versions": [
+        "1.21.4"
+      ]
     },
     {
       "name": "open",
-      "version": "5.3.5",
       "license": "MIT",
       "author": "Sebastian Thiel <byronimo@gmail.com>",
-      "homepage": "https://github.com/Byron/open-rs"
+      "homepage": "https://github.com/Byron/open-rs",
+      "versions": [
+        "5.3.5"
+      ]
     },
     {
       "name": "openssl-probe",
-      "version": "0.2.1",
       "license": "MIT OR Apache-2.0",
       "author": "Alex Crichton <alex@alexcrichton.com>",
-      "homepage": "https://github.com/rustls/openssl-probe"
+      "homepage": "https://github.com/rustls/openssl-probe",
+      "versions": [
+        "0.2.1"
+      ]
     },
     {
       "name": "option-ext",
-      "version": "0.2.0",
       "license": "MPL-2.0",
       "author": "Simon Ochsenreither <simon@ochsenreither.de>",
-      "homepage": "https://github.com/soc/option-ext"
+      "homepage": "https://github.com/soc/option-ext",
+      "versions": [
+        "0.2.0"
+      ]
     },
     {
       "name": "os_pipe",
-      "version": "1.2.3",
       "license": "MIT",
       "author": "Jack O'Connor",
-      "homepage": "https://github.com/oconnor663/os_pipe.rs"
+      "homepage": "https://github.com/oconnor663/os_pipe.rs",
+      "versions": [
+        "1.2.3"
+      ]
     },
     {
       "name": "osakit",
-      "version": "0.3.1",
       "license": "MIT OR Apache-2.0",
       "author": "Marat Dulin <mdevils@gmail.com>",
-      "homepage": "https://github.com/mdevils/rust-osakit"
+      "homepage": "https://github.com/mdevils/rust-osakit",
+      "versions": [
+        "0.3.1"
+      ]
     },
     {
       "name": "pango",
-      "version": "0.18.3",
       "license": "MIT",
       "author": "The gtk-rs Project Developers",
-      "homepage": "https://gtk-rs.org/"
+      "homepage": "https://gtk-rs.org/",
+      "versions": [
+        "0.18.3"
+      ]
     },
     {
       "name": "pango-sys",
-      "version": "0.18.0",
       "license": "MIT",
       "author": "The gtk-rs Project Developers",
-      "homepage": "https://gtk-rs.org/"
+      "homepage": "https://gtk-rs.org/",
+      "versions": [
+        "0.18.0"
+      ]
     },
     {
       "name": "parking_lot",
-      "version": "0.12.5",
       "license": "MIT OR Apache-2.0",
       "author": "Amanieu d'Antras <amanieu@gmail.com>",
-      "homepage": "https://github.com/Amanieu/parking_lot"
+      "homepage": "https://github.com/Amanieu/parking_lot",
+      "versions": [
+        "0.12.5"
+      ]
     },
     {
       "name": "parking_lot_core",
-      "version": "0.9.12",
       "license": "MIT OR Apache-2.0",
       "author": "Amanieu d'Antras <amanieu@gmail.com>",
-      "homepage": "https://github.com/Amanieu/parking_lot"
+      "homepage": "https://github.com/Amanieu/parking_lot",
+      "versions": [
+        "0.9.12"
+      ]
     },
     {
       "name": "pathdiff",
-      "version": "0.2.3",
       "license": "MIT OR Apache-2.0",
       "author": "Manish Goregaokar <manishsmail@gmail.com>",
-      "homepage": "https://github.com/Manishearth/pathdiff"
+      "homepage": "https://github.com/Manishearth/pathdiff",
+      "versions": [
+        "0.2.3"
+      ]
     },
     {
       "name": "percent-encoding",
-      "version": "2.3.2",
       "license": "MIT OR Apache-2.0",
       "author": "The rust-url developers",
-      "homepage": "https://github.com/servo/rust-url/"
+      "homepage": "https://github.com/servo/rust-url/",
+      "versions": [
+        "2.3.2"
+      ]
     },
     {
       "name": "phf",
-      "version": "0.13.1",
       "license": "MIT",
       "author": "Steven Fackler <sfackler@gmail.com>",
-      "homepage": "https://github.com/rust-phf/rust-phf"
+      "homepage": "https://github.com/rust-phf/rust-phf",
+      "versions": [
+        "0.13.1"
+      ]
     },
     {
       "name": "phf_codegen",
-      "version": "0.13.1",
       "license": "MIT",
       "author": "Steven Fackler <sfackler@gmail.com>",
-      "homepage": "https://github.com/rust-phf/rust-phf"
+      "homepage": "https://github.com/rust-phf/rust-phf",
+      "versions": [
+        "0.13.1"
+      ]
     },
     {
       "name": "phf_generator",
-      "version": "0.13.1",
       "license": "MIT",
       "author": "Steven Fackler <sfackler@gmail.com>",
-      "homepage": "https://github.com/rust-phf/rust-phf"
+      "homepage": "https://github.com/rust-phf/rust-phf",
+      "versions": [
+        "0.13.1"
+      ]
     },
     {
       "name": "phf_macros",
-      "version": "0.13.1",
       "license": "MIT",
       "author": "Steven Fackler <sfackler@gmail.com>",
-      "homepage": "https://github.com/rust-phf/rust-phf"
+      "homepage": "https://github.com/rust-phf/rust-phf",
+      "versions": [
+        "0.13.1"
+      ]
     },
     {
       "name": "phf_shared",
-      "version": "0.13.1",
       "license": "MIT",
       "author": "Steven Fackler <sfackler@gmail.com>",
-      "homepage": "https://github.com/rust-phf/rust-phf"
+      "homepage": "https://github.com/rust-phf/rust-phf",
+      "versions": [
+        "0.13.1"
+      ]
     },
     {
       "name": "pin-project-lite",
-      "version": "0.2.17",
       "license": "MIT OR Apache-2.0",
       "author": "Taiki Endo",
-      "homepage": "https://github.com/taiki-e/pin-project-lite"
+      "homepage": "https://github.com/taiki-e/pin-project-lite",
+      "versions": [
+        "0.2.17"
+      ]
     },
     {
       "name": "pkg-config",
-      "version": "0.3.33",
       "license": "MIT OR Apache-2.0",
       "author": "Alex Crichton <alex@alexcrichton.com>",
-      "homepage": "https://github.com/rust-lang/pkg-config-rs"
+      "homepage": "https://github.com/rust-lang/pkg-config-rs",
+      "versions": [
+        "0.3.33"
+      ]
     },
     {
       "name": "plist",
-      "version": "1.9.0",
       "license": "MIT",
       "author": "Ed Barnard <eabarnard@gmail.com>",
-      "homepage": "https://github.com/ebarnard/rust-plist/"
+      "homepage": "https://github.com/ebarnard/rust-plist/",
+      "versions": [
+        "1.9.0"
+      ]
     },
     {
       "name": "png",
-      "version": "0.17.16, 0.18.1",
       "license": "MIT OR Apache-2.0",
       "author": "The image-rs Developers",
-      "homepage": "https://github.com/image-rs/image-png"
+      "homepage": "https://github.com/image-rs/image-png",
+      "versions": [
+        "0.17.16",
+        "0.18.1"
+      ]
     },
     {
       "name": "potential_utf",
-      "version": "0.1.5",
       "license": "Unicode-3.0",
       "author": "The ICU4X Project Developers",
-      "homepage": "https://icu4x.unicode.org"
+      "homepage": "https://icu4x.unicode.org",
+      "versions": [
+        "0.1.5"
+      ]
     },
     {
       "name": "powerfmt",
-      "version": "0.2.0",
       "license": "MIT OR Apache-2.0",
       "author": "Jacob Pratt <jacob@jhpratt.dev>",
-      "homepage": "https://github.com/jhpratt/powerfmt"
+      "homepage": "https://github.com/jhpratt/powerfmt",
+      "versions": [
+        "0.2.0"
+      ]
     },
     {
       "name": "precomputed-hash",
-      "version": "0.1.1",
       "license": "MIT",
       "author": "Emilio Cobos Álvarez <emilio@crisal.io>",
-      "homepage": "https://github.com/emilio/precomputed-hash"
+      "homepage": "https://github.com/emilio/precomputed-hash",
+      "versions": [
+        "0.1.1"
+      ]
     },
     {
       "name": "proc-macro-crate",
-      "version": "1.3.1, 2.0.2, 3.5.0",
       "license": "MIT OR Apache-2.0",
       "author": "Bastian Köcher <git@kchr.de>",
-      "homepage": "https://github.com/bkchr/proc-macro-crate"
+      "homepage": "https://github.com/bkchr/proc-macro-crate",
+      "versions": [
+        "1.3.1",
+        "2.0.2",
+        "3.5.0"
+      ]
     },
     {
       "name": "proc-macro-error",
-      "version": "1.0.4",
       "license": "MIT OR Apache-2.0",
       "author": "CreepySkeleton <creepy-skeleton@yandex.ru>",
-      "homepage": "https://gitlab.com/CreepySkeleton/proc-macro-error"
+      "homepage": "https://gitlab.com/CreepySkeleton/proc-macro-error",
+      "versions": [
+        "1.0.4"
+      ]
     },
     {
       "name": "proc-macro-error-attr",
-      "version": "1.0.4",
       "license": "MIT OR Apache-2.0",
       "author": "CreepySkeleton <creepy-skeleton@yandex.ru>",
-      "homepage": "https://gitlab.com/CreepySkeleton/proc-macro-error"
+      "homepage": "https://gitlab.com/CreepySkeleton/proc-macro-error",
+      "versions": [
+        "1.0.4"
+      ]
     },
     {
       "name": "proc-macro2",
-      "version": "1.0.106",
       "license": "MIT OR Apache-2.0",
       "author": "David Tolnay <dtolnay@gmail.com>, Alex Crichton <alex@alexcrichton.com>",
-      "homepage": "https://github.com/dtolnay/proc-macro2"
+      "homepage": "https://github.com/dtolnay/proc-macro2",
+      "versions": [
+        "1.0.106"
+      ]
     },
     {
       "name": "quick-xml",
-      "version": "0.39.4",
       "license": "MIT",
       "author": "Johann Tuffe",
-      "homepage": "https://github.com/tafia/quick-xml"
+      "homepage": "https://github.com/tafia/quick-xml",
+      "versions": [
+        "0.39.4"
+      ]
     },
     {
       "name": "quote",
-      "version": "1.0.45",
       "license": "MIT OR Apache-2.0",
       "author": "David Tolnay <dtolnay@gmail.com>",
-      "homepage": "https://github.com/dtolnay/quote"
+      "homepage": "https://github.com/dtolnay/quote",
+      "versions": [
+        "1.0.45"
+      ]
     },
     {
       "name": "r-efi",
-      "version": "5.3.0, 6.0.0",
       "license": "MIT OR Apache-2.0 OR LGPL-2.1-or-later",
       "author": "Red Hat, Inc., Microsoft Corporation, David Rheinsberg",
-      "homepage": "https://github.com/r-efi/r-efi/wiki"
+      "homepage": "https://github.com/r-efi/r-efi/wiki",
+      "versions": [
+        "5.3.0",
+        "6.0.0"
+      ]
     },
     {
       "name": "raw-window-handle",
-      "version": "0.6.2",
       "license": "MIT OR Apache-2.0 OR Zlib",
       "author": "Osspial <osspial@gmail.com>",
-      "homepage": "https://github.com/rust-windowing/raw-window-handle"
+      "homepage": "https://github.com/rust-windowing/raw-window-handle",
+      "versions": [
+        "0.6.2"
+      ]
     },
     {
       "name": "redox_syscall",
-      "version": "0.5.18",
       "license": "MIT",
       "author": "Jeremy Soller <jackpot51@gmail.com>",
-      "homepage": "https://gitlab.redox-os.org/redox-os/syscall"
+      "homepage": "https://gitlab.redox-os.org/redox-os/syscall",
+      "versions": [
+        "0.5.18"
+      ]
     },
     {
       "name": "redox_users",
-      "version": "0.5.2",
       "license": "MIT",
       "author": "Jose Narvaez <goyox86@gmail.com>, Wesley Hershberger <mggmugginsmc@gmail.com>",
-      "homepage": "https://gitlab.redox-os.org/redox-os/users"
+      "homepage": "https://gitlab.redox-os.org/redox-os/users",
+      "versions": [
+        "0.5.2"
+      ]
     },
     {
       "name": "ref-cast",
-      "version": "1.0.25",
       "license": "MIT OR Apache-2.0",
       "author": "David Tolnay <dtolnay@gmail.com>",
-      "homepage": "https://github.com/dtolnay/ref-cast"
+      "homepage": "https://github.com/dtolnay/ref-cast",
+      "versions": [
+        "1.0.25"
+      ]
     },
     {
       "name": "ref-cast-impl",
-      "version": "1.0.25",
       "license": "MIT OR Apache-2.0",
       "author": "David Tolnay <dtolnay@gmail.com>",
-      "homepage": "https://github.com/dtolnay/ref-cast"
+      "homepage": "https://github.com/dtolnay/ref-cast",
+      "versions": [
+        "1.0.25"
+      ]
     },
     {
       "name": "regex",
-      "version": "1.12.3",
       "license": "MIT OR Apache-2.0",
       "author": "The Rust Project Developers, Andrew Gallant <jamslam@gmail.com>",
-      "homepage": "https://github.com/rust-lang/regex"
+      "homepage": "https://github.com/rust-lang/regex",
+      "versions": [
+        "1.12.3"
+      ]
     },
     {
       "name": "regex-automata",
-      "version": "0.4.14",
       "license": "MIT OR Apache-2.0",
       "author": "The Rust Project Developers, Andrew Gallant <jamslam@gmail.com>",
-      "homepage": "https://github.com/rust-lang/regex/tree/master/regex-automata"
+      "homepage": "https://github.com/rust-lang/regex/tree/master/regex-automata",
+      "versions": [
+        "0.4.14"
+      ]
     },
     {
       "name": "regex-syntax",
-      "version": "0.8.10",
       "license": "MIT OR Apache-2.0",
       "author": "The Rust Project Developers, Andrew Gallant <jamslam@gmail.com>",
-      "homepage": "https://github.com/rust-lang/regex/tree/master/regex-syntax"
+      "homepage": "https://github.com/rust-lang/regex/tree/master/regex-syntax",
+      "versions": [
+        "0.8.10"
+      ]
     },
     {
       "name": "reqwest",
-      "version": "0.13.3",
       "license": "MIT OR Apache-2.0",
       "author": "Sean McArthur <sean@seanmonstar.com>",
-      "homepage": "https://github.com/seanmonstar/reqwest"
+      "homepage": "https://github.com/seanmonstar/reqwest",
+      "versions": [
+        "0.13.3"
+      ]
     },
     {
       "name": "ring",
-      "version": "0.17.14",
       "license": "Apache-2.0 AND ISC",
       "author": "Brian Smith",
-      "homepage": "https://github.com/briansmith/ring"
+      "homepage": "https://github.com/briansmith/ring",
+      "versions": [
+        "0.17.14"
+      ]
     },
     {
       "name": "rustc_version",
-      "version": "0.4.1",
       "license": "MIT OR Apache-2.0",
       "author": "The Rust Project Developers",
-      "homepage": "https://github.com/djc/rustc-version-rs"
+      "homepage": "https://github.com/djc/rustc-version-rs",
+      "versions": [
+        "0.4.1"
+      ]
     },
     {
       "name": "rustc-hash",
-      "version": "2.1.2",
       "license": "MIT OR Apache-2.0",
       "author": "The Rust Project Developers",
-      "homepage": "https://github.com/rust-lang/rustc-hash"
+      "homepage": "https://github.com/rust-lang/rustc-hash",
+      "versions": [
+        "2.1.2"
+      ]
     },
     {
       "name": "rustix",
-      "version": "1.1.4",
       "license": "MIT OR Apache-2.0 WITH LLVM-exception OR Apache-2.0",
       "author": "Dan Gohman <dev@sunfishcode.online>, Jakub Konka <kubkon@jakubkonka.com>",
-      "homepage": "https://github.com/bytecodealliance/rustix"
+      "homepage": "https://github.com/bytecodealliance/rustix",
+      "versions": [
+        "1.1.4"
+      ]
     },
     {
       "name": "rustls",
-      "version": "0.23.40",
       "license": "MIT OR Apache-2.0 OR ISC",
       "author": "Joseph Birr-Pixton",
-      "homepage": "https://github.com/rustls/rustls"
+      "homepage": "https://github.com/rustls/rustls",
+      "versions": [
+        "0.23.40"
+      ]
     },
     {
       "name": "rustls-native-certs",
-      "version": "0.8.3",
       "license": "MIT OR Apache-2.0 OR ISC",
       "author": "Joseph Birr-Pixton",
-      "homepage": "https://github.com/rustls/rustls-native-certs"
+      "homepage": "https://github.com/rustls/rustls-native-certs",
+      "versions": [
+        "0.8.3"
+      ]
     },
     {
       "name": "rustls-pki-types",
-      "version": "1.14.1",
       "license": "MIT OR Apache-2.0",
       "author": "Dirkjan Ochtman",
-      "homepage": "https://github.com/rustls/pki-types"
+      "homepage": "https://github.com/rustls/pki-types",
+      "versions": [
+        "1.14.1"
+      ]
     },
     {
       "name": "rustls-platform-verifier",
-      "version": "0.7.0",
       "license": "MIT OR Apache-2.0",
       "author": "1Password",
-      "homepage": "https://github.com/rustls/rustls-platform-verifier"
+      "homepage": "https://github.com/rustls/rustls-platform-verifier",
+      "versions": [
+        "0.7.0"
+      ]
     },
     {
       "name": "rustls-platform-verifier-android",
-      "version": "0.1.1",
       "license": "MIT OR Apache-2.0",
       "author": "1Password",
-      "homepage": "https://github.com/rustls/rustls-platform-verifier"
+      "homepage": "https://github.com/rustls/rustls-platform-verifier",
+      "versions": [
+        "0.1.1"
+      ]
     },
     {
       "name": "rustls-webpki",
-      "version": "0.103.13",
       "license": "ISC",
       "author": "Brian Smith",
-      "homepage": "https://github.com/rustls/webpki"
+      "homepage": "https://github.com/rustls/webpki",
+      "versions": [
+        "0.103.13"
+      ]
     },
     {
       "name": "rustversion",
-      "version": "1.0.22",
       "license": "MIT OR Apache-2.0",
       "author": "David Tolnay <dtolnay@gmail.com>",
-      "homepage": "https://github.com/dtolnay/rustversion"
+      "homepage": "https://github.com/dtolnay/rustversion",
+      "versions": [
+        "1.0.22"
+      ]
     },
     {
       "name": "same-file",
-      "version": "1.0.6",
       "license": "MIT OR Unlicense",
       "author": "Andrew Gallant <jamslam@gmail.com>",
-      "homepage": "https://github.com/BurntSushi/same-file"
+      "homepage": "https://github.com/BurntSushi/same-file",
+      "versions": [
+        "1.0.6"
+      ]
     },
     {
       "name": "schannel",
-      "version": "0.1.29",
       "license": "MIT",
       "author": "Steven Fackler <sfackler@gmail.com>, Steffen Butzer <steffen.butzer@outlook.com>",
-      "homepage": "https://github.com/steffengy/schannel-rs"
+      "homepage": "https://github.com/steffengy/schannel-rs",
+      "versions": [
+        "0.1.29"
+      ]
     },
     {
       "name": "schemars",
-      "version": "0.8.22, 0.9.0, 1.2.1",
       "license": "MIT",
       "author": "Graham Esau <gesau@hotmail.co.uk>",
-      "homepage": "https://graham.cool/schemars/"
+      "homepage": "https://graham.cool/schemars/",
+      "versions": [
+        "0.8.22",
+        "0.9.0",
+        "1.2.1"
+      ]
     },
     {
       "name": "schemars_derive",
-      "version": "0.8.22",
       "license": "MIT",
       "author": "Graham Esau <gesau@hotmail.co.uk>",
-      "homepage": "https://graham.cool/schemars/"
+      "homepage": "https://graham.cool/schemars/",
+      "versions": [
+        "0.8.22"
+      ]
     },
     {
       "name": "scopeguard",
-      "version": "1.2.0",
       "license": "MIT OR Apache-2.0",
       "author": "bluss",
-      "homepage": "https://github.com/bluss/scopeguard"
+      "homepage": "https://github.com/bluss/scopeguard",
+      "versions": [
+        "1.2.0"
+      ]
     },
     {
       "name": "security-framework",
-      "version": "3.7.0",
       "license": "MIT OR Apache-2.0",
       "author": "Steven Fackler <sfackler@gmail.com>, Kornel <kornel@geekhood.net>",
-      "homepage": "https://lib.rs/crates/security_framework"
+      "homepage": "https://lib.rs/crates/security_framework",
+      "versions": [
+        "3.7.0"
+      ]
     },
     {
       "name": "security-framework-sys",
-      "version": "2.17.0",
       "license": "MIT OR Apache-2.0",
       "author": "Steven Fackler <sfackler@gmail.com>, Kornel <kornel@geekhood.net>",
-      "homepage": "https://lib.rs/crates/security-framework-sys"
+      "homepage": "https://lib.rs/crates/security-framework-sys",
+      "versions": [
+        "2.17.0"
+      ]
     },
     {
       "name": "selectors",
-      "version": "0.36.1",
       "license": "MPL-2.0",
       "author": "The Servo Project Developers",
-      "homepage": "https://github.com/servo/stylo"
+      "homepage": "https://github.com/servo/stylo",
+      "versions": [
+        "0.36.1"
+      ]
     },
     {
       "name": "semver",
-      "version": "1.0.28",
       "license": "MIT OR Apache-2.0",
       "author": "David Tolnay <dtolnay@gmail.com>",
-      "homepage": "https://github.com/dtolnay/semver"
+      "homepage": "https://github.com/dtolnay/semver",
+      "versions": [
+        "1.0.28"
+      ]
     },
     {
       "name": "serde_core",
-      "version": "1.0.229",
       "license": "MIT OR Apache-2.0",
       "author": "Erick Tryzelaar <erick.tryzelaar@gmail.com>, David Tolnay <dtolnay@gmail.com>",
-      "homepage": "https://serde.rs"
+      "homepage": "https://serde.rs",
+      "versions": [
+        "1.0.229"
+      ]
     },
     {
       "name": "serde_derive",
-      "version": "1.0.229",
       "license": "MIT OR Apache-2.0",
       "author": "Erick Tryzelaar <erick.tryzelaar@gmail.com>, David Tolnay <dtolnay@gmail.com>",
-      "homepage": "https://serde.rs"
+      "homepage": "https://serde.rs",
+      "versions": [
+        "1.0.229"
+      ]
     },
     {
       "name": "serde_derive_internals",
-      "version": "0.29.1",
       "license": "MIT OR Apache-2.0",
       "author": "Erick Tryzelaar <erick.tryzelaar@gmail.com>, David Tolnay <dtolnay@gmail.com>",
-      "homepage": "https://serde.rs"
+      "homepage": "https://serde.rs",
+      "versions": [
+        "0.29.1"
+      ]
     },
     {
       "name": "serde_repr",
-      "version": "0.1.20",
       "license": "MIT OR Apache-2.0",
       "author": "David Tolnay <dtolnay@gmail.com>",
-      "homepage": "https://github.com/dtolnay/serde-repr"
+      "homepage": "https://github.com/dtolnay/serde-repr",
+      "versions": [
+        "0.1.20"
+      ]
     },
     {
       "name": "serde_spanned",
-      "version": "0.6.9, 1.1.1",
       "license": "MIT OR Apache-2.0",
       "author": "toml-rs contributors",
-      "homepage": "https://github.com/toml-rs/toml"
+      "homepage": "https://github.com/toml-rs/toml",
+      "versions": [
+        "0.6.9",
+        "1.1.1"
+      ]
     },
     {
       "name": "serde_with",
-      "version": "3.21.0",
       "license": "MIT OR Apache-2.0",
       "author": "Jonas Bushart, Marcin Kaźmierczak",
-      "homepage": "https://github.com/jonasbb/serde_with/"
+      "homepage": "https://github.com/jonasbb/serde_with/",
+      "versions": [
+        "3.21.0"
+      ]
     },
     {
       "name": "serde_with_macros",
-      "version": "3.21.0",
       "license": "MIT OR Apache-2.0",
       "author": "Jonas Bushart",
-      "homepage": "https://github.com/jonasbb/serde_with/"
+      "homepage": "https://github.com/jonasbb/serde_with/",
+      "versions": [
+        "3.21.0"
+      ]
     },
     {
       "name": "serde-untagged",
-      "version": "0.1.9",
       "license": "MIT OR Apache-2.0",
       "author": "David Tolnay <dtolnay@gmail.com>",
-      "homepage": "https://github.com/dtolnay/serde-untagged"
+      "homepage": "https://github.com/dtolnay/serde-untagged",
+      "versions": [
+        "0.1.9"
+      ]
     },
     {
       "name": "serialize-to-javascript",
-      "version": "0.1.2",
       "license": "MIT OR Apache-2.0",
       "author": "Chip Reed <chip@chip.sh>",
-      "homepage": "https://github.com/chippers/serialize-to-javascript"
+      "homepage": "https://github.com/chippers/serialize-to-javascript",
+      "versions": [
+        "0.1.2"
+      ]
     },
     {
       "name": "serialize-to-javascript-impl",
-      "version": "0.1.2",
       "license": "MIT OR Apache-2.0",
       "author": "Chip Reed <chip@chip.sh>",
-      "homepage": "https://github.com/chippers/serialize-to-javascript"
+      "homepage": "https://github.com/chippers/serialize-to-javascript",
+      "versions": [
+        "0.1.2"
+      ]
     },
     {
       "name": "servo_arc",
-      "version": "0.4.3",
       "license": "MIT OR Apache-2.0",
       "author": "The Servo Project Developers",
-      "homepage": "https://github.com/servo/stylo"
+      "homepage": "https://github.com/servo/stylo",
+      "versions": [
+        "0.4.3"
+      ]
     },
     {
       "name": "sha2",
-      "version": "0.10.9",
       "license": "MIT OR Apache-2.0",
       "author": "RustCrypto Developers",
-      "homepage": "https://github.com/RustCrypto/hashes"
+      "homepage": "https://github.com/RustCrypto/hashes",
+      "versions": [
+        "0.10.9"
+      ]
     },
     {
       "name": "shared_child",
-      "version": "1.1.1",
       "license": "MIT",
       "author": "jacko",
-      "homepage": "https://github.com/oconnor663/shared_child.rs"
+      "homepage": "https://github.com/oconnor663/shared_child.rs",
+      "versions": [
+        "1.1.1"
+      ]
     },
     {
       "name": "shlex",
-      "version": "1.3.0",
       "license": "MIT OR Apache-2.0",
       "author": "comex <comexk@gmail.com>, Fenhl <fenhl@fenhl.net>, Adrian Taylor <adetaylor@chromium.org>, Alex Touchet <alextouchet@outlook.com>, Daniel Parks <dp+git@oxidized.org>, Garrett Berg <googberg@gmail.com>",
-      "homepage": "https://github.com/comex/rust-shlex"
+      "homepage": "https://github.com/comex/rust-shlex",
+      "versions": [
+        "1.3.0"
+      ]
     },
     {
       "name": "sigchld",
-      "version": "0.2.4",
       "license": "MIT",
       "author": "Jack O'Connor",
-      "homepage": "https://github.com/oconnor663/sigchld.rs"
+      "homepage": "https://github.com/oconnor663/sigchld.rs",
+      "versions": [
+        "0.2.4"
+      ]
     },
     {
       "name": "signal-hook",
-      "version": "0.3.18",
       "license": "MIT OR Apache-2.0",
       "author": "Michal 'vorner' Vaner <vorner@vorner.cz>, Thomas Himmelstoss <thimm@posteo.de>",
-      "homepage": "https://github.com/vorner/signal-hook"
+      "homepage": "https://github.com/vorner/signal-hook",
+      "versions": [
+        "0.3.18"
+      ]
     },
     {
       "name": "signal-hook-registry",
-      "version": "1.4.8",
       "license": "MIT OR Apache-2.0",
       "author": "Michal 'vorner' Vaner <vorner@vorner.cz>, Masaki Hara <ackie.h.gmai@gmail.com>",
-      "homepage": "https://github.com/vorner/signal-hook"
+      "homepage": "https://github.com/vorner/signal-hook",
+      "versions": [
+        "1.4.8"
+      ]
     },
     {
       "name": "simd_cesu8",
-      "version": "1.1.1",
       "license": "MIT OR Apache-2.0",
       "author": "Sean C. Roach <me@seancroach.dev>",
-      "homepage": "https://github.com/seancroach/simd_cesu8"
+      "homepage": "https://github.com/seancroach/simd_cesu8",
+      "versions": [
+        "1.1.1"
+      ]
     },
     {
       "name": "simd-adler32",
-      "version": "0.3.9",
       "license": "MIT",
       "author": "Marvin Countryman <me@maar.vin>",
-      "homepage": "https://github.com/mcountryman/simd-adler32"
+      "homepage": "https://github.com/mcountryman/simd-adler32",
+      "versions": [
+        "0.3.9"
+      ]
     },
     {
       "name": "simdutf8",
-      "version": "0.1.5",
       "license": "MIT OR Apache-2.0",
       "author": "Hans Kratz <hans@appfour.com>",
-      "homepage": "https://github.com/rusticstuff/simdutf8"
+      "homepage": "https://github.com/rusticstuff/simdutf8",
+      "versions": [
+        "0.1.5"
+      ]
     },
     {
       "name": "siphasher",
-      "version": "1.0.3",
       "license": "MIT OR Apache-2.0",
       "author": "Frank Denis <github@pureftpd.org>",
-      "homepage": "https://docs.rs/siphasher"
+      "homepage": "https://docs.rs/siphasher",
+      "versions": [
+        "1.0.3"
+      ]
     },
     {
       "name": "slab",
-      "version": "0.4.12",
       "license": "MIT",
       "author": "Carl Lerche <me@carllerche.com>",
-      "homepage": "https://github.com/tokio-rs/slab"
+      "homepage": "https://github.com/tokio-rs/slab",
+      "versions": [
+        "0.4.12"
+      ]
     },
     {
       "name": "smallvec",
-      "version": "1.15.1",
       "license": "MIT OR Apache-2.0",
       "author": "The Servo Project Developers",
-      "homepage": "https://github.com/servo/rust-smallvec"
+      "homepage": "https://github.com/servo/rust-smallvec",
+      "versions": [
+        "1.15.1"
+      ]
     },
     {
       "name": "socket2",
-      "version": "0.6.3",
       "license": "MIT OR Apache-2.0",
       "author": "Alex Crichton <alex@alexcrichton.com>, Thomas de Zeeuw <thomasdezeeuw@gmail.com>",
-      "homepage": "https://github.com/rust-lang/socket2"
+      "homepage": "https://github.com/rust-lang/socket2",
+      "versions": [
+        "0.6.3"
+      ]
     },
     {
       "name": "softbuffer",
-      "version": "0.4.8",
       "license": "MIT OR Apache-2.0",
       "author": "Kirill Chibisov",
-      "homepage": "https://github.com/rust-windowing/softbuffer"
+      "homepage": "https://github.com/rust-windowing/softbuffer",
+      "versions": [
+        "0.4.8"
+      ]
     },
     {
       "name": "soup3",
-      "version": "0.5.0",
       "license": "MIT",
       "author": "The Gtk-rs Project Developers",
-      "homepage": "https://gitlab.gnome.org/World/Rust/soup3-rs"
+      "homepage": "https://gitlab.gnome.org/World/Rust/soup3-rs",
+      "versions": [
+        "0.5.0"
+      ]
     },
     {
       "name": "soup3-sys",
-      "version": "0.5.0",
       "license": "MIT",
       "author": "The Gtk-rs Project Developers",
-      "homepage": "https://gtk-rs.org"
+      "homepage": "https://gtk-rs.org",
+      "versions": [
+        "0.5.0"
+      ]
     },
     {
       "name": "stable_deref_trait",
-      "version": "1.2.1",
       "license": "MIT OR Apache-2.0",
       "author": "Robert Grosse <n210241048576@gmail.com>",
-      "homepage": "https://github.com/storyyeller/stable_deref_trait"
+      "homepage": "https://github.com/storyyeller/stable_deref_trait",
+      "versions": [
+        "1.2.1"
+      ]
     },
     {
       "name": "string_cache",
-      "version": "0.9.0",
       "license": "MIT OR Apache-2.0",
       "author": "The Servo Project Developers",
-      "homepage": "https://github.com/servo/string-cache"
+      "homepage": "https://github.com/servo/string-cache",
+      "versions": [
+        "0.9.0"
+      ]
     },
     {
       "name": "string_cache_codegen",
-      "version": "0.6.1",
       "license": "MIT OR Apache-2.0",
       "author": "The Servo Project Developers",
-      "homepage": "https://github.com/servo/string-cache"
+      "homepage": "https://github.com/servo/string-cache",
+      "versions": [
+        "0.6.1"
+      ]
     },
     {
       "name": "strsim",
-      "version": "0.11.1",
       "license": "MIT",
       "author": "Danny Guo <danny@dannyguo.com>, maxbachmann <oss@maxbachmann.de>",
-      "homepage": "https://github.com/rapidfuzz/strsim-rs"
+      "homepage": "https://github.com/rapidfuzz/strsim-rs",
+      "versions": [
+        "0.11.1"
+      ]
     },
     {
       "name": "subtle",
-      "version": "2.6.1",
       "license": "BSD-3-Clause",
       "author": "Isis Lovecruft <isis@patternsinthevoid.net>, Henry de Valence <hdevalence@hdevalence.ca>",
-      "homepage": "https://dalek.rs/"
+      "homepage": "https://dalek.rs/",
+      "versions": [
+        "2.6.1"
+      ]
     },
     {
       "name": "swift-rs",
-      "version": "1.0.7",
       "license": "MIT OR Apache-2.0",
       "author": "The swift-rs contributors",
-      "homepage": "https://github.com/Brendonovich/swift-rs"
+      "homepage": "https://github.com/Brendonovich/swift-rs",
+      "versions": [
+        "1.0.7"
+      ]
     },
     {
       "name": "syn",
-      "version": "1.0.109, 2.0.117, 3.0.3",
       "license": "MIT OR Apache-2.0",
       "author": "David Tolnay <dtolnay@gmail.com>",
-      "homepage": "https://github.com/dtolnay/syn"
+      "homepage": "https://github.com/dtolnay/syn",
+      "versions": [
+        "1.0.109",
+        "2.0.117",
+        "3.0.3"
+      ]
     },
     {
       "name": "sync_wrapper",
-      "version": "1.0.2",
       "license": "Apache-2.0",
       "author": "Actyx AG <developer@actyx.io>",
-      "homepage": "https://docs.rs/sync_wrapper"
+      "homepage": "https://docs.rs/sync_wrapper",
+      "versions": [
+        "1.0.2"
+      ]
     },
     {
       "name": "synstructure",
-      "version": "0.13.2",
       "license": "MIT",
       "author": "Nika Layzell <nika@thelayzells.com>",
-      "homepage": "https://github.com/mystor/synstructure"
+      "homepage": "https://github.com/mystor/synstructure",
+      "versions": [
+        "0.13.2"
+      ]
     },
     {
       "name": "system-configuration",
-      "version": "0.7.0",
       "license": "MIT OR Apache-2.0",
       "author": "Mullvad VPN",
-      "homepage": "https://github.com/mullvad/system-configuration-rs"
+      "homepage": "https://github.com/mullvad/system-configuration-rs",
+      "versions": [
+        "0.7.0"
+      ]
     },
     {
       "name": "system-configuration-sys",
-      "version": "0.6.0",
       "license": "MIT OR Apache-2.0",
       "author": "Mullvad VPN",
-      "homepage": "https://github.com/mullvad/system-configuration-rs"
+      "homepage": "https://github.com/mullvad/system-configuration-rs",
+      "versions": [
+        "0.6.0"
+      ]
     },
     {
       "name": "system-deps",
-      "version": "6.2.2",
       "license": "MIT OR Apache-2.0",
       "author": "Guillaume Desmottes <guillaume.desmottes@collabora.com>, Josh Triplett <josh@joshtriplett.org>",
-      "homepage": "https://github.com/gdesmott/system-deps"
+      "homepage": "https://github.com/gdesmott/system-deps",
+      "versions": [
+        "6.2.2"
+      ]
     },
     {
       "name": "tao",
-      "version": "0.35.2",
       "license": "Apache-2.0",
       "author": "Tauri Programme within The Commons Conservancy, The winit contributors",
-      "homepage": "https://github.com/diffplug/tao"
+      "homepage": "https://github.com/diffplug/tao",
+      "versions": [
+        "0.35.2"
+      ]
     },
     {
       "name": "tao-macros",
-      "version": "0.1.3",
       "license": "MIT OR Apache-2.0",
       "author": "Tauri Programme within The Commons Conservancy",
-      "homepage": "https://github.com/diffplug/tao"
+      "homepage": "https://github.com/diffplug/tao",
+      "versions": [
+        "0.1.3"
+      ]
     },
     {
       "name": "tar",
-      "version": "0.4.46",
       "license": "MIT OR Apache-2.0",
       "author": "Alex Crichton <alex@alexcrichton.com>",
-      "homepage": "https://github.com/composefs/tar-rs"
+      "homepage": "https://github.com/composefs/tar-rs",
+      "versions": [
+        "0.4.46"
+      ]
     },
     {
       "name": "target-lexicon",
-      "version": "0.12.16",
       "license": "Apache-2.0 WITH LLVM-exception",
       "author": "Dan Gohman <sunfish@mozilla.com>",
-      "homepage": "https://github.com/bytecodealliance/target-lexicon"
+      "homepage": "https://github.com/bytecodealliance/target-lexicon",
+      "versions": [
+        "0.12.16"
+      ]
     },
     {
       "name": "tauri-codegen",
-      "version": "2.6.3",
       "license": "MIT OR Apache-2.0",
       "author": "Tauri Programme within The Commons Conservancy",
-      "homepage": "https://tauri.app/"
+      "homepage": "https://tauri.app/",
+      "versions": [
+        "2.6.3"
+      ]
     },
     {
       "name": "tauri-macros",
-      "version": "2.6.3",
       "license": "MIT OR Apache-2.0",
       "author": "Tauri Programme within The Commons Conservancy",
-      "homepage": "https://tauri.app/"
+      "homepage": "https://tauri.app/",
+      "versions": [
+        "2.6.3"
+      ]
     },
     {
       "name": "tauri-plugin",
-      "version": "2.6.2",
       "license": "MIT OR Apache-2.0",
       "author": "Tauri Programme within The Commons Conservancy",
-      "homepage": "https://tauri.app/"
+      "homepage": "https://tauri.app/",
+      "versions": [
+        "2.6.2"
+      ]
     },
     {
       "name": "tauri-runtime",
-      "version": "2.11.3",
       "license": "MIT OR Apache-2.0",
       "author": "Tauri Programme within The Commons Conservancy",
-      "homepage": "https://tauri.app/"
+      "homepage": "https://tauri.app/",
+      "versions": [
+        "2.11.3"
+      ]
     },
     {
       "name": "tauri-runtime-wry",
-      "version": "2.11.4",
       "license": "MIT OR Apache-2.0",
       "author": "Tauri Programme within The Commons Conservancy",
-      "homepage": "https://tauri.app/"
+      "homepage": "https://tauri.app/",
+      "versions": [
+        "2.11.4"
+      ]
     },
     {
       "name": "tauri-utils",
-      "version": "2.9.3",
       "license": "MIT OR Apache-2.0",
       "author": "Tauri Programme within The Commons Conservancy",
-      "homepage": "https://tauri.app/"
+      "homepage": "https://tauri.app/",
+      "versions": [
+        "2.9.3"
+      ]
     },
     {
       "name": "tauri-winres",
-      "version": "0.3.6",
       "license": "MIT",
       "author": "Tauri Programme within The Commons Conservancy, Max Resch <resch.max@gmail.com>",
-      "homepage": "https://github.com/tauri-apps/winres"
+      "homepage": "https://github.com/tauri-apps/winres",
+      "versions": [
+        "0.3.6"
+      ]
     },
     {
       "name": "tempfile",
-      "version": "3.27.0",
       "license": "MIT OR Apache-2.0",
       "author": "Steven Allen <steven@stebalien.com>, The Rust Project Developers, Ashley Mannix <ashleymannix@live.com.au>, Jason White <me@jasonwhite.io>",
-      "homepage": "https://stebalien.com/projects/tempfile-rs/"
+      "homepage": "https://stebalien.com/projects/tempfile-rs/",
+      "versions": [
+        "3.27.0"
+      ]
     },
     {
       "name": "tendril",
-      "version": "0.5.0",
       "license": "MIT OR Apache-2.0",
       "author": "Keegan McAllister <mcallister.keegan@gmail.com>, Simon Sapin <simon.sapin@exyr.org>, Chris Morgan <me@chrismorgan.info>",
-      "homepage": "https://github.com/servo/html5ever"
+      "homepage": "https://github.com/servo/html5ever",
+      "versions": [
+        "0.5.0"
+      ]
     },
     {
       "name": "thiserror",
-      "version": "1.0.69, 2.0.18",
       "license": "MIT OR Apache-2.0",
       "author": "David Tolnay <dtolnay@gmail.com>",
-      "homepage": "https://github.com/dtolnay/thiserror"
+      "homepage": "https://github.com/dtolnay/thiserror",
+      "versions": [
+        "1.0.69",
+        "2.0.18"
+      ]
     },
     {
       "name": "thiserror-impl",
-      "version": "1.0.69, 2.0.18",
       "license": "MIT OR Apache-2.0",
       "author": "David Tolnay <dtolnay@gmail.com>",
-      "homepage": "https://github.com/dtolnay/thiserror"
+      "homepage": "https://github.com/dtolnay/thiserror",
+      "versions": [
+        "1.0.69",
+        "2.0.18"
+      ]
     },
     {
       "name": "time",
-      "version": "0.3.47",
       "license": "MIT OR Apache-2.0",
       "author": "Jacob Pratt <open-source@jhpratt.dev>, Time contributors",
-      "homepage": "https://time-rs.github.io"
+      "homepage": "https://time-rs.github.io",
+      "versions": [
+        "0.3.47"
+      ]
     },
     {
       "name": "time-core",
-      "version": "0.1.8",
       "license": "MIT OR Apache-2.0",
       "author": "Jacob Pratt <open-source@jhpratt.dev>, Time contributors",
-      "homepage": "https://github.com/time-rs/time"
+      "homepage": "https://github.com/time-rs/time",
+      "versions": [
+        "0.1.8"
+      ]
     },
     {
       "name": "time-macros",
-      "version": "0.2.27",
       "license": "MIT OR Apache-2.0",
       "author": "Jacob Pratt <open-source@jhpratt.dev>, Time contributors",
-      "homepage": "https://github.com/time-rs/time"
+      "homepage": "https://github.com/time-rs/time",
+      "versions": [
+        "0.2.27"
+      ]
     },
     {
       "name": "tinystr",
-      "version": "0.8.3",
       "license": "Unicode-3.0",
       "author": "The ICU4X Project Developers",
-      "homepage": "https://github.com/unicode-org/icu4x"
+      "homepage": "https://github.com/unicode-org/icu4x",
+      "versions": [
+        "0.8.3"
+      ]
     },
     {
       "name": "tinyvec",
-      "version": "1.11.0",
       "license": "MIT OR Zlib OR Apache-2.0",
       "author": "Lokathor <zefria@gmail.com>",
-      "homepage": "https://github.com/Lokathor/tinyvec"
+      "homepage": "https://github.com/Lokathor/tinyvec",
+      "versions": [
+        "1.11.0"
+      ]
     },
     {
       "name": "tinyvec_macros",
-      "version": "0.1.1",
       "license": "MIT OR Apache-2.0 OR Zlib",
       "author": "Soveu <marx.tomasz@gmail.com>",
-      "homepage": "https://github.com/Soveu/tinyvec_macros"
+      "homepage": "https://github.com/Soveu/tinyvec_macros",
+      "versions": [
+        "0.1.1"
+      ]
     },
     {
       "name": "tokio",
-      "version": "1.52.3",
       "license": "MIT",
       "author": "Tokio Contributors <team@tokio.rs>",
-      "homepage": "https://tokio.rs"
+      "homepage": "https://tokio.rs",
+      "versions": [
+        "1.52.3"
+      ]
     },
     {
       "name": "tokio-rustls",
-      "version": "0.26.4",
       "license": "MIT OR Apache-2.0",
       "author": "quininer kel",
-      "homepage": "https://github.com/rustls/tokio-rustls"
+      "homepage": "https://github.com/rustls/tokio-rustls",
+      "versions": [
+        "0.26.4"
+      ]
     },
     {
       "name": "tokio-util",
-      "version": "0.7.18",
       "license": "MIT",
       "author": "Tokio Contributors <team@tokio.rs>",
-      "homepage": "https://tokio.rs"
+      "homepage": "https://tokio.rs",
+      "versions": [
+        "0.7.18"
+      ]
     },
     {
       "name": "toml",
-      "version": "0.8.2, 0.9.12+spec-1.1.0, 1.1.2+spec-1.1.0",
       "license": "MIT OR Apache-2.0",
       "author": "Alex Crichton <alex@alexcrichton.com>",
-      "homepage": "https://github.com/toml-rs/toml"
+      "homepage": "https://github.com/toml-rs/toml",
+      "versions": [
+        "0.8.2",
+        "0.9.12+spec-1.1.0",
+        "1.1.2+spec-1.1.0"
+      ]
     },
     {
       "name": "toml_datetime",
-      "version": "0.6.3, 0.7.5+spec-1.1.0, 1.1.1+spec-1.1.0",
       "license": "MIT OR Apache-2.0",
       "author": "Alex Crichton <alex@alexcrichton.com>",
-      "homepage": "https://github.com/toml-rs/toml"
+      "homepage": "https://github.com/toml-rs/toml",
+      "versions": [
+        "0.6.3",
+        "0.7.5+spec-1.1.0",
+        "1.1.1+spec-1.1.0"
+      ]
     },
     {
       "name": "toml_edit",
-      "version": "0.19.15, 0.20.2, 0.25.11+spec-1.1.0",
       "license": "MIT OR Apache-2.0",
       "author": "Andronik Ordian <write@reusable.software>, Ed Page <eopage@gmail.com>",
-      "homepage": "https://github.com/toml-rs/toml"
+      "homepage": "https://github.com/toml-rs/toml",
+      "versions": [
+        "0.19.15",
+        "0.20.2",
+        "0.25.11+spec-1.1.0"
+      ]
     },
     {
       "name": "toml_parser",
-      "version": "1.1.2+spec-1.1.0",
       "license": "MIT OR Apache-2.0",
       "author": "toml-rs contributors",
-      "homepage": "https://github.com/toml-rs/toml"
+      "homepage": "https://github.com/toml-rs/toml",
+      "versions": [
+        "1.1.2+spec-1.1.0"
+      ]
     },
     {
       "name": "toml_writer",
-      "version": "1.1.1+spec-1.1.0",
       "license": "MIT OR Apache-2.0",
       "author": "toml-rs contributors",
-      "homepage": "https://github.com/toml-rs/toml"
+      "homepage": "https://github.com/toml-rs/toml",
+      "versions": [
+        "1.1.1+spec-1.1.0"
+      ]
     },
     {
       "name": "tower",
-      "version": "0.5.3",
       "license": "MIT",
       "author": "Tower Maintainers <team@tower-rs.com>",
-      "homepage": "https://github.com/tower-rs/tower"
+      "homepage": "https://github.com/tower-rs/tower",
+      "versions": [
+        "0.5.3"
+      ]
     },
     {
       "name": "tower-http",
-      "version": "0.6.11",
       "license": "MIT",
       "author": "Tower Maintainers <team@tower-rs.com>",
-      "homepage": "https://github.com/tower-rs/tower-http"
+      "homepage": "https://github.com/tower-rs/tower-http",
+      "versions": [
+        "0.6.11"
+      ]
     },
     {
       "name": "tower-layer",
-      "version": "0.3.3",
       "license": "MIT",
       "author": "Tower Maintainers <team@tower-rs.com>",
-      "homepage": "https://github.com/tower-rs/tower"
+      "homepage": "https://github.com/tower-rs/tower",
+      "versions": [
+        "0.3.3"
+      ]
     },
     {
       "name": "tower-service",
-      "version": "0.3.3",
       "license": "MIT",
       "author": "Tower Maintainers <team@tower-rs.com>",
-      "homepage": "https://github.com/tower-rs/tower"
+      "homepage": "https://github.com/tower-rs/tower",
+      "versions": [
+        "0.3.3"
+      ]
     },
     {
       "name": "tracing",
-      "version": "0.1.44",
       "license": "MIT",
       "author": "Eliza Weisman <eliza@buoyant.io>, Tokio Contributors <team@tokio.rs>",
-      "homepage": "https://tokio.rs"
+      "homepage": "https://tokio.rs",
+      "versions": [
+        "0.1.44"
+      ]
     },
     {
       "name": "tracing-attributes",
-      "version": "0.1.31",
       "license": "MIT",
       "author": "Tokio Contributors <team@tokio.rs>, Eliza Weisman <eliza@buoyant.io>, David Barsky <dbarsky@amazon.com>",
-      "homepage": "https://tokio.rs"
+      "homepage": "https://tokio.rs",
+      "versions": [
+        "0.1.31"
+      ]
     },
     {
       "name": "tracing-core",
-      "version": "0.1.36",
       "license": "MIT",
       "author": "Tokio Contributors <team@tokio.rs>",
-      "homepage": "https://tokio.rs"
+      "homepage": "https://tokio.rs",
+      "versions": [
+        "0.1.36"
+      ]
     },
     {
       "name": "tray-icon",
-      "version": "0.24.1",
       "license": "MIT OR Apache-2.0",
       "author": "Tauri Programme within The Commons Conservancy",
-      "homepage": "https://github.com/tauri-apps/tray-icon"
+      "homepage": "https://github.com/tauri-apps/tray-icon",
+      "versions": [
+        "0.24.1"
+      ]
     },
     {
       "name": "try-lock",
-      "version": "0.2.5",
       "license": "MIT",
       "author": "Sean McArthur <sean@seanmonstar.com>",
-      "homepage": "https://github.com/seanmonstar/try-lock"
+      "homepage": "https://github.com/seanmonstar/try-lock",
+      "versions": [
+        "0.2.5"
+      ]
     },
     {
       "name": "typeid",
-      "version": "1.0.3",
       "license": "MIT OR Apache-2.0",
       "author": "David Tolnay <dtolnay@gmail.com>",
-      "homepage": "https://github.com/dtolnay/typeid"
+      "homepage": "https://github.com/dtolnay/typeid",
+      "versions": [
+        "1.0.3"
+      ]
     },
     {
       "name": "typenum",
-      "version": "1.20.0",
       "license": "MIT OR Apache-2.0",
       "author": "Paho Lurie-Gregg <paho@paholg.com>, Andre Bogus <bogusandre@gmail.com>",
-      "homepage": "https://github.com/paholg/typenum"
+      "homepage": "https://github.com/paholg/typenum",
+      "versions": [
+        "1.20.0"
+      ]
     },
     {
       "name": "unic-char-property",
-      "version": "0.9.0",
       "license": "MIT OR Apache-2.0",
       "author": "The UNIC Project Developers",
-      "homepage": "https://github.com/open-i18n/rust-unic/"
+      "homepage": "https://github.com/open-i18n/rust-unic/",
+      "versions": [
+        "0.9.0"
+      ]
     },
     {
       "name": "unic-char-range",
-      "version": "0.9.0",
       "license": "MIT OR Apache-2.0",
       "author": "The UNIC Project Developers",
-      "homepage": "https://github.com/open-i18n/rust-unic/"
+      "homepage": "https://github.com/open-i18n/rust-unic/",
+      "versions": [
+        "0.9.0"
+      ]
     },
     {
       "name": "unic-common",
-      "version": "0.9.0",
       "license": "MIT OR Apache-2.0",
       "author": "The UNIC Project Developers",
-      "homepage": "https://github.com/open-i18n/rust-unic/"
+      "homepage": "https://github.com/open-i18n/rust-unic/",
+      "versions": [
+        "0.9.0"
+      ]
     },
     {
       "name": "unic-ucd-ident",
-      "version": "0.9.0",
       "license": "MIT OR Apache-2.0",
       "author": "The UNIC Project Developers",
-      "homepage": "https://github.com/open-i18n/rust-unic/"
+      "homepage": "https://github.com/open-i18n/rust-unic/",
+      "versions": [
+        "0.9.0"
+      ]
     },
     {
       "name": "unic-ucd-version",
-      "version": "0.9.0",
       "license": "MIT OR Apache-2.0",
       "author": "The UNIC Project Developers",
-      "homepage": "https://github.com/open-i18n/rust-unic/"
+      "homepage": "https://github.com/open-i18n/rust-unic/",
+      "versions": [
+        "0.9.0"
+      ]
     },
     {
       "name": "unicode-ident",
-      "version": "1.0.24",
       "license": "(MIT OR Apache-2.0) AND Unicode-3.0",
       "author": "David Tolnay <dtolnay@gmail.com>",
-      "homepage": "https://github.com/dtolnay/unicode-ident"
+      "homepage": "https://github.com/dtolnay/unicode-ident",
+      "versions": [
+        "1.0.24"
+      ]
     },
     {
       "name": "unicode-segmentation",
-      "version": "1.13.2",
       "license": "MIT OR Apache-2.0",
       "author": "kwantam <kwantam@gmail.com>, Manish Goregaokar <manishsmail@gmail.com>",
-      "homepage": "https://github.com/unicode-rs/unicode-segmentation"
+      "homepage": "https://github.com/unicode-rs/unicode-segmentation",
+      "versions": [
+        "1.13.2"
+      ]
     },
     {
       "name": "untrusted",
-      "version": "0.9.0",
       "license": "ISC",
       "author": "Brian Smith <brian@briansmith.org>",
-      "homepage": "https://github.com/briansmith/untrusted"
+      "homepage": "https://github.com/briansmith/untrusted",
+      "versions": [
+        "0.9.0"
+      ]
     },
     {
       "name": "url",
-      "version": "2.5.8",
       "license": "MIT OR Apache-2.0",
       "author": "The rust-url developers",
-      "homepage": "https://github.com/servo/rust-url"
+      "homepage": "https://github.com/servo/rust-url",
+      "versions": [
+        "2.5.8"
+      ]
     },
     {
       "name": "urlpattern",
-      "version": "0.3.0",
       "license": "MIT",
       "author": "the Deno authors, crowlKats <crowlkats@toaxl.com>",
-      "homepage": "https://github.com/denoland/rust-urlpattern"
+      "homepage": "https://github.com/denoland/rust-urlpattern",
+      "versions": [
+        "0.3.0"
+      ]
     },
     {
       "name": "utf-8",
-      "version": "0.7.6",
       "license": "MIT OR Apache-2.0",
       "author": "Simon Sapin <simon.sapin@exyr.org>",
-      "homepage": "https://github.com/SimonSapin/rust-utf8"
+      "homepage": "https://github.com/SimonSapin/rust-utf8",
+      "versions": [
+        "0.7.6"
+      ]
     },
     {
       "name": "utf8_iter",
-      "version": "1.0.4",
       "license": "MIT OR Apache-2.0",
       "author": "Henri Sivonen <hsivonen@hsivonen.fi>",
-      "homepage": "https://docs.rs/utf8_iter/"
+      "homepage": "https://docs.rs/utf8_iter/",
+      "versions": [
+        "1.0.4"
+      ]
     },
     {
       "name": "uuid",
-      "version": "1.23.1",
       "license": "MIT OR Apache-2.0",
       "author": "Ashley Mannix<ashleymannix@live.com.au>, Dylan DPC<dylan.dpc@gmail.com>, Hunar Roop Kahlon<hunar.roop@gmail.com>",
-      "homepage": "https://github.com/uuid-rs/uuid"
+      "homepage": "https://github.com/uuid-rs/uuid",
+      "versions": [
+        "1.23.1"
+      ]
     },
     {
       "name": "version_check",
-      "version": "0.9.5",
       "license": "MIT OR Apache-2.0",
       "author": "Sergio Benitez <sb@sergio.bz>",
-      "homepage": "https://github.com/SergioBenitez/version_check"
+      "homepage": "https://github.com/SergioBenitez/version_check",
+      "versions": [
+        "0.9.5"
+      ]
     },
     {
       "name": "version-compare",
-      "version": "0.2.1",
       "license": "MIT",
       "author": "Tim Visee <3a4fb3964f@sinenomine.email>",
-      "homepage": "https://timvisee.com/projects/version-compare/"
+      "homepage": "https://timvisee.com/projects/version-compare/",
+      "versions": [
+        "0.2.1"
+      ]
     },
     {
       "name": "vswhom",
-      "version": "0.1.0",
       "license": "MIT",
       "author": "nabijaczleweli <nabijaczleweli@gmail.com>",
-      "homepage": "https://github.com/nabijaczleweli/vswhom.rs"
+      "homepage": "https://github.com/nabijaczleweli/vswhom.rs",
+      "versions": [
+        "0.1.0"
+      ]
     },
     {
       "name": "vswhom-sys",
-      "version": "0.1.3",
       "license": "MIT",
       "author": "наб <nabijaczleweli@nabijaczleweli.xyz>, forrestsmithfb <forrest.smith@fb.com>",
-      "homepage": "https://github.com/nabijaczleweli/vswhom-sys.rs"
+      "homepage": "https://github.com/nabijaczleweli/vswhom-sys.rs",
+      "versions": [
+        "0.1.3"
+      ]
     },
     {
       "name": "walkdir",
-      "version": "2.5.0",
       "license": "MIT OR Unlicense",
       "author": "Andrew Gallant <jamslam@gmail.com>",
-      "homepage": "https://github.com/BurntSushi/walkdir"
+      "homepage": "https://github.com/BurntSushi/walkdir",
+      "versions": [
+        "2.5.0"
+      ]
     },
     {
       "name": "want",
-      "version": "0.3.1",
       "license": "MIT",
       "author": "Sean McArthur <sean@seanmonstar.com>",
-      "homepage": "https://github.com/seanmonstar/want"
+      "homepage": "https://github.com/seanmonstar/want",
+      "versions": [
+        "0.3.1"
+      ]
     },
     {
       "name": "wasi",
-      "version": "0.11.1+wasi-snapshot-preview1",
       "license": "MIT OR Apache-2.0 WITH LLVM-exception OR Apache-2.0",
       "author": "The Cranelift Project Developers",
-      "homepage": "https://github.com/bytecodealliance/wasi"
+      "homepage": "https://github.com/bytecodealliance/wasi",
+      "versions": [
+        "0.11.1+wasi-snapshot-preview1"
+      ]
     },
     {
       "name": "wasip2",
-      "version": "1.0.3+wasi-0.2.9",
       "license": "MIT OR Apache-2.0 WITH LLVM-exception OR Apache-2.0",
       "author": "The Bytecode Alliance",
-      "homepage": "https://github.com/bytecodealliance/wasi-rs"
+      "homepage": "https://github.com/bytecodealliance/wasi-rs",
+      "versions": [
+        "1.0.3+wasi-0.2.9"
+      ]
     },
     {
       "name": "wasm-bindgen",
-      "version": "0.2.121",
       "license": "MIT OR Apache-2.0",
       "author": "The wasm-bindgen Developers",
-      "homepage": "https://wasm-bindgen.github.io/wasm-bindgen"
+      "homepage": "https://wasm-bindgen.github.io/wasm-bindgen",
+      "versions": [
+        "0.2.121"
+      ]
     },
     {
       "name": "wasm-bindgen-futures",
-      "version": "0.4.71",
       "license": "MIT OR Apache-2.0",
       "author": "The wasm-bindgen Developers",
-      "homepage": "https://wasm-bindgen.github.io/wasm-bindgen/"
+      "homepage": "https://wasm-bindgen.github.io/wasm-bindgen/",
+      "versions": [
+        "0.4.71"
+      ]
     },
     {
       "name": "wasm-bindgen-macro",
-      "version": "0.2.121",
       "license": "MIT OR Apache-2.0",
       "author": "The wasm-bindgen Developers",
-      "homepage": "https://wasm-bindgen.github.io/wasm-bindgen/"
+      "homepage": "https://wasm-bindgen.github.io/wasm-bindgen/",
+      "versions": [
+        "0.2.121"
+      ]
     },
     {
       "name": "wasm-bindgen-macro-support",
-      "version": "0.2.121",
       "license": "MIT OR Apache-2.0",
       "author": "The wasm-bindgen Developers",
-      "homepage": "https://wasm-bindgen.github.io/wasm-bindgen/"
+      "homepage": "https://wasm-bindgen.github.io/wasm-bindgen/",
+      "versions": [
+        "0.2.121"
+      ]
     },
     {
       "name": "wasm-bindgen-shared",
-      "version": "0.2.121",
       "license": "MIT OR Apache-2.0",
       "author": "The wasm-bindgen Developers",
-      "homepage": "https://wasm-bindgen.github.io/wasm-bindgen/"
+      "homepage": "https://wasm-bindgen.github.io/wasm-bindgen/",
+      "versions": [
+        "0.2.121"
+      ]
     },
     {
       "name": "wasm-streams",
-      "version": "0.5.0",
       "license": "MIT OR Apache-2.0",
       "author": "Mattias Buelens <mattias@buelens.com>",
-      "homepage": "https://github.com/MattiasBuelens/wasm-streams/"
+      "homepage": "https://github.com/MattiasBuelens/wasm-streams/",
+      "versions": [
+        "0.5.0"
+      ]
     },
     {
       "name": "web_atoms",
-      "version": "0.2.4",
       "license": "MIT OR Apache-2.0",
       "author": "The html5ever Project Developers",
-      "homepage": "https://github.com/servo/html5ever"
+      "homepage": "https://github.com/servo/html5ever",
+      "versions": [
+        "0.2.4"
+      ]
     },
     {
       "name": "web-sys",
-      "version": "0.3.98",
       "license": "MIT OR Apache-2.0",
       "author": "The wasm-bindgen Developers",
-      "homepage": "https://wasm-bindgen.github.io/wasm-bindgen/web-sys/index.html"
+      "homepage": "https://wasm-bindgen.github.io/wasm-bindgen/web-sys/index.html",
+      "versions": [
+        "0.3.98"
+      ]
     },
     {
       "name": "webkit2gtk",
-      "version": "2.0.2",
       "license": "MIT",
       "author": "Antoni Boucher, The Gtk-rs Project Developers",
-      "homepage": "https://github.com/tauri-apps/webkit2gtk-rs"
+      "homepage": "https://github.com/tauri-apps/webkit2gtk-rs",
+      "versions": [
+        "2.0.2"
+      ]
     },
     {
       "name": "webkit2gtk-sys",
-      "version": "2.0.2",
       "license": "MIT",
       "author": "Antoni Boucher",
-      "homepage": "https://github.com/tauri-apps/webkit2gtk-rs"
+      "homepage": "https://github.com/tauri-apps/webkit2gtk-rs",
+      "versions": [
+        "2.0.2"
+      ]
     },
     {
       "name": "webpki-root-certs",
-      "version": "1.0.7",
       "license": "CDLA-Permissive-2.0",
       "author": "The rustls contributors",
-      "homepage": "https://github.com/rustls/webpki-roots"
+      "homepage": "https://github.com/rustls/webpki-roots",
+      "versions": [
+        "1.0.7"
+      ]
     },
     {
       "name": "webview2-com",
-      "version": "0.38.2",
       "license": "MIT",
       "author": "Bill Avery",
-      "homepage": "https://github.com/wravery/webview2-rs"
+      "homepage": "https://github.com/wravery/webview2-rs",
+      "versions": [
+        "0.38.2"
+      ]
     },
     {
       "name": "webview2-com-macros",
-      "version": "0.8.1",
       "license": "MIT",
       "author": "Bill Avery",
-      "homepage": "https://github.com/wravery/webview2-rs"
+      "homepage": "https://github.com/wravery/webview2-rs",
+      "versions": [
+        "0.8.1"
+      ]
     },
     {
       "name": "webview2-com-sys",
-      "version": "0.38.2",
       "license": "MIT",
       "author": "Bill Avery",
-      "homepage": "https://github.com/wravery/webview2-rs"
+      "homepage": "https://github.com/wravery/webview2-rs",
+      "versions": [
+        "0.38.2"
+      ]
     },
     {
       "name": "winapi",
-      "version": "0.3.9",
       "license": "MIT OR Apache-2.0",
       "author": "Peter Atashian <retep998@gmail.com>",
-      "homepage": "https://github.com/retep998/winapi-rs"
+      "homepage": "https://github.com/retep998/winapi-rs",
+      "versions": [
+        "0.3.9"
+      ]
     },
     {
       "name": "winapi-i686-pc-windows-gnu",
-      "version": "0.4.0",
       "license": "MIT OR Apache-2.0",
       "author": "Peter Atashian <retep998@gmail.com>",
-      "homepage": "https://github.com/retep998/winapi-rs"
+      "homepage": "https://github.com/retep998/winapi-rs",
+      "versions": [
+        "0.4.0"
+      ]
     },
     {
       "name": "winapi-util",
-      "version": "0.1.11",
       "license": "MIT OR Unlicense",
       "author": "Andrew Gallant <jamslam@gmail.com>",
-      "homepage": "https://github.com/BurntSushi/winapi-util"
+      "homepage": "https://github.com/BurntSushi/winapi-util",
+      "versions": [
+        "0.1.11"
+      ]
     },
     {
       "name": "winapi-x86_64-pc-windows-gnu",
-      "version": "0.4.0",
       "license": "MIT OR Apache-2.0",
       "author": "Peter Atashian <retep998@gmail.com>",
-      "homepage": "https://github.com/retep998/winapi-rs"
+      "homepage": "https://github.com/retep998/winapi-rs",
+      "versions": [
+        "0.4.0"
+      ]
     },
     {
       "name": "window-vibrancy",
-      "version": "0.6.0",
       "license": "MIT OR Apache-2.0",
       "author": "Tauri Programme within The Commons Conservancy",
-      "homepage": "https://github.com/tauri-apps/tauri-plugin-vibrancy"
+      "homepage": "https://github.com/tauri-apps/tauri-plugin-vibrancy",
+      "versions": [
+        "0.6.0"
+      ]
     },
     {
       "name": "windows",
-      "version": "0.61.3",
       "license": "MIT OR Apache-2.0",
       "author": "Microsoft",
-      "homepage": "https://github.com/microsoft/windows-rs"
+      "homepage": "https://github.com/microsoft/windows-rs",
+      "versions": [
+        "0.61.3"
+      ]
     },
     {
       "name": "windows_aarch64_gnullvm",
-      "version": "0.42.2, 0.52.6, 0.53.1",
       "license": "MIT OR Apache-2.0",
       "author": "Microsoft",
-      "homepage": "https://github.com/microsoft/windows-rs"
+      "homepage": "https://github.com/microsoft/windows-rs",
+      "versions": [
+        "0.42.2",
+        "0.52.6",
+        "0.53.1"
+      ]
     },
     {
       "name": "windows_aarch64_msvc",
-      "version": "0.42.2, 0.52.6, 0.53.1",
       "license": "MIT OR Apache-2.0",
       "author": "Microsoft",
-      "homepage": "https://github.com/microsoft/windows-rs"
+      "homepage": "https://github.com/microsoft/windows-rs",
+      "versions": [
+        "0.42.2",
+        "0.52.6",
+        "0.53.1"
+      ]
     },
     {
       "name": "windows_i686_gnu",
-      "version": "0.42.2, 0.52.6, 0.53.1",
       "license": "MIT OR Apache-2.0",
       "author": "Microsoft",
-      "homepage": "https://github.com/microsoft/windows-rs"
+      "homepage": "https://github.com/microsoft/windows-rs",
+      "versions": [
+        "0.42.2",
+        "0.52.6",
+        "0.53.1"
+      ]
     },
     {
       "name": "windows_i686_gnullvm",
-      "version": "0.52.6, 0.53.1",
       "license": "MIT OR Apache-2.0",
       "author": "Microsoft",
-      "homepage": "https://github.com/microsoft/windows-rs"
+      "homepage": "https://github.com/microsoft/windows-rs",
+      "versions": [
+        "0.52.6",
+        "0.53.1"
+      ]
     },
     {
       "name": "windows_i686_msvc",
-      "version": "0.42.2, 0.52.6, 0.53.1",
       "license": "MIT OR Apache-2.0",
       "author": "Microsoft",
-      "homepage": "https://github.com/microsoft/windows-rs"
+      "homepage": "https://github.com/microsoft/windows-rs",
+      "versions": [
+        "0.42.2",
+        "0.52.6",
+        "0.53.1"
+      ]
     },
     {
       "name": "windows_x86_64_gnu",
-      "version": "0.42.2, 0.52.6, 0.53.1",
       "license": "MIT OR Apache-2.0",
       "author": "Microsoft",
-      "homepage": "https://github.com/microsoft/windows-rs"
+      "homepage": "https://github.com/microsoft/windows-rs",
+      "versions": [
+        "0.42.2",
+        "0.52.6",
+        "0.53.1"
+      ]
     },
     {
       "name": "windows_x86_64_gnullvm",
-      "version": "0.42.2, 0.52.6, 0.53.1",
       "license": "MIT OR Apache-2.0",
       "author": "Microsoft",
-      "homepage": "https://github.com/microsoft/windows-rs"
+      "homepage": "https://github.com/microsoft/windows-rs",
+      "versions": [
+        "0.42.2",
+        "0.52.6",
+        "0.53.1"
+      ]
     },
     {
       "name": "windows_x86_64_msvc",
-      "version": "0.42.2, 0.52.6, 0.53.1",
       "license": "MIT OR Apache-2.0",
       "author": "Microsoft",
-      "homepage": "https://github.com/microsoft/windows-rs"
+      "homepage": "https://github.com/microsoft/windows-rs",
+      "versions": [
+        "0.42.2",
+        "0.52.6",
+        "0.53.1"
+      ]
     },
     {
       "name": "windows-collections",
-      "version": "0.2.0, 0.3.2",
       "license": "MIT OR Apache-2.0",
       "author": "Microsoft",
-      "homepage": "https://github.com/microsoft/windows-rs"
+      "homepage": "https://github.com/microsoft/windows-rs",
+      "versions": [
+        "0.2.0",
+        "0.3.2"
+      ]
     },
     {
       "name": "windows-core",
-      "version": "0.61.2, 0.62.2",
       "license": "MIT OR Apache-2.0",
       "author": "Microsoft",
-      "homepage": "https://github.com/microsoft/windows-rs"
+      "homepage": "https://github.com/microsoft/windows-rs",
+      "versions": [
+        "0.61.2",
+        "0.62.2"
+      ]
     },
     {
       "name": "windows-future",
-      "version": "0.2.1, 0.3.2",
       "license": "MIT OR Apache-2.0",
       "author": "Microsoft",
-      "homepage": "https://github.com/microsoft/windows-rs"
+      "homepage": "https://github.com/microsoft/windows-rs",
+      "versions": [
+        "0.2.1",
+        "0.3.2"
+      ]
     },
     {
       "name": "windows-implement",
-      "version": "0.60.2",
       "license": "MIT OR Apache-2.0",
       "author": "Microsoft",
-      "homepage": "https://github.com/microsoft/windows-rs"
+      "homepage": "https://github.com/microsoft/windows-rs",
+      "versions": [
+        "0.60.2"
+      ]
     },
     {
       "name": "windows-interface",
-      "version": "0.59.3",
       "license": "MIT OR Apache-2.0",
       "author": "Microsoft",
-      "homepage": "https://github.com/microsoft/windows-rs"
+      "homepage": "https://github.com/microsoft/windows-rs",
+      "versions": [
+        "0.59.3"
+      ]
     },
     {
       "name": "windows-link",
-      "version": "0.1.3, 0.2.1",
       "license": "MIT OR Apache-2.0",
       "author": "Microsoft",
-      "homepage": "https://github.com/microsoft/windows-rs"
+      "homepage": "https://github.com/microsoft/windows-rs",
+      "versions": [
+        "0.1.3",
+        "0.2.1"
+      ]
     },
     {
       "name": "windows-numerics",
-      "version": "0.2.0, 0.3.1",
       "license": "MIT OR Apache-2.0",
       "author": "Microsoft",
-      "homepage": "https://github.com/microsoft/windows-rs"
+      "homepage": "https://github.com/microsoft/windows-rs",
+      "versions": [
+        "0.2.0",
+        "0.3.1"
+      ]
     },
     {
       "name": "windows-registry",
-      "version": "0.6.1",
       "license": "MIT OR Apache-2.0",
       "author": "Microsoft",
-      "homepage": "https://github.com/microsoft/windows-rs"
+      "homepage": "https://github.com/microsoft/windows-rs",
+      "versions": [
+        "0.6.1"
+      ]
     },
     {
       "name": "windows-result",
-      "version": "0.3.4, 0.4.1",
       "license": "MIT OR Apache-2.0",
       "author": "Microsoft",
-      "homepage": "https://github.com/microsoft/windows-rs"
+      "homepage": "https://github.com/microsoft/windows-rs",
+      "versions": [
+        "0.3.4",
+        "0.4.1"
+      ]
     },
     {
       "name": "windows-strings",
-      "version": "0.4.2, 0.5.1",
       "license": "MIT OR Apache-2.0",
       "author": "Microsoft",
-      "homepage": "https://github.com/microsoft/windows-rs"
+      "homepage": "https://github.com/microsoft/windows-rs",
+      "versions": [
+        "0.4.2",
+        "0.5.1"
+      ]
     },
     {
       "name": "windows-sys",
-      "version": "0.45.0, 0.52.0, 0.59.0, 0.60.2, 0.61.2",
       "license": "MIT OR Apache-2.0",
       "author": "Microsoft",
-      "homepage": "https://github.com/microsoft/windows-rs"
+      "homepage": "https://github.com/microsoft/windows-rs",
+      "versions": [
+        "0.45.0",
+        "0.52.0",
+        "0.59.0",
+        "0.60.2",
+        "0.61.2"
+      ]
     },
     {
       "name": "windows-targets",
-      "version": "0.42.2, 0.52.6, 0.53.5",
       "license": "MIT OR Apache-2.0",
       "author": "Microsoft",
-      "homepage": "https://github.com/microsoft/windows-rs"
+      "homepage": "https://github.com/microsoft/windows-rs",
+      "versions": [
+        "0.42.2",
+        "0.52.6",
+        "0.53.5"
+      ]
     },
     {
       "name": "windows-threading",
-      "version": "0.1.0, 0.2.1",
       "license": "MIT OR Apache-2.0",
       "author": "Microsoft",
-      "homepage": "https://github.com/microsoft/windows-rs"
+      "homepage": "https://github.com/microsoft/windows-rs",
+      "versions": [
+        "0.1.0",
+        "0.2.1"
+      ]
     },
     {
       "name": "windows-version",
-      "version": "0.1.7",
       "license": "MIT OR Apache-2.0",
       "author": "Microsoft",
-      "homepage": "https://github.com/microsoft/windows-rs"
+      "homepage": "https://github.com/microsoft/windows-rs",
+      "versions": [
+        "0.1.7"
+      ]
     },
     {
       "name": "winnow",
-      "version": "0.5.40, 0.7.15, 1.0.3",
       "license": "MIT",
       "author": "Ed Page and nom contributors",
-      "homepage": "https://github.com/winnow-rs/winnow"
+      "homepage": "https://github.com/winnow-rs/winnow",
+      "versions": [
+        "0.5.40",
+        "0.7.15",
+        "1.0.3"
+      ]
     },
     {
       "name": "winreg",
-      "version": "0.55.0",
       "license": "MIT",
       "author": "Igor Shaula <gentoo90@gmail.com>",
-      "homepage": "https://github.com/gentoo90/winreg-rs"
+      "homepage": "https://github.com/gentoo90/winreg-rs",
+      "versions": [
+        "0.55.0"
+      ]
     },
     {
       "name": "wit-bindgen",
-      "version": "0.57.1",
       "license": "MIT OR Apache-2.0 WITH LLVM-exception OR Apache-2.0",
       "author": "Alex Crichton <alex@alexcrichton.com>",
-      "homepage": "https://github.com/bytecodealliance/wit-bindgen"
+      "homepage": "https://github.com/bytecodealliance/wit-bindgen",
+      "versions": [
+        "0.57.1"
+      ]
     },
     {
       "name": "writeable",
-      "version": "0.6.3",
       "license": "Unicode-3.0",
       "author": "The ICU4X Project Developers",
-      "homepage": "https://github.com/unicode-org/icu4x"
+      "homepage": "https://github.com/unicode-org/icu4x",
+      "versions": [
+        "0.6.3"
+      ]
     },
     {
       "name": "wry",
-      "version": "0.55.1",
       "license": "MIT OR Apache-2.0",
       "author": "Tauri Programme within The Commons Conservancy",
-      "homepage": "https://github.com/tauri-apps/wry"
+      "homepage": "https://github.com/tauri-apps/wry",
+      "versions": [
+        "0.55.1"
+      ]
     },
     {
       "name": "x11",
-      "version": "2.21.0",
       "license": "MIT",
       "author": "daggerbot <daggerbot@gmail.com>, Erle Pereira <erle@erlepereira.com>, AltF02 <contact@altf2.dev>",
-      "homepage": "https://github.com/AltF02/x11-rs.git"
+      "homepage": "https://github.com/AltF02/x11-rs.git",
+      "versions": [
+        "2.21.0"
+      ]
     },
     {
       "name": "x11-dl",
-      "version": "2.21.0",
       "license": "MIT",
       "author": "daggerbot <daggerbot@gmail.com>, Erle Pereira <erle@erlepereira.com>, AltF02 <contact@altf2.dev>",
-      "homepage": "https://github.com/AltF02/x11-rs.git"
+      "homepage": "https://github.com/AltF02/x11-rs.git",
+      "versions": [
+        "2.21.0"
+      ]
     },
     {
       "name": "xattr",
-      "version": "1.6.1",
       "license": "MIT OR Apache-2.0",
       "author": "Steven Allen <steven@stebalien.com>",
-      "homepage": "https://github.com/Stebalien/xattr"
+      "homepage": "https://github.com/Stebalien/xattr",
+      "versions": [
+        "1.6.1"
+      ]
     },
     {
       "name": "yoke",
-      "version": "0.8.2",
       "license": "Unicode-3.0",
       "author": "Manish Goregaokar <manishsmail@gmail.com>",
-      "homepage": "https://github.com/unicode-org/icu4x"
+      "homepage": "https://github.com/unicode-org/icu4x",
+      "versions": [
+        "0.8.2"
+      ]
     },
     {
       "name": "yoke-derive",
-      "version": "0.8.2",
       "license": "Unicode-3.0",
       "author": "Manish Goregaokar <manishsmail@gmail.com>",
-      "homepage": "https://github.com/unicode-org/icu4x"
+      "homepage": "https://github.com/unicode-org/icu4x",
+      "versions": [
+        "0.8.2"
+      ]
     },
     {
       "name": "zerofrom",
-      "version": "0.1.8",
       "license": "Unicode-3.0",
       "author": "The ICU4X Project Developers",
-      "homepage": "https://github.com/unicode-org/icu4x"
+      "homepage": "https://github.com/unicode-org/icu4x",
+      "versions": [
+        "0.1.8"
+      ]
     },
     {
       "name": "zerofrom-derive",
-      "version": "0.1.7",
       "license": "Unicode-3.0",
       "author": "Manish Goregaokar <manishsmail@gmail.com>",
-      "homepage": "https://github.com/unicode-org/icu4x"
+      "homepage": "https://github.com/unicode-org/icu4x",
+      "versions": [
+        "0.1.7"
+      ]
     },
     {
       "name": "zeroize",
-      "version": "1.8.2",
       "license": "MIT OR Apache-2.0",
       "author": "The RustCrypto Project Developers",
-      "homepage": "https://github.com/RustCrypto/utils/tree/master/zeroize"
+      "homepage": "https://github.com/RustCrypto/utils/tree/master/zeroize",
+      "versions": [
+        "1.8.2"
+      ]
     },
     {
       "name": "zerotrie",
-      "version": "0.2.4",
       "license": "Unicode-3.0",
       "author": "The ICU4X Project Developers",
-      "homepage": "https://icu4x.unicode.org"
+      "homepage": "https://icu4x.unicode.org",
+      "versions": [
+        "0.2.4"
+      ]
     },
     {
       "name": "zerovec",
-      "version": "0.11.6",
       "license": "Unicode-3.0",
       "author": "The ICU4X Project Developers",
-      "homepage": "https://github.com/unicode-org/icu4x"
+      "homepage": "https://github.com/unicode-org/icu4x",
+      "versions": [
+        "0.11.6"
+      ]
     },
     {
       "name": "zerovec-derive",
-      "version": "0.11.3",
       "license": "Unicode-3.0",
       "author": "Manish Goregaokar <manishsmail@gmail.com>",
-      "homepage": "https://github.com/unicode-org/icu4x"
+      "homepage": "https://github.com/unicode-org/icu4x",
+      "versions": [
+        "0.11.3"
+      ]
     },
     {
       "name": "zip",
-      "version": "4.6.1",
       "license": "MIT",
       "author": "Mathijs van de Nes <git@mathijs.vd-nes.nl>, Marli Frost <marli@frost.red>, Ryan Levick <ryan.levick@gmail.com>, Chris Hennick <hennickc@amazon.com>",
-      "homepage": "https://github.com/zip-rs/zip2.git"
+      "homepage": "https://github.com/zip-rs/zip2.git",
+      "versions": [
+        "4.6.1"
+      ]
     },
     {
       "name": "zmij",
-      "version": "1.0.21",
       "license": "MIT",
       "author": "David Tolnay <dtolnay@gmail.com>",
-      "homepage": "https://github.com/dtolnay/zmij"
+      "homepage": "https://github.com/dtolnay/zmij",
+      "versions": [
+        "1.0.21"
+      ]
     }
   ]
 }

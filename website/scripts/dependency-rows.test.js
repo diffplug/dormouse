@@ -11,12 +11,12 @@ describe('compareVersions', () => {
 
 describe('mergeReleases', () => {
   it('lists every release of one name and license on one row, oldest first', () => {
-    expect(mergeReleases([release('1.1.2'), release('0.8.2'), release('0.9.12')]).map((row) => row.version)).toEqual(['0.8.2, 0.9.12, 1.1.2']);
+    expect(mergeReleases([release('1.1.2'), release('0.8.2'), release('0.9.12')]).map((row) => row.versions)).toEqual([['0.8.2', '0.9.12', '1.1.2']]);
   });
 
   it('keeps a license change on its own row', () => {
     const rows = mergeReleases([release('2.12.1', { license: 'BSD-3-Clause' }), release('3.2.4', { license: 'ISC' })]);
-    expect(rows.map((row) => [row.version, row.license])).toEqual([['2.12.1', 'BSD-3-Clause'], ['3.2.4', 'ISC']]);
+    expect(rows.map((row) => [row.versions, row.license])).toEqual([[['2.12.1'], 'BSD-3-Clause'], [['3.2.4'], 'ISC']]);
   });
 
   it('takes author and homepage from the newest release that names them', () => {

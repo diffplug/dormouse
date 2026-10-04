@@ -7,7 +7,6 @@ import DocsLayout from "../components/DocsLayout";
 import {
   LINK_CLASS,
   MUTED_TEXT_CLASS,
-  SCROLL_MT_CLASS,
   TABLE_CLASS,
   TABLE_HEAD_ROW_CLASS,
   TABLE_ROW_CLASS,
@@ -35,7 +34,8 @@ const link = tv({ base: LINK_CLASS });
 
 type PackageDependency = {
   name: string;
-  version: string;
+  /** Every release of this package under one license, oldest first. */
+  versions: string[];
   license: string | null;
   author: string | null;
   homepage: string | null;
@@ -58,12 +58,14 @@ function DependencyName({ dep }: { dep: PackageDependency }) {
 
 /** `declaredName` differs from `name` only when a Cargo manifest renames the
  *  crate; every other source leaves it undefined. */
+type DependencyRow = PackageDependency & { declaredName?: string };
+
 function DependencyTable({
   nameLabel,
   deps,
 }: {
   nameLabel: string;
-  deps: readonly (PackageDependency & { declaredName?: string })[];
+  deps: readonly DependencyRow[];
 }) {
   return (
     <div className={TABLE_WRAP_CLASS}>
@@ -86,17 +88,15 @@ function DependencyTable({
         </thead>
         <tbody>
           {deps.map((dep) => (
-            <tr key={`${dep.name}@${dep.version}`} className={TABLE_ROW_CLASS}>
+            <tr key={`${dep.name}@${dep.versions[0]}`} className={TABLE_ROW_CLASS}>
               <td className="py-1.5 pr-4 break-words">
                 <DependencyName dep={dep} />
                 {dep.declaredName && dep.declaredName !== dep.name ? (
                   <div className={`font-mono text-xs ${MUTED_TEXT_CLASS}`}>{dep.declaredName}</div>
                 ) : null}
               </td>
-              {/* A row merges every release of one package under one license,
-                  so each version gets its own line. */}
               <td className={`py-1.5 pr-4 font-mono ${MUTED_TEXT_CLASS}`}>
-                {dep.version.split(", ").map((version) => {
+                {dep.versions.map((version) => {
                   // Build metadata (`+spec-1.1.0`) gets its own small line.
                   const [core, ...build] = version.split("+");
                   return (
@@ -123,9 +123,9 @@ type SupplyChainSection = {
   /** Anchor the rail links, and the heading's id. */
   id: string;
   title: string;
-  count: number;
   description: string;
-  table: ReactNode;
+  nameLabel: string;
+  deps: readonly DependencyRow[];
 };
 
 type SupplyChainProduct = {
@@ -133,6 +133,8 @@ type SupplyChainProduct = {
   id: string;
   title: string;
   description: ReactNode;
+  /** The product's headline count in the summary row, and what it counts. */
+  summary: { count: number; detail: string };
   sections: readonly SupplyChainSection[];
 };
 
@@ -152,38 +154,42 @@ const PRODUCTS: readonly SupplyChainProduct[] = [
     title: "Dormouse Terminal",
     description:
       "Every install: the VS Code extension or the Standalone app, and the dor CLI they put on each terminal's PATH.",
+    summary: {
+      count: npmDeps.terminal.length,
+      detail: `npm packages, plus ${cargoDeps.direct.length + cargoDeps.transitive.length} Cargo crates and Node.js ${runtimeDeps[0].versions[0]}`,
+    },
     sections: [
       {
         id: "bundled-runtime",
         title: "Bundled Runtime",
-        count: runtimeDeps.length,
         description:
           "The Standalone app ships a bundled NodeJS, which bundles other components under their own licenses.\nThe VS Code extension bundles no runtime — it runs on the editor's own Electron Node.",
-        table: <DependencyTable nameLabel="Package" deps={runtimeDeps} />,
+        nameLabel: "Package",
+        deps: runtimeDeps,
       },
       {
         id: "npm-dependencies",
         title: "npm Dependencies",
-        count: npmDeps.terminal.length,
         description:
           "Runtime npm packages used by the Standalone app, the VS Code extension, and the dor CLI, plus the bundled themes.",
-        table: <DependencyTable nameLabel="Package" deps={npmDeps.terminal} />,
+        nameLabel: "Package",
+        deps: npmDeps.terminal,
       },
       {
         id: "direct-cargo-dependencies",
         title: "Direct Cargo Dependencies",
-        count: cargoDeps.direct.length,
         description:
           "Crates declared directly in standalone/src-tauri/Cargo.toml, including build and target-specific dependencies.",
-        table: <DependencyTable nameLabel="Crate" deps={cargoDeps.direct} />,
+        nameLabel: "Crate",
+        deps: cargoDeps.direct,
       },
       {
         id: "transitive-cargo-dependencies",
         title: "Transitive Cargo Dependencies",
-        count: cargoDeps.transitive.length,
         description:
           "Every crate the direct dependencies pull into the locked Tauri build graph, including build-time and platform-specific crates that aren't all linked into the final binary.",
-        table: <DependencyTable nameLabel="Package" deps={cargoDeps.transitive} />,
+        nameLabel: "Package",
+        deps: cargoDeps.transitive,
       },
     ],
   },
@@ -192,13 +198,14 @@ const PRODUCTS: readonly SupplyChainProduct[] = [
     title: "Built-in Tools",
     description:
       "The file viewer and editors behind dor open — Monaco, the Markdown editor, and Mermaid diagrams. They ship with every install, inside the dor CLI, but their code runs only when you open a file with a built-in Tool, in that Tool's frame, whose server hands out only the files you opened (and, for Markdown, images in and below the document's folder).",
+    summary: { count: npmDeps.builtinTools.length, detail: "npm packages" },
     sections: [
       {
         id: "builtin-tools-npm-dependencies",
         title: "npm Dependencies",
-        count: npmDeps.builtinTools.length,
         description: "Runtime npm packages of the built-in Tools that the Terminal does not already use.",
-        table: <DependencyTable nameLabel="Package" deps={npmDeps.builtinTools} />,
+        nameLabel: "Package",
+        deps: npmDeps.builtinTools,
       },
     ],
   },
@@ -214,13 +221,14 @@ const PRODUCTS: readonly SupplyChainProduct[] = [
         .
       </>
     ),
+    summary: { count: npmDeps.relay.length, detail: "npm packages" },
     sections: [
       {
         id: "relay-npm-dependencies",
         title: "npm Dependencies",
-        count: npmDeps.relay.length,
         description: "Runtime npm packages of the Relay that the sections above do not already list.",
-        table: <DependencyTable nameLabel="Package" deps={npmDeps.relay} />,
+        nameLabel: "Package",
+        deps: npmDeps.relay,
       },
     ],
   },
@@ -262,13 +270,13 @@ function DependencySection({ section }: { section: SupplyChainSection }) {
       <div className="mb-4 flex flex-col gap-1 border-b border-[var(--color-text)]/10 pb-3 md:flex-row md:items-end md:justify-between">
         <div>
           <div className="flex items-baseline gap-2">
-            <h3 id={section.id} className={`${SCROLL_MT_CLASS} font-display text-xl`}>{section.title}</h3>
-            <div className={`font-mono text-md ${MUTED_TEXT_CLASS}`}>({section.count})</div>
+            <AnchoredHeading id={section.id} depth={3} spacing="">{section.title}</AnchoredHeading>
+            <div className={`font-mono text-md ${MUTED_TEXT_CLASS}`}>({section.deps.length})</div>
           </div>
           <p className={`text-sm whitespace-pre-line ${MUTED_TEXT_CLASS}`}>{section.description}</p>
         </div>
       </div>
-      {section.table}
+      <DependencyTable nameLabel={section.nameLabel} deps={section.deps} />
     </section>
   );
 }
@@ -282,17 +290,6 @@ function ProductSection({ product }: { product: SupplyChainProduct }) {
         <DependencySection key={section.id} section={section} />
       ))}
     </section>
-  );
-}
-
-/** One product's headline count in the summary row. */
-function ProductCount({ count, title, detail }: { count: number; title: string; detail: string }) {
-  return (
-    <div>
-      <div className="font-mono text-2xl">{count}</div>
-      <div>{title}</div>
-      <div className={MUTED_TEXT_CLASS}>{detail}</div>
-    </div>
   );
 }
 
@@ -351,13 +348,13 @@ export default function SupplyChain() {
         and their transitive dependencies, which power this marketing site but don't ship in the app, so they're not listed below.
       </p>
       <div className="grid gap-3 border-y border-[var(--color-text)]/10 py-4 text-sm md:grid-cols-3">
-        <ProductCount
-          count={npmDeps.terminal.length}
-          title="Dormouse Terminal"
-          detail={`npm packages, plus ${cargoDeps.direct.length + cargoDeps.transitive.length} Cargo crates and Node.js ${runtimeDeps[0].version}`}
-        />
-        <ProductCount count={npmDeps.builtinTools.length} title="Built-in Tools" detail="npm packages" />
-        <ProductCount count={npmDeps.relay.length} title="Self-hosted Relay" detail="npm packages" />
+        {PRODUCTS.map(({ id, title, summary }) => (
+          <div key={id}>
+            <div className="font-mono text-2xl">{summary.count}</div>
+            <div>{title}</div>
+            <div className={MUTED_TEXT_CLASS}>{summary.detail}</div>
+          </div>
+        ))}
       </div>
 
       {PRODUCTS.map((product) => (

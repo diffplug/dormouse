@@ -144,7 +144,6 @@ const workspacePackagesByName = new Map(workspacePackages.map((workspacePackage)
   workspacePackage.pkg.name,
   workspacePackage,
 ]));
-const productRoots = new Set(productDependencyFilters);
 /** The section being walked; every package first read during it belongs to it. */
 let currentSection = null;
 /** Every disclosed release, one entry per `name@version`, merged into rows on output. */
@@ -160,17 +159,7 @@ const undescribedPackages = new Map();
 /** Each package's `contributors` (or `authors`), the last resort for its author. */
 const listedPeople = new Map();
 
-/**
- * The section that first disclosed each `name@version`. pnpm installs one
- * release at several paths when peer contexts differ, so the path walk alone
- * would repeat a release under a later section.
- */
-const releaseSections = new Map();
-
 function addExternalPackage(pkg) {
-  const release = `${pkg.name}@${pkg.version}`;
-  if ((releaseSections.get(release) ?? currentSection) !== currentSection) return;
-  releaseSections.set(release, currentSection);
   const people = formatPeople(pkg.contributors) ?? formatPeople(pkg.authors);
   if (people) listedPeople.set(pkg.name, people);
   externalReleases.push({
@@ -221,6 +210,8 @@ function scanDependency(fromDir, packageName, declaredBy) {
   if (!packageJsonPath) {
     const edge = missingDependency(declaredBy);
     if (edge === 'skip') return;
+    // The first section to reach it keeps it, as `firstSectionReleases` does.
+    if (edge === 'describe' && undescribedPackages.has(packageName)) return;
     if (edge === 'describe') {
       undescribedPackages.set(packageName, {
         section: currentSection,
@@ -241,7 +232,7 @@ function scanDependency(fromDir, packageName, declaredBy) {
 }
 
 function scanDependencies(pkg, fromDir) {
-  const isProductRoot = productRoots.has(pkg.name);
+  const isProductRoot = sectionOfRoot.has(pkg.name);
   const isWorkspace = workspacePackagesByName.has(pkg.name);
   for (const { name, optional } of getDependencyNames(pkg)) {
     scanDependency(fromDir, name, { pkg, optional, isWorkspace, isProductRoot });
@@ -253,9 +244,9 @@ for (const section of productSections) {
   for (const packageName of section.roots) scanWorkspacePackage(packageName);
 }
 
-// Snapshotted before the loop writes to `externalReleases`, so nothing is ever
+// Grouped before the loop writes to `externalReleases`, so nothing is ever
 // described from something that was itself described rather than read.
-const readReleasesByName = Map.groupBy([...externalReleases], (release) => release.name);
+const readReleasesByName = Map.groupBy(externalReleases, (release) => release.name);
 for (const [packageName, { section, siblings }] of undescribedPackages) {
   const sibling = siblings.map((name) => readReleasesByName.get(name)).find(Boolean);
   if (!sibling) {
@@ -290,7 +281,23 @@ function normalizeLicense(license) {
   return moveMitFirstInOrGroup(normalized);
 }
 
-const deps = [...externalReleases];
+/**
+ * Each `name@version` once, in the first section that reached it. pnpm installs
+ * one release at several paths when peer contexts differ, so the path walk
+ * alone would repeat it under a later section. A described release cannot
+ * collide with a read one: it is described because it is not installed.
+ */
+function firstSectionReleases(releases) {
+  const seen = new Set();
+  return releases.filter(({ name, version }) => {
+    const release = `${name}@${version}`;
+    if (seen.has(release)) return false;
+    seen.add(release);
+    return true;
+  });
+}
+
+const deps = firstSectionReleases(externalReleases);
 
 // Merge in bundled theme extensions from OpenVSX, compiled into lib and so
 // part of the terminal.
@@ -304,12 +311,12 @@ const isVscodeBuiltInTheme = (dep) =>
   (dep.name === "Default Themes (built-in)" || dep.name.endsWith(" Theme (built-in)"));
 
 const vscodeBuiltInThemes = themeExtensions.filter(isVscodeBuiltInTheme);
-if (vscodeBuiltInThemes.length > 0) {
-  const versions = [...new Set(vscodeBuiltInThemes.map((dep) => dep.version).filter(Boolean))].sort();
+// One release per version, which `mergeReleases` folds into one row.
+for (const version of new Set(vscodeBuiltInThemes.map((dep) => dep.version).filter(Boolean))) {
   deps.push({
     section: "terminal",
     name: "VS Code built-in themes",
-    version: versions.join(", "),
+    version,
     license: "MIT",
     author: "Microsoft Corporation",
     homepage: "https://github.com/microsoft/vscode/tree/main/extensions",
@@ -397,41 +404,41 @@ const missingAuthorScopes = {
 const missingHomepageScopes = {
   "@radix-ui/": "https://www.radix-ui.com/",
 };
+/** The value of the first `prefix` key that `name` starts with. */
+function byPrefix(table, name) {
+  return Object.entries(table).find(([prefix]) => name.startsWith(prefix))?.[1];
+}
+
+/** Fills a missing `field` from `override`, or fails generation naming `table`. */
+function requireField(dep, field, override, table) {
+  if (dep[field]) return;
+  if (!override) {
+    console.error(`ERROR: "${dep.name}" has no ${field}. Add it to ${table} in generate-deps.js`);
+    process.exit(1);
+  }
+  dep[field] = override;
+}
+
 for (const dep of deps) {
-  if (!dep.license) {
-    const override = missingLicense[dep.name];
-    if (!override) {
-      console.error(`ERROR: "${dep.name}" has no license. Add it to missingLicense in generate-deps.js`);
-      process.exit(1);
-    }
-    dep.license = override;
-  }
-  if (!dep.author) {
-    const override = missingAuthor[dep.name]
-      ?? Object.entries(missingAuthorScopes).find(([scope]) => dep.name.startsWith(scope))?.[1]
-      ?? listedPeople.get(dep.name);
-    if (!override) {
-      console.error(`ERROR: "${dep.name}" has no author. Add it to missingAuthor in generate-deps.js`);
-      process.exit(1);
-    }
-    dep.author = override;
-  }
-  if (!dep.homepage) {
-    const override = Object.entries(missingHomepageScopes).find(([scope]) => dep.name.startsWith(scope))?.[1];
-    if (!override) {
-      console.error(`ERROR: "${dep.name}" has no homepage. Add its scope to missingHomepageScopes in generate-deps.js`);
-      process.exit(1);
-    }
-    dep.homepage = override;
-  }
+  requireField(dep, "license", missingLicense[dep.name], "missingLicense");
+  requireField(
+    dep,
+    "author",
+    missingAuthor[dep.name] ?? byPrefix(missingAuthorScopes, dep.name) ?? listedPeople.get(dep.name),
+    "missingAuthor",
+  );
+  requireField(dep, "homepage", byPrefix(missingHomepageScopes, dep.name), "missingHomepageScopes");
 }
 
 // Merged after the overrides, so a release whose metadata needed one still
 // joins its siblings' row.
-const npmRows = mergeReleases(deps, ["section"]).sort(compareDependencyEntries);
+const npmRowsBySection = Map.groupBy(
+  mergeReleases(deps, ["section"]).sort(compareDependencyEntries),
+  (row) => row.section,
+);
 const npmDepsBySection = Object.fromEntries(productSections.map(({ id }) => [
   id,
-  npmRows.filter((dep) => dep.section === id).map(({ section: _section, ...dep }) => dep),
+  (npmRowsBySection.get(id) ?? []).map(({ section: _section, ...row }) => row),
 ]));
 
 // Manual overrides for Cargo crates whose published Cargo.toml omits author or
@@ -529,14 +536,14 @@ function cargoPackageEntry(pkg) {
     license: normalizeLicense(pkg.license),
     author: formatCargoAuthor(pkg.authors)
       ?? cargoMissingAuthor[pkg.name]
-      ?? Object.entries(cargoMissingAuthorPrefixes).find(([prefix]) => pkg.name.startsWith(prefix))?.[1]
+      ?? byPrefix(cargoMissingAuthorPrefixes, pkg.name)
       ?? null,
     homepage: getCargoHomepage(pkg) ?? cargoMissingHomepage[pkg.name] ?? null,
   };
 }
 
 function compareDependencyEntries(a, b) {
-  return a.name.localeCompare(b.name) || compareVersions(a.version, b.version);
+  return a.name.localeCompare(b.name) || compareVersions(a.versions[0], b.versions[0]);
 }
 
 function getCargoMetadata() {
@@ -592,10 +599,7 @@ function getCargoDependencies() {
 
 const cargoDeps = getCargoDependencies();
 for (const dep of [...cargoDeps.direct, ...cargoDeps.transitive]) {
-  if (!dep.author) {
-    console.error(`ERROR: crate "${dep.name}" has no author. Add it to cargoMissingAuthor in generate-deps.js`);
-    process.exit(1);
-  }
+  requireField(dep, "author", null, "cargoMissingAuthor");
 }
 
 // Bundled runtime: the standalone app ships a Node.js binary as a Tauri
@@ -615,7 +619,7 @@ function getBundledRuntimeDependencies() {
   return [
     {
       name: "Node.js",
-      version: nodeVersion,
+      versions: [nodeVersion],
       license: "MIT and bundled component licenses",
       author: "OpenJS Foundation and Node.js contributors",
       homepage: "https://github.com/nodejs/node",

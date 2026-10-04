@@ -17,7 +17,7 @@ export function compareVersions(a, b) {
 }
 
 /**
- * Merges releases into rows: one row per name and license, whose `version`
+ * Merges releases into rows: one row per name and license, whose `versions`
  * lists every release oldest first. A license change between releases keeps
  * separate rows, since one row cannot state two licenses. Author and homepage
  * come from the newest release that names them — a crate that dropped Cargo's
@@ -25,19 +25,14 @@ export function compareVersions(a, b) {
  * `groupBy` names further fields a merged row must agree on.
  */
 export function mergeReleases(releases, groupBy = []) {
-  const groups = new Map();
-  for (const release of releases) {
-    const key = [release.name, release.license ?? "", ...groupBy.map((field) => release[field] ?? "")].join("\0");
-    const group = groups.get(key);
-    if (group) group.push(release);
-    else groups.set(key, [release]);
-  }
+  const groups = Map.groupBy(releases, (release) =>
+    [release.name, release.license ?? "", ...groupBy.map((field) => release[field] ?? "")].join("\0"));
   return [...groups.values()].map((group) => {
     const newestFirst = [...group].sort((a, b) => compareVersions(b.version, a.version));
-    const versions = [...new Set(newestFirst.map((release) => release.version))].reverse();
+    const { version: _version, ...newest } = newestFirst[0];
     return {
-      ...newestFirst[0],
-      version: versions.join(", "),
+      ...newest,
+      versions: [...new Set(newestFirst.map((release) => release.version))].reverse(),
       author: newestFirst.find((release) => release.author)?.author ?? null,
       homepage: newestFirst.find((release) => release.homepage)?.homepage ?? null,
     };
