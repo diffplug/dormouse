@@ -71,7 +71,7 @@ Pinned by `hosted/server/tests/relay.test.ts`, `hosted/server/tests/relay-push.t
 
 ## Billing boundary
 
-**Billing** on the account Worker: `docs/specs/hosted.md` -> "Billing" and "Entitlement" own it; these are the checks on it. Inspect `billingRoutes` and `reconcileDue` in `hosted/server/billing-routes.ts`, `hosted/server/billing.ts`, `entitledSql` in `hosted/server/entitlement.ts`, and `hosted/server/dormouse-migrations/005_billing_founders.sql`.
+**Billing** on the account Worker: `docs/specs/hosted.md` -> "Billing" and "Entitlement" own it; these are the checks on it. Inspect `billingRoutes` and `reconcileDue` in `hosted/server/billing-routes.ts`, `hosted/server/billing.ts`, `entitledSql` in `hosted/server/entitlement.ts`, and `hosted/server/dormouse-migrations/006_billing_founders.sql`.
 
 - **FAIL IF** the entitlement admits an account but by `ADMIN_EMAIL` verified or by exactly one current subscription that is `active` before its period end or `trialing` before its trial end, or reads that state from anywhere but the synchronized `pgstencil_billing.subscriptions` rows in the same query as the bearer (rationale).
 - **FAIL IF** a billing route takes a Stripe Price, customer, owner, quantity, success or return URL from the request, or acts for any owner but the cookie's login; or a Price, the secret key, or the webhook secret comes from anywhere but the account's bindings, `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` being Worker secrets rather than `vars`.

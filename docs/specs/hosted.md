@@ -240,7 +240,7 @@ Errors are JSON `{ message }`; the cookie routes answer 401 without a login and 
 - **The account pages** are `/checkout?plan=` (signed in, the plan and its price now, then Stripe), Stripe's return to `/billing?checkout=` (confirmed, then the founders-row opt-in and the survey), and the account page's Plan section. **May keep a pending checkout's plan name, and nothing else, in the tab's session storage**, so a provider sign-in returns to it.
 - **Must keep a founder's opt-in as the name they chose to show** (`dormouse_founders`, deleted on withdrawal) and the survey as one set of answers per account (`dormouse_price_survey`), each answer whole dollars or null.
 
-Source of truth: `billingRoutes` and `reconcileDue` in `hosted/server/billing-routes.ts`; `billingSetup`, `openCohort`, and `withBilling` in `hosted/server/billing.ts`; `hosted/src/Billing.tsx` and `takeCheckout` in `hosted/src/checkout.ts`; `hosted/server/dormouse-migrations/005_billing_founders.sql`. Pinned by `hosted/server/tests/billing.test.ts`.
+Source of truth: `billingRoutes` and `reconcileDue` in `hosted/server/billing-routes.ts`; `billingSetup`, `openCohort`, and `withBilling` in `hosted/server/billing.ts`; `hosted/src/Billing.tsx` and `takeCheckout` in `hosted/src/checkout.ts`; `hosted/server/dormouse-migrations/006_billing_founders.sql`. Pinned by `hosted/server/tests/billing.test.ts`.
 
 ## Development and release
 
