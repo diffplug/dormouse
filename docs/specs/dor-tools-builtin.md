@@ -1,7 +1,7 @@
 # Built-in Tools
 
 > - See `docs/specs/glossary.md` for Surface / Session / Pane vocabulary.
-> - Owns the built-in Tools — `builtin:file` (the local-file viewer and its text and Markdown editors), `builtin:code` (the source editor), and `builtin:folder` — and their runtime package launched through `dor`. `dor open` dispatch, the Preview slot, OSC 367, and close consent belong to `docs/specs/dor-tool.md`; the listeners' audited rules to `docs/specs/security-local.md` → Local-file viewer.
+> - Owns the built-in Tools — `builtin:file` (the local-file viewer and its text, Markdown, and image editors), `builtin:code` (the source editor), and `builtin:folder` — and their runtime package launched through `dor`. `dor open` dispatch, the Preview slot, OSC 367, and close consent belong to `docs/specs/dor-tool.md`; the listeners' audited rules to `docs/specs/security-local.md` → Local-file viewer.
 
 ## Packaging
 
@@ -24,7 +24,7 @@ Source of truth: `dor/package.json`, `dor-tools-builtin/package.json`; `dor-tool
 
 **Must require a user Tool for PDFs**, including files named `README.pdf`. (rationale)
 
-**Must retain media/HTML grant descriptors until the Tool exits.** Refresh reads those files again; replacements and dependency-graph changes require restarting. Text editing follows [Editing files](#editing-files). **Must report a view that cannot be edited clean as it starts**, so closing it asks nothing (`docs/specs/reopen.md` → "Reopenable kinds"). Cold restore creates a fresh URL capability; Workspace movement keeps the live binding.
+**Must retain media/HTML grant descriptors until the Tool exits.** Refresh reads those files again; replacements and dependency-graph changes require restarting. Text editing follows [Editing files](#editing-files). **Must report a view that cannot be edited (not text, PNG, or JPEG) clean as it starts**, so closing it asks nothing (`docs/specs/reopen.md` → "Reopenable kinds"). Cold restore creates a fresh URL capability; Workspace movement keeps the live binding.
 
 Source of truth: `runFileViewer` in `dor-tools-builtin/src/file-viewer.ts`; `fileViewerFormat` in `dor-tools-builtin/src/file-viewer-format.ts`. Tests: `dor-tools-builtin/test/file-viewer.test.mjs`.
 
@@ -50,8 +50,19 @@ Source of truth: `saveEditableFile` in `dor-tools-builtin/src/editable-file.ts`;
 - **Must serve images on request from regular image-format files at or under the document's canonical directory**, by realpath, under a `sandbox` CSP. Nothing else loads, external URLs included.
 - **Must write a pasted or dropped PNG, JPEG, GIF, or WebP beside the document as a new `image-YYYYMMDD-HHMMSS[-N].<ext>`**, signature-checked, at most 32 MiB, never replacing a file; its reference is an unsaved edit.
 - **Must rename a listed image on disk at once**, to an image name in its own directory not starting with `.`, never replacing another file (case-only renames allowed); rewritten references are an unsaved edit.
+- **Must replace a PNG or JPEG at or under the document's canonical directory only when its spelled path is its realpath**, following no symlink below it, as the [Image editor](#image-editor) saves; reads for editing share the rule.
 
-Source of truth: `dor-tools-builtin/viewer/markdown.tsx`; `safeCreateDOM` in `dor-tools-builtin/viewer/markdown-safety.ts`; `openImage` / `writePastedImage` / `renameImage` in `dor-tools-builtin/src/markdown-images.ts`. Tests: `dor-tools-builtin/test/markdown-editor.test.mjs`.
+Source of truth: `dor-tools-builtin/viewer/markdown.tsx`; `safeCreateDOM` in `dor-tools-builtin/viewer/markdown-safety.ts`; `openImage` / `writePastedImage` / `renameImage` / `saveImageInFolder` in `dor-tools-builtin/src/markdown-images.ts`. Tests: `dor-tools-builtin/test/markdown-editor.test.mjs`.
+
+## Image editor
+
+`builtin:file` edits PNG and JPEG; other image formats stay view-only.
+
+- **Must save exactly the submitted bytes, at most 32 MiB**, under the revision, identity, permission, and replacement rules of [Editing files](#editing-files).
+- **Must refuse a save whose `Content-Type` or signature is not its extension's type** (415).
+- **Must send the revision as the `X-Dor-Version` response header and take it back as the save's `version` query parameter**, the body being the image bytes. The Markdown editor's in-place replacement shares this contract.
+
+Source of truth: `saveImageFile` in `dor-tools-builtin/src/markdown-images.ts`; `saveEditableBytes` in `dor-tools-builtin/src/editable-file.ts`; `imagePage` in `dor-tools-builtin/src/editor-page.ts`. Tests: `dor-tools-builtin/test/file-viewer.test.mjs`.
 
 ## Code editor
 

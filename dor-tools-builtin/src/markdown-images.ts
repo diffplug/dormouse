@@ -2,10 +2,9 @@ import { constants } from 'node:fs';
 import { copyFile, link, lstat, open, realpath, rename, unlink, type FileHandle } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import { CONTROLS, fileViewerFormat } from './file-viewer-format.js';
+import { IMAGE_BOUND, readEditableImage, saveEditableBytes } from './editable-file.js';
 import { HttpError, isInsideRoot, openRegularFile, pathSegments } from './viewer-server.js';
 
-/** Bound on one pasted image's decoded bytes. */
-export const IMAGE_LIMIT = 32 * 1024 * 1024;
 /** A pasted image's type, its file extension, and the signature its bytes must open with. */
 const PASTE_TYPES: Record<string, { ext: string; magic: (b: Buffer) => boolean }> = {
   'image/png': { ext: 'png', magic: b => b.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) },
@@ -13,6 +12,18 @@ const PASTE_TYPES: Record<string, { ext: string; magic: (b: Buffer) => boolean }
   'image/gif': { ext: 'gif', magic: b => /^GIF8[79]a/.test(b.subarray(0, 6).toString('latin1')) },
   'image/webp': { ext: 'webp', magic: b => b.subarray(0, 4).toString('latin1') === 'RIFF' && b.subarray(8, 12).toString('latin1') === 'WEBP' },
 };
+
+/** The `PASTE_TYPES` type whose signature `bytes` opens with, if any. */
+export const imageKind = (bytes: Buffer): string | undefined =>
+  Object.keys(PASTE_TYPES).find(type => PASTE_TYPES[type].magic(bytes));
+
+/** The image types the image editor re-encodes; every other image is view-only. */
+const EDITABLE_IMAGES = new Set(['image/png', 'image/jpeg']);
+/** `path`'s type when its extension names an editable image (PNG or JPEG). */
+export function editableImageType(path: string): string | undefined {
+  const mime = fileViewerFormat(path)?.mime;
+  return mime && EDITABLE_IMAGES.has(mime) ? mime : undefined;
+}
 
 const isImage = (path: string) => !!fileViewerFormat(path)?.mime.startsWith('image/');
 
@@ -30,6 +41,36 @@ export async function openImage(root: string, route: string): Promise<{ file: Fi
   if (!isInsideRoot(root, canonical) || !isImage(canonical)) throw new HttpError(404);
   const file = await openRegularFile(canonical).catch(() => { throw new HttpError(404); });
   return { file, mime: fileViewerFormat(canonical)!.mime };
+}
+
+/** An editable image at or under `root` for replacement. `imagePath` keeps the
+ * spelling under `root`, and the spelling must be the realpath, so no symlink
+ * below `root` is followed; else 404. */
+async function editableImagePath(root: string, route: string): Promise<{ path: string; mime: string }> {
+  const path = imagePath(root, route);
+  const mime = editableImageType(path);
+  if (!mime) throw new HttpError(415, 'Only PNG and JPEG images can be edited.');
+  if (await realpath(path).catch(() => null) !== path) throw new HttpError(404);
+  return { path, mime };
+}
+
+/** The bytes, type, and revision of an editable image at or under `root`. */
+export async function readImageInFolder(root: string, route: string): Promise<{ bytes: Buffer; version: string; mime: string }> {
+  const { path, mime } = await editableImagePath(root, route);
+  return { ...await readEditableImage(path), mime };
+}
+
+/** Saves `bytes` over `target`, an editable image of type `mime`, at revision
+ * `version` when the request's `type` and the bytes' signature are both `mime`. */
+export async function saveImageFile(target: string, mime: string, type: string, bytes: Buffer, version: string): Promise<{ version: string }> {
+  if (type !== mime || imageKind(bytes) !== mime) throw new HttpError(415, `Save this image as ${mime === 'image/png' ? 'PNG' : 'JPEG'}.`);
+  return saveEditableBytes(target, bytes, version, IMAGE_BOUND);
+}
+
+/** Replaces an editable image at or under `root` in place, as `saveImageFile`. */
+export async function saveImageInFolder(root: string, route: string, type: string, bytes: Buffer, version: string): Promise<{ version: string }> {
+  const { path, mime } = await editableImagePath(root, route);
+  return saveImageFile(path, mime, type, bytes, version);
 }
 
 const pad = (n: number) => String(n).padStart(2, '0');

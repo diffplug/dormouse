@@ -20,3 +20,10 @@ export function markdownPage(name: string): string {
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>${escapeHtml(name)}</title><link rel="stylesheet" href="assets/markdown.css"></head><body>
 <div id="root"></div>${CONFIRM}<script type="module" src="assets/markdown.js"></script></body></html>`;
 }
+
+/** The image editor (docs/specs/dor-tools-builtin.md -> Image editor); the
+ * pixels arrive from `source`, never in this markup. */
+export function imagePage(name: string): string {
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>${escapeHtml(name)}</title><link rel="stylesheet" href="assets/image.css"></head><body>
+<div id="root"></div>${CONFIRM}<script type="module" src="assets/image.js"></script></body></html>`;
+}

@@ -123,3 +123,72 @@ test('image renames stay in their folder, keep an image name, and never replace 
   assert.equal((await rename(viewer, 'img/diagram.png', 'img/Diagram.png')).status, 200);
   assert.ok((await readdir(join(docs, 'img'))).includes('Diagram.png'));
 });
+
+const EDITED = Buffer.concat([PNG, Buffer.from('edited')]);
+const edit = (viewer, path) => send(viewer, route(viewer, `edit/${path}`));
+const saveImage = (viewer, path, version, bytes = EDITED, type = 'image/png', origin) =>
+  send(viewer, route(viewer, `image-save/${path}?version=${version}`), { body: bytes, type, origin });
+
+test('a PNG or JPEG at or under the document folder is replaced in place at its revision', async () => {
+  const viewer = await start();
+  const opened = await edit(viewer, 'img/a%20b.png');
+  assert.equal(opened.status, 200);
+  assert.equal(opened.headers['content-type'], 'image/png');
+  assert.match(opened.headers['content-security-policy'], /^sandbox;/);
+  assert.ok(opened.body.equals(PNG));
+  const version = opened.headers['x-dor-version'];
+  for (const origin of ['', 'null', 'https://elsewhere.test']) assert.equal((await saveImage(viewer, 'img/a%20b.png', version, EDITED, 'image/png', origin)).status, 403);
+  assert.equal((await saveImage(viewer, 'img/a%20b.png', '')).status, 400);
+  assert.equal((await saveImage(viewer, 'img/a%20b.png', version, JPEG)).status, 415);
+  assert.equal((await saveImage(viewer, 'img/a%20b.png', version, EDITED, 'image/jpeg')).status, 415);
+  const saved = await saveImage(viewer, 'img/a%20b.png', version);
+  assert.equal(saved.status, 200, saved.body.toString());
+  assert.ok((await readFile(join(docs, 'img', 'a b.png'))).equals(EDITED));
+  assert.equal((await edit(viewer, 'img/a%20b.png')).headers['x-dor-version'], JSON.parse(saved.body).version);
+  assert.equal((await saveImage(viewer, 'img/a%20b.png', version)).status, 409);
+  assert.ok((await readFile(join(docs, 'img', 'a b.png'))).equals(EDITED));
+  await writeFile(join(docs, 'photo.jpeg'), JPEG);
+  const photo = await edit(viewer, 'photo.jpeg');
+  assert.equal(photo.headers['content-type'], 'image/jpeg');
+  const jpeg = Buffer.concat([JPEG, Buffer.from('edited')]);
+  assert.equal((await saveImage(viewer, 'photo.jpeg', photo.headers['x-dor-version'], jpeg, 'image/jpeg')).status, 200);
+  assert.ok((await readFile(join(docs, 'photo.jpeg'))).equals(jpeg));
+  const notes = await start('notes.txt', 'plain');
+  assert.equal((await edit(notes, 'img/a%20b.png')).status, 404);
+  assert.equal((await saveImage(notes, 'img/a%20b.png', version)).status, 404);
+});
+
+test('in-place image saves refuse other formats, oversize bodies, and paths leaving the folder', async () => {
+  const viewer = await start();
+  const version = (await edit(viewer, 'img/a%20b.png')).headers['x-dor-version'];
+  for (const name of ['anim.gif', 'photo.webp']) {
+    await writeFile(join(docs, name), 'image');
+    assert.equal((await edit(viewer, name)).status, 415);
+    assert.equal((await saveImage(viewer, name, version)).status, 415);
+    assert.equal(await readFile(join(docs, name), 'utf8'), 'image');
+  }
+  assert.equal((await edit(viewer, 'secret.txt')).status, 404);
+  assert.equal((await edit(viewer, 'missing.png')).status, 404);
+  assert.equal((await edit(viewer, '../outside.png')).status, 404);
+  assert.equal((await saveImage(viewer, '..%2Foutside.png', version)).status, 403);
+  assert.ok((await readFile(join(root, 'outside.png'))).equals(PNG));
+  const large = Buffer.concat([PNG, Buffer.alloc(32 * 1024 * 1024)]);
+  assert.equal((await saveImage(viewer, 'img/a%20b.png', version, large)).status, 413);
+  assert.ok((await readFile(join(docs, 'img', 'a b.png'))).equals(PNG));
+});
+
+test('in-place image saves follow no symlink, to the image or to a folder above it', { skip: process.platform === 'win32' }, async () => {
+  const viewer = await start();
+  const version = (await edit(viewer, 'img/a%20b.png')).headers['x-dor-version'];
+  await symlink(join(docs, 'img', 'a b.png'), join(docs, 'alias.png'));
+  await symlink(join(docs, 'img'), join(docs, 'linked'));
+  await symlink(join(root, 'outside.png'), join(docs, 'escape.png'));
+  for (const path of ['alias.png', 'linked/a%20b.png', 'escape.png']) {
+    assert.equal((await edit(viewer, path)).status, 404, path);
+    assert.equal((await saveImage(viewer, path, version)).status, 404, path);
+  }
+  // Reads still follow a symlink that stays inside the folder.
+  assert.equal((await send(viewer, route(viewer, 'images/alias.png'))).status, 200);
+  assert.ok((await readFile(join(docs, 'img', 'a b.png'))).equals(PNG));
+  assert.ok((await readFile(join(root, 'outside.png'))).equals(PNG));
+});

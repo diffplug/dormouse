@@ -254,3 +254,67 @@ test('editor saves atomically while its retained raw grant still reads the origi
   assert.equal(raw.status, 200);
   assert.equal(raw.body, 'original');
 });
+
+const PNG = Buffer.from('89504e470d0a1a0a0000000d4948445200000001000000010802000000907753de', 'hex');
+const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0x10]);
+async function postBytes(viewer, route, bytes, type, origin = `http://127.0.0.1:${viewer.port}`) {
+  return new Promise((resolve, reject) => {
+    const req = request({ host: '127.0.0.1', port: viewer.port, path: viewer.path.replace(/view$/, route), method: 'POST',
+      headers: { 'Content-Type': type, ...(origin ? { Origin: origin } : {}) } }, res => {
+      const chunks = []; res.on('data', chunk => chunks.push(chunk));
+      res.on('end', () => resolve({ status: res.statusCode, body: Buffer.concat(chunks).toString() }));
+    });
+    req.on('error', reject); req.end(bytes);
+  });
+}
+
+test('a PNG or JPEG opens in the image editor, which saves its bytes over the file at their revision', async () => {
+  const states = [];
+  await writeFile(join(root, 'shot.png'), PNG);
+  const viewer = await startFileViewer(join(root, 'shot.png'), { onDirty: dirty => states.push(dirty) });
+  viewers.push(viewer);
+  // An editor reports its own state, so the entry does not report it clean.
+  assert.equal(viewer.editable, true);
+  const page = await get(viewer);
+  assert.equal(page.headers['content-type'], 'text/html; charset=utf-8');
+  assert.match(page.body, /<div id="root">.*assets\/image\.js/s);
+  assert.match(page.body, /assets\/image\.css/);
+  assert.match(page.headers['content-security-policy'], /frame-src 'none'/);
+  const source = await new Promise((resolve, reject) => request({ host: '127.0.0.1', port: viewer.port, path: viewer.path.replace(/view$/, 'source') }, res => {
+    const chunks = []; res.on('data', chunk => chunks.push(chunk));
+    res.on('end', () => resolve({ headers: res.headers, body: Buffer.concat(chunks) }));
+  }).on('error', reject).end());
+  assert.equal(source.headers['content-type'], 'image/png');
+  assert.ok(source.body.equals(PNG));
+  const version = source.headers['x-dor-version'];
+  const edited = Buffer.concat([PNG, Buffer.from('edited')]);
+  for (const origin of ['', 'null', 'https://elsewhere.test']) assert.equal((await postBytes(viewer, `save?version=${version}`, edited, 'image/png', origin)).status, 403);
+  assert.equal((await postBytes(viewer, 'save', edited, 'image/png')).status, 400);
+  assert.equal((await postBytes(viewer, `save?version=${version}`, JPEG, 'image/png')).status, 415);
+  assert.equal((await postBytes(viewer, `save?version=${version}`, edited, 'image/jpeg')).status, 415);
+  const saved = await postBytes(viewer, `save?version=${version}`, edited, 'image/png');
+  assert.equal(saved.status, 200, saved.body);
+  assert.ok((await readFile(join(root, 'shot.png'))).equals(edited));
+  assert.equal((await get(viewer, viewer.path.replace(/view$/, 'source'))).headers['x-dor-version'], JSON.parse(saved.body).version);
+  assert.equal((await postBytes(viewer, `save?version=${version}`, edited, 'image/png')).status, 409);
+  assert.equal((await post(viewer, 'state', { dirty: true })).status, 200);
+  assert.deepEqual(states, [true]);
+  // The raw resource keeps its grant on the bytes it opened.
+  const raw = await get(viewer, viewer.path.replace(/view$/, 'file/shot.png'));
+  assert.equal(raw.headers['content-type'], 'image/png');
+  assert.equal(raw.body, PNG.toString());
+  const photo = await start('photo.jpg', JPEG);
+  assert.equal(photo.editable, true);
+  assert.equal((await postBytes(photo, `save?version=${(await get(photo, photo.path.replace(/view$/, 'source'))).headers['x-dor-version']}`, PNG, 'image/jpeg')).status, 415);
+});
+
+test('other image formats stay view-only', async () => {
+  for (const name of ['anim.gif', 'photo.webp', 'pic.avif', 'favicon.ico', 'icon.svg']) {
+    const viewer = await start(name, 'image');
+    assert.equal(viewer.editable, false, name);
+    assert.match(viewer.path, /\/file\/[^/]+$/);
+    assert.equal((await get(viewer)).body, 'image');
+    const post = await postBytes({ ...viewer, path: viewer.path.replace(/file\/[^/]+$/, 'view') }, 'save?version=x', PNG, 'image/png');
+    assert.equal(post.status, 403, name);
+  }
+});

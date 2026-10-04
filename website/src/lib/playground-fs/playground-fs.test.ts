@@ -115,7 +115,7 @@ describe("PlaygroundViewers", () => {
     const { viewers, writes } = harness();
     const viewer = viewers.open("t1", "__view-file", [README], "/");
     if (viewer instanceof Error) throw viewer;
-    for (const route of ["save", "image", "rename"]) {
+    for (const route of ["save", "image", "rename", "image-save/a.png"]) {
       expect(viewers.handle(viewer.token, post(route, { text: "x", version: "snapshot" }))).toMatchObject({ status: 403, body: READ_ONLY_ERROR });
     }
     expect(viewers.handle(viewer.token, post("state", { dirty: true }))!.status).toBe(200);

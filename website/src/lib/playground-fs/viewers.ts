@@ -117,7 +117,7 @@ export class PlaygroundViewers {
         this.write(viewer.terminalId, stateSequence({ dirty }));
         return json({});
       }
-      if (route === "save" || (viewer.markdown && (route === "image" || route === "rename"))) {
+      if (route === "save" || (viewer.markdown && (route === "image" || route === "rename" || route.startsWith("image-save/")))) {
         throw new HttpError(403, READ_ONLY_ERROR);
       }
       throw new HttpError(404);

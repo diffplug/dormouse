@@ -3,7 +3,7 @@ import { mkdtemp, realpath, rm, readFile, writeFile, symlink, rename, stat, read
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, test } from 'node:test';
-import { readEditableFile, saveEditableFile } from '../dist/editable-file.js';
+import { IMAGE_BOUND, IMAGE_LIMIT, readEditableFile, readEditableImage, saveEditableBytes, saveEditableFile } from '../dist/editable-file.js';
 import { execFileSync } from 'node:child_process';
 import { win32 } from 'node:path';
 let root, file;
@@ -55,6 +55,28 @@ test('refuses a substituted symlink and invalid UTF-8 without changing either fi
   await assert.rejects(readEditableFile(file), { status: 415 });
 });
 
+
+test('saves exact bytes, with no text handling, under the caller\'s bound', async () => {
+  // A BOM-less body after a BOM, and CRLF after LF: text saves would rewrite both.
+  file = join(root, 'shot.png');
+  await writeFile(file, Buffer.from('\uFEFFa\nb\n'));
+  const source = await readEditableImage(file);
+  const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0xff, 0x00]);
+  const saved = await saveEditableBytes(file, bytes, source.version, IMAGE_BOUND);
+  assert.ok((await readFile(file)).equals(bytes));
+  assert.equal((await readEditableImage(file)).version, saved.version);
+  await assert.rejects(saveEditableBytes(file, bytes, source.version, IMAGE_BOUND), { status: 409 });
+  await assert.rejects(saveEditableBytes(file, Buffer.alloc(9), saved.version, { limit: 8, message: 'small' }), { status: 413, message: 'small' });
+  assert.ok((await readFile(file)).equals(bytes));
+});
+
+test('reads an image up to 32 MiB, where text stops at 8', async () => {
+  await writeFile(file, Buffer.alloc(8 * 1024 * 1024 + 1));
+  await assert.rejects(readEditableFile(file), { status: 413 });
+  assert.equal((await readEditableImage(file)).bytes.length, 8 * 1024 * 1024 + 1);
+  await writeFile(file, Buffer.alloc(IMAGE_LIMIT + 1));
+  await assert.rejects(readEditableImage(file), { status: 413 });
+});
 
 function powershell(script, target) {
   const binary = win32.join(process.env.SystemRoot || process.env.SYSTEMROOT || 'C:\\Windows', 'System32/WindowsPowerShell/v1.0/powershell.exe');
