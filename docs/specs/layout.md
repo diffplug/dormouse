@@ -29,7 +29,7 @@ Pane drag scopes: `docs/specs/tiling-engine.md` → "Hierarchical drag and drop"
 
 **Must hold the slot's header while a switch holds its ghost** (`docs/specs/dor-tool.md` → Switching the slot): the ghost's face and Display glyph stay until the new view is ready. A terminal face's label keeps its name until the retarget, then shows the Tool's name (`docs/specs/dor-tool.md` → Naming); derivation resumes once ready. A serving Tool's name, read from its params, needs no hold (rationale).
 
-**Never give a Tool navigation, an address, or a dev-server chip** (rationale). **Must keep every Tool header control inside the header's palette**, Terminal Context included. A serving Tool's header, left to right: Display (`docs/specs/dor-browser.md` → Browser Chrome); Terminal Context; its name (`docs/specs/dor-tool.md` → Naming), renamed as a terminal label is; its TODO pill (`docs/specs/alert.md` → Pane Header); flexible gap; split buttons (full only); the pane-action group, with Break between minimize and kill on every face past approval (`docs/specs/dor-tool.md` → Run end). A port conflict's terminal header leads with Terminal Context; the terminal face, which shows that terminal, has none.
+**Never give a Tool navigation, an address, or a dev-server chip** (rationale). **Must keep every Tool header control inside the header's palette**, Terminal Context included. A serving Tool's header, left to right: Display (`docs/specs/dor-browser.md` → Browser Chrome); Terminal Context; Break (`docs/specs/dor-tool.md` → Run end), except at the tiny tier; its name (`docs/specs/dor-tool.md` → Naming), renamed as a terminal label is; its TODO pill (`docs/specs/alert.md` → Pane Header); flexible gap; split buttons (full only); the pane-action group. A port conflict's terminal header leads with Terminal Context and Break; the terminal face, which shows that terminal, leads with Break alone, which pending approval lacks.
 
 A terminal header, left to right: derived label; TODO pill (compact+); flexible gap; mouse-reporting override icon (compact+, only while the inside program requests mouse reporting); split left/right, split top/bottom (full only); then the pane-action group: zoom/unzoom, minimize, kill.
 
@@ -79,7 +79,7 @@ Source of truth: `AlertRingIndicator` in `lib/src/components/wall/AlertRingIndic
 |---|---|
 | Terminal | split; then the TODO pill and mouse-override icon (the label truncates); then minimize and kill |
 | Browser | split; then navigation; then the chrome, into a viewport-clamped popover behind one trigger; then minimize and kill, into the popover |
-| Serving Tool (no popover) | split; then Display; then minimize, Break, and kill — each boundary reserving the widest Display glyph (rationale) |
+| Serving Tool (no popover) | split; then Display; then Break, minimize, and kill — each boundary reserving the widest Display glyph (rationale) |
 
 A port conflict's terminal header adds its Terminal Context button to each terminal boundary.
 

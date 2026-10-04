@@ -12,7 +12,7 @@ import { isPreviewSlotParams, isToolParams, toolFace } from './browser-surface';
 import { usePreviewKeep } from './preview-keep';
 import { SessionTodoPill } from './SessionTodoPill';
 import { useHeaderTier } from './use-header-tier';
-import { HEADER_CONTROL_SLOT_PX, PaneActionGroup, SplitButtons, TerminalContextButton } from './PaneActionButtons';
+import { BreakToolButton, HEADER_CONTROL_SLOT_PX, PaneActionGroup, SplitButtons, TerminalContextButton } from './PaneActionButtons';
 import type { PaneProps } from './pane-props';
 import { toolSemanticName } from './tool-name';
 import { usePaneRename } from './use-pane-rename';
@@ -142,6 +142,7 @@ export function TerminalPaneHeader({ id, title, params, terminalContext = false 
       }}
     >
       {terminalContext && <TerminalContextButton surfaceId={id} />}
+      {breakable && !tiny && <BreakToolButton surfaceId={id} />}
       <div className="flex flex-1 min-w-0 items-center gap-1.5 overflow-hidden">
         {rename.renaming ? rename.editor(label.primary) : (
           // A preview's label is drag area, not a rename: its double-click
@@ -192,7 +193,7 @@ export function TerminalPaneHeader({ id, title, params, terminalContext = false 
           {/* The title region clips via `overflow-hidden` so this group
               never has to (`docs/specs/layout.md` → "Pane header responsive
               sizing"). */}
-          <PaneActionGroup dirty={dirty} breakable={breakable} surfaceId={id} zoomed={zoomed} activeHeader={isActiveHeader} showMinimizeKill={!tiny} />
+          <PaneActionGroup dirty={dirty} surfaceId={id} zoomed={zoomed} activeHeader={isActiveHeader} showMinimizeKill={!tiny} />
         </>
       )}
       {/* Where the tier or the rename editor hides Kill, the dot it carries sits at the right edge. */}

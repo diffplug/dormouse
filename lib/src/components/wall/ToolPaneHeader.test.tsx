@@ -103,8 +103,8 @@ describe('ToolPaneHeader — a serving Tool', () => {
     renderHeader(SERVING);
     expect(header().className).toContain('bg-header-active-bg');
     expect(controls()).toEqual([
-      'agent-browser resizes with pane — change display', 'Terminal context',
-      'Split left/right', 'Split top/bottom', 'Zoom', 'Minimize', 'Break', 'Kill',
+      'agent-browser resizes with pane — change display', 'Terminal context', 'Break',
+      'Split left/right', 'Split top/bottom', 'Zoom', 'Minimize', 'Kill',
     ]);
     // The name sits after both, before the layout buttons.
     const order = [labelled('Terminal context')!, name()!, labelled('Split left/right')!];
@@ -174,11 +174,11 @@ describe('ToolPaneHeader — a serving Tool', () => {
     renderHeader(SERVING);
     act(() => recordToolDirty(ID, true));
     const steps: [number, (string | null)[]][] = [
-      [382, ['agent-browser resizes with pane — change display', 'Terminal context', 'Split left/right', 'Split top/bottom', 'Zoom', 'Minimize', 'Break', 'Kill']],
-      [381, ['agent-browser resizes with pane — change display', 'Terminal context', 'Zoom', 'Minimize', 'Break', 'Kill']],
-      [187, ['agent-browser resizes with pane — change display', 'Terminal context', 'Zoom', 'Minimize', 'Break', 'Kill']],
-      [186, ['Terminal context', 'Zoom', 'Minimize', 'Break', 'Kill']],
-      [151, ['Terminal context', 'Zoom', 'Minimize', 'Break', 'Kill']],
+      [382, ['agent-browser resizes with pane — change display', 'Terminal context', 'Break', 'Split left/right', 'Split top/bottom', 'Zoom', 'Minimize', 'Kill']],
+      [381, ['agent-browser resizes with pane — change display', 'Terminal context', 'Break', 'Zoom', 'Minimize', 'Kill']],
+      [187, ['agent-browser resizes with pane — change display', 'Terminal context', 'Break', 'Zoom', 'Minimize', 'Kill']],
+      [186, ['Terminal context', 'Break', 'Zoom', 'Minimize', 'Kill']],
+      [151, ['Terminal context', 'Break', 'Zoom', 'Minimize', 'Kill']],
       [150, ['Terminal context', 'Zoom']],
       [80, ['Terminal context', 'Zoom']],
     ];

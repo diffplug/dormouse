@@ -14,13 +14,10 @@ export type FocusHandlers = { onFocus?: () => void; onBlur?: () => void };
  * shortcut hints (`docs/specs/shortcuts.md`) are written once, and so the
  * browser header can render the pair on its own inside the popover.
  * `beforeAct` is that header's popover dismissal; the terminal passes none.
- * `breakable` puts a Tool's Break between them (`docs/specs/dor-tool.md` ->
- * Run end), Kill staying Kill.
  */
-export function MinimizeKillButtons({ surfaceId, dirty = false, breakable = false, beforeAct, onFocus, onBlur }: {
+export function MinimizeKillButtons({ surfaceId, dirty = false, beforeAct, onFocus, onBlur }: {
   surfaceId: string;
   dirty?: boolean;
-  breakable?: boolean;
   beforeAct?: () => void;
 } & FocusHandlers) {
   const actions = useContext(WallActionsContext);
@@ -32,14 +29,6 @@ export function MinimizeKillButtons({ surfaceId, dirty = false, breakable = fals
         ariaLabel="Minimize"
         tooltip="Minimize [m] or [d]"
       ><ArrowLineDownIcon size={14} /></HeaderActionButton>
-      {breakable && actions.onBreakTool && (
-        <HeaderActionButton
-          className={chromeButton()}
-          onClick={(e) => { e.stopPropagation(); beforeAct?.(); actions.onBreakTool?.(surfaceId); }}
-          ariaLabel="Break"
-          tooltip="Break into a plain terminal and a browser pane"
-        ><LinkBreakIcon size={14} /></HeaderActionButton>
-      )}
       <HeaderActionButton
         className="group/kill flex h-5 min-w-5 items-center justify-center rounded transition-colors hover:bg-error/10 hover:text-error"
         onClick={(e) => { e.stopPropagation(); beforeAct?.(); actions.onKill(surfaceId); }}
@@ -61,11 +50,10 @@ export function MinimizeKillButtons({ surfaceId, dirty = false, breakable = fals
  * when `showMinimizeKill` goes false and where that pair ends up.
  */
 export function PaneActionGroup({
-  surfaceId, zoomed, activeHeader, showMinimizeKill, dirty = false, breakable = false, className = 'ml-1', beforeAct, minimizeKillFocus,
+  surfaceId, zoomed, activeHeader, showMinimizeKill, dirty = false, className = 'ml-1', beforeAct, minimizeKillFocus,
 }: {
   surfaceId: string;
   dirty?: boolean;
-  breakable?: boolean;
   zoomed: boolean;
   activeHeader: boolean;
   showMinimizeKill: boolean;
@@ -82,7 +70,7 @@ export function PaneActionGroup({
         ariaLabel={zoomed ? 'Unzoom' : 'Zoom'}
         tooltip={zoomed ? 'Unzoom' : 'Zoom [z]'}
       >{zoomed ? <ArrowsInIcon size={14} /> : <ArrowsOutIcon size={14} />}</HeaderActionButton>
-      {showMinimizeKill && <MinimizeKillButtons surfaceId={surfaceId} dirty={dirty} breakable={breakable} beforeAct={beforeAct} {...minimizeKillFocus} />}
+      {showMinimizeKill && <MinimizeKillButtons surfaceId={surfaceId} dirty={dirty} beforeAct={beforeAct} {...minimizeKillFocus} />}
     </div>
   );
 }
@@ -112,6 +100,22 @@ export function SplitButtons({ surfaceId }: { surfaceId: string }) {
 /** The width a 20px header control, such as the one below, adds to a header:
  *  itself and the header's 6px gap. */
 export const HEADER_CONTROL_SLOT_PX = 26;
+
+/** A Tool's Break, beside its Terminal Context button: asks, then splits the
+ *  Tool into its plain terminal and a browser pane (`docs/specs/dor-tool.md` ->
+ *  Run end). Kill stays Kill. */
+export function BreakToolButton({ surfaceId }: { surfaceId: string }) {
+  const actions = useContext(WallActionsContext);
+  if (!actions.onBreakTool) return null;
+  return (
+    <HeaderActionButton
+      className={`${chromeButton()} shrink-0`}
+      onClick={(e) => { e.stopPropagation(); actions.onBreakTool?.(surfaceId); }}
+      ariaLabel="Break"
+      tooltip="Break into a plain terminal and a browser pane"
+    ><LinkBreakIcon size={14} /></HeaderActionButton>
+  );
+}
 
 /** Toggles a Tool's Terminal Context, which shows its primary terminal
  *  (`docs/specs/terminal-context.md` -> Tool context), from under the button. */

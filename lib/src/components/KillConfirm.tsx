@@ -9,6 +9,9 @@ export interface ConfirmKill {
   id: string;
   char: string;
   exit?: KillExit;
+  /** What the letter confirms: a kill, or a Tool's Break
+   *  (`docs/specs/dor-tool.md` -> Run end), which the same gate guards. */
+  action?: 'kill' | 'break';
 }
 
 export const KILL_SHAKE_MS = 400;
@@ -97,6 +100,10 @@ export function KillConfirmOverlay({ confirmKill, paneElements, onCancel }: {
       onCancel={onCancel}
       exit={confirmKill.exit}
       targetElement={panelEl}
+      {...(confirmKill.action === 'break' ? {
+        title: 'Confirm break',
+        detail: 'This Tool becomes a plain terminal, still running; its page opens in a browser pane beside it. They cannot be rejoined.',
+      } : {})}
     />
   );
 }

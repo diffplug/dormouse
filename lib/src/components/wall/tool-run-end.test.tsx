@@ -17,6 +17,7 @@ import * as terminalRegistry from '../../lib/terminal-registry';
 import { _resetRunHoldsForTesting, holdForHostInterrupt, releaseRunHold } from '../../lib/tool-run-hold';
 import * as toolEditor from '../../lib/tool-editor';
 import { recordToolDirty, resetToolDirty } from '../../lib/tool-dirty-store';
+import { cfg } from '../../cfg';
 import { mountWallHarness, registerStubScreen, reportRunning, STUB_CHROME, type WallHarness } from './wall-test-utils';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -196,7 +197,18 @@ describe('Run end', () => {
 describe('Break', () => {
   const SERVING = { ...PARAMS, url: 'http://127.0.0.1:6006/?path=/story/a', renderMode: 'iframe' };
   const breakButton = () => container.querySelector<HTMLButtonElement>(`[data-pane-header-for="${ID}"] [aria-label="Break"]`);
-  const clickBreak = async () => { await act(async () => breakButton()!.click()); await harness.flush(); };
+  const confirmTitle = () => Array.from(document.body.querySelectorAll('h2')).find(h => h.textContent === 'Confirm break') ?? null;
+  const press = async (key: string) => { await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true })); }); await harness.flush(); };
+  /** Break, then type the confirmation's letter. */
+  const clickBreak = async () => {
+    await act(async () => breakButton()!.click());
+    await harness.flush();
+    expect(confirmTitle()).not.toBeNull();
+    await press('q');
+  };
+  let pinned: string | null;
+  beforeEach(() => { pinned = cfg.killConfirm.char; cfg.killConfirm.char = 'q'; });
+  afterEach(() => { cfg.killConfirm.char = pinned; });
 
   it('splits a serving Tool into its plain terminal, still running, and an ordinary browser pane on its page', async () => {
     // Running before the Wall mounts, so serving keeps the page it framed.
@@ -226,6 +238,18 @@ describe('Break', () => {
     } finally {
       screen.dispose();
     }
+  });
+
+  it('asks first, and Escape changes nothing', async () => {
+    act(() => reportRunning(ID, COMMAND));
+    await mountTool(SERVING);
+    await act(async () => breakButton()!.click());
+    await harness.flush();
+    expect(confirmTitle()).not.toBeNull();
+    await press('Escape');
+    const saved = await leaves();
+    expect(Object.keys(saved)).toEqual([ID]);
+    expect(saved[ID].component).toBe('tool');
   });
 
   it('breaks a Tool not serving into its terminal alone', async () => {
