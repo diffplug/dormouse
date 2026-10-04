@@ -76,6 +76,7 @@ vi.mock('../src/pty-manager', async (importOriginal) => ({
 }));
 
 vi.mock('../src/burrow', () => ({
+  burrowNetworkAllowed: async () => true,
   configureBurrow: (deps: BurrowDeps) => {
     wiring.burrow = deps;
   },
@@ -148,6 +149,15 @@ beforeEach(async () => {
 
 afterEach(() => {
   vi.clearAllMocks();
+});
+
+it('answers a voice command under its request id, null where the window has no managed voice', async () => {
+  const webview = fakeWebview();
+  const disposable = router.attachRouter(webview.channel, {});
+  try {
+    webview.send({ type: 'voice:command', payload: { op: 'status' }, requestId: 'req-7' });
+    await vi.waitFor(() => expect(webview.posted).toContainEqual({ type: 'voice:result', requestId: 'req-7', result: null }));
+  } finally { disposable.dispose(); }
 });
 
 it('reports rejected helper creation as an exited terminal', () => {

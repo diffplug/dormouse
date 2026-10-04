@@ -7,6 +7,8 @@ import { randomBytes } from 'crypto';
 import { CSP_NONCE_PLACEHOLDER } from './csp-nonce-placeholder';
 import { HOST_MESSAGE_TOKEN_GLOBAL } from '../../lib/src/lib/vscode-message-token';
 import { RECOVERY_COMMANDS_GLOBAL } from '../../lib/src/lib/vscode-recovery-global';
+import { MANAGED_VOICE_GLOBAL } from '../../lib/src/lib/vscode-managed-voice-global';
+import { bakedRelayMode } from '../../lib/src/host/relay-origin';
 
 function serializeForInlineScript(value: unknown): string {
   return JSON.stringify(value ?? null)
@@ -103,6 +105,9 @@ export function getWebviewHtml(
     `script-src 'nonce-${nonce}' 'strict-dynamic' 'wasm-unsafe-eval'`,
     `font-src ${webview.cspSource}`,
     `img-src ${webview.cspSource} data: blob:`,
+    // Managed voice plays the host-fetched clip from a blob URL
+    // (`lib/src/lib/managed-voice-engine.ts`); nothing else is media.
+    `media-src blob:`,
     // ws: entries cover the agent-browser stream relay (frames + input for
     // browser surfaces; see docs/specs/dor-browser.md). No relay origin here:
     // the Burrow holds its `/ws/burrow` socket from the extension host, which
@@ -149,7 +154,7 @@ export function getWebviewHtml(
     html,
     indexPath,
     '</head>',
-    `    <script nonce="${nonce}">globalThis.${HOST_MESSAGE_TOKEN_GLOBAL} = ${serializeForInlineScript(messageToken)};\nglobalThis.__DORMOUSE_HOST_STATE__ = ${serializeForInlineScript(initialState)};\nglobalThis.__DORMOUSE_SELECTED_SHELL__ = ${serializeForInlineScript(selectedShell ?? null)};\nglobalThis.${RECOVERY_COMMANDS_GLOBAL} = ${serializeForInlineScript(recoveryCommands ?? null)};</script>\n  </head>`,
+    `    <script nonce="${nonce}">globalThis.${HOST_MESSAGE_TOKEN_GLOBAL} = ${serializeForInlineScript(messageToken)};\nglobalThis.__DORMOUSE_HOST_STATE__ = ${serializeForInlineScript(initialState)};\nglobalThis.__DORMOUSE_SELECTED_SHELL__ = ${serializeForInlineScript(selectedShell ?? null)};\nglobalThis.${RECOVERY_COMMANDS_GLOBAL} = ${serializeForInlineScript(recoveryCommands ?? null)};\nglobalThis.${MANAGED_VOICE_GLOBAL} = ${bakedRelayMode() === 'hosted'};</script>\n  </head>`,
   );
 
   return { html, messageToken };

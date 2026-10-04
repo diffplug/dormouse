@@ -66,6 +66,7 @@ import {
 } from './peer-link';
 import type { PtySink } from './processed-pty-streams';
 import { VsCodeBurrowStateStore } from './burrow-store';
+import type { ManagedVoiceCredential } from '../../lib/src/host/managed-voice-host';
 import { log } from './log';
 
 /**
@@ -84,6 +85,8 @@ export interface BurrowDeps {
    * (`processed-pty-streams.ts`) rather than a registry of its own per attachment.
    */
   streamPty(ptyId: string, sink: PtySink): () => void;
+  /** This window's managed voice, which a Hosted sign-in hands its token (`managed-voice.ts`). */
+  voiceCredential?(): ManagedVoiceCredential | undefined;
 }
 
 let deps: BurrowDeps | null = null;
@@ -285,6 +288,9 @@ function startService(): void {
       }
     },
     relay: bakedRelay(),
+    // A Hosted sign-in hands managed voice its token; sign-out clears it, in
+    // `SecretStorage`, which every window hears.
+    voiceCredential: bakedRelay().mode === 'hosted' ? bound.voiceCredential?.() : undefined,
     // Building the factory loads nothing: the addon is opened inside the first
     // offer, if one ever comes (`native-direct-peer.ts`).
     createDirectPeer: createNativeDirectPeerFactory(),
@@ -583,6 +589,21 @@ async function idleAnswer(cmd: string): Promise<{ result: unknown } | null> {
       return { result: { ended: false } satisfies TakeBackResult };
     default:
       return null;
+  }
+}
+
+/**
+ * Whether the network policy lets this window reach Hosted on its own, for
+ * managed voice: the service's answer in the broker, else the policy every
+ * window reads from `globalState`, which only the service writes.
+ */
+export async function burrowNetworkAllowed(): Promise<boolean> {
+  if (service) return service.networkAllowed();
+  try {
+    return (await idleNetworkPolicy()).level !== 'nothing';
+  } catch {
+    // A failed read counts as Nothing, as it does for the service.
+    return false;
   }
 }
 

@@ -30,9 +30,43 @@ export const MAX_AUDIO_BYTES = 512 * 1024;
 export const CLIP_CACHE_MAX_ENTRIES = 32;
 export const CLIP_CACHE_MAX_BYTES = 4 * 1024 * 1024;
 
-interface StoredConfig {
+export interface StoredManagedVoice {
   token: string | null;
   voiceId: string;
+}
+type StoredConfig = StoredManagedVoice;
+
+/**
+ * Where a host keeps managed voice's config: the sidecar's owner-only file
+ * ({@link fileManagedVoiceStore}), or VS Code's `SecretStorage`.
+ */
+export interface ManagedVoiceStore {
+  /**
+   * The stored record, unvalidated, or `null` where nothing readable is
+   * stored. **Rejects on a transient failure**, which is never "no config": a
+   * lock cached as defaults would let the next edit overwrite the token.
+   */
+  read(): Promise<unknown>;
+  /** Persist `next`, of which only `changed` differs from what was read. */
+  write(next: StoredManagedVoice, changed: keyof StoredManagedVoice): Promise<void>;
+}
+
+/** The sidecar's store: `managed-voice.json` in the owner-only state directory, rewritten whole. */
+export function fileManagedVoiceStore(stateDir: string): ManagedVoiceStore {
+  const file = join(stateDir, MANAGED_VOICE_FILE);
+  return {
+    async read() {
+      try {
+        return JSON.parse(await readFile(file, 'utf8'));
+      } catch (error) {
+        // Only a missing or unparsable file is "no config": a transient lock
+        // (EBUSY, EPERM, EMFILE) is retried on the next read.
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT' || error instanceof SyntaxError) return null;
+        throw error;
+      }
+    },
+    write: (next) => writeJsonAtomic(stateDir, file, next),
+  };
 }
 
 function normalizeStored(value: unknown): StoredConfig {
@@ -95,8 +129,8 @@ function createClipCache() {
 }
 
 export function createManagedVoiceHost(options: {
-  /** The owner-only state directory; without one no token can be stored. */
-  stateDir?: string;
+  /** Where the config lives; without one no token can be stored. */
+  store?: ManagedVoiceStore;
   /** Each change's status, for every window; never the token. */
   onStatus: (status: ManagedVoiceStatus) => void;
   fetch?: typeof globalThis.fetch;
@@ -110,13 +144,20 @@ export function createManagedVoiceHost(options: {
    * `false` refuses before any request, a cached clip included.
    */
   networkAllowed: () => Promise<boolean>;
-}): { handle(command: unknown): Promise<unknown>; credential: ManagedVoiceCredential } {
+}): {
+  handle(command: unknown): Promise<unknown>;
+  credential: ManagedVoiceCredential;
+  /**
+   * Another process changed the store (a sibling VS Code window): read it
+   * again, forget the clips and the refusal the old token earned, and
+   * announce the status.
+   */
+  invalidate(): void;
+} {
   const fetchImpl = options.fetch ?? globalThis.fetch;
   const timeoutMs = options.timeoutMs ?? MANAGED_VOICE_REQUEST_TIMEOUT_MS;
   const log = options.log ?? (() => {});
-  const store = options.stateDir
-    ? { dir: options.stateDir, file: join(options.stateDir, MANAGED_VOICE_FILE) }
-    : undefined;
+  const store = options.store;
   // The only place the token may go (`docs/specs/security-local.md` -> "Persisted state"),
   // and `null` in a self-host build: no token is read, nothing is sent, and
   // every edit and speak is refused.
@@ -131,32 +172,29 @@ export function createManagedVoiceHost(options: {
   let tokenGeneration = 0;
 
   const load = (): Promise<StoredConfig> => {
-    loaded ??= (async () => {
-      if (!store) return normalizeStored(null);
-      try {
-        return normalizeStored(JSON.parse(await readFile(store.file, 'utf8')));
-      } catch (error) {
-        // Only a missing or unparsable file is "no config": a transient lock
-        // (EBUSY, EPERM, EMFILE) cached as defaults would let the next edit
-        // overwrite the saved token. Anything else is retried on the next read.
-        if ((error as NodeJS.ErrnoException).code === 'ENOENT' || error instanceof SyntaxError) {
-          return normalizeStored(null);
-        }
-        loaded = null;
-        throw error;
-      }
-    })();
+    loaded ??= (store ? store.read() : Promise.resolve(null)).then(normalizeStored, (error: unknown) => {
+      // Never cached: the next read tries again.
+      loaded = null;
+      throw error;
+    });
     return loaded;
+  };
+
+  /** A changed token forgets every clip and every refusal the old one earned. */
+  const forgetToken = (): void => {
+    tokenGeneration++;
+    clips.clear();
+    notEntitled = false;
   };
 
   const status = (config: StoredConfig): ManagedVoiceStatus =>
     ({ configured: config.token !== null, voiceId: config.voiceId, notEntitled });
 
-  /** Rewrite the file with `edit` applied, then announce the result. Runs on `serialize`. */
-  async function save(edit: (config: StoredConfig) => StoredConfig): Promise<ManagedVoiceStatus> {
-    if (!store) throw new Error('no owner-only state directory');
-    const next = edit({ ...await load() });
-    await writeJsonAtomic(store.dir, store.file, next);
+  /** Store `changed` as `value`, then announce the result. Runs on `serialize`. */
+  async function save<K extends keyof StoredConfig>(changed: K, value: StoredConfig[K]): Promise<ManagedVoiceStatus> {
+    if (!store) throw new Error('no owner-only store');
+    const next = { ...await load(), [changed]: value };
+    await store.write(next, changed);
     loaded = Promise.resolve(next);
     options.onStatus(status(next));
     return status(next);
@@ -167,20 +205,17 @@ export function createManagedVoiceHost(options: {
     const voiceId = (update as { voiceId?: unknown } | null)?.voiceId;
     if (!isManagedVoiceId(voiceId)) return { ok: false, reason: 'invalid-voice' };
     try {
-      return { ok: true, ...await save((config) => ({ ...config, voiceId })) };
+      return { ok: true, ...await save('voiceId', voiceId) };
     } catch (error) {
       log(`[managed-voice] could not read or save: ${String(error)}`);
       return { ok: false, reason: 'unavailable' };
     }
   }
 
-  /** A changed token forgets every clip and every refusal the old one earned. */
   const setToken = (token: string | null) => serialize(async () => {
     if (speakUrl === null) throw new Error('this build has no managed voice');
-    tokenGeneration++;
-    clips.clear();
-    notEntitled = false;
-    await save((config) => ({ ...config, token }));
+    forgetToken();
+    await save('token', token);
   });
 
   /** Latch what Hosted last said of the entitlement, announcing a change. */
@@ -268,6 +303,12 @@ export function createManagedVoiceHost(options: {
   }
 
   return {
+    invalidate() {
+      if (speakUrl === null) return;
+      loaded = null;
+      forgetToken();
+      void load().then((config) => options.onStatus(status(config)), () => {});
+    },
     credential: {
       async save(token) {
         if (!isManagedVoiceToken(token)) throw new Error('not a voice token');

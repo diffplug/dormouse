@@ -6,6 +6,7 @@ import {
   CLIP_CACHE_MAX_BYTES,
   CLIP_CACHE_MAX_ENTRIES,
   createManagedVoiceHost,
+  fileManagedVoiceStore,
   MAX_AUDIO_BYTES,
   MANAGED_VOICE_FILE,
 } from './managed-voice-host';
@@ -47,7 +48,7 @@ let host: ReturnType<typeof make>;
 
 function make(options: { timeoutMs?: number; stateDir?: string; networkAllowed?: () => Promise<boolean> } = {}) {
   return createManagedVoiceHost({
-    stateDir: 'stateDir' in options ? options.stateDir : dir,
+    store: 'stateDir' in options ? (options.stateDir ? fileManagedVoiceStore(options.stateDir) : undefined) : fileManagedVoiceStore(dir),
     onStatus: (status) => void broadcasts.push(status),
     fetch: fetchMock as unknown as typeof fetch,
     timeoutMs: options.timeoutMs,
@@ -293,10 +294,47 @@ describe('speak', () => {
   });
 });
 
+describe('a store another process shares', () => {
+  it('writes only the field that changed, and invalidate reads a sibling’s change, forgetting the clips', async () => {
+    let shared: Record<string, unknown> = {};
+    const writes: string[] = [];
+    const store = {
+      read: async () => ({ ...shared }),
+      write: async (next: { token: string | null; voiceId: string }, changed: 'token' | 'voiceId') => {
+        writes.push(changed);
+        shared = { ...shared, [changed]: next[changed] };
+      },
+    };
+    const window = createManagedVoiceHost({
+      store,
+      onStatus: (status) => void broadcasts.push(status),
+      fetch: fetchMock as unknown as typeof fetch,
+      relay: { origin: DEFAULT_RELAY_ORIGIN, mode: 'hosted' },
+      networkAllowed: async () => true,
+    });
+    await window.credential.save(TOKEN);
+    await window.handle({ op: 'configure', update: { voiceId: OTHER_VOICE } });
+    expect(writes).toEqual(['token', 'voiceId']);
+    fetchMock.mockImplementation(async () => audioResponse());
+    await window.handle({ op: 'speak', text: 'build finished' });
+
+    // A sibling window signed out.
+    shared = { voiceId: OTHER_VOICE };
+    window.invalidate();
+    await vi.waitFor(() => expect(broadcasts.at(-1)).toEqual(idle(false, OTHER_VOICE)));
+    expect(await window.handle({ op: 'speak', text: 'build finished' })).toEqual({ ok: false, reason: 'unconfigured' });
+    // Signed in again there: the old clip is not replayed.
+    shared = { token: `dmv_${'C'.repeat(43)}`, voiceId: OTHER_VOICE };
+    window.invalidate();
+    await window.handle({ op: 'speak', text: 'build finished' });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe('the build it runs in', () => {
   it('speaks to the voice origin from any Hosted build, a dev build’s local Hosted included', async () => {
     const local = createManagedVoiceHost({
-      stateDir: dir,
+      store: fileManagedVoiceStore(dir),
       onStatus: () => {},
       fetch: fetchMock as unknown as typeof fetch,
       relay: { origin: 'http://localhost:8787', mode: 'hosted' },
@@ -315,7 +353,7 @@ describe('the build it runs in', () => {
     // "Relay origin"), so it reads none of it.
     await host.credential.save(TOKEN);
     const selfHost = createManagedVoiceHost({
-      stateDir: dir,
+      store: fileManagedVoiceStore(dir),
       onStatus: (status) => void broadcasts.push(status),
       fetch: fetchMock as unknown as typeof fetch,
       relay: { origin: 'https://relay.example.ts.net', mode: 'self-host' },

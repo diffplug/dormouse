@@ -199,6 +199,14 @@ describe('getWebviewHtml', () => {
     expect(inline![1]).not.toContain('<meta http-equiv="Content-Security-Policy"');
   });
 
+  it('lets managed voice play a blob clip, and tells the webview this build has it', () => {
+    const { html } = getWebviewHtml(webview, mediaPath);
+    // Blob alone: no remote media origin, so a clip only plays once the host fetched it.
+    expect(cspSources(html, 'media-src')).toEqual(['blob:']);
+    // The test runner's build is Hosted (no relay define).
+    expect(html).toContain('globalThis.__DORMOUSE_MANAGED_VOICE__ = true;');
+  });
+
   it('mints a fresh nonce and message token per document', () => {
     const first = getWebviewHtml(webview, mediaPath);
     const second = getWebviewHtml(webview, mediaPath);
