@@ -1,4 +1,5 @@
-import { shellCommandKind } from 'dor/commands/shell-quote';
+import { hasShellInputControls, shellCommandKind } from 'dor/commands/shell-quote';
+import { wallHandleOwning } from '../components/wall/wall-handles';
 import { getMouseSelectionState } from './mouse-selection';
 import { getPlatform, PLATFORM_STRING } from './platform';
 import { shellEscapePath } from './shell-escape';
@@ -87,13 +88,19 @@ function writePasteToPty(terminalId: string, text: string): void {
   writeUserInput(terminalId, payload);
 }
 
+export const CONTROL_PATH_NOTICE = 'Nothing pasted: a file name has a control character';
+
 /**
  * Shell-escape the given paths and type them at the terminal, joined by single
  * spaces with a trailing space so the next prompt keystroke starts a fresh
- * token.
+ * token. A path carrying a control character refuses the whole paste (spec §8.6).
  */
 export function pasteFilePaths(terminalId: string, paths: string[]): void {
   if (paths.length === 0) return;
+  if (paths.some(hasShellInputControls)) {
+    wallHandleOwning(terminalId)?.showNotice(CONTROL_PATH_NOTICE, terminalId);
+    return;
+  }
   // A Session keeps the shell family it launched with even after the user picks
   // a different app-global default for future terminals. The fallback only
   // serves adapters/tests that have no registered Session entry.

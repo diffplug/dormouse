@@ -1,4 +1,4 @@
-import { quotePowerShellArg, type ShellCommandKind } from 'dor/commands/shell-quote';
+import { quotePosixArg, quotePowerShellArg, type ShellCommandKind } from 'dor/commands/shell-quote';
 import { POSIX_ESCAPABLE } from './posix-escape';
 
 // Matches macOS Terminal's drag-and-drop format: backslash-escape each shell
@@ -13,11 +13,10 @@ export function shellEscapePosix(input: string): string {
   // Newline/CR cannot round-trip through backslash-escape: bash reads
   // `\<newline>` as a line continuation and *swallows* both the backslash
   // and the newline, corrupting filenames that legally contain them. Fall
-  // back to single-quote wrapping for these, using the '\'' idiom to
-  // embed literal single quotes.
-  if (POSIX_NEEDS_QUOTES.test(input)) {
-    return `'${input.replace(/'/g, `'\\''`)}'`;
-  }
+  // back to `dor`'s single-quote wrapping, which keeps `'` and `\` outside
+  // the quotes so fish parses it too. `pasteFilePaths` refuses such a path
+  // before it gets here; this keeps the function total.
+  if (POSIX_NEEDS_QUOTES.test(input)) return quotePosixArg(input);
   return input.replace(POSIX_UNSAFE, '\\$1');
 }
 
