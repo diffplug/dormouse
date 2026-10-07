@@ -28,6 +28,7 @@ import {
   moveWorkspace,
   resetWorkspaces,
   setAutoWorkspaceName,
+  setWorkspaceAlertDelivery,
   setWorkspacePinned,
 } from '../lib/workspace-store';
 
@@ -724,23 +725,43 @@ describe('pinned tabs', () => {
   });
 });
 
-describe('reorder slides', () => {
-  /** Animated keys, `+` as '+', with each slide's starting offset. */
-  let slides: Map<string, string>;
+describe('tab tweens', () => {
+  /** Each item's tweens, `+` as '+': `width A→B`, or the transform's start. */
+  let tweens: Map<string, string[]>;
+  /** A width tween holds its item at its first width until `settle`. */
+  let held: Map<Element, number>;
+  let frames: FrameRequestCallback[];
+  let measure: ReturnType<typeof vi.spyOn<HTMLElement, 'getBoundingClientRect'>>;
+
+  const key = (element: HTMLElement) => element.dataset.workspaceTab ?? '+';
+  /** Every tween runs to its end. */
+  const settle = () => { held.clear(); tweens.clear(); };
 
   beforeEach(() => {
-    slides = new Map();
+    tweens = new Map();
+    held = new Map();
+    frames = [];
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => frames.push(callback));
+    vi.stubGlobal('cancelAnimationFrame', () => {});
     Object.defineProperty(HTMLElement.prototype, 'animate', {
       configurable: true,
       value(this: HTMLElement, keyframes: Keyframe[]) {
-        slides.set(this.dataset.workspaceTab ?? '+', String(keyframes[0].transform));
-        return { cancel() {} };
+        const [from, to] = keyframes;
+        const tween = from.width ? `width ${from.width}→${to.width}` : String(from.transform);
+        if (from.width) held.set(this, parseFloat(String(from.width)));
+        tweens.set(key(this), [...tweens.get(key(this)) ?? [], tween]);
+        return { cancel: () => { held.delete(this); } };
       },
     });
-    // jsdom lays nothing out: each tab and `+` is 100px wide in DOM order, but
-    // a tab named "Renamed" is 200px, so a rename moves its neighbours.
-    const width = (item: Element) => (item.textContent === 'Renamed' ? 200 : 100);
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+    // jsdom lays nothing out. In DOM order, `+` is 20px and a tab is 20px of
+    // padding, 10px a character of its name or draft, and 20px for its `×`.
+    const natural = (item: Element) => {
+      if (!(item instanceof HTMLElement) || item.dataset.workspaceTab === undefined) return 20;
+      const label = item.querySelector('input')?.value ?? item.querySelector('span')!.textContent!;
+      return 20 + 10 * label.length + (item.querySelector('[data-workspace-tab-close]') ? 20 : 0);
+    };
+    const width = (item: Element) => held.get(item) ?? natural(item);
+    measure = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
       const items = [...container.querySelectorAll('[data-workspace-tab], [data-workspace-new]')];
       const left = items.slice(0, Math.max(0, items.indexOf(this))).reduce((sum, item) => sum + width(item), 0);
       const right = left + width(this);
@@ -750,41 +771,73 @@ describe('reorder slides', () => {
 
   afterEach(() => {
     delete (HTMLElement.prototype as Partial<HTMLElement>).animate;
+    vi.unstubAllGlobals();
   });
 
-  /** Renders the default Workspace plus `ids`, and returns the default's id. */
+  /** Renders the default Workspace, active and named `w1`, then `ids` named
+   *  `w2`, `w3`…, and returns the default's id. */
   async function renderWith(...ids: string[]): Promise<string> {
     const first = getWorkspacesSnapshot().workspaces[0].id;
-    await act(async () => { for (const id of ids) createWorkspace({ id }); });
+    await act(async () => {
+      setAutoWorkspaceName(first, 'w1');
+      ids.forEach((id, index) => createWorkspace({ id, name: `w${index + 2}`, nameIsAuto: true, activate: false }));
+    });
     await render();
-    slides.clear();
+    settle();
     return first;
   }
 
   it('slides the tabs a move displaces from where they were, and leaves the rest', async () => {
     const first = await renderWith('ws-2', 'ws-3');
     await act(async () => { moveWorkspace(first, 1); });
-    expect(slides).toEqual(new Map([[first, 'translate(-100px, 0px)'], ['ws-2', 'translate(100px, 0px)']]));
+    expect(tweens).toEqual(new Map([[first, ['translate(-40px, 0px)']], ['ws-2', ['translate(60px, 0px)']]]));
   });
 
-  it('slides a tab that pinning remounts into the other group, with `+`', async () => {
+  it('slides a tab that pinning remounts into the other group, its × tweening away, with `+`', async () => {
     const first = await renderWith('ws-2');
     await act(async () => { setWorkspacePinned(first, true); });
-    expect(slides).toEqual(new Map([[first, 'translate(-200px, 0px)'], ['ws-2', 'translate(100px, 0px)'], ['+', 'translate(100px, 0px)']]));
+    expect(tweens).toEqual(new Map([
+      [first, ['width 60px→40px', 'translate(-60px, 0px)']],
+      ['ws-2', ['translate(60px, 0px)']],
+      ['+', ['translate(60px, 0px)']],
+    ]));
   });
 
-  it('slides nothing for a rename, or under reduced motion', async () => {
+  it('tweens the × from the old active tab to the new one, leaving + where it was', async () => {
     const first = await renderWith('ws-2');
-    await act(async () => { setAutoWorkspaceName(first, 'Renamed'); });
-    expect(slides.size).toBe(0);
+    await act(async () => { activateButton('ws-2').click(); });
+    expect(tweens).toEqual(new Map([[first, ['width 60px→40px']], ['ws-2', ['width 40px→60px']]]));
+  });
+
+  it('tweens the rename editor to its text as it is typed, carrying the tabs after it', async () => {
+    const first = await renderWith('ws-2');
+    await act(async () => { requestWorkspaceRename(first); });
+    // The editor drops the ×, and is as wide as its draft.
+    expect(tweens).toEqual(new Map([[first, ['width 60px→40px']]]));
+    const input = tabFor(first).querySelector('input')!;
+    expect(input.style.width).toBe('2ch');
+    settle();
+
+    await act(async () => {
+      input.dispatchEvent(new InputEvent('beforeinput', { bubbles: true, cancelable: true }));
+      typeInto(input, 'w1xx');
+    });
+    expect(input.style.width).toBe('4ch');
+    // The editor's re-render does not reach the strip: a frame plays it.
+    expect(tweens.size).toBe(0);
+    await act(async () => { for (const frame of frames.splice(0)) frame(0); });
+    expect(tweens).toEqual(new Map([[first, ['width 40px→60px']]]));
+  });
+
+  it('never measures for a change that leaves the strip as it was, and tweens nothing under reduced motion', async () => {
+    const first = await renderWith('ws-2');
+    measure.mockClear();
+    await act(async () => { setWorkspaceAlertDelivery(first, { pushEnabled: false }); });
+    expect(measure).not.toHaveBeenCalled();
 
     vi.stubGlobal('matchMedia', (query: string) => ({ matches: query === '(prefers-reduced-motion: reduce)' }));
-    try {
-      await act(async () => { moveWorkspace(first, 1); });
-      expect(slides.size).toBe(0);
-    } finally {
-      vi.unstubAllGlobals();
-    }
+    await act(async () => { moveWorkspace(first, 1); });
+    expect(tweens.size).toBe(0);
   });
 });
 

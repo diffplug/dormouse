@@ -59,11 +59,13 @@ export const COPY_OUTCOME_LABEL: Record<CopyOutcome, string> = { copied: 'Copied
  *  preview tab is (`docs/specs/layout.md` → "Pane header"). */
 export const PREVIEW_LABEL_CLASS = 'italic';
 
-/** The `max-w-` / `h-` bounds of `DOOR_TAB_CLASS`, for the host code that has to
- *  reason about a tab's size without a rendered element (the cross-window tab
- *  drag). Tailwind needs the arbitrary values spelled literally above, so these
- *  two are a mirror — keep them in sync. */
+/** The `max-w-` / `h-` / `min-w-` bounds of `DOOR_TAB_CLASS`, for code that has
+ *  to reason about a tab's size without a rendered element (the cross-window
+ *  tab drag) or replaces one bound (a Workspace tab's floor). Tailwind needs the
+ *  arbitrary values spelled literally above, so these are a mirror — keep them
+ *  in sync. */
 export const DOOR_TAB_MAX_WIDTH_PX = 220;
+export const DOOR_TAB_MIN_WIDTH_PX = 68;
 export const DOOR_TAB_HEIGHT_PX = 24;
 
 /** The surface an alarm inset is drawn on, which is what picks its token: each

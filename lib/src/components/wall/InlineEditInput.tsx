@@ -19,6 +19,9 @@ interface InlineEditInputProps {
    *  it was untouched, since the seed is read once and the caller's value may
    *  have moved since. */
   submitUntouched?: boolean;
+  /** Size the field to its draft, in `ch` — exact only in a monospace font —
+   *  rather than the browser's default 20 characters. */
+  fitDraft?: boolean;
   [key: `data-${string}`]: string;
 }
 
@@ -44,6 +47,7 @@ export function InlineEditInput({
   onCancel,
   blurAction,
   submitUntouched = true,
+  fitDraft = false,
   ...dataAttrs
 }: InlineEditInputProps) {
   const [draft, setDraft] = useState(initialValue);
@@ -62,6 +66,7 @@ export function InlineEditInput({
     <input
       {...dataAttrs}
       className={className}
+      style={fitDraft ? { width: `${Math.max(1, [...draft].length)}ch` } : undefined}
       value={draft}
       autoFocus
       ref={selectOnMount}

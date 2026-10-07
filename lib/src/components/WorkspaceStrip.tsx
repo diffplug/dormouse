@@ -16,7 +16,7 @@ import { WorkspaceKillConfirm } from './WorkspaceKillConfirm';
 import { WorkspaceTabMenu } from './WorkspaceTabMenu';
 import { useTodoPillContent } from './TodoPillBody';
 import { AlertRingInset, useAlertRingBurst } from './alert-ring';
-import { AUTO_NAME_CLASS, chromeButton, DOOR_TAB_CLASS, HEADER_PALETTE_TRANSITION_CLASS, ModalFrame, modalActionButton, OVERLAY_MAX_HEIGHT, TAB_INACTIVE_FADE_STYLE, TERMINAL_TOP_RADIUS_CLASS, TODO_PILL_TRACKING_CLASS } from './design';
+import { AUTO_NAME_CLASS, chromeButton, DOOR_TAB_CLASS, DOOR_TAB_MIN_WIDTH_PX, HEADER_PALETTE_TRANSITION_CLASS, ModalFrame, modalActionButton, OVERLAY_MAX_HEIGHT, TAB_INACTIVE_FADE_STYLE, TERMINAL_TOP_RADIUS_CLASS, TODO_PILL_TRACKING_CLASS } from './design';
 import { createWorkspaceStripDrag, type StripDragHost } from './workspace-strip-drag';
 import { acquireChromeKeyboardLease } from './wall/chrome-keyboard-lease';
 import { getWallHandle } from './wall/wall-handles';
@@ -45,7 +45,7 @@ import {
 } from '../lib/workspace-store';
 import type { WorkspaceId } from '../lib/session-types';
 import { revealWorkspaceTab, workspaceStripAreas } from './workspace-tab-elements';
-import { useWorkspaceTabFlip } from './workspace-tab-flip';
+import { useWorkspaceTabTween } from './workspace-tab-tween';
 
 /**
  * The Window's Workspace tabs. Store-driven end to end (Workspaces, membership,
@@ -86,7 +86,6 @@ export function WorkspaceStrip({
 
   const tabElementsRef = useRef(new Map<WorkspaceId, HTMLElement>());
   const stripRef = useRef<HTMLDivElement | null>(null);
-  useWorkspaceTabFlip(stripRef);
 
   // The editor, the confirmation, and the tab menu all sit outside every Wall,
   // so a capture-phase command-mode shortcut would still fire behind them.
@@ -129,6 +128,8 @@ export function WorkspaceStrip({
   useLayoutEffect(() => {
     revealWorkspaceTab(tabElementsRef.current.get(activeId) ?? null);
   }, [activeId]);
+  // After the reveal: the tween measures where it scrolled the tabs to.
+  useWorkspaceTabTween(stripRef);
 
   // Stable across renders: the tab's own `data-workspace-tab` says which entry
   // it is, and the returned cleanup is what React 19 calls on detach.
@@ -308,6 +309,10 @@ export function WorkspaceStrip({
   );
 }
 
+/** The name button's `pl-2.5` + `pr-2.5`: the least a tab ever puts around its
+ *  name, so a floor built on it never exceeds the tab's natural width. */
+const TAB_NAME_PADDING_PX = 20;
+
 /** Memoized: every callback below is stable and takes the Workspace id, so a tab
  *  re-renders only when its own name, state, or union changes. */
 const WorkspaceTab = memo(function WorkspaceTab({
@@ -357,6 +362,10 @@ const WorkspaceTab = memo(function WorkspaceTab({
 }) {
   const todoPill = useTodoPillContent(union.todo);
   const showClose = active && !pinned;
+  // A floor for when the strip squeezes the tab, never above its natural width:
+  // the name in `ch` (the tab is monospace) plus the least padding around it.
+  // The editor is never squeezed, and has no floor to inflate an empty draft.
+  const minWidth = renaming ? 0 : `min(${DOOR_TAB_MIN_WIDTH_PX}px, calc(${[...name].length}ch + ${TAB_NAME_PADDING_PX}px))`;
   // The TODO pill shows whichever Workspace is visible, as a pane's does. The
   // alarm inset is a hidden Workspace's summons: the visible one's panes ring.
   const showAlarmInset = !active && union.ringing;
@@ -384,11 +393,12 @@ const WorkspaceTab = memo(function WorkspaceTab({
       className={clsx(
         DOOR_TAB_CLASS,
         HEADER_PALETTE_TRANSITION_CLASS,
-        'w-max shrink',
+        'w-max',
+        renaming ? 'shrink-0' : 'shrink',
         active ? 'bg-header-active-bg text-header-active-fg' : 'bg-header-inactive-bg text-header-inactive-fg',
         dragging && 'opacity-60',
       )}
-      style={active ? undefined : TAB_INACTIVE_FADE_STYLE}
+      style={active ? { minWidth } : { ...TAB_INACTIVE_FADE_STYLE, minWidth }}
       onPointerDown={(event) => {
         // The close button has its own click, and a press inside the open rename
         // editor is a text selection — neither may start a reorder drag.
@@ -418,7 +428,8 @@ const WorkspaceTab = memo(function WorkspaceTab({
         <InlineEditInput
           data-workspace-rename-for={id}
           initialValue={name}
-          className="h-full min-w-0 flex-1 bg-transparent px-2.5 text-sm outline-none"
+          className="box-content h-full min-w-0 bg-transparent px-2.5 text-sm outline-none"
+          fitDraft
           blurAction="submit"
           submitUntouched={false}
           onSubmit={(value) => onFinishRename(id, value)}
