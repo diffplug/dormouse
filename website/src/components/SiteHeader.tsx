@@ -1,42 +1,10 @@
 import { forwardRef } from "react";
-import { DOCS_PAGES } from "../lib/docs-pages";
-import { sitePath } from "../lib/site-meta";
+import { NAV_LINKS, NAV_LINKS_OFF_PLAYGROUND } from "../lib/site-nav";
 
 export const STATIC_PAGE_HEADER_STYLE: React.CSSProperties = {
   background: "rgba(10, 10, 10, 0.85)",
   backdropFilter: "blur(12px)",
 };
-
-const NAV_LINKS: readonly {
-  href: string;
-  label: string;
-  external?: boolean;
-  hideOnMobile?: boolean;
-  /** Paths this entry highlights for, when the href itself is never a page. */
-  covers?: readonly string[];
-}[] = [
-  { href: sitePath("/playground"), label: "Playground" },
-  { href: "/#download", label: "Download", hideOnMobile: true },
-  // Desktop only: on a phone the docs are reached from the homepage's own
-  // links, and the four marketing destinations earn the narrow bar first.
-  // `/docs` only ever redirects, so it can never equal the current path — it
-  // highlights for the pages it leads to instead. Left bare for that reason:
-  // it is an entrypoint `website/public/_redirects` owns, not a served page,
-  // so `sitePath` has nothing to point it at.
-  {
-    href: "/docs",
-    label: "Docs",
-    hideOnMobile: true,
-    covers: DOCS_PAGES.map((page) => page.path),
-  },
-  { href: "https://github.com/diffplug/dormouse", label: "GitHub", external: true },
-];
-
-const CHROME_INACTIVE_BG = "var(--color-header-inactive-bg)";
-const CHROME_INACTIVE_FG = "var(--color-header-inactive-fg)";
-
-const THEME_AWARE_LINK_CLASS =
-  "cursor-pointer opacity-100 hover:underline focus-visible:underline underline-offset-4 decoration-[var(--color-header-inactive-fg)]";
 
 interface SiteHeaderProps {
   /** Current path — highlights matching nav link */
@@ -47,8 +15,6 @@ interface SiteHeaderProps {
   brandVisible?: boolean;
   /** Optional header control, used by the Pocket playground's theme picker. */
   controls?: React.ReactNode;
-  /** Use VSCode theme variables instead of the marketing site's palette. */
-  themeAware?: boolean;
   /** Extra inline styles for the header element (background, blur, etc.) */
   style?: React.CSSProperties;
 }
@@ -64,22 +30,10 @@ const SiteHeader = forwardRef<HTMLElement, SiteHeaderProps>(
     brandRef,
     brandVisible = true,
     controls,
-    themeAware = false,
     style,
   }, ref) {
-    const navLinks = activePath === "/playground"
-      ? NAV_LINKS.filter(({ href }) => href !== sitePath("/playground"))
-      : NAV_LINKS;
-
-    const headerStyle: React.CSSProperties = themeAware
-        ? {
-          color: CHROME_INACTIVE_FG,
-          backgroundColor: CHROME_INACTIVE_BG,
-          backdropFilter: "blur(8px)",
-          WebkitBackdropFilter: "blur(8px)",
-          ...style,
-        }
-      : { color: "var(--color-text)", ...style };
+    const navLinks = activePath === "/playground" ? NAV_LINKS_OFF_PLAYGROUND : NAV_LINKS;
+    const headerStyle: React.CSSProperties = { color: "var(--color-text)", ...style };
 
     return (
       <>
@@ -91,25 +45,8 @@ const SiteHeader = forwardRef<HTMLElement, SiteHeaderProps>(
           <a
             ref={brandRef}
             href="/"
-            className={
-              brandVisible
-                ? `cursor-pointer text-xl ${
-                    themeAware
-                      ? THEME_AWARE_LINK_CLASS
-                      : "text-[var(--color-caramel)]"
-                  }`
-                : `text-xl ${
-                    themeAware ? "" : "text-[var(--color-caramel)]"
-                  }`
-            }
-            style={
-              brandVisible ? undefined : {
-                    color: themeAware
-                      ? CHROME_INACTIVE_FG
-                      : undefined,
-                    opacity: 0,
-                  }
-            }
+            className={`text-xl text-[var(--color-caramel)]${brandVisible ? " cursor-pointer" : ""}`}
+            style={brandVisible ? undefined : { opacity: 0 }}
           >
             Dormouse
           </a>
@@ -124,13 +61,7 @@ const SiteHeader = forwardRef<HTMLElement, SiteHeaderProps>(
                     href={href}
                     className={`cursor-pointer transition-colors ${
                       hideOnMobile ? "hidden md:block " : ""
-                    }${
-                      themeAware
-                        ? THEME_AWARE_LINK_CLASS
-                        : isActive
-                          ? "text-[var(--color-caramel)]"
-                          : "hover:text-[var(--color-caramel)]"
-                    }`}
+                    }${isActive ? "text-[var(--color-caramel)]" : "hover:text-[var(--color-caramel)]"}`}
                     {...(external ? { target: "_blank", rel: "noopener noreferrer" } : {})}
                   >
                     {label}
