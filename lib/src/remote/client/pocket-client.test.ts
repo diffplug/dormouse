@@ -47,6 +47,7 @@ import {
   localStoragePocketStorage,
   purgeLegacyPairedMarkers,
   type PocketClientDeps,
+  type PocketSession,
   type PocketStorage,
 } from './pocket-client';
 import type { KnownBurrowV1 } from './pocket-db';
@@ -1413,12 +1414,20 @@ describe('a direct-only session, end to end', () => {
 
 describe('setup + signin', () => {
   it('registers with the scanned token and is signed in by the finish alone', async () => {
-    const harness = makeClient({ ...AUTH_ROUTES });
+    const storage = memoryStorage();
+    const harness = makeClient({ ...AUTH_ROUTES }, { storage });
     const token = secret();
     const setup = await harness.client.setup({ setupToken: token }, 'My Phone');
     expect(setup.credentialId).toBe(CREDENTIAL_ID);
     expect(harness.client.sessionToken).toBe(SESSION_TOKEN);
     expect(harness.client.accountId).toBe(ACCOUNT_ID);
+    // Kept for the next launch, naming the credential a pairing proves with.
+    expect(storage.getSession()).toEqual({
+      token: SESSION_TOKEN,
+      accountId: ACCOUNT_ID,
+      credentialId: CREDENTIAL_ID,
+      expiresAt: 1,
+    });
     expect(harness.calls.some((c) => c.url.includes('/api/signin/'))).toBe(false);
 
     await harness.client.listBurrows();
@@ -1669,6 +1678,66 @@ describe('the durable deletion queue', () => {
 
 // --- The account plane ------------------------------------------------------
 
+describe('the session across launches', () => {
+  const NOW = 1_700_000_000_000;
+  const stored: PocketSession = {
+    token: SESSION_TOKEN,
+    accountId: ACCOUNT_ID,
+    credentialId: CREDENTIAL_ID,
+    expiresAt: NOW + 60_000,
+  };
+  const relaunch = (storage: PocketStorage, routes: Record<string, RouteHandler> = {}) =>
+    makeClient({ ...AUTH_ROUTES, ...routes }, { storage, now: () => NOW });
+
+  it('is written at sign-in and read back by the next launch', async () => {
+    const storage = memoryStorage();
+    await makeClient({ ...AUTH_ROUTES }, { storage }).client.signin();
+    expect(storage.getSession()).toMatchObject({ token: SESSION_TOKEN, credentialId: CREDENTIAL_ID });
+
+    storage.setSession(stored);
+    const harness = relaunch(storage);
+
+    expect(harness.client.sessionToken).toBe(SESSION_TOKEN);
+    expect(harness.client.accountId).toBe(ACCOUNT_ID);
+    await harness.client.listBurrows();
+    expect(harness.calls.at(-1)!.headers.authorization).toBe(`Bearer ${SESSION_TOKEN}`);
+  });
+
+  it('is dropped, and cleared from storage, once past its expiry', () => {
+    const storage = memoryStorage();
+    storage.setSession({ ...stored, expiresAt: NOW });
+
+    expect(relaunch(storage).client.sessionToken).toBeNull();
+    expect(storage.getSession()).toBeNull();
+  });
+
+  it('is cleared from storage by the session gate 401', async () => {
+    const storage = memoryStorage();
+    storage.setSession(stored);
+    const harness = relaunch(storage, {
+      '/api/burrows': () => ({ status: 401, json: { error: 'unauthorized' } }),
+    });
+
+    await expect(harness.client.listBurrows()).rejects.toBeInstanceOf(SessionExpiredError);
+    expect(storage.getSession()).toBeNull();
+  });
+
+  it('is cleared from memory and storage by signing out, which closes the relay socket', async () => {
+    const storage = memoryStorage();
+    storage.setSession(stored);
+    const harness = relaunch(storage);
+    const opening = harness.client.openSocket();
+    harness.socket.open();
+    await opening;
+
+    harness.client.signOut();
+
+    expect(harness.client.sessionToken).toBeNull();
+    expect(storage.getSession()).toBeNull();
+    expect(harness.socket.readyState).toBe(3);
+  });
+});
+
 describe('session expiry', () => {
   it('discards the token and reports expiry on the session gate 401', async () => {
     let live = true;
@@ -1724,6 +1793,9 @@ describe('the presence proof', () => {
     // key in full, so there is nothing to send and the recovery is a sign-in.
     const harness = await makeE2eHarness();
     const invitation = await harness.mintInvitation();
+    // Signs in, so it holds a session — but the cache it would read the
+    // public key back out of is emptied before the pairing.
+    const storage: PocketStorage = { ...memoryStorage(), getPasskeyPublicKey: () => null };
     const emptied = new PocketClient({
       wsBase: 'ws://test',
       fetch: harness.fetch,
@@ -1731,14 +1803,13 @@ describe('the presence proof', () => {
       createWebSocket: () => harness.relay.openClientSocket(),
       knownBurrows: memoryKnownBurrows(),
       pendingDeletions: memoryPendingDeletions(),
-      // Signs in, so it holds a session — but the cache it would read the
-      // public key back out of is emptied before the pairing.
-      storage: { ...memoryStorage(), getPasskeyPublicKey: () => null },
+      storage,
     });
     await emptied.signin();
 
     await expect(emptied.pair(invitation, 'iPhone')).rejects.toThrow(PASSKEY_UNAVAILABLE_MESSAGE);
     expect(emptied.sessionToken).toBeNull();
+    expect(storage.getSession()).toBeNull();
     expect(harness.approvals).toEqual([]);
   });
 
@@ -1801,6 +1872,13 @@ describe('localStoragePocketStorage', () => {
     vi.unstubAllGlobals();
   });
 
+  const SESSION: PocketSession = {
+    token: 'tok',
+    accountId: 'owner',
+    credentialId: 'cred-1',
+    expiresAt: 1_700_000_000_000,
+  };
+
   /** A `localStorage` that throws on every access, as blocked site data does. */
   function blockedLocalStorage() {
     const blocked = (): never => {
@@ -1848,7 +1926,43 @@ describe('localStoragePocketStorage', () => {
     expect(() => {
       storage.setPasskeyPublicKey('cred-1', 'pk-1');
       storage.setRegisteredPushEndpoint('digest');
+      storage.setSession(SESSION);
+      storage.clearSession();
     }).not.toThrow();
+  });
+
+  it('signs a client in for the life of the tab when storage is blocked', async () => {
+    vi.stubGlobal('localStorage', blockedLocalStorage());
+    const { client } = makeClient({ ...AUTH_ROUTES }, { storage: localStoragePocketStorage() });
+
+    expect(client.sessionToken).toBeNull();
+    await client.signin();
+    expect(client.sessionToken).toBe(SESSION_TOKEN);
+  });
+
+  it('keeps the session as a versioned record a later launch reads back', () => {
+    const { map, store } = fakeLocalStorage();
+    vi.stubGlobal('localStorage', store);
+
+    localStoragePocketStorage().setSession(SESSION);
+    expect(JSON.parse(map.get('dormouse-pocket:session')!)).toEqual({ v: 1, ...SESSION });
+    expect(localStoragePocketStorage().getSession()).toEqual(SESSION);
+
+    localStoragePocketStorage().clearSession();
+    expect(map.has('dormouse-pocket:session')).toBe(false);
+  });
+
+  it.each([
+    ['unparseable', '{'],
+    ['another version', JSON.stringify({ v: 2, ...SESSION })],
+    ['missing its credential', JSON.stringify({ v: 1, ...SESSION, credentialId: undefined })],
+    ['null', 'null'],
+  ])('reads a stored session that is %s as none', (_, raw) => {
+    const { map, store } = fakeLocalStorage();
+    map.set('dormouse-pocket:session', raw);
+    vi.stubGlobal('localStorage', store);
+
+    expect(localStoragePocketStorage().getSession()).toBeNull();
   });
 
   it('answers reads from the in-session mirror when storage is blocked', () => {

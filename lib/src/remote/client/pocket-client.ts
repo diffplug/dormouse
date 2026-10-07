@@ -94,6 +94,20 @@ import type { TerminalHandlers } from './remote-adapter';
 export type PocketSocket = RemoteWebSocket;
 
 /**
+ * The Relay sign-in session: its bearer token, the account the Relay answered
+ * with it — `'owner'` from a self-host Relay, the account's user id from
+ * Hosted — the credential that signed in, and the Relay's expiry. Every
+ * presence proof names that account and credential, and a pairing outcome must
+ * name the account.
+ */
+export interface PocketSession {
+  readonly token: string;
+  readonly accountId: string;
+  readonly credentialId: string;
+  readonly expiresAt: number;
+}
+
+/**
  * Persistent per-device state that is *not* an end-to-end identity — those live
  * in IndexedDB ({@link KnownBurrowStore}). Passkey public keys are cached by
  * credential id at registration *and* at sign-in — the Relay returns the
@@ -119,6 +133,13 @@ export interface PocketStorage {
    */
   getRegisteredPushEndpoint(): string | null;
   setRegisteredPushEndpoint(fingerprint: string): void;
+  /**
+   * The Relay session, kept so a relaunch lands signed in. It reaches the
+   * Relay alone; every Burrow ceremony still demands its own presence proof.
+   */
+  getSession(): PocketSession | null;
+  setSession(session: PocketSession): void;
+  clearSession(): void;
 }
 
 /**
@@ -354,14 +375,8 @@ export class PocketClient {
   #ws: PocketSocket | null = null;
   /** The open relay socket's heartbeat, or null while none is open. */
   #heartbeat: RelayHeartbeat | null = null;
-  /**
-   * The sign-in session: its token, and the account the Relay answered with
-   * it — `'owner'` from a self-host Relay, the account's user id from Hosted.
-   * Every presence proof names that account, and a pairing outcome must.
-   */
-  #session: { readonly token: string; readonly accountId: string } | null = null;
-  /** The credential id from the most recent sign-in (or registration). */
-  #credentialId: string | null = null;
+  /** Written only through {@link #setSession}, which keeps storage in step. */
+  #session: PocketSession | null;
 
   constructor(deps: PocketClientDeps) {
     this.#baseUrl = deps.baseUrl ?? '';
@@ -373,6 +388,10 @@ export class PocketClient {
     this.#pendingDeletions = deps.pendingDeletions;
     this.#storage = deps.storage ?? localStoragePocketStorage();
     this.#now = deps.now ?? (() => Date.now());
+    // A stored session the Relay has already expired would only cost a 401.
+    const stored = this.#storage.getSession();
+    this.#session = stored && stored.expiresAt > this.#now() ? stored : null;
+    if (stored && !this.#session) this.#storage.clearSession();
     this.#setTimer = deps.setTimer ?? realTimer;
     this.#core = new ClientSessionCore<E2eRoute>({
       sendFrame: (route, step, ciphertext) => this.#sendE2e(route, step, ciphertext),
@@ -514,8 +533,12 @@ export class PocketClient {
     }
     // Only once the Relay has acknowledged it: this names the credential a
     // pairing's presence proof is built from. Sign-in refreshes it.
-    this.#session = { token: finish.sessionToken, accountId: finish.accountId };
-    this.#credentialId = registration.credentialId;
+    this.#setSession({
+      token: finish.sessionToken,
+      accountId: finish.accountId,
+      credentialId: registration.credentialId,
+      expiresAt: finish.expiresAt,
+    });
     return finish;
   }
 
@@ -547,13 +570,17 @@ export class PocketClient {
     }
   }
 
-  /** Sign in with a discoverable passkey; keeps the session token in memory. */
+  /** Sign in with a discoverable passkey; the session is kept across launches. */
   async signin(): Promise<SigninFinishResponse> {
     const begin = await this.#api<SigninBeginResponse>(API_ROUTES.signinBegin, {});
     const assertion = await this.#webauthn.getAssertion(begin.challenge, begin.rpId);
     const finish = await this.#api<SigninFinishResponse>(API_ROUTES.signinFinish, { assertion });
-    this.#session = { token: finish.sessionToken, accountId: finish.accountId };
-    this.#credentialId = assertion.credentialId;
+    this.#setSession({
+      token: finish.sessionToken,
+      accountId: finish.accountId,
+      credentialId: assertion.credentialId,
+      expiresAt: finish.expiresAt,
+    });
     // Signing in is enough to pair from here. The Relay returns the asserted
     // passkey's public key, so a browser profile that never performed the
     // registration — an iOS Home Screen install, a second browser — can still
@@ -561,6 +588,15 @@ export class PocketClient {
     // second passkey.
     this.#storage.setPasskeyPublicKey(assertion.credentialId, finish.passkeyPublicKey);
     return finish;
+  }
+
+  /**
+   * Forget the session on this device and close the relay socket it opened.
+   * Local only: the Relay keeps the token until it expires.
+   */
+  signOut(): void {
+    this.close();
+    this.#setSession(null);
   }
 
   async listBurrows(): Promise<BurrowsResponse['burrows']> {
@@ -779,7 +815,7 @@ export class PocketClient {
     // to already be there when they look.
     onCode?.(code);
 
-    const passkeyCredentialId = this.#requireCredentialId();
+    const passkeyCredentialId = this.#requireSession().credentialId;
     const presence = await this.#provePresence({
       kind: 'pairing',
       burrowId,
@@ -1238,7 +1274,7 @@ export class PocketClient {
       // Drop the token here rather than at the call site: every later request
       // and every relay upgrade would fail the same way, and keeping it would
       // let the UI believe it is still signed in.
-      this.#session = null;
+      this.#setSession(null);
       throw new SessionExpiredError();
     }
     // A refusal, not a bare Error: an answer arrived, which is what `setup`
@@ -1274,21 +1310,21 @@ export class PocketClient {
     throw original;
   }
 
-  #requireSession(): { readonly token: string; readonly accountId: string } {
+  #requireSession(): PocketSession {
     if (!this.#session) throw new Error('sign in first');
     return this.#session;
   }
 
-  #requireCredentialId(): string {
-    const credentialId = this.#credentialId;
-    if (!credentialId) throw new Error('sign in before pairing or connecting');
-    return credentialId;
+  #setSession(session: PocketSession | null): void {
+    this.#session = session;
+    if (session) this.#storage.setSession(session);
+    else this.#storage.clearSession();
   }
 
   #requirePasskeyPublicKey(credentialId: string): string {
     const publicKey = this.#storage.getPasskeyPublicKey(credentialId);
     if (!publicKey) {
-      this.#session = null;
+      this.#setSession(null);
       throw new PasskeyUnavailableError();
     }
     return publicKey;
@@ -1321,9 +1357,12 @@ interface E2eRoute {
 export function localStoragePocketStorage(): PocketStorage {
   const PASSKEY_PREFIX = 'dormouse-pocket:passkey:';
   const PUSH_ENDPOINT_KEY = 'dormouse-pocket:push-endpoint';
+  const SESSION_KEY = 'dormouse-pocket:session';
 
   const passkeys = new Map<string, string>();
   let pushEndpoint: string | undefined;
+  /** `undefined` until this run writes or clears it; `null` is cleared. */
+  let session: PocketSession | null | undefined;
 
   const read = (key: string): string | null => {
     try {
@@ -1376,7 +1415,38 @@ export function localStoragePocketStorage(): PocketStorage {
       pushEndpoint = fingerprint;
       write(PUSH_ENDPOINT_KEY, fingerprint);
     },
+    getSession: () => (session === undefined ? parseStoredSession(read(SESSION_KEY)) : session),
+    setSession: (next) => {
+      session = next;
+      write(SESSION_KEY, JSON.stringify({ v: 1, ...next }));
+    },
+    // The mirror remembers the clear, so a removal that failed cannot bring
+    // the session back for the rest of this run.
+    clearSession: () => {
+      session = null;
+      drop(SESSION_KEY);
+    },
   };
+}
+
+/** A session `localStoragePocketStorage` wrote, or null for anything else. */
+function parseStoredSession(raw: string | null): PocketSession | null {
+  if (raw === null) return null;
+  try {
+    const { v, token, accountId, credentialId, expiresAt } = JSON.parse(raw) as Record<string, unknown>;
+    if (
+      v === 1 &&
+      typeof token === 'string' &&
+      typeof accountId === 'string' &&
+      typeof credentialId === 'string' &&
+      typeof expiresAt === 'number'
+    ) {
+      return { token, accountId, credentialId, expiresAt };
+    }
+  } catch {
+    // Unparseable is malformed.
+  }
+  return null;
 }
 
 /**

@@ -186,7 +186,11 @@ export default function App({
    */
   const [passkeyAlreadyRegistered, setPasskeyAlreadyRegistered] = useState(false);
 
-  const [phase, setPhase] = useState<Phase>({ at: 'auth' });
+  // A session kept from an earlier launch lands on the list; its first read,
+  // once the capability probe passes, finds out whether the Relay still honors it.
+  const [phase, setPhase] = useState<Phase>(() => ({
+    at: client.sessionToken === null ? 'auth' : 'burrows',
+  }));
   /**
    * The last failure. Unkeyed, because every screen that reports one owns its
    * whole viewport: whatever failed last is the only thing there is to say.
@@ -251,7 +255,7 @@ export default function App({
   // across one.
   const at = phase.at;
   useEffect(() => {
-    if (at !== 'burrows') return;
+    if (at !== 'burrows' || !noiseSupported) return;
     const run = ++pushLoadRunRef.current;
     const current = () => pushLoadRunRef.current === run;
     setPushSubscriptionCurrent(false);
@@ -278,7 +282,7 @@ export default function App({
         // re-offers its idempotent Enable rather than claiming push is on; the
         // next Burrows entry re-reads.
       });
-  }, [at, client, loadPushConfig]);
+  }, [at, client, loadPushConfig, noiseSupported]);
 
   /**
    * Whether this device is registered for push notifications with one Burrow.
@@ -367,6 +371,15 @@ export default function App({
     return views;
   }, [client]);
 
+  // The restored session's first read; a 401 drops to sign-in through `run`.
+  // Latched, so StrictMode's second effect pass does not read twice.
+  const restoredRef = useRef(false);
+  useEffect(() => {
+    if (!noiseSupported || restoredRef.current) return;
+    restoredRef.current = true;
+    if (client.sessionToken !== null) void run('refresh', loadBurrows);
+  }, [client, loadBurrows, noiseSupported, run]);
+
   // Socket drop / burrow-gone: dispose the adapter and fall back to Burrows.
   useEffect(() => {
     client.setOnBurrowGone(() => {
@@ -447,7 +460,21 @@ export default function App({
         await requireDeployment();
         cancelledPairingRef.current = false;
         const label = deviceLabel();
-        let spentOnSetup = false;
+        // A signed-in phone has no passkey to create, so it spends the code
+        // rather than leaving a photographed QR redeemable. A refusal aborts:
+        // the code is dead, and pairing with it would fail at the Burrow anyway.
+        // A stored session the Relay no longer honors — a self-host Relay
+        // restarted — is refused at the session gate before the code is spent,
+        // so the scan carries on through sign-in with the same code.
+        let spent = false;
+        if (client.sessionToken !== null) {
+          try {
+            await client.retireSetupToken(invitation.setupToken);
+            spent = true;
+          } catch (err) {
+            if (!(err instanceof SessionExpiredError)) throw err;
+          }
+        }
         if (client.sessionToken === null) {
           // A browser with no usable passkey registers one with the scanned
           // token; anything else signs in with what it already holds.
@@ -484,13 +511,10 @@ export default function App({
               throw err;
             }
             // Registering signed in too: the finish carried the session.
-            spentOnSetup = true;
+            spent = true;
           }
         }
-        // A signed-in phone has no passkey to create, so it spends the code
-        // rather than leaving a photographed QR redeemable. A refusal aborts:
-        // the code is dead, and pairing with it would fail at the Burrow anyway.
-        if (!spentOnSetup) await client.retireSetupToken(invitation.setupToken);
+        if (!spent) await client.retireSetupToken(invitation.setupToken);
         await client.retirePendingDeletions();
 
         setPhase({ at: 'pairing', code: null });
@@ -600,6 +624,13 @@ export default function App({
     setPhase({ at: 'burrows' });
   };
 
+  // Local only: the pinned Burrows and push registration stay, as on expiry.
+  const signOut = () => {
+    client.signOut();
+    setError(null);
+    setPhase({ at: 'auth' });
+  };
+
   // --- Views ---------------------------------------------------------------
 
   // Gated, not degraded: nothing above has performed a remote operation, and
@@ -688,6 +719,7 @@ export default function App({
           onForget={onForget}
           onEnablePush={onEnablePush}
           onRetryPushConfig={onRetryPushConfig}
+          onSignOut={signOut}
         />
       );
   }
@@ -1127,6 +1159,7 @@ export function BurrowsView({
   onForget,
   onEnablePush,
   onRetryPushConfig,
+  onSignOut,
 }: {
   /** The pinned records; a Burrow with no record is not one of these. */
   burrows: BurrowView[];
@@ -1148,6 +1181,7 @@ export function BurrowsView({
   /** Registers every paired Burrow at once — see {@link pushNoticeState}. */
   onEnablePush: () => void;
   onRetryPushConfig: () => void;
+  onSignOut: () => void;
 }): React.ReactElement {
   const pushNotice = pushNoticeState({
     pairedBurrowIds: burrows.filter((h) => !h.needsPairing).map((h) => h.burrowId),
@@ -1252,6 +1286,14 @@ export function BurrowsView({
           onClick={onScan}
         >
           {SCAN_LABEL}
+        </button>
+        <button
+          type="button"
+          className={clsx(pkButton({ tone: 'ghost', size: 'sm' }), 'self-center')}
+          disabled={busy !== null}
+          onClick={onSignOut}
+        >
+          Sign out
         </button>
       </div>
     </div>

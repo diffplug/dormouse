@@ -35,7 +35,12 @@ import {
   type TerminalDataEvent,
 } from 'remote-lib-common';
 
-import { PocketClient, type PocketClientDeps, type PocketStorage } from './pocket-client';
+import {
+  PocketClient,
+  type PocketClientDeps,
+  type PocketSession,
+  type PocketStorage,
+} from './pocket-client';
 import type {
   KnownBurrowStore,
   KnownBurrowV1,
@@ -114,6 +119,7 @@ export function makeFetch(
 export function memoryStorage(): PocketStorage {
   const passkeys = new Map<string, string>();
   let pushEndpoint: string | null = null;
+  let session: PocketSession | null = null;
   return {
     getPasskeyPublicKey: (id) => passkeys.get(id) ?? null,
     setPasskeyPublicKey: (id, pk) => void passkeys.set(id, pk),
@@ -121,6 +127,9 @@ export function memoryStorage(): PocketStorage {
     knownCredentialIds: () => [...passkeys.keys()],
     getRegisteredPushEndpoint: () => pushEndpoint,
     setRegisteredPushEndpoint: (fingerprint) => void (pushEndpoint = fingerprint),
+    getSession: () => session,
+    setSession: (next) => void (session = next),
+    clearSession: () => void (session = null),
   };
 }
 

@@ -78,6 +78,8 @@ The iOS 26.6.1 pairing failure reported in September 2026 occurred after local a
 
 The phone subsequently reported `write-record / DataError` in the disposable database. Testing a separately stored key distinguishes an inline-key check failure from broken key deserialization; an explicit key can bypass the former while hiding the latter until readback. This diagnostic does not migrate records.
 
+**Why the Relay session may sit in `localStorage`.** Without it every cold launch, and every relaunch of an installed app iOS evicted, cost a sign-in prompt before the Burrows list. The token is authentication-plane only: it reaches the Relay's routes and sockets for at most its 12 hours, and never stands in for a presence proof at a Burrow (remote-security-model, Presence proofs). Its exposure is the Client statics' class, which already live in the same origin's storage and are the stronger capability; script running in the Pocket origin is outside the model either way. It holds the credential id because pairing names the passkey a proof is built from, which a relaunch could not otherwise recover without a prompt.
+
 **Why one module owns every IndexedDB open.** Two modules opening the same database can disagree about the version, and a connection held open across an upgrade blocks it indefinitely. Centralizing name, version, upgrade and open makes both states unreachable rather than merely unlikely.
 
 ## Serving the built bundle
