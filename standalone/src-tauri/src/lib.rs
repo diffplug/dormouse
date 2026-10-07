@@ -1764,9 +1764,9 @@ fn restart_hung_webviews(app: &AppHandle, labels: &[String]) {
     let watchdog = app.state::<UiWatchdog>();
     for (pid, labels) in by_pid {
         let sample_path = dir.as_ref().and_then(|dir| {
-            create_dir_all(dir).ok()?;
             let path = dir.join(format!("{}-{pid}.sample.txt", log_timestamp()));
-            macos::sample(pid, &path).then(|| path.display().to_string())
+            write_owner_only_with(&path, restrict_to_owner, |path| macos::sample(pid, path))
+                .then(|| path.display().to_string())
         });
         let killed = macos::kill(pid);
         append_log(format!(
@@ -2024,6 +2024,27 @@ fn ensure_parent_with(
 /// crash mid-write (`docs/specs/standalone.md` -> "Persistence").
 fn write_file_atomically(path: &Path, contents: &str) -> Result<(), String> {
     write_file_with_permissions(path, contents, restrict_to_owner)
+}
+
+/// Owner-only for a state-root file a child process writes, which cannot go
+/// through `write_file_atomically`: the macOS hang sample. The directory is
+/// restricted before `write` runs, and a file a failed `write` or restrict
+/// leaves behind is removed.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn write_owner_only_with(
+    path: &Path,
+    restrict: impl Fn(&Path, u32) -> Result<(), String>,
+    write: impl FnOnce(&Path) -> bool,
+) -> bool {
+    if ensure_parent_with(path, &restrict).is_err() {
+        return false;
+    }
+    // A failed or timed-out `sample` can leave a partial file at the umask.
+    if !write(path) || restrict(path, 0o600).is_err() {
+        let _ = std::fs::remove_file(path);
+        return false;
+    }
+    true
 }
 
 /// `write_file_atomically` with the permission step injected, so a test can
@@ -5699,6 +5720,50 @@ mod tests {
             // leaves the boot sweep anything to find.
             assert!(!dir.path().join("main.json.tmp").exists());
         }
+    }
+
+    #[test]
+    fn a_child_written_state_file_is_never_written_into_an_unrestricted_directory() {
+        let dir = TempDir::new("hang-sample-permission-failure");
+        let path = dir.path().join("hangs").join("sample.txt");
+        let mut ran = false;
+        let restrict_dir_fails = |_: &Path, mode: u32| if mode == 0o700 { Err("denied".to_owned()) } else { Ok(()) };
+        assert!(!super::write_owner_only_with(&path, restrict_dir_fails, |_| { ran = true; true }));
+        assert!(!ran);
+        // A file that cannot be restricted is removed rather than kept.
+        let restrict_file_fails = |path: &Path, mode: u32| if mode == 0o600 { Err("denied".to_owned()) } else { super::restrict_to_owner(path, mode) };
+        assert!(!super::write_owner_only_with(&path, restrict_file_fails, |path| fs::write(path, "sample").is_ok()));
+        assert!(!path.exists());
+        // So is whatever a failed writer left behind.
+        assert!(!super::write_owner_only_with(&path, super::restrict_to_owner, |path| { fs::write(path, "partial").unwrap(); false }));
+        assert!(!path.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_child_written_state_file_is_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = TempDir::new("hang-sample-permissions");
+        let hangs = dir.path().join("hangs");
+        fs::create_dir(&hangs).unwrap();
+        fs::set_permissions(&hangs, fs::Permissions::from_mode(0o755)).unwrap();
+        let path = hangs.join("sample.txt");
+        let written = super::write_owner_only_with(&path, super::restrict_to_owner, |path| {
+            fs::write(path, "sample").unwrap();
+            fs::set_permissions(path, fs::Permissions::from_mode(0o644)).is_ok()
+        });
+        assert!(written);
+        assert_eq!(fs::metadata(&hangs).unwrap().permissions().mode() & 0o777, 0o700);
+        assert_eq!(fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+    }
+
+    /// docs/specs/security-local.md -> "Persisted state".
+    #[test]
+    fn the_hang_sample_is_written_owner_only() {
+        let src = include_str!("lib.rs").split("#[cfg(test)]").next().unwrap();
+        let body = src.split("fn restart_hung_webviews(").nth(1).unwrap().split("\n}").next().unwrap();
+        assert!(body.contains("write_owner_only_with(&path, restrict_to_owner,"));
+        assert!(!body.contains("create_dir_all("));
     }
 
     #[cfg(unix)]
