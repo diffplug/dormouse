@@ -1,5 +1,5 @@
 import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type DependencyList, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
-import { ArrowCounterClockwiseIcon, ArrowLineUpIcon, ArrowSquareOutIcon, BugBeetleIcon, CaretDownIcon, CheckIcon, CircleNotchIcon, CopyIcon, FolderSimpleIcon, PauseIcon, PlugIcon, PushPinIcon, SlidersHorizontalIcon, TerminalIcon, WarningIcon, XIcon } from '@phosphor-icons/react';
+import { ArrowCounterClockwiseIcon, ArrowLineUpIcon, ArrowSquareOutIcon, BellIcon, BugBeetleIcon, CaretDownIcon, CheckIcon, CircleNotchIcon, CopyIcon, FolderSimpleIcon, PauseIcon, PlugIcon, PushPinIcon, SlidersHorizontalIcon, TerminalIcon, WarningIcon, XIcon } from '@phosphor-icons/react';
 import { ELEVATED_PANE_SHADOW, OnOffSwitch, POPUP_SURFACE_CLASS, SUBTLE_ACTION_COLOR_CLASS, SUBTLE_ACTION_INTERACTION_CLASS, SUBTLE_ACTION_REST_COLOR_CLASS, SUBTLE_ACTION_WRAPPER_INTERACTION_CLASS, TERMINAL_CONTEXT_SURFACE_CLASS, TERMINAL_CONTEXT_EXIT_MS, TERMINAL_CONTEXT_TEETH_PX, TERMINAL_SELECTION_BORDER_RADIUS } from '../design';
 import { stepFocus } from '../focus-step';
 import { renderModeFor, type BrowserAutomationProvider } from 'dor-lib-common/browser-providers';
@@ -190,6 +190,7 @@ const EXPLAIN_TEXT = 'debug title';
 /** Muted marks leading the directory and port rows in place of a label column. */
 const FOLDER_ICON = <FolderSimpleIcon size={14} className="shrink-0 text-muted" />;
 const PORT_ICON = <PlugIcon size={14} className="shrink-0 text-muted" />;
+const BELL_ICON = <BellIcon size={14} className="shrink-0 text-muted" />;
 
 /** The copyable Surface ref, the title explanation, the workspace move, then `actions`. */
 function HeaderRow({ surfaceRef, onExplain, onCopyRef, actions, workspaceMove }: {
@@ -522,7 +523,9 @@ export function TerminalContextView(p: TerminalContextViewProps) {
             <span>TODO</span><OnOffSwitch on={p.todo} onEnable={p.onTodo} onDisable={p.onTodo} label="TODO" />
           </div>
         </div></div>
-        {p.notification && <div className="mb-1 ml-6 mt-1 border-l-2 border-border py-1 pl-3"><div>{p.notification.title}</div><div className="whitespace-pre-wrap text-muted">{p.notification.body}</div></div>}
+        {p.notification && <div data-context-notification className="flex h-6 min-w-0 items-center gap-1 pl-1" title={[p.notification.title, p.notification.body].filter(Boolean).join('\n')}>
+          {BELL_ICON}<span className="truncate">{p.notification.title && <span className="font-semibold">{p.notification.title}</span>}{p.notification.title && p.notification.body && ' '}{p.notification.body && <span className="text-muted">{p.notification.body}</span>}</span>
+        </div>}
       </div>
       {/* The terminal ground, carried into the teeth beside and below it. */}
       <div className="@container flex min-h-0 flex-1 flex-col bg-terminal-bg"
