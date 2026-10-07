@@ -65,7 +65,6 @@ vi.mock('../client/pocket-client', async (importOriginal) => ({
     setOnTransportChanged = () => undefined;
     close = () => undefined;
     openSocket = async () => undefined;
-    signin = async () => ({});
     listKnownBurrows = async () => KNOWN;
     listBurrows = async () => KNOWN.map((record) => ({
       burrowId: record.burrowId,
@@ -152,8 +151,11 @@ function rowText(label: string): string {
   return rowFor(container, label).textContent ?? '';
 }
 
-/** Sign in and land on the Burrows view, which is what runs the push load. */
-async function signIn() {
+/**
+ * Launch with a session kept from an earlier launch, which lands on the
+ * Burrows view: what runs the push load.
+ */
+async function openBurrows() {
   act(() => {
     root.render(
       <StrictMode>
@@ -162,7 +164,6 @@ async function signIn() {
     );
   });
   await settle();
-  await click(container, 'Sign in with passkey');
 }
 
 describe('the one Enable on the Burrows view', () => {
@@ -174,7 +175,7 @@ describe('the one Enable on the Burrows view', () => {
    */
   it('subscribes the browser once and registers every paired Burrow', async () => {
     fake.subscribeInBrowser.mockResolvedValue({ endpoint: 'https://push.example/abc' });
-    await signIn();
+    await openBurrows();
 
     await click(container, ENABLE);
 
@@ -193,7 +194,7 @@ describe('the one Enable on the Burrows view', () => {
    */
   it('retires owed deletions before registering a replacement', async () => {
     fake.subscribeInBrowser.mockResolvedValue({ endpoint: 'https://push.example/abc' });
-    await signIn();
+    await openBurrows();
     fake.order = [];
 
     await click(container, ENABLE);
@@ -212,7 +213,7 @@ describe('the one Enable on the Burrows view', () => {
       if (burrowId === 'burrow-2') throw new Error('The Relay refused the registration.');
       return { burrowIds: [...registered.add(burrowId)] };
     });
-    await signIn();
+    await openBurrows();
 
     await click(container, ENABLE);
 
@@ -230,7 +231,7 @@ describe('the one Enable on the Burrows view', () => {
    */
   it('offers Enable after a subscriptions read that failed', async () => {
     fake.listPushSubscribedBurrows.mockRejectedValue(new Error('offline'));
-    await signIn();
+    await openBurrows();
 
     expect(buttonNamed(container, ENABLE)).not.toBeNull();
     expect(container.textContent).not.toContain('Push notifications on.');
@@ -238,7 +239,7 @@ describe('the one Enable on the Burrows view', () => {
 
   it('reads the registrations back on entering the list', async () => {
     fake.listPushSubscribedBurrows.mockResolvedValue(['burrow-1', 'burrow-2']);
-    await signIn();
+    await openBurrows();
 
     expect(container.textContent).not.toContain('Push notifications on.');
     // Both halves are required: the Relay row *and* a browser subscription
@@ -256,7 +257,7 @@ describe('a permission the user denies', () => {
    */
   it('shows the failure, then replaces the offer with the reason', async () => {
     fake.subscribeInBrowser.mockRejectedValue(new Error('Notifications are blocked.'));
-    await signIn();
+    await openBurrows();
 
     let denyProbe!: (state: PushAvailability) => void;
     fake.availability = new Promise<PushAvailability>((resolve) => {
@@ -292,7 +293,7 @@ describe('a completed registration', () => {
       }),
     );
     fake.subscribeInBrowser.mockResolvedValue({ endpoint: 'https://push.example/abc' });
-    await signIn();
+    await openBurrows();
 
     await click(container, ENABLE);
     expect(container.textContent).toContain('Push notifications on.');

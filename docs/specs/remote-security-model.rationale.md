@@ -8,6 +8,8 @@
 
 **Why both verifiers must demand the same user-presence level.** Both evaluate the *same* assertion, so a Relay demanding user verification while the Burrow settles for presence leaves the weaker verifier deciding — inverting "the Burrow is the final authority" through a configuration difference rather than an attack. Mirroring the flag into enrollment stops each side reading its own environment.
 
+**Why a raise voids proofs in flight, not only windows.** A proof verified under the weaker demand is still mid-decision across WebCrypto awaits and the local approval modal; letting it finish would authorize under the demand the raise replaced and seed a window it could ride for up to `PRESENCE_WINDOW_MAX_MS`. A pairing whose write has started is past local consent, which Pairing makes final, so it commits; opening no window leaves its next connection proving under the new demand.
+
 ## Client statics
 
 The initial restart harness used an experimental envelope without the production AAD binding. Its restart evidence below is primitive-level evidence; the v3 harness uses the production codec and requires a fresh checkpoint. The operator's v3 Home Screen report at 17:17:44 UTC on September 11, 2026 passed with authenticated context and a retained production-format key from 17:14:19 UTC. It detects a new page instance after the requested phone restart, not process termination itself.
@@ -34,9 +36,23 @@ The Encoding API is available in every targeted runtime; narrow declarations in 
 
 **Why the Burrow-side verifier never throws.** Its input is attacker-supplied plaintext, decrypted inside the process that owns every PTY, so an exception escaping it is a denial-of-service surface at best and an unhandled rejection that takes the Burrow down at worst.
 
-**Why a first run costs three authenticator prompts, and every ceremony after it exactly one.** The three are distinct facts, each proved to a different party: `navigator.credentials.create` mints the passkey, sign-in proves it to the Relay for the session token a relay socket needs, and the presence proof proves it to the *Burrow* over that ceremony's own handshake. Collapsing any pair means one party trusting another's attestation of freshness — the substitution "the Burrow is the final authority" forbids. The rejected alternative, a Relay-attested presence window, removes two prompts by handing the Relay the ability to mint presence.
+**Why a first run costs two authenticator prompts, and every ceremony after it at most one.** The two are distinct facts, each proved to a different party: `navigator.credentials.create` mints the passkey for the Relay, which issues the session token a relay socket needs off that registration (a sign-in would prove the same fact to the same party), and the presence proof proves it to the *Burrow* over that ceremony's own handshake. Two is the floor. Registration cannot double as the Burrow's proof: synced platform passkeys answer attestation `none`, so `create` returns no credential-key signature over any challenge (packed self-attestation would carry one, but cannot be relied on). Nor can the pairing proof come first: it is bound to a handshake hash, which needs a `/ws/client` socket, which needs a session. Collapsing the remaining pair means one party trusting another's attestation of freshness — the substitution "the Burrow is the final authority" forbids. The rejected alternative, a Relay-attested presence window, removes prompts by handing the Relay the ability to mint presence; the Burrow's own [Presence window](#presence-window) removes the later ones without that. Issuing the session at `setup/finish` grants a setup-token holder nothing new: `checkRegistration` verifies no signature, so that holder could already register a key of their own and sign in with it.
 
 **Why there is no app-session signing key beside the bearer token.** A second key would sign requests already carried over TLS to an origin the passkey is bound to, against an attacker who by assumption cannot read that channel — no threat in scope moves. It would also be a long-lived secret in browser storage that authorizes a Relay request with no fresh assertion behind it, where the Client static authorizes nothing without one.
+
+## Presence window
+
+**Why the Burrow holds the window, not the Relay.** The rejected Relay-attested window let the party trusted with nothing vouch for freshness. This one opens only on a proof the Burrow verified, is keyed by a Client static the Relay never sees (IK encrypts it in message 1), and counts only activity the Burrow decrypted, so a compromised Relay can neither open one nor keep one alive. Riding it still takes the static's private half, which IK proves on every connection.
+
+**Why keyed by the Client static, with the proof's identities beside it.** The static is the one identity IK authenticates on every connection, so a window belongs to the browser that held it when the proof verified; keyed by passkey, every other browser paired with that synced passkey would ride it. Keeping the identities the proof verified lets the redeem run the conjunction as a proof would. Nothing marks which record a window was opened under: inside one runtime the ACL changes only at a pairing approval, which re-seeds that static's window, and revocation takes a new runtime ([Revocation propagation](./remote-security-model.md#revocation-propagation)), which starts with none.
+
+**Why the offer is binding.** A redeem that evaluated the window again could refuse an offer the Burrow had just made — a window at its idle edge closes between message 2 and the redeem — and the Client could only cover that with a retry: a second handshake, at the prompt the window was meant to save. Binding leaves one decision, made at message 2. The challenge's 2-minute TTL, under the 5-minute idle bound, limits how stale it can be; a UV raise voids it with the windows it rests on; and the conjunction still runs at the redeem.
+
+**Why five minutes idle and twelve hours in all.** Five minutes sits above the 120 s established-session idle timeout, so a phone backgrounded long enough for its session to be reaped comes back without a prompt, while one put down for longer prompts again. Twelve hours matches `RELAY_SESSION_TTL_MS`: a Client needs a live relay session to connect at all, and the cap bounds how far continuous use can stretch one proof.
+
+**Why keepalives count as activity.** Pocket sends them only while its page is visible, so they track a phone in use, and watching an agent run is use. Separating typed input from automatic messages would add no security: every Client→Burrow message is authenticated by the same static alone, and whoever holds it can send either kind.
+
+**Why a dropped relay socket keeps every window.** Windows are the Burrow's memory of proofs it verified, not relay state, and nothing the Relay does can affect one. Clearing them would turn each laptop sleep or network change into a prompt with no security gained.
 
 ## Pairing
 
@@ -53,6 +69,8 @@ The Encoding API is available in every targeted runtime; narrow declarations in 
 **Why a resumed handshake re-checks its invitation.** Minting runs off the frame chain and reaps synchronously, so a code can be retired — by TTL, by the cap, or by a lost relay socket — while message 1 is still mid-flight. Reserving it afterwards would announce a state change for an entry that is already gone, which the QR panel would render as a scan that never happened.
 
 ## Connection
+
+**Why the proof binds the whole message-2 payload.** Version skew stays harmless with no negotiation. Pocket has always bound whatever message 2 carried, so a Pocket that predates the offer byte still verifies against a Burrow that sends it; a newer Pocket reading a bare 32-byte payload knows that Burrow offers nothing. Only the Burrow needs to know where its challenge ends.
 
 **Why a failure before `Split` gets only a generic outer error.** There is no session to encrypt a denial on: everything before `Split` is handshake state, and any reply would be plaintext the relay can read and a stranger can provoke. A generic outer error ends the ceremony on the Relay's pipe without naming which of the handshake, the challenge, or the ACL was the reason — and without letting a flood of `init` frames buy a reply each.
 

@@ -35,7 +35,12 @@ import {
   type TerminalDataEvent,
 } from 'remote-lib-common';
 
-import { PocketClient, type PocketClientDeps, type PocketStorage } from './pocket-client';
+import {
+  PocketClient,
+  type PocketClientDeps,
+  type PocketSession,
+  type PocketStorage,
+} from './pocket-client';
 import type {
   KnownBurrowStore,
   KnownBurrowV1,
@@ -114,6 +119,7 @@ export function makeFetch(
 export function memoryStorage(): PocketStorage {
   const passkeys = new Map<string, string>();
   let pushEndpoint: string | null = null;
+  let session: PocketSession | null = null;
   return {
     getPasskeyPublicKey: (id) => passkeys.get(id) ?? null,
     setPasskeyPublicKey: (id, pk) => void passkeys.set(id, pk),
@@ -121,6 +127,11 @@ export function memoryStorage(): PocketStorage {
     knownCredentialIds: () => [...passkeys.keys()],
     getRegisteredPushEndpoint: () => pushEndpoint,
     setRegisteredPushEndpoint: (fingerprint) => void (pushEndpoint = fingerprint),
+    getSession: () => session,
+    setSession: (next) => void (session = next),
+    clearSession: (token) => {
+      if (session?.token === token) session = null;
+    },
   };
 }
 
@@ -189,7 +200,12 @@ export const AUTH_ROUTES: Record<string, RouteHandler> = {
     },
   }),
   '/api/setup/finish': () => ({
-    json: { accountId: ACCOUNT_ID, credentialId: CREDENTIAL_ID },
+    json: {
+      sessionToken: SESSION_TOKEN,
+      accountId: ACCOUNT_ID,
+      credentialId: CREDENTIAL_ID,
+      expiresAt: 1,
+    },
   }),
   '/api/setup/retire': () => ({ status: 204 }),
   '/api/signin/begin': () => ({ json: { challenge: secret(), rpId: RP_ID } }),
@@ -270,6 +286,8 @@ export async function makeE2eHarness(
     announcedStatic?: string;
     loadAcl?: () => BurrowAclRecord[];
     now?: () => number;
+    /** The Burrow's own clock, which its challenges and presence windows read. */
+    burrowNow?: () => number;
     /** Make every delivery-row deletion fail, as an offline phone's would. */
     pushDeleteFails?: boolean;
     /** Extra `PocketClient` deps — the keepalive timer and visibility seams. */
@@ -305,6 +323,7 @@ export async function makeE2eHarness(
     enrollment,
     reconnect: false,
     createWebSocket: () => burrowSocket,
+    ...(options.burrowNow ? { now: options.burrowNow } : {}),
     ...(options.burrowDirect || options.burrowPathPolicy
       ? { directPeering: { createPeer: options.burrowDirect ?? null, pathPolicy: options.burrowPathPolicy } }
       : {}),

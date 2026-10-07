@@ -12,6 +12,9 @@ import {
   DEFAULT_CHALLENGE_TTL_MS,
   MAX_TOKENS_PER_BURROW,
   NoiseTransportSession,
+  PRESENCE_WINDOW,
+  PRESENCE_WINDOW_IDLE_MS,
+  PRESENCE_WINDOW_MAX_MS,
   WS_CLOSE_BURROW_NOT_ENTITLED,
   WS_CLOSE_BURROW_REPLACED,
   WS_CLOSE_BURROW_REVOKED,
@@ -55,6 +58,8 @@ const ORIGIN = 'https://burrow-machine.example';
 const RP_ID = 'burrow.example';
 const BURROW_LABEL = 'Ned’s laptop';
 const ACCOUNT = 'owner';
+/** A gap between keepalives inside the established-session idle reap. */
+const ESTABLISHED_IDLE_STEP_MS = 100_000;
 
 /** One passkey for this Burrow's RP, from the shared driver. */
 const newAuthenticator = (): Promise<TestAuthenticator> =>
@@ -199,7 +204,13 @@ describe('BurrowRuntime end-to-end ceremonies', () => {
   async function requestPairing(
     clientId: string,
     authenticator: TestAuthenticator,
-    options: { code?: string; label?: string; invitation?: PairingInvitation; clientStatic?: NoiseKeyPair } = {},
+    options: {
+      code?: string;
+      label?: string;
+      invitation?: PairingInvitation;
+      clientStatic?: NoiseKeyPair;
+      accountId?: string;
+    } = {},
   ) {
     const invitation = options.invitation ?? (await mintInvitation());
     const clientStatic = options.clientStatic ?? (await generateNoiseKeyPair());
@@ -212,7 +223,7 @@ describe('BurrowRuntime end-to-end ceremonies', () => {
       handshakeHash: toBase64Url(session.handshakeHash),
       passkeyCredentialId: authenticator.credentialId,
     };
-    const presence = await presenceProofFor(authenticator, binding);
+    const presence = await presenceProofFor(authenticator, binding, { accountId: options.accountId });
     const approvalsBefore = approvals.length;
     const framesBefore = e2eFrames('pairing', invitation.inviteId).length;
     sendE2e(
@@ -994,6 +1005,296 @@ describe('BurrowRuntime end-to-end ceremonies', () => {
     expect(socket.sent.length).toBe(framesBefore);
     expect(sessions[0]!.handled).toEqual([]);
     expect(sessions[0]!.disposed).toBe(false);
+  });
+
+  // --- Presence window -----------------------------------------------------
+
+  /** Redeem the window over an opened connection, whatever message 2 offered. */
+  async function redeemWindow(clientId: string, connectionId: string, session: NoiseTransportSession) {
+    sendE2e(
+      clientId,
+      'connection',
+      connectionId,
+      'transport',
+      toBase64Url(session.sendControl({ presence: PRESENCE_WINDOW })),
+    );
+    await settle();
+    return await outcome(session, 'connection', connectionId);
+  }
+
+  /**
+   * Open a connection and redeem the window over it, whatever was offered.
+   * `offer` is what message 2 said; `session` stays usable when it succeeded.
+   */
+  async function rideWindow(clientId: string, clientStatic: NoiseKeyPair) {
+    const connectionId = testRoutingId();
+    const { session, offer } = await openConnection(clientId, clientStatic, connectionId);
+    return { offer, outcome: await redeemWindow(clientId, connectionId, session), session, connectionId };
+  }
+
+  /** One keepalive on an established session: Client activity, as the Burrow counts it. */
+  async function keepalive(clientId: string, connectionId: string, session: NoiseTransportSession) {
+    sendE2e(clientId, 'connection', connectionId, 'transport', toBase64Url(session.sendKeepalive()));
+    await settle();
+  }
+
+  const success = { ok: true, burrowLabel: BURROW_LABEL };
+  const presenceRejected = { ok: false, code: 'presence-rejected' };
+
+  it('opens a window at pairing, so the first connect verifies no assertion', async () => {
+    makeBurrow();
+    const { clientStatic } = await pairedClient();
+    const verify = vi.spyOn(globalThis.crypto.subtle, 'verify');
+    try {
+      expect(await rideWindow('c1', clientStatic)).toMatchObject({ offer: PRESENCE_WINDOW, outcome: success });
+      expect(verify).not.toHaveBeenCalled();
+    } finally {
+      verify.mockRestore();
+    }
+    expect(sessions).toHaveLength(1);
+  });
+
+  it('offers no window it has verified no proof for, and a connection proof opens one', async () => {
+    makeBurrow();
+    const { authenticator, clientStatic } = await pairedClient();
+    const records = savedRecords;
+    // A restart: the ACL survives, the windows do not.
+    burrow.stop();
+    makeBurrow(() => records);
+    expect(await rideWindow('c1', clientStatic)).toMatchObject({ offer: 'none', outcome: presenceRejected });
+    expect(burrow.pendingChallengeCount).toBe(0);
+    expect(await attemptConnection('c1', clientStatic, authenticator)).toEqual(success);
+    expect(await rideWindow('c1', clientStatic)).toMatchObject({ offer: PRESENCE_WINDOW, outcome: success });
+  });
+
+  it('offers nothing to another Client static, and refuses its window request', async () => {
+    makeBurrow();
+    await pairedClient();
+    expect(await rideWindow('c2', await generateNoiseKeyPair())).toMatchObject({
+      offer: 'none',
+      outcome: presenceRejected,
+    });
+  });
+
+  it('closes a window left idle, consuming the challenge the refused ride named', async () => {
+    makeBurrow();
+    const { clientStatic } = await pairedClient();
+    clock += PRESENCE_WINDOW_IDLE_MS;
+    expect(await rideWindow('c1', clientStatic)).toMatchObject({ offer: 'none', outcome: presenceRejected });
+    expect(burrow.pendingChallengeCount).toBe(0);
+  });
+
+  it('refuses a window ride on an expired challenge, though the window is open', async () => {
+    makeBurrow();
+    const { clientStatic } = await pairedClient();
+    const connectionId = testRoutingId();
+    const { session, offer } = await openConnection('c1', clientStatic, connectionId);
+    expect(offer).toBe(PRESENCE_WINDOW);
+    clock += DEFAULT_CHALLENGE_TTL_MS + 1;
+    expect(await redeemWindow('c1', connectionId, session)).toEqual(presenceRejected);
+  });
+
+  it('honors the offer it made though the window closed before the redeem', async () => {
+    makeBurrow();
+    const { clientStatic } = await pairedClient();
+    clock += PRESENCE_WINDOW_IDLE_MS - 1;
+    const connectionId = testRoutingId();
+    const { session, offer } = await openConnection('c1', clientStatic, connectionId);
+    expect(offer).toBe(PRESENCE_WINDOW);
+    // Idle past the window now, but inside the challenge's TTL.
+    clock += 1;
+    expect(await redeemWindow('c1', connectionId, session)).toEqual(success);
+  });
+
+  it('runs the ACL conjunction against the identities the offered window was opened for', async () => {
+    makeBurrow();
+    const { authenticator, clientStatic } = await pairedClient();
+    const connectionId = testRoutingId();
+    const { session, offer } = await openConnection('c1', clientStatic, connectionId);
+    expect(offer).toBe(PRESENCE_WINDOW);
+    // Re-paired before the redeem, under another account: the record for this
+    // passkey and static no longer names the account the offer was made for.
+    const repair = await requestPairing('c2', authenticator, { clientStatic, accountId: 'someone-else' });
+    approvals[approvals.length - 1]!.approve(repair.code);
+    expect(await outcome(repair.session, 'pairing', repair.invitation.inviteId)).toMatchObject({ ok: true });
+    expect(await redeemWindow('c1', connectionId, session)).toEqual({ ok: false, code: 'pairing-required' });
+  });
+
+  it('counts a live session’s activity, and folds an ended one’s in', async () => {
+    makeBurrow();
+    const { clientStatic } = await pairedClient();
+    const ride = await rideWindow('c1', clientStatic);
+    // Keepalives inside the idle reap hold the window open past its own idle
+    // bound while the session lives.
+    for (let i = 0; i < 4; i++) {
+      clock += ESTABLISHED_IDLE_STEP_MS;
+      await keepalive('c1', ride.connectionId, ride.session);
+    }
+    expect((await openConnection('c2', clientStatic, testRoutingId())).offer).toBe(PRESENCE_WINDOW);
+    // Activity after that offer, then the session ends: its last keepalive is
+    // what keeps the window open after it.
+    clock += ESTABLISHED_IDLE_STEP_MS;
+    await keepalive('c1', ride.connectionId, ride.session);
+    const activeAt = clock;
+    socket.receive({ t: 'client-gone', clientId: 'c1' });
+    await settle();
+    expect(sessions[0]!.disposed).toBe(true);
+    clock = activeAt + PRESENCE_WINDOW_IDLE_MS - 1;
+    expect(await rideWindow('c3', clientStatic)).toMatchObject({ offer: PRESENCE_WINDOW, outcome: success });
+  });
+
+  it('closes a window at its cap however active, because a ride never refreshes the proof', async () => {
+    makeBurrow();
+    const { clientStatic } = await pairedClient();
+    const provedAt = clock;
+    const first = await rideWindow('c1', clientStatic);
+    // Nothing is reaped between frames here, so one keepalive stands in for
+    // twelve hours of them.
+    clock = provedAt + PRESENCE_WINDOW_MAX_MS - 1;
+    await keepalive('c1', first.connectionId, first.session);
+    const last = await rideWindow('c2', clientStatic);
+    expect(last).toMatchObject({ offer: PRESENCE_WINDOW, outcome: success });
+    clock += 1;
+    await keepalive('c2', last.connectionId, last.session);
+    expect(await rideWindow('c3', clientStatic)).toMatchObject({ offer: 'none', outcome: presenceRejected });
+  });
+
+  /** A passkey that asserts presence but not user verification. */
+  const newUnverifiedAuthenticator = (): Promise<TestAuthenticator> =>
+    createTestAuthenticator({ rpId: RP_ID, origin: ORIGIN, userVerified: false });
+
+  /** Pair under a Relay that does not yet demand user verification. */
+  async function pairedWithoutUv() {
+    const { clientStatic } = await pairedWithoutUvBy();
+    return clientStatic;
+  }
+
+  async function pairedWithoutUvBy() {
+    makeBurrow();
+    const authenticator = await newUnverifiedAuthenticator();
+    const { invitation, clientStatic, session, code } = await requestPairing('c1', authenticator);
+    approvals[0]!.approve(code);
+    expect(await outcome(session, 'pairing', invitation.inviteId)).toMatchObject({ ok: true });
+    return { authenticator, clientStatic };
+  }
+
+  /** Raise the UV demand from inside the Burrow's next signature check, i.e. mid-verification. */
+  function raiseDuringVerify() {
+    const verify = globalThis.crypto.subtle.verify.bind(globalThis.crypto.subtle);
+    let raised = false;
+    const spy = vi.spyOn(globalThis.crypto.subtle, 'verify').mockImplementation(((...args: Parameters<typeof verify>) => {
+      if (!raised) {
+        raised = true;
+        socket.receive({ t: 'policy', requireUserVerification: true });
+      }
+      return verify(...args);
+    }) as typeof verify);
+    return { raised: () => raised, restore: () => spy.mockRestore() };
+  }
+
+  it('rejects a connection proof verified under the demand a raise replaced mid-verification', async () => {
+    const { authenticator, clientStatic } = await pairedWithoutUvBy();
+    const raise = raiseDuringVerify();
+    try {
+      expect(await attemptConnection('c1', clientStatic, authenticator)).toEqual(presenceRejected);
+      expect(raise.raised()).toBe(true);
+    } finally {
+      raise.restore();
+    }
+    // Nor did it open a window to ride.
+    expect(await rideWindow('c1', clientStatic)).toMatchObject({ offer: 'none', outcome: presenceRejected });
+  });
+
+  it('rejects a pairing proof verified under the demand a raise replaced mid-verification', async () => {
+    makeBurrow();
+    const raise = raiseDuringVerify();
+    let pairing;
+    try {
+      pairing = await requestPairing('c1', await newUnverifiedAuthenticator());
+      expect(raise.raised()).toBe(true);
+    } finally {
+      raise.restore();
+    }
+    expect(approvals).toHaveLength(0);
+    expect(await outcome(pairing.session, 'pairing', pairing.invitation.inviteId)).toEqual(presenceRejected);
+  });
+
+  it('rejects a pairing whose proof a raise outdated while it awaited local approval', async () => {
+    makeBurrow();
+    const { invitation, clientStatic, session, code } = await requestPairing('c1', await newUnverifiedAuthenticator());
+    expect(approvals).toHaveLength(1);
+    socket.receive({ t: 'policy', requireUserVerification: true });
+    await approvals[0]!.approve(code);
+    expect(await outcome(session, 'pairing', invitation.inviteId)).toEqual(presenceRejected);
+    expect(burrow.activeRecords).toHaveLength(0);
+    expect(savedRecords).toHaveLength(0);
+    expect((await openConnection('c1', clientStatic, testRoutingId())).offer).toBe('none');
+  });
+
+  it('commits a pairing a raise found mid-write, but opens no window on its outdated proof', async () => {
+    const write = Promise.withResolvers<void>();
+    makeBurrow(undefined, { saveAcl: () => write.promise });
+    const { invitation, clientStatic, session, code } = await requestPairing('c1', await newUnverifiedAuthenticator());
+    const completed = approvals[0]!.approve(code);
+    await settle();
+    socket.receive({ t: 'policy', requireUserVerification: true });
+    write.resolve();
+    await completed;
+    // Local consent was final once the write started.
+    expect(await outcome(session, 'pairing', invitation.inviteId)).toMatchObject({ ok: true });
+    expect(burrow.activeRecords).toHaveLength(1);
+    expect(await rideWindow('c2', clientStatic)).toMatchObject({ offer: 'none', outcome: presenceRejected });
+  });
+
+  it('clears every window when the Relay raises the UV demand', async () => {
+    const clientStatic = await pairedWithoutUv();
+    socket.receive({ t: 'policy', requireUserVerification: true });
+    expect(await rideWindow('c1', clientStatic)).toMatchObject({ offer: 'none', outcome: presenceRejected });
+  });
+
+  it('voids an offer already made when the Relay raises the UV demand before its redeem', async () => {
+    const clientStatic = await pairedWithoutUv();
+    const connectionId = testRoutingId();
+    const { session, offer } = await openConnection('c1', clientStatic, connectionId);
+    expect(offer).toBe(PRESENCE_WINDOW);
+    socket.receive({ t: 'policy', requireUserVerification: true });
+    expect(await redeemWindow('c1', connectionId, session)).toEqual(presenceRejected);
+  });
+
+  it('voids an offer whose message 2 was still being written when the UV demand rose', async () => {
+    const clientStatic = await pairedWithoutUv();
+    // The Client's ephemeral, then the Burrow's — generated while it writes
+    // message 2, after the offer was decided and before it is stored.
+    const generateKey = globalThis.crypto.subtle.generateKey.bind(globalThis.crypto.subtle);
+    let generated = 0;
+    const raiseMidHandshake = ((...args: Parameters<typeof generateKey>) => {
+      if (++generated === 2) socket.receive({ t: 'policy', requireUserVerification: true });
+      return generateKey(...args);
+    }) as typeof generateKey;
+    const raise = vi.spyOn(globalThis.crypto.subtle, 'generateKey').mockImplementation(raiseMidHandshake);
+    const connectionId = testRoutingId();
+    try {
+      const { session, offer } = await openConnection('c1', clientStatic, connectionId);
+      expect(generated).toBe(2);
+      expect(offer).toBe(PRESENCE_WINDOW);
+      expect(await redeemWindow('c1', connectionId, session)).toEqual(presenceRejected);
+    } finally {
+      raise.mockRestore();
+    }
+  });
+
+  it('keeps its windows across a dropped relay socket, and clears them on stop()', async () => {
+    makeBurrow();
+    const { clientStatic } = await pairedClient();
+    socket.drop();
+    await settle();
+    burrow.start();
+    socket.open();
+    expect(await rideWindow('c1', clientStatic)).toMatchObject({ offer: PRESENCE_WINDOW, outcome: success });
+    burrow.stop();
+    burrow.start();
+    socket.open();
+    expect(await rideWindow('c1', clientStatic)).toMatchObject({ offer: 'none', outcome: presenceRejected });
   });
 
   // --- Lifecycle -----------------------------------------------------------
