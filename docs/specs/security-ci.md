@@ -99,7 +99,7 @@ Hosted credentials live only in the three Hosted environments the secret invento
 - **FAIL IF** a Hosted environment lacks those branch restrictions, or `hosted-preview` or `hosted-production` lacks required reviewers or disabled administrator bypass; inspect all three environments and their deployment policies.
 - **FAIL IF** Hosted credentials appear at repository/org scope, or production credentials appear in `hosted-preview`; inspect GitHub secret placement.
 - **FAIL IF** `hosted-release-tag` is used by a job other than `tag` in `.github/workflows/hosted-production.yml`, a workflow reads `HOSTED_TAG_TOKEN`, or `tag` hands `hosted/scripts/production-tag.mjs` any credential but the token its `actions/create-github-app-token` step mints with `owner: diffplug`, `repositories: dormouse`, and only `permission-contents: write` (rationale).
-- **FAIL IF** `hosted-release-tag`'s `HOSTED_TAG_APP_CLIENT_ID` variable is not `Iv23liADZP0hPRZCYRz8`, the client ID of App `5228264`, or a `hosted/` tag dated after the App's creation (2026-10-07T19:37Z) has a tagger other than `dormouse-hosted-tagger[bot]`. The App's own permissions are unreadable with `AUDIT_PAT`; `## Future` → Tagger permissions stages their check (rationale).
+- **FAIL IF** `gh api apps/dormouse-hosted-tagger` shows permissions other than `contents: write` and `metadata: read`, or any event.
 - **FAIL IF** the App (`Integration` actor `5228264`) bypasses any ruleset but `Hosted tag creation`, which must target only `refs/tags/hosted/**`, block only `creation`, and be bypassed otherwise only by admin; or `Hosted tag history` stops blocking `update` and `deletion` on `refs/tags/hosted/**` with an admin-only bypass. A leaked key adds `hosted/` tags, never moves or deletes one.
 - **FAIL IF** a Hosted preview deploy accepts a fork or a failing verification, preview cleanup checks out a PR ref rather than `main`, or a Hosted production tag can run before live verification succeeds; inspect the workflow dependency/condition graph.
 
@@ -134,12 +134,6 @@ Its remedy is staged under `## Future` → Notarization credentials.
 
 **Scope: notarization-profile** — [Notarization credentials](#notarization-credentials).
 
-**Scope: tagger-permissions** — [Tagger permissions](#tagger-permissions).
-
 ### Notarization credentials
 
 Use `notarytool store-credentials` plus `--keychain-profile` to move password exposure to one short provisioning call instead of every submission. Update the release runbook and verify with live Apple credentials before promotion.
-
-### Tagger permissions
-
-Give the audit a read of `orgs/diffplug/installations` — organization `Administration: read`, on `AUDIT_PAT` or a second read-only token — then fail if the `dormouse-hosted-tagger` installation holds permissions other than `contents: write` and `metadata: read`, subscribes to any event, or selects a repository other than `diffplug/dormouse`.
