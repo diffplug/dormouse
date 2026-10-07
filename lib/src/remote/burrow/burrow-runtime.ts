@@ -17,6 +17,7 @@ import {
   MAX_TOKENS_PER_BURROW,
   NoiseError,
   NoiseTransportSession,
+  PRESENCE_WINDOW,
   TokenBucket,
   WS_CLOSE_BURROW_NOT_ENTITLED,
   WS_CLOSE_BURROW_REPLACED,
@@ -1492,7 +1493,11 @@ export class BurrowRuntime {
       this.#denyConnection(frame.clientId, pending, 'protocol-rejected');
       return;
     }
-    const request = receipt.value;
+    const presence = receipt.value.presence;
+    if (presence === PRESENCE_WINDOW) {
+      this.#denyConnection(frame.clientId, pending, 'protocol-rejected');
+      return;
+    }
     // Consumed before any other work, so a challenge can never be presented
     // twice whatever the rest of this decision does.
     const challengeValid = this.#challenges.consume(pending.burrowChallenge);
@@ -1502,9 +1507,9 @@ export class BurrowRuntime {
       connectionId: pending.connectionId,
       burrowChallenge: pending.burrowChallenge,
       handshakeHash: pending.handshakeHash,
-      passkeyCredentialId: request.presence.binding.passkeyCredentialId,
+      passkeyCredentialId: presence.binding.passkeyCredentialId,
     };
-    const proof = await verifyPresenceProof(request.presence, binding, this.#policy);
+    const proof = await verifyPresenceProof(presence, binding, this.#policy);
     if (this.#clients.get(frame.clientId)?.connection !== pending) return;
     if (!challengeValid || !proof.ok) {
       const why = challengeValid && !proof.ok ? proof.reason : 'challenge-invalid';
@@ -1515,7 +1520,7 @@ export class BurrowRuntime {
     const authorized = this.#aclRecord(
       binding.passkeyCredentialId,
       pending.clientStaticPublicKey,
-      request.presence.accountId,
+      presence.accountId,
       proof.passkeyPublicKeyHash,
     );
     if (typeof authorized === 'string') {
