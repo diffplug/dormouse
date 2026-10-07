@@ -8,6 +8,7 @@ import { WorkspaceStrip } from './WorkspaceStrip';
 import { chromeKeyboardHeld, resetChromeKeyboardLeases } from './wall/chrome-keyboard-lease';
 import { registerWallHandle, resetWallHandles, stubWallHandle, type WallHandle } from './wall/wall-handles';
 import { ensureResizeObserver } from './wall/wall-test-utils';
+import { installFakeFrames } from './motion-test-utils';
 import { requestWorkspaceClose, requestWorkspaceRename, workspaceCloseConfirmation } from './wall/workspace-lifecycle';
 import { resetWorkspaceSurfaces, setWorkspaceSurfaces } from '../lib/workspace-surfaces';
 import { clearTerminalActivity, setTerminalActivity } from '../lib/terminal-registry';
@@ -730,7 +731,7 @@ describe('tab tweens', () => {
   let tweens: Map<string, string[]>;
   /** A width tween holds its item at its first width until `settle`. */
   let held: Map<Element, number>;
-  let frames: FrameRequestCallback[];
+  const frames = installFakeFrames();
   let measure: ReturnType<typeof vi.spyOn<HTMLElement, 'getBoundingClientRect'>>;
 
   const key = (element: HTMLElement) => element.dataset.workspaceTab ?? '+';
@@ -740,15 +741,15 @@ describe('tab tweens', () => {
   beforeEach(() => {
     tweens = new Map();
     held = new Map();
-    frames = [];
-    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => frames.push(callback));
-    vi.stubGlobal('cancelAnimationFrame', () => {});
     Object.defineProperty(HTMLElement.prototype, 'animate', {
       configurable: true,
       value(this: HTMLElement, keyframes: Keyframe[]) {
         const [from, to] = keyframes;
-        const tween = from.width ? `width ${from.width}→${to.width}` : String(from.transform);
-        if (from.width) held.set(this, parseFloat(String(from.width)));
+        let tween = String(from.transform);
+        if (from.width) {
+          tween = `width ${from.width}→${to.width}`;
+          held.set(this, parseFloat(String(from.width)));
+        }
         tweens.set(key(this), [...tweens.get(key(this)) ?? [], tween]);
         return { cancel: () => { held.delete(this); } };
       },
@@ -757,15 +758,15 @@ describe('tab tweens', () => {
     // padding, 10px a character of its name, and 20px for its `×`; the rename
     // editor's tab is the wider of its draft and the tab it kept as slack.
     const label = (name: string, close: boolean) => 20 + 10 * name.length + (close ? 20 : 0);
-    const natural = (item: Element) => {
-      if (!(item instanceof HTMLElement) || item.dataset.workspaceTab === undefined) return 20;
+    const natural = (item: HTMLElement) => {
+      if (item.dataset.workspaceTab === undefined) return 20;
       const slack = item.querySelector('[data-workspace-rename-slack]');
       if (slack) return Math.max(label(item.querySelector('input')!.value, false), label(slack.textContent!, !!slack.querySelector('svg')));
       return label(item.querySelector('span')!.textContent!, !!item.querySelector('[data-workspace-tab-close]'));
     };
-    const width = (item: Element) => held.get(item) ?? natural(item);
+    const width = (item: HTMLElement) => held.get(item) ?? natural(item);
     measure = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
-      const items = [...container.querySelectorAll('[data-workspace-tab], [data-workspace-new]')];
+      const items = [...container.querySelectorAll<HTMLElement>('[data-workspace-tab], [data-workspace-new]')];
       const left = items.slice(0, Math.max(0, items.indexOf(this))).reduce((sum, item) => sum + width(item), 0);
       const right = left + width(this);
       return { left, right, width: right - left, top: 0, bottom: 24, height: 24, x: left, y: 0, toJSON: () => ({}) } as DOMRect;
@@ -774,7 +775,6 @@ describe('tab tweens', () => {
 
   afterEach(() => {
     delete (HTMLElement.prototype as Partial<HTMLElement>).animate;
-    vi.unstubAllGlobals();
   });
 
   /** Renders the default Workspace, active and named `w1`, then `ids` named
@@ -825,7 +825,7 @@ describe('tab tweens', () => {
         typeInto(input, value);
       });
       // The editor's re-render does not reach the strip: a frame plays it.
-      await act(async () => { for (const frame of frames.splice(0)) frame(0); });
+      await act(async () => { frames.advance(0); });
     };
     await type('w1xx');
     expect(input.style.width).toBe('calc(4ch + 2px)');
@@ -840,7 +840,7 @@ describe('tab tweens', () => {
     await act(async () => { setWorkspaceAlertDelivery(first, { pushEnabled: false }); });
     expect(measure).not.toHaveBeenCalled();
 
-    vi.stubGlobal('matchMedia', (query: string) => ({ matches: query === '(prefers-reduced-motion: reduce)' }));
+    frames.reduceMotion();
     await act(async () => { moveWorkspace(first, 1); });
     expect(tweens.size).toBe(0);
   });

@@ -401,7 +401,7 @@ const WorkspaceTab = memo(function WorkspaceTab({
         active ? 'bg-header-active-bg text-header-active-fg' : 'bg-header-inactive-bg text-header-inactive-fg',
         dragging && 'opacity-60',
       )}
-      style={active ? { minWidth } : { ...TAB_INACTIVE_FADE_STYLE, minWidth }}
+      style={{ ...(!active && TAB_INACTIVE_FADE_STYLE), minWidth }}
       onPointerDown={(event) => {
         // The close button has its own click, and a press inside the open rename
         // editor is a text selection — neither may start a reorder drag.

@@ -9,12 +9,9 @@ const TWEEN_DURATION_MS = 180;
 const TWEEN_EASING = 'cubic-bezier(0.22, 1, 0.36, 1)';
 
 /** The strip's tweened items — every tab, keyed by its Workspace id, and `+`. */
-function tweenItems(strip: HTMLElement): Map<string, HTMLElement> {
-  const items = new Map<string, HTMLElement>();
-  for (const element of strip.querySelectorAll<HTMLElement>('[data-workspace-tab], [data-workspace-new]')) {
-    items.set(element.dataset.workspaceTab ?? '+', element);
-  }
-  return items;
+function tweenItems(strip: HTMLElement): [string, HTMLElement][] {
+  return [...strip.querySelectorAll<HTMLElement>('[data-workspace-tab], [data-workspace-new]')]
+    .map((element) => [element.dataset.workspaceTab ?? '+', element]);
 }
 
 /** Whether two states draw the same strip: the same tabs in the same groups and
@@ -48,21 +45,25 @@ function createStripTween(strip: () => HTMLElement | null) {
     const root = strip();
     // jsdom has no Web Animations.
     if (!before || !root || motionIsInstant() || typeof HTMLElement.prototype.animate !== 'function') return;
-    const items = [...tweenItems(root)].filter(([key]) => before.has(key)).map(([key, element]) => ({ element, from: before.get(key)! }));
-    // Each pass over every item, so the strip lays out twice rather than per tab.
+    const items = tweenItems(root).filter(([key]) => before.has(key)).map(([key, element]) => ({ element, from: before.get(key)! }));
+    // Each pass over every item, so the strip lays out at most twice rather
+    // than per tab.
     for (const { element } of items) {
       for (const animation of tweens.get(element) ?? []) animation.cancel();
       tweens.delete(element);
     }
-    const widths = items.map(({ element }) => element.getBoundingClientRect().width);
+    const lasts = items.map(({ element }) => element.getBoundingClientRect());
+    let resized = false;
     items.forEach(({ element, from }, index) => {
-      if (Math.abs(from.width - widths[index]) < 0.5) return;
+      const to = lasts[index].width;
+      if (Math.abs(from.width - to) < 0.5) return;
+      resized = true;
       // The floor would clamp a tween from below it; it returns at the end.
-      animate(element, [{ width: `${from.width}px`, minWidth: '0px' }, { width: `${widths[index]}px`, minWidth: '0px' }]);
+      animate(element, [{ width: `${from.width}px`, minWidth: '0px' }, { width: `${to}px`, minWidth: '0px' }]);
     });
     // Measured with the widths at their first frame: the transform makes up
     // only the jump the widths' own tween does not carry.
-    const starts = items.map(({ element }) => element.getBoundingClientRect());
+    const starts = resized ? items.map(({ element }) => element.getBoundingClientRect()) : lasts;
     items.forEach(({ element, from }, index) => {
       const dx = from.left - starts[index].left;
       const dy = from.top - starts[index].top;
@@ -74,7 +75,7 @@ function createStripTween(strip: () => HTMLElement | null) {
   function capture(): void {
     const root = strip();
     if (!root || first) return;
-    first = new Map([...tweenItems(root)].map(([key, element]) => [key, element.getBoundingClientRect()]));
+    first = new Map(tweenItems(root).map(([key, element]) => [key, element.getBoundingClientRect()]));
     frame = requestAnimationFrame(play);
   }
 
@@ -89,7 +90,8 @@ function createStripTween(strip: () => HTMLElement | null) {
  * that pinning remounts into the other group still slides from where it was.
  *
  * Widths tween as layout, so the tabs after a growing one are pushed along with
- * it; a reorder's jump in position is a transform on top.
+ * it; a reorder's jump in position is a transform on top. A TODO pill coming or
+ * going snaps: its trigger is the Activity store, too busy to measure on.
  */
 export function useWorkspaceTabTween(stripRef: RefObject<HTMLElement | null>): void {
   const [tween] = useState(() => createStripTween(() => stripRef.current));
