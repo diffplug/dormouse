@@ -1,0 +1,90 @@
+{
+  "$comment": "The GitHub state the security specs require, read by scripts/github-state-check.mjs. Each value is derived from the FAIL IF it cites; the script owns which differences fail. Change a value here only in the same PR as the spec text that justifies it.",
+  "repository": "diffplug/dormouse",
+  "adminGatedRefs": [
+    { "type": "branch", "name": "main", "gatedBy": "Merge access" },
+    { "type": "tag", "name": "v*", "gatedBy": "Tag operations" }
+  ],
+  "rulesets": {
+    "Merge access": {
+      "target": "branch",
+      "include": ["~DEFAULT_BRANCH"],
+      "exclude": [],
+      "rules": ["creation", "deletion", "update"],
+      "bypass": [{ "actor_type": "RepositoryRole", "actor_id": 5, "bypass_mode": "exempt" }]
+    },
+    "Tag operations": {
+      "target": "tag",
+      "include": ["~ALL"],
+      "exclude": ["refs/tags/hosted/**"],
+      "rules": ["creation", "update"],
+      "bypass": [{ "actor_type": "RepositoryRole", "actor_id": 5, "bypass_mode": "exempt" }]
+    },
+    "Hosted tag creation": {
+      "target": "tag",
+      "include": ["refs/tags/hosted/**"],
+      "exclude": [],
+      "rules": ["creation"],
+      "bypass": [
+        { "actor_type": "Integration", "actor_id": 5228264, "bypass_mode": "always" },
+        { "actor_type": "RepositoryRole", "actor_id": 5, "bypass_mode": "exempt" }
+      ]
+    },
+    "Hosted tag history": {
+      "target": "tag",
+      "include": ["refs/tags/hosted/**"],
+      "exclude": [],
+      "rules": ["deletion", "update"],
+      "bypass": [{ "actor_type": "RepositoryRole", "actor_id": 5, "bypass_mode": "exempt" }]
+    }
+  },
+  "botCollaborator": { "login": "dormouse-bot", "forbiddenRoles": ["admin", "maintain"] },
+  "environments": {
+    "hosted-preview": {
+      "policies": [{ "type": "branch", "name": "main" }, { "type": "branch", "name": "refs/pull/*/merge" }],
+      "requiredReviewers": true,
+      "canAdminsBypass": false,
+      "secrets": ["CLOUDFLARE_API_TOKEN", "NEON_API_KEY", "PREVIEW_AUTH_SECRET"]
+    },
+    "hosted-production": {
+      "policies": [{ "type": "branch", "name": "main" }],
+      "requiredReviewers": true,
+      "canAdminsBypass": false,
+      "secrets": ["BACKUP_AGE_IDENTITY", "CLOUDFLARE_API_TOKEN", "DATABASE_URL"]
+    },
+    "hosted-release-tag": {
+      "policies": [{ "type": "branch", "name": "main" }],
+      "secrets": ["HOSTED_TAG_APP_PRIVATE_KEY"]
+    },
+    "release-attest": {
+      "policies": [{ "type": "tag", "name": "v*" }],
+      "secrets": [],
+      "variables": []
+    },
+    "security-audit": {
+      "policies": [{ "type": "branch", "name": "main" }, { "type": "tag", "name": "v*" }],
+      "secrets": ["AUDIT_PAT", "CLAUDE_CODE_OAUTH_TOKEN", "EMBARGO_TOKEN"]
+    },
+    "tend": {
+      "policies": [{ "type": "branch", "name": "main" }],
+      "secrets": ["CLAUDE_CODE_OAUTH_TOKEN", "TEND_BOT_TOKEN"]
+    },
+    "vscode-extension-publish": {
+      "policies": [{ "type": "tag", "name": "v*" }],
+      "requiredReviewers": true,
+      "preventSelfReview": true,
+      "canAdminsBypass": false,
+      "secrets": ["OVSX_PAT", "VSCE_PAT"]
+    }
+  },
+  "hostedEnvironments": ["hosted-preview", "hosted-production", "hosted-release-tag"],
+  "productionOnlySecrets": ["BACKUP_AGE_IDENTITY", "DATABASE_URL"],
+  "repoSecrets": ["ARGOS_TOKEN", "CHROMATIC_PROJECT_TOKEN"],
+  "repoSecretsMayBeAbsent": ["CHROMATIC_PROJECT_TOKEN"],
+  "orgSecrets": [],
+  "workflowPermissions": { "default_workflow_permissions": "read", "can_approve_pull_request_reviews": false },
+  "app": { "slug": "dormouse-hosted-tagger", "id": 5228264, "permissions": { "contents": "write", "metadata": "read" }, "events": [] },
+  "liveness": { "workflow": "workflow-audit.yaml", "event": "schedule", "branch": "main", "hours": 48, "infoAfterHours": 27 },
+  "activeWorkflows": ["security-audit.yaml", "workflow-audit.yaml"],
+  "embargoRepository": "diffplug/dormouse-embargo"
+}

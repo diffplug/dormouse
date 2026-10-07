@@ -14,6 +14,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -114,6 +116,8 @@ jobs:
           # what the installer writes. No build step is needed for it: the
           # `Test` step above builds remote-lib-common, as does the
           # `pnpm --filter relay build` inside every install below.
+          # The single-quoted script is JavaScript, so its `${…}` is not shell's.
+          # shellcheck disable=SC2016
           read_offer() {
             node --input-type=module -e '
               import { readFileSync, statSync } from "node:fs";
@@ -151,6 +155,51 @@ jobs:
           [ -L "$root/previous" ] || { echo "::error::no previous release retained after an update"; exit 1; }
           bash -n "$root/bin/manage"
           bash -n "$root/bin/run-relay"
+  # The workflows themselves: actionlint for syntax, expressions, and the
+  # shell in every `run:` block; zizmor for GitHub Actions security
+  # (`.github/zizmor.yml` names each accepted exception). The repository's own
+  # workflow rules — docs/specs/security-ci.md's `FAIL IF` lines — are
+  # `scripts/workflow-lint.mjs`, which runs in `pnpm test` above. Both tools
+  # sit outside the lockfile, so each is pinned exactly and verified by hash
+  # (docs/specs/security-supply-chain.md -> "Cooldown and alerts").
+  workflow-lint:
+    name: Workflow Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install actionlint
+        env:
+          ACTIONLINT_VERSION: 1.7.12
+          ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+        run: |
+          set -euo pipefail
+          tarball="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          curl -fsSL -o "$RUNNER_TEMP/$tarball" "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/$tarball"
+          echo "$ACTIONLINT_SHA256  $RUNNER_TEMP/$tarball" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/actionlint"
+          tar -xzf "$RUNNER_TEMP/$tarball" -C "$RUNNER_TEMP/actionlint" actionlint
+
+      # Uses the runner's preinstalled shellcheck for `run:` blocks.
+      - name: actionlint
+        run: '"$RUNNER_TEMP/actionlint/actionlint" -color'
+
+      - name: Install zizmor
+        run: |
+          set -euo pipefail
+          python3 -m venv "$RUNNER_TEMP/zizmor"
+          "$RUNNER_TEMP/zizmor/bin/pip" install --require-hashes --only-binary :all: --no-deps -r .github/zizmor-requirements.txt
+
+      # Online, so impostor commits and known-vulnerable pins are checked too;
+      # the token reads public repositories only.
+      - name: zizmor
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: '"$RUNNER_TEMP/zizmor/bin/zizmor" --format github .github/workflows'
+
   webview-smoketest:
     name: Webview Boot Smoketest
     runs-on: ubuntu-latest
@@ -162,6 +211,8 @@ jobs:
     # (docs/specs/vscode.rationale.md -> "CSP policy").
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -194,6 +245,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       # `cargo check` runs standalone/src-tauri/build.rs, which fails the build
       # unless the Node.js on PATH exactly matches package.json's
@@ -287,6 +340,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       # Same pin-driven setup as the smoketest above: build.rs fails unless the
       # Node.js on PATH matches package.json's devEngines.runtime.version.

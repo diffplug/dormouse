@@ -4,6 +4,16 @@
 
 The three release-gate pieces are named separately because they break independently: dropping `--exit-status` alone un-gates the release while leaving a green grep for "invoked".
 
+## Deterministic checks
+
+**Why GitHub state left the model (review of 160 runs, 2026-10).** About 60% of the roughly 223 `FAIL IF` bullets then in the corpus asked mechanical questions — GitHub API state, workflow-file properties, configuration values — and a model re-read them nightly. They flip-flopped on unchanged state: the `tend-mention` permission check read PASS on 2026-08-21 and FAIL on 2026-08-22 with nothing changed. On 2026-09-15 `ci-and-secrets` enumerated four of the seven environments, passed, and the PASS closed an open failure issue. A script that enumerates from the API and fails a planted violation of every clause it judges cannot do either. The model keeps the judgement bullets, where a reading of code or of a spec is the check.
+
+**Why the expected values live in a file.** The script needs the spec's values as data; `.github/audit/` sits in `.github/workflows/workflow-audit.yaml`'s window, so an edit to them is surfaced like an edit to a prompt, and `ci-and-secrets` reads the file against its spec on every full run.
+
+## Skipping an unchanged audit
+
+**Why a skip is safe.** A model pass over the same commit and the same GitHub state reads the same inputs; repeating it nightly bought variance, not coverage, at about $28 a run (2026-10). The deterministic checks still run every night, so live drift in a setting is caught whether or not the domains run. **Why seven days.** The domains also read what neither input records — a mutable upstream tag's content, npm attestations, models improving — so a skip never outlives a week. The tend tag's commit is hashed, so moving it forces a full run. **Why a dispatch never skips.** The release gate dispatches one and must audit the tag it ships, and a maintainer dispatching by hand wants a full run.
+
 ## Domains
 
 One context holding every subject matter degrades application security — the domain with the most code behind it, and the easiest to crowd out with API responses.

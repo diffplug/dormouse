@@ -11,8 +11,14 @@
 # repo or the ci-and-secrets domain will report FAILs that are really 403s.
 #
 # Usage:
-#   scripts/security-audit-local.sh            # all four domains
+#   scripts/security-audit-local.sh            # the deterministic checks, then all four domains
 #   scripts/security-audit-local.sh application-security   # one domain
+#   scripts/security-audit-local.sh github-state            # the deterministic checks alone
+#
+# The deterministic GitHub-state check (`scripts/github-state-check.mjs`) runs
+# first whenever a domain that reads its fragment does — `ci-and-secrets` and
+# `supply-chain` — on the same `gh` login, with `--local` so a 403 reads as
+# unverifiable rather than as drift in the CI PAT's scope.
 #
 # Reports land in ./audit-*.md, which .gitignore covers.
 
@@ -107,15 +113,37 @@ run_domain() {
   fi
 }
 
+# The deterministic checks, writing the fragment CI's reporting step reads
+# beside the domains'. Same verdict grammar as `run_domain` below.
+run_github_state() {
+  echo "==> github-state -> audit-github-state.md (deterministic)"
+  rm -f audit-github-state.md
+  if ! node scripts/github-state-check.mjs --local --out audit-github-state.md >/dev/null; then
+    echo "==> the GitHub-state check failed to run" >&2
+    return 1
+  fi
+  case "$(head -n1 audit-github-state.md)" in
+    'VERDICT: PASS') return 0 ;;
+    'VERDICT: FAIL'*) echo "==> github-state reports FAIL" >&2; return 1 ;;
+    *) echo "==> github-state could not determine every check" >&2; return 1 ;;
+  esac
+}
+
 if [ $# -gt 0 ]; then
-  run_domain "$1"
-  exit $?
+  status=0
+  case "$1" in
+    github-state) run_github_state; exit $? ;;
+    ci-and-secrets|supply-chain) run_github_state || status=1 ;;
+  esac
+  run_domain "$1" || status=$?
+  exit "$status"
 fi
 
 # All four, sequentially rather than fanned out. CI parallelises because it is
 # paying wall-clock for a nightly; locally, serial output is readable and a
 # each domain's failure is recorded while the remaining domains still run.
 status=0
+run_github_state || status=1
 for domain in supply-chain ci-and-secrets application-security hosted; do
   run_domain "$domain" || status=1
 done
