@@ -1169,7 +1169,7 @@
       "author": "Petyo Ivanov",
       "homepage": "https://mdxeditor.dev/",
       "versions": [
-        "4.3.1"
+        "4.3.2"
       ]
     },
     {
@@ -3564,7 +3564,7 @@
       "author": "Yusuke Wada <yusuke@kamawada.com> (https://github.com/yusukebe)",
       "homepage": "https://github.com/honojs/node-server",
       "versions": [
-        "2.1.1"
+        "2.1.3"
       ]
     },
     {
@@ -3627,7 +3627,7 @@
       "author": "Yusuke Wada <yusuke@kamawada.com> (https://github.com/yusukebe)",
       "homepage": "https://hono.dev",
       "versions": [
-        "4.13.9"
+        "4.13.13"
       ]
     },
     {
