@@ -56,6 +56,10 @@ The October 2026 audit read tend 0.3.5's `claude/action.yaml`, `restore-sensitiv
 
 **Why "effective, not declared" is the whole point.** A job that declares nothing textually "grants" nothing while its token carries nine write scopes. And with `default_workflow_permissions` at `write`, one regenerated workflow that omits a `permissions:` block silently reopens what every permission bullet closes — the repository setting is the only durable fix, since a YAML edit does not survive the nightly regen.
 
+## Hosted Deployments
+
+**Why a GitHub App, not a PAT (2026-10).** The tag job first held an admin's fine-grained Contents-write PAT: as the admin it could write `main`, bypassed every tag rule, and expired on a date someone had to remember. The App's key mints an hour-long token, revoked when the job ends, for this repository alone. Contents write still reaches feature branches, as `TEND_BOT_TOKEN` already does, but the rulesets let the App past only `hosted/` tag creation: `main` and `v*` tags stay admin-only. A tagger of `dormouse-hosted-tagger[bot]` on a `hosted/` tag is the evidence that the App path works and the PAT can go.
+
 ## VS Code Extension Releases
 
 **Why the second clause is repo-wide.** Scoping it to `release.yml` would let a `VSCE_PAT` or `OVSX_PAT` reference from another workflow file pass unremarked.
