@@ -1739,16 +1739,22 @@ test('getListeningPortsForPids (darwin) keeps the live pids when lsof exits non-
   assert.deepEqual(ports.map((p) => [p.pid, p.port]), [[4242, 3000]]);
 });
 
+// Windows helpers run by their absolute System32 path, never a bare name that
+// Windows would look up in the working directory first.
+const WINDOWS_ENV = { SystemRoot: 'D:\\Win' };
+const POWERSHELL = 'D:\\Win\\System32\\WindowsPowerShell\\v1.0\\powershell.exe';
+const NETSTAT = 'D:\\Win\\System32\\netstat.exe';
+
 test('getListeningPortsForPids (win32) prefers Get-NetTCPConnection', async () => {
   const execFile = (cmd, args) => {
-    assert.equal(cmd, 'powershell.exe');
+    assert.equal(cmd, POWERSHELL);
     const script = args[args.length - 1];
     if (script.includes('Get-NetTCPConnection')) {
       return JSON.stringify([{ LocalAddress: '0.0.0.0', LocalPort: 3000, OwningProcess: 4242 }]);
     }
     throw new Error(`unexpected script: ${script}`);
   };
-  const ports = await getListeningPortsForPids([4242], { platform: 'win32', execFile }, new Map([[4242, 'node.exe']]));
+  const ports = await getListeningPortsForPids([4242], { platform: 'win32', env: WINDOWS_ENV, execFile }, new Map([[4242, 'node.exe']]));
   assert.deepEqual(ports, [
     { protocol: 'tcp', family: 'IPv4', address: '0.0.0.0', port: 3000, pid: 4242, processName: 'node.exe' },
   ]);
@@ -1756,15 +1762,15 @@ test('getListeningPortsForPids (win32) prefers Get-NetTCPConnection', async () =
 
 test('getListeningPortsForPids (win32) falls back to netstat when the cmdlet fails', async () => {
   const execFile = (cmd, args) => {
-    if (cmd === 'powershell.exe') {
+    if (cmd === POWERSHELL) {
       throw new Error('Get-NetTCPConnection: not recognized');
     }
-    if (cmd === 'netstat') {
+    if (cmd === NETSTAT) {
       return '  TCP    0.0.0.0:3000   0.0.0.0:0   LISTENING   4242\n';
     }
     throw new Error('unexpected');
   };
-  const ports = await getListeningPortsForPids([4242], { platform: 'win32', execFile });
+  const ports = await getListeningPortsForPids([4242], { platform: 'win32', env: WINDOWS_ENV, execFile });
   assert.deepEqual(ports, [
     { protocol: 'tcp', family: 'IPv4', address: '0.0.0.0', port: 3000, pid: 4242, processName: undefined },
   ]);
@@ -1786,11 +1792,11 @@ test('Windows port subprocesses share the socket budget, including netstat fallb
       now += 1000;
       throw new Error('cmdlet failed');
     }
-    assert.equal(cmd, 'netstat');
+    assert.equal(cmd, NETSTAT);
     now += 500;
     return '  TCP    0.0.0.0:3000   0.0.0.0:0   LISTENING   4242\n';
   };
-  const result = await getOpenPortsForPids([4242], { platform: 'win32', execFile, now: () => now });
+  const result = await getOpenPortsForPids([4242], { platform: 'win32', env: WINDOWS_ENV, execFile, now: () => now });
   const budget = openPortScanTimeoutMs(1);
   assert.deepEqual(timeouts, [OPEN_PORT_TIMEOUT_MS, budget, budget - 1000]);
   assert.equal(now, OPEN_PORT_TIMEOUT_MS + 1500);
@@ -1806,9 +1812,9 @@ test('Windows does not start netstat after the socket deadline expires', async (
     throw new Error('timed out');
   };
   assert.deepEqual(await getListeningPortsForPids([4242], {
-    platform: 'win32', execFile, now: () => now, scanTimeoutMs: 3100,
+    platform: 'win32', env: WINDOWS_ENV, execFile, now: () => now, scanTimeoutMs: 3100,
   }), []);
-  assert.deepEqual(commands, ['powershell.exe']);
+  assert.deepEqual(commands, [POWERSHELL]);
   assert.equal(now, 3100);
 });
 

@@ -594,8 +594,8 @@ export class BurrowService {
       this.#refuseNothing();
       return createWebSocket(url);
     };
-    // Looked up at the call, like `burrowFetch`'s default; a request that gets
-    // no answer says which host and why, never undici's bare `fetch failed`.
+    // The global is looked up at the call, so a test can stub it; a request that
+    // gets no answer says which host and why, never undici's bare `fetch failed`.
     const injectedFetch = describingFetchFailures((input, init) =>
       (options.fetch ?? globalThis.fetch)(input, init),
     );

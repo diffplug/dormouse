@@ -271,7 +271,11 @@ const LATCH_FOR_CLOSE: ReadonlyMap<number, BurrowLatch> = new Map([
 
 export interface BurrowOptions {
   enrollment: BurrowEnrollment;
-  createWebSocket?: (url: string) => WebSocketLike;
+  /**
+   * The Burrow service's guarded socket factory, with no default: the global
+   * would bypass the network policy (`docs/specs/remote-network.md` -> "Policy").
+   */
+  createWebSocket: (url: string) => WebSocketLike;
   /** Build the remote-api handler for an authorized client (see activation.ts). */
   createSession?: (opts: RemoteApiSessionContext) => RemoteApiSessionLike;
   /**
@@ -479,8 +483,7 @@ export class BurrowRuntime {
     this.#acl = loadBurrowAcl(options.enrollment.burrowId, options.loadAcl);
     this.#challenges = new ChallengeIssuer({ now: this.#now });
 
-    this.#createWebSocket =
-      options.createWebSocket ?? ((url) => new WebSocket(url) as unknown as WebSocketLike);
+    this.#createWebSocket = options.createWebSocket;
     this.#createSession = options.createSession;
     this.#saveAcl = options.saveAcl;
     this.#requestApproval = options.requestApproval;

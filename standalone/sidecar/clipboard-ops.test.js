@@ -11,6 +11,11 @@ const {
   splitNonEmptyLines,
 } = require('./clipboard-ops');
 
+// Windows helpers run by their absolute System32 path, never a bare name that
+// Windows would look up in the working directory first.
+const WINDOWS_ENV = { SystemRoot: 'D:\\Win' };
+const POWERSHELL = 'D:\\Win\\System32\\WindowsPowerShell\\v1.0\\powershell.exe';
+
 // A fake child_process.spawn for writeClipboardText: records (cmd, args) and the
 // text written to stdin, then fires `close`/`error` asynchronously like a real
 // process. `behavior(cmd)` chooses the outcome per command ({ code } | { error }).
@@ -119,8 +124,9 @@ test('readClipboardFilePaths on mac returns [] when osascript fails', async () =
 test('readClipboardFilePaths on windows parses FileDropList lines', async () => {
   const paths = await readClipboardFilePaths({
     platform: 'win32',
+    env: WINDOWS_ENV,
     exec: async (cmd) => {
-      assert.equal(cmd, 'powershell');
+      assert.equal(cmd, POWERSHELL);
       return { stdout: 'C:\\a.png\r\nC:\\b.jpg\r\n' };
     },
   });
@@ -216,7 +222,9 @@ test('readClipboardImageAsFilePath on windows doubles every PowerShell quote in 
     osModule: fakeOs("/t/o'k‘a’b‚c‛d"),
     cryptoModule: fakeCrypto('uuid-W'),
     fsModule: fs.module,
+    env: WINDOWS_ENV,
     exec: async (cmd, args) => {
+      assert.equal(cmd, POWERSHELL);
       commands.push(args[args.length - 1]);
       return { stdout: '' };
     },
@@ -263,8 +271,9 @@ test('readClipboardText on mac returns empty string when pbpaste fails', async (
 test('readClipboardText on windows strips Get-Clipboard trailing newline', async () => {
   const text = await readClipboardText({
     platform: 'win32',
+    env: WINDOWS_ENV,
     exec: async (cmd, args) => {
-      assert.equal(cmd, 'powershell');
+      assert.equal(cmd, POWERSHELL);
       assert.ok(args.includes('Get-Clipboard -Raw'));
       return { stdout: 'line1\r\nline2\r\n' };
     },
@@ -341,8 +350,8 @@ test('writeClipboardText on mac shells out to pbcopy via stdin', async () => {
 
 test('writeClipboardText on windows shells out to clip', async () => {
   const f = fakeSpawn();
-  await writeClipboardText('x', { platform: 'win32', spawn: f.spawn });
-  assert.deepEqual(f.calls.map((c) => [c[0], c[1]]), [['clip', []]]);
+  await writeClipboardText('x', { platform: 'win32', env: WINDOWS_ENV, spawn: f.spawn });
+  assert.deepEqual(f.calls.map((c) => [c[0], c[1]]), [['D:\\Win\\System32\\clip.exe', []]]);
 });
 
 test('writeClipboardText spawns with windowsHide so no console window flickers', async () => {
