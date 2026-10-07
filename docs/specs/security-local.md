@@ -126,11 +126,12 @@ The attacker is another local account reading disk; what the remote stack leaves
 
 **The VS Code peer-link token is a local credential at rest** — `burrow.peer-token` in the extension's global storage, written mode `0600` with `wx`, its socket directory re-checked on every contention round. Neither control does anything on Windows, and Dormouse applies no Windows DACL to the peer-link token, `recovery.json`, or the `tool-trust` receipts (`docs/specs/security.md` -> "Known gaps"; rationale).
 
-No standalone log call (`docs/specs/standalone.md` -> "Logging") carries PTY bytes; the log's exposure is `docs/specs/security.md` -> "Known gaps" (rationale).
+No standalone log call (`docs/specs/standalone.md` -> "Logging") carries PTY bytes, but the log records the `dor` socket path (rationale).
 
 - **FAIL IF** `write_file_atomically` in `standalone/src-tauri/src/lib.rs` stops restricting the directory and the file it writes to the owning user on **every** platform `restrict_to_owner` has an arm for — `0700`/`0600` on unix, and on Windows a DACL protected from inheritance carrying exactly one ACE for the current user — or the mode stops reaching the temp file *before* any bytes are written, or **any** of its callers stops going through it. Enumerate them from the file rather than from this line: every writer under the state root is one, the legacy-transcript scrub and `arrivals.json` included. The one exception is the macOS hang sample `/usr/bin/sample` writes into `hangs/`; it goes through `write_owner_only_with`, which restricts the directory before the child runs and the file after. Pinned by the Rust tests in the same file (rationale).
+- **FAIL IF** a standalone log handle opens other than through `open_log` in `standalone/src-tauri/src/lib.rs`, or `open_log` stops leaving the log owner-only on **every** platform — unix: `0600`, an existing file tightened, a symlink refused; Windows: `restrict_to_owner`'s DACL — or the Linux default is not a per-user directory whenever `XDG_STATE_HOME` or `HOME` is absolute. Pinned by the Rust tests in the same file (rationale).
 
-Source of truth: `SESSION_STATE_KEY` in `vscode-ext/src/session-state.ts`, `ensureToken` in `vscode-ext/src/peer-link.ts`, `default_log_path` in `standalone/src-tauri/src/lib.rs`, `createManagedVoiceHost` in `lib/src/host/managed-voice-host.ts`, `hostedVoiceOrigin` in `lib/src/host/relay-origin.ts`.
+Source of truth: `SESSION_STATE_KEY` in `vscode-ext/src/session-state.ts`, `ensureToken` in `vscode-ext/src/peer-link.ts`, `default_log_location` in `standalone/src-tauri/src/lib.rs`, `createManagedVoiceHost` in `lib/src/host/managed-voice-host.ts`, `hostedVoiceOrigin` in `lib/src/host/relay-origin.ts`.
 
 ## Terminal context directory actions
 

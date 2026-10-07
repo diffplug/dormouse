@@ -418,7 +418,15 @@ The `WindowEvent::DragDrop` handler emits the dropped paths as `dormouse://files
 
 ## Logging
 
-Windows release builds use the GUI subsystem, so nothing streams to a launching terminal. Rust appends sidecar stderr, malformed stdout, and its own diagnostics to `%LOCALAPPDATA%\Dormouse Terminal\dormouse.log` on Windows, `$TMPDIR/dormouse.log` elsewhere, overridable via `DORMOUSE_LOG_FILE`. Startup keeps the previous run's log as `dormouse.previous.log`.
+Windows release builds use the GUI subsystem, so nothing streams to a launching terminal. Rust appends sidecar stderr, malformed stdout, and its own diagnostics to `dormouse.log`, overridable via `DORMOUSE_LOG_FILE`:
+
+| Platform | Directory |
+|---|---|
+| Windows | `%LOCALAPPDATA%\Dormouse Terminal` |
+| Linux | `$XDG_STATE_HOME/dormouse-terminal`, else `~/.local/state/dormouse-terminal`; `/tmp` only when neither is an absolute path |
+| macOS | `$TMPDIR` |
+
+Startup keeps the previous run's log as `dormouse.previous.log`. The log is owner-only (`docs/specs/security-local.md` -> "Persisted state").
 
 Source of truth: `init_log` / `read_update_log` in `standalone/src-tauri/src/lib.rs`.
 
