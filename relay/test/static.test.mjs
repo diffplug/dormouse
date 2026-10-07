@@ -136,24 +136,33 @@ test('every Pocket response carries the policy — shell, asset, and SPA fallbac
   }
 });
 
-test('the policy is same-origin everywhere, and unframeable', async () => {
+test('the policy is same-origin everywhere, unframeable, and loosens only what pocket-app.md lists', async () => {
+  // Exact, directive set included (docs/specs/security-remote.md -> "Cross-origin
+  // access"): a directive or source added here widens what XSS on the Pocket
+  // origin reaches. `connect-src` is pinned per origin below.
   const { app: hono } = app({ pocketDir: await makePocketDir() });
-  const policy = policyOf(await hono.request('/'));
+  const { 'connect-src': _connect, ...policy } = policyOf(await hono.request('/'));
 
-  // No *script* exception: the build emits none inline and loads nothing
-  // off-origin, which the built-output case below pins. `wasm-unsafe-eval` is
-  // the addon's SIXEL decoder and permits WebAssembly compilation only — it is
-  // pinned here so a widening to `'unsafe-eval'` cannot pass as the same thing.
-  assert.deepEqual(policy['script-src'], ["'self'", "'wasm-unsafe-eval'"]);
-  assert.deepEqual(policy['default-src'], ["'self'"]);
-  assert.deepEqual(policy['worker-src'], ["'self'"]);
-  assert.deepEqual(policy['object-src'], ["'none'"]);
-  assert.deepEqual(policy['frame-ancestors'], ["'none'"]);
-  assert.deepEqual(policy['base-uri'], ["'none'"]);
-  assert.deepEqual(policy['form-action'], ["'self'"]);
-  // The one loosening: the shell's pre-paint `<style>` and React's own style
-  // attributes. A hash covers the first but not the second.
-  assert.deepEqual(policy['style-src'], ["'self'", "'unsafe-inline'"]);
+  assert.deepEqual(policy, {
+    'default-src': ["'self'"],
+    // No *script* exception: the build emits none inline and loads nothing
+    // off-origin, which the built-output case below pins. `wasm-unsafe-eval`
+    // is the addon's SIXEL decoder and permits WebAssembly compilation only —
+    // pinned so a widening to `'unsafe-eval'` cannot pass as the same thing.
+    'script-src': ["'self'", "'wasm-unsafe-eval'"],
+    // The one style loosening: the shell's pre-paint `<style>` and React's own
+    // style attributes. A hash covers the first but not the second.
+    'style-src': ["'self'", "'unsafe-inline'"],
+    'img-src': ["'self'", 'data:', 'blob:'],
+    'font-src': ["'self'"],
+    'media-src': ["'self'", 'blob:'],
+    'worker-src': ["'self'"],
+    'manifest-src': ["'self'"],
+    'object-src': ["'none'"],
+    'frame-ancestors': ["'none'"],
+    'base-uri': ["'none'"],
+    'form-action': ["'self'"],
+  });
 });
 
 test('connect-src names this deployment own relay and no other burrow', async () => {
@@ -167,21 +176,6 @@ test('connect-src names this deployment own relay and no other burrow', async ()
     const policy = policyOf(await hono.request('/'));
     assert.deepEqual(policy['connect-src'], ["'self'", expected], origin);
   }
-});
-
-test('the policy loosens only what docs/specs/pocket-app.md lists, and names no other directive', async () => {
-  // docs/specs/security-remote.md -> "Cross-origin access": a directive added
-  // here, or a source added to one, widens what XSS on the Pocket origin reaches.
-  const { app: hono } = app({ origin: 'https://dormouse.tailnet.ts.net', pocketDir: await makePocketDir() });
-  const policy = policyOf(await hono.request('/'));
-  assert.deepEqual(Object.keys(policy).sort(), [
-    'base-uri', 'connect-src', 'default-src', 'font-src', 'form-action', 'frame-ancestors', 'img-src',
-    'manifest-src', 'media-src', 'object-src', 'script-src', 'style-src', 'worker-src',
-  ]);
-  assert.deepEqual(policy['img-src'], ["'self'", 'data:', 'blob:']);
-  assert.deepEqual(policy['media-src'], ["'self'", 'blob:']);
-  assert.deepEqual(policy['font-src'], ["'self'"]);
-  assert.deepEqual(policy['manifest-src'], ["'self'"]);
 });
 
 // The other half of `script-src` — that the BUILT shell carries no inline

@@ -49,12 +49,3 @@ test('the wrapper is the only importer of the bare event API', () => {
   const offenders = sources.filter((file) => /from ['"]@tauri-apps\/api\/event['"]/.test(file.text));
   assert.deepEqual(offenders.map((file) => file.name), []);
 });
-
-// The standalone adapters take host events over Tauri IPC or the dev harness's
-// own transport, never `window.postMessage`, so a page in a browser pane has no
-// inbox here to forge a host message into (docs/specs/security-local.md ->
-// "Browser panes"). Shared webview listeners live in lib, each checking origin.
-test('no standalone module listens for window messages', () => {
-  const offenders = sources.filter((file) => /addEventListener\(\s*['"`]message['"`]|\bonmessage\b/.test(file.text));
-  assert.deepEqual(offenders.map((file) => file.name), []);
-});

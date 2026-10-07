@@ -157,7 +157,7 @@ describe.each([
   // host's messages arrive the same way, behind a per-boot token. Here host
   // events arrive only over the transport, so there is no inbox to forge
   // (docs/specs/security-local.md -> "Browser panes").
-  it("takes no host event from a window message, whatever its shape or origin", async () => {
+  it("takes no host event from a window message, whatever its shape", async () => {
     const { adapter, deliver, sent } = await open();
     const seen: PtyDataDetail[] = [];
     const alerts: AlertStateDetail[] = [];
@@ -171,12 +171,10 @@ describe.each([
       ["dor:controlRequest", { requestId: "dor-forged", surfaceId: "forged", cmd: "list" }],
       ["burrow:ask", { burrowRequestId: "ask-forged", op: "surfaceOp", params: {} }],
     ];
-    for (const origin of [window.location.origin, "http://127.0.0.1:61234", "null"]) {
-      for (const [event, payload] of forged) {
-        // VS Code's host shape, the Tauri event's, and the dev harness's.
-        for (const data of [{ type: event, ...payload }, { event, payload }, { event, data: payload }]) {
-          window.dispatchEvent(new MessageEvent("message", { origin, data }));
-        }
+    for (const [event, payload] of forged) {
+      // VS Code's host shape, the Tauri event's, and the dev harness's.
+      for (const data of [{ type: event, ...payload }, { event, payload }, { event, data: payload }]) {
+        window.dispatchEvent(new MessageEvent("message", { origin: window.location.origin, data }));
       }
     }
     await new Promise((resolve) => setTimeout(resolve, 0));

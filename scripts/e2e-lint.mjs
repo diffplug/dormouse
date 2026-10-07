@@ -217,6 +217,15 @@ const RELAY_ROOM_LEAKS = new RegExp(
 const SOURCE_TREES = ['remote-lib-common/src/', 'lib/src/', 'relay/src/'];
 
 /**
+ * Every shipped tree that could hold a Burrow ACL writer: the shared ACL, both
+ * hosts' Burrow code, the Relays, and `dor`.
+ */
+const ACL_WRITER_TREES = [...SOURCE_TREES, 'hosted/server/', 'vscode-ext/src/', 'standalone/src/', 'standalone/sidecar/', 'dor/src/'];
+
+/** A class member's opening line in `BurrowRuntime`, which ends the one before it. */
+const NOT_NEXT_MEMBER = String.raw`(?:(?!\n  (?:async |static )?[#\w]+\s*\()[\s\S])*?`;
+
+/**
  * The two services that carry ciphertext they must not read: the Relay, and
  * Hosted, whose one-time room forwards a handshake.
  */
@@ -554,6 +563,35 @@ export const RULES = [
     // A one-time connection has no relayed fallback at all: the rendezvous
     // carries a handshake, never a session.
     pattern: /^        directOnly: true,$/m,
+  },
+  {
+    rule: 'One call mints a Burrow ACL record',
+    security: 'must have no caller but `BurrowRuntime.#approvePairing`',
+    kind: 'exactly',
+    trees: ACL_WRITER_TREES,
+    // `BurrowAcl.approve` takes the approved client as an object literal; the
+    // pairing request's own `approve(code)` takes a string and is not this.
+    pattern: /\.approve\(\s*\{/g,
+    count: 1,
+    violationFile: 'lib/src/host/remote/service.ts',
+    violation: '\nvoid acl.approve({});\n',
+  },
+  {
+    rule: 'Two calls save a Burrow ACL: the runtime\'s approval and the service\'s wiring to its store',
+    security: 'must have no caller but `BurrowRuntime.#approvePairing`',
+    kind: 'exactly',
+    trees: ACL_WRITER_TREES,
+    pattern: /\.#?saveAcl\(/g,
+    count: 2,
+    violationFile: 'vscode-ext/src/burrow-store.ts',
+    violation: "\nvoid store.saveAcl('burrow', []);\n",
+  },
+  {
+    rule: 'The mint and its save sit in `#approvePairing`',
+    security: 'must have no caller but `BurrowRuntime.#approvePairing`',
+    kind: 'require',
+    file: BURROW_RUNTIME,
+    pattern: new RegExp(String.raw`^  #approvePairing\(${NOT_NEXT_MEMBER}\.approve\(\{${NOT_NEXT_MEMBER}this\.#saveAcl\(`, 'm'),
   },
   {
     rule: '`OneTimeRuntime` names nothing that grants or persists',

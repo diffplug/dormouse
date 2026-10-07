@@ -38,6 +38,15 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+const PROXY = 'http://127.0.0.1:61234';
+function proxyPlatform(result: Awaited<ReturnType<NonNullable<PlatformAdapter['createIframeProxyUrl']>>> = { ok: true, url: `${PROXY}/app` }, swapCapable = true) {
+  // A host that drives agent-browser can swap the pane to it.
+  const platform: PlatformAdapter = swapCapable ? installBrowserHost().platform : new FakePtyAdapter();
+  platform.createIframeProxyUrl = vi.fn(async () => result);
+  setPlatform(platform);
+  return platform;
+}
+
 async function renderPanel(
   actions: WallActions,
   props: PaneProps = paneProps('iframe-raw'),
@@ -89,9 +98,7 @@ describe('IframePanel', () => {
   // absent. The sets are exact (docs/specs/security-local.md -> "Browser panes"):
   // a token added here is a privilege every framed page gets.
   it.each(['raw', 'proxied'] as const)('frames a %s page under exactly the audited sandbox and permissions', async (kind) => {
-    if (kind === 'proxied') {
-      installBrowserHost().platform.createIframeProxyUrl = vi.fn(async () => ({ ok: true as const, url: 'http://127.0.0.1:61234/app' }));
-    }
+    if (kind === 'proxied') proxyPlatform();
     const iframe = await renderPanel(stubActions());
     expect(iframe.hasAttribute('data-dormouse-proxy')).toBe(kind === 'proxied');
 
@@ -318,12 +325,7 @@ describe('IframePanel', () => {
   // for its frame (docs/specs/security-local.md -> "Browser panes").
   it('acts on no message from any origin but its own proxy', async () => {
     const onClickPanel = vi.fn();
-    const { platform } = installBrowserHost();
-    platform.createIframeProxyUrl = vi.fn(async () => ({
-      ok: true as const,
-      url: 'http://127.0.0.1:61234/app',
-      upstream: 'http://example.test/app',
-    }));
+    proxyPlatform({ ok: true, url: `${PROXY}/app`, upstream: 'http://example.test/app' });
     await renderPanel(stubActions({ onClickPanel }), paneProps('iframe-foreign'));
     const chrome = () => getAgentBrowserScreenController('iframe-foreign')?.chrome().url;
     const before = chrome();
@@ -333,14 +335,14 @@ describe('IframePanel', () => {
 
     for (const origin of ['http://127.0.0.1:61235', 'http://localhost:61234', 'https://evil.example', window.location.origin, 'null']) {
       await send(origin, { __dormouse: 'pointerdown' });
-      await send(origin, { __dormouse: 'location', url: 'http://127.0.0.1:61234/other', loaded: true });
-      await send(origin, { __dormouse: 'open-window', url: 'http://127.0.0.1:61234/docs' });
+      await send(origin, { __dormouse: 'location', url: `${PROXY}/other`, loaded: true });
+      await send(origin, { __dormouse: 'open-window', url: `${PROXY}/docs` });
     }
     expect(onClickPanel).not.toHaveBeenCalled();
     expect(chrome()).toBe(before);
     expect(container.textContent).not.toContain('Open in new pane');
 
-    await send('http://127.0.0.1:61234', { __dormouse: 'pointerdown' });
+    await send(PROXY, { __dormouse: 'pointerdown' });
     expect(onClickPanel).toHaveBeenCalledWith('iframe-foreign');
   });
 
@@ -424,14 +426,6 @@ describe('before its first paint', () => {
 });
 
 describe('iframe failures offer a way out', () => {
-  const PROXY = 'http://127.0.0.1:61234';
-  function proxyPlatform(result: Awaited<ReturnType<NonNullable<PlatformAdapter['createIframeProxyUrl']>>> = { ok: true, url: `${PROXY}/app` }, swapCapable = true) {
-    // A host that drives agent-browser can swap the pane to it.
-    const platform: PlatformAdapter = swapCapable ? installBrowserHost().platform : new FakePtyAdapter();
-    platform.createIframeProxyUrl = vi.fn(async () => result);
-    setPlatform(platform);
-    return platform;
-  }
   // The shim's load report (`pageshow` / `DOMContentLoaded`); a clicked link's
   // report carries no `loaded`.
   const report = async (path = '/app', loaded = true) => {
