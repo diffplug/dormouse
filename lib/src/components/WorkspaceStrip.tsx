@@ -10,13 +10,13 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from 'react';
 import { clsx } from 'clsx';
-import { PlusIcon, PushPinIcon, XIcon } from '@phosphor-icons/react';
+import { PlusIcon, XIcon } from '@phosphor-icons/react';
 import { InlineEditInput } from './wall/InlineEditInput';
 import { WorkspaceKillConfirm } from './WorkspaceKillConfirm';
 import { WorkspaceTabMenu } from './WorkspaceTabMenu';
 import { useTodoPillContent } from './TodoPillBody';
 import { AlertRingInset, useAlertRingBurst } from './alert-ring';
-import { AUTO_NAME_CLASS, chromeButton, DOOR_TAB_CLASS, HEADER_PALETTE_TRANSITION_CLASS, ModalFrame, modalActionButton, OVERLAY_MAX_HEIGHT, TAB_INACTIVE_FADE_STYLE, TERMINAL_TOP_RADIUS_CLASS, TODO_PILL_TRACKING_CLASS } from './design';
+import { AUTO_NAME_CLASS, chromeButton, DOOR_TAB_CLASS, DOOR_TAB_MIN_WIDTH_PX, HEADER_PALETTE_TRANSITION_CLASS, ModalFrame, modalActionButton, OVERLAY_MAX_HEIGHT, TAB_INACTIVE_FADE_STYLE, TERMINAL_TOP_RADIUS_CLASS, TODO_PILL_TRACKING_CLASS } from './design';
 import { createWorkspaceStripDrag, type StripDragHost } from './workspace-strip-drag';
 import { acquireChromeKeyboardLease } from './wall/chrome-keyboard-lease';
 import { getWallHandle } from './wall/wall-handles';
@@ -45,6 +45,7 @@ import {
 } from '../lib/workspace-store';
 import type { WorkspaceId } from '../lib/session-types';
 import { revealWorkspaceTab, workspaceStripAreas } from './workspace-tab-elements';
+import { useWorkspaceTabTween } from './workspace-tab-tween';
 
 /**
  * The Window's Workspace tabs. Store-driven end to end (Workspaces, membership,
@@ -84,6 +85,7 @@ export function WorkspaceStrip({
   const [draggingId, setDraggingId] = useState<WorkspaceId | null>(null);
 
   const tabElementsRef = useRef(new Map<WorkspaceId, HTMLElement>());
+  const stripRef = useRef<HTMLDivElement | null>(null);
 
   // The editor, the confirmation, and the tab menu all sit outside every Wall,
   // so a capture-phase command-mode shortcut would still fire behind them.
@@ -126,6 +128,8 @@ export function WorkspaceStrip({
   useLayoutEffect(() => {
     revealWorkspaceTab(tabElementsRef.current.get(activeId) ?? null);
   }, [activeId]);
+  // After the reveal: the tween measures where it scrolled the tabs to.
+  useWorkspaceTabTween(stripRef);
 
   // Stable across renders: the tab's own `data-workspace-tab` says which entry
   // it is, and the returned cleanup is what React 19 calls on detach.
@@ -247,6 +251,7 @@ export function WorkspaceStrip({
   // order is strip order.
   return (
     <div
+      ref={stripRef}
       data-workspace-strip
       className={clsx('flex min-w-0 flex-1 items-end gap-1.5', className)}
     >
@@ -304,6 +309,13 @@ export function WorkspaceStrip({
   );
 }
 
+/** The name button's `pl-2.5` + `pr-2.5`: the least a tab ever puts around its
+ *  name, so a floor built on it never exceeds the tab's natural width. */
+const TAB_NAME_PADDING_PX = 20;
+
+/** The `×`'s box, which the rename editor keeps as slack. */
+const TAB_CLOSE_SLOT_CLASS = 'flex h-full shrink-0 items-center pl-0.5 pr-2';
+
 /** Memoized: every callback below is stable and takes the Workspace id, so a tab
  *  re-renders only when its own name, state, or union changes. */
 const WorkspaceTab = memo(function WorkspaceTab({
@@ -330,7 +342,7 @@ const WorkspaceTab = memo(function WorkspaceTab({
   id: WorkspaceId;
   name: string;
   nameIsAuto: boolean;
-  /** Pinned right: no `×`, and a pin where it would be. */
+  /** Pinned right: no `×`. */
   pinned: boolean;
   active: boolean;
   union: WorkspaceUnion;
@@ -352,6 +364,11 @@ const WorkspaceTab = memo(function WorkspaceTab({
   wasDragged: () => boolean;
 }) {
   const todoPill = useTodoPillContent(union.todo);
+  const showClose = active && !pinned;
+  // A floor for when the strip squeezes the tab, never above its natural width:
+  // the name in `ch` (the tab is monospace) plus the least padding around it.
+  // The editor is never squeezed, and has no floor to inflate an empty draft.
+  const minWidth = renaming ? 0 : `min(${DOOR_TAB_MIN_WIDTH_PX}px, calc(${[...name].length}ch + ${TAB_NAME_PADDING_PX}px))`;
   // The TODO pill shows whichever Workspace is visible, as a pane's does. The
   // alarm inset is a hidden Workspace's summons: the visible one's panes ring.
   const showAlarmInset = !active && union.ringing;
@@ -379,11 +396,12 @@ const WorkspaceTab = memo(function WorkspaceTab({
       className={clsx(
         DOOR_TAB_CLASS,
         HEADER_PALETTE_TRANSITION_CLASS,
-        'w-max shrink',
+        'w-max',
+        renaming ? 'shrink-0' : 'shrink',
         active ? 'bg-header-active-bg text-header-active-fg' : 'bg-header-inactive-bg text-header-inactive-fg',
         dragging && 'opacity-60',
       )}
-      style={active ? undefined : TAB_INACTIVE_FADE_STYLE}
+      style={{ ...(!active && TAB_INACTIVE_FADE_STYLE), minWidth }}
       onPointerDown={(event) => {
         // The close button has its own click, and a press inside the open rename
         // editor is a text selection — neither may start a reorder drag.
@@ -410,22 +428,32 @@ const WorkspaceTab = memo(function WorkspaceTab({
       }}
     >
       {renaming ? (
-        <InlineEditInput
-          data-workspace-rename-for={id}
-          initialValue={name}
-          className="h-full min-w-0 flex-1 bg-transparent px-2.5 text-sm outline-none"
-          blurAction="submit"
-          submitUntouched={false}
-          onSubmit={(value) => onFinishRename(id, value)}
-          onCancel={onCancelRename}
-        />
+        <div className="grid h-full min-w-0 flex-1">
+          {/* The tab as it was, unseen and sharing the editor's cell: the space
+              its `×` held is slack the draft fills before the tab has to grow. */}
+          <span data-workspace-rename-slack aria-hidden="true" className="invisible col-start-1 row-start-1 flex">
+            <span className={clsx('whitespace-pre pl-2.5', showClose ? 'pr-1' : 'pr-2.5', nameIsAuto && AUTO_NAME_CLASS)}>{name}</span>
+            {showClose && <span className={TAB_CLOSE_SLOT_CLASS}><XIcon size={11} weight="bold" /></span>}
+          </span>
+          <InlineEditInput
+            data-workspace-rename-for={id}
+            initialValue={name}
+            // Content-box, so the floor less its padding fills the cell.
+            className="col-start-1 row-start-1 box-content h-full min-w-[calc(100%-1.25rem)] bg-transparent px-2.5 text-sm outline-none"
+            fitDraft
+            blurAction="submit"
+            submitUntouched={false}
+            onSubmit={(value) => onFinishRename(id, value)}
+            onCancel={onCancelRename}
+          />
+        </div>
       ) : (
         <>
           <button
             type="button"
             className={clsx(
               'flex h-full min-w-0 flex-1 items-center overflow-hidden pl-2.5 text-left',
-              showTodoPill || active || pinned ? 'pr-1' : 'pr-2.5',
+              showTodoPill || showClose ? 'pr-1' : 'pr-2.5',
             )}
             aria-label={label}
             title={label}
@@ -454,7 +482,7 @@ const WorkspaceTab = memo(function WorkspaceTab({
                 'transition-colors hover:bg-current/10 active:bg-current/20',
                 // Current-coloured, as a theme's focus ring can match the active tab.
                 'focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1 focus-visible:outline-current',
-                !active && !pinned && 'mr-1.5',
+                !showClose && 'mr-1.5',
               )}
               data-flourishing={todoPill.flourishing ? 'true' : 'false'}
               aria-label={`Next TODO in ${name}`}
@@ -472,16 +500,11 @@ const WorkspaceTab = memo(function WorkspaceTab({
           )}
         </>
       )}
-      {pinned && !renaming && (
-        <span data-workspace-tab-pinned className="flex h-full shrink-0 items-center pl-0.5 pr-2 opacity-65" aria-hidden="true">
-          <PushPinIcon size={11} weight="fill" />
-        </span>
-      )}
-      {active && !pinned && !renaming && (
+      {showClose && !renaming && (
         <button
           type="button"
           data-workspace-tab-close={id}
-          className="flex h-full shrink-0 items-center rounded pl-0.5 pr-2 hover:bg-current/10"
+          className={clsx(TAB_CLOSE_SLOT_CLASS, 'rounded hover:bg-current/10')}
           aria-label={`Close ${name}`}
           title={`Close ${name}`}
           onClick={(event) => {
