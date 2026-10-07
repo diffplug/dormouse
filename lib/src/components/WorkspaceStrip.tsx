@@ -64,7 +64,7 @@ export function WorkspaceStrip({
   spacerAttributes,
 }: {
   className?: string;
-  /** The three cross-Window drag hooks (`StripDragHost`). A composition with no
+  /** The four cross-Window drag hooks (`StripDragHost`). A composition with no
    *  Windows — Storybook, the website playground — supplies none. */
   onDragOutsideWindow?: StripDragHost['onDragOutsideWindow'];
   onDragBackInsideStrip?: StripDragHost['onDragBackInsideStrip'];
