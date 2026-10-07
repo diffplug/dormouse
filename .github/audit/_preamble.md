@@ -69,7 +69,7 @@ Then do the qualitative pass described for your domain. Rate each finding by thi
   - Reproduction: <input> → <effect>
 ```
 
-The location is the sink's `path:line` (for spec drift or a condition no code holds, the spec line that states it); the second backticked field is its root cause, the function or rule it lives in. Indented lines below the header belong to the finding. The reporting step merges findings naming the same file and root cause within five lines, so name the root cause the same way each time and report each finding once. An `INFO` needs no evidence lines.
+The location is the sink's `path:line` (for spec drift or a condition no code holds, the spec line that states it); the second backticked field is its root cause, the function or rule it lives in. Indented lines below the header belong to the finding, so append the header and its evidence in one write. The reporting step merges findings naming the same file and root cause within five lines, so name the root cause the same way each time and report each finding once. An `INFO` needs no evidence lines.
 
 When your qualitative pass has finished, append exactly one line saying so:
 
@@ -93,7 +93,7 @@ printf '\n<!-- END OF REPORT -->\n' >> <your fragment>
 
 ### Work streams
 
-**Delegate only by the `## Work streams` your domain file names, never by a partition of your own**: one delegate per stream, holding that stream's rules and nothing else. A rule stream runs no qualitative pass; the `qualitative` stream is the domain's one pass, run by you or by one delegate. A delegate appends its lines straight to your fragment, one `printf … >>` per line or per finding, and writes no verdict line and no sentinel; when it finishes it touches `$RUNNER_TEMP/<your fragment>.<stream>.done`, and that file is what your wait loop below tests.
+**Delegate only by the `## Work streams` your domain file names, never by a partition of your own**: one delegate per stream, holding that stream's rules and nothing else. A rule stream runs no qualitative pass; the `qualitative` stream is the domain's one pass, run by you or by one delegate. A delegate appends its lines straight to your fragment, one `printf … >>` per result line and one per finding, its evidence lines in the same call so another stream's line cannot land inside it, and writes no verdict line and no sentinel; when it finishes it touches `$RUNNER_TEMP/<your fragment>.<stream>.done`, and that file is what your wait loop below tests.
 
 **If you delegate, block for your delegates — never end your turn to wait.** Subagents launch in the **background**: the Task tool returns an id, not a report. Ending your turn ends *you*, and your caller reads that as your report being finished — it merges the fragment as it stands and everything your delegates write afterwards is lost. Block inside a Bash call instead, and never with `run_in_background`, which returns an id immediately and blocks nothing. A single Bash call is capped at ten minutes, so break the loop yourself under the cap, issue it with `timeout: 600000`, and re-issue it under a bound of your own:
 
