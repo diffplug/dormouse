@@ -906,7 +906,7 @@ struct LogLocation {
 }
 
 /// Linux's per-user log directory: `$XDG_STATE_HOME`, else `~/.local/state`,
-/// each used only when absolute (the XDG rule). `None` only with neither set.
+/// each used only when absolute (the XDG rule). `None` when neither is usable.
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn linux_log_dir(xdg_state_home: Option<OsString>, home: Option<OsString>) -> Option<PathBuf> {
     let absolute = |value: Option<OsString>| value.map(PathBuf::from).filter(|path| path.is_absolute());
@@ -930,13 +930,14 @@ fn default_log_location() -> LogLocation {
         };
     }
 
-    // Never Linux's `/tmp`: it is shared, so another account could plant the name.
+    // Not Linux's `/tmp`, which is shared, unless neither variable is usable;
+    // `open_log` still refuses a planted name there.
     #[cfg(target_os = "linux")]
     if let Some(dir) = linux_log_dir(env::var_os("XDG_STATE_HOME"), env::var_os("HOME")) {
         return LogLocation { path: dir.join("dormouse.log"), own_dir: true };
     }
 
-    // macOS's `$TMPDIR` is per-user and `0700`.
+    // macOS's `$TMPDIR` is per-user and `0700`; Linux's is `/tmp`.
     LogLocation { path: env::temp_dir().join("dormouse.log"), own_dir: false }
 }
 
@@ -5833,8 +5834,9 @@ mod tests {
         assert!(!body.contains("create_dir_all("));
     }
 
-    /// Linux keeps the log in a per-user state directory, never the shared
-    /// temp directory (docs/specs/standalone.md -> "Logging").
+    /// Linux keeps the log in a per-user state directory whenever it has one
+    /// (docs/specs/standalone.md -> "Logging"). Unix paths, so unix only.
+    #[cfg(unix)]
     #[test]
     fn linux_log_dir_is_per_user_state() {
         use std::ffi::OsString;
