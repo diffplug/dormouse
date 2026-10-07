@@ -73,6 +73,7 @@ The diff window's evasions are `docs/specs/security.md` -> "Known gaps".
 - **FAIL IF** the secret inventory departs from this placement (rationale). It is exhaustive: a secret at repo, org, or environment level that no line names fails. One pass over `actions/secrets`, `actions/organization-secrets`, and each environment's secret listing answers every line:
   - `ARGOS_TOKEN` and `CHROMATIC_PROJECT_TOKEN` — repo level, the only secrets there; accepted with rotation (see "Reachable repo-level secrets"). No workflow reads `CHROMATIC_PROJECT_TOKEN` since Chromatic left CI; its absence is no violation.
   - `AUDIT_PAT` — in `security-audit`, absent at repo level.
+  - `EMBARGO_TOKEN` — in `security-audit`, absent at repo level: a fine-grained PAT holding Issues: write on the private `diffplug/dormouse-embargo` alone, read only by the step that files embargoed audit findings (`docs/specs/security-audit.md` -> "Embargo").
   - `TEND_BOT_TOKEN` — in `tend`, absent at repo level.
   - `CLAUDE_CODE_OAUTH_TOKEN` — in **both** `tend` and `security-audit`, absent at repo level. Environments do not inherit each other's secrets, so a rotation must set both.
   - `OVSX_PAT`, `VSCE_PAT` — in `vscode-extension-publish` only, absent at repo level.

@@ -18,6 +18,8 @@ An earlier step guarantees `$AUDIT_PAT` is present; `docs/specs/security-audit.m
 
 When run by `scripts/security-audit-local.sh` without `AUDIT_PAT`, use the operator's existing `gh` authentication without a `GH_TOKEN=` override. Report an inaccessible check as `UNVERIFIABLE`; local credentials are not evidence about the CI PAT's scope.
 
+You hold no credential for the private tracker `docs/specs/security-audit.md` -> "Embargo" files to, and need none: read that section's checks from the workflow, the scripts it names, and the unauthenticated `curl` the rule gives.
+
 **Check effective permissions, not declared ones**, as `docs/specs/security-ci.md` -> "Automated Maintainer (tend)" defines them. Read `actions/permissions/workflow` before judging any inherited-permission check.
 
 **Derive every inventory from the live API, never from the spec's own list.** A `FAIL IF` that says "any" quantifies over what exists now; illustrative `Today:` lists do not limit its scope.

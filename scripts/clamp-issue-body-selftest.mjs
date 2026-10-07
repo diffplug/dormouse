@@ -8,12 +8,12 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { BODY_LIMIT, clampIssueBody } from './clamp-issue-body.mjs';
+import { BODY_LIMIT, MAX_PARTS, clampIssueBody, splitIssueBody } from './clamp-issue-body.mjs';
 
 const failures = [];
 
@@ -70,6 +70,56 @@ function auditShapedBody(totalLength) {
     const written = readFileSync(file, 'utf8');
     check('the CLI rewrites the file under the limit', written.length <= BODY_LIMIT, `got ${written.length}`);
     check('the CLI passes --note through', written.includes('See the artifact.'));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// The private audit issue splits rather than truncates: the 2026-08-29 and
+// 08-30 runs lost a FAIL past the cut. Every part fits, and stripping the part
+// headers gives back the body exactly.
+{
+  const body = auditShapedBody(226_302);
+  const parts = splitIssueBody(body, 'See the artifact.');
+  check('a long body splits into several parts', parts.length > 1, `got ${parts.length}`);
+  check('every part fits the limit', parts.every((p) => p.length <= BODY_LIMIT),
+    parts.map((p) => p.length).join(', '));
+  check('parts are labelled in order', parts.every((p, i) => p.startsWith(`_Part ${i + 1} of ${parts.length}._\n\n`)));
+  const rejoined = parts.map((p) => p.replace(/^_Part \d+ of \d+\._\n\n/, '')).join('');
+  check('the split loses nothing', rejoined === body, `rejoined ${rejoined.length} of ${body.length}`);
+  check('the head stays in part 1', parts[0].includes('**A domain returned `FAIL`.**'));
+  check('a split cuts at line boundaries', parts.slice(0, -1).every((p) => p.endsWith('\n')));
+}
+
+// A body that fits is its own single part, byte-identical.
+{
+  const body = auditShapedBody(1_000);
+  const parts = splitIssueBody(body, 'ignored');
+  check('a short body is one untouched part', parts.length === 1 && parts[0] === body);
+}
+
+// A runaway body stops at MAX_PARTS and says so, every part still postable.
+{
+  const parts = splitIssueBody('y'.repeat(BODY_LIMIT * (MAX_PARTS + 3)), 'See the artifact.');
+  check('a runaway body stops at MAX_PARTS', parts.length === MAX_PARTS, `got ${parts.length}`);
+  check('every capped part fits', parts.every((p) => p.length <= BODY_LIMIT));
+  check('the last part says where the split stopped',
+    parts.at(-1).includes(`Split stopped at ${MAX_PARTS} parts`) && parts.at(-1).includes('See the artifact.'));
+}
+
+// `--split` writes numbered part files beside the body, which it leaves alone.
+{
+  const dir = mkdtempSync(join(tmpdir(), 'clamp-issue-body-'));
+  try {
+    const file = join(dir, 'audit-private.md');
+    const body = auditShapedBody(68_424);
+    writeFileSync(file, body);
+    const cli = fileURLToPath(new URL('./clamp-issue-body.mjs', import.meta.url));
+    execFileSync('node', [cli, file, '--split', '--note', 'See the artifact.'], { stdio: 'pipe' });
+    const names = readdirSync(dir).filter((n) => n.startsWith('audit-private-part-')).sort();
+    check('the CLI writes zero-padded part files', names.length === 3 && names[0] === 'audit-private-part-01.md', names.join(', '));
+    check('the CLI leaves the body itself alone', readFileSync(file, 'utf8') === body);
+    check('every written part fits', names.every((n) => readFileSync(join(dir, n), 'utf8').length <= BODY_LIMIT));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
