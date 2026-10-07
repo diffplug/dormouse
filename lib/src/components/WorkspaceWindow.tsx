@@ -7,7 +7,7 @@ import { getPlatform } from '../lib/platform';
 import { getWorkspacesSnapshot, subscribeToWorkspaces } from '../lib/workspace-store';
 import type { SessionFlushRequest } from '../lib/platform/types';
 import { installWorkspaceAutoNaming } from '../lib/workspace-autoname-controller';
-import type { WallBootPlans, WallBootProps } from './wall/wall-types';
+import type { WallBootPlans, WallBootProps, WallEvent, WallMode } from './wall/wall-types';
 import type { WorkspaceId } from '../lib/session-types';
 import { RingHandoffContext } from './wall/wall-context';
 import type { RingFrame } from '../lib/rect-tween';
@@ -25,12 +25,18 @@ export function WorkspaceWindow({
   baseboardNotice,
   dialogHost,
   enableBurrow,
+  initialMode,
+  onEvent,
   initialPlans,
   ...boot
 }: WallBootProps & {
   baseboardNotice?: ReactNode;
   dialogHost?: ReactNode;
   enableBurrow?: boolean;
+  /** Every Wall's mode at mount, the seeded one's and each new Workspace's. */
+  initialMode?: WallMode;
+  /** Every Wall's events, inactive ones' included. */
+  onEvent?: (event: WallEvent) => void;
   /** One record per Workspace, from the restored Window. Takes precedence over
    *  the single-record props, which stay for the compositions that restore one
    *  Session (stories, the website playground). */
@@ -103,6 +109,8 @@ export function WorkspaceWindow({
                 baseboardNotice={isActive ? baseboardNotice : undefined}
                 dialogHost={isActive ? dialogHost : undefined}
                 enableBurrow={enableBurrow}
+                initialMode={initialMode}
+                onEvent={onEvent}
               />
             </WorkspaceMotion>
           );

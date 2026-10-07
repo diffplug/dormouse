@@ -47,6 +47,9 @@ interface SiteHeaderProps {
   brandVisible?: boolean;
   /** Optional header control, used by the Pocket playground's theme picker. */
   controls?: React.ReactNode;
+  /** The desktop playground's Workspace tabs, after the brand and resting on
+   *  the header's bottom edge, where the Wall begins. */
+  tabs?: React.ReactNode;
   /** Use VSCode theme variables instead of the marketing site's palette. */
   themeAware?: boolean;
   /** Extra inline styles for the header element (background, blur, etc.) */
@@ -64,6 +67,7 @@ const SiteHeader = forwardRef<HTMLElement, SiteHeaderProps>(
     brandRef,
     brandVisible = true,
     controls,
+    tabs,
     themeAware = false,
     style,
   }, ref) {
@@ -113,6 +117,7 @@ const SiteHeader = forwardRef<HTMLElement, SiteHeaderProps>(
           >
             Dormouse
           </a>
+          {tabs ? <div className="flex min-w-0 flex-1 items-end self-stretch">{tabs}</div> : null}
           <div className="ml-auto flex min-w-0 items-center gap-3 md:gap-8">
             {controls ? <div className="min-w-0">{controls}</div> : null}
             <nav className="flex shrink-0 items-center gap-5 md:gap-10">

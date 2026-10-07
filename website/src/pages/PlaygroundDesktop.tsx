@@ -90,7 +90,8 @@ function PlaygroundDesktopExperience() {
   useRestoredTheme(WEBSITE_DEFAULT_THEME_ID);
 
   const [WallModule, setWallModule] = useState<{
-    Wall: React.ComponentType<any>;
+    WorkspaceWindow: React.ComponentType<any>;
+    WorkspaceStrip: React.ComponentType<any>;
   } | null>(null);
   const [placeToPasteOpen, setPlaceToPasteOpen] = useState(false);
 
@@ -132,13 +133,16 @@ function PlaygroundDesktopExperience() {
       if (getPreferredPlayground() === "pocket") return;
       // None of these consumes another, so load the whole bundle at once rather
       // than paying a round of module resolution each on the boot path.
-      const [platform, registry, mouseSelection, themes, alertSettings, wall, shellDefaults, asciiSplash, playgroundFs] = await Promise.all([
+      const [platform, registry, mouseSelection, themes, alertSettings, workspaceWindow, workspaceStrip, workspaceStore, bootPlans, shellDefaults, asciiSplash, playgroundFs] = await Promise.all([
         import("dormouse-lib/lib/platform"),
         import("dormouse-lib/lib/terminal-registry"),
         import("dormouse-lib/lib/mouse-selection"),
         import("dormouse-lib/lib/themes"),
         import("dormouse-lib/lib/alert-settings"),
-        import("dormouse-lib/components/Wall"),
+        import("dormouse-lib/components/WorkspaceWindow"),
+        import("dormouse-lib/components/WorkspaceStrip"),
+        import("dormouse-lib/lib/workspace-store"),
+        import("dormouse-lib/components/wall/workspace-boot-plans"),
         import("dormouse-lib/lib/shell-defaults"),
         import("../lib/ascii-splash-runner"),
         import("../lib/playground-fs"),
@@ -281,7 +285,11 @@ function PlaygroundDesktopExperience() {
         if (adapter.hasPty(pane.id)) tryAutoStart(pane);
       }
 
-      setWallModule({ Wall: wall.Wall });
+      // Both stores outlive the page: a revisit starts from one Workspace and
+      // re-seeds the L-shape rather than finding the last visit's Workspaces.
+      workspaceStore.resetWorkspaces();
+      bootPlans.resetWorkspaceBootPlans();
+      setWallModule({ WorkspaceWindow: workspaceWindow.WorkspaceWindow, WorkspaceStrip: workspaceStrip.WorkspaceStrip });
     }
     loadWall();
 
@@ -322,11 +330,15 @@ function PlaygroundDesktopExperience() {
 
   return (
     <>
-      <SiteHeader activePath="/playground" themeAware />
+      <SiteHeader
+        activePath="/playground"
+        themeAware
+        tabs={WallModule ? <WallModule.WorkspaceStrip className="self-stretch" /> : null}
+      />
 
       <main className="fixed top-16 right-0 bottom-0 left-0 flex min-h-0 md:top-20">
         {WallModule ? (
-          <WallModule.Wall
+          <WallModule.WorkspaceWindow
             restoredLathLayout={DESKTOP_PLAYGROUND_LAYOUT}
             initialMode="passthrough"
             onEvent={handleWallEvent}
