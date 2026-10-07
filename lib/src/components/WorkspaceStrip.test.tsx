@@ -696,6 +696,14 @@ describe('pinned tabs', () => {
     expect(claimed).toEqual([container.querySelector('[data-workspace-strip-spacer]')]);
   });
 
+  it('puts a host control right after +, before the spacer', async () => {
+    await act(async () => { createWorkspace({ id: 'ws-2', name: 'Notes', pinned: true }); });
+    await render(<WorkspaceStrip afterNew={<button type="button" data-host-control>Reset</button>} />);
+    const order = [...container.querySelectorAll<HTMLElement>('[data-workspace-new], [data-host-control], [data-workspace-strip-spacer], [data-workspace-tab]')]
+      .map((element) => element.dataset.workspaceTab ?? ('workspaceNew' in element.dataset ? '+' : 'hostControl' in element.dataset ? 'host' : 'spacer'));
+    expect(order.slice(-4)).toEqual(['+', 'host', 'spacer', 'ws-2']);
+  });
+
   it('groups pinned tabs after +, with no close button, and middle-click closes nothing', async () => {
     const first = getWorkspacesSnapshot().workspaces[0].id;
     await act(async () => {

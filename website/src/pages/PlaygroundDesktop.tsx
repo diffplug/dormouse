@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { ArrowCounterClockwiseIcon } from "@phosphor-icons/react";
 import { Link } from "react-router";
 import SiteHeader, { STATIC_PAGE_HEADER_STYLE } from "../components/SiteHeader";
 import PlaygroundHeader, { PLAYGROUND_HEADER_HEIGHT_PX } from "../components/PlaygroundHeader";
@@ -94,6 +95,7 @@ function PlaygroundDesktopExperience() {
     WorkspaceWindow: React.ComponentType<any>;
     WorkspaceStrip: React.ComponentType<any>;
     join: { backgroundImage: string; height: number };
+    resetClass: string;
   } | null>(null);
   const [placeToPasteOpen, setPlaceToPasteOpen] = useState(false);
 
@@ -293,11 +295,12 @@ function PlaygroundDesktopExperience() {
       workspaceStore.resetWorkspaces();
       bootPlans.resetWorkspaceBootPlans();
       // A user's name, so auto-naming never retitles it from its panes' cwd.
-      workspaceStore.renameWorkspace(workspaceStore.getActiveWorkspaceId(), "tutorial");
+      workspaceStore.renameWorkspace(workspaceStore.getActiveWorkspaceId(), "Playground");
       setWallModule({
         WorkspaceWindow: workspaceWindow.WorkspaceWindow,
         WorkspaceStrip: workspaceStrip.WorkspaceStrip,
         join: { backgroundImage: design.TAB_WALL_JOIN_GRADIENT, height: design.PANE_GUTTER_PX },
+        resetClass: design.chromeButton({ kind: "labeled", class: "mb-0.5 shrink-0 text-muted hover:text-app-fg" }),
       });
     }
     loadWall();
@@ -340,7 +343,23 @@ function PlaygroundDesktopExperience() {
   return (
     <>
       <PlaygroundHeader
-        tabs={WallModule ? <WallModule.WorkspaceStrip className="self-stretch" /> : null}
+        tabs={WallModule ? (
+          <WallModule.WorkspaceStrip
+            className="self-stretch"
+            afterNew={
+              // What a refresh always did, where a visitor looks for it.
+              <button
+                type="button"
+                className={WallModule.resetClass}
+                title="Reset the playground to how it started"
+                onClick={() => window.location.reload()}
+              >
+                <ArrowCounterClockwiseIcon size={12} weight="bold" aria-hidden="true" />
+                Reset playground
+              </button>
+            }
+          />
+        ) : null}
         join={WallModule?.join}
       />
 
