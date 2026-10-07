@@ -38,3 +38,73 @@ it('preserves one command echo when the helper resizes between PTY chunks', asyn
     expect(text.match(/On branch main/g)).toHaveLength(1);
   } finally { terminal.dispose(); adapter.shutdown(); }
 });
+
+it.each([false, true])('keeps both narrow helper prompts when startup waits for fit (yield before fit: %s)', async (yieldBeforeFit) => {
+  const adapter = new FakePtyAdapter();
+  adapter.deferHelperStartup = true;
+  const terminal = new Terminal({ cols: 80, rows: 24, allowProposedApi: true });
+  terminal.loadAddon(new UnicodeGraphemesAddon());
+  const output = vi.fn(({ data }: { data: string }) => terminal.write(data));
+  adapter.onPtyData(output);
+  const drain = () => new Promise<void>(resolve => terminal.write('', resolve));
+  try {
+    adapter.spawnPty(ID, { helper: { parentId: 'source', command: 'git status' } });
+    if (yieldBeforeFit) await drain();
+    expect(output).not.toHaveBeenCalled();
+    terminal.resize(26, 5);
+    adapter.resizePty(ID, 26, 5);
+    // A size notification alone does not release output before the story is ready.
+    expect(output).not.toHaveBeenCalled();
+    adapter.resumeHelperStartup(ID);
+    adapter.resumeHelperStartup(ID);
+    await drain();
+    adapter.writePty(ID, 'git status\r');
+    await drain();
+    const buffer = terminal.buffer.active;
+    const lines = Array.from({ length: buffer.length }, (_, i) => buffer.getLine(i)!.translateToString(true));
+    expect(lines).toEqual([
+      '/home/demo/projects/dormou',
+      'se ❯ git status',
+      'On branch main',
+      'nothing to commit, working',
+      ' tree clean',
+      '/home/demo/projects/dormou',
+      'se ❯ ',
+    ]);
+    expect(buffer.viewportY).toBe(buffer.baseY);
+    expect(buffer.baseY).toBe(2);
+  } finally { terminal.dispose(); adapter.shutdown(); }
+});
+
+it.each(['kill', 'reset'] as const)('discards a deferred helper prompt on %s', async (action) => {
+  const adapter = new FakePtyAdapter();
+  adapter.deferHelperStartup = true;
+  const output = vi.fn();
+  adapter.onPtyData(output);
+  try {
+    adapter.spawnPty(ID, { helper: { parentId: 'source', command: 'git status' } });
+    if (action === 'kill') adapter.killPty(ID);
+    else { adapter.reset(); adapter.onPtyData(output); }
+    // Reusing the id must not let the old helper write into the new terminal.
+    adapter.spawnPty(ID);
+    adapter.resumeHelperStartup(ID);
+    await Promise.resolve();
+    expect(output).not.toHaveBeenCalled();
+  } finally { adapter.shutdown(); }
+});
+
+it('does not let a queued prompt release a replacement helper early', async () => {
+  const adapter = new FakePtyAdapter();
+  const output = vi.fn();
+  adapter.onPtyData(output);
+  try {
+    adapter.spawnPty(ID, { helper: { parentId: 'source', command: 'git status' } });
+    adapter.killPty(ID);
+    adapter.deferHelperStartup = true;
+    adapter.spawnPty(ID, { helper: { parentId: 'source', command: 'git status' } });
+    await Promise.resolve();
+    expect(output).not.toHaveBeenCalled();
+    adapter.resumeHelperStartup(ID);
+    expect(output).toHaveBeenCalledTimes(1);
+  } finally { adapter.shutdown(); }
+});
