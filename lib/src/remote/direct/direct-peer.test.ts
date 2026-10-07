@@ -617,7 +617,7 @@ describe('DirectPeer', () => {
     it('refuses a pair the stack could not read, before the open', async () => {
       const policy = lanOnlyPolicy();
       const run = pair({}, policy);
-      run.answerer.transportPairThrows = true;
+      run.answerer.pairReadThrows = true;
       const offer = await run.clientPeer.offer();
       await run.clientPeer.acceptAnswer((await run.burrowPeer.answer(offer!))!);
       await flushMicrotasks();
@@ -630,24 +630,21 @@ describe('DirectPeer', () => {
     it('refuses a pair the stack could not read once open, unlike a reading of no pair', async () => {
       const { answerer, burrow, timers } = await connected({}, lanOnlyPolicy());
       answerer.setConnectionState('connected');
-      // ICE renominated onto a pair the transport read throws on.
-      answerer.transportPairThrows = true;
+      // ICE renominated onto a pair the stack throws reading.
+      answerer.pairReadThrows = true;
       timers.fireAt(DIRECT_PATH_RECHECK_MS);
 
       expect(burrow.refusals).toEqual(['the connection’s selected candidate pair could not be read']);
       expect(answerer.closed).toBe(true);
     });
 
-    it('reads the native pair where the stack has one, never the transport’s', async () => {
-      const { answerer, burrow, timers } = await connected({ nativePairRead: true }, lanOnlyPolicy());
-      answerer.setConnectionState('connected');
-      answerer.transportPairThrows = true;
-      timers.fireAt(DIRECT_PATH_RECHECK_MS);
-      expect(burrow.refusals).toEqual([]);
+    it('refuses a held peer with no native read of the pair, as a browser’s', async () => {
+      const policy = lanOnlyPolicy();
+      const run = await connected({ pairRead: 'none' }, policy);
 
-      answerer.reselect(OFF_LAN);
-
-      expect(burrow.refusals).toEqual(['off the LAN']);
+      expect(run.burrow.opens).toBe(0);
+      expect(run.burrow.refusals).toEqual(['the connection’s selected candidate pair could not be read']);
+      expect(policy.asked).toEqual([]);
     });
 
     it('arms no re-read for a peer no policy holds', async () => {

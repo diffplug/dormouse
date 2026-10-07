@@ -63,16 +63,16 @@ export interface FakeDirectNetworkOptions {
    */
   readonly channelSide?: FakePeerRole;
   /**
-   * What each end's transport first reports as its selected pair, as the
-   * answerer sees it: {@link FAKE_LAN_PAIR} by default, `null` for none.
+   * What each end first reports as its selected pair, as the answerer sees it:
+   * {@link FAKE_LAN_PAIR} by default, `null` for none.
    */
   readonly selectedPair?: DirectSelectedPair | null;
   /**
-   * Give each end `node-datachannel`'s native read of that pair
-   * ({@link DirectPeerLike.selectedCandidatePair}) beside the transport's, as
-   * the polyfill does; a browser's transport read alone by default.
+   * Whether each end has `node-datachannel`'s native read of that pair
+   * ({@link DirectPeerLike.selectedCandidatePair}): `native`, the default, as
+   * the polyfill does, or `none`, as a browser.
    */
-  readonly nativePairRead?: boolean;
+  readonly pairRead?: 'native' | 'none';
 }
 
 /** The pair a run selects unless it says otherwise: both ends on one LAN. */
@@ -270,16 +270,13 @@ export class FakePeer implements DirectPeerLike {
   #connectionState = 'connecting';
   closed = false;
   /**
-   * What the transport's `getSelectedCandidatePair()` reports, as addresses;
-   * `null` for none. See {@link FakeDirectNetworkOptions.selectedPair}.
+   * What the native `selectedCandidatePair()` reports, as addresses; `null`
+   * for none. See {@link FakeDirectNetworkOptions.selectedPair}.
    */
   selectedPair: DirectSelectedPair | null;
-  /**
-   * Make the transport's `getSelectedCandidatePair()` throw, as the polyfill's
-   * does for a candidate with no mid, whatever {@link selectedPair} holds.
-   */
-  transportPairThrows = false;
-  /** See {@link FakeDirectNetworkOptions.nativePairRead}. */
+  /** Make that read throw, as the addon does on a libdatachannel error, whatever {@link selectedPair} holds. */
+  pairReadThrows = false;
+  /** See {@link FakeDirectNetworkOptions.pairRead}. */
   readonly selectedCandidatePair?: DirectPeerLike['selectedCandidatePair'];
 
   constructor(
@@ -296,7 +293,12 @@ export class FakePeer implements DirectPeerLike {
     // its candidates from the case.
     if (this.#gathering === 'complete') this.#gathered.push(candidateLine(HOST_CANDIDATE[role], 'host'));
     this.selectedPair = options.selectedPair === undefined ? FAKE_LAN_PAIR : options.selectedPair;
-    if (options.nativePairRead) this.selectedCandidatePair = () => pairOf(this.selectedPair);
+    if (options.pairRead !== 'none') {
+      this.selectedCandidatePair = () => {
+        if (this.pairReadThrows) throw new Error('libdatachannel error: the pair could not be read');
+        return pairOf(this.selectedPair);
+      };
+    }
   }
 
   get iceGatheringState(): string {
@@ -317,19 +319,7 @@ export class FakePeer implements DirectPeerLike {
   get sctp(): DirectSctpLike | null {
     const limit = this.#options.maxMessageSize;
     if (limit === null) return null;
-    const pair = this.selectedPair;
-    const throws = this.transportPairThrows;
-    return {
-      maxMessageSize: limit ?? NOISE_MAX_MESSAGE_LENGTH,
-      transport: {
-        iceTransport: {
-          getSelectedCandidatePair: () => {
-            if (throws) throw new TypeError('At least one of sdpMLineIndex or sdpMid must be specified');
-            return pairOf(pair);
-          },
-        },
-      },
-    };
+    return { maxMessageSize: limit ?? NOISE_MAX_MESSAGE_LENGTH };
   }
 
   get connectionState(): string {

@@ -80,7 +80,7 @@ export interface DirectCandidateLike {
 }
 
 /**
- * As much of `RTCSctpTransport` as the size and path checks need. The size is
+ * As much of `RTCSctpTransport` as the size check needs. The size is
  * the association's own limit, negotiated from both ends' `a=max-message-size`,
  * so it is knowable only once the channel is open — `node-datachannel`'s
  * polyfill exposes the transport from construction and leaves this null until
@@ -88,19 +88,9 @@ export interface DirectCandidateLike {
  */
 export interface DirectSctpLike {
   readonly maxMessageSize: number | null;
-  /**
-   * `RTCDtlsTransport` → `RTCIceTransport`, whose selected pair a
-   * {@link DirectPathPolicy} checks. Optional all the way down: only a
-   * restricted Burrow reads it, and a peer that cannot say is refused there.
-   */
-  readonly transport?: {
-    readonly iceTransport?: {
-      getSelectedCandidatePair?(): DirectCandidatePairLike | null;
-    };
-  };
 }
 
-/** A selected candidate pair, as either read in {@link DirectPeerLike} reports it. */
+/** A selected candidate pair, as {@link DirectPeerLike.selectedCandidatePair} reports it. */
 export interface DirectCandidatePairLike {
   readonly local?: DirectCandidateLike;
   readonly remote?: DirectCandidateLike;
@@ -120,10 +110,11 @@ export interface DirectPeerLike {
   readonly connectionState: string;
   /**
    * `node-datachannel`'s polyfill only: the native `PeerConnection`'s selected
-   * pair, each end's `address` read straight from the ICE agent. Read in place
-   * of the transport's, which rebuilds each end as an `RTCIceCandidate` whose
-   * constructor throws on a candidate with no mid — a pair the agent may still
-   * be sending on. A browser has none, and holds no path policy.
+   * pair, each end's `address` read straight from the ICE agent — the one read
+   * a {@link DirectPathPolicy} checks, never the W3C transport's, which
+   * rebuilds each end as an `RTCIceCandidate` whose constructor throws on a
+   * candidate with no mid. A browser has none, and holds no path policy; a
+   * peer that does with none is refused.
    */
   selectedCandidatePair?(): DirectCandidatePairLike | null;
   addEventListener(type: string, handler: (ev: unknown) => void): void;
@@ -204,7 +195,7 @@ function addressOf(candidate: DirectCandidateLike | undefined): string | null {
   return typeof address === 'string' ? address : null;
 }
 
-/** A selected pair whose read threw: refused, never read as no pair. */
+/** A selected pair with no read, or whose read threw: refused, never read as no pair. */
 const UNREADABLE_PAIR = 'unreadable';
 
 /**
@@ -836,17 +827,16 @@ export class DirectPeer {
   }
 
   /**
-   * The selected pair's addresses — from the native read where the peer has
-   * one ({@link DirectPeerLike.selectedCandidatePair}), else the transport's —
-   * `null` where the stack reports none, or {@link UNREADABLE_PAIR} where
-   * reading it threw.
+   * The selected pair's addresses from the native read
+   * ({@link DirectPeerLike.selectedCandidatePair}): `null` where the stack
+   * reports none, or {@link UNREADABLE_PAIR} where the peer has no such read
+   * or reading it threw.
    */
   #selectedPair(): DirectSelectedPair | null | typeof UNREADABLE_PAIR {
     const peer = this.#peer;
+    if (!peer.selectedCandidatePair) return UNREADABLE_PAIR;
     try {
-      const pair = peer.selectedCandidatePair
-        ? peer.selectedCandidatePair()
-        : peer.sctp?.transport?.iceTransport?.getSelectedCandidatePair?.();
+      const pair = peer.selectedCandidatePair();
       return pair ? { local: addressOf(pair.local), remote: addressOf(pair.remote) } : null;
     } catch {
       return UNREADABLE_PAIR;
