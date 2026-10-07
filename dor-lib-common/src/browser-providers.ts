@@ -67,10 +67,13 @@ export const DEFAULT_PLAYWRIGHT_BIN = 'playwright-cli';
 const PLAYWRIGHT_FILENAME_RE = /^playwright-cli(?:\.(?:cmd|bat|exe|com|ps1))?$/i;
 const AGENT_BROWSER_FILENAME_RE = /^agent-browser(?:\.(?:cmd|bat|exe|com|ps1))?$/i;
 
-// POSIX absolute, Windows drive-absolute, or a UNC share. A relative path is
-// refused outright: it would resolve against the spawner's cwd, which the
-// caller does not know and must not be able to aim at.
-const ABSOLUTE_RE = /^(?:\/|[A-Za-z]:[\\/]|\\\\)/;
+// POSIX absolute or Windows drive-absolute. A relative path is refused
+// outright: it would resolve against the spawner's cwd, which the caller does
+// not know and must not be able to aim at. So is anything opening with two
+// separators in either spelling: a UNC share (`\\host\share`, `//host/share`)
+// or a device path (`\\?\`, `\\.\`), which Windows would run off another
+// machine or past its own path normalization.
+const ABSOLUTE_RE = /^(?:\/(?![\\/])|[A-Za-z]:[\\/])/;
 
 /**
  * True when `candidate` may be spawned as agent-browser.

@@ -5,7 +5,7 @@
  * clock, so "arms no timer" is a count rather than a wait.
  */
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   WS_CLOSE_BURROW_NOT_ENTITLED,
@@ -205,5 +205,34 @@ describe('BurrowRuntime relay socket policy', () => {
     await settle();
     expect(burrow.status).toBe('stopped');
     expect(clock.armed).toBe(0);
+  });
+});
+
+describe('BurrowRuntime transport', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  // The factory is the Burrow service's policy-guarded one
+  // (`docs/specs/remote-network.md` -> "Policy"); a caller that omits it gets no
+  // socket, never one opened around the guard.
+  it('has no default socket factory to fall back on', () => {
+    const globalSocket = vi.fn();
+    vi.stubGlobal('WebSocket', globalSocket);
+    const options = {
+      enrollment,
+      reconnect: false,
+      loadAcl: () => [],
+      saveAcl: () => {},
+      requestApproval: () => {},
+      dismissApproval: () => {},
+    };
+    const burrow = new BurrowRuntime(options as unknown as ConstructorParameters<typeof BurrowRuntime>[0]);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      burrow.start();
+    } finally {
+      burrow.stop();
+      warn.mockRestore();
+    }
+    expect(globalSocket).not.toHaveBeenCalled();
   });
 });
