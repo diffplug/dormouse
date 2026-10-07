@@ -17,7 +17,7 @@
       "homepage": "https://github.com/madsmtm/objc2",
       "declaredName": "objc2",
       "versions": [
-        "0.6.4"
+        "0.6.5"
       ]
     },
     {
@@ -77,7 +77,7 @@
       "homepage": "https://tauri.app/",
       "declaredName": "tauri",
       "versions": [
-        "2.11.6"
+        "2.12.1"
       ]
     },
     {
@@ -87,7 +87,7 @@
       "homepage": "https://tauri.app/",
       "declaredName": "tauri-build",
       "versions": [
-        "2.6.3"
+        "2.7.1"
       ]
     },
     {
@@ -97,7 +97,7 @@
       "homepage": "https://github.com/tauri-apps/plugins-workspace",
       "declaredName": "tauri-plugin-shell",
       "versions": [
-        "2.3.6"
+        "2.4.0"
       ]
     },
     {
@@ -107,7 +107,7 @@
       "homepage": "https://github.com/tauri-apps/plugins-workspace",
       "declaredName": "tauri-plugin-updater",
       "versions": [
-        "2.12.0"
+        "2.13.1"
       ]
     },
     {
@@ -146,7 +146,7 @@
       "author": "Daniel Reiter Horn <danielrh@dropbox.com>",
       "homepage": "https://github.com/dropbox/rust-alloc-no-stdlib",
       "versions": [
-        "2.0.4"
+        "3.0.0"
       ]
     },
     {
@@ -155,7 +155,7 @@
       "author": "Daniel Reiter Horn <danielrh@dropbox.com>",
       "homepage": "https://github.com/dropbox/rust-alloc-no-stdlib",
       "versions": [
-        "0.2.2"
+        "0.3.0"
       ]
     },
     {
@@ -283,7 +283,7 @@
       "author": "Daniel Reiter Horn <danielrh@dropbox.com>, The Brotli Authors",
       "homepage": "https://github.com/dropbox/rust-brotli",
       "versions": [
-        "8.0.2"
+        "9.0.0"
       ]
     },
     {
@@ -292,7 +292,7 @@
       "author": "Daniel Reiter Horn <danielrh@dropbox.com>, The Brotli Authors",
       "homepage": "https://github.com/dropbox/rust-brotli-decompressor",
       "versions": [
-        "5.0.0"
+        "6.0.1"
       ]
     },
     {
@@ -382,7 +382,7 @@
       "author": "Kornel <kornel@geekhood.net>",
       "homepage": "https://lib.rs/cargo_toml",
       "versions": [
-        "0.22.3"
+        "1.0.1"
       ]
     },
     {
@@ -418,7 +418,7 @@
       "author": "Matthew D. Steele <mdsteele@alum.mit.edu>",
       "homepage": "https://github.com/mdsteele/rust-cfb",
       "versions": [
-        "0.7.3"
+        "0.14.0"
       ]
     },
     {
@@ -563,7 +563,7 @@
       "author": "Simon Sapin <simon.sapin@exyr.org>",
       "homepage": "https://github.com/servo/rust-cssparser",
       "versions": [
-        "0.36.0"
+        "0.37.0"
       ]
     },
     {
@@ -572,25 +572,16 @@
       "author": "Simon Sapin <simon.sapin@exyr.org>",
       "homepage": "https://github.com/servo/rust-cssparser",
       "versions": [
-        "0.6.1"
+        "0.7.1"
       ]
     },
     {
       "name": "ctor",
       "license": "MIT OR Apache-2.0",
       "author": "Matt Mastracci <matthew@mastracci.com>",
-      "homepage": "https://github.com/mmastrac/rust-ctor",
+      "homepage": "https://github.com/mmastrac/linktime",
       "versions": [
-        "0.8.0"
-      ]
-    },
-    {
-      "name": "ctor-proc-macro",
-      "license": "MIT OR Apache-2.0",
-      "author": "Matt Mastracci <matthew@mastracci.com>",
-      "homepage": "https://github.com/mmastrac/rust-ctor",
-      "versions": [
-        "0.0.7"
+        "1.0.13"
       ]
     },
     {
@@ -678,9 +669,9 @@
       "name": "dirs",
       "license": "MIT OR Apache-2.0",
       "author": "Simon Ochsenreither <simon@ochsenreither.de>",
-      "homepage": "https://github.com/soc/dirs-rs",
+      "homepage": "https://codeberg.org/dirs/dirs-rs",
       "versions": [
-        "6.0.0"
+        "7.0.0"
       ]
     },
     {
@@ -734,7 +725,7 @@
       "author": "niklak <morgenpurple@gmail.com>, importcjj <importcjj@gmail.com>",
       "homepage": "https://github.com/niklak/dom_query",
       "versions": [
-        "0.27.0"
+        "0.28.0"
       ]
     },
     {
@@ -762,24 +753,6 @@
       "homepage": "https://github.com/upsuper/dtoa-short",
       "versions": [
         "0.3.5"
-      ]
-    },
-    {
-      "name": "dtor",
-      "license": "MIT OR Apache-2.0",
-      "author": "Matt Mastracci <matthew@mastracci.com>",
-      "homepage": "https://github.com/mmastrac/rust-ctor",
-      "versions": [
-        "0.3.0"
-      ]
-    },
-    {
-      "name": "dtor-proc-macro",
-      "license": "MIT OR Apache-2.0",
-      "author": "Matt Mastracci <matthew@mastracci.com>",
-      "homepage": "https://github.com/mmastrac/rust-ctor",
-      "versions": [
-        "0.0.6"
       ]
     },
     {
@@ -1241,7 +1214,7 @@
       "author": "The html5ever Project Developers",
       "homepage": "https://github.com/servo/html5ever",
       "versions": [
-        "0.38.0"
+        "0.39.0"
       ]
     },
     {
@@ -1440,7 +1413,7 @@
       "author": "Bojan <dbojan@gmail.com>",
       "homepage": "https://github.com/bojand/infer",
       "versions": [
-        "0.19.0"
+        "0.22.0"
       ]
     },
     {
@@ -1550,25 +1523,25 @@
       "author": "Ivan Dubrov <dubrov.ivan@gmail.com>",
       "homepage": "https://github.com/idubrov/json-patch",
       "versions": [
-        "3.0.1"
+        "4.2.0"
       ]
     },
     {
       "name": "jsonptr",
       "license": "MIT OR Apache-2.0",
-      "author": "chance dinkins, André Sá de Mello <codasm@pm.me>",
+      "author": "chance dinkins, André Sá de Mello <codasm@pm.me>, Oliver Wangler <oliver@wngr.de>",
       "homepage": "https://github.com/chanced/jsonptr",
       "versions": [
-        "0.6.3"
+        "0.7.1"
       ]
     },
     {
       "name": "keyboard-types",
       "license": "MIT OR Apache-2.0",
       "author": "Pyfisch <pyfisch@posteo.org>",
-      "homepage": "https://github.com/pyfisch/keyboard-types",
+      "homepage": "https://github.com/rust-windowing/keyboard-types",
       "versions": [
-        "0.7.0"
+        "0.8.3"
       ]
     },
     {
@@ -1595,7 +1568,7 @@
       "author": "The Rust Project Developers",
       "homepage": "https://github.com/rust-lang/libc",
       "versions": [
-        "0.2.189"
+        "0.2.190"
       ]
     },
     {
@@ -1667,7 +1640,7 @@
       "author": "The html5ever Project Developers",
       "homepage": "https://github.com/servo/html5ever",
       "versions": [
-        "0.38.0"
+        "0.39.0"
       ]
     },
     {
@@ -1730,7 +1703,7 @@
       "author": "Tauri Programme within The Commons Conservancy",
       "homepage": "https://github.com/tauri-apps/muda",
       "versions": [
-        "0.19.1"
+        "0.20.0"
       ]
     },
     {
@@ -1740,6 +1713,15 @@
       "homepage": "https://github.com/rust-mobile/ndk",
       "versions": [
         "0.9.0"
+      ]
+    },
+    {
+      "name": "ndk-context",
+      "license": "MIT OR Apache-2.0",
+      "author": "The Rust Windowing contributors",
+      "homepage": "https://github.com/rust-windowing/android-ndk-rs",
+      "versions": [
+        "0.1.1"
       ]
     },
     {
@@ -2474,7 +2456,7 @@
       "author": "The Servo Project Developers",
       "homepage": "https://github.com/servo/stylo",
       "versions": [
-        "0.36.1"
+        "0.38.0"
       ]
     },
     {
@@ -2781,7 +2763,7 @@
       "author": "The swift-rs contributors",
       "homepage": "https://github.com/Brendonovich/swift-rs",
       "versions": [
-        "1.0.7"
+        "1.0.8"
       ]
     },
     {
@@ -2846,7 +2828,7 @@
       "author": "Tauri Programme within The Commons Conservancy, The winit contributors",
       "homepage": "https://github.com/diffplug/tao",
       "versions": [
-        "0.35.2"
+        "0.37.1"
       ]
     },
     {
@@ -2855,7 +2837,7 @@
       "author": "Tauri Programme within The Commons Conservancy",
       "homepage": "https://github.com/diffplug/tao",
       "versions": [
-        "0.1.3"
+        "0.1.4"
       ]
     },
     {
@@ -2882,7 +2864,7 @@
       "author": "Tauri Programme within The Commons Conservancy",
       "homepage": "https://tauri.app/",
       "versions": [
-        "2.6.3"
+        "2.7.1"
       ]
     },
     {
@@ -2891,7 +2873,7 @@
       "author": "Tauri Programme within The Commons Conservancy",
       "homepage": "https://tauri.app/",
       "versions": [
-        "2.6.3"
+        "2.7.1"
       ]
     },
     {
@@ -2900,7 +2882,7 @@
       "author": "Tauri Programme within The Commons Conservancy",
       "homepage": "https://tauri.app/",
       "versions": [
-        "2.6.2"
+        "2.7.1"
       ]
     },
     {
@@ -2909,7 +2891,7 @@
       "author": "Tauri Programme within The Commons Conservancy",
       "homepage": "https://tauri.app/",
       "versions": [
-        "2.11.3"
+        "2.12.1"
       ]
     },
     {
@@ -2918,7 +2900,7 @@
       "author": "Tauri Programme within The Commons Conservancy",
       "homepage": "https://tauri.app/",
       "versions": [
-        "2.11.4"
+        "2.12.1"
       ]
     },
     {
@@ -2927,7 +2909,7 @@
       "author": "Tauri Programme within The Commons Conservancy",
       "homepage": "https://tauri.app/",
       "versions": [
-        "2.9.3"
+        "2.10.1"
       ]
     },
     {
@@ -3065,7 +3047,6 @@
       "homepage": "https://github.com/toml-rs/toml",
       "versions": [
         "0.8.2",
-        "0.9.12+spec-1.1.0",
         "1.1.2+spec-1.1.0"
       ]
     },
@@ -3076,7 +3057,6 @@
       "homepage": "https://github.com/toml-rs/toml",
       "versions": [
         "0.6.3",
-        "0.7.5+spec-1.1.0",
         "1.1.1+spec-1.1.0"
       ]
     },
@@ -3178,7 +3158,7 @@
       "author": "Tauri Programme within The Commons Conservancy",
       "homepage": "https://github.com/tauri-apps/tray-icon",
       "versions": [
-        "0.24.1"
+        "0.25.1"
       ]
     },
     {
@@ -3206,51 +3186,6 @@
       "homepage": "https://github.com/paholg/typenum",
       "versions": [
         "1.20.0"
-      ]
-    },
-    {
-      "name": "unic-char-property",
-      "license": "MIT OR Apache-2.0",
-      "author": "The UNIC Project Developers",
-      "homepage": "https://github.com/open-i18n/rust-unic/",
-      "versions": [
-        "0.9.0"
-      ]
-    },
-    {
-      "name": "unic-char-range",
-      "license": "MIT OR Apache-2.0",
-      "author": "The UNIC Project Developers",
-      "homepage": "https://github.com/open-i18n/rust-unic/",
-      "versions": [
-        "0.9.0"
-      ]
-    },
-    {
-      "name": "unic-common",
-      "license": "MIT OR Apache-2.0",
-      "author": "The UNIC Project Developers",
-      "homepage": "https://github.com/open-i18n/rust-unic/",
-      "versions": [
-        "0.9.0"
-      ]
-    },
-    {
-      "name": "unic-ucd-ident",
-      "license": "MIT OR Apache-2.0",
-      "author": "The UNIC Project Developers",
-      "homepage": "https://github.com/open-i18n/rust-unic/",
-      "versions": [
-        "0.9.0"
-      ]
-    },
-    {
-      "name": "unic-ucd-version",
-      "license": "MIT OR Apache-2.0",
-      "author": "The UNIC Project Developers",
-      "homepage": "https://github.com/open-i18n/rust-unic/",
-      "versions": [
-        "0.9.0"
       ]
     },
     {
@@ -3295,7 +3230,7 @@
       "author": "the Deno authors, crowlKats <crowlkats@toaxl.com>",
       "homepage": "https://github.com/denoland/rust-urlpattern",
       "versions": [
-        "0.3.0"
+        "0.6.0"
       ]
     },
     {
@@ -3470,6 +3405,15 @@
       ]
     },
     {
+      "name": "web-time",
+      "license": "MIT OR Apache-2.0",
+      "author": "dAxpeDDa",
+      "homepage": "https://github.com/daxpedda/web-time",
+      "versions": [
+        "1.1.0"
+      ]
+    },
+    {
       "name": "webkit2gtk",
       "license": "MIT",
       "author": "Antoni Boucher, The Gtk-rs Project Developers",
@@ -3502,7 +3446,7 @@
       "author": "Bill Avery",
       "homepage": "https://github.com/wravery/webview2-rs",
       "versions": [
-        "0.38.2"
+        "0.39.1"
       ]
     },
     {
@@ -3520,7 +3464,7 @@
       "author": "Bill Avery",
       "homepage": "https://github.com/wravery/webview2-rs",
       "versions": [
-        "0.38.2"
+        "0.39.1"
       ]
     },
     {
@@ -3565,16 +3509,7 @@
       "author": "Tauri Programme within The Commons Conservancy",
       "homepage": "https://github.com/tauri-apps/tauri-plugin-vibrancy",
       "versions": [
-        "0.6.0"
-      ]
-    },
-    {
-      "name": "windows",
-      "license": "MIT OR Apache-2.0",
-      "author": "Microsoft",
-      "homepage": "https://github.com/microsoft/windows-rs",
-      "versions": [
-        "0.61.3"
+        "0.8.1"
       ]
     },
     {
@@ -3670,7 +3605,6 @@
       "author": "Microsoft",
       "homepage": "https://github.com/microsoft/windows-rs",
       "versions": [
-        "0.2.0",
         "0.3.2"
       ]
     },
@@ -3680,7 +3614,6 @@
       "author": "Microsoft",
       "homepage": "https://github.com/microsoft/windows-rs",
       "versions": [
-        "0.61.2",
         "0.62.2"
       ]
     },
@@ -3690,7 +3623,6 @@
       "author": "Microsoft",
       "homepage": "https://github.com/microsoft/windows-rs",
       "versions": [
-        "0.2.1",
         "0.3.2"
       ]
     },
@@ -3718,7 +3650,6 @@
       "author": "Microsoft",
       "homepage": "https://github.com/microsoft/windows-rs",
       "versions": [
-        "0.1.3",
         "0.2.1"
       ]
     },
@@ -3728,7 +3659,6 @@
       "author": "Microsoft",
       "homepage": "https://github.com/microsoft/windows-rs",
       "versions": [
-        "0.2.0",
         "0.3.1"
       ]
     },
@@ -3747,7 +3677,6 @@
       "author": "Microsoft",
       "homepage": "https://github.com/microsoft/windows-rs",
       "versions": [
-        "0.3.4",
         "0.4.1"
       ]
     },
@@ -3757,7 +3686,6 @@
       "author": "Microsoft",
       "homepage": "https://github.com/microsoft/windows-rs",
       "versions": [
-        "0.4.2",
         "0.5.1"
       ]
     },
@@ -3791,7 +3719,6 @@
       "author": "Microsoft",
       "homepage": "https://github.com/microsoft/windows-rs",
       "versions": [
-        "0.1.0",
         "0.2.1"
       ]
     },
@@ -3811,7 +3738,6 @@
       "homepage": "https://github.com/winnow-rs/winnow",
       "versions": [
         "0.5.40",
-        "0.7.15",
         "1.0.3"
       ]
     },
@@ -3848,7 +3774,7 @@
       "author": "Tauri Programme within The Commons Conservancy",
       "homepage": "https://github.com/tauri-apps/wry",
       "versions": [
-        "0.55.1"
+        "0.57.0"
       ]
     },
     {

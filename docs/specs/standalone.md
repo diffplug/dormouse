@@ -438,7 +438,7 @@ Source of truth: `start_ui_watchdog` in `standalone/src-tauri/src/lib.rs`; `Watc
 **Must let an Objective-C exception that AppKit raises beneath a tao callback, such as the `sendEvent:` override, unwind to AppKit**, whose event loop reports it and keeps running. Both halves are required (rationale):
 
 - **Must build release with `panic = "unwind"`.**
-- **Must take tao from the `diffplug/tao` fork** through `[patch.crates-io]`, whose Apple callbacks are `extern "C-unwind"`: one fork branch per patched release (`dormouse-0.35` is `tao-v0.35.2` plus that commit), `tao-macros` from the same rev. **Must rebase the commit onto the new release when tauri moves tao**, since an unused `[patch]` only warns; drop the patch once tauri depends on a tao carrying tauri-apps/tao#1354.
+- **Must take tao from the `diffplug/tao` fork** through `[patch.crates-io]`, whose Apple callbacks are `extern "C-unwind"`: one fork branch per patched release (`dormouse-0.37` is `tao-v0.37.1` plus that commit), `tao-macros` from the same rev. **Must rebase the commit onto the new release when tauri moves tao**, since an unused `[patch]` only warns; drop the patch once tauri depends on a tao carrying tauri-apps/tao#1354.
 
 **Rust panics still abort** (`abort_on_panic`, installed first in `run`). **An exception raised inside the Tauri event handler still aborts** (rationale).
 
