@@ -44,7 +44,7 @@ Source of truth: `standalone/src-tauri/src/lib.rs` (`SidecarState`, the `#[tauri
 
 **A blocking command must be async** — `#[tauri::command(async)]` or a plain `#[tauri::command]` over an `async fn`. Tauri runs a sync command on the main thread, where waiting on the sidecar or the arrival-journal lock stops the webview painting for the whole round trip (rationale). **The three clipboard readers included**: their non-Windows branches round-trip through the sidecar. A source-scanning test in `lib.rs` enforces it.
 
-**`pty_graceful_kill` must forward final output during its grace**, resolving once the last target has exited or at its timeout; under ConPTY the SIGTERM is an immediate kill. **The sidecar keeps each PTY's latest 200,000 UTF-16 code units for replay.** Pinned by `standalone/sidecar/pty-core.test.js`. `dor` control plumbing and the sidecar env: `docs/specs/dor-cli.md` → Host Plumbing.
+`pty_graceful_kill`: §Routing; `docs/specs/transport.md` → Graceful shutdown. **The sidecar keeps each PTY's latest 200,000 UTF-16 code units for replay.** Pinned by `standalone/sidecar/pty-core.test.js`. `dor` control plumbing and the sidecar env: `docs/specs/dor-cli.md` → Host Plumbing.
 
 ### Burrow service
 

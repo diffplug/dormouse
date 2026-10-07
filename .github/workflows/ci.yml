@@ -323,3 +323,9 @@ jobs:
 
       - name: Browser launch shell tests
         run: pnpm --dir lib exec vitest run src/host/browser-launch-env.test.ts
+
+      # node-pty ships the Windows addon and ConPTY DLL as prebuilds, so the
+      # install above suffices. The Linux suite cannot exercise native close.
+      - name: Windows PTY shutdown tests
+        if: runner.os == 'Windows'
+        run: pnpm exec node --test --test-force-exit standalone/sidecar/graceful-kill-windows.test.js standalone/sidecar/pty-host-wiring.test.js

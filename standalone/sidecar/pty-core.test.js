@@ -820,7 +820,7 @@ test('gracefulKill SIGTERMs the named PTYs, echoes requestId, forwards final out
   const mgr = create((event, data) => {
     events.push({ event, data });
     if (event === 'gracefulKillDone') resolveDone();
-  }, { spawn() { return fakePty; } });
+  }, { spawn() { return fakePty; } }, { platform: 'linux' });
 
   mgr.spawn('pane-1');
   mgr.gracefulKill(['pane-1'], 1, 'req-42');
@@ -872,6 +872,43 @@ test('gracefulKill resolves early after exits and a final output grace tick', as
   ]);
   // Resolved on the exit-driven early path, nowhere near the 60s bound.
   assert.ok(Date.now() - started < 5_000);
+});
+
+test('gracefulKill stops a PTY whose kill(signal) throws, as node-pty does on Windows', async () => {
+  // Models node-pty's WindowsTerminal: `kill(signal)` throws "Signals not
+  // supported on windows.", and only the argument-less ConPTY close stops it.
+  const listeners = {};
+  const closes = [];
+  const fakePty = {
+    pid: 7,
+    onData(handler) { listeners.data = handler; },
+    onExit(handler) { listeners.exit = handler; },
+    resize() {},
+    write() {},
+    kill(signal) {
+      if (signal) throw new Error('Signals not supported on windows.');
+      closes.push(signal);
+      setTimeout(() => listeners.exit({ exitCode: 0 }), 10);
+    },
+  };
+
+  let resolveDone;
+  const done = new Promise((resolve) => { resolveDone = resolve; });
+  const mgr = create((event) => {
+    if (event === 'gracefulKillDone') resolveDone('done');
+  }, { spawn() { return fakePty; } }, { platform: 'win32' });
+
+  mgr.spawn('pane-1');
+  mgr.gracefulKill(['pane-1'], 60_000, 'req-1');
+  const outcome = await Promise.race([
+    done,
+    new Promise((resolve) => setTimeout(() => resolve('still waiting'), 2_000)),
+  ]);
+
+  // The PTY got a stop it accepts, and the wait ended on its exit rather than
+  // sitting out the timeout.
+  assert.equal(closes.length, 1);
+  assert.equal(outcome, 'done');
 });
 
 test('gracefulKill with nothing live waits one grace tick', async () => {
@@ -2210,7 +2247,7 @@ test('marked requests recover exited buffers without reviving or discovering the
   assert.equal(events.length, 1);
 });
 
-test('gracefulKill targets only the named PTYs', async () => {
+for (const platform of ['linux', 'win32']) test(`gracefulKill targets only the named PTYs (${platform})`, async () => {
   const events = [];
   const pty = fakePtyModule();
   let resolveDone;
@@ -2218,15 +2255,30 @@ test('gracefulKill targets only the named PTYs', async () => {
   const mgr = create((event, data) => {
     events.push({ event, data });
     if (event === 'gracefulKillDone') resolveDone();
-  }, pty.module, { replay: true });
+  }, pty.module, { platform, replay: true });
   mgr.spawn('a');
   mgr.spawn('b');
 
   mgr.gracefulKill(['a'], 1, 'req-1');
   await done;
 
-  assert.deepEqual(pty.killed, [['a', 'SIGTERM']]);
+  assert.deepEqual(pty.killed, [['a', platform === 'win32' ? undefined : 'SIGTERM']]);
   assert.deepEqual(events.at(-1), { event: 'gracefulKillDone', data: { requestId: 'req-1' } });
+});
+
+test('Windows cleanup closes each PTY once, including a replacement under the same id', async () => {
+  const pty = fakePtyModule();
+  let resolveDone;
+  const done = new Promise(resolve => { resolveDone = resolve; });
+  const mgr = create(event => { if (event === 'gracefulKillDone') resolveDone(); }, pty.module, { platform: 'win32' });
+  mgr.spawn('a');
+  mgr.spawn('b');
+  mgr.gracefulKill(['a'], 1);
+  mgr.kill('a');
+  mgr.spawn('a');
+  mgr.killAll();
+  await done;
+  assert.deepEqual(pty.killed, [['a', undefined], ['b', undefined], ['a', undefined]]);
 });
 
 test('gracefulKill([]) kills nothing and still answers', async () => {

@@ -1274,7 +1274,7 @@ module.exports.pacedInputSegments = pacedInputSegments;
 // `onHelper(id, isHelper)` hears every helper decision — each spawn and each
 // promotion that succeeds — so the host's alerts, which keep a helper inert,
 // read this map's answer rather than keeping their own (docs/specs/alert.md).
-module.exports.create = function create(send, ptyModule, { replay = false, sliceSince = null, onHelper = () => {}, scanPorts = createPortScanner((pids, count) => getOpenPortsForPids(pids, { budgetCount: count })) } = {}) {
+module.exports.create = function create(send, ptyModule, { platform = process.platform, replay = false, sliceSince = null, onHelper = () => {}, scanPorts = createPortScanner((pids, count) => getOpenPortsForPids(pids, { budgetCount: count })) } = {}) {
   if (!ptyModule || typeof ptyModule.spawn !== 'function') {
     throw new TypeError('create() requires a node-pty compatible module');
   }
@@ -1353,7 +1353,7 @@ module.exports.create = function create(send, ptyModule, { replay = false, slice
   }
 
   function spawn(id, options) {
-    const config = resolveSpawnConfig({ ...options, id, surfaceId: id });
+    const config = resolveSpawnConfig({ ...options, id, surfaceId: id }, { platform });
     if (options?.helper && validHelperOwner(id, options.helper)) {
       helpers.set(id, { parentId: options.helper.parentId, command: options.helper.command });
     } else if (options?.helper) {
@@ -1377,7 +1377,7 @@ module.exports.create = function create(send, ptyModule, { replay = false, slice
         // the consumer, letting our protocol parser reply from the active theme —
         // the same passthrough Windows Terminal relies on. Verified end-to-end on
         // Windows. Ignored by node-pty on non-Windows platforms.
-        useConptyDll: process.platform === 'win32',
+        useConptyDll: platform === 'win32',
       });
     } catch (err) {
       console.error(`[pty-core] spawn failed for ${id}:`, err.message);
@@ -1518,6 +1518,22 @@ module.exports.create = function create(send, ptyModule, { replay = false, slice
     return ptys.has(id);
   }
 
+  // ConPTY closes asynchronously. Calling the pinned addon's native kill twice
+  // before onExit can crash the owner, so graceful shutdown and later cleanup
+  // share a guard keyed by the PTY object (never by a reusable Session id).
+  const closingPtys = new WeakSet();
+  function stopPty(p, graceful = false) {
+    if (platform !== 'win32') {
+      if (graceful) p.kill('SIGTERM');
+      else p.kill();
+      return;
+    }
+    if (closingPtys.has(p)) return;
+    closingPtys.add(p);
+    try { p.kill(); }
+    catch (error) { closingPtys.delete(p); throw error; }
+  }
+
   function kill(id) {
     helpers.delete(id);
     sessions.delete(id);
@@ -1525,7 +1541,7 @@ module.exports.create = function create(send, ptyModule, { replay = false, slice
     cancelInput(id);
     const p = ptys.get(id);
     if (p) {
-      p.kill();
+      stopPty(p);
       ptys.delete(id);
       ptyShells.delete(id);
     }
@@ -1535,7 +1551,7 @@ module.exports.create = function create(send, ptyModule, { replay = false, slice
     for (const id of repaintTimers.keys()) cancelRepaint(id);
     for (const id of inputs.keys()) cancelInput(id);
     for (const [, p] of ptys) {
-      p.kill();
+      stopPty(p);
     }
     ptys.clear();
     ptyShells.clear();
@@ -1719,7 +1735,7 @@ module.exports.create = function create(send, ptyModule, { replay = false, slice
   }
 
   /**
-   * SIGTERM `ids` and resolve once they have exited.
+   * Stop `ids` with the platform's shutdown request and wait for their exits.
    *
    * Always an explicit set, never a blanket kill: one window of several tears
    * down alone, and killing a sibling's terminals is unrecoverable. The host
@@ -1729,12 +1745,17 @@ module.exports.create = function create(send, ptyModule, { replay = false, slice
   function gracefulKill(ids, timeout = 2000, requestId) {
     const done = () => send('gracefulKillDone', { requestId });
     const targets = (Array.isArray(ids) ? ids : []).filter((id) => ptys.has(id));
-    // Nothing live to SIGTERM, but a just-exited PTY can still deliver final
+    // Nothing live to stop, but a just-exited PTY can still deliver final
     // output shortly after onExit (notably under ConPTY). Keep the same single
     // grace tick used after the live map empties before the quit flush runs.
     if (targets.length === 0) { setTimeout(done, 50); return; }
     for (const id of targets) {
-      try { ptys.get(id).kill('SIGTERM'); } catch { /* already dead */ }
+      try {
+        // WindowsTerminal rejects signals (possibly in a deferred callback,
+        // beyond this catch). kill() closes the ConPTY; the pinned addon can
+        // terminate its shell immediately, so this is no flush guarantee.
+        stopPty(ptys.get(id), true);
+      } catch { /* already dead */ }
     }
     // Resolve early once every target has exited (onExit removes it) instead
     // of always sitting out the full timeout — but one grace tick after the last
