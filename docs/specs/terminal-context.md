@@ -62,7 +62,7 @@ The Window-host workspace picker follows `docs/specs/layout.md` → Moving Surfa
 
 ## Tool context
 
-**Must show a Tool's primary Session in Terminal Context instead of creating an auxiliary helper**; one whose run ended is a plain terminal with a helper (`docs/specs/dor-tool.md` → Run end). Reuse the title, directory, port, and alert presentation, showing Tool command status without helper Modify, Reset, or Promote controls; a preview slot's adds Keep open (`docs/specs/layout.md` → Pane header). Pending approval cannot open context.
+**Must show a Tool's primary Session in Terminal Context instead of creating an auxiliary helper**; one whose run ended is a plain terminal with a helper (`docs/specs/dor-tool.md` → Run end). Reuse the title explanation, directory, port, and alert presentation, showing Tool command status without helper Modify, Reset, or Promote controls; a preview slot's adds Keep open (`docs/specs/layout.md` → Pane header). Pending approval cannot open context.
 
 **Must focus the Tool terminal instance directly**, bypassing its browser Surface focus handle.
 

@@ -36,7 +36,7 @@ Recovery requires a fresh exit hint followed by a separator, such as a newline. 
 
 When no watch list has been saved, Dormouse watches commands marked **Yes** in the table above. This includes fresh installations and upgrades where watching was never configured. It observes terminal output becoming busy and then quiet, which can indicate a finished response or a request for input. This is an output heuristic; it does not read the agent's internal task state.
 
-An existing saved watch list is preserved, including an empty list. To watch any running command, listed here or not, open its terminal context and select **Watch all `<command>` commands**. Remove a rule there or in Settings. Rules apply to every pane running that command; Cursor's two executable names have separate rules.
+An existing saved watch list is preserved, including an empty list. To watch any running command, listed here or not, open its terminal context and turn on **watch `<command>`**. Remove a rule there or in Settings. Rules apply to every pane running that command; Cursor's two executable names have separate rules.
 
 Watching requires shell integration that reports the running command. Terminal notifications and command-exit alerts work independently of watching.
 
