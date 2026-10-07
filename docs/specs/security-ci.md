@@ -93,9 +93,9 @@ Source of truth: `packageRules` in `.github/renovate.json`; `.github/workflows/w
 
 ## Hosted Deployments
 
-Hosted credentials live only in the three Hosted environments the secret inventory above places them in. `hosted-production` and `hosted-release-tag` admit only `main`; `hosted-preview` admits only `main` and `refs/pull/*/merge`. All require Ned or Edgar's review with administrator bypass disabled; self-review is allowed. Preview approval authorizes the PR code to receive test-resource credentials only.
+Hosted credentials live only in the three Hosted environments the secret inventory above places them in. `hosted-production` and `hosted-release-tag` admit only `main`; `hosted-preview` admits only `main` and `refs/pull/*/merge`. `hosted-preview` and `hosted-production` require Ned or Edgar's review with administrator bypass disabled; self-review is allowed. Preview approval authorizes the PR code to receive test-resource credentials only. `hosted-release-tag` requires no review: approving the deploy approves its tag, which runs only after that deploy's live verification succeeds, so a `hosted/` tag records what is live.
 
-- **FAIL IF** a Hosted environment lacks those branch restrictions, required reviewers, or disabled administrator bypass; inspect all three environments and their deployment policies.
+- **FAIL IF** a Hosted environment lacks those branch restrictions, or `hosted-preview` or `hosted-production` lacks required reviewers or disabled administrator bypass; inspect all three environments and their deployment policies.
 - **FAIL IF** Hosted credentials appear at repository/org scope, or production credentials appear in `hosted-preview`; inspect GitHub secret placement.
 - **FAIL IF** `hosted-release-tag` is used by a job other than `tag` in `.github/workflows/hosted-production.yml`, a workflow reads `HOSTED_TAG_TOKEN`, or `tag` hands `hosted/scripts/production-tag.mjs` any credential but the token its `actions/create-github-app-token` step mints with `owner: diffplug`, `repositories: dormouse`, and only `permission-contents: write` (rationale).
 - **FAIL IF** `gh api apps/dormouse-hosted-tagger` shows permissions other than `contents: write` and `metadata: read`, or any event.
