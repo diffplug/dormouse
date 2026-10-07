@@ -3,7 +3,7 @@ import { expect, userEvent, waitFor, within } from 'storybook/test';
 import { Wall } from '../components/Wall';
 import { disposeHelper, getHelper } from '../lib/helper-terminal';
 import { flushTerminal, getTerminalInstance, refitSession } from '../lib/terminal-registry';
-import { flattenScenario, SCENARIO_SHELL_PROMPT } from '../lib/platform';
+import { FakePtyAdapter, getPlatform, flattenScenario, SCENARIO_SHELL_PROMPT } from '../lib/platform';
 import { leaves, normalizeWeights, type LathNode } from '../lib/lath/model';
 import type { LathPersistedLayout } from '../lib/lath/persistence';
 import { requireElement, settleTerminalContext, settleTerminals } from './settle-terminals';
@@ -53,6 +53,11 @@ async function rightClickSourceHeader() {
   const header = await requireElement(`[data-pane-header-for="${SOURCE}"]`, 'source header');
   header.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 }));
   await requireElement('[data-helper-terminal] .xterm', 'helper terminal');
+  const helper = getHelper(SOURCE)!;
+  // Fitting after output changes wrapping and can clip xterm's current prompt
+  // line. Release the fake shell only once it has its actual mounted grid.
+  refitSession(helper.id);
+  (getPlatform() as FakePtyAdapter).resumeHelperStartup(helper.id);
 }
 async function openContext() {
   await rightClickSourceHeader();
@@ -69,6 +74,9 @@ async function openContext() {
   const text = Array.from({ length: input.buffer.active.length }, (_, i) =>
     input.buffer.active.getLine(i)?.translateToString(true) ?? '').join('');
   expect(text.match(/git status/g)).toHaveLength(1);
+  // Both prompts must survive, including the final wrapped cursor line.
+  expect(text.match(/\/home\/demo\/projects\/dormouse ❯/g)).toHaveLength(2);
+  expect(input.buffer.active.viewportY).toBe(input.buffer.active.baseY);
 }
 function expectedSide({ layout, zoomed, cursor, sourceAtEnd }: Props) {
   // Alone in the Wall, the helper avoids the cursor; beside a neighbor, it takes the neighbor's side.
@@ -139,7 +147,12 @@ const meta = {
   component: PlacementWall,
   // Argos replays stories for capture; unfinished input from the preceding run
   // must not turn this run's fresh-helper fixture into a preserved helper.
-  beforeEach: () => { disposeHelper(SOURCE); },
+  beforeEach: () => {
+    disposeHelper(SOURCE);
+    const platform = getPlatform() as FakePtyAdapter;
+    platform.deferHelperStartup = true;
+    return () => { platform.deferHelperStartup = false; };
+  },
   args: { layout: 'single', width: 1100, height: 780, sourceAtEnd: false, cursor: 'bottom', zoomed: false },
   parameters: { layout: 'fullscreen', fakePty: { scenario: flattenScenario(SCENARIO_SHELL_PROMPT) }, primedTerminalState: { byId: { [SOURCE]: { cwd: { path: '/home/demo/projects/dormouse', pathKind: 'posix', isRemote: false, source: 'osc633', updatedAt: 0 } } } }, chromatic: { viewports: [1200] } },
   play: async ({ args, canvasElement }) => { await prepare(args); canvasElement.dataset.placementCheck = 'passed'; },

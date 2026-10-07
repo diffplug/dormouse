@@ -75,6 +75,8 @@ pnpm test                                                      # full CI test ga
 cargo test                                                     # see §2
 ```
 
+Helper placement snapshots: defer the fake helper's first prompt until its terminal is mounted and fitted. Drain queued xterm writes before capture and assert one autorun echo, both complete prompts, and a viewport at the bottom. Output emitted at the initial wide grid can lose the current prompt line when xterm shrinks; waiting afterward cannot repair it. `lib/src/stories/HelperPlacement.stories.tsx` owns the gate and `lib/src/lib/platform/fake-adapter-helper.test.ts` covers deferred startup and narrow wrapping.
+
 Help snapshots: after changing any `dor` help text, rebuild and refresh with `cd dor && pnpm build && UPDATE_SNAPSHOTS=1 node --test`, then run `node --test` again and commit `dor/test/snapshots/`.
 
 Tests that pin the stack's non-obvious rules, by concern:
