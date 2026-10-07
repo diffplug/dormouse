@@ -275,8 +275,8 @@ importers:
         specifier: ^1.2.5
         version: 1.2.5
       '@mdxeditor/editor':
-        specifier: 4.3.1
-        version: 4.3.1(@codemirror/language@6.12.4)(@lezer/highlight@1.2.5)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(supports-color@10.2.2)(typescript@7.0.2)(yjs@13.6.33)
+        specifier: 4.3.2
+        version: 4.3.2(@codemirror/language@6.12.4)(@lezer/highlight@1.2.5)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(supports-color@10.2.2)(typescript@7.0.2)(yjs@13.6.33)
       dor-lib-common:
         specifier: workspace:*
         version: link:../dor-lib-common
@@ -2479,8 +2479,8 @@ packages:
       '@types/react': '>=16'
       react: '>=16'
 
-  '@mdxeditor/editor@4.3.1':
-    resolution: {integrity: sha512-oFWFusqx167eivpAl3Fs32LLR1HaJveb3w2ewoVP6vsFb/rd95ShoiPoew3Sa2KIYkpjvMgVgFlauB4Re1FADg==}
+  '@mdxeditor/editor@4.3.2':
+    resolution: {integrity: sha512-nIFzhxcsTP6p9z2yPzZEItyVWuxOPZMbhZm5VNTVAc1OPeiPb7e7QgIwJZmlwWFpjsbmjU5ouafXbThDiGhv2A==}
     engines: {node: '>=16'}
     peerDependencies:
       react: '>= 18 || >= 19'
@@ -9873,7 +9873,7 @@ snapshots:
       '@types/react': 19.3.0
       react: 19.3.0
 
-  '@mdxeditor/editor@4.3.1(@codemirror/language@6.12.4)(@lezer/highlight@1.2.5)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(supports-color@10.2.2)(typescript@7.0.2)(yjs@13.6.33)':
+  '@mdxeditor/editor@4.3.2(@codemirror/language@6.12.4)(@lezer/highlight@1.2.5)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(supports-color@10.2.2)(typescript@7.0.2)(yjs@13.6.33)':
     dependencies:
       '@codemirror/commands': 6.11.1
       '@codemirror/lang-markdown': 6.5.2
