@@ -29,9 +29,7 @@ const ruleset = (ctx, name) => Object.entries(ctx.responses)
   .find(([path, r]) => /\/rulesets\/\d+$/.test(path) && r.body?.name === name)[1].body;
 const env = (ctx, name) => body(ctx, 'environments').environments.find((e) => e.name === name);
 const names = (list) => list.map((name) => ({ name }));
-const LISTINGS = ['&status=success&per_page=10', '&per_page=20'].map((q) => `actions/workflows/workflow-audit.yaml/runs?event=schedule&branch=main${q}`);
-/** Every run either liveness listing returns. */
-const liveRuns = (ctx) => LISTINGS.flatMap((path) => body(ctx, path).workflow_runs);
+const liveRuns = (ctx) => body(ctx, 'actions/workflows/workflow-audit.yaml/runs?event=schedule&branch=main&per_page=20').workflow_runs;
 function addEnvironment(ctx, name, { policy = { deployment_branch_policy: { protected_branches: false, custom_branch_policies: true } }, policies = [{ name: 'main', type: 'branch' }], secrets = [] } = {}) {
   body(ctx, 'environments').environments.push({ name, protection_rules: [], can_admins_bypass: true, ...policy });
   ctx.responses[`${R}/environments/${name}/deployment-branch-policies`] = { status: 200, body: { total_count: policies.length, branch_policies: policies } };
@@ -119,6 +117,7 @@ const violations = [
   ['`workflow-audit.yaml` silent for 48 hours', (ctx) => {
     for (const r of liveRuns(ctx)) r.created_at = new Date(NOW.getTime() - 49 * 3_600_000).toISOString();
   }, '`workflow-audit.yaml` has a successful `schedule` run'],
+  ['`workflow-audit.yaml` scheduled runs all failed', (ctx) => { for (const r of liveRuns(ctx)) r.conclusion = 'failure'; }, '`workflow-audit.yaml` has a successful `schedule` run'],
   ['`workflow-audit.yaml` only succeeded on a dispatch', (ctx) => {
     for (const r of liveRuns(ctx)) r.event = 'workflow_dispatch';
   }, '`workflow-audit.yaml` has a successful `schedule` run'],
@@ -175,22 +174,6 @@ test('an extra ruleset or drift from a Today: list is INFO, not a failure', () =
   assert.equal(result.info.length, 2, result.info.join('\n'));
 });
 
-// A listing that lags behind (seen live, 2026-10-07: the `status=success`
-// listing once omitted the two newest runs) must not read as a dead workflow
-// while the other listing has them; both lagging, or both failing, still fails.
-test('liveness reads the union of its two listings', () => {
-  const stale = (path) => (ctx) => {
-    const listing = body(ctx, path);
-    listing.workflow_runs = listing.workflow_runs.filter((r) => NOW.getTime() - Date.parse(r.created_at) > 48 * 3_600_000);
-  };
-  for (const path of LISTINGS) assert.equal(replay(stale(path)).verdict, 'PASS', path);
-  assert.equal(replay((ctx) => LISTINGS.forEach((p) => stale(p)(ctx))).verdict, 'FAIL');
-  const oneDown = replay((ctx) => { ctx.responses[`${R}/${LISTINGS[0]}`] = { status: 502, body: null }; });
-  assert.equal(oneDown.verdict, 'PASS');
-  const bothDown = replay((ctx) => LISTINGS.forEach((p) => { ctx.responses[`${R}/${p}`] = { status: 502, body: null }; }));
-  assert.equal(bothDown.verdict, 'INCONCLUSIVE');
-});
-
 test('one skipped workflow-audit run is INFO inside the 48 hours', () => {
   const result = replay((ctx) => {
     for (const r of liveRuns(ctx)) r.created_at = new Date(NOW.getTime() - 30 * 3_600_000).toISOString();
@@ -236,30 +219,37 @@ test('the state hash ignores listing order and run history, and tracks every jud
 
 // The CLI over `gh` itself: pagination merged across pages, a 204 read as
 // enabled, an error's status taken from gh's stderr, and the fragment and
-// `GITHUB_OUTPUT` written. The stub serves the fixture, splitting every list
-// across two pages.
+// `GITHUB_OUTPUT` written. Every response is rendered up front — plain, and
+// as `--slurp` would page it, each list split across two pages — so the stub
+// is a shell `case` rather than a Node start per call.
 test('the CLI reads gh, writes the fragment, and hands the hash on', (t) => {
   const dir = tempDir(t, 'github-state-');
   mkdirSync(join(dir, 'bin'));
-  const fixturePath = join(dir, 'fixture.json');
-  writeFileSync(fixturePath, JSON.stringify(fixture));
-  writeFileSync(join(dir, 'bin', 'gh'), `#!${process.execPath}
-const fixture = JSON.parse(require('node:fs').readFileSync(${JSON.stringify(fixturePath)}, 'utf8'));
-const args = process.argv.slice(2);
-const path = args.at(-1);
-const r = fixture.responses[path];
-if (!r || r.status >= 400) { process.stderr.write('gh: Not Found (HTTP ' + (r?.status ?? 404) + ')\\n'); process.exit(1); }
-if (r.status === 204) process.exit(0);
-let body = r.body;
-if (path.includes('/runs?')) body = { ...body, workflow_runs: body.workflow_runs.map((run) => ({ ...run, created_at: new Date(Date.now() - 3600e3).toISOString() })) };
-if (!args.includes('--slurp')) { process.stdout.write(JSON.stringify(body)); process.exit(0); }
-const split = (list) => [list.slice(0, 1), list.slice(1)];
-if (Array.isArray(body)) process.stdout.write(JSON.stringify(split(body)));
-else {
-  const key = Object.keys(body).find((k) => Array.isArray(body[k]));
-  const [a, b] = key ? split(body[key]) : [[], []];
-  process.stdout.write(JSON.stringify(key ? [{ ...body, [key]: a }, { ...body, [key]: b }] : [body]));
-}
+  mkdirSync(join(dir, 'r'));
+  const split = (list) => [list.slice(0, 1), list.slice(1)];
+  const slurped = (body) => {
+    if (Array.isArray(body)) return split(body);
+    const key = Object.keys(body).find((k) => Array.isArray(body[k]));
+    if (!key) return [body];
+    const [a, b] = split(body[key]);
+    return [{ ...body, [key]: a }, { ...body, [key]: b }];
+  };
+  const arms = Object.entries(fixture.responses).map(([path, r], i) => {
+    let body = r.body;
+    if (path.includes('/runs?')) body = { ...body, workflow_runs: body.workflow_runs.map((run) => ({ ...run, created_at: new Date(Date.now() - 3600e3).toISOString() })) };
+    if (r.status >= 400) return `  '${path}') echo 'gh: Not Found (HTTP ${r.status})' >&2; exit 1 ;;`;
+    if (r.status === 204) return `  '${path}') exit 0 ;;`;
+    writeFileSync(join(dir, 'r', `${i}`), JSON.stringify(body));
+    writeFileSync(join(dir, 'r', `${i}.slurp`), JSON.stringify(slurped(body)));
+    return `  '${path}') f="${join(dir, 'r', `${i}`)}" ;;`;
+  });
+  writeFileSync(join(dir, 'bin', 'gh'), `#!/bin/sh
+slurp=; for a in "$@"; do [ "$a" = --slurp ] && slurp=.slurp; path=$a; done
+case "$path" in
+${arms.join('\n')}
+  *) echo 'gh: Not Found (HTTP 404)' >&2; exit 1 ;;
+esac
+cat "$f$slurp"
 `, { mode: 0o755 });
   writeFileSync(join(dir, 'bin', 'curl'), `#!/bin/sh\nprintf '${fixture.embargoStatus}'\n`, { mode: 0o755 });
   const output = join(dir, 'github-output');

@@ -4,6 +4,7 @@ import { copyFileSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSy
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { BODY_LIMIT } from './clamp-issue-body.mjs';
+import { FRAGMENT } from './github-state-check.mjs';
 import { decide } from './security-audit-plan.mjs';
 import { repoRoot, tempDir, workflowRunBlock } from './lint-kit.mjs';
 
@@ -12,7 +13,7 @@ const workflow = readFileSync(join(repo, '.github/workflows/security-audit.yaml'
 const allFragments = workflow.match(/^\s+AUDIT_FRAGMENTS: (.+)$/m)[1].split(/\s+/);
 // The deterministic GitHub-state check's fragment rides the same list; the
 // rest are the four domains the orchestrator waits for and merges.
-const STATE_FRAGMENT = 'audit-github-state.md';
+const STATE_FRAGMENT = FRAGMENT;
 const fragments = allFragments.filter((f) => f !== STATE_FRAGMENT);
 
 // Execute the shipped block, so changes to its parser or guards reach these tests.
@@ -330,7 +331,7 @@ for (const [name, state, expected, row] of [
 // run — the domains never ran, and the reporting step must not call that an
 // unfinished audit — and the status the plan step wrote is held to that
 // fragment's verdict.
-const SKIP_FRAGMENTS = "${{ steps.plan.outputs.skip == 'true' && 'audit-github-state.md' || env.AUDIT_FRAGMENTS }}";
+const SKIP_FRAGMENTS = '${{ steps.plan.outputs.fragments || env.AUDIT_FRAGMENTS }}';
 test('a skipped run narrows the reporting steps to the deterministic fragment', () => {
   for (const name of ['Compose the audit report', 'Surface result, file or close issue']) {
     assert.ok(stepText(name).includes(`          AUDIT_FRAGMENTS: ${SKIP_FRAGMENTS}\n`), name);
@@ -356,10 +357,9 @@ for (const [name, state, expected] of [['passes on a passing check', null, 'PASS
 }
 
 const HASH = 'a'.repeat(64);
-const SHA = COMMIT;
 const NOW = new Date('2026-10-07T12:00:00Z');
 const prior = (overrides = {}, state = {}) => ({ id: 41, conclusion: 'success',
-  state: { commit: SHA, state_hash: HASH, full_run_at: '2026-10-05T12:00:00Z', mode: 'full', ...state }, ...overrides });
+  state: { commit: COMMIT, state_hash: HASH, full_run_at: '2026-10-05T12:00:00Z', mode: 'full', ...state }, ...overrides });
 for (const [name, input, skip, reason] of [
   ['an unchanged scheduled run skips', { previous: prior() }, true, /unchanged since run 41/],
   ['a dispatch never skips', { event: 'workflow_dispatch', previous: prior() }, false, /`workflow_dispatch` run always audits in full/],
@@ -373,7 +373,7 @@ for (const [name, input, skip, reason] of [
   ['an unreadable full-run time is repeated', { previous: prior({}, { full_run_at: 'never' }) }, false, /7 or more days old/],
 ]) {
   test(`skip decision: ${name}`, () => {
-    const decision = decide({ event: 'schedule', sha: SHA, hash: HASH, now: NOW, ...input });
+    const decision = decide({ event: 'schedule', sha: COMMIT, hash: HASH, now: NOW, ...input });
     assert.equal(decision.skip, skip);
     assert.match(decision.reason, reason);
     // A skip carries the last full audit's time forward; a full run starts the clock.
@@ -385,7 +385,6 @@ for (const [name, input, skip, reason] of [
 // previous run's `audit-state` artifact.
 test('the plan step skips on recorded state, writes the stand-in report, and records its own', (t) => {
   const { dir, env } = fixture(t);
-  copyFileSync(join(repo, 'scripts/security-audit-plan.mjs'), join(dir, 'scripts/security-audit-plan.mjs'));
   rmSync(join(dir, STATE_FRAGMENT));
   const recorded = { commit: COMMIT, state_hash: HASH, full_run_at: new Date(Date.now() - 86_400_000).toISOString(), mode: 'full', run_id: '41' };
   stub(dir, 'gh', `
@@ -402,11 +401,12 @@ test('the plan step skips on recorded state, writes the stand-in report, and rec
   `);
   const output = join(dir, 'github-output');
   writeFileSync(output, '');
-  const run = (event) => spawnSync(process.execPath, [join(dir, 'scripts/security-audit-plan.mjs')], { cwd: dir, encoding: 'utf8',
+  const run = (event) => spawnSync(process.execPath, [join(repo, 'scripts/security-audit-plan.mjs')], { cwd: dir, encoding: 'utf8',
     env: { ...env, GITHUB_EVENT_NAME: event, STATE_HASH: HASH, GITHUB_OUTPUT: output } });
   const skipped = run('schedule');
   assert.equal(skipped.status, 0, skipped.stderr);
   assert.match(readFileSync(output, 'utf8'), /^skip=true$/m);
+  assert.match(readFileSync(output, 'utf8'), new RegExp(`^fragments=${STATE_FRAGMENT}$`, 'm'));
   assert.equal(readFileSync(join(dir, 'audit-status.txt'), 'utf8'), 'PASS\n');
   assert.match(readFileSync(join(dir, 'audit-report.md'), 'utf8'), /four domains were skipped: .*run 41/);
   const state = JSON.parse(readFileSync(join(dir, 'audit-state/audit-state.json'), 'utf8'));
@@ -420,6 +420,7 @@ test('the plan step skips on recorded state, writes the stand-in report, and rec
   const dispatched = run('workflow_dispatch');
   assert.equal(dispatched.status, 0, dispatched.stderr);
   assert.match(readFileSync(output, 'utf8'), /^skip=false$/m);
+  assert.doesNotMatch(readFileSync(output, 'utf8'), /^fragments=/m);
   assert.ok(!existsSync(join(dir, 'audit-status.txt')) && !existsSync(join(dir, 'audit-report.md')));
   assert.equal(JSON.parse(readFileSync(join(dir, 'audit-state/audit-state.json'), 'utf8')).mode, 'full');
 });
@@ -593,6 +594,15 @@ test('a failed encryption leaves nothing to upload and fails the step', (t) => {
  * without `--local`, which keeps a 403 on the operator's login from reading as
  * CI PAT drift.
  */
+/** The local runner, the prompt files it reads, and the stand-in check, in a fixture tree. */
+function localRunnerFixture(dir) {
+  copyFileSync(join(repo, 'scripts/security-audit-local.sh'), join(dir, 'scripts/security-audit-local.sh'));
+  for (const name of ['_preamble', 'orchestrator', 'supply-chain', 'ci-and-secrets', 'application-security', 'hosted']) {
+    copyFileSync(join(repo, `.github/audit/${name}.md`), join(dir, `.github/audit/${name}.md`));
+  }
+  fakeStateCheck(dir);
+}
+
 function fakeStateCheck(dir) {
   writeFileSync(join(dir, 'scripts/github-state-check.mjs'), `
     import { appendFileSync, writeFileSync } from 'node:fs';
@@ -606,12 +616,7 @@ for (const [verdict, cliExit, expected, sentinel = true, stateVerdict = 'PASS'] 
   test(`local runner: ${verdict}, CLI exit ${cliExit}${sentinel ? '' : ', no sentinel'}${stateVerdict === 'PASS' ? '' : `, GitHub state ${stateVerdict}`}`, (t) => {
     const { dir, env: base } = fixture(t);
     const env = { ...base, FAKE_STATE_VERDICT: stateVerdict };
-    copyFileSync(join(repo, 'scripts/security-audit-local.sh'), join(dir, 'scripts/security-audit-local.sh'));
-    fakeStateCheck(dir);
-    mkdirSync(join(dir, '.github/audit'), { recursive: true });
-    for (const name of ['_preamble', 'orchestrator', 'supply-chain', 'ci-and-secrets', 'application-security', 'hosted']) {
-      copyFileSync(join(repo, `.github/audit/${name}.md`), join(dir, `.github/audit/${name}.md`));
-    }
+    localRunnerFixture(dir);
     stubGh(dir);
     stub(dir, 'claude', `
       const fs = require('node:fs');
@@ -645,11 +650,7 @@ for (const [arg, runsState, runsDomain] of [['github-state', true, false], ['ci-
   test(`local runner: \`${arg}\` ${runsState ? 'runs' : 'skips'} the GitHub-state check`, (t) => {
     const { dir, env } = fixture(t);
     rmSync(join(dir, STATE_FRAGMENT));
-    copyFileSync(join(repo, 'scripts/security-audit-local.sh'), join(dir, 'scripts/security-audit-local.sh'));
-    for (const name of ['_preamble', 'orchestrator', 'supply-chain', 'ci-and-secrets', 'application-security', 'hosted']) {
-      copyFileSync(join(repo, `.github/audit/${name}.md`), join(dir, `.github/audit/${name}.md`));
-    }
-    fakeStateCheck(dir);
+    localRunnerFixture(dir);
     stub(dir, 'claude', `
       const fs = require('node:fs');
       const output = process.argv[3].match(/\\*\\*Output file:\\*\\* \\x60([^\\x60]+)\\x60/)[1];

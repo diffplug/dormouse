@@ -340,7 +340,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           # A skipped run has only the deterministic fragment to read.
-          AUDIT_FRAGMENTS: ${{ steps.plan.outputs.skip == 'true' && 'audit-github-state.md' || env.AUDIT_FRAGMENTS }}
+          AUDIT_FRAGMENTS: ${{ steps.plan.outputs.fragments || env.AUDIT_FRAGMENTS }}
         run: |
           set -eo pipefail
 
@@ -733,7 +733,7 @@ jobs:
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
-          AUDIT_FRAGMENTS: ${{ steps.plan.outputs.skip == 'true' && 'audit-github-state.md' || env.AUDIT_FRAGMENTS }}
+          AUDIT_FRAGMENTS: ${{ steps.plan.outputs.fragments || env.AUDIT_FRAGMENTS }}
           STATUS: ${{ steps.compose.outputs.status }}
           FILE_STATUS: ${{ steps.compose.outputs.file_status }}
           DISSENTING: ${{ steps.compose.outputs.dissenting }}

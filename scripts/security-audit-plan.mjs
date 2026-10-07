@@ -15,16 +15,17 @@
  * Reads `GITHUB_EVENT_NAME`, `GITHUB_SHA`, `GITHUB_RUN_ID`,
  * `GITHUB_REPOSITORY`, `RUNNER_TEMP`, and `STATE_HASH` (the check's output);
  * `gh` runs on the workflow token. Writes `skip=`, `reason=` to
- * `GITHUB_OUTPUT`, `$RUNNER_TEMP/audit-state/audit-state.json` for the
+ * `GITHUB_OUTPUT` (and `fragments=`, the one fragment a skipped run reports), `$RUNNER_TEMP/audit-state/audit-state.json` for the
  * `audit-state` artifact, and — when skipping — the `audit-report.md` and
  * `audit-status.txt` the orchestrator would otherwise write. The reporting
  * step still holds that status to the GitHub-state fragment's own verdict.
  */
 
 import { spawnSync } from 'node:child_process';
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { FRAGMENT } from './github-state-check.mjs';
 
 export const MAX_SKIP_DAYS = 7;
 export const ARTIFACT = 'audit-state';
@@ -64,12 +65,9 @@ function previousRun({ repo, runId }) {
     .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))[0];
   if (!run) return undefined;
   const dir = mkdtempSync(join(process.env.RUNNER_TEMP ?? '/tmp', 'previous-audit-state-'));
-  const downloaded = gh(['run', 'download', String(run.id), '-R', repo, '-n', ARTIFACT, '-D', dir]) !== null;
-  const file = join(dir, 'audit-state.json');
+  gh(['run', 'download', String(run.id), '-R', repo, '-n', ARTIFACT, '-D', dir]);
   let state = null;
-  if (downloaded && existsSync(file)) {
-    try { state = JSON.parse(readFileSync(file, 'utf8')); } catch { state = null; }
-  }
+  try { state = JSON.parse(readFileSync(join(dir, 'audit-state.json'), 'utf8')); } catch { /* no artifact: audit in full */ }
   return { id: run.id, conclusion: run.conclusion, state };
 }
 
@@ -82,6 +80,7 @@ function main() {
 
   const stateDir = join(env.RUNNER_TEMP, ARTIFACT);
   mkdirSync(stateDir, { recursive: true });
+  // `mode` and `run_id` are for a reader of the artifact; `decide` reads the rest.
   writeFileSync(join(stateDir, 'audit-state.json'), `${JSON.stringify({
     commit: env.GITHUB_SHA, state_hash: env.STATE_HASH ?? '', full_run_at: decision.fullRunAt,
     mode: decision.skip ? 'skipped' : 'full', run_id: env.GITHUB_RUN_ID,
@@ -91,7 +90,10 @@ function main() {
     writeFileSync('audit-report.md', `# Security audit\n\nThe four domains were skipped: ${decision.reason}. Only the deterministic checks ran; their fragment follows in the reporting step.\n`);
     writeFileSync('audit-status.txt', 'PASS\n');
   }
-  if (env.GITHUB_OUTPUT) appendFileSync(env.GITHUB_OUTPUT, `skip=${decision.skip}\nreason=${decision.reason.replace(/\n/g, ' ')}\n`);
+  // A skipped run's reporting steps read only the deterministic fragment.
+  if (env.GITHUB_OUTPUT) {
+    appendFileSync(env.GITHUB_OUTPUT, `skip=${decision.skip}\nreason=${decision.reason.replace(/\n/g, ' ')}\n${decision.skip ? `fragments=${FRAGMENT}\n` : ''}`);
+  }
   if (env.GITHUB_STEP_SUMMARY) appendFileSync(env.GITHUB_STEP_SUMMARY, `**Domains ${decision.skip ? 'skipped' : 'run in full'}:** ${decision.reason}.\n`);
   console.log(`${decision.skip ? 'Skipping' : 'Running'} the domains: ${decision.reason}.`);
 }

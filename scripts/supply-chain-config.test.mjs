@@ -39,11 +39,10 @@ function check(files) {
     const scoped = Array.isArray(names) && names.length > 0 && names.every((n) => PGSTENCIL_RULE.includes(n));
     if (!scoped) fail(`a Renovate rule drops the cooldown for ${JSON.stringify(names ?? 'every package')}`);
   }
+  for (const key of ['includePaths', 'ignorePaths']) if (renovate[key] !== undefined) fail(`Renovate limits every manager with ${key}`);
   for (const manager of MANAGERS) {
     if (!(renovate.enabledManagers ?? []).includes(manager)) fail(`Renovate does not enable ${manager}`);
-    for (const scope of [renovate, renovate[manager] ?? {}]) {
-      for (const key of ['includePaths', 'ignorePaths']) if (scope[key] !== undefined) fail(`Renovate limits ${manager} with ${key}`);
-    }
+    for (const key of ['includePaths', 'ignorePaths']) if (renovate[manager]?.[key] !== undefined) fail(`Renovate limits ${manager} with ${key}`);
     for (const type of UPDATE_TYPES) {
       // A covering rule narrows by manager and update type alone.
       const covers = rules.some((r) => typeof r.minimumReleaseAge === 'string'
@@ -81,9 +80,7 @@ function check(files) {
   const lintRun = (lint?.steps ?? []).map((s) => s.run ?? '').join('\n');
   if (!/pip"? install --require-hashes --only-binary :all: --no-deps -r \.github\/zizmor-requirements\.txt/.test(lintRun)) fail('ci.yml does not install zizmor from its hash-pinned requirements');
   const pin = (lint?.steps ?? []).find((s) => s.env?.ACTIONLINT_VERSION)?.env ?? {};
-  const version = /^\d+\.\d+\.\d+$/.test(pin.ACTIONLINT_VERSION ?? '') ? pin.ACTIONLINT_VERSION : null;
-  const sha = pin.ACTIONLINT_SHA256;
-  if (!version || !/^[0-9a-f]{64}$/.test(sha ?? '') || !/sha256sum -c/.test(lintRun)) fail('ci.yml does not install actionlint at an exact version verified by sha256');
+  if (!/^\d+\.\d+\.\d+$/.test(pin.ACTIONLINT_VERSION ?? '') || !/^[0-9a-f]{64}$/.test(pin.ACTIONLINT_SHA256 ?? '') || !/sha256sum -c/.test(lintRun)) fail('ci.yml does not install actionlint at an exact version verified by sha256');
   return failures;
 }
 
@@ -104,7 +101,7 @@ for (const [name, mutate, expected] of [
   ['a Renovate rule drops the cooldown for everything', json('renovate', (r) => r.packageRules.push({ matchManagers: ['npm'], minimumReleaseAge: null })), 'drops the cooldown for "every package"'],
   ['a Renovate rule drops the cooldown for another package', json('renovate', (r) => r.packageRules.push({ matchPackageNames: ['pgstencil', 'left-pad'], minimumReleaseAge: null })), 'drops the cooldown for'],
   ['cargo disabled in Renovate', json('renovate', (r) => { r.enabledManagers = r.enabledManagers.filter((m) => m !== 'cargo'); }), 'does not enable cargo'],
-  ['Renovate ignoring paths', json('renovate', (r) => { r.ignorePaths = ['standalone/**']; }), 'with ignorePaths'],
+  ['Renovate ignoring paths', json('renovate', (r) => { r.ignorePaths = ['standalone/**']; }), 'limits every manager with ignorePaths'],
   ['Renovate npm limited to paths', json('renovate', (r) => { r.npm = { includePaths: ['lib/**'] }; }), 'limits npm with includePaths'],
   ['no cooldown on npm majors', json('renovate', (r) => { r.packageRules = r.packageRules.filter((x) => !(x.matchUpdateTypes?.includes('major') && x.minimumReleaseAge)); }), 'covers npm major'],
   ['the patch cooldown narrowed to one package', json('renovate', (r) => { r.packageRules.find((x) => x.matchUpdateTypes?.includes('patch') && x.minimumReleaseAge).matchPackageNames = ['react']; }), 'covers npm patch'],

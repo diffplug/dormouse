@@ -44,6 +44,19 @@ for f in _preamble orchestrator supply-chain ci-and-secrets application-security
   [ -f "$AUDIT_DIR/$f.md" ] || { echo "error: missing $AUDIT_DIR/$f.md" >&2; exit 1; }
 done
 
+# A fragment's first line, in the grammar CI applies in
+# .github/workflows/security-audit.yaml, and for the same reason: a failure with
+# an appended explanation is still a finding, so only the PASS arm matches
+# exactly. Drifting from CI here would report a dissenting fragment as unreadable.
+fragment_verdict() {
+  case "$(head -n1 "$2")" in
+    'VERDICT: PASS') return 0 ;;
+    'VERDICT: FAIL'*) echo "==> $1 reports FAIL" >&2; return 1 ;;
+    'VERDICT: INCONCLUSIVE') echo "==> $1 could not determine every check" >&2; return 1 ;;
+    *) echo "==> $1 produced no readable verdict" >&2; return 1 ;;
+  esac
+}
+
 # One domain, in the foreground. This is the loop you actually iterate in while
 # editing a security spec: no orchestrator, no waiting, no merge — just the domain
 # under test, writing its own fragment.
@@ -97,16 +110,7 @@ run_domain() {
       case "$(head -n1 "$out")" in 'VERDICT: FAIL'*) echo "==> $domain reports FAIL" >&2 ;; esac
       return 1
     fi
-    # The same grammar CI applies in .github/workflows/security-audit.yaml, and
-    # for the same reason: a failure with an appended explanation is still a
-    # finding, so only the PASS arm matches exactly. Drifting from CI here would
-    # report a dissenting fragment as unreadable.
-    case "$(head -n1 "$out")" in
-      'VERDICT: PASS') return 0 ;;
-      'VERDICT: FAIL'*) echo "==> $domain reports FAIL" >&2; return 1 ;;
-      'VERDICT: INCONCLUSIVE') return 1 ;;
-      *) echo "==> $domain produced no readable verdict" >&2; return 1 ;;
-    esac
+    fragment_verdict "$domain" "$out"
   else
     echo "==> $domain produced no fragment — in CI that is an INCONCLUSIVE audit, not a FAIL" >&2
     return 1
@@ -114,7 +118,7 @@ run_domain() {
 }
 
 # The deterministic checks, writing the fragment CI's reporting step reads
-# beside the domains'. Same verdict grammar as `run_domain` below.
+# beside the domains'.
 run_github_state() {
   echo "==> github-state -> audit-github-state.md (deterministic)"
   rm -f audit-github-state.md
@@ -122,11 +126,7 @@ run_github_state() {
     echo "==> the GitHub-state check failed to run" >&2
     return 1
   fi
-  case "$(head -n1 audit-github-state.md)" in
-    'VERDICT: PASS') return 0 ;;
-    'VERDICT: FAIL'*) echo "==> github-state reports FAIL" >&2; return 1 ;;
-    *) echo "==> github-state could not determine every check" >&2; return 1 ;;
-  esac
+  fragment_verdict github-state audit-github-state.md
 }
 
 if [ $# -gt 0 ]; then

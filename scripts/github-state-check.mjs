@@ -35,15 +35,15 @@
 
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { appendFileSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { appendFileSync, readdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import YAML from 'yaml';
+import { readRepoFile, repoRoot } from './lint-kit.mjs';
 
 export const FRAGMENT = 'audit-github-state.md';
-export const EXPECTED = '.github/audit/expected-github-state.json';
+const EXPECTED = '.github/audit/expected-github-state.json';
 const SENTINEL = '<!-- END OF REPORT -->';
-const ROOT = fileURLToPath(new URL('..', import.meta.url));
 
 const TEND = ['docs/specs/security-ci.md', 'Automated Maintainer (tend)'];
 const HOSTED = ['docs/specs/security-ci.md', 'Hosted Deployments'];
@@ -75,7 +75,7 @@ function mergePages(pages) {
  * 'public'` swaps in `WORKFLOW_TOKEN` when set; everything else runs on the
  * inherited `GH_TOKEN` (the PAT in CI) or the operator's login.
  */
-export function ghFetcher(env = process.env) {
+function ghFetcher(env = process.env) {
   return (path, { paginate = false, auth = 'admin' } = {}) => {
     const args = ['api', '-H', 'Accept: application/vnd.github+json'];
     if (paginate) args.push('--paginate', '--slurp');
@@ -95,7 +95,7 @@ export function ghFetcher(env = process.env) {
 }
 
 /** The unauthenticated status code of a URL, as the `Embargo` rule's `curl` reads it. */
-export function curlStatus(url) {
+function curlStatus(url) {
   const run = spawnSync('curl', ['-s', '-o', '/dev/null', '-w', '%{http_code}', url], { encoding: 'utf8' });
   return run.status === 0 ? run.stdout.trim() : '000';
 }
@@ -107,11 +107,10 @@ const byKey = (a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b));
 const enc = encodeURIComponent;
 
 /** Every `max-sixty/tend/claude@<ref>` the generated workflows pin. */
-export function tendRefs(root = ROOT) {
-  const dir = join(root, '.github/workflows');
+function tendRefs() {
   const refs = new Set();
-  for (const file of readdirSync(dir).filter((f) => /^tend-.*\.ya?ml$/.test(f))) {
-    for (const [, ref] of readFileSync(join(dir, file), 'utf8').matchAll(/max-sixty\/tend\/claude@([^\s#]+)/g)) refs.add(ref);
+  for (const file of readdirSync(join(repoRoot, '.github/workflows')).filter((f) => /^tend-.*\.ya?ml$/.test(f))) {
+    for (const [, ref] of readRepoFile(`.github/workflows/${file}`).matchAll(/max-sixty\/tend\/claude@([^\s#]+)/g)) refs.add(ref);
   }
   return sorted(refs);
 }
@@ -122,7 +121,7 @@ export function tendRefs(root = ROOT) {
  * `volatile` holds what changes without anything changing (run history) and is
  * left out of the hash.
  */
-export function observe(api, { repo, expected, tend = [], curl = curlStatus }) {
+function observe(api, { repo, expected, tend = [], curl = curlStatus }) {
   const R = `repos/${repo}`;
   const state = { errors: {}, volatile: {} };
   const read = (key, path, opts = {}) => {
@@ -187,6 +186,7 @@ export function observe(api, { repo, expected, tend = [], curl = curlStatus }) {
   if (repoSecrets) state.repoSecrets = sorted((repoSecrets.secrets ?? []).map((x) => x.name));
   const orgSecrets = read('orgSecrets', `${R}/actions/organization-secrets`, { paginate: true });
   if (orgSecrets) state.orgSecrets = sorted((orgSecrets.secrets ?? []).map((x) => x.name));
+  // Hashed, not judged: no rule constrains them.
   const repoVariables = read('repoVariables', `${R}/actions/variables`, { paginate: true });
   if (repoVariables) state.repoVariables = sorted((repoVariables.variables ?? []).map((x) => x.name));
 
@@ -213,15 +213,10 @@ export function observe(api, { repo, expected, tend = [], curl = curlStatus }) {
     else state.errors[`workflow ${file}`] = wf.status;
   }
   const { workflow, event, branch } = expected.liveness;
-  // Two listings, unioned: one `status=success` listing has been seen to omit
-  // the two newest runs (2026-10-07), which would read as a dead workflow.
-  const runs = [`&status=success&per_page=10`, `&per_page=20`]
-    .map((q) => read('liveness', `${R}/actions/workflows/${enc(workflow)}/runs?event=${event}&branch=${branch}${q}`, { auth: 'public' }));
-  if (runs.some(Boolean)) {
-    delete state.errors.liveness;
-    const seen = new Map(runs.filter(Boolean).flatMap((r) => r.workflow_runs ?? []).map((r) => [r.id, r]));
-    state.volatile.successfulRuns = [...seen.values()].map((r) => ({ id: r.id, created_at: r.created_at, event: r.event, head_branch: r.head_branch, conclusion: r.conclusion }));
-  }
+  // Unfiltered by status, which `judge` filters itself: a `status=success`
+  // listing was seen to omit the two newest runs (2026-10-07).
+  const runs = read('liveness', `${R}/actions/workflows/${enc(workflow)}/runs?event=${event}&branch=${branch}&per_page=20`, { auth: 'public' });
+  if (runs) state.volatile.runs = (runs.workflow_runs ?? []).map((r) => ({ id: r.id, created_at: r.created_at, event: r.event, head_branch: r.head_branch, conclusion: r.conclusion }));
 
   // The tagger App is private: `apps/<slug>` answers 404 or 403 to every token
   // an audit run holds, and only an org admin can list its installation. So its
@@ -230,7 +225,7 @@ export function observe(api, { repo, expected, tend = [], curl = curlStatus }) {
   const [org] = repo.split('/');
   const installations = api(`orgs/${enc(org)}/installations`, { paginate: true });
   const app = installations.status === 200 ? (installations.body.installations ?? []).find((i) => i.app_id === expected.app.id) : undefined;
-  if (app) state.app = { id: app.app_id, slug: app.app_slug, permissions: Object.fromEntries(Object.entries(app.permissions ?? {}).sort()), events: sorted(app.events ?? []) };
+  if (app) state.app = { id: app.app_id, permissions: Object.fromEntries(Object.entries(app.permissions ?? {}).sort()), events: sorted(app.events ?? []) };
 
   // Not judged — the tag is mutable by design (docs/specs/security.md -> "What is not defended") — but
   // hashed, so a moved tag makes the next scheduled run audit in full.
@@ -263,12 +258,13 @@ export function stateHash(state) {
 const same = (a, b) => canonical(a) === canonical(b);
 const show = (values) => (values.length ? values.map((v) => `\`${v}\``).join(', ') : 'none');
 const showRef = ({ type, name }) => `${type} \`${name}\``;
+const showBypass = (actors) => actors.map((b) => `${b.actor_type} ${b.actor_id} (${b.bypass_mode})`).join(', ');
 
 /**
  * One result per clause. `local` reads a 403 as the operator's own login
  * falling short — unverifiable — rather than as drift in the CI PAT's scope.
  */
-export function judge(state, { expected, tendAllowed, now = new Date(), local = false }) {
+function judge(state, { expected, tendAllowed, now = new Date(), local = false }) {
   const results = [];
   const info = [];
   const warnings = [];
@@ -297,23 +293,15 @@ export function judge(state, { expected, tendAllowed, now = new Date(), local = 
       if (got.length !== 1) return [false, `${got.length} rulesets named \`${name}\``];
       return [got[0].enforcement === 'active', `enforcement \`${got[0].enforcement}\``];
     });
-    const got = () => state.rulesets.find((r) => r.name === name);
-    check(cite, `ruleset \`${name}\` targets ${want.target} refs ${show(want.include)}${want.exclude.length ? ` except ${show(want.exclude)}` : ''}`, rulesetErrors, () => {
-      const r = got();
-      if (!r) return [false, 'ruleset missing'];
-      return [r.target === want.target && same(r.include, want.include) && same(r.exclude, want.exclude),
-        `target ${r.target}, include ${show(r.include)}, exclude ${show(r.exclude)}`];
+    /** A clause on this ruleset; a missing one fails it. */
+    const checkRuleset = (clause, fn) => check(cite, `ruleset \`${name}\` ${clause}`, rulesetErrors, () => {
+      const r = state.rulesets.find((x) => x.name === name);
+      return r ? fn(r) : [false, 'ruleset missing'];
     });
-    check(cite, `ruleset \`${name}\` blocks exactly ${show(want.rules)}`, rulesetErrors, () => {
-      const r = got();
-      if (!r) return [false, 'ruleset missing'];
-      return [same(r.rules, want.rules), `rules ${show(r.rules)}`];
-    });
-    check(cite, `ruleset \`${name}\` bypass actors are exactly ${want.bypass.map((b) => `${b.actor_type} ${b.actor_id} (${b.bypass_mode})`).join(', ')}`, rulesetErrors, () => {
-      const r = got();
-      if (!r) return [false, 'ruleset missing'];
-      return [same(r.bypass, [...want.bypass].sort(byKey)), `bypass ${r.bypass.map((b) => `${b.actor_type} ${b.actor_id} (${b.bypass_mode})`).join(', ') || 'none'}`];
-    });
+    checkRuleset(`targets ${want.target} refs ${show(want.include)}${want.exclude.length ? ` except ${show(want.exclude)}` : ''}`, (r) =>
+      [r.target === want.target && same(r.include, want.include) && same(r.exclude, want.exclude), `target ${r.target}, include ${show(r.include)}, exclude ${show(r.exclude)}`]);
+    checkRuleset(`blocks exactly ${show(want.rules)}`, (r) => [same(r.rules, want.rules), `rules ${show(r.rules)}`]);
+    checkRuleset(`bypass actors are exactly ${showBypass(want.bypass)}`, (r) => [same(r.bypass, [...want.bypass].sort(byKey)), `bypass ${showBypass(r.bypass) || 'none'}`]);
   }
   check(HOSTED, `the Hosted tagger App (\`Integration\` ${expected.app.id}) bypasses no ruleset but \`Hosted tag creation\``, rulesetErrors, () => {
     const bypassed = state.rulesets.filter((r) => r.bypass.some((b) => b.actor_type === 'Integration' && b.actor_id === expected.app.id)).map((r) => r.name);
@@ -344,61 +332,36 @@ export function judge(state, { expected, tendAllowed, now = new Date(), local = 
   for (const name of envNames) {
     const want = expected.environments[name];
     const needs = ['environments', ...envErrors.filter((k) => k.startsWith(`environment ${name} `))];
-    const env = () => state.environments.find((e) => e.name === name);
+    const e = state.environments?.find((x) => x.name === name);
     const hosted = expected.hostedEnvironments.includes(name);
+    const reviewCite = name === 'vscode-extension-publish' ? VSCODE : HOSTED;
+    /** A clause on this environment; a missing one fails it. */
+    const checkEnv = (cite, clause, fn) => check(cite, `\`${name}\` ${clause}`, needs, () => (e ? fn(e) : [false, 'environment missing']));
+    const wantPolicies = want && [...want.policies].sort(byKey);
     if (hosted) {
-      check(HOSTED, `\`${name}\` admits exactly ${want.policies.map(showRef).join(' and ')}`, needs, () => {
-        const e = env();
-        if (!e) return [false, 'environment missing'];
-        if (!e.branchPolicy?.custom_branch_policies) return [false, `deployment_branch_policy ${JSON.stringify(e.branchPolicy)}`];
-        return [same(e.policies, [...want.policies].sort(byKey)), `admits ${e.policies.map(showRef).join(', ') || 'nothing'}`];
-      });
+      checkEnv(HOSTED, `admits exactly ${want.policies.map(showRef).join(' and ')}`, (x) => (x.branchPolicy?.custom_branch_policies
+        ? [same(x.policies, wantPolicies), `admits ${x.policies.map(showRef).join(', ') || 'nothing'}`]
+        : [false, `deployment_branch_policy ${JSON.stringify(x.branchPolicy)}`]));
     }
     if (name !== 'hosted-preview') {
-      check(TEND, `\`${name}\` admits only refs the \`Merge access\` or \`Tag operations\` ruleset reserves to admins`, needs, () => {
-        const e = env();
-        if (!e) return [false, 'environment missing'];
-        if (!e.branchPolicy) return [false, 'no deployment branch policy: every branch and tag is admitted'];
-        if (e.branchPolicy.protected_branches) return [false, '`protected_branches: true` admits any protected branch'];
-        const loose = e.policies.filter((p) => !gated.some((g) => g.type === p.type && g.name === p.name));
-        return [loose.length === 0, `admits ${e.policies.map(showRef).join(', ') || 'nothing'}${loose.length ? `; not admin-gated: ${loose.map(showRef).join(', ')}` : ''}`];
+      checkEnv(TEND, 'admits only refs the `Merge access` or `Tag operations` ruleset reserves to admins', (x) => {
+        if (!x.branchPolicy) return [false, 'no deployment branch policy: every branch and tag is admitted'];
+        if (x.branchPolicy.protected_branches) return [false, '`protected_branches: true` admits any protected branch'];
+        const loose = x.policies.filter((p) => !gated.some((g) => g.type === p.type && g.name === p.name));
+        return [loose.length === 0, `admits ${x.policies.map(showRef).join(', ') || 'nothing'}${loose.length ? `; not admin-gated: ${loose.map(showRef).join(', ')}` : ''}`];
       });
-      if (want && !hosted && !envErrors.includes('environments') && env()?.policies && !same(env().policies, [...want.policies].sort(byKey))) {
-        info.push(`\`${name}\` admits ${env().policies.map(showRef).join(', ') || 'nothing'}, not the ${want.policies.map(showRef).join(', ')} \`${EXPECTED}\` records; update the file or the spec's \`Today:\` list.`);
+      if (want && !hosted && e?.policies && !same(e.policies, wantPolicies)) {
+        info.push(`\`${name}\` admits ${e.policies.map(showRef).join(', ') || 'nothing'}, not the ${want.policies.map(showRef).join(', ')} \`${EXPECTED}\` records; update the file or the spec's \`Today:\` list.`);
       }
     }
-    if (want?.requiredReviewers) {
-      const cite = name === 'vscode-extension-publish' ? VSCODE : HOSTED;
-      check(cite, `\`${name}\` requires nonempty reviewers`, needs, () => {
-        const e = env();
-        return [!!e && e.reviewers.length > 0, e ? `reviewers ${show(e.reviewers)}` : 'environment missing'];
-      });
-    }
-    if (want?.preventSelfReview) {
-      check(VSCODE, `\`${name}\` sets \`prevent_self_review: true\``, needs, () => {
-        const e = env();
-        return [!!e && e.preventSelfReview === true, e ? `prevent_self_review ${e.preventSelfReview}` : 'environment missing'];
-      });
-    }
+    if (want?.requiredReviewers) checkEnv(reviewCite, 'requires nonempty reviewers', (x) => [x.reviewers.length > 0, `reviewers ${show(x.reviewers)}`]);
+    if (want?.preventSelfReview) checkEnv(VSCODE, 'sets `prevent_self_review: true`', (x) => [x.preventSelfReview === true, `prevent_self_review ${x.preventSelfReview}`]);
     if (want && 'canAdminsBypass' in want) {
-      const cite = name === 'vscode-extension-publish' ? VSCODE : HOSTED;
-      check(cite, `\`${name}\` sets \`can_admins_bypass: ${want.canAdminsBypass}\``, needs, () => {
-        const e = env();
-        return [!!e && e.canAdminsBypass === want.canAdminsBypass, e ? `can_admins_bypass ${e.canAdminsBypass}` : 'environment missing'];
-      });
+      checkEnv(reviewCite, `sets \`can_admins_bypass: ${want.canAdminsBypass}\``, (x) => [x.canAdminsBypass === want.canAdminsBypass, `can_admins_bypass ${x.canAdminsBypass}`]);
     }
-    check(TEND, `\`${name}\` holds exactly the secrets the inventory places there`, needs, () => {
-      const e = env();
-      const placed = want?.secrets ?? [];
-      if (!e) return [false, 'environment missing'];
-      return [same(e.secrets, sorted(placed)), `holds ${show(e.secrets)}; placed: ${show(placed)}`];
-    });
-    if (want?.variables) {
-      check(TEND, `\`${name}\` declares no environment variables`, needs, () => {
-        const e = env();
-        return [!!e && same(e.variables, want.variables), e ? `variables ${show(e.variables)}` : 'environment missing'];
-      });
-    }
+    checkEnv(TEND, 'holds exactly the secrets the inventory places there', (x) =>
+      [same(x.secrets, sorted(want?.secrets ?? [])), `holds ${show(x.secrets)}; placed: ${show(want?.secrets ?? [])}`]);
+    if (want?.variables) checkEnv(TEND, 'declares no environment variables', (x) => [same(x.variables, want.variables), `variables ${show(x.variables)}`]);
   }
 
   // Repo- and org-level secrets.
@@ -407,7 +370,7 @@ export function judge(state, { expected, tendAllowed, now = new Date(), local = 
     const absent = expected.repoSecrets.filter((s) => !state.repoSecrets.includes(s) && !expected.repoSecretsMayBeAbsent.includes(s));
     return [extra.length === 0 && absent.length === 0, `repo level holds ${show(state.repoSecrets)}`];
   });
-  check(TEND, 'no org-level secret is visible to this repository', ['orgSecrets'], () => [state.orgSecrets.length === 0, `organization-secrets lists ${show(state.orgSecrets)}`]);
+  check(TEND, 'no org-level secret is visible to this repository', ['orgSecrets'], () => [same(state.orgSecrets, expected.orgSecrets), `organization-secrets lists ${show(state.orgSecrets)}`]);
   check(TEND, '`ANTHROPIC_API_KEY` is absent at repo and org level', ['repoSecrets', 'orgSecrets'], () => {
     const at = [state.repoSecrets.includes('ANTHROPIC_API_KEY') && 'repo', state.orgSecrets.includes('ANTHROPIC_API_KEY') && 'org'].filter(Boolean);
     return [at.length === 0, at.length ? `present at ${at.join(' and ')} level` : 'absent at both'];
@@ -428,16 +391,15 @@ export function judge(state, { expected, tendAllowed, now = new Date(), local = 
   });
 
   // Workflow token defaults, the backstop for every permission rule.
-  check(TEND, `\`default_workflow_permissions\` is \`${expected.workflowPermissions.default_workflow_permissions}\``, ['workflowPermissions'], () =>
-    [state.workflowPermissions.default_workflow_permissions === expected.workflowPermissions.default_workflow_permissions, `\`${state.workflowPermissions.default_workflow_permissions}\``]);
-  check(TEND, `\`can_approve_pull_request_reviews\` is \`${expected.workflowPermissions.can_approve_pull_request_reviews}\``, ['workflowPermissions'], () =>
-    [state.workflowPermissions.can_approve_pull_request_reviews === expected.workflowPermissions.can_approve_pull_request_reviews, `\`${state.workflowPermissions.can_approve_pull_request_reviews}\``]);
+  for (const [key, value] of Object.entries(expected.workflowPermissions)) {
+    check(TEND, `\`${key}\` is \`${value}\``, ['workflowPermissions'], () => [state.workflowPermissions[key] === value, `\`${state.workflowPermissions[key]}\``]);
+  }
 
   // Workflow liveness.
-  const { workflow, hours, infoAfterHours } = expected.liveness;
+  const { workflow, event, branch, hours, infoAfterHours } = expected.liveness;
   check(TEND, `\`${workflow}\` exists and is enabled`, [`workflow ${workflow}`], () => [state.workflows[workflow] === 'active', `state \`${state.workflows[workflow]}\``]);
-  check(TEND, `\`${workflow}\` has a successful \`schedule\` run on \`main\` in the last ${hours} hours`, ['liveness'], () => {
-    const ok = state.volatile.successfulRuns.filter((r) => r.event === 'schedule' && r.head_branch === 'main' && r.conclusion === 'success');
+  check(TEND, `\`${workflow}\` has a successful \`${event}\` run on \`${branch}\` in the last ${hours} hours`, ['liveness'], () => {
+    const ok = state.volatile.runs.filter((r) => r.event === event && r.head_branch === branch && r.conclusion === 'success');
     const latest = ok.map((r) => Date.parse(r.created_at)).sort((a, b) => b - a)[0];
     if (latest === undefined) return [false, 'no successful scheduled run listed'];
     const age = (now.getTime() - latest) / 3_600_000;
@@ -454,14 +416,11 @@ export function judge(state, { expected, tendAllowed, now = new Date(), local = 
   }
 
   // Repository security settings.
-  check(COOLDOWN, 'secret scanning is enabled', ['repository'], () => {
-    const status = state.securityAndAnalysis?.secret_scanning ?? null;
-    return [status === 'enabled', state.securityAndAnalysis ? `\`${status}\`` : '`security_and_analysis` absent (a non-admin token)'];
-  });
-  check(COOLDOWN, 'secret scanning push protection is enabled', ['repository'], () => {
-    const status = state.securityAndAnalysis?.secret_scanning_push_protection ?? null;
-    return [status === 'enabled', state.securityAndAnalysis ? `\`${status}\`` : '`security_and_analysis` absent (a non-admin token)'];
-  });
+  for (const [key, clause] of [['secret_scanning', 'secret scanning is enabled'], ['secret_scanning_push_protection', 'secret scanning push protection is enabled']]) {
+    check(COOLDOWN, clause, ['repository'], () => (state.securityAndAnalysis
+      ? [state.securityAndAnalysis[key] === 'enabled', `\`${state.securityAndAnalysis[key] ?? null}\``]
+      : [false, '`security_and_analysis` absent (a non-admin token)']));
+  }
   check(COOLDOWN, 'Dependabot alerts are on (`vulnerability-alerts` answers 204)', ['vulnerabilityAlerts'], () => [state.vulnerabilityAlerts, state.vulnerabilityAlerts ? '204' : '404']);
   check(REPORTING, 'private vulnerability reporting is enabled', ['privateVulnerabilityReporting'], () => [state.privateVulnerabilityReporting, `enabled: ${state.privateVulnerabilityReporting}`]);
 
@@ -474,7 +433,7 @@ export function judge(state, { expected, tendAllowed, now = new Date(), local = 
 }
 
 /** The fragment: verdict line, result lines, findings, sentinel. */
-export function fragment({ results, info, warnings = [] }, hash) {
+function fragment({ results, info, warnings = [] }, hash) {
   const verdict = results.some((r) => r.verdict === 'FAIL') ? 'FAIL'
     : results.some((r) => r.verdict === 'UNVERIFIABLE') ? 'INCONCLUSIVE' : 'PASS';
   const lines = [`VERDICT: ${verdict}`, '',
@@ -490,13 +449,11 @@ export function fragment({ results, info, warnings = [] }, hash) {
 }
 
 /** `secrets.allowed` from `.config/tend.yaml`. */
-export function tendAllowedSecrets(root = ROOT) {
-  return YAML.parse(readFileSync(join(root, '.config/tend.yaml'), 'utf8'))?.secrets?.allowed ?? [];
+function tendAllowedSecrets() {
+  return YAML.parse(readRepoFile('.config/tend.yaml'))?.secrets?.allowed ?? [];
 }
 
-export function loadExpected(root = ROOT) {
-  return JSON.parse(readFileSync(join(root, EXPECTED), 'utf8'));
-}
+const loadExpected = () => JSON.parse(readRepoFile(EXPECTED));
 
 /** Observe, judge, and render, over any fetcher. */
 export function run({ api, curl, expected = loadExpected(), tend = tendRefs(), tendAllowed = tendAllowedSecrets(), now, local = false, repo = expected.repository }) {
@@ -507,15 +464,14 @@ export function run({ api, curl, expected = loadExpected(), tend = tendRefs(), t
 }
 
 function main(argv) {
-  const args = { out: null, local: false, repo: null };
+  const args = { out: null, local: false, repo: undefined };
   for (let i = 2; i < argv.length; i++) {
     if (argv[i] === '--out') args.out = argv[++i];
     else if (argv[i] === '--local') args.local = true;
     else if (argv[i] === '--repo') args.repo = argv[++i];
     else throw new Error(`unexpected argument: ${argv[i]}`);
   }
-  const expected = loadExpected();
-  const result = run({ api: ghFetcher(), curl: curlStatus, expected, local: args.local, repo: args.repo ?? expected.repository });
+  const result = run({ api: ghFetcher(), local: args.local, repo: args.repo });
   if (args.out) writeFileSync(args.out, result.text);
   process.stdout.write(result.text);
   if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `hash=${result.hash}\nverdict=${result.verdict}\n`);

@@ -2,8 +2,8 @@
   "$comment": "The GitHub state the security specs require, read by scripts/github-state-check.mjs. Each value is derived from the FAIL IF it cites; the script owns which differences fail. Change a value here only in the same PR as the spec text that justifies it.",
   "repository": "diffplug/dormouse",
   "adminGatedRefs": [
-    { "type": "branch", "name": "main", "gatedBy": "Merge access" },
-    { "type": "tag", "name": "v*", "gatedBy": "Tag operations" }
+    { "type": "branch", "name": "main" },
+    { "type": "tag", "name": "v*" }
   ],
   "rulesets": {
     "Merge access": {
@@ -83,7 +83,7 @@
   "repoSecretsMayBeAbsent": ["CHROMATIC_PROJECT_TOKEN"],
   "orgSecrets": [],
   "workflowPermissions": { "default_workflow_permissions": "read", "can_approve_pull_request_reviews": false },
-  "app": { "slug": "dormouse-hosted-tagger", "id": 5228264, "permissions": { "contents": "write", "metadata": "read" }, "events": [] },
+  "app": { "id": 5228264, "permissions": { "contents": "write", "metadata": "read" }, "events": [] },
   "liveness": { "workflow": "workflow-audit.yaml", "event": "schedule", "branch": "main", "hours": 48, "infoAfterHours": 27 },
   "activeWorkflows": ["security-audit.yaml", "workflow-audit.yaml"],
   "embargoRepository": "diffplug/dormouse-embargo"

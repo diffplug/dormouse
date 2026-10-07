@@ -17,11 +17,11 @@
  * of the real files and requires this lint to report it.
  */
 
-import { readdirSync, readFileSync, realpathSync } from 'node:fs';
+import { readdirSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import YAML from 'yaml';
-import { repoRoot } from './lint-kit.mjs';
+import { readRepoFile, repoRoot } from './lint-kit.mjs';
 
 const POLICIES = 'docs/specs/security-ci.md -> "GitHub Actions Policies"';
 const TEND = 'docs/specs/security-ci.md -> "Automated Maintainer (tend)"';
@@ -36,15 +36,12 @@ const AGENT_WRITES = ['contents', 'pull-requests', 'issues', 'id-token'];
 const RELEASE_WRITES = ['id-token', 'attestations'];
 const WINDOW = ['.github/workflows/', '.config/tend.yaml', '.github/audit/', '.vscode/', '.gitattributes', 'scripts/setup-git.mjs', 'scripts/md-merge.mjs', 'scripts/md-unwrap.mjs'];
 
-export function loadInputs(root = repoRoot) {
-  const dir = join(root, '.github/workflows');
+export function loadInputs() {
   const workflows = {};
-  for (const file of readdirSync(dir).filter((f) => /\.ya?ml$/.test(f)).sort()) workflows[file] = readFileSync(join(dir, file), 'utf8');
-  return {
-    workflows,
-    tendConfig: readFileSync(join(root, '.config/tend.yaml'), 'utf8'),
-    renovate: readFileSync(join(root, '.github/renovate.json'), 'utf8'),
-  };
+  for (const file of readdirSync(join(repoRoot, '.github/workflows')).filter((f) => /\.ya?ml$/.test(f)).sort()) {
+    workflows[file] = readRepoFile(`.github/workflows/${file}`);
+  }
+  return { workflows, tendConfig: readRepoFile('.config/tend.yaml'), renovate: readRepoFile('.github/renovate.json') };
 }
 
 /** `{ scope: 'read'|'write'|'none' }` for a `permissions:` value, or `*` for `write-all`. */
@@ -75,10 +72,12 @@ const triggers = (doc) => {
 
 const environmentOf = (job) => (typeof job?.environment === 'string' ? job.environment : job?.environment?.name);
 
-/** Secret names a job can read: its own text plus the workflow-level `env:`. */
+/** What a job can see: its own text plus the workflow-level `env:`. */
+const jobText = (doc, job) => JSON.stringify([doc.env ?? null, job]);
+
+/** Secret names a job can read. */
 function secretsOf(doc, job) {
-  const text = JSON.stringify([doc.env ?? null, job]);
-  return new Set([...text.matchAll(/secrets\s*(?:\.\s*([A-Za-z_][A-Za-z0-9_]*)|\[\s*'([^']+)'\s*\])/g)].map((m) => m[1] ?? m[2]));
+  return new Set([...jobText(doc, job).matchAll(/secrets\s*(?:\.\s*([A-Za-z_][A-Za-z0-9_]*)|\[\s*'([^']+)'\s*\])/g)].map((m) => m[1] ?? m[2]));
 }
 
 const compareVersions = (a, b) => {
@@ -141,11 +140,8 @@ export function check(inputs) {
           fail(TEND, `${file} job \`${jobId}\` writes to \`$GITHUB_ENV\` from a step holding a secret`);
         }
       }
-    }
-    if (tend && doc.env !== undefined) fail(TEND, `${file} sets a workflow-level \`env:\`, which the harness forwards to the agent`);
 
-    // Credentials bound to a protected environment are read only from jobs bound to it, in any workflow.
-    for (const [jobId, job] of Object.entries(doc.jobs ?? {})) {
+      // Credentials bound to a protected environment are read only from jobs bound to it, in any workflow.
       const secrets = secretsOf(doc, job);
       const environment = environmentOf(job);
       for (const name of ['VSCE_PAT', 'OVSX_PAT']) {
@@ -154,10 +150,9 @@ export function check(inputs) {
       if (environment === 'hosted-release-tag' && !(file === 'hosted-production.yml' && jobId === 'tag')) {
         fail(HOSTED, `${file} job \`${jobId}\` uses \`hosted-release-tag\`; only \`tag\` in hosted-production.yml may`);
       }
-      if (JSON.stringify(job).includes('HOSTED_TAG_TOKEN') || JSON.stringify(doc.env ?? {}).includes('HOSTED_TAG_TOKEN')) {
-        fail(HOSTED, `${file} job \`${jobId}\` reads \`HOSTED_TAG_TOKEN\``);
-      }
+      if (jobText(doc, job).includes('HOSTED_TAG_TOKEN')) fail(HOSTED, `${file} job \`${jobId}\` reads \`HOSTED_TAG_TOKEN\``);
     }
+    if (tend && doc.env !== undefined) fail(TEND, `${file} sets a workflow-level \`env:\`, which the harness forwards to the agent`);
   }
 
   // release.yml: tags only, the audit dispatch, the publish environment, no production signing secret.
@@ -221,13 +216,14 @@ export function check(inputs) {
 }
 
 function main() {
-  const failures = check(loadInputs());
+  const inputs = loadInputs();
+  const failures = check(inputs);
   if (failures.length) {
     console.error(`workflow-lint: ${failures.length} violation(s)\n`);
     for (const f of failures) console.error(`  ${f}`);
     process.exit(1);
   }
-  console.log(`workflow-lint: OK (${Object.keys(loadInputs().workflows).length} workflows)`);
+  console.log(`workflow-lint: OK (${Object.keys(inputs.workflows).length} workflows)`);
 }
 
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) main();
