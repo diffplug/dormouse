@@ -182,8 +182,8 @@ importers:
         specifier: 2.0.0
         version: 2.0.0
       micromark-extension-gfm-table:
-        specifier: 2.1.1
-        version: 2.1.1
+        specifier: 2.1.2
+        version: 2.1.2
       micromark-extension-mdxjs:
         specifier: 3.0.0
         version: 3.0.0
@@ -2985,6 +2985,7 @@ packages:
   '@pgstencil/auth@0.2.1':
     resolution: {integrity: sha512-B5Wu035642KEr0V/VJf+C0MMM9PiAGvpXF9VTeKeiTnBifYQIkO9Cks+RLPiO2laxdBWLlNxo6RDVbjLaIiufA==}
     engines: {node: '>=24'}
+    deprecated: OAuth breaks with better-auth 1.7.7; upgrade to 0.3.0
     peerDependencies:
       hono: ^4.13.7
       kysely: ^0.29.5
@@ -6366,6 +6367,9 @@ packages:
 
   micromark-extension-gfm-table@2.1.1:
     resolution: {integrity: sha512-t2OU/dXXioARrC6yWfJ4hqB7rct14e8f7m0cbI5hUmDyyIlwv5vEtooptH8INkbLzOatzKuVbQmAYcbWoyz6Dg==}
+
+  micromark-extension-gfm-table@2.1.2:
+    resolution: {integrity: sha512-pRzm4kDTu0MjlmBkxmS9yYhw60nncfcEwu9NNdPFSQEFXS95ZKyIIyTSHu/o3ReBUrLKYEq+7YaXCRn/bPB4MA==}
 
   micromark-extension-gfm-tagfilter@2.0.0:
     resolution: {integrity: sha512-xHlTOmuCSotIA8TW1mDIM6X2O1SiX5P9IuDtqGonFhEK0qgRI4yeC6vMxEV2dgyr2TiD+2PQ10o+cOhdVAcwfg==}
@@ -13701,6 +13705,14 @@ snapshots:
       micromark-util-types: 2.0.2
 
   micromark-extension-gfm-table@2.1.1:
+    dependencies:
+      devlop: 1.1.0
+      micromark-factory-space: 2.0.1
+      micromark-util-character: 2.1.1
+      micromark-util-symbol: 2.0.1
+      micromark-util-types: 2.0.2
+
+  micromark-extension-gfm-table@2.1.2:
     dependencies:
       devlop: 1.1.0
       micromark-factory-space: 2.0.1
