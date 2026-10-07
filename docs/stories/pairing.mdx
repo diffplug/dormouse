@@ -102,7 +102,7 @@ That makes it a self-host build, which contacts nothing of Dormouse's on its own
 
 ## 3. Enroll the laptop
 
-**Settings → Network**, at the bottom of the app-global Settings dialog (the sliders icon at the far right of the baseboard). A new install opens nothing on its own — Network starts at **Nothing** — so first choose **My Relay only**, which lets this laptop reach the Relay it was built for and nothing else:
+**Settings → Network**, at the bottom of the app-global Settings dialog (the sliders icon at the far right of the baseboard). A new install opens nothing on its own — Network starts at **Nowhere** — so first choose **Anywhere, through** your Relay's host, which lets this laptop reach the Relay it was built for and nothing else:
 
 <Canvas of={Network.SelfHostNothing} />
 
@@ -110,7 +110,7 @@ The Phones section below it then holds the remote-control choices. Because the R
 
 <Canvas of={RemoteControl.OfferAvailable} />
 
-> The other button, **One-time connection**, is disabled in a self-host build like this one: its links are made at `relay.dormouse.sh`. In a stock build, under **Local networks** or **Anywhere**, it needs none of this walkthrough — no Relay, no enrollment, no passkey, no pairing. It shows a link good for one phone, for one session, confirmed with the same two digits and saving nothing; `docs/specs/one-time.md` owns it.
+> The other button, **One-time connection**, is disabled in a self-host build like this one: its links are made at `relay.dormouse.sh`. In a stock build, under **Local networks only** or **Anywhere**, it needs none of this walkthrough — no Relay, no enrollment, no passkey, no pairing. It shows a link good for one phone, for one session, confirmed with the same two digits and saving nothing; `docs/specs/one-time.md` owns it.
 
 The installer left a `run/enroll-offer.json` next to its state — this install's origin plus a one-time token the Relay redeems in place of the setup password — and the Burrow reads that same file from the well-known path for the platform. It lasts for 24 hours or until the first Burrow enrolls, whichever comes first. Press **Enroll** and the machine is connected.
 

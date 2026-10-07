@@ -8,6 +8,7 @@ import { WorkspaceStrip } from './WorkspaceStrip';
 import { chromeKeyboardHeld, resetChromeKeyboardLeases } from './wall/chrome-keyboard-lease';
 import { registerWallHandle, resetWallHandles, stubWallHandle, type WallHandle } from './wall/wall-handles';
 import { ensureResizeObserver } from './wall/wall-test-utils';
+import { installFakeFrames } from './motion-test-utils';
 import { requestWorkspaceClose, requestWorkspaceRename, workspaceCloseConfirmation } from './wall/workspace-lifecycle';
 import { resetWorkspaceSurfaces, setWorkspaceSurfaces } from '../lib/workspace-surfaces';
 import { clearTerminalActivity, setTerminalActivity } from '../lib/terminal-registry';
@@ -25,8 +26,11 @@ import {
   createWorkspace,
   getActiveWorkspaceId,
   getWorkspacesSnapshot,
+  moveWorkspace,
   resetWorkspaces,
   setAutoWorkspaceName,
+  setWorkspaceAlertDelivery,
+  setWorkspacePinned,
 } from '../lib/workspace-store';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -707,7 +711,6 @@ describe('pinned tabs', () => {
     // The empty spacer pushes the pinned group flush against the strip's right end.
     expect(order).toEqual([first, 'ws-3', '+', 'spacer', 'ws-2']);
     expect(tabFor('ws-2').closest('[data-workspace-pinned-group]')).not.toBeNull();
-    expect(tabFor('ws-2').querySelector('[data-workspace-tab-pinned]')).not.toBeNull();
     expect(activateButton('ws-2').getAttribute('aria-label')).toBe('Notes, pinned');
 
     // Active, and still no ×.
@@ -720,6 +723,126 @@ describe('pinned tabs', () => {
     await act(async () => { await Promise.resolve(); });
     expect(closeAll).not.toHaveBeenCalled();
     expect(tabs()).toHaveLength(3);
+  });
+});
+
+describe('tab tweens', () => {
+  /** Each item's tweens, `+` as '+': `width A→B`, or the transform's start. */
+  let tweens: Map<string, string[]>;
+  /** A width tween holds its item at its first width until `settle`. */
+  let held: Map<Element, number>;
+  const frames = installFakeFrames();
+  let measure: ReturnType<typeof vi.spyOn<HTMLElement, 'getBoundingClientRect'>>;
+
+  const key = (element: HTMLElement) => element.dataset.workspaceTab ?? '+';
+  /** Every tween runs to its end. */
+  const settle = () => { held.clear(); tweens.clear(); };
+
+  beforeEach(() => {
+    tweens = new Map();
+    held = new Map();
+    Object.defineProperty(HTMLElement.prototype, 'animate', {
+      configurable: true,
+      value(this: HTMLElement, keyframes: Keyframe[]) {
+        const [from, to] = keyframes;
+        let tween = String(from.transform);
+        if (from.width) {
+          tween = `width ${from.width}→${to.width}`;
+          held.set(this, parseFloat(String(from.width)));
+        }
+        tweens.set(key(this), [...tweens.get(key(this)) ?? [], tween]);
+        return { cancel: () => { held.delete(this); } };
+      },
+    });
+    // jsdom lays nothing out. In DOM order, `+` is 20px and a tab is 20px of
+    // padding, 10px a character of its name, and 20px for its `×`; the rename
+    // editor's tab is the wider of its draft and the tab it kept as slack.
+    const label = (name: string, close: boolean) => 20 + 10 * name.length + (close ? 20 : 0);
+    const natural = (item: HTMLElement) => {
+      if (item.dataset.workspaceTab === undefined) return 20;
+      const slack = item.querySelector('[data-workspace-rename-slack]');
+      if (slack) return Math.max(label(item.querySelector('input')!.value, false), label(slack.textContent!, !!slack.querySelector('svg')));
+      return label(item.querySelector('span')!.textContent!, !!item.querySelector('[data-workspace-tab-close]'));
+    };
+    const width = (item: HTMLElement) => held.get(item) ?? natural(item);
+    measure = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const items = [...container.querySelectorAll<HTMLElement>('[data-workspace-tab], [data-workspace-new]')];
+      const left = items.slice(0, Math.max(0, items.indexOf(this))).reduce((sum, item) => sum + width(item), 0);
+      const right = left + width(this);
+      return { left, right, width: right - left, top: 0, bottom: 24, height: 24, x: left, y: 0, toJSON: () => ({}) } as DOMRect;
+    });
+  });
+
+  afterEach(() => {
+    delete (HTMLElement.prototype as Partial<HTMLElement>).animate;
+  });
+
+  /** Renders the default Workspace, active and named `w1`, then `ids` named
+   *  `w2`, `w3`…, and returns the default's id. */
+  async function renderWith(...ids: string[]): Promise<string> {
+    const first = getWorkspacesSnapshot().workspaces[0].id;
+    await act(async () => {
+      setAutoWorkspaceName(first, 'w1');
+      ids.forEach((id, index) => createWorkspace({ id, name: `w${index + 2}`, nameIsAuto: true, activate: false }));
+    });
+    await render();
+    settle();
+    return first;
+  }
+
+  it('slides the tabs a move displaces from where they were, and leaves the rest', async () => {
+    const first = await renderWith('ws-2', 'ws-3');
+    await act(async () => { moveWorkspace(first, 1); });
+    expect(tweens).toEqual(new Map([[first, ['translate(-40px, 0px)']], ['ws-2', ['translate(60px, 0px)']]]));
+  });
+
+  it('slides a tab that pinning remounts into the other group, its × tweening away, with `+`', async () => {
+    const first = await renderWith('ws-2');
+    await act(async () => { setWorkspacePinned(first, true); });
+    expect(tweens).toEqual(new Map([
+      [first, ['width 60px→40px', 'translate(-60px, 0px)']],
+      ['ws-2', ['translate(60px, 0px)']],
+      ['+', ['translate(60px, 0px)']],
+    ]));
+  });
+
+  it('tweens the × from the old active tab to the new one, leaving + where it was', async () => {
+    const first = await renderWith('ws-2');
+    await act(async () => { activateButton('ws-2').click(); });
+    expect(tweens).toEqual(new Map([[first, ['width 60px→40px']], ['ws-2', ['width 40px→60px']]]));
+  });
+
+  it('keeps the × as the rename editor\'s slack, then tweens the tab to text that outgrows it', async () => {
+    const first = await renderWith('ws-2');
+    await act(async () => { requestWorkspaceRename(first); });
+    expect(tweens.size).toBe(0);
+    const input = tabFor(first).querySelector('input')!;
+    expect(input.style.width).toBe('calc(2ch + 2px)');
+
+    const type = async (value: string) => {
+      await act(async () => {
+        input.dispatchEvent(new InputEvent('beforeinput', { bubbles: true, cancelable: true }));
+        typeInto(input, value);
+      });
+      // The editor's re-render does not reach the strip: a frame plays it.
+      await act(async () => { frames.advance(0); });
+    };
+    await type('w1xx');
+    expect(input.style.width).toBe('calc(4ch + 2px)');
+    expect(tweens.size).toBe(0);
+    await type('w1xxx');
+    expect(tweens).toEqual(new Map([[first, ['width 60px→70px']]]));
+  });
+
+  it('never measures for a change that leaves the strip as it was, and tweens nothing under reduced motion', async () => {
+    const first = await renderWith('ws-2');
+    measure.mockClear();
+    await act(async () => { setWorkspaceAlertDelivery(first, { pushEnabled: false }); });
+    expect(measure).not.toHaveBeenCalled();
+
+    frames.reduceMotion();
+    await act(async () => { moveWorkspace(first, 1); });
+    expect(tweens.size).toBe(0);
   });
 });
 

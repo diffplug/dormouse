@@ -1075,7 +1075,7 @@ describe('BurrowRuntime bounds', () => {
     const refused = new BurrowRuntime({
       enrollment,
       createWebSocket: () => {
-        if (refusing) throw new Error('set to Nothing');
+        if (refusing) throw new Error('set to Nowhere');
         opened += 1;
         return new FakeSocket();
       },

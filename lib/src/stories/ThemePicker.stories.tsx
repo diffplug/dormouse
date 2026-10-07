@@ -24,7 +24,7 @@ function PickerStory({ maxHeight }: { maxHeight?: string }) {
           : undefined
       }
     >
-      <ThemePicker variant="compact" />
+      <ThemePicker variant="compact" offerStore />
     </div>
   );
 }

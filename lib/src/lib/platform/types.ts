@@ -228,6 +228,14 @@ export interface PlatformAdapter {
   hostOwnsShells?: boolean;
 
   /**
+   * Whether the Theme picker offers installing a theme from OpenVSX, which
+   * fetches open-vsx.org outside the network policy. Absent reads as `false`;
+   * only the fake adapter (the website playground, Storybook) sets it
+   * (docs/specs/theme.md -> "Where the user picks a theme").
+   */
+  offersThemeStore?: boolean;
+
+  /**
    * Whether Settings offers Labs (`docs/specs/reopen.md` → "Labs: No-confirm
    * delayed kill"). Absent reads as `false`; only the Standalone adapters set it.
    */

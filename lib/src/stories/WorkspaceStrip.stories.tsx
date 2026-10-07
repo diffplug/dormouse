@@ -1,6 +1,10 @@
 import { setWorkspaceMoveError } from '../lib/workspace-ui-store';
 import { useEffect } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
+import { expect } from 'storybook/test';
+import { flushSync } from 'react-dom';
+import { cfg } from '../cfg';
+import { renameWorkspace } from '../lib/workspace-store';
 import { WorkspaceStrip } from '../components/WorkspaceStrip';
 import { registerWallHandle, stubWallHandle } from '../components/wall/wall-handles';
 import { requireElement, waitForPrimedState } from './settle-terminals';
@@ -119,6 +123,45 @@ export const Overflow: Story = {
   },
 };
 
+/** Real flex layout: jsdom's mocked tab rects cannot detect an animated width
+ *  being shrunk a second time before it reaches its measured endpoint. */
+export const OverflowWidthTween: Story = {
+  args: { width: 250 },
+  parameters: { primedWorkspaces: primed(['Alpha', 'Bravo', 'Charlie'], 0) },
+  play: async ({ canvasElement }) => {
+    const tab = await requireElement<HTMLElement>(`[data-workspace-tab="${ws(1)}"]`, 'Bravo tab');
+    const animate = cfg.layout.animate;
+    const animations: Animation[] = [];
+    try {
+      // Snapshot runs normally disable motion; this story checks its geometry
+      // at exact times, then finishes it before the screenshot.
+      cfg.layout.animate = true;
+      const before = tab.getBoundingClientRect().width;
+      flushSync(() => renameWorkspace(ws(1), 'Bravo has a very long title'));
+      animations.push(...canvasElement.getAnimations({ subtree: true }));
+      const widthTween = animations.find((animation) => animation.effect instanceof KeyframeEffect
+        && animation.effect.target === tab
+        && animation.effect.getKeyframes().some((frame) => frame.width !== undefined));
+      expect(widthTween).toBeDefined();
+      widthTween!.pause();
+      widthTween!.currentTime = 0;
+      expect(tab.getBoundingClientRect().width).toBeCloseTo(before, 1);
+
+      const duration = Number(widthTween!.effect!.getComputedTiming().duration);
+      widthTween!.currentTime = duration - 0.001;
+      const lastFrame = tab.getBoundingClientRect().width;
+      widthTween!.finish();
+      const settled = tab.getBoundingClientRect().width;
+      expect(settled).toBeGreaterThan(before);
+      expect(lastFrame).toBeCloseTo(settled, 1);
+      expect(getComputedStyle(tab).flexShrink).toBe('1');
+    } finally {
+      animations.forEach((animation) => animation.cancel());
+      cfg.layout.animate = animate;
+    }
+  },
+};
+
 /** Closing a Workspace that holds work asks first; with no Window behind it the
  *  confirmation is viewport-centered. */
 export const CloseConfirm: Story = {
@@ -144,7 +187,7 @@ export const MoveRefused: Story = {
   },
 };
 
-/** Pinned right: after `+`, with a pin where `×` would be, never closeable
+/** Pinned right: after `+`, with no `×`, never closeable
  *  alone (`docs/specs/layout.md` → "Workspace tabs"). */
 export const Pinned: Story = {
   parameters: { primedWorkspaces: primed(['Agents', 'Build', 'Notes', 'Docs'], 2, undefined, [2, 3]) },

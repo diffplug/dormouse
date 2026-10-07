@@ -249,6 +249,10 @@ function ensureChild(extensionPath: string): ChildProcess {
   const nodePath = dorEnv.DORMOUSE_NODE;
 
   child = fork(hostScript, [], {
+    // Our own install, never the inherited cwd, which may be a workspace
+    // folder: Windows looks a bare program name up there before `PATH`
+    // (docs/specs/security-local.md -> "Spawned programs").
+    cwd: extensionPath,
     stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
     execPath: nodePath,
     execArgv: [], // clear --inspect flags inherited from VSCode debug

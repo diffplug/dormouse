@@ -74,9 +74,9 @@ export function ToolApproval({ params, id, onResolve }: PaneProps & {
 
       <div className="text-xs text-muted/80">
         {pending.trustRecorded ? 'Permission is saved. Retry checks the Tool configuration again. Closing this pane keeps the permission.' : (
-          <>{pending.path} decides what this runs. Allowing the upstream covers every
-            worktree of it; allowing the folder covers this checkout only. Declining
-            records nothing.</>
+          <>{pending.path} decides what this runs. Allowing the upstream covers any
+            folder whose git config names it, every clone and worktree included;
+            allowing the folder covers this checkout only. Declining records nothing.</>
         )}
       </div>
     </PaneMessage>

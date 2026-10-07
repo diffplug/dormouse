@@ -46,13 +46,14 @@ const PAGES = [
   {
     route: "/security",
     element: <SecurityDocs />,
-    audience: "security",
+    // Remote control's rows too: Hosted and one-time readers never visit /self-host.
+    audiences: ["security", "self-host"],
     links: [sitePath("/supply-chain"), sitePath("/self-host")],
   },
   {
     route: "/supply-chain",
     element: <SupplyChain />,
-    audience: "supply-chain",
+    audiences: ["supply-chain"],
     links: [
       `${sitePath("/security")}#how-the-guarantees-are-checked`,
       `${sitePath("/self-host")}#what-the-installer-does`,
@@ -61,7 +62,7 @@ const PAGES = [
   {
     route: "/self-host",
     element: <SelfHostDocs />,
-    audience: "self-host",
+    audiences: ["self-host"],
     links: [
       `${sitePath("/security")}#how-the-guarantees-are-checked`,
       sitePath("/supply-chain"),
@@ -102,35 +103,35 @@ describe("audience pages", () => {
     Record<"guarantees" | "notDefended" | "knownGaps", unknown>
   >;
 
-  it("names every audience the generator splits", () => {
-    expect(PAGES.map((page) => page.audience).sort()).toEqual(Object.keys(audiences).sort());
+  it("places every audience the generator splits on some page", () => {
+    expect([...new Set(PAGES.flatMap((page) => page.audiences))].sort()).toEqual(Object.keys(audiences).sort());
   });
 
   for (const page of PAGES) {
-    it(`${page.route} renders every row and bullet of its audience, and none of the others'`, () => {
+    it(`${page.route} renders every row and bullet of its audiences, and none of the others'`, () => {
       const main = renderMain(page.element);
-      const mine = audiences[page.audience];
+      const mine = page.audiences.map((name) => audiences[name]);
       const others = Object.entries(audiences)
-        .filter(([name]) => name !== page.audience)
+        .filter(([name]) => !(page.audiences as readonly string[]).includes(name))
         .map(([, sections]) => sections);
       // The umbrella's own paragraphs link the specs too ("Every pull request
       // … Disclosure"); only its rows and bullets are audience-scoped.
       const prose =
-        page.audience === "security"
+        page.route === "/security"
           ? repoHrefsIn((security.pageBlocks as { type: string }[]).filter((b) => b.type === "paragraph"))
           : [];
       for (const key of ["guarantees", "notDefended", "knownGaps"] as const) {
-        const own = repoHrefsIn(mine[key]);
+        const own = mine.flatMap((sections) => repoHrefsIn(sections[key]));
         for (const href of own) expect(main).toContain(`href="${href}"`);
         for (const href of others.flatMap((sections) => repoHrefsIn(sections[key]))) {
           if (!own.includes(href) && !prose.includes(href)) expect(main).not.toContain(`href="${href}"`);
         }
       }
-      expect(repoHrefsIn(mine.guarantees).length).toBeGreaterThan(0);
+      for (const sections of mine) expect(repoHrefsIn(sections.guarantees).length).toBeGreaterThan(0);
     });
   }
 
-  for (const page of PAGES.filter((page) => page.audience !== "security")) {
+  for (const page of PAGES.filter((page) => page.route !== "/security")) {
     it(`${page.route} links the audit method the guarantees rest on`, () => {
       const securityLinks = [...renderMain(page.element).matchAll(/href="(\/security[^"]*)"/g)].map(
         ([, href]) => href,

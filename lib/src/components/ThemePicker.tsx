@@ -50,6 +50,12 @@ export interface ThemePickerProps {
    * it (docs/specs/theme.md).
    */
   onPick?: (theme: DormouseTheme) => void;
+  /**
+   * Offer "Install theme from OpenVSX", which fetches open-vsx.org from the
+   * page. Only the website passes it: no network policy governs that fetch,
+   * and Standalone's content policy blocks it (docs/specs/theme.md).
+   */
+  offerStore?: boolean;
 }
 
 const useBrowserLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect;
@@ -63,6 +69,7 @@ export function ThemePicker({
   onOpenChange,
   menuSide = 'below',
   onPick,
+  offerStore = false,
 }: ThemePickerProps) {
   // The server and first client render must agree. Installed themes and the
   // active id come from browser storage, so reading either here leaves React
@@ -178,16 +185,18 @@ export function ThemePicker({
             >
               Debug current theme
             </button>
-            <button
-              type="button"
-              onClick={() => {
-                setOpen(false);
-                setStoreOpen(true);
-              }}
-              className="w-full rounded px-3 py-1.5 text-left text-sm font-medium text-link transition-opacity hover:opacity-85"
-            >
-              Install theme from OpenVSX
-            </button>
+            {offerStore ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setOpen(false);
+                  setStoreOpen(true);
+                }}
+                className="w-full rounded px-3 py-1.5 text-left text-sm font-medium text-link transition-opacity hover:opacity-85"
+              >
+                Install theme from OpenVSX
+              </button>
+            ) : null}
           </div>
         </div>
       ) : null}

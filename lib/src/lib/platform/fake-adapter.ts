@@ -100,6 +100,8 @@ export class FakePtyAdapter implements PlatformAdapter {
   hostOwnsTheme?: boolean;
   hostOwnsShells?: boolean;
   hostOwnsUpdates?: boolean;
+  /** The website, which runs on this adapter, may reach open-vsx.org. */
+  offersThemeStore?: boolean = true;
 
   // Same reason, one layer up: a fake platform has no Burrow service behind it, so
   // this stays undefined and the Settings dialog's Network topic renders

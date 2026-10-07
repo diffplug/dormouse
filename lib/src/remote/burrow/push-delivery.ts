@@ -98,8 +98,8 @@ export interface AlertPushDeps {
     clientStaticPublicKey: string,
     plaintext: Uint8Array,
   ) => Promise<SealedPushV1 | null>;
-  /** Injectable for tests. */
-  readonly fetch?: typeof globalThis.fetch;
+  /** The Burrow service's guarded fetch; required, as `BurrowFetchOptions`'s. */
+  readonly fetch: typeof globalThis.fetch;
 }
 
 /**

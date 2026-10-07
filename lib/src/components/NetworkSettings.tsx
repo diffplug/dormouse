@@ -122,15 +122,23 @@ interface LevelChoice {
 function choiceFor(level: NetworkLevel, relayOrigin: string): Omit<LevelChoice, 'level'> {
   switch (level) {
     case 'nothing':
-      return { title: 'Nothing', detail: 'Dormouse opens no connections on its own, and phones can’t reach it.' };
+      return { title: 'Nowhere', detail: 'Dormouse opens no connections on its own, and phones can’t reach it.' };
     case 'local':
-      return { title: 'Local networks', detail: 'Phones connect only over networks you choose.' };
+      return {
+        title: 'Local networks only',
+        detail:
+          'Phones reach your terminals only over networks you choose. Phone and spoken alerts send a pane’s ' +
+          'name from any network.',
+      };
     case 'anywhere':
-      return { title: 'Anywhere', detail: 'Phones connect directly from any network.' };
+      return {
+        title: 'Anywhere',
+        detail: 'Phones reach your terminals from any network, directly when they can, otherwise relayed through Hosted.',
+      };
     case 'relay':
       return {
-        title: 'My Relay only',
-        detail: `Phones reach Dormouse through ${hostOf(relayOrigin)}, the Relay this build was made for.`,
+        title: `Anywhere, through ${hostOf(relayOrigin)}`,
+        detail: 'Directly when they can, otherwise through your Relay.',
       };
   }
 }
@@ -230,7 +238,7 @@ export function connectionsFor(facts: NetworkFacts): ConnectionRow[] {
     });
   }
   // A phone reaches this computer directly wherever one can connect at all —
-  // not under Local networks with nothing allowed, nor under My Relay only
+  // not under Local networks with nothing allowed, nor under `relay`
   // once that Relay refuses this Burrow.
   if (oneTime || (policy.level === 'relay' && !refused)) {
     rows.push({
@@ -315,7 +323,7 @@ function LevelPicker({ choices, level, onLevel }: {
   };
   return (
     <div>
-      <div id="network-level-label" className={LABEL}>Connections Dormouse makes on its own</div>
+      <div id="network-level-label" className={LABEL}>End-to-end encrypted terminal data may travel</div>
       <div ref={group} role="radiogroup" aria-labelledby="network-level-label" className="mt-1.5 flex flex-col gap-1">
         {choices.map((choice, position) => {
           const selected = choice.level === level;
@@ -366,8 +374,8 @@ function ConnectionList({ rows }: { rows: ConnectionRow[] }) {
       <div id="network-connections-label" className={LABEL}>What Dormouse connects to</div>
       {rows.length === 0 ? (
         <div className={HINT}>
-          Nothing. Terminals and browser panes still reach whatever you open in them, including
-          panes restored at launch.
+          Nothing. Terminals, browser panes, and agents still reach whatever you open in them,
+          including those Dormouse restores at launch.
         </div>
       ) : (
         <dl className="mt-1.5 grid grid-cols-[minmax(0,2fr)_minmax(0,3fr)] gap-x-4 text-sm">

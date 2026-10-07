@@ -459,9 +459,9 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
                   <section aria-labelledby="computers">
                     <h2 id="computers">Computers</h2>
                     <p className="help">
-                      Computers enrolled to this account can reach your phones
-                      through the Hosted Relay. Remote control is in admin-only
-                      testing.
+                      A phone reaches a computer enrolled here through the
+                      Hosted Relay only once paired by two digits typed at that
+                      computer. Remote control is in admin-only testing.
                     </p>
                     {computers.length === 0 && (
                       <p className="help">
@@ -649,7 +649,7 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
         </a>
         <a href="https://dormouse.sh/privacy/" rel="noreferrer">Privacy ↗</a>
         <a href="https://dormouse.sh/terms/" rel="noreferrer">Terms ↗</a>
-        <span>Optional services. Your terminal stays yours.</span>
+        <span>Optional services. Your terminals run on your own computer.</span>
       </footer>
     </div>
   );
