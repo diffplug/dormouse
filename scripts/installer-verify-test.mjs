@@ -316,7 +316,10 @@ function cases(platform, env) {
       '[]',
     ],
     // The gate the confirm hangs off, run as the installer runs it: the
-    // origin's root handler read once, then judged. `conflict` is the only
+    // origin's root handler read once into a variable, then judged. The
+    // assignment is load-bearing in the 1 MiB cases: `serve_origin_root` stops
+    // reading at the root, so a pipe into it SIGPIPEs the writer, and only an
+    // assignment under `set -e` turns that 141 into a failure, as at the gate. `conflict` is the only
     // answer that asks before repointing the operator's `/`, so every foreign
     // root handler must reach it, and a root on any other listener must not
     // answer `loopback`.
@@ -327,12 +330,12 @@ function cases(platform, env) {
     ]),
     [
       'serve_state: a foreign root mapping, ahead of 1 MiB',
-      `serve_state 3100 "$(serve_origin_root ${sq(ORIGIN)} ${pad(SERVE_OTHER_PATH, `${AT_443}\n${SERVE_ROOT_FOREIGN}\n`)})"`,
+      `root="$(serve_origin_root ${sq(ORIGIN)} ${pad(SERVE_OTHER_PATH, `${AT_443}\n${SERVE_ROOT_FOREIGN}\n`)})"; serve_state 3100 "$root"`,
       'conflict',
     ],
     [
       'serve_state: 1 MiB of serve status with no root mapping at all',
-      `serve_state 3100 "$(serve_origin_root ${sq(ORIGIN)} ${pad(SERVE_OTHER_PATH, `${AT_443}\n`)})"`,
+      `root="$(serve_origin_root ${sq(ORIGIN)} ${pad(SERVE_OTHER_PATH, `${AT_443}\n`)})"; serve_state 3100 "$root"`,
       'none',
     ],
     ...SERVE_CASES.filter(([, , root]) => root).map(([fixture, , root]) => [

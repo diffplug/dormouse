@@ -479,7 +479,10 @@ export const RULES = [
   },
   {
     // Where every Serve decision reads `/` from: the root handler under the
-    // listener whose header names the origin with no port, i.e. :443. A
+    // listener whose header names the origin with no port, i.e. :443, read
+    // from a here-string because the reader stops at the root it finds — a
+    // pipe in would SIGPIPE the writer, and the gate's assignment would abort
+    // the install with 141. A
     // per-line root match took a root on any listener — `--https=8443`, a
     // Service — as the origin's, so a node whose :443 served someone else
     // answered "already ours" at the gate, in `manage verify`, and in
@@ -491,8 +494,8 @@ export const RULES = [
     // its two copies identical.
     rule: "Network posture — the Serve root is read from the origin's :443 listener alone",
     patterns: {
-      macOS: /BEGIN \{ if \(origin == ""\) exit \}\n\s*substr\(\$0, 1, 4\) != "\|-- " \{ listener = \(tolower\(\$1\) == tolower\(origin\)\); next \}\n\s*listener && \$2 == "\/" \{ sub\(\/\^\[\|\]-- \\\/ \+\/, ""\); print; exit \}/,
-      Linux: /BEGIN \{ if \(origin == ""\) exit \}\n\s*substr\(\$0, 1, 4\) != "\|-- " \{ listener = \(tolower\(\$1\) == tolower\(origin\)\); next \}\n\s*listener && \$2 == "\/" \{ sub\(\/\^\[\|\]-- \\\/ \+\/, ""\); print; exit \}/,
+      macOS: /BEGIN \{ if \(origin == ""\) exit \}\n\s*substr\(\$0, 1, 4\) != "\|-- " \{ listener = \(tolower\(\$1\) == tolower\(origin\)\); next \}\n\s*listener && \$2 == "\/" \{ sub\(\/\^\[\|\]-- \\\/ \+\/, ""\); print; exit \}\n\s*' <<<"\$2"/,
+      Linux: /BEGIN \{ if \(origin == ""\) exit \}\n\s*substr\(\$0, 1, 4\) != "\|-- " \{ listener = \(tolower\(\$1\) == tolower\(origin\)\); next \}\n\s*listener && \$2 == "\/" \{ sub\(\/\^\[\|\]-- \\\/ \+\/, ""\); print; exit \}\n\s*' <<<"\$2"/,
       Windows: new RegExp(escapeRegExp(WINDOWS_SERVE_ORIGIN_ROOT)),
     },
     exactMatches: { macOS: 2, Linux: 2, Windows: 2 },
