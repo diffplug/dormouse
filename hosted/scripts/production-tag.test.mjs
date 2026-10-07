@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import {
   productionDay,
   nextProductionTag,
@@ -113,18 +113,30 @@ test("a ref creation failure never falls back to updating an existing tag", asyn
 });
 
 test("the tag job's only credential is an App token for this repository with Contents write alone", () => {
-  const workflow = readFileSync(
-    new URL("../../.github/workflows/hosted-production.yml", import.meta.url),
-    "utf8",
-  );
-  const job = workflow.slice(workflow.indexOf("\n  tag:"));
-  // One secret, the App's key, and only the minting step reads it.
-  assert.deepEqual(job.match(/secrets\.\w+/g), ["secrets.HOSTED_TAG_APP_PRIVATE_KEY"]);
-  const mint = job.match(/\n      - name: [^\n]*\n        id: tagger\n        uses: actions\/create-github-app-token@[0-9a-f]{40} # v[\d.]+\n        with:\n((?: {10}[^\n]*\n)+)/);
+  const workflows = new URL("../../.github/workflows/", import.meta.url);
+  const workflow = readFileSync(new URL("hosted-production.yml", workflows), "utf8");
+  const start = workflow.indexOf("\n  tag:\n");
+  const next = workflow.slice(start + 1).search(/\n  [\w-]+:\n/);
+  const job = next < 0 ? workflow.slice(start) : workflow.slice(start, start + 1 + next);
+  // Only this job enters the environment, and no workflow reads the retired PAT.
+  for (const name of readdirSync(workflows).filter((f) => /\.ya?ml$/.test(f))) {
+    const text = readFileSync(new URL(name, workflows), "utf8");
+    assert.ok(!text.includes("HOSTED_TAG_TOKEN"), name);
+    assert.equal(text.split("hosted-release-tag").length - 1, name === "hosted-production.yml" ? 1 : 0, name);
+  }
+  assert.match(job, /\n    environment: hosted-release-tag\n/);
+  // One secret, the App's key; no GITHUB_TOKEN handed to a step.
+  assert.deepEqual(job.match(/secrets\W+\w+/g), ["secrets.HOSTED_TAG_APP_PRIVATE_KEY"]);
+  assert.doesNotMatch(job, /github\.token|GITHUB_TOKEN:/);
+  const mint = job.match(/\n        uses: actions\/create-github-app-token@[0-9a-f]{40} # v[\d.]+\n        with:\n((?: {10}[^\n]*\n)+)/);
   assert.ok(mint, "the tag job mints its token with a SHA-pinned create-github-app-token");
-  assert.deepEqual(
-    mint[1].trim().split("\n").map((line) => line.trim()).filter((line) => !/^(client-id|private-key):/.test(line)),
-    ["owner: diffplug", "repositories: dormouse", "permission-contents: write"],
-  );
+  assert.deepEqual(mint[1].trim().split("\n").map((line) => line.trim()), [
+    "client-id: ${{ vars.HOSTED_TAG_APP_CLIENT_ID }}",
+    "private-key: ${{ secrets.HOSTED_TAG_APP_PRIVATE_KEY }}",
+    "owner: diffplug",
+    "repositories: dormouse",
+    "permission-contents: write",
+  ]);
+  assert.match(job, /\n        id: tagger\n        uses: actions\/create-github-app-token@/);
   assert.deepEqual(job.match(/GH_TOKEN: .*/g), ["GH_TOKEN: ${{ steps.tagger.outputs.token }}"]);
 });

@@ -153,14 +153,14 @@ gh secret set CLOUDFLARE_API_TOKEN --repo diffplug/dormouse --env hosted-product
 gh secret set DATABASE_URL --repo diffplug/dormouse --env hosted-production
 gh secret set BACKUP_AGE_IDENTITY --repo diffplug/dormouse --env hosted-production
 gh variable set HOSTED_TAG_APP_CLIENT_ID --repo diffplug/dormouse --env hosted-release-tag --body 'Iv23liADZP0hPRZCYRz8'
-gh secret set HOSTED_TAG_APP_PRIVATE_KEY --repo diffplug/dormouse --env hosted-release-tag < dormouse-hosted-tagger.private-key.pem
+gh secret set HOSTED_TAG_APP_PRIVATE_KEY --repo diffplug/dormouse --env hosted-release-tag < PATH_TO_DOWNLOADED_KEY.pem
 ```
 
 `DATABASE_URL` is the direct migration-role Postgres URL. Generate the age identity with `age-keygen` into private password-manager storage, then enter it at the hidden prompt; preserve that independent copy and old keys on rotation. Use a production Cloudflare token covering Workers deployment (which includes the Durable Object migrations, rate-limit bindings, and Cron Triggers), Workers secret listing, Hyperdrive read, and the custom-domain zone permissions for all three hostnames.
 
 The tag job authenticates as `dormouse-hosted-tagger`, a private GitHub App owned by `diffplug` (App ID `5228264`) (client ID `Iv23liADZP0hPRZCYRz8`) with Contents write, Metadata read, no webhook or events, and one installation selecting only this repository. The App is a bypass actor on `Hosted tag creation` alone, so it can create `hosted/` tags but never move or delete one, and `v*` tags stay admin-only; `docs/specs/security-ci.md` -> "Hosted Deployments" owns these checks. Do not grant tag bypass to the bot or Actions generally.
 
-To rotate the key, generate a new private key on the App's settings page, set it with the `gh secret set HOSTED_TAG_APP_PRIVATE_KEY` line above, delete the local `.pem`, and delete the old key on the settings page. A tag job that fails on a bad key can be re-run alone once the secret is fixed; it never records a deployment twice.
+Rotate the key yearly and on any suspected exposure, with a reminder in Bitwarden: generate a new private key on the App's settings page, set it with the `gh secret set HOSTED_TAG_APP_PRIVATE_KEY` line above, delete the local `.pem`, and delete the old key on the settings page. A tag job that fails on a bad key can be re-run alone once the secret is fixed; it never records a deployment twice.
 
 ### Runtime secrets in the Workers
 
