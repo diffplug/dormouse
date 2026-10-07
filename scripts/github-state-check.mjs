@@ -213,8 +213,15 @@ export function observe(api, { repo, expected, tend = [], curl = curlStatus }) {
     else state.errors[`workflow ${file}`] = wf.status;
   }
   const { workflow, event, branch } = expected.liveness;
-  const runs = read('liveness', `${R}/actions/workflows/${enc(workflow)}/runs?event=${event}&branch=${branch}&status=success&per_page=10`, { auth: 'public' });
-  if (runs) state.volatile.successfulRuns = (runs.workflow_runs ?? []).map((r) => ({ id: r.id, created_at: r.created_at, event: r.event, head_branch: r.head_branch, conclusion: r.conclusion }));
+  // Two listings, unioned: one `status=success` listing has been seen to omit
+  // the two newest runs (2026-10-07), which would read as a dead workflow.
+  const runs = [`&status=success&per_page=10`, `&per_page=20`]
+    .map((q) => read('liveness', `${R}/actions/workflows/${enc(workflow)}/runs?event=${event}&branch=${branch}${q}`, { auth: 'public' }));
+  if (runs.some(Boolean)) {
+    delete state.errors.liveness;
+    const seen = new Map(runs.filter(Boolean).flatMap((r) => r.workflow_runs ?? []).map((r) => [r.id, r]));
+    state.volatile.successfulRuns = [...seen.values()].map((r) => ({ id: r.id, created_at: r.created_at, event: r.event, head_branch: r.head_branch, conclusion: r.conclusion }));
+  }
 
   // The tagger App is private: `apps/<slug>` answers 404 or 403 to every token
   // an audit run holds, and only an org admin can list its installation. So its

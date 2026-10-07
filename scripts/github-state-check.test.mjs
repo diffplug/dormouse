@@ -29,6 +29,9 @@ const ruleset = (ctx, name) => Object.entries(ctx.responses)
   .find(([path, r]) => /\/rulesets\/\d+$/.test(path) && r.body?.name === name)[1].body;
 const env = (ctx, name) => body(ctx, 'environments').environments.find((e) => e.name === name);
 const names = (list) => list.map((name) => ({ name }));
+const LISTINGS = ['&status=success&per_page=10', '&per_page=20'].map((q) => `actions/workflows/workflow-audit.yaml/runs?event=schedule&branch=main${q}`);
+/** Every run either liveness listing returns. */
+const liveRuns = (ctx) => LISTINGS.flatMap((path) => body(ctx, path).workflow_runs);
 function addEnvironment(ctx, name, { policy = { deployment_branch_policy: { protected_branches: false, custom_branch_policies: true } }, policies = [{ name: 'main', type: 'branch' }], secrets = [] } = {}) {
   body(ctx, 'environments').environments.push({ name, protection_rules: [], can_admins_bypass: true, ...policy });
   ctx.responses[`${R}/environments/${name}/deployment-branch-policies`] = { status: 200, body: { total_count: policies.length, branch_policies: policies } };
@@ -114,10 +117,10 @@ const violations = [
   ['`workflow-audit.yaml` disabled', (ctx) => { body(ctx, 'actions/workflows/workflow-audit.yaml').state = 'disabled_manually'; }, '`workflow-audit.yaml` exists and is enabled'],
   ['`workflow-audit.yaml` deleted', (ctx) => { delete ctx.responses[`${R}/actions/workflows/workflow-audit.yaml`]; }, '`workflow-audit.yaml` exists and is enabled'],
   ['`workflow-audit.yaml` silent for 48 hours', (ctx) => {
-    for (const r of body(ctx, 'actions/workflows/workflow-audit.yaml/runs?event=schedule&branch=main&status=success&per_page=10').workflow_runs) r.created_at = new Date(NOW.getTime() - 49 * 3_600_000).toISOString();
+    for (const r of liveRuns(ctx)) r.created_at = new Date(NOW.getTime() - 49 * 3_600_000).toISOString();
   }, '`workflow-audit.yaml` has a successful `schedule` run'],
   ['`workflow-audit.yaml` only succeeded on a dispatch', (ctx) => {
-    for (const r of body(ctx, 'actions/workflows/workflow-audit.yaml/runs?event=schedule&branch=main&status=success&per_page=10').workflow_runs) r.event = 'workflow_dispatch';
+    for (const r of liveRuns(ctx)) r.event = 'workflow_dispatch';
   }, '`workflow-audit.yaml` has a successful `schedule` run'],
   ['`security-audit.yaml` disabled', (ctx) => { body(ctx, 'actions/workflows/security-audit.yaml').state = 'disabled_manually'; }, '`security-audit.yaml` exists and is enabled'],
   ['secret scanning off', (ctx) => { ctx.responses[R].body.security_and_analysis.secret_scanning.status = 'disabled'; }, 'secret scanning is enabled'],
@@ -172,9 +175,25 @@ test('an extra ruleset or drift from a Today: list is INFO, not a failure', () =
   assert.equal(result.info.length, 2, result.info.join('\n'));
 });
 
+// A listing that lags behind (seen live, 2026-10-07: the `status=success`
+// listing once omitted the two newest runs) must not read as a dead workflow
+// while the other listing has them; both lagging, or both failing, still fails.
+test('liveness reads the union of its two listings', () => {
+  const stale = (path) => (ctx) => {
+    const listing = body(ctx, path);
+    listing.workflow_runs = listing.workflow_runs.filter((r) => NOW.getTime() - Date.parse(r.created_at) > 48 * 3_600_000);
+  };
+  for (const path of LISTINGS) assert.equal(replay(stale(path)).verdict, 'PASS', path);
+  assert.equal(replay((ctx) => LISTINGS.forEach((p) => stale(p)(ctx))).verdict, 'FAIL');
+  const oneDown = replay((ctx) => { ctx.responses[`${R}/${LISTINGS[0]}`] = { status: 502, body: null }; });
+  assert.equal(oneDown.verdict, 'PASS');
+  const bothDown = replay((ctx) => LISTINGS.forEach((p) => { ctx.responses[`${R}/${p}`] = { status: 502, body: null }; }));
+  assert.equal(bothDown.verdict, 'INCONCLUSIVE');
+});
+
 test('one skipped workflow-audit run is INFO inside the 48 hours', () => {
   const result = replay((ctx) => {
-    for (const r of body(ctx, 'actions/workflows/workflow-audit.yaml/runs?event=schedule&branch=main&status=success&per_page=10').workflow_runs) r.created_at = new Date(NOW.getTime() - 30 * 3_600_000).toISOString();
+    for (const r of liveRuns(ctx)) r.created_at = new Date(NOW.getTime() - 30 * 3_600_000).toISOString();
   });
   assert.equal(result.verdict, 'PASS');
   assert.match(result.info.join('\n'), /one scheduled run was skipped or failed/);
@@ -202,7 +221,7 @@ test('the state hash ignores listing order and run history, and tracks every jud
     body(ctx, 'environments').environments.reverse();
     body(ctx, 'actions/secrets').secrets.reverse();
     ctx.responses[`${R}/rulesets?includes_parents=true`].body.reverse();
-    for (const r of body(ctx, 'actions/workflows/workflow-audit.yaml/runs?event=schedule&branch=main&status=success&per_page=10').workflow_runs) r.created_at = NOW.toISOString();
+    for (const r of liveRuns(ctx)) r.created_at = NOW.toISOString();
   });
   assert.equal(reordered.hash, base);
   for (const [name, mutate, clause] of violations) {
