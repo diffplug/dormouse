@@ -29,6 +29,16 @@ Source of truth: `PlatformAdapter` in `lib/src/lib/platform/types.ts`.
 - **Hiding a webview does not kill its PTYs**, and becoming visible again resumes over the still-owned ones ("Reconnection protocol").
 - **A naturally exited PTY may stay mounted as an exited pane**; frontend semantic state — CWD, title candidates, last command — is retained until the Session is disposed.
 - **Must keep explicitly killed PTYs non-resumable**: late output never recreates a killed id's buffer.
+- **Must let only an id's current PTY generation speak for it**: a spawn over a live generation stops the displaced one, whose later output and exit are dropped; output after a generation's own exit still flows.
+
+### Graceful shutdown
+
+- **Must stop only the explicitly named live PTYs**: use SIGTERM on POSIX and ConPTY close on Windows, never a signal argument there (rationale).
+- **Must acknowledge after the targets exit and a final-output grace tick, or at the caller's timeout**, forwarding output received during the wait; an empty target set still gets the grace tick.
+- **Must allow cleanup to follow or overlap graceful shutdown without closing a Windows PTY twice.**
+- **Never promise shell-history or final-output flushing from Windows ConPTY close**; recovery capture precedes shutdown (`docs/compatible-agents.md` → Capture).
+
+Source of truth: `gracefulKill` in `standalone/sidecar/pty-core.js`.
 
 ### PTY buffering
 
@@ -180,7 +190,7 @@ Source of truth: `ManagedVoicePort` in `lib/src/lib/platform/managed-voice-types
 
 - **A Workspace with neither a published nor a boot-seeded session is dropped rather than written empty**, so a mid-boot snapshot cannot blank a restored Workspace.
 - **A Workspace's save compares against its own previous record** — seeded from disk until its Wall publishes — never the Window's active one, or a dead PTY's retained cwd and alert would come from the wrong Workspace.
-- **Reordering, renaming, or switching the active Workspace writes too.** **Always write `nameIsAuto`**; lacking it, only a `Workspace <n>` name is auto.
+- **Reordering, renaming, pinning, or switching the active Workspace writes too.** **Always write `nameIsAuto`**; lacking it, only a `Workspace <n>` name is auto. **Write `pinned` only when true**, in every record a Window builds.
 - **Must publish both Workspace records in one synchronous step with a Surface move's ownership change**, unprobed and behind one Window write (`pagehide` included), fencing saves collected before or during the change and retaining a departed Session's previous cwd/alert in the destination.
 - **VS Code does not use the collector** — each webview persists one bare `PersistedSession`, its single Workspace, through its own per-surface state API (`docs/specs/vscode.md`).
 

@@ -212,10 +212,10 @@ const describeSdp = (sdp, times = []) => {
 };
 /** One end of the addon's selected pair, raw. */
 const pairEnd = (end) => end && { type: end.type, address: end.address, candidate: end.candidate };
-/** The addon's selected pair, as its ICE agent reports it now. */
+/** The addon's selected pair, as its ICE agent reports it now: the native read `DirectPeer` takes. */
 const addonPair = () => {
   try {
-    const raw = connection.sctp?.transport?.iceTransport?.getSelectedCandidatePair?.();
+    const raw = connection.selectedCandidatePair?.();
     return raw ? { local: pairEnd(raw.local), remote: pairEnd(raw.remote) } : null;
   } catch (error) {
     return { error: String(error) };

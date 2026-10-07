@@ -36,7 +36,7 @@ Recovery requires a fresh exit hint followed by a separator, such as a newline. 
 
 When no watch list has been saved, Dormouse watches commands marked **Yes** in the table above. This includes fresh installations and upgrades where watching was never configured. It observes terminal output becoming busy and then quiet, which can indicate a finished response or a request for input. This is an output heuristic; it does not read the agent's internal task state.
 
-An existing saved watch list is preserved, including an empty list. To watch any running command, listed here or not, open its terminal context and select **Watch all `<command>` commands**. Remove a rule there or in Settings. Rules apply to every pane running that command; Cursor's two executable names have separate rules.
+An existing saved watch list is preserved, including an empty list. To watch any running command, listed here or not, open its terminal context and turn on **watch `<command>`**. Remove a rule there or in Settings. Rules apply to every pane running that command; Cursor's two executable names have separate rules.
 
 Watching requires shell integration that reports the running command. Terminal notifications and command-exit alerts work independently of watching.
 
@@ -115,7 +115,7 @@ Source of truth: `CODING_AGENTS` in `lib/src/lib/coding-agents.ts`; `detectResum
 - **Must keep one rebuilt invocation per Surface in a host-owned, single-use record outside the persisted Session.** The renderer save path never derives or writes it. (rationale)
 - **Must call `beginCapture` before capture can return early.** The first call per host process clears the previous record; subsequent calls merge, preserving captures from other Windows. (rationale)
 - **Must persist every detection synchronously through `createRecoveryStore`**, using `recovery.json` in the host-selected directory, a temporary file with mode `0600` on Unix, and atomic rename. Windows storage permissions follow `docs/specs/security-local.md` -> "Persisted state". A failed write must not throw through teardown. Without a directory the store is memory-only and logs that limitation once.
-- **Must read and unlink the durable record on the first claim**, including on parse failure; if unlink fails, ignore it. Discard records older than 7 days after unlinking. Within the process, each container claims only its saved pane ids, and each entry is handed out once. (rationale)
+- **Must read and unlink the durable record on the first claim**, including on parse failure; if unlink fails, ignore it. After unlinking, discard a record whose `createdAt` is not a finite number or is older than 7 days. Within the process, each container claims only its saved pane ids, and each entry is handed out once. (rationale)
 - **Must deliver claimed commands out of band on boot through `PlatformAdapter.getRecoveryCommands()`**; adapters whose hosts capture nothing may omit it. Only cold restore consumes these commands for execution; live resume never executes them.
 
 Source of truth: `createRecoveryStore` in `lib/src/host/recovery-store.ts`; `PlatformAdapter` in `lib/src/lib/platform/types.ts`; pinned by `lib/src/host/recovery-store.test.ts`.

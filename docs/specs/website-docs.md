@@ -128,7 +128,7 @@ Source of truth: `DOCS_PAGES` in `website/src/lib/docs-pages.ts`; `DocsLayout` i
 
 **Must describe the managed Relay as Pocket's Relay:** terminals stay on an awake, online computer, and self-hosting remains. `NotifySignupForm` exposes the `nedshed.dev` devlog handoff and keeps email per tab. **Must use native required-email validation.** `website/src/components/NotifySignupForm.test.tsx` pins all three.
 
-**Must open `/self-host` with the Relay boundary:** Dormouse needs none; remote features require a configured Relay and otherwise make no network requests; it links `/hosted`. **`/hosted` opens with its plan cards** instead, and its managed Relay section discloses metadata, labels the review pending, and links the model. `website/src/lib/docs-rail.test.tsx` pins both.
+**Must open `/self-host` with the Relay boundary:** Dormouse needs none; a new install opens no connection on its own (`docs/specs/remote-network.md` -> "Policy"); push and a paired phone need a Relay, and a one-time connection only Hosted's rendezvous of its handshake; it links `/hosted`. **`/hosted` opens with its plan cards** instead, and its managed Relay section discloses metadata, labels the review pending, and links the model. `website/src/lib/docs-rail.test.tsx` pins both.
 
 **Must also link it from** Pocket marketing/tutorial, self-host docs, and the speech and remote-control settings; `linkedFrom` owns the rest. `/pricing` 301-redirects here rather than becoming a page, pinned by `checkPricingRedirect` in `scripts/public-docs-lint.mjs`.
 
@@ -182,12 +182,12 @@ Source of truth: `SELF_HOST_DELTA` in `website/scripts/generate-docs.js`; `SelfH
 
 **Must** publish every section, so **the spec may carry no `## Future` heading and no `Reserved:` paragraph**; `checkSecurityFold` pins that, and staged material has to be withheld by a delta rule before it can exist there.
 
-**Must** render the guarantees table and the two lists by audience, from `docs.security.json`, never restated: `securityAudiences` splits each entry by the spec its links name, and an entry naming no spec, a spec in no group, or two groups fails the build.
+**Must** render the guarantees table and the two lists by audience, from `docs.security.json`, never restated: `securityAudiences` splits each entry by the spec its links name, and an entry naming no spec, a spec in no group, or two groups fails the build. **`/security` must render the `self-host` audience's entries beside its own** (`SECURITY_PAGE_AUDIENCES`): a Hosted or one-time reader is never sent to `/self-host`.
 
 ```mermaid
 flowchart LR
   SEC[docs/specs/security.md] -->|SECURITY_DELTA| J[docs.security.json]
-  J -->|security| P1["/security"]
+  J -->|security, self-host| P1["/security"]
   J -->|self-host| P2["/self-host"]
   J -->|supply-chain| P3["/supply-chain"]
   SH[SELF_HOST.md] -->|SELF_HOST_DELTA| JS[docs.selfhost.json] --> P2
@@ -195,7 +195,7 @@ flowchart LR
 
 The spec file on GitHub is the one place every entry appears together. The three pages cross-link, and each specialized page links `/security#how-the-guarantees-are-checked`; `website/src/pages/security-pages.test.tsx` pins the entries and links.
 
-Source of truth: `SECURITY_DELTA`, `SECURITY_AUDIENCES` (spec → audience), and `securityAudiences` in `website/scripts/generate-docs.js`; `SecurityDocs` in `website/src/pages/SecurityDocs.tsx`.
+Source of truth: `SECURITY_DELTA`, `SECURITY_AUDIENCES` (spec → audience), `SECURITY_PAGE_AUDIENCES`, and `securityAudiences` in `website/scripts/generate-docs.js`; `SecurityDocs` in `website/src/pages/SecurityDocs.tsx`.
 
 ## Generated documentation boundary
 

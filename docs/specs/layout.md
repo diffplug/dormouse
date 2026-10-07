@@ -7,7 +7,7 @@
 
 ## Conceptual model
 
-A Wall renders one Workspace's Surfaces as Panes in Content or Doors on the Baseboard. Pane↔Door preserves the Surface; a Doored browser or Tool Surface keeps its backing session while releasing its viewer resources ([Minimize and reattach](#minimize-and-reattach)). Standalone mounts one Wall per Workspace and switches between them ([Workspaces](#workspaces)). VS Code maps each Workspace to a webview (`docs/specs/vscode.md`).
+A Wall renders one Workspace's Surfaces as Panes in Content or Doors on the Baseboard. Pane↔Door preserves the Surface; a Doored browser or Tool Surface keeps its backing session while releasing its viewer resources ([Minimize and reattach](#minimize-and-reattach)). Standalone and the website's desktop playground mount one Wall per Workspace and switch between them ([Workspaces](#workspaces)). VS Code maps each Workspace to a webview (`docs/specs/vscode.md`).
 
 ## Shell layout
 
@@ -41,7 +41,7 @@ Source of truth: `TerminalPaneHeader` in `lib/src/components/wall/TerminalPaneHe
 
 **Must open the terminal context from terminal header, body, and command-mode `a` and `>` entry points.** Browser-only Surfaces and Doors have no context. A Tool's context displays its primary terminal (`docs/specs/terminal-context.md` → Tool context); application mouse ownership: `docs/specs/mouse-and-clipboard.md` → Terminal context input.
 
-**Must render one context per Wall in a stable Wall-level overlay**, anchored to the invoking source and following its painted bounds without resizing panes or remounting the helper. An outside pointer press or explicit close dismisses it; its copy editors count as inside.
+**Must render one context per Wall in a stable Wall-level overlay**, anchored to the invoking source and following its painted bounds without resizing panes or remounting the helper. An outside pointer press or explicit close dismisses it; its copy editors count as inside. **Must recede every other pane while it is open**, leaving their input unchanged.
 
 **Must choose placement on opening and retain its side while usable. Never reposition in response to terminal output.** It goes beside the source where a usable candidate fits, else over the source's half opposite its visible terminal cursor; minimized panes do not count, and zoom uses single-pane placement. **Must remember a manual side choice per source for the mounted Wall's lifetime**, never on disk; an unavailable choice falls back automatically.
 
@@ -119,8 +119,11 @@ Source of truth: `lib/src/components/Baseboard.tsx`.
 - **Must enter the Workspace `+` creates in passthrough, keyboard focus included, after mount, unless the user has switched away.** Deactivation restores a Wall's chrome selection to its last live pane. External removal of the highlighted Workspace selects a live pane.
 - **Must route command-mode `x` / `k` on a highlighted Workspace tab through the tab's `×` close action**, including inactive tabs.
 - **Must reveal a Workspace in command mode before a user close or its confirmation.** Successful user closure selects the next Workspace tab in command mode (previous at the end). Command closures stay focus-neutral.
+- **Must order the strip unpinned tabs, `+` (then any host control), empty space, then the pinned group flush against the strip's right end, the store's list partitioned to match**: a new Workspace ends the unpinned group; pinning moves a tab to the pinned group's left edge, unpinning to just left of `+`. **A reorder (drag, `dor workspace move --index`, an arrival's slot) must clamp within its group. Never scroll the pinned group out of view**; the empty space between belongs to the host, never to the strip's drag or drop targets. A pin survives restore, Transfer, tear-out, and window Reopen (`docs/specs/transport.md` → Persisted session types).
+- **Never close a pinned Workspace alone**: it shows no `×`, middle-click and `x` / `k` do nothing, and the close verb refuses it, Labs pending kill included (`dor`: `docs/specs/dor-cli.md` → dor workspace). Its Window's close still closes it.
+- **Must open the tab menu on right-click, or `Shift+F10` / `ContextMenu` on a focused tab, under the tab, left edges aligned, or right edges where it would overflow**: Rename, Use automatic name (user-set names), Pin right / Unpin, Copy ref, Move to new window (hosts that tear out, with the tear-out's consents), Close. **It holds the chrome keyboard lease and never opens over a rename or pending confirmation, or for a closing or transferring Workspace; any of those starting dismisses it. A right press or Control-click must never start a reorder.**
 
-Source of truth: `WorkspaceStrip` in `lib/src/components/WorkspaceStrip.tsx`; `nextTodoMember` in `lib/src/lib/workspace-union.ts`.
+Source of truth: `WorkspaceStrip` in `lib/src/components/WorkspaceStrip.tsx`; `WorkspaceTabMenu` in `lib/src/components/WorkspaceTabMenu.tsx`; `setWorkspacePinned` in `lib/src/lib/workspace-store.ts`; `nextTodoMember` in `lib/src/lib/workspace-union.ts`.
 
 ### Workspace names
 
@@ -156,14 +159,14 @@ Source of truth: `createWorkspaceMotion` in `lib/src/components/workspace-motion
 - **Must retain stable Surface identity and Session state while remounting in the destination Wall**: terminals keep their registry instance, browser automation reconnects, and a retained helper follows its source. **Never close a departing Session.** A moved preview slot is pinned.
 - **Must confirm plain iframe and serving iframe Tool moves before creating a destination or changing membership**, with the typed-letter Workspace confirmation ([Workspace lifecycle](#workspace-lifecycle)): the Surface reopens at its last-known saved URL, possibly losing page state. Doors remain minimized while waiting. CLI consent: `docs/specs/dor-cli.md` → dor move.
 - **Must refuse dirty Tools, pending Tool approval, browser startup, closing Surfaces/Workspaces and helper promotion**, rechecking after consent and asynchronous preparation. Iframe consent never bypasses a dirty or pending refusal.
-- **Must follow a GUI move into destination passthrough** (acknowledgement: `docs/specs/alert.md` → Workspace union); CLI focus: `docs/specs/dor-cli.md` → dor move. Remove a source with no Panes or Doors; if Doors remain but no pane does, refill normally.
+- **Must follow a GUI move into destination passthrough** (acknowledgement: `docs/specs/alert.md` → Workspace union); CLI focus: `docs/specs/dor-cli.md` → dor move. Remove a source with no Panes or Doors unless it is pinned, which refills instead; if Doors remain but no pane does, refill normally.
 - **Must prepare before departure and roll back failed adoption**, restoring layout, Doors, parked state, selection, zoom, metadata and refs. Refs: `docs/specs/dor-cli.md` → Handle Model; durable publication: `docs/specs/transport.md` → Persisted session types.
 
 Source of truth: `moveSurface` in `lib/src/components/wall/surface-move.ts`.
 
 ### Workspace lifecycle
 
-VS Code and the website playground mount a bare Wall with no Workspace id, which behaves exactly as a single-Workspace Window. Verb semantics are the glossary's Workspace verb rows.
+VS Code mounts a bare Wall with no Workspace id, which behaves exactly as a single-Workspace Window. Verb semantics are the glossary's Workspace verb rows.
 
 - **Must mount every Workspace's Wall in one grid cell**, inactive Walls `inert`, then `visibility:hidden` after their fade and never `display:none` (rationale).
 - **Must preserve mounted leaves across switches**: no re-seed, no re-parent, no leaf unmount, and no `resumeTerminal` / `restoreTerminal`; the only mount work is the terminal reattach below, which replays nothing, so I8 holds by construction.
@@ -176,13 +179,13 @@ VS Code and the website playground mount a bare Wall with no Workspace id, which
 - **Must retain mode and selection across switches unless the [activation gesture](#workspace-tabs) changes them.**
 - Close confirms first when any member's own close would (`docs/specs/reopen.md` → "Workspaces and windows"; under Labs a pending kill instead), then closes every member Surface. **Must select the fresh Workspace that replaces the last closed one. Must serialize closes across the Window.**
 - **Must refuse a Workspace whose Wall has not registered** (`workspace '<ref>' is still mounting`, one wording for every caller), never close past it (I4). A gesture waits out the registration gap first, as `dor workspace close` does, and is dropped unannounced on its timeout, a pending transfer, or a close in flight.
-- Rename edits the Workspace `name` only, never a Surface title or the per-pane inline rename, and pins it ([Workspace names](#workspace-names)). **A press inside the open rename editor must never start a reorder.**
+- Rename edits the Workspace `name` only, never a Surface title or the per-pane inline rename, and keeps it ([Workspace names](#workspace-names)). **A press inside the open rename editor must never start a reorder.**
 - **Must drop the closing Workspace's rename editor and pending confirmation, and no other's.**
 - **Must run every Workspace verb outside the strip**, which renders the rename editor and confirmation from a store, so tab gestures and `dor` commands take one path. Every Workspace verb has a `dor` counterpart (`docs/specs/dor-cli.md` → "dor workspace"): a command close raises no confirmation, refusing instead, and closes its member Surfaces silently.
 
 A Workspace may leave the Window for another: `docs/specs/standalone.md` -> "Transfer". **Must confirm before a move that would destroy an iframe's page state**: a Workspace holding a plain iframe or serving iframe Tool, Doored ones included, asks with the Close's typed confirmation before it leaves, since that document reopens at its saved URL; agent-browser Surfaces reconnect and ask nothing (`iframeSurfaceRefs` on the Wall handle). **Must show drag refusals over Window content in a dialog** until dismissal, retry, or Workspace departure; it waits behind a pending confirmation and an open rename.
 
-**Must use `WorkspaceKillConfirm` for Workspace close, the iframe move gates, and host termination confirmations**: a bare matching letter confirms, another bare key cancels, and a modifier or chord never answers, so `Cmd+Q` still quits. **Must ignore the close confirmation's key while that Workspace transfers.** **Must hold at most one pending Workspace confirmation** (close, cross-Window move gate, Surface move iframe consent), answered no when a newer one is raised or any close, cross-Window move, or Surface move starts, by gesture or `dor`, even one that refuses. **Must abandon superseded preparation while awaiting a Wall, window probe or editor decision**, so an older verb cannot later act or replace the newer question. A successful transfer dismisses only the departing Workspace's pending confirmation and rename UI; a failed transfer retains them. No pending kill follows a Workspace to its destination.
+**Must use `WorkspaceKillConfirm` for Workspace close, the iframe move gates, and host termination confirmations**: a bare matching letter confirms, another bare key cancels, and a modifier or chord never answers, so `Cmd+Q` still quits. **Must ignore the close confirmation's key while that Workspace transfers, and refuse renaming or pinning it.** **Must hold at most one pending Workspace confirmation** (close, cross-Window move gate, Surface move iframe consent), answered no when a newer one is raised or any close, cross-Window move, or Surface move starts, by gesture or `dor`, even one that refuses. **Must abandon superseded preparation while awaiting a Wall, window probe or editor decision**, so an older verb cannot later act or replace the newer question. A successful transfer dismisses only the departing Workspace's pending confirmation and rename UI; a failed transfer retains them. No pending kill follows a Workspace to its destination.
 
 Persisted containers: `docs/specs/transport.md`; standalone's per-window record: `docs/specs/standalone.md` -> "Persistence". The union projection: `docs/specs/alert.md` → Workspace union.
 
@@ -243,7 +246,7 @@ Every open dialog holds its own reference-counted lease on the dialog gate; comm
 
 **Must defer the pending Workspace confirmation while an inline Workspace rename editor is open**, leaving its keys to the input; it appears after rename ends.
 
-Chrome outside every Wall takes the chrome keyboard lease instead: the Workspace strip's rename editor and close confirmation live in the app bar, where `stopPropagation` cannot reach a capture-phase window listener. The Workspace branch is inert on a Wall with no Workspace id.
+Chrome outside every Wall takes the chrome keyboard lease instead: the Workspace strip's rename editor, close confirmation, and tab menu live in the app bar, where `stopPropagation` cannot reach a capture-phase window listener. The Workspace branch is inert on a Wall with no Workspace id.
 
 **Must leave Escape and Tab to IME composition in modal/popover focus traps and terminal-context dialogs, and Enter/Escape in shared inline editors** (`isComposingKey` in `lib/src/lib/dom.ts`).
 
@@ -306,7 +309,7 @@ Back-navigation: a breadcrumb tracks the last navigation direction and origin pa
 
 Pane↔door: Down from a pane with no pane below it selects the first door; Up from a door selects the last pane; Left/Right moves between doors. Doors have no spatial query — they are an ordered list.
 
-**Must let Up from a top-edge pane highlight the active Workspace tab when a strip is mounted.** Left/Right traverses tabs in strip order and then `+`, stopping at either end; Down returns to the originating live pane, or the first live pane if it disappeared. Clear pane backtracking on entry to either chrome row. Highlighting changes neither the active Workspace nor DOM focus.
+**Must let Up from a top-edge pane highlight the active Workspace tab when a strip is mounted.** Left/Right traverses tabs and `+` in strip order ([Workspace tabs](#workspace-tabs)), stopping at either end; Down returns to the originating live pane, or the first live pane if it disappeared. Clear pane backtracking on entry to either chrome row. Highlighting changes neither the active Workspace nor DOM focus.
 
 **Must keep Workspace tabs and `+` command-mode-only selection targets.** `Enter` on an inactive tab activates it and retains tab selection in command mode; on the active tab it enters the last live pane in passthrough, falling back to the first. `Enter` on `+` creates a Workspace and enters its terminal after mount. Other pane actions and terminal clipboard operations are inert there. Every passthrough entry selects a live pane.
 

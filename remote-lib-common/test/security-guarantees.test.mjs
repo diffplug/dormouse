@@ -13,7 +13,16 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { fromBase64Url, openPush, sealPush, utf8Decode, utf8Encode } from '../dist/index.js';
+import {
+  PRESENCE_WINDOW,
+  PRESENCE_WINDOW_IDLE_MS,
+  PRESENCE_WINDOW_MAX_MS,
+  fromBase64Url,
+  openPush,
+  sealPush,
+  utf8Decode,
+  utf8Encode,
+} from '../dist/index.js';
 import {
   CompromisedRelay,
   FakeClock,
@@ -229,8 +238,19 @@ test('every trusted client must be explicitly paired with every burrow', async (
   assert.equal(otherBurrow.acl.hasActiveClient(client.staticPublicKeyFor(burrow)), false);
 });
 
-test('every connection requires fresh user presence', async () => {
-  const { burrow, authenticator, client } = await world();
+/** Count the assertions a passkey makes, so a test can see which connections asked it. */
+function countAssertions(authenticator) {
+  const assert = authenticator.assert.bind(authenticator);
+  const counter = { calls: 0 };
+  authenticator.assert = (options) => {
+    counter.calls += 1;
+    return assert(options);
+  };
+  return counter;
+}
+
+test('every connection requires user presence the Burrow itself verified', async () => {
+  const { clock, burrow, authenticator, client } = await world();
   await client.pair(burrow, { accountId: ACCOUNT, authenticator });
 
   const first = await client.connect(burrow, { accountId: ACCOUNT, authenticator });
@@ -260,9 +280,68 @@ test('every connection requires fresh user presence', async () => {
   assert.equal(crossed.outcome.code, 'presence-rejected');
   assert.equal(crossed.detail, 'binding-mismatch');
 
+  // Inside the window those proofs opened, the same browser connects without
+  // asking the passkey: the Burrow verified this record's presence itself.
+  const assertions = countAssertions(authenticator);
+  const ridden = await client.connect(burrow, { accountId: ACCOUNT, authenticator, window: true });
+  assert.equal(ridden.offer, PRESENCE_WINDOW);
+  assert.equal(ridden.ok, true);
+  assert.equal(assertions.calls, 0);
+
+  // Idle past the window, it is closed: no offer, and a request anyway is a
+  // presence denial. Only a fresh proof opens it again.
+  clock.advance(PRESENCE_WINDOW_IDLE_MS);
+  const idle = await client.connect(burrow, { accountId: ACCOUNT, authenticator, window: true });
+  assert.equal(idle.offer, 'none');
+  assert.equal(idle.outcome.code, 'presence-rejected');
+  assert.equal(idle.detail, 'no-window-offered');
+  assert.equal((await client.connect(burrow, { accountId: ACCOUNT, authenticator })).ok, true);
+  assert.equal(assertions.calls, 1);
+
+  // However busy the browser keeps it, a ride never refreshes the proof: the
+  // window closes at its cap.
+  const step = PRESENCE_WINDOW_IDLE_MS - 1;
+  for (let elapsed = step; elapsed < PRESENCE_WINDOW_MAX_MS; elapsed += step) {
+    clock.advance(step);
+    assert.equal((await client.connect(burrow, { accountId: ACCOUNT, authenticator, window: true })).ok, true);
+  }
+  clock.advance(step);
+  const capped = await client.connect(burrow, { accountId: ACCOUNT, authenticator, window: true });
+  assert.equal(capped.outcome.code, 'presence-rejected');
+  assert.equal(assertions.calls, 1);
+
   // The Burrow challenge is single-use whatever the outcome, so the issuer holds
   // nothing a captured request could still be replayed against.
   assert.equal(burrow.challenges.pendingCount, 0);
+});
+
+test('a presence window speaks only for its own identities and Client static', async () => {
+  const { clock, burrow, authenticator, client } = await world();
+  await client.pair(burrow, { accountId: ACCOUNT, authenticator });
+
+  // An attacker's browser, vouched for by a compromised Relay, holds no window:
+  // the Burrow offers nothing, and a request anyway is a presence denial.
+  const attacker = await SimClient.create({ label: 'Attacker', origin: ORIGIN, relay: new CompromisedRelay() });
+  const intruded = await attacker.connect(burrow, { accountId: ACCOUNT, authenticator, window: true });
+  assert.equal(intruded.offer, 'none');
+  assert.equal(intruded.outcome.code, 'presence-rejected');
+
+  // A redeem still runs the four-way conjunction, against the identities the
+  // window's proof was verified for: a record that no longer holds them grants
+  // nothing, whatever the window says.
+  const [record] = burrow.acl.activeRecords();
+  clock.advance(1);
+  burrow.acl.approve({ ...record, accountId: 'someone-else' });
+  const replaced = await client.connect(burrow, { accountId: ACCOUNT, authenticator, window: true });
+  assert.equal(replaced.offer, PRESENCE_WINDOW);
+  assert.equal(replaced.outcome.code, 'pairing-required');
+  assert.deepEqual(replaced.misses, ['account-mismatch']);
+
+  // And a revoked record is gone whatever window remains.
+  burrow.acl.revokeClient(client.staticPublicKeyFor(burrow));
+  const revoked = await client.connect(burrow, { accountId: ACCOUNT, authenticator, window: true });
+  assert.equal(revoked.outcome.code, 'pairing-required');
+  assert.ok(revoked.misses.includes('client-not-paired'));
 });
 
 test('revoking a client cuts off access immediately', async () => {

@@ -10,13 +10,14 @@ import {
   getWorkspacesSnapshot,
   renameWorkspace,
   resetWorkspaces,
+  setWorkspacePinned,
   installWorkspaceIdPool,
   resetWorkspaceIdPool,
 } from '../../lib/workspace-store';
 import { clearTerminalActivity, setTerminalActivity } from '../../lib/session-activity-store';
 import { createAlertEpisode } from '../../lib/alert-episode';
 import { resetWorkspaceSurfaces, setWorkspaceSurfaces } from '../../lib/workspace-surfaces';
-import { resetWindowSessionAggregator } from '../../lib/window-session-aggregator';
+import { resetWindowSessionAggregator, setWorkspaceTransferPending } from '../../lib/window-session-aggregator';
 import { getWorkspaceUiSnapshot, requestConfirmation, resetWorkspaceUi } from '../../lib/workspace-ui-store';
 import { setPlatform } from '../../lib/platform';
 import type { OpenPort, PlatformAdapter } from '../../lib/platform/types';
@@ -72,8 +73,8 @@ describe('workspace.list', () => {
     expect(answer(detail)).toEqual({
       windowRef: 'window:1',
       workspaces: [
-        { ref: 'workspace:1', id: first, name: 'Workspace 1', auto: true, active: true, ringing: false, todo: false, count: 0 },
-        { ref: 'workspace:2', id: 'ws-2', name: 'build', auto: false, active: false, ringing: true, todo: true, count: 2 },
+        { ref: 'workspace:1', id: first, name: 'Workspace 1', auto: true, pinned: false, active: true, ringing: false, todo: false, count: 0 },
+        { ref: 'workspace:2', id: 'ws-2', name: 'build', auto: false, pinned: false, active: false, ringing: true, todo: true, count: 2 },
       ],
     });
     expect(workspaceRows()).toHaveLength(2);
@@ -142,6 +143,55 @@ describe('workspace mutation verbs', () => {
   });
 });
 
+describe('workspace.pin', () => {
+  it('pins right and unpins, idempotently, reporting the pin in the listing', async () => {
+    const first = getWorkspacesSnapshot().workspaces[0].id;
+    createWorkspace({ id: 'ws-2', name: 'build', activate: false });
+
+    const pin = request('workspace.pin', { workspace: 'workspace:1', pinned: true });
+    await handleWorkspaceControl(pin);
+    expect(answer(pin)).toEqual({ status: 'pinned', workspaceId: first, workspaceRef: 'workspace:1', name: 'Workspace 1' });
+    expect(getWorkspacesSnapshot().workspaces.map((ws) => ws.id)).toEqual(['ws-2', first]);
+    expect(workspaceRows().map((row) => [row.id, row.pinned])).toEqual([['ws-2', false], [first, true]]);
+
+    const again = request('workspace.pin', { workspace: 'build', pinned: true });
+    await handleWorkspaceControl(again);
+    expect(answer(again)).toMatchObject({ status: 'pinned', workspaceId: 'ws-2' });
+    const unpin = request('workspace.pin', { workspace: 'build', pinned: false });
+    await handleWorkspaceControl(unpin);
+    expect(answer(unpin)).toMatchObject({ status: 'unpinned', workspaceId: 'ws-2' });
+    expect(workspaceRows().map((row) => [row.id, row.pinned])).toEqual([['ws-2', false], [first, true]]);
+  });
+
+  it('refuses a pin or a rename while the Workspace transfers, leaving both as they were', async () => {
+    createWorkspace({ id: 'ws-2', name: 'build', activate: false });
+    setWorkspaceTransferPending('ws-2', true);
+    try {
+      const pin = request('workspace.pin', { workspace: 'build', pinned: true });
+      await handleWorkspaceControl(pin);
+      expect(answer(pin)).toBe("workspace 'workspace:2' was not pinned: Workspace is transferring");
+      expect(workspaceRows().find((row) => row.id === 'ws-2')?.pinned).toBe(false);
+      for (const params of [{ name: 'deploys' }, { auto: true }]) {
+        const rename = request('workspace.rename', { workspace: 'build', ...params });
+        await handleWorkspaceControl(rename);
+        expect(answer(rename)).toBe("workspace 'workspace:2' was not renamed: Workspace is transferring");
+      }
+      expect(workspaceRows().find((row) => row.id === 'ws-2')).toMatchObject({ name: 'build', auto: false });
+    } finally {
+      setWorkspaceTransferPending('ws-2', false);
+    }
+  });
+
+  it('requires a target and a boolean', async () => {
+    const missing = request('workspace.pin', { pinned: true });
+    await handleWorkspaceControl(missing);
+    expect(answer(missing)).toBe('workspace is required');
+    const noFlag = request('workspace.pin', { workspace: 'workspace:1' });
+    await handleWorkspaceControl(noFlag);
+    expect(answer(noFlag)).toBe('pinned is required');
+  });
+});
+
 describe('workspace.move', () => {
   // Refs are the minted id's number only once a pool is installed; without
   // one, `workspace-7` would read as a position (`docs/specs/dor-cli.md`).
@@ -167,6 +217,16 @@ describe('workspace.move', () => {
     const neither = request('workspace.move', { workspace: 'workspace:7' });
     await handleWorkspaceControl(neither);
     expect(answer(neither)).toMatch(/needs a window, an index, or both/);
+  });
+
+  it('clamps --index within the Workspace\'s own group', async () => {
+    const first = getWorkspacesSnapshot().workspaces[0].id;
+    createWorkspace({ id: 'workspace-7', name: 'build', activate: false });
+    createWorkspace({ id: 'workspace-8', name: 'notes', pinned: true, activate: false });
+    const move = request('workspace.move', { workspace: 'workspace:8', index: 0 });
+    await handleWorkspaceControl(move);
+    expect(answer(move)).toMatchObject({ status: 'moved', workspaceRef: 'workspace:8' });
+    expect(getWorkspacesSnapshot().workspaces.map((ws) => ws.id)).toEqual([first, 'workspace-7', 'workspace-8']);
   });
 
   it('refuses cross-window moves of dirty Tools even with the iframe destruction flag', async () => {
@@ -272,6 +332,22 @@ describe('workspace.close', () => {
     });
     expect(closeAll).toHaveBeenCalled();
     expect(getWorkspacesSnapshot().workspaces).toHaveLength(1);
+  });
+
+  it('refuses a pinned Workspace even with force', async () => {
+    const second = createWorkspace({ id: 'ws-2', name: 'build', activate: false }).id;
+    const closeAll = vi.fn(async () => null);
+    handleFor(getWorkspacesSnapshot().workspaces[0].id);
+    handleFor(second, { needsCloseConfirmation: () => true, closeAll });
+    setWorkspacePinned(second, true);
+
+    for (const force of [false, true]) {
+      const refused = request('workspace.close', { workspace: 'build', force });
+      await handleWorkspaceControl(refused);
+      expect(answer(refused)).toBe("workspace 'workspace:2' was not closed: workspace is pinned; unpin it to close");
+    }
+    expect(closeAll).not.toHaveBeenCalled();
+    expect(getWorkspacesSnapshot().workspaces).toHaveLength(2);
   });
 
   it('refuses a Workspace whose Wall never registered, rather than orphaning its Sessions', async () => {

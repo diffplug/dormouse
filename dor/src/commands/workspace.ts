@@ -61,6 +61,18 @@ const ACTIONS = {
       ? { workspace: args[0], auto: true }
       : { workspace: args[0], name: args[1] }),
   },
+  pin: {
+    usage: '<workspace> [--json]',
+    accepts: (args) => args.length === 1,
+    arityError: 'dor workspace pin takes one workspace',
+    run: (client, args) => client.pinWorkspace({ workspace: args[0], pinned: true }),
+  },
+  unpin: {
+    usage: '<workspace> [--json]',
+    accepts: (args) => args.length === 1,
+    arityError: 'dor workspace unpin takes one workspace',
+    run: (client, args) => client.pinWorkspace({ workspace: args[0], pinned: false }),
+  },
   close: {
     usage: '<workspace> [--force] [--json]',
     accepts: (args) => args.length === 1,
@@ -95,7 +107,7 @@ export const workspaceCommand: Command = {
   name: 'workspace',
   helpPatches: [
     {
-      // stricli renders one usage line per command in root help; the four
+      // stricli renders one usage line per command in root help; the
       // actions collapse to the shape they share.
       scope: 'root',
       findReplace: [
@@ -106,7 +118,7 @@ export const workspaceCommand: Command = {
   ],
   command: buildCommand<WorkspaceFlags, string[], DorCommandContext>({
     docs: {
-      brief: 'Create, rename, close, switch, or move Workspaces.',
+      brief: 'Create, rename, pin, close, switch, or move Workspaces.',
       customUsage: USAGE,
       fullDescription: `To move a single Surface between Workspaces, use dor move.
 
@@ -118,12 +130,15 @@ new creates a Workspace in the background and prints its ref: it never moves the
 
 rename sets a name the Workspace keeps; rename --auto hands it back to auto-naming and prints the outgoing name, since the derived one is computed afterwards.
 
-close kills every Surface in the Workspace. It refuses — raising no confirmation, because the caller is a command rather than someone watching the Wall — when the Workspace holds a Surface the user has typed into or a running command; --force closes it anyway. Closing the last remaining Workspace replaces it with a fresh one.
+pin pins a Workspace right: its tab joins the group at the strip's right end, after the + button, and it cannot be closed — not by its tab, a key, or dor workspace close, even with --force — until unpin returns it to the end of the unpinned tabs. Closing its window still closes it. dor list --workspaces marks it [pinned].
 
-move puts a Workspace in another window (--window <label>, or --window new to tear it out into its own) and/or at a strip position (--index <n>, 0-based; with --window, a position in that window's strip). Nothing is killed: its terminals travel whole. "moved" is printed only once the target window has adopted the Workspace; one it hands back (it closed mid-transfer, or never answered) is an error naming the reason, and the Workspace stays where it was. The one thing a move between windows cannot carry is a plain iframe's page state — the document cannot leave its webview, so the iframe reopens at its saved URL — and the move is refused when the Workspace holds one unless --dangerously-destroy-iframe-page-state is passed. Agent-browser Surfaces are not affected.
+close kills every Surface in the Workspace. It refuses — raising no confirmation, because the caller is a command rather than someone watching the Wall — when the Workspace holds a Surface the user has typed into or a running command; --force closes it anyway. It refuses a pinned Workspace outright. Closing the last remaining Workspace replaces it with a fresh one.
+
+move puts a Workspace in another window (--window <label>, or --window new to tear it out into its own) and/or at a strip position (--index <n>, 0-based; with --window, a position in that window's strip). The position stays within the Workspace's own group, pinned or not, and a pinned Workspace arrives pinned. Nothing is killed: its terminals travel whole. "moved" is printed only once the target window has adopted the Workspace; one it hands back (it closed mid-transfer, or never answered) is an error naming the reason, and the Workspace stays where it was. The one thing a move between windows cannot carry is a plain iframe's page state — the document cannot leave its webview, so the iframe reopens at its saved URL — and the move is refused when the Workspace holds one unless --dangerously-destroy-iframe-page-state is passed. Agent-browser Surfaces are not affected.
 
 Text output:
   created workspace:2 "build"
+  pinned workspace:2 "build"
   closed workspace:2 "build"
   moved workspace:2 "build"
 

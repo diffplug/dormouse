@@ -10,8 +10,10 @@ test('Windows folder opening completes on launch and still reports spawn errors'
   const results = [];
   openNativeDirectory('C:\\Users\\Me\\My Project', error => results.push(error), {
     platform: 'win32',
+    env: { SystemRoot: 'D:\\Win' },
     spawn(exe, args, options) {
-      assert.equal(exe, 'explorer.exe');
+      // Absolute: Windows looks a bare name up in the working directory first.
+      assert.equal(exe, 'D:\\Win\\explorer.exe');
       assert.deepEqual(args, ['C:\\Users\\Me\\My Project']);
       assert.equal(options.stdio, 'ignore');
       return child;

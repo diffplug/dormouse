@@ -1,6 +1,6 @@
 import { flushSync } from 'react-dom';
 import type { MoveSurfaceRequest, MoveSurfaceResponse } from 'dor/commands/types';
-import { closeWorkspace, createWorkspace, generateWorkspaceId, getActiveWorkspaceId, hasWorkspace, resolveWorkspaceRef, setActiveWorkspace, workspaceRefFor } from '../../lib/workspace-store';
+import { closeWorkspace, createWorkspace, generateWorkspaceId, getActiveWorkspaceId, hasWorkspace, isWorkspacePinned, resolveWorkspaceRef, setActiveWorkspace, workspaceRefFor } from '../../lib/workspace-store';
 import { forgetWorkspaceSession, invalidateWorkspaceSaves, isWorkspaceTransferPending, moveRetainedSurfaceRecord, publishWorkspaceSessions, setWorkspaceTransferPending } from '../../lib/window-session-aggregator';
 import { cancelPendingConfirmation, dismissWorkspaceUi, requestConfirmation, setWorkspaceMoveError } from '../../lib/workspace-ui-store';
 import type { WorkspaceId } from '../../lib/session-types';
@@ -132,6 +132,8 @@ export async function moveSurface(id: string, request: Omit<MoveSurfaceRequest, 
     invalidateWorkspaceSaves(source.workspaceId);
     invalidateWorkspaceSaves(targetId);
     const receiver = target!;
+    // Read after the last await: a pin set meanwhile keeps the source.
+    const keepSource = isWorkspacePinned(source.workspaceId);
     let surfaceRef = '';
     flushSync(() => {
       undoDeparture = prepared.depart();
@@ -141,7 +143,9 @@ export async function moveSurface(id: string, request: Omit<MoveSurfaceRequest, 
         surfaceRef = adopted.surfaceRef;
       } catch (error) { undoDeparture(); undoDeparture = undefined; throw error; }
       receiver.finishSurfaceMove();
-      source.finishSurfaceMove();
+      // A pinned source is never discarded: it refills, as a kill of its last
+      // pane does (`docs/specs/layout.md` → "Moving Surfaces between Workspaces").
+      source.finishSurfaceMove({ keepEmpty: keepSource });
     });
     // React effects and store subscribers can collect saves synchronously
     // during the commit, before the retained cwd/alert migrates. Their promise
@@ -153,7 +157,7 @@ export async function moveSurface(id: string, request: Omit<MoveSurfaceRequest, 
     committed = true;
     moveRetainedSurfaceRecord(id, source.workspaceId, targetId);
     publishWorkspaceSessions([[source.workspaceId, source.serializeNow()], [targetId, receiver.serializeNow()]]);
-    const sourceEmpty = source.surfaceIds().length === 0;
+    const sourceEmpty = source.surfaceIds().length === 0 && !keepSource;
     flushSync(() => {
       if (sourceEmpty) discardWorkspace(source.workspaceId);
       if (gui || request.focus) {

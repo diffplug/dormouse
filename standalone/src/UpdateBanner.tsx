@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { XIcon } from '@phosphor-icons/react';
+import { BaseboardNotice, noticeLinkClass as linkClass, noticeLinkStyle as linkStyle, type NoticeLink } from './BaseboardNotice';
 
 export type UpdateBannerState =
   | { status: 'idle' }
@@ -27,15 +27,13 @@ interface UpdateBannerProps {
   onCheckNow: () => void;
 }
 
-const linkClass = 'shrink-0 hover:underline';
-const linkStyle = { color: 'var(--vscode-textLink-foreground)' };
 
 export function UpdateBanner({ state, onDismiss, onApproveUpdate, onRestart, onOpenChangelog, onOpenDebug, onCheckNow }: UpdateBannerProps) {
   if (state.status === 'idle' || state.status === 'dismissed') return null;
 
   let message: ReactNode;
   let title: string | undefined;
-  let links: { label: string; onClick: () => void }[];
+  let links: NoticeLink[];
 
   switch (state.status) {
     case 'available':
@@ -101,24 +99,5 @@ export function UpdateBanner({ state, onDismiss, onApproveUpdate, onRestart, onO
     }
   }
 
-  return (
-    <span className="flex items-center gap-1.5 pb-1 text-sm font-mono text-muted">
-      <span className="truncate" title={title}>{message}</span>
-      {links.map((link) => (
-        <span key={link.label} className="contents">
-          <span className="shrink-0">·</span>
-          <button onClick={link.onClick} className={linkClass} style={linkStyle}>
-            {link.label}
-          </button>
-        </span>
-      ))}
-      <button
-        onClick={onDismiss}
-        className="shrink-0 rounded p-0.5 hover:bg-foreground/10 hover:text-foreground"
-        aria-label="Dismiss"
-      >
-        <XIcon size={10} />
-      </button>
-    </span>
-  );
+  return <BaseboardNotice message={message} title={title} links={links} onDismiss={onDismiss} />;
 }

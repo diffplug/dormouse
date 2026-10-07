@@ -5,9 +5,9 @@ import { realpathSync } from "node:fs";
 import { vapidKeysFrom } from "./vapid.mjs";
 import { WORKERS, deployWorkers, fromStage, readConfigs } from "./workers.mjs";
 
-export function required(env, name) {
+export function required(env, name, section = "Provision PR previews") {
   if (!env[name])
-    throw new Error(`Missing ${name}; see hosted/README.md -> Provision PR previews`);
+    throw new Error(`Missing ${name}; see hosted/README.md -> ${section}`);
   return env[name];
 }
 
@@ -79,9 +79,10 @@ export function previewConfig(base, env, worker, hyperdriveId) {
 }
 
 /**
- * Every Worker's preview config, keyed as `WORKERS` is; all three share one
- * Hyperdrive, as production does. The relay's enrollment links name the
- * account preview, never production's account.
+ * Every Worker's preview config, keyed as `WORKERS` is; all three share the
+ * PR's one Hyperdrive, unlike production's one per Worker
+ * (`docs/specs/hosted.md` -> "PR previews"). The relay's enrollment links name
+ * the account preview, never production's account.
  */
 export function previewConfigs(bases, env, hyperdriveId) {
   const configs = Object.fromEntries(
@@ -116,6 +117,11 @@ export function hyperdriveOrigin(connectionString) {
     throw new Error("DATABASE_URL must be a direct Postgres connection URL");
   if (url.hostname.includes("-pooler."))
     throw new Error("Hyperdrive needs the direct Neon URL");
+  // libpq and pg read these from the query too, so a URL setting one would
+  // reach another database than the authority this answers.
+  for (const key of ["host", "hostaddr", "port", "dbname", "user", "password", "service"])
+    if (url.searchParams.has(key))
+      throw new Error(`DATABASE_URL must not set ${key} in its query`);
   return {
     scheme: "postgres",
     host: url.hostname,

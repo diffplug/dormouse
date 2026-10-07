@@ -4,6 +4,7 @@ mod log_tail;
 mod panic_policy;
 mod quit_state;
 mod routing;
+mod ui_watchdog;
 mod workspaces;
 // The Dock's Quit, an `osascript` quit and a logout reach AppKit without ever
 // raising `RunEvent::ExitRequested` (docs/specs/standalone.md §Trigger
@@ -17,6 +18,7 @@ use routing::{Route, RouteView};
 use std::{
     collections::{HashMap, HashSet},
     env,
+    ffi::OsString,
     fs::{create_dir_all, File, OpenOptions},
     io::{BufRead, BufReader, Write},
     path::{Path, PathBuf},
@@ -855,8 +857,9 @@ fn finish_window_close(app: &AppHandle, label: &str) {
     }
 }
 
-/// SIGTERM the PTYs a window left behind, and drop their Sessions' alert
-/// entries with them: no window will ever show those Sessions again.
+/// Gracefully stop the PTYs a window left behind (`docs/specs/transport.md` ->
+/// Graceful shutdown), and drop their Sessions' alert entries with them: no
+/// window will ever show those Sessions again.
 ///
 /// Reached whenever a window goes away still owning shells — the close
 /// ack-timeout path ran no teardown at all, and a teardown that overran its
@@ -884,6 +887,10 @@ fn pty_reap_message(ids: &[String]) -> String {
 
 const LOG_FILE_ENV: &str = "DORMOUSE_LOG_FILE";
 
+/// The Windows log directory's `Dormouse Terminal` in Linux's lowercase form,
+/// as the Relay's `Dormouse Relay` logs go to `dormouse-relay` there.
+const LINUX_LOG_DIR_NAME: &str = "dormouse-terminal";
+
 fn log_timestamp() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -891,24 +898,93 @@ fn log_timestamp() -> u64 {
         .unwrap_or_default()
 }
 
-fn default_log_path() -> PathBuf {
+struct LogLocation {
+    path: PathBuf,
+    /// The directory is Dormouse's own, so it is created and kept owner-only;
+    /// an override's or the OS's directory is left as it is.
+    own_dir: bool,
+}
+
+/// Linux's per-user log directory: `$XDG_STATE_HOME`, else `~/.local/state`,
+/// each used only when absolute (the XDG rule). `None` when neither is usable.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn linux_log_dir(xdg_state_home: Option<OsString>, home: Option<OsString>) -> Option<PathBuf> {
+    let absolute = |value: Option<OsString>| value.map(PathBuf::from).filter(|path| path.is_absolute());
+    absolute(xdg_state_home)
+        .or_else(|| absolute(home).map(|home| home.join(".local").join("state")))
+        .map(|dir| dir.join(LINUX_LOG_DIR_NAME))
+}
+
+fn default_log_location() -> LogLocation {
     if let Some(path) = env::var_os(LOG_FILE_ENV) {
-        return PathBuf::from(path);
+        return LogLocation { path: PathBuf::from(path), own_dir: false };
     }
 
     #[cfg(target_os = "windows")]
     if let Some(local_app_data) = env::var_os("LOCALAPPDATA") {
-        return PathBuf::from(local_app_data)
-            .join("Dormouse Terminal")
-            .join("dormouse.log");
+        return LogLocation {
+            path: PathBuf::from(local_app_data)
+                .join("Dormouse Terminal")
+                .join("dormouse.log"),
+            own_dir: false,
+        };
     }
 
-    env::temp_dir().join("dormouse.log")
+    // Not Linux's `/tmp`, which is shared, unless neither variable is usable;
+    // `open_log` still refuses a planted name there.
+    #[cfg(target_os = "linux")]
+    if let Some(dir) = linux_log_dir(env::var_os("XDG_STATE_HOME"), env::var_os("HOME")) {
+        return LogLocation { path: dir.join("dormouse.log"), own_dir: true };
+    }
+
+    // macOS's `$TMPDIR` is per-user and `0700`; Linux's is `/tmp`.
+    LogLocation { path: env::temp_dir().join("dormouse.log"), own_dir: false }
+}
+
+fn log_location() -> &'static LogLocation {
+    static LOCATION: OnceLock<LogLocation> = OnceLock::new();
+    LOCATION.get_or_init(default_log_location)
 }
 
 fn log_path() -> &'static Path {
-    static PATH: OnceLock<PathBuf> = OnceLock::new();
-    PATH.get_or_init(default_log_path)
+    &log_location().path
+}
+
+/// Create the log's directory; one that is Dormouse's own is also tightened to
+/// owner-only, and `false` (log nothing) when that fails.
+fn prepare_log_dir(path: &Path, own_dir: bool) -> bool {
+    let Some(dir) = path.parent() else { return true };
+    if !own_dir {
+        let _ = create_dir_all(dir);
+        return true;
+    }
+    let mut builder = std::fs::DirBuilder::new();
+    builder.recursive(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        builder.mode(0o700);
+    }
+    builder.create(dir).is_ok() && restrict_to_owner(dir, 0o700).is_ok()
+}
+
+/// Open a log handle owner-only. On unix it never follows a symlink at `path`,
+/// and it refuses a file another account owns, which it cannot `fchmod`.
+fn open_log(path: &Path, options: &mut OpenOptions) -> std::io::Result<File> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+        let file = options.mode(0o600).custom_flags(libc::O_NOFOLLOW).open(path)?;
+        // An existing file keeps its mode through `open`; this tightens it.
+        file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+        Ok(file)
+    }
+    #[cfg(not(unix))]
+    {
+        let file = options.open(path)?;
+        restrict_to_owner(path, 0o600).map_err(std::io::Error::other)?;
+        Ok(file)
+    }
 }
 
 // `append_log` runs per stdout/stderr line from the sidecar; reopening
@@ -917,14 +993,11 @@ fn log_path() -> &'static Path {
 fn log_file() -> Option<&'static Mutex<File>> {
     static FILE: OnceLock<Option<Mutex<File>>> = OnceLock::new();
     FILE.get_or_init(|| {
-        let path = log_path();
-        if let Some(parent) = path.parent() {
-            let _ = create_dir_all(parent);
+        let location = log_location();
+        if !prepare_log_dir(&location.path, location.own_dir) {
+            return None;
         }
-        OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(path)
+        open_log(&location.path, OpenOptions::new().create(true).append(true))
             .ok()
             .map(Mutex::new)
     })
@@ -932,20 +1005,17 @@ fn log_file() -> Option<&'static Mutex<File>> {
 }
 
 fn init_log() {
-    let path = log_path();
-    if let Some(parent) = path.parent() {
-        let _ = create_dir_all(parent);
+    let location = log_location();
+    let path = location.path.as_path();
+    if !prepare_log_dir(path, location.own_dir) {
+        return;
     }
     // Keep the last run's log beside it, so a hang or forced restart leaves its
-    // evidence; a missing log (first launch) is fine.
+    // evidence; a missing log (first launch) is fine. `rename` moves a symlink
+    // itself, never its target.
     let _ = std::fs::rename(path, path.with_extension("previous.log"));
 
-    if let Ok(mut file) = OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(true)
-        .open(path)
-    {
+    if let Ok(mut file) = open_log(path, OpenOptions::new().create(true).write(true).truncate(true)) {
         let _ = writeln!(
             file,
             "[{}] Dormouse log started at {}",
@@ -1658,6 +1728,133 @@ fn read_clipboard_text(
     }
 }
 
+/// docs/specs/standalone.md §UI watchdog.
+type UiWatchdog = Mutex<ui_watchdog::Watchdog>;
+
+/// The page's first render committed: watch it from now on. Answers whether the
+/// watchdog restarted it, once.
+#[tauri::command]
+fn ui_watchdog_arm(window: tauri::Window, state: tauri::State<'_, UiWatchdog>) -> Option<ui_watchdog::RestartNotice> {
+    guard(&state).arm(window.label())
+}
+
+/// Probe every armed page each tick and restart the ones that stopped
+/// answering. A quit, or a window's own close, tears its page down on its own
+/// schedule with its own watchdogs, so the count stands still meanwhile.
+#[cfg(target_os = "macos")]
+fn start_ui_watchdog(app: &AppHandle) {
+    if !ui_watchdog::enabled(env::var("DORMOUSE_UI_WATCHDOG").ok().as_deref()) {
+        append_log("[ui-watchdog] off");
+        return;
+    }
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let watchdog = app.state::<UiWatchdog>();
+        let quit = app.state::<QuitState>();
+        let mut last = (Instant::now(), SystemTime::now());
+        loop {
+            std::thread::sleep(ui_watchdog::TICK);
+            let now = (Instant::now(), SystemTime::now());
+            // `Instant` stands still while the Mac sleeps; the wall clock does
+            // not, so a wake reads as a stall too.
+            let stalled = now.0.saturating_duration_since(last.0) > ui_watchdog::STALL
+                || now.1.duration_since(last.1).map_or(true, |gap| gap > ui_watchdog::STALL);
+            last = now;
+            let quitting = !guard(&quit.machine).idle();
+            let (hung, due) = {
+                let mut watchdog = guard(&watchdog);
+                if stalled || quitting {
+                    watchdog.restart_counts(|_| true);
+                    continue;
+                }
+                let close = guard(&quit.close);
+                watchdog.restart_counts(|label| close.active(label));
+                drop(close);
+                (watchdog.hung(now.0), watchdog.queue_probes())
+            };
+            if !hung.is_empty() {
+                // Off this thread: sampling takes seconds, and the other
+                // windows are still watched meanwhile.
+                let app = app.clone();
+                std::thread::spawn(move || restart_hung_webviews(&app, &hung));
+            }
+            if !due.is_empty() {
+                send_ui_probes(&app, due);
+            }
+        }
+    });
+}
+
+#[cfg(not(target_os = "macos"))]
+fn start_ui_watchdog(_app: &AppHandle) {}
+
+/// One main-thread hop for every due page. The clock starts there, not when
+/// the probe was queued: a main thread held by a native modal is not the
+/// page's hang. The probe is a script evaluation, whose completion runs only
+/// once the page's own main thread has run it, so a stuck page never answers.
+#[cfg(target_os = "macos")]
+fn send_ui_probes(app: &AppHandle, labels: Vec<String>) {
+    let handle = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        let watchdog = handle.state::<UiWatchdog>();
+        for label in labels {
+            let Some(window) = handle.get_webview_window(&label) else { continue };
+            if !guard(&watchdog).sent(&label, Instant::now()) {
+                continue;
+            }
+            let answer = handle.clone();
+            let _ = window.eval_with_callback("1", move |result| {
+                // Only a page that ran the script answers "1"; a failed
+                // evaluation (a killed or navigating page) answers "".
+                if result == "1" {
+                    guard(&answer.state::<UiWatchdog>()).answered(&label);
+                }
+            });
+        }
+    });
+}
+
+/// Sample each hung page's WebContent process, then SIGKILL it; Tauri's
+/// default terminate handler reloads the page onto the live sidecar.
+#[cfg(target_os = "macos")]
+fn restart_hung_webviews(app: &AppHandle, labels: &[String]) {
+    use ui_watchdog::macos;
+    append_log(format!("[ui-watchdog] {} did not answer; restarting", labels.join(", ")));
+    // Windows of one WebContent process hang together: sample and kill it once.
+    let mut by_pid: std::collections::BTreeMap<i32, Vec<String>> = Default::default();
+    for label in labels {
+        match macos::web_process_id(app, label) {
+            Some(pid) => by_pid.entry(pid).or_default().push(label.clone()),
+            None => append_log(format!("[ui-watchdog] no WebContent process for {label}; left as is")),
+        }
+    }
+    let dir = state_root(app).ok().map(|root| root.join("hangs"));
+    let watchdog = app.state::<UiWatchdog>();
+    for (pid, labels) in by_pid {
+        let sample_path = dir.as_ref().and_then(|dir| {
+            let path = dir.join(format!("{}-{pid}.sample.txt", log_timestamp()));
+            write_owner_only_with(&path, restrict_to_owner, |path| macos::sample(pid, path))
+                .then(|| path.display().to_string())
+        });
+        let killed = macos::kill(pid);
+        append_log(format!(
+            "[ui-watchdog] WebContent {pid} ({}): sample {}; {}",
+            labels.join(", "),
+            sample_path.as_deref().unwrap_or("not taken"),
+            if killed { "killed" } else { "kill failed" }
+        ));
+        if killed {
+            let mut watchdog = guard(&watchdog);
+            for label in labels {
+                watchdog.restarted(label, ui_watchdog::RestartNotice { sample_path: sample_path.clone() });
+            }
+        }
+    }
+    if let Some(dir) = dir {
+        macos::prune(&dir, ui_watchdog::SAMPLES_KEPT);
+    }
+}
+
 #[tauri::command(async)]
 fn read_update_log() -> Result<String, String> {
     read_log_tail(10_000)
@@ -1895,6 +2092,27 @@ fn ensure_parent_with(
 /// crash mid-write (`docs/specs/standalone.md` -> "Persistence").
 fn write_file_atomically(path: &Path, contents: &str) -> Result<(), String> {
     write_file_with_permissions(path, contents, restrict_to_owner)
+}
+
+/// Owner-only for a state-root file a child process writes, which cannot go
+/// through `write_file_atomically`: the macOS hang sample. The directory is
+/// restricted before `write` runs, and a file a failed `write` or restrict
+/// leaves behind is removed.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn write_owner_only_with(
+    path: &Path,
+    restrict: impl Fn(&Path, u32) -> Result<(), String>,
+    write: impl FnOnce(&Path) -> bool,
+) -> bool {
+    if ensure_parent_with(path, &restrict).is_err() {
+        return false;
+    }
+    // A failed or timed-out `sample` can leave a partial file at the umask.
+    if !write(path) || restrict(path, 0o600).is_err() {
+        let _ = std::fs::remove_file(path);
+        return false;
+    }
+    true
 }
 
 /// `write_file_atomically` with the permission step injected, so a test can
@@ -2766,8 +2984,7 @@ fn transfer_admitted(
     from: &str,
     to: &str,
 ) -> bool {
-    machine.phase == quit_state::QuitPhase::Idle
-        && !machine.approved
+    machine.idle()
         && !arrivals.blocks_transfer(from, to)
         && [from, to].into_iter().all(|label| !close.active(label) && !closing.contains(label))
 }
@@ -3371,7 +3588,8 @@ fn window_at_cursor(
 
 /// Show (or clear) another window's drop caret while a tab is dragged over it.
 /// The previously hovered window is always cleared, so a caret can never be
-/// left behind in a window the pointer has since left.
+/// left behind in a window the pointer has since left. `pinned` says which of
+/// the target's tab groups the caret keeps to.
 #[tauri::command]
 fn hover_workspace_target(
     app: AppHandle,
@@ -3379,6 +3597,7 @@ fn hover_workspace_target(
     label: Option<String>,
     x: f64,
     y: f64,
+    pinned: Option<bool>,
 ) {
     let mut current = guard(&windows.hover_target);
     if current.as_deref() != label.as_deref() {
@@ -3391,7 +3610,7 @@ fn hover_workspace_target(
         let _ = app.emit_to(
             label.as_str(),
             "dormouse://workspace-drop-hover",
-            serde_json::json!({ "x": x, "y": y }),
+            serde_json::json!({ "x": x, "y": y, "pinned": pinned.unwrap_or(false) }),
         );
     }
 }
@@ -4157,6 +4376,15 @@ pub fn run() {
                 }
             }
         })
+        // A page that starts loading is not the one that armed: its successor
+        // arms once it boots (§UI watchdog).
+        .on_page_load(|webview, payload| {
+            if payload.event() == tauri::webview::PageLoadEvent::Started {
+                if let Some(watchdog) = webview.app_handle().try_state::<UiWatchdog>() {
+                    guard(&watchdog).disarm(webview.label());
+                }
+            }
+        })
         .on_window_event(|window, event| {
             let app = window.app_handle();
             match event {
@@ -4210,6 +4438,9 @@ pub fn run() {
                 // run off-thread behind the approved-exit gate.
                 WindowEvent::Destroyed => {
                     let label = window.label().to_string();
+                    if let Some(watchdog) = app.try_state::<UiWatchdog>() {
+                        guard(&watchdog).forget(&label);
+                    }
                     let lost = if let Some(state) = app.try_state::<WindowState>() {
                         // Drop label-keyed ownership synchronously; only the
                         // returned arrivals need the blocking journal worker.
@@ -4290,6 +4521,9 @@ pub fn run() {
 
             // Quit-interception state (docs/specs/standalone.md §Quit flow).
             app.manage(QuitState::default());
+
+            app.manage(UiWatchdog::default());
+            start_ui_watchdog(app.handle());
 
             // A crash between a snapshot's temp write and its rename leaves a
             // file nothing will ever read or overwrite; one written before
@@ -4404,6 +4638,7 @@ pub fn run() {
             load_session,
             save_session,
             browser_request,
+            ui_watchdog_arm,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Dormouse")
@@ -5553,6 +5788,172 @@ mod tests {
             // leaves the boot sweep anything to find.
             assert!(!dir.path().join("main.json.tmp").exists());
         }
+    }
+
+    #[test]
+    fn a_child_written_state_file_is_never_written_into_an_unrestricted_directory() {
+        let dir = TempDir::new("hang-sample-permission-failure");
+        let path = dir.path().join("hangs").join("sample.txt");
+        let mut ran = false;
+        let restrict_dir_fails = |_: &Path, mode: u32| if mode == 0o700 { Err("denied".to_owned()) } else { Ok(()) };
+        assert!(!super::write_owner_only_with(&path, restrict_dir_fails, |_| { ran = true; true }));
+        assert!(!ran);
+        // A file that cannot be restricted is removed rather than kept.
+        let restrict_file_fails = |path: &Path, mode: u32| if mode == 0o600 { Err("denied".to_owned()) } else { super::restrict_to_owner(path, mode) };
+        assert!(!super::write_owner_only_with(&path, restrict_file_fails, |path| fs::write(path, "sample").is_ok()));
+        assert!(!path.exists());
+        // So is whatever a failed writer left behind.
+        assert!(!super::write_owner_only_with(&path, super::restrict_to_owner, |path| { fs::write(path, "partial").unwrap(); false }));
+        assert!(!path.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_child_written_state_file_is_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = TempDir::new("hang-sample-permissions");
+        let hangs = dir.path().join("hangs");
+        fs::create_dir(&hangs).unwrap();
+        fs::set_permissions(&hangs, fs::Permissions::from_mode(0o755)).unwrap();
+        let path = hangs.join("sample.txt");
+        let written = super::write_owner_only_with(&path, super::restrict_to_owner, |path| {
+            fs::write(path, "sample").unwrap();
+            fs::set_permissions(path, fs::Permissions::from_mode(0o644)).is_ok()
+        });
+        assert!(written);
+        assert_eq!(fs::metadata(&hangs).unwrap().permissions().mode() & 0o777, 0o700);
+        assert_eq!(fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+    }
+
+    /// docs/specs/security-local.md -> "Persisted state".
+    #[test]
+    fn the_hang_sample_is_written_owner_only() {
+        let src = include_str!("lib.rs").split("#[cfg(test)]").next().unwrap();
+        let body = src.split("fn restart_hung_webviews(").nth(1).unwrap().split("\n}").next().unwrap();
+        assert!(body.contains("write_owner_only_with(&path, restrict_to_owner,"));
+        assert!(!body.contains("create_dir_all("));
+    }
+
+    /// Linux keeps the log in a per-user state directory whenever it has one
+    /// (docs/specs/standalone.md -> "Logging"). Unix paths, so unix only.
+    #[cfg(unix)]
+    #[test]
+    fn linux_log_dir_is_per_user_state() {
+        use std::ffi::OsString;
+        let some = |value: &str| Some(OsString::from(value));
+        assert_eq!(
+            super::linux_log_dir(some("/xdg/state"), some("/home/me")),
+            Some(PathBuf::from("/xdg/state/dormouse-terminal"))
+        );
+        // A relative XDG value is ignored, as the XDG spec requires.
+        assert_eq!(
+            super::linux_log_dir(some("relative"), some("/home/me")),
+            Some(PathBuf::from("/home/me/.local/state/dormouse-terminal"))
+        );
+        assert_eq!(
+            super::linux_log_dir(None, some("/home/me")),
+            Some(PathBuf::from("/home/me/.local/state/dormouse-terminal"))
+        );
+        assert_eq!(super::linux_log_dir(None, some("relative")), None);
+        assert_eq!(super::linux_log_dir(None, None), None);
+    }
+
+    /// The Linux default is wired to that directory, not the temp directory.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_default_log_location_is_not_the_temp_directory() {
+        if std::env::var_os(super::LOG_FILE_ENV).is_some() {
+            return;
+        }
+        let location = super::default_log_location();
+        let dir = super::linux_log_dir(std::env::var_os("XDG_STATE_HOME"), std::env::var_os("HOME"))
+            .expect("HOME is set under cargo test");
+        assert_eq!(location.path, dir.join("dormouse.log"));
+        assert!(location.own_dir);
+    }
+
+    /// Windows has no mode, so the log gets the owner-only DACL instead of
+    /// whatever its directory hands down.
+    #[cfg(windows)]
+    #[test]
+    fn log_open_protects_the_dacl_on_windows() {
+        use std::os::windows::ffi::OsStrExt;
+        use windows::core::PCWSTR;
+        use windows::Win32::Foundation::{LocalFree, ERROR_SUCCESS, HLOCAL};
+        use windows::Win32::Security::Authorization::{GetNamedSecurityInfoW, SE_FILE_OBJECT};
+        use windows::Win32::Security::{
+            GetSecurityDescriptorControl, ACL, DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR,
+            SE_DACL_PROTECTED,
+        };
+
+        let dir = TempDir::new("log-acl");
+        let path = dir.path().join("dormouse.log");
+        super::open_log(&path, fs::OpenOptions::new().create(true).append(true)).unwrap();
+
+        let wide: Vec<u16> = path.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+        unsafe {
+            let mut dacl: *mut ACL = std::ptr::null_mut();
+            let mut sd = PSECURITY_DESCRIPTOR::default();
+            let rc = GetNamedSecurityInfoW(
+                PCWSTR(wide.as_ptr()),
+                SE_FILE_OBJECT,
+                DACL_SECURITY_INFORMATION,
+                None,
+                None,
+                Some(&mut dacl),
+                None,
+                &mut sd,
+            );
+            assert_eq!(rc, ERROR_SUCCESS, "GetNamedSecurityInfoW failed");
+            let mut control: u16 = 0;
+            let mut revision = 0u32;
+            GetSecurityDescriptorControl(sd, &mut control, &mut revision)
+                .expect("GetSecurityDescriptorControl failed");
+            let _ = LocalFree(Some(HLOCAL(sd.0)));
+            assert!(control & SE_DACL_PROTECTED.0 != 0, "the log inherits its DACL");
+        }
+    }
+
+    /// The log's own directory is owner-only, and so is the file, whether new
+    /// or left loose by an earlier run (docs/specs/security-local.md ->
+    /// "Persisted state").
+    #[cfg(unix)]
+    #[test]
+    fn log_file_and_its_own_directory_are_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = |path: &Path| fs::metadata(path).unwrap().permissions().mode() & 0o777;
+        let root = TempDir::new("log-owner-only");
+        let dir = root.path().join("state");
+        fs::create_dir(&dir).unwrap();
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o755)).unwrap();
+        let path = dir.join("dormouse.log");
+        assert!(super::prepare_log_dir(&path, true));
+        assert_eq!(mode(&dir), 0o700);
+
+        fs::write(&path, b"old").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o666)).unwrap();
+        super::open_log(&path, fs::OpenOptions::new().create(true).append(true)).unwrap();
+        assert_eq!(mode(&path), 0o600);
+
+        let fresh = dir.join("fresh.log");
+        super::open_log(&fresh, fs::OpenOptions::new().create(true).write(true).truncate(true)).unwrap();
+        assert_eq!(mode(&fresh), 0o600);
+    }
+
+    /// A symlink planted at the log's name is refused by both opens, so neither
+    /// truncates nor appends to whatever it points at.
+    #[cfg(unix)]
+    #[test]
+    fn log_open_refuses_a_planted_symlink() {
+        let root = TempDir::new("log-symlink");
+        let victim = root.path().join("victim");
+        fs::write(&victim, b"keep").unwrap();
+        let path = root.path().join("dormouse.log");
+        std::os::unix::fs::symlink(&victim, &path).unwrap();
+
+        assert!(super::open_log(&path, fs::OpenOptions::new().create(true).write(true).truncate(true)).is_err());
+        assert!(super::open_log(&path, fs::OpenOptions::new().create(true).append(true)).is_err());
+        assert_eq!(fs::read(&victim).unwrap(), b"keep");
     }
 
     #[cfg(unix)]

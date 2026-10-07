@@ -34,18 +34,19 @@ Pocket is:
 flowchart TD
   T{session token?}
   T -- no --> U{prior passkey use?}
-  U -- no --> G["setup({ setupToken }), signin"]
+  U -- no --> G["setup({ setupToken }), which signs in"]
   U -- yes --> I[signin]
   I -- 404 --> G
   I -- ok --> R[POST /api/setup/retire]
   T -- yes --> R
+  R -- session expired --> U
   R & I & G -- fails --> X[abort]
   R --> P[pair]
   G --> P
   P -- approved --> C[connect]
 ```
 
-**A phone that registers nothing spends the code at `POST /api/setup/retire`**, so a photographed QR cannot register a passkey afterwards. **Only a sign-in refused 404 falls back to registering** (rationale). Pairing runs per [remote-security-model.md](./remote-security-model.md) → Pairing, and **the two digits go on screen before the outcome is known and stay until it lands**. **Cancelling closes the relay socket** and reports nothing. (rationale) **A refused token is reported, never folded away**: `SETUP_TOKEN_INVALID_ERROR` becomes `SetupTokenInvalidError`, whose recovery is a new code on the computer.
+**A phone that registers nothing spends the code at `POST /api/setup/retire`**, so a photographed QR cannot register a passkey afterwards. **A session the Relay no longer honors falls back to sign-in with the same code**, which the session gate refused before spending. **Only a sign-in refused 404 falls back to registering** (rationale). Pairing runs per [remote-security-model.md](./remote-security-model.md) → Pairing, and **the two digits go on screen before the outcome is known and stay until it lands**. **Cancelling closes the relay socket** and reports nothing. (rationale) **A refused token is reported, never folded away**: `SETUP_TOKEN_INVALID_ERROR` becomes `SetupTokenInvalidError`, whose recovery is a new code on the computer.
 
 **Runtimes are gated, not degraded**: `probeNoiseSupport` runs before sign-in, setup, pairing, or connection; `false` renders a fixed upgrade requirement instead.
 
@@ -92,7 +93,7 @@ Pocket ships a web app manifest and a service worker: installable to a home scre
 - **Registration is best-effort and never awaited**: a failure warns and boot continues (rationale) — ordinary without support and on an insecure origin, since service workers need a secure context.
 - **Must focus an existing app window on notification click, preserving its screen, or open `/` if none exists.** Pushes carry no Pane navigation target.
 
-**The installed app is a separate storage partition from the browser tab** — iOS Safari and a Home Screen web app share no cookies, `localStorage`, or IndexedDB — so the install mints its own per-Burrow statics and is a *different Client*, **needing its own pairing approval on each Burrow**. (rationale) **The two cannot be merged**, so Pocket suggests a label naming the mode at pairing — `Dormouse Pocket (Home Screen)` versus `Dormouse Pocket (browser)` — for the laptop's approval modal and Alarm settings to tell them apart.
+**The installed app is a separate storage partition from the browser tab** — iOS Safari and a Home Screen web app share no cookies, `localStorage`, or IndexedDB — so the install mints its own per-Burrow statics, signs in once on its own, and is a *different Client*, **needing its own pairing approval on each Burrow**. (rationale) **The two cannot be merged**, so Pocket suggests a label naming the mode at pairing — `Dormouse Pocket (Home Screen)` versus `Dormouse Pocket (browser)` — for the laptop's approval modal and Alarm settings to tell them apart.
 
 **Signing in *is* enough to ask.** `SigninFinishResponse` returns the asserted passkey's public key, which a Client needs to build a presence proof, so a profile that never registered can still pair (rationale); holding that public key authorizes nothing ([remote-security-model.md](./remote-security-model.md) -> Client statics). **If the cached copy disappears mid-session, Pocket clears the session token and returns to sign-in** (`PasskeyUnavailableError`).
 
@@ -130,7 +131,7 @@ Source of truth: `getPushAvailability` / `subscribeToPushInBrowser` in `lib/src/
 
 **One module owns the IndexedDB name, its version, its upgrade, and every open** (rationale). `dormouse-pocket` is at **v4**: `known-burrows` (`KnownBurrowV1`, keyed by `burrowId`) and `pending-deletions` (`PendingDeliveryDeletionV1`, keyed `burrowId:deliveryId`); every earlier version upgrades to that shape. **A version bump is a compatibility event: it must never empty `pending-deletions` for a store already at v4**, which would discard owed deletions. **`navigator.storage.persist()` is requested best-effort**: a browser that refuses gets ordinary eviction-prone storage, which re-pairing survives ([remote-security-model.md](./remote-security-model.md) → Client static loss).
 
-**A `KnownBurrowV1` is this Client's whole authorization state** for one Burrow. **`localStorage` holds only the `:passkey:` cache and the `:push-endpoint` digest.**
+**A `KnownBurrowV1` is this Client's whole authorization state** for one Burrow. **`localStorage` holds only the `:passkey:` cache, the `:push-endpoint` digest, and the Relay session** (`dormouse-pocket:session`: token, account, credential id, expiry; rationale). **A launch holding an unexpired session opens on the Burrows list once the capability gate passes and its first read answers**, which finds out whether the Relay still honors it. **Sign out on the Burrows view forgets the session locally; nothing revokes it on the Relay.**
 
 Source of truth: `requirePocketKeyStorage` in `lib/src/remote/client/pocket-db.ts`; `generatePocketKeyPair` in `lib/src/remote/client/pocket-private-key.ts`.
 
@@ -162,11 +163,11 @@ Source of truth: `runCapabilities` in `lib/pocket/diagnostics/capabilities.js`.
 
 **While a connection is established and the page is visible, Pocket sends one fixed-size keepalive every `E2E_KEEPALIVE_INTERVAL_MS` (30 s)** on the Noise session; hiding the page pauses them, and returning sends one immediately before resuming the interval. (rationale)
 
-The Burrow disposes any session it has not decrypted a Client message on for `ESTABLISHED_E2E_IDLE_TIMEOUT_MS` ([remote-security-model.md](./remote-security-model.md) → Burrow bounds), so **a phone suspended for longer comes back to no session**, and reconnecting costs a fresh Noise handshake and one WebAuthn prompt (rationale). **Pocket runs the same deadline against its own last send**, before a keepalive and before every request, and reports burrow loss when it passes: the reap's goodbye may never be read, and the relay socket to the *Relay* stays open. (rationale)
+The Burrow disposes any session it has not decrypted a Client message on for `ESTABLISHED_E2E_IDLE_TIMEOUT_MS` ([remote-security-model.md](./remote-security-model.md) → Burrow bounds), so **a phone suspended for longer comes back to no session**, and reconnecting costs a fresh Noise handshake (rationale). **Connect rides the Burrow's presence window whenever message 2 offers one, and proves presence otherwise** ([remote-security-model.md](./remote-security-model.md) → Presence window). **Pocket runs the same deadline against its own last send**, before a keepalive and before every request, and reports burrow loss when it passes: the reap's goodbye may never be read, and the relay socket to the *Relay* stays open. (rationale)
 
 **The Burrow's goodbye is burrow loss** — its idle reap, a newer session from this same Client static, or the person at the computer taking a pane back ([remote-api.md](./remote-api.md) → Transport): the phone leaves the wall exactly as it does for a `burrow-gone`, and stays paired.
 
-Source of truth: `ClientSessionCore` in `lib/src/remote/client/session-core.ts`.
+Source of truth: `ClientSessionCore` in `lib/src/remote/client/session-core.ts`; `PocketClient.connect` in `lib/src/remote/client/pocket-client.ts`.
 
 ## The path the session takes
 
@@ -174,16 +175,18 @@ Source of truth: `ClientSessionCore` in `lib/src/remote/client/session-core.ts`.
 
 **Must retire the previous session — its peer, its channel, and its pending requests — immediately before the replacement's connection request goes out, and never report burrow loss for it**: the old channel's close can otherwise arrive first and fail the replacement's waiter. **Never earlier than that**: a presence proof the user dismisses, or a handshake that fails, leaves a working session untouched, and a replacement refused after the request has gone leaves none.
 
-**Must label the connected header with the live path, `relay` or `direct`, without status colours**, keeping fallback reasons in hover text. **Must pass only a `DirectRelayCause` to Pocket, never runtime failure text**; `TRANSPORT_RELAY_CAUSES` owns the displayed sentences. After the switch, a channel failure ends the session (remote-api.md → Direct path): Pocket returns to the list, and reconnecting costs a fresh handshake and WebAuthn prompt.
+**Must label the connected header with the live path, `relay` or `direct`, without status colours**, keeping fallback reasons in hover text. **Must pass only a `DirectRelayCause` to Pocket, never runtime failure text**; `TRANSPORT_RELAY_CAUSES` owns the displayed sentences. After the switch, a channel failure ends the session (remote-api.md → Direct path): Pocket returns to the list, and reconnecting costs a fresh handshake.
 
 Source of truth: `PocketClient.connect` in `lib/src/remote/client/pocket-client.ts`; `deploymentDirectPeer` in `lib/src/remote/pocket-app/deployment.ts`; `TRANSPORT_RELAY_CAUSES` in `lib/src/remote/pocket-app/views.tsx`.
 
 ## An expired session drops to sign-in
 
-Sessions expire ([relay.md](./relay.md)) and, on a self-host Relay, also end on every restart, while the passkey and paired Burrow records outlive both; Hosted also ends the session of an account no longer entitled (`docs/specs/hosted.md` -> "Relay"). **Pocket therefore treats a dead session as actionable, not reportable** (rationale): `PocketClient` clears its in-memory token and throws `SessionExpiredError`; the app tears down any live adapter and returns to sign-in carrying that message. One passkey prompt restores the Burrows list, pairing and push registration intact.
+Sessions expire ([relay.md](./relay.md)) and, on a self-host Relay, also end on every restart, while the passkey and paired Burrow records outlive both; Hosted also ends the session of an account no longer entitled (`docs/specs/hosted.md` -> "Relay"). **Pocket therefore treats a dead session as actionable, not reportable** (rationale): `PocketClient` clears its token, in memory and in storage, and throws `SessionExpiredError`; the app tears down any live adapter and returns to sign-in carrying that message. One passkey prompt restores the Burrows list, pairing and push registration intact.
 
 - **The trigger is the session gate specifically**, matched on the shared `UNAUTHORIZED_ERROR` from `remote-lib-common/src/remote/wire.ts` — a refused setup token answers 401 too. (rationale)
-- **A rejected relay upgrade carries no status**, so `openSocket` asks an authenticated route what happened: a 401 there means expiry, anything else leaves it an ordinary socket failure.
+- **A rejected relay upgrade carries no status**, so `openSocket` asks an authenticated route what happened, with the token the socket presented: a 401 there means expiry, anything else leaves it an ordinary socket failure.
+- **A 401 clears only the session whose token it answered.** It is `SessionSupersededError`, never `SessionExpiredError`, only while a different session is current (rationale).
+- **Clearing the stored session removes it only while storage holds the cleared token**, so a stale tab never erases another tab's newer sign-in (rationale).
 
 Source of truth: `SessionExpiredError` in `lib/src/remote/client/pocket-client.ts`.
 

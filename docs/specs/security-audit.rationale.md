@@ -66,7 +66,7 @@ Collapsing the inconclusive case into `FAIL`, as the step originally did, filed 
 
 A `FAIL IF` condition no audit run can read makes the verdict a coin flip, because no run can ever determine it. `AUDIT_PAT`-readable GitHub state is not in that class: a failed call there is a real `UNVERIFIABLE`. `## Future` holds such an obligation only while its subject is unbuilt, since a staged item must eventually be promoted; a standing obligation on existing infrastructure is present-tense fact and stays beside its rule. `security-hosted.md` carried two: the Cloudflare script-injection exclusion, which is a zone setting, and a closing activation sentence that stated its own answer. Run 35586089654 (2026-09-21) reached both as `UNVERIFIABLE` in its sub-auditors and its domain lead resolved both to PASS, on the ground that the audited condition was the in-repo half; run 35709640946 (2026-09-22) left both `UNVERIFIABLE`, so a pass with 375 PASS and 0 FAIL returned INCONCLUSIVE and held the release gate shut (issue #747). Nothing in the tree had changed between them. #757 staged both under `security-hosted.md`'s `## Future` and kept the in-repo half — the deploy's `preflight` gate — as a `FAIL IF`.
 
-GitHub rejects an over-long issue body outright; that rejection lands on a `set -e` step *after* the verdict is decided, and the finding then reaches no issue and no comment — only a red run and an artifact that expires. Truncation keeps the head because that is where the verdict and the links are, and the clamp call is non-fatal so a failure of the helper cannot reopen the window it closes.
+GitHub rejects an over-long issue body outright; that rejection lands on a `set -e` step *after* the verdict is decided, and the finding then reaches no issue and no comment — only a red run and an artifact that expires. The 2026-08-29 and 08-30 runs lost a `FAIL` that way, over 65,536 characters. The public body truncated with its head kept until the embargo; the private report now splits instead, because a reader of the private tracker has no reason to lose any of it, and the split stops at a bounded part count only so a runaway fragment cannot flood the tracker with comments. Both helper calls are non-fatal so a failure of the helper cannot reopen the window it closes.
 
 Keeping the head is not the same as keeping what decides. Run 35842217451 (2026-09-23) composed a 226,302-character body: the posted issue carried `VERDICT: INCONCLUSIVE` for `audit-ci-secrets.md` and a note sending the reader to its `UNVERIFIABLE` checks, while that domain's one `UNVERIFIABLE` line sat past the cut along with the whole of `## Application security`, `## Hosted accounts` and `## Summary`. The deciding lines are not positionally predictable, so the clamp cannot be taught to keep them; lifting them into the head, which the clamp keeps by construction, is what makes the notes' pointers resolve. The lift matches at line start after an optional heading or bullet marker because every fragment is written in `FAIL IF` vocabulary — `### FAIL IF results` heads the passing list, and a `- PASS:` bullet quotes the clause it passed — so a bare `FAIL` match would lift the passing evidence as findings. The findings are bounded at 40 lines, and every lifted line at 500 characters, so the lift cannot itself exhaust the budget it protects; the real report produced 8 lines and 1,571 characters. The cap falls on the findings alone because one verdict line per fragment is bounded by the fragment count while a single domain's findings are not, so a shared cap would let the first domain's findings push the last domain's verdict out — the loss the lift exists to prevent. The first draft of the lift piped `grep` without `|| true`: a nonempty fragment carrying no marker line — the unreadable-verdict state the guard loop above already reports — made the pipeline exit 1, and `set -eo pipefail` ended the step before `audit-comment.md` was composed, so nothing was posted at all. Caught by the review on the PR that introduced it and pinned by a markerless-fragment case.
 
@@ -78,13 +78,35 @@ Existence is not agreement. The missing-fragment guard catches a domain that pro
 
 The September 2026 spec audit found that prefix matching accepted `VERDICT: PASS but unfinished`, whitespace deletion accepted `P A S S`, and the local runner returned success for a failed domain or a process that wrote a fragment before failing. The shared preamble also permitted `UNVERIFIABLE` checks without giving the domain an inconclusive verdict. Exact passing verdicts and the third domain outcome keep incomplete evidence from becoming a passing audit. Failure prefixes remain dissent: an appended explanation cannot turn an actual finding into an inconclusive report.
 
-The redaction step is the only thing between an accidental `printenv` and a world-readable artifact, and until its `FAIL IF` existed nothing would have tripped on its deletion. Its sinks are deleted rather than truncated on error because `: >` has to open the file and so fails on exactly the unreadable file that made the redactor throw, whereas `rm` needs only the directory.
+The redaction step was once the only thing between an accidental `printenv` and a world-readable artifact, and until its `FAIL IF` existed nothing would have tripped on its deletion. With the artifact encrypted and the report filed privately it still keeps a secret out of both, since a secret in a private tracker is still leaked. Its sinks are deleted rather than truncated on error because `: >` has to open the file and so fails on exactly the unreadable file that made the redactor throw, whereas `rm` needs only the directory.
 
-Without the transcript a run that produces no verdict is undiagnosable: `claude-code-action` keeps tool output out of the step log on purpose and the runner is ephemeral. World-readable is consistent with the audit reports already posted to public issues; `***` masking applies to step logs, not to artifact contents.
+Without the transcript a run that produces no verdict is undiagnosable: `claude-code-action` keeps tool output out of the step log on purpose and the runner is ephemeral. `***` masking applies to step logs, not to artifact contents.
 
 The October 2026 audit checked the upload's `if: always()` and the reporter's absent-artifact branch. They attempt postprocessing after ordinary failures, but cannot establish an upload after the runner itself times out or is cancelled; the issue links a download only when the artifact lookup returns an id.
 
 Publishing the fragments when no merged report exists is the same "a prompt is not a control" split as the guards above. Run 34581574869 (2026-09-11) ended its turn before the merge, so this step's report section was one line saying no report was produced — while `supply-chain` and `ci-and-secrets` had finished `VERDICT: PASS` fragments in the working directory, already redacted and already read twice by the guard loops. `.github/audit/orchestrator.md` §4 now forbids ending the turn there, but the run's findings should not depend on that sentence being followed. Verbatim and unmerged, because §3's merge is the only thing entitled to characterise a fragment; the cut-off and absent markers are the exception, being the same mechanical tests the step's own guard loops already ran, and a fragment published without them reads as a finished report.
+
+## Embargo
+
+Issue #1027 (2026-10) carried a BLOCKER with a working `calc` command-injection payload in the public `security-audit-failure` body, and every run's `audit-transcript` artifact — the merged report, the four fragments, and the Claude transcript — was downloadable by anyone for 14 days. Both contradicted `docs/specs/security.md` telling a reporter never to open a public issue. The security-audit sweep review of 2026-10-07 moved the detail to a private tracker and the artifact to ciphertext.
+
+The public body is built from what a domain cannot phrase. A domain writes its own check lines, so a heading-shaped string in one is still agent text; only a heading the checked-out spec already publishes is safe to repeat, and the builder looks each one up rather than trusting the line's shape. Verdicts publish as an enum, never as the verdict line, because `VERDICT: FAIL — <explanation>` is a legal verdict line and the explanation is detail.
+
+`EMBARGO_TOKEN` stays out of the agent's step so an accidental print, or an agent talked into filing, cannot reach the private tracker or its history. Running no repository code in the token's step stops a modified checkout swapping the script that handles it. Neither stops an agent that subverts the runner: a hosted runner grants passwordless `sudo`, and the agent's processes and files outlive its step; that is the known gap in `docs/specs/security.md`.
+
+The token's step also writes `gh` a fresh config directory, so no leftover configuration decides where the token goes.
+
+`age` comes from the Ubuntu archive the runner image already trusts, as in `.github/workflows/hosted-production.yml`'s backup step; no new trust root and no pinned binary to bump. The recipient lives in a checked-in file so a key rotation is a one-line diff under `.github/audit/`, which `workflow-audit.yaml` watches.
+
+The tracker's visibility is checked against `github.com` rather than the REST API: anonymous API calls share a 60-an-hour limit per runner address, and a rate-limited 403 would read as `UNVERIFIABLE` and hold the release gate.
+
+One private issue per failing run, rather than per finding, is the first slice; a ledger that stops a PASS closing the public issue while private findings are unfixed would build on the same tracker.
+
+Provisioning `EMBARGO_TOKEN`: a fine-grained PAT with Issues: write on `diffplug/dormouse-embargo` only, minted on an admin's account.
+
+```bash
+gh secret set EMBARGO_TOKEN --env security-audit --repo diffplug/dormouse --body 'github_pat_…'
+```
 
 ## Environment and `AUDIT_PAT`
 
@@ -92,7 +114,7 @@ A bot-pushed feature branch cannot reach the audit job at all — GitHub rejects
 
 Without the PAT the audit cannot read the administration endpoints behind ruleset bypass actors, repo-level secret listing, and environment policies, so the specs it enforces would be unenforceable in their key sections.
 
-Passing the PAT only as an unexpanded `GH_TOKEN=` prefix is a convention, not a control: the agent holds unrestricted Bash and audits code that touches secrets, so one `printenv` or one `set -x` would publish an admin-read PAT for the artifact's whole retention.
+Passing the PAT only as an unexpanded `GH_TOKEN=` prefix is a convention, not a control: the agent holds unrestricted Bash and audits code that touches secrets, so one `printenv` or one `set -x` lands an admin-read PAT in the transcript.
 
 Provisioning the secret, for whoever has to rotate it:
 

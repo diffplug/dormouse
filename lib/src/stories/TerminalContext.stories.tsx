@@ -102,7 +102,7 @@ function ContextPrototype({ scenario, initialDetail = null, paneWidth, paneHeigh
     <div className="flex items-center gap-2 bg-header-active-bg px-2.5 text-header-active-fg" style={{ height: PANE_HEADER_HEIGHT_PX }}><span>pnpm dev</span><span className="ml-auto flex items-center gap-3"><FrameCornersIcon size={13} /><XIcon size={13} /></span></div>
     <pre className="m-0 p-3 leading-6 text-muted">{'~/projects/dormouse ❯ pnpm dev\n\n  VITE ready\n  ➜  Local: http://localhost:5173/'}</pre>
     <div className="absolute" style={{ left: placement.rect.x, top: placement.rect.y, width: placement.rect.width, height: placement.rect.height }}>
-      <TerminalContextView placement={{ ...placement, onChange: setSide }} title="pnpm dev" surfaceRef="surface:3" cwd={PARENT_DIR} helperCwd={HELPER_DIR} mismatch={scenario === 'differentDirectory'}
+      <TerminalContextView placement={{ ...placement, onChange: setSide }} surfaceRef="surface:3" cwd={PARENT_DIR} helperCwd={HELPER_DIR} mismatch={scenario === 'differentDirectory'}
         titleSources={[{ source: 'User override', value: 'Not set' }, { source: 'OSC 2', value: 'pnpm dev', note: 'Used' }, { source: 'OSC 0', value: 'zsh', note: 'Not used' }, { source: 'Command', value: 'pnpm dev', note: 'Fallback' }]}
         scan={scenario === 'scanFailed' ? { status: 'failed' } : { status: 'loaded', entries: scenario === 'noPorts' ? [] : ports }}
         watchRule="pnpm" watching={watching} todo={todo} notification={scenario === 'notification' ? { title: 'Tests complete', body: '341 passed, 0 failed' } : null}
@@ -161,20 +161,19 @@ const meta = {
     }
     // These snapshots must actually expose the state named in the story.
     if (['noPorts', 'multiplePorts', 'notification', 'scanFailed'].includes(args.initialScenario ?? 'fresh')) {
-      const canvas = within(canvasElement);
-      const target = canvas.getByText(args.initialScenario === 'notification' ? 'Tests complete' : 'Ports', { exact: true });
+      const target = args.initialScenario === 'notification' ? within(canvasElement).getByText('Tests complete', { exact: true }) : canvasElement.querySelector<HTMLElement>('[data-context-ports]')!;
       target.scrollIntoView({ block: 'nearest' });
       await expect(target).toBeVisible();
     }
     const panel = canvasElement.querySelector<HTMLElement>('[data-terminal-context]')!;
     const bounds = panel.getBoundingClientRect();
-    // The Title, Dir, and Ports rows each stay on one line at every width.
-    for (const row of panel.querySelectorAll<HTMLElement>('[data-context-title], [data-context-dir], [data-context-ports]')) {
+    // The header, Dir, Ports, and notification rows each stay on one line at every width.
+    for (const row of panel.querySelectorAll<HTMLElement>('[data-context-title], [data-context-dir], [data-context-ports], [data-context-notification]')) {
       expect(row.getBoundingClientRect().height).toBeLessThanOrEqual(28);
       expect(row.scrollWidth).toBeLessThanOrEqual(row.clientWidth);
     }
     // DOM visibility matchers do not catch overflow clipping; check actual bounds.
-    for (const element of [within(panel).getByTitle('pnpm dev'), ...panel.querySelectorAll('button')]) {
+    for (const element of panel.querySelectorAll('button')) {
       const box = element.getBoundingClientRect();
       expect(box.width).toBeGreaterThan(0);
       expect(box.left).toBeGreaterThanOrEqual(bounds.left);
@@ -185,7 +184,7 @@ const meta = {
       expect(button.scrollWidth, button.getAttribute('aria-label') ?? '').toBeLessThanOrEqual(button.clientWidth);
       expect(button.scrollHeight, button.getAttribute('aria-label') ?? '').toBeLessThanOrEqual(button.clientHeight);
     }
-    const terminal = panel.querySelector<HTMLElement>('.bg-terminal-bg')!;
+    const terminal = panel.querySelector<HTMLElement>('.min-h-16.bg-terminal-bg')!;
     expect(terminal.getBoundingClientRect().height).toBeGreaterThanOrEqual(64);
     canvasElement.dataset.contextCheck = 'passed';
   },

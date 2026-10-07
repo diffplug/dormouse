@@ -1,9 +1,9 @@
 import { useState, useEffect, useSyncExternalStore } from 'react';
 import { MinusIcon, CornersOutIcon, CornersInIcon, XIcon } from '@phosphor-icons/react';
-import { PANE_GUTTER_PX, PopupButtonRow, TAB_WALL_JOIN_GRADIENT, chromeButton } from '../../lib/src/components/design';
+import { APP_BAR_HEIGHT_PX, PANE_GUTTER_PX, PopupButtonRow, TabWallJoin, chromeButton } from '../../lib/src/components/design';
 import { WorkspaceStrip } from '../../lib/src/components/WorkspaceStrip';
 import { IS_MAC } from '../../lib/src/lib/platform';
-import { onDragBackInsideStrip, onDragCancelled, onDragOutsideWindow, onDropOnOtherWindow } from './workspace-drag';
+import { moveWorkspaceToNewWindow, onDragBackInsideStrip, onDragCancelled, onDragOutsideWindow, onDropOnOtherWindow } from './workspace-drag';
 import { getDropCaretX, subscribeDropCaret } from './workspace-drop-caret';
 
 type AppWindow = {
@@ -148,30 +148,34 @@ export function AppBar() {
   return (
     <div
       data-tauri-drag-region
-      className={`relative flex h-[30px] shrink-0 select-none items-center bg-app-bg text-app-fg text-xs ${
+      className={`relative flex shrink-0 select-none items-center bg-app-bg text-app-fg text-xs ${
         IS_MAC ? 'pl-[78px]' : ''
       }`}
-      style={{ marginBottom: PANE_GUTTER_PX }}
+      style={{ height: APP_BAR_HEIGHT_PX, marginBottom: PANE_GUTTER_PX }}
     >
       {/* On macOS, native traffic lights are shown by titleBarStyle "Overlay" —
           we just leave padding on the left (pl-[78px]) to avoid overlapping them. */}
 
-      {/* The Workspace strip: after the traffic lights on macOS, at the start of
-          the bar on Windows/Linux. The spacer after it is the drag target, with
-          a floor so it survives any tab count — the strip scrolls into what is
-          left rather than growing over it. Tauri matches `data-tauri-drag-region`
-          on the event target alone, so no tab or tab button may carry it — that
-          is what leaves a press on a tab free to activate, rename, or reorder. */}
-      <div className="flex min-w-0 items-end self-stretch pl-1.75">
+      {/* The Workspace strip fills the bar: after the traffic lights on macOS,
+          at the start of the bar on Windows/Linux, its pinned group flush
+          against the right end (before the window controls). The empty space
+          it leaves between `+` and the pinned group is the drag target, with a
+          floor so it survives any tab count — the unpinned tabs scroll into
+          what is left rather than growing over it. Tauri matches
+          `data-tauri-drag-region` on the event target alone, so no tab or tab
+          button may carry it — that is what leaves a press on a tab free to
+          activate, rename, or reorder. */}
+      <div data-tauri-drag-region className="flex min-w-0 flex-1 items-end self-stretch px-1.75">
         <WorkspaceStrip
-          className="min-w-0"
+          className="self-stretch"
+          spacerAttributes={{ 'data-tauri-drag-region': true }}
           onDragOutsideWindow={BROWSER_DEV ? undefined : onDragOutsideWindow}
           onDragBackInsideStrip={BROWSER_DEV ? undefined : onDragBackInsideStrip}
           onDropOnOtherWindow={BROWSER_DEV ? undefined : onDropOnOtherWindow}
           onDragCancelled={BROWSER_DEV ? undefined : onDragCancelled}
+          onMoveToNewWindow={BROWSER_DEV ? undefined : moveWorkspaceToNewWindow}
         />
       </div>
-      <div data-tauri-drag-region className="min-w-8 flex-1 self-stretch" />
       <DropCaret />
 
       {/* Theme and shell selection live in the Settings dialog at the
@@ -180,11 +184,7 @@ export function AppBar() {
           native-style window controls on Windows/Linux. */}
       {!IS_MAC && <WinControls />}
       {/* Reserve the gradient's own band above the Wall's focus-ring gutter. */}
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute inset-x-0 top-full z-10"
-        style={{ height: PANE_GUTTER_PX, backgroundImage: TAB_WALL_JOIN_GRADIENT }}
-      />
+      <TabWallJoin />
     </div>
   );
 }
@@ -201,8 +201,8 @@ function DropCaret() {
     <div
       data-workspace-drop-caret
       aria-hidden="true"
-      className="pointer-events-none fixed top-0 z-50 h-[30px] w-0.5 bg-current"
-      style={{ left: x }}
+      className="pointer-events-none fixed top-0 z-50 w-0.5 bg-current"
+      style={{ left: x, height: APP_BAR_HEIGHT_PX }}
     />
   );
 }

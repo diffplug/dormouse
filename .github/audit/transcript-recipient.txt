@@ -1,0 +1,7 @@
+# The maintainer's age public key. `.github/workflows/security-audit.yaml`
+# encrypts the `audit-transcript` artifact to it, so this public repository
+# uploads only ciphertext. Decrypt a downloaded artifact with:
+#   age -d -i ~/.config/dormouse/audit-transcript.agekey audit-transcript.tar.gz.age | tar -xz
+# Rotating the key means replacing the line below; see
+# docs/specs/security-audit.md -> "Embargo".
+age15aqsn6kx3eckj70cxf4l8072fefzd6sskzk9akvfp6m9fcwrsgsqs6valr

@@ -134,7 +134,7 @@ describe('ThemePicker', () => {
 
     vi.useFakeTimers();
     try {
-      act(() => root.render(<ThemePicker variant="settings-dialog" />));
+      act(() => root.render(<ThemePicker variant="settings-dialog" offerStore />));
       openStore();
       act(() => setNativeFieldValue(container.querySelector('input')!, 'dracula'));
       await act(async () => { vi.advanceTimersByTime(300); });
@@ -149,5 +149,14 @@ describe('ThemePicker', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  // Standalone's content policy blocks open-vsx.org and no network policy
+  // governs the fetch, so only a caller that opts in offers the store.
+  it('offers no theme store unless its caller does', () => {
+    act(() => root.render(<ThemePicker variant="settings-dialog" />));
+    act(() => (container.querySelector<HTMLButtonElement>('button[aria-haspopup="menu"]')!).click());
+    expect(container.querySelector('[role="menu"]')!.textContent).not.toContain('Install theme from OpenVSX');
+    expect(container.querySelector('[role="menu"]')!.textContent).toContain('Debug current theme');
   });
 });

@@ -17,6 +17,9 @@ export interface WorkspaceMeta {
   /** The name is derived (`docs/specs/layout.md` → "Workspace names") rather than
    *  one a user set. */
   nameIsAuto: boolean;
+  /** Pinned right: in the strip's right-hand group and never closed alone
+   *  (`docs/specs/layout.md` → "Workspace tabs"). Absent when unpinned. */
+  pinned?: true;
 }
 
 export interface WorkspacesState {
@@ -63,6 +66,11 @@ export function hasWorkspace(id: WorkspaceId): boolean {
 
 export function getWorkspace(id: WorkspaceId): WorkspaceMeta | undefined {
   return state.workspaces.find((workspace) => workspace.id === id);
+}
+
+/** Whether the Workspace is pinned right; an unknown one is not. */
+export function isWorkspacePinned(id: WorkspaceId): boolean {
+  return !!getWorkspace(id)?.pinned;
 }
 
 let workspaceSequence = 0;
@@ -145,7 +153,22 @@ function nextDefaultName(): string {
   return `Workspace ${max + 1}`;
 }
 
-/** Replace the whole model (used on restore to load the persisted Window). */
+/** The index where the pinned group starts: the list's length when none is
+ *  pinned. The list is always partitioned, unpinned first, so this is also one
+ *  past the unpinned group's end, and where the strip's `+` sits. */
+export function pinnedBoundary(workspaces: readonly WorkspaceMeta[] = state.workspaces): number {
+  const first = workspaces.findIndex((ws) => ws.pinned);
+  return first === -1 ? workspaces.length : first;
+}
+
+/** Unpinned Workspaces, then pinned ones, each group keeping its order. */
+function partitionPinned(workspaces: WorkspaceMeta[]): WorkspaceMeta[] {
+  const pinned = workspaces.filter((ws) => ws.pinned);
+  return pinned.length === 0 ? workspaces : [...workspaces.filter((ws) => !ws.pinned), ...pinned];
+}
+
+/** Replace the whole model (used on restore to load the persisted Window). A
+ *  list out of partition is stably partitioned, unpinned first. */
 export function setWorkspaces(next: WorkspacesState): void {
   // Reject duplicate identities before notifying listeners.
   const ids = new Set(next.workspaces.map((workspace) => workspace.id));
@@ -157,7 +180,7 @@ export function setWorkspaces(next: WorkspacesState): void {
   const activeId = next.workspaces.some((ws) => ws.id === next.activeId)
     ? next.activeId
     : next.workspaces[0].id;
-  emit({ workspaces: [...next.workspaces], activeId });
+  emit({ workspaces: partitionPinned([...next.workspaces]), activeId });
 }
 
 export function setActiveWorkspace(id: WorkspaceId): void {
@@ -179,7 +202,12 @@ function freshWorkspaceId(): WorkspaceId {
   return id;
 }
 
-export function createWorkspace(opts?: { id?: WorkspaceId; name?: string; nameIsAuto?: boolean; activate?: boolean; alertDelivery?: AlertDeliveryOverrides }): WorkspaceMeta {
+/**
+ * Add a Workspace where its group meets the other: an unpinned one at the end of
+ * the unpinned group, just left of `+`; a pinned one (an arrival from another
+ * Window) at the left edge of the pinned group.
+ */
+export function createWorkspace(opts?: { id?: WorkspaceId; name?: string; nameIsAuto?: boolean; pinned?: boolean; activate?: boolean; alertDelivery?: AlertDeliveryOverrides }): WorkspaceMeta {
   if (opts?.id !== undefined && state.workspaces.some((workspace) => workspace.id === opts.id)) {
     throw new Error(`Duplicate Workspace id: ${opts.id}`);
   }
@@ -188,10 +216,13 @@ export function createWorkspace(opts?: { id?: WorkspaceId; name?: string; nameIs
     id,
     name: opts?.name ?? nextDefaultName(),
     nameIsAuto: opts?.name === undefined || opts.nameIsAuto === true,
+    ...(opts?.pinned ? { pinned: true as const } : {}),
     ...(opts?.alertDelivery ? { alertDelivery: normalizeAlertDeliveryOverrides(opts.alertDelivery) } : {}),
   };
   const activeId = opts?.activate === false ? state.activeId : meta.id;
-  emit({ workspaces: [...state.workspaces, meta], activeId });
+  const workspaces = [...state.workspaces];
+  workspaces.splice(pinnedBoundary(workspaces), 0, meta);
+  emit({ workspaces, activeId });
   return meta;
 }
 
@@ -236,18 +267,38 @@ export function closeWorkspace(id: WorkspaceId): boolean {
 }
 
 /**
- * Move a Workspace to `toIndex` (clamped into range), keeping every other
- * Workspace's relative order. Returns whether the list changed. Refs are
- * stable, so a reorder renames nothing (`docs/specs/dor-cli.md` → "Handle Model").
+ * Move a Workspace to `toIndex`, clamped into its own group (unpinned or
+ * pinned), keeping every other Workspace's relative order: a reorder never pins
+ * or unpins. Returns whether the list changed. Refs are stable, so a reorder
+ * renames nothing (`docs/specs/dor-cli.md` → "Handle Model").
  */
 export function moveWorkspace(id: WorkspaceId, toIndex: number): boolean {
   const from = state.workspaces.findIndex((ws) => ws.id === id);
   if (from === -1) return false;
-  const to = Math.max(0, Math.min(state.workspaces.length - 1, Math.trunc(toIndex)));
+  const boundary = pinnedBoundary(state.workspaces);
+  const [min, max] = state.workspaces[from].pinned
+    ? [boundary, state.workspaces.length - 1]
+    : [0, boundary - 1];
+  const to = Math.max(min, Math.min(max, Math.trunc(toIndex)));
   if (from === to) return false;
   const workspaces = [...state.workspaces];
   const [moved] = workspaces.splice(from, 1);
   workspaces.splice(to, 0, moved);
+  emit({ ...state, workspaces });
+  return true;
+}
+
+/**
+ * Pin a Workspace right, or unpin it. Pinning puts it at the left edge of the
+ * pinned group; unpinning puts it at the end of the unpinned group, just left of
+ * `+` (`docs/specs/layout.md` → "Workspace tabs"). Returns whether it changed.
+ */
+export function setWorkspacePinned(id: WorkspaceId, pinned: boolean): boolean {
+  const current = getWorkspace(id);
+  if (!current || !!current.pinned === pinned) return false;
+  const { pinned: _old, ...unpinned } = current;
+  const workspaces = state.workspaces.filter((ws) => ws.id !== id);
+  workspaces.splice(pinnedBoundary(workspaces), 0, pinned ? { ...unpinned, pinned: true as const } : unpinned);
   emit({ ...state, workspaces });
   return true;
 }

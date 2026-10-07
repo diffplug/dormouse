@@ -25,7 +25,7 @@ const NOTHING: NetworkPolicy = { level: 'nothing', allowed: [], autoUpdate: fals
 const ANYWHERE: NetworkPolicy = { level: 'anywhere', allowed: [], autoUpdate: false };
 
 describe('levelsFor', () => {
-  it('offers a Hosted build Local networks and Anywhere, and a self-host build My Relay only', () => {
+  it('offers a Hosted build Local networks and Anywhere, and a self-host build `relay`', () => {
     expect(levelsFor('hosted')).toEqual(['nothing', 'local', 'anywhere']);
     expect(levelsFor('self-host')).toEqual(['nothing', 'relay']);
   });

@@ -1,7 +1,7 @@
 /**
- * Shared scaffolding for the extension-host suites. Both of them need a
- * throwaway `globalStorageUri`, a poll-with-deadline, and a way to make one
- * process behave like two VS Code windows.
+ * Shared scaffolding for the extension-host suites: a throwaway
+ * `globalStorageUri`, a poll-with-deadline, and a way to make one process
+ * behave like two VS Code windows.
  */
 
 import { vi } from 'vitest';

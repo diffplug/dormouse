@@ -51,7 +51,10 @@ jobs:
     env:
       BUILD_SHA: ${{ github.sha }}
       CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+      # Each Worker's own Hyperdrive; preflight checks each one's role.
       HYPERDRIVE_ID: ${{ vars.HYPERDRIVE_ID }}
+      RELAY_HYPERDRIVE_ID: ${{ vars.RELAY_HYPERDRIVE_ID }}
+      VOICE_HYPERDRIVE_ID: ${{ vars.VOICE_HYPERDRIVE_ID }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -66,7 +69,7 @@ jobs:
         with:
           name: hosted-production-assets
           path: hosted/dist
-      - name: Validate production identities, uncached Hyperdrive and each Worker's secrets
+      - name: Validate production identities, each Worker's uncached Hyperdrive and role, and its secrets
         run: node hosted/scripts/production.mjs preflight
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
@@ -88,12 +91,12 @@ jobs:
         run: pnpm --filter dormouse-hosted db:migrate && pnpm --filter dormouse-hosted db:validate
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-      - name: Deploy the relay and verify its rendezvous, then the voice and account Workers
+      - name: Deploy the relay and verify its readiness and rendezvous, then the voice and account Workers
         run: node hosted/scripts/production.mjs deploy
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      - name: Verify live production revisions, auth boundary and rendezvous
+      - name: Verify live production revisions, readiness, auth boundary and rendezvous
         id: live
         run: |
           node hosted/scripts/production.mjs smoke
@@ -111,11 +114,22 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: package.json
+      # GITHUB_TOKEN cannot bypass the tag rulesets. The dormouse-hosted-tagger App is a
+      # bypass actor for creating `hosted/` tags only; its token is this repository's
+      # alone, contents-write, and revoked when the job ends.
+      - name: Mint the release-tag App's token
+        id: tagger
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.HOSTED_TAG_APP_CLIENT_ID }}
+          private-key: ${{ secrets.HOSTED_TAG_APP_PRIVATE_KEY }}
+          owner: diffplug
+          repositories: dormouse
+          permission-contents: write
       - name: Record the verified Hosted deployment
         run: node hosted/scripts/production-tag.mjs
         env:
-          # GITHUB_TOKEN cannot bypass the repository's admin-only tag ruleset.
-          GH_TOKEN: ${{ secrets.HOSTED_TAG_TOKEN }}
+          GH_TOKEN: ${{ steps.tagger.outputs.token }}
           BUILD_SHA: ${{ github.sha }}
           DEPLOYMENT_VERIFIED_AT: ${{ needs.deploy.outputs.verified-at }}
           DEPLOYMENT_ID: ${{ needs.deploy.outputs.deployment-id }}

@@ -728,7 +728,7 @@ describe('burrow service glue', () => {
     // which is the proof it reached a service at all.
     expect(results(bound.posted)[0]).toMatchObject({
       burrowRequestId: 'rh-1',
-      error: expect.stringContaining('set to Nothing'),
+      error: expect.stringContaining('set to Nowhere'),
     });
   });
 

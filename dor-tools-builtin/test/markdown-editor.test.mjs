@@ -93,6 +93,8 @@ test('pasted images become new files beside the document, checked against their 
   assert.equal((await paste(viewer, 'image/svg+xml', Buffer.from('<svg/>'))).status, 415);
   assert.equal((await paste(viewer, 'image/png', JPEG)).status, 415);
   assert.equal((await paste(viewer, 'constructor', PNG)).status, 415);
+  // A CORS-safelisted type is one a foreign page could send unpreflighted.
+  for (const type of ['text/plain', 'application/x-www-form-urlencoded', 'multipart/form-data']) assert.equal((await paste(viewer, type, PNG)).status, 415, type);
   const notes = await start('notes.txt', 'plain');
   assert.equal((await paste(notes, 'image/png', PNG)).status, 404);
 });
@@ -109,6 +111,7 @@ test('image renames stay in their folder, keep an image name, and never replace 
   const viewer = await start();
   await writeFile(join(docs, 'img', 'taken.png'), PNG);
   assert.equal((await rename(viewer, 'img/a b.png', 'img/taken.png')).status, 409);
+  assert.equal((await send(viewer, route(viewer, 'rename'), { body: { from: 'img/a b.png', to: 'img/c.png' }, type: 'text/plain' })).status, 415);
   assert.equal((await rename(viewer, 'img/a b.png', 'moved.png')).status, 400);
   assert.equal((await rename(viewer, 'img/a b.png', 'img/.hidden.png')).status, 400);
   assert.equal((await rename(viewer, 'img/a b.png', 'img/notes.txt')).status, 404);

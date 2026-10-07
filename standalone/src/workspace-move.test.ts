@@ -77,7 +77,7 @@ import {
   getWorkspaceBootPlan,
   resetWorkspaceBootPlans,
 } from "dormouse-lib/components/wall/workspace-boot-plans";
-import { createWorkspace, getWorkspacesSnapshot, resetWorkspaces } from "dormouse-lib/lib/workspace-store";
+import { createWorkspace, getWorkspacesSnapshot, resetWorkspaces, setWorkspaces } from "dormouse-lib/lib/workspace-store";
 import {
   getWindowSnapshot,
   isWorkspaceTransferPending,
@@ -689,6 +689,32 @@ describe("the target half", () => {
     expect(getWorkspacesSnapshot().workspaces[0]?.id).toBe(WORKSPACE_ID);
   });
 
+  it("lands a pinned arrival in this window's pinned group, clamping the slot it names", async () => {
+    createWorkspace({ id: "ws-here", name: "Here" });
+    createWorkspace({ id: "ws-pinned", name: "Notes", pinned: true });
+    const pinnedPayload = payload();
+    arrivals = [{ ...pinnedPayload, workspace: { ...pinnedPayload.workspace, pinned: true }, index: 0 } as WorkspaceTransferPayload];
+
+    initWorkspaceMoves(fakePlatform());
+    await settle();
+
+    const workspaces = getWorkspacesSnapshot().workspaces;
+    expect(workspaces.map((w) => w.id).slice(-2)).toEqual([WORKSPACE_ID, "ws-pinned"]);
+    expect(workspaces.find((w) => w.id === WORKSPACE_ID)?.pinned).toBe(true);
+  });
+
+  it("lands a pinned arrival with no slot at the end of this window's pinned group", async () => {
+    createWorkspace({ id: "ws-here", name: "Here" });
+    createWorkspace({ id: "ws-pinned", name: "Notes", pinned: true });
+    const pinnedPayload = payload();
+    arrivals = [{ ...pinnedPayload, workspace: { ...pinnedPayload.workspace, pinned: true } }];
+
+    initWorkspaceMoves(fakePlatform());
+    await settle();
+
+    expect(getWorkspacesSnapshot().workspaces.map((w) => w.id).slice(-2)).toEqual(["ws-pinned", WORKSPACE_ID]);
+  });
+
   it("hands the Workspace back when the host never answers, rather than restarting live shells", async () => {
     // A timed-out collection is not a collection that found no PTYs: those
     // shells are still running, and a cold restore would start a second set.
@@ -857,6 +883,13 @@ describe("a torn-out window's boot", () => {
     expect(getWorkspacesSnapshot().workspaces.map((workspace) => workspace.name)).toEqual(["Deploys"]);
   });
 
+  it("keeps the torn-out Workspace's pin", async () => {
+    const pinnedPayload = payload();
+    arrivals = [{ ...pinnedPayload, workspace: { ...pinnedPayload.workspace, pinned: true } }];
+    await bootFromTearOut(fakePlatform());
+    expect(getWorkspacesSnapshot().workspaces.map((workspace) => workspace.pinned)).toEqual([true]);
+  });
+
   it("boots fresh without installing a refused tear-out or retaining its Sessions", async () => {
     const platform = fakePlatform();
     const kill = vi.spyOn(platform, "killPty");
@@ -918,8 +951,17 @@ describe("a torn-out window's boot", () => {
 /** One scan of the strip, shared by the drop index, the caret, and the tear-out
  *  grab offset (`standalone/src/workspace-tabs.ts`). */
 describe("workspaceDropTarget", () => {
+  /** The store the strip renders: its order splits the tabs into groups. */
+  function model(unpinned: string[], pinned: string[] = []): void {
+    const workspaces = [...unpinned.map((id) => ({ id, name: id, nameIsAuto: false })),
+      ...pinned.map((id) => ({ id, name: id, nameIsAuto: false, pinned: true as const }))];
+    if (workspaces.length) setWorkspaces({ workspaces, activeId: workspaces[0].id });
+    else resetWorkspaces();
+  }
+
   function strip(count: number): void {
     document.body.innerHTML = "";
+    model(Array.from({ length: count }, (_, index) => `w${index}`));
     for (let index = 0; index < count; index += 1) {
       const tab = document.createElement("div");
       tab.dataset.workspaceTab = `w${index}`;
@@ -945,7 +987,55 @@ describe("workspaceDropTarget", () => {
     // ...and, when appending, the last tab, whose right edge it goes after.
     expect(workspaceDropTarget(900).rect?.right).toBe(300);
     strip(0);
-    expect(workspaceDropTarget(10)).toEqual({ index: undefined, rect: null });
+    expect(workspaceDropTarget(10)).toEqual({ index: undefined, rect: null, edge: "left" });
+  });
+
+  /** `unpinned` tabs, then `+`, then `pinned` tabs in their group, 100px each,
+   *  in a strip ending at 1000. */
+  function grouped(unpinned: number, pinned: number): void {
+    document.body.innerHTML = "";
+    const strip = document.createElement("div");
+    strip.dataset.workspaceStrip = "";
+    strip.getBoundingClientRect = () => ({ left: 0, right: 1000, width: 1000, height: 30 }) as DOMRect;
+    document.body.append(strip);
+    model(Array.from({ length: unpinned }, (_, index) => `u${index}`), Array.from({ length: pinned }, (_, index) => `p${index}`));
+    const box = (left: number) => () => ({ left, right: left + 100, width: 100, height: 24 }) as DOMRect;
+    for (let index = 0; index < unpinned; index += 1) {
+      const tab = document.createElement("div");
+      tab.dataset.workspaceTab = `u${index}`;
+      tab.getBoundingClientRect = box(index * 100);
+      document.body.append(tab);
+    }
+    const plus = document.createElement("button");
+    plus.dataset.workspaceNew = "";
+    plus.getBoundingClientRect = () => ({ left: unpinned * 100, right: unpinned * 100 + 20, width: 20, height: 20 }) as DOMRect;
+    document.body.append(plus);
+    const group = document.createElement("div");
+    group.dataset.workspacePinnedGroup = "";
+    for (let index = 0; index < pinned; index += 1) {
+      const tab = document.createElement("div");
+      tab.dataset.workspaceTab = `p${index}`;
+      tab.getBoundingClientRect = box(unpinned * 100 + 20 + index * 100);
+      group.append(tab);
+    }
+    document.body.append(group);
+  }
+
+  it("keeps an unpinned arrival out of the pinned group, and a pinned one out of the unpinned", () => {
+    grouped(2, 2); // u0 0–100, u1 100–200, + 200–220, p0 220–320, p1 320–420
+    // Over the pinned tabs, an unpinned arrival lands after the last unpinned tab.
+    expect(workspaceDropTarget(400)).toMatchObject({ index: 2, rect: { right: 200 }, edge: "right" });
+    expect(workspaceDropTarget(10)).toMatchObject({ index: 0, rect: { left: 0 }, edge: "left" });
+    // Over the unpinned tabs, a pinned arrival lands at the pinned group's left edge.
+    expect(workspaceDropTarget(10, true)).toMatchObject({ index: 2, rect: { left: 220 }, edge: "left" });
+    expect(workspaceDropTarget(900, true)).toMatchObject({ index: undefined, rect: { right: 420 }, edge: "right" });
+  });
+
+  it("puts the caret at the strip's right end for the first pinned tab, and at its start for the first unpinned", () => {
+    grouped(2, 0);
+    expect(workspaceDropTarget(10, true)).toMatchObject({ index: undefined, rect: { right: 1000 }, edge: "right" });
+    grouped(0, 2);
+    expect(workspaceDropTarget(400)).toMatchObject({ index: 0, rect: { left: 0 }, edge: "left" });
   });
 
   it("finds one Workspace's own tab, and answers null for one not rendered", () => {

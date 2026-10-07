@@ -18,6 +18,8 @@ An earlier step guarantees `$AUDIT_PAT` is present; `docs/specs/security-audit.m
 
 When run by `scripts/security-audit-local.sh` without `AUDIT_PAT`, use the operator's existing `gh` authentication without a `GH_TOKEN=` override. Report an inaccessible check as `UNVERIFIABLE`; local credentials are not evidence about the CI PAT's scope.
 
+You hold no credential for the private tracker `docs/specs/security-audit.md` -> "Embargo" files to, and need none: read that section's checks from the workflow, the scripts it names, and the unauthenticated `curl` the rule gives.
+
 **Check effective permissions, not declared ones**, as `docs/specs/security-ci.md` -> "Automated Maintainer (tend)" defines them. Read `actions/permissions/workflow` before judging any inherited-permission check.
 
 **Derive every inventory from the live API, never from the spec's own list.** A `FAIL IF` that says "any" quantifies over what exists now; illustrative `Today:` lists do not limit its scope.
@@ -35,6 +37,6 @@ When run by `scripts/security-audit-local.sh` without `AUDIT_PAT`, use the opera
 
 ## Qualitative pass
 
-You own `.github/` (including `.github/audit/`, which holds this audit's own prompts), `.config/`, `.claude/`, `.vscode/`, `scripts/`, and `website/public/` — the Tauri updater manifest shipped apps fetch lives there, so it is a release artifact rather than marketing. You also own any code anywhere that touches a secret.
+You own `.github/` (including `.github/audit/`, which holds this audit's own prompts), `.config/`, `.claude/`, `.vscode/`, `scripts/`, and `website/public/` — the Tauri updater manifest shipped apps fetch lives there, so it is a release artifact rather than marketing. You also own three root files that configure code a maintainer's checkout runs: `dormouse.yml`, whose `tools.*.run` commands `dor tool` launches; `install_skills.sh`, which fetches the agent skills `skills-lock.json` names into the untracked `.agents/skills/` and links them into `.claude/commands/`; and `skills-lock.json` itself. You also own any code anywhere that touches a secret.
 
 `.vscode/` is here rather than with the product code because it is configuration that can execute: a `tasks.json` entry with `"runOn": "folderOpen"` runs on checkout when a maintainer opens the folder, which is the same shape of persistence `workflow-audit.yaml` watches workflows for. There is no such task today; the point is that adding one should be a finding, not a quiet config change.

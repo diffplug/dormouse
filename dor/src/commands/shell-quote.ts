@@ -42,10 +42,14 @@ export function buildShellCommandForKind(kind: ShellCommandKind, args: readonly 
   }
 }
 
-function quotePosixArg(arg: string): string {
+/** Single-quoted, with each `'` and `\` stepped outside the quotes: fish reads
+ *  `\'` and `\\` as escapes even inside single quotes, so `'a\'` would not close.
+ *  Also what the webview's paste path uses for a path backslash-escaping cannot
+ *  carry (`shellEscapePosix`). */
+export function quotePosixArg(arg: string): string {
   if (arg === '') return "''";
   if (POSIX_SAFE_ARG.test(arg)) return arg;
-  return `'${arg.replace(/'/g, "'\\''")}'`;
+  return `'${arg.replace(/['\\]/g, (c) => `'\\${c}'`)}'`;
 }
 
 function quotePowerShellCommand(args: readonly string[]): string {
@@ -56,13 +60,19 @@ function quotePowerShellCommand(args: readonly string[]): string {
   return `${commandPrefix}${[quotedCommand, ...rest.map(quotePowerShellArg)].join(' ')}`;
 }
 
+/** Every character PowerShell reads as a single quote: `'` and U+2018–U+201B.
+ *  `standalone/sidecar/clipboard-ops.js` and `standalone/scripts/clean-dev-sidecar.mjs`
+ *  keep copies; neither can import this module. */
+const POWERSHELL_SINGLE_QUOTES = /['\u2018-\u201b]/g;
+
 /** PowerShell single-quoted strings are literal — no `$(...)` subexpression and
  *  no `$name` interpolation — so this is also what the webview's drop/paste
- *  path uses to quote a file path for a PowerShell pane (`shellEscapePath`). */
+ *  path uses to quote a file path for a PowerShell pane (`shellEscapePath`).
+ *  Each quote character is doubled, as `EscapeSingleQuotedStringContent` does. */
 export function quotePowerShellArg(arg: string): string {
   if (arg === '') return "''";
   if (WINDOWS_SAFE_ARG.test(arg)) return arg;
-  return `'${arg.replace(/'/g, "''")}'`;
+  return `'${arg.replace(POWERSHELL_SINGLE_QUOTES, (c) => c + c)}'`;
 }
 
 function quoteCmdArg(arg: string): string {

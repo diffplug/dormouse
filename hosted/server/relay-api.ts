@@ -267,7 +267,13 @@ export function relayApiRoutes(app: Hono<{ Bindings: RelayEnv }>) {
             409,
           );
         registered = true;
-        const res: SetupFinishResponse = { accountId: spent.userId, credentialId };
+        // Registering signs in too; `consumeSetupToken` refused an owner not
+        // entitled, so no session is minted for one.
+        const res: SetupFinishResponse = {
+          ...(await mintSession(db, spent.userId)),
+          accountId: spent.userId,
+          credentialId,
+        };
         return c.json(res);
       } finally {
         if (!registered) await restoreSetupToken(db, token, spent);
@@ -321,18 +327,9 @@ export function relayApiRoutes(app: Hono<{ Bindings: RelayEnv }>) {
       const { userId, entitled, publicKey } = verdict.passkey;
       // A session is never minted for an account that is not entitled.
       if (!entitled) return c.json({ error: NOT_ENTITLED_ERROR }, 401);
-      const sessionToken = randomBase64Url(RELAY_BEARER_BYTE_LENGTH);
-      const expiresAt = await admit(
-        db,
-        SESSIONS,
-        userId,
-        { tokenHash: digest(sessionToken), userId },
-        RELAY_SESSION_TTL_MS,
-      );
       const res: SigninFinishResponse = {
-        sessionToken,
+        ...(await mintSession(db, userId)),
         accountId: userId,
-        expiresAt: expiresAt!,
         passkeyPublicKey: publicKey,
       };
       return c.json(res);
@@ -677,6 +674,19 @@ export async function admit(
     );
     return rows[0]?.expiresAt;
   });
+}
+
+/** A fresh session for `userId`, within its account's cap. */
+async function mintSession(db: Client, userId: string) {
+  const sessionToken = randomBase64Url(RELAY_BEARER_BYTE_LENGTH);
+  const expiresAt = await admit(
+    db,
+    SESSIONS,
+    userId,
+    { tokenHash: digest(sessionToken), userId },
+    RELAY_SESSION_TTL_MS,
+  );
+  return { sessionToken, expiresAt: expiresAt! };
 }
 
 /** A setup token of the minted shape from a request body, or null. */

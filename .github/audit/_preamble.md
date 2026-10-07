@@ -22,7 +22,13 @@ Write your findings to the file named in your own prompt, and write them **as yo
 printf 'VERDICT: INCONCLUSIVE\n\n### FAIL IF results\n\n' > <your fragment>
 ```
 
-Then append each check's line as you determine it, and each finding as you rate it, under `### FAIL IF results` (one line per check) and `### Qualitative findings` (severity-tagged). **Append; never rewrite the file whole.** What is in that file is the whole of what the audit publishes from you: run 35205193090's `application-security` domain had every one of its work streams reported and lost all of them, because it was holding them for a final write-up it never reached.
+Then append each check's line as you determine it, and each finding as you rate it, under `### FAIL IF results` (one line per check) and `### Qualitative findings` (severity-tagged). Write each check as `- PASS:`, `- FAIL:`, or `- UNVERIFIABLE:`, then the spec and the heading the `FAIL IF` sits under, verbatim, then the clause and its evidence:
+
+```
+- FAIL: `docs/specs/security-ci.md` -> "GitHub Actions Policies" — <clause>: <evidence>
+```
+
+Write each finding as `- BLOCKER:`, `- WARNING:`, or `- INFO:` followed by the finding. The public issue names a failed check only by that spec and heading, and only when the heading exists in the spec, and counts findings by those tags; everything else you write is filed privately until fixed. **Append; never rewrite the file whole.** What is in that file is the whole of what the audit publishes from you: run 35205193090's `application-security` domain had every one of its work streams reported and lost all of them, because it was holding them for a final write-up it never reached.
 
 **Its very first line must be literally `VERDICT: PASS`, `VERDICT: FAIL`, or `VERDICT: INCONCLUSIVE`** — nothing else on that line. The reporting step reads it, so it is the one part of your report a machine reads: a `FAIL` there cannot be lost in a merge, and it is what stops an optimistic summary from overriding you. It opens as `INCONCLUSIVE` so a fragment you never finish fails closed on its own. Rewrite that one line at the end, with Edit rather than `sed -i` (whose in-place flag differs between GNU and BSD), then close the file:
 
@@ -62,4 +68,6 @@ echo "$ANSWER"
 
 Never substitute a bare `sleep` — the harness blocks it; the `until` loop above is the sanctioned form. Run 35327271988's `application-security` domain backgrounded its own wait loop, said it was holding for four outstanding work streams, and ended its turn at 09:11:56. All four finished by 09:19:29, fourteen minutes inside the deadline, and none of their results reached the report.
 
-Never print a secret value. `$AUDIT_PAT` is passed only as an unexpanded `GH_TOKEN=` prefix; do not echo it, do not run `printenv` or `set -x`, and do not paste the contents of any credential file into your report — report its mode and location instead. This repository is public and both your report and the SDK transcript are world-readable.
+Never print a secret value. `$AUDIT_PAT` is passed only as an unexpanded `GH_TOKEN=` prefix; do not echo it, do not run `printenv` or `set -x`, and do not paste the contents of any credential file into your report — report its mode and location instead. Your report is filed in a private tracker and the SDK transcript is archived encrypted, but a secret in either is still a leaked secret.
+
+Never create, edit, or comment on an issue or pull request, in any repository. The workflow files your report, privately, after you finish; anything you post yourself lands in public.

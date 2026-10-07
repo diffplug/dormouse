@@ -15,6 +15,7 @@ function api(path, method = "GET", body) {
 }
 // Reviewed preview code can receive only dedicated test credentials. Production and tag
 // identities additionally require main, preserving the repository's admin-only merge gate.
+// The tag job needs the approved deploy, so its environment asks for no second review.
 const reviewers = [
   { type: "User", id: 2924992 },
   { type: "User", id: 68454991 },
@@ -25,7 +26,7 @@ for (const name of [
   "hosted-release-tag",
 ]) {
   api(`environments/${name}`, "PUT", {
-    reviewers,
+    reviewers: name === "hosted-release-tag" ? [] : reviewers,
     prevent_self_review: false,
     can_admins_bypass: false,
     deployment_branch_policy: {

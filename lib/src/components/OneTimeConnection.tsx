@@ -37,9 +37,9 @@ import { phoneOnAnyNetwork } from '../remote/network-policy';
 const UNAVAILABLE_COPY: Record<OneTimeUnavailableReason, string> = {
   'self-host':
     `Not available in a self-host build: one-time links are made at ${hostOf(DEFAULT_RELAY_ORIGIN)}, ` +
-    'which this build never contacts.',
+    'which this build reaches only through a link you click.',
   'network-off':
-    'Off while Settings → Network is set to Nothing: this computer opens no connections on its own.',
+    'Off while Settings → Network is set to Nowhere: this computer opens no connections on its own.',
 };
 
 /**

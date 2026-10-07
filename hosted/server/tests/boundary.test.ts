@@ -178,7 +178,7 @@ test.for(NAMES)(
       `http://${new URL(ORIGINS[name]).host}`,
     ];
     for (const origin of foreign)
-      for (const [method, path] of [...SERVED[name], ["GET", "/api/health"]]) {
+      for (const [method, path] of [...SERVED[name], ["GET", "/api/health"], ["GET", "/api/ready"]]) {
         const response = await send(name, origin + path, method);
         expect(response.status, `${method} ${origin}${path}`).toBe(421);
       }
@@ -200,7 +200,6 @@ const ABSENT: Record<Name, [string, string][]> = {
     ["GET", "/api/auth/get-session"],
     ["POST", "/api/auth/sign-out"],
     ["GET", "/api/providers"],
-    ["GET", "/api/ready"],
     ["GET", "/api/voice/tokens"],
     ["POST", "/api/voice/tokens"],
     ["DELETE", "/api/voice/tokens/00000000-0000-4000-8000-000000000000"],
@@ -217,7 +216,6 @@ const ABSENT: Record<Name, [string, string][]> = {
     ["GET", "/api/auth/csrf"],
     ["GET", "/api/auth/get-session"],
     ["GET", "/api/providers"],
-    ["GET", "/api/ready"],
     ["GET", "/api/voice/tokens"],
     ["POST", "/api/voice/tokens"],
     ["GET", "/api/voice/speak"],
@@ -251,6 +249,21 @@ test("the account answers /connect/ with its own shell and policy, never the pho
       ACCOUNT_POLICY,
     );
   }
+});
+
+test("readiness without a database binding is down, saying nothing more", async () => {
+  const app = workerApp({
+    bindings: (env) => env,
+    rules: relayRules,
+    ready: "SELECT 1 LIMIT 0",
+    unavailable: "unavailable",
+    routes: () => {},
+  });
+  const response = await app.fetch(new Request(ORIGINS.relay + "/api/ready"), {
+    APP_ORIGIN: ORIGINS.relay,
+  });
+  expect(response.status).toBe(503);
+  expect(await response.json()).toEqual({ ok: false });
 });
 
 test("each Worker caches only its own hashed assets as immutable", async () => {
@@ -494,6 +507,58 @@ test("the relay bundle reads no cookie and never asks auth", () => {
   }
   // The pattern finds it where it is.
   expect(readFileSync("server/account-gate.ts", "utf8")).toMatch(/["'`]cookie["'`]/);
+});
+
+/** Every state-changing Better Auth route the packed adapter admits. */
+const AUTH_WRITES = [
+  "/email-otp/send-verification-otp",
+  "/sign-in/email-otp",
+  "/sign-in/social",
+  "/link-social",
+  "/sign-out",
+];
+
+test("an auth write carrying the login cookie needs the account's own Origin and the CSRF token", async () => {
+  // `/api/auth/*` goes straight to the packed adapter (`accountApp`), so its
+  // gate is the one between another site and the victim's login. Each refusal
+  // comes before Better Auth runs, so none reaches the database.
+  const account = ORIGINS.account;
+  const issued = await send("account", account + "/api/auth/csrf");
+  const csrfCookie = issued.headers.get("set-cookie")!.split(";")[0]!;
+  expect(csrfCookie).toMatch(/^__Host-pgstencil\.csrf=/);
+  const { csrf } = (await issued.json()) as { csrf: string };
+  const post = (path: string, headers: Record<string, string>) =>
+    workers.account.dispatchFetch(`${account}/api/auth${path}`, {
+      method: "POST",
+      redirect: "manual",
+      headers: {
+        cookie: `__Host-pgstencil.session_token=victim; ${csrfCookie}`,
+        "content-type": "application/json",
+        ...headers,
+      },
+      body: "{}",
+    });
+  const foreign = [
+    ...NAMES.filter((name) => name !== "account").map((name) => ORIGINS[name]),
+    "https://dormouse.sh",
+    "https://attacker.example",
+    "null",
+  ];
+  for (const path of AUTH_WRITES) {
+    for (const origin of foreign)
+      expect((await post(path, { origin, "x-csrf-token": csrf })).status, `${origin} ${path}`).toBe(403);
+    expect((await post(path, { "x-csrf-token": csrf })).status, `no Origin ${path}`).toBe(403);
+    expect((await post(path, { origin: account })).status, `no token ${path}`).toBe(403);
+    expect((await post(path, { origin: account, "x-csrf-token": "0".repeat(64) })).status, `wrong token ${path}`).toBe(403);
+    // A CORS-safelisted type is what a form or an unpreflighted fetch could send.
+    for (const type of ["text/plain", "application/x-www-form-urlencoded", "multipart/form-data"])
+      expect((await post(path, { origin: account, "x-csrf-token": csrf, "content-type": type })).status, `${type} ${path}`).toBe(415);
+    expect((await send("account", `${account}/api/auth${path}`)).status, `GET ${path}`).toBe(404);
+  }
+  // Better Auth's other state-changing endpoints are not served at all.
+  for (const path of ["/update-user", "/delete-user", "/change-email", "/unlink-account", "/revoke-session", "/revoke-sessions", "/revoke-other-sessions", "/sign-in/email", "/sign-up/email"])
+    expect((await post(path, { origin: account, "x-csrf-token": csrf })).status, path).toBe(404);
+  expect(outbound).toEqual([]);
 });
 
 test("the cookie gate refuses a presented foreign Origin on every method", async () => {

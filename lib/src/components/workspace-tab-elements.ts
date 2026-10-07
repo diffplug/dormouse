@@ -1,6 +1,14 @@
-/** The strip itself, whose bounds a pane drag over the tabs claims. */
+/** The strip itself: the whole span the host gives it, its empty space
+ *  included. */
 export function workspaceStripElement(): HTMLElement | null {
   return document.querySelector('[data-workspace-strip]');
+}
+
+/** The strip's tab areas — the scrolling tabs with `+`, and the pinned group —
+ *  whose bounds a pane drag over the tabs claims. The empty title-bar space
+ *  between them belongs to the host. */
+export function workspaceStripAreas(): HTMLElement[] {
+  return [...document.querySelectorAll<HTMLElement>('[data-workspace-strip-area]')];
 }
 
 /** Every Workspace tab in strip order. The strip renders outside every Wall, so
