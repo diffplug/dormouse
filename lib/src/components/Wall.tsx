@@ -297,7 +297,7 @@ export function Wall({
   enableBurrow?: boolean;
   /**
    * The Workspace this Wall renders. Absent means the host mounts one Wall for
-   * the whole page (VS Code, the website playground): it still registers a
+   * the whole page (VS Code): it still registers a
    * handle, under `DEFAULT_WORKSPACE_ID`, so the `dor` router always finds it.
    */
   workspaceId?: WorkspaceId;

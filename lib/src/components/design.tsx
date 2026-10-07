@@ -87,6 +87,22 @@ export const ALERT_RING_INSET_BY_GROUND: Record<AlertRingGround, string> = {
 // together so a palette change can't move one endpoint without the other.
 export const TAB_WALL_JOIN_GRADIENT = 'linear-gradient(to bottom, var(--color-header-active-bg), var(--color-app-bg))';
 
+/** The title bar a Workspace strip rests in: the standalone AppBar and the
+ *  website playground's. The Wall begins a `PANE_GUTTER_PX` join band below. */
+export const APP_BAR_HEIGHT_PX = 30;
+
+/** The join band under a title bar, over the Wall's top gutter. The bar must
+ *  be its positioned ancestor. */
+export function TabWallJoin() {
+  return (
+    <div
+      aria-hidden="true"
+      className="pointer-events-none absolute inset-x-0 top-full z-10"
+      style={{ height: PANE_GUTTER_PX, backgroundImage: TAB_WALL_JOIN_GRADIENT }}
+    />
+  );
+}
+
 // The inactive tab's fade, starting at 70% of the 24px tab — just below the
 // label's baseline — and ending at 70% app background, i.e. a 30/70 sRGB mix
 // with the header color under it. Deliberately TRANSLUCENT rather than a
