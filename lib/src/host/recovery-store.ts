@@ -13,6 +13,7 @@
 import { randomUUID } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { normalizeResumeCommand } from '../lib/resume-patterns';
 import { noCommands, silent, type RecoveryLog } from './recovery-capture';
 
 const FILE_NAME = 'recovery.json';
@@ -20,6 +21,10 @@ const FILE_NAME = 'recovery.json';
 /** How long a record stays offerable. One cold start consumes it; this only
  *  bounds a host that never comes back. */
 export const RECOVERY_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+
+/** How far ahead of this clock a record may be dated: a clock stepped back
+ *  between teardown and start, not a record from the future. */
+export const RECOVERY_CLOCK_SKEW_MS = 5 * 60 * 1000;
 
 interface PersistedRecovery {
   createdAt: number;
@@ -155,15 +160,20 @@ function readAndClearRecord(file: string, log: RecoveryLog): Record<string, stri
   }
   if (!recovery) return noCommands();
 
-  const age = Date.now() - (recovery.createdAt ?? 0);
-  if (age > RECOVERY_MAX_AGE_MS) {
-    log.info(`[recovery] discarding record ${Math.round(age / 86_400_000)}d old`);
+  // Written as the window it must fall in, so a missing or non-numeric date
+  // (whose age is NaN, false against any bound) fails it too.
+  const createdAt: unknown = recovery.createdAt;
+  const age = typeof createdAt === 'number' ? Date.now() - createdAt : NaN;
+  if (!(age <= RECOVERY_MAX_AGE_MS && age >= -RECOVERY_CLOCK_SKEW_MS)) {
+    log.info(`[recovery] discarding record created at ${String(createdAt)}`);
     return noCommands();
   }
 
   // Shape-guard every entry. This file is plain JSON on disk and its values end up
   // typed into a shell, so a torn or hand-edited record must fail as one dropped
-  // entry rather than as something later code has to survive.
+  // entry rather than as something later code has to survive. The restore
+  // revalidates again before typing; this keeps anything that is not a known
+  // resume invocation from leaving the host at all.
   const raw: unknown = recovery.commands;
   const commands: Record<string, string> = noCommands();
   if (raw && typeof raw === 'object') {
@@ -172,7 +182,12 @@ function readAndClearRecord(file: string, log: RecoveryLog): Record<string, stri
         log.error(`[recovery] dropping ${id}: expected a string, got ${typeof command}`);
         continue;
       }
-      commands[id] = command;
+      const normalized = normalizeResumeCommand(command);
+      if (normalized === null) {
+        log.error(`[recovery] dropping ${id}: not a recognized resume invocation`);
+        continue;
+      }
+      commands[id] = normalized;
     }
   }
   log.info(`[recovery] read ${Object.keys(commands).length} command(s) from the record`);

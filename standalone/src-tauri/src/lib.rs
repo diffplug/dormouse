@@ -18,6 +18,7 @@ use routing::{Route, RouteView};
 use std::{
     collections::{HashMap, HashSet},
     env,
+    ffi::OsString,
     fs::{create_dir_all, File, OpenOptions},
     io::{BufRead, BufReader, Write},
     path::{Path, PathBuf},
@@ -886,6 +887,10 @@ fn pty_reap_message(ids: &[String]) -> String {
 
 const LOG_FILE_ENV: &str = "DORMOUSE_LOG_FILE";
 
+/// The Windows log directory's `Dormouse Terminal` in Linux's lowercase form,
+/// as the Relay's `Dormouse Relay` logs go to `dormouse-relay` there.
+const LINUX_LOG_DIR_NAME: &str = "dormouse-terminal";
+
 fn log_timestamp() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -893,24 +898,92 @@ fn log_timestamp() -> u64 {
         .unwrap_or_default()
 }
 
-fn default_log_path() -> PathBuf {
+struct LogLocation {
+    path: PathBuf,
+    /// The directory is Dormouse's own, so it is created and kept owner-only;
+    /// an override's or the OS's directory is left as it is.
+    own_dir: bool,
+}
+
+/// Linux's per-user log directory: `$XDG_STATE_HOME`, else `~/.local/state`,
+/// each used only when absolute (the XDG rule). `None` only with neither set.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn linux_log_dir(xdg_state_home: Option<OsString>, home: Option<OsString>) -> Option<PathBuf> {
+    let absolute = |value: Option<OsString>| value.map(PathBuf::from).filter(|path| path.is_absolute());
+    absolute(xdg_state_home)
+        .or_else(|| absolute(home).map(|home| home.join(".local").join("state")))
+        .map(|dir| dir.join(LINUX_LOG_DIR_NAME))
+}
+
+fn default_log_location() -> LogLocation {
     if let Some(path) = env::var_os(LOG_FILE_ENV) {
-        return PathBuf::from(path);
+        return LogLocation { path: PathBuf::from(path), own_dir: false };
     }
 
     #[cfg(target_os = "windows")]
     if let Some(local_app_data) = env::var_os("LOCALAPPDATA") {
-        return PathBuf::from(local_app_data)
-            .join("Dormouse Terminal")
-            .join("dormouse.log");
+        return LogLocation {
+            path: PathBuf::from(local_app_data)
+                .join("Dormouse Terminal")
+                .join("dormouse.log"),
+            own_dir: false,
+        };
     }
 
-    env::temp_dir().join("dormouse.log")
+    // Never Linux's `/tmp`: it is shared, so another account could plant the name.
+    #[cfg(target_os = "linux")]
+    if let Some(dir) = linux_log_dir(env::var_os("XDG_STATE_HOME"), env::var_os("HOME")) {
+        return LogLocation { path: dir.join("dormouse.log"), own_dir: true };
+    }
+
+    // macOS's `$TMPDIR` is per-user and `0700`.
+    LogLocation { path: env::temp_dir().join("dormouse.log"), own_dir: false }
+}
+
+fn log_location() -> &'static LogLocation {
+    static LOCATION: OnceLock<LogLocation> = OnceLock::new();
+    LOCATION.get_or_init(default_log_location)
 }
 
 fn log_path() -> &'static Path {
-    static PATH: OnceLock<PathBuf> = OnceLock::new();
-    PATH.get_or_init(default_log_path)
+    &log_location().path
+}
+
+/// Create the log's directory; one that is Dormouse's own is also tightened to
+/// owner-only, and `false` (log nothing) when that fails.
+fn prepare_log_dir(path: &Path, own_dir: bool) -> bool {
+    let Some(dir) = path.parent() else { return true };
+    if !own_dir {
+        let _ = create_dir_all(dir);
+        return true;
+    }
+    let mut builder = std::fs::DirBuilder::new();
+    builder.recursive(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        builder.mode(0o700);
+    }
+    builder.create(dir).is_ok() && restrict_to_owner(dir, 0o700).is_ok()
+}
+
+/// Open a log handle owner-only. On unix it never follows a symlink at `path`,
+/// and it refuses a file another account owns, which it cannot `fchmod`.
+fn open_log(path: &Path, options: &mut OpenOptions) -> std::io::Result<File> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+        let file = options.mode(0o600).custom_flags(libc::O_NOFOLLOW).open(path)?;
+        // An existing file keeps its mode through `open`; this tightens it.
+        file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+        Ok(file)
+    }
+    #[cfg(not(unix))]
+    {
+        let file = options.open(path)?;
+        restrict_to_owner(path, 0o600).map_err(std::io::Error::other)?;
+        Ok(file)
+    }
 }
 
 // `append_log` runs per stdout/stderr line from the sidecar; reopening
@@ -919,14 +992,11 @@ fn log_path() -> &'static Path {
 fn log_file() -> Option<&'static Mutex<File>> {
     static FILE: OnceLock<Option<Mutex<File>>> = OnceLock::new();
     FILE.get_or_init(|| {
-        let path = log_path();
-        if let Some(parent) = path.parent() {
-            let _ = create_dir_all(parent);
+        let location = log_location();
+        if !prepare_log_dir(&location.path, location.own_dir) {
+            return None;
         }
-        OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(path)
+        open_log(&location.path, OpenOptions::new().create(true).append(true))
             .ok()
             .map(Mutex::new)
     })
@@ -934,20 +1004,17 @@ fn log_file() -> Option<&'static Mutex<File>> {
 }
 
 fn init_log() {
-    let path = log_path();
-    if let Some(parent) = path.parent() {
-        let _ = create_dir_all(parent);
+    let location = log_location();
+    let path = location.path.as_path();
+    if !prepare_log_dir(path, location.own_dir) {
+        return;
     }
     // Keep the last run's log beside it, so a hang or forced restart leaves its
-    // evidence; a missing log (first launch) is fine.
+    // evidence; a missing log (first launch) is fine. `rename` moves a symlink
+    // itself, never its target.
     let _ = std::fs::rename(path, path.with_extension("previous.log"));
 
-    if let Ok(mut file) = OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(true)
-        .open(path)
-    {
+    if let Ok(mut file) = open_log(path, OpenOptions::new().create(true).write(true).truncate(true)) {
         let _ = writeln!(
             file,
             "[{}] Dormouse log started at {}",
@@ -5764,6 +5831,127 @@ mod tests {
         let body = src.split("fn restart_hung_webviews(").nth(1).unwrap().split("\n}").next().unwrap();
         assert!(body.contains("write_owner_only_with(&path, restrict_to_owner,"));
         assert!(!body.contains("create_dir_all("));
+    }
+
+    /// Linux keeps the log in a per-user state directory, never the shared
+    /// temp directory (docs/specs/standalone.md -> "Logging").
+    #[test]
+    fn linux_log_dir_is_per_user_state() {
+        use std::ffi::OsString;
+        let some = |value: &str| Some(OsString::from(value));
+        assert_eq!(
+            super::linux_log_dir(some("/xdg/state"), some("/home/me")),
+            Some(PathBuf::from("/xdg/state/dormouse-terminal"))
+        );
+        // A relative XDG value is ignored, as the XDG spec requires.
+        assert_eq!(
+            super::linux_log_dir(some("relative"), some("/home/me")),
+            Some(PathBuf::from("/home/me/.local/state/dormouse-terminal"))
+        );
+        assert_eq!(
+            super::linux_log_dir(None, some("/home/me")),
+            Some(PathBuf::from("/home/me/.local/state/dormouse-terminal"))
+        );
+        assert_eq!(super::linux_log_dir(None, some("relative")), None);
+        assert_eq!(super::linux_log_dir(None, None), None);
+    }
+
+    /// The Linux default is wired to that directory, not the temp directory.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_default_log_location_is_not_the_temp_directory() {
+        if std::env::var_os(super::LOG_FILE_ENV).is_some() {
+            return;
+        }
+        let location = super::default_log_location();
+        let dir = super::linux_log_dir(std::env::var_os("XDG_STATE_HOME"), std::env::var_os("HOME"))
+            .expect("HOME is set under cargo test");
+        assert_eq!(location.path, dir.join("dormouse.log"));
+        assert!(location.own_dir);
+    }
+
+    /// Windows has no mode, so the log gets the owner-only DACL instead of
+    /// whatever its directory hands down.
+    #[cfg(windows)]
+    #[test]
+    fn log_open_protects_the_dacl_on_windows() {
+        use std::os::windows::ffi::OsStrExt;
+        use windows::core::PCWSTR;
+        use windows::Win32::Foundation::{LocalFree, ERROR_SUCCESS, HLOCAL};
+        use windows::Win32::Security::Authorization::{GetNamedSecurityInfoW, SE_FILE_OBJECT};
+        use windows::Win32::Security::{
+            GetSecurityDescriptorControl, ACL, DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR,
+            SE_DACL_PROTECTED,
+        };
+
+        let dir = TempDir::new("log-acl");
+        let path = dir.path().join("dormouse.log");
+        super::open_log(&path, fs::OpenOptions::new().create(true).append(true)).unwrap();
+
+        let wide: Vec<u16> = path.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+        unsafe {
+            let mut dacl: *mut ACL = std::ptr::null_mut();
+            let mut sd = PSECURITY_DESCRIPTOR::default();
+            let rc = GetNamedSecurityInfoW(
+                PCWSTR(wide.as_ptr()),
+                SE_FILE_OBJECT,
+                DACL_SECURITY_INFORMATION,
+                None,
+                None,
+                Some(&mut dacl),
+                None,
+                &mut sd,
+            );
+            assert_eq!(rc, ERROR_SUCCESS, "GetNamedSecurityInfoW failed");
+            let mut control: u16 = 0;
+            let mut revision = 0u32;
+            GetSecurityDescriptorControl(sd, &mut control, &mut revision)
+                .expect("GetSecurityDescriptorControl failed");
+            let _ = LocalFree(Some(HLOCAL(sd.0)));
+            assert!(control & SE_DACL_PROTECTED.0 != 0, "the log inherits its DACL");
+        }
+    }
+
+    /// The log's own directory is owner-only, and so is the file, whether new
+    /// or left loose by an earlier run (docs/specs/security-local.md ->
+    /// "Persisted state").
+    #[cfg(unix)]
+    #[test]
+    fn log_file_and_its_own_directory_are_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = |path: &Path| fs::metadata(path).unwrap().permissions().mode() & 0o777;
+        let root = TempDir::new("log-owner-only");
+        let dir = root.path().join("state");
+        fs::create_dir(&dir).unwrap();
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o755)).unwrap();
+        let path = dir.join("dormouse.log");
+        assert!(super::prepare_log_dir(&path, true));
+        assert_eq!(mode(&dir), 0o700);
+
+        fs::write(&path, b"old").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o666)).unwrap();
+        super::open_log(&path, fs::OpenOptions::new().create(true).append(true)).unwrap();
+        assert_eq!(mode(&path), 0o600);
+
+        let fresh = dir.join("fresh.log");
+        super::open_log(&fresh, fs::OpenOptions::new().create(true).write(true).truncate(true)).unwrap();
+        assert_eq!(mode(&fresh), 0o600);
+    }
+
+    /// A symlink planted at the log's name is refused by both opens, so neither
+    /// truncates nor appends to whatever it points at.
+    #[cfg(unix)]
+    #[test]
+    fn log_open_refuses_a_planted_symlink() {
+        let root = TempDir::new("log-symlink");
+        let victim = root.path().join("victim");
+        fs::write(&victim, b"keep").unwrap();
+        let path = root.path().join("dormouse.log");
+        std::os::unix::fs::symlink(&victim, &path).unwrap();
+
+        assert!(super::open_log(&path, fs::OpenOptions::new().create(true).write(true).truncate(true)).is_err());
+        assert!(super::open_log(&path, fs::OpenOptions::new().create(true).append(true)).is_err());
+        assert_eq!(fs::read(&victim).unwrap(), b"keep");
     }
 
     #[cfg(unix)]

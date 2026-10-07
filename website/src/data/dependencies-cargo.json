@@ -11,6 +11,16 @@
       ]
     },
     {
+      "name": "libc",
+      "license": "MIT OR Apache-2.0",
+      "author": "The Rust Project Developers",
+      "homepage": "https://github.com/rust-lang/libc",
+      "declaredName": "libc",
+      "versions": [
+        "0.2.190"
+      ]
+    },
+    {
       "name": "objc2",
       "license": "MIT",
       "author": "Mads Marquart <mads@marquart.dk>",
@@ -1560,15 +1570,6 @@
       "homepage": "https://github.com/tauri-apps/libappindicator-rs",
       "versions": [
         "0.9.0"
-      ]
-    },
-    {
-      "name": "libc",
-      "license": "MIT OR Apache-2.0",
-      "author": "The Rust Project Developers",
-      "homepage": "https://github.com/rust-lang/libc",
-      "versions": [
-        "0.2.190"
       ]
     },
     {
