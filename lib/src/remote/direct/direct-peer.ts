@@ -95,12 +95,15 @@ export interface DirectSctpLike {
    */
   readonly transport?: {
     readonly iceTransport?: {
-      getSelectedCandidatePair?(): {
-        readonly local?: DirectCandidateLike;
-        readonly remote?: DirectCandidateLike;
-      } | null;
+      getSelectedCandidatePair?(): DirectCandidatePairLike | null;
     };
   };
+}
+
+/** A selected candidate pair, as either read in {@link DirectPeerLike} reports it. */
+export interface DirectCandidatePairLike {
+  readonly local?: DirectCandidateLike;
+  readonly remote?: DirectCandidateLike;
 }
 
 /** The subset of `RTCPeerConnection` one negotiation needs. */
@@ -115,6 +118,14 @@ export interface DirectPeerLike {
   /** Null until the association exists; see {@link DirectSctpLike}. */
   readonly sctp: DirectSctpLike | null;
   readonly connectionState: string;
+  /**
+   * `node-datachannel`'s polyfill only: the native `PeerConnection`'s selected
+   * pair, each end's `address` read straight from the ICE agent. Read in place
+   * of the transport's, which rebuilds each end as an `RTCIceCandidate` whose
+   * constructor throws on a candidate with no mid — a pair the agent may still
+   * be sending on. A browser has none, and holds no path policy.
+   */
+  selectedCandidatePair?(): DirectCandidatePairLike | null;
   addEventListener(type: string, handler: (ev: unknown) => void): void;
   close(): void;
 }
@@ -186,6 +197,15 @@ function shownAddress(address: string | null): string | null {
   const unmapped = address?.replace(/^::ffff:(?=\d+\.\d+\.\d+\.\d+$)/i, '') ?? null;
   return isIpLiteral(unmapped) ? unmapped : null;
 }
+
+/** One end's address as a pair read reports it, or `null` where it gives no string. */
+function addressOf(candidate: DirectCandidateLike | undefined): string | null {
+  const address = candidate?.address;
+  return typeof address === 'string' ? address : null;
+}
+
+/** A selected pair whose read threw: refused, never read as no pair. */
+const UNREADABLE_PAIR = 'unreadable';
 
 /**
  * What a Burrow whose network policy restricts the direct path holds one
@@ -774,15 +794,17 @@ export class DirectPeer {
    * Check the path again while the channel is open and the connection reports
    * `connected` — on a state change, and every {@link DIRECT_PATH_RECHECK_MS}.
    * A connection on its way down is `#onConnectionState`'s, never a refused
-   * path — and so, once open, is a reading with no pair: a stack with no
-   * selected pair has nowhere to send, and loses the connection by its state.
+   * path — and so, once open, is a reading of no pair: a stack with no selected
+   * pair has nowhere to send, and loses the connection by its state. **A pair
+   * the stack could not read is refused**, open or not: it may be one the
+   * agent is sending on.
    */
   #recheckPath(): void {
     if (!this.#pathPolicy || this.#closed || !this.#open || this.#peer.connectionState !== 'connected') {
       return;
     }
     const pair = this.#selectedPair();
-    if (pair) this.#pathRefused(pair);
+    if (pair !== null) this.#pathRefused(pair);
   }
 
   /** Re-read the path every {@link DIRECT_PATH_RECHECK_MS} until the peer closes, where a policy holds it. */
@@ -799,6 +821,10 @@ export class DirectPeer {
   #pathRefused(pair = this.#selectedPair()): boolean {
     const policy = this.#pathPolicy;
     if (!policy) return false;
+    if (pair === UNREADABLE_PAIR) {
+      this.#refuse('the connection’s selected candidate pair could not be read');
+      return true;
+    }
     const refusal = policy.refusal(pair);
     if (refusal === null) return false;
     // The end refused, and its own address on the pair: the remote one is the
@@ -810,16 +836,20 @@ export class DirectPeer {
   }
 
   /**
-   * The selected pair's addresses, or `null` where the stack reports none — or
-   * throws reporting it, as `node-datachannel`'s polyfill can for a candidate
-   * it cannot describe.
+   * The selected pair's addresses — from the native read where the peer has
+   * one ({@link DirectPeerLike.selectedCandidatePair}), else the transport's —
+   * `null` where the stack reports none, or {@link UNREADABLE_PAIR} where
+   * reading it threw.
    */
-  #selectedPair(): DirectSelectedPair | null {
+  #selectedPair(): DirectSelectedPair | null | typeof UNREADABLE_PAIR {
+    const peer = this.#peer;
     try {
-      const pair = this.#peer.sctp?.transport?.iceTransport?.getSelectedCandidatePair?.();
-      return pair ? { local: pair.local?.address ?? null, remote: pair.remote?.address ?? null } : null;
+      const pair = peer.selectedCandidatePair
+        ? peer.selectedCandidatePair()
+        : peer.sctp?.transport?.iceTransport?.getSelectedCandidatePair?.();
+      return pair ? { local: addressOf(pair.local), remote: addressOf(pair.remote) } : null;
     } catch {
-      return null;
+      return UNREADABLE_PAIR;
     }
   }
 

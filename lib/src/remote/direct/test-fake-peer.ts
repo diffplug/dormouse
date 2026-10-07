@@ -67,6 +67,12 @@ export interface FakeDirectNetworkOptions {
    * answerer sees it: {@link FAKE_LAN_PAIR} by default, `null` for none.
    */
   readonly selectedPair?: DirectSelectedPair | null;
+  /**
+   * Give each end `node-datachannel`'s native read of that pair
+   * ({@link DirectPeerLike.selectedCandidatePair}) beside the transport's, as
+   * the polyfill does; a browser's transport read alone by default.
+   */
+  readonly nativePairRead?: boolean;
 }
 
 /** The pair a run selects unless it says otherwise: both ends on one LAN. */
@@ -83,6 +89,10 @@ const HOST_CANDIDATE: Record<FakePeerRole, string> = {
 
 /** The public address a srflx reports unless a case names another (TEST-NET-3, RFC 5737). */
 const SRFLX_ADDRESS = '203.0.113.7';
+
+/** A pair of addresses as a stack's read reports it, or `null` for none. */
+const pairOf = (pair: DirectSelectedPair | null) =>
+  pair && { local: { address: pair.local }, remote: { address: pair.remote } };
 
 /** The kinds of candidate a case can have an end gather. */
 export type FakeCandidateType = 'host' | 'srflx';
@@ -264,6 +274,13 @@ export class FakePeer implements DirectPeerLike {
    * `null` for none. See {@link FakeDirectNetworkOptions.selectedPair}.
    */
   selectedPair: DirectSelectedPair | null;
+  /**
+   * Make the transport's `getSelectedCandidatePair()` throw, as the polyfill's
+   * does for a candidate with no mid, whatever {@link selectedPair} holds.
+   */
+  transportPairThrows = false;
+  /** See {@link FakeDirectNetworkOptions.nativePairRead}. */
+  readonly selectedCandidatePair?: DirectPeerLike['selectedCandidatePair'];
 
   constructor(
     role: FakePeerRole,
@@ -279,6 +296,7 @@ export class FakePeer implements DirectPeerLike {
     // its candidates from the case.
     if (this.#gathering === 'complete') this.#gathered.push(candidateLine(HOST_CANDIDATE[role], 'host'));
     this.selectedPair = options.selectedPair === undefined ? FAKE_LAN_PAIR : options.selectedPair;
+    if (options.nativePairRead) this.selectedCandidatePair = () => pairOf(this.selectedPair);
   }
 
   get iceGatheringState(): string {
@@ -300,13 +318,15 @@ export class FakePeer implements DirectPeerLike {
     const limit = this.#options.maxMessageSize;
     if (limit === null) return null;
     const pair = this.selectedPair;
-    const candidate = (address: string | null) => ({ address });
+    const throws = this.transportPairThrows;
     return {
       maxMessageSize: limit ?? NOISE_MAX_MESSAGE_LENGTH,
       transport: {
         iceTransport: {
-          getSelectedCandidatePair: () =>
-            pair && { local: candidate(pair.local), remote: candidate(pair.remote) },
+          getSelectedCandidatePair: () => {
+            if (throws) throw new TypeError('At least one of sdpMLineIndex or sdpMid must be specified');
+            return pairOf(pair);
+          },
         },
       },
     };
