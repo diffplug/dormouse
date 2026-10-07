@@ -31,7 +31,7 @@ A focused cross-origin iframe surface swallows the gesture; the proxy shim detec
 
 ## Workspaces (command mode)
 
-Standalone only — a bare Wall (VS Code, the website playground) leaves these keys unbound.
+Standalone and the desktop playground — a bare Wall (VS Code) leaves these keys unbound.
 
 | Key | Action | Description |
 |-----|--------|-------------|

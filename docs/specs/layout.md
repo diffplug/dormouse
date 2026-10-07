@@ -166,7 +166,7 @@ Source of truth: `moveSurface` in `lib/src/components/wall/surface-move.ts`.
 
 ### Workspace lifecycle
 
-VS Code and the website playground mount a bare Wall with no Workspace id, which behaves exactly as a single-Workspace Window. Verb semantics are the glossary's Workspace verb rows.
+VS Code mounts a bare Wall with no Workspace id, which behaves exactly as a single-Workspace Window. Verb semantics are the glossary's Workspace verb rows.
 
 - **Must mount every Workspace's Wall in one grid cell**, inactive Walls `inert`, then `visibility:hidden` after their fade and never `display:none` (rationale).
 - **Must preserve mounted leaves across switches**: no re-seed, no re-parent, no leaf unmount, and no `resumeTerminal` / `restoreTerminal`; the only mount work is the terminal reattach below, which replays nothing, so I8 holds by construction.
