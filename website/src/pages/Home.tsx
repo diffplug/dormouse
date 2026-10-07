@@ -705,7 +705,7 @@ export default function Home() {
 
   return (
     <div style={{ visibility: heroCanPaint ? "visible" : "hidden" }}>
-      <SiteHeader ref={headerRef} brandRef={headerBrandRef} brandVisible={false} />
+      <SiteHeader ref={headerRef} brandRef={headerBrandRef} brandVisible={false} prelaunch />
 
       {/* ── Fixed video layer — bottom-anchored, scrubs for the full runway ── */}
       <video

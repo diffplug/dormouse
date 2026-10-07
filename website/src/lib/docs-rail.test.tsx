@@ -11,6 +11,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { describe, expect, it } from "vitest";
 import { DOCS_PAGES, type TocEntry } from "./docs-pages";
+import { PRELAUNCH_NOTICE } from "../components/SiteHeader";
 
 import Changelog, { changelogToc } from "../pages/Changelog";
 import changelog from "../data/changelog.json";
@@ -66,6 +67,13 @@ describe("every page in the rail", () => {
       for (const id of ids) expect(rendered).toContain(id);
     });
   }
+
+  it("asks for word of mouth only while Hosted rolls out", () => {
+    for (const [path, { element }] of Object.entries(PAGES)) {
+      const markup = renderToStaticMarkup(<MemoryRouter>{element}</MemoryRouter>);
+      expect(markup, path).toContain(PRELAUNCH_NOTICE);
+    }
+  });
 
   it("discloses Hosted's metadata and its pending review in the managed Relay section", () => {
     const markup = renderToStaticMarkup(<MemoryRouter><Hosted /></MemoryRouter>);
