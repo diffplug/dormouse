@@ -29,7 +29,7 @@ const FAIL_IF_RE = /^\s*(?:[-*]\s+)?\*\*FAIL IF\b/;
 const HEADING_RE = /^(#{1,6})\s+(.+?)\s*$/;
 const FENCE_RE = /^\s*(```|~~~)/;
 
-/** `- PASS: `docs/specs/x.md` -> "Heading" #2.b — <clause>: <evidence>` */
+/** `- PASS: `docs/specs/security-ci.md` -> "GitHub Actions Policies" #2.b — <clause>: <evidence>` */
 const RESULT_RE = /^- (PASS|FAIL|UNVERIFIABLE): `(docs\/specs\/security[a-z-]*\.md)` -> "([^"\n]+)" #([1-9]\d*)(?:\.([a-z]))? — (\S.*)$/;
 /** `- WARNING: `path/to/file.ts:88` `rootCause` — <summary>` */
 const FINDING_RE = /^- (BLOCKER|WARNING|INFO): `([^`\s:]+):([1-9]\d*)(?:-\d+)?` `([^`\n]+)` — (\S.*)$/;
