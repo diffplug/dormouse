@@ -2319,3 +2319,33 @@ test('a generation replaced under its id never reports its exit; a killed one do
   pty.listeners.get('a').exit({ exitCode: 3 });
   assert.deepEqual(events.filter((e) => e.event === 'exit').map((e) => e.data.exitCode), [3]);
 });
+
+// A spawn over a live generation (a cold restore after a silent host) must not
+// stream two shells into one Session, nor leak the one it displaced.
+test('PTY owner streams only the current generation and stops the one a spawn displaced', () => {
+  const sent = [];
+  const generations = [];
+  const mgr = create((type, msg) => sent.push([type, msg]), {
+    spawn() {
+      const generation = { number: generations.length + 1, onData: null, kills: [] };
+      generations.push(generation);
+      return {
+        pid: generation.number,
+        onData(handler) { generation.onData = handler; },
+        onExit() {},
+        resize() {},
+        write() {},
+        kill(signal) { generation.kills.push(signal); },
+      };
+    },
+  }, { platform: 'darwin' });
+  mgr.spawn('pane-1');
+  mgr.spawn('pane-1');
+  generations[0].onData('old shell');
+  generations[1].onData('new shell');
+  assert.deepEqual(sent.filter(([type]) => type === 'data').map(([, msg]) => msg.data), ['new shell']);
+  assert.deepEqual(generations[0].kills, ['SIGTERM']);
+  assert.deepEqual(generations[1].kills, []);
+  mgr.killAll();
+});
+
