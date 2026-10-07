@@ -459,8 +459,10 @@ describe('the direct path over the native addon', () => {
       const run = await openBound();
       try {
         // Both ends on this machine, so both are the one allowed address: the
-        // addon reports the pair as literals, never a name.
-        const pair = run.bound.sctp?.transport?.iceTransport?.getSelectedCandidatePair?.();
+        // addon's native read, the one the policy takes, reports the pair as
+        // literals, never a name.
+        expect(run.bound.selectedCandidatePair).toBeTypeOf('function');
+        const pair = run.bound.selectedCandidatePair?.();
         expect(pair?.local?.address).toBe(EXTERNAL_V4);
         expect(pair?.remote?.address).toBe(EXTERNAL_V4);
         expect(run.lost).toEqual([]);
@@ -482,7 +484,7 @@ describe('the direct path over the native addon', () => {
         ),
       );
       try {
-        const pair = run.bound.sctp?.transport?.iceTransport?.getSelectedCandidatePair?.();
+        const pair = run.bound.selectedCandidatePair?.();
         expect(pair?.remote?.address).toBe(EXTERNAL_V4);
         expect(run.lost).toEqual([]);
       } finally {
