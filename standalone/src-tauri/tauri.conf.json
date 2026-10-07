@@ -19,6 +19,8 @@
         "hiddenTitle": true,
         "width": 1200,
         "height": 800,
+        "minWidth": 100,
+        "minHeight": 100,
         "resizable": true,
         "dragDropEnabled": false,
         "backgroundThrottling": "disabled"

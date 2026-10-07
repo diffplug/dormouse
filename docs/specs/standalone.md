@@ -182,7 +182,9 @@ Source of truth: `route` in `standalone/src-tauri/src/routing.rs`; `dispatch_sid
 
 **Geometry is a sibling of the snapshot**, `sessions/<label>.geometry.json`, written through the same atomic writer, debounced, and re-applied at boot. No `tauri-plugin-window-state` (rationale).
 
-Source of truth: `note_geometry` / `restore_windows` in `standalone/src-tauri/src/lib.rs`.
+**Every window has a minimum size**, set in `standalone/src-tauri/tauri.conf.json` and cloned to every later window. **A restored box is raised to it and re-centered on the primary display unless a minimum-size patch is visible** (rationale).
+
+Source of truth: `note_geometry` / `restore_windows` / `fit_geometry` in `standalone/src-tauri/src/lib.rs`.
 
 ### What a window's `Destroyed` settles
 
