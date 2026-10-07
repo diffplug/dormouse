@@ -27,7 +27,9 @@ export interface WallHandle {
   canMoveSurfaces: boolean;
   prepareSurfaceMove(id: string): PreparedSurfaceMove;
   adoptSurfaceMove(id: string, meta: LeafMeta): { surfaceRef: string; rollback(): void };
-  finishSurfaceMove(): void;
+  /** End a Surface move on this Wall. An emptied tree refills when Doors
+   *  remain, or when `keepEmpty` says the Workspace stays (a pinned source). */
+  finishSurfaceMove(options?: { keepEmpty?: boolean }): void;
   focusSurface(id: string, acknowledge: boolean): void;
   showMoveNotice(id: string, text: string): void;
   /** A brief notice on the pane the user is on: the Window's answer to a verb

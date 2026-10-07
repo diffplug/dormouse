@@ -1,5 +1,5 @@
 import { withFreshSurfaceIds } from '../../lib/session-remap';
-import type { PersistedWindow, PersistedWorkspace, WorkspaceId } from '../../lib/session-types';
+import { workspaceRecord, type PersistedWindow, type PersistedWorkspace, type WorkspaceId } from '../../lib/session-types';
 import { generateWorkspaceId, getWorkspacesSnapshot } from '../../lib/workspace-store';
 import { getWallHandle } from './wall-handles';
 import { pendingKillSessionIds } from '../../lib/pending-kills';
@@ -37,7 +37,7 @@ export function windowReopenSnapshot(): PersistedWindow | null {
     if (!handle) return null;
     const id = generateWorkspaceId();
     fresh.set(workspace.id, id);
-    records.push({ id, name: workspace.name, nameIsAuto: workspace.nameIsAuto, session: withFreshSurfaceIds(handle.serializeReported()) });
+    records.push(workspaceRecord({ ...workspace, id }, withFreshSurfaceIds(handle.serializeReported())));
   }
   if (records.length === 0) return null;
   return { version: 1, workspaces: records, activeWorkspaceId: fresh.get(activeId) ?? records[0].id };

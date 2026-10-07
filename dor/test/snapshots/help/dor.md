@@ -22,7 +22,7 @@ USAGE
   dor agent-browser [--key name|--session name|--surface handle] [--workspace ref] [args...]
   dor playwright [--key name] [--session name] [--surface handle] [--workspace ref] <args>...
   dor list [--all] [--command text] [--cwd path] [--id-format refs|ids|both] [--json] [--kind terminal|browser|tool] [--port number] [--ports] [--view paned|zoomed|minimized] [--workspace ref] [--workspaces] [--window label]
-  dor workspace new|rename|close|switch|move [args...] [flags...]
+  dor workspace new|rename|pin|unpin|close|switch|move [args...] [flags...]
   dor app restart [--json]
   dor --help
 
@@ -49,7 +49,7 @@ COMMANDS
   agent-browser  Drive a browser surface via your agent-browser install.
   playwright     Drive a browser surface via your playwright CLI install.
   list           List Dormouse Surfaces.
-  workspace      Create, rename, close, switch, or move Workspaces.
+  workspace      Create, rename, pin, close, switch, or move Workspaces.
   app            Restart Dormouse Standalone, resuming supported agent sessions.
 
 ```

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createWorkspace, resetWorkspaces, getWorkspacesSnapshot } from '../../lib/workspace-store';
+import { createWorkspace, resetWorkspaces, getWorkspacesSnapshot, setWorkspacePinned } from '../../lib/workspace-store';
 import type { PersistedSession } from '../../lib/session-types';
 import { registerWallHandle, resetWallHandles, stubWallHandle } from './wall-handles';
 import { windowNeedsCloseConfirmation, windowReopenSnapshot } from './window-reopen';
@@ -74,5 +74,13 @@ describe('closing one window of several', () => {
     expect(pane).toMatchObject({ cwd: '/repo', title: 'shell', untouched: true });
     expect(pane.id).not.toBe('pane-ws-2');
     expect(snapshot.workspaces[1].session.surfaceRefs).toBeUndefined();
+  });
+
+  it('keeps a pin, which a reopened window restores', () => {
+    twoWorkspaces(null);
+    setWorkspacePinned('ws-2', true);
+    const snapshot = windowReopenSnapshot()!;
+    expect(snapshot.workspaces.map(workspace => workspace.pinned)).toEqual([undefined, true]);
+    expect(snapshot.workspaces[0]).not.toHaveProperty('pinned');
   });
 });

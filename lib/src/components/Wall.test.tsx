@@ -4492,6 +4492,26 @@ describe('engagement', () => {
   });
 });
 
+it('recedes every other pane while a context is open and restores them as it exits', async () => {
+  await act(async () => root.render(<Wall initialPaneIds={['pane-a', 'pane-b']} initialMode="passthrough" />));
+  await flush();
+  const originalMatchMedia = window.matchMedia;
+  window.matchMedia = query => ({ ...originalMatchMedia(query), matches: false });
+  try {
+    const receded = () => [...container.querySelectorAll<HTMLElement>('[data-lath-leaf][data-receded]')].map(leaf => leaf.dataset.lathLeaf);
+    expect(receded()).toEqual([]);
+    act(() => container.querySelector('[data-pane-header-for="pane-a"]')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true })));
+    await flush();
+    expect(receded()).toEqual(['pane-b']);
+    act(() => container.querySelector<HTMLButtonElement>('[aria-label="Close terminal context"]')!.click());
+    // The exit is still playing, and the peers are already back.
+    expect(container.querySelector('[data-terminal-context]')?.hasAttribute('inert')).toBe(true);
+    expect(receded()).toEqual([]);
+  } finally {
+    window.matchMedia = originalMatchMedia;
+  }
+});
+
 it('moves a retained helper without resizing or replacing its source, and remembers the manual side', async () => {
   const retained: helpers.HelperTerminal = { id: 'placement-helper', parentId: 'placement-source', command: '', status: 'preserved' };
   vi.spyOn(helpers, 'getHelper').mockImplementation(id => id === 'placement-source' ? retained : undefined);

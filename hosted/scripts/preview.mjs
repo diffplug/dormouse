@@ -79,9 +79,10 @@ export function previewConfig(base, env, worker, hyperdriveId) {
 }
 
 /**
- * Every Worker's preview config, keyed as `WORKERS` is; all three share one
- * Hyperdrive, as production does. The relay's enrollment links name the
- * account preview, never production's account.
+ * Every Worker's preview config, keyed as `WORKERS` is; all three share the
+ * PR's one Hyperdrive, unlike production's one per Worker
+ * (`docs/specs/hosted.md` -> "PR previews"). The relay's enrollment links name
+ * the account preview, never production's account.
  */
 export function previewConfigs(bases, env, hyperdriveId) {
   const configs = Object.fromEntries(

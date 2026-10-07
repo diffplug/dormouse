@@ -62,5 +62,5 @@ panic = "unwind"
 
 [patch.crates-io]
 # docs/specs/standalone.md -> "Objective-C exceptions".
-tao = { git = "https://github.com/diffplug/tao", rev = "397f6789285412024892579aff0897aade11d832" }
-tao-macros = { git = "https://github.com/diffplug/tao", rev = "397f6789285412024892579aff0897aade11d832" }
+tao = { git = "https://github.com/diffplug/tao", rev = "12d4695500ff8e3b7cc9a409d6e01245296df6c1" }
+tao-macros = { git = "https://github.com/diffplug/tao", rev = "12d4695500ff8e3b7cc9a409d6e01245296df6c1" }

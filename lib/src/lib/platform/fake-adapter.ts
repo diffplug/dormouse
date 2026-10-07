@@ -60,6 +60,9 @@ export class FakePtyAdapter implements PlatformAdapter {
   /** The deterministic demo shell behind each helper (docs/specs/terminal-context.md). */
   private helpers = new Map<string, { cwd: string; busy: boolean }>();
   private helperCommand = DEFAULT_HELPER_COMMAND;
+  /** Placement stories release each helper after fitting its mounted terminal. */
+  deferHelperStartup = false;
+  private pendingHelperPrompts = new Map<string, () => void>();
   private terminalSizes = new Map<string, FakePtySize>();
   private activeTimers = new Map<string, ReturnType<typeof setTimeout>[]>();
   private defaultScenario: FakeScenario | null = null;
@@ -167,6 +170,8 @@ export class FakePtyAdapter implements PlatformAdapter {
     this.activeTimers.clear();
     this.terminals.clear();
     this.helpers.clear();
+    this.pendingHelperPrompts.clear();
+    this.deferHelperStartup = false;
     this.terminalSizes.clear();
     this.defaultScenario = null;
     this.scenarioMap.clear();
@@ -255,7 +260,19 @@ export class FakePtyAdapter implements PlatformAdapter {
       }
       if (output) this.sendOutput(id, output);
     });
-    queueMicrotask(() => this.sendOutput(id, prompt()));
+    const start = () => this.sendOutput(id, prompt());
+    this.pendingHelperPrompts.set(id, start);
+    if (!this.deferHelperStartup) queueMicrotask(() => {
+      // A killed or replaced shell cannot start a newer generation's prompt.
+      if (this.pendingHelperPrompts.get(id) === start) this.resumeHelperStartup(id);
+    });
+  }
+
+  /** Release a deferred first prompt once; retained helpers already have one. */
+  resumeHelperStartup(id: string): void {
+    const start = this.pendingHelperPrompts.get(id);
+    this.pendingHelperPrompts.delete(id);
+    start?.();
   }
 
   private resolveScenario(id: string): FakeScenario | null {
@@ -295,6 +312,7 @@ export class FakePtyAdapter implements PlatformAdapter {
       this.activeTimers.delete(id);
     }
     this.terminals.delete(id);
+    this.pendingHelperPrompts.delete(id);
     this.terminalSizes.delete(id);
     this.inputHandlers.delete(id);
     this.protocolParsers.delete(id);

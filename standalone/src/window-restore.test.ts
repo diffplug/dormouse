@@ -153,6 +153,22 @@ describe("restoreWindowOrFresh", () => {
     forgetHelper("b1");
   });
 
+  it("restores a pin, its Workspace in the pinned group", async () => {
+    const saved: PersistedWindow = {
+      version: 1,
+      workspaces: [
+        { id: "ws-a", name: "A", nameIsAuto: false, pinned: true, session: sessionOver("a1") },
+        { id: "ws-b", name: "B", nameIsAuto: false, session: sessionOver("b1") },
+      ],
+      activeWorkspaceId: "ws-a",
+    };
+    const { platform } = fakePlatform([{ id: "a1", alive: true }, { id: "b1", alive: true }], saved);
+
+    await restoreWindowOrFresh(platform);
+
+    expect(getWorkspacesSnapshot().workspaces.map((w) => [w.id, w.pinned === true])).toEqual([["ws-b", false], ["ws-a", true]]);
+  });
+
   it("boots a fresh Window and rewrites the blob when the restore throws", async () => {
     // A duplicate Workspace id is rejected outright by `setWorkspaces`; before,
     // the throw escaped `bootstrap()` and nothing rendered at all — on this and

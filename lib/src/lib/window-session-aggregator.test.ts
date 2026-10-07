@@ -23,6 +23,7 @@ import {
   renameWorkspace,
   resetWorkspaces,
   setActiveWorkspace,
+  setWorkspacePinned,
   getWorkspacesSnapshot,
 } from './workspace-store';
 
@@ -200,6 +201,23 @@ describe('window session aggregator', () => {
       setActiveWorkspace(second);
       await settle();
       expect(write.mock.calls.at(-1)?.[0].activeWorkspaceId).toBe(second);
+    });
+
+    it('writes a pin change, carrying `pinned` only on a pinned Workspace', async () => {
+      const write = vi.fn();
+      const first = getWorkspacesSnapshot().workspaces[0].id;
+      const second = createWorkspace({ name: 'Second' }).id;
+      publishWorkspaceSession(first, session('a'));
+      publishWorkspaceSession(second, session('b'));
+      installWindowSessionWriter(write);
+
+      setWorkspacePinned(first, true);
+      await settle();
+      expect(write).toHaveBeenCalledTimes(1);
+      const [written] = write.mock.calls[0];
+      expect(written.workspaces.map((ws: { id: string }) => ws.id)).toEqual([second, first]);
+      expect(written.workspaces[0]).not.toHaveProperty('pinned');
+      expect(written.workspaces[1].pinned).toBe(true);
     });
 
     it('never names an active Workspace the blob does not contain', async () => {

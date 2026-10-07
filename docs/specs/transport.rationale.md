@@ -2,6 +2,12 @@
 
 > Informative companion to [transport.md](transport.md): the evidence, symptoms, and dead-approach history behind its rules, keyed by that spec's headings (AGENTS.md → "What, not why"). Nothing here is normative.
 
+## Graceful shutdown
+
+With node-pty 1.2.0-beta.15 on Windows (measured 2026-10-06), `kill('SIGTERM')` throws, including from a deferred callback if the terminal is not ready. The swallowed synchronous error left shutdown waiting out its deadline without stopping anything (#984). Argument-less `kill()` closes the bundled ConPTY; the native addon also calls `TerminateProcess` on the shell. A console-handler probe did not save its close marker, so this path is not a history-flush guarantee. Agent recovery already captures before this stage.
+
+A second close before `onExit` crashed the Node process in the native test. The shared close guard uses the PTY object so a new process under a reused Session id remains stoppable. Native tests cover ready, not-yet-ready, and overlapping cleanup; fake tests cover output delivered after exit.
+
 ## PTY buffering
 
 **Why a buffer outlives its process.** Recovery capture runs before any kill (`docs/compatible-agents.md` → "Capture"), but a webview reopened over an exited pane still needs its transcript, and a Workspace transfer replays an exited pane's since-mark tail.

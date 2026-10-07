@@ -30,6 +30,20 @@ describe('readPersistedWindow', () => {
     expect(readPersistedWindow(win)).toEqual(win);
   });
 
+  it('round-trips a pin, and reads anything but `true` as unpinned', () => {
+    const win: PersistedWindow = {
+      version: 1,
+      activeWorkspaceId: 'ws-a',
+      workspaces: [
+        { id: 'ws-a', name: 'Left', nameIsAuto: false, session: sessionA },
+        { id: 'ws-b', name: 'Notes', nameIsAuto: false, pinned: true, session: sessionB },
+      ],
+    };
+    expect(readPersistedWindow(win)).toEqual(win);
+    const odd = readPersistedWindow({ ...win, workspaces: [{ ...win.workspaces[1], pinned: 'yes' }] });
+    expect(odd?.workspaces[0]).not.toHaveProperty('pinned');
+  });
+
   it('reads a blob from before auto-naming: only a `Workspace <n>` name is auto', () => {
     const win = readPersistedWindow({
       version: 1,

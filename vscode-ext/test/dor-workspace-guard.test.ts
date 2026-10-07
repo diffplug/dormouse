@@ -23,7 +23,7 @@ describe('dorWorkspaceRefusal', () => {
 
   it('refuses the Workspace-spanning listing and every container verb', () => {
     expect(dorWorkspaceRefusal('surface.list', { scope: 'all' })).toMatch(/dor list --all/);
-    for (const method of ['workspace.list', 'workspace.new', 'workspace.rename', 'workspace.close', 'workspace.switch']) {
+    for (const method of ['workspace.list', 'workspace.new', 'workspace.rename', 'workspace.close', 'workspace.switch', 'workspace.move', 'workspace.pin']) {
       expect(dorWorkspaceRefusal(method, {})).toMatch(/dor workspace/);
     }
   });

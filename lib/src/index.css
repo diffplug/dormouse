@@ -42,6 +42,30 @@ body {
   overflow: hidden;
 }
 
+/* While a terminal context is open every other pane recedes under a scrim of the
+ * Wall's own ground (docs/specs/layout.md → "Header context menu"). A scrim rather
+ * than the leaf's opacity, which the animator writes; it takes no input, so a press
+ * still reaches the pane and dismisses the context. */
+.lath-host .lath-leaf::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  pointer-events: none;
+  background-color: var(--color-app-bg);
+  opacity: 0;
+  transition: opacity 200ms ease-out;
+}
+
+.lath-host .lath-leaf[data-receded]::after {
+  /* The strong modal backdrop's strength (`modalOverlay` in design.tsx). */
+  opacity: 0.55;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lath-host .lath-leaf::after { transition: none; }
+}
+
 .lath-host .lath-leaf-header {
   position: relative;
   overflow: visible;

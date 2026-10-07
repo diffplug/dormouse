@@ -65,8 +65,8 @@ exports[`TutRunner snapshots > renders the alert section with all items incomple
 
    [33m●[0m  [1mAlert me whenever [36mlongtask[39m runs[0m
         [3mPress [36ms[39m to start a fake [36mlongtask[39m, then right-click that pane's header[0m
-        [3m(or select it and press [36ma[39m) and turn on "Watch all longtask commands".[0m
-        [3mAlerts belong to the command, not the tab.[0m
+        [3m(or select it and press [36ma[39m) and turn on "watch longtask". Alerts belong[0m
+        [3mto the command, not the tab.[0m
    [2m·[0m  The rule covers every pane running that command
    [2m·[0m  It rings when the command goes quiet
    [2m·[0m  Dismissing a ringing alert leaves a TODO behind

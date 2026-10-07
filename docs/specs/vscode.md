@@ -63,7 +63,7 @@ A `WebviewPanelSerializer` under the `dormouse` view type restores editor panels
 2. Capture agent recovery commands.
 3. Flush every webview's session.
 4. Refresh saved state from the still-live PTYs (CWD).
-5. Graceful kill, then force kill.
+5. Graceful kill (`docs/specs/transport.md` → Graceful shutdown), then force kill.
 
 **Must capture before the session flush and PTY kills** (rationale). Shared capture and durability follow `docs/compatible-agents.md`. Source of truth: `deactivate` in `vscode-ext/src/extension.ts`.
 

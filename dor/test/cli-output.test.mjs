@@ -100,8 +100,8 @@ const fixtureSurfaces = [
 // The Window's Workspaces, as the host projects them for `--workspaces` and for
 // the `--all` group headers.
 const fixtureWorkspaces = [
-  { ref: 'workspace:1', id: 'workspace-1', name: 'Workspace 1', active: true, ringing: false, todo: false, count: 0 },
-  { ref: 'workspace:2', id: 'workspace-2b1c', name: 'build', active: false, ringing: true, todo: true, count: 2 },
+  { ref: 'workspace:1', id: 'workspace-1', name: 'Workspace 1', pinned: false, active: true, ringing: false, todo: false, count: 0 },
+  { ref: 'workspace:2', id: 'workspace-2b1c', name: 'build', pinned: true, active: false, ringing: true, todo: true, count: 2 },
 ];
 
 // Listening ports the host would attach to a terminal Surface for `--ports`.
@@ -347,6 +347,11 @@ function fixtureClient(surfacesFixture = fixtureSurfaces) {
       this.requests.push({ method: 'switchWorkspace', request });
       const target = fixtureWorkspace(request.workspace);
       return { status: 'active', workspaceId: target.id, workspaceRef: target.ref, name: target.name };
+    },
+    async pinWorkspace(request) {
+      this.requests.push({ method: 'pinWorkspace', request });
+      const target = fixtureWorkspace(request.workspace);
+      return { status: request.pinned ? 'pinned' : 'unpinned', workspaceId: target.id, workspaceRef: target.ref, name: target.name };
     },
     async moveWorkspace(request) {
       this.requests.push({ method: 'moveWorkspace', request });
@@ -1650,7 +1655,7 @@ test('list --all keeps the header of a Workspace its filters emptied', async () 
   // The text listing says which Workspaces there are, exactly as the JSON
   // payload's `workspaces` array does — a filtered-out group is a header with
   // no rows under it, not a Workspace that vanished.
-  assert.match(result.stdout, /^workspace:1 {2}Workspace 1 {2}\[active\]\n\nworkspace:2 {2}build\n {4}/);
+  assert.match(result.stdout, /^workspace:1 {2}Workspace 1 {2}\[active\]\n\nworkspace:2 {2}build {2}\[pinned\]\n {4}/);
 });
 
 test('list --workspace asks the host for another Workspace', async () => {
@@ -1696,6 +1701,18 @@ test('workspace mutation verbs', async () => {
     { method: 'renameWorkspace', request: { workspace: 'workspace:2', name: 'agents' } },
     { method: 'switchWorkspace', request: { workspace: 'build' } },
   ]);
+});
+
+test('workspace pin and unpin send one request each, and take one workspace', async () => {
+  const client = fixtureClient();
+  await snapshot('workspace-pin', await runCli(['workspace', 'pin', 'build'], { client, env: listEnv }));
+  await snapshot('workspace-unpin-json', await runCli(['workspace', 'unpin', 'workspace:2', '--json'], { client, env: listEnv }));
+  assert.deepEqual(client.requests, [
+    { method: 'pinWorkspace', request: { workspace: 'build', pinned: true } },
+    { method: 'pinWorkspace', request: { workspace: 'workspace:2', pinned: false } },
+  ]);
+  await snapshot('workspace-pin-arity', await runCli(['workspace', 'pin'], { client: fixtureClient(), env: listEnv }));
+  await snapshot('workspace-unpin-force-misuse', await runCli(['workspace', 'unpin', '2', '--force'], { client: fixtureClient(), env: listEnv }));
 });
 
 test('workspace close refuses running work until forced', async () => {

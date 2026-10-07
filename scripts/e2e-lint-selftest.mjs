@@ -5,8 +5,9 @@
  *
  * Why this exists: `deploy-lint-selftest.mjs` is mostly the other direction —
  * the installer lint mostly checks that controls are *present*, so removing one
- * is the test there (its one `forbidden` rule mutates this way instead). Every
- * rule here checks that something is *absent*, and the
+ * is the test there (its `forbidden` rules mutate this way instead). Nearly
+ * every rule here checks that something is *absent* (the `require` rules below
+ * are the exception), and the
  * characteristic failure of an absence check is passing because the pattern
  * cannot see the thing it names — a regex anchored on a spelling nobody uses, a
  * scope that resolves to no files, a spec phrase that drifted. A green

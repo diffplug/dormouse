@@ -81,6 +81,11 @@ describe('prepareWorkspaceTransfer', () => {
     expect(prepared.payload.workspace).toEqual({ id: 'ws-id', name: 'Deploys', nameIsAuto: false, session: SESSION });
   });
 
+  it('carries a pin to the Window it lands in', async () => {
+    const prepared = await prepareWorkspaceTransfer(deps([], { naming: { name: 'Deploys', nameIsAuto: false, pinned: true } }));
+    expect(prepared.payload.workspace).toEqual({ id: 'ws-id', name: 'Deploys', nameIsAuto: false, pinned: true, session: SESSION });
+  });
+
   it('touches nothing until the commit, so a refused transfer costs nothing', async () => {
     const prepared = await prepareWorkspaceTransfer(deps());
 

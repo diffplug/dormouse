@@ -44,7 +44,7 @@ Source of truth: `standalone/src-tauri/src/lib.rs` (`SidecarState`, the `#[tauri
 
 **A blocking command must be async** — `#[tauri::command(async)]` or a plain `#[tauri::command]` over an `async fn`. Tauri runs a sync command on the main thread, where waiting on the sidecar or the arrival-journal lock stops the webview painting for the whole round trip (rationale). **The three clipboard readers included**: their non-Windows branches round-trip through the sidecar. A source-scanning test in `lib.rs` enforces it.
 
-**`pty_graceful_kill` must forward final output during its grace**, resolving once the last target has exited or at its timeout; under ConPTY the SIGTERM is an immediate kill. **The sidecar keeps each PTY's latest 200,000 UTF-16 code units for replay.** Pinned by `standalone/sidecar/pty-core.test.js`. `dor` control plumbing and the sidecar env: `docs/specs/dor-cli.md` → Host Plumbing.
+`pty_graceful_kill`: §Routing; `docs/specs/transport.md` → Graceful shutdown. **The sidecar keeps each PTY's latest 200,000 UTF-16 code units for replay.** Pinned by `standalone/sidecar/pty-core.test.js`. `dor` control plumbing and the sidecar env: `docs/specs/dor-cli.md` → Host Plumbing.
 
 ### Burrow service
 
@@ -108,7 +108,7 @@ Every quit trigger is driven through the webview quit orchestrator (§Quit flow)
 
 Source of truth: `standalone/src/AppBar.tsx`.
 
-The AppBar is the draggable titlebar: the Workspace strip, then the window controls on Windows and Linux (macOS draws native traffic lights). **Never put a shell picker here**: the shell is the Settings dialog's Shell row (`lib/src/components/ShellPicker.tsx`; what a changed pick spawns: `docs/specs/layout.md` -> "Session lifecycle and terminal registry"); the theme picker's placement is `docs/specs/theme.md` → "Where the user picks a theme". The strip is `docs/specs/layout.md` → Workspace tabs; its indicators `docs/specs/alert.md` → Workspace union.
+The AppBar is the draggable titlebar: the Workspace strip across its width, its pinned group flush against the right end, then the window controls on Windows and Linux (macOS draws native traffic lights). **Must make the strip's space before its pinned group the window-drag region, never a tab or button.** **Never put a shell picker here**: the shell is the Settings dialog's Shell row (`lib/src/components/ShellPicker.tsx`; what a changed pick spawns: `docs/specs/layout.md` -> "Session lifecycle and terminal registry"); the theme picker's placement is `docs/specs/theme.md` → "Where the user picks a theme". The strip is `docs/specs/layout.md` → Workspace tabs; its indicators `docs/specs/alert.md` → Workspace union.
 
 ### Application menu
 
@@ -169,7 +169,7 @@ Source of truth: `standalone/src-tauri/src/workspaces.rs`; `installWorkspaceRegi
 | everything else | — | every window |
 
 - **Ownership is minted only in `pty_spawn`**, dropped by `pty_kill` or the window going away, and reassigned by a transfer. **Never dropped by an exit, nor does an exit end a transfer's marking phase** (rationale). Minting clears any suppression left under that id. `pty_kill` drops the owner before the sidecar removes the Session's alert entry, so the removal's state reaches no window.
-- **A PTY event no window owns is dropped, and the shell is reaped** (rationale). `Destroyed` sends `pty:reap` for whatever the departing window still owned; the sidecar removes those Sessions' alert entries and SIGTERMs them. **The quit teardown's `pty:gracefulKill` removes no entry**: windows still show those PTYs.
+- **A PTY event no window owns is dropped, and the shell is reaped** (rationale). `Destroyed` sends `pty:reap` for whatever the departing window still owned; the sidecar removes those Sessions' alert entries and stops them gracefully (`docs/specs/transport.md` -> "Graceful shutdown"). **The quit teardown's `pty:gracefulKill` removes no entry**: windows still show those PTYs.
 - **A `dor` request naming a Surface no window owns is answered with an error**, never handed to a sibling.
 - **`pty_request_init`, `pty_graceful_kill` and `capture_agent_recovery` target the invoking window's own PTYs and take no ids**: a window tearing down must never touch a sibling's terminals. Each also excludes what an arrival claims (§Arrival queue).
 - **Every webview listener names its own window**: Tauri delivers an `emit_to` event to any listener with the default `Any` target (rationale). `listenToWindow` in `standalone/src/window-label.ts` is the only caller of the event API, pinned by `standalone/scripts/window-listeners.test.mjs`.
@@ -286,7 +286,7 @@ Source of truth: `Arrival` in `standalone/src-tauri/src/routing.rs`; `begin_arri
 
 **A pointer captured on a strip tab keeps delivering `pointermove` and `pointerup` outside the window**, so the gesture stays the webview's and Rust is only asked which window is under the cursor (`window_at_cursor`; rationale). **The release transfers there, or tears out when the cursor is over no window or over this window outside its own strip.**
 
-**Among windows containing the cursor the most recently focused wins** — the OS exposes no z-order. **The target decides the drop index.**
+**Among windows containing the cursor the most recently focused wins** — the OS exposes no z-order. **The target decides the drop index, and its caret shows that slot** (`docs/specs/layout.md` → "Workspace tabs").
 
 Source of truth: `window_at` in `standalone/src-tauri/src/routing.rs`; `standalone/src/workspace-drag.ts`.
 
@@ -438,7 +438,7 @@ Source of truth: `start_ui_watchdog` in `standalone/src-tauri/src/lib.rs`; `Watc
 **Must let an Objective-C exception that AppKit raises beneath a tao callback, such as the `sendEvent:` override, unwind to AppKit**, whose event loop reports it and keeps running. Both halves are required (rationale):
 
 - **Must build release with `panic = "unwind"`.**
-- **Must take tao from the `diffplug/tao` fork** through `[patch.crates-io]`, whose Apple callbacks are `extern "C-unwind"`: one fork branch per patched release (`dormouse-0.35` is `tao-v0.35.2` plus that commit), `tao-macros` from the same rev. **Must rebase the commit onto the new release when tauri moves tao**, since an unused `[patch]` only warns; drop the patch once tauri depends on a tao carrying tauri-apps/tao#1354.
+- **Must take tao from the `diffplug/tao` fork** through `[patch.crates-io]`, whose Apple callbacks are `extern "C-unwind"`: one fork branch per patched release (`dormouse-0.37` is `tao-v0.37.1` plus that commit), `tao-macros` from the same rev. **Must rebase the commit onto the new release when tauri moves tao**, since an unused `[patch]` only warns; drop the patch once tauri depends on a tao carrying tauri-apps/tao#1354.
 
 **Rust panics still abort** (`abort_on_panic`, installed first in `run`). **An exception raised inside the Tauri event handler still aborts** (rationale).
 

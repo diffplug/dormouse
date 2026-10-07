@@ -45,6 +45,7 @@ export const WORKSPACE_CONTROL_METHODS = {
   close: 'workspace.close',
   switch: 'workspace.switch',
   move: 'workspace.move',
+  pin: 'workspace.pin',
 } as const;
 
 export type WorkspaceControlMethod = (typeof WORKSPACE_CONTROL_METHODS)[keyof typeof WORKSPACE_CONTROL_METHODS];
