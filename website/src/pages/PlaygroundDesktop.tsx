@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { Link } from "react-router";
 import SiteHeader, { STATIC_PAGE_HEADER_STYLE } from "../components/SiteHeader";
+import PlaygroundHeader, { PLAYGROUND_HEADER_HEIGHT_PX } from "../components/PlaygroundHeader";
 import { PlaceToPaste } from "../components/PlaceToPaste";
 import { useRestoredTheme } from "dormouse-lib/lib/themes";
 import { PlaygroundShellRegistry } from "../lib/playground-shells";
@@ -92,6 +93,7 @@ function PlaygroundDesktopExperience() {
   const [WallModule, setWallModule] = useState<{
     WorkspaceWindow: React.ComponentType<any>;
     WorkspaceStrip: React.ComponentType<any>;
+    join: { backgroundImage: string; height: number };
   } | null>(null);
   const [placeToPasteOpen, setPlaceToPasteOpen] = useState(false);
 
@@ -133,7 +135,7 @@ function PlaygroundDesktopExperience() {
       if (getPreferredPlayground() === "pocket") return;
       // None of these consumes another, so load the whole bundle at once rather
       // than paying a round of module resolution each on the boot path.
-      const [platform, registry, mouseSelection, themes, alertSettings, workspaceWindow, workspaceStrip, workspaceStore, bootPlans, shellDefaults, asciiSplash, playgroundFs] = await Promise.all([
+      const [platform, registry, mouseSelection, themes, alertSettings, workspaceWindow, workspaceStrip, workspaceStore, bootPlans, design, shellDefaults, asciiSplash, playgroundFs] = await Promise.all([
         import("dormouse-lib/lib/platform"),
         import("dormouse-lib/lib/terminal-registry"),
         import("dormouse-lib/lib/mouse-selection"),
@@ -143,6 +145,7 @@ function PlaygroundDesktopExperience() {
         import("dormouse-lib/components/WorkspaceStrip"),
         import("dormouse-lib/lib/workspace-store"),
         import("dormouse-lib/components/wall/workspace-boot-plans"),
+        import("dormouse-lib/components/design"),
         import("dormouse-lib/lib/shell-defaults"),
         import("../lib/ascii-splash-runner"),
         import("../lib/playground-fs"),
@@ -289,7 +292,11 @@ function PlaygroundDesktopExperience() {
       // re-seeds the L-shape rather than finding the last visit's Workspaces.
       workspaceStore.resetWorkspaces();
       bootPlans.resetWorkspaceBootPlans();
-      setWallModule({ WorkspaceWindow: workspaceWindow.WorkspaceWindow, WorkspaceStrip: workspaceStrip.WorkspaceStrip });
+      setWallModule({
+        WorkspaceWindow: workspaceWindow.WorkspaceWindow,
+        WorkspaceStrip: workspaceStrip.WorkspaceStrip,
+        join: { backgroundImage: design.TAB_WALL_JOIN_GRADIENT, height: design.PANE_GUTTER_PX },
+      });
     }
     loadWall();
 
@@ -330,13 +337,17 @@ function PlaygroundDesktopExperience() {
 
   return (
     <>
-      <SiteHeader
-        activePath="/playground"
-        themeAware
+      <PlaygroundHeader
         tabs={WallModule ? <WallModule.WorkspaceStrip className="self-stretch" /> : null}
+        join={WallModule?.join}
       />
 
-      <main className="fixed top-16 right-0 bottom-0 left-0 flex min-h-0 md:top-20">
+      {/* Below the bar and its join band, as the standalone Wall sits below its
+          AppBar. */}
+      <main
+        className="fixed right-0 bottom-0 left-0 flex min-h-0"
+        style={{ top: PLAYGROUND_HEADER_HEIGHT_PX + (WallModule?.join.height ?? 0) }}
+      >
         {WallModule ? (
           <WallModule.WorkspaceWindow
             restoredLathLayout={DESKTOP_PLAYGROUND_LAYOUT}
