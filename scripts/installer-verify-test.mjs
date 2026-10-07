@@ -28,15 +28,15 @@
  * copy — and driven under the same `set -euo pipefail` those scripts run
  * under. Extraction takes the LAST definition of a name, so it keeps working
  * if a helper ever exists twice — once in the installer body and once inside
- * the `MANAGE_EOF` heredoc. Today only `env_file_value` is defined twice, and
- * the two copies are checked identical. `owner_only`, `has_off_loopback` and
- * `serve_proxies_root` are in the heredoc (the `manage` copy);
- * `create_release_stage`, `env_missing_keys`, `serve_state` and
- * `serve_root_target` are in the installer body.
+ * the `MANAGE_EOF` heredoc. Today `env_file_value` and `serve_origin_root`
+ * are defined twice, and each pair is checked identical. `owner_only`,
+ * `has_off_loopback` and `serve_proxies_root` are in the heredoc (the
+ * `manage` copy); `create_release_stage`, `env_missing_keys` and
+ * `serve_state` are in the installer body.
  *
- * Windows is not covered: `Invoke-Verify` and the Serve ladder both match
- * against strings they have already captured, and nothing in CI can run
- * PowerShell anyway (see `deploy-lint.mjs`).
+ * Windows is not run: nothing in CI can run PowerShell, so its Serve reader
+ * and gate — the same reading over the same text — are pinned textually by
+ * `deploy-lint.mjs` instead.
  */
 
 import { spawnSync } from 'node:child_process';
@@ -82,12 +82,59 @@ function extractFunction(text, name) {
 const pad = (line) =>
   `"$(awk 'BEGIN{for(i=0;i<20000;i++) print "${line}"}')"`;
 
-/** The `tailscale serve status` line shapes the conflict gate reads. */
+/**
+ * `tailscale serve status` text, in the shapes Tailscale's own printer emits
+ * (`printServeStatusTrees` and `printWebStatusTree` in its
+ * `cmd/tailscale/cli/serve_status.go` and `serve_legacy.go`): one header line
+ * per listener — `https://<host>` for :443, `https://<host>:<port>` for any
+ * other, `(tailnet only)` or `(Funnel on)` after it, `(svc:<name>)` after that
+ * for a Service — then one `|-- <mount> <type> <target>` line per handler.
+ * Mounts are padded to the longest and `<type>` to five columns, so `path` and
+ * `text` carry two spaces before the target. A blank line ends each listener.
+ */
+const ORIGIN = 'https://node.tailnet.ts.net';
+const listener = (header, ...handlers) => [header, ...handlers, ''].join('\n');
 const SERVE_ROOT_FOREIGN = '|-- / proxy http://127.0.0.1:9999';
 const SERVE_ROOT_OURS = '|-- / proxy http://127.0.0.1:3100';
+const SERVE_ROOT_PATH = '|-- / path  /Users/me/site';
+const SERVE_ROOT_TEXT = '|-- / text  "hello from elsewhere"';
 const SERVE_OTHER_PATH = '|-- /elsewhere proxy http://127.0.0.1:8888';
 const SERVE_OUR_PORT_OTHER_PATH = '|-- /api proxy http://127.0.0.1:3100';
 const SERVE_ROOT_PORT_PREFIX = '|-- / proxy http://127.0.0.1:31000';
+const AT_443 = `${ORIGIN} (tailnet only)`;
+const AT_443_FUNNEL = `${ORIGIN} (Funnel on)`;
+const AT_8443 = `${ORIGIN}:8443 (tailnet only)`;
+const AT_SERVICE = 'https://web.tailnet.ts.net (tailnet only) (svc:web)';
+const SERVE_STATUS = {
+  ours: listener(AT_443, SERVE_ROOT_OURS),
+  oursPadded: listener(AT_443, '|-- /    proxy http://127.0.0.1:3100', '|-- /api proxy http://127.0.0.1:8888'),
+  oursUnderFunnel: [
+    '',
+    '# Funnel on:',
+    `#     - ${ORIGIN}`,
+    '',
+    listener(AT_443_FUNNEL, SERVE_ROOT_OURS),
+  ].join('\n'),
+  foreignProxy: listener(AT_443, SERVE_ROOT_FOREIGN),
+  foreignPath: listener(AT_443, SERVE_ROOT_PATH),
+  foreignText: listener(AT_443, SERVE_ROOT_TEXT),
+  foreignPathPadded: listener(AT_443, '|-- /         path  /Users/me/site', SERVE_OTHER_PATH),
+  foreignWithOurPortElsewhere: listener(AT_443, SERVE_ROOT_FOREIGN, SERVE_OUR_PORT_OTHER_PATH),
+  portPrefix: listener(AT_443, SERVE_ROOT_PORT_PREFIX),
+  // Ours on another listener, someone else's at the origin: Tailscale sorts
+  // listeners by host:port, so :443 prints first, but the reading must not
+  // depend on the order.
+  oursOn8443ForeignOn443: [listener(AT_443, SERVE_ROOT_FOREIGN), listener(AT_8443, SERVE_ROOT_OURS)].join('\n'),
+  oursOn8443PathOn443: [listener(AT_8443, SERVE_ROOT_OURS), listener(AT_443, SERVE_ROOT_PATH)].join('\n'),
+  oursOn8443Only: listener(AT_8443, SERVE_ROOT_OURS),
+  oursOnServiceOnly: listener(AT_SERVICE, SERVE_ROOT_OURS),
+  foreignOn8443OursOn443: [listener(AT_443, SERVE_ROOT_OURS), listener(AT_8443, SERVE_ROOT_FOREIGN)].join('\n'),
+  noRootAtOrigin: listener(AT_443, SERVE_OUR_PORT_OTHER_PATH),
+  noConfig: 'No serve config',
+};
+
+/** `printf '%s'` of one fixture, safe inside a double-quoted shell word. */
+const shellText = (text) => `$(printf '%s\\n' ${text.split('\n').map((l) => `'${l.replaceAll("'", "'\\''")}'`).join(' ')})`;
 
 /**
  * `lsof` and `ss` print different shapes, and each platform's check reads its
@@ -192,28 +239,30 @@ function cases(platform, env) {
       `if has_off_loopback 3100 ${pad(loopback)}; then echo detected; else echo clean; fi`,
       'clean',
     ],
-    // These three are the only pin that RUNS `serve_proxies_root`, and the only
-    // one that catches a weakening which keeps the spelling: an
-    // `|| grep -qE '127\.0\.0\.1:'"$1" <<<"$2"` fallback beside the scoped match
-    // leaves `deploy-lint` at 3x and green while the two negative
-    // cases below go red, which is the `/api`-on-our-port config this branch
-    // opened on passing again. The lint counts the helper's text, so a straight
-    // revert of the root scoping or the `([^0-9]|$)` reddens it too; the `<<<`
-    // is what it alone holds.
+    // The only pin that RUNS `serve_proxies_root`, and the only one that
+    // catches a weakening which keeps the spelling: a fallback match beside the
+    // scoped one leaves `deploy-lint`'s textual counts green while the negative
+    // cases below go red.
+    ...[
+      ['ours', 'pass'],
+      ['oursPadded', 'pass'],
+      ['oursUnderFunnel', 'pass'],
+      ['foreignWithOurPortElsewhere', 'fail'],
+      ['portPrefix', 'fail'],
+      ['oursOn8443ForeignOn443', 'fail'],
+      ['oursOn8443Only', 'fail'],
+      ['oursOnServiceOnly', 'fail'],
+      ['foreignOn8443OursOn443', 'pass'],
+      ['noConfig', 'fail'],
+    ].map(([fixture, expected]) => [
+      `serve_proxies_root: ${fixture}`,
+      `if serve_proxies_root 3100 '${ORIGIN}' "${shellText(SERVE_STATUS[fixture])}"; then echo pass; else echo fail; fi`,
+      expected,
+    ]),
     [
-      'serve_proxies_root: a foreign root with our port on another path is not a pass',
-      `if serve_proxies_root 3100 "$(printf '%s\\n%s\\n' "${SERVE_ROOT_FOREIGN}" "${SERVE_OUR_PORT_OTHER_PATH}")"; then echo pass; else echo fail; fi`,
+      'serve_proxies_root: no origin recorded is never a pass',
+      `if serve_proxies_root 3100 '' "${shellText(SERVE_STATUS.ours)}"; then echo pass; else echo fail; fi`,
       'fail',
-    ],
-    [
-      'serve_proxies_root: a root on a port this one is a prefix of is not a pass',
-      `if serve_proxies_root 3100 "${SERVE_ROOT_PORT_PREFIX}"; then echo pass; else echo fail; fi`,
-      'fail',
-    ],
-    [
-      'serve_proxies_root: the mapping the installer writes, with the origin header above it',
-      `if serve_proxies_root 3100 "$(printf '%s\\n%s\\n' 'https://node.tailnet.ts.net (tailnet only)' "${SERVE_ROOT_OURS}")"; then echo pass; else echo fail; fi`,
-      'pass',
     ],
     [
       'env_missing_keys: the file the installer writes is complete',
@@ -250,45 +299,51 @@ function cases(platform, env) {
       `printf '[%s]\\n' "$(env_missing_keys '${env.extraKey}')"`,
       '[]',
     ],
+    // The gate the confirm hangs off: `conflict` is the only answer that asks
+    // before repointing the operator's `/`, so every foreign root handler must
+    // reach it, and a root on any other listener must not answer `loopback`.
+    ...[
+      ['ours', 'loopback'],
+      ['oursPadded', 'loopback'],
+      ['oursUnderFunnel', 'loopback'],
+      ['foreignOn8443OursOn443', 'loopback'],
+      ['foreignProxy', 'conflict'],
+      ['foreignPath', 'conflict'],
+      ['foreignText', 'conflict'],
+      ['foreignPathPadded', 'conflict'],
+      ['foreignWithOurPortElsewhere', 'conflict'],
+      ['portPrefix', 'conflict'],
+      ['oursOn8443ForeignOn443', 'conflict'],
+      ['oursOn8443PathOn443', 'conflict'],
+      ['oursOn8443Only', 'none'],
+      ['oursOnServiceOnly', 'none'],
+      ['noRootAtOrigin', 'none'],
+      ['noConfig', 'none'],
+    ].map(([fixture, expected]) => [
+      `serve_state: ${fixture}`,
+      `serve_state 3100 '${ORIGIN}' "${shellText(SERVE_STATUS[fixture])}"`,
+      expected,
+    ]),
     [
-      "serve_state: a foreign root mapping, ahead of 1 MiB — the gate the confirm hangs off",
-      `serve_state 3100 "$(printf '%s\\n' "${SERVE_ROOT_FOREIGN}"; awk 'BEGIN{for(i=0;i<20000;i++) print "${SERVE_OTHER_PATH}"}')"`,
-      'conflict',
-    ],
-    [
-      'serve_state: a foreign root with our own port on another path is still a conflict',
-      `serve_state 3100 "$(printf '%s\\n%s\\n' "${SERVE_ROOT_FOREIGN}" "${SERVE_OUR_PORT_OTHER_PATH}")"`,
-      'conflict',
-    ],
-    [
-      'serve_state: our root mapping, with other paths around it',
-      `serve_state 3100 "$(printf '%s\\n%s\\n' "${SERVE_ROOT_OURS}" "${SERVE_OTHER_PATH}")"`,
-      'loopback',
-    ],
-    [
-      'serve_state: a root on a port this one is a prefix of is not ours',
-      `serve_state 3100 "${SERVE_ROOT_PORT_PREFIX}"`,
+      'serve_state: a foreign root mapping, ahead of 1 MiB',
+      `serve_state 3100 '${ORIGIN}' "$(printf '%s\\n%s\\n' '${AT_443}' '${SERVE_ROOT_FOREIGN}'; awk 'BEGIN{for(i=0;i<20000;i++) print "${SERVE_OTHER_PATH}"}')"`,
       'conflict',
     ],
     [
       'serve_state: 1 MiB of serve status with no root mapping at all',
-      `serve_state 3100 ${pad(SERVE_OTHER_PATH)}`,
+      `serve_state 3100 '${ORIGIN}' "$(printf '%s\\n' '${AT_443}'; awk 'BEGIN{for(i=0;i<20000;i++) print "${SERVE_OTHER_PATH}"}')"`,
       'none',
     ],
-    [
-      'serve_root_target: names the first root target, over 1 MiB of matches',
-      // Call-site shaped, but this pins the ANSWER, not an abort. A `| head -1`
-      // in here raises 141 and nothing propagates it: `printf` is the
-      // function's last command, so `$?` is 0 by the time it returns, and bash
-      // carries no `errexit` into `$( )` without `inherit_errexit`, which
-      // bash 3.2 does not have. Both facts are load-bearing and neither is
-      // "it lives in a helper": end the function on the failing assignment, or
-      // call it outside a substitution, and the 141 aborts again — see the
-      // comment on `serve_root_target` itself.
-      `serve="$(printf '%s\\n' "${SERVE_ROOT_FOREIGN}"; awk 'BEGIN{for(i=0;i<20000;i++) print "${SERVE_ROOT_FOREIGN}"}')"\n` +
-        `if target="$(serve_root_target "$serve")"; then printf '[%s]\\n' "$target"; else echo aborted; fi`,
-      '[http://127.0.0.1:9999]',
-    ],
+    ...[
+      ['foreignProxy', '[proxy http://127.0.0.1:9999]'],
+      ['foreignPath', '[path  /Users/me/site]'],
+      ['foreignText', '[text  "hello from elsewhere"]'],
+      ['oursOn8443ForeignOn443', '[proxy http://127.0.0.1:9999]'],
+    ].map(([fixture, expected]) => [
+      `serve_origin_root: names the origin's root handler for the confirm (${fixture})`,
+      `printf '[%s]\\n' "$(serve_origin_root '${ORIGIN}' "${shellText(SERVE_STATUS[fixture])}")"`,
+      expected,
+    ]),
   ];
 }
 
@@ -325,8 +380,8 @@ export function run() {
           'owner_only',
           'has_off_loopback',
           'env_missing_keys',
+          'serve_origin_root',
           'serve_state',
-          'serve_root_target',
           'serve_proxies_root',
         ]
           .map((name) => extractFunction(text, name))
@@ -334,9 +389,11 @@ export function run() {
         const parser = text.match(/while IFS= read -r line[^]*?done < "\$ENV_FILE"/);
         if (!parser) throw new Error('missing wrapper env parser');
         helpers += `\nload_runtime_env() {\n${parser[0]}\n}\n`;
-        const readers = [...text.matchAll(/env_file_value\(\) \{[^]*?\n\}/g)];
-        if (readers.length !== 2 || readers[0][0] !== readers[1][0]) {
-          throw new Error('installer and manage env readers differ');
+        for (const name of ['env_file_value', 'serve_origin_root']) {
+          const copies = [...text.matchAll(new RegExp(`\\n${name}\\(\\) \\{[^]*?\\n\\}`, 'g'))];
+          if (copies.length !== 2 || copies[0][0] !== copies[1][0]) {
+            throw new Error(`installer and manage copies of ${name}() differ`);
+          }
         }
       } catch (err) {
         failures.push(`${platform}: ${err.message} in ${file}`);

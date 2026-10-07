@@ -528,6 +528,27 @@ function Invoke-Tailscale {
   return Invoke-Native -FilePath $TS_BIN -Arguments $Arguments
 }
 
+# The handler -- "<type> <target>", such as "proxy http://127.0.0.1:3100" --
+# that captured `serve status` text lists at / under the listener whose header
+# names $Origin with no port: :443, the listener the passkey origin is. '' when
+# that listener has no root. Scoped to the listener because a root line on any
+# other one (`--https=8443`, a Service, plain HTTP) says nothing about what the
+# origin serves, yet matched as if it did. Bets on the layout of Tailscale's
+# `printWebStatusTree`: one header line `<scheme>://<host>[:<port>] (<access>)`
+# per listener, then one `|-- <mount> <type> <target>` line per handler, where
+# <type> is proxy, path, or text. The unix `serve_origin_root` reads the same.
+function Get-ServeOriginRoot {
+  param([string]$Text, [string]$Origin)
+  if (-not $Origin) { return '' }
+  $listener = $false
+  foreach ($raw in ($Text -split "`r?`n")) {
+    $line = $raw.TrimEnd()
+    if (-not $line.StartsWith('|-- ')) { $listener = (($line -split '\s+')[0] -eq $Origin); continue }
+    if ($listener -and $line -match '^\|-- / +(\S.*)$') { return $Matches[1] }
+  }
+  return ''
+}
+
 # ------------------------------------------------------------------ start ----
 
 Write-Host "$C_BLD Dormouse selfhost Relay -- Windows installer$C_OFF"
@@ -1187,6 +1208,21 @@ function Invoke-Tailscale {
   return Invoke-Native -FilePath $TS_BIN -Arguments $Arguments
 }
 
+# The root handler at $Origin in captured `serve status` text. The same
+# function the installer body carries; its comment there states the layout it
+# bets on.
+function Get-ServeOriginRoot {
+  param([string]$Text, [string]$Origin)
+  if (-not $Origin) { return '' }
+  $listener = $false
+  foreach ($raw in ($Text -split "`r?`n")) {
+    $line = $raw.TrimEnd()
+    if (-not $line.StartsWith('|-- ')) { $listener = (($line -split '\s+')[0] -eq $Origin); continue }
+    if ($listener -and $line -match '^\|-- / +(\S.*)$') { return $Matches[1] }
+  }
+  return ''
+}
+
 # pnpm hardlinks packages out of its store with the read-only attribute set, and
 # Windows refuses to unlink a read-only file. Clear it, then delete.
 function Remove-Tree {
@@ -1594,22 +1630,19 @@ function Invoke-Verify {
   if (-not $serveText.Trim()) {
     Fail "tailscale serve reports no configuration"
   } else {
-    # Root-scoped, not merely bounded: `/api` on this port is not `/` on this
-    # port, and a green tick here is a claim about the origin serving Pocket at
-    # `/`. Same match as the unix `serve_proxies_root`.
-    if ($serveText -match ('(?m)^\|--\s+/\s+proxy.*' + [regex]::Escape("127.0.0.1:$PORT") + '([^0-9]|$)')) {
-      Pass "Serve proxies / to 127.0.0.1:$PORT"
+    # The root at the origin, not merely bounded: `/api` on this port is not `/`
+    # on it, and a green tick here is a claim about the origin serving Pocket at
+    # `/`. The origin's listener names the host, so this is also the origin
+    # check. Same reading as the unix `serve_proxies_root`.
+    $serveRoot = Get-ServeOriginRoot -Text $serveText -Origin $ORIGIN
+    if ($serveRoot -match ('^proxy +http://' + [regex]::Escape("127.0.0.1:$PORT") + '(/|$)')) {
+      Pass "Serve proxies / to 127.0.0.1:$PORT at DORMOUSE_ORIGIN ($ORIGIN)"
     } else {
-      Fail "Serve does not proxy / to 127.0.0.1:$PORT"
+      Fail "Serve does not proxy / to 127.0.0.1:$PORT at DORMOUSE_ORIGIN ($ORIGIN)"
       # The remedy is one command and `verify` already knows it, so print it
       # rather than leaving the reader to find `manage serve` in the runbook.
       Write-Host ('      re-apply it with: "{0}\bin\manage.cmd" serve' -f $Root)
       foreach ($l in $serveText.Split("`n")) { if ($l.Trim()) { Write-Host "      $($l.TrimEnd())" } }
-    }
-    if ($ORIGIN -and ($serveText -match [regex]::Escape($ORIGIN.Replace('https://', '')))) {
-      Pass "Serve origin matches DORMOUSE_ORIGIN ($ORIGIN)"
-    } else {
-      Fail "Serve origin does not match DORMOUSE_ORIGIN ($ORIGIN)"
     }
   }
 
@@ -1902,10 +1935,13 @@ function Invoke-Uninstall {
 
   # Turn off only the mapping this installer owns.
   $serve = Invoke-Tailscale @('serve', 'status')
-  # Root-scoped, like the unix `serve_proxies_root`: `serve --bg off` resets the
-  # node's whole Serve config, so an unscoped port match turned off a root
-  # mapping this install never owned whenever our port sat on another path.
-  if (($serve.StdOut + $serve.StdErr) -match ('(?m)^\|--\s+/\s+proxy.*' + [regex]::Escape("127.0.0.1:$PORT") + '([^0-9]|$)')) {
+  $serveText = $serve.StdOut + $serve.StdErr
+  # Root-scoped at the origin, like the unix `serve_proxies_root`: `serve --bg
+  # off` resets the node's whole Serve config, so an unscoped port match turned
+  # off a root mapping this install never owned whenever our port sat on
+  # another path or another listener.
+  $serveRoot = Get-ServeOriginRoot -Text $serveText -Origin $ORIGIN
+  if ($serveRoot -match ('^proxy +http://' + [regex]::Escape("127.0.0.1:$PORT") + '(/|$)')) {
     $off = Invoke-Tailscale @('serve', '--bg', 'off')
     if ($off.ExitCode -eq 0) { Write-Host "turned off the Serve mapping to 127.0.0.1:$PORT" }
     else { [Console]::Error.WriteLine('could not turn off the Serve mapping; check "tailscale serve status" and remove it by hand') }
@@ -2285,18 +2321,18 @@ rem directly.
   }
 
   $NEEDS_SERVE = $true
-  # Root-scoped and right-bounded, for the two reasons the unix `serve_state`
-  # carries: a bare port match said "already ours" for a config whose ROOT was
-  # foreign and whose other path sat on this port, and `127.0.0.1:31000`
-  # contains `127.0.0.1:3100`. Either one skips the confirm below and the
-  # mutation with it, leaving / foreign while the install reports success.
-  if ($SERVE_BEFORE -match ('(?m)^\|--\s+/\s+proxy.*' + [regex]::Escape("127.0.0.1:$LOOPBACK_PORT") + '([^0-9]|$)')) {
+  # The origin's root handler alone, right-bounded, for the reasons the unix
+  # `serve_state` carries: a bare port match said "already ours" when / was
+  # foreign and another path sat on this port; `127.0.0.1:31000` contains
+  # `127.0.0.1:3100`; a root proxy on another listener said "already ours"
+  # while :443 served someone else; and only a foreign proxy counted as a
+  # conflict, so a path or text root was repointed without the confirm.
+  $serveRoot = Get-ServeOriginRoot -Text $SERVE_BEFORE -Origin $ORIGIN
+  if ($serveRoot -match ('^proxy +http://' + [regex]::Escape("127.0.0.1:$LOOPBACK_PORT") + '(/|$)')) {
     Write-Ok "Serve already proxies to 127.0.0.1:$LOOPBACK_PORT"
     $NEEDS_SERVE = $false
-  } elseif ($SERVE_BEFORE -match '(?m)^\|--\s+/\s+proxy') {
-    $existingTarget = ''
-    if ($SERVE_BEFORE -match '(?m)^\|--\s+/\s+proxy\s+(.*)$') { $existingTarget = $Matches[1].Trim() }
-    Write-Warn2 "the root HTTPS path is already mapped to something else: $(if ($existingTarget) { $existingTarget } else { '<unknown>' })"
+  } elseif ($serveRoot) {
+    Write-Warn2 "the root HTTPS path is already mapped to something else: $serveRoot"
     Write-Warn2 "Dormouse needs / on this node to serve the Pocket app at the passkey origin."
     if (-not (Confirm-Step "Repoint / to 127.0.0.1:$LOOPBACK_PORT?")) {
       Die "left the Serve config alone. Resolve the hostname/path conflict, then re-run."
