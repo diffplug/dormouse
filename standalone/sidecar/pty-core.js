@@ -441,7 +441,7 @@ async function detectWindowsShells(runtime = {}) {
   }
 
   // Command Prompt
-  const cmdPath = env.ComSpec || env.COMSPEC || windowsSystemPath(env, 'System32', 'cmd.exe');
+  const cmdPath = resolveDefaultShell('win32', env);
   if (fileExists(cmdPath, fsModule)) {
     shells.push({ name: 'Command Prompt', path: cmdPath, args: [] });
   }
