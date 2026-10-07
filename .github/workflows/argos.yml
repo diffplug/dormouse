@@ -57,8 +57,8 @@ jobs:
       github.event_name != 'pull_request'
       || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
-    # This job does the rendering, and `--with-deps` runs an unbounded apt-get;
-    # without a cap a stalled mirror holds the runner 6h.
+    # This job does the rendering; without a cap a hung capture or browser
+    # download holds the runner 6h.
     timeout-minutes: 30
     steps:
       - name: Checkout
@@ -78,12 +78,31 @@ jobs:
         working-directory: lib
 
       - name: Install browsers
-        run: pnpm exec playwright install --with-deps chromium webkit
+        run: pnpm exec playwright install chromium webkit
         working-directory: lib
 
-      - name: Install snapshot symbol font
-        # Matches the explicit fallback in lib/.storybook/themes.ts.
-        run: sudo apt-get install -y --no-install-recommends fonts-dejavu-core
+      # The apt half of `--with-deps`, bounded and retried like ci.yml's apt
+      # steps: an unbounded apt-get on a stalled Ubuntu mirror once held this
+      # step until the job's 30-minute cap killed it, while ci.yml's retries
+      # rode out the same stall. Root runs Playwright's apt commands without its
+      # own sudo, so `timeout` reaches the whole apt process tree. DejaVu matches
+      # the explicit fallback in lib/.storybook/themes.ts.
+      # Worst case is 3 x (240 deps + 120 font) + 2 x 15 sleep = 1110s.
+      - name: Install browser system dependencies
+        timeout-minutes: 19
+        working-directory: lib
+        run: |
+          node_bin=$(command -v node)
+          for i in 1 2 3; do
+            if sudo timeout 240 "$node_bin" node_modules/playwright/cli.js install-deps chromium webkit \
+               && sudo timeout 120 apt-get install -y -q --no-install-recommends fonts-dejavu-core; then
+              exit 0
+            fi
+            echo "::warning::apt attempt $i for browser dependencies failed or timed out"
+            if [ "$i" -lt 3 ]; then sleep 15; fi
+          done
+          echo "::error::could not install browser system dependencies"
+          exit 1
 
       - name: Capture and upload screenshots
         # One Argos build per browser: `storybook-chromium`, `storybook-webkit`.
