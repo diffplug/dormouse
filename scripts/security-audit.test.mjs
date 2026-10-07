@@ -1,26 +1,56 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { copyFileSync, mkdirSync, readdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { BODY_LIMIT } from './clamp-issue-body.mjs';
 import { repoRoot, tempDir, workflowRunBlock } from './lint-kit.mjs';
 
 const repo = repoRoot;
 const workflow = readFileSync(join(repo, '.github/workflows/security-audit.yaml'), 'utf8');
 const fragments = workflow.match(/^\s+AUDIT_FRAGMENTS: (.+)$/m)[1].split(/\s+/);
-const publishedSinks = workflow.match(/          path: \|\n((?:            .*\n)+)/)[1]
-  .trim().split('\n').map((line) => line.trim().replace('${{ runner.temp }}/', ''));
 
 // Execute the shipped block, so changes to its parser or guards reach these tests.
 const runBlock = (name) => workflowRunBlock(workflow, name);
+
+/** One step's whole text, from its `- name:` line to the next step. */
+function stepText(name) {
+  const start = workflow.indexOf(`      - name: ${name}\n`);
+  assert.ok(start >= 0, `missing workflow step: ${name}`);
+  const end = workflow.indexOf('\n      - ', start + 1);
+  return workflow.slice(start, end < 0 ? undefined : end);
+}
+
+// Every sink the encrypted archive takes, as its loop names them. The
+// redaction tests below write a secret into each, and the encryption test
+// checks the archive holds them, so a sink added to one list and not the
+// other fails one of the two.
+const archivedSinks = runBlock('Encrypt the audit transcript')
+  .match(/^for f in (.+); do$/m)[1]
+  .replace('"$RUNNER_TEMP/claude-execution-output.json"', 'claude-execution-output.json')
+  .replace('$AUDIT_FRAGMENTS', fragments.join(' '))
+  .split(/\s+/);
+
+const EMBARGO_REPO = stepText('File embargoed findings').match(/^          EMBARGO_REPO: (.+)$/m)[1];
+const COMMIT = '0123456789abcdef0123456789abcdef01234567';
 
 function fixture(t) {
   const dir = tempDir(t, 'dormouse-audit-');
   mkdirSync(join(dir, 'bin'));
   mkdirSync(join(dir, 'scripts'));
-  copyFileSync(join(repo, 'scripts/clamp-issue-body.mjs'), join(dir, 'scripts/clamp-issue-body.mjs'));
+  mkdirSync(join(dir, 'docs/specs'), { recursive: true });
+  mkdirSync(join(dir, '.github/audit'), { recursive: true });
+  for (const script of ['clamp-issue-body.mjs', 'security-audit-public-body.mjs']) {
+    copyFileSync(join(repo, 'scripts', script), join(dir, 'scripts', script));
+  }
+  // The public builder names a failed check only by a heading these specs carry.
+  for (const spec of readdirSync(join(repo, 'docs/specs')).filter((f) => /^security[a-z-]*\.md$/.test(f))) {
+    copyFileSync(join(repo, 'docs/specs', spec), join(dir, 'docs/specs', spec));
+  }
+  copyFileSync(join(repo, '.github/audit/transcript-recipient.txt'), join(dir, '.github/audit/transcript-recipient.txt'));
   const env = { ...process.env, PATH: `${join(dir, 'bin')}:${process.env.PATH}`, RUNNER_TEMP: dir,
     AUDIT_FRAGMENTS: fragments.join(' '), GITHUB_REPOSITORY: 'fixture/repo', GITHUB_RUN_ID: '123',
+    GITHUB_SHA: COMMIT, GH_TOKEN: 'fixture-workflow-token',
     AUDIT_PAT: 'fixture-admin-token', CLAUDE_CODE_OAUTH_TOKEN: 'fixture-oauth-token' };
   return { dir, env };
 }
@@ -29,14 +59,69 @@ function stub(dir, name, source) {
   writeFileSync(join(dir, 'bin', name), `#!${process.execPath}\n${source}\n`, { mode: 0o755 });
 }
 
+/**
+ * A `gh` that records each call with the token it was handed and the body it
+ * posted. `issue list` finds open issue 23; a create in the embargo repository
+ * answers with its URL, or fails when `GH_FAIL_EMBARGO` is set.
+ */
+function stubGh(dir) {
+  stub(dir, 'gh', `
+    const fs = require('node:fs');
+    const args = process.argv.slice(2);
+    const bodyAt = args.indexOf('--body-file');
+    const body = bodyAt === -1 ? null : fs.readFileSync(args[bodyAt + 1], 'utf8');
+    const embargo = args.includes(${JSON.stringify(EMBARGO_REPO)}) || (args[2] ?? '').includes(${JSON.stringify(EMBARGO_REPO)});
+    fs.appendFileSync('gh-calls.jsonl', JSON.stringify({ args, token: process.env.GH_TOKEN, body, embargo }) + '\\n');
+    if (embargo && process.env.GH_FAIL_EMBARGO) process.exit(1);
+    if (args[0] === 'issue' && args[1] === 'list') process.stdout.write('23\\n');
+    if (embargo && args[1] === 'create') process.stdout.write('https://github.com/${EMBARGO_REPO}/issues/7\\n');
+  `);
+}
+
+const ghCalls = (dir) => (existsSync(join(dir, 'gh-calls.jsonl'))
+  ? readFileSync(join(dir, 'gh-calls.jsonl'), 'utf8').trim().split('\n').map(JSON.parse)
+  : []);
+
+/** `NAME: ${{ steps.<id>.outputs.<key> }}` entries of a step's `env:`, so the plumbing between steps is the shipped one. */
+const outputEnv = (name) => [...stepText(name).matchAll(/^          (\w+): \$\{\{ steps\.(\w+)\.outputs\.(\w+) \}\}$/gm)]
+  .map(([, variable, step, key]) => ({ variable, step, key }));
+
+/**
+ * Run the three reporting steps as the runner would: compose, then the
+ * embargo filing unless the verdict passed (its `if:`), then the public step,
+ * each handed the outputs its `env:` names.
+ */
+function runReporting(dir, env, { embargoToken = 'fixture-embargo-token', embargoEnv = {} } = {}) {
+  const outputs = {};
+  const run = (id, name, extra) => {
+    const file = join(dir, `github-output-${id}`);
+    writeFileSync(file, '');
+    const resolved = Object.fromEntries(outputEnv(name).map(({ variable, step, key }) => [variable, outputs[step]?.[key] ?? '']));
+    const result = spawnSync('bash', ['-c', runBlock(name)], { cwd: dir, encoding: 'utf8',
+      env: { ...env, GITHUB_OUTPUT: file, ...resolved, ...extra } });
+    outputs[id] = Object.fromEntries(readFileSync(file, 'utf8').split('\n').filter(Boolean)
+      .map((line) => [line.slice(0, line.indexOf('=')), line.slice(line.indexOf('=') + 1)]));
+    return result;
+  };
+  assert.match(stepText('File embargoed findings'), /^        if: always\(\) && steps\.compose\.outputs\.status != 'PASS'$/m);
+  const composed = run('compose', 'Compose the audit report', {});
+  assert.equal(composed.status, 0, composed.stderr);
+  const embargoed = outputs.compose.status === 'PASS' ? null
+    : run('embargo', 'File embargoed findings', { GH_TOKEN: embargoToken, EMBARGO_REPO, ...embargoEnv });
+  const surfaced = run('surface', 'Surface result, file or close issue', {});
+  return { composed, embargoed, surfaced, outputs };
+}
+
+const privateParts = (dir) => readdirSync(dir).filter((f) => /^audit-private-part-\d+\.md$/.test(f)).sort()
+  .map((f) => readFileSync(join(dir, f), 'utf8'));
+
 // The one literal every reader waits for and every fixture writes. The
 // producer copy in `.github/audit/_preamble.md` is pinned against it below.
 const SENTINEL = '<!-- END OF REPORT -->';
 
-const reporting = runBlock('Surface result, file or close issue');
 const cases = [
   { name: 'all checks pass', status: 'PASS\n', verdicts: ['PASS', 'PASS', 'PASS', 'PASS'], expected: 'PASS' },
-  { name: 'missing merged verdict', verdicts: ['PASS', 'PASS', 'PASS', 'PASS'], expected: 'INCONCLUSIVE' },
+  { name: 'missing merged verdict', verdicts: ['PASS', 'PASS', 'PASS', 'PASS'], expected: 'INCONCLUSIVE', publicRows: ['The orchestrator wrote no verdict.'] },
   { name: 'embedded whitespace is not PASS', status: 'P A\nSS\n', verdicts: ['PASS', 'PASS', 'PASS', 'PASS'], expected: 'INCONCLUSIVE' },
   { name: 'PASS prefix with a suffix is unreadable', status: 'PASS', verdicts: ['PASS but unfinished', 'PASS', 'PASS', 'PASS'], expected: 'INCONCLUSIVE' },
   { name: 'missing fragment', status: 'PASS', verdicts: [null, 'PASS', 'PASS', 'PASS'], expected: 'INCONCLUSIVE' },
@@ -44,13 +129,15 @@ const cases = [
   { name: 'dissent overrides missing merged verdict', verdicts: ['FAIL', 'PASS', 'PASS', 'PASS'], expected: 'FAIL' },
   { name: 'FAIL with explanation overrides merged PASS', status: 'PASS', verdicts: ['FAIL — credential leaked', 'PASS', 'PASS', 'PASS'], expected: 'FAIL' },
   { name: 'FAIL with explanation overrides missing merged verdict', verdicts: ['FAIL — credential leaked', 'PASS', 'PASS', 'PASS'], expected: 'FAIL' },
-  { name: 'FAIL records every incomplete condition', status: 'FAIL', verdicts: [null, 'garbled', 'INCONCLUSIVE', 'PASS'], expected: 'FAIL', notes: ['left no report', 'could not be read', 'could not determine every check'] },
+  { name: 'FAIL records every incomplete condition', status: 'FAIL', verdicts: [null, 'garbled', 'INCONCLUSIVE', 'PASS'], expected: 'FAIL', notes: ['left no report', 'could not be read', 'could not determine every check'],
+    publicRows: ['| `audit-supply-chain.md` | no report |', '| `audit-ci-secrets.md` | unreadable |', '| `audit-application.md` | INCONCLUSIVE |', '| `audit-hosted.md` | PASS |'] },
   { name: 'dissent and incomplete domains coexist', status: 'PASS', verdicts: ['FAIL', null, 'INCONCLUSIVE', 'PASS'], expected: 'FAIL', notes: ['returned `FAIL`', 'left no report', 'could not determine every check'] },
   // A domain cut off between rewriting its verdict line and writing its
   // sentinel reads as a clean PASS on line 1. Without the sentinel guard that
   // is a merged PASS over a report that stopped early, and PASS opens the
   // release gate.
-  { name: 'PASS without a sentinel is a cut-off domain', status: 'PASS', verdicts: ['PASS', 'PASS', 'PASS', 'PASS'], unfinished: [2], expected: 'INCONCLUSIVE', notes: ['cut off mid-report'] },
+  { name: 'PASS without a sentinel is a cut-off domain', status: 'PASS', verdicts: ['PASS', 'PASS', 'PASS', 'PASS'], unfinished: [2], expected: 'INCONCLUSIVE', notes: ['cut off mid-report'],
+    publicRows: ['| `audit-application.md` | PASS, cut off |'] },
   { name: 'a cut-off FAIL is still a finding', status: 'PASS', verdicts: ['PASS', 'PASS', 'FAIL', 'PASS'], unfinished: [2], expected: 'FAIL', notes: ['returned `FAIL`', 'cut off mid-report'] },
   { name: 'a trailing blank line still ends a report', status: 'PASS', verdicts: ['PASS', 'PASS', 'PASS', 'PASS'], trailingBlank: true, expected: 'PASS' },
   // The no-verdict note is the reader's index into the merged report, so it
@@ -85,7 +172,7 @@ const cases = [
     verdicts: ['PASS', 'INCONCLUSIVE', 'PASS', 'PASS'],
     evidence: [null, '- UNVERIFIABLE: token scope needs a live credential', null, null],
     report: `# Fixture report\n${'filler paragraph. '.repeat(3000)}\n`,
-    expected: 'INCONCLUSIVE', clamped: true,
+    expected: 'INCONCLUSIVE', split: true,
     notes: ['- `audit-ci-secrets.md`: - UNVERIFIABLE: token scope needs a live credential',
       '- `audit-hosted.md`: VERDICT: PASS'] },
   // The lift reads line starts, so the `FAIL IF` vocabulary every fragment is
@@ -119,62 +206,239 @@ const cases = [
 for (const scenario of cases) {
   test(`reporting: ${scenario.name}`, (t) => {
     const { dir, env } = fixture(t);
-    stub(dir, 'gh', `
-      const fs = require('node:fs');
-      const args = process.argv.slice(2);
-      fs.appendFileSync('gh-calls.jsonl', JSON.stringify(args) + '\\n');
-      if (args[0] === 'issue' && args[1] === 'list') process.stdout.write('23\\n');
-    `);
+    stubGh(dir);
     if (scenario.status !== undefined) writeFileSync(join(dir, 'audit-status.txt'), scenario.status);
     if (scenario.report !== null) writeFileSync(join(dir, 'audit-report.md'), scenario.report ?? '# Fixture report\n');
+    const written = [];
     scenario.verdicts.forEach((verdict, i) => {
       if (verdict === null) return;
       const sentinel = scenario.unfinished?.includes(i)
         ? ''
         : `${SENTINEL}\n${scenario.trailingBlank ? '\n' : ''}`;
       const evidence = scenario.evidence?.[i] ?? 'Evidence';
-      writeFileSync(join(dir, fragments[i]),
-        scenario.raw?.[i] ?? `VERDICT: ${verdict}\n${evidence}\n${sentinel}`);
+      const text = scenario.raw?.[i] ?? `VERDICT: ${verdict}\n${evidence}\n${sentinel}`;
+      written.push(text);
+      writeFileSync(join(dir, fragments[i]), text);
     });
-    const result = spawnSync('bash', ['-c', reporting], { cwd: dir, env, encoding: 'utf8' });
-    assert.equal(result.status, scenario.expected === 'PASS' ? 0 : 1, result.stderr);
-    const calls = readFileSync(join(dir, 'gh-calls.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
-    assert.equal(calls.some((args) => args[0] === 'issue' && args[1] === 'close'), scenario.expected === 'PASS');
+    const { surfaced } = runReporting(dir, env);
+    assert.equal(surfaced.status, scenario.expected === 'PASS' ? 0 : 1, surfaced.stderr);
+    const calls = ghCalls(dir);
+    assert.equal(calls.some(({ args }) => args[0] === 'issue' && args[1] === 'close'), scenario.expected === 'PASS');
+    if (scenario.expected === 'PASS') {
+      // A pass files nothing, in either tracker.
+      assert.ok(!calls.some(({ args }) => args[0] === 'issue' && (args[1] === 'create' || args[1] === 'comment')));
+      return;
+    }
     // The step aborting before it posts leaves every `notes` assertion below
     // unreachable, so name the post itself.
     if (scenario.posts) {
-      assert.ok(calls.some((args) => args[0] === 'issue' && args[1] === 'comment'), 'no issue comment was posted');
+      assert.ok(calls.some(({ args, embargo }) => !embargo && args[0] === 'issue' && args[1] === 'comment'), 'no public issue comment was posted');
     }
-    if (scenario.expected !== 'PASS') {
-      const body = readFileSync(join(dir, 'audit-comment.md'), 'utf8');
-      assert.match(body, scenario.expected === 'FAIL' ? /Audit failed/ : /Audit reached no usable verdict/);
-      // Without this the truncation case passes vacuously on a body that fit.
-      if (scenario.clamped) assert.match(body, /_Truncated to fit: the full body is \d+ characters\./);
-      for (const note of scenario.notes ?? []) assert.ok(body.includes(note), `missing note: ${note}`);
-      for (const [note, n] of Object.entries(scenario.counts ?? {})) {
-        assert.equal(body.split(note).length - 1, n, `wrong occurrence count for: ${note}`);
+    const body = readFileSync(join(dir, 'audit-private.md'), 'utf8');
+    assert.match(body, scenario.expected === 'FAIL' ? /Audit failed/ : /Audit reached no usable verdict/);
+    // The deciding lines are in the head, the issue's own body, whatever the split does.
+    const parts = privateParts(dir);
+    const head = scenario.split ? parts[0] : body;
+    // Without this the split case passes vacuously on a body that fit.
+    if (scenario.split) assert.ok(parts.length > 1 && parts.every((part) => part.length <= BODY_LIMIT), `parts: ${parts.length}`);
+    for (const note of scenario.notes ?? []) assert.ok(head.includes(note), `missing note: ${note}`);
+    for (const [note, n] of Object.entries(scenario.counts ?? {})) {
+      assert.equal(body.split(note).length - 1, n, `wrong occurrence count for: ${note}`);
+    }
+    // The private issue received every part, in order, under the embargo token.
+    const filed = calls.filter(({ embargo }) => embargo);
+    assert.deepEqual(filed.map(({ body: posted }) => posted), parts);
+    assert.ok(filed.every(({ token }) => token === 'fixture-embargo-token'));
+    // The public issue carries none of what a domain wrote beyond its verdict.
+    const published = calls.filter(({ embargo, body: posted }) => !embargo && posted !== null);
+    assert.equal(published.length, 1);
+    assert.ok(published.every(({ token }) => token === 'fixture-workflow-token'));
+    const publicBody = published[0].body;
+    assert.match(publicBody, scenario.expected === 'FAIL' ? /^Audit failed/ : /^Audit reached no usable verdict/);
+    assert.ok(!publicBody.includes('Fixture report') && !publicBody.includes('filler paragraph'));
+    for (const text of written) {
+      for (const line of text.split('\n').filter((l) => l.length > 6 && !/^VERDICT: (PASS|INCONCLUSIVE)$/.test(l) && l !== SENTINEL)) {
+        assert.ok(!publicBody.includes(line), `the public body carries fragment text: ${line}`);
       }
     }
+    for (const row of scenario.publicRows ?? []) assert.ok(publicBody.includes(row), `missing public row: ${row}`);
   });
 }
 
-test('redaction covers every published sink', (t) => {
+// The two sinks the redactor guards are the encrypted archive and the private
+// issue, which is composed from the same files.
+test('redaction covers every archived sink', (t) => {
   const { dir, env } = fixture(t);
-  const sinks = publishedSinks;
-  for (const sink of sinks) writeFileSync(join(dir, sink), `${env.AUDIT_PAT} ${env.CLAUDE_CODE_OAUTH_TOKEN}`);
+  for (const sink of archivedSinks) writeFileSync(join(dir, sink), `${env.AUDIT_PAT} ${env.CLAUDE_CODE_OAUTH_TOKEN}`);
   const result = spawnSync('bash', ['-c', runBlock('Redact secrets from agent output')], { cwd: dir, env, encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
-  for (const sink of sinks) assert.equal(readFileSync(join(dir, sink), 'utf8'), '*** ***');
+  for (const sink of archivedSinks) assert.equal(readFileSync(join(dir, sink), 'utf8'), '*** ***');
 });
 
-test('redactor failure removes every published sink', (t) => {
+test('redactor failure removes every archived sink', (t) => {
   const { dir, env } = fixture(t);
-  const sinks = publishedSinks;
-  for (const sink of sinks) writeFileSync(join(dir, sink), env.AUDIT_PAT);
+  for (const sink of archivedSinks) writeFileSync(join(dir, sink), env.AUDIT_PAT);
   stub(dir, 'node', 'process.exit(1);');
   const result = spawnSync('bash', ['-c', runBlock('Redact secrets from agent output')], { cwd: dir, env, encoding: 'utf8' });
   assert.equal(result.status, 1);
-  for (const sink of sinks) assert.equal(existsSync(join(dir, sink)), false, sink);
+  for (const sink of archivedSinks) assert.equal(existsSync(join(dir, sink)), false, sink);
+});
+
+// --- Embargo: detail goes private, the public issue gets verdicts and counts ---
+
+// Issue #1027 published a working command-injection payload. A FAIL line and a
+// BLOCKER carrying one, a FAIL line naming a heading no spec has, and a
+// verdict line with an appended explanation: none of their text may reach the
+// public body, and all of it must reach the private issue.
+const EXPLOIT = '$(printf calc-injected-7f3a)';
+test('the public issue carries counts and verified section names, never finding text', (t) => {
+  const { dir, env } = fixture(t);
+  stubGh(dir);
+  writeFileSync(join(dir, 'audit-status.txt'), 'FAIL');
+  writeFileSync(join(dir, 'audit-report.md'), `# Security audit\n\nThe merged report quotes ${EXPLOIT}.\n`);
+  writeFileSync(join(dir, fragments[0]), `VERDICT: PASS\n- PASS: fine\n${SENTINEL}\n`);
+  writeFileSync(join(dir, fragments[1]), [
+    `VERDICT: FAIL — ${EXPLOIT}`,
+    '### FAIL IF results',
+    `- FAIL: \`docs/specs/security-audit.md\` -> "Environment and \`AUDIT_PAT\`" — reproduced with ${EXPLOIT}`,
+    `- FAIL: \`docs/specs/security-audit.md\` -> "Run ${EXPLOIT} to see" — a heading no spec has`,
+    '- PASS: `docs/specs/security-ci.md` -> "GitHub Actions Policies" — pinned',
+    '### Qualitative findings',
+    `- BLOCKER: the reporter runs ${EXPLOIT}`,
+    `- **WARNING** — ${EXPLOIT} again`,
+    '- INFO: nothing to see',
+    SENTINEL, '',
+  ].join('\n'));
+  writeFileSync(join(dir, fragments[2]), `VERDICT: PASS\n${SENTINEL}\n`);
+  writeFileSync(join(dir, fragments[3]), `VERDICT: PASS\n${SENTINEL}\n`);
+  const { surfaced } = runReporting(dir, env);
+  assert.equal(surfaced.status, 1, surfaced.stderr);
+  const calls = ghCalls(dir);
+  const publicBody = calls.find(({ embargo, body }) => !embargo && body !== null).body;
+  assert.ok(!publicBody.includes('calc-injected-7f3a'), publicBody);
+  assert.ok(publicBody.includes(`| \`${fragments[1]}\` | FAIL | 2 | 1 | 1 |`), publicBody);
+  assert.ok(publicBody.includes('- `docs/specs/security-audit.md` -> "Environment and `AUDIT_PAT`"'), publicBody);
+  assert.ok(publicBody.includes('1 failed check named no section heading'), publicBody);
+  assert.ok(publicBody.includes(COMMIT), publicBody);
+  assert.match(publicBody, /triaged privately until fixed/);
+  const privately = calls.filter(({ embargo }) => embargo).map(({ body }) => body).join('');
+  assert.ok(privately.includes(`The merged report quotes ${EXPLOIT}.`), privately);
+  assert.ok(privately.includes(`- BLOCKER: the reporter runs ${EXPLOIT}`), privately);
+});
+
+test('a long report is split across the private issue and its comments, losing nothing', (t) => {
+  const { dir, env } = fixture(t);
+  stubGh(dir);
+  writeFileSync(join(dir, 'audit-status.txt'), 'FAIL');
+  const tail = `- FAIL: the finding past the old cut ${EXPLOIT}`;
+  writeFileSync(join(dir, 'audit-report.md'), `# Security audit\n${'filler line of a long report.\n'.repeat(4000)}${tail}\n`);
+  fragments.forEach((f, i) => writeFileSync(join(dir, f), `VERDICT: ${i ? 'PASS' : 'FAIL'}\n${SENTINEL}\n`));
+  runReporting(dir, env);
+  const filed = ghCalls(dir).filter(({ embargo }) => embargo);
+  assert.ok(filed.length >= 4, `filed ${filed.length} part(s)`);
+  assert.deepEqual(filed.map(({ args }) => args[1]), ['create', ...Array(filed.length - 1).fill('comment')]);
+  assert.ok(filed[0].args.includes(EMBARGO_REPO));
+  assert.ok(filed.every(({ body }) => body.length <= BODY_LIMIT));
+  assert.ok(filed.at(-1).body.includes(tail));
+});
+
+for (const [name, options, result, publicNote] of [
+  ['a missing EMBARGO_TOKEN', { embargoToken: '' }, 'missing-token', '`EMBARGO_TOKEN` is not set'],
+  ['a refused private filing', { embargoEnv: { GH_FAIL_EMBARGO: '1' } }, 'failed', 'The private filing failed.'],
+]) {
+  test(`${name} fails loudly and publishes no detail`, (t) => {
+    const { dir, env } = fixture(t);
+    stubGh(dir);
+    writeFileSync(join(dir, 'audit-status.txt'), 'FAIL');
+    writeFileSync(join(dir, 'audit-report.md'), `# Security audit\n${EXPLOIT}\n`);
+    fragments.forEach((f, i) => writeFileSync(join(dir, f), `VERDICT: ${i ? 'PASS' : 'FAIL'}\n- BLOCKER: ${EXPLOIT}\n${SENTINEL}\n`));
+    const { embargoed, surfaced, outputs } = runReporting(dir, env, options);
+    assert.equal(embargoed.status, 1);
+    assert.match(embargoed.stdout, /::error::/);
+    assert.equal(outputs.embargo.result, result);
+    assert.ok(!`${embargoed.stdout}${embargoed.stderr}`.includes('calc-injected-7f3a'));
+    if (result === 'missing-token') assert.equal(ghCalls(dir).filter(({ embargo }) => embargo).length, 0);
+    // The public issue is still filed, says the private filing failed, and
+    // carries no more than it would have anyway.
+    assert.equal(surfaced.status, 1);
+    const published = ghCalls(dir).filter(({ embargo, body }) => !embargo && body !== null);
+    assert.equal(published.length, 1);
+    assert.ok(published[0].body.includes(publicNote), published[0].body);
+    assert.ok(!published[0].body.includes('calc-injected-7f3a'), published[0].body);
+  });
+}
+
+// The agent must never hold `EMBARGO_TOKEN`: it is named in exactly one step's
+// `env:`, that step is not the agent's, and no job- or workflow-level `env:`,
+// `$GITHUB_ENV` write, or whole-secrets expression reaches it elsewhere.
+test('EMBARGO_TOKEN is in the embargo step\'s env alone', () => {
+  const holder = 'File embargoed findings';
+  const uses = workflow.split('\n').filter((line) => /secrets\s*\.\s*EMBARGO_TOKEN|secrets\s*\[/.test(line));
+  assert.deepEqual(uses, ['          GH_TOKEN: ${{ secrets.EMBARGO_TOKEN }}']);
+  const env = stepText(holder).match(/^        env:\n((?:          .*\n)+)/m)[1];
+  assert.ok(env.includes(uses[0]), 'the token is not in the embargo step\'s env');
+  assert.ok(!stepText('Audit against the security specs').includes('EMBARGO'));
+  assert.doesNotMatch(workflow, /toJSON\(\s*secrets\s*\)|secrets: inherit/);
+  assert.doesNotMatch(workflow, /GITHUB_ENV/);
+});
+
+// Holding the token, the step runs `gh` on the parts the compose step wrote
+// and nothing from the repository: no script a modified checkout could swap.
+test('the embargo step runs no repository code', () => {
+  const block = runBlock('File embargoed findings');
+  assert.doesNotMatch(block, /\bnode\b|\bpnpm\b|\bnpx\b|scripts\/|\.\/|\bsource\b|^\s*\. /m);
+});
+
+// Every path the transcript artifact uploads is age ciphertext, and the
+// upload runs only when the encryption step succeeded.
+test('the transcript artifact uploads ciphertext only', () => {
+  const upload = stepText('Archive audit transcript');
+  const paths = upload.match(/^          path: (.+)$/m)?.[1];
+  assert.ok(paths && !paths.startsWith('|'), 'expected a single upload path');
+  assert.match(paths, /\.age$/);
+  assert.match(upload, /^        if: always\(\) && steps\.encrypt\.outcome == 'success'$/m);
+  assert.match(stepText('Encrypt the audit transcript'), /^        id: encrypt$/m);
+});
+
+/** A fake `age` that marks its output and copies stdin, or fails half-way through when `AGE_FAIL` is set. */
+function stubAge(dir) {
+  stub(dir, 'age', `
+    const fs = require('node:fs');
+    const args = process.argv.slice(2);
+    const recipients = args[args.indexOf('-R') + 1];
+    if (!fs.readFileSync(recipients, 'utf8').includes('age15aqsn6kx3eckj70cxf4l8072fefzd6sskzk9akvfp6m9fcwrsgsqs6valr')) process.exit(3);
+    const out = args[args.indexOf('-o') + 1];
+    fs.writeFileSync(out, 'age-encryption.org/v1\\n');
+    if (process.env.AGE_FAIL) process.exit(1);
+    fs.appendFileSync(out, fs.readFileSync(0));
+  `);
+  stub(dir, 'sudo', 'process.exit(0);');
+}
+
+test('the transcript is archived as age ciphertext holding every sink', (t) => {
+  const { dir, env } = fixture(t);
+  stubAge(dir);
+  for (const sink of archivedSinks) writeFileSync(join(dir, sink), `plaintext of ${sink}`);
+  const result = spawnSync('bash', ['-c', runBlock('Encrypt the audit transcript')], { cwd: dir, env, encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  const out = join(dir, 'audit-transcript.tar.gz.age');
+  const sealed = readFileSync(out);
+  assert.ok(sealed.toString('latin1').startsWith('age-encryption.org/v1\n'));
+  const tarball = join(dir, 'archive.tar.gz');
+  writeFileSync(tarball, sealed.subarray('age-encryption.org/v1\n'.length));
+  const listed = spawnSync('tar', ['-tzf', tarball], { encoding: 'utf8' }).stdout.split('\n')
+    .map((f) => f.replace(/^\.\//, '')).filter(Boolean).sort();
+  assert.deepEqual(listed, [...archivedSinks].sort());
+  assert.deepEqual(readdirSync(dir).filter((f) => f.endsWith('.partial')), []);
+});
+
+test('a failed encryption leaves nothing to upload and fails the step', (t) => {
+  const { dir, env } = fixture(t);
+  stubAge(dir);
+  for (const sink of archivedSinks) writeFileSync(join(dir, sink), `plaintext of ${sink}`);
+  const result = spawnSync('bash', ['-c', runBlock('Encrypt the audit transcript')], { cwd: dir, env: { ...env, AGE_FAIL: '1' }, encoding: 'utf8' });
+  assert.notEqual(result.status, 0);
+  assert.deepEqual(readdirSync(dir).filter((f) => f.startsWith('audit-transcript')), []);
 });
 
 // 'FAIL — explained' pins the grammar against CI's: an appended explanation is
@@ -191,6 +455,7 @@ for (const [verdict, cliExit, expected, sentinel = true] of [['PASS', 0, 0], ['F
     for (const name of ['_preamble', 'orchestrator', 'supply-chain', 'ci-and-secrets', 'application-security', 'hosted']) {
       copyFileSync(join(repo, `.github/audit/${name}.md`), join(dir, `.github/audit/${name}.md`));
     }
+    stubGh(dir);
     stub(dir, 'claude', `
       const fs = require('node:fs');
       const prompt = process.argv[3];
@@ -211,6 +476,8 @@ for (const [verdict, cliExit, expected, sentinel = true] of [['PASS', 0, 0], ['F
     }
     if (!sentinel) assert.match(result.stderr, /cut off before finishing/);
     for (const fragment of fragments) assert.ok(existsSync(join(dir, fragment)), fragment);
+    // Local output stays local: the runner files nothing, anywhere.
+    assert.deepEqual(ghCalls(dir), []);
   });
 }
 

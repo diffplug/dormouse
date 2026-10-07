@@ -19,3 +19,9 @@ Maintainer-facing context for `docs/specs/security.md`, keyed by its headings. T
 ## How the guarantees are checked
 
 **Why every lint carries a self-test.** A lint rule that no self-test mutates can go silently vacuous — a renamed file or a regex that stops matching passes forever — so a rule without one is a claim, not a check. `scripts/security-audit-local.sh` runs the nightly audit's prompts locally.
+
+The public issue carries verdicts and counts because the audit's findings are vulnerabilities until fixed. Issue #1027 (2026-10) published a BLOCKER with a working command-injection payload, which contradicted `docs/specs/security.md` -> "Reporting a vulnerability" telling a reporter never to open a public issue; the detail now goes where an advisory would (`docs/specs/security-audit.md` -> "Embargo").
+
+## Reporting a vulnerability
+
+The advisory form is the only channel this spec offers, and a disabled one sends a reporter to a public issue.

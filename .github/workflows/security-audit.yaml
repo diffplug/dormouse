@@ -22,14 +22,13 @@ jobs:
     runs-on: ubuntu-latest
     env:
       # The four per-domain fragment filenames, in one place. They are
-      # named by the redactor's argv, its fail-closed `rm -f`, and the
-      # reporting step's guard loop, and drift between two of those lists
-      # is precisely what the `FAIL IF` on the redactor exists to catch —
-      # a sink that stops being redacted but keeps being published. Every
-      # use word-splits this deliberately, so the names must stay
-      # space-separated and shell-safe. The artifact `path:` needs one
-      # entry per line and so cannot consume it; that list is spelled out
-      # and carries a pointer back here.
+      # named by the redactor's argv, its fail-closed `rm -f`, the
+      # encrypted archive, the reporting step's guard loop, and the public
+      # body builder, and drift between two of those lists is precisely
+      # what the `FAIL IF` on the redactor exists to catch — a sink that
+      # stops being redacted but keeps being published. Every use
+      # word-splits this deliberately, so the names must stay
+      # space-separated and shell-safe.
       AUDIT_FRAGMENTS: audit-supply-chain.md audit-ci-secrets.md audit-application.md audit-hosted.md
     # Must stay well above the orchestrator's own wait deadline in
     # `.github/audit/orchestrator.md` (32 minutes, counted from the first
@@ -169,45 +168,29 @@ jobs:
             give them, how to wait for them without ending your turn,
             and how to write `audit-report.md` and `audit-status.txt`.
 
-      # The SDK transcript is the only record of what the audit actually
-      # did. `claude-code-action` keeps it out of the logs on purpose
-      # (`show_full_output` stays off so tool output cannot leak into a
-      # public log), and the runner is ephemeral — so without this upload
-      # a run that finishes without writing a verdict is undiagnosable
-      # after the fact, which is exactly the failure this archive exists
-      # to explain. Uploaded unconditionally: a PASS transcript is the
-      # baseline you compare a bad one against.
+      # Everything the agent wrote leaves the runner by two routes only: an
+      # age-encrypted archive (`Encrypt the audit transcript`) and the
+      # private embargo issue (`File embargoed findings`). The public issue
+      # is built from verdicts and counts and carries none of it. See
+      # docs/specs/security-audit.md -> "Embargo".
       #
-      # This repo is public, so the artifact is world-readable. That is
-      # consistent with the audit reports already posted to public
-      # issues. It is NOT consistent with log masking: `***` redaction
-      # applies to step logs, not to artifact contents, and the SDK
-      # serializes every message into this file — Bash `tool_result`
-      # bodies included — so raw tool output ships verbatim.
+      # Both routes still get the redactor. The prompt only passes
+      # `$AUDIT_PAT` through an unexpanded `GH_TOKEN=` prefix, but that is
+      # a convention, not a control: the agent holds unrestricted Bash and
+      # audits code that touches secrets, so one `printenv` or one `set -x`
+      # lands a PAT in the SDK transcript, which serializes every Bash
+      # `tool_result` verbatim. `***` masking applies to step logs, not to
+      # files. Stripping the values does not stop an agent that encodes a
+      # secret, but it closes the accidental-print path, which is the one
+      # that actually happens.
       #
-      # The prompt only passes `$AUDIT_PAT` through an unexpanded
-      # `GH_TOKEN=` prefix and `gh api` never returns secret values, but
-      # that is a convention, not a control: the agent holds unrestricted
-      # Bash and is asked to audit code that touches secrets, so one
-      # `printenv` or one `set -x` would publish an admin-read PAT for
-      # the artifact's whole retention. The step below strips the values
-      # verbatim first. That does not stop an agent that encodes a
-      # secret, but it closes the accidental-print path, which is the
-      # one that actually happens.
-      # Both sinks, not just the archive. `audit-report.md` is `cat` into a
-      # public issue, which outlives the artifact's 14 days, is indexed, and
-      # is emailed to subscribers — and the prompt asks for evidence as
-      # "API response excerpt, or command output", so it invites exactly the
-      # paste this guards against.
-      #
-      # Fail closed. `Archive audit transcript` below is `if: always()` and
-      # does not depend on this step's outcome, so a throwing redactor would
-      # otherwise ship the raw file: on any error, delete every sink
-      # instead. Deleted rather than truncated — `: >` has to open the file
-      # and so fails on exactly the unreadable file that made the redactor
-      # throw, whereas `rm` needs only the directory. A nonzero count is not routine — it means a secret reached
-      # a file in cleartext — so it surfaces as an annotation rather than a
-      # log line, and the right response is to rotate.
+      # Fail closed: on any error, delete every sink instead, so neither
+      # route ships the raw file. Deleted rather than truncated — `: >` has
+      # to open the file and so fails on exactly the unreadable file that
+      # made the redactor throw, whereas `rm` needs only the directory. A
+      # nonzero count is not routine — it means a secret reached a file in
+      # cleartext — so it surfaces as an annotation rather than a log line,
+      # and the right response is to rotate.
       - name: Redact secrets from agent output
         if: always()
         env:
@@ -215,10 +198,11 @@ jobs:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
         run: |
           TRANSCRIPT="$RUNNER_TEMP/claude-execution-output.json"
-          # Every sink that the archive step below publishes has to be in
-          # the argument list, and the fail-closed `rm -f` has to delete
-          # the same set — docs/specs/security-audit.md names `audit-report.md`, the four
-          # per-domain fragments, and the transcript. The fragments are
+          # Every sink the encrypted archive or the private issue carries
+          # has to be in the argument list, and the fail-closed `rm -f` has
+          # to delete the same set — docs/specs/security-audit.md names
+          # `audit-report.md`, the four per-domain fragments, and the
+          # transcript. The fragments are
           # agent output like any other: a subagent that shells out and
           # prints an environment lands the value in its own fragment,
           # not in the merged report. The fragment names come from the
@@ -229,6 +213,7 @@ jobs:
           # single-quoted script — inside it, Node parses it as
           # JavaScript and the step fails closed on every run, which
           # `bash -n` does not catch.
+          # shellcheck disable=SC2086
           node -e '
             const fs = require("fs");
             let hits = 0;
@@ -254,34 +239,58 @@ jobs:
           ' "$TRANSCRIPT" audit-report.md $AUDIT_FRAGMENTS \
             || { rm -f "$TRANSCRIPT" audit-report.md $AUDIT_FRAGMENTS; exit 1; }
 
-      - name: Archive audit transcript
+      # The SDK transcript is the only record of what the audit actually
+      # did: `claude-code-action` keeps tool output out of the logs on
+      # purpose, and the runner is ephemeral, so a run that finishes
+      # without a verdict is undiagnosable without it. The fragments ride
+      # along so an orchestrator that dies mid-merge still ships what the
+      # domains found. Archived on every outcome — a PASS transcript is the
+      # baseline you compare a bad one against.
+      #
+      # This repository is public and so is every artifact it uploads, so
+      # the archive goes up as age ciphertext only, to the maintainer key
+      # in `.github/audit/transcript-recipient.txt`. Written to a partial
+      # name and renamed once age exits zero, so a failed encryption leaves
+      # nothing at the path the upload names, and the upload is gated on
+      # this step succeeding as well. `age` comes from the Ubuntu archive
+      # the runner image already trusts, as in `hosted-production.yml`.
+      - name: Encrypt the audit transcript
+        id: encrypt
         if: always()
+        run: |
+          set -euo pipefail
+          OUT="$RUNNER_TEMP/audit-transcript.tar.gz.age"
+          rm -f "$OUT" "$OUT.partial"
+          sudo apt-get update -qq && sudo apt-get install -y -qq age
+          STAGE=$(mktemp -d)
+          # Unquoted on purpose: `AUDIT_FRAGMENTS` is a filename list. A sink
+          # a domain never wrote is simply absent from the archive.
+          # shellcheck disable=SC2086
+          for f in "$RUNNER_TEMP/claude-execution-output.json" audit-report.md $AUDIT_FRAGMENTS; do
+            if [ -f "$f" ]; then cp "$f" "$STAGE/"; fi
+          done
+          tar -C "$STAGE" -czf - . |
+            age -R .github/audit/transcript-recipient.txt -o "$OUT.partial" ||
+            { rm -f "$OUT.partial"; rm -rf "$STAGE"; echo "::error::Encrypting the audit transcript failed; nothing is uploaded."; exit 1; }
+          mv "$OUT.partial" "$OUT"
+          rm -rf "$STAGE"
+
+      - name: Archive audit transcript
+        if: always() && steps.encrypt.outcome == 'success'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: audit-transcript
-          # The per-domain fragments ride along with the transcript so an
-          # orchestrator that dies mid-merge still ships whatever the
-          # domains found. Without them an INCONCLUSIVE run reproduces
-          # nothing: `audit-report.md` is what the merge would have
-          # produced, and the fragments are the only record when it never
-          # ran. `if-no-files-found: warn` is load-bearing here — a domain
-          # that died legitimately leaves no fragment, and that must not
-          # fail the upload.
-          #
-          # This is the one fragment list that cannot read the job-level
-          # `AUDIT_FRAGMENTS` — `path:` wants one entry per line — so it
-          # is spelled out and has to be edited in step with that value.
-          path: |
-            ${{ runner.temp }}/claude-execution-output.json
-            audit-report.md
-            audit-supply-chain.md
-            audit-ci-secrets.md
-            audit-application.md
-            audit-hosted.md
+          # Ciphertext only: one `.age` file, never a plaintext sink.
+          path: ${{ runner.temp }}/audit-transcript.tar.gz.age
           retention-days: 14
-          if-no-files-found: warn
+          if-no-files-found: error
 
-      - name: Surface result, file or close issue
+      # Decides the verdict and composes the private report. It files
+      # nothing: `File embargoed findings` takes the report to the private
+      # tracker and `Surface result, file or close issue` files the public
+      # issue, each reading what this step hands on in its outputs.
+      - name: Compose the audit report
+        id: compose
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
@@ -424,25 +433,28 @@ jobs:
             STATUS=MISSING
           fi
 
-          DATE=$(date -u +%Y-%m-%dT%H:%MZ)
-          RUN_URL="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
-
-          # Idempotent label creation; ignore "already exists" errors.
-          gh label create security-audit-failure \
-            --color B60205 --description "Security audit failure" 2>/dev/null || true
+          # Every condition the loops recorded, and the verdict, for the two
+          # filing steps. Values are fragment names from `AUDIT_FRAGMENTS`,
+          # never fragment text.
+          {
+            echo "status=$STATUS"
+            echo "file_status=$FILE_STATUS"
+            echo "dissenting=${DISSENTING:-}"
+            echo "missing=${MISSING_FRAGMENTS:-}"
+            echo "unreadable=${UNREADABLE_VERDICTS:-}"
+            echo "unfinished=${UNFINISHED:-}"
+            echo "inconclusive=${INCONCLUSIVE_DOMAINS:-}"
+          } >> "$GITHUB_OUTPUT"
 
           if [ "$STATUS" = "PASS" ]; then
-            # Auto-close any open audit-failure issues so the issue
-            # tracker reflects the live state.
-            for n in $(gh issue list --label security-audit-failure \
-                         --state open --json number --jq '.[].number'); do
-              gh issue close "$n" --comment "Audit passed at $DATE. [Run]($RUN_URL)"
-            done
-            echo "Audit passed."
+            echo "Audit passed; nothing to file."
             exit 0
           fi
 
-          # Deep-link the transcript so the issue points at the evidence
+          DATE=$(date -u +%Y-%m-%dT%H:%MZ)
+          RUN_URL="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+
+          # Deep-link the encrypted transcript so the issue points at the evidence
           # rather than at a run page the reader has to dig through. The
           # id lookup needs `actions: read`, which this job holds. Left
           # empty when there is no artifact — a run cancelled on
@@ -493,15 +505,15 @@ jobs:
             echo "- **The audit wrote no verdict.** \`audit-status.txt\` was absent, empty, or not \`PASS\`/\`FAIL\`, so the run ended without deciding. Start at the report's own markers: \`UNVERIFIABLE\` is a check the agent could not determine, \`_Incomplete …_\` heads a domain that was cut off mid-report, and a domain section reading \`_No report …_\` is one that never reported — which is what an expired wait deadline looks like." >> "$NOTES"
           fi
 
-          # The notes above index the report by marker, and the clamp below
-          # keeps the head — so on a report too long to post, the markers they
-          # send the reader to are the part that gets cut. Run 35842217451
+          # The notes above index the report by marker, and only the head is
+          # the issue's own body — the split below files the rest as
+          # comments, and the public issue gets none of it. Run 35842217451
           # posted `VERDICT: INCONCLUSIVE` naming `audit-ci-secrets.md`, and
           # its one `UNVERIFIABLE` line, along with two whole later domains
           # and their verdicts, fell past 32,000 characters of a 226,302-
           # character body. Lift every line that carries a verdict or a
-          # non-passing finding into the head, where the clamp cannot reach
-          # it; the full sections still follow for whatever survives.
+          # non-passing finding into the head, where the reader starts; the
+          # full sections follow.
           #
           # Verdicts and findings are collected separately so the cap can fall
           # on the findings alone: one verdict line per fragment is bounded by
@@ -517,8 +529,8 @@ jobs:
           #
           # `|| true` on both: `grep` exits 1 when it matches nothing, and
           # under this step's `set -eo pipefail` that would end the step here,
-          # before `audit-comment.md` is composed and before any `gh issue`
-          # call — turning a truncated report into no report at all. A
+          # before `audit-private.md` is composed — turning a long report
+          # into no report at all. A
           # nonempty fragment with no marker line is exactly the state the
           # verdict loop above already reports as unreadable.
           VERDICTS=$(mktemp)
@@ -534,17 +546,15 @@ jobs:
           done
 
           if [ "$STATUS" = "FAIL" ]; then
-            TITLE="[security-audit] FAIL on $(date -u +%Y-%m-%d)"
             HEADLINE="Audit failed at $DATE."
           else
-            TITLE="[security-audit] INCONCLUSIVE on $(date -u +%Y-%m-%d)"
             HEADLINE="Audit reached no usable verdict at $DATE. This is not a security finding: the run ended without deciding."
           fi
 
           {
             LINKS="[Run]($RUN_URL)"
             [ -n "$TRANSCRIPT_URL" ] && LINKS="$LINKS · [Transcript]($TRANSCRIPT_URL)"
-            echo "$HEADLINE $LINKS"
+            echo "$HEADLINE $LINKS · audited commit \`$GITHUB_SHA\`"
             echo
             if [ -s "$NOTES" ]; then
               cat "$NOTES"
@@ -609,18 +619,138 @@ jobs:
                 echo
               done
             fi
-          } > audit-comment.md
+          } > audit-private.md
           rm -f "$NOTES" "$VERDICTS" "$FINDINGS"
 
-          # Truncate before posting, non-fatally. See docs/specs/security-audit.md -> "Outcomes and reporting".
-          node scripts/clamp-issue-body.mjs audit-comment.md \
-            --note "The untruncated \`audit-report.md\` is in this run's \`audit-transcript\` artifact${TRANSCRIPT_URL:+ ([download]($TRANSCRIPT_URL))}." \
-            || echo "clamp-issue-body.mjs failed; posting audit-comment.md unclamped." >&2
+          # Split rather than truncate: the private issue carries the report
+          # whole, as its body and comments. Non-fatal, like the clamp it
+          # replaced: on a helper failure the body goes up as one part and
+          # the tracker takes it or refuses it. See
+          # docs/specs/security-audit.md -> "Outcomes and reporting".
+          node scripts/clamp-issue-body.mjs audit-private.md --split \
+            --note "The full report is in this run's encrypted \`audit-transcript\` artifact${TRANSCRIPT_URL:+ ([download]($TRANSCRIPT_URL))}." \
+            || { echo "clamp-issue-body.mjs failed; filing audit-private.md as one part." >&2; cp audit-private.md audit-private-part-01.md; }
+
+      # The one step that holds `EMBARGO_TOKEN`, and it runs no repository
+      # code: only `gh`, on the parts `Compose the audit report` wrote. The
+      # agent step never has the token in its environment; see
+      # docs/specs/security-audit.md -> "Embargo" for what that does and
+      # does not stop. One private issue per failing run, its report split
+      # across the body and comments so nothing is truncated away.
+      #
+      # Any failure — no token, no report, a refused create or comment —
+      # fails this step loudly and records why for the public step, which
+      # says so in public without the detail. Never a fallback that puts
+      # the detail anywhere else.
+      - name: File embargoed findings
+        id: embargo
+        if: always() && steps.compose.outputs.status != 'PASS'
+        env:
+          GH_TOKEN: ${{ secrets.EMBARGO_TOKEN }}
+          EMBARGO_REPO: diffplug/dormouse-embargo
+          STATUS: ${{ steps.compose.outputs.status }}
+        run: |
+          set -uo pipefail
+          fail() {
+            echo "result=$1" >> "$GITHUB_OUTPUT"
+            echo "::error::$2 The audit's findings were not filed privately; the public issue says so without them."
+            exit 1
+          }
+          [ -n "${GH_TOKEN:-}" ] ||
+            fail missing-token "EMBARGO_TOKEN is not set in the security-audit environment."
+          shopt -s nullglob
+          PARTS=(audit-private-part-*.md)
+          [ "${#PARTS[@]}" -gt 0 ] ||
+            fail no-report "No private report was composed."
+          # A config directory nothing else wrote, so no leftover `gh`
+          # configuration decides where the token is sent.
+          GH_CONFIG_DIR=$(mktemp -d)
+          export GH_CONFIG_DIR GH_HOST=github.com
+          case "${STATUS:-}" in FAIL) VERDICT=FAIL ;; *) VERDICT=INCONCLUSIVE ;; esac
+          TITLE="[security-audit] $VERDICT on $(date -u +%Y-%m-%d) at ${GITHUB_SHA:0:7}"
+          URL=$(gh issue create --repo "$EMBARGO_REPO" --title "$TITLE" --body-file "${PARTS[0]}") ||
+            fail failed "Filing the private issue failed."
+          for part in "${PARTS[@]:1}"; do
+            gh issue comment "$URL" --body-file "$part" >/dev/null ||
+              fail failed "The private issue was filed but $part could not be added to it."
+          done
+          echo "result=filed" >> "$GITHUB_OUTPUT"
+          echo "Filed ${#PARTS[@]} part(s) in the private tracker."
+
+      # The public issue: verdicts, counts, and failed section names, built
+      # by `scripts/security-audit-public-body.mjs` and nothing else — no
+      # fragment, report, or finding text. PASS closes every open failure
+      # issue; anything else files or updates one and exits non-zero, which
+      # is what holds the release gate in `release.yml` shut.
+      - name: Surface result, file or close issue
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STATUS: ${{ steps.compose.outputs.status }}
+          FILE_STATUS: ${{ steps.compose.outputs.file_status }}
+          DISSENTING: ${{ steps.compose.outputs.dissenting }}
+          MISSING_FRAGMENTS: ${{ steps.compose.outputs.missing }}
+          UNREADABLE_VERDICTS: ${{ steps.compose.outputs.unreadable }}
+          UNFINISHED: ${{ steps.compose.outputs.unfinished }}
+          INCONCLUSIVE_DOMAINS: ${{ steps.compose.outputs.inconclusive }}
+          EMBARGO_RESULT: ${{ steps.embargo.outputs.result }}
+        run: |
+          set -eo pipefail
+          # A compose step that died before deciding hands on nothing, and
+          # nothing is not a pass.
+          case "${STATUS:-}" in PASS|FAIL|MISSING) ;; *) STATUS=MISSING ;; esac
+          case "${FILE_STATUS:-}" in PASS|FAIL|MISSING) ;; *) FILE_STATUS=MISSING ;; esac
+          DATE=$(date -u +%Y-%m-%dT%H:%MZ)
+          RUN_URL="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+
+          # Idempotent label creation; ignore "already exists" errors.
+          gh label create security-audit-failure \
+            --color B60205 --description "Security audit failure" 2>/dev/null || true
+
+          if [ "$STATUS" = "PASS" ]; then
+            # Auto-close any open audit-failure issues so the issue
+            # tracker reflects the live state.
+            for n in $(gh issue list --label security-audit-failure \
+                         --state open --json number --jq '.[].number'); do
+              gh issue close "$n" --comment "Audit passed at $DATE. [Run]($RUN_URL)"
+            done
+            echo "Audit passed."
+            exit 0
+          fi
+
+          if [ "$STATUS" = "FAIL" ]; then
+            TITLE="[security-audit] FAIL on $(date -u +%Y-%m-%d)"
+          else
+            TITLE="[security-audit] INCONCLUSIVE on $(date -u +%Y-%m-%d)"
+          fi
+
+          # A builder that throws gets a fixed sentence, never a fallback to
+          # the report.
+          node scripts/security-audit-public-body.mjs \
+              --status "$STATUS" --file-status "$FILE_STATUS" --date "$DATE" \
+              --run-url "$RUN_URL" --commit "$GITHUB_SHA" \
+              --dissenting "${DISSENTING:-}" --missing "${MISSING_FRAGMENTS:-}" \
+              --unreadable "${UNREADABLE_VERDICTS:-}" --unfinished "${UNFINISHED:-}" \
+              --inconclusive "${INCONCLUSIVE_DOMAINS:-}" > audit-public.md ||
+            printf '%s\n\n%s\n' "The audit did not pass at $DATE. [Run]($RUN_URL)" \
+              "The public summary could not be built. Finding details are triaged privately until fixed." > audit-public.md
+
+          case "${EMBARGO_RESULT:-}" in
+            filed) ;;
+            missing-token) printf '\n%s\n' "**The private filing failed: \`EMBARGO_TOKEN\` is not set.** The details are only in the encrypted transcript." ;;
+            no-report) printf '\n%s\n' "**The private filing failed: no private report was composed.** Read the run's log." ;;
+            *) printf '\n%s\n' "**The private filing failed.** The details are only in the encrypted transcript; read the run's log for why." ;;
+          esac >> audit-public.md
+
+          # Fits by construction; clamped anyway so a pathological count of
+          # failed sections cannot get the body rejected.
+          node scripts/clamp-issue-body.mjs audit-public.md \
+            || echo "clamp-issue-body.mjs failed; posting audit-public.md unclamped." >&2
 
           EXISTING=$(gh issue list --label security-audit-failure \
                        --state open --json number --jq '.[0].number' || true)
           if [ -n "$EXISTING" ]; then
-            gh issue comment "$EXISTING" --body-file audit-comment.md
+            gh issue comment "$EXISTING" --body-file audit-public.md
             # Upward only. FAIL is the ceiling: an inconclusive run must not
             # relabel an issue that already carries real findings, and the
             # title never needs walking back down because a PASS closes the
@@ -633,6 +763,6 @@ jobs:
             gh issue create \
               --title "$TITLE" \
               --label security-audit-failure \
-              --body-file audit-comment.md
+              --body-file audit-public.md
           fi
           exit 1
