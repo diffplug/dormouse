@@ -1,9 +1,7 @@
 import { DOCS_PAGES } from "./docs-pages";
 import { sitePath } from "./site-meta";
 
-/** The site's top-level links, shared by the marketing header and the desktop
- *  playground's title bar. */
-export interface SiteNavLink {
+interface SiteNavLink {
   href: string;
   label: string;
   external?: boolean;
@@ -12,7 +10,7 @@ export interface SiteNavLink {
   covers?: readonly string[];
 }
 
-
+/** The site's top-level links. */
 export const NAV_LINKS: readonly SiteNavLink[] = [
   { href: sitePath("/playground"), label: "Playground" },
   { href: "/#download", label: "Download", hideOnMobile: true },
@@ -30,3 +28,7 @@ export const NAV_LINKS: readonly SiteNavLink[] = [
   },
   { href: "https://github.com/diffplug/dormouse", label: "GitHub", external: true },
 ];
+
+/** The links from the playground, which needs none to itself: the marketing
+ *  header there and the desktop playground's title bar. */
+export const NAV_LINKS_OFF_PLAYGROUND = NAV_LINKS.filter(({ href }) => href !== sitePath("/playground"));

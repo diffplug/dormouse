@@ -2,9 +2,9 @@ import { useEffect, useRef, useSyncExternalStore, type ReactNode } from 'react';
 import { WorkspaceMotion } from './WorkspaceMotion';
 import { Wall } from './Wall';
 import { listWallHandles } from './wall/wall-handles';
-import { getWorkspaceBootPlan, seedWorkspaceBootPlans } from './wall/workspace-boot-plans';
+import { getWorkspaceBootPlan, resetWorkspaceBootPlans, seedWorkspaceBootPlans } from './wall/workspace-boot-plans';
 import { getPlatform } from '../lib/platform';
-import { getWorkspacesSnapshot, subscribeToWorkspaces } from '../lib/workspace-store';
+import { getWorkspacesSnapshot, resetWorkspaces, subscribeToWorkspaces } from '../lib/workspace-store';
 import type { SessionFlushRequest } from '../lib/platform/types';
 import { installWorkspaceAutoNaming } from '../lib/workspace-autoname-controller';
 import type { WallBootPlans, WallBootProps, WallEvent, WallMode } from './wall/wall-types';
@@ -13,6 +13,14 @@ import { RingHandoffContext } from './wall/wall-context';
 import type { RingFrame } from '../lib/rect-tween';
 import { PendingKillOverlay } from './PendingKillOverlay';
 import { getHeldWorkspaces, subscribeToHeldWorkspaces } from './wall/workspace-lifecycle';
+
+/** Back to one fresh Workspace with no parked boot plans, for a page that mounts
+ *  a `WorkspaceWindow` again in the same document (the website playground on a
+ *  revisit): both stores outlive the component. */
+export function resetWorkspaceWindow(): void {
+  resetWorkspaces();
+  resetWorkspaceBootPlans();
+}
 
 /**
  * One Window's Workspaces: a mounted `<Wall>` each, all in the same grid cell so

@@ -45,7 +45,7 @@ vi.mock("dormouse-lib/lib/platform", () => {
 vi.mock("dormouse-lib/lib/terminal-registry", () => ({}));
 vi.mock("dormouse-lib/lib/mouse-selection", () => ({}));
 vi.mock("dormouse-lib/components/WorkspaceWindow", () => ({}));
-vi.mock("dormouse-lib/components/WorkspaceStrip", () => ({}));
+vi.mock("../components/PlaygroundTabs", () => ({}));
 vi.mock("dormouse-lib/lib/platform/fake-scenarios", () => ({}));
 vi.mock("../lib/ascii-splash-runner", () => ({}));
 

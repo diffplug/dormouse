@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { ArrowCounterClockwiseIcon } from "@phosphor-icons/react";
 import { Link } from "react-router";
 import SiteHeader, { STATIC_PAGE_HEADER_STYLE } from "../components/SiteHeader";
-import PlaygroundHeader, { PLAYGROUND_HEADER_HEIGHT_PX } from "../components/PlaygroundHeader";
+import PlaygroundHeader from "../components/PlaygroundHeader";
+import { APP_BAR_HEIGHT_PX, PANE_GUTTER_PX } from "dormouse-lib/components/design";
 import { PlaceToPaste } from "../components/PlaceToPaste";
 import { useRestoredTheme } from "dormouse-lib/lib/themes";
 import { PlaygroundShellRegistry } from "../lib/playground-shells";
@@ -93,9 +93,7 @@ function PlaygroundDesktopExperience() {
 
   const [WallModule, setWallModule] = useState<{
     WorkspaceWindow: React.ComponentType<any>;
-    WorkspaceStrip: React.ComponentType<any>;
-    join: { backgroundImage: string; height: number };
-    resetClass: string;
+    PlaygroundTabs: React.ComponentType;
   } | null>(null);
   const [placeToPasteOpen, setPlaceToPasteOpen] = useState(false);
 
@@ -137,17 +135,15 @@ function PlaygroundDesktopExperience() {
       if (getPreferredPlayground() === "pocket") return;
       // None of these consumes another, so load the whole bundle at once rather
       // than paying a round of module resolution each on the boot path.
-      const [platform, registry, mouseSelection, themes, alertSettings, workspaceWindow, workspaceStrip, workspaceStore, bootPlans, design, shellDefaults, asciiSplash, playgroundFs] = await Promise.all([
+      const [platform, registry, mouseSelection, themes, alertSettings, workspaceWindow, playgroundTabs, workspaceStore, shellDefaults, asciiSplash, playgroundFs] = await Promise.all([
         import("dormouse-lib/lib/platform"),
         import("dormouse-lib/lib/terminal-registry"),
         import("dormouse-lib/lib/mouse-selection"),
         import("dormouse-lib/lib/themes"),
         import("dormouse-lib/lib/alert-settings"),
         import("dormouse-lib/components/WorkspaceWindow"),
-        import("dormouse-lib/components/WorkspaceStrip"),
+        import("../components/PlaygroundTabs"),
         import("dormouse-lib/lib/workspace-store"),
-        import("dormouse-lib/components/wall/workspace-boot-plans"),
-        import("dormouse-lib/components/design"),
         import("dormouse-lib/lib/shell-defaults"),
         import("../lib/ascii-splash-runner"),
         import("../lib/playground-fs"),
@@ -290,18 +286,12 @@ function PlaygroundDesktopExperience() {
         if (adapter.hasPty(pane.id)) tryAutoStart(pane);
       }
 
-      // Both stores outlive the page: a revisit starts from one Workspace and
-      // re-seeds the L-shape rather than finding the last visit's Workspaces.
-      workspaceStore.resetWorkspaces();
-      bootPlans.resetWorkspaceBootPlans();
+      // A revisit starts from one Workspace and re-seeds the L-shape rather
+      // than finding the last visit's Workspaces.
+      workspaceWindow.resetWorkspaceWindow();
       // A user's name, so auto-naming never retitles it from its panes' cwd.
       workspaceStore.renameWorkspace(workspaceStore.getActiveWorkspaceId(), "Playground");
-      setWallModule({
-        WorkspaceWindow: workspaceWindow.WorkspaceWindow,
-        WorkspaceStrip: workspaceStrip.WorkspaceStrip,
-        join: { backgroundImage: design.TAB_WALL_JOIN_GRADIENT, height: design.PANE_GUTTER_PX },
-        resetClass: design.chromeButton({ kind: "labeled", class: "mb-0.5 shrink-0 text-muted hover:text-app-fg" }),
-      });
+      setWallModule({ WorkspaceWindow: workspaceWindow.WorkspaceWindow, PlaygroundTabs: playgroundTabs.PlaygroundTabs });
     }
     loadWall();
 
@@ -342,32 +332,11 @@ function PlaygroundDesktopExperience() {
 
   return (
     <>
-      <PlaygroundHeader
-        tabs={WallModule ? (
-          <WallModule.WorkspaceStrip
-            className="self-stretch"
-            afterNew={
-              // What a refresh always did, where a visitor looks for it.
-              <button
-                type="button"
-                className={WallModule.resetClass}
-                title="Reset the playground to how it started"
-                onClick={() => window.location.reload()}
-              >
-                <ArrowCounterClockwiseIcon size={12} weight="bold" aria-hidden="true" />
-                Reset playground
-              </button>
-            }
-          />
-        ) : null}
-        join={WallModule?.join}
-      />
+      <PlaygroundHeader tabs={WallModule ? <WallModule.PlaygroundTabs /> : null} />
 
-      {/* Below the bar and its join band, as the standalone Wall sits below its
-          AppBar. */}
       <main
         className="fixed right-0 bottom-0 left-0 flex min-h-0"
-        style={{ top: PLAYGROUND_HEADER_HEIGHT_PX + (WallModule?.join.height ?? 0) }}
+        style={{ top: APP_BAR_HEIGHT_PX + PANE_GUTTER_PX }}
       >
         {WallModule ? (
           <WallModule.WorkspaceWindow
