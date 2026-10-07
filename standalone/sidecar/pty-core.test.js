@@ -820,7 +820,7 @@ test('gracefulKill SIGTERMs the named PTYs, echoes requestId, forwards final out
   const mgr = create((event, data) => {
     events.push({ event, data });
     if (event === 'gracefulKillDone') resolveDone();
-  }, { spawn() { return fakePty; } });
+  }, { spawn() { return fakePty; } }, { platform: 'linux' });
 
   mgr.spawn('pane-1');
   mgr.gracefulKill(['pane-1'], 1, 'req-42');
@@ -896,7 +896,7 @@ test('gracefulKill stops a PTY whose kill(signal) throws, as node-pty does on Wi
   const done = new Promise((resolve) => { resolveDone = resolve; });
   const mgr = create((event) => {
     if (event === 'gracefulKillDone') resolveDone('done');
-  }, { spawn() { return fakePty; } });
+  }, { spawn() { return fakePty; } }, { platform: 'win32' });
 
   mgr.spawn('pane-1');
   mgr.gracefulKill(['pane-1'], 60_000, 'req-1');
@@ -2247,7 +2247,7 @@ test('marked requests recover exited buffers without reviving or discovering the
   assert.equal(events.length, 1);
 });
 
-test('gracefulKill targets only the named PTYs', async () => {
+for (const platform of ['linux', 'win32']) test(`gracefulKill targets only the named PTYs (${platform})`, async () => {
   const events = [];
   const pty = fakePtyModule();
   let resolveDone;
@@ -2255,15 +2255,30 @@ test('gracefulKill targets only the named PTYs', async () => {
   const mgr = create((event, data) => {
     events.push({ event, data });
     if (event === 'gracefulKillDone') resolveDone();
-  }, pty.module, { replay: true });
+  }, pty.module, { platform, replay: true });
   mgr.spawn('a');
   mgr.spawn('b');
 
   mgr.gracefulKill(['a'], 1, 'req-1');
   await done;
 
-  assert.deepEqual(pty.killed, [['a', 'SIGTERM']]);
+  assert.deepEqual(pty.killed, [['a', platform === 'win32' ? undefined : 'SIGTERM']]);
   assert.deepEqual(events.at(-1), { event: 'gracefulKillDone', data: { requestId: 'req-1' } });
+});
+
+test('Windows cleanup closes each PTY once, including a replacement under the same id', async () => {
+  const pty = fakePtyModule();
+  let resolveDone;
+  const done = new Promise(resolve => { resolveDone = resolve; });
+  const mgr = create(event => { if (event === 'gracefulKillDone') resolveDone(); }, pty.module, { platform: 'win32' });
+  mgr.spawn('a');
+  mgr.spawn('b');
+  mgr.gracefulKill(['a'], 1);
+  mgr.kill('a');
+  mgr.spawn('a');
+  mgr.killAll();
+  await done;
+  assert.deepEqual(pty.killed, [['a', undefined], ['b', undefined], ['a', undefined]]);
 });
 
 test('gracefulKill([]) kills nothing and still answers', async () => {

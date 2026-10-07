@@ -29,6 +29,15 @@ Source of truth: `PlatformAdapter` in `lib/src/lib/platform/types.ts`.
 - **A naturally exited PTY may stay mounted as an exited pane**; frontend semantic state — CWD, title candidates, last command — is retained until the Session is disposed.
 - **Must keep explicitly killed PTYs non-resumable**: late output never recreates a killed id's buffer.
 
+### Graceful shutdown
+
+- **Must stop only the explicitly named live PTYs**: use SIGTERM on POSIX and ConPTY close on Windows, never a signal argument there (rationale).
+- **Must acknowledge after the targets exit and a final-output grace tick, or at the caller's timeout**, forwarding output received during the wait; an empty target set still gets the grace tick.
+- **Must allow cleanup to follow or overlap graceful shutdown without closing a Windows PTY twice.**
+- **Never promise shell-history or final-output flushing from Windows ConPTY close**; recovery capture precedes shutdown (`docs/compatible-agents.md` → Capture).
+
+Source of truth: `gracefulKill` in `standalone/sidecar/pty-core.js`.
+
 ### PTY buffering
 
 **Both Node-resident hosts (VS Code's extension host, standalone's sidecar) keep a bounded, in-memory-only scrollback per PTY that survives natural, signal-driven, and graceful exit; only an explicit kill (`kill` / `killAll`), a spawn reusing the id, or host-process exit releases it** (rationale). Each host's bound: `docs/specs/vscode.md` → Webview hosting, `docs/specs/standalone.md` → "Rust ↔ sidecar bridge". Stream positions follow Universal invariants.

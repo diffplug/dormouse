@@ -47,7 +47,7 @@ Source of truth: `standalone/src-tauri/src/lib.rs` (`SidecarState`, the `#[tauri
 
 **A blocking command must be async** — `#[tauri::command(async)]` or a plain `#[tauri::command]` over an `async fn`. Tauri runs a sync command on the main thread, where waiting on the sidecar or the arrival-journal lock stops the webview painting for the whole round trip (rationale). **The three clipboard readers included**: their non-Windows branches round-trip through the sidecar. A source-scanning test in `lib.rs` enforces it.
 
-**`pty_graceful_kill` SIGTERMs the calling window's live PTYs** (§Routing) and resolves one grace tick after the last exits, or at its timeout for SIGTERM-ignoring programs. **Must forward final output during that grace period**. Under ConPTY the SIGTERM is an immediate kill. **The sidecar keeps each PTY's latest 200,000 UTF-16 code units for replay.** Pinned by `standalone/sidecar/pty-core.test.js`.
+`pty_graceful_kill`: §Routing; `docs/specs/transport.md` → Graceful shutdown. **The sidecar keeps each PTY's latest 200,000 UTF-16 code units for replay.** Pinned by `standalone/sidecar/pty-core.test.js`.
 
 Sidecar events reach the webview, where `TauriAdapter` converts dor control requests into the `dormouse:control-request` CustomEvent that `Wall` handles (`docs/specs/dor-cli.md` → Host Plumbing, including the sidecar env).
 
