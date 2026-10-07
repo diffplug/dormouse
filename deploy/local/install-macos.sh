@@ -791,8 +791,9 @@ has_off_loopback() {
 # `serve_state` for why a pipe is not one.
 serve_origin_root() {
   awk -v origin="$1" '
-    substr($0, 1, 4) != "|-- " { listener = (origin != "" && tolower($1) == tolower(origin)); next }
-    listener && !found && $2 == "/" { found = 1; sub(/^[|]-- \/ +/, ""); print }
+    BEGIN { if (origin == "") exit }
+    substr($0, 1, 4) != "|-- " { listener = (tolower($1) == tolower(origin)); next }
+    listener && $2 == "/" { sub(/^[|]-- \/ +/, ""); print; exit }
   ' <<<"$2"
 }
 
@@ -932,8 +933,6 @@ cmd_verify() {
   if [ -z "$serve_out" ]; then
     fail "tailscale serve reports no configuration"
   else
-    # At the origin, not merely somewhere: the listener the passkey origin is
-    # names the host, so this one check is also the origin check.
     if serve_proxies_root "$PORT" "$ORIGIN" "$serve_out"; then
       pass "Serve proxies / to 127.0.0.1:$PORT at DORMOUSE_ORIGIN ($ORIGIN)"
     else
@@ -1467,15 +1466,15 @@ step "Configuring Tailscale Serve"
 # that); its comment there states the layout it bets on.
 serve_origin_root() {
   awk -v origin="$1" '
-    substr($0, 1, 4) != "|-- " { listener = (origin != "" && tolower($1) == tolower(origin)); next }
-    listener && !found && $2 == "/" { found = 1; sub(/^[|]-- \/ +/, ""); print }
+    BEGIN { if (origin == "") exit }
+    substr($0, 1, 4) != "|-- " { listener = (tolower($1) == tolower(origin)); next }
+    listener && $2 == "/" { sub(/^[|]-- \/ +/, ""); print; exit }
   ' <<<"$2"
 }
 
-# What does an existing Serve configuration say about `/` at the origin? Echoes
+# What does the origin's root handler ($2, from `serve_origin_root`) say? Echoes
 # `loopback` (a proxy to the port $1), `conflict` (any other handler there —
-# a proxy elsewhere, static files, or text), or `none`. $2 is the origin, $3
-# captured `tailscale serve status` output.
+# a proxy elsewhere, static files, or text), or `none`.
 #
 # Captured, and searched with a here-string, because the pipe form decided a
 # gate rather than a report: `printf … | grep -q` exits at the first match, the
@@ -1484,17 +1483,13 @@ serve_origin_root() {
 # took NEITHER branch — so the `confirm` below never ran and the install
 # repointed the operator's root path silently.
 #
-# Every arm reads the origin's root handler alone. A bare `127.0.0.1:$1`
-# anywhere said `loopback` when / was foreign and /api sat on this port; a
-# root proxy on another listener said `loopback` while :443 served someone
-# else; and only a foreign `proxy` said `conflict`, so a `path` or `text`
-# root was repointed without the confirm.
+# Only the origin's root handler counts: a bare `127.0.0.1:$1` anywhere, a root
+# on another listener, or treating only a foreign `proxy` as a conflict each
+# once let the install repoint someone else's `/` without the confirm.
 serve_state() {
-  local root
-  root="$(serve_origin_root "$2" "$3")"
-  if grep -qE '^proxy +http://127\.0\.0\.1:'"$1"'(/|$)' <<<"$root"; then
+  if grep -qE '^proxy +http://127\.0\.0\.1:'"$1"'(/|$)' <<<"$2"; then
     printf 'loopback\n'
-  elif [ -n "$root" ]; then
+  elif [ -n "$2" ]; then
     printf 'conflict\n'
   else
     printf 'none\n'
@@ -1508,14 +1503,14 @@ if [ -n "$SERVE_BEFORE" ]; then
 fi
 
 NEEDS_SERVE=1
-case "$(serve_state "$LOOPBACK_PORT" "$ORIGIN" "$SERVE_BEFORE")" in
+SERVE_ROOT="$(serve_origin_root "$ORIGIN" "$SERVE_BEFORE")"
+case "$(serve_state "$LOOPBACK_PORT" "$SERVE_ROOT")" in
   loopback)
     ok "Serve already proxies to 127.0.0.1:$LOOPBACK_PORT"
     NEEDS_SERVE=0
     ;;
   conflict)
-    EXISTING_TARGET="$(serve_origin_root "$ORIGIN" "$SERVE_BEFORE")"
-    warn "the root HTTPS path is already mapped to something else: ${EXISTING_TARGET:-<unknown>}"
+    warn "the root HTTPS path is already mapped to something else: $SERVE_ROOT"
     warn "Dormouse needs / on this node to serve the Pocket app at the passkey origin."
     confirm "Repoint / to 127.0.0.1:$LOOPBACK_PORT?" \
       || die "left the Serve config alone. Resolve the hostname/path conflict, then re-run."

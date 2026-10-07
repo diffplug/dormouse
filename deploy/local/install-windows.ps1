@@ -1630,10 +1630,9 @@ function Invoke-Verify {
   if (-not $serveText.Trim()) {
     Fail "tailscale serve reports no configuration"
   } else {
-    # The root at the origin, not merely bounded: `/api` on this port is not `/`
-    # on it, and a green tick here is a claim about the origin serving Pocket at
-    # `/`. The origin's listener names the host, so this is also the origin
-    # check. Same reading as the unix `serve_proxies_root`.
+    # A claim about the origin serving Pocket at `/`, so read at the origin's
+    # root, like the unix `serve_proxies_root`; that also makes it the origin
+    # check.
     $serveRoot = Get-ServeOriginRoot -Text $serveText -Origin $ORIGIN
     if ($serveRoot -match ('^proxy +http://' + [regex]::Escape("127.0.0.1:$PORT") + '(/|$)')) {
       Pass "Serve proxies / to 127.0.0.1:$PORT at DORMOUSE_ORIGIN ($ORIGIN)"
@@ -2321,12 +2320,9 @@ rem directly.
   }
 
   $NEEDS_SERVE = $true
-  # The origin's root handler alone, right-bounded, for the reasons the unix
-  # `serve_state` carries: a bare port match said "already ours" when / was
-  # foreign and another path sat on this port; `127.0.0.1:31000` contains
-  # `127.0.0.1:3100`; a root proxy on another listener said "already ours"
-  # while :443 served someone else; and only a foreign proxy counted as a
-  # conflict, so a path or text root was repointed without the confirm.
+  # The origin's root handler alone, right-bounded, with any handler there but
+  # ours a conflict: the same reading, for the same reasons, as the unix
+  # `serve_state`.
   $serveRoot = Get-ServeOriginRoot -Text $SERVE_BEFORE -Origin $ORIGIN
   if ($serveRoot -match ('^proxy +http://' + [regex]::Escape("127.0.0.1:$LOOPBACK_PORT") + '(/|$)')) {
     Write-Ok "Serve already proxies to 127.0.0.1:$LOOPBACK_PORT"

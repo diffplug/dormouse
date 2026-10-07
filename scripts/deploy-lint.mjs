@@ -49,6 +49,26 @@ export const INSTALLERS = [
   { platform: 'Linux', file: 'deploy/local/install-linux.sh' },
 ];
 
+/** `text` as a regex that matches it literally. */
+const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * The Windows installer's Serve origin-root reader, spelled out whole: it
+ * cannot be run here, so its text is the control, and requiring both copies
+ * (installer body and `manage`) to equal it keeps them identical.
+ */
+const WINDOWS_SERVE_ORIGIN_ROOT = String.raw`function Get-ServeOriginRoot {
+  param([string]$Text, [string]$Origin)
+  if (-not $Origin) { return '' }
+  $listener = $false
+  foreach ($raw in ($Text -split "` + '`r?`n' + String.raw`")) {
+    $line = $raw.TrimEnd()
+    if (-not $line.StartsWith('|-- ')) { $listener = (($line -split '\s+')[0] -eq $Origin); continue }
+    if ($listener -and $line -match '^\|-- / +(\S.*)$') { return $Matches[1] }
+  }
+  return ''
+}`;
+
 /**
  * One entry per `FAIL IF` clause this can see. `pattern` is matched against the
  * whole file; `skip` names platforms the rule does not apply to, with a reason
@@ -466,13 +486,14 @@ export const RULES = [
     // uninstall. Counted, because each installer carries the reader twice:
     // the installer body's for the gate, and the generated `manage`'s.
     // `scripts/installer-verify-test.mjs` runs the unix copies over
-    // multi-listener `serve status` text; Windows has only this.
+    // multi-listener `serve status` text and checks the two identical; Windows
+    // has only this, so its pattern is the whole function, which also keeps
+    // its two copies identical.
     rule: "Network posture — the Serve root is read from the origin's :443 listener alone",
     patterns: {
-      macOS: /substr\(\$0, 1, 4\) != "\|-- " \{ listener = \(origin != "" && tolower\(\$1\) == tolower\(origin\)\); next \}\n\s*listener && !found && \$2 == "\/" \{/,
-      Linux: /substr\(\$0, 1, 4\) != "\|-- " \{ listener = \(origin != "" && tolower\(\$1\) == tolower\(origin\)\); next \}\n\s*listener && !found && \$2 == "\/" \{/,
-      Windows:
-        /if \(-not \$line\.StartsWith\('\|-- '\)\) \{ \$listener = \(\(\$line -split '\\s\+'\)\[0\] -eq \$Origin\); continue \}\n\s*if \(\$listener -and \$line -match '\^\\\|-- \/ \+\(\\S\.\*\)\$'\) \{ return \$Matches\[1\] \}/,
+      macOS: /BEGIN \{ if \(origin == ""\) exit \}\n\s*substr\(\$0, 1, 4\) != "\|-- " \{ listener = \(tolower\(\$1\) == tolower\(origin\)\); next \}\n\s*listener && \$2 == "\/" \{ sub\(\/\^\[\|\]-- \\\/ \+\/, ""\); print; exit \}/,
+      Linux: /BEGIN \{ if \(origin == ""\) exit \}\n\s*substr\(\$0, 1, 4\) != "\|-- " \{ listener = \(tolower\(\$1\) == tolower\(origin\)\); next \}\n\s*listener && \$2 == "\/" \{ sub\(\/\^\[\|\]-- \\\/ \+\/, ""\); print; exit \}/,
+      Windows: new RegExp(escapeRegExp(WINDOWS_SERVE_ORIGIN_ROOT)),
     },
     exactMatches: { macOS: 2, Linux: 2, Windows: 2 },
   },
@@ -483,8 +504,8 @@ export const RULES = [
     // or text root as `none`, and the install repointed it without asking.
     rule: 'Network posture — any root handler at the origin but ours is a Serve conflict',
     patterns: {
-      macOS: /if grep -qE '\^proxy \+http:\/\/127\\\.0\\\.0\\\.1:'"\$1"'\(\/\|\$\)' <<<"\$root"; then\n\s*printf 'loopback\\n'\n\s*elif \[ -n "\$root" \]; then\n\s*printf 'conflict\\n'/,
-      Linux: /if grep -qE '\^proxy \+http:\/\/127\\\.0\\\.0\\\.1:'"\$1"'\(\/\|\$\)' <<<"\$root"; then\n\s*printf 'loopback\\n'\n\s*elif \[ -n "\$root" \]; then\n\s*printf 'conflict\\n'/,
+      macOS: /if grep -qE '\^proxy \+http:\/\/127\\\.0\\\.0\\\.1:'"\$1"'\(\/\|\$\)' <<<"\$2"; then\n\s*printf 'loopback\\n'\n\s*elif \[ -n "\$2" \]; then\n\s*printf 'conflict\\n'/,
+      Linux: /if grep -qE '\^proxy \+http:\/\/127\\\.0\\\.0\\\.1:'"\$1"'\(\/\|\$\)' <<<"\$2"; then\n\s*printf 'loopback\\n'\n\s*elif \[ -n "\$2" \]; then\n\s*printf 'conflict\\n'/,
       Windows: /\} elseif \(\$serveRoot\) \{\n\s*Write-Warn2 "the root HTTPS path is already mapped to something else: \$serveRoot"/,
     },
     exactMatches: { macOS: 1, Linux: 1, Windows: 1 },
@@ -496,21 +517,22 @@ export const RULES = [
     // right survives a caller that stops asking: the uninstall scoping was
     // once deletable on all three platforms with every gate green.
     //
-    // Unix: the two helper matches (`serve_proxies_root`, `serve_state`) and
-    // the three call sites that hand them the origin — `manage verify`,
-    // uninstall, the install-time gate. Windows spells all three inline, so
+    // Unix: `serve_proxies_root`'s match (`serve_state`'s is the rule above)
+    // and the three call sites that hand the origin in — `manage verify`,
+    // uninstall, and the install-time gate, which reads the root once and
+    // judges it. Windows spells all three inline, so
     // each site is one span, $PORT in `Invoke-Verify` and `Invoke-Uninstall`,
     // $LOOPBACK_PORT at the gate. `SERVE_AFTER` is excluded on purpose: it is
     // bounded but not root-scoped, because it asserts our own `serve --bg`
     // landed rather than auditing a foreign config.
     rule: "Network posture — every root-path Serve decision consults the origin's root, bounded on the port",
     patterns: {
-      macOS: /grep -qE '\^proxy \+http:\/\/127\\\.0\\\.0\\\.1:'"\$1"'\(\/\|\$\)' <<<"\$(?:\(serve_origin_root "\$2" "\$3"\)|root)"|serve_proxies_root "\$PORT" "\$ORIGIN" "\$serve_out"|serve_state "\$LOOPBACK_PORT" "\$ORIGIN" "\$SERVE_BEFORE"/,
-      Linux: /grep -qE '\^proxy \+http:\/\/127\\\.0\\\.0\\\.1:'"\$1"'\(\/\|\$\)' <<<"\$(?:\(serve_origin_root "\$2" "\$3"\)|root)"|serve_proxies_root "\$PORT" "\$ORIGIN" "\$serve_out"|serve_state "\$LOOPBACK_PORT" "\$ORIGIN" "\$SERVE_BEFORE"/,
+      macOS: /grep -qE '\^proxy \+http:\/\/127\\\.0\\\.0\\\.1:'"\$1"'\(\/\|\$\)' <<<"\$\(serve_origin_root "\$2" "\$3"\)"|serve_proxies_root "\$PORT" "\$ORIGIN" "\$serve_out"|SERVE_ROOT="\$\(serve_origin_root "\$ORIGIN" "\$SERVE_BEFORE"\)"\ncase "\$\(serve_state "\$LOOPBACK_PORT" "\$SERVE_ROOT"\)" in/,
+      Linux: /grep -qE '\^proxy \+http:\/\/127\\\.0\\\.0\\\.1:'"\$1"'\(\/\|\$\)' <<<"\$\(serve_origin_root "\$2" "\$3"\)"|serve_proxies_root "\$PORT" "\$ORIGIN" "\$serve_out"|SERVE_ROOT="\$\(serve_origin_root "\$ORIGIN" "\$SERVE_BEFORE"\)"\ncase "\$\(serve_state "\$LOOPBACK_PORT" "\$SERVE_ROOT"\)" in/,
       Windows:
         /\$serveRoot = Get-ServeOriginRoot -Text \$\w+ -Origin \$ORIGIN\n\s*if \(\$serveRoot -match \('\^proxy \+http:\/\/' \+ \[regex\]::Escape\("127\.0\.0\.1:\$(?:LOOPBACK_)?PORT"\) \+ '\(\/\|\$\)'\)\)/,
     },
-    exactMatches: { macOS: 5, Linux: 5, Windows: 3 },
+    exactMatches: { macOS: 4, Linux: 4, Windows: 3 },
   },
   {
     // Pinned on what the check says. The `/` in the message is the control: it

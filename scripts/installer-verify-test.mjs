@@ -78,9 +78,15 @@ function extractFunction(text, name) {
   throw new Error(`unterminated ${name}()`);
 }
 
-/** ~1 MiB of `line`, well past any pipe buffer, built inside the shell. */
-const pad = (line) =>
-  `"$(awk 'BEGIN{for(i=0;i<20000;i++) print "${line}"}')"`;
+/** One shell word holding `s` verbatim, newlines included. */
+const sq = (s) => "'" + s.replaceAll("'", "'\\''") + "'";
+
+/**
+ * `head`, then ~1 MiB of `line` — well past any pipe buffer — as one shell
+ * word, built inside the shell.
+ */
+const pad = (line, head = '') =>
+  `"$(printf '%s' ${sq(head)}; awk 'BEGIN{for(i=0;i<20000;i++) print "${line}"}')"`;
 
 /**
  * `tailscale serve status` text, in the shapes Tailscale's own printer emits
@@ -133,8 +139,29 @@ const SERVE_STATUS = {
   noConfig: 'No serve config',
 };
 
-/** `printf '%s'` of one fixture, safe inside a double-quoted shell word. */
-const shellText = (text) => `$(printf '%s\\n' ${text.split('\n').map((l) => `'${l.replaceAll("'", "'\\''")}'`).join(' ')})`;
+/**
+ * `[fixture, serve_state's answer, the root handler the confirm names]`, one
+ * row per fixture: `serve_proxies_root` passes exactly where the gate says
+ * `loopback`.
+ */
+const SERVE_CASES = [
+  ['ours', 'loopback'],
+  ['oursPadded', 'loopback'],
+  ['oursUnderFunnel', 'loopback'],
+  ['foreignOn8443OursOn443', 'loopback'],
+  ['foreignProxy', 'conflict', 'proxy http://127.0.0.1:9999'],
+  ['foreignPath', 'conflict', 'path  /Users/me/site'],
+  ['foreignText', 'conflict', 'text  "hello from elsewhere"'],
+  ['foreignPathPadded', 'conflict'],
+  ['foreignWithOurPortElsewhere', 'conflict'],
+  ['portPrefix', 'conflict'],
+  ['oursOn8443ForeignOn443', 'conflict', 'proxy http://127.0.0.1:9999'],
+  ['oursOn8443PathOn443', 'conflict'],
+  ['oursOn8443Only', 'none'],
+  ['oursOnServiceOnly', 'none'],
+  ['noRootAtOrigin', 'none'],
+  ['noConfig', 'none'],
+];
 
 /**
  * `lsof` and `ss` print different shapes, and each platform's check reads its
@@ -231,7 +258,7 @@ function cases(platform, env) {
     ],
     [
       'has_off_loopback: off-loopback first, 1 MiB of loopback after',
-      `if has_off_loopback 3100 "$(printf '%s\\n' "${offLoopback}"; awk 'BEGIN{for(i=0;i<20000;i++) print "${loopback}"}')"; then echo detected; else echo clean; fi`,
+      `if has_off_loopback 3100 ${pad(loopback, `${offLoopback}\n`)}; then echo detected; else echo clean; fi`,
       'detected',
     ],
     [
@@ -242,26 +269,15 @@ function cases(platform, env) {
     // The only pin that RUNS `serve_proxies_root`, and the only one that
     // catches a weakening which keeps the spelling: a fallback match beside the
     // scoped one leaves `deploy-lint`'s textual counts green while the negative
-    // cases below go red.
-    ...[
-      ['ours', 'pass'],
-      ['oursPadded', 'pass'],
-      ['oursUnderFunnel', 'pass'],
-      ['foreignWithOurPortElsewhere', 'fail'],
-      ['portPrefix', 'fail'],
-      ['oursOn8443ForeignOn443', 'fail'],
-      ['oursOn8443Only', 'fail'],
-      ['oursOnServiceOnly', 'fail'],
-      ['foreignOn8443OursOn443', 'pass'],
-      ['noConfig', 'fail'],
-    ].map(([fixture, expected]) => [
+    // cases below go red. Its answer is `serve_state`'s `loopback`.
+    ...SERVE_CASES.map(([fixture, state]) => [
       `serve_proxies_root: ${fixture}`,
-      `if serve_proxies_root 3100 '${ORIGIN}' "${shellText(SERVE_STATUS[fixture])}"; then echo pass; else echo fail; fi`,
-      expected,
+      `if serve_proxies_root 3100 ${sq(ORIGIN)} ${sq(SERVE_STATUS[fixture])}; then echo pass; else echo fail; fi`,
+      state === 'loopback' ? 'pass' : 'fail',
     ]),
     [
       'serve_proxies_root: no origin recorded is never a pass',
-      `if serve_proxies_root 3100 '' "${shellText(SERVE_STATUS.ours)}"; then echo pass; else echo fail; fi`,
+      `if serve_proxies_root 3100 '' ${sq(SERVE_STATUS.ours)}; then echo pass; else echo fail; fi`,
       'fail',
     ],
     [
@@ -299,50 +315,30 @@ function cases(platform, env) {
       `printf '[%s]\\n' "$(env_missing_keys '${env.extraKey}')"`,
       '[]',
     ],
-    // The gate the confirm hangs off: `conflict` is the only answer that asks
-    // before repointing the operator's `/`, so every foreign root handler must
-    // reach it, and a root on any other listener must not answer `loopback`.
-    ...[
-      ['ours', 'loopback'],
-      ['oursPadded', 'loopback'],
-      ['oursUnderFunnel', 'loopback'],
-      ['foreignOn8443OursOn443', 'loopback'],
-      ['foreignProxy', 'conflict'],
-      ['foreignPath', 'conflict'],
-      ['foreignText', 'conflict'],
-      ['foreignPathPadded', 'conflict'],
-      ['foreignWithOurPortElsewhere', 'conflict'],
-      ['portPrefix', 'conflict'],
-      ['oursOn8443ForeignOn443', 'conflict'],
-      ['oursOn8443PathOn443', 'conflict'],
-      ['oursOn8443Only', 'none'],
-      ['oursOnServiceOnly', 'none'],
-      ['noRootAtOrigin', 'none'],
-      ['noConfig', 'none'],
-    ].map(([fixture, expected]) => [
+    // The gate the confirm hangs off, run as the installer runs it: the
+    // origin's root handler read once, then judged. `conflict` is the only
+    // answer that asks before repointing the operator's `/`, so every foreign
+    // root handler must reach it, and a root on any other listener must not
+    // answer `loopback`.
+    ...SERVE_CASES.map(([fixture, state]) => [
       `serve_state: ${fixture}`,
-      `serve_state 3100 '${ORIGIN}' "${shellText(SERVE_STATUS[fixture])}"`,
-      expected,
+      `serve_state 3100 "$(serve_origin_root ${sq(ORIGIN)} ${sq(SERVE_STATUS[fixture])})"`,
+      state,
     ]),
     [
       'serve_state: a foreign root mapping, ahead of 1 MiB',
-      `serve_state 3100 '${ORIGIN}' "$(printf '%s\\n%s\\n' '${AT_443}' '${SERVE_ROOT_FOREIGN}'; awk 'BEGIN{for(i=0;i<20000;i++) print "${SERVE_OTHER_PATH}"}')"`,
+      `serve_state 3100 "$(serve_origin_root ${sq(ORIGIN)} ${pad(SERVE_OTHER_PATH, `${AT_443}\n${SERVE_ROOT_FOREIGN}\n`)})"`,
       'conflict',
     ],
     [
       'serve_state: 1 MiB of serve status with no root mapping at all',
-      `serve_state 3100 '${ORIGIN}' "$(printf '%s\\n' '${AT_443}'; awk 'BEGIN{for(i=0;i<20000;i++) print "${SERVE_OTHER_PATH}"}')"`,
+      `serve_state 3100 "$(serve_origin_root ${sq(ORIGIN)} ${pad(SERVE_OTHER_PATH, `${AT_443}\n`)})"`,
       'none',
     ],
-    ...[
-      ['foreignProxy', '[proxy http://127.0.0.1:9999]'],
-      ['foreignPath', '[path  /Users/me/site]'],
-      ['foreignText', '[text  "hello from elsewhere"]'],
-      ['oursOn8443ForeignOn443', '[proxy http://127.0.0.1:9999]'],
-    ].map(([fixture, expected]) => [
+    ...SERVE_CASES.filter(([, , root]) => root).map(([fixture, , root]) => [
       `serve_origin_root: names the origin's root handler for the confirm (${fixture})`,
-      `printf '[%s]\\n' "$(serve_origin_root '${ORIGIN}' "${shellText(SERVE_STATUS[fixture])}")"`,
-      expected,
+      `printf '[%s]\\n' "$(serve_origin_root ${sq(ORIGIN)} ${sq(SERVE_STATUS[fixture])})"`,
+      `[${root}]`,
     ]),
   ];
 }
@@ -429,7 +425,7 @@ export function run() {
 
       const allCases = cases(platform, env);
       const stagePath = join(fixtureDir, `stage-${platform}`);
-      const quotedStage = "'" + stagePath.replaceAll("'", "'\\''") + "'";
+      const quotedStage = sq(stagePath);
       allCases.push([
         'create_release_stage: collision preserves an existing release',
         `create_release_stage ${quotedStage}; printf keep > ${quotedStage}/marker; if create_release_stage ${quotedStage} 2>/dev/null; then echo overwritten; else cat ${quotedStage}/marker; fi`,
@@ -438,7 +434,7 @@ export function run() {
       if ((platform === 'macOS' && process.platform === 'darwin') ||
           (platform === 'Linux' && process.platform === 'linux')) {
         for (const [path, expected] of [[protectedDir, 'pass'], [publicDir, 'fail']]) {
-          const quoted = "'" + path.replaceAll("'", "'\\''") + "'";
+          const quoted = sq(path);
           allCases.push([
             `owner_only: native stat on ${expected === 'pass' ? '0700' : '0755'} directory`,
             `pass() { echo pass; }; fail() { echo fail; }; owner_only ${quoted} 700 secret`,
