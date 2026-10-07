@@ -11,28 +11,16 @@
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
-
-/** Set by a case standing in for a Burrow that predates presence windows. */
-const legacyBurrow = vi.hoisted(() => ({ on: false }));
-
-// That Burrow's message 2 is the bare 32-byte challenge, with no offer byte.
-vi.mock('remote-lib-common', async (importOriginal) => {
-  const real = await importOriginal<typeof import('remote-lib-common')>();
-  return {
-    ...real,
-    encodeConnectionMessage2: (challenge: Uint8Array, offer: import('remote-lib-common').ConnectionOffer) =>
-      legacyBurrow.on ? challenge : real.encodeConnectionMessage2(challenge, offer),
-  };
-});
-
 import {
   CONTROL_PAYLOAD_SIZE,
-  DEFAULT_CHALLENGE_TTL_MS,
   DEFAULT_PAIRING_TTL_MS,
   DIRECT_ONLY_DEADLINE_MS,
   E2E_KEEPALIVE_INTERVAL_MS,
   ESTABLISHED_E2E_IDLE_TIMEOUT_MS,
   KEEPALIVE_BODY_SIZE,
+  PRESENCE_WINDOW_IDLE_MS,
+  PRESENCE_WINDOW_MAX_MS,
+  RELAY_BEARER_BYTE_LENGTH,
   RELAY_PING,
   RELAY_PING_INTERVAL_MS,
   RELAY_PONG,
@@ -43,6 +31,7 @@ import {
   hashPasskeyPublicKey,
   parsePairingInvitationUrl,
   pushEndpointFingerprint,
+  randomBase64Url,
   toBase64Url,
   type PasskeyAssertion,
   type TerminalDataEvent,
@@ -901,7 +890,9 @@ describe('the direct path, end to end', () => {
     const timers = fakeTimers();
     const clientPeers: FakePeer[] = [];
     const burrowPeers: FakePeer[] = [];
+    let burrowClock = Date.now();
     const harness = await makeE2eHarness({
+      burrowNow: () => burrowClock,
       deps: {
         setTimer: timers.setTimer,
         ...(options.clientHasPeer === false
@@ -917,6 +908,9 @@ describe('the direct path, end to end', () => {
       harness,
       network,
       timers,
+      advanceBurrow: (ms: number) => {
+        burrowClock += ms;
+      },
       clientPeers,
       burrowPeers,
       /** This session's routing id, read off the envelope the Client addressed. */
@@ -1267,11 +1261,13 @@ describe('the direct path, end to end', () => {
     await run.cutover();
     const gone = vi.fn();
     run.harness.client.setOnBurrowGone(gone);
+    // Past the window's cap, so the replacement has to prove; the hello is
+    // activity at the new time, so the live session is not idle under it.
+    run.advanceBurrow(PRESENCE_WINDOW_MAX_MS);
+    await run.harness.client.hello();
     vi.spyOn(run.harness.authenticator, 'assert').mockRejectedValueOnce(new Error('dismissed'));
 
-    await expect(run.harness.client.connect(run.harness.burrowId, { allowWindow: false })).rejects.toThrow(
-      'dismissed',
-    );
+    await expect(run.harness.client.connect(run.harness.burrowId)).rejects.toThrow('dismissed');
 
     expect(gone).not.toHaveBeenCalled();
     expect(run.harness.client.connectedBurrowId).toBe(run.harness.burrowId);
@@ -1829,7 +1825,6 @@ describe('the presence proof', () => {
     expect(storage.getSession()).toBeNull();
     expect(harness.approvals).toEqual([]);
   });
-
 });
 
 /**
@@ -1838,10 +1833,6 @@ describe('the presence proof', () => {
  * (`docs/specs/remote-security-model.md` -> Presence window).
  */
 describe('the presence window, as Pocket rides it', () => {
-  afterEach(() => {
-    legacyBurrow.on = false;
-  });
-
   /** A signed-in, paired phone whose prompts, and whose Burrow's clock, the case owns. */
   async function paired() {
     let prompts = 0;
@@ -1891,43 +1882,13 @@ describe('the presence window, as Pocket rides it', () => {
     expect(run.harness.burrow.establishedSessionCount).toBe(1);
   });
 
-  it('proves to a Burrow that predates windows, whose message 2 is the bare challenge', async () => {
+  it('proves where message 2 offers no window', async () => {
     const run = await paired();
-    legacyBurrow.on = true;
+    run.advanceBurrow(PRESENCE_WINDOW_IDLE_MS);
 
     expect(await run.harness.client.connect(run.harness.burrowId)).toMatchObject({ ok: true });
 
     expect(run.prompts()).toBe(1);
-  });
-
-  it('proves whenever the caller declines the window, offered or not', async () => {
-    const run = await paired();
-
-    expect(await run.harness.client.connect(run.harness.burrowId, { allowWindow: false })).toMatchObject({
-      ok: true,
-    });
-
-    expect(run.prompts()).toBe(1);
-  });
-
-  /**
-   * The offer is advisory. Here the redeem lands after its challenge expired,
-   * while the window itself stays open — so the retry is offered the window
-   * again, and only declining it makes the retry prompt.
-   */
-  it('retries a refused redeem exactly once, on a fresh handshake that proves', async () => {
-    const run = await paired();
-    run.harness.relay.holdToClientWhen((frame) => frame.kind === 'connection' && frame.step === 'response');
-    const connecting = run.harness.client.connect(run.harness.burrowId);
-    await waitFor(() => run.harness.relay.isHoldingToClient(), 'message 2 to be held');
-    run.advanceBurrow(DEFAULT_CHALLENGE_TTL_MS + 1);
-    run.harness.relay.releaseToClient();
-
-    expect(await connecting).toEqual({ ok: true, burrowLabel: BURROW_LABEL });
-
-    expect(run.prompts()).toBe(1);
-    const inits = run.harness.clientSocket().frames('e2e').filter((f) => f.kind === 'connection' && f.step === 'init');
-    expect(inits).toHaveLength(2);
   });
 });
 
@@ -1969,7 +1930,7 @@ describe('localStoragePocketStorage', () => {
   });
 
   const SESSION: PocketSession = {
-    token: 'tok',
+    token: randomBase64Url(RELAY_BEARER_BYTE_LENGTH),
     accountId: 'owner',
     credentialId: 'cred-1',
     expiresAt: 1_700_000_000_000,
@@ -2023,7 +1984,7 @@ describe('localStoragePocketStorage', () => {
       storage.setPasskeyPublicKey('cred-1', 'pk-1');
       storage.setRegisteredPushEndpoint('digest');
       storage.setSession(SESSION);
-      storage.clearSession();
+      storage.setSession(null);
     }).not.toThrow();
   });
 
@@ -2044,7 +2005,7 @@ describe('localStoragePocketStorage', () => {
     expect(JSON.parse(map.get('dormouse-pocket:session')!)).toEqual({ v: 1, ...SESSION });
     expect(localStoragePocketStorage().getSession()).toEqual(SESSION);
 
-    localStoragePocketStorage().clearSession();
+    localStoragePocketStorage().setSession(null);
     expect(map.has('dormouse-pocket:session')).toBe(false);
   });
 
@@ -2052,6 +2013,7 @@ describe('localStoragePocketStorage', () => {
     ['unparseable', '{'],
     ['another version', JSON.stringify({ v: 2, ...SESSION })],
     ['missing its credential', JSON.stringify({ v: 1, ...SESSION, credentialId: undefined })],
+    ['holding no bearer', JSON.stringify({ v: 1, ...SESSION, token: 'tok' })],
     ['null', 'null'],
   ])('reads a stored session that is %s as none', (_, raw) => {
     const { map, store } = fakeLocalStorage();

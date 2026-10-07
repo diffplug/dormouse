@@ -66,6 +66,8 @@ import {
  * lockstep with a separate `phase` string was four places to get it wrong.
  */
 type Phase =
+  /** A session kept from an earlier launch, before its first read answers. */
+  | { readonly at: 'restoring' }
   | { readonly at: 'auth' }
   | { readonly at: 'scan' }
   /** `code` is null for the moment between the handshake and the sampled code. */
@@ -186,10 +188,8 @@ export default function App({
    */
   const [passkeyAlreadyRegistered, setPasskeyAlreadyRegistered] = useState(false);
 
-  // A session kept from an earlier launch lands on the list; its first read,
-  // once the capability probe passes, finds out whether the Relay still honors it.
   const [phase, setPhase] = useState<Phase>(() => ({
-    at: client.sessionToken === null ? 'auth' : 'burrows',
+    at: client.sessionToken === null ? 'auth' : 'restoring',
   }));
   /**
    * The last failure. Unkeyed, because every screen that reports one owns its
@@ -255,7 +255,7 @@ export default function App({
   // across one.
   const at = phase.at;
   useEffect(() => {
-    if (at !== 'burrows' || !noiseSupported) return;
+    if (at !== 'burrows') return;
     const run = ++pushLoadRunRef.current;
     const current = () => pushLoadRunRef.current === run;
     setPushSubscriptionCurrent(false);
@@ -282,7 +282,7 @@ export default function App({
         // re-offers its idempotent Enable rather than claiming push is on; the
         // next Burrows entry re-reads.
       });
-  }, [at, client, loadPushConfig, noiseSupported]);
+  }, [at, client, loadPushConfig]);
 
   /**
    * Whether this device is registered for push notifications with one Burrow.
@@ -371,14 +371,19 @@ export default function App({
     return views;
   }, [client]);
 
-  // The restored session's first read; a 401 drops to sign-in through `run`.
-  // Latched, so StrictMode's second effect pass does not read twice.
-  const restoredRef = useRef(false);
+  // A kept session's first read, once the capability gate passes: it finds
+  // out whether the Relay still honors the session. A 401 drops to sign-in
+  // through `run`; any other failure still lands on the list, where Refresh
+  // retries.
   useEffect(() => {
-    if (!noiseSupported || restoredRef.current) return;
-    restoredRef.current = true;
-    if (client.sessionToken !== null) void run('refresh', loadBurrows);
-  }, [client, loadBurrows, noiseSupported, run]);
+    if (at !== 'restoring' || !noiseSupported) return;
+    void run('refresh', () =>
+      loadBurrows().catch((err: unknown) => {
+        setPhase({ at: 'burrows' });
+        throw err;
+      }),
+    );
+  }, [at, loadBurrows, noiseSupported, run]);
 
   // Socket drop / burrow-gone: dispose the adapter and fall back to Burrows.
   useEffect(() => {
@@ -466,16 +471,9 @@ export default function App({
         // A stored session the Relay no longer honors — a self-host Relay
         // restarted — is refused at the session gate before the code is spent,
         // so the scan carries on through sign-in with the same code.
-        let spent = false;
-        if (client.sessionToken !== null) {
-          try {
-            await client.retireSetupToken(invitation.setupToken);
-            spent = true;
-          } catch (err) {
-            if (!(err instanceof SessionExpiredError)) throw err;
-          }
-        }
-        if (client.sessionToken === null) {
+        let spent =
+          client.sessionToken !== null && (await retireUnlessExpired(client, invitation.setupToken));
+        if (!spent) {
           // A browser with no usable passkey registers one with the scanned
           // token; anything else signs in with what it already holds.
           let mustRegister = !hasPriorUseNow(client, passkeyAlreadyRegistered);
@@ -668,6 +666,8 @@ export default function App({
       );
     case 'pairing':
       return <PairingCodeView code={phase.code} onCancel={onCancelPairing} />;
+    case 'restoring':
+      return <Waiting />;
     case 'auth':
       return (
         <SetupOrSignin
@@ -722,6 +722,20 @@ export default function App({
           onSignOut={signOut}
         />
       );
+  }
+}
+
+/**
+ * Spend a scanned code under the session held: false, with nothing spent, when
+ * the Relay no longer honors that session. Any other refusal throws.
+ */
+async function retireUnlessExpired(client: PocketClient, setupToken: string): Promise<boolean> {
+  try {
+    await client.retireSetupToken(setupToken);
+    return true;
+  } catch (err) {
+    if (err instanceof SessionExpiredError) return false;
+    throw err;
   }
 }
 

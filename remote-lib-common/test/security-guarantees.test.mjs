@@ -294,7 +294,7 @@ test('every connection requires user presence the Burrow itself verified', async
   const idle = await client.connect(burrow, { accountId: ACCOUNT, authenticator, window: true });
   assert.equal(idle.offer, 'none');
   assert.equal(idle.outcome.code, 'presence-rejected');
-  assert.equal(idle.detail, 'window-closed');
+  assert.equal(idle.detail, 'no-window-offered');
   assert.equal((await client.connect(burrow, { accountId: ACCOUNT, authenticator })).ok, true);
   assert.equal(assertions.calls, 1);
 
@@ -315,7 +315,7 @@ test('every connection requires user presence the Burrow itself verified', async
   assert.equal(burrow.challenges.pendingCount, 0);
 });
 
-test('a presence window speaks only for its own active record and Client static', async () => {
+test('a presence window speaks only for its own identities and Client static', async () => {
   const { clock, burrow, authenticator, client } = await world();
   await client.pair(burrow, { accountId: ACCOUNT, authenticator });
 
@@ -326,15 +326,16 @@ test('a presence window speaks only for its own active record and Client static'
   assert.equal(intruded.offer, 'none');
   assert.equal(intruded.outcome.code, 'presence-rejected');
 
-  // The offer is advisory: a record replaced without a proof the Burrow
-  // verified leaves the window naming the old one, so redeeming it fails.
+  // A redeem still runs the four-way conjunction, against the identities the
+  // window's proof was verified for: a record that no longer holds them grants
+  // nothing, whatever the window says.
   const [record] = burrow.acl.activeRecords();
   clock.advance(1);
-  burrow.acl.approve({ ...record, approvedBy: 'restore' });
+  burrow.acl.approve({ ...record, accountId: 'someone-else' });
   const replaced = await client.connect(burrow, { accountId: ACCOUNT, authenticator, window: true });
   assert.equal(replaced.offer, PRESENCE_WINDOW);
   assert.equal(replaced.outcome.code, 'pairing-required');
-  assert.deepEqual(replaced.misses, ['record-replaced']);
+  assert.deepEqual(replaced.misses, ['account-mismatch']);
 
   // And a revoked record is gone whatever window remains.
   burrow.acl.revokeClient(client.staticPublicKeyFor(burrow));

@@ -3,37 +3,26 @@
  * (`docs/specs/remote-security-model.md` -> Presence window).
  *
  * Keyed by the IK-authenticated Client static, base64url as the ACL stores it.
- * Each entry names the ACL record its proof was verified for, so a redeem can
- * re-run the conjunction against that record and nothing else. In memory only,
+ * Each entry names the identities its proof was verified for, so a redeem can
+ * re-run the ACL conjunction against them and nothing else. In memory only,
  * and evaluated rather than reaped: an entry past its bounds reads as closed
  * and is dropped the next time anything asks about it.
  */
 
 import { PRESENCE_WINDOW_IDLE_MS, PRESENCE_WINDOW_MAX_MS } from './e2e-bounds.js';
 
-/** The ACL record a window was opened for; `approvedAt` tells a re-pairing apart. */
+/** The identities a window's proof was verified for. */
 export interface PresenceWindowRecord {
   readonly accountId: string;
   readonly passkeyCredentialId: string;
   readonly passkeyPublicKeyHash: string;
-  readonly approvedAt: number;
 }
 
 export interface PresenceWindowEntry extends PresenceWindowRecord {
   /** When the Burrow verified the proof that opened or last refreshed it. */
   readonly provedAt: number;
-  /** `provedAt`, or the latest activity folded in from a session that has ended. */
+  /** `provedAt`, or the latest Client activity folded in since. */
   readonly activeAt: number;
-}
-
-/**
- * Client activity under one record: a live session's last decrypted
- * Client->Burrow message, or an ended one's. Counted only toward the window of
- * the record that session was authorized under.
- */
-export interface PresenceWindowActivity {
-  readonly approvedAt: number;
-  readonly at: number;
 }
 
 export interface PresenceWindowsOptions {
@@ -51,8 +40,7 @@ export class PresenceWindows {
 
   /**
    * Open, or refresh, the window for one Client static after the Burrow
-   * verified a proof for `record` at `provedAt`. Replaces any entry for
-   * another record outright.
+   * verified a proof for `record` at `provedAt`. Replaces any entry outright.
    */
   seed(clientStaticPublicKey: string, record: PresenceWindowRecord, provedAt: number): void {
     this.#sweepCapped();
@@ -60,40 +48,35 @@ export class PresenceWindows {
       accountId: record.accountId,
       passkeyCredentialId: record.passkeyCredentialId,
       passkeyPublicKeyHash: record.passkeyPublicKeyHash,
-      approvedAt: record.approvedAt,
       provedAt,
       activeAt: provedAt,
     });
   }
 
-  /** Fold one session's activity in; a no-op unless it was under the entry's record. */
-  noteActivity(clientStaticPublicKey: string, activity: PresenceWindowActivity): void {
+  /**
+   * Fold one session's Client activity in: its last decrypted Client->Burrow
+   * message, live or ended. Never moves the activity back.
+   */
+  noteActivity(clientStaticPublicKey: string, at: number): void {
     const entry = this.#entries.get(clientStaticPublicKey);
-    if (!entry || entry.approvedAt !== activity.approvedAt || activity.at <= entry.activeAt) return;
-    this.#entries.set(clientStaticPublicKey, { ...entry, activeAt: activity.at });
+    if (!entry || at <= entry.activeAt) return;
+    this.#entries.set(clientStaticPublicKey, { ...entry, activeAt: at });
   }
 
   /**
-   * The open window for one Client static, or `null`. `live` is the activity
-   * of a session still running under it, which has not been folded in yet.
-   * Open means less than {@link PRESENCE_WINDOW_IDLE_MS} since the latest
-   * activity and less than {@link PRESENCE_WINDOW_MAX_MS} since the proof.
+   * The open window for one Client static, or `null`. Open means less than
+   * {@link PRESENCE_WINDOW_IDLE_MS} since the latest activity and less than
+   * {@link PRESENCE_WINDOW_MAX_MS} since the proof.
    */
-  open(clientStaticPublicKey: string, live: PresenceWindowActivity | null = null): PresenceWindowEntry | null {
+  open(clientStaticPublicKey: string): PresenceWindowEntry | null {
     const entry = this.#entries.get(clientStaticPublicKey);
     if (!entry) return null;
     const now = this.#now();
-    const liveAt = live?.approvedAt === entry.approvedAt ? live.at : Number.NEGATIVE_INFINITY;
-    const activeAt = Math.max(entry.activeAt, liveAt);
-    if (now - activeAt < PRESENCE_WINDOW_IDLE_MS && now - entry.provedAt < PRESENCE_WINDOW_MAX_MS) {
+    if (now - entry.activeAt < PRESENCE_WINDOW_IDLE_MS && now - entry.provedAt < PRESENCE_WINDOW_MAX_MS) {
       return entry;
     }
     this.#entries.delete(clientStaticPublicKey);
     return null;
-  }
-
-  forget(clientStaticPublicKey: string): void {
-    this.#entries.delete(clientStaticPublicKey);
   }
 
   clear(): void {

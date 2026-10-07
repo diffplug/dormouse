@@ -129,7 +129,6 @@ export function memoryStorage(): PocketStorage {
     setRegisteredPushEndpoint: (fingerprint) => void (pushEndpoint = fingerprint),
     getSession: () => session,
     setSession: (next) => void (session = next),
-    clearSession: () => void (session = null),
   };
 }
 

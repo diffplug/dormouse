@@ -10,7 +10,7 @@
  * (`docs/specs/relay.md` → E2E framing).
  */
 
-import { isBoundedString } from './bytes.js';
+import { concatBytes, isBoundedString } from './bytes.js';
 import { CHALLENGE_BYTE_LENGTH } from './challenge.js';
 import { PATH_ADDRESS_SOURCES, isIpLiteral, type PathAddressSource } from './direct-path.js';
 import {
@@ -288,10 +288,7 @@ const OFFER_BYTES: Readonly<Record<ConnectionOffer, number>> = { none: 0x00, [PR
  */
 export function encodeConnectionMessage2(challenge: Uint8Array, offer: ConnectionOffer): Uint8Array {
   if (challenge.length !== CHALLENGE_BYTE_LENGTH) throw new Error('a Burrow challenge is 32 bytes');
-  const payload = new Uint8Array(CHALLENGE_BYTE_LENGTH + 1);
-  payload.set(challenge);
-  payload[CHALLENGE_BYTE_LENGTH] = OFFER_BYTES[offer];
-  return payload;
+  return concatBytes(challenge, Uint8Array.of(OFFER_BYTES[offer]));
 }
 
 /**

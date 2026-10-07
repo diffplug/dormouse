@@ -102,8 +102,6 @@ Measured on iPhone 15 Pro, Safari 26.6.1, September 2026: X25519 generation work
 
 **Why the Burrow's idle reap is worth a fresh handshake.** It is the price of the Burrow reclaiming state that a hostile relay would otherwise never let it reclaim: without a deadline the Burrow holds sessions open at a peer's discretion.
 
-**Why a refused ride is retried once, and with a proof.** The offer is advisory: the window can close between message 2 and the redeem (the idle edge, a raised UV demand, the challenge's own expiry), and a person who tapped Connect should not read a denial they did not cause. A retry that proves always settles it, at the prompt the window would have saved; a retry allowed to ride again could meet a Burrow that keeps offering and keeps refusing.
-
 **Why the Client runs the Burrow's deadline against its own last send.** The relay socket is to the Relay and stays open across the reap, and the Burrow's goodbye goes out while the page is suspended — delivered late, or not at all. Without the local check a returning phone holds a session the Burrow has forgotten: every request hangs with no error, and only a reload escapes.
 
 ## An expired session drops to sign-in

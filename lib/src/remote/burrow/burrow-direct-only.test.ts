@@ -163,11 +163,12 @@ describe('BurrowRuntime direct-only sessions', () => {
   }
 
   /** Pair and connect `clientId`, answering its session and the outcome it read. */
-  async function connect(clientId = 'c1') {
+  /** Pair, then connect with a fresh proof or — with `window` — by riding the presence window. */
+  async function connect(clientId = 'c1', { window = false }: { window?: boolean } = {}) {
     const clientStatic = await pairClient(clientId);
     clock.advance(1_000);
     const connectionId = testRoutingId();
-    const { session, burrowChallenge } = await openConnectionSession({
+    const { session, burrowChallenge, offer } = await openConnectionSession({
       socket,
       burrowId: enrollment.burrowId,
       clientId,
@@ -183,9 +184,10 @@ describe('BurrowRuntime direct-only sessions', () => {
       handshakeHash: toBase64Url(session.handshakeHash),
       passkeyCredentialId: authenticator.credentialId,
     };
-    send(clientId, connectionId, session.sendControl({ presence: await presenceProofFor(authenticator, binding) }));
+    const presence = window ? PRESENCE_WINDOW : await presenceProofFor(authenticator, binding);
+    send(clientId, connectionId, session.sendControl({ presence }));
     const outcome = await readOutcome(socket, session, 'connection', connectionId);
-    return { session, connectionId, clientId, outcome };
+    return { session, connectionId, clientId, offer, outcome };
   }
 
   function send(clientId: string, connectionId: string, ciphertext: Uint8Array): void {
@@ -234,22 +236,9 @@ describe('BurrowRuntime direct-only sessions', () => {
 
   it('says so to a connection that rode the presence window, which asked for no proof', async () => {
     localNetworks();
-    const clientStatic = await pairClient('c1');
-    const connectionId = testRoutingId();
-    const { session, offer } = await openConnectionSession({
-      socket,
-      burrowId: enrollment.burrowId,
-      clientId: 'c1',
-      connectionId,
-      clientStatic,
-      burrowStaticPublicKey: enrollment.noiseStaticPublicKey!,
-    });
-    expect(offer).toBe(PRESENCE_WINDOW);
-    send('c1', connectionId, session.sendControl({ presence: PRESENCE_WINDOW }));
-    expect(await readOutcome(socket, session, 'connection', connectionId)).toEqual({
-      ok: true,
-      burrowLabel: LABEL,
-      directOnly: true,
+    expect(await connect('c1', { window: true })).toMatchObject({
+      offer: PRESENCE_WINDOW,
+      outcome: { ok: true, burrowLabel: LABEL, directOnly: true },
     });
   });
 

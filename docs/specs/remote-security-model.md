@@ -77,13 +77,13 @@ Source of truth: `utf8Encode` in `remote-lib-common/src/security/bytes.ts` (`rem
 
 ## Presence window
 
-**A connection may skip the assertion only on a proof this Burrow verified itself.** A presence window is Burrow memory keyed by the IK-authenticated Client static (rationale), naming the ACL record — account, passkey credential, key hash, `approvedAt` — that proof was verified for.
+**A connection may skip the assertion only on a proof this Burrow verified itself.** A presence window is Burrow memory keyed by the IK-authenticated Client static (rationale), naming the identities — account, passkey credential, key hash — that proof was verified for.
 
 - **Only a Burrow-verified proof for an active record opens or refreshes one**: a pairing proof once its record is committed, replacing any window for that static; a connection proof once the conjunction holds. **A connection that rode a window never refreshes its proof time.** Pairing always requires a proof.
-- **Open means under `PRESENCE_WINDOW_IDLE_MS` since the static's last activity and under `PRESENCE_WINDOW_MAX_MS` since the proof** ([Burrow bounds](#burrow-bounds); rationale). Activity is the proof itself or any decrypted Client→Burrow message, keepalives included, on an established session authorized under that same record (rationale).
-- **The offer is advisory.** Message 2 carries it ([Connection](#connection)); a redeem consumes the challenge, then re-checks the window (closed: `presence-rejected`) and re-runs the conjunction against the window's own record, `approvedAt` included (a miss: `pairing-required`).
+- **Open means under `PRESENCE_WINDOW_IDLE_MS` since the static's last activity and under `PRESENCE_WINDOW_MAX_MS` since the proof** ([Burrow bounds](#burrow-bounds); rationale). Activity is the proof itself or any decrypted Client→Burrow message, keepalives included, on an established session of that static (rationale).
+- **The offer is binding.** Message 2 carries it ([Connection](#connection)); a redeem consumes the challenge, is `presence-rejected` when the challenge is spent or no window was offered, and otherwise rides the offered window without evaluating it again, running the conjunction against that window's identities (a miss: `pairing-required`; rationale).
 - **The Relay can neither mint nor extend a window**: one opens only on a proof the Burrow verified, keyed by a static the Relay never sees, and only messages the Burrow decrypts count as activity.
-- **Cleared by a raised UV demand and by `stop()`**, and absent from every new runtime (a Burrow restart, a network-policy change); **never cleared by a dropped relay socket** (rationale). Evaluated at offer and redeem, never reaped, and held in memory only.
+- **Cleared by a raised UV demand, which also voids every offer not yet redeemed, and by `stop()`**, and absent from every new runtime (a Burrow restart, a network-policy change); **never cleared by a dropped relay socket** (rationale). Evaluated at the offer, never reaped, and held in memory only.
 
 Source of truth: `PresenceWindows` in `remote-lib-common/src/security/presence-window.ts`; `BurrowRuntime.#openWindow` in `lib/src/remote/burrow/burrow-runtime.ts`.
 
@@ -122,7 +122,7 @@ Source of truth: `BurrowRuntime.mintInvitation` / `#onPairingInit` / `#onPairing
 ## Connection
 
 - **IK against the pinned Burrow static.** Fresh 16-byte connection ID; Client initiator with its paired per-Burrow static, `rs` the pin; message 2's payload is a fresh 32-byte Burrow challenge (`ChallengeIssuer`, 2-minute TTL) then one offer byte — `0x01` when the Client static has an open [presence window](#presence-window), else `0x00` — always 33 bytes. **A proof's `burrowChallenge` is the whole payload**; a Client reads a bare 32-byte payload or an unknown offer byte as no offer (rationale). Completing Noise proves both statics and **authorizes nothing**.
-- **Authorization = (proof ∨ window) ∧ conjunction.** `ConnectionRequestV1.presence` is a `PresenceProofV1` or `'window'`, padded alike. The Burrow consumes the challenge *before verifying presence*, verifies a proof against the binding it built from its own `burrowId`, connection ID, message-2 payload and handshake hash, or redeems the window, then requires one active `BurrowAclRecord` holding all four of `accountId`, `passkeyCredentialId`, `passkeyPublicKeyHash`, and the IK-authenticated Client static.
+- **Authorization = (proof ∨ window) ∧ conjunction.** `ConnectionRequestV1.presence` is a `PresenceProofV1` or `'window'`, padded alike. The Burrow consumes the challenge *before verifying presence*, verifies a proof against the binding it built from its own `burrowId`, connection ID, message-2 payload and handshake hash, or redeems the window message 2 offered, then requires one active `BurrowAclRecord` holding all four of `accountId`, `passkeyCredentialId`, `passkeyPublicKeyHash`, and the IK-authenticated Client static.
 - **Then `ConnectionOutcomeV1`**: success carries the Burrow label (and `directOnly` under Local networks); denial carries only `pairing-required`, `presence-rejected`, `protocol-rejected`, `burrow-busy`, or `burrow-error`. **Every ACL miss is `pairing-required`** — individual ACL and presence failures are logged owner-locally and never returned. Success promotes the two `CipherState`s into the established session; every terminal decision sends exactly one outcome and clears pending state; **failures before `Split` yield only a generic outer error** (rationale).
 - **Protocol-v1 rides inside**, as application messages on the session's byte stream ([remote-api.md](./remote-api.md) -> Transport).
 
@@ -262,7 +262,7 @@ The checklist an auditor or a change reviewer verifies against, each property es
 * Compromising the Relay reveals no pairing decision, Burrow label, remote-api message, terminal byte, or notification text.
 * Passkey synchronization does not automatically create trusted Clients.
 * Every trusted Client must be explicitly paired with every Burrow.
-* Every connection requires user presence the Burrow itself verified — a fresh proof bound to that connection's transcript, or one it verified for the same record and Client static within its presence window; the Relay can neither supply nor extend one.
+* Every connection requires user presence the Burrow itself verified — a fresh proof bound to that connection's transcript, or one it verified for the same identities and Client static within its presence window; the Relay can neither supply nor extend one.
 * Every access decision is ultimately made by the Burrow.
 * A one-time session is authorized only by typing, on the Burrow, the two digits its phone shows; it writes nothing at either end and runs only on the direct path (pinned by `lib/src/remote/client/one-time-e2e.test.ts`).
 

@@ -36,6 +36,7 @@ import {
   isE2eRelayToClientFrame,
   isNoisePublicKey,
   isPairingOutcomeV1,
+  isRelayBearer,
   pairingInvitationPrologue,
   pushEndpointFingerprint,
   pushSubscriptionDeletePath,
@@ -140,8 +141,8 @@ export interface PocketStorage {
    * Relay alone; every Burrow ceremony still demands its own presence proof.
    */
   getSession(): PocketSession | null;
-  setSession(session: PocketSession): void;
-  clearSession(): void;
+  /** `null` forgets it. */
+  setSession(session: PocketSession | null): void;
 }
 
 /**
@@ -393,7 +394,7 @@ export class PocketClient {
     // A stored session the Relay has already expired would only cost a 401.
     const stored = this.#storage.getSession();
     this.#session = stored && stored.expiresAt > this.#now() ? stored : null;
-    if (stored && !this.#session) this.#storage.clearSession();
+    if (stored && !this.#session) this.#storage.setSession(null);
     this.#setTimer = deps.setTimer ?? realTimer;
     this.#core = new ClientSessionCore<E2eRoute>({
       sendFrame: (route, step, ciphertext) => this.#sendE2e(route, step, ciphertext),
@@ -892,13 +893,13 @@ export class PocketClient {
   // --- Connection ----------------------------------------------------------
 
   /**
-   * Connect to a paired Burrow: IK against the pinned static, then either one
-   * presence proof over this handshake's own transcript or, where message 2
-   * offers it and `allowWindow` holds, a ride on the Burrow's presence window
-   * with no prompt — and the Burrow's single outcome
+   * Connect to a paired Burrow: IK against the pinned static, then either a
+   * ride on the Burrow's presence window where message 2 offers one, with no
+   * prompt, or one presence proof over this handshake's own transcript — and
+   * the Burrow's single outcome
    * (`docs/specs/remote-security-model.md` → Connection, Presence window).
    */
-  async connect(burrowId: string, { allowWindow = true }: { allowWindow?: boolean } = {}): Promise<ConnectResult> {
+  async connect(burrowId: string): Promise<ConnectResult> {
     await this.#ensureSocket();
     let record: KnownBurrowV1 | null;
     try {
@@ -940,18 +941,19 @@ export class PocketClient {
     }
     // Message 2's payload is the Burrow's fresh single-use challenge and its
     // window offer; a proof binds the whole of it. A Burrow that predates
-    // windows sends the bare challenge, which offers none.
-    const rideWindow = allowWindow && decodeConnectionMessage2(message2) === PRESENCE_WINDOW;
-    const presence = rideWindow
-      ? PRESENCE_WINDOW
-      : await this.#provePresence({
-          kind: 'connection',
-          burrowId,
-          connectionId,
-          burrowChallenge: toBase64Url(message2),
-          handshakeHash: toBase64Url(session.handshakeHash),
-          passkeyCredentialId: record.passkeyCredentialId,
-        });
+    // windows sends the bare challenge, which offers none. An offer is
+    // binding, so riding it needs no fallback.
+    const presence =
+      decodeConnectionMessage2(message2) === PRESENCE_WINDOW
+        ? PRESENCE_WINDOW
+        : await this.#provePresence({
+            kind: 'connection',
+            burrowId,
+            connectionId,
+            burrowChallenge: toBase64Url(message2),
+            handshakeHash: toBase64Url(session.handshakeHash),
+            passkeyCredentialId: record.passkeyCredentialId,
+          });
     // **A second Connect on one Client replaces the first**, the mirror of
     // `BurrowRuntime.#promoteConnection`: its predecessor's endpoint, peer and
     // channel go, and left alive the orphan's channel would report violations
@@ -1006,10 +1008,6 @@ export class PocketClient {
       }
       return { ok: true, burrowLabel: outcome.burrowLabel };
     }
-    // The offer is advisory: the window can close between message 2 and the
-    // redeem. One retry that always proves, so it can never loop, and the
-    // caller sees only its outcome.
-    if (rideWindow && outcome.code === 'presence-rejected') return this.connect(burrowId, { allowWindow: false });
     if (outcome.code === 'pairing-required') {
       // Best-effort: the outcome is authenticated and the row has to move to
       // *Pair again* whatever the local stores do. A tombstone write that
@@ -1329,8 +1327,7 @@ export class PocketClient {
 
   #setSession(session: PocketSession | null): void {
     this.#session = session;
-    if (session) this.#storage.setSession(session);
-    else this.#storage.clearSession();
+    this.#storage.setSession(session);
   }
 
   #requirePasskeyPublicKey(credentialId: string): string {
@@ -1373,8 +1370,6 @@ export function localStoragePocketStorage(): PocketStorage {
 
   const passkeys = new Map<string, string>();
   let pushEndpoint: string | undefined;
-  /** `undefined` until this run writes or clears it; `null` is cleared. */
-  let session: PocketSession | null | undefined;
 
   const read = (key: string): string | null => {
     try {
@@ -1427,16 +1422,12 @@ export function localStoragePocketStorage(): PocketStorage {
       pushEndpoint = fingerprint;
       write(PUSH_ENDPOINT_KEY, fingerprint);
     },
-    getSession: () => (session === undefined ? parseStoredSession(read(SESSION_KEY)) : session),
+    // No mirror: the client reads this once, at construction, and holds the
+    // session itself for the life of the tab.
+    getSession: () => parseStoredSession(read(SESSION_KEY)),
     setSession: (next) => {
-      session = next;
-      write(SESSION_KEY, JSON.stringify({ v: 1, ...next }));
-    },
-    // The mirror remembers the clear, so a removal that failed cannot bring
-    // the session back for the rest of this run.
-    clearSession: () => {
-      session = null;
-      drop(SESSION_KEY);
+      if (next) write(SESSION_KEY, JSON.stringify({ v: 1, ...next }));
+      else drop(SESSION_KEY);
     },
   };
 }
@@ -1448,7 +1439,7 @@ function parseStoredSession(raw: string | null): PocketSession | null {
     const { v, token, accountId, credentialId, expiresAt } = JSON.parse(raw) as Record<string, unknown>;
     if (
       v === 1 &&
-      typeof token === 'string' &&
+      isRelayBearer(token) &&
       typeof accountId === 'string' &&
       typeof credentialId === 'string' &&
       typeof expiresAt === 'number'

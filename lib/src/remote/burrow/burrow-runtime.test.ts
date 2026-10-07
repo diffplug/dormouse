@@ -204,7 +204,13 @@ describe('BurrowRuntime end-to-end ceremonies', () => {
   async function requestPairing(
     clientId: string,
     authenticator: TestAuthenticator,
-    options: { code?: string; label?: string; invitation?: PairingInvitation; clientStatic?: NoiseKeyPair } = {},
+    options: {
+      code?: string;
+      label?: string;
+      invitation?: PairingInvitation;
+      clientStatic?: NoiseKeyPair;
+      accountId?: string;
+    } = {},
   ) {
     const invitation = options.invitation ?? (await mintInvitation());
     const clientStatic = options.clientStatic ?? (await generateNoiseKeyPair());
@@ -217,7 +223,7 @@ describe('BurrowRuntime end-to-end ceremonies', () => {
       handshakeHash: toBase64Url(session.handshakeHash),
       passkeyCredentialId: authenticator.credentialId,
     };
-    const presence = await presenceProofFor(authenticator, binding);
+    const presence = await presenceProofFor(authenticator, binding, { accountId: options.accountId });
     const approvalsBefore = approvals.length;
     const framesBefore = e2eFrames('pairing', invitation.inviteId).length;
     sendE2e(
@@ -1003,13 +1009,8 @@ describe('BurrowRuntime end-to-end ceremonies', () => {
 
   // --- Presence window -----------------------------------------------------
 
-  /**
-   * Open a connection and redeem the window over it, whatever was offered.
-   * `offer` is what message 2 said; `session` stays usable when it succeeded.
-   */
-  async function rideWindow(clientId: string, clientStatic: NoiseKeyPair) {
-    const connectionId = testRoutingId();
-    const { session, offer } = await openConnection(clientId, clientStatic, connectionId);
+  /** Redeem the window over an opened connection, whatever message 2 offered. */
+  async function redeemWindow(clientId: string, connectionId: string, session: NoiseTransportSession) {
     sendE2e(
       clientId,
       'connection',
@@ -1018,7 +1019,17 @@ describe('BurrowRuntime end-to-end ceremonies', () => {
       toBase64Url(session.sendControl({ presence: PRESENCE_WINDOW })),
     );
     await settle();
-    return { offer, outcome: await outcome(session, 'connection', connectionId), session, connectionId };
+    return await outcome(session, 'connection', connectionId);
+  }
+
+  /**
+   * Open a connection and redeem the window over it, whatever was offered.
+   * `offer` is what message 2 said; `session` stays usable when it succeeded.
+   */
+  async function rideWindow(clientId: string, clientStatic: NoiseKeyPair) {
+    const connectionId = testRoutingId();
+    const { session, offer } = await openConnection(clientId, clientStatic, connectionId);
+    return { offer, outcome: await redeemWindow(clientId, connectionId, session), session, connectionId };
   }
 
   /** One keepalive on an established session: Client activity, as the Burrow counts it. */
@@ -1080,9 +1091,33 @@ describe('BurrowRuntime end-to-end ceremonies', () => {
     const { session, offer } = await openConnection('c1', clientStatic, connectionId);
     expect(offer).toBe(PRESENCE_WINDOW);
     clock += DEFAULT_CHALLENGE_TTL_MS + 1;
-    sendE2e('c1', 'connection', connectionId, 'transport', toBase64Url(session.sendControl({ presence: PRESENCE_WINDOW })));
-    await settle();
-    expect(await outcome(session, 'connection', connectionId)).toEqual(presenceRejected);
+    expect(await redeemWindow('c1', connectionId, session)).toEqual(presenceRejected);
+  });
+
+  it('honors the offer it made though the window closed before the redeem', async () => {
+    makeBurrow();
+    const { clientStatic } = await pairedClient();
+    clock += PRESENCE_WINDOW_IDLE_MS - 1;
+    const connectionId = testRoutingId();
+    const { session, offer } = await openConnection('c1', clientStatic, connectionId);
+    expect(offer).toBe(PRESENCE_WINDOW);
+    // Idle past the window now, but inside the challenge's TTL.
+    clock += 1;
+    expect(await redeemWindow('c1', connectionId, session)).toEqual(success);
+  });
+
+  it('runs the ACL conjunction against the identities the offered window was opened for', async () => {
+    makeBurrow();
+    const { authenticator, clientStatic } = await pairedClient();
+    const connectionId = testRoutingId();
+    const { session, offer } = await openConnection('c1', clientStatic, connectionId);
+    expect(offer).toBe(PRESENCE_WINDOW);
+    // Re-paired before the redeem, under another account: the record for this
+    // passkey and static no longer names the account the offer was made for.
+    const repair = await requestPairing('c2', authenticator, { clientStatic, accountId: 'someone-else' });
+    approvals[approvals.length - 1]!.approve(repair.code);
+    expect(await outcome(repair.session, 'pairing', repair.invitation.inviteId)).toMatchObject({ ok: true });
+    expect(await redeemWindow('c1', connectionId, session)).toEqual({ ok: false, code: 'pairing-required' });
   });
 
   it('counts a live session’s activity, and folds an ended one’s in', async () => {
@@ -1090,18 +1125,22 @@ describe('BurrowRuntime end-to-end ceremonies', () => {
     const { clientStatic } = await pairedClient();
     const ride = await rideWindow('c1', clientStatic);
     // Keepalives inside the idle reap hold the window open past its own idle
-    // bound, though nothing has been folded into it yet.
+    // bound while the session lives.
     for (let i = 0; i < 4; i++) {
       clock += ESTABLISHED_IDLE_STEP_MS;
       await keepalive('c1', ride.connectionId, ride.session);
     }
     expect((await openConnection('c2', clientStatic, testRoutingId())).offer).toBe(PRESENCE_WINDOW);
+    // Activity after that offer, then the session ends: its last keepalive is
+    // what keeps the window open after it.
+    clock += ESTABLISHED_IDLE_STEP_MS;
+    await keepalive('c1', ride.connectionId, ride.session);
     const activeAt = clock;
-    // The session is then reaped for idleness, and its last keepalive is what
-    // keeps the window open after it.
-    clock = activeAt + PRESENCE_WINDOW_IDLE_MS - 1;
-    expect(await rideWindow('c2', clientStatic)).toMatchObject({ offer: PRESENCE_WINDOW, outcome: success });
+    socket.receive({ t: 'client-gone', clientId: 'c1' });
+    await settle();
     expect(sessions[0]!.disposed).toBe(true);
+    clock = activeAt + PRESENCE_WINDOW_IDLE_MS - 1;
+    expect(await rideWindow('c3', clientStatic)).toMatchObject({ offer: PRESENCE_WINDOW, outcome: success });
   });
 
   it('closes a window at its cap however active, because a ride never refreshes the proof', async () => {
@@ -1120,31 +1159,51 @@ describe('BurrowRuntime end-to-end ceremonies', () => {
     expect(await rideWindow('c3', clientStatic)).toMatchObject({ offer: 'none', outcome: presenceRejected });
   });
 
-  it('re-pairing reopens the window for the new record, which an older session cannot extend', async () => {
-    makeBurrow();
-    const { authenticator, clientStatic } = await pairedClient();
-    const ride = await rideWindow('c1', clientStatic);
-    clock += ESTABLISHED_IDLE_STEP_MS;
-    const { invitation, session, code } = await requestPairing('c2', authenticator, { clientStatic });
-    const repairedAt = clock;
-    approvals[approvals.length - 1]!.approve(code);
-    expect(await outcome(session, 'pairing', invitation.inviteId)).toMatchObject({ ok: true });
-    // The session that rode the old record stays busy; the new record's window
-    // still closes on its own idle bound.
-    for (clock = repairedAt; clock < repairedAt + PRESENCE_WINDOW_IDLE_MS; clock += ESTABLISHED_IDLE_STEP_MS) {
-      await keepalive('c1', ride.connectionId, ride.session);
-    }
-    expect(await rideWindow('c3', clientStatic)).toMatchObject({ offer: 'none', outcome: presenceRejected });
-  });
-
-  it('clears every window when the Relay raises the UV demand', async () => {
+  /** Pair under a Relay that does not yet demand user verification. */
+  async function pairedWithoutUv() {
     makeBurrow();
     const authenticator = await createTestAuthenticator({ rpId: RP_ID, origin: ORIGIN, userVerified: false });
     const { invitation, clientStatic, session, code } = await requestPairing('c1', authenticator);
     approvals[0]!.approve(code);
     expect(await outcome(session, 'pairing', invitation.inviteId)).toMatchObject({ ok: true });
+    return clientStatic;
+  }
+
+  it('clears every window when the Relay raises the UV demand', async () => {
+    const clientStatic = await pairedWithoutUv();
     socket.receive({ t: 'policy', requireUserVerification: true });
     expect(await rideWindow('c1', clientStatic)).toMatchObject({ offer: 'none', outcome: presenceRejected });
+  });
+
+  it('voids an offer already made when the Relay raises the UV demand before its redeem', async () => {
+    const clientStatic = await pairedWithoutUv();
+    const connectionId = testRoutingId();
+    const { session, offer } = await openConnection('c1', clientStatic, connectionId);
+    expect(offer).toBe(PRESENCE_WINDOW);
+    socket.receive({ t: 'policy', requireUserVerification: true });
+    expect(await redeemWindow('c1', connectionId, session)).toEqual(presenceRejected);
+  });
+
+  it('voids an offer whose message 2 was still being written when the UV demand rose', async () => {
+    const clientStatic = await pairedWithoutUv();
+    // The Client's ephemeral, then the Burrow's — generated while it writes
+    // message 2, after the offer was decided and before it is stored.
+    const generateKey = globalThis.crypto.subtle.generateKey.bind(globalThis.crypto.subtle);
+    let generated = 0;
+    const raiseMidHandshake = ((...args: Parameters<typeof generateKey>) => {
+      if (++generated === 2) socket.receive({ t: 'policy', requireUserVerification: true });
+      return generateKey(...args);
+    }) as typeof generateKey;
+    const raise = vi.spyOn(globalThis.crypto.subtle, 'generateKey').mockImplementation(raiseMidHandshake);
+    const connectionId = testRoutingId();
+    try {
+      const { session, offer } = await openConnection('c1', clientStatic, connectionId);
+      expect(generated).toBe(2);
+      expect(offer).toBe(PRESENCE_WINDOW);
+      expect(await redeemWindow('c1', connectionId, session)).toEqual(presenceRejected);
+    } finally {
+      raise.mockRestore();
+    }
   });
 
   it('keeps its windows across a dropped relay socket, and clears them on stop()', async () => {

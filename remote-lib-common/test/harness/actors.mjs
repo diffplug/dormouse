@@ -253,7 +253,7 @@ export class SimBurrow {
 
   /** inviteId -> { invitation, keyPair, state, session, clientStaticPublicKey } */
   #invitations = new Map();
-  /** connectionId -> { session, clientStaticPublicKey, challenge, boundChallenge } */
+  /** connectionId -> { session, clientStaticPublicKey, challenge, boundChallenge, offer } */
   #connections = new Map();
 
   constructor({ burrowId, label, rpId, origin, clock, policy, ttlMs, invitationTtlSeconds }) {
@@ -414,20 +414,24 @@ export class SimBurrow {
     await responder.readMessage(message1);
     const clientStaticPublicKey = toBase64Url(responder.remoteStaticPublicKey);
     const issued = this.challenges.issue();
-    const offer = this.windows.open(clientStaticPublicKey) ? PRESENCE_WINDOW : 'none';
-    const payload = encodeConnectionMessage2(fromBase64Url(issued.challenge), offer);
+    // Every session this Burrow promoted has already ended and folded its
+    // activity in, so there is no live one to count.
+    const offer = this.windows.open(clientStaticPublicKey);
+    const payload = encodeConnectionMessage2(fromBase64Url(issued.challenge), offer ? PRESENCE_WINDOW : 'none');
     const message2 = await responder.writeMessage(payload);
     this.#connections.set(connectionId, {
       session: new NoiseTransportSession(responder.session),
       clientStaticPublicKey,
       challenge: issued.challenge,
       boundChallenge: toBase64Url(payload),
+      // Binding: a redeem rides this entry and evaluates no window again.
+      offer,
     });
     return message2;
   }
 
   /**
-   * Authorization = (proof ∨ window) ∧ conjunction. The specific miss is
+   * Authorization = (proof ∨ offered window) ∧ conjunction. The specific miss is
    * reported on the returned object — the owner-local log — while the
    * `ConnectionOutcomeV1` itself carries only `pairing-required`. That
    * separation is the point: which half of the conjunction failed never
@@ -461,14 +465,12 @@ export class SimBurrow {
     if (!isConnectionRequestV1(request)) return deny('protocol-rejected', { detail: 'malformed-request' });
     if (!fresh) return deny('presence-rejected', { detail: 'challenge-invalid' });
 
-    // Who the presence speaks for: a proof's verified identity, or the record
-    // an open window was opened for.
+    // Who the presence speaks for: the identities the offered window was
+    // opened for, or a proof's verified ones.
     let presented;
-    let window = null;
     if (request.presence === PRESENCE_WINDOW) {
-      window = this.windows.open(pending.clientStaticPublicKey);
-      if (!window) return deny('presence-rejected', { detail: 'window-closed' });
-      presented = window;
+      if (!pending.offer) return deny('presence-rejected', { detail: 'no-window-offered' });
+      presented = pending.offer;
     } else {
       const expected = {
         kind: 'connection',
@@ -501,14 +503,11 @@ export class SimBurrow {
     if (auth.record.passkeyPublicKeyHash !== presented.passkeyPublicKeyHash) {
       return deny('pairing-required', { misses: ['passkey-key-mismatch'] });
     }
-    // A window speaks only for the record it was opened for.
-    if (window && auth.record.approvedAt !== window.approvedAt) {
-      return deny('pairing-required', { misses: ['record-replaced'] });
-    }
-    // Only a proof opens or refreshes a window; a ride is activity under it.
+    // Only a proof opens or refreshes a window; riding one never does. The
+    // session promoted here ends at once, folding its one activity in.
     const now = this.clock.now();
-    if (window) this.windows.noteActivity(pending.clientStaticPublicKey, { approvedAt: auth.record.approvedAt, at: now });
-    else this.windows.seed(pending.clientStaticPublicKey, auth.record, now);
+    if (request.presence !== PRESENCE_WINDOW) this.windows.seed(pending.clientStaticPublicKey, auth.record, now);
+    this.windows.noteActivity(pending.clientStaticPublicKey, now);
     return answer({ ok: true, burrowLabel: this.label }, { record: auth.record });
   }
 }

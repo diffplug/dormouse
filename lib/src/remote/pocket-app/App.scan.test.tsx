@@ -563,6 +563,15 @@ describe('a session kept from an earlier launch', () => {
     expect(buttonNamed(container, 'Sign in with passkey')).not.toBeNull();
   });
 
+  it('lands on the list, saying why, when its first read fails for another reason', async () => {
+    fake.listBurrows.mockRejectedValue(new Error('offline'));
+
+    await boot();
+
+    expect(alertText(container)).toBe('offline');
+    expect(buttonNamed(container, 'Sign out')).not.toBeNull();
+  });
+
   it('signs out to the auth screen', async () => {
     await boot();
 

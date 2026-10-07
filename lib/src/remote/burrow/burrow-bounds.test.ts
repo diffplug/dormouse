@@ -37,6 +37,7 @@ import {
   mintNoiseStaticKeyPair,
   toBase64Url,
   type BurrowAclRecord,
+  type ConnectionOffer,
   type NoiseKeyPair,
   type PresenceBinding,
 } from 'remote-lib-common';
@@ -198,18 +199,21 @@ describe('BurrowRuntime bounds', () => {
   }
 
   /** The connection ceremony through to its outcome, whatever that outcome is. */
+  /** Connect with a fresh proof, or — with `window` — by riding the presence window. */
   async function connectClient(
     clientId: string,
     clientStatic: NoiseKeyPair,
+    { window = false }: { window?: boolean } = {},
   ): Promise<{
     session: NoiseTransportSession;
     connectionId: string;
+    offer: ConnectionOffer | null;
     outcome: Record<string, unknown>;
   }> {
     // One token per `init`, and the bucket sustains one per second.
     clock.advance(1_000);
     const connectionId = testRoutingId();
-    const { session, burrowChallenge } = await openConnectionSession({
+    const { session, burrowChallenge, offer } = await openConnectionSession({
       socket,
       burrowId: enrollment.burrowId,
       clientId,
@@ -225,18 +229,17 @@ describe('BurrowRuntime bounds', () => {
       handshakeHash: toBase64Url(session.handshakeHash),
       passkeyCredentialId: authenticator.credentialId,
     };
+    const presence = window ? PRESENCE_WINDOW : await presenceProofFor(authenticator, binding);
     sendE2eFrame(socket, {
       clientId,
       burrowId: enrollment.burrowId,
       kind: 'connection',
       id: connectionId,
       step: 'transport',
-      ct: toBase64Url(
-        session.sendControl({ presence: await presenceProofFor(authenticator, binding) }),
-      ),
+      ct: toBase64Url(session.sendControl({ presence })),
     });
     const outcome = await readOutcome(socket, session, 'connection', connectionId);
-    return { session, connectionId, outcome };
+    return { session, connectionId, offer, outcome };
   }
 
   /** One authorized session, from a fresh Client static through both ceremonies. */
@@ -559,28 +562,9 @@ describe('BurrowRuntime bounds', () => {
     const { outcome } = await connectClient('c-late', stranger);
     expect(outcome).toEqual({ ok: false, code: 'burrow-busy' });
     // Riding the presence window its pairing opened buys no more than a proof.
-    clock.advance(1_000);
-    const connectionId = testRoutingId();
-    const { session, offer } = await openConnectionSession({
-      socket,
-      burrowId: enrollment.burrowId,
-      clientId: 'c-late',
-      connectionId,
-      clientStatic: stranger,
-      burrowStaticPublicKey: enrollment.noiseStaticPublicKey!,
-    });
-    expect(offer).toBe(PRESENCE_WINDOW);
-    sendE2eFrame(socket, {
-      clientId: 'c-late',
-      burrowId: enrollment.burrowId,
-      kind: 'connection',
-      id: connectionId,
-      step: 'transport',
-      ct: toBase64Url(session.sendControl({ presence: PRESENCE_WINDOW })),
-    });
-    expect(await readOutcome(socket, session, 'connection', connectionId)).toEqual({
-      ok: false,
-      code: 'burrow-busy',
+    expect(await connectClient('c-late', stranger, { window: true })).toMatchObject({
+      offer: PRESENCE_WINDOW,
+      outcome: { ok: false, code: 'burrow-busy' },
     });
     expect(burrow.establishedSessionCount).toBe(MAX_ESTABLISHED_E2E_SESSIONS);
     expect(sessions.filter((s) => s.disposed)).toHaveLength(0);
