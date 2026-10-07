@@ -752,32 +752,29 @@ describe('reorder slides', () => {
     delete (HTMLElement.prototype as Partial<HTMLElement>).animate;
   });
 
-  it('slides the tabs a move displaces from where they were, and leaves the rest', async () => {
+  /** Renders the default Workspace plus `ids`, and returns the default's id. */
+  async function renderWith(...ids: string[]): Promise<string> {
     const first = getWorkspacesSnapshot().workspaces[0].id;
-    await act(async () => {
-      createWorkspace({ id: 'ws-2' });
-      createWorkspace({ id: 'ws-3' });
-    });
+    await act(async () => { for (const id of ids) createWorkspace({ id }); });
     await render();
     slides.clear();
+    return first;
+  }
+
+  it('slides the tabs a move displaces from where they were, and leaves the rest', async () => {
+    const first = await renderWith('ws-2', 'ws-3');
     await act(async () => { moveWorkspace(first, 1); });
     expect(slides).toEqual(new Map([[first, 'translate(-100px, 0px)'], ['ws-2', 'translate(100px, 0px)']]));
   });
 
   it('slides a tab that pinning remounts into the other group, with `+`', async () => {
-    const first = getWorkspacesSnapshot().workspaces[0].id;
-    await act(async () => { createWorkspace({ id: 'ws-2' }); });
-    await render();
-    slides.clear();
+    const first = await renderWith('ws-2');
     await act(async () => { setWorkspacePinned(first, true); });
     expect(slides).toEqual(new Map([[first, 'translate(-200px, 0px)'], ['ws-2', 'translate(100px, 0px)'], ['+', 'translate(100px, 0px)']]));
   });
 
   it('slides nothing for a rename, or under reduced motion', async () => {
-    const first = getWorkspacesSnapshot().workspaces[0].id;
-    await act(async () => { createWorkspace({ id: 'ws-2' }); });
-    await render();
-    slides.clear();
+    const first = await renderWith('ws-2');
     await act(async () => { setAutoWorkspaceName(first, 'Renamed'); });
     expect(slides.size).toBe(0);
 

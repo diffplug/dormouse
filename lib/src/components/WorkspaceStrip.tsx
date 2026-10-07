@@ -86,7 +86,7 @@ export function WorkspaceStrip({
 
   const tabElementsRef = useRef(new Map<WorkspaceId, HTMLElement>());
   const stripRef = useRef<HTMLDivElement | null>(null);
-  useWorkspaceTabFlip(stripRef, workspaces.map((workspace) => `${workspace.id}${workspace.pinned ? ' pinned' : ''}`).join('\n'));
+  useWorkspaceTabFlip(stripRef);
 
   // The editor, the confirmation, and the tab menu all sit outside every Wall,
   // so a capture-phase command-mode shortcut would still fire behind them.
