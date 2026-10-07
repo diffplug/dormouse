@@ -153,6 +153,42 @@ describe.each([
     expect(sent()).toEqual([]);
   });
 
+  // A page in a browser pane can `postMessage` this window, and in VS Code the
+  // host's messages arrive the same way, behind a per-boot token. Here host
+  // events arrive only over the transport, so there is no inbox to forge
+  // (docs/specs/security-local.md -> "Browser panes").
+  it("takes no host event from a window message, whatever its shape or origin", async () => {
+    const { adapter, deliver, sent } = await open();
+    const seen: PtyDataDetail[] = [];
+    const alerts: AlertStateDetail[] = [];
+    adapter.onPtyData((detail) => void seen.push(detail));
+    adapter.onAlertState((detail) => void alerts.push(detail));
+
+    const forged: Array<[string, Record<string, unknown>]> = [
+      ["pty:data", { id: "forged", data: "x" }],
+      ["alert:state", { id: "forged", status: "ALERT_RINGING", todo: true }],
+      ["terminal:clipboardOffer", { id: "forged", text: "x" }],
+      ["dor:controlRequest", { requestId: "dor-forged", surfaceId: "forged", cmd: "list" }],
+      ["burrow:ask", { burrowRequestId: "ask-forged", op: "surfaceOp", params: {} }],
+    ];
+    for (const origin of [window.location.origin, "http://127.0.0.1:61234", "null"]) {
+      for (const [event, payload] of forged) {
+        // VS Code's host shape, the Tauri event's, and the dev harness's.
+        for (const data of [{ type: event, ...payload }, { event, payload }, { event, data: payload }]) {
+          window.dispatchEvent(new MessageEvent("message", { origin, data }));
+        }
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(seen).toEqual([]);
+    expect(alerts).toEqual([]);
+    expect(sent()).toEqual([]);
+    // The same event over the transport is heard.
+    deliver("pty:data", { id: "real", data: "y" });
+    expect(seen).toEqual([{ id: "real", data: "y", textData: undefined }]);
+  });
+
   it("rebuilds pane state from a replay, and asks nothing of the alerts", async () => {
     const { adapter, deliver, sent } = await open();
     const alerts: AlertStateDetail[] = [];

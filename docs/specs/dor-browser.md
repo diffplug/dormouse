@@ -306,8 +306,7 @@ Source of truth: `iframeShim` in `lib/src/host/iframe-proxy-rewrite.ts`, `browse
 ### Iframe Focus And Rendering Notes
 
 - **Must tell cross-origin iframe focus from app backgrounding in focus code**: it blurs the parent window while `document.hasFocus()` stays true.
-- **Must sandbox every framed page, proxied or raw** (rationale), omitting `allow-top-navigation` to block framebusting.
-- **Never grant a device or clipboard-read permission in the `allow` attribute**: `autoplay`, `clipboard-write`, `fullscreen` only (rationale).
+- **Must sandbox every framed page, proxied or raw, and grant it no permission** beyond the token sets `docs/specs/security-local.md` -> "Browser panes" audits (rationale).
 
 Source of truth: `lib/src/components/wall/IframePanel.tsx`, `subscribeWindowFocus` in `lib/src/lib/window-focus.ts`.
 

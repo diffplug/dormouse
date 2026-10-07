@@ -86,17 +86,20 @@ describe('IframePanel', () => {
   // website, Storybook, the tutorial — so it is not the trusted one. It used to
   // be framed with no sandbox and a full camera/microphone/geolocation/
   // clipboard-read grant, in a webview where the per-site prompt is often
-  // absent.
-  it('sandboxes the raw fallback and grants no device or clipboard-read permission', async () => {
-    const iframe = await renderPanel(stubActions());
-
-    const sandbox = iframe.getAttribute('sandbox') ?? '';
-    expect(sandbox).toContain('allow-scripts');
-    expect(sandbox).not.toContain('allow-top-navigation');
-    const allow = iframe.getAttribute('allow') ?? '';
-    for (const forbidden of ['camera', 'microphone', 'geolocation', 'clipboard-read']) {
-      expect(allow).not.toContain(forbidden);
+  // absent. The sets are exact (docs/specs/security-local.md -> "Browser panes"):
+  // a token added here is a privilege every framed page gets.
+  it.each(['raw', 'proxied'] as const)('frames a %s page under exactly the audited sandbox and permissions', async (kind) => {
+    if (kind === 'proxied') {
+      installBrowserHost().platform.createIframeProxyUrl = vi.fn(async () => ({ ok: true as const, url: 'http://127.0.0.1:61234/app' }));
     }
+    const iframe = await renderPanel(stubActions());
+    expect(iframe.hasAttribute('data-dormouse-proxy')).toBe(kind === 'proxied');
+
+    const tokens = (value: string | null, separator: RegExp) => (value ?? '').split(separator).map((t) => t.trim()).filter(Boolean).sort();
+    expect(tokens(iframe.getAttribute('sandbox'), /\s+/)).toEqual([
+      'allow-downloads', 'allow-forms', 'allow-modals', 'allow-popups', 'allow-same-origin', 'allow-scripts',
+    ]);
+    expect(tokens(iframe.getAttribute('allow'), /;/)).toEqual(['autoplay', 'clipboard-write', 'fullscreen']);
   });
 
   it('refuses an open-window url that is not http(s)', async () => {
@@ -308,6 +311,37 @@ describe('IframePanel', () => {
 
     expect(updateParameters).not.toHaveBeenCalled();
     expect(getAgentBrowserScreenController('iframe-proxied')?.chrome().url).toBe('http://example.test/other/?q=1#frag');
+  });
+
+  // Any page can post to this window: another pane's proxy, an upstream that
+  // escaped one, the webview itself. Only this panel's own proxy origin speaks
+  // for its frame (docs/specs/security-local.md -> "Browser panes").
+  it('acts on no message from any origin but its own proxy', async () => {
+    const onClickPanel = vi.fn();
+    const { platform } = installBrowserHost();
+    platform.createIframeProxyUrl = vi.fn(async () => ({
+      ok: true as const,
+      url: 'http://127.0.0.1:61234/app',
+      upstream: 'http://example.test/app',
+    }));
+    await renderPanel(stubActions({ onClickPanel }), paneProps('iframe-foreign'));
+    const chrome = () => getAgentBrowserScreenController('iframe-foreign')?.chrome().url;
+    const before = chrome();
+    const send = (origin: string, data: unknown) => act(async () => {
+      window.dispatchEvent(new MessageEvent('message', { origin, data }));
+    });
+
+    for (const origin of ['http://127.0.0.1:61235', 'http://localhost:61234', 'https://evil.example', window.location.origin, 'null']) {
+      await send(origin, { __dormouse: 'pointerdown' });
+      await send(origin, { __dormouse: 'location', url: 'http://127.0.0.1:61234/other', loaded: true });
+      await send(origin, { __dormouse: 'open-window', url: 'http://127.0.0.1:61234/docs' });
+    }
+    expect(onClickPanel).not.toHaveBeenCalled();
+    expect(chrome()).toBe(before);
+    expect(container.textContent).not.toContain('Open in new pane');
+
+    await send('http://127.0.0.1:61234', { __dormouse: 'pointerdown' });
+    expect(onClickPanel).toHaveBeenCalledWith('iframe-foreign');
   });
 
   it('re-resolves the proxy on Back after an observed in-frame navigation', async () => {

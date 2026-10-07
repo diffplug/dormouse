@@ -96,6 +96,7 @@ The Client's per-Burrow browser storage follows `docs/specs/remote-security-mode
 Pocket uses relative API URLs at the configured origin; Burrow HTTP runs in Node. The Relay grants no preflight or CORS response; it does not reject every request carrying a foreign `Origin` (rationale).
 
 - **FAIL IF** the Relay installs CORS middleware, emits `Access-Control-Allow-Origin`, or accepts authentication from a cookie (rationale). Pinned by `relay/test/cors.test.mjs`.
+- **FAIL IF** a self-host Relay response for Pocket — the shell, an asset, `sw.js`, or the SPA fallback — lacks `pocketContentSecurityPolicy` in `remote-lib-common/src/remote/relay-common.ts` for its configured origin, or that policy names a directive or source beyond those `docs/specs/pocket-app.md` -> "Deployment: same-origin, always" lists: the Pocket origin holds Client statics and opens sealed pushes. Read `registerPocketServing` in `relay/src/app.ts`; pinned by `relay/test/static.test.mjs`. Hosted's is `docs/specs/security-hosted.md` -> "Relay boundary".
 
 ### Network posture (self-hosted)
 

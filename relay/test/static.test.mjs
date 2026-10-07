@@ -169,6 +169,21 @@ test('connect-src names this deployment own relay and no other burrow', async ()
   }
 });
 
+test('the policy loosens only what docs/specs/pocket-app.md lists, and names no other directive', async () => {
+  // docs/specs/security-remote.md -> "Cross-origin access": a directive added
+  // here, or a source added to one, widens what XSS on the Pocket origin reaches.
+  const { app: hono } = app({ origin: 'https://dormouse.tailnet.ts.net', pocketDir: await makePocketDir() });
+  const policy = policyOf(await hono.request('/'));
+  assert.deepEqual(Object.keys(policy).sort(), [
+    'base-uri', 'connect-src', 'default-src', 'font-src', 'form-action', 'frame-ancestors', 'img-src',
+    'manifest-src', 'media-src', 'object-src', 'script-src', 'style-src', 'worker-src',
+  ]);
+  assert.deepEqual(policy['img-src'], ["'self'", 'data:', 'blob:']);
+  assert.deepEqual(policy['media-src'], ["'self'", 'blob:']);
+  assert.deepEqual(policy['font-src'], ["'self'"]);
+  assert.deepEqual(policy['manifest-src'], ["'self'"]);
+});
+
 // The other half of `script-src` — that the BUILT shell carries no inline
 // script and nothing off-origin — is asserted by `lib/scripts/assert-pocket-worker.mjs`
 // inside `build:pocket`, because no test suite builds the app first.
