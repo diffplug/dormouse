@@ -100,6 +100,7 @@ export function runLint(script) {
     return {
       ok: false,
       stdout: typeof error?.stdout === 'string' ? error.stdout : '',
+      stderr: typeof error?.stderr === 'string' ? error.stderr : '',
     };
   }
 }
@@ -147,6 +148,22 @@ export function makeSelftest(script, backupSuffix) {
     /** Apply any mutation and require the lint to fail. */
     withMutation(relative, mutate, label) {
       runMutation(relative, mutate, () => lintFails(script), label);
+    },
+    /**
+     * Apply any mutation and require the lint to fail *with `expected` in its
+     * report*, so a case that goes red for an unrelated reason — a broken
+     * fixture, another rule — is not counted as proving this one.
+     */
+    withMutationReporting(relative, mutate, expected, label) {
+      runMutation(
+        relative,
+        mutate,
+        () => {
+          const result = runLint(script);
+          return !result.ok && result.stderr.includes(expected);
+        },
+        label,
+      );
     },
     /** Append `text` to `relative` — the shape every "put it back" case takes. */
     withAppended(relative, text, label) {

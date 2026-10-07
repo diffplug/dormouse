@@ -25,6 +25,8 @@
  * there.
  */
 
+import { readFileSync, writeFileSync } from 'node:fs';
+
 import { makeSelftest, readRepoFile } from './lint-kit.mjs';
 
 const LINT = 'scripts/loopback-lint.mjs';
@@ -104,6 +106,30 @@ selftest.withAppendedOutput(
   `${TEST_TARGET}\n      a test listener is not reported separately by loopback-lint`,
 );
 
+// Check 4: a shipped listener binds loopback. Planted in a shipped host module
+// with no listener of its own; each must be reported as check 4's, not as a
+// missing guard.
+const SHIPPED_TARGET = 'lib/src/host/git-info.ts';
+const BEYOND_LOOPBACK = [
+  ['.listen(0) with no host', '\nexport function __selftest(s: any) { s.listen(0); }\n', 'no spelled-out loopback host'],
+  ['.listen(port, callback)', '\nexport function __selftest(s: any, cb: () => void) { s.listen(9999, cb); }\n', 'no spelled-out loopback host'],
+  ['.listen({ port }) with no host', '\nexport function __selftest(s: any) { s.listen({ port: 0 }); }\n', 'no spelled-out loopback host'],
+  ['.listen(port, host variable)', '\nexport function __selftest(s: any, h: string) { s.listen(0, h); }\n', 'no spelled-out loopback host'],
+  ['serve({ port }) with no hostname', '\nexport function __selftest(app: any) { serve({ fetch: app.fetch, port: 0 }); }\n', 'no spelled-out loopback host'],
+  ['a 0.0.0.0 host', "\nexport const __selftest = { host: '0.0.0.0' };\n", 'binds every interface'],
+  ["a '::' host passed to listen", "\nexport function __selftest(s: any) { s.listen(0, '::'); }\n", 'binds every interface'],
+  ['a dgram socket', "\nexport const __selftest = (d: any) => d.createSocket('udp4');\n", 'opens a UDP socket outside ALL_INTERFACES'],
+  ['a second RTCPeerConnection', '\nexport const __selftest = () => new RTCPeerConnection({});\n', 'opens a UDP socket outside ALL_INTERFACES'],
+];
+for (const [name, source, expected] of BEYOND_LOOPBACK) {
+  selftest.withMutationReporting(
+    SHIPPED_TARGET,
+    (path) => writeFileSync(path, readFileSync(path, 'utf8') + source),
+    expected,
+    `${name}\n      adding this to ${SHIPPED_TARGET} does not report "${expected}" — check 4 cannot see it`,
+  );
+}
+
 // Every alternative the lint declares needs a fixture above, or it is a claim
 // nothing checks — which is how a `WebSocket.Relay` branch that matched no real
 // API rode along beside a working one. Read as text because `loopback-lint.mjs`
@@ -131,5 +157,6 @@ selftest.finish(
   + 'clause in docs/specs/security-local.md -> "Loopback Listeners" is not true of it.\n'
   + 'A green extension case means SOURCE_EXT does not read that file type, so the\n'
   + '"all tracked JavaScript and TypeScript" scope is narrower than it claims.\n'
-  + 'The test case must stay green and appear under the test heading.',
+  + 'The test case must stay green and appear under the test heading. A green\n'
+  + 'check-4 case is a shipped bind beyond loopback the lint cannot see.',
 );

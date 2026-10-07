@@ -38,13 +38,12 @@
  *     below one of those is a miss, and the audit is what covers it.
  *   - A positional port may wrap one call (`Number(process.env.PORT || 0)`);
  *     a port expression nesting parentheses deeper hides the bind.
- *   - Outside `ws`, it matches only an explicit loopback host. A listener that
- *     binds every interface (`.listen(port)` with no host) is a different and
- *     larger problem, and `relay/` does it deliberately from config, so
- *     flagging it here would be noise. A host built at runtime
- *     (`.listen(port, hostVar)`, `serve({ hostname: bindHost })`) is invisible
- *     to a regex and always will be — that is the ceiling of a textual check,
- *     and the audit is what covers above it.
+ *   - Outside `ws`, checks 1–3 match only an explicit loopback host. A
+ *     listener that binds every interface is check 4's, and only in the
+ *     shipped directories: `relay/` does it deliberately from config. A host
+ *     built at runtime (`.listen(port, hostVar)`) fails check 4 rather than
+ *     passing it, since only a spelled-out loopback host passes; anything
+ *     subtler is the ceiling of a textual check, and the audit covers above it.
  *   - Unix-domain sockets and named pipes are out of scope by design: no
  *     browser can reach one, which is why the `dor` control channel is bounded
  *     by socket permissions instead.
@@ -64,6 +63,13 @@
  *      that path.
  *   3. Finding no non-test listeners at all is a failure, not a pass: it means
  *      the bind shape moved and this lint has quietly stopped checking anything.
+ *   4. In the shipped directories (`SHIPPED`), nothing binds beyond loopback —
+ *      the inbound half of Settings → Network → Nowhere's "phones can't reach
+ *      it" (`docs/specs/security-local.md` -> "Network policy"). Every
+ *      `.listen(` or `serve({` is one of the loopback bind forms above or a
+ *      `NOT_TCP` entry; no `0.0.0.0`, `::`, or `*` host; and a UDP socket
+ *      (`createSocket(`, `RTCPeerConnection(`) only where `ALL_INTERFACES`
+ *      says why. `scripts/outbound-lint.mjs` owns the outbound half.
  */
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -93,6 +99,50 @@ const ALLOWED = {
 };
 
 const GUARD_REFERENCES = ['loopback-guard', 'dev-host-guard'];
+
+/** The directories whose code reaches a user's machine — check 4's scope. */
+const SHIPPED = [
+  'lib/src/',
+  'standalone/src/',
+  'standalone/sidecar/',
+  'vscode-ext/src/',
+  'dor/src/',
+  'dor-tools-builtin/src/',
+  'dor-tools-builtin/viewer/',
+  'dor-lib-common/src/',
+  'remote-lib-common/src/',
+];
+/** Code that runs on the phone, which listens on nothing of this computer's. */
+const PHONE = ['lib/src/remote/pocket-app/', 'lib/src/remote/one-time-app/', 'lib/src/remote/client/'];
+/** Test helpers `IS_TEST` does not name: only tests import them. */
+const IS_TEST_HELPER = /(?:^|\/)test-[^/]*$|test-utils\./;
+
+/**
+ * Shipped `.listen(` calls that bind no TCP port, each with why: a Unix-domain
+ * socket or named pipe, which no network reaches, or a method that only
+ * shares the name.
+ */
+const NOT_TCP = {
+  'standalone/sidecar/dor-control-server.js':
+    'The dor control channel listens on a Unix-domain socket or named pipe path '
+    + '(resolveControlSocketPath), never a port.',
+  'vscode-ext/src/peer-link.ts':
+    'The peer link between VS Code windows listens on a Unix-domain socket or named pipe path, never a port.',
+  'dor/src/commands/open-picker.ts':
+    'terminal.listen subscribes to the picker\'s own keyboard input; no socket.',
+};
+
+/**
+ * The shipped sockets that may bind beyond loopback, each with why. A new
+ * entry is a new way for something off this machine to reach it.
+ */
+const ALL_INTERFACES = {
+  'lib/src/host/remote/native-direct-peer.ts':
+    'The direct path\'s UDP socket: it binds the one allowed address under Local '
+    + 'networks, else every interface, and the level restricts the path, not the '
+    + 'listener (docs/specs/remote-network.md -> "Local networks"). Built only '
+    + 'through the Burrow service\'s guarded factory, which declines under Nothing.',
+};
 // A TCP listener is not only `.listen(`. Every library in this tree that can
 // bind one gets its own spelling, because a check that sees one API is a check
 // an author leaves by picking another — which is what an audit found: `ws` and
@@ -222,6 +272,52 @@ if (nonTestListeners.length === 0) {
     + '      in scripts/loopback-lint.mjs no longer matches anything. This lint is not\n'
     + '      passing, it has stopped looking.',
   );
+}
+
+// --- Check 4: nothing shipped binds beyond loopback ---------------------------
+const WILDCARD_HOST = /(?:\b(?:host|hostname|address|bindAddress)\s*:\s*|\.listen\([^)]*?,\s*)['"](?:0\.0\.0\.0|::|\*)['"]/g;
+const UDP_BIND = /\bcreateSocket\s*\(|\bRTCPeerConnection\s*\(/g;
+const usedNotTcp = new Set();
+const usedAllInterfaces = new Set();
+for (const rel of sourceFiles()) {
+  if (!SHIPPED.some((dir) => rel.startsWith(dir)) || PHONE.some((dir) => rel.startsWith(dir))) continue;
+  if (IS_TEST.test(rel) || IS_TEST_HELPER.test(rel) || SELF.has(rel)) continue;
+  if (!existsSync(join(ROOT, rel))) continue;
+  const text = readFileSync(join(ROOT, rel), 'utf-8');
+  const lineAt = (index) => text.slice(0, index).split('\n').length;
+  const loopbackAt = new Set([...text.matchAll(LISTEN_RE)].map((m) => m.index));
+  for (const call of text.matchAll(/\.listen\(|\bserve\(\s*\{/g)) {
+    if (loopbackAt.has(call.index)) continue;
+    if (rel in NOT_TCP) {
+      usedNotTcp.add(rel);
+      continue;
+    }
+    problems.push(
+      `${rel}:${lineAt(call.index)}: a shipped listener with no spelled-out loopback host.\n`
+      + '      With no host, Node binds every interface, and a phone on any network can\n'
+      + '      reach it. Bind 127.0.0.1 — or, for a Unix socket or named pipe, add a NOT_TCP\n'
+      + '      entry in this script (docs/specs/security-local.md -> "Network policy").',
+    );
+  }
+  for (const wildcard of text.matchAll(WILDCARD_HOST)) {
+    problems.push(`${rel}:${lineAt(wildcard.index)}: binds every interface (${wildcard[0].trim()}); shipped listeners bind loopback.`);
+  }
+  for (const udp of text.matchAll(UDP_BIND)) {
+    if (rel in ALL_INTERFACES) {
+      usedAllInterfaces.add(rel);
+      continue;
+    }
+    problems.push(
+      `${rel}:${lineAt(udp.index)}: opens a UDP socket outside ALL_INTERFACES.\n`
+      + '      The direct path\'s socket is the one shipped bind beyond loopback; a new\n'
+      + '      one needs an entry here saying what bounds it.',
+    );
+  }
+}
+for (const [allowlist, used] of [[NOT_TCP, usedNotTcp], [ALL_INTERFACES, usedAllInterfaces]]) {
+  for (const rel of Object.keys(allowlist)) {
+    if (!used.has(rel)) problems.push(`${rel}: check 4 allowlist entry no longer matches — drop it from scripts/loopback-lint.mjs.`);
+  }
 }
 
 // -----------------------------------------------------------------------------
