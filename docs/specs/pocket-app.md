@@ -34,7 +34,7 @@ Pocket is:
 flowchart TD
   T{session token?}
   T -- no --> U{prior passkey use?}
-  U -- no --> G["setup({ setupToken }), signin"]
+  U -- no --> G["setup({ setupToken }), which signs in"]
   U -- yes --> I[signin]
   I -- 404 --> G
   I -- ok --> R[POST /api/setup/retire]

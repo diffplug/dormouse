@@ -175,7 +175,7 @@ Either way, that one action creates the account's first passkey (or signs in wit
 
 - A **per-Burrow key** is minted and held in memory until the laptop approves, then written to IndexedDB. Storage and the encrypted fallback's security tradeoff follow `docs/specs/remote-security-model.md` → Client statics. It identifies this browser for this laptop; another laptop gets another key.
 - **The code is spent either way.** A phone with no passkey redeems it to register one; a phone that already has one retires it at `POST /api/setup/retire`, so a photograph of the laptop's screen cannot register a passkey afterwards. A refusal stops the run — a dead code is one the laptop would refuse too.
-- The session token that lets the phone open a relay socket is issued. Presence itself is proved again inside the pairing channel, over a challenge derived from that handshake, so signing in buys routing rather than authorization.
+- The session token that lets the phone open a relay socket is issued, by the registration itself on a first run, so creating the passkey also signs in. Presence itself is proved again inside the pairing channel, over a challenge derived from that handshake, so signing in buys routing rather than authorization.
 
 A browser that cannot do X25519 at all never gets here: Pocket probes for it before any of the above and shows a fixed upgrade requirement instead. Runtimes are gated, not degraded.
 

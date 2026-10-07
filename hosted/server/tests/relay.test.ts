@@ -354,8 +354,12 @@ test("setup, sign-in, and a presence proof end to end, scoped to the account tha
   const token = await f.setupToken(laptop.token);
   const registered = await f.register(phone, token);
   expect(registered.status).toBe(200);
+  const { sessionToken: setupSession, expiresAt: setupExpiry, ...identity } = registered.json!;
   // The account's immutable id where the self-host Relay answers 'owner'.
-  expect(registered.json).toEqual({ accountId: owner, credentialId: phone.credentialId });
+  expect(identity).toEqual({ accountId: owner, credentialId: phone.credentialId });
+  // Creating the passkey signed in: the finish's session reads the account.
+  expect(Math.abs(setupExpiry - (Date.now() + 12 * 3600_000))).toBeLessThan(60_000);
+  expect((await f.call("GET", API_ROUTES.burrows, { bearer: setupSession })).status).toBe(200);
   expect(await f.sql(`SELECT "userId", label FROM dormouse_relay_passkeys`)).toEqual([
     { userId: owner, label: "Phone" },
   ]);
@@ -402,9 +406,9 @@ test("setup, sign-in, and a presence proof end to end, scoped to the account tha
 
   // Every bearer secret is at rest only as its SHA-256.
   const fresh = await f.setupToken(laptop.token);
-  expect(await f.sql(`SELECT "tokenHash" FROM dormouse_relay_sessions`)).toEqual([
-    { tokenHash: digest(sessionToken) },
-  ]);
+  expect(await f.sql(`SELECT "tokenHash" FROM dormouse_relay_sessions ORDER BY "tokenHash"`)).toEqual(
+    [digest(setupSession), digest(sessionToken)].sort().map((tokenHash) => ({ tokenHash })),
+  );
   expect(await f.sql(`SELECT "tokenHash" FROM dormouse_relay_setup_tokens`)).toEqual([
     { tokenHash: digest(fresh) },
   ]);
@@ -477,12 +481,16 @@ test("a refused finish puts the token back on its own expiry; a removed Burrow's
     });
     expect(response).toMatchObject({ status: 400, json: { error } });
   }
+  const sessions = () => f.sql(`SELECT count(*)::int AS n FROM dormouse_relay_sessions`);
+  // A refused finish signs nobody in.
+  expect(await sessions()).toEqual([{ n: 0 }]);
   expect((await f.register(phone, token)).status).toBe(200);
   // The same credential cannot be registered twice.
   expect(await f.register(phone, await f.setupToken(laptop.token))).toMatchObject({
     status: 409,
     json: { error: "credential already registered" },
   });
+  expect(await sessions()).toEqual([{ n: 1 }]);
 
   const pending = await f.setupToken(laptop.token);
   await f.call("POST", API_ROUTES.setupBegin, { body: { setupToken: pending } });
@@ -807,8 +815,10 @@ test("a de-entitled account signs in to nothing, and its sessions answer as expi
   const owner = await f.account(ADMIN_EMAIL);
   const laptop = await f.burrow(owner);
   const phone = await newAuthenticator();
-  expect((await f.register(phone, await f.setupToken(laptop.token))).status).toBe(200);
-  const { sessionToken } = await f.session(phone);
+  // The session registering the passkey minted, de-entitled like any other.
+  const registered = await f.register(phone, await f.setupToken(laptop.token));
+  expect(registered.status).toBe(200);
+  const { sessionToken } = registered.json!;
   const binding = f.pairing(laptop.burrowId, phone);
   const begun = await f.call("POST", API_ROUTES.reauthBegin, { bearer: sessionToken, body: { binding } });
   const assertion = await phone.assert({ challenge: begun.json!.challenge, origin });

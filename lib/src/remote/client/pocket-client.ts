@@ -462,7 +462,8 @@ export class PocketClient {
 
   /**
    * First-time setup: passkey registration gated by the single-use `setupToken`
-   * off a scanned setup code. Follow with {@link signin}.
+   * off a scanned setup code. The Relay's acknowledgement carries a session, so
+   * this also signs in.
    */
   async setup({ setupToken }: { setupToken: string }, label: string): Promise<SetupFinishResponse> {
     const begin = await this.#setupApi<SetupBeginResponse>(API_ROUTES.setupBegin, { setupToken });
@@ -513,6 +514,7 @@ export class PocketClient {
     }
     // Only once the Relay has acknowledged it: this names the credential a
     // pairing's presence proof is built from. Sign-in refreshes it.
+    this.#session = { token: finish.sessionToken, accountId: finish.accountId };
     this.#credentialId = registration.credentialId;
     return finish;
   }

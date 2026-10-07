@@ -1412,14 +1412,14 @@ describe('a direct-only session, end to end', () => {
 });
 
 describe('setup + signin', () => {
-  it('registers with the scanned token, signs in, and sends the session as a bearer', async () => {
+  it('registers with the scanned token and is signed in by the finish alone', async () => {
     const harness = makeClient({ ...AUTH_ROUTES });
     const token = secret();
     const setup = await harness.client.setup({ setupToken: token }, 'My Phone');
     expect(setup.credentialId).toBe(CREDENTIAL_ID);
-
-    const signin = await harness.client.signin();
-    expect(signin.sessionToken).toBe(SESSION_TOKEN);
+    expect(harness.client.sessionToken).toBe(SESSION_TOKEN);
+    expect(harness.client.accountId).toBe(ACCOUNT_ID);
+    expect(harness.calls.some((c) => c.url.includes('/api/signin/'))).toBe(false);
 
     await harness.client.listBurrows();
     const burrowsCall = harness.calls.find((c) => c.url.endsWith('/api/burrows'))!;
@@ -1491,6 +1491,7 @@ describe('setup + signin', () => {
       );
 
       expect(harness.client.hasPriorUse()).toBe(false);
+      expect(harness.client.sessionToken).toBeNull();
     });
 
     it('survives a finish whose answer never arrived, since the Relay may hold it', async () => {

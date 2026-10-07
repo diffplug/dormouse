@@ -693,7 +693,14 @@ export function createApp(config: AppConfig): CreatedApp {
       }
       registered = true;
 
-      const res: SetupFinishResponse = { accountId: SELFHOST_ACCOUNT_ID, credentialId };
+      // Registering signs in too: the Client needs no separate sign-in prompt.
+      const { token, session } = sessions.mint(SELFHOST_ACCOUNT_ID);
+      const res: SetupFinishResponse = {
+        sessionToken: token,
+        accountId: session.accountId,
+        credentialId,
+        expiresAt: session.expiresAt,
+      };
       return c.json(res);
     } finally {
       // Its original expiry rides along, so a retry never buys extra time.

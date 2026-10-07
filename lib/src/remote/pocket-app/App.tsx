@@ -483,8 +483,8 @@ export default function App({
               if (err instanceof PasskeyAlreadyRegisteredError) setPasskeyAlreadyRegistered(true);
               throw err;
             }
+            // Registering signed in too: the finish carried the session.
             spentOnSetup = true;
-            await client.signin();
           }
         }
         // A signed-in phone has no passkey to create, so it spends the code

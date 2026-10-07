@@ -218,7 +218,9 @@ beforeEach(() => {
   fake.sessionToken = null;
   fake.accountId = 'owner';
   fake.setup.mockReset().mockImplementation(async () => {
+    // Registering signs in: the Relay's finish carries the session.
     fake.hasPriorUse = true;
+    fake.sessionToken = 'tok';
     return {};
   });
   fake.signin.mockReset().mockImplementation(async () => {
@@ -323,9 +325,10 @@ describe('a first run, from the scan to the terminal', () => {
 
     await pasteCode(url);
 
-    // The token created the passkey, so there is nothing left to retire.
+    // The token created the passkey, so there is nothing left to retire; the
+    // registration signed in, so there is no sign-in prompt either.
     expect(fake.setup).toHaveBeenCalledWith({ setupToken: invitation.setupToken }, DEVICE_LABEL);
-    expect(fake.signin).toHaveBeenCalledOnce();
+    expect(fake.signin).not.toHaveBeenCalled();
     expect(fake.retireSetupToken).not.toHaveBeenCalled();
     // The invitation reached `pair` as the parser produced it.
     expect(fake.pair.mock.calls[0]![0].inviteId).toBe(invitation.inviteId);
@@ -451,19 +454,15 @@ describe('a phone that is already signed in', () => {
     // out — so the Relay's 404 outranks this browser's own record.
     const { url, invitation } = await invitationUrl();
     fake.hasPriorUse = true;
-    fake.signin.mockReset().mockImplementationOnce(async () => {
-      throw new RelayRefusalError('unknown credential', 404);
-    });
-    fake.signin.mockImplementation(async () => {
-      fake.sessionToken = 'tok';
-      return {};
-    });
+    fake.signin.mockReset().mockRejectedValueOnce(new RelayRefusalError('unknown credential', 404));
     fake.pair.mockResolvedValue({ ok: true, record: await knownBurrow(invitation.burrowId) });
     await boot();
 
     await pasteCode(url);
 
     expect(fake.setup).toHaveBeenCalledWith({ setupToken: invitation.setupToken }, DEVICE_LABEL);
+    // Only the refused attempt: the registration signed in.
+    expect(fake.signin).toHaveBeenCalledOnce();
     // The token made the passkey, so there is nothing left to retire, and the
     // scan carries on into the pairing it was for.
     expect(fake.retireSetupToken).not.toHaveBeenCalled();

@@ -189,7 +189,12 @@ export const AUTH_ROUTES: Record<string, RouteHandler> = {
     },
   }),
   '/api/setup/finish': () => ({
-    json: { accountId: ACCOUNT_ID, credentialId: CREDENTIAL_ID },
+    json: {
+      sessionToken: SESSION_TOKEN,
+      accountId: ACCOUNT_ID,
+      credentialId: CREDENTIAL_ID,
+      expiresAt: 1,
+    },
   }),
   '/api/setup/retire': () => ({ status: 204 }),
   '/api/signin/begin': () => ({ json: { challenge: secret(), rpId: RP_ID } }),
