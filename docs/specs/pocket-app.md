@@ -185,7 +185,8 @@ Sessions expire ([relay.md](./relay.md)) and, on a self-host Relay, also end on 
 
 - **The trigger is the session gate specifically**, matched on the shared `UNAUTHORIZED_ERROR` from `remote-lib-common/src/remote/wire.ts` — a refused setup token answers 401 too. (rationale)
 - **A rejected relay upgrade carries no status**, so `openSocket` asks an authenticated route what happened, with the token the socket presented: a 401 there means expiry, anything else leaves it an ordinary socket failure.
-- **A 401 clears only the session whose token it answered.** One answering a session signed out since is `SessionSupersededError`, never `SessionExpiredError`, and leaves the current session in memory and storage (rationale).
+- **A 401 clears only the session whose token it answered.** It is `SessionSupersededError`, never `SessionExpiredError`, only while a different session is current (rationale).
+- **Clearing the stored session removes it only while storage holds the cleared token**, so a stale tab never erases another tab's newer sign-in (rationale).
 
 Source of truth: `SessionExpiredError` in `lib/src/remote/client/pocket-client.ts`.
 

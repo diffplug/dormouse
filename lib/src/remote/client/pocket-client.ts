@@ -141,8 +141,14 @@ export interface PocketStorage {
    * Relay alone; every Burrow ceremony still demands its own presence proof.
    */
   getSession(): PocketSession | null;
-  /** `null` forgets it. */
-  setSession(session: PocketSession | null): void;
+  setSession(session: PocketSession): void;
+  /**
+   * Forget the stored session, but only while it is still the one holding
+   * `token`. Every tab of the origin shares this storage, so what is stored may
+   * be another tab's newer sign-in, which this tab's expiry or sign-out must
+   * leave standing.
+   */
+  clearSession(token: string): void;
 }
 
 /**
@@ -261,7 +267,8 @@ export class SessionExpiredError extends RelayRefusalError {
  * signed in again since: the 401 speaks for a session that is already gone, so
  * it clears nothing and must not send the current one back to sign-in. Never a
  * {@link SessionExpiredError}, so nothing that reacts to expiry reacts to this;
- * the request's result is simply obsolete.
+ * the request's result is simply obsolete. Only a *different* current session
+ * makes a 401 superseded: with none current, it is expiry.
  */
 export class SessionSupersededError extends RelayRefusalError {
   constructor() {
@@ -408,7 +415,7 @@ export class PocketClient {
     // A stored session the Relay has already expired would only cost a 401.
     const stored = this.#storage.getSession();
     this.#session = stored && stored.expiresAt > this.#now() ? stored : null;
-    if (stored && !this.#session) this.#storage.setSession(null);
+    if (stored && !this.#session) this.#storage.clearSession(stored.token);
     this.#setTimer = deps.setTimer ?? realTimer;
     this.#core = new ClientSessionCore<E2eRoute>({
       sendFrame: (route, step, ciphertext) => this.#sendE2e(route, step, ciphertext),
@@ -613,7 +620,7 @@ export class PocketClient {
    */
   signOut(): void {
     this.close();
-    this.#setSession(null);
+    this.#forgetSession();
   }
 
   async listBurrows(): Promise<BurrowsResponse['burrows']> {
@@ -1300,13 +1307,16 @@ export class PocketClient {
     if (response.status === 401 && parsed.error === UNAUTHORIZED_ERROR) {
       // A 401 speaks only for the token it was sent with. One that outlived its
       // session — signed out and in again while it was in flight — must not
-      // erase the replacement.
-      const sent = init?.session;
-      if (sent && sent.token !== this.#session?.token) throw new SessionSupersededError();
+      // erase the replacement. With no session current — an earlier 401 on the
+      // same token, or a sign-out, already cleared it — it is still expiry, so
+      // the caller still lands on sign-in.
+      const current = this.#session;
+      const sent = init?.session ?? current;
+      if (sent && current && current.token !== sent.token) throw new SessionSupersededError();
       // Drop the token here rather than at the call site: every later request
       // and every relay upgrade would fail the same way, and keeping it would
       // let the UI believe it is still signed in.
-      this.#setSession(null);
+      if (sent) this.#forgetSession(sent.token);
       throw new SessionExpiredError();
     }
     // A refusal, not a bare Error: an answer arrived, which is what `setup`
@@ -1328,8 +1338,8 @@ export class PocketClient {
    * question and costs one request on a path that has already failed.
    */
   async #diagnoseSocketFailure(original: Error, session: PocketSession): Promise<never> {
-    // Signed out meanwhile: nothing left to diagnose.
-    if (this.#session === null) throw original;
+    // Probed even with no session current: a concurrent 401 may have cleared
+    // it, and only the probe's own 401 can still send the caller to sign-in.
     try {
       // With the token the socket presented, so a 401 is about that session.
       await this.#api<BurrowsResponse>(API_ROUTES.burrows, undefined, {
@@ -1350,15 +1360,26 @@ export class PocketClient {
     return this.#session;
   }
 
-  #setSession(session: PocketSession | null): void {
+  #setSession(session: PocketSession): void {
     this.#session = session;
     this.#storage.setSession(session);
+  }
+
+  /**
+   * Forget the session holding `token` — the current one by default — in
+   * memory if it is current, and in storage if storage still holds it, so
+   * neither a newer sign-in in this tab nor one another tab stored is erased.
+   */
+  #forgetSession(token: string | undefined = this.#session?.token): void {
+    if (token === undefined) return;
+    if (this.#session?.token === token) this.#session = null;
+    this.#storage.clearSession(token);
   }
 
   #requirePasskeyPublicKey(credentialId: string): string {
     const publicKey = this.#storage.getPasskeyPublicKey(credentialId);
     if (!publicKey) {
-      this.#setSession(null);
+      this.#forgetSession();
       throw new PasskeyUnavailableError();
     }
     return publicKey;
@@ -1461,9 +1482,10 @@ export function localStoragePocketStorage(): PocketStorage {
     // No mirror: the client reads this once, at construction, and holds the
     // session itself for the life of the tab.
     getSession: () => parseStoredSession(read(SESSION_KEY)),
-    setSession: (next) => {
-      if (next) write(SESSION_KEY, JSON.stringify({ v: 1, ...next }));
-      else drop(SESSION_KEY);
+    setSession: (next) => write(SESSION_KEY, JSON.stringify({ v: 1, ...next })),
+    // Compare-then-remove: another tab's sign-in may have replaced the token.
+    clearSession: (token) => {
+      if (parseStoredSession(read(SESSION_KEY))?.token === token) drop(SESSION_KEY);
     },
   };
 }

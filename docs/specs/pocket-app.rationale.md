@@ -110,7 +110,9 @@ Measured on iPhone 15 Pro, Safari 26.6.1, September 2026: X25519 generation work
 
 **Why the trigger is `UNAUTHORIZED_ERROR` and not a bare 401.** Treating a refused setup token's 401 as an expired session would sign the user out mid-pairing and lose the ceremony state — worse than the bug the sign-out path exists to fix.
 
-**Why a 401 is judged against the token it was sent with.** Background reads, such as the Burrows view's push query, can outlive a sign-out and sign-in; a late 401 for the old token would otherwise erase the fresh session and leave the Burrows list failing every action with "sign in first".
+**Why a 401 is judged against the token it was sent with.** Background reads, such as the Burrows view's push query, can outlive a sign-out and sign-in; a late 401 for the old token would otherwise erase the fresh session and leave the Burrows list failing every action with "sign in first". Superseded needs a *different* current session, not merely a mismatch: two requests carrying one expired token answer 401 in turn, the first clears the session (the app swallows a background one), and if the second read the now-empty session as a mismatch the foreground caller would stay on the Burrows view with no session.
+
+**Why a stored-session clear compares tokens.** Every tab of the origin shares `dormouse-pocket:session`, while each tab holds its own session in memory. A tab still on an older token whose 401 or sign-out cleared storage unconditionally would delete the token another tab signed in with since, signing that tab out at its next launch.
 
 ## Deployment: same-origin, always
 
