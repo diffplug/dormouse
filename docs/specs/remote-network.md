@@ -10,10 +10,10 @@
 
 | Level | Offered in | What Dormouse opens on its own |
 |---|---|---|
-| `nothing` | every build | nothing |
-| `local` (Local networks) | Hosted builds | one-time links, the relay socket once enrolled and push through it, managed voice |
+| `nothing` (Nowhere) | every build | nothing |
+| `local` (Local networks only) | Hosted builds | one-time links, the relay socket once enrolled and push through it, managed voice |
 | `anywhere` (Anywhere) | Hosted builds | one-time links to any network, Cloudflare STUN as a phone connects, the relay socket once enrolled and push through it, managed voice |
-| `relay` (My Relay only) | self-host builds | the relay socket, and push through it |
+| `relay` (Anywhere, through the Relay's host) | self-host builds | the relay socket, and push through it |
 
 - **A new install starts at Nothing.** **Must save the default at the service's first read, so it never flips**: `relay` where an enrollment for the baked origin exists — an upgraded self-host install — else `nothing` (rationale). A VS Code window with no service reads the default unsaved.
 - **A stored level the build does not offer, or a stored record that is not a policy — an unparseable file included — reads as `nothing`**; the first stays on disk, as an enrollment for another origin does.
@@ -94,13 +94,13 @@ The Settings dialog's Network topic (`docs/specs/alert.md` -> "Settings dialog")
 
 - **Renders nothing without a Burrow service**, which holds the policy.
 - **Never keep a draft**: every change sends a whole policy through `setNetworkPolicy`, and the panel renders the store's mirror of the answer; a refusal shows where the change was made. **Must make each change from the service's latest answer, one at a time** (`changeNetworkPolicy`).
-- **Offer the service's `levels`, in its order.**
+- **Offer the service's `levels`, in its order.** **Each choice's sentence must be true of its level**: over which networks a phone reaches the terminals, and what still leaves from any network.
 - **Choosing Local networks with nothing allowed must first allow every prefix of this machine's `lan` interfaces**, never a `vpn` or `virtual` one; the panel fills them, not the service (rationale). **Any other choice must keep `allowed`.**
-- **The connection list states only what is built** (rationale): `connectionsFor` lists every connection the level, this build, and the Burrow's standing open on their own, and nothing else; under `nothing`, none.
+- **The connection list states only what is built** (rationale): `connectionsFor` lists every connection the level, this build, and the Burrow's standing open on their own, and nothing else; under `nothing`, none. **An empty list must say that terminals, browser panes, and agents still reach what they open, those Dormouse restores at launch included.**
 - **Allowed networks**, under `local`: one switch per interface. **Must list every allowed range no switch reading On covers**, with Remove; **switching one off keeps a range another switch reading On needs**. A held path refusal shows here, with Dismiss.
 - **Phones**: under any level but `nothing`, the Remote control choices (`docs/specs/relay.md` -> "Remote control, in the Settings dialog"); under `nothing`, the levels that allow a phone, and Disconnect for a held enrollment, which is local.
 - **Updates**: a self-host build says it never updates itself, and a host with `hostOwnsUpdates` (VS Code) names the Marketplace. Any other build offers the automatic-check switch, absent under `nothing`, and **only with the platform's `updates` port** (`docs/specs/auto-update.md` -> "Threading") the last successful check and Check now.
-- **Under `nothing`, Notifications' push and managed-voice lines say they are off because Network is set to Nothing**, each linking to this topic. **The Baseboard holds the policy store for the window's life**, so its settings preview reads the level on its first frame; the Network panel re-reads on mount, and **a failed re-read never replaces a policy already read**.
+- **Under `nothing`, Notifications' push and managed-voice lines say they are off because of the level**, each linking to this topic. **The Baseboard holds the policy store for the window's life**, so its settings preview reads the level on its first frame; the Network panel re-reads on mount, and **a failed re-read never replaces a policy already read**.
 
 Source of truth: `NetworkSettings` and `connectionsFor` in `lib/src/components/NetworkSettings.tsx`; `lib/src/remote/burrow/network-policy-store.ts`.
 

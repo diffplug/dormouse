@@ -356,7 +356,7 @@ export const WithRemoteControl: Story = {
     await selectTopic('Network')({ canvasElement });
     const body = dialog(canvasElement);
     await body.findByText('1 paired phone.');
-    await expect(body.getByRole('radio', { name: /^My Relay only/ })).toHaveAttribute('aria-checked', 'true');
+    await expect(body.getByRole('radio', { name: /^Anywhere, through / })).toHaveAttribute('aria-checked', 'true');
   },
 };
 
@@ -380,7 +380,7 @@ export const SearchNetwork: Story = {
 };
 
 /**
- * Network set to Nothing: push and managed voice say they are off, and why,
+ * Network set to Nowhere: push and managed voice say they are off, and why,
  * each pointing at the Network topic, which the link scrolls to.
  */
 export const NotificationsUnderNothing: Story = {

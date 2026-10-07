@@ -3,7 +3,7 @@
 > - See `docs/specs/glossary.md` for Pane / Door vocabulary used in the surface hierarchy below.
 > - **Defers to `DESIGN.md`:** the named color rules (Bg-Only Chrome, Host-Theme-Only, Inset-Over-Border) and the Don'ts they carry. This spec owns the token plumbing under them.
 
-VS Code supplies `--vscode-*`; standalone, website, and Pocket use `applyTheme()` with bundled or installed themes — Pocket before first paint, including auth ([pocket-app.md](./pocket-app.md#design-system-and-theming) owns its browser-chrome sync). **Every shipping host runs the same consumed-token resolver** (`lib/src/lib/themes/vscode-color-resolver.ts`) before rendering. `pnpm dev:lib` is the one exception: `lib/src/main.tsx` installs the resolver only for a real webview and nothing on that path applies a theme, so the dev server renders with no `--vscode-*` at all.
+VS Code supplies `--vscode-*`; standalone, website, and Pocket use `applyTheme()` with bundled themes, the website also with installed ones — Pocket before first paint, including auth ([pocket-app.md](./pocket-app.md#design-system-and-theming) owns its browser-chrome sync). **Every shipping host runs the same consumed-token resolver** (`lib/src/lib/themes/vscode-color-resolver.ts`) before rendering. `pnpm dev:lib` is the one exception: `lib/src/main.tsx` installs the resolver only for a real webview and nothing on that path applies a theme, so the dev server renders with no `--vscode-*` at all.
 
 ## Surface hierarchy
 
@@ -100,6 +100,7 @@ Source of truth: `DormouseTheme` in `lib/src/lib/themes/types.ts`; build importe
 **Every host that lets the user pick a theme does it in the Settings dialog**; **host chrome — the standalone titlebar, the website playground navbar — carries none**. Pages with no Settings dialog — the `/playground/pocket` mounts and the docs pages — use the free-floating `compact` picker (rationale).
 
 - **VS Code offers none at all** (rationale). `VSCodeAdapter` sets the optional `hostOwnsTheme` capability and the dialog hides its Theme row (`docs/specs/transport.md` → Adapter model).
+- **Only the website offers installing a theme from OpenVSX**, a fetch from the page that no network policy governs (`docs/specs/remote-network.md` -> "Policy"): its `compact` mounts pass `offerStore`, and the Settings dialog passes it where the platform sets `offersThemeStore`, which only the fake adapter does. **Never offer it in Standalone**, whose content policy blocks open-vsx.org.
 - **Each host restores at boot**, since the picker mounts only when the dialog opens: standalone calls `restoreActiveTheme()`; the website and Pocket use `useRestoredTheme()`, which applies at render init **and repeats after commit** (hydration again), Pocket passing `restorePocketTheme` so its browser-chrome sync rides the same lifecycle.
 - **The host's fallback theme is module state, not a prop.** `setDefaultThemeId()` holds it and `restoreActiveTheme()` takes no argument, so every path re-resolving the active theme gets the same answer (rationale). **`useRestoredTheme()` latches it before its first restore and ahead of any child render** (rationale).
 - **The picker renders the bundled default through hydration, then reconciles stored themes and selection in a layout effect** (rationale).
