@@ -1,6 +1,6 @@
 # Supply Chain Security
 
-> - Owns what Dormouse puts on a user's machine — the dependency graph, the bundled runtime, the themes — how that is disclosed, and the cooldown before a new release is adopted.
+> - Owns what Dormouse puts on a user's machine — the dependency graph, the bundled runtime, the themes — how that is disclosed, and the cooldown before a new release is adopted, maintainer tooling outside the lockfile included.
 > - Defers the disclosure page's rendering to `docs/specs/website-docs.md -> "Reference page chrome"` and the runtime's build to `docs/specs/standalone.md`.
 > - Read `docs/specs/security.md` first; `docs/specs/security-audit.md` says how the `FAIL IF` lines here are run.
 
@@ -64,4 +64,5 @@ Source of truth: `bundle_node_runtime` / `verify_node_version` in `standalone/sr
 - **FAIL IF** `minimumReleaseAgeExclude` in `pnpm-workspace.yaml` contains anything except `pgstencil` and `@pgstencil/*`, or a Renovate package rule sets `minimumReleaseAge: null` for any package outside `pgstencil` and `@pgstencil/**`.
 - **FAIL IF** `.github/renovate.json` is missing `npm` or `cargo` from `enabledManagers`, limits either with `includePaths` or `ignorePaths`, or lacks a `minimumReleaseAge` package rule covering each of the `patch`, `minor`, and `major` update types for both managers (rationale).
 - **FAIL IF** `.github/renovate.json` has no `vulnerabilityAlerts` block, or that block does not set `minimumReleaseAge` **explicitly**. Renovate's built-in default for that block is `minimumReleaseAge: null`, force-applied before lookup, so *omitting* the key drops the cooldown rather than inheriting it from `packageRules`. Keeping it is deliberate (rationale).
+- **FAIL IF** `install_skills.sh` runs a package through `npx` without an exact version: outside the lockfile, both cooldowns, and Renovate, a hand bump to a release at least a day old is its only gate (rationale). `skills` never checks `skills-lock.json`'s `computedHash`; it installs each source's current default branch (`docs/specs/security.md` -> "Known gaps").
 - **FAIL IF** secret scanning or its push protection is disabled on the repository (`gh api repos/diffplug/dormouse --jq .security_and_analysis`), or Dependabot alerts are off (`GET /repos/diffplug/dormouse/vulnerability-alerts` must answer 204, not 404). Push protection is the one control that acts *before* a credential lands, blocking a push whose diff carries a recognized provider token; it applies to `dormouse-bot` too (rationale).
