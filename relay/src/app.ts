@@ -451,6 +451,11 @@ export function createApp(config: AppConfig): CreatedApp {
   // dropped on read (docs/specs/relay.md -> State files).
   const pushStore = new PushSubscriptionStore(config.stateDir, now, burrowStore);
   const sessions = new SessionStore(now);
+  /** A fresh sign-in session, as the setup and sign-in finishes both answer it. */
+  const mintSession = () => {
+    const { token, session } = sessions.mint(SELFHOST_ACCOUNT_ID);
+    return { sessionToken: token, accountId: session.accountId, expiresAt: session.expiresAt };
+  };
   const hub = new RelayHub();
   // Separate issuers per flow: a setup challenge cannot be redeemed at sign-in.
   // Both are capped as well as swept: `POST /api/signin/begin` needs no auth
@@ -693,7 +698,8 @@ export function createApp(config: AppConfig): CreatedApp {
       }
       registered = true;
 
-      const res: SetupFinishResponse = { accountId: SELFHOST_ACCOUNT_ID, credentialId };
+      // Registering signs in too: the Client needs no separate sign-in prompt.
+      const res: SetupFinishResponse = { ...mintSession(), credentialId };
       return c.json(res);
     } finally {
       // Its original expiry rides along, so a retry never buys extra time.
@@ -721,11 +727,8 @@ export function createApp(config: AppConfig): CreatedApp {
     });
     if (!verdict.ok) return c.json({ error: verdict.error }, verdict.status);
 
-    const { token, session } = sessions.mint(SELFHOST_ACCOUNT_ID);
     const res: SigninFinishResponse = {
-      sessionToken: token,
-      accountId: session.accountId,
-      expiresAt: session.expiresAt,
+      ...mintSession(),
       // Public, and a Client needs it to build pair/connect requests
       // (`SigninFinishResponse.passkeyPublicKey`).
       passkeyPublicKey: verdict.passkey.publicKey,

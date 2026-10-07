@@ -384,6 +384,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                     <span>Theme:</span>
                     <ThemePicker
                       variant="settings-dialog"
+                      offerStore={getPlatform().offersThemeStore === true}
                       open={openMenu === 'theme'}
                       onOpenChange={onThemeOpenChange}
                     />
@@ -526,7 +527,7 @@ export function AlarmSettingsSection({ sink, preview = false, onShowNetwork }: {
           </>
         ) : networkOff ? (
           <>
-            Managed voice is off while <NetworkTopicLink onShow={onShowNetwork} /> is set to Nothing,
+            Managed voice is off while <NetworkTopicLink onShow={onShowNetwork} /> is set to Nowhere,
             so alerts use your browser or system voice.
           </>
         ) : (
@@ -551,7 +552,7 @@ export function AlarmSettingsSection({ sink, preview = false, onShowNetwork }: {
       action={preview ? null : <PushTestButton />}
     >
       {networkOff ? (
-        <>Push is off while <NetworkTopicLink onShow={onShowNetwork} /> is set to Nothing.</>
+        <>Push is off while <NetworkTopicLink onShow={onShowNetwork} /> is set to Nowhere.</>
       ) : (
         describePushTargets(push, hasBurrowService && !preview)
       )}

@@ -2188,7 +2188,7 @@ describe('network policy', () => {
       });
     });
 
-    it('saves My Relay only for an enrollment this build reaches, which keeps running', async () => {
+    it('saves `relay` for an enrollment this build reaches, which keeps running', async () => {
       // An upgraded self-host install: dropping its phones would read as breakage.
       createService({ enrollment: ENROLLMENT, network: null });
       await service.start();
@@ -2285,8 +2285,8 @@ describe('network policy', () => {
 
       await service.push('pty-1', 'build finished');
       expect((await command('pushDevices')).result).toBeNull();
-      expect((await command('pushTest')).error).toContain('set to Nothing');
-      expect((await command('setupQr')).error).toContain('set to Nothing');
+      expect((await command('pushTest')).error).toContain('set to Nowhere');
+      expect((await command('setupQr')).error).toContain('set to Nowhere');
       expect(requests).toEqual([]);
     });
 
@@ -2295,9 +2295,9 @@ describe('network policy', () => {
       createService({ network: NOTHING });
 
       expect((await command('enroll', { password: 'setup', label: 'Laptop' })).error).toContain(
-        'set to Nothing',
+        'set to Nowhere',
       );
-      expect((await command('enrollOffer', { label: 'Laptop' })).error).toContain('set to Nothing');
+      expect((await command('enrollOffer', { label: 'Laptop' })).error).toContain('set to Nowhere');
       expect(requests).toEqual([]);
       expect(offerReads).toBe(0);
       expect(store.enrollment).toBeNull();
@@ -2311,7 +2311,7 @@ describe('network policy', () => {
         status: 'unavailable',
         reason: 'network-off',
       });
-      expect((await command('oneTimeOpen')).error).toContain('set to Nothing');
+      expect((await command('oneTimeOpen')).error).toContain('set to Nowhere');
       expect(rendezvous.rooms).toEqual([]);
     });
 
@@ -2324,8 +2324,8 @@ describe('network policy', () => {
       const answerers = vi.spyOn(network, 'createAnswerer');
 
       await setPolicy(NOTHING);
-      expect(() => createWebSocket!(`${ORIGIN.replace(/^http/, 'ws')}/ws/burrow`)).toThrow('set to Nothing');
-      await expect(fetch!(`${ORIGIN}${API_ROUTES.pushDevices}`)).rejects.toThrow('set to Nothing');
+      expect(() => createWebSocket!(`${ORIGIN.replace(/^http/, 'ws')}/ws/burrow`)).toThrow('set to Nowhere');
+      await expect(fetch!(`${ORIGIN}${API_ROUTES.pushDevices}`)).rejects.toThrow('set to Nowhere');
       // Its `null` declines the direct path, as a host without one does.
       expect(directPeering!.createPeer!()).toBeNull();
       expect(sockets).toHaveLength(1);
@@ -2413,7 +2413,7 @@ describe('network policy', () => {
     expect(rendezvous.rooms).toEqual([]);
   });
 
-  it('hands the running Burrow’s direct peers no ICE server and no hold under My Relay only', async () => {
+  it('hands the running Burrow’s direct peers no ICE server and no hold under `relay`', async () => {
     const handed: Handed[] = [];
     createService({ enrollment: ENROLLMENT, network: RELAY_ON }, { createDirectPeer: answererTo('192.168.1.3', handed) });
     await service.start();
@@ -2493,7 +2493,7 @@ describe('network policy', () => {
       saved();
       const open = command('oneTimeOpen');
       await set;
-      expect((await open).error).toContain('set to Nothing');
+      expect((await open).error).toContain('set to Nowhere');
       expect(rendezvous.rooms).toEqual([]);
       expect(oneTimeStates().at(-1)).toEqual({ status: 'unavailable', reason: 'network-off' });
     });
@@ -2781,7 +2781,7 @@ describe('Hosted enrollment', () => {
     expect((await command('beginHostedEnrollment', { label: 'x' })).error).toContain('setup password');
 
     hosted({ network: NOTHING });
-    expect((await command('beginHostedEnrollment', { label: 'x' })).error).toContain('set to Nothing');
+    expect((await command('beginHostedEnrollment', { label: 'x' })).error).toContain('set to Nowhere');
     expect(requests).toEqual([]);
   });
 

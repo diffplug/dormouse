@@ -1,7 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+const GIT = '/usr/bin/git';
 const spawnAndCapture = vi.fn();
-vi.mock('dor-lib-common', () => ({ spawnAndCapture: (...args: unknown[]) => spawnAndCapture(...args) }));
+const resolveBinaryPath = vi.fn((_name: string, _env: unknown): string | undefined => GIT);
+vi.mock('dor-lib-common', () => ({
+  spawnAndCapture: (...args: unknown[]) => spawnAndCapture(...args),
+  resolveBinaryPath: (name: string, env: unknown) => resolveBinaryPath(name, env),
+}));
 
 const { resolveUpstreamUrl } = await import('./git-upstream');
 
@@ -19,12 +24,24 @@ function script(...results: unknown[]) {
 beforeEach(() => spawnAndCapture.mockReset());
 
 describe('resolveUpstreamUrl', () => {
+  it('runs git by its PATH-resolved path, and nothing when PATH has none', async () => {
+    // Windows looks a bare name up in the working directory before PATH.
+    script(ok('origin/main'), ok('https://github.com/o/r'));
+    await resolveUpstreamUrl('/repo');
+    expect(resolveBinaryPath).toHaveBeenCalledWith('git', process.env);
+    for (const [binary] of spawnAndCapture.mock.calls) expect(binary).toBe(GIT);
+    spawnAndCapture.mockReset();
+    resolveBinaryPath.mockReturnValueOnce(undefined).mockReturnValueOnce(undefined);
+    expect(await resolveUpstreamUrl('/repo')).toBeNull();
+    expect(spawnAndCapture).not.toHaveBeenCalled();
+  });
+
   it('uses the branch upstream’s remote', async () => {
     script(ok('origin/main'), ok('git@github.com:diffplug/dormouse.git'));
     expect(await resolveUpstreamUrl('/repo')).toBe('https://github.com/diffplug/dormouse');
-    expect(spawnAndCapture).toHaveBeenNthCalledWith(1, 'git',
+    expect(spawnAndCapture).toHaveBeenNthCalledWith(1, GIT,
       ['-C', '/repo', 'rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}']);
-    expect(spawnAndCapture).toHaveBeenNthCalledWith(2, 'git', ['-C', '/repo', 'remote', 'get-url', 'origin']);
+    expect(spawnAndCapture).toHaveBeenNthCalledWith(2, GIT, ['-C', '/repo', 'remote', 'get-url', 'origin']);
   });
 
   it('prefers a fork over the repo you trusted', async () => {
@@ -32,19 +49,19 @@ describe('resolveUpstreamUrl', () => {
     // contributor's fork must not inherit the upstream repo's grant.
     script(ok('newbie/pr-500'), ok('https://github.com/newbie/dormouse.git'));
     expect(await resolveUpstreamUrl('/repo')).toBe('https://github.com/newbie/dormouse');
-    expect(spawnAndCapture).toHaveBeenNthCalledWith(2, 'git', ['-C', '/repo', 'remote', 'get-url', 'newbie']);
+    expect(spawnAndCapture).toHaveBeenNthCalledWith(2, GIT, ['-C', '/repo', 'remote', 'get-url', 'newbie']);
   });
 
   it('keeps a branch name containing slashes out of the remote name', async () => {
     script(ok('origin/feature/nested'), ok('https://github.com/o/r'));
     await expect(resolveUpstreamUrl('/repo')).resolves.toBe('https://github.com/o/r');
-    expect(spawnAndCapture).toHaveBeenNthCalledWith(2, 'git', ['-C', '/repo', 'remote', 'get-url', 'origin']);
+    expect(spawnAndCapture).toHaveBeenNthCalledWith(2, GIT, ['-C', '/repo', 'remote', 'get-url', 'origin']);
   });
 
   it('falls back to origin with no upstream set', async () => {
     script(failed(), ok('https://github.com/diffplug/dormouse'));
     expect(await resolveUpstreamUrl('/repo')).toBe('https://github.com/diffplug/dormouse');
-    expect(spawnAndCapture).toHaveBeenNthCalledWith(2, 'git', ['-C', '/repo', 'remote', 'get-url', 'origin']);
+    expect(spawnAndCapture).toHaveBeenNthCalledWith(2, GIT, ['-C', '/repo', 'remote', 'get-url', 'origin']);
   });
 
   it('falls back to origin on a detached HEAD', async () => {
@@ -78,7 +95,7 @@ describe('resolveUpstreamUrl', () => {
     script(ok('origin/main'), ok('https://github.com/o/r'));
     await resolveUpstreamUrl('/repo with spaces/;rm -rf /');
     for (const [binary, args] of spawnAndCapture.mock.calls) {
-      expect(binary).toBe('git');
+      expect(binary).toBe(GIT);
       expect(args[0]).toBe('-C');
       expect(args[1]).toBe('/repo with spaces/;rm -rf /');
     }

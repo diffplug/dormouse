@@ -93,7 +93,7 @@ The relay Worker serves the self-host Relay's HTTP API to many accounts: the pat
 
 | Route | On Hosted |
 |---|---|
-| `POST /api/setup/begin`, `/finish` | The passkey joins the account owning the token's Burrow: `accountId` is its user ID, `existingCredentialIds` its passkeys; 409 at `MAX_PASSKEYS_PER_ACCOUNT` |
+| `POST /api/setup/begin`, `/finish` | The passkey joins the account owning the token's Burrow: `accountId` is its user ID, `existingCredentialIds` its passkeys; 409 at `MAX_PASSKEYS_PER_ACCOUNT`; `finish`'s session counts toward `MAX_SESSIONS_PER_ACCOUNT` as sign-in's does |
 | `POST /api/setup/retire` | Spends only a token one of the session's account's Burrows minted |
 | `POST /api/signin/finish` | The asserted credential's account; `accountId` is its user ID. 401 `NOT_ENTITLED_ERROR`, and no session, for an account not entitled |
 | `POST /api/reauth/begin`, `/finish` | Only the session's account's credentials and nonces |

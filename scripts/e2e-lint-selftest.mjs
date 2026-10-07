@@ -170,6 +170,19 @@ for (const violation of [
   );
 }
 
+// The presence-window rule must redden in every scope it names, not just the
+// Relay import the loop appends, and for each spelling: the constant, a
+// private field, and the module path.
+for (const [file, violation] of [
+  ['hosted/server/relay-api.ts', '\nconst __selftest = PRESENCE_WINDOW;\n'],
+  ['lib/src/remote/burrow/one-time-runtime.ts', '\nclass __Selftest { #presenceWindows = null; }\n'],
+  ['lib/src/remote/one-time-rendezvous.ts', '\ntype __Selftest = PresenceWindowEntry;\n'],
+  ['lib/src/remote/client/one-time-client.ts', "\nexport * from '../../../../remote-lib-common/src/security/presence-window';\n"],
+  ['lib/src/remote/one-time-app/OneTimeApp.tsx', '\nconst __selftest = PRESENCE_WINDOW_IDLE_MS;\n'],
+]) {
+  selftest.withAppended(file, violation, `a presence window in ${file} stays green: ${violation.trim()}`);
+}
+
 // Every name the one-time phone's store rule lists must redden it on its own,
 // in the client, in the session core it shares with Pocket, and in the page —
 // the loop case appends one import to the client alone. A dynamic import and a

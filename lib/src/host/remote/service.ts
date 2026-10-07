@@ -178,11 +178,11 @@ function safeHostname(): string {
 
 /** What every command the `nothing` level refuses answers, before any request. */
 const NETWORK_OFF_REFUSAL =
-  'Settings → Network is set to Nothing, so this computer opens no connections on its own.';
+  'Settings → Network is set to Nowhere, so this computer opens no connections on its own.';
 
 /** What `oneTimeOpen` answers under `local` with no network allowed. */
 const NO_NETWORK_ALLOWED_REFUSAL =
-  'No network is allowed under Local networks, so no phone can connect. Allow one in Settings → Network.';
+  'No network is allowed under Local networks only, so no phone can connect. Allow one in Settings → Network.';
 
 /**
  * The policy this build reads (`docs/specs/remote-network.md` → "Policy"): the
@@ -594,8 +594,8 @@ export class BurrowService {
       this.#refuseNothing();
       return createWebSocket(url);
     };
-    // Looked up at the call, like `burrowFetch`'s default; a request that gets
-    // no answer says which host and why, never undici's bare `fetch failed`.
+    // The global is looked up at the call, so a test can stub it; a request that
+    // gets no answer says which host and why, never undici's bare `fetch failed`.
     const injectedFetch = describingFetchFailures((input, init) =>
       (options.fetch ?? globalThis.fetch)(input, init),
     );

@@ -84,8 +84,9 @@ describe("every page in the rail", () => {
 
     for (const markup of [selfHostMarkup, hostedMarkup]) {
       expect(markup).toContain("Dormouse is just a terminal — it needs no server or hosting.");
-      expect(markup).toContain("They require a Relay to");
-      expect(markup).toContain("Dormouse’s remote features make no network requests");
+      expect(markup).toContain("A new install opens no connection on its own until you choose");
+      expect(markup).toContain("Push and a paired phone need a Relay");
+      expect(markup).toContain("A one-time connection needs none");
     }
     expect(selfHostMarkup.indexOf("Dormouse is just a terminal —"))
       .toBeLessThan(selfHostMarkup.indexOf('id="security-model"'));

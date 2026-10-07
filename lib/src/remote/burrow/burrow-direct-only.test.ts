@@ -15,6 +15,7 @@ import {
   DIRECT_ANSWER_TIMEOUT_MS,
   DIRECT_BUFFER_HIGH,
   DIRECT_ONLY_DEADLINE_MS,
+  PRESENCE_WINDOW,
   SESSION_END_V1,
   mintNoiseStaticKeyPair,
   toBase64Url,
@@ -162,11 +163,12 @@ describe('BurrowRuntime direct-only sessions', () => {
   }
 
   /** Pair and connect `clientId`, answering its session and the outcome it read. */
-  async function connect(clientId = 'c1') {
+  /** Pair, then connect with a fresh proof or — with `window` — by riding the presence window. */
+  async function connect(clientId = 'c1', { window = false }: { window?: boolean } = {}) {
     const clientStatic = await pairClient(clientId);
     clock.advance(1_000);
     const connectionId = testRoutingId();
-    const { session, burrowChallenge } = await openConnectionSession({
+    const { session, burrowChallenge, offer } = await openConnectionSession({
       socket,
       burrowId: enrollment.burrowId,
       clientId,
@@ -182,9 +184,10 @@ describe('BurrowRuntime direct-only sessions', () => {
       handshakeHash: toBase64Url(session.handshakeHash),
       passkeyCredentialId: authenticator.credentialId,
     };
-    send(clientId, connectionId, session.sendControl({ presence: await presenceProofFor(authenticator, binding) }));
+    const presence = window ? PRESENCE_WINDOW : await presenceProofFor(authenticator, binding);
+    send(clientId, connectionId, session.sendControl({ presence }));
     const outcome = await readOutcome(socket, session, 'connection', connectionId);
-    return { session, connectionId, clientId, outcome };
+    return { session, connectionId, clientId, offer, outcome };
   }
 
   function send(clientId: string, connectionId: string, ciphertext: Uint8Array): void {
@@ -229,6 +232,14 @@ describe('BurrowRuntime direct-only sessions', () => {
     expect(sessions[0]!.disposed).toBe(true);
     expect(burrow.establishedSessionCount).toBe(0);
     expect(await lastControl(live, 1)).toEqual(SESSION_END_V1);
+  });
+
+  it('says so to a connection that rode the presence window, which asked for no proof', async () => {
+    localNetworks();
+    expect(await connect('c1', { window: true })).toMatchObject({
+      offer: PRESENCE_WINDOW,
+      outcome: { ok: true, burrowLabel: LABEL, directOnly: true },
+    });
   });
 
   it('carries protocol-v1 once the direct path does, past the deadline', async () => {

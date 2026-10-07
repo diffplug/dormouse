@@ -86,7 +86,7 @@ type Body = ReturnType<typeof within>;
 /** The panel opens on "Checking…" until the stub answers; wait for the picker. */
 async function settled(canvasElement: HTMLElement): Promise<Body> {
   const canvas = within(canvasElement);
-  await canvas.findByRole('radiogroup', { name: 'Connections Dormouse makes on its own' });
+  await canvas.findByRole('radiogroup', { name: 'End-to-end encrypted terminal data may travel' });
   return canvas;
 }
 
@@ -95,8 +95,8 @@ export const Nothing: Story = {
   parameters: { primedBurrow: hosted(nothingPolicy()), primedUpdates: { checkedAt: null } },
   play: async ({ canvasElement }) => {
     const canvas = await settled(canvasElement);
-    await expect(canvas.getByRole('radio', { name: /^Nothing/ })).toHaveAttribute('aria-checked', 'true');
-    await canvas.findByText(/^Nothing\. Terminals and browser panes/);
+    await expect(canvas.getByRole('radio', { name: /^Nowhere/ })).toHaveAttribute('aria-checked', 'true');
+    await canvas.findByText(/^Nothing\. Terminals, browser panes, and agents/);
     await canvas.findByText(/Checked only when you ask\. Never checked on this computer\./);
     await expect(canvas.getByRole('radio', { name: /^Anywhere/ })).toHaveAttribute('aria-checked', 'false');
   },
@@ -122,7 +122,7 @@ export const NothingChooseFromPhones: Story = {
   parameters: { primedBurrow: hosted(nothingPolicy()) },
   play: async ({ canvasElement }) => {
     const canvas = await settled(canvasElement);
-    await userEvent.click(canvas.getByRole('button', { name: 'Local networks' }));
+    await userEvent.click(canvas.getByRole('button', { name: 'Local networks only' }));
     await waitFor(() =>
       expect(canvas.getByRole('radio', { name: /^Local networks/ })).toHaveAttribute('aria-checked', 'true'));
     await expect(canvas.getByRole('switch', { name: 'Allow Local network en0 on' })).toBeVisible();
@@ -250,7 +250,7 @@ export const LocalNetworksNoneAllowed: Story = {
   play: async ({ canvasElement }) => {
     const canvas = await settled(canvasElement);
     await canvas.findByText('No network is allowed, so no phone can connect.');
-    await canvas.findByText(/^Nothing\. Terminals and browser panes/);
+    await canvas.findByText(/^Nothing\. Terminals, browser panes, and agents/);
   },
 };
 
@@ -310,10 +310,10 @@ export const SwitchingLevels: Story = {
     await userEvent.click(canvas.getByRole('radio', { name: /^Anywhere/ }));
     await canvas.findByText(CLOUDFLARE_STUN_HOST);
     await expect(canvas.queryByText('Allowed networks')).toBeNull();
-    await userEvent.click(canvas.getByRole('radio', { name: /^Nothing/ }));
-    await canvas.findByText(/^Nothing\. Terminals and browser panes/);
+    await userEvent.click(canvas.getByRole('radio', { name: /^Nowhere/ }));
+    await canvas.findByText(/^Nothing\. Terminals, browser panes, and agents/);
     await expect(canvas.queryByText('Allowed networks')).toBeNull();
-    await canvas.findByRole('button', { name: 'Local networks' });
+    await canvas.findByRole('button', { name: 'Local networks only' });
     await canvas.findByRole('button', { name: 'Anywhere' });
   },
 };
@@ -335,19 +335,19 @@ export const SelfHost: Story = {
   parameters: { primedBurrow: selfHost(RELAY_ON, enrolledStatus({ pairedClients: 1 })) },
   play: async ({ canvasElement }) => {
     const canvas = await settled(canvasElement);
-    await expect(canvas.getByRole('radio', { name: /^My Relay only/ })).toHaveAttribute('aria-checked', 'true');
+    await expect(canvas.getByRole('radio', { name: /^Anywhere, through / })).toHaveAttribute('aria-checked', 'true');
     await canvas.findByText('ned-mac.tail9c2f1.ts.net → your phone’s push service');
     await canvas.findByText('This build never updates itself. Rebuild it from source to update.');
     await canvas.findByText('1 paired phone.');
   },
 };
 
-/** A self-host build at Nothing, before enrolling: My Relay only is the way to a phone. */
+/** A self-host build at Nothing, before enrolling: Anywhere, through its Relay, is the way to a phone. */
 export const SelfHostNothing: Story = {
   parameters: { primedBurrow: selfHost(nothingPolicy()) },
   play: async ({ canvasElement }) => {
     const canvas = await settled(canvasElement);
-    await canvas.findByRole('button', { name: 'My Relay only' });
+    await canvas.findByRole('button', { name: /^Anywhere, through / });
   },
 };
 
@@ -356,7 +356,7 @@ export const SelfHostNothingEnrolled: Story = {
   parameters: { primedBurrow: selfHost(nothingPolicy(), enrolledStatus({ connection: 'stopped', serving: false })) },
   play: async ({ canvasElement }) => {
     const canvas = await settled(canvasElement);
-    await canvas.findByText(/which nothing reaches while Network is set to Nothing/);
+    await canvas.findByText(/which nothing reaches while Network is set to Nowhere/);
     await userEvent.click(canvas.getByRole('button', { name: 'Disconnect' }));
     await canvas.findByText('Paired phones will need to pair again.');
   },

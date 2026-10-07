@@ -76,7 +76,7 @@ Run once from the repository root with the operator's existing `gh` login:
 node hosted/scripts/setup-github.mjs
 ```
 
-The script creates or updates the three environments with the branch policies, required reviewers, and disabled administrator bypass that `docs/specs/security-ci.md` -> "Hosted Deployments" owns. Repository branch and tag protections are unchanged.
+The script creates or updates the three environments with the branch policies, required reviewers (none on the tag environment), and disabled administrator bypass that `docs/specs/security-ci.md` -> "Hosted Deployments" owns. Repository branch and tag protections are unchanged.
 
 ## Provision PR previews
 

@@ -4,6 +4,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { execFile, spawn } = require('node:child_process');
 const { promisify } = require('node:util');
+const { windowsPowerShellPath, windowsSystemPath } = require('./windows-system');
 
 const rawExecFileP = promisify(execFile);
 
@@ -54,7 +55,7 @@ async function readFilePathsWindows(runtime) {
   const cmd = '$out = Get-Clipboard -Format FileDropList; if ($out) { $out | ForEach-Object { $_.FullName } }';
   try {
     const { stdout } = await exec(
-      'powershell',
+      windowsPowerShellPath(runtime.env || process.env),
       ['-NoProfile', '-NonInteractive', '-Command', cmd],
       { maxBuffer: MAX_BUFFER },
     );
@@ -116,7 +117,7 @@ async function readTextWindows(runtime) {
   const exec = runtime.exec || execFileP;
   try {
     const { stdout } = await exec(
-      'powershell',
+      windowsPowerShellPath(runtime.env || process.env),
       ['-NoProfile', '-NonInteractive', '-Command', 'Get-Clipboard -Raw'],
       { maxBuffer: MAX_BUFFER },
     );
@@ -200,7 +201,7 @@ async function readImageWindows(out, runtime) {
   ].join(' ');
   try {
     const { stdout } = await exec(
-      'powershell',
+      windowsPowerShellPath(runtime.env || process.env),
       ['-NoProfile', '-NonInteractive', '-Command', cmd],
       { maxBuffer: MAX_BUFFER },
     );
@@ -308,7 +309,7 @@ function writeViaStdin(cmd, args, text, runtime) {
 async function writeClipboardText(text, runtime = {}) {
   const platform = runtime.platform || process.platform;
   if (platform === 'darwin') return writeViaStdin('pbcopy', [], text, runtime);
-  if (platform === 'win32') return writeViaStdin('clip', [], text, runtime);
+  if (platform === 'win32') return writeViaStdin(windowsSystemPath(runtime.env || process.env, 'System32', 'clip.exe'), [], text, runtime);
   const env = runtime.env || process.env;
   const wayland = Boolean(env.WAYLAND_DISPLAY);
   const attempts = wayland

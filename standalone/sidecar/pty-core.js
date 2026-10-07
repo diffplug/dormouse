@@ -3,6 +3,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { execFile, spawn } = require('node:child_process');
 const { createPortScanner } = require('./port-scanner');
+const { windowsPowerShellPath, windowsSystemPath } = require('./windows-system');
 
 function safeResolve(resolver) {
   try {
@@ -15,11 +16,7 @@ function safeResolve(resolver) {
 
 function resolveDefaultShell(platform = process.platform, env = process.env) {
   if (platform === 'win32') {
-    return (
-      env.ComSpec ||
-      env.COMSPEC ||
-      path.win32.join(env.SystemRoot || env.SYSTEMROOT || 'C:\\Windows', 'System32', 'cmd.exe')
-    );
+    return env.ComSpec || env.COMSPEC || windowsSystemPath(env, 'System32', 'cmd.exe');
   }
   return env.SHELL || '/bin/sh';
 }
@@ -435,17 +432,16 @@ function fileExists(filePath, fsModule = fs) {
 async function detectWindowsShells(runtime = {}) {
   const env = runtime.env || process.env;
   const fsModule = runtime.fsModule || fs;
-  const systemRoot = env.SystemRoot || env.SYSTEMROOT || 'C:\\Windows';
   const shells = [];
 
   // Windows PowerShell (built-in)
-  const winPowerShell = path.win32.join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+  const winPowerShell = windowsPowerShellPath(env);
   if (fileExists(winPowerShell, fsModule)) {
     shells.push({ name: 'Windows PowerShell', path: winPowerShell, args: [] });
   }
 
   // Command Prompt
-  const cmdPath = env.ComSpec || env.COMSPEC || path.win32.join(systemRoot, 'System32', 'cmd.exe');
+  const cmdPath = env.ComSpec || env.COMSPEC || windowsSystemPath(env, 'System32', 'cmd.exe');
   if (fileExists(cmdPath, fsModule)) {
     shells.push({ name: 'Command Prompt', path: cmdPath, args: [] });
   }
@@ -479,10 +475,10 @@ async function detectWindowsShells(runtime = {}) {
   // the sidecar is itself spawned CREATE_NO_WINDOW, and a console child without
   // that flag stalls on Windows console allocation — the actual reason the old
   // wsl.exe call timed out.
-  const wslExe = path.win32.join(systemRoot, 'System32', 'wsl.exe');
+  const wslExe = windowsSystemPath(env, 'System32', 'wsl.exe');
   if (fileExists(wslExe, fsModule)) {
     try {
-      const regExe = path.win32.join(systemRoot, 'System32', 'reg.exe');
+      const regExe = windowsSystemPath(env, 'System32', 'reg.exe');
       const raw = await runText(
         runtime,
         regExe,
@@ -1072,7 +1068,7 @@ function parseNetstatListening(output, pidSet) {
 module.exports.parseNetstatListening = parseNetstatListening;
 
 function runPowerShell(script, runtime, timeout = OPEN_PORT_TIMEOUT_MS) {
-  return runText(runtime, 'powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { timeout });
+  return runText(runtime, windowsPowerShellPath(runtime.env || process.env), ['-NoProfile', '-NonInteractive', '-Command', script], { timeout });
 }
 
 /** Run a `... | ConvertTo-Json` script and return its rows as an array. */
@@ -1099,7 +1095,8 @@ async function windowsListeningPorts(pids, runtime = {}, names) {
     ports = parseNetTcpConnections(json, pidSet);
   } catch {
     try {
-      ports = parseNetstatListening(await runText(runtime, 'netstat', ['-ano', '-p', 'TCP'], { timeout: remaining() }), pidSet);
+      const netstat = windowsSystemPath(runtime.env || process.env, 'System32', 'netstat.exe');
+      ports = parseNetstatListening(await runText(runtime, netstat, ['-ano', '-p', 'TCP'], { timeout: remaining() }), pidSet);
     } catch { return []; }
   }
   // Names come from the process-table read; a failed read leaves ports unnamed.
@@ -1179,7 +1176,8 @@ function openNativeDirectory(nativePath, done, runtime = {}) {
     if (nativePath.includes(',')) return done(new Error('Explorer cannot open a path containing a comma'));
     // Explorer is a shell UI: acknowledge process launch, not its lifetime or
     // exit status. Keep OS-level launch errors visible to the caller.
-    const child = (runtime.spawn || spawn)('explorer.exe', [nativePath], { windowsHide: true, stdio: 'ignore' });
+    const explorer = windowsSystemPath(runtime.env || process.env, 'explorer.exe');
+    const child = (runtime.spawn || spawn)(explorer, [nativePath], { windowsHide: true, stdio: 'ignore' });
     let settled = false;
     const finish = error => { if (!settled) { settled = true; done(error); } };
     child.once('error', finish);

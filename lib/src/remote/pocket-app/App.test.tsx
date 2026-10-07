@@ -77,6 +77,7 @@ function renderBurrows(
           onForget={overrides.onForget ?? (() => undefined)}
           onEnablePush={overrides.onEnablePush ?? (() => undefined)}
           onRetryPushConfig={overrides.onRetryPushConfig ?? (() => undefined)}
+          onSignOut={() => undefined}
         />
       </StrictMode>,
     );
