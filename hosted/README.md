@@ -45,7 +45,7 @@ Run `pnpm install` and re-run Hosted's integration tests after an update. The pr
 | Production | Dedicated Dormouse Postgres database, a migration role and one runtime role per Worker, three uncached Hyperdrives, one per Worker connecting as its role; Workers `dormouse-hosted` (`hosted.dormouse.sh`, with rate-limit namespace `7`), `dormouse-relay` (`relay.dormouse.sh`, with its `OneTimeRoom` and `RelayRoom` Durable Object namespaces and rate-limit namespaces `1`–`6`), and `dormouse-voice` (`voice.dormouse.sh`, with the history-sweep Cron Trigger), each on its custom domain; GitHub `hosted-production` environment |
 | Email | Dedicated Postmark server, verified `signin@dormouse.sh`, SPF/DKIM/DMARC, Apple Private Email Relay registration |
 | OAuth | Separate Dormouse GitHub, Google, Microsoft, and Apple registrations; exact callbacks below |
-| Release history | `hosted-release-tag` GitHub environment, an admin identity's repository-scoped Contents-write fine-grained PAT, immutable annotated `hosted/` tags |
+| Release history | `hosted-release-tag` GitHub environment, the `dormouse-hosted-tagger` GitHub App, the `Hosted tag creation` and `Hosted tag history` tag rulesets, immutable annotated `hosted/` tags |
 | Recovery | Neon backups/PITR enabled, encrypted pre-migration dumps retained as GitHub artifacts for 30 days, age identity also retained independently in a password manager |
 
 Cloudflare Workers Scripts and Hyperdrive permissions are account-scoped, so previews need their own test account. `docs/specs/security-ci.md` -> "Hosted Deployments" owns the credential placement the audit checks.
@@ -64,7 +64,7 @@ Public identifiers recorded during provisioning on 2026-09-29; secret values rem
 | Microsoft | DiffPlug tenant `cf6a3474-e2f1-498a-9109-706289336d8a`; client ID `be9f84a1-fc52-4a50-afcb-c659c11a1f17` |
 | Apple | Team `LXW8WAGWYX`; primary App ID `sh.dormouse.standalone`; Services ID `sh.dormouse.hosted`; signing key `UFV5N9DWJS` |
 
-The Apple client-secret JWT expires **2027-03-28 05:33 UTC**; renew by **2027-02-26** using the signing key in Bitwarden. Microsoft's secret was created with a 180-day expiry; its exact expiry is saved with it in Bitwarden. The release-tag PAT expires **2026-12-27**; renew it before that date in the separately protected `hosted-release-tag` environment. Apple's private relay has the exact sender and the Postmark return-path domain registered. Provisioning these registrations does not establish acceptance.
+The Apple client-secret JWT expires **2027-03-28 05:33 UTC**; renew by **2027-02-26** using the signing key in Bitwarden. Microsoft's secret was created with a 180-day expiry; its exact expiry is saved with it in Bitwarden. Apple's private relay has the exact sender and the Postmark return-path domain registered. Provisioning these registrations does not establish acceptance.
 
 The public policy pages are live. Google is external and in production; its branding is verified and published, with only OpenID, email, and profile scopes.
 
@@ -152,12 +152,15 @@ gh variable set VOICE_HYPERDRIVE_ID --repo diffplug/dormouse --env hosted-produc
 gh secret set CLOUDFLARE_API_TOKEN --repo diffplug/dormouse --env hosted-production
 gh secret set DATABASE_URL --repo diffplug/dormouse --env hosted-production
 gh secret set BACKUP_AGE_IDENTITY --repo diffplug/dormouse --env hosted-production
-gh secret set HOSTED_TAG_TOKEN --repo diffplug/dormouse --env hosted-release-tag
+gh variable set HOSTED_TAG_APP_CLIENT_ID --repo diffplug/dormouse --env hosted-release-tag --body 'Iv23liADZP0hPRZCYRz8'
+gh secret set HOSTED_TAG_APP_PRIVATE_KEY --repo diffplug/dormouse --env hosted-release-tag < PATH_TO_DOWNLOADED_KEY.pem
 ```
 
 `DATABASE_URL` is the direct migration-role Postgres URL. Generate the age identity with `age-keygen` into private password-manager storage, then enter it at the hidden prompt; preserve that independent copy and old keys on rotation. Use a production Cloudflare token covering Workers deployment (which includes the Durable Object migrations, rate-limit bindings, and Cron Triggers), Workers secret listing, Hyperdrive read, and the custom-domain zone permissions for all three hostnames.
 
-The tag PAT belongs to a repository admin and selects only this repository with Contents write. It can bypass the existing tag ruleset and can also write code, so it is isolated from the deploy job in a separately approved main-only environment (`docs/specs/security-ci.md` -> "Hosted Deployments"). Record its expiry; do not grant tag bypass to the bot or Actions generally.
+The tag job authenticates as `dormouse-hosted-tagger`, a private GitHub App owned by `diffplug` (App ID `5228264`) (client ID `Iv23liADZP0hPRZCYRz8`) with Contents write, Metadata read, no webhook or events, and one installation selecting only this repository. The App is a bypass actor on `Hosted tag creation` alone, so it can create `hosted/` tags but never move or delete one, and `v*` tags stay admin-only; `docs/specs/security-ci.md` -> "Hosted Deployments" owns these checks. Do not grant tag bypass to the bot or Actions generally.
+
+Rotate the key yearly and on any suspected exposure, with a reminder in Bitwarden: generate a new private key on the App's settings page, set it with the `gh secret set HOSTED_TAG_APP_PRIVATE_KEY` line above, delete the local `.pem`, and delete the old key on the settings page. A tag job that fails on a bad key can be re-run alone once the secret is fixed; it never records a deployment twice.
 
 ### Runtime secrets in the Workers
 
