@@ -313,6 +313,9 @@ export function WorkspaceStrip({
  *  name, so a floor built on it never exceeds the tab's natural width. */
 const TAB_NAME_PADDING_PX = 20;
 
+/** The `×`'s box, which the rename editor keeps as slack. */
+const TAB_CLOSE_SLOT_CLASS = 'flex h-full shrink-0 items-center pl-0.5 pr-2';
+
 /** Memoized: every callback below is stable and takes the Workspace id, so a tab
  *  re-renders only when its own name, state, or union changes. */
 const WorkspaceTab = memo(function WorkspaceTab({
@@ -425,16 +428,25 @@ const WorkspaceTab = memo(function WorkspaceTab({
       }}
     >
       {renaming ? (
-        <InlineEditInput
-          data-workspace-rename-for={id}
-          initialValue={name}
-          className="box-content h-full min-w-0 bg-transparent px-2.5 text-sm outline-none"
-          fitDraft
-          blurAction="submit"
-          submitUntouched={false}
-          onSubmit={(value) => onFinishRename(id, value)}
-          onCancel={onCancelRename}
-        />
+        <div className="grid h-full min-w-0 flex-1">
+          {/* The tab as it was, unseen and sharing the editor's cell: the space
+              its `×` held is slack the draft fills before the tab has to grow. */}
+          <span data-workspace-rename-slack aria-hidden="true" className="invisible col-start-1 row-start-1 flex">
+            <span className={clsx('whitespace-pre pl-2.5', showClose ? 'pr-1' : 'pr-2.5', nameIsAuto && AUTO_NAME_CLASS)}>{name}</span>
+            {showClose && <span className={TAB_CLOSE_SLOT_CLASS}><XIcon size={11} weight="bold" /></span>}
+          </span>
+          <InlineEditInput
+            data-workspace-rename-for={id}
+            initialValue={name}
+            // Content-box, so the floor less its padding fills the cell.
+            className="col-start-1 row-start-1 box-content h-full min-w-[calc(100%-1.25rem)] bg-transparent px-2.5 text-sm outline-none"
+            fitDraft
+            blurAction="submit"
+            submitUntouched={false}
+            onSubmit={(value) => onFinishRename(id, value)}
+            onCancel={onCancelRename}
+          />
+        </div>
       ) : (
         <>
           <button
@@ -492,7 +504,7 @@ const WorkspaceTab = memo(function WorkspaceTab({
         <button
           type="button"
           data-workspace-tab-close={id}
-          className="flex h-full shrink-0 items-center rounded pl-0.5 pr-2 hover:bg-current/10"
+          className={clsx(TAB_CLOSE_SLOT_CLASS, 'rounded hover:bg-current/10')}
           aria-label={`Close ${name}`}
           title={`Close ${name}`}
           onClick={(event) => {

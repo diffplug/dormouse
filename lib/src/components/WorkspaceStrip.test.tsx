@@ -754,11 +754,14 @@ describe('tab tweens', () => {
       },
     });
     // jsdom lays nothing out. In DOM order, `+` is 20px and a tab is 20px of
-    // padding, 10px a character of its name or draft, and 20px for its `×`.
+    // padding, 10px a character of its name, and 20px for its `×`; the rename
+    // editor's tab is the wider of its draft and the tab it kept as slack.
+    const label = (name: string, close: boolean) => 20 + 10 * name.length + (close ? 20 : 0);
     const natural = (item: Element) => {
       if (!(item instanceof HTMLElement) || item.dataset.workspaceTab === undefined) return 20;
-      const label = item.querySelector('input')?.value ?? item.querySelector('span')!.textContent!;
-      return 20 + 10 * label.length + (item.querySelector('[data-workspace-tab-close]') ? 20 : 0);
+      const slack = item.querySelector('[data-workspace-rename-slack]');
+      if (slack) return Math.max(label(item.querySelector('input')!.value, false), label(slack.textContent!, !!slack.querySelector('svg')));
+      return label(item.querySelector('span')!.textContent!, !!item.querySelector('[data-workspace-tab-close]'));
     };
     const width = (item: Element) => held.get(item) ?? natural(item);
     measure = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
@@ -809,24 +812,26 @@ describe('tab tweens', () => {
     expect(tweens).toEqual(new Map([[first, ['width 60px→40px']], ['ws-2', ['width 40px→60px']]]));
   });
 
-  it('tweens the rename editor to its text as it is typed, carrying the tabs after it', async () => {
+  it('keeps the × as the rename editor\'s slack, then tweens the tab to text that outgrows it', async () => {
     const first = await renderWith('ws-2');
     await act(async () => { requestWorkspaceRename(first); });
-    // The editor drops the ×, and is as wide as its draft.
-    expect(tweens).toEqual(new Map([[first, ['width 60px→40px']]]));
-    const input = tabFor(first).querySelector('input')!;
-    expect(input.style.width).toBe('2ch');
-    settle();
-
-    await act(async () => {
-      input.dispatchEvent(new InputEvent('beforeinput', { bubbles: true, cancelable: true }));
-      typeInto(input, 'w1xx');
-    });
-    expect(input.style.width).toBe('4ch');
-    // The editor's re-render does not reach the strip: a frame plays it.
     expect(tweens.size).toBe(0);
-    await act(async () => { for (const frame of frames.splice(0)) frame(0); });
-    expect(tweens).toEqual(new Map([[first, ['width 40px→60px']]]));
+    const input = tabFor(first).querySelector('input')!;
+    expect(input.style.width).toBe('calc(2ch + 2px)');
+
+    const type = async (value: string) => {
+      await act(async () => {
+        input.dispatchEvent(new InputEvent('beforeinput', { bubbles: true, cancelable: true }));
+        typeInto(input, value);
+      });
+      // The editor's re-render does not reach the strip: a frame plays it.
+      await act(async () => { for (const frame of frames.splice(0)) frame(0); });
+    };
+    await type('w1xx');
+    expect(input.style.width).toBe('calc(4ch + 2px)');
+    expect(tweens.size).toBe(0);
+    await type('w1xxx');
+    expect(tweens).toEqual(new Map([[first, ['width 60px→70px']]]));
   });
 
   it('never measures for a change that leaves the strip as it was, and tweens nothing under reduced motion', async () => {
