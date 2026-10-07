@@ -56,6 +56,8 @@ DORMOUSE_NODE_BINARY="$DORMOUSE_MAIN_CHECKOUT/standalone/src-tauri/binaries/node
 - **Tauri (real thing, several windows):** `pnpm dev:standalone` from the repo root of the worktree. Dev builds use a separate state root (`<app_data_dir>/dev`), so dev and installed app never share snapshots.
 - **Browser harness (one window only):** inside Dormouse, `dor tool innerdogfood`; outside, `pnpm innerdogfood`. It prints the URL and an `agent-browser` command. The skill `.claude/skills/debug-standalone-agent-browser/SKILL.md` covers driving it. The harness simulates **one** window: transfer, tear-out, quit voting, and cross-window `dor` routing only run in Tauri.
 
+After changing sidecar, staged CLI, or bundled host sources, re-stage and restart either one; frontend edits hot-reload, and Tauri watches Rust.
+
 Opening a second window: drag a Workspace tab out of the strip and release it outside the window, or from a Dormouse terminal run `dor workspace move <ref> --window new`.
 
 ## 4. Automated tests
@@ -72,6 +74,8 @@ pnpm lint:specs && node scripts/xterm-lint.mjs                  # fast inner loo
 pnpm test                                                      # full CI test gate
 cargo test                                                     # see §2
 ```
+
+Helper placement snapshots: defer the fake helper's first prompt until its terminal is mounted and fitted. Drain queued xterm writes before capture and assert one autorun echo, both complete prompts, and a viewport at the bottom. Output emitted at the initial wide grid can lose the current prompt line when xterm shrinks; waiting afterward cannot repair it. `lib/src/stories/HelperPlacement.stories.tsx` owns the gate and `lib/src/lib/platform/fake-adapter-helper.test.ts` covers deferred startup and narrow wrapping.
 
 Help snapshots: after changing any `dor` help text, rebuild and refresh with `cd dor && pnpm build && UPDATE_SNAPSHOTS=1 node --test`, then run `node --test` again and commit `dor/test/snapshots/`.
 
@@ -125,6 +129,15 @@ User-run results are recorded under "Transfer findings" below. Items marked **WK
 - Relaunch: both windows and their Workspaces come back; the interrupted agent resumes on its own.
 - `dor app restart` (packaged build) asks what Cmd+Q asks — the requesting pane aside — then relaunches into whatever bundle is installed.
 
+**Wall on Lath (live acceptance, standalone agent-browser harness)**
+- Type into the selected terminal: keystrokes echo, `dor list` marks it `*`. `dor iframe <url>` / `dor ensure` from a touched terminal creates in the background; the caller keeps DOM focus, selection, and typing.
+- Click between panes (body and header) both ways: selection and focus follow, passthrough entered. `dor kill` of a background Surface leaves the caller's selection, focus, and typing intact; killing the selected pane adopts a survivor.
+- Minimize the last pane: the Door is created and selected, auto-spawn fills the Wall, the Door keeps selection. Click a Door: it reattaches at its original position where structure allows.
+- An iframe that focuses itself moves selection onto its pane, as a click would (in VS Code, a background `dor` command never yanks focus out of the editor).
+- Zoom: the pane rises to the inset wall rect and returns with the layout identical. Restart: layout, Doors, titles, and params restored.
+- Kill with animation: fade in place, survivors tween; a second kill mid-tween retargets cleanly; reduced motion is instant. Frame-sample the shrink-to-corner of a last-pane kill and its top-left refill.
+- Drag a pane to a leaf edge, an ancestor edge, and a center: preview matches the commit pixel-exactly at leaf, column, and root depth; dragging while a Door is selected selects the dragged pane. Drag a pane onto the baseboard (minimize with token) and a Door out (restore at the hit-tested position).
+
 **Harness alert stores**
 - In `innerdogfood`, toggle a watched command and change alarm settings: they survive a page reload (they now live in the sidecar).
 
@@ -134,7 +147,7 @@ Each row names the code and the spec section that must change with it. Spec lint
 
 | Concern | Code | Spec |
 |---|---|---|
-| Strip look, tabs, menus, rename, indicators | `lib/src/components/WorkspaceStrip.tsx`, `workspace-strip-drag.ts`, stories in `lib/src/stories/` | `docs/specs/layout.md` → Workspaces; `standalone.md` → AppBar; `alert.md` → Workspace union |
+| Strip look, tabs, menus, rename, indicators | `lib/src/components/WorkspaceStrip.tsx`, `workspace-strip-drag.ts`, stories in `lib/src/stories/` | look: `lib/src/components/design.tsx`; behavior: `docs/specs/layout.md` → Workspaces; `standalone.md` → AppBar; `alert.md` → Workspace union |
 | Shared Workspace kill confirmation and iframe move gate | `lib/src/components/WorkspaceKillConfirm.tsx` ("Confirm kill workspace"), `lib/src/components/WorkspaceStrip.tsx` (`confirmation`), `standalone/src/WorkspaceTeardownModal.tsx` (window close / app quit), `lib/src/lib/workspace-ui-store.ts` | `layout.md` → Workspaces; `standalone.md` → Quit protocol |
 | Command-mode Workspace keys (`1`–`9`, `Enter`, `,`, `x`/`k` on a tab) | `lib/src/components/wall/keyboard/handle-workspace-shortcuts.ts` | `layout.md` → Keyboard shortcuts (command mode), `shortcuts.md` |
 | Composition, active/hidden Wall, input gating | `lib/src/components/WorkspaceWindow.tsx`, `Wall.tsx` (`WorkspaceActiveContext`) | `layout.md` → Workspaces |
@@ -155,7 +168,7 @@ Each row names the code and the spec section that must change with it. Spec lint
 
 ## 7. Rules that bite
 
-- **Every Tauri `listen` must be `listenToWindow`** (`standalone/src/window-label.ts`). A bare `listen` receives every window's traffic; `scripts/window-listeners.test.mjs` fails the build otherwise. Broadcasts (`app.emit`) still reach scoped listeners.
+- **Every Tauri `listen` must be `listenToWindow`** (`standalone/src/window-label.ts`). A bare `listen` receives every window's traffic; `standalone/scripts/window-listeners.test.mjs` fails the build otherwise. Broadcasts (`app.emit`) still reach scoped listeners.
 - Workspace id allocation and reservation-failure fallback follow `docs/specs/standalone.md` → Workspace registry; use `createWorkspace()`.
 - Session release boundaries follow `docs/specs/transport.md` → Transferring a Workspace and the `releaseSession` comment in `lib/src/lib/terminal-lifecycle.ts`.
 - **`take_arrivals` does not consume**, and an arrival without content is not drainable. If you change the transfer sequence, keep: source invokes → Rust marks → source serializes → `transfer_workspace_content` → target nudged/built.

@@ -103,7 +103,7 @@ describe('ToolPaneHeader — a serving Tool', () => {
     renderHeader(SERVING);
     expect(header().className).toContain('bg-header-active-bg');
     expect(controls()).toEqual([
-      'agent-browser resizes with pane — change display', 'Terminal context',
+      'agent-browser resizes with pane — change display', 'Terminal context', 'Break',
       'Split left/right', 'Split top/bottom', 'Zoom', 'Minimize', 'Kill',
     ]);
     // The name sits after both, before the layout buttons.
@@ -174,12 +174,12 @@ describe('ToolPaneHeader — a serving Tool', () => {
     renderHeader(SERVING);
     act(() => recordToolDirty(ID, true));
     const steps: [number, (string | null)[]][] = [
-      [356, ['agent-browser resizes with pane — change display', 'Terminal context', 'Split left/right', 'Split top/bottom', 'Zoom', 'Minimize', 'Kill']],
-      [355, ['agent-browser resizes with pane — change display', 'Terminal context', 'Zoom', 'Minimize', 'Kill']],
-      [161, ['agent-browser resizes with pane — change display', 'Terminal context', 'Zoom', 'Minimize', 'Kill']],
-      [160, ['Terminal context', 'Zoom', 'Minimize', 'Kill']],
-      [125, ['Terminal context', 'Zoom', 'Minimize', 'Kill']],
-      [124, ['Terminal context', 'Zoom']],
+      [382, ['agent-browser resizes with pane — change display', 'Terminal context', 'Break', 'Split left/right', 'Split top/bottom', 'Zoom', 'Minimize', 'Kill']],
+      [381, ['agent-browser resizes with pane — change display', 'Terminal context', 'Break', 'Zoom', 'Minimize', 'Kill']],
+      [187, ['agent-browser resizes with pane — change display', 'Terminal context', 'Break', 'Zoom', 'Minimize', 'Kill']],
+      [186, ['Terminal context', 'Break', 'Zoom', 'Minimize', 'Kill']],
+      [151, ['Terminal context', 'Break', 'Zoom', 'Minimize', 'Kill']],
+      [150, ['Terminal context', 'Zoom']],
       [80, ['Terminal context', 'Zoom']],
     ];
     for (const [width, expected] of steps) {
@@ -335,7 +335,7 @@ describe('ToolPaneHeader — other faces', () => {
   });
 
   it('re-tiers when a port conflict comes and goes, though the header\'s width never changes', () => {
-    act(() => resizeHeader(110));
+    act(() => resizeHeader(136));
     renderHeader({ surfaceType: 'tool', command: 'pnpm dev' });
     expect(labelled('Kill')).not.toBeNull();
     renderHeader({ surfaceType: 'tool', command: 'pnpm dev', toolPortConflict: [3000, 4000] });
@@ -347,9 +347,9 @@ describe('ToolPaneHeader — other faces', () => {
 
   it('keeps the port-conflict face\'s minimize and kill to the Terminal Context button\'s narrowest boundary', () => {
     renderHeader({ surfaceType: 'tool', command: 'pnpm dev', toolPortConflict: [3000, 4000] });
-    act(() => resizeHeader(125));
+    act(() => resizeHeader(151));
     expect(labelled('Kill')).not.toBeNull();
-    act(() => resizeHeader(124));
+    act(() => resizeHeader(150));
     expect(labelled('Kill')).toBeNull();
     expect(labelled('Zoom')).not.toBeNull();
   });

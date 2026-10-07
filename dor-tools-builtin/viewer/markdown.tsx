@@ -104,7 +104,8 @@ const tokenClasses = [syntaxHighlighting(classHighlighter)];
 const plugins = [
   capture(), markdownSafetyPlugin(), commentsPlugin(),
   headingsPlugin(), listsPlugin(), quotePlugin(), thematicBreakPlugin(), linkPlugin(), linkDialogPlugin(),
-  tablePlugin(), frontmatterPlugin(), markdownShortcutPlugin(),
+  // Unpadded tables: padding to aligned columns rewrites every row of a table when one cell changes.
+  tablePlugin({ tablePipeAlign: false }), frontmatterPlugin(), markdownShortcutPlugin(),
   imagePlugin({ imageUploadHandler: upload, imagePreviewHandler: async src => imageUrl(src), disableImageResize: true }),
   codeBlockPlugin({ defaultCodeBlockLanguage: '', codeBlockEditorDescriptors: [mermaidDescriptor] }),
   codeMirrorPlugin({ codeBlockLanguages: {

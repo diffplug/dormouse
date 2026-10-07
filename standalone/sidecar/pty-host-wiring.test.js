@@ -4,7 +4,7 @@ const { readFileSync } = require('node:fs');
 const { runInNewContext } = require('node:vm');
 const { create } = require('./pty-core');
 
-test('VS Code gracefulKillAll dispatches to the shared core and acknowledges exit', async () => {
+test('VS Code gracefulKill dispatches named PTYs to the shared core and acknowledges exit', async () => {
   const messages = [];
   const handlers = {};
   const killed = [];
@@ -34,10 +34,10 @@ test('VS Code gracefulKillAll dispatches to the shared core and acknowledges exi
   });
   handlers.message({ type: 'spawn', id: 'one' });
   handlers.message({ type: 'spawn', id: 'two' });
-  handlers.message({ type: 'gracefulKillAll', timeout: 1_000, requestId: 'deactivate' });
+  handlers.message({ type: 'gracefulKill', ids: ['one'], timeout: 1_000, requestId: 'deactivate' });
   await done;
-  assert.equal(killed.length, 2);
-  assert.equal(messages.filter(message => message.type === 'exit').length, 2);
+  assert.equal(killed.length, 1);
+  assert.deepEqual(messages.filter(message => message.type === 'exit').map(message => message.id), ['one']);
   assert.equal(messages.at(-1).type, 'gracefulKillDone');
   assert.equal(messages.at(-1).requestId, 'deactivate');
 });

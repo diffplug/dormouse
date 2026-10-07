@@ -8,11 +8,11 @@ import {
 import { ToolDirtyIndicator, useToolDirty } from '../ToolDirtyIndicator';
 import { HeaderActionButton } from '../HeaderActionButton';
 import { paneHeader, PREVIEW_LABEL_CLASS } from '../design';
-import { isPreviewSlotParams } from './browser-surface';
+import { isPreviewSlotParams, isToolParams, toolFace } from './browser-surface';
 import { usePreviewKeep } from './preview-keep';
 import { SessionTodoPill } from './SessionTodoPill';
 import { useHeaderTier } from './use-header-tier';
-import { HEADER_CONTROL_SLOT_PX, PaneActionGroup, SplitButtons, TerminalContextButton } from './PaneActionButtons';
+import { BreakToolButton, HEADER_CONTROL_SLOT_PX, PaneActionGroup, SplitButtons, TerminalContextButton } from './PaneActionButtons';
 import type { PaneProps } from './pane-props';
 import { toolSemanticName } from './tool-name';
 import { usePaneRename } from './use-pane-rename';
@@ -119,7 +119,9 @@ export function TerminalPaneHeader({ id, title, params, terminalContext = false 
   const isActiveHeader = mode === 'passthrough' && isSelected && windowFocused;
   const rename = usePaneRename(id);
   const tabRef = useRef<HTMLDivElement>(null);
-  const tier = useHeaderTier(tabRef, terminalHeaderTier, { reservePx: terminalContext ? HEADER_CONTROL_SLOT_PX : 0 });
+  // A Tool's terminal face, past approval, offers Break (docs/specs/dor-tool.md -> Run end).
+  const breakable = isToolParams(params) && toolFace(params) !== 'pending-approval';
+  const tier = useHeaderTier(tabRef, terminalHeaderTier, { reservePx: (terminalContext ? HEADER_CONTROL_SLOT_PX : 0) + (breakable ? HEADER_CONTROL_SLOT_PX : 0) });
   const compactOrWider = tier === 'full' || tier === 'compact';
   const tiny = tier === 'tiny';
   const keep = usePreviewKeep(id, preview);
@@ -140,6 +142,7 @@ export function TerminalPaneHeader({ id, title, params, terminalContext = false 
       }}
     >
       {terminalContext && <TerminalContextButton surfaceId={id} />}
+      {breakable && !tiny && <BreakToolButton surfaceId={id} />}
       <div className="flex flex-1 min-w-0 items-center gap-1.5 overflow-hidden">
         {rename.renaming ? rename.editor(label.primary) : (
           // A preview's label is drag area, not a rename: its double-click

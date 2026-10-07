@@ -4,6 +4,7 @@ mod log_tail;
 mod panic_policy;
 mod quit_state;
 mod routing;
+mod ui_watchdog;
 mod workspaces;
 // The Dock's Quit, an `osascript` quit and a logout reach AppKit without ever
 // raising `RunEvent::ExitRequested` (docs/specs/standalone.md §Trigger
@@ -936,6 +937,9 @@ fn init_log() {
     if let Some(parent) = path.parent() {
         let _ = create_dir_all(parent);
     }
+    // Keep the last run's log beside it, so a hang or forced restart leaves its
+    // evidence; a missing log (first launch) is fine.
+    let _ = std::fs::rename(path, path.with_extension("previous.log"));
 
     if let Ok(mut file) = OpenOptions::new()
         .create(true)
@@ -1652,6 +1656,133 @@ fn read_clipboard_text(
             .get("text")
             .and_then(|v| v.as_str().map(String::from))
             .unwrap_or_default())
+    }
+}
+
+/// docs/specs/standalone.md §UI watchdog.
+type UiWatchdog = Mutex<ui_watchdog::Watchdog>;
+
+/// The page's first render committed: watch it from now on. Answers whether the
+/// watchdog restarted it, once.
+#[tauri::command]
+fn ui_watchdog_arm(window: tauri::Window, state: tauri::State<'_, UiWatchdog>) -> Option<ui_watchdog::RestartNotice> {
+    guard(&state).arm(window.label())
+}
+
+/// Probe every armed page each tick and restart the ones that stopped
+/// answering. A quit, or a window's own close, tears its page down on its own
+/// schedule with its own watchdogs, so the count stands still meanwhile.
+#[cfg(target_os = "macos")]
+fn start_ui_watchdog(app: &AppHandle) {
+    if !ui_watchdog::enabled(env::var("DORMOUSE_UI_WATCHDOG").ok().as_deref()) {
+        append_log("[ui-watchdog] off");
+        return;
+    }
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let watchdog = app.state::<UiWatchdog>();
+        let quit = app.state::<QuitState>();
+        let mut last = (Instant::now(), SystemTime::now());
+        loop {
+            std::thread::sleep(ui_watchdog::TICK);
+            let now = (Instant::now(), SystemTime::now());
+            // `Instant` stands still while the Mac sleeps; the wall clock does
+            // not, so a wake reads as a stall too.
+            let stalled = now.0.saturating_duration_since(last.0) > ui_watchdog::STALL
+                || now.1.duration_since(last.1).map_or(true, |gap| gap > ui_watchdog::STALL);
+            last = now;
+            let quitting = !guard(&quit.machine).idle();
+            let (hung, due) = {
+                let mut watchdog = guard(&watchdog);
+                if stalled || quitting {
+                    watchdog.restart_counts(|_| true);
+                    continue;
+                }
+                let close = guard(&quit.close);
+                watchdog.restart_counts(|label| close.active(label));
+                drop(close);
+                (watchdog.hung(now.0), watchdog.queue_probes())
+            };
+            if !hung.is_empty() {
+                // Off this thread: sampling takes seconds, and the other
+                // windows are still watched meanwhile.
+                let app = app.clone();
+                std::thread::spawn(move || restart_hung_webviews(&app, &hung));
+            }
+            if !due.is_empty() {
+                send_ui_probes(&app, due);
+            }
+        }
+    });
+}
+
+#[cfg(not(target_os = "macos"))]
+fn start_ui_watchdog(_app: &AppHandle) {}
+
+/// One main-thread hop for every due page. The clock starts there, not when
+/// the probe was queued: a main thread held by a native modal is not the
+/// page's hang. The probe is a script evaluation, whose completion runs only
+/// once the page's own main thread has run it, so a stuck page never answers.
+#[cfg(target_os = "macos")]
+fn send_ui_probes(app: &AppHandle, labels: Vec<String>) {
+    let handle = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        let watchdog = handle.state::<UiWatchdog>();
+        for label in labels {
+            let Some(window) = handle.get_webview_window(&label) else { continue };
+            if !guard(&watchdog).sent(&label, Instant::now()) {
+                continue;
+            }
+            let answer = handle.clone();
+            let _ = window.eval_with_callback("1", move |result| {
+                // Only a page that ran the script answers "1"; a failed
+                // evaluation (a killed or navigating page) answers "".
+                if result == "1" {
+                    guard(&answer.state::<UiWatchdog>()).answered(&label);
+                }
+            });
+        }
+    });
+}
+
+/// Sample each hung page's WebContent process, then SIGKILL it; Tauri's
+/// default terminate handler reloads the page onto the live sidecar.
+#[cfg(target_os = "macos")]
+fn restart_hung_webviews(app: &AppHandle, labels: &[String]) {
+    use ui_watchdog::macos;
+    append_log(format!("[ui-watchdog] {} did not answer; restarting", labels.join(", ")));
+    // Windows of one WebContent process hang together: sample and kill it once.
+    let mut by_pid: std::collections::BTreeMap<i32, Vec<String>> = Default::default();
+    for label in labels {
+        match macos::web_process_id(app, label) {
+            Some(pid) => by_pid.entry(pid).or_default().push(label.clone()),
+            None => append_log(format!("[ui-watchdog] no WebContent process for {label}; left as is")),
+        }
+    }
+    let dir = state_root(app).ok().map(|root| root.join("hangs"));
+    let watchdog = app.state::<UiWatchdog>();
+    for (pid, labels) in by_pid {
+        let sample_path = dir.as_ref().and_then(|dir| {
+            create_dir_all(dir).ok()?;
+            let path = dir.join(format!("{}-{pid}.sample.txt", log_timestamp()));
+            macos::sample(pid, &path).then(|| path.display().to_string())
+        });
+        let killed = macos::kill(pid);
+        append_log(format!(
+            "[ui-watchdog] WebContent {pid} ({}): sample {}; {}",
+            labels.join(", "),
+            sample_path.as_deref().unwrap_or("not taken"),
+            if killed { "killed" } else { "kill failed" }
+        ));
+        if killed {
+            let mut watchdog = guard(&watchdog);
+            for label in labels {
+                watchdog.restarted(label, ui_watchdog::RestartNotice { sample_path: sample_path.clone() });
+            }
+        }
+    }
+    if let Some(dir) = dir {
+        macos::prune(&dir, ui_watchdog::SAMPLES_KEPT);
     }
 }
 
@@ -2763,8 +2894,7 @@ fn transfer_admitted(
     from: &str,
     to: &str,
 ) -> bool {
-    machine.phase == quit_state::QuitPhase::Idle
-        && !machine.approved
+    machine.idle()
         && !arrivals.blocks_transfer(from, to)
         && [from, to].into_iter().all(|label| !close.active(label) && !closing.contains(label))
 }
@@ -3368,7 +3498,8 @@ fn window_at_cursor(
 
 /// Show (or clear) another window's drop caret while a tab is dragged over it.
 /// The previously hovered window is always cleared, so a caret can never be
-/// left behind in a window the pointer has since left.
+/// left behind in a window the pointer has since left. `pinned` says which of
+/// the target's tab groups the caret keeps to.
 #[tauri::command]
 fn hover_workspace_target(
     app: AppHandle,
@@ -3376,6 +3507,7 @@ fn hover_workspace_target(
     label: Option<String>,
     x: f64,
     y: f64,
+    pinned: Option<bool>,
 ) {
     let mut current = guard(&windows.hover_target);
     if current.as_deref() != label.as_deref() {
@@ -3388,7 +3520,7 @@ fn hover_workspace_target(
         let _ = app.emit_to(
             label.as_str(),
             "dormouse://workspace-drop-hover",
-            serde_json::json!({ "x": x, "y": y }),
+            serde_json::json!({ "x": x, "y": y, "pinned": pinned.unwrap_or(false) }),
         );
     }
 }
@@ -3439,6 +3571,10 @@ fn quit_cancel(
     guard(&windows.arrivals).cancel_deferred();
     let actions = guard(&state.machine).cancel();
     apply_quit_actions(&app, actions);
+    // A cancel refused mid-walk or after approval leaves the hold to the exit.
+    if !quit_walking(&app) && !quit_approved(&app) {
+        answer_held_terminate(&app, false);
+    }
 }
 
 // A non-last window finished its teardown: destroy it and start the next one.
@@ -3478,6 +3614,18 @@ fn quit_restart(app: AppHandle, requester: Option<String>) -> Result<bool, Strin
 fn relaunch_requested(app: &AppHandle) -> bool {
     app.try_state::<QuitState>()
         .is_some_and(|state| guard(&state.machine).relaunches())
+}
+
+/// Answer the OS terminate macOS holds for the flow, if any (§Trigger
+/// interception); whether one was held.
+#[cfg(target_os = "macos")]
+fn answer_held_terminate(app: &AppHandle, proceed: bool) -> bool {
+    macos_terminate::answer_held(app, proceed)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn answer_held_terminate(_app: &AppHandle, _proceed: bool) -> bool {
+    false
 }
 
 #[cfg(target_os = "macos")]
@@ -4138,6 +4286,15 @@ pub fn run() {
                 }
             }
         })
+        // A page that starts loading is not the one that armed: its successor
+        // arms once it boots (§UI watchdog).
+        .on_page_load(|webview, payload| {
+            if payload.event() == tauri::webview::PageLoadEvent::Started {
+                if let Some(watchdog) = webview.app_handle().try_state::<UiWatchdog>() {
+                    guard(&watchdog).disarm(webview.label());
+                }
+            }
+        })
         .on_window_event(|window, event| {
             let app = window.app_handle();
             match event {
@@ -4191,6 +4348,9 @@ pub fn run() {
                 // run off-thread behind the approved-exit gate.
                 WindowEvent::Destroyed => {
                     let label = window.label().to_string();
+                    if let Some(watchdog) = app.try_state::<UiWatchdog>() {
+                        guard(&watchdog).forget(&label);
+                    }
                     let lost = if let Some(state) = app.try_state::<WindowState>() {
                         // Drop label-keyed ownership synchronously; only the
                         // returned arrivals need the blocking journal worker.
@@ -4271,6 +4431,9 @@ pub fn run() {
 
             // Quit-interception state (docs/specs/standalone.md §Quit flow).
             app.manage(QuitState::default());
+
+            app.manage(UiWatchdog::default());
+            start_ui_watchdog(app.handle());
 
             // A crash between a snapshot's temp write and its rename leaves a
             // file nothing will ever read or overwrite; one written before
@@ -4385,6 +4548,7 @@ pub fn run() {
             load_session,
             save_session,
             browser_request,
+            ui_watchdog_arm,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Dormouse")
@@ -4398,12 +4562,13 @@ pub fn run() {
             }
             // A window-level exit request (§Trigger interception). The flow's own
             // app.exit(0) re-enters here with approved=true and passes; `code`
-            // (None = user-initiated) is deliberately ignored.
+            // (None = user-initiated) is deliberately ignored. Every exit lands
+            // here, watchdogs included, so a held OS terminate gets its Yes here.
             RunEvent::ExitRequested { api, .. } => {
                 if !quit_approved(app) {
                     api.prevent_exit();
                     request_quit(app, QuitIntent::default());
-                } else if !exit_after_cleanup(app) {
+                } else if !exit_after_cleanup(app) || answer_held_terminate(app, true) {
                     api.prevent_exit();
                 }
             }
@@ -5025,12 +5190,19 @@ mod tests {
         assert!(event.contains("!exit_after_cleanup(app)"));
         let gate = source.split("fn exit_after_cleanup").nth(1).unwrap().split("\n}").next().unwrap();
         assert!(gate.contains("if start_watchdog") && gate.contains("force_if_waiting") && gate.contains("QUIT_PHASE_TIMEOUT_MS"));
+        // A held OS terminate must be answered on every exit (all pass through
+        // this arm) and on cancel; refusing one aborts a logout outright
+        // (docs/specs/standalone.md -> "Trigger interception").
+        assert!(event.contains("answer_held_terminate(app, true)"));
+        let cancel = source.split("fn quit_cancel(").nth(1).unwrap().split("\n}").next().unwrap();
+        assert!(cancel.contains("answer_held_terminate(&app, false)"));
         let macos = include_str!("macos_terminate.rs");
-        let delegate = macos.split("if quit_approved(app) {").nth(1).unwrap().split("append_log(").next().unwrap();
-        assert!(delegate.contains("exit_after_cleanup(app)"));
-        assert!(delegate.contains("TerminateCancel"));
+        let delegate = macos.split("fn should_terminate(").nth(1).unwrap().split("\n}").next().unwrap();
+        assert!(delegate.contains("exit_after_cleanup(app)") && delegate.contains("TerminateLater"));
+        assert!(!delegate.contains("TerminateCancel"));
         // An OS terminate never relaunches (docs/specs/standalone.md -> "Restart").
         assert!(delegate.contains("forget_restart(app)"));
+        assert!(macos.split("pub fn answer_held(").nth(1).unwrap().split("\n}").next().unwrap().contains("forget_restart(app)"));
     }
 
     /// docs/specs/standalone.md -> "Restart".

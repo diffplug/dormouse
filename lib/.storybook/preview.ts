@@ -1,5 +1,4 @@
 import type { Preview } from '@storybook/react';
-import isChromatic from 'chromatic/isChromatic';
 import { useEffect, useLayoutEffect, StrictMode } from 'react';
 import { createElement } from 'react';
 import '../src/theme.css';
@@ -65,7 +64,8 @@ function applyPrimedWorkspaces(primed: PrimedWorkspaces | undefined): void {
   const activeId = primed.activeId ?? primed.workspaces[0]?.id;
   const same = current.activeId === activeId
     && current.workspaces.length === primed.workspaces.length
-    && current.workspaces.every((ws, i) => ws.id === primed.workspaces[i].id && ws.name === primed.workspaces[i].name);
+    && current.workspaces.every((ws, i) => ws.id === primed.workspaces[i].id && ws.name === primed.workspaces[i].name
+      && (ws.pinned === true) === (primed.workspaces[i].pinned === true));
   if (same) return;
   setWorkspaces({ workspaces: primed.workspaces, activeId });
   resetWorkspaceSurfaces();
@@ -86,15 +86,8 @@ const fakePlatform = initPlatform('fake');
 /** Defined only by `lib/vitest.argos.config.ts`; absent in the real Storybook. */
 declare const __ARGOS_SNAPSHOT__: true | undefined;
 
-/** A visual-snapshot run — Chromatic or Argos — that must render deterministically.
- *
- *  Ask `isChromatic()`, never the user agent: Chromatic only rewrites the UA on
- *  its Chrome runner, and identifies every other browser (Safari, Firefox, Edge)
- *  with a `chromatic=true` query parameter instead. A UA sniff therefore left
- *  every guard below OFF in Safari — an alarm pulsing on a 650ms infinite loop, a
- *  blinking cursor, terminals on WebGL, and mid-tween pane geometry — which is
- *  what made the Safari snapshots unstable while Chrome's stayed clean. */
-const visualSnapshot = isChromatic() || typeof __ARGOS_SNAPSHOT__ !== 'undefined';
+/** An Argos visual-snapshot run, which must render deterministically. */
+const visualSnapshot = typeof __ARGOS_SNAPSHOT__ !== 'undefined';
 
 // Pin animations at T=0 for deterministic snapshots.
 if (visualSnapshot) {
@@ -253,8 +246,7 @@ const preview: Preview = {
   parameters: {
     layout: 'fullscreen',
     // Argos otherwise shrinks the body to fit-content at 2x zoom, collapsing every
-    // fullscreen layout into a sliver; capture the page at the viewport width,
-    // as Chromatic does.
+    // fullscreen layout into a sliver; capture the page at the viewport width.
     argos: { fitToContent: false },
   },
   globalTypes: {

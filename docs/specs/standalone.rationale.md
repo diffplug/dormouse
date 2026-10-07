@@ -10,8 +10,6 @@
 
 ## Alerts
 
-**Why one manager per host process, beside the PTYs.** Each window used to run its own `AlertManager` in its webview, fed from events the sidecar had already parsed. Three failures followed from where it lived (audit, 2026-09-23): WKWebView throttles a background window's timers, so the detector, deferral and await timers of a window the user was not looking at ran late — exactly the window a completion should summon them back to; a reload started the webview with an empty manager and a live resume seeds nothing, so every ring and TODO in the window vanished; and a Workspace transfer had to snapshot the ring, its episode, the detector deadlines and the deferred notification into the transfer content, resume them in the target, and bind a replay token so the since-mark replay's reports fired once. VS Code never had these, because its manager lives in the extension host beside the PTYs and the parse. Moving standalone's there made the two hosts one shape, now one module (`createAlertHost`): the parse feeds one manager in stream order, the Burrow's remote writes reach it in the same process, and a window is only a viewer whose state is routed to it.
-
 **Why an await's answer names its window.** Routed by the Session's `id` it would reach the Session's owner, not the window that parked it, and a `requestId` is what Rust's invoke matcher swallows. It was broadcast at first, each adapter matching its own random `awaitId`; `forWindow` routes it the way `pty:list` is routed, so no other window sees it (2026-09).
 
 ## Windows node subsystem
@@ -77,10 +75,6 @@ Tauri removes a label from `webview_windows()` only when the window is actually 
 
 ## Boot and geometry
 
-The flush thread ran `window.scale_factor()` while holding the rect cache. Off the main thread both that and `is_minimized()` post to the event loop and block on the reply, and the main thread reaches the same cache from `window_at_cursor` — which a cross-window drag calls ~16 times a second. `refresh_rect` takes the scale rather than the window so the shape cannot come back by accident.
-
-The flush also cleared its "a thread is coming" flag after taking the dirty set rather than with it. A `Moved` landing in that gap was marked dirty and then saw the flag still set, so it scheduled nothing — and a window whose last move is its final position simply never had that position written.
-
 `tauri-plugin-window-state` would have been a second store answering "which windows exist", a new Cargo *and* npm dependency riding the disclosure regeneration and the cooldown, and it still would not have done the boot enumeration — which is already Rust's job, beside the snapshots it reads.
 
 The cap is a ceiling on one launch, not a limit on how many windows may exist: the excess snapshots stay on disk untouched, so raising the cap restores them.
@@ -99,13 +93,9 @@ A target whose `adopt_done` is refused already has the arrival payload needed to
 
 **Why the mark is stamped in the stream rather than asked for.** A mark fetched by request answers at some instant the sidecar chose, while the source's xterm stands at whatever `pty:data` had reached it — two clocks nothing aligns, so a serialization taken against a fetched mark either repeats or loses the bytes between them. A `marked` line written into the same stdout as the data is ordered with it by construction: the sidecar's reader is one thread, Rust's reader is one thread, and the webview's event queue is one queue. The one gap left is the parser's incomplete-sequence buffer, which can hold bytes older than the mark past it; that tail is the same class of cut the bounded replay always made, and the target's parser resynchronizes on the next ground byte (2026-09).
 
-
-
 **Why a hand-back replays since the mark, and only the marked ids.** The first hand-back returned the ids unsuppressed and silent: the source's xterm stood at the mark, and every byte from there to the hand-back had gone to a target that never mounted it — dropped while suppressed, or painted in a webview that then closed. The since-mark replay is the arrival's own second half aimed back at the source, which is why it rides the same `pty:requestInit` and the same suppression-lifting `pty:replay` path rather than a new message. An id the content did not mark has no such gap: the source either saw every byte live or serialized the whole buffer it still holds, and the sidecar's only answer for an unmarked id is that whole buffer again (2026-09).
 
-The first build emitted `workspace-arriving` straight at the target. A window torn out seconds earlier, or one restoring at launch, has no listener yet and is a perfectly ordinary drop target — the payload went nowhere, and because the departure was announced in the same breath, the source dropped its tab too. The Workspace's Sessions were then alive, owned by a window with no pane for them.
-
-Queueing fixed the delivery but not the bookkeeping, and the follow-up review found five symptoms of one gap: the arrival was not a single keyed thing. The suppression map, the departure list, the boot list and the sweep each held a piece and each inferred the rest, so `adopt_ready` answered with "everything suppressed for this window" (two arrivals resumed over each other), a departure announced every Workspace a source had sent to that window (one landing released them all), the sweep could lift a live arrival's suppression on a slow boot, and a boot list placed an arriving Workspace's shells as loose panes. The record keyed by `workspaceId` is the fix for all five at once, which is why it is one change rather than five.
+**Why one keyed record.** The first build emitted `workspace-arriving` straight at the target; a window torn out seconds earlier, or one restoring at launch, had no listener yet, so the payload went nowhere while the source dropped its tab, leaving live Sessions owned by a window with no pane for them. Queueing fixed delivery but not bookkeeping: the suppression map, the departure list, the boot list and the sweep each held a piece of the arrival and inferred the rest, so `adopt_ready` resumed two arrivals over each other, one landing released every Workspace a source had sent, the sweep lifted a live arrival's suppression on a slow boot, and a boot list placed arriving shells as loose panes. The record keyed by `workspaceId` fixed all five at once.
 
 Two phases rather than one, because the target can genuinely refuse. A release at the invoke was safe only while nothing could go wrong between the invoke and the mount; closing the target mid-arrival made the Workspace's Sessions live and ownerless. Holding the source's state until `workspace-departed` costs a transferring Workspace being briefly absent from the snapshot — deliberate, since the alternative is both windows persisting it and a relaunch restoring it twice.
 
@@ -131,12 +121,6 @@ A WKWebView pointer captured on an element keeps receiving `pointermove` and `po
 
 **What the teardown flush lost.** The pre-Rust path flushed the session on teardown into WebKit `localStorage` and lost the final debounce/heartbeat window; awaiting the write pipeline to disk (`drainSessionSaves`) recovers it, which a last fire-and-forget save would not.
 
-**What a record build costs.** `getCwd` is an `lsof` subprocess in the sidecar on macOS (`getCwdsForPids` in `standalone/sidecar/pty-core.js`), one round trip per terminal pane, on every debounced save and every 30 s heartbeat. That price is why the dirty triggers are keyed to the owning Workspace: an unkeyed trigger would make every idle Workspace pay it whenever any Workspace moved.
-
-**Why a timed-out boot list is asked again rather than acted on.** `timedOut` is the whole difference between "the host holds nothing" and "the host never answered", and `resumeOrRestoreFrom` cannot tell them apart — it cold-restores over the second, starting a second set of shells on top of the ones still running. The arrival path already refused rather than restore; the ordinary boot path had no such guard, and a launch slower than the 500 ms budget (a cold sidecar behind an antivirus scan, a laptop waking) is exactly when it bites. A retry is cheap in the case that matters and free in every other: an empty list still resolves the moment it arrives.
-
-**Why the aggregator debounces on top of the Wall's own debounce.** Each Wall already coalesces its own record; the second stage coalesces *across* Walls, so one window-wide event (a store change, a theme push, a burst of output in two Workspaces) becomes one host write rather than one per Workspace.
-
 **Why debug keeps a state subtree as well as the wrapper identifier.** The native dev wrapper already selects a stable per-worktree Tauri identifier, including a separate Burrow store. Raw Tauri dev bypasses that wrapper and can use the installed identifier; the subtree protects its session and recovery files without changing where that identifier’s enrollment lives. Older debug builds used the identifier root directly, so their snapshots need targeted transcript migration after the split. Deleting those snapshots could remove installed layouts for a raw-dev launch.
 
 ## Trigger interception
@@ -144,6 +128,8 @@ A WKWebView pointer captured on an element keeps receiving `pointermove` and `po
 **Why the app menu's Quit item is custom.** Tauri hands `PredefinedMenuItem::quit` to muda, whose macOS implementation sends `terminate:` to `NSApp` (`muda-0.19.1/src/platform_impl/macos/mod.rs`); tao's app delegate implements `applicationWillTerminate:` and nothing else (`tao-0.35.2/src/platform_impl/macos/app_delegate.rs`), so no `RunEvent::ExitRequested` is ever raised for it. The same hole swallowed the Dock's Quit item, `osascript`, logout and restart. Cheap while a quit was only a confirmation; expensive once quit captures agent recovery and writes the final snapshot.
 
 `applicationShouldTerminate:` is added to the *live* delegate's class rather than to a delegate of our own, because replacing `NSApp.delegate` would take tao's window and application callbacks with it. `class_addMethod` refuses when the class already implements the selector, which is the signal that a tao upgrade has started handling this itself.
+
+**Why hold, never refuse.** `NSTerminateCancel` reaches loginwindow as `userCanceledErr`, which aborts a logout or restart outright: on 2026-10-03 a restart reached Dormouse after loginwindow had begun quitting the other apps, Dormouse answered Cancel to start its own flow, and the session sat half logged out — no Dock, no Mission Control, apps launching without windows — until the restart was cancelled by hand half an hour later (loginwindow: `kAEAnswer event with a userCanceledErr`, `Got a valid appname : Dormouse Terminal`). `NSTerminateLater` is AppKit's documented way to finish work first, and loginwindow waits for it. Measured with a probe app on macOS 27.0.1, 2026-10: while held, AppKit runs a nested loop in `NSModalPanelRunLoopMode` until `replyToApplicationShouldTerminate:`; a second terminate never reaches the delegate; the reply only records the answer and AppKit acts once the nested loop regains control; No returns the app to the default mode; and `[NSApp stop:]` with tao's dummy event does **not** end the nested loop — the app hangs, which is why every exit while held must reply instead. tao's observers, timer and wake source are in `kCFRunLoopCommonModes` (`tao` fork `observer.rs`, `event_loop.rs`), so the flow keeps running inside the nested loop; Yes ends in `applicationWillTerminate:`, which tao turns into `LoopDestroyed` and tauri-runtime-wry into `RunEvent::Exit`, so the sidecar shutdown still runs.
 
 ## Quit flow
 
@@ -162,6 +148,16 @@ Arbitrating fixed the dialog and left the vote: a quit meeting a *committed* clo
 **Why not `AppHandle::request_restart`.** It raises `ExitRequested` with `RESTART_EXIT_CODE`, and `ExitRequestApi::prevent_exit` ignores that code (`tauri-2.11.5/src/app.rs`). A restart would slip past the unapproved-exit guard and the hand-back cleanup gate, and the watchdog and `Destroyed` exits, which call `app.exit(0)`, would drop the relaunch. Relaunching from `RunEvent::Exit` keeps one exit path. That exit stops tao's run loop with `[NSApp stop:]`, never `terminate:` (`tao-0.35.2/src/platform_impl/macos/app_state.rs`), so the spliced `applicationShouldTerminate:` sees only OS-initiated terminates. Checked 2026-09.
 
 **Why the refusals.** Under `tauri dev` the relaunched binary outlives the CLI and the Vite server it loads from. `tauri::process::restart` just calls `exit(0)` when `current_binary` fails — on macOS, for a path through a symlink (`tauri-utils-2.9.3/src/platform/starting_binary.rs`) — so the check turns a silent quit into an answer.
+
+## UI watchdog
+
+**The hang.** 2026-10-03, a dogfood build: WebContent at 100% CPU with the sidecar and every PTY idle. `sample` showed one `DOMTimer` firing into a `performMicrotaskCheckpoint` that never returned: the Tool reaper re-asking a Tool that declined to stop (fixed in #992). Nothing could name the JavaScript: the frames are unsymbolicated JIT, SIP blocks a debugger on the Apple-signed XPC service, and release webviews are not inspectable. `kill` (SIGTERM) left the process running; `kill -9` brought the window back on its live shells, with no work lost.
+
+**Why sample, then kill.** The sample is the only evidence a release hang leaves, and only while the process lives. `_webProcessIdentifier` is private WKWebView API (present on macOS 27, checked with `respondsToSelector:` before use); no public API names the process.
+
+**Why a script evaluation.** A page-side timer is throttled when a window is hidden, and a host-side `evaluateJavaScript` is not; its completion handler is one round trip, where an event plus an `invoke` answer was two. The probe's clock starts on the host main thread, because a native modal there delays delivery, not the page. A window minimized for three minutes was never restarted (2026-10-03).
+
+**Why 5 s.** Chosen 2026-10-03 over 30 s, accepting that a restart loses state that lives in the webview alone, unsaved Tool edits included. The restore, first render, and a reload happen before the page arms. Stalls after arming still can: cross-origin Tool and `dor iframe` pages run in the page's WebContent process (one process served three Tool iframes during the 2026-10-03 hang), so a page blocking for 5 s, or a large file a viewer parses synchronously, restarts the whole UI. The 30 s repeat threshold keeps a stall that recurs on every boot from becoming a restart loop.
 
 ## Objective-C exceptions
 

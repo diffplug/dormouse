@@ -1,5 +1,4 @@
 import type { Context, ExecutionContext, Hono } from "hono";
-import { queryDatabase } from "pgstencil/postgres";
 import type { AccountEnv } from "./bindings";
 import { accountRules } from "./headers";
 import { relayAccountRoutes, type RelayAccountHost } from "./relay-account";
@@ -25,19 +24,10 @@ export function accountApp(
   return workerApp<AccountEnv>({
     bindings,
     rules: accountRules,
+    ready: 'SELECT "singleSession", "emailAuthenticated" FROM "session" LIMIT 0',
     unavailable: "Sign-in is temporarily unavailable. Please try again.",
     routes(app) {
       configure?.(app);
-      app.get("/api/ready", async (c) => {
-        const ok = await queryDatabase(
-          c.env.HYPERDRIVE.connectionString,
-          'SELECT "singleSession", "emailAuthenticated" FROM "session" LIMIT 0',
-        ).then(
-          () => true,
-          () => false,
-        );
-        return c.json({ ok }, ok ? 200 : 503);
-      });
       app.all("/api/auth/*", (c) =>
         fetchAuth(c.req.raw, c.env, c.executionCtx),
       );

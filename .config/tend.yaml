@@ -1,6 +1,15 @@
 bot_name: dormouse-bot
 merge: restricted
 
+# Trusted runner steps on the base tree, before the agent starts. Only
+# scripts/setup-git.mjs (Node built-ins, no dependency code): it defines
+# the md-sentences merge driver, so the agent's own merges of markdown go
+# sentence by sentence once it has installed dependencies. No runner-side
+# step merges, so the driver runs only inside the agent's sandbox.
+setup:
+  - name: Define the markdown merge driver
+    run: node scripts/setup-git.mjs
+
 secrets:
   allowed:
     - CHROMATIC_PROJECT_TOKEN

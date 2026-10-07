@@ -21,7 +21,7 @@
  * text, never re-serializes, so nothing else in a file moves.
  * Symlinks are skipped (`vscode-ext/CHANGELOG.md` -> `../CHANGELOG.md`).
  */
-import { readFileSync, writeFileSync, lstatSync } from 'node:fs';
+import { readFileSync, writeFileSync, lstatSync, realpathSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { fromMarkdown } from 'mdast-util-from-markdown';
@@ -131,6 +131,6 @@ function main(argv) {
   }
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   main(process.argv.slice(2));
 }

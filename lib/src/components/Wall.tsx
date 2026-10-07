@@ -91,7 +91,7 @@ import {
   retainsLivePage,
   browserUrlFromParams,
   surfaceKindFromParams,
-  isPreviewSlotParams, isToolParams, matchesToolKey, namespacedToolKey, toolPendingFromParams,
+  isPreviewSlotParams, isToolParams, matchesToolKey, namespacedToolKey, toolFace, toolPendingFromParams,
 } from './wall/browser-surface';
 import { usePreviewSlotPin } from './wall/preview-slot';
 import { browserSurfaceUrl, hostPathDisplay, iframeRefusal } from './wall/browser-url';
@@ -111,6 +111,7 @@ import {
 } from './wall/lath-wall-engine';
 import type { LeafMeta } from '../lib/lath/persistence';
 import { useToolServing } from './wall/use-tool-serving';
+import { endToolDesignation, useToolRunEnd } from './wall/use-tool-run-end';
 import { useToolReaper } from './wall/use-tool-reaper';
 import { rehydrateTool } from './wall/tool-reaper';
 import type { WallNav } from './wall/keyboard/types';
@@ -770,6 +771,8 @@ export function Wall({
   /** Make a close that would ask a pending kill instead (set below, once
    *  restoring has what it needs). */
   const pendKillRef = useRef<(id: string) => void>(() => {});
+  /** Break, once its confirmation is accepted (`docs/specs/dor-tool.md` -> Run end). */
+  const breakToolRef = useRef<(id: string) => Promise<void>>(async () => {});
 
   /** Push the reopen record of a Surface about to close (set below, once the
    *  serializer exists). */
@@ -805,9 +808,10 @@ export function Wall({
 
   /**
    * The kill gesture on a Surface, from the header, the keyboard, or a Door: a
-   * Door reattaches first, an untouched shell closes at once, anything else
-   * stages the confirm overlay. A source whose helper has running work is
-   * revealed with the reason instead, and nothing is staged.
+   * close that would not confirm (`closeKindOf`) runs at once, a Door's in
+   * place; one that would goes pending under Labs delayed kill, else stages the
+   * confirm overlay (a Door reattaching first). A source whose helper has
+   * running work is revealed with the reason instead, and nothing is staged.
    */
   const requestKill = useCallback((id: string) => {
     const stage = () => {
@@ -849,7 +853,8 @@ export function Wall({
     // `isDying` guard in killPaneImmediately is the second line of defense.)
     confirmKillRef.current = staged;
     setConfirmKill(staged);
-    void closeSurface(ck.id, 'ask');
+    if (ck.action === 'break') void breakToolRef.current(ck.id);
+    else void closeSurface(ck.id, 'ask');
     confirmTimerRef.current = setTimeout(() => setConfirmKill(null), KILL_CONFIRM_MS);
   }, [closeSurface]);
 
@@ -1745,6 +1750,7 @@ export function Wall({
   // A tool grows its browser when its command starts serving.
   const toolsPaused = useCallback(() => closingWorkspaceRef.current || isWorkspaceTransferPending(effectiveWorkspaceId), [effectiveWorkspaceId]);
   useToolServing({ lath, doorsRef, paused: toolsPaused });
+  useToolRunEnd({ lath, doorsRef, paused: toolsPaused });
   useToolReaper({ lath, doors, doorsRef, active, paused: toolsPaused });
 
   const previewSlot = usePreviewSlotPin(lath);
@@ -1982,9 +1988,9 @@ export function Wall({
       publishMembership();
       return { surfaceRef, rollback };
     },
-    finishSurfaceMove: () => {
+    finishSurfaceMove: (options) => {
       movingSurfaceRef.current = false;
-      if (memberSurfaceIds().length) refillEmptyTree();
+      if (memberSurfaceIds().length || options?.keepEmpty) refillEmptyTree();
     },
     focusSurface: (id, acknowledge) => {
       if (acknowledge) wallActionsRef.current.onFocusPane(id);
@@ -2300,6 +2306,14 @@ export function Wall({
         title: hostPathDisplay(url, true),
       });
     },
+    onBreakTool: (id: string) => {
+      // As Kill does: the confirm keystroke must reach the Wall, not the pane's
+      // xterm. Break always asks, since nothing rejoins what it splits.
+      const params = lath.getMeta(id)?.params;
+      if (!isToolParams(params) || toolFace(params) === 'pending-approval' || !nav.hasPane(id) || lath.isDying(id)) return;
+      exitTerminalMode();
+      setConfirmKill({ id, char: randomKillChar(), action: 'break', serving: browserUrlFromParams(params) !== null });
+    },
     onBrowserLaunchFailed: (id, error) => {
       // The one liveness check every creator's fallback shares.
       const params = lath.getMeta(id)?.params;
@@ -2327,6 +2341,8 @@ export function Wall({
   }), [previewSlot, addSplitPanel, minimizePane, enterTerminalMode, exitTerminalMode, requestKill, replaceSurface, buildDorSurfaces, createContentSurface, surfaceRefForId, resolveToolApproval, lath, nav]);
   const openContextPort = useCallback(async (id: string, entry: PortUrlEntry, mode: PortMode): Promise<void> => {
     const opening = terminalContextRef.current;
+    // Success dismisses only the context that asked; a failed or cancelled
+    // launch leaves it open, and a later context that replaced it stays.
     const dismiss = () => {
       if (terminalContextRef.current !== opening) return;
       cancelContextPortLaunches();
@@ -2344,6 +2360,8 @@ export function Wall({
     const provider = parseRenderMode(mode).provider;
     // Keep the persisted agent-browser suffix from before multiple providers.
     const key = `${id}:${entry.port}:${provider === 'agent-browser' ? 'agent' : provider ?? 'iframe'}`;
+    // Requests for one target run one at a time: a second waits for the first,
+    // then reuses what it placed.
     const pending = contextPortLaunches.current.get(key);
     if (pending) {
       await pending.done;
@@ -2393,6 +2411,39 @@ export function Wall({
       if (contextPortLaunches.current.get(key) === launch) contextPortLaunches.current.delete(key);
     }
   }, [buildDorSurfaces, findSurfaceByParams, createContentSurface, enterTerminalMode, revealSurface, updateSurfaceParams, generatePaneId, lath, nav, cancelContextPortLaunches]);
+  breakToolRef.current = async (id: string) => {
+    // docs/specs/dor-tool.md -> Run end: the Tool becomes the plain
+    // terminal it runs in, still running, and a serving page reopens —
+    // reloaded, at the URL on screen, in the renderer it used where this
+    // host has it — as an ordinary browser Surface beside it.
+    const params = lath.getMeta(id)?.params;
+    if (!isToolParams(params) || toolFace(params) === 'pending-approval') return;
+    // Consent just before the document goes; any change while asking abandons the Break.
+    if (!await confirmToolEditorsClose([id]) || lath.getMeta(id)?.params !== params) return;
+    // Only an http(s) page reopens, as a swap judges it; a transient or error
+    // page on screen falls back to the Tool's own URL.
+    const shownUrl = browserSurfaceUrl(getAgentBrowserScreenController(id)?.chrome().url ?? '') ?? browserUrlFromParams(params);
+    const mode = resolveRenderMode(params);
+    const cwd = getTerminalPaneState(id)?.cwd?.path;
+    if (terminalContextRef.current?.id === id) setTerminalContext(null);
+    endToolDesignation(lath, id);
+    if (!shownUrl) return;
+    const provider = parseRenderMode(mode).provider;
+    const reference = buildDorSurfaces().find((s) => s.id === id);
+    if (!reference) return;
+    const created = createContentSurface({
+      minimized: false,
+      preserveSource: true,
+      // A launch that fails takes its pane with it.
+      params: provider && hostSupportsBrowser(provider)
+        ? { surfaceType: 'browser', renderMode: mode, url: shownUrl, cwd, syncEngaged: false, launchFallback: 'close' satisfies LaunchFallback }
+        : { surfaceType: 'browser', renderMode: 'iframe', url: shownUrl },
+      reference,
+      title: hostPathDisplay(shownUrl, true),
+    });
+    if (created.ok) enterTerminalMode(created.value.id);
+  };
+
   const contextActions = useMemo(() => ({
     id: contextSourceId,
     mounted: terminalContext,

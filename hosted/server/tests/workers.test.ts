@@ -41,6 +41,7 @@ import {
   type Name,
 } from "./bundle";
 import { limitOf, untilLimited } from "./rate-limit";
+import { RUNTIME_ROLES, workerDatabases } from "./worker-roles";
 
 const origin = ORIGINS.account;
 const voiceOrigin = ORIGINS.voice;
@@ -106,6 +107,7 @@ async function fixture(
   const context = await createTestContext({
     migrations: production === "preview" ? previewMigrations : migrations,
   });
+  const databases = await workerDatabases(context.database.url);
   const provider = await mockOAuthServer({
     betterAuth: true,
     now: production ? undefined : () => context.time.now(),
@@ -203,7 +205,7 @@ async function fixture(
               : testBundle)
         ).outputFiles![0].text,
         bindings,
-        database: context.database.url,
+        database: databases.account,
         // Vite's content-hashed build output, with the SPA fallback answering
         // every other path — including an unknown one under /assets/ — with the shell.
         assets: (request) =>
@@ -226,7 +228,7 @@ async function fixture(
           ACCOUNT_ORIGIN: origin,
           RELAY_ENROLL_SECRET: TEST_ENROLL_SECRET,
         },
-        database: context.database.url,
+        database: databases.relay,
         assets: () => new WorkerResponse("<!doctype html>", { headers: { "content-type": "text/html" } }),
         outboundService,
         routes: [`${new URL(ORIGINS.relay).host}/*`],
@@ -250,7 +252,7 @@ async function fixture(
             ]
           ).outputFiles![0].text,
           bindings: { ...bindings, APP_ORIGIN: voiceOrigin },
-          database: context.database.url,
+          database: databases.voice,
           outboundService,
         }),
       );
@@ -426,6 +428,9 @@ async function fixture(
         method: "POST",
         body: time,
       }),
+    /** `name`'s `/api/ready`; the relay and voice run as their own roles. */
+    ready: async (name: "relay" | "voice") =>
+      (await (name === "voice" ? voice() : relay())).dispatchFetch(ORIGINS[name] + "/api/ready"),
     /** Background passes the voice Worker scheduled so far; the test entry only. */
     waitUntilCalls: async () =>
       Number(
@@ -589,6 +594,32 @@ test("same-site requests fail, the sibling Workers' included; production exclude
     'ALTER TABLE "session" DROP COLUMN "emailAuthenticated"',
   );
   expect((await browser.request("/api/ready")).status).toBe(503);
+});
+
+test("the relay and voice are ready only while their own roles hold the grants their lookups need", async ({
+  onTestFinished,
+}) => {
+  const f = await fixture(true);
+  onTestFinished(f.close);
+  const status = async (name: "relay" | "voice") => {
+    const response = await f.ready(name);
+    // Up or down, and nothing about why.
+    expect(await response.json(), name).toEqual({ ok: response.status === 200 });
+    return response.status;
+  };
+  expect(await status("relay")).toBe(200);
+  expect(await status("voice")).toBe(200);
+  // A grant gone from one role fails that Worker's readiness alone.
+  await queryDatabase(f.database.url, `REVOKE SELECT ON dormouse_relay_sessions FROM ${RUNTIME_ROLES.relay}`);
+  expect(await status("relay")).toBe(503);
+  expect(await status("voice")).toBe(200);
+  await queryDatabase(f.database.url, `REVOKE SELECT ("emailVerified") ON "user" FROM ${RUNTIME_ROLES.voice}`);
+  expect(await status("voice")).toBe(503);
+  // Speak's WHERE columns count too: a lookup that cannot filter cannot speak.
+  await queryDatabase(f.database.url, `GRANT SELECT ("emailVerified") ON "user" TO ${RUNTIME_ROLES.voice}`);
+  expect(await status("voice")).toBe(200);
+  await queryDatabase(f.database.url, `REVOKE SELECT (hash) ON dormouse_voice_tokens FROM ${RUNTIME_ROLES.voice}`);
+  expect(await status("voice")).toBe(503);
 });
 
 test("an enabled provider missing its credential fails closed with the secure headers", async ({

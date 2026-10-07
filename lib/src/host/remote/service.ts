@@ -433,6 +433,26 @@ export function suggestedBurrowLabel(kind: BurrowKind): string {
 }
 
 /**
+ * The service's mirror of the pending pairings, keyed by clientId. Bounded,
+ * like the runtime's own map: this one is mirrored to the webview in full on
+ * every change, so an unbounded queue costs quadratic bridge traffic on top of
+ * the memory. `BurrowRuntime` evicts on its side too; both are capped because
+ * either can be fed independently, and a cap that only one of them honors is
+ * not a cap.
+ */
+export function enqueuePending(pairings: Map<string, PendingPairing>, pending: PendingPairing): void {
+  // Coalesce by clientId before counting: a re-sent pair replaces its own
+  // entry, at the back, and evicts no one else's.
+  pairings.delete(pending.clientId);
+  while (pairings.size >= MAX_PENDING_PAIRINGS) {
+    const oldest = pairings.keys().next();
+    if (oldest.done) break;
+    pairings.delete(oldest.value);
+  }
+  pairings.set(pending.clientId, pending);
+}
+
+/**
  * A Hosted enrollment awaiting approval. The device code and the Noise static
  * stay here, in this process; `status` carries the rest
  * ({@link HostedEnrollmentState}).
@@ -1586,11 +1606,34 @@ export class BurrowService {
       onInvitationChanged: (inviteId, state, outcome) =>
         this.#emitInvitation(inviteId, state, outcome),
       onPathRefused: (refusal) => this.#recordPathRefusal(refusal),
+      onPolicyRaised: () => this.#persistRaisedPolicy(enrollment),
       probeStanding: () => probeBurrowStanding({ enrollment, fetch: this.#fetch }),
       now: this.#now,
     });
     this.#burrow.start();
     this.#emitStatus();
+  }
+
+  /**
+   * Keep the Relay's raise to user verification across restarts, onto the
+   * enrollment whose Burrow heard it — and only while that is still this
+   * machine's enrollment, so a raise queued behind a clear or a re-enroll
+   * writes nothing. The running Burrow already enforces it; a failed save is
+   * retried by the raise after the next start.
+   */
+  #persistRaisedPolicy(raisedBy: BurrowEnrollment): void {
+    void this.#serialize(async () => {
+      const current = this.#enrollment;
+      if (this.#disposed || current?.burrowToken !== raisedBy.burrowToken) return;
+      const raised = { ...current, requireUserVerification: true };
+      try {
+        await this.#store.saveEnrollment(raised);
+      } catch (error) {
+        console.warn('[burrow] could not persist the Relay\'s user-verification demand', error);
+        return;
+      }
+      this.#enrollment = raised;
+    });
   }
 
   /**
@@ -1691,18 +1734,7 @@ export class BurrowService {
   // --- Pairing queue ---
 
   #enqueuePairing(pending: PendingPairing): void {
-    // Bounded, like the controller's own map: this one is mirrored to the
-    // webview in full on every change, so an unbounded queue costs quadratic
-    // bridge traffic on top of the memory. `BurrowRuntime` evicts on its side too;
-    // both are capped because either can be fed independently, and a cap that
-    // only one of them honors is not a cap.
-    while (this.#pairings.size >= MAX_PENDING_PAIRINGS) {
-      const oldest = this.#pairings.keys().next();
-      if (oldest.done) break;
-      this.#pairings.delete(oldest.value);
-    }
-    // Coalesce by clientId: a re-sent pair for the same client replaces the old.
-    this.#pairings.set(pending.clientId, pending);
+    enqueuePending(this.#pairings, pending);
     this.#emitQueue();
   }
 

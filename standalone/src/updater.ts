@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from 'react';
 import { bakedRelayMode } from 'dormouse-lib/host/relay-origin';
+import { normalizeExternalUri } from 'dormouse-lib/lib/external-links';
 import { isRecord } from 'dormouse-lib/lib/is-record';
 import { loadJson, saveJson } from 'dormouse-lib/lib/local-json-store';
 import { getPlatformOrNull, IS_WINDOWS, PLATFORM_STRING } from 'dormouse-lib/lib/platform';
@@ -11,13 +12,20 @@ import type { Update } from '@tauri-apps/plugin-updater';
 const GITHUB_REPO_URL = 'https://github.com/diffplug/dormouse';
 const BROWSER_DEV_HOST = Boolean(import.meta.env.VITE_DORMOUSE_BROWSER_DEV_HOST);
 
-function openUrl(url: string, context: string): void {
+/** Every launch revalidates, as an adapter's `openExternal` does
+ *  (docs/specs/security-local.md -> "Terminal output"). */
+export function openUrl(url: string, context: string): void {
+  const normalized = normalizeExternalUri(url);
+  if (normalized === null) {
+    console.error(`[updater] Refused to open ${context}: not an openable URL`);
+    return;
+  }
   if (BROWSER_DEV_HOST) {
-    window.open(url, '_blank', 'noopener,noreferrer');
+    window.open(normalized, '_blank', 'noopener,noreferrer');
     return;
   }
   import('@tauri-apps/plugin-shell')
-    .then(({ open }) => open(url))
+    .then(({ open }) => open(normalized))
     .catch((e) => console.error(`[updater] Failed to open ${context}:`, e));
 }
 

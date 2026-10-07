@@ -198,7 +198,7 @@ Doors are the pane-header indicators on the baseboard. The most signature compon
 - **Dimensions:** `h-6` (24px), `min-w-[68px]`, `max-w-[220px]`; the button pads `px-2.5` (10px), with `gap-2` between its glyph, title, and badges.
 - **Type:** `text-sm font-medium font-mono`.
 - **Content:** leading browser-display icon cluster on a browser Surface (`size={12}` each, `gap-0.5` — a wide robot plus the presentation glyph, or the presentation glyph alone for `iframe`; named in the Door's accessible name, `docs/specs/dor-browser.md` → Browser Chrome); truncated title; optional TODO pill (`text-xs font-semibold tracking-[0.08em]`, success-tinted when flourishing).
-- **Alarm:** one 2px inset overlay (`--color-alarm-vs-door`) draws the edge for both the unlabelled ring, where it flashes once on arrival, and `SPOKEN`, which persists until the ring clears and adds a speaker icon *beside* the TODO pill instead of evicting it. `SPEAKING` instead inverts and pulses the whole Door and takes the badge slot for its speaker-plus-label, for one utterance. Both speech states carry a speaker icon (shape, not color); all three name the state in the accessible name. The row inventory is `docs/specs/layout.md` → Alarm overlay.
+- **Alarm:** one 2px inset overlay (`--color-alarm-vs-door`) draws the edge for both the unlabelled ring, where it flashes once on arrival, and `SPOKEN`, which persists until the ring clears and adds a speaker icon *beside* the TODO pill instead of evicting it. `SPEAKING` instead inverts and pulses the whole Door and takes the badge slot for its speaker-plus-label, for one utterance. Both speech states carry a speaker icon (shape, not color); all three name the state in the accessible name. The row inventory is `alertRingRow` in `lib/src/components/alert-ring.tsx`; the overlay's layering is `docs/specs/layout.md` → Alarm overlay.
 - **Hover/Focus:** no decorative hover on the door itself; the focus state is conveyed by the parent pane's selection ring, not by a per-door treatment. The door is a labelled `role="group"` wrapper with one button that reattaches.
 
 ### Buttons
@@ -239,7 +239,7 @@ The system uses **raised surfaces**, not "cards." There are no nested cards. The
 ### Navigation
 
 The system has no traditional product top-nav. Three surfaces play navigational roles:
-- **Workspace strip** (standalone app bar, top): Door geometry, pane-header palettes, and the gradients seating the selected tab against the Wall and fading the rest into the app ground — `docs/specs/layout.md` → Workspace tabs. Union indicators belong to `docs/specs/alert.md` → Workspace union; VS Code uses its native chrome (`docs/specs/vscode.md`).
+- **Workspace strip** (standalone app bar, top): Door geometry, pane-header palettes, and the gradients seating the selected tab against the Wall and fading the rest into the app ground — `TAB_WALL_JOIN_GRADIENT` and the shared Door/tab constants in `lib/src/components/design.tsx`. Union indicators belong to `docs/specs/alert.md` → Workspace union; VS Code uses its native chrome (`docs/specs/vscode.md`).
 - **Baseboard** (bottom of the app): horizontal strip of doors representing minimized panes plus chrome action buttons. Doors are the primary navigation affordance to a minimized terminal. Buttons use `chromeButton` with 24px height, muted text, and `hover:text-foreground`; Settings icons use square buttons with 2px gaps, while labeled overflow buttons keep horizontal padding.
 - **Pane Header (TerminalPaneHeader)**: the tab-replacing strip at the top of each pane. Lath is a headless tiling engine with no tab-bar chrome of its own; the React header IS the tab.
 
@@ -267,6 +267,9 @@ When selection moves between panes/doors, the focus ring **glides** to the new t
 
 #### Copy Editor Travel
 The copy editor's moves and resizes ease on the focus ring's duration and curve (`FOCUS_MOTION_MS`, `rect-tween.ts` driven by `rect-motion.ts`, which owns when it snaps instead).
+
+#### Terminal Context Teeth
+The terminal context reads as torn from its source. The edge facing the source is cut corner to corner into 90° teeth, `TERMINAL_CONTEXT_TEETH_PX` deep and twice that wide, and that depth is the panel's whole overlap with the source. Each row carries its own background into the teeth beside it, so the cut is the content's edge rather than a border; that side has square corners and no halo, while the other three keep the elevated pane's. The helper bar sits in the terminal background between hairlines, labelling the helper terminal rather than adding a second header. While the context is open, every other pane recedes under a scrim of the app ground and the selection ring wraps source and panel together. Source of truth: `contextTeeth` in `lib/src/components/wall/TerminalContextView.tsx`.
 
 ## 6. Do's and Don'ts
 

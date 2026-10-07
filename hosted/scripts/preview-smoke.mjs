@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { setTimeout as delay } from "node:timers/promises";
-import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { realpathSync } from "node:fs";
 import { providerAuthorizationOrigins } from "../server/providers.js";
 import { oneTimeSmoke } from "./one-time-smoke.mjs";
 
@@ -74,6 +74,16 @@ export async function healthSmoke(origin, sha, fetcher = fetch) {
 }
 
 /**
+ * A Worker reaches Postgres as its deployment binds it: its `/api/ready` runs a
+ * query only its own role's grants admit.
+ */
+export async function readySmoke(origin, fetcher = fetch) {
+  const response = await smokeRequest(fetcher, origin + "/api/ready", {});
+  await response.body?.cancel();
+  assert.equal(response.status, 200, `${origin} must reach Postgres through its Hyperdrive`);
+}
+
+/**
  * The relay answers a VAPID key from `/api/push/config`. Cloudflare exposes a
  * Worker secret's name and never its value, so preflight sees only that both
  * halves exist; a pair that does not match turns push off, and fails here.
@@ -104,11 +114,7 @@ export async function smoke(
       redirect: "manual",
       ...options,
     }, delay, sha);
-  assert.equal(
-    (await request("/api/ready")).status,
-    200,
-    "Auth schema must be reachable through Hyperdrive",
-  );
+  await readySmoke(origin, fetcher);
   const start = await request("/api/auth/csrf");
   assert.equal(start.status, 200, "Auth must issue a CSRF challenge");
   assert.match(start.headers.get("cache-control"), /no-store/);
@@ -292,10 +298,18 @@ async function retrying(limit, what, check, { retryMs, wait }) {
 }
 
 /**
- * The relay's smoke: its revision, then its push config and its one-time
- * rendezvous, each retried on its own up to `attempts`, `retryMs` apart, so a
- * passed revision never runs again and neither later check runs on a relay that
- * did not pass.
+ * A relay or voice Worker's revision, then its readiness, each retried on its
+ * own up to `attempts` (`retrying`'s `retry`), so a passed check never runs
+ * again and readiness never runs on a revision that did not pass.
+ */
+async function liveSmoke(origin, sha, fetcher, attempts, retry) {
+  await retrying(attempts, origin, () => healthSmoke(origin, sha, fetcher), retry);
+  await retrying(attempts, `${origin} ready`, () => readySmoke(origin, fetcher), retry);
+}
+
+/**
+ * The relay's smoke: `liveSmoke`, then its push config and its one-time
+ * rendezvous, each retried on its own the same way.
  */
 export async function relaySmoke(
   origin,
@@ -309,15 +323,15 @@ export async function relaySmoke(
   } = {},
 ) {
   const retry = { retryMs, wait };
-  await retrying(attempts, origin, () => healthSmoke(origin, sha, fetcher), retry);
+  await liveSmoke(origin, sha, fetcher, attempts, retry);
   await retrying(attempts, `${origin} push`, () => pushConfigSmoke(origin, fetcher), retry);
   await retrying(attempts, `${origin} one-time`, () => oneTime(origin), retry);
 }
 
 /**
- * Every Worker's smoke: the account's auth boundary, the voice's revision, and
- * `relaySmoke` — never waiting on the account, so an account failure hides no
- * relay one. The three run concurrently, each retrying on its own up to its
+ * Every Worker's smoke: the account's auth boundary, the voice's `liveSmoke`,
+ * and `relaySmoke` — never waiting on the account, so an account failure hides
+ * no relay one. The three run concurrently, each retrying on its own up to its
  * `attempts` (one count for all, or `{ account, relay, voice }`), `retryMs`
  * apart. Every part settles before the smoke fails, and the failure names each
  * part that failed.
@@ -342,7 +356,7 @@ export async function smokeAll(
     retrying(limit("account"), account, () =>
       smoke(account, sha, fetcher, preview, providers), retry),
     relaySmoke(relay, sha, { fetcher, oneTime, attempts: limit("relay"), retryMs, wait }),
-    retrying(limit("voice"), voice, () => healthSmoke(voice, sha, fetcher), retry),
+    liveSmoke(voice, sha, fetcher, limit("voice"), retry),
   ]);
   const failures = results.flatMap((result) =>
     result.status === "rejected" ? [result.reason] : [],
@@ -354,7 +368,7 @@ export async function smokeAll(
 
 if (
   process.argv[1] &&
-  resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+  realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)
 ) {
   const [origins, sha] = process.argv.slice(2);
   assert.match(sha ?? "", /^[a-f0-9]{40}$/);

@@ -58,7 +58,7 @@
 
 **Why `listen`-time errors are logged rather than thrown.** The sockets already accepted are unaffected by an accept-time failure, and a listener that has genuinely died is noticed by the windows that can no longer reach it.
 
-**Why an empty token read must be waited out.** An empty `relayToken` fails the hello check for every peer, and a broker never re-reads the token, so a window that adopted `''` would refuse the whole installation for its lifetime while every other window retried at `RETRY_MS` forever.
+**Why an empty token read must be waited out.** An empty `serverToken` fails the hello check for every peer, and a broker never re-reads the token, so a window that adopted `''` would refuse the whole installation for its lifetime while every other window retried at `RETRY_MS` forever.
 
 **Why exhausting that wait latches a permanent stand-down.** The exclusive create answers `EEXIST` for a token path that is a *directory* or unreadable as readily as for one another window owns, so the remaining cases are a crash-left zero-length file or a `globalStorageUri` this process cannot read — and retrying either would make every command wait out its queue budget on every attempt.
 
@@ -68,17 +68,11 @@
 
 **Where the `WebSocket` boundary falls.** `globalThis.WebSocket` arrived in Node 22, and VS Code 1.92 — the floor `engines.vscode` declares — shipped Node 20.14 (its release notes, July 2024), so an older extension host has no global to use.
 
-**Why `pushDevices` answers `null` instead of refusing.** When an un-enrolled window refused the read-only commands, the Settings dialog reported an unreachable server on machines that had simply never enrolled.
-
 ## The direct path
 
 macOS library validation decides which process may load the addon. Run under VS Code's main `Code` binary (`ELECTRON_RUN_AS_NODE=1`), `dlopen` of `node_datachannel.node` fails with "mapping process and mapped file (non-platform) have different Team IDs". Under `Code Helper (Plugin)` — the binary extension hosts run in, entitled `com.apple.security.cs.disable-library-validation` — the same file loads and two in-process peers complete a data-channel round trip, both from the installed package and from the staged `dist/node_modules` tree (measured on VS Code with Electron 42.10.0, macOS arm64, 2026-09).
 
 The platform packages come from a scoped `pnpm deploy` because the wider switches reach too far: `supportedArchitectures` in `pnpm-workspace.yaml` is workspace-wide, and `pnpm install --os/--cpu` in the release job would fetch every platform's esbuild, lightningcss, workerd, and sharp as well. A first version fetched the tarballs from the registry itself and checked them against a regex over `pnpm-lock.yaml`; it ignored the configured registry, which pnpm 12 does not export to scripts. `--libc glibc` did not drop the musl packages on a macOS host, hence copying only the declared platform packages.
-
-## Peer surfaces
-
-**Why installing the responder is keyed by the link.** Each install adds a `status` subscription, and each arming under it adds pane-state, activity, and focus listeners with no handle left to remove them. A flag would be wrong because the platform adapter, not the module, is what owns a link.
 
 ## Peer surfaces across windows
 

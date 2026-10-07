@@ -1054,6 +1054,19 @@ describe('Surface moves between Workspaces', () => {
     expect(wallFor('ws-2').querySelector('[data-focused="true"]')).toBeNull();
   });
 
+  it('refills a pinned source the move empties instead of removing it', async () => {
+    const source = await twoWalls(['pane-a']);
+    workspaceStore.setWorkspacePinned(source, true);
+    await act(async () => { await moveSurface('pane-a', request({ workspace: workspaceStore.workspaceRefFor('ws-2') })); });
+    expect(workspaceStore.getWorkspacesSnapshot().workspaces.map(ws => ws.id)).toEqual(['ws-2', source]);
+    const refilled = getWallHandle(source)!.surfaceIds();
+    expect(refilled).toHaveLength(1);
+    expect(refilled).not.toContain('pane-a');
+    expect(getWallHandle('ws-2')!.surfaceIds()).toEqual(['pane-x', 'pane-a']);
+    // The source survived, so a neutral CLI move leaves the user where they were.
+    expect(getActiveWorkspaceId()).toBe(source);
+  });
+
   it('creates a receiving Workspace with only the moved Surface and follows a GUI move into passthrough', async () => {
     const source = await twoWalls();
     let result: Awaited<ReturnType<typeof moveSurface>> = null;
@@ -1458,6 +1471,8 @@ describe('Labs: a Workspace close that would ask, kept pending', () => {
     expect(replacement).not.toBe(only);
     await act(async () => { restorePendingKill(pendingKillKey('workspace', only)); });
     await act(async () => { await vi.waitFor(() => expect(getWorkspacesSnapshot().workspaces.map(ws => ws.id)).toEqual([only])); });
+    // Its going is no close of the user's, so Reopen has nothing to bring back.
+    expect(_reopenRecordsForTesting()).toHaveLength(0);
   });
 
   it('closes through every member Surface when finalized, then lets its Wall go', async () => {
