@@ -292,6 +292,8 @@ function PlaygroundDesktopExperience() {
       // re-seeds the L-shape rather than finding the last visit's Workspaces.
       workspaceStore.resetWorkspaces();
       bootPlans.resetWorkspaceBootPlans();
+      // A user's name, so auto-naming never retitles it from its panes' cwd.
+      workspaceStore.renameWorkspace(workspaceStore.getActiveWorkspaceId(), "tutorial");
       setWallModule({
         WorkspaceWindow: workspaceWindow.WorkspaceWindow,
         WorkspaceStrip: workspaceStrip.WorkspaceStrip,
