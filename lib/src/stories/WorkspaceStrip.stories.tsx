@@ -144,7 +144,7 @@ export const MoveRefused: Story = {
   },
 };
 
-/** Pinned right: after `+`, with a pin where `×` would be, never closeable
+/** Pinned right: after `+`, with no `×`, never closeable
  *  alone (`docs/specs/layout.md` → "Workspace tabs"). */
 export const Pinned: Story = {
   parameters: { primedWorkspaces: primed(['Agents', 'Build', 'Notes', 'Docs'], 2, undefined, [2, 3]) },

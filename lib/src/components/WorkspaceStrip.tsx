@@ -10,7 +10,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from 'react';
 import { clsx } from 'clsx';
-import { PlusIcon, PushPinIcon, XIcon } from '@phosphor-icons/react';
+import { PlusIcon, XIcon } from '@phosphor-icons/react';
 import { InlineEditInput } from './wall/InlineEditInput';
 import { WorkspaceKillConfirm } from './WorkspaceKillConfirm';
 import { WorkspaceTabMenu } from './WorkspaceTabMenu';
@@ -45,6 +45,7 @@ import {
 } from '../lib/workspace-store';
 import type { WorkspaceId } from '../lib/session-types';
 import { revealWorkspaceTab, workspaceStripAreas } from './workspace-tab-elements';
+import { useWorkspaceTabFlip } from './workspace-tab-flip';
 
 /**
  * The Window's Workspace tabs. Store-driven end to end (Workspaces, membership,
@@ -84,6 +85,8 @@ export function WorkspaceStrip({
   const [draggingId, setDraggingId] = useState<WorkspaceId | null>(null);
 
   const tabElementsRef = useRef(new Map<WorkspaceId, HTMLElement>());
+  const stripRef = useRef<HTMLDivElement | null>(null);
+  useWorkspaceTabFlip(stripRef, workspaces.map((workspace) => `${workspace.id}${workspace.pinned ? ' pinned' : ''}`).join('\n'));
 
   // The editor, the confirmation, and the tab menu all sit outside every Wall,
   // so a capture-phase command-mode shortcut would still fire behind them.
@@ -247,6 +250,7 @@ export function WorkspaceStrip({
   // order is strip order.
   return (
     <div
+      ref={stripRef}
       data-workspace-strip
       className={clsx('flex min-w-0 flex-1 items-end gap-1.5', className)}
     >
@@ -330,7 +334,7 @@ const WorkspaceTab = memo(function WorkspaceTab({
   id: WorkspaceId;
   name: string;
   nameIsAuto: boolean;
-  /** Pinned right: no `×`, and a pin where it would be. */
+  /** Pinned right: no `×`. */
   pinned: boolean;
   active: boolean;
   union: WorkspaceUnion;
@@ -352,6 +356,7 @@ const WorkspaceTab = memo(function WorkspaceTab({
   wasDragged: () => boolean;
 }) {
   const todoPill = useTodoPillContent(union.todo);
+  const showClose = active && !pinned;
   // The TODO pill shows whichever Workspace is visible, as a pane's does. The
   // alarm inset is a hidden Workspace's summons: the visible one's panes ring.
   const showAlarmInset = !active && union.ringing;
@@ -425,7 +430,7 @@ const WorkspaceTab = memo(function WorkspaceTab({
             type="button"
             className={clsx(
               'flex h-full min-w-0 flex-1 items-center overflow-hidden pl-2.5 text-left',
-              showTodoPill || active || pinned ? 'pr-1' : 'pr-2.5',
+              showTodoPill || showClose ? 'pr-1' : 'pr-2.5',
             )}
             aria-label={label}
             title={label}
@@ -454,7 +459,7 @@ const WorkspaceTab = memo(function WorkspaceTab({
                 'transition-colors hover:bg-current/10 active:bg-current/20',
                 // Current-coloured, as a theme's focus ring can match the active tab.
                 'focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1 focus-visible:outline-current',
-                !active && !pinned && 'mr-1.5',
+                !showClose && 'mr-1.5',
               )}
               data-flourishing={todoPill.flourishing ? 'true' : 'false'}
               aria-label={`Next TODO in ${name}`}
@@ -472,12 +477,7 @@ const WorkspaceTab = memo(function WorkspaceTab({
           )}
         </>
       )}
-      {pinned && !renaming && (
-        <span data-workspace-tab-pinned className="flex h-full shrink-0 items-center pl-0.5 pr-2 opacity-65" aria-hidden="true">
-          <PushPinIcon size={11} weight="fill" />
-        </span>
-      )}
-      {active && !pinned && !renaming && (
+      {showClose && !renaming && (
         <button
           type="button"
           data-workspace-tab-close={id}

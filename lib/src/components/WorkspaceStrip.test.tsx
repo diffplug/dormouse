@@ -25,8 +25,10 @@ import {
   createWorkspace,
   getActiveWorkspaceId,
   getWorkspacesSnapshot,
+  moveWorkspace,
   resetWorkspaces,
   setAutoWorkspaceName,
+  setWorkspacePinned,
 } from '../lib/workspace-store';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -707,7 +709,6 @@ describe('pinned tabs', () => {
     // The empty spacer pushes the pinned group flush against the strip's right end.
     expect(order).toEqual([first, 'ws-3', '+', 'spacer', 'ws-2']);
     expect(tabFor('ws-2').closest('[data-workspace-pinned-group]')).not.toBeNull();
-    expect(tabFor('ws-2').querySelector('[data-workspace-tab-pinned]')).not.toBeNull();
     expect(activateButton('ws-2').getAttribute('aria-label')).toBe('Notes, pinned');
 
     // Active, and still no ×.
@@ -720,6 +721,73 @@ describe('pinned tabs', () => {
     await act(async () => { await Promise.resolve(); });
     expect(closeAll).not.toHaveBeenCalled();
     expect(tabs()).toHaveLength(3);
+  });
+});
+
+describe('reorder slides', () => {
+  /** Animated keys, `+` as '+', with each slide's starting offset. */
+  let slides: Map<string, string>;
+
+  beforeEach(() => {
+    slides = new Map();
+    Object.defineProperty(HTMLElement.prototype, 'animate', {
+      configurable: true,
+      value(this: HTMLElement, keyframes: Keyframe[]) {
+        slides.set(this.dataset.workspaceTab ?? '+', String(keyframes[0].transform));
+        return { cancel() {} };
+      },
+    });
+    // jsdom lays nothing out: each tab and `+` is 100px wide in DOM order, but
+    // a tab named "Renamed" is 200px, so a rename moves its neighbours.
+    const width = (item: Element) => (item.textContent === 'Renamed' ? 200 : 100);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const items = [...container.querySelectorAll('[data-workspace-tab], [data-workspace-new]')];
+      const left = items.slice(0, Math.max(0, items.indexOf(this))).reduce((sum, item) => sum + width(item), 0);
+      const right = left + width(this);
+      return { left, right, width: right - left, top: 0, bottom: 24, height: 24, x: left, y: 0, toJSON: () => ({}) } as DOMRect;
+    });
+  });
+
+  afterEach(() => {
+    delete (HTMLElement.prototype as Partial<HTMLElement>).animate;
+  });
+
+  it('slides the tabs a move displaces from where they were, and leaves the rest', async () => {
+    const first = getWorkspacesSnapshot().workspaces[0].id;
+    await act(async () => {
+      createWorkspace({ id: 'ws-2' });
+      createWorkspace({ id: 'ws-3' });
+    });
+    await render();
+    slides.clear();
+    await act(async () => { moveWorkspace(first, 1); });
+    expect(slides).toEqual(new Map([[first, 'translate(-100px, 0px)'], ['ws-2', 'translate(100px, 0px)']]));
+  });
+
+  it('slides a tab that pinning remounts into the other group, with `+`', async () => {
+    const first = getWorkspacesSnapshot().workspaces[0].id;
+    await act(async () => { createWorkspace({ id: 'ws-2' }); });
+    await render();
+    slides.clear();
+    await act(async () => { setWorkspacePinned(first, true); });
+    expect(slides).toEqual(new Map([[first, 'translate(-200px, 0px)'], ['ws-2', 'translate(100px, 0px)'], ['+', 'translate(100px, 0px)']]));
+  });
+
+  it('slides nothing for a rename, or under reduced motion', async () => {
+    const first = getWorkspacesSnapshot().workspaces[0].id;
+    await act(async () => { createWorkspace({ id: 'ws-2' }); });
+    await render();
+    slides.clear();
+    await act(async () => { setAutoWorkspaceName(first, 'Renamed'); });
+    expect(slides.size).toBe(0);
+
+    vi.stubGlobal('matchMedia', (query: string) => ({ matches: query === '(prefers-reduced-motion: reduce)' }));
+    try {
+      await act(async () => { moveWorkspace(first, 1); });
+      expect(slides.size).toBe(0);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
 
