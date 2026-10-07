@@ -856,8 +856,9 @@ fn finish_window_close(app: &AppHandle, label: &str) {
     }
 }
 
-/// SIGTERM the PTYs a window left behind, and drop their Sessions' alert
-/// entries with them: no window will ever show those Sessions again.
+/// Gracefully stop the PTYs a window left behind (`docs/specs/transport.md` ->
+/// Graceful shutdown), and drop their Sessions' alert entries with them: no
+/// window will ever show those Sessions again.
 ///
 /// Reached whenever a window goes away still owning shells — the close
 /// ack-timeout path ran no teardown at all, and a teardown that overran its
