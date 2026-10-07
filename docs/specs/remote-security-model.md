@@ -27,7 +27,7 @@ Non-goals: a compromised browser runtime or operating system; a user intentional
 
 ## Passkeys
 
-Every pairing and every connection carries one WebAuthn assertion, verified by the Burrow inside the encrypted channel.
+Every pairing carries one WebAuthn assertion, verified by the Burrow inside the encrypted channel, and so does every connection outside a [presence window](#presence-window).
 
 > **Passkeys are user credentials, not device identities** — synchronization puts one passkey on many physical devices and changes nothing here (rationale).
 
@@ -45,7 +45,7 @@ A Client static is long-lived Client identity — the capability the Burrow actu
 
 **Must prefer a directly persisted nonextractable private key.** Only a failed native storage probe may select AES-256-GCM-encrypted PKCS#8 with a per-key nonextractable AES key, after that format passes reopen and key agreement. **Must import recovered X25519 keys nonextractably, never persist plaintext private bytes, and leave existing native records unchanged.** (rationale)
 
-Active XSS can use either format and can extract the X25519 private bytes in the encrypted format. Nonextractability is therefore not a universal at-rest guarantee; browser/OS compromise defeats both formats. A stolen static still requires its paired passkey's fresh presence proof. Clearing browser data destroys either format ([Client static loss](#client-static-loss)).
+Active XSS can use either format and can extract the X25519 private bytes in the encrypted format. Nonextractability is therefore not a universal at-rest guarantee; browser/OS compromise defeats both formats. A stolen static still needs its paired passkey's fresh presence proof, or an open [presence window](#presence-window) for that static plus a Relay session for its account. Clearing browser data destroys either format ([Client static loss](#client-static-loss)).
 
 Source of truth: `generatePocketKeyPair` in `lib/src/remote/client/pocket-private-key.ts`; what Pocket stores is [pocket-app.md](./pocket-app.md).
 
@@ -70,10 +70,22 @@ Source of truth: `remote-lib-common/src/security/acl.ts` (the schema and `Burrow
 - **The WebAuthn challenge is derived, not random.** `presenceChallenge(binding, relayNonce)` is base64url `SHA-256(lengthPrefixedConcat(domain, kind, binding fields in declared order, relayNonce))` under `dormouse/presence/v1`. **One encoding rule: a base64url field is hashed as the bytes it encodes and everything else as UTF-8** — decoded are `connectionId`, `burrowChallenge`, `handshakeHash`, and the nonce; text are the domain, the kind, `burrowId`, and `passkeyCredentialId`. Relay mints, Burrow recomputes, one builder. `isPresenceBinding` takes **exactly one kind's fields, each bounded** — anything the challenge does not cover must not reach the Burrow inside a verified binding.
 - **`POST /api/reauth/begin` takes a required, kind-tagged binding** and answers the derived challenge over a one-use Relay nonce ([relay.md](./relay.md) owns both routes). **No binding, or no nonce to `finish`, is a 400** (rationale). `finish` consumes the nonce, recomputes the challenge, verifies the assertion against the **stored** key for that exact credential, and **extends nothing** — not the session's life, not the relay socket.
 - **`PresenceProofV1` travels only inside the first Client→Burrow transport payload**, carrying the binding, the Relay nonce, `accountId` (as the Relay answered sign-in), the passkey credential id, its canonical SPKI public key, and the assertion. The Burrow recomputes the challenge with the same builder, requires **every binding field to equal what it built from its own state**, verifies RP ID, origin, presence/verification policy, and signature against the *presented* key, and hashes that key for the ACL. **A Relay success flag is never evidence**, and **the verifier never throws**, including missing WebCrypto or rejected digest operations — a rejection is an ordinary denial (rationale).
-- **Every proof is fresh and single-use**: any restart — dropped transport, consumed challenge, failed handshake, later attempt — needs a new handshake, Burrow challenge, Relay nonce, and authenticator operation; one prompt per pairing or connection, two on a self-hosted first run (rationale).
+- **Every proof is fresh and single-use**: any restart — dropped transport, consumed challenge, failed handshake, later attempt — needs a new handshake, Burrow challenge, Relay nonce, and authenticator operation; one prompt per pairing, one per connection outside a [presence window](#presence-window), two on a self-hosted first run (rationale). A window ride replays no proof; it carries none.
 - **The Relay session is authentication-plane only.** Its bearer token ([relay.md](./relay.md)) is never reusable proof of presence for a Burrow, and **has no app-session signing key beside it** (rationale).
 
 Source of truth: `utf8Encode` in `remote-lib-common/src/security/bytes.ts` (`remote-lib-common/test/bytes.test.mjs`); `presenceChallenge` / `isPresenceBinding` in `remote-lib-common/src/security/presence.ts`, `verifyPresenceProof` in `remote-lib-common/src/security/e2e-ceremony.ts`, `relay/src/app.ts`.
+
+## Presence window
+
+**A connection may skip the assertion only on a proof this Burrow verified itself.** A presence window is Burrow memory keyed by the IK-authenticated Client static (rationale), naming the ACL record — account, passkey credential, key hash, `approvedAt` — that proof was verified for.
+
+- **Only a Burrow-verified proof for an active record opens or refreshes one**: a pairing proof once its record is committed, replacing any window for that static; a connection proof once the conjunction holds. **A connection that rode a window never refreshes its proof time.** Pairing always requires a proof.
+- **Open means under `PRESENCE_WINDOW_IDLE_MS` since the static's last activity and under `PRESENCE_WINDOW_MAX_MS` since the proof** ([Burrow bounds](#burrow-bounds); rationale). Activity is the proof itself or any decrypted Client→Burrow message, keepalives included, on an established session authorized under that same record (rationale).
+- **The offer is advisory.** Message 2 carries it ([Connection](#connection)); a redeem consumes the challenge, then re-checks the window (closed: `presence-rejected`) and re-runs the conjunction against the window's own record, `approvedAt` included (a miss: `pairing-required`).
+- **The Relay can neither mint nor extend a window**: one opens only on a proof the Burrow verified, keyed by a static the Relay never sees, and only messages the Burrow decrypts count as activity.
+- **Cleared by a raised UV demand and by `stop()`**, and absent from every new runtime (a Burrow restart, a network-policy change); **never cleared by a dropped relay socket** (rationale). Evaluated at offer and redeem, never reaped, and held in memory only.
+
+Source of truth: `PresenceWindows` in `remote-lib-common/src/security/presence-window.ts`; `BurrowRuntime.#openWindow` in `lib/src/remote/burrow/burrow-runtime.ts`.
 
 ## Pairing
 
@@ -109,14 +121,14 @@ Source of truth: `BurrowRuntime.mintInvitation` / `#onPairingInit` / `#onPairing
 
 ## Connection
 
-- **IK against the pinned Burrow static.** Fresh 16-byte connection ID; Client initiator with its paired per-Burrow static, `rs` the pin; message 2's payload is a fresh 32-byte Burrow challenge (`ChallengeIssuer`, 2-minute TTL). Completing Noise proves both statics and **authorizes nothing**.
-- **Authorization = proof ∧ conjunction.** The Burrow consumes the challenge *before verifying presence*, verifies `PresenceProofV1` against the binding it built from its own `burrowId`, connection ID, challenge and handshake hash, then requires one active `BurrowAclRecord` holding all four of `accountId`, `passkeyCredentialId`, `passkeyPublicKeyHash`, and the IK-authenticated Client static.
+- **IK against the pinned Burrow static.** Fresh 16-byte connection ID; Client initiator with its paired per-Burrow static, `rs` the pin; message 2's payload is a fresh 32-byte Burrow challenge (`ChallengeIssuer`, 2-minute TTL) then one offer byte — `0x01` when the Client static has an open [presence window](#presence-window), else `0x00` — always 33 bytes. **A proof's `burrowChallenge` is the whole payload**; a Client reads a bare 32-byte payload or an unknown offer byte as no offer (rationale). Completing Noise proves both statics and **authorizes nothing**.
+- **Authorization = (proof ∨ window) ∧ conjunction.** `ConnectionRequestV1.presence` is a `PresenceProofV1` or `'window'`, padded alike. The Burrow consumes the challenge *before verifying presence*, verifies a proof against the binding it built from its own `burrowId`, connection ID, message-2 payload and handshake hash, or redeems the window, then requires one active `BurrowAclRecord` holding all four of `accountId`, `passkeyCredentialId`, `passkeyPublicKeyHash`, and the IK-authenticated Client static.
 - **Then `ConnectionOutcomeV1`**: success carries the Burrow label (and `directOnly` under Local networks); denial carries only `pairing-required`, `presence-rejected`, `protocol-rejected`, `burrow-busy`, or `burrow-error`. **Every ACL miss is `pairing-required`** — individual ACL and presence failures are logged owner-locally and never returned. Success promotes the two `CipherState`s into the established session; every terminal decision sends exactly one outcome and clears pending state; **failures before `Split` yield only a generic outer error** (rationale).
 - **Protocol-v1 rides inside**, as application messages on the session's byte stream ([remote-api.md](./remote-api.md) -> Transport).
 
 **Pocket accepts an outcome only after decrypting it on the cipher state for the expected handshake hash**; a timer expiring without one reports unavailable, not denial. **The proof asserts with the record's own paired credential** — the sole `allowCredentials` entry for that Burrow, never whichever passkey signed this session in ([pocket-app.md](./pocket-app.md) owns what the outcome then does to the record).
 
-Source of truth: `BurrowRuntime.#onConnectionInit` / `#onConnectionTransport` / `#promoteConnection` in `lib/src/remote/burrow/burrow-runtime.ts`, `EstablishedE2eSession` in `lib/src/remote/burrow/established-session.ts` (the established session), `ChallengeIssuer` in `remote-lib-common/src/security/challenge.ts`.
+Source of truth: `BurrowRuntime.#onConnectionInit` / `#onConnectionTransport` / `#promoteConnection` in `lib/src/remote/burrow/burrow-runtime.ts`, `EstablishedE2eSession` in `lib/src/remote/burrow/established-session.ts` (the established session), `ChallengeIssuer` in `remote-lib-common/src/security/challenge.ts`, `encodeConnectionMessage2` / `decodeConnectionMessage2` in `remote-lib-common/src/security/e2e-ceremony.ts`.
 
 ## One-time connection
 
@@ -163,6 +175,7 @@ Source of truth: `sealPush` / `openPush` / `isSealedPushV1` in `remote-lib-commo
 | `MAX_ESTABLISHED_E2E_SESSIONS` | 16 | `remote-lib-common/src/security/e2e-bounds.ts` |
 | `ESTABLISHED_E2E_IDLE_TIMEOUT_MS` | 120 000 | same |
 | `E2E_INIT_BURST` / `E2E_INIT_REFILL_INTERVAL_MS` | 8 / 1 000 | same |
+| `PRESENCE_WINDOW_IDLE_MS` / `PRESENCE_WINDOW_MAX_MS` | 300 000 / 43 200 000 (12 h) | same |
 | `DIRECT_SETUP_TIMEOUT_MS` / `DIRECT_ANSWER_TIMEOUT_MS` / `DIRECT_GATHER_TIMEOUT_MS` / `DIRECT_SRFLX_GRACE_MS` | 15 000 / 10 000 / 3 000 / 500 | `remote-lib-common/src/security/direct-path.ts` |
 | `DIRECT_HANDOFF_TIMEOUT_MS` / `DIRECT_DISCONNECTED_GRACE_MS` | `= DIRECT_SETUP_TIMEOUT_MS` (15 000) / 5 000 | same |
 | `DIRECT_ONLY_DEADLINE_MS` | `= DIRECT_SETUP_TIMEOUT_MS + DIRECT_HANDOFF_TIMEOUT_MS` (30 000; rationale) | same |
@@ -176,7 +189,7 @@ Source of truth: `sealPush` / `openPush` / `isSealedPushV1` in `remote-lib-commo
 
 - **Must bound waiting relay frames before enqueueing**, by count and cumulative received-string length; both `e2e` and `client-gone` share one FIFO and one in-flight operation across reconnects. Overflow synchronously closes the relay connection and clears its queue and transient state; never skip a transport frame and continue its Noise session (rationale).
 - **At most one pairing, one connection, and one established session per relay client**; a replacement disposes its predecessor, whatever identity it belonged to (rationale). Pending pairings expire on the pairing TTL, pending connections on the challenge TTL.
-- **The session cap is checked at promotion and nowhere else**, after the presence proof and the ACL conjunction have both succeeded (rationale). A Client static already holding a session **replaces its own** atomically; any other identity at the cap gets the fixed-size `burrow-busy` and **evicts no other entry**. Pending caps and the token bucket stay active at the cap.
+- **The session cap is checked at promotion and nowhere else**, after presence — a proof or a window — and the ACL conjunction have both succeeded (rationale). A Client static already holding a session **replaces its own** atomically; any other identity at the cap gets the fixed-size `burrow-busy` and **evicts no other entry**. Pending caps and the token bucket stay active at the cap.
 - **A Burrow-global token bucket gates the WebCrypto an accepted `init` buys**, on the Burrow's own clock, and **must answer a refused init with nothing**, as for shape or size refusals. **Must enforce pending caps after a valid handshake by evicting the oldest pending entry**, with the outcome in the expiry table below (rationale).
 - **A message is processed only for its exact pending ID and expected step**: unknown IDs are dropped without decryption, established frames decrypt only at their session's next nonce, and **the first invalid ciphertext destroys its session** (rationale).
 - **Must reject malformed or over-size routing frames before WebCrypto or entry allocation.** **`MAX_RELAY_TO_BURROW_FRAME_LENGTH` is measured on the received string before `JSON.parse`** (a non-string payload is dropped) and given to the socket implementation's `maxPayload` where it takes one (rationale); the wire guard then bounds every routing value, `clientId` first, before the ciphertext scan — handshake messages at 65,535 bytes, application payloads at 1 MiB, each measured before base64 decoding.
@@ -191,7 +204,7 @@ Source of truth: `sealPush` / `openPush` / `isSealedPushV1` in `remote-lib-commo
   | Pending connection evicted at its cap | nothing (rationale) |
 
 - **The idle deadline moves only on a successfully decrypted Client→Burrow transport message**, keepalive or application data; **never** on Burrow output, a failed decrypt, a relay envelope, a socket ping, or any unauthenticated frame (rationale). The Client keepalives on `E2E_KEEPALIVE_INTERVAL_MS` and runs the same deadline against its own last send, so a session the Burrow reaped ends on both sides ([pocket-app.md](./pocket-app.md)).
-- **Every expiry or outcome disposes remote-control attachments without killing terminal sessions**, erases Noise state and keys, and removes the entry before accepting replacement work. `client-gone` disposes that client's state; **losing the Burrow's own relay socket disposes everything, invitations included** (rationale).
+- **Every expiry or outcome disposes remote-control attachments without killing terminal sessions**, erases Noise state and keys, and removes the entry before accepting replacement work. `client-gone` disposes that client's state; **losing the Burrow's own relay socket disposes everything but [presence windows](#presence-window), invitations included** (rationale).
 
 Source of truth: `lib/src/remote/burrow/burrow-runtime.ts`, `EstablishedE2eSession` in `lib/src/remote/burrow/established-session.ts` (an established session's decrypt and idle clock), and `TokenBucket` in `remote-lib-common/src/security/token-bucket.ts` — the same primitive the Relay admits Burrow enrollment with ([relay.md](./relay.md#http-api)). Pinned by `lib/src/remote/burrow/burrow-bounds.test.ts`, `relay/test/malicious-relay.test.mjs` and `remote-lib-common/test/token-bucket.test.mjs`.
 
@@ -249,7 +262,7 @@ The checklist an auditor or a change reviewer verifies against, each property es
 * Compromising the Relay reveals no pairing decision, Burrow label, remote-api message, terminal byte, or notification text.
 * Passkey synchronization does not automatically create trusted Clients.
 * Every trusted Client must be explicitly paired with every Burrow.
-* Every connection requires fresh user presence, single-use and bound to that connection's own transcript.
+* Every connection requires user presence the Burrow itself verified — a fresh proof bound to that connection's transcript, or one it verified for the same record and Client static within its presence window; the Relay can neither supply nor extend one.
 * Every access decision is ultimately made by the Burrow.
 * A one-time session is authorized only by typing, on the Burrow, the two digits its phone shows; it writes nothing at either end and runs only on the direct path (pinned by `lib/src/remote/client/one-time-e2e.test.ts`).
 
@@ -257,7 +270,7 @@ The checklist an auditor or a change reviewer verifies against, each property es
 
 ## Residual metadata
 
-**No traffic-analysis resistance, per-Burrow unlinkability, or metadata anonymity is claimed.** The Relay still observes account and passkey authentication data, IPs, Burrow IDs and online state, routing relationships, every session's reauth exchange, push endpoints, timing, ciphertext sizes, and volume — **the last three only while the Relay is carrying the session**, since a session that has switched to the [direct path](#direct-path) leaves it the fact of the session and each end's liveness and nothing else. Two leaks follow and are accepted rather than closed (rationale): Client→Burrow timing exposes inter-keystroke timing on a relayed session while keystroke *values* stay encrypted, ending at the switch — which in exchange shows each paired peer the other's addresses, until then known only to the Relay — and one `PushSubscription` per worker scope lets a shared endpoint correlate every `deliveryId` one Pocket profile registers across Burrows. A push carries no counter, so a Relay that kept an envelope can re-deliver it ([Push sealing](#push-sealing)).
+**No traffic-analysis resistance, per-Burrow unlinkability, or metadata anonymity is claimed.** The Relay still observes account and passkey authentication data, IPs, Burrow IDs and online state, routing relationships, every session's reauth exchange, push endpoints, timing, ciphertext sizes, and volume — **the last three only while the Relay is carrying the session**, since a session that has switched to the [direct path](#direct-path) leaves it the fact of the session and each end's liveness and nothing else. Two leaks follow and are accepted rather than closed (rationale): Client→Burrow timing exposes inter-keystroke timing on a relayed session while keystroke *values* stay encrypted, ending at the switch — which in exchange shows each paired peer the other's addresses, until then known only to the Relay — and one `PushSubscription` per worker scope lets a shared endpoint correlate every `deliveryId` one Pocket profile registers across Burrows. A push carries no counter, so a Relay that kept an envelope can re-deliver it ([Push sealing](#push-sealing)). A connection that rode a [presence window](#presence-window) makes no reauth exchange and answers sooner, so the Relay can tell it from one that proved.
 
 **Hosted's Relay observes what the self-host Relay does**, each account's in its own `RelayRoom` ([hosted.md](./hosted.md) -> "Relay sockets").
 

@@ -18,6 +18,7 @@ import {
   NoiseError,
   NoiseTransportSession,
   PRESENCE_WINDOW,
+  PresenceWindows,
   TokenBucket,
   WS_CLOSE_BURROW_NOT_ENTITLED,
   WS_CLOSE_BURROW_REPLACED,
@@ -40,6 +41,7 @@ import {
   MAX_RELAY_TO_BURROW_FRAME_LENGTH,
   pairingInvitationPrologue,
   e2eConnectionPrologue,
+  encodeConnectionMessage2,
   randomBase64Url,
   sealPush,
   toBase64Url,
@@ -56,6 +58,9 @@ import {
   type PairingInvitation,
   type PairingOutcomeV1,
   type PresenceBinding,
+  type PresenceWindowActivity,
+  type PresenceWindowEntry,
+  type PresenceWindowRecord,
   type SealedPushV1,
   type RelayPolicyFrame,
   type RelayToBurrowFrame,
@@ -202,6 +207,8 @@ interface PendingPairingSession {
     readonly passkeyCredentialId: string;
     readonly passkeyPublicKeyHash: string;
     readonly label: string;
+    /** When this Burrow verified the pairing proof; the window it opens counts from here. */
+    readonly verifiedAt: number;
   };
   /** **Exactly one attempt**: a second confirm is refused whatever it types. */
   attempted: boolean;
@@ -213,7 +220,13 @@ interface PendingConnectionSession {
   readonly session: NoiseTransportSession;
   readonly handshakeHash: string;
   readonly clientStaticPublicKey: string;
-  readonly burrowChallenge: string;
+  /** The issuer's handle, consumed on the first control whatever it carries. */
+  readonly challenge: string;
+  /**
+   * What the proof binds as `burrowChallenge`: the whole message-2 payload,
+   * offer byte included, base64url.
+   */
+  readonly boundChallenge: string;
   readonly expiresAt: number;
 }
 
@@ -226,6 +239,8 @@ interface EstablishedSession {
   readonly connectionId: string;
   /** The IK-authenticated Client static — what the session cap is keyed on. */
   readonly clientStaticPublicKey: string;
+  /** The authorizing record's `approvedAt`: its activity counts toward that record's window only. */
+  readonly approvedAt: number;
   readonly e2e: EstablishedE2eSession;
 }
 
@@ -349,6 +364,13 @@ export class BurrowRuntime {
   #acl: BurrowAcl;
   readonly #saveApproval = createSerialQueue();
   readonly #challenges: ChallengeIssuer;
+  /**
+   * The presence proofs this Burrow verified, by Client static
+   * (`docs/specs/remote-security-model.md` → Presence window). In memory only,
+   * and never cleared by a dropped relay socket: they are this Burrow's
+   * memory, not relay state.
+   */
+  readonly #presenceWindows: PresenceWindows;
 
   readonly #createWebSocket: (url: string) => WebSocketLike;
   readonly #createSession?: BurrowOptions['createSession'];
@@ -479,6 +501,7 @@ export class BurrowRuntime {
     });
     this.#acl = loadBurrowAcl(options.enrollment.burrowId, options.loadAcl);
     this.#challenges = new ChallengeIssuer({ now: this.#now });
+    this.#presenceWindows = new PresenceWindows({ now: this.#now });
 
     this.#createWebSocket =
       options.createWebSocket ?? ((url) => new WebSocket(url) as unknown as WebSocketLike);
@@ -810,6 +833,7 @@ export class BurrowRuntime {
     for (const clientId of [...this.#clients.keys()]) {
       this.#disposeEstablished(clientId, { goodbye: 'unflushed' });
     }
+    this.#presenceWindows.clear();
     this.#stopped = true;
     this.#status = 'stopped';
     this.#run += 1;
@@ -968,9 +992,9 @@ export class BurrowRuntime {
   }
 
   /**
-   * Connection-scoped state resets on a dropped socket; the ACL persists, and
-   * invitations go with the socket (`docs/specs/remote-security-model.md` →
-   * Burrow bounds).
+   * Connection-scoped state resets on a dropped socket; the ACL and presence
+   * windows persist, and invitations go with the socket
+   * (`docs/specs/remote-security-model.md` → Burrow bounds).
    */
   #dropTransientState(): void {
     // First, so a ceremony step already awaiting sees it the moment it resumes.
@@ -1074,6 +1098,8 @@ export class BurrowRuntime {
   #raisePolicy(frame: RelayPolicyFrame): void {
     if (frame.requireUserVerification !== true || this.#policy.requireUserVerification) return;
     this.#policy = { ...this.#policy, requireUserVerification: true };
+    // Every window rests on a proof verified under the weaker demand.
+    this.#presenceWindows.clear();
     this.#onPolicyRaised();
   }
 
@@ -1258,6 +1284,7 @@ export class BurrowRuntime {
       // bounded and stripped once, here, so the queue projection, the modal, and
       // the persisted record all see the same safe value.
       label: boundedPairingLabel(request.label),
+      verifiedAt: this.#now(),
     };
     this.#requestApproval({
       clientId: frame.clientId,
@@ -1312,6 +1339,10 @@ export class BurrowRuntime {
         pending.committing = true;
         await this.#saveAcl(this.#enrollment.burrowId, next.records());
         this.#acl = next;
+        // Only once the record is live, so the connect that follows pairing
+        // needs no second prompt; a window for an older record of this static
+        // is replaced.
+        this.#presenceWindows.seed(pending.clientStaticPublicKey, record, approval.verifiedAt);
         // Consent already happened, so a successful save stays committed even
         // after transport loss. Never answer on a retired or replacement pipe.
         if (this.#clients.get(clientId)?.pairing !== pending) return;
@@ -1414,8 +1445,9 @@ export class BurrowRuntime {
 
   /**
    * Noise message 1 against this Burrow's long-term static; message 2's payload is
-   * the fresh challenge the proof must bind to
-   * (`docs/specs/remote-security-model.md` → Connection).
+   * the fresh challenge the proof must bind to, then whether this Client static
+   * may ride its presence window (`docs/specs/remote-security-model.md` →
+   * Connection).
    */
   async #onConnectionInit(frame: E2eRelayToBurrowFrame, epoch: number): Promise<void> {
     // Before the await, so a refused frame cannot even reach the one-time
@@ -1427,6 +1459,7 @@ export class BurrowRuntime {
     let message2: Uint8Array;
     let clientStaticPublicKey: string;
     let challenge: string;
+    let boundChallenge: string;
     let expiresAt: number;
     try {
       const handshake = await createNoiseResponder({
@@ -1435,14 +1468,18 @@ export class BurrowRuntime {
       });
       const payload = await handshake.readMessage(fromBase64Url(frame.ct));
       if (payload.length !== 0) throw new NoiseError('connection message 1 carries a payload');
+      const remoteStatic = handshake.remoteStaticPublicKey;
+      if (!remoteStatic) throw new NoiseError('IK did not authenticate a Client static');
+      clientStaticPublicKey = toBase64Url(remoteStatic);
       // Issued only once message 1 has decrypted: minting one per *attempted*
       // `init` would let a relay grow the issuer with frames that never
       // authenticated at all.
       ({ challenge, expiresAt } = this.#challenges.issue());
-      message2 = await handshake.writeMessage(fromBase64Url(challenge));
-      const remoteStatic = handshake.remoteStaticPublicKey;
-      if (!remoteStatic) throw new NoiseError('IK did not authenticate a Client static');
-      clientStaticPublicKey = toBase64Url(remoteStatic);
+      // Advisory: the redeem re-checks the window and the record.
+      const offer = this.#openWindow(clientStaticPublicKey) ? PRESENCE_WINDOW : 'none';
+      const message2Payload = encodeConnectionMessage2(fromBase64Url(challenge), offer);
+      boundChallenge = toBase64Url(message2Payload);
+      message2 = await handshake.writeMessage(message2Payload);
       session = new NoiseTransportSession(handshake.session);
     } catch {
       // Nothing to answer on: there is no session yet.
@@ -1461,7 +1498,8 @@ export class BurrowRuntime {
       session,
       handshakeHash: toBase64Url(session.handshakeHash),
       clientStaticPublicKey,
-      burrowChallenge: challenge,
+      challenge,
+      boundChallenge,
       expiresAt,
     };
     this.#armReaper();
@@ -1494,41 +1532,76 @@ export class BurrowRuntime {
       return;
     }
     const presence = receipt.value.presence;
-    if (presence === PRESENCE_WINDOW) {
-      this.#denyConnection(frame.clientId, pending, 'protocol-rejected');
-      return;
-    }
     // Consumed before any other work, so a challenge can never be presented
-    // twice whatever the rest of this decision does.
-    const challengeValid = this.#challenges.consume(pending.burrowChallenge);
-    const binding: PresenceBinding = {
-      kind: 'connection',
-      burrowId: this.#enrollment.burrowId,
-      connectionId: pending.connectionId,
-      burrowChallenge: pending.burrowChallenge,
-      handshakeHash: pending.handshakeHash,
-      passkeyCredentialId: presence.binding.passkeyCredentialId,
-    };
-    const proof = await verifyPresenceProof(presence, binding, this.#policy);
-    if (this.#clients.get(frame.clientId)?.connection !== pending) return;
-    if (!challengeValid || !proof.ok) {
-      const why = challengeValid && !proof.ok ? proof.reason : 'challenge-invalid';
-      console.warn(`[burrow] connection presence rejected: ${why}`);
+    // twice whatever the rest of this decision does — a window ride included.
+    const challengeValid = this.#challenges.consume(pending.challenge);
+    // Who the presence speaks for: a proof's verified identity, or the record
+    // an open window was opened for. A string is why there is none.
+    let presented: Omit<PresenceWindowRecord, 'approvedAt'> | string;
+    let window: PresenceWindowEntry | null = null;
+    if (presence === PRESENCE_WINDOW) {
+      window = challengeValid ? this.#openWindow(pending.clientStaticPublicKey) : null;
+      presented = window ?? (challengeValid ? 'window-closed' : 'challenge-invalid');
+    } else {
+      const binding: PresenceBinding = {
+        kind: 'connection',
+        burrowId: this.#enrollment.burrowId,
+        connectionId: pending.connectionId,
+        burrowChallenge: pending.boundChallenge,
+        handshakeHash: pending.handshakeHash,
+        passkeyCredentialId: presence.binding.passkeyCredentialId,
+      };
+      const proof = await verifyPresenceProof(presence, binding, this.#policy);
+      if (this.#clients.get(frame.clientId)?.connection !== pending) return;
+      if (!challengeValid) presented = 'challenge-invalid';
+      else if (!proof.ok) presented = proof.reason;
+      else {
+        presented = {
+          accountId: presence.accountId,
+          passkeyCredentialId: binding.passkeyCredentialId,
+          passkeyPublicKeyHash: proof.passkeyPublicKeyHash,
+        };
+      }
+    }
+    if (typeof presented === 'string') {
+      console.warn(`[burrow] connection presence rejected: ${presented}`);
       this.#denyConnection(frame.clientId, pending, 'presence-rejected');
       return;
     }
-    const authorized = this.#aclRecord(
-      binding.passkeyCredentialId,
+    let authorized = this.#aclRecord(
+      presented.passkeyCredentialId,
       pending.clientStaticPublicKey,
-      presence.accountId,
-      proof.passkeyPublicKeyHash,
+      presented.accountId,
+      presented.passkeyPublicKeyHash,
     );
+    // A window speaks only for the record it was opened for, not a re-pairing.
+    if (window && typeof authorized !== 'string' && authorized.approvedAt !== window.approvedAt) {
+      authorized = 'record-replaced';
+    }
     if (typeof authorized === 'string') {
       console.warn(`[burrow] connection refused: ${authorized}`);
       this.#denyConnection(frame.clientId, pending, 'pairing-required');
       return;
     }
-    this.#promoteConnection(frame.clientId, pending, authorized.label);
+    // Only a proof opens or refreshes a window; riding one never does.
+    if (!window) this.#presenceWindows.seed(pending.clientStaticPublicKey, authorized, this.#now());
+    this.#promoteConnection(frame.clientId, pending, authorized);
+  }
+
+  /**
+   * The open presence window for one Client static, counting the activity of
+   * a session still running under it (`docs/specs/remote-security-model.md` →
+   * Presence window).
+   */
+  #openWindow(clientStaticPublicKey: string): PresenceWindowEntry | null {
+    let live: PresenceWindowActivity | null = null;
+    // At most one: a static's new session replaces its own.
+    for (const { established } of this.#clients.values()) {
+      if (established?.clientStaticPublicKey !== clientStaticPublicKey) continue;
+      live = { approvedAt: established.approvedAt, at: established.e2e.lastClientActivityAt };
+      break;
+    }
+    return this.#presenceWindows.open(clientStaticPublicKey, live);
   }
 
   /**
@@ -1558,10 +1631,15 @@ export class BurrowRuntime {
    * **{@link MAX_ESTABLISHED_E2E_SESSIONS} is checked here and only here**, and
    * a Client static replaces its own session rather than counting against it
    * (`docs/specs/remote-security-model.md` → Burrow bounds). This is the first
-   * point at which the presence proof and the ACL conjunction have both
-   * succeeded, so the only thing that can fill the cap is authorized phones.
+   * point at which presence — a proof or a window — and the ACL conjunction
+   * have both succeeded, so the only thing that can fill the cap is authorized
+   * phones.
    */
-  #promoteConnection(clientId: string, pending: PendingConnectionSession, label: string): void {
+  #promoteConnection(
+    clientId: string,
+    pending: PendingConnectionSession,
+    record: BurrowAclRecord,
+  ): void {
     const { incumbent, others } = this.#establishedFor(
       pending.clientStaticPublicKey,
       clientId,
@@ -1603,6 +1681,7 @@ export class BurrowRuntime {
     // session is — the id and the two cipher states — and not the pending
     // record, whose handshake hash, Client static and challenge are spent.
     const { connectionId, session, clientStaticPublicKey } = pending;
+    const { label, approvedAt } = record;
     const createSession = this.#createSession;
     const e2e: EstablishedE2eSession = new EstablishedE2eSession({
       session,
@@ -1624,7 +1703,7 @@ export class BurrowRuntime {
       now: this.#now,
       setTimer: this.#setTimer,
     });
-    state.established = { connectionId, clientStaticPublicKey, e2e };
+    state.established = { connectionId, clientStaticPublicKey, approvedAt, e2e };
     this.#armReaper();
   }
 
@@ -1684,7 +1763,7 @@ export class BurrowRuntime {
     // `client-gone`. Without this the issuer's own lazy sweep is the only thing
     // that reclaims an abandoned challenge, which is the second reclaim policy
     // the reaper exists to remove. Already-consumed is a no-op.
-    this.#challenges.consume(state.connection.burrowChallenge);
+    this.#challenges.consume(state.connection.challenge);
     state.connection = undefined;
     this.#pruneClient(clientId);
   }
@@ -1757,7 +1836,8 @@ export class BurrowRuntime {
    */
   #clearEstablished(state: ClientState, goodbye: Goodbye = false): void {
     if (!state.established) return;
-    const { e2e } = state.established;
+    const { e2e, clientStaticPublicKey, approvedAt } = state.established;
+    this.#presenceWindows.noteActivity(clientStaticPublicKey, { approvedAt, at: e2e.lastClientActivityAt });
     // Cleared first, so nothing the teardown sets off can reach this session
     // through the slot again — `end` itself reports nothing once it begins.
     state.established = undefined;

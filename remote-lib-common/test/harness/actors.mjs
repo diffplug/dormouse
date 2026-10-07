@@ -6,7 +6,7 @@
  * Everything here runs the *real* primitives — the QR grammar and its parser,
  * the IK handshake against the invitation key and then the pinned Burrow static,
  * the fixed-size padded control messages, the one presence verifier, the Burrow
- * challenge issuer, and the Burrow ACL. Only the relay is imaginary: a Client
+ * challenge issuer, the presence windows, and the Burrow ACL. Only the relay is imaginary: a Client
  * hands its Noise messages straight to a Burrow object.
  *
  * Tampering is a first-class feature: every actor accepts overrides so tests
@@ -17,12 +17,16 @@ import {
   BurrowAcl,
   ChallengeIssuer,
   NoiseTransportSession,
+  PRESENCE_WINDOW,
+  PresenceWindows,
   boundedPairingLabel,
   concatBytes,
   createNoiseInitiator,
   createNoiseResponder,
+  decodeConnectionMessage2,
   e2eConnectionPrologue,
   ecdsaRawToDer,
+  encodeConnectionMessage2,
   formatPairingInvitationUrl,
   fromBase64Url,
   generateNoiseKeyPair,
@@ -222,8 +226,10 @@ export class CompromisedRelay extends SimRelay {
 }
 
 /**
- * The Burrow (Dormouse Terminal): the ACL, the challenge issuer, one long-term
- * Noise static, and the per-invitation one-use keypairs. It is the only party
+ * The Burrow (Dormouse Terminal): the ACL, the challenge issuer, the presence
+ * windows, one long-term Noise static, and the per-invitation one-use keypairs.
+ * A connection's session ends the moment it is promoted, so its activity is the
+ * promotion instant. It is the only party
  * that writes the ACL, and the only one that decides a connection.
  */
 export class SimBurrow {
@@ -247,7 +253,7 @@ export class SimBurrow {
 
   /** inviteId -> { invitation, keyPair, state, session, clientStaticPublicKey } */
   #invitations = new Map();
-  /** connectionId -> { session, clientStaticPublicKey, challenge } */
+  /** connectionId -> { session, clientStaticPublicKey, challenge, boundChallenge } */
   #connections = new Map();
 
   constructor({ burrowId, label, rpId, origin, clock, policy, ttlMs, invitationTtlSeconds }) {
@@ -261,6 +267,7 @@ export class SimBurrow {
       typeof this.policy.origin === 'string' ? this.policy.origin : this.policy.origin[0];
     this.acl = new BurrowAcl(burrowId, { now: clock.now });
     this.challenges = new ChallengeIssuer({ now: clock.now, ttlMs });
+    this.windows = new PresenceWindows({ now: clock.now });
   }
 
   issueChallenge() {
@@ -366,6 +373,7 @@ export class SimBurrow {
     };
     const proof = await verifyPresenceProof(request.presence, expected, this.policy);
     if (!proof.ok) return deny('presence-rejected', proof.reason);
+    const verifiedAt = this.clock.now();
     if (!approve) return deny('user-denied');
     // The human types what the phone displays; compare once, no retry.
     if ((typedCode ?? request.code) !== request.code) return deny('confirmation-mismatch');
@@ -379,6 +387,7 @@ export class SimBurrow {
       approvedBy,
       label: label ?? boundedPairingLabel(request.label),
     });
+    this.windows.seed(pending.clientStaticPublicKey, record, verifiedAt);
     return answer(
       {
         ok: true,
@@ -395,7 +404,7 @@ export class SimBurrow {
 
   /**
    * Noise message 1 of a connection against the long-term static; answers
-   * message 2 carrying a fresh 32-byte Burrow challenge as its payload.
+   * message 2 carrying a fresh 32-byte Burrow challenge and the window offer.
    */
   async readConnectionInit(connectionId, message1) {
     const responder = await createNoiseResponder({
@@ -403,21 +412,26 @@ export class SimBurrow {
       staticKeyPair: this.staticKeyPair,
     });
     await responder.readMessage(message1);
+    const clientStaticPublicKey = toBase64Url(responder.remoteStaticPublicKey);
     const issued = this.challenges.issue();
-    const message2 = await responder.writeMessage(fromBase64Url(issued.challenge));
+    const offer = this.windows.open(clientStaticPublicKey) ? PRESENCE_WINDOW : 'none';
+    const payload = encodeConnectionMessage2(fromBase64Url(issued.challenge), offer);
+    const message2 = await responder.writeMessage(payload);
     this.#connections.set(connectionId, {
       session: new NoiseTransportSession(responder.session),
-      clientStaticPublicKey: toBase64Url(responder.remoteStaticPublicKey),
+      clientStaticPublicKey,
       challenge: issued.challenge,
+      boundChallenge: toBase64Url(payload),
     });
     return message2;
   }
 
   /**
-   * Authorization = proof ∧ conjunction. The specific miss is reported on the
-   * returned object — the owner-local log — while the `ConnectionOutcomeV1`
-   * itself carries only `pairing-required`. That separation is the point:
-   * which half of the conjunction failed never leaves the Burrow.
+   * Authorization = (proof ∨ window) ∧ conjunction. The specific miss is
+   * reported on the returned object — the owner-local log — while the
+   * `ConnectionOutcomeV1` itself carries only `pairing-required`. That
+   * separation is the point: which half of the conjunction failed never
+   * leaves the Burrow.
    */
   async handleConnectionRequest(connectionId, ciphertext) {
     const pending = this.#connections.get(connectionId);
@@ -447,31 +461,54 @@ export class SimBurrow {
     if (!isConnectionRequestV1(request)) return deny('protocol-rejected', { detail: 'malformed-request' });
     if (!fresh) return deny('presence-rejected', { detail: 'challenge-invalid' });
 
-    const expected = {
-      kind: 'connection',
-      burrowId: this.burrowId,
-      connectionId,
-      burrowChallenge: pending.challenge,
-      handshakeHash: toBase64Url(pending.session.handshakeHash),
-      passkeyCredentialId: request.presence.binding.passkeyCredentialId,
-    };
-    const proof = await verifyPresenceProof(request.presence, expected, this.policy);
-    if (!proof.ok) return deny('presence-rejected', { detail: proof.reason });
+    // Who the presence speaks for: a proof's verified identity, or the record
+    // an open window was opened for.
+    let presented;
+    let window = null;
+    if (request.presence === PRESENCE_WINDOW) {
+      window = this.windows.open(pending.clientStaticPublicKey);
+      if (!window) return deny('presence-rejected', { detail: 'window-closed' });
+      presented = window;
+    } else {
+      const expected = {
+        kind: 'connection',
+        burrowId: this.burrowId,
+        connectionId,
+        burrowChallenge: pending.boundChallenge,
+        handshakeHash: toBase64Url(pending.session.handshakeHash),
+        passkeyCredentialId: request.presence.binding.passkeyCredentialId,
+      };
+      const proof = await verifyPresenceProof(request.presence, expected, this.policy);
+      if (!proof.ok) return deny('presence-rejected', { detail: proof.reason });
+      presented = {
+        accountId: request.presence.accountId,
+        passkeyCredentialId: expected.passkeyCredentialId,
+        passkeyPublicKeyHash: proof.passkeyPublicKeyHash,
+      };
+    }
 
     const auth = this.acl.authorize({
-      passkeyCredentialId: expected.passkeyCredentialId,
+      passkeyCredentialId: presented.passkeyCredentialId,
       clientStaticPublicKey: pending.clientStaticPublicKey,
     });
     if (!auth.record) return deny('pairing-required', { misses: auth.reasons });
     // The record is the conjunction of four values, not two: the account and
     // the passkey key hash are checked against the same row the two identities
     // selected, so a Relay that swapped either grants nothing.
-    if (auth.record.accountId !== request.presence.accountId) {
+    if (auth.record.accountId !== presented.accountId) {
       return deny('pairing-required', { misses: ['account-mismatch'] });
     }
-    if (auth.record.passkeyPublicKeyHash !== proof.passkeyPublicKeyHash) {
+    if (auth.record.passkeyPublicKeyHash !== presented.passkeyPublicKeyHash) {
       return deny('pairing-required', { misses: ['passkey-key-mismatch'] });
     }
+    // A window speaks only for the record it was opened for.
+    if (window && auth.record.approvedAt !== window.approvedAt) {
+      return deny('pairing-required', { misses: ['record-replaced'] });
+    }
+    // Only a proof opens or refreshes a window; a ride is activity under it.
+    const now = this.clock.now();
+    if (window) this.windows.noteActivity(pending.clientStaticPublicKey, { approvedAt: auth.record.approvedAt, at: now });
+    else this.windows.seed(pending.clientStaticPublicKey, auth.record, now);
     return answer({ ok: true, burrowLabel: this.label }, { record: auth.record });
   }
 }
@@ -661,15 +698,24 @@ export class SimClient {
 
   /**
    * The whole connection ceremony: IK against the pinned Burrow static, the
-   * challenge that arrives in message 2, one control message carrying the
-   * proof, and the single outcome.
+   * challenge and window offer that arrive in message 2, one control message
+   * carrying a proof — or, with `window`, a request to ride the Burrow's
+   * presence window, which asks the passkey for nothing — and the single
+   * outcome.
    *
    * `misses` is the Burrow's owner-local reason list; the outcome the Client is
    * actually sent never names it.
    */
   async connect(
     burrow,
-    { accountId, authenticator, relay = this.relay, connectionId = randomRoutingId(), tamper = {} } = {},
+    {
+      accountId,
+      authenticator,
+      relay = this.relay,
+      connectionId = randomRoutingId(),
+      window = false,
+      tamper = {},
+    } = {},
   ) {
     if (relay) relay.validateAccount(accountId, authenticator.credentialId);
     const staticKeyPair = await this.#staticFor(burrow.burrowId);
@@ -683,35 +729,37 @@ export class SimClient {
       remoteStaticPublicKey: remoteStatic,
     });
     const message1 = await initiator.writeMessage();
-    const challengeBytes = await initiator.readMessage(
-      await burrow.readConnectionInit(connectionId, message1),
-    );
+    const payload = await initiator.readMessage(await burrow.readConnectionInit(connectionId, message1));
+    const offer = decodeConnectionMessage2(payload);
     const session = new NoiseTransportSession(initiator.session);
 
     const binding = {
       kind: 'connection',
       burrowId: burrow.burrowId,
       connectionId,
-      burrowChallenge: toBase64Url(challengeBytes),
+      // The whole payload, offer byte included.
+      burrowChallenge: toBase64Url(payload),
       handshakeHash: toBase64Url(session.handshakeHash),
       passkeyCredentialId: authenticator.credentialId,
     };
     const presence =
       tamper.presence ??
-      (await this.presenceProof({
-        binding,
-        accountId,
-        authenticator,
-        rpId: burrow.policy.rpId,
-        relay,
-        tamper,
-      }));
+      (window
+        ? PRESENCE_WINDOW
+        : await this.presenceProof({
+            binding,
+            accountId,
+            authenticator,
+            rpId: burrow.policy.rpId,
+            relay,
+            tamper,
+          }));
     const answered = await burrow.handleConnectionRequest(
       connectionId,
       session.sendControl({ presence, ...(tamper.request ?? {}) }),
     );
     if (answered.ciphertext === null) {
-      return { ok: false, outcome: null, presence, binding, detail: answered.detail, misses: [] };
+      return { ok: false, outcome: null, offer, presence, binding, detail: answered.detail, misses: [] };
     }
     const receipt = session.receive(answered.ciphertext);
     const outcome =
@@ -719,6 +767,7 @@ export class SimClient {
     return {
       ok: outcome?.ok === true,
       outcome,
+      offer,
       presence,
       binding,
       detail: answered.detail,

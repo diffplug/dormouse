@@ -228,13 +228,15 @@ What each step establishes: `docs/specs/remote-security-model.md` -> "Pairing".
 sequenceDiagram
   Phone->>Relay: e2e init (Noise msg 1)
   Relay->>Burrow: e2e init {clientId}
-  Burrow-->>Relay: e2e response (msg 2 = 32-byte Burrow challenge)
+  Burrow-->>Relay: e2e response (msg 2 = challenge + window offer)
   Relay-->>Phone: e2e response
-  Note over Phone: ONE biometric prompt
-  Phone->>Relay: reauth begin/finish
+  opt no presence window open
+    Note over Phone: ONE biometric prompt
+    Phone->>Relay: reauth begin/finish
+  end
   Phone->>Relay: e2e transport ConnectionRequestV1
   Relay->>Burrow: e2e transport
-  Note over Burrow: challenge consumed, proof + ACL checked
+  Note over Burrow: challenge consumed, proof or window + ACL checked
   Burrow-->>Relay: e2e transport ConnectionOutcomeV1
   Relay-->>Phone: e2e transport
   Phone->>Burrow: protocol-v1 inside the same Noise session

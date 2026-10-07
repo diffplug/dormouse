@@ -19,6 +19,7 @@ import {
   concatBytes,
   createNoiseInitiator,
   createNoiseResponder,
+  decodeConnectionMessage2,
   e2eConnectionPrologue,
   ecdsaRawToDer,
   fromBase64Url,
@@ -29,6 +30,7 @@ import {
   toBase64Url,
   utf8Decode,
   utf8Encode,
+  type ConnectionOffer,
   type NoiseKeyPair,
   type NoiseSession,
   type PairingInvitation,
@@ -382,7 +384,7 @@ export async function openConnectionSession(options: {
   connectionId: string;
   clientStatic: NoiseKeyPair;
   burrowStaticPublicKey: string;
-}): Promise<{ session: NoiseTransportSession; burrowChallenge: string }> {
+}): Promise<{ session: NoiseTransportSession; burrowChallenge: string; offer: ConnectionOffer | null }> {
   const handshake = await createNoiseInitiator({
     prologue: e2eConnectionPrologue(options.burrowId, options.connectionId),
     staticKeyPair: options.clientStatic,
@@ -401,12 +403,13 @@ export async function openConnectionSession(options: {
       (frame) => frame.step === 'response',
     ),
   );
-  // Message 2's payload is the Burrow's fresh single-use challenge, which the
-  // presence binding must name.
+  // Message 2's payload is the Burrow's fresh single-use challenge and its
+  // window offer; the presence binding names the whole of it.
   const payload = await handshake.readMessage(fromBase64Url(response.ct as string));
   return {
     session: new NoiseTransportSession(handshake.session),
     burrowChallenge: toBase64Url(payload),
+    offer: decodeConnectionMessage2(payload),
   };
 }
 

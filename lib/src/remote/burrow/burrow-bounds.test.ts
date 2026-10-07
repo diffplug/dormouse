@@ -25,6 +25,7 @@ import {
   MAX_CLIENT_ID_LENGTH,
   MAX_PENDING_PAIRINGS,
   MAX_RELAY_TO_BURROW_FRAME_LENGTH,
+  PRESENCE_WINDOW,
   RELAY_PING,
   RELAY_PING_INTERVAL_MS,
   RELAY_PONG,
@@ -557,6 +558,30 @@ describe('BurrowRuntime bounds', () => {
     const stranger = await pairClient('c-late');
     const { outcome } = await connectClient('c-late', stranger);
     expect(outcome).toEqual({ ok: false, code: 'burrow-busy' });
+    // Riding the presence window its pairing opened buys no more than a proof.
+    clock.advance(1_000);
+    const connectionId = testRoutingId();
+    const { session, offer } = await openConnectionSession({
+      socket,
+      burrowId: enrollment.burrowId,
+      clientId: 'c-late',
+      connectionId,
+      clientStatic: stranger,
+      burrowStaticPublicKey: enrollment.noiseStaticPublicKey!,
+    });
+    expect(offer).toBe(PRESENCE_WINDOW);
+    sendE2eFrame(socket, {
+      clientId: 'c-late',
+      burrowId: enrollment.burrowId,
+      kind: 'connection',
+      id: connectionId,
+      step: 'transport',
+      ct: toBase64Url(session.sendControl({ presence: PRESENCE_WINDOW })),
+    });
+    expect(await readOutcome(socket, session, 'connection', connectionId)).toEqual({
+      ok: false,
+      code: 'burrow-busy',
+    });
     expect(burrow.establishedSessionCount).toBe(MAX_ESTABLISHED_E2E_SESSIONS);
     expect(sessions.filter((s) => s.disposed)).toHaveLength(0);
   });

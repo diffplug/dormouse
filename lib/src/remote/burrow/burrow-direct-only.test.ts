@@ -15,6 +15,7 @@ import {
   DIRECT_ANSWER_TIMEOUT_MS,
   DIRECT_BUFFER_HIGH,
   DIRECT_ONLY_DEADLINE_MS,
+  PRESENCE_WINDOW,
   SESSION_END_V1,
   mintNoiseStaticKeyPair,
   toBase64Url,
@@ -229,6 +230,27 @@ describe('BurrowRuntime direct-only sessions', () => {
     expect(sessions[0]!.disposed).toBe(true);
     expect(burrow.establishedSessionCount).toBe(0);
     expect(await lastControl(live, 1)).toEqual(SESSION_END_V1);
+  });
+
+  it('says so to a connection that rode the presence window, which asked for no proof', async () => {
+    localNetworks();
+    const clientStatic = await pairClient('c1');
+    const connectionId = testRoutingId();
+    const { session, offer } = await openConnectionSession({
+      socket,
+      burrowId: enrollment.burrowId,
+      clientId: 'c1',
+      connectionId,
+      clientStatic,
+      burrowStaticPublicKey: enrollment.noiseStaticPublicKey!,
+    });
+    expect(offer).toBe(PRESENCE_WINDOW);
+    send('c1', connectionId, session.sendControl({ presence: PRESENCE_WINDOW }));
+    expect(await readOutcome(socket, session, 'connection', connectionId)).toEqual({
+      ok: true,
+      burrowLabel: LABEL,
+      directOnly: true,
+    });
   });
 
   it('carries protocol-v1 once the direct path does, past the deadline', async () => {

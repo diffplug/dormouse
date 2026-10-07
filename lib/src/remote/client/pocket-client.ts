@@ -929,8 +929,8 @@ export class PocketClient {
     let burrowChallenge: string;
     try {
       const response = await this.#core.exchange(route, await handshake.writeMessage(), deadline);
-      // Message 2's payload is the Burrow's fresh single-use challenge, which the
-      // presence binding must name.
+      // Message 2's payload is the Burrow's fresh single-use challenge and its
+      // window offer; the presence binding names the whole of it.
       burrowChallenge = toBase64Url(await handshake.readMessage(fromBase64Url(response)));
       session = new NoiseTransportSession(handshake.session);
     } catch (err) {
