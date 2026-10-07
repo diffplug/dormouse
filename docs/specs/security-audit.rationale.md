@@ -60,7 +60,13 @@ Run 35205193090's `## Summary` also inverted the placeholder it was reading: "tw
 
 ## Outcomes and reporting
 
-Source audit, 2026-10: quoted `VERDICT:` lines in the first fragment can displace later verdicts beyond the 32,000-character clamp. PASS status with finished domains but no merged report can still close failure issues. The default `gh issue list` returns only 30, leaving older open failures unreconciled. These reporter defects remain unfixed in the current code.
+A review of 160 runs (2026-05 to 2026-10) found the reported verdict trusted as the agent wrote it. On 2026-10-07 the `hosted` fragment opened `VERDICT: PASS` over its own `[Origin boundary #6.b] UNVERIFIABLE`; the issue for #797 missed a `FAIL —` line because the lift expected `FAIL:`; `ci-and-secrets` folded multi-clause rules into one PASS each; and a whole section could go unreported with nothing noticing. Each was a prompt being followed or not. Computing the verdict from lines in a fixed grammar, against a manifest the specs determine, turns each into a mechanical INCONCLUSIVE: the skipped section is a missing rule, the folded clauses are a lettered gap or a bare number the domain chose, and the misspelled `FAIL` is a malformed line.
+
+A malformed line is INCONCLUSIVE rather than lifted by a more tolerant pattern because every tolerant pattern so far matched some passing evidence too: `### FAIL IF results` heads a passing list, and `- PASS: **FAIL IF** …` quotes the clause it passed. A malformed `BLOCKER` still counts as one, since a claimed blocker filed as "no verdict" would be the inversion this change exists to stop.
+
+A pessimistic verdict line that its lines do not support is held at INCONCLUSIVE rather than taken as `FAIL`: taken at its word it files a security finding nobody can locate, and overruled it passes a domain that doubted itself. The same rule covers `audit-status.txt`, which is an agent's conclusion like any other.
+
+The private report carries only what did not pass. Run 36119432126's fragments were 335,600 characters, nearly all of it `PASS` evidence, and its merged report repeated them: eleven parts once split, with the deciding lines in the head only because a lift put them there. With the computed verdicts and non-`PASS` lines leading, the head is the decision, and the `PASS` record stays in the encrypted transcript for whoever needs it.
 
 Collapsing the inconclusive case into `FAIL`, as the step originally did, filed an identical issue for "the repo is insecure" and "the auditor stopped early".
 
@@ -68,11 +74,7 @@ A `FAIL IF` condition no audit run can read makes the verdict a coin flip, becau
 
 GitHub rejects an over-long issue body outright; that rejection lands on a `set -e` step *after* the verdict is decided, and the finding then reaches no issue and no comment — only a red run and an artifact that expires. The 2026-08-29 and 08-30 runs lost a `FAIL` that way, over 65,536 characters. The public body truncated with its head kept until the embargo; the private report now splits instead, because a reader of the private tracker has no reason to lose any of it, and the split stops at a bounded part count only so a runaway fragment cannot flood the tracker with comments. Both helper calls are non-fatal so a failure of the helper cannot reopen the window it closes.
 
-Keeping the head is not the same as keeping what decides. Run 35842217451 (2026-09-23) composed a 226,302-character body: the posted issue carried `VERDICT: INCONCLUSIVE` for `audit-ci-secrets.md` and a note sending the reader to its `UNVERIFIABLE` checks, while that domain's one `UNVERIFIABLE` line sat past the cut along with the whole of `## Application security`, `## Hosted accounts` and `## Summary`. The deciding lines are not positionally predictable, so the clamp cannot be taught to keep them; lifting them into the head, which the clamp keeps by construction, is what makes the notes' pointers resolve. The lift matches at line start after an optional heading or bullet marker because every fragment is written in `FAIL IF` vocabulary — `### FAIL IF results` heads the passing list, and a `- PASS:` bullet quotes the clause it passed — so a bare `FAIL` match would lift the passing evidence as findings. The findings are bounded at 40 lines, and every lifted line at 500 characters, so the lift cannot itself exhaust the budget it protects; the real report produced 8 lines and 1,571 characters. The cap falls on the findings alone because one verdict line per fragment is bounded by the fragment count while a single domain's findings are not, so a shared cap would let the first domain's findings push the last domain's verdict out — the loss the lift exists to prevent. The first draft of the lift piped `grep` without `|| true`: a nonempty fragment carrying no marker line — the unreadable-verdict state the guard loop above already reports — made the pipeline exit 1, and `set -eo pipefail` ended the step before `audit-comment.md` was composed, so nothing was posted at all. Caught by the review on the PR that introduced it and pinned by a markerless-fragment case.
-
 Issue prose per combination of conditions cannot be kept correct by fixing combinations. Four consecutive review rounds found the same defect in different clothes — an arm whose text was true only of the states that could reach it, made false by the next gate that widened. A note claiming nothing about the other conditions cannot be invalidated by a new one.
-
-Gating a fragment guard on the status produced the same defect three times: gated on `PASS`, one empty fragment silenced the dissent check; widened to `!= FAIL`, an orchestrator that wrote `FAIL` itself silenced both, so a domain that left no report beside a real finding appeared nowhere at all. Recording what is true of a run and deciding its verdict are separate jobs.
 
 Existence is not agreement. The missing-fragment guard catches a domain that produced nothing; the verdict-line guard catches one whose `FAIL` the merge lost, which is worse, because `PASS` closes the open failure issue and opens the release gate. A fragment the check cannot read must not fall through to an unchallenged `PASS` either — that puts the verdict back on a prompt having been followed, the thing the guard exists to stop being the control.
 
@@ -84,7 +86,15 @@ Without the transcript a run that produces no verdict is undiagnosable: `claude-
 
 The October 2026 audit checked the upload's `if: always()` and the reporter's absent-artifact branch. They attempt postprocessing after ordinary failures, but cannot establish an upload after the runner itself times out or is cancelled; the issue links a download only when the artifact lookup returns an id.
 
-Publishing the fragments when no merged report exists is the same "a prompt is not a control" split as the guards above. Run 34581574869 (2026-09-11) ended its turn before the merge, so this step's report section was one line saying no report was produced — while `supply-chain` and `ci-and-secrets` had finished `VERDICT: PASS` fragments in the working directory, already redacted and already read twice by the guard loops. `.github/audit/orchestrator.md` §4 now forbids ending the turn there, but the run's findings should not depend on that sentence being followed. Verbatim and unmerged, because §3's merge is the only thing entitled to characterise a fragment; the cut-off and absent markers are the exception, being the same mechanical tests the step's own guard loops already ran, and a fragment published without them reads as a finished report.
+## Findings
+
+Severity was never defined, and the ratings showed it. On #1027 a low-impact umask was the run's one FAIL while a file name reaching a PowerShell command line and a paste submitting a command were WARNINGs; the order was the order of mechanical certainty, not of impact. The rubric names the reach — execution, credential, authorization — so a domain rates what an attacker gets.
+
+A qualitative BLOCKER fails the run, as the preamble already told domains to report; until the verdict was computed only the domain's own line enforced it, so a BLOCKER under `VERDICT: PASS` passed.
+
+The evidence fields exist for false positives. A `recovery.json` finding claimed its contents were "not revalidated" after reading only the reader; the sink, `normalizeResumeCommand`, revalidates. Requiring the sink by name, and a reproduction or a cap at INFO, makes that claim either checked or visibly unconfirmed. Missing evidence makes the line malformed rather than demoting it, because a mechanical demotion of a real BLOCKER is the dangerous direction.
+
+Duplicates came from delegation: each delegate a domain improvised ran its own qualitative pass over overlapping ground, and the merge concatenated them, so one PowerShell finding reached #1027 three times and a log finding twice. Named streams make the partition the prompt's rather than the run's, with one qualitative stream so no ground is swept twice; the five-line merge catches what still overlaps, including across domains.
 
 ## Embargo
 
@@ -100,13 +110,22 @@ The token's step also writes `gh` a fresh config directory, so no leftover confi
 
 The tracker's visibility is checked against `github.com` rather than the REST API: anonymous API calls share a 60-an-hour limit per runner address, and a rate-limited 403 would read as `UNVERIFIABLE` and hold the release gate.
 
-One private issue per failing run, rather than per finding, is the first slice; a ledger that stops a PASS closing the public issue while private findings are unfixed would build on the same tracker.
 
 Provisioning `EMBARGO_TOKEN`: a fine-grained PAT with Issues: write on `diffplug/dormouse-embargo` only, minted on an admin's account.
 
 ```bash
 gh secret set EMBARGO_TOKEN --env security-audit --repo diffplug/dormouse --body 'github_pat_…'
 ```
+
+## Findings ledger
+
+A later PASS closed issues whose findings were never fixed: the pass of 2026-07-10 closed a tend-permissions failure that was back by 07-14, and `hangs/` passed on 10-05 and 10-06 and failed on 10-07. A nondeterministic reader misses a finding on some nights, so one quiet night is not a fix. WARNINGs, which never failed a run, were not tracked anywhere once their run's issue closed.
+
+The key leaves out the line number so an edit above a finding does not open a second issue for it; the five-line window applies within one run, where lines are comparable.
+
+A PASS still exits zero while ledger findings are open: the gate holds a release on what the current tree fails, and the ledger holds what a human has not yet triaged. Only predecessors' issues hold the public issue open, so a PASS's own new WARNINGs do not keep a failure issue alive by themselves.
+
+The step lists the tracker with `--limit 1000`, and the public step does the same: the default of 30 left an older open failure issue unreconciled.
 
 ## Environment and `AUDIT_PAT`
 

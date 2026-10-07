@@ -21,6 +21,17 @@ For `## Terminal context directory actions`, read `docs/specs/terminal-context.m
 
 For the rest of `docs/specs/security-local.md`, read each section's owner first — `docs/specs/terminal-escapes.md` and the owners its rows name, `docs/specs/dor-tool.md` -> "Reaping", "Terminal links", and "Opening local files", `docs/specs/dor-browser.md`, `docs/specs/dor-cli.md`, `docs/specs/vscode.md` -> "Webview message authentication", `docs/specs/standalone.md` -> "Persistence" — then the parser, the iframe shim, the control-socket code, and the persistence paths they point at. The attacker there is a program printing to the terminal, a page in a browser pane, or another local account, never the network.
 
+## Work streams
+
+Delegate only by these streams (`.github/audit/_preamble.md` -> "Work streams"). Each holds every rule under the headings it names, subheadings included:
+
+- `local-terminal` — `docs/specs/security-local.md`: "Terminal output", "Browser panes", "The dor control socket", "Persisted state", "Terminal context directory actions", "Spawned programs", "Dor Tool configuration".
+- `local-listeners` — `docs/specs/security-local.md`: "Loopback Listeners", "Local-file viewer", "Network policy".
+- `remote-trust` — `docs/specs/security-remote.md`: "Trust boundary", "Relay origin", "Cross-origin access", "What crosses the boundary", "Auxiliary helpers".
+- `remote-transport` — `docs/specs/security-remote.md`: "Direct path", "One-time connection".
+- `remote-deploy` — `docs/specs/security-remote.md`: "Credentials at rest", "The setup password", "Network posture (self-hosted)".
+- `qualitative` — the qualitative pass below, once, over the whole of this domain's scope.
+
 ## Qualitative pass
 
 Be adversarial, and go past the `FAIL IF` list; a bare section name is `docs/specs/security-remote.md`'s. Ask specifically:

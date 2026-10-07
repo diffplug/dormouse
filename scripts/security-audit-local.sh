@@ -93,14 +93,16 @@ run_domain() {
     fi
     # The same grammar CI applies in .github/workflows/security-audit.yaml, and
     # for the same reason: a failure with an appended explanation is still a
-    # finding, so only the PASS arm matches exactly. Drifting from CI here would
-    # report a dissenting fragment as unreadable.
+    # finding. Drifting from CI here would report a dissenting fragment as
+    # unreadable.
     case "$(head -n1 "$out")" in
-      'VERDICT: PASS') return 0 ;;
-      'VERDICT: FAIL'*) echo "==> $domain reports FAIL" >&2; return 1 ;;
-      'VERDICT: INCONCLUSIVE') return 1 ;;
-      *) echo "==> $domain produced no readable verdict" >&2; return 1 ;;
+      'VERDICT: PASS'|'VERDICT: INCONCLUSIVE') ;;
+      'VERDICT: FAIL'*) echo "==> $domain reports FAIL" >&2 ;;
+      *) echo "==> $domain produced no readable verdict" >&2 ;;
     esac
+    # And the verdict CI reports: computed from the fragment's lines, zero only
+    # on PASS, which also needs the line above to say exactly `VERDICT: PASS`.
+    node scripts/security-audit-report.mjs check "$out" >&2
   else
     echo "==> $domain produced no fragment — in CI that is an INCONCLUSIVE audit, not a FAIL" >&2
     return 1

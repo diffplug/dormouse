@@ -20,6 +20,8 @@ When run by `scripts/security-audit-local.sh` without `AUDIT_PAT`, use the opera
 
 You hold no credential for the private tracker `docs/specs/security-audit.md` -> "Embargo" files to, and need none: read that section's checks from the workflow, the scripts it names, and the unauthenticated `curl` the rule gives.
 
+For `docs/specs/security-audit.md`'s "Outcomes and reporting", "Findings", and "Findings ledger", read `scripts/security-audit-report.mjs` and the three reporting steps of `.github/workflows/security-audit.yaml`, then run `node --test scripts/security-audit.test.mjs`, which executes those steps as shipped against a stub `gh`. A passing suite is evidence only for the properties its cases assert; judge each clause against the code as well.
+
 **Check effective permissions, not declared ones**, as `docs/specs/security-ci.md` -> "Automated Maintainer (tend)" defines them. Read `actions/permissions/workflow` before judging any inherited-permission check.
 
 **Derive every inventory from the live API, never from the spec's own list.** A `FAIL IF` that says "any" quantifies over what exists now; illustrative `Today:` lists do not limit its scope.
@@ -34,6 +36,15 @@ You hold no credential for the private tracker `docs/specs/security-audit.md` ->
 - Judge every discovered member against the applicable conditions, including explicit exceptions. Record FAIL for a violated condition. The secret-placement inventory in `security-ci.md` is normative: a secret outside the specified placements is a FAIL, not a documentation omission. A mere mention elsewhere in the scoped specs, such as a blast-radius table row, grants no exception to a placement requirement.
 - Absence from an illustrative environment `Today:` list alone is not a violation. Report documentation omissions as INFO under `### Qualitative findings`; skip the INFO when another section of the scoped specs already covers the member. This only suppresses the documentation finding, not a placement FAIL.
 - Never record `PASS` on a condition evaluated over only the spec's listed subset or an incomplete API enumeration. Apply the access-error handling above and the shared preamble's incomplete-check verdict rules.
+
+## Work streams
+
+Delegate only by these streams (`.github/audit/_preamble.md` -> "Work streams"). Each holds every rule under the headings it names:
+
+- `actions` — `docs/specs/security-ci.md`: "GitHub Actions Policies", "Automated Maintainer (tend)".
+- `releases` — `docs/specs/security-ci.md`: "Hosted Deployments", "VS Code Extension Releases", "Desktop Releases"; `docs/specs/security.md`: "Reporting a vulnerability".
+- `audit` — `docs/specs/security-audit.md`: "Schedule and gate", "Domains", "Orchestration", "Outcomes and reporting", "Findings", "Embargo", "Findings ledger", "Environment and `AUDIT_PAT`".
+- `qualitative` — the qualitative pass below, once, over the whole of this domain's scope.
 
 ## Qualitative pass
 

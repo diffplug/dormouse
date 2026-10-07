@@ -22,6 +22,16 @@ gh api --paginate 'repos/diffplug/pgstencil/commits/<commit>/check-runs?check_na
 
 Judge both answers by the pgstencil `FAIL IF` under "Deployment boundary". A commit can carry several `security-audit` runs; a `cancelled` one is a manual dispatch that was stopped, not a verdict. `diffplug/pgstencil`'s own `security-audit` workflow audits the released code against its `SECURITY.md`; beyond the adapter reads above, do not audit the installed packages' contents here — audit how `hosted/` configures the adapter. Distinguish tested code from pending production configuration; do not treat local provider simulations as live OAuth acceptance, and treat a checked-in placeholder as no evidence about an external control. Production activation is staged under the spec's `## Future`: while it sits below the fold there is no check here, so report its state as INFO under `### Qualitative findings`.
 
+## Work streams
+
+Delegate only by these streams (`.github/audit/_preamble.md` -> "Work streams"). Each holds every rule under the headings it names:
+
+- `origin-account` — `docs/specs/security-hosted.md`: "Origin boundary", "Account boundary".
+- `relay` — `docs/specs/security-hosted.md`: "Relay boundary".
+- `rendezvous` — `docs/specs/security-hosted.md`: "Rendezvous boundary".
+- `deployment` — `docs/specs/security-hosted.md`: "Deployment boundary".
+- `qualitative` — the qualitative pass below, once, over the whole of this domain's scope.
+
 ## Qualitative pass
 
 You own `hosted/` and the installed pgstencil boundary. You **read** `.github/workflows/hosted-preview.yml` and `.github/workflows/hosted-production.yml` for the Deployment boundary above, but you do not own them: `ci-and-secrets` owns those workflows' credentials, environments, reviewers, and token placement (`docs/specs/security-ci.md` -> "Hosted Deployments"). Report what the deployment *path* does and leave that half to it, so the two domains do not report the same finding twice.
