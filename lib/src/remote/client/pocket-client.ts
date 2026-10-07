@@ -256,6 +256,20 @@ export class SessionExpiredError extends RelayRefusalError {
   }
 }
 
+/**
+ * The Relay rejected the token a request was *sent* with, but this client has
+ * signed in again since: the 401 speaks for a session that is already gone, so
+ * it clears nothing and must not send the current one back to sign-in. Never a
+ * {@link SessionExpiredError}, so nothing that reacts to expiry reacts to this;
+ * the request's result is simply obsolete.
+ */
+export class SessionSupersededError extends RelayRefusalError {
+  constructor() {
+    super('This request belonged to an earlier sign-in.', 401);
+    this.name = 'SessionSupersededError';
+  }
+}
+
 /** Shown when the scanned code is expired, spent, or otherwise unknown. */
 export const SETUP_CODE_DEAD_MESSAGE =
   'That setup code has expired. Show a new one on the computer and scan it again.';
@@ -561,7 +575,7 @@ export class PocketClient {
    * {@link SetupTokenInvalidError}. Classified here rather than in {@link #api}
    * so no other route's 401 can be read as a dead code.
    */
-  async #setupApi<T>(route: string, body: unknown, init?: RequestInit): Promise<T> {
+  async #setupApi<T>(route: string, body: unknown, init?: ApiInit): Promise<T> {
     try {
       return await this.#api<T>(route, body, init);
     } catch (err) {
@@ -737,17 +751,18 @@ export class PocketClient {
 
   /** Open the `/ws/client` relay socket; resolves once it is open. */
   async openSocket(): Promise<void> {
+    const session = this.#requireSession();
     try {
-      await this.#openSocket();
+      await this.#openSocket(session);
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err));
       if (error instanceof SessionExpiredError) throw error;
-      await this.#diagnoseSocketFailure(error);
+      await this.#diagnoseSocketFailure(error, session);
     }
   }
 
-  #openSocket(): Promise<void> {
-    const token = this.#requireSession().token;
+  #openSocket(session: PocketSession): Promise<void> {
+    const token = session.token;
     const url = `${this.#wsBase}${WS_ROUTES.client}?${WS_TOKEN_PARAM}=${encodeURIComponent(token)}`;
     const ws = this.#createWebSocket(url);
     this.#ws = ws;
@@ -1113,8 +1128,10 @@ export class PocketClient {
     if (!this.socketOpen) await this.openSocket();
   }
 
-  #auth(): { headers: Record<string, string> } {
-    return { headers: { authorization: `Bearer ${this.#requireSession().token}` } };
+  /** The current session's bearer header, naming the session for {@link #api}'s 401. */
+  #auth(): ApiInit & { session: PocketSession } {
+    const session = this.#requireSession();
+    return { headers: { authorization: `Bearer ${session.token}` }, session };
   }
 
   /**
@@ -1269,7 +1286,7 @@ export class PocketClient {
     return { ...this.#unavailable(error), pairingRequired: false };
   }
 
-  async #api<T>(route: string, body?: unknown, init?: RequestInit): Promise<T> {
+  async #api<T>(route: string, body?: unknown, init?: ApiInit): Promise<T> {
     const method = init?.method ?? 'POST';
     const response = await this.#fetch(`${this.#baseUrl}${route}`, {
       method,
@@ -1281,6 +1298,11 @@ export class PocketClient {
     // answers 401 too, and bouncing the user to sign-in for that would be a
     // worse bug than the one this fixes.
     if (response.status === 401 && parsed.error === UNAUTHORIZED_ERROR) {
+      // A 401 speaks only for the token it was sent with. One that outlived its
+      // session — signed out and in again while it was in flight — must not
+      // erase the replacement.
+      const sent = init?.session;
+      if (sent && sent.token !== this.#session?.token) throw new SessionSupersededError();
       // Drop the token here rather than at the call site: every later request
       // and every relay upgrade would fail the same way, and keeping it would
       // let the UI believe it is still signed in.
@@ -1305,15 +1327,18 @@ export class PocketClient {
    * "network is down" is to ask an authenticated route — which answers the
    * question and costs one request on a path that has already failed.
    */
-  async #diagnoseSocketFailure(original: Error): Promise<never> {
+  async #diagnoseSocketFailure(original: Error, session: PocketSession): Promise<never> {
+    // Signed out meanwhile: nothing left to diagnose.
     if (this.#session === null) throw original;
     try {
+      // With the token the socket presented, so a 401 is about that session.
       await this.#api<BurrowsResponse>(API_ROUTES.burrows, undefined, {
         method: 'GET',
-        headers: { authorization: `Bearer ${this.#session.token}` },
+        headers: { authorization: `Bearer ${session.token}` },
+        session,
       });
     } catch (err) {
-      if (err instanceof SessionExpiredError) throw err;
+      if (err instanceof SessionExpiredError || err instanceof SessionSupersededError) throw err;
       // Probe failed for its own reason — report the socket failure, which is
       // what the user actually hit.
     }
@@ -1338,6 +1363,17 @@ export class PocketClient {
     }
     return publicKey;
   }
+}
+
+/**
+ * What {@link PocketClient}'s `#api` reads off a request: the method, the
+ * headers, and — for an authenticated route — the session whose token the
+ * headers carry, which is what a 401 is about.
+ */
+interface ApiInit {
+  readonly method?: string;
+  readonly headers?: Record<string, string>;
+  readonly session?: PocketSession;
 }
 
 /** Where one ceremony's frames are addressed; the envelope's routing triple. */

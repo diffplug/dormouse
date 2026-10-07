@@ -1159,15 +1159,92 @@ describe('BurrowRuntime end-to-end ceremonies', () => {
     expect(await rideWindow('c3', clientStatic)).toMatchObject({ offer: 'none', outcome: presenceRejected });
   });
 
+  /** A passkey that asserts presence but not user verification. */
+  const newUnverifiedAuthenticator = (): Promise<TestAuthenticator> =>
+    createTestAuthenticator({ rpId: RP_ID, origin: ORIGIN, userVerified: false });
+
   /** Pair under a Relay that does not yet demand user verification. */
   async function pairedWithoutUv() {
+    const { clientStatic } = await pairedWithoutUvBy();
+    return clientStatic;
+  }
+
+  async function pairedWithoutUvBy() {
     makeBurrow();
-    const authenticator = await createTestAuthenticator({ rpId: RP_ID, origin: ORIGIN, userVerified: false });
+    const authenticator = await newUnverifiedAuthenticator();
     const { invitation, clientStatic, session, code } = await requestPairing('c1', authenticator);
     approvals[0]!.approve(code);
     expect(await outcome(session, 'pairing', invitation.inviteId)).toMatchObject({ ok: true });
-    return clientStatic;
+    return { authenticator, clientStatic };
   }
+
+  /** Raise the UV demand from inside the Burrow's next signature check, i.e. mid-verification. */
+  function raiseDuringVerify() {
+    const verify = globalThis.crypto.subtle.verify.bind(globalThis.crypto.subtle);
+    let raised = false;
+    const spy = vi.spyOn(globalThis.crypto.subtle, 'verify').mockImplementation(((...args: Parameters<typeof verify>) => {
+      if (!raised) {
+        raised = true;
+        socket.receive({ t: 'policy', requireUserVerification: true });
+      }
+      return verify(...args);
+    }) as typeof verify);
+    return { raised: () => raised, restore: () => spy.mockRestore() };
+  }
+
+  it('rejects a connection proof verified under the demand a raise replaced mid-verification', async () => {
+    const { authenticator, clientStatic } = await pairedWithoutUvBy();
+    const raise = raiseDuringVerify();
+    try {
+      expect(await attemptConnection('c1', clientStatic, authenticator)).toEqual(presenceRejected);
+      expect(raise.raised()).toBe(true);
+    } finally {
+      raise.restore();
+    }
+    // Nor did it open a window to ride.
+    expect(await rideWindow('c1', clientStatic)).toMatchObject({ offer: 'none', outcome: presenceRejected });
+  });
+
+  it('rejects a pairing proof verified under the demand a raise replaced mid-verification', async () => {
+    makeBurrow();
+    const raise = raiseDuringVerify();
+    let pairing;
+    try {
+      pairing = await requestPairing('c1', await newUnverifiedAuthenticator());
+      expect(raise.raised()).toBe(true);
+    } finally {
+      raise.restore();
+    }
+    expect(approvals).toHaveLength(0);
+    expect(await outcome(pairing.session, 'pairing', pairing.invitation.inviteId)).toEqual(presenceRejected);
+  });
+
+  it('rejects a pairing whose proof a raise outdated while it awaited local approval', async () => {
+    makeBurrow();
+    const { invitation, clientStatic, session, code } = await requestPairing('c1', await newUnverifiedAuthenticator());
+    expect(approvals).toHaveLength(1);
+    socket.receive({ t: 'policy', requireUserVerification: true });
+    await approvals[0]!.approve(code);
+    expect(await outcome(session, 'pairing', invitation.inviteId)).toEqual(presenceRejected);
+    expect(burrow.activeRecords).toHaveLength(0);
+    expect(savedRecords).toHaveLength(0);
+    expect((await openConnection('c1', clientStatic, testRoutingId())).offer).toBe('none');
+  });
+
+  it('commits a pairing a raise found mid-write, but opens no window on its outdated proof', async () => {
+    const write = Promise.withResolvers<void>();
+    makeBurrow(undefined, { saveAcl: () => write.promise });
+    const { invitation, clientStatic, session, code } = await requestPairing('c1', await newUnverifiedAuthenticator());
+    const completed = approvals[0]!.approve(code);
+    await settle();
+    socket.receive({ t: 'policy', requireUserVerification: true });
+    write.resolve();
+    await completed;
+    // Local consent was final once the write started.
+    expect(await outcome(session, 'pairing', invitation.inviteId)).toMatchObject({ ok: true });
+    expect(burrow.activeRecords).toHaveLength(1);
+    expect(await rideWindow('c2', clientStatic)).toMatchObject({ offer: 'none', outcome: presenceRejected });
+  });
 
   it('clears every window when the Relay raises the UV demand', async () => {
     const clientStatic = await pairedWithoutUv();

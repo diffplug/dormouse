@@ -110,6 +110,8 @@ Measured on iPhone 15 Pro, Safari 26.6.1, September 2026: X25519 generation work
 
 **Why the trigger is `UNAUTHORIZED_ERROR` and not a bare 401.** Treating a refused setup token's 401 as an expired session would sign the user out mid-pairing and lose the ceremony state — worse than the bug the sign-out path exists to fix.
 
+**Why a 401 is judged against the token it was sent with.** Background reads, such as the Burrows view's push query, can outlive a sign-out and sign-in; a late 401 for the old token would otherwise erase the fresh session and leave the Burrows list failing every action with "sign in first".
+
 ## Deployment: same-origin, always
 
 **What the origin check buys.** A Pocket served anywhere else cannot sign in at all, since WebAuthn binds the passkey to the serving origin — so the rule is enforced by the Relay, not merely observed by the client.

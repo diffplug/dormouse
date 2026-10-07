@@ -208,6 +208,8 @@ interface PendingPairingSession {
     readonly label: string;
     /** When this Burrow verified the pairing proof; the window it opens counts from here. */
     readonly verifiedAt: number;
+    /** The demand the proof was verified under; a raise since voids it ({@link BurrowRuntime.#raisePolicy}). */
+    readonly policy: ConnectionPolicy;
   };
   /** **Exactly one attempt**: a second confirm is refused whatever it types. */
   attempted: boolean;
@@ -1274,11 +1276,12 @@ export class BurrowRuntime {
       handshakeHash: pending.handshakeHash,
       passkeyCredentialId: request.presence.binding.passkeyCredentialId,
     };
-    const proof = await verifyPresenceProof(request.presence, binding, this.#policy);
+    const policy = this.#policy;
+    const proof = await verifyPresenceProof(request.presence, binding, policy);
     // The client may have gone, or been superseded, while WebCrypto ran.
     if (this.#clients.get(frame.clientId)?.pairing !== pending) return;
-    if (!proof.ok) {
-      console.warn(`[burrow] pairing presence rejected: ${proof.reason}`);
+    if (!proof.ok || this.#policy !== policy) {
+      console.warn(`[burrow] pairing presence rejected: ${proof.ok ? 'policy-raised' : proof.reason}`);
       this.#finishPairing(frame.clientId, 'presence-rejected');
       return;
     }
@@ -1292,6 +1295,7 @@ export class BurrowRuntime {
       // the persisted record all see the same safe value.
       label: boundedPairingLabel(request.label),
       verifiedAt: this.#now(),
+      policy,
     };
     this.#requestApproval({
       clientId: frame.clientId,
@@ -1332,6 +1336,12 @@ export class BurrowRuntime {
         this.#finishPairing(clientId, 'invitation-expired');
         return;
       }
+      // A UV raise while the modal waited voids the proof the approval rests on.
+      if (this.#policy !== approval.policy) {
+        console.warn('[burrow] pairing presence rejected: policy-raised');
+        this.#finishPairing(clientId, 'presence-rejected');
+        return;
+      }
       try {
         const next = BurrowAcl.fromRecords(this.#acl.burrowId, this.#acl.records(), { now: this.#now });
         const record = next.approve({
@@ -1348,8 +1358,11 @@ export class BurrowRuntime {
         this.#acl = next;
         // Only once the record is live, so the connect that follows pairing
         // needs no second prompt; a window for an older record of this static
-        // is replaced.
-        this.#presenceWindows.seed(pending.clientStaticPublicKey, record, approval.verifiedAt);
+        // is replaced. A UV raise during the write cannot cancel local consent,
+        // but the proof no longer meets the demand, so it opens no window.
+        if (this.#policy === approval.policy) {
+          this.#presenceWindows.seed(pending.clientStaticPublicKey, record, approval.verifiedAt);
+        }
         // Consent already happened, so a successful save stays committed even
         // after transport loss. Never answer on a retired or replacement pipe.
         if (this.#clients.get(clientId)?.pairing !== pending) return;
@@ -1566,10 +1579,13 @@ export class BurrowRuntime {
         handshakeHash: pending.handshakeHash,
         passkeyCredentialId: presence.binding.passkeyCredentialId,
       };
-      const proof = await verifyPresenceProof(presence, binding, this.#policy);
+      const policy = this.#policy;
+      const proof = await verifyPresenceProof(presence, binding, policy);
       if (this.#clients.get(frame.clientId)?.connection !== pending) return;
       if (!challengeValid) return this.#rejectPresence(frame.clientId, pending, 'challenge-invalid');
       if (!proof.ok) return this.#rejectPresence(frame.clientId, pending, proof.reason);
+      // A UV raise during verification: the proof met only the weaker demand.
+      if (this.#policy !== policy) return this.#rejectPresence(frame.clientId, pending, 'policy-raised');
       presented = {
         accountId: presence.accountId,
         passkeyCredentialId: binding.passkeyCredentialId,

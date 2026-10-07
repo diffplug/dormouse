@@ -184,7 +184,8 @@ Source of truth: `PocketClient.connect` in `lib/src/remote/client/pocket-client.
 Sessions expire ([relay.md](./relay.md)) and, on a self-host Relay, also end on every restart, while the passkey and paired Burrow records outlive both; Hosted also ends the session of an account no longer entitled (`docs/specs/hosted.md` -> "Relay"). **Pocket therefore treats a dead session as actionable, not reportable** (rationale): `PocketClient` clears its token, in memory and in storage, and throws `SessionExpiredError`; the app tears down any live adapter and returns to sign-in carrying that message. One passkey prompt restores the Burrows list, pairing and push registration intact.
 
 - **The trigger is the session gate specifically**, matched on the shared `UNAUTHORIZED_ERROR` from `remote-lib-common/src/remote/wire.ts` — a refused setup token answers 401 too. (rationale)
-- **A rejected relay upgrade carries no status**, so `openSocket` asks an authenticated route what happened: a 401 there means expiry, anything else leaves it an ordinary socket failure.
+- **A rejected relay upgrade carries no status**, so `openSocket` asks an authenticated route what happened, with the token the socket presented: a 401 there means expiry, anything else leaves it an ordinary socket failure.
+- **A 401 clears only the session whose token it answered.** One answering a session signed out since is `SessionSupersededError`, never `SessionExpiredError`, and leaves the current session in memory and storage (rationale).
 
 Source of truth: `SessionExpiredError` in `lib/src/remote/client/pocket-client.ts`.
 

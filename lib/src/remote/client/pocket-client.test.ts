@@ -47,6 +47,7 @@ import {
   PASSKEY_UNAVAILABLE_MESSAGE,
   PocketClient,
   SessionExpiredError,
+  SessionSupersededError,
   SetupTokenInvalidError,
   localStoragePocketStorage,
   purgeLegacyPairedMarkers,
@@ -1797,6 +1798,79 @@ describe('session expiry', () => {
     harness.socket.emitError();
     await expect(opening).rejects.toThrow('relay socket error');
     expect(harness.client.sessionToken).toBe(SESSION_TOKEN);
+  });
+
+  /**
+   * A 401 speaks for the token it was sent with. Signed out and in again while
+   * one was in flight, the late answer must leave the replacement standing.
+   */
+  describe('a late 401 for a session already replaced', () => {
+    const REPLACEMENT_TOKEN = 'tok-replacement';
+
+    /** Signed in once; `signInAgain` signs out and in, minting the replacement. */
+    async function replaceable(gate: string) {
+      const storage = memoryStorage();
+      let tokens = [SESSION_TOKEN, REPLACEMENT_TOKEN];
+      const answer401 = Promise.withResolvers<void>();
+      const harness = await signedIn(
+        {
+          '/api/signin/finish': async (body) => {
+            const finished = await AUTH_ROUTES['/api/signin/finish']!(body);
+            const [token, ...rest] = tokens;
+            tokens = rest;
+            return { json: { ...(finished.json as object), sessionToken: token } };
+          },
+          // The old session's request is held until the replacement exists.
+          [gate]: async () => {
+            await answer401.promise;
+            return { status: 401, json: { error: 'unauthorized' } };
+          },
+        },
+        { storage },
+      );
+      return {
+        harness,
+        storage,
+        signInAgain: async () => {
+          harness.client.signOut();
+          await harness.client.signin();
+          expect(harness.client.sessionToken).toBe(REPLACEMENT_TOKEN);
+        },
+        answer401: () => answer401.resolve(),
+      };
+    }
+
+    it('leaves the replacement in memory and storage, and is not expiry', async () => {
+      const { harness, storage, signInAgain, answer401 } = await replaceable(
+        '/api/push/subscriptions/query',
+      );
+      await seedRecord(harness.knownBurrows, 'h1');
+      const query = harness.client.listPushSubscribedBurrows();
+      await settle();
+      await signInAgain();
+
+      answer401();
+      const error = await query.catch((err: unknown) => err);
+      expect(error).toBeInstanceOf(SessionSupersededError);
+      expect(error).not.toBeInstanceOf(SessionExpiredError);
+      expect(harness.client.sessionToken).toBe(REPLACEMENT_TOKEN);
+      expect(storage.getSession()?.token).toBe(REPLACEMENT_TOKEN);
+    });
+
+    it('judges a relay upgrade by the token the socket presented', async () => {
+      const { harness, storage, signInAgain, answer401 } = await replaceable('/api/burrows');
+      const opening = harness.client.openSocket().catch((err: unknown) => err);
+      harness.socket.emitError();
+      await settle();
+      // The diagnosis probe is in flight under the old token.
+      expect(harness.calls.at(-1)!.headers.authorization).toBe(`Bearer ${SESSION_TOKEN}`);
+      await signInAgain();
+
+      answer401();
+      expect(await opening).toBeInstanceOf(SessionSupersededError);
+      expect(harness.client.sessionToken).toBe(REPLACEMENT_TOKEN);
+      expect(storage.getSession()?.token).toBe(REPLACEMENT_TOKEN);
+    });
   });
 });
 

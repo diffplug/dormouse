@@ -8,6 +8,8 @@
 
 **Why both verifiers must demand the same user-presence level.** Both evaluate the *same* assertion, so a Relay demanding user verification while the Burrow settles for presence leaves the weaker verifier deciding — inverting "the Burrow is the final authority" through a configuration difference rather than an attack. Mirroring the flag into enrollment stops each side reading its own environment.
 
+**Why a raise voids proofs in flight, not only windows.** A proof verified under the weaker demand is still mid-decision across WebCrypto awaits and the local approval modal; letting it finish would authorize under the demand the raise replaced and seed a window it could ride for up to `PRESENCE_WINDOW_MAX_MS`. A pairing whose write has started is past local consent, which Pairing makes final, so it commits; opening no window leaves its next connection proving under the new demand.
+
 ## Client statics
 
 The initial restart harness used an experimental envelope without the production AAD binding. Its restart evidence below is primitive-level evidence; the v3 harness uses the production codec and requires a fresh checkpoint. The operator's v3 Home Screen report at 17:17:44 UTC on September 11, 2026 passed with authenticated context and a retained production-format key from 17:14:19 UTC. It detects a new page instance after the requested phone restart, not process termination itself.
