@@ -4,7 +4,7 @@ import { wallHandleOwning } from './wall-handles';
 import { MoveWorkspaceAction } from './MoveWorkspaceAction';
 import { TerminalPane } from '../TerminalPane';
 import { TerminalContextView, type ContextScan, type TerminalContextViewProps } from './TerminalContextView';
-import { TerminalContextContext, WallActionsContext, type TerminalContextState } from './wall-context';
+import { TerminalContextContext, WallActionsContext, WorkspaceActiveContext, type TerminalContextState } from './wall-context';
 import { getHelper, helperRevision, openHelper, resetHelper, setHelperVisible, subscribeHelpers } from '../../lib/helper-terminal';
 import { isDelayedKillEnabled } from '../../lib/labs-settings';
 import { DEFAULT_WORKSPACE_ID } from '../../lib/session-types';
@@ -21,6 +21,7 @@ import { DEFAULT_HELPER_COMMAND } from '../../lib/terminal-context-types';
 export function TerminalContext({ id, title, closing, origin, warning: openWarning, tool = false, preview = false, placement }: TerminalContextState & { title?: string; tool?: boolean; preview?: boolean } & Pick<TerminalContextViewProps, 'placement'>) {
   const context = useContext(TerminalContextContext);
   const actions = useContext(WallActionsContext);
+  const workspaceActive = useContext(WorkspaceActiveContext);
   const states = useSyncExternalStore(subscribeToTerminalPaneState, getTerminalPaneStateSnapshot);
   const activities = useSyncExternalStore(subscribeToActivity, getActivitySnapshot);
   useSyncExternalStore(subscribeHelpers, helperRevision);
@@ -48,12 +49,13 @@ export function TerminalContext({ id, title, closing, origin, warning: openWarni
     void platform.getOpenPorts(id).then(ports => { if (!cancelled) setScan({ status: 'loaded', entries: listenerUrlsByPort(ports) }); }, () => { if (!cancelled) setScan({ status: 'failed' }); });
     return () => { cancelled = true; };
   }, [id, platform, tool]);
-  // The helper polls only while the context is open; an exit pauses it at once.
+  // The helper polls only while the context shows: an exit pauses it at once,
+  // and so does its Workspace going out of view, which leaves the context open.
   useEffect(() => {
-    if (closing || tool) return;
+    if (closing || tool || !workspaceActive) return;
     setHelperVisible(id, true);
     return () => setHelperVisible(id, false);
-  }, [id, closing, tool]);
+  }, [id, closing, tool, workspaceActive]);
   const onClose = useCallback(() => { context.close(); if (!tool) focusSession(id, true); }, [context, id, tool]);
   const copy = async (value: string) => { if (!await writeTextToClipboard(value)) throw new Error('Could not copy to clipboard'); };
   const mismatch = !!helper && !!cwd && !!helperCwd && (cwd.path !== helperCwd.path || cwd.isRemote !== helperCwd.isRemote || (cwd.isRemote && cwd.host !== helperCwd.host));
