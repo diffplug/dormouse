@@ -87,15 +87,16 @@ jobs:
       # rode out the same stall. Root runs Playwright's apt commands without its
       # own sudo, so `timeout` reaches the whole apt process tree. DejaVu matches
       # the explicit fallback in lib/.storybook/themes.ts.
-      # Worst case is 3 x (240 deps + 120 font) + 2 x 15 sleep = 1110s.
+      # Worst case is 3 x (360 deps + 60 font) + 2 x 15 sleep = 1290s; the deps
+      # attempt downloads ~115 MB, which took 113s on a degraded mirror.
       - name: Install browser system dependencies
-        timeout-minutes: 19
+        timeout-minutes: 22
         working-directory: lib
         run: |
           node_bin=$(command -v node)
           for i in 1 2 3; do
-            if sudo timeout 240 "$node_bin" node_modules/playwright/cli.js install-deps chromium webkit \
-               && sudo timeout 120 apt-get install -y -q --no-install-recommends fonts-dejavu-core; then
+            if sudo timeout 360 "$node_bin" node_modules/playwright/cli.js install-deps chromium webkit \
+               && sudo timeout 60 apt-get install -y -q --no-install-recommends fonts-dejavu-core; then
               exit 0
             fi
             echo "::warning::apt attempt $i for browser dependencies failed or timed out"
