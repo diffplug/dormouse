@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   productionDay,
   nextProductionTag,
@@ -109,4 +110,21 @@ test("a ref creation failure never falls back to updating an existing tag", asyn
     /conflict/,
   );
   assert.equal(calls.length, 3);
+});
+
+test("the tag job's only credential is an App token for this repository with Contents write alone", () => {
+  const workflow = readFileSync(
+    new URL("../../.github/workflows/hosted-production.yml", import.meta.url),
+    "utf8",
+  );
+  const job = workflow.slice(workflow.indexOf("\n  tag:"));
+  // One secret, the App's key, and only the minting step reads it.
+  assert.deepEqual(job.match(/secrets\.\w+/g), ["secrets.HOSTED_TAG_APP_PRIVATE_KEY"]);
+  const mint = job.match(/\n      - name: [^\n]*\n        id: tagger\n        uses: actions\/create-github-app-token@[0-9a-f]{40} # v[\d.]+\n        with:\n((?: {10}[^\n]*\n)+)/);
+  assert.ok(mint, "the tag job mints its token with a SHA-pinned create-github-app-token");
+  assert.deepEqual(
+    mint[1].trim().split("\n").map((line) => line.trim()).filter((line) => !/^(client-id|private-key):/.test(line)),
+    ["owner: diffplug", "repositories: dormouse", "permission-contents: write"],
+  );
+  assert.deepEqual(job.match(/GH_TOKEN: .*/g), ["GH_TOKEN: ${{ steps.tagger.outputs.token }}"]);
 });

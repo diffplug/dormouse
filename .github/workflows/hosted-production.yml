@@ -114,11 +114,22 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: package.json
+      # GITHUB_TOKEN cannot bypass the tag rulesets. The dormouse-hosted-tagger App is a
+      # bypass actor for creating `hosted/` tags only; its token is this repository's
+      # alone, contents-write, and revoked when the job ends.
+      - name: Mint the release-tag App's token
+        id: tagger
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.HOSTED_TAG_APP_CLIENT_ID }}
+          private-key: ${{ secrets.HOSTED_TAG_APP_PRIVATE_KEY }}
+          owner: diffplug
+          repositories: dormouse
+          permission-contents: write
       - name: Record the verified Hosted deployment
         run: node hosted/scripts/production-tag.mjs
         env:
-          # GITHUB_TOKEN cannot bypass the repository's admin-only tag ruleset.
-          GH_TOKEN: ${{ secrets.HOSTED_TAG_TOKEN }}
+          GH_TOKEN: ${{ steps.tagger.outputs.token }}
           BUILD_SHA: ${{ github.sha }}
           DEPLOYMENT_VERIFIED_AT: ${{ needs.deploy.outputs.verified-at }}
           DEPLOYMENT_ID: ${{ needs.deploy.outputs.deployment-id }}
