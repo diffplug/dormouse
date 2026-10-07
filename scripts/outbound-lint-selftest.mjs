@@ -181,6 +181,12 @@ const CSP = [
   ],
   [
     'standalone/src-tauri/tauri.conf.json',
+    replace("default-src 'self'; ", ''),
+    'no default-src',
+    'a Standalone CSP with no default-src fallback',
+  ],
+  [
+    'standalone/src-tauri/tauri.conf.json',
     replace("script-src 'self'", "script-src 'self' https:"),
     'script-src admits https:',
     'a scheme source in the Standalone script-src',

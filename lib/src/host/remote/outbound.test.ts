@@ -199,7 +199,6 @@ describe.each(['hosted', 'self-host'] as const)('a %s build, under Nowhere', (mo
     expect(net.offMachine()).toEqual([]);
     const policy = (await command('networkPolicy')).result as { policy: NetworkPolicy };
     expect(policy.policy.level).toBe('nothing');
-    // The stored-but-unoffered or unparseable record stays as it was.
   });
 });
 

@@ -5,7 +5,8 @@
  * policy").
  *
  * The globals the Burrow service and managed voice reach for — `fetch` and
- * `WebSocket` — are replaced by recorders that answer locally, and everything
+ * `WebSocket` — are replaced by recorders that answer locally (a 503, a socket
+ * that never opens), and everything
  * underneath them is hooked too, so a path that bypasses the globals is still
  * seen: every TCP connect (`net.Socket.prototype.connect`, which `http`,
  * `https`, `tls`, and undici all end in), `tls.connect`, `dgram.createSocket`,
@@ -36,9 +37,6 @@ export interface OutboundAttempt {
   host: string | null;
 }
 
-/** What answers a recorded `fetch`; the default is a 503 with an empty JSON body. */
-export type FetchAnswer = (url: URL, init?: RequestInit) => Response | Promise<Response>;
-
 const LOOPBACK = /^(?:127(?:\.\d{1,3}){3}|localhost|::1|\[::1\]|::ffff:127(?:\.\d{1,3}){3})$/i;
 
 /** Whether `attempt` stays on this machine: loopback, or a Unix socket or named pipe. */
@@ -53,8 +51,6 @@ export interface OutboundRecorder {
   offMachine(): OutboundAttempt[];
   /** The distinct hosts {@link offMachine} names. */
   hosts(): Set<string>;
-  /** Replace what a recorded `fetch` answers. */
-  answerFetch(answer: FetchAnswer): void;
   /** Restore every hook. */
   restore(): void;
 }
@@ -169,15 +165,13 @@ export function recordOutbound(): OutboundRecorder {
   });
 
   // The globals the hosts reach for, answered locally.
-  let answer: FetchAnswer = () => new Response('{}', { status: 503, headers: { 'content-type': 'application/json' } });
   const g = globalThis as Record<string, unknown>;
   const hadFetch = 'fetch' in g;
   const fetch = g.fetch;
   g.fetch = async (input: unknown, init?: RequestInit) => {
     const attempt = record('globalThis.fetch', hostOfUrl(input));
-    const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : (input as Request).url);
     if (staysLocal(attempt)) return (fetch as typeof globalThis.fetch)(input as RequestInfo, init);
-    return answer(url, init);
+    return new Response('{}', { status: 503, headers: { 'content-type': 'application/json' } });
   };
   restores.push(() => {
     if (hadFetch) g.fetch = fetch;
@@ -201,9 +195,6 @@ export function recordOutbound(): OutboundRecorder {
     attempts,
     offMachine: () => attempts.filter((attempt) => !staysLocal(attempt)),
     hosts: () => new Set(attempts.filter((attempt) => !staysLocal(attempt)).map((attempt) => attempt.host!)),
-    answerFetch(next) {
-      answer = next;
-    },
     restore() {
       for (const undo of restores.splice(0).reverse()) undo();
     },

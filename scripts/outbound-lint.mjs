@@ -631,6 +631,9 @@ function localSource(source) {
 function checkCsp(where, policy) {
   const directives = policy.split(';').map((d) => d.trim()).filter(Boolean);
   if (directives.length === 0) problems.push(`${where}: an empty CSP — the parse found nothing to check.`);
+  else if (!directives.some((d) => d.split(/\s+/)[0] === 'default-src')) {
+    problems.push(`${where}: no default-src, so every fetch directive it omits admits any origin.`);
+  }
   for (const directive of directives) {
     const [name, ...sources] = directive.split(/\s+/);
     if (!/-src(?:-elem|-attr)?$/.test(name) && name !== 'form-action') continue;
