@@ -32,9 +32,9 @@ export interface WallHandle {
   finishSurfaceMove(options?: { keepEmpty?: boolean }): void;
   focusSurface(id: string, acknowledge: boolean): void;
   showMoveNotice(id: string, text: string): void;
-  /** A brief notice on the pane the user is on: the Window's answer to a verb
-   *  with nothing to act on. */
-  showNotice(text: string): void;
+  /** A brief notice on pane `id`, else the pane the user is on: the Window's
+   *  answer to a verb with nothing to act on, or one it refused. */
+  showNotice(text: string, id?: string): void;
   /** Rebuild a closed Surface here (`docs/specs/reopen.md`); `focus` selects it. */
   reopenSurface(record: SurfaceReopenRecord, focus: boolean): { id: string; ref: string };
   /** This Workspace's record now, with no cwd probe. */

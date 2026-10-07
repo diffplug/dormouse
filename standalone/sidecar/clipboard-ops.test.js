@@ -206,6 +206,26 @@ test('readClipboardImageAsFilePath on mac returns temp path on success', async (
   assert.deepEqual(fs.rmdirs, [path.join('/t', 'dormouse-drops-dir-0')]);
 });
 
+// PowerShell closes a single-quoted string at U+2018–U+201B as well as `'`, so a
+// temp directory under such a name must not end the literal early.
+test('readClipboardImageAsFilePath on windows doubles every PowerShell quote in the path', async () => {
+  const fs = fakeFs();
+  const commands = [];
+  await readClipboardImageAsFilePath({
+    platform: 'win32',
+    osModule: fakeOs("/t/o'k‘a’b‚c‛d"),
+    cryptoModule: fakeCrypto('uuid-W'),
+    fsModule: fs.module,
+    exec: async (cmd, args) => {
+      commands.push(args[args.length - 1]);
+      return { stdout: '' };
+    },
+  });
+  const out = path.join("/t/o''k‘‘a’’b‚‚c‛‛d", 'dormouse-drops-dir-0', 'uuid-W-clipboard.png');
+  assert.equal(commands.length, 1);
+  assert.ok(commands[0].includes(`$img.Save('${out}',`), commands[0]);
+});
+
 test('readClipboardImageAsFilePath returns null when osascript returns empty', async () => {
   const fs = fakeFs();
   const result = await readClipboardImageAsFilePath({

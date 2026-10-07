@@ -1997,8 +1997,7 @@ export function Wall({
       else enterTerminalMode(id);
     },
     showMoveNotice: (id, text) => showShellSpawnNotice(id, text, 8000),
-    showNotice: (text) => {
-      const id = livePaneId();
+    showNotice: (text, id = livePaneId()) => {
       if (id) showShellSpawnNotice(id, text);
     },
     reopenSurface,
