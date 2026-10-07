@@ -18,7 +18,7 @@
 
 **Must carry one status line per helper state**, offering Reset in place of Modify only for user-touched or exited helpers.
 
-**Must make Reset an explicit discard**, confirming loss of scrollback, unfinished input, running programs, and unsaved edits; under Labs it asks nothing and the old helper becomes a pending kill (`docs/specs/reopen.md` → "Labs: No-confirm delayed kill"). Cancellation changes nothing; confirmation disposes the old helper and launches a fresh one using the source's current directory and current global setting. Stale timers cannot write to the replacement.
+**Must make Reset an explicit discard**, confirming loss of scrollback, unfinished input, running programs, and unsaved edits; under Labs it asks nothing and the old helper becomes a pending kill (`docs/specs/reopen.md` → "Labs: No-confirm delayed kill"), which the host stops counting as the source's one helper until a restore re-owns it. Cancellation changes nothing; confirmation disposes the old helper and launches a fresh one using the source's current directory and current global setting. Stale timers cannot write to the replacement.
 
 Source of truth: `openHelper` / `helperHasWork` / `disposeHelper` / `closeHelperParent` in `lib/src/lib/helper-terminal.ts`; `markSessionTouched` / `parkElement` in `lib/src/lib/terminal-lifecycle.ts`; `HELPER_STATUS` — the state, its status line, and whether it offers Reset — in `lib/src/components/wall/TerminalContextView.tsx`. Tests: `lib/src/lib/helper-terminal.test.ts`.
 

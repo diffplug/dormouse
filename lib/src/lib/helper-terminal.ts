@@ -122,7 +122,8 @@ export function disposeHelper(parentId: string): void {
 /**
  * Take the parent's helper off it without ending its Session — a Reset made a
  * pending kill (`docs/specs/reopen.md`). The caller owns the returned helper:
- * {@link reattachHelper} puts it back, `disposeSession` ends it.
+ * {@link reattachHelper} puts it back, `disposeSession` ends it. The host still
+ * counts it as the parent's one helper until {@link releaseHostHelper}.
  */
 export function detachHelper(parentId: string): HelperTerminal | undefined {
   const helper = helpers.get(parentId);
@@ -131,17 +132,36 @@ export function detachHelper(parentId: string): HelperTerminal | undefined {
   return helper;
 }
 
+/** The host owns one helper per parent and refuses a second's spawn: a
+ *  detached helper stops counting there, on the handshake promotion uses. */
+function releaseHostHelper(id: string): Promise<unknown> | undefined {
+  return getPlatform().terminalContext?.({ op: 'promote', id });
+}
+
 /** Put a detached helper back on its parent, ending the one that replaced it.
  *  False when the parent has closed, or the replacement holds anything a
- *  discard would lose: user input, a running command, a promotion. */
+ *  discard would lose: user input, a running command, a promotion. The host
+ *  hears it in order — the replacement's claim released, the old one's
+ *  restored, then the replacement killed — so its one-helper rule never sees
+ *  two owners. */
 export function reattachHelper(helper: HelperTerminal): boolean {
   const { parentId } = helper;
   if (!parentIsOpen(parentId) || !registry.has(helper.id)) return false;
   const replacement = helpers.get(parentId);
   const entry = replacement && registry.get(replacement.id);
   if (replacement && (replacement.promoting || entry?.untouched === false || getTerminalPaneState(replacement.id).currentCommand)) return false;
-  if (replacement) disposeHelper(parentId);
+  if (replacement) forgetHelper(parentId);
   installHelper(helper);
+  void (async () => {
+    try {
+      if (replacement) await releaseHostHelper(replacement.id);
+      await getPlatform().terminalContext?.({ op: 'promote', id: helper.id, restore: { parentId, command: helper.command } });
+    } catch (error) {
+      console.warn('[helper] the host refused the restored helper', error);
+    } finally {
+      if (replacement) disposeSession(replacement.id);
+    }
+  })();
   return true;
 }
 
@@ -150,10 +170,12 @@ export function reattachHelper(helper: HelperTerminal): boolean {
  * pending kill instead, which a restore puts back in place of the fresh one
  * (`docs/specs/reopen.md` → "Labs: No-confirm delayed kill").
  */
-export function resetHelper(parentId: string, parent: { workspaceId: WorkspaceId; title: string; ref: string }): void {
+export async function resetHelper(parentId: string, parent: { workspaceId: WorkspaceId; title: string; ref: string }): Promise<void> {
   if (!isDelayedKillEnabled()) { disposeHelper(parentId); return; }
   const old = detachHelper(parentId);
   if (!old) return;
+  // Before the fresh helper spawns, which the host would otherwise refuse.
+  await releaseHostHelper(old.id);
   addPendingKill({ kind: 'helper', id: old.id, workspaceId: parent.workspaceId, ref: parent.ref, surfaceId: old.parentId, title: parent.title, label: 'Helper' }, {
     // A closed parent, or a replacement with work of its own, refuses: the old
     // helper stays pending, its countdown untouched, until it finalizes.
