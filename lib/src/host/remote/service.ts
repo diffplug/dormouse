@@ -178,11 +178,11 @@ function safeHostname(): string {
 
 /** What every command the `nothing` level refuses answers, before any request. */
 const NETWORK_OFF_REFUSAL =
-  'Settings → Network is set to Nothing, so this computer opens no connections on its own.';
+  'Settings → Network is set to Nowhere, so this computer opens no connections on its own.';
 
 /** What `oneTimeOpen` answers under `local` with no network allowed. */
 const NO_NETWORK_ALLOWED_REFUSAL =
-  'No network is allowed under Local networks, so no phone can connect. Allow one in Settings → Network.';
+  'No network is allowed under Local networks only, so no phone can connect. Allow one in Settings → Network.';
 
 /**
  * The policy this build reads (`docs/specs/remote-network.md` → "Policy"): the
