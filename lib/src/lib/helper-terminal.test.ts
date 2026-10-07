@@ -62,6 +62,27 @@ describe('helper lifecycle', () => {
     }
   });
 
+  it('keeps a Labs Reset\'s old helper pending even when the host release fails, so it still finalizes', async () => {
+    const labs = await import('./labs-settings');
+    const pending = await import('./pending-kills');
+    vi.spyOn(labs, 'isDelayedKillEnabled').mockReturnValue(true);
+    try {
+      const old = await openHelper('parent');
+      // VS Code's request timeout: the release never answers in time.
+      host.terminalContext.mockImplementation(async (request: { op: string }) => {
+        if (request.op === 'promote') throw new Error('timed out');
+        return { home: '/home/user', command: 'git status', busy: false };
+      });
+      await expect(resetHelper('parent', { workspaceId: 'ws', title: 'shell', ref: 'surface:1' })).rejects.toThrow('timed out');
+      expect(pending.getPendingKills().map(kill => [kill.kind, kill.id])).toEqual([['helper', old.id]]);
+      await pending.finalizePendingKills();
+      expect(registry.has(old.id)).toBe(false);
+    } finally {
+      pending._resetPendingKillsForTesting();
+      vi.restoreAllMocks();
+    }
+  });
+
   it('keeps the old helper pending rather than discard a replacement holding user input', async () => {
     const labs = await import('./labs-settings');
     const pending = await import('./pending-kills');

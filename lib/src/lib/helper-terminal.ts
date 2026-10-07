@@ -174,14 +174,15 @@ export async function resetHelper(parentId: string, parent: { workspaceId: Works
   if (!isDelayedKillEnabled()) { disposeHelper(parentId); return; }
   const old = detachHelper(parentId);
   if (!old) return;
-  // Before the fresh helper spawns, which the host would otherwise refuse.
-  await releaseHostHelper(old.id);
   addPendingKill({ kind: 'helper', id: old.id, workspaceId: parent.workspaceId, ref: parent.ref, surfaceId: old.parentId, title: parent.title, label: 'Helper' }, {
     // A closed parent, or a replacement with work of its own, refuses: the old
     // helper stays pending, its countdown untouched, until it finalizes.
     restore: () => reattachHelper(old),
     finalize: () => disposeSession(old.id),
   });
+  // Before the fresh helper spawns, which the host would otherwise refuse;
+  // after the pending kill, so a failed release still finalizes the old one.
+  await releaseHostHelper(old.id);
 }
 
 /** Parents torn down while their registry entry lingers for the kill fade; a
