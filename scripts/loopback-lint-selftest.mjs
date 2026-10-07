@@ -25,9 +25,7 @@
  * there.
  */
 
-import { readFileSync, writeFileSync } from 'node:fs';
-
-import { makeSelftest, readRepoFile } from './lint-kit.mjs';
+import { appendText, makeSelftest } from './lint-kit.mjs';
 
 const LINT = 'scripts/loopback-lint.mjs';
 
@@ -118,35 +116,30 @@ const BEYOND_LOOPBACK = [
   ['serve({ port }) with no hostname', '\nexport function __selftest(app: any) { serve({ fetch: app.fetch, port: 0 }); }\n', 'no spelled-out loopback host'],
   ['a 0.0.0.0 host', "\nexport const __selftest = { host: '0.0.0.0' };\n", 'binds every interface'],
   ["a '::' host passed to listen", "\nexport function __selftest(s: any) { s.listen(0, '::'); }\n", 'binds every interface'],
-  ['a dgram socket', "\nexport const __selftest = (d: any) => d.createSocket('udp4');\n", 'opens a UDP socket outside ALL_INTERFACES'],
-  ['a second RTCPeerConnection', '\nexport const __selftest = () => new RTCPeerConnection({});\n', 'opens a UDP socket outside ALL_INTERFACES'],
+  ['a dgram socket', "\nexport const __selftest = (d: any) => d.createSocket('udp4');\n", 'opens a UDP socket CHECK_4_EXCEPTIONS does not name'],
+  ['a second RTCPeerConnection', '\nexport const __selftest = () => new RTCPeerConnection({});\n', 'opens a UDP socket CHECK_4_EXCEPTIONS does not name'],
 ];
 for (const [name, source, expected] of BEYOND_LOOPBACK) {
   selftest.withMutationReporting(
     SHIPPED_TARGET,
-    (path) => writeFileSync(path, readFileSync(path, 'utf8') + source),
+    appendText(source),
     expected,
     `${name}\n      adding this to ${SHIPPED_TARGET} does not report "${expected}" — check 4 cannot see it`,
   );
 }
+// An exception covers its one call, not the file: a TCP bind beside the peer
+// link's Unix-socket listen is still a bind.
+selftest.withMutationReporting(
+  'vscode-ext/src/peer-link.ts',
+  appendText('\nexport function __selftest(s: any) { s.listen(0); }\n'),
+  'no spelled-out loopback host',
+  'a second listen in a file CHECK_4_EXCEPTIONS names\n      the exception covers the whole file, not its one call',
+);
 
 // Every alternative the lint declares needs a fixture above, or it is a claim
 // nothing checks — which is how a `WebSocket.Relay` branch that matched no real
-// API rode along beside a working one. Read as text because `loopback-lint.mjs`
-// runs its checks at module scope and exits, so it cannot be imported.
-const declared = [...readRepoFile(LINT).matchAll(/^ *\{ label: '([^']+)'/gm)].map((m) => m[1]);
-if (declared.length === 0) {
-  selftest.weak.push(
-    `no bind forms found in ${LINT}\n`
-    + '      BIND_FORMS has moved, so this file is no longer checking its coverage',
-  );
-}
-for (const label of declared) {
-  if (FIXTURES.some(([name]) => name === label)) continue;
-  selftest.weak.push(
-    `${label}\n      ${LINT} declares this bind form and no fixture here exercises it`,
-  );
-}
+// API rode along beside a working one.
+selftest.requireFixtures(LINT, FIXTURES.map(([name]) => name), 'bind form');
 
 selftest.finish(
   'loopback-lint-selftest',

@@ -13,7 +13,8 @@
  * author classify it here, in review.
  *
  * What it checks, over every tracked source file in the shipped directories
- * (`SHIPPED`; tests, stories, and test helpers left out):
+ * (`SHIPPED_DIRS` in `scripts/lint-kit.mjs`; tests, stories, and test helpers
+ * left out):
  *
  *   1. Inventory. Every file that spells a network primitive in `FORMS` has an
  *      `OUTBOUND_SITES` entry giving its class and reason. A stale entry — a
@@ -57,31 +58,10 @@
  * has no fixture for.
  */
 
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { readRepoFile, repoRoot, trackedFiles } from './lint-kit.mjs';
-
-/** The directories whose code reaches a user's machine or phone. */
-const SHIPPED = [
-  'lib/src/',
-  'standalone/src/',
-  'standalone/sidecar/',
-  'vscode-ext/src/',
-  'dor/src/',
-  'dor-tools-builtin/src/',
-  'dor-tools-builtin/viewer/',
-  'dor-lib-common/src/',
-  'remote-lib-common/src/',
-];
-
-/** Code that runs on the phone, never on the computer the policy governs. */
-const PHONE = ['lib/src/remote/pocket-app/', 'lib/src/remote/one-time-app/', 'lib/src/remote/client/'];
-
-const SOURCE_EXT = /\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$/;
-/** Tests, stories, and the helpers only tests import. */
-const IS_TEST =
-  /(?:\.test\.|\.spec\.|\.stories\.|(?:^|\/)(?:tests?|stories|__tests__)\/|(?:^|\/)test-[^/]*$|test-utils\.|-test-mock\.|(?:^|\/)test-ports\.|-fixtures\.)/;
+import { PHONE_DIRS, isShippedSource, lineOf, readRepoFile, repoRoot, trackedFiles } from './lint-kit.mjs';
 
 const LOOPBACK_HOST = /^(?:127\.0\.0\.1|localhost|\[::1\]|ipc\.localhost)$/;
 
@@ -93,10 +73,10 @@ const LOOPBACK_HOST = /^(?:127\.0\.0\.1|localhost|\[::1\]|ipc\.localhost)$/;
  */
 const FORMS = [
   { label: 'fetch call', re: /(?<![\w$.#])fetch\s*\(/ },
-  { label: 'global fetch', re: /(?<!typeof\s+)\b(?:globalThis|window|self)\s*\.\s*fetch\b/ },
-  { label: 'new WebSocket', re: /\bnew\s+WebSocket\s*\(/ },
-  { label: 'global WebSocket', re: /(?<!typeof\s+)\b(?:globalThis|window|self)\s*\.\s*WebSocket\b/ },
-  { label: 'ws module', re: /(?:\bfrom|\brequire\s*\(|\bimport\s*\()\s*['"]ws['"]/ },
+  { label: 'global fetch', re: /(?<!typeof\s+)\b(?:globalThis|window|self)\s*\.\s*fetch\b/, global: true },
+  { label: 'new WebSocket', re: /\bnew\s+WebSocket\s*\(/, global: true },
+  { label: 'global WebSocket', re: /(?<!typeof\s+)\b(?:globalThis|window|self)\s*\.\s*WebSocket\b/, global: true },
+  { label: 'ws module', re: /(?:\bfrom|\brequire\s*\(|\bimport\s*\()\s*['"]ws['"]/, global: true },
   { label: 'XMLHttpRequest', re: /\bXMLHttpRequest\b/ },
   { label: 'EventSource', re: /\bnew\s+EventSource\s*\(/ },
   { label: 'sendBeacon', re: /\bsendBeacon\s*\(/ },
@@ -114,7 +94,7 @@ const FORMS = [
   { label: 'tls or http2 module', re: /(?:\bfrom|\brequire\s*\(|\bimport\s*\()\s*['"](?:node:)?(?:tls|http2)['"]/ },
   { label: 'dgram module', re: /(?:\bfrom|\brequire\s*\(|\bimport\s*\()\s*['"](?:node:)?dgram['"]/ },
   { label: 'dns module', re: /(?:\bfrom|\brequire\s*\(|\bimport\s*\()\s*['"](?:node:)?dns(?:\/promises)?['"]/ },
-  { label: 'undici', re: /['"]undici['"]/ },
+  { label: 'undici', re: /['"]undici['"]/, global: true },
   { label: 'RTCPeerConnection', re: /\bRTCPeerConnection\s*\(/ },
   { label: 'node-datachannel', re: /['"]node-datachannel(?:\/[\w-]+)?['"]/ },
   { label: 'Tauri plugin', re: /['"]@tauri-apps\/plugin-[\w-]+['"]/ },
@@ -122,7 +102,8 @@ const FORMS = [
   { label: 'window.open', re: /\bwindow\s*\.\s*open\s*\(/ },
   { label: 'remote Worker', re: /\bnew\s+(?:Shared)?Worker\s*\(\s*(?!new\s+URL\s*\(\s*['"`]\.{1,2}\/)/ },
   { label: 'importScripts', re: /\bimportScripts\s*\(/ },
-  { label: 'remote URL literal', re: null }, // see remoteHosts(); a form so its fixture is required
+  // Matched by remoteHosts(), not by `re`; listed so the self-test requires its fixture.
+  { label: 'remote URL literal', re: null },
 ];
 
 /**
@@ -135,7 +116,7 @@ const FORMS = [
  *     user's own terminal, browser pane, or agent.
  *   - `loopback` — reaches only this machine over TCP.
  *   - `local-ipc` — the host bridge, a Unix socket, or a named pipe.
- *   - `phone` — runs on the phone (`PHONE`), never on this computer.
+ *   - `phone` — runs on the phone (`PHONE_DIRS`), never on this computer.
  *   - `dev-only` — loaded only by the dev harness; ships in no build.
  */
 const OUTBOUND_SITES = {
@@ -485,22 +466,16 @@ function remoteHosts(code) {
  */
 function codeOf(src) {
   const blank = (m) => m.replace(/[^\n]/g, ' ');
-  return stripComments(src.replace(/\r\n/g, '\n'))
+  return stripComments(src)
     .replace(/\bimport\s+type\b[^;]*?\bfrom\s*['"][^'"]+['"]/g, blank)
     .replace(/\btypeof\s+import\s*\(\s*['"][^'"]+['"]\s*\)/g, blank);
 }
 
-const lineOf = (text, index) => text.slice(0, index).split('\n').length;
-
 const problems = [];
 const inventory = [];
-const seenSites = new Set();
+/** Each inventoried file's remote hosts, for the stale-`REMOTE_LITERALS` check. */
+const hostsByFile = new Map();
 
-function shippedSourceFiles() {
-  return trackedFiles().filter(
-    (rel) => SOURCE_EXT.test(rel) && SHIPPED.some((dir) => rel.startsWith(dir)) && !IS_TEST.test(rel),
-  );
-}
 
 function checkClass(rel, entry) {
   const cls = entry?.class;
@@ -508,8 +483,8 @@ function checkClass(rel, entry) {
     problems.push(`${rel}: OUTBOUND_SITES entry needs a class and a reason a reviewer can check.`);
     return null;
   }
-  const isPhone = PHONE.some((dir) => rel.startsWith(dir));
-  if (cls === 'phone' && !isPhone) problems.push(`${rel}: classed phone, but is not under ${PHONE.join(', ')}.`);
+  const isPhone = PHONE_DIRS.some((dir) => rel.startsWith(dir));
+  if (cls === 'phone' && !isPhone) problems.push(`${rel}: classed phone, but is not under ${PHONE_DIRS.join(', ')}.`);
   if (isPhone && cls !== 'phone') problems.push(`${rel}: phone code classed ${cls}; it runs on the phone.`);
   if (cls.startsWith('guarded:')) {
     if (!CHOKES.has(cls.slice('guarded:'.length))) problems.push(`${rel}: unknown choke point in ${cls}.`);
@@ -523,16 +498,17 @@ function checkClass(rel, entry) {
 
 // --- Rules 1–3: the source inventory -------------------------------------------
 const fileForms = FORMS.filter((form) => form.re);
-for (const rel of shippedSourceFiles()) {
+for (const rel of trackedFiles().filter(isShippedSource)) {
+  // A tracked path can still be absent mid-rebase or in a sparse checkout.
   if (!existsSync(join(repoRoot, rel))) continue;
-  const code = codeOf(readFileSync(join(repoRoot, rel), 'utf8'));
+  const code = codeOf(readRepoFile(rel));
   const hits = [];
   for (const form of fileForms) {
     const match = form.re.exec(code);
-    if (match) hits.push({ label: form.label, line: lineOf(code, match.index) });
+    if (match) hits.push({ form, line: lineOf(code, match.index) });
   }
   const hosts = remoteHosts(code);
-  if (hosts.length > 0) hits.push({ label: 'remote URL literal', line: hosts[0].line });
+  if (hosts.length > 0) hits.push({ form: { label: 'remote URL literal' }, line: hosts[0].line });
 
   // Rule 2b holds whether or not the file is in the inventory.
   if (rel !== RUNTIME_OWNER) {
@@ -551,27 +527,27 @@ for (const rel of shippedSourceFiles()) {
   const entry = OUTBOUND_SITES[rel];
   if (!entry) {
     problems.push(
-      `${rel}:${hits[0].line}: spells ${hits.map((h) => h.label).join(', ')} with no OUTBOUND_SITES entry.\n`
+      `${rel}:${hits[0].line}: spells ${hits.map((h) => h.form.label).join(', ')} with no OUTBOUND_SITES entry.\n`
       + '      Every network primitive in shipped code is classified: say which choke point\n'
       + '      guards it, which user action triggers it, or that it reaches only this machine\n'
       + '      (docs/specs/security-local.md -> "Network policy").',
     );
     continue;
   }
-  seenSites.add(rel);
+  hostsByFile.set(rel, hosts);
   const cls = checkClass(rel, entry);
 
   // Rule 2a: a guarded file uses the guard, never the global.
   if (cls?.startsWith('guarded:') && !GUARD_BUILDERS.has(rel)) {
-    const global = hits.find((h) => ['global fetch', 'new WebSocket', 'global WebSocket', 'ws module', 'undici'].includes(h.label));
+    const global = hits.find((h) => h.form.global);
     if (global) {
       problems.push(
-        `${rel}:${global.line}: a ${cls} file names the global transport (${global.label}).\n`
+        `${rel}:${global.line}: a ${cls} file names the global transport (${global.form.label}).\n`
         + '      Take the guarded fetch or socket factory as a parameter with no default;\n'
         + '      the global bypasses the network policy\'s choke point.',
       );
     }
-    const bare = hits.find((h) => h.label === 'fetch call');
+    const bare = hits.find((h) => h.form.label === 'fetch call');
     if (bare && !/\bfetch\??\s*:\s*typeof\s+globalThis\.fetch\b/.test(code)) {
       problems.push(
         `${rel}:${bare.line}: a ${cls} file calls a fetch it does not take as a parameter.\n`
@@ -593,7 +569,7 @@ for (const rel of shippedSourceFiles()) {
 }
 
 for (const rel of Object.keys(OUTBOUND_SITES)) {
-  if (seenSites.has(rel)) continue;
+  if (hostsByFile.has(rel)) continue;
   problems.push(
     existsSync(join(repoRoot, rel))
       ? `${rel}: OUTBOUND_SITES entry no longer spells any form — drop it from scripts/outbound-lint.mjs.`
@@ -601,7 +577,7 @@ for (const rel of Object.keys(OUTBOUND_SITES)) {
   );
 }
 for (const [rel, { hosts: allowed }] of Object.entries(REMOTE_LITERALS)) {
-  const spelled = existsSync(join(repoRoot, rel)) ? remoteHosts(codeOf(readFileSync(join(repoRoot, rel), 'utf8'))) : [];
+  const spelled = hostsByFile.get(rel) ?? [];
   for (const host of allowed) {
     if (!spelled.some((h) => h.host === host)) {
       problems.push(`${rel}: REMOTE_LITERALS admits ${host}, which the file no longer spells — drop it.`);
@@ -610,9 +586,6 @@ for (const [rel, { hosts: allowed }] of Object.entries(REMOTE_LITERALS)) {
 }
 if (inventory.length === 0) {
   problems.push('no network primitive matched in any shipped file — FORMS has stopped seeing the code.');
-}
-for (const form of FORMS) {
-  if (form.re === null && form.label !== 'remote URL literal') problems.push(`FORMS entry ${form.label} has no pattern.`);
 }
 
 // --- Rule 4: CSP --------------------------------------------------------------
@@ -670,7 +643,7 @@ if (JSON.stringify(endpoints) !== JSON.stringify(UPDATER_ENDPOINTS)) {
 
 {
   let viewerCsps = 0;
-  for (const rel of trackedFiles().filter((f) => f.startsWith('dor-tools-builtin/src/') && SOURCE_EXT.test(f) && !IS_TEST.test(f))) {
+  for (const rel of trackedFiles().filter((f) => f.startsWith('dor-tools-builtin/src/') && isShippedSource(f))) {
     const text = readRepoFile(rel);
     for (const match of text.matchAll(/\bconst\s+(\w*CSP)\s*=\s*(['"`])((?:(?!\2).)*)\2/g)) {
       viewerCsps += 1;

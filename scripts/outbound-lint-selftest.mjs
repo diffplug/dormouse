@@ -14,9 +14,7 @@
  * owns the restore).
  */
 
-import { readFileSync, writeFileSync } from 'node:fs';
-
-import { makeSelftest, readRepoFile } from './lint-kit.mjs';
+import { appendText as append, makeSelftest, replaceText as replace } from './lint-kit.mjs';
 
 const LINT = 'scripts/outbound-lint.mjs';
 
@@ -68,15 +66,6 @@ const FIXTURES = [
 ];
 
 const selftest = makeSelftest('outbound-lint.mjs', '.outbound-selftest.bak');
-const append = (text) => (path) => {
-  writeFileSync(path, readFileSync(path, 'utf8') + text);
-};
-const replace = (from, to) => (path) => {
-  const text = readFileSync(path, 'utf8');
-  if (!text.includes(from)) throw new Error(`selftest fixture: ${path} no longer contains ${JSON.stringify(from)}`);
-  writeFileSync(path, text.replace(from, to));
-};
-
 for (const [name, source] of FIXTURES) {
   selftest.withMutationReporting(
     TARGET,
@@ -281,16 +270,8 @@ for (const [relative, mutate, expected, label] of [...STRUCTURAL, ...CSP, ...TAU
   );
 }
 
-// Every form the lint declares needs a fixture above, or it is a claim nothing
-// checks. Read as text because the lint runs at module scope and exits.
-const declared = [...readRepoFile(LINT).matchAll(/^ *\{ label: '([^']+)'/gm)].map((m) => m[1]);
-if (declared.length === 0) {
-  selftest.weak.push(`no forms found in ${LINT}\n      FORMS has moved, so this file is no longer checking its coverage`);
-}
-for (const label of declared) {
-  if (FIXTURES.some(([name]) => name === label)) continue;
-  selftest.weak.push(`${label}\n      ${LINT} declares this form and no fixture here exercises it`);
-}
+// Every form the lint declares needs a fixture above, or it is a claim nothing checks.
+selftest.requireFixtures(LINT, FIXTURES.map(([name]) => name), 'form');
 
 selftest.finish(
   'outbound-lint-selftest',

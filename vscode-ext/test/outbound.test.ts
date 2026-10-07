@@ -14,19 +14,32 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { connectionsFor } from '../../lib/src/components/NetworkSettings';
+import { hostOf } from '../../lib/src/components/remote-control-shared';
 import { DEFAULT_RELAY_ORIGIN } from '../../lib/src/host/relay-origin';
 import type { BurrowConsoleStatus } from '../../lib/src/host/remote/service-protocol';
-import { mintTestNoiseStatic, recordOutbound, type OutboundRecorder } from '../../lib/src/host/remote/test-outbound';
+import {
+  ANYWHERE_ON,
+  LOCAL_ON,
+  RELAY_ON,
+  SELF_HOST_RELAY_ORIGIN,
+} from '../../lib/src/host/remote/test-burrow-link';
+import {
+  WEBVIEW_COMMANDS,
+  listedHosts,
+  mintTestNoiseStatic,
+  recordOutbound,
+  testEnrollment,
+  type OutboundRecorder,
+} from '../../lib/src/host/remote/test-outbound';
+import { CLOUDFLARE_STUN_HOST } from '../../lib/src/remote/direct/ice-servers';
 import type { NetworkPolicy } from '../../lib/src/remote/network-policy';
 import { ENROLLMENT_KEY } from '../../lib/src/remote/burrow/store';
 import { NETWORK_POLICY_KEY } from '../src/burrow-store';
 import type { ExtensionMessage } from '../src/message-types';
-import { removeDir, tempStorageDir, tick, waitFor } from './helpers';
+import { freshModule, removeDir, tempStorageDir, tick, waitFor } from './helpers';
 
 type BurrowModule = typeof import('../src/burrow');
 type LinkModule = typeof import('../src/peer-link');
-
-const SELF_HOST_ORIGIN = 'https://ned-mac.tail9c2f1.ts.net';
 
 const relayBuild = vi.hoisted(() => ({ origin: 'https://relay.dormouse.sh', mode: 'hosted' as 'hosted' | 'self-host' }));
 vi.mock('../../lib/src/host/relay-origin', async (importOriginal) => ({
@@ -35,11 +48,16 @@ vi.mock('../../lib/src/host/relay-origin', async (importOriginal) => ({
 }));
 
 /** The installer's offer file is the one other thing read off the real disk. */
-vi.mock('../../lib/src/host/remote/enroll-offer', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../lib/src/host/remote/enroll-offer')>()),
-  readEnrollmentOffer: () =>
-    Promise.resolve({ origin: SELF_HOST_ORIGIN, token: 'a'.repeat(64), mintedAt: '2026-08-31T00:00:00.000Z' }),
-}));
+vi.mock('../../lib/src/host/remote/enroll-offer', async (importOriginal) => {
+  const { SELF_HOST_RELAY_ORIGIN: origin } = await import('../../lib/src/host/remote/test-burrow-link');
+  return {
+    ...(await importOriginal<typeof import('../../lib/src/host/remote/enroll-offer')>()),
+    readEnrollmentOffer: () => Promise.resolve({ origin, token: 'a'.repeat(64), mintedAt: '2026-08-31T00:00:00.000Z' }),
+  };
+});
+
+/** Real time each case may take: CI is slower than a laptop, and these wait on answers. */
+const CASE_TIMEOUT_MS = 60_000;
 
 let noise: { privateKeyPkcs8: string; publicKey: string };
 let dir: string;
@@ -78,7 +96,7 @@ afterEach(async () => {
 });
 
 /** The slice of `ExtensionContext` the store and the link read, in memory. */
-function fakeContext(secrets: Map<string, string>, global: Map<string, unknown>) {
+function storageContext(secrets: Map<string, string>, global: Map<string, unknown>) {
   return {
     globalStorageUri: { fsPath: dir },
     subscriptions: [] as unknown[],
@@ -99,25 +117,16 @@ function fakeContext(secrets: Map<string, string>, global: Map<string, unknown>)
   } as never;
 }
 
-function enrollmentJson(origin: string): string {
-  return JSON.stringify({
-    relayUrl: origin,
-    burrowId: 'S6kyjjqOS7mw3l8ye89U3g',
-    burrowToken: 'token',
-    origin,
-    rpId: new URL(origin).hostname,
-    label: 'Laptop',
-    noiseStaticPrivateKey: noise.privateKeyPkcs8,
-    noiseStaticPublicKey: noise.publicKey,
-  });
+function setBuild(mode: 'hosted' | 'self-host'): void {
+  relayBuild.mode = mode;
+  relayBuild.origin = mode === 'self-host' ? SELF_HOST_RELAY_ORIGIN : DEFAULT_RELAY_ORIGIN;
 }
 
 /** One window activated as VS Code activates it, with `secrets` and `global` as its storage. */
 async function activate(secrets: Map<string, string>, global: Map<string, unknown>): Promise<void> {
-  vi.resetModules();
-  mod = (await import('../src/burrow')) as BurrowModule;
-  link = (await import('../src/peer-link')) as LinkModule;
-  const context = fakeContext(secrets, global);
+  mod = await freshModule<BurrowModule>(() => import('../src/burrow'));
+  link = await import('../src/peer-link');
+  const context = storageContext(secrets, global);
   link.initPeerLink(context);
   mod.configureBurrow({
     brokerRequest: async () => [],
@@ -129,9 +138,14 @@ async function activate(secrets: Map<string, string>, global: Map<string, unknow
   activation = mod.initBurrow(context);
 }
 
-async function command(cmd: string, params?: unknown): Promise<{ result?: unknown; error?: string }> {
+function send(cmd: string, params?: unknown): string {
   const burrowRequestId = `outbound-${++seq}`;
   mod!.handleBurrowCommand({ burrowRequestId, cmd, ...(params === undefined ? {} : { params }) });
+  return burrowRequestId;
+}
+
+async function command(cmd: string, params?: unknown): Promise<{ result?: unknown; error?: string }> {
+  const burrowRequestId = send(cmd, params);
   const find = () =>
     posted
       .filter((message) => message.type === 'burrow:result')
@@ -141,36 +155,28 @@ async function command(cmd: string, params?: unknown): Promise<{ result?: unknow
   return find()!;
 }
 
-/** Every request the webview sends at startup and when Settings opens, and each one a click sends. */
+/** {@link WEBVIEW_COMMANDS} and `oneTimeOpen`, then a moment for anything they started. */
 async function exercise(): Promise<void> {
-  for (const cmd of ['networkPolicy', 'status', 'oneTimeStatus', 'pairingQueue', 'pushDevices', 'pushTest', 'setupQr', 'reconnect']) {
-    await command(cmd);
-  }
-  await command('enroll', { password: 'p'.repeat(32), label: 'Laptop' });
-  await command('enrollOffer', { label: 'Laptop' });
-  await command('beginHostedEnrollment', { label: 'Laptop' });
-  // Not awaited: where it is allowed, its answer waits on a rendezvous socket
-  // that no relay here will ever open; what it reaches is what counts.
-  mod!.handleBurrowCommand({ burrowRequestId: `outbound-${++seq}`, cmd: 'oneTimeOpen' });
+  for (const [cmd, params] of WEBVIEW_COMMANDS) await command(cmd, params);
+  send('oneTimeOpen');
   await tick(300);
 }
 
 const SETUPS: Array<[string, (secrets: Map<string, string>, global: Map<string, unknown>) => void]> = [
   ['a fresh install', () => {}],
   ['an enrollment at Nowhere', (secrets, global) => {
-    secrets.set(ENROLLMENT_KEY, enrollmentJson(relayBuild.origin));
+    secrets.set(ENROLLMENT_KEY, JSON.stringify(testEnrollment(relayBuild.origin, noise)));
     global.set(NETWORK_POLICY_KEY, { level: 'nothing', allowed: [], autoUpdate: true });
   }],
   ['an unreadable policy over an enrollment', (secrets, global) => {
-    secrets.set(ENROLLMENT_KEY, enrollmentJson(relayBuild.origin));
+    secrets.set(ENROLLMENT_KEY, JSON.stringify(testEnrollment(relayBuild.origin, noise)));
     global.set(NETWORK_POLICY_KEY, { level: 'anywhere', allowed: 'everything' });
   }],
 ];
 
 describe.each(['hosted', 'self-host'] as const)('a %s build, under Nowhere', (mode) => {
   it.each(SETUPS)('opens no connection with %s', async (_name, setup) => {
-    relayBuild.mode = mode;
-    relayBuild.origin = mode === 'self-host' ? SELF_HOST_ORIGIN : DEFAULT_RELAY_ORIGIN;
+    setBuild(mode);
     const secrets = new Map<string, string>();
     const global = new Map<string, unknown>();
     setup(secrets, global);
@@ -179,20 +185,17 @@ describe.each(['hosted', 'self-host'] as const)('a %s build, under Nowhere', (mo
 
     expect(net.offMachine()).toEqual([]);
     expect(((await command('networkPolicy')).result as { policy: NetworkPolicy }).policy.level).toBe('nothing');
-  });
+  }, CASE_TIMEOUT_MS);
 });
 
 describe('under every other level, exactly the listed connections', () => {
-  const LEVELS: Array<['hosted' | 'self-host', NetworkPolicy]> = [
-    ['hosted', { level: 'local', allowed: ['192.168.1.0/24'], autoUpdate: false }],
-    ['hosted', { level: 'anywhere', allowed: [], autoUpdate: false }],
-    ['self-host', { level: 'relay', allowed: [], autoUpdate: false }],
-  ];
-
-  it.each(LEVELS)('a %s build at %j', async (mode, policy) => {
-    relayBuild.mode = mode;
-    relayBuild.origin = mode === 'self-host' ? SELF_HOST_ORIGIN : DEFAULT_RELAY_ORIGIN;
-    const secrets = new Map([[ENROLLMENT_KEY, enrollmentJson(relayBuild.origin)]]);
+  it.each([
+    ['hosted', LOCAL_ON],
+    ['hosted', ANYWHERE_ON],
+    ['self-host', RELAY_ON],
+  ] as const)('a %s build at %j', async (mode, policy) => {
+    setBuild(mode);
+    const secrets = new Map([[ENROLLMENT_KEY, JSON.stringify(testEnrollment(relayBuild.origin, noise))]]);
     const global = new Map<string, unknown>([[NETWORK_POLICY_KEY, { level: 'nothing', allowed: [], autoUpdate: false }]]);
     await activate(secrets, global);
     await command('status');
@@ -202,15 +205,11 @@ describe('under every other level, exactly the listed connections', () => {
     await exercise();
 
     const status = (await command('status')).result as BurrowConsoleStatus;
-    const listed = new Set(
-      connectionsFor({ policy, status, managedVoice: false, updater: false })
-        .map((row) => row.to.split(/\s/)[0]!)
-        .filter((first) => /^[\w-]+(?:\.[\w-]+)+$/.test(first)),
-    );
+    const listed = listedHosts(connectionsFor({ policy, status, managedVoice: false, updater: false }));
     const contacted = net.hosts();
     for (const host of contacted) expect(listed).toContain(host);
-    expect(contacted).toContain(new URL(relayBuild.origin).hostname);
-    expect(contacted).not.toContain('stun.cloudflare.com');
+    expect(contacted).toContain(hostOf(relayBuild.origin));
+    expect(contacted).not.toContain(CLOUDFLARE_STUN_HOST);
     expect(net.offMachine().filter((attempt) => !attempt.via.startsWith('globalThis.'))).toEqual([]);
-  });
+  }, CASE_TIMEOUT_MS);
 });

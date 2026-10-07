@@ -26,9 +26,12 @@ import Module, { syncBuiltinESMExports } from 'node:module';
 import net from 'node:net';
 import tls from 'node:tls';
 
-import { mintNoiseStaticKeyPair } from 'remote-lib-common';
-
+import type { connectionsFor } from '../../components/NetworkSettings';
+import type { BurrowEnrollment } from '../../remote/burrow/enrollment';
 import { FakeSocket } from '../../remote/test-fake-socket';
+
+/** Re-exported so a suite outside `lib` need not depend on `remote-lib-common` itself. */
+export { mintNoiseStaticKeyPair as mintTestNoiseStatic } from 'remote-lib-common';
 
 export interface OutboundAttempt {
   /** Which hook saw it. */
@@ -40,13 +43,11 @@ export interface OutboundAttempt {
 const LOOPBACK = /^(?:127(?:\.\d{1,3}){3}|localhost|::1|\[::1\]|::ffff:127(?:\.\d{1,3}){3})$/i;
 
 /** Whether `attempt` stays on this machine: loopback, or a Unix socket or named pipe. */
-export function staysLocal(attempt: OutboundAttempt): boolean {
+function staysLocal(attempt: OutboundAttempt): boolean {
   return attempt.host === null || LOOPBACK.test(attempt.host);
 }
 
 export interface OutboundRecorder {
-  /** Every attempt, in order. */
-  readonly attempts: readonly OutboundAttempt[];
   /** The attempts that would leave this machine. */
   offMachine(): OutboundAttempt[];
   /** The distinct hosts {@link offMachine} names. */
@@ -68,17 +69,17 @@ function hostOfUrl(input: unknown): string | null {
   }
 }
 
-/** The host or path a `net.Socket#connect` call names, in any of its argument shapes. */
-function connectTarget(args: unknown[]): { host: string | null } {
+/** The host a `net.Socket#connect` call names in any of its argument shapes, or null for a path. */
+function connectHost(args: unknown[]): string | null {
   // `net.connect` hands the socket its normalized `[options, cb]` array.
   const first = Array.isArray(args[0]) ? args[0][0] : args[0];
   if (first && typeof first === 'object') {
     const options = first as { path?: unknown; host?: unknown };
-    if (typeof options.path === 'string') return { host: null };
-    return { host: typeof options.host === 'string' ? options.host : 'localhost' };
+    if (typeof options.path === 'string') return null;
+    return typeof options.host === 'string' ? options.host : 'localhost';
   }
-  if (typeof first === 'string' && !/^\d+$/.test(first)) return { host: null };
-  return { host: typeof args[1] === 'string' ? args[1] : 'localhost' };
+  if (typeof first === 'string' && !/^\d+$/.test(first)) return null;
+  return typeof args[1] === 'string' ? args[1] : 'localhost';
 }
 
 /** Install every hook. Call {@link OutboundRecorder.restore} in `afterEach`. */
@@ -90,11 +91,14 @@ export function recordOutbound(): OutboundRecorder {
     attempts.push(attempt);
     return attempt;
   };
+  /** Replace `target[key]`, restoring it — or its absence — in {@link OutboundRecorder.restore}. */
   const patch = <T extends object, K extends keyof T>(target: T, key: K, replacement: T[K]) => {
+    const had = key in target;
     const original = target[key];
     target[key] = replacement;
     restores.push(() => {
-      target[key] = original;
+      if (had) target[key] = original;
+      else delete target[key];
     });
     return original;
   };
@@ -102,7 +106,7 @@ export function recordOutbound(): OutboundRecorder {
   // Every TCP connect: http, https, tls, and undici all end here.
   const connect = net.Socket.prototype.connect;
   patch(net.Socket.prototype, 'connect', function (this: net.Socket, ...args: unknown[]) {
-    const attempt = record('net.Socket#connect', connectTarget(args).host);
+    const attempt = record('net.Socket#connect', connectHost(args));
     if (staysLocal(attempt)) return (connect as (...a: unknown[]) => net.Socket).apply(this, args);
     process.nextTick(() => this.destroy(new Error(`outbound recorder refused ${attempt.host}`)));
     return this;
@@ -110,8 +114,7 @@ export function recordOutbound(): OutboundRecorder {
 
   const tlsConnect = tls.connect;
   patch(tls, 'connect', ((...args: unknown[]) => {
-    const target = connectTarget(args);
-    record('tls.connect', target.host);
+    record('tls.connect', connectHost(args));
     return (tlsConnect as (...a: unknown[]) => tls.TLSSocket)(...args);
   }) as typeof tls.connect);
 
@@ -166,45 +169,64 @@ export function recordOutbound(): OutboundRecorder {
 
   // The globals the hosts reach for, answered locally.
   const g = globalThis as Record<string, unknown>;
-  const hadFetch = 'fetch' in g;
-  const fetch = g.fetch;
-  g.fetch = async (input: unknown, init?: RequestInit) => {
+  const fetch = patch(g, 'fetch', async (input: unknown, init?: RequestInit) => {
     const attempt = record('globalThis.fetch', hostOfUrl(input));
     if (staysLocal(attempt)) return (fetch as typeof globalThis.fetch)(input as RequestInfo, init);
     return new Response('{}', { status: 503, headers: { 'content-type': 'application/json' } });
-  };
-  restores.push(() => {
-    if (hadFetch) g.fetch = fetch;
-    else delete g.fetch;
   });
-
-  const hadWebSocket = 'WebSocket' in g;
-  const WebSocket = g.WebSocket;
-  g.WebSocket = class RecordedSocket extends FakeSocket {
+  patch(g, 'WebSocket', class RecordedSocket extends FakeSocket {
     constructor(url: string) {
       super();
       record('globalThis.WebSocket', hostOfUrl(url));
     }
-  };
-  restores.push(() => {
-    if (hadWebSocket) g.WebSocket = WebSocket;
-    else delete g.WebSocket;
   });
 
+  const offMachine = () => attempts.filter((attempt) => !staysLocal(attempt));
   return {
-    attempts,
-    offMachine: () => attempts.filter((attempt) => !staysLocal(attempt)),
-    hosts: () => new Set(attempts.filter((attempt) => !staysLocal(attempt)).map((attempt) => attempt.host!)),
+    offMachine,
+    hosts: () => new Set(offMachine().map((attempt) => attempt.host!)),
     restore() {
       for (const undo of restores.splice(0).reverse()) undo();
     },
   };
 }
 
+// --- What both host suites drive and compare ---------------------------------
+
+/** A stored enrollment at `origin` that a started Burrow accepts. */
+export function testEnrollment(origin: string, noise: { privateKeyPkcs8: string; publicKey: string }): BurrowEnrollment {
+  return {
+    relayUrl: origin,
+    burrowId: 'S6kyjjqOS7mw3l8ye89U3g',
+    burrowToken: 'tok',
+    origin,
+    rpId: new URL(origin).hostname,
+    label: 'Laptop',
+    noiseStaticPrivateKey: noise.privateKeyPkcs8,
+    noiseStaticPublicKey: noise.publicKey,
+  };
+}
+
 /**
- * A real Noise static pair, for an enrollment fixture a started Burrow accepts.
- * Here so a suite outside `lib` need not depend on `remote-lib-common` itself.
+ * Every command the webview sends at startup and when Settings opens, then each
+ * one a click sends — but `oneTimeOpen`, which each suite sends unawaited: where
+ * a level allows it, its answer waits on a rendezvous socket no relay here opens.
  */
-export function mintTestNoiseStatic(): Promise<{ privateKeyPkcs8: string; publicKey: string }> {
-  return mintNoiseStaticKeyPair();
+export const WEBVIEW_COMMANDS: ReadonlyArray<readonly [cmd: string, params?: unknown]> = [
+  ['networkPolicy'],
+  ['status'],
+  ['oneTimeStatus'],
+  ['pairingQueue'],
+  ['pushDevices'],
+  ['pushTest'],
+  ['setupQr'],
+  ['reconnect'],
+  ['enroll', { password: 'p'.repeat(32), label: 'Laptop' }],
+  ['enrollOffer', { label: 'Laptop' }],
+  ['beginHostedEnrollment', { label: 'Laptop' }],
+];
+
+/** Every host a `connectionsFor` row names, from the head of its `to`. */
+export function listedHosts(rows: ReturnType<typeof connectionsFor>): Set<string> {
+  return new Set(rows.map((row) => row.to.split(/\s/)[0]!).filter((head) => /^[\w-]+(?:\.[\w-]+)+$/.test(head)));
 }
