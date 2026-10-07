@@ -87,7 +87,7 @@
       "author": "Tauri Apps Contributors",
       "homepage": "https://github.com/tauri-apps/tauri#readme",
       "versions": [
-        "2.11.1"
+        "2.12.1"
       ]
     },
     {
@@ -96,7 +96,7 @@
       "author": "Tauri Apps Contributors",
       "homepage": "https://github.com/tauri-apps/plugins-workspace",
       "versions": [
-        "2.3.6"
+        "2.4.0"
       ]
     },
     {
@@ -105,7 +105,7 @@
       "author": "Tauri Apps Contributors",
       "homepage": "https://github.com/tauri-apps/plugins-workspace",
       "versions": [
-        "2.12.0"
+        "2.13.1"
       ]
     },
     {
