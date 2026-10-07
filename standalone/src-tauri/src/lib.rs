@@ -2028,17 +2028,19 @@ fn write_file_atomically(path: &Path, contents: &str) -> Result<(), String> {
 
 /// Owner-only for a state-root file a child process writes, which cannot go
 /// through `write_file_atomically`: the macOS hang sample. The directory is
-/// restricted before `write` runs, and a file left unrestricted is removed.
+/// restricted before `write` runs, and a file a failed `write` or restrict
+/// leaves behind is removed.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn write_owner_only_with(
     path: &Path,
     restrict: impl Fn(&Path, u32) -> Result<(), String>,
     write: impl FnOnce(&Path) -> bool,
 ) -> bool {
-    if ensure_parent_with(path, &restrict).is_err() || !write(path) {
+    if ensure_parent_with(path, &restrict).is_err() {
         return false;
     }
-    if restrict(path, 0o600).is_err() {
+    // A failed or timed-out `sample` can leave a partial file at the umask.
+    if !write(path) || restrict(path, 0o600).is_err() {
         let _ = std::fs::remove_file(path);
         return false;
     }
@@ -5731,6 +5733,9 @@ mod tests {
         // A file that cannot be restricted is removed rather than kept.
         let restrict_file_fails = |path: &Path, mode: u32| if mode == 0o600 { Err("denied".to_owned()) } else { super::restrict_to_owner(path, mode) };
         assert!(!super::write_owner_only_with(&path, restrict_file_fails, |path| fs::write(path, "sample").is_ok()));
+        assert!(!path.exists());
+        // So is whatever a failed writer left behind.
+        assert!(!super::write_owner_only_with(&path, super::restrict_to_owner, |path| { fs::write(path, "partial").unwrap(); false }));
         assert!(!path.exists());
     }
 
