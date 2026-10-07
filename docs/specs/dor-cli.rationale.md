@@ -42,6 +42,8 @@ A Windows reproduction in 2026-10 (Node 22.22.3, cross-spawn 7.0.6) passed a lit
 
 **Why `dor await` prints no terminal text.** Mirroring `dor read` would drag its whole output-flag surface (`--lines`, mode selection) onto `await` and spend the one thing `await` has that composes cleanly: a stdout that is nothing but the cause, so `CAUSE=$(dor await …)` needs no parsing. `dor await … && dor read …` gets the screen back for one extra command.
 
+**Why quoting covers curly quotes and fish backslashes.** The 2026-10-07 security audit (#1027) found both. PowerShell's tokenizer treats U+2018–U+201B as single quotes, and its own `CodeGeneration.EscapeSingleQuotedStringContent` doubles them, so a file name such as `a’;calc;’b` substituted as `$TARGET` closed the literal and ran `calc`. fish has no shell kind of its own; the `'\''` idiom is right for it, but a bare `\` before the closing quote was not: `x 'a\' ';echo INJECTED;#'` ran `echo INJECTED` in fish 4.9. `'a'\\''` parses to `a\` in sh, bash, zsh, dash and fish alike, which `dor/test/shell-quote.test.mjs` checks against each installed shell.
+
 ## Browser Surface Addressing
 
 **Why the bind waits past the host's browser request timeout.** `surface.browser` answers only once the host has asked the browser where it streams, and that `attach` queues behind any launch, relaunch or close of the same browser, which can take the host's whole budget. At the client's default 5 s deadline, a command run just after a pop-out printed "could not open the Dormouse browser surface … timed out" and the pane bound anyway; agents read stderr, so the warning misled them (review of #777, 2026-09).

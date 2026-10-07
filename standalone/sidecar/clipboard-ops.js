@@ -183,13 +183,20 @@ async function readImageMac(out, runtime) {
   }
 }
 
+// A PowerShell single-quoted literal: PowerShell closes one at `'` and at
+// U+2018–U+201B, so each is doubled. Mirrors `quotePowerShellArg` in
+// `dor/src/commands/shell-quote.ts`, which this plain-CJS module cannot import.
+function powerShellLiteral(value) {
+  return `'${value.replace(/['\u2018-\u201b]/g, (c) => c + c)}'`;
+}
+
 async function readImageWindows(out, runtime) {
   const exec = runtime.exec || execFileP;
   const cmd = [
     'Add-Type -AssemblyName System.Windows.Forms;',
     'Add-Type -AssemblyName System.Drawing;',
     '$img = [System.Windows.Forms.Clipboard]::GetImage();',
-    `if ($img) { $img.Save('${out.replace(/'/g, "''")}', [System.Drawing.Imaging.ImageFormat]::Png); 'ok' } else { '' }`,
+    `if ($img) { $img.Save(${powerShellLiteral(out)}, [System.Drawing.Imaging.ImageFormat]::Png); 'ok' } else { '' }`,
   ].join(' ');
   try {
     const { stdout } = await exec(

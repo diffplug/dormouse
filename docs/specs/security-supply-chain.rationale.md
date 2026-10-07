@@ -34,4 +34,6 @@ The pgstencil exception has a different gate: its release workflow stages a vers
 
 Why the `vulnerabilityAlerts` cooldown is kept rather than dropped for speed: it guards the opposite threat from the alert itself — a compromised release that gets yanked within a day, which a reviewer reading a dependency diff cannot detect the way the ecosystem's own yank process can. Nothing here auto-merges, and the Dependabot alert already makes the vulnerability visible the moment it is published, so what the cooldown costs is a day before the remediation PR appears, not a day before anyone knows.
 
+What `skills` 1.7.0 does with the lock (read from its npm tarball, 2026-10): `experimental_install` (`runInstallFromLock`) hands each lock entry's source, with no ref when the entry has none, to the ordinary `add` path, which fetches it, installs it, and writes the hash of what it fetched back into the lock. `computedHash` is compared only by `sync`, for skills from `node_modules`, and only to skip an unchanged one. Why Renovate does not track the pin: it would need a regex manager, outside the `npm` and `cargo` cooldown rules, for one maintainer script.
+
 Why push protection covering `dormouse-bot` is the point rather than an incidental: an injected agent pasting a token into a file is exactly the shape it stops.
