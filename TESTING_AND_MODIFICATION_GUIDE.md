@@ -168,7 +168,7 @@ Each row names the code and the spec section that must change with it. Spec lint
 
 ## 7. Rules that bite
 
-- **Every Tauri `listen` must be `listenToWindow`** (`standalone/src/window-label.ts`). A bare `listen` receives every window's traffic; `scripts/window-listeners.test.mjs` fails the build otherwise. Broadcasts (`app.emit`) still reach scoped listeners.
+- **Every Tauri `listen` must be `listenToWindow`** (`standalone/src/window-label.ts`). A bare `listen` receives every window's traffic; `standalone/scripts/window-listeners.test.mjs` fails the build otherwise. Broadcasts (`app.emit`) still reach scoped listeners.
 - Workspace id allocation and reservation-failure fallback follow `docs/specs/standalone.md` → Workspace registry; use `createWorkspace()`.
 - Session release boundaries follow `docs/specs/transport.md` → Transferring a Workspace and the `releaseSession` comment in `lib/src/lib/terminal-lifecycle.ts`.
 - **`take_arrivals` does not consume**, and an arrival without content is not drainable. If you change the transfer sequence, keep: source invokes → Rust marks → source serializes → `transfer_workspace_content` → target nudged/built.
