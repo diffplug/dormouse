@@ -87,6 +87,7 @@ export function workspaceMetadataRefusal(id: WorkspaceId): string | null {
  * unmount.
  *
  * `mode` is `prompt` for a user gesture, `silent` for `dor workspace close`.
+ * `record: false` leaves no reopen record, for a close the user never made.
  * **A refusal reveals the Workspace only in `prompt` mode** — there is a prompt
  * behind it to show; a silent caller gets the message and the user is left where
  * they were.
@@ -99,6 +100,7 @@ export function workspaceMetadataRefusal(id: WorkspaceId): string | null {
 export async function closeWorkspaceWithSurfaces(
   id: WorkspaceId,
   mode: WorkspaceCloseMode = 'prompt',
+  { record: reopenable = true }: { record?: boolean } = {},
 ): Promise<string | null> {
   const isCurrent = cancelPendingConfirmation();
   const refused = workspaceCloseRefusal(id);
@@ -119,7 +121,7 @@ export async function closeWorkspaceWithSurfaces(
     if (!isCurrent()) return 'Workspace close was superseded by a newer close or move';
     // Reopenable only whole: one member whose own close would ask leaves no
     // record, so the record is taken before any member closes.
-    const record = handle.needsCloseConfirmation() ? null : workspaceReopenRecord(id, handle.serializeReported());
+    const record = !reopenable || handle.needsCloseConfirmation() ? null : workspaceReopenRecord(id, handle.serializeReported());
     const refusal = await handle.closeAll(editors);
     if (refusal) {
       // A refusal returns to its prompt if the user navigated away during close.
@@ -242,7 +244,7 @@ function pendWorkspace(id: WorkspaceId): void {
     if (focus) getWallHandle(id)?.selectWorkspaceTab();
     // A replacement nobody has used goes again, as if it never came.
     const unused = replacement !== null ? getWallHandle(replacement) : null;
-    if (unused && unused.surfaceIds().length <= 1 && !unused.needsCloseConfirmation()) void closeWorkspaceWithSurfaces(replacement!, 'silent');
+    if (unused && unused.surfaceIds().length <= 1 && !unused.needsCloseConfirmation()) void closeWorkspaceWithSurfaces(replacement!, 'silent', { record: false });
   };
   addPendingKill({ kind: 'workspace', id, workspaceId: id, title: meta.name, label: 'Workspace' }, {
     restore,
