@@ -58,8 +58,13 @@ function createStripTween(strip: () => HTMLElement | null) {
       const to = lasts[index].width;
       if (Math.abs(from.width - to) < 0.5) return;
       resized = true;
-      // The floor would clamp a tween from below it; it returns at the end.
-      animate(element, [{ width: `${from.width}px`, minWidth: '0px' }, { width: `${to}px`, minWidth: '0px' }]);
+      // These are already flexed widths. Shrinking them again would undershoot
+      // the endpoint and jump when the animation ends. The floor would clamp
+      // a tween from below it; both constraints return at the end.
+      animate(element, [
+        { width: `${from.width}px`, minWidth: '0px', flexShrink: 0 },
+        { width: `${to}px`, minWidth: '0px', flexShrink: 0 },
+      ]);
     });
     // Measured with the widths at their first frame: the transform makes up
     // only the jump the widths' own tween does not carry.
