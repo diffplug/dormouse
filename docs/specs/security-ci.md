@@ -76,7 +76,7 @@ The diff window's evasions are `docs/specs/security.md` -> "Known gaps".
   - `TEND_BOT_TOKEN` — in `tend`, absent at repo level.
   - `CLAUDE_CODE_OAUTH_TOKEN` — in **both** `tend` and `security-audit`, absent at repo level. Environments do not inherit each other's secrets, so a rotation must set both.
   - `OVSX_PAT`, `VSCE_PAT` — in `vscode-extension-publish` only, absent at repo level.
-  - `CLOUDFLARE_API_TOKEN`, `NEON_API_KEY`, `PREVIEW_AUTH_SECRET` — in `hosted-preview`; `CLOUDFLARE_API_TOKEN`, `DATABASE_URL`, `BACKUP_AGE_IDENTITY` — in `hosted-production`; `HOSTED_TAG_APP_PRIVATE_KEY` — in `hosted-release-tag`, beside the retired `HOSTED_TAG_TOKEN` only until a `hosted/` tag's tagger is `dormouse-hosted-tagger[bot]`. Each absent at repo level; the two `CLOUDFLARE_API_TOKEN`s are separate values.
+  - `CLOUDFLARE_API_TOKEN`, `NEON_API_KEY`, `PREVIEW_AUTH_SECRET` — in `hosted-preview`; `CLOUDFLARE_API_TOKEN`, `DATABASE_URL`, `BACKUP_AGE_IDENTITY` — in `hosted-production`; `HOSTED_TAG_APP_PRIVATE_KEY` — in `hosted-release-tag`. Each absent at repo level; the two `CLOUDFLARE_API_TOKEN`s are separate values.
   - `ANTHROPIC_API_KEY` — absent at repo *and* org level, for as long as `tend-*.yaml` passes `anthropic_api_key` to `max-sixty/tend/claude`.
   - `release-attest`'s own secret listing is empty **and** it declares no environment variables, so `id-token: write` stays the only credential `release.yml`'s two build jobs can reach.
   - No org-level secret visible to this repository at all (see "Org-level secrets").
