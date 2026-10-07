@@ -284,6 +284,8 @@ export async function makeE2eHarness(
     announcedStatic?: string;
     loadAcl?: () => BurrowAclRecord[];
     now?: () => number;
+    /** The Burrow's own clock, which its challenges and presence windows read. */
+    burrowNow?: () => number;
     /** Make every delivery-row deletion fail, as an offline phone's would. */
     pushDeleteFails?: boolean;
     /** Extra `PocketClient` deps — the keepalive timer and visibility seams. */
@@ -319,6 +321,7 @@ export async function makeE2eHarness(
     enrollment,
     reconnect: false,
     createWebSocket: () => burrowSocket,
+    ...(options.burrowNow ? { now: options.burrowNow } : {}),
     ...(options.burrowDirect || options.burrowPathPolicy
       ? { directPeering: { createPeer: options.burrowDirect ?? null, pathPolicy: options.burrowPathPolicy } }
       : {}),

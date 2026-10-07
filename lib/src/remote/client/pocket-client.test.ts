@@ -11,8 +11,23 @@
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
+
+/** Set by a case standing in for a Burrow that predates presence windows. */
+const legacyBurrow = vi.hoisted(() => ({ on: false }));
+
+// That Burrow's message 2 is the bare 32-byte challenge, with no offer byte.
+vi.mock('remote-lib-common', async (importOriginal) => {
+  const real = await importOriginal<typeof import('remote-lib-common')>();
+  return {
+    ...real,
+    encodeConnectionMessage2: (challenge: Uint8Array, offer: import('remote-lib-common').ConnectionOffer) =>
+      legacyBurrow.on ? challenge : real.encodeConnectionMessage2(challenge, offer),
+  };
+});
+
 import {
   CONTROL_PAYLOAD_SIZE,
+  DEFAULT_CHALLENGE_TTL_MS,
   DEFAULT_PAIRING_TTL_MS,
   DIRECT_ONLY_DEADLINE_MS,
   E2E_KEEPALIVE_INTERVAL_MS,
@@ -604,7 +619,7 @@ describe('connecting, end to end', () => {
     expect(harness.client.connectedBurrowId).toBeNull();
     expect(harness.burrow.establishedSessionCount).toBe(0);
     await expect(harness.client.hello()).rejects.toThrow();
-    // Still paired: the next connection is one presence prompt away.
+    // Still paired: the next connection needs no new pairing.
     expect(await harness.client.connect(harness.burrowId)).toMatchObject({ ok: true });
   });
 
@@ -1254,7 +1269,9 @@ describe('the direct path, end to end', () => {
     run.harness.client.setOnBurrowGone(gone);
     vi.spyOn(run.harness.authenticator, 'assert').mockRejectedValueOnce(new Error('dismissed'));
 
-    await expect(run.harness.client.connect(run.harness.burrowId)).rejects.toThrow('dismissed');
+    await expect(run.harness.client.connect(run.harness.burrowId, { allowWindow: false })).rejects.toThrow(
+      'dismissed',
+    );
 
     expect(gone).not.toHaveBeenCalled();
     expect(run.harness.client.connectedBurrowId).toBe(run.harness.burrowId);
@@ -1813,25 +1830,104 @@ describe('the presence proof', () => {
     expect(harness.approvals).toEqual([]);
   });
 
-  it('is one authenticator prompt per ceremony, never a cached one', async () => {
-    let assertions = 0;
+});
+
+/**
+ * Prompts counted at the authenticator, alongside the `/api/reauth/*` calls a
+ * proof makes: riding the Burrow's presence window makes neither
+ * (`docs/specs/remote-security-model.md` -> Presence window).
+ */
+describe('the presence window, as Pocket rides it', () => {
+  afterEach(() => {
+    legacyBurrow.on = false;
+  });
+
+  /** A signed-in, paired phone whose prompts, and whose Burrow's clock, the case owns. */
+  async function paired() {
+    let prompts = 0;
+    let burrowClock = Date.now();
     const authenticator = await createTestAuthenticator({ rpId: RP_ID, origin: ORIGIN });
     const counted: TestAuthenticator = {
       ...authenticator,
       assert: (challenge, origin) => {
-        assertions++;
+        prompts++;
         return authenticator.assert(challenge, origin);
       },
     };
-    const harness = await makeE2eHarness({ authenticator: counted });
-    // One for the sign-in the harness performs.
-    expect(assertions).toBe(1);
-
+    const harness = await makeE2eHarness({ authenticator: counted, burrowNow: () => burrowClock });
     await harness.pairAndApprove(await harness.mintInvitation());
-    expect(assertions).toBe(2);
+    // Sign-in, then the pairing's proof.
+    expect(prompts).toBe(2);
+    return {
+      harness,
+      /** Prompts since pairing. */
+      prompts: () => prompts - 2,
+      reauths: () => harness.calls.filter((c) => c.url.endsWith('/api/reauth/begin')).length,
+      advanceBurrow: (ms: number) => {
+        burrowClock += ms;
+      },
+    };
+  }
 
-    await harness.client.connect(harness.burrowId);
-    expect(assertions).toBe(3);
+  it('connects straight after pairing without a prompt: the pairing proof opened the window', async () => {
+    const run = await paired();
+    const reauths = run.reauths();
+
+    expect(await run.harness.client.connect(run.harness.burrowId)).toEqual({ ok: true, burrowLabel: BURROW_LABEL });
+
+    expect(run.prompts()).toBe(0);
+    expect(run.reauths()).toBe(reauths);
+  });
+
+  it('reconnects inside the window without a prompt', async () => {
+    const run = await paired();
+    await run.harness.client.connect(run.harness.burrowId);
+    run.harness.sessions[0]!.end();
+    run.advanceBurrow(60_000);
+
+    expect(await run.harness.client.connect(run.harness.burrowId)).toMatchObject({ ok: true });
+
+    expect(run.prompts()).toBe(0);
+    expect(run.harness.burrow.establishedSessionCount).toBe(1);
+  });
+
+  it('proves to a Burrow that predates windows, whose message 2 is the bare challenge', async () => {
+    const run = await paired();
+    legacyBurrow.on = true;
+
+    expect(await run.harness.client.connect(run.harness.burrowId)).toMatchObject({ ok: true });
+
+    expect(run.prompts()).toBe(1);
+  });
+
+  it('proves whenever the caller declines the window, offered or not', async () => {
+    const run = await paired();
+
+    expect(await run.harness.client.connect(run.harness.burrowId, { allowWindow: false })).toMatchObject({
+      ok: true,
+    });
+
+    expect(run.prompts()).toBe(1);
+  });
+
+  /**
+   * The offer is advisory. Here the redeem lands after its challenge expired,
+   * while the window itself stays open — so the retry is offered the window
+   * again, and only declining it makes the retry prompt.
+   */
+  it('retries a refused redeem exactly once, on a fresh handshake that proves', async () => {
+    const run = await paired();
+    run.harness.relay.holdToClientWhen((frame) => frame.kind === 'connection' && frame.step === 'response');
+    const connecting = run.harness.client.connect(run.harness.burrowId);
+    await waitFor(() => run.harness.relay.isHoldingToClient(), 'message 2 to be held');
+    run.advanceBurrow(DEFAULT_CHALLENGE_TTL_MS + 1);
+    run.harness.relay.releaseToClient();
+
+    expect(await connecting).toEqual({ ok: true, burrowLabel: BURROW_LABEL });
+
+    expect(run.prompts()).toBe(1);
+    const inits = run.harness.clientSocket().frames('e2e').filter((f) => f.kind === 'connection' && f.step === 'init');
+    expect(inits).toHaveLength(2);
   });
 });
 

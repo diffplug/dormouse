@@ -163,11 +163,11 @@ Source of truth: `runCapabilities` in `lib/pocket/diagnostics/capabilities.js`.
 
 **While a connection is established and the page is visible, Pocket sends one fixed-size keepalive every `E2E_KEEPALIVE_INTERVAL_MS` (30 s)** on the Noise session; hiding the page pauses them, and returning sends one immediately before resuming the interval. (rationale)
 
-The Burrow disposes any session it has not decrypted a Client message on for `ESTABLISHED_E2E_IDLE_TIMEOUT_MS` ([remote-security-model.md](./remote-security-model.md) → Burrow bounds), so **a phone suspended for longer comes back to no session**, and reconnecting costs a fresh Noise handshake and one WebAuthn prompt (rationale). **Pocket runs the same deadline against its own last send**, before a keepalive and before every request, and reports burrow loss when it passes: the reap's goodbye may never be read, and the relay socket to the *Relay* stays open. (rationale)
+The Burrow disposes any session it has not decrypted a Client message on for `ESTABLISHED_E2E_IDLE_TIMEOUT_MS` ([remote-security-model.md](./remote-security-model.md) → Burrow bounds), so **a phone suspended for longer comes back to no session**, and reconnecting costs a fresh Noise handshake (rationale). **Connect rides the Burrow's presence window whenever message 2 offers one, and proves presence otherwise** ([remote-security-model.md](./remote-security-model.md) → Presence window); **a ride refused `presence-rejected` is retried exactly once, on a fresh handshake that always proves**, and the caller sees only the retry's outcome (rationale). **Pocket runs the same deadline against its own last send**, before a keepalive and before every request, and reports burrow loss when it passes: the reap's goodbye may never be read, and the relay socket to the *Relay* stays open. (rationale)
 
 **The Burrow's goodbye is burrow loss** — its idle reap, a newer session from this same Client static, or the person at the computer taking a pane back ([remote-api.md](./remote-api.md) → Transport): the phone leaves the wall exactly as it does for a `burrow-gone`, and stays paired.
 
-Source of truth: `ClientSessionCore` in `lib/src/remote/client/session-core.ts`.
+Source of truth: `ClientSessionCore` in `lib/src/remote/client/session-core.ts`; `PocketClient.connect` in `lib/src/remote/client/pocket-client.ts`.
 
 ## The path the session takes
 
@@ -175,7 +175,7 @@ Source of truth: `ClientSessionCore` in `lib/src/remote/client/session-core.ts`.
 
 **Must retire the previous session — its peer, its channel, and its pending requests — immediately before the replacement's connection request goes out, and never report burrow loss for it**: the old channel's close can otherwise arrive first and fail the replacement's waiter. **Never earlier than that**: a presence proof the user dismisses, or a handshake that fails, leaves a working session untouched, and a replacement refused after the request has gone leaves none.
 
-**Must label the connected header with the live path, `relay` or `direct`, without status colours**, keeping fallback reasons in hover text. **Must pass only a `DirectRelayCause` to Pocket, never runtime failure text**; `TRANSPORT_RELAY_CAUSES` owns the displayed sentences. After the switch, a channel failure ends the session (remote-api.md → Direct path): Pocket returns to the list, and reconnecting costs a fresh handshake and WebAuthn prompt.
+**Must label the connected header with the live path, `relay` or `direct`, without status colours**, keeping fallback reasons in hover text. **Must pass only a `DirectRelayCause` to Pocket, never runtime failure text**; `TRANSPORT_RELAY_CAUSES` owns the displayed sentences. After the switch, a channel failure ends the session (remote-api.md → Direct path): Pocket returns to the list, and reconnecting costs a fresh handshake.
 
 Source of truth: `PocketClient.connect` in `lib/src/remote/client/pocket-client.ts`; `deploymentDirectPeer` in `lib/src/remote/pocket-app/deployment.ts`; `TRANSPORT_RELAY_CAUSES` in `lib/src/remote/pocket-app/views.tsx`.
 

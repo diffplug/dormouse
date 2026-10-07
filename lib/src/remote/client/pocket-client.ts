@@ -22,11 +22,13 @@ import {
   E2E_ID_BYTE_LENGTH,
   MAX_PUSH_QUERY_DELIVERY_IDS,
   NoiseTransportSession,
+  PRESENCE_WINDOW,
   SETUP_TOKEN_INVALID_ERROR,
   UNAUTHORIZED_ERROR,
   WS_ROUTES,
   WS_TOKEN_PARAM,
   createNoiseInitiator,
+  decodeConnectionMessage2,
   e2eConnectionPrologue,
   fromBase64Url,
   hashPasskeyPublicKey,
@@ -890,11 +892,13 @@ export class PocketClient {
   // --- Connection ----------------------------------------------------------
 
   /**
-   * Connect to a paired Burrow: IK against the pinned static, one presence proof
-   * over this handshake's own transcript, and the Burrow's single outcome
-   * (`docs/specs/remote-security-model.md` → Connection).
+   * Connect to a paired Burrow: IK against the pinned static, then either one
+   * presence proof over this handshake's own transcript or, where message 2
+   * offers it and `allowWindow` holds, a ride on the Burrow's presence window
+   * with no prompt — and the Burrow's single outcome
+   * (`docs/specs/remote-security-model.md` → Connection, Presence window).
    */
-  async connect(burrowId: string): Promise<ConnectResult> {
+  async connect(burrowId: string, { allowWindow = true }: { allowWindow?: boolean } = {}): Promise<ConnectResult> {
     await this.#ensureSocket();
     let record: KnownBurrowV1 | null;
     try {
@@ -926,24 +930,28 @@ export class PocketClient {
       remoteStaticPublicKey: fromBase64Url(record.burrowStaticPublicKey),
     });
     let session: NoiseTransportSession;
-    let burrowChallenge: string;
+    let message2: Uint8Array;
     try {
       const response = await this.#core.exchange(route, await handshake.writeMessage(), deadline);
-      // Message 2's payload is the Burrow's fresh single-use challenge and its
-      // window offer; the presence binding names the whole of it.
-      burrowChallenge = toBase64Url(await handshake.readMessage(fromBase64Url(response)));
+      message2 = await handshake.readMessage(fromBase64Url(response));
       session = new NoiseTransportSession(handshake.session);
     } catch (err) {
       return this.#connectionUnavailable(err);
     }
-    const presence = await this.#provePresence({
-      kind: 'connection',
-      burrowId,
-      connectionId,
-      burrowChallenge,
-      handshakeHash: toBase64Url(session.handshakeHash),
-      passkeyCredentialId: record.passkeyCredentialId,
-    });
+    // Message 2's payload is the Burrow's fresh single-use challenge and its
+    // window offer; a proof binds the whole of it. A Burrow that predates
+    // windows sends the bare challenge, which offers none.
+    const rideWindow = allowWindow && decodeConnectionMessage2(message2) === PRESENCE_WINDOW;
+    const presence = rideWindow
+      ? PRESENCE_WINDOW
+      : await this.#provePresence({
+          kind: 'connection',
+          burrowId,
+          connectionId,
+          burrowChallenge: toBase64Url(message2),
+          handshakeHash: toBase64Url(session.handshakeHash),
+          passkeyCredentialId: record.passkeyCredentialId,
+        });
     // **A second Connect on one Client replaces the first**, the mirror of
     // `BurrowRuntime.#promoteConnection`: its predecessor's endpoint, peer and
     // channel go, and left alive the orphan's channel would report violations
@@ -998,6 +1006,10 @@ export class PocketClient {
       }
       return { ok: true, burrowLabel: outcome.burrowLabel };
     }
+    // The offer is advisory: the window can close between message 2 and the
+    // redeem. One retry that always proves, so it can never loop, and the
+    // caller sees only its outcome.
+    if (rideWindow && outcome.code === 'presence-rejected') return this.connect(burrowId, { allowWindow: false });
     if (outcome.code === 'pairing-required') {
       // Best-effort: the outcome is authenticated and the row has to move to
       // *Pair again* whatever the local stores do. A tombstone write that
