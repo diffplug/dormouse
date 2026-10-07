@@ -129,6 +129,8 @@ Its remedy is staged under `## Future` → Notarization credentials.
 
 - **FAIL IF** `scripts/sign-and-deploy.sh` stops doing any of three things: verifying GitHub artifact attestations, verifying artifact SHA-256 manifests, or using PIV-backed Windows signing. Pinned by `scripts/sign-and-deploy.test.mjs`.
 - **FAIL IF** `TAURI_SIGNING_PRIVATE_KEY` is passed on a command line anywhere in `scripts/sign-and-deploy.sh` rather than through the environment, or `EV_SIGN_PIN` is passed literally to `jsign --storepass` instead of by environment-variable reference.
+- **FAIL IF** `plugins.updater` in `standalone/src-tauri/tauri.conf.json` trusts any key but minisign `AC5A7E8D541A64DB`, asks any endpoint but `https://dormouse.sh/standalone-latest.json`, or sets `dangerousInsecureTransportProtocol`; a `tauri.<platform>.conf.json` overlay configures the updater; or a platform in `website/public/standalone-latest.json` is signed under another key. Every install takes its next update on that key's word. Pinned by `standalone/scripts/updater-trust-root.test.mjs`.
+- **FAIL IF** `standalone/src-tauri/entitlements-macos-node.plist` grants anything beyond `allow-jit`, `allow-unsigned-executable-memory`, and `disable-library-validation`, or `scripts/sign-and-deploy.sh` signs anything but `Contents/MacOS/node` with it (rationale). Pinned by `standalone/scripts/macos-entitlements.test.mjs`.
 
 ## Future
 
