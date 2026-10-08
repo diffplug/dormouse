@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
+const fs = require('node:fs');
 const { create, getDescendantPids, openNativeDirectory } = require('./pty-core');
 
 test('Windows folder opening completes on launch and still reports spawn errors', () => {
@@ -151,6 +152,17 @@ test('a helper cannot own another helper or reference an absent owner', () => {
   assert.equal(spawns, 2);
   assert.deepEqual(events.filter(e => e.event === 'exit').map(e => e.data.id), ['nested', 'orphan']);
   manager.killAll();
+});
+
+test('directory opening refuses a share or device path without touching it', (t) => {
+  const stat = t.mock.method(fs, 'statSync');
+  const events = [];
+  const manager = create((event, data) => events.push({ event, data }), { spawn() { throw new Error('unexpected spawn'); } });
+  for (const path of ['//host/share', '/\\host\\share', '\\\\host\\share', '\\\\?\\C:\\repo']) {
+    manager.context({ op: 'openDirectory', id: 'parent', path }, 'directory');
+    assert.match(events.at(-1).data.error, /unavailable/, path);
+  }
+  assert.equal(stat.mock.callCount(), 0);
 });
 
 test('directory opening rejects relative paths and malformed input', () => {

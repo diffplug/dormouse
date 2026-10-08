@@ -21,6 +21,7 @@ import { doubleClick, mountWallHarness, reportRunning, waitUntil, type WallHarne
 import { clearExternalLinkConfirmation, getExternalLinkConfirmationSnapshot } from '../../lib/external-link-confirmation';
 import { activateTerminalLink } from '../../lib/terminal-link-activation';
 import { applyLiveToolEvents } from '../../lib/tool-events';
+import { openSequence } from 'dor-tools-lib/osc';
 import { parseReplay } from '../../lib/platform/replay-parse';
 import type { LathNode } from '../../lib/lath/model';
 import { recordToolAnnounce, resetToolAnnounces } from '../../lib/tool-announce-store';
@@ -934,9 +935,38 @@ describe('an OSC 367 open', () => {
     expect(toolControl.mock.calls.map(([request]) => request.target)).toEqual(['/repo/docs/x.pdf', '/repo/docs/a.md']);
   });
 
-  it('ignores an ordinary terminal and a later command in a Tool\'s pane', async () => {
+  /** Bytes from `id`'s PTY, through the host's own parse. */
+  const output = (id: string, ...chunks: string[]) => act(async () => { for (const chunk of chunks) fake.sendOutput(id, chunk); });
+  const osc = (body: string) => `\x1b]${body}\x07`;
+  const openBytes = (path: string) => openSequence({ path, preview: true });
+
+  it('refuses an open after a command start the host never launched, even one reporting the Tool\'s own command', async () => {
     const toolControl = await mountFolder('cat notes.txt');
-    await emit('folder', open('/repo/docs/a.md', true));
+    await output('folder',
+      osc('633;D;0') + osc('633;A') + osc('633;B') + osc(`633;E;${folder.command}`) + osc('633;C'),
+      openBytes('/repo/docs/a.md'));
+    await flush();
+    expect(toolControl).not.toHaveBeenCalled();
+    expect(container.querySelectorAll('[data-lath-leaf]')).toHaveLength(2);
+  });
+
+  it('acts on an open from the run the host launched in a Tool', async () => {
+    const toolControl = installHost();
+    await mountWall([{ id: 'slot', params: viewerParams('a.md') }]);
+    shell('pane-a', null);
+    shell('slot', 'view /repo/a.md');
+    // The slot's shell reports through its PTY, as a real one does.
+    fake.setInputHandler('slot', data => fake.sendOutput('slot', data === '\x03'
+      ? `^C${osc('633;D;130')}${osc('633;A')}${osc('633;B')}`
+      : `\r\n${osc(`633;E;${data.slice(0, -1)}`)}${osc('633;C')}`));
+    expect(await answer(await request({ file: 'b.md', preview: true }))).toMatchObject({ status: 'retargeted', surfaceId: 'slot' });
+    await output('slot', openBytes('/repo/c.md'));
+    await waitUntil(() => toolControl.mock.calls.some(([call]) => call.target === '/repo/c.md'));
+    startTool(newLeaf(), String((await paramsOf(newLeaf()))?.command));
+  });
+
+  it('ignores an ordinary terminal', async () => {
+    const toolControl = await mountFolder();
     await emit('pane-a', open('/repo/docs/a.md', true));
     await flush();
     expect(toolControl).not.toHaveBeenCalled();

@@ -176,7 +176,7 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
 
   /** See TauriAdapter: `userInput` rides the write itself. */
   writePty(id: string, data: string, options?: WritePtyOptions): void {
-    this.host.send("pty_write", { id, data, paced: options?.paced, userInput: options?.userInput });
+    this.host.send("pty_write", { id, data, paced: options?.paced, userInput: options?.userInput, launch: options?.launch });
   }
 
   resizePty(id: string, cols: number, rows: number): void {

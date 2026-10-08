@@ -14,6 +14,8 @@ Why image data has different bounds from semantic text. Titles, commands, and di
 
 Why the `OSC 633` terminator filter is emit-side. The parser scans raw bytes for the three terminators `findOscTerminator` knows — `BEL`, `ESC \`, the C1 ST — so a directory name or command line carrying one ends the `633` sequence early and the remainder arrives as a fresh, fully trusted OSC. Nothing the parser can do distinguishes that from an emitter that meant it, which is why the boundary is in the scripts Dormouse ships. `lib/src/lib/terminal-protocol.test.ts` proves the parser *cannot* defend it: for each of the three terminators it forges an `OSC 9` notification with the body `PWNED` through an unfiltered `Cwd=`.
 
+Why the OSC 367 `open` check names its evidence. Its earlier wording, "a Tool running its designated command", left open what shows the command is running, and the gate compared the command line the shell reports, which is output. Two nightly audits split on it (2026-10). The check now names the host's launch as the evidence and rules out anything the output reports, so the verdict no longer depends on the auditor's reading.
+
 Why deceptive links are gated twice. The modal omits its Open action and focuses Copy, while the host callback independently rejects the deceptive verdict. The component regression exercises both the rendered buttons and a direct callback invocation, so an accidental presentation change cannot alone enable opening.
 
 ## Browser panes
@@ -60,6 +62,14 @@ The Vite listener serves modules containing the browser-dev bridge token. Vite's
 
 What header stripping cannot protect. A proxied script runs on `127.0.0.1` and can still read or write non-HttpOnly cookies through `document.cookie`, subject to browser partitioning. The per-grant port isolates origins, not cookie storage. Full isolation needs a separate browser storage context or host namespace; cookie-backed login in the iframe renderer cannot be preserved safely by forwarding ambient cookies.
 
+## Network policy
+
+**Why the outbound lint classifies files, not calls (2026-10).** Nowhere's promise had rested on the nightly audit reading the tree, and a call-site table found no automatic ungated connection. A textual lint cannot tell a guarded call from an unguarded one, but it can make every network primitive in shipped code a reviewed line with a class and a reason, so a new `fetch` in a component fails a build rather than waiting for an audit. Comments are stripped first, since the remote stack documents `RTCPeerConnection` and `node-datachannel` in prose far more than it calls them, and type-only imports name modules without loading them.
+
+**Why the runtime suites hook the Node layer.** The service's own tests inject its transport, so they prove the guard and not the host wiring around it. Booting `createSidecarHost` and the VS Code glue with nothing injected, and recording at `net.Socket.prototype.connect`, `dns`, `http(s)`, `dgram`, and the addon's load as well as at the globals, catches a path that skips the guard, which a stubbed `fetch` alone would not. A mutation that drops managed voice's `networkAllowed` check, starts the Burrow under `nothing`, or loads the addon at boot each turns them red (2026-10-07).
+
+**Why STUN and the phone rows are not driven.** Each needs a phone's Noise handshake through the relay before any peer is built; `one-time-runtime.test.ts` and the direct-path suites cover the choice of ICE server per level, and `scripts/e2e-lint.mjs` the server itself.
+
 ## Persisted state
 
 Why the managed-voice token sits beside the Burrow's enrollment. It is the same class of secret — a revocable bearer credential for a Dormouse service — and that directory is the one `burrow_state_dir` already locks on Windows, where `writeJsonAtomic`'s modes are no-ops. A leaked token lets its holder spend the account's daily speak cap until it is revoked on the Hosted account page; it grants no terminal access.
@@ -83,3 +93,7 @@ Why a document cannot loosen mermaid (mermaid 11.17.2, read 2026-10). Its config
 ## Spawned programs
 
 Why a bare name runs a planted file. On Windows, libuv's `search_path` (Node's `spawn` and `execFile`) and cross-spawn's `which` both look in the working directory before `PATH` (`docs/specs/dor-cli.rationale.md` -> "Spawning External Binaries"). A 2026-10-07 review after the nightly audit found `powershell`, `netstat`, `clip`, and `explorer.exe` spawned by bare name in the sidecar and in VS Code's extension host and pty host, and `git` in `lib/src/host/git-cli.ts`; the pty host inherited the extension host's cwd, which can be a workspace folder. The tests assert the path each spawn receives, run off Windows; none of this was exercised on a Windows machine (2026-10).
+
+## Dor Tool configuration
+
+Why a string `run` and format characters are refused (2026-10). The trust prompt draws Tool text as the browser lays it out, while the shell receives the same text as typed input: a control can be invisible in the prompt yet act as a line-editing key, and a bidi control or zero-width character can make the drawn text differ from the bytes. Refusing them at parse keeps what the prompt shows equal to what runs, which escaping in the prompt alone would not, since the escaped text is not what a person approves running. A multi-line string `run` is refused with the rest because each line would submit separately; `&&` or `;` joins commands on one line. Arguments, substituted paths, the project path, and the upstream URL are refused only for controls and are shown with format characters escaped: they name a location rather than text a repo wrote, and ordinary names need some of them, such as U+200C in Persian spelling or U+200D in emoji.

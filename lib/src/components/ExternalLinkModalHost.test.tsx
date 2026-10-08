@@ -65,6 +65,18 @@ it('rejects confirmation of a blocked URI', () => {
   expect(mocks.open).not.toHaveBeenCalled();
 });
 
+it('blocks a URL carrying a format character and shows its title and URL with every hidden character escaped', () => {
+  act(() => requestExternalLinkConfirmation('https://trusted.example/\u202ecod.exe', 'see \u200bthe report'));
+  expect([...document.body.querySelectorAll('button')].some((button) => button.textContent?.startsWith('Open '))).toBe(false);
+  expect(document.body.textContent).toContain('https://trusted.example/\\u202ecod.exe');
+  expect(document.body.textContent).not.toMatch(/[\u200b\u202e]/);
+  act(() => mocks.confirm());
+  expect(mocks.open).not.toHaveBeenCalled();
+  act(() => clearExternalLinkConfirmation());
+  act(() => requestExternalLinkConfirmation('https://trusted.example/', 'see \u200bthe report'));
+  expect(document.body.textContent).toContain('see \\u200bthe report');
+});
+
 const fileUri = 'file:///work/my%20report.md';
 const source = { surfaceId: 'pane-a', cwd: '/work' };
 const viewers = { handlers: [

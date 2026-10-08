@@ -1,0 +1,60 @@
+Domain: application-security
+Class: a persisted browser binaryPath runs a program off another machine
+Expect: dor-lib-common/src/browser-providers.ts
+Source: reverses #1040 (a UNC binaryPath passed the executable gate)
+
+diff --git a/dor-lib-common/src/browser-providers.ts b/dor-lib-common/src/browser-providers.ts
+index 3147d2795..a43376867 100644
+--- a/dor-lib-common/src/browser-providers.ts
++++ b/dor-lib-common/src/browser-providers.ts
+@@ -67,10 +67,10 @@ export const DEFAULT_PLAYWRIGHT_BIN = 'playwright-cli';
+ const PLAYWRIGHT_FILENAME_RE = /^playwright-cli(?:\.(?:cmd|bat|exe|com|ps1))?$/i;
+ const AGENT_BROWSER_FILENAME_RE = /^agent-browser(?:\.(?:cmd|bat|exe|com|ps1))?$/i;
+ 
+-// POSIX absolute or Windows drive-absolute. A relative path is refused
+-// outright: it would resolve against the spawner's cwd, which the caller does
+-// not know and must not be able to aim at. So is a UNC or device path.
+-const ABSOLUTE_RE = /^(?:\/|[A-Za-z]:[\\/])/;
++// POSIX absolute, Windows drive-absolute, or a UNC share. A relative path is
++// refused outright: it would resolve against the spawner's cwd, which the
++// caller does not know and must not be able to aim at.
++const ABSOLUTE_RE = /^(?:\/|[A-Za-z]:[\\/]|\\\\)/;
+ 
+ /**
+  * True for a path opening with two separators in either spelling: a UNC share
+@@ -109,7 +109,7 @@ function isAllowedBrowserBinary(candidate: unknown, configuredPath: string | und
+   if (/[\u0000-\u001f\u007f]/.test(candidate)) return false;
+   if (configuredPath && candidate === configuredPath) return true;
+   if (candidate === name) return true;
+-  if (isUncOrDevicePath(candidate) || !ABSOLUTE_RE.test(candidate)) return false;
++  if (!ABSOLUTE_RE.test(candidate)) return false;
+   const segments = candidate.split(/[\\/]/);
+   if (segments.includes('..')) return false;
+   return filename.test(segments[segments.length - 1] ?? '');
+diff --git a/lib/src/lib/agent-browser-binary.test.ts b/lib/src/lib/agent-browser-binary.test.ts
+index 786476cec..624b85659 100644
+--- a/lib/src/lib/agent-browser-binary.test.ts
++++ b/lib/src/lib/agent-browser-binary.test.ts
+@@ -35,14 +35,6 @@ describe('isAllowedAgentBrowserBinary', () => {
+       './agent-browser',
+       '../../../usr/bin/agent-browser',
+       '/opt/../usr/bin/agent-browser',
+-      // UNC and device paths: Windows would run a file off another machine.
+-      '\\\\host\\share\\agent-browser.exe',
+-      '//host/share/agent-browser.exe',
+-      '/\\host\\share\\agent-browser.exe',
+-      '\\/host/share/agent-browser.exe',
+-      '\\\\?\\UNC\\host\\share\\agent-browser.exe',
+-      '\\\\?\\C:\\tools\\agent-browser.exe',
+-      '\\\\.\\C:\\tools\\agent-browser.exe',
+       // Control characters are how one argument becomes two.
+       '/usr/local/bin/agent-browser\n/bin/sh',
+       '/usr/local/bin/agent-browser\u0000',
+@@ -59,6 +51,6 @@ describe('isAllowedAgentBrowserBinary', () => {
+ 
+  it('validates Playwright executable hints independently of agent-browser', () => {
+   for (const candidate of ['playwright-cli', '/opt/bin/playwright-cli', 'C:\\tools\\playwright-cli.cmd']) expect(isAllowedPlaywrightBinary(candidate)).toBe(true);
+-  for (const candidate of ['agent-browser', '/bin/sh', './playwright-cli', '/opt/../playwright-cli', '/opt/playwright-cli\n', '\\\\host\\share\\playwright-cli.cmd', '//host/share/playwright-cli']) expect(isAllowedPlaywrightBinary(candidate)).toBe(false);
++  for (const candidate of ['agent-browser', '/bin/sh', './playwright-cli', '/opt/../playwright-cli', '/opt/playwright-cli\n']) expect(isAllowedPlaywrightBinary(candidate)).toBe(false);
+   expect(isAllowedPlaywrightBinary('/opt/custom-wrapper', '/opt/custom-wrapper')).toBe(true);
+ });

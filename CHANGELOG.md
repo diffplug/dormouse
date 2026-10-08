@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to this project will be documented in this file.
+All notable changes to this project will be documented in this file. Also available at [blyg.dormouse.sh](https://blyg.dormouse.sh/).
 
 - 🔌 - affects only the VS Code plugin
 - 🖥️ - affects only the standalone desktop app

@@ -28,6 +28,7 @@ CWD, sourced `osc7`, `osc9_9`, `osc633` (`P ; Cwd=`), `osc1337` (`CurrentDir=`):
 
 - **OSC 7 is parsed as a `file:` URI, its host taken from the URL parser's normalized hostname, preserving raw case and the literal `localhost` spelling only.**
 - **OSC 9;9 drive-letter and UNC paths are Windows paths; every other path is `unknown`, never `posix`** (rationale).
+- **A path opening with two separators in either spelling is remote**, OSC 7's `file:////host/share` included (`isUncOrDevicePath` in `dor-lib-common/src/browser-providers.ts`).
 - **Must preserve native CWD text, including percent signs, semicolons and edge spaces; percent-decode only OSC 7 file URIs** (rationale).
 - `process` — the adapter polled the PTY's process for its working directory.
 - `manual` — seeded via `cwdFromManualPath()`. `seedTerminalManualCwd()` (session restore) writes it **only into a pane with no CWD yet**; `seedLaunchedCommand()` (known spawn directory) applies it **unconditionally** — safe only at spawn, before any OSC has reported.

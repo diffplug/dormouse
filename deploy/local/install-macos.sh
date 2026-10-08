@@ -777,18 +777,45 @@ has_off_loopback() {
   grep -qv "127\.0\.0\.1:$1" <<<"$2"
 }
 
-# Does captured `serve status` output ($2) map the ROOT path to 127.0.0.1:$1?
-# Root-scoped and right-bounded for the two reasons the installer's own
-# `serve_state` carries: `/api` on this port is not `/` on this port, and
-# `127.0.0.1:31000` contains `127.0.0.1:3100`. Either one green-ticked a node
-# whose origin served someone else's app at `/`.
+# Does any file named in $@ name a credential? Exit 0 when one does. Names are
+# extracted before the one allowed path variable is filtered out, so exactly
+# DORMOUSE_ENROLL_TOKEN_FILE is exempt. Captured first, for the reason
+# has_off_loopback is: a `grep -q` reading a pipe exits at its first match.
+names_credential() {
+  local names
+  names="$(grep -hEo 'DORMOUSE_SETUP_PASSWORD|DORMOUSE_VAPID_PRIVATE_KEY|DORMOUSE_ENROLL_TOKEN(_[[:alnum:]_]+)?' "$@" 2>/dev/null || true)"
+  [ -n "$names" ] && grep -qvx 'DORMOUSE_ENROLL_TOKEN_FILE' <<<"$names"
+}
+
+# The handler — `<type> <target>`, such as `proxy http://127.0.0.1:3100` — that
+# captured `serve status` output ($2) lists at `/` under the listener whose
+# header names origin $1 with no port: :443, the listener the passkey origin
+# is. Empty when that listener has no root. Scoped to the listener because a
+# root line on any other one (`--https=8443`, a Service, plain HTTP) says
+# nothing about what the origin serves, yet matched as if it did.
 #
-# This bets on `serve status`'s layout, which the installer's conflict gate
-# already bets on. The bet fails toward a red verify on a healthy node rather
-# than a green one on a broken node, which is the direction this command exists
-# to get right.
+# Bets on the layout of Tailscale's `printWebStatusTree`: one header line
+# `<scheme>://<host>[:<port>] (<access>)` per listener, then one
+# `|-- <mount> <type> <target>` line per handler, where `<type>` is `proxy`,
+# `path`, or `text`. Captured and searched with a here-string; see
+# `serve_state` for why a pipe is not one.
+serve_origin_root() {
+  awk -v origin="$1" '
+    BEGIN { if (origin == "") exit }
+    substr($0, 1, 4) != "|-- " { listener = (tolower($1) == tolower(origin)); next }
+    listener && $2 == "/" { sub(/^[|]-- \/ +/, ""); print; exit }
+  ' <<<"$2"
+}
+
+# Does captured `serve status` output ($3) map `/` at origin $2 to
+# 127.0.0.1:$1? Right-bounded for the reason the installer's own `serve_state`
+# carries: `127.0.0.1:31000` contains `127.0.0.1:3100`.
+#
+# The bet on `serve status`'s layout fails toward a red verify on a healthy
+# node rather than a green one on a broken node, which is the direction this
+# command exists to get right.
 serve_proxies_root() {
-  grep -qE '^\|-- / +proxy .*127\.0\.0\.1:'"$1"'([^0-9]|$)' <<<"$2"
+  grep -qE '^proxy +http://127\.0\.0\.1:'"$1"'(/|$)' <<<"$(serve_origin_root "$2" "$3")"
 }
 
 cmd_status() {
@@ -916,19 +943,14 @@ cmd_verify() {
   if [ -z "$serve_out" ]; then
     fail "tailscale serve reports no configuration"
   else
-    if serve_proxies_root "$PORT" "$serve_out"; then
-      pass "Serve proxies / to 127.0.0.1:$PORT"
+    if serve_proxies_root "$PORT" "$ORIGIN" "$serve_out"; then
+      pass "Serve proxies / to 127.0.0.1:$PORT at DORMOUSE_ORIGIN ($ORIGIN)"
     else
-      fail "Serve does not proxy / to 127.0.0.1:$PORT"
+      fail "Serve does not proxy / to 127.0.0.1:$PORT at DORMOUSE_ORIGIN ($ORIGIN)"
       # The remedy is one command and `verify` already knows it, so print it
       # rather than leaving the reader to find `manage serve` in the runbook.
       printf '      re-apply it with: "%s/bin/manage" serve\n' "$ROOT"
       printf '%s\n' "$serve_out" | sed 's/^/      /'
-    fi
-    if [ -n "$ORIGIN" ] && grep -q "${ORIGIN#https://}" <<<"$serve_out"; then
-      pass "Serve origin matches DORMOUSE_ORIGIN ($ORIGIN)"
-    else
-      fail "Serve origin does not match DORMOUSE_ORIGIN ($ORIGIN)"
     fi
   fi
 
@@ -973,9 +995,8 @@ cmd_verify() {
   # and nothing else secret (docs/specs/security-remote.md -> "Credentials at
   # rest"). A name, not a value: the installer supplies none of these, so one
   # appearing means a hand-edit or a regression put a credential where any
-  # process that can read the definition can read it. Extracting names before
-  # filtering exempts exactly DORMOUSE_ENROLL_TOKEN_FILE; a bare token or any
-  # other suffix remains a finding on every platform.
+  # process that can read the definition can read it. A bare token or any
+  # suffix but _FILE remains a finding on every platform.
   #
   # `grep -q` exits 2 on a file it cannot open, which is neither a match nor a
   # miss, so both searches report on definition_read rather than green-ticking
@@ -984,9 +1005,7 @@ cmd_verify() {
   if [ -r "$PLIST" ] && [ -r "$ROOT/bin/run-relay" ]; then definition_read=1; fi
   if [ "$definition_read" = 0 ]; then
     fail "the LaunchAgent or bin/run-relay could not be read — it was searched for neither a credential nor the source checkout"
-  elif grep -hEo 'DORMOUSE_SETUP_PASSWORD|DORMOUSE_VAPID_PRIVATE_KEY|DORMOUSE_ENROLL_TOKEN(_[[:alnum:]_]+)?' \
-       "$PLIST" "$ROOT/bin/run-relay" 2>/dev/null |\
-       grep -qvx 'DORMOUSE_ENROLL_TOKEN_FILE'; then
+  elif names_credential "$PLIST" "$ROOT/bin/run-relay"; then
     fail "the LaunchAgent or wrapper names a credential — it must carry only paths"
   else
     pass "the service definition names no credential"
@@ -1120,7 +1139,7 @@ cmd_uninstall() {
   # an unscoped port match turned off a root mapping this install never owned —
   # the operator's own, which the installer itself refuses to repoint without a
   # confirm — whenever our port happened to sit on some other path.
-  if serve_proxies_root "$PORT" "$serve_out"; then
+  if serve_proxies_root "$PORT" "$ORIGIN" "$serve_out"; then
     if ts serve --bg off 2>/dev/null; then
       printf 'turned off the Serve mapping to 127.0.0.1:%s\n' "$PORT"
     else
@@ -1449,9 +1468,20 @@ fi
 
 step "Configuring Tailscale Serve"
 
-# What does an existing Serve configuration say about the root path? Echoes
-# `loopback` (already proxying to the port $1), `conflict` (root mapped
-# somewhere else), or `none`. $2 is captured `tailscale serve status` output.
+# The root handler at origin $1 in captured `serve status` output ($2). The
+# same function `manage` carries, kept identical (installer-verify-test checks
+# that); its comment there states the layout it bets on.
+serve_origin_root() {
+  awk -v origin="$1" '
+    BEGIN { if (origin == "") exit }
+    substr($0, 1, 4) != "|-- " { listener = (tolower($1) == tolower(origin)); next }
+    listener && $2 == "/" { sub(/^[|]-- \/ +/, ""); print; exit }
+  ' <<<"$2"
+}
+
+# What does the origin's root handler ($2, from `serve_origin_root`) say? Echoes
+# `loopback` (a proxy to the port $1), `conflict` (any other handler there —
+# a proxy elsewhere, static files, or text), or `none`.
 #
 # Captured, and searched with a here-string, because the pipe form decided a
 # gate rather than a report: `printf … | grep -q` exits at the first match, the
@@ -1459,34 +1489,18 @@ step "Configuring Tailscale Serve"
 # match". Past the pipe buffer, `serve status` carrying a foreign root mapping
 # took NEITHER branch — so the `confirm` below never ran and the install
 # repointed the operator's root path silently.
+#
+# Only the origin's root handler counts: a bare `127.0.0.1:$1` anywhere, a root
+# on another listener, or treating only a foreign `proxy` as a conflict each
+# once let the install repoint someone else's `/` without the confirm.
 serve_state() {
-  # Both arms are scoped to the root line, because that is the path this
-  # function answers about. A bare `127.0.0.1:$1` anywhere in the output said
-  # `loopback` for a config whose ROOT was foreign and whose /api happened to
-  # sit on this port: the confirm was skipped, the mutation was skipped, and
-  # the install ended reporting the origin as ours while / served someone else.
-  if grep -qE '^\|-- / +proxy .*127\.0\.0\.1:'"$1"'([^0-9]|$)' <<<"$2"; then
+  if grep -qE '^proxy +http://127\.0\.0\.1:'"$1"'(/|$)' <<<"$2"; then
     printf 'loopback\n'
-  elif grep -qE '^\|-- / +proxy' <<<"$2"; then
+  elif [ -n "$2" ]; then
     printf 'conflict\n'
   else
     printf 'none\n'
   fi
-}
-
-# The first root-path proxy target in captured `serve status` output ($1), or
-# nothing. The first line is taken by parameter expansion rather than `| head
-# -1`, which exits after one line and leaves `sed` to die of SIGPIPE. That 141
-# is absorbed here by two facts, neither of them "this is a helper": `printf`
-# runs last, so $? is 0 by return, and the single call site below is a `$( )`,
-# which bash enters without `errexit` absent `inherit_errexit` (bash 3.2 has
-# none). Lose either — end on the failing assignment, or call this outside a
-# substitution — and the 141 aborts the install again, so the expansion stays.
-# It is hygiene rather than a pinned control, which is why nothing lints it.
-serve_root_target() {
-  local targets
-  targets="$(sed -n 's%^|-- / *proxy *%%p' <<<"$1")"
-  printf '%s' "${targets%%$'\n'*}"
 }
 
 SERVE_BEFORE="$(ts serve status 2>&1 || true)"
@@ -1496,14 +1510,14 @@ if [ -n "$SERVE_BEFORE" ]; then
 fi
 
 NEEDS_SERVE=1
-case "$(serve_state "$LOOPBACK_PORT" "$SERVE_BEFORE")" in
+SERVE_ROOT="$(serve_origin_root "$ORIGIN" "$SERVE_BEFORE")"
+case "$(serve_state "$LOOPBACK_PORT" "$SERVE_ROOT")" in
   loopback)
     ok "Serve already proxies to 127.0.0.1:$LOOPBACK_PORT"
     NEEDS_SERVE=0
     ;;
   conflict)
-    EXISTING_TARGET="$(serve_root_target "$SERVE_BEFORE")"
-    warn "the root HTTPS path is already mapped to something else: ${EXISTING_TARGET:-<unknown>}"
+    warn "the root HTTPS path is already mapped to something else: $SERVE_ROOT"
     warn "Dormouse needs / on this node to serve the Pocket app at the passkey origin."
     confirm "Repoint / to 127.0.0.1:$LOOPBACK_PORT?" \
       || die "left the Serve config alone. Resolve the hostname/path conflict, then re-run."

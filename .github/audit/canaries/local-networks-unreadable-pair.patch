@@ -1,0 +1,85 @@
+Domain: application-security
+Rule: `docs/specs/security-remote.md` -> "One-time connection" #9 — or on one the stack could not read
+Expect: lib/src/remote/direct/direct-peer.ts
+Source: reverses #1031 (a selected-pair read that throws counts as no pair once open)
+
+diff --git a/lib/src/remote/direct/direct-peer.test.ts b/lib/src/remote/direct/direct-peer.test.ts
+index a684c0e15..e940dc773 100644
+--- a/lib/src/remote/direct/direct-peer.test.ts
++++ b/lib/src/remote/direct/direct-peer.test.ts
+@@ -614,30 +614,6 @@ describe('DirectPeer', () => {
+       expect(burrow.refusals).toEqual([]);
+     });
+ 
+-    it('refuses a pair the stack could not read, before the open', async () => {
+-      const policy = lanOnlyPolicy();
+-      const run = pair({}, policy);
+-      run.answerer.pairReadThrows = true;
+-      const offer = await run.clientPeer.offer();
+-      await run.clientPeer.acceptAnswer((await run.burrowPeer.answer(offer!))!);
+-      await flushMicrotasks();
+-
+-      expect(run.burrow.opens).toBe(0);
+-      expect(run.burrow.refusals).toEqual(['the connection’s selected candidate pair could not be read']);
+-      expect(policy.asked).toEqual([]);
+-    });
+-
+-    it('refuses a pair the stack could not read once open, unlike a reading of no pair', async () => {
+-      const { answerer, burrow, timers } = await connected({}, lanOnlyPolicy());
+-      answerer.setConnectionState('connected');
+-      // ICE renominated onto a pair the stack throws reading.
+-      answerer.pairReadThrows = true;
+-      timers.fireAt(DIRECT_PATH_RECHECK_MS);
+-
+-      expect(burrow.refusals).toEqual(['the connection’s selected candidate pair could not be read']);
+-      expect(answerer.closed).toBe(true);
+-    });
+-
+     it('refuses a held peer with no native read of the pair, as a browser’s', async () => {
+       const policy = lanOnlyPolicy();
+       const run = await connected({ pairRead: 'none' }, policy);
+diff --git a/lib/src/remote/direct/direct-peer.ts b/lib/src/remote/direct/direct-peer.ts
+index b6acfa637..5806afa65 100644
+--- a/lib/src/remote/direct/direct-peer.ts
++++ b/lib/src/remote/direct/direct-peer.ts
+@@ -195,7 +195,7 @@ function addressOf(candidate: DirectCandidateLike | undefined): string | null {
+   return typeof address === 'string' ? address : null;
+ }
+ 
+-/** A selected pair with no read, or whose read threw: refused, never read as no pair. */
++/** A peer with no selected-pair read at all: refused, never read as no pair. */
+ const UNREADABLE_PAIR = 'unreadable';
+ 
+ /**
+@@ -786,9 +786,8 @@ export class DirectPeer {
+    * `connected` — on a state change, and every {@link DIRECT_PATH_RECHECK_MS}.
+    * A connection on its way down is `#onConnectionState`'s, never a refused
+    * path — and so, once open, is a reading of no pair: a stack with no selected
+-   * pair has nowhere to send, and loses the connection by its state. **A pair
+-   * the stack could not read is refused**, open or not: it may be one the
+-   * agent is sending on.
++   * pair has nowhere to send, and loses the connection by its state. **A peer
++   * with no pair read is refused**, open or not.
+    */
+   #recheckPath(): void {
+     if (!this.#pathPolicy || this.#closed || !this.#open || this.#peer.connectionState !== 'connected') {
+@@ -829,8 +828,8 @@ export class DirectPeer {
+   /**
+    * The selected pair's addresses from the native read
+    * ({@link DirectPeerLike.selectedCandidatePair}): `null` where the stack
+-   * reports none, or {@link UNREADABLE_PAIR} where the peer has no such read
+-   * or reading it threw.
++   * reports none or reading it threw (a pair mid-renegotiation), or
++   * {@link UNREADABLE_PAIR} where the peer has no such read.
+    */
+   #selectedPair(): DirectSelectedPair | null | typeof UNREADABLE_PAIR {
+     const peer = this.#peer;
+@@ -839,7 +838,7 @@ export class DirectPeer {
+       const pair = peer.selectedCandidatePair();
+       return pair ? { local: addressOf(pair.local), remote: addressOf(pair.remote) } : null;
+     } catch {
+-      return UNREADABLE_PAIR;
++      return null;
+     }
+   }
+ 

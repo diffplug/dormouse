@@ -71,8 +71,8 @@ export async function runCli(rawArgv: string[], options: CliOptions): Promise<Cl
   const argv = verb === undefined ? [] : [canonicalDorVerb(verb), ...rest];
   // `dor agent-browser <args...>` and `dor playwright <args...>` forward args verbatim to the
   // provider's CLI, so they must never reach stricli's flag parser. Only a bare
-  // `--help`/`-h` (or `dor help agent-browser`, normalized above) falls through
-  // to stricli.
+  // `--help`/`-h` falls through to stricli; `dor help agent-browser` starts with
+  // `help`, so it never matches here and is rewritten below.
   if (isBrowserProvider(argv[0]) && !isPassthroughHelpInvocation(argv)) {
     return options.host.runBrowserCli(argv[0], argv.slice(1), options);
   }

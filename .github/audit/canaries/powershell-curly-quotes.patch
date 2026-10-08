@@ -1,0 +1,57 @@
+Domain: application-security
+Class: a crafted file name escapes a shell quoting helper
+Expect: dor/src/commands/shell-quote.ts
+Source: reverses #1033 (PowerShell closes a quoted string at U+2018-U+201B too)
+
+diff --git a/dor/src/commands/shell-quote.ts b/dor/src/commands/shell-quote.ts
+index 3c1e9d972..d225b9271 100644
+--- a/dor/src/commands/shell-quote.ts
++++ b/dor/src/commands/shell-quote.ts
+@@ -62,6 +62,6 @@ function quotePowerShellCommand(args: readonly string[]): string {
+ 
+-/** Every character PowerShell reads as a single quote: `'` and U+2018–U+201B.
++/** The single quote PowerShell closes a literal at.
+  *  `standalone/sidecar/clipboard-ops.js` and `standalone/scripts/clean-dev-sidecar.mjs`
+  *  keep copies; neither can import this module. */
+-const POWERSHELL_SINGLE_QUOTES = /['\u2018-\u201b]/g;
++const POWERSHELL_SINGLE_QUOTES = /'/g;
+ 
+@@ -70,3 +70,3 @@ const POWERSHELL_SINGLE_QUOTES = /['\u2018-\u201b]/g;
+  *  path uses to quote a file path for a PowerShell pane (`shellEscapePath`).
+- *  Each quote character is doubled, as `EscapeSingleQuotedStringContent` does. */
++ *  Each quote is doubled. */
+ export function quotePowerShellArg(arg: string): string {
+diff --git a/dor/test/shell-quote.test.mjs b/dor/test/shell-quote.test.mjs
+index 3a023095b..e84246068 100644
+--- a/dor/test/shell-quote.test.mjs
++++ b/dor/test/shell-quote.test.mjs
+@@ -4,3 +4,3 @@ import { spawnSync } from 'node:child_process';
+ import { existsSync } from 'node:fs';
+-import { buildShellCommandForKind, quotePowerShellArg } from '../dist/commands/shell-quote.js';
++import { buildShellCommandForKind } from '../dist/commands/shell-quote.js';
+ 
+@@ -44,11 +44,1 @@ test('posix quoting steps a backslash outside the single quotes', () => {
+ 
+-test('PowerShell quoting doubles every single-quote character PowerShell reads', () => {
+-  // U+2018–U+201B close a PowerShell single-quoted string just as `'` does.
+-  for (const quote of ["'", '‘', '’', '‚', '‛']) {
+-    assert.equal(quotePowerShellArg(`a${quote}; calc; ${quote}b`), `'a${quote}${quote}; calc; ${quote}${quote}b'`);
+-  }
+-  assert.equal(
+-    buildShellCommandForKind('powershell', ['cat', 'x’; calc; ’.txt']),
+-    "cat 'x’’; calc; ’’.txt'",
+-  );
+-});
+diff --git a/lib/src/lib/shell-escape.test.ts b/lib/src/lib/shell-escape.test.ts
+index db6c409e4..333c150ce 100644
+--- a/lib/src/lib/shell-escape.test.ts
++++ b/lib/src/lib/shell-escape.test.ts
+@@ -120,8 +120,2 @@ describe('shellEscapePath shell dispatch', () => {
+ 
+-  // PowerShell also closes a single-quoted string at U+2018–U+201B.
+-  it('doubles curly single quotes for PowerShell', () => {
+-    expect(shellEscapePath('x’; calc; ’.txt', 'powershell')).toBe(`'x’’; calc; ’’.txt'`);
+-    expect(shellEscapePath('a‘b‚c‛d', 'powershell')).toBe(`'a‘‘b‚‚c‛‛d'`);
+-  });
+-
+   it('leaves an inert path bare in a PowerShell Session', () => {

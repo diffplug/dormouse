@@ -15,7 +15,7 @@
  * security spec, which headroom alone cannot promise, so it picks the same way
  * from the specs that qualify. Check 15 is a number rather than a pattern: its
  * case removes a paired rationale file instead of planting text.
- * `scripts/lint-kit.mjs` owns the edit-and-restore.
+ * `scripts/lint-kit.mjs` owns the sandbox and the edit-and-restore.
  */
 
 import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -97,7 +97,7 @@ const CASES = [
   ['check 9: a map beside a Source of truth pointer', SPEC, '\n## Files\n\n| Entrypoint | Role |\n|---|---|\n| `scripts/lint-kit.mjs` | Lint plumbing. |\n\nSource of truth: `countWords` in `scripts/spec-md.mjs`.\n'],
 ];
 
-const selftest = makeSelftest('spec-lint.mjs', '.spec-selftest.bak');
+const selftest = makeSelftest('spec-lint.mjs');
 
 // Check 9 must also pass a map alone: the fixture renames SPEC's own pointers
 // out of the way, and runs each heading spelling the lint accepts. A missing

@@ -19,6 +19,7 @@ import {
 } from '../terminal-state-store';
 import { themeColorProvider } from '../terminal-theme';
 import { applyLiveToolEvents } from '../tool-events';
+import { ToolLaunchLatch } from '../tool-launch-latch';
 import { offerProgramCopy } from '../mouse-selection';
 
 /** This renderer is its host's one realm. */
@@ -69,6 +70,8 @@ export class FakePtyAdapter implements PlatformAdapter {
   private scenarioMap = new Map<string, FakeScenario>();
   private inputHandlers = new Map<string, (data: string) => void>();
   private protocolParsers = new Map<string, TerminalProtocolParser>();
+  /** Each PTY generation's OSC 367 `open` latch, as a host's owner stream keeps it. */
+  private launchLatches = new Map<string, ToolLaunchLatch>();
   private openPortsMap = new Map<string, OpenPort[]>();
   /**
    * The alerts' host role, in process: the renderer's verbs reach it through
@@ -183,6 +186,7 @@ export class FakePtyAdapter implements PlatformAdapter {
     this.spawnHandlers.clear();
     this.inputHandlers.clear();
     this.protocolParsers.clear();
+    this.launchLatches.clear();
     this.openPortsMap.clear();
     // What this realm parked settles `cancelled`, as a disposing adapter's does.
     this.alerts.dispose();
@@ -204,6 +208,7 @@ export class FakePtyAdapter implements PlatformAdapter {
     }
     this.terminals.add(id);
     this.protocolParsers.set(id, new TerminalProtocolParser(themeColorProvider));
+    this.launchLatches.set(id, new ToolLaunchLatch());
     this.terminalSizes.set(id, {
       cols: options?.cols ?? DEFAULT_PTY_SIZE.cols,
       rows: options?.rows ?? DEFAULT_PTY_SIZE.rows,
@@ -284,6 +289,7 @@ export class FakePtyAdapter implements PlatformAdapter {
   writePty(id: string, data: string, options?: WritePtyOptions): void {
     if (options?.userInput) this.alertManager.acknowledge(id, { input: true });
     if (!this.terminals.has(id)) return;
+    if (options?.launch) this.launchLatch(id).arm(data);
     // Only echo if no scenario is actively playing
     if (this.activeTimers.has(id)) return;
     // Route to custom input handler if set
@@ -318,6 +324,7 @@ export class FakePtyAdapter implements PlatformAdapter {
     this.terminalSizes.delete(id);
     this.inputHandlers.delete(id);
     this.protocolParsers.delete(id);
+    this.launchLatches.delete(id);
     this.openPortsMap.delete(id);
     // The Session is over, so its alert state goes with it.
     this.alertManager.remove(id);
@@ -522,10 +529,19 @@ export class FakePtyAdapter implements PlatformAdapter {
     return parser;
   }
 
+  private launchLatch(id: string): ToolLaunchLatch {
+    let latch = this.launchLatches.get(id);
+    if (!latch) {
+      latch = new ToolLaunchLatch();
+      this.launchLatches.set(id, latch);
+    }
+    return latch;
+  }
+
   private emitPtyData(id: string, data: string, options: { skipActivity?: boolean } = {}): void {
     const parsed = this.getProtocolParser(id).process(data);
     // The Tool stores are this renderer's own.
-    applyLiveToolEvents(id, parsed.events);
+    applyLiveToolEvents(id, this.launchLatch(id).admit(parsed.events));
     applyTerminalSemanticEvents(id, applyTerminalEvents(this.alertManager, id, parsed.events));
     const inputHandler = this.inputHandlers.get(id);
     for (const response of collectTerminalProtocolResponses(parsed.events)) {

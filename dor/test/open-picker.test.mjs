@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runCli } from '../dist/cli.js';
@@ -292,6 +293,28 @@ test('outside git, the walk hands each repo it reaches to git and skips macOS Li
     const none = [];
     await listFiles(dir, { onFiles: paths => none.push(...paths), signal: aborted.signal });
     assert.deepEqual(none, [], 'an aborted walk lists nothing');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('listing a repository never runs the fsmonitor its own config names', { skip: process.platform === 'win32' }, async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'dor-fsmonitor-'));
+  try {
+    const repo = join(dir, 'repo');
+    const marker = join(dir, 'fsmonitor-ran');
+    const hook = join(dir, 'fsmonitor.sh');
+    await writeFile(hook, `#!/bin/sh\necho > '${marker}'\n`);
+    await chmod(hook, 0o755);
+    await mkdir(repo);
+    execFileSync('git', ['init', '-q'], { cwd: repo });
+    await writeFile(join(repo, 'a.ts'), '');
+    execFileSync('git', ['add', 'a.ts'], { cwd: repo });
+    execFileSync('git', ['config', 'core.fsmonitor', hook], { cwd: repo });
+    const files = [];
+    await listFiles(repo, { onFiles: paths => files.push(...paths) });
+    assert.deepEqual(files, ['a.ts']);
+    assert.equal(existsSync(marker), false);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

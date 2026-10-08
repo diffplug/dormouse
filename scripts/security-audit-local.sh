@@ -11,8 +11,20 @@
 # repo or the ci-and-secrets domain will report FAILs that are really 403s.
 #
 # Usage:
-#   scripts/security-audit-local.sh            # all four domains
+#   scripts/security-audit-local.sh            # the deterministic checks, then all four domains
 #   scripts/security-audit-local.sh application-security   # one domain
+#   scripts/security-audit-local.sh github-state            # the deterministic checks alone
+#   scripts/security-audit-local.sh canary [count]          # recall on seeded vulnerabilities
+#
+# `canary` measures rather than audits (docs/specs/security-audit.md -> "Canary
+# recall"): it copies the committed tree to a temporary directory, seeds it from
+# `.github/audit/canaries/` as CI does, runs the three code domains there, and
+# scores their fragments. Your checkout is never touched, and nothing is filed.
+#
+# The deterministic GitHub-state check (`scripts/github-state-check.mjs`) runs
+# first whenever a domain that reads its fragment does — `ci-and-secrets` and
+# `supply-chain` — on the same `gh` login, with `--local` so a 403 reads as
+# unverifiable rather than as drift in the CI PAT's scope.
 #
 # Reports land in ./audit-*.md, which .gitignore covers.
 
@@ -79,43 +91,85 @@ run_domain() {
     echo "==> $domain auditor process failed" >&2
     return 1
   fi
-  if [ -s "$out" ]; then
-    echo "==> wrote $out"
-    # Same sentinel CI reads, for the same reason: the domain appends findings
-    # as it determines them, so a fragment without its last line is one whose
-    # domain stopped early — and its first line may already say PASS.
-    # Last non-blank line, not `tail -n1`: a trailing blank line after the
-    # sentinel still ends a finished report.
-    if [ "$(sed -e '/^[[:space:]]*$/d' "$out" | tail -n1)" != "<!-- END OF REPORT -->" ]; then
-      echo "==> $domain was cut off before finishing $out — findings kept, its verdict line covers less than it appears to" >&2
-      case "$(head -n1 "$out")" in 'VERDICT: FAIL'*) echo "==> $domain reports FAIL" >&2 ;; esac
-      return 1
-    fi
-    # The same grammar CI applies in .github/workflows/security-audit.yaml, and
-    # for the same reason: a failure with an appended explanation is still a
-    # finding, so only the PASS arm matches exactly. Drifting from CI here would
-    # report a dissenting fragment as unreadable.
-    case "$(head -n1 "$out")" in
-      'VERDICT: PASS') return 0 ;;
-      'VERDICT: FAIL'*) echo "==> $domain reports FAIL" >&2; return 1 ;;
-      'VERDICT: INCONCLUSIVE') return 1 ;;
-      *) echo "==> $domain produced no readable verdict" >&2; return 1 ;;
-    esac
-  else
+  if [ ! -s "$out" ]; then
     echo "==> $domain produced no fragment — in CI that is an INCONCLUSIVE audit, not a FAIL" >&2
     return 1
   fi
+  echo "==> wrote $out"
+  # The verdict CI reports, computed from the fragment's lines: zero only on
+  # PASS, which also needs its sentinel and a first line of exactly
+  # `VERDICT: PASS`. It prints why anything else is not.
+  node scripts/security-audit-report.mjs check "$out" >&2
+}
+
+# The open ledger findings every domain re-verifies, as CI's `List open
+# findings` step writes them, read on the operator's own login. Without the
+# file each domain computes INCONCLUSIVE, as it does in CI. It reads the
+# private tracker and files nothing there.
+write_open_findings() {
+  local open row
+  rm -f audit-open-findings.txt
+  if ! open=$(gh issue list --repo diffplug/dormouse-embargo --state open --limit 1000 --json number,title \
+      --jq '.[] | select(.title | startswith("[audit-finding ")) | "\(.number) \(.title)"'); then
+    echo "==> could not read the findings ledger; every domain will compute INCONCLUSIVE" >&2
+    return 0
+  fi
+  while read -r row; do
+    [ -n "$row" ] || continue
+    printf '%s\n' "${row#* }"
+  done <<< "$open" > audit-open-findings.txt
+}
+
+# The deterministic checks, writing the fragment CI's reporting step reads
+# beside the domains'.
+run_github_state() {
+  echo "==> github-state -> audit-github-state.md (deterministic)"
+  rm -f audit-github-state.md
+  if ! node scripts/github-state-check.mjs --local --out audit-github-state.md >/dev/null; then
+    echo "==> the GitHub-state check failed to run" >&2
+    return 1
+  fi
+  node scripts/security-audit-report.mjs check audit-github-state.md >&2
+}
+
+# The canary, in a copy of the committed tree: seeded, audited by the three code
+# domains, then scored. `CANARY_KEY` picks the seeds;
+# the same key and pool seed the same way.
+run_canary() {
+  local count="${1:-6}" tree stash domain
+  tree=$(mktemp -d)
+  stash=$(mktemp -d)
+  git archive HEAD | tar -x -C "$tree"
+  echo "==> canary: seeding $count in $tree"
+  (cd "$tree" && node scripts/security-audit-canary.mjs seed --key "${CANARY_KEY:-$(date +%s)}" --count "$count" --stash "$stash" &&
+    pnpm install --frozen-lockfile >/dev/null)
+  # Run here rather than through the copy's runner, which would read the real
+  # findings ledger: a canary hands its domains an empty list, as CI does.
+  (cd "$tree" && : > audit-open-findings.txt &&
+    for domain in $(node scripts/security-audit-canary.mjs domains); do run_domain "$domain" || true; done)
+  (cd "$tree" && node scripts/security-audit-canary.mjs score --stash "$stash" \
+    --scorecard "$stash/scorecard.json" --public "$stash/canary-recall.json")
+  echo "==> scorecard: $stash/scorecard.json; seeded tree: $tree"
 }
 
 if [ $# -gt 0 ]; then
-  run_domain "$1"
-  exit $?
+  status=0
+  case "$1" in
+    canary) shift; run_canary "$@"; exit $? ;;
+    github-state) run_github_state; exit $? ;;
+    ci-and-secrets|supply-chain) run_github_state || status=1 ;;
+  esac
+  write_open_findings
+  run_domain "$1" || status=$?
+  exit "$status"
 fi
 
 # All four, sequentially rather than fanned out. CI parallelises because it is
 # paying wall-clock for a nightly; locally, serial output is readable and a
 # each domain's failure is recorded while the remaining domains still run.
 status=0
+run_github_state || status=1
+write_open_findings
 for domain in supply-chain ci-and-secrets application-security hosted; do
   run_domain "$domain" || status=1
 done
@@ -123,5 +177,5 @@ done
 echo
 echo "==> fragments:"
 ls -la audit-*.md 2>/dev/null || echo "  (none)"
-echo "==> merge and verdict are the orchestrator's job in CI; read the fragments directly here."
+echo "==> each verdict above is the one CI computes; there is no merge here, so read the fragments directly."
 exit "$status"

@@ -176,6 +176,18 @@ The website changelog page imports `website/src/data/changelog.json`, but **`CHA
 
 Source of truth: `create_release` in `scripts/sign-and-deploy.sh`; `website/scripts/generate-changelog.js`; lifecycle scripts in `website/package.json`.
 
+### Blyg changelog
+
+**Must host `https://blyg.dormouse.sh/` with the checksum-pinned, unmodified Blygger Studio Worker.** Its Cloudflare D1 database and R2 bucket hold content; Git records deployment configuration and the upstream release checksum. Operator setup, updates and token renewal are in `deploy/blyg/README.md`.
+
+**Must publish only stable, public GitHub releases with a matching `CHANGELOG.md` entry**, oldest first when backfilling. `.github/workflows/blyg-publish.yml` runs on release publication, changelog changes on `main`, and manual dispatch; publisher code and changelog come from reviewed `main`. Versions without a public GitHub release remain unpublished. Studio records the Blyg publication time; the entry text retains the original release date.
+
+**Must retain one Studio item per release, pin every published revision, and leave unchanged content at its existing revision.** A correction uses the same item. An interrupted run resumes its matching draft or completes the current pin; conflicting drafts, duplicate release identities and withdrawn items require operator resolution. **Never edit release text in Studio**; change `CHANGELOG.md` and synchronize it. Avoid simultaneous manual and automated publication; Actions serializes its runs.
+
+**Must receive Webmentions independently of the publisher, with public response display off initially.** Studio owns verification and moderation. A publishing-token expiry stops synchronization without affecting the public site or receiver. Credential placement follows `docs/specs/security-ci.md` -> "Automated Maintainer (tend)".
+
+Source of truth: `syncPublications` in `scripts/publish-blyg.mjs`; `.github/workflows/blyg-publish.yml`; `deploy/blyg/wrangler.jsonc`.
+
 ## Environment / secrets
 
 | Secret | Where | Purpose |

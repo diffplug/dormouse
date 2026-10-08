@@ -1202,15 +1202,24 @@ fn pty_write(
     data: String,
     paced: Option<bool>,
     user_input: Option<bool>,
+    launch: Option<bool>,
 ) {
-    send_to_sidecar(&state, pty_input_message(&id, &data, paced, user_input));
+    send_to_sidecar(&state, pty_input_message(&id, &data, paced, user_input, launch));
 }
 
 /// One `pty:input` line. **Human input carries `userInput` on the write itself**,
 /// never a separate alert command racing it: the sidecar acknowledges it and
 /// opens the echo window before the bytes reach the PTY (docs/specs/alert.md
-/// → Engagement). Each flag is present only when true.
-fn pty_input_message(id: &str, data: &str, paced: Option<bool>, user_input: Option<bool>) -> String {
+/// → Engagement). `launch` rides it the same way, arming the PTY's OSC 367
+/// `open` latch before the shell can report the run (docs/specs/dor-tool.md →
+/// OSC 367). Each flag is present only when true.
+fn pty_input_message(
+    id: &str,
+    data: &str,
+    paced: Option<bool>,
+    user_input: Option<bool>,
+    launch: Option<bool>,
+) -> String {
     #[derive(Serialize)]
     #[serde(rename_all = "camelCase")]
     struct PtyInput<'a> {
@@ -1220,10 +1229,18 @@ fn pty_input_message(id: &str, data: &str, paced: Option<bool>, user_input: Opti
         paced: bool,
         #[serde(skip_serializing_if = "std::ops::Not::not")]
         user_input: bool,
+        #[serde(skip_serializing_if = "std::ops::Not::not")]
+        launch: bool,
     }
     sidecar_line(
         "pty:input",
-        PtyInput { id, data, paced: paced == Some(true), user_input: user_input == Some(true) },
+        PtyInput {
+            id,
+            data,
+            paced: paced == Some(true),
+            user_input: user_input == Some(true),
+            launch: launch == Some(true),
+        },
     )
 }
 
@@ -5134,12 +5151,16 @@ mod tests {
     #[test]
     fn user_input_rides_the_write_it_describes() {
         assert_eq!(
-            parse_line(&super::pty_input_message("t1", "y", None, Some(true))),
+            parse_line(&super::pty_input_message("t1", "y", None, Some(true), None)),
             serde_json::json!({ "event": "pty:input", "data": { "id": "t1", "data": "y", "userInput": true } })
         );
         assert_eq!(
-            parse_line(&super::pty_input_message("t1", "\x1b[I", Some(true), Some(false))),
+            parse_line(&super::pty_input_message("t1", "\x1b[I", Some(true), Some(false), Some(false))),
             serde_json::json!({ "event": "pty:input", "data": { "id": "t1", "data": "\x1b[I", "paced": true } })
+        );
+        assert_eq!(
+            parse_line(&super::pty_input_message("t1", "view\r", None, None, Some(true))),
+            serde_json::json!({ "event": "pty:input", "data": { "id": "t1", "data": "view\r", "launch": true } })
         );
     }
 

@@ -1,0 +1,7 @@
+.bundle/
+.staging/
+.wrangler/
+.dev.vars*
+backups/
+*.secret
+

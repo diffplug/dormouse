@@ -4,6 +4,16 @@
 
 The three release-gate pieces are named separately because they break independently: dropping `--exit-status` alone un-gates the release while leaving a green grep for "invoked".
 
+## Deterministic checks
+
+**Why GitHub state left the model (review of 160 runs, 2026-10).** About 60% of the roughly 223 `FAIL IF` bullets then in the corpus asked mechanical questions — GitHub API state, workflow-file properties, configuration values — and a model re-read them nightly. They flip-flopped on unchanged state: the `tend-mention` permission check read PASS on 2026-08-21 and FAIL on 2026-08-22 with nothing changed. On 2026-09-15 `ci-and-secrets` enumerated four of the seven environments, passed, and the PASS closed an open failure issue. A script that enumerates from the API and fails a planted violation of every clause it judges cannot do either. The model keeps the judgement bullets, where a reading of code or of a spec is the check.
+
+**Why the expected values live in a file.** The script needs the spec's values as data; `.github/audit/` sits in `.github/workflows/workflow-audit.yaml`'s window, so an edit to them is surfaced like an edit to a prompt, and `ci-and-secrets` reads the file against its spec on every full run.
+
+## Skipping an unchanged audit
+
+**Why a skip is safe.** A model pass over the same commit and the same GitHub state reads the same inputs; repeating it nightly bought variance, not coverage, at about $28 a run (2026-10). The deterministic checks still run every night, so live drift in a setting is caught whether or not the domains run. **Why seven days.** The domains also read what neither input records — a mutable upstream tag's content, npm attestations, models improving — so a skip never outlives a week. The tend tag's commit is hashed, so moving it forces a full run. **Why a dispatch never skips.** The release gate dispatches one and must audit the tag it ships, and a maintainer dispatching by hand wants a full run.
+
 ## Domains
 
 One context holding every subject matter degrades application security — the domain with the most code behind it, and the easiest to crowd out with API responses.
@@ -60,7 +70,15 @@ Run 35205193090's `## Summary` also inverted the placeholder it was reading: "tw
 
 ## Outcomes and reporting
 
-Source audit, 2026-10: quoted `VERDICT:` lines in the first fragment can displace later verdicts beyond the 32,000-character clamp. PASS status with finished domains but no merged report can still close failure issues. The default `gh issue list` returns only 30, leaving older open failures unreconciled. These reporter defects remain unfixed in the current code.
+A review of 160 runs (2026-05 to 2026-10) found the reported verdict trusted as the agent wrote it. On 2026-10-07 the `hosted` fragment opened `VERDICT: PASS` over its own `[Origin boundary #6.b] UNVERIFIABLE`; the issue for #797 missed a `FAIL —` line because the lift expected `FAIL:`; `ci-and-secrets` folded multi-clause rules into one PASS each; and a whole section could go unreported with nothing noticing. Each was a prompt being followed or not. Computing the verdict from lines in a fixed grammar, against a manifest the specs determine, turns each into a mechanical INCONCLUSIVE: the skipped section is a missing rule, the folded clauses are a lettered gap or a bare number the domain chose, and the misspelled `FAIL` is a malformed line.
+
+A malformed line is INCONCLUSIVE rather than lifted by a more tolerant pattern because every tolerant pattern so far matched some passing evidence too: `### FAIL IF results` heads a passing list, and `- PASS: **FAIL IF** …` quotes the clause it passed. A malformed `BLOCKER` still counts as one, since a claimed blocker filed as "no verdict" would be the inversion this change exists to stop.
+
+An `INFO` is the one line let off the grammar, because it cannot fail the run: run 37720578105 (2026-10-07) went INCONCLUSIVE, holding the release gate, only because `supply-chain` wrote `- INFO: pnpm-lock.yaml:1340 — …` without its backticked location and root cause. The exact `- INFO: ` prefix is what classifies it; a bold or unprefixed `INFO`, or one whose remainder starts like a result or another severity, may be a mangled failure and stays malformed.
+
+A pessimistic verdict line that its lines do not support is held at INCONCLUSIVE rather than taken as `FAIL`: taken at its word it files a security finding nobody can locate, and overruled it passes a domain that doubted itself. The same rule covers `audit-status.txt`, which is an agent's conclusion like any other.
+
+The private report carries only what did not pass. Run 36119432126's fragments were 335,600 characters, nearly all of it `PASS` evidence, and its merged report repeated them: eleven parts once split, with the deciding lines in the head only because a lift put them there. With the computed verdicts and non-`PASS` lines leading, the head is the decision, and the `PASS` record stays in the encrypted transcript for whoever needs it.
 
 Collapsing the inconclusive case into `FAIL`, as the step originally did, filed an identical issue for "the repo is insecure" and "the auditor stopped early".
 
@@ -68,15 +86,11 @@ A `FAIL IF` condition no audit run can read makes the verdict a coin flip, becau
 
 GitHub rejects an over-long issue body outright; that rejection lands on a `set -e` step *after* the verdict is decided, and the finding then reaches no issue and no comment — only a red run and an artifact that expires. The 2026-08-29 and 08-30 runs lost a `FAIL` that way, over 65,536 characters. The public body truncated with its head kept until the embargo; the private report now splits instead, because a reader of the private tracker has no reason to lose any of it, and the split stops at a bounded part count only so a runaway fragment cannot flood the tracker with comments. Both helper calls are non-fatal so a failure of the helper cannot reopen the window it closes.
 
-Keeping the head is not the same as keeping what decides. Run 35842217451 (2026-09-23) composed a 226,302-character body: the posted issue carried `VERDICT: INCONCLUSIVE` for `audit-ci-secrets.md` and a note sending the reader to its `UNVERIFIABLE` checks, while that domain's one `UNVERIFIABLE` line sat past the cut along with the whole of `## Application security`, `## Hosted accounts` and `## Summary`. The deciding lines are not positionally predictable, so the clamp cannot be taught to keep them; lifting them into the head, which the clamp keeps by construction, is what makes the notes' pointers resolve. The lift matches at line start after an optional heading or bullet marker because every fragment is written in `FAIL IF` vocabulary — `### FAIL IF results` heads the passing list, and a `- PASS:` bullet quotes the clause it passed — so a bare `FAIL` match would lift the passing evidence as findings. The findings are bounded at 40 lines, and every lifted line at 500 characters, so the lift cannot itself exhaust the budget it protects; the real report produced 8 lines and 1,571 characters. The cap falls on the findings alone because one verdict line per fragment is bounded by the fragment count while a single domain's findings are not, so a shared cap would let the first domain's findings push the last domain's verdict out — the loss the lift exists to prevent. The first draft of the lift piped `grep` without `|| true`: a nonempty fragment carrying no marker line — the unreadable-verdict state the guard loop above already reports — made the pipeline exit 1, and `set -eo pipefail` ended the step before `audit-comment.md` was composed, so nothing was posted at all. Caught by the review on the PR that introduced it and pinned by a markerless-fragment case.
-
 Issue prose per combination of conditions cannot be kept correct by fixing combinations. Four consecutive review rounds found the same defect in different clothes — an arm whose text was true only of the states that could reach it, made false by the next gate that widened. A note claiming nothing about the other conditions cannot be invalidated by a new one.
-
-Gating a fragment guard on the status produced the same defect three times: gated on `PASS`, one empty fragment silenced the dissent check; widened to `!= FAIL`, an orchestrator that wrote `FAIL` itself silenced both, so a domain that left no report beside a real finding appeared nowhere at all. Recording what is true of a run and deciding its verdict are separate jobs.
 
 Existence is not agreement. The missing-fragment guard catches a domain that produced nothing; the verdict-line guard catches one whose `FAIL` the merge lost, which is worse, because `PASS` closes the open failure issue and opens the release gate. A fragment the check cannot read must not fall through to an unchallenged `PASS` either — that puts the verdict back on a prompt having been followed, the thing the guard exists to stop being the control.
 
-The September 2026 spec audit found that prefix matching accepted `VERDICT: PASS but unfinished`, whitespace deletion accepted `P A S S`, and the local runner returned success for a failed domain or a process that wrote a fragment before failing. The shared preamble also permitted `UNVERIFIABLE` checks without giving the domain an inconclusive verdict. Exact passing verdicts and the third domain outcome keep incomplete evidence from becoming a passing audit. Failure prefixes remain dissent: an appended explanation cannot turn an actual finding into an inconclusive report.
+The September 2026 spec audit found that prefix matching accepted `VERDICT: PASS but unfinished`, whitespace deletion accepted `P A S S`, and the local runner returned success for a failed domain or a process that wrote a fragment before failing. The shared preamble also permitted `UNVERIFIABLE` checks without giving the domain an inconclusive verdict. Exact passing verdicts and the third domain outcome keep incomplete evidence from becoming a passing audit. A failure prefix stayed dissent until the verdict was computed from lines; an October 2026 audit INFO noted it still accepted any `VERDICT: FAIL…` line, and since an actual finding now fails from its own lines, all three verdicts are exact.
 
 The redaction step was once the only thing between an accidental `printenv` and a world-readable artifact, and until its `FAIL IF` existed nothing would have tripped on its deletion. With the artifact encrypted and the report filed privately it still keeps a secret out of both, since a secret in a private tracker is still leaked. Its sinks are deleted rather than truncated on error because `: >` has to open the file and so fails on exactly the unreadable file that made the redactor throw, whereas `rm` needs only the directory.
 
@@ -84,15 +98,25 @@ Without the transcript a run that produces no verdict is undiagnosable: `claude-
 
 The October 2026 audit checked the upload's `if: always()` and the reporter's absent-artifact branch. They attempt postprocessing after ordinary failures, but cannot establish an upload after the runner itself times out or is cancelled; the issue links a download only when the artifact lookup returns an id.
 
-Publishing the fragments when no merged report exists is the same "a prompt is not a control" split as the guards above. Run 34581574869 (2026-09-11) ended its turn before the merge, so this step's report section was one line saying no report was produced — while `supply-chain` and `ci-and-secrets` had finished `VERDICT: PASS` fragments in the working directory, already redacted and already read twice by the guard loops. `.github/audit/orchestrator.md` §4 now forbids ending the turn there, but the run's findings should not depend on that sentence being followed. Verbatim and unmerged, because §3's merge is the only thing entitled to characterise a fragment; the cut-off and absent markers are the exception, being the same mechanical tests the step's own guard loops already ran, and a fragment published without them reads as a finished report.
+## Findings
+
+Severity was never defined, and the ratings showed it. On #1027 a low-impact umask was the run's one FAIL while a file name reaching a PowerShell command line and a paste submitting a command were WARNINGs; the order was the order of mechanical certainty, not of impact. The rubric names the reach — execution, credential, authorization — so a domain rates what an attacker gets.
+
+A qualitative BLOCKER fails the run, as the preamble already told domains to report; until the verdict was computed only the domain's own line enforced it, so a BLOCKER under `VERDICT: PASS` passed.
+
+The evidence fields exist for false positives. A `recovery.json` finding claimed its contents were "not revalidated" after reading only the reader; the sink, `normalizeResumeCommand`, revalidates. Requiring the sink by name, and a reproduction or a cap at INFO, makes that claim either checked or visibly unconfirmed. Missing evidence makes the line malformed rather than demoting it, because a mechanical demotion of a real BLOCKER is the dangerous direction.
+
+Run 37710148950 (2026-10-08) reported two `FAIL`s and two WARNINGs; run 37713086378, on a later commit with that code unchanged, passed and reported none of them. Comparing the fragments, the second run had passed each of those rules on the presence of the control it names, skipping a step the PASS evidence rules now require. The open findings are handed back as a checklist so a finding one run reached is not left to the next run's luck.
+
+Duplicates came from delegation: each delegate a domain improvised ran its own qualitative pass over overlapping ground, and the merge concatenated them, so one PowerShell finding reached #1027 three times and a log finding twice. Named streams make the partition the prompt's rather than the run's, with one qualitative stream so no ground is swept twice; the five-line merge catches what still overlaps, including across domains.
 
 ## Embargo
 
 Issue #1027 (2026-10) carried a BLOCKER with a working `calc` command-injection payload in the public `security-audit-failure` body, and every run's `audit-transcript` artifact — the merged report, the four fragments, and the Claude transcript — was downloadable by anyone for 14 days. Both contradicted `docs/specs/security.md` telling a reporter never to open a public issue. The security-audit sweep review of 2026-10-07 moved the detail to a private tracker and the artifact to ciphertext.
 
-The public body is built from what a domain cannot phrase. A domain writes its own check lines, so a heading-shaped string in one is still agent text; only a heading the checked-out spec already publishes is safe to repeat, and the builder looks each one up rather than trusting the line's shape. Verdicts publish as an enum, never as the verdict line, because `VERDICT: FAIL — <explanation>` is a legal verdict line and the explanation is detail.
+The public body is built from what a domain cannot phrase. A domain writes its own check lines, so a heading-shaped string in one is still agent text; only a heading the checked-out spec already publishes is safe to repeat, and the builder looks each one up rather than trusting the line's shape. Verdicts publish as an enum, never as the verdict line, because the verdict line is agent text, which once carried an explanation after `VERDICT: FAIL`.
 
-`EMBARGO_TOKEN` stays out of the agent's step so an accidental print, or an agent talked into filing, cannot reach the private tracker or its history. Running no repository code in the token's step stops a modified checkout swapping the script that handles it. Neither stops an agent that subverts the runner: a hosted runner grants passwordless `sudo`, and the agent's processes and files outlive its step; that is the known gap in `docs/specs/security.md`.
+`EMBARGO_TOKEN` stays out of the agent's step so an accidental print, or an agent talked into filing, cannot reach the private tracker or its history. The domains still need the open findings, so `List open findings` reads them with the token before the agent starts and hands over a file, never the token. The titles are private-tracker data, and the transcript the agent reads them into is already ciphertext; the step logs only the count, because a step's log is public and its `env:` is printed there, which rules out handing the titles on as step outputs. Running no repository code in the token's step stops a modified checkout swapping the script that handles it. Neither stops an agent that subverts the runner: a hosted runner grants passwordless `sudo`, and the agent's processes and files outlive its step; that is the known gap in `docs/specs/security.md`.
 
 The token's step also writes `gh` a fresh config directory, so no leftover configuration decides where the token goes.
 
@@ -100,13 +124,26 @@ The token's step also writes `gh` a fresh config directory, so no leftover confi
 
 The tracker's visibility is checked against `github.com` rather than the REST API: anonymous API calls share a 60-an-hour limit per runner address, and a rate-limited 403 would read as `UNVERIFIABLE` and hold the release gate.
 
-One private issue per failing run, rather than per finding, is the first slice; a ledger that stops a PASS closing the public issue while private findings are unfixed would build on the same tracker.
 
 Provisioning `EMBARGO_TOKEN`: a fine-grained PAT with Issues: write on `diffplug/dormouse-embargo` only, minted on an admin's account.
 
 ```bash
 gh secret set EMBARGO_TOKEN --env security-audit --repo diffplug/dormouse --body 'github_pat_…'
 ```
+
+## Findings ledger
+
+A later PASS closed issues whose findings were never fixed: the pass of 2026-07-10 closed a tend-permissions failure that was back by 07-14, and `hangs/` passed on 10-05 and 10-06 and failed on 10-07. A nondeterministic reader misses a finding on some nights, so one quiet night is not a fix. WARNINGs, which never failed a run, were not tracked anywhere once their run's issue closed.
+
+The key leaves out the line number so an edit above a finding does not open a second issue for it; the five-line window applies within one run, where lines are comparable. It leaves out the clause letter too: domains letter a rule's clauses as they read it, so the same failure lettered `.b` one night and `.c` the next opened a second issue. A finding's root cause is free text the domain writes, and its wording drifts between runs (`parseConfig()`, `parseConfig fallback`); keying on the code symbol in it, with the whole cause lowercased only where it names none, holds one finding to one key. PascalCase is not read as a symbol, and a cause written as its rule is read whole: prose spells `GitHub` and `PowerShell`, and two rules under one heading would otherwise share its first proper noun. The failure key keeps an empty part where the clause letter was, so an unlettered failure keeps the key it was minted under.
+
+Hand-filed issues carry `manual-…` keys that no run mints, and their titles cite a spec and heading rather than a rule number. They still count as open and still hold a PASS to re-verification, at the heading they cite, because they were filed for exactly the findings a run had missed.
+
+A PASS that names the finding with a `path:line` is a mechanical stand-in for having looked: it cannot prove the reasoning, but a domain that never read the checklist cannot produce it. Only failures that cite a rule are checked this way; a finding citing no rule is re-verified in the qualitative pass, which no line can hold to a particular finding.
+
+A PASS still exits zero while ledger findings are open: the gate holds a release on what the current tree fails, and the ledger holds what a human has not yet triaged. Only predecessors' issues hold the public issue open, so a PASS's own new WARNINGs do not keep a failure issue alive by themselves.
+
+The step lists the tracker with `--limit 1000`, and the public step does the same: the default of 30 left an older open failure issue unreconciled.
 
 ## Environment and `AUDIT_PAT`
 
@@ -121,3 +158,19 @@ Provisioning the secret, for whoever has to rotate it:
 ```bash
 gh secret set AUDIT_PAT --env security-audit --repo diffplug/dormouse --body 'github_pat_…'
 ```
+
+## Canary recall
+
+**Why measure recall (2026-10-07).** Run 37710148950 reported two failed checks and two WARNINGs; run 37713086378, on the same code, reported none of the four. Earlier, a real webview bug was found in 3 of 20 runs. A PASS says nothing about what a run would have caught; a canary turns that into a number per run.
+
+**Why a seed deletes the pins that would catch it.** A regression on `main` has passed CI, so a seed whose test still fails measures whether a domain runs a test, not whether it reads code. A seed that reclassifies an `OUTBOUND_SITES` entry or narrows a lint models the commit that silenced it.
+
+**Why the history is replaced.** A commit on top of the audited one leaves `git diff HEAD~1`, the remote-tracking ref, and the reflog each listing the seeds. The seeds applied sit in `$RUNNER_TEMP`, which an agent that goes looking can still read; the measurement assumes it does not.
+
+**Why only the code domains.** `ci-and-secrets` reads repository settings, which a checkout cannot seed, and `scripts/github-state-check.mjs` answers them deterministically, with planted-violation tests of its own.
+
+**Why a seed may name its severity (2026-10-07).** Canary run 37720586893 scored `recovery-created-at-nan` missed: the domain found the NaN age skipping `readAndClearRecord`'s max-age gate and rated it INFO hardening, which it is, because `normalizeResumeCommand` rebuilds the command at the typing boundary. The seed's expectation was wrong, not the domain. A seed whose real severity is below WARNING says so in its header, with the reason beside it, rather than the scorer counting every INFO and with it every near-miss.
+
+**Why the catch rule is strict.** A line citing the file but not the rule may be another finding in a file a seed touched. Counting near-misses would publish a recall a re-run could not reproduce.
+
+**Why a separate job, and a filter on the gate.** The `audit` job files issues, reads the ledger, uploads `audit-state`, and gates a release; gating each step on an input would leave each a place to get the condition wrong. A canary and a release dispatch can share a commit, so the gate also refuses a run by its title.

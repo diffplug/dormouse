@@ -190,6 +190,15 @@ export const RELAY_ROOM = 'hosted/server/relay-room.ts';
 export const RELAY_ROUTING = 'remote-lib-common/src/remote/relay-routing.ts';
 
 /**
+ * Every way a Hosted room could decode a frame it forwards: a parse, base64 in
+ * any spelling (`atob`, `Buffer`, `fromBase64Url`, a `base64` encoding
+ * argument), or a `TextDecoder`. Shared by {@link RELAY_ROOM_LEAKS} and the
+ * one-time room's rule, which forbid the same decode; not by the frame layer's,
+ * which mints ids with `randomBase64Url`.
+ */
+const FRAME_DECODE = String.raw`\bJSON\.parse\b|\batob\b|\bBuffer\b|\bTextDecoder\b|[Bb]ase64`;
+
+/**
  * Everything {@link RELAY_ROOM} could keep, log, or read a frame through,
  * spelled out because it reaches frames only through {@link RELAY_ROUTING}:
  *
@@ -204,7 +213,8 @@ export const RELAY_ROUTING = 'remote-lib-common/src/remote/relay-routing.ts';
  */
 const RELAY_ROOM_LEAKS = new RegExp(
   [
-    String.raw`\bct\b|\bJSON\.parse\b|\batob\b|\bBuffer\b|\bTextDecoder\b|[Bb]ase64`,
+    String.raw`\bct\b`,
+    FRAME_DECODE,
     String.raw`\bconsole\b(?!\.\w+\(\s*"[^"\\]*"\s*\))`,
     String.raw`\bstorage\b(?!\.(?:get|getAlarm|setAlarm|deleteAlarm)\b|\.put\(ACCOUNT_KEY, account\))`,
     String.raw`\bserializeAttachment\((?!(?:\w+\.)?conn\)|\{(?:(?!\.\.\.)[^{}()])*\}\s*satisfies\s+(?:BurrowConn|ClientConn)\))`,
@@ -213,8 +223,41 @@ const RELAY_ROOM_LEAKS = new RegExp(
   'g',
 );
 
+/**
+ * Everything Hosted's one-time room could keep, log, or read a frame through.
+ * Its state is a count, a flag, and an expiry in the Burrow socket's
+ * attachment (`docs/specs/one-time.md` -> "Hosted rendezvous"), so it allows:
+ *
+ * - no parse or decode, and no `console` at all;
+ * - `storage` only to set and delete the alarm and to `deleteAll` — an alias
+ *   of it is a match;
+ * - an attachment only as a literal checked `satisfies RoomState`, whose one
+ *   spread is the `state` it read back — `satisfies` refuses any other field;
+ * - `RoomState` declared once, with `number` and `boolean` fields alone, so
+ *   that refusal leaves nowhere to put a frame.
+ */
+const ONE_TIME_ROOM_LEAKS = new RegExp(
+  [
+    FRAME_DECODE,
+    String.raw`\bconsole\b`,
+    String.raw`\bstorage\b(?!\.(?:setAlarm|deleteAlarm|deleteAll)\b)`,
+    String.raw`\bserializeAttachment\((?!\{(?:(?!\.\.\.(?!state\b))[^{}()])*\}\s*satisfies\s+RoomState\))`,
+    String.raw`\b(?:interface|type)\s+RoomState\b(?!\s*\{(?:\s*(?:\/\*\*(?:(?!\*\/)[\s\S])*\*\/|\w+:\s*(?:number|boolean);))*\s*\})`,
+  ].join('|'),
+  'g',
+);
+
 /** The three shipped source trees, scanned whole for the dependency rules. */
 const SOURCE_TREES = ['remote-lib-common/src/', 'lib/src/', 'relay/src/'];
+
+/**
+ * Every shipped tree that could hold a Burrow ACL writer: the shared ACL, both
+ * hosts' Burrow code, the Relays, and `dor`.
+ */
+const ACL_WRITER_TREES = [...SOURCE_TREES, 'hosted/server/', 'vscode-ext/src/', 'standalone/src/', 'standalone/sidecar/', 'dor/src/'];
+
+/** A class member's opening line in `BurrowRuntime`, which ends the one before it. */
+const NOT_NEXT_MEMBER = String.raw`(?:(?!\n  (?:async |static )?[#\w]+\s*\()[\s\S])*?`;
 
 /**
  * The two services that carry ciphertext they must not read: the Relay, and
@@ -252,6 +295,15 @@ const AT_REST_KEY_WRAPPER = 'lib/src/remote/client/pocket-private-key.ts';
  * already sealed inside it.
  */
 export const WEB_PUSH_SENDER = 'remote-lib-common/src/remote/web-push.ts';
+
+/**
+ * A module specifier naming one of `packages` (a regex alternation) in every
+ * form that loads it: `from` (an import or a re-export), a side-effect
+ * `import`, a dynamic `import()`, and `require()`.
+ */
+function importOf(packages) {
+  return new RegExp(String.raw`(?:\bfrom\s*|\bimport\s*\(?\s*|\brequire\s*\(\s*)['"\`](?:${packages})`, 'g');
+}
 
 /**
  * One entry per structural property. Every rule states the line it enforces in
@@ -335,10 +387,11 @@ export const RULES = [
     security: 'X25519 stays WebCrypto-only',
     kind: 'forbid',
     trees: SOURCE_TREES,
-    // Anchored on the import, not the package name, so the module header may go
-    // on explaining why `@noble/ciphers` is the one exception.
-    pattern:
-      /\bfrom\s+['"](?:@noble\/curves|@noble\/hashes|@noble\/ed25519|@noble\/secp256k1|tweetnacl|libsodium|libsodium-wrappers|sodium-native|elliptic|js-nacl|micro-ed25519)/g,
+    // Anchored on the module specifier, not the package name, so the module
+    // header may go on explaining why `@noble/ciphers` is the one exception.
+    pattern: importOf(
+      '@noble\\/curves|@noble\\/hashes|@noble\\/ed25519|@noble\\/secp256k1|tweetnacl|libsodium|libsodium-wrappers|sodium-native|elliptic|js-nacl|micro-ed25519',
+    ),
     violationFile: 'remote-lib-common/src/security/noise.ts',
     violation: "\nimport { x25519 } from '@noble/curves/ed25519.js';\n",
   },
@@ -347,7 +400,7 @@ export const RULES = [
     security: 'X25519 stays WebCrypto-only',
     kind: 'exactly',
     trees: SOURCE_TREES,
-    pattern: /\bfrom\s+['"]@noble\/ciphers/g,
+    pattern: importOf('@noble\\/ciphers'),
     count: 2,
     violationFile: 'remote-lib-common/src/security/push-seal.ts',
     violation: "\nimport { xchacha20poly1305 } from '@noble/ciphers/chacha.js';\n",
@@ -468,8 +521,9 @@ export const RULES = [
     // The room forwards a frame verbatim and bounds it by raw length and count
     // alone, so it has no reason to read one: a parse is the first step toward
     // a room that acts on what a handshake says, and a log or a stored frame
-    // is handshake ciphertext kept past the handshake.
-    pattern: /\bJSON\.parse\b|\bfromBase64Url\b|\batob\b|\bconsole\.|\bstorage\.(?:put|sql|kv)\b/g,
+    // is handshake ciphertext kept past the handshake. Everything it could
+    // keep one through is in `ONE_TIME_ROOM_LEAKS`.
+    pattern: ONE_TIME_ROOM_LEAKS,
     violationFile: 'hosted/server/one-time-room.ts',
     violation: '\nconst __selftest = (frame: string) => JSON.parse(frame);\n',
   },
@@ -554,6 +608,35 @@ export const RULES = [
     // A one-time connection has no relayed fallback at all: the rendezvous
     // carries a handshake, never a session.
     pattern: /^        directOnly: true,$/m,
+  },
+  {
+    rule: 'One call mints a Burrow ACL record',
+    security: 'must have no caller but `BurrowRuntime.#approvePairing`',
+    kind: 'exactly',
+    trees: ACL_WRITER_TREES,
+    // `BurrowAcl.approve` takes the approved client as an object literal; the
+    // pairing request's own `approve(code)` takes a string and is not this.
+    pattern: /\.approve\(\s*\{/g,
+    count: 1,
+    violationFile: 'lib/src/host/remote/service.ts',
+    violation: '\nvoid acl.approve({});\n',
+  },
+  {
+    rule: 'Two calls save a Burrow ACL: the runtime\'s approval and the service\'s wiring to its store',
+    security: 'must have no caller but `BurrowRuntime.#approvePairing`',
+    kind: 'exactly',
+    trees: ACL_WRITER_TREES,
+    pattern: /\.#?saveAcl\(/g,
+    count: 2,
+    violationFile: 'vscode-ext/src/burrow-store.ts',
+    violation: "\nvoid store.saveAcl('burrow', []);\n",
+  },
+  {
+    rule: 'The mint and its save sit in `#approvePairing`',
+    security: 'must have no caller but `BurrowRuntime.#approvePairing`',
+    kind: 'require',
+    file: BURROW_RUNTIME,
+    pattern: new RegExp(String.raw`^  #approvePairing\(${NOT_NEXT_MEMBER}\.approve\(\{${NOT_NEXT_MEMBER}this\.#saveAcl\(`, 'm'),
   },
   {
     rule: '`OneTimeRuntime` names nothing that grants or persists',

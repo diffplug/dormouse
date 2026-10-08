@@ -7,12 +7,33 @@
 
 export type ShellCommandKind = 'cmd' | 'posix' | 'powershell';
 
+/** C0, DEL, and C1, as a character class body. */
+export const CONTROL_CHARACTERS = '\\x00-\\x1f\\x7f-\\x9f';
+/** Unicode format characters that reorder or hide the text around them: every
+ *  bidi control, the zero-width space and joiners, the word joiner and
+ *  invisible operators, and the BOM — the set `boundedPushText` in
+ *  `remote-lib-common/src/security/push.ts` drops. A class body, so a printer
+ *  can escape the same set. */
+export const FORMAT_CHARACTERS = '\\u061c\\u200b-\\u200f\\u202a-\\u202e\\u2060-\\u2064\\u2066-\\u2069\\ufeff';
+const SHELL_INPUT_CONTROLS = new RegExp(`[${CONTROL_CHARACTERS}]`);
+const CONTROL_OR_FORMAT = new RegExp(`[${CONTROL_CHARACTERS}${FORMAT_CHARACTERS}]`);
+
 /** Shell quotes cannot protect bytes that an interactive terminal interprets
  * as editing keys, escape sequences, or line submission before shell parsing.
  * C1 is included: the line editor echoes it, and the echo drives the terminal. */
 export function hasShellInputControls(value: string): boolean {
-  return /[\x00-\x1f\x7f-\x9f]/.test(value);
+  return SHELL_INPUT_CONTROLS.test(value);
 }
+
+/** Text a repo writes into a Tool definition: besides the controls above, any
+ *  character that makes the text shown differ from the text run
+ *  (`docs/specs/security-local.md` -> Dor Tool configuration). */
+export function hasControlOrFormatCharacters(value: string): boolean {
+  return CONTROL_OR_FORMAT.test(value);
+}
+
+/** How a refusal names what `hasControlOrFormatCharacters` finds. */
+export const CONTROL_OR_FORMAT_TEXT = 'terminal control characters or invisible formatting characters';
 
 const POSIX_SAFE_ARG = /^[A-Za-z0-9_@%+=:,./-]+$/;
 // No `,` or `@`, unlike the posix set: PowerShell's argument mode reads a comma

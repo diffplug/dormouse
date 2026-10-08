@@ -12,6 +12,8 @@
  * The pane holds no PTY while this is showing. Nothing from the repo has run.
  */
 import { useRef } from 'react';
+import { hasShellInputControls } from 'dor/commands/shell-quote';
+import { printableExact } from 'dor/commands/terminal-text';
 import { usePaneChrome } from './use-pane-chrome';
 import { PaneMessage, modalActionButton } from '../design';
 import { toolPendingFromParams } from './browser-surface';
@@ -25,19 +27,26 @@ export function ToolApproval({ params, id, onResolve }: PaneProps & {
   const pending = toolPendingFromParams(params);
   if (!pending) return null;
 
+  // Shown exactly: a format character a path or argument carries appears as
+  // its escape, and text with a control the host refuses never offers a grant
+  // (`docs/specs/security-local.md` -> Dor Tool configuration).
+  const { name, run, path, projectRoot, upstreamUrl } = pending;
+  const refused = [name, run, path, projectRoot, upstreamUrl ?? ''].some(hasShellInputControls);
+
   return (
     <PaneMessage ref={elRef} contentClassName="flex flex-col gap-4">
       <div className="flex flex-col gap-1 font-mono text-muted">
-        <div className="text-foreground">dor tool {pending.name}</div>
+        <div className="text-foreground">dor tool {printableExact(name)}</div>
         <div>will launch</div>
-        <code className="rounded bg-app-bg px-2 py-1 text-foreground">{pending.run}</code>
+        <code className="rounded bg-app-bg px-2 py-1 text-foreground">{printableExact(run)}</code>
         <div>and then open a browser</div>
       </div>
 
-      {pending.error ? <div role="alert" className="text-error">{pending.error}</div> : null}
+      {refused ? <div role="alert" className="text-error">This Tool contains terminal control characters, so it cannot be approved.</div>
+        : pending.error ? <div role="alert" className="text-error">{printableExact(pending.error)}</div> : null}
 
       <div className="flex flex-col gap-2">
-        {pending.trustRecorded ? (
+        {refused ? null : pending.trustRecorded ? (
           <button
             type="button"
             className={modalActionButton({ tone: 'primary' })}
@@ -45,22 +54,22 @@ export function ToolApproval({ params, id, onResolve }: PaneProps & {
           >
             Retry
           </button>
-        ) : pending.upstreamUrl ? (
+        ) : upstreamUrl ? (
           <button
             type="button"
             className={modalActionButton({ tone: 'primary' })}
             onClick={() => onResolve(id, 'upstream')}
           >
-            Always allow for upstream {pending.upstreamUrl}
+            Always allow for upstream {printableExact(upstreamUrl)}
           </button>
         ) : null}
-        {!pending.trustRecorded ? (
+        {!pending.trustRecorded && !refused ? (
           <button
             type="button"
             className={modalActionButton()}
             onClick={() => onResolve(id, 'folder')}
           >
-            Always allow for folder {pending.projectRoot}
+            Always allow for folder {printableExact(projectRoot)}
           </button>
         ) : null}
         <button
@@ -74,7 +83,7 @@ export function ToolApproval({ params, id, onResolve }: PaneProps & {
 
       <div className="text-xs text-muted/80">
         {pending.trustRecorded ? 'Permission is saved. Retry checks the Tool configuration again. Closing this pane keeps the permission.' : (
-          <>{pending.path} decides what this runs. Allowing the upstream covers any
+          <>{printableExact(path)} decides what this runs. Allowing the upstream covers any
             folder whose git config names it, every clone and worktree included;
             allowing the folder covers this checkout only. Declining records nothing.</>
         )}

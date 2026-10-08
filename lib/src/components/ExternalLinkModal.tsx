@@ -1,5 +1,6 @@
 import { useRef } from 'react';
 import type { OpenHandler } from 'dor/commands/types';
+import { printableExact } from 'dor/commands/terminal-text';
 import { ProhibitIcon, WarningOctagonIcon } from '@phosphor-icons/react';
 import { writeTextToClipboard } from '../lib/clipboard';
 import type { DisplayMatchVerdict, ExternalUriDecision } from '../lib/external-links';
@@ -69,7 +70,8 @@ export function ExternalLinkModal({
 
   const openableDecision = request.decision.status === 'openable' ? request.decision : null;
   const blockedDecision = request.decision.status === 'blocked' ? request.decision : null;
-  const displayUri = request.decision.displayUri || request.uri;
+  // Terminal text, shown exactly: a blocked URL keeps whatever got it blocked.
+  const displayUri = printableExact(request.decision.displayUri || request.uri);
   const verdict = request.verdict;
   const isDeceptive = verdict === 'deceptive';
   const buttonNoun = openableDecision
@@ -143,7 +145,7 @@ export function ExternalLinkModal({
           </p>
         </div>
       )}
-      {error && <p role="alert" className="mt-3 break-words text-xs text-error">{error}</p>}
+      {error && <p role="alert" className="mt-3 break-words text-xs text-error">{printableExact(error)}</p>}
 
       <div className="mt-4 flex justify-end gap-2 text-xs">
         {isDeceptive ? (
@@ -210,7 +212,7 @@ function OpenTitle({
   if (verdict === 'plain' && displayText.trim()) {
     return (
       <>
-        Confirm open: <span className="font-semibold">{displayText.trim()}</span>
+        Confirm open: <span className="font-semibold">{printableExact(displayText.trim())}</span>
       </>
     );
   }
@@ -228,7 +230,7 @@ function DeceptiveTitle({ displayText }: { displayText: string }) {
       />
       <span className="leading-snug">
         Deceptive link text was{' '}
-        <span className="font-semibold">{displayText.trim()}</span>, URL was:
+        <span className="font-semibold">{printableExact(displayText.trim())}</span>, URL was:
       </span>
     </span>
   );
