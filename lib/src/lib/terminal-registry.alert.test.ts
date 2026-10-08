@@ -761,7 +761,7 @@ describe('terminal-registry alert behavior', () => {
     });
   });
 
-  it('Story 9: new output defers an owed ring until quiet or acknowledgement', () => {
+  it('Story 9: sustained output defers an owed ring, but an isolated prompt does not', () => {
     const id = 'story-9';
     createSession(id);
     enableAlert(id);
@@ -769,7 +769,12 @@ describe('terminal-registry alert behavior', () => {
     driveToRingingNeedsAttention(id);
     const episode = getActivity(id).episode;
     emitOutput(id, 'shell prompt');
-    expect(getActivity(id)).toMatchObject({ status: 'NOTHING_TO_SHOW', episode });
+    expect(getActivity(id)).toMatchObject({ status: 'ALERT_RINGING', episode });
+    advance(1_600);
+    emitOutput(id, 'continued output');
+    expect(getActivity(id)).toMatchObject({ status: 'MIGHT_BE_BUSY', episode });
+    emitOutput(id, 'confirmed output');
+    expect(getActivity(id)).toMatchObject({ status: 'BUSY', episode });
     advance(5_000);
     expect(getActivity(id)).toMatchObject({ status: 'ALERT_RINGING', episode });
 

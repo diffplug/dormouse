@@ -6,7 +6,7 @@ export interface AlertEpisode {
   startedAt: number;
 }
 
-/** An owed ring deferred until recent output stops (`docs/specs/alert.md` -> Completion events). */
+/** An owed ring deferred until the output detector returns to quiet (`docs/specs/alert.md` -> Completion events). */
 export function isAlertDeferred(state: { episode?: AlertEpisode | null; status: SessionStatus }): boolean {
   return state.episode != null && state.status !== 'ALERT_RINGING';
 }

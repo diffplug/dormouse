@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AlertManager, type ActivityNotification, type AwaitOutcome } from './alert-manager';
 import { applyTerminalEvents, TerminalProtocolParser } from './terminal-protocol';
 import { cfg } from '../cfg';
-import { collectEpisodes, engage, finishCommand, goIdle, leave, runCommand, VIEWER } from './alert-manager-test-utils';
+import { collectEpisodes, driveToBusy, engage, finishCommand, goIdle, leave, runCommand, VIEWER } from './alert-manager-test-utils';
 import { alertedPty, createOwnerPtyStream } from '../host/owner-pty';
 
 /**
@@ -182,7 +182,7 @@ describe('held completions', () => {
   it('keeps ringing a ring that already showed when it comes due again while engaged', () => {
     manager.notifyFromProtocol(PANE, PERMISSION);
     expect(ringing(PANE)).toBe(true);
-    output(PANE, 1_000);
+    driveToBusy(manager, PANE);
     expect(ringing(PANE)).toBe(false);
     engage(manager, PANE);
     vi.advanceTimersByTime(5_000);
@@ -445,7 +445,7 @@ describe('a Claude Code turn', () => {
   });
 
   it.each([
-    ['after a short turn and its trailing frame go quiet', RECORDED_TURN_MS, 3 + QUIET_MS],
+    ['immediately after a turn too short to establish activity', RECORDED_TURN_MS, 0],
     ['once a longer turn has gone quiet', LONG_TURN_MS, 3 + QUIET_MS],
   ] as const)('rings "claude finished" once when the user moved away mid-turn: %s', (_when, turnMs, afterEndMs) => {
     const ringAt = ENTER_AT + turnMs + afterEndMs;

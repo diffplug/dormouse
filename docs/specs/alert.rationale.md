@@ -42,9 +42,9 @@
 
 **Why the gate reads private detector state.** The detector runs for unwatched commands, and other tracks can mask it in the public projection; the gate needs the underlying evidence, not whichever state wins display precedence.
 
-**Why command finishes bypass animation deferral.** A shell-reported exit is a lifecycle event; animation detection is only a recent-output heuristic. Letting the heuristic overrule the event would add latency and let unrelated background output defer a certain completion indefinitely.
+**Why command finishes bypass animation deferral.** A shell-reported exit is a lifecycle event; animation detection is only an output heuristic. Letting the heuristic overrule the event would add latency and let unrelated background output defer a certain completion indefinitely.
 
-**Why deferral waits for recent output without a ceiling.** The 30-second cap addressed notifications starved by `watch -n1` redraws or dev-server heartbeat output (audit, 2026-09-23). It also rang during ongoing animation. The chosen preference is now to wait indefinitely for quiet rather than summon during output; even a brief unconfirmed redraw can delay an owed notification without cancelling it (product decision, 2026-10-01). Idle-pane notifications remain immediate.
+**Why deferral uses the detector without a ceiling.** Deferring on every accepted output chunk let an isolated redraw hide an alert and introduced a separate quiet clock beside the busy detector. The intended activity boundary includes candidate work, confirmed work, and the finishing window; a rejected candidate or a command boundary releases the alert without waiting for a second timer (product decision, 2026-10-08). Once activity qualifies, sustained output can still defer indefinitely; the user preference remains to avoid summoning during animation.
 
 **Why a deferred report opens its ring at once.** A report during animation used to wait outside the ring until quiet: invisible, unpersisted, and discarded with no TODO by a click or any user verb, while a ring that had already shown and then deferred became a TODO on the same click. Two mechanisms carried one intent with different exits (2026-10-08). One ring with derived deferral gives every verb one path. The cost: the alarm delay counts from the report, not from quiet, as it already did for a ring deferred after it showed.
 
@@ -96,7 +96,7 @@
 
 **Why the keystroke fallback is not routed into the manager.** The fallback in `docs/specs/terminal-state.md` is renderer-side and lower confidence than a shell-reported command boundary. Wiring it in would buy integration-less shells a worse version of WATCHING at the price of a second command-tracking path to keep in sync.
 
-**Why resumed work defers an owed ring.** The marked `ttr.pgstencil-adopt` speech (2026-09-09 18:17:03) followed a WATCHING settle and resumed output. Withdrawing only confirmed WATCHING left program-sent reports ringing through animation. Deferring on the first accepted output preserves the debt even when a redraw never confirms BUSY; the same episode and original deadlines prevent alarm replay and avoid adding another full delay after quiet (product decision, 2026-10-01).
+**Why resumed work defers an owed ring.** The marked `ttr.pgstencil-adopt` speech (2026-09-09 18:17:03) followed a WATCHING settle and resumed output. Withdrawing only confirmed WATCHING left program-sent reports ringing through animation. Deferral preserves the debt; the same episode and original deadlines prevent alarm replay and avoid adding another full delay after quiet (product decision, 2026-10-01).
 
 ## Terminal reports
 

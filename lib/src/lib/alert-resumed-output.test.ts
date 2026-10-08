@@ -35,7 +35,7 @@ function ring(source: 'watching' | 'report'): void {
 }
 
 describe('owed alerts during resumed output', () => {
-  it('keeps a deferred report when output arrives while a claimant takes the settle', () => {
+  it('releases a deferred report despite one new chunk while a claimant takes the settle', () => {
     driveToBusy(manager, ID);
     manager.notifyFromProtocol(ID, REPORT);
     vi.advanceTimersByTime(1_000);
@@ -46,19 +46,20 @@ describe('owed alerts during resumed output', () => {
       return true;
     });
     settle();
-    expect(manager.getState(ID).status).not.toBe('ALERT_RINGING');
-    vi.advanceTimersByTime(5_000);
     expect(manager.getState(ID)).toMatchObject({ status: 'ALERT_RINGING', notification: REPORT });
   });
-  it.each(['watching', 'report'] as const)('defers a %s on the first redraw and keeps its original alarm deadlines', (source) => {
+  it.each(['watching', 'report'] as const)('defers a %s on candidate activity and keeps its original alarm deadlines', (source) => {
     ring(source);
     const episode = manager.getState(ID).episode;
     vi.advanceTimersByTime(1_000);
     manager.onData(ID);
-    expect(manager.getState(ID)).toMatchObject({ status: 'NOTHING_TO_SHOW', episode, todo: false });
-    vi.advanceTimersByTime(5_000);
+    expect(manager.getState(ID).status).toBe('ALERT_RINGING');
+    vi.advanceTimersByTime(1_600);
+    manager.onData(ID);
+    expect(manager.getState(ID)).toMatchObject({ status: 'MIGHT_BE_BUSY', episode, todo: false });
+    vi.advanceTimersByTime(500);
     expect(manager.getState(ID)).toMatchObject({ status: 'ALERT_RINGING', episode });
-    vi.advanceTimersByTime(3_999);
+    vi.advanceTimersByTime(6_899);
     expect(spoken).not.toHaveBeenCalled();
     vi.advanceTimersByTime(1);
     expect(spoken).toHaveBeenCalledExactlyOnceWith(ID, episode!.id);
@@ -83,7 +84,7 @@ describe('owed alerts during resumed output', () => {
     ring('report');
     vi.advanceTimersByTime(DELAY);
     for (let i = 0; i < 3; i++) {
-      manager.onData(ID);
+      driveToBusy(manager, ID);
       vi.advanceTimersByTime(5_000 + DELAY);
     }
     expect(spoken).toHaveBeenCalledOnce();
@@ -100,7 +101,7 @@ describe('owed alerts during resumed output', () => {
   });
   it('keeps the richest detail across deferrals and new reports', () => {
     ring('report');
-    manager.onData(ID);
+    driveToBusy(manager, ID);
     manager.notifyFromProtocol(ID, { source: 'BEL', title: 'Terminal bell', body: null });
     expect(manager.getState(ID).notification).toEqual(REPORT);
     vi.advanceTimersByTime(5_000);
@@ -109,29 +110,29 @@ describe('owed alerts during resumed output', () => {
   it('exempts a mixed command-exit ring from deferral', () => {
     armCommandExit(manager, ID, WATCHED);
     ring('report');
-    manager.onData(ID);
+    driveToBusy(manager, ID);
     finishCommand(manager, ID);
     heartbeat(manager, ID, DELAY);
     expect(manager.getState(ID)).toMatchObject({ status: 'ALERT_RINGING', notification: REPORT });
     expect(spoken).toHaveBeenCalledOnce();
   });
-  it('leaves a deferred ring deferred behind an engaged exit until the exit escalates', () => {
+  it('releases an already-shown ring when an engaged command exit resets activity', () => {
     armCommandExit(manager, ID, WATCHED);
     ring('report');
-    manager.onData(ID);
+    driveToBusy(manager, ID);
     engage(manager, ID);
     finishCommand(manager, ID);
-    const deferred = manager.getState(ID);
-    expect(deferred.episode).not.toBeNull();
-    expect(deferred.status).not.toBe('ALERT_RINGING');
+    const released = manager.getState(ID);
+    expect(released.episode).not.toBeNull();
+    expect(released.status).toBe('ALERT_RINGING');
     goIdle(manager, ID);
-    expect(manager.getState(ID)).toMatchObject({ status: 'ALERT_RINGING', episode: deferred.episode });
+    expect(manager.getState(ID)).toMatchObject({ status: 'ALERT_RINGING', episode: released.episode });
   });
   it('defers a report once an await consumes the exit that exempted it', async () => {
     armCommandExit(manager, ID, WATCHED);
     ring('report');
     finishCommand(manager, ID);
-    manager.onData(ID);
+    driveToBusy(manager, ID);
     expect(await manager.awaitCompletion(ID, { until: 'exit', timeoutMs: 60_000 }).promise).toMatchObject({ cause: 'exit' });
     expect(manager.getState(ID).status).not.toBe('ALERT_RINGING');
     vi.advanceTimersByTime(5_000);
@@ -140,12 +141,12 @@ describe('owed alerts during resumed output', () => {
   it('works without a matching WATCHING rule', () => {
     manager.setWatchedCommands([]);
     ring('report');
-    manager.onData(ID);
+    driveToBusy(manager, ID);
     expect(manager.getState(ID).status).toBe('WATCHING_DISABLED');
     vi.advanceTimersByTime(5_000);
     expect(manager.getState(ID).status).toBe('ALERT_RINGING');
   });
-  it('defers a notification followed by output in the same PTY read', () => {
+  it('shows a notification followed by an isolated redraw in the same PTY read', () => {
     const stream = createOwnerPtyStream(ID, {
       alerts: manager, colorProvider: () => null,
       onToolEvents() {}, onSemanticEvents() {}, writeResponse() {}, onClipboardOffer() {}, onChunk() {},
@@ -153,8 +154,6 @@ describe('owed alerts during resumed output', () => {
     stream.write('\x1b]9;needs input\x07final spinner frame');
     const episode = manager.getState(ID).episode;
     expect(episode).not.toBeNull();
-    expect(manager.getState(ID).status).not.toBe('ALERT_RINGING');
-    vi.advanceTimersByTime(5_000);
     expect(manager.getState(ID)).toMatchObject({ status: 'ALERT_RINGING', episode });
   });
   it('ignores resize output when deciding whether to defer', () => {
@@ -165,10 +164,46 @@ describe('owed alerts during resumed output', () => {
     vi.advanceTimersByTime(DELAY);
     expect(spoken).toHaveBeenCalledOnce();
   });
+  it('ignores late isolated resize output and repeated typing echoes', () => {
+    manager.onResize(ID);
+    manager.onData(ID);
+    vi.advanceTimersByTime(600);
+    manager.onData(ID); // A late redraw outside the resize grace is still only one chunk.
+    manager.notifyFromProtocol(ID, REPORT);
+    expect(manager.getState(ID).status).toBe('ALERT_RINGING');
+    manager.acknowledge(ID, { input: true });
+    for (let i = 0; i < 20; i++) {
+      vi.advanceTimersByTime(400);
+      manager.acknowledge(ID, { input: true });
+      manager.onData(ID);
+    }
+    vi.advanceTimersByTime(751);
+    manager.onData(ID); // Fresh output ends acknowledgement suppression.
+    manager.notifyFromProtocol(ID, REPORT);
+    expect(manager.getState(ID).status).toBe('ALERT_RINGING');
+  });
+  it('publishes candidate deferral and its expiry for unwatched commands without moving alarm deadlines', () => {
+    manager.setWatchedCommands([]);
+    scheduler.setDefaults({ ...DEFAULT_ALERT_SETTINGS, speakEnabled: true, speakDelayMs: 1_000, pushEnabled: true, pushDelayMs: 1_000 });
+    manager.onData(ID);
+    vi.advanceTimersByTime(1_500);
+    manager.onData(ID);
+    manager.notifyFromProtocol(ID, REPORT);
+    const episode = manager.getState(ID).episode;
+    expect(manager.getState(ID).status).toBe('WATCHING_DISABLED');
+    vi.advanceTimersByTime(499);
+    expect(spoken).not.toHaveBeenCalled();
+    expect(pushed).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(manager.getState(ID)).toMatchObject({ status: 'ALERT_RINGING', episode });
+    vi.advanceTimersByTime(500);
+    expect(spoken).toHaveBeenCalledExactlyOnceWith(ID, episode!.id);
+    expect(pushed).toHaveBeenCalledOnce();
+  });
   it('releases a deferral when disabled and defers immediately when re-enabled', () => {
     ring('report');
     const episode = manager.getState(ID).episode;
-    manager.onData(ID);
+    driveToBusy(manager, ID);
     manager.setDeferAlertsUntilQuiet(false);
     expect(manager.getState(ID)).toMatchObject({ status: 'ALERT_RINGING', episode });
     manager.setDeferAlertsUntilQuiet(true);
@@ -178,15 +213,16 @@ describe('owed alerts during resumed output', () => {
   });
   it('persists a deferred ring as TODO, whether or not it was ever visible', () => {
     ring('report');
-    manager.onData(ID);
+    driveToBusy(manager, ID);
     expect(toPersistedAlertState(manager.getState(ID))).toMatchObject({ todo: true, notification: REPORT });
-    manager.onData('never-visible');
+    driveToBusy(manager, 'never-visible');
     manager.notifyFromProtocol('never-visible', REPORT);
     expect(toPersistedAlertState(manager.getState('never-visible'))).toMatchObject({ todo: true, notification: REPORT });
   });
   it.each(['acknowledge', 'dismiss', 'clearTodo', 'remove', 'seed'] as const)('clears a deferred summons on %s without stale delivery', (action) => {
+    manager.setWatchedCommands([]); // Isolate report delivery from a later WATCHING settle.
     ring('report');
-    manager.onData(ID);
+    driveToBusy(manager, ID);
     if (action === 'acknowledge') manager.acknowledge(ID, { input: false });
     else if (action === 'dismiss') manager.dismissAlert(ID);
     else if (action === 'seed') manager.seed(ID, { todo: false });
@@ -198,12 +234,12 @@ describe('owed alerts during resumed output', () => {
   });
   it('removes a deferred WATCHING source with its rule while retaining a report', () => {
     ring('watching');
-    manager.onData(ID);
+    driveToBusy(manager, ID);
     manager.setWatchedCommands([]);
     expect(manager.getState(ID).episode).toBeNull();
     vi.advanceTimersByTime(5_000);
     ring('report');
-    manager.onData(ID);
+    driveToBusy(manager, ID);
     manager.setWatchedCommands([WATCHED]);
     manager.setWatchedCommands([]);
     vi.advanceTimersByTime(5_000);
