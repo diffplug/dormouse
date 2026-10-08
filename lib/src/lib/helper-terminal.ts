@@ -190,7 +190,7 @@ export async function resetHelper(parentId: string, parent: { workspaceId: Works
  *  WeakSet so the mark leaves with the entry. */
 const closedParents = new WeakSet<object>();
 
-/** The parent Surface is retiring (kill, renderer swap, shell replacement):
+/** The parent Surface is retiring (kill, shell replacement):
  *  dispose its helper, and refuse an `openHelper` whose host round trip lands
  *  afterwards, which would otherwise spawn a helper PTY nothing can reach. */
 export function closeHelperParent(parentId: string): void {

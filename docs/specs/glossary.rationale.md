@@ -10,4 +10,4 @@
 
 ## Invariants
 
-**Why render mode alone cannot determine identity continuity.** `replaceSurface` replaces the Lath leaf, so its Surface id, and the ref derived from it, change. Agent-browser headed/headless relaunches keep the same leaf and id; a minimized failed-connect rollback can also change render mode through a params update.
+**Why a render swap keeps the id but shell replacement does not.** A render swap changes only the renderer of a Surface that owns no PTY, so its slot, TODO, and `dor` ref stay with it; minting a new id dropped the TODO and stranded any script holding the ref. A replaced shell's PTY is killed under its id, and that id stays marked: late output and exit can still arrive, VS Code's host drops them by `killedPtyIds`, and the alert manager keeps a `removed` tombstone until a live Session reports under the id. A browser reusing the id would inherit or be confused with those events. A browser also launches under its own id before placement decides whether it replaces the shell (`preparedId`).

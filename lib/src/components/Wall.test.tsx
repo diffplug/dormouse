@@ -1046,7 +1046,7 @@ describe('Wall on the Lath engine', () => {
       expect(container.querySelector(`[data-lath-leaf="${browserId}"]`)?.hasAttribute('data-lath-parked')).toBe(true);
 
       // Until the boot names it, `dor agent-browser --surface` has nothing to drive.
-      expect(await dispatchResolveAgentBrowser(browserId)).toEqual({
+      expect(await dispatchResolveBrowser(browserId)).toEqual({
         ok: false,
         error: `surface '${surfaceRefForId(browserId)}' has no agent-browser session yet`,
       });
@@ -1080,6 +1080,81 @@ describe('Wall on the Lath engine', () => {
     }
   });
 
+  /** docs/specs/glossary.md -> "Invariants" I10: a render swap changes the renderer, never the Surface. */
+  const abPaneLayout = {
+    version: 1 as const,
+    tree: { root: { kind: 'leaf' as const, id: 'ab-pane' } },
+    leafMeta: {
+      'ab-pane': { component: 'browser', tabComponent: 'surface', title: 'localhost:5173', params: {
+        surfaceType: 'browser', renderMode: 'agent-browser-screencast', session: 'ab-live', url: 'http://localhost:5173/',
+      } },
+    },
+  };
+  const leafIdList = () => Array.from(container.querySelectorAll<HTMLElement>('[data-lath-leaf]')).map((leaf) => leaf.dataset.lathLeaf!);
+
+  it('keeps the Surface id and its TODO across an agent-browser → iframe swap', async () => {
+    const { requests } = hostBrowsers();
+    await act(async () => root.render(<Wall restoredLathLayout={abPaneLayout} initialMode="command" />));
+    await flush();
+    await act(async () => { terminalRegistry.toggleSessionTodo('ab-pane'); });
+
+    await act(async () => { getAgentBrowserScreenController('ab-pane')?.actions.setRenderMode?.('iframe'); });
+    await flush();
+
+    expect(leafIdList()).toEqual(['ab-pane']);
+    expect(getAgentBrowserScreenController('ab-pane')?.snapshot().renderMode).toBe('iframe');
+    expect(terminalRegistry.getActivitySnapshot().get('ab-pane')?.todo).toBe(true);
+    // The old renderer's browser and controller went with the swap.
+    expect(requests('close')).toContainEqual(expect.objectContaining({ provider: 'agent-browser', binding: { session: 'ab-live' } }));
+    expect(getAgentBrowserSurfaceController('ab-pane')).toBeNull();
+  });
+
+  it('keeps the Surface id across a provider swap and launches the new provider under it', async () => {
+    const { requests } = hostBrowsers({
+      launch: async (request) => ({ ok: true, session: request.provider === 'playwright' ? 'pw-1' : 'ab-relaunch', stream: 4321 }),
+    });
+    await act(async () => root.render(<Wall restoredLathLayout={abPaneLayout} initialMode="command" />));
+    await flush();
+
+    await act(async () => { getAgentBrowserScreenController('ab-pane')?.actions.setRenderMode?.('playwright-screencast'); });
+    await flush();
+
+    expect(leafIdList()).toEqual(['ab-pane']);
+    expect(getAgentBrowserSurfaceController('ab-pane')?.provider).toBe('playwright');
+    expect(requests('launch')).toEqual([expect.objectContaining({ provider: 'playwright', url: 'http://localhost:5173/' })]);
+    expect(requests('close')).toContainEqual(expect.objectContaining({ provider: 'agent-browser', binding: { session: 'ab-live' } }));
+    // `dor` addresses the swapped Surface by the ref it always had.
+    expect(await dispatchResolveBrowser(surfaceRefForId('ab-pane'), 'playwright')).toMatchObject({ ok: true, result: { binding: { session: 'pw-1' } } });
+  });
+
+  it('answers dor with the same ref after an iframe → agent-browser swap', async () => {
+    const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(false);
+    hostBrowsers({ launch: async () => ({ ok: true, session: 'swapped', stream: 4321 }) });
+    try {
+      await act(async () => root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />));
+      await flush();
+      const iframe = await dispatchIframe('http://localhost:5173/');
+      await act(async () => { getAgentBrowserScreenController(iframe.id)?.actions.setRenderMode?.('agent-browser-screencast'); });
+      await flush();
+
+      expect(leafIdList()).toEqual(['pane-a', iframe.id]);
+      let response: unknown;
+      await act(async () => {
+        window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+          detail: {
+            method: SURFACE_CONTROL_METHODS.browser,
+            params: { provider: 'agent-browser', session: 'swapped', surface: 'pane-a' },
+            respond: (r: unknown) => { response = r; },
+          },
+        }));
+      });
+      await flush();
+      expect(response).toMatchObject({ ok: true, result: { status: 'existing', surfaceId: iframe.id, surfaceRef: iframe.ref } });
+    } finally {
+      untouchedSpy.mockRestore();
+    }
+  });
+
   it('binds a minimized pane restored after a failed provider swap to a live controller', async () => {
     const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(true);
     const pwOpen = Promise.withResolvers<{ ok: boolean; error?: string }>();
@@ -1102,7 +1177,7 @@ describe('Wall on the Lath engine', () => {
       await flush();
       const eagerLeaf = container.querySelector<HTMLElement>('[data-lath-leaf]')!;
       const eagerId = eagerLeaf.dataset.lathLeaf!;
-      expect(eagerId).not.toBe('ab-pane');
+      expect(eagerId).toBe('ab-pane');
       await act(async () => { eagerLeaf.querySelector<HTMLButtonElement>('[aria-label="Minimize"]')!.click(); });
       await flush();
 
@@ -1175,7 +1250,7 @@ describe('Wall on the Lath engine', () => {
       await flush();
       const eagerLeaf = container.querySelector<HTMLElement>('[data-lath-leaf]')!;
       const eagerId = eagerLeaf.dataset.lathLeaf!;
-      expect(eagerId).not.toBe(iframeId);
+      expect(eagerId).toBe(iframeId);
 
       await act(async () => {
         eagerLeaf.querySelector<HTMLButtonElement>('[aria-label="Minimize"]')!.click();
@@ -1189,7 +1264,7 @@ describe('Wall on the Lath engine', () => {
       });
       await flush();
 
-      expect(await dispatchResolveAgentBrowser(eagerId)).toMatchObject({ ok: true, result: { binding: { session: 'dormouse.1.gui-minimized' }, fresh: false } });
+      expect(await dispatchResolveBrowser(eagerId)).toMatchObject({ ok: true, result: { binding: { session: 'dormouse.1.gui-minimized' }, fresh: false } });
       expect(requests('close').filter((request) => request.binding.session === 'dormouse.1.gui-minimized')).toEqual([]);
     } finally {
       untouchedSpy.mockRestore();
@@ -1217,7 +1292,7 @@ describe('Wall on the Lath engine', () => {
       await flush();
       const eagerLeaf = container.querySelector<HTMLElement>('[data-lath-leaf]')!;
       const eagerId = eagerLeaf.dataset.lathLeaf!;
-      expect(eagerId).not.toBe(iframeId);
+      expect(eagerId).toBe(iframeId);
       await act(async () => {
         eagerLeaf.querySelector<HTMLButtonElement>('[aria-label="Minimize"]')!.click();
       });
@@ -1230,7 +1305,7 @@ describe('Wall on the Lath engine', () => {
       await flush();
 
       expect(container.querySelector(`[data-door-id="${eagerId}"]`)).not.toBeNull();
-      expect(await dispatchResolveAgentBrowser(eagerId)).toEqual({
+      expect(await dispatchResolveBrowser(eagerId)).toEqual({
         ok: false,
         error: `surface '${surfaceRefForId(eagerId)}' is not agent-browser rendered (render_mode: iframe) — an iframe cannot be driven; open its page with dor agent-browser open http://localhost:5173/`,
       });
@@ -1287,7 +1362,7 @@ describe('Wall on the Lath engine', () => {
       await flush();
       const eagerId = Array.from(container.querySelectorAll<HTMLElement>('[data-lath-leaf]'))
         .map((leaf) => leaf.dataset.lathLeaf!).find((leafId) => leafId !== 'pane-a')!;
-      expect(eagerId).not.toBe('keyed-ab');
+      expect(eagerId).toBe('keyed-ab');
       await act(async () => {
         container.querySelector<HTMLElement>(`[data-lath-leaf="${eagerId}"]`)!.querySelector<HTMLButtonElement>('[aria-label="Minimize"]')!.click();
       });
@@ -1304,7 +1379,7 @@ describe('Wall on the Lath engine', () => {
       await act(async () => { landClose(); });
       await flush();
       expect(events).toEqual([`close ${defaultSession}`, 'close landed', `launch ${defaultSession} http://localhost:5173/`]);
-      expect(await dispatchResolveAgentBrowser(eagerId)).toMatchObject({ ok: true, result: { binding: { session: defaultSession } } });
+      expect(await dispatchResolveBrowser(eagerId)).toMatchObject({ ok: true, result: { binding: { session: defaultSession } } });
       // …so `dor agent-browser --key default` drives it rather than opening a second pane.
       let reused: { ok: boolean; result?: { status: string; surfaceId: string } } | undefined;
       await act(async () => {
@@ -1340,9 +1415,9 @@ describe('Wall on the Lath engine', () => {
       await flush();
 
       const restoredId = container.querySelector<HTMLElement>('[data-lath-leaf]')!.dataset.lathLeaf!;
-      expect(restoredId).not.toBe(iframeId);
+      expect(restoredId).toBe(iframeId);
       expect(getAgentBrowserScreenController(restoredId)?.snapshot().renderMode).toBe('iframe');
-      expect(await dispatchResolveAgentBrowser(surfaceRefForId(restoredId))).toEqual({
+      expect(await dispatchResolveBrowser(surfaceRefForId(restoredId))).toEqual({
         ok: false,
         error: `surface '${surfaceRefForId(restoredId)}' is not agent-browser rendered (render_mode: iframe) — an iframe cannot be driven; open its page with dor agent-browser open http://localhost:5173/`,
       });
@@ -1515,21 +1590,21 @@ describe('Wall on the Lath engine', () => {
       const abId = await dispatchAgentBrowser({ session: 'dormouse.1.gui-a1b2c3', surface: 'pane-a' });
       const iframeRef = (await dispatchIframe('http://localhost:5173/')).ref;
 
-      expect(await dispatchResolveAgentBrowser(abId)).toMatchObject({ ok: true, result: { binding: { session: 'dormouse.1.gui-a1b2c3' }, fresh: false } });
+      expect(await dispatchResolveBrowser(abId)).toMatchObject({ ok: true, result: { binding: { session: 'dormouse.1.gui-a1b2c3' }, fresh: false } });
       // A parked ab surface keeps its daemon session, so a minimized target resolves.
       await act(async () => {
         container.querySelector<HTMLButtonElement>(`[data-lath-leaf="${abId}"] [aria-label="Minimize"]`)!.click();
       });
       await flush();
-      expect(await dispatchResolveAgentBrowser(abId)).toMatchObject({ ok: true });
+      expect(await dispatchResolveBrowser(abId)).toMatchObject({ ok: true });
 
       // Gate 1: a terminal has no browser at all.
-      expect(await dispatchResolveAgentBrowser('pane-a')).toEqual({
+      expect(await dispatchResolveBrowser('pane-a')).toEqual({
         ok: false,
         error: "surface 'pane-a' has no browser (kind: terminal)",
       });
       // Gate 2: an iframe renderer has a browser but no agent-browser session.
-      expect(await dispatchResolveAgentBrowser(iframeRef)).toEqual({
+      expect(await dispatchResolveBrowser(iframeRef)).toEqual({
         ok: false,
         error: `surface '${iframeRef}' is not agent-browser rendered (render_mode: iframe) — an iframe cannot be driven; open its page with dor agent-browser open http://localhost:5173/`,
       });
@@ -3397,13 +3472,13 @@ describe('Wall on the Lath engine', () => {
     return response;
   }
 
-  async function dispatchResolveAgentBrowser(surface: string): Promise<unknown> {
+  async function dispatchResolveBrowser(surface: string, provider = 'agent-browser'): Promise<unknown> {
     let response: unknown;
     await act(async () => {
       window.dispatchEvent(new CustomEvent('dormouse:control-request', {
         detail: {
           method: SURFACE_CONTROL_METHODS.resolveBrowser,
-          params: { provider: 'agent-browser', surface },
+          params: { provider, surface },
           respond: (r: unknown) => { response = r; },
         },
       }));
@@ -3924,7 +3999,7 @@ describe('Wall on the Lath engine', () => {
       });
       await flush();
       const pwRef = created!.result!.surfaceRef;
-      expect(await dispatchResolveAgentBrowser(pwRef)).toEqual({
+      expect(await dispatchResolveBrowser(pwRef)).toEqual({
         ok: false,
         error: `surface '${pwRef}' is not agent-browser rendered (render_mode: playwright-screencast) — drive it with dor playwright --surface ${pwRef}`,
       });
@@ -4001,10 +4076,10 @@ describe('Wall on the Lath engine', () => {
         provider: 'agent-browser', binding: {}, op: 'launch', url: 'https://accounts.example/login', headed: false,
       })]);
       // The pane is there at once; `dor agent-browser --surface` has nothing to drive until the launch names it.
-      expect(await dispatchResolveAgentBrowser(tab)).toMatchObject({ ok: false });
+      expect(await dispatchResolveBrowser(tab)).toMatchObject({ ok: false });
       await act(async () => { launches[0]({ ok: true, session: 'dormouse.1.gui-abc', stream: 4321 }); });
       await flush();
-      expect(await dispatchResolveAgentBrowser(tab)).toMatchObject({ ok: true, result: { binding: { session: 'dormouse.1.gui-abc' } } });
+      expect(await dispatchResolveBrowser(tab)).toMatchObject({ ok: true, result: { binding: { session: 'dormouse.1.gui-abc' } } });
 
       // Nor can it be swapped back into an iframe that would refuse it.
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -4027,8 +4102,8 @@ describe('Wall on the Lath engine', () => {
       await act(async () => { real.actions.setRenderMode?.('iframe'); });
       await flush();
       shown.mockRestore();
-      const [framed] = leafIds().filter((id) => !beforeSwap.includes(id));
-      expect(getAgentBrowserScreenController(framed)?.chrome().url).toBe('http://localhost:5173/report');
+      expect(leafIds()).toEqual(beforeSwap);
+      expect(getAgentBrowserScreenController(tab)?.chrome().url).toBe('http://localhost:5173/report');
 
       // A launch that fails takes its pane with it.
       const beforeFailure = leafIds();

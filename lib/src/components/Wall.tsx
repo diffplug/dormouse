@@ -1180,7 +1180,7 @@ export function Wall({
 
   /**
    * Rebuild a closed Surface from its record as a new Surface with a new ref
-   * (glossary I10): where it sat, a Pane beside the selected pane when its
+   * (docs/specs/reopen.md → "The reopen record"): where it sat, a Pane beside the selected pane when its
    * neighbors are gone. `focus` selects it as a reopen gesture does.
    */
   const reopenSurface = useCallback((record: SurfaceReopenRecord, focus: boolean): string => {
@@ -1561,29 +1561,20 @@ export function Wall({
   }, [minimizePane, lath, settleAddSelection, nav]);
 
   /**
-   * Replace a content surface's renderer in place, preserving its slot
-   * (docs/specs/dor-browser.md → "Display Modal And Render Swaps"): an atomic
-   * identity swap that closes the old surface's session if any and selects the
-   * new. The generalized form of createContentSurface's replace-untouched-terminal
-   * branch.
+   * Swap a browser Surface's renderer in place, keeping its id, slot, and
+   * TODO (docs/specs/dor-browser.md → "Display Modal And Render Swaps"): the
+   * old renderer's session and controller close, the leaf takes the new
+   * renderer's meta, and the pane is selected. The new renderer acquires its
+   * own controller under the same id when it mounts.
    */
-  const replaceSurface = useCallback((oldId: string, next: {
+  const swapBrowserRenderer = useCallback((id: string, next: {
     params: Record<string, unknown>;
     title: string;
-  }): string | null => {
-    const oldParams = nav.paneParams(oldId);
-    const oldVisible = nav.hasPane(oldId);
-    if (!oldVisible) return null;
-    // The old renderer goes away with this swap: its session and its
-    // controller's client-side resources (no-op for a non-automated surface).
-    void closeBrowserSurface(oldId, oldParams);
-    // A browser Surface has no helper; the terminal's goes with the old id.
-    closeHelperParent(oldId);
-    const newId = mintSurfaceId();
-    lath.store.replaceLeaf(oldId, newId, browserLeafMeta(next.title, next.params));
-    clearLocalSurfaceActivity(oldId);
-    selectPane(newId);
-    return newId;
+  }): void => {
+    if (!nav.hasPane(id)) return;
+    void closeBrowserSurface(id, nav.paneParams(id));
+    lath.store.setMeta(id, browserLeafMeta(next.title, next.params));
+    selectPane(id);
   }, [selectPane, lath, nav]);
 
   // Listen for external "new terminal" requests (e.g. from the standalone AppBar)
@@ -2121,15 +2112,15 @@ export function Wall({
         return;
       }
 
-      // agent-browser → iframe: frame the active tab's URL, then the replace
-      // closes the now-unneeded headless browser. Webview-only.
+      // agent-browser → iframe: frame the active tab's URL; the swap closes
+      // the now-unneeded headless browser. Webview-only.
       if (currentRenderMode !== 'iframe' && mode === 'iframe') {
         const url = shownUrl;
         if (!url) {
           console.warn(`[dormouse] cannot swap surface '${id}' to iframe: no URL observed yet`);
           return;
         }
-        replaceSurface(id, {
+        swapBrowserRenderer(id, {
           params: { surfaceType: 'browser', renderMode: 'iframe', url },
           title: hostPathDisplay(url, true),
         });
@@ -2138,8 +2129,8 @@ export function Wall({
 
       // iframe or the other provider → a live automated browser (screencast or
       // popout): absent a host that can launch one, inert like other
-      // host-gated affordances. The swap lands NOW: the old renderer is
-      // replaced by a session-less automated pane, whose controller launches
+      // host-gated affordances. The swap lands NOW: the pane becomes a
+      // session-less automated renderer, whose controller launches
       // the browser at the URL — headed for a popout, so it mounts already
       // popped out — and binds the session it answers with
       // (docs/specs/dor-browser.md → "Display Modal And Render Swaps").
@@ -2178,7 +2169,7 @@ export function Wall({
           session: undefined,
           ...(previousSession ? { launchSession: previousSession } : {}),
         };
-        replaceSurface(id, {
+        swapBrowserRenderer(id, {
           params: { surfaceType: 'browser', renderMode: mode, url, cwd, syncEngaged: viewport?.mode === 'pane-sync', ...(viewport ? { browserViewport: viewport } : {}), launchFallback: { restore } satisfies LaunchFallback },
           title: hostPathDisplay(url, true),
         });
@@ -2232,7 +2223,7 @@ export function Wall({
       void resolveToolApproval(id, choice);
     },
     onPinPreview: previewSlot.pin,
-  }), [previewSlot, addSplitPanel, minimizePane, enterTerminalMode, exitTerminalMode, requestKill, replaceSurface, buildDorSurfaces, createContentSurface, resolveToolApproval, lath, nav]);
+  }), [previewSlot, addSplitPanel, minimizePane, enterTerminalMode, exitTerminalMode, requestKill, swapBrowserRenderer, buildDorSurfaces, createContentSurface, resolveToolApproval, lath, nav]);
   const openContextPort = useCallback(async (id: string, entry: PortUrlEntry, mode: PortMode): Promise<void> => {
     const opening = terminalContextRef.current;
     // Success dismisses only the context that asked; a failed or cancelled
