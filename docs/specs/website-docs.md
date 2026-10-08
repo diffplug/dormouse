@@ -33,8 +33,8 @@ Content invariants, checked by review unless a check is named:
 - Pocket is described only as shipped or explicitly in development.
 - Browser Surfaces are explained to match [dor-browser.md](dor-browser.md) without exposing persisted params, controller registries, proxy plumbing, or future renderers.
 - VS Code command names in getting started exist in `vscode-ext/package.json` (`checkVsCodeCommands`).
-- Detailed CLI behavior links to `/dor`; the complete agent operating guide links to `/agent-skill`; the hosted-services preview links to `/hosted` (`checkRoutesToReferences`).
-- The guide carries no copied internal future design.
+- Detailed CLI behavior links to `/dor`; the complete agent operating guide links to `/agent-skill`; the Hosted service page links to `/hosted` (`checkRoutesToReferences`).
+- The guide renders no `TODO:` placeholders and no copied internal future design.
 
 ### Marketplace and Open VSX constraints
 
@@ -120,15 +120,17 @@ These pages follow the reader's theme, through `DocsLayout`; the rest of the sit
 
 Source of truth: `DOCS_PAGES` in `website/src/lib/docs-pages.ts`; `DocsLayout` in `website/src/components/DocsLayout.tsx`; `website/public/_redirects`.
 
-## `/hosted` preview
+## `/hosted`
+
+`docs/specs/pricing.md` -> "The Hosted page" owns what it says and sells; this section owns its place on the site.
 
 **Must describe the account service and link its account app, privacy policy, and terms.**
 
-**Must mark both services — Hosted's Pocket Relay and optional managed voice — unavailable;** terminals stay on an awake, online computer; browser speech and self-hosting remain.
+**Must describe the managed Relay as Pocket's Relay:** terminals stay on an awake, online computer, and self-hosting remains. `NotifySignupForm` exposes the `nedshed.dev` devlog handoff and keeps email per tab. **Must use native required-email validation.** `website/src/components/NotifySignupForm.test.tsx` pins all three.
 
-**Must open both hosting pages with the Relay boundary:** Dormouse needs none; a new install opens no connection on its own (`docs/specs/remote-network.md` -> "Policy"); push and a paired phone need a Relay, and a one-time connection only Hosted's rendezvous of its handshake. `/self-host` links `/hosted`; `/hosted` labels hosting pending review, discloses metadata, and links the trust model. `website/src/lib/docs-rail.test.tsx` pins this.
+**Must open `/self-host` with the Relay boundary:** Dormouse needs none; a new install opens no connection on its own (`docs/specs/remote-network.md` -> "Policy"); push and a paired phone need a Relay, and a one-time connection only Hosted's rendezvous of its handshake; it links `/hosted`. **`/hosted` opens with its plan cards** instead, and its managed Relay section discloses metadata, labels the review pending, and links the model. `website/src/lib/docs-rail.test.tsx` pins both.
 
-**Must also link the preview from** Pocket marketing/tutorial, self-host docs, and the speech and remote-control settings; `linkedFrom` owns the rest.
+**Must also link it from** Pocket marketing/tutorial, self-host docs, and the speech and remote-control settings; `linkedFrom` owns the rest. `/pricing` 301-redirects here rather than becoming a page, pinned by `checkPricingRedirect` in `scripts/public-docs-lint.mjs`.
 
 Source of truth: `Hosted` in `website/src/pages/Hosted.tsx`; `HostingRequirementNotice` in `website/src/components/HostingRequirementNotice.tsx`.
 

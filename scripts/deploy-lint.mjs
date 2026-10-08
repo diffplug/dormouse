@@ -49,6 +49,26 @@ export const INSTALLERS = [
   { platform: 'Linux', file: 'deploy/local/install-linux.sh' },
 ];
 
+/** `text` as a regex that matches it literally. */
+const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * The Windows installer's Serve origin-root reader, spelled out whole: it
+ * cannot be run here, so its text is the control, and requiring both copies
+ * (installer body and `manage`) to equal it keeps them identical.
+ */
+const WINDOWS_SERVE_ORIGIN_ROOT = String.raw`function Get-ServeOriginRoot {
+  param([string]$Text, [string]$Origin)
+  if (-not $Origin) { return '' }
+  $listener = $false
+  foreach ($raw in ($Text -split "` + '`r?`n' + String.raw`")) {
+    $line = $raw.TrimEnd()
+    if (-not $line.StartsWith('|-- ')) { $listener = (($line -split '\s+')[0] -eq $Origin); continue }
+    if ($listener -and $line -match '^\|-- / +(\S.*)$') { return $Matches[1] }
+  }
+  return ''
+}`;
+
 /**
  * One entry per `FAIL IF` clause this can see. `pattern` is matched against the
  * whole file; `skip` names platforms the rule does not apply to, with a reason
@@ -458,60 +478,69 @@ export const RULES = [
     },
   },
   {
-    // A gate, not a report, which is why it is its own rule: past the pipe
-    // buffer the piped ladder took NEITHER branch, so `confirm` never ran and
-    // the install repointed the operator's root Serve path without asking.
-    //
-    // Every root-path Serve match, counted: the gate's two arms, plus
-    // `serve_proxies_root`, which asks the same question about the same output
-    // for `manage verify` and for uninstall — the rule below counts those two
-    // consumers, since this one cannot. All are scoped to the root line and
-    // right-bounded — an unscoped port match said "already ours" for a config
-    // whose root was foreign, and for one on :31000.
-    rule: 'Network posture — every root-path Serve match is scoped to / and bounded on the port',
+    // Where every Serve decision reads `/` from: the root handler under the
+    // listener whose header names the origin with no port, i.e. :443, read
+    // from a here-string because the reader stops at the root it finds — a
+    // pipe in would SIGPIPE the writer, and the gate's assignment would abort
+    // the install with 141. A
+    // per-line root match took a root on any listener — `--https=8443`, a
+    // Service — as the origin's, so a node whose :443 served someone else
+    // answered "already ours" at the gate, in `manage verify`, and in
+    // uninstall. Counted, because each installer carries the reader twice:
+    // the installer body's for the gate, and the generated `manage`'s.
+    // `scripts/installer-verify-test.mjs` runs the unix copies over
+    // multi-listener `serve status` text and checks the two identical; Windows
+    // has only this, so its pattern is the whole function, which also keeps
+    // its two copies identical.
+    rule: "Network posture — the Serve root is read from the origin's :443 listener alone",
     patterns: {
-      macOS: /grep -qE '\^\\\|-- \/ \+proxy \.\*127\\\.0\\\.0\\\.1:'"\$1"'\(\[\^0-9\]\|\$\)' <<<"\$2"|grep -qE '\^\\\|-- \/ \+proxy' <<<"\$2"/,
-      Linux: /grep -qE '\^\\\|-- \/ \+proxy \.\*127\\\.0\\\.0\\\.1:'"\$1"'\(\[\^0-9\]\|\$\)' <<<"\$2"|grep -qE '\^\\\|-- \/ \+proxy' <<<"\$2"/,
+      macOS: /BEGIN \{ if \(origin == ""\) exit \}\n\s*substr\(\$0, 1, 4\) != "\|-- " \{ listener = \(tolower\(\$1\) == tolower\(origin\)\); next \}\n\s*listener && \$2 == "\/" \{ sub\(\/\^\[\|\]-- \\\/ \+\/, ""\); print; exit \}\n\s*' <<<"\$2"/,
+      Linux: /BEGIN \{ if \(origin == ""\) exit \}\n\s*substr\(\$0, 1, 4\) != "\|-- " \{ listener = \(tolower\(\$1\) == tolower\(origin\)\); next \}\n\s*listener && \$2 == "\/" \{ sub\(\/\^\[\|\]-- \\\/ \+\/, ""\); print; exit \}\n\s*' <<<"\$2"/,
+      Windows: new RegExp(escapeRegExp(WINDOWS_SERVE_ORIGIN_ROOT)),
     },
-    skip: {
-      Windows:
-        'its ladder, verify and uninstall checks are all `-match` over a string already captured from `Invoke-Tailscale`, so there is no pipeline to take SIGPIPE; the root scoping and the port bound are pinned on this platform by the rule below, which counts all three inline `-match` sites',
-    },
-    exactMatches: { macOS: 3, Linux: 3 },
+    exactMatches: { macOS: 2, Linux: 2, Windows: 2 },
   },
   {
-    // The rule above counts the helper's own text, so it stays green when a
-    // CALLER stops asking — `serve_proxies_root` survives on `manage verify`'s
-    // call alone, and the shell test pins that its answer is right, never that
-    // uninstall consults it. Reviewing this branch proved it: the uninstall
-    // scoping was deletable on all three platforms with every gate green. This
-    // counts the consumers instead.
-    //
-    // Windows spells the match inline at all three sites rather than through a
-    // helper, so the pattern is variable-agnostic — $PORT in `Invoke-Verify`
-    // and `Invoke-Uninstall`, $LOOPBACK_PORT at the install-time gate — and runs
-    // through the `([^0-9]|$)` tail. Both halves are load-bearing and neither
-    // was covered at first: stopping the pattern before the tail left the
-    // right-bound deletable at the two $PORT sites, and counting only $PORT
-    // left the gate — the one arm where a wrong answer is a mutation, not a
-    // report — pinned by nothing at all. Each revert kept every gate green.
-    // `SERVE_AFTER` is excluded on purpose: it is bounded but not root-scoped,
-    // because it asserts our own `serve --bg` landed rather than auditing a
-    // foreign config.
-    rule: 'Network posture — every root-path Serve decision consults the root-scoped match',
+    // The gate the confirm hangs off. Only a proxy to our own port may skip it;
+    // any other root handler at the origin — a proxy elsewhere, `path`, or
+    // `text` — is a conflict. Matching only a foreign `proxy` read a static
+    // or text root as `none`, and the install repointed it without asking.
+    rule: 'Network posture — any root handler at the origin but ours is a Serve conflict',
     patterns: {
-      macOS: /if serve_proxies_root "\$PORT" "\$serve_out"; then/,
-      Linux: /if serve_proxies_root "\$PORT" "\$serve_out"; then/,
-      Windows:
-        /-match \('\(\?m\)\^\\\|--\\s\+\/\\s\+proxy\.\*' \+ \[regex\]::Escape\("127\.0\.0\.1:\$(?:LOOPBACK_)?PORT"\) \+ '\(\[\^0-9\]\|\$\)'\)/,
+      macOS: /if grep -qE '\^proxy \+http:\/\/127\\\.0\\\.0\\\.1:'"\$1"'\(\/\|\$\)' <<<"\$2"; then\n\s*printf 'loopback\\n'\n\s*elif \[ -n "\$2" \]; then\n\s*printf 'conflict\\n'/,
+      Linux: /if grep -qE '\^proxy \+http:\/\/127\\\.0\\\.0\\\.1:'"\$1"'\(\/\|\$\)' <<<"\$2"; then\n\s*printf 'loopback\\n'\n\s*elif \[ -n "\$2" \]; then\n\s*printf 'conflict\\n'/,
+      Windows: /\} elseif \(\$serveRoot\) \{\n\s*Write-Warn2 "the root HTTPS path is already mapped to something else: \$serveRoot"/,
     },
-    exactMatches: { macOS: 2, Linux: 2, Windows: 3 },
+    exactMatches: { macOS: 1, Linux: 1, Windows: 1 },
   },
   {
-    // Windows takes the same match inline rather than through a helper, so it
-    // is pinned on what the check says instead. The `/` in the message is the
-    // control: it is the difference between a claim about the origin serving
-    // Pocket at the root and a claim about the port appearing somewhere.
+    // The two rules above pin the reader and the gate's arms; this pins that
+    // every decision consults them, right-bounded on the port —
+    // `127.0.0.1:31000` contains `127.0.0.1:3100`. A helper whose answer is
+    // right survives a caller that stops asking: the uninstall scoping was
+    // once deletable on all three platforms with every gate green.
+    //
+    // Unix: `serve_proxies_root`'s match (`serve_state`'s is the rule above)
+    // and the three call sites that hand the origin in — `manage verify`,
+    // uninstall, and the install-time gate, which reads the root once and
+    // judges it. Windows spells all three inline, so
+    // each site is one span, $PORT in `Invoke-Verify` and `Invoke-Uninstall`,
+    // $LOOPBACK_PORT at the gate. `SERVE_AFTER` is excluded on purpose: it is
+    // bounded but not root-scoped, because it asserts our own `serve --bg`
+    // landed rather than auditing a foreign config.
+    rule: "Network posture — every root-path Serve decision consults the origin's root, bounded on the port",
+    patterns: {
+      macOS: /grep -qE '\^proxy \+http:\/\/127\\\.0\\\.0\\\.1:'"\$1"'\(\/\|\$\)' <<<"\$\(serve_origin_root "\$2" "\$3"\)"|serve_proxies_root "\$PORT" "\$ORIGIN" "\$serve_out"|SERVE_ROOT="\$\(serve_origin_root "\$ORIGIN" "\$SERVE_BEFORE"\)"\ncase "\$\(serve_state "\$LOOPBACK_PORT" "\$SERVE_ROOT"\)" in/,
+      Linux: /grep -qE '\^proxy \+http:\/\/127\\\.0\\\.0\\\.1:'"\$1"'\(\/\|\$\)' <<<"\$\(serve_origin_root "\$2" "\$3"\)"|serve_proxies_root "\$PORT" "\$ORIGIN" "\$serve_out"|SERVE_ROOT="\$\(serve_origin_root "\$ORIGIN" "\$SERVE_BEFORE"\)"\ncase "\$\(serve_state "\$LOOPBACK_PORT" "\$SERVE_ROOT"\)" in/,
+      Windows:
+        /\$serveRoot = Get-ServeOriginRoot -Text \$\w+ -Origin \$ORIGIN\n\s*if \(\$serveRoot -match \('\^proxy \+http:\/\/' \+ \[regex\]::Escape\("127\.0\.0\.1:\$(?:LOOPBACK_)?PORT"\) \+ '\(\/\|\$\)'\)\)/,
+    },
+    exactMatches: { macOS: 4, Linux: 4, Windows: 3 },
+  },
+  {
+    // Pinned on what the check says. The `/` in the message is the control: it
+    // is the difference between a claim about the origin serving Pocket at the
+    // root and a claim about the port appearing somewhere.
     rule: 'Network posture — manage verify names the root path in its Serve verdict',
     patterns: {
       macOS: /Serve does not proxy \/ to 127\.0\.0\.1:/,

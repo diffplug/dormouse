@@ -11,6 +11,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { describe, expect, it } from "vitest";
 import { DOCS_PAGES, type TocEntry } from "./docs-pages";
+import { PRELAUNCH_NOTICE } from "../components/SiteHeader";
 
 import Changelog, { changelogToc } from "../pages/Changelog";
 import changelog from "../data/changelog.json";
@@ -67,14 +68,22 @@ describe("every page in the rail", () => {
     });
   }
 
-  it("labels Hosted security as a reviewed design target, not a current guarantee", () => {
-    const markup = renderToStaticMarkup(<MemoryRouter><Hosted /></MemoryRouter>);
-    expect(markup).toContain("Paid hosting remains a design target pending independent review");
-    expect(markup).toContain("would still see connection metadata");
-    expect(markup).toContain("remote-security-model.md");
+  it("asks for word of mouth only while Hosted rolls out", () => {
+    for (const [path, { element }] of Object.entries(PAGES)) {
+      const markup = renderToStaticMarkup(<MemoryRouter>{element}</MemoryRouter>);
+      expect(markup, path).toContain(PRELAUNCH_NOTICE);
+    }
   });
 
-  it("opens both hosting choices with the Relay boundary", () => {
+  it("discloses Hosted's metadata and its pending review in the managed Relay section", () => {
+    const markup = renderToStaticMarkup(<MemoryRouter><Hosted /></MemoryRouter>);
+    const relay = markup.slice(markup.indexOf('id="remote-control"'));
+    expect(relay).toContain("Its independent security review is pending");
+    expect(relay).toContain("connection metadata");
+    expect(relay).toContain("remote-security-model.md");
+  });
+
+  it("opens self-host with the Relay boundary and Hosted with its plans", () => {
     const selfHostMarkup = renderToStaticMarkup(
       <MemoryRouter><SelfHostDocs /></MemoryRouter>,
     );
@@ -82,18 +91,18 @@ describe("every page in the rail", () => {
       <MemoryRouter><Hosted /></MemoryRouter>,
     );
 
-    for (const markup of [selfHostMarkup, hostedMarkup]) {
-      expect(markup).toContain("Dormouse is just a terminal — it needs no server or hosting.");
-      expect(markup).toContain("A new install opens no connection on its own until you choose");
-      expect(markup).toContain("Push and a paired phone need a Relay");
-      expect(markup).toContain("A one-time connection needs none");
-    }
+    expect(selfHostMarkup).toContain("Dormouse is just a terminal — it needs no server or hosting.");
+    expect(selfHostMarkup).toContain("A new install opens no connection on its own until you choose");
+    expect(selfHostMarkup).toContain("Push and a paired phone need a Relay");
+    expect(selfHostMarkup).toContain("A one-time connection needs none");
     expect(selfHostMarkup.indexOf("Dormouse is just a terminal —"))
       .toBeLessThan(selfHostMarkup.indexOf('id="security-model"'));
-    expect(hostedMarkup.indexOf("Dormouse is just a terminal —"))
-      .toBeLessThan(hostedMarkup.indexOf('id="remote-control"'));
-    expect(selfHostMarkup).toContain("See the planned paid option");
-    expect(hostedMarkup).toContain("Paid hosting remains a design target pending independent review");
+    expect(selfHostMarkup).toContain("See Dormouse Hosted");
+
+    // The plan cards are the first thing under the title; the box is gone.
+    expect(hostedMarkup).not.toContain("Dormouse is just a terminal —");
+    expect(hostedMarkup.indexOf('id="pricing"')).toBeGreaterThan(-1);
+    expect(hostedMarkup.indexOf('id="pricing"')).toBeLessThan(hostedMarkup.indexOf('id="voice"'));
   });
 
   it("names the two hosting choices", () => {

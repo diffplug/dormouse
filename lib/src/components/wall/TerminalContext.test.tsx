@@ -9,7 +9,7 @@ import { TerminalPanel } from './TerminalPanel';
 import { TerminalContext } from './TerminalContext';
 import * as terminalRegistry from '../../lib/terminal-registry';
 import * as helpers from '../../lib/helper-terminal';
-import { TerminalContextContext } from './wall-context';
+import { TerminalContextContext, WorkspaceActiveContext } from './wall-context';
 import { ensureResizeObserver, PortalAnchoredButton } from './wall-test-utils';
 import { setMouseReporting, removeMouseSelectionState } from '../../lib/mouse-selection';
 import { setPlatform } from '../../lib/platform';
@@ -510,3 +510,22 @@ it.each(['composing', 'WebKit ending'])('leaves detail Escape and Tab to the IME
   act(() => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
   expect(container.querySelector('[role="dialog"]')).toBeNull();
 });
+
+it('pauses its helper while its Workspace is out of view, and resumes when it returns', async () => {
+  const open = vi.spyOn(helpers, 'openHelper').mockResolvedValue({ id: 'helper', parentId: 'hidden-source', command: '', status: 'off' });
+  const visible = vi.spyOn(helpers, 'setHelperVisible');
+  const show = (active: boolean) => act(async () => root.render(<WorkspaceActiveContext.Provider value={active}><TerminalContext id="hidden-source" /></WorkspaceActiveContext.Provider>));
+  try {
+    await show(true);
+    expect(visible.mock.calls.at(-1)).toEqual(['hidden-source', true]);
+    await show(false);
+    expect(visible.mock.calls.at(-1)).toEqual(['hidden-source', false]);
+    await show(true);
+    expect(visible.mock.calls.at(-1)).toEqual(['hidden-source', true]);
+  } finally {
+    await act(async () => root.render(<></>));
+    open.mockRestore();
+    visible.mockRestore();
+  }
+});
+

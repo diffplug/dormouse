@@ -2463,6 +2463,52 @@ fn read_geometry(dir: &Path, label: &str) -> Option<WindowGeometry> {
     serde_json::from_str(&raw).ok()
 }
 
+/// A saved box made safe to reopen: never smaller than `min`, and re-centered
+/// on the first of `monitors` (the primary) unless at least a `min`-sized patch
+/// of it lies on one of them — a display unplugged since the save would
+/// otherwise reopen the window where nobody can see it. An empty `monitors`
+/// means the platform could not say, so the position is kept.
+fn fit_geometry(saved: WindowGeometry, min: (f64, f64), monitors: &[WindowGeometry]) -> WindowGeometry {
+    let mut fit = WindowGeometry {
+        width: saved.width.max(min.0),
+        height: saved.height.max(min.1),
+        ..saved
+    };
+    let overlap = |m: &WindowGeometry| {
+        let w = (fit.x + fit.width).min(m.x + m.width) - fit.x.max(m.x);
+        let h = (fit.y + fit.height).min(m.y + m.height) - fit.y.max(m.y);
+        w >= min.0 && h >= min.1
+    };
+    if let Some(primary) = monitors.first().filter(|_| !monitors.iter().any(overlap)) {
+        fit.x = primary.x + ((primary.width - fit.width) / 2.0).max(0.0);
+        fit.y = primary.y + ((primary.height - fit.height) / 2.0).max(0.0);
+    }
+    fit
+}
+
+/// Every connected display in logical coordinates, the primary first.
+fn monitor_rects(app: &AppHandle) -> Vec<WindowGeometry> {
+    let primary = app.primary_monitor().ok().flatten();
+    let mut monitors = app.available_monitors().unwrap_or_default();
+    if let Some(primary) = &primary {
+        if let Some(at) = monitors.iter().position(|m| m.position() == primary.position()) {
+            monitors.swap(0, at);
+        }
+    }
+    monitors
+        .iter()
+        .map(|m| {
+            let scale = m.scale_factor();
+            WindowGeometry {
+                x: f64::from(m.position().x) / scale,
+                y: f64::from(m.position().y) / scale,
+                width: f64::from(m.size().width) / scale,
+                height: f64::from(m.size().height) / scale,
+            }
+        })
+        .collect()
+}
+
 /// Seed the cache from the platform. Once per window, at creation: from there
 /// the `Moved` / `Resized` payloads carry the new box themselves.
 fn seed_geometry(app: &AppHandle, label: &str) {
@@ -2563,8 +2609,15 @@ fn session_file_names(dir: &Path) -> Vec<String> {
 /// order `restorable_labels` produced (`main` first). The cap is a ceiling on
 /// how many windows one launch may open; the excess stays on disk untouched.
 fn restore_windows(app: &AppHandle, dir: &Path, labels: &[String]) {
+    let first = app.config().app.windows.first();
+    let min = (
+        first.and_then(|w| w.min_width).unwrap_or(0.0),
+        first.and_then(|w| w.min_height).unwrap_or(0.0),
+    );
+    let monitors = monitor_rects(app);
+    let saved_box = |label: &str| read_geometry(dir, label).map(|saved| fit_geometry(saved, min, &monitors));
     if let Some(window) = app.get_webview_window(routing::MAIN_LABEL) {
-        if let Some(geometry) = read_geometry(dir, routing::MAIN_LABEL) {
+        if let Some(geometry) = saved_box(routing::MAIN_LABEL) {
             let _ = window.set_position(tauri::LogicalPosition::new(geometry.x, geometry.y));
             let _ = window.set_size(tauri::LogicalSize::new(geometry.width, geometry.height));
         }
@@ -2580,7 +2633,7 @@ fn restore_windows(app: &AppHandle, dir: &Path, labels: &[String]) {
         }
         // An unreadable snapshot still opens its window: the webview boots
         // fresh, which is a window the user can use rather than one they lost.
-        if let Err(err) = build_window(app, label, read_geometry(dir, label)) {
+        if let Err(err) = build_window(app, label, saved_box(label)) {
             append_log(format!("[window] {err}"));
             continue;
         }
@@ -4727,6 +4780,43 @@ mod tests {
             assert_eq!(later.label, "ws-2");
             assert_eq!(later.background_throttling, Some(BackgroundThrottlingPolicy::Disabled));
         }
+    }
+
+    /// docs/specs/standalone.md -> "Boot and geometry": no window may be
+    /// resized, tiled, or restored down to nothing.
+    #[test]
+    fn every_window_has_a_minimum_size() {
+        use tauri::utils::config::Config;
+        let conf: Config = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        let first = conf.app.windows.first().unwrap();
+        let later = super::window_config(first, "ws-2", None);
+        for window in [first, &later] {
+            assert!(window.min_width.is_some_and(|w| w >= 100.0));
+            assert!(window.min_height.is_some_and(|h| h >= 100.0));
+        }
+    }
+
+    #[test]
+    fn a_restored_box_is_floored_and_kept_on_a_connected_display() {
+        use super::{fit_geometry, WindowGeometry as G};
+        let g = |x, y, width, height| G { x, y, width, height };
+        let min = (100.0, 100.0);
+        let primary = g(0.0, 0.0, 1440.0, 900.0);
+        let above = g(-443.0, -1080.0, 1920.0, 1080.0);
+        let monitors = [primary, above];
+        // A zero-thickness save comes back at the minimum, in place.
+        assert_eq!(fit_geometry(g(0.0, 0.0, 720.0, 0.0), min, &monitors), g(0.0, 0.0, 720.0, 100.0));
+        // A box on a secondary display stays there.
+        let on_above = g(-443.0, -1049.0, 961.0, 1050.0);
+        assert_eq!(fit_geometry(on_above, min, &monitors), on_above);
+        // A box mostly off the edge stays while a minimum-size patch shows.
+        let peeking = g(1340.0, 800.0, 800.0, 600.0);
+        assert_eq!(fit_geometry(peeking, min, &monitors), peeking);
+        // Less than that, or a display unplugged since: centered on the primary.
+        assert_eq!(fit_geometry(g(1360.0, 0.0, 800.0, 600.0), min, &monitors), g(320.0, 150.0, 800.0, 600.0));
+        assert_eq!(fit_geometry(on_above, min, &[primary]), g(239.5, 0.0, 961.0, 1050.0));
+        // No monitor list means no opinion on the position.
+        assert_eq!(fit_geometry(on_above, min, &[]), on_above);
     }
 
     // RAII guard so a failing assert doesn't leak the temp dir.

@@ -190,6 +190,15 @@ export const RELAY_ROOM = 'hosted/server/relay-room.ts';
 export const RELAY_ROUTING = 'remote-lib-common/src/remote/relay-routing.ts';
 
 /**
+ * Every way a Hosted room could decode a frame it forwards: a parse, base64 in
+ * any spelling (`atob`, `Buffer`, `fromBase64Url`, a `base64` encoding
+ * argument), or a `TextDecoder`. Shared by {@link RELAY_ROOM_LEAKS} and the
+ * one-time room's rule, which forbid the same decode; not by the frame layer's,
+ * which mints ids with `randomBase64Url`.
+ */
+const FRAME_DECODE = String.raw`\bJSON\.parse\b|\batob\b|\bBuffer\b|\bTextDecoder\b|[Bb]ase64`;
+
+/**
  * Everything {@link RELAY_ROOM} could keep, log, or read a frame through,
  * spelled out because it reaches frames only through {@link RELAY_ROUTING}:
  *
@@ -204,7 +213,8 @@ export const RELAY_ROUTING = 'remote-lib-common/src/remote/relay-routing.ts';
  */
 const RELAY_ROOM_LEAKS = new RegExp(
   [
-    String.raw`\bct\b|\bJSON\.parse\b|\batob\b|\bBuffer\b|\bTextDecoder\b|[Bb]ase64`,
+    String.raw`\bct\b`,
+    FRAME_DECODE,
     String.raw`\bconsole\b(?!\.\w+\(\s*"[^"\\]*"\s*\))`,
     String.raw`\bstorage\b(?!\.(?:get|getAlarm|setAlarm|deleteAlarm)\b|\.put\(ACCOUNT_KEY, account\))`,
     String.raw`\bserializeAttachment\((?!(?:\w+\.)?conn\)|\{(?:(?!\.\.\.)[^{}()])*\}\s*satisfies\s+(?:BurrowConn|ClientConn)\))`,
@@ -478,7 +488,7 @@ export const RULES = [
     // alone, so it has no reason to read one: a parse is the first step toward
     // a room that acts on what a handshake says, and a log or a stored frame
     // is handshake ciphertext kept past the handshake.
-    pattern: /\bJSON\.parse\b|\bfromBase64Url\b|\batob\b|\bconsole\.|\bstorage\.(?:put|sql|kv)\b/g,
+    pattern: new RegExp([FRAME_DECODE, String.raw`\bconsole\.|\bstorage\.(?:put|sql|kv)\b`].join('|'), 'g'),
     violationFile: 'hosted/server/one-time-room.ts',
     violation: '\nconst __selftest = (frame: string) => JSON.parse(frame);\n',
   },
