@@ -11,7 +11,7 @@
 
 **Settings is the front door.** The spoken-alarm row's managed-voice link and the playground tutorial land on `/hosted#voice`, and the plan cards sit within one screen of that anchor. `#remote-control` and `#voice` keep resolving as section ids.
 
-**Content, in order:** the plan cards, directly under the title and anchored `#pricing`; what a member gets, as prose; "Self-hosting stays free"; and a short FAQ — refunds and cancellation, the founding lock, who appears in the founders row, what happens if Hosted shuts down, and that team pricing goes by email to `teams@dormouse.sh`.
+**Content, in order:** the plan cards, directly under the title and anchored `#pricing`; what a member gets, as prose; "Self-hosting stays free"; and a short FAQ — refunds and cancellation, the founding lock, who appears in the founders row, what happens if Hosted shuts down, and that team pricing goes by email to `support@dormouse.sh`.
 
 **Prices, inclusions, and the FAQ are prerendered text**, and the page emits `Product` / `Offer` JSON-LD carrying one `Offer` per paid plan at its current price, so an assistant fetching the page can quote it. **Offers stay `PreOrder` while checkout is unbuilt.**
 
@@ -46,7 +46,7 @@ Seats left in the open cohort and the founders row load after hydration from one
 
 ### Published prices
 
-Prices in USD, and the merchant of record adds or includes tax by jurisdiction.
+Prices in USD; DiffPlug adds or includes applicable tax by jurisdiction.
 
 | Plan | Price | Cadence |
 |---|---|---|
@@ -78,8 +78,8 @@ Team and enterprise tiers are never sold through this page. A free hosted tier i
 What each plan grants once checkout can sell it; [Published prices](#published-prices) is the ladder as the page prints it today.
 
 - **Founding grants the Individual plan plus a founding badge**; monthly and yearly grant the plan alone.
-- **A founding lock survives every later price change** and ends only when the subscription lapses; a lapsed founder re-subscribes at list.
-- **Cohorts close by count, never by date.** The count is completed purchases at the billing provider; a refund returns the seat to its cohort.
+- **Must lock the founding base yearly price in USD while the subscription remains active**, excluding applicable taxes; a lapsed founder re-subscribes at list. **Must preserve the lock through billing-provider migrations and failures caused by DiffPlug**, allowing payment restoration.
+- **Cohorts close by count, never by date.** The count is completed purchases at the billing provider; a full refund or finally reversed payment returns the seat to its cohort.
 - **When a cohort closes the price rises one step and the counter resets to 100.**
 - **Founding closes only when the ladder reaches list.** Founding means bought at launch pricing; the hosted Relay shipping does not close it.
 - **Checkout honors the price it opened at.** Concurrent checkouts may oversell a cohort by a few seats; the overage is the customer's, and the next cohort still opens at a full 100.
@@ -102,19 +102,19 @@ What each plan grants once checkout can sell it; [Published prices](#published-p
 
 ### Checkout and entitlement
 
-- **Stripe Managed Payments runs checkout, subscriptions, and the customer portal as merchant of record, through `@pgstencil/stripe`**, so tax is Stripe's. Dormouse never stores card data. A founding lock is a per-cohort Price; cohort counts come from the billing provider's completed subscriptions.
+- **Must use Stripe Billing, Stripe-hosted Checkout, and its customer portal through `@pgstencil/stripe`; DiffPlug is the seller and merchant of record**, responsible for refunds and applicable tax registration, collection, filing, and remittance. **Never receive or store full card numbers in Dormouse.** A founding lock is a per-cohort Price; cohort counts come from the billing provider's completed subscriptions.
 - **Checkout starts from a Hosted account**: a buy button lands on the account origin, which asks for sign-in first, so the subscription belongs to an account from its first event.
 - **Founding checkout offers the founders-row opt-in, unticked**; the account can withdraw it at any time.
 - **The success page asks the four Van Westendorp questions**, optional and unsent until answered: too expensive to consider, too cheap to trust, expensive but would consider, a bargain. Their answers inform later list changes.
 - **The entitlement is the account's subscription, read on the server on every voice and Relay request.** No licence, no offline verification, and no grace past what the subscription grants; a lapsed member's voices fall back to the system voice and its Burrows to `not-entitled`.
 - **A desktop signs in from Settings by device code**, the flow Burrow enrollment already runs (`docs/specs/hosted.md` -> "Burrow enrollment"). The approval mints a desktop credential the host keeps and never hands a webview. Sign-in is the only account surface in the free client.
-- **One account covers every machine the member uses.** No device count, no seat count, no activation limit.
-- **A refund or chargeback ends the subscription**, so the next request is refused, and the seat returns to its cohort.
+- **Must license one individual, including work use, without a per-device charge.** **Must disclose material enrollment and usage limits before purchase**, including the managed Relay's enrollment cap (`docs/specs/hosted.md` -> "Burrow enrollment").
+- **A full refund or a finally reversed payment ends the subscription**, so the next request is refused. A partial refund or billing correction never ends it, and an open dispute only suspends it ("Paid-launch requirements").
 
 ### Managed voice
 
 - **Dormouse operates the endpoint and holds the vendor key** (ElevenLabs). A request carries the desktop credential, a voice id, and the text; the response is audio.
-- **What leaves the machine is exactly the sanitized spoken label and the voice id** — the `toSpokenText` output in `lib/src/lib/alert-speech.ts`, never terminal content, never a notification body, never a Session id. **Disclose this in the enable flow before the first request**, honoring the promise the Hosted page makes.
+- **Must send only the shortened displayed label, voice id, and authentication credential in the voice request**, never the terminal screen or output stream, notification body, or Session id. **Must disclose before enabling managed voice that labels can come from program-supplied titles, command labels, or directory names and that secret filtering is heuristic**, not a guarantee of confidentiality. Connection metadata remains visible to the serving infrastructure.
 - **Cache clips by voice and text on the client** and regenerate only when the label changes; a cache hit makes no request. **Fair use is a daily request cap per member**; past it, the system voice speaks.
 - **The system voice is the fallback**, for offline, unentitled, endpoint error, or cap: same delivery rules, same cut-off on attend, never silence because the service failed. Delivery identity, queueing, and cut-off stay owned by `docs/specs/alert.md` -> "Spoken alarms".
 - **One voice per Pane.** The member default applies everywhere; a per-Pane override is persisted with the pane's settings and follows the Session through minimize and restore. Doors and headers show nothing new.
@@ -123,10 +123,30 @@ What each plan grants once checkout can sell it; [Published prices](#published-p
 ### Renewal, cancellation, refund
 
 - **Every plan auto-renews; cancel any time; access runs to period end.**
-- **30-day refund on every plan.** A refund revokes.
+- **Must offer a full refund within 30 days of the first Hosted payment or any yearly renewal**, including collected tax; monthly renewals, plan changes, and resubscriptions do not restart this voluntary first-payment guarantee. **Must preserve mandatory legal remedies.** A full refund revokes.
 - **A failed founding renewal gets 30 days of grace before the lock is lost.**
 - **A subscription is personal and non-transferable.**
 - **No trial**: the 30-day refund is the trial.
+
+### Paid-launch requirements
+
+Part of **hosted-sales**; these remain unimplemented launch gates, not claims about the current account service.
+
+EEA/UK representative appointment is excluded from the internal release gate by operator decision; applicable legal obligations remain unchanged (rationale).
+
+- **Must obtain affirmative agreement to versioned terms and express consent to automatic renewal before charging**, disclosing price, taxes, interval, refund conditions, cancellation, and material limits beside the purchase action; retain the accepted version, offered limits, and consent evidence and send a durable confirmation.
+- **Must provide direct online cancellation and a support cancellation path when account access is lost.** **Must cancel future renewals as part of account closure**, explaining remaining access and refund eligibility before completing closure; verification cannot require account recovery.
+- **Must send jurisdiction-required renewal, annual, and price-change notices with cancellation instructions.** For California consumers, annual-term renewal notices are 15–45 days before renewal and fee-change notices 7–30 days before effectiveness; annual reminders also apply to monthly plans (rationale).
+- **Must route subscription notices to the maintained billing email**, including provider-only accounts without a sign-in email; use the account contact email for other notices, or show them at sign-in when none exists. **Must record notice delivery or presentation before starting a notice period**, and provide any additional legally required notice or consent process.
+- **Never end a subscription solely for a partial refund or billing correction.** **Must distinguish payment-dispute suspension from termination**: notify the customer, restore remaining access and the prior founding price if suspension was mistaken or payment is restored, and preserve refund and dispute rights; final reversal may end the affected access and renewals.
+- **Must refund unused prepaid service, including corresponding collected tax, on permanent discontinuation or termination unrelated to customer breach**, and offer the same remedy for a material service reduction or rejected material terms change during a prepaid term. **Must give at least 30 days' advance notice of discontinuation, material reductions, or material terms changes**, except urgent legal or security requirements; no retroactive terms changes for disputes.
+- **Must verify the permitted sales territories and tax setup before accepting payment**, and confirm refund, cancellation, failed-payment, and founder-lock behavior against the published offer. Stripe Billing does not transfer the seller's tax obligations.
+- **Must support worldwide sales only where lawful, including EEA and UK consumer rights**: disclose the statutory withdrawal right and model form before purchase and in the confirmation, accept an unambiguous notice without account recovery, and refund withdrawal payments within 14 days without a use deduction or waiver for immediate access. The voluntary guarantee is additional (rationale).
+- **Must provide a prominent online withdrawal function on the account billing page throughout the statutory withdrawal period**, distinct from cancelling renewal; allow the consumer to identify the contract, confirm submission, and receive a durable acknowledgement with the statement and its date and time. **Must disclose its location before purchase and in the confirmation** (rationale).
+- **Must complete the EEA and UK provider privacy arrangements before launch**: execute applicable processor agreements, document provider transfer safeguards and assessments, and publish the applicable contacts and means to obtain the safeguards. **Never claim a transfer certification, contract, or representative that has not been verified** (rationale).
+- **Must recheck ElevenLabs' training opt-out or contractual no-training protection and the applicable processing agreement before enabling paid voices**, and keep the public disclosure consistent with the verified practice. History deletion alone is not evidence of either protection (rationale).
+- **Must obtain acceptance of the managed-voice customer provisions before granting paid voice access**, archive the incorporated provider requirements with the accepted terms, preserve mandatory consumer rights, and relay relevant provider notices. **Must apply the terms' age and government-use restrictions to managed voices** and verify the permitted voice selection. **Must obtain ElevenLabs' written approval before marketing that names it**; the Terms and Privacy policy name it because the provider requirements and disclosure law need them to. Provider requirement changes follow the published notice, renewed-agreement, service-reduction, and refund process (rationale).
+- **Must complete the privacy notice from verified practices before paid launch**: purposes and applicable legal bases, retention periods or criteria, survey linkage, provider roles, and applicable international-transfer safeguards; describe unshipped practices conditionally. **Must archive previous policies and record actual publication and applicability dates.** **Must apply the replacement terms to new accounts on acceptance and to existing accounts on the notified date at least 30 days after notice**, unless expressly accepted sooner; obtain renewed agreement where required, preserve previous terms until then, and never backdate replacement to the revision date (rationale).
 
 ### Open questions
 
