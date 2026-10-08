@@ -7,11 +7,14 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { chmod, mkdir, rename, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, open, rename, rm, writeFile } from 'node:fs/promises';
 import { setTimeout as delay } from 'node:timers/promises';
 
-/** Write `value` as JSON to `path`, creating `dir` (which contains it) first. */
-export async function writeJsonAtomic(dir: string, path: string, value: unknown): Promise<void> {
+/** Write `value` as JSON to `path`, creating `dir` (which contains it) first.
+ *  `durable` flushes the file and then its directory before resolving, for a
+ *  caller that acts on the write as soon as it lands (a counter's high-water
+ *  mark); without it a crash may lose a write that already resolved. */
+export async function writeJsonAtomic(dir: string, path: string, value: unknown, { durable = false }: { durable?: boolean } = {}): Promise<void> {
   // 0700 dir + 0600 file: these files decide what is authorized, and the app
   // data directory is not otherwise private on a shared machine.
   await mkdir(dir, { recursive: true, mode: 0o700 });
@@ -35,7 +38,17 @@ export async function writeJsonAtomic(dir: string, path: string, value: unknown)
   const tmp = `${path}.${randomUUID()}.tmp`;
   let renamed = false;
   try {
-    await writeFile(tmp, JSON.stringify(value), { mode: 0o600 });
+    if (durable) {
+      const handle = await open(tmp, 'w', 0o600);
+      try {
+        await handle.writeFile(JSON.stringify(value));
+        await handle.sync();
+      } finally {
+        await handle.close();
+      }
+    } else {
+      await writeFile(tmp, JSON.stringify(value), { mode: 0o600 });
+    }
     // Concurrent replacements can briefly leave a Windows destination pending
     // deletion. Retry only that platform's sharing failures, with ten 10ms waits;
     // keep the old file intact and propagate persistent or unrelated failures.
@@ -51,5 +64,20 @@ export async function writeJsonAtomic(dir: string, path: string, value: unknown)
   } finally {
     // A failed rename must not accumulate temp files holding the same secret.
     if (!renamed) await rm(tmp, { force: true }).catch(() => {});
+  }
+  if (durable) await syncDirectory(dir);
+}
+
+/** Flush the rename itself. Best-effort: Windows cannot open a directory to
+ *  flush it (NTFS journals the rename), and some filesystems refuse a
+ *  directory fsync; the file's own contents are already on disk. */
+async function syncDirectory(dir: string): Promise<void> {
+  if (process.platform === 'win32') return;
+  const handle = await open(dir, 'r').catch(() => null);
+  if (!handle) return;
+  try {
+    await handle.sync().catch(() => {});
+  } finally {
+    await handle.close();
   }
 }

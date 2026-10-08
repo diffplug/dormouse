@@ -218,6 +218,18 @@ it('answers a Surface id reservation from the window counter, by request id', as
   } finally { disposable.dispose(); }
 });
 
+it('reserves above every Surface PTY this extension host holds, whatever floor the asking panel restored', async () => {
+  const sibling = fakeWebview();
+  const asking = fakeWebview();
+  const disposables = [router.attachRouter(sibling.channel, {}), router.attachRouter(asking.channel, {})];
+  try {
+    sibling.send({ type: 'pty:spawn', id: 'surface-90', options: { cwd: '/repo' } });
+    sibling.send({ type: 'pty:spawn', id: 'surface-uuid', options: { cwd: '/repo' } });
+    asking.send({ type: 'surface:reserveIds', count: 1, floor: 5, requestId: 'req-8' });
+    await vi.waitFor(() => expect(asking.posted).toContainEqual({ type: 'surface:reservedIds', ids: ['surface-91'], requestId: 'req-8' }));
+  } finally { for (const disposable of disposables) disposable.dispose(); }
+});
+
 // The colour cache answers OSC 10/11/12 from the last whole theme push, exactly
 // as the sidecar's `setThemeColors` does (lib/src/host/remote/sidecar-entry.ts).
 it('drops a malformed theme push whole, keeping the last good one', () => {

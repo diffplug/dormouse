@@ -20,7 +20,9 @@
 
 ## Surface id minting
 
-**Why the mark is not in `workspaceState`.** Its writes reach disk on VS Code's own schedule, so a raised mark could be lost after its numbers were handed out, and the next run would reuse them; an atomic file write is durable when it resolves. Re-reading before each raise keeps two empty windows sharing `globalStorageUri` from handing out the same block or writing the mark lower.
+**Why the mark is not in `workspaceState`.** Its writes reach disk on VS Code's own schedule, so a raised mark could be lost after its numbers were handed out, and the next run would reuse them; the counter file is flushed, then its directory, before a reservation is answered.
+
+**Why one counter for the install.** A counter per window (`storageUri`) numbered every window from `surface-1`, and the Burrow's phone directory, keyed by Surface id, kept only the first window's row for each number: another window's terminals vanished from the phone, and an attach could reach the wrong window. Each window's extension host is its own process, so the read-raise-write takes a lock across them.
 
 ## CSP policy
 

@@ -88,8 +88,9 @@ export function activate(context: vscode.ExtensionContext) {
   reportWindowPresence(vscode.window.state);
   context.subscriptions.push(vscode.window.onDidChangeWindowState(reportWindowPresence));
   initToolHost(context.globalStorageUri?.fsPath);
-  // Never workspaceState, whose writes may not reach disk (session-state.ts).
-  initSurfaceIds((context.storageUri ?? context.globalStorageUri)?.fsPath ?? null);
+  // One counter for every window of the install; never workspaceState, whose
+  // writes may not reach disk (session-state.ts).
+  initSurfaceIds(context.globalStorageUri?.fsPath ?? null);
   log.init();
   extensionContext = context;
   ptyManager.setExtensionPath(context.extensionPath);

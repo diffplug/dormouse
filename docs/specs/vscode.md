@@ -77,7 +77,7 @@ Source of truth: `captureAgentRecoveryCommands` / `takeRecoveryCommands` in `vsc
 
 ### Surface id minting
 
-**The extension host mints every Surface id its webviews use** (`docs/specs/transport.md` → Surface ids), keeping the high-water mark in `surface-ids.json` under `storageUri`, else `globalStorageUri`, **never `workspaceState`** (rationale). **Must re-read the file before raising the mark**, since empty windows share `globalStorageUri`.
+**The extension host mints every Surface id its webviews use** (`docs/specs/transport.md` → Surface ids) **off one counter for the whole install** (rationale), its high-water mark in `surface-ids.json` under `globalStorageUri`, **never `workspaceState`** (rationale). A Surface id names one Surface across the install, except in the windows "Duplicate Workspace in New Window" cold-restores (§Peer surfaces across windows).
 
 Source of truth: `vscode-ext/src/surface-ids.ts`.
 
@@ -212,7 +212,7 @@ The broker window listens on the authenticated local socket and every other wind
 
 **Cross-window streams are reference-counted per routed PTY**: two attachments to one foreign surface share one `subscribe`, only zero-to-one starts the owner forwarding and only one-to-zero stops it. **The owner answers the first `subscribe` with `subscribed` only after its sink and atomic liveness check are installed**, a recorded exit going first on the same ordered socket, so an exit cannot be overtaken by a successful attach. **The last unsubscribe stops the forwarding but keeps the route** (rationale). **Routes are refreshed by every resolve and dropped only by an `exit` frame or the owning window disconnecting** (`forgetPeerRoutes`).
 
-**Never key routes by a raw `ptyId`** — Surface ids are unique only within a window, since each extension host mints its own (§Surface id minting), and cold restore can duplicate them across windows (rationale). The broker replaces an answer's owner-local `ptyId` with an opaque route handle for the `(peer socket, ptyId)` pair; follow-up surface asks address that peer alone, and `subscribe`, `write`, and PTY-only `resizePty` translate it back to the owner's id on that socket only. **The handle is checked against this window's PTYs and stays in the peer namespace after its route closes**, so a stale handle fails closed. **When a peer disconnects, every handle routed to it is dropped and reported as exited.**
+**Never key routes by a raw `ptyId`**: cold restore can duplicate Surface ids across windows (rationale). The broker replaces an answer's owner-local `ptyId` with an opaque route handle for the `(peer socket, ptyId)` pair; follow-up surface asks address that peer alone, and `subscribe`, `write`, and PTY-only `resizePty` translate it back to the owner's id on that socket only. **The handle is checked against this window's PTYs and stays in the peer namespace after its route closes**, so a stale handle fails closed. **When a peer disconnects, every handle routed to it is dropped and reported as exited.**
 
 **Never send a result both ways**: the broker's `commandRoutes` records which window is owed each in-flight `burrowRequestId`; an answer with an entry goes to that socket alone, one without to this window's webviews (rationale). A disconnecting window's routes are dropped, its commands left to the asking adapter's timeout, and **whatever the broker was still asking it is settled empty on the spot**. **A `result` frame is taken only from the window the request was put to.**
 
