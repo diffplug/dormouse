@@ -25,7 +25,7 @@ interface SiteHeaderProps {
  * Asks readers not to post the site anywhere big yet (Hacker News, mostly)
  * while Hosted rolls out. Delete it, and the `prelaunch` props, at launch.
  */
-export const PRELAUNCH_NOTICE = "Pre-launch — word of mouth only, please.";
+export const PRELAUNCH_NOTICE = "Pre-launch — word of mouth only, please. No top-level forum posts.";
 
 /**
  * Shared site header. On Home the brand fades in via scroll; on other pages
@@ -48,7 +48,8 @@ const SiteHeader = forwardRef<HTMLElement, SiteHeaderProps>(
       <>
         {/* The strip shares the header's fixed height rather than adding to
             it, so every offset keyed to h-16 / md:h-20 (page padding, sticky
-            rails, scroll-padding-top) stays right. */}
+            rails, scroll-padding-top) stays right. On a phone the notice
+            wraps to two lines, taking its height from the nav row. */}
         <header
           ref={ref}
           className="fixed top-0 left-0 right-0 z-20 flex h-16 flex-col font-display text-lg md:h-20"
@@ -57,7 +58,7 @@ const SiteHeader = forwardRef<HTMLElement, SiteHeaderProps>(
           {prelaunch ? (
             <p
               role="note"
-              className="flex h-6 shrink-0 items-center justify-center px-4 text-center font-body text-sm leading-none"
+              className="flex min-h-6 shrink-0 items-center justify-center px-4 py-0.5 text-center font-body text-xs leading-tight sm:text-sm sm:leading-none"
               style={{ background: "var(--color-prelaunch-bg)", color: "var(--color-prelaunch-fg)" }}
             >
               {PRELAUNCH_NOTICE}

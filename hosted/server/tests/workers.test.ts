@@ -20,6 +20,7 @@ import {
 } from "./oauth-server";
 import type { Session } from "../../src/api";
 import { ADMIN_EMAIL } from "../admin";
+import { PRELAUNCH_REFUSAL, SIGN_IN_ALLOWLIST } from "../prelaunch";
 import { CRON_SWEEP_CAP, SPEECH_SWEEP_CAP, VOICE_DAILY_CAP } from "../voice";
 import { ALREADY_APPROVED, RECENT_LOGIN_REQUIRED } from "../relay-account";
 import { TERMS_VERSION } from "../policy-constants";
@@ -544,7 +545,7 @@ test("same-site requests fail, the sibling Workers' included; production exclude
       (
         await browser.post(
           "email-otp/send-verification-otp",
-          { email: "x@example.test", type: "sign-in" },
+          { email: ADMIN_EMAIL, type: "sign-in" },
           sameSite,
         )
       ).status,
@@ -589,7 +590,7 @@ test("same-site requests fail, the sibling Workers' included; production exclude
   };
   for (const sameSite of SAME_SITE)
     expect((await account.fetch(sameSite + "/api/auth/csrf")).status, sameSite).toBe(421);
-  await browser.email("real-clock@example.test");
+  await browser.email(SIGN_IN_ALLOWLIST[1]);
   expect(
     Math.abs(
       Date.parse((await browser.session())!.session.createdAt) - Date.now(),
@@ -601,6 +602,59 @@ test("same-site requests fail, the sibling Workers' included; production exclude
     'ALTER TABLE "session" DROP COLUMN "emailAuthenticated"',
   );
   expect((await browser.request("/api/ready")).status).toBe(503);
+});
+
+test("pre-launch, production signs in only the allowlist's verified emails", async ({
+  onTestFinished,
+}) => {
+  const f = await fixture(true, "github");
+  onTestFinished(f.close);
+  for (const address of SIGN_IN_ALLOWLIST) {
+    const listed = f.browser();
+    await listed.email(address.toUpperCase());
+    expect((await listed.session())!.user.email).toBe(address);
+  }
+  const stranger = f.browser();
+  const refused = await stranger.post("email-otp/send-verification-otp", {
+    email: "stranger@example.test",
+    type: "sign-in",
+  });
+  expect(refused.status).toBe(403);
+  expect(await refused.json()).toEqual({ message: PRELAUNCH_REFUSAL });
+  expect(
+    (
+      await stranger.post("sign-in/email-otp", {
+        email: "stranger@example.test",
+        otp: "00000000",
+      })
+    ).status,
+  ).toBe(403);
+  expect(
+    await queryDatabase(f.database.url, 'SELECT 1 FROM "user" WHERE email = $1', [
+      "stranger@example.test",
+    ]),
+  ).toHaveLength(0);
+  // A provider login lands, then is deleted before its first use, as is one
+  // claiming a listed address unverified.
+  for (const profile of [
+    { email: "stranger@example.test" },
+    { email: ADMIN_EMAIL, verified: false },
+  ]) {
+    const browser = f.browser();
+    await browser.oauth("github", profile);
+    expect(await browser.session()).toBeNull();
+    expect(
+      (await browser.request("/api/voice/tokens")).status,
+    ).toBe(401);
+  }
+  expect(
+    await queryDatabase(
+      f.database.url,
+      `SELECT 1 FROM "session" s JOIN "user" u ON u.id = s."userId"
+        WHERE NOT (u."emailVerified" AND u.email = ANY($1))`,
+      [SIGN_IN_ALLOWLIST],
+    ),
+  ).toHaveLength(0);
 });
 
 test("the relay and voice are ready only while their own roles hold the grants their lookups need", async ({
