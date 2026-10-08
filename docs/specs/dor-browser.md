@@ -94,7 +94,7 @@ The host owns Resize with pane (rationale), answering each engagement — a choi
 
 **Must persist resolved viewport settings**, restoring them when the browser is recreated without rereading a preset definition.
 
-Every swap happens in place under the same Surface id (`docs/specs/glossary.md` → "Invariants" I10): the old renderer goes through `closeBrowserSurface`, and the leaf takes the new renderer's params.
+Every swap happens in place, keeping the Surface id (`docs/specs/glossary.md` → "Invariants" I10).
 
 | From -> To | Behavior |
 | --- | --- |

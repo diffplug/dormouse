@@ -1733,7 +1733,7 @@ const registry = new Map<string, AgentBrowserSurfaceController>();
 /**
  * The controller for `id`, created on first use. One driving a different
  * provider than `params` asks for is replaced, since `provider` is fixed for a
- * controller's life, and a render swap keeps the Surface id.
+ * controller's life.
  */
 export function acquireAgentBrowserSurfaceController(
   id: string,

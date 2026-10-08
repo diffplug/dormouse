@@ -1563,19 +1563,14 @@ export function Wall({
   /**
    * Swap a browser Surface's renderer in place, keeping its id, slot, and
    * TODO (docs/specs/dor-browser.md → "Display Modal And Render Swaps"): the
-   * old renderer's session and controller close, the leaf takes the new
-   * renderer's meta, and the pane is selected. The new renderer acquires its
-   * own controller under the same id when it mounts.
+   * old renderer's session and controller close, and the leaf takes the new
+   * renderer's meta. The new renderer acquires its own controller under the
+   * same id when it mounts.
    */
-  const swapBrowserRenderer = useCallback((id: string, next: {
-    params: Record<string, unknown>;
-    title: string;
-  }): void => {
-    if (!nav.hasPane(id)) return;
-    void closeBrowserSurface(id, nav.paneParams(id));
-    lath.store.setMeta(id, browserLeafMeta(next.title, next.params));
-    selectPane(id);
-  }, [selectPane, lath, nav]);
+  const swapBrowserRenderer = useCallback((id: string, from: unknown, next: Record<string, unknown>): void => {
+    void closeBrowserSurface(id, from);
+    lath.store.setMeta(id, browserLeafMeta(hostPathDisplay(browserUrlFromParams(next) ?? '', true), next));
+  }, [lath]);
 
   // Listen for external "new terminal" requests (e.g. from the standalone AppBar)
   useEffect(() => {
@@ -2120,10 +2115,8 @@ export function Wall({
           console.warn(`[dormouse] cannot swap surface '${id}' to iframe: no URL observed yet`);
           return;
         }
-        swapBrowserRenderer(id, {
-          params: { surfaceType: 'browser', renderMode: 'iframe', url },
-          title: hostPathDisplay(url, true),
-        });
+        swapBrowserRenderer(id, params, { surfaceType: 'browser', renderMode: 'iframe', url });
+        selectPane(id);
         return;
       }
 
@@ -2169,10 +2162,8 @@ export function Wall({
           session: undefined,
           ...(previousSession ? { launchSession: previousSession } : {}),
         };
-        swapBrowserRenderer(id, {
-          params: { surfaceType: 'browser', renderMode: mode, url, cwd, syncEngaged: viewport?.mode === 'pane-sync', ...(viewport ? { browserViewport: viewport } : {}), launchFallback: { restore } satisfies LaunchFallback },
-          title: hostPathDisplay(url, true),
-        });
+        swapBrowserRenderer(id, params, { surfaceType: 'browser', renderMode: mode, url, cwd, syncEngaged: viewport?.mode === 'pane-sync', ...(viewport ? { browserViewport: viewport } : {}), launchFallback: { restore } satisfies LaunchFallback });
+        selectPane(id);
       }
     },
     onOpenBrowserPane: (id, url) => {
@@ -2212,18 +2203,18 @@ export function Wall({
       }
       // The failed controller goes; the pane stays, as the embed or the
       // renderer the swap replaced.
-      void closeBrowserSurface(id, params);
       if (fallback === 'embed') {
+        void closeBrowserSurface(id, params);
         lath.store.updateParams(id, { toolRender: 'iframe', renderMode: 'iframe', syncEngaged: false, launchSession: undefined, launchFallback: undefined });
       } else {
-        lath.store.setMeta(id, browserLeafMeta(hostPathDisplay(browserUrlFromParams(fallback.restore) ?? '', true), fallback.restore));
+        swapBrowserRenderer(id, params, fallback.restore);
       }
     },
     onResolveToolApproval: (id: string, choice: 'upstream' | 'folder' | 'decline' | 'retry') => {
       void resolveToolApproval(id, choice);
     },
     onPinPreview: previewSlot.pin,
-  }), [previewSlot, addSplitPanel, minimizePane, enterTerminalMode, exitTerminalMode, requestKill, swapBrowserRenderer, buildDorSurfaces, createContentSurface, resolveToolApproval, lath, nav]);
+  }), [previewSlot, addSplitPanel, minimizePane, enterTerminalMode, exitTerminalMode, requestKill, selectPane, swapBrowserRenderer, buildDorSurfaces, createContentSurface, resolveToolApproval, lath, nav]);
   const openContextPort = useCallback(async (id: string, entry: PortUrlEntry, mode: PortMode): Promise<void> => {
     const opening = terminalContextRef.current;
     // Success dismisses only the context that asked; a failed or cancelled

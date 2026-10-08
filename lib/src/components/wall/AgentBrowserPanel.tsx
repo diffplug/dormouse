@@ -65,9 +65,8 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
 
   // The surface-scoped controller: get-or-create, keyed by surface id. Survives
   // this component's unmount (minimize, layout churn, StrictMode). Keyed by
-  // provider too: a minimized pane keeps this view mounted while its Wall
-  // restores a failed cross-provider swap in place, and the restored provider
-  // needs its own. One released under this view is replaced when params next
+  // provider too: a cross-provider render swap keeps the Surface id and this
+  // view mounted, and the new provider needs its own. One released under this view is replaced when params next
   // change (`generation`), never on the release itself: a kill releases it as
   // the pane starts to fade, where re-acquiring would leave a live controller
   // behind for a dead Surface.

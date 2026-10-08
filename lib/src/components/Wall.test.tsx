@@ -1090,7 +1090,7 @@ describe('Wall on the Lath engine', () => {
       } },
     },
   };
-  const leafIdList = () => Array.from(container.querySelectorAll<HTMLElement>('[data-lath-leaf]')).map((leaf) => leaf.dataset.lathLeaf!);
+  const leafIds = () => Array.from(container.querySelectorAll<HTMLElement>('[data-lath-leaf]')).map((leaf) => leaf.dataset.lathLeaf!);
 
   it('keeps the Surface id and its TODO across an agent-browser → iframe swap', async () => {
     const { requests } = hostBrowsers();
@@ -1101,7 +1101,7 @@ describe('Wall on the Lath engine', () => {
     await act(async () => { getAgentBrowserScreenController('ab-pane')?.actions.setRenderMode?.('iframe'); });
     await flush();
 
-    expect(leafIdList()).toEqual(['ab-pane']);
+    expect(leafIds()).toEqual(['ab-pane']);
     expect(getAgentBrowserScreenController('ab-pane')?.snapshot().renderMode).toBe('iframe');
     expect(terminalRegistry.getActivitySnapshot().get('ab-pane')?.todo).toBe(true);
     // The old renderer's browser and controller went with the swap.
@@ -1119,7 +1119,7 @@ describe('Wall on the Lath engine', () => {
     await act(async () => { getAgentBrowserScreenController('ab-pane')?.actions.setRenderMode?.('playwright-screencast'); });
     await flush();
 
-    expect(leafIdList()).toEqual(['ab-pane']);
+    expect(leafIds()).toEqual(['ab-pane']);
     expect(getAgentBrowserSurfaceController('ab-pane')?.provider).toBe('playwright');
     expect(requests('launch')).toEqual([expect.objectContaining({ provider: 'playwright', url: 'http://localhost:5173/' })]);
     expect(requests('close')).toContainEqual(expect.objectContaining({ provider: 'agent-browser', binding: { session: 'ab-live' } }));
@@ -1137,19 +1137,8 @@ describe('Wall on the Lath engine', () => {
       await act(async () => { getAgentBrowserScreenController(iframe.id)?.actions.setRenderMode?.('agent-browser-screencast'); });
       await flush();
 
-      expect(leafIdList()).toEqual(['pane-a', iframe.id]);
-      let response: unknown;
-      await act(async () => {
-        window.dispatchEvent(new CustomEvent('dormouse:control-request', {
-          detail: {
-            method: SURFACE_CONTROL_METHODS.browser,
-            params: { provider: 'agent-browser', session: 'swapped', surface: 'pane-a' },
-            respond: (r: unknown) => { response = r; },
-          },
-        }));
-      });
-      await flush();
-      expect(response).toMatchObject({ ok: true, result: { status: 'existing', surfaceId: iframe.id, surfaceRef: iframe.ref } });
+      expect(leafIds()).toEqual(['pane-a', iframe.id]);
+      expect(await dispatchAgentBrowserResponse({ session: 'swapped', surface: 'pane-a' })).toMatchObject({ ok: true, result: { status: 'existing', surfaceId: iframe.id, surfaceRef: iframe.ref } });
     } finally {
       untouchedSpy.mockRestore();
     }
@@ -1164,21 +1153,15 @@ describe('Wall on the Lath engine', () => {
     try {
       await act(async () => {
         root.render(<Wall
-          restoredLathLayout={{ version: 1, tree: { root: { kind: 'leaf', id: 'ab-pane' } }, leafMeta: {
-            'ab-pane': { component: 'browser', tabComponent: 'surface', title: 'localhost:5173', params: {
-              surfaceType: 'browser', renderMode: 'agent-browser-screencast', session: 'ab-live', url: 'http://localhost:5173/',
-            } },
-          } }}
+          restoredLathLayout={abPaneLayout}
           initialMode="command"
         />);
       });
       await flush();
       await act(async () => { getAgentBrowserScreenController('ab-pane')?.actions.setRenderMode?.('playwright-screencast'); });
       await flush();
-      const eagerLeaf = container.querySelector<HTMLElement>('[data-lath-leaf]')!;
-      const eagerId = eagerLeaf.dataset.lathLeaf!;
-      expect(eagerId).toBe('ab-pane');
-      await act(async () => { eagerLeaf.querySelector<HTMLButtonElement>('[aria-label="Minimize"]')!.click(); });
+      expect(leafIds()).toEqual(['ab-pane']);
+      await act(async () => { container.querySelector<HTMLElement>('[data-lath-leaf="ab-pane"]')!.querySelector<HTMLButtonElement>('[aria-label="Minimize"]')!.click(); });
       await flush();
 
       // Playwright is not installed: the Door comes back as agent-browser, in
@@ -1188,8 +1171,8 @@ describe('Wall on the Lath engine', () => {
       expect(requests('launch')).toContainEqual(expect.objectContaining({
         provider: 'agent-browser', binding: { session: 'ab-live' }, op: 'launch', url: 'http://localhost:5173/', headed: false,
       }));
-      expect(getAgentBrowserSurfaceController(eagerId)?.provider).toBe('agent-browser');
-      expect(getAgentBrowserScreenController(eagerId)?.snapshot().renderMode).toBe('agent-browser-screencast');
+      expect(getAgentBrowserSurfaceController('ab-pane')?.provider).toBe('agent-browser');
+      expect(getAgentBrowserScreenController('ab-pane')?.snapshot().renderMode).toBe('agent-browser-screencast');
     } finally {
       untouchedSpy.mockRestore();
     }
@@ -1248,15 +1231,13 @@ describe('Wall on the Lath engine', () => {
         getAgentBrowserScreenController(iframeId)?.actions.setRenderMode?.('agent-browser-screencast');
       });
       await flush();
-      const eagerLeaf = container.querySelector<HTMLElement>('[data-lath-leaf]')!;
-      const eagerId = eagerLeaf.dataset.lathLeaf!;
-      expect(eagerId).toBe(iframeId);
+      expect(leafIds()).toEqual([iframeId]);
 
       await act(async () => {
-        eagerLeaf.querySelector<HTMLButtonElement>('[aria-label="Minimize"]')!.click();
+        container.querySelector<HTMLElement>(`[data-lath-leaf="${iframeId}"]`)!.querySelector<HTMLButtonElement>('[aria-label="Minimize"]')!.click();
       });
       await flush();
-      expect(container.querySelector(`[data-door-id="${eagerId}"]`)).not.toBeNull();
+      expect(container.querySelector(`[data-door-id="${iframeId}"]`)).not.toBeNull();
 
       await act(async () => {
         resolveOpen({ ok: true, session: 'dormouse.1.gui-minimized', stream: 4321, binaryPath: '/usr/bin/agent-browser' });
@@ -1264,7 +1245,7 @@ describe('Wall on the Lath engine', () => {
       });
       await flush();
 
-      expect(await dispatchResolveBrowser(eagerId)).toMatchObject({ ok: true, result: { binding: { session: 'dormouse.1.gui-minimized' }, fresh: false } });
+      expect(await dispatchResolveBrowser(iframeId)).toMatchObject({ ok: true, result: { binding: { session: 'dormouse.1.gui-minimized' }, fresh: false } });
       expect(requests('close').filter((request) => request.binding.session === 'dormouse.1.gui-minimized')).toEqual([]);
     } finally {
       untouchedSpy.mockRestore();
@@ -1290,11 +1271,9 @@ describe('Wall on the Lath engine', () => {
         getAgentBrowserScreenController(iframeId)?.actions.setRenderMode?.('agent-browser-screencast');
       });
       await flush();
-      const eagerLeaf = container.querySelector<HTMLElement>('[data-lath-leaf]')!;
-      const eagerId = eagerLeaf.dataset.lathLeaf!;
-      expect(eagerId).toBe(iframeId);
+      expect(leafIds()).toEqual([iframeId]);
       await act(async () => {
-        eagerLeaf.querySelector<HTMLButtonElement>('[aria-label="Minimize"]')!.click();
+        container.querySelector<HTMLElement>(`[data-lath-leaf="${iframeId}"]`)!.querySelector<HTMLButtonElement>('[aria-label="Minimize"]')!.click();
       });
       await flush();
 
@@ -1304,10 +1283,10 @@ describe('Wall on the Lath engine', () => {
       });
       await flush();
 
-      expect(container.querySelector(`[data-door-id="${eagerId}"]`)).not.toBeNull();
-      expect(await dispatchResolveBrowser(eagerId)).toEqual({
+      expect(container.querySelector(`[data-door-id="${iframeId}"]`)).not.toBeNull();
+      expect(await dispatchResolveBrowser(iframeId)).toEqual({
         ok: false,
-        error: `surface '${surfaceRefForId(eagerId)}' is not agent-browser rendered (render_mode: iframe) — an iframe cannot be driven; open its page with dor agent-browser open http://localhost:5173/`,
+        error: `surface '${surfaceRefForId(iframeId)}' is not agent-browser rendered (render_mode: iframe) — an iframe cannot be driven; open its page with dor agent-browser open http://localhost:5173/`,
       });
     } finally {
       untouchedSpy.mockRestore();
@@ -1360,11 +1339,9 @@ describe('Wall on the Lath engine', () => {
 
       await act(async () => { getAgentBrowserScreenController('keyed-ab')?.actions.setRenderMode?.('playwright-screencast'); });
       await flush();
-      const eagerId = Array.from(container.querySelectorAll<HTMLElement>('[data-lath-leaf]'))
-        .map((leaf) => leaf.dataset.lathLeaf!).find((leafId) => leafId !== 'pane-a')!;
-      expect(eagerId).toBe('keyed-ab');
+      expect(leafIds()).toEqual(['keyed-ab', 'pane-a']);
       await act(async () => {
-        container.querySelector<HTMLElement>(`[data-lath-leaf="${eagerId}"]`)!.querySelector<HTMLButtonElement>('[aria-label="Minimize"]')!.click();
+        container.querySelector<HTMLElement>('[data-lath-leaf="keyed-ab"]')!.querySelector<HTMLButtonElement>('[aria-label="Minimize"]')!.click();
       });
       await flush();
 
@@ -1374,12 +1351,12 @@ describe('Wall on the Lath engine', () => {
       warn.mockRestore();
       // Back to agent-browser in the Door it was minimized to, reopened in the
       // session its key names once the swap's close of it has been answered…
-      expect(container.querySelector(`[data-door-id="${eagerId}"]`)).not.toBeNull();
+      expect(container.querySelector('[data-door-id="keyed-ab"]')).not.toBeNull();
       expect(events).toEqual([`close ${defaultSession}`]);
       await act(async () => { landClose(); });
       await flush();
       expect(events).toEqual([`close ${defaultSession}`, 'close landed', `launch ${defaultSession} http://localhost:5173/`]);
-      expect(await dispatchResolveBrowser(eagerId)).toMatchObject({ ok: true, result: { binding: { session: defaultSession } } });
+      expect(await dispatchResolveBrowser('keyed-ab')).toMatchObject({ ok: true, result: { binding: { session: defaultSession } } });
       // …so `dor agent-browser --key default` drives it rather than opening a second pane.
       let reused: { ok: boolean; result?: { status: string; surfaceId: string } } | undefined;
       await act(async () => {
@@ -1392,7 +1369,7 @@ describe('Wall on the Lath engine', () => {
         }));
       });
       await flush();
-      expect(reused).toMatchObject({ ok: true, result: { status: 'existing', surfaceId: eagerId } });
+      expect(reused).toMatchObject({ ok: true, result: { status: 'existing', surfaceId: 'keyed-ab' } });
     } finally {
       untouchedSpy.mockRestore();
     }
@@ -1414,12 +1391,11 @@ describe('Wall on the Lath engine', () => {
       });
       await flush();
 
-      const restoredId = container.querySelector<HTMLElement>('[data-lath-leaf]')!.dataset.lathLeaf!;
-      expect(restoredId).toBe(iframeId);
-      expect(getAgentBrowserScreenController(restoredId)?.snapshot().renderMode).toBe('iframe');
-      expect(await dispatchResolveBrowser(surfaceRefForId(restoredId))).toEqual({
+      expect(leafIds()).toEqual([iframeId]);
+      expect(getAgentBrowserScreenController(iframeId)?.snapshot().renderMode).toBe('iframe');
+      expect(await dispatchResolveBrowser(surfaceRefForId(iframeId))).toEqual({
         ok: false,
-        error: `surface '${surfaceRefForId(restoredId)}' is not agent-browser rendered (render_mode: iframe) — an iframe cannot be driven; open its page with dor agent-browser open http://localhost:5173/`,
+        error: `surface '${surfaceRefForId(iframeId)}' is not agent-browser rendered (render_mode: iframe) — an iframe cannot be driven; open its page with dor agent-browser open http://localhost:5173/`,
       });
     } finally {
       untouchedSpy.mockRestore();
@@ -3423,6 +3399,12 @@ describe('Wall on the Lath engine', () => {
   }
 
   async function dispatchAgentBrowser(params: Record<string, unknown>): Promise<string> {
+    const response = await dispatchAgentBrowserResponse(params);
+    expect(response?.ok).toBe(true);
+    return response!.result!.surfaceId!;
+  }
+
+  async function dispatchAgentBrowserResponse(params: Record<string, unknown>): Promise<{ ok: boolean; result?: { surfaceId?: string } } | undefined> {
     let response: { ok: boolean; result?: { surfaceId?: string } } | undefined;
     await act(async () => {
       window.dispatchEvent(new CustomEvent('dormouse:control-request', {
@@ -3434,8 +3416,7 @@ describe('Wall on the Lath engine', () => {
       }));
     });
     await flush();
-    expect(response?.ok).toBe(true);
-    return response!.result!.surfaceId!;
+    return response;
   }
 
   /** `dor iframe <url>`; returns the new surface's `{ id, ref }`. */
@@ -4058,7 +4039,6 @@ describe('Wall on the Lath engine', () => {
       await act(async () => root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />));
       await flush();
       const iframe = await dispatchIframe('http://localhost:5173/');
-      const leafIds = () => Array.from(container.querySelectorAll<HTMLElement>('[data-lath-leaf]')).map((leaf) => leaf.dataset.lathLeaf!);
       const openTab = async (url: string) => {
         await act(async () => {
           window.dispatchEvent(new MessageEvent('message', { origin: 'http://127.0.0.1:61234', data: { __dormouse: 'open-window', url } }));
