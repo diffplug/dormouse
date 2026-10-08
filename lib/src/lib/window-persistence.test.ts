@@ -62,8 +62,8 @@ describe('window-persistence', () => {
     const store = memoryStore(JSON.stringify({
       version: 2,
       workspaces: [
-        { id: 'ws-1', name: 'One', session: sessionA },
-        { id: 'ws-2', name: 'Two', session: { version: 4, panes: 'nope' } },
+        { id: 'ws-1', name: 'One', nameIsAuto: false, session: sessionA },
+        { id: 'ws-2', name: 'Two', nameIsAuto: false, session: { version: 4, panes: 'nope' } },
       ],
       activeWorkspaceId: 'ws-2',
     }));

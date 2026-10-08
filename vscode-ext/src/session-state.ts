@@ -12,8 +12,7 @@ import { log } from './log';
 const SESSION_STATE_KEY = 'dormouse.session';
 
 export function getSavedSessionState(context: vscode.ExtensionContext): PersistedSession | null {
-  const saved = readPersistedSession(context.workspaceState.get<unknown>(SESSION_STATE_KEY));
-  return saved && Array.isArray(saved.panes) ? saved : null;
+  return readPersistedSession(context.workspaceState.get<unknown>(SESSION_STATE_KEY));
 }
 
 export function saveSessionState(context: vscode.ExtensionContext, state: unknown): Thenable<void> {
@@ -32,7 +31,7 @@ function toPersistedAlert(alert: AlertState | undefined, fallback: PersistedAler
  */
 export function mergeAlertStates(state: unknown, alertStates: Map<string, AlertState>): unknown {
   const parsed = readPersistedSession(state);
-  if (!parsed || !Array.isArray(parsed.panes)) return state;
+  if (!parsed) return state;
   return {
     ...parsed,
     panes: parsed.panes.map((pane) => pane.surfaceType === 'browser'

@@ -137,7 +137,7 @@ describe('restoreSession', () => {
     const saved: PersistedSession = {
       version: 4,
       panes: [
-        { id: 'pane-a', title: 'Pane A', cwd: 'C:\\repo' },
+        { id: 'pane-a', title: 'Pane A', cwd: 'C:\\repo', untouched: false },
       ],
     };
 
@@ -349,10 +349,10 @@ it.each(['absent', 'corrupt'] as const)('preserves multiple Tool kinds through e
     version: 4,
     lathLayout: geometry === 'corrupt' ? { version: 1, tree: { root: {} }, leafMeta: {} } : undefined,
     panes: [
-      { id: 'tool-a', title: 'A', cwd: '/repo', surfaceType: 'tool', command: 'pnpm storybook', tool: { render: 'iframe', port: 'auto' } },
-      { id: 'shell', title: 'Shell', cwd: '/repo' },
-      { id: 'tool-b', title: 'B', cwd: '/repo', surfaceType: 'tool', command: 'pnpm dev', tool: { render: 'agent-browser-screencast', port: 'announced' } },
-      { id: 'web', title: 'Web', cwd: null, surfaceType: 'browser' },
+      { id: 'tool-a', title: 'A', cwd: '/repo', untouched: false, surfaceType: 'tool', command: 'pnpm storybook', tool: { render: 'iframe', port: 'auto' } },
+      { id: 'shell', title: 'Shell', cwd: '/repo', untouched: false },
+      { id: 'tool-b', title: 'B', cwd: '/repo', untouched: false, surfaceType: 'tool', command: 'pnpm dev', tool: { render: 'agent-browser-screencast', port: 'announced' } },
+      { id: 'web', title: 'Web', cwd: null, untouched: false, surfaceType: 'browser' },
     ],
   }));
   expect(restored?.paneIds).toEqual(['tool-a', 'shell', 'tool-b']);

@@ -58,7 +58,7 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
   const syncEngaged = params?.syncEngaged;
   const cwd = params?.cwd;
   // poppedOut is derived from the canonical renderMode the shell passes; fall
-  // back to resolving it from params for a direct mount (tests) / legacy blob.
+  // back to resolving it from params for a direct mount (tests).
   const seededMode = renderModeProp ?? resolveRenderMode(params);
   const provider = surfaceProvider(seededMode);
   const cli = BROWSER_PROVIDER_GUI[provider].cli;

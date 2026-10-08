@@ -198,7 +198,7 @@ Carriers: the `surface_reserve_ids` invoke (standalone); `surface:reserveIds` �
 
 - **A Workspace with neither a published nor a boot-seeded session is dropped rather than written empty**, so a mid-boot snapshot cannot blank a restored Workspace.
 - **A Workspace's save compares against its own previous record** — seeded from disk until its Wall publishes — never the Window's active one, or a dead PTY's retained cwd and alert would come from the wrong Workspace.
-- **Reordering, renaming, pinning, or switching the active Workspace writes too.** **Always write `nameIsAuto`**; lacking it, only a `Workspace <n>` name is auto. **Write `pinned` only when true**, in every record a Window builds.
+- **Reordering, renaming, pinning, or switching the active Workspace writes too.** **Always write `nameIsAuto`**; a reader drops a record without it. **Write `pinned` only when true**, in every record a Window builds.
 - **Must publish both Workspace records in one synchronous step with a Surface move's ownership change**, unprobed and behind one Window write (`pagehide` included), fencing saves collected before or during the change and retaining a departed Session's previous cwd/alert in the destination.
 - **VS Code does not use the collector** — each webview persists one bare `PersistedSession`, its single Workspace, through its own per-surface state API (`docs/specs/vscode.md`).
 
@@ -210,7 +210,7 @@ Carriers: the `surface_reserve_ids` invoke (standalone); `surface:reserveIds` �
 
 **A corrupt save must never block startup.** Every read goes through `readPersistedSession()` / `readPersistedWindow()`, which accept the canonical parsed object *or* a JSON-stringified blob and log-and-discard anything present but unreadable. `readPersistedWindow` also drops Workspaces whose inner session is unreadable and repairs a dangling `activeWorkspaceId` to the first Workspace.
 
-**Must keep recovery commands outside `PersistedPane`.** `readPersistedSession` strips legacy `resumeCommand` fields. Capture, records, and execution follow `docs/compatible-agents.md`.
+**Must keep recovery commands outside `PersistedPane`.** Capture, records, and execution follow `docs/compatible-agents.md`.
 
 Source of truth: `PersistedSession` in `lib/src/lib/session-types.ts`; `lib/src/lib/window-session-aggregator.ts`; `saveSession` in `lib/src/lib/session-save.ts`; `restoreSession` in `lib/src/lib/session-restore.ts`; `lib/src/lib/window-persistence.ts`; `standalone/src/coalesce-cwds.ts`.
 
@@ -224,7 +224,7 @@ Source of truth: `PersistedSession` in `lib/src/lib/session-types.ts`; `lib/src/
 
 **Must remove legacy transcript bytes from disk** (rationale). **No writer accepts a transcript-bearing Session shape.**
 
-- **`readPersistedSession` drops `scrollback` and `resumeCommand` when present** and requires neither, so a transcript never survives into a parsed Session and the first save after upgrade rewrites each store without one.
+- **A transcript-bearing blob is of an older format, which no reader parses** (Persisted session types): standalone deletes such a snapshot at boot (`docs/specs/standalone.md` → Persistence), and VS Code's first save overwrites its store.
 - **Standalone sweeps orphaned session temp files at boot**, the only path that can retire a transcript a crash left in one, and **never touches a live snapshot**. `sweep_orphan_session_temps` in `standalone/src-tauri/src/lib.rs`.
 - **Debug standalone must atomically remove obsolete pane `scrollback` from recognized legacy-root snapshots**, preserving other fields and leaving malformed snapshots untouched. `scrub_legacy_session_transcripts` in `standalone/src-tauri/src/lib.rs`.
 
@@ -256,7 +256,6 @@ Standalone's per-window record: `docs/specs/standalone.md` -> "Persistence". "Re
 - **A spawn that fails still reports an exit.** `pty-core.spawn` answers a node-pty failure with `error` *and* `exit`; `error` reaches no webview (rationale).
 - **Teardown acks are correlated by request id, never by message type alone.** For `interrupt` and the graceful kill the pty-host echoes `requestId` on `interruptDone` / `gracefulKillDone` and the caller compares it — a timed-out call's ack still arrives afterwards (rationale).
 - **An omitted interrupt target list is not an empty one.** `pty-core.interrupt(ids)` broadcasts to every live PTY only when `ids` is *omitted*; an empty array is a no-op, so a caller whose computed set comes out empty never sends the blanket second press that destroys codex's hint.
-- **Untouched defaults conservatively.** New saved panes include `untouched`; a pane read without the field defaults to `untouched: false`, so it still requires kill confirmation.
 - **Replay filtering does not re-fire alerts**, quiesce-detector events, or protocol notifications (`docs/specs/terminal-escapes.md` → "`pty:data` strip semantics").
 - **Never run a synchronous subprocess on a PTY host's event loop** (the Tauri sidecar, VS Code's pty-host); `/proc` reads and small state files are exempt (rationale). Pinned by `standalone/sidecar/no-sync-subprocess.test.js`.
 - **Must discard a probe's answer for a PTY replaced or exited mid-probe.**

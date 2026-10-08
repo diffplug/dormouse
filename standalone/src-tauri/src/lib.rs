@@ -2251,12 +2251,12 @@ const SESSION_TEMP_SUFFIX: &str = ".json.tmp";
 /// Delete every orphaned temp write in the sessions directory, at boot.
 ///
 /// The writer removes its own temp on every error path, so what remains here is
-/// the legacy and hard-crash migration: a kill between the temp write and the
-/// rename leaves a file `load_session` cannot see and nothing else will ever
-/// overwrite — and a snapshot written before Dormouse stopped storing
-/// transcripts carries one. Deleting is the point: those bytes have to leave the
-/// disk (docs/specs/transport.md -> "Retiring the transcripts already on disk").
-/// Never touches a live snapshot; the window that owns one rewrites it itself.
+/// a hard crash's: a kill between the temp write and the rename leaves a file
+/// `load_session` cannot see and nothing else will ever overwrite, and one an
+/// older build left may carry a transcript. Deleting is the point: those bytes
+/// have to leave the disk (docs/specs/transport.md -> "Retiring the transcripts
+/// already on disk"). Never touches a snapshot: `discard_other_formats` deletes
+/// one of another format, and the window that owns a current one rewrites it.
 fn sweep_orphan_session_temps(dir: &Path) -> Result<(), String> {
     let suffix = SESSION_TEMP_SUFFIX;
     let entries = match std::fs::read_dir(dir) {
@@ -2338,8 +2338,9 @@ fn scrub_legacy_session_transcripts(dir: &Path) -> Vec<String> {
     errors
 }
 
-/// Active snapshots retain their normal webview rewrite. Only debug builds have
-/// an abandoned root requiring targeted migration; never delete its layouts.
+/// Orphaned temps in each root; the active root's snapshots are
+/// `discard_other_formats`' and their windows'. Only debug builds have an
+/// abandoned root requiring targeted migration; never delete its layouts.
 fn sweep_session_roots(app_data: &Path) -> Vec<String> {
     let root = state_root_from(app_data.to_path_buf());
     let mut errors = Vec::new();

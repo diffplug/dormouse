@@ -9,7 +9,6 @@ import { hasShellInputControls } from 'dor/commands/shell-quote';
 import {
   ACTIVITY_NOTIFICATION_SOURCES,
   type ActivityNotification,
-  type ActivityNotificationSource,
   type TodoState,
 } from './alert-manager';
 
@@ -61,16 +60,6 @@ export interface PersistedPane {
 }
 
 /**
- * The notification sources a build from before the tolerant reader knows. Such
- * a build rejects a whole session that carries any other, so the writer keeps
- * to these until no strict pre-tolerant build reads the file
- * (`docs/specs/alert.md` -> Public State).
- */
-const STRICT_READER_NOTIFICATION_SOURCES: readonly ActivityNotificationSource[] = Object.freeze([
-  'OSC 9', 'OSC 9;4', 'OSC 99', 'OSC 777', 'BEL', 'COMMAND_EXIT',
-]);
-
-/**
  * Narrow Activity down to what may reach disk. The parameter deliberately uses
  * the persisted shape: live `AlertState` is structurally assignable to it, and
  * this explicit projection keeps `JSON.stringify` from writing extra live or
@@ -78,13 +67,10 @@ const STRICT_READER_NOTIFICATION_SOURCES: readonly ActivityNotificationSource[] 
  * no one has looked at is written as the TODO a look would have left.
  */
 export function toPersistedAlertState(state: PersistedAlertState & { episode?: AlertEpisode | null }): PersistedAlertState {
-  const notification = state.notification ?? null;
   return {
     status: state.status,
     todo: state.todo || state.status === 'ALERT_RINGING' || isAlertPaused(state),
-    notification: notification !== null && STRICT_READER_NOTIFICATION_SOURCES.includes(notification.source)
-      ? notification
-      : null,
+    notification: state.notification ?? null,
   };
 }
 
@@ -139,8 +125,7 @@ export type WorkspaceId = string;
 export interface PersistedWorkspace {
   id: WorkspaceId;
   name: string;
-  /** Always written. A blob from before auto-naming lacks it, and reads a
-   *  default name as auto, any other as user-set. */
+  /** Always written; a record without it is dropped on read. */
   nameIsAuto: boolean;
   /** Written only when true; absent reads as unpinned
    *  (`docs/specs/layout.md` → "Workspace tabs"). */
@@ -184,15 +169,7 @@ export function isDefaultWorkspaceName(name: string): boolean {
   return /^Workspace \d+$/.test(name);
 }
 
-type PersistedPaneInput = Omit<PersistedPane, 'untouched'> & { untouched?: boolean };
-
-interface PersistedSessionInput {
-  alertDelivery?: unknown;
-  version: typeof PERSISTED_SESSION_VERSION;
-  panes: PersistedPaneInput[];
-  doors?: PersistedDoor[];
-  lathLayout?: unknown;
-}
+type PersistedSessionInput = Omit<PersistedSession, 'alertDelivery'> & { alertDelivery?: unknown };
 
 // --- Validation guards (reject untrusted blobs) ---
 
@@ -226,10 +203,7 @@ function isPersistedPaneShape(value: unknown): boolean {
     typeof value.id === 'string' &&
     typeof value.title === 'string' &&
     (typeof value.cwd === 'string' || value.cwd === null) &&
-    // Neither `scrollback` nor `resumeCommand` is checked: legacy blobs carry
-    // them and stay readable, new ones never do, and `normalizeSession` strips
-    // both either way.
-    (value.untouched === undefined || typeof value.untouched === 'boolean') &&
+    typeof value.untouched === 'boolean' &&
     (value.surfaceType === undefined || value.surfaceType === 'terminal' || value.surfaceType === 'browser' || value.surfaceType === 'tool') &&
     (value.command === undefined || (value.surfaceType === 'tool' && typeof value.command === 'string')) &&
     (value.tool === undefined || (value.surfaceType === 'tool' && isPersistedToolMetadataShape(value.tool))) &&
@@ -308,22 +282,9 @@ function logDiscard(value: unknown, current: number, kind: 'session' | 'window')
 function normalizeSession(session: PersistedSessionInput): PersistedSession {
   const alertDelivery = normalizeAlertDeliveryOverrides(session.alertDelivery);
   const { alertDelivery: _rawDelivery, ...rest } = session;
-  // Deny-list retired fields so future PersistedPane fields pass through without
-  // manual allowlist updates. Neither retired field is on PersistedPaneInput.
-  const panes: PersistedPane[] = session.panes.map((pane) => {
-    const {
-      scrollback: _retiredScrollback,
-      resumeCommand: _retiredResumeCommand,
-      ...carried
-    } = pane as PersistedPaneInput & { scrollback?: unknown; resumeCommand?: unknown };
-    return {
-      ...carried,
-      untouched: pane.untouched ?? false,
-      ...(carried.alert ? { alert: normalizePersistedAlert(carried.alert) } : {}),
-    };
-  });
+  const panes = session.panes.map((pane) => pane.alert ? { ...pane, alert: normalizePersistedAlert(pane.alert) } : pane);
   return {
-    ...(rest as Omit<PersistedSession, 'panes'>),
+    ...rest,
     panes,
     ...(Object.keys(alertDelivery).length ? { alertDelivery } : {}),
   };
@@ -370,7 +331,7 @@ export function readPersistedWindow(raw: unknown): PersistedWindow | null {
   const seen = new Set<WorkspaceId>();
   const workspaces = (value.workspaces as unknown[])
     .map((ws): PersistedWorkspace | null => {
-      if (!isRecord(ws) || typeof ws.id !== 'string' || typeof ws.name !== 'string') return null;
+      if (!isRecord(ws) || typeof ws.id !== 'string' || typeof ws.name !== 'string' || typeof ws.nameIsAuto !== 'boolean') return null;
       // First wins. A duplicate id is rejected outright by `setWorkspaces`, and a
       // blob that throws there would leave the app with nothing rendered at all.
       if (seen.has(ws.id)) {
@@ -380,8 +341,7 @@ export function readPersistedWindow(raw: unknown): PersistedWindow | null {
       const session = readPersistedSession(ws.session);
       if (!session) return null;
       seen.add(ws.id);
-      const nameIsAuto = typeof ws.nameIsAuto === 'boolean' ? ws.nameIsAuto : isDefaultWorkspaceName(ws.name);
-      return workspaceRecord({ id: ws.id, name: ws.name, nameIsAuto, pinned: ws.pinned === true }, session);
+      return workspaceRecord({ id: ws.id, name: ws.name, nameIsAuto: ws.nameIsAuto, pinned: ws.pinned === true }, session);
     })
     .filter((ws): ws is PersistedWorkspace => ws !== null);
   if (workspaces.length === 0) return null;

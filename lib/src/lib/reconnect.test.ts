@@ -101,7 +101,7 @@ describe('resumeOrRestore', () => {
     const layout = lathLayoutFor('parent');
     const helper = { parentId: 'parent', command: 'git status' };
     const result = await resumeOrRestore(createPlatform([{ id: 'parent', alive: true }, { id: 'helper', alive: true, helper }], {
-      version: 4, lathLayout: layout, panes: [{ id: 'parent', title: 'Parent', cwd: null }],
+      version: 4, lathLayout: layout, panes: [{ id: 'parent', title: 'Parent', cwd: null, untouched: false }],
     }));
     expect(result.paneIds).toEqual(['parent']); expect(result.lathLayout).toEqual(layout);
     expect(terminalRegistryMocks.resumeTerminal).toHaveBeenCalledWith('helper', 'helper-replay', { alive: true, exitCode: undefined, helper });
@@ -119,9 +119,9 @@ describe('resumeOrRestore', () => {
       lathLayout,
       doors,
       panes: [
-        { id: 'pane-a', title: 'Pane A', cwd: null },
-        { id: 'pane-b', title: 'Pane B', cwd: null },
-        { id: 'pane-c', title: 'Pane C', cwd: null },
+        { id: 'pane-a', title: 'Pane A', cwd: null, untouched: false },
+        { id: 'pane-b', title: 'Pane B', cwd: null, untouched: false },
+        { id: 'pane-c', title: 'Pane C', cwd: null, untouched: false },
       ],
     };
 
@@ -148,7 +148,7 @@ describe('resumeOrRestore', () => {
       version: 4,
       lathLayout: lathLayoutFor('pane-a'),
       panes: [
-        { id: 'pane-a', title: 'Production API', cwd: null },
+        { id: 'pane-a', title: 'Production API', cwd: null, untouched: false },
       ],
     };
 
@@ -168,7 +168,7 @@ describe('resumeOrRestore', () => {
       version: 4,
       lathLayout: lathLayoutFor('pane-a'),
       panes: [
-        { id: 'pane-a', title: 'PowerShell', cwd: null },
+        { id: 'pane-a', title: 'PowerShell', cwd: null, untouched: false },
       ],
     };
 
@@ -205,26 +205,6 @@ describe('resumeOrRestore', () => {
     });
   });
 
-  it('defaults missing saved untouched state to touched when resuming live PTYs', async () => {
-    const saved = {
-      version: 4 as const,
-      lathLayout: lathLayoutFor('pane-a'),
-      panes: [
-        { id: 'pane-a', title: 'Pane A', cwd: null },
-      ],
-    };
-
-    await resumeOrRestore(createPlatform([
-      { id: 'pane-a', alive: true },
-    ], saved as PersistedSession));
-
-    expect(terminalRegistryMocks.resumeTerminal).toHaveBeenCalledWith('pane-a', 'pane-a-replay', {
-      alive: true,
-      exitCode: undefined,
-      title: 'Pane A',
-    });
-  });
-
   it('seeds saved minimized door titles when resuming live PTYs', async () => {
     const saved: PersistedSession = {
       version: 4,
@@ -234,7 +214,7 @@ describe('resumeOrRestore', () => {
         title: 'Renamed Door',
       }],
       panes: [
-        { id: 'pane-a', title: 'Renamed Door', cwd: null },
+        { id: 'pane-a', title: 'Renamed Door', cwd: null, untouched: false },
       ],
     };
 
@@ -254,8 +234,8 @@ describe('resumeOrRestore', () => {
       version: 4,
       lathLayout: lathLayoutFor('pane-a', 'pane-b'),
       panes: [
-        { id: 'pane-a', title: 'Pane A', cwd: null },
-        { id: 'pane-b', title: 'Pane B', cwd: null },
+        { id: 'pane-a', title: 'Pane A', cwd: null, untouched: false },
+        { id: 'pane-b', title: 'Pane B', cwd: null, untouched: false },
       ],
     };
 
@@ -284,9 +264,9 @@ describe('resumeOrRestore', () => {
       lathLayout: lathLayoutFor(),
       doors,
       panes: [
-        { id: 'pane-a', title: 'Pane A', cwd: null },
-        { id: 'pane-b', title: 'Pane B', cwd: null },
-        { id: 'stale-pane', title: 'Stale Pane', cwd: null },
+        { id: 'pane-a', title: 'Pane A', cwd: null, untouched: false },
+        { id: 'pane-b', title: 'Pane B', cwd: null, untouched: false },
+        { id: 'stale-pane', title: 'Stale Pane', cwd: null, untouched: false },
       ],
     };
 
@@ -309,9 +289,9 @@ describe('resumeOrRestore', () => {
       version: 4,
       lathLayout,
       panes: [
-        { id: 'pane-a', title: 'Pane A', cwd: null },
-        { id: 'pane-b', title: 'Pane B', cwd: null },
-        { id: 'stale-pane', title: 'Stale Pane', cwd: null },
+        { id: 'pane-a', title: 'Pane A', cwd: null, untouched: false },
+        { id: 'pane-b', title: 'Pane B', cwd: null, untouched: false },
+        { id: 'stale-pane', title: 'Stale Pane', cwd: null, untouched: false },
       ],
     };
 
@@ -333,8 +313,8 @@ describe('resumeOrRestore', () => {
       version: 4,
       lathLayout,
       panes: [
-        { id: 'pane-term', title: 'Terminal', cwd: null },
-        { id: 'pane-web', title: 'localhost', cwd: null, surfaceType: 'browser' },
+        { id: 'pane-term', title: 'Terminal', cwd: null, untouched: false },
+        { id: 'pane-web', title: 'localhost', cwd: null, untouched: false, surfaceType: 'browser' },
       ],
     };
 
@@ -357,11 +337,12 @@ describe('resumeOrRestore', () => {
       version: 4,
       lathLayout: lathLayoutFor('pane-term', 'pane-web'),
       panes: [
-        { id: 'pane-term', title: 'Terminal', cwd: null },
+        { id: 'pane-term', title: 'Terminal', cwd: null, untouched: false },
         {
           id: 'pane-web',
           title: 'localhost',
           cwd: null,
+          untouched: false,
           surfaceType: 'browser',
           alert: { status: 'WATCHING_DISABLED', watchingEnabled: false, todo: true, notification: null },
         },
@@ -389,9 +370,9 @@ describe('resumeOrRestore', () => {
       version: 4,
       lathLayout: lathLayoutFor('pane-term', 'stale-term', 'pane-web'),
       panes: [
-        { id: 'pane-term', title: 'Terminal', cwd: null },
-        { id: 'stale-term', title: 'Stale terminal', cwd: null },
-        { id: 'pane-web', title: 'localhost', cwd: null, surfaceType: 'browser' },
+        { id: 'pane-term', title: 'Terminal', cwd: null, untouched: false },
+        { id: 'stale-term', title: 'Stale terminal', cwd: null, untouched: false },
+        { id: 'pane-web', title: 'localhost', cwd: null, untouched: false, surfaceType: 'browser' },
       ],
     };
 
@@ -419,8 +400,8 @@ describe('resumeOrRestore', () => {
       lathLayout,
       doors,
       panes: [
-        { id: 'pane-term', title: 'Terminal', cwd: null },
-        { id: 'door-web', title: 'localhost', cwd: null, surfaceType: 'browser' },
+        { id: 'pane-term', title: 'Terminal', cwd: null, untouched: false },
+        { id: 'door-web', title: 'localhost', cwd: null, untouched: false, surfaceType: 'browser' },
       ],
     };
 

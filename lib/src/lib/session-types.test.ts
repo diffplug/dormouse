@@ -22,6 +22,8 @@ describe('persisted format versions', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const info = vi.spyOn(console, 'info').mockImplementation(() => {});
     expect(readPersistedSession({ version: 4, panes })?.panes.map((pane) => pane.id)).toEqual(['surface-1']);
+    // VS Code hands state back JSON-stringified.
+    expect(readPersistedSession(JSON.stringify({ version: 4, panes }))?.panes).toEqual(panes);
     expect(readPersistedSession({ version: 3, panes })).toBeNull();
     expect(readPersistedSession(JSON.stringify({ version: 5, panes }))).toBeNull();
     expect(warn).not.toHaveBeenCalled();
@@ -31,11 +33,17 @@ describe('persisted format versions', () => {
   it('reads only the current Window version, discarding any other quietly', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const info = vi.spyOn(console, 'info').mockImplementation(() => {});
-    const window = { activeWorkspaceId: 'w', workspaces: [{ id: 'w', name: 'W', session: { version: 4, panes } }] };
+    const window = { activeWorkspaceId: 'w', workspaces: [{ id: 'w', name: 'W', nameIsAuto: false, session: { version: 4, panes } }] };
     expect(readPersistedWindow({ ...window, version: 2 })?.workspaces).toHaveLength(1);
     expect(readPersistedWindow({ ...window, version: 1 })).toBeNull();
     expect(warn).not.toHaveBeenCalled();
     expect(info).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects a current Session with a pane missing `untouched`', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(readPersistedSession({ version: 4, panes: [{ id: 'surface-1', title: 'A', cwd: null }] })).toBeNull();
+    expect(warn).toHaveBeenCalledTimes(1);
   });
 
   it('still warns on a blob with no version at all', () => {

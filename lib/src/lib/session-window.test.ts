@@ -43,16 +43,16 @@ describe('readPersistedWindow', () => {
     expect(odd?.workspaces[0]).not.toHaveProperty('pinned');
   });
 
-  it('reads a blob from before auto-naming: only a `Workspace <n>` name is auto', () => {
+  it('drops a Workspace record without `nameIsAuto`', () => {
     const win = readPersistedWindow({
       version: 2,
       activeWorkspaceId: 'ws-a',
       workspaces: [
         { id: 'ws-a', name: 'Workspace 3', session: sessionA },
-        { id: 'ws-b', name: 'Build', session: sessionB },
+        { id: 'ws-b', name: 'Build', nameIsAuto: false, session: sessionB },
       ],
     });
-    expect(win?.workspaces.map((ws) => ws.nameIsAuto)).toEqual([true, false]);
+    expect(win?.workspaces.map((ws) => ws.id)).toEqual(['ws-b']);
   });
 
   it('parses a JSON-stringified window blob', () => {
@@ -68,7 +68,7 @@ describe('readPersistedWindow', () => {
     const win: PersistedWindow = {
       version: 2,
       activeWorkspaceId: 'gone',
-      workspaces: [{ id: 'ws-a', name: 'A', session: sessionA }],
+      workspaces: [{ id: 'ws-a', name: 'A', nameIsAuto: false, session: sessionA }],
     };
     expect(readPersistedWindow(win)?.activeWorkspaceId).toBe('ws-a');
   });
@@ -78,8 +78,8 @@ describe('readPersistedWindow', () => {
       version: 2 as const,
       activeWorkspaceId: 'ws-a',
       workspaces: [
-        { id: 'ws-a', name: 'A', session: sessionA },
-        { id: 'ws-bad', name: 'Bad', session: { nonsense: true } },
+        { id: 'ws-a', name: 'A', nameIsAuto: false, session: sessionA },
+        { id: 'ws-bad', name: 'Bad', nameIsAuto: false, session: { nonsense: true } },
       ],
     };
     const read = readPersistedWindow(win);
@@ -94,8 +94,8 @@ describe('readPersistedWindow', () => {
       version: 2 as const,
       activeWorkspaceId: 'ws-a',
       workspaces: [
-        { id: 'ws-a', name: 'First', session: sessionA },
-        { id: 'ws-a', name: 'Second', session: sessionB },
+        { id: 'ws-a', name: 'First', nameIsAuto: false, session: sessionA },
+        { id: 'ws-a', name: 'Second', nameIsAuto: false, session: sessionB },
       ],
     };
     const read = readPersistedWindow(win);
@@ -117,8 +117,8 @@ describe('windowPaneIds', () => {
       version: 2,
       activeWorkspaceId: 'ws-a',
       workspaces: [
-        { id: 'ws-a', name: 'A', session: sessionA },
-        { id: 'ws-b', name: 'B', session: sessionB },
+        { id: 'ws-a', name: 'A', nameIsAuto: false, session: sessionA },
+        { id: 'ws-b', name: 'B', nameIsAuto: false, session: sessionB },
       ],
     };
     expect(windowPaneIds(win)).toEqual(['pane-a', 'pane-b']);
