@@ -50,7 +50,7 @@ describe('owed alerts during resumed output', () => {
     vi.advanceTimersByTime(5_000);
     expect(manager.getState(ID)).toMatchObject({ status: 'ALERT_RINGING', notification: REPORT });
   });
-  it.each(['watching', 'report'] as const)('pauses a %s on the first redraw and keeps its original alarm deadlines', (source) => {
+  it.each(['watching', 'report'] as const)('defers a %s on the first redraw and keeps its original alarm deadlines', (source) => {
     ring(source);
     const episode = manager.getState(ID).episode;
     vi.advanceTimersByTime(1_000);
@@ -79,7 +79,7 @@ describe('owed alerts during resumed output', () => {
     expect(spoken).toHaveBeenCalledExactlyOnceWith(ID, episode!.id);
     expect(pushed).toHaveBeenCalledOnce();
   });
-  it('does not repeat delivered sinks through repeated pauses', () => {
+  it('does not repeat delivered sinks through repeated deferrals', () => {
     ring('report');
     vi.advanceTimersByTime(DELAY);
     for (let i = 0; i < 3; i++) {
@@ -98,7 +98,7 @@ describe('owed alerts during resumed output', () => {
     expect(spoken).toHaveBeenCalledOnce();
     expect(pushed).toHaveBeenCalledOnce();
   });
-  it('keeps the richest detail across pauses and new reports', () => {
+  it('keeps the richest detail across deferrals and new reports', () => {
     ring('report');
     manager.onData(ID);
     manager.notifyFromProtocol(ID, { source: 'BEL', title: 'Terminal bell', body: null });
@@ -106,7 +106,7 @@ describe('owed alerts during resumed output', () => {
     vi.advanceTimersByTime(5_000);
     expect(manager.getState(ID)).toMatchObject({ status: 'ALERT_RINGING', notification: REPORT });
   });
-  it('exempts a mixed command-exit ring from pauses', () => {
+  it('exempts a mixed command-exit ring from deferral', () => {
     armCommandExit(manager, ID, WATCHED);
     ring('report');
     manager.onData(ID);
@@ -115,19 +115,19 @@ describe('owed alerts during resumed output', () => {
     expect(manager.getState(ID)).toMatchObject({ status: 'ALERT_RINGING', notification: REPORT });
     expect(spoken).toHaveBeenCalledOnce();
   });
-  it('leaves a paused ring paused behind an engaged exit until the exit escalates', () => {
+  it('leaves a deferred ring deferred behind an engaged exit until the exit escalates', () => {
     armCommandExit(manager, ID, WATCHED);
     ring('report');
     manager.onData(ID);
     engage(manager, ID);
     finishCommand(manager, ID);
-    const paused = manager.getState(ID);
-    expect(paused.episode).not.toBeNull();
-    expect(paused.status).not.toBe('ALERT_RINGING');
+    const deferred = manager.getState(ID);
+    expect(deferred.episode).not.toBeNull();
+    expect(deferred.status).not.toBe('ALERT_RINGING');
     goIdle(manager, ID);
-    expect(manager.getState(ID)).toMatchObject({ status: 'ALERT_RINGING', episode: paused.episode });
+    expect(manager.getState(ID)).toMatchObject({ status: 'ALERT_RINGING', episode: deferred.episode });
   });
-  it('pauses a report once an await consumes the exit that exempted it', async () => {
+  it('defers a report once an await consumes the exit that exempted it', async () => {
     armCommandExit(manager, ID, WATCHED);
     ring('report');
     finishCommand(manager, ID);
@@ -145,7 +145,7 @@ describe('owed alerts during resumed output', () => {
     vi.advanceTimersByTime(5_000);
     expect(manager.getState(ID).status).toBe('ALERT_RINGING');
   });
-  it('pauses a notification followed by output in the same PTY read', () => {
+  it('defers a notification followed by output in the same PTY read', () => {
     const stream = createOwnerPtyStream(ID, {
       alerts: manager, colorProvider: () => null,
       onToolEvents() {}, onSemanticEvents() {}, writeResponse() {}, onClipboardOffer() {}, onChunk() {},
@@ -157,7 +157,7 @@ describe('owed alerts during resumed output', () => {
     vi.advanceTimersByTime(5_000);
     expect(manager.getState(ID)).toMatchObject({ status: 'ALERT_RINGING', episode });
   });
-  it('ignores resize output when deciding whether to pause', () => {
+  it('ignores resize output when deciding whether to defer', () => {
     ring('report');
     manager.onResize(ID);
     manager.onData(ID);
@@ -165,7 +165,7 @@ describe('owed alerts during resumed output', () => {
     vi.advanceTimersByTime(DELAY);
     expect(spoken).toHaveBeenCalledOnce();
   });
-  it('releases a pause when disabled and pauses immediately when re-enabled', () => {
+  it('releases a deferral when disabled and defers immediately when re-enabled', () => {
     ring('report');
     const episode = manager.getState(ID).episode;
     manager.onData(ID);
@@ -176,15 +176,15 @@ describe('owed alerts during resumed output', () => {
     vi.advanceTimersByTime(5_000);
     expect(manager.getState(ID)).toMatchObject({ status: 'ALERT_RINGING', episode });
   });
-  it('persists a previously visible pause as TODO but keeps initial deferral live-only', () => {
+  it('persists a deferred ring as TODO, whether or not it was ever visible', () => {
     ring('report');
     manager.onData(ID);
     expect(toPersistedAlertState(manager.getState(ID))).toMatchObject({ todo: true, notification: REPORT });
     manager.onData('never-visible');
     manager.notifyFromProtocol('never-visible', REPORT);
-    expect(toPersistedAlertState(manager.getState('never-visible'))).toMatchObject({ todo: false, notification: null });
+    expect(toPersistedAlertState(manager.getState('never-visible'))).toMatchObject({ todo: true, notification: REPORT });
   });
-  it.each(['acknowledge', 'dismiss', 'clearTodo', 'remove', 'seed'] as const)('clears a paused summons on %s without stale delivery', (action) => {
+  it.each(['acknowledge', 'dismiss', 'clearTodo', 'remove', 'seed'] as const)('clears a deferred summons on %s without stale delivery', (action) => {
     ring('report');
     manager.onData(ID);
     if (action === 'acknowledge') manager.acknowledge(ID, { input: false });
@@ -196,7 +196,7 @@ describe('owed alerts during resumed output', () => {
     expect(spoken).not.toHaveBeenCalled();
     expect(pushed).not.toHaveBeenCalled();
   });
-  it('removes a paused WATCHING source with its rule while retaining a report', () => {
+  it('removes a deferred WATCHING source with its rule while retaining a report', () => {
     ring('watching');
     manager.onData(ID);
     manager.setWatchedCommands([]);

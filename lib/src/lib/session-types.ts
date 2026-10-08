@@ -4,7 +4,7 @@ import { isToolKeyScope, isToolRender, type ToolKeyScope, type ToolRender } from
 import { isBrowserViewportSetting, type BrowserViewportSetting } from 'dor-lib-common/browser-viewports';
 import type { SessionStatus } from './alert-manager';
 import type { WorkspaceMeta } from './workspace-store';
-import { isAlertPaused, type AlertEpisode } from './alert-episode';
+import { isAlertDeferred, type AlertEpisode } from './alert-episode';
 import { hasShellInputControls } from 'dor/commands/shell-quote';
 import {
   ACTIVITY_NOTIFICATION_SOURCES,
@@ -81,7 +81,7 @@ export function toPersistedAlertState(state: PersistedAlertState & { episode?: A
   const notification = state.notification ?? null;
   return {
     status: state.status,
-    todo: state.todo || state.status === 'ALERT_RINGING' || isAlertPaused(state),
+    todo: state.todo || state.status === 'ALERT_RINGING' || isAlertDeferred(state),
     notification: notification !== null && STRICT_READER_NOTIFICATION_SOURCES.includes(notification.source)
       ? notification
       : null,

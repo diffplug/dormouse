@@ -1,13 +1,13 @@
 import type { SessionStatus } from './alert-manager';
 
-/** One unresolved summons, retained through animation pauses. Never cold-persisted. */
+/** One unresolved summons, retained while deferred behind animation. Never cold-persisted. */
 export interface AlertEpisode {
   id: string;
   startedAt: number;
 }
 
-/** An owed ring held back by recent output (`docs/specs/alert.md` -> Completion events). */
-export function isAlertPaused(state: { episode?: AlertEpisode | null; status: SessionStatus }): boolean {
+/** An owed ring deferred until recent output stops (`docs/specs/alert.md` -> Completion events). */
+export function isAlertDeferred(state: { episode?: AlertEpisode | null; status: SessionStatus }): boolean {
   return state.episode != null && state.status !== 'ALERT_RINGING';
 }
 
