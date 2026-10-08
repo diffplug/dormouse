@@ -2900,6 +2900,11 @@ fn record_workspace_id(record: &JsonValue) -> Option<&str> {
     record.get("workspaceId").and_then(JsonValue::as_str)
 }
 
+/// The `PersistedSession` of the Workspace a record carries.
+fn record_session(record: &JsonValue) -> Option<&JsonValue> {
+    record.get("workspace")?.get("session")
+}
+
 /// Append one arrival's record, replacing and returning any earlier record of
 /// the same id.
 fn record_arrival_on_disk(dir: &Path, arrival: &routing::Arrival) -> Result<Option<JsonValue>, String> {
@@ -3001,12 +3006,11 @@ const SESSION_VERSION: u64 = 4;
 /// migration. What it discarded, as `(snapshots, records)`.
 fn discard_other_formats(dir: &Path) -> Result<(usize, usize), String> {
     let _disk = guard(&ARRIVAL_DISK_LOCK);
-    let version = |value: Option<&JsonValue>| value?.get("version")?.as_u64();
     let mut snapshots = 0;
     for label in routing::restorable_labels(session_file_names(dir)) {
         // An unparseable snapshot is its window's to overwrite, as before.
         let Ok(Some(snapshot)) = read_snapshot_from(dir, &label) else { continue };
-        if version(Some(&snapshot)) != Some(WINDOW_VERSION) {
+        if snapshot["version"] != WINDOW_VERSION {
             remove_session_from(dir, &label)?;
             snapshots += 1;
         }
@@ -3014,7 +3018,7 @@ fn discard_other_formats(dir: &Path) -> Result<(usize, usize), String> {
     // An unreadable journal is `restore_arrivals`' to drop.
     let Ok(mut records) = read_arrivals_from(dir) else { return Ok((snapshots, 0)) };
     let before = records.len();
-    records.retain(|record| version(record.get("workspace").and_then(|w| w.get("session"))) == Some(SESSION_VERSION));
+    records.retain(|record| record_session(record).is_some_and(|session| session["version"] == SESSION_VERSION));
     if records.len() != before {
         write_arrivals_to(dir, &records)?;
     }
@@ -3579,7 +3583,7 @@ fn saved_windows(dir: &Path) -> SavedWindows {
     let snapshot_surfaces = snapshots.iter().flat_map(ids::snapshot_surface_ids);
     let journal_surfaces = records
         .iter()
-        .filter_map(|record| record.get("workspace")?.get("session"))
+        .filter_map(record_session)
         .flat_map(ids::session_surface_ids);
     let next_surface = ids::seed_next(ids::Kind::Surface, snapshot_surfaces.chain(journal_surfaces));
     SavedWindows { labels, next_ws, next_workspace, next_surface }

@@ -28,24 +28,10 @@ export interface SessionKeyValueStore {
  * or one another build wrote, is discarded so it can never block startup.
  */
 export function loadWindowState(storage: SessionKeyValueStore, key: string): PersistedWindow | null {
-  const raw = storage.getItem(key);
-  if (raw === null) return null;
-  const parsed = parseStoredJson(raw);
-  return parsed === null ? null : readPersistedWindow(parsed);
+  return readPersistedWindow(storage.getItem(key));
 }
 
 /** Persist `snapshot` under `key`. */
 export function saveWindowState(storage: SessionKeyValueStore, key: string, snapshot: PersistedWindow): void {
   storage.setItem(key, JSON.stringify(snapshot));
-}
-
-/** Parse a stored JSON blob, or null when it is corrupt — a bad blob degrades to a
- *  fresh start rather than throwing at the boot boundary (`docs/specs/transport.md`). */
-function parseStoredJson(raw: string): unknown {
-  try {
-    return JSON.parse(raw);
-  } catch {
-    console.warn('[dormouse] Ignoring corrupt persisted state; starting fresh.');
-    return null;
-  }
 }

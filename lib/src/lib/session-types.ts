@@ -289,18 +289,20 @@ export function readPersistedSession(raw: unknown): PersistedSession | null {
   if (isEmptyState(raw)) return null;
   const value = parseJsonString(raw);
   if (isPersistedSession(value)) return normalizeSession(value);
-  if (!isOtherVersion(value, PERSISTED_SESSION_VERSION)) {
-    console.warn('[dormouse] Ignoring unreadable persisted session; starting fresh.');
-  }
+  logDiscard(value, PERSISTED_SESSION_VERSION, 'session');
   return null;
 }
 
-/** A blob another build wrote: discarded as a fresh start, never migrated
- *  (`docs/specs/transport.md` → "Persisted session types"). Logs the discard. */
-function isOtherVersion(value: unknown, current: number): boolean {
-  if (!isRecord(value) || typeof value.version !== 'number' || value.version === current) return false;
-  console.info(`[dormouse] Discarding state saved by another version (format ${value.version}); starting fresh.`);
-  return true;
+/** Say why a present blob starts fresh: another build's version is expected
+ *  and never migrated (`docs/specs/transport.md` → "Persisted session types");
+ *  anything else is unreadable. */
+function logDiscard(value: unknown, current: number, kind: 'session' | 'window'): void {
+  const version = isRecord(value) ? value.version : undefined;
+  if (typeof version === 'number' && version !== current) {
+    console.info(`[dormouse] Discarding a ${kind} saved by another version (format ${version}); starting fresh.`);
+  } else {
+    console.warn(`[dormouse] Ignoring unreadable persisted ${kind}; starting fresh.`);
+  }
 }
 
 function normalizeSession(session: PersistedSessionInput): PersistedSession {
@@ -361,9 +363,7 @@ export function readPersistedWindow(raw: unknown): PersistedWindow | null {
   if (isEmptyState(raw)) return null;
   const value = parseJsonString(raw);
   if (!isRecord(value) || !isPersistedWindowShape(value)) {
-    if (!isOtherVersion(value, PERSISTED_WINDOW_VERSION)) {
-      console.warn('[dormouse] Ignoring unreadable persisted window; starting fresh.');
-    }
+    logDiscard(value, PERSISTED_WINDOW_VERSION, 'window');
     return null;
   }
 
