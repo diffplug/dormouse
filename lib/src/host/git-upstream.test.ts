@@ -10,7 +10,7 @@ vi.mock('dor-lib-common', async (importOriginal) => ({
 }));
 
 const { resolveUpstreamUrl } = await import('./git-upstream');
-const UNTRUSTED = ['-c', 'core.fsmonitor=false'];
+const { UNTRUSTED_REPO_GIT_ARGS: UNTRUSTED } = await import('dor-lib-common');
 
 const ok = (stdout: string) => ({ ok: true, exitCode: 0, stdout, stderr: '' });
 const failed = (exitCode = 128) => ({ ok: true, exitCode, stdout: '', stderr: 'fatal' });

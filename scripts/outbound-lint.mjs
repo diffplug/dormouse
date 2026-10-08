@@ -610,22 +610,21 @@ function localSource(source) {
  * the viewers are framed by the webview.
  */
 const NO_FALLBACK = ['base-uri', 'form-action'];
+const TAURI_REQUIRED = [...NO_FALLBACK, 'frame-ancestors'];
 
 function checkCsp(where, policy, required = NO_FALLBACK) {
   const directives = policy.split(';').map((d) => d.trim()).filter(Boolean);
   const names = new Set(directives.map((d) => d.split(/\s+/)[0]));
   if (directives.length === 0) problems.push(`${where}: an empty CSP — the parse found nothing to check.`);
-  else {
-    for (const name of ['default-src', ...required]) {
-      if (names.has(name)) continue;
-      problems.push(name === 'default-src'
-        ? `${where}: no default-src, so every fetch directive it omits admits any origin.`
-        : `${where}: no ${name}, which does not fall back to default-src and so admits any origin.`);
-    }
+  else if (!names.has('default-src')) {
+    problems.push(`${where}: no default-src, so every fetch directive it omits admits any origin.`);
+  }
+  for (const name of required.filter((n) => directives.length > 0 && !names.has(n))) {
+    problems.push(`${where}: no ${name}, which does not fall back to default-src and so admits any origin.`);
   }
   for (const directive of directives) {
     const [name, ...sources] = directive.split(/\s+/);
-    if (!/-src(?:-elem|-attr)?$/.test(name) && !['base-uri', 'form-action', 'frame-ancestors'].includes(name)) continue;
+    if (!/-src(?:-elem|-attr)?$/.test(name) && !TAURI_REQUIRED.includes(name)) continue;
     for (const source of sources) {
       if (localSource(source)) continue;
       problems.push(
@@ -638,7 +637,6 @@ function checkCsp(where, policy, required = NO_FALLBACK) {
 }
 
 const tauriConf = JSON.parse(readRepoFile('standalone/src-tauri/tauri.conf.json'));
-const TAURI_REQUIRED = [...NO_FALLBACK, 'frame-ancestors'];
 checkCsp('standalone/src-tauri/tauri.conf.json app.security.csp', tauriConf.app?.security?.csp ?? '', TAURI_REQUIRED);
 if (tauriConf.app?.security?.devCsp) checkCsp('standalone/src-tauri/tauri.conf.json app.security.devCsp', tauriConf.app.security.devCsp, TAURI_REQUIRED);
 if (tauriConf.app?.withGlobalTauri) {
