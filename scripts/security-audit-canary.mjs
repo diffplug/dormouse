@@ -26,7 +26,9 @@
  * diff. `Domain:` is the domain that owns what it breaks; `Rule:` names the
  * `FAIL IF` it violates as a result line names one, then ` — ` and a phrase
  * from that rule, or `Class:` the qualitative class; `Expect:` lists the files
- * a catch must cite; `Source:` says where it came from.
+ * a catch must cite; `Source:` says where it came from. An optional
+ * `Severity:` lowers or raises the least finding severity that catches the
+ * seed from WARNING, then ` — ` and why the seed's real severity is that.
  */
 
 import { spawnSync } from 'node:child_process';
@@ -34,15 +36,18 @@ import { createHash } from 'node:crypto';
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { RULE_ID, domains, parseFragment, readFragment, ruleId } from './security-audit-report.mjs';
+import { RULE_ID, SEVERITY_RANK, domains, parseFragment, readFragment, ruleId } from './security-audit-report.mjs';
 
 export const POOL_DIR = '.github/audit/canaries';
 /** The domains a canary runs: the code-reading ones. `ci-and-secrets` reads live GitHub state, which a checkout cannot seed. */
 export const CANARY_DOMAINS = ['supply-chain', 'application-security', 'hosted'];
 /** What the replacement history says, the same on every run. */
 const COMMIT_MESSAGE = 'Audited tree';
-const HEADER_RE = /^(Domain|Rule|Class|Expect|Source): (\S.*)$/;
+const HEADER_RE = /^(Domain|Rule|Class|Expect|Source|Severity): (\S.*)$/;
 const RULE_RE = new RegExp(`^${RULE_ID} — (\\S.*)$`);
+const SEVERITY_RE = new RegExp(`^(${Object.keys(SEVERITY_RANK).join('|')}) — \\S`);
+/** The least finding severity that catches a seed whose header names none. */
+const DEFAULT_SEVERITY = 'WARNING';
 const RUN_URL_RE = /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/actions\/runs\/\d+$/;
 
 // --- The pool ---------------------------------------------------------------
@@ -70,7 +75,9 @@ export function parseSeed(id, text) {
   const expect = (header.Expect ?? '').split(/\s+/).filter(Boolean);
   if (expect.length === 0 || expect.some((f) => !files.includes(f))) throw new Error(`${id}: Expect must name files its diff touches`);
   if (!header.Source) throw new Error(`${id}: no Source`);
-  return { id, domain: header.Domain, rule, class: header.Class ?? null, expect, files, source: header.Source };
+  const severity = header.Severity ? header.Severity.match(SEVERITY_RE)?.[1] : DEFAULT_SEVERITY;
+  if (!severity) throw new Error(`${id}: Severity must read one of ${Object.keys(SEVERITY_RANK).join(', ')}, then — and why`);
+  return { id, domain: header.Domain, rule, class: header.Class ?? null, expect, files, source: header.Source, severity };
 }
 
 /** Every seed in the pool, by id. */
@@ -134,24 +141,30 @@ export function seed({ root = '.', key, count, stash }) {
 // --- Score -------------------------------------------------------------------
 
 /**
- * The lines that can catch a seed: each `FAIL` result and each BLOCKER or
- * WARNING finding, with the text a citation is looked for in.
+ * The lines that can catch a seed: each `FAIL` result and each finding, an
+ * INFO off the grammar included, with the text a citation is looked for in.
  */
 function candidates(name, p) {
   return [
     ...p.results.filter((r) => r.status === 'FAIL').map((r) => ({ fragment: name, kind: 'FAIL', text: r.line,
       rule: ruleId(r.spec, r.heading, r.rule) })),
-    ...p.findings.filter((f) => f.severity !== 'INFO').map((f) => ({ fragment: name, kind: f.severity, text: f.block.join('\n') })),
+    ...p.findings.map((f) => ({ fragment: name, kind: f.severity, text: f.block.join('\n') })),
+    ...p.looseInfo.map((line) => ({ fragment: name, kind: 'INFO', text: line })),
   ];
 }
 
+/** Whether a line is severe enough to catch a seed whose floor is `severity`: a `FAIL` always is. */
+const severeEnough = (line, severity) => line.kind === 'FAIL' || SEVERITY_RANK[line.kind] >= SEVERITY_RANK[severity];
+
 /**
- * Whether one line catches one seed: it cites an expected file, and for a
- * `FAIL IF` seed its rule — a `FAIL` result on that rule, or a finding naming
- * the rule's spec file and quoted heading, as the preamble's root-cause
- * spelling (`security-ci.md "GitHub Actions Policies" #2`) and a result id both do.
+ * Whether one line catches one seed: it is severe enough, it cites an expected
+ * file, and for a `FAIL IF` seed its rule — a `FAIL` result on that rule, or a
+ * finding naming the rule's spec file and quoted heading, as the preamble's
+ * root-cause spelling (`security-ci.md "GitHub Actions Policies" #2`) and a
+ * result id both do.
  */
 function catches(line, s) {
+  if (!severeEnough(line, s.severity)) return false;
   if (!s.expect.some((file) => line.text.includes(file))) return false;
   if (!s.rule) return true;
   return line.kind === 'FAIL'
@@ -161,9 +174,9 @@ function catches(line, s) {
 
 /**
  * The scorecard, from the seeds applied and each canary domain's fragment text
- * (null when absent or empty). `unseeded` counts the lines that could catch a
- * seed and cite no file a seed touched: findings on code no seed changed,
- * which a canary does not file anywhere.
+ * (null when absent or empty). `unseeded` counts the `FAIL` results and
+ * BLOCKER or WARNING findings that cite no file a seed touched: findings on
+ * code no seed changed, which a canary does not file anywhere.
  */
 export function score(seeds, fragments) {
   const parsed = Object.entries(fragments).map(([name, text]) => [name, text === null ? null : parseFragment(text)]);
@@ -171,7 +184,7 @@ export function score(seeds, fragments) {
   const touched = [...new Set(seeds.flatMap((s) => s.files))];
   const results = seeds.map((s) => {
     const by = lines.filter((l) => catches(l, s));
-    return { id: s.id, domain: s.domain, rule: s.rule, class: s.class, expect: s.expect, caught: by.length > 0,
+    return { id: s.id, domain: s.domain, rule: s.rule, class: s.class, expect: s.expect, severity: s.severity, caught: by.length > 0,
       by: by.map((l) => `${l.fragment}: ${l.text.split('\n')[0]}`) };
   });
   const perDomain = Object.fromEntries(CANARY_DOMAINS.map((d) => {
@@ -183,7 +196,7 @@ export function score(seeds, fragments) {
     seeded: results.length,
     caught: results.filter((r) => r.caught).length,
     domains: perDomain,
-    unseeded: lines.filter((l) => !touched.some((file) => l.text.includes(file))).length,
+    unseeded: lines.filter((l) => severeEnough(l, DEFAULT_SEVERITY) && !touched.some((file) => l.text.includes(file))).length,
     unfinished,
     seeds: results,
   };

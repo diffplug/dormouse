@@ -84,8 +84,10 @@ Source of truth: `.github/audit/orchestrator.md`; the fragment contract in `.git
 **Verdicts are computed from the fragments' lines, never read from a conclusion** (rationale). `scripts/security-audit-report.mjs` parses each fragment in the grammar `.github/audit/_preamble.md` fixes:
 
 - **FAIL**: any `FAIL` result or `BLOCKER` finding, malformed or not.
-- **INCONCLUSIVE**: otherwise, an `UNVERIFIABLE` result, an owed rule with no result, a skipped clause letter, a malformed line, a result for a rule not owed, not exactly one `QUALITATIVE: done` line, no sentinel, a first line other than exact `VERDICT: PASS`, no open-findings list, or a PASS passing over an open finding ([Findings ledger](#findings-ledger)).
+- **INCONCLUSIVE**: otherwise, an `UNVERIFIABLE` result, an owed rule with no result, a skipped clause letter, a malformed line other than an `INFO` anomaly (below), a result for a rule not owed, not exactly one `QUALITATIVE: done` line, no sentinel, a first line other than exact `VERDICT: PASS`, no open-findings list, or a PASS passing over an open finding ([Findings ledger](#findings-ledger)).
 - **PASS**: none of these.
+
+**An `INFO` off the grammar is an anomaly, never a doubt**: a line opening exactly `- INFO: ` whose remainder starts like no other line is kept verbatim in the private report and changes no verdict (rationale).
 
 **A domain owes one result per `FAIL IF` rule in the specs its `**Scope` claims**, numbered by position under its heading, so a skipped section is a missing rule. A rule pinned to `scripts/github-state-check.mjs` alone is owed by `audit-github-state.md` instead, which owes every rule that pin names, no `QUALITATIVE` line, and no evidence lines on its findings. A verdict line or `audit-status.txt` that disagrees with the computed verdict is reported as an anomaly; a pessimistic one holds at INCONCLUSIVE, never raising to `FAIL`.
 
@@ -96,7 +98,7 @@ Source of truth: `.github/audit/orchestrator.md`; the fragment contract in `.git
 - **A `FAIL IF` names only a condition an audit run can read**: the readable half is audited, and the rest is staged under `## Future` only while it is unbuilt, otherwise stated beside the rule. `AUDIT_PAT`-readable GitHub state stays audited (rationale).
 
 - **FAIL IF** the `Redact secrets from agent output` step is removed, stops covering any sink later archived or filed (`audit-report.md`, every `AUDIT_FRAGMENTS` fragment, and the transcript), or stops failing closed by deleting those files when the redactor itself throws (rationale). Pinned by `scripts/security-audit.test.mjs`.
-- **FAIL IF** the reporting step takes a verdict from a `VERDICT:` line or `audit-status.txt` over the computed one, reads a stated verdict from a first line other than exact `VERDICT: PASS`, `VERDICT: FAIL`, or `VERDICT: INCONCLUSIVE`, a fragment computes PASS under any INCONCLUSIVE condition above, the manifest is read from anywhere but the claimed specs' `FAIL IF` lines or comes back empty for a fragment or spec it cannot resolve, or a builder that throws hands on anything but INCONCLUSIVE (rationale).
+- **FAIL IF** the reporting step takes a verdict from a `VERDICT:` line or `audit-status.txt` over the computed one, reads a stated verdict from a first line other than exact `VERDICT: PASS`, `VERDICT: FAIL`, or `VERDICT: INCONCLUSIVE`, a fragment computes PASS under any INCONCLUSIVE condition above, an `INFO` line, in the grammar or not, changes a verdict or opens a ledger issue, the manifest is read from anywhere but the claimed specs' `FAIL IF` lines or comes back empty for a fragment or spec it cannot resolve, or a builder that throws hands on anything but INCONCLUSIVE (rationale).
 - **FAIL IF** the private report omits a note for a condition that holds — a failing, missing, unreadable, cut-off, or inconclusive domain, an anomaly, or no status — or any note asserts something about a condition other than its own, or the public issue's domain table omits one (rationale).
 - **FAIL IF** the audit has been weakened in a way no bullet above names — e.g. the prompt no longer requires the qualitative pass, a `FAIL IF` can be ignored, the failure-reporting step that opens a `security-audit-failure` issue and exits non-zero has been removed, or the `AUDIT_PAT` pre-check is removed or bypassed. **This bullet is a judgement item, not a checklist.**
 
@@ -142,7 +144,7 @@ Source of truth: `List open findings`, `Encrypt the audit transcript`, `File emb
 
 ### Findings ledger
 
-**Every run reads the ledger, a PASS included, and only a human closes a ledger issue** (rationale). A ledger issue's title starts `[audit-finding <key>]`: a failure's key hashes its rule's spec, heading, and number; a finding's, its normalized file and the root-cause symbol it names, or its rule where it names none (rationale). A key with no open issue gets one, a PASS's WARNINGs included; one already open gets a `Seen again` comment. Any open `[audit-finding …]` issue counts, a hand-filed `manual-…` key included.
+**Every run reads the ledger, a PASS included, and only a human closes a ledger issue** (rationale). A ledger issue's title starts `[audit-finding <key>]`: a failure's key hashes its rule's spec, heading, and number; a finding's, its normalized file and the root-cause symbol it names, or its rule where it names none (rationale). A key with no open issue gets one, a PASS's WARNINGs included, an `INFO` never; one already open gets a `Seen again` comment. Any open `[audit-finding …]` issue counts, a hand-filed `manual-…` key included.
 
 Before the agent starts, `List open findings` writes the open titles to `audit-open-findings.txt` for the domains to re-verify. A PASS line naming `[audit-finding <key>]` and then a `path:line` re-verifies a failure cited on its rule, or on its heading for a hand-filed citation (rationale).
 
@@ -169,9 +171,10 @@ Source of truth: `Verify AUDIT_PAT is provisioned` in `.github/workflows/securit
 
 1. `seed` applies `CANARY_SEEDS` seeds from `.github/audit/canaries/`, in an order the run id fixes, skipping one that does not apply over those before it; then it deletes the pool and replaces the history with one root commit, so nothing in the checkout tells a seed from the code around it.
 2. The audit's agent runs the code domains over that checkout: `supply-chain`, `application-security`, and `hosted`, handed an empty open-findings list. `ci-and-secrets` reads live GitHub state, which a checkout cannot seed, and the ledger is never read.
-3. `score` counts a seed caught only when a `FAIL` result or a BLOCKER or WARNING finding cites one of its `Expect:` files and, for a seed naming a `FAIL IF`, that rule: the result's rule id, or the finding's spec and heading.
+3. `score` counts a seed caught only when a `FAIL` result, or a finding at or above the seed's catch severity, cites one of its `Expect:` files and, for a seed naming a `FAIL IF`, that rule: the result's rule id, or the finding's spec and heading.
 
 - **A seed re-introduces a vulnerability already fixed on `main`, or a synthetic one, and deletes the test and lint cases that would fail on it**, so the seeded tree passes CI as a regression on `main` has (rationale). Its header is factual and names no finding under embargo.
+- **A seed's catch severity is WARNING unless its `Severity:` header names another**, then ` — ` and why (rationale).
 - The public record is the step summary's line and the `canary-recall` artifact: seeded and caught counts, how many domains left no finished report, and the run link. Reserved: its fields are what scope **audit-canary-publication** reads; add, never rename.
 - Which seeds ran, what caught them, and findings on code no seed touched stay in the `canary-transcript` artifact; a canary files them nowhere.
 - A canary run is a completed run on `main`, so the next scheduled run audits in full ([Skipping an unchanged audit](#skipping-an-unchanged-audit)).
