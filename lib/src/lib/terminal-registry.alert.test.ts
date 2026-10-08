@@ -621,7 +621,7 @@ describe('terminal-registry alert behavior', () => {
     expect(getActivity(id)).toMatchObject({ status: 'BUSY' });
   });
 
-  it('Story 4: completion while still engaged does not ring', () => {
+  it('Story 4: completion while still engaged does not ring, but leaves a TODO', () => {
     const id = 'story-4';
     createSession(id);
     enableAlert(id);
@@ -633,7 +633,7 @@ describe('terminal-registry alert behavior', () => {
 
     expect(getActivity(id)).toMatchObject({
       status: 'NOTHING_TO_SHOW',
-      todo: false,
+      todo: true,
     });
   });
 
@@ -761,7 +761,7 @@ describe('terminal-registry alert behavior', () => {
     });
   });
 
-  it('Story 9: new output pauses an owed ring until quiet or acknowledgement', () => {
+  it('Story 9: new output defers an owed ring until quiet or acknowledgement', () => {
     const id = 'story-9';
     createSession(id);
     enableAlert(id);
@@ -944,7 +944,7 @@ describe('terminal-registry alert behavior', () => {
       entry.terminal.emitInput(input);
       // Written as it came, and not as user input.
       expect(write.mock.calls).toEqual([[id, input]]);
-      // The fake PTY echoes the reply as output. It may pause presentation,
+      // The fake PTY echoes the reply as output. It may defer presentation,
       // but must never acknowledge or discard the owed episode.
       expect(getActivity(id)).toMatchObject({ episode, todo: false });
       advance(5_000);

@@ -202,7 +202,7 @@ describe('AlertManager in isolation', () => {
 
   it('ALERT_RINGING latches through output until acknowledged', () => {
     const id = 'latch-test';
-    // Deferral ships on and pauses a WATCHING ring once output resumes; latching through output is the switched-off timing.
+    // Deferral ships on and defers a WATCHING ring once output resumes; latching through output is the switched-off timing.
     manager.setDeferAlertsUntilQuiet(false);
     runWatchedCommand(id);
 
@@ -602,18 +602,18 @@ describe('AlertManager in isolation', () => {
     expect(manager.getState(id)).toEqual(quiet);
   });
 
-  it('leaves a notification still deferred behind animation pending when dismissed', () => {
-    const id = 'dismiss-keeps-deferral';
+  it('dismisses a ring still deferred behind animation to a TODO', () => {
+    const id = 'dismiss-deferred';
     driveToBusy(manager, id);
     manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'Build finished' });
-    expect(manager.getState(id)).toMatchObject({ status: 'WATCHING_DISABLED', todo: false, notification: null });
+    expect(manager.getState(id)).toMatchObject({ status: 'WATCHING_DISABLED', todo: false });
 
     manager.dismissAlert(id);
 
     vi.advanceTimersByTime(5_000);
     expect(manager.getState(id)).toMatchObject({
-      status: 'ALERT_RINGING',
-      todo: false,
+      status: 'WATCHING_DISABLED',
+      todo: true,
       notification: { source: 'OSC 9', title: null, body: 'Build finished' },
     });
   });
@@ -628,8 +628,8 @@ describe('AlertManager in isolation', () => {
     manager.updateProtocolProgress(id, { state: 'normal', percent: 100 });
     expect(manager.getState(id)).toMatchObject({
       status: 'WATCHING_DISABLED',
-      todo: false,
-      notification: null,
+      todo: true,
+      notification: { source: 'OSC 9;4', title: 'Progress complete' },
     });
   });
 
@@ -641,8 +641,8 @@ describe('AlertManager in isolation', () => {
 
     expect(manager.getState(id)).toMatchObject({
       status: 'WATCHING_DISABLED',
-      todo: false,
-      notification: null,
+      todo: true,
+      notification: { source: 'OSC 777', title: 'done', body: 'Build finished' },
     });
   });
 
@@ -657,8 +657,8 @@ describe('AlertManager in isolation', () => {
 
     expect(manager.getState(id)).toMatchObject({
       status: 'OSC_NOTIF_BUSY',
-      todo: false,
-      notification: null,
+      todo: true,
+      notification: { source: 'OSC 777' },
     });
   });
 
@@ -672,8 +672,8 @@ describe('AlertManager in isolation', () => {
 
     expect(manager.getState(id)).toMatchObject({
       status: 'WATCHING_DISABLED',
-      todo: false,
-      notification: null,
+      todo: true,
+      notification: { source: 'BEL' },
     });
   });
 
@@ -780,7 +780,7 @@ describe('AlertManager in isolation', () => {
     });
   });
 
-  it('clears a command-exit watch on an engaged PTY exit, leaving dropping the held exit', () => {
+  it('clears a command-exit watch on an engaged PTY exit, leaving the held exit as TODO', () => {
     const id = 'command-exit-pty-exit-unarmed';
 
     engage(manager, id);
@@ -791,8 +791,8 @@ describe('AlertManager in isolation', () => {
 
     expect(manager.getState(id)).toMatchObject({
       status: 'WATCHING_DISABLED',
-      todo: false,
-      notification: null,
+      todo: true,
+      notification: { source: 'COMMAND_EXIT' },
     });
   });
 
@@ -817,21 +817,22 @@ describe('AlertManager in isolation', () => {
     });
 
     it.each([
-      ['presence lapses idle, ringing it', () => {}, true],
-      ['focus moves to another pane, dropping it', () => engage(manager, 'another-pane'), false],
-      ['the window leaves, dropping it', () => leave(manager), false],
-      ['the user types, dropping it', (id: string) => manager.acknowledge(id, { input: true }), false],
-    ] as const)('finished while engaged, is held until %s', (_how, end, rings) => {
+      ['presence lapses idle, ringing it', () => {}, true, true],
+      ['focus moves to another pane, leaving its TODO', () => engage(manager, 'another-pane'), false, true],
+      ['the window leaves, leaving its TODO', () => leave(manager), false, true],
+      ['the user types, clearing it', (id: string) => manager.acknowledge(id, { input: true }), false, false],
+    ] as const)('finished while engaged, is held as TODO until %s', (_how, end, rings, todo) => {
       const id = `short-exit-engaged-${_how}`;
       engage(manager, id);
       runCommand(manager, id, 'sleep 10');
       finishAfterTenSeconds(id);
-      expect(manager.getState(id)).toMatchObject({ status: 'WATCHING_DISABLED', notification: null });
+      expect(manager.getState(id)).toMatchObject({ status: 'WATCHING_DISABLED', todo: true, notification: { source: 'COMMAND_EXIT' } });
 
       end(id);
       // The lapse that rings a hold finds nothing once a hold is dropped.
       goIdle(manager, id);
       expect(manager.getState(id).status === 'ALERT_RINGING').toBe(rings);
+      expect(manager.getState(id).todo).toBe(todo);
     });
   });
 
@@ -847,8 +848,8 @@ describe('AlertManager in isolation', () => {
     finishCommand(manager, id);
     expect(manager.getState(id)).toMatchObject({
       status: 'WATCHING_DISABLED',
-      todo: false,
-      notification: null,
+      todo: true,
+      notification: { source: 'COMMAND_EXIT' },
     });
   });
 
@@ -1098,12 +1099,12 @@ describe('AlertManager in isolation', () => {
     expect(manager.getState(id).status).toBe('BUSY');
 
     settle();
-    // The user is looking: no ring yet, and the detector simply starts over.
+    // The user is looking: a TODO, no ring yet, and the detector simply starts over.
     expect(manager.getState(id)).toMatchObject({
       status: 'NOTHING_TO_SHOW',
       watchingEnabled: true,
-      todo: false,
-      notification: null,
+      todo: true,
+      notification: { source: 'WATCHING' },
     });
   });
 
@@ -1148,7 +1149,7 @@ describe('AlertManager in isolation', () => {
     driveToBusy(manager, id);
 
     manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'Done' });
-    expect(manager.getState(id)).toMatchObject({ todo: false, notification: null });
+    expect(manager.getState(id)).toMatchObject({ status: 'WATCHING_DISABLED', todo: false });
 
     vi.advanceTimersByTime(5_000);
     expect(manager.getState(id)).toMatchObject({ status: 'ALERT_RINGING', todo: false });
@@ -1165,7 +1166,7 @@ describe('AlertManager in isolation', () => {
       manager.onData('one-chunk');
       manager.notifyFromProtocol('one-chunk', REPORT);
       vi.advanceTimersByTime(4_999);
-      expect(manager.getState('one-chunk').episode).toBeNull();
+      expect(manager.getState('one-chunk').status).not.toBe('ALERT_RINGING');
       vi.advanceTimersByTime(1);
       expect(manager.getState('one-chunk')).toMatchObject({ status: 'ALERT_RINGING', notification: REPORT });
     });
@@ -1177,11 +1178,7 @@ describe('AlertManager in isolation', () => {
       expect(manager.getState(id).status).toBe('WATCHING_DISABLED');
 
       manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'Done' });
-      expect(manager.getState(id)).toMatchObject({
-        status: 'WATCHING_DISABLED',
-        todo: false,
-        notification: null,
-      });
+      expect(manager.getState(id)).toMatchObject({ status: 'WATCHING_DISABLED', todo: false });
 
       vi.advanceTimersByTime(4_999);
       expect(manager.getState(id).status).toBe('WATCHING_DISABLED');
@@ -1284,13 +1281,9 @@ describe('AlertManager in isolation', () => {
       manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'Done' });
 
       // This unarmed command finish resets the detector but is not itself an
-      // alert; the pending terminal notification still owns its quiet deadline.
+      // alert; the deferred ring still waits for its quiet deadline.
       finishCommand(manager, id);
-      expect(manager.getState(id)).toMatchObject({
-        status: 'WATCHING_DISABLED',
-        todo: false,
-        notification: null,
-      });
+      expect(manager.getState(id)).toMatchObject({ status: 'WATCHING_DISABLED', todo: false });
 
       vi.advanceTimersByTime(5_000);
       expect(manager.getState(id)).toMatchObject({
@@ -1300,7 +1293,7 @@ describe('AlertManager in isolation', () => {
       });
     });
 
-    it('cancels deferred delivery when the user acknowledges', () => {
+    it('turns a deferred ring into a TODO when the user acknowledges', () => {
       const id = 'defer-acknowledged';
       driveToBusy(manager, id);
       manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'Done' });
@@ -1309,8 +1302,9 @@ describe('AlertManager in isolation', () => {
       vi.advanceTimersByTime(60_000);
       expect(manager.getState(id)).toMatchObject({
         status: 'WATCHING_DISABLED',
-        todo: false,
-        notification: null,
+        episode: null,
+        todo: true,
+        notification: { source: 'OSC 9', title: null, body: 'Done' },
       });
     });
 
@@ -1345,7 +1339,7 @@ describe('AlertManager in isolation', () => {
       heartbeat(manager, id, 20_000);
       manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'Second' });
       heartbeat(manager, id, 60_000);
-      expect(manager.getState(id).notification).toBeNull();
+      expect(manager.getState(id).status).not.toBe('ALERT_RINGING');
       vi.advanceTimersByTime(5_000);
       expect(manager.getState(id)).toMatchObject({
         status: 'ALERT_RINGING',
@@ -1487,8 +1481,8 @@ describe('AlertManager in isolation', () => {
       }]);
       expect(manager.getState(id)).toMatchObject({
         status: 'WATCHING_DISABLED',
-        todo: false,
-        notification: null,
+        todo: true,
+        notification: { source: 'COMMAND_EXIT' },
       });
     });
 

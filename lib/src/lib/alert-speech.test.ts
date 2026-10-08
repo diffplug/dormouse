@@ -137,7 +137,7 @@ describe('toSpokenText', () => {
  * (`alert-delivery-scheduler.test.ts`).
  */
 describe('spoken alarms', () => {
-  it('keeps a paused queued alarm while allowing another pane to speak', () => {
+  it('keeps a deferred queued alarm while allowing another pane to speak', () => {
     ringTwoWithFirstSpeaking();
     const second = getActivity('pty-2');
     setTerminalActivity('pty-2', { ...second, status: 'BUSY' });
@@ -176,7 +176,7 @@ describe('spoken alarms', () => {
     expect(getAlertSpeechState('pty-1')).toBe('speaking');
   });
 
-  it('cuts started speech on a pause without replaying it after quiet', () => {
+  it('cuts started speech on a deferral without replaying it after quiet', () => {
     start();
     ring('pty-1');
     const state = getActivity('pty-1');
@@ -190,7 +190,7 @@ describe('spoken alarms', () => {
     expect(getAlertSpeechState('pty-1')).toBe('spoken');
   });
 
-  it('drops paused preparation on acknowledgement instead of restoring it later', () => {
+  it('drops deferred preparation on acknowledgement instead of restoring it later', () => {
     start();
     ring('pty-1');
     const state = getActivity('pty-1');
@@ -473,7 +473,7 @@ describe('spoken alarms', () => {
     expect(engine.utterances.every(utterance => utterance.onend === null)).toBe(true);
   });
 
-  it('returns paused preparation to a full queue and speaks it after quiet', () => {
+  it('returns deferred preparation to a full queue and speaks it after quiet', () => {
     start();
     for (let i = 0; i < 66; i++) ring(`pty-${i}`);
     const first = getActivity('pty-0');
