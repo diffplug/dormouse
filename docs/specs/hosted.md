@@ -35,7 +35,7 @@ Source of truth: `WORKERS` in `hosted/scripts/workers.mjs`; `workerApp` in `host
 
 **Must identify accounts by immutable user ID, never email.** Provider-only accounts keep their identity when a provider subsequently supplies email. Exceptions: `ADMIN_EMAIL` ("Managed voice") and `SIGN_IN_ALLOWLIST` (below).
 
-**Must sign in only `SIGN_IN_ALLOWLIST`'s verified emails, in production, until launch.** A request naming another email is refused before a code is sent or an account created; on a GET, which every read of a login is, a login whose user is not a listed verified email has all its user's logins deleted before the auth handler answers. Signed out, the frontend shows its pre-launch notice instead of the sign-in form unless the URL carries `?signin`. The test entry runs without the gate; previews and local development keep it off. Ends at launch (Future item 4).
+**Must sign in only `SIGN_IN_ALLOWLIST`'s verified emails, in production, until launch.** A request naming another email is refused before a code is sent or an account created; on a GET, which every read of a login is, a login whose user is not a listed verified email has all its user's logins deleted before the auth handler answers. Signed out, the frontend shows its pre-launch notice instead of the sign-in form unless the URL carries `?signin` or a failed callback's `?error`. The test entry runs without the gate; previews and local development keep it off. Ends at launch (Future item 4).
 
 **Must enable providers explicitly in `OAUTH_PROVIDERS`.** The allowed set is GitHub, Google, Microsoft, and Apple. Missing paired credentials or unknown names fail closed; unused credentials enable nothing. Email uses Postmark in production and local capture in development.
 
@@ -191,6 +191,8 @@ sequenceDiagram
     end
   end
 ```
+
+Pre-launch, a signed-out visitor to `verificationUrl` is sent to the devlog instead of signing in, and the code is lost, unless the link carries `?signin` (`/enroll?signin#<userCode>`); "Identity and login" owns the gate.
 
 Begin answers another origin, or none, with the self-host 409 `ORIGIN_MISMATCH_ERROR`. `userCode` is `XXXX-XXXX`; `verificationUrl` is `ACCOUNT_ORIGIN/enroll#<userCode>`, absent without `ACCOUNT_ORIGIN`; `expiresAt` is `ENROLLMENT_TTL_MS` (10 minutes) out; `interval` is 5 seconds. `enrolled` is the self-host `BurrowEnrollResponse`, `origin` the relay's `APP_ORIGIN` and `rpId` its hostname, without `requireUserVerification`. `redeemed` answers until the approval expires, so the Burrow can name what the account must remove. The 409 names `ACCOUNT_ORIGIN/account` at `MAX_ENROLLED_BURROWS` Burrows.
 

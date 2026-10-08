@@ -57,11 +57,13 @@ async function recordContinued() {
 }
 
 // Pre-launch: a signed-out visitor is sent to the devlog's email signup
-// instead of the sign-in form; `/login?signin` still opens it. Delete this,
-// and its use below, at launch.
+// instead of the sign-in form; `/login?signin` still opens it, as does a
+// failed provider callback's `?error`, which only a sign-in started there
+// reaches, so its message shows. Delete this, and its use below, at launch.
 const SUBSCRIBE_URL = "https://nedshed.dev/subscribe";
 const SUBSCRIBE_REDIRECT_MS = 4000;
-const SIGN_IN_OPEN = new URLSearchParams(location.search).has("signin");
+const SIGN_IN_PARAMS = new URLSearchParams(location.search);
+const SIGN_IN_OPEN = SIGN_IN_PARAMS.has("signin") || SIGN_IN_PARAMS.has("error");
 
 export function App({ enrollment }: { enrollment: Enrollment | null }) {
   const [session, setSession] = useState<Session | null>(null);
