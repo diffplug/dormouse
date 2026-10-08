@@ -32,15 +32,11 @@
 
 **Why a service worker.** A built-in viewer is a server its page reaches by relative `fetch`; a browser page has no loopback listener, and a `srcdoc` or `blob:` frame breaks the pages' relative URLs and the Monaco worker, which would mean patching the editors. Scoping a worker to `/playground-fs/` serves the unchanged pages at real http(s) URLs. It keeps no token map because an idle worker is stopped and restarted at will; asking the windows costs one `MessageChannel` round trip per request.
 
-## Runner-local intercepts
-
-**Why the demos' OSCs are invisible.** `FakePtyAdapter.sendOutput` runs its bytes through the real `TerminalProtocolParser`, which consumes the `OSC 633` sequences instead of printing them, so a demo can report shell integration into a pane whose alt-screen TUI is mid-draw without corrupting the frame.
-
-**Why `s` pumps only `tut-boxed`.** `tut-splash` animates continuously and so is never silent; only the quiet pane needs pumping for WATCHING's silence chain to be worth watching.
-
-**Why the `x` demo uses an unwatched command name.** WATCHING and a command exit both raise the ring, so a watched name would leave the user unable to tell which fired. `slowbuild` sits outside the WATCHING rule set, leaving the command exit as the only source — and command-exit alerting arms only once the user has clicked into the pane and left it, which is what the demo asks for.
-
 ## Fake shell behavior
+
+**Why the Alerts section runs real commands.** It used to teach tutorial-only keys: `s`, `n`, and `x` reported fake commands onto the changelog and `ascii-splash` panes. A `Build finished` notification rang the changelog viewer, the `longtask` reported on `ascii-splash` could never go quiet because that pane animates forever, and one ring ticked unrelated items (2026-10-08). Running `agent` and `build` in a pane the user split teaches the real habit — start work, look elsewhere, get summoned — and each ring has the cause its item names.
+
+**Why `build` stays unwatched and `agent --quiet` leans on the default rule.** WATCHING and a command exit both raise the ring, so a watched `build` would blur which one rang. `agent` is a default rule (Cursor's CLI), so the quiet agent shows WATCHING with no setup, which is how a user first meets it.
 
 **Why shell integration is mandatory rather than nice-to-have.** A playground pane emitting no `OSC 633` would report "No command running" for every alert — including the pane hosting the tutorial itself, leaving the alert section with nothing to demonstrate. Reporting them also makes every playground pane OSC-driven, which is what keeps `docs/specs/terminal-state.md`'s keystroke fallback from engaging there.
 
@@ -48,6 +44,6 @@
 
 **Why `move` is emitted from two call sites.** The Cmd/Ctrl-Arrow swap and the center-drop swap are separate code paths producing the same user-visible result; emitting from only one would make an event consumer — the tutorial detector first among them — credit the item for a keyboard swap but not a drag.
 
-**What `sendOutput` is for.** The only way the alert demos can fake shell integration and a program-sent notification with no real shell behind the pane.
+**What `sendOutput` is for.** It is the playground shells' output path: bytes go through the real parser, so the alert programs' `OSC 633` and `OSC 9` reach the Activity layer as a real PTY's would.
 
 **Why the theme subscription backs the opening ask.** Picking a theme needs no command-mode vocabulary ([Profiles](#profiles)); the picker remains operable through ordinary keyboard focus. Comparing consecutive theme ids also keeps the achievement repeatable after progress is reset.
