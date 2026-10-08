@@ -2,11 +2,12 @@
  * This window's Surface id counter (docs/specs/vscode.md → "Surface id
  * minting"): every webview here reserves `surface-<n>` blocks from it.
  *
- * Its high-water mark lives in `surface-ids.json` as a ceiling no handed-out
- * number has reached, mirroring standalone's `ids.rs`. A reservation that would
- * reach it first re-reads the file — empty windows share `globalStorageUri`, and
- * another may have raised it — then raises it by a slack and writes it before
- * handing anything out, so a later run starting at the ceiling reuses nothing.
+ * Its next number lives in `surface-ids.json`, which no handed-out number has
+ * reached, mirroring standalone's `ids.rs`. Every reservation re-reads the
+ * file — empty windows share `globalStorageUri`, and another may have moved it
+ * — then writes the end of its block there before handing anything out, so a
+ * later run starting there reuses nothing and skips nothing: no slack, since a
+ * ref is the number and webviews reserve a few ids at a time.
  */
 
 import { readFile } from 'node:fs/promises';
@@ -18,7 +19,6 @@ import { log } from './log';
 
 const FILE = 'surface-ids.json';
 const VERSION = 1;
-const SLACK = 1024;
 const MAX_BLOCK = 64;
 
 export interface SurfaceIdAllocator {
@@ -34,13 +34,11 @@ export function createSurfaceIdAllocator(dir: string | null, logger: AllocatorLo
   const file = dir === null ? null : path.join(dir, FILE);
   /** The lowest number not yet handed out. */
   let next = 1;
-  /** No number handed out reaches this; persisted before one would. */
-  let ceiling = 0;
-  // One at a time: a raise awaits the file, and the next reservation must see
-  // the ceiling it wrote.
+  // One at a time: a reservation awaits the file, and the next must see the
+  // number it wrote.
   const serialize = createSerialQueue();
 
-  async function persistedCeiling(): Promise<number> {
+  async function persistedNext(): Promise<number> {
     if (file === null) return 0;
     try {
       const parsed: unknown = JSON.parse(await readFile(file, 'utf8'));
@@ -56,22 +54,16 @@ export function createSurfaceIdAllocator(dir: string | null, logger: AllocatorLo
   async function reserveNow(count: number, floor: number): Promise<string[]> {
     const n = Math.max(1, Math.min(MAX_BLOCK, Math.trunc(count) || 1));
     const above = Number.isSafeInteger(floor) && floor > 0 ? floor : 0;
-    let first = Math.max(next, above + 1);
-    if (first + n > ceiling) {
-      // Numbers below a ceiling this counter did not write belong to another
-      // window or an earlier run.
-      const persisted = await persistedCeiling();
-      if (persisted > ceiling) first = Math.max(first, persisted);
-      ceiling = first + n + SLACK;
-      if (file !== null) {
-        try {
-          await writeJsonAtomic(path.dirname(file), file, { version: VERSION, surface: ceiling });
-        } catch (error) {
-          logger.error(`[surface-ids] write ${file}: ${String(error)}; the counter stays in memory`);
-        }
+    // Numbers below the persisted one belong to another window or an earlier run.
+    const first = Math.max(next, above + 1, await persistedNext());
+    next = first + n;
+    if (file !== null) {
+      try {
+        await writeJsonAtomic(path.dirname(file), file, { version: VERSION, surface: next });
+      } catch (error) {
+        logger.error(`[surface-ids] write ${file}: ${String(error)}; the counter stays in memory`);
       }
     }
-    next = first + n;
     return Array.from({ length: n }, (_, i) => surfaceIdFor(first + i));
   }
 

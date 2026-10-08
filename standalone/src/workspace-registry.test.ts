@@ -73,14 +73,14 @@ describe("workspace registry", () => {
       ],
     };
     uninstall = await installWorkspaceRegistry(h, restored);
-    expect(h.invoke).toHaveBeenCalledWith("surface_reserve_ids", { count: 64, floor: 1500 });
+    expect(h.invoke).toHaveBeenCalledWith("surface_reserve_ids", { count: 8, floor: 1500 });
     expect(mintSurfaceId()).toBe("surface-1501");
   });
 
   it("mints from the host's block and reports the store once per change, coalesced", async () => {
     const h = host();
     uninstall = await installWorkspaceRegistry(h, null);
-    expect(h.invoke).toHaveBeenCalledWith("workspace_reserve_ids", { count: 32 });
+    expect(h.invoke).toHaveBeenCalledWith("workspace_reserve_ids", { count: 4 });
     expect(generateWorkspaceId()).toBe("workspace-50");
     await Promise.resolve();
     // The boot report: the store as it stood at install.

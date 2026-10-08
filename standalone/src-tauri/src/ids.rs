@@ -2,11 +2,14 @@
 //! numbers (`workspace-<n>`), and window labels (`ws-<n>`)
 //! (`docs/specs/standalone.md` → "Workspace registry").
 //!
-//! Each counter keeps a durable ceiling in `ids.json` that no handed-out
-//! number has reached. A reservation that would reach it first raises it by a
-//! slack and hands the caller the file to write, so the file is written once
-//! per slack's worth of numbers, and a relaunch starting at the ceiling never
-//! reuses a number whatever closed since the last write.
+//! Each counter's next number persists in `ids.json`. Every reservation hands
+//! the caller the file to write before any number in the block is used, so a
+//! relaunch starting there never reuses a number whatever closed since, and
+//! never skips one it did not hand out: a ref is the number, so numbers stay
+//! as dense as the creates behind them. No slack past the block, as a hi/lo
+//! ceiling would add: every relaunch's numbering jumped by the slack. The
+//! write per reservation is affordable because the webviews reserve a few ids
+//! at a time, at the pace of user creates.
 //!
 //! Pure over its own state, like `workspaces`; `lib.rs` holds the lock and
 //! writes the file.
@@ -55,34 +58,18 @@ impl Kind {
     pub fn id(self, n: u64) -> String {
         format!("{}{n}", self.prefix())
     }
-
-    /// How far past a reservation a ceiling raise reaches, sized to how often
-    /// each kind is minted.
-    fn slack(self) -> u64 {
-        match self {
-            Kind::Surface => 1024,
-            Kind::Workspace => 64,
-            Kind::Window => 16,
-        }
-    }
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-struct Counter {
-    /// The lowest number not yet handed out or seen.
-    next: u64,
-    /// No number handed out reaches this; persisted before one would.
-    ceiling: u64,
-}
-
+/// Each kind's lowest number not yet handed out or seen.
 #[derive(Debug, Default)]
 pub struct Counters {
-    surface: Counter,
-    workspace: Counter,
-    window: Counter,
+    surface: u64,
+    workspace: u64,
+    window: u64,
 }
 
-/// The persisted form: each kind's ceiling.
+/// The persisted form: each kind's next number, which no number handed out
+/// reaches.
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct File {
     version: u64,
@@ -92,7 +79,7 @@ struct File {
 }
 
 impl Counters {
-    fn counter(&mut self, kind: Kind) -> &mut Counter {
+    fn next(&mut self, kind: Kind) -> &mut u64 {
         match kind {
             Kind::Surface => &mut self.surface,
             Kind::Workspace => &mut self.workspace,
@@ -103,59 +90,39 @@ impl Counters {
     /// Never hand out a number below `next`: every number a previous run left
     /// on disk, or a window reported, sits below it.
     pub fn seed(&mut self, kind: Kind, next: u64) {
-        let counter = self.counter(kind);
-        counter.next = counter.next.max(next);
+        let counter = self.next(kind);
+        *counter = (*counter).max(next);
     }
 
-    /// Adopt a persisted file's ceilings as starting points: nothing at or
+    /// Adopt a persisted file's numbers as starting points: nothing at or
     /// above one was handed out, so starting there reuses nothing.
     pub fn load(&mut self, contents: &str) -> Result<(), String> {
         let file: File = serde_json::from_str(contents).map_err(|e| format!("unreadable {FILE}: {e}"))?;
         if file.version != VERSION {
             return Err(format!("{FILE} has version {}, expected {VERSION}", file.version));
         }
-        for (kind, ceiling) in [
-            (Kind::Surface, file.surface),
-            (Kind::Workspace, file.workspace),
-            (Kind::Window, file.window),
-        ] {
-            let counter = self.counter(kind);
-            counter.next = counter.next.max(ceiling);
-            counter.ceiling = counter.ceiling.max(ceiling);
-        }
+        self.seed(Kind::Surface, file.surface);
+        self.seed(Kind::Workspace, file.workspace);
+        self.seed(Kind::Window, file.window);
         Ok(())
     }
 
-    /// Hand out `count` numbers of `kind`, all above `above`. When the block
-    /// reaches the ceiling, the ceiling rises and the returned file contents
-    /// must be written before any number in the block is used.
-    pub fn reserve(&mut self, kind: Kind, count: u64, above: u64) -> (Range<u64>, Option<String>) {
-        let counter = self.counter(kind);
-        let first = counter.next.max(kind.first()).max(above.saturating_add(1));
+    /// Hand out `count` numbers of `kind`, all above `above`, with the file
+    /// contents that must be written before any number in the block is used.
+    pub fn reserve(&mut self, kind: Kind, count: u64, above: u64) -> (Range<u64>, String) {
+        let counter = self.next(kind);
+        let first = (*counter).max(kind.first()).max(above.saturating_add(1));
         let end = first.saturating_add(count);
-        counter.next = end;
-        if end <= counter.ceiling {
-            return (first..end, None);
-        }
-        counter.ceiling = end.saturating_add(kind.slack());
-        // Every other kind at its ceiling rises in the same write, so a boot's
-        // first reservation of each kind costs one write, not one per kind.
-        for other in [Kind::Surface, Kind::Workspace, Kind::Window] {
-            let counter = self.counter(other);
-            let next = counter.next.max(other.first());
-            if next >= counter.ceiling {
-                counter.ceiling = next.saturating_add(other.slack());
-            }
-        }
-        (first..end, Some(self.file()))
+        *counter = end;
+        (first..end, self.file())
     }
 
     fn file(&self) -> String {
         serde_json::to_string(&File {
             version: VERSION,
-            surface: self.surface.ceiling,
-            workspace: self.workspace.ceiling,
-            window: self.window.ceiling,
+            surface: self.surface,
+            workspace: self.workspace,
+            window: self.window,
         })
         .expect("plain numbers serialize")
     }
@@ -206,35 +173,33 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    fn ceilings(file: &str) -> JsonValue {
+    fn persisted(file: &str) -> JsonValue {
         serde_json::from_str(file).unwrap()
     }
 
     #[test]
-    fn a_block_reaching_the_ceiling_raises_it_past_the_block_and_asks_for_a_write() {
+    fn every_block_asks_to_persist_exactly_its_end() {
         let mut counters = Counters::default();
-        let (block, file) = counters.reserve(Kind::Workspace, 64, 0);
-        assert_eq!(block, 2..66);
-        let file = ceilings(&file.expect("the first block reaches the zero ceiling"));
+        let (block, file) = counters.reserve(Kind::Workspace, 4, 0);
+        assert_eq!(block, 2..6);
+        let file = persisted(&file);
         assert_eq!(file["version"], 1);
-        assert_eq!(file["workspace"], 66 + 64);
-        // Below the raised ceiling: no write.
-        assert_eq!(counters.reserve(Kind::Workspace, 64, 0), (66..130, None));
+        assert_eq!(file["workspace"], 6);
         let (block, file) = counters.reserve(Kind::Workspace, 1, 0);
-        assert_eq!(block, 130..131);
-        assert_eq!(ceilings(&file.unwrap())["workspace"], 131 + 64);
+        assert_eq!(block, 6..7);
+        assert_eq!(persisted(&file)["workspace"], 7);
     }
 
     #[test]
-    fn one_write_raises_every_kind_at_its_ceiling() {
+    fn a_loaded_file_resumes_where_it_left_off_and_every_write_carries_each_kind() {
         let mut counters = Counters::default();
         counters.load(r#"{"version":1,"surface":500,"workspace":40,"window":9}"#).unwrap();
-        let (block, file) = counters.reserve(Kind::Surface, 64, 0);
-        assert_eq!(block, 500..564);
-        let file = ceilings(&file.expect("a loaded ceiling is reached at once"));
-        assert_eq!((file["surface"].as_u64(), file["workspace"].as_u64(), file["window"].as_u64()), (Some(564 + 1024), Some(40 + 64), Some(9 + 16)));
-        assert_eq!(counters.reserve(Kind::Workspace, 32, 0), (40..72, None));
-        assert_eq!(counters.reserve(Kind::Window, 1, 0), (9..10, None));
+        let (block, file) = counters.reserve(Kind::Surface, 8, 0);
+        assert_eq!(block, 500..508);
+        let file = persisted(&file);
+        assert_eq!((file["surface"].as_u64(), file["workspace"].as_u64(), file["window"].as_u64()), (Some(508), Some(40), Some(9)));
+        assert_eq!(counters.reserve(Kind::Workspace, 4, 0).0, 40..44);
+        assert_eq!(counters.reserve(Kind::Window, 1, 0).0, 9..10);
     }
 
     #[test]

@@ -86,7 +86,7 @@ async function runCloseTeardown(): Promise<void> {
 }
 
 async function pushReopenRecord(): Promise<void> {
-  const snapshot = windowReopenSnapshot();
+  const snapshot = await windowReopenSnapshot();
   if (snapshot) await invoke("push_closed_window", { snapshot: JSON.stringify(snapshot), closedAt: Date.now() });
 }
 

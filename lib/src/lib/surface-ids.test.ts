@@ -1,17 +1,19 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { installSurfaceIdPool, maxSurfaceNumber, mintSurfaceId, resetSurfaceIdPool } from './surface-ids';
+import { installSurfaceIdPool, maxSurfaceNumber, mintSurfaceId, resetSurfaceIdPool, surfaceIdMinter } from './surface-ids';
 import type { PersistedSession } from './session-types';
 import { registry, type TerminalEntry } from './terminal-store';
 import { registerWallHandle, stubWallHandle } from '../components/wall/wall-handles';
 
-/** A host counter from `start`, honoring the floor as Rust does. */
+/** A host counter from `start`, honoring the floor and clamping a block to 64
+ *  as Rust does. */
 function counting(start: number) {
   let next = start;
   return vi.fn(async (count: number, floor: number) => {
+    const n = Math.min(count, 64);
     next = Math.max(next, floor + 1);
     const first = next;
-    next += count;
-    return Array.from({ length: count }, (_, i) => `surface-${first + i}`);
+    next += n;
+    return Array.from({ length: n }, (_, i) => `surface-${first + i}`);
   });
 }
 
@@ -22,23 +24,25 @@ describe('mintSurfaceId', () => {
     expect([mintSurfaceId(), mintSurfaceId(), mintSurfaceId()]).toEqual(['surface-1', 'surface-2', 'surface-3']);
   });
 
-  it('mints from the host pool once one is installed, refilling in the background', async () => {
+  it('mints from a small host pool once one is installed, topping it up in the background', async () => {
     const reserve = counting(500);
     await installSurfaceIdPool(reserve, 0);
-    expect(reserve).toHaveBeenCalledWith(64, 0);
+    expect(reserve).toHaveBeenCalledWith(8, 0);
     expect(mintSurfaceId()).toBe('surface-500');
-    // Draining past the low-water mark refills before the pool runs dry.
-    for (let i = 0; i < 48; i++) mintSurfaceId();
+    // Draining past the low-water mark refills before the pool runs dry, back
+    // up to the pool's size and no further: what it holds at exit is burned.
+    for (let i = 0; i < 5; i++) mintSurfaceId();
     await Promise.resolve();
     expect(reserve).toHaveBeenCalledTimes(2);
-    for (let i = 0; i < 15; i++) mintSurfaceId();
-    expect(mintSurfaceId()).toBe('surface-564');
+    expect(reserve).toHaveBeenLastCalledWith(6, 0);
+    for (let i = 0; i < 2; i++) mintSurfaceId();
+    expect(mintSurfaceId()).toBe('surface-508');
   });
 
   it('names the restored floor in every reservation', async () => {
     const reserve = counting(1);
     await installSurfaceIdPool(reserve, 41);
-    expect(reserve).toHaveBeenCalledWith(64, 41);
+    expect(reserve).toHaveBeenCalledWith(8, 41);
     expect(mintSurfaceId()).toBe('surface-42');
   });
 
@@ -63,6 +67,24 @@ describe('mintSurfaceId', () => {
       registry.delete('surface-1');
       unregister();
     }
+  });
+});
+
+describe('surfaceIdMinter', () => {
+  it('has a burst larger than the pool in hand, past the host\'s block clamp', async () => {
+    const reserve = counting(1);
+    await installSurfaceIdPool(reserve, 0);
+    const mint = await surfaceIdMinter(100);
+    const burst = Array.from({ length: 100 }, () => mint());
+    expect(burst).toEqual(Array.from({ length: 100 }, (_, i) => `surface-${i + 1}`));
+    // The pool refilled behind the burst, and past it the minter falls back to it.
+    await Promise.resolve();
+    expect(mint()).toBe('surface-101');
+  });
+
+  it('counts in the page when no host mints', async () => {
+    const mint = await surfaceIdMinter(2);
+    expect([mint(), mint(), mintSurfaceId()]).toEqual(['surface-1', 'surface-2', 'surface-3']);
   });
 });
 

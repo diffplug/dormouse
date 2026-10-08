@@ -10,7 +10,11 @@ import { registry } from './terminal-store';
  * counts on its own.
  */
 
-const pool = createIdPool(64, 16, 'surface-ids');
+// Small, so a launch burns at most 8 numbers (see `createIdPool`). Surfaces are
+// created at the user's pace — a keystroke, a click, a `dor` process each — and
+// a refill is one host round trip of a few ms, so refilling below 3 keeps the
+// pool ahead; a burst that mints more at once reserves through `surfaceIdMinter`.
+const pool = createIdPool(8, 3, 'surface-ids');
 let localSequence = 0;
 /** Whether a Wall in this page holds an id; `wall-handles.ts` installs it, since
  *  this module sits below the components. */
@@ -41,15 +45,28 @@ function nextId(): string {
   return pool.take() ?? `surface-${crypto.randomUUID()}`;
 }
 
-/** A new Surface id. One a Session or Wall in this page already holds is
- *  skipped, and logged: a host's counter never produces one, but the page's
+/** The first id from `next` no Session or Wall in this page already holds; a
+ *  skipped one is logged: a host's counter never produces one, but the page's
  *  own counter starts at `surface-1` whatever this page restored. */
-export function mintSurfaceId(): string {
+function mintFrom(next: () => string): string {
   for (;;) {
-    const id = nextId();
+    const id = next();
     if (!registry.has(id) && !wallOwns(id)) return id;
     console.error(`[surface-ids] skipping ${id}, which is already in use`);
   }
+}
+
+/** A new Surface id. */
+export function mintSurfaceId(): string {
+  return mintFrom(nextId);
+}
+
+/** A synchronous minter for `count` Surfaces created at once (a Reopen remaps a
+ *  whole Workspace or window), with every id in hand once it resolves, so a
+ *  burst larger than the pool still mints numbered ids. */
+export async function surfaceIdMinter(count: number): Promise<() => string> {
+  const next = await pool.minter(count, nextId);
+  return () => mintFrom(next);
 }
 
 /** The highest `surface-<n>` number among `sessions`' Surfaces, else 0. */

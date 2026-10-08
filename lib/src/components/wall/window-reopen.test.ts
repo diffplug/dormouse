@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createWorkspace, resetWorkspaces, getWorkspacesSnapshot, setWorkspacePinned } from '../../lib/workspace-store';
+import { createWorkspace, installWorkspaceIdPool, resetWorkspaceIdPool, resetWorkspaces, getWorkspacesSnapshot, setWorkspacePinned } from '../../lib/workspace-store';
 import type { PersistedSession } from '../../lib/session-types';
 import { registerWallHandle, resetWallHandles, stubWallHandle } from './wall-handles';
 import { windowNeedsCloseConfirmation, windowReopenSnapshot } from './window-reopen';
-import { resetSurfaceIdPool } from '../../lib/surface-ids';
+import { installSurfaceIdPool, resetSurfaceIdPool } from '../../lib/surface-ids';
 import { _resetPendingKillsForTesting, addPendingKill } from '../../lib/pending-kills';
 import { applyTerminalSemanticEvents, removeTerminalPaneState } from '../../lib/terminal-state-store';
 
@@ -16,6 +16,7 @@ beforeEach(() => {
   resetWorkspaces();
   resetWallHandles();
   resetSurfaceIdPool();
+  resetWorkspaceIdPool();
 });
 
 afterEach(() => {
@@ -55,16 +56,16 @@ describe('closing one window of several', () => {
     }
   });
 
-  it('asks, and leaves no record, when any Workspace would ask', () => {
+  it('asks, and leaves no record, when any Workspace would ask', async () => {
     twoWorkspaces('ws-2');
     expect(windowNeedsCloseConfirmation()).toBe(true);
-    expect(windowReopenSnapshot()).toBeNull();
+    expect(await windowReopenSnapshot()).toBeNull();
   });
 
-  it('records every Workspace in strip order with fresh ids, its active one still active', () => {
+  it('records every Workspace in strip order with fresh ids, its active one still active', async () => {
     const { first } = twoWorkspaces(null);
     expect(windowNeedsCloseConfirmation()).toBe(false);
-    const snapshot = windowReopenSnapshot()!;
+    const snapshot = (await windowReopenSnapshot())!;
     expect(snapshot.workspaces.map(workspace => workspace.name)).toEqual([getWorkspacesSnapshot().workspaces[0].name, 'docs']);
     const ids = snapshot.workspaces.map(workspace => workspace.id);
     expect(ids).not.toContain(first);
@@ -76,10 +77,34 @@ describe('closing one window of several', () => {
     expect(snapshot.workspaces.map(workspace => workspace.session.panes[0].id)).toEqual(['surface-1', 'surface-2']);
   });
 
-  it('keeps a pin, which a reopened window restores', () => {
+  it('numbers every id in a window larger than the pools hold, reserving them before the remap', async () => {
+    /** A host counter, clamping a block to 64 as Rust does. */
+    const counting = (prefix: string, start: number) => {
+      let next = start;
+      return async (count: number) => Array.from({ length: Math.min(count, 64) }, () => `${prefix}-${next++}`);
+    };
+    await installSurfaceIdPool(counting('surface', 1), 0);
+    await installWorkspaceIdPool(counting('workspace', 2));
+    const big = (prefix: string): PersistedSession => ({
+      version: 4,
+      panes: Array.from({ length: 12 }, (_, i) => ({ id: `${prefix}-${i}`, cwd: null, title: '', untouched: true })),
+    });
+    const ids = Array.from({ length: 6 }, (_, i) => `ws-${i + 2}`);
+    for (const id of ids) createWorkspace({ id, name: id, activate: false });
+    for (const { id } of getWorkspacesSnapshot().workspaces) {
+      registerWallHandle(stubWallHandle(id, { needsCloseConfirmation: () => false, serializeReported: () => big(id) }));
+    }
+    const snapshot = (await windowReopenSnapshot())!;
+    expect(snapshot.workspaces.map(workspace => workspace.id).every(id => /^workspace-\d+$/.test(id))).toBe(true);
+    const surfaces = snapshot.workspaces.flatMap(workspace => workspace.session.panes.map(pane => pane.id));
+    expect(surfaces).toHaveLength(84);
+    expect(surfaces.every(id => /^surface-\d+$/.test(id))).toBe(true);
+  });
+
+  it('keeps a pin, which a reopened window restores', async () => {
     twoWorkspaces(null);
     setWorkspacePinned('ws-2', true);
-    const snapshot = windowReopenSnapshot()!;
+    const snapshot = (await windowReopenSnapshot())!;
     expect(snapshot.workspaces.map(workspace => workspace.pinned)).toEqual([undefined, true]);
     expect(snapshot.workspaces[0]).not.toHaveProperty('pinned');
   });

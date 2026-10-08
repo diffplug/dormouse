@@ -1,6 +1,7 @@
-import { withFreshSurfaceIds } from '../../lib/session-remap';
-import { PERSISTED_WINDOW_VERSION, workspaceRecord, type PersistedWindow, type PersistedWorkspace, type WorkspaceId } from '../../lib/session-types';
-import { generateWorkspaceId, getWorkspacesSnapshot } from '../../lib/workspace-store';
+import { freshSurfaceIdCount, withFreshSurfaceIds } from '../../lib/session-remap';
+import { PERSISTED_WINDOW_VERSION, workspaceRecord, type PersistedSession, type PersistedWindow, type WorkspaceId } from '../../lib/session-types';
+import { surfaceIdMinter } from '../../lib/surface-ids';
+import { getWorkspacesSnapshot, workspaceIdMinter, type WorkspaceMeta } from '../../lib/workspace-store';
 import { getWallHandle } from './wall-handles';
 import { pendingKillSessionIds } from '../../lib/pending-kills';
 import { countRunningSessionsIn } from '../../lib/terminal-state-store';
@@ -26,19 +27,28 @@ export function windowNeedsCloseConfirmation(): boolean {
  * reopened Workspace does, so nothing in the new window shares one with what
  * the close kills.
  */
-export function windowReopenSnapshot(): PersistedWindow | null {
+export async function windowReopenSnapshot(): Promise<PersistedWindow | null> {
   if (windowNeedsCloseConfirmation()) return null;
+  // Read before the reservation awaits, as the window stands at its close.
   const { workspaces, activeId } = getWorkspacesSnapshot();
-  const fresh = new Map<WorkspaceId, WorkspaceId>();
-  const records: PersistedWorkspace[] = [];
+  const closing: { workspace: WorkspaceMeta; session: PersistedSession }[] = [];
   for (const workspace of workspaces) {
     const handle = getWallHandle(workspace.id);
     // A Wall still mounting cannot say what it holds.
     if (!handle) return null;
-    const id = generateWorkspaceId();
-    fresh.set(workspace.id, id);
-    records.push(workspaceRecord({ ...workspace, id }, withFreshSurfaceIds(handle.serializeReported())));
+    closing.push({ workspace, session: handle.serializeReported() });
   }
-  if (records.length === 0) return null;
+  if (closing.length === 0) return null;
+  // The whole window remaps at once, more ids than the pools hold.
+  const [mintWorkspace, mintSurface] = await Promise.all([
+    workspaceIdMinter(closing.length),
+    surfaceIdMinter(closing.reduce((sum, { session }) => sum + freshSurfaceIdCount(session), 0)),
+  ]);
+  const fresh = new Map<WorkspaceId, WorkspaceId>();
+  const records = closing.map(({ workspace, session }) => {
+    const id = mintWorkspace();
+    fresh.set(workspace.id, id);
+    return workspaceRecord({ ...workspace, id }, withFreshSurfaceIds(session, mintSurface));
+  });
   return { version: PERSISTED_WINDOW_VERSION, workspaces: records, activeWorkspaceId: fresh.get(activeId) ?? records[0].id };
 }

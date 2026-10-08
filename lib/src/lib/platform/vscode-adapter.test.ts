@@ -617,8 +617,8 @@ describe('VSCodeAdapter Surface ids', () => {
     const adapter = new VSCodeAdapter();
     const ready = adapter.init();
     const request = postMessage.mock.calls.at(-1)![0];
-    expect(request).toMatchObject({ type: 'surface:reserveIds', count: 64, floor: 41 });
-    windowTarget.dispatchEvent(hostMessage({ type: 'surface:reservedIds', requestId: request.requestId, ids: Array.from({ length: 64 }, (_, i) => `surface-${1042 + i}`) }));
+    expect(request).toMatchObject({ type: 'surface:reserveIds', count: 8, floor: 41 });
+    windowTarget.dispatchEvent(hostMessage({ type: 'surface:reservedIds', requestId: request.requestId, ids: Array.from({ length: 8 }, (_, i) => `surface-${1042 + i}`) }));
     await ready;
     expect(mintSurfaceId()).toBe('surface-1042');
   });

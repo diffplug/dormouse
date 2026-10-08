@@ -4,11 +4,18 @@ import type { PersistedSession } from './session-types';
 import { isRecord } from './is-record';
 import { mintSurfaceId } from './surface-ids';
 
+/** How many ids {@link withFreshSurfaceIds} mints for `session`, so a caller
+ *  can have them in hand first (`surfaceIdMinter`). */
+export function freshSurfaceIdCount(session: PersistedSession): number {
+  return new Set([...session.panes, ...(session.doors ?? [])].map(surface => surface.id)).size;
+}
+
 /**
  * A closed Workspace's record with every Surface given a fresh id, for Reopen
  * (`docs/specs/reopen.md`): the rebuilt Sessions must never share an id — a
  * PTY's, the host's — with the ones the close just killed, so each comes back
- * under a new ref.
+ * under a new ref. Mints {@link freshSurfaceIdCount} ids synchronously, more
+ * than the page's pool may hold, so a caller passes a `surfaceIdMinter`.
  */
 export function withFreshSurfaceIds(session: PersistedSession, mint = mintSurfaceId): PersistedSession {
   const ids = new Map<string, string>();

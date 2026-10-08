@@ -2,7 +2,8 @@ import type { ReopenResponse } from 'dor/commands/types';
 import { surfaceRefForId } from 'dor/protocol';
 import { getPlatform } from '../../lib/platform';
 import { newestReopenClosedAt, popReopenRecord, pushReopenRecord, type SurfaceReopenRecord, type WorkspaceReopenRecord } from '../../lib/reopen-stack';
-import { withFreshSurfaceIds } from '../../lib/session-remap';
+import { freshSurfaceIdCount, withFreshSurfaceIds } from '../../lib/session-remap';
+import { surfaceIdMinter } from '../../lib/surface-ids';
 import { getPendingKills, pendingKillKey, restorePendingKill, type PendingKill } from '../../lib/pending-kills';
 import { restoreSession } from '../../lib/session-restore';
 import { createWorkspace, generateWorkspaceId, getActiveWorkspaceId, moveWorkspace, setActiveWorkspace, workspaceRefFor } from '../../lib/workspace-store';
@@ -67,10 +68,11 @@ function reopenSurface(record: SurfaceReopenRecord, gesture: boolean): ReopenRes
  * A closed Workspace comes back as a new one, at its strip slot, through cold
  * restore: new Sessions and Surface ids, so new refs.
  */
-function reopenWorkspace(record: WorkspaceReopenRecord, gesture: boolean): ReopenResponse {
+async function reopenWorkspace(record: WorkspaceReopenRecord, gesture: boolean): Promise<ReopenResponse> {
   const { name, nameIsAuto, session } = record.workspace;
+  const mintSurface = await surfaceIdMinter(freshSurfaceIdCount(session));
   const id = generateWorkspaceId();
-  const restored = restoreSession(getPlatform(), { savedSession: withFreshSurfaceIds(session) });
+  const restored = restoreSession(getPlatform(), { savedSession: withFreshSurfaceIds(session, mintSurface) });
   // Parked before the Workspace exists: its Wall mounts from this plan.
   setWorkspaceBootPlan(id, restored ? wallBootFromResult(restored) : {});
   createWorkspace({ id, name, nameIsAuto, activate: gesture, alertDelivery: session.alertDelivery });

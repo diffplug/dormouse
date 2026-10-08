@@ -327,17 +327,18 @@ describe('workspace-store', () => {
     expect(resolveWorkspaceRef('workspace:7')).toEqual({ ok: false, message: "unknown workspace target 'workspace:7'" });
   });
 
-  it('mints ids from the host pool once one is installed', async () => {
+  it('mints ids from a small host pool once one is installed', async () => {
     const reserve = minting(100);
     await installWorkspaceIdPool(reserve);
-    expect(reserve).toHaveBeenCalledWith(32);
+    expect(reserve).toHaveBeenCalledWith(4);
     expect(generateWorkspaceId()).toBe('workspace-100');
     expect(createWorkspace().id).toBe('workspace-101');
     expect(workspaceRefFor('workspace-101')).toBe('workspace:101');
-    // Draining past the low-water mark refills in the background.
-    for (let i = 0; i < 23; i++) generateWorkspaceId();
+    // Draining past the low-water mark tops the pool back up in the background.
+    generateWorkspaceId();
     await Promise.resolve();
     expect(reserve).toHaveBeenCalledTimes(2);
+    expect(reserve).toHaveBeenLastCalledWith(3);
   });
 
   it('a failed first reservation still creates stable opaque refs and can recover', async () => {

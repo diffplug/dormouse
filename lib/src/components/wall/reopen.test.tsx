@@ -17,7 +17,8 @@ import { recordToolDirty, resetToolDirty } from '../../lib/tool-dirty-store';
 import { mountWallHarness, type WallHarness } from './wall-test-utils';
 import { getWallHandle } from './wall-handles';
 import { reopenClosed } from './reopen';
-import { resetSurfaceIdPool } from '../../lib/surface-ids';
+import { installSurfaceIdPool, resetSurfaceIdPool } from '../../lib/surface-ids';
+import { getWorkspaceBootPlan } from './workspace-boot-plans';
 import { _resetPendingKillsForTesting, addPendingKill, getPendingKills } from '../../lib/pending-kills';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -172,6 +173,20 @@ describe('Reopen', () => {
     expect(reopened.result).toMatchObject({ status: 'reopened', kind: 'surface', surfaceId: 'surface-1', surfaceRef: 'surface:1' });
     await harness.flush();
     expect(leafIds()).toHaveLength(2);
+  });
+
+  it('reopens a Workspace larger than the Surface id pool under numbered ids alone', async () => {
+    vi.spyOn(terminalRegistry, 'restoreTerminal').mockImplementation(() => ({}) as ReturnType<typeof terminalRegistry.restoreTerminal>);
+    let next = 100;
+    await installSurfaceIdPool(async (count) => Array.from({ length: Math.min(count, 64) }, () => `surface-${++next}`), 0);
+    pushReopenRecord({ kind: 'workspace', closedAt: 1, index: 0, workspace: {
+      id: 'workspace-9', name: 'big', nameIsAuto: false,
+      session: { version: 4, panes: Array.from({ length: 20 }, (_, i) => ({ id: `old-${i}`, cwd: null, title: '', untouched: true })) },
+    } });
+    const reopened = await reopenClosed({ gesture: false });
+    const { initialPaneIds } = getWorkspaceBootPlan((reopened as { workspaceId: string }).workspaceId);
+    expect(initialPaneIds).toHaveLength(20);
+    expect(initialPaneIds!.every(id => /^surface-\d+$/.test(id))).toBe(true);
   });
 
   it('reopens a closed window the host holds when it closed after this Window\'s newest record', async () => {

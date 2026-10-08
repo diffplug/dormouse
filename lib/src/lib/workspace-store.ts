@@ -81,7 +81,10 @@ let workspaceSequence = 0;
  *  and unique across windows. Once installed, a `workspace-<n>` id reads as
  *  minted: a bare Wall's `DEFAULT_WORKSPACE_ID` is `workspace-1`, which beside
  *  VS Code's random ids would otherwise make one store both. */
-const idPool = createIdPool(32, 8, 'workspace-store');
+// Small, so a launch burns at most 4 numbers (see `createIdPool`): Workspaces
+// are created one gesture or `dor` call at a time, and a refill is one host
+// round trip of a few ms. A window's Reopen reserves through `workspaceIdMinter`.
+const idPool = createIdPool(4, 2, 'workspace-store');
 
 /** Give this Window a host that mints ids. Resolves once the first block is
  *  in hand, so a create that follows never falls back to a random id. */
@@ -101,6 +104,13 @@ export function generateWorkspaceId(): WorkspaceId {
   if (reserved !== undefined) return reserved;
   if (idPool.installed) return `workspace-${crypto.randomUUID()}`;
   return `workspace-${Math.random().toString(36).slice(2, 10)}-${++workspaceSequence}`;
+}
+
+/** A synchronous minter for `count` Workspaces created at once, with every id
+ *  in hand once it resolves, so a burst larger than the pool still mints
+ *  numbered ids. */
+export function workspaceIdMinter(count: number): Promise<() => WorkspaceId> {
+  return idPool.minter(count, generateWorkspaceId);
 }
 
 /** Positions exist only on hosts without an application-wide registry; every

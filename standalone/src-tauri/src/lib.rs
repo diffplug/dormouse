@@ -152,9 +152,9 @@ struct WindowState {
     /// registry). Only ever held briefly: a report raising a counter runs on
     /// the main thread.
     ids: Mutex<ids::Counters>,
-    /// Where the counters' ceilings persist, `None` when the state root is
-    /// unavailable. Held across a reservation and its write, so no caller
-    /// takes a number before the file covers it.
+    /// Where the counters persist, `None` when the state root is unavailable.
+    /// Held across a reservation and its write, so no caller takes a number
+    /// before the file covers it, and writes land in reservation order.
     ids_file: Mutex<Option<PathBuf>>,
     /// Windows closed with everything reopenable, newest first
     /// (docs/specs/reopen.md). Memory only: a quit forgets them.
@@ -197,11 +197,12 @@ impl RoutingState {
 
 impl WindowState {
     /// `count` numbers of `kind`, all above `above`, never handed out by this
-    /// run or an earlier one (§Workspace registry).
+    /// run or an earlier one (§Workspace registry). Writes and fsyncs
+    /// `ids.json` every call, so every caller must be off the main thread.
     fn reserve_ids(&self, kind: ids::Kind, count: u64, above: u64) -> std::ops::Range<u64> {
         let path = guard(&self.ids_file);
-        let (block, file) = guard(&self.ids).reserve(kind, count, above);
-        if let (Some(contents), Some(path)) = (file, path.as_ref()) {
+        let (block, contents) = guard(&self.ids).reserve(kind, count, above);
+        if let Some(path) = path.as_ref() {
             if let Err(e) = write_file_atomically(path, &contents) {
                 append_log(format!("[ids] {e}; the counters stay in memory"));
             }
@@ -210,7 +211,7 @@ impl WindowState {
     }
 
     /// Boot: persist the counters at `path`, and raise each above both the
-    /// ceilings a previous run left there and every id it left on disk. A
+    /// numbers a previous run left there and every id it left on disk. A
     /// missing or unreadable file leaves the disk scan alone.
     fn seed_ids(&self, path: PathBuf, saved: &SavedWindows) {
         let mut file = guard(&self.ids_file);
@@ -5584,14 +5585,17 @@ mod tests {
     }
 
     #[test]
-    fn a_reservation_reaching_the_ceiling_is_on_disk_before_it_returns() {
+    fn a_reservation_is_on_disk_before_it_returns_and_a_relaunch_resumes_just_past_it() {
         let root = TempDir::new("ids-persist");
-        let block = boot_ids(root.path()).reserve_ids(super::ids::Kind::Surface, 64, 0);
-        assert_eq!(block, 1..65);
+        let windows = boot_ids(root.path());
+        windows.reserve_ids(super::ids::Kind::Surface, 8, 0);
+        let block = windows.reserve_ids(super::ids::Kind::Surface, 8, 0);
+        assert_eq!(block, 9..17);
         let file: JsonValue = serde_json::from_str(&fs::read_to_string(root.path().join("ids.json")).unwrap()).unwrap();
-        assert!(file["surface"].as_u64().unwrap() >= block.end);
-        // A crash now, with nothing else on disk: the relaunch starts above.
-        assert!(boot_ids(root.path()).reserve_ids(super::ids::Kind::Surface, 1, 0).start >= block.end);
+        assert_eq!(file["surface"].as_u64(), Some(block.end));
+        // A crash now, with nothing else on disk: the relaunch starts just
+        // above, wasting no numbers.
+        assert_eq!(boot_ids(root.path()).reserve_ids(super::ids::Kind::Surface, 1, 0).start, block.end);
     }
 
     #[test]
@@ -5604,7 +5608,7 @@ mod tests {
         // workspace-6 through workspace-9 closed; only workspace-5 is saved.
         write_session_to(&sessions, "main", &snapshot_json(&[("workspace-5", "Kept")], "workspace-5")).unwrap();
         assert_eq!(super::saved_windows(&sessions).next_workspace, 6);
-        assert!(boot_ids(root.path()).reserve_ids(super::ids::Kind::Workspace, 1, 0).start >= 10);
+        assert_eq!(boot_ids(root.path()).reserve_ids(super::ids::Kind::Workspace, 1, 0).start, 10);
     }
 
     #[test]
@@ -5617,8 +5621,7 @@ mod tests {
         // ws-4 closed, taking its snapshot with it; ws-2 is still saved.
         write_session_to(&sessions, "ws-2", &snapshot_json(&[("workspace-2", "Kept")], "workspace-2")).unwrap();
         assert_eq!(super::saved_windows(&sessions).next_ws, 3);
-        let next = super::next_window_label(&boot_ids(root.path()));
-        assert!(routing::ws_index(&next).unwrap() >= 5, "{next}");
+        assert_eq!(super::next_window_label(&boot_ids(root.path())), "ws-5");
     }
 
     #[test]

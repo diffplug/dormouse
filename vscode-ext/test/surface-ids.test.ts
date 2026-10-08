@@ -8,7 +8,7 @@ import { removeDir, tempStorageDir } from './helpers';
 
 let dir: string;
 const file = () => path.join(dir, 'surface-ids.json');
-const ceiling = async () => (JSON.parse(await readFile(file(), 'utf8')) as { surface: number }).surface;
+const persisted = async () => (JSON.parse(await readFile(file(), 'utf8')) as { surface: number }).surface;
 const logger = { error: vi.fn() };
 const numbers = (ids: string[]) => ids.map(surfaceIdNumber);
 
@@ -19,27 +19,27 @@ beforeEach(async () => {
 afterEach(async () => { await removeDir(dir); });
 
 describe('createSurfaceIdAllocator', () => {
-  it('persists a ceiling above a block before handing it out, and a later run starts there', async () => {
+  it('persists exactly the end of each block before handing it out, and a later run resumes there', async () => {
     const first = createSurfaceIdAllocator(dir, logger);
     expect(await first.reserve(3, 0)).toEqual(['surface-1', 'surface-2', 'surface-3']);
-    const persisted = await ceiling();
-    expect(persisted).toBeGreaterThan(3);
+    expect(await persisted()).toBe(4);
     expect(await first.reserve(1, 0)).toEqual(['surface-4']);
+    expect(await persisted()).toBe(5);
+    // No slack: the relaunch wastes no numbers.
     const later = createSurfaceIdAllocator(dir, logger);
-    expect(numbers(await later.reserve(1, 0))).toEqual([persisted]);
+    expect(await later.reserve(1, 0)).toEqual(['surface-5']);
   });
 
-  it('never regresses below a higher ceiling another window wrote', async () => {
+  it('never hands out a number another window sharing the file did, nor writes it lower', async () => {
     // Two empty windows sharing globalStorageUri.
     const mine = createSurfaceIdAllocator(dir, logger);
     const theirs = createSurfaceIdAllocator(dir, logger);
-    const minted = numbers(await mine.reserve(64, 0));
-    const theirBlock = numbers(await theirs.reserve(64, 0));
-    const theirCeiling = await ceiling();
-    // Drain mine well past the ceiling it wrote, so it raises again.
-    for (let i = 0; i < 20; i++) minted.push(...numbers(await mine.reserve(64, 0)));
+    const minted = numbers(await mine.reserve(8, 0));
+    const theirBlock = numbers(await theirs.reserve(8, 0));
+    const theirMark = await persisted();
+    minted.push(...numbers(await mine.reserve(8, 0)));
     expect(minted.filter((n) => theirBlock.includes(n))).toEqual([]);
-    expect(await ceiling()).toBeGreaterThan(theirCeiling);
+    expect(await persisted()).toBeGreaterThan(theirMark);
   });
 
   it('honors the floor the webview restored', async () => {
