@@ -40,7 +40,7 @@ function lathLayoutFor(...ids: string[]) {
 }
 
 const sessionOver = (...ids: string[]): PersistedSession => ({
-  version: 3,
+  version: 4,
   lathLayout: lathLayoutFor(...ids),
   panes: ids.map((id) => ({ id, title: id, cwd: null, untouched: false })),
 });
@@ -80,7 +80,7 @@ beforeEach(() => {
 describe("routeUnownedPtys", () => {
   it("routes a helper to the Workspace holding its source, not the active one", () => {
     const saved: PersistedWindow = {
-      version: 1,
+      version: 2,
       workspaces: [
         { id: "ws-a", name: "A", nameIsAuto: false, session: sessionOver("a1") },
         { id: "ws-b", name: "B", nameIsAuto: false, session: sessionOver("b1") },
@@ -102,7 +102,7 @@ describe("routeUnownedPtys", () => {
 
   it("leaves a helper whose source is itself unowned to the active Workspace", () => {
     const saved: PersistedWindow = {
-      version: 1,
+      version: 2,
       workspaces: [{ id: "ws-a", name: "A", nameIsAuto: false, session: sessionOver("a1") }],
       activeWorkspaceId: "ws-a",
     };
@@ -124,7 +124,7 @@ describe("restoreWindowOrFresh", () => {
     // the active Workspace promoted B's helper to a top-level pane of A, and its
     // stray id then voided A's whole saved layout.
     const saved: PersistedWindow = {
-      version: 1,
+      version: 2,
       workspaces: [
         { id: "ws-a", name: "A", nameIsAuto: false, session: sessionOver("a1", "a2") },
         { id: "ws-b", name: "B", nameIsAuto: false, session: sessionOver("b1") },
@@ -155,7 +155,7 @@ describe("restoreWindowOrFresh", () => {
 
   it("restores a pin, its Workspace in the pinned group", async () => {
     const saved: PersistedWindow = {
-      version: 1,
+      version: 2,
       workspaces: [
         { id: "ws-a", name: "A", nameIsAuto: false, pinned: true, session: sessionOver("a1") },
         { id: "ws-b", name: "B", nameIsAuto: false, session: sessionOver("b1") },
@@ -174,7 +174,7 @@ describe("restoreWindowOrFresh", () => {
     // the throw escaped `bootstrap()` and nothing rendered at all — on this and
     // every later launch.
     const duplicated: PersistedWindow = {
-      version: 1,
+      version: 2,
       workspaces: [
         { id: "ws-a", name: "A", nameIsAuto: false, session: sessionOver("a1") },
         { id: "ws-a", name: "A again", nameIsAuto: false, session: sessionOver("a2") },

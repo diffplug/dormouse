@@ -2,7 +2,7 @@ import { isToolKeyScope, isToolRender } from './platform/tool-types';
 import { isBrowserViewportSetting } from 'dor-lib-common/browser-viewports';
 import { normalizeAlertDeliveryOverrides, type AlertDeliveryOverrides } from './alert-delivery-model';
 import type { PlatformAdapter } from './platform/types';
-import { browserPersistedPane, isToolCommandArgv, readPersistedSession, toPersistedAlertState, type PersistedDoor, type PersistedPane, type PersistedSession, type PersistedToolMetadata, type PersistedSurfaceType } from './session-types';
+import { browserPersistedPane, isToolCommandArgv, PERSISTED_SESSION_VERSION, readPersistedSession, toPersistedAlertState, type PersistedDoor, type PersistedPane, type PersistedSession, type PersistedToolMetadata, type PersistedSurfaceType } from './session-types';
 import { getActivity, getLivePersistedAlertState, getTerminalPaneState, isUntouched } from './terminal-registry';
 import { UNNAMED_PANEL_TITLE } from './terminal-state';
 import { isToolReaped } from './tool-reap-store';
@@ -157,7 +157,7 @@ export function assemblePersistedSession(
   });
   const alertDelivery = normalizeAlertDeliveryOverrides(alertDeliveryOverrides ?? previous?.alertDelivery);
   return {
-    version: 3,
+    version: PERSISTED_SESSION_VERSION,
     ...(Object.keys(alertDelivery).length ? { alertDelivery } : {}),
     panes: persisted,
     doors: persistedDoors,

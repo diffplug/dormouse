@@ -101,7 +101,7 @@ describe('resumeOrRestore', () => {
     const layout = lathLayoutFor('parent');
     const helper = { parentId: 'parent', command: 'git status' };
     const result = await resumeOrRestore(createPlatform([{ id: 'parent', alive: true }, { id: 'helper', alive: true, helper }], {
-      version: 3, lathLayout: layout, panes: [{ id: 'parent', title: 'Parent', cwd: null }],
+      version: 4, lathLayout: layout, panes: [{ id: 'parent', title: 'Parent', cwd: null }],
     }));
     expect(result.paneIds).toEqual(['parent']); expect(result.lathLayout).toEqual(layout);
     expect(terminalRegistryMocks.resumeTerminal).toHaveBeenCalledWith('helper', 'helper-replay', { alive: true, exitCode: undefined, helper });
@@ -115,7 +115,7 @@ describe('resumeOrRestore', () => {
       title: 'Pane C',
     }];
     const saved: PersistedSession = {
-      version: 3,
+      version: 4,
       lathLayout,
       doors,
       panes: [
@@ -145,7 +145,7 @@ describe('resumeOrRestore', () => {
 
   it('seeds saved visible pane titles when resuming live PTYs', async () => {
     const saved: PersistedSession = {
-      version: 3,
+      version: 4,
       lathLayout: lathLayoutFor('pane-a'),
       panes: [
         { id: 'pane-a', title: 'Production API', cwd: null },
@@ -165,7 +165,7 @@ describe('resumeOrRestore', () => {
 
   it('restores the launch shell reported by a live PTY', async () => {
     const saved: PersistedSession = {
-      version: 3,
+      version: 4,
       lathLayout: lathLayoutFor('pane-a'),
       panes: [
         { id: 'pane-a', title: 'PowerShell', cwd: null },
@@ -186,7 +186,7 @@ describe('resumeOrRestore', () => {
 
   it('seeds saved untouched state when resuming live PTYs', async () => {
     const saved: PersistedSession = {
-      version: 3,
+      version: 4,
       lathLayout: lathLayoutFor('pane-a'),
       panes: [
         { id: 'pane-a', title: 'Pane A', cwd: null, untouched: true },
@@ -207,7 +207,7 @@ describe('resumeOrRestore', () => {
 
   it('defaults missing saved untouched state to touched when resuming live PTYs', async () => {
     const saved = {
-      version: 3 as const,
+      version: 4 as const,
       lathLayout: lathLayoutFor('pane-a'),
       panes: [
         { id: 'pane-a', title: 'Pane A', cwd: null },
@@ -227,7 +227,7 @@ describe('resumeOrRestore', () => {
 
   it('seeds saved minimized door titles when resuming live PTYs', async () => {
     const saved: PersistedSession = {
-      version: 3,
+      version: 4,
       lathLayout: lathLayoutFor(),
       doors: [{
         id: 'pane-a',
@@ -251,7 +251,7 @@ describe('resumeOrRestore', () => {
 
   it('does not reuse a saved layout when live PTYs do not match saved panes', async () => {
     const saved: PersistedSession = {
-      version: 3,
+      version: 4,
       lathLayout: lathLayoutFor('pane-a', 'pane-b'),
       panes: [
         { id: 'pane-a', title: 'Pane A', cwd: null },
@@ -280,7 +280,7 @@ describe('resumeOrRestore', () => {
       title: 'Pane B',
     }];
     const saved: PersistedSession = {
-      version: 3,
+      version: 4,
       lathLayout: lathLayoutFor(),
       doors,
       panes: [
@@ -306,7 +306,7 @@ describe('resumeOrRestore', () => {
   it('ignores stale saved panes when the saved layout still matches live visible panes', async () => {
     const lathLayout = lathLayoutFor('pane-a', 'pane-b');
     const saved: PersistedSession = {
-      version: 3,
+      version: 4,
       lathLayout,
       panes: [
         { id: 'pane-a', title: 'Pane A', cwd: null },
@@ -330,7 +330,7 @@ describe('resumeOrRestore', () => {
   it('keeps the saved layout and a visible browser pane when only terminals have live PTYs', async () => {
     const lathLayout = lathLayoutFor('pane-term', 'pane-web');
     const saved: PersistedSession = {
-      version: 3,
+      version: 4,
       lathLayout,
       panes: [
         { id: 'pane-term', title: 'Terminal', cwd: null },
@@ -354,7 +354,7 @@ describe('resumeOrRestore', () => {
 
   it('restores browser surface TODO from the persisted alert during live resume', async () => {
     const saved: PersistedSession = {
-      version: 3,
+      version: 4,
       lathLayout: lathLayoutFor('pane-term', 'pane-web'),
       panes: [
         { id: 'pane-term', title: 'Terminal', cwd: null },
@@ -386,7 +386,7 @@ describe('resumeOrRestore', () => {
 
   it('drops visible browser panes from terminal fallback when the saved layout is rejected', async () => {
     const saved: PersistedSession = {
-      version: 3,
+      version: 4,
       lathLayout: lathLayoutFor('pane-term', 'stale-term', 'pane-web'),
       panes: [
         { id: 'pane-term', title: 'Terminal', cwd: null },
@@ -415,7 +415,7 @@ describe('resumeOrRestore', () => {
       params: { surfaceType: 'browser', renderMode: 'iframe', url: 'http://localhost:5173' },
     }];
     const saved: PersistedSession = {
-      version: 3,
+      version: 4,
       lathLayout,
       doors,
       panes: [
@@ -442,7 +442,7 @@ describe('resumeOrRestoreFrom', () => {
   });
 
   const savedFor = (...ids: string[]): PersistedSession => ({
-    version: 3,
+    version: 4,
     lathLayout: lathLayoutFor(...ids),
     panes: ids.map((id) => ({ id, title: id, cwd: null, untouched: false })),
   });
@@ -642,7 +642,7 @@ describe('collectLivePtys addressing', () => {
       // A saved terminal pane is exactly what the retry protects: ask again.
       const saved = addressedPlatform();
       (saved.platform as { getState: () => unknown }).getState = () => ({
-        version: 3,
+        version: 4,
         panes: [{ id: 'a', title: 'a', cwd: '/tmp', untouched: false, alert: null }],
       });
       const restoring = resumeOrRestore(saved.platform);

@@ -4,7 +4,7 @@ import type { PersistedSession } from './session-types';
 
 describe('withFreshSurfaceIds', () => {
   const session: PersistedSession = {
-    version: 3,
+    version: 4,
     panes: [
       { id: 'a', cwd: '/repo', title: 'shell', untouched: true },
       { id: 'b', cwd: null, title: 'docs', untouched: false, surfaceType: 'browser' },

@@ -301,7 +301,7 @@ Source of truth: `window_at` in `standalone/src-tauri/src/routing.rs`; `standalo
 
 Source of truth: `restoreWindowOrFresh` in `standalone/src/window-restore.ts`.
 
-**Nothing is deleted at boot but orphaned session temp files and what the arrival merge settles** (`docs/specs/transport.md` → "Retiring the transcripts already on disk").
+**Nothing is deleted at boot but orphaned session temp files, what the arrival merge settles, and another format's state** (`docs/specs/transport.md` → "Retiring the transcripts already on disk"). **Before the arrival merge, boot must delete each snapshot of another `PersistedWindow.version`, with its temp and geometry, and each arrival record holding another `PersistedSession.version`** (`docs/specs/transport.md` → "Persisted session types"). Source of truth: `discard_other_formats` in `standalone/src-tauri/src/lib.rs`.
 
 **Never back the session blob with WebKit `localStorage`** — a WAL that grows without bound (rationale). The blob rides the `SessionKeyValueStore` seam over the Rust-backed `standalone/src/tauri-session-store.ts`. Theme selection still persists on `localStorage` (`docs/specs/theme.md`).
 
@@ -310,7 +310,7 @@ Source of truth: `restoreWindowOrFresh` in `standalone/src/window-restore.ts`.
 - **The label is sanitized** so it cannot escape the directory.
 - **Temp-then-rename**, the temp file fsynced first and, on unix, the directory after, best-effort (rationale). **The writer removes its own temp file on every error path**, so only a crash leaves one.
 - **Window identity is implicit**: each command keys by the invoking window's label, so the frontend stays window-agnostic.
-- Only §Per-window close and the boot merge (§Arrival queue) delete a snapshot.
+- Only §Per-window close, the boot merge (§Arrival queue), and the discard above delete a snapshot.
 
 **Must use `<app_data_dir>/dev` as the debug state root and `<app_data_dir>` for release builds** (rationale), and **keep Burrow state directly under the identifier's `app_data_dir`**. **Rust passes the sidecar its two directories by environment**, each created owner-only first and empty when it could not be: `DORMOUSE_STATE_DIR` (the Burrow store, `app_data_dir`) and `DORMOUSE_RECOVERY_DIR` (the state root, so a dev run's record cannot reach the installed app). The browser-dev harness sets both to its per-run temp directory. Source of truth: `state_root_from` / `prepare_owner_only_dir` in `standalone/src-tauri/src/lib.rs`.
 

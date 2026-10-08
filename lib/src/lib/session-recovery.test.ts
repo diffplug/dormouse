@@ -12,7 +12,7 @@ import { readPersistedSession } from './session-types';
  */
 describe('recovery commands never enter the persisted session', () => {
   const blob = (pane: Record<string, unknown>) => ({
-    version: 3 as const,
+    version: 4 as const,
     panes: [{ id: 'pane-a', cwd: null, title: 'A', untouched: false, ...pane }],
   });
 

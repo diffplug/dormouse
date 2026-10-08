@@ -10,7 +10,7 @@ const ptyManager = vi.hoisted(() => ({
 
 vi.mock('../src/pty-manager', () => ptyManager);
 
-import { mergeAlertStates, refreshSavedSessionStateFromPtys } from '../src/session-state';
+import { getSavedSessionState, mergeAlertStates, refreshSavedSessionStateFromPtys } from '../src/session-state';
 
 const liveAlert = (overrides: Partial<AlertState> = {}): AlertState => ({
   ...DEFAULT_ALERT_STATE,
@@ -42,7 +42,7 @@ describe('VS Code session alert persistence', () => {
 
   it('projects live alert state before a periodic save', () => {
     const session: PersistedSession = {
-      version: 3,
+      version: 4,
       panes: [{ id: 'terminal-a', title: 'Terminal A', cwd: null, untouched: false }],
     };
 
@@ -73,7 +73,7 @@ describe('VS Code session alert persistence', () => {
       episode: { id: 'episode-stale', startedAt: 0 },
     };
     const store = contextWithState({
-      version: 3,
+      version: 4,
       panes: [
         { id: 'browser-a', title: 'Browser A', cwd: null, untouched: false, surfaceType: 'browser', alert: staleAlert },
         { id: 'terminal-a', title: 'Terminal A', cwd: '/saved', untouched: false, alert: staleAlert },
@@ -87,5 +87,18 @@ describe('VS Code session alert persistence', () => {
       { status: 'NOTHING_TO_SHOW', todo: true, notification: null },
       { status: 'NOTHING_TO_SHOW', todo: true, notification: null },
     ]);
+  });
+
+  it('reads an older build\'s saved session as none, so the view starts fresh', async () => {
+    const info = vi.spyOn(console, 'info').mockImplementation(() => {});
+    const old = { version: 3, panes: [{ id: 'pane-1', title: 'Old', cwd: '/old', untouched: false }] };
+    const store = contextWithState(old);
+
+    expect(getSavedSessionState(store.context)).toBeNull();
+    // A panel's `setState` blob goes through the same reader on its way back in.
+    expect(mergeAlertStates(old, new Map([['pane-1', liveAlert({ todo: true })]]))).toBe(old);
+    await refreshSavedSessionStateFromPtys(store.context);
+    expect(store.read()).toBe(old);
+    info.mockRestore();
   });
 });

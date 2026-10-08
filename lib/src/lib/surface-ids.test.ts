@@ -69,7 +69,7 @@ describe('mintSurfaceId', () => {
 describe('maxSurfaceNumber', () => {
   it('reads panes and doors, ignoring ids with no number', () => {
     const session = (panes: string[], doors: string[] = []) => ({
-      version: 3,
+      version: 4,
       panes: panes.map((id) => ({ id })),
       doors: doors.map((id) => ({ id })),
     }) as unknown as PersistedSession;

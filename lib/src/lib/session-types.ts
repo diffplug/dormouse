@@ -115,10 +115,17 @@ export interface PersistedDoor {
   token?: unknown;
 }
 
+/** The `PersistedSession.version` this build writes and the only one it reads
+ *  (`docs/specs/transport.md` → "Persisted session types"). Pinned against the
+ *  Rust host by `standalone/scripts/persisted-format.json`. */
+export const PERSISTED_SESSION_VERSION = 4;
+/** The `PersistedWindow.version` this build writes and the only one it reads. */
+export const PERSISTED_WINDOW_VERSION = 2;
+
 export interface PersistedSession {
   /** Workspace delivery overrides, shared by standalone and VS Code snapshots. */
   alertDelivery?: AlertDeliveryOverrides;
-  version: 3;
+  version: typeof PERSISTED_SESSION_VERSION;
   panes: PersistedPane[];
   doors?: PersistedDoor[];
   /** Native Lath persisted layout (`LathPersistedLayout`) — the layout Dormouse
@@ -163,7 +170,7 @@ export function metaFromRecord(record: PersistedWorkspace): WorkspaceMeta {
 
 /** Standalone Window snapshot. VS Code persists one bare Session per webview. */
 export interface PersistedWindow {
-  version: 1;
+  version: typeof PERSISTED_WINDOW_VERSION;
   workspaces: PersistedWorkspace[];
   activeWorkspaceId: WorkspaceId;
 }
@@ -179,9 +186,9 @@ export function isDefaultWorkspaceName(name: string): boolean {
 
 type PersistedPaneInput = Omit<PersistedPane, 'untouched'> & { untouched?: boolean };
 
-interface PersistedSessionV3Input {
+interface PersistedSessionInput {
   alertDelivery?: unknown;
-  version: 3;
+  version: typeof PERSISTED_SESSION_VERSION;
   panes: PersistedPaneInput[];
   doors?: PersistedDoor[];
   lathLayout?: unknown;
@@ -220,7 +227,7 @@ function isPersistedPaneShape(value: unknown): boolean {
     typeof value.title === 'string' &&
     (typeof value.cwd === 'string' || value.cwd === null) &&
     // Neither `scrollback` nor `resumeCommand` is checked: legacy blobs carry
-    // them and stay readable, new ones never do, and `normalizeSessionV3` strips
+    // them and stay readable, new ones never do, and `normalizeSession` strips
     // both either way.
     (value.untouched === undefined || typeof value.untouched === 'boolean') &&
     (value.surfaceType === undefined || value.surfaceType === 'terminal' || value.surfaceType === 'browser' || value.surfaceType === 'tool') &&
@@ -267,8 +274,8 @@ function isPersistedDoor(value: unknown): value is PersistedDoor {
   );
 }
 
-function isPersistedSessionV3(value: unknown): value is PersistedSessionV3Input {
-  if (!isRecord(value) || value.version !== 3) return false;
+function isPersistedSession(value: unknown): value is PersistedSessionInput {
+  if (!isRecord(value) || value.version !== PERSISTED_SESSION_VERSION) return false;
   return (
     Array.isArray(value.panes) &&
     value.panes.every(isPersistedPaneShape) &&
@@ -276,16 +283,27 @@ function isPersistedSessionV3(value: unknown): value is PersistedSessionV3Input 
   );
 }
 
-/** Parse a v3 Session; malformed present state warns and falls back to fresh. */
+/** Parse a Session; another build's version is a quiet fresh start, malformed
+ *  present state warns and falls back to fresh. */
 export function readPersistedSession(raw: unknown): PersistedSession | null {
   if (isEmptyState(raw)) return null;
   const value = parseJsonString(raw);
-  if (isPersistedSessionV3(value)) return normalizeSessionV3(value);
-  console.warn('[dormouse] Ignoring unreadable persisted session; starting fresh.');
+  if (isPersistedSession(value)) return normalizeSession(value);
+  if (!isOtherVersion(value, PERSISTED_SESSION_VERSION)) {
+    console.warn('[dormouse] Ignoring unreadable persisted session; starting fresh.');
+  }
   return null;
 }
 
-function normalizeSessionV3(session: PersistedSessionV3Input): PersistedSession {
+/** A blob another build wrote: discarded as a fresh start, never migrated
+ *  (`docs/specs/transport.md` → "Persisted session types"). Logs the discard. */
+function isOtherVersion(value: unknown, current: number): boolean {
+  if (!isRecord(value) || typeof value.version !== 'number' || value.version === current) return false;
+  console.info(`[dormouse] Discarding state saved by another version (format ${value.version}); starting fresh.`);
+  return true;
+}
+
+function normalizeSession(session: PersistedSessionInput): PersistedSession {
   const alertDelivery = normalizeAlertDeliveryOverrides(session.alertDelivery);
   const { alertDelivery: _rawDelivery, ...rest } = session;
   // Deny-list retired fields so future PersistedPane fields pass through without
@@ -326,25 +344,16 @@ function isEmptyState(raw: unknown): boolean {
 
 // --- Window container (stage 2b) ---
 
-// Structural gate only: a v1 Window with a workspaces array and an active id.
+// Structural gate only: a current Window with a workspaces array and an active id.
 // Each Workspace element is validated (and dropped if bad) per-item in
 // readPersistedWindow, so malformed elements don't reject the whole Window.
 function isPersistedWindowShape(value: unknown): boolean {
   return (
     isRecord(value) &&
-    value.version === 1 &&
+    value.version === PERSISTED_WINDOW_VERSION &&
     Array.isArray(value.workspaces) &&
     typeof value.activeWorkspaceId === 'string'
   );
-}
-
-/** Wrap a single `PersistedSession` as a one-Workspace `PersistedWindow`. */
-export function wrapSessionInWindow(
-  session: PersistedSession,
-  id: WorkspaceId = DEFAULT_WORKSPACE_ID,
-  name: string = DEFAULT_WORKSPACE_NAME,
-): PersistedWindow {
-  return { version: 1, workspaces: [{ id, name, nameIsAuto: isDefaultWorkspaceName(name), session }], activeWorkspaceId: id };
 }
 
 /** Parse a Window, dropping invalid Workspaces and repairing a dangling active id. */
@@ -352,7 +361,9 @@ export function readPersistedWindow(raw: unknown): PersistedWindow | null {
   if (isEmptyState(raw)) return null;
   const value = parseJsonString(raw);
   if (!isRecord(value) || !isPersistedWindowShape(value)) {
-    console.warn('[dormouse] Ignoring unreadable persisted window; starting fresh.');
+    if (!isOtherVersion(value, PERSISTED_WINDOW_VERSION)) {
+      console.warn('[dormouse] Ignoring unreadable persisted window; starting fresh.');
+    }
     return null;
   }
 
@@ -377,7 +388,7 @@ export function readPersistedWindow(raw: unknown): PersistedWindow | null {
   const activeWorkspaceId = workspaces.some((ws) => ws.id === value.activeWorkspaceId)
     ? (value.activeWorkspaceId as WorkspaceId)
     : workspaces[0].id;
-  return { version: 1, workspaces, activeWorkspaceId };
+  return { version: PERSISTED_WINDOW_VERSION, workspaces, activeWorkspaceId };
 }
 
 /** Every pane id the Window's Workspaces name, across all of them — what a boot

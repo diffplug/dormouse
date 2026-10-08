@@ -1,5 +1,5 @@
 import { withFreshSurfaceIds } from '../../lib/session-remap';
-import { workspaceRecord, type PersistedWindow, type PersistedWorkspace, type WorkspaceId } from '../../lib/session-types';
+import { PERSISTED_WINDOW_VERSION, workspaceRecord, type PersistedWindow, type PersistedWorkspace, type WorkspaceId } from '../../lib/session-types';
 import { generateWorkspaceId, getWorkspacesSnapshot } from '../../lib/workspace-store';
 import { getWallHandle } from './wall-handles';
 import { pendingKillSessionIds } from '../../lib/pending-kills';
@@ -40,5 +40,5 @@ export function windowReopenSnapshot(): PersistedWindow | null {
     records.push(workspaceRecord({ ...workspace, id }, withFreshSurfaceIds(handle.serializeReported())));
   }
   if (records.length === 0) return null;
-  return { version: 1, workspaces: records, activeWorkspaceId: fresh.get(activeId) ?? records[0].id };
+  return { version: PERSISTED_WINDOW_VERSION, workspaces: records, activeWorkspaceId: fresh.get(activeId) ?? records[0].id };
 }

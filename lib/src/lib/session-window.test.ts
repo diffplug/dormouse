@@ -2,25 +2,24 @@ import { describe, expect, it } from 'vitest';
 import {
   readPersistedWindow,
   windowPaneIds,
-  wrapSessionInWindow,
   type PersistedSession,
   type PersistedWindow,
 } from './session-types';
 
 const sessionA: PersistedSession = {
-  version: 3,
+  version: 4,
   panes: [{ id: 'pane-a', title: 'A', cwd: null, untouched: false }],
 };
 
 const sessionB: PersistedSession = {
-  version: 3,
+  version: 4,
   panes: [{ id: 'pane-b', title: 'B', cwd: null, untouched: false }],
 };
 
 describe('readPersistedWindow', () => {
   it('round-trips a canonical multi-Workspace window', () => {
     const win: PersistedWindow = {
-      version: 1,
+      version: 2,
       activeWorkspaceId: 'ws-b',
       workspaces: [
         { id: 'ws-a', name: 'Left', nameIsAuto: false, session: sessionA },
@@ -32,7 +31,7 @@ describe('readPersistedWindow', () => {
 
   it('round-trips a pin, and reads anything but `true` as unpinned', () => {
     const win: PersistedWindow = {
-      version: 1,
+      version: 2,
       activeWorkspaceId: 'ws-a',
       workspaces: [
         { id: 'ws-a', name: 'Left', nameIsAuto: false, session: sessionA },
@@ -46,7 +45,7 @@ describe('readPersistedWindow', () => {
 
   it('reads a blob from before auto-naming: only a `Workspace <n>` name is auto', () => {
     const win = readPersistedWindow({
-      version: 1,
+      version: 2,
       activeWorkspaceId: 'ws-a',
       workspaces: [
         { id: 'ws-a', name: 'Workspace 3', session: sessionA },
@@ -57,13 +56,17 @@ describe('readPersistedWindow', () => {
   });
 
   it('parses a JSON-stringified window blob', () => {
-    const win = wrapSessionInWindow(sessionA);
+    const win: PersistedWindow = {
+      version: 2,
+      activeWorkspaceId: 'ws-a',
+      workspaces: [{ id: 'ws-a', name: 'A', nameIsAuto: false, session: sessionA }],
+    };
     expect(readPersistedWindow(JSON.stringify(win))).toEqual(win);
   });
 
   it('falls back to the first Workspace when activeWorkspaceId matches none', () => {
     const win: PersistedWindow = {
-      version: 1,
+      version: 2,
       activeWorkspaceId: 'gone',
       workspaces: [{ id: 'ws-a', name: 'A', session: sessionA }],
     };
@@ -72,7 +75,7 @@ describe('readPersistedWindow', () => {
 
   it('drops Workspaces with an unreadable session, keeping the rest', () => {
     const win = {
-      version: 1 as const,
+      version: 2 as const,
       activeWorkspaceId: 'ws-a',
       workspaces: [
         { id: 'ws-a', name: 'A', session: sessionA },
@@ -88,7 +91,7 @@ describe('readPersistedWindow', () => {
     // `setWorkspaces` rejects a duplicate outright, so a blob carrying one would
     // otherwise take the whole launch down before anything rendered.
     const win = {
-      version: 1 as const,
+      version: 2 as const,
       activeWorkspaceId: 'ws-a',
       workspaces: [
         { id: 'ws-a', name: 'First', session: sessionA },
@@ -111,7 +114,7 @@ describe('readPersistedWindow', () => {
 describe('windowPaneIds', () => {
   it('names every pane across every Workspace, and nothing without a Window', () => {
     const win: PersistedWindow = {
-      version: 1,
+      version: 2,
       activeWorkspaceId: 'ws-a',
       workspaces: [
         { id: 'ws-a', name: 'A', session: sessionA },

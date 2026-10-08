@@ -333,7 +333,7 @@ describe('Wall on the Lath engine', () => {
 
     const saved = fake.getState() as { version?: number; lathLayout?: { version?: number; leafMeta?: Record<string, unknown> } } | null;
     expect(saved).not.toBeNull();
-    expect(saved!.version).toBe(3);
+    expect(saved!.version).toBe(4);
     expect(saved!.lathLayout).toBeDefined();
     expect(saved!.lathLayout!.version).toBe(1);
     // The surviving pane is present in the Lath layout's leaf meta.

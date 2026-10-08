@@ -660,12 +660,12 @@ describe('WorkspaceWindow', () => {
     // run persisted for it — exactly the values a cold restore spawns it from.
     const first = getWorkspacesSnapshot().workspaces[0].id;
     seedWindowSession({
-      version: 1,
+      version: 2,
       workspaces: [{
         id: first,
         name: 'One',
         session: {
-          version: 3,
+          version: 4,
           doors: [],
           panes: [{ id: 'pane-a', title: 'Pane A', cwd: '/retained', untouched: false, alert: { status: 'NOTHING_TO_SHOW', todo: true } }],
         },
@@ -688,7 +688,7 @@ describe('WorkspaceWindow', () => {
     await act(async () => { createWorkspace({ id: 'ws-2' }); });
     await flush();
     // Its Wall has saved at least once, as one does the moment it auto-spawns.
-    publishWorkspaceSession('ws-2', { version: 3, panes: [] });
+    publishWorkspaceSession('ws-2', { version: 4, panes: [] });
     expect(previousWorkspaceSession('ws-2')).not.toBeNull();
 
     await act(async () => { await closeWorkspaceWithSurfaces('ws-2'); });
@@ -996,7 +996,7 @@ describe('Surface moves between Workspaces', () => {
 
   it('preserves Session identity, ref, TODO and retained cwd, and recomputes both unions', async () => {
     const source = await twoWalls(['surface-3', 'pane-b']);
-    publishWorkspaceSession(source, { version: 3, panes: [{ id: 'surface-3', title: 'exited', cwd: '/retained' }, { id: 'pane-b', title: 'other' }] });
+    publishWorkspaceSession(source, { version: 4, panes: [{ id: 'surface-3', title: 'exited', cwd: '/retained' }, { id: 'pane-b', title: 'other' }] });
     await act(async () => setTerminalActivity('surface-3', { todo: true }));
     const kill = vi.spyOn(fake, 'killPty');
     const acknowledge = vi.spyOn(fake, 'alertAcknowledge');
@@ -1023,7 +1023,7 @@ describe('Surface moves between Workspaces', () => {
 
   it('fences a save collected during adoption before the retained cwd migrates', async () => {
     const source = await twoWalls();
-    publishWorkspaceSession(source, { version: 3, panes: [{ id: 'pane-a', title: 'exited', cwd: '/retained' }, { id: 'pane-b', title: 'other' }] });
+    publishWorkspaceSession(source, { version: 4, panes: [{ id: 'pane-a', title: 'exited', cwd: '/retained' }, { id: 'pane-b', title: 'other' }] });
     const target = getWallHandle('ws-2')!;
     const finish = target.finishSurfaceMove;
     let duringCommit!: Promise<void>;

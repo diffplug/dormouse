@@ -8,7 +8,7 @@ import { _resetPendingKillsForTesting, addPendingKill } from '../../lib/pending-
 import { applyTerminalSemanticEvents, removeTerminalPaneState } from '../../lib/terminal-state-store';
 
 const session = (id: string): PersistedSession => ({
-  version: 3,
+  version: 4,
   panes: [{ id, cwd: '/repo', title: 'shell', untouched: true }],
 });
 

@@ -1,5 +1,5 @@
 import type { LeafMeta } from '../../lib/lath/persistence';
-import type { PersistedSession } from '../../lib/session-types';
+import { PERSISTED_SESSION_VERSION, type PersistedSession } from '../../lib/session-types';
 import type { SurfaceReopenRecord } from '../../lib/reopen-stack';
 import type { BrowserAutomationProvider } from 'dor-lib-common/browser-providers';
 import type { WorkspaceId } from '../../lib/session-types';
@@ -142,8 +142,8 @@ export function stubWallHandle(workspaceId: WorkspaceId, overrides: Partial<Wall
     showMoveNotice: () => {},
     showNotice: () => {},
     reopenSurface: () => { throw new Error('Reopen is unavailable'); },
-    serializeNow: () => ({ version: 3, panes: [] }),
-    serializeReported: () => ({ version: 3, panes: [] }),
+    serializeNow: () => ({ version: PERSISTED_SESSION_VERSION, panes: [] }),
+    serializeReported: () => ({ version: PERSISTED_SESSION_VERSION, panes: [] }),
     surfaceIds: () => [],
     ownsSurface: () => false,
     iframeSurfaceIds: () => [],
@@ -159,7 +159,7 @@ export function stubWallHandle(workspaceId: WorkspaceId, overrides: Partial<Wall
     prepareWorkspaceTransfer: async () => ({
       payload: {
         workspaceId,
-        workspace: { id: workspaceId, name: '', nameIsAuto: false, session: { version: 3, panes: [] } },
+        workspace: { id: workspaceId, name: '', nameIsAuto: false, session: { version: PERSISTED_SESSION_VERSION, panes: [] } },
         terminalIds: [],
         allIds: [],
       },

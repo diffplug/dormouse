@@ -29,7 +29,7 @@ let fake: FakePtyAdapter & { reapsTools?: boolean };
 let spawned: string[];
 
 function session(panes: PersistedPane[]): PersistedSession {
-  return { version: 3, panes, doors: [] };
+  return { version: 4, panes, doors: [] };
 }
 
 const reapedPane: PersistedPane = {

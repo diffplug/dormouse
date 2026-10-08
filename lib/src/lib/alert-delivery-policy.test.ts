@@ -48,7 +48,7 @@ describe('workspace delivery policy', () => {
   it('round-trips sparse choices in both host shapes and follows rename/reset', () => {
     const id = workspace();
     setWorkspaceAlertDelivery(id, { speakVoice: 'voice-uri', speakEnabled: false });
-    publishWorkspaceSession(id, { version: 3, panes: [] });
+    publishWorkspaceSession(id, { version: 4, panes: [] });
     renameWorkspace(id, 'New name');
     const saved = readPersistedWindow(JSON.stringify(getWindowSnapshot()))!;
     expect(saved.workspaces[0]).toMatchObject({ name: 'New name', session: { alertDelivery: { speakVoice: 'voice-uri', speakEnabled: false } } });

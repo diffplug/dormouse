@@ -612,7 +612,7 @@ describe('VSCodeAdapter Surface ids', () => {
   afterEach(() => { vi.unstubAllGlobals(); resetSurfaceIdPool(); });
 
   it('init mints from the extension host, above every Surface the webview restored', async () => {
-    const saved = { version: 3, panes: [{ id: 'surface-41', cwd: null, title: 'shell', untouched: true }], doors: [{ id: 'surface-9', title: 'docs' }] };
+    const saved = { version: 4, panes: [{ id: 'surface-41', cwd: null, title: 'shell', untouched: true }], doors: [{ id: 'surface-9', title: 'docs' }] };
     vi.stubGlobal('acquireVsCodeApi', () => ({ postMessage, getState: () => saved, setState: vi.fn() }));
     const adapter = new VSCodeAdapter();
     const ready = adapter.init();

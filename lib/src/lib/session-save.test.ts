@@ -77,7 +77,7 @@ describe('saveSession', () => {
 
   it('persists the live alert state even when the previous snapshot was empty', async () => {
     const platform = createPlatform({
-      version: 3,
+      version: 4,
       layout: null,
       panes: [{ id: 'pane-a', title: 'Pane A', cwd: null, alert: null }],
     });
@@ -87,7 +87,7 @@ describe('saveSession', () => {
     await saveSession(platform, [{ id: 'pane-a', title: 'Pane A' }]);
 
     expect(platform.saveState).toHaveBeenCalledWith({
-      version: 3,
+      version: 4,
       doors: [],
       panes: [
         expect.objectContaining({
@@ -105,7 +105,7 @@ describe('saveSession', () => {
 
     expect(platform.getCwd).toHaveBeenCalledWith('pane-a');
     expect(platform.saveState).toHaveBeenCalledWith({
-      version: 3,
+      version: 4,
       doors: [],
       panes: [
         expect.objectContaining({
@@ -125,7 +125,7 @@ describe('saveSession', () => {
     }]);
 
     expect(platform.saveState).toHaveBeenCalledWith({
-      version: 3,
+      version: 4,
       doors: [
         expect.objectContaining({
           id: 'pane-a',
@@ -155,7 +155,7 @@ describe('saveSession', () => {
     }]);
 
     expect(platform.saveState).toHaveBeenCalledWith({
-      version: 3,
+      version: 4,
       doors: [
         expect.objectContaining({
           id: 'pane-a',
@@ -178,7 +178,7 @@ describe('saveSession', () => {
     await saveSession(platform, [{ id: 'pane-a', title: 'Pane A' }]);
 
     expect(platform.saveState).toHaveBeenCalledWith({
-      version: 3,
+      version: 4,
       doors: [],
       panes: [
         expect.objectContaining({
@@ -423,7 +423,7 @@ describe('saveSession', () => {
       // The post-kill flush: every probe would answer null and be discarded for
       // the previous record's value anyway.
       const platform = createPlatform({
-        version: 3,
+        version: 4,
         panes: [{ id: 'pane-a', title: 'Pane A', cwd: '/before-the-kill', untouched: false }],
       });
       platform.getCwds = vi.fn(async () => ({}));

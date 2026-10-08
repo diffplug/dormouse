@@ -2958,7 +2958,7 @@ fn snapshot_with_workspace(
         return Err("arrival record names no workspace.id".to_string());
     };
     let mut snapshot = snapshot.unwrap_or_else(
-        || serde_json::json!({ "version": 1, "workspaces": [], "activeWorkspaceId": id }),
+        || serde_json::json!({ "version": WINDOW_VERSION, "workspaces": [], "activeWorkspaceId": id }),
     );
     let workspaces = snapshot
         .get_mut("workspaces")
@@ -2986,6 +2986,39 @@ fn read_snapshot_from(dir: &Path, label: &str) -> Result<Option<JsonValue>, Stri
                 .map_err(|e| format!("unreadable snapshot for {label}: {e}"))
         })
         .transpose()
+}
+
+/// The `PersistedWindow.version` and its Workspaces' `PersistedSession.version`
+/// this build writes, and the only ones it keeps (docs/specs/transport.md ->
+/// "Persisted session types"). `standalone/scripts/persisted-format.json` pins
+/// them against the webview's.
+const WINDOW_VERSION: u64 = 2;
+const SESSION_VERSION: u64 = 4;
+
+/// Boot, before the arrival merge: delete every snapshot of another format,
+/// with its temp and geometry like a closed window, and every journal record
+/// whose Workspace session is of another format — a fresh start, never a
+/// migration. What it discarded, as `(snapshots, records)`.
+fn discard_other_formats(dir: &Path) -> Result<(usize, usize), String> {
+    let _disk = guard(&ARRIVAL_DISK_LOCK);
+    let version = |value: Option<&JsonValue>| value?.get("version")?.as_u64();
+    let mut snapshots = 0;
+    for label in routing::restorable_labels(session_file_names(dir)) {
+        // An unparseable snapshot is its window's to overwrite, as before.
+        let Ok(Some(snapshot)) = read_snapshot_from(dir, &label) else { continue };
+        if version(Some(&snapshot)) != Some(WINDOW_VERSION) {
+            remove_session_from(dir, &label)?;
+            snapshots += 1;
+        }
+    }
+    // An unreadable journal is `restore_arrivals`' to drop.
+    let Ok(mut records) = read_arrivals_from(dir) else { return Ok((snapshots, 0)) };
+    let before = records.len();
+    records.retain(|record| version(record.get("workspace").and_then(|w| w.get("session"))) == Some(SESSION_VERSION));
+    if records.len() != before {
+        write_arrivals_to(dir, &records)?;
+    }
+    Ok((snapshots, before - records.len()))
 }
 
 /// Every record still on disk at boot is a crash's leftover, so the Workspace
@@ -4677,7 +4710,16 @@ pub fn run() {
             match state_root(app.handle()) {
                 Ok(root) => {
                     let dir = root.join("sessions");
-                    // First: a Workspace in flight at the last exit is in no
+                    // First, another build's snapshots and records go, so
+                    // nothing below restores or merges them (§Persistence).
+                    match discard_other_formats(&dir) {
+                        Ok((0, 0)) => {}
+                        Ok((snapshots, records)) => append_log(format!(
+                            "[session] discarded {snapshots} snapshot(s) and {records} arrival record(s) from another version"
+                        )),
+                        Err(e) => append_log(format!("[session] {e}")),
+                    }
+                    // Then: a Workspace in flight at the last exit is in no
                     // snapshot until this puts it in its target's, and a
                     // tear-out target's file must exist before the enumeration
                     // below (§Arrival queue).
@@ -4809,14 +4851,15 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{
-        arrivals_path, find_node_binary, forget_arrival_on_disk,
+        arrivals_path, discard_other_formats, find_node_binary, forget_arrival_on_disk, geometry_path,
         open_ports_many_timeout, read_arrivals_from,
-        read_session_from, record_arrival_on_disk,
+        read_session_from, record_arrival_on_disk, record_workspace_id,
         resolve_dor_cli_paths, resolve_sidecar_path, restore_arrivals, session_file_name,
         session_file_names, state_root_from, strip_windows_verbatim_prefix,
         sweep_orphan_session_temps, temp_write_path,
         write_session_to, JsonValue, OPEN_PORT_TIMEOUT_MS,
         OPEN_PORT_TIMEOUT_PER_ID_MS, OPEN_PORT_ROUND_TRIP_MARGIN_MS, SESSION_TEMP_SUFFIX,
+        SESSION_VERSION, WINDOW_VERSION,
     };
     use super::routing;
     use super::guard;
@@ -4963,7 +5006,7 @@ mod tests {
     // --- Pending arrivals on disk (§Arrival queue) ---------------------------
 
     fn workspace_json(id: &str, name: &str) -> JsonValue {
-        serde_json::json!({ "id": id, "name": name, "session": { "version": 3, "panes": [] } })
+        serde_json::json!({ "id": id, "name": name, "session": { "version": SESSION_VERSION, "panes": [] } })
     }
 
     fn arrival_of(id: &str, from: &str, to: &str) -> routing::Arrival {
@@ -4982,7 +5025,7 @@ mod tests {
     fn snapshot_json(entries: &[(&str, &str)], active: &str) -> String {
         let workspaces: Vec<JsonValue> =
             entries.iter().map(|(id, name)| workspace_json(id, name)).collect();
-        serde_json::json!({ "version": 1, "workspaces": workspaces, "activeWorkspaceId": active })
+        serde_json::json!({ "version": WINDOW_VERSION, "workspaces": workspaces, "activeWorkspaceId": active })
             .to_string()
     }
 
@@ -5066,7 +5109,7 @@ mod tests {
         let ws2 = read_snapshot(dir.path(), "ws-2").unwrap();
         assert_eq!(snapshot_ids(&ws2), vec!["workspace-7"]);
         assert_eq!(ws2["activeWorkspaceId"], "workspace-7");
-        assert_eq!(ws2["version"], 1);
+        assert_eq!(ws2["version"], WINDOW_VERSION);
         // The window the merge created is one the boot enumeration reopens.
         assert_eq!(routing::restorable_labels(session_file_names(dir.path())), vec!["ws-2"]);
     }
@@ -5591,9 +5634,9 @@ mod tests {
     #[test]
     fn the_surface_seed_covers_panes_and_doors_in_snapshots_and_the_journal() {
         let dir = TempDir::new("ids-surface-seed");
-        let snapshot = serde_json::json!({ "version": 1, "activeWorkspaceId": "workspace-2", "workspaces": [{
+        let snapshot = serde_json::json!({ "version": WINDOW_VERSION, "activeWorkspaceId": "workspace-2", "workspaces": [{
             "id": "workspace-2", "name": "Saved",
-            "session": { "version": 3, "panes": [{ "id": "surface-3" }], "doors": [{ "id": "surface-9" }] }
+            "session": { "version": SESSION_VERSION, "panes": [{ "id": "surface-3" }], "doors": [{ "id": "surface-9" }] }
         }] });
         write_session_to(dir.path(), "main", &snapshot.to_string()).unwrap();
         assert_eq!(super::saved_windows(dir.path()).next_surface, 10);
@@ -5620,6 +5663,41 @@ mod tests {
         fs::write(arrivals_path(dir.path()), "{not json").unwrap();
         assert!(restore_arrivals(dir.path()).is_err());
         assert!(!arrivals_path(dir.path()).exists());
+    }
+
+    #[test]
+    fn the_persisted_format_matches_the_webviews() {
+        let pinned: JsonValue = serde_json::from_str(include_str!("../../scripts/persisted-format.json")).unwrap();
+        assert_eq!(pinned, serde_json::json!({ "window": WINDOW_VERSION, "session": SESSION_VERSION }));
+    }
+
+    #[test]
+    fn boot_discards_another_formats_snapshots_and_journal_records() {
+        let dir = TempDir::new("discard-other-formats");
+        let old = serde_json::json!({ "version": 1, "activeWorkspaceId": "w", "workspaces": [
+            { "id": "w", "name": "Old", "session": { "version": 3, "panes": [] } }
+        ] });
+        write_session_to(dir.path(), "ws-2", &old.to_string()).unwrap();
+        fs::write(dir.path().join("ws-2.json.tmp"), b"old").unwrap();
+        fs::write(geometry_path(dir.path(), "ws-2"), b"{}").unwrap();
+        write_session_to(dir.path(), "main", &snapshot_json(&[("workspace-2", "Kept")], "workspace-2")).unwrap();
+        fs::write(geometry_path(dir.path(), "main"), b"{}").unwrap();
+        record_arrival_on_disk(dir.path(), &arrival_of("workspace-7", "main", "ws-3")).unwrap();
+        let mut stale = arrival_of("workspace-8", "main", "ws-4");
+        stale.payload["workspace"]["session"]["version"] = serde_json::json!(3);
+        record_arrival_on_disk(dir.path(), &stale).unwrap();
+
+        assert_eq!(discard_other_formats(dir.path()).unwrap(), (1, 1));
+
+        assert!(read_session_from(dir.path(), "ws-2").unwrap().is_none());
+        assert!(!dir.path().join("ws-2.json.tmp").exists());
+        assert!(!geometry_path(dir.path(), "ws-2").exists());
+        assert_eq!(snapshot_ids(&read_snapshot(dir.path(), "main").unwrap()), vec!["workspace-2"]);
+        assert!(geometry_path(dir.path(), "main").exists());
+        let records = read_arrivals_from(dir.path()).unwrap();
+        assert_eq!(records.iter().filter_map(record_workspace_id).collect::<Vec<_>>(), vec!["workspace-7"]);
+        // Nothing of another format is left, so a second boot changes nothing.
+        assert_eq!(discard_other_formats(dir.path()).unwrap(), (0, 0));
     }
 
     /// The Windows half of `restrict_to_owner`: after it runs, the DACL must be

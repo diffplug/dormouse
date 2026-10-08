@@ -60,12 +60,12 @@ describe("workspace registry", () => {
   it("mints Surface ids from the host, above the highest Surface the Window restored", async () => {
     const h = host();
     const session = (panes: string[], doors: string[]) => ({
-      version: 3,
+      version: 4,
       panes: panes.map((id) => ({ id, cwd: null, title: "shell", untouched: true })),
       doors: doors.map((id) => ({ id, title: "docs" })),
     }) as PersistedSession;
     const restored: PersistedWindow = {
-      version: 1,
+      version: 2,
       activeWorkspaceId: "workspace-1",
       workspaces: [
         { id: "workspace-1", name: "Workspace 1", nameIsAuto: true, session: session(["surface-3"], ["surface-1500"]) },

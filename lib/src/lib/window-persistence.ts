@@ -1,10 +1,4 @@
-import { isRecord } from './is-record';
-import {
-  readPersistedSession,
-  readPersistedWindow,
-  wrapSessionInWindow,
-  type PersistedWindow,
-} from './session-types';
+import { readPersistedWindow, type PersistedWindow } from './session-types';
 
 /**
  * The standalone host's stored top-level blob is a `PersistedWindow`
@@ -30,26 +24,14 @@ export interface SessionKeyValueStore {
 }
 
 /**
- * Read the stored Window, or null when nothing readable is there. A corrupt blob
- * is discarded so a bad save can never block startup.
- *
- * A blob written before standalone persisted Windows is a bare
- * `PersistedSession`; it is wrapped as this Window's one Workspace. That is the
- * only migration — every write since is a Window.
+ * Read the stored Window, or null when nothing readable is there. A corrupt blob,
+ * or one another build wrote, is discarded so it can never block startup.
  */
 export function loadWindowState(storage: SessionKeyValueStore, key: string): PersistedWindow | null {
   const raw = storage.getItem(key);
   if (raw === null) return null;
   const parsed = parseStoredJson(raw);
-  if (parsed === null) return null;
-  // Dispatch on the version discriminator rather than trying both readers: each
-  // one warns on a shape it does not recognize, and a Window handed to the
-  // Session reader would warn on every boot.
-  if (isRecord(parsed) && parsed.version === 3) {
-    const legacy = readPersistedSession(parsed);
-    return legacy ? wrapSessionInWindow(legacy) : null;
-  }
-  return readPersistedWindow(parsed);
+  return parsed === null ? null : readPersistedWindow(parsed);
 }
 
 /** Persist `snapshot` under `key`. */

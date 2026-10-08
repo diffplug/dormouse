@@ -1,12 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { loadWindowState, saveWindowState, type SessionKeyValueStore } from './window-persistence';
-import {
-  DEFAULT_WORKSPACE_ID,
-  DEFAULT_WORKSPACE_NAME,
-  wrapSessionInWindow,
-  type PersistedSession,
-  type PersistedWindow,
-} from './session-types';
+import type { PersistedSession, PersistedWindow } from './session-types';
 
 function memoryStore(seed?: string): SessionKeyValueStore & { value: () => string | null } {
   let stored: string | null = seed ?? null;
@@ -18,16 +12,16 @@ function memoryStore(seed?: string): SessionKeyValueStore & { value: () => strin
 }
 
 const sessionA: PersistedSession = {
-  version: 3,
+  version: 4,
   panes: [{ id: 'pane-a', title: 'A', cwd: '/a', untouched: false }],
 };
 const sessionB: PersistedSession = {
-  version: 3,
+  version: 4,
   panes: [{ id: 'pane-b', title: 'B', cwd: '/b', untouched: false }],
 };
 
 const twoWorkspaces: PersistedWindow = {
-  version: 1,
+  version: 2,
   workspaces: [
     { id: 'ws-1', name: 'One', nameIsAuto: false, session: sessionA },
     { id: 'ws-2', name: 'Two', nameIsAuto: false, session: sessionB },
@@ -42,33 +36,34 @@ describe('window-persistence', () => {
     expect(loadWindowState(store, 'k')).toEqual(twoWorkspaces);
   });
 
-  it('wraps a pre-Window blob as this Window\'s one Workspace', () => {
-    const store = memoryStore(JSON.stringify(sessionA));
-    expect(loadWindowState(store, 'k')).toEqual({
-      version: 1,
-      workspaces: [{ id: DEFAULT_WORKSPACE_ID, name: DEFAULT_WORKSPACE_NAME, nameIsAuto: true, session: sessionA }],
-      activeWorkspaceId: DEFAULT_WORKSPACE_ID,
-    });
-    expect(loadWindowState(store, 'k')).toEqual(wrapSessionInWindow(sessionA));
+  it('discards a blob an older build wrote, quietly', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const info = vi.spyOn(console, 'info').mockImplementation(() => {});
+    // A bare Session from before standalone persisted Windows is not wrapped.
+    expect(loadWindowState(memoryStore(JSON.stringify({ ...sessionA, version: 3 })), 'k')).toBeNull();
+    expect(loadWindowState(memoryStore(JSON.stringify({ ...twoWorkspaces, version: 1 })), 'k')).toBeNull();
+    expect(warn).not.toHaveBeenCalled();
+    expect(info).toHaveBeenCalledTimes(2);
+    warn.mockRestore();
+    info.mockRestore();
   });
 
   it('starts fresh on an absent, corrupt, or unrecognizable blob', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     expect(loadWindowState(memoryStore(), 'k')).toBeNull();
     expect(loadWindowState(memoryStore('{not json'), 'k')).toBeNull();
-    expect(loadWindowState(memoryStore('{"version":99}'), 'k')).toBeNull();
-    // A v3 blob that fails its own guard is not retried as a Window.
-    expect(loadWindowState(memoryStore('{"version":3,"panes":"nope"}'), 'k')).toBeNull();
+    expect(loadWindowState(memoryStore('{"version":2,"workspaces":"nope"}'), 'k')).toBeNull();
+    expect(loadWindowState(memoryStore('{"panes":[]}'), 'k')).toBeNull();
     warn.mockRestore();
   });
 
   it('drops an unreadable Workspace instead of the whole Window', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const store = memoryStore(JSON.stringify({
-      version: 1,
+      version: 2,
       workspaces: [
         { id: 'ws-1', name: 'One', session: sessionA },
-        { id: 'ws-2', name: 'Two', session: { version: 3, panes: 'nope' } },
+        { id: 'ws-2', name: 'Two', session: { version: 4, panes: 'nope' } },
       ],
       activeWorkspaceId: 'ws-2',
     }));
