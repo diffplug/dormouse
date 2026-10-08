@@ -2329,7 +2329,7 @@
       "author": "Joseph Birr-Pixton",
       "homepage": "https://github.com/rustls/rustls",
       "versions": [
-        "0.23.40"
+        "0.23.45"
       ]
     },
     {
@@ -2374,7 +2374,7 @@
       "author": "Brian Smith",
       "homepage": "https://github.com/rustls/webpki",
       "versions": [
-        "0.103.13"
+        "0.103.15"
       ]
     },
     {
