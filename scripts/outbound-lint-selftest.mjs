@@ -10,8 +10,8 @@
  * one list of what it looks for; this file keys a fixture to each label and
  * goes red on any form it has no fixture for.
  *
- * Each case edits one real, tracked file and restores it (`scripts/lint-kit.mjs`
- * owns the restore).
+ * Each case edits one real, tracked file in a sandbox copy of the tree
+ * (`scripts/lint-kit.mjs` owns the sandbox).
  */
 
 import { appendText as append, makeSelftest, replaceText as replace } from './lint-kit.mjs';
@@ -65,7 +65,7 @@ const FIXTURES = [
   ['remote URL literal', '\nexport const __selftest = (p: string) => `wss://relay.example.net/${p}`;\n'],
 ];
 
-const selftest = makeSelftest('outbound-lint.mjs', '.outbound-selftest.bak');
+const selftest = makeSelftest('outbound-lint.mjs');
 for (const [name, source] of FIXTURES) {
   selftest.withMutationReporting(
     TARGET,

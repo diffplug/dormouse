@@ -25,10 +25,8 @@
  * silently re-arm the counted-sites gap on the next addition. A control can
  * also be present and wrong; the security audit still owns that.
  *
- * Restores every file it touches on any thrown error. A signal mid-run (Ctrl-C,
- * a cancelled job) is the one gap: it can leave an installer with one control
- * deleted and a `*.selftest.bak` beside it. `deploy-lint` catches that on the
- * way in, and the backups are gitignored so they cannot be staged by accident.
+ * Every edit lands in a sandbox copy of the tree (`scripts/lint-kit.mjs`),
+ * never in the checkout.
  */
 
 import { writeFileSync } from 'node:fs';
@@ -36,7 +34,7 @@ import { writeFileSync } from 'node:fs';
 import { makeSelftest, readRepoFile } from './lint-kit.mjs';
 import { INSTALLERS, RULES } from './deploy-lint.mjs';
 
-const selftest = makeSelftest('deploy-lint.mjs', '.selftest.bak');
+const selftest = makeSelftest('deploy-lint.mjs');
 
 for (const {
   rule,

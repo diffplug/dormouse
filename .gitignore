@@ -96,13 +96,6 @@ lib/screenshots/
 audit-*.md
 audit-status.txt
 
-# lint self-test backups, if a signal interrupts one mid-run
-*.selftest.bak
-*.e2e-selftest.bak
-*.loopback-selftest.bak
-*.outbound-selftest.bak
-*.spec-selftest.bak
-
 # Impeccable per-developer state and generated critiques (design.json is shared).
 .impeccable/config.local.json
 .impeccable/critique/

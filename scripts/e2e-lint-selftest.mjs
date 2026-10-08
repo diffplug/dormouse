@@ -42,7 +42,7 @@ import {
   WEB_PUSH_SENDER,
 } from './e2e-lint.mjs';
 
-const selftest = makeSelftest('e2e-lint.mjs', '.e2e-selftest.bak');
+const selftest = makeSelftest('e2e-lint.mjs');
 
 for (const rule of RULES) {
   const name = rule.rule;

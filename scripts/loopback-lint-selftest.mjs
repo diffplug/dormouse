@@ -18,8 +18,8 @@
  * so an alternative can no longer ride along unmatched the way a corrupted
  * `WebSocket.Relay` branch did beside a working one.
  *
- * Each case appends a listener to one real, tracked, unguarded source file and
- * restores it afterwards (`scripts/lint-kit.mjs` owns the restore). The target
+ * Each case appends a listener to one real, tracked, unguarded source file in a
+ * sandbox copy of the tree (`scripts/lint-kit.mjs` owns the sandbox). The target
  * is deliberately a file with no listener and no guard reference of its own, so
  * a case that goes red went red for the bind and not for something already
  * there.
@@ -32,8 +32,7 @@ const LINT = 'scripts/loopback-lint.mjs';
 /**
  * A tracked, non-test source file that binds nothing and names no guard.
  * Anything with those three properties works; this one is a small Windows-only
- * dev helper, so a mutation cannot disturb a build even if a run is killed
- * between the edit and the restore.
+ * dev helper.
  */
 const TARGET = 'standalone/scripts/clean-dev-sidecar.mjs';
 const TEST_TARGET = 'lib/src/lib/feature-flags.test.ts';
@@ -75,7 +74,7 @@ const FIXTURES = [
   ['vite, server.host', "\nexport const __selftest = { server: { proxy: { '/api': { target: 'http://up' } }, host: '127.0.0.1' } };\n"],
 ];
 
-const selftest = makeSelftest('loopback-lint.mjs', '.loopback-selftest.bak');
+const selftest = makeSelftest('loopback-lint.mjs');
 
 for (const [name, source] of FIXTURES) {
   selftest.withAppended(
