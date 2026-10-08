@@ -1,6 +1,6 @@
 import type { SessionStatus } from './alert-manager';
 
-/** One unresolved summons, retained while deferred behind animation. Never cold-persisted. */
+/** One unresolved summons, retained while deferred behind confirmed work. Never cold-persisted. */
 export interface AlertEpisode {
   id: string;
   startedAt: number;

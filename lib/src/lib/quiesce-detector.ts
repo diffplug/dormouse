@@ -14,9 +14,9 @@ export interface QuiesceDetectorOptions {
   onChange?: (status: QuiesceStatus) => void;
   /**
    * A busy Session stayed quiet long enough to look finished. Fired once per
-   * settle with the detector already quiet, before onChange publishes that
-   * transition, so an owner can latch a ring before the reset is announced.
-   * Whether a settle rings a human is the owner's policy call.
+   * settle with the detector already quiet — so the completion it dispatches
+   * never defers itself — and before onChange publishes that transition, so
+   * no idle flash precedes a ring. Whether a settle rings is the owner's call.
    */
   onSettled?: () => void;
 }
@@ -178,12 +178,7 @@ export class QuiesceDetector {
         case 'settledConfirm':
           if (this.status !== 'MIGHT_NEED_ATTENTION') break;
           this.resetOutputTracking();
-          // Completion consumers must see quiet, not defer the completion this
-          // detector just produced. Publish after dispatch so no idle flash
-          // precedes the ring; preserve any fresh activity a consumer starts.
-          this.status = 'NOTHING_TO_SHOW';
-          this.onSettled?.();
-          if (!this.disposed && this.status === 'NOTHING_TO_SHOW') this.onChange?.(this.status);
+          this.setStatus('NOTHING_TO_SHOW', () => this.onSettled?.());
           break;
       }
     }, delay);
@@ -214,9 +209,12 @@ export class QuiesceDetector {
     this.outputCountSinceReset = 0;
   }
 
-  private setStatus(status: QuiesceStatus): void {
+  /** The one writer of `status`. `beforePublish` runs with the new status
+   *  already readable; a hook that moves the detector on publishes for itself. */
+  private setStatus(status: QuiesceStatus, beforePublish?: () => void): void {
     if (this.status === status) return;
     this.status = status;
-    this.onChange?.(status);
+    beforePublish?.();
+    if (this.status === status && !this.disposed) this.onChange?.(status);
   }
 }

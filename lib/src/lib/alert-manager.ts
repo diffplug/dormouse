@@ -453,27 +453,11 @@ export class AlertManager {
 
   private createDetector(id: string): QuiesceDetector {
     return new QuiesceDetector({
-      // Transitions drive deferral even for unwatched commands.
-      onChange: () => {
-        const entry = this.entries.get(id);
-        if (!entry || (!this.isWatching(entry) && entry.ring === null)) return;
-        this.notify(id);
-      },
+      // Every transition may move the projection — WATCHING's public state or
+      // a ring's deferral — and `notify` skips what did not change.
+      onChange: () => this.notify(id),
       onSettled: () => this.onSettled(id),
     });
-  }
-
-  /**
-   * The detector alone decides when output is active enough to defer an
-   * owed ring: confirmed work only, since a candidate that enters and expires
-   * with each sparse redraw would blink the ring. Exit sources remain
-   * authoritative, including a report joined to an exit.
-   */
-  private isDeferred(entry: AlertEntry): boolean {
-    return entry.ring !== null
-      && this.deferAlertsUntilQuiet
-      && entry.detector.isConfirmedBusy()
-      && !entry.ring.sources.includes('exit');
   }
 
   /**
@@ -565,7 +549,7 @@ export class AlertManager {
       }
       case 'commandFinished':
         if (!event.seen) break;
-        // A shell-reported exit is authoritative, so recent animation never
+        // A shell-reported exit is authoritative, so confirmed work never
         // delays it. The detector only gates in-band terminal notifications.
         this.holdOrDeliver(id, entry, 'exit', {
           source: 'COMMAND_EXIT',
@@ -939,8 +923,21 @@ export class AlertManager {
 
   // --- Deferral ---
 
+  /**
+   * The detector alone decides when output is active enough to defer an
+   * owed ring: confirmed work only, since a candidate that enters and expires
+   * with each sparse redraw would blink the ring. Exit sources remain
+   * authoritative, including a report joined to an exit.
+   */
+  private isDeferred(entry: AlertEntry): boolean {
+    return entry.ring !== null
+      && this.deferAlertsUntilQuiet
+      && entry.detector.isConfirmedBusy()
+      && !entry.ring.sources.includes('exit');
+  }
+
   /** A never-shown ring released by the detector is still fresh news: hold it
-   * if the user is engaged. Detector transitions publish even without WATCHING. */
+   * if the user is engaged. Run by `notify` before every publish. */
   private reconcileRing(id: string, entry: AlertEntry): void {
     const { ring } = entry;
     if (ring === null) return;

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AlertManager } from './alert-manager';
 import { createAlertDeliveryScheduler, type AlertDeliveryScheduler } from './alert-delivery-scheduler';
 import { DEFAULT_ALERT_SETTINGS } from './alert-settings-model';
-import { armCommandExit, driveToBusy, engage, finishCommand, goIdle, heartbeat, REPORT, runCommand, settle } from './alert-manager-test-utils';
+import { armCommandExit, driveToBusy, driveToCandidate, engage, finishCommand, goIdle, heartbeat, REPORT, runCommand, settle } from './alert-manager-test-utils';
 import { toPersistedAlertState } from './session-types';
 import { createOwnerPtyStream } from '../host/owner-pty';
 
@@ -52,16 +52,15 @@ describe('owed alerts during resumed output', () => {
     ring(source);
     const episode = manager.getState(ID).episode;
     vi.advanceTimersByTime(1_000);
-    manager.onData(ID);
-    vi.advanceTimersByTime(1_600);
-    manager.onData(ID);
+    driveToCandidate(manager, ID);
     // A candidate alone would blink the ring with every sparse redraw.
     expect(manager.getState(ID)).toMatchObject({ status: 'ALERT_RINGING', episode });
     manager.onData(ID);
     expect(manager.getState(ID)).toMatchObject({ status: 'BUSY', episode, todo: false });
     vi.advanceTimersByTime(5_000);
     expect(manager.getState(ID)).toMatchObject({ status: 'ALERT_RINGING', episode });
-    vi.advanceTimersByTime(DELAY - 7_600 - 1);
+    // Due a full delay after the ring opened, not after it came back.
+    vi.advanceTimersByTime(episode!.startedAt + DELAY - Date.now() - 1);
     expect(spoken).not.toHaveBeenCalled();
     vi.advanceTimersByTime(1);
     expect(spoken).toHaveBeenCalledExactlyOnceWith(ID, episode!.id);
@@ -166,13 +165,15 @@ describe('owed alerts during resumed output', () => {
     vi.advanceTimersByTime(DELAY);
     expect(spoken).toHaveBeenCalledOnce();
   });
-  it('ignores late isolated resize output and repeated typing echoes', () => {
+  it('ignores late isolated resize output', () => {
     manager.onResize(ID);
     manager.onData(ID);
     vi.advanceTimersByTime(600);
     manager.onData(ID); // A late redraw outside the resize grace is still only one chunk.
     manager.notifyFromProtocol(ID, REPORT);
     expect(manager.getState(ID).status).toBe('ALERT_RINGING');
+  });
+  it('ignores repeated typing echoes', () => {
     manager.acknowledge(ID, { input: true });
     for (let i = 0; i < 20; i++) {
       vi.advanceTimersByTime(400);

@@ -8,19 +8,7 @@ import {
 } from './terminal-protocol';
 import { cfg } from '../cfg';
 import { toPersistedAlertState } from './session-types';
-import {
-  armCommandExit,
-  collectEpisodes,
-  driveToBusy,
-  engage,
-  finishCommand,
-  goIdle,
-  heartbeat,
-  leave,
-  REPORT,
-  runCommand,
-  settle,
-} from './alert-manager-test-utils';
+import { armCommandExit, collectEpisodes, driveToBusy, driveToCandidate, engage, finishCommand, goIdle, heartbeat, leave, REPORT, runCommand, settle } from './alert-manager-test-utils';
 
 describe('AlertManager in isolation', () => {
   let manager: AlertManager;
@@ -1219,9 +1207,7 @@ describe('AlertManager in isolation', () => {
 
     it('rings through candidate activity, deferring only once work is confirmed', () => {
       const id = 'defer-candidate';
-      manager.onData(id);
-      vi.advanceTimersByTime(1_600);
-      manager.onData(id);
+      driveToCandidate(manager, id);
 
       manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'Done' });
       expect(manager.getState(id).status).toBe('ALERT_RINGING');
