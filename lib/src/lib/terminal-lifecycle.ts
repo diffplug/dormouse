@@ -375,13 +375,13 @@ function typeCommandWhenPromptReady(id: string, command: string, requireIntegrat
     if (ready) {
       clearInterval(timer);
       seedLaunchedCommand(id, command);
-      getPlatform().writePty(id, `${command}\r`);
+      getPlatform().writePty(id, `${command}\r`, { launch: true });
     } else if ((elapsed += LAUNCH_PROMPT_POLL_MS) >= timeoutMs) {
       clearInterval(timer);
       // Best effort for split; drop for ensure (the handler kills + errors).
       if (!requireIntegration) {
         seedLaunchedCommand(id, command);
-        getPlatform().writePty(id, `${command}\r`);
+        getPlatform().writePty(id, `${command}\r`, { launch: true });
       }
     }
   }, LAUNCH_PROMPT_POLL_MS);

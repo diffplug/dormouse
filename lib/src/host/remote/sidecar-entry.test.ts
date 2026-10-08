@@ -784,6 +784,24 @@ describe('the sidecar host', () => {
     ]);
   });
 
+  it('forwards an OSC 367 open only from the run a launch write started', () => {
+    const opens = () => out.filter((line) => line.event === 'terminal:toolEvents')
+      .flatMap((line) => (line.data as { events: { kind: string; open?: { path: string } }[] }).events)
+      .flatMap((event) => event.kind === 'toolOpen' ? [event.open!.path] : []);
+    const open = (path: string) => `\x1b]367;open;${JSON.stringify({ v: 1, path, preview: false })}\x07`;
+    const start = '\x1b]633;E;view /a\x07\x1b]633;C\x07';
+    host.onPtyEvent('data', { id: 'pty-1', data: start });
+    host.onPtyEvent('data', { id: 'pty-1', data: open('/forged') });
+    // Typed by a user: never a launch.
+    host.handleCommand('pty:input', { id: 'pty-1', data: 'view /a\r', userInput: true });
+    host.onPtyEvent('data', { id: 'pty-1', data: `\x1b]633;D;0\x07${start}${open('/typed')}` });
+    host.handleCommand('pty:input', { id: 'pty-1', data: 'view /a\r', launch: true });
+    expect(calls.at(-1)).toMatchObject({ op: 'write', args: ['pty-1', 'view /a\r', undefined] });
+    host.onPtyEvent('data', { id: 'pty-1', data: `\x1b]633;D;0\x07${start}${open('/launched')}` });
+    host.onPtyEvent('data', { id: 'pty-1', data: `\x1b]633;D;0\x07${start}${open('/after')}` });
+    expect(opens()).toEqual(['/launched']);
+  });
+
   it('opens the resize grace before the PTY resizes', () => {
     const graced: string[] = [];
     vi.spyOn(host.alerts, 'onResize').mockImplementation((id) => void graced.push(`grace ${id} after ${calls.length} calls`));

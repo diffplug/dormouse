@@ -201,13 +201,16 @@ describe.each([
 
   // The sidecar acknowledges it and opens the echo window before it writes, so
   // the flag must ride the write itself — a separate command could lose the race.
-  it("writes user input with its acknowledgement in one message", async () => {
+  // A launch arms the PTY's OSC 367 open latch the same way, ahead of the shell.
+  it("writes user input with its acknowledgement, and a launch with its mark, in one message", async () => {
     const { adapter, sent } = await open();
     adapter.writePty("typed", "\x1b[I");
     adapter.writePty("typed", "y", { userInput: true });
+    adapter.writePty("typed", "view\r", { launch: true });
     expect(sent()).toEqual([
-      ["pty_write", { id: "typed", data: "\x1b[I", paced: undefined, userInput: undefined }],
-      ["pty_write", { id: "typed", data: "y", paced: undefined, userInput: true }],
+      ["pty_write", { id: "typed", data: "\x1b[I", paced: undefined, userInput: undefined, launch: undefined }],
+      ["pty_write", { id: "typed", data: "y", paced: undefined, userInput: true, launch: undefined }],
+      ["pty_write", { id: "typed", data: "view\r", paced: undefined, userInput: undefined, launch: true }],
     ]);
   });
 

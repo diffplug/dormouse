@@ -555,7 +555,7 @@ function typeToolCommand(
   { acceptCompletedRun = true }: { acceptCompletedRun?: boolean } = {},
 ): Promise<WaitOutcome> {
   const previousRun = getTerminalPaneState(id).lastCommand?.id ?? null;
-  getPlatform().writePty(id, `${command}\r`);
+  getPlatform().writePty(id, `${command}\r`, { launch: true });
   return waitForTerminalState(
     id,
     (state) => surfaceRunsCommand(state, command, cwd)
@@ -1151,12 +1151,13 @@ export function useDorControl({
     }
 
     if (detail.method === SURFACE_CONTROL_METHODS.tool) {
-      // An OSC 367 `open` comes only from a Tool Session's running designated
-      // command, as serving does: a later command in that pane is inert.
+      // An OSC 367 `open` reaches here only from the run the host itself
+      // launched in that PTY (`ToolLaunchLatch`, at the PTY owner's parse), and
+      // acts only for a Tool Session. The command line the shell reports is
+      // output, so it never vouches for the run (docs/specs/dor-tool.md -> OSC 367).
       if (detail.oscOpen) {
         const tool = detail.surfaceId === undefined ? undefined : lath.getMeta(detail.surfaceId)?.params;
-        const run = detail.surfaceId === undefined ? null : getTerminalPaneState(detail.surfaceId).currentCommand;
-        if (!isToolParams(tool) || run?.rawCommandLine !== tool.command) {
+        if (!isToolParams(tool)) {
           detail.respond({ ok: false, error: 'OSC 367 open is accepted only from a running Tool' });
           return;
         }

@@ -343,7 +343,7 @@ export class TauriAdapter implements PlatformAdapter {
   /** `userInput` rides the write itself: the sidecar acknowledges it and opens
    *  the echo window before writing (docs/specs/alert.md → Engagement). */
   writePty(id: string, data: string, options?: WritePtyOptions): void {
-    invoke("pty_write", { id, data, paced: options?.paced, userInput: options?.userInput });
+    invoke("pty_write", { id, data, paced: options?.paced, userInput: options?.userInput, launch: options?.launch });
   }
 
   resizePty(id: string, cols: number, rows: number): void {

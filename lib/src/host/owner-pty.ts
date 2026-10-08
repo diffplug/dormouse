@@ -13,6 +13,7 @@ import {
   type TerminalProtocolEvent,
 } from '../lib/terminal-protocol';
 import type { TerminalSemanticEvent } from '../lib/terminal-state';
+import { ToolLaunchLatch } from '../lib/tool-launch-latch';
 import { stripMouseReportsFromInput } from '../lib/terminal-report-filter';
 
 /**
@@ -25,8 +26,9 @@ export interface OwnerPtyStreamOptions {
   /** The host's one manager (`lib/src/host/alert-host.ts`). */
   alerts: AlertManager;
   colorProvider: TerminalColorProvider;
-  /** The Tool announcements, state and command-start resets of one parse, in
-   *  stream order, for the renderer that holds the Tool stores. */
+  /** The Tool announcements, state, admitted `open` requests and command-start
+   *  resets of one parse, in stream order, for the renderer that holds the Tool
+   *  stores. */
   onToolEvents(events: TerminalProtocolEvent[]): void;
   /** The timestamped semantic events of one parse, for the renderer's
    *  terminal-state store. */
@@ -41,6 +43,12 @@ export interface OwnerPtyStreamOptions {
   onChunk(chunk: ProcessedPtyChunk): void;
 }
 
+export interface OwnerPtyStream extends ProcessedPtyStream {
+  /** The host is typing a command line into this PTY generation: its run alone
+   *  may make OSC 367 `open` requests (`ToolLaunchLatch`). */
+  armLaunch(): void;
+}
+
 /**
  * One PTY generation's parse site, feeding the alerts and the renderer from the
  * same pass: per batch, reports and command boundaries to the manager in stream
@@ -48,12 +56,13 @@ export interface OwnerPtyStreamOptions {
  * replies; then each visible chunk counts as the Session working, ahead of the
  * renderer (`docs/specs/terminal-escapes.md` → "Parsing location").
  */
-export function createOwnerPtyStream(id: string, options: OwnerPtyStreamOptions): ProcessedPtyStream {
-  return createProcessedPtyStream({
+export function createOwnerPtyStream(id: string, options: OwnerPtyStreamOptions): OwnerPtyStream {
+  const launch = new ToolLaunchLatch();
+  const stream = createProcessedPtyStream({
     colorProvider: options.colorProvider,
     onEvents(events) {
       const semanticEvents = applyTerminalEvents(options.alerts, id, events);
-      const toolEvents = collectTerminalToolEvents(events);
+      const toolEvents = collectTerminalToolEvents(launch.admit(events));
       if (toolEvents.length > 0) options.onToolEvents(toolEvents);
       if (semanticEvents.length > 0) options.onSemanticEvents(semanticEvents);
       for (const response of collectTerminalProtocolResponses(events)) options.writeResponse(response);
@@ -64,6 +73,7 @@ export function createOwnerPtyStream(id: string, options: OwnerPtyStreamOptions)
       options.onChunk(chunk);
     },
   });
+  return Object.assign(stream, { armLaunch: () => launch.arm() });
 }
 
 /** The slice of a host's PTY manager that input and size changes reach. */

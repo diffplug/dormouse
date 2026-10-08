@@ -132,6 +132,14 @@ A Workspace transfer carries the live browser binding separately from its durabl
 
 JSON escaping can double the source length of a valid path, so a field within its own bound can still exceed the serialized payload cap of the host. C1 OSC and ST are literal JSON characters, unlike escaped C0 controls; allowing them in a serve path inserts terminal framing into the emitted sequence.
 
+The `open` gate keys on the host's own launch (2026-10, after a security audit). It first compared the command line the shell reported (`OSC 633;E`) with the Tool's command, but that line is terminal output, the attacker's own channel. A latch only the host's write arms admits nothing output alone can claim. Alternatives considered on 2026-10-07:
+
+- A per-launch nonce in the Tool's environment, echoed in the `open` payload: spawn environment reaches every later command in that shell (as `DORMOUSE_DEHYDRATE` does, [Reaping](#reaping)), a takeover types into a shell already running, which has no PowerShell spelling for a `VAR=value` prefix, and every Tool would have to send it.
+- The PTY's foreground process: node-pty exposes neither the foreground process group nor its pid ([Reaping](#reaping)), and Windows has no equivalent.
+- Keeping the latch in the renderer's terminal state: hosts send a parse's Tool events before its semantic events, so a renderer gate sees state from before the chunk the `open` arrived in, and a webview reload rebuilds that state from replay without the launch. The PTY owner sees every boundary in stream order and outlives the webview.
+
+The latch fails closed: a Tool that prints a second shell-integration start (a nested integrated shell) or a prompt sequence ends its own run's opens until its next launch. One window stays: output written between the host's write and the shell's report of that start, which only a process already writing to that terminal can produce, can take the start until the shell's own report ends it.
+
 ## Closing unsaved Tools
 
 Host save request ids restart at 1 on a replacement connection. A completion that reads the current frame connection can therefore acknowledge a new request after reconnect, permitting closure before the new save finishes. The accepted host object distinguishes connection generations even when a reconnect repeats its nonce.

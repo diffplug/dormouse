@@ -142,7 +142,8 @@ Source of truth: the message schema in `vscode-ext/src/message-types.ts` (`Webvi
 | Host → webview | `pty:openPortsMany` | `[]` for an id with no live PTY. |
 | Host → webview | `pty:data` | PTY output after state-driving supported OSCs are parsed/stripped; `OSC 8` and ImageAddon's inline-image `OSC 1337` forms are preserved for xterm.js, routed only to the owning router. |
 | Host → webview | `terminal:semanticEvents` | Normalized CWD / prompt-command / title events the owner's parser derived, in stream order. |
-| Host → webview | `terminal:toolEvents` | Ordered Tool announcements, state, and command-start resets (`docs/specs/dor-tool.md` → OSC 367). |
+| Host → webview | `terminal:toolEvents` | Ordered Tool announcements, state, admitted `open` requests, and command-start resets (`docs/specs/dor-tool.md` → OSC 367). |
+| Webview → host | `pty:input` / `pty_write` | `launch`: a command line the host types to run; the owner arms its OSC 367 `open` latch before writing (`docs/specs/dor-tool.md` → OSC 367). |
 | Host → webview | `terminal:clipboardOffer` | One decoded `OSC 52` write, offered to the copy editor (`docs/specs/mouse-and-clipboard.md` §4.6). |
 | Host → webview | `terminal:clientInput` | A remote Client wrote to this Session, which is no longer untouched (`docs/specs/layout.md` → "Kill confirmation"). |
 | Webview → host | `pty:spawn` | `options.alert`: a cold-restored pane's persisted alert state (`docs/specs/alert.md` → Public State). |
