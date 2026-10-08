@@ -3483,15 +3483,14 @@ describe('Wall on the Lath engine', () => {
     expect(focusOf('pane-a')).toBe('false');
   });
 
-  it('a split mints its id from the host pool, past any id this Wall already holds', async () => {
-    vi.spyOn(console, 'error').mockImplementation(() => {});
+  it('a split mints its id from the host pool', async () => {
     await installSurfaceIdPool(async (count) => Array.from({ length: count }, (_, i) => `surface-${7 + i}`), 0);
     try {
       await act(async () => {
-        root.render(<Wall initialPaneIds={['surface-7']} initialMode="passthrough" />);
+        root.render(<Wall initialPaneIds={['surface-6']} initialMode="passthrough" />);
       });
       await flush();
-      expect(await dispatchSplit({ direction: 'right' })).toBe('surface-8');
+      expect(await dispatchSplit({ direction: 'right' })).toBe('surface-7');
     } finally {
       resetSurfaceIdPool();
     }

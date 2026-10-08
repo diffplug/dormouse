@@ -6,7 +6,6 @@ import type { WorkspaceId } from '../../lib/session-types';
 import type { SaveOptions } from '../../lib/session-save';
 import type { PreparedWorkspaceTransfer } from './workspace-transfer';
 import type { DorControlRequest } from './use-dor-control';
-import { setSurfaceIdWallOwnership } from '../../lib/surface-ids';
 
 export interface PreparedSurfaceMove {
   meta: LeafMeta;
@@ -118,9 +117,6 @@ export function wallHandleOwning(surfaceId: string): WallHandle | null {
   }
   return null;
 }
-
-// A minted Surface id must not name one a Wall here already holds.
-setSurfaceIdWallOwnership((id) => wallHandleOwning(id) !== null);
 
 /** Forget every handle (tests). */
 export function resetWallHandles(): void {

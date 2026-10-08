@@ -17,13 +17,6 @@ import { registry } from './terminal-store';
 // reserves through `surfaceIdMinter`.
 const pool = createIdPool(8, 6, 'surface-ids');
 let localSequence = 0;
-/** Whether a Wall in this page holds an id; `wall-handles.ts` installs it, since
- *  this module sits below the components. */
-let wallOwns: (id: string) => boolean = () => false;
-
-export function setSurfaceIdWallOwnership(owns: (id: string) => boolean): void {
-  wallOwns = owns;
-}
 
 /** Mint from `reserve`, which hands out ids numbered above `floor` — the highest
  *  `surface-<n>` this page restored. Resolves once the first block is in hand,
@@ -33,6 +26,12 @@ export function installSurfaceIdPool(
   floor: number,
 ): Promise<void> {
   return pool.install((count) => reserve(count, floor));
+}
+
+/** Keep the page's own counter above `ids`, the Surfaces a restore brings
+ *  back; a host's counter is above them already (the reservation's floor). */
+export function seedSurfaceIds(ids: Iterable<string>): void {
+  for (const id of ids) localSequence = Math.max(localSequence, surfaceIdNumber(id) ?? 0);
 }
 
 /** Back to the page's own counter, from `surface-1` (tests). */
@@ -46,13 +45,12 @@ function nextId(): string {
   return pool.take() ?? `surface-${crypto.randomUUID()}`;
 }
 
-/** The first id from `next` no Session or Wall in this page already holds; a
- *  skipped one is logged: a host's counter never produces one, but the page's
- *  own counter starts at `surface-1` whatever this page restored. */
+/** The first id from `next` no Session in this page already holds; a skipped
+ *  one is logged, since neither counter should produce one. */
 function mintFrom(next: () => string): string {
   for (;;) {
     const id = next();
-    if (!registry.has(id) && !wallOwns(id)) return id;
+    if (!registry.has(id)) return id;
     console.error(`[surface-ids] skipping ${id}, which is already in use`);
   }
 }

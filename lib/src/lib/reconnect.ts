@@ -6,6 +6,7 @@ import { restoreBrowserSurfaceTodo, resumeTerminal } from './terminal-registry';
 import type { TerminalResumeInfo } from './terminal-lifecycle';
 import { readPersistedSession, type PersistedDoor, type PersistedSession } from './session-types';
 import { isReapedToolPane, persistedLathLayout, restoreReapedTool, restoreSession } from './session-restore';
+import { seedSurfaceIds } from './surface-ids';
 
 export interface ReconnectResult {
   paneIds: string[];
@@ -194,6 +195,7 @@ export function resumeOrRestoreFrom(
 
   const mine = live.ptys.filter((pty) =>
     opts.ptyIds === undefined || opts.ptyIds.has(pty.id) || opts.claimUnowned?.has(pty.id));
+  seedSurfaceIds([...mine.map((pty) => pty.id), ...(saved?.panes ?? []).map((pane) => pane.id), ...(saved?.doors ?? []).map((door) => door.id)]);
   const resumed = mine.length > 0 ? resumeLivePtys(platform, mine, live.replay, saved, opts.terminalGrids) : null;
   if (resumed) return resumed;
 

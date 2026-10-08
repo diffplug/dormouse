@@ -1,8 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { installSurfaceIdPool, maxSurfaceNumber, mintSurfaceId, resetSurfaceIdPool, surfaceIdMinter } from './surface-ids';
+import { installSurfaceIdPool, maxSurfaceNumber, mintSurfaceId, resetSurfaceIdPool, seedSurfaceIds, surfaceIdMinter } from './surface-ids';
 import type { PersistedSession } from './session-types';
 import { registry, type TerminalEntry } from './terminal-store';
-import { registerWallHandle, stubWallHandle } from '../components/wall/wall-handles';
 
 /** A host counter from `start`, honoring the floor and clamping a block to 64
  *  as Rust does. */
@@ -55,18 +54,21 @@ describe('mintSurfaceId', () => {
     expect(error).toHaveBeenCalled();
   });
 
-  it('skips an id a Session or Wall already holds, and says so', async () => {
+  it('skips an id a Session already holds, and says so', async () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
     registry.set('surface-1', {} as TerminalEntry);
-    const unregister = registerWallHandle(stubWallHandle('ws-a', { ownsSurface: (id) => id === 'surface-2' }));
     try {
-      expect(mintSurfaceId()).toBe('surface-3');
+      expect(mintSurfaceId()).toBe('surface-2');
       expect(error).toHaveBeenCalledWith('[surface-ids] skipping surface-1, which is already in use');
-      expect(error).toHaveBeenCalledWith('[surface-ids] skipping surface-2, which is already in use');
     } finally {
       registry.delete('surface-1');
-      unregister();
     }
+  });
+
+  it('counts in the page above the Surfaces a restore seeded, never back down', () => {
+    seedSurfaceIds(['surface-12', 'pane-a', 'surface-x']);
+    seedSurfaceIds(['surface-3']);
+    expect(mintSurfaceId()).toBe('surface-13');
   });
 });
 
