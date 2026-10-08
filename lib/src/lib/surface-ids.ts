@@ -1,4 +1,6 @@
+import { createIdPool } from './id-pool';
 import type { PersistedSession } from './session-types';
+import { registry } from './terminal-store';
 
 /**
  * Surface ids (`docs/specs/transport.md` → "Surface ids"): `surface-<n>` off one
@@ -7,28 +9,14 @@ import type { PersistedSession } from './session-types';
  * counts on its own.
  */
 
-// A block this size, refilled this early, keeps a burst of splits ahead of the
-// reservation round-trip; an exhausted pool mints an opaque UUID id.
-const POOL_SIZE = 64;
-const POOL_LOW = 16;
-
-const pool: string[] = [];
-let reserveIds: ((count: number, floor: number) => Promise<string[]>) | null = null;
-let restoredFloor = 0;
-let refilling: Promise<void> | null = null;
+const pool = createIdPool(64, 16, 'surface-ids');
 let localSequence = 0;
+/** Whether a Wall in this page holds an id; `wall-handles.ts` installs it, since
+ *  this module sits below the components. */
+let wallOwns: (id: string) => boolean = () => false;
 
-function refill(): Promise<void> {
-  if (!reserveIds || refilling) return refilling ?? Promise.resolve();
-  const reserve = reserveIds;
-  const pending = reserve(POOL_SIZE, restoredFloor)
-    .then((ids) => { if (reserveIds === reserve) pool.push(...ids); })
-    .catch((error: unknown) => {
-      console.error('[surface-ids] the host did not reserve Surface ids; using opaque ids until it does', error);
-    })
-    .finally(() => { if (refilling === pending) refilling = null; });
-  refilling = pending;
-  return pending;
+export function setSurfaceIdWallOwnership(owns: (id: string) => boolean): void {
+  wallOwns = owns;
 }
 
 /** Mint from `reserve`, which hands out ids numbered above `floor` — the highest
@@ -38,35 +26,26 @@ export function installSurfaceIdPool(
   reserve: (count: number, floor: number) => Promise<string[]>,
   floor: number,
 ): Promise<void> {
-  reserveIds = reserve;
-  restoredFloor = floor;
-  refilling = null;
-  pool.length = 0;
-  return refill();
+  return pool.install((count) => reserve(count, floor));
 }
 
 /** Back to the page's own counter, from `surface-1` (tests). */
 export function resetSurfaceIdPool(): void {
-  reserveIds = null;
-  restoredFloor = 0;
-  refilling = null;
-  pool.length = 0;
+  pool.reset();
   localSequence = 0;
 }
 
 function nextId(): string {
-  if (!reserveIds) return `surface-${++localSequence}`;
-  const reserved = pool.shift();
-  if (pool.length < POOL_LOW) void refill();
-  return reserved ?? `surface-${crypto.randomUUID()}`;
+  if (!pool.installed) return `surface-${++localSequence}`;
+  return pool.take() ?? `surface-${crypto.randomUUID()}`;
 }
 
-/** A new Surface id. `taken` names ids already live here; one is skipped, and
- *  logged, since the counter should never have produced it. */
-export function mintSurfaceId(taken?: (id: string) => boolean): string {
+/** A new Surface id. One a Session or Wall in this page already holds is
+ *  skipped, and logged, since the counter should never have produced it. */
+export function mintSurfaceId(): string {
   for (;;) {
     const id = nextId();
-    if (!taken?.(id)) return id;
+    if (!registry.has(id) && !wallOwns(id)) return id;
     console.error(`[surface-ids] skipping ${id}, which is already in use`);
   }
 }

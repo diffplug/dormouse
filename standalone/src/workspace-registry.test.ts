@@ -15,7 +15,6 @@ import {
   getRegistrySnapshot,
   installWorkspaceRegistry,
   resetWorkspaceRegistry,
-  restoredSurfaceFloor,
   type WorkspaceRegistrySnapshot,
 } from "./workspace-registry";
 
@@ -73,14 +72,14 @@ describe("workspace registry", () => {
         { id: "workspace-2", name: "Workspace 2", nameIsAuto: true, session: session(["surface-1200"], []) },
       ],
     };
-    uninstall = await installWorkspaceRegistry(h, restoredSurfaceFloor(restored));
+    uninstall = await installWorkspaceRegistry(h, restored);
     expect(h.invoke).toHaveBeenCalledWith("surface_reserve_ids", { count: 64, floor: 1500 });
     expect(mintSurfaceId()).toBe("surface-1501");
   });
 
   it("mints from the host's block and reports the store once per change, coalesced", async () => {
     const h = host();
-    uninstall = await installWorkspaceRegistry(h, 0);
+    uninstall = await installWorkspaceRegistry(h, null);
     expect(h.invoke).toHaveBeenCalledWith("workspace_reserve_ids", { count: 32 });
     expect(generateWorkspaceId()).toBe("workspace-50");
     await Promise.resolve();
@@ -101,7 +100,7 @@ describe("workspace registry", () => {
 
   it("takes the host's snapshot at install and drops one older than it holds", async () => {
     const h = host();
-    uninstall = await installWorkspaceRegistry(h, 0);
+    uninstall = await installWorkspaceRegistry(h, null);
     expect(getRegistrySnapshot().revision).toBe(3);
     h.push({ revision: 2, windows: [] });
     expect(getRegistrySnapshot().revision).toBe(3);
@@ -116,7 +115,7 @@ describe("workspace registry", () => {
     const report = vi.fn().mockImplementationOnce(() => new Promise((_, fail) => { reject = fail; })).mockResolvedValue(null);
     const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
     const h = host(report);
-    uninstall = await installWorkspaceRegistry(h, 0);
+    uninstall = await installWorkspaceRegistry(h, null);
     reject(new Error('bridge unavailable'));
     await new Promise(resolve => setTimeout(resolve, 0));
     renameWorkspace('workspace-1', 'changed');
@@ -132,7 +131,7 @@ describe("workspace registry", () => {
     const report = vi.fn().mockImplementationOnce(() => new Promise((_, fail) => { reject = fail; })).mockResolvedValue(null);
     vi.spyOn(console, 'error').mockImplementation(() => {});
     const h = host(report);
-    uninstall = await installWorkspaceRegistry(h, 0);
+    uninstall = await installWorkspaceRegistry(h, null);
     renameWorkspace('workspace-1', 'B');
     await Promise.resolve();
     renameWorkspace('workspace-1', 'Workspace 1');
@@ -146,7 +145,7 @@ describe("workspace registry", () => {
   });
 
   it('shares canonical numbered and opaque refs with Rust and the browser harness', async () => {
-    uninstall = await installWorkspaceRegistry(host(), 0);
+    uninstall = await installWorkspaceRegistry(host(), null);
     const cases: { id: string; ref: string }[] = JSON.parse(workspaceRefCases);
     for (const { id, ref } of cases) expect(workspaceRefFor(id)).toBe(ref);
   });

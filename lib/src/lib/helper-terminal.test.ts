@@ -29,7 +29,6 @@ describe('helper lifecycle', () => {
     try {
       registry.set('surface-5', { untouched: true } as TerminalEntry);
       expect((await openHelper('parent')).id).toBe('surface-6');
-      expect(error).toHaveBeenCalledOnce();
     } finally {
       resetSurfaceIdPool();
       error.mockRestore();

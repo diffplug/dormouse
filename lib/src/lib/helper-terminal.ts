@@ -228,7 +228,7 @@ export async function openHelper(parentId: string): Promise<HelperTerminal> {
     if (!platform.terminalContext) throw new Error('Helper terminals are unavailable on this host');
     const settings = await platform.terminalContext({ op: 'settings' });
     if (!parentIsOpen(parentId)) throw new Error('The parent terminal has closed');
-    const id = mintSurfaceId((taken) => registry.has(taken));
+    const id = mintSurfaceId();
     // One cwd for the spawn and the launched command's record, so a remote parent
     // leaves the helper in the host default rather than claiming the ssh path.
     const cwd = getInheritableCwd(parentId);

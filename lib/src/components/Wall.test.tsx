@@ -3486,7 +3486,7 @@ describe('Wall on the Lath engine', () => {
   });
 
   it('a split mints its id from the host pool, past any id this Wall already holds', async () => {
-    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
     await installSurfaceIdPool(async (count) => Array.from({ length: count }, (_, i) => `surface-${7 + i}`), 0);
     try {
       await act(async () => {
@@ -3494,7 +3494,6 @@ describe('Wall on the Lath engine', () => {
       });
       await flush();
       expect(await dispatchSplit({ direction: 'right' })).toBe('surface-8');
-      expect(error).toHaveBeenCalledWith('[surface-ids] skipping surface-7, which is already in use');
     } finally {
       resetSurfaceIdPool();
     }

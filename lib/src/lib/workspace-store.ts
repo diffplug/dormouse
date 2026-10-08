@@ -2,6 +2,7 @@ import { getPendingKills } from './pending-kills';
 import { normalizeAlertDeliveryOverrides, sameAlertDeliveryOverrides, type AlertDeliveryOverrides } from './alert-delivery-model';
 import { parseWorkspaceRef } from 'dor/protocol';
 import { DEFAULT_WORKSPACE_ID, DEFAULT_WORKSPACE_NAME, isDefaultWorkspaceName, type WorkspaceId } from './session-types';
+import { createIdPool } from './id-pool';
 
 /**
  * In-memory model of the Window's Workspaces: the ordered list, which one is
@@ -77,58 +78,28 @@ let workspaceSequence = 0;
 
 /** Ids the host reserved for this Window to mint from (`docs/specs/standalone.md`
  *  → "Workspace registry"): `workspace-<n>` off one counter, so a ref is stable
- *  and unique across windows. Refilled in the background; below the low-water
- *  mark a burst of creates still finds one. */
-const idPool: WorkspaceId[] = [];
-// A block this size, refilled this early, keeps a burst of creates ahead of
-// the reservation round-trip; an exhausted pool uses an opaque UUID ref.
-const ID_POOL_SIZE = 32;
-const ID_POOL_LOW = 8;
-let reserveIds: ((count: number) => Promise<WorkspaceId[]>) | null = null;
-let refilling: Promise<void> | null = null;
-/** Whether a host that mints ids is installed. Only then does a `workspace-<n>`
- *  id read as minted: a bare Wall's `DEFAULT_WORKSPACE_ID` is `workspace-1`,
- *  which beside VS Code's random ids would otherwise make one store both. */
-let registryInstalled = false;
-
-function refillIdPool(): Promise<void> {
-  if (!reserveIds || refilling) return refilling ?? Promise.resolve();
-  const reserve = reserveIds;
-  const pending = reserve(ID_POOL_SIZE)
-    .then((ids) => { if (reserveIds === reserve) idPool.push(...ids); })
-    .catch((error: unknown) => {
-      console.error('[workspace-store] the host did not reserve Workspace ids; using opaque ids until it does', error);
-    })
-    .finally(() => { if (refilling === pending) refilling = null; });
-  refilling = pending;
-  return pending;
-}
+ *  and unique across windows. Once installed, a `workspace-<n>` id reads as
+ *  minted: a bare Wall's `DEFAULT_WORKSPACE_ID` is `workspace-1`, which beside
+ *  VS Code's random ids would otherwise make one store both. */
+const idPool = createIdPool(32, 8, 'workspace-store');
 
 /** Give this Window a host that mints ids. Resolves once the first block is
  *  in hand, so a create that follows never falls back to a random id. */
 export function installWorkspaceIdPool(reserve: (count: number) => Promise<WorkspaceId[]>): Promise<void> {
-  reserveIds = reserve;
-  refilling = null;
-  registryInstalled = true;
-  idPool.length = 0;
-  return refillIdPool();
+  return idPool.install(reserve);
 }
 
 /** Forget the installed pool, back to a host with no registry (tests). */
 export function resetWorkspaceIdPool(): void {
-  reserveIds = null;
-  refilling = null;
-  registryInstalled = false;
-  idPool.length = 0;
+  idPool.reset();
 }
 
 /** Prefer a Rust-reserved number; a failed reservation must not prevent boot
  *  from installing persistence. Opaque UUIDs have stable refs too. */
 export function generateWorkspaceId(): WorkspaceId {
-  const reserved = idPool.shift();
-  if (idPool.length < ID_POOL_LOW) void refillIdPool();
+  const reserved = idPool.take();
   if (reserved !== undefined) return reserved;
-  if (registryInstalled) return `workspace-${crypto.randomUUID()}`;
+  if (idPool.installed) return `workspace-${crypto.randomUUID()}`;
   return `workspace-${Math.random().toString(36).slice(2, 10)}-${++workspaceSequence}`;
 }
 
@@ -141,7 +112,7 @@ export function workspaceRefNumber(id: WorkspaceId): number | null {
 /** Positions exist only on hosts without an application-wide registry; every
  *  other host's {@link workspaceRefFor} is unique across its Windows. */
 export function refsArePositional(): boolean {
-  return !registryInstalled;
+  return !idPool.installed;
 }
 
 /** "Workspace N", one past the highest existing `Workspace <n>` name. */
@@ -375,7 +346,7 @@ export function resolveWorkspaceRef(ref: string): WorkspaceRefResolution {
     const match = workspaceByNumber(number);
     if (match) return found(match);
   } else if (name) {
-    const byId = registryInstalled && state.workspaces.find((ws) => ws.id === name);
+    const byId = idPool.installed && state.workspaces.find((ws) => ws.id === name);
     if (byId) return found(byId);
     const matches = state.workspaces.filter((workspace) => workspace.name === name);
     if (matches.length === 1) return found(matches[0]);

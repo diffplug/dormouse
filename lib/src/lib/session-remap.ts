@@ -2,14 +2,15 @@ import type { LathNode } from './lath/model';
 import { isLathPersistedLayout } from './lath/persistence';
 import type { PersistedSession } from './session-types';
 import { isRecord } from './is-record';
+import { mintSurfaceId } from './surface-ids';
 
 /**
- * A closed Workspace's record with every Surface given a fresh id from `mint`,
- * for Reopen (`docs/specs/reopen.md`): the rebuilt Sessions must never share an
- * id — a PTY's, the host's — with the ones the close just killed, and its
- * `surface:N` refs start over in the Workspace it reopens as.
+ * A closed Workspace's record with every Surface given a fresh id, for Reopen
+ * (`docs/specs/reopen.md`): the rebuilt Sessions must never share an id — a
+ * PTY's, the host's — with the ones the close just killed, and its `surface:N`
+ * refs start over in the Workspace it reopens as.
  */
-export function withFreshSurfaceIds(session: PersistedSession, mint: () => string): PersistedSession {
+export function withFreshSurfaceIds(session: PersistedSession, mint = mintSurfaceId): PersistedSession {
   const ids = new Map<string, string>();
   const fresh = (id: string): string => {
     let next = ids.get(id);

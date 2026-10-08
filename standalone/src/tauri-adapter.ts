@@ -46,7 +46,7 @@ import type { PersistedWindow } from "dormouse-lib/lib/session-types";
 import { TauriSessionStore } from "./tauri-session-store";
 import { claimRecoveryCommands, windowStateSlot } from "./window-recovery";
 import { listenToWindow } from "./window-label";
-import { installWorkspaceRegistry, restoredSurfaceFloor, type WorkspaceRegistrySnapshot } from "./workspace-registry";
+import { installWorkspaceRegistry, type WorkspaceRegistrySnapshot } from "./workspace-registry";
 import { withTimeout } from "./with-timeout";
 import type { TerminalProtocolEvent } from "dormouse-lib/lib/terminal-protocol";
 import { getTerminalTheme, onTerminalThemeChange } from "dormouse-lib/lib/terminal-theme";
@@ -287,7 +287,7 @@ export class TauriAdapter implements PlatformAdapter {
       invoke: (cmd, args) => rawInvoke(cmd, args),
       onSnapshot: (handler) =>
         listenToWindow<WorkspaceRegistrySnapshot>("dormouse://workspaces", (event) => handler(event.payload)),
-    }, restoredSurfaceFloor(this.windowSlot.read())));
+    }, this.windowSlot.read()));
   }
 
   // Seed the session cache from the Rust file store before restore reads it

@@ -12,6 +12,7 @@
 import { readFile } from 'node:fs/promises';
 import * as path from 'node:path';
 import { writeJsonAtomic } from '../../lib/src/host/atomic-json-file';
+import { createSerialQueue } from '../../lib/src/host/remote/serial-queue';
 import { log } from './log';
 
 const FILE = 'surface-ids.json';
@@ -34,7 +35,9 @@ export function createSurfaceIdAllocator(dir: string | null, logger: AllocatorLo
   let next = 1;
   /** No number handed out reaches this; persisted before one would. */
   let ceiling = 0;
-  let queue: Promise<unknown> = Promise.resolve();
+  // One at a time: a raise awaits the file, and the next reservation must see
+  // the ceiling it wrote.
+  const serialize = createSerialQueue();
 
   async function persistedCeiling(): Promise<number> {
     if (file === null) return 0;
@@ -72,17 +75,12 @@ export function createSurfaceIdAllocator(dir: string | null, logger: AllocatorLo
   }
 
   return {
-    reserve(count, floor) {
-      // One at a time: a raise awaits the file, and a second reservation must
-      // see the ceiling the first one wrote.
-      const result = queue.then(() => reserveNow(count, floor));
-      queue = result.catch(() => {});
-      return result;
-    },
+    reserve: (count, floor) => serialize(() => reserveNow(count, floor)),
   };
 }
 
-let allocator: SurfaceIdAllocator | null = null;
+/** In memory until activation names this window's storage. */
+let allocator = createSurfaceIdAllocator(null, log);
 
 /** Activation: persist this window's counter under `dir`. */
 export function initSurfaceIds(dir: string | null): void {
@@ -90,6 +88,5 @@ export function initSurfaceIds(dir: string | null): void {
 }
 
 export function reserveSurfaceIds(count: number, floor: number): Promise<string[]> {
-  allocator ??= createSurfaceIdAllocator(null, log);
   return allocator.reserve(count, floor);
 }

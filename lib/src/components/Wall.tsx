@@ -71,7 +71,7 @@ import { getWorkspace, getWorkspacesSnapshot, setActiveWorkspace, subscribeToWor
 import { awaitWallEmpty } from './wall/close-all';
 import { closeKind, type CloseKind } from './wall/close-kind';
 import { registerWallHandle, type WallHandle } from './wall/wall-handles';
-import { mintWallSurfaceId } from './wall/mint-surface-id';
+import { mintSurfaceId } from '../lib/surface-ids';
 import { prepareWorkspaceTransfer } from './wall/workspace-transfer';
 import { installDorControlRouter } from './wall/dor-control-router';
 import { reopenClosed } from './wall/reopen';
@@ -954,7 +954,7 @@ export function Wall({
     const { paneIds, fresh } = lath.seed(
       restoredLathLayoutRef.current,
       initialPaneIdsRef.current,
-      mintWallSurfaceId,
+      mintSurfaceId,
       initialDoorsRef.current,
     );
     for (const id of paneIds) surfaceRefForId(id);
@@ -1043,7 +1043,7 @@ export function Wall({
    *  while the tree is non-empty. */
   const refillEmptyTree = useCallback((departedId?: string) => {
     if (lath.store.getSnapshot().tree.root !== null) return;
-    const id = mintWallSurfaceId();
+    const id = mintSurfaceId();
     surfaceRefForId(id);
     stageDefaultShell(id, departedId ? getInheritableCwd(departedId) : undefined);
     lath.store.setEnterHint(id, 'top-left'); // grows from the top-left as the killed pane shrank to the bottom-right
@@ -1267,7 +1267,7 @@ export function Wall({
    * neighbors are gone. `focus` selects it as a reopen gesture does.
    */
   const reopenSurface = useCallback((record: SurfaceReopenRecord, focus: boolean): { id: string; ref: string } => {
-    const id = mintWallSurfaceId();
+    const id = mintSurfaceId();
     const meta = reopenPane(id, record.pane, record.meta);
     const ref = surfaceRefForId(id);
     const { placement } = record;
@@ -1490,7 +1490,7 @@ export function Wall({
       return { ok: false, message: `surface '${reference.ref}' is not in the active workspace` };
     }
 
-    const newId = mintWallSurfaceId();
+    const newId = mintSurfaceId();
     // An explicit cwd (the invoking directory `dor ensure` and `dor split`
     // send) wins; otherwise inherit the reference pane's local cwd.
     const inheritedCwd = cwd ?? getInheritableCwd(referenceId);
@@ -1608,7 +1608,7 @@ export function Wall({
     const referenceVisible = nav.hasPane(reference.id);
     if (!referenceVisible) return { ok: false, message: `surface '${reference.ref}' is not visible` };
 
-    const newId = preparedId ?? mintWallSurfaceId();
+    const newId = preparedId ?? mintSurfaceId();
     const browserMeta = browserLeafMeta(title, params);
     // Replace-in-place is reserved for a reference with no browser — a blank
     // untouched shell. Anything holding web content (a browser surface today, a
@@ -1668,7 +1668,7 @@ export function Wall({
     void closeBrowserSurface(oldId, oldParams);
     // A browser Surface has no helper; the terminal's goes with the old id.
     closeHelperParent(oldId);
-    const newId = mintWallSurfaceId();
+    const newId = mintSurfaceId();
     transferSurfaceRef(oldId, newId);
     lath.store.replaceLeaf(oldId, newId, browserLeafMeta(next.title, next.params));
     clearLocalSurfaceActivity(oldId);
@@ -1683,7 +1683,7 @@ export function Wall({
       // is looking at, not every mounted one.
       if (!activeRef.current) return;
       const detail = ((e as CustomEvent<ShellSpawnRequest>).detail ?? {}) as ShellSpawnRequest;
-      const newId = mintWallSurfaceId();
+      const newId = mintSurfaceId();
       surfaceRefForId(newId);
 
       // Store shell options so getOrCreateTerminal picks them up on mount
@@ -2084,7 +2084,7 @@ export function Wall({
     splitDirection: 'horizontal' | 'vertical',
     source: 'keyboard' | 'mouse' = 'mouse',
   ) => {
-    const newId = mintWallSurfaceId();
+    const newId = mintSurfaceId();
     surfaceRefForId(newId);
     const ref = id && nav.hasPane(id) ? id : null;
     // Carry the currently selected shell into every manual split.
@@ -2382,7 +2382,7 @@ export function Wall({
       if (provider && !hostSupportsBrowser(provider)) throw new Error(providerUnavailable(provider));
       try {
         if (provider) {
-          preparedId = mintWallSurfaceId();
+          preparedId = mintSurfaceId();
           const controller = acquireAgentBrowserSurfaceController(preparedId, { ...params, renderMode: mode });
           const result = await controller.prepareForPlacement();
           if (result.status === 'cancelled' || !current()) throw cancelledLaunch();
