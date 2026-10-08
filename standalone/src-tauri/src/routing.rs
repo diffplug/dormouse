@@ -435,21 +435,9 @@ pub fn sweep_awaiting(
     released
 }
 
-/// The next `ws-<n>`, above every label given — live windows and saved
-/// snapshots alike, so a torn-out window can never claim a saved window's file.
-pub fn seed_next_ws(labels: impl IntoIterator<Item = impl AsRef<str>>) -> u64 {
-    let mut max = 0u64;
-    for label in labels {
-        if let Some(n) = ws_index(label.as_ref()) {
-            max = max.max(n);
-        }
-    }
-    max + 1
-}
-
 /// `ws-4` -> 4; anything else -> None.
 pub fn ws_index(label: &str) -> Option<u64> {
-    label.strip_prefix(WS_LABEL_PREFIX)?.parse::<u64>().ok()
+    crate::ids::Kind::Window.number(label)
 }
 
 /// Whether `main` was among `labels`, and everything else in the order given.
@@ -840,13 +828,6 @@ mod tests {
             sweep_awaiting(&mut map, now, AWAITING_REPLAY_MAX, &arrival_ids(&arrivals)),
             vec!["arriving".to_string()]
         );
-    }
-
-    #[test]
-    fn the_next_ws_label_clears_every_live_and_saved_one() {
-        assert_eq!(seed_next_ws(["main", "ws-2", "ws-7", "ws-x"]), 8);
-        assert_eq!(seed_next_ws(Vec::<String>::new()), 1);
-        assert_eq!(seed_next_ws(["main"]), 1);
     }
 
     #[test]

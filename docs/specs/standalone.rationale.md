@@ -59,7 +59,7 @@ In a real build the same day, with the xterm textarea focused and typed into, a 
 
 ## Workspace registry
 
-**Why a persisted high-water mark, not the disk scan alone.** The scan sees only what is still saved: closing the highest-numbered Workspace or window deletes it from disk, so the next launch minted its number again, and a `dor` ref an agent cached named a stranger. The file holds a ceiling (hi/lo): a raise writes it once per slack's worth of numbers rather than on every create, keeping a create clear of the atomic write's fsyncs, and a relaunch starts at the ceiling, leaving a gap of at most the slack. Running in memory when the state root or the write fails keeps every create working; only a later launch may then reuse a number.
+**Why a persisted high-water mark, not the disk scan alone.** The scan sees only what is still saved: closing the highest-numbered Workspace or window deletes it from disk, so the next launch minted its number again, and a `dor` ref an agent cached named a stranger. A ceiling (hi/lo) rather than the last number keeps the atomic write's fsyncs off nearly every create, at the cost of a gap in the numbering after each relaunch. Running in memory when the state root or the write fails keeps every create working; only a later launch may then reuse a number.
 
 **Why `ids.json` sits in the state root, not `sessions/`.** `sessions/` is enumerated as window snapshots and swept at boot, and a per-window close removes what it owns there; the counters belong to no window.
 

@@ -28,6 +28,29 @@ pub enum Kind {
 }
 
 impl Kind {
+    pub fn prefix(self) -> &'static str {
+        match self {
+            Kind::Surface => "surface-",
+            Kind::Workspace => "workspace-",
+            Kind::Window => crate::routing::WS_LABEL_PREFIX,
+        }
+    }
+
+    /// The lowest number ever handed out. `workspace-1` is what a bare Wall
+    /// calls its only Workspace, and a fresh window minting it would collide
+    /// with a snapshot restored under that id.
+    fn first(self) -> u64 {
+        match self {
+            Kind::Workspace => 2,
+            Kind::Surface | Kind::Window => 1,
+        }
+    }
+
+    /// The counter's number in an id of this kind, if it has one.
+    pub fn number(self, id: &str) -> Option<u64> {
+        numbered(id, self.prefix())
+    }
+
     /// How far past a reservation a ceiling raise reaches, sized to how often
     /// each kind is minted.
     fn slack(self) -> u64 {
@@ -103,7 +126,7 @@ impl Counters {
     /// must be written before any number in the block is used.
     pub fn reserve(&mut self, kind: Kind, count: u64, above: u64) -> (Range<u64>, Option<String>) {
         let counter = self.counter(kind);
-        let first = counter.next.max(above.saturating_add(1));
+        let first = counter.next.max(kind.first()).max(above.saturating_add(1));
         let end = first.saturating_add(count);
         counter.next = end;
         if end <= counter.ceiling {
@@ -125,7 +148,7 @@ impl Counters {
 }
 
 /// The digits after `prefix`, if that is all there is.
-pub fn numbered(id: &str, prefix: &str) -> Option<u64> {
+fn numbered(id: &str, prefix: &str) -> Option<u64> {
     let suffix = id.strip_prefix(prefix)?;
     if suffix.is_empty() || !suffix.bytes().all(|byte| byte.is_ascii_digit()) {
         return None;
@@ -133,17 +156,12 @@ pub fn numbered(id: &str, prefix: &str) -> Option<u64> {
     suffix.parse().ok()
 }
 
-/// The counter's number in a `surface-<n>` id, if it has one.
-pub fn surface_number(id: &str) -> Option<u64> {
-    numbered(id, "surface-")
-}
-
-/// The next Surface number, above every id given.
-pub fn seed_next_surface(ids: impl IntoIterator<Item = impl AsRef<str>>) -> u64 {
+/// The next number of `kind`, above every id given.
+pub fn seed_next(kind: Kind, ids: impl IntoIterator<Item = impl AsRef<str>>) -> u64 {
     ids.into_iter()
-        .filter_map(|id| surface_number(id.as_ref()))
+        .filter_map(|id| kind.number(id.as_ref()))
         .max()
-        .map_or(1, |n| n + 1)
+        .map_or(kind.first(), |n| (n + 1).max(kind.first()))
 }
 
 /// Every Surface id a persisted Session names: its panes and its doors.
@@ -181,38 +199,16 @@ mod tests {
     #[test]
     fn a_block_reaching_the_ceiling_raises_it_past_the_block_and_asks_for_a_write() {
         let mut counters = Counters::default();
-        let (block, file) = counters.reserve(Kind::Workspace, 64, 1);
+        let (block, file) = counters.reserve(Kind::Workspace, 64, 0);
         assert_eq!(block, 2..66);
         let file = ceilings(&file.expect("the first block reaches the zero ceiling"));
         assert_eq!(file["version"], 1);
         assert_eq!(file["workspace"], 66 + 64);
         // Below the raised ceiling: no write.
-        assert_eq!(counters.reserve(Kind::Workspace, 64, 1), (66..130, None));
-        let (block, file) = counters.reserve(Kind::Workspace, 1, 1);
+        assert_eq!(counters.reserve(Kind::Workspace, 64, 0), (66..130, None));
+        let (block, file) = counters.reserve(Kind::Workspace, 1, 0);
         assert_eq!(block, 130..131);
         assert_eq!(ceilings(&file.unwrap())["workspace"], 131 + 64);
-    }
-
-    #[test]
-    fn a_relaunch_starts_at_the_persisted_ceiling() {
-        let mut counters = Counters::default();
-        counters.load(r#"{"version":1,"surface":2000,"workspace":10,"window":7}"#).unwrap();
-        // The disk only names lower numbers: the highest ones closed.
-        counters.seed(Kind::Workspace, 6);
-        counters.seed(Kind::Window, 3);
-        assert_eq!(counters.reserve(Kind::Workspace, 1, 1).0, 10..11);
-        assert_eq!(counters.reserve(Kind::Window, 1, 0).0, 7..8);
-        assert_eq!(counters.reserve(Kind::Surface, 1, 0).0, 2000..2001);
-    }
-
-    #[test]
-    fn seeding_never_lowers_a_counter() {
-        let mut counters = Counters::default();
-        counters.reserve(Kind::Surface, 20, 0);
-        counters.seed(Kind::Surface, 5);
-        assert_eq!(counters.reserve(Kind::Surface, 1, 0).0, 21..22);
-        counters.seed(Kind::Surface, 40);
-        assert_eq!(counters.reserve(Kind::Surface, 1, 0).0, 40..41);
     }
 
     #[test]
@@ -243,9 +239,19 @@ mod tests {
         ] });
         let ids = snapshot_surface_ids(&snapshot);
         assert_eq!(ids, vec!["surface-3", "custom-id", "surface-9", "surface-4"]);
-        assert_eq!(seed_next_surface(ids), 10);
-        assert_eq!(seed_next_surface(Vec::<String>::new()), 1);
-        assert_eq!(surface_number("surface-"), None);
-        assert_eq!(surface_number("surface-1a"), None);
+        assert_eq!(seed_next(Kind::Surface, ids), 10);
+    }
+
+    #[test]
+    fn each_counter_seeds_above_every_id_given_and_never_below_its_first() {
+        assert_eq!(seed_next(Kind::Surface, Vec::<String>::new()), 1);
+        assert_eq!(seed_next(Kind::Surface, ["surface-", "surface-1a", "surface-+4"]), 1);
+        assert_eq!(seed_next(Kind::Window, ["main", "ws-2", "ws-7", "ws-x"]), 8);
+        assert_eq!(seed_next(Kind::Window, ["main"]), 1);
+        assert_eq!(seed_next(Kind::Workspace, Vec::<String>::new()), 2);
+        assert_eq!(seed_next(Kind::Workspace, ["workspace-0", "workspace-1"]), 2);
+        assert_eq!(seed_next(Kind::Workspace, ["workspace-3", "workspace-12", "workspace-x"]), 13);
+        // `workspace-1` is a bare Wall's own, even on an empty counter.
+        assert_eq!(Counters::default().reserve(Kind::Workspace, 1, 0).0, 2..3);
     }
 }

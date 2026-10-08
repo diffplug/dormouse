@@ -148,13 +148,14 @@ struct WindowState {
     closing: Mutex<HashSet<String>>,
     /// Every window's Workspaces under their stable refs (§Workspace registry).
     registry: Mutex<workspaces::Registry>,
-    /// The next window label, Workspace id, and Surface id, seeded at setup
-    /// above every one on disk and in `ids_file`; Workspace and Surface ids
-    /// are handed out in blocks so a webview can mint synchronously.
+    /// The next window label, Workspace id, and Surface id (§Workspace
+    /// registry). Only ever held briefly: a report raising a counter runs on
+    /// the main thread.
     ids: Mutex<ids::Counters>,
-    /// Where the counters' ceilings persist; unset when the state root is
-    /// unavailable, which leaves them in memory.
-    ids_file: OnceLock<PathBuf>,
+    /// Where the counters' ceilings persist, `None` when the state root is
+    /// unavailable. Held across a reservation and its write, so no caller
+    /// takes a number before the file covers it.
+    ids_file: Mutex<Option<PathBuf>>,
     /// Windows closed with everything reopenable, newest first
     /// (docs/specs/reopen.md). Memory only: a quit forgets them.
     closed_windows: Mutex<Vec<ClosedWindow>>,
@@ -195,14 +196,12 @@ impl RoutingState {
 }
 
 impl WindowState {
-    /// `count` numbers of `kind`, all above `above`, never handed out before
-    /// by this run or any earlier one: a raised ceiling is written first
-    /// (§Workspace registry). The lock is held across the write, so no other
-    /// caller can take a number the file does not yet cover.
+    /// `count` numbers of `kind`, all above `above`, never handed out by this
+    /// run or an earlier one (§Workspace registry).
     fn reserve_ids(&self, kind: ids::Kind, count: u64, above: u64) -> std::ops::Range<u64> {
-        let mut counters = guard(&self.ids);
-        let (block, file) = counters.reserve(kind, count, above);
-        if let (Some(contents), Some(path)) = (file, self.ids_file.get()) {
+        let path = guard(&self.ids_file);
+        let (block, file) = guard(&self.ids).reserve(kind, count, above);
+        if let (Some(contents), Some(path)) = (file, path.as_ref()) {
             if let Err(e) = write_file_atomically(path, &contents) {
                 append_log(format!("[ids] {e}; the counters stay in memory"));
             }
@@ -212,9 +211,9 @@ impl WindowState {
 
     /// Boot: persist the counters at `path`, and raise each above both the
     /// ceilings a previous run left there and every id it left on disk. A
-    /// missing or unreadable file leaves the disk scan alone. Never lowers a
-    /// counter: a window's report may already sit higher.
+    /// missing or unreadable file leaves the disk scan alone.
     fn seed_ids(&self, path: PathBuf, saved: &SavedWindows) {
+        let mut file = guard(&self.ids_file);
         let mut counters = guard(&self.ids);
         match std::fs::read_to_string(&path) {
             Ok(contents) => {
@@ -225,7 +224,7 @@ impl WindowState {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
             Err(e) => append_log(format!("[ids] read {}: {e}", path.display())),
         }
-        let _ = self.ids_file.set(path);
+        *file = Some(path);
         counters.seed(ids::Kind::Window, saved.next_ws);
         counters.seed(ids::Kind::Workspace, saved.next_workspace);
         counters.seed(ids::Kind::Surface, saved.next_surface);
@@ -3535,22 +3534,21 @@ fn saved_windows(dir: &Path) -> SavedWindows {
     let endpoints = records.iter().flat_map(|record| {
         ["from", "to"].into_iter().filter_map(move |field| record.get(field).and_then(JsonValue::as_str))
     });
-    let next_ws = routing::seed_next_ws(labels.iter().map(String::as_str).chain(endpoints));
+    let next_ws = ids::seed_next(ids::Kind::Window, labels.iter().map(String::as_str).chain(endpoints));
     let snapshots: Vec<JsonValue> = names
         .iter()
         .filter_map(|name| name.strip_suffix(".json"))
-        .filter_map(|label| read_session_from(dir, label).ok().flatten())
-        .filter_map(|contents| serde_json::from_str::<JsonValue>(&contents).ok())
+        .filter_map(|label| read_snapshot_from(dir, label).ok().flatten())
         .collect();
     let snapshot_ids = snapshots.iter().flat_map(workspaces::snapshot_ids);
     let journal_ids = records.iter().filter_map(record_workspace_id).map(str::to_owned);
-    let next_workspace = workspaces::seed_next(snapshot_ids.chain(journal_ids));
+    let next_workspace = ids::seed_next(ids::Kind::Workspace, snapshot_ids.chain(journal_ids));
     let snapshot_surfaces = snapshots.iter().flat_map(ids::snapshot_surface_ids);
     let journal_surfaces = records
         .iter()
         .filter_map(|record| record.get("workspace")?.get("session"))
         .flat_map(ids::session_surface_ids);
-    let next_surface = ids::seed_next_surface(snapshot_surfaces.chain(journal_surfaces));
+    let next_surface = ids::seed_next(ids::Kind::Surface, snapshot_surfaces.chain(journal_surfaces));
     SavedWindows { labels, next_ws, next_workspace, next_surface }
 }
 
@@ -3560,10 +3558,8 @@ fn saved_windows(dir: &Path) -> SavedWindows {
 /// more (§Workspace registry).
 #[tauri::command(async)]
 fn workspace_reserve_ids(windows: tauri::State<'_, WindowState>, count: u64) -> Vec<String> {
-    // Above 1 even when setup could not seed from disk: `workspace-1` is the
-    // bare Wall's own and `workspace:0` names nothing (§Workspace registry).
     windows
-        .reserve_ids(ids::Kind::Workspace, count.clamp(1, 64), 1)
+        .reserve_ids(ids::Kind::Workspace, count.clamp(1, 64), 0)
         .map(|n| format!("workspace-{n}"))
         .collect()
 }
@@ -3591,7 +3587,7 @@ fn workspace_report(
 ) {
     // A reported id above the counter (a snapshot restored from a newer
     // build, say) must never be minted again.
-    let above = workspaces::seed_next(entries.iter().map(|entry| entry.id.as_str()));
+    let above = ids::seed_next(ids::Kind::Workspace, entries.iter().map(|entry| entry.id.as_str()));
     guard(&windows.ids).seed(ids::Kind::Workspace, above);
     let changed = workspaces::report(&mut guard(&windows.registry), window.label(), entries);
     if changed {
@@ -5560,12 +5556,12 @@ mod tests {
         let root = TempDir::new("ids-workspace-relaunch");
         let sessions = root.path().join("sessions");
         let windows = boot_ids(root.path());
-        let ids = (0..8).map(|_| windows.reserve_ids(super::ids::Kind::Workspace, 1, 1).start).collect::<Vec<_>>();
+        let ids = (0..8).map(|_| windows.reserve_ids(super::ids::Kind::Workspace, 1, 0).start).collect::<Vec<_>>();
         assert_eq!(ids, (2..10).collect::<Vec<_>>());
         // workspace-6 through workspace-9 closed; only workspace-5 is saved.
         write_session_to(&sessions, "main", &snapshot_json(&[("workspace-5", "Kept")], "workspace-5")).unwrap();
         assert_eq!(super::saved_windows(&sessions).next_workspace, 6);
-        assert!(boot_ids(root.path()).reserve_ids(super::ids::Kind::Workspace, 1, 1).start >= 10);
+        assert!(boot_ids(root.path()).reserve_ids(super::ids::Kind::Workspace, 1, 0).start >= 10);
     }
 
     #[test]
@@ -5587,9 +5583,9 @@ mod tests {
         let root = TempDir::new("ids-seed-max");
         let windows = super::WindowState::default();
         // A report can land before the disk scan seeds.
-        windows.reserve_ids(super::ids::Kind::Workspace, 30, 1);
+        windows.reserve_ids(super::ids::Kind::Workspace, 30, 0);
         windows.seed_ids(root.path().join("ids.json"), &super::saved_windows(&root.path().join("sessions")));
-        assert_eq!(windows.reserve_ids(super::ids::Kind::Workspace, 1, 1).start, 32);
+        assert_eq!(windows.reserve_ids(super::ids::Kind::Workspace, 1, 0).start, 32);
     }
 
     #[test]

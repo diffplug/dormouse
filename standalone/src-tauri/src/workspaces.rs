@@ -36,22 +36,12 @@ pub struct Registry {
 /// The counter's suffix of a `workspace-<n>` id, if it has one. Ids minted
 /// elsewhere retain their opaque id as a stable ref.
 pub fn ref_number(id: &str) -> Option<u64> {
-    crate::ids::numbered(id, "workspace-")
+    crate::ids::Kind::Workspace.number(id)
 }
 
 /// The stable `dor` ref of an id: its counter number, else the id itself.
 pub fn ref_for(id: &str) -> String {
     ref_number(id).map_or_else(|| format!("workspace:{id}"), |n| format!("workspace:{n}"))
-}
-
-/// The next counter value, above every id given. Never below 2: `workspace-1`
-/// is what a bare Wall calls its only Workspace, and a fresh window minting it
-/// would collide with a snapshot restored under that id.
-pub fn seed_next(ids: impl IntoIterator<Item = impl AsRef<str>>) -> u64 {
-    ids.into_iter()
-        .filter_map(|id| ref_number(id.as_ref()))
-        .max()
-        .map_or(2, |n| n.max(1) + 1)
 }
 
 /// Every Workspace id a persisted window snapshot names.
@@ -191,15 +181,11 @@ mod tests {
     }
 
     #[test]
-    fn the_counter_seeds_above_every_id_on_disk_and_never_mints_one() {
-        assert_eq!(seed_next(Vec::<String>::new()), 2);
-        assert_eq!(seed_next(["workspace-1"]), 2);
-        assert_eq!(seed_next(["workspace-3", "workspace-12", "workspace-x"]), 13);
+    fn a_snapshot_names_its_workspace_ids() {
         let ids = snapshot_ids(&json!({
             "workspaces": [{ "id": "workspace-4" }, { "id": "workspace-9", "name": "n" }, { "name": "no id" }]
         }));
         assert_eq!(ids, vec!["workspace-4", "workspace-9"]);
-        assert_eq!(seed_next(ids), 10);
     }
 
     #[test]
