@@ -102,35 +102,59 @@ flowchart TD
 
 Claimants get first refusal per Session in registration order; the first to claim the event ends the offer. **A claimed event must never ring, set TODO, or store an `ActivityNotification`.**
 
-What an owed completion becomes, until a verb or a withdrawal (Clearing And TODO) ends it:
+A `completion` passed the gates above. Confirmed work is `BUSY` or `MIGHT_NEED_ATTENTION`; a reset is a command boundary or an answered `watching` source (WATCHING Track). The ring, hold, and TODO are separate latches: a pane can ring while a newer completion is held.
 
 ```mermaid
 stateDiagram-v2
-  direction LR
-  [*] --> Ringing: not engaged, no confirmed work
-  [*] --> Deferred: not engaged, confirmed work
-  [*] --> Held: engaged
-  Deferred --> Ringing: work ends, or an exit source joins
-  Deferred --> Held: work ends while engaged, never shown
-  Ringing --> Deferred: work confirmed
-  Held --> Ringing: viewer goes idle, focus unchanged
-  Held --> TODO: focus moves, viewer leaves
-  Ringing --> TODO: a look
-  Deferred --> TODO: a look
+  state "One Session: every region runs at once" as Session {
+    state "Output detector" as Detector {
+      [*] --> NOTHING_TO_SHOW
+      NOTHING_TO_SHOW --> MIGHT_BE_BUSY: output across the candidate gap
+      MIGHT_BE_BUSY --> NOTHING_TO_SHOW: unconfirmed, or reset
+      MIGHT_BE_BUSY --> BUSY: more output
+      BUSY --> MIGHT_NEED_ATTENTION: silence
+      MIGHT_NEED_ATTENTION --> BUSY: output
+      MIGHT_NEED_ATTENTION --> NOTHING_TO_SHOW: more silence emits settle, or reset
+      BUSY --> NOTHING_TO_SHOW: reset
+    }
+    --
+    state "Foreground command" as Command {
+      [*] --> NoCommand
+      NoCommand --> Unseen: start, not engaged
+      NoCommand --> Seen: start, engaged
+      Unseen --> Seen: engaged or acknowledged
+      Unseen --> NoCommand: finish, never rings
+      Seen --> NoCommand: finish, emits exit
+    }
+    --
+    state "Ring" as Ring {
+      [*] --> NoRing
+      NoRing --> Showing: completion, not engaged
+      NoRing --> Deferred: same, during confirmed work
+      Showing --> Deferred: work confirmed, no exit source
+      Deferred --> Showing: confirmed work ends
+      Deferred --> NoRing: due while engaged, never shown, becomes a hold
+      Showing --> NoRing: verb or withdrawal
+      Deferred --> NoRing: verb or withdrawal
+    }
+    --
+    state "Hold" as Hold {
+      [*] --> NoHold
+      NoHold --> Held: completion, engaged
+      Held --> NoHold: viewer idle, sources go to the ring
+      Held --> NoHold: focus moves, viewer leaves, or a verb
+    }
+    --
+    state "TODO" as Todo {
+      [*] --> Off
+      Off --> On: look at a ring, a hold, a receipt, or t
+      On --> Off: typing, the pill, or t
+    }
+  }
 ```
 
-**Must hold, never ring, a completion that would ring an engaged Session**. **A hold must set TODO at once**, its detail by richness (Clearing And TODO), and keeps the sources it would raise, repeated holds merging. Holding leaves a progress cycle alone.
-
-- **Presence lapsing `idle` with focus unchanged must ring what was held**, each source by its unengaged path.
-- Any other end — focus moving, the viewer leaving, a user verb — forgets the hold; only a verb may clear its TODO (rationale).
-- Rule removal withdraws a held `watching` source as it withdraws a ringing one (WATCHING Track).
-
-**With `deferAlertsUntilQuiet` enabled, a ring must be deferred exactly while the output detector has confirmed work**, whether WATCHING is on or off; WATCHING Track defines confirmed work (rationale).
-
-- **Must open the ring at once and derive deferral, never store it**: a deferred ring keeps its sources, detail, episode, and alarm deadlines, unpublished as `ALERT_RINGING` until confirmed work ends, a command-boundary reset included.
-- **A never-shown ring that comes due while engaged must become a hold** (rationale); one already shown goes on ringing.
-- **Never defer a ring carrying an `exit` source**, whatever joined it.
-- **Never cap a deferral** (rationale). Disabling the setting shows every deferred ring at once.
+- **A hold must set TODO at once**, its detail by richness (Clearing And TODO), repeated holds merging; it leaves a progress cycle alone. Rung on idle, each held source takes its unengaged path, the acknowledged check included. A forgotten hold keeps its TODO (rationale); rule removal withdraws a held `watching` source as a ringing one.
+- **With `deferAlertsUntilQuiet` enabled, a ring must be deferred exactly while the detector has confirmed work, WATCHING or not, derived and never stored**: it keeps its sources, detail, episode, and alarm deadlines (rationale). **A never-shown ring that comes due while engaged must become a hold** (rationale). **Never defer a ring carrying an `exit` source**, whatever joined it. **Never cap a deferral** (rationale); disabling the setting shows every deferred ring at once.
 
 Two ordering rules:
 
@@ -222,21 +246,7 @@ Source of truth: `awaitCompletion` in `lib/src/lib/alert-manager.ts`; `AlertComm
 
 The output/silence detector is always on. Every Session runs one `QuiesceDetector` for its whole lifetime, fed by every output chunk outside the echo window and reset at every command boundary. It never latches and knows nothing about engagement or rules; the rule set decides only whether its state is publicly visible and whether a settle may ring.
 
-**Must use the detector as the single output-activity signal for status, inferred completion, and alert deferral.** Confirmed work means `BUSY` or `MIGHT_NEED_ATTENTION`; a `MIGHT_BE_BUSY` candidate is not, and neither is quiet (`NOTHING_TO_SHOW`). A single accepted output chunk leaves a quiet detector quiet. Only confirmed work can settle; a rejected candidate generates no completion.
-
-```mermaid
-stateDiagram-v2
-  [*] --> NOTHING_TO_SHOW
-  state "Confirmed work" as Confirmed {
-    BUSY --> MIGHT_NEED_ATTENTION: silence
-    MIGHT_NEED_ATTENTION --> BUSY: output resumes
-  }
-  NOTHING_TO_SHOW --> MIGHT_BE_BUSY: repeated output; candidate window elapses
-  MIGHT_BE_BUSY --> BUSY: further output confirms work
-  MIGHT_BE_BUSY --> NOTHING_TO_SHOW: confirmation expires
-  MIGHT_NEED_ATTENTION --> NOTHING_TO_SHOW: sustained silence / emit completion
-  Confirmed --> NOTHING_TO_SHOW: command boundary or detector reset
-```
+**Must use the detector as the single output-activity signal for status, inferred completion, and alert deferral**; its states are the Output detector region in Completion events. A single accepted output chunk leaves a quiet detector quiet, and only confirmed work can settle.
 
 **Must expose quiet to completion consumers before dispatching a settle**, and dispatch before publishing the quiet transition. Completion events owns its routing to awaits and rings; Public State owns the display projection; Completion events owns deferral.
 
@@ -295,7 +305,7 @@ Source of truth: grammars, parsing, sanitization limits, and `applyTerminalEvent
 
 Command-exit alerting consumes normalized semantic command events from `docs/specs/terminal-state.md` (`OSC 133`, `OSC 633`, or equivalent) and **must not parse raw OSC itself**.
 
-- A command start creates `commandExitWatch` for the current foreground command, marked seen when the Session is engaged at its start, becomes engaged, or is acknowledged while it runs.
+- A command start creates `commandExitWatch`; its seen lifecycle is the Foreground command region in Completion events.
 - **Must derive armed, never store it**: a seen command running while the Session is not engaged — public `COMMAND_EXIT_ARMED`, published on every engagement edge.
 - When the same command finishes — a prompt boundary with no finish event counts, with no exit code — or the PTY exits before a finish event, it rings only if it was seen. **Never gate the ring on how long the command ran** (rationale).
 - The `exit` source carries the `COMMAND_EXIT` notification: the summarized command and its exit code.
@@ -318,7 +328,7 @@ Detail follows one richness order: a text report (`OSC 9`, `OSC 99`, `OSC 777`) 
 | an await consumes a source (Await) | withdraws that source |
 | a rule stops covering the `watching` key | withdraws `watching` |
 
-- **The user verbs acknowledge; a withdrawal must never acknowledge.** Each verb clears a deferred ring as a visible one and also drops whatever was held, the hold's TODO following the verb. A ring a withdrawal empties goes with its detail, leaving `todo` and its notification as they stood.
+- **The user verbs acknowledge; a withdrawal must never acknowledge.** Each verb clears a deferred ring as a visible one and drops a hold; a withdrawal leaves `todo` and its notification as they stood.
 - **Any keystroke into the pane must clear TODO** (rationale).
 - **Never summon twice for an acknowledged state.** After a user verb clears a ring or drops a hold, a report before any output only updates the TODO (Completion events); opening a ring or starting a command forgets the acknowledgement (rationale).
 - Command-mode `Enter` that only enters passthrough does not clear TODO.
@@ -352,9 +362,22 @@ Application alarm defaults live beside the WATCHING rule set, edited in Settings
 
 **The host must decide when to deliver, in `createAlertHost` beside the manager** (rationale):
 
-- **Must deliver at most once per sink per episode**, due at the episode's start plus the Session's delay. Deferral retains unsent deadlines and consumed sinks; quiet sends overdue alarms without restarting the delay. A source joining delivers nothing; clearing consumes pending work.
-- **Must hold a deferred ring's alarms until quiet; otherwise recheck at the deadline and consume a deadline that fails, never retrying it**: speech only while the Session is not engaged (Engagement); push only while no viewer is present (VS Code's window as a viewer: `docs/specs/vscode.md` -> "Workspaces"; rationale).
-- **Disabling must consume pending work immediately; enabling must never replay an episode**, one that began disabled included. Delay edits never move a deadline; speech reads the current voice at engine admission.
+Each sink, per episode:
+
+```mermaid
+stateDiagram-v2
+  direction LR
+  [*] --> Armed: episode opens, sink on
+  Armed --> Disarmed: ring deferred
+  Disarmed --> Armed: ring shows, same deadline
+  Armed --> Sent: due, not blocked
+  Armed --> Consumed: due but blocked
+  Armed --> Consumed: sink off, or ring cleared
+  Disarmed --> Consumed: sink off, or ring cleared
+```
+
+- **Must deliver at most once per sink per episode**, due at the episode's start plus the Session's delay, never retried; a source joining delivers nothing. Blocked: speech while the Session is engaged (Engagement); push while any viewer is present (VS Code's window as a viewer: `docs/specs/vscode.md` -> "Workspaces"; rationale).
+- **Enabling must never replay an episode**, one that began disabled included. Delay edits never move a deadline; speech reads the current voice at engine admission.
 - **Each realm must publish every Session it shows** — Pane label and Workspace overrides — as one `sessions` op, label changes throttled (rationale).
 - **A publication must overwrite each Session it names, whichever realm published it last, and never drop one the manager holds state for**; one its realm omits with none is forgotten (rationale). The host keeps each Session's entry until the Session is removed, through its realm's end and a respawn under its id; an unpublished Session uses the defaults.
 
