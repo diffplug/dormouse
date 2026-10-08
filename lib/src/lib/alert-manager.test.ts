@@ -8,19 +8,7 @@ import {
 } from './terminal-protocol';
 import { cfg } from '../cfg';
 import { toPersistedAlertState } from './session-types';
-import {
-  armCommandExit,
-  collectEpisodes,
-  driveToBusy,
-  engage,
-  finishCommand,
-  goIdle,
-  heartbeat,
-  leave,
-  REPORT,
-  runCommand,
-  settle,
-} from './alert-manager-test-utils';
+import { armCommandExit, collectEpisodes, driveToBusy, driveToCandidate, engage, finishCommand, goIdle, heartbeat, leave, REPORT, runCommand, settle } from './alert-manager-test-utils';
 
 describe('AlertManager in isolation', () => {
   let manager: AlertManager;
@@ -1160,14 +1148,11 @@ describe('AlertManager in isolation', () => {
       manager.setDeferAlertsUntilQuiet(true);
     });
 
-    it('rings immediately in an idle pane, but waits after a single output chunk', () => {
+    it('rings immediately in an idle pane and after a single output chunk', () => {
       manager.notifyFromProtocol('idle', REPORT);
       expect(manager.getState('idle').status).toBe('ALERT_RINGING');
       manager.onData('one-chunk');
       manager.notifyFromProtocol('one-chunk', REPORT);
-      vi.advanceTimersByTime(4_999);
-      expect(manager.getState('one-chunk').status).not.toBe('ALERT_RINGING');
-      vi.advanceTimersByTime(1);
       expect(manager.getState('one-chunk')).toMatchObject({ status: 'ALERT_RINGING', notification: REPORT });
     });
 
@@ -1220,13 +1205,13 @@ describe('AlertManager in isolation', () => {
       expect(manager.getState(id).status).toBe('ALERT_RINGING');
     });
 
-    it('defers from MIGHT_BE_BUSY without requiring confirmed activity', () => {
-      const id = 'do-not-defer-candidate';
-      manager.onData(id);
-      vi.advanceTimersByTime(1_600);
-      manager.onData(id);
+    it('rings through candidate activity, deferring only once work is confirmed', () => {
+      const id = 'defer-candidate';
+      driveToCandidate(manager, id);
 
       manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'Done' });
+      expect(manager.getState(id).status).toBe('ALERT_RINGING');
+      manager.onData(id);
       expect(manager.getState(id).status).toBe('WATCHING_DISABLED');
       vi.advanceTimersByTime(5_000);
       expect(manager.getState(id).status).toBe('ALERT_RINGING');
@@ -1274,18 +1259,15 @@ describe('AlertManager in isolation', () => {
       });
     });
 
-    it('carries a deferred terminal notification across a command-boundary reset', () => {
+    it('releases a deferred terminal notification on a command-boundary reset', () => {
       const id = 'defer-notification-across-finish';
       runCommand(manager, id);
       driveToBusy(manager, id);
       manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'Done' });
 
       // This unarmed command finish resets the detector but is not itself an
-      // alert; the deferred ring still waits for its quiet deadline.
+      // alert; returning the detector to quiet releases the existing ring.
       finishCommand(manager, id);
-      expect(manager.getState(id)).toMatchObject({ status: 'WATCHING_DISABLED', todo: false });
-
-      vi.advanceTimersByTime(5_000);
       expect(manager.getState(id)).toMatchObject({
         status: 'ALERT_RINGING',
         todo: false,
@@ -1407,7 +1389,7 @@ describe('AlertManager in isolation', () => {
 
   // --- Ordered ingestion ---
 
-  it('keeps a notification after an unarmed command finish behind recent output', () => {
+  it('shows a notification after an unarmed command finish despite the final redraw', () => {
     const id = 'ordered-ingestion';
     const parser = new TerminalProtocolParser();
     const feed = (chunk: string): void => {
@@ -1423,8 +1405,6 @@ describe('AlertManager in isolation', () => {
     // A precmd hook reports after the shell's D and A, in the same read.
     feed('done\r\n\x1b]633;D;0\x07\x1b]633;A\x07\x1b]777;notify;Command completed;./build.sh\x1b\\$ ');
 
-    expect(manager.getState(id).status).not.toBe('ALERT_RINGING');
-    vi.advanceTimersByTime(5_000);
     expect(manager.getState(id)).toMatchObject({
       status: 'ALERT_RINGING',
       notification: { source: 'OSC 777', title: 'Command completed', body: './build.sh' },

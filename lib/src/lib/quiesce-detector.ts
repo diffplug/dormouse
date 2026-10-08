@@ -14,9 +14,9 @@ export interface QuiesceDetectorOptions {
   onChange?: (status: QuiesceStatus) => void;
   /**
    * A busy Session stayed quiet long enough to look finished. Fired once per
-   * settle, immediately before the detector returns to `NOTHING_TO_SHOW`, so an
-   * owner that latches a ring has already done so by the time the reset is
-   * announced. Whether a settle rings a human is the owner's policy call.
+   * settle with the detector already quiet — so the completion it dispatches
+   * never defers itself — and before onChange publishes that transition, so
+   * no idle flash precedes a ring. Whether a settle rings is the owner's call.
    */
   onSettled?: () => void;
 }
@@ -26,9 +26,6 @@ const T_BUSY_CONFIRM_GAP = cfg.alert.busyConfirmGap;
 const T_MIGHT_NEED_ATTENTION = cfg.alert.mightNeedAttention;
 const T_SETTLED_CONFIRM = cfg.alert.needsAttentionConfirm;
 const T_RESIZE_DEBOUNCE = cfg.alert.resizeDebounce;
-
-/** Silence from the last accepted output through a confirmed settle. */
-const QUIESCE_AFTER_OUTPUT_MS = T_MIGHT_NEED_ATTENTION + T_SETTLED_CONFIRM;
 
 /** Longest silence unconfirmed candidate history can span and still count. */
 const CANDIDATE_HISTORY_TTL_MS = T_BUSY_CANDIDATE_GAP + T_BUSY_CONFIRM_GAP;
@@ -49,13 +46,6 @@ export class QuiesceDetector {
   private timers = new Map<DetectorTimer, ReturnType<typeof setTimeout>>();
   private firstOutputAt: number | null = null;
   private lastOutputAt: number | null = null;
-  /**
-   * Last output that got past the resize grace window. Deliberately outlives
-   * `reset()`: "how long since this pane last printed" is a fact about the PTY,
-   * not state-machine history, and an owner timing quiet across a command
-   * boundary still needs it after the boundary has reset the machine.
-   */
-  private lastAcceptedOutputAt: number | null = null;
   private outputCountSinceReset = 0;
   private readonly onChange: ((status: QuiesceStatus) => void) | null;
   private readonly onSettled: (() => void) | null;
@@ -74,22 +64,7 @@ export class QuiesceDetector {
     return this.status === 'BUSY' || this.status === 'MIGHT_NEED_ATTENTION';
   }
 
-  /** Deferring an owed alert needs only recent output, not confirmed work. */
-  hasRecentOutput(): boolean {
-    return this.lastAcceptedOutputAt !== null && Date.now() < this.quietAt();
-  }
-
-  /**
-   * When the pane counts as quiet if nothing more arrives — the instant a
-   * settle would confirm. The one place that composition is written down, so an
-   * owner scheduling against quiet never restates the settle path's stages.
-   */
-  quietAt(): number {
-    return (this.lastAcceptedOutputAt ?? Date.now()) + QUIESCE_AFTER_OUTPUT_MS;
-  }
-
-  /** Start over from `NOTHING_TO_SHOW`, forgetting the state machine's output
-   * history. The `quietAt` clock is not history and survives (see above). */
+  /** Start over from quiet, forgetting the previous command's output history. */
   reset(): void {
     if (this.disposed) return;
     this.clearActivityTimers();
@@ -112,7 +87,6 @@ export class QuiesceDetector {
     }
 
     this.lastOutputAt = now;
-    this.lastAcceptedOutputAt = now;
 
     switch (this.status) {
       case 'NOTHING_TO_SHOW':
@@ -204,8 +178,7 @@ export class QuiesceDetector {
         case 'settledConfirm':
           if (this.status !== 'MIGHT_NEED_ATTENTION') break;
           this.resetOutputTracking();
-          this.onSettled?.();
-          this.setStatus('NOTHING_TO_SHOW');
+          this.setStatus('NOTHING_TO_SHOW', () => this.onSettled?.());
           break;
       }
     }, delay);
@@ -236,9 +209,12 @@ export class QuiesceDetector {
     this.outputCountSinceReset = 0;
   }
 
-  private setStatus(status: QuiesceStatus): void {
+  /** The one writer of `status`. `beforePublish` runs with the new status
+   *  already readable; a hook that moves the detector on publishes for itself. */
+  private setStatus(status: QuiesceStatus, beforePublish?: () => void): void {
     if (this.status === status) return;
     this.status = status;
-    this.onChange?.(status);
+    beforePublish?.();
+    if (this.status === status && !this.disposed) this.onChange?.(status);
   }
 }

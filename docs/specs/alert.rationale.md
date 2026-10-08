@@ -42,9 +42,9 @@
 
 **Why the gate reads private detector state.** The detector runs for unwatched commands, and other tracks can mask it in the public projection; the gate needs the underlying evidence, not whichever state wins display precedence.
 
-**Why command finishes bypass animation deferral.** A shell-reported exit is a lifecycle event; animation detection is only a recent-output heuristic. Letting the heuristic overrule the event would add latency and let unrelated background output defer a certain completion indefinitely.
+**Why command finishes bypass animation deferral.** A shell-reported exit is a lifecycle event; animation detection is only an output heuristic. Letting the heuristic overrule the event would add latency and let unrelated background output defer a certain completion indefinitely.
 
-**Why deferral waits for recent output without a ceiling.** The 30-second cap addressed notifications starved by `watch -n1` redraws or dev-server heartbeat output (audit, 2026-09-23). It also rang during ongoing animation. The chosen preference is now to wait indefinitely for quiet rather than summon during output; even a brief unconfirmed redraw can delay an owed notification without cancelling it (product decision, 2026-10-01). Idle-pane notifications remain immediate.
+**Why deferral uses the detector's confirmed work, without a ceiling.** Deferring on every accepted output chunk let an isolated redraw hide an alert and introduced a separate quiet clock beside the busy detector (product decision, 2026-10-08). Deferring on a `MIGHT_BE_BUSY` candidate too made the ring blink: output every 1.5–2 s enters and expires a candidate each cycle, about 35 visibility flips in 30 s at 1.6 s, as with `htop`'s default refresh (measured 2026-10-08). Confirmed work ends only by settling or a command boundary, so the ring changes visibility once per burst. Once work is confirmed, sustained output can still defer indefinitely; the user preference remains to avoid summoning during animation.
 
 **Why a deferred report opens its ring at once.** A report during animation used to wait outside the ring until quiet: invisible, unpersisted, and discarded with no TODO by a click or any user verb, while a ring that had already shown and then deferred became a TODO on the same click. Two mechanisms carried one intent with different exits (2026-10-08). One ring with derived deferral gives every verb one path. The cost: the alarm delay counts from the report, not from quiet, as it already did for a ring deferred after it showed.
 
@@ -96,7 +96,7 @@
 
 **Why the keystroke fallback is not routed into the manager.** The fallback in `docs/specs/terminal-state.md` is renderer-side and lower confidence than a shell-reported command boundary. Wiring it in would buy integration-less shells a worse version of WATCHING at the price of a second command-tracking path to keep in sync.
 
-**Why resumed work defers an owed ring.** The marked `ttr.pgstencil-adopt` speech (2026-09-09 18:17:03) followed a WATCHING settle and resumed output. Withdrawing only confirmed WATCHING left program-sent reports ringing through animation. Deferring on the first accepted output preserves the debt even when a redraw never confirms BUSY; the same episode and original deadlines prevent alarm replay and avoid adding another full delay after quiet (product decision, 2026-10-01).
+**Why resumed work defers an owed ring.** The marked `ttr.pgstencil-adopt` speech (2026-09-09 18:17:03) followed a WATCHING settle and resumed output. Withdrawing only confirmed WATCHING left program-sent reports ringing through animation. Deferral preserves the debt; the same episode and original deadlines prevent alarm replay and avoid adding another full delay after quiet (product decision, 2026-10-01).
 
 ## Terminal reports
 
@@ -124,7 +124,7 @@
 
 ## Alarm settings
 
-**Why animation deferral defaults on.** Coding agents (`claude`, `codex`) send their notification OSC while their TUI is still redrawing its spinner, so an undeferred ring summons the user to a pane that is still animating (2026-09). The gate engages only on recent output, so a BEL from an otherwise quiet shell still rings at once; turning the switch off restores the protocols' literal timing. Installs that saved any settings blob keep the old value: the blob has no version field, and a persisted `false` cannot be told from a deliberate opt-out, so dropping it on read would leave the off position unpersistable.
+**Why animation deferral defaults on.** Coding agents (`claude`, `codex`) send their notification OSC while their TUI is still redrawing its spinner, so an undeferred ring summons the user to a pane that is still animating (2026-09). The gate engages only on confirmed work, so a BEL from an otherwise quiet shell still rings at once, and so does a turn too short to confirm work: the recorded one-sentence Claude turn (`a Claude Code turn` in `lib/src/lib/alert-engagement.test.ts`) rings with its trailing frame still to draw, while longer turns wait for quiet (2026-10-08). Turning the switch off restores the protocols' literal timing. Installs that saved any settings blob keep the old value: the blob has no version field, and a persisted `false` cannot be told from a deliberate opt-out, so dropping it on read would leave the off position unpersistable.
 
 **Why the settings ride the WATCHING rule set's seed/broadcast shape.** Each VS Code webview has its own origin and therefore its own `localStorage`, while the `AlertManager` is shared; without a host-authoritative copy, two webviews would each believe their own blob. The one difference is the whole-blob relay: an alarm setting is not a set of independent keys the way a rule list is.
 

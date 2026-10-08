@@ -301,8 +301,6 @@ interface AlertEntry {
   todo: TodoState;
   /** The TODO's detail: null without one. A ring shows its own instead. */
   notification: ActivityNotification | null;
-  /** Publishes a deferred ring's end at the detector's quiet deadline (`armDeferWake`). */
-  deferWake: ReturnType<typeof setTimeout> | null;
   /** Completions withheld while engaged, already shown as TODO: rung if presence lapses idle (`setViewer`), dropped by any other end. */
   held: HeldCompletion | null;
   /** Output and completions before this instant answer the user's own input (`acknowledge`). */
@@ -390,13 +388,10 @@ export class AlertManager {
     if (!entry) return;
     // The echo of the user's own keystroke is not the program working.
     if (this.inEchoWindow(entry)) return;
-    const wasRinging = entry.ring !== null && !this.isDeferred(entry);
     if (!entry.detector.onData()) return;
     for (const set of [entry.ring, entry.held]) noteOutput(set);
     entry.ackedQuiet = false;
     this.eachWaiter(id, (waiter) => waiter.onOutput());
-    // Publish only the deferral itself, not every chunk of a deferred ring.
-    if (wasRinging && this.isDeferred(entry)) this.notify(id);
   }
 
   onExit(id: string, exitCode?: number): void {
@@ -458,27 +453,11 @@ export class AlertManager {
 
   private createDetector(id: string): QuiesceDetector {
     return new QuiesceDetector({
-      // Detector state is public only while WATCHING, so only then can a
-      // transition change the projection.
-      onChange: () => {
-        const entry = this.entries.get(id);
-        if (!entry || !this.isWatching(entry)) return;
-        this.notify(id);
-      },
+      // Every transition may move the projection — WATCHING's public state or
+      // a ring's deferral — and `notify` skips what did not change.
+      onChange: () => this.notify(id),
       onSettled: () => this.onSettled(id),
     });
-  }
-
-  /**
-   * The ring waits for the animation to stop: a single accepted redraw is
-   * enough to delay, never discard, an owed ring. Exit sources remain
-   * authoritative, including a report joined to an exit.
-   */
-  private isDeferred(entry: AlertEntry): boolean {
-    return entry.ring !== null
-      && this.deferAlertsUntilQuiet
-      && entry.detector.hasRecentOutput()
-      && !entry.ring.sources.includes('exit');
   }
 
   /**
@@ -570,7 +549,7 @@ export class AlertManager {
       }
       case 'commandFinished':
         if (!event.seen) break;
-        // A shell-reported exit is authoritative, so recent animation never
+        // A shell-reported exit is authoritative, so confirmed work never
         // delays it. The detector only gates in-band terminal notifications.
         this.holdOrDeliver(id, entry, 'exit', {
           source: 'COMMAND_EXIT',
@@ -945,36 +924,24 @@ export class AlertManager {
   // --- Deferral ---
 
   /**
-   * Wake at the detector's quiet deadline to publish a deferred ring's end;
-   * `notify` re-arms it while output keeps moving the deadline — so continuing
-   * output costs one timer per quiet window rather than one per PTY chunk. A
-   * timer already waiting stays: the due time only moves later. The detector's
-   * own settle fires only from busy, so this wake is what ends a deferral after
-   * output that never confirmed busy, or after a command boundary reset it.
+   * The detector alone decides when output is active enough to defer an
+   * owed ring: confirmed work only, since a candidate that enters and expires
+   * with each sparse redraw would blink the ring. Exit sources remain
+   * authoritative, including a report joined to an exit.
    */
-  private armDeferWake(id: string, entry: AlertEntry): void {
-    if (entry.deferWake !== null) return;
-    entry.deferWake = setTimeout(() => {
-      entry.deferWake = null;
-      if (entry.detector.hasRecentOutput()) this.armDeferWake(id, entry);
-      else this.notify(id);
-    }, Math.max(0, entry.detector.quietAt() - Date.now()));
+  private isDeferred(entry: AlertEntry): boolean {
+    return entry.ring !== null
+      && this.deferAlertsUntilQuiet
+      && entry.detector.isConfirmedBusy()
+      && !entry.ring.sources.includes('exit');
   }
 
-  /**
-   * Run by `notify` before every publish, and it mutates: whatever publishes a
-   * deferral arms the wake that publishes its end, and a ring that comes due
-   * without ever having shown is still news to the Session — engaged, it
-   * becomes a hold like a fresh completion would, rather than ringing in front
-   * of the user. Every deferred-to-due edge ends in `notify`, so this is the
-   * one place that decision is made.
-   */
+  /** A never-shown ring released by the detector is still fresh news: hold it
+   * if the user is engaged. Run by `notify` before every publish. */
   private reconcileRing(id: string, entry: AlertEntry): void {
     const { ring } = entry;
     if (ring === null) return;
-    if (this.isDeferred(entry)) {
-      this.armDeferWake(id, entry);
-    } else if (!ring.shown) {
+    if (!this.isDeferred(entry) && !ring.shown) {
       if (this.isEngaged(id)) {
         entry.ring = null;
         eachSource(ring, (source) => this.hold(entry, source, ring.detail));
@@ -982,12 +949,6 @@ export class AlertManager {
         ring.shown = true;
       }
     }
-  }
-
-  private clearDeferWake(entry: AlertEntry): void {
-    if (entry.deferWake === null) return;
-    clearTimeout(entry.deferWake);
-    entry.deferWake = null;
   }
 
   /**
@@ -1040,7 +1001,6 @@ export class AlertManager {
    * Only clearing a ring or a hold records an acknowledgement.
    */
   private clearRingForUser(entry: AlertEntry): Ring | null {
-    this.clearDeferWake(entry);
     const { ring, held } = entry;
     if (ring === null && held === null) return null;
     entry.ring = null;
@@ -1279,7 +1239,6 @@ export class AlertManager {
     this.claimants.delete(id);
     const entry = this.entries.get(id);
     if (entry) {
-      this.clearDeferWake(entry);
       entry.detector.dispose();
       this.entries.delete(id);
       this.notify(id);
@@ -1322,7 +1281,6 @@ export class AlertManager {
     // never hears an outcome absorbed a completion it never delivered.
     for (const id of [...this.awaits.keys()]) this.settleWaiters(id, 'cancelled');
     for (const entry of this.entries.values()) {
-      this.clearDeferWake(entry);
       entry.detector.dispose();
     }
     this.entries.clear();
@@ -1385,7 +1343,6 @@ export class AlertManager {
         pendingCommandLine: null,
         todo: false,
         notification: null,
-        deferWake: null,
         held: null,
         echoUntil: 0,
       };

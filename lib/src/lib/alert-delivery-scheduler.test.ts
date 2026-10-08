@@ -26,8 +26,7 @@ let delivered: Delivered[];
 const sinks = () => delivered.map((delivery) => delivery.sink);
 const episodeId = (id = PANE) => manager.getState(id).episode!.id;
 const ring = (id = PANE) => manager.notifyFromProtocol(id, REPORT);
-/** Clear the ring with a click, then ring again on fresh output: deferred
- *  until that output goes quiet, its episode starting at the report. */
+/** Clear the ring with a click, then allow a fresh report after output. */
 const ringAgain = () => {
   manager.acknowledge(PANE, { input: false });
   manager.onData(PANE);
