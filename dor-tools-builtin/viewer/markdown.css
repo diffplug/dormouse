@@ -69,6 +69,10 @@ body .mdxeditor-toolbar button{padding:2px}
 .prose th,.prose td{border:1px solid var(--baseBorder);padding:2px 8px;vertical-align:top}
 .prose th{background:var(--baseBgSubtle);font-weight:600}
 .prose img{max-width:100%}
+/* An image the document gives no size shows at the width its file records (image-size.ts). */
+.prose .md-default-size img{width:var(--default-width)}
+/* MDXEditor's edge resize handles stretch an image off its aspect; its corners keep it. */
+.prose :is([class*=_imageResizerN_],[class*=_imageResizerE_],[class*=_imageResizerS_],[class*=_imageResizerW_]){display:none}
 /* MDXEditor's table editor: content-sized, its row/column tools slim and shown on hover. */
 .prose [class*=tableEditor]{width:auto;min-width:min(100%,320px);table-layout:auto;height:auto}
 .prose [class*=tableEditor]>tbody>tr>:not([class*=toolCell]){padding:1px 8px}

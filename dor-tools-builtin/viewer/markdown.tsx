@@ -15,6 +15,7 @@ import '@mdxeditor/editor/style.css';
 import { checked, documentPage, loadingState, stateLabel, textSource, type DocumentState } from './document-session';
 import { editableImage, imageSources, imageUrl, ImagesPanel, localImagePath, type SavedImages } from './images-panel';
 import { ImageOverlay } from './image-overlay';
+import { forgetImageWidths, sizeImages } from './image-size';
 import { commentsPlugin } from './markdown-comments';
 import { markdownSafetyPlugin } from './markdown-safety';
 import { pageTheme, subscribeTheme } from './page-theme';
@@ -35,6 +36,7 @@ const update = (change: Partial<typeof store>) => { store = { ...store, ...chang
 const usePage = () => useSyncExternalStore(changes.subscribe, () => store);
 const editorRef = createRef<MDXEditorMethods>();
 let realm: Realm | undefined;
+let sizing: ReturnType<typeof sizeImages> | undefined;
 let loads = 0;
 
 const page = documentPage();
@@ -48,6 +50,7 @@ const session = page.open<string>({
   holds: mark => editorRef.current?.getMarkdown() === mark,
   async apply(text) {
     // A reload mounts a fresh editor: its own normalization is then not an edit, and undo starts over.
+    forgetImageWidths();
     flushSync(() => root.render(<Page key={++loads} markdown={text.replace(/\r\n?/g, '\n')} />));
     await new Promise(resolve => setTimeout(resolve));
   },
@@ -72,6 +75,7 @@ function refreshImage(path: string, version: string) {
   update({ saved: { ...store.saved, [path]: version } });
   // A new handler makes each image node resolve its URL again.
   realm?.pub(imagePreviewHandler$, (src: string) => previewUrl(src));
+  sizing?.refresh();
 }
 
 /** MDXEditor's own image toolbar (delete, settings), which it does not export; read before `imagePlugin` replaces it. */
@@ -103,6 +107,8 @@ const capture = realmPlugin({
     // Only image nodes change the list, so typing does not walk the document.
     editor.registerMutationListener(ImageNode, refresh, { skipInitialization: true });
     refresh();
+    // A PNG or JPEG under the document's folder may record its scale.
+    sizing = sizeImages(editor, src => editableImage(localImagePath(src)) ? imageUrl(src, store.saved) : null);
     const open = (event: MouseEvent) => {
       if (!(event.target instanceof HTMLImageElement)) return;
       const key = editor.read(() => $getNearestNodeFromDOMNode(event.target as Node)?.getKey());
@@ -159,7 +165,7 @@ const plugins = [
   headingsPlugin(), listsPlugin(), quotePlugin(), thematicBreakPlugin(), linkPlugin(), linkDialogPlugin(),
   // Unpadded tables: padding to aligned columns rewrites every row of a table when one cell changes.
   tablePlugin({ tablePipeAlign: false }), frontmatterPlugin(), markdownShortcutPlugin(),
-  imagePlugin({ imageUploadHandler: upload, imagePreviewHandler: previewUrl, disableImageResize: true, EditImageToolbar: ImageToolbar as FC }),
+  imagePlugin({ imageUploadHandler: upload, imagePreviewHandler: previewUrl, allowSetImageDimensions: true, EditImageToolbar: ImageToolbar as FC }),
   codeBlockPlugin({ defaultCodeBlockLanguage: '', codeBlockEditorDescriptors: [mermaidDescriptor] }),
   codeMirrorPlugin({ codeBlockLanguages: {
     '': 'Plain text', sh: 'Shell', bash: 'Bash', js: 'JavaScript', jsx: 'JSX', ts: 'TypeScript', tsx: 'TSX', json: 'JSON',

@@ -5,6 +5,7 @@
  * standard PNG; 16-bit samples round to 8 bits. It encodes 8-bit RGB, or RGBA
  * when any pixel is not opaque. No DOM, so Node tests load it. */
 import { ascii, isPng, latin1, PNG_SIGNATURE } from '../../src/image-format';
+import { exifFields } from '../../src/image-resolution';
 import { isOpaque, orient, type Raster } from './pixels';
 import { cicpSpace, iccSpace, rgbProfile, type SaveNote, type SourceColor } from './icc';
 
@@ -158,24 +159,6 @@ function expandRow(colorType: number, row: Uint8Array, out: Uint8Array, o: numbe
   }
 }
 
-/** The EXIF orientation (1–8) a TIFF-structured `eXIf` holds in its first
- * IFD; 1 when it holds none or cannot be read. */
-function exifOrientation(tiff: Uint8Array): number {
-  if (tiff.length < 8) return 1;
-  const little = tiff[0] === 0x49 && tiff[1] === 0x49;
-  if (!little && !(tiff[0] === 0x4d && tiff[1] === 0x4d)) return 1;
-  const view = new DataView(tiff.buffer, tiff.byteOffset, tiff.byteLength), ifd = view.getUint32(4, little);
-  if (ifd + 2 > tiff.length) return 1;
-  for (let i = 0, at = ifd + 2, n = view.getUint16(ifd, little); i < n && at + 12 <= tiff.length; i++, at += 12) {
-    // Tag 0x0112, a SHORT.
-    if (view.getUint16(at, little) === 0x0112 && view.getUint16(at + 2, little) === 3) {
-      const o = view.getUint16(at + 8, little);
-      return o >= 1 && o <= 8 ? o : 1;
-    }
-  }
-  return 1;
-}
-
 /** A PNG's pixels, upright by its `eXIf` orientation, and its color: the
  * chunks a save keeps, its RGB ICC profile inflated. */
 export interface DecodedPng extends SourceColor { raster: Raster }
@@ -271,7 +254,7 @@ export async function decodePng(bytes: Uint8Array): Promise<DecodedPng> {
   }
   const keep = chunks.filter(c => KEPT.has(c.type) && (c.type !== 'iCCP' || profile)).map(c => c.raw.slice());
   // Upright, as a browser shows it; a save then drops the eXIf.
-  const raster = orient({ width, height, data: new Uint8ClampedArray(out.buffer) }, exif ? exifOrientation(exif) : 1);
+  const raster = orient({ width, height, data: new Uint8ClampedArray(out.buffer) }, exif ? exifFields(exif).orientation : 1);
   return { raster, space, keep, profile, notes };
 }
 
