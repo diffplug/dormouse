@@ -43,7 +43,7 @@ Text output is designed for you to read: it is terse and carries the same refs. 
 
 ## Surface handles
 
-- `surface:N` — the Surface's ref, e.g. `surface:3`; its id is `surface-3`, and either form works. Refs are unique across the app and never change: layout churn, focus, and moves between Workspaces leave them as they are, and numbers are never reused after a kill. A ref for a killed surface fails loudly instead of silently retargeting.
+- `surface:N` — the Surface's ref, e.g. `surface:3`. Always pass this form: the id `surface-3` (in `--json` output and `DORMOUSE_SURFACE_ID`) is not a ref everywhere — `dor iframe surface-3` reads it as a hostname. Refs are unique across the app and never change: layout churn, focus, and moves between Workspaces leave them as they are, and numbers are never reused after a kill. A ref for a killed surface fails loudly instead of silently retargeting.
 - `surface:self` — the terminal you are running in.
 - `surface:focused` — whatever the user currently has focused.
 - `title:<exact title>` — exists for human recovery; avoid it in automation (titles drift). Prefer refs from command responses or `dor list`.
