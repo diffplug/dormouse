@@ -9,6 +9,7 @@ import {
   RELAY_ORIGIN_PLACEHOLDER,
   RETIRED_RELAY_VARIABLES,
   assertRelayOriginBaked,
+  relayDefineVitePlugin,
   relayOriginDefine,
   resolveRelayOrigin,
 } from '../../../scripts/relay-origin.mjs';
@@ -93,9 +94,9 @@ describe('the baked relay origin', () => {
     expect(isDevHostedBuild({ origin: 'https://relay.example.ts.net', mode: 'self-host' })).toBe(false);
   });
 
-  it('reads as the Hosted default where nothing was baked (the test runner)', () => {
-    expect(bakedRelay()).toEqual({ origin: DEFAULT_RELAY_ORIGIN, mode: 'hosted' });
-    expect(bakedRelayMode()).toBe('hosted');
+  it('reads as self-host where nothing was baked (the test runner), never Hosted', () => {
+    expect(bakedRelay()).toEqual({ origin: DEFAULT_RELAY_ORIGIN, mode: 'self-host' });
+    expect(bakedRelayMode()).toBe('self-host');
   });
 
   it('reaches Hosted only in a Hosted build', () => {
@@ -227,6 +228,19 @@ describe('assertRelayOriginBaked', () => {
     expect(() => assertRelayOriginBaked(bundle, relay)).toThrow(/does not contain/);
     writeFileSync(bundle, 'const origin = "https://relay.example.ts.net", mode = "self-host";');
     expect(() => assertRelayOriginBaked(bundle, relay)).not.toThrow();
+  });
+
+  it('fails a Vite build whose define missed a chunk', () => {
+    const plugin = relayDefineVitePlugin();
+    expect(plugin.apply).toBe('build');
+    const generate = (code: string) => plugin.generateBundle({}, {
+      'assets/index.js': { type: 'chunk', fileName: 'assets/index.js', code },
+      'assets/index.css': { type: 'asset', fileName: 'assets/index.css', source: RELAY_MODE_PLACEHOLDER },
+    });
+    for (const placeholder of [RELAY_ORIGIN_PLACEHOLDER, RELAY_MODE_PLACEHOLDER]) {
+      expect(() => generate(`typeof ${placeholder} == "string"`), placeholder).toThrow(/survived into assets\/index\.js/);
+    }
+    expect(() => generate('return "self-host"')).not.toThrow();
   });
 
   it('defines both placeholders as the literals the readers compare', () => {

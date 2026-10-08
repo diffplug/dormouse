@@ -114,6 +114,11 @@ export function getWebviewHtml(
     // frame-src override the `default-src 'none'` fallback blocks the frame
     // outright, leaving a blank (white) pane. See docs/specs/dor-browser.md.
     `frame-src http://127.0.0.1:* http://localhost:*`,
+    // Neither falls back to `default-src`. No form here submits (each handler
+    // calls `preventDefault`), and nothing wants a `<base>`. `frame-ancestors`
+    // is left out: a `<meta>` policy ignores it, and VS Code frames this page.
+    `base-uri 'none'`,
+    `form-action 'none'`,
   ].join('; ');
 
   html = spliceOnce(

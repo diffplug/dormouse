@@ -16,6 +16,7 @@ import { setPlatform } from '../../lib/platform';
 import { FakePtyAdapter } from '../../lib/platform/fake-adapter';
 import { rememberBrowserProvider } from './BrowserProviderSwitch';
 import { cfg } from '../../cfg';
+import { cwdFromOsc633, cwdFromOsc7, cwdFromOsc9_9 } from '../../lib/terminal-state';
 
 vi.mock('../TerminalPane', () => ({ TerminalPane: () => <textarea aria-label="Fake terminal input" /> }));
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -387,6 +388,27 @@ it('offers the rule covering the running script, else that script\'s own key', a
     open.mockRestore();
     clearRules();
     terminalRegistry.removeTerminalPaneState('watch-row');
+  }
+});
+
+it('never offers Explore for a share or device path, however the terminal reported it', async () => {
+  const open = vi.spyOn(helpers, 'openHelper').mockResolvedValue({ id: 'helper', parentId: 'unc-row', command: '', status: 'off' });
+  const unavailable = () => container.querySelector('[aria-label="Directory unavailable on this host"]');
+  try {
+    for (const [cwd, explorable] of [
+      [cwdFromOsc7('file:///home/me/repo'), true],
+      [cwdFromOsc7('file:////host/share/repo'), false],
+      [cwdFromOsc9_9('\\\\host\\share'), false],
+      [cwdFromOsc633('/\\host\\share'), false],
+      [cwdFromOsc9_9('\\\\?\\C:\\repo'), false],
+    ] as const) {
+      terminalRegistry.applyTerminalSemanticEvents('unc-row', [{ type: 'cwd', cwd: cwd! }]);
+      await act(async () => root.render(<TerminalContext id="unc-row" />));
+      expect(unavailable() === null, cwd!.path).toBe(explorable);
+    }
+  } finally {
+    open.mockRestore();
+    terminalRegistry.removeTerminalPaneState('unc-row');
   }
 });
 

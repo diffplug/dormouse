@@ -91,6 +91,12 @@ describe('getWebviewHtml', () => {
     ]);
   });
 
+  it('closes the directives that do not fall back to default-src', () => {
+    const { html } = getWebviewHtml(webview, mediaPath);
+    expect(cspSources(html, 'form-action')).toEqual([`'none'`]);
+    expect(cspSources(html, 'base-uri')).toEqual([`'none'`]);
+  });
+
   it('carries the real nonce on every tag Vite marked, and leaves no placeholder', () => {
     const { html } = getWebviewHtml(webview, mediaPath);
     const nonce = nonceOf(html);

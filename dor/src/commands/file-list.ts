@@ -6,7 +6,7 @@
  */
 import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
-import { resolveBinaryPath, spawnAndCapture } from 'dor-lib-common';
+import { UNTRUSTED_REPO_GIT_ARGS, resolveBinaryPath, spawnAndCapture } from 'dor-lib-common';
 
 const FILE_LIST_LIMIT = 200_000;
 const GIT_TIMEOUT_MS = 15_000;
@@ -97,8 +97,7 @@ const byPath = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 /** Tracked and untracked-but-not-ignored files under `cwd`, less deleted ones;
  *  dot-folders included. Null outside a work tree. */
 async function gitFiles(git: string, cwd: string): Promise<string[] | null> {
-  // Reading the index runs `core.fsmonitor`, which the listed repo's own config may name.
-  const listed = await spawnAndCapture(git, ['-c', 'core.fsmonitor=false', 'ls-files', '-z', '-t', '--cached', '--others', '--deleted', '--exclude-standard'], {
+  const listed = await spawnAndCapture(git, [...UNTRUSTED_REPO_GIT_ARGS, 'ls-files', '-z', '-t', '--cached', '--others', '--deleted', '--exclude-standard'], {
     cwd, timeoutMs: GIT_TIMEOUT_MS, maxOutputBytes: 256 * 1024 * 1024,
   });
   if (!listed.ok || listed.exitCode !== 0) return null;

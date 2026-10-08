@@ -276,7 +276,7 @@ Source of truth: `remote-lib-common/src/security/noise-transport.ts`.
 
 **The enroll request carries the baked origin**, which a Relay served from another refuses ("HTTP API"). **The Burrow refuses a reported `origin` other than its own before persisting**, naming the `burrows.json` row left behind.
 
-**The build must fail on both silent failure modes**, a bad variable and a bundle the `define` did not reach (rationale). The standalone webview bakes the same pair.
+**The build must fail on both silent failure modes**, a bad variable and a bundle the `define` did not reach, the standalone webview's included (rationale). **Any mode but a baked `hosted` reads as self-host.**
 
 **Enrollment and Burrow-authenticated push fetches must use `redirect: 'error'`**: Node does not re-check a redirect target, so following one could carry the setup password, a device code, the `burrowToken`, or notification metadata to another origin.
 
