@@ -93,6 +93,8 @@ const violations = [
   ['an unnamed environment admits every branch', (ctx) => addEnvironment(ctx, 'staging', { policy: { deployment_branch_policy: null } }), '`staging` admits only refs'],
   ['an unnamed environment holds a secret', (ctx) => addEnvironment(ctx, 'staging', { secrets: ['STAGING_TOKEN'] }), '`staging` holds exactly'],
   ['`tend` admits every branch', (ctx) => { env(ctx, 'tend').deployment_branch_policy = null; }, '`tend` admits only refs'],
+  ['`blyg-publish` admits a feature branch', (ctx) => { body(ctx, 'environments/blyg-publish/deployment-branch-policies').branch_policies.push({ name: 'feature/*', type: 'branch' }); }, '`blyg-publish` admits only refs'],
+  ['`blyg-publish` loses its publishing token', (ctx) => { body(ctx, 'environments/blyg-publish/secrets').secrets = []; }, '`blyg-publish` holds exactly the secrets'],
   ['`security-audit` admits protected branches', (ctx) => { env(ctx, 'security-audit').deployment_branch_policy = { protected_branches: true, custom_branch_policies: false }; }, '`security-audit` admits only refs'],
   ['`release-attest` admits a bot-pushable branch', (ctx) => { body(ctx, 'environments/release-attest/deployment-branch-policies').branch_policies.push({ name: 'feature/*', type: 'branch' }); }, '`release-attest` admits only refs'],
   ['`hosted-preview` admits another branch', (ctx) => { body(ctx, 'environments/hosted-preview/deployment-branch-policies').branch_policies.push({ name: 'dev', type: 'branch' }); }, '`hosted-preview` admits exactly'],

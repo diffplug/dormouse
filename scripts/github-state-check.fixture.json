@@ -225,8 +225,17 @@
   "repos/diffplug/dormouse/environments": {
    "status": 200,
    "body": {
-    "total_count": 7,
+    "total_count": 8,
     "environments": [
+     {
+      "name": "blyg-publish",
+      "protection_rules": [],
+      "can_admins_bypass": true,
+      "deployment_branch_policy": {
+       "protected_branches": false,
+       "custom_branch_policies": true
+      }
+     },
      {
       "id": 21767729669,
       "name": "hosted-preview",
@@ -941,6 +950,40 @@
       "created_at": "2026-09-28T15:21:14Z"
      }
     ]
+   }
+  },
+  "repos/diffplug/dormouse/environments/blyg-publish/deployment-branch-policies": {
+   "status": 200,
+   "body": {
+    "total_count": 2,
+    "branch_policies": [
+     {
+      "name": "main",
+      "type": "branch"
+     },
+     {
+      "name": "v*",
+      "type": "tag"
+     }
+    ]
+   }
+  },
+  "repos/diffplug/dormouse/environments/blyg-publish/secrets": {
+   "status": 200,
+   "body": {
+    "total_count": 1,
+    "secrets": [
+     {
+      "name": "BLYG_API_TOKEN"
+     }
+    ]
+   }
+  },
+  "repos/diffplug/dormouse/environments/blyg-publish/variables": {
+   "status": 200,
+   "body": {
+    "total_count": 0,
+    "variables": []
    }
   }
  }
