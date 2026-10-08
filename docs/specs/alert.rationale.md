@@ -48,6 +48,8 @@
 
 **Why a deferred report opens its ring at once.** A report during animation used to wait outside the ring until quiet: invisible, unpersisted, and discarded with no TODO by a click or any user verb, while a ring that had already shown and then deferred became a TODO on the same click. Two mechanisms carried one intent with different exits (2026-10-08). One ring with derived deferral gives every verb one path. The cost: the alarm delay counts from the report, not from quiet, as it already did for a ring deferred after it showed.
 
+**Why a never-shown ring that comes due while engaged is held.** Opening the ring at once let a report deferred while the user was away ring in front of them if they came back before the animation stopped — the case holds exist to spare. Until a ring has shown, it is still a fresh completion to the Session, so engagement at its reveal decides as it would have at dispatch. A ring that has shown already summoned the user, and a look still has to answer it (2026-10-08).
+
 ## Await
 
 **Why `quiet` includes exit and the bell.** No caller wants "wake me when it settles" and also wants to keep blocking after the thing died: without exit, a crashed peer hangs its caller until the timeout. The bell is in for the opposite reason — an explicit `OSC 9` / `BEL` is *stronger* evidence than inferred silence, so ignoring "I need input" while waiting for the peer to go quiet would be perverse.

@@ -34,7 +34,7 @@ Public `status` is a projection — first match wins:
 
 **Must identify each unresolved summons with an `episode` id and start time**, retained while deferred (Completion events). Opening the ring creates it; clearing ends it. A source joining an active ring joins its episode and never starts another delivery episode. **Never persist episodes.**
 
-`awaited` sits beside `status`: true while at least one `dor await` is parked on the Session (Await). It is derived from live waiters and never persisted.
+`awaited` sits beside `status`: true while at least one `dor await` is parked on the Session (Await).
 
 **Persist only** `todo` and the sanitized `notification` (plus `status` for diagnostics):
 
@@ -111,6 +111,7 @@ stateDiagram-v2
   [*] --> Deferred: not engaged, recent output
   [*] --> Held: engaged
   Deferred --> Ringing: quiet, or an exit source joins
+  Deferred --> Held: quiet while engaged, never shown
   Ringing --> Deferred: output resumes
   Held --> Ringing: viewer goes idle, focus unchanged
   Held --> TODO: focus moves, viewer leaves
@@ -118,15 +119,16 @@ stateDiagram-v2
   Deferred --> TODO: a look
 ```
 
-**Must hold, never ring, a completion that would ring an engaged Session**, whatever its source. **A hold must set TODO at once**, its detail by richness (Clearing And TODO), and keeps the sources it would raise, repeated holds merging. Holding leaves a progress cycle alone.
+**Must hold, never ring, a completion that would ring an engaged Session**. **A hold must set TODO at once**, its detail by richness (Clearing And TODO), and keeps the sources it would raise, repeated holds merging. Holding leaves a progress cycle alone.
 
 - **Presence lapsing `idle` with focus unchanged must ring what was held**, each source by its unengaged path.
 - Any other end — focus moving, the viewer leaving, a user verb — forgets the hold; only a verb may clear its TODO (rationale).
 - Rule removal withdraws a held `watching` source as it withdraws a ringing one (WATCHING Track).
 
-**With `deferAlertsUntilQuiet` enabled, a ring must be deferred while the detector has accepted output within its quiet deadline (`quietAt`)**, including unconfirmed activity and WATCHING off; a report on an idle pane rings immediately (rationale).
+**With `deferAlertsUntilQuiet` enabled, a ring must be deferred while the detector has accepted output within its quiet deadline (`quietAt`)**, including unconfirmed activity and WATCHING off; an idle pane rings immediately (rationale).
 
-- **Must open the ring at once and derive deferral, never store it**: a deferred ring keeps its sources, detail, episode, and alarm deadlines, unpublished as `ALERT_RINGING` until quiet, confirmed BUSY or not.
+- **Must open the ring at once and derive deferral, never store it**: a deferred ring keeps its sources, detail, episode, and alarm deadlines, unpublished as `ALERT_RINGING` until quiet.
+- **A never-shown ring that comes due while engaged must become a hold** (rationale); one already shown goes on ringing.
 - **Never defer a ring carrying an `exit` source**, whatever joined it. A held exit leaves an existing deferral alone.
 - **Never cap a deferral** (rationale). Disabling the setting shows every deferred ring at once.
 
@@ -209,7 +211,6 @@ sequenceDiagram
 - **The host must answer exactly one `alert:awaitResult` per await, to the realm that parked it**, a cancel included. **Must ignore an `awaitId` already parked in that realm**; a malformed `id` or `until` is answered `cancelled`.
 - **A realm that ends — a disposed or recreated webview, a reloaded or closed window — must have everything it parked cancelled and answered by the host, synchronously** (rationale); a disposing adapter settles its own.
 - The fake adapter runs the same host in process. The Pocket phone adapter has no `dor` and protocol-v1 carries no await, so it settles every request `cancelled` at once.
-- An await survives a Workspace transfer: the manager never moves (Live Workspace transfer).
 
 **A PTY exit or Session removal must resolve every waiter still parked as `died`**, after command-finish dispatch gets first chance to resolve normally. Manager disposal resolves every waiter as `cancelled`.
 

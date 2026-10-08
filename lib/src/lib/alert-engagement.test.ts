@@ -159,18 +159,34 @@ describe('held completions', () => {
     expect(manager.getState(PANE)).toMatchObject({ status: 'ALERT_RINGING', notification: PERMISSION });
   });
 
-  it('shows a ring deferred before the viewer engaged once quiet, deferring it again while output resumes', () => {
+  it('holds a ring that comes due while engaged without ever having shown', () => {
     output(PANE, 3_000);
     manager.notifyFromProtocol(PANE, PERMISSION);
     engage(manager, PANE);
-    expect(ringing(PANE)).toBe(false);
+    vi.advanceTimersByTime(5_000);
+    expect(manager.getState(PANE)).toMatchObject({ status: 'WATCHING_DISABLED', episode: null, todo: true, notification: PERMISSION });
+
+    goIdle(manager, PANE);
+    expect(manager.getState(PANE)).toMatchObject({ status: 'ALERT_RINGING', notification: PERMISSION });
+  });
+
+  it('rings a never-shown deferred ring once quiet if the viewer left before it came due', () => {
+    output(PANE, 3_000);
+    manager.notifyFromProtocol(PANE, PERMISSION);
+    engage(manager, PANE);
+    leave(manager);
     vi.advanceTimersByTime(5_000);
     expect(manager.getState(PANE)).toMatchObject({ status: 'ALERT_RINGING', todo: false, notification: PERMISSION });
+  });
 
-    output(PANE, 5_000);
-    expect(ringing(PANE)).toBe(false);
-    vi.advanceTimersByTime(5_000);
+  it('keeps ringing a ring that already showed when it comes due again while engaged', () => {
+    manager.notifyFromProtocol(PANE, PERMISSION);
     expect(ringing(PANE)).toBe(true);
+    output(PANE, 1_000);
+    expect(ringing(PANE)).toBe(false);
+    engage(manager, PANE);
+    vi.advanceTimersByTime(5_000);
+    expect(manager.getState(PANE)).toMatchObject({ status: 'ALERT_RINGING', todo: false, notification: PERMISSION });
   });
 
   it('acknowledging drops what was held and records it as answered', () => {

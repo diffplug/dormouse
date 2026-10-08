@@ -124,6 +124,9 @@ interface Ring extends SourceSet {
   episode: AlertEpisode;
   /** What it shows, and what the TODO a look turns it into keeps. */
   detail: ActivityNotification;
+  /** Published as `ALERT_RINGING` at least once. Until then, coming due on an
+   *  engaged Session makes it a hold (`publishDeferral`). */
+  shown: boolean;
 }
 
 /**
@@ -948,6 +951,28 @@ export class AlertManager {
     }, Math.max(0, entry.detector.quietAt() - Date.now()));
   }
 
+  /**
+   * Run before every publish. Whatever publishes a deferral arms the wake that
+   * publishes its end. A ring that comes due without ever having shown is
+   * still news to the Session: engaged, it becomes a hold like a fresh
+   * completion would, rather than ringing in front of the user.
+   */
+  private publishDeferral(id: string, entry: AlertEntry): void {
+    const { ring } = entry;
+    if (ring === null) return;
+    if (this.isDeferred(entry)) {
+      this.armDeferWake(id, entry);
+    } else if (ring.shown) {
+      return;
+    } else if (this.isEngaged(id)) {
+      entry.ring = null;
+      if (ring.watching) this.hold(entry, ring.watching, ring.detail);
+      for (const source of ring.sources) this.hold(entry, source, ring.detail);
+    } else {
+      ring.shown = true;
+    }
+  }
+
   private clearDeferWake(entry: AlertEntry): void {
     if (entry.deferWake === null) return;
     clearTimeout(entry.deferWake);
@@ -967,7 +992,7 @@ export class AlertManager {
   ): void {
     let ring = entry.ring;
     if (ring === null) {
-      ring = { episode: createAlertEpisode(), sources: [], watching: null, detail };
+      ring = { episode: createAlertEpisode(), sources: [], watching: null, detail, shown: false };
       entry.ring = ring;
       entry.ackedQuiet = false;
     } else {
@@ -1361,9 +1386,8 @@ export class AlertManager {
   }
 
   private notify(id: string): void {
-    // Whatever publishes a deferral arms the wake that publishes its end.
     const entry = this.entries.get(id);
-    if (entry && this.isDeferred(entry)) this.armDeferWake(id, entry);
+    if (entry) this.publishDeferral(id, entry);
     const state = this.getState(id);
     const last = this.lastEmitted.get(id);
     // A helper publishes nothing, but takes back what it published before a demotion.
