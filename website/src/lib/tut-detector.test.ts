@@ -79,6 +79,11 @@ function makeDetectorHarness(initialActivitySnapshot = new Map<string, ActivityS
       activitySnapshot = snapshot;
       activityListener?.();
     },
+    /** One pane, `pane-a`, in `activityState`. */
+    setPane: (activityState: ActivityState) => {
+      activitySnapshot = new Map([["pane-a", activityState]]);
+      activityListener?.();
+    },
     setSpeechOn: (on: boolean) => {
       speechOn = on;
       speechListener?.();
@@ -192,28 +197,28 @@ describe("TutDetector", () => {
     ["COMMAND_EXIT", "al-cmd-exit"],
     ["WATCHING", "al-watch"],
   ] as const)("credits a ring whose detail is %s as %s", (source, item) => {
-    const { state, setActivitySnapshot } = makeDetectorHarness();
+    const { state, setPane } = makeDetectorHarness();
 
-    setActivitySnapshot(new Map([["pane-a", activity("NOTHING_TO_SHOW")]]));
+    setPane(activity("NOTHING_TO_SHOW"));
     // Deferred behind output: an episode, but not yet ringing.
-    setActivitySnapshot(new Map([["pane-a", { ...ringing(source), status: "BUSY" }]]));
+    setPane({ ...ringing(source), status: "BUSY" });
     expect(state.isComplete(item)).toBe(false);
 
-    setActivitySnapshot(new Map([["pane-a", ringing(source)]]));
+    setPane(ringing(source));
     expect(state.isComplete(item)).toBe(true);
   });
 
   it("credits al-todo-auto when a look turns a ring into a TODO, never when output defers it", () => {
-    const { state, setActivitySnapshot } = makeDetectorHarness();
+    const { state, setPane } = makeDetectorHarness();
     const ring = { ...ringing("OSC 9"), todo: true };
 
-    setActivitySnapshot(new Map([["pane-a", activity("NOTHING_TO_SHOW")]]));
-    setActivitySnapshot(new Map([["pane-a", ring]]));
-    setActivitySnapshot(new Map([["pane-a", { ...ring, status: "BUSY" }]]));
+    setPane(activity("NOTHING_TO_SHOW"));
+    setPane(ring);
+    setPane({ ...ring, status: "BUSY" });
     expect(state.isComplete("al-todo-auto")).toBe(false);
 
-    setActivitySnapshot(new Map([["pane-a", ring]]));
-    setActivitySnapshot(new Map([["pane-a", { ...ring, status: "NOTHING_TO_SHOW", episode: null }]]));
+    setPane(ring);
+    setPane({ ...ring, status: "NOTHING_TO_SHOW", episode: null });
     expect(state.isComplete("al-todo-auto")).toBe(true);
     expect(state.isComplete("al-held")).toBe(false);
     expect(state.isComplete("al-todo-manual")).toBe(false);
@@ -233,10 +238,10 @@ describe("TutDetector", () => {
   });
 
   it("credits al-todo-clear when a TODO goes", () => {
-    const { state, setActivitySnapshot } = makeDetectorHarness();
+    const { state, setPane } = makeDetectorHarness();
 
-    setActivitySnapshot(new Map([["pane-a", activity("NOTHING_TO_SHOW", true)]]));
-    setActivitySnapshot(new Map([["pane-a", activity("NOTHING_TO_SHOW", false)]]));
+    setPane(activity("NOTHING_TO_SHOW", true));
+    setPane(activity("NOTHING_TO_SHOW", false));
     expect(state.isComplete("al-todo-clear")).toBe(true);
   });
 

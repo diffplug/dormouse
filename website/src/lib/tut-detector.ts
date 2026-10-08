@@ -12,8 +12,8 @@ interface ActivityStoreModule {
   getActivitySnapshot: () => Map<string, ActivityState>;
 }
 
-/** Whether spoken alarms are on where the user is, app default or Workspace
- *  override alike. */
+/** Whether spoken alarms are on in the active Workspace, app default or
+ *  Workspace override alike. */
 interface SpeechStoreModule {
   subscribe: (listener: () => void) => () => void;
   isSpeechOn: () => boolean;
@@ -63,7 +63,6 @@ export class TutDetector {
   private prevMouse = new Map<string, MouseSelectionState>();
   private previousThemeId = '';
   private speechStore: SpeechStoreModule | undefined;
-  private previousSpeechOn = false;
   private disposables: (() => void)[] = [];
 
   constructor({ state, activityStore, mouseStore, themeStore, commandStore, speechStore }: TutDetectorOptions) {
@@ -101,11 +100,11 @@ export class TutDetector {
     const speech = this.speechStore;
     if (speech) {
       // Turned on, not found on: a setting saved on an earlier visit is no act.
-      this.previousSpeechOn = speech.isSpeechOn();
+      let wasOn = speech.isSpeechOn();
       this.disposables.push(speech.subscribe(() => {
         const on = speech.isSpeechOn();
-        if (on && !this.previousSpeechOn) this.state.markComplete("al-speak");
-        this.previousSpeechOn = on;
+        if (on && !wasOn) this.state.markComplete("al-speak");
+        wasOn = on;
       }));
     }
     this.disposables.push(

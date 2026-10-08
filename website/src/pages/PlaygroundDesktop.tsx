@@ -16,7 +16,6 @@ import { getPreferredPlayground, POCKET_PLAYGROUND_PATH, usePreferredPlayground 
 import {
   DESKTOP_PANES,
   DESKTOP_PLAYGROUND_LAYOUT,
-  PANE_MAIN,
   type DesktopPaneSpec,
 } from "../lib/playground-desktop-layout";
 import { SITE_LINK_CLASS } from "../components/site-tokens";
@@ -98,12 +97,13 @@ function PlaygroundDesktopExperience() {
       if (getPreferredPlayground() === "pocket") return;
       // None of these consumes another, so load the whole bundle at once rather
       // than paying a round of module resolution each on the boot path.
-      const [platform, registry, mouseSelection, themes, alertPolicy, workspaceWindow, playgroundTabs, workspaceStore, shellDefaults, asciiSplash, playgroundFs] = await Promise.all([
+      const [platform, registry, mouseSelection, themes, alertSettings, alertDelivery, workspaceWindow, playgroundTabs, workspaceStore, shellDefaults, asciiSplash, playgroundFs] = await Promise.all([
         import("dormouse-lib/lib/platform"),
         import("dormouse-lib/lib/terminal-registry"),
         import("dormouse-lib/lib/mouse-selection"),
         import("dormouse-lib/lib/themes"),
-        import("dormouse-lib/lib/alert-delivery-policy"),
+        import("dormouse-lib/lib/alert-settings"),
+        import("dormouse-lib/lib/alert-delivery-model"),
         import("dormouse-lib/components/WorkspaceWindow"),
         import("../components/PlaygroundTabs"),
         import("dormouse-lib/lib/workspace-store"),
@@ -133,11 +133,17 @@ function PlaygroundDesktopExperience() {
         mouseStore: mouseSelection,
         themeStore: themes,
         commandStore: registry,
-        // The tutorial pane's policy: the app default under the Workspace's
-        // override, so either switch credits `al-speak`.
+        // The active Workspace's policy, the app default under its override,
+        // so either switch credits `al-speak`.
         speechStore: {
-          subscribe: alertPolicy.subscribeToAlertDeliveryPolicy,
-          isSpeechOn: () => alertPolicy.getSessionAlertPolicy(PANE_MAIN).speakEnabled,
+          subscribe: (listener) => {
+            const stops = [alertSettings.subscribeToAlertSettings(listener), workspaceStore.subscribeToWorkspaces(listener)];
+            return () => stops.forEach((stop) => stop());
+          },
+          isSpeechOn: () => alertDelivery.resolveAlertDeliveryPolicy(
+            alertSettings.getAlertSettings(),
+            workspaceStore.getWorkspace(workspaceStore.getActiveWorkspaceId())?.alertDelivery,
+          ).speakEnabled,
         },
       });
       detectorRef.current = detector;

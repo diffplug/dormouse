@@ -2,6 +2,7 @@ import { BOLD, CLEAR_LINE, PROMPT, RESET, fg, promptFor } from 'dormouse-lib/lib
 import { shortPath } from 'dor/commands/open-picker';
 import { POSIX_ESCAPABLE } from 'dormouse-lib/lib/posix-escape';
 import { HOME, type DirEntry, type VirtualFs } from './playground-fs/vfs';
+import { ALERT_PROGRAMS } from './alert-programs';
 
 export type SendOutput = (data: string) => void;
 
@@ -63,7 +64,7 @@ const ESCAPABLE = new RegExp(POSIX_ESCAPABLE.source, 'g');
 
 /** The pages' programs (`splash` is `ascii-splash`'s alias), and with a
  * filesystem the builtins and `dor` too, sorted as a listing shows them. */
-const PROGRAMS = ['agent', 'ascii-splash', 'build', 'changelog', 'tutorial'];
+const PROGRAMS = ['ascii-splash', 'changelog', 'tutorial', ...ALERT_PROGRAMS].sort();
 const FS_COMMANDS = [...PROGRAMS, 'cd', 'dor', 'ls', 'pwd'].sort();
 
 /** The longest prefix every one of `names` shares. */

@@ -13,6 +13,8 @@ import { TutorialShell } from "./tutorial-shell";
 
 const PANE = "pane";
 const OTHER = "tutorial";
+/** One `agent` turn, plus a frame for its last write. */
+const TURN_MS = AGENT_TURN_MS + 200;
 /** Past a deferred report's quiet deadline. */
 const QUIET_MS = 5_100;
 
@@ -29,10 +31,11 @@ beforeEach(() => {
   output = [];
   latest = undefined;
   adapter.onAlertState((detail) => { if (detail.id === PANE) latest = detail; });
-  shell = new TutorialShell(
-    (data) => { output.push(data); adapter.sendOutput(PANE, data); },
-    (name, args, onExit) => startAlertProgram(name, args, (data) => { output.push(data); adapter.sendOutput(PANE, data); }, onExit),
-  );
+  const send = (data: string) => {
+    output.push(data);
+    adapter.sendOutput(PANE, data);
+  };
+  shell = new TutorialShell(send, (name, args, onExit) => startAlertProgram(name, args, send, onExit));
 });
 
 afterEach(() => {
@@ -42,13 +45,14 @@ afterEach(() => {
 });
 
 const lookAt = (id: string) => adapter.alertEngagement({ present: true, focusId: id });
+const screen = () => output.join("");
 
 describe("alert programs", () => {
   it("agent rings with its question once its screen settles, while the user is elsewhere", () => {
     lookAt(OTHER);
     shell.handleInput("agent\r");
-    vi.advanceTimersByTime(AGENT_TURN_MS + 200);
-    expect(output.join("")).toContain("\x1b]9;agent: Allow edit to README.md?\x07");
+    vi.advanceTimersByTime(TURN_MS);
+    expect(screen()).toContain("\x1b]9;agent: Allow edit to README.md?\x07");
     expect(latest?.status).not.toBe("ALERT_RINGING");
 
     vi.advanceTimersByTime(QUIET_MS);
@@ -58,7 +62,7 @@ describe("alert programs", () => {
   it("agent leaves a TODO, not a ring, when the user is watching its pane", () => {
     lookAt(PANE);
     shell.handleInput("agent\r");
-    vi.advanceTimersByTime(AGENT_TURN_MS + 200 + QUIET_MS);
+    vi.advanceTimersByTime(TURN_MS + QUIET_MS);
     expect(latest).toMatchObject({ status: "WATCHING_DISABLED", todo: true, notification: { source: "OSC 9" } });
   });
 
@@ -66,8 +70,8 @@ describe("alert programs", () => {
     adapter.alertSetWatchedCommands([...DEFAULT_WATCHED_COMMANDS]);
     lookAt(OTHER);
     shell.handleInput("agent --quiet\r");
-    vi.advanceTimersByTime(AGENT_TURN_MS + 200 + QUIET_MS);
-    expect(output.join("")).not.toContain("\x1b]9;");
+    vi.advanceTimersByTime(TURN_MS + QUIET_MS);
+    expect(screen()).not.toContain("\x1b]9;");
     expect(latest).toMatchObject({ status: "ALERT_RINGING", notification: { source: "WATCHING" } });
   });
 
@@ -84,18 +88,18 @@ describe("alert programs", () => {
   it.each(["agent", "build"])("%s quits on Ctrl-C", (name) => {
     shell.handleInput(`${name}\r`);
     shell.handleInput("\x03");
-    expect(output.join("")).toContain("\x1b]633;D;130\x07");
+    expect(screen()).toContain("\x1b]633;D;130\x07");
   });
 
   it("agent takes another request after an answer", () => {
     lookAt(OTHER);
     shell.handleInput("agent\r");
-    vi.advanceTimersByTime(AGENT_TURN_MS + 200);
+    vi.advanceTimersByTime(TURN_MS);
     output.length = 0;
     shell.handleInput("y");
-    expect(output.join("")).toContain("Edited README.md");
+    expect(screen()).toContain("Edited README.md");
     shell.handleInput("fix the tests\r");
     vi.advanceTimersByTime(200);
-    expect(output.join("")).toContain("Working on fix the tests");
+    expect(screen()).toContain("Working on fix the tests");
   });
 });

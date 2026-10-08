@@ -1,3 +1,4 @@
+import { cfg } from "dormouse-lib/cfg";
 import { BOLD, CLEAR_LINE, DIM, RESET, fg } from "dormouse-lib/lib/ansi";
 import type { InteractiveProgram, SendOutput } from "./tutorial-shell";
 
@@ -10,9 +11,12 @@ import type { InteractiveProgram, SendOutput } from "./tutorial-shell";
 
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const FRAME_MS = 100;
+/** The names `startAlertProgram` runs, for the shell to complete and suggest. */
+export const ALERT_PROGRAMS = ["agent", "build"] as const;
+
 /** One `agent` turn: past the detector's BUSY confirmation, which a WATCHING
- *  settle needs, and short enough to wait through. */
-export const AGENT_TURN_MS = 4_000;
+ *  settle needs, with margin, and short enough to wait through. */
+export const AGENT_TURN_MS = cfg.alert.busyCandidateGap + cfg.alert.busyConfirmGap + 2_000;
 /** How long `build` runs before it exits. */
 export const BUILD_MS = 8_000;
 /** What a terminal sends for `Ctrl-C`; both programs quit on it. */
@@ -25,6 +29,13 @@ const FIRST_TASK = "tidy up README.md";
 
 /** Key sequences are not text, so neither program types them. */
 const KEY_SEQUENCE = /\x1b(?:\[[0-?]*[ -/]*[@-~]|O.|.)?/g;
+
+/** `Ctrl-C`: echo it, stop, and exit as an interrupted child of a shell does. */
+function interrupt(program: InteractiveProgram, send: SendOutput, onExit: (exitCode?: number) => void): void {
+  send("^C\r\n");
+  program.dispose();
+  onExit(EXIT_INTERRUPTED);
+}
 
 type AgentPhase = "working" | "asking" | "idle";
 
@@ -55,9 +66,7 @@ export class AgentProgram implements InteractiveProgram {
   handleInput(data: string): void {
     for (const ch of data.replace(KEY_SEQUENCE, "")) {
       if (ch === INTERRUPT) {
-        this.send("^C\r\n");
-        this.dispose();
-        this.onExit(EXIT_INTERRUPTED);
+        interrupt(this, this.send, this.onExit);
         return;
       }
       if (this.phase === "asking") this.answer(ch);
@@ -72,7 +81,8 @@ export class AgentProgram implements InteractiveProgram {
 
   private work(task: string): void {
     this.phase = "working";
-    // Its question titled the pane, as a real agent's does; working retitles it.
+    // Its `OSC 9` question became the pane's title, as a real agent's does
+    // (docs/specs/terminal-state.md); working retitles it.
     this.send("\x1b]2;agent\x07");
     const startedAt = Date.now();
     let frame = 0;
@@ -146,17 +156,14 @@ export class BuildProgram implements InteractiveProgram {
       }, index * stepMs));
     });
     this.timers.push(setTimeout(() => {
-      this.timers = [];
+      this.dispose();
       this.send(`${fg(32)}✓${RESET} Build finished in ${(BUILD_MS / 1_000).toFixed(1)}s.\r\n`);
       this.onExit(0);
     }, BUILD_MS));
   }
 
   handleInput(data: string): void {
-    if (!data.includes(INTERRUPT)) return;
-    this.send("^C\r\n");
-    this.dispose();
-    this.onExit(EXIT_INTERRUPTED);
+    if (data.includes(INTERRUPT)) interrupt(this, this.send, this.onExit);
   }
 
   dispose(): void {
