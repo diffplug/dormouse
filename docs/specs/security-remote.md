@@ -105,7 +105,7 @@ Pocket uses relative API URLs at the configured origin; Burrow HTTP runs in Node
 
 The HTTPS origin may be public. Tailnet-only Serve is the installer default and defense in depth, never an authentication premise: under Funnel, public admission is [The setup password](#the-setup-password), and a Client still reaches no Burrow without the Burrow-local authorization above. Funnel state is no install or health verdict (rationale).
 
-**A direct path opens the one listener no loopback rule covers** (`docs/specs/remote-security-model.md` -> "Direct path"): neither `docs/specs/security-local.md` -> "Loopback Listeners" nor `scripts/loopback-lint.mjs` reaches a UDP socket the browser or the addon binds.
+**A direct path opens the one listener no loopback rule covers** (`docs/specs/remote-security-model.md` -> "Direct path"): `docs/specs/security-local.md` -> "Loopback Listeners" does not reach a UDP socket the browser or the addon binds, and `scripts/loopback-lint.mjs` only allowlists the addon's ("Network policy" there).
 
 - **FAIL IF** `deploy/local/install-macos.sh`, `deploy/local/install-windows.ps1`, or `deploy/local/install-linux.sh` stops requiring the effective `DORMOUSE_BIND_HOST` in `config/relay.env` to be `127.0.0.1`, or if any `manage verify` stops asserting that the plaintext port is unreachable on the node's Tailscale IP.
 - **FAIL IF** the unset default of `DORMOUSE_BIND_HOST` in `relay/src/config.ts` stops being `undefined` — listen on every interface, what a container wants, where the namespace is the boundary — or if `relay/test/bind-host.test.mjs` stops spawning the real entrypoint to prove the plaintext port is unreachable off-loopback when it *is* set.

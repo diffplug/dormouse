@@ -60,6 +60,14 @@ The Vite listener serves modules containing the browser-dev bridge token. Vite's
 
 What header stripping cannot protect. A proxied script runs on `127.0.0.1` and can still read or write non-HttpOnly cookies through `document.cookie`, subject to browser partitioning. The per-grant port isolates origins, not cookie storage. Full isolation needs a separate browser storage context or host namespace; cookie-backed login in the iframe renderer cannot be preserved safely by forwarding ambient cookies.
 
+## Network policy
+
+**Why the outbound lint classifies files, not calls (2026-10).** Nowhere's promise had rested on the nightly audit reading the tree, and a call-site table found no automatic ungated connection. A textual lint cannot tell a guarded call from an unguarded one, but it can make every network primitive in shipped code a reviewed line with a class and a reason, so a new `fetch` in a component fails a build rather than waiting for an audit. Comments are stripped first, since the remote stack documents `RTCPeerConnection` and `node-datachannel` in prose far more than it calls them, and type-only imports name modules without loading them.
+
+**Why the runtime suites hook the Node layer.** The service's own tests inject its transport, so they prove the guard and not the host wiring around it. Booting `createSidecarHost` and the VS Code glue with nothing injected, and recording at `net.Socket.prototype.connect`, `dns`, `http(s)`, `dgram`, and the addon's load as well as at the globals, catches a path that skips the guard, which a stubbed `fetch` alone would not. A mutation that drops managed voice's `networkAllowed` check, starts the Burrow under `nothing`, or loads the addon at boot each turns them red (2026-10-07).
+
+**Why STUN and the phone rows are not driven.** Each needs a phone's Noise handshake through the relay before any peer is built; `one-time-runtime.test.ts` and the direct-path suites cover the choice of ICE server per level, and `scripts/e2e-lint.mjs` the server itself.
+
 ## Persisted state
 
 Why the managed-voice token sits beside the Burrow's enrollment. It is the same class of secret — a revocable bearer credential for a Dormouse service — and that directory is the one `burrow_state_dir` already locks on Windows, where `writeJsonAtomic`'s modes are no-ops. A leaked token lets its holder spend the account's daily speak cap until it is revoked on the Hosted account page; it grants no terminal access.
