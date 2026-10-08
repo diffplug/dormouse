@@ -56,7 +56,7 @@ const SECURITY_MODEL_URL =
   "https://github.com/diffplug/dormouse/blob/main/docs/specs/remote-security-model.md";
 
 /** Where team and enterprise inquiries go; nothing on this page sells them. */
-const TEAMS_EMAIL = "teams@dormouse.sh";
+const SUPPORT_EMAIL = "support@dormouse.sh";
 
 export function meta({ location }: MetaArgs) {
   return siteMeta(location.pathname, {
@@ -481,7 +481,7 @@ export default function Hosted() {
         <p className={`mt-5 text-sm ${MUTED_TEXT_CLASS}`}>
           The founding price rises as each cohort of 100 sells out, and founding closes for
           good at the $100 list price. Whatever you paid stays locked. For team and enterprise
-          plans, email <a href={`mailto:${TEAMS_EMAIL}`} className={LINK_CLASS}>{TEAMS_EMAIL}</a>.
+          plans, email <a href={`mailto:${SUPPORT_EMAIL}`} className={LINK_CLASS}>{SUPPORT_EMAIL}</a>.
         </p>
       </section>
 
@@ -633,7 +633,7 @@ export default function Hosted() {
           <FaqEntry question="Do you sell team or enterprise plans?">
             Not on this page. Org accounts, SSO, and audit export are a separate piece of work. If
             you need them, email{" "}
-            <a href={`mailto:${TEAMS_EMAIL}`} className={LINK_CLASS}>{TEAMS_EMAIL}</a> and say
+            <a href={`mailto:${SUPPORT_EMAIL}`} className={LINK_CLASS}>{SUPPORT_EMAIL}</a> and say
             what you need — that is how I will know what to build.
           </FaqEntry>
         </div>
