@@ -22,7 +22,7 @@ export interface SaveSink {
 }
 
 function previousPaneMap(previous: PersistedSession | null): Map<string, PersistedPane> {
-  if (!previous || !Array.isArray(previous.panes)) return new Map();
+  if (!previous) return new Map();
   return new Map(previous.panes.map((pane) => [pane.id, pane]));
 }
 

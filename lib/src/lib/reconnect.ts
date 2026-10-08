@@ -253,7 +253,7 @@ function resumeLivePtys(
 }
 
 function getSavedPaneResumeInfo(saved: PersistedSession | null, liveIds: string[]): Map<string, { title: string; untouched: boolean }> {
-  if (!saved || !Array.isArray(saved.panes)) return new Map();
+  if (!saved) return new Map();
 
   const liveSet = new Set(liveIds);
   const result = new Map<string, { title: string; untouched: boolean }>();
@@ -266,7 +266,7 @@ function getSavedPaneResumeInfo(saved: PersistedSession | null, liveIds: string[
 }
 
 function getSavedResumePlan(saved: PersistedSession | null, liveIds: string[], reapedIds: readonly string[]): ReconnectResult | null {
-  if (!saved || !Array.isArray(saved.panes)) return null;
+  if (!saved) return null;
 
   // Reuse persisted visible/doors state only when every live PTY is covered
   // by the saved session. Extra saved panes can be stale, but extra live panes

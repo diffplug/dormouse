@@ -2338,9 +2338,9 @@ fn scrub_legacy_session_transcripts(dir: &Path) -> Vec<String> {
     errors
 }
 
-/// Orphaned temps in each root; the active root's snapshots are
-/// `discard_other_formats`' and their windows'. Only debug builds have an
-/// abandoned root requiring targeted migration; never delete its layouts.
+/// Sweeps orphaned temps in each root; `discard_other_formats` and each window
+/// own the active root's snapshots. Only debug builds have an abandoned root
+/// requiring targeted migration; never delete its layouts.
 fn sweep_session_roots(app_data: &Path) -> Vec<String> {
     let root = state_root_from(app_data.to_path_buf());
     let mut errors = Vec::new();

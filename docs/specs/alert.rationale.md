@@ -6,7 +6,7 @@
 
 **Why one ring instead of three tracks.** Each track stored its ring differently and doubled as other state: the protocol ring shared `protocolStatus` with progress, the command-exit ring shared `commandExitStatus` with the arm, and WATCHING kept a command key. Every clearing verb, await, and restart then treated them differently — the TODO asymmetries under Clearing And TODO, progress un-ringing a report, a bell overwriting an exit code (audit, 2026-09-23). One latch with a list of sources gives every rule one place to act.
 
-**Why the reader drops what it cannot validate.** A strict reader validating every persisted pane's notification against its own source list rejects the whole session over one unknown source, not just the detail. A development build and an installed one share one session file, so a source a newer build of the same format adds — `WATCHING` was the first — would empty the other build's restore. Dropping only the detail costs a TODO its text and nothing else.
+**Why the reader drops what it cannot validate.** A strict reader validating every persisted pane's notification against its own source list rejects the whole session over one unknown source, not just the detail. Two builds of one format can read one store — after a downgrade, say — so a source the newer one adds would empty the older one's restore. Dropping only the detail costs a TODO its text and nothing else.
 
 **Why the detector outranks the command-exit arm.** A watched command is by definition running, so a WATCHING Session is almost always also command-exit armed; ranking the arm first would mask the detector's busy/quiet states for the whole run, and the detector's state is the one derived from real output.
 

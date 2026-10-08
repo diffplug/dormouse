@@ -1,7 +1,7 @@
 import { getPendingKills } from './pending-kills';
 import { normalizeAlertDeliveryOverrides, sameAlertDeliveryOverrides, type AlertDeliveryOverrides } from './alert-delivery-model';
 import { parseWorkspaceRef } from 'dor/protocol';
-import { DEFAULT_WORKSPACE_ID, DEFAULT_WORKSPACE_NAME, isDefaultWorkspaceName, type WorkspaceId } from './session-types';
+import { DEFAULT_WORKSPACE_ID, DEFAULT_WORKSPACE_NAME, type WorkspaceId } from './session-types';
 import { createIdPool } from './id-pool';
 
 /**
@@ -119,7 +119,8 @@ export function refsArePositional(): boolean {
 function nextDefaultName(): string {
   let max = 0;
   for (const ws of state.workspaces) {
-    if (isDefaultWorkspaceName(ws.name)) max = Math.max(max, Number(ws.name.slice('Workspace '.length)));
+    const assigned = /^Workspace (\d+)$/.exec(ws.name);
+    if (assigned) max = Math.max(max, Number(assigned[1]));
   }
   return `Workspace ${max + 1}`;
 }

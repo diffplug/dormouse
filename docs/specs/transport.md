@@ -198,7 +198,7 @@ Carriers: the `surface_reserve_ids` invoke (standalone); `surface:reserveIds` �
 
 - **A Workspace with neither a published nor a boot-seeded session is dropped rather than written empty**, so a mid-boot snapshot cannot blank a restored Workspace.
 - **A Workspace's save compares against its own previous record** — seeded from disk until its Wall publishes — never the Window's active one, or a dead PTY's retained cwd and alert would come from the wrong Workspace.
-- **Reordering, renaming, pinning, or switching the active Workspace writes too.** **Always write `nameIsAuto`**; a reader drops a record without it. **Write `pinned` only when true**, in every record a Window builds.
+- **Reordering, renaming, pinning, or switching the active Workspace writes too.** **Always write `nameIsAuto`**. **Write `pinned` only when true**, in every record a Window builds.
 - **Must publish both Workspace records in one synchronous step with a Surface move's ownership change**, unprobed and behind one Window write (`pagehide` included), fencing saves collected before or during the change and retaining a departed Session's previous cwd/alert in the destination.
 - **VS Code does not use the collector** — each webview persists one bare `PersistedSession`, its single Workspace, through its own per-surface state API (`docs/specs/vscode.md`).
 
@@ -208,7 +208,7 @@ Carriers: the `surface_reserve_ids` invoke (standalone); `surface:reserveIds` �
 
 **`PersistedSession.version` is 4 and `PersistedWindow.version` 2; a reader must discard any other version as a fresh start, never migrate it.** Every writer stamps both, and the standalone Rust host keeps and discards by the same pair, pinned by `standalone/scripts/persisted-format.json` (`docs/specs/standalone.md` → Persistence).
 
-**A corrupt save must never block startup.** Every read goes through `readPersistedSession()` / `readPersistedWindow()`, which accept the canonical parsed object *or* a JSON-stringified blob and log-and-discard anything present but unreadable. `readPersistedWindow` also drops Workspaces whose inner session is unreadable and repairs a dangling `activeWorkspaceId` to the first Workspace.
+**A corrupt save must never block startup.** Every read goes through `readPersistedSession()` / `readPersistedWindow()`, which accept the canonical parsed object *or* a JSON-stringified blob and log-and-discard anything present but unreadable. `readPersistedWindow` also drops unreadable Workspace records and repairs a dangling `activeWorkspaceId` to the first Workspace.
 
 **Must keep recovery commands outside `PersistedPane`.** Capture, records, and execution follow `docs/compatible-agents.md`.
 
@@ -224,7 +224,7 @@ Source of truth: `PersistedSession` in `lib/src/lib/session-types.ts`; `lib/src/
 
 **Must remove legacy transcript bytes from disk** (rationale). **No writer accepts a transcript-bearing Session shape.**
 
-- **A transcript-bearing blob is of an older format, which no reader parses** (Persisted session types): standalone deletes such a snapshot at boot (`docs/specs/standalone.md` → Persistence), and VS Code's first save overwrites its store.
+- **Never parse a transcript-bearing blob**: it is of an older format (Persisted session types). Standalone deletes such a snapshot at boot (`docs/specs/standalone.md` → Persistence), and VS Code's first save overwrites its store.
 - **Standalone sweeps orphaned session temp files at boot**, the only path that can retire a transcript a crash left in one, and **never touches a live snapshot**. `sweep_orphan_session_temps` in `standalone/src-tauri/src/lib.rs`.
 - **Debug standalone must atomically remove obsolete pane `scrollback` from recognized legacy-root snapshots**, preserving other fields and leaving malformed snapshots untouched. `scrub_legacy_session_transcripts` in `standalone/src-tauri/src/lib.rs`.
 

@@ -73,7 +73,7 @@ export async function refreshSavedSessionStateFromPtys(
       const cwd = await ptyManager.getCwd(pane.id);
       log.info(`[session] ${pane.id}: live PTY cwd=${cwd}`);
 
-      return { ...pane, cwd: cwd ?? pane.cwd ?? null, alert };
+      return { ...pane, cwd: cwd ?? pane.cwd, alert };
     }),
   );
 
@@ -125,10 +125,9 @@ function recoveryStore(context: vscode.ExtensionContext): RecoveryStore {
  *    that has never once been generous enough to reach `[deactivate] done`, so
  *    the one step whose data cannot be reconstructed goes before the ones whose
  *    data can (cwd re-reads, alert merges).
- * 2. **Writes its own file, not `PersistedPane.resumeCommand`.** A later
- *    `flushAllSessions` would otherwise overwrite the session blob with the
- *    webview's copy, whose `resumeCommand` is always the stale `null` it last
- *    saw. A separate record makes the write order stop mattering.
+ * 2. **Writes its own file, not the session blob**, which a later
+ *    `flushAllSessions` overwrites with the webview's copy. A separate record
+ *    makes the write order stop mattering.
  *
  * The scrollback the capture reads never leaves it — only the detected
  * invocation is stored, so no transcript reaches persisted state.

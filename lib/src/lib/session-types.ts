@@ -125,7 +125,6 @@ export type WorkspaceId = string;
 export interface PersistedWorkspace {
   id: WorkspaceId;
   name: string;
-  /** Always written; a record without it is dropped on read. */
   nameIsAuto: boolean;
   /** Written only when true; absent reads as unpinned
    *  (`docs/specs/layout.md` → "Workspace tabs"). */
@@ -163,11 +162,6 @@ export interface PersistedWindow {
 /** Default id/name for the single Workspace a fresh Window is created with. */
 export const DEFAULT_WORKSPACE_ID: WorkspaceId = 'workspace-1';
 export const DEFAULT_WORKSPACE_NAME = 'Workspace 1';
-
-/** Whether a name is one `Workspace <n>` the app assigned, not one a user typed. */
-export function isDefaultWorkspaceName(name: string): boolean {
-  return /^Workspace \d+$/.test(name);
-}
 
 type PersistedSessionInput = Omit<PersistedSession, 'alertDelivery'> & { alertDelivery?: unknown };
 
@@ -310,7 +304,7 @@ function isEmptyState(raw: unknown): boolean {
 // Structural gate only: a current Window with a workspaces array and an active id.
 // Each Workspace element is validated (and dropped if bad) per-item in
 // readPersistedWindow, so malformed elements don't reject the whole Window.
-function isPersistedWindowShape(value: unknown): boolean {
+function isPersistedWindowShape(value: unknown): value is Record<string, unknown> {
   return (
     isRecord(value) &&
     value.version === PERSISTED_WINDOW_VERSION &&
@@ -319,11 +313,17 @@ function isPersistedWindowShape(value: unknown): boolean {
   );
 }
 
+// `pinned` and `session` are read leniently: anything but `true` is unpinned,
+// and the session goes through `readPersistedSession`.
+function isPersistedWorkspaceShape(value: unknown): value is Record<string, unknown> & Pick<PersistedWorkspace, 'id' | 'name' | 'nameIsAuto'> {
+  return isRecord(value) && typeof value.id === 'string' && typeof value.name === 'string' && typeof value.nameIsAuto === 'boolean';
+}
+
 /** Parse a Window, dropping invalid Workspaces and repairing a dangling active id. */
 export function readPersistedWindow(raw: unknown): PersistedWindow | null {
   if (isEmptyState(raw)) return null;
   const value = parseJsonString(raw);
-  if (!isRecord(value) || !isPersistedWindowShape(value)) {
+  if (!isPersistedWindowShape(value)) {
     logDiscard(value, PERSISTED_WINDOW_VERSION, 'window');
     return null;
   }
@@ -331,7 +331,10 @@ export function readPersistedWindow(raw: unknown): PersistedWindow | null {
   const seen = new Set<WorkspaceId>();
   const workspaces = (value.workspaces as unknown[])
     .map((ws): PersistedWorkspace | null => {
-      if (!isRecord(ws) || typeof ws.id !== 'string' || typeof ws.name !== 'string' || typeof ws.nameIsAuto !== 'boolean') return null;
+      if (!isPersistedWorkspaceShape(ws)) {
+        console.warn('[dormouse] Ignoring a malformed persisted Workspace');
+        return null;
+      }
       // First wins. A duplicate id is rejected outright by `setWorkspaces`, and a
       // blob that throws there would leave the app with nothing rendered at all.
       if (seen.has(ws.id)) {
