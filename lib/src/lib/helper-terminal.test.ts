@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { registry, pendingShellOpts, type TerminalEntry } from './terminal-store';
+import { installSurfaceIdPool, resetSurfaceIdPool } from './surface-ids';
 import { applyTerminalSemanticEvents, getTerminalPaneState, resetTerminalPaneState, removeTerminalPaneState } from './terminal-state-store';
 import { beginPromotion, cancelPromotion, closeHelperParent, detachHelper, disposeHelper, resetHelper, finishPromotion, getHelper, helperHasWork, openHelper, reattachHelper, restoreHelper, setHelperVisible, subscribeHelpers } from './helper-terminal';
 
@@ -22,6 +23,19 @@ afterEach(() => { setHelperVisible('parent', false); disposeHelper('parent'); re
 const prompt = (id: string) => applyTerminalSemanticEvents(id, [{ type: 'promptStart' }, { type: 'promptEnd' }]);
 
 describe('helper lifecycle', () => {
+  it('takes a Surface id from the host pool at birth, past one already live', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    await installSurfaceIdPool(async (count) => Array.from({ length: count }, (_, i) => `surface-${5 + i}`), 0);
+    try {
+      registry.set('surface-5', { untouched: true } as TerminalEntry);
+      expect((await openHelper('parent')).id).toBe('surface-6');
+      expect(error).toHaveBeenCalledOnce();
+    } finally {
+      resetSurfaceIdPool();
+      error.mockRestore();
+    }
+  });
+
   it('detaches a helper with its Session alive and puts it back in place of its replacement', async () => {
     const old = await openHelper('parent');
     expect(detachHelper('parent')).toBe(old);

@@ -20,6 +20,7 @@ import { dorWorkspaceRefusal } from './dor-workspace-guard';
 import { runBrowserRequest } from './agent-browser-host';
 import { createIframeProxyUrl, releaseIframeProxyLease } from './iframe-proxy-host';
 import { toolControl } from './tool-host';
+import { reserveSurfaceIds } from './surface-ids';
 import type { ToolHostRequest } from '../../lib/src/lib/platform/types';
 import { ASK_BUDGET_MS } from '../../lib/src/host/remote/service-protocol';
 import { configurePeerLink, remoteNotifyPeerChange } from './peer-link';
@@ -624,6 +625,11 @@ export function attachRouter(
           post({
             type: 'pty:shells', shells, requestId: msg.requestId,
           } satisfies ExtensionMessage);
+        });
+        break;
+      case 'surface:reserveIds':
+        void reserveSurfaceIds(msg.count, msg.floor).then((ids) => {
+          post({ type: 'surface:reservedIds', ids, requestId: msg.requestId } satisfies ExtensionMessage);
         });
         break;
       case 'clipboard:readFiles':

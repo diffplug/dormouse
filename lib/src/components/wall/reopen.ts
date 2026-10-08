@@ -2,6 +2,7 @@ import type { ReopenResponse } from 'dor/commands/types';
 import { getPlatform } from '../../lib/platform';
 import { newestReopenClosedAt, popReopenRecord, pushReopenRecord, type SurfaceReopenRecord, type WorkspaceReopenRecord } from '../../lib/reopen-stack';
 import { withFreshSurfaceIds } from '../../lib/session-remap';
+import { mintWallSurfaceId } from './mint-surface-id';
 import { getPendingKills, pendingKillKey, restorePendingKill, type PendingKill } from '../../lib/pending-kills';
 import { restoreSession } from '../../lib/session-restore';
 import { createWorkspace, generateWorkspaceId, getActiveWorkspaceId, moveWorkspace, setActiveWorkspace, workspaceRefFor } from '../../lib/workspace-store';
@@ -69,7 +70,7 @@ function reopenSurface(record: SurfaceReopenRecord, gesture: boolean): ReopenRes
 function reopenWorkspace(record: WorkspaceReopenRecord, gesture: boolean): ReopenResponse {
   const { name, nameIsAuto, session } = record.workspace;
   const id = generateWorkspaceId();
-  const restored = restoreSession(getPlatform(), { savedSession: withFreshSurfaceIds(session) });
+  const restored = restoreSession(getPlatform(), { savedSession: withFreshSurfaceIds(session, mintWallSurfaceId) });
   // Parked before the Workspace exists: its Wall mounts from this plan.
   setWorkspaceBootPlan(id, restored ? wallBootFromResult(restored) : {});
   createWorkspace({ id, name, nameIsAuto, activate: gesture, alertDelivery: session.alertDelivery });

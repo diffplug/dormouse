@@ -39,6 +39,7 @@ import { resetTerminalPaneState, setTerminalUserTitle } from '../lib/terminal-st
 import { recordToolDirty, resetToolDirty } from '../lib/tool-dirty-store';
 import { cancelEditorClose, getEditorClosePrompt, UNSAVED_TOOL_REFUSAL } from '../lib/tool-editor';
 import { setWindowLabel } from '../lib/workspace-store';
+import { installSurfaceIdPool, resetSurfaceIdPool } from '../lib/surface-ids';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -3482,6 +3483,21 @@ describe('Wall on the Lath engine', () => {
     // Focus moves to the freshly split surface; the caller is no longer focused.
     expect(focusOf(newId)).toBe('true');
     expect(focusOf('pane-a')).toBe('false');
+  });
+
+  it('a split mints its id from the host pool, past any id this Wall already holds', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    await installSurfaceIdPool(async (count) => Array.from({ length: count }, (_, i) => `surface-${7 + i}`), 0);
+    try {
+      await act(async () => {
+        root.render(<Wall initialPaneIds={['surface-7']} initialMode="passthrough" />);
+      });
+      await flush();
+      expect(await dispatchSplit({ direction: 'right' })).toBe('surface-8');
+      expect(error).toHaveBeenCalledWith('[surface-ids] skipping surface-7, which is already in use');
+    } finally {
+      resetSurfaceIdPool();
+    }
   });
 
   it('dor split -- <command> keeps focus on the calling surface (passthrough)', async () => {

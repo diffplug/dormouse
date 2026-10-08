@@ -294,4 +294,8 @@ test('registry seeds reservations above restored IDs and mirrors canonical works
   // Repeated/lower restored reports never wind the process counter backwards.
   await command('workspace_report', { entries: [{ id: 'workspace-400', name: 'Restored', active: true }] });
   assert.deepEqual(await command('workspace_reserve_ids', { count: 1 }), ['workspace-403']);
+  // Surface ids stay above the floor the page restored, and never wind back.
+  assert.deepEqual(await command('surface_reserve_ids', { count: 2, floor: 0 }), ['surface-1', 'surface-2']);
+  assert.deepEqual(await command('surface_reserve_ids', { count: 1, floor: 40 }), ['surface-41']);
+  assert.deepEqual(await command('surface_reserve_ids', { count: 1, floor: 3 }), ['surface-42']);
 });

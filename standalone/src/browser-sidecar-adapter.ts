@@ -3,7 +3,7 @@ import type { BrowserRequest, BrowserResult } from '../../lib/src/lib/platform/b
 import { applyLiveToolEvents } from '../../lib/src/lib/tool-events';
 import { offerProgramCopy } from '../../lib/src/lib/mouse-selection';
 import type { TerminalContextRequest, TerminalContextInfo } from '../../lib/src/lib/terminal-context-types';
-import { installWorkspaceRegistry, type WorkspaceRegistrySnapshot } from "./workspace-registry";
+import { installWorkspaceRegistry, restoredSurfaceFloor, type WorkspaceRegistrySnapshot } from "./workspace-registry";
 import type {
   IframeProxyResult,
   OpenPort,
@@ -131,7 +131,7 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
         this.onRegistrySnapshot = handler;
         return () => { this.onRegistrySnapshot = null; };
       },
-    });
+    }, restoredSurfaceFloor(this.windowSlot.read()));
     // Started, not awaited — see TauriAdapter.
     this.recoveryReady = claimRecoveryCommands(
       (paneIds) => this.host.invoke<Record<string, string>>("take_recovery_commands", { paneIds }),

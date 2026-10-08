@@ -1,5 +1,6 @@
 import { getPlatform } from './platform';
 import { registry } from './terminal-store';
+import { mintSurfaceId } from './surface-ids';
 import { disposeSession, getOrCreateTerminal, parkElement, setPendingShellOpts } from './terminal-lifecycle';
 import { addPendingKill } from './pending-kills';
 import { isDelayedKillEnabled } from './labs-settings';
@@ -227,7 +228,7 @@ export async function openHelper(parentId: string): Promise<HelperTerminal> {
     if (!platform.terminalContext) throw new Error('Helper terminals are unavailable on this host');
     const settings = await platform.terminalContext({ op: 'settings' });
     if (!parentIsOpen(parentId)) throw new Error('The parent terminal has closed');
-    const id = `helper-${crypto.randomUUID()}`;
+    const id = mintSurfaceId((taken) => registry.has(taken));
     // One cwd for the spawn and the launched command's record, so a remote parent
     // leaves the helper in the host default rather than claiming the ssh path.
     const cwd = getInheritableCwd(parentId);

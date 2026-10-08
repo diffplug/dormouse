@@ -1450,7 +1450,7 @@ describe('Labs: a Workspace close that would ask, kept pending', () => {
   });
 
   it('asks as before, pending nothing, when a member\'s helper runs a command', async () => {
-    vi.spyOn(helperTerminal, 'getHelper').mockImplementation(id => id.startsWith('pane') ? { id: 'helper', parentId: id, command: '', status: 'running' } : undefined);
+    vi.spyOn(helperTerminal, 'getHelper').mockImplementation(id => /^(pane|surface)-/.test(id) ? { id: 'helper', parentId: id, command: '', status: 'running' } : undefined);
     vi.spyOn(helperTerminal, 'helperHasWork').mockResolvedValue(true);
     createWorkspace({ id: 'ws-2', name: 'build', activate: false });
     await render(<><WorkspaceStrip /><WorkspaceWindow initialPaneIds={['pane-a']} /></>);

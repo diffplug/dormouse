@@ -55,7 +55,7 @@ The containment hierarchy `dor` handles commit to (`docs/specs/dor-cli.md`):
 Window ⊃ Workspace ⊃ Pane ⊃ Surface  (terminal = Session | browser)
 ```
 
-**Surface identity:** a primary Surface's id is its Lath leaf id; a helper receives its Lath leaf only on promotion. A terminal Surface's id is its `SessionId`, stable (I1); browser replacement and relaunch have different identity effects (I10).
+**Surface identity:** a Surface's id is minted as `surface-<n>` (`docs/specs/transport.md` → Surface ids); a primary Surface's id is its Lath leaf id, and a helper receives its Lath leaf only on promotion. A terminal Surface's id is its `SessionId`, stable (I1); browser replacement and relaunch have different identity effects (I10).
 
 ## Containers
 

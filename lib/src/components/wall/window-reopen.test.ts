@@ -3,6 +3,7 @@ import { createWorkspace, resetWorkspaces, getWorkspacesSnapshot, setWorkspacePi
 import type { PersistedSession } from '../../lib/session-types';
 import { registerWallHandle, resetWallHandles, stubWallHandle } from './wall-handles';
 import { windowNeedsCloseConfirmation, windowReopenSnapshot } from './window-reopen';
+import { resetSurfaceIdPool } from '../../lib/surface-ids';
 import { _resetPendingKillsForTesting, addPendingKill } from '../../lib/pending-kills';
 import { applyTerminalSemanticEvents, removeTerminalPaneState } from '../../lib/terminal-state-store';
 
@@ -16,6 +17,7 @@ const session = (id: string): PersistedSession => ({
 beforeEach(() => {
   resetWorkspaces();
   resetWallHandles();
+  resetSurfaceIdPool();
 });
 
 afterEach(() => {
@@ -72,7 +74,8 @@ describe('closing one window of several', () => {
     expect(snapshot.activeWorkspaceId).toBe(ids[1]);
     const [pane] = snapshot.workspaces[1].session.panes;
     expect(pane).toMatchObject({ cwd: '/repo', title: 'shell', untouched: true });
-    expect(pane.id).not.toBe('pane-ws-2');
+    // Minted as any new Surface is, in strip order.
+    expect(snapshot.workspaces.map(workspace => workspace.session.panes[0].id)).toEqual(['surface-1', 'surface-2']);
     expect(snapshot.workspaces[1].session.surfaceRefs).toBeUndefined();
   });
 

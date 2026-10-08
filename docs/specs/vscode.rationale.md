@@ -18,6 +18,10 @@
 
 **Why the recovery record is not `workspaceState`.** Writing it there was tried and measured (2026-08): detection completed and the record was never written — the state store's SQLite flush is already tearing down while `deactivate()` runs.
 
+## Surface id minting
+
+**Why the mark is not in `workspaceState`.** Its writes reach disk on VS Code's own schedule, so a raised mark could be lost after its numbers were handed out, and the next run would reuse them; an atomic file write is durable when it resolves. Re-reading before each raise keeps two empty windows sharing `globalStorageUri` from handing out the same block or writing the mark lower.
+
 ## CSP policy
 
 **Why Vite stamps the nonce rather than a post-hoc rewrite.** Vite walks its own output with a real HTML parser, so coverage follows the shape it actually emitted — a regex over the document only covers the tags whoever wrote it thought of.

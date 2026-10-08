@@ -173,6 +173,14 @@ const invokeMap = {
     nextWorkspaceId += n;
     return Array.from({ length: n }, (_, i) => `workspace-${first + i}`);
   },
+  // Surface ids (docs/specs/transport.md -> "Surface ids"): never at or below
+  // the floor the page restored, which outlives this process in localStorage.
+  surface_reserve_ids: ({ count, floor }) => {
+    const n = Math.max(1, Math.min(64, Number(count) || 1));
+    const first = Math.max(nextSurfaceId, (Number(floor) || 0) + 1);
+    nextSurfaceId = first + n;
+    return Array.from({ length: n }, (_, i) => `surface-${first + i}`);
+  },
   workspace_report: ({ entries }) => {
     // Restored browser state survives this process; mirror Rust's report seed.
     for (const entry of entries ?? []) {
@@ -190,6 +198,7 @@ const invokeMap = {
 };
 
 let nextWorkspaceId = 2;
+let nextSurfaceId = 1;
 let registryEntries = '[]';
 let registryRevision = 0;
 /** A minted id's counter number, else undefined; mirrors `ref_number` in standalone/src-tauri/src/workspaces.rs. */

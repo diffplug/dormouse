@@ -16,6 +16,8 @@ import {
   applyTerminalSemanticEvents,
 } from '../terminal-state-store';
 import { markSessionTouched } from '../terminal-store';
+import { installSurfaceIdPool, maxSurfaceNumber } from '../surface-ids';
+import { readPersistedSession } from '../session-types';
 import { getTerminalTheme, onTerminalThemeChange } from '../terminal-theme';
 import { HOST_MESSAGE_TOKEN_FIELD, isHostMessage, readHostMessageToken } from '../vscode-message-token';
 import { parseReplay } from './replay-parse';
@@ -234,8 +236,15 @@ export class VSCodeAdapter implements PlatformAdapter {
     return { promise, detach };
   }
 
+  /** Mint Surface ids from the extension host's counter, above every id this
+   *  webview restored (docs/specs/vscode.md → "Surface id minting"). */
   async init(): Promise<void> {
-    // No initialization needed — the webview is already running
+    const restored = readPersistedSession(this.getState());
+    await installSurfaceIdPool(async (count, floor) => {
+      const ids = await this.requestResponse('surface:reserveIds', 'surface:reservedIds', { count, floor }, (msg) => msg.ids as string[]);
+      if (!ids) throw new Error('the extension host did not answer');
+      return ids;
+    }, maxSurfaceNumber(restored ? [restored] : []));
   }
 
   shutdown(): void {

@@ -7,6 +7,7 @@ import { closeBrowserSessions, setBrowserShellRuntime } from './agent-browser-ho
 import { serveWebview } from './webview-messaging';
 import { log } from './log';
 import { initToolHost } from './tool-host';
+import { initSurfaceIds } from './surface-ids';
 import { captureAgentRecoveryCommands, mergeAlertStates, refreshSavedSessionStateFromPtys, takeRecoveryCommands } from './session-state';
 import { readPersistedSession } from '../../lib/src/lib/session-types';
 import { workspaceTitle } from './workspace-chrome';
@@ -87,6 +88,8 @@ export function activate(context: vscode.ExtensionContext) {
   reportWindowPresence(vscode.window.state);
   context.subscriptions.push(vscode.window.onDidChangeWindowState(reportWindowPresence));
   initToolHost(context.globalStorageUri?.fsPath);
+  // Never workspaceState, whose writes may not reach disk (session-state.ts).
+  initSurfaceIds((context.storageUri ?? context.globalStorageUri)?.fsPath ?? null);
   log.init();
   extensionContext = context;
   ptyManager.setExtensionPath(context.extensionPath);

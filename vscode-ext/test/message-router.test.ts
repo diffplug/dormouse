@@ -209,6 +209,15 @@ it('forwards an OSC 367 open only from the run a launch write started', () => {
   }
 });
 
+it('answers a Surface id reservation from the window counter, by request id', async () => {
+  const webview = fakeWebview();
+  const disposable = router.attachRouter(webview.channel, {});
+  try {
+    webview.send({ type: 'surface:reserveIds', count: 2, floor: 41, requestId: 'req-7' });
+    await vi.waitFor(() => expect(webview.posted).toContainEqual({ type: 'surface:reservedIds', ids: ['surface-42', 'surface-43'], requestId: 'req-7' }));
+  } finally { disposable.dispose(); }
+});
+
 // The colour cache answers OSC 10/11/12 from the last whole theme push, exactly
 // as the sidecar's `setThemeColors` does (lib/src/host/remote/sidecar-entry.ts).
 it('drops a malformed theme push whole, keeping the last good one', () => {
