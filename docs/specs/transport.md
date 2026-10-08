@@ -206,13 +206,13 @@ Carriers: the `surface_reserve_ids` invoke (standalone); `surface:reserveIds` �
 
 **A save probes every non-browser pane's cwd in one host round trip where the adapter offers `getCwds`, and every save landing in one microtask shares that round trip**, falling back to one `getCwd` per id (rationale). **A flush may say `probeCwd: false`** and keep each pane's previously persisted cwd — the post-kill quit flush (`docs/specs/standalone.md` → "Quit flow").
 
-**`PersistedSession.version` is 4 and `PersistedWindow.version` 2; a reader must discard any other version as a fresh start, never migrate it.** Every writer stamps both, and the standalone Rust host keeps and discards by the same pair, pinned by `standalone/scripts/persisted-format.json` (`docs/specs/standalone.md` → Persistence).
+**`PersistedSession.version` is 4 and `PersistedWindow.version` 2; a reader must discard any other version as a fresh start, never migrate it.** Every writer stamps both, pinned by `standalone/scripts/persisted-format.json`; the standalone Rust host's discard: `docs/specs/standalone.md` → Persistence.
 
 **A corrupt save must never block startup.** Every read goes through `readPersistedSession()` / `readPersistedWindow()`, which accept the canonical parsed object *or* a JSON-stringified blob and log-and-discard anything present but unreadable. `readPersistedWindow` also drops unreadable Workspace records and repairs a dangling `activeWorkspaceId` to the first Workspace.
 
 **Must keep recovery commands outside `PersistedPane`.** Capture, records, and execution follow `docs/compatible-agents.md`.
 
-Source of truth: `PersistedSession` in `lib/src/lib/session-types.ts`; `lib/src/lib/window-session-aggregator.ts`; `saveSession` in `lib/src/lib/session-save.ts`; `restoreSession` in `lib/src/lib/session-restore.ts`; `lib/src/lib/window-persistence.ts`; `standalone/src/coalesce-cwds.ts`.
+Source of truth: `PersistedSession` in `lib/src/lib/session-types.ts`; `lib/src/lib/window-session-aggregator.ts`; `saveSession` in `lib/src/lib/session-save.ts`; `restoreSession` in `lib/src/lib/session-restore.ts`; `standalone/src/coalesce-cwds.ts`.
 
 ## Persistence policy
 

@@ -1,4 +1,4 @@
-import { surfaceIdNumber } from 'dor/protocol';
+import { surfaceIdFor, surfaceIdNumber } from 'dor/protocol';
 import { createIdPool } from './id-pool';
 import type { PersistedSession } from './session-types';
 import { registry } from './terminal-store';
@@ -37,12 +37,13 @@ export function resetSurfaceIdPool(): void {
 }
 
 function nextId(): string {
-  if (!pool.installed) return `surface-${++localSequence}`;
+  if (!pool.installed) return surfaceIdFor(++localSequence);
   return pool.take() ?? `surface-${crypto.randomUUID()}`;
 }
 
 /** A new Surface id. One a Session or Wall in this page already holds is
- *  skipped, and logged, since the counter should never have produced it. */
+ *  skipped, and logged: a host's counter never produces one, but the page's
+ *  own counter starts at `surface-1` whatever this page restored. */
 export function mintSurfaceId(): string {
   for (;;) {
     const id = nextId();

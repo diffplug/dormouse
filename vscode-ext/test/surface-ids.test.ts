@@ -1,21 +1,22 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { readFile } from 'node:fs/promises';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { surfaceIdNumber } from 'dor/protocol';
 import { createSurfaceIdAllocator } from '../src/surface-ids';
+import { removeDir, tempStorageDir } from './helpers';
 
 let dir: string;
 const file = () => path.join(dir, 'surface-ids.json');
 const ceiling = async () => (JSON.parse(await readFile(file(), 'utf8')) as { surface: number }).surface;
 const logger = { error: vi.fn() };
-const numbers = (ids: string[]) => ids.map((id) => Number(id.slice('surface-'.length)));
+const numbers = (ids: string[]) => ids.map(surfaceIdNumber);
 
 beforeEach(async () => {
-  dir = await mkdtemp(path.join(tmpdir(), 'dormouse-surface-ids-'));
+  dir = await tempStorageDir();
   logger.error.mockClear();
 });
-afterEach(async () => { await rm(dir, { recursive: true, force: true }); });
+afterEach(async () => { await removeDir(dir); });
 
 describe('createSurfaceIdAllocator', () => {
   it('persists a ceiling above a block before handing it out, and a later run starts there', async () => {

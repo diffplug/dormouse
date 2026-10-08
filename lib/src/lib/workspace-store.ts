@@ -1,6 +1,6 @@
 import { getPendingKills } from './pending-kills';
 import { normalizeAlertDeliveryOverrides, sameAlertDeliveryOverrides, type AlertDeliveryOverrides } from './alert-delivery-model';
-import { parseWorkspaceRef } from 'dor/protocol';
+import { parseWorkspaceRef, workspaceIdNumber } from 'dor/protocol';
 import { DEFAULT_WORKSPACE_ID, DEFAULT_WORKSPACE_NAME, type WorkspaceId } from './session-types';
 import { createIdPool } from './id-pool';
 
@@ -101,12 +101,6 @@ export function generateWorkspaceId(): WorkspaceId {
   if (reserved !== undefined) return reserved;
   if (idPool.installed) return `workspace-${crypto.randomUUID()}`;
   return `workspace-${Math.random().toString(36).slice(2, 10)}-${++workspaceSequence}`;
-}
-
-/** The registry number of a `workspace-<n>` id; a random or bare id has none. */
-export function workspaceRefNumber(id: WorkspaceId): number | null {
-  const match = /^workspace-(\d+)$/.exec(id);
-  return match ? Number(match[1]) : null;
 }
 
 /** Positions exist only on hosts without an application-wide registry; every
@@ -308,7 +302,7 @@ export function workspaceRefFor(id: WorkspaceId): string {
     const index = state.workspaces.findIndex((ws) => ws.id === id);
     return `workspace:${index === -1 ? 1 : index + 1}`;
   }
-  const number = workspaceRefNumber(id);
+  const number = workspaceIdNumber(id);
   if (number !== null) return `workspace:${number}`;
   return `workspace:${id}`;
 }
@@ -335,7 +329,7 @@ export type WorkspaceRefResolution =
 function workspaceByNumber(number: number): WorkspaceMeta | undefined {
   return refsArePositional()
     ? state.workspaces[number - 1]
-    : state.workspaces.find((ws) => workspaceRefNumber(ws.id) === number);
+    : state.workspaces.find((ws) => workspaceIdNumber(ws.id) === number);
 }
 
 /** Resolve the host's canonical ref first, then an unambiguous name. */
@@ -360,7 +354,7 @@ export function resolveWorkspaceRef(ref: string): WorkspaceRefResolution {
   }
   // Off the strip on its way to a kill (`docs/specs/reopen.md`).
   const pending = getPendingKills().find(kill => kill.kind === 'workspace'
-    && (number !== null ? workspaceRefNumber(kill.id) === number : kill.id === name || kill.title === name));
+    && (number !== null ? workspaceIdNumber(kill.id) === number : kill.id === name || kill.title === name));
   if (pending) return { ok: false, message: `workspace '${target}' is a pending kill` };
   return { ok: false, message: `unknown workspace target '${target}'` };
 }

@@ -169,8 +169,23 @@ export function parseWorkspaceRef(ref: string): ParsedWorkspaceRef {
 
 const SURFACE_ID_PREFIX = 'surface-';
 const SURFACE_REF_PREFIX = 'surface:';
-const NUMBERED_SURFACE_ID = /^surface-(\d+)$/;
 const BARE_NUMBER = /^\d+$/;
+
+/** The number in a counter-minted `<prefix><n>` id, else null. */
+function idNumber(prefix: string, id: string): number | null {
+  const digits = id.startsWith(prefix) ? id.slice(prefix.length) : '';
+  return BARE_NUMBER.test(digits) ? Number(digits) : null;
+}
+
+/** The registry number of a `workspace-<n>` id; a random or bare id has none. */
+export function workspaceIdNumber(id: string): number | null {
+  return idNumber('workspace-', id);
+}
+
+/** The Surface id numbered `n`. */
+export function surfaceIdFor(n: number): string {
+  return SURFACE_ID_PREFIX + n;
+}
 
 /** A Surface's `dor` ref, derived from its id: `surface-347` is `surface:347`
  *  (`docs/specs/dor-cli.md` → "Handle Model"). An id without the `surface-`
@@ -181,8 +196,7 @@ export function surfaceRefForId(id: string): string {
 
 /** The number in a `surface-<n>` id, else null. */
 export function surfaceIdNumber(id: string): number | null {
-  const match = NUMBERED_SURFACE_ID.exec(id);
-  return match ? Number(match[1]) : null;
+  return idNumber(SURFACE_ID_PREFIX, id);
 }
 
 /** Creation order: numbered ids by number, then every other id, ties by id. */

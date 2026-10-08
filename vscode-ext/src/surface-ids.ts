@@ -11,6 +11,7 @@
 
 import { readFile } from 'node:fs/promises';
 import * as path from 'node:path';
+import { surfaceIdFor } from 'dor/protocol';
 import { writeJsonAtomic } from '../../lib/src/host/atomic-json-file';
 import { createSerialQueue } from '../../lib/src/host/remote/serial-queue';
 import { log } from './log';
@@ -71,7 +72,7 @@ export function createSurfaceIdAllocator(dir: string | null, logger: AllocatorLo
       }
     }
     next = first + n;
-    return Array.from({ length: n }, (_, i) => `surface-${first + i}`);
+    return Array.from({ length: n }, (_, i) => surfaceIdFor(first + i));
   }
 
   return {

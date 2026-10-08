@@ -55,7 +55,7 @@ The containment hierarchy `dor` handles commit to (`docs/specs/dor-cli.md`):
 Window ⊃ Workspace ⊃ Pane ⊃ Surface  (terminal = Session | browser)
 ```
 
-**Surface identity:** a Surface's id is minted as `surface-<n>` (`docs/specs/transport.md` → Surface ids), and its `dor` ref is the id's number (`docs/specs/dor-cli.md` → Handle Model); a primary Surface's id is its Lath leaf id, and a helper receives its Lath leaf only on promotion. A terminal Surface's id is its `SessionId`, stable (I1); a browser Surface keeps its id across render swaps (I10).
+**Surface identity:** minting: `docs/specs/transport.md` → Surface ids; refs: `docs/specs/dor-cli.md` → Handle Model. A primary Surface's id is its Lath leaf id, and a helper receives its Lath leaf only on promotion. A terminal Surface's id is its `SessionId`, stable (I1); a browser Surface's across render swaps and replacement: I10.
 
 ## Containers
 

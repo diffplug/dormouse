@@ -2763,11 +2763,7 @@ fn build_window(
 /// The label a new window takes: `ws-<n>`, never used by this run or an
 /// earlier one (§Windows).
 fn next_window_label(windows: &WindowState) -> String {
-    format!(
-        "{}{}",
-        routing::WS_LABEL_PREFIX,
-        windows.reserve_ids(ids::Kind::Window, 1, 0).start
-    )
+    ids::Kind::Window.id(windows.reserve_ids(ids::Kind::Window, 1, 0).start)
 }
 
 fn payload_terminal_ids(payload: &JsonValue) -> Vec<String> {
@@ -3598,7 +3594,7 @@ fn saved_windows(dir: &Path) -> SavedWindows {
 fn workspace_reserve_ids(windows: tauri::State<'_, WindowState>, count: u64) -> Vec<String> {
     windows
         .reserve_ids(ids::Kind::Workspace, count.clamp(1, 64), 0)
-        .map(|n| format!("workspace-{n}"))
+        .map(|n| ids::Kind::Workspace.id(n))
         .collect()
 }
 
@@ -3610,7 +3606,7 @@ fn workspace_reserve_ids(windows: tauri::State<'_, WindowState>, count: u64) -> 
 fn surface_reserve_ids(windows: tauri::State<'_, WindowState>, count: u64, floor: Option<u64>) -> Vec<String> {
     windows
         .reserve_ids(ids::Kind::Surface, count.clamp(1, 64), floor.unwrap_or(0))
-        .map(|n| format!("surface-{n}"))
+        .map(|n| ids::Kind::Surface.id(n))
         .collect()
 }
 
@@ -4872,7 +4868,6 @@ mod tests {
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::sync::atomic::Ordering;
-    use std::sync::Mutex;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     /// A Window-wide port listing is budgeted for its batch: both of the

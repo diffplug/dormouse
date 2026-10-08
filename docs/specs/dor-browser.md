@@ -32,7 +32,7 @@ Source of truth: `BrowserPanelParams` in `lib/src/components/wall/BrowserPanel.t
 
 ## Placement And Lifetime
 
-**Must share one placement rule across browser entry points**: replace an untouched, helper-less terminal caller in place, else split next to the reference surface. **Never replace a reference that already has a browser.** A replacement is a new Surface; the shell's ref is retired. The pane context menu never replaces ([Pane Context Menu Connect](#pane-context-menu-connect)); helper callers follow `docs/specs/dor-cli.md` → Helper callers and targets.
+**Must share one placement rule across browser entry points**: replace an untouched, helper-less terminal caller in place, else split next to the reference surface. **Never replace a reference that already has a browser.** A replacement is a new Surface (`docs/specs/glossary.md` → "Invariants" I10). The pane context menu never replaces ([Pane Context Menu Connect](#pane-context-menu-connect)); helper callers follow `docs/specs/dor-cli.md` → Helper callers and targets.
 
 **Must open focus-neutrally**, like `dor ensure`, except a Pane Context Menu placement and `docs/specs/layout.md` corner case #6.
 
@@ -94,7 +94,7 @@ The host owns Resize with pane (rationale), answering each engagement — a choi
 
 **Must persist resolved viewport settings**, restoring them when the browser is recreated without rereading a preset definition.
 
-Every swap happens in place, keeping the Surface id (`docs/specs/glossary.md` → "Invariants" I10).
+Surface identity across swaps: `docs/specs/glossary.md` → "Invariants" I10.
 
 | From -> To | Behavior |
 | --- | --- |

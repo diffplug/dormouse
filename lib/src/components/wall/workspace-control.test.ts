@@ -404,10 +404,9 @@ function listing(surfaces: Array<Record<string, unknown>>) {
   });
 }
 
-/** Terminal rows as a Wall reports them, `focused` on the first. Stable ids are
- *  unique Window-wide, so each Wall's rows carry its own prefix. */
-function terminalRows(prefix: string, refs: string[]): Array<Record<string, unknown>> {
-  return refs.map((ref, index) => ({ ref, id: `${prefix}-${ref}`, kind: 'terminal', focused: index === 0 }));
+/** Terminal rows as a Wall reports them, `focused` on the first. */
+function terminalRows(numbers: number[]): Array<Record<string, unknown>> {
+  return numbers.map((n, index) => ({ ref: `surface:${n}`, id: `surface-${n}`, kind: 'terminal', focused: index === 0 }));
 }
 
 it.each([
@@ -453,8 +452,8 @@ describe('surface.list --all', () => {
   it('tags every row with its Workspace and carries the directory', async () => {
     const first = getWorkspacesSnapshot().workspaces[0].id;
     createWorkspace({ id: 'ws-2', name: 'build', activate: false });
-    handleFor(first, { handleDorControl: listing(terminalRows('a', ['surface:1'])) });
-    const second = listing(terminalRows('b', ['surface:2', 'surface:3']));
+    handleFor(first, { handleDorControl: listing(terminalRows([1])) });
+    const second = listing(terminalRows([2, 3]));
     handleFor('ws-2', { handleDorControl: second });
 
     const detail = request('surface.list', { scope: 'all' });
@@ -477,8 +476,8 @@ describe('surface.list --all', () => {
     // Every Wall marks its own selection; the Window has one focus, and it is
     // in the Workspace the user is looking at.
     createWorkspace({ id: 'ws-2', name: 'build', activate: true });
-    handleFor(first, { handleDorControl: listing(terminalRows('a', ['surface:1', 'surface:2'])) });
-    handleFor('ws-2', { handleDorControl: listing(terminalRows('b', ['surface:3'])) });
+    handleFor(first, { handleDorControl: listing(terminalRows([1, 2])) });
+    handleFor('ws-2', { handleDorControl: listing(terminalRows([3])) });
 
     const detail = request('surface.list', { scope: 'all' });
     await listAllWorkspaceSurfaces(detail);
@@ -500,16 +499,16 @@ describe('surface.list --all', () => {
     ));
     const getOpenPorts = vi.fn(async () => []);
     setPlatform({ getOpenPorts, getOpenPortsMany } as unknown as PlatformAdapter);
-    const firstWall = listing(terminalRows('a', ['surface:1']));
+    const firstWall = listing(terminalRows([1]));
     handleFor(first, { handleDorControl: firstWall });
-    handleFor('ws-2', { handleDorControl: listing(terminalRows('b', ['surface:1', 'surface:2'])) });
+    handleFor('ws-2', { handleDorControl: listing(terminalRows([2, 3])) });
 
     const detail = request('surface.list', { scope: 'all', includePorts: true });
     await listAllWorkspaceSurfaces(detail);
 
     // One scan for the whole Window, not one per Workspace and not one per row.
     expect(getOpenPortsMany).toHaveBeenCalledTimes(1);
-    expect(getOpenPortsMany).toHaveBeenCalledWith(['a-surface:1', 'b-surface:1', 'b-surface:2']);
+    expect(getOpenPortsMany).toHaveBeenCalledWith(['surface-1', 'surface-2', 'surface-3']);
     expect(getOpenPorts).not.toHaveBeenCalled();
     // The Walls are asked for rows only: a forwarded `includePorts` would be N
     // scans again.

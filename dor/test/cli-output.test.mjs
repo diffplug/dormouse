@@ -31,7 +31,7 @@ async function withTempDir(prefix, run) {
 
 const fixtureSurfaces = [
   {
-    id: '11111111-1111-4111-8111-111111111111',
+    id: 'surface-1',
     ref: 'surface:1',
     kind: 'terminal',
     renderMode: null,
@@ -47,7 +47,7 @@ const fixtureSurfaces = [
     awaited: false,
   },
   {
-    id: '22222222-2222-4222-8222-222222222222',
+    id: 'surface-2',
     ref: 'surface:2',
     kind: 'terminal',
     renderMode: null,
@@ -64,7 +64,7 @@ const fixtureSurfaces = [
     awaited: true,
   },
   {
-    id: '33333333-3333-4333-8333-333333333333',
+    id: 'surface-3',
     ref: 'surface:3',
     kind: 'browser',
     renderMode: 'agent-browser-screencast',
@@ -80,7 +80,7 @@ const fixtureSurfaces = [
     awaited: false,
   },
   {
-    id: '44444444-4444-4444-8444-444444444444',
+    id: 'surface-4',
     ref: 'surface:4',
     kind: 'terminal',
     renderMode: null,
@@ -141,27 +141,20 @@ function fixtureClient(surfacesFixture = fixtureSurfaces) {
         return {
           surfaces: [
             { ...fixtureSurfaces[0], workspaceRef: 'workspace:1' },
-            { ...fixtureSurfaces[2], ref: 'surface:1', workspaceRef: 'workspace:2' },
-            { ...fixtureSurfaces[3], ref: 'surface:2', workspaceRef: 'workspace:2' },
+            { ...fixtureSurfaces[2], workspaceRef: 'workspace:2' },
+            { ...fixtureSurfaces[3], workspaceRef: 'workspace:2' },
           ],
           workspaces: fixtureWorkspaces,
           windowRef: 'window:1',
           workspaceRef: 'workspace:1',
         };
       }
-      const paneTarget = request.pane;
-      const matched = paneTarget
-        ? surfacesFixture.filter((surface) => (
-          surface.ref === paneTarget ||
-          surface.id === paneTarget
-        ))
-        : surfacesFixture;
       // Mirror the host: attach listening ports to terminal Surfaces on request.
       const surfaces = request.includePorts
-        ? matched.map((surface) => (surface.kind === 'terminal'
+        ? surfacesFixture.map((surface) => (surface.kind === 'terminal'
           ? { ...surface, ports: fixturePortsByRef[surface.ref] ?? [] }
           : surface))
-        : matched;
+        : surfacesFixture;
       return {
         surfaces,
         windowRef: 'window:1',
@@ -174,7 +167,7 @@ function fixtureClient(surfacesFixture = fixtureSurfaces) {
       const command = request.command ? buildShellCommandForKind('posix', request.command) : undefined;
       return {
         status: 'created',
-        surfaceId: '33333333-3333-4333-8333-333333333333',
+        surfaceId: 'surface-3',
         surfaceRef: 'surface:3',
         direction: request.direction === 'auto' ? 'right' : request.direction,
         minimized: request.minimized,
@@ -214,7 +207,7 @@ function fixtureClient(surfacesFixture = fixtureSurfaces) {
       const keyed = named && request.name === 'storybook' && !request.fresh;
       return {
         status: keyed ? 'existing' : 'created',
-        surfaceId: '44444444-4444-4444-8444-444444444444',
+        surfaceId: 'surface-4',
         surfaceRef: 'surface:4',
         command,
         cwd: request.cwd,
@@ -231,7 +224,7 @@ function fixtureClient(surfacesFixture = fixtureSurfaces) {
       const isExisting = command === 'pnpm dev:workspace';
       return {
         status: isExisting ? (request.restart ? 'restarted' : 'existing') : 'created',
-        surfaceId: '33333333-3333-4333-8333-333333333333',
+        surfaceId: 'surface-3',
         surfaceRef: 'surface:3',
         command,
         cwd: request.cwd,
@@ -243,8 +236,8 @@ function fixtureClient(surfacesFixture = fixtureSurfaces) {
       return {
         status: 'sent',
         surfaceId: request.surface === 'surface:2'
-          ? '22222222-2222-4222-8222-222222222222'
-          : '11111111-1111-4111-8111-111111111111',
+          ? 'surface-2'
+          : 'surface-1',
         surfaceRef: request.surface ?? 'surface:1',
         inputCount: request.inputCount,
       };
@@ -258,8 +251,8 @@ function fixtureClient(surfacesFixture = fixtureSurfaces) {
       return {
         workspaceRef: 'workspace:1',
         surfaceId: request.surface === 'surface:2'
-          ? '22222222-2222-4222-8222-222222222222'
-          : '11111111-1111-4111-8111-111111111111',
+          ? 'surface-2'
+          : 'surface-1',
         surfaceRef: request.surface ?? 'surface:1',
         text: limited,
       };
@@ -269,8 +262,8 @@ function fixtureClient(surfacesFixture = fixtureSurfaces) {
       return {
         status: 'killed',
         surfaceId: request.surface === 'surface:2'
-          ? '22222222-2222-4222-8222-222222222222'
-          : '11111111-1111-4111-8111-111111111111',
+          ? 'surface-2'
+          : 'surface-1',
         surfaceRef: request.surface,
       };
     },
@@ -279,8 +272,8 @@ function fixtureClient(surfacesFixture = fixtureSurfaces) {
       return {
         status: request.surface === 'surface:1' ? 'replaced' : 'created',
         surfaceId: request.surface === 'surface:1'
-          ? '11111111-1111-4111-8111-111111111111'
-          : '33333333-3333-4333-8333-333333333333',
+          ? 'surface-1'
+          : 'surface-3',
         surfaceRef: request.surface === 'surface:1' ? 'surface:1' : 'surface:3',
         url: request.url,
         minimized: request.minimized,
@@ -290,7 +283,7 @@ function fixtureClient(surfacesFixture = fixtureSurfaces) {
       this.requests.push({ method: 'browserSurface', request });
       return {
         status: 'created',
-        surfaceId: '33333333-3333-4333-8333-333333333333',
+        surfaceId: 'surface-3',
         surfaceRef: 'surface:3',
         session: request.session,
         minimized: false,
@@ -373,7 +366,7 @@ function fixtureClient(surfacesFixture = fixtureSurfaces) {
         throw new Error("surface 'surface:2' is not serving any port");
       }
       return {
-        surfaceId: '11111111-1111-4111-8111-111111111111',
+        surfaceId: 'surface-1',
         surfaceRef: 'surface:1',
         port: 5173,
         url: 'http://localhost:5173/',
@@ -392,7 +385,7 @@ function awaitClient(outcome) {
       this.requests.push({ method: 'awaitSurface', request });
       return {
         workspaceRef: 'workspace:1',
-        surfaceId: '33333333-3333-4333-8333-333333333333',
+        surfaceId: 'surface-3',
         surfaceRef: request.surface,
         waitedMs: 0,
         ...outcome,
@@ -1592,7 +1585,7 @@ test('an unresolvable bare name is a missing install, including with no PATH', (
 // in. The control socket is private host plumbing (the CLI is the public API), so
 // the host block must not echo it — the snapshot proves the field is absent.
 const listEnv = {
-  DORMOUSE_SURFACE_ID: '22222222-2222-4222-8222-222222222222',
+  DORMOUSE_SURFACE_ID: 'surface-2',
   DORMOUSE_CLI_JS: '/opt/dormouse/dor-cli/dist/dor.js',
   DORMOUSE_NODE: '/opt/dormouse/node',
   DORMOUSE_HOST: 'vscode',
@@ -1644,7 +1637,7 @@ test('list --all json tags each row with its Workspace and carries the directory
   const payload = JSON.parse(result.stdout);
   assert.deepEqual(
     payload.surfaces.map((surface) => [surface.workspace_ref, surface.ref]),
-    [['workspace:1', 'surface:1'], ['workspace:2', 'surface:1'], ['workspace:2', 'surface:2']],
+    [['workspace:1', 'surface:1'], ['workspace:2', 'surface:3'], ['workspace:2', 'surface:4']],
   );
   assert.deepEqual(payload.workspaces.map((row) => row.ref), ['workspace:1', 'workspace:2']);
   await snapshot('list-all-json', result);

@@ -51,6 +51,11 @@ impl Kind {
         numbered(id, self.prefix())
     }
 
+    /// The id of this kind numbered `n`.
+    pub fn id(self, n: u64) -> String {
+        format!("{}{n}", self.prefix())
+    }
+
     /// How far past a reservation a ceiling raise reaches, sized to how often
     /// each kind is minted.
     fn slack(self) -> u64 {
@@ -133,6 +138,15 @@ impl Counters {
             return (first..end, None);
         }
         counter.ceiling = end.saturating_add(kind.slack());
+        // Every other kind at its ceiling rises in the same write, so a boot's
+        // first reservation of each kind costs one write, not one per kind.
+        for other in [Kind::Surface, Kind::Workspace, Kind::Window] {
+            let counter = self.counter(other);
+            let next = counter.next.max(other.first());
+            if next >= counter.ceiling {
+                counter.ceiling = next.saturating_add(other.slack());
+            }
+        }
         (first..end, Some(self.file()))
     }
 
@@ -209,6 +223,18 @@ mod tests {
         let (block, file) = counters.reserve(Kind::Workspace, 1, 0);
         assert_eq!(block, 130..131);
         assert_eq!(ceilings(&file.unwrap())["workspace"], 131 + 64);
+    }
+
+    #[test]
+    fn one_write_raises_every_kind_at_its_ceiling() {
+        let mut counters = Counters::default();
+        counters.load(r#"{"version":1,"surface":500,"workspace":40,"window":9}"#).unwrap();
+        let (block, file) = counters.reserve(Kind::Surface, 64, 0);
+        assert_eq!(block, 500..564);
+        let file = ceilings(&file.expect("a loaded ceiling is reached at once"));
+        assert_eq!((file["surface"].as_u64(), file["workspace"].as_u64(), file["window"].as_u64()), (Some(564 + 1024), Some(40 + 64), Some(9 + 16)));
+        assert_eq!(counters.reserve(Kind::Workspace, 32, 0), (40..72, None));
+        assert_eq!(counters.reserve(Kind::Window, 1, 0), (9..10, None));
     }
 
     #[test]
