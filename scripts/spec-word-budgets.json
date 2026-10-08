@@ -1,5 +1,5 @@
 {
-  "AGENTS.md": 3900,
+  "AGENTS.md": 3950,
   "SECURITY.md": 200,
   "SELF_HOST.md": 4650,
   "docs/compatible-agents.md": 1850,
@@ -18,6 +18,7 @@
   "docs/specs/mouse-and-clipboard.md": 4350,
   "docs/specs/one-time.md": 2900,
   "docs/specs/pocket-app.md": 3650,
+  "docs/specs/pricing.md": 2050,
   "docs/specs/relay.md": 5650,
   "docs/specs/remote-api.md": 4550,
   "docs/specs/remote-network.md": 2450,
@@ -41,5 +42,5 @@
   "docs/specs/tutorial.md": 2000,
   "docs/specs/vscode.md": 4450,
   "docs/specs/webgl-text.md": 800,
-  "docs/specs/website-docs.md": 2800
+  "docs/specs/website-docs.md": 2850
 }
