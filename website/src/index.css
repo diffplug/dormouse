@@ -1,4 +1,9 @@
 @import "tailwindcss";
+/* Served from dormouse.sh, not Google Fonts, so a visit makes no third-party
+   request. Regular weight only, as the Google Fonts request was; each file
+   carries unicode-range subsets, so a page fetches only the scripts it uses. */
+@import "@fontsource/ubuntu-mono/400.css";
+@import "@fontsource/ubuntu-sans-mono/400.css";
 
 /* Library components compile from source here (the `dormouse-lib` alias in
    vite.config.ts), so Tailwind must scan them or their utilities are never
