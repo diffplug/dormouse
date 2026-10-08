@@ -4,6 +4,7 @@ import { copyFileSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSy
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { BODY_LIMIT } from './clamp-issue-body.mjs';
+import { SENTINEL, domains, fragmentManifest, ledgerKey, owedIds as owedRuleIds } from './security-audit-report.mjs';
 import { FRAGMENT } from './github-state-check.mjs';
 import { decide } from './security-audit-plan.mjs';
 import { repoRoot, tempDir, workflowRunBlock } from './lint-kit.mjs';
@@ -40,22 +41,59 @@ const archivedSinks = runBlock('Encrypt the audit transcript')
 const EMBARGO_REPO = stepText('File embargoed findings').match(/^          EMBARGO_REPO: (.+)$/m)[1];
 const COMMIT = '0123456789abcdef0123456789abcdef01234567';
 
+// `SENTINEL` is the reader's own literal; the producer copy in
+// `.github/audit/_preamble.md` is pinned against it below.
+
+/** Every rule a fragment's domain owes, as the result-line id the preamble fixes, from the real specs. */
+const owedIds = (fragment) => owedRuleIds(fragmentManifest(repo, fragment));
+
+/**
+ * A fragment written to the grammar. Every owed rule passes unless `results`
+ * overrides it by id; `drop` omits rules by id prefix; `lines` are appended
+ * verbatim. `stated` is the domain's own verdict line.
+ */
+function fragmentText(fragment, { stated = 'PASS', results = {}, drop = [], lines = [], qualitative = fragment === STATE_FRAGMENT ? 0 : 1, sentinel = true, trailingBlank = false } = {}) {
+  const out = [`VERDICT: ${stated}`, ''];
+  for (const id of owedIds(fragment)) {
+    if (drop.some((prefix) => id.startsWith(prefix))) continue;
+    out.push(results[id] ?? `- PASS: ${id} — the clause: evidence`);
+  }
+  out.push(...lines);
+  for (let i = 0; i < qualitative; i++) out.push('- QUALITATIVE: done — the whole scope');
+  if (sentinel) out.push('', SENTINEL, ...(trailingBlank ? [''] : []));
+  return `${out.join('\n')}\n`;
+}
+
+/** The first rule a fragment owes, for overriding. */
+const firstId = (fragment) => owedIds(fragment)[0];
+
+/** A BLOCKER or WARNING with all three evidence fields. */
+const finding = (severity, location, cause, summary) => [
+  `- ${severity}: \`${location}\` \`${cause}\` — ${summary}`,
+  '  - Code: `Invoke-Expression "& $name"`',
+  '  - Path: a file name → `Invoke-Expression`',
+  '  - Reproduction: a file named `x;calc` → calc runs',
+];
+
 function fixture(t) {
   const dir = tempDir(t, 'dormouse-audit-');
   mkdirSync(join(dir, 'bin'));
   mkdirSync(join(dir, 'scripts'));
   mkdirSync(join(dir, 'docs/specs'), { recursive: true });
   mkdirSync(join(dir, '.github/audit'), { recursive: true });
-  for (const script of ['clamp-issue-body.mjs', 'security-audit-public-body.mjs']) {
+  for (const script of ['clamp-issue-body.mjs', 'security-audit-public-body.mjs', 'security-audit-report.mjs']) {
     copyFileSync(join(repo, 'scripts', script), join(dir, 'scripts', script));
   }
-  // The public builder names a failed check only by a heading these specs carry.
+  // The manifest is derived from these specs and the domain prompts' scopes,
+  // and the public builder names a failed check only by a heading they carry.
   for (const spec of readdirSync(join(repo, 'docs/specs')).filter((f) => /^security[a-z-]*\.md$/.test(f))) {
     copyFileSync(join(repo, 'docs/specs', spec), join(dir, 'docs/specs', spec));
   }
-  copyFileSync(join(repo, '.github/audit/transcript-recipient.txt'), join(dir, '.github/audit/transcript-recipient.txt'));
+  for (const f of readdirSync(join(repo, '.github/audit'))) {
+    copyFileSync(join(repo, '.github/audit', f), join(dir, '.github/audit', f));
+  }
   // The deterministic check passed unless a case says otherwise.
-  writeFileSync(join(dir, STATE_FRAGMENT), `VERDICT: PASS\n\n### FAIL IF results\n\n- PASS: fixture\n\n${SENTINEL}\n`);
+  writeFileSync(join(dir, STATE_FRAGMENT), fragmentText(STATE_FRAGMENT));
   const env = { ...process.env, PATH: `${join(dir, 'bin')}:${process.env.PATH}`, RUNNER_TEMP: dir,
     AUDIT_FRAGMENTS: allFragments.join(' '), GITHUB_REPOSITORY: 'fixture/repo', GITHUB_RUN_ID: '123',
     GITHUB_SHA: COMMIT, GH_TOKEN: 'fixture-workflow-token',
@@ -69,19 +107,24 @@ function stub(dir, name, source) {
 
 /**
  * A `gh` that records each call with the token it was handed and the body it
- * posted. `issue list` finds open issue 23; a create in the embargo repository
- * answers with its URL, or fails when `GH_FAIL_EMBARGO` is set.
+ * posted. A public `issue list` finds open issue 23 unless `GH_NO_PUBLIC_ISSUE`
+ * is set; the embargo repository's lists the rows of `GH_LEDGER_OPEN`. A
+ * create in the embargo repository answers with its URL; every embargo call
+ * fails when `GH_FAIL_EMBARGO` is set.
  */
 function stubGh(dir) {
   stub(dir, 'gh', `
     const fs = require('node:fs');
     const args = process.argv.slice(2);
     const bodyAt = args.indexOf('--body-file');
-    const body = bodyAt === -1 ? null : fs.readFileSync(args[bodyAt + 1], 'utf8');
+    const body = bodyAt === -1 ? (args.includes('--body') ? args[args.indexOf('--body') + 1] : null) : fs.readFileSync(args[bodyAt + 1], 'utf8');
     const embargo = args.includes(${JSON.stringify(EMBARGO_REPO)}) || (args[2] ?? '').includes(${JSON.stringify(EMBARGO_REPO)});
     fs.appendFileSync('gh-calls.jsonl', JSON.stringify({ args, token: process.env.GH_TOKEN, body, embargo }) + '\\n');
     if (embargo && process.env.GH_FAIL_EMBARGO) process.exit(1);
-    if (args[0] === 'issue' && args[1] === 'list') process.stdout.write('23\\n');
+    if (args[0] === 'issue' && args[1] === 'list') {
+      if (embargo) process.stdout.write(process.env.GH_LEDGER_OPEN ?? '');
+      else if (!process.env.GH_NO_PUBLIC_ISSUE) process.stdout.write('23\\n');
+    }
     if (embargo && args[1] === 'create') process.stdout.write('https://github.com/${EMBARGO_REPO}/issues/7\\n');
   `);
 }
@@ -95,9 +138,8 @@ const outputEnv = (name) => [...stepText(name).matchAll(/^          (\w+): \$\{\
   .map(([, variable, step, key]) => ({ variable, step, key }));
 
 /**
- * Run the three reporting steps as the runner would: compose, then the
- * embargo filing unless the verdict passed (its `if:`), then the public step,
- * each handed the outputs its `env:` names.
+ * Run the three reporting steps as the runner would: compose, the embargo
+ * filing, then the public step, each handed the outputs its `env:` names.
  */
 function runReporting(dir, env, { embargoToken = 'fixture-embargo-token', embargoEnv = {} } = {}) {
   const outputs = {};
@@ -111,150 +153,136 @@ function runReporting(dir, env, { embargoToken = 'fixture-embargo-token', embarg
       .map((line) => [line.slice(0, line.indexOf('=')), line.slice(line.indexOf('=') + 1)]));
     return result;
   };
-  assert.match(stepText('File embargoed findings'), /^        if: always\(\) && steps\.compose\.outputs\.status != 'PASS'$/m);
+  // Every run reads the ledger, a PASS included.
+  assert.match(stepText('File embargoed findings'), /^        if: always\(\)$/m);
   const composed = run('compose', 'Compose the audit report', {});
   assert.equal(composed.status, 0, composed.stderr);
-  const embargoed = outputs.compose.status === 'PASS' ? null
-    : run('embargo', 'File embargoed findings', { GH_TOKEN: embargoToken, EMBARGO_REPO, ...embargoEnv });
-  const surfaced = run('surface', 'Surface result, file or close issue', {});
+  const embargoed = run('embargo', 'File embargoed findings', { GH_TOKEN: embargoToken, EMBARGO_REPO, ...embargoEnv });
+  const surfaced = run('surface', 'Surface result, file or close issue', embargoEnv);
   return { composed, embargoed, surfaced, outputs };
 }
+
+/** The embargo calls that file the per-run report: not the ledger's list, issues, or comments. */
+const reportCalls = (calls) => calls.filter(({ embargo, args }) => embargo && (args[1] === 'create'
+  ? !args[args.indexOf('--title') + 1].startsWith('[audit-finding ')
+  : args[1] === 'comment' && args[2].startsWith('https://')));
 
 const privateParts = (dir) => readdirSync(dir).filter((f) => /^audit-private-part-\d+\.md$/.test(f)).sort()
   .map((f) => readFileSync(join(dir, f), 'utf8'));
 
-// The one literal every reader waits for and every fixture writes. The
-// producer copy in `.github/audit/_preamble.md` is pinned against it below.
-const SENTINEL = '<!-- END OF REPORT -->';
-
+// Each scenario writes `frags[i]` (options for `fragmentText`, null for none,
+// or a string written raw) and the orchestrator's `status`.
+const [SUPPLY, CI, APP, HOSTED] = fragments;
+const allPass = () => fragments.map(() => ({}));
 const cases = [
-  { name: 'all checks pass', status: 'PASS\n', verdicts: ['PASS', 'PASS', 'PASS', 'PASS'], expected: 'PASS' },
-  { name: 'missing merged verdict', verdicts: ['PASS', 'PASS', 'PASS', 'PASS'], expected: 'INCONCLUSIVE', publicRows: ['The orchestrator wrote no verdict.'] },
-  { name: 'embedded whitespace is not PASS', status: 'P A\nSS\n', verdicts: ['PASS', 'PASS', 'PASS', 'PASS'], expected: 'INCONCLUSIVE' },
-  { name: 'PASS prefix with a suffix is unreadable', status: 'PASS', verdicts: ['PASS but unfinished', 'PASS', 'PASS', 'PASS'], expected: 'INCONCLUSIVE' },
-  { name: 'missing fragment', status: 'PASS', verdicts: [null, 'PASS', 'PASS', 'PASS'], expected: 'INCONCLUSIVE' },
-  { name: 'unverifiable checks override merged PASS', status: 'PASS', verdicts: ['INCONCLUSIVE', 'PASS', 'PASS', 'PASS'], expected: 'INCONCLUSIVE' },
-  { name: 'dissent overrides missing merged verdict', verdicts: ['FAIL', 'PASS', 'PASS', 'PASS'], expected: 'FAIL' },
-  { name: 'FAIL with explanation overrides merged PASS', status: 'PASS', verdicts: ['FAIL — credential leaked', 'PASS', 'PASS', 'PASS'], expected: 'FAIL' },
-  { name: 'FAIL with explanation overrides missing merged verdict', verdicts: ['FAIL — credential leaked', 'PASS', 'PASS', 'PASS'], expected: 'FAIL' },
-  { name: 'FAIL records every incomplete condition', status: 'FAIL', verdicts: [null, 'garbled', 'INCONCLUSIVE', 'PASS'], expected: 'FAIL', notes: ['left no report', 'could not be read', 'could not determine every check'],
-    publicRows: ['| `audit-supply-chain.md` | no report |', '| `audit-ci-secrets.md` | unreadable |', '| `audit-application.md` | INCONCLUSIVE |', '| `audit-hosted.md` | PASS |'] },
-  { name: 'dissent and incomplete domains coexist', status: 'PASS', verdicts: ['FAIL', null, 'INCONCLUSIVE', 'PASS'], expected: 'FAIL', notes: ['returned `FAIL`', 'left no report', 'could not determine every check'] },
+  { name: 'all checks pass', status: 'PASS\n', frags: allPass(), expected: 'PASS' },
+  { name: 'missing merged verdict', frags: allPass(), expected: 'INCONCLUSIVE', publicRows: ['The orchestrator wrote no verdict.'] },
+  { name: 'embedded whitespace is not PASS', status: 'P A\nSS\n', frags: allPass(), expected: 'INCONCLUSIVE' },
+  { name: 'PASS prefix with a suffix is unreadable', status: 'PASS', frags: [{ stated: 'PASS but unfinished' }, {}, {}, {}], expected: 'INCONCLUSIVE',
+    notes: ["A domain's verdict could not be read"] },
+  { name: 'missing fragment', status: 'PASS', frags: [null, {}, {}, {}], expected: 'INCONCLUSIVE', notes: ['left no report'] },
+  { name: 'unverifiable checks override merged PASS', status: 'PASS',
+    frags: [{ stated: 'INCONCLUSIVE', results: { [firstId(SUPPLY)]: `- UNVERIFIABLE: ${firstId(SUPPLY)} — the clause: network error` } }, {}, {}, {}],
+    expected: 'INCONCLUSIVE', notes: ['- UNVERIFIABLE: `docs/specs/security-supply-chain.md`'] },
+  { name: 'dissent overrides missing merged verdict',
+    frags: [{ stated: 'FAIL', results: { [firstId(SUPPLY)]: `- FAIL: ${firstId(SUPPLY)} — the clause: violated` } }, {}, {}, {}], expected: 'FAIL' },
+  { name: 'FAIL with explanation overrides merged PASS', status: 'PASS',
+    frags: [{ stated: 'FAIL — credential leaked', results: { [firstId(SUPPLY)]: `- FAIL: ${firstId(SUPPLY)} — the clause: violated` } }, {}, {}, {}], expected: 'FAIL',
+    notes: ["A domain's lines record a failure"] },
+  // 2026-10-07: a fragment opened `VERDICT: PASS` over its own `UNVERIFIABLE`
+  // line, and the line was believed. The computed verdict decides, and the
+  // disagreement is reported.
+  { name: 'a computed INCONCLUSIVE overrides a contradicting VERDICT: PASS', status: 'PASS',
+    frags: [{}, {}, {}, { results: { [firstId(HOSTED)]: `- UNVERIFIABLE: ${firstId(HOSTED)}.b — the clause: not reached` } }],
+    expected: 'INCONCLUSIVE', notes: ['### Anomalies', `\`${HOSTED}\`: its first line says \`VERDICT: PASS\`, its lines compute INCONCLUSIVE`, '`audit-status.txt` says `PASS`'],
+    publicRows: [`| \`${HOSTED}\` | INCONCLUSIVE |`, "1 domain's own verdict line disagreed"] },
+  { name: 'a computed FAIL overrides a contradicting VERDICT: PASS', status: 'PASS',
+    frags: [{}, { results: { [firstId(CI)]: `- FAIL: ${firstId(CI)} — the clause: violated` } }, {}, {}],
+    expected: 'FAIL', notes: [`\`${CI}\`: its first line says \`VERDICT: PASS\`, its lines compute FAIL`], publicRows: [`| \`${CI}\` | FAIL | 1 |`] },
+  // Taken at its word, a `FAIL` line with no failing result under it would file
+  // a security finding nobody can find; overruled, it would pass a domain that
+  // doubted itself. It is held at INCONCLUSIVE and reported.
+  { name: 'a VERDICT: FAIL with no failing line is not believed either way', status: 'FAIL',
+    frags: [{}, {}, { stated: 'FAIL' }, {}], expected: 'INCONCLUSIVE',
+    notes: [`\`${APP}\`: its first line says \`VERDICT: FAIL\`, its lines compute PASS`, '`audit-status.txt` says `FAIL`, the domains\' lines compute INCONCLUSIVE', 'A domain claimed more than its result lines record'] },
+  // `audit-status.txt` is a conclusion like any other: a FAIL over four
+  // passing domains is an anomaly, not a finding.
+  { name: 'an orchestrator FAIL over passing domains is not believed', status: 'FAIL', frags: allPass(), expected: 'INCONCLUSIVE',
+    notes: ['`audit-status.txt` says `FAIL`, the domains\' lines compute PASS'] },
+  // A domain more cautious than its lines claimed less, not more: no hint of
+  // a hidden finding in the headline.
+  { name: 'a cautious VERDICT: INCONCLUSIVE over passing lines is not a claimed finding', status: 'PASS',
+    frags: [{}, {}, { stated: 'INCONCLUSIVE' }, {}], expected: 'INCONCLUSIVE', notes: ['This is not a security finding'] },
+  // Whole sections were skipped silently: every rule the specs carry is owed a line.
+  { name: 'a skipped section is INCONCLUSIVE', status: 'PASS',
+    frags: [{}, {}, {}, { drop: ['`docs/specs/security-hosted.md` -> "Origin boundary"'] }], expected: 'INCONCLUSIVE',
+    notes: ['### Rules with no result line', `- \`${HOSTED}\`: \`docs/specs/security-hosted.md\` -> "Origin boundary" #6`],
+    publicRows: [`| \`${HOSTED}\` | INCONCLUSIVE | 0 | 6 | 0 |`] },
+  // #797: a `FAIL —` line the lift expected as `FAIL:` was lost. Off the
+  // grammar, a line is malformed, and a malformed line cannot pass.
+  { name: 'a malformed result line is INCONCLUSIVE', status: 'PASS',
+    frags: [{ lines: ['- FAIL — `docs/specs/security-supply-chain.md` -> "Disclosure" #1: violated'] }, {}, {}, {}], expected: 'INCONCLUSIVE',
+    notes: ['### Malformed lines', '- FAIL — `docs/specs/security-supply-chain.md`'], publicRows: [`| \`${SUPPLY}\` | INCONCLUSIVE | 0 | 0 | 1 |`] },
+  { name: 'a bold result line is malformed', status: 'PASS',
+    frags: [{ lines: ['- **FAIL IF** something holds: PASS.'] }, {}, {}, {}], expected: 'INCONCLUSIVE', notes: ['### Malformed lines'] },
+  { name: 'a skipped clause is INCONCLUSIVE', status: 'PASS',
+    frags: [{ results: { [firstId(SUPPLY)]: `- PASS: ${firstId(SUPPLY)}.a — one: ok\n- PASS: ${firstId(SUPPLY)}.c — three: ok` } }, {}, {}, {}],
+    expected: 'INCONCLUSIVE', notes: [`- \`${SUPPLY}\`: ${firstId(SUPPLY)}.b`] },
+  { name: 'a result naming a rule nobody owes is INCONCLUSIVE', status: 'PASS',
+    frags: [{ lines: ['- PASS: `docs/specs/security-supply-chain.md` -> "Disclosure" #99 — the clause: ok'] }, {}, {}, {}], expected: 'INCONCLUSIVE',
+    notes: ['names no rule this domain owes'] },
+  { name: 'no qualitative pass is INCONCLUSIVE', status: 'PASS', frags: [{}, {}, { qualitative: 0 }, {}], expected: 'INCONCLUSIVE',
+    notes: ['it recorded no finished qualitative pass'] },
+  { name: 'a BLOCKER fails the run', status: 'PASS',
+    frags: [{}, {}, { stated: 'FAIL', lines: finding('BLOCKER', 'deploy/local/install-windows.ps1:88', 'Install-Service', 'a file name reaches Invoke-Expression') }, {}],
+    expected: 'FAIL', publicRows: [`| \`${APP}\` | FAIL | 0 | 0 | 0 | 1 | 0 |`] },
+  { name: 'a BLOCKER without its evidence still fails, and is malformed', status: 'PASS',
+    frags: [{}, {}, { stated: 'FAIL', lines: ['- BLOCKER: `lib/x.ts:4` `run` — something'] }, {}],
+    expected: 'FAIL', notes: ['BLOCKER without its Code, Path, Reproduction evidence'] },
   // A domain cut off between rewriting its verdict line and writing its
-  // sentinel reads as a clean PASS on line 1. Without the sentinel guard that
-  // is a merged PASS over a report that stopped early, and PASS opens the
-  // release gate.
-  { name: 'PASS without a sentinel is a cut-off domain', status: 'PASS', verdicts: ['PASS', 'PASS', 'PASS', 'PASS'], unfinished: [2], expected: 'INCONCLUSIVE', notes: ['cut off mid-report'],
-    publicRows: ['| `audit-application.md` | PASS, cut off |'] },
-  { name: 'a cut-off FAIL is still a finding', status: 'PASS', verdicts: ['PASS', 'PASS', 'FAIL', 'PASS'], unfinished: [2], expected: 'FAIL', notes: ['returned `FAIL`', 'cut off mid-report'] },
-  { name: 'a trailing blank line still ends a report', status: 'PASS', verdicts: ['PASS', 'PASS', 'PASS', 'PASS'], trailingBlank: true, expected: 'PASS' },
-  // The no-verdict note is the reader's index into the merged report, so it
-  // names every marker the merge can leave there. Drop one and the reader is
-  // told to look for two shapes in a report that has three.
-  { name: 'the no-verdict note names every report marker', verdicts: ['PASS', 'PASS', 'PASS', 'PASS'], unfinished: [2], expected: 'INCONCLUSIVE', notes: ['`UNVERIFIABLE`', '`_Incomplete …_`', '`_No report …_`'] },
-  // Run 34581574869 ended its turn before §3, so no merged report existed and
-  // this arm published a single line — while two domains' finished `VERDICT:
-  // PASS` fragments sat in the working directory and reached a human only
-  // through the artifact. The fragments are what the run found; the absence of
-  // a merge is not a reason to drop them.
-  // Cut off, not absent: this arm runs the same sentinel test the guard loop
-  // above does, so all three domain states read the same here as in a merged
-  // report. Without the `_Incomplete …_` marker the no-verdict note sends the
-  // reader after a third marker the body does not carry, and the cut-off
-  // domain's fragment is published looking finished.
-  // Anchored to its heading and counted, because a bare `notes` entry is
-  // satisfied by the marker appearing anywhere: dropping the sentinel test
-  // marks every fragment and inverting it marks the finished one, and both
-  // read as a pass. Those are the inverse of the bug this arm fixes.
-  { name: 'no merged report publishes the fragments, marking cut-off and absent domains', report: null, verdicts: ['PASS', 'PASS', null, 'PASS'], unfinished: [1], expected: 'INCONCLUSIVE',
-    notes: ['the merge never ran', '## audit-supply-chain.md', 'VERDICT: PASS', '## audit-application.md', '_No report — this domain produced no fragment._',
-      '## audit-ci-secrets.md\n\n_Incomplete — this domain never closed its report'],
-    counts: { '_Incomplete — this domain never closed its report': 1 } },
-  // Run 35842217451 composed a 226,302-character body; the clamp keeps the
-  // head, so what reached the issue was `VERDICT: INCONCLUSIVE` for
-  // `audit-ci-secrets.md` without the one `UNVERIFIABLE` line the note sends
-  // the reader to, and without two later domains' sections at all. Every
-  // verdict and non-passing finding is lifted into the head ahead of the
-  // report, where the clamp cannot reach it.
-  { name: 'the lines that decided the verdict outlive truncation', status: 'PASS',
-    verdicts: ['PASS', 'INCONCLUSIVE', 'PASS', 'PASS'],
-    evidence: [null, '- UNVERIFIABLE: token scope needs a live credential', null, null],
-    report: `# Fixture report\n${'filler paragraph. '.repeat(3000)}\n`,
-    expected: 'INCONCLUSIVE', split: true,
-    notes: ['- `audit-ci-secrets.md`: - UNVERIFIABLE: token scope needs a live credential',
-      '- `audit-hosted.md`: VERDICT: PASS'] },
-  // The lift reads line starts, so the `FAIL IF` vocabulary every fragment is
-  // written in must not read as a finding: a passing clause quoting one, and
-  // the heading the list sits under, are both PASS evidence.
-  { name: 'a passing FAIL IF clause is not lifted as a finding', status: 'PASS',
-    verdicts: ['PASS', 'PASS', 'PASS', 'PASS'],
-    evidence: ['### FAIL IF results\n- PASS: **FAIL IF** a secret leaks — none does.', null, null, null],
-    unfinished: [0], expected: 'INCONCLUSIVE',
-    counts: { 'FAIL IF': 0 } },
-  // A fragment carrying no marker line at all — the unreadable-verdict state
-  // the guard loop above already reports. The lift's `grep` matches nothing
-  // and exits 1; without `|| true` this step's `set -eo pipefail` ends it
-  // before the body is composed, so the reader gets a red run and an artifact
-  // instead of a truncated report. `raw` bypasses the verdict-line prefix
-  // every other fixture fragment carries.
-  { name: 'a fragment with no marker line still gets reported', status: 'PASS',
-    verdicts: ['PASS', 'PASS', 'PASS', 'PASS'],
-    raw: [null, null, '# audit-application.md\n\nI reviewed the specs but could not finish.\n', null],
-    expected: 'INCONCLUSIVE', posts: true,
-    notes: ["A domain's verdict could not be read", '- `audit-hosted.md`: VERDICT: PASS'] },
-  // The cap falls on the findings alone, so one domain's findings cannot push
-  // a later domain's verdict out of the head — the loss the lift exists to
-  // prevent. 42 findings in the first fragment is two past the cap.
-  { name: 'findings past the cap do not push out a later verdict', status: 'PASS',
-    verdicts: ['PASS', 'PASS', 'PASS', 'PASS'],
-    evidence: [Array.from({ length: 42 }, (_, i) => `WARNING: finding ${i}`).join('\n'), null, null, null],
-    unfinished: [0], expected: 'INCONCLUSIVE',
-    notes: ['- `audit-hosted.md`: VERDICT: PASS', 'more findings; read them in the transcript'] },
+  // sentinel reads as a clean PASS on line 1.
+  { name: 'PASS without a sentinel is a cut-off domain', status: 'PASS', frags: [{}, {}, { sentinel: false }, {}], expected: 'INCONCLUSIVE', notes: ['cut off mid-report'],
+    publicRows: [`| \`${APP}\` | INCONCLUSIVE, cut off |`] },
+  { name: 'a cut-off FAIL is still a finding', status: 'PASS',
+    frags: [{}, {}, { stated: 'FAIL', sentinel: false, results: { [firstId(APP)]: `- FAIL: ${firstId(APP)} — the clause: violated` } }, {}],
+    expected: 'FAIL', notes: ["A domain's lines record a failure", 'cut off mid-report'] },
+  { name: 'a trailing blank line still ends a report', status: 'PASS', frags: fragments.map(() => ({ trailingBlank: true })), expected: 'PASS' },
+  { name: 'FAIL records every incomplete condition', status: 'FAIL',
+    frags: [null, 'garbled\n', { stated: 'INCONCLUSIVE', results: { [firstId(APP)]: `- UNVERIFIABLE: ${firstId(APP)} — c: e` } }, { stated: 'FAIL', results: { [firstId(HOSTED)]: `- FAIL: ${firstId(HOSTED)} — c: e` } }],
+    expected: 'FAIL', notes: ['left no report', 'could not be read', 'could not determine every check', 'record a failure'],
+    publicRows: [`| \`${SUPPLY}\` | no report |`, `| \`${CI}\` | INCONCLUSIVE, cut off |`, `| \`${APP}\` | INCONCLUSIVE |`, `| \`${HOSTED}\` | FAIL |`] },
 ];
 for (const scenario of cases) {
   test(`reporting: ${scenario.name}`, (t) => {
     const { dir, env } = fixture(t);
     stubGh(dir);
     if (scenario.status !== undefined) writeFileSync(join(dir, 'audit-status.txt'), scenario.status);
-    if (scenario.report !== null) writeFileSync(join(dir, 'audit-report.md'), scenario.report ?? '# Fixture report\n');
+    writeFileSync(join(dir, 'audit-report.md'), '# Fixture report\n');
     const written = [];
-    scenario.verdicts.forEach((verdict, i) => {
-      if (verdict === null) return;
-      const sentinel = scenario.unfinished?.includes(i)
-        ? ''
-        : `${SENTINEL}\n${scenario.trailingBlank ? '\n' : ''}`;
-      const evidence = scenario.evidence?.[i] ?? 'Evidence';
-      const text = scenario.raw?.[i] ?? `VERDICT: ${verdict}\n${evidence}\n${sentinel}`;
+    scenario.frags.forEach((options, i) => {
+      if (options === null) return;
+      const text = typeof options === 'string' ? options : fragmentText(fragments[i], options);
       written.push(text);
       writeFileSync(join(dir, fragments[i]), text);
     });
-    const { surfaced } = runReporting(dir, env);
+    const { surfaced, outputs } = runReporting(dir, env);
+    assert.equal(outputs.compose.status, scenario.expected === 'INCONCLUSIVE' ? 'MISSING' : scenario.expected);
     assert.equal(surfaced.status, scenario.expected === 'PASS' ? 0 : 1, surfaced.stderr);
     const calls = ghCalls(dir);
-    assert.equal(calls.some(({ args }) => args[0] === 'issue' && args[1] === 'close'), scenario.expected === 'PASS');
+    assert.equal(calls.some(({ args, embargo }) => !embargo && args[0] === 'issue' && args[1] === 'close'), scenario.expected === 'PASS');
+    // Nothing ever closes a ledger issue.
+    assert.ok(!calls.some(({ args, embargo }) => embargo && args[1] === 'close'));
     if (scenario.expected === 'PASS') {
-      // A pass files nothing, in either tracker.
+      // A clean pass files nothing, in either tracker.
       assert.ok(!calls.some(({ args }) => args[0] === 'issue' && (args[1] === 'create' || args[1] === 'comment')));
       return;
     }
-    // The step aborting before it posts leaves every `notes` assertion below
-    // unreachable, so name the post itself.
-    if (scenario.posts) {
-      assert.ok(calls.some(({ args, embargo }) => !embargo && args[0] === 'issue' && args[1] === 'comment'), 'no public issue comment was posted');
-    }
     const body = readFileSync(join(dir, 'audit-private.md'), 'utf8');
-    assert.match(body, scenario.expected === 'FAIL' ? /Audit failed/ : /Audit reached no usable verdict/);
-    // The deciding lines are in the head, the issue's own body, whatever the split does.
-    const parts = privateParts(dir);
-    const head = scenario.split ? parts[0] : body;
-    // Without this the split case passes vacuously on a body that fit.
-    if (scenario.split) assert.ok(parts.length > 1 && parts.every((part) => part.length <= BODY_LIMIT), `parts: ${parts.length}`);
-    for (const note of scenario.notes ?? []) assert.ok(head.includes(note), `missing note: ${note}`);
-    for (const [note, n] of Object.entries(scenario.counts ?? {})) {
-      assert.equal(body.split(note).length - 1, n, `wrong occurrence count for: ${note}`);
-    }
+    assert.match(body, scenario.expected === 'FAIL' ? /^Audit failed/ : /^Audit reached no usable verdict/);
+    for (const note of scenario.notes ?? []) assert.ok(body.includes(note), `missing note: ${note}\n${body}`);
     // The private issue received every part, in order, under the embargo token.
-    const filed = calls.filter(({ embargo }) => embargo);
+    const parts = privateParts(dir);
+    const filed = reportCalls(calls);
     assert.deepEqual(filed.map(({ body: posted }) => posted), parts);
     assert.ok(filed.every(({ token }) => token === 'fixture-embargo-token'));
     // The public issue carries none of what a domain wrote beyond its verdict.
@@ -263,18 +291,209 @@ for (const scenario of cases) {
     assert.ok(published.every(({ token }) => token === 'fixture-workflow-token'));
     const publicBody = published[0].body;
     assert.match(publicBody, scenario.expected === 'FAIL' ? /^Audit failed/ : /^Audit reached no usable verdict/);
-    assert.ok(!publicBody.includes('Fixture report') && !publicBody.includes('filler paragraph'));
+    assert.ok(!publicBody.includes('Fixture report'));
     for (const text of written) {
-      for (const line of text.split('\n').filter((l) => l.length > 6 && !/^VERDICT: (PASS|INCONCLUSIVE)$/.test(l) && l !== SENTINEL)) {
+      for (const line of text.split('\n').filter((l) => l.length > 6 && !/^VERDICT: (PASS|INCONCLUSIVE|FAIL)$/.test(l) && l !== SENTINEL)) {
         assert.ok(!publicBody.includes(line), `the public body carries fragment text: ${line}`);
       }
     }
-    for (const row of scenario.publicRows ?? []) assert.ok(publicBody.includes(row), `missing public row: ${row}`);
+    for (const row of scenario.publicRows ?? []) assert.ok(publicBody.includes(row), `missing public row: ${row}\n${publicBody}`);
   });
 }
 
-// The two sinks the redactor guards are the encrypted archive and the private
-// issue, which is composed from the same files.
+// The private issue carries what did not pass; the PASS ledger stays in the
+// encrypted artifact, so a clean domain's hundred lines do not bury the one
+// that failed.
+test('the private report carries no PASS line', (t) => {
+  const { dir, env } = fixture(t);
+  stubGh(dir);
+  writeFileSync(join(dir, 'audit-status.txt'), 'FAIL');
+  fragments.forEach((f, i) => writeFileSync(join(dir, f), fragmentText(f, i ? {} : { stated: 'FAIL', results: { [firstId(f)]: `- FAIL: ${firstId(f)} — c: violated` } })));
+  runReporting(dir, env);
+  const body = readFileSync(join(dir, 'audit-private.md'), 'utf8');
+  assert.ok(!body.includes('- PASS:'), body);
+  assert.ok(body.includes(`- FAIL: ${firstId(SUPPLY)} — c: violated`), body);
+});
+
+// One PowerShell issue was reported three times on #1027. Findings naming the
+// same file and root cause within five lines are one finding: one entry in
+// the private report, one in the ledger, at the worst severity reported.
+test('duplicate findings merge in the private report and the ledger', (t) => {
+  const { dir, env } = fixture(t);
+  stubGh(dir);
+  writeFileSync(join(dir, 'audit-status.txt'), 'PASS');
+  fragments.forEach((f, i) => writeFileSync(join(dir, f), fragmentText(f, {
+    lines: i === 2 ? [...finding('WARNING', 'deploy/local/install-windows.ps1:88', 'Install-Service', 'first'),
+      ...finding('WARNING', './deploy/local/install-windows.ps1:91', 'install-service()', 'second')]
+      : i === 1 ? finding('WARNING', 'deploy/local/install-windows.ps1:86', 'Install-Service', 'third')
+        : i === 3 ? finding('WARNING', 'deploy/local/install-windows.ps1:140', 'Install-Service', 'far away') : [],
+  })));
+  const { outputs, surfaced } = runReporting(dir, env);
+  assert.equal(outputs.compose.status, 'PASS');
+  assert.equal(surfaced.status, 0, surfaced.stderr);
+  const body = readFileSync(join(dir, 'audit-private.md'), 'utf8');
+  assert.ok(body.includes('_4 reported, 2 after merging duplicates'), body);
+  const created = ghCalls(dir).filter(({ embargo, args }) => embargo && args[1] === 'create');
+  // Two in-run findings, one ledger key: the far one shares the file and root cause.
+  assert.equal(created.length, 1, JSON.stringify(created));
+  const key = ledgerKey('finding', 'deploy/local/install-windows.ps1', 'install-service');
+  assert.ok(created[0].args[created[0].args.indexOf('--title') + 1].startsWith(`[audit-finding ${key}] WARNING:`));
+});
+
+// The ledger: open if new, a comment if already open, never closed by a run.
+test('the ledger opens a new finding and comments on one already open', (t) => {
+  const { dir, env } = fixture(t);
+  stubGh(dir);
+  writeFileSync(join(dir, 'audit-status.txt'), 'FAIL');
+  const failId = firstId(CI);
+  fragments.forEach((f, i) => writeFileSync(join(dir, f), fragmentText(f, i === 1
+    ? { stated: 'FAIL', results: { [failId]: `- FAIL: ${failId} — c: violated` }, lines: finding('BLOCKER', 'lib/a.ts:10', 'runIt', 'new one') }
+    : {})));
+  const [, spec, heading, rule] = failId.match(/^`([^`]+)` -> "([^"]+)" #(\d+)$/);
+  const known = ledgerKey('check', spec, heading, rule, '');
+  const { surfaced, outputs } = runReporting(dir, env, { embargoEnv: { GH_LEDGER_OPEN: `41 [audit-finding ${known}] FAIL: old\n42 [audit-finding 0123456789ab] WARNING: other\n` } });
+  assert.equal(surfaced.status, 1);
+  assert.equal(outputs.embargo.result, 'filed');
+  assert.equal(outputs.embargo.open_findings, '2');
+  const embargoCalls = ghCalls(dir).filter(({ embargo }) => embargo);
+  const comment = embargoCalls.find(({ args }) => args[1] === 'comment' && args[2] === '41');
+  assert.ok(comment, JSON.stringify(embargoCalls));
+  assert.match(comment.body, /^Seen again as FAIL in \[run 123\]/);
+  const ledgerCreates = embargoCalls.filter(({ args }) => args[1] === 'create' && args[args.indexOf('--title') + 1].startsWith('[audit-finding '));
+  assert.equal(ledgerCreates.length, 1);
+  assert.ok(ledgerCreates[0].body.includes('- BLOCKER: `lib/a.ts:10` `runIt` — new one'));
+  assert.ok(!embargoCalls.some(({ args }) => args[1] === 'close' || args[1] === 'edit'));
+  // The public body counts what is still open privately, and says nothing else of it.
+  const publicBody = ghCalls(dir).find(({ embargo, body }) => !embargo && body !== null).body;
+  assert.ok(publicBody.includes('2 findings from earlier runs are still open in the private ledger.'), publicBody);
+  assert.ok(!publicBody.includes('new one') && !publicBody.includes('runIt'));
+});
+
+// A later PASS closed the issue on 2026-07-14 and 2026-10-06 while the
+// findings behind it were unfixed. While the ledger holds one an earlier run
+// opened, a PASS says so on the public issue instead of closing it.
+test('a PASS does not close the public issue while a ledger issue is open', (t) => {
+  const { dir, env } = fixture(t);
+  stubGh(dir);
+  writeFileSync(join(dir, 'audit-status.txt'), 'PASS');
+  fragments.forEach((f) => writeFileSync(join(dir, f), fragmentText(f)));
+  const { surfaced } = runReporting(dir, env, { embargoEnv: { GH_LEDGER_OPEN: '41 [audit-finding 0123456789ab] BLOCKER: old\n' } });
+  assert.equal(surfaced.status, 0, surfaced.stderr);
+  const pub = ghCalls(dir).filter(({ embargo }) => !embargo);
+  assert.ok(!pub.some(({ args }) => args[1] === 'close'));
+  const comment = pub.find(({ args }) => args[1] === 'comment' && args[2] === '23');
+  assert.match(comment.body, /^PASS this run at .*; 1 finding\(s\) from earlier runs are still under private review/);
+  assert.ok(!comment.body.includes('0123456789ab'));
+});
+
+test('a PASS whose ledger cannot be read closes nothing and fails', (t) => {
+  const { dir, env } = fixture(t);
+  stubGh(dir);
+  writeFileSync(join(dir, 'audit-status.txt'), 'PASS');
+  fragments.forEach((f) => writeFileSync(join(dir, f), fragmentText(f)));
+  const { embargoed, surfaced, outputs } = runReporting(dir, env, { embargoToken: '' });
+  assert.equal(embargoed.status, 1);
+  assert.equal(outputs.embargo.result, 'missing-token');
+  assert.equal(surfaced.status, 1);
+  assert.match(surfaced.stdout, /::error::/);
+  assert.ok(!ghCalls(dir).some(({ args }) => args[1] === 'close'));
+});
+
+test('a PASS with an empty ledger closes the public issue', (t) => {
+  const { dir, env } = fixture(t);
+  stubGh(dir);
+  writeFileSync(join(dir, 'audit-status.txt'), 'PASS');
+  fragments.forEach((f) => writeFileSync(join(dir, f), fragmentText(f)));
+  const { surfaced } = runReporting(dir, env);
+  assert.equal(surfaced.status, 0, surfaced.stderr);
+  const close = ghCalls(dir).find(({ args }) => args[1] === 'close');
+  assert.deepEqual(close.args.slice(0, 3), ['issue', 'close', '23']);
+});
+
+// A WARNING does not fail the run, and is not lost with it either.
+test('a passing run files its WARNINGs in the ledger and nothing else', (t) => {
+  const { dir, env } = fixture(t);
+  stubGh(dir);
+  writeFileSync(join(dir, 'audit-status.txt'), 'PASS');
+  fragments.forEach((f, i) => writeFileSync(join(dir, f), fragmentText(f, i === 2 ? { lines: finding('WARNING', 'lib/b.ts:5', 'paste', 'a paste submits a command') } : {})));
+  const { surfaced, outputs } = runReporting(dir, env);
+  assert.equal(outputs.compose.status, 'PASS');
+  assert.equal(surfaced.status, 0, surfaced.stderr);
+  const embargoCalls = ghCalls(dir).filter(({ embargo, args }) => embargo && args[1] !== 'list');
+  assert.equal(embargoCalls.length, 1);
+  assert.ok(embargoCalls[0].args[embargoCalls[0].args.indexOf('--title') + 1].startsWith('[audit-finding '));
+  // Opened by this run, so it does not hold the public issue open.
+  assert.ok(ghCalls(dir).some(({ args }) => args[1] === 'close'));
+});
+
+// The builder failing must not turn into a verdict.
+test('a report builder that throws reports INCONCLUSIVE', (t) => {
+  const { dir, env } = fixture(t);
+  stubGh(dir);
+  writeFileSync(join(dir, 'audit-status.txt'), 'PASS');
+  fragments.forEach((f) => writeFileSync(join(dir, f), fragmentText(f)));
+  writeFileSync(join(dir, 'scripts/security-audit-report.mjs'), 'throw new Error("boom");\n');
+  const { outputs, surfaced } = runReporting(dir, env);
+  assert.equal(outputs.compose.status, 'MISSING');
+  assert.equal(surfaced.status, 1);
+  assert.ok(!ghCalls(dir).some(({ args }) => args[1] === 'close'));
+});
+
+// The manifest is what makes a skipped section visible, so it must be derived
+// from the specs: between them the domains and the deterministic check owe
+// every rule each spec carries, and a domain owes every one a script does not
+// answer alone.
+test('every FAIL IF rule is owed by its domain, its deterministic check, or both', () => {
+  const claimed = domains(repo);
+  assert.deepEqual(claimed.map((d) => d.fragment).sort(), [...fragments].sort());
+  const state = new Set(owedIds(STATE_FRAGMENT));
+  for (const { fragment, specs } of claimed) {
+    const owed = new Set(owedIds(fragment));
+    for (const spec of specs) {
+      const text = readFileSync(join(repo, spec), 'utf8').split(/^## Future\b/m)[0];
+      const rules = text.split('\n').filter((l) => /^\s*(?:[-*]\s+)?\*\*FAIL IF\b/.test(l)).length;
+      const covered = new Set([...owed, ...state].filter((id) => id.startsWith(`\`${spec}\``)));
+      assert.equal(covered.size, rules, `${fragment}: ${spec}`);
+    }
+  }
+  // Pinned to the script alone, a rule is the check's only; pinned beside a
+  // test, the domain still answers the rest of it.
+  const ci = new Set(owedIds(CI));
+  assert.ok(state.has(VSCODE_RULE) && !ci.has(VSCODE_RULE));
+  const gate = owedIds(STATE_FRAGMENT).find((id) => id.includes('"Schedule and gate"'));
+  assert.ok(gate && ci.has(gate));
+});
+
+// An empty manifest would let any fragment pass, so a fragment no domain
+// writes, or a scope naming a spec that is gone, fails closed.
+test('the manifest fails closed on a fragment or spec nobody can resolve', (t) => {
+  assert.throws(() => fragmentManifest(repo, 'audit-typo.md'), /no domain prompt writes/);
+  const { dir } = fixture(t);
+  const prompt = join(dir, '.github/audit/supply-chain.md');
+  writeFileSync(prompt, readFileSync(prompt, 'utf8').replace('docs/specs/security-supply-chain.md', 'docs/specs/security-moved.md'));
+  assert.throws(() => fragmentManifest(dir, SUPPLY), /does not exist/);
+});
+
+// The work streams replace a domain's own partition, so between them they hold
+// every heading the manifest owes, each exactly once.
+test('each domain\'s work streams cover every owed heading once', () => {
+  for (const { domain, fragment } of domains(repo)) {
+    const prompt = readFileSync(join(repo, `.github/audit/${domain}.md`), 'utf8');
+    const section = prompt.split(/^## Work streams$/m)[1]?.split(/^## /m)[0];
+    assert.ok(section, `${domain}: no ## Work streams section`);
+    const named = [];
+    for (const line of section.split('\n').filter((l) => l.startsWith('- `'))) {
+      let spec = null;
+      for (const m of line.matchAll(/`(docs\/specs\/[^`]+)`|"([^"]+)"/g)) {
+        if (m[1]) spec = m[1];
+        else named.push(`${spec}\0${m[2]}`);
+      }
+    }
+    assert.ok(section.includes('- `qualitative` —'), `${domain}: no qualitative stream`);
+    assert.deepEqual([...named].sort(), [...fragmentManifest(repo, fragment).keys()].sort(), domain);
+  }
+});
+
 test('redaction covers every archived sink', (t) => {
   const { dir, env } = fixture(t);
   for (const sink of archivedSinks) writeFileSync(join(dir, sink), `${env.AUDIT_PAT} ${env.CLAUDE_CODE_OAUTH_TOKEN}`);
@@ -294,12 +513,11 @@ test('redactor failure removes every archived sink', (t) => {
 
 // --- The deterministic GitHub-state check and the skip-unchanged path ---
 
-const STATE_FAIL = [
-  'VERDICT: FAIL', '', '### FAIL IF results', '',
-  '- PASS: `docs/specs/security-ci.md` -> "Automated Maintainer (tend)" — `tend` holds exactly the secrets the inventory places there: fixture',
-  '- FAIL: `docs/specs/security-ci.md` -> "VS Code Extension Releases" — `vscode-extension-publish` sets `prevent_self_review: true`: prevent_self_review false',
-  '', SENTINEL, '',
-].join('\n');
+// The deterministic fragment owes the rules pinned to its script and no
+// qualitative line; this one fails the VS Code reviewer rule.
+const VSCODE_RULE = owedIds(STATE_FRAGMENT).find((id) => id.includes('"VS Code Extension Releases"'));
+const STATE_FAIL = fragmentText(STATE_FRAGMENT, { stated: 'FAIL',
+  results: { [VSCODE_RULE]: `- FAIL: ${VSCODE_RULE} — \`vscode-extension-publish\` sets \`prevent_self_review: true\`: prevent_self_review false` } });
 
 // The check's verdict is a domain's like any other: a FAIL there fails the run
 // whatever the orchestrator wrote, and a missing fragment is an unfinished audit.
@@ -312,7 +530,7 @@ for (const [name, state, expected, row] of [
     stubGh(dir);
     writeFileSync(join(dir, 'audit-status.txt'), 'PASS');
     writeFileSync(join(dir, 'audit-report.md'), '# Fixture report\n');
-    for (const f of fragments) writeFileSync(join(dir, f), `VERDICT: PASS\n${SENTINEL}\n`);
+    for (const f of fragments) writeFileSync(join(dir, f), fragmentText(f));
     if (state === null) rmSync(join(dir, STATE_FRAGMENT));
     else writeFileSync(join(dir, STATE_FRAGMENT), state);
     const { surfaced, outputs } = runReporting(dir, env);
@@ -428,59 +646,59 @@ test('the plan step skips on recorded state, writes the stand-in report, and rec
 // --- Embargo: detail goes private, the public issue gets verdicts and counts ---
 
 // Issue #1027 published a working command-injection payload. A FAIL line and a
-// BLOCKER carrying one, a FAIL line naming a heading no spec has, and a
-// verdict line with an appended explanation: none of their text may reach the
-// public body, and all of it must reach the private issue.
+// BLOCKER carrying one, a FAIL line naming a heading no spec has, malformed
+// lines carrying one, and a verdict line with an appended explanation: none of
+// their text may reach the public body, and all of it must reach the private
+// issue.
 const EXPLOIT = '$(printf calc-injected-7f3a)';
 test('the public issue carries counts and verified section names, never finding text', (t) => {
   const { dir, env } = fixture(t);
   stubGh(dir);
   writeFileSync(join(dir, 'audit-status.txt'), 'FAIL');
   writeFileSync(join(dir, 'audit-report.md'), `# Security audit\n\nThe merged report quotes ${EXPLOIT}.\n`);
-  writeFileSync(join(dir, fragments[0]), `VERDICT: PASS\n- PASS: fine\n${SENTINEL}\n`);
-  writeFileSync(join(dir, fragments[1]), [
-    `VERDICT: FAIL — ${EXPLOIT}`,
-    '### FAIL IF results',
-    `- FAIL: \`docs/specs/security-audit.md\` -> "Environment and \`AUDIT_PAT\`" — reproduced with ${EXPLOIT}`,
-    `- FAIL: \`docs/specs/security-audit.md\` -> "Run ${EXPLOIT} to see" — a heading no spec has`,
-    '- PASS: `docs/specs/security-ci.md` -> "GitHub Actions Policies" — pinned',
-    '### Qualitative findings',
-    `- BLOCKER: the reporter runs ${EXPLOIT}`,
-    `- **WARNING** — ${EXPLOIT} again`,
-    '- INFO: nothing to see',
-    SENTINEL, '',
-  ].join('\n'));
-  writeFileSync(join(dir, fragments[2]), `VERDICT: PASS\n${SENTINEL}\n`);
-  writeFileSync(join(dir, fragments[3]), `VERDICT: PASS\n${SENTINEL}\n`);
+  fragments.forEach((f, i) => writeFileSync(join(dir, f), i !== 1 ? fragmentText(f) : fragmentText(f, {
+    stated: `FAIL — ${EXPLOIT}`,
+    results: { '`docs/specs/security-audit.md` -> "Environment and `AUDIT_PAT`" #1': `- FAIL: \`docs/specs/security-audit.md\` -> "Environment and \`AUDIT_PAT\`" #1 — reproduced with ${EXPLOIT}` },
+    lines: [
+      `- FAIL: \`docs/specs/security-audit.md\` -> "Run ${EXPLOIT} to see" #1 — a heading no spec has`,
+      ...finding('BLOCKER', 'lib/a.ts:3', 'run', `the reporter runs ${EXPLOIT}`),
+      `- **WARNING** — ${EXPLOIT} again`,
+      '- INFO: `docs/x.md:1` `drift` — nothing to see',
+    ],
+  })));
   const { surfaced } = runReporting(dir, env);
   assert.equal(surfaced.status, 1, surfaced.stderr);
   const calls = ghCalls(dir);
   const publicBody = calls.find(({ embargo, body }) => !embargo && body !== null).body;
   assert.ok(!publicBody.includes('calc-injected-7f3a'), publicBody);
-  assert.ok(publicBody.includes(`| \`${fragments[1]}\` | FAIL | 2 | 1 | 1 |`), publicBody);
+  assert.ok(publicBody.includes(`| \`${fragments[1]}\` | FAIL | 2 | 0 | 2 | 1 | 0 |`), publicBody);
   assert.ok(publicBody.includes('- `docs/specs/security-audit.md` -> "Environment and `AUDIT_PAT`"'), publicBody);
   assert.ok(publicBody.includes('1 failed check named no section heading'), publicBody);
   assert.ok(publicBody.includes(COMMIT), publicBody);
   assert.match(publicBody, /triaged privately until fixed/);
   const privately = calls.filter(({ embargo }) => embargo).map(({ body }) => body).join('');
-  assert.ok(privately.includes(`The merged report quotes ${EXPLOIT}.`), privately);
-  assert.ok(privately.includes(`- BLOCKER: the reporter runs ${EXPLOIT}`), privately);
+  assert.ok(privately.includes(`- BLOCKER: \`lib/a.ts:3\` \`run\` — the reporter runs ${EXPLOIT}`), privately);
+  assert.ok(privately.includes(`- **WARNING** — ${EXPLOIT} again`), privately);
 });
 
 test('a long report is split across the private issue and its comments, losing nothing', (t) => {
   const { dir, env } = fixture(t);
   stubGh(dir);
   writeFileSync(join(dir, 'audit-status.txt'), 'FAIL');
-  const tail = `- FAIL: the finding past the old cut ${EXPLOIT}`;
-  writeFileSync(join(dir, 'audit-report.md'), `# Security audit\n${'filler line of a long report.\n'.repeat(4000)}${tail}\n`);
-  fragments.forEach((f, i) => writeFileSync(join(dir, f), `VERDICT: ${i ? 'PASS' : 'FAIL'}\n${SENTINEL}\n`));
+  const id = firstId(SUPPLY);
+  const filler = Array.from({ length: 400 }, (_, i) => `  - Note: filler line ${i} of a long finding ${'x'.repeat(200)}`);
+  const tail = `  - Note: the line past the old cut ${EXPLOIT}`;
+  fragments.forEach((f, i) => writeFileSync(join(dir, f), fragmentText(f, i ? {} : {
+    stated: 'FAIL', results: { [id]: `- FAIL: ${id} — c: violated` },
+    lines: [...finding('WARNING', 'lib/a.ts:3', 'run', 'long'), ...filler, tail],
+  })));
   runReporting(dir, env);
-  const filed = ghCalls(dir).filter(({ embargo }) => embargo);
-  assert.ok(filed.length >= 4, `filed ${filed.length} part(s)`);
+  const filed = reportCalls(ghCalls(dir));
+  assert.ok(filed.length >= 3, `filed ${filed.length} part(s)`);
   assert.deepEqual(filed.map(({ args }) => args[1]), ['create', ...Array(filed.length - 1).fill('comment')]);
   assert.ok(filed[0].args.includes(EMBARGO_REPO));
   assert.ok(filed.every(({ body }) => body.length <= BODY_LIMIT));
-  assert.ok(filed.at(-1).body.includes(tail));
+  assert.ok(filed.map(({ body }) => body).join('').includes(tail));
 });
 
 for (const [name, options, result, publicNote] of [
@@ -492,7 +710,7 @@ for (const [name, options, result, publicNote] of [
     stubGh(dir);
     writeFileSync(join(dir, 'audit-status.txt'), 'FAIL');
     writeFileSync(join(dir, 'audit-report.md'), `# Security audit\n${EXPLOIT}\n`);
-    fragments.forEach((f, i) => writeFileSync(join(dir, f), `VERDICT: ${i ? 'PASS' : 'FAIL'}\n- BLOCKER: ${EXPLOIT}\n${SENTINEL}\n`));
+    fragments.forEach((f, i) => writeFileSync(join(dir, f), fragmentText(f, i ? {} : { stated: 'FAIL', lines: finding('BLOCKER', 'lib/a.ts:3', 'run', EXPLOIT) })));
     const { embargoed, surfaced, outputs } = runReporting(dir, env, options);
     assert.equal(embargoed.status, 1);
     assert.match(embargoed.stdout, /::error::/);
@@ -528,6 +746,9 @@ test('EMBARGO_TOKEN is in the embargo step\'s env alone', () => {
 test('the embargo step runs no repository code', () => {
   const block = runBlock('File embargoed findings');
   assert.doesNotMatch(block, /\bnode\b|\bpnpm\b|\bnpx\b|scripts\/|\.\/|\bsource\b|^\s*\. /m);
+  // Nor any other program: `gh` and shell builtins only.
+  const code = block.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
+  assert.doesNotMatch(code, /(?:^|[\s;|&(`]|\$\()(?:date|mktemp|mkdir|sed|awk|grep|head|tail|wc|cat|cut|tr|jq|curl|wget|python3?|env|xargs|find|sort)\b(?!-)/m);
 });
 
 // Every path the transcript artifact uploads is age ciphertext, and the
@@ -604,16 +825,20 @@ function localRunnerFixture(dir) {
 }
 
 function fakeStateCheck(dir) {
+  const texts = { PASS: fragmentText(STATE_FRAGMENT), FAIL: STATE_FAIL,
+    INCONCLUSIVE: fragmentText(STATE_FRAGMENT, { stated: 'INCONCLUSIVE', drop: [VSCODE_RULE] }) };
   writeFileSync(join(dir, 'scripts/github-state-check.mjs'), `
     import { appendFileSync, writeFileSync } from 'node:fs';
     if (!process.argv.includes('--local')) process.exit(9);
     appendFileSync('state-check-calls', 'called\\n');
-    writeFileSync(process.argv[process.argv.indexOf('--out') + 1], 'VERDICT: ' + (process.env.FAKE_STATE_VERDICT ?? 'PASS') + '\\n\\n${SENTINEL}\\n');
+    writeFileSync(process.argv[process.argv.indexOf('--out') + 1], ${JSON.stringify(texts)}[process.env.FAKE_STATE_VERDICT ?? 'PASS']);
   `);
 }
 
-for (const [verdict, cliExit, expected, sentinel = true, stateVerdict = 'PASS'] of [['PASS', 0, 0], ['FAIL', 0, 1], ['FAIL \u2014 explained', 0, 1], ['INCONCLUSIVE', 0, 1], ['PASS extra', 0, 1], ['PASS', 7, 1], ['PASS', 0, 1, false], ['FAIL', 0, 1, false], ['PASS', 0, 1, true, 'FAIL'], ['PASS', 0, 1, true, 'INCONCLUSIVE']]) {
-  test(`local runner: ${verdict}, CLI exit ${cliExit}${sentinel ? '' : ', no sentinel'}${stateVerdict === 'PASS' ? '' : `, GitHub state ${stateVerdict}`}`, (t) => {
+// The `drop` row is CI's computed verdict reaching the local runner: a
+// fragment that says PASS over a skipped rule does not exit zero here either.
+for (const [verdict, cliExit, expected, sentinel = true, stateVerdict = 'PASS', drop = false] of [['PASS', 0, 0], ['FAIL', 0, 1], ['FAIL \u2014 explained', 0, 1], ['INCONCLUSIVE', 0, 1], ['PASS extra', 0, 1], ['PASS', 7, 1], ['PASS', 0, 1, false], ['FAIL', 0, 1, false], ['PASS', 0, 1, true, 'FAIL'], ['PASS', 0, 1, true, 'INCONCLUSIVE'], ['PASS', 0, 1, true, 'PASS', true]]) {
+  test(`local runner: ${verdict}, CLI exit ${cliExit}${sentinel ? '' : ', no sentinel'}${stateVerdict === 'PASS' ? '' : `, GitHub state ${stateVerdict}`}${drop ? ', a rule skipped' : ''}`, (t) => {
     const { dir, env: base } = fixture(t);
     const env = { ...base, FAKE_STATE_VERDICT: stateVerdict };
     localRunnerFixture(dir);
@@ -622,7 +847,7 @@ for (const [verdict, cliExit, expected, sentinel = true, stateVerdict = 'PASS'] 
       const fs = require('node:fs');
       const prompt = process.argv[3];
       const output = prompt.match(/\\*\\*Output file:\\*\\* \\x60([^\\x60]+)\\x60/)[1];
-      fs.writeFileSync(output, ${JSON.stringify(`VERDICT: ${verdict}\nEvidence\n${sentinel ? `${SENTINEL}\n\n` : ''}`)});
+      fs.writeFileSync(output, ${JSON.stringify(Object.fromEntries(fragments.map((f) => [f, fragmentText(f, { stated: verdict, sentinel, drop: drop ? [firstId(f)] : [] })])))}[output]);
       process.exit(${cliExit});
     `);
     // The all-domains path calls run_domain in a conditional: Bash disables
@@ -630,13 +855,11 @@ for (const [verdict, cliExit, expected, sentinel = true, stateVerdict = 'PASS'] 
     const result = spawnSync('bash', ['scripts/security-audit-local.sh'], { cwd: dir, env, encoding: 'utf8' });
     assert.equal(result.status, expected, result.stderr);
     if (verdict.startsWith('FAIL')) {
-      assert.ok(!result.stderr.includes('no readable verdict'), result.stderr);
-      // A dissent is reported as one whether or not the fragment finished. CI
-      // records both conditions and escalates to FAIL; reporting only the
-      // cut-off here would hide a finding the domain did write.
-      assert.match(result.stderr, /reports FAIL/);
+      assert.ok(!result.stderr.includes('first line is not a verdict'), result.stderr);
+      // A dissent is reported as one whether or not the fragment finished.
+      assert.match(result.stderr, /says `VERDICT: FAIL/);
     }
-    if (!sentinel) assert.match(result.stderr, /cut off before finishing/);
+    if (!sentinel) assert.match(result.stderr, /never wrote its sentinel/);
     for (const fragment of allFragments) assert.ok(existsSync(join(dir, fragment)), fragment);
     assert.equal(readFileSync(join(dir, STATE_FRAGMENT), 'utf8').split('\n')[0], `VERDICT: ${stateVerdict}`);
     // Local output stays local: the runner files nothing, anywhere.
@@ -654,7 +877,7 @@ for (const [arg, runsState, runsDomain] of [['github-state', true, false], ['ci-
     stub(dir, 'claude', `
       const fs = require('node:fs');
       const output = process.argv[3].match(/\\*\\*Output file:\\*\\* \\x60([^\\x60]+)\\x60/)[1];
-      fs.writeFileSync(output, ${JSON.stringify(`VERDICT: PASS\n${SENTINEL}\n`)});
+      fs.writeFileSync(output, ${JSON.stringify(Object.fromEntries(fragments.map((f) => [f, fragmentText(f)])))}[output]);
       fs.appendFileSync('claude-calls', output + '\\n');
     `);
     const result = spawnSync('bash', ['scripts/security-audit-local.sh', arg], { cwd: dir, env, encoding: 'utf8' });
@@ -714,7 +937,7 @@ test('the preamble forbids a delegating domain from waiting by ending its turn',
 test('the delegate wait bounds itself by its caller\'s deadline', (t) => {
   const block = promptShellBlock(readFileSync(join(repo, '.github/audit/_preamble.md'), 'utf8'), 'delegate-deadline-')
     .replace('<your fragment>', 'audit-application.md')
-    .replace("<every delegate's output file is complete>", '[ -f delegates-done ]');
+    .replace("<every delegated stream's .done file exists>", '[ -f delegates-done ]');
   const runDelegateWait = (caller, done) => {
     const dir = tempDir(t, 'dormouse-audit-delegate-');
     if (caller !== undefined) writeFileSync(join(dir, 'audit-deadline'), `${caller}\n`);

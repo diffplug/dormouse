@@ -18,7 +18,18 @@ For the GitHub API calls those still need, the default `$GH_TOKEN` is a workflow
 
 You hold no credential for the private tracker `docs/specs/security-audit.md` -> "Embargo" files to, and need none: read that section's checks from the workflow, the scripts it names, and the deterministic fragment.
 
+For `docs/specs/security-audit.md`'s "Outcomes and reporting", "Findings", and "Findings ledger", read `scripts/security-audit-report.mjs` and the three reporting steps of `.github/workflows/security-audit.yaml`, then run `node --test scripts/security-audit.test.mjs`, which executes those steps as shipped against a stub `gh`. A passing suite is evidence only for the properties its cases assert; judge each clause against the code as well.
+
 **Check effective permissions, not declared ones**, as `docs/specs/security-ci.md` -> "Automated Maintainer (tend)" defines them, and **derive every inventory from what exists, never from the spec's own list**: illustrative `Today:` lists do not limit a `FAIL IF` that says "any". Never record `PASS` on a condition evaluated over only part of what it quantifies over.
+
+## Work streams
+
+Delegate only by these streams (`.github/audit/_preamble.md` -> "Work streams"). Each holds every rule under the headings it names:
+
+- `actions` — `docs/specs/security-ci.md`: "GitHub Actions Policies", "Automated Maintainer (tend)".
+- `releases` — `docs/specs/security-ci.md`: "Hosted Deployments", "VS Code Extension Releases", "Desktop Releases".
+- `audit` — `docs/specs/security-audit.md`: "Schedule and gate", "Deterministic checks", "Skipping an unchanged audit", "Domains", "Orchestration", "Outcomes and reporting", "Findings", "Embargo", "Findings ledger", "Environment and `AUDIT_PAT`".
+- `qualitative` — the qualitative pass below, once, over the whole of this domain's scope.
 
 ## Qualitative pass
 
