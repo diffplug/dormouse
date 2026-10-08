@@ -129,7 +129,7 @@ stateDiagram-v2
 
 - **Must open the ring at once and derive deferral, never store it**: a deferred ring keeps its sources, detail, episode, and alarm deadlines, unpublished as `ALERT_RINGING` until confirmed work ends, a command-boundary reset included.
 - **A never-shown ring that comes due while engaged must become a hold** (rationale); one already shown goes on ringing.
-- **Never defer a ring carrying an `exit` source**, whatever joined it. A held exit leaves an existing deferral alone.
+- **Never defer a ring carrying an `exit` source**, whatever joined it.
 - **Never cap a deferral** (rationale). Disabling the setting shows every deferred ring at once.
 
 Two ordering rules:
