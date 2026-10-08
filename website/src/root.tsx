@@ -32,9 +32,6 @@ export function Layout({ children }: { children: ReactNode }) {
         <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
         <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
 
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-        <link href="https://fonts.googleapis.com/css2?family=Ubuntu+Mono&family=Ubuntu+Sans+Mono&display=swap" rel="stylesheet" />
         <Meta />
         <Links />
       </head>
