@@ -20,7 +20,7 @@
 
 import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { dedupFindings, domainVerdict, fragmentManifest, readFileStatus, readFragments } from './security-audit-report.mjs';
+import { dedupFindings, judgeFragment, readFileStatus, readFragments } from './security-audit-report.mjs';
 
 function valid(value, pattern, name) {
   if (typeof value !== 'string' || !pattern.test(value)) throw new Error(`invalid ${name}: ${JSON.stringify(value)}`);
@@ -55,7 +55,7 @@ export function publicBody({ status, fileStatus, date, runUrl, commit, repo, fra
       lines.push(`| \`${name}\` | no report | – | – | – | – | – |`);
       continue;
     }
-    const d = domainVerdict(text, fragmentManifest(root, name));
+    const d = judgeFragment(root, name, text);
     const failed = d.results.filter((r) => r.status === 'FAIL');
     const merged = dedupFindings(d.findings.map((finding) => ({ fragment: name, finding })));
     const count = (severity) => merged.filter((m) => m.severity === severity).length;

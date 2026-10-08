@@ -37,6 +37,8 @@ jobs:
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       # The bundled Node.js version is pinned in package.json's
       # devEngines.runtime.version (see standalone/src-tauri/build.rs, which
@@ -46,6 +48,8 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: package.json
+          # A release restores no cache another ref's run could have written.
+          package-manager-cache: false
 
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
 
@@ -56,10 +60,9 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
-      - name: Rust cache
-        uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
-        with:
-          workspaces: standalone/src-tauri
+      # No Rust cache: a release build restores nothing a run on another ref
+      # wrote, since the default branch's cache scope is reachable from every
+      # job that runs there, the agent-driven ones included.
 
       - name: Install system dependencies (Linux)
         if: matrix.platform == 'ubuntu-22.04'
@@ -187,10 +190,14 @@ jobs:
       attestations: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: package.json
+          # A release restores no cache another ref's run could have written.
+          package-manager-cache: false
 
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
 
@@ -318,10 +325,14 @@ jobs:
       name: vscode-extension-publish
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: package.json
+          # A release restores no cache another ref's run could have written.
+          package-manager-cache: false
 
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
 
@@ -338,7 +349,7 @@ jobs:
         working-directory: vscode-ext
         run: |
           for i in 1 2 3; do
-            pnpm exec vsce publish --packagePath *.vsix --no-dependencies && exit 0
+            pnpm exec vsce publish --packagePath ./*.vsix --no-dependencies && exit 0
             echo "Attempt $i failed, retrying in 10s..."
             sleep 10
           done
@@ -350,7 +361,7 @@ jobs:
         working-directory: vscode-ext
         run: |
           for i in 1 2 3; do
-            pnpm exec ovsx publish --packagePath *.vsix --no-dependencies && exit 0
+            pnpm exec ovsx publish --packagePath ./*.vsix --no-dependencies && exit 0
             echo "Attempt $i failed, retrying in 10s..."
             sleep 10
           done

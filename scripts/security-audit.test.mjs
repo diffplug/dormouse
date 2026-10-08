@@ -1,15 +1,21 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, mkdirSync, readdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { copyFileSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { BODY_LIMIT } from './clamp-issue-body.mjs';
 import { SENTINEL, domains, fragmentManifest, ledgerKey, owedIds as owedRuleIds } from './security-audit-report.mjs';
+import { FRAGMENT } from './github-state-check.mjs';
+import { decide } from './security-audit-plan.mjs';
 import { repoRoot, tempDir, workflowRunBlock } from './lint-kit.mjs';
 
 const repo = repoRoot;
 const workflow = readFileSync(join(repo, '.github/workflows/security-audit.yaml'), 'utf8');
-const fragments = workflow.match(/^\s+AUDIT_FRAGMENTS: (.+)$/m)[1].split(/\s+/);
+const allFragments = workflow.match(/^\s+AUDIT_FRAGMENTS: (.+)$/m)[1].split(/\s+/);
+// The deterministic GitHub-state check's fragment rides the same list; the
+// rest are the four domains the orchestrator waits for and merges.
+const STATE_FRAGMENT = FRAGMENT;
+const fragments = allFragments.filter((f) => f !== STATE_FRAGMENT);
 
 // Execute the shipped block, so changes to its parser or guards reach these tests.
 const runBlock = (name) => workflowRunBlock(workflow, name);
@@ -29,7 +35,7 @@ function stepText(name) {
 const archivedSinks = runBlock('Encrypt the audit transcript')
   .match(/^for f in (.+); do$/m)[1]
   .replace('"$RUNNER_TEMP/claude-execution-output.json"', 'claude-execution-output.json')
-  .replace('$AUDIT_FRAGMENTS', fragments.join(' '))
+  .replace('$AUDIT_FRAGMENTS', allFragments.join(' '))
   .split(/\s+/);
 
 const EMBARGO_REPO = stepText('File embargoed findings').match(/^          EMBARGO_REPO: (.+)$/m)[1];
@@ -46,7 +52,7 @@ const owedIds = (fragment) => owedRuleIds(fragmentManifest(repo, fragment));
  * overrides it by id; `drop` omits rules by id prefix; `lines` are appended
  * verbatim. `stated` is the domain's own verdict line.
  */
-function fragmentText(fragment, { stated = 'PASS', results = {}, drop = [], lines = [], qualitative = 1, sentinel = true, trailingBlank = false } = {}) {
+function fragmentText(fragment, { stated = 'PASS', results = {}, drop = [], lines = [], qualitative = fragment === STATE_FRAGMENT ? 0 : 1, sentinel = true, trailingBlank = false } = {}) {
   const out = [`VERDICT: ${stated}`, ''];
   for (const id of owedIds(fragment)) {
     if (drop.some((prefix) => id.startsWith(prefix))) continue;
@@ -86,8 +92,10 @@ function fixture(t) {
   for (const f of readdirSync(join(repo, '.github/audit'))) {
     copyFileSync(join(repo, '.github/audit', f), join(dir, '.github/audit', f));
   }
+  // The deterministic check passed unless a case says otherwise.
+  writeFileSync(join(dir, STATE_FRAGMENT), fragmentText(STATE_FRAGMENT));
   const env = { ...process.env, PATH: `${join(dir, 'bin')}:${process.env.PATH}`, RUNNER_TEMP: dir,
-    AUDIT_FRAGMENTS: fragments.join(' '), GITHUB_REPOSITORY: 'fixture/repo', GITHUB_RUN_ID: '123',
+    AUDIT_FRAGMENTS: allFragments.join(' '), GITHUB_REPOSITORY: 'fixture/repo', GITHUB_RUN_ID: '123',
     GITHUB_SHA: COMMIT, GH_TOKEN: 'fixture-workflow-token',
     AUDIT_PAT: 'fixture-admin-token', CLAUDE_CODE_OAUTH_TOKEN: 'fixture-oauth-token' };
   return { dir, env };
@@ -428,19 +436,28 @@ test('a report builder that throws reports INCONCLUSIVE', (t) => {
 });
 
 // The manifest is what makes a skipped section visible, so it must be derived
-// from the specs and cover every one each domain claims.
-test('every domain owes a result for every FAIL IF rule in its specs', () => {
+// from the specs: between them the domains and the deterministic check owe
+// every rule each spec carries, and a domain owes every one a script does not
+// answer alone.
+test('every FAIL IF rule is owed by its domain, its deterministic check, or both', () => {
   const claimed = domains(repo);
   assert.deepEqual(claimed.map((d) => d.fragment).sort(), [...fragments].sort());
+  const state = new Set(owedIds(STATE_FRAGMENT));
   for (const { fragment, specs } of claimed) {
-    const owed = fragmentManifest(repo, fragment);
+    const owed = new Set(owedIds(fragment));
     for (const spec of specs) {
       const text = readFileSync(join(repo, spec), 'utf8').split(/^## Future\b/m)[0];
       const rules = text.split('\n').filter((l) => /^\s*(?:[-*]\s+)?\*\*FAIL IF\b/.test(l)).length;
-      const counted = [...owed].filter(([key]) => key.startsWith(`${spec}\0`)).reduce((n, [, c]) => n + c, 0);
-      assert.equal(counted, rules, `${fragment}: ${spec}`);
+      const covered = new Set([...owed, ...state].filter((id) => id.startsWith(`\`${spec}\``)));
+      assert.equal(covered.size, rules, `${fragment}: ${spec}`);
     }
   }
+  // Pinned to the script alone, a rule is the check's only; pinned beside a
+  // test, the domain still answers the rest of it.
+  const ci = new Set(owedIds(CI));
+  assert.ok(state.has(VSCODE_RULE) && !ci.has(VSCODE_RULE));
+  const gate = owedIds(STATE_FRAGMENT).find((id) => id.includes('"Schedule and gate"'));
+  assert.ok(gate && ci.has(gate));
 });
 
 // An empty manifest would let any fragment pass, so a fragment no domain
@@ -488,6 +505,138 @@ test('redactor failure removes every archived sink', (t) => {
   const result = spawnSync('bash', ['-c', runBlock('Redact secrets from agent output')], { cwd: dir, env, encoding: 'utf8' });
   assert.equal(result.status, 1);
   for (const sink of archivedSinks) assert.equal(existsSync(join(dir, sink)), false, sink);
+});
+
+// --- The deterministic GitHub-state check and the skip-unchanged path ---
+
+// The deterministic fragment owes the rules pinned to its script and no
+// qualitative line; this one fails the VS Code reviewer rule.
+const VSCODE_RULE = owedIds(STATE_FRAGMENT).find((id) => id.includes('"VS Code Extension Releases"'));
+const STATE_FAIL = fragmentText(STATE_FRAGMENT, { stated: 'FAIL',
+  results: { [VSCODE_RULE]: `- FAIL: ${VSCODE_RULE} — \`vscode-extension-publish\` sets \`prevent_self_review: true\`: prevent_self_review false` } });
+
+// The check's verdict is a domain's like any other: a FAIL there fails the run
+// whatever the orchestrator wrote, and a missing fragment is an unfinished audit.
+for (const [name, state, expected, row] of [
+  ['a GitHub-state FAIL fails a merged PASS', STATE_FAIL, 'FAIL', '| `audit-github-state.md` | FAIL | 1 | 0 | 0 |'],
+  ['a missing GitHub-state fragment is inconclusive', null, 'INCONCLUSIVE', '| `audit-github-state.md` | no report |'],
+]) {
+  test(`reporting: ${name}`, (t) => {
+    const { dir, env } = fixture(t);
+    stubGh(dir);
+    writeFileSync(join(dir, 'audit-status.txt'), 'PASS');
+    writeFileSync(join(dir, 'audit-report.md'), '# Fixture report\n');
+    for (const f of fragments) writeFileSync(join(dir, f), fragmentText(f));
+    if (state === null) rmSync(join(dir, STATE_FRAGMENT));
+    else writeFileSync(join(dir, STATE_FRAGMENT), state);
+    const { surfaced, outputs } = runReporting(dir, env);
+    assert.equal(surfaced.status, 1);
+    assert.equal(outputs.compose.status, expected === 'FAIL' ? 'FAIL' : 'MISSING');
+    const publicBody = ghCalls(dir).find(({ embargo, body }) => !embargo && body !== null).body;
+    assert.ok(publicBody.includes(row), publicBody);
+    if (state) {
+      assert.ok(publicBody.includes('- `docs/specs/security-ci.md` -> "VS Code Extension Releases"'), publicBody);
+      assert.ok(!publicBody.includes('prevent_self_review false'), publicBody);
+    }
+  });
+}
+
+// The two reporting steps read only the deterministic fragment on a skipped
+// run — the domains never ran, and the reporting step must not call that an
+// unfinished audit — and the status the plan step wrote is held to that
+// fragment's verdict.
+const SKIP_FRAGMENTS = '${{ steps.plan.outputs.fragments || env.AUDIT_FRAGMENTS }}';
+test('a skipped run narrows the reporting steps to the deterministic fragment', () => {
+  for (const name of ['Compose the audit report', 'Surface result, file or close issue']) {
+    assert.ok(stepText(name).includes(`          AUDIT_FRAGMENTS: ${SKIP_FRAGMENTS}\n`), name);
+  }
+  assert.match(stepText('Audit against the security specs'), /^        if: steps\.plan\.outputs\.skip != 'true'$/m);
+  assert.ok(allFragments.includes(STATE_FRAGMENT));
+});
+for (const [name, state, expected] of [['passes on a passing check', null, 'PASS'], ['fails on a failing check', STATE_FAIL, 'FAIL']]) {
+  test(`reporting: a skipped run ${name}`, (t) => {
+    const { dir, env } = fixture(t);
+    stubGh(dir);
+    writeFileSync(join(dir, 'audit-status.txt'), 'PASS\n');
+    writeFileSync(join(dir, 'audit-report.md'), '# Security audit\n\nThe four domains were skipped.\n');
+    if (state) writeFileSync(join(dir, STATE_FRAGMENT), state);
+    const { surfaced, outputs } = runReporting(dir, { ...env, AUDIT_FRAGMENTS: STATE_FRAGMENT });
+    assert.equal(outputs.compose.status, expected);
+    assert.equal(surfaced.status, expected === 'PASS' ? 0 : 1, surfaced.stderr);
+    if (expected === 'FAIL') {
+      const publicBody = ghCalls(dir).find(({ embargo, body }) => !embargo && body !== null).body;
+      assert.ok(!publicBody.includes('audit-supply-chain.md'), publicBody);
+    }
+  });
+}
+
+const HASH = 'a'.repeat(64);
+const NOW = new Date('2026-10-07T12:00:00Z');
+const prior = (overrides = {}, state = {}) => ({ id: 41, conclusion: 'success',
+  state: { commit: COMMIT, state_hash: HASH, full_run_at: '2026-10-05T12:00:00Z', mode: 'full', ...state }, ...overrides });
+for (const [name, input, skip, reason] of [
+  ['an unchanged scheduled run skips', { previous: prior() }, true, /unchanged since run 41/],
+  ['a dispatch never skips', { event: 'workflow_dispatch', previous: prior() }, false, /`workflow_dispatch` run always audits in full/],
+  ['a changed commit audits in full', { sha: 'b'.repeat(40), previous: prior() }, false, /commit changed/],
+  ['a changed GitHub state audits in full', { hash: 'c'.repeat(64), previous: prior() }, false, /hash changed/],
+  ['no hash audits in full', { hash: '', previous: prior() }, false, /produced no hash/],
+  ['a failed previous run audits in full', { previous: prior({ conclusion: 'failure' }) }, false, /concluded `failure`/],
+  ['a previous run with no recorded state audits in full', { previous: { id: 41, conclusion: 'success', state: null } }, false, /no `audit-state` artifact/],
+  ['no previous run audits in full', { previous: undefined }, false, /no earlier completed run/],
+  ['a full audit a week old is repeated', { previous: prior({}, { full_run_at: '2026-09-30T12:00:00Z' }) }, false, /7 or more days old/],
+  ['an unreadable full-run time is repeated', { previous: prior({}, { full_run_at: 'never' }) }, false, /7 or more days old/],
+]) {
+  test(`skip decision: ${name}`, () => {
+    const decision = decide({ event: 'schedule', sha: COMMIT, hash: HASH, now: NOW, ...input });
+    assert.equal(decision.skip, skip);
+    assert.match(decision.reason, reason);
+    // A skip carries the last full audit's time forward; a full run starts the clock.
+    assert.equal(decision.fullRunAt, skip ? input.previous.state.full_run_at : NOW.toISOString());
+  });
+}
+
+// The plan step as shipped, over a `gh` that lists runs and serves the
+// previous run's `audit-state` artifact.
+test('the plan step skips on recorded state, writes the stand-in report, and records its own', (t) => {
+  const { dir, env } = fixture(t);
+  rmSync(join(dir, STATE_FRAGMENT));
+  const recorded = { commit: COMMIT, state_hash: HASH, full_run_at: new Date(Date.now() - 86_400_000).toISOString(), mode: 'full', run_id: '41' };
+  stub(dir, 'gh', `
+    const fs = require('node:fs');
+    const args = process.argv.slice(2);
+    fs.appendFileSync('gh-calls.jsonl', JSON.stringify({ args, token: process.env.GH_TOKEN }) + '\\n');
+    if (args[0] === 'api') process.stdout.write(JSON.stringify({ workflow_runs: [
+      { id: 123, head_branch: 'main', conclusion: null, created_at: '2026-10-07T11:00:00Z' },
+      { id: 41, head_branch: 'main', conclusion: 'success', created_at: '2026-10-06T11:00:00Z' },
+      { id: 40, head_branch: 'main', conclusion: 'failure', created_at: '2026-10-05T11:00:00Z' } ] }));
+    else if (args[0] === 'run' && args[1] === 'download' && args[2] === '41') {
+      fs.writeFileSync(require('node:path').join(args[args.indexOf('-D') + 1], 'audit-state.json'), ${JSON.stringify(JSON.stringify(recorded))});
+    } else process.exit(1);
+  `);
+  const output = join(dir, 'github-output');
+  writeFileSync(output, '');
+  const run = (event) => spawnSync(process.execPath, [join(repo, 'scripts/security-audit-plan.mjs')], { cwd: dir, encoding: 'utf8',
+    env: { ...env, GITHUB_EVENT_NAME: event, STATE_HASH: HASH, GITHUB_OUTPUT: output } });
+  const skipped = run('schedule');
+  assert.equal(skipped.status, 0, skipped.stderr);
+  assert.match(readFileSync(output, 'utf8'), /^skip=true$/m);
+  assert.match(readFileSync(output, 'utf8'), new RegExp(`^fragments=${STATE_FRAGMENT}$`, 'm'));
+  assert.equal(readFileSync(join(dir, 'audit-status.txt'), 'utf8'), 'PASS\n');
+  assert.match(readFileSync(join(dir, 'audit-report.md'), 'utf8'), /four domains were skipped: .*run 41/);
+  const state = JSON.parse(readFileSync(join(dir, 'audit-state/audit-state.json'), 'utf8'));
+  assert.deepEqual(state, { commit: COMMIT, state_hash: HASH, full_run_at: recorded.full_run_at, mode: 'skipped', run_id: '123' });
+  // The run under way is never its own reference.
+  assert.ok(ghCalls(dir).some(({ args }) => args.slice(0, 8).join(' ') === 'run download 41 -R fixture/repo -n audit-state -D'));
+
+  rmSync(join(dir, 'audit-status.txt'));
+  rmSync(join(dir, 'audit-report.md'));
+  writeFileSync(output, '');
+  const dispatched = run('workflow_dispatch');
+  assert.equal(dispatched.status, 0, dispatched.stderr);
+  assert.match(readFileSync(output, 'utf8'), /^skip=false$/m);
+  assert.doesNotMatch(readFileSync(output, 'utf8'), /^fragments=/m);
+  assert.ok(!existsSync(join(dir, 'audit-status.txt')) && !existsSync(join(dir, 'audit-report.md')));
+  assert.equal(JSON.parse(readFileSync(join(dir, 'audit-state/audit-state.json'), 'utf8')).mode, 'full');
 });
 
 // --- Embargo: detail goes private, the public issue gets verdicts and counts ---
@@ -656,12 +805,39 @@ test('a failed encryption leaves nothing to upload and fails the step', (t) => {
 // The `false` rows write no sentinel: the local runner rejects a fragment its
 // domain stopped short of finishing, exactly as CI's reporting step does, so a
 // PASS on line 1 of a cut-off report does not exit zero here either.
-// The last row is CI's computed verdict reaching the local runner: a fragment
-// that says PASS over a skipped rule does not exit zero here either.
-for (const [verdict, cliExit, expected, sentinel = true, drop = false] of [['PASS', 0, 0], ['FAIL', 0, 1], ['FAIL \u2014 explained', 0, 1], ['INCONCLUSIVE', 0, 1], ['PASS extra', 0, 1], ['PASS', 7, 1], ['PASS', 0, 1, false], ['FAIL', 0, 1, false], ['PASS', 0, 1, true, true]]) {
-  test(`local runner: ${verdict}, CLI exit ${cliExit}${sentinel ? '' : ', no sentinel'}${drop ? ', a rule skipped' : ''}`, (t) => {
-    const { dir, env } = fixture(t);
-    copyFileSync(join(repo, 'scripts/security-audit-local.sh'), join(dir, 'scripts/security-audit-local.sh'));
+/**
+ * A stand-in for `scripts/github-state-check.mjs` in the local runner's tree:
+ * it writes the fragment `FAKE_STATE_VERDICT` names, and refuses to run
+ * without `--local`, which keeps a 403 on the operator's login from reading as
+ * CI PAT drift.
+ */
+/** The local runner, the prompt files it reads, and the stand-in check, in a fixture tree. */
+function localRunnerFixture(dir) {
+  copyFileSync(join(repo, 'scripts/security-audit-local.sh'), join(dir, 'scripts/security-audit-local.sh'));
+  for (const name of ['_preamble', 'orchestrator', 'supply-chain', 'ci-and-secrets', 'application-security', 'hosted']) {
+    copyFileSync(join(repo, `.github/audit/${name}.md`), join(dir, `.github/audit/${name}.md`));
+  }
+  fakeStateCheck(dir);
+}
+
+function fakeStateCheck(dir) {
+  const texts = { PASS: fragmentText(STATE_FRAGMENT), FAIL: STATE_FAIL,
+    INCONCLUSIVE: fragmentText(STATE_FRAGMENT, { stated: 'INCONCLUSIVE', drop: [VSCODE_RULE] }) };
+  writeFileSync(join(dir, 'scripts/github-state-check.mjs'), `
+    import { appendFileSync, writeFileSync } from 'node:fs';
+    if (!process.argv.includes('--local')) process.exit(9);
+    appendFileSync('state-check-calls', 'called\\n');
+    writeFileSync(process.argv[process.argv.indexOf('--out') + 1], ${JSON.stringify(texts)}[process.env.FAKE_STATE_VERDICT ?? 'PASS']);
+  `);
+}
+
+// The `drop` row is CI's computed verdict reaching the local runner: a
+// fragment that says PASS over a skipped rule does not exit zero here either.
+for (const [verdict, cliExit, expected, sentinel = true, stateVerdict = 'PASS', drop = false] of [['PASS', 0, 0], ['FAIL', 0, 1], ['FAIL \u2014 explained', 0, 1], ['INCONCLUSIVE', 0, 1], ['PASS extra', 0, 1], ['PASS', 7, 1], ['PASS', 0, 1, false], ['FAIL', 0, 1, false], ['PASS', 0, 1, true, 'FAIL'], ['PASS', 0, 1, true, 'INCONCLUSIVE'], ['PASS', 0, 1, true, 'PASS', true]]) {
+  test(`local runner: ${verdict}, CLI exit ${cliExit}${sentinel ? '' : ', no sentinel'}${stateVerdict === 'PASS' ? '' : `, GitHub state ${stateVerdict}`}${drop ? ', a rule skipped' : ''}`, (t) => {
+    const { dir, env: base } = fixture(t);
+    const env = { ...base, FAKE_STATE_VERDICT: stateVerdict };
+    localRunnerFixture(dir);
     stubGh(dir);
     stub(dir, 'claude', `
       const fs = require('node:fs');
@@ -680,9 +856,30 @@ for (const [verdict, cliExit, expected, sentinel = true, drop = false] of [['PAS
       assert.match(result.stderr, /says `VERDICT: FAIL/);
     }
     if (!sentinel) assert.match(result.stderr, /never wrote its sentinel/);
-    for (const fragment of fragments) assert.ok(existsSync(join(dir, fragment)), fragment);
+    for (const fragment of allFragments) assert.ok(existsSync(join(dir, fragment)), fragment);
+    assert.equal(readFileSync(join(dir, STATE_FRAGMENT), 'utf8').split('\n')[0], `VERDICT: ${stateVerdict}`);
     // Local output stays local: the runner files nothing, anywhere.
     assert.deepEqual(ghCalls(dir), []);
+  });
+}
+
+// One domain at a time: the deterministic check runs ahead of the two domains
+// that read its fragment, alone on request, and not before the others.
+for (const [arg, runsState, runsDomain] of [['github-state', true, false], ['ci-and-secrets', true, true], ['supply-chain', true, true], ['hosted', false, true]]) {
+  test(`local runner: \`${arg}\` ${runsState ? 'runs' : 'skips'} the GitHub-state check`, (t) => {
+    const { dir, env } = fixture(t);
+    rmSync(join(dir, STATE_FRAGMENT));
+    localRunnerFixture(dir);
+    stub(dir, 'claude', `
+      const fs = require('node:fs');
+      const output = process.argv[3].match(/\\*\\*Output file:\\*\\* \\x60([^\\x60]+)\\x60/)[1];
+      fs.writeFileSync(output, ${JSON.stringify(Object.fromEntries(fragments.map((f) => [f, fragmentText(f)])))}[output]);
+      fs.appendFileSync('claude-calls', output + '\\n');
+    `);
+    const result = spawnSync('bash', ['scripts/security-audit-local.sh', arg], { cwd: dir, env, encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(existsSync(join(dir, 'state-check-calls')), runsState);
+    assert.equal(existsSync(join(dir, 'claude-calls')), runsDomain);
   });
 }
 
@@ -871,4 +1068,79 @@ test('merge distinguishes finished, cut-off, and absent domains', (t) => {
   // The fourth domain is emitted too — a heading dropped from `emit` would
   // silently publish a report missing a domain that did report.
   assert.match(report, /## Hosted accounts\n\nVERDICT: PASS\nhosted evidence/);
+});
+
+// --- docs/specs/security-audit.md's textual rules about the workflow and prompts ---
+
+const release = readFileSync(join(repo, '.github/workflows/release.yml'), 'utf8');
+const local = readFileSync(join(repo, 'scripts/security-audit-local.sh'), 'utf8');
+const agents = JSON.parse(stepText('Audit against the security specs').match(/--agents '(.+)'$/m)[1]);
+const DOMAINS = ['supply-chain', 'ci-and-secrets', 'application-security', 'hosted'];
+
+// "Schedule and gate": nightly and on dispatch, and three separate things make
+// it the release gate — the dispatch, the failing watch, and the `needs:` edge.
+test('the audit runs nightly and on dispatch, and gates the VS Code publish', () => {
+  assert.match(workflow, /^on:\n  schedule:\n    - cron: "21 4 \* \* \*"\n  workflow_dispatch:\n/m);
+  const gate = workflowRunBlock(release, 'Dispatch security audit and gate on its result').replace(/^\s*#.*$/gm, '');
+  assert.match(gate, /^set -euo pipefail$/m);
+  assert.match(gate, /^workflow="security-audit\.yaml"$/m);
+  assert.match(gate, /^gh workflow run "\$workflow" -R "\$repo" --ref "\$tag"$/m);
+  assert.match(gate, /^gh run watch "\$run_id" -R "\$repo" --exit-status$/m);
+  const publish = release.slice(release.indexOf('\n  publish-vscode:\n'));
+  assert.match(publish, /^    needs:\n(?:      - .+\n)*      - security-audit\n/m);
+});
+
+// "Domains": the code-reading domains on Opus, the mechanical ones on the
+// Sonnet floor, in CI and in the local runner alike; every prompt file either
+// names exists, and both read the same files.
+test('the model split holds in CI and locally, over the same prompt files', () => {
+  assert.match(stepText('Audit against the security specs'), /^            --model sonnet$/m);
+  assert.deepEqual(Object.keys(agents).sort(), [...DOMAINS].sort());
+  for (const domain of DOMAINS) {
+    assert.equal(agents[domain].model, ['application-security', 'hosted'].includes(domain) ? 'opus' : undefined, domain);
+    assert.ok(agents[domain].prompt.includes(`\`.github/audit/${domain}.md\``), domain);
+  }
+  for (const file of [...JSON.stringify(agents).matchAll(/\.github\/audit\/([\w-]+\.md)/g)].map((m) => m[1]).concat('orchestrator.md')) {
+    assert.ok(existsSync(join(repo, '.github/audit', file)), file);
+  }
+  assert.match(local, /^  local model_args="--model sonnet"$/m);
+  assert.match(local, /^  case "\$domain" in application-security\|hosted\) model_args="--model opus" ;; esac$/m);
+  assert.match(local, /^for f in _preamble orchestrator supply-chain ci-and-secrets application-security hosted; do$/m);
+  assert.match(local, /cat "\$AUDIT_DIR\/_preamble\.md"; echo; cat "\$AUDIT_DIR\/\$domain\.md"/);
+});
+
+// "Orchestration": the job outlives the orchestrator's persisted deadline, and
+// the Bash cap outlives the wait loop's own break.
+test('the job timeout and Bash cap stay above the waits they bound', () => {
+  const deadline = Number(orchestrator.match(/\+ (\d+) \)\) > "\$DEADLINE_FILE"/)[1]);
+  const callBreak = Number(orchestrator.match(/CALL_END=\$\(\( \$\(date \+%s\) \+ (\d+) \)\)/)[1]);
+  const jobMinutes = Number(workflow.match(/^    timeout-minutes: (\d+)$/m)[1]);
+  const bashCap = Number(stepText('Audit against the security specs').match(/BASH_DEFAULT_TIMEOUT_MS: "(\d+)"/)[1]);
+  assert.ok(jobMinutes * 60 > deadline, `job ${jobMinutes}m vs deadline ${deadline}s`);
+  assert.ok(bashCap > callBreak * 1000, `cap ${bashCap}ms vs break ${callBreak}s`);
+});
+
+// `AUDIT_FRAGMENTS` names every domain's output file and nothing a domain does
+// not write, beside the deterministic check's.
+test('AUDIT_FRAGMENTS names every domain\'s fragment', () => {
+  const outputs = DOMAINS.map((d) => readFileSync(join(repo, `.github/audit/${d}.md`), 'utf8').match(/\*\*Output file:\*\* `([^`]+)`/)[1]);
+  assert.deepEqual([...fragments].sort(), [...outputs].sort());
+  assert.deepEqual(allFragments, [...fragments, STATE_FRAGMENT]);
+});
+
+// "Outcomes and reporting" and "Embargo": every step after the agent runs
+// whatever the agent did, and the PAT is verified before the agent starts.
+test('the redaction, archive, and reporting steps run on every outcome, after the PAT check', () => {
+  for (const name of ['Redact secrets from agent output', 'Encrypt the audit transcript', 'Compose the audit report', 'Surface result, file or close issue']) {
+    assert.match(stepText(name), /^        if: always\(\)$/m, name);
+  }
+  const order = ['Verify AUDIT_PAT is provisioned', 'Check GitHub state', 'Audit against the security specs', 'Redact secrets from agent output']
+    .map((name) => workflow.indexOf(`      - name: ${name}\n`));
+  assert.ok(order.every((at, i) => at > 0 && (i === 0 || at > order[i - 1])), String(order));
+  assert.match(runBlock('Verify AUDIT_PAT is provisioned'), /^\[ -n "\$AUDIT_PAT" \] && exit 0$/m);
+  assert.match(workflow, /^    environment:\n      name: security-audit$/m);
+  // No step prints either credential.
+  for (const line of workflow.split('\n')) {
+    if (/\b(echo|printf)\b/.test(line)) assert.doesNotMatch(line, /\$\{?(AUDIT_PAT|CLAUDE_CODE_OAUTH_TOKEN)\b/, line);
+  }
 });

@@ -75,43 +75,80 @@ function readDomains(root) {
 }
 
 /**
- * Every heading of one spec that carries `FAIL IF` rules, with how many, in
- * source order — the rule's number under its heading is its position. Fenced
- * code is skipped, and nothing under `## Future` is a rule.
+ * The fragments a script writes rather than a domain, and the script whose
+ * `Pinned by` a rule must carry for that fragment to owe it. A deterministic
+ * fragment runs no qualitative pass, and its findings carry no evidence
+ * lines: it reports what it read, not a judgement.
  */
-function specManifest(root, spec) {
+export const DETERMINISTIC = { 'audit-github-state.md': 'scripts/github-state-check.mjs' };
+
+/**
+ * Every `FAIL IF` rule of one spec, in source order: its heading, its number
+ * under that heading (its position), and the `Pinned by` clause its text
+ * carries, sub-bullets included. Fenced code is skipped, and nothing under
+ * `## Future` is a rule.
+ */
+function specRules(root, spec) {
   const path = join(root, spec);
   // Fail closed: a moved spec must not shrink what its domain owes to nothing.
   if (!existsSync(path)) throw new Error(`a domain claims ${spec}, which does not exist`);
-  const counts = new Map();
+  const rules = [];
   let heading = null;
   let fenced = false;
+  let rule = null;
   for (const line of readFileSync(path, 'utf8').split('\n')) {
-    if (FENCE_RE.test(line)) { fenced = !fenced; continue; }
+    if (FENCE_RE.test(line)) { fenced = !fenced; rule = null; continue; }
     if (fenced) continue;
     const h = line.match(HEADING_RE);
     if (h) {
       if (h[1] === '##' && /^Future\b/.test(h[2])) break;
       heading = h[2];
+      rule = null;
       continue;
     }
-    if (heading !== null && FAIL_IF_RE.test(line)) counts.set(heading, (counts.get(heading) ?? 0) + 1);
+    if (heading !== null && FAIL_IF_RE.test(line)) {
+      rule = { spec, heading, n: rules.filter((r) => r.heading === heading).length + 1, text: line };
+      rules.push(rule);
+    } else if (rule && /^\s+\S/.test(line)) {
+      rule.text += `\n${line}`;
+    } else {
+      rule = null;
+    }
   }
-  return [...counts].map(([title, count]) => ({ heading: title, count }));
+  for (const r of rules) r.pin = r.text.match(/Pinned by ([^\n]*?)(?:\.(?:\s|$)|$)/)?.[1] ?? '';
+  return rules;
+}
+
+/** The rule under `heading` whose text contains `phrase`: how a script cites the rule it answers. */
+export function ruleNumber(root, spec, heading, phrase) {
+  const hits = specRules(root, spec).filter((r) => r.heading === heading && r.text.includes(phrase));
+  if (hits.length !== 1) throw new Error(`${spec} -> "${heading}" has ${hits.length} rules containing ${JSON.stringify(phrase)}`);
+  return hits[0].n;
 }
 
 /**
- * The rules a fragment's domain owes a result for, as `spec\0heading` -> rule
- * count. Throws for a fragment no domain writes: an empty manifest would let
- * any fragment pass.
+ * The rules a fragment owes a result for, as `spec\0heading` -> rule numbers.
+ * A domain owes every rule in the specs its `**Scope` claims except those
+ * pinned by a deterministic script alone; that script's fragment owes every
+ * rule whose pin names it. Throws for a fragment nothing writes: an empty
+ * manifest would let any fragment pass.
  */
 export function fragmentManifest(root, fragment) {
+  const script = DETERMINISTIC[fragment];
   const domain = domains(root).find((d) => d.fragment === fragment);
-  if (!domain) throw new Error(`no domain prompt writes ${fragment}`);
+  if (!script && !domain) throw new Error(`no domain prompt writes ${fragment}`);
+  const specs = script ? [...new Set(domains(root).flatMap((d) => d.specs))] : domain.specs;
+  const pinnedAlone = (r) => Object.values(DETERMINISTIC).some((s) => r.pin === `\`${s}\``);
   const owed = new Map();
-  for (const spec of domain.specs) {
-    for (const { heading, count } of specManifest(root, spec)) owed.set(`${spec}\0${heading}`, count);
+  for (const spec of specs) {
+    for (const r of specRules(root, spec)) {
+      if (script ? !r.pin.includes(`\`${script}\``) : pinnedAlone(r)) continue;
+      const key = `${spec}\0${r.heading}`;
+      if (!owed.has(key)) owed.set(key, []);
+      owed.get(key).push(r.n);
+    }
   }
+  if (script && owed.size === 0) throw new Error(`no rule is pinned by ${script}`);
   return owed;
 }
 
@@ -126,7 +163,7 @@ function statedVerdict(firstLine) {
 }
 
 /** Every structured line of a fragment, and every line that tried to be one and is not. */
-function parseFragment(text) {
+function parseFragment(text, { evidence = true } = {}) {
   const lines = text.split('\n');
   const parsed = {
     stated: statedVerdict(lines[0] ?? ''),
@@ -145,7 +182,7 @@ function parseFragment(text) {
     }
     if (FENCE_RE.test(line)) { fenced = !fenced; finding = null; continue; }
     if (fenced) continue;
-    if (finding) closeFinding(parsed, finding);
+    if (finding) closeFinding(parsed, finding, evidence);
     finding = null;
     let m;
     if ((m = line.match(RESULT_RE))) {
@@ -158,14 +195,14 @@ function parseFragment(text) {
       parsed.malformed.push({ line, why: 'not in the grammar `.github/audit/_preamble.md` fixes' });
     }
   }
-  if (finding) closeFinding(parsed, finding);
+  if (finding) closeFinding(parsed, finding, evidence);
   return parsed;
 }
 
 /** A BLOCKER or WARNING without its evidence is a claim, not a finding: it cannot pass and is not filed as one. */
-function closeFinding(parsed, finding) {
+function closeFinding(parsed, finding, evidence) {
   while (finding.block.length > 1 && finding.block.at(-1).trim() === '') finding.block.pop();
-  if (finding.severity !== 'INFO') {
+  if (evidence && finding.severity !== 'INFO') {
     const missing = EVIDENCE.filter((field) => !finding.block.some((l) => new RegExp(`^\\s+[-*] ${field}: \\S`).test(l)));
     if (missing.length > 0) {
       parsed.malformed.push({ line: finding.header, why: `${finding.severity} without its ${missing.join(', ')} evidence` });
@@ -179,36 +216,37 @@ function closeFinding(parsed, finding) {
 export const ruleId = (spec, heading, n, clause) => `\`${spec}\` -> "${heading}" #${n}${clause ? `.${clause}` : ''}`;
 
 /** Every rule id a manifest owes, in order. */
-export const owedIds = (owed) => [...owed].flatMap(([key, count]) => {
+export const owedIds = (owed) => [...owed].flatMap(([key, numbers]) => {
   const [spec, heading] = key.split('\0');
-  return Array.from({ length: count }, (_, i) => ruleId(spec, heading, i + 1));
+  return numbers.map((n) => ruleId(spec, heading, n));
 });
 
 // --- The computed verdict --------------------------------------------------
 
 /**
- * One domain's verdict from its own lines. `text` is null for a fragment that
- * is absent or empty.
+ * One fragment's verdict from its own lines, against the rules its manifest
+ * owes. `text` is null for a fragment that is absent or empty. A
+ * deterministic fragment owes no qualitative line and no finding evidence.
  */
-export function domainVerdict(text, owed) {
+export function domainVerdict(text, owed, { deterministic = false } = {}) {
   if (text === null) {
     return { verdict: 'INCONCLUSIVE', stated: null, absent: true, finished: false, doubts: ['it left no report'],
       results: [], findings: [], malformed: [], missing: owedIds(owed), stray: [], anomalies: [] };
   }
-  const p = parseFragment(text);
+  const p = parseFragment(text, { evidence: !deterministic });
   const missing = [];
   const stray = [];
   const byRule = new Map();
   for (const r of p.results) {
     const key = `${r.spec}\0${r.heading}`;
-    if (!owed.has(key) || r.rule > owed.get(key)) { stray.push(r); continue; }
+    if (!owed.get(key)?.includes(r.rule)) { stray.push(r); continue; }
     const id = `${key}\0${r.rule}`;
     if (!byRule.has(id)) byRule.set(id, []);
     byRule.get(id).push(r);
   }
-  for (const [key, count] of owed) {
+  for (const [key, numbers] of owed) {
     const [spec, heading] = key.split('\0');
-    for (let n = 1; n <= count; n++) {
+    for (const n of numbers) {
       const name = ruleId(spec, heading, n);
       const lines = byRule.get(`${key}\0${n}`);
       if (!lines) { missing.push(name); continue; }
@@ -225,7 +263,7 @@ export function domainVerdict(text, owed) {
   if (missing.length) doubts.push(`${missing.length} rule${missing.length > 1 ? 's have' : ' has'} no result line`);
   if (p.malformed.length) doubts.push(`${p.malformed.length} line${p.malformed.length > 1 ? 's are' : ' is'} malformed`);
   if (stray.length) doubts.push(`${stray.length} result line${stray.length > 1 ? 's name' : ' names'} no rule this domain owes`);
-  if (p.qualitative !== 1) doubts.push(p.qualitative ? 'it recorded more than one qualitative pass' : 'it recorded no finished qualitative pass');
+  if (!deterministic && p.qualitative !== 1) doubts.push(p.qualitative ? 'it recorded more than one qualitative pass' : 'it recorded no finished qualitative pass');
   if (!p.finished) doubts.push('it never wrote its sentinel');
   if (p.stated === null) doubts.push('its first line is not a verdict');
   const computed = failed ? 'FAIL' : doubts.length ? 'INCONCLUSIVE' : 'PASS';
@@ -243,6 +281,10 @@ export function domainVerdict(text, owed) {
   return { verdict, stated: p.stated, absent: false, finished: p.finished, doubts,
     results: p.results, findings: p.findings, malformed: p.malformed, missing, stray, anomalies };
 }
+
+/** A fragment's verdict, judged against its own manifest and profile. */
+export const judgeFragment = (root, name, text) =>
+  domainVerdict(text, fragmentManifest(root, name), { deterministic: name in DETERMINISTIC });
 
 /** The run's verdict: the worst domain, and never PASS unless the orchestrator wrote exactly `PASS`. */
 function runVerdict(domainsByFragment, fileStatus) {
@@ -301,7 +343,7 @@ export function readFileStatus() {
 /** Everything the reporting step decides, from the working directory. */
 function compose({ fragments, root = '.', fileStatus, runUrl, transcriptUrl = '', commit, date }) {
   const byFragment = {};
-  for (const [name, text] of Object.entries(fragments)) byFragment[name] = domainVerdict(text, fragmentManifest(root, name));
+  for (const [name, text] of Object.entries(fragments)) byFragment[name] = judgeFragment(root, name, text);
   const run = runVerdict(byFragment, fileStatus);
   const status = run.overall === 'INCONCLUSIVE' ? 'MISSING' : run.overall;
 
@@ -427,7 +469,7 @@ function main(argv) {
     return;
   }
   if (command === 'check') {
-    const d = domainVerdict(readFragment(args._), fragmentManifest('.', args._));
+    const d = judgeFragment('.', args._, readFragment(args._));
     console.log(`${args._}: ${d.verdict}${d.doubts.length ? ` (${d.doubts.join('; ')})` : ''}`);
     for (const a of d.anomalies) console.log(`  anomaly: ${a}`);
     for (const m of d.missing) console.log(`  no result line: ${m}`);
