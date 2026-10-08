@@ -134,8 +134,8 @@ stateDiagram-v2
       Showing --> Deferred: work confirmed, no exit source
       Deferred --> Showing: confirmed work ends
       Deferred --> NoRing: due while engaged, never shown, becomes a hold
-      Showing --> NoRing: verb or withdrawal
-      Deferred --> NoRing: verb or withdrawal
+      Showing --> NoRing: verb, or last source withdrawn
+      Deferred --> NoRing: verb, or last source withdrawn
     }
     --
     state "Hold" as Hold {
