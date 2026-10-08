@@ -1,6 +1,7 @@
 Domain: application-security
 Class: a recovery record outlives its age gate and is typed at a shell on restore
 Expect: lib/src/host/recovery-store.ts
+Severity: INFO — hardening: `normalizeResumeCommand` rebuilds a restored command at the typing boundary, so a stale record types only a known resume invocation
 Source: reverses #1034 (a non-numeric createdAt gave a NaN age, which passes the 7-day bound)
 
 diff --git a/lib/src/host/recovery-store.test.ts b/lib/src/host/recovery-store.test.ts

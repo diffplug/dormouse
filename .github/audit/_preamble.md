@@ -22,7 +22,7 @@ Write your findings to the file named in your own prompt, and write them **as yo
 printf 'VERDICT: INCONCLUSIVE\n\n' > <your fragment>
 ```
 
-**The reporting step computes your verdict from your lines, not from what you conclude.** It reads only the line shapes below, wherever they sit in the file; a line that starts like one of them (`PASS`, `FAIL`, `UNVERIFIABLE`, `BLOCKER`, `WARNING`, `INFO`, `QUALITATIVE`, bold or not) but is not written exactly to its grammar is malformed, and one malformed line makes your domain INCONCLUSIVE. Prose that starts any other way is kept in the encrypted transcript and read by no machine.
+**The reporting step computes your verdict from your lines, not from what you conclude.** It reads only the line shapes below, wherever they sit in the file; a line that starts like one of them (`PASS`, `FAIL`, `UNVERIFIABLE`, `BLOCKER`, `WARNING`, `INFO`, `QUALITATIVE`, bold or not) but is not written exactly to its grammar is malformed, and one malformed line makes your domain INCONCLUSIVE. The one exception is a line opening exactly `- INFO: `: off its grammar, it is reported as an anomaly instead. Prose that starts any other way is kept in the encrypted transcript and read by no machine.
 
 ### Result lines
 
@@ -85,7 +85,13 @@ Then do the qualitative pass described for your domain. Rate each finding by thi
   - Reproduction: <input> → <effect>
 ```
 
-The location is the sink's `path:line` (for spec drift or a condition no code holds, the spec line that states it). The second backticked field is its root cause: the one function, constant, or other symbol it lives in, spelled as the code spells it, or where there is none, the rule (`security-ci.md "GitHub Actions Policies" #2`). Indented lines below the header belong to the finding, so append the header and its evidence in one write. The ledger keys a finding on its file and that symbol, never its line or wording, and the reporting step merges findings naming the same file and root cause within five lines, so name the root cause the same way each time and report each finding once. An `INFO` needs no evidence lines.
+An `INFO` takes the same header, both fields backticked, and no evidence lines:
+
+```
+- INFO: `pnpm-lock.yaml:1340` `resolution` — <one-line summary>
+```
+
+The location is the sink's `path:line` (for spec drift or a condition no code holds, the spec line that states it). The second backticked field is its root cause: the one function, constant, or other symbol it lives in, spelled as the code spells it, or where there is none, the rule (`security-ci.md "GitHub Actions Policies" #2`). Indented lines below the header belong to the finding, so append the header and its evidence in one write. The ledger keys a finding on its file and that symbol, never its line or wording, and the reporting step merges findings naming the same file and root cause within five lines, so name the root cause the same way each time and report each finding once.
 
 When your qualitative pass has finished, append exactly one line saying so:
 
@@ -99,7 +105,7 @@ A fragment with no such line, or with two, is INCONCLUSIVE: the pass is part of 
 
 The public issue names a failed check only by its spec and heading, and only when the heading exists in the spec, and counts findings by their tags; everything else you write is filed privately until fixed. **Append; never rewrite the file whole.** What is in that file is the whole of what the audit publishes from you: run 35205193090's `application-security` domain had every one of its work streams reported and lost all of them, because it was holding them for a final write-up it never reached.
 
-**Its very first line must be literally `VERDICT: PASS`, `VERDICT: FAIL`, or `VERDICT: INCONCLUSIVE`** — nothing else on that line. It opens as `INCONCLUSIVE` so a fragment you never finish fails closed on its own. The reporting step compares it with the verdict your lines compute and reports any disagreement: FAIL if any result is `FAIL` or any finding is `BLOCKER`; otherwise INCONCLUSIVE if any result is `UNVERIFIABLE`, a rule has no result line, a line is malformed, the qualitative line is missing, or a PASS leaves an open finding it should name; PASS only when every rule was determined. Rewrite that one line at the end, with Edit rather than `sed -i` (whose in-place flag differs between GNU and BSD), then close the file:
+**Its very first line must be literally `VERDICT: PASS`, `VERDICT: FAIL`, or `VERDICT: INCONCLUSIVE`** — nothing else on that line. It opens as `INCONCLUSIVE` so a fragment you never finish fails closed on its own. The reporting step compares it with the verdict your lines compute and reports any disagreement: FAIL if any result is `FAIL` or any finding is `BLOCKER`; otherwise INCONCLUSIVE if any result is `UNVERIFIABLE`, a rule has no result line, a line other than an `INFO` is malformed, the qualitative line is missing, or a PASS leaves an open finding it should name; PASS only when every rule was determined. Rewrite that one line at the end, with Edit rather than `sed -i` (whose in-place flag differs between GNU and BSD), then close the file:
 
 ```sh
 printf '\n<!-- END OF REPORT -->\n' >> <your fragment>

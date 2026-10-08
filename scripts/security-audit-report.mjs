@@ -45,11 +45,18 @@ const FINDING_RE = /^- (BLOCKER|WARNING|INFO): `([^`\s:]+):([1-9]\d*)(?:-\d+)?` 
 const QUALITATIVE_RE = /^- QUALITATIVE: done — \S/;
 /** Anything that starts the way a result, finding, or marker line does, written or not to the grammar. */
 const LOOSE_RE = /^\s*(?:[-*+]\s+)?(?:\*\*|__|\[)?\s*(PASS|FAIL|UNVERIFIABLE|BLOCKER|WARNING|INFO|QUALITATIVE)\b/;
+/**
+ * An INFO written off the grammar: its prefix exactly as the grammar spells it,
+ * and a remainder that starts like no other line. It cannot carry a failure.
+ */
+const LOOSE_INFO_PREFIX = '- INFO: ';
+const looseInfo = (line) => line.startsWith(LOOSE_INFO_PREFIX) && /^\S/.test(line.slice(LOOSE_INFO_PREFIX.length))
+  && !LOOSE_RE.test(line.slice(LOOSE_INFO_PREFIX.length));
 /** The evidence a BLOCKER or WARNING carries, one indented sub-bullet each. */
 const EVIDENCE = ['Code', 'Path', 'Reproduction'];
 
 const RANK = { PASS: 0, INCONCLUSIVE: 1, FAIL: 2 };
-const SEVERITY_RANK = { INFO: 0, WARNING: 1, BLOCKER: 2 };
+export const SEVERITY_RANK = { INFO: 0, WARNING: 1, BLOCKER: 2 };
 const worst = (a, b) => (RANK[a] >= RANK[b] ? a : b);
 const clip = (s, n = 500) => (s.length > n ? `${s.slice(0, n)}…` : s);
 
@@ -172,7 +179,7 @@ export function parseFragment(text, { evidence = true } = {}) {
   const parsed = {
     stated: statedVerdict(lines[0] ?? ''),
     finished: lines.filter((l) => l.trim() !== '').at(-1) === SENTINEL,
-    results: [], findings: [], malformed: [], qualitative: 0,
+    results: [], findings: [], malformed: [], looseInfo: [], qualitative: 0,
   };
   let fenced = false;
   let finding = null;
@@ -195,6 +202,8 @@ export function parseFragment(text, { evidence = true } = {}) {
       finding = { severity: m[1], path: m[2], line: Number(m[3]), cause: m[4], summary: m[5], header: line, block: [line] };
     } else if (QUALITATIVE_RE.test(line)) {
       parsed.qualitative++;
+    } else if (looseInfo(line)) {
+      parsed.looseInfo.push(line);
     } else if (LOOSE_RE.test(line)) {
       parsed.malformed.push({ line, why: 'not in the grammar `.github/audit/_preamble.md` fixes' });
     }
@@ -294,7 +303,7 @@ function unexplainedPasses(results, owed, open) {
 export function domainVerdict(text, owed, { deterministic = false, open = [] } = {}) {
   if (text === null) {
     return { verdict: 'INCONCLUSIVE', stated: null, absent: true, finished: false, doubts: ['it left no report'],
-      results: [], findings: [], malformed: [], missing: owedIds(owed), stray: [], unexplained: [], unhanded: false, anomalies: [] };
+      results: [], findings: [], malformed: [], looseInfo: [], missing: owedIds(owed), stray: [], unexplained: [], unhanded: false, anomalies: [] };
   }
   const p = parseFragment(text, { evidence: !deterministic });
   const missing = [];
@@ -346,7 +355,7 @@ export function domainVerdict(text, owed, { deterministic = false, open = [] } =
     doubts.push('its own line is more doubtful than its lines');
   }
   return { verdict, stated: p.stated, absent: false, finished: p.finished, doubts,
-    results: p.results, findings: p.findings, malformed: p.malformed, missing, stray, unexplained, unhanded, anomalies };
+    results: p.results, findings: p.findings, malformed: p.malformed, looseInfo: p.looseInfo, missing, stray, unexplained, unhanded, anomalies };
 }
 
 /** A fragment's verdict, judged against its own manifest, its profile, and the open findings handed to the run. */
@@ -485,7 +494,10 @@ function compose({ fragments, root = '.', fileStatus, runUrl, transcriptUrl = ''
   lines.push('', `Orchestrator's \`audit-status.txt\`: ${fileStatus === 'MISSING' ? 'absent or unreadable' : `\`${fileStatus}\``}.`, '');
 
   const anomalies = [...run.anomalies.map((a) => `- ${a}.`),
-    ...Object.entries(byFragment).flatMap(([name, d]) => d.anomalies.map((a) => `- \`${name}\`: ${a}.`))];
+    ...Object.entries(byFragment).flatMap(([name, d]) => [
+      ...d.anomalies.map((a) => `- \`${name}\`: ${a}.`),
+      // Kept whole: an INFO off the grammar is read by a person, never a machine.
+      ...d.looseInfo.map((line) => `- \`${name}\`: an \`INFO\` line off the grammar, which changes no verdict: ${line}`)])];
   if (anomalies.length) lines.push('### Anomalies', '', '_Where a verdict line disagrees with the lines under it, the computed verdict is the one this run reports._', '', ...anomalies, '');
 
   const nonPass = Object.entries(byFragment).flatMap(([name, d]) =>
@@ -574,6 +586,7 @@ function main(argv) {
     const d = judgeFragment('.', args._, readFragment(args._));
     console.log(`${args._}: ${d.verdict}${d.doubts.length ? ` (${d.doubts.join('; ')})` : ''}`);
     for (const a of d.anomalies) console.log(`  anomaly: ${a}`);
+    for (const line of d.looseInfo) console.log(`  anomaly: an INFO line off the grammar: ${clip(line, 200)}`);
     for (const m of d.missing) console.log(`  no result line: ${m}`);
     for (const u of d.unexplained) console.log(`  open finding passed without a reason: ${u}`);
     for (const m of d.malformed) console.log(`  malformed (${m.why}): ${clip(m.line, 200)}`);

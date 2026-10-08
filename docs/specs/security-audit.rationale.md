@@ -74,6 +74,8 @@ A review of 160 runs (2026-05 to 2026-10) found the reported verdict trusted as 
 
 A malformed line is INCONCLUSIVE rather than lifted by a more tolerant pattern because every tolerant pattern so far matched some passing evidence too: `### FAIL IF results` heads a passing list, and `- PASS: **FAIL IF** …` quotes the clause it passed. A malformed `BLOCKER` still counts as one, since a claimed blocker filed as "no verdict" would be the inversion this change exists to stop.
 
+An `INFO` is the one line let off the grammar, because it cannot fail the run: run 37720578105 (2026-10-07) went INCONCLUSIVE, holding the release gate, only because `supply-chain` wrote `- INFO: pnpm-lock.yaml:1340 — …` without its backticked location and root cause. The exact `- INFO: ` prefix is what classifies it; a bold or unprefixed `INFO`, or one whose remainder starts like a result or another severity, may be a mangled failure and stays malformed.
+
 A pessimistic verdict line that its lines do not support is held at INCONCLUSIVE rather than taken as `FAIL`: taken at its word it files a security finding nobody can locate, and overruled it passes a domain that doubted itself. The same rule covers `audit-status.txt`, which is an agent's conclusion like any other.
 
 The private report carries only what did not pass. Run 36119432126's fragments were 335,600 characters, nearly all of it `PASS` evidence, and its merged report repeated them: eleven parts once split, with the deciding lines in the head only because a lift put them there. With the computed verdicts and non-`PASS` lines leading, the head is the decision, and the `PASS` record stays in the encrypted transcript for whoever needs it.
@@ -166,6 +168,8 @@ gh secret set AUDIT_PAT --env security-audit --repo diffplug/dormouse --body 'gi
 **Why the history is replaced.** A commit on top of the audited one leaves `git diff HEAD~1`, the remote-tracking ref, and the reflog each listing the seeds. The seeds applied sit in `$RUNNER_TEMP`, which an agent that goes looking can still read; the measurement assumes it does not.
 
 **Why only the code domains.** `ci-and-secrets` reads repository settings, which a checkout cannot seed, and `scripts/github-state-check.mjs` answers them deterministically, with planted-violation tests of its own.
+
+**Why a seed may name its severity (2026-10-07).** Canary run 37720586893 scored `recovery-created-at-nan` missed: the domain found the NaN age skipping `readAndClearRecord`'s max-age gate and rated it INFO hardening, which it is, because `normalizeResumeCommand` rebuilds the command at the typing boundary. The seed's expectation was wrong, not the domain. A seed whose real severity is below WARNING says so in its header, with the reason beside it, rather than the scorer counting every INFO and with it every near-miss.
 
 **Why the catch rule is strict.** A line citing the file but not the rule may be another finding in a file a seed touched. Counting near-misses would publish a recall a re-run could not reproduce.
 

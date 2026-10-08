@@ -238,6 +238,17 @@ const cases = [
     notes: ['### Malformed lines', '- FAIL — `docs/specs/security-supply-chain.md`'], publicRows: [`| \`${SUPPLY}\` | INCONCLUSIVE | 0 | 0 | 1 |`] },
   { name: 'a bold result line is malformed', status: 'PASS',
     frags: [{ lines: ['- **FAIL IF** something holds: PASS.'] }, {}, {}, {}], expected: 'INCONCLUSIVE', notes: ['### Malformed lines'] },
+  // Only an INFO is let off the grammar (below): a BLOCKER or WARNING written
+  // off it may be a failure the lines no longer carry, and so may a line that
+  // cannot be told for an INFO by its exact prefix.
+  ...[
+    '- BLOCKER: pnpm-lock.yaml:1340 — a tarball from outside the registry',
+    '- WARNING: pnpm-lock.yaml:1340 — a tarball from outside the registry',
+    '- **INFO**: pnpm-lock.yaml:1340 — a tarball from outside the registry',
+    'INFO: pnpm-lock.yaml:1340 — a tarball from outside the registry',
+    '- INFO: BLOCKER — a tarball from outside the registry',
+  ].map((line) => ({ name: `a line off the grammar is INCONCLUSIVE: ${line}`, status: 'PASS',
+    frags: [{ lines: [line] }, {}, {}, {}], expected: 'INCONCLUSIVE', notes: ['### Malformed lines', line] })),
   { name: 'a skipped clause is INCONCLUSIVE', status: 'PASS',
     frags: [{ results: { [firstId(SUPPLY)]: `- PASS: ${firstId(SUPPLY)}.a — one: ok\n- PASS: ${firstId(SUPPLY)}.c — three: ok` } }, {}, {}, {}],
     expected: 'INCONCLUSIVE', notes: [`- \`${SUPPLY}\`: ${firstId(SUPPLY)}.b`] },
@@ -313,6 +324,25 @@ for (const scenario of cases) {
     for (const row of scenario.publicRows ?? []) assert.ok(publicBody.includes(row), `missing public row: ${row}\n${publicBody}`);
   });
 }
+
+// Run 37720578105 went INCONCLUSIVE, holding the release gate, on one INFO
+// written without its backticked location and root cause. An INFO cannot fail
+// the run, so off the grammar it is reported as written and leaves the verdict
+// alone; and no INFO, in the grammar or not, reaches the ledger.
+test('an INFO off the grammar is an anomaly that leaves a PASS and files nothing', (t) => {
+  const { dir, env } = fixture(t);
+  stubGh(dir);
+  writeFileSync(join(dir, 'audit-status.txt'), 'PASS');
+  const loose = '- INFO: pnpm-lock.yaml:1340 — only non-registry resolution is the pinned tarball';
+  fragments.forEach((f) => writeFileSync(join(dir, f), fragmentText(f, f === SUPPLY ? { lines: [loose, '- INFO: `docs/x.md:1` `drift` — in the grammar'] } : {})));
+  const { surfaced, outputs } = runReporting(dir, env);
+  assert.equal(outputs.compose.status, 'PASS');
+  assert.equal(surfaced.status, 0, surfaced.stderr);
+  const body = readFileSync(join(dir, 'audit-private.md'), 'utf8');
+  assert.ok(body.includes(`- \`${SUPPLY}\`: an \`INFO\` line off the grammar, which changes no verdict: ${loose}\n`), body);
+  assert.equal(readFileSync(join(dir, 'audit-ledger/index.tsv'), 'utf8'), '');
+  assert.ok(!ghCalls(dir).some(({ embargo, args }) => embargo && args[1] !== 'list'), JSON.stringify(ghCalls(dir)));
+});
 
 // The private issue carries what did not pass; the PASS ledger stays in the
 // encrypted artifact, so a clean domain's hundred lines do not bury the one
@@ -778,6 +808,7 @@ test('the public issue carries counts and verified section names, never finding 
       ...finding('BLOCKER', 'lib/a.ts:3', 'run', `the reporter runs ${EXPLOIT}`),
       `- **WARNING** — ${EXPLOIT} again`,
       '- INFO: `docs/x.md:1` `drift` — nothing to see',
+      `- INFO: off the grammar, quoting ${EXPLOIT}`,
     ],
   })));
   const { surfaced } = runReporting(dir, env);
@@ -793,6 +824,7 @@ test('the public issue carries counts and verified section names, never finding 
   const privately = calls.filter(({ embargo }) => embargo).map(({ body }) => body).join('');
   assert.ok(privately.includes(`- BLOCKER: \`lib/a.ts:3\` \`run\` — the reporter runs ${EXPLOIT}`), privately);
   assert.ok(privately.includes(`- **WARNING** — ${EXPLOIT} again`), privately);
+  assert.ok(privately.includes(`- INFO: off the grammar, quoting ${EXPLOIT}`), privately);
 });
 
 test('a long report is split across the private issue and its comments, losing nothing', (t) => {

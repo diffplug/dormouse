@@ -3,7 +3,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
-import { CANARY_DOMAINS, POOL_DIR, publicRecord, readPool, redact, score, summaryLine } from './security-audit-canary.mjs';
+import { CANARY_DOMAINS, POOL_DIR, parseSeed, publicRecord, readPool, redact, score, summaryLine } from './security-audit-canary.mjs';
 import { SENTINEL, domains, ruleNumber } from './security-audit-report.mjs';
 import { repoRoot as repo, tempDir, workflowRunBlock } from './lint-kit.mjs';
 
@@ -177,7 +177,7 @@ test('the canary job seeds, hides the seeds, and scores, filing and pushing noth
 // --- The scorer -------------------------------------------------------------
 
 const RULE = { spec: 'docs/specs/security-local.md', heading: 'Terminal output', n: 9, phrase: 'x' };
-const seedOf = (id, domain, expect, rule = null) => ({ id, domain, rule, class: rule ? null : 'fixture', expect, files: expect, source: 'fixture' });
+const seedOf = (id, domain, expect, rule = null, severity = 'WARNING') => ({ id, domain, rule, class: rule ? null : 'fixture', expect, files: expect, source: 'fixture', severity });
 
 test('a seed is caught only by a FAIL or a BLOCKER or WARNING citing its file, and its rule when it has one', () => {
   const seeds = [
@@ -199,7 +199,7 @@ test('a seed is caught only by a FAIL or a BLOCKER or WARNING citing its file, a
       '- WARNING: `src/g.ts:2` `security-local.md "Terminal output" #9` — summary',
       '  - Code: `x`', '  - Path: a → b', '  - Reproduction: c → d',
     ]),
-    [fragmentOf.hosted]: fragment([...warning('BLOCKER', 'src/d.ts:1'), '- INFO: `src/e.ts:1` `cause` — not a catch', ...warning('WARNING', 'src/z.ts:1')]),
+    [fragmentOf.hosted]: fragment([...warning('BLOCKER', 'src/d.ts:1'), '- INFO: `src/e.ts:1` `cause` — not a catch', ...warning('WARNING', 'src/z.ts:1'), '- INFO: `src/y.ts:1` `cause` — not counted']),
     [fragmentOf['supply-chain']]: fragment(['A paragraph naming src/f.ts is prose, not a catch.'], { finished: false }),
   });
   assert.deepEqual(card.seeds.filter((s) => s.caught).map((s) => s.id), ['rule-by-fail', 'rule-by-warning', 'rule-by-root-cause', 'class-by-blocker']);
@@ -213,6 +213,40 @@ test('a seed is caught only by a FAIL or a BLOCKER or WARNING citing its file, a
   assert.equal(card.unseeded, 1);
   assert.deepEqual(card.unfinished, [fragmentOf['supply-chain']]);
   assert.match(card.seeds[0].by[0], /^audit-application\.md: - FAIL: /);
+});
+
+// Run 37720586893 found `recovery-created-at-nan` and rated it INFO, which it
+// is: a seed's `Severity:` is the least finding severity that catches it.
+test('a seed\'s Severity sets the least finding severity that catches it', () => {
+  const header = (severity) => seedPatch(`Domain: hosted\nClass: fixture\nExpect: src/a.ts\n${severity}Source: fixture`, 'src/a.ts', 'a', 'b');
+  assert.equal(parseSeed('default', header('')).severity, 'WARNING');
+  assert.equal(parseSeed('low', header('Severity: INFO — hardening\n')).severity, 'INFO');
+  assert.throws(() => parseSeed('bare', header('Severity: INFO\n')), /Severity must read/);
+  assert.throws(() => parseSeed('unknown', header('Severity: LOW — why\n')), /Severity must read/);
+  const seeds = [
+    seedOf('info-by-info', 'hosted', ['src/a.ts'], null, 'INFO'),
+    seedOf('info-by-loose-info', 'hosted', ['src/g.ts'], null, 'INFO'),
+    seedOf('warning-by-info', 'hosted', ['src/b.ts']),
+    seedOf('blocker-by-warning', 'hosted', ['src/c.ts'], null, 'BLOCKER'),
+    seedOf('blocker-by-blocker', 'hosted', ['src/d.ts'], null, 'BLOCKER'),
+    seedOf('rule-by-fail', 'application-security', ['src/e.ts'], RULE, 'BLOCKER'),
+    // Written before `Severity:`, as a stash from an older run is.
+    { ...seedOf('stashed-by-info', 'hosted', ['src/f.ts']), severity: undefined },
+  ];
+  const card = score(seeds, {
+    [fragmentOf.hosted]: fragment([
+      '- INFO: `src/a.ts:1` `cause` — hardening',
+      '- INFO: `src/b.ts:1` `cause` — hardening',
+      ...warning('WARNING', 'src/c.ts:1'),
+      ...warning('BLOCKER', 'src/d.ts:1'),
+      '- INFO: `src/f.ts:1` `cause` — hardening',
+      // Off the grammar, as the audit lets an INFO be.
+      '- INFO: src/g.ts:1 — hardening',
+    ]),
+    [fragmentOf['application-security']]: fragment(['- FAIL: `docs/specs/security-local.md` -> "Terminal output" #9 — clause: src/e.ts:1']),
+  });
+  assert.deepEqual(card.seeds.filter((r) => r.caught).map((r) => r.id), ['info-by-info', 'info-by-loose-info', 'blocker-by-blocker', 'rule-by-fail']);
+  assert.deepEqual(Object.keys(publicRecord(card)).sort(), ['caught', 'run_url', 'seeded', 'unfinished']);
 });
 
 test('a domain with no fragment catches nothing and is unfinished', () => {
