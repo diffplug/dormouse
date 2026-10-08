@@ -14,6 +14,12 @@
 #   scripts/security-audit-local.sh            # the deterministic checks, then all four domains
 #   scripts/security-audit-local.sh application-security   # one domain
 #   scripts/security-audit-local.sh github-state            # the deterministic checks alone
+#   scripts/security-audit-local.sh canary [count]          # recall on seeded vulnerabilities
+#
+# `canary` measures rather than audits (docs/specs/security-audit.md -> "Canary
+# recall"): it copies the committed tree to a temporary directory, seeds it from
+# `.github/audit/canaries/` as CI does, runs the three code domains there, and
+# scores their fragments. Your checkout is never touched, and nothing is filed.
 #
 # The deterministic GitHub-state check (`scripts/github-state-check.mjs`) runs
 # first whenever a domain that reads its fragment does — `ci-and-secrets` and
@@ -126,9 +132,30 @@ run_github_state() {
   node scripts/security-audit-report.mjs check audit-github-state.md >&2
 }
 
+# The canary, in a copy of the committed tree: seeded, audited by the three code
+# domains, then scored. `CANARY_KEY` picks the seeds;
+# the same key and pool seed the same way.
+run_canary() {
+  local count="${1:-6}" tree stash domain
+  tree=$(mktemp -d)
+  stash=$(mktemp -d)
+  git archive HEAD | tar -x -C "$tree"
+  echo "==> canary: seeding $count in $tree"
+  (cd "$tree" && node scripts/security-audit-canary.mjs seed --key "${CANARY_KEY:-$(date +%s)}" --count "$count" --stash "$stash" &&
+    pnpm install --frozen-lockfile >/dev/null)
+  # Run here rather than through the copy's runner, which would read the real
+  # findings ledger: a canary hands its domains an empty list, as CI does.
+  (cd "$tree" && : > audit-open-findings.txt &&
+    for domain in $(node scripts/security-audit-canary.mjs domains); do run_domain "$domain" || true; done)
+  (cd "$tree" && node scripts/security-audit-canary.mjs score --stash "$stash" \
+    --scorecard "$stash/scorecard.json" --public "$stash/canary-recall.json")
+  echo "==> scorecard: $stash/scorecard.json; seeded tree: $tree"
+}
+
 if [ $# -gt 0 ]; then
   status=0
   case "$1" in
+    canary) shift; run_canary "$@"; exit $? ;;
     github-state) run_github_state; exit $? ;;
     ci-and-secrets|supply-chain) run_github_state || status=1 ;;
   esac

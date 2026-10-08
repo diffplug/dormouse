@@ -1,0 +1,67 @@
+Domain: application-security
+Rule: `docs/specs/security-local.md` -> "Network policy" #2 — a webview or viewer CSP omits `default-src`, `base-uri`, or `form-action`
+Expect: vscode-ext/src/webview-html.ts scripts/outbound-lint.mjs
+Source: reverses #1060 (the VS Code webview CSP declared no form-action), with the lint narrowed so it stays green
+
+diff --git a/scripts/outbound-lint-selftest.mjs b/scripts/outbound-lint-selftest.mjs
+index 68ea073c0..aad194c02 100644
+--- a/scripts/outbound-lint-selftest.mjs
++++ b/scripts/outbound-lint-selftest.mjs
+@@ -212,7 +212,7 @@ const CSP = [
+     `no ${name}`,
+     `a Standalone CSP with no ${name}`,
+   ]),
+-  ...["base-uri", "form-action"].map((name) => [
++  ...["base-uri"].map((name) => [
+     'vscode-ext/src/webview-html.ts',
+     replace(`\`${name} 'none'\`,`, ''),
+     `no ${name}`,
+diff --git a/scripts/outbound-lint.mjs b/scripts/outbound-lint.mjs
+index de4434a62..08ce235a6 100644
+--- a/scripts/outbound-lint.mjs
++++ b/scripts/outbound-lint.mjs
+@@ -649,7 +649,8 @@ if (tauriConf.app?.withGlobalTauri) {
+   const block = /const\s+csp\s*=\s*\[([\s\S]*?)\]\s*\.join\(\s*['"];\s*['"]\s*\)/.exec(text);
+   const parts = block ? [...stripComments(block[1]).matchAll(/`([^`]*)`/g)].map((m) => m[1]) : [];
+   if (parts.length === 0) problems.push(`${rel}: found no \`const csp = [...]\` directive list — the CSP moved and is unchecked.`);
+-  else checkCsp(rel, parts.join('; ').replace(/'nonce-\$\{nonce\}'/g, "'nonce-x'"));
++  // No form in the webview submits (each handler calls `preventDefault`).
++  else checkCsp(rel, parts.join('; ').replace(/'nonce-\$\{nonce\}'/g, "'nonce-x'"), ['base-uri']);
+ }
+ 
+ {
+diff --git a/vscode-ext/src/webview-html.ts b/vscode-ext/src/webview-html.ts
+index 0072a0e09..b61ac4035 100644
+--- a/vscode-ext/src/webview-html.ts
++++ b/vscode-ext/src/webview-html.ts
+@@ -114,11 +114,11 @@ export function getWebviewHtml(
+     // frame-src override the `default-src 'none'` fallback blocks the frame
+     // outright, leaving a blank (white) pane. See docs/specs/dor-browser.md.
+     `frame-src http://127.0.0.1:* http://localhost:*`,
+-    // Neither falls back to `default-src`. No form here submits (each handler
+-    // calls `preventDefault`), and nothing wants a `<base>`. `frame-ancestors`
+-    // is left out: a `<meta>` policy ignores it, and VS Code frames this page.
++    // `base-uri` does not fall back to `default-src`, and nothing wants a
++    // `<base>`. No form here submits (each handler calls `preventDefault`).
++    // `frame-ancestors` is left out: a `<meta>` policy ignores it, and VS Code
++    // frames this page.
+     `base-uri 'none'`,
+-    `form-action 'none'`,
+   ].join('; ');
+ 
+   html = spliceOnce(
+diff --git a/vscode-ext/test/webview-html.test.ts b/vscode-ext/test/webview-html.test.ts
+index d302d2e96..f8d31f0e0 100644
+--- a/vscode-ext/test/webview-html.test.ts
++++ b/vscode-ext/test/webview-html.test.ts
+@@ -91,9 +91,8 @@ describe('getWebviewHtml', () => {
+     ]);
+   });
+ 
+-  it('closes the directives that do not fall back to default-src', () => {
++  it('closes base-uri, which does not fall back to default-src', () => {
+     const { html } = getWebviewHtml(webview, mediaPath);
+-    expect(cspSources(html, 'form-action')).toEqual([`'none'`]);
+     expect(cspSources(html, 'base-uri')).toEqual([`'none'`]);
+   });
+ 

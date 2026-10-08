@@ -1,0 +1,53 @@
+Domain: application-security
+Class: a recovery record outlives its age gate and is typed at a shell on restore
+Expect: lib/src/host/recovery-store.ts
+Source: reverses #1034 (a non-numeric createdAt gave a NaN age, which passes the 7-day bound)
+
+diff --git a/lib/src/host/recovery-store.test.ts b/lib/src/host/recovery-store.test.ts
+index 4fe3acd3b..75b68a212 100644
+--- a/lib/src/host/recovery-store.test.ts
++++ b/lib/src/host/recovery-store.test.ts
+@@ -116,23 +116,6 @@ describe('recovery store', () => {
+       expect(fs.existsSync(file())).toBe(false);
+     });
+ 
+-    it('discards a record whose createdAt is not a number', () => {
+-      // `Date.now() - '2026-10-07'` is NaN, which the age bound never rejects.
+-      write({ createdAt: '2026-10-07', commands: { a: 'claude --continue' } });
+-      const store = createRecoveryStore(dir, { log });
+-      expect(store.take(['a'])).toEqual({});
+-      expect(fs.existsSync(file())).toBe(false);
+-    });
+-
+-    it('discards a record whose createdAt is not finite', () => {
+-      // JSON has no Infinity literal, but an out-of-range number parses to one,
+-      // whose age is -Infinity.
+-      fs.writeFileSync(file(), '{"createdAt":1e999,"commands":{"a":"claude --continue"}}', 'utf8');
+-      const store = createRecoveryStore(dir, { log });
+-      expect(store.take(['a'])).toEqual({});
+-      expect(fs.existsSync(file())).toBe(false);
+-    });
+-
+     it('drops a non-string entry rather than handing it on', () => {
+       write({ createdAt: Date.now(), commands: { a: 'claude --continue', b: { evil: true } } });
+       const store = createRecoveryStore(dir, { log });
+diff --git a/lib/src/host/recovery-store.ts b/lib/src/host/recovery-store.ts
+index 13c17aef4..c2e5753c0 100644
+--- a/lib/src/host/recovery-store.ts
++++ b/lib/src/host/recovery-store.ts
+@@ -155,14 +155,7 @@ function readAndClearRecord(file: string, log: RecoveryLog): Record<string, stri
+   }
+   if (!recovery) return noCommands();
+ 
+-  // A non-numeric date gives a NaN age and an infinite one -Infinity; both
+-  // pass the bound below.
+-  const createdAt: unknown = recovery.createdAt;
+-  if (!Number.isFinite(createdAt)) {
+-    log.info(`[recovery] discarding record with createdAt ${String(createdAt)}`);
+-    return noCommands();
+-  }
+-  const age = Date.now() - (createdAt as number);
++  const age = Date.now() - (recovery.createdAt ?? 0);
+   if (age > RECOVERY_MAX_AGE_MS) {
+     log.info(`[recovery] discarding record ${Math.round(age / 86_400_000)}d old`);
+     return noCommands();

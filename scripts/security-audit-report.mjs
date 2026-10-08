@@ -36,7 +36,7 @@ const HEADING_RE = /^(#{1,6})\s+(.+?)\s*$/;
 const FENCE_RE = /^\s*(```|~~~)/;
 
 /** A rule's id as `ruleId` writes it: `` `spec` -> "heading" #n ``, capturing all three. */
-const RULE_ID = /`(docs\/specs\/security[a-z-]*\.md)` -> "([^"\n]+)" #([1-9]\d*)/.source;
+export const RULE_ID = /`(docs\/specs\/security[a-z-]*\.md)` -> "([^"\n]+)" #([1-9]\d*)/.source;
 /** `- PASS: `docs/specs/security-ci.md` -> "GitHub Actions Policies" #2.b — <clause>: <evidence>` */
 const RESULT_RE = new RegExp(`^- (PASS|FAIL|UNVERIFIABLE): ${RULE_ID}(?:\\.([a-z]))? — (\\S.*)$`);
 /** `- WARNING: `path/to/file.ts:88` `rootCause` — <summary>` */
@@ -167,7 +167,7 @@ function statedVerdict(firstLine) {
 }
 
 /** Every structured line of a fragment, and every line that tried to be one and is not. */
-function parseFragment(text, { evidence = true } = {}) {
+export function parseFragment(text, { evidence = true } = {}) {
   const lines = text.split('\n');
   const parsed = {
     stated: statedVerdict(lines[0] ?? ''),
@@ -543,7 +543,7 @@ function notes(byFragment, fileStatus) {
 // --- CLI -------------------------------------------------------------------
 
 /** One fragment's text, or null when it is absent or empty. */
-function readFragment(name) {
+export function readFragment(name) {
   const text = existsSync(name) ? readFileSync(name, 'utf8') : '';
   return text === '' ? null : text;
 }

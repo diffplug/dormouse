@@ -1,0 +1,71 @@
+Domain: application-security
+Class: a crafted argument escapes a shell quoting helper
+Expect: dor/src/commands/shell-quote.ts
+Source: reverses #1033 (fish reads \' and \\ as escapes inside single quotes)
+
+diff --git a/dor/src/commands/shell-quote.ts b/dor/src/commands/shell-quote.ts
+index 3c1e9d972..97ca3ecc1 100644
+--- a/dor/src/commands/shell-quote.ts
++++ b/dor/src/commands/shell-quote.ts
+@@ -44,4 +44,3 @@ export function buildShellCommandForKind(kind: ShellCommandKind, args: readonly
+ 
+-/** Single-quoted, with each `'` and `\` stepped outside the quotes: fish reads
+- *  `\'` and `\\` as escapes even inside single quotes, so `'a\'` would not close.
++/** Single-quoted, with each `'` stepped outside the quotes (`'\''`).
+  *  Also what the webview's paste path uses for a path backslash-escaping cannot
+@@ -51,3 +50,3 @@ export function quotePosixArg(arg: string): string {
+   if (POSIX_SAFE_ARG.test(arg)) return arg;
+-  return `'${arg.replace(/['\\]/g, (c) => `'\\${c}'`)}'`;
++  return `'${arg.replace(/'/g, "'\\''")}'`;
+ }
+diff --git a/dor/test/shell-quote.test.mjs b/dor/test/shell-quote.test.mjs
+index 3a023095b..2bc8c07ad 100644
+--- a/dor/test/shell-quote.test.mjs
++++ b/dor/test/shell-quote.test.mjs
+@@ -6,5 +6,3 @@ import { buildShellCommandForKind, quotePowerShellArg } from '../dist/commands/s
+ 
+-// Argv a posix-quoted command must hand back unchanged. The backslash cases are
+-// the ones fish reads differently from sh: inside its single quotes `\'` and
+-// `\\` are escapes, so `'a\'` would not close and the next element would run.
++// Argv a posix-quoted command must hand back unchanged.
+ const TRICKY_ARGV = [
+@@ -28,3 +26,2 @@ const SHELLS = [
+   ['dash', findShell('/bin/dash', '/usr/bin/dash'), []],
+-  ['fish', findShell('/opt/homebrew/bin/fish', '/usr/local/bin/fish', '/usr/bin/fish'), ['--no-config']],
+ ];
+@@ -39,6 +36,2 @@ for (const [name, shell, flags] of SHELLS) {
+ }
+-
+-test('posix quoting steps a backslash outside the single quotes', () => {
+-  assert.equal(buildShellCommandForKind('posix', ['a\\', ';x;#']), "'a'\\\\'' ';x;#'");
+-});
+ 
+diff --git a/lib/src/lib/shell-escape.test.ts b/lib/src/lib/shell-escape.test.ts
+index db6c409e4..795585b76 100644
+--- a/lib/src/lib/shell-escape.test.ts
++++ b/lib/src/lib/shell-escape.test.ts
+@@ -42,8 +42,2 @@ describe('shellEscapePosix', () => {
+ 
+-  // fish reads `\'` and `\\` as escapes inside single quotes, so a backslash
+-  // must sit outside them or `'a\'` swallows the rest of the line.
+-  it('steps a backslash outside the single quotes when it must quote', () => {
+-    expect(shellEscapePosix('a\\\nb')).toBe("'a'\\\\'\nb'");
+-  });
+-
+   it('backslash-escapes shell metacharacters', () => {
+@@ -157,3 +151,2 @@ describe('shellEscapePosix round-trips through a real shell', () => {
+     ['sh', findShell('/bin/sh'), []],
+-    ['fish', findShell('/opt/homebrew/bin/fish', '/usr/local/bin/fish', '/usr/bin/fish'), ['--no-config']],
+   ];
+diff --git a/lib/src/lib/shell-escape.ts b/lib/src/lib/shell-escape.ts
+index 395bab894..43ed14325 100644
+--- a/lib/src/lib/shell-escape.ts
++++ b/lib/src/lib/shell-escape.ts
+@@ -15,5 +15,4 @@ export function shellEscapePosix(input: string): string {
+   // and the newline, corrupting filenames that legally contain them. Fall
+-  // back to `dor`'s single-quote wrapping, which keeps `'` and `\` outside
+-  // the quotes so fish parses it too. `pasteFilePaths` refuses such a path
+-  // before it gets here; this keeps the function total.
++  // back to `dor`'s single-quote wrapping. `pasteFilePaths` refuses such a
++  // path before it gets here; this keeps the function total.
+   if (POSIX_NEEDS_QUOTES.test(input)) return quotePosixArg(input);

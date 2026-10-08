@@ -1,0 +1,118 @@
+Domain: application-security
+Rule: `docs/specs/security-local.md` -> "Network policy" #1 — with no default to the global `WebSocket` or `fetch`
+Expect: lib/src/remote/burrow/burrow-fetch.ts scripts/outbound-lint.mjs
+Source: reverses #1040 (burrowFetch fell back to the global fetch), with the lint entry reclassified so it stays green
+
+diff --git a/lib/src/remote/burrow/burrow-fetch.test.ts b/lib/src/remote/burrow/burrow-fetch.test.ts
+index b070f94c8..550d0f9af 100644
+--- a/lib/src/remote/burrow/burrow-fetch.test.ts
++++ b/lib/src/remote/burrow/burrow-fetch.test.ts
+@@ -3,7 +3,7 @@
+  * from undici's `cause`, never a bare `fetch failed` and never the whole URL.
+  */
+ 
+-import { afterEach, describe, expect, it, vi } from 'vitest';
++import { describe, expect, it } from 'vitest';
+ 
+ import {
+   API_ROUTES,
+@@ -12,7 +12,7 @@ import {
+   UNKNOWN_BURROW_TOKEN_ERROR,
+ } from 'remote-lib-common';
+ 
+-import { burrowFetch, describeFetchFailure, describingFetchFailures, probeBurrowStanding } from './burrow-fetch';
++import { describeFetchFailure, describingFetchFailures, probeBurrowStanding } from './burrow-fetch';
+ 
+ const URL_WITH_PATH = 'https://relay.dormouse.sh/api/burrow/enroll/begin?x=1';
+ 
+@@ -123,19 +123,3 @@ describe('probeBurrowStanding', () => {
+     await expect(probeBurrowStanding({ enrollment, fetch })).rejects.toThrow('fetch failed');
+   });
+ });
+-
+-describe('burrowFetch transport', () => {
+-  afterEach(() => vi.unstubAllGlobals());
+-
+-  // The fetch is the Burrow service's policy-guarded one
+-  // (`docs/specs/remote-network.md` -> "Policy"); a caller that omits it fails,
+-  // never reaching the network around the guard.
+-  it('has no default fetch to fall back on', async () => {
+-    const globalFetch = vi.fn(async () => new Response('{}'));
+-    vi.stubGlobal('fetch', globalFetch);
+-    const options = { enrollment: { relayUrl: 'https://relay.example', burrowToken: 'tok' } };
+-    await expect(burrowFetch(options as unknown as Parameters<typeof burrowFetch>[0], API_ROUTES.pushDevices)).rejects.toThrow();
+-    await expect(probeBurrowStanding(options as unknown as Parameters<typeof probeBurrowStanding>[0])).rejects.toThrow();
+-    expect(globalFetch).not.toHaveBeenCalled();
+-  });
+-});
+diff --git a/lib/src/remote/burrow/burrow-fetch.ts b/lib/src/remote/burrow/burrow-fetch.ts
+index a4661ebc1..6abfae1f6 100644
+--- a/lib/src/remote/burrow/burrow-fetch.ts
++++ b/lib/src/remote/burrow/burrow-fetch.ts
+@@ -105,11 +105,8 @@ export function describingFetchFailures(fetch: typeof globalThis.fetch): typeof
+ export interface BurrowFetchOptions {
+   /** Who this Burrow is to that Relay, and the bearer that proves it. */
+   readonly enrollment: Pick<BurrowEnrollment, 'relayUrl' | 'burrowToken'>;
+-  /**
+-   * The Burrow service's guarded fetch, with no default: the global would
+-   * bypass the network policy (`docs/specs/remote-network.md` -> "Policy").
+-   */
+-  readonly fetch: typeof globalThis.fetch;
++  /** The Burrow service's guarded fetch; the global when a caller has none. */
++  readonly fetch?: typeof globalThis.fetch;
+   readonly timeoutMs?: number;
+   /** Leads the non-2xx message, which always ends in ` (<status>)`. */
+   readonly errorPrefix?: string;
+@@ -121,7 +118,8 @@ export interface BurrowFetchOptions {
+  * endpoint whose only input is the bearer still posts, with `{}`.
+  */
+ function burrowRequest(options: BurrowFetchOptions, route: string, body?: unknown): Promise<Response> {
+-  return options.fetch(`${options.enrollment.relayUrl}${route}`, {
++  const doFetch = options.fetch ?? globalThis.fetch;
++  return doFetch(`${options.enrollment.relayUrl}${route}`, {
+     ...(body === undefined ? {} : { method: 'POST', body: JSON.stringify(body) }),
+     // The service replaced a webview whose CSP checked every redirect target,
+     // and a Node process re-checks nothing. Do not let the Relay's open redirect
+diff --git a/scripts/outbound-lint-selftest.mjs b/scripts/outbound-lint-selftest.mjs
+index 68ea073c0..4a4a1b0e5 100644
+--- a/scripts/outbound-lint-selftest.mjs
++++ b/scripts/outbound-lint-selftest.mjs
+@@ -93,10 +93,10 @@ selftest.withAppendedOutput(
+ // --- Structural rules ----------------------------------------------------------
+ const STRUCTURAL = [
+   [
+-    'lib/src/remote/burrow/burrow-fetch.ts',
++    'lib/src/remote/burrow/enrollment.ts',
+     append('\nexport const __selftest = (f?: typeof globalThis.fetch) => f ?? globalThis.fetch;\n'),
+     'names the global transport (global fetch)',
+-    'a globalThis.fetch fallback in burrow-fetch',
++    'a globalThis.fetch fallback in a guarded file',
+   ],
+   [
+     'lib/src/remote/burrow/enrollment.ts',
+diff --git a/scripts/outbound-lint.mjs b/scripts/outbound-lint.mjs
+index de4434a62..0ac7ab7df 100644
+--- a/scripts/outbound-lint.mjs
++++ b/scripts/outbound-lint.mjs
+@@ -132,10 +132,6 @@ const OUTBOUND_SITES = {
+     class: 'guarded:burrow-service',
+     reason: 'createRelaySocket is the socket factory VS Code injects into BurrowService, which calls it only through its transport guard.',
+   },
+-  'lib/src/remote/burrow/burrow-fetch.ts': {
+-    class: 'guarded:burrow-service',
+-    reason: 'Calls only the fetch its caller passes — the service\'s guarded fetch, with no default.',
+-  },
+   'lib/src/remote/burrow/enrollment.ts': {
+     class: 'guarded:burrow-service',
+     reason: 'The enrollment exchange calls only the fetch parameter, which the service passes as its guarded fetch.',
+@@ -159,6 +155,10 @@ const OUTBOUND_SITES = {
+     reason: 'runUpdateCheck calls check() only when the policy is not nothing and autoUpdate is on; Check now is a click; openUrl opens the changelog or an issue search on a click.',
+   },
+   // --- user: a click, a command, or the user's own terminal, pane, or agent ---
++  'lib/src/remote/burrow/burrow-fetch.ts': {
++    class: 'user:relay-enrollment',
++    reason: 'Talks to the Relay the user enrolled this Burrow with, on the fetch its caller passes.',
++  },
+   'lib/src/components/ExternalLinkModalHost.tsx': {
+     class: 'user:link-click',
+     reason: 'Opens a link in the system browser after the user confirms it in the external-link modal.',

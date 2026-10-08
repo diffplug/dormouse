@@ -10,16 +10,37 @@ on:
   schedule:
     - cron: "21 4 * * *"
   workflow_dispatch:
+    inputs:
+      # A canary run measures the audit rather than auditing: it seeds known
+      # vulnerabilities into a throwaway checkout and counts how many the code
+      # domains catch (docs/specs/security-audit.md -> "Canary recall"). It runs
+      # the `canary` job alone, on `main` alone, and files and gates nothing.
+      canary:
+        description: "Measure recall on seeded vulnerabilities instead of auditing (main only; files and gates nothing)"
+        type: boolean
+        default: false
 
-permissions:
-  contents: read
-  actions: read
-  issues: write
-  id-token: write
+# The release gate in release.yml picks its run by this title, so a canary can
+# never be the run a release waits on.
+run-name: ${{ inputs.canary && 'security-audit canary (recall measurement, not an audit)' || 'security-audit' }}
+
+# Each job declares its own.
+permissions: {}
 
 jobs:
   audit:
+    # Every run but a canary: the schedule, the release gate's dispatch, and a
+    # plain dispatch carry no `canary` input.
+    if: ${{ !inputs.canary }}
     runs-on: ubuntu-latest
+    # No `id-token`: with it, claude-code-action exchanges OIDC for the Claude
+    # App's installation token, which can push and file, and hands it to the
+    # agent. The action runs on this job's token instead, passed below, so the
+    # agent holds `issues: write` (the reporting steps need it) and no more.
+    permissions:
+      contents: read
+      actions: read
+      issues: write
     env:
       # The four per-domain fragment filenames, then the deterministic
       # GitHub-state check's, in one place. They are
@@ -179,6 +200,9 @@ jobs:
           BASH_DEFAULT_TIMEOUT_MS: "600000"
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Skips the OIDC exchange for the Claude App's installation token,
+          # which can write; the agent's `gh` gets this job's token.
+          github_token: ${{ github.token }}
           # release.yml dispatches this workflow with the default
           # GITHUB_TOKEN, so the actor is `github-actions[bot]`. The
           # action refuses bot-initiated runs unless the bot is allow-
@@ -626,3 +650,153 @@ jobs:
               --body-file audit-public.md
           fi
           exit 1
+
+  # Recall, not an audit (docs/specs/security-audit.md -> "Canary recall"): the
+  # code domains audit a checkout seeded with known vulnerabilities from
+  # `.github/audit/canaries/`, and a script counts the seeds their lines catch.
+  # It holds no `AUDIT_PAT` and no `EMBARGO_TOKEN`, writes to nothing but this
+  # run's artifacts, and leaves the skip decision and the release gate alone:
+  # it uploads no `audit-state`, and release.yml never picks a run by its title.
+  canary:
+    if: ${{ inputs.canary }}
+    runs-on: ubuntu-latest
+    # Above the orchestrator's 32-minute wait, as the audit job's is.
+    timeout-minutes: 45
+    # No `issues: write`, no `contents: write`, and no `id-token`: without it
+    # claude-code-action cannot mint its GitHub App token, and runs on the
+    # read-only workflow token passed below instead.
+    permissions:
+      contents: read
+    # For `CLAUDE_CODE_OAUTH_TOKEN`, which is env-scoped. The environment also
+    # admits `v*` tags; the first step refuses them.
+    environment:
+      name: security-audit
+    env:
+      CANARY_SEEDS: "6"
+      CANARY_FRAGMENTS: audit-supply-chain.md audit-application.md audit-hosted.md
+    steps:
+      - name: Refuse any ref but main
+        run: |
+          [ "$GITHUB_REF" = refs/heads/main ] && exit 0
+          echo "::error::A canary runs on main only."
+          exit 1
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          # No token left in `.git/config` for the agent to push with.
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: package.json
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      # In this runner's checkout only: the seeds, then one fresh root commit in
+      # place of the history, so no diff tells the auditor which changes are
+      # seeds. The seeds applied go to the stash, outside the checkout; the log
+      # carries their count alone. `ci-and-secrets` is not run, so its fragment
+      # is written finished here for the orchestrator's wait. The open-findings
+      # list is handed over empty: the ledger is real findings on `main`, which
+      # a canary neither reads nor scores.
+      - name: Seed the checkout
+        id: seed
+        run: |
+          node scripts/security-audit-canary.mjs seed --key "$GITHUB_RUN_ID" \
+            --count "$CANARY_SEEDS" --stash "$RUNNER_TEMP/canary-stash"
+          printf 'VERDICT: INCONCLUSIVE\n\nThis run does not audit ci-and-secrets.\n\n<!-- END OF REPORT -->\n' > audit-ci-secrets.md
+          : > audit-open-findings.txt
+
+      # The audit job's agent step, less `ci-and-secrets`: the same pinned
+      # action, prompts, tools, and model split.
+      - name: Audit the seeded checkout
+        uses: anthropics/claude-code-action@58985842b834ed26087302ba27d07bc24ca8697a # v1.0.244
+        env:
+          BASH_DEFAULT_TIMEOUT_MS: "600000"
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Skips the OIDC exchange for the Claude App's installation token,
+          # which can write; the agent's `gh` gets this job's token.
+          github_token: ${{ github.token }}
+          claude_args: >-
+            --model sonnet
+            --allowed-tools "Read,Write,Edit,Bash,Grep,Glob,Task,Agent"
+            --disallowed-tools "Workflow"
+            --agents '{"supply-chain":{"description":"Audits docs/specs/security-supply-chain.md.","prompt":"Read `.github/audit/_preamble.md` and then `.github/audit/supply-chain.md`, and follow them exactly."},"application-security":{"description":"Audits docs/specs/security-local.md and docs/specs/security-remote.md, and sweeps the rest of the product code.","prompt":"Read `.github/audit/_preamble.md` and then `.github/audit/application-security.md`, and follow them exactly.","model":"opus"},"hosted":{"description":"Audits docs/specs/security-hosted.md: Hosted accounts and the pgstencil provenance link.","prompt":"Read `.github/audit/_preamble.md` and then `.github/audit/hosted.md`, and follow them exactly.","model":"opus"}}'
+          prompt: |
+            You are the orchestrator of this repository's security audit.
+
+            Read `.github/audit/orchestrator.md` and follow it exactly, with one
+            change: this run audits three domains. Spawn only `supply-chain`,
+            `application-security`, and `hosted`. `audit-ci-secrets.md` is
+            already written and finished, so do not spawn `ci-and-secrets`.
+
+      # As the audit job's redactor: every sink the archive carries, deleted
+      # rather than kept when the redactor throws. Before scoring, so the
+      # scorecard quotes redacted lines.
+      - name: Redact secrets from canary output
+        if: always()
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          TRANSCRIPT="$RUNNER_TEMP/claude-execution-output.json"
+          # shellcheck disable=SC2086
+          node scripts/security-audit-canary.mjs redact "$TRANSCRIPT" audit-report.md $CANARY_FRAGMENTS \
+            || { rm -f "$TRANSCRIPT" audit-report.md $CANARY_FRAGMENTS; exit 1; }
+
+      # The public half is counts alone: the step summary's one line and the
+      # `canary-recall` artifact. Which seeds ran, and which were caught by
+      # what, stay in the scorecard, which leaves only encrypted.
+      - name: Score the canary
+        id: score
+        if: always() && steps.seed.outcome == 'success'
+        run: |
+          node scripts/security-audit-canary.mjs score --stash "$RUNNER_TEMP/canary-stash" \
+            --run-url "https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            --scorecard "$RUNNER_TEMP/canary-stash/scorecard.json" \
+            --public "$RUNNER_TEMP/canary-recall/canary-recall.json" --summary "$GITHUB_STEP_SUMMARY"
+
+      # As the audit job's transcript: age ciphertext to the maintainer key,
+      # written to a partial name and renamed once age exits zero.
+      - name: Encrypt the canary transcript
+        id: encrypt
+        if: always()
+        run: |
+          set -euo pipefail
+          OUT="$RUNNER_TEMP/canary-transcript.tar.gz.age"
+          rm -f "$OUT" "$OUT.partial"
+          sudo apt-get update -qq && sudo apt-get install -y -qq age
+          STAGE=$(mktemp -d)
+          # shellcheck disable=SC2086
+          for f in "$RUNNER_TEMP/claude-execution-output.json" audit-report.md $CANARY_FRAGMENTS \
+                   "$RUNNER_TEMP/canary-stash/seeds.json" "$RUNNER_TEMP/canary-stash/scorecard.json"; do
+            if [ -f "$f" ]; then cp "$f" "$STAGE/"; fi
+          done
+          tar -C "$STAGE" -czf - . |
+            age -R .github/audit/transcript-recipient.txt -o "$OUT.partial" ||
+            { rm -f "$OUT.partial"; rm -rf "$STAGE"; echo "::error::Encrypting the canary transcript failed; nothing is uploaded."; exit 1; }
+          mv "$OUT.partial" "$OUT"
+          rm -rf "$STAGE"
+
+      - name: Archive the canary transcript
+        if: always() && steps.encrypt.outcome == 'success'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: canary-transcript
+          # Ciphertext only: one `.age` file, never a plaintext sink.
+          path: ${{ runner.temp }}/canary-transcript.tar.gz.age
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Upload the canary recall
+        if: always() && steps.score.outcome == 'success'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: canary-recall
+          path: ${{ runner.temp }}/canary-recall/canary-recall.json
+          retention-days: 90
+          if-no-files-found: error

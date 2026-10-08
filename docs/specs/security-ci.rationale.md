@@ -58,6 +58,8 @@ The October 2026 audit read tend 0.3.5's `claude/action.yaml`, `restore-sensitiv
 
 **Why an unnamed environment fails.** An environment is a place to bind a secret or an OIDC token. The audit run of 2026-09-15 judged four of seven environments and passed; enumerating from the API closes that, and failing on a name the expected state lacks makes a new environment a reviewed change, as a new org-level secret already is.
 
+**Why `id-token` left the agent-managed list (2026-10-08).** With `id-token: write` and no `github_token` input, `anthropics/claude-code-action` exchanges the job's OIDC token for the Claude GitHub App's installation token and exports it as `GH_TOKEN`; the audit's own run 37455371907 logged `Exchanging OIDC token for app token...`. That token carries the App's permissions, not the job's, so the security-audit agent could push to and file in this public repository past every `permissions:` block. No agent-managed job used OIDC for anything else, so the scope goes and the action runs on the job's own token.
+
 ## Hosted Deployments
 
 **Why the App's own permissions are not audited (measured 2026-10-07).** `gh api apps/dormouse-hosted-tagger` answers 404 unauthenticated and 403 to both `AUDIT_PAT` and the workflow token, because the App is private; `GET /orgs/diffplug/installations` answers an organization administrator only. Run 37699058650 recorded the check `UNVERIFIABLE`, which would have held every release gate. What a run can read still bounds a leaked key's reach over refs: the rulesets let the App past `hosted/` tag creation alone, so a token minted with every permission the installation holds still cannot move `main`, a `v*` tag, or an existing `hosted/` tag.

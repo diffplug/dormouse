@@ -156,3 +156,17 @@ Provisioning the secret, for whoever has to rotate it:
 ```bash
 gh secret set AUDIT_PAT --env security-audit --repo diffplug/dormouse --body 'github_pat_…'
 ```
+
+## Canary recall
+
+**Why measure recall (2026-10-07).** Run 37710148950 reported two failed checks and two WARNINGs; run 37713086378, on the same code, reported none of the four. Earlier, a real webview bug was found in 3 of 20 runs. A PASS says nothing about what a run would have caught; a canary turns that into a number per run.
+
+**Why a seed deletes the pins that would catch it.** A regression on `main` has passed CI, so a seed whose test still fails measures whether a domain runs a test, not whether it reads code. A seed that reclassifies an `OUTBOUND_SITES` entry or narrows a lint models the commit that silenced it.
+
+**Why the history is replaced.** A commit on top of the audited one leaves `git diff HEAD~1`, the remote-tracking ref, and the reflog each listing the seeds. The seeds applied sit in `$RUNNER_TEMP`, which an agent that goes looking can still read; the measurement assumes it does not.
+
+**Why only the code domains.** `ci-and-secrets` reads repository settings, which a checkout cannot seed, and `scripts/github-state-check.mjs` answers them deterministically, with planted-violation tests of its own.
+
+**Why the catch rule is strict.** A line citing the file but not the rule may be another finding in a file a seed touched. Counting near-misses would publish a recall a re-run could not reproduce.
+
+**Why a separate job, and a filter on the gate.** The `audit` job files issues, reads the ledger, uploads `audit-state`, and gates a release; gating each step on an input would leave each a place to get the condition wrong. A canary and a release dispatch can share a commit, so the gate also refuses a run by its title.
