@@ -141,12 +141,12 @@ run_canary() {
   stash=$(mktemp -d)
   git archive HEAD | tar -x -C "$tree"
   echo "==> canary: seeding $count in $tree"
-  (cd "$tree" && pnpm install --frozen-lockfile >/dev/null &&
-    node scripts/security-audit-canary.mjs seed --key "${CANARY_KEY:-$(date +%s)}" --count "$count" --stash "$stash")
+  (cd "$tree" && node scripts/security-audit-canary.mjs seed --key "${CANARY_KEY:-$(date +%s)}" --count "$count" --stash "$stash" &&
+    pnpm install --frozen-lockfile >/dev/null)
   # Run here rather than through the copy's runner, which would read the real
   # findings ledger: a canary hands its domains an empty list, as CI does.
   (cd "$tree" && : > audit-open-findings.txt &&
-    for domain in supply-chain application-security hosted; do run_domain "$domain" || true; done)
+    for domain in $(node scripts/security-audit-canary.mjs domains); do run_domain "$domain" || true; done)
   (cd "$tree" && node scripts/security-audit-canary.mjs score --stash "$stash" \
     --scorecard "$stash/scorecard.json" --public "$stash/canary-recall.json")
   echo "==> scorecard: $stash/scorecard.json; seeded tree: $tree"

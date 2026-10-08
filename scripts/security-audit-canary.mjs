@@ -16,6 +16,8 @@
  *     <dir>/seeds.json: the scorecard, with seed detail, for the encrypted
  *     archive; the public record, counts alone; and one summary line appended
  *     to <file>.
+ *   node scripts/security-audit-canary.mjs domains
+ *     The domains a canary runs, space-separated.
  *   node scripts/security-audit-canary.mjs redact <file>...
  *     Replace `CLAUDE_CODE_OAUTH_TOKEN`'s value in each file; exits non-zero if
  *     any file could not be rewritten.
@@ -32,7 +34,7 @@ import { createHash } from 'node:crypto';
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { domains, parseFragment, ruleId } from './security-audit-report.mjs';
+import { RULE_ID, domains, parseFragment, readFragment, ruleId } from './security-audit-report.mjs';
 
 export const POOL_DIR = '.github/audit/canaries';
 /** The domains a canary runs: the code-reading ones. `ci-and-secrets` reads live GitHub state, which a checkout cannot seed. */
@@ -40,7 +42,7 @@ export const CANARY_DOMAINS = ['supply-chain', 'application-security', 'hosted']
 /** What the replacement history says, the same on every run. */
 const COMMIT_MESSAGE = 'Audited tree';
 const HEADER_RE = /^(Domain|Rule|Class|Expect|Source): (\S.*)$/;
-const RULE_RE = /^`(docs\/specs\/security[a-z-]*\.md)` -> "([^"\n]+)" #([1-9]\d*) — (\S.*)$/;
+const RULE_RE = new RegExp(`^${RULE_ID} — (\\S.*)$`);
 const RUN_URL_RE = /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/actions\/runs\/\d+$/;
 
 // --- The pool ---------------------------------------------------------------
@@ -135,9 +137,7 @@ export function seed({ root = '.', key, count, stash }) {
  * The lines that can catch a seed: each `FAIL` result and each BLOCKER or
  * WARNING finding, with the text a citation is looked for in.
  */
-function candidates(name, text) {
-  if (text === null) return [];
-  const p = parseFragment(text);
+function candidates(name, p) {
   return [
     ...p.results.filter((r) => r.status === 'FAIL').map((r) => ({ fragment: name, kind: 'FAIL', text: r.line,
       rule: ruleId(r.spec, r.heading, r.rule) })),
@@ -165,7 +165,8 @@ function catches(line, s) {
  * which a canary does not file anywhere.
  */
 export function score(seeds, fragments) {
-  const lines = Object.entries(fragments).flatMap(([name, text]) => candidates(name, text));
+  const parsed = Object.entries(fragments).map(([name, text]) => [name, text === null ? null : parseFragment(text)]);
+  const lines = parsed.flatMap(([name, p]) => (p ? candidates(name, p) : []));
   const touched = [...new Set(seeds.flatMap((s) => s.files))];
   const results = seeds.map((s) => {
     const by = lines.filter((l) => catches(l, s));
@@ -176,7 +177,7 @@ export function score(seeds, fragments) {
     const mine = results.filter((r) => r.domain === d);
     return [d, { seeded: mine.length, caught: mine.filter((r) => r.caught).length }];
   }));
-  const unfinished = Object.entries(fragments).filter(([, text]) => text === null || !parseFragment(text).finished).map(([n]) => n);
+  const unfinished = parsed.filter(([, p]) => !p?.finished).map(([n]) => n);
   return {
     seeded: results.length,
     caught: results.filter((r) => r.caught).length,
@@ -190,8 +191,7 @@ export function score(seeds, fragments) {
 /** What the canary publishes: counts and the run link, nothing a seed's detail could be read from. */
 export function publicRecord(scorecard, runUrl = '') {
   if (runUrl && !RUN_URL_RE.test(runUrl)) throw new Error(`not a run URL: ${JSON.stringify(runUrl)}`);
-  const count = (n) => (Number.isInteger(n) && n >= 0 ? n : 0);
-  return { seeded: count(scorecard.seeded), caught: count(scorecard.caught), unfinished: count(scorecard.unfinished.length), run_url: runUrl };
+  return { seeded: scorecard.seeded, caught: scorecard.caught, unfinished: scorecard.unfinished.length, run_url: runUrl };
 }
 
 /** The one public line: `canary: 4/6 seeds caught (run)`. */
@@ -202,15 +202,10 @@ export function summaryLine(record) {
 }
 
 /** Each canary domain's fragment in the working directory, or null. */
-function readFragments(root) {
-  const out = {};
-  for (const d of domains(root).filter((x) => CANARY_DOMAINS.includes(x.domain))) {
-    const path = join(root, d.fragment);
-    const text = existsSync(path) ? readFileSync(path, 'utf8') : '';
-    out[d.fragment] = text === '' ? null : text;
-  }
-  if (Object.keys(out).length !== CANARY_DOMAINS.length) throw new Error('a canary domain has no prompt naming its fragment');
-  return out;
+function readFragments() {
+  const named = domains('.').filter((d) => CANARY_DOMAINS.includes(d.domain));
+  if (named.length !== CANARY_DOMAINS.length) throw new Error('a canary domain has no prompt naming its fragment');
+  return Object.fromEntries(named.map((d) => [d.fragment, readFragment(d.fragment)]));
 }
 
 // --- Redact ------------------------------------------------------------------
@@ -248,7 +243,7 @@ function main(argv) {
   }
   if (command === 'score') {
     const seeds = JSON.parse(readFileSync(join(args.stash, 'seeds.json'), 'utf8'));
-    const scorecard = score(seeds, readFragments('.'));
+    const scorecard = score(seeds, readFragments());
     const record = publicRecord(scorecard, args['run-url'] ?? '');
     for (const [file, value] of [[args.scorecard, scorecard], [args.public, record]]) {
       mkdirSync(dirname(file), { recursive: true });
@@ -263,7 +258,11 @@ function main(argv) {
     console.log(hits ? `::warning::Redacted ${hits} literal secret occurrence(s); rotate CLAUDE_CODE_OAUTH_TOKEN.` : 'No literal secret occurrences found.');
     return;
   }
-  throw new Error('usage: security-audit-canary.mjs seed|score|redact …');
+  if (command === 'domains') {
+    console.log(CANARY_DOMAINS.join(' '));
+    return;
+  }
+  throw new Error('usage: security-audit-canary.mjs seed|score|redact|domains …');
 }
 
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {

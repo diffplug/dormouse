@@ -107,11 +107,8 @@ function checkout(t) {
   // The local runner's stand-in for the GitHub-state check `supply-chain` reads.
   writeFileSync(join(dir, 'scripts/github-state-check.mjs'), "import { writeFileSync } from 'node:fs'; writeFileSync(process.argv[process.argv.indexOf('--out') + 1], 'VERDICT: PASS\\n');");
   stub(bin, 'gh', "require('node:fs').appendFileSync(process.env.CALLS, 'gh ' + process.argv.slice(2).join(' ') + '\\n');");
-  stub(bin, 'git', `
-    require('node:fs').appendFileSync(process.env.CALLS, 'git ' + process.argv.slice(2).join(' ') + '\\n');
-    const run = require('node:child_process').spawnSync(${JSON.stringify(realGit)}, process.argv.slice(2), { stdio: 'inherit' });
-    process.exit(run.status ?? 1);
-  `);
+  // A shell stub: every seed step runs git a handful of times.
+  writeFileSync(join(bin, 'git'), `#!/bin/sh\necho "git $*" >> "$CALLS"\nexec '${realGit}' "$@"\n`, { mode: 0o755 });
   const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, CALLS: join(base, 'calls'),
     RUNNER_TEMP: runner, GITHUB_RUN_ID: '4242', GITHUB_REPOSITORY: 'fixture/repo',
     GITHUB_STEP_SUMMARY: join(runner, 'summary.md'), GITHUB_OUTPUT: join(runner, 'output'),
@@ -160,7 +157,7 @@ test('the canary job seeds, hides the seeds, and scores, filing and pushing noth
   assert.equal(readFileSync(join(dir, 'audit-ci-secrets.md'), 'utf8').trim().split('\n').at(-1), SENTINEL);
 
   const gate = seeds.find((s) => s.id.startsWith('gate-'));
-  writeFileSync(join(dir, fragmentOf['application-security']), fragment([gate.rule ? FAIL_GATE : warning('WARNING', 'src/gate.ts:1')[0], ...(gate.rule ? [] : warning('WARNING', 'src/gate.ts:1').slice(1))]));
+  writeFileSync(join(dir, fragmentOf['application-security']), fragment(gate.rule ? [FAIL_GATE] : warning('WARNING', 'src/gate.ts:1')));
   writeFileSync(join(dir, fragmentOf.hosted), fragment(warning('INFO', 'src/room.ts:1')));
   const scored = spawnSync('bash', ['-c', canaryBlock('Score the canary')], { cwd: dir, env, encoding: 'utf8' });
   assert.equal(scored.status, 0, scored.stderr);
