@@ -35,7 +35,7 @@ const cases = [
   ['release.yml build job writes packages', edit('release.yml', '      id-token: write\n      attestations: write\n    strategy:', '      id-token: write\n      attestations: write\n      packages: write\n    strategy:'), 'build-standalone` holds write on packages'],
   ['actions: write beyond the audit dispatch', edit('release.yml', '      id-token: write\n      attestations: write\n    steps:', '      id-token: write\n      attestations: write\n      actions: write\n    steps:'), 'build-vscode` holds write on actions'],
   ['an agent-managed job with actions: write', edit('tend-review.yaml', '      actions: read\n', '      actions: write\n'), 'tend-review.yaml job `review` holds write on actions'],
-  ['an agent-managed job with checks: write', edit('security-audit.yaml', '  actions: read\n  issues: write', '  actions: read\n  checks: write\n  issues: write'), 'security-audit.yaml job `audit` holds write on checks'],
+  ['an agent-managed job with checks: write', edit('security-audit.yaml', '      actions: read\n      issues: write', '      actions: read\n      checks: write\n      issues: write'), 'security-audit.yaml job `audit` holds write on checks'],
   ['a tend job-level env', edit('tend-review.yaml', '    runs-on: ubuntu-24.04\n', '    runs-on: ubuntu-24.04\n    env:\n      X: y\n'), 'job-level `env:`'],
   ['a tend workflow-level env', edit('tend-review.yaml', '\njobs:\n', '\nenv:\n  X: y\njobs:\n'), 'workflow-level `env:`'],
   ['release.yml on a branch push', edit('release.yml', "    tags:\n      - 'v*'", "    branches: [main]\n    tags:\n      - 'v*'"), 'not only a pushed `v*` tag'],

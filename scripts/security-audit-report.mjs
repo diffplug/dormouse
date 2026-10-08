@@ -167,7 +167,7 @@ function statedVerdict(firstLine) {
 }
 
 /** Every structured line of a fragment, and every line that tried to be one and is not. */
-function parseFragment(text, { evidence = true } = {}) {
+export function parseFragment(text, { evidence = true } = {}) {
   const lines = text.split('\n');
   const parsed = {
     stated: statedVerdict(lines[0] ?? ''),

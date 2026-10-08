@@ -95,8 +95,8 @@ function fixture(t) {
   for (const spec of readdirSync(join(repo, 'docs/specs')).filter((f) => /^security[a-z-]*\.md$/.test(f))) {
     copyFileSync(join(repo, 'docs/specs', spec), join(dir, 'docs/specs', spec));
   }
-  for (const f of readdirSync(join(repo, '.github/audit'))) {
-    copyFileSync(join(repo, '.github/audit', f), join(dir, '.github/audit', f));
+  for (const f of readdirSync(join(repo, '.github/audit'), { withFileTypes: true }).filter((e) => e.isFile())) {
+    copyFileSync(join(repo, '.github/audit', f.name), join(dir, '.github/audit', f.name));
   }
   // The deterministic check passed unless a case says otherwise.
   writeFileSync(join(dir, STATE_FRAGMENT), fragmentText(STATE_FRAGMENT));

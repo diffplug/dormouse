@@ -1,0 +1,41 @@
+Domain: application-security
+Rule: `docs/specs/security-remote.md` -> "Relay origin" #4 — answers `'hosted'` for anything but a baked `hosted`
+Expect: lib/src/host/relay-origin.ts
+Source: reverses #1060 (a relay mode with no define, or an unknown one, read as Hosted)
+
+diff --git a/lib/src/host/relay-origin.test.ts b/lib/src/host/relay-origin.test.ts
+index ccd5ba2e5..20a5e1918 100644
+--- a/lib/src/host/relay-origin.test.ts
++++ b/lib/src/host/relay-origin.test.ts
+@@ -94,9 +94,9 @@ describe('the baked relay origin', () => {
+     expect(isDevHostedBuild({ origin: 'https://relay.example.ts.net', mode: 'self-host' })).toBe(false);
+   });
+ 
+-  it('reads as self-host where nothing was baked (the test runner), never Hosted', () => {
+-    expect(bakedRelay()).toEqual({ origin: DEFAULT_RELAY_ORIGIN, mode: 'self-host' });
+-    expect(bakedRelayMode()).toBe('self-host');
++  it('reads as the Hosted default where nothing was baked (the test runner)', () => {
++    expect(bakedRelay()).toEqual({ origin: DEFAULT_RELAY_ORIGIN, mode: 'hosted' });
++    expect(bakedRelayMode()).toBe('hosted');
+   });
+ 
+   it('reaches Hosted only in a Hosted build', () => {
+diff --git a/lib/src/host/relay-origin.ts b/lib/src/host/relay-origin.ts
+index fd81d3815..830be3562 100644
+--- a/lib/src/host/relay-origin.ts
++++ b/lib/src/host/relay-origin.ts
+@@ -76,12 +76,10 @@ export function bakedRelay(): RelayBuild {
+ /**
+  * The mode this build was compiled with; see {@link bakedRelay}. The webview
+  * reads it on its own, the standalone Vite build baking the same pair.
+- *
+- * Fails closed: anything but a baked `hosted` — no define, or an unknown value —
+- * reads as `self-host`, which reaches nothing of Dormouse's in the background.
+  */
+ export function bakedRelayMode(): RelayMode {
+-  return typeof __DORMOUSE_RELAY_MODE__ === 'string' && __DORMOUSE_RELAY_MODE__ === 'hosted' ? 'hosted' : 'self-host';
++  if (typeof __DORMOUSE_RELAY_MODE__ !== 'string') return 'hosted';
++  return __DORMOUSE_RELAY_MODE__ === 'self-host' ? 'self-host' : 'hosted';
+ }
+ 
+ /**

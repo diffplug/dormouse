@@ -289,7 +289,9 @@ jobs:
           gh workflow run "$workflow" -R "$repo" --ref "$tag"
 
           # The dispatched run takes a few seconds to register. Poll for it:
-          # same head commit, workflow_dispatch event, created after $since.
+          # same head commit, workflow_dispatch event, created after $since,
+          # and never a canary, which measures the audit and gates nothing
+          # (docs/specs/security-audit.md -> "Canary recall").
           run_id=""
           for attempt in $(seq 1 36); do
             sleep 5
@@ -298,8 +300,8 @@ jobs:
               --workflow "$workflow" \
               --event workflow_dispatch \
               --limit 20 \
-              --json databaseId,headSha,createdAt \
-              --jq "[.[] | select(.headSha==\"$sha\" and .createdAt >= \"$since\")] | sort_by(.createdAt) | last | .databaseId // empty")"
+              --json databaseId,headSha,createdAt,displayTitle \
+              --jq "[.[] | select(.headSha==\"$sha\" and .createdAt >= \"$since\" and ((.displayTitle // \"\") | startswith(\"security-audit canary\") | not))] | sort_by(.createdAt) | last | .databaseId // empty")"
             [ -n "$run_id" ] && break
             echo "  …waiting for dispatched run to appear (attempt $attempt/36)"
           done

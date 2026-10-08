@@ -1,0 +1,37 @@
+Domain: application-security
+Rule: `docs/specs/security-local.md` -> "Persisted state" #1 — The one exception is the macOS hang sample
+Expect: standalone/src-tauri/src/lib.rs
+Source: reverses #1028 (the hang sample was written at the umask after a bare create_dir_all)
+
+diff --git a/standalone/src-tauri/src/lib.rs b/standalone/src-tauri/src/lib.rs
+index 14a5dbd6d..16232d5f4 100644
+--- a/standalone/src-tauri/src/lib.rs
++++ b/standalone/src-tauri/src/lib.rs
+@@ -1832,9 +1832,9 @@ fn restart_hung_webviews(app: &AppHandle, labels: &[String]) {
+     let watchdog = app.state::<UiWatchdog>();
+     for (pid, labels) in by_pid {
+         let sample_path = dir.as_ref().and_then(|dir| {
++            create_dir_all(dir).ok()?;
+             let path = dir.join(format!("{}-{pid}.sample.txt", log_timestamp()));
+-            write_owner_only_with(&path, restrict_to_owner, |path| macos::sample(pid, path))
+-                .then(|| path.display().to_string())
++            macos::sample(pid, &path).then(|| path.display().to_string())
+         });
+         let killed = macos::kill(pid);
+         append_log(format!(
+@@ -5915,15 +5915,6 @@ mod tests {
+         assert_eq!(fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+     }
+ 
+-    /// docs/specs/security-local.md -> "Persisted state".
+-    #[test]
+-    fn the_hang_sample_is_written_owner_only() {
+-        let src = include_str!("lib.rs").split("#[cfg(test)]").next().unwrap();
+-        let body = src.split("fn restart_hung_webviews(").nth(1).unwrap().split("\n}").next().unwrap();
+-        assert!(body.contains("write_owner_only_with(&path, restrict_to_owner,"));
+-        assert!(!body.contains("create_dir_all("));
+-    }
+-
+     /// Linux keeps the log in a per-user state directory whenever it has one
+     /// (docs/specs/standalone.md -> "Logging"). Unix paths, so unix only.
+     #[cfg(unix)]
