@@ -42,6 +42,22 @@ It prints one template line per `FAIL IF` in your scope, numbered by its positio
 - **A rule asserting several properties gets one line per clause**, lettered `.a`, `.b`, … in the order the rule states them, with no letter skipped; a single-clause rule is the bare number. A lettered gap counts as an undetermined clause.
 - A line naming a rule your manifest does not print is malformed.
 
+### Evidence for a PASS
+
+A PASS is a claim, and needs evidence as much as a FAIL does. **That the control a rule names exists is never by itself a PASS.**
+
+- **Trace the gate's input.** On a rule that names a gate or check, trace each input the gate compares back to where it is set, and say whether an attacker the rule names can set it. A comparison against a value that attacker writes is no gate.
+- **Check absence and failure.** On a rule about a configuration or policy, check what is absent as well as what is present, and judge each missing item by its actual fallback, which is not always the default the policy states. Then take the failure and default paths — a missing define, an unset environment variable, an unparseable file — and say what each does.
+- **Keep every condition.** When you split a rule into clauses, every condition the rule names lands in some clause. A dropped condition makes the result malformed, however the kept clauses read.
+
+### Open findings
+
+`audit-open-findings.txt` lists the open ledger issues, one title per line: `[audit-finding <key>] <summary>`. A failure's summary cites its rule — `FAIL: <spec> -> "<heading>" #<n>`, or, for one filed by hand, `FAIL <spec file> <heading>:`; a BLOCKER's or WARNING's names its file and root cause, or what was filed by hand. **Read it before your first check, and re-verify each finding as you reach the rule it cites**; one citing no rule, in your qualitative pass. Its titles are embargoed like your fragment, so quote them nowhere else.
+
+- **Never write PASS on a rule an open failure cites without saying why it no longer holds.** On a PASS line for that rule — for a citation of a heading alone, any rule under it — write `[audit-finding <key>]` and then the `path:line` that shows it. The reporting step makes your domain INCONCLUSIVE for a cited finding no PASS line names that way.
+- **A finding that still holds is reported again**: a `FAIL` on its rule, or a finding with the same file and root cause, so the ledger counts it as seen rather than opening another.
+- If the file is absent, the run could not read the ledger. Carry on: your domain computes INCONCLUSIVE whatever you write.
+
 ### Severity
 
 Then do the qualitative pass described for your domain. Rate each finding by this rubric, against the attacker `docs/specs/security.md` and the spec you are in describe:
@@ -69,7 +85,7 @@ Then do the qualitative pass described for your domain. Rate each finding by thi
   - Reproduction: <input> → <effect>
 ```
 
-The location is the sink's `path:line` (for spec drift or a condition no code holds, the spec line that states it); the second backticked field is its root cause, the function or rule it lives in. Indented lines below the header belong to the finding, so append the header and its evidence in one write. The reporting step merges findings naming the same file and root cause within five lines, so name the root cause the same way each time and report each finding once. An `INFO` needs no evidence lines.
+The location is the sink's `path:line` (for spec drift or a condition no code holds, the spec line that states it). The second backticked field is its root cause: the one function, constant, or other symbol it lives in, spelled as the code spells it, or where there is none, the rule (`security-ci.md "GitHub Actions Policies" #2`). Indented lines below the header belong to the finding, so append the header and its evidence in one write. The ledger keys a finding on its file and that symbol, never its line or wording, and the reporting step merges findings naming the same file and root cause within five lines, so name the root cause the same way each time and report each finding once. An `INFO` needs no evidence lines.
 
 When your qualitative pass has finished, append exactly one line saying so:
 
@@ -83,7 +99,7 @@ A fragment with no such line, or with two, is INCONCLUSIVE: the pass is part of 
 
 The public issue names a failed check only by its spec and heading, and only when the heading exists in the spec, and counts findings by their tags; everything else you write is filed privately until fixed. **Append; never rewrite the file whole.** What is in that file is the whole of what the audit publishes from you: run 35205193090's `application-security` domain had every one of its work streams reported and lost all of them, because it was holding them for a final write-up it never reached.
 
-**Its very first line must be literally `VERDICT: PASS`, `VERDICT: FAIL`, or `VERDICT: INCONCLUSIVE`** — nothing else on that line. It opens as `INCONCLUSIVE` so a fragment you never finish fails closed on its own. The reporting step compares it with the verdict your lines compute and reports any disagreement: FAIL if any result is `FAIL` or any finding is `BLOCKER`; otherwise INCONCLUSIVE if any result is `UNVERIFIABLE`, a rule has no result line, a line is malformed, or the qualitative line is missing; PASS only when every rule was determined. Rewrite that one line at the end, with Edit rather than `sed -i` (whose in-place flag differs between GNU and BSD), then close the file:
+**Its very first line must be literally `VERDICT: PASS`, `VERDICT: FAIL`, or `VERDICT: INCONCLUSIVE`** — nothing else on that line. It opens as `INCONCLUSIVE` so a fragment you never finish fails closed on its own. The reporting step compares it with the verdict your lines compute and reports any disagreement: FAIL if any result is `FAIL` or any finding is `BLOCKER`; otherwise INCONCLUSIVE if any result is `UNVERIFIABLE`, a rule has no result line, a line is malformed, the qualitative line is missing, or a PASS leaves an open finding it should name; PASS only when every rule was determined. Rewrite that one line at the end, with Edit rather than `sed -i` (whose in-place flag differs between GNU and BSD), then close the file:
 
 ```sh
 printf '\n<!-- END OF REPORT -->\n' >> <your fragment>
@@ -93,7 +109,7 @@ printf '\n<!-- END OF REPORT -->\n' >> <your fragment>
 
 ### Work streams
 
-**Delegate only by the `## Work streams` your domain file names, never by a partition of your own**: one delegate per stream, holding that stream's rules and nothing else. A rule stream runs no qualitative pass; the `qualitative` stream is the domain's one pass, run by you or by one delegate. A delegate appends its lines straight to your fragment, one `printf … >>` per result line and one per finding, its evidence lines in the same call so another stream's line cannot land inside it, and writes no verdict line and no sentinel; when it finishes it touches `$RUNNER_TEMP/<your fragment>.<stream>.done`, and that file is what your wait loop below tests.
+**Delegate only by the `## Work streams` your domain file names, never by a partition of your own**: one delegate per stream, holding that stream's rules and nothing else, and the open findings citing them; the `qualitative` stream takes the open findings that cite no rule. A rule stream runs no qualitative pass; the `qualitative` stream is the domain's one pass, run by you or by one delegate. A delegate appends its lines straight to your fragment, one `printf … >>` per result line and one per finding, its evidence lines in the same call so another stream's line cannot land inside it, and writes no verdict line and no sentinel; when it finishes it touches `$RUNNER_TEMP/<your fragment>.<stream>.done`, and that file is what your wait loop below tests.
 
 **If you delegate, block for your delegates — never end your turn to wait.** Subagents launch in the **background**: the Task tool returns an id, not a report. Ending your turn ends *you*, and your caller reads that as your report being finished — it merges the fragment as it stands and everything your delegates write afterwards is lost. Block inside a Bash call instead, and never with `run_in_background`, which returns an id immediately and blocks nothing. A single Bash call is capped at ten minutes, so break the loop yourself under the cap, issue it with `timeout: 600000`, and re-issue it under a bound of your own:
 
