@@ -372,17 +372,17 @@ function typeCommandWhenPromptReady(id: string, command: string, requireIntegrat
     const ready = requireIntegration
       ? isPaneOscDriven(id)
       : getTerminalPaneState(id).currentCommand === null;
-    if (ready) {
-      clearInterval(timer);
+    const type = () => {
       seedLaunchedCommand(id, command);
       getPlatform().writePty(id, `${command}\r`, { launch: true });
+    };
+    if (ready) {
+      clearInterval(timer);
+      type();
     } else if ((elapsed += LAUNCH_PROMPT_POLL_MS) >= timeoutMs) {
       clearInterval(timer);
       // Best effort for split; drop for ensure (the handler kills + errors).
-      if (!requireIntegration) {
-        seedLaunchedCommand(id, command);
-        getPlatform().writePty(id, `${command}\r`, { launch: true });
-      }
+      if (!requireIntegration) type();
     }
   }, LAUNCH_PROMPT_POLL_MS);
 }

@@ -289,7 +289,7 @@ export class FakePtyAdapter implements PlatformAdapter {
   writePty(id: string, data: string, options?: WritePtyOptions): void {
     if (options?.userInput) this.alertManager.acknowledge(id, { input: true });
     if (!this.terminals.has(id)) return;
-    if (options?.launch) this.launchLatch(id).arm();
+    if (options?.launch) this.launchLatch(id).arm(data);
     // Only echo if no scenario is actively playing
     if (this.activeTimers.has(id)) return;
     // Route to custom input handler if set

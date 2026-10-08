@@ -14,6 +14,7 @@ import type { AlertCommand } from '../../lib/src/host/alert-protocol';
 import type { PeerLinkDeps } from '../src/peer-link';
 import type { BurrowDeps } from '../src/burrow';
 import type { WebviewChannel } from '../src/webview-messaging';
+import { openSequence } from 'dor-tools-lib/osc';
 
 /** What `message-router.ts` hands the two modules it configures at load. */
 const wiring = vi.hoisted(() => ({
@@ -192,7 +193,7 @@ it('forwards a parse\'s Tool events in stream order only to the PTY owner', () =
 it('forwards an OSC 367 open only from the run a launch write started', () => {
   const owner = fakeWebview();
   const attached = router.attachRouter(owner.channel, {});
-  const open = (path: string) => `\x1b]367;open;${JSON.stringify({ v: 1, path, preview: false })}\x07`;
+  const open = (path: string) => openSequence({ path });
   const run = '\x1b]633;D;0\x07\x1b]633;E;view /a\x07\x1b]633;C\x07';
   try {
     owner.send({ type: 'dormouse:init' });

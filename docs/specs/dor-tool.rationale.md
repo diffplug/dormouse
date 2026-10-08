@@ -138,7 +138,7 @@ The `open` gate keys on the host's own launch (2026-10, after a security audit).
 - The PTY's foreground process: node-pty exposes neither the foreground process group nor its pid ([Reaping](#reaping)), and Windows has no equivalent.
 - Keeping the latch in the renderer's terminal state: hosts send a parse's Tool events before its semantic events, so a renderer gate sees state from before the chunk the `open` arrived in, and a webview reload rebuilds that state from replay without the launch. The PTY owner sees every boundary in stream order and outlives the webview.
 
-The latch fails closed: a Tool that prints a second shell-integration start (a nested integrated shell) or a prompt sequence ends its own run's opens until its next launch. One window stays: output written between the host's write and the shell's report of that start, which only a process already writing to that terminal can produce, can take the start until the shell's own report ends it.
+The reported line is still compared, as a narrowing: without it, a launch the shell swallowed would stay armed until whatever start came next, a command the user typed included. The latch fails closed: a Tool that prints a second shell-integration start (a nested integrated shell) or a prompt sequence ends its own run's opens until its next launch. One window stays: output written between the host's write and the shell's report of that start, which only a process already writing to that terminal can produce, can take the start until the shell's own report ends it.
 
 ## Closing unsaved Tools
 

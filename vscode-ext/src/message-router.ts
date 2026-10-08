@@ -591,7 +591,7 @@ export function attachRouter(
       }
       case 'pty:input':
         // Armed before the bytes reach the shell that will report the run.
-        if (msg.launch === true) getOwnerPtyStream(msg.id).armLaunch();
+        if (msg.launch === true) getOwnerPtyStream(msg.id).armLaunch(msg.data);
         alertedPtys.write(msg.id, msg.data, { paced: msg.paced, userInput: msg.userInput === true });
         break;
       case 'pty:resize':

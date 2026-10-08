@@ -71,9 +71,9 @@ export interface SidecarSurfaceBridge {
   onPtyEvent(event: string, data: unknown): void;
   /** A `pty:spawn` command: the id now names a new PTY generation. */
   onPtySpawn(id: unknown): void;
-  /** A `pty:input` the webview marked `launch`: arms that generation's
-   *  `ToolLaunchLatch`, before the bytes reach the shell. */
-  onPtyLaunch(id: string): void;
+  /** A `pty:input` of `typed` the webview marked `launch`: arms that
+   *  generation's `ToolLaunchLatch`, before the bytes reach the shell. */
+  onPtyLaunch(id: string, typed: string): void;
   /**
    * A `pty:themeColors` push. The sidecar has no DOM, so the webview reports its
    * resolved terminal theme for OSC 10/11/12; anything malformed is ignored.
@@ -360,8 +360,8 @@ export function createSidecarSurfaceBridge(
       for (const sink of stream.sinks.keys()) sink.onExit(exitCode);
     },
 
-    onPtyLaunch(id) {
-      ownerStream(id).parsed.armLaunch();
+    onPtyLaunch(id, typed) {
+      ownerStream(id).parsed.armLaunch(typed);
     },
 
     onPtySpawn(id) {
@@ -548,7 +548,7 @@ export function createSidecarHost(options: SidecarHostOptions): SidecarHost {
           return true;
         }
         case 'pty:input':
-          if (detail.launch === true && isString(id)) bridge.onPtyLaunch(id);
+          if (detail.launch === true && isString(id) && isString(detail.data)) bridge.onPtyLaunch(id, detail.data);
           pty.write(id as string, detail.data as string, {
             paced: detail.paced === true,
             userInput: detail.userInput === true,

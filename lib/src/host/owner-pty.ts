@@ -44,9 +44,9 @@ export interface OwnerPtyStreamOptions {
 }
 
 export interface OwnerPtyStream extends ProcessedPtyStream {
-  /** The host is typing a command line into this PTY generation: its run alone
-   *  may make OSC 367 `open` requests (`ToolLaunchLatch`). */
-  armLaunch(): void;
+  /** The host is typing `typed` into this PTY generation to run it: that run
+   *  alone may make OSC 367 `open` requests (`ToolLaunchLatch`). */
+  armLaunch(typed: string): void;
 }
 
 /**
@@ -73,7 +73,7 @@ export function createOwnerPtyStream(id: string, options: OwnerPtyStreamOptions)
       options.onChunk(chunk);
     },
   });
-  return Object.assign(stream, { armLaunch: () => launch.arm() });
+  return Object.assign(stream, { armLaunch: (typed: string) => launch.arm(typed) });
 }
 
 /** The slice of a host's PTY manager that input and size changes reach. */

@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
+import { openSequence } from 'dor-tools-lib/osc';
 import { TerminalProtocolParser } from './terminal-protocol';
 import { ToolLaunchLatch } from './tool-launch-latch';
 
 const osc = (body: string) => `\x1b]${body}\x07`;
-const open = (path: string) => osc(`367;open;${JSON.stringify({ v: 1, path, preview: false })}`);
+const open = (path: string) => openSequence({ path });
 const start = (line: string) => osc(`633;E;${line}`) + osc('633;C');
 const finish = osc('633;D;0') + osc('633;A') + osc('633;B');
 
@@ -24,13 +25,13 @@ function pty() {
 describe('ToolLaunchLatch', () => {
   it('admits the launched run\'s opens, including one in the chunk that reports its start', () => {
     const { latch, admitted } = pty();
-    latch.arm();
+    latch.arm('view /a\r');
     expect(admitted(start('view /a') + open('/a'), open('/b'))).toEqual(['/a', '/b']);
   });
 
   it('keeps a launch armed across the prompt the typed line waits on, admitting nothing before its start', () => {
     const { latch, admitted } = pty();
-    latch.arm();
+    latch.arm('view /a');
     expect(admitted(osc('633;A') + open('/x') + osc('633;B'), start('view /a'), open('/a'))).toEqual(['/a']);
   });
 
@@ -40,16 +41,22 @@ describe('ToolLaunchLatch', () => {
     expect(admitted(start('view /a') + open('/b'))).toEqual([]);
   });
 
+  it('ends a launch at a start reporting another line, never binding a later one', () => {
+    const { latch, admitted } = pty();
+    latch.arm('view /a');
+    expect(admitted(start('cat notes.txt') + open('/a'), finish + start('view /a') + open('/b'))).toEqual([]);
+  });
+
   it('admits nothing once the launched run is over, though a later start reports the same command', () => {
     const { latch, admitted } = pty();
-    latch.arm();
+    latch.arm('view /a');
     expect(admitted(start('view /a'), finish + start('view /a') + open('/a'), open('/b'))).toEqual([]);
   });
 
   it('ends the launched run at a second start or a prompt, never resuming it', () => {
     for (const ending of [start('view /a'), osc('133;C'), osc('633;A'), osc('133;D;0')]) {
       const { latch, admitted } = pty();
-      latch.arm();
+      latch.arm('view /a');
       expect(admitted(start('view /a'), ending + open('/a'), open('/b')), JSON.stringify(ending)).toEqual([]);
     }
   });

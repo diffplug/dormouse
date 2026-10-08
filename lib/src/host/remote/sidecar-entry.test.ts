@@ -25,6 +25,7 @@ import { REPORT } from '../../lib/alert-manager-test-utils';
 import { createAlertClient } from '../alert-client';
 import type { AlertStateDetail } from '../../lib/platform/types';
 import { DEFAULT_MANAGED_VOICE_ID } from '../../lib/platform/managed-voice-types';
+import { openSequence } from 'dor-tools-lib/osc';
 
 const HOLD: SurfaceHold = { holder: 'session-a', label: 'iPhone', lease: '1', serviceId: 'service-1' };
 
@@ -788,7 +789,7 @@ describe('the sidecar host', () => {
     const opens = () => out.filter((line) => line.event === 'terminal:toolEvents')
       .flatMap((line) => (line.data as { events: { kind: string; open?: { path: string } }[] }).events)
       .flatMap((event) => event.kind === 'toolOpen' ? [event.open!.path] : []);
-    const open = (path: string) => `\x1b]367;open;${JSON.stringify({ v: 1, path, preview: false })}\x07`;
+    const open = (path: string) => openSequence({ path });
     const start = '\x1b]633;E;view /a\x07\x1b]633;C\x07';
     host.onPtyEvent('data', { id: 'pty-1', data: start });
     host.onPtyEvent('data', { id: 'pty-1', data: open('/forged') });

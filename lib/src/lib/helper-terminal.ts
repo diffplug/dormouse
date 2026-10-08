@@ -59,7 +59,7 @@ function watchHelper(helper: HelperTerminal, launchCwd?: string): void {
       if (isPaneOscDriven(helper.id) && atPrompt(helper.id)) {
         status = 'running';
         seedLaunchedCommand(helper.id, helper.command, launchCwd);
-        getPlatform().writePty(helper.id, `${helper.command}\r`);
+        getPlatform().writePty(helper.id, `${helper.command}\r`, { launch: true });
       } else if (Date.now() - started >= READINESS_TIMEOUT_MS) status = 'unsupported';
     } else if (helper.status === 'running' && atPrompt(helper.id)) status = 'completed';
     if (status !== helper.status) { helper.status = status; notifyHelpers(); }

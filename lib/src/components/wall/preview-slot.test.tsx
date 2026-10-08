@@ -21,6 +21,7 @@ import { doubleClick, mountWallHarness, reportRunning, waitUntil, type WallHarne
 import { clearExternalLinkConfirmation, getExternalLinkConfirmationSnapshot } from '../../lib/external-link-confirmation';
 import { activateTerminalLink } from '../../lib/terminal-link-activation';
 import { applyLiveToolEvents } from '../../lib/tool-events';
+import { openSequence } from 'dor-tools-lib/osc';
 import { parseReplay } from '../../lib/platform/replay-parse';
 import type { LathNode } from '../../lib/lath/model';
 import { recordToolAnnounce, resetToolAnnounces } from '../../lib/tool-announce-store';
@@ -937,7 +938,7 @@ describe('an OSC 367 open', () => {
   /** Bytes from `id`'s PTY, through the host's own parse. */
   const output = (id: string, ...chunks: string[]) => act(async () => { for (const chunk of chunks) fake.sendOutput(id, chunk); });
   const osc = (body: string) => `\x1b]${body}\x07`;
-  const openBytes = (path: string) => osc(`367;open;${JSON.stringify({ v: 1, path, preview: true })}`);
+  const openBytes = (path: string) => openSequence({ path, preview: true });
 
   it('refuses an open after a command start the host never launched, even one reporting the Tool\'s own command', async () => {
     const toolControl = await mountFolder('cat notes.txt');
