@@ -22,6 +22,7 @@ import type { Session } from "../../src/api";
 import { ADMIN_EMAIL } from "../admin";
 import { CRON_SWEEP_CAP, SPEECH_SWEEP_CAP, VOICE_DAILY_CAP } from "../voice";
 import { ALREADY_APPROVED, RECENT_LOGIN_REQUIRED } from "../relay-account";
+import { TERMS_VERSION } from "../policy-constants";
 import {
   API_ROUTES,
   NOT_ENTITLED_ERROR,
@@ -403,7 +404,13 @@ async function fixture(
       }>;
     const remove = (burrowId: string, from = origin) =>
       request(`/api/relay/burrows/${burrowId}`, { method: "DELETE", headers: { origin: from } });
-    return { request, post, session, email, oauth, tokens, speak, mint, approve, computers, remove };
+    const accept = (version: unknown, from = origin) =>
+      request("/api/terms/acceptance", {
+        method: "POST",
+        body: JSON.stringify({ version }),
+        headers: { origin: from, "content-type": "application/json" },
+      });
+    return { request, post, session, email, oauth, tokens, speak, mint, approve, computers, remove, accept };
   }
   return {
     ...context,
@@ -707,6 +714,31 @@ test("preview runs cloud smoke against real auth, ignores stale providers, and p
 
 const voiceId = "21m00Tcm4TlvDq8ikWAM";
 const hi = { text: "hi", voiceId };
+
+test("terms acceptance: any signed-in account records the current version once, from this origin only", async ({
+  onTestFinished,
+}) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const user = f.browser();
+  expect((await user.accept(TERMS_VERSION)).status).toBe(401);
+  await user.email("someone@example.test");
+  for (const sameSite of SAME_SITE)
+    expect((await user.accept(TERMS_VERSION, sameSite)).status, sameSite).toBe(403);
+  expect((await user.accept("2026-09-29")).status).toBe(409);
+  expect((await user.accept(TERMS_VERSION)).status).toBe(204);
+  const [first] = await queryDatabase<{ acceptedAt: Date }>(
+    f.database.url,
+    `SELECT "acceptedAt" FROM dormouse_terms_acceptances`,
+  );
+  expect((await user.accept(TERMS_VERSION)).status).toBe(204);
+  expect(
+    await queryDatabase(
+      f.database.url,
+      `SELECT version, "acceptedAt" FROM dormouse_terms_acceptances`,
+    ),
+  ).toEqual([{ version: TERMS_VERSION, acceptedAt: first.acceptedAt }]);
+});
 
 test("managed voice: only the verified admin mints, speaks, and revokes", async ({
   onTestFinished,

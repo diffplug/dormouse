@@ -24,7 +24,7 @@ export const PRIVACY_SECTIONS: PolicySection[] = [
   { id: "information", title: "Account and sign-in", body: <>
     <p>When you use email sign-in, we process your email address, its verification status, sign-in requests, and one-time verification codes. We store a protected representation of each code to verify it.</p>
     <p>If you choose Google, GitHub, Microsoft, or Apple sign-in, we receive the provider’s account identifier and the identity information it supplies, which may include your name, email address, verification status, and profile-image URL. Apple may supply a private relay address. We use the provider identifier to recognize you even when your email changes. We do not request access to your mail, documents, repositories, or contacts.</p>
-    <p>We keep account and connected-provider records, creation and update times, and browser login records. Login records can include your IP address and browser information. We also process cookies, temporary sign-in state, and abuse-prevention records.</p>
+    <p>We keep account and connected-provider records, creation and update times, browser login records, and which version of the terms you agreed to and when. Login records can include your IP address and browser information. We also process cookies, temporary sign-in state, and abuse-prevention records.</p>
     <p>When you sign in a copy of Dormouse to your account, we store only a hash of the credential that copy keeps, never the credential itself, with when it was created, last used, and revoked.</p>
     <p>If you contact support, we receive your message and anything you choose to include. Please do not send passwords, API keys, or terminal contents that contain secrets.</p>
   </> },

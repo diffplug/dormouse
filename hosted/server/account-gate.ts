@@ -40,6 +40,20 @@ export function cookieAdmin(
   host: (c: Context) => AccountHost,
   refuse: (c: Context) => Response,
 ): MiddlewareHandler<{ Variables: { login: AccountLogin } }> {
+  return cookieGate(host, refuse);
+}
+
+/** {@link cookieAdmin}'s gate for a route any signed-in account may use. */
+export function cookieLogin(
+  host: (c: Context) => AccountHost,
+): MiddlewareHandler<{ Variables: { login: AccountLogin } }> {
+  return cookieGate(host);
+}
+
+function cookieGate(
+  host: (c: Context) => AccountHost,
+  refuse?: (c: Context) => Response,
+): MiddlewareHandler<{ Variables: { login: AccountLogin } }> {
   return async (c, next) => {
     const origin = new URL(c.req.url).origin;
     const presented = c.req.header("origin");
@@ -61,7 +75,7 @@ export function cookieAdmin(
       session?: { createdAt?: unknown };
     } | null;
     if (!session?.user) return c.json({ message: "Sign in first." }, 401);
-    if (!isAdmin(session.user)) return refuse(c);
+    if (refuse && !isAdmin(session.user)) return refuse(c);
     c.set("login", {
       userId: session.user.id,
       createdAt: session.session?.createdAt,
