@@ -20,9 +20,10 @@ export interface IdPool {
   take(): string | undefined;
   /**
    * A synchronous minter for a burst of `count` ids, all in hand once this
-   * resolves: from the pool first, then reserved from the host, so a burst
-   * larger than the pool never falls back. Past `count`, or with no host, it
-   * returns `fallback()`.
+   * resolves: reserved from the host apart from the pool, so a burst larger
+   * than the pool never falls back, and a create that lands while it awaits
+   * still finds the pool whole. Past `count`, or with no host, it returns
+   * `fallback()`.
    */
   minter(count: number, fallback: () => string): Promise<() => string>;
 }
@@ -69,7 +70,7 @@ export function createIdPool(size: number, low: number, label: string): IdPool {
     get installed() { return reserveIds !== null; },
     take,
     async minter(count, fallback) {
-      const burst = ids.splice(0, count);
+      const burst: string[] = [];
       // A host may hand out fewer than asked (both clamp a block), so ask
       // until the burst is whole or the host stops answering.
       const reserve = reserveIds;
@@ -83,7 +84,6 @@ export function createIdPool(size: number, low: number, label: string): IdPool {
           break;
         }
       }
-      if (ids.length < low) void refill();
       return () => burst.shift() ?? fallback();
     },
   };

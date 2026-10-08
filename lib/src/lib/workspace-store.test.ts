@@ -335,10 +335,9 @@ describe('workspace-store', () => {
     expect(createWorkspace().id).toBe('workspace-101');
     expect(workspaceRefFor('workspace-101')).toBe('workspace:101');
     // Draining past the low-water mark tops the pool back up in the background.
-    generateWorkspaceId();
     await Promise.resolve();
     expect(reserve).toHaveBeenCalledTimes(2);
-    expect(reserve).toHaveBeenLastCalledWith(3);
+    expect(reserve).toHaveBeenLastCalledWith(2);
   });
 
   it('a failed first reservation still creates stable opaque refs and can recover', async () => {

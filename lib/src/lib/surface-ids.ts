@@ -12,9 +12,10 @@ import { registry } from './terminal-store';
 
 // Small, so a launch burns at most 8 numbers (see `createIdPool`). Surfaces are
 // created at the user's pace — a keystroke, a click, a `dor` process each — and
-// a refill is one host round trip of a few ms, so refilling below 3 keeps the
-// pool ahead; a burst that mints more at once reserves through `surfaceIdMinter`.
-const pool = createIdPool(8, 3, 'surface-ids');
+// a refill is one host round trip of a few ms, so refilling once 3 are gone
+// keeps a quick run of creates ahead of it; a burst that mints more at once
+// reserves through `surfaceIdMinter`.
+const pool = createIdPool(8, 6, 'surface-ids');
 let localSequence = 0;
 /** Whether a Wall in this page holds an id; `wall-handles.ts` installs it, since
  *  this module sits below the components. */

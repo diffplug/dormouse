@@ -84,7 +84,7 @@ let workspaceSequence = 0;
 // Small, so a launch burns at most 4 numbers (see `createIdPool`): Workspaces
 // are created one gesture or `dor` call at a time, and a refill is one host
 // round trip of a few ms. A window's Reopen reserves through `workspaceIdMinter`.
-const idPool = createIdPool(4, 2, 'workspace-store');
+const idPool = createIdPool(4, 3, 'workspace-store');
 
 /** Give this Window a host that mints ids. Resolves once the first block is
  *  in hand, so a create that follows never falls back to a random id. */

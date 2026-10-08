@@ -31,11 +31,11 @@ describe('mintSurfaceId', () => {
     expect(mintSurfaceId()).toBe('surface-500');
     // Draining past the low-water mark refills before the pool runs dry, back
     // up to the pool's size and no further: what it holds at exit is burned.
-    for (let i = 0; i < 5; i++) mintSurfaceId();
+    for (let i = 0; i < 2; i++) mintSurfaceId();
     await Promise.resolve();
     expect(reserve).toHaveBeenCalledTimes(2);
-    expect(reserve).toHaveBeenLastCalledWith(6, 0);
-    for (let i = 0; i < 2; i++) mintSurfaceId();
+    expect(reserve).toHaveBeenLastCalledWith(3, 0);
+    for (let i = 0; i < 5; i++) mintSurfaceId();
     expect(mintSurfaceId()).toBe('surface-508');
   });
 
@@ -76,10 +76,26 @@ describe('surfaceIdMinter', () => {
     await installSurfaceIdPool(reserve, 0);
     const mint = await surfaceIdMinter(100);
     const burst = Array.from({ length: 100 }, () => mint());
-    expect(burst).toEqual(Array.from({ length: 100 }, (_, i) => `surface-${i + 1}`));
-    // The pool refilled behind the burst, and past it the minter falls back to it.
-    await Promise.resolve();
-    expect(mint()).toBe('surface-101');
+    // Reserved past the pool's 1..8, which the burst leaves alone.
+    expect(burst).toEqual(Array.from({ length: 100 }, (_, i) => `surface-${i + 9}`));
+    // Past the burst, the minter falls back to the pool.
+    expect(mint()).toBe('surface-1');
+  });
+
+  it('leaves the pool whole for a create that lands while a burst reserves', async () => {
+    const counter = counting(1);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    await installSurfaceIdPool(async (count, floor) => {
+      if (count === 10) await gate;
+      return counter(count, floor);
+    }, 0);
+    const reopening = surfaceIdMinter(10);
+    // A `dor split` while a 10-Surface Workspace reopens.
+    expect(mintSurfaceId()).toBe('surface-1');
+    release();
+    const mint = await reopening;
+    expect(Array.from({ length: 10 }, () => mint())).toEqual(Array.from({ length: 10 }, (_, i) => `surface-${i + 9}`));
   });
 
   it('counts in the page when no host mints', async () => {
