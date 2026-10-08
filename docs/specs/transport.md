@@ -224,7 +224,7 @@ Source of truth: `PersistedSession` in `lib/src/lib/session-types.ts`; `lib/src/
 
 **Must remove legacy transcript bytes from disk** (rationale). **No writer accepts a transcript-bearing Session shape.**
 
-- **Never parse a transcript-bearing blob**: it is of an older format (Persisted session types). Standalone deletes such a snapshot at boot (`docs/specs/standalone.md` → Persistence), and VS Code's first save overwrites its store.
+- **Never parse a transcript-bearing blob**: it is of an older format (Persisted session types). Standalone deletes such a snapshot at boot (`docs/specs/standalone.md` → Persistence); VS Code deletes such a `workspaceState` blob at activation (`discardUnreadableSessionState` in `vscode-ext/src/session-state.ts`), and a panel's first save overwrites its `setState` blob.
 - **Standalone sweeps orphaned session temp files at boot**, the only path that can retire a transcript a crash left in one, and **never touches a live snapshot**. `sweep_orphan_session_temps` in `standalone/src-tauri/src/lib.rs`.
 - **Debug standalone must atomically remove obsolete pane `scrollback` from recognized legacy-root snapshots**, preserving other fields and leaving malformed snapshots untouched. `scrub_legacy_session_transcripts` in `standalone/src-tauri/src/lib.rs`.
 

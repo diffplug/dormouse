@@ -10,7 +10,7 @@ const ptyManager = vi.hoisted(() => ({
 
 vi.mock('../src/pty-manager', () => ptyManager);
 
-import { getSavedSessionState, mergeAlertStates, refreshSavedSessionStateFromPtys } from '../src/session-state';
+import { discardUnreadableSessionState, getSavedSessionState, mergeAlertStates, refreshSavedSessionStateFromPtys } from '../src/session-state';
 
 const liveAlert = (overrides: Partial<AlertState> = {}): AlertState => ({
   ...DEFAULT_ALERT_STATE,
@@ -99,6 +99,18 @@ describe('VS Code session alert persistence', () => {
     expect(mergeAlertStates(old, new Map([['pane-1', liveAlert({ todo: true })]]))).toBe(old);
     await refreshSavedSessionStateFromPtys(store.context);
     expect(store.read()).toBe(old);
+    info.mockRestore();
+  });
+
+  it('deletes an older build\'s saved session at activation and keeps a current one', async () => {
+    const info = vi.spyOn(console, 'info').mockImplementation(() => {});
+    const old = contextWithState({ version: 3, panes: [{ id: 'pane-1', title: 'Old', cwd: '/old', untouched: false, scrollback: 'secret' }] });
+    await discardUnreadableSessionState(old.context);
+    expect(old.read()).toBeUndefined();
+    const current = { version: 4, panes: [{ id: 'surface-1', title: 'New', cwd: '/new', untouched: false }] };
+    const kept = contextWithState(current);
+    await discardUnreadableSessionState(kept.context);
+    expect(kept.read()).toBe(current);
     info.mockRestore();
   });
 });

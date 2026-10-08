@@ -15,6 +15,17 @@ export function getSavedSessionState(context: vscode.ExtensionContext): Persiste
   return readPersistedSession(context.workspaceState.get<unknown>(SESSION_STATE_KEY));
 }
 
+/**
+ * Activation: delete a saved session no reader takes — another build's format,
+ * or unreadable. It may carry a transcript (docs/specs/transport.md → "Retiring
+ * the transcripts already on disk"), and the view that would overwrite it may
+ * never open again.
+ */
+export async function discardUnreadableSessionState(context: vscode.ExtensionContext): Promise<void> {
+  const raw = context.workspaceState.get<unknown>(SESSION_STATE_KEY);
+  if (raw !== undefined && readPersistedSession(raw) === null) await context.workspaceState.update(SESSION_STATE_KEY, undefined);
+}
+
 export function saveSessionState(context: vscode.ExtensionContext, state: unknown): Thenable<void> {
   return context.workspaceState.update(SESSION_STATE_KEY, state);
 }
