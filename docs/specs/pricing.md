@@ -79,7 +79,7 @@ What each plan grants once checkout can sell it; [Published prices](#published-p
 
 - **Founding grants the Individual plan plus a founding badge**; monthly and yearly grant the plan alone.
 - **Must lock the founding base yearly price in USD while the subscription remains active**, excluding applicable taxes; a lapsed founder re-subscribes at list. **Must preserve the lock through billing-provider migrations and failures caused by DiffPlug**, allowing payment restoration.
-- **Cohorts close by count, never by date.** The count is completed purchases at the billing provider; a refund returns the seat to its cohort.
+- **Cohorts close by count, never by date.** The count is completed purchases at the billing provider; a full refund or finally reversed payment returns the seat to its cohort.
 - **When a cohort closes the price rises one step and the counter resets to 100.**
 - **Founding closes only when the ladder reaches list.** Founding means bought at launch pricing; the hosted Relay shipping does not close it.
 - **Checkout honors the price it opened at.** Concurrent checkouts may oversell a cohort by a few seats; the overage is the customer's, and the next cohort still opens at a full 100.
@@ -109,7 +109,7 @@ What each plan grants once checkout can sell it; [Published prices](#published-p
 - **The entitlement is the account's subscription, read on the server on every voice and Relay request.** No licence, no offline verification, and no grace past what the subscription grants; a lapsed member's voices fall back to the system voice and its Burrows to `not-entitled`.
 - **A desktop signs in from Settings by device code**, the flow Burrow enrollment already runs (`docs/specs/hosted.md` -> "Burrow enrollment"). The approval mints a desktop credential the host keeps and never hands a webview. Sign-in is the only account surface in the free client.
 - **Must license one individual, including work use, without a per-device charge.** **Must disclose material enrollment and usage limits before purchase**, including the managed Relay's enrollment cap (`docs/specs/hosted.md` -> "Burrow enrollment").
-- **A refund or chargeback ends the subscription**, so the next request is refused, and the seat returns to its cohort.
+- **A full refund or a finally reversed payment ends the subscription**, so the next request is refused. A partial refund or billing correction never ends it, and an open dispute only suspends it ("Paid-launch requirements").
 
 ### Managed voice
 
