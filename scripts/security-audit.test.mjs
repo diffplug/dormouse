@@ -209,6 +209,10 @@ const cases = [
   // passing domains is an anomaly, not a finding.
   { name: 'an orchestrator FAIL over passing domains is not believed', status: 'FAIL', frags: allPass(), expected: 'INCONCLUSIVE',
     notes: ['`audit-status.txt` says `FAIL`, the domains\' lines compute PASS'] },
+  // A domain more cautious than its lines claimed less, not more: no hint of
+  // a hidden finding in the headline.
+  { name: 'a cautious VERDICT: INCONCLUSIVE over passing lines is not a claimed finding', status: 'PASS',
+    frags: [{}, {}, { stated: 'INCONCLUSIVE' }, {}], expected: 'INCONCLUSIVE', notes: ['This is not a security finding'] },
   // Whole sections were skipped silently: every rule the specs carry is owed a line.
   { name: 'a skipped section is INCONCLUSIVE', status: 'PASS',
     frags: [{}, {}, {}, { drop: ['`docs/specs/security-hosted.md` -> "Origin boundary"'] }], expected: 'INCONCLUSIVE',

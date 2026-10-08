@@ -376,7 +376,9 @@ function compose({ fragments, root = '.', fileStatus, runUrl, transcriptUrl = ''
   const links = `[Run](${runUrl})${transcriptUrl ? ` · [Transcript](${transcriptUrl})` : ''} · audited commit \`${commit}\``;
   const headline = status === 'FAIL' ? `Audit failed at ${date}.`
     : status === 'PASS' ? `Audit passed at ${date}.`
-      : `Audit reached no usable verdict at ${date}. ${run.anomalies.length || Object.values(byFragment).some((d) => d.anomalies.length || d.malformed.length)
+      // Only a claimed failure the lines do not carry, or a line that may be a
+      // mangled one, is "more"; an optimistic or a cautious line claims less.
+      : `Audit reached no usable verdict at ${date}. ${fileStatus === 'FAIL' || Object.values(byFragment).some((d) => d.stated === 'FAIL' || d.malformed.length)
         ? 'A domain claimed more than its result lines record; read the anomalies before treating this as no finding.'
         : 'This is not a security finding: the run ended without deciding.'}`;
   lines.push(`${headline} ${links}`, '');
