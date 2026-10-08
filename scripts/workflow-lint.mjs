@@ -32,7 +32,10 @@ const VSCODE = 'docs/specs/security-ci.md -> "VS Code Extension Releases"';
 const TEND_ACTION = 'max-sixty/tend/claude';
 const TEND_MINIMUM = [0, 1, 19];
 const AGENT_MANAGED = (file) => /^tend-.*\.ya?ml$/.test(file) || file === 'workflow-audit.yaml' || file === 'security-audit.yaml';
-const AGENT_WRITES = ['contents', 'pull-requests', 'issues', 'id-token'];
+// No `id-token`: with it, claude-code-action mints the Claude App's
+// installation token for its agent, past every permission declared here.
+const AGENT_WRITES = ['contents', 'pull-requests', 'issues'];
+const CLAUDE_ACTION = 'anthropics/claude-code-action';
 const RELEASE_WRITES = ['id-token', 'attestations'];
 const WINDOW = ['.github/workflows/', '.config/tend.yaml', '.github/audit/', '.vscode/', '.gitattributes', 'scripts/setup-git.mjs', 'scripts/md-merge.mjs', 'scripts/md-unwrap.mjs'];
 
@@ -133,6 +136,9 @@ export function check(inputs) {
       }
       if (tend && job?.env !== undefined) fail(TEND, `${file} job \`${jobId}\` sets a job-level \`env:\`, which the harness forwards to the agent`);
       for (const step of job?.steps ?? []) {
+        if (step?.uses?.startsWith(`${CLAUDE_ACTION}@`) && step.with?.github_token === undefined) {
+          fail(TEND, `${file} job \`${jobId}\` runs \`${CLAUDE_ACTION}\` without \`github_token\`, so it would run on the Claude App's token`);
+        }
         if (step?.uses?.startsWith(`${TEND_ACTION}@`) && step.with?.merge !== 'restricted') {
           fail(TEND, `${file} job \`${jobId}\` passes \`merge: ${step.with?.merge}\` to \`${TEND_ACTION}\``);
         }

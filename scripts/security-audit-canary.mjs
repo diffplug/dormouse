@@ -32,7 +32,7 @@
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { RULE_ID, domains, parseFragment, readFragment, ruleId } from './security-audit-report.mjs';
 
@@ -148,14 +148,15 @@ function candidates(name, p) {
 /**
  * Whether one line catches one seed: it cites an expected file, and for a
  * `FAIL IF` seed its rule — a `FAIL` result on that rule, or a finding naming
- * the rule's spec and heading.
+ * the rule's spec file and quoted heading, as the preamble's root-cause
+ * spelling (`security-ci.md "GitHub Actions Policies" #2`) and a result id both do.
  */
 function catches(line, s) {
   if (!s.expect.some((file) => line.text.includes(file))) return false;
   if (!s.rule) return true;
   return line.kind === 'FAIL'
     ? line.rule === ruleId(s.rule.spec, s.rule.heading, s.rule.n)
-    : line.text.includes(`\`${s.rule.spec}\` -> "${s.rule.heading}"`);
+    : line.text.includes(basename(s.rule.spec)) && line.text.includes(`"${s.rule.heading}"`);
 }
 
 /**

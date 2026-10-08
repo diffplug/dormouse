@@ -184,6 +184,7 @@ test('a seed is caught only by a FAIL or a BLOCKER or WARNING citing its file, a
     seedOf('rule-by-fail', 'application-security', ['src/a.ts'], RULE),
     seedOf('rule-by-warning', 'application-security', ['src/b.ts'], RULE),
     seedOf('rule-wrong-rule', 'application-security', ['src/c.ts'], RULE),
+    seedOf('rule-by-root-cause', 'application-security', ['src/g.ts'], RULE),
     seedOf('class-by-blocker', 'hosted', ['src/d.ts']),
     seedOf('class-by-info', 'hosted', ['src/e.ts']),
     seedOf('class-uncited', 'supply-chain', ['src/f.ts']),
@@ -194,15 +195,18 @@ test('a seed is caught only by a FAIL or a BLOCKER or WARNING citing its file, a
       ...warning('WARNING', 'src/b.ts:4', ' (`docs/specs/security-local.md` -> "Terminal output")'),
       '- FAIL: `docs/specs/security-local.md` -> "Terminal output" #8 — clause: src/c.ts:5',
       ...warning('WARNING', 'src/c.ts:5'),
+      // The preamble's spelling of a rule as a root cause.
+      '- WARNING: `src/g.ts:2` `security-local.md "Terminal output" #9` — summary',
+      '  - Code: `x`', '  - Path: a → b', '  - Reproduction: c → d',
     ]),
     [fragmentOf.hosted]: fragment([...warning('BLOCKER', 'src/d.ts:1'), '- INFO: `src/e.ts:1` `cause` — not a catch', ...warning('WARNING', 'src/z.ts:1')]),
     [fragmentOf['supply-chain']]: fragment(['A paragraph naming src/f.ts is prose, not a catch.'], { finished: false }),
   });
-  assert.deepEqual(card.seeds.filter((s) => s.caught).map((s) => s.id), ['rule-by-fail', 'rule-by-warning', 'class-by-blocker']);
-  assert.deepEqual([card.seeded, card.caught], [6, 3]);
+  assert.deepEqual(card.seeds.filter((s) => s.caught).map((s) => s.id), ['rule-by-fail', 'rule-by-warning', 'rule-by-root-cause', 'class-by-blocker']);
+  assert.deepEqual([card.seeded, card.caught], [7, 4]);
   assert.deepEqual(card.domains, {
     'supply-chain': { seeded: 1, caught: 0 },
-    'application-security': { seeded: 3, caught: 2 },
+    'application-security': { seeded: 4, caught: 3 },
     hosted: { seeded: 2, caught: 1 },
   });
   // The one line citing no file a seed touched.
@@ -248,7 +252,10 @@ test('a canary runs alone, on main alone, with no credential to file or push', (
   assert.match(workflow, /^ {2}workflow_dispatch:\n {4}inputs:\n(?: {6}#.*\n)* {6}canary:\n(?: {8}.+\n)* {8}type: boolean\n {8}default: false\n/m);
   assert.match(audit, /^ {4}if: \$\{\{ !inputs\.canary \}\}$/m);
   assert.match(canary, /^ {4}if: \$\{\{ inputs\.canary \}\}$/m);
-  assert.match(canary, /^ {4}permissions:\n {6}contents: read\n {6}id-token: write\n {4}\S/m);
+  // `contents: read` alone, and the agent on this job's token: with `id-token`
+  // and no `github_token`, claude-code-action mints the Claude App's token.
+  assert.match(canary, /^ {4}permissions:\n {6}contents: read\n {4}\S/m);
+  assert.match(canary, /^ {10}github_token: \$\{\{ github\.token \}\}$/m);
   assert.match(canary, /^ {10}persist-credentials: false$/m);
   const code = canary.replace(/^\s*#.*$/gm, '');
   for (const banned of [/\bgh\s+\w/, /\bgit\s+push\b/, /audit-state/, /AUDIT_PAT/, /EMBARGO_TOKEN/, /contents:\s*write/, /issues:\s*write/]) {

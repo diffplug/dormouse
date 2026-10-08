@@ -33,11 +33,14 @@ jobs:
     # plain dispatch carry no `canary` input.
     if: ${{ !inputs.canary }}
     runs-on: ubuntu-latest
+    # No `id-token`: with it, claude-code-action exchanges OIDC for the Claude
+    # App's installation token, which can push and file, and hands it to the
+    # agent. The action runs on this job's token instead, passed below, so the
+    # agent holds `issues: write` (the reporting steps need it) and no more.
     permissions:
       contents: read
       actions: read
       issues: write
-      id-token: write
     env:
       # The four per-domain fragment filenames, then the deterministic
       # GitHub-state check's, in one place. They are
@@ -197,6 +200,9 @@ jobs:
           BASH_DEFAULT_TIMEOUT_MS: "600000"
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Skips the OIDC exchange for the Claude App's installation token,
+          # which can write; the agent's `gh` gets this job's token.
+          github_token: ${{ github.token }}
           # release.yml dispatches this workflow with the default
           # GITHUB_TOKEN, so the actor is `github-actions[bot]`. The
           # action refuses bot-initiated runs unless the bot is allow-
@@ -656,10 +662,11 @@ jobs:
     runs-on: ubuntu-latest
     # Above the orchestrator's 32-minute wait, as the audit job's is.
     timeout-minutes: 45
-    # No `issues: write` and no `contents: write`: nothing here files or pushes.
+    # No `issues: write`, no `contents: write`, and no `id-token`: without it
+    # claude-code-action cannot mint its GitHub App token, and runs on the
+    # read-only workflow token passed below instead.
     permissions:
       contents: read
-      id-token: write
     # For `CLAUDE_CODE_OAUTH_TOKEN`, which is env-scoped. The environment also
     # admits `v*` tags; the first step refuses them.
     environment:
@@ -712,6 +719,9 @@ jobs:
           BASH_DEFAULT_TIMEOUT_MS: "600000"
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Skips the OIDC exchange for the Claude App's installation token,
+          # which can write; the agent's `gh` gets this job's token.
+          github_token: ${{ github.token }}
           claude_args: >-
             --model sonnet
             --allowed-tools "Read,Write,Edit,Bash,Grep,Glob,Task,Agent"
