@@ -28,14 +28,14 @@ const DOR_OPEN_ITEM_IDS = [
 ] as const;
 
 const ALERT_ITEM_IDS = [
-  "al-watch-cmd",
-  "al-spreads",
-  "al-ring",
+  "al-notif",
   "al-todo-auto",
   "al-todo-clear",
-  "al-todo-manual",
-  "al-notif",
+  "al-held",
   "al-cmd-exit",
+  "al-watch",
+  "al-todo-manual",
+  "al-speak",
 ] as const;
 
 const COPY_ITEM_IDS = [
@@ -246,48 +246,48 @@ export const DESKTOP_SECTIONS: readonly Section[] = [
     title: 'Alerts and attention',
     items: [
       {
-        id: 'al-watch-cmd',
-        title: 'Alert me whenever `longtask` runs',
-        hint: 'Press `s` to start a fake `longtask`, then right-click that pane\'s header (or select it and press `a`) and turn on "watch longtask". Alerts belong to the command, not the tab.',
-      },
-      {
-        id: 'al-spreads',
-        title: 'The rule covers every pane running that command',
-        hint: 'Both fake tasks are covered by the one rule you set. Any pane you open later that runs `longtask` will watch too, with no extra clicks.',
-      },
-      {
-        id: 'al-ring',
-        title: 'It rings when the command goes quiet',
-        hint:
-          `It rings when the command goes quiet, unless you are looking at that pane. The pane you are typing in or clicked into counts as looked at while you keep using Dormouse; stop for the inactivity timeout in Alarm settings and it rings.`,
+        id: 'al-notif',
+        title: 'Run `agent`, then come back here',
+        hint: 'Split off a new pane (the split button in any pane header, or `|` in command mode), run `agent` in it, then click back into this pane. When it needs you, its pane rings: no setup, the program asked. Dormouse waits for its screen to settle first.',
       },
       {
         id: 'al-todo-auto',
-        title: 'Dismissing a ringing alert leaves a TODO behind',
-        hint: 'Click the pane, or press `a`, to dismiss. The TODO is there so a ring you waved away does not vanish without a trace.',
+        title: 'Look at it',
+        hint: 'Click the ringing pane. The ringing stops, but a TODO stays until you deal with it. Hover the TODO pill to read what it wanted.',
       },
       {
         id: 'al-todo-clear',
-        title: 'Type anything inside the pane to clear the TODO',
+        title: 'Answer it',
+        hint: 'Type `y` in the pane. Dealing with it clears the TODO.',
       },
       {
-        id: 'al-todo-manual',
-        title: 'Add a TODO by hand',
-        hint: 'Press `t` in command mode, or right-click the header and use the TODO switch.',
-      },
-      {
-        id: 'al-notif',
-        title: 'A program can ring on its own',
-        hint: 'Press `n` for a fake build that sends a notification. This needs no rule at all — any program that emits `BEL`, `OSC 9`, `OSC 777`, or `OSC 99` rings, and once you look its message stays on the TODO tag.',
+        id: 'al-held',
+        title: 'Stay and watch',
+        hint: 'Ask `agent` for something else, press `Enter`, and stay in its pane. When it asks, you get a TODO, not an alarm: you were already looking. Sit still for the inactivity timeout in Settings and it rings anyway.',
       },
       {
         id: 'al-cmd-exit',
-        title: 'A command that finished while you were away',
-        hint: 'Press `x` to start a slow build in another pane, click into that pane, then click back here and wait. Dormouse rings for any command you looked at that finished after you walked away — again, no rule needed.',
+        title: 'Run `build`, then come back here',
+        hint: 'A command you started rings when it finishes after you looked away. No rule needed.',
+      },
+      {
+        id: 'al-watch',
+        title: 'An agent that never asks',
+        hint: 'Run `agent --quiet` and come back here. It sends nothing, yet its pane rings once it goes quiet: Dormouse watches `agent`, `claude`, `codex`, and other coding agents out of the box. To watch any other command, right-click its pane header (or select it and press `a`).',
+      },
+      {
+        id: 'al-todo-manual',
+        title: 'Mark a pane for later',
+        hint: 'Press `t` in command mode, or right-click the header and use the TODO switch.',
+      },
+      {
+        id: 'al-speak',
+        title: 'Hear it out loud',
+        hint: 'Click the speaker at the bottom-right to turn on spoken alarms. Next time a pane rings, Dormouse says its name after a few seconds.',
       },
     ],
     prose: [
-      'Three different things can make a pane ring: a rule you set on a command name, a notification the program sends, and a command finishing while you were elsewhere. None of them ring while you are looking at the pane — they wait until you go idle.',
+      'A pane rings when it needs you and you are not looking at it. Look, and it becomes a TODO; deal with it, and it is gone.',
     ],
   },
   COPY_PASTE_SECTION,

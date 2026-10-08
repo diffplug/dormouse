@@ -25,7 +25,7 @@ Device routes (`website/src/routes.ts`):
 
 - **Must credit a keyboard split before its automatic passthrough transition**, and tell the user to re-enter command mode for the following navigation item (rationale).
 - **Must credit `kb-arrows` only on command-mode selection of a distinct pane**; an arrow or click counts, a swap's resulting focus does not.
-- **Must credit `al-spreads` only when newly enabled WATCHING shares a command key with another live pane.**
+- **Must credit an alert ring only on a transition into `ALERT_RINGING`, by the source its detail names**, so a ring already standing when first seen credits nothing.
 - **Must credit the `dor open` section from the command lines the shells report**, never from a hook in the playground `dor` or its viewers.
 
 Source of truth: `TutRunner` in `website/src/lib/tut-runner.ts`; `TutDetector` in `website/src/lib/tut-detector.ts`; `TutorialState` in `website/src/lib/tutorial-state.ts`; profiles in `website/src/lib/tut-items.ts`.
@@ -35,7 +35,7 @@ Source of truth: `TutRunner` in `website/src/lib/tut-runner.ts`; `TutDetector` i
 - **The desktop page must restore its own theme** with `useRestoredTheme(WEBSITE_DEFAULT_THEME_ID)` (`website/src/lib/website-theme.ts`), which declares the host fallback the Settings picker re-resolves through; `PlaygroundHeader` has no theme picker (rationale).
 - `/playground/desktop` runs `WorkspaceWindow`, its strip in an app-style title bar (`FakePtyAdapter`, `initialMode="passthrough"`), from one fresh Workspace. **Must seed its three-pane L-shape as an explicit Lath snapshot** — `restoredLathLayout` from `DESKTOP_PLAYGROUND_LAYOUT` — never the synchronous `initialPaneIds` path (rationale); `website/src/lib/playground-desktop-layout.test.ts` pins it. `DESKTOP_PANES` in the same file owns each seed's id, command, and title; **`tut-boxed` is the Auto-copy + `cp-override` target** (rationale). **Titles are seeded as pending shell opts** (`setPendingShellOpts(id, { title })`) before the Wall mounts, and a user-pin outranks the engine fallback (`docs/specs/terminal-state.md` → "Header Derivation").
 
-Every visible pane gets a `TutorialShell` via `PlaygroundShellRegistry`. **`ensureShell` must stay idempotent** — `paneAdded` covers every pane that becomes visible, and `FakePtyAdapter.onPtySpawn` covers the seed panes again, auto-launching each seed's command exactly once (rationale). The page's `startProgram` knows `tutorial` (`TutRunner`), `ascii-splash`/`splash`, `changelog`, and `dor` ([Playground filesystem](#playground-filesystem)).
+Every visible pane gets a `TutorialShell` via `PlaygroundShellRegistry`. **`ensureShell` must stay idempotent** — `paneAdded` covers every pane that becomes visible, and `FakePtyAdapter.onPtySpawn` covers the seed panes again, auto-launching each seed's command exactly once (rationale). The page's `startProgram` knows `tutorial` (`TutRunner`), `ascii-splash`/`splash`, `changelog`, `agent` and `build` ([Fake shell behavior](#fake-shell-behavior)), and `dor` ([Playground filesystem](#playground-filesystem)).
 
 `/playground/pocket` runs `MobileWall` with **`pocket-tut`** (active, `TutRunner` on `POCKET_TUTORIAL_PROFILE`) and **`pocket-changelog`** (`ChangelogRunner`), and starts a `TutDetector` over the same shared stores. **Must credit Pocket gesture items only on the active tutorial Session's Gesture navigation screen**, through `MobileTerminalUi.onGestureScroll` and `onGestureInput`.
 
@@ -57,12 +57,7 @@ Extras: `Starred on GitHub` (persisted separately), FlappyTerm, `Reset progress`
 
 ### Runner-local intercepts
 
-**`TutRunner` intercepts four keys while a specific section is open; they are not real Dormouse shortcuts.** The three alert demos report fake commands as `OSC 633 ; E / C / D` through `FakePtyAdapter.sendOutput`, which the real `TerminalProtocolParser` strips from visible output (rationale). **Must snapshot the live inactivity timeout at demo launch; the run outlasts it and the BUSY-confirm floor.** Each demo's countdown, page timer, and re-press guard run the same snapshotted duration — longer for `s`, whose fake command must outlive WATCHING's silence chain. Pinned by `website/src/lib/tut-runner.test.ts`.
-
-- **`s`** (Alerts) — reports `longtask` on both alert panes so command-keyed WATCHING demonstrates `al-spreads`, pumping only the quiet `tut-boxed` (rationale). **A press while that command is still running is ignored**, and **the page cancels any prior pump and exit timer** — the runner's guard is per instance, so a re-run `tutorial` would otherwise stack them.
-- **`n`** (Alerts) — writes a raw `OSC 777` notification to `tut-boxed`, exercising a terminal report, which needs no WATCHING rule.
-- **`x`** (Alerts) — starts a fake `slowbuild` on `tut-splash` and reports its exit after the captured duration. **The command name must stay unwatched**, so a command exit rather than WATCHING raises the ring (rationale). **The page must cancel the prior exit timer across runner instances.**
-- **`p`** (Copy paste) — toggles the **Place To Paste** scratch modal (`website/src/components/PlaceToPaste.tsx`). Desktop only.
+**`TutRunner` intercepts `p` while Copy paste is open; it is not a real Dormouse shortcut.** It toggles the **Place To Paste** scratch modal (`website/src/components/PlaceToPaste.tsx`). Desktop only.
 
 ### Pocket Copy paste specifics
 
@@ -73,6 +68,7 @@ Pocket reuses `cp-select` / `cp-raw` / `cp-rewrap` but drops `cp-override`: Sele
 `TutorialShell` ([Layout](#layout)):
 
 * **Shell integration must be reported for every command it runs** — `OSC 633 ; A/B` around the prompt, `633 ; E` + `633 ; C` on launch, `633 ; D` on exit. WATCHING is keyed on the running command's name (`docs/specs/alert.md`), and the OSCs also keep `docs/specs/terminal-state.md`'s keystroke fallback from engaging here (rationale).
+* **The Alerts section's programs, which both pages run, must ring for their own reasons, never through a tutorial hook**: `agent` works one turn, then asks with an `OSC 9`; `agent --quiet` sends nothing and rings only through the default `agent` WATCHING rule (`DEFAULT_WATCHED_COMMANDS`); `build` exits after its run. **`build` must stay unwatched**, so its exit, not WATCHING, raises the ring (rationale). Source of truth: `startAlertProgram` in `website/src/lib/alert-programs.ts`.
 * **While a program runs, every input byte goes to it** — `\x03` included, which the runners treat as quit — as do bytes left in the chunk after the Enter that launched it. On exit the terminal returns to the prompt instead of restarting the program. At the prompt, `\x03` abandons the line for a new prompt and runs nothing. Tab completes the last word: a command name, and on the desktop `dor`'s verb or a snapshot path.
 
 **The only commands are the ones `startProgram` knows** ([Layout](#layout)) and the desktop's `cd`, `ls`, and `pwd`; anything else prints an "Unknown command" line and exits `127`.
@@ -124,10 +120,9 @@ Source of truth: `installPlaygroundFs` in `website/src/lib/playground-fs/index.t
 Hooks in `dormouse-lib` / `MobileTerminalUi` that exist for tutorial observability:
 
 - **`WallEvent.kill` / `move` / `paneAdded`** — discriminants on the `WallEvent` union. `kill` fires from `killPaneImmediately`, so every kill path credits `kb-kill`. **`move` must fire from both** the Cmd/Ctrl-Arrow swap in `lib/src/components/wall/keyboard/handle-pane-shortcuts.ts` **and** the center-drop swap in `Wall.onProposeMove` (rationale). **`paneAdded` fires once per pane that becomes visible** — seed ids, splits, dor surfaces, restores, auto-spawn — with seeds announced explicitly.
-- **`FakePtyAdapter.pumpActivity`** — drives the alert manager for a fixed duration with no data output (the `s` demo). Returns a cancel handle; stops on its own if the pty dies mid-duration.
 - **`FakePtyAdapter.sendOutput`** — pushes data through the real protocol parser as if the PTY produced it (rationale). **Unlike `writePty` it is not suppressed while a scenario is playing.**
 - **`FakePtyAdapter.onPtySpawn`** — fires synchronously inside `spawnPty`, before the scenario plays, so a page attaches a shell without racing `TerminalPane`'s mount.
-- **`subscribeToWatchedCommands` / `getWatchedCommands`** (`lib/src/lib/watched-commands.ts`, re-exported from `terminal-registry`) — the WATCHING rule set; **must credit `al-watch-cmd` only once `longtask` is watched**.
+- **`resolveAlertDeliveryPolicy`** (`lib/src/lib/alert-delivery-model.ts`) — the active Workspace's speech policy, the app default under its override; **must credit `al-speak` only on a turn from off to on**, seeded at `start()`, so a setting saved on an earlier visit grants nothing.
 - **`MobileTerminalUi.onGestureInput`** — optional, reports radial-menu input only; **must fire before the input is sent**, so the final Escape is credited before it leaves the tutorial screen. Pinned by `lib/src/components/MobileTerminalUi.test.tsx`.
 - **`MobileTerminalUi.onGestureScroll`** — optional, reports signed line counts only for edge scrolling.
 - **`subscribeToActiveTheme` / `getActiveThemeId`** (`lib/src/lib/themes/`) — the active theme, watched to credit `th-theme`. **Must seed the detector's previous theme at `start()` and compare consecutive ids**, so boot-time restore cannot grant the item and choosing the startup theme after a reset still can. Pinned by `website/src/lib/tut-detector.test.ts` (rationale).

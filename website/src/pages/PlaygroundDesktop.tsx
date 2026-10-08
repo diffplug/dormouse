@@ -9,17 +9,13 @@ import { PlaygroundShellRegistry } from "../lib/playground-shells";
 import { DESKTOP_TUTORIAL_PROFILE } from "../lib/tut-items";
 import { TutorialState } from "../lib/tutorial-state";
 import { TutDetector } from "../lib/tut-detector";
-import {
-  BUSY_DEMO_INTERVAL_MS,
-  TutRunner,
-} from "../lib/tut-runner";
+import { TutRunner } from "../lib/tut-runner";
+import { startAlertProgram } from "../lib/alert-programs";
 import { ChangelogRunner } from "../lib/changelog-runner";
 import { getPreferredPlayground, POCKET_PLAYGROUND_PATH, usePreferredPlayground } from "../lib/playground-routing";
 import {
   DESKTOP_PANES,
   DESKTOP_PLAYGROUND_LAYOUT,
-  PANE_BOXED,
-  PANE_SPLASH,
   type DesktopPaneSpec,
 } from "../lib/playground-desktop-layout";
 import { SITE_LINK_CLASS } from "../components/site-tokens";
@@ -27,37 +23,6 @@ import { WEBSITE_DEFAULT_THEME_ID } from "../lib/website-theme";
 
 type FakePtyAdapter = import("dormouse-lib/lib/platform/fake-adapter").FakePtyAdapter;
 type WallEvent = import("dormouse-lib/components/Wall").WallEvent;
-
-/** The two panes the alert section drives; the third hosts the runner itself. */
-const ALERT_DEMO_PANES = [PANE_BOXED, PANE_SPLASH] as const;
-
-function sendToPane(
-  adapter: FakePtyAdapter,
-  paneId: string,
-  data: string,
-): void {
-  adapter.sendOutput(paneId, data);
-}
-
-/**
- * Report a foreground command the way a shell with integration would. The OSCs
- * are stripped from visible output, so this never disturbs the TUI the pane is
- * already drawing.
- */
-function startFakeCommand(
-  adapter: FakePtyAdapter,
-  paneId: string,
-  commandLine: string,
-): void {
-  sendToPane(adapter, paneId, `\x1b]633;E;${commandLine}\x07\x1b]633;C\x07`);
-}
-
-function finishFakeCommand(
-  adapter: FakePtyAdapter,
-  paneId: string,
-): void {
-  sendToPane(adapter, paneId, "\x1b]633;D;0\x07");
-}
 
 function DesktopPlaygroundUnavailable() {
   return (
@@ -104,9 +69,6 @@ function PlaygroundDesktopExperience() {
   const autoStartedRef = useRef<Set<string>>(new Set());
   const spawnUnsubRef = useRef<(() => void) | null>(null);
   const disposeFsRef = useRef<(() => void) | null>(null);
-  const busyDemoDisposeRef = useRef<(() => void) | null>(null);
-  const busyDemoFinishTimerRef = useRef<number | null>(null);
-  const commandExitDemoFinishTimerRef = useRef<number | null>(null);
 
   const handleOpenGithub = useCallback(() => {
     window.open(
@@ -135,12 +97,13 @@ function PlaygroundDesktopExperience() {
       if (getPreferredPlayground() === "pocket") return;
       // None of these consumes another, so load the whole bundle at once rather
       // than paying a round of module resolution each on the boot path.
-      const [platform, registry, mouseSelection, themes, alertSettings, workspaceWindow, playgroundTabs, workspaceStore, shellDefaults, asciiSplash, playgroundFs] = await Promise.all([
+      const [platform, registry, mouseSelection, themes, alertSettings, alertDelivery, workspaceWindow, playgroundTabs, workspaceStore, shellDefaults, asciiSplash, playgroundFs] = await Promise.all([
         import("dormouse-lib/lib/platform"),
         import("dormouse-lib/lib/terminal-registry"),
         import("dormouse-lib/lib/mouse-selection"),
         import("dormouse-lib/lib/themes"),
         import("dormouse-lib/lib/alert-settings"),
+        import("dormouse-lib/lib/alert-delivery-model"),
         import("dormouse-lib/components/WorkspaceWindow"),
         import("../components/PlaygroundTabs"),
         import("dormouse-lib/lib/workspace-store"),
@@ -170,6 +133,18 @@ function PlaygroundDesktopExperience() {
         mouseStore: mouseSelection,
         themeStore: themes,
         commandStore: registry,
+        // The active Workspace's policy, the app default under its override,
+        // so either switch credits `al-speak`.
+        speechStore: {
+          subscribe: (listener) => {
+            const stops = [alertSettings.subscribeToAlertSettings(listener), workspaceStore.subscribeToWorkspaces(listener)];
+            return () => stops.forEach((stop) => stop());
+          },
+          isSpeechOn: () => alertDelivery.resolveAlertDeliveryPolicy(
+            alertSettings.getAlertSettings(),
+            workspaceStore.getWorkspace(workspaceStore.getActiveWorkspaceId())?.alertDelivery,
+          ).speakEnabled,
+        },
       });
       detectorRef.current = detector;
       detector.start();
@@ -183,66 +158,6 @@ function PlaygroundDesktopExperience() {
               terminalId,
               state: tutorialState,
               onExit,
-              getInactivityTimeoutMs: () => alertSettings.getAlertSettings().inactivityTimeoutMs,
-              // WATCHING is keyed on the running command, so the demo has to
-              // report one through shell integration. Both alert panes run the
-              // same fake `longtask`, which is what lets one rule light up the
-              // other pane (docs/specs/alert.md).
-              onTriggerBusyDemo: (durationMs, commandMs) => {
-                // TutRunner ignores `s` for the whole `commandMs`, but that
-                // guard is per runner while these refs are per page: exiting
-                // `tutorial` and re-running it, or running it in a second pane,
-                // builds a fresh runner that cannot see this pump or timer.
-                busyDemoDisposeRef.current?.();
-                if (busyDemoFinishTimerRef.current !== null) {
-                  window.clearTimeout(busyDemoFinishTimerRef.current);
-                  busyDemoFinishTimerRef.current = null;
-                }
-                for (const paneId of ALERT_DEMO_PANES) {
-                  startFakeCommand(adapter, paneId, "longtask");
-                }
-                // Always pump the changelog pane: it is the quiet one, so it can
-                // actually go silent and ring. ascii-splash animates forever, so
-                // it stays BUSY — which is a fine demo of the rule applying, but
-                // it could never reach ALERT_RINGING.
-                busyDemoDisposeRef.current = adapter.pumpActivity(
-                  PANE_BOXED,
-                  durationMs,
-                  BUSY_DEMO_INTERVAL_MS,
-                );
-                busyDemoFinishTimerRef.current = window.setTimeout(() => {
-                  busyDemoFinishTimerRef.current = null;
-                  for (const paneId of ALERT_DEMO_PANES) {
-                    finishFakeCommand(adapter, paneId);
-                    // The pane's real program is still drawing, so put its
-                    // actual command line back rather than leaving the pane
-                    // looking idle.
-                    shellRegistryRef.current?.ensureShell(paneId).reportRunningCommand();
-                  }
-                }, commandMs);
-              },
-              // Terminal reports need no rule at all — this is a raw OSC 777
-              // notification, parsed by the same code a real PTY feeds.
-              onTriggerNotifyDemo: () => {
-                sendToPane(
-                  adapter,
-                  PANE_BOXED,
-                  "\x1b]777;notify;Build finished;3 packages rebuilt\x07",
-                );
-              },
-              // An unwatched command, so its exit, not WATCHING, raises the ring:
-              // the user clicks into the pane, clicks away, and the exit rings.
-              onTriggerCommandExitDemo: (durationMs) => {
-                if (commandExitDemoFinishTimerRef.current !== null) {
-                  window.clearTimeout(commandExitDemoFinishTimerRef.current);
-                }
-                startFakeCommand(adapter, PANE_SPLASH, "slowbuild");
-                commandExitDemoFinishTimerRef.current = window.setTimeout(() => {
-                  commandExitDemoFinishTimerRef.current = null;
-                  finishFakeCommand(adapter, PANE_SPLASH);
-                  shellRegistryRef.current?.ensureShell(PANE_SPLASH).reportRunningCommand();
-                }, durationMs);
-              },
               onTogglePlaceToPaste: () => setPlaceToPasteOpen((open) => !open),
               onOpenGithub: handleOpenGithub,
               onOpenPocket: handleOpenPocket,
@@ -259,6 +174,8 @@ function PlaygroundDesktopExperience() {
           if (name === "changelog") {
             return new ChangelogRunner({ adapter, terminalId, onExit });
           }
+          const alertProgram = startAlertProgram(name, args, (data) => adapter.sendOutput(terminalId, data), onExit);
+          if (alertProgram) return alertProgram;
           if (name === "dor") {
             return fsHost.startDor(terminalId, args, shellRegistry.cwdOf(terminalId) ?? fsHost.shellFs.cwd, onExit);
           }
@@ -307,16 +224,6 @@ function PlaygroundDesktopExperience() {
       spawnUnsubRef.current = null;
       disposeFsRef.current?.();
       disposeFsRef.current = null;
-      busyDemoDisposeRef.current?.();
-      busyDemoDisposeRef.current = null;
-      if (busyDemoFinishTimerRef.current !== null) {
-        window.clearTimeout(busyDemoFinishTimerRef.current);
-        busyDemoFinishTimerRef.current = null;
-      }
-      if (commandExitDemoFinishTimerRef.current !== null) {
-        window.clearTimeout(commandExitDemoFinishTimerRef.current);
-        commandExitDemoFinishTimerRef.current = null;
-      }
     };
   }, [handleOpenGithub, handleOpenPocket, tryAutoStart]);
 
