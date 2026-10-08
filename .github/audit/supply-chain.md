@@ -14,6 +14,14 @@ A diff in that copy is a real FAIL.
 
 For the shipped-workspace check under "Disclosure", work out from first principles which workspace packages put files on a user's disk and by what route; the generator's arrays are the shortcut that goes stale.
 
+## Work streams
+
+Delegate only by these streams (`.github/audit/_preamble.md` -> "Work streams"). Each holds every rule under the headings it names:
+
+- `disclosure` — `docs/specs/security-supply-chain.md`: "Disclosure".
+- `runtime-cooldown` — `docs/specs/security-supply-chain.md`: "Bundled runtime", "Cooldown and alerts".
+- `qualitative` — the qualitative pass below, once, over the whole of this domain's scope.
+
 ## Qualitative pass
 
 You own the dependency graph, the lockfile, and **all of `website/` except `website/public/`**, which is `ci-and-secrets`' because the Tauri updater manifest lives there. So `website/src/`, `website/scripts/`, and the build config (`package.json`, `vite.config.ts`, `react-router.config.ts`, `tsconfig.json`) are all yours. `generate-deps.js` is in that set: audit the whole generator, not just the arrays "Disclosure" names.

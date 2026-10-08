@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { FRAGMENT, run, SECTIONS, stateHash } from './github-state-check.mjs';
 import { repoRoot, tempDir } from './lint-kit.mjs';
-import { tallyFragment } from './security-audit-public-body.mjs';
+import { judgeFragment } from './security-audit-report.mjs';
 
 // Responses recorded from the live API with the maintainer's `gh` login (URLs,
 // node ids, and variable values stripped), replayed with no network. Every
@@ -46,14 +46,18 @@ test('the recorded live state passes every clause', () => {
   assert.ok(result.results.length >= 55, `${result.results.length} results`);
 });
 
-// Each result names a heading that exists in its spec, in the line form the
-// public issue builder recognizes — so a failed check is counted under its
-// section there, never as an unnamed one.
-test('every result line names a real spec heading the public builder accepts', () => {
+// The reporting step computes this fragment's verdict from its lines against
+// the rules the specs pin to this script. Every rule gets a line, every line
+// is in the grammar and names a pinned rule, so the computed verdict is the
+// script's own — a mismatch between the two PRs' formats goes red here.
+test('the reporting step reads the fragment as the script judged it', () => {
+  const clean = judgeFragment(repoRoot, FRAGMENT, replay().text);
+  assert.equal(clean.verdict, 'PASS', [...clean.doubts, ...clean.missing, ...clean.malformed.map((m) => m.line)].join('\n'));
   const failing = replay((ctx) => { ctx.embargo = '200'; body(ctx, 'actions/permissions/workflow').default_workflow_permissions = 'write'; });
-  const tally = tallyFragment(failing.text, repoRoot);
-  assert.equal(tally.failed, 2);
-  assert.equal(tally.unnamed, 0);
+  const judged = judgeFragment(repoRoot, FRAGMENT, failing.text);
+  assert.equal(judged.verdict, 'FAIL');
+  assert.equal(judged.results.filter((r) => r.status === 'FAIL').length, 2);
+  assert.deepEqual([judged.stray, judged.missing, judged.malformed], [[], [], []]);
   for (const [spec, heading] of SECTIONS) {
     const headings = readFileSync(join(repoRoot, spec), 'utf8').split('\n').map((l) => l.match(/^#{2,6}\s+(.+?)\s*$/)?.[1]);
     assert.ok(headings.includes(heading), `${spec} has no heading "${heading}"`);
@@ -154,7 +158,7 @@ test('the tagger App\'s permissions are read only where readable, and never fail
     const result = replay(drift);
     assert.equal(result.verdict, 'PASS');
     assert.equal(result.warnings.length, 1);
-    assert.match(result.text, /^- WARNING: the Hosted tagger App's installation holds/m);
+    assert.match(result.text, /^- WARNING: `[^`]+:1` `[^`]+` — the Hosted tagger App's installation holds/m);
   }
 });
 
@@ -262,4 +266,9 @@ cat "$f$slurp"
   assert.equal(written.split('\n')[0], 'VERDICT: PASS', written);
   const { hash } = replay();
   assert.equal(readFileSync(output, 'utf8'), `hash=${hash}\nverdict=PASS\n`);
+  // The job log is public: with `--out`, stdout carries the verdict and
+  // counts, never a clause or its evidence (docs/specs/security-audit.md -> "Embargo").
+  const clauses = written.split('\n').filter((line) => line.startsWith('- ')).length;
+  assert.ok(clauses > 0, written);
+  assert.equal(cli.stdout, `VERDICT: PASS (${clauses} PASS, 0 FAIL, 0 UNVERIFIABLE). Observed-state hash ${hash}.\n`);
 });

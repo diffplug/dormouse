@@ -114,18 +114,26 @@ emit() {
 } > audit-report.md
 ```
 
-Then append a `## Summary` section: overall PASS, FAIL, or INCONCLUSIVE — the last whenever §4 below tells you to write no status file — a one-paragraph rationale, and one line per domain giving that domain's verdict. Do not force a binary here: the private INCONCLUSIVE issue reproduces this report under a title saying no verdict was reached, so a `## Summary` asserting `PASS` over a domain that never reported contradicts the issue carrying it, and publishes an overall `PASS` covering an unaudited domain.
+Then append a `## Summary` section: overall PASS, FAIL, or INCONCLUSIVE — the last whenever §4 below tells you to write no status file — a one-paragraph rationale, and one line per domain giving the verdict §4's `check` printed for it. Do not force a binary here. This report is archived in the encrypted transcript for whoever reads the run in full; the issues are built from the fragments' lines, not from it.
 
 For a domain cut off mid-report, the Summary says that and gives its verdict line. **Never state how much such a domain covered, nor why it stopped** — you did not watch it work, and its fragment's own prose is about the moment it was written. An unclosed fragment is not evidence of a timeout: run 35327271988's was published as "cut off ... at the 32-minute deadline" when that domain had in fact ended its own turn twenty-one minutes before the deadline. Run 35205193090 read "two of seven work streams had not reported" and published "completed only two of seven", turning five audited streams into five unaudited ones in the one paragraph a reader starts from.
 
 ## 4. The verdict
 
-Write `PASS` or `FAIL` — no other text — to `audit-status.txt` according to the precedence below. PASS requires all four domains to pass.
+**The reporting step computes each domain's verdict from its result and finding lines, and reports any line that disagrees with it as an anomaly** — a domain's `VERDICT:` line and your status file alike. So read verdicts the way it does, from the lines rather than from anyone's summary:
 
-FAIL if any subagent returned FAIL. That is a finding, and it stays a finding whether or not the other domains reported.
+```sh
+for f in audit-supply-chain.md audit-ci-secrets.md audit-application.md audit-hosted.md; do
+  node scripts/security-audit-report.mjs check "$f"
+done
+```
 
-If no subagent returned FAIL but any domain returned INCONCLUSIVE, or a fragment is missing, empty, has no exact verdict line, or carries no sentinel, **write no status file at all.** The sentinel belongs in that list because a domain cut off just after rewriting its verdict line leaves `VERDICT: PASS` on line 1 of a report that stopped early — the one state where the verdict line alone reads clean. A domain that produced no report did not pass, but it did not fail either: `FAIL` publishes it as `[security-audit] FAIL`, relabels an open issue upward, and files a run that merely ran out of time as a security finding. That is the conflation the workflow's three outcomes exist to prevent. With no status file the reporting step reaches INCONCLUSIVE instead and reproduces the partial report you wrote in §3, placeholders and all. Never write `PASS` over a missing fragment: the reporting step catches that one independently and downgrades it, but do not make it do that work.
+Each call prints that fragment's computed verdict first, then why. Write `PASS` or `FAIL` — no other text — to `audit-status.txt` according to the precedence below. PASS requires all four domains to print `PASS`.
 
-**Write `audit-report.md` before `audit-status.txt`**, always, even if you are running short: a partial report reaches a human through the private INCONCLUSIVE issue, while a status file with no report behind it reaches nobody. Write `audit-status.txt` only once the rules above establish a verdict. Do not call `exit` — the workflow inspects the status file.
+FAIL if any fragment printed `FAIL`. That is a finding, and it stays a finding whether or not the other domains reported.
 
-**Never end your turn while `audit-report.md` does not exist.** Ending it is what ends the run, so a run that stops there publishes nothing at all — not even the domains that did report, whose fragments then reach a human only through a 14-day artifact. If you have nothing left to wait on, merge §3 with whatever fragments exist and let its markers say the rest.
+If none printed `FAIL` but any printed `INCONCLUSIVE` — a missing, empty, unfinished, or unreadable fragment among them — **write no status file at all.** A domain that produced no report did not pass, but it did not fail either: `FAIL` publishes it as `[security-audit] FAIL` and files a run that merely ran out of time as a security finding. That is the conflation the workflow's three outcomes exist to prevent. With no status file the reporting step reaches INCONCLUSIVE instead. Never write `PASS` over a domain that did not print it: the reporting step catches that independently and reports it as an anomaly, but do not make it do that work.
+
+**Write `audit-report.md` before `audit-status.txt`**, always, even if you are running short: the merged report is the run's one readable account in the transcript, and a status file with nothing behind it explains nothing. Write `audit-status.txt` only once the rules above establish a verdict. Do not call `exit` — the workflow inspects the status file.
+
+**Never end your turn while `audit-report.md` does not exist.** Ending it is what ends the run, before §4's verdict and before the merge the transcript keeps. If you have nothing left to wait on, merge §3 with whatever fragments exist and let its markers say the rest.

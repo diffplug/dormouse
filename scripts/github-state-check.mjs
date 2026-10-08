@@ -40,19 +40,34 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import YAML from 'yaml';
 import { readRepoFile, repoRoot } from './lint-kit.mjs';
+import { ruleNumber, ruleId } from './security-audit-report.mjs';
 
 export const FRAGMENT = 'audit-github-state.md';
 const EXPECTED = '.github/audit/expected-github-state.json';
 const SENTINEL = '<!-- END OF REPORT -->';
 
-const TEND = ['docs/specs/security-ci.md', 'Automated Maintainer (tend)'];
-const HOSTED = ['docs/specs/security-ci.md', 'Hosted Deployments'];
-const VSCODE = ['docs/specs/security-ci.md', 'VS Code Extension Releases'];
-const COOLDOWN = ['docs/specs/security-supply-chain.md', 'Cooldown and alerts'];
-const REPORTING = ['docs/specs/security.md', 'Reporting a vulnerability'];
-const GATE = ['docs/specs/security-audit.md', 'Schedule and gate'];
-const EMBARGO = ['docs/specs/security-audit.md', 'Embargo'];
-export const SECTIONS = [TEND, HOSTED, VSCODE, COOLDOWN, REPORTING, GATE, EMBARGO];
+// Each rule a clause answers, as its spec, its heading, and a phrase only that
+// rule's text carries; the rule's number is looked up in the spec, so a
+// renumbered or reworded rule fails here rather than citing the wrong one.
+const CI = 'docs/specs/security-ci.md';
+const TEND = 'Automated Maintainer (tend)';
+const RULESETS = [CI, TEND, 'either admin-gating ruleset'];
+const BOT = [CI, TEND, '`dormouse-bot` holds'];
+const ENVIRONMENTS = [CI, TEND, 'any GitHub environment except'];
+const INVENTORY = [CI, TEND, 'the secret inventory departs'];
+const TEND_ALLOWED = [CI, TEND, '`secrets.allowed`'];
+const LIVENESS = [CI, TEND, '`.github/workflows/workflow-audit.yaml` is missing'];
+const PERMISSIONS = [CI, TEND, '`default_workflow_permissions`'];
+const HOSTED = [CI, 'Hosted Deployments', 'a Hosted environment lacks'];
+const HOSTED_CREDENTIALS = [CI, 'Hosted Deployments', 'Hosted credentials appear'];
+const HOSTED_APP = [CI, 'Hosted Deployments', 'the App (`Integration` actor'];
+const VSCODE = [CI, 'VS Code Extension Releases', '`vscode-extension-publish` lacks'];
+const COOLDOWN = ['docs/specs/security-supply-chain.md', 'Cooldown and alerts', 'secret scanning or its push protection'];
+const REPORTING = ['docs/specs/security.md', 'Reporting a vulnerability', 'private vulnerability reporting is disabled'];
+const GATE = ['docs/specs/security-audit.md', 'Schedule and gate', '`.github/workflows/security-audit.yaml` is missing or disabled'];
+const EMBARGO = ['docs/specs/security-audit.md', 'Embargo', '`diffplug/dormouse-embargo` is publicly visible'];
+export const SECTIONS = [RULESETS, BOT, ENVIRONMENTS, INVENTORY, TEND_ALLOWED, LIVENESS, PERMISSIONS, HOSTED,
+  HOSTED_CREDENTIALS, HOSTED_APP, VSCODE, COOLDOWN, REPORTING, GATE, EMBARGO];
 
 // --- Fetching -------------------------------------------------------------
 
@@ -268,7 +283,8 @@ function judge(state, { expected, tendAllowed, now = new Date(), local = false }
   const results = [];
   const info = [];
   const warnings = [];
-  const add = (verdict, [spec, heading], clause, evidence) => results.push({ verdict, spec, heading, clause, evidence });
+  const add = (verdict, [spec, heading, phrase], clause, evidence) =>
+    results.push({ verdict, spec, heading, rule: ruleNumber(repoRoot, spec, heading, phrase), clause, evidence });
   const unreadable = (keys) => keys.map((k) => [k, state.errors[k]]).filter(([, status]) => status !== undefined);
   /** Judge `fn` unless a state key it needs could not be read. */
   const check = (cite, clause, needs, fn) => {
@@ -287,7 +303,7 @@ function judge(state, { expected, tendAllowed, now = new Date(), local = false }
 
   // Rulesets: missing, inactive, or departing from the expected targets, rules, or bypass actors.
   for (const [name, want] of Object.entries(expected.rulesets)) {
-    const cite = name.startsWith('Hosted') ? HOSTED : TEND;
+    const cite = name.startsWith('Hosted') ? HOSTED_APP : RULESETS;
     check(cite, `ruleset \`${name}\` exists and is active`, rulesetErrors, () => {
       const got = state.rulesets.filter((r) => r.name === name);
       if (got.length !== 1) return [false, `${got.length} rulesets named \`${name}\``];
@@ -303,7 +319,7 @@ function judge(state, { expected, tendAllowed, now = new Date(), local = false }
     checkRuleset(`blocks exactly ${show(want.rules)}`, (r) => [same(r.rules, want.rules), `rules ${show(r.rules)}`]);
     checkRuleset(`bypass actors are exactly ${showBypass(want.bypass)}`, (r) => [same(r.bypass, [...want.bypass].sort(byKey)), `bypass ${showBypass(r.bypass) || 'none'}`]);
   }
-  check(HOSTED, `the Hosted tagger App (\`Integration\` ${expected.app.id}) bypasses no ruleset but \`Hosted tag creation\``, rulesetErrors, () => {
+  check(HOSTED_APP, `the Hosted tagger App (\`Integration\` ${expected.app.id}) bypasses no ruleset but \`Hosted tag creation\``, rulesetErrors, () => {
     const bypassed = state.rulesets.filter((r) => r.bypass.some((b) => b.actor_type === 'Integration' && b.actor_id === expected.app.id)).map((r) => r.name);
     return [same(bypassed, ['Hosted tag creation']), `bypassed rulesets: ${show(bypassed)}`];
   });
@@ -314,7 +330,7 @@ function judge(state, { expected, tendAllowed, now = new Date(), local = false }
   }
 
   // The bot's role.
-  check(TEND, `\`${expected.botCollaborator.login}\` holds neither ${expected.botCollaborator.forbiddenRoles.map((r) => `\`${r}\``).join(' nor ')}`, ['bot'], () => {
+  check(BOT, `\`${expected.botCollaborator.login}\` holds neither ${expected.botCollaborator.forbiddenRoles.map((r) => `\`${r}\``).join(' nor ')}`, ['bot'], () => {
     if (state.bot.collaborator === false) return [true, 'not a collaborator'];
     const held = [state.bot.permission, state.bot.role_name];
     return [!held.some((role) => expected.botCollaborator.forbiddenRoles.includes(role)), `permission \`${state.bot.permission}\`, role_name \`${state.bot.role_name}\``];
@@ -323,7 +339,7 @@ function judge(state, { expected, tendAllowed, now = new Date(), local = false }
   // Environments: enumerated, each judged by the rule it falls under.
   const envErrors = Object.keys(state.errors).filter((k) => k === 'environments' || k.startsWith('environment '));
   const gated = expected.adminGatedRefs;
-  check(TEND, 'every environment is one the expected state names', ['environments'], () => {
+  check(ENVIRONMENTS, 'every environment is one the expected state names', ['environments'], () => {
     const extra = state.environments.map((e) => e.name).filter((n) => !(n in expected.environments));
     return [extra.length === 0, `environments: ${show(state.environments.map((e) => e.name))}${extra.length ? `; not named: ${show(extra)}` : ''}`];
   });
@@ -344,7 +360,7 @@ function judge(state, { expected, tendAllowed, now = new Date(), local = false }
         : [false, `deployment_branch_policy ${JSON.stringify(x.branchPolicy)}`]));
     }
     if (name !== 'hosted-preview') {
-      checkEnv(TEND, 'admits only refs the `Merge access` or `Tag operations` ruleset reserves to admins', (x) => {
+      checkEnv(ENVIRONMENTS, 'admits only refs the `Merge access` or `Tag operations` ruleset reserves to admins', (x) => {
         if (!x.branchPolicy) return [false, 'no deployment branch policy: every branch and tag is admitted'];
         if (x.branchPolicy.protected_branches) return [false, '`protected_branches: true` admits any protected branch'];
         const loose = x.policies.filter((p) => !gated.some((g) => g.type === p.type && g.name === p.name));
@@ -359,32 +375,32 @@ function judge(state, { expected, tendAllowed, now = new Date(), local = false }
     if (want && 'canAdminsBypass' in want) {
       checkEnv(reviewCite, `sets \`can_admins_bypass: ${want.canAdminsBypass}\``, (x) => [x.canAdminsBypass === want.canAdminsBypass, `can_admins_bypass ${x.canAdminsBypass}`]);
     }
-    checkEnv(TEND, 'holds exactly the secrets the inventory places there', (x) =>
+    checkEnv(INVENTORY, 'holds exactly the secrets the inventory places there', (x) =>
       [same(x.secrets, sorted(want?.secrets ?? [])), `holds ${show(x.secrets)}; placed: ${show(want?.secrets ?? [])}`]);
-    if (want?.variables) checkEnv(TEND, 'declares no environment variables', (x) => [same(x.variables, want.variables), `variables ${show(x.variables)}`]);
+    if (want?.variables) checkEnv(INVENTORY, 'declares no environment variables', (x) => [same(x.variables, want.variables), `variables ${show(x.variables)}`]);
   }
 
   // Repo- and org-level secrets.
-  check(TEND, `repo-level secrets are ${show(expected.repoSecrets)} and nothing else`, ['repoSecrets'], () => {
+  check(INVENTORY, `repo-level secrets are ${show(expected.repoSecrets)} and nothing else`, ['repoSecrets'], () => {
     const extra = state.repoSecrets.filter((s) => !expected.repoSecrets.includes(s));
     const absent = expected.repoSecrets.filter((s) => !state.repoSecrets.includes(s) && !expected.repoSecretsMayBeAbsent.includes(s));
     return [extra.length === 0 && absent.length === 0, `repo level holds ${show(state.repoSecrets)}`];
   });
-  check(TEND, 'no org-level secret is visible to this repository', ['orgSecrets'], () => [same(state.orgSecrets, expected.orgSecrets), `organization-secrets lists ${show(state.orgSecrets)}`]);
-  check(TEND, '`ANTHROPIC_API_KEY` is absent at repo and org level', ['repoSecrets', 'orgSecrets'], () => {
+  check(INVENTORY, 'no org-level secret is visible to this repository', ['orgSecrets'], () => [same(state.orgSecrets, expected.orgSecrets), `organization-secrets lists ${show(state.orgSecrets)}`]);
+  check(INVENTORY, '`ANTHROPIC_API_KEY` is absent at repo and org level', ['repoSecrets', 'orgSecrets'], () => {
     const at = [state.repoSecrets.includes('ANTHROPIC_API_KEY') && 'repo', state.orgSecrets.includes('ANTHROPIC_API_KEY') && 'org'].filter(Boolean);
     return [at.length === 0, at.length ? `present at ${at.join(' and ')} level` : 'absent at both'];
   });
-  check(TEND, 'every repo-level secret is in `.config/tend.yaml` `secrets.allowed`', ['repoSecrets'], () => {
+  check(TEND_ALLOWED, 'every repo-level secret is in `.config/tend.yaml` `secrets.allowed`', ['repoSecrets'], () => {
     const missing = state.repoSecrets.filter((s) => !tendAllowed.includes(s));
     return [missing.length === 0, `allowed ${show(tendAllowed)}${missing.length ? `; missing ${show(missing)}` : ''}`];
   });
   const hostedSecrets = sorted(new Set(expected.hostedEnvironments.flatMap((n) => expected.environments[n].secrets)));
-  check(HOSTED, 'no Hosted credential appears at repo or org scope', ['repoSecrets', 'orgSecrets'], () => {
+  check(HOSTED_CREDENTIALS, 'no Hosted credential appears at repo or org scope', ['repoSecrets', 'orgSecrets'], () => {
     const leaked = [...state.repoSecrets, ...state.orgSecrets].filter((s) => hostedSecrets.includes(s));
     return [leaked.length === 0, leaked.length ? `found ${show(leaked)}` : `none of ${show(hostedSecrets)} at either`];
   });
-  check(HOSTED, 'no production-only credential is in `hosted-preview`', ['environments', ...envErrors.filter((k) => k.startsWith('environment hosted-preview '))], () => {
+  check(HOSTED_CREDENTIALS, 'no production-only credential is in `hosted-preview`', ['environments', ...envErrors.filter((k) => k.startsWith('environment hosted-preview '))], () => {
     const preview = state.environments.find((e) => e.name === 'hosted-preview')?.secrets ?? [];
     const leaked = preview.filter((s) => expected.productionOnlySecrets.includes(s));
     return [leaked.length === 0, `hosted-preview holds ${show(preview)}`];
@@ -392,13 +408,13 @@ function judge(state, { expected, tendAllowed, now = new Date(), local = false }
 
   // Workflow token defaults, the backstop for every permission rule.
   for (const [key, value] of Object.entries(expected.workflowPermissions)) {
-    check(TEND, `\`${key}\` is \`${value}\``, ['workflowPermissions'], () => [state.workflowPermissions[key] === value, `\`${state.workflowPermissions[key]}\``]);
+    check(PERMISSIONS, `\`${key}\` is \`${value}\``, ['workflowPermissions'], () => [state.workflowPermissions[key] === value, `\`${state.workflowPermissions[key]}\``]);
   }
 
   // Workflow liveness.
   const { workflow, event, branch, hours, infoAfterHours } = expected.liveness;
-  check(TEND, `\`${workflow}\` exists and is enabled`, [`workflow ${workflow}`], () => [state.workflows[workflow] === 'active', `state \`${state.workflows[workflow]}\``]);
-  check(TEND, `\`${workflow}\` has a successful \`${event}\` run on \`${branch}\` in the last ${hours} hours`, ['liveness'], () => {
+  check(LIVENESS, `\`${workflow}\` exists and is enabled`, [`workflow ${workflow}`], () => [state.workflows[workflow] === 'active', `state \`${state.workflows[workflow]}\``]);
+  check(LIVENESS, `\`${workflow}\` has a successful \`${event}\` run on \`${branch}\` in the last ${hours} hours`, ['liveness'], () => {
     const ok = state.volatile.runs.filter((r) => r.event === event && r.head_branch === branch && r.conclusion === 'success');
     const latest = ok.map((r) => Date.parse(r.created_at)).sort((a, b) => b - a)[0];
     if (latest === undefined) return [false, 'no successful scheduled run listed'];
@@ -439,10 +455,26 @@ function fragment({ results, info, warnings = [] }, hash) {
   const lines = [`VERDICT: ${verdict}`, '',
     `Deterministic: \`scripts/github-state-check.mjs\` against \`${EXPECTED}\`. Observed-state hash \`${hash}\`.`, '',
     '### FAIL IF results', ''];
-  for (const r of results) lines.push(`- ${r.verdict}: \`${r.spec}\` -> "${r.heading}" — ${r.clause}: ${r.evidence}`);
-  lines.push('', '### Qualitative findings', '');
-  for (const text of warnings) lines.push(`- WARNING: ${text}`);
-  for (const text of info) lines.push(`- INFO: ${text}`);
+  // One line per clause, in the grammar the reporting step computes the
+  // verdict from: a rule with several clauses letters them `.a`, `.b`, … in
+  // the order they were judged.
+  const perRule = new Map();
+  for (const r of results) {
+    const key = `${r.spec}\0${r.heading}\0${r.rule}`;
+    perRule.set(key, [...(perRule.get(key) ?? []), r]);
+  }
+  for (const r of results) {
+    const siblings = perRule.get(`${r.spec}\0${r.heading}\0${r.rule}`);
+    const clause = siblings.length > 1 ? String.fromCharCode(97 + siblings.indexOf(r)) : null;
+    lines.push(`- ${r.verdict}: ${ruleId(r.spec, r.heading, r.rule, clause)} — ${r.clause}: ${r.evidence}`);
+  }
+  lines.push('', '### Findings', '');
+  // Located at the expected-state file, with the subject a finding names as its
+  // root cause, so the reporting step merges and files it like any other.
+  const finding = (severity, text) =>
+    `- ${severity}: \`${EXPECTED}:1\` \`${text.match(/`([^`]+)`/)?.[1] ?? 'github-state'}\` — ${text}`;
+  for (const text of warnings) lines.push(finding('WARNING', text));
+  for (const text of info) lines.push(finding('INFO', text));
   if (!info.length && !warnings.length) lines.push('None: this fragment judges only the clauses above.');
   lines.push('', SENTINEL, '');
   return { verdict, text: lines.join('\n') };
@@ -472,8 +504,16 @@ function main(argv) {
     else throw new Error(`unexpected argument: ${argv[i]}`);
   }
   const result = run({ api: ghFetcher(), local: args.local, repo: args.repo });
-  if (args.out) writeFileSync(args.out, result.text);
-  process.stdout.write(result.text);
+  if (args.out) {
+    // The job log is public, and a failing clause's evidence is finding
+    // detail the embargo keeps private: with `--out` the clauses go to the
+    // fragment only, and the log gets the verdict and counts.
+    writeFileSync(args.out, result.text);
+    const count = (v) => result.results.filter((r) => r.verdict === v).length;
+    process.stdout.write(`VERDICT: ${result.verdict} (${count('PASS')} PASS, ${count('FAIL')} FAIL, ${count('UNVERIFIABLE')} UNVERIFIABLE). Observed-state hash ${result.hash}.\n`);
+  } else {
+    process.stdout.write(result.text);
+  }
   if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `hash=${result.hash}\nverdict=${result.verdict}\n`);
 }
 
