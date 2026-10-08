@@ -125,6 +125,7 @@ Source of truth: `.github/audit/_preamble.md`; `dedupFindings` in `scripts/secur
 | Ledger issue in `diffplug/dormouse-embargo`, one per open finding key | one failed rule clause, or one merged BLOCKER or WARNING, with its evidence |
 | `audit-transcript` artifact | age ciphertext of the transcript, `audit-report.md`, and the fragments |
 | `audit-state` artifact | the audited commit, the GitHub-state hash, whether the domains ran, and when they last did |
+| `Check GitHub state` job log | the GitHub-state verdict, its clause counts, and the hash |
 
 - **FAIL IF** the public issue can carry finding text: it is posted from anything but the output of `scripts/security-audit-public-body.mjs` and the fixed private-filing notes, or that builder emits anything but fixed text, counts, validated run metadata, fragment names, and headings it found in the checked-out spec. A failed check naming no such heading, in the line form `.github/audit/_preamble.md` fixes, is counted, never quoted (rationale).
 - **FAIL IF** `secrets.EMBARGO_TOKEN` is referenced anywhere but the `env:` of `File embargoed findings`, a workflow or job `env:` or a `$GITHUB_ENV` write could carry it to another step, or that step runs anything but `gh` and shell builtins (rationale).
