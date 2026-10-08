@@ -56,6 +56,13 @@ async function recordContinued() {
   sessionStorage.removeItem(CONTINUED_KEY);
 }
 
+// Pre-launch: a signed-out visitor is sent to the devlog's email signup
+// instead of the sign-in form; `/login?signin` still opens it. Delete this,
+// and its use below, at launch.
+const SUBSCRIBE_URL = "https://nedshed.dev/subscribe";
+const SUBSCRIBE_REDIRECT_MS = 4000;
+const SIGN_IN_OPEN = new URLSearchParams(location.search).has("signin");
+
 export function App({ enrollment }: { enrollment: Enrollment | null }) {
   const [session, setSession] = useState<Session | null>(null);
   const [enabled, setEnabled] = useState<Provider[]>([]);
@@ -139,6 +146,15 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
   useEffect(() => {
     if (enterCode) codeInput.current?.focus();
   }, [enterCode]);
+  const comingSoon = !loading && !session && !SIGN_IN_OPEN;
+  useEffect(() => {
+    if (!comingSoon) return;
+    const timer = setTimeout(
+      () => location.assign(SUBSCRIBE_URL),
+      SUBSCRIBE_REDIRECT_MS,
+    );
+    return () => clearTimeout(timer);
+  }, [comingSoon]);
   useEffect(() => {
     // A link opened in the tab already on `/enroll` changes only the fragment:
     // take its code as the first load did, without reloading. Elsewhere a
@@ -276,14 +292,18 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
       </header>
       <main>
         <h1>
-          {enrolling
+          {comingSoon
+            ? "Coming soon"
+            : enrolling
             ? "Approve a computer"
             : session
               ? "Your account"
               : "Sign in to Dormouse Hosted"}
         </h1>
         <p className="intro">
-          {enrolling
+          {comingSoon
+            ? "Check out the devlog at nedshed.dev."
+            : enrolling
             ? !enrolling.code
               ? "This link cannot be approved."
               : session
@@ -295,6 +315,10 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
         </p>
         {loading ? (
           <p role="status">Checking your account…</p>
+        ) : comingSoon ? (
+          <a className="primary button-link" href={SUBSCRIBE_URL}>
+            Subscribe at nedshed.dev
+          </a>
         ) : (
           <>
             {error && (
