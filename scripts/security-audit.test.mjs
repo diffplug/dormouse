@@ -4,7 +4,7 @@ import { copyFileSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSy
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { BODY_LIMIT } from './clamp-issue-body.mjs';
-import { SENTINEL, domains, fragmentManifest, ledgerKey, owedIds as owedRuleIds } from './security-audit-report.mjs';
+import { OPEN_FINDINGS, SENTINEL, domains, failKey, fragmentManifest, ledgerKey, owedIds as owedRuleIds } from './security-audit-report.mjs';
 import { FRAGMENT } from './github-state-check.mjs';
 import { decide } from './security-audit-plan.mjs';
 import { repoRoot, tempDir, workflowRunBlock } from './lint-kit.mjs';
@@ -138,10 +138,12 @@ const outputEnv = (name) => [...stepText(name).matchAll(/^          (\w+): \$\{\
   .map(([, variable, step, key]) => ({ variable, step, key }));
 
 /**
- * Run the three reporting steps as the runner would: compose, the embargo
- * filing, then the public step, each handed the outputs its `env:` names.
+ * Run the open-findings list and the three reporting steps as the runner
+ * would: the list (before the agent, whose fragments are already written),
+ * compose, the embargo filing, then the public step, each handed the outputs
+ * its `env:` names.
  */
-function runReporting(dir, env, { embargoToken = 'fixture-embargo-token', embargoEnv = {} } = {}) {
+function runReporting(dir, env, { embargoToken = 'fixture-embargo-token', listToken = embargoToken, embargoEnv = {} } = {}) {
   const outputs = {};
   const run = (id, name, extra) => {
     const file = join(dir, `github-output-${id}`);
@@ -155,11 +157,12 @@ function runReporting(dir, env, { embargoToken = 'fixture-embargo-token', embarg
   };
   // Every run reads the ledger, a PASS included.
   assert.match(stepText('File embargoed findings'), /^        if: always\(\)$/m);
+  const listed = run('findings', 'List open findings', { GH_TOKEN: listToken, EMBARGO_REPO, ...embargoEnv });
   const composed = run('compose', 'Compose the audit report', {});
   assert.equal(composed.status, 0, composed.stderr);
   const embargoed = run('embargo', 'File embargoed findings', { GH_TOKEN: embargoToken, EMBARGO_REPO, ...embargoEnv });
   const surfaced = run('surface', 'Surface result, file or close issue', embargoEnv);
-  return { composed, embargoed, surfaced, outputs };
+  return { listed, composed, embargoed, surfaced, outputs };
 }
 
 /** The embargo calls that file the per-run report: not the ledger's list, issues, or comments. */
@@ -181,6 +184,10 @@ const cases = [
   { name: 'PASS prefix with a suffix is unreadable', status: 'PASS', frags: [{ stated: 'PASS but unfinished' }, {}, {}, {}], expected: 'INCONCLUSIVE',
     notes: ["A domain's verdict could not be read"] },
   { name: 'missing fragment', status: 'PASS', frags: [null, {}, {}, {}], expected: 'INCONCLUSIVE', notes: ['left no report'] },
+  // Only the exact line is a verdict: `VERDICT: FAIL` with anything after it is
+  // unreadable, and may be a mangled claim, so the headline says to look.
+  { name: 'a VERDICT: FAIL with a suffix is unreadable', status: 'PASS', frags: [{}, { stated: 'FAIL — credential leaked' }, {}, {}], expected: 'INCONCLUSIVE',
+    notes: ["A domain's verdict could not be read", 'A domain claimed more than its result lines record'] },
   { name: 'unverifiable checks override merged PASS', status: 'PASS',
     frags: [{ stated: 'INCONCLUSIVE', results: { [firstId(SUPPLY)]: `- UNVERIFIABLE: ${firstId(SUPPLY)} — the clause: network error` } }, {}, {}, {}],
     expected: 'INCONCLUSIVE', notes: ['- UNVERIFIABLE: `docs/specs/security-supply-chain.md`'] },
@@ -350,7 +357,7 @@ test('the ledger opens a new finding and comments on one already open', (t) => {
     ? { stated: 'FAIL', results: { [failId]: `- FAIL: ${failId} — c: violated` }, lines: finding('BLOCKER', 'lib/a.ts:10', 'runIt', 'new one') }
     : {})));
   const [, spec, heading, rule] = failId.match(/^`([^`]+)` -> "([^"]+)" #(\d+)$/);
-  const known = ledgerKey('check', spec, heading, rule, '');
+  const known = failKey(spec, heading, Number(rule));
   const { surfaced, outputs } = runReporting(dir, env, { embargoEnv: { GH_LEDGER_OPEN: `41 [audit-finding ${known}] FAIL: old\n42 [audit-finding 0123456789ab] WARNING: other\n` } });
   assert.equal(surfaced.status, 1);
   assert.equal(outputs.embargo.result, 'filed');
@@ -386,12 +393,15 @@ test('a PASS does not close the public issue while a ledger issue is open', (t) 
   assert.ok(!comment.body.includes('0123456789ab'));
 });
 
+// The domains were handed the open findings, so they could pass; the ledger
+// read that decides whether to close went missing afterwards.
 test('a PASS whose ledger cannot be read closes nothing and fails', (t) => {
   const { dir, env } = fixture(t);
   stubGh(dir);
   writeFileSync(join(dir, 'audit-status.txt'), 'PASS');
   fragments.forEach((f) => writeFileSync(join(dir, f), fragmentText(f)));
-  const { embargoed, surfaced, outputs } = runReporting(dir, env, { embargoToken: '' });
+  const { embargoed, surfaced, outputs } = runReporting(dir, env, { listToken: 'fixture-embargo-token', embargoToken: '' });
+  assert.equal(outputs.compose.status, 'PASS');
   assert.equal(embargoed.status, 1);
   assert.equal(outputs.embargo.result, 'missing-token');
   assert.equal(surfaced.status, 1);
@@ -424,6 +434,99 @@ test('a passing run files its WARNINGs in the ledger and nothing else', (t) => {
   assert.ok(embargoCalls[0].args[embargoCalls[0].args.indexOf('--title') + 1].startsWith('[audit-finding '));
   // Opened by this run, so it does not hold the public issue open.
   assert.ok(ghCalls(dir).some(({ args }) => args[1] === 'close'));
+});
+
+// --- Re-verifying the open ledger findings ---
+
+// Run 37713086378 passed four rules an earlier run had failed, with the code
+// unchanged, on the presence of the controls they name. The domains are handed
+// the open findings, and a PASS over one a rule cites must say why it no
+// longer holds, at a `path:line`.
+const CI_POLICIES = owedIds(CI).filter((id) => id.includes('`docs/specs/security-ci.md` -> "GitHub Actions Policies"'));
+const MINTED_RULE = CI_POLICIES[1];
+const [, MINTED_SPEC, MINTED_HEADING, MINTED_N] = MINTED_RULE.match(/^`([^`]+)` -> "([^"]+)" #(\d+)$/);
+const MINTED_KEY = failKey(MINTED_SPEC, MINTED_HEADING, Number(MINTED_N));
+const MINTED_OPEN = `41 [audit-finding ${MINTED_KEY}] FAIL: ${MINTED_RULE}\n`;
+// Hand-filed, before keys were minted: a heading, no rule number.
+const MANUAL_OPEN = '42 [audit-finding manual-example-gate] FAIL security-ci.md GitHub Actions Policies: a hand-filed failure\n';
+
+/** Every domain passes; `ci` overrides the CI fragment's options. */
+function runOverOpen(t, open, ci = {}, options = {}) {
+  const { dir, env } = fixture(t);
+  stubGh(dir);
+  writeFileSync(join(dir, 'audit-status.txt'), 'PASS');
+  fragments.forEach((f) => writeFileSync(join(dir, f), fragmentText(f, f === CI ? ci : {})));
+  const run = runReporting(dir, env, { embargoEnv: { GH_LEDGER_OPEN: open }, ...options });
+  const body = existsSync(join(dir, 'audit-private.md')) ? readFileSync(join(dir, 'audit-private.md'), 'utf8') : '';
+  return { dir, body, ...run };
+}
+
+for (const [name, open, ci, expected, note] of [
+  ['a PASS over an open failure with no reason is INCONCLUSIVE', MINTED_OPEN, {}, 'MISSING',
+    `\`${CI}\`: ${MINTED_RULE} passes over \`[audit-finding ${MINTED_KEY}]\``],
+  ['a PASS naming the open failure without a path:line is INCONCLUSIVE', MINTED_OPEN,
+    { results: { [MINTED_RULE]: `- PASS: ${MINTED_RULE} — c: holds; [audit-finding ${MINTED_KEY}] fixed upstream` } }, 'MISSING',
+    '### Open findings passed without a reason'],
+  ['a PASS naming the open failure and where it was fixed passes', MINTED_OPEN,
+    { results: { [MINTED_RULE]: `- PASS: ${MINTED_RULE} — c: holds; [audit-finding ${MINTED_KEY}] no longer holds: the gate now reads \`scripts/workflow-lint.mjs:130\`` } }, 'PASS', null],
+  ['a PASS under a hand-filed heading citation with no reason is INCONCLUSIVE', MANUAL_OPEN, {}, 'MISSING',
+    `\`${CI}\`: \`docs/specs/security-ci.md\` -> "GitHub Actions Policies" passes over \`[audit-finding manual-example-gate]\``],
+  ['any PASS line under the hand-filed heading may give the reason', MANUAL_OPEN,
+    { results: { [CI_POLICIES.at(-1)]: `- PASS: ${CI_POLICIES.at(-1)} — c: holds; [audit-finding manual-example-gate] no longer holds: \`.github/workflows/security-audit.yaml:17\`` } }, 'PASS', null],
+  ['a finding citing no rule holds no PASS to a reason', '43 [audit-finding manual-example-lint] WARNING a lint misses a case\n', {}, 'PASS', null],
+  ['no open-findings list leaves every domain INCONCLUSIVE', '', {}, 'MISSING', 'No open ledger findings were handed to the domains.'],
+]) {
+  test(`reporting: ${name}`, (t) => {
+    const { body, outputs } = runOverOpen(t, open, ci, note?.startsWith('No open') ? { listToken: '' } : {});
+    assert.equal(outputs.compose.status, expected, body);
+    if (note) assert.ok(body.includes(note), `missing note: ${note}\n${body}`);
+  });
+}
+
+// The open failure re-reported on another clause is the same failure: the
+// ledger comments on its issue rather than opening a second.
+test('a failure re-reported under another clause letter is seen again, not refiled', (t) => {
+  const { dir, outputs } = runOverOpen(t, MINTED_OPEN, { stated: 'FAIL', results: { [MINTED_RULE]:
+    `- PASS: ${MINTED_RULE}.a — c: holds\n- PASS: ${MINTED_RULE}.b — c: holds\n- FAIL: ${MINTED_RULE}.c — c: violated again\n- FAIL: ${MINTED_RULE}.d — c: and here` } });
+  assert.equal(outputs.compose.status, 'FAIL');
+  assert.equal(readFileSync(join(dir, 'audit-ledger/index.tsv'), 'utf8'), `${MINTED_KEY}\tFAIL\n`);
+  assert.ok(readFileSync(join(dir, 'audit-ledger/1.md'), 'utf8').includes(`- FAIL: ${MINTED_RULE}.d — c: and here`));
+  const embargoCalls = ghCalls(dir).filter(({ embargo }) => embargo);
+  assert.ok(embargoCalls.some(({ args }) => args[1] === 'comment' && args[2] === '41'), JSON.stringify(embargoCalls));
+  assert.ok(!embargoCalls.some(({ args }) => args[1] === 'create' && args[args.indexOf('--title') + 1].startsWith('[audit-finding ')));
+});
+
+// A ledger key must not move with what a domain chose to call it: the clause
+// letter of a failure, or the line and wording of a finding's root cause.
+test('ledger keys ignore the clause letter and a finding\'s wording', (t) => {
+  const keyed = (ci) => {
+    const { dir } = runOverOpen(t, '', { stated: 'FAIL', ...ci });
+    return readFileSync(join(dir, 'audit-ledger/index.tsv'), 'utf8');
+  };
+  const rule = owedIds(CI)[0];
+  const asB = keyed({ results: { [rule]: `- PASS: ${rule}.a — c: ok\n- FAIL: ${rule}.b — c: violated` } });
+  const asC = keyed({ results: { [rule]: `- PASS: ${rule}.a — c: ok\n- PASS: ${rule}.b — c: ok\n- FAIL: ${rule}.c — c: violated` } });
+  assert.equal(asB, asC);
+  const [, spec, heading, n] = rule.match(/^`([^`]+)` -> "([^"]+)" #(\d+)$/);
+  assert.equal(asB, `${failKey(spec, heading, Number(n))}\tFAIL\n`);
+  const symbol = keyed({ stated: 'PASS', lines: finding('WARNING', 'lib/src/config.ts:40', 'parseConfig()', 'one night') });
+  const reworded = keyed({ stated: 'PASS', lines: finding('WARNING', './lib/src/config.ts:90', 'parseConfig falls back to defaults', 'another night') });
+  assert.equal(symbol, reworded);
+  assert.equal(symbol, `${ledgerKey('finding', 'lib/src/config.ts', 'parseconfig')}\tWARNING\n`);
+});
+
+// Hand-filed ledger issues carry keys no run mints; they still count as open,
+// so a PASS that re-verified them comments rather than closing the public issue.
+test('a hand-filed ledger key still counts as an open finding', (t) => {
+  const { dir, outputs, surfaced } = runOverOpen(t, MANUAL_OPEN,
+    { results: { [CI_POLICIES[0]]: `- PASS: ${CI_POLICIES[0]} — c: holds; [audit-finding manual-example-gate] no longer holds: \`lib/src/x.ts:3\`` } });
+  assert.equal(outputs.compose.status, 'PASS');
+  assert.equal(outputs.embargo.open_findings, '1');
+  assert.equal(surfaced.status, 0, surfaced.stderr);
+  assert.equal(readFileSync(join(dir, OPEN_FINDINGS), 'utf8'), MANUAL_OPEN.slice(3));
+  const pub = ghCalls(dir).filter(({ embargo }) => !embargo);
+  assert.ok(!pub.some(({ args }) => args[1] === 'close'));
+  assert.ok(pub.some(({ args, body }) => args[1] === 'comment' && /^PASS this run at .*; 1 finding\(s\) from earlier runs/.test(body)));
 });
 
 // The builder failing must not turn into a verdict.
@@ -727,28 +830,62 @@ for (const [name, options, result, publicNote] of [
   });
 }
 
-// The agent must never hold `EMBARGO_TOKEN`: it is named in exactly one step's
-// `env:`, that step is not the agent's, and no job- or workflow-level `env:`,
-// `$GITHUB_ENV` write, or whole-secrets expression reaches it elsewhere.
-test('EMBARGO_TOKEN is in the embargo step\'s env alone', () => {
-  const holder = 'File embargoed findings';
+// The agent must never hold `EMBARGO_TOKEN`: it is named only in the `env:`
+// of the two steps that list and file the ledger, neither is the agent's, and
+// no job- or workflow-level `env:`, `$GITHUB_ENV` write, or whole-secrets
+// expression reaches it elsewhere.
+const HOLDERS = ['List open findings', 'File embargoed findings'];
+test('EMBARGO_TOKEN is in the env of the list and embargo steps alone', () => {
   const uses = workflow.split('\n').filter((line) => /secrets\s*\.\s*EMBARGO_TOKEN|secrets\s*\[/.test(line));
-  assert.deepEqual(uses, ['          GH_TOKEN: ${{ secrets.EMBARGO_TOKEN }}']);
-  const env = stepText(holder).match(/^        env:\n((?:          .*\n)+)/m)[1];
-  assert.ok(env.includes(uses[0]), 'the token is not in the embargo step\'s env');
+  assert.deepEqual(uses, HOLDERS.map(() => '          GH_TOKEN: ${{ secrets.EMBARGO_TOKEN }}'));
+  for (const holder of HOLDERS) {
+    const env = stepText(holder).match(/^        env:\n((?:          .*\n)+)/m)[1];
+    assert.ok(env.includes(uses[0]), `the token is not in ${holder}'s env`);
+  }
   assert.ok(!stepText('Audit against the security specs').includes('EMBARGO'));
   assert.doesNotMatch(workflow, /toJSON\(\s*secrets\s*\)|secrets: inherit/);
   assert.doesNotMatch(workflow, /GITHUB_ENV/);
 });
 
-// Holding the token, the step runs `gh` on the parts the compose step wrote
-// and nothing from the repository: no script a modified checkout could swap.
-test('the embargo step runs no repository code', () => {
-  const block = runBlock('File embargoed findings');
-  assert.doesNotMatch(block, /\bnode\b|\bpnpm\b|\bnpx\b|scripts\/|\.\/|\bsource\b|^\s*\. /m);
-  // Nor any other program: `gh` and shell builtins only.
-  const code = block.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
-  assert.doesNotMatch(code, /(?:^|[\s;|&(`]|\$\()(?:date|mktemp|mkdir|sed|awk|grep|head|tail|wc|cat|cut|tr|jq|curl|wget|python3?|env|xargs|find|sort)\b(?!-)/m);
+// Holding the token, each step runs `gh` and nothing from the repository: no
+// script a modified checkout could swap.
+for (const holder of HOLDERS) {
+  test(`${holder} runs no repository code`, () => {
+    const block = runBlock(holder);
+    assert.doesNotMatch(block, /\bnode\b|\bpnpm\b|\bnpx\b|scripts\/|\.\/|\bsource\b|^\s*\. /m);
+    // Nor any other program: `gh` and shell builtins only.
+    const code = block.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
+    assert.doesNotMatch(code, /(?:^|[\s;|&(`]|\$\()(?:date|mktemp|mkdir|rm|mv|cp|tee|sed|awk|grep|head|tail|wc|cat|cut|tr|jq|curl|wget|python3?|env|xargs|find|sort)\b(?!-)/m);
+  });
+}
+
+// The titles are embargoed detail: the list step hands them to the agent in
+// one file and logs their count, and only after the plan step decides the run
+// audits and before the agent starts.
+test('the list step writes the open titles to one file and logs only their count', (t) => {
+  const order = ['Skip the domains if nothing changed', 'List open findings', 'Audit against the security specs']
+    .map((name) => workflow.indexOf(`      - name: ${name}\n`));
+  assert.ok(order.every((at, i) => at > 0 && (i === 0 || at > order[i - 1])), String(order));
+  assert.match(stepText('List open findings'), /^        if: steps\.plan\.outputs\.skip != 'true'$/m);
+  const { dir, env } = fixture(t);
+  stubGh(dir);
+  const before = new Set(readdirSync(dir));
+  const result = spawnSync('bash', ['-c', runBlock('List open findings')], { cwd: dir, encoding: 'utf8',
+    env: { ...env, GH_TOKEN: 'fixture-embargo-token', EMBARGO_REPO, GITHUB_OUTPUT: join(dir, 'github-output'),
+      GH_LEDGER_OPEN: `41 [audit-finding 0123456789ab] FAIL: secret detail ${EXPLOIT}\n42 [audit-finding manual-example-gate] FAIL security-ci.md GitHub Actions Policies: more detail\n` } });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(readFileSync(join(dir, OPEN_FINDINGS), 'utf8'),
+    `[audit-finding 0123456789ab] FAIL: secret detail ${EXPLOIT}\n[audit-finding manual-example-gate] FAIL security-ci.md GitHub Actions Policies: more detail\n`);
+  assert.deepEqual(readdirSync(dir).filter((f) => !before.has(f)).sort(), ['gh-calls.jsonl', OPEN_FINDINGS].sort());
+  assert.equal(`${result.stdout}${result.stderr}`, '2 open finding(s) for the domains to re-verify.\n');
+  assert.ok(ghCalls(dir).every(({ args, embargo }) => embargo && args.slice(0, 2).join(' ') === 'issue list'));
+  // Without the token it reads nothing and writes no file, which holds every domain at INCONCLUSIVE.
+  rmSync(join(dir, OPEN_FINDINGS));
+  rmSync(join(dir, 'gh-calls.jsonl'));
+  const missing = spawnSync('bash', ['-c', runBlock('List open findings')], { cwd: dir, encoding: 'utf8',
+    env: { ...env, GH_TOKEN: '', EMBARGO_REPO, GITHUB_OUTPUT: join(dir, 'github-output') } });
+  assert.equal(missing.status, 1);
+  assert.ok(!existsSync(join(dir, OPEN_FINDINGS)) && ghCalls(dir).length === 0);
 });
 
 // Every path the transcript artifact uploads is age ciphertext, and the
@@ -854,16 +991,18 @@ for (const [verdict, cliExit, expected, sentinel = true, stateVerdict = 'PASS', 
     // errexit inside it, so a failed CLI needs an explicit return.
     const result = spawnSync('bash', ['scripts/security-audit-local.sh'], { cwd: dir, env, encoding: 'utf8' });
     assert.equal(result.status, expected, result.stderr);
-    if (verdict.startsWith('FAIL')) {
+    if (verdict === 'FAIL') {
       assert.ok(!result.stderr.includes('first line is not a verdict'), result.stderr);
       // A dissent is reported as one whether or not the fragment finished.
       assert.match(result.stderr, /says `VERDICT: FAIL/);
     }
+    // Only the exact line is a verdict: an appended explanation makes it unreadable.
+    if (verdict.startsWith('FAIL ')) assert.match(result.stderr, /first line is not a verdict/);
     if (!sentinel) assert.match(result.stderr, /never wrote its sentinel/);
     for (const fragment of allFragments) assert.ok(existsSync(join(dir, fragment)), fragment);
     assert.equal(readFileSync(join(dir, STATE_FRAGMENT), 'utf8').split('\n')[0], `VERDICT: ${stateVerdict}`);
-    // Local output stays local: the runner files nothing, anywhere.
-    assert.deepEqual(ghCalls(dir), []);
+    // Local output stays local: the runner reads the ledger and files nothing, anywhere.
+    assert.deepEqual(ghCalls(dir).map(({ args }) => args.slice(0, 2).join(' ')), ['issue list']);
   });
 }
 
@@ -874,6 +1013,7 @@ for (const [arg, runsState, runsDomain] of [['github-state', true, false], ['ci-
     const { dir, env } = fixture(t);
     rmSync(join(dir, STATE_FRAGMENT));
     localRunnerFixture(dir);
+    stubGh(dir);
     stub(dir, 'claude', `
       const fs = require('node:fs');
       const output = process.argv[3].match(/\\*\\*Output file:\\*\\* \\x60([^\\x60]+)\\x60/)[1];

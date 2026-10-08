@@ -95,6 +95,7 @@ lib/screenshots/
 # Local security-audit fragments (scripts/security-audit-local.sh)
 audit-*.md
 audit-status.txt
+audit-open-findings.txt
 
 # lint self-test backups, if a signal interrupts one mid-run
 *.selftest.bak

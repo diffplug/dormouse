@@ -96,6 +96,24 @@ run_domain() {
   node scripts/security-audit-report.mjs check "$out" >&2
 }
 
+# The open ledger findings every domain re-verifies, as CI's `List open
+# findings` step writes them, read on the operator's own login. Without the
+# file each domain computes INCONCLUSIVE, as it does in CI. It reads the
+# private tracker and files nothing there.
+write_open_findings() {
+  local open row
+  rm -f audit-open-findings.txt
+  if ! open=$(gh issue list --repo diffplug/dormouse-embargo --state open --limit 1000 --json number,title \
+      --jq '.[] | select(.title | startswith("[audit-finding ")) | "\(.number) \(.title)"'); then
+    echo "==> could not read the findings ledger; every domain will compute INCONCLUSIVE" >&2
+    return 0
+  fi
+  while read -r row; do
+    [ -n "$row" ] || continue
+    printf '%s\n' "${row#* }"
+  done <<< "$open" > audit-open-findings.txt
+}
+
 # The deterministic checks, writing the fragment CI's reporting step reads
 # beside the domains'.
 run_github_state() {
@@ -114,6 +132,7 @@ if [ $# -gt 0 ]; then
     github-state) run_github_state; exit $? ;;
     ci-and-secrets|supply-chain) run_github_state || status=1 ;;
   esac
+  write_open_findings
   run_domain "$1" || status=$?
   exit "$status"
 fi
@@ -123,6 +142,7 @@ fi
 # each domain's failure is recorded while the remaining domains still run.
 status=0
 run_github_state || status=1
+write_open_findings
 for domain in supply-chain ci-and-secrets application-security hosted; do
   run_domain "$domain" || status=1
 done

@@ -14,6 +14,9 @@
  *     `audit-ledger/`, and the step outputs to <file>. Fragments named by
  *     $AUDIT_FRAGMENTS, `audit-status.txt`, the domain prompts, and the specs
  *     are read from the working directory.
+ *
+ * `check` and `compose` both read `audit-open-findings.txt`, the open ledger
+ * titles the domains were handed to re-verify, from the working directory.
  */
 
 import { createHash } from 'node:crypto';
@@ -24,6 +27,8 @@ import { clampIssueBody } from './clamp-issue-body.mjs';
 
 export const SENTINEL = '<!-- END OF REPORT -->';
 const AUDIT_DIR = '.github/audit';
+/** The open ledger issues' titles, one per line, written before the domains start. */
+export const OPEN_FINDINGS = 'audit-open-findings.txt';
 
 /** A rule line in a spec, the same match `scripts/spec-lint.mjs` uses: the bold leads the line. */
 const FAIL_IF_RE = /^\s*(?:[-*]\s+)?\*\*FAIL IF\b/;
@@ -154,12 +159,9 @@ export function fragmentManifest(root, fragment) {
 
 // --- Parsing one fragment --------------------------------------------------
 
-/** The verdict a fragment's first line states, by the grammar the reporting step has always read. */
+/** The verdict a fragment's first line states: one of the three exact lines `.github/audit/_preamble.md` allows, or null. */
 function statedVerdict(firstLine) {
-  if (firstLine === 'VERDICT: PASS') return 'PASS';
-  if (firstLine === 'VERDICT: INCONCLUSIVE') return 'INCONCLUSIVE';
-  if (firstLine.startsWith('VERDICT: FAIL')) return 'FAIL';
-  return null;
+  return firstLine.match(/^VERDICT: (PASS|FAIL|INCONCLUSIVE)$/)?.[1] ?? null;
 }
 
 /** Every structured line of a fragment, and every line that tried to be one and is not. */
@@ -221,17 +223,76 @@ export const owedIds = (owed) => [...owed].flatMap(([key, numbers]) => {
   return numbers.map((n) => ruleId(spec, heading, n));
 });
 
+// --- Open ledger findings --------------------------------------------------
+
+/** `[audit-finding <key>] <summary>`: a minted hash key, or a hand-filed `manual-…` one. */
+const LEDGER_TITLE_RE = /^\[audit-finding ([\w.-]+)\] (\S.*)$/;
+/** A minted failure's summary: `FAIL: `spec` -> "heading" #n`. */
+const MINTED_CITE_RE = /^FAIL: `(docs\/specs\/security[a-z-]*\.md)` -> "([^"\n]+)" #([1-9]\d*)/;
+/** A hand-filed one's: `FAIL security-ci.md GitHub Actions Policies: <summary>`, citing a heading alone. */
+const MANUAL_CITE_RE = /^FAIL (security[a-z-]*\.md) ([^:\n]+):/;
+/** A `path:line`, where a re-verified finding's reason points. */
+const LOCATION_RE = /[\w@-]+(?:[./][\w@-]+)+:[1-9]\d*/;
+
+/**
+ * The open ledger findings, one per `[audit-finding …]` title, with the rule a
+ * failure cites: its spec, heading, and number, or for a hand-filed title its
+ * heading alone (`rule` null). A finding that cites no rule is re-verified by
+ * the qualitative pass, which no line records.
+ */
+export function parseOpenFindings(text) {
+  return text.split('\n').flatMap((line) => {
+    const m = line.trim().match(LEDGER_TITLE_RE);
+    if (!m) return [];
+    const minted = m[2].match(MINTED_CITE_RE);
+    const manual = minted ? null : m[2].match(MANUAL_CITE_RE);
+    return [{ key: m[1],
+      spec: minted ? minted[1] : manual ? `docs/specs/${manual[1]}` : null,
+      heading: minted ? minted[2] : manual ? manual[2].trim() : null,
+      rule: minted ? Number(minted[3]) : null }];
+  });
+}
+
+/** The open findings this run handed its domains, or null when it handed none: the list step failed or never ran. */
+export function readOpenFindings(root = '.') {
+  const path = join(root, OPEN_FINDINGS);
+  return existsSync(path) ? parseOpenFindings(readFileSync(path, 'utf8')) : null;
+}
+
+/**
+ * Each open failure a fragment passed without saying why: every result line
+ * on its rule (on its heading, for a heading-level citation) is `PASS`, and
+ * none names `[audit-finding <key>]` followed by a `path:line`. A `FAIL` or
+ * `UNVERIFIABLE` there leaves the finding open, and no line at all is already
+ * a missing rule.
+ */
+function unexplainedPasses(results, owed, open) {
+  const out = [];
+  for (const f of open) {
+    const numbers = f.spec ? owed.get(`${f.spec}\0${f.heading}`) : null;
+    if (!numbers || (f.rule !== null && !numbers.includes(f.rule))) continue;
+    const scope = results.filter((r) => r.spec === f.spec && r.heading === f.heading && (f.rule === null || r.rule === f.rule));
+    if (scope.length === 0 || scope.some((r) => r.status !== 'PASS')) continue;
+    const marker = `[audit-finding ${f.key}]`;
+    if (scope.some((r) => r.line.includes(marker) && LOCATION_RE.test(r.line.slice(r.line.indexOf(marker))))) continue;
+    out.push(`${f.rule === null ? `\`${f.spec}\` -> "${f.heading}"` : ruleId(f.spec, f.heading, f.rule)} passes over \`${marker}\``);
+  }
+  return out;
+}
+
 // --- The computed verdict --------------------------------------------------
 
 /**
  * One fragment's verdict from its own lines, against the rules its manifest
  * owes. `text` is null for a fragment that is absent or empty. A
- * deterministic fragment owes no qualitative line and no finding evidence.
+ * deterministic fragment owes no qualitative line, no finding evidence, and
+ * no re-verification; a domain owes a reason for each open finding it passes
+ * (`open`), and with `open` null it re-verified none.
  */
-export function domainVerdict(text, owed, { deterministic = false } = {}) {
+export function domainVerdict(text, owed, { deterministic = false, open = [] } = {}) {
   if (text === null) {
     return { verdict: 'INCONCLUSIVE', stated: null, absent: true, finished: false, doubts: ['it left no report'],
-      results: [], findings: [], malformed: [], missing: owedIds(owed), stray: [], anomalies: [] };
+      results: [], findings: [], malformed: [], missing: owedIds(owed), stray: [], unexplained: [], unhanded: false, anomalies: [] };
   }
   const p = parseFragment(text, { evidence: !deterministic });
   const missing = [];
@@ -266,6 +327,10 @@ export function domainVerdict(text, owed, { deterministic = false } = {}) {
   if (!deterministic && p.qualitative !== 1) doubts.push(p.qualitative ? 'it recorded more than one qualitative pass' : 'it recorded no finished qualitative pass');
   if (!p.finished) doubts.push('it never wrote its sentinel');
   if (p.stated === null) doubts.push('its first line is not a verdict');
+  const unhanded = !deterministic && open === null;
+  const unexplained = deterministic || unhanded ? [] : unexplainedPasses(p.results, owed, open);
+  if (unhanded) doubts.push('it was handed no open ledger findings to re-verify');
+  if (unexplained.length) doubts.push(`${unexplained.length} open ledger finding${unexplained.length > 1 ? 's are' : ' is'} passed with no reason it no longer holds`);
   const computed = failed ? 'FAIL' : doubts.length ? 'INCONCLUSIVE' : 'PASS';
   const anomalies = [];
   if (p.stated !== null && p.stated !== computed) {
@@ -279,12 +344,14 @@ export function domainVerdict(text, owed, { deterministic = false } = {}) {
     doubts.push('its own line is more doubtful than its lines');
   }
   return { verdict, stated: p.stated, absent: false, finished: p.finished, doubts,
-    results: p.results, findings: p.findings, malformed: p.malformed, missing, stray, anomalies };
+    results: p.results, findings: p.findings, malformed: p.malformed, missing, stray, unexplained, unhanded, anomalies };
 }
 
-/** A fragment's verdict, judged against its own manifest and profile. */
-export const judgeFragment = (root, name, text) =>
-  domainVerdict(text, fragmentManifest(root, name), { deterministic: name in DETERMINISTIC });
+/** A fragment's verdict, judged against its own manifest, its profile, and the open findings handed to the run. */
+export function judgeFragment(root, name, text) {
+  const deterministic = name in DETERMINISTIC;
+  return domainVerdict(text, fragmentManifest(root, name), { deterministic, open: deterministic ? [] : readOpenFindings(root) });
+}
 
 /** The run's verdict: the worst domain, and never PASS unless the orchestrator wrote exactly `PASS`. */
 function runVerdict(domainsByFragment, fileStatus) {
@@ -301,7 +368,24 @@ function runVerdict(domainsByFragment, fileStatus) {
 // --- Duplicates and the ledger ---------------------------------------------
 
 const normPath = (p) => p.replace(/^\.\//, '').replace(/^\/+/, '');
-const normCause = (c) => c.trim().toLowerCase().replace(/\(\)$/, '').replace(/\s+/g, ' ');
+/** An identifier that reads as code: camelCase, PascalCase with two humps, `snake_case`, or a call. */
+const SYMBOL_RE = /[A-Za-z_$][\w$]*(?:\(\))?/g;
+const codeLike = (token) => /[a-z][A-Z]|[A-Z][a-z]+[A-Z]|_|\(\)$/.test(token);
+
+/**
+ * A finding's root cause as its key reads it: the symbol it names, not the
+ * words around it, so `parseConfig()` and `parseConfig fallback` are one
+ * cause. A single token is its own symbol; prose naming none falls back to the
+ * whole cause (the rule it lives in), lowercased with its punctuation dropped.
+ */
+export function rootCause(cause) {
+  const text = cause.trim();
+  const symbol = /\s/.test(text) ? text.match(SYMBOL_RE)?.find(codeLike) : text;
+  return (symbol ?? text.replace(/[`'"“”,;:]/g, '')).toLowerCase().replace(/\(\)$/, '').replace(/\s+/g, ' ');
+}
+
+/** A finding's identity across runs and domains: its file and root cause, never its line or wording. */
+export const findingKey = (path, cause) => `${normPath(path)}\0${rootCause(cause)}`;
 
 /**
  * Findings that name the same root cause in the same file within five lines are
@@ -310,7 +394,7 @@ const normCause = (c) => c.trim().toLowerCase().replace(/\(\)$/, '').replace(/\s
  */
 export function dedupFindings(entries) {
   const sorted = entries
-    .map((e) => ({ ...e, key: `${normPath(e.finding.path)}\0${normCause(e.finding.cause)}` }))
+    .map((e) => ({ ...e, key: findingKey(e.finding.path, e.finding.cause) }))
     .sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : a.finding.line - b.finding.line));
   const merged = [];
   for (const e of sorted) {
@@ -331,6 +415,8 @@ export function dedupFindings(entries) {
 
 /** A ledger key: stable across runs, so line drift does not open a second issue for one finding. */
 export const ledgerKey = (...parts) => createHash('sha256').update(parts.join('\0')).digest('hex').slice(0, 12);
+/** A failed rule's key: its spec, heading, and number, never the clause letter a domain chose. */
+export const failKey = (spec, heading, rule) => ledgerKey('check', spec, heading, rule);
 
 // --- Compose ---------------------------------------------------------------
 
@@ -350,13 +436,15 @@ function compose({ fragments, root = '.', fileStatus, runUrl, transcriptUrl = ''
   const entries = Object.entries(byFragment).flatMap(([fragment, d]) => d.findings.map((finding) => ({ fragment, finding })));
   const merged = dedupFindings(entries);
 
-  // The ledger: one entry per failed rule clause, and per file and root
-  // cause among the merged BLOCKERs and WARNINGs.
+  // The ledger: one entry per failed rule, its clauses together, and per
+  // file and root cause among the merged BLOCKERs and WARNINGs.
   const ledger = new Map();
   for (const [fragment, d] of Object.entries(byFragment)) {
     for (const r of d.results.filter((x) => x.status === 'FAIL')) {
-      const key = ledgerKey('check', r.spec, r.heading, r.rule, r.clause ?? '');
-      if (!ledger.has(key)) ledger.set(key, { key, severity: 'FAIL', title: `FAIL: ${ruleId(r.spec, r.heading, r.rule, r.clause)}`, body: `Reported by \`${fragment}\`:\n\n${r.line}\n` });
+      const key = failKey(r.spec, r.heading, r.rule);
+      const line = `Reported by \`${fragment}\`:\n\n${r.line}\n`;
+      if (ledger.has(key)) ledger.get(key).body += `\n${line}`;
+      else ledger.set(key, { key, severity: 'FAIL', title: `FAIL: ${ruleId(r.spec, r.heading, r.rule)}`, body: line });
     }
   }
   for (const m of merged.filter((x) => x.severity !== 'INFO')) {
@@ -377,8 +465,9 @@ function compose({ fragments, root = '.', fileStatus, runUrl, transcriptUrl = ''
   const headline = status === 'FAIL' ? `Audit failed at ${date}.`
     : status === 'PASS' ? `Audit passed at ${date}.`
       // Only a claimed failure the lines do not carry, or a line that may be a
-      // mangled one, is "more"; an optimistic or a cautious line claims less.
-      : `Audit reached no usable verdict at ${date}. ${fileStatus === 'FAIL' || Object.values(byFragment).some((d) => d.stated === 'FAIL' || d.malformed.length)
+      // mangled one — an unreadable verdict line included — is "more"; an
+      // optimistic or a cautious line claims less.
+      : `Audit reached no usable verdict at ${date}. ${fileStatus === 'FAIL' || Object.values(byFragment).some((d) => d.stated === 'FAIL' || d.malformed.length || (!d.absent && d.stated === null))
         ? 'A domain claimed more than its result lines record; read the anomalies before treating this as no finding.'
         : 'This is not a security finding: the run ended without deciding.'}`;
   lines.push(`${headline} ${links}`, '');
@@ -400,6 +489,9 @@ function compose({ fragments, root = '.', fileStatus, runUrl, transcriptUrl = ''
   const missing = Object.entries(byFragment).flatMap(([name, d]) =>
     (d.absent ? [] : d.missing).map((m) => `- \`${name}\`: ${m}`));
   if (missing.length) lines.push('### Rules with no result line', '', '_Each counts as undetermined: the domain skipped it, or wrote its line outside the grammar._', '', ...missing, '');
+
+  const unexplained = Object.entries(byFragment).flatMap(([name, d]) => d.unexplained.map((u) => `- \`${name}\`: ${u}`));
+  if (unexplained.length) lines.push('### Open findings passed without a reason', '', '_Each counts as undetermined: a PASS on a rule an open ledger finding cites must name the finding and the `path:line` showing it no longer holds._', '', ...unexplained, '');
 
   const malformed = Object.entries(byFragment).flatMap(([name, d]) => [
     ...d.malformed.map((m) => `- \`${name}\` (${m.why}): ${clip(m.line)}`),
@@ -433,6 +525,8 @@ function notes(byFragment, fileStatus) {
   if (unreadable) out.push(`- **A domain's verdict could not be read.** The first line of ${unreadable} is not an exact \`VERDICT: PASS\`, \`VERDICT: FAIL\`, or \`VERDICT: INCONCLUSIVE\`.`);
   const cut = of((d) => !d.absent && !d.finished);
   if (cut) out.push(`- **A domain was cut off mid-report.** ${cut} never wrote its \`${SENTINEL}\` sentinel, so its lines are what it had recorded when it stopped. The findings it did write are still findings.`);
+  const unhanded = of((d) => d.unhanded);
+  if (unhanded) out.push(`- **No open ledger findings were handed to the domains.** \`${OPEN_FINDINGS}\` was absent, so ${unhanded} re-verified none of them; the \`List open findings\` step's log says why.`);
   const doubtful = Object.entries(byFragment).filter(([, d]) => !d.absent && d.verdict === 'INCONCLUSIVE');
   if (doubtful.length) out.push(`- **A domain could not determine every check.** ${doubtful.map(([n]) => n).join(', ')}: ${doubtful.map(([n, d]) => `\`${n}\` — ${d.doubts.join('; ')}`).join('. ')}.`);
   if (fileStatus === 'MISSING') out.push('- **The orchestrator wrote no verdict.** `audit-status.txt` was absent, empty, or not `PASS`/`FAIL`. The domains\' computed verdicts above still stand; an expired wait deadline looks like a domain with no report or one cut off.');
@@ -475,6 +569,7 @@ function main(argv) {
     console.log(`${args._}: ${d.verdict}${d.doubts.length ? ` (${d.doubts.join('; ')})` : ''}`);
     for (const a of d.anomalies) console.log(`  anomaly: ${a}`);
     for (const m of d.missing) console.log(`  no result line: ${m}`);
+    for (const u of d.unexplained) console.log(`  open finding passed without a reason: ${u}`);
     for (const m of d.malformed) console.log(`  malformed (${m.why}): ${clip(m.line, 200)}`);
     process.exit(d.verdict === 'PASS' ? 0 : 1);
   }

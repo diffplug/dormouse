@@ -119,6 +119,41 @@ jobs:
           retention-days: 14
           if-no-files-found: error
 
+      # The open findings ledger, as the checklist each domain re-verifies
+      # before it passes a rule one cites (docs/specs/security-audit.md ->
+      # "Findings ledger"). The second step that holds `EMBARGO_TOKEN`, and
+      # like the first it runs only `gh` and shell builtins. It writes the
+      # open ledger titles, keys and summaries alone, to
+      # `audit-open-findings.txt` for the agent to read, and logs only their
+      # count, which the public issue already carries. A failure writes no
+      # file, and every domain then computes INCONCLUSIVE.
+      - name: List open findings
+        id: findings
+        if: steps.plan.outputs.skip != 'true'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.EMBARGO_TOKEN }}
+          EMBARGO_REPO: diffplug/dormouse-embargo
+        run: |
+          set -uo pipefail
+          [ -n "${GH_TOKEN:-}" ] ||
+            { echo "::error::EMBARGO_TOKEN is not set; the domains have no open findings to re-verify."; exit 1; }
+          GH_CONFIG_DIR="$RUNNER_TEMP/gh-findings-$GITHUB_RUN_ID-$$"
+          [ ! -e "$GH_CONFIG_DIR" ] ||
+            { echo "::error::A gh configuration directory already exists at the fresh path."; exit 1; }
+          export GH_CONFIG_DIR GH_HOST=github.com
+          OPEN=$(gh issue list --repo "$EMBARGO_REPO" --state open --limit 1000 \
+                   --json number,title \
+                   --jq '.[] | select(.title | startswith("[audit-finding ")) | "\(.number) \(.title)"') ||
+            { echo "::error::Reading the findings ledger failed; the domains have no open findings to re-verify."; exit 1; }
+          COUNT=0
+          while read -r row; do
+            [ -n "$row" ] || continue
+            printf '%s\n' "${row#* }"
+            COUNT=$((COUNT + 1))
+          done <<< "$OPEN" > audit-open-findings.txt
+          echo "$COUNT open finding(s) for the domains to re-verify."
+
       - name: Audit against the security specs
         if: steps.plan.outputs.skip != 'true'
         uses: anthropics/claude-code-action@58985842b834ed26087302ba27d07bc24ca8697a # v1.0.244
@@ -391,7 +426,7 @@ jobs:
             --note "The full report is in this run's encrypted \`audit-transcript\` artifact${TRANSCRIPT_URL:+ ([download]($TRANSCRIPT_URL))}." \
             || { echo "clamp-issue-body.mjs failed; filing audit-private.md as one part." >&2; cp audit-private.md audit-private-part-01.md; }
 
-      # The one step that holds `EMBARGO_TOKEN`, and it runs no repository
+      # The other step that holds `EMBARGO_TOKEN`, and it runs no repository
       # code: only `gh` and shell builtins, on the files `Compose the audit
       # report` wrote. The agent step never has the token in its environment;
       # see docs/specs/security-audit.md -> "Embargo" for what that does and
