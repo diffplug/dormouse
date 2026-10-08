@@ -42,7 +42,7 @@ import {
   WEB_PUSH_SENDER,
 } from './e2e-lint.mjs';
 
-const selftest = makeSelftest('e2e-lint.mjs', '.e2e-selftest.bak');
+const selftest = makeSelftest('e2e-lint.mjs');
 
 for (const rule of RULES) {
   const name = rule.rule;
@@ -276,6 +276,9 @@ for (const [file, violation] of [
 // Every spelling the room rule names must redden it, not just the parse the
 // loop appends: a decode, a log, or a stored frame is the same leak. The
 // decodes are the relay room's set, a `Buffer` and a `TextDecoder` included.
+// A frame kept in the attachment — spread in, beside the room's own state,
+// unchecked or past `satisfies` — or in a `RoomState` widened to hold one is
+// stored too, as is any reach for `storage` or `console` through an alias.
 for (const violation of [
   '\nconst __selftest = (ct: string) => fromBase64Url(ct);\n',
   '\nconst __selftest = (ct: string) => atob(ct);\n',
@@ -286,11 +289,21 @@ for (const violation of [
   '\nconst __selftest = (frame: string) => console.log(frame);\n',
   "\nconst __selftest = (frame: string) => this.#ctx.storage.put('frame', frame);\n",
   "\nconst __selftest = (frame: string) => this.#ctx.storage.sql.exec('SELECT ?', frame);\n",
+  "\nconst __selftest = (frame: string) => this.#ctx.storage.kv.put('frame', frame);\n",
+  "\nconst __selftest = (ctx: DurableObjectState, frame: string) => { const store = ctx.storage; return store.put('frame', frame); };\n",
+  '\nconst __selftest = ({ storage }: DurableObjectState) => storage;\n',
+  '\nconst __selftest = console;\n',
+  '\nconst __selftest = (ws: WorkerWebSocket, state: RoomState, frame: string) => ws.serializeAttachment({ ...state, frame });\n',
+  '\nconst __selftest = (ws: WorkerWebSocket, frame: string) => ws.serializeAttachment(frame);\n',
+  '\nconst __selftest = (ws: WorkerWebSocket, state: RoomState, frame: string) => ws.serializeAttachment({ ...state, ...{ frame } } satisfies RoomState);\n',
+  '\nconst __selftest = (ws: WorkerWebSocket, last: RoomState) => ws.serializeAttachment({ ...last } satisfies RoomState);\n',
+  '\ninterface RoomState {\n  last: string;\n}\n',
+  '\ntype RoomState = { expiresAt: number; frames: string[] };\n',
 ]) {
   selftest.withAppended(
     'hosted/server/one-time-room.ts',
     violation,
-    `a forbidden read in hosted/server/one-time-room.ts stays green: ${violation.trim()}`,
+    `a forbidden read or store in hosted/server/one-time-room.ts stays green: ${violation.trim()}`,
   );
 }
 
