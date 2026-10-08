@@ -11,8 +11,14 @@
 # repo or the ci-and-secrets domain will report FAILs that are really 403s.
 #
 # Usage:
-#   scripts/security-audit-local.sh            # all four domains
+#   scripts/security-audit-local.sh            # the deterministic checks, then all four domains
 #   scripts/security-audit-local.sh application-security   # one domain
+#   scripts/security-audit-local.sh github-state            # the deterministic checks alone
+#
+# The deterministic GitHub-state check (`scripts/github-state-check.mjs`) runs
+# first whenever a domain that reads its fragment does — `ci-and-secrets` and
+# `supply-chain` — on the same `gh` login, with `--local` so a 403 reads as
+# unverifiable rather than as drift in the CI PAT's scope.
 #
 # Reports land in ./audit-*.md, which .gitignore covers.
 
@@ -37,6 +43,19 @@ fi
 for f in _preamble orchestrator supply-chain ci-and-secrets application-security hosted; do
   [ -f "$AUDIT_DIR/$f.md" ] || { echo "error: missing $AUDIT_DIR/$f.md" >&2; exit 1; }
 done
+
+# A fragment's first line, in the grammar CI applies in
+# .github/workflows/security-audit.yaml, and for the same reason: a failure with
+# an appended explanation is still a finding, so only the PASS arm matches
+# exactly. Drifting from CI here would report a dissenting fragment as unreadable.
+fragment_verdict() {
+  case "$(head -n1 "$2")" in
+    'VERDICT: PASS') return 0 ;;
+    'VERDICT: FAIL'*) echo "==> $1 reports FAIL" >&2; return 1 ;;
+    'VERDICT: INCONCLUSIVE') echo "==> $1 could not determine every check" >&2; return 1 ;;
+    *) echo "==> $1 produced no readable verdict" >&2; return 1 ;;
+  esac
+}
 
 # One domain, in the foreground. This is the loop you actually iterate in while
 # editing a security spec: no orchestrator, no waiting, no merge — just the domain
@@ -91,31 +110,40 @@ run_domain() {
       case "$(head -n1 "$out")" in 'VERDICT: FAIL'*) echo "==> $domain reports FAIL" >&2 ;; esac
       return 1
     fi
-    # The same grammar CI applies in .github/workflows/security-audit.yaml, and
-    # for the same reason: a failure with an appended explanation is still a
-    # finding, so only the PASS arm matches exactly. Drifting from CI here would
-    # report a dissenting fragment as unreadable.
-    case "$(head -n1 "$out")" in
-      'VERDICT: PASS') return 0 ;;
-      'VERDICT: FAIL'*) echo "==> $domain reports FAIL" >&2; return 1 ;;
-      'VERDICT: INCONCLUSIVE') return 1 ;;
-      *) echo "==> $domain produced no readable verdict" >&2; return 1 ;;
-    esac
+    fragment_verdict "$domain" "$out"
   else
     echo "==> $domain produced no fragment — in CI that is an INCONCLUSIVE audit, not a FAIL" >&2
     return 1
   fi
 }
 
+# The deterministic checks, writing the fragment CI's reporting step reads
+# beside the domains'.
+run_github_state() {
+  echo "==> github-state -> audit-github-state.md (deterministic)"
+  rm -f audit-github-state.md
+  if ! node scripts/github-state-check.mjs --local --out audit-github-state.md >/dev/null; then
+    echo "==> the GitHub-state check failed to run" >&2
+    return 1
+  fi
+  fragment_verdict github-state audit-github-state.md
+}
+
 if [ $# -gt 0 ]; then
-  run_domain "$1"
-  exit $?
+  status=0
+  case "$1" in
+    github-state) run_github_state; exit $? ;;
+    ci-and-secrets|supply-chain) run_github_state || status=1 ;;
+  esac
+  run_domain "$1" || status=$?
+  exit "$status"
 fi
 
 # All four, sequentially rather than fanned out. CI parallelises because it is
 # paying wall-clock for a nightly; locally, serial output is readable and a
 # each domain's failure is recorded while the remaining domains still run.
 status=0
+run_github_state || status=1
 for domain in supply-chain ci-and-secrets application-security hosted; do
   run_domain "$domain" || status=1
 done

@@ -21,7 +21,8 @@ jobs:
   audit:
     runs-on: ubuntu-latest
     env:
-      # The four per-domain fragment filenames, in one place. They are
+      # The four per-domain fragment filenames, then the deterministic
+      # GitHub-state check's, in one place. They are
       # named by the redactor's argv, its fail-closed `rm -f`, the
       # encrypted archive, the reporting step's guard loop, and the public
       # body builder, and drift between two of those lists is precisely
@@ -29,7 +30,7 @@ jobs:
       # stops being redacted but keeps being published. Every use
       # word-splits this deliberately, so the names must stay
       # space-separated and shell-safe.
-      AUDIT_FRAGMENTS: audit-supply-chain.md audit-ci-secrets.md audit-application.md audit-hosted.md
+      AUDIT_FRAGMENTS: audit-supply-chain.md audit-ci-secrets.md audit-application.md audit-hosted.md audit-github-state.md
     # Must stay well above the orchestrator's own wait deadline in
     # `.github/audit/orchestrator.md` (32 minutes, counted from the first
     # time its wait loop runs — i.e. after checkout, setup-node, the
@@ -75,8 +76,52 @@ jobs:
           echo "::error::AUDIT_PAT secret is not set."
           exit 1
 
+      # The deterministic half: every `FAIL IF` that GitHub state answers,
+      # read live and judged by a script against
+      # `.github/audit/expected-github-state.json` rather than re-derived by
+      # a model each night (docs/specs/security-audit.md -> "Deterministic
+      # checks"). Its fragment rides `AUDIT_FRAGMENTS` like a domain's, so a
+      # FAIL here fails the run through the reporting steps below. It must
+      # not stop the domains: a crash leaves no fragment, which the
+      # reporting step's guard reports as an unfinished audit.
+      - name: Check GitHub state
+        id: ghstate
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.AUDIT_PAT }}
+          # Workflow runs, the tagger App, and the tend tag are public; the
+          # workflow token reads them without spending the PAT's scope.
+          WORKFLOW_TOKEN: ${{ github.token }}
+        run: node scripts/github-state-check.mjs --out audit-github-state.md
+
+      # A scheduled run whose commit and GitHub-state hash both match the last
+      # completed run on `main`, which passed, skips the model-run domains
+      # (docs/specs/security-audit.md -> "Skipping an unchanged audit"). A
+      # dispatch, the release gate's included, never skips. A crash here
+      # leaves `skip` unset, which runs the domains.
+      - name: Skip the domains if nothing changed
+        id: plan
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STATE_HASH: ${{ steps.ghstate.outputs.hash }}
+        run: node scripts/security-audit-plan.mjs
+
+      # What this run audited, for the next run's skip decision: the commit,
+      # the state hash, and when the domains last ran. Public like every
+      # artifact here, and it carries nothing a finding could.
+      - name: Upload the audited state
+        if: always() && steps.plan.outcome == 'success'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: audit-state
+          path: ${{ runner.temp }}/audit-state/audit-state.json
+          retention-days: 14
+          if-no-files-found: error
+
       - name: Audit against the security specs
-        uses: anthropics/claude-code-action@58985842b834ed26087302ba27d07bc24ca8697a # v1
+        if: steps.plan.outputs.skip != 'true'
+        uses: anthropics/claude-code-action@58985842b834ed26087302ba27d07bc24ca8697a # v1.0.244
         env:
           # `claude-code-action` resets `GH_TOKEN` to its own internal
           # workflow token, so setting `GH_TOKEN` at this scope is
@@ -294,6 +339,8 @@ jobs:
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
+          # A skipped run has only the deterministic fragment to read.
+          AUDIT_FRAGMENTS: ${{ steps.plan.outputs.fragments || env.AUDIT_FRAGMENTS }}
         run: |
           set -eo pipefail
 
@@ -686,6 +733,7 @@ jobs:
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
+          AUDIT_FRAGMENTS: ${{ steps.plan.outputs.fragments || env.AUDIT_FRAGMENTS }}
           STATUS: ${{ steps.compose.outputs.status }}
           FILE_STATUS: ${{ steps.compose.outputs.file_status }}
           DISSENTING: ${{ steps.compose.outputs.dissenting }}

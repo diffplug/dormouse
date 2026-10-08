@@ -6,14 +6,7 @@
 
 **Output file:** `audit-supply-chain.md`
 
-The default `$GH_TOKEN` in this environment is a workflow `GITHUB_TOKEN` and does **not** have admin scope. GitHub omits `security_and_analysis` for a non-admin token and answers 403 rather than 204 on the Dependabot alert endpoint, so the secret-scanning and Dependabot checks read as absent when they are on. Prefix those `gh api` calls with `GH_TOKEN=$AUDIT_PAT`:
-
-```sh
-GH_TOKEN=$AUDIT_PAT gh api repos/$GITHUB_REPOSITORY --jq .security_and_analysis
-GH_TOKEN=$AUDIT_PAT gh api repos/$GITHUB_REPOSITORY/vulnerability-alerts
-```
-
-An earlier step guarantees `$AUDIT_PAT` is present; `docs/specs/security-audit.md` states its scopes. If a prefixed call still returns 403, record FAIL with the note "PAT scope drifted from docs/specs/security-audit.md". When run by `scripts/security-audit-local.sh` without `AUDIT_PAT`, use the operator's existing `gh` authentication without a `GH_TOKEN=` override, and report an inaccessible check as `UNVERIFIABLE`.
+The secret-scanning and Dependabot clauses under "Cooldown and alerts" are judged in `audit-github-state.md`, which `scripts/github-state-check.mjs` wrote before you started; **do not re-derive or re-record them** — the reporting step reads that fragment itself. For every other `FAIL IF` marked `Pinned by` a script or test, run it — `node --test scripts/supply-chain-config.test.mjs` for the cooldown, Renovate, runtime-pin, `npx`, and CI-linter rules — and record its result as the evidence, one line per clause it pins. What stays yours is the unpinned clauses, the judgement bullets, and the qualitative pass.
 
 Run the generate-deps check in a scratch copy of the audited commit (`git archive HEAD` into a temporary directory, committed clean there), after `pnpm install --frozen-lockfile --ignore-scripts` in that copy, never in the audited tree: the generator resolves every dependency by walking real `node_modules` directories and throws rather than under-reporting if they are absent.
 
