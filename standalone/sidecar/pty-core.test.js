@@ -2344,7 +2344,9 @@ test('PTY owner streams only the current generation and stops the one a spawn di
   generations[0].onData('old shell');
   generations[1].onData('new shell');
   assert.deepEqual(sent.filter(([type]) => type === 'data').map(([, msg]) => msg.data), ['new shell']);
-  assert.deepEqual(generations[0].kills, ['SIGTERM']);
+  // `kill()` with no argument is node-pty's SIGHUP; an interactive bash ignores
+  // SIGTERM, so a graceful stop would leave the unreachable shell running.
+  assert.deepEqual(generations[0].kills, [undefined]);
   assert.deepEqual(generations[1].kills, []);
   mgr.killAll();
 });

@@ -1396,12 +1396,14 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
     // A spawn over a live generation — a cold restore that believed a host
     // silent through both list asks (`collectLivePtys`) — leaves the old shell
     // unreachable: nothing can write to it, and its output and exit no longer
-    // speak for the id. Stop it rather than leak it.
+    // speak for the id. Stop it rather than leak it — with node-pty's default
+    // SIGHUP, not the graceful SIGTERM: an interactive bash ignores SIGTERM, and
+    // no later kill can reach a PTY that is no longer in `ptys`.
     const displaced = ptys.get(id);
     ptys.set(id, p);
     if (displaced) {
       console.error(`[pty-core] spawn replaced a live PTY under ${id}; stopping the old one`);
-      try { stopPty(displaced, true); } catch (error) { console.error(`[pty-core] stopping the displaced PTY under ${id} failed:`, error.message); }
+      try { stopPty(displaced); } catch (error) { console.error(`[pty-core] stopping the displaced PTY under ${id} failed:`, error.message); }
     }
     const session = { chunks: [], chars: 0, received: 0, shell: config.shell };
     sessions.set(id, session);
