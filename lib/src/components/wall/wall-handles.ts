@@ -36,8 +36,8 @@ export interface WallHandle {
   /** A brief notice on pane `id`, else the pane the user is on: the Window's
    *  answer to a verb with nothing to act on, or one it refused. */
   showNotice(text: string, id?: string): void;
-  /** Rebuild a closed Surface here (`docs/specs/reopen.md`); `focus` selects it. */
-  reopenSurface(record: SurfaceReopenRecord, focus: boolean): { id: string; ref: string };
+  /** Rebuild a closed Surface here (`docs/specs/reopen.md`); `focus` selects it. Returns its new id. */
+  reopenSurface(record: SurfaceReopenRecord, focus: boolean): string;
   /** This Workspace's record now, with no cwd probe. */
   serializeNow(): PersistedSession;
   /** The same, each cwd as its Session last reported it: a reopen record. */
@@ -46,13 +46,11 @@ export interface WallHandle {
   /** The Wall's member Surfaces: visible panes ∪ Doors. */
   surfaceIds(): string[];
   ownsSurface(id: string): boolean;
-  /** Member Surfaces rendered as plain iframes, Doored ones included, as their
-   *  refs: the page state a move between Windows destroys
-   *  (`docs/specs/layout.md` → Workspaces). Refs, not internal ids, because
-   *  the refusal naming them is read by a `dor` caller. Agent-browser
-   *  Surfaces are not among them — their session lives in the host and
-   *  reconnects. */
-  iframeSurfaceRefs(): string[];
+  /** Member Surfaces rendered as plain iframes, Doored ones included: the page
+   *  state a move between Windows destroys (`docs/specs/layout.md` →
+   *  Workspaces). Agent-browser Surfaces are not among them — their session
+   *  lives in the host and reconnects. */
+  iframeSurfaceIds(): string[];
   /** The sessions of `provider` that member browser Surfaces are bound to or
    *  launching, which a `--key` elsewhere in the Window must not mint again
    *  (docs/specs/dor-browser.md → "Managed identity"). */
@@ -148,7 +146,7 @@ export function stubWallHandle(workspaceId: WorkspaceId, overrides: Partial<Wall
     serializeReported: () => ({ version: 3, panes: [] }),
     surfaceIds: () => [],
     ownsSurface: () => false,
-    iframeSurfaceRefs: () => [],
+    iframeSurfaceIds: () => [],
     browserSessions: () => [],
     needsCloseConfirmation: () => false,
     dirtyToolIds: () => [],

@@ -19,8 +19,8 @@ The target is one of:
                  localhost:5173, box.ts.net:3000). The explicit port marks a
                  dev/infra server, which is http far more often than not.
   :<port>        Sugar for http://localhost:<port> (e.g. :5173).
-  surface:<ref>  A terminal Surface handle (surface:N, surface:self,
-                 surface:focused, or a Surface id). Dormouse scans that terminal's
+  surface:<ref>  A terminal Surface handle (surface:N, surface:self, or
+                 surface:focused). Dormouse scans that terminal's
                  listening ports and opens http://localhost:<port>/; it fails if
                  the terminal owns zero or multiple ports.
 

@@ -86,7 +86,7 @@ driven with dor playwright --surface instead.
 In an "open" command, dor also resolves a Dormouse target in place of a URL:
 a schemeless host:port (and the ":<port>" localhost shorthand) defaults to
 http:// rather than agent-browser's https://, and a terminal Surface handle
-(surface:N, surface:self, surface:focused, or a Surface id) resolves to the
+(surface:N, surface:self, or surface:focused) resolves to the
 dev-server URL that terminal owns via the host port scan.
 
 Examples:

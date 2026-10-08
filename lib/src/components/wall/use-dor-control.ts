@@ -106,7 +106,6 @@ export type DorControlParams = {
   restart?: unknown;
   binaryPath?: unknown;
   includePorts?: unknown;
-  pane?: string;
   session?: unknown;
   surface?: unknown;
   url?: unknown;
@@ -155,7 +154,7 @@ export type DorControlRequest = Omit<DorControlRequestPayload, 'params'> & {
  *  its response, or a failure message. `minimized` is the surface's current
  *  minimized state (the reused surface's, or the requested value for a fresh one). */
 type EnsureBrowserSurfaceResult =
-  | { ok: true; status: 'created' | 'existing' | 'replaced'; surfaceId: string; surfaceRef: string; minimized: boolean }
+  | { ok: true; status: 'created' | 'existing' | 'replaced'; surfaceId: string; minimized: boolean }
   | { ok: false; message: string };
 
 /** Reuse-or-create an automated browser surface for the session a `dor agent-browser` /
@@ -180,7 +179,7 @@ type EnsureBrowserSurface = (args: {
 }) => EnsureBrowserSurfaceResult;
 
 function matchesTarget(
-  classified: ParsedSurfaceTarget,
+  classified: Exclude<ParsedSurfaceTarget, { kind: 'invalid' }>,
   surface: DorSurface,
   callerSurfaceId: string | undefined,
 ): boolean {
@@ -193,18 +192,7 @@ function matchesTarget(
       return classified.id === surface.id;
     case 'title':
       return surface.title === classified.title;
-    case 'invalid':
-      return false;
   }
-}
-
-/** Whether one Surface answers a target; an absent target matches every one. */
-function matchesDorSurfaceTarget(
-  target: string | undefined,
-  surface: DorSurface,
-  callerSurfaceId: string | undefined,
-): boolean {
-  return !target || matchesTarget(parseSurfaceTarget(target), surface, callerSurfaceId);
 }
 
 function renderSurfaceForError(surface: DorSurface): string {
@@ -646,7 +634,7 @@ export function useDorControl({
     /** Lay the leaf out even beside a Door reference, which otherwise makes
      *  it a Door. */
     visible?: boolean;
-  }) => ParseResult<{ id: string; ref: string; minimized: boolean }>;
+  }) => ParseResult<{ id: string; minimized: boolean }>;
   createContentSurface: (args: {
     minimized: boolean;
     params: Record<string, unknown>;
@@ -654,7 +642,7 @@ export function useDorControl({
     title: string;
     focusNeutral?: boolean;
     preserveSource?: boolean;
-  }) => ParseResult<{ id: string; ref: string; status: 'created' | 'replaced' }>;
+  }) => ParseResult<{ id: string; status: 'created' | 'replaced' }>;
   /** A Wall closure in flight. */
   isClosingSurface: (id: string) => boolean;
   /** Whether this Wall's Workspace is being closed. */
@@ -970,7 +958,6 @@ export function useDorControl({
         ok: true,
         status: 'existing',
         surfaceId: existing.id,
-        surfaceRef: surfaceRefForId(existing.id),
         minimized: existing.minimized,
       };
     }
@@ -1001,7 +988,6 @@ export function useDorControl({
       ok: true,
       status: result.value.status,
       surfaceId: result.value.id,
-      surfaceRef: result.value.ref,
       minimized,
     };
   }, [createContentSurface, findBrowserSurface, updateSurfaceParams, lath]);
@@ -1051,8 +1037,7 @@ export function useDorControl({
       nav.hasPane(surface.id) ? dorDirectionForEdge(lath.store.autoEdgeFor(surface.id)) : 'right';
 
     if (detail.method === SURFACE_CONTROL_METHODS.list) {
-      const matched = buildDorSurfaceList()
-        .filter((surface) => matchesDorSurfaceTarget(params.pane, surface, detail.surfaceId));
+      const matched = buildDorSurfaceList();
       const surfaces = booleanParam(params.includePorts)
         ? await attachSurfacePorts(matched)
         : matched;
@@ -1104,7 +1089,7 @@ export function useDorControl({
         result: {
           status: 'created',
           surfaceId: result.value.id,
-          surfaceRef: result.value.ref,
+          surfaceRef: surfaceRefForId(result.value.id),
           direction,
           minimized: result.value.minimized,
           ...(command ? { command } : {}),
@@ -1190,13 +1175,13 @@ export function useDorControl({
         // `key` and `warnings` are read when called, after the lookup fills them.
         const respondTool = (
           status: ToolSurfaceResponse['status'],
-          surface: { surfaceId: string; surfaceRef?: string; command: string; cwd: string; minimized: boolean },
+          surface: { surfaceId: string; command: string; cwd: string; minimized: boolean },
         ) => detail.respond({
           ok: true,
           result: {
             status,
             surfaceId: surface.surfaceId,
-            surfaceRef: surface.surfaceRef ?? surfaceRefForId(surface.surfaceId),
+            surfaceRef: surfaceRefForId(surface.surfaceId),
             command: surface.command,
             cwd: surface.cwd,
             minimized: surface.minimized,
@@ -1376,7 +1361,6 @@ export function useDorControl({
               }
               respondTool('pending', {
                 surfaceId: pending.value.id,
-                surfaceRef: pending.value.ref,
                 command: pendingCommand,
                 cwd,
                 minimized: pending.value.minimized,
@@ -1662,7 +1646,6 @@ export function useDorControl({
         }
         respondTool('created', {
           surfaceId: created.value.id,
-          surfaceRef: created.value.ref,
           command,
           cwd,
           minimized: created.value.minimized,
@@ -1790,7 +1773,7 @@ export function useDorControl({
         result: {
           status: 'created',
           surfaceId: result.value.id,
-          surfaceRef: result.value.ref,
+          surfaceRef: surfaceRefForId(result.value.id),
           command,
           cwd,
           minimized: result.value.minimized,
@@ -1987,7 +1970,7 @@ export function useDorControl({
         result: {
           status: result.value.status,
           surfaceId: result.value.id,
-          surfaceRef: result.value.ref,
+          surfaceRef: surfaceRefForId(result.value.id),
           url,
           minimized: booleanParam(params.minimized),
         },
@@ -2059,19 +2042,19 @@ export function useDorControl({
     if (detail.method === SURFACE_CONTROL_METHODS.browserViewport) {
       const provider = requestedProvider();
       if (!provider) return;
-      let target: { id: string; ref: string } | null = null;
+      let targetId: string | null = null;
       const key = stringParam(params.key);
       const session = stringParam(params.session);
       if (key !== undefined) {
         const found = findBrowserSurface(provider, { key });
-        if (found) target = { id: found.id, ref: surfaceRefForId(found.id) };
+        if (found) targetId = found.id;
       } else if (session !== undefined) {
         const matches = buildDorSurfaces().filter((surface) => {
           const p = lath.getMeta(surface.id)?.params;
           return parseRenderMode((p as { renderMode?: unknown } | undefined)?.renderMode).provider === provider
             && agentBrowserSessionFromParams(p) === session;
         });
-        if (matches.length === 1) target = { id: matches[0].id, ref: matches[0].ref };
+        if (matches.length === 1) targetId = matches[0].id;
         else if (matches.length > 1) {
           detail.respond({ ok: false, error: `session '${session}' is bound to multiple Surfaces; use --surface` });
           return;
@@ -2079,13 +2062,13 @@ export function useDorControl({
       } else {
         const found = requireBrowserSurface(params.surface, detail);
         if (!found || !requireAutomationSession(found, provider, detail)) return;
-        target = { id: found.id, ref: found.ref };
+        targetId = found.id;
       }
-      if (!target) {
+      if (!targetId) {
         detail.respond({ ok: false, error: 'No bound browser Surface; use --surface with a screencast' });
         return;
       }
-      const surfaceParams = lath.getMeta(target.id)?.params;
+      const surfaceParams = lath.getMeta(targetId)?.params;
       const mode = parseRenderMode((surfaceParams as { renderMode?: unknown } | undefined)?.renderMode);
       if (params.setting !== undefined && mode.presentation !== 'screencast') {
         detail.respond({ ok: false, error: 'dor-embed-size requires a screencast Surface' });
@@ -2125,7 +2108,7 @@ export function useDorControl({
         detail.respond({ ok: false, error: providerUnavailable(provider) });
         return;
       }
-      const controller = getAgentBrowserSurfaceController(target.id);
+      const controller = getAgentBrowserSurfaceController(targetId);
       try {
         if (setting) {
           if (controller) await controller.applyViewportSetting(setting);
@@ -2133,7 +2116,7 @@ export function useDorControl({
             const changed = await browser.viewport(setting.width, setting.height, setting.dpr);
             if (!changed.ok) throw new Error(changed.error ?? 'Could not resize browser viewport');
           } else throw new Error('pane-sync requires a mounted screencast pane');
-          updateSurfaceParams(target.id, { browserViewport: setting, syncEngaged: setting.mode === 'pane-sync' });
+          updateSurfaceParams(targetId, { browserViewport: setting, syncEngaged: setting.mode === 'pane-sync' });
         }
         const measured = await browser.measure();
         if (!measured.ok && setting) throw new Error(measured.error ?? 'Could not measure browser viewport');
@@ -2142,16 +2125,16 @@ export function useDorControl({
           || (setting.dpr !== undefined && measured.viewport.dpr !== setting.dpr)
         )) throw new Error('Browser reported a different viewport after resizing');
         if (!setting && measured.ok && measured.viewport && mode.presentation === 'screencast') {
-          const stored = (lath.getMeta(target.id)?.params as { browserViewport?: unknown } | undefined)?.browserViewport;
+          const stored = (lath.getMeta(targetId)?.params as { browserViewport?: unknown } | undefined)?.browserViewport;
           if (!isBrowserViewportSetting(stored) || stored.mode !== 'pane-sync') {
             if (controller) controller.adoptMeasuredViewport(measured.viewport);
-            else updateSurfaceParams(target.id, { browserViewport: viewportFromMeasurement(provider, isBrowserViewportSetting(stored) ? stored : undefined, measured.viewport), syncEngaged: false });
+            else updateSurfaceParams(targetId, { browserViewport: viewportFromMeasurement(provider, isBrowserViewportSetting(stored) ? stored : undefined, measured.viewport), syncEngaged: false });
           }
         }
-        const stored = (lath.getMeta(target.id)?.params as { browserViewport?: unknown } | undefined)?.browserViewport;
+        const stored = (lath.getMeta(targetId)?.params as { browserViewport?: unknown } | undefined)?.browserViewport;
         const effective = setting ?? (isBrowserViewportSetting(stored) ? stored : { mode: 'fixed', width: 1440, height: 900 });
         detail.respond({ ok: true, result: {
-          surfaceId: target.id, surfaceRef: target.ref, provider, renderMode: mode.mode,
+          surfaceId: targetId, surfaceRef: surfaceRefForId(targetId), provider, renderMode: mode.mode,
           requested: effective, ...(measured.viewport ? { actual: measured.viewport } : {}), ready: measured.ok && !!measured.viewport,
         } });
       } catch (error) {
@@ -2245,7 +2228,7 @@ export function useDorControl({
         result: {
           status: result.status,
           surfaceId: result.surfaceId,
-          surfaceRef: result.surfaceRef,
+          surfaceRef: surfaceRefForId(result.surfaceId),
           session,
           minimized: result.minimized,
         },

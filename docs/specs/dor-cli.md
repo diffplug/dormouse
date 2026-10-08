@@ -139,7 +139,7 @@ Invariants:
 flowchart TD
   R[request] --> AT{app.* or tool.*?}
   AT -- yes --> WIN[the Window answers]
-  AT -- no --> BAD{helper --surface, or another --window?}
+  AT -- no --> BAD{malformed or helper --surface, or another --window?}
   BAD -- yes --> REF[refuse]
   BAD -- no --> C{workspace verb, list --all?}
   C -- yes --> WIN

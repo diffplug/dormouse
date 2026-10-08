@@ -197,7 +197,7 @@ describe("the tab menu's Move to new window", () => {
   it("asks the iframe question a drag asks, and answers a pending one no", async () => {
     const answer = vi.fn();
     requestConfirmation({ id: "ws-other", char: "q", answer });
-    registerWallHandle(stubWallHandle("ws-1", { iframeSurfaceRefs: () => ["surface:4"] }));
+    registerWallHandle(stubWallHandle("ws-1", { iframeSurfaceIds: () => ["surface-4"] }));
     moveWorkspaceToNewWindow("ws-1");
     expect(answer).toHaveBeenCalledExactlyOnceWith(false);
     await settle();
@@ -213,7 +213,7 @@ describe("releasing the drag", () => {
   it.each([true, false])("protects dirty drafts before the iframe gate (existing window: %s)", async (existing) => {
     recordToolDirty("editor", true);
     registerWallHandle(stubWallHandle("ws-1", {
-      dirtyToolIds: () => ["editor"], iframeSurfaceRefs: () => ["surface:4"],
+      dirtyToolIds: () => ["editor"], iframeSurfaceIds: () => ["surface-4"],
     }));
     hit = existing ? { label: "ws-2", x: 120, y: 9 } : null;
     const drop = () => onDropOnOtherWindow("ws-1", { clientX: 900, clientY: 9 }, false);
@@ -259,7 +259,7 @@ describe("releasing the drag", () => {
   it("asks first when the Workspace holds an iframe, and moves only on the typed letter", async () => {
     resetWallHandles();
     resetWorkspaceUi();
-    registerWallHandle(stubWallHandle("ws-1", { iframeSurfaceRefs: () => ["browser-1", "browser-2"] }));
+    registerWallHandle(stubWallHandle("ws-1", { iframeSurfaceIds: () => ["browser-1", "browser-2"] }));
     hit = { label: "ws-2", x: 120, y: 9 };
     onDropOnOtherWindow("ws-1", { clientX: 900, clientY: 9 }, false);
     await settle();
@@ -276,7 +276,7 @@ describe("releasing the drag", () => {
 
   it("does not ask for a Workspace of terminals and agent-browser Surfaces", async () => {
     resetWallHandles();
-    registerWallHandle(stubWallHandle("ws-1", { iframeSurfaceRefs: () => [] }));
+    registerWallHandle(stubWallHandle("ws-1", { iframeSurfaceIds: () => [] }));
     hit = null;
     onDropOnOtherWindow("ws-1", { clientX: 2000, clientY: 800 }, false);
     await settle();
@@ -301,7 +301,7 @@ describe("releasing the drag", () => {
 
   it("abandons a dirty-editor decision when a newer move starts", async () => {
     recordToolDirty("editor", true);
-    registerWallHandle(stubWallHandle("ws-1", { dirtyToolIds: () => ["editor"], iframeSurfaceRefs: () => ["surface:4"] }));
+    registerWallHandle(stubWallHandle("ws-1", { dirtyToolIds: () => ["editor"], iframeSurfaceIds: () => ["surface-4"] }));
     onDropOnOtherWindow("ws-1", { clientX: 2000, clientY: 800 }, false);
     await settle();
     expect(getEditorClosePrompt()).not.toBeNull();

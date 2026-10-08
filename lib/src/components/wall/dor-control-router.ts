@@ -1,4 +1,4 @@
-import { isAppControlMethod, isToolControlMethod, isWindowControlMethod, isWorkspaceControlMethod, parseSurfaceTarget, SURFACE_CONTROL_METHODS } from 'dor/protocol';
+import { isAppControlMethod, isToolControlMethod, isWindowControlMethod, isWorkspaceControlMethod, parseSurfaceTarget, SURFACE_CONTROL_METHODS, surfaceRefForId } from 'dor/protocol';
 import { registry, isHelperSession } from '../../lib/terminal-store';
 import { createRefCount } from '../../lib/ref-count';
 import { getPendingKill, isPendingKillSession } from '../../lib/pending-kills';
@@ -43,14 +43,6 @@ export type DorControlRoute =
    *  `message` — the active Workspace still mounting — if nothing ever does. */
   | { kind: 'none'; message: string };
 
-/** The Workspace holding the Surface this target names by id or ref
- *  (`parseSurfaceTarget`); either names one Surface Window-wide. */
-function wallHandleOwningTarget(target: unknown): WallHandle | null {
-  if (typeof target !== 'string') return null;
-  const parsed = parseSurfaceTarget(target);
-  return parsed.kind === 'id' ? wallHandleOwning(parsed.id) : null;
-}
-
 /** The host supplies this before cross-window routing. In-process requests
  * (OSC, fake adapter) capture the same origin from the renderer registry, once
  * on arrival, so a promotion during route retries cannot clear it. */
@@ -75,7 +67,7 @@ export function resolveDorControlRoute(detail: DorControlRequest): DorControlRou
   }
   // A helper's request names its parent; a pending helper is itself the caller.
   const caller = [detail.surfaceId, detail.helperParentId].find(id => id && isPendingKillSession(id));
-  if (caller) return { kind: 'error', message: `surface '${caller}' is a pending kill` };
+  if (caller) return { kind: 'error', message: `surface '${surfaceRefForId(caller)}' is a pending kill` };
   return route;
 }
 
@@ -84,12 +76,12 @@ function resolveRoute(detail: DorControlRequest): DorControlRoute {
   if (isToolControlMethod(detail.method)) return { kind: 'tool' };
   if (isWindowControlMethod(detail.method)) return { kind: 'reopen' };
   const params: WindowControlParams = detail.params ?? {};
-  if (typeof params.surface === 'string') {
-    const target = parseSurfaceTarget(params.surface);
-    if ((target.kind === 'self' && detail.helperParentId)
-      || (target.kind === 'id' && isHelperSession(target.id))) {
-      return { kind: 'error', message: 'Helper terminals are not public Surface targets; promote the helper first' };
-    }
+  const target = typeof params.surface === 'string' ? parseSurfaceTarget(params.surface) : null;
+  // A malformed handle names nothing anywhere, so no Wall need answer it.
+  if (target?.kind === 'invalid') return { kind: 'error', message: target.message };
+  if ((target?.kind === 'self' && detail.helperParentId)
+    || (target?.kind === 'id' && isHelperSession(target.id))) {
+    return { kind: 'error', message: 'Helper terminals are not public Surface targets; promote the helper first' };
   }
   // Typed before use: `params` is whatever crossed the control socket, and a
   // non-string ref reaching `.trim()` would throw out of the window listener,
@@ -117,7 +109,7 @@ function resolveRoute(detail: DorControlRequest): DorControlRoute {
   }
   // An id or ref names one Surface in the whole Window, so a command targeting
   // one is answered by whichever Workspace holds it, caller or not.
-  const owningTarget = wallHandleOwningTarget(params.surface);
+  const owningTarget = target?.kind === 'id' ? wallHandleOwning(target.id) : null;
   if (owningTarget) return { kind: 'handle', handle: owningTarget };
   // The caller's own Workspace: `dor split` from a background Workspace lands
   // beside its caller, not in whichever Workspace the user is looking at.

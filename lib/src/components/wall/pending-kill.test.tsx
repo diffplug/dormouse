@@ -103,7 +103,7 @@ describe('a pending kill', () => {
         method: SURFACE_CONTROL_METHODS.split, surfaceId: 'surface-12', params: {}, respond: resolve,
       } })); });
     });
-    expect(answer).toEqual({ ok: false, error: "surface 'surface-12' is a pending kill" });
+    expect(answer).toEqual({ ok: false, error: "surface 'surface:12' is a pending kill" });
     expect(leafIds()).toEqual(['surface-11']);
   });
 

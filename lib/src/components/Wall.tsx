@@ -912,10 +912,9 @@ export function Wall({
   /** A member whose live document cannot leave its webview: a move reopens it. */
   const isIframeSurface = useCallback((id: string): boolean => retainsLivePage(lath.getMeta(id)?.params), [lath]);
 
-  /** The members whose live document a move between Windows cannot carry, by
-   *  the ref a `dor` caller can act on. */
-  const iframeSurfaceRefs = useCallback(
-    (): string[] => memberSurfaceIds().filter(isIframeSurface).map(surfaceRefForId),
+  /** The members whose live document a move between Windows cannot carry. */
+  const iframeSurfaceIds = useCallback(
+    (): string[] => memberSurfaceIds().filter(isIframeSurface),
     [isIframeSurface, memberSurfaceIds],
   );
 
@@ -1184,7 +1183,7 @@ export function Wall({
    * (glossary I10): where it sat, a Pane beside the selected pane when its
    * neighbors are gone. `focus` selects it as a reopen gesture does.
    */
-  const reopenSurface = useCallback((record: SurfaceReopenRecord, focus: boolean): { id: string; ref: string } => {
+  const reopenSurface = useCallback((record: SurfaceReopenRecord, focus: boolean): string => {
     const id = mintSurfaceId();
     const meta = reopenPane(id, record.pane, record.meta);
     const { placement } = record;
@@ -1195,7 +1194,7 @@ export function Wall({
       restoreFromToken(id, meta, { ...placement.token, leafId: id });
       if (focus) enterTerminalMode(id);
     }
-    return { id, ref: surfaceRefForId(id) };
+    return id;
   }, [restoreFromToken, enterTerminalMode, insertDoorAt, lath]);
 
   /**
@@ -1284,9 +1283,8 @@ export function Wall({
   // The Surfaces of the current Workspace. `buildDorSurfaces` is the visible-pane
   // projection used for geometry/placement; `buildDorSurfaceList` additionally
   // includes minimized (doored) Surfaces for `dor list` and direct operations.
-  // `surface:N` refs come from the Workspace-scoped registry above, not from
-  // layout/list position. This is a parallel projection to the phone's
-  // `DirectoryEntry` (`lib/src/remote/burrow/directory-collect.ts`) over the same
+  // Refs derive from the id (`surfaceRefForId`), not from layout/list position.
+  // This is a parallel projection to the phone's `DirectoryEntry` (`lib/src/remote/burrow/directory-collect.ts`) over the same
   // stores — keep the shared field derivations (activity / cwd / ringing / todo)
   // in sync.
   const buildDorSurfacesInternal = useCallback((includeMinimized: boolean): DorSurface[] => {
@@ -1394,7 +1392,6 @@ export function Wall({
     visible?: boolean;
   }): ParseResult<{
     id: string;
-    ref: string;
     minimized: boolean;
   }> => {
     const referenceId = reference.id;
@@ -1440,7 +1437,6 @@ export function Wall({
 
     if (referenceDoor) {
       const edge = edgeForDorDirection(direction);
-      const ref = surfaceRefForId(newId);
       // The Door's restore token, which a visible leaf is laid out from as its
       // reattach would be.
       const token: RestoreToken = {
@@ -1461,7 +1457,7 @@ export function Wall({
         restoreFromToken(newId, leafMeta ?? terminalLeafMeta(), token);
         settleAddSelection(!!focusNeutral, false, newId);
         splitEvent();
-        return { ok: true, value: { id: newId, ref, minimized: false } };
+        return { ok: true, value: { id: newId, minimized: false } };
       }
       if (!deferTerminal) getOrCreateTerminal(newId);
       // This Surface is born minimized — it never has a pane to detach — so register
@@ -1470,7 +1466,7 @@ export function Wall({
       lath.store.addDoor(newId, leafMeta ?? terminalLeafMeta());
       addMinimizedSplitDoor(referenceId, { id: newId, token }, !focusNeutral);
       splitEvent();
-      return { ok: true, value: { id: newId, ref, minimized: true } };
+      return { ok: true, value: { id: newId, minimized: true } };
     }
 
     // The split is inherently background: `dor split` (not focus-neutral) selects
@@ -1489,7 +1485,7 @@ export function Wall({
       if (!deferTerminal) getOrCreateTerminal(newId);
       minimizePane(newId, { select: selectedNew });
     }
-    return { ok: true, value: { id: newId, ref: surfaceRefForId(newId), minimized } };
+    return { ok: true, value: { id: newId, minimized } };
   }, [addMinimizedSplitDoor, minimizePane, restoreFromToken, lath, settleAddSelection, nav]);
 
   /**
@@ -1518,7 +1514,6 @@ export function Wall({
     preparedId?: string;
   }): ParseResult<{
     id: string;
-    ref: string;
     status: 'created' | 'replaced';
   }> => {
     const referenceVisible = nav.hasPane(reference.id);
@@ -1546,7 +1541,7 @@ export function Wall({
       // onto the resulting door rather than leave selectedType='pane' pointing
       // at a door id (the overlay would keep a stale rect).
       if (minimized) minimizePane(newId, { select: selectedNew });
-      return { ok: true, value: { id: newId, ref: surfaceRefForId(newId), status: 'replaced' } };
+      return { ok: true, value: { id: newId, status: 'replaced' } };
     }
 
     // Split beside the reference by its aspect ratio (autoEdge). The split-event
@@ -1562,7 +1557,7 @@ export function Wall({
       source: 'dor',
     });
     if (minimized) minimizePane(newId, { select: selectedNew });
-    return { ok: true, value: { id: newId, ref: surfaceRefForId(newId), status: 'created' } };
+    return { ok: true, value: { id: newId, status: 'created' } };
   }, [minimizePane, lath, settleAddSelection, nav]);
 
   /**
@@ -1908,7 +1903,7 @@ export function Wall({
 
     surfaceIds: memberSurfaceIds,
     ownsSurface,
-    iframeSurfaceRefs,
+    iframeSurfaceIds,
     browserSessions,
     // A shell whose Session has not spawned yet has nothing to lose.
     needsCloseConfirmation: () => memberSurfaceIds().some(id => closeKindOf(id) === 'confirm'

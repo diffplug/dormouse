@@ -194,11 +194,14 @@ describe('dor control routing', () => {
       expect(resolveDorControlRoute(request({ surfaceId: 'surface-1', params: { surface } })))
         .toEqual({ kind: 'handle', handle: owner });
     }
-    // `surface:self`, a title, and a refused bare number stay with the caller.
-    for (const surface of ['surface:self', 'title:surface-2', '2']) {
+    // `surface:self` and a title stay with the caller.
+    for (const surface of ['surface:self', 'title:surface-2']) {
       expect(resolveDorControlRoute(request({ surfaceId: 'surface-1', params: { surface } })))
         .toEqual({ kind: 'handle', handle: caller });
     }
+    // A malformed handle is refused before any Wall is asked.
+    expect(resolveDorControlRoute(request({ surfaceId: 'surface-1', params: { surface: 'pane:2' } })))
+      .toEqual({ kind: 'error', message: "'pane:2' is not a Surface handle; use surface:2" });
   });
 
   it('answers the container verbs and --all at the Window, with no Wall involved', () => {

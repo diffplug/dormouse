@@ -121,7 +121,6 @@ export interface WorkspaceScopedFlags {
 }
 
 export interface ListSurfacesRequest extends WorkspaceScopedRequest {
-  pane?: string;
   window?: string;
   /** Omitted means `workspace`. */
   scope?: ListScope;
@@ -503,8 +502,8 @@ export interface IframeSurfaceResponse {
 }
 
 export interface ResolveOpenTargetRequest extends WorkspaceScopedRequest {
-  /** A terminal Surface handle (surface:N, a Surface id, surface:self,
-   *  surface:focused) whose dev-server URL should be resolved. */
+  /** A terminal Surface handle (surface:N, surface:self, surface:focused)
+   *  whose dev-server URL should be resolved. */
   surface: string;
 }
 

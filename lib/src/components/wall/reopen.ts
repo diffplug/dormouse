@@ -59,13 +59,13 @@ function reopenSurface(record: SurfaceReopenRecord, gesture: boolean): ReopenRes
     throw new Error(mountingRefusal(workspaceRefFor(getActiveWorkspaceId())));
   }
   if (gesture) setActiveWorkspace(handle.workspaceId);
-  const { id, ref } = handle.reopenSurface(record, gesture);
-  return { status: 'reopened', kind: 'surface', surfaceId: id, surfaceRef: ref };
+  const id = handle.reopenSurface(record, gesture);
+  return { status: 'reopened', kind: 'surface', surfaceId: id, surfaceRef: surfaceRefForId(id) };
 }
 
 /**
  * A closed Workspace comes back as a new one, at its strip slot, through cold
- * restore: new Sessions and Surface ids, refs starting over.
+ * restore: new Sessions and Surface ids, so new refs.
  */
 function reopenWorkspace(record: WorkspaceReopenRecord, gesture: boolean): ReopenResponse {
   const { name, nameIsAuto, session } = record.workspace;

@@ -192,8 +192,7 @@ export function isOwnPendingKill(kill: PendingKill, workspaceId: WorkspaceId): b
 
 /** Why a `dor` Surface target naming `id` names nothing: a pending kill. */
 export function pendingSurfaceRefusal(target: string, id: string): string | null {
-  const pending = snapshot.some(kill => kill.kind === 'surface' && kill.id === id);
-  return pending ? `surface '${target}' is a pending kill` : null;
+  return getPendingKill('surface', id) ? `surface '${target}' is a pending kill` : null;
 }
 
 /** How far through its countdown a kill is, 0 to 1. */

@@ -1,4 +1,4 @@
-import { isWorkspaceControlMethod, unsupportedControlMethodMessage, WORKSPACE_CONTROL_METHODS } from 'dor/protocol';
+import { isWorkspaceControlMethod, surfaceRefForId, unsupportedControlMethodMessage, WORKSPACE_CONTROL_METHODS } from 'dor/protocol';
 import type { DorControlResult } from 'dor/protocol';
 import type {
   GroupedSurface,
@@ -287,9 +287,9 @@ export async function handleWorkspaceControl(detail: DorControlRequest): Promise
         // The one thing a move between Windows cannot carry is a plain
         // iframe's document: it reopens at its saved URL, its page state gone
         // (`docs/specs/layout.md` → Workspaces). The caller says so explicitly.
-        const iframes = handle.iframeSurfaceRefs();
+        const iframes = handle.iframeSurfaceIds();
         if (iframes.length > 0 && params.dangerouslyDestroyIframePageState !== true) {
-          const refs = iframes.join(', ');
+          const refs = iframes.map(surfaceRefForId).join(', ');
           detail.respond({
             ok: false,
             error: `workspace '${target.ref}' holds ${iframes.length} iframe Surface(s) whose page state a move destroys (${refs}); `

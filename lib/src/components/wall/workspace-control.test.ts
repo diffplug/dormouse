@@ -231,7 +231,7 @@ describe('workspace.move', () => {
 
   it('refuses cross-window moves of dirty Tools even with the iframe destruction flag', async () => {
     const second = createWorkspace({ id: 'workspace-7', name: 'build', activate: false }).id;
-    handleFor(second, { dirtyToolIds: () => ['editor'], iframeSurfaceRefs: () => ['surface:4'] });
+    handleFor(second, { dirtyToolIds: () => ['editor'], iframeSurfaceIds: () => ['surface-4'] });
     const transferWorkspace = vi.fn(async () => {});
     setPlatform({ transferWorkspace } as unknown as PlatformAdapter);
     for (const dangerouslyDestroyIframePageState of [false, true]) {
@@ -248,7 +248,7 @@ describe('workspace.move', () => {
   it('refuses to move a Workspace holding iframes unless told to destroy their page state', async () => {
     const second = createWorkspace({ id: 'workspace-7', name: 'build', activate: false }).id;
     handleFor(getWorkspacesSnapshot().workspaces[0].id);
-    handleFor(second, { iframeSurfaceRefs: () => ['surface:4'] });
+    handleFor(second, { iframeSurfaceIds: () => ['surface-4'] });
     const transferWorkspace = vi.fn(async () => {});
     setPlatform({ transferWorkspace } as unknown as PlatformAdapter);
 
