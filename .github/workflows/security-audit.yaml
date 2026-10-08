@@ -328,7 +328,7 @@ jobs:
           else
             echo "::error::The report builder failed; the run is reported INCONCLUSIVE with no detail."
             STATUS=MISSING
-            { echo "status=MISSING"; echo "file_status=MISSING"; echo "builder=failed"; } >> "$GITHUB_OUTPUT"
+            echo "status=MISSING" >> "$GITHUB_OUTPUT"
             rm -rf audit-ledger
             printf '%s\n\n%s\n' "Audit reached no usable verdict: the report builder failed. [Run]($RUN_URL)" \
               "Read the run's log and the encrypted \`audit-transcript\` artifact." > audit-private.md
@@ -403,8 +403,9 @@ jobs:
             [ "${#PARTS[@]}" -gt 0 ] ||
               fail no-report "No private report was composed."
             case "${STATUS:-}" in FAIL) VERDICT=FAIL ;; *) VERDICT=INCONCLUSIVE ;; esac
-            [[ "${RUN_DATE:-}" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || RUN_DATE="an unknown day"
-            TITLE="[security-audit] $VERDICT on $RUN_DATE at ${GITHUB_SHA:0:7}"
+            DAY="an unknown day"
+            [[ "${RUN_DATE:-}" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}Z$ ]] && DAY="${RUN_DATE%%T*}"
+            TITLE="[security-audit] $VERDICT on $DAY at ${GITHUB_SHA:0:7}"
             URL=$(gh issue create --repo "$EMBARGO_REPO" --title "$TITLE" --body-file "${PARTS[0]}") ||
               fail failed "Filing the private issue failed."
             for part in "${PARTS[@]:1}"; do
@@ -455,6 +456,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           STATUS: ${{ steps.compose.outputs.status }}
+          RUN_DATE: ${{ steps.compose.outputs.date }}
           EMBARGO_RESULT: ${{ steps.embargo.outputs.result }}
           OPEN_FINDINGS: ${{ steps.embargo.outputs.open_findings }}
         run: |
@@ -464,7 +466,9 @@ jobs:
           case "${STATUS:-}" in PASS|FAIL|MISSING) ;; *) STATUS=MISSING ;; esac
           # A count the ledger step did not hand on is unknown, never zero.
           [[ "${OPEN_FINDINGS:-}" =~ ^[0-9]+$ ]] || OPEN_FINDINGS=""
-          DATE=$(date -u +%Y-%m-%dT%H:%MZ)
+          # The compose step's timestamp, so both issues name the same day.
+          DATE="${RUN_DATE:-}"
+          [[ "$DATE" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}Z$ ]] || DATE=$(date -u +%Y-%m-%dT%H:%MZ)
           RUN_URL="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
 
           # Idempotent label creation; ignore "already exists" errors.
@@ -497,9 +501,9 @@ jobs:
           fi
 
           if [ "$STATUS" = "FAIL" ]; then
-            TITLE="[security-audit] FAIL on $(date -u +%Y-%m-%d)"
+            TITLE="[security-audit] FAIL on ${DATE%%T*}"
           else
-            TITLE="[security-audit] INCONCLUSIVE on $(date -u +%Y-%m-%d)"
+            TITLE="[security-audit] INCONCLUSIVE on ${DATE%%T*}"
           fi
 
           # A builder that throws gets a fixed sentence, never a fallback to

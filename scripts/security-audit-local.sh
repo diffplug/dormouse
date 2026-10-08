@@ -79,34 +79,15 @@ run_domain() {
     echo "==> $domain auditor process failed" >&2
     return 1
   fi
-  if [ -s "$out" ]; then
-    echo "==> wrote $out"
-    # Same sentinel CI reads, for the same reason: the domain appends findings
-    # as it determines them, so a fragment without its last line is one whose
-    # domain stopped early — and its first line may already say PASS.
-    # Last non-blank line, not `tail -n1`: a trailing blank line after the
-    # sentinel still ends a finished report.
-    if [ "$(sed -e '/^[[:space:]]*$/d' "$out" | tail -n1)" != "<!-- END OF REPORT -->" ]; then
-      echo "==> $domain was cut off before finishing $out — findings kept, its verdict line covers less than it appears to" >&2
-      case "$(head -n1 "$out")" in 'VERDICT: FAIL'*) echo "==> $domain reports FAIL" >&2 ;; esac
-      return 1
-    fi
-    # The same grammar CI applies in .github/workflows/security-audit.yaml, and
-    # for the same reason: a failure with an appended explanation is still a
-    # finding. Drifting from CI here would report a dissenting fragment as
-    # unreadable.
-    case "$(head -n1 "$out")" in
-      'VERDICT: PASS'|'VERDICT: INCONCLUSIVE') ;;
-      'VERDICT: FAIL'*) echo "==> $domain reports FAIL" >&2 ;;
-      *) echo "==> $domain produced no readable verdict" >&2 ;;
-    esac
-    # And the verdict CI reports: computed from the fragment's lines, zero only
-    # on PASS, which also needs the line above to say exactly `VERDICT: PASS`.
-    node scripts/security-audit-report.mjs check "$out" >&2
-  else
+  if [ ! -s "$out" ]; then
     echo "==> $domain produced no fragment — in CI that is an INCONCLUSIVE audit, not a FAIL" >&2
     return 1
   fi
+  echo "==> wrote $out"
+  # The verdict CI reports, computed from the fragment's lines: zero only on
+  # PASS, which also needs its sentinel and a first line of exactly
+  # `VERDICT: PASS`. It prints why anything else is not.
+  node scripts/security-audit-report.mjs check "$out" >&2
 }
 
 if [ $# -gt 0 ]; then
@@ -125,5 +106,5 @@ done
 echo
 echo "==> fragments:"
 ls -la audit-*.md 2>/dev/null || echo "  (none)"
-echo "==> merge and verdict are the orchestrator's job in CI; read the fragments directly here."
+echo "==> each verdict above is the one CI computes; there is no merge here, so read the fragments directly."
 exit "$status"

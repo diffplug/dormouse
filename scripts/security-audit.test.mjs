@@ -4,7 +4,7 @@ import { copyFileSync, mkdirSync, readdirSync, readFileSync, writeFileSync, exis
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { BODY_LIMIT } from './clamp-issue-body.mjs';
-import { domains, fragmentManifest, ledgerKey } from './security-audit-report.mjs';
+import { SENTINEL, domains, fragmentManifest, ledgerKey, owedIds as owedRuleIds } from './security-audit-report.mjs';
 import { repoRoot, tempDir, workflowRunBlock } from './lint-kit.mjs';
 
 const repo = repoRoot;
@@ -35,15 +35,11 @@ const archivedSinks = runBlock('Encrypt the audit transcript')
 const EMBARGO_REPO = stepText('File embargoed findings').match(/^          EMBARGO_REPO: (.+)$/m)[1];
 const COMMIT = '0123456789abcdef0123456789abcdef01234567';
 
-// The one literal every reader waits for and every fixture writes. The
-// producer copy in `.github/audit/_preamble.md` is pinned against it below.
-const SENTINEL = '<!-- END OF REPORT -->';
+// `SENTINEL` is the reader's own literal; the producer copy in
+// `.github/audit/_preamble.md` is pinned against it below.
 
 /** Every rule a fragment's domain owes, as the result-line id the preamble fixes, from the real specs. */
-const owedIds = (fragment) => [...fragmentManifest(repo, fragment)].flatMap(([key, count]) => {
-  const [spec, heading] = key.split('\0');
-  return Array.from({ length: count }, (_, i) => `\`${spec}\` -> "${heading}" #${i + 1}`);
-});
+const owedIds = (fragment) => owedRuleIds(fragmentManifest(repo, fragment));
 
 /**
  * A fragment written to the grammar. Every owed rule passes unless `results`
@@ -447,6 +443,16 @@ test('every domain owes a result for every FAIL IF rule in its specs', () => {
   }
 });
 
+// An empty manifest would let any fragment pass, so a fragment no domain
+// writes, or a scope naming a spec that is gone, fails closed.
+test('the manifest fails closed on a fragment or spec nobody can resolve', (t) => {
+  assert.throws(() => fragmentManifest(repo, 'audit-typo.md'), /no domain prompt writes/);
+  const { dir } = fixture(t);
+  const prompt = join(dir, '.github/audit/supply-chain.md');
+  writeFileSync(prompt, readFileSync(prompt, 'utf8').replace('docs/specs/security-supply-chain.md', 'docs/specs/security-moved.md'));
+  assert.throws(() => fragmentManifest(dir, SUPPLY), /does not exist/);
+});
+
 // The work streams replace a domain's own partition, so between them they hold
 // every heading the manifest owes, each exactly once.
 test('each domain\'s work streams cover every owed heading once', () => {
@@ -669,13 +675,11 @@ for (const [verdict, cliExit, expected, sentinel = true, drop = false] of [['PAS
     const result = spawnSync('bash', ['scripts/security-audit-local.sh'], { cwd: dir, env, encoding: 'utf8' });
     assert.equal(result.status, expected, result.stderr);
     if (verdict.startsWith('FAIL')) {
-      assert.ok(!result.stderr.includes('no readable verdict'), result.stderr);
-      // A dissent is reported as one whether or not the fragment finished. CI
-      // records both conditions and escalates to FAIL; reporting only the
-      // cut-off here would hide a finding the domain did write.
-      assert.match(result.stderr, /reports FAIL/);
+      assert.ok(!result.stderr.includes('first line is not a verdict'), result.stderr);
+      // A dissent is reported as one whether or not the fragment finished.
+      assert.match(result.stderr, /says `VERDICT: FAIL/);
     }
-    if (!sentinel) assert.match(result.stderr, /cut off before finishing/);
+    if (!sentinel) assert.match(result.stderr, /never wrote its sentinel/);
     for (const fragment of fragments) assert.ok(existsSync(join(dir, fragment)), fragment);
     // Local output stays local: the runner files nothing, anywhere.
     assert.deepEqual(ghCalls(dir), []);

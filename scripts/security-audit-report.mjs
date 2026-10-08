@@ -20,6 +20,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { clampIssueBody } from './clamp-issue-body.mjs';
 
 export const SENTINEL = '<!-- END OF REPORT -->';
 const AUDIT_DIR = '.github/audit';
@@ -47,8 +48,14 @@ const clip = (s, n = 500) => (s.length > n ? `${s.slice(0, n)}…` : s);
 
 // --- Manifest: what each domain owes ---------------------------------------
 
+const domainCache = new Map();
 /** Each domain prompt's fragment and the security specs its `**Scope` list claims. */
 export function domains(root = '.') {
+  if (!domainCache.has(root)) domainCache.set(root, readDomains(root));
+  return domainCache.get(root);
+}
+
+function readDomains(root) {
   const dir = join(root, AUDIT_DIR);
   const out = [];
   for (const file of readdirSync(dir).filter((f) => f.endsWith('.md') && !f.startsWith('_') && f !== 'orchestrator.md').sort()) {
@@ -72,9 +79,10 @@ export function domains(root = '.') {
  * source order — the rule's number under its heading is its position. Fenced
  * code is skipped, and nothing under `## Future` is a rule.
  */
-export function specManifest(root, spec) {
+function specManifest(root, spec) {
   const path = join(root, spec);
-  if (!existsSync(path)) return [];
+  // Fail closed: a moved spec must not shrink what its domain owes to nothing.
+  if (!existsSync(path)) throw new Error(`a domain claims ${spec}, which does not exist`);
   const counts = new Map();
   let heading = null;
   let fenced = false;
@@ -92,11 +100,16 @@ export function specManifest(root, spec) {
   return [...counts].map(([title, count]) => ({ heading: title, count }));
 }
 
-/** The rules a fragment's domain owes a result for, as `spec\0heading` -> rule count. */
+/**
+ * The rules a fragment's domain owes a result for, as `spec\0heading` -> rule
+ * count. Throws for a fragment no domain writes: an empty manifest would let
+ * any fragment pass.
+ */
 export function fragmentManifest(root, fragment) {
   const domain = domains(root).find((d) => d.fragment === fragment);
+  if (!domain) throw new Error(`no domain prompt writes ${fragment}`);
   const owed = new Map();
-  for (const spec of domain?.specs ?? []) {
+  for (const spec of domain.specs) {
     for (const { heading, count } of specManifest(root, spec)) owed.set(`${spec}\0${heading}`, count);
   }
   return owed;
@@ -105,7 +118,7 @@ export function fragmentManifest(root, fragment) {
 // --- Parsing one fragment --------------------------------------------------
 
 /** The verdict a fragment's first line states, by the grammar the reporting step has always read. */
-export function statedVerdict(firstLine) {
+function statedVerdict(firstLine) {
   if (firstLine === 'VERDICT: PASS') return 'PASS';
   if (firstLine === 'VERDICT: INCONCLUSIVE') return 'INCONCLUSIVE';
   if (firstLine.startsWith('VERDICT: FAIL')) return 'FAIL';
@@ -113,7 +126,7 @@ export function statedVerdict(firstLine) {
 }
 
 /** Every structured line of a fragment, and every line that tried to be one and is not. */
-export function parseFragment(text) {
+function parseFragment(text) {
   const lines = text.split('\n');
   const parsed = {
     stated: statedVerdict(lines[0] ?? ''),
@@ -162,6 +175,15 @@ function closeFinding(parsed, finding) {
   parsed.findings.push(finding);
 }
 
+/** A rule's id in the result-line grammar: `` `spec` -> "heading" #n[.c] ``. */
+export const ruleId = (spec, heading, n, clause) => `\`${spec}\` -> "${heading}" #${n}${clause ? `.${clause}` : ''}`;
+
+/** Every rule id a manifest owes, in order. */
+export const owedIds = (owed) => [...owed].flatMap(([key, count]) => {
+  const [spec, heading] = key.split('\0');
+  return Array.from({ length: count }, (_, i) => ruleId(spec, heading, i + 1));
+});
+
 // --- The computed verdict --------------------------------------------------
 
 /**
@@ -170,8 +192,8 @@ function closeFinding(parsed, finding) {
  */
 export function domainVerdict(text, owed) {
   if (text === null) {
-    return { computed: 'INCONCLUSIVE', verdict: 'INCONCLUSIVE', stated: null, absent: true,
-      results: [], findings: [], malformed: [], missing: [...owed].map(([key]) => key.replace('\0', ' -> ')), stray: [], anomalies: [] };
+    return { verdict: 'INCONCLUSIVE', stated: null, absent: true, finished: false, doubts: ['it left no report'],
+      results: [], findings: [], malformed: [], missing: owedIds(owed), stray: [], anomalies: [] };
   }
   const p = parseFragment(text);
   const missing = [];
@@ -187,7 +209,7 @@ export function domainVerdict(text, owed) {
   for (const [key, count] of owed) {
     const [spec, heading] = key.split('\0');
     for (let n = 1; n <= count; n++) {
-      const name = `\`${spec}\` -> "${heading}" #${n}`;
+      const name = ruleId(spec, heading, n);
       const lines = byRule.get(`${key}\0${n}`);
       if (!lines) { missing.push(name); continue; }
       // Clauses are lettered from `a` with no gap: a gap is a clause skipped.
@@ -213,21 +235,22 @@ export function domainVerdict(text, owed) {
   }
   // The computed verdict decides. A domain more doubtful than its lines is not
   // overruled into a PASS, and is not taken at its word either.
-  const verdict = computed === 'PASS' && p.stated !== 'PASS' ? 'INCONCLUSIVE' : computed;
-  return { computed, verdict, stated: p.stated, absent: false, finished: p.finished, doubts,
+  let verdict = computed;
+  if (computed === 'PASS' && p.stated !== 'PASS') {
+    verdict = 'INCONCLUSIVE';
+    doubts.push('its own line is more doubtful than its lines');
+  }
+  return { verdict, stated: p.stated, absent: false, finished: p.finished, doubts,
     results: p.results, findings: p.findings, malformed: p.malformed, missing, stray, anomalies };
 }
 
 /** The run's verdict: the worst domain, and never PASS unless the orchestrator wrote exactly `PASS`. */
-export function runVerdict(domainsByFragment, fileStatus) {
+function runVerdict(domainsByFragment, fileStatus) {
   let overall = 'PASS';
   for (const d of Object.values(domainsByFragment)) overall = worst(overall, d.verdict);
   const anomalies = [];
-  if (fileStatus !== 'MISSING') {
-    const computedOverall = overall;
-    if (fileStatus !== computedOverall) {
-      anomalies.push(`\`audit-status.txt\` says \`${fileStatus}\`, the domains' lines compute ${computedOverall}`);
-    }
+  if (fileStatus !== 'MISSING' && fileStatus !== overall) {
+    anomalies.push(`\`audit-status.txt\` says \`${fileStatus}\`, the domains' lines compute ${overall}`);
   }
   if (overall === 'PASS' && fileStatus !== 'PASS') overall = 'INCONCLUSIVE';
   return { overall, anomalies };
@@ -276,7 +299,7 @@ export function readFileStatus() {
 }
 
 /** Everything the reporting step decides, from the working directory. */
-export function compose({ fragments, root = '.', fileStatus, runUrl, transcriptUrl = '', commit, date }) {
+function compose({ fragments, root = '.', fileStatus, runUrl, transcriptUrl = '', commit, date }) {
   const byFragment = {};
   for (const [name, text] of Object.entries(fragments)) byFragment[name] = domainVerdict(text, fragmentManifest(root, name));
   const run = runVerdict(byFragment, fileStatus);
@@ -285,44 +308,40 @@ export function compose({ fragments, root = '.', fileStatus, runUrl, transcriptU
   const entries = Object.entries(byFragment).flatMap(([fragment, d]) => d.findings.map((finding) => ({ fragment, finding })));
   const merged = dedupFindings(entries);
 
-  // The ledger: one entry per failed rule clause and per merged BLOCKER or WARNING.
-  const ledger = [];
+  // The ledger: one entry per failed rule clause, and per file and root
+  // cause among the merged BLOCKERs and WARNINGs.
+  const ledger = new Map();
   for (const [fragment, d] of Object.entries(byFragment)) {
     for (const r of d.results.filter((x) => x.status === 'FAIL')) {
-      const id = `\`${r.spec}\` -> "${r.heading}" #${r.rule}${r.clause ? `.${r.clause}` : ''}`;
       const key = ledgerKey('check', r.spec, r.heading, r.rule, r.clause ?? '');
-      if (ledger.some((e) => e.key === key)) continue;
-      ledger.push({ key, severity: 'FAIL', title: `FAIL: ${id}`, body: `Reported by \`${fragment}\`:\n\n${r.line}\n` });
+      if (!ledger.has(key)) ledger.set(key, { key, severity: 'FAIL', title: `FAIL: ${ruleId(r.spec, r.heading, r.rule, r.clause)}`, body: `Reported by \`${fragment}\`:\n\n${r.line}\n` });
     }
   }
   for (const m of merged.filter((x) => x.severity !== 'INFO')) {
-    const key = ledgerKey('finding', ...m.key.split('\0'));
-    if (ledger.some((e) => e.key === key)) {
-      ledger.find((e) => e.key === key).body += `\n---\n\n${m.finding.block.join('\n')}\n`;
-      continue;
-    }
+    const key = ledgerKey('finding', m.key);
     const f = m.finding;
-    ledger.push({ key, severity: m.severity,
-      title: `${m.severity}: ${f.path}:${f.line} ${f.cause} — ${f.summary}`,
+    if (ledger.has(key)) { ledger.get(key).body += `\n---\n\n${f.block.join('\n')}\n`; continue; }
+    ledger.set(key, { key, severity: m.severity, title: `${m.severity}: ${f.path}:${f.line} ${f.cause} — ${f.summary}`,
       body: `Reported by ${m.fragments.map((x) => `\`${x}\``).join(', ')}:\n\n${f.block.join('\n')}\n` });
   }
-  for (const e of ledger) {
+  const note = `First filed from [this run](${runUrl}) at commit \`${commit}\`. The audit never closes this issue: close it when the fix lands, citing the PR.`;
+  for (const e of ledger.values()) {
     e.title = clip(`[audit-finding ${e.key}] ${e.title}`, 240);
-    e.body += `\nFirst filed from [this run](${runUrl}) at commit \`${commit}\`. The audit never closes this issue: close it when the fix lands, citing the PR.\n`;
+    e.body = clampIssueBody(`${e.body}\n${note}\n`, 'The rest is in the run\'s encrypted `audit-transcript` artifact.');
   }
 
   const lines = [];
   const links = `[Run](${runUrl})${transcriptUrl ? ` · [Transcript](${transcriptUrl})` : ''} · audited commit \`${commit}\``;
   const headline = status === 'FAIL' ? `Audit failed at ${date}.`
     : status === 'PASS' ? `Audit passed at ${date}.`
-      : `Audit reached no usable verdict at ${date}. ${Object.values(byFragment).some((d) => d.stated === 'FAIL' || d.malformed.length) || fileStatus === 'FAIL'
+      : `Audit reached no usable verdict at ${date}. ${run.anomalies.length || Object.values(byFragment).some((d) => d.anomalies.length || d.malformed.length)
         ? 'A domain claimed more than its result lines record; read the anomalies before treating this as no finding.'
         : 'This is not a security finding: the run ended without deciding.'}`;
   lines.push(`${headline} ${links}`, '');
-  lines.push(...notes(byFragment, fileStatus, run));
+  lines.push(...notes(byFragment, fileStatus));
   lines.push('### Computed verdicts', '', '| Domain | Computed | Its own line | Missing rules | Malformed lines |', '| --- | --- | --- | --- | --- |');
   for (const [name, d] of Object.entries(byFragment)) {
-    lines.push(`| \`${name}\` | ${d.absent ? 'no report' : d.verdict}${d.absent || d.finished ? '' : ', cut off'} | ${d.stated ?? (d.absent ? '–' : 'unreadable')} | ${d.missing.length} | ${d.malformed.length} |`);
+    lines.push(`| \`${name}\` | ${d.absent ? 'no report' : d.verdict}${d.absent || d.finished ? '' : ', cut off'} | ${d.stated ?? (d.absent ? '–' : 'unreadable')} | ${d.missing.length} | ${d.malformed.length + d.stray.length} |`);
   }
   lines.push('', `Orchestrator's \`audit-status.txt\`: ${fileStatus === 'MISSING' ? 'absent or unreadable' : `\`${fileStatus}\``}.`, '');
 
@@ -355,14 +374,14 @@ export function compose({ fragments, root = '.', fileStatus, runUrl, transcriptU
   }
   lines.push(`_\`PASS\` lines, each domain's prose, and the orchestrator's merged report are in the encrypted \`audit-transcript\` artifact${transcriptUrl ? ` ([download](${transcriptUrl}))` : ''}._`);
 
-  return { status, fileStatus, byFragment, ledger, merged, privateReport: `${lines.join('\n')}\n` };
+  return { status, ledger: [...ledger.values()], privateReport: `${lines.join('\n')}\n` };
 }
 
 /** One note per condition that holds, each claiming nothing about the others. */
 function notes(byFragment, fileStatus) {
   const of = (pick) => Object.entries(byFragment).filter(([, d]) => pick(d)).map(([n]) => n).join(', ');
   const out = [];
-  const failing = of((d) => d.computed === 'FAIL');
+  const failing = of((d) => d.verdict === 'FAIL');
   if (failing) out.push(`- **A domain's lines record a failure.** ${failing} carries a \`FAIL\` result or a \`BLOCKER\` — read its lines below first.`);
   const absent = of((d) => d.absent);
   if (absent) out.push(`- **A domain left no report.** No nonempty fragment remains for: ${absent}. Those domains are unaudited. The redactor deletes every fragment and the report when it throws; check that step's result as well as the audit transcript.`);
@@ -370,8 +389,8 @@ function notes(byFragment, fileStatus) {
   if (unreadable) out.push(`- **A domain's verdict could not be read.** The first line of ${unreadable} is not an exact \`VERDICT: PASS\`, \`VERDICT: FAIL\`, or \`VERDICT: INCONCLUSIVE\`.`);
   const cut = of((d) => !d.absent && !d.finished);
   if (cut) out.push(`- **A domain was cut off mid-report.** ${cut} never wrote its \`${SENTINEL}\` sentinel, so its lines are what it had recorded when it stopped. The findings it did write are still findings.`);
-  const doubtful = of((d) => !d.absent && d.computed !== 'FAIL' && d.verdict === 'INCONCLUSIVE');
-  if (doubtful) out.push(`- **A domain could not determine every check.** ${doubtful}: ${Object.entries(byFragment).filter(([, d]) => !d.absent && d.computed !== 'FAIL' && d.verdict === 'INCONCLUSIVE').map(([n, d]) => `\`${n}\` — ${(d.doubts.length ? d.doubts : ['its own line is more doubtful than its lines']).join('; ')}`).join('. ')}.`);
+  const doubtful = Object.entries(byFragment).filter(([, d]) => !d.absent && d.verdict === 'INCONCLUSIVE');
+  if (doubtful.length) out.push(`- **A domain could not determine every check.** ${doubtful.map(([n]) => n).join(', ')}: ${doubtful.map(([n, d]) => `\`${n}\` — ${d.doubts.join('; ')}`).join('. ')}.`);
   if (fileStatus === 'MISSING') out.push('- **The orchestrator wrote no verdict.** `audit-status.txt` was absent, empty, or not `PASS`/`FAIL`. The domains\' computed verdicts above still stand; an expired wait deadline looks like a domain with no report or one cut off.');
   if (out.length) out.push('');
   return out;
@@ -379,13 +398,18 @@ function notes(byFragment, fileStatus) {
 
 // --- CLI -------------------------------------------------------------------
 
-/** Each fragment `$AUDIT_FRAGMENTS` names, read from the working directory: its text, or null when absent or empty. */
+/** One fragment's text, or null when it is absent or empty. */
+function readFragment(name) {
+  const text = existsSync(name) ? readFileSync(name, 'utf8') : '';
+  return text === '' ? null : text;
+}
+
+/** Each fragment `$AUDIT_FRAGMENTS` names, read from the working directory. */
 export function readFragments() {
   const fragments = {};
   for (const name of (process.env.AUDIT_FRAGMENTS ?? '').split(/\s+/).filter(Boolean)) {
     if (!/^[\w.-]+\.md$/.test(name)) throw new Error(`invalid fragment name: ${JSON.stringify(name)}`);
-    const text = existsSync(name) ? readFileSync(name, 'utf8') : '';
-    fragments[name] = text === '' ? null : text;
+    fragments[name] = readFragment(name);
   }
   if (Object.keys(fragments).length === 0) throw new Error('AUDIT_FRAGMENTS names no fragment');
   return fragments;
@@ -399,18 +423,12 @@ function main(argv) {
     else args._ = rest[i];
   }
   if (command === 'manifest') {
-    const owed = fragmentManifest('.', args._);
-    if (owed.size === 0) throw new Error(`no domain writes ${args._}`);
-    for (const [key, count] of owed) {
-      const [spec, heading] = key.split('\0');
-      for (let n = 1; n <= count; n++) console.log(`- PASS: \`${spec}\` -> "${heading}" #${n} — <clause>: <evidence>`);
-    }
+    for (const id of owedIds(fragmentManifest('.', args._))) console.log(`- PASS: ${id} — <clause>: <evidence>`);
     return;
   }
   if (command === 'check') {
-    const text = existsSync(args._) ? readFileSync(args._, 'utf8') : '';
-    const d = domainVerdict(text === '' ? null : text, fragmentManifest('.', args._));
-    console.log(`${args._}: ${d.verdict}${d.doubts?.length ? ` (${d.doubts.join('; ')})` : ''}`);
+    const d = domainVerdict(readFragment(args._), fragmentManifest('.', args._));
+    console.log(`${args._}: ${d.verdict}${d.doubts.length ? ` (${d.doubts.join('; ')})` : ''}`);
     for (const a of d.anomalies) console.log(`  anomaly: ${a}`);
     for (const m of d.missing) console.log(`  no result line: ${m}`);
     for (const m of d.malformed) console.log(`  malformed (${m.why}): ${clip(m.line, 200)}`);
@@ -433,7 +451,7 @@ function main(argv) {
       writeFileSync(`audit-ledger/${i + 1}.md`, e.body);
     });
     writeFileSync('audit-ledger/index.tsv', report.ledger.map((e) => `${e.key}\t${e.severity}\n`).join(''));
-    writeFileSync(args.outputs, `status=${report.status}\nfile_status=${report.fileStatus}\nledger=${report.ledger.length}\ndate=${date.slice(0, 10)}\n`);
+    writeFileSync(args.outputs, `status=${report.status}\ndate=${date}\n`);
     console.log(`Computed ${report.status}; ${report.ledger.length} ledger entr${report.ledger.length === 1 ? 'y' : 'ies'}.`);
     return;
   }

@@ -7,7 +7,7 @@
  *
  * Every string this emits is fixed template text, a number, a validated
  * GitHub-supplied value, a fragment name from `AUDIT_FRAGMENTS`, or a spec
- * heading verified to exist in the checked-out `docs/specs/`. Nothing a domain
+ * heading the checked-out specs owe that domain a rule under. Nothing a domain
  * wrote reaches the output as text, so an agent cannot publish detail by
  * phrasing it as a heading or a verdict. The verdicts are the ones
  * `scripts/security-audit-report.mjs` computes, never a domain's own line.
@@ -18,23 +18,9 @@
  * working directory; the body goes to stdout.
  */
 
-import { existsSync, readFileSync, realpathSync } from 'node:fs';
-import { join } from 'node:path';
+import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dedupFindings, domainVerdict, fragmentManifest, readFileStatus, readFragments } from './security-audit-report.mjs';
-
-const headingCache = new Map();
-/** Every `##`–`######` heading of a security spec, or none when the file does not exist. */
-function specHeadings(root, spec) {
-  if (!headingCache.has(spec)) {
-    const path = join(root, spec);
-    const text = existsSync(path) ? readFileSync(path, 'utf8') : '';
-    headingCache.set(spec, new Set(text.split('\n')
-      .map((line) => line.match(/^#{2,6}\s+(.+?)\s*$/)?.[1])
-      .filter(Boolean)));
-  }
-  return headingCache.get(spec);
-}
 
 function valid(value, pattern, name) {
   if (typeof value !== 'string' || !pattern.test(value)) throw new Error(`invalid ${name}: ${JSON.stringify(value)}`);
@@ -75,13 +61,12 @@ export function publicBody({ status, fileStatus, date, runUrl, commit, repo, fra
     const count = (severity) => merged.filter((m) => m.severity === severity).length;
     if (d.anomalies.length) disagreements++;
     lines.push(`| \`${name}\` | ${d.verdict}${d.finished ? '' : ', cut off'} | ${failed.length} | ${d.missing.length} | ${d.malformed.length + d.stray.length} | ${count('BLOCKER')} | ${count('WARNING')} |`);
+    // Only a heading the manifest owes is named; `domainVerdict` sorted every
+    // other one into `stray`, and those are counted, never quoted.
     for (const r of failed) {
-      if (specHeadings(root, r.spec).has(r.heading)) {
-        const section = `\`${r.spec}\` -> "${r.heading}"`;
-        sections.set(section, (sections.get(section) ?? 0) + 1);
-      } else {
-        unnamed++;
-      }
+      if (d.stray.includes(r)) { unnamed++; continue; }
+      const section = `\`${r.spec}\` -> "${r.heading}"`;
+      sections.set(section, (sections.get(section) ?? 0) + 1);
     }
   }
   if (sections.size > 0 || unnamed > 0) {
