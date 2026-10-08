@@ -1,3 +1,5 @@
+import { hasControlOrFormatCharacters } from 'dor/commands/shell-quote';
+
 const BLOCKED_EXTERNAL_URI_PROTOCOLS = new Set(['javascript:', 'data:', 'blob:', 'about:']);
 /** C0, DEL, and C1 controls. */
 const CONTROL_CHARACTER_RE = /[\x00-\x1f\x7f-\x9f]/;
@@ -28,8 +30,10 @@ export function inspectExternalUri(input: string): ExternalUriDecision {
     return blocked(input, trimmed, null, 'No URL was provided.');
   }
 
-  if (CONTROL_CHARACTER_RE.test(trimmed)) {
-    return blocked(input, trimmed, null, 'The URL contains control characters.');
+  // Format characters too: the dialog would show a URL other than the one
+  // that opens.
+  if (hasControlOrFormatCharacters(trimmed)) {
+    return blocked(input, trimmed, null, 'The URL contains control or invisible formatting characters.');
   }
 
   try {

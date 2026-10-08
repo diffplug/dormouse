@@ -2071,36 +2071,39 @@ test('tool --list takes no name, command, or placement flag', async () => {
   }
 });
 
-test('tool --list escapes control characters in repo text, in every output', async () => {
+// Controls, and the format characters that reorder or hide text: what a person
+// reads before approving a Tool must be what is there.
+const HIDDEN = /[\x00-\x09\x0b-\x1f\x7f-\x9f\u061c\u200b-\u200f\u202a-\u202e\u2060\u2066-\u2069\ufeff]/;
+
+test('tool --list escapes control and format characters in repo text, in every output', async () => {
   const listing = {
-    project: { path: '/work/site/dormouse.yml', approved: false },
+    project: { path: '/work/s\u2067ite/dormouse.yml', approved: false },
     user: { path: '/home/me/.config/dormouse/dormouse.yml', found: false },
-    tools: [{ name: 'evil\u001b]52;c;x\u0007', scope: 'project', run: 'echo \u009b31m', render: 'iframe', port: 'auto', keyed: false, description: 'fine\u001b[2Jtext', shadowed: false }],
-    warnings: ['/work/site/dormouse.yml: tools.evil\u001b[2J: ignoring unknown field \'x\''],
+    tools: [{ name: 'evil\u001b]52;c;x\u0007', scope: 'project', run: 'echo \u009b31m', render: 'iframe', port: 'auto', keyed: false, description: 'fine\u001b[2Jtext \u202eexe.txt', shadowed: false }],
+    warnings: ['/work/site/dormouse.yml: tools.evil\u001b[2J\u200b: ignoring unknown field \'x\''],
   };
   const client = fixtureClient();
   client.toolList = async () => listing;
-  const controls = /[\x00-\x09\x0b-\x1f\x7f-\x9f]/;
   const text = await runCli(['tool', '--list'], { client });
-  assert.doesNotMatch(text.stdout, controls);
-  assert.doesNotMatch(text.stderr, controls);
+  assert.doesNotMatch(text.stdout, HIDDEN);
+  assert.doesNotMatch(text.stderr, HIDDEN);
   assert.match(text.stdout, /evil\\u001b\]52;c;x\\u0007/);
   assert.match(text.stdout, /\\u009b31m/);
-  assert.match(text.stdout, /fine\\u001b\[2Jtext/);
+  assert.match(text.stdout, /fine\\u001b\[2Jtext \\u202eexe\.txt/);
+  assert.match(text.stdout, /s\\u2067ite/);
   const json = await runCli(['tool', '--list', '--json'], { client });
-  assert.doesNotMatch(json.stdout, controls);
+  assert.doesNotMatch(json.stdout, HIDDEN);
   assert.deepEqual(JSON.parse(json.stdout).tools, listing.tools);
 });
 
-test('tool and open escape control characters in the host answer, in every output', async () => {
-  const answer = { status: 'created', surfaceId: 's', surfaceRef: 'surface:9', command: 'run \u009b31m \u007f \u001b[2J', cwd: '/work/\u0085site', minimized: false, key: 'k\u009d' };
+test('tool and open escape control and format characters in the host answer, in every output', async () => {
+  const answer = { status: 'created', surfaceId: 's', surfaceRef: 'surface:9', command: 'run \u009b31m \u007f \u001b[2J \u202e', cwd: '/work/\u0085site\ufeff', minimized: false, key: 'k\u009d' };
   const client = fixtureClient();
   client.toolSurface = async () => answer;
-  const controls = /[\x00-\x09\x0b-\x1f\x7f-\x9f]/;
   for (const argv of [['tool', 'evil'], ['tool', '--json', 'evil'], ['open', 'a.md'], ['open', '--json', 'a.md']]) {
     const result = await runCli(argv, { client, env: { PWD: '/work' } });
     assert.equal(result.exitCode, 0, argv.join(' '));
-    assert.doesNotMatch(result.stdout, controls, argv.join(' '));
+    assert.doesNotMatch(result.stdout, HIDDEN, argv.join(' '));
     assert.match(result.stdout, /\\u009b31m/, argv.join(' '));
     if (argv.includes('--json')) assert.equal(JSON.parse(result.stdout).command, answer.command);
   }

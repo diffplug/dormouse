@@ -14,6 +14,21 @@ export function hasShellInputControls(value: string): boolean {
   return /[\x00-\x1f\x7f-\x9f]/.test(value);
 }
 
+/** Unicode format characters that reorder or hide the text around them: every
+ *  bidi control (U+061C, U+200E/F, U+202A–U+202E, U+2066–U+2069), the
+ *  zero-width space and joiners, the word joiner, and the BOM. A character
+ *  class body, so a printer can escape the same set. */
+export const FORMAT_CHARACTERS = '\\u061c\\u200b-\\u200f\\u202a-\\u202e\\u2060\\u2066-\\u2069\\ufeff';
+const CONTROL_OR_FORMAT = new RegExp(`[\\x00-\\x1f\\x7f-\\x9f${FORMAT_CHARACTERS}]`);
+
+/** Text a person approves before it runs, or that reaches a shell from Tool
+ *  configuration: besides the controls above, any character that makes the
+ *  text shown differ from the text run
+ *  (`docs/specs/security-local.md` -> Dor Tool configuration). */
+export function hasControlOrFormatCharacters(value: string): boolean {
+  return CONTROL_OR_FORMAT.test(value);
+}
+
 const POSIX_SAFE_ARG = /^[A-Za-z0-9_@%+=:,./-]+$/;
 // No `,` or `@`, unlike the posix set: PowerShell's argument mode reads a comma
 // as the array operator (`cat a,b.txt` passes two arguments), while an initial

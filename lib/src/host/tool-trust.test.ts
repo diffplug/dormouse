@@ -276,6 +276,17 @@ tools:
     });
   });
 
+  it('refuses to ask about a project path or upstream the prompt cannot show as it is', async () => {
+    const hidden = join(root, 'repo‮gnp.exe');
+    await mkdir(hidden);
+    await writeFile(join(hidden, 'dormouse.yml'), YML);
+    expect(await lookupTool('storybook', hidden, new MemoryToolTrustStore(), { resolveUpstream: noUpstream }))
+      .toMatchObject({ status: 'error', message: expect.stringContaining('invisible formatting characters') });
+    await write(YML);
+    expect(await lookupTool('storybook', root, new MemoryToolTrustStore(), { resolveUpstream: async () => 'https://example.com/a​b' }))
+      .toMatchObject({ status: 'error' });
+  });
+
   it('surfaces a parse error as an error rather than throwing', async () => {
     await write('tools:\n  t:\n    run: x\n    prespawn_dedupe: [$NOPE]\n');
     const result = await lookupTool('t', root, new MemoryToolTrustStore(), { resolveUpstream: noUpstream });

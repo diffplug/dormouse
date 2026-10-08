@@ -15,7 +15,8 @@ import { lstat, open } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
 import { writeJsonAtomic } from './atomic-json-file';
-import { ToolFileError, parseToolFile, type ToolEntry, type ToolFile } from './tool-registry';
+import { hasControlOrFormatCharacters } from 'dor/commands/shell-quote';
+import { CONTROL_OR_FORMAT_TEXT, ToolFileError, parseToolFile, type ToolEntry, type ToolFile } from './tool-registry';
 import { resolveUpstreamUrl } from './git-upstream';
 import { resolveToolInput, type ToolInput } from './tool-input';
 
@@ -305,6 +306,10 @@ export async function lookupTool(
 
   const grant = await projectGrant(found.dir, trust, resolveUpstream);
   if (grant.trusted) return { status: 'ok', projectRoot: found.dir, path: found.path, file, entry, input };
+  // The trust prompt names both; it must show them as they are.
+  if ([found.path, grant.upstreamUrl ?? ''].some(hasControlOrFormatCharacters)) {
+    return { status: 'error', message: `a project path or upstream URL to approve cannot contain ${CONTROL_OR_FORMAT_TEXT}` };
+  }
   return {
     status: 'untrusted',
     projectRoot: found.dir,

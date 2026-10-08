@@ -367,6 +367,27 @@ selftest.withAppended(
   `AES-GCM in the module beside ${WEB_PUSH_SENDER} stays green`,
 );
 
+// The curve ban and the `@noble/ciphers` count read a module specifier, so
+// every form that loads one must redden them, not just the `from` clause the
+// loop appends: a side-effect import, a dynamic import, and a `require`.
+for (const [pkg, what] of [
+  ['@noble/curves/ed25519.js', 'a JavaScript curve'],
+  ['@noble/ciphers/chacha.js', 'a third `@noble/ciphers` import'],
+]) {
+  for (const violation of [
+    `\nimport '${pkg}';\n`,
+    `\nconst __selftest = import('${pkg}');\n`,
+    `\nconst __selftest = await import(\n  "${pkg}"\n);\n`,
+    `\nconst __selftest = require('${pkg}');\n`,
+  ]) {
+    selftest.withAppended(
+      'remote-lib-common/src/security/noise.ts',
+      violation,
+      `${what} in remote-lib-common/src/security/noise.ts stays green: ${violation.trim()}`,
+    );
+  }
+}
+
 const cited = new Map();
 for (const rule of RULES) {
   const spec = rule.spec ?? SECURITY_SPEC;

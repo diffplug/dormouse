@@ -287,13 +287,14 @@ export const RULES = [
   },
   {
     // The service definition legitimately carries DORMOUSE_ENROLL_TOKEN_FILE,
-    // and no other name in that namespace. Pin the exact Unix filter alongside
+    // and no other name in that namespace. Pin the exact Unix filter, over
+    // names captured first (a pipe into `grep -q` SIGPIPEs its writer), alongside
     // the equivalent Windows negative lookahead (word-bounded, so a name that
     // merely extends _FILE is a finding there too) so the platforms cannot drift.
     rule: 'Credentials at rest — only the enrollment token file name is exempt',
     patterns: {
-      macOS: /grep -qvx 'DORMOUSE_ENROLL_TOKEN_FILE'/,
-      Linux: /grep -qvx 'DORMOUSE_ENROLL_TOKEN_FILE'/,
+      macOS: /grep -qvx 'DORMOUSE_ENROLL_TOKEN_FILE' <<<"\$names"/,
+      Linux: /grep -qvx 'DORMOUSE_ENROLL_TOKEN_FILE' <<<"\$names"/,
       Windows: /DORMOUSE_ENROLL_TOKEN\(\?!_FILE\\b\)/,
     },
   },

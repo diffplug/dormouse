@@ -973,6 +973,16 @@ has_off_loopback() {
   grep -qv '^127\.0\.0\.1:' <<<"$addrs"
 }
 
+# Does any file named in $@ name a credential? Exit 0 when one does. Names are
+# extracted before the one allowed path variable is filtered out, so exactly
+# DORMOUSE_ENROLL_TOKEN_FILE is exempt. Captured first, for the reason
+# has_off_loopback is: a `grep -q` reading a pipe exits at its first match.
+names_credential() {
+  local names
+  names="$(grep -hEo 'DORMOUSE_SETUP_PASSWORD|DORMOUSE_VAPID_PRIVATE_KEY|DORMOUSE_ENROLL_TOKEN(_[[:alnum:]_]+)?' "$@" 2>/dev/null || true)"
+  [ -n "$names" ] && grep -qvx 'DORMOUSE_ENROLL_TOKEN_FILE' <<<"$names"
+}
+
 # The handler — `<type> <target>`, such as `proxy http://127.0.0.1:3100` — that
 # captured `serve status` output ($2) lists at `/` under the listener whose
 # header names origin $1 with no port: :443, the listener the passkey origin
@@ -1219,9 +1229,8 @@ cmd_verify() {
   # and nothing else secret (docs/specs/security-remote.md -> "Credentials at
   # rest"). A name, not a value: the installer supplies none of these, so one
   # appearing means a hand-edit or a regression put a credential where any
-  # process that can read the definition can read it. Extracting names before
-  # filtering exempts exactly DORMOUSE_ENROLL_TOKEN_FILE; a bare token or any
-  # other suffix remains a finding on every platform.
+  # process that can read the definition can read it. A bare token or any
+  # suffix but _FILE remains a finding on every platform.
   #
   # `grep -q` exits 2 on a file it cannot open, which is neither a match nor a
   # miss, so both searches report on definition_read rather than green-ticking
@@ -1230,9 +1239,7 @@ cmd_verify() {
   if [ -r "$UNIT_FILE" ] && [ -r "$ROOT/bin/run-relay" ]; then definition_read=1; fi
   if [ "$definition_read" = 0 ]; then
     fail "the unit or bin/run-relay could not be read — it was searched for neither a credential nor the source checkout"
-  elif grep -hEo 'DORMOUSE_SETUP_PASSWORD|DORMOUSE_VAPID_PRIVATE_KEY|DORMOUSE_ENROLL_TOKEN(_[[:alnum:]_]+)?' \
-       "$UNIT_FILE" "$ROOT/bin/run-relay" 2>/dev/null |\
-       grep -qvx 'DORMOUSE_ENROLL_TOKEN_FILE'; then
+  elif names_credential "$UNIT_FILE" "$ROOT/bin/run-relay"; then
     fail "the unit or wrapper names a credential — it must carry only paths"
   else
     pass "the service definition names no credential"

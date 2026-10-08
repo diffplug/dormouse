@@ -12,6 +12,8 @@
  * The pane holds no PTY while this is showing. Nothing from the repo has run.
  */
 import { useRef } from 'react';
+import { hasControlOrFormatCharacters } from 'dor/commands/shell-quote';
+import { printableExact } from 'dor/commands/terminal-text';
 import { usePaneChrome } from './use-pane-chrome';
 import { PaneMessage, modalActionButton } from '../design';
 import { toolPendingFromParams } from './browser-surface';
@@ -25,6 +27,22 @@ export function ToolApproval({ params, id, onResolve }: PaneProps & {
   const pending = toolPendingFromParams(params);
   if (!pending) return null;
 
+  // What the host refuses to resolve, this never shows as approvable: the
+  // text would not be the command that runs
+  // (`docs/specs/security-local.md` -> Dor Tool configuration).
+  if ([pending.name, pending.run, pending.path, pending.projectRoot, pending.upstreamUrl ?? ''].some(hasControlOrFormatCharacters)) {
+    return (
+      <PaneMessage ref={elRef} contentClassName="flex flex-col gap-4">
+        <div role="alert" className="text-error">
+          This Tool's configuration contains terminal control characters or invisible formatting characters, so it cannot be approved.
+        </div>
+        <button type="button" className={modalActionButton()} onClick={() => onResolve(id, 'decline')}>
+          Close
+        </button>
+      </PaneMessage>
+    );
+  }
+
   return (
     <PaneMessage ref={elRef} contentClassName="flex flex-col gap-4">
       <div className="flex flex-col gap-1 font-mono text-muted">
@@ -34,7 +52,7 @@ export function ToolApproval({ params, id, onResolve }: PaneProps & {
         <div>and then open a browser</div>
       </div>
 
-      {pending.error ? <div role="alert" className="text-error">{pending.error}</div> : null}
+      {pending.error ? <div role="alert" className="text-error">{printableExact(pending.error)}</div> : null}
 
       <div className="flex flex-col gap-2">
         {pending.trustRecorded ? (

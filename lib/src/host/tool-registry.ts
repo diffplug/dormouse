@@ -10,7 +10,7 @@ import { isMap, isScalar, parseDocument as parseYamlDocument, type Document } fr
 import { builtinHandler, FOLDER_MATCH_SUFFIX } from 'dor-tools-builtin/file-viewer-format';
 import { isRecord } from '../lib/is-record';
 import { truncateText } from '../lib/osc-sanitize';
-import { hasShellInputControls } from 'dor/commands/shell-quote';
+import { hasControlOrFormatCharacters } from 'dor/commands/shell-quote';
 import { isToolRender, TOOL_RENDERS, type ToolRender } from '../lib/platform/tool-types';
 import type { BrowserViewportSelection } from 'dor-lib-common/browser-viewports';
 import { parseBrowserConfig, parseViewportSelection, type BrowserConfigLayer } from './browser-config';
@@ -65,6 +65,9 @@ export interface ToolFile {
 }
 
 export class ToolFileError extends Error {}
+
+/** How a refusal names what `hasControlOrFormatCharacters` finds. */
+export const CONTROL_OR_FORMAT_TEXT = 'terminal control characters or invisible formatting characters';
 
 /** Parse the shared YAML document before choosing which section to validate.
  * A malformed document is always an error; browser-only reads deliberately do
@@ -202,6 +205,8 @@ export function parseToolFile(
   const descriptions = entryDescriptions(document);
 
   for (const [name, rawEntry] of Object.entries(toolsNode)) {
+    // Before `where`, which would carry the name into the error unescaped.
+    if (hasControlOrFormatCharacters(name)) throw new ToolFileError(`${path}: tool names cannot contain ${CONTROL_OR_FORMAT_TEXT}`);
     const where = `${path}: tools.${name}`;
     if (name.startsWith('builtin:')) throw new ToolFileError(`${where}: the 'builtin:' prefix is reserved`);
     if (!isRecord(rawEntry)) throw new ToolFileError(`${where}: entry must be a mapping`);
@@ -219,15 +224,23 @@ export function parseToolFile(
       if (!run.length || !run.every(arg => typeof arg === 'string') || !run[0].trim()) {
         throw new ToolFileError(`${where}: 'run' must be a non-empty argument list`);
       }
-      if (run.some(hasShellInputControls)) throw new ToolFileError(`${where}: run arguments cannot contain terminal control characters`);
       validateSubstitutions(run.filter(arg => arg !== '$ARGS'), scope, where);
     } else if (typeof run !== 'string' || run.trim() === '') {
       throw new ToolFileError(`${where}: 'run' is required and must be a non-empty string or argument list`);
+    }
+    // A string `run` too: the trust prompt shows it, and the shell's line
+    // editor acts on what it hides (`docs/specs/security-local.md` -> Dor Tool
+    // configuration).
+    if ((typeof run === 'string' ? [run.trim()] : run as string[]).some(hasControlOrFormatCharacters)) {
+      throw new ToolFileError(`${where}: run cannot contain ${CONTROL_OR_FORMAT_TEXT}`);
     }
 
     let dedupeTemplate: string[] | null = null;
     if (rawEntry.prespawn_dedupe !== undefined && rawEntry.prespawn_dedupe !== null) {
       dedupeTemplate = readDedupeTemplate(rawEntry.prespawn_dedupe, where);
+      if (dedupeTemplate.some(hasControlOrFormatCharacters)) {
+        throw new ToolFileError(`${where}: prespawn_dedupe cannot contain ${CONTROL_OR_FORMAT_TEXT}`);
+      }
       validateSubstitutions(dedupeTemplate, scope, where);
       if (typeof run === 'string' && usesTarget(dedupeTemplate)) {
         throw new ToolFileError(`${where}: $TARGET in prespawn_dedupe requires an argument-list run`);

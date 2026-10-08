@@ -297,6 +297,15 @@ const AT_REST_KEY_WRAPPER = 'lib/src/remote/client/pocket-private-key.ts';
 export const WEB_PUSH_SENDER = 'remote-lib-common/src/remote/web-push.ts';
 
 /**
+ * A module specifier naming one of `packages` (a regex alternation) in every
+ * form that loads it: `from` (an import or a re-export), a side-effect
+ * `import`, a dynamic `import()`, and `require()`.
+ */
+function importOf(packages) {
+  return new RegExp(String.raw`(?:\bfrom\s*|\bimport\s*\(?\s*|\brequire\s*\(\s*)['"\`](?:${packages})`, 'g');
+}
+
+/**
  * One entry per structural property. Every rule states the line it enforces in
  * `security`, which must still appear in its `spec` (`SECURITY_SPEC` when
  * omitted) — as a substring of the raw text, so the phrase has to sit on one
@@ -378,10 +387,11 @@ export const RULES = [
     security: 'X25519 stays WebCrypto-only',
     kind: 'forbid',
     trees: SOURCE_TREES,
-    // Anchored on the import, not the package name, so the module header may go
-    // on explaining why `@noble/ciphers` is the one exception.
-    pattern:
-      /\bfrom\s+['"](?:@noble\/curves|@noble\/hashes|@noble\/ed25519|@noble\/secp256k1|tweetnacl|libsodium|libsodium-wrappers|sodium-native|elliptic|js-nacl|micro-ed25519)/g,
+    // Anchored on the module specifier, not the package name, so the module
+    // header may go on explaining why `@noble/ciphers` is the one exception.
+    pattern: importOf(
+      '@noble\\/curves|@noble\\/hashes|@noble\\/ed25519|@noble\\/secp256k1|tweetnacl|libsodium|libsodium-wrappers|sodium-native|elliptic|js-nacl|micro-ed25519',
+    ),
     violationFile: 'remote-lib-common/src/security/noise.ts',
     violation: "\nimport { x25519 } from '@noble/curves/ed25519.js';\n",
   },
@@ -390,7 +400,7 @@ export const RULES = [
     security: 'X25519 stays WebCrypto-only',
     kind: 'exactly',
     trees: SOURCE_TREES,
-    pattern: /\bfrom\s+['"]@noble\/ciphers/g,
+    pattern: importOf('@noble\\/ciphers'),
     count: 2,
     violationFile: 'remote-lib-common/src/security/push-seal.ts',
     violation: "\nimport { xchacha20poly1305 } from '@noble/ciphers/chacha.js';\n",

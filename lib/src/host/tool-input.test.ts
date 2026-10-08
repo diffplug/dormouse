@@ -26,11 +26,16 @@ describe('Tool argv safety', () => {
       .rejects.toThrow('terminal control characters');
   });
 
-  it('rejects control-bearing argument-list configuration but preserves literal shell scripts', () => {
+  it('rejects control-bearing argument-list configuration', () => {
     const parse = (run: string | string[]) => parseToolFile(JSON.stringify({ tools: { viewer: { run } } }), { path: '/repo/dormouse.yml', dir: '/repo', scope: 'repo' });
     expect(() => parse(['viewer', 'first\nsecond'])).toThrow('terminal control characters');
     expect(() => parse(['viewer', 'a\u009b31m'])).toThrow('terminal control characters');
-    expect(parse('echo first\necho second').tools.get('viewer')?.run).toBe('echo first\necho second');
+  });
+
+  it('rejects format characters in arguments and in what substitutions introduce', async () => {
+    await expect(resolveToolInput(entry, { ...context, args: ['file\u202ename'] })).rejects.toThrow('invisible formatting characters');
+    await expect(resolveToolInput({ ...entry, run: ['viewer', '$CWD'] }, { ...context, cwd: '/repo/\u2066x\u2069' }))
+      .rejects.toThrow('invisible formatting characters');
   });
 
   it('rejects controls in file inputs and their resolving directory', async () => {

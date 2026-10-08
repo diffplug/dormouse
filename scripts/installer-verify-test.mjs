@@ -3,7 +3,8 @@
  * Executable tests for the installer decisions whose answer cannot be read off
  * the file: the searches over CLI output nobody bounds — whether the loopback
  * port is bound anywhere but 127.0.0.1 and whether an existing Serve config
- * already claims the root path — plus the install's reading of a possibly
+ * already claims the root path — and over a service definition, whether it
+ * names a credential, plus the install's reading of a possibly
  * half-written `config/relay.env`, credential ownership, and exclusive release
  * staging. Env-reader cases also execute the shipped wrapper parser. Runs
  * from the repo root via `pnpm test`. `--help` is checked the same way: its
@@ -30,7 +31,7 @@
  * if a helper ever exists twice — once in the installer body and once inside
  * the `MANAGE_EOF` heredoc. Today `env_file_value` and `serve_origin_root`
  * are defined twice, and each pair is checked identical. `owner_only`,
- * `has_off_loopback` and `serve_proxies_root` are in the heredoc (the
+ * `has_off_loopback`, `names_credential` and `serve_proxies_root` are in the heredoc (the
  * `manage` copy); `create_release_stage`, `env_missing_keys` and
  * `serve_state` are in the installer body.
  *
@@ -223,8 +224,29 @@ function writeEnvFixtures(dir) {
   return paths;
 }
 
+/**
+ * Service definitions for `names_credential`. The big ones carry ~1 MiB of the
+ * one allowed name after a credential, so a `grep -q` reading a pipe exits at
+ * the credential while the writer still has most of its output to write.
+ */
+function writeDefinitionFixtures(dir) {
+  const allowed = 'DORMOUSE_ENROLL_TOKEN_FILE=/home/me/run/enroll-offer.json\n'.repeat(20000);
+  const files = {
+    credentialAhead: `DORMOUSE_SETUP_PASSWORD=weak\n${allowed}`,
+    allowedOnly: allowed,
+    suffixed: 'DORMOUSE_ENROLL_TOKEN_SECRET=x\n',
+    none: 'PORT=3100\n',
+  };
+  const paths = {};
+  for (const [name, body] of Object.entries(files)) {
+    paths[name] = join(dir, `${name}.definition`);
+    writeFileSync(paths[name], body);
+  }
+  return paths;
+}
+
 /** `[label, body, expected]`, where `body` echoes exactly one word. */
-function cases(platform, env) {
+function cases(platform, env, definitions) {
   const { loopback, offLoopback } = listenerFixtures[platform];
   const ownerCases = [
     ['700 fixture-owner', 'pass', 'private path owned by this account'],
@@ -261,6 +283,16 @@ function cases(platform, env) {
       `if has_off_loopback 3100 ${pad(loopback, `${offLoopback}\n`)}; then echo detected; else echo clean; fi`,
       'detected',
     ],
+    ...[
+      ['a credential ahead of 1 MiB of the allowed name', [definitions.credentialAhead], 'detected'],
+      ['the allowed name alone, 1 MiB of it', [definitions.allowedOnly], 'clean'],
+      ['a token name with another suffix', [definitions.none, definitions.suffixed], 'detected'],
+      ['no credential name at all', [definitions.none], 'clean'],
+    ].map(([label, files, expected]) => [
+      `names_credential: ${label}`,
+      `if names_credential ${files.map(sq).join(' ')}; then echo detected; else echo clean; fi`,
+      expected,
+    ]),
     [
       'has_off_loopback: 1 MiB of loopback only',
       `if has_off_loopback 3100 ${pad(loopback)}; then echo detected; else echo clean; fi`,
@@ -363,6 +395,7 @@ export function run() {
 
   const fixtureDir = mkdtempSync(join(tmpdir(), 'dormouse-installer-verify-'));
   const env = writeEnvFixtures(fixtureDir);
+  const definitions = writeDefinitionFixtures(fixtureDir);
   const protectedDir = join(fixtureDir, 'protected');
   const publicDir = join(fixtureDir, 'public');
   mkdirSync(protectedDir, { mode: 0o700 });
@@ -378,6 +411,7 @@ export function run() {
           'env_file_value',
           'owner_only',
           'has_off_loopback',
+          'names_credential',
           'env_missing_keys',
           'serve_origin_root',
           'serve_state',
@@ -426,7 +460,7 @@ export function run() {
         );
       }
 
-      const allCases = cases(platform, env);
+      const allCases = cases(platform, env, definitions);
       const stagePath = join(fixtureDir, `stage-${platform}`);
       const quotedStage = sq(stagePath);
       allCases.push([
