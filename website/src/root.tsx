@@ -8,6 +8,9 @@ import {
   type MetaArgs,
 } from "react-router";
 import { siteMeta } from "./lib/site-meta";
+import { FONT_READY_SCRIPT, FONT_READY_STYLE } from "./lib/font-ready";
+import bodyFont from "@fontsource/ubuntu-mono/files/ubuntu-mono-latin-400-normal.woff2?url";
+import displayFont from "@fontsource/ubuntu-sans-mono/files/ubuntu-sans-mono-latin-400-normal.woff2?url";
 
 /**
  * Every page's title, description, canonical, and social cards.
@@ -22,8 +25,9 @@ export function meta({ location }: MetaArgs) {
 }
 
 export function Layout({ children }: { children: ReactNode }) {
+  // The inline font gate can still own an html attribute when hydration starts.
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <head>
         <meta charSet="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -32,8 +36,12 @@ export function Layout({ children }: { children: ReactNode }) {
         <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
         <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
 
+        <link rel="preload" href={bodyFont} as="font" type="font/woff2" crossOrigin="anonymous" />
+        <link rel="preload" href={displayFont} as="font" type="font/woff2" crossOrigin="anonymous" />
         <Meta />
         <Links />
+        <style>{FONT_READY_STYLE}</style>
+        <script dangerouslySetInnerHTML={{ __html: FONT_READY_SCRIPT }} />
       </head>
       <body>
         {children}

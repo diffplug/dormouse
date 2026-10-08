@@ -106,6 +106,12 @@ Source of truth: `buildDocument` in `website/scripts/generate-docs.js`; `Markdow
 
 **Every in-site link spells that served path** — `sitePath` in components, the generator's rewrites in reference prose — so no reader lands on a redirect. Exempt: `/` with its anchors, and the `/docs` entrypoint, which names no page. `checkInSiteHrefsAreServed` pins it.
 
+## Website fonts
+
+**Must serve website fonts from dormouse.sh.** **Must defer initial page content until its fonts finish loading, with a bounded fallback for unavailable fonts and readable pages without JavaScript.** This applies across the website, including prerendered routes and the SPA fallback.
+
+Source of truth: `Layout` in `website/src/root.tsx`.
+
 ## Reference page chrome
 
 **Each page's `linkedFrom` names every document owing it a link** — the two READMEs and the homepage — so the obligation is registry-driven, never inferred from the path. `checkRoutesToReferences` reads it.
