@@ -188,6 +188,18 @@ describe('the one Enable on the Burrows view', () => {
     expect(buttonNamed(container, ENABLE)).toBeNull();
   });
 
+  // Push is opt-in (docs/specs/remote-security-model.md -> "Push sealing"):
+  // entering the list reads the Relay's key and nothing more, so no prompt
+  // appears and no delivery row exists until the user taps.
+  it('asks the browser and the Relay for nothing until Enable is tapped', async () => {
+    fake.subscribeInBrowser.mockResolvedValue({ endpoint: 'https://push.example/abc' });
+    await openBurrows();
+
+    expect(buttonNamed(container, ENABLE)).not.toBeNull();
+    expect(fake.subscribeInBrowser).not.toHaveBeenCalled();
+    expect(fake.subscribeToPush).not.toHaveBeenCalled();
+  });
+
   /**
    * A replacement registered while a superseded delivery row is still on the
    * Relay would leave that row reachable, so the queue drains first.

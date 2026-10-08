@@ -307,3 +307,11 @@ test('CI records original executable paths, including app files and dotfiles, in
   assert.deepEqual(executables.sort(), [`${app}/Contents/MacOS/node`, `${app}/Contents/Resources/sidecar/dor/bin/dor`].sort());
   succeeds(spawnSync('shasum', ['-a', '256', '-c', 'artifact-manifest.sha256'], { cwd: standalone, encoding: 'utf8' }));
 });
+
+// The Node sidecar's hardened-runtime exceptions reach it alone
+// (docs/specs/security-ci.md -> "Desktop Releases").
+test('only the Node sidecar is signed with the macOS entitlements', () => {
+  const source = readFileSync(script, 'utf8');
+  assert.equal(source.match(/--entitlements\b/g)?.length, 1);
+  assert.match(source, /if \[\[ "\$binary" == "\$app_path\/Contents\/MacOS\/node" \]\]; then\n(?:[^\n]*\\\n)*?\s*--entitlements "\$MACOS_NODE_ENTITLEMENTS"/);
+});

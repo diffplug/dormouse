@@ -34,7 +34,8 @@
  *      Rust network client; no HTTP/WebSocket/upload/opener plugin or HTTP
  *      client crate in `[dependencies]`; `updater:` permissions only in
  *      `main-only.json`; no capability with a `remote` scope; no
- *      `withGlobalTauri`; the updater's endpoints exactly `UPDATER_ENDPOINTS`.
+ *      `withGlobalTauri`. The updater's endpoint and key are pinned by
+ *      `standalone/scripts/updater-trust-root.test.mjs`.
  *
  * Listeners — the other half of "phones can't reach it" — are
  * `scripts/loopback-lint.mjs`'s: a loopback bind must reference a guard, and a
@@ -317,7 +318,6 @@ const GUARD_BUILDERS = new Set([
 /** The only file that may construct the Burrow's runtimes. */
 const RUNTIME_OWNER = 'lib/src/host/remote/service.ts';
 
-const UPDATER_ENDPOINTS = ['https://dormouse.sh/standalone-latest.json'];
 
 const CHOKES = new Set(['burrow-service', 'managed-voice', 'updater']);
 const PLAIN_CLASSES = new Set(['loopback', 'local-ipc', 'phone', 'dev-only']);
@@ -626,10 +626,6 @@ checkCsp('standalone/src-tauri/tauri.conf.json app.security.csp', tauriConf.app?
 if (tauriConf.app?.security?.devCsp) checkCsp('standalone/src-tauri/tauri.conf.json app.security.devCsp', tauriConf.app.security.devCsp);
 if (tauriConf.app?.withGlobalTauri) {
   problems.push('standalone/src-tauri/tauri.conf.json: app.withGlobalTauri exposes the Tauri API to every script in the page.');
-}
-const endpoints = tauriConf.plugins?.updater?.endpoints ?? [];
-if (JSON.stringify(endpoints) !== JSON.stringify(UPDATER_ENDPOINTS)) {
-  problems.push(`standalone/src-tauri/tauri.conf.json: updater endpoints ${JSON.stringify(endpoints)} are not ${JSON.stringify(UPDATER_ENDPOINTS)}.`);
 }
 
 {
