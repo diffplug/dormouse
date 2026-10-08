@@ -299,3 +299,21 @@ test('registry seeds reservations above restored IDs and mirrors canonical works
   assert.deepEqual(await command('surface_reserve_ids', { count: 1, floor: 40 }), ['surface-41']);
   assert.deepEqual(await command('surface_reserve_ids', { count: 1, floor: 3 }), ['surface-42']);
 });
+
+test('a restart never re-mints an id an earlier run handed out', async t => {
+  const f = await fixture(t);
+  async function command(run, cmd, args = {}) {
+    const response = await invoke(run, run.token, run.app, cmd, args);
+    assert.equal(response.status, 200);
+    return (await response.json()).result;
+  }
+  const first = await f.start().ready();
+  assert.deepEqual(await command(first, 'surface_reserve_ids', { count: 2, floor: 0 }), ['surface-1', 'surface-2']);
+  assert.deepEqual(await command(first, 'workspace_reserve_ids', { count: 1 }), ['workspace-2']);
+  await command(first, 'workspace_report', { entries: [{ id: 'workspace-9', name: 'Gone later', active: true }] });
+  await first.stop();
+  // The page restored nothing above surface-1: surface-2 was killed before the restart.
+  const second = await f.start().ready();
+  assert.deepEqual(await command(second, 'surface_reserve_ids', { count: 1, floor: 1 }), ['surface-3']);
+  assert.deepEqual(await command(second, 'workspace_reserve_ids', { count: 1 }), ['workspace-10']);
+});

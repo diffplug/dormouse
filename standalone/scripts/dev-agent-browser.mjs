@@ -3,7 +3,7 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
-import { mkdtempSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { AGENT_BROWSER_SOCKET_DIR_ENV, sessionForKey } from 'dor-lib-common/browser-providers';
 // cross-spawn, not node:child_process: this script spawns `dor` and
 // `agent-browser`, which are `.cmd` shims on Windows that a bare-name spawn
@@ -169,24 +169,28 @@ const invokeMap = {
   // one id counter and one window, since the harness simulates no second one.
   workspace_reserve_ids: ({ count }) => {
     const n = Math.max(1, Math.min(64, Number(count) || 1));
-    const first = nextWorkspaceId;
-    nextWorkspaceId += n;
+    const first = ids.workspace;
+    ids.workspace += n;
+    saveIds();
     return Array.from({ length: n }, (_, i) => `workspace-${first + i}`);
   },
   // Surface ids (docs/specs/transport.md -> "Surface ids"): never at or below
   // the floor the page restored, which outlives this process in localStorage.
   surface_reserve_ids: ({ count, floor }) => {
     const n = Math.max(1, Math.min(64, Number(count) || 1));
-    const first = Math.max(nextSurfaceId, (Number(floor) || 0) + 1);
-    nextSurfaceId = first + n;
+    const first = Math.max(ids.surface, (Number(floor) || 0) + 1);
+    ids.surface = first + n;
+    saveIds();
     return Array.from({ length: n }, (_, i) => `surface-${first + i}`);
   },
   workspace_report: ({ entries }) => {
     // Restored browser state survives this process; mirror Rust's report seed.
+    const seeded = ids.workspace;
     for (const entry of entries ?? []) {
       const minted = refNumber(entry?.id ?? '');
-      if (minted !== undefined) nextWorkspaceId = Math.max(nextWorkspaceId, minted + 1);
+      if (minted !== undefined) ids.workspace = Math.max(ids.workspace, minted + 1);
     }
+    if (ids.workspace !== seeded) saveIds();
     const next = JSON.stringify(entries ?? []);
     if (next === registryEntries) return null;
     registryEntries = next;
@@ -197,8 +201,27 @@ const invokeMap = {
   workspace_registry: () => registrySnapshot(),
 };
 
-let nextWorkspaceId = 2;
-let nextSurfaceId = 1;
+// The next Workspace and Surface numbers, persisted before any is handed out as
+// Rust's `ids.json` is, so a restart never re-mints a killed Surface's number.
+// Per worktree, the lifetime of the harness browser's localStorage, where the
+// page keeps its session.
+const idsFile = path.join(repoRoot, 'node_modules', '.cache', 'dormouse-innerdogfood', 'ids.json');
+const ids = loadIds();
+function loadIds() {
+  try {
+    const { workspace, surface } = JSON.parse(readFileSync(idsFile, 'utf8'));
+    if (Number.isSafeInteger(workspace) && Number.isSafeInteger(surface)) return { workspace: Math.max(2, workspace), surface: Math.max(1, surface) };
+  } catch {
+    // None yet, or unreadable: start over, as a fresh state root does.
+  }
+  return { workspace: 2, surface: 1 };
+}
+function saveIds() {
+  mkdirSync(path.dirname(idsFile), { recursive: true });
+  const tmp = `${idsFile}.${process.pid}.tmp`;
+  writeFileSync(tmp, JSON.stringify(ids));
+  renameSync(tmp, idsFile);
+}
 let registryEntries = '[]';
 let registryRevision = 0;
 /** A minted id's counter number, else undefined; mirrors `ref_number` in standalone/src-tauri/src/workspaces.rs. */
