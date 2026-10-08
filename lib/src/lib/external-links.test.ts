@@ -20,6 +20,8 @@ describe('normalizeExternalUri', () => {
   it('rejects malformed or control-character-bearing input', () => {
     expect(normalizeExternalUri('not a url')).toBeNull();
     expect(normalizeExternalUri('https://example.com/\nnext')).toBeNull();
+    expect(normalizeExternalUri('https://example.com/\u202etxt.exe')).toBeNull();
+    expect(normalizeExternalUri('https://exa\u200bmple.com/')).toBeNull();
     expect(normalizeExternalUri('')).toBeNull();
   });
 

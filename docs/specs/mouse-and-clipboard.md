@@ -350,9 +350,9 @@ Neither `params` nor the URI is parsed at the PTY boundary.
 |---|---|---|
 | **Openable** | any absolute URI with a scheme — `http:`, `https:`, `mailto:`, `file:`, custom app schemes such as `vscode:` | cancel plus an open action |
 | **Deceptive** | display text URL-shaped (a full URL or a bare domain) but resolving to a different host than the target; one that merely *differs* — a human phrase, a same-host sibling URL — is **plain**, not deceptive, and stays openable | **No open action at all**: close and copy only, the copy button taking initial focus so a reflexive Enter cannot open anything |
-| **Blocked** | malformed URIs, control-character-bearing targets, browser-executable or opaque pseudo-schemes (`javascript:`, `data:`, `blob:`, `about:`) | **Never silently dropped**: the dialog opens with the reason, close the only action |
+| **Blocked** | malformed URIs, targets carrying a control, bidi, or zero-width character (`hasControlOrFormatCharacters`), browser-executable or opaque pseudo-schemes (`javascript:`, `data:`, `blob:`, `about:`) | **Never silently dropped**: the dialog opens with the reason, close the only action |
 
-**Cancel/close is the safe default; long targets must wrap and scroll without truncation.** **The confirmation host must reject deceptive verdicts even if its callback runs.** **Every external-URL adapter must revalidate through `normalizeExternalUri` before opening** (VS Code before `vscode.env.openExternal`) — consent does not replace validation.
+**Cancel/close is the safe default; long targets must wrap and scroll without truncation.** **Must show the target, display text, and any error with those characters escaped** (`printableExact`), so the text read is the text there. **The confirmation host must reject deceptive verdicts even if its callback runs.** **Every external-URL adapter must revalidate through `normalizeExternalUri` before opening** (VS Code before `vscode.env.openExternal`) — consent does not replace validation.
 
 `docs/specs/dor-tool.md` → "Terminal links" owns confirmed file opening and viewer selection.
 

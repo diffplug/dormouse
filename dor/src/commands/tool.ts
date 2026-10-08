@@ -11,7 +11,6 @@ import type {
 import {
   callerWorkingDirectory,
   errorMessage,
-  printable,
   renderPrintableJson,
   requireControlClient,
   scanPreDelimiterArgs,
@@ -21,7 +20,7 @@ import {
   writeStderr,
   writeStdout,
 } from './shared.js';
-import { renderToolResponse } from './terminal-text.js';
+import { printableExact, renderToolResponse } from './terminal-text.js';
 
 interface ToolFlags {
   readonly list?: boolean;
@@ -221,12 +220,12 @@ export async function dispatchToolSurface(
   try {
     const response = await client.toolSurface(request);
     // Lint output is advisory and must not pollute a `--json` parse.
-    for (const warning of response.warnings ?? []) writeStderr(context, `${printable(warning)}\n`);
+    for (const warning of response.warnings ?? []) writeStderr(context, `${printableExact(warning)}\n`);
     writeStdout(context, renderToolResponse(response, json));
     return undefined;
   } catch (error) {
     // Host errors can echo paths and repo text.
-    return new Error(printable(errorMessage(error)));
+    return new Error(printableExact(errorMessage(error)));
   }
 }
 
@@ -237,34 +236,34 @@ async function listTools(context: DorCommandContext, flags: ToolFlags): Promise<
   try {
     const listing = await client.toolList({ cwd: callerWorkingDirectory(flags.cwd, context.options), global: flags.global === true });
     const { warnings, ...shown } = listing;
-    for (const warning of warnings) writeStderr(context, `${printable(warning)}\n`);
+    for (const warning of warnings) writeStderr(context, `${printableExact(warning)}\n`);
     writeStdout(context, flags.json === true ? renderPrintableJson(shown) : renderToolList(listing, flags.global === true));
     return undefined;
   } catch (error) {
-    return new Error(printable(errorMessage(error)));
+    return new Error(printableExact(errorMessage(error)));
   }
 }
 
 /** Grouped by file, each Tool's description indented beneath it. Every field is
- *  repo text bound for a terminal, so each passes `printable`. `--global` never
+ *  repo text bound for a terminal, so each passes `printableExact`. `--global` never
  *  looked for a project, so it reports none. */
 function renderToolList(listing: ToolListResponse, global: boolean): string {
   const lines: string[] = [];
-  if (listing.project) lines.push(`project  ${printable(listing.project.path)}  [${listing.project.approved ? 'approved' : 'not approved'}]`);
+  if (listing.project) lines.push(`project  ${printableExact(listing.project.path)}  [${listing.project.approved ? 'approved' : 'not approved'}]`);
   else if (!global) lines.push('project  [no dormouse.yml found]');
   const tool = (entry: ToolListResponse['tools'][number]) => {
     lines.push(`  ${[
-      printable(entry.name),
-      printable(JSON.stringify(entry.run)),
+      printableExact(entry.name),
+      printableExact(JSON.stringify(entry.run)),
       `[${entry.render}]`,
       `[port ${entry.port}]`,
       ...(entry.keyed ? ['[keyed]'] : []),
       ...(entry.shadowed ? ['[shadowed]'] : []),
     ].join('  ')}`);
-    for (const line of entry.description?.split('\n') ?? []) lines.push(line ? `      ${printable(line)}` : '');
+    for (const line of entry.description?.split('\n') ?? []) lines.push(line ? `      ${printableExact(line)}` : '');
   };
   listing.tools.filter(entry => entry.scope === 'project').forEach(tool);
-  lines.push(`user  ${printable(listing.user.path)}${listing.user.found ? '' : '  [not found]'}`);
+  lines.push(`user  ${printableExact(listing.user.path)}${listing.user.found ? '' : '  [not found]'}`);
   listing.tools.filter(entry => entry.scope === 'user').forEach(tool);
   return `${lines.join('\n')}\n`;
 }
