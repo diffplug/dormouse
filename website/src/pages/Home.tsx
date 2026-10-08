@@ -705,7 +705,7 @@ export default function Home() {
 
   return (
     <div style={{ visibility: heroCanPaint ? "visible" : "hidden" }}>
-      <SiteHeader ref={headerRef} brandRef={headerBrandRef} brandVisible={false} />
+      <SiteHeader ref={headerRef} brandRef={headerBrandRef} brandVisible={false} prelaunch />
 
       {/* ── Fixed video layer — bottom-anchored, scrubs for the full runway ── */}
       <video
@@ -836,12 +836,12 @@ export default function Home() {
               <a href={sitePath("/self-host")} className={SITE_LINK_CLASS}>self-host runbook</a>{" "}
               walks the whole install. If you would rather skip running it,
               {" "}<a href={`${sitePath("/hosted")}#remote-control`} className={SITE_LINK_CLASS}>Dormouse Hosted</a>{" "}
-              is coming soon.
+              runs it for you.
             </p>
             <p className="text-lg leading-relaxed opacity-70">
+              Try the{" "}
               <a href={sitePath("/playground/pocket")} className={SITE_LINK_CLASS}>Dormouse Pocket</a>{" "}
-              is in development — try the phone interface in your browser, and
-              sign up there to hear when it's ready.
+              phone interface in your browser before you connect your own.
             </p>
           </div>
         </section>
@@ -1003,7 +1003,7 @@ export default function Home() {
               </div>
             </div>
             <p className="mt-7 text-lg">
-              <a href={sitePath("/hosted")} className={SITE_LINK_CLASS}>Compare the planned services and follow the launch</a>
+              <a href={sitePath("/hosted")} className={SITE_LINK_CLASS}>See what Dormouse Hosted costs</a>
             </p>
           </div>
         </section>

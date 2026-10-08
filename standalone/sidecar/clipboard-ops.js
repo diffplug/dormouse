@@ -20,6 +20,16 @@ function execFileP(cmd, args, options) {
 
 const MAX_BUFFER = 16 * 1024 * 1024;
 
+/** Run `script` in Windows PowerShell, by its absolute path (`windowsPowerShellPath`). */
+function runPowerShell(script, runtime) {
+  const exec = runtime.exec || execFileP;
+  return exec(
+    windowsPowerShellPath(runtime.env || process.env),
+    ['-NoProfile', '-NonInteractive', '-Command', script],
+    { maxBuffer: MAX_BUFFER },
+  );
+}
+
 const MAC_FILE_PATHS_SCRIPT = [
   'use framework "AppKit"',
   'use framework "Foundation"',
@@ -51,14 +61,9 @@ async function readFilePathsMac(runtime) {
 }
 
 async function readFilePathsWindows(runtime) {
-  const exec = runtime.exec || execFileP;
   const cmd = '$out = Get-Clipboard -Format FileDropList; if ($out) { $out | ForEach-Object { $_.FullName } }';
   try {
-    const { stdout } = await exec(
-      windowsPowerShellPath(runtime.env || process.env),
-      ['-NoProfile', '-NonInteractive', '-Command', cmd],
-      { maxBuffer: MAX_BUFFER },
-    );
+    const { stdout } = await runPowerShell(cmd, runtime);
     return splitNonEmptyLines(stdout);
   } catch {
     return [];
@@ -114,13 +119,8 @@ async function readTextMac(runtime) {
 }
 
 async function readTextWindows(runtime) {
-  const exec = runtime.exec || execFileP;
   try {
-    const { stdout } = await exec(
-      windowsPowerShellPath(runtime.env || process.env),
-      ['-NoProfile', '-NonInteractive', '-Command', 'Get-Clipboard -Raw'],
-      { maxBuffer: MAX_BUFFER },
-    );
+    const { stdout } = await runPowerShell('Get-Clipboard -Raw', runtime);
     // Get-Clipboard -Raw appends a trailing newline that wasn't on the clipboard.
     return stdout.replace(/\r?\n$/, '');
   } catch {
@@ -192,7 +192,6 @@ function powerShellLiteral(value) {
 }
 
 async function readImageWindows(out, runtime) {
-  const exec = runtime.exec || execFileP;
   const cmd = [
     'Add-Type -AssemblyName System.Windows.Forms;',
     'Add-Type -AssemblyName System.Drawing;',
@@ -200,11 +199,7 @@ async function readImageWindows(out, runtime) {
     `if ($img) { $img.Save(${powerShellLiteral(out)}, [System.Drawing.Imaging.ImageFormat]::Png); 'ok' } else { '' }`,
   ].join(' ');
   try {
-    const { stdout } = await exec(
-      windowsPowerShellPath(runtime.env || process.env),
-      ['-NoProfile', '-NonInteractive', '-Command', cmd],
-      { maxBuffer: MAX_BUFFER },
-    );
+    const { stdout } = await runPowerShell(cmd, runtime);
     return stdout.trim() === 'ok';
   } catch {
     return false;
@@ -308,9 +303,9 @@ function writeViaStdin(cmd, args, text, runtime) {
 
 async function writeClipboardText(text, runtime = {}) {
   const platform = runtime.platform || process.platform;
-  if (platform === 'darwin') return writeViaStdin('pbcopy', [], text, runtime);
-  if (platform === 'win32') return writeViaStdin(windowsSystemPath(runtime.env || process.env, 'System32', 'clip.exe'), [], text, runtime);
   const env = runtime.env || process.env;
+  if (platform === 'darwin') return writeViaStdin('pbcopy', [], text, runtime);
+  if (platform === 'win32') return writeViaStdin(windowsSystemPath(env, 'System32', 'clip.exe'), [], text, runtime);
   const wayland = Boolean(env.WAYLAND_DISPLAY);
   const attempts = wayland
     ? [['wl-copy', []], ['xclip', ['-selection', 'clipboard']]]

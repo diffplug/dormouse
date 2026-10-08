@@ -100,6 +100,7 @@ audit-status.txt
 *.selftest.bak
 *.e2e-selftest.bak
 *.loopback-selftest.bak
+*.outbound-selftest.bak
 *.spec-selftest.bak
 
 # Impeccable per-developer state and generated critiques (design.json is shared).

@@ -23,6 +23,10 @@
   --color-surface: oklch(18% 0.015 60);
   --color-text: #dedede;
   --color-caramel: #b47624;
+  /* The pre-launch strip atop SiteHeader: a caution yellow that reads the
+     same in every docs theme, so it is not derived from one. */
+  --color-prelaunch-bg: #f2c230;
+  --color-prelaunch-fg: #1a1400;
 }
 
 /* The reference pages' accent, one definition for the four class strings in

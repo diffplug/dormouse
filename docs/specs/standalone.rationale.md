@@ -79,6 +79,8 @@ Tauri removes a label from `webview_windows()` only when the window is actually 
 
 The cap is a ceiling on one launch, not a limit on how many windows may exist: the excess snapshots stay on disk untouched, so raising the cap restores them.
 
+The minimum exists because macOS edge tiling could leave a window with no minimum zero-thick, and the restore floor because that box was then saved and reopened just as thin (2026-10). The overlap test catches a box saved on a display unplugged since, which would otherwise reopen where nobody can see it.
+
 ## Transfer
 
 The `adopt_ready` hop exists because the alternative is a race with no safe side. If Rust listed and replayed as part of the transfer, the target's collector might not be armed yet and the replay would be lost; if the target armed first and asked for the whole Window, it would take every sibling's PTY. Asking for exactly the suppressed set, only once the collector exists, has neither failure.
