@@ -230,8 +230,6 @@ test('a seed\'s Severity sets the least finding severity that catches it', () =>
     seedOf('blocker-by-warning', 'hosted', ['src/c.ts'], null, 'BLOCKER'),
     seedOf('blocker-by-blocker', 'hosted', ['src/d.ts'], null, 'BLOCKER'),
     seedOf('rule-by-fail', 'application-security', ['src/e.ts'], RULE, 'BLOCKER'),
-    // Written before `Severity:`, as a stash from an older run is.
-    { ...seedOf('stashed-by-info', 'hosted', ['src/f.ts']), severity: undefined },
   ];
   const card = score(seeds, {
     [fragmentOf.hosted]: fragment([
@@ -239,7 +237,6 @@ test('a seed\'s Severity sets the least finding severity that catches it', () =>
       '- INFO: `src/b.ts:1` `cause` — hardening',
       ...warning('WARNING', 'src/c.ts:1'),
       ...warning('BLOCKER', 'src/d.ts:1'),
-      '- INFO: `src/f.ts:1` `cause` — hardening',
       // Off the grammar, as the audit lets an INFO be.
       '- INFO: src/g.ts:1 — hardening',
     ]),

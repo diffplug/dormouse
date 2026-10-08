@@ -45,7 +45,7 @@ export const CANARY_DOMAINS = ['supply-chain', 'application-security', 'hosted']
 const COMMIT_MESSAGE = 'Audited tree';
 const HEADER_RE = /^(Domain|Rule|Class|Expect|Source|Severity): (\S.*)$/;
 const RULE_RE = new RegExp(`^${RULE_ID} — (\\S.*)$`);
-const SEVERITY_RE = /^(INFO|WARNING|BLOCKER) — \S/;
+const SEVERITY_RE = new RegExp(`^(${Object.keys(SEVERITY_RANK).join('|')}) — \\S`);
 /** The least finding severity that catches a seed whose header names none. */
 const DEFAULT_SEVERITY = 'WARNING';
 const RUN_URL_RE = /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/actions\/runs\/\d+$/;
@@ -76,7 +76,7 @@ export function parseSeed(id, text) {
   if (expect.length === 0 || expect.some((f) => !files.includes(f))) throw new Error(`${id}: Expect must name files its diff touches`);
   if (!header.Source) throw new Error(`${id}: no Source`);
   const severity = header.Severity ? header.Severity.match(SEVERITY_RE)?.[1] : DEFAULT_SEVERITY;
-  if (!severity) throw new Error(`${id}: Severity must read INFO, WARNING, or BLOCKER, then — and why`);
+  if (!severity) throw new Error(`${id}: Severity must read one of ${Object.keys(SEVERITY_RANK).join(', ')}, then — and why`);
   return { id, domain: header.Domain, rule, class: header.Class ?? null, expect, files, source: header.Source, severity };
 }
 
@@ -154,7 +154,7 @@ function candidates(name, p) {
 }
 
 /** Whether a line is severe enough to catch a seed whose floor is `severity`: a `FAIL` always is. */
-const severeEnough = (line, severity = DEFAULT_SEVERITY) => line.kind === 'FAIL' || SEVERITY_RANK[line.kind] >= SEVERITY_RANK[severity];
+const severeEnough = (line, severity) => line.kind === 'FAIL' || SEVERITY_RANK[line.kind] >= SEVERITY_RANK[severity];
 
 /**
  * Whether one line catches one seed: it is severe enough, it cites an expected
@@ -196,7 +196,7 @@ export function score(seeds, fragments) {
     seeded: results.length,
     caught: results.filter((r) => r.caught).length,
     domains: perDomain,
-    unseeded: lines.filter((l) => severeEnough(l) && !touched.some((file) => l.text.includes(file))).length,
+    unseeded: lines.filter((l) => severeEnough(l, DEFAULT_SEVERITY) && !touched.some((file) => l.text.includes(file))).length,
     unfinished,
     seeds: results,
   };

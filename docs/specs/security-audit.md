@@ -84,7 +84,7 @@ Source of truth: `.github/audit/orchestrator.md`; the fragment contract in `.git
 **Verdicts are computed from the fragments' lines, never read from a conclusion** (rationale). `scripts/security-audit-report.mjs` parses each fragment in the grammar `.github/audit/_preamble.md` fixes:
 
 - **FAIL**: any `FAIL` result or `BLOCKER` finding, malformed or not.
-- **INCONCLUSIVE**: otherwise, an `UNVERIFIABLE` result, an owed rule with no result, a skipped clause letter, a malformed line other than an `INFO`, a result for a rule not owed, not exactly one `QUALITATIVE: done` line, no sentinel, a first line other than exact `VERDICT: PASS`, no open-findings list, or a PASS passing over an open finding ([Findings ledger](#findings-ledger)).
+- **INCONCLUSIVE**: otherwise, an `UNVERIFIABLE` result, an owed rule with no result, a skipped clause letter, a malformed line other than an `INFO` anomaly (below), a result for a rule not owed, not exactly one `QUALITATIVE: done` line, no sentinel, a first line other than exact `VERDICT: PASS`, no open-findings list, or a PASS passing over an open finding ([Findings ledger](#findings-ledger)).
 - **PASS**: none of these.
 
 **An `INFO` off the grammar is an anomaly, never a doubt**: a line opening exactly `- INFO: ` whose remainder starts like no other line is kept verbatim in the private report and changes no verdict (rationale).

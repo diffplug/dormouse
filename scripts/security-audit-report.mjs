@@ -49,9 +49,8 @@ const LOOSE_RE = /^\s*(?:[-*+]\s+)?(?:\*\*|__|\[)?\s*(PASS|FAIL|UNVERIFIABLE|BLO
  * An INFO written off the grammar: its prefix exactly as the grammar spells it,
  * and a remainder that starts like no other line. It cannot carry a failure.
  */
-const LOOSE_INFO_PREFIX = '- INFO: ';
-const looseInfo = (line) => line.startsWith(LOOSE_INFO_PREFIX) && /^\S/.test(line.slice(LOOSE_INFO_PREFIX.length))
-  && !LOOSE_RE.test(line.slice(LOOSE_INFO_PREFIX.length));
+const LOOSE_INFO_RE = /^- INFO: (?=\S)/;
+const looseInfo = (line) => LOOSE_INFO_RE.test(line) && !LOOSE_RE.test(line.replace(LOOSE_INFO_RE, ''));
 /** The evidence a BLOCKER or WARNING carries, one indented sub-bullet each. */
 const EVIDENCE = ['Code', 'Path', 'Reproduction'];
 
