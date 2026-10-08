@@ -178,8 +178,8 @@ test('parallel worktrees own ports, browser identities and bridges; stopping one
 
 // The harness speaks the same sidecar protocol Rust does: one fixed window
 // label stamped on every alert command, over anything the page claimed, and a
-// write's `userInput` riding the write (docs/specs/standalone.md -> "Alerts").
-test('stamps its one window on alert commands and carries userInput on the write', { timeout: 60000 }, async t => {
+// write's `userInput` and `launch` riding the write (docs/specs/standalone.md -> "Alerts").
+test('stamps its one window on alert commands and carries userInput and launch on the write', { timeout: 60000 }, async t => {
   const run = await (await fixture(t)).start().ready();
   const line = async (pattern) => JSON.parse((await run.wait(pattern))[1]);
   assert.equal((await send(run, 'alert_command', { payload: { op: 'hello', window: 'ws-9' } })).status, 200);
@@ -189,6 +189,10 @@ test('stamps its one window on alert commands and carries userInput on the write
   assert.equal((await send(run, 'pty_write', { id: 'p1', data: 'y', userInput: true })).status, 200);
   assert.deepEqual(await line(/SIDECAR_LINE (\{"event":"pty:input".*\})/), {
     event: 'pty:input', data: { id: 'p1', data: 'y', userInput: true },
+  });
+  assert.equal((await send(run, 'pty_write', { id: 'p1', data: 'view\r', launch: true })).status, 200);
+  assert.deepEqual(await line(/SIDECAR_LINE (\{"event":"pty:input".*"launch".*\})/), {
+    event: 'pty:input', data: { id: 'p1', data: 'view\r', launch: true },
   });
 });
 

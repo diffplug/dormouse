@@ -14,6 +14,7 @@ import type { AlertCommand } from '../../lib/src/host/alert-protocol';
 import type { PeerLinkDeps } from '../src/peer-link';
 import type { BurrowDeps } from '../src/burrow';
 import type { WebviewChannel } from '../src/webview-messaging';
+import { openSequence } from 'dor-tools-lib/osc';
 
 /** What `message-router.ts` hands the two modules it configures at load. */
 const wiring = vi.hoisted(() => ({
@@ -184,6 +185,27 @@ it('forwards a parse\'s Tool events in stream order only to the PTY owner', () =
   } finally {
     first.dispose();
     second.dispose();
+  }
+});
+
+// An OSC 367 `open` reaches the renderer only from the run a webview's launch
+// write started there (docs/specs/dor-tool.md -> OSC 367).
+it('forwards an OSC 367 open only from the run a launch write started', () => {
+  const owner = fakeWebview();
+  const attached = router.attachRouter(owner.channel, {});
+  const open = (path: string) => openSequence({ path });
+  const run = '\x1b]633;D;0\x07\x1b]633;E;view /a\x07\x1b]633;C\x07';
+  try {
+    owner.send({ type: 'dormouse:init' });
+    owner.send({ type: 'pty:spawn', id: 'tool-open', options: { cwd: '/repo' } });
+    ptys.callbacks!.onData('tool-open', `${run}${open('/forged')}`);
+    owner.send({ type: 'pty:input', id: 'tool-open', data: 'view /a\r', launch: true });
+    ptys.callbacks!.onData('tool-open', `${run}${open('/launched')}`);
+    ptys.callbacks!.onData('tool-open', `${run}${open('/after')}`);
+    expect(owner.posted.flatMap(message => message.type === 'terminal:toolEvents' ? message.events : [])
+      .flatMap(event => event.kind === 'toolOpen' ? [event.open.path] : [])).toEqual(['/launched']);
+  } finally {
+    attached.dispose();
   }
 });
 

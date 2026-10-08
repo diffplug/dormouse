@@ -176,6 +176,10 @@ export interface WritePtyOptions {
   /** A human typed, pasted, or dropped this: the host acknowledges it with
    *  input before writing (`docs/specs/alert.md` -> Engagement). */
   userInput?: true;
+  /** Dormouse itself is typing a command line to run: the host admits OSC 367
+   *  `open` from that run alone (`docs/specs/dor-tool.md` -> OSC 367). Never
+   *  set for anything a user, `dor send`, or a remote Client types. */
+  launch?: true;
 }
 
 export interface PlatformAdapter {

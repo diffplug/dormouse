@@ -186,7 +186,7 @@ describe('helper lifecycle', () => {
     setHelperVisible('parent', true);
     await openHelper('parent');
     await vi.advanceTimersByTimeAsync(100);
-    expect(host.writePty).toHaveBeenCalledExactlyOnceWith(helper.id, 'git status\r');
+    expect(host.writePty).toHaveBeenCalledExactlyOnceWith(helper.id, 'git status\r', { launch: true });
   });
   it('keeps ownership stable when a reopened menu resets or promotes during promotion', async () => {
     const helper = await openHelper('parent');
@@ -224,7 +224,7 @@ describe('helper lifecycle', () => {
     expect(first).toBe(second);
     await vi.advanceTimersByTimeAsync(1000); expect(host.writePty).not.toHaveBeenCalled();
     prompt(first.id); await vi.advanceTimersByTimeAsync(100);
-    expect(host.writePty).toHaveBeenCalledExactlyOnceWith(first.id, 'git status\r');
+    expect(host.writePty).toHaveBeenCalledExactlyOnceWith(first.id, 'git status\r', { launch: true });
     prompt(first.id); await vi.advanceTimersByTimeAsync(500);
     expect(first.status).toBe('completed'); expect(host.writePty).toHaveBeenCalledTimes(1);
   });
@@ -264,7 +264,7 @@ describe('helper lifecycle', () => {
     host.terminalContext.mockResolvedValue({ command: 'echo next', busy: false });
     const next = await openHelper('parent'); prompt(old.id); prompt(next.id);
     await vi.advanceTimersByTimeAsync(100);
-    expect(host.writePty).toHaveBeenCalledExactlyOnceWith(next.id, 'echo next\r');
+    expect(host.writePty).toHaveBeenCalledExactlyOnceWith(next.id, 'echo next\r', { launch: true });
     removeTerminalPaneState(old.id);
   });
   it('missing integration never receives a timeout write and is not safe to close', async () => {

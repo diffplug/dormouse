@@ -481,6 +481,7 @@ describe('terminal-registry alert behavior', () => {
     const id = 'restored-tool-command';
     const received: string[] = [];
     fakePlatform.setInputHandler(id, (data) => received.push(data));
+    const write = vi.spyOn(fakePlatform, 'writePty');
 
     restoreTerminal(id, { command: 'pnpm storybook', requireIntegration: true });
     expect(getTerminalPaneState(id).currentCommand?.rawCommandLine).toBe('pnpm storybook');
@@ -489,6 +490,9 @@ describe('terminal-registry alert behavior', () => {
     applyTerminalSemanticEvents(id, [{ type: 'promptStart' }]);
     await vi.advanceTimersByTimeAsync(200);
     expect(received).toEqual(['pnpm storybook\r']);
+    // The host's own launch: the one run whose OSC 367 `open` it admits.
+    expect(write).toHaveBeenCalledWith(id, 'pnpm storybook\r', { launch: true });
+    write.mockRestore();
   });
 
   it.each(['restore', 'split'])('seeds the actual %s launch after a non-integrated shell prompt', async (launch) => {

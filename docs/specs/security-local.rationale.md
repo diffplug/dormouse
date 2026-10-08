@@ -14,6 +14,8 @@ Why image data has different bounds from semantic text. Titles, commands, and di
 
 Why the `OSC 633` terminator filter is emit-side. The parser scans raw bytes for the three terminators `findOscTerminator` knows — `BEL`, `ESC \`, the C1 ST — so a directory name or command line carrying one ends the `633` sequence early and the remainder arrives as a fresh, fully trusted OSC. Nothing the parser can do distinguishes that from an emitter that meant it, which is why the boundary is in the scripts Dormouse ships. `lib/src/lib/terminal-protocol.test.ts` proves the parser *cannot* defend it: for each of the three terminators it forges an `OSC 9` notification with the body `PWNED` through an unfiltered `Cwd=`.
 
+Why the OSC 367 `open` check names its evidence. Its earlier wording, "a Tool running its designated command", left open what shows the command is running, and the gate compared the command line the shell reports, which is output. Two nightly audits split on it (2026-10). The check now names the host's launch as the evidence and rules out anything the output reports, so the verdict no longer depends on the auditor's reading.
+
 Why deceptive links are gated twice. The modal omits its Open action and focuses Copy, while the host callback independently rejects the deceptive verdict. The component regression exercises both the rendered buttons and a direct callback invocation, so an accidental presentation change cannot alone enable opening.
 
 ## Browser panes

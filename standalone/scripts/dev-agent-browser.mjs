@@ -111,9 +111,10 @@ const HARNESS_WINDOW = 'main';
 
 const fireAndForget = {
   pty_spawn: ({ id, options }) => writeSidecar('pty:spawn', { id, options }),
-  // `userInput` rides the write, as `pty_write` in src-tauri/src/lib.rs carries it.
-  pty_write: ({ id, data, paced, userInput }) =>
-    writeSidecar('pty:input', { id, data, paced, ...(userInput === true ? { userInput: true } : {}) }),
+  // `userInput` and `launch` ride the write, as `pty_write` in src-tauri/src/lib.rs carries them.
+  pty_write: ({ id, data, paced, userInput, launch }) => writeSidecar('pty:input', {
+    id, data, paced, ...(userInput === true ? { userInput: true } : {}), ...(launch === true ? { launch: true } : {}),
+  }),
   pty_resize: ({ id, cols, rows }) => writeSidecar('pty:resize', { id, cols, rows }),
   pty_theme_colors: ({ colors }) => writeSidecar('pty:themeColors', colors),
   pty_kill: ({ id }) => writeSidecar('pty:kill', { id }),
