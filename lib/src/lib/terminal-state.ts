@@ -1,3 +1,4 @@
+import { isUncOrDevicePath } from 'dor-lib-common/browser-providers';
 import { POSIX_ESCAPABLE } from './posix-escape';
 
 export type CwdSource = 'osc7' | 'osc9_9' | 'osc633' | 'osc1337' | 'process' | 'manual';
@@ -269,7 +270,8 @@ export function cwdFromOsc7(rawUriInput: string, now = Date.now()): CwdState | n
     host,
     scheme: 'file',
     pathKind: inferPathKind(decodedPath),
-    isRemote: isRemoteFileHost(host),
+    // `file:////host/share` names a share by its path alone.
+    isRemote: isRemoteFileHost(host) || isUncOrDevicePath(decodedPath),
     source: 'osc7',
     updatedAt: now,
   };
@@ -281,7 +283,7 @@ export function cwdFromOsc9_9(rawPath: string, now = Date.now()): CwdState | nul
   return {
     path,
     pathKind: isWindowsPath(path) ? 'windows' : 'unknown',
-    isRemote: isUncPath(path),
+    isRemote: isUncOrDevicePath(path),
     source: 'osc9_9',
     updatedAt: now,
   };
@@ -711,7 +713,7 @@ function cwdFromDecodedPath(rawPath: string, source: CwdSource, now: number): Cw
   return {
     path,
     pathKind: inferPathKind(path),
-    isRemote: isUncPath(path),
+    isRemote: isUncOrDevicePath(path),
     source,
     updatedAt: now,
   };
@@ -807,11 +809,7 @@ function inferPathKind(path: string): PathKind {
 }
 
 function isWindowsPath(path: string): boolean {
-  return /^[A-Za-z]:(?:[\\/]|$)/.test(path) || isUncPath(path);
-}
-
-function isUncPath(path: string): boolean {
-  return path.startsWith('\\\\') || path.startsWith('//');
+  return /^[A-Za-z]:(?:[\\/]|$)/.test(path) || isUncOrDevicePath(path);
 }
 
 function isRemoteFileHost(host: string | undefined): boolean {

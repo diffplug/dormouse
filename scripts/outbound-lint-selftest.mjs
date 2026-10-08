@@ -200,9 +200,41 @@ const CSP = [
   ],
   [
     'dor-tools-builtin/src/file-viewer.ts',
-    replace("img-src data:\"", "img-src data: https:\""),
+    replace("img-src data:;", "img-src data: https:;"),
     'img-src admits https:',
     'https: in the image viewer CSP',
+  ],
+  // Directives with no default-src fallback: each must be declared, not only
+  // checked where present.
+  ...["base-uri", "form-action", "frame-ancestors"].map((name) => [
+    'standalone/src-tauri/tauri.conf.json',
+    replace(`; ${name} 'none'`, ''),
+    `no ${name}`,
+    `a Standalone CSP with no ${name}`,
+  ]),
+  ...["base-uri", "form-action"].map((name) => [
+    'vscode-ext/src/webview-html.ts',
+    replace(`\`${name} 'none'\`,`, ''),
+    `no ${name}`,
+    `a VS Code webview CSP with no ${name}`,
+  ]),
+  [
+    'dor-tools-builtin/src/editor-page.ts',
+    replace("; form-action 'none'", ''),
+    'no form-action',
+    'a built-in viewer CSP with no form-action',
+  ],
+  [
+    'dor-tools-builtin/src/file-viewer.ts',
+    replace("; base-uri 'none'", ''),
+    'no base-uri',
+    'an image viewer CSP with no base-uri',
+  ],
+  [
+    'standalone/src-tauri/tauri.conf.json',
+    replace("form-action 'none'", 'form-action https://forms.example.net'),
+    'form-action admits https://forms.example.net',
+    'a remote form target in the Standalone CSP',
   ],
 ];
 

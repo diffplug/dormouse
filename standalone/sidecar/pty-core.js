@@ -1661,7 +1661,9 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
         } else helpers.delete(request.id);
         onHelper(request.id, helpers.has(request.id));
       } else if (request.op === 'openDirectory') {
-        if (typeof request.path !== 'string' || !path.isAbsolute(request.path) || request.path.includes('\0') || !directoryExists(request.path)) throw new Error('Directory is unavailable');
+        // A share or device path (`isUncOrDevicePath` in dor-lib-common) is
+        // refused before the existence check, which alone would reach its host.
+        if (typeof request.path !== 'string' || !path.isAbsolute(request.path) || /^[\\/]{2}/.test(request.path) || request.path.includes('\0') || !directoryExists(request.path)) throw new Error('Directory is unavailable');
         const nativePath = fs.realpathSync(request.path);
         // Absolute canonical path is one argument; no shell interprets OSC text.
         openNativeDirectory(nativePath, (error) => {

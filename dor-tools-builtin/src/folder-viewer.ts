@@ -2,7 +2,7 @@ import type { Dirent } from 'node:fs';
 import { opendir, realpath, stat } from 'node:fs/promises';
 import type { IncomingMessage } from 'node:http';
 import { join } from 'node:path';
-import { resolveBinaryPath, spawnAndCapture } from 'dor-lib-common';
+import { UNTRUSTED_REPO_GIT_ARGS, resolveBinaryPath, spawnAndCapture } from 'dor-lib-common';
 import { DEHYDRATE_ENV, dehydrateSequence, openSequence, readDehydrated, validToolOpenPath } from 'dor-tools-lib/osc';
 import { byDisplayOrder, FOLDER_CSP, folderViewerPage } from './folder-viewer-page.js';
 import { announceViewer, HttpError, isInsideRoot, pathSegments, readJsonBody, reply, startCapabilityViewer } from './viewer-server.js';
@@ -25,10 +25,9 @@ export type FolderOpen = (path: string, preview: boolean) => Promise<FolderOpenR
  * repository, a timeout) answers none: ignore state only dims entries. */
 async function gitIgnored(git: string | undefined, dir: string, names: string[]): Promise<Set<string>> {
   if (!git || !names.length) return new Set();
-  // Reading the index runs `core.fsmonitor`, which the listed folder's own
-  // `.git/config` may name. `./` keeps a leading `:` from reading as pathspec
-  // magic; git resolves each path's type itself, so dir-only patterns match.
-  const result = await spawnAndCapture(git, ['-c', 'core.fsmonitor=false', 'check-ignore', '-z', '--stdin'], {
+  // `./` keeps a leading `:` from reading as pathspec magic; git resolves each
+  // path's type itself, so dir-only patterns match.
+  const result = await spawnAndCapture(git, [...UNTRUSTED_REPO_GIT_ARGS, 'check-ignore', '-z', '--stdin'], {
     cwd: dir, input: names.map(name => `./${name}\0`).join(''), timeoutMs: GIT_TIMEOUT_MS, maxOutputBytes: GIT_OUTPUT_LIMIT,
   });
   // Exit 1 is git's "none ignored"; 128 is "not a repository" or a refused query.
