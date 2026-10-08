@@ -522,7 +522,7 @@ export function AlarmSettingsSection({ sink, preview = false, onShowNetwork }: {
           <>
             Uses your browser or system voice.{' '}
             <ExternalTextLink href={HOSTED_VOICE_URL}>
-              Managed ElevenLabs voice is coming soon.
+              Get managed ElevenLabs voices.
             </ExternalTextLink>
           </>
         ) : networkOff ? (
