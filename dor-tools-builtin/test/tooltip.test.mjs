@@ -1,8 +1,12 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
+import { runInNewContext } from 'node:vm';
 import { load } from './bundle.mjs';
+import { OUT, tooltipScriptModule } from '../scripts/build-tooltip-script.mjs';
 
 const { placeTip, tipLines, TIP_GAP, TIP_MARGIN } = await load('../viewer/tip-layout.ts');
+const { refuseDisabledClick } = await load('../viewer/aria-disabled.ts');
 
 const plain = text => ({ text, key: false });
 const key = text => ({ text, key: true });
@@ -38,4 +42,35 @@ test('flips above when there is no room below', () => {
   // Fits neither side: the roomier one, clamped.
   const tall = placeTip(box(10, 300), { width: 120, height: 390 }, viewport);
   assert.deepEqual(tall, { left: 10, top: TIP_MARGIN, above: true });
+});
+
+test('a click on or inside an aria-disabled control never reaches the page', () => {
+  const click = disabled => {
+    const event = { prevented: false, stopped: false, preventDefault() { this.prevented = true; }, stopImmediatePropagation() { this.stopped = true; },
+      target: { closest: selector => (disabled && selector === '[aria-disabled="true"]' ? {} : null) } };
+    refuseDisabledClick(event);
+    return { prevented: event.prevented, stopped: event.stopped };
+  };
+  assert.deepEqual(click(true), { prevented: true, stopped: true });
+  assert.deepEqual(click(false), { prevented: false, stopped: false });
+  // A text node, or a click with no target, is not a control.
+  for (const target of [null, {}]) assert.doesNotThrow(() => refuseDisabledClick({ target, preventDefault() { throw new Error('refused'); } }));
+});
+
+test('installing tooltips keeps the page\'s aria-disabled controls inert', async () => {
+  const listeners = [];
+  const target = () => ({ addEventListener: (type, listener, capture) => listeners.push({ type, listener, capture }) });
+  const element = () => ({ style: {}, dataset: {}, setAttribute() {}, append() {} });
+  const document = { ...target(), body: element(), createElement: element };
+  const { TOOLTIP_SCRIPT } = await load('../src/tooltip-script.ts');
+  runInNewContext(TOOLTIP_SCRIPT, { document, window: target(), MutationObserver: class {}, performance });
+  const clicks = listeners.filter(l => l.type === 'click' && l.capture === true);
+  assert.equal(clicks.length, 1);
+  let prevented = false;
+  clicks[0].listener({ target: { closest: () => ({}) }, preventDefault() { prevented = true; }, stopImmediatePropagation() {} });
+  assert.ok(prevented);
+});
+
+test('the folder viewer inlines the current tooltip', async () => {
+  assert.equal(await readFile(OUT, 'utf8'), await tooltipScriptModule(), 'src/tooltip-script.ts is stale: run node scripts/build-tooltip-script.mjs');
 });

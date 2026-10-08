@@ -188,8 +188,8 @@ export function ImageEditor({ image, name, onChange, controls, error, ref }: Ima
           </div>
         ))}
         <div className="ie-group">
-          <button type="button" className="ie-icon" aria-label="Undo" data-tip="Undo [Cmd/Ctrl+Z]" disabled={!ctl.canUndo} onPointerDown={keepFocus} onClick={() => ctl.undo()}><Icon name="undo" /></button>
-          <button type="button" className="ie-icon" aria-label="Redo" data-tip="Redo [Shift+Cmd/Ctrl+Z]" disabled={!ctl.canRedo} onPointerDown={keepFocus} onClick={() => ctl.redo()}><Icon name="redo" /></button>
+          <button type="button" className="ie-icon" aria-label="Undo" data-tip="Undo [Cmd/Ctrl+Z]" aria-disabled={!ctl.canUndo} onPointerDown={keepFocus} onClick={() => ctl.undo()}><Icon name="undo" /></button>
+          <button type="button" className="ie-icon" aria-label="Redo" data-tip="Redo [Shift+Cmd/Ctrl+Z]" aria-disabled={!ctl.canRedo} onPointerDown={keepFocus} onClick={() => ctl.redo()}><Icon name="redo" /></button>
         </div>
         <div className="ie-end">{controls}</div>
       </div>

@@ -3,7 +3,10 @@
  * the `data-tip` text of the control under the mouse, or of the control
  * keyboard focus reaches, on a raised surface like the app's pane-header
  * tooltips (DESIGN.md -> Header Action Button). `[k]` renders as a shortcut
- * and a newline starts another line (./tip-layout.ts). Touch input shows none. */
+ * and a newline starts another line (./tip-layout.ts). Touch input shows none.
+ * A control that cannot act keeps its tip by being `aria-disabled` rather
+ * than `disabled`, which this also keeps inert (./aria-disabled.ts). */
+import { refuseDisabledClick } from './aria-disabled';
 import { placeTip, tipLines } from './tip-layout';
 import './tooltip.css';
 
@@ -39,7 +42,7 @@ export function installTooltips(): void {
   // While a tip shows, its control leaving the page or changing its disabled
   // state hides it; a changed `data-tip` replaces the text.
   const watch = new MutationObserver(records => {
-    if (!anchor?.isConnected || records.some(r => r.target === anchor && r.attributeName === 'disabled')) hide();
+    if (!anchor?.isConnected || records.some(r => r.target === anchor && r.attributeName === 'aria-disabled')) hide();
     else if (records.some(r => r.target === anchor && r.attributeName === 'data-tip')) render();
   });
 
@@ -87,7 +90,7 @@ export function installTooltips(): void {
     if (!shown) return;
     describedBy = el.getAttribute('aria-describedby');
     el.setAttribute('aria-describedby', describedBy ? `${describedBy} ${ID}` : ID);
-    watch.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['disabled', 'data-tip'] });
+    watch.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['aria-disabled', 'data-tip'] });
   }
 
   function hide() {
@@ -134,6 +137,7 @@ export function installTooltips(): void {
   });
   document.addEventListener('focusout', () => { if (fromFocus) hide(); });
   document.addEventListener('keydown', event => { if (event.key === 'Escape') hide(); }, true);
+  document.addEventListener('click', refuseDisabledClick, true);
   window.addEventListener('scroll', hide, { capture: true, passive: true });
   window.addEventListener('resize', hide);
   window.addEventListener('blur', hide);

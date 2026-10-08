@@ -66,7 +66,7 @@ const session = documentPage().open<number>({
   },
 }, {
   report(state) {
-    saveButton.disabled = !state.dirty || state.saving;
+    saveButton.setAttribute('aria-disabled', String(!state.dirty || state.saving));
     el('state').textContent = stateLabel(state);
   },
   fail(text) {

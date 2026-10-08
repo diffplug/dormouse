@@ -11,6 +11,7 @@ import { afterEach, beforeEach, test } from 'node:test';
 import { folderDehydrateSequence, oscOpen, readFolderViewState, startFolderViewer } from '../dist/folder-viewer.js';
 import { parseToolDehydrate, readDehydrated, TOOL_PAYLOAD_LIMIT } from 'dor-tools-lib/osc';
 import { folderViewerPage } from '../dist/folder-viewer-page.js';
+import { TOOLTIP_SCRIPT, TOOLTIP_STYLE } from '../dist/tooltip-script.js';
 
 const posixOnly = { skip: process.platform === 'win32' ? 'POSIX file names and symlinks' : false };
 const hasGit = spawnSync('git', ['--version']).status === 0;
@@ -289,9 +290,10 @@ async function runPage(names, { listings = null, saved = null } = {}) {
   }
   const elements = { tree: new Element(), show: new Element(), status: new Element(), refresh: new Element(), collapse: new Element() };
   const items = [];
+  const created = [];
   const document = {
     getElementById: id => elements[id],
-    createElement: tag => { const element = new Element(); if (tag === 'li') items.push(element); return element; },
+    createElement: tag => { const element = new Element(); created.push(element); if (tag === 'li') items.push(element); return element; },
   };
   const answer = body => ({ ok: true, text: async () => JSON.stringify(body) });
   const posts = [];
@@ -309,11 +311,12 @@ async function runPage(names, { listings = null, saved = null } = {}) {
       ? new Promise((resolve, reject) => posts.push({ sent: `${url} ${JSON.parse(init.body).path}`, ok: () => resolve(answer({ ok: true, status: 'created' })), fail: () => reject(new Error('lost')) }))
       : Promise.resolve(answer({ entries: listing(url), truncated: false }));
   };
-  runInNewContext(/<script>([\s\S]*)<\/script>/.exec(folderViewerPage(root))[1], { document, fetch, setTimeout, clearTimeout });
+  // The page's own script; the tooltip's follows it.
+  runInNewContext(/<script>([\s\S]*?)<\/script>/.exec(folderViewerPage(root))[1], { document, fetch, setTimeout, clearTimeout });
   await settle();
   const tree = elements.tree.handlers;
   return {
-    items, elements, states,
+    items, created, elements, states,
     posts, sent: () => posts.map(post => post.sent),
     click: (name, detail = 1) => tree.click({ target: items[names.indexOf(name)], detail }),
     dblclick: name => tree.dblclick({ target: items[names.indexOf(name)] }),
@@ -321,6 +324,15 @@ async function runPage(names, { listings = null, saved = null } = {}) {
   };
 }
 const settle = () => new Promise(resolve => setImmediate(resolve));
+
+test('the page shows the other pages\' tooltips, never a native title', async () => {
+  const page = folderViewerPage(root);
+  assert.ok(page.includes(`<script>${TOOLTIP_SCRIPT}</script>`) && page.includes(TOOLTIP_STYLE));
+  assert.doesNotMatch(page.replace(TOOLTIP_SCRIPT, ''), /\stitle=|\.title\s*=/);
+  assert.match(page, /id="refresh"[^>]* data-tip="Refresh"/);
+  const tips = (await runPage(['a.txt'])).created.map(element => element.attributes['data-tip']).filter(Boolean);
+  assert.deepEqual(tips, ['a.txt']);
+});
 
 test('the page sends an activate only once every select in flight has settled', async () => {
   const page = await runPage(['a.txt', 'b.txt']);
