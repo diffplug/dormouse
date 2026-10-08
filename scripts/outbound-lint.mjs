@@ -29,7 +29,9 @@
  *      loopback appears only in a file and host `REMOTE_LITERALS` names.
  *   4. CSP. Every source list in the Standalone CSP, the VS Code webview CSP,
  *      and the built-in viewers' CSP constants admits only this origin, IPC,
- *      `data:`/`blob:`, a nonce or hash, VS Code's `cspSource`, or loopback.
+ *      `data:`/`blob:`, a nonce or hash, VS Code's `cspSource`, or loopback;
+ *      and each declares `default-src` plus the directives that do not fall
+ *      back to it (`NO_FALLBACK`).
  *   5. Tauri. The builder registers exactly the shell and updater plugins; no
  *      Rust network client; no HTTP/WebSocket/upload/opener plugin or HTTP
  *      client crate in `[dependencies]`; `updater:` permissions only in
@@ -601,15 +603,29 @@ function localSource(source) {
   return /^(?:https?|wss?):\/\/(?:127\.0\.0\.1|localhost|\[::1\])(?::(?:\d+|\*))?$/.test(source);
 }
 
-function checkCsp(where, policy) {
+/**
+ * Directives with no `default-src` fallback, so a policy that omits one admits
+ * any origin there. `frame-ancestors` is required only of the Standalone CSP,
+ * which Tauri sends as a header: a `<meta>` policy (VS Code's) ignores it, and
+ * the viewers are framed by the webview.
+ */
+const NO_FALLBACK = ['base-uri', 'form-action'];
+
+function checkCsp(where, policy, required = NO_FALLBACK) {
   const directives = policy.split(';').map((d) => d.trim()).filter(Boolean);
+  const names = new Set(directives.map((d) => d.split(/\s+/)[0]));
   if (directives.length === 0) problems.push(`${where}: an empty CSP — the parse found nothing to check.`);
-  else if (!directives.some((d) => d.split(/\s+/)[0] === 'default-src')) {
-    problems.push(`${where}: no default-src, so every fetch directive it omits admits any origin.`);
+  else {
+    for (const name of ['default-src', ...required]) {
+      if (names.has(name)) continue;
+      problems.push(name === 'default-src'
+        ? `${where}: no default-src, so every fetch directive it omits admits any origin.`
+        : `${where}: no ${name}, which does not fall back to default-src and so admits any origin.`);
+    }
   }
   for (const directive of directives) {
     const [name, ...sources] = directive.split(/\s+/);
-    if (!/-src(?:-elem|-attr)?$/.test(name) && name !== 'form-action') continue;
+    if (!/-src(?:-elem|-attr)?$/.test(name) && !['base-uri', 'form-action', 'frame-ancestors'].includes(name)) continue;
     for (const source of sources) {
       if (localSource(source)) continue;
       problems.push(
@@ -622,8 +638,9 @@ function checkCsp(where, policy) {
 }
 
 const tauriConf = JSON.parse(readRepoFile('standalone/src-tauri/tauri.conf.json'));
-checkCsp('standalone/src-tauri/tauri.conf.json app.security.csp', tauriConf.app?.security?.csp ?? '');
-if (tauriConf.app?.security?.devCsp) checkCsp('standalone/src-tauri/tauri.conf.json app.security.devCsp', tauriConf.app.security.devCsp);
+const TAURI_REQUIRED = [...NO_FALLBACK, 'frame-ancestors'];
+checkCsp('standalone/src-tauri/tauri.conf.json app.security.csp', tauriConf.app?.security?.csp ?? '', TAURI_REQUIRED);
+if (tauriConf.app?.security?.devCsp) checkCsp('standalone/src-tauri/tauri.conf.json app.security.devCsp', tauriConf.app.security.devCsp, TAURI_REQUIRED);
 if (tauriConf.app?.withGlobalTauri) {
   problems.push('standalone/src-tauri/tauri.conf.json: app.withGlobalTauri exposes the Tauri API to every script in the page.');
 }

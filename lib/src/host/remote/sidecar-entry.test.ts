@@ -26,6 +26,12 @@ import { createAlertClient } from '../alert-client';
 import type { AlertStateDetail } from '../../lib/platform/types';
 import { DEFAULT_MANAGED_VOICE_ID } from '../../lib/platform/managed-voice-types';
 
+// A stock Hosted build: the test runner bakes no define, which reads as self-host.
+vi.mock('../relay-origin', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../relay-origin')>();
+  return { ...actual, bakedRelay: () => ({ origin: actual.DEFAULT_RELAY_ORIGIN, mode: 'hosted' }) };
+});
+
 const HOLD: SurfaceHold = { holder: 'session-a', label: 'iPhone', lease: '1', serviceId: 'service-1' };
 
 let sent: Array<{ event: string; data: unknown }>;

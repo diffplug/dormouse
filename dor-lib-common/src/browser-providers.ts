@@ -69,11 +69,18 @@ const AGENT_BROWSER_FILENAME_RE = /^agent-browser(?:\.(?:cmd|bat|exe|com|ps1))?$
 
 // POSIX absolute or Windows drive-absolute. A relative path is refused
 // outright: it would resolve against the spawner's cwd, which the caller does
-// not know and must not be able to aim at. So is anything opening with two
-// separators in either spelling: a UNC share (`\\host\share`, `//host/share`)
-// or a device path (`\\?\`, `\\.\`), which Windows would run off another
-// machine or past its own path normalization.
-const ABSOLUTE_RE = /^(?:\/(?![\\/])|[A-Za-z]:[\\/])/;
+// not know and must not be able to aim at. So is a UNC or device path.
+const ABSOLUTE_RE = /^(?:\/|[A-Za-z]:[\\/])/;
+
+/**
+ * True for a path opening with two separators in either spelling: a UNC share
+ * (`\\host\share`, `//host/share`) or a device path (`\\?\`, `\\.\`), which
+ * Windows reaches on another machine or past its own path normalization;
+ * even a `stat` of one reaches that machine.
+ */
+export function isUncOrDevicePath(path: string): boolean {
+  return /^[\\/]{2}/.test(path);
+}
 
 /**
  * True when `candidate` may be spawned as agent-browser.
@@ -102,7 +109,7 @@ function isAllowedBrowserBinary(candidate: unknown, configuredPath: string | und
   if (/[\u0000-\u001f\u007f]/.test(candidate)) return false;
   if (configuredPath && candidate === configuredPath) return true;
   if (candidate === name) return true;
-  if (!ABSOLUTE_RE.test(candidate)) return false;
+  if (isUncOrDevicePath(candidate) || !ABSOLUTE_RE.test(candidate)) return false;
   const segments = candidate.split(/[\\/]/);
   if (segments.includes('..')) return false;
   return filename.test(segments[segments.length - 1] ?? '');
