@@ -15,6 +15,7 @@ const TRUST_MODEL_URL = "https://github.com/diffplug/dormouse/blob/main/docs/spe
 export const PRIVACY_SECTIONS: PolicySection[] = [
   { id: "scope", title: "Who we are and what this covers", body: <>
     <p>DiffPlug LLC operates Dormouse Hosted and is the controller of the personal information described here: the account service at hosted.dormouse.sh, the managed Relay and Pocket at relay.dormouse.sh, and managed voices at voice.dormouse.sh. This policy covers those services, the paid subscription that unlocks them, and related support. Contact us at <a className={LINK_CLASS} href="mailto:support@diffplug.com">support@diffplug.com</a> about privacy or your account.</p>
+    <p>Our business address is DiffPlug LLC, 447 Sutter St Ste 405, San Francisco, CA 94108, United States.</p>
     <p>Dormouse itself runs on your computer and sends no usage telemetry. An update check fetches a version file from dormouse.sh without sending terminal contents or a Hosted account identifier. Like other network requests, it exposes your IP address and connection information to the serving infrastructure. Automatic checks require both automatic updates to be enabled and Settings → Network to be above Nothing, the default for a new install. Check now makes a request when you click it. Creating an account does not upload your terminal contents, commands, files, or audio.</p>
     <p>This policy does not describe a Relay you operate yourself or third-party services you choose to open. Those services have their own operators and policies.</p>
   </> },
