@@ -30,7 +30,8 @@ describe('helper lifecycle', () => {
     const fresh = await openHelper('parent');
     expect(reattachHelper(old)).toBe(true);
     expect(getHelper('parent')).toBe(old);
-    expect(registry.has(fresh.id)).toBe(false);
+    // Killed once the host has the old helper back (its claim order: Labs below).
+    await vi.waitFor(() => expect(registry.has(fresh.id)).toBe(false));
   });
 
   it('resets into a pending kill under Labs, which restores the old helper in place of the fresh one', async () => {
@@ -39,13 +40,43 @@ describe('helper lifecycle', () => {
     vi.spyOn(labs, 'isDelayedKillEnabled').mockReturnValue(true);
     try {
       const old = await openHelper('parent');
-      resetHelper('parent', { workspaceId: 'ws', title: 'shell', ref: 'surface:1' });
+      await resetHelper('parent', { workspaceId: 'ws', title: 'shell', ref: 'surface:1' });
       expect(registry.has(old.id)).toBe(true);
       expect(pending.getPendingKills().map(kill => [kill.kind, kill.id])).toEqual([['helper', old.id]]);
+      // The host owns one helper per parent: the old one's claim goes before the fresh one spawns.
+      const promotes = () => host.terminalContext.mock.calls.map(([request]) => request).filter(request => request.op === 'promote');
+      expect(promotes()).toEqual([{ op: 'promote', id: old.id }]);
       const fresh = await openHelper('parent');
       pending.restorePendingKill(pending.pendingKillKey('helper', old.id));
       expect(getHelper('parent')).toBe(old);
-      expect(registry.has(fresh.id)).toBe(false);
+      // Released, re-owned, then killed: never two owners at the host.
+      await vi.waitFor(() => expect(registry.has(fresh.id)).toBe(false));
+      expect(promotes()).toEqual([
+        { op: 'promote', id: old.id },
+        { op: 'promote', id: fresh.id },
+        { op: 'promote', id: old.id, restore: { parentId: 'parent', command: old.command } },
+      ]);
+    } finally {
+      pending._resetPendingKillsForTesting();
+      vi.restoreAllMocks();
+    }
+  });
+
+  it('keeps a Labs Reset\'s old helper pending even when the host release fails, so it still finalizes', async () => {
+    const labs = await import('./labs-settings');
+    const pending = await import('./pending-kills');
+    vi.spyOn(labs, 'isDelayedKillEnabled').mockReturnValue(true);
+    try {
+      const old = await openHelper('parent');
+      // VS Code's request timeout: the release never answers in time.
+      host.terminalContext.mockImplementation(async (request: { op: string }) => {
+        if (request.op === 'promote') throw new Error('timed out');
+        return { home: '/home/user', command: 'git status', busy: false };
+      });
+      await expect(resetHelper('parent', { workspaceId: 'ws', title: 'shell', ref: 'surface:1' })).rejects.toThrow('timed out');
+      expect(pending.getPendingKills().map(kill => [kill.kind, kill.id])).toEqual([['helper', old.id]]);
+      await pending.finalizePendingKills();
+      expect(registry.has(old.id)).toBe(false);
     } finally {
       pending._resetPendingKillsForTesting();
       vi.restoreAllMocks();
@@ -58,7 +89,7 @@ describe('helper lifecycle', () => {
     vi.spyOn(labs, 'isDelayedKillEnabled').mockReturnValue(true);
     try {
       const old = await openHelper('parent');
-      resetHelper('parent', { workspaceId: 'ws', title: 'shell', ref: 'surface:1' });
+      await resetHelper('parent', { workspaceId: 'ws', title: 'shell', ref: 'surface:1' });
       const fresh = await openHelper('parent');
       registry.get(fresh.id)!.untouched = false;
       const [before] = pending.getPendingKills();

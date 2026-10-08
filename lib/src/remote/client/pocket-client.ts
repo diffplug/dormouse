@@ -22,11 +22,13 @@ import {
   E2E_ID_BYTE_LENGTH,
   MAX_PUSH_QUERY_DELIVERY_IDS,
   NoiseTransportSession,
+  PRESENCE_WINDOW,
   SETUP_TOKEN_INVALID_ERROR,
   UNAUTHORIZED_ERROR,
   WS_ROUTES,
   WS_TOKEN_PARAM,
   createNoiseInitiator,
+  decodeConnectionMessage2,
   e2eConnectionPrologue,
   fromBase64Url,
   hashPasskeyPublicKey,
@@ -34,6 +36,7 @@ import {
   isE2eRelayToClientFrame,
   isNoisePublicKey,
   isPairingOutcomeV1,
+  isRelayBearer,
   pairingInvitationPrologue,
   pushEndpointFingerprint,
   pushSubscriptionDeletePath,
@@ -94,6 +97,20 @@ import type { TerminalHandlers } from './remote-adapter';
 export type PocketSocket = RemoteWebSocket;
 
 /**
+ * The Relay sign-in session: its bearer token, the account the Relay answered
+ * with it — `'owner'` from a self-host Relay, the account's user id from
+ * Hosted — the credential that signed in, and the Relay's expiry. Every
+ * presence proof names that account and credential, and a pairing outcome must
+ * name the account.
+ */
+export interface PocketSession {
+  readonly token: string;
+  readonly accountId: string;
+  readonly credentialId: string;
+  readonly expiresAt: number;
+}
+
+/**
  * Persistent per-device state that is *not* an end-to-end identity — those live
  * in IndexedDB ({@link KnownBurrowStore}). Passkey public keys are cached by
  * credential id at registration *and* at sign-in — the Relay returns the
@@ -119,6 +136,19 @@ export interface PocketStorage {
    */
   getRegisteredPushEndpoint(): string | null;
   setRegisteredPushEndpoint(fingerprint: string): void;
+  /**
+   * The Relay session, kept so a relaunch lands signed in. It reaches the
+   * Relay alone; every Burrow ceremony still demands its own presence proof.
+   */
+  getSession(): PocketSession | null;
+  setSession(session: PocketSession): void;
+  /**
+   * Forget the stored session, but only while it is still the one holding
+   * `token`. Every tab of the origin shares this storage, so what is stored may
+   * be another tab's newer sign-in, which this tab's expiry or sign-out must
+   * leave standing.
+   */
+  clearSession(token: string): void;
 }
 
 /**
@@ -229,6 +259,21 @@ export class SessionExpiredError extends RelayRefusalError {
   constructor() {
     super(SESSION_EXPIRED_MESSAGE, 401);
     this.name = 'SessionExpiredError';
+  }
+}
+
+/**
+ * The Relay rejected the token a request was *sent* with, but this client has
+ * signed in again since: the 401 speaks for a session that is already gone, so
+ * it clears nothing and must not send the current one back to sign-in. Never a
+ * {@link SessionExpiredError}, so nothing that reacts to expiry reacts to this;
+ * the request's result is simply obsolete. Only a *different* current session
+ * makes a 401 superseded: with none current, it is expiry.
+ */
+export class SessionSupersededError extends RelayRefusalError {
+  constructor() {
+    super('This request belonged to an earlier sign-in.', 401);
+    this.name = 'SessionSupersededError';
   }
 }
 
@@ -354,14 +399,8 @@ export class PocketClient {
   #ws: PocketSocket | null = null;
   /** The open relay socket's heartbeat, or null while none is open. */
   #heartbeat: RelayHeartbeat | null = null;
-  /**
-   * The sign-in session: its token, and the account the Relay answered with
-   * it — `'owner'` from a self-host Relay, the account's user id from Hosted.
-   * Every presence proof names that account, and a pairing outcome must.
-   */
-  #session: { readonly token: string; readonly accountId: string } | null = null;
-  /** The credential id from the most recent sign-in (or registration). */
-  #credentialId: string | null = null;
+  /** Written only through {@link #setSession}, which keeps storage in step. */
+  #session: PocketSession | null;
 
   constructor(deps: PocketClientDeps) {
     this.#baseUrl = deps.baseUrl ?? '';
@@ -373,6 +412,10 @@ export class PocketClient {
     this.#pendingDeletions = deps.pendingDeletions;
     this.#storage = deps.storage ?? localStoragePocketStorage();
     this.#now = deps.now ?? (() => Date.now());
+    // A stored session the Relay has already expired would only cost a 401.
+    const stored = this.#storage.getSession();
+    this.#session = stored && stored.expiresAt > this.#now() ? stored : null;
+    if (stored && !this.#session) this.#storage.clearSession(stored.token);
     this.#setTimer = deps.setTimer ?? realTimer;
     this.#core = new ClientSessionCore<E2eRoute>({
       sendFrame: (route, step, ciphertext) => this.#sendE2e(route, step, ciphertext),
@@ -462,7 +505,8 @@ export class PocketClient {
 
   /**
    * First-time setup: passkey registration gated by the single-use `setupToken`
-   * off a scanned setup code. Follow with {@link signin}.
+   * off a scanned setup code. The Relay's acknowledgement carries a session, so
+   * this also signs in.
    */
   async setup({ setupToken }: { setupToken: string }, label: string): Promise<SetupFinishResponse> {
     const begin = await this.#setupApi<SetupBeginResponse>(API_ROUTES.setupBegin, { setupToken });
@@ -513,7 +557,12 @@ export class PocketClient {
     }
     // Only once the Relay has acknowledged it: this names the credential a
     // pairing's presence proof is built from. Sign-in refreshes it.
-    this.#credentialId = registration.credentialId;
+    this.#setSession({
+      token: finish.sessionToken,
+      accountId: finish.accountId,
+      credentialId: registration.credentialId,
+      expiresAt: finish.expiresAt,
+    });
     return finish;
   }
 
@@ -533,7 +582,7 @@ export class PocketClient {
    * {@link SetupTokenInvalidError}. Classified here rather than in {@link #api}
    * so no other route's 401 can be read as a dead code.
    */
-  async #setupApi<T>(route: string, body: unknown, init?: RequestInit): Promise<T> {
+  async #setupApi<T>(route: string, body: unknown, init?: ApiInit): Promise<T> {
     try {
       return await this.#api<T>(route, body, init);
     } catch (err) {
@@ -545,13 +594,17 @@ export class PocketClient {
     }
   }
 
-  /** Sign in with a discoverable passkey; keeps the session token in memory. */
+  /** Sign in with a discoverable passkey; the session is kept across launches. */
   async signin(): Promise<SigninFinishResponse> {
     const begin = await this.#api<SigninBeginResponse>(API_ROUTES.signinBegin, {});
     const assertion = await this.#webauthn.getAssertion(begin.challenge, begin.rpId);
     const finish = await this.#api<SigninFinishResponse>(API_ROUTES.signinFinish, { assertion });
-    this.#session = { token: finish.sessionToken, accountId: finish.accountId };
-    this.#credentialId = assertion.credentialId;
+    this.#setSession({
+      token: finish.sessionToken,
+      accountId: finish.accountId,
+      credentialId: assertion.credentialId,
+      expiresAt: finish.expiresAt,
+    });
     // Signing in is enough to pair from here. The Relay returns the asserted
     // passkey's public key, so a browser profile that never performed the
     // registration — an iOS Home Screen install, a second browser — can still
@@ -559,6 +612,15 @@ export class PocketClient {
     // second passkey.
     this.#storage.setPasskeyPublicKey(assertion.credentialId, finish.passkeyPublicKey);
     return finish;
+  }
+
+  /**
+   * Forget the session on this device and close the relay socket it opened.
+   * Local only: the Relay keeps the token until it expires.
+   */
+  signOut(): void {
+    this.close();
+    this.#forgetSession();
   }
 
   async listBurrows(): Promise<BurrowsResponse['burrows']> {
@@ -696,17 +758,18 @@ export class PocketClient {
 
   /** Open the `/ws/client` relay socket; resolves once it is open. */
   async openSocket(): Promise<void> {
+    const session = this.#requireSession();
     try {
-      await this.#openSocket();
+      await this.#openSocket(session);
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err));
       if (error instanceof SessionExpiredError) throw error;
-      await this.#diagnoseSocketFailure(error);
+      await this.#diagnoseSocketFailure(error, session);
     }
   }
 
-  #openSocket(): Promise<void> {
-    const token = this.#requireSession().token;
+  #openSocket(session: PocketSession): Promise<void> {
+    const token = session.token;
     const url = `${this.#wsBase}${WS_ROUTES.client}?${WS_TOKEN_PARAM}=${encodeURIComponent(token)}`;
     const ws = this.#createWebSocket(url);
     this.#ws = ws;
@@ -777,7 +840,7 @@ export class PocketClient {
     // to already be there when they look.
     onCode?.(code);
 
-    const passkeyCredentialId = this.#requireCredentialId();
+    const passkeyCredentialId = this.#requireSession().credentialId;
     const presence = await this.#provePresence({
       kind: 'pairing',
       burrowId,
@@ -852,9 +915,11 @@ export class PocketClient {
   // --- Connection ----------------------------------------------------------
 
   /**
-   * Connect to a paired Burrow: IK against the pinned static, one presence proof
-   * over this handshake's own transcript, and the Burrow's single outcome
-   * (`docs/specs/remote-security-model.md` → Connection).
+   * Connect to a paired Burrow: IK against the pinned static, then either a
+   * ride on the Burrow's presence window where message 2 offers one, with no
+   * prompt, or one presence proof over this handshake's own transcript — and
+   * the Burrow's single outcome
+   * (`docs/specs/remote-security-model.md` → Connection, Presence window).
    */
   async connect(burrowId: string): Promise<ConnectResult> {
     await this.#ensureSocket();
@@ -888,24 +953,29 @@ export class PocketClient {
       remoteStaticPublicKey: fromBase64Url(record.burrowStaticPublicKey),
     });
     let session: NoiseTransportSession;
-    let burrowChallenge: string;
+    let message2: Uint8Array;
     try {
       const response = await this.#core.exchange(route, await handshake.writeMessage(), deadline);
-      // Message 2's payload is the Burrow's fresh single-use challenge, which the
-      // presence binding must name.
-      burrowChallenge = toBase64Url(await handshake.readMessage(fromBase64Url(response)));
+      message2 = await handshake.readMessage(fromBase64Url(response));
       session = new NoiseTransportSession(handshake.session);
     } catch (err) {
       return this.#connectionUnavailable(err);
     }
-    const presence = await this.#provePresence({
-      kind: 'connection',
-      burrowId,
-      connectionId,
-      burrowChallenge,
-      handshakeHash: toBase64Url(session.handshakeHash),
-      passkeyCredentialId: record.passkeyCredentialId,
-    });
+    // Message 2's payload is the Burrow's fresh single-use challenge and its
+    // window offer; a proof binds the whole of it. A Burrow that predates
+    // windows sends the bare challenge, which offers none. An offer is
+    // binding, so riding it needs no fallback.
+    const presence =
+      decodeConnectionMessage2(message2) === PRESENCE_WINDOW
+        ? PRESENCE_WINDOW
+        : await this.#provePresence({
+            kind: 'connection',
+            burrowId,
+            connectionId,
+            burrowChallenge: toBase64Url(message2),
+            handshakeHash: toBase64Url(session.handshakeHash),
+            passkeyCredentialId: record.passkeyCredentialId,
+          });
     // **A second Connect on one Client replaces the first**, the mirror of
     // `BurrowRuntime.#promoteConnection`: its predecessor's endpoint, peer and
     // channel go, and left alive the orphan's channel would report violations
@@ -1065,8 +1135,10 @@ export class PocketClient {
     if (!this.socketOpen) await this.openSocket();
   }
 
-  #auth(): { headers: Record<string, string> } {
-    return { headers: { authorization: `Bearer ${this.#requireSession().token}` } };
+  /** The current session's bearer header, naming the session for {@link #api}'s 401. */
+  #auth(): ApiInit & { session: PocketSession } {
+    const session = this.#requireSession();
+    return { headers: { authorization: `Bearer ${session.token}` }, session };
   }
 
   /**
@@ -1221,7 +1293,7 @@ export class PocketClient {
     return { ...this.#unavailable(error), pairingRequired: false };
   }
 
-  async #api<T>(route: string, body?: unknown, init?: RequestInit): Promise<T> {
+  async #api<T>(route: string, body?: unknown, init?: ApiInit): Promise<T> {
     const method = init?.method ?? 'POST';
     const response = await this.#fetch(`${this.#baseUrl}${route}`, {
       method,
@@ -1233,10 +1305,18 @@ export class PocketClient {
     // answers 401 too, and bouncing the user to sign-in for that would be a
     // worse bug than the one this fixes.
     if (response.status === 401 && parsed.error === UNAUTHORIZED_ERROR) {
+      // A 401 speaks only for the token it was sent with. One that outlived its
+      // session — signed out and in again while it was in flight — must not
+      // erase the replacement. With no session current — an earlier 401 on the
+      // same token, or a sign-out, already cleared it — it is still expiry, so
+      // the caller still lands on sign-in.
+      const current = this.#session;
+      const sent = init?.session ?? current;
+      if (sent && current && current.token !== sent.token) throw new SessionSupersededError();
       // Drop the token here rather than at the call site: every later request
       // and every relay upgrade would fail the same way, and keeping it would
       // let the UI believe it is still signed in.
-      this.#session = null;
+      if (sent) this.#forgetSession(sent.token);
       throw new SessionExpiredError();
     }
     // A refusal, not a bare Error: an answer arrived, which is what `setup`
@@ -1257,40 +1337,64 @@ export class PocketClient {
    * "network is down" is to ask an authenticated route — which answers the
    * question and costs one request on a path that has already failed.
    */
-  async #diagnoseSocketFailure(original: Error): Promise<never> {
-    if (this.#session === null) throw original;
+  async #diagnoseSocketFailure(original: Error, session: PocketSession): Promise<never> {
+    // Probed even with no session current: a concurrent 401 may have cleared
+    // it, and only the probe's own 401 can still send the caller to sign-in.
     try {
+      // With the token the socket presented, so a 401 is about that session.
       await this.#api<BurrowsResponse>(API_ROUTES.burrows, undefined, {
         method: 'GET',
-        headers: { authorization: `Bearer ${this.#session.token}` },
+        headers: { authorization: `Bearer ${session.token}` },
+        session,
       });
     } catch (err) {
-      if (err instanceof SessionExpiredError) throw err;
+      if (err instanceof SessionExpiredError || err instanceof SessionSupersededError) throw err;
       // Probe failed for its own reason — report the socket failure, which is
       // what the user actually hit.
     }
     throw original;
   }
 
-  #requireSession(): { readonly token: string; readonly accountId: string } {
+  #requireSession(): PocketSession {
     if (!this.#session) throw new Error('sign in first');
     return this.#session;
   }
 
-  #requireCredentialId(): string {
-    const credentialId = this.#credentialId;
-    if (!credentialId) throw new Error('sign in before pairing or connecting');
-    return credentialId;
+  #setSession(session: PocketSession): void {
+    this.#session = session;
+    this.#storage.setSession(session);
+  }
+
+  /**
+   * Forget the session holding `token` — the current one by default — in
+   * memory if it is current, and in storage if storage still holds it, so
+   * neither a newer sign-in in this tab nor one another tab stored is erased.
+   */
+  #forgetSession(token: string | undefined = this.#session?.token): void {
+    if (token === undefined) return;
+    if (this.#session?.token === token) this.#session = null;
+    this.#storage.clearSession(token);
   }
 
   #requirePasskeyPublicKey(credentialId: string): string {
     const publicKey = this.#storage.getPasskeyPublicKey(credentialId);
     if (!publicKey) {
-      this.#session = null;
+      this.#forgetSession();
       throw new PasskeyUnavailableError();
     }
     return publicKey;
   }
+}
+
+/**
+ * What {@link PocketClient}'s `#api` reads off a request: the method, the
+ * headers, and — for an authenticated route — the session whose token the
+ * headers carry, which is what a 401 is about.
+ */
+interface ApiInit {
+  readonly method?: string;
+  readonly headers?: Record<string, string>;
+  readonly session?: PocketSession;
 }
 
 /** Where one ceremony's frames are addressed; the envelope's routing triple. */
@@ -1319,6 +1423,7 @@ interface E2eRoute {
 export function localStoragePocketStorage(): PocketStorage {
   const PASSKEY_PREFIX = 'dormouse-pocket:passkey:';
   const PUSH_ENDPOINT_KEY = 'dormouse-pocket:push-endpoint';
+  const SESSION_KEY = 'dormouse-pocket:session';
 
   const passkeys = new Map<string, string>();
   let pushEndpoint: string | undefined;
@@ -1374,7 +1479,35 @@ export function localStoragePocketStorage(): PocketStorage {
       pushEndpoint = fingerprint;
       write(PUSH_ENDPOINT_KEY, fingerprint);
     },
+    // No mirror: the client reads this once, at construction, and holds the
+    // session itself for the life of the tab.
+    getSession: () => parseStoredSession(read(SESSION_KEY)),
+    setSession: (next) => write(SESSION_KEY, JSON.stringify({ v: 1, ...next })),
+    // Compare-then-remove: another tab's sign-in may have replaced the token.
+    clearSession: (token) => {
+      if (parseStoredSession(read(SESSION_KEY))?.token === token) drop(SESSION_KEY);
+    },
   };
+}
+
+/** A session `localStoragePocketStorage` wrote, or null for anything else. */
+function parseStoredSession(raw: string | null): PocketSession | null {
+  if (raw === null) return null;
+  try {
+    const { v, token, accountId, credentialId, expiresAt } = JSON.parse(raw) as Record<string, unknown>;
+    if (
+      v === 1 &&
+      isRelayBearer(token) &&
+      typeof accountId === 'string' &&
+      typeof credentialId === 'string' &&
+      typeof expiresAt === 'number'
+    ) {
+      return { token, accountId, credentialId, expiresAt };
+    }
+  } catch {
+    // Unparseable is malformed.
+  }
+  return null;
 }
 
 /**

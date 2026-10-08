@@ -23,7 +23,7 @@ import {
   resetWorkspaces,
   setWorkspaces,
 } from "dormouse-lib/lib/workspace-store";
-import { DEFAULT_WORKSPACE_NAME, windowPaneIds } from "dormouse-lib/lib/session-types";
+import { DEFAULT_WORKSPACE_NAME, metaFromRecord, windowPaneIds } from "dormouse-lib/lib/session-types";
 import type { PersistedSession, PersistedWindow, WorkspaceId } from "dormouse-lib/lib/session-types";
 import { wallBootFromResult, type WallBootPlans } from "dormouse-lib/components/wall/wall-types";
 
@@ -121,7 +121,7 @@ export function installWindowPersistence(
   seedWindowSession(saved);
   if (saved) {
     setWorkspaces({
-      workspaces: saved.workspaces.map(({ id, name, nameIsAuto, session }) => ({ id, name, nameIsAuto, ...(session.alertDelivery ? { alertDelivery: session.alertDelivery } : {}) })),
+      workspaces: saved.workspaces.map(metaFromRecord),
       activeId: saved.activeWorkspaceId,
     });
   } else {

@@ -8,6 +8,7 @@ import { WorkspaceStrip } from './WorkspaceStrip';
 import { chromeKeyboardHeld, resetChromeKeyboardLeases } from './wall/chrome-keyboard-lease';
 import { registerWallHandle, resetWallHandles, stubWallHandle, type WallHandle } from './wall/wall-handles';
 import { ensureResizeObserver } from './wall/wall-test-utils';
+import { installFakeFrames } from './motion-test-utils';
 import { requestWorkspaceClose, requestWorkspaceRename, workspaceCloseConfirmation } from './wall/workspace-lifecycle';
 import { resetWorkspaceSurfaces, setWorkspaceSurfaces } from '../lib/workspace-surfaces';
 import { clearTerminalActivity, setTerminalActivity } from '../lib/terminal-registry';
@@ -25,8 +26,11 @@ import {
   createWorkspace,
   getActiveWorkspaceId,
   getWorkspacesSnapshot,
+  moveWorkspace,
   resetWorkspaces,
   setAutoWorkspaceName,
+  setWorkspaceAlertDelivery,
+  setWorkspacePinned,
 } from '../lib/workspace-store';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -683,4 +687,376 @@ it('keeps a move refusal visible and releases the keyboard when dismissed', asyn
   expect(document.querySelector('[role="alert"]')).toBeNull();
   expect(getWorkspaceUiSnapshot().moveError).toBeNull();
   expect(chromeKeyboardHeld()).toBe(false);
+});
+
+describe('pinned tabs', () => {
+  it('hands the host the spacer between + and the pinned group, and nothing else', async () => {
+    await render(<WorkspaceStrip spacerAttributes={{ 'data-tauri-drag-region': true }} />);
+    const claimed = [...container.querySelectorAll<HTMLElement>('[data-tauri-drag-region]')];
+    expect(claimed).toEqual([container.querySelector('[data-workspace-strip-spacer]')]);
+  });
+
+  it('puts a host control right after +', async () => {
+    await render(<WorkspaceStrip afterNew={<button type="button" data-host-control>Reset</button>} />);
+    expect(container.querySelector('[data-workspace-new] + [data-host-control]')).not.toBeNull();
+  });
+
+  it('groups pinned tabs after +, with no close button, and middle-click closes nothing', async () => {
+    const first = getWorkspacesSnapshot().workspaces[0].id;
+    await act(async () => {
+      createWorkspace({ id: 'ws-2', name: 'Notes', pinned: true });
+      createWorkspace({ id: 'ws-3', name: 'Build' });
+    });
+    const closeAll = vi.fn(async () => null);
+    stubHandle('ws-2', { closeAll });
+    await render();
+    const strip = container.querySelector('[data-workspace-strip]')!;
+    const order = [...strip.querySelectorAll<HTMLElement>('[data-workspace-tab], [data-workspace-new], [data-workspace-strip-spacer]')]
+      .map((element) => element.dataset.workspaceTab ?? ('workspaceNew' in element.dataset ? '+' : 'spacer'));
+    // The empty spacer pushes the pinned group flush against the strip's right end.
+    expect(order).toEqual([first, 'ws-3', '+', 'spacer', 'ws-2']);
+    expect(tabFor('ws-2').closest('[data-workspace-pinned-group]')).not.toBeNull();
+    expect(activateButton('ws-2').getAttribute('aria-label')).toBe('Notes, pinned');
+
+    // Active, and still no ×.
+    await act(async () => { activateButton('ws-2').click(); });
+    expect(tabFor('ws-2').dataset.workspaceTabActive).toBe('true');
+    expect(tabFor('ws-2').querySelector('[data-workspace-tab-close]')).toBeNull();
+    await act(async () => {
+      tabFor('ws-2').dispatchEvent(new MouseEvent('auxclick', { bubbles: true, cancelable: true, button: 1 }));
+    });
+    await act(async () => { await Promise.resolve(); });
+    expect(closeAll).not.toHaveBeenCalled();
+    expect(tabs()).toHaveLength(3);
+  });
+});
+
+describe('tab tweens', () => {
+  /** Each item's tweens, `+` as '+': `width A→B`, or the transform's start. */
+  let tweens: Map<string, string[]>;
+  /** A width tween holds its item at its first width until `settle`. */
+  let held: Map<Element, number>;
+  const frames = installFakeFrames();
+  let measure: ReturnType<typeof vi.spyOn<HTMLElement, 'getBoundingClientRect'>>;
+
+  const key = (element: HTMLElement) => element.dataset.workspaceTab ?? '+';
+  /** Every tween runs to its end. */
+  const settle = () => { held.clear(); tweens.clear(); };
+
+  beforeEach(() => {
+    tweens = new Map();
+    held = new Map();
+    Object.defineProperty(HTMLElement.prototype, 'animate', {
+      configurable: true,
+      value(this: HTMLElement, keyframes: Keyframe[]) {
+        const [from, to] = keyframes;
+        let tween = String(from.transform);
+        if (from.width) {
+          tween = `width ${from.width}→${to.width}`;
+          held.set(this, parseFloat(String(from.width)));
+        }
+        tweens.set(key(this), [...tweens.get(key(this)) ?? [], tween]);
+        return { cancel: () => { held.delete(this); } };
+      },
+    });
+    // jsdom lays nothing out. In DOM order, `+` is 20px and a tab is 20px of
+    // padding, 10px a character of its name, and 20px for its `×`; the rename
+    // editor's tab is the wider of its draft and the tab it kept as slack.
+    const label = (name: string, close: boolean) => 20 + 10 * name.length + (close ? 20 : 0);
+    const natural = (item: HTMLElement) => {
+      if (item.dataset.workspaceTab === undefined) return 20;
+      const slack = item.querySelector('[data-workspace-rename-slack]');
+      if (slack) return Math.max(label(item.querySelector('input')!.value, false), label(slack.textContent!, !!slack.querySelector('svg')));
+      return label(item.querySelector('span')!.textContent!, !!item.querySelector('[data-workspace-tab-close]'));
+    };
+    const width = (item: HTMLElement) => held.get(item) ?? natural(item);
+    measure = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const items = [...container.querySelectorAll<HTMLElement>('[data-workspace-tab], [data-workspace-new]')];
+      const left = items.slice(0, Math.max(0, items.indexOf(this))).reduce((sum, item) => sum + width(item), 0);
+      const right = left + width(this);
+      return { left, right, width: right - left, top: 0, bottom: 24, height: 24, x: left, y: 0, toJSON: () => ({}) } as DOMRect;
+    });
+  });
+
+  afterEach(() => {
+    delete (HTMLElement.prototype as Partial<HTMLElement>).animate;
+  });
+
+  /** Renders the default Workspace, active and named `w1`, then `ids` named
+   *  `w2`, `w3`…, and returns the default's id. */
+  async function renderWith(...ids: string[]): Promise<string> {
+    const first = getWorkspacesSnapshot().workspaces[0].id;
+    await act(async () => {
+      setAutoWorkspaceName(first, 'w1');
+      ids.forEach((id, index) => createWorkspace({ id, name: `w${index + 2}`, nameIsAuto: true, activate: false }));
+    });
+    await render();
+    settle();
+    return first;
+  }
+
+  it('slides the tabs a move displaces from where they were, and leaves the rest', async () => {
+    const first = await renderWith('ws-2', 'ws-3');
+    await act(async () => { moveWorkspace(first, 1); });
+    expect(tweens).toEqual(new Map([[first, ['translate(-40px, 0px)']], ['ws-2', ['translate(60px, 0px)']]]));
+  });
+
+  it('slides a tab that pinning remounts into the other group, its × tweening away, with `+`', async () => {
+    const first = await renderWith('ws-2');
+    await act(async () => { setWorkspacePinned(first, true); });
+    expect(tweens).toEqual(new Map([
+      [first, ['width 60px→40px', 'translate(-60px, 0px)']],
+      ['ws-2', ['translate(60px, 0px)']],
+      ['+', ['translate(60px, 0px)']],
+    ]));
+  });
+
+  it('tweens the × from the old active tab to the new one, leaving + where it was', async () => {
+    const first = await renderWith('ws-2');
+    await act(async () => { activateButton('ws-2').click(); });
+    expect(tweens).toEqual(new Map([[first, ['width 60px→40px']], ['ws-2', ['width 40px→60px']]]));
+  });
+
+  it('keeps the × as the rename editor\'s slack, then tweens the tab to text that outgrows it', async () => {
+    const first = await renderWith('ws-2');
+    await act(async () => { requestWorkspaceRename(first); });
+    expect(tweens.size).toBe(0);
+    const input = tabFor(first).querySelector('input')!;
+    expect(input.style.width).toBe('calc(2ch + 2px)');
+
+    const type = async (value: string) => {
+      await act(async () => {
+        input.dispatchEvent(new InputEvent('beforeinput', { bubbles: true, cancelable: true }));
+        typeInto(input, value);
+      });
+      // The editor's re-render does not reach the strip: a frame plays it.
+      await act(async () => { frames.advance(0); });
+    };
+    await type('w1xx');
+    expect(input.style.width).toBe('calc(4ch + 2px)');
+    expect(tweens.size).toBe(0);
+    await type('w1xxx');
+    expect(tweens).toEqual(new Map([[first, ['width 60px→70px']]]));
+  });
+
+  it('never measures for a change that leaves the strip as it was, and tweens nothing under reduced motion', async () => {
+    const first = await renderWith('ws-2');
+    measure.mockClear();
+    await act(async () => { setWorkspaceAlertDelivery(first, { pushEnabled: false }); });
+    expect(measure).not.toHaveBeenCalled();
+
+    frames.reduceMotion();
+    await act(async () => { moveWorkspace(first, 1); });
+    expect(tweens.size).toBe(0);
+  });
+});
+
+describe('tab context menu', () => {
+  const menuEl = () => document.querySelector<HTMLElement>('[role="menu"]');
+  const items = () => [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+  const itemKeys = () => items().map((item) => item.dataset.workspaceMenuItem);
+  const item = (key: string) => document.querySelector<HTMLButtonElement>(`[data-workspace-menu-item="${key}"]`)!;
+  const rightClick = async (id: string, init: MouseEventInit = {}) => {
+    await act(async () => {
+      tabFor(id).dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, ...init }));
+    });
+  };
+  const key = async (target: Element, init: KeyboardEventInit) => {
+    await act(async () => { target.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init })); });
+  };
+
+  it('opens with its rows in order, holding the chrome keyboard lease', async () => {
+    const first = getWorkspacesSnapshot().workspaces[0].id;
+    await render();
+    await rightClick(first);
+    expect(menuEl()).not.toBeNull();
+    // Auto-named, so no Use automatic name; one window, so no Move to new window.
+    expect(itemKeys()).toEqual(['rename', 'pin', 'copy-ref', 'close']);
+    expect(item('copy-ref').textContent).toContain('workspace:1');
+    expect(menuEl()!.querySelector('[role="separator"]')).not.toBeNull();
+    expect(chromeKeyboardHeld()).toBe(true);
+    expect(document.activeElement).toBe(items()[0]);
+
+    // An outside press dismisses it and releases the keyboard.
+    await act(async () => { document.body.dispatchEvent(pointer('pointerdown', { button: 0 })); });
+    expect(menuEl()).toBeNull();
+    expect(chromeKeyboardHeld()).toBe(false);
+  });
+
+  it('opens under its tab, left edges aligned, or right edges aligned at the window\'s right end', async () => {
+    const first = getWorkspacesSnapshot().workspaces[0].id;
+    await act(async () => { createWorkspace({ id: 'ws-2', name: 'Notes', pinned: true }); });
+    await render();
+    // jsdom lays nothing out: a tab near the left, and a pinned one at the
+    // window's right end (innerWidth 1024).
+    const boxes: Record<string, { left: number; width: number }> = { [first]: { left: 100, width: 80 }, 'ws-2': { left: 950, width: 60 } };
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const box = this.dataset.workspaceTab ? boxes[this.dataset.workspaceTab] : undefined;
+      const left = box?.left ?? 0;
+      const width = box?.width ?? 0;
+      return { left, right: left + width, width, top: 6, bottom: 30, height: 24, x: left, y: 6, toJSON: () => ({}) } as DOMRect;
+    });
+    Object.defineProperty(window, 'innerWidth', { value: 1024, configurable: true });
+
+    // The pointer's position plays no part.
+    await rightClick(first, { clientX: 600, clientY: 300 });
+    expect(menuEl()!.style.left).toBe('100px');
+    expect(menuEl()!.style.top).toBe('34px');
+    await key(menuEl()!, { key: 'Escape' });
+
+    // 224px from 950 would run off the right: its right edge meets the tab's.
+    await rightClick('ws-2');
+    expect(menuEl()!.style.left).toBe(`${950 + 60 - 224}px`);
+  });
+
+  it('offers Use automatic name only for a user-set name, and Move to new window only from a host that tears out', async () => {
+    await act(async () => { createWorkspace({ id: 'ws-2', name: 'Deploys' }); });
+    const tearOut = vi.fn();
+    await render(<WorkspaceStrip onMoveToNewWindow={tearOut} />);
+    await rightClick('ws-2');
+    expect(itemKeys()).toEqual(['rename', 'auto-name', 'pin', 'copy-ref', 'new-window', 'close']);
+    await act(async () => { item('auto-name').click(); });
+    expect(getWorkspacesSnapshot().workspaces.find((ws) => ws.id === 'ws-2')?.nameIsAuto).toBe(true);
+    expect(menuEl()).toBeNull();
+
+    await rightClick('ws-2');
+    await act(async () => { item('new-window').click(); });
+    expect(tearOut).toHaveBeenCalledExactlyOnceWith('ws-2');
+  });
+
+  it('pins right and unpins, and a pinned tab\'s Close is inert and says why', async () => {
+    const first = getWorkspacesSnapshot().workspaces[0].id;
+    await act(async () => { createWorkspace({ id: 'ws-2' }); });
+    const closeAll = vi.fn(async () => null);
+    stubHandle(first, { closeAll });
+    await render();
+    await rightClick(first);
+    expect(item('pin').textContent).toBe('Pin right');
+    await act(async () => { item('pin').click(); });
+    expect(getWorkspacesSnapshot().workspaces.map((ws) => [ws.id, ws.pinned === true])).toEqual([['ws-2', false], [first, true]]);
+    expect(tabFor(first).closest('[data-workspace-pinned-group]')).not.toBeNull();
+
+    await rightClick(first);
+    expect(item('pin').textContent).toBe('Unpin');
+    expect(item('close').getAttribute('aria-disabled')).toBe('true');
+    expect(item('close').title).toBe('workspace is pinned; unpin it to close');
+    await act(async () => { item('close').click(); });
+    await act(async () => { await Promise.resolve(); });
+    expect(closeAll).not.toHaveBeenCalled();
+    // Inert: the menu stays up.
+    expect(menuEl()).not.toBeNull();
+
+    await act(async () => { item('pin').click(); });
+    expect(getWorkspacesSnapshot().workspaces.map((ws) => [ws.id, ws.pinned === true])).toEqual([['ws-2', false], [first, false]]);
+  });
+
+  it('closes an unpinned Workspace through the close verb, and renames through the editor', async () => {
+    await act(async () => { createWorkspace({ id: 'ws-2' }); });
+    const closeAll = vi.fn(async () => null);
+    stubHandle('ws-2', { closeAll });
+    await render();
+    await rightClick('ws-2');
+    await act(async () => { item('rename').click(); });
+    expect(getWorkspaceUiSnapshot().renamingId).toBe('ws-2');
+    expect(menuEl()).toBeNull();
+    // Never over the open editor.
+    await rightClick('ws-2');
+    expect(menuEl()).toBeNull();
+    await act(async () => {
+      container.querySelector('[data-workspace-rename-for="ws-2"]')!
+        .dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+
+    await rightClick('ws-2');
+    await act(async () => { item('close').click(); });
+    await act(async () => { await Promise.resolve(); });
+    expect(closeAll).toHaveBeenCalled();
+  });
+
+  it('copies the Workspace ref', async () => {
+    const writeText = vi.fn(async () => {});
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    await act(async () => { createWorkspace({ id: 'ws-2' }); });
+    await render();
+    await rightClick('ws-2');
+    await act(async () => { item('copy-ref').click(); });
+    expect(writeText).toHaveBeenCalledWith('workspace:2');
+  });
+
+  it('opens from Shift+F10 or the ContextMenu key, walks its rows by arrow, and Escape hands focus back to the tab', async () => {
+    const first = getWorkspacesSnapshot().workspaces[0].id;
+    await render();
+    for (const init of [{ key: 'F10', shiftKey: true }, { key: 'ContextMenu' }]) {
+      activateButton(first).focus();
+      await key(activateButton(first), init);
+      expect(menuEl()).not.toBeNull();
+      expect(document.activeElement).toBe(items()[0]);
+      await key(menuEl()!, { key: 'ArrowUp' });
+      expect(document.activeElement).toBe(items().at(-1));
+      await key(menuEl()!, { key: 'ArrowDown' });
+      expect(document.activeElement).toBe(items()[0]);
+      await key(menuEl()!, { key: 'End' });
+      expect(document.activeElement).toBe(items().at(-1));
+      await key(menuEl()!, { key: 'Escape' });
+      expect(menuEl()).toBeNull();
+      expect(document.activeElement).toBe(activateButton(first));
+    }
+  });
+
+  it('hands focus back to the pinned tab where it lands after a keyboard Pin right', async () => {
+    const first = getWorkspacesSnapshot().workspaces[0].id;
+    await act(async () => { createWorkspace({ id: 'ws-2', activate: false }); });
+    await render();
+    activateButton(first).focus();
+    await key(activateButton(first), { key: 'ContextMenu' });
+    await act(async () => { item('pin').click(); });
+    expect(tabFor(first).closest('[data-workspace-pinned-group]')).not.toBeNull();
+    expect(document.activeElement).toBe(activateButton(first));
+  });
+
+  it('never opens for a Workspace on its way to another window, and goes when its Workspace does', async () => {
+    await act(async () => { createWorkspace({ id: 'ws-2' }); });
+    await render();
+    setWorkspaceTransferPending('ws-2', true);
+    await rightClick('ws-2');
+    expect(menuEl()).toBeNull();
+    setWorkspaceTransferPending('ws-2', false);
+    await rightClick('ws-2');
+    expect(menuEl()).not.toBeNull();
+    await act(async () => { dismissWorkspaceUi('ws-2'); });
+    expect(menuEl()).toBeNull();
+  });
+
+  it('pins nothing once its Workspace has begun transferring', async () => {
+    await act(async () => { createWorkspace({ id: 'ws-2' }); });
+    await render();
+    await rightClick('ws-2');
+    setWorkspaceTransferPending('ws-2', true);
+    try {
+      await act(async () => { item('pin').click(); });
+      expect(getWorkspacesSnapshot().workspaces.find((ws) => ws.id === 'ws-2')?.pinned).toBeUndefined();
+    } finally {
+      setWorkspaceTransferPending('ws-2', false);
+    }
+  });
+
+  it('never starts a reorder from a right press or a macOS Control-click', async () => {
+    const first = getWorkspacesSnapshot().workspaces[0].id;
+    await act(async () => { createWorkspace({ id: 'ws-2' }); });
+    await render();
+    const order = () => getWorkspacesSnapshot().workspaces.map((workspace) => workspace.id);
+    const boxes = new Map(order().map((id, index) => [id, { left: index * 100, width: 100 }]));
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const box = this.dataset.workspaceTab ? boxes.get(this.dataset.workspaceTab) : undefined;
+      const left = box?.left ?? 0;
+      const width = box?.width ?? 300;
+      return { left, right: left + width, width, top: 0, bottom: 24, height: 24, x: left, y: 0, toJSON: () => ({}) } as DOMRect;
+    });
+    for (const init of [{ button: 2 }, { button: 0, ctrlKey: true }]) {
+      await act(async () => { tabFor(first).dispatchEvent(pointer('pointerdown', { clientX: 50, clientY: 12, ...init })); });
+      await act(async () => { window.dispatchEvent(pointer('pointermove', { clientX: 160, clientY: 12 })); });
+      await act(async () => { window.dispatchEvent(pointer('pointerup', { clientX: 160, clientY: 12 })); });
+      expect(order()).toEqual([first, 'ws-2']);
+    }
+  });
 });

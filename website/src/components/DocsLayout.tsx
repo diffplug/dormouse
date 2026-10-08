@@ -223,7 +223,7 @@ export default function DocsLayout({
 
   return (
     <>
-      <SiteHeader activePath={activePath} style={DOCS_HEADER_STYLE} />
+      <SiteHeader activePath={activePath} style={DOCS_HEADER_STYLE} prelaunch />
 
       <div className="min-h-screen bg-[var(--color-bg)] pt-16 pb-16 text-[var(--color-text)] md:pt-20">
         {/* Narrow screens get the rail on demand: the docs are a small part of

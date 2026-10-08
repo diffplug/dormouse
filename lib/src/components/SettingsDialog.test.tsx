@@ -227,9 +227,9 @@ describe('SettingsDialog under Network → Nothing', () => {
     });
     platform.managedVoice = makeStubManagedVoicePort(true);
     await render();
-    expect(text()).toContain('Push is off while Network is set to Nothing.');
+    expect(text()).toContain('Push is off while Network is set to Nowhere.');
     expect(text()).toContain(
-      'Managed voice is off while Network is set to Nothing, so alerts use your browser or system voice.',
+      'Managed voice is off while Network is set to Nowhere, so alerts use your browser or system voice.',
     );
     expect(text()).not.toContain('Connect this machine to a Dormouse Relay');
 
@@ -256,4 +256,18 @@ describe('SettingsDialog under Network → Nothing', () => {
     expect(document.querySelector<HTMLInputElement>('input[type="search"]')!.value).toBe('');
     expect(network.hidden).toBe(false);
   });
+});
+
+describe('SettingsDialog theme row', () => {
+  it.each([[true, true], [undefined, false]] as const)(
+    'offers the OpenVSX store only on a platform that does (offersThemeStore %s)',
+    async (offers, shown) => {
+      platform.offersThemeStore = offers;
+      await render();
+      const trigger = document.querySelector<HTMLButtonElement>('button[aria-label^="Theme: "]')!;
+      await act(async () => trigger.click());
+      const menu = document.querySelector('[role="menu"][aria-label="Select theme"]')!;
+      expect(menu.textContent?.includes('Install theme from OpenVSX')).toBe(shown);
+    },
+  );
 });

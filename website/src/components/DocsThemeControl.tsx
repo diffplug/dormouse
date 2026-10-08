@@ -84,6 +84,7 @@ export default function DocsThemeControl({
     <div className="rounded border shadow-2xl" style={PANEL_STYLE}>
       <ThemePicker
         variant="compact"
+        offerStore
         menuSide={inline ? "below" : "above"}
         onPick={dismissThemePrompt}
       />

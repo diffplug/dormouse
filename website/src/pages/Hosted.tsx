@@ -497,8 +497,7 @@ export default function Hosted() {
         <p className={`mb-4 ${BODY_TEXT_CLASS}`}>
           Free and with no account, Dormouse speaks an unattended terminal’s name in your
           browser or system voice. A plan swaps that for a natural ElevenLabs
-          voice on every machine you activate, chosen per pane from a curated set with a
-          default of your own. I hold the vendor key, so there is no second account to set
+          voice on every machine you sign in on, chosen from a curated set. I hold the vendor key, so there is no second account to set
           up or pay for.
         </p>
         <p className={`mb-4 leading-relaxed ${MUTED_TEXT_CLASS}`}>

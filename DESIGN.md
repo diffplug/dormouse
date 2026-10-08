@@ -268,6 +268,9 @@ When selection moves between panes/doors, the focus ring **glides** to the new t
 #### Copy Editor Travel
 The copy editor's moves and resizes ease on the focus ring's duration and curve (`FOCUS_MOTION_MS`, `rect-tween.ts` driven by `rect-motion.ts`, which owns when it snaps instead).
 
+#### Terminal Context Teeth
+The terminal context reads as torn from its source. The edge facing the source is cut corner to corner into 90° teeth, `TERMINAL_CONTEXT_TEETH_PX` deep and twice that wide, and that depth is the panel's whole overlap with the source. Each row carries its own background into the teeth beside it, so the cut is the content's edge rather than a border; that side has square corners and no halo, while the other three keep the elevated pane's. The helper bar sits in the terminal background between hairlines, labelling the helper terminal rather than adding a second header. While the context is open, every other pane recedes under a scrim of the app ground and the selection ring wraps source and panel together. Source of truth: `contextTeeth` in `lib/src/components/wall/TerminalContextView.tsx`.
+
 ## 6. Do's and Don'ts
 
 ### Do:

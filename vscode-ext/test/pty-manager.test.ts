@@ -28,6 +28,11 @@ describe('PTY manager lifetime and buffers', () => {
     vi.clearAllMocks();
   });
 
+  it('forks the pty host in the extension’s own directory, never the inherited cwd', async () => {
+    await startManager();
+    expect(mocks.fork.mock.calls[0]![2]).toMatchObject({ cwd: '/extension' });
+  });
+
   it('waits for both serial port scans before timing out the child', async () => {
     vi.useFakeTimers();
     try {

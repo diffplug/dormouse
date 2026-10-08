@@ -71,7 +71,7 @@ JSON output (--json) always includes both stable ids and refs, and each row carr
 
 --all lists every Workspace of this Window, grouped under a Workspace header — every Workspace keeps its header, including one holding nothing and one the filters emptied. Rows keep their own Workspace-scoped surface:N refs, so several groups have a surface:1, but only the active Workspace's selection carries the focus marker; each JSON row adds workspace_ref, and the payload adds a workspaces array plus caller_workspace_ref/focused_workspace_ref, because caller_surface_ref/focused_surface_ref then name a ref several groups share (the _id halves stay unique). Target a row from another Workspace by its stable id, or pass --workspace.
 
---workspaces prints the Workspace overview instead of any Surface: one row per Workspace with the active marker, its name, [ringing]/[todo] when any member Surface is, and [attention N] for the number owing it. It takes --json and --window, and no other flag.
+--workspaces prints the Workspace overview instead of any Surface: one row per Workspace with the active marker, its name, [pinned] when it is pinned (dor workspace pin), [ringing]/[todo] when any member Surface is, and [attention N] for the number owing it. It takes --json and --window, and no other flag.
 
 Text output:
   * surface:1  terminal  -              paned  ~/projects/site  pnpm dev  :5173
@@ -289,7 +289,7 @@ function renderListText(
   // Workspace keeps its header**, even one no row survived: the listing says
   // which Workspaces there are, and the JSON payload lists them all either way.
   const groups = response.workspaces.map((workspace) => [
-    `${workspace.ref}  ${printable(workspace.name)}${workspace.active ? '  [active]' : ''}`,
+    `${workspace.ref}  ${printable(workspace.name)}${workspace.active ? '  [active]' : ''}${workspace.pinned ? '  [pinned]' : ''}`,
     ...response.surfaces.flatMap((surface, index) => (
       surface.workspaceRef === workspace.ref ? [`  ${rows[index]}`] : []
     )),
@@ -360,6 +360,7 @@ function renderWorkspacesText(response: ListWorkspacesResponse): string {
   const nameWidth = Math.max(...names.map((name) => name.length));
   const lines = rows.map((row, index) => {
     const tags = [
+      ...(row.pinned ? ['[pinned]'] : []),
       ...attentionTags(row),
       ...(row.count > 0 ? [`[attention ${row.count}]`] : []),
     ];
@@ -381,6 +382,7 @@ function renderWorkspaceJson(row: WorkspaceRow): Record<string, unknown> {
     id: row.id,
     name: row.name,
     auto: row.auto,
+    pinned: row.pinned,
     active: row.active,
     ringing: row.ringing,
     todo: row.todo,

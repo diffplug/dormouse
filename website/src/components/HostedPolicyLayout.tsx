@@ -12,7 +12,7 @@ export default function HostedPolicyLayout({ path, title, sections }: {
 }) {
   return (
     <>
-      <SiteHeader activePath={path} style={STATIC_PAGE_HEADER_STYLE} />
+      <SiteHeader activePath={path} style={STATIC_PAGE_HEADER_STYLE} prelaunch />
       <div className="min-h-screen bg-[var(--color-bg)] px-4 pt-28 pb-12 text-[var(--color-text)] md:px-6 md:pt-36">
         <main className="mx-auto max-w-3xl">
           <p className={`mb-3 font-display text-sm ${MUTED_TEXT_CLASS}`}>Dormouse Hosted</p>

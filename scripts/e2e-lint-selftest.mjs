@@ -5,8 +5,9 @@
  *
  * Why this exists: `deploy-lint-selftest.mjs` is mostly the other direction —
  * the installer lint mostly checks that controls are *present*, so removing one
- * is the test there (its one `forbidden` rule mutates this way instead). Every
- * rule here checks that something is *absent*, and the
+ * is the test there (its `forbidden` rules mutate this way instead). Nearly
+ * every rule here checks that something is *absent* (the `require` rules below
+ * are the exception), and the
  * characteristic failure of an absence check is passing because the pattern
  * cannot see the thing it names — a regex anchored on a spelling nobody uses, a
  * scope that resolves to no files, a spec phrase that drifted. A green
@@ -167,6 +168,19 @@ for (const violation of [
     violation,
     `a grant name in lib/src/remote/burrow/one-time-runtime.ts stays green: ${violation.trim()}`,
   );
+}
+
+// The presence-window rule must redden in every scope it names, not just the
+// Relay import the loop appends, and for each spelling: the constant, a
+// private field, and the module path.
+for (const [file, violation] of [
+  ['hosted/server/relay-api.ts', '\nconst __selftest = PRESENCE_WINDOW;\n'],
+  ['lib/src/remote/burrow/one-time-runtime.ts', '\nclass __Selftest { #presenceWindows = null; }\n'],
+  ['lib/src/remote/one-time-rendezvous.ts', '\ntype __Selftest = PresenceWindowEntry;\n'],
+  ['lib/src/remote/client/one-time-client.ts', "\nexport * from '../../../../remote-lib-common/src/security/presence-window';\n"],
+  ['lib/src/remote/one-time-app/OneTimeApp.tsx', '\nconst __selftest = PRESENCE_WINDOW_IDLE_MS;\n'],
+]) {
+  selftest.withAppended(file, violation, `a presence window in ${file} stays green: ${violation.trim()}`);
 }
 
 // Every name the one-time phone's store rule lists must redden it on its own,

@@ -820,7 +820,7 @@ test('gracefulKill SIGTERMs the named PTYs, echoes requestId, forwards final out
   const mgr = create((event, data) => {
     events.push({ event, data });
     if (event === 'gracefulKillDone') resolveDone();
-  }, { spawn() { return fakePty; } });
+  }, { spawn() { return fakePty; } }, { platform: 'linux' });
 
   mgr.spawn('pane-1');
   mgr.gracefulKill(['pane-1'], 1, 'req-42');
@@ -872,6 +872,43 @@ test('gracefulKill resolves early after exits and a final output grace tick', as
   ]);
   // Resolved on the exit-driven early path, nowhere near the 60s bound.
   assert.ok(Date.now() - started < 5_000);
+});
+
+test('gracefulKill stops a PTY whose kill(signal) throws, as node-pty does on Windows', async () => {
+  // Models node-pty's WindowsTerminal: `kill(signal)` throws "Signals not
+  // supported on windows.", and only the argument-less ConPTY close stops it.
+  const listeners = {};
+  const closes = [];
+  const fakePty = {
+    pid: 7,
+    onData(handler) { listeners.data = handler; },
+    onExit(handler) { listeners.exit = handler; },
+    resize() {},
+    write() {},
+    kill(signal) {
+      if (signal) throw new Error('Signals not supported on windows.');
+      closes.push(signal);
+      setTimeout(() => listeners.exit({ exitCode: 0 }), 10);
+    },
+  };
+
+  let resolveDone;
+  const done = new Promise((resolve) => { resolveDone = resolve; });
+  const mgr = create((event) => {
+    if (event === 'gracefulKillDone') resolveDone('done');
+  }, { spawn() { return fakePty; } }, { platform: 'win32' });
+
+  mgr.spawn('pane-1');
+  mgr.gracefulKill(['pane-1'], 60_000, 'req-1');
+  const outcome = await Promise.race([
+    done,
+    new Promise((resolve) => setTimeout(() => resolve('still waiting'), 2_000)),
+  ]);
+
+  // The PTY got a stop it accepts, and the wait ended on its exit rather than
+  // sitting out the timeout.
+  assert.equal(closes.length, 1);
+  assert.equal(outcome, 'done');
 });
 
 test('gracefulKill with nothing live waits one grace tick', async () => {
@@ -1702,16 +1739,22 @@ test('getListeningPortsForPids (darwin) keeps the live pids when lsof exits non-
   assert.deepEqual(ports.map((p) => [p.pid, p.port]), [[4242, 3000]]);
 });
 
+// Windows helpers run by their absolute System32 path, never a bare name that
+// Windows would look up in the working directory first.
+const WINDOWS_ENV = { SystemRoot: 'D:\\Win' };
+const POWERSHELL = 'D:\\Win\\System32\\WindowsPowerShell\\v1.0\\powershell.exe';
+const NETSTAT = 'D:\\Win\\System32\\netstat.exe';
+
 test('getListeningPortsForPids (win32) prefers Get-NetTCPConnection', async () => {
   const execFile = (cmd, args) => {
-    assert.equal(cmd, 'powershell.exe');
+    assert.equal(cmd, POWERSHELL);
     const script = args[args.length - 1];
     if (script.includes('Get-NetTCPConnection')) {
       return JSON.stringify([{ LocalAddress: '0.0.0.0', LocalPort: 3000, OwningProcess: 4242 }]);
     }
     throw new Error(`unexpected script: ${script}`);
   };
-  const ports = await getListeningPortsForPids([4242], { platform: 'win32', execFile }, new Map([[4242, 'node.exe']]));
+  const ports = await getListeningPortsForPids([4242], { platform: 'win32', env: WINDOWS_ENV, execFile }, new Map([[4242, 'node.exe']]));
   assert.deepEqual(ports, [
     { protocol: 'tcp', family: 'IPv4', address: '0.0.0.0', port: 3000, pid: 4242, processName: 'node.exe' },
   ]);
@@ -1719,15 +1762,15 @@ test('getListeningPortsForPids (win32) prefers Get-NetTCPConnection', async () =
 
 test('getListeningPortsForPids (win32) falls back to netstat when the cmdlet fails', async () => {
   const execFile = (cmd, args) => {
-    if (cmd === 'powershell.exe') {
+    if (cmd === POWERSHELL) {
       throw new Error('Get-NetTCPConnection: not recognized');
     }
-    if (cmd === 'netstat') {
+    if (cmd === NETSTAT) {
       return '  TCP    0.0.0.0:3000   0.0.0.0:0   LISTENING   4242\n';
     }
     throw new Error('unexpected');
   };
-  const ports = await getListeningPortsForPids([4242], { platform: 'win32', execFile });
+  const ports = await getListeningPortsForPids([4242], { platform: 'win32', env: WINDOWS_ENV, execFile });
   assert.deepEqual(ports, [
     { protocol: 'tcp', family: 'IPv4', address: '0.0.0.0', port: 3000, pid: 4242, processName: undefined },
   ]);
@@ -1749,11 +1792,11 @@ test('Windows port subprocesses share the socket budget, including netstat fallb
       now += 1000;
       throw new Error('cmdlet failed');
     }
-    assert.equal(cmd, 'netstat');
+    assert.equal(cmd, NETSTAT);
     now += 500;
     return '  TCP    0.0.0.0:3000   0.0.0.0:0   LISTENING   4242\n';
   };
-  const result = await getOpenPortsForPids([4242], { platform: 'win32', execFile, now: () => now });
+  const result = await getOpenPortsForPids([4242], { platform: 'win32', env: WINDOWS_ENV, execFile, now: () => now });
   const budget = openPortScanTimeoutMs(1);
   assert.deepEqual(timeouts, [OPEN_PORT_TIMEOUT_MS, budget, budget - 1000]);
   assert.equal(now, OPEN_PORT_TIMEOUT_MS + 1500);
@@ -1769,9 +1812,9 @@ test('Windows does not start netstat after the socket deadline expires', async (
     throw new Error('timed out');
   };
   assert.deepEqual(await getListeningPortsForPids([4242], {
-    platform: 'win32', execFile, now: () => now, scanTimeoutMs: 3100,
+    platform: 'win32', env: WINDOWS_ENV, execFile, now: () => now, scanTimeoutMs: 3100,
   }), []);
-  assert.deepEqual(commands, ['powershell.exe']);
+  assert.deepEqual(commands, [POWERSHELL]);
   assert.equal(now, 3100);
 });
 
@@ -2210,7 +2253,7 @@ test('marked requests recover exited buffers without reviving or discovering the
   assert.equal(events.length, 1);
 });
 
-test('gracefulKill targets only the named PTYs', async () => {
+for (const platform of ['linux', 'win32']) test(`gracefulKill targets only the named PTYs (${platform})`, async () => {
   const events = [];
   const pty = fakePtyModule();
   let resolveDone;
@@ -2218,15 +2261,30 @@ test('gracefulKill targets only the named PTYs', async () => {
   const mgr = create((event, data) => {
     events.push({ event, data });
     if (event === 'gracefulKillDone') resolveDone();
-  }, pty.module, { replay: true });
+  }, pty.module, { platform, replay: true });
   mgr.spawn('a');
   mgr.spawn('b');
 
   mgr.gracefulKill(['a'], 1, 'req-1');
   await done;
 
-  assert.deepEqual(pty.killed, [['a', 'SIGTERM']]);
+  assert.deepEqual(pty.killed, [['a', platform === 'win32' ? undefined : 'SIGTERM']]);
   assert.deepEqual(events.at(-1), { event: 'gracefulKillDone', data: { requestId: 'req-1' } });
+});
+
+test('Windows cleanup closes each PTY once, including a replacement under the same id', async () => {
+  const pty = fakePtyModule();
+  let resolveDone;
+  const done = new Promise(resolve => { resolveDone = resolve; });
+  const mgr = create(event => { if (event === 'gracefulKillDone') resolveDone(); }, pty.module, { platform: 'win32' });
+  mgr.spawn('a');
+  mgr.spawn('b');
+  mgr.gracefulKill(['a'], 1);
+  mgr.kill('a');
+  mgr.spawn('a');
+  mgr.killAll();
+  await done;
+  assert.deepEqual(pty.killed, [['a', undefined], ['b', undefined], ['a', undefined]]);
 });
 
 test('gracefulKill([]) kills nothing and still answers', async () => {
@@ -2261,3 +2319,33 @@ test('a generation replaced under its id never reports its exit; a killed one do
   pty.listeners.get('a').exit({ exitCode: 3 });
   assert.deepEqual(events.filter((e) => e.event === 'exit').map((e) => e.data.exitCode), [3]);
 });
+
+// A spawn over a live generation (a cold restore after a silent host) must not
+// stream two shells into one Session, nor leak the one it displaced.
+test('PTY owner streams only the current generation and stops the one a spawn displaced', () => {
+  const sent = [];
+  const generations = [];
+  const mgr = create((type, msg) => sent.push([type, msg]), {
+    spawn() {
+      const generation = { number: generations.length + 1, onData: null, kills: [] };
+      generations.push(generation);
+      return {
+        pid: generation.number,
+        onData(handler) { generation.onData = handler; },
+        onExit() {},
+        resize() {},
+        write() {},
+        kill(signal) { generation.kills.push(signal); },
+      };
+    },
+  }, { platform: 'darwin' });
+  mgr.spawn('pane-1');
+  mgr.spawn('pane-1');
+  generations[0].onData('old shell');
+  generations[1].onData('new shell');
+  assert.deepEqual(sent.filter(([type]) => type === 'data').map(([, msg]) => msg.data), ['new shell']);
+  assert.deepEqual(generations[0].kills, ['SIGTERM']);
+  assert.deepEqual(generations[1].kills, []);
+  mgr.killAll();
+});
+

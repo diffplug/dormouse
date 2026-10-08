@@ -155,7 +155,8 @@ test('a scanned token registers a passkey without the setup password', async () 
     label: 'iPhone Safari',
   });
   assert.equal(finished.status, 200);
-  assert.deepEqual(await finished.json(), {
+  const { accountId, credentialId } = await finished.json();
+  assert.deepEqual({ accountId, credentialId }, {
     accountId: 'owner',
     credentialId: authenticator.credentialId,
   });

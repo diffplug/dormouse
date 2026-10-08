@@ -95,7 +95,7 @@ Paths and shapes are `API_ROUTES` / `WS_ROUTES` and their types in `remote-lib-c
 | --- | --- | --- |
 | `GET /api/hello` | — | Fixed health response; **carries no release identity**, which the runtime file holds ("Installing it") |
 | `POST /api/setup/begin` | setup token | Registration challenge, gated exactly as `finish` is; answers the account's credential ids for a retry's `excludeCredentials` |
-| `POST /api/setup/finish` | setup token | Registers the passkey; `label` is reduced (`boundedPushText`), never refused |
+| `POST /api/setup/finish` | setup token | Registers the passkey; `label` is reduced (`boundedPushText`), never refused; issues a session token as sign-in does, and none on a refusal |
 | `POST /api/setup/retire` | session token | Spends a live setup token, registering nothing (rationale); 204, or 401 `SETUP_TOKEN_INVALID_ERROR` |
 | `POST /api/signin/begin` | — | Sign-in challenge |
 | `POST /api/signin/finish` | — | Verifies the assertion; issues a 12-hour in-memory session token |
@@ -202,7 +202,7 @@ Source of truth: `RelayHub` in `relay/src/relay.ts`; the sweeps in `relay/src/ap
 sequenceDiagram
   Note over Phone: scan the Burrow's QR
   alt no usable passkey
-    Phone->>Relay: setup (token), then signin
+    Phone->>Relay: setup (token), which signs in
   else passkey held
     Phone->>Relay: signin if needed, then setup retire (token)
   end
@@ -228,13 +228,15 @@ What each step establishes: `docs/specs/remote-security-model.md` -> "Pairing".
 sequenceDiagram
   Phone->>Relay: e2e init (Noise msg 1)
   Relay->>Burrow: e2e init {clientId}
-  Burrow-->>Relay: e2e response (msg 2 = 32-byte Burrow challenge)
+  Burrow-->>Relay: e2e response (msg 2 = challenge + window offer)
   Relay-->>Phone: e2e response
-  Note over Phone: ONE biometric prompt
-  Phone->>Relay: reauth begin/finish
+  opt no presence window open
+    Note over Phone: ONE biometric prompt
+    Phone->>Relay: reauth begin/finish
+  end
   Phone->>Relay: e2e transport ConnectionRequestV1
   Relay->>Burrow: e2e transport
-  Note over Burrow: challenge consumed, proof + ACL checked
+  Note over Burrow: challenge consumed, proof or window + ACL checked
   Burrow-->>Relay: e2e transport ConnectionOutcomeV1
   Relay-->>Phone: e2e transport
   Phone->>Burrow: protocol-v1 inside the same Noise session

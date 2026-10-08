@@ -24,10 +24,12 @@ import {
   onDragCancelled,
   onDragOutsideWindow,
   onDropOnOtherWindow,
+  moveWorkspaceToNewWindow,
   _resetWorkspaceDragForTesting,
 } from "./workspace-drag";
 import { _setWindowLabelForTesting } from "./window-label";
 import { registerWallHandle, resetWallHandles, stubWallHandle } from "dormouse-lib/components/wall/wall-handles";
+import { createWorkspace, resetWorkspaces } from "dormouse-lib/lib/workspace-store";
 import { cancelPendingConfirmation, getWorkspaceUiSnapshot, requestConfirmation, resetWorkspaceUi, settleConfirmation } from "dormouse-lib/lib/workspace-ui-store";
 
 import { cancelEditorClose, decideEditorClose, getEditorClosePrompt } from "dormouse-lib/lib/tool-editor";
@@ -73,48 +75,48 @@ afterEach(() => { cancelEditorClose(); vi.useRealTimers(); });
 
 describe("hit testing while dragging", () => {
   it("probes at most once per throttle window", async () => {
-    for (let i = 0; i < 10; i += 1) onDragOutsideWindow({ clientX: i, clientY: 100 });
+    for (let i = 0; i < 10; i += 1) onDragOutsideWindow({ clientX: i, clientY: 100 }, "ws-1");
     await settle();
     expect(probes()).toBe(1);
   });
 
   it("never probes for a pointer that has not moved", async () => {
-    onDragOutsideWindow({ clientX: 900, clientY: 8 });
+    onDragOutsideWindow({ clientX: 900, clientY: 8 }, "ws-1");
     await settle();
     expect(probes()).toBe(1);
     // A repeated move at the same point is not a new question, so it must not
     // cost a round trip once the throttle window is over.
     await throttleElapsed();
-    onDragOutsideWindow({ clientX: 900, clientY: 8 });
+    onDragOutsideWindow({ clientX: 900, clientY: 8 }, "ws-1");
     await settle();
     expect(probes()).toBe(1);
   });
 
   it("shows a caret in the window under the cursor and clears the one it left", async () => {
     hit = { label: "ws-2", x: 40, y: 8 };
-    onDragOutsideWindow({ clientX: 900, clientY: 8 });
+    onDragOutsideWindow({ clientX: 900, clientY: 8 }, "ws-1");
     await settle();
-    expect(hovers()).toEqual([{ label: "ws-2", x: 40, y: 8 }]);
+    expect(hovers()).toEqual([{ label: "ws-2", x: 40, y: 8, pinned: false }]);
 
     // Moved onto a different window: Rust clears the previous caret itself, so
     // the host only names the new one.
     hit = { label: "ws-3", x: 12, y: 8 };
     await throttleElapsed();
-    onDragOutsideWindow({ clientX: 1400, clientY: 8 });
+    onDragOutsideWindow({ clientX: 1400, clientY: 8 }, "ws-1");
     await settle();
-    expect(lastHover()).toEqual({ label: "ws-3", x: 12, y: 8 });
+    expect(lastHover()).toEqual({ label: "ws-3", x: 12, y: 8, pinned: false });
 
     // Over nothing at all.
     hit = null;
     await throttleElapsed();
-    onDragOutsideWindow({ clientX: 2000, clientY: 800 });
+    onDragOutsideWindow({ clientX: 2000, clientY: 800 }, "ws-1");
     await settle();
-    expect(lastHover()).toEqual({ label: null, x: 0, y: 0 });
+    expect(lastHover()).toEqual({ label: null, x: 0, y: 0, pinned: false });
   });
 
   it("follows the pointer across the target's tabs instead of lighting one caret", async () => {
     hit = { label: "ws-2", x: 10, y: 8 };
-    onDragOutsideWindow({ clientX: 900, clientY: 8 });
+    onDragOutsideWindow({ clientX: 900, clientY: 8 }, "ws-1");
     await settle();
     expect(hovers()).toHaveLength(1);
 
@@ -122,14 +124,14 @@ describe("hit testing while dragging", () => {
     // caret stays where the pointer first entered.
     hit = { label: "ws-2", x: 260, y: 8 };
     await throttleElapsed();
-    onDragOutsideWindow({ clientX: 1150, clientY: 8 });
+    onDragOutsideWindow({ clientX: 1150, clientY: 8 }, "ws-1");
     await settle();
-    expect(lastHover()).toEqual({ label: "ws-2", x: 260, y: 8 });
+    expect(lastHover()).toEqual({ label: "ws-2", x: 260, y: 8, pinned: false });
 
     // A pixel of travel inside the same slot is not worth an IPC hop.
     hit = { label: "ws-2", x: 261, y: 8 };
     await throttleElapsed();
-    onDragOutsideWindow({ clientX: 1151, clientY: 8 });
+    onDragOutsideWindow({ clientX: 1151, clientY: 8 }, "ws-1");
     await settle();
     expect(hovers()).toHaveLength(2);
   });
@@ -138,39 +140,72 @@ describe("hit testing while dragging", () => {
     // The leading edge alone never sees the resting position, which is the one
     // the caret must show and the one the drop uses.
     hit = { label: "ws-2", x: 10, y: 8 };
-    onDragOutsideWindow({ clientX: 900, clientY: 8 });
+    onDragOutsideWindow({ clientX: 900, clientY: 8 }, "ws-1");
     await settle();
     expect(probes()).toBe(1);
 
     // Inside the same throttle window, and then the pointer stops.
     hit = { label: "ws-2", x: 300, y: 8 };
-    onDragOutsideWindow({ clientX: 1190, clientY: 8 });
+    onDragOutsideWindow({ clientX: 1190, clientY: 8 }, "ws-1");
     await settle();
     expect(probes()).toBe(1);
 
     await throttleElapsed();
     expect(probes()).toBe(2);
-    expect(lastHover()).toEqual({ label: "ws-2", x: 300, y: 8 });
+    expect(lastHover()).toEqual({ label: "ws-2", x: 300, y: 8, pinned: false });
   });
 
   it("clears the caret when the pointer comes back over its own strip", async () => {
     hit = { label: "ws-2", x: 40, y: 8 };
-    onDragOutsideWindow({ clientX: 900, clientY: 8 });
+    onDragOutsideWindow({ clientX: 900, clientY: 8 }, "ws-1");
     await settle();
-    expect(lastHover()).toEqual({ label: "ws-2", x: 40, y: 8 });
+    expect(lastHover()).toEqual({ label: "ws-2", x: 40, y: 8, pinned: false });
 
     // The in-strip reorder takes the gesture back; a caret left burning in the
     // other window claims a drop that is no longer going to happen.
     onDragBackInsideStrip();
     await settle();
-    expect(lastHover()).toEqual({ label: null, x: 0, y: 0 });
+    expect(lastHover()).toEqual({ label: null, x: 0, y: 0, pinned: false });
+  });
+
+  it("tells the target the dragged Workspace is pinned, so its caret keeps to the pinned group", async () => {
+    createWorkspace({ id: "ws-pinned", pinned: true });
+    hit = { label: "ws-2", x: 40, y: 8 };
+    onDragOutsideWindow({ clientX: 900, clientY: 8 }, "ws-pinned");
+    await settle();
+    expect(lastHover()).toEqual({ label: "ws-2", x: 40, y: 8, pinned: true });
+    resetWorkspaces();
   });
 
   it("never shows a caret in its own window", async () => {
     hit = { label: "main", x: 40, y: 8 };
-    onDragOutsideWindow({ clientX: 100, clientY: 400 });
+    onDragOutsideWindow({ clientX: 100, clientY: 400 }, "ws-1");
     await settle();
     expect(hovers()).toEqual([]);
+  });
+});
+
+describe("the tab menu's Move to new window", () => {
+  it("tears out without asking where the cursor is", async () => {
+    moveWorkspaceToNewWindow("ws-1");
+    await settle();
+    expect(probes()).toBe(0);
+    expect(mocks.tearOutWorkspace).toHaveBeenCalledWith("ws-1", expect.objectContaining({ x: 90, y: 12 }), []);
+    expect(mocks.transferWorkspaceTo).not.toHaveBeenCalled();
+  });
+
+  it("asks the iframe question a drag asks, and answers a pending one no", async () => {
+    const answer = vi.fn();
+    requestConfirmation({ id: "ws-other", char: "q", answer });
+    registerWallHandle(stubWallHandle("ws-1", { iframeSurfaceRefs: () => ["surface:4"] }));
+    moveWorkspaceToNewWindow("ws-1");
+    expect(answer).toHaveBeenCalledExactlyOnceWith(false);
+    await settle();
+    const pending = getWorkspaceUiSnapshot().confirmation;
+    expect(pending).toMatchObject({ id: "ws-1", title: "Move and lose page state?" });
+    expect(mocks.tearOutWorkspace).not.toHaveBeenCalled();
+    settleConfirmation(pending!, true);
+    expect(mocks.tearOutWorkspace).toHaveBeenCalledWith("ws-1", expect.any(Object), []);
   });
 });
 
@@ -303,21 +338,21 @@ describe("releasing the drag", () => {
 
   it("clears the hover caret on release", async () => {
     hit = { label: "ws-2", x: 40, y: 8 };
-    onDragOutsideWindow({ clientX: 900, clientY: 8 });
+    onDragOutsideWindow({ clientX: 900, clientY: 8 }, "ws-1");
     await settle();
     mocks.invoke.mockClear();
 
     onDropOnOtherWindow("ws-1", { clientX: 900, clientY: 8 }, true);
     await settle();
-    expect(hovers()[0]).toEqual({ label: null, x: 0, y: 0 });
+    expect(hovers()[0]).toEqual({ label: null, x: 0, y: 0, pinned: false });
   });
 
   it("ignores a probe that lands after the release", async () => {
     // A caret is lit, so the release has something to clear.
     hit = { label: "ws-2", x: 40, y: 8 };
-    onDragOutsideWindow({ clientX: 900, clientY: 8 });
+    onDragOutsideWindow({ clientX: 900, clientY: 8 }, "ws-1");
     await settle();
-    expect(lastHover()).toEqual({ label: "ws-2", x: 40, y: 8 });
+    expect(lastHover()).toEqual({ label: "ws-2", x: 40, y: 8, pinned: false });
 
     // A probe is an IPC round trip that can outlive the gesture. Park one.
     let answerProbe!: (hit: { label: string; x: number; y: number } | null) => void;
@@ -328,12 +363,12 @@ describe("releasing the drag", () => {
       return new Promise((resolve) => { answerProbe = resolve; });
     });
     await throttleElapsed();
-    onDragOutsideWindow({ clientX: 1400, clientY: 8 });
+    onDragOutsideWindow({ clientX: 1400, clientY: 8 }, "ws-1");
     await settle();
 
     onDropOnOtherWindow("ws-1", { clientX: 1400, clientY: 8 }, true);
     await settle();
-    expect(lastHover()).toEqual({ label: null, x: 0, y: 0 });
+    expect(lastHover()).toEqual({ label: null, x: 0, y: 0, pinned: false });
     const cleared = hovers().length;
 
     // The stale answer arrives — and must not re-light a caret in a window the
@@ -345,7 +380,7 @@ describe("releasing the drag", () => {
 
   it("clears the hover caret when the drag is abandoned", async () => {
     hit = { label: "ws-2", x: 40, y: 8 };
-    onDragOutsideWindow({ clientX: 900, clientY: 8 });
+    onDragOutsideWindow({ clientX: 900, clientY: 8 }, "ws-1");
     await settle();
     mocks.invoke.mockClear();
 
@@ -353,7 +388,7 @@ describe("releasing the drag", () => {
     // burning in the window the pointer happened to be over.
     onDragCancelled();
     await settle();
-    expect(hovers()[0]).toEqual({ label: null, x: 0, y: 0 });
+    expect(hovers()[0]).toEqual({ label: null, x: 0, y: 0, pinned: false });
     expect(mocks.transferWorkspaceTo).not.toHaveBeenCalled();
     expect(mocks.tearOutWorkspace).not.toHaveBeenCalled();
   });

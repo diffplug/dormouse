@@ -60,8 +60,8 @@ export interface ToolTakeoverGate {
 
 /**
  * Whether the caller's own shell is one the host may type into: an integrated
- * pane whose reported line is this invocation and nothing else. Both placements
- * need it, and neither can proceed without it.
+ * pane whose reported line is this invocation and nothing else. Take-over
+ * cannot proceed without it.
  */
 function callerTypedTool(gate: ToolTakeoverGate): boolean {
   return gate.oscDriven && isNakedToolInvocation(gate.rawCommandLine, gate.verb);

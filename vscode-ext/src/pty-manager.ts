@@ -249,6 +249,10 @@ function ensureChild(extensionPath: string): ChildProcess {
   const nodePath = dorEnv.DORMOUSE_NODE;
 
   child = fork(hostScript, [], {
+    // Our own install, never the inherited cwd, which may be a workspace
+    // folder: Windows looks a bare program name up there before `PATH`
+    // (docs/specs/security-local.md -> "Spawned programs").
+    cwd: extensionPath,
     stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
     execPath: nodePath,
     execArgv: [], // clear --inspect flags inherited from VSCode debug
@@ -529,9 +533,10 @@ export function interrupt(ids: string[], timeoutMs = 400): Promise<void> {
 }
 
 /**
- * SIGTERM every PTY this extension host still has alive and wait for their exits
- * and final output. `pty-core` only ever kills an explicit set, so the ids are
- * named here: this pty-host serves one window, and every live PTY in it is ours.
+ * Gracefully stop every PTY this extension host still has alive and wait for
+ * their exits and final output (docs/specs/transport.md -> Graceful shutdown).
+ * `pty-core` only ever kills an explicit set, so the ids are named here: this
+ * pty-host serves one window, and every live PTY in it is ours.
  */
 export function gracefulKillLive(timeoutMs = 2000): Promise<void> {
   // Extra margin beyond the pty-host's own timeout.

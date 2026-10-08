@@ -59,11 +59,13 @@ export const COPY_OUTCOME_LABEL: Record<CopyOutcome, string> = { copied: 'Copied
  *  preview tab is (`docs/specs/layout.md` → "Pane header"). */
 export const PREVIEW_LABEL_CLASS = 'italic';
 
-/** The `max-w-` / `h-` bounds of `DOOR_TAB_CLASS`, for the host code that has to
- *  reason about a tab's size without a rendered element (the cross-window tab
- *  drag). Tailwind needs the arbitrary values spelled literally above, so these
- *  two are a mirror — keep them in sync. */
+/** The `max-w-` / `h-` / `min-w-` bounds of `DOOR_TAB_CLASS`, for code that has
+ *  to reason about a tab's size without a rendered element (the cross-window
+ *  tab drag) or replaces one bound (a Workspace tab's floor). Tailwind needs the
+ *  arbitrary values spelled literally above, so these are a mirror — keep them
+ *  in sync. */
 export const DOOR_TAB_MAX_WIDTH_PX = 220;
+export const DOOR_TAB_MIN_WIDTH_PX = 68;
 export const DOOR_TAB_HEIGHT_PX = 24;
 
 /** The surface an alarm inset is drawn on, which is what picks its token: each
@@ -84,6 +86,22 @@ export const ALERT_RING_INSET_BY_GROUND: Record<AlertRingGround, string> = {
 // against the Wall, and the rest recede into the app ground. Keep them
 // together so a palette change can't move one endpoint without the other.
 export const TAB_WALL_JOIN_GRADIENT = 'linear-gradient(to bottom, var(--color-header-active-bg), var(--color-app-bg))';
+
+/** The title bar a Workspace strip rests in: the standalone AppBar and the
+ *  website playground's. The Wall begins a `PANE_GUTTER_PX` join band below. */
+export const APP_BAR_HEIGHT_PX = 30;
+
+/** The join band under a title bar, over the Wall's top gutter. The bar must
+ *  be its positioned ancestor. */
+export function TabWallJoin() {
+  return (
+    <div
+      aria-hidden="true"
+      className="pointer-events-none absolute inset-x-0 top-full z-10"
+      style={{ height: PANE_GUTTER_PX, backgroundImage: TAB_WALL_JOIN_GRADIENT }}
+    />
+  );
+}
 
 // The inactive tab's fade, starting at 70% of the 24px tab — just below the
 // label's baseline — and ending at 70% app background, i.e. a 30/70 sRGB mix
@@ -224,6 +242,11 @@ export const popupButton = tv({
 
 export type PopupButtonVariants = VariantProps<typeof popupButton>;
 
+/** One row of a popup menu inside a `PopupButtonRow` (the shell picker, the
+ *  Workspace tab menu). Keyboard focus takes the hover wash, so arrow keys show
+ *  where they are; a disabled row stays focusable and reads as unavailable. */
+export const POPUP_MENU_ITEM_CLASS = 'flex w-full items-center gap-2 whitespace-nowrap px-3 py-1.5 text-left text-sm text-foreground transition-colors not-aria-disabled:hover:bg-foreground/10 focus-visible:bg-foreground/10 focus-visible:outline-none aria-disabled:cursor-not-allowed aria-disabled:text-muted';
+
 export interface ModalRect {
   top: number;
   left: number;
@@ -349,8 +372,12 @@ export type ModalSurfaceVariants = VariantProps<typeof modalSurface>;
 /** The terminal context floats over its source pane: the modal surface with an
  *  edge that stays visible in dark themes. Its exit length is mirrored into CSS
  *  as `--context-exit-duration` (docs/specs/layout.md → "Header context menu"). */
-export const TERMINAL_CONTEXT_SURFACE_CLASS = modalSurface({ padding: 'none', elevation: 'modal', class: 'z-[1000] border-foreground/20' });
+export const TERMINAL_CONTEXT_SURFACE_CLASS = modalSurface({ padding: 'none', elevation: 'modal', class: 'border-foreground/20' });
 export const TERMINAL_CONTEXT_EXIT_MS = 180;
+/** Depth of the terminal context's teeth on the edge facing its source: the panel's whole
+ *  overlap with the source, so placement and the view must agree (DESIGN.md → "Terminal
+ *  Context Teeth"). Teeth are 90°, so each one is twice this wide. */
+export const TERMINAL_CONTEXT_TEETH_PX = 10;
 
 export const modalActionButton = tv({
   base: 'rounded px-2 py-1.5 text-xs transition-colors focus-visible:outline focus-visible:outline-1 focus-visible:outline-focus-ring disabled:cursor-not-allowed disabled:opacity-45',

@@ -66,6 +66,8 @@ import {
  * lockstep with a separate `phase` string was four places to get it wrong.
  */
 type Phase =
+  /** A session kept from an earlier launch, before its first read answers. */
+  | { readonly at: 'restoring' }
   | { readonly at: 'auth' }
   | { readonly at: 'scan' }
   /** `code` is null for the moment between the handshake and the sampled code. */
@@ -186,7 +188,9 @@ export default function App({
    */
   const [passkeyAlreadyRegistered, setPasskeyAlreadyRegistered] = useState(false);
 
-  const [phase, setPhase] = useState<Phase>({ at: 'auth' });
+  const [phase, setPhase] = useState<Phase>(() => ({
+    at: client.sessionToken === null ? 'auth' : 'restoring',
+  }));
   /**
    * The last failure. Unkeyed, because every screen that reports one owns its
    * whole viewport: whatever failed last is the only thing there is to say.
@@ -367,6 +371,20 @@ export default function App({
     return views;
   }, [client]);
 
+  // A kept session's first read, once the capability gate passes: it finds
+  // out whether the Relay still honors the session. A 401 drops to sign-in
+  // through `run`; any other failure still lands on the list, where Refresh
+  // retries.
+  useEffect(() => {
+    if (at !== 'restoring' || !noiseSupported) return;
+    void run('refresh', () =>
+      loadBurrows().catch((err: unknown) => {
+        setPhase({ at: 'burrows' });
+        throw err;
+      }),
+    );
+  }, [at, loadBurrows, noiseSupported, run]);
+
   // Socket drop / burrow-gone: dispose the adapter and fall back to Burrows.
   useEffect(() => {
     client.setOnBurrowGone(() => {
@@ -447,8 +465,15 @@ export default function App({
         await requireDeployment();
         cancelledPairingRef.current = false;
         const label = deviceLabel();
-        let spentOnSetup = false;
-        if (client.sessionToken === null) {
+        // A signed-in phone has no passkey to create, so it spends the code
+        // rather than leaving a photographed QR redeemable. A refusal aborts:
+        // the code is dead, and pairing with it would fail at the Burrow anyway.
+        // A stored session the Relay no longer honors — a self-host Relay
+        // restarted — is refused at the session gate before the code is spent,
+        // so the scan carries on through sign-in with the same code.
+        let spent =
+          client.sessionToken !== null && (await retireUnlessExpired(client, invitation.setupToken));
+        if (!spent) {
           // A browser with no usable passkey registers one with the scanned
           // token; anything else signs in with what it already holds.
           let mustRegister = !hasPriorUseNow(client, passkeyAlreadyRegistered);
@@ -483,14 +508,11 @@ export default function App({
               if (err instanceof PasskeyAlreadyRegisteredError) setPasskeyAlreadyRegistered(true);
               throw err;
             }
-            spentOnSetup = true;
-            await client.signin();
+            // Registering signed in too: the finish carried the session.
+            spent = true;
           }
         }
-        // A signed-in phone has no passkey to create, so it spends the code
-        // rather than leaving a photographed QR redeemable. A refusal aborts:
-        // the code is dead, and pairing with it would fail at the Burrow anyway.
-        if (!spentOnSetup) await client.retireSetupToken(invitation.setupToken);
+        if (!spent) await client.retireSetupToken(invitation.setupToken);
         await client.retirePendingDeletions();
 
         setPhase({ at: 'pairing', code: null });
@@ -600,6 +622,13 @@ export default function App({
     setPhase({ at: 'burrows' });
   };
 
+  // Local only: the pinned Burrows and push registration stay, as on expiry.
+  const signOut = () => {
+    client.signOut();
+    setError(null);
+    setPhase({ at: 'auth' });
+  };
+
   // --- Views ---------------------------------------------------------------
 
   // Gated, not degraded: nothing above has performed a remote operation, and
@@ -637,6 +666,8 @@ export default function App({
       );
     case 'pairing':
       return <PairingCodeView code={phase.code} onCancel={onCancelPairing} />;
+    case 'restoring':
+      return <Waiting />;
     case 'auth':
       return (
         <SetupOrSignin
@@ -688,8 +719,23 @@ export default function App({
           onForget={onForget}
           onEnablePush={onEnablePush}
           onRetryPushConfig={onRetryPushConfig}
+          onSignOut={signOut}
         />
       );
+  }
+}
+
+/**
+ * Spend a scanned code under the session held: false, with nothing spent, when
+ * the Relay no longer honors that session. Any other refusal throws.
+ */
+async function retireUnlessExpired(client: PocketClient, setupToken: string): Promise<boolean> {
+  try {
+    await client.retireSetupToken(setupToken);
+    return true;
+  } catch (err) {
+    if (err instanceof SessionExpiredError) return false;
+    throw err;
   }
 }
 
@@ -1127,6 +1173,7 @@ export function BurrowsView({
   onForget,
   onEnablePush,
   onRetryPushConfig,
+  onSignOut,
 }: {
   /** The pinned records; a Burrow with no record is not one of these. */
   burrows: BurrowView[];
@@ -1148,6 +1195,7 @@ export function BurrowsView({
   /** Registers every paired Burrow at once — see {@link pushNoticeState}. */
   onEnablePush: () => void;
   onRetryPushConfig: () => void;
+  onSignOut: () => void;
 }): React.ReactElement {
   const pushNotice = pushNoticeState({
     pairedBurrowIds: burrows.filter((h) => !h.needsPairing).map((h) => h.burrowId),
@@ -1252,6 +1300,14 @@ export function BurrowsView({
           onClick={onScan}
         >
           {SCAN_LABEL}
+        </button>
+        <button
+          type="button"
+          className={clsx(pkButton({ tone: 'ghost', size: 'sm' }), 'self-center')}
+          disabled={busy !== null}
+          onClick={onSignOut}
+        >
+          Sign out
         </button>
       </div>
     </div>

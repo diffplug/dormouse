@@ -35,6 +35,7 @@ export * from './security/push.js';
 export * from './security/push-seal.js';
 export * from './security/pairing.js';
 export * from './security/e2e-bounds.js';
+export * from './security/presence-window.js';
 export * from './security/direct-path.js';
 export * from './security/token-bucket.js';
 export * from './security/link-url.js';

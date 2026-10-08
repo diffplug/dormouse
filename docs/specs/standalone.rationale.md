@@ -79,6 +79,8 @@ Tauri removes a label from `webview_windows()` only when the window is actually 
 
 The cap is a ceiling on one launch, not a limit on how many windows may exist: the excess snapshots stay on disk untouched, so raising the cap restores them.
 
+The minimum exists because macOS edge tiling could leave a window with no minimum zero-thick, and the restore floor because that box was then saved and reopened just as thin (2026-10). The overlap test catches a box saved on a display unplugged since, which would otherwise reopen where nobody can see it.
+
 ## Transfer
 
 The `adopt_ready` hop exists because the alternative is a race with no safe side. If Rust listed and replayed as part of the transfer, the target's collector might not be armed yet and the replay would be lost; if the target armed first and asked for the whole Window, it would take every sibling's PTY. Asking for exactly the suppressed set, only once the collector exists, has neither failure.
@@ -148,6 +150,16 @@ Arbitrating fixed the dialog and left the vote: a quit meeting a *committed* clo
 **Why not `AppHandle::request_restart`.** It raises `ExitRequested` with `RESTART_EXIT_CODE`, and `ExitRequestApi::prevent_exit` ignores that code (`tauri-2.11.5/src/app.rs`). A restart would slip past the unapproved-exit guard and the hand-back cleanup gate, and the watchdog and `Destroyed` exits, which call `app.exit(0)`, would drop the relaunch. Relaunching from `RunEvent::Exit` keeps one exit path. That exit stops tao's run loop with `[NSApp stop:]`, never `terminate:` (`tao-0.35.2/src/platform_impl/macos/app_state.rs`), so the spliced `applicationShouldTerminate:` sees only OS-initiated terminates. Checked 2026-09.
 
 **Why the refusals.** Under `tauri dev` the relaunched binary outlives the CLI and the Vite server it loads from. `tauri::process::restart` just calls `exit(0)` when `current_binary` fails — on macOS, for a path through a symlink (`tauri-utils-2.9.3/src/platform/starting_binary.rs`) — so the check turns a silent quit into an answer.
+
+## UI watchdog
+
+**The hang.** 2026-10-03, a dogfood build: WebContent at 100% CPU with the sidecar and every PTY idle. `sample` showed one `DOMTimer` firing into a `performMicrotaskCheckpoint` that never returned: the Tool reaper re-asking a Tool that declined to stop (fixed in #992). Nothing could name the JavaScript: the frames are unsymbolicated JIT, SIP blocks a debugger on the Apple-signed XPC service, and release webviews are not inspectable. `kill` (SIGTERM) left the process running; `kill -9` brought the window back on its live shells, with no work lost.
+
+**Why sample, then kill.** The sample is the only evidence a release hang leaves, and only while the process lives. `_webProcessIdentifier` is private WKWebView API (present on macOS 27, checked with `respondsToSelector:` before use); no public API names the process.
+
+**Why a script evaluation.** A page-side timer is throttled when a window is hidden, and a host-side `evaluateJavaScript` is not; its completion handler is one round trip, where an event plus an `invoke` answer was two. The probe's clock starts on the host main thread, because a native modal there delays delivery, not the page. A window minimized for three minutes was never restarted (2026-10-03).
+
+**Why 5 s.** Chosen 2026-10-03 over 30 s, accepting that a restart loses state that lives in the webview alone, unsaved Tool edits included. The restore, first render, and a reload happen before the page arms. Stalls after arming still can: cross-origin Tool and `dor iframe` pages run in the page's WebContent process (one process served three Tool iframes during the 2026-10-03 hang), so a page blocking for 5 s, or a large file a viewer parses synchronously, restarts the whole UI. The 30 s repeat threshold keeps a stall that recurs on every boot from becoming a restart loop.
 
 ## Objective-C exceptions
 

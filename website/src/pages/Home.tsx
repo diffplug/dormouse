@@ -705,7 +705,7 @@ export default function Home() {
 
   return (
     <div style={{ visibility: heroCanPaint ? "visible" : "hidden" }}>
-      <SiteHeader ref={headerRef} brandRef={headerBrandRef} brandVisible={false} />
+      <SiteHeader ref={headerRef} brandRef={headerBrandRef} brandVisible={false} prelaunch />
 
       {/* ── Fixed video layer — bottom-anchored, scrubs for the full runway ── */}
       <video
@@ -826,8 +826,9 @@ export default function Home() {
               The relay is one Node process. No database — state is JSON on
               disk, and push keys mint themselves on first boot. Put{" "}
               <code className={SITE_CODE_CLASS}>tailscale serve</code>{" "}
-              in front of it and you're done: no Dormouse account or
-              Dormouse-operated cloud. The Relay stays on your own
+              in front of it, build Dormouse from source pointed at it (a
+              stock build reaches only Dormouse Hosted), and you're done: no
+              Dormouse account or Dormouse-operated cloud. The Relay stays on your own
               machine, inside your tailnet. Your laptop decides which phones get
               notified — the Relay isn't allowed to choose for it, and the{" "}
               <a href={sitePath("/security")} className={SITE_LINK_CLASS}>security spec</a>{" "}

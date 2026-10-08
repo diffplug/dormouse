@@ -10,10 +10,10 @@
 
 | Level | Offered in | What Dormouse opens on its own |
 |---|---|---|
-| `nothing` | every build | nothing |
-| `local` (Local networks) | Hosted builds | one-time links, the relay socket once enrolled and push through it, managed voice |
+| `nothing` (Nowhere) | every build | nothing |
+| `local` (Local networks only) | Hosted builds | one-time links, the relay socket once enrolled and push through it, managed voice |
 | `anywhere` (Anywhere) | Hosted builds | one-time links to any network, Cloudflare STUN as a phone connects, the relay socket once enrolled and push through it, managed voice |
-| `relay` (My Relay only) | self-host builds | the relay socket, and push through it |
+| `relay` (Anywhere, through the Relay's host) | self-host builds | the relay socket, and push through it |
 
 - **A new install starts at Nothing.** **Must save the default at the service's first read, so it never flips**: `relay` where an enrollment for the baked origin exists — an upgraded self-host install — else `nothing` (rationale). A VS Code window with no service reads the default unsaved.
 - **A stored level the build does not offer, or a stored record that is not a policy — an unparseable file included — reads as `nothing`**; the first stays on disk, as an enrollment for another origin does.
@@ -40,7 +40,7 @@ Under `local` each runtime — a one-time link, or the persistent Burrow — is 
 - **The attempt's UDP socket binds the one allowed address when exactly one is present**: a single interface holds every address in the allowed networks, loopback and link-local aside, and exactly one in its preferred family, IPv4 over IPv6. **Otherwise it listens on every interface** (`docs/specs/remote-security-model.md` -> "Direct path"), and the level restricts the path, not the listener. Chosen per attempt (rationale).
 - **Must strip every candidate outside the allowed networks from the Burrow's answer**, and send a default address outside them as `0.0.0.0`. **An answer left with no candidate refuses the attempt.**
 - **Must strip the phone's offer the same way before the Burrow applies it**, a hostname, mDNS name, or unreadable candidate included, so its ICE agent sends no check and makes no lookup toward an address the level does not hold. **An offer left with no candidate is still answered**: the phone's checks reach the answer's candidates, and the pair forms peer-reflexive (rationale).
-- **Must check the selected candidate pair on the Burrow before its channel reports open**, and again while it is open and `connected` — on every ICE or connection state change, and every `DIRECT_PATH_RECHECK_MS` (rationale): both ends parse as IP addresses — IPv4-mapped IPv6 matching its IPv4 range — each inside an allowed CIDR. **A hostname, an mDNS name, or a pair the stack will not report refuses**, and a frame arriving before the open is checked first; once open, a reading with no pair is left to the connection's own state (rationale).
+- **Must check the selected candidate pair on the Burrow before its channel reports open**, and again while it is open and `connected` — on every ICE or connection state change, and every `DIRECT_PATH_RECHECK_MS` (rationale): both ends parse as IP addresses — IPv4-mapped IPv6 matching its IPv4 range — each inside an allowed CIDR. **A hostname, an mDNS name, or a pair the stack cannot read refuses**, open or not, and a frame arriving before the open is checked first. **A reading of no pair refuses before the open; once open it is left to the connection's own state** (rationale).
 - **Never trust SDP candidates, Hosted-observed addresses, or Client claims** as path evidence; only the Burrow's own ICE agent answers (rationale).
 - **A refusal is a violation**: it ends the session `network-not-allowed` (`docs/specs/one-time.md` -> "Burrow runtime"), switched or not.
 - **The check gates terminal traffic, not approval** (rationale): an off-network phone holding a link can reach the two-digit prompt and still receives no terminal byte.
@@ -94,13 +94,13 @@ The Settings dialog's Network topic (`docs/specs/alert.md` -> "Settings dialog")
 
 - **Renders nothing without a Burrow service**, which holds the policy.
 - **Never keep a draft**: every change sends a whole policy through `setNetworkPolicy`, and the panel renders the store's mirror of the answer; a refusal shows where the change was made. **Must make each change from the service's latest answer, one at a time** (`changeNetworkPolicy`).
-- **Offer the service's `levels`, in its order.**
+- **Offer the service's `levels`, in its order.** **Each choice's sentence must be true of its level**: over which networks a phone reaches the terminals, and what still leaves from any network.
 - **Choosing Local networks with nothing allowed must first allow every prefix of this machine's `lan` interfaces**, never a `vpn` or `virtual` one; the panel fills them, not the service (rationale). **Any other choice must keep `allowed`.**
-- **The connection list states only what is built** (rationale): `connectionsFor` lists every connection the level, this build, and the Burrow's standing open on their own, and nothing else; under `nothing`, none.
+- **The connection list states only what is built** (rationale): `connectionsFor` lists every connection the level, this build, and the Burrow's standing open on their own, and nothing else; under `nothing`, none. **An empty list must say that terminals, browser panes, and agents still reach what they open, those Dormouse restores at launch included.**
 - **Allowed networks**, under `local`: one switch per interface. **Must list every allowed range no switch reading On covers**, with Remove; **switching one off keeps a range another switch reading On needs**. A held path refusal shows here, with Dismiss.
 - **Phones**: under any level but `nothing`, the Remote control choices (`docs/specs/relay.md` -> "Remote control, in the Settings dialog"); under `nothing`, the levels that allow a phone, and Disconnect for a held enrollment, which is local.
 - **Updates**: a self-host build says it never updates itself, and a host with `hostOwnsUpdates` (VS Code) names the Marketplace. Any other build offers the automatic-check switch, absent under `nothing`, and **only with the platform's `updates` port** (`docs/specs/auto-update.md` -> "Threading") the last successful check and Check now.
-- **Under `nothing`, Notifications' push and managed-voice lines say they are off because Network is set to Nothing**, each linking to this topic. **The Baseboard holds the policy store for the window's life**, so its settings preview reads the level on its first frame; the Network panel re-reads on mount, and **a failed re-read never replaces a policy already read**.
+- **Under `nothing`, Notifications' push and managed-voice lines say they are off because of the level**, each linking to this topic. **The Baseboard holds the policy store for the window's life**, so its settings preview reads the level on its first frame; the Network panel re-reads on mount, and **a failed re-read never replaces a policy already read**.
 
 Source of truth: `NetworkSettings` and `connectionsFor` in `lib/src/components/NetworkSettings.tsx`; `lib/src/remote/burrow/network-policy-store.ts`.
 

@@ -248,7 +248,7 @@ export const DESKTOP_SECTIONS: readonly Section[] = [
       {
         id: 'al-watch-cmd',
         title: 'Alert me whenever `longtask` runs',
-        hint: 'Press `s` to start a fake `longtask`, then right-click that pane\'s header (or select it and press `a`) and turn on "Watch all longtask commands". Alerts belong to the command, not the tab.',
+        hint: 'Press `s` to start a fake `longtask`, then right-click that pane\'s header (or select it and press `a`) and turn on "watch longtask". Alerts belong to the command, not the tab.',
       },
       {
         id: 'al-spreads',

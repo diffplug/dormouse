@@ -78,6 +78,8 @@ The iOS 26.6.1 pairing failure reported in September 2026 occurred after local a
 
 The phone subsequently reported `write-record / DataError` in the disposable database. Testing a separately stored key distinguishes an inline-key check failure from broken key deserialization; an explicit key can bypass the former while hiding the latter until readback. This diagnostic does not migrate records.
 
+**Why the Relay session may sit in `localStorage`.** Without it every cold launch, and every relaunch of an installed app iOS evicted, cost a sign-in prompt before the Burrows list. The token is authentication-plane only: it reaches the Relay's routes and sockets for at most its 12 hours, and never stands in for a presence proof at a Burrow (remote-security-model, Presence proofs). Its exposure is the Client statics' class, which already live in the same origin's storage and are the stronger capability; script running in the Pocket origin is outside the model either way. It holds the credential id because pairing names the passkey a proof is built from, which a relaunch could not otherwise recover without a prompt.
+
 **Why one module owns every IndexedDB open.** Two modules opening the same database can disagree about the version, and a connection held open across an upgrade blocks it indefinitely. Centralizing name, version, upgrade and open makes both states unreachable rather than merely unlikely.
 
 ## Serving the built bundle
@@ -98,7 +100,7 @@ Measured on iPhone 15 Pro, Safari 26.6.1, September 2026: X25519 generation work
 
 **Why hidden pauses the keepalive instead of slowing it.** Timer throttling in a backgrounded tab is at the browser's discretion, so a keepalive that fires "sometimes" would promise a liveness the phone cannot keep; it promises nothing while hidden and resumes with an immediate send.
 
-**Why the Burrow's idle reap is worth a fresh handshake and a WebAuthn prompt.** It is the price of the Burrow reclaiming state that a hostile relay would otherwise never let it reclaim: without a deadline the Burrow holds sessions open at a peer's discretion.
+**Why the Burrow's idle reap is worth a fresh handshake.** It is the price of the Burrow reclaiming state that a hostile relay would otherwise never let it reclaim: without a deadline the Burrow holds sessions open at a peer's discretion.
 
 **Why the Client runs the Burrow's deadline against its own last send.** The relay socket is to the Relay and stays open across the reap, and the Burrow's goodbye goes out while the page is suspended — delivered late, or not at all. Without the local check a returning phone holds a session the Burrow has forgotten: every request hangs with no error, and only a reload escapes.
 
@@ -107,6 +109,10 @@ Measured on iPhone 15 Pro, Safari 26.6.1, September 2026: X25519 generation work
 **Why a dead session is actionable rather than reportable.** Without a way back, an installed Pocket is stuck: there is no address bar to reload from, and the in-app Refresh re-sends the same dead token, leaving force-quit as the only escape.
 
 **Why the trigger is `UNAUTHORIZED_ERROR` and not a bare 401.** Treating a refused setup token's 401 as an expired session would sign the user out mid-pairing and lose the ceremony state — worse than the bug the sign-out path exists to fix.
+
+**Why a 401 is judged against the token it was sent with.** Background reads, such as the Burrows view's push query, can outlive a sign-out and sign-in; a late 401 for the old token would otherwise erase the fresh session and leave the Burrows list failing every action with "sign in first". Superseded needs a *different* current session, not merely a mismatch: two requests carrying one expired token answer 401 in turn, the first clears the session (the app swallows a background one), and if the second read the now-empty session as a mismatch the foreground caller would stay on the Burrows view with no session.
+
+**Why a stored-session clear compares tokens.** Every tab of the origin shares `dormouse-pocket:session`, while each tab holds its own session in memory. A tab still on an older token whose 401 or sign-out cleared storage unconditionally would delete the token another tab signed in with since, signing that tab out at its next launch.
 
 ## Deployment: same-origin, always
 

@@ -16,8 +16,9 @@
  * checked-in service worker shadowing the built one, no one-time frame the
  * Relay or `BurrowRuntime` could read, no parse in
  * the Hosted room that forwards one, no grant a one-time connection could
- * leave behind, no store a one-time phone could keep anything in, and no
- * relayed application message a Local-networks session would read. An
+ * leave behind, no store a one-time phone could keep anything in, no presence
+ * window anywhere but the Burrow, and no relayed application message a
+ * Local-networks session would read. An
  * absence is exactly what a
  * reviewer stops noticing: nothing in a
  * diff says "a second cipher suite is now reachable", and the nightly audit is
@@ -566,6 +567,25 @@ export const RULES = [
     pattern: GRANT_NAME,
     violationFile: ONE_TIME_RUNTIME,
     violation: "\nimport { BurrowAcl } from 'remote-lib-common';\n",
+  },
+  {
+    rule: 'No presence window outside the Burrow',
+    security: 'no presence window held or named outside the Burrow',
+    kind: 'forbid',
+    // A window waives a prompt, so it may open only on a proof the Burrow
+    // verified. A Relay, Hosted, or one-time file that names one has started to
+    // mint, extend, or redeem a waiver on someone else's word. The session core
+    // is left out: Pocket shares it and rides windows.
+    files: [
+      ...sourceFilesUnder(ROUTING_TREES),
+      ONE_TIME_RUNTIME,
+      ONE_TIME_RENDEZVOUS,
+      'lib/src/remote/client/one-time-client.ts',
+      ...sourceFilesUnder([ONE_TIME_PAGE_TREE]),
+    ],
+    pattern: /\b[Pp]resenceWindow\w*|\bPRESENCE_WINDOW\w*|presence-window/g,
+    violationFile: 'relay/src/relay.ts',
+    violation: "\nimport { PresenceWindows } from 'remote-lib-common';\n",
   },
   {
     rule: 'The one-time phone, its page, and its session core name no store',

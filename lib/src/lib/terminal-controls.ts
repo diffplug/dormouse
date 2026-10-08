@@ -148,7 +148,7 @@ export class TerminalControlStreamFilter {
 }
 
 /** Remove presentation controls safely from slices that may start or end
- * mid-sequence. Shared by resume-hint and returned-prompt detection. */
+ * mid-sequence. */
 export function stripTerminalControls(input: string, options: StripTerminalControlsOptions = {}): string {
   // OSC/DCS/SOS/PM/APC strings, including an unterminated one, whose tail is
   // swallowed rather than promoted to visible text. Shared with the streaming

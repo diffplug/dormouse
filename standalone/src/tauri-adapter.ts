@@ -401,7 +401,8 @@ export class TauriAdapter implements PlatformAdapter {
   }
 
   /**
-   * SIGTERM this window's PTYs and wait for their exits and final output.
+   * Gracefully stop this window's PTYs and wait for their exits and final
+   * output (`docs/specs/transport.md` -> "Graceful shutdown").
    *
    * The target set is what this window owns, and Rust alone decides it
    * (`docs/specs/standalone.md` -> "Windows"), so a sibling's terminals are not

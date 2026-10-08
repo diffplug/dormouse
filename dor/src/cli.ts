@@ -38,6 +38,7 @@ export type {
   CloseWorkspaceRequest,
   RenameWorkspaceRequest,
   SwitchWorkspaceRequest,
+  PinWorkspaceRequest,
   WorkspaceMutationResponse,
   WorkspaceRow,
   ReadSurfaceRequest,

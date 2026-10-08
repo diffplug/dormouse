@@ -23,6 +23,10 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 process-wrap = { version = "10", features = ["std"] }
 
+[target.'cfg(unix)'.dependencies]
+# `O_NOFOLLOW` for the log file (open_log in lib.rs); std does not export it.
+libc = "0.2"
+
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62", features = [
     "Win32_System_Threading",
@@ -46,9 +50,6 @@ tauri-runtime-wry = { version = "2", default-features = false }
 objc2-app-kit = { version = "0.3", default-features = false, features = ["NSApplication", "NSEvent", "NSGraphicsContext"] }
 objc2-foundation = { version = "0.3", default-features = false, features = ["NSDictionary", "NSException", "NSGeometry", "NSString"] }
 
-[target.'cfg(unix)'.dev-dependencies]
-libc = "0.2"
-
 [[test]]
 name = "objc_exception_unwinds"
 harness = false
@@ -62,5 +63,5 @@ panic = "unwind"
 
 [patch.crates-io]
 # docs/specs/standalone.md -> "Objective-C exceptions".
-tao = { git = "https://github.com/diffplug/tao", rev = "397f6789285412024892579aff0897aade11d832" }
-tao-macros = { git = "https://github.com/diffplug/tao", rev = "397f6789285412024892579aff0897aade11d832" }
+tao = { git = "https://github.com/diffplug/tao", rev = "12d4695500ff8e3b7cc9a409d6e01245296df6c1" }
+tao-macros = { git = "https://github.com/diffplug/tao", rev = "12d4695500ff8e3b7cc9a409d6e01245296df6c1" }

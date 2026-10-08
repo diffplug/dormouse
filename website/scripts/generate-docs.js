@@ -567,14 +567,15 @@ const buildSelfHost = () =>
   });
 
 /**
- * Which page carries which of the security spec's rows and bullets.
+ * Which audience each of the security spec's rows and bullets belongs to.
  *
  * `/security`, `/self-host`, and `/supply-chain` each show the part
  * of the spec a reader there relies on, rendered from this data rather than
  * restated — the spec is what the nightly audit reads, and a hand-written copy
- * in a page is the one that rots. The umbrella page is one audience among
- * three: the local application and the pipeline; the spec file on GitHub is
- * the one place every row appears together. A guarantee row, an undefended edge, or a known gap belongs to
+ * in a page is the one that rots. `/security` shows its own audience — the
+ * local application and the pipeline — and remote control's
+ * ({@link SECURITY_PAGE_AUDIENCES}); the spec file on GitHub is the one place
+ * every row appears together. A guarantee row, an undefended edge, or a known gap belongs to
  * the audience of the spec its links name, and every link in one entry must
  * agree. An entry naming no spec, a spec in neither group, or both groups
  * fails the build: the spec's own pointers are the classification, so a new
@@ -586,6 +587,13 @@ export const SECURITY_AUDIENCES = {
   'self-host': ['docs/specs/remote-security-model.md', 'docs/specs/security-remote.md', 'SELF_HOST.md'],
   'supply-chain': ['docs/specs/security-supply-chain.md'],
 };
+
+/**
+ * The audiences `/security` renders: its own, and remote control's, since a
+ * Hosted or one-time reader relies on those rows and is never sent to
+ * `/self-host` (docs/specs/website-docs.md -> `/security` spec).
+ */
+export const SECURITY_PAGE_AUDIENCES = ['security', 'self-host'];
 
 /** The umbrella sections that split by audience, and the block each splits. */
 const SECURITY_AUDIENCE_SECTIONS = [
@@ -632,9 +640,17 @@ export function securityAudiences(page) {
   return out;
 }
 
-/** The umbrella's blocks with the three split blocks narrowed to one audience. */
-export function audienceBlocks(page, audiences, audience) {
-  const swap = new Map(securitySections(page).map(({ key, block }) => [block, audiences[audience][key]]));
+/**
+ * The umbrella's blocks with the three split blocks narrowed to `names`'
+ * entries, kept in the spec's order.
+ */
+export function audienceBlocks(page, audiences, names) {
+  const swap = new Map(
+    securitySections(page).map(({ key, block, entries }) => {
+      const mine = new Set(names.flatMap((name) => audiences[name][key][entries]));
+      return [block, { ...block, [entries]: block[entries].filter((entry) => mine.has(entry)) }];
+    }),
+  );
   return page.blocks.map((block) => swap.get(block) ?? block);
 }
 
@@ -645,8 +661,8 @@ export function audienceBlocks(page, audiences, audience) {
  * `scripts/spec-lint.mjs` budgets it and the nightly audit reads it. No
  * `canonicalUrl`, because the delta removes no section — the page is the spec,
  * which is the point of publishing it. `pageBlocks` is the same document with
- * the three split blocks narrowed to the umbrella's own audience; `blocks`
- * keeps every entry, for the two pages that render the other two audiences.
+ * the three split blocks narrowed to {@link SECURITY_PAGE_AUDIENCES}; `blocks`
+ * keeps every entry.
  */
 const buildSecurity = async () => {
   const page = await buildDocument({
@@ -656,7 +672,7 @@ const buildSecurity = async () => {
     fallbackTitle: 'Security',
   });
   const audiences = securityAudiences(page);
-  return { ...page, audiences, pageBlocks: audienceBlocks(page, audiences, 'security') };
+  return { ...page, audiences, pageBlocks: audienceBlocks(page, audiences, SECURITY_PAGE_AUDIENCES) };
 };
 
 /** Blocks belonging to a heading: everything up to the next heading of <= depth. */

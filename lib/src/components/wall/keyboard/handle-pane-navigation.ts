@@ -1,5 +1,5 @@
 import { ARROW_OPPOSITES, isArrowKey, type NavHistoryRef, type WallKeyboardCtx } from './types';
-import { getWorkspacesSnapshot } from '../../../lib/workspace-store';
+import { getWorkspacesSnapshot, pinnedBoundary } from '../../../lib/workspace-store';
 import { isWorkspaceSelection, workspaceIdOfSelection } from '../wall-types';
 
 /**
@@ -28,7 +28,9 @@ export function handlePaneNavigation(
     navHistory.current = null;
     if (dir === 'ArrowDown') ctx.returnToPane();
     else if (dir === 'ArrowLeft' || dir === 'ArrowRight') {
-      const ids = [...getWorkspacesSnapshot().workspaces.map(workspace => workspace.id), null];
+      // The strip's own order: `+` (null) sits where the pinned group starts.
+      const ids: Array<string | null> = getWorkspacesSnapshot().workspaces.map(workspace => workspace.id);
+      ids.splice(pinnedBoundary(), 0, null);
       const index = ids.indexOf(workspaceIdOfSelection(currentType, sid));
       const next = index + (dir === 'ArrowLeft' ? -1 : 1);
       if (index >= 0 && next >= 0 && next < ids.length) ctx.selectWorkspace(ids[next]);
