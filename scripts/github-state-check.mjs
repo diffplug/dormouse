@@ -472,8 +472,16 @@ function main(argv) {
     else throw new Error(`unexpected argument: ${argv[i]}`);
   }
   const result = run({ api: ghFetcher(), local: args.local, repo: args.repo });
-  if (args.out) writeFileSync(args.out, result.text);
-  process.stdout.write(result.text);
+  if (args.out) {
+    // The job log is public, and a failing clause's evidence is finding
+    // detail the embargo keeps private: with `--out` the clauses go to the
+    // fragment only, and the log gets the verdict and counts.
+    writeFileSync(args.out, result.text);
+    const count = (v) => result.results.filter((r) => r.verdict === v).length;
+    process.stdout.write(`VERDICT: ${result.verdict} (${count('PASS')} PASS, ${count('FAIL')} FAIL, ${count('UNVERIFIABLE')} UNVERIFIABLE). Observed-state hash ${result.hash}.\n`);
+  } else {
+    process.stdout.write(result.text);
+  }
   if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `hash=${result.hash}\nverdict=${result.verdict}\n`);
 }
 

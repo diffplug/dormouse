@@ -262,4 +262,9 @@ cat "$f$slurp"
   assert.equal(written.split('\n')[0], 'VERDICT: PASS', written);
   const { hash } = replay();
   assert.equal(readFileSync(output, 'utf8'), `hash=${hash}\nverdict=PASS\n`);
+  // The job log is public: with `--out`, stdout carries the verdict and
+  // counts, never a clause or its evidence (docs/specs/security-audit.md -> "Embargo").
+  const clauses = written.split('\n').filter((line) => line.startsWith('- ')).length;
+  assert.ok(clauses > 0, written);
+  assert.equal(cli.stdout, `VERDICT: PASS (${clauses} PASS, 0 FAIL, 0 UNVERIFIABLE). Observed-state hash ${hash}.\n`);
 });
