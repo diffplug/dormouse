@@ -223,6 +223,30 @@ const RELAY_ROOM_LEAKS = new RegExp(
   'g',
 );
 
+/**
+ * Everything Hosted's one-time room could keep, log, or read a frame through.
+ * Its state is a count, a flag, and an expiry in the Burrow socket's
+ * attachment (`docs/specs/one-time.md` -> "Hosted rendezvous"), so it allows:
+ *
+ * - no parse or decode, and no `console` at all;
+ * - `storage` only to set and delete the alarm and to `deleteAll` — an alias
+ *   of it is a match;
+ * - an attachment only as a literal checked `satisfies RoomState`, whose one
+ *   spread is the `state` it read back — `satisfies` refuses any other field;
+ * - `RoomState` declared once, with `number` and `boolean` fields alone, so
+ *   that refusal leaves nowhere to put a frame.
+ */
+const ONE_TIME_ROOM_LEAKS = new RegExp(
+  [
+    FRAME_DECODE,
+    String.raw`\bconsole\b`,
+    String.raw`\bstorage\b(?!\.(?:setAlarm|deleteAlarm|deleteAll)\b)`,
+    String.raw`\bserializeAttachment\((?!\{(?:(?!\.\.\.(?!state\b))[^{}()])*\}\s*satisfies\s+RoomState\))`,
+    String.raw`\b(?:interface|type)\s+RoomState\b(?!\s*\{(?:\s*(?:\/\*\*(?:(?!\*\/)[\s\S])*\*\/|\w+:\s*(?:number|boolean);))*\s*\})`,
+  ].join('|'),
+  'g',
+);
+
 /** The three shipped source trees, scanned whole for the dependency rules. */
 const SOURCE_TREES = ['remote-lib-common/src/', 'lib/src/', 'relay/src/'];
 
@@ -487,8 +511,9 @@ export const RULES = [
     // The room forwards a frame verbatim and bounds it by raw length and count
     // alone, so it has no reason to read one: a parse is the first step toward
     // a room that acts on what a handshake says, and a log or a stored frame
-    // is handshake ciphertext kept past the handshake.
-    pattern: new RegExp([FRAME_DECODE, String.raw`\bconsole\.|\bstorage\.(?:put|sql|kv)\b`].join('|'), 'g'),
+    // is handshake ciphertext kept past the handshake. Everything it could
+    // keep one through is in `ONE_TIME_ROOM_LEAKS`.
+    pattern: ONE_TIME_ROOM_LEAKS,
     violationFile: 'hosted/server/one-time-room.ts',
     violation: '\nconst __selftest = (frame: string) => JSON.parse(frame);\n',
   },
