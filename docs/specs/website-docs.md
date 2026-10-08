@@ -136,7 +136,7 @@ Source of truth: `Hosted` in `website/src/pages/Hosted.tsx`; `HostingRequirement
 
 ## Hosted policies
 
-**Must prerender `/privacy` and `/terms` outside Docs navigation with standalone marketing chrome, an effective date, and a last-updated date.**
+**Must prerender `/privacy` and `/terms` outside Docs navigation with standalone marketing chrome and a last-updated date.** **Must mark draft policies as not yet effective; effective policies carry their effective date.**
 
 Source of truth: `HostedPolicyLayout` in `website/src/components/HostedPolicyLayout.tsx`.
 

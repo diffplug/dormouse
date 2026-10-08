@@ -502,16 +502,19 @@ export default function Hosted() {
           up or pay for.
         </p>
         <p className={`mb-4 leading-relaxed ${MUTED_TEXT_CLASS}`}>
-          What leaves your computer is exactly the short spoken label — the terminal’s
-          name — and the id of the voice that should say it. Never terminal output, never
-          a notification body, never a session id. The app discloses this before the first
-          request, and clips are cached on your machine so a repeated label makes no
-          second one.
+          Managed voices send a shortened displayed label, voice id, and authentication
+          credential to our service; ElevenLabs receives the label and voice id. Labels
+          can contain program-supplied titles, command labels, or directory names.
+          Filtering cannot remove every secret. The terminal screen and output stream
+          are not uploaded for speech. The app explains this before the first request,
+          and cached clips play locally. See the{" "}
+          <a href={sitePath("/privacy") + "#voice"} className={LINK_CLASS}>voice privacy details</a>.
         </p>
         <p className={`leading-relaxed ${MUTED_TEXT_CLASS}`}>
           The system voice stays, and stays the fallback: offline, past the daily fair-use
           cap, or if my endpoint fails, Dormouse speaks in the system voice rather than
-          going silent.
+          going silent. Managed voices allow 500 requests per subscriber per UTC day;
+          provider failures count, cached playback does not.
         </p>
       </section>
 
@@ -530,7 +533,8 @@ export default function Hosted() {
           Dormouse Pocket puts your terminals on your phone. It needs a Relay to connect
           the two, and Hosted runs it for you: enrollment of your own computers, sealed
           push notifications, and Pocket without a tailnet. Your terminals still run on
-          your own awake, online computer.
+          your own awake, online computer. An account can enroll up to 32 copies of
+          Dormouse, with no per-device charge; standalone and VS Code count separately.
         </p>
         <p className={`leading-relaxed ${MUTED_TEXT_CLASS}`}>
           Terminal traffic is end-to-end encrypted between your computer and your phone,
@@ -597,14 +601,18 @@ export default function Hosted() {
         <AnchoredHeading id="faq" spacing="mt-0 mb-6">Questions</AnchoredHeading>
         <div className="grid gap-5">
           <FaqEntry question="Refunds and cancellation?">
-            30 days, on every plan. Monthly, yearly, and founding all auto-renew and
-            you can cancel any time — access runs to the end of the period you paid for. A
-            refund ends access and returns the seat to its cohort.
+            Ask within 30 days of your first Hosted payment or any yearly renewal for
+            a full refund. Monthly renewals are outside that voluntary guarantee.
+            All plans auto-renew; cancel any time to stop renewal and keep access through
+            the paid period. A full refund ends access. Legal rights still apply; see the{" "}
+            <a href={sitePath("/terms") + "#cancellation"} className={LINK_CLASS}>refund terms</a>.
           </FaqEntry>
           <FaqEntry question="What exactly does a founding price lock?">
-            The price you paid, for as long as the subscription stays active. It survives
-            every later price change; a failed renewal gets 30 days of grace before the
-            lock is lost, and a lapsed founder re-subscribes at list. Founding badges are
+            Your base yearly price in US dollars, for as long as the subscription stays
+            active; taxes may change. A failed renewal gives you 30 days to restore
+            payment and keep the price, but paid features pause until payment succeeds.
+            A failure caused by us or a billing-provider migration does not forfeit the
+            lock. A lapsed founder re-subscribes at list. Founding badges are
             cosmetic — in the app and on the credits page, never a capability.
           </FaqEntry>
           <FaqEntry question="Who appears in the founders row?">
@@ -614,12 +622,14 @@ export default function Hosted() {
             loading the page never tells GitHub or Google you visited.
           </FaqEntry>
           <FaqEntry question="What if Dormouse Hosted shuts down?">
-            The Relay is source-available and the{" "}
+            We will stop renewals and refund the unused portion of prepaid subscriptions,
+            with at least 30 days’ notice unless an urgent legal or security requirement
+            prevents it. The Relay is source-available and the{" "}
             <a href={sitePath("/self-host")} className={LINK_CLASS}>
               self-hosting runbook
             </a>{" "}
-            is published, so remote control survives me. Spoken alarms fall back to your
-            system voice, which needs nothing from me at all.
+            is published if you want to run your own Relay. Spoken alarms fall back to
+            your system voice. Self-hosting does not replace your refund.
           </FaqEntry>
           <FaqEntry question="Do you sell team or enterprise plans?">
             Not on this page. Org accounts, SSO, and audit export are a separate piece of work. If
