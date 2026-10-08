@@ -128,7 +128,6 @@ jobs:
       # count, which the public issue already carries. A failure writes no
       # file, and every domain then computes INCONCLUSIVE.
       - name: List open findings
-        id: findings
         if: steps.plan.outputs.skip != 'true'
         continue-on-error: true
         env:

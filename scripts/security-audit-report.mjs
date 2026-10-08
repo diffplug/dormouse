@@ -35,8 +35,10 @@ const FAIL_IF_RE = /^\s*(?:[-*]\s+)?\*\*FAIL IF\b/;
 const HEADING_RE = /^(#{1,6})\s+(.+?)\s*$/;
 const FENCE_RE = /^\s*(```|~~~)/;
 
+/** A rule's id as `ruleId` writes it: `` `spec` -> "heading" #n ``, capturing all three. */
+const RULE_ID = /`(docs\/specs\/security[a-z-]*\.md)` -> "([^"\n]+)" #([1-9]\d*)/.source;
 /** `- PASS: `docs/specs/security-ci.md` -> "GitHub Actions Policies" #2.b — <clause>: <evidence>` */
-const RESULT_RE = /^- (PASS|FAIL|UNVERIFIABLE): `(docs\/specs\/security[a-z-]*\.md)` -> "([^"\n]+)" #([1-9]\d*)(?:\.([a-z]))? — (\S.*)$/;
+const RESULT_RE = new RegExp(`^- (PASS|FAIL|UNVERIFIABLE): ${RULE_ID}(?:\\.([a-z]))? — (\\S.*)$`);
 /** `- WARNING: `path/to/file.ts:88` `rootCause` — <summary>` */
 const FINDING_RE = /^- (BLOCKER|WARNING|INFO): `([^`\s:]+):([1-9]\d*)(?:-\d+)?` `([^`\n]+)` — (\S.*)$/;
 /** `- QUALITATIVE: done — <what the pass covered>` */
@@ -228,7 +230,7 @@ export const owedIds = (owed) => [...owed].flatMap(([key, numbers]) => {
 /** `[audit-finding <key>] <summary>`: a minted hash key, or a hand-filed `manual-…` one. */
 const LEDGER_TITLE_RE = /^\[audit-finding ([\w.-]+)\] (\S.*)$/;
 /** A minted failure's summary: `FAIL: `spec` -> "heading" #n`. */
-const MINTED_CITE_RE = /^FAIL: `(docs\/specs\/security[a-z-]*\.md)` -> "([^"\n]+)" #([1-9]\d*)/;
+const MINTED_CITE_RE = new RegExp(`^FAIL: ${RULE_ID}`);
 /** A hand-filed one's: `FAIL security-ci.md GitHub Actions Policies: <summary>`, citing a heading alone. */
 const MANUAL_CITE_RE = /^FAIL (security[a-z-]*\.md) ([^:\n]+):/;
 /** A `path:line`, where a re-verified finding's reason points. */
@@ -348,10 +350,8 @@ export function domainVerdict(text, owed, { deterministic = false, open = [] } =
 }
 
 /** A fragment's verdict, judged against its own manifest, its profile, and the open findings handed to the run. */
-export function judgeFragment(root, name, text) {
-  const deterministic = name in DETERMINISTIC;
-  return domainVerdict(text, fragmentManifest(root, name), { deterministic, open: deterministic ? [] : readOpenFindings(root) });
-}
+export const judgeFragment = (root, name, text) =>
+  domainVerdict(text, fragmentManifest(root, name), { deterministic: name in DETERMINISTIC, open: readOpenFindings(root) });
 
 /** The run's verdict: the worst domain, and never PASS unless the orchestrator wrote exactly `PASS`. */
 function runVerdict(domainsByFragment, fileStatus) {
@@ -368,9 +368,14 @@ function runVerdict(domainsByFragment, fileStatus) {
 // --- Duplicates and the ledger ---------------------------------------------
 
 const normPath = (p) => p.replace(/^\.\//, '').replace(/^\/+/, '');
-/** An identifier that reads as code: camelCase, PascalCase with two humps, `snake_case`, or a call. */
+/**
+ * An identifier that reads as code: lowerCamel, `snake_case`, or a call. Not
+ * PascalCase, which prose spells too (`GitHub`, `PowerShell`).
+ */
 const SYMBOL_RE = /[A-Za-z_$][\w$]*(?:\(\))?/g;
-const codeLike = (token) => /[a-z][A-Z]|[A-Z][a-z]+[A-Z]|_|\(\)$/.test(token);
+const codeLike = (token) => /^[a-z$][\w$]*[A-Z]|_|\(\)$/.test(token);
+/** A root cause written as the rule it lives in: `security-ci.md "GitHub Actions Policies" #2`. */
+const RULE_CAUSE_RE = /\.md\b[^"]*"[^"]+"\s*#\d+/;
 
 /**
  * A finding's root cause as its key reads it: the symbol it names, not the
@@ -380,7 +385,7 @@ const codeLike = (token) => /[a-z][A-Z]|[A-Z][a-z]+[A-Z]|_|\(\)$/.test(token);
  */
 export function rootCause(cause) {
   const text = cause.trim();
-  const symbol = /\s/.test(text) ? text.match(SYMBOL_RE)?.find(codeLike) : text;
+  const symbol = RULE_CAUSE_RE.test(text) ? null : /\s/.test(text) ? text.match(SYMBOL_RE)?.find(codeLike) : text;
   return (symbol ?? text.replace(/[`'"“”,;:]/g, '')).toLowerCase().replace(/\(\)$/, '').replace(/\s+/g, ' ');
 }
 
@@ -416,7 +421,8 @@ export function dedupFindings(entries) {
 /** A ledger key: stable across runs, so line drift does not open a second issue for one finding. */
 export const ledgerKey = (...parts) => createHash('sha256').update(parts.join('\0')).digest('hex').slice(0, 12);
 /** A failed rule's key: its spec, heading, and number, never the clause letter a domain chose. */
-export const failKey = (spec, heading, rule) => ledgerKey('check', spec, heading, rule);
+// The empty fifth part is where the clause letter was, so a single-clause key minted before is unchanged.
+export const failKey = (spec, heading, rule) => ledgerKey('check', spec, heading, rule, '');
 
 // --- Compose ---------------------------------------------------------------
 

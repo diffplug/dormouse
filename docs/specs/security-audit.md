@@ -148,7 +148,7 @@ Before the agent starts, `List open findings` writes the open titles to `audit-o
 
 - **FAIL IF** `File embargoed findings` can close, edit, or reopen an issue, or open a ledger issue for a key that already has one open (rationale).
 - **FAIL IF** a PASS closes a public `security-audit-failure` issue while a ledger issue opened before that run is still open, or while the ledger could not be read; or a PASS whose ledger could not be read exits zero (rationale).
-- **FAIL IF** a failure's key changes with its clause letter or a finding's with its line or the words around its symbol, an open issue with a key the run did not mint stops counting, or a domain computes PASS with no open-findings list or over a cited open finding none of its PASS lines names. Pinned by `scripts/security-audit.test.mjs`.
+- **FAIL IF** a failure's key changes with its clause letter or a finding's with its line or the words around its symbol, or an open issue with a key the run did not mint stops counting. Pinned by `scripts/security-audit.test.mjs`.
 
 ## Environment and `AUDIT_PAT`
 

@@ -67,6 +67,12 @@ function fragmentText(fragment, { stated = 'PASS', results = {}, drop = [], line
 /** The first rule a fragment owes, for overriding. */
 const firstId = (fragment) => owedIds(fragment)[0];
 
+/** A rule id's ledger key, as the reporting step mints it for a failure on that rule. */
+function failKeyOf(id) {
+  const [, spec, heading, n] = id.match(/^`([^`]+)` -> "([^"]+)" #(\d+)$/);
+  return failKey(spec, heading, Number(n));
+}
+
 /** A BLOCKER or WARNING with all three evidence fields. */
 const finding = (severity, location, cause, summary) => [
   `- ${severity}: \`${location}\` \`${cause}\` — ${summary}`,
@@ -356,8 +362,7 @@ test('the ledger opens a new finding and comments on one already open', (t) => {
   fragments.forEach((f, i) => writeFileSync(join(dir, f), fragmentText(f, i === 1
     ? { stated: 'FAIL', results: { [failId]: `- FAIL: ${failId} — c: violated` }, lines: finding('BLOCKER', 'lib/a.ts:10', 'runIt', 'new one') }
     : {})));
-  const [, spec, heading, rule] = failId.match(/^`([^`]+)` -> "([^"]+)" #(\d+)$/);
-  const known = failKey(spec, heading, Number(rule));
+  const known = failKeyOf(failId);
   const { surfaced, outputs } = runReporting(dir, env, { embargoEnv: { GH_LEDGER_OPEN: `41 [audit-finding ${known}] FAIL: old\n42 [audit-finding 0123456789ab] WARNING: other\n` } });
   assert.equal(surfaced.status, 1);
   assert.equal(outputs.embargo.result, 'filed');
@@ -444,8 +449,7 @@ test('a passing run files its WARNINGs in the ledger and nothing else', (t) => {
 // longer holds, at a `path:line`.
 const CI_POLICIES = owedIds(CI).filter((id) => id.includes('`docs/specs/security-ci.md` -> "GitHub Actions Policies"'));
 const MINTED_RULE = CI_POLICIES[1];
-const [, MINTED_SPEC, MINTED_HEADING, MINTED_N] = MINTED_RULE.match(/^`([^`]+)` -> "([^"]+)" #(\d+)$/);
-const MINTED_KEY = failKey(MINTED_SPEC, MINTED_HEADING, Number(MINTED_N));
+const MINTED_KEY = failKeyOf(MINTED_RULE);
 const MINTED_OPEN = `41 [audit-finding ${MINTED_KEY}] FAIL: ${MINTED_RULE}\n`;
 // Hand-filed, before keys were minted: a heading, no rule number.
 const MANUAL_OPEN = '42 [audit-finding manual-example-gate] FAIL security-ci.md GitHub Actions Policies: a hand-filed failure\n';
@@ -461,7 +465,7 @@ function runOverOpen(t, open, ci = {}, options = {}) {
   return { dir, body, ...run };
 }
 
-for (const [name, open, ci, expected, note] of [
+for (const [name, open, ci, expected, note, options = {}] of [
   ['a PASS over an open failure with no reason is INCONCLUSIVE', MINTED_OPEN, {}, 'MISSING',
     `\`${CI}\`: ${MINTED_RULE} passes over \`[audit-finding ${MINTED_KEY}]\``],
   ['a PASS naming the open failure without a path:line is INCONCLUSIVE', MINTED_OPEN,
@@ -474,10 +478,10 @@ for (const [name, open, ci, expected, note] of [
   ['any PASS line under the hand-filed heading may give the reason', MANUAL_OPEN,
     { results: { [CI_POLICIES.at(-1)]: `- PASS: ${CI_POLICIES.at(-1)} — c: holds; [audit-finding manual-example-gate] no longer holds: \`.github/workflows/security-audit.yaml:17\`` } }, 'PASS', null],
   ['a finding citing no rule holds no PASS to a reason', '43 [audit-finding manual-example-lint] WARNING a lint misses a case\n', {}, 'PASS', null],
-  ['no open-findings list leaves every domain INCONCLUSIVE', '', {}, 'MISSING', 'No open ledger findings were handed to the domains.'],
+  ['no open-findings list leaves every domain INCONCLUSIVE', '', {}, 'MISSING', 'No open ledger findings were handed to the domains.', { listToken: '' }],
 ]) {
   test(`reporting: ${name}`, (t) => {
-    const { body, outputs } = runOverOpen(t, open, ci, note?.startsWith('No open') ? { listToken: '' } : {});
+    const { body, outputs } = runOverOpen(t, open, ci, options);
     assert.equal(outputs.compose.status, expected, body);
     if (note) assert.ok(body.includes(note), `missing note: ${note}\n${body}`);
   });
@@ -507,12 +511,19 @@ test('ledger keys ignore the clause letter and a finding\'s wording', (t) => {
   const asB = keyed({ results: { [rule]: `- PASS: ${rule}.a — c: ok\n- FAIL: ${rule}.b — c: violated` } });
   const asC = keyed({ results: { [rule]: `- PASS: ${rule}.a — c: ok\n- PASS: ${rule}.b — c: ok\n- FAIL: ${rule}.c — c: violated` } });
   assert.equal(asB, asC);
+  // An unlettered failure keeps the key it was minted under before clause letters were dropped.
   const [, spec, heading, n] = rule.match(/^`([^`]+)` -> "([^"]+)" #(\d+)$/);
-  assert.equal(asB, `${failKey(spec, heading, Number(n))}\tFAIL\n`);
+  assert.equal(asB, `${ledgerKey('check', spec, heading, n, '')}\tFAIL\n`);
   const symbol = keyed({ stated: 'PASS', lines: finding('WARNING', 'lib/src/config.ts:40', 'parseConfig()', 'one night') });
   const reworded = keyed({ stated: 'PASS', lines: finding('WARNING', './lib/src/config.ts:90', 'parseConfig falls back to defaults', 'another night') });
   assert.equal(symbol, reworded);
   assert.equal(symbol, `${ledgerKey('finding', 'lib/src/config.ts', 'parseconfig')}\tWARNING\n`);
+  // A cause written as its rule, or in prose, keys on all of it: neither the
+  // heading's proper noun nor a product name is a symbol.
+  const ruleCause = (n) => keyed({ stated: 'PASS', lines: finding('WARNING', '.github/workflows/x.yaml:4', `security-audit.md "Environment and AUDIT_PAT" #${n}`, 'one') });
+  assert.notEqual(ruleCause(2), ruleCause(4));
+  const prose = (cause) => keyed({ stated: 'PASS', lines: finding('WARNING', '.github/workflows/x.yaml:4', cause, 'one') });
+  assert.notEqual(prose('GitHub token reaches a log'), prose('GitHub cache is shared'));
 });
 
 // Hand-filed ledger issues carry keys no run mints; they still count as open,
