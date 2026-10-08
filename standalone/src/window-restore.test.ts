@@ -16,7 +16,8 @@ import { DEFAULT_WORKSPACE_ID } from "dormouse-lib/lib/session-types";
 import type { PersistedSession, PersistedWindow } from "dormouse-lib/lib/session-types";
 import { forgetHelper, getHelper } from "dormouse-lib/lib/helper-terminal";
 import { setPlatform } from "dormouse-lib/lib/platform";
-import { getWorkspacesSnapshot, resetWorkspaces } from "dormouse-lib/lib/workspace-store";
+import { getWorkspacesSnapshot, installWorkspaceIdPool, resetWorkspaceIdPool, resetWorkspaces } from "dormouse-lib/lib/workspace-store";
+import { installSurfaceIdPool, resetSurfaceIdPool } from "dormouse-lib/lib/surface-ids";
 import { resetWindowSessionAggregator } from "dormouse-lib/lib/window-session-aggregator";
 import type { LathNode } from "dormouse-lib/lib/lath/model";
 import { restoreWindowOrFresh, routeUnownedPtys } from "./window-restore";
@@ -191,6 +192,45 @@ describe("restoreWindowOrFresh", () => {
     expect(getWorkspacesSnapshot().workspaces).toHaveLength(1);
     // And the blob that could not be restored is gone.
     expect(saves[saves.length - 1]?.workspaces).toEqual([]);
+  });
+
+  it("remaps a reopened window to fresh ids before it restores, and saves them at once", async () => {
+    const counting = (prefix: string, start: number) => {
+      let next = start;
+      return async (count: number) => Array.from({ length: count }, () => `${prefix}-${next++}`);
+    };
+    await installSurfaceIdPool(counting("surface", 50), 0);
+    await installWorkspaceIdPool(counting("workspace", 20));
+    try {
+      const closed: PersistedWindow = {
+        version: 2,
+        workspaces: [
+          { id: "workspace-3", name: "A", nameIsAuto: false, session: sessionOver("surface-4", "surface-5") },
+          { id: "workspace-7", name: "B", nameIsAuto: false, session: sessionOver("surface-9") },
+        ],
+        activeWorkspaceId: "workspace-7",
+        reopened: true,
+      };
+      const { platform, saves } = fakePlatform([], closed);
+
+      const plans = await restoreWindowOrFresh(platform);
+
+      const workspaces = getWorkspacesSnapshot();
+      const ids = workspaces.workspaces.map((workspace) => workspace.id);
+      expect(ids.every((id) => /^workspace-\d+$/.test(id) && !["workspace-3", "workspace-7"].includes(id))).toBe(true);
+      expect(workspaces.activeId).toBe(ids[1]);
+      expect(Object.keys(plans)).toEqual(ids);
+      const panes = Object.values(plans).flatMap((plan) => plan.initialPaneIds ?? []);
+      expect(panes).toHaveLength(3);
+      expect(panes.every((id) => /^surface-\d+$/.test(id) && !["surface-4", "surface-5", "surface-9"].includes(id))).toBe(true);
+      // On disk before anything else can read the closed window's ids again.
+      const written = saves[saves.length - 1];
+      expect(written.workspaces.map((workspace) => workspace.id)).toEqual(ids);
+      expect(written).not.toHaveProperty("reopened");
+    } finally {
+      resetSurfaceIdPool();
+      resetWorkspaceIdPool();
+    }
   });
 
   it("mints a unique first Workspace id for every fresh Window", async () => {

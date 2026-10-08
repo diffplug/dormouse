@@ -40,6 +40,12 @@ describe('persisted format versions', () => {
     expect(info).toHaveBeenCalledTimes(1);
   });
 
+  it('keeps the mark a window close leaves for Reopen, and adds none', () => {
+    const window = { version: 2, activeWorkspaceId: 'w', workspaces: [{ id: 'w', name: 'W', nameIsAuto: false, session: { version: 4, panes } }] };
+    expect(readPersistedWindow({ ...window, reopened: true })?.reopened).toBe(true);
+    expect(readPersistedWindow(window)).not.toHaveProperty('reopened');
+  });
+
   it('rejects a current Session with a pane missing `untouched`', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     expect(readPersistedSession({ version: 4, panes: [{ id: 'surface-1', title: 'A', cwd: null }] })).toBeNull();

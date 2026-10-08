@@ -157,6 +157,10 @@ export interface PersistedWindow {
   version: typeof PERSISTED_WINDOW_VERSION;
   workspaces: PersistedWorkspace[];
   activeWorkspaceId: WorkspaceId;
+  /** A closed window's snapshot, kept for Reopen with that window's ids: the
+   *  window that boots from it remaps them before restoring
+   *  (`withFreshWindowIds` in `lib/src/components/wall/window-reopen.ts`). */
+  reopened?: true;
 }
 
 /** Default id/name for the single Workspace a fresh Window is created with. */
@@ -351,7 +355,7 @@ export function readPersistedWindow(raw: unknown): PersistedWindow | null {
   const activeWorkspaceId = workspaces.some((ws) => ws.id === value.activeWorkspaceId)
     ? (value.activeWorkspaceId as WorkspaceId)
     : workspaces[0].id;
-  return { version: PERSISTED_WINDOW_VERSION, workspaces, activeWorkspaceId };
+  return { version: PERSISTED_WINDOW_VERSION, workspaces, activeWorkspaceId, ...(value.reopened === true ? { reopened: true } : {}) };
 }
 
 /** Every pane id the Window's Workspaces name, across all of them — what a boot

@@ -3652,8 +3652,10 @@ fn take_arrivals(window: tauri::Window, windows: tauri::State<'_, WindowState>) 
     routing::arrival_payloads(&guard(&windows.arrivals), window.label())
 }
 
-/// A closing window whose close asked nothing leaves its snapshot here, built
-/// with fresh ids, for Reopen (docs/specs/reopen.md); its geometry is the cached box.
+/// A closing window whose close asked nothing leaves its snapshot here, for
+/// Reopen (docs/specs/reopen.md); its geometry is the cached box. The snapshot
+/// keeps the closed window's ids, marked `reopened`: the window that boots from
+/// it remaps them.
 #[tauri::command]
 fn push_closed_window(
     window: tauri::Window,
