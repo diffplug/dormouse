@@ -618,7 +618,7 @@ export default function Hosted() {
             Only founders who tick the box at checkout; it starts unticked, and you can
             take yourself out from your account at any time. Everyone else counts toward
             the number at the end of the row. The pictures are served from this site, so
-            loading the page never tells GitHub or Google you visited.
+            loading the page never asks GitHub or Google for them.
           </FaqEntry>
           <FaqEntry question="What if Dormouse Hosted shuts down?">
             We will stop renewals and refund the unused portion of prepaid subscriptions,

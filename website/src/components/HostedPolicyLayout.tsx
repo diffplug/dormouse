@@ -17,10 +17,7 @@ export default function HostedPolicyLayout({ path, title, sections }: {
         <main className="mx-auto max-w-3xl">
           <p className={`mb-3 font-display text-sm ${MUTED_TEXT_CLASS}`}>Dormouse Hosted</p>
           <h1 className="mb-4 font-display text-[clamp(1.75rem,3vw+0.5rem,2.5rem)]">{title}</h1>
-          <p className={`mb-12 ${MUTED_TEXT_CLASS}`}>
-            Draft for paid launch — not yet effective. Last updated <time dateTime="2026-10-08">October 8, 2026</time>.
-            {" "}The effective date will be announced before these policies take effect.
-          </p>
+          <p className={`mb-12 ${MUTED_TEXT_CLASS}`}>Effective <time dateTime="2026-10-08">October 8, 2026</time></p>
           {sections.map(({ id, title, body }) => (
             <section key={id} aria-labelledby={id} className="mb-10">
               <h2 id={id} className="mb-3 scroll-mt-24 font-display text-2xl">{title}</h2>
