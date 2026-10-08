@@ -51,6 +51,16 @@ Source of truth: `hosted/server/providers.js`; `authPolicy` / `providerBindings`
 
 Source of truth: `App` in `hosted/src/App.tsx`; `restoreTheme` in `hosted/src/main.tsx`.
 
+## Terms acceptance
+
+Continuing past the sign-in notice is how an account agrees to the Hosted terms (`website/src/pages/Terms.tsx` -> "The service").
+
+- **Must show the notice beside every sign-in method**, naming `TERMS_VERSION` and linking the terms and privacy policy without leaving the page.
+- **`TERMS_VERSION` is the policy pages' revision date** and changes with every terms revision.
+- **Must record each account's first acceptance of each version**, after a sign-in that continued past the notice,, current version only.
+
+Source of truth: `termsRoutes` in `hosted/server/terms.ts`; `TERMS_VERSION` in `hosted/server/policy-constants.ts`.
+
 ## Managed voice
 
 An admin-only test slice: Dormouse desktop exchanges a pasted voice token for ElevenLabs speech. The account Worker serves the token routes; the voice Worker serves speak.
@@ -81,7 +91,7 @@ Errors are JSON `{ message }`. Cookie routes answer 401 without a login and 403 
 
 **Must delete ElevenLabs speech history, which keeps each generation's text, from the production voice Worker only**: one pass shortly after each successful speak, and a Cron Trigger every 5 minutes for what that missed. No retention bound is guaranteed (rationale).
 
-- **Must use an ElevenLabs account dedicated to Dormouse voice.** A sweep deletes the whole account's history.
+- **Must use an ElevenLabs service account dedicated to Dormouse voice, with history access isolated from other workspace usage.** A sweep deletes every history item visible to its key (rationale).
 - **Never touch the database or any binding but `ELEVENLABS_API_KEY` in a sweep**, so an idle deployment lets Postgres suspend. Without the key nothing runs; development and previews never sweep.
 - **Must fail the cron invocation when its pass cannot list or any delete fails; the after-speech pass only logs** (rationale).
 

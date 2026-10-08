@@ -6,6 +6,7 @@ import {
   type FormEvent,
 } from "react";
 import {
+  acceptTerms,
   approveEnrollment,
   createVoiceToken,
   getAccounts,
@@ -24,8 +25,36 @@ import {
   type Session,
   type VoiceToken,
 } from "./api";
-import { LOGIN_FRESH_AGE_MS, RECENT_LOGIN_WINDOW } from "../server/policy-constants";
+import {
+  LOGIN_FRESH_AGE_MS,
+  RECENT_LOGIN_WINDOW,
+  TERMS_VERSION,
+} from "../server/policy-constants";
 import { takeEnrollment, type Enrollment } from "./enrollment";
+
+// The terms version the sign-in notice showed when this tab continued past it,
+// kept through a provider's redirect until the account's acceptance is
+// recorded (docs/specs/hosted.md -> "Terms acceptance").
+const CONTINUED_KEY = "dormouse.terms-continued";
+function noteContinued() {
+  try {
+    sessionStorage.setItem(CONTINUED_KEY, TERMS_VERSION);
+  } catch {
+    // Storage blocked: the agreement stands, only its record is lost.
+  }
+}
+/** Records a pending acceptance; a failure leaves it for the next refresh. */
+async function recordContinued() {
+  let version: string | null = null;
+  try {
+    version = sessionStorage.getItem(CONTINUED_KEY);
+  } catch {
+    return;
+  }
+  if (!version) return;
+  await acceptTerms(version);
+  sessionStorage.removeItem(CONTINUED_KEY);
+}
 
 export function App({ enrollment }: { enrollment: Enrollment | null }) {
   const [session, setSession] = useState<Session | null>(null);
@@ -72,6 +101,7 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
           getComputers().catch(() => null),
         ])
       : [[], null, null];
+    if (current) await recordContinued().catch(() => {});
     if (generation !== refreshGeneration.current) return;
     setSession(current);
     setEnabled(providers);
@@ -161,6 +191,7 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
       return;
     }
     void act("verify", async () => {
+      noteContinued();
       await post("sign-in/email-otp", { email: email.trim(), otp: code });
       setCode("");
       setEnterCode(false);
@@ -612,7 +643,10 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
                         key={provider}
                         disabled={!!busy}
                         onClick={() =>
-                          void act(provider, () => social(provider, false))
+                          void act(provider, () => {
+                            noteContinued();
+                            return social(provider, false);
+                          })
                         }
                       >
                         {busy === provider
@@ -622,6 +656,25 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
                     ))}
                   </section>
                 )}
+                <p className="help">
+                  By continuing, you agree to the{" "}
+                  <a
+                    href="https://dormouse.sh/terms/"
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Terms
+                  </a>{" "}
+                  (version {TERMS_VERSION}) and acknowledge the{" "}
+                  <a
+                    href="https://dormouse.sh/privacy/"
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Privacy policy
+                  </a>
+                  .
+                </p>
                 {enrolling && enabled.length > 0 ? (
                   <p className="help">
                     Signing in with a provider leaves this page. Afterwards,

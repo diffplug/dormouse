@@ -5,9 +5,10 @@ import { sitePath } from "../lib/site-meta";
 
 export type PolicySection = { id: string; title: string; body: ReactNode };
 
-export default function HostedPolicyLayout({ path, title, sections }: {
+export default function HostedPolicyLayout({ path, title, applicability, sections }: {
   path: string;
   title: string;
+  applicability: string;
   sections: PolicySection[];
 }) {
   return (
@@ -17,7 +18,7 @@ export default function HostedPolicyLayout({ path, title, sections }: {
         <main className="mx-auto max-w-3xl">
           <p className={`mb-3 font-display text-sm ${MUTED_TEXT_CLASS}`}>Dormouse Hosted</p>
           <h1 className="mb-4 font-display text-[clamp(1.75rem,3vw+0.5rem,2.5rem)]">{title}</h1>
-          <p className={`mb-12 ${MUTED_TEXT_CLASS}`}>Effective September 29, 2026</p>
+          <p className={`mb-12 ${MUTED_TEXT_CLASS}`}>Last updated <time dateTime="2026-10-08">October 8, 2026</time>. {applicability}</p>
           {sections.map(({ id, title, body }) => (
             <section key={id} aria-labelledby={id} className="mb-10">
               <h2 id={id} className="mb-3 scroll-mt-24 font-display text-2xl">{title}</h2>
