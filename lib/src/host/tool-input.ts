@@ -2,8 +2,8 @@ import { realpath, stat } from 'node:fs/promises';
 import { hostname } from 'node:os';
 import { isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { hasControlOrFormatCharacters, hasShellInputControls } from 'dor/commands/shell-quote';
-import { CONTROL_OR_FORMAT_TEXT, resolveDedupeKey, substituteToolTokens, ToolFileError, usesTarget, type ToolEntry } from './tool-registry';
+import { hasShellInputControls } from 'dor/commands/shell-quote';
+import { resolveDedupeKey, substituteToolTokens, ToolFileError, usesTarget, type ToolEntry } from './tool-registry';
 
 /** What one invocation's inputs resolved an entry to: the argv (or literal
  *  shell string) to run, and the rendered dedupe key. */
@@ -74,8 +74,8 @@ export async function resolveToolInput(
   context: { cwd: string; projectRoot: string | null; args: readonly string[] },
 ): Promise<ToolInput> {
   const { args } = context;
-  if (args.some(arg => typeof arg !== 'string' || hasControlOrFormatCharacters(arg))) {
-    throw new ToolFileError(`tool arguments cannot contain ${CONTROL_OR_FORMAT_TEXT}`);
+  if (args.some(arg => typeof arg !== 'string' || hasShellInputControls(arg))) {
+    throw new ToolFileError('tool arguments cannot contain terminal control characters');
   }
   const runList = typeof entry.run === 'string' ? [] : entry.run;
   const runHasTarget = usesTarget(runList);
@@ -90,7 +90,7 @@ export async function resolveToolInput(
   }
   const run = runList.flatMap(arg => arg === '$ARGS' ? [...args] : [substituteToolTokens(arg, substitution, entry.name)]);
   if (!runHasTarget && !runList.includes('$ARGS')) run.push(...args);
-  if (run.some(hasControlOrFormatCharacters)) throw new ToolFileError(`tool arguments cannot contain ${CONTROL_OR_FORMAT_TEXT}`);
+  if (run.some(hasShellInputControls)) throw new ToolFileError('tool arguments cannot contain terminal control characters');
   if (!run[0]?.trim()) throw new ToolFileError('tool argument list must name an executable');
   return { run, key };
 }

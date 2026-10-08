@@ -32,10 +32,12 @@ describe('Tool argv safety', () => {
     expect(() => parse(['viewer', 'a\u009b31m'])).toThrow('terminal control characters');
   });
 
-  it('rejects format characters in arguments and in what substitutions introduce', async () => {
-    await expect(resolveToolInput(entry, { ...context, args: ['file\u202ename'] })).rejects.toThrow('invisible formatting characters');
-    await expect(resolveToolInput({ ...entry, run: ['viewer', '$CWD'] }, { ...context, cwd: '/repo/\u2066x\u2069' }))
-      .rejects.toThrow('invisible formatting characters');
+  // A location, not text a repo wrote: the trust prompt shows its format
+  // characters escaped, and a Persian folder name needs U+200C.
+  it('keeps a format character an argument or a substituted path carries', async () => {
+    expect((await resolveToolInput(entry, { ...context, args: ['file\u202ename'] })).run).toEqual(['viewer', 'file\u202ename']);
+    expect((await resolveToolInput({ ...entry, run: ['viewer', '$CWD'] }, { ...context, cwd: '/\u067e\u0631\u0648\u0698\u0647\u200c\u0647\u0627' })).run)
+      .toEqual(['viewer', '/\u067e\u0631\u0648\u0698\u0647\u200c\u0647\u0627']);
   });
 
   it('rejects controls in file inputs and their resolving directory', async () => {

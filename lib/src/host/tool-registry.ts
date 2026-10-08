@@ -10,7 +10,7 @@ import { isMap, isScalar, parseDocument as parseYamlDocument, type Document } fr
 import { builtinHandler, FOLDER_MATCH_SUFFIX } from 'dor-tools-builtin/file-viewer-format';
 import { isRecord } from '../lib/is-record';
 import { truncateText } from '../lib/osc-sanitize';
-import { hasControlOrFormatCharacters } from 'dor/commands/shell-quote';
+import { CONTROL_OR_FORMAT_TEXT, hasControlOrFormatCharacters } from 'dor/commands/shell-quote';
 import { isToolRender, TOOL_RENDERS, type ToolRender } from '../lib/platform/tool-types';
 import type { BrowserViewportSelection } from 'dor-lib-common/browser-viewports';
 import { parseBrowserConfig, parseViewportSelection, type BrowserConfigLayer } from './browser-config';
@@ -65,9 +65,6 @@ export interface ToolFile {
 }
 
 export class ToolFileError extends Error {}
-
-/** How a refusal names what `hasControlOrFormatCharacters` finds. */
-export const CONTROL_OR_FORMAT_TEXT = 'terminal control characters or invisible formatting characters';
 
 /** Parse the shared YAML document before choosing which section to validate.
  * A malformed document is always an error; browser-only reads deliberately do
@@ -224,14 +221,13 @@ export function parseToolFile(
       if (!run.length || !run.every(arg => typeof arg === 'string') || !run[0].trim()) {
         throw new ToolFileError(`${where}: 'run' must be a non-empty argument list`);
       }
+      if (run.some(hasControlOrFormatCharacters)) throw new ToolFileError(`${where}: run cannot contain ${CONTROL_OR_FORMAT_TEXT}`);
       validateSubstitutions(run.filter(arg => arg !== '$ARGS'), scope, where);
     } else if (typeof run !== 'string' || run.trim() === '') {
       throw new ToolFileError(`${where}: 'run' is required and must be a non-empty string or argument list`);
-    }
-    // A string `run` too: the trust prompt shows it, and the shell's line
-    // editor acts on what it hides (`docs/specs/security-local.md` -> Dor Tool
-    // configuration).
-    if ((typeof run === 'string' ? [run.trim()] : run as string[]).some(hasControlOrFormatCharacters)) {
+    } else if (hasControlOrFormatCharacters(run.trim())) {
+      // A string `run` too: the trust prompt shows it, and the shell's line
+      // editor acts on what it hides.
       throw new ToolFileError(`${where}: run cannot contain ${CONTROL_OR_FORMAT_TEXT}`);
     }
 

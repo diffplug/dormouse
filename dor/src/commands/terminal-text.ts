@@ -1,10 +1,10 @@
 // Browser-safe: the website playground's dor prints with these.
-import { FORMAT_CHARACTERS } from './shell-quote.js';
+import { CONTROL_CHARACTERS, FORMAT_CHARACTERS } from './shell-quote.js';
 import type { ToolSurfaceResponse, VersionMetadata } from './types.js';
 
-const TERMINAL_CONTROLS = /[\x00-\x1f\x7f-\x9f]/g;
-const CONTROL_OR_FORMAT = new RegExp(`[\\x00-\\x1f\\x7f-\\x9f${FORMAT_CHARACTERS}]`, 'g');
-/** What `JSON.stringify` leaves unescaped of the set above. */
+const TERMINAL_CONTROLS = new RegExp(`[${CONTROL_CHARACTERS}]`, 'g');
+const CONTROL_OR_FORMAT = new RegExp(`[${CONTROL_CHARACTERS}${FORMAT_CHARACTERS}]`, 'g');
+/** What `JSON.stringify` leaves unescaped of the set above: it escapes C0. */
 const JSON_UNESCAPED = new RegExp(`[\\x7f-\\x9f${FORMAT_CHARACTERS}]`, 'g');
 export const escapeControl = (char: string) => `\\u${char.charCodeAt(0).toString(16).padStart(4, '0')}`;
 

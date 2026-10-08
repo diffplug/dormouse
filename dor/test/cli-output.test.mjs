@@ -2072,8 +2072,9 @@ test('tool --list takes no name, command, or placement flag', async () => {
 });
 
 // Controls, and the format characters that reorder or hide text: what a person
-// reads before approving a Tool must be what is there.
-const HIDDEN = /[\x00-\x09\x0b-\x1f\x7f-\x9f\u061c\u200b-\u200f\u202a-\u202e\u2060\u2066-\u2069\ufeff]/;
+// reads before approving a Tool must be what is there. Spelled out rather than
+// built from `FORMAT_CHARACTERS`, so narrowing that set reddens this.
+const HIDDEN = /[\x00-\x09\x0b-\x1f\x7f-\x9f\u061c\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]/;
 
 test('tool --list escapes control and format characters in repo text, in every output', async () => {
   const listing = {

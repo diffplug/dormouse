@@ -1,8 +1,6 @@
-import { hasControlOrFormatCharacters } from 'dor/commands/shell-quote';
+import { CONTROL_OR_FORMAT_TEXT, hasControlOrFormatCharacters, hasShellInputControls } from 'dor/commands/shell-quote';
 
 const BLOCKED_EXTERNAL_URI_PROTOCOLS = new Set(['javascript:', 'data:', 'blob:', 'about:']);
-/** C0, DEL, and C1 controls. */
-const CONTROL_CHARACTER_RE = /[\x00-\x1f\x7f-\x9f]/;
 /** One DNS label, the source both host-shape patterns below are built from. */
 const DNS_LABEL = '[a-z0-9](?:[a-z0-9-]*[a-z0-9])?';
 
@@ -33,7 +31,7 @@ export function inspectExternalUri(input: string): ExternalUriDecision {
   // Format characters too: the dialog would show a URL other than the one
   // that opens.
   if (hasControlOrFormatCharacters(trimmed)) {
-    return blocked(input, trimmed, null, 'The URL contains control or invisible formatting characters.');
+    return blocked(input, trimmed, null, `The URL contains ${CONTROL_OR_FORMAT_TEXT}.`);
   }
 
   try {
@@ -104,7 +102,7 @@ export function localFileLinkPreviewPath(uri: string, displayText: string): stri
   const link = decodeFileLink(uri);
   if (!link || (link.host !== '' && !PLAIN_HOSTNAME_RE.test(link.host))) return null;
   const { path } = link;
-  if (CONTROL_CHARACTER_RE.test(path)) return null;
+  if (hasShellInputControls(path)) return null;
   const names = (text: string) => text !== '' && (path === text || path.endsWith(`/${text}`));
   const text = displayText.trim();
   return names(text) || names(text.replace(LS_CLASSIFIER_RE, '')) ? path : null;
