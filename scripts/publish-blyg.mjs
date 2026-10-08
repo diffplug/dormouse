@@ -40,7 +40,7 @@ export function publicationPlan(markdown, releases) {
       const entry = entries.get(release.tag_name.slice(1));
       if (!entry) throw new Error(`Published ${release.tag_name} is missing from CHANGELOG.md`);
       const { version, date, body } = entry;
-      return [{ version, content_md: `# Dormouse ${version}\n\nReleased ${date}. [Download and release assets](https://github.com/${REPOSITORY}/releases/tag/v${version}).\n\n${body}\n\n---\n\n🔌 VS Code extension only · 🖥️ Desktop app only · Unmarked changes apply to both.\n` }];
+      return [{ version, content_md: `# Dormouse ${version}\n\nReleased ${date}. [Download](https://github.com/${REPOSITORY}/releases/tag/v${version}).\n\n${body}\n\n---\n\n🔌 VS Code extension only · 🖥️ Desktop app only · Unmarked changes apply to both.\n` }];
     });
 }
 
