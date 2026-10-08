@@ -137,7 +137,7 @@ export interface BurrowLink {
  * is the common case, so the two never cost twice the bytes over a transport
  * (`docs/specs/transport.md`). The same pair crosses every host seam and the
  * remote wire — `ProcessedPtyChunk` in
- * `lib/src/remote/burrow/burrow-surface-provider.ts`, `TerminalDataEvent` in
+ * `lib/src/lib/processed-pty-stream.ts`, `TerminalDataEvent` in
  * `remote-lib-common/src/remote/wire.ts` — under the same omitted/present rule.
  */
 export interface PtyDataDetail {

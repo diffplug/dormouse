@@ -32,7 +32,7 @@ export type PeerLinkResponse =
   | { kind: 'result'; id: string; results: unknown[] }
   | { kind: 'subscribed'; id: string; ptyId: string }
   // `textData` rides the frame under the `ProcessedPtyChunk` rule: omitted when
-  // it equals `data` (`lib/src/remote/burrow/burrow-surface-provider.ts`).
+  // it equals `data` (`lib/src/lib/processed-pty-stream.ts`).
   | { kind: 'data'; ptyId: string; data: string; textData?: string }
   | { kind: 'exit'; ptyId: string; exitCode: number }
   | { kind: 'notify' }

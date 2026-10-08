@@ -28,8 +28,8 @@ import { DOOR_TAB_HEIGHT_PX, DOOR_TAB_MAX_WIDTH_PX } from "dormouse-lib/componen
 /** The cursor probe is an IPC round trip; a pointermove is per frame. */
 const HIT_TEST_THROTTLE_MS = 60;
 /** How far the pointer must travel inside the target before its caret is worth
- *  redrawing. A tab is `DOOR_TAB_MAX_WIDTH_PX` at most, so this cannot skip a
- *  whole slot. */
+ *  redrawing. A tab is at least `DOOR_TAB_MIN_WIDTH_PX` wide, so this cannot skip
+ *  a whole slot. */
 const HOVER_BUCKET_PX = 12;
 
 /** Where the cursor is, in the hit window's own logical client space. */

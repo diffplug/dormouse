@@ -399,7 +399,8 @@ export class PocketClient {
   #ws: PocketSocket | null = null;
   /** The open relay socket's heartbeat, or null while none is open. */
   #heartbeat: RelayHeartbeat | null = null;
-  /** Written only through {@link #setSession}, which keeps storage in step. */
+  /** Changed after construction only by {@link #setSession} and
+   *  {@link #forgetSession}, which keep storage in step. */
   #session: PocketSession | null;
 
   constructor(deps: PocketClientDeps) {
