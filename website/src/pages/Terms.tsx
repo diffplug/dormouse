@@ -71,6 +71,10 @@ export const TERMS_SECTIONS: PolicySection[] = [
     <p>To the extent permitted by law, DiffPlug LLC is not liable for indirect or consequential losses arising from the service. Its total aggregate liability for all claims arising out of or relating to these terms or Hosted is limited to the Hosted subscription fees you paid, including through our payment processor, in the twelve months preceding the first event giving rise to the claims. This is one aggregate limit, not a separate limit for each claim.</p>
     <p>The exclusions and limit do not reduce refunds owed under these terms, or exclude or limit liability for fraud, willful misconduct, gross negligence, death or personal injury caused by negligence, or any liability or consumer right that cannot lawfully be excluded or limited. You remain responsible for keeping independent copies of information you need.</p>
   </> },
+  { id: "governing-law", title: "Governing law and severability", body: <>
+    <p>California law governs these terms. If you are a consumer, you also retain the protections of mandatory law in the country where you habitually reside.</p>
+    <p>If a provision of these terms is unenforceable, the remaining provisions continue to apply to the extent permitted by law.</p>
+  </> },
   { id: "changes", title: "Changes and contact", body: <>
     <p>We will identify the effective date of changes on this page. We will give at least 30 days’ advance notice by email of material changes, except when an urgent security or legal need requires earlier action. Changes do not apply retroactively to disputes. If a material change takes effect during a prepaid term and you do not accept it, you may end your subscription and receive a refund for the unused portion. We will obtain renewed agreement where required by law.</p>
     <p>We may change monthly and yearly subscription prices only from a future renewal, after notice of the new price and how to cancel. We will give the notices required where you live, including applicable renewal reminders, annual reminders, and price-change notices. A price change never changes a founder’s locked base subscription price.</p>
