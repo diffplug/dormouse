@@ -1,0 +1,39 @@
+name: Publish Dormouse Blyg
+
+on:
+  release:
+    types: [published]
+  push:
+    branches: [main]
+    paths: [CHANGELOG.md]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: blyg-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.repository == 'diffplug/dormouse' && (github.ref == 'refs/heads/main' || (github.event_name == 'release' && startsWith(github.ref, 'refs/tags/v')))
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: blyg-publish
+    steps:
+      # Release tags can predate this publisher. Always use reviewed main for
+      # publisher code and the canonical changelog, including later corrections.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: package.json
+      - run: node --test scripts/publish-blyg.test.mjs
+      - name: Publish and pin released changelog entries
+        run: node scripts/publish-blyg.mjs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BLYG_API_TOKEN: ${{ secrets.BLYG_API_TOKEN }}

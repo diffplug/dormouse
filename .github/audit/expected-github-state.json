@@ -40,6 +40,10 @@
   },
   "botCollaborator": { "login": "dormouse-bot", "forbiddenRoles": ["admin", "maintain"] },
   "environments": {
+    "blyg-publish": {
+      "policies": [{ "type": "branch", "name": "main" }, { "type": "tag", "name": "v*" }],
+      "secrets": ["BLYG_API_TOKEN"]
+    },
     "hosted-preview": {
       "policies": [{ "type": "branch", "name": "main" }, { "type": "branch", "name": "refs/pull/*/merge" }],
       "requiredReviewers": true,

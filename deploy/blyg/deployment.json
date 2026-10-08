@@ -1,0 +1,17 @@
+{
+  "deployedAt": "2026-10-08",
+  "studioVersion": "0.36.1",
+  "initialWorkerVersion": "a444cea0-f883-41a7-8b66-2b34bc8dd22c",
+  "publicUrl": "https://blyg.dormouse.sh/",
+  "verified": {
+    "publicPage": 200,
+    "manifest": 200,
+    "rss": 200,
+    "archiveIndex": 200,
+    "anonymousSettings": 401,
+    "webmentionAdvertised": true,
+    "ownerLogin": true,
+    "publishedReleases": 16,
+    "pinnedRevisions": 16
+  }
+}
