@@ -1,4 +1,4 @@
-import { surfaceIdFor, surfaceIdNumber } from 'dor/protocol';
+import { maxSurfaceIdNumber, surfaceIdFor } from 'dor/protocol';
 import { createIdPool } from './id-pool';
 import type { PersistedSession } from './session-types';
 import { registry } from './terminal-store';
@@ -28,10 +28,11 @@ export function installSurfaceIdPool(
   return pool.install((count) => reserve(count, floor));
 }
 
-/** Keep the page's own counter above `ids`, the Surfaces a restore brings
- *  back; a host's counter is above them already (the reservation's floor). */
-export function seedSurfaceIds(ids: Iterable<string>): void {
-  for (const id of ids) localSequence = Math.max(localSequence, surfaceIdNumber(id) ?? 0);
+/** Keep the page's own counter above `floor`, the highest `surface-<n>` a
+ *  restore brings back; a host's counter is above it already (the
+ *  reservation's floor). */
+export function seedSurfaceIds(floor: number): void {
+  localSequence = Math.max(localSequence, floor);
 }
 
 /** Back to the page's own counter, from `surface-1` (tests). */
@@ -72,9 +73,7 @@ export async function surfaceIdMinter(count: number): Promise<() => string> {
 export function maxSurfaceNumber(sessions: Iterable<PersistedSession>): number {
   let max = 0;
   for (const session of sessions) {
-    for (const { id } of [...session.panes, ...(session.doors ?? [])]) {
-      max = Math.max(max, surfaceIdNumber(id) ?? 0);
-    }
+    max = Math.max(max, maxSurfaceIdNumber([...session.panes, ...(session.doors ?? [])].map(({ id }) => id)));
   }
   return max;
 }

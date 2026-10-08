@@ -82,8 +82,9 @@ let workspaceSequence = 0;
  *  minted: a bare Wall's `DEFAULT_WORKSPACE_ID` is `workspace-1`, which beside
  *  VS Code's random ids would otherwise make one store both. */
 // Small, so a launch burns at most 4 numbers (see `createIdPool`): Workspaces
-// are created one gesture or `dor` call at a time, and a refill is one host
-// round trip of a few ms. A window's Reopen reserves through `workspaceIdMinter`.
+// are created one gesture or `dor` call at a time, and a refill, after each
+// one, is one host round trip of a few ms. A window's Reopen reserves through
+// `workspaceIdMinter`.
 const idPool = createIdPool(4, 3, 'workspace-store');
 
 /** Give this Window a host that mints ids. Resolves once the first block is

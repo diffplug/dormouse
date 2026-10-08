@@ -56,7 +56,7 @@ describe('closing one window of several', () => {
     }
   });
 
-  it('asks, and leaves no record, when any Workspace would ask', async () => {
+  it('asks, and leaves no record, when any Workspace would ask', () => {
     twoWorkspaces('ws-2');
     expect(windowNeedsCloseConfirmation()).toBe(true);
     expect(windowReopenSnapshot()).toBeNull();
@@ -81,7 +81,7 @@ describe('closing one window of several', () => {
     expect(snapshot.workspaces[1].session.panes[0]).toMatchObject({ id: 'pane-ws-2', cwd: '/repo', title: 'shell', untouched: true });
   });
 
-  it('keeps a pin, which a reopened window restores', async () => {
+  it('keeps a pin, which a reopened window restores', () => {
     twoWorkspaces(null);
     setWorkspacePinned('ws-2', true);
     const snapshot = windowReopenSnapshot()!;

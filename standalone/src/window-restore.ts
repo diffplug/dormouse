@@ -91,11 +91,11 @@ export async function restoreWindowOrFresh(platform: PlatformAdapter): Promise<W
   try {
     // A window Reopen built still holds the closed one's ids (docs/specs/reopen.md);
     // `init()` installed the pools this remap mints from.
-    const restoring = saved?.reopened ? await withFreshWindowIds(saved) : saved;
-    const plans = await restoreWindow(platform, restoring);
-    // Its fresh ids reach disk at once: a reload that read the closed window's
-    // again would remap over the Sessions this boot just started.
-    if (restoring !== saved) await flushWindowSession();
+    const plans = await restoreWindow(platform, saved?.reopened ? await withFreshWindowIds(saved) : saved);
+    // Its fresh ids head for disk at once (the write is issued synchronously;
+    // render need not wait on it): a reload that read the closed window's again
+    // would remap over the Sessions this boot just started.
+    if (saved?.reopened) void flushWindowSession();
     return plans;
   } catch (err) {
     console.error("[dormouse] Could not restore the persisted Window; starting fresh", err);

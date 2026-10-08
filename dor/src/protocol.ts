@@ -199,6 +199,13 @@ export function surfaceIdNumber(id: string): number | null {
   return idNumber(SURFACE_ID_PREFIX, id);
 }
 
+/** The highest `surface-<n>` number among `ids`, else 0. */
+export function maxSurfaceIdNumber(ids: Iterable<string>): number {
+  let max = 0;
+  for (const id of ids) max = Math.max(max, surfaceIdNumber(id) ?? 0);
+  return max;
+}
+
 /** Creation order: numbered ids by number, then every other id, ties by id. */
 export function compareSurfaceIds(a: string, b: string): number {
   const na = surfaceIdNumber(a);

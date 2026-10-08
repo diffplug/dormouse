@@ -114,6 +114,11 @@ export function getBufferedPtys(): Map<string, { alive: boolean; exitCode?: numb
   return result;
 }
 
+/** Every PTY id this extension host holds, alive or exited but not killed. */
+export function ptyIds(): Iterable<string> {
+  return ptyBuffers.keys();
+}
+
 /**
  * Every PTY this extension host still has alive. An exited one stays buffered
  * until `kill()`, but can neither take a `^C` nor exit again, so no teardown

@@ -16,7 +16,7 @@
 import { mkdir, readFile, rm, stat } from 'node:fs/promises';
 import * as path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { surfaceIdFor, surfaceIdNumber } from 'dor/protocol';
+import { surfaceIdFor } from 'dor/protocol';
 import { writeJsonAtomic } from '../../lib/src/host/atomic-json-file';
 import { createSerialQueue } from '../../lib/src/host/remote/serial-queue';
 import { log } from './log';
@@ -25,11 +25,12 @@ const FILE = 'surface-ids.json';
 const VERSION = 1;
 const MAX_BLOCK = 64;
 /** A lock older than this was left by an extension host that died holding it:
- *  a holder keeps it for one read and one flushed write. */
-const LOCK_STALE_MS = 5_000;
+ *  a holder keeps it for one read and one flushed write, a few ms. Short,
+ *  because a webview's boot waits on its first reservation. */
+const LOCK_STALE_MS = 1_000;
 const LOCK_RETRY_MS = 10;
 /** Past the stale age, so a dead holder's lock is always broken first. */
-const LOCK_ATTEMPTS = 1_000;
+const LOCK_ATTEMPTS = 200;
 
 export interface SurfaceIdAllocator {
   /** `count` ids (clamped to 1..64), each numbered above `floor` and above every
@@ -78,6 +79,9 @@ export function createSurfaceIdAllocator(dir: string | null, logger: AllocatorLo
   // One at a time within this process; the lock orders it against the others.
   const serialize = createSerialQueue();
 
+  /** Created once; a failure shows up as the lock's or the write's. */
+  let storageReady: Promise<unknown> | null = null;
+
   async function persistedNext(file: string): Promise<number> {
     try {
       const parsed: unknown = JSON.parse(await readFile(file, 'utf8'));
@@ -107,12 +111,7 @@ export function createSurfaceIdAllocator(dir: string | null, logger: AllocatorLo
 
   async function reserveInFile(file: string, n: number, above: number): Promise<number> {
     const storage = path.dirname(file);
-    try {
-      await mkdir(storage, { recursive: true, mode: 0o700 });
-    } catch (error) {
-      logger.error(`[surface-ids] create ${storage}: ${String(error)}; the counter stays in memory`);
-      return take(n, above, 0);
-    }
+    await (storageReady ??= mkdir(storage, { recursive: true, mode: 0o700 }).catch(() => {}));
     return withLock(`${file}.lock`, logger, async () => {
       const first = take(n, above, await persistedNext(file));
       try {
@@ -135,13 +134,6 @@ let allocator = createSurfaceIdAllocator(null, log);
 /** Activation: persist the install's counter under `dir` (`globalStorageUri`). */
 export function initSurfaceIds(dir: string | null): void {
   allocator = createSurfaceIdAllocator(dir, log);
-}
-
-/** The highest `surface-<n>` number among `ids`, else 0. */
-export function highestSurfaceNumber(ids: Iterable<string>): number {
-  let max = 0;
-  for (const id of ids) max = Math.max(max, surfaceIdNumber(id) ?? 0);
-  return max;
 }
 
 export function reserveSurfaceIds(count: number, floor: number): Promise<string[]> {

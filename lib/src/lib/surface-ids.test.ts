@@ -66,8 +66,8 @@ describe('mintSurfaceId', () => {
   });
 
   it('counts in the page above the Surfaces a restore seeded, never back down', () => {
-    seedSurfaceIds(['surface-12', 'pane-a', 'surface-x']);
-    seedSurfaceIds(['surface-3']);
+    seedSurfaceIds(12);
+    seedSurfaceIds(3);
     expect(mintSurfaceId()).toBe('surface-13');
   });
 });

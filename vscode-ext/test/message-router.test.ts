@@ -63,6 +63,7 @@ vi.mock('../src/pty-manager', async (importOriginal) => ({
   },
   spawn: (id: string) => { ptys.buffered.set(id, { alive: true }); },
   getBufferedPtys: () => new Map(ptys.buffered),
+  ptyIds: () => ptys.buffered.keys(),
   getCwd: async (id: string) => {
     ptys.cwdAsked.push(id);
     await ptys.cwdWait;

@@ -20,7 +20,8 @@ import { dorWorkspaceRefusal } from './dor-workspace-guard';
 import { runBrowserRequest } from './agent-browser-host';
 import { createIframeProxyUrl, releaseIframeProxyLease } from './iframe-proxy-host';
 import { toolControl } from './tool-host';
-import { highestSurfaceNumber, reserveSurfaceIds } from './surface-ids';
+import { reserveSurfaceIds } from './surface-ids';
+import { maxSurfaceIdNumber } from 'dor/protocol';
 import type { ToolHostRequest } from '../../lib/src/lib/platform/types';
 import { ASK_BUDGET_MS } from '../../lib/src/host/remote/service-protocol';
 import { configurePeerLink, remoteNotifyPeerChange } from './peer-link';
@@ -630,7 +631,7 @@ export function attachRouter(
       case 'surface:reserveIds':
         // Above every PTY this extension host holds, too: a sibling panel's
         // restored Surfaces are here before that panel reserves with its floor.
-        void reserveSurfaceIds(msg.count, Math.max(msg.floor, highestSurfaceNumber(ptyManager.getBufferedPtys().keys()))).then((ids) => {
+        void reserveSurfaceIds(msg.count, Math.max(msg.floor, maxSurfaceIdNumber(ptyManager.ptyIds()))).then((ids) => {
           post({ type: 'surface:reservedIds', ids, requestId: msg.requestId } satisfies ExtensionMessage);
         });
         break;

@@ -208,6 +208,7 @@ const invokeMap = {
 const idsFile = path.join(repoRoot, 'node_modules', '.cache', 'dormouse-innerdogfood', 'ids.json');
 const ids = loadIds();
 function loadIds() {
+  mkdirSync(path.dirname(idsFile), { recursive: true });
   try {
     const { workspace, surface } = JSON.parse(readFileSync(idsFile, 'utf8'));
     if (Number.isSafeInteger(workspace) && Number.isSafeInteger(surface)) return { workspace: Math.max(2, workspace), surface: Math.max(1, surface) };
@@ -217,7 +218,6 @@ function loadIds() {
   return { workspace: 2, surface: 1 };
 }
 function saveIds() {
-  mkdirSync(path.dirname(idsFile), { recursive: true });
   const tmp = `${idsFile}.${process.pid}.tmp`;
   writeFileSync(tmp, JSON.stringify(ids));
   renameSync(tmp, idsFile);
