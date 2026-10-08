@@ -33,7 +33,6 @@ export function stubWallActions(overrides: Partial<WallActions> = {}): WallActio
     onFinishRename: vi.fn(() => ({ accepted: true })),
     onCancelRename: vi.fn(),
     onSwapRenderMode: vi.fn(),
-    resolveSurfaceRef: vi.fn((id: string) => id),
     onPinPreview: vi.fn(),
     onBreakTool: vi.fn(),
     ...overrides,

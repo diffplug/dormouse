@@ -20,7 +20,7 @@ The target is one of:
                  dev/infra server, which is http far more often than not.
   :<port>        Sugar for http://localhost:<port> (e.g. :5173).
   surface:<ref>  A terminal Surface handle (surface:N, surface:self,
-                 surface:focused, or a stable id). Dormouse scans that terminal's
+                 surface:focused, or a Surface id). Dormouse scans that terminal's
                  listening ports and opens http://localhost:<port>/; it fails if
                  the terminal owns zero or multiple ports.
 
@@ -31,7 +31,7 @@ Text output:
 JSON output:
   {
     "status": "created",
-    "surface_id": "pane-abc",
+    "surface_id": "surface-3",
     "surface_ref": "surface:3",
     "url": "http://localhost:5173",
     "minimized": false

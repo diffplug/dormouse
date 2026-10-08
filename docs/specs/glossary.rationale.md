@@ -10,4 +10,4 @@
 
 ## Invariants
 
-**Why replacement keeps the `surface:N` ref but not the id.** `replaceSurface` replaces the Lath leaf, so its raw Surface id changes while the CLI ref continues addressing the replacement. Agent-browser headed/headless relaunches keep the same leaf and id; a minimized failed-connect rollback can also change render mode through a params update. Thus render mode alone cannot determine identity continuity.
+**Why render mode alone cannot determine identity continuity.** `replaceSurface` replaces the Lath leaf, so its Surface id, and the ref derived from it, change. Agent-browser headed/headless relaunches keep the same leaf and id; a minimized failed-connect rollback can also change render mode through a params update.

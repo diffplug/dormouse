@@ -81,9 +81,6 @@ export interface WallActions {
   onOpenBrowserPane?: (id: string, url: string) => void;
   /** A browser Surface's first launch failed: apply its `launchFallback`. */
   onBrowserLaunchFailed?: (id: string, error: string) => void;
-  /** The stable `surface:N` ref for a pane/door id (minted lazily, exactly as
-   *  `dor list` assigns refs). Used by the pane context menu to show the handle. */
-  resolveSurfaceRef: (id: string) => string;
   /** Resolve a pending tool's approval: grant and start it, or close its pane
    *  (docs/specs/dor-tool.md -> Trust). */
   onResolveToolApproval: (id: string, choice: 'upstream' | 'folder' | 'decline' | 'retry') => void;
@@ -111,7 +108,6 @@ export const WallActionsContext = createContext<WallActions>({
   onCancelRename: () => {},
   onSwapRenderMode: () => {},
   onOpenBrowserPane: () => {},
-  resolveSurfaceRef: (id: string) => id,
   onResolveToolApproval: () => {},
 });
 

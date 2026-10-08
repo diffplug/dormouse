@@ -2,7 +2,7 @@ import { isToolKeyScope, isToolRender } from './platform/tool-types';
 import { isBrowserViewportSetting } from 'dor-lib-common/browser-viewports';
 import { normalizeAlertDeliveryOverrides, type AlertDeliveryOverrides } from './alert-delivery-model';
 import type { PlatformAdapter } from './platform/types';
-import { browserPersistedPane, isToolCommandArgv, readPersistedSession, toPersistedAlertState, type PersistedDoor, type PersistedPane, type PersistedSession, type PersistedSurfaceRefs, type PersistedToolMetadata, type PersistedSurfaceType } from './session-types';
+import { browserPersistedPane, isToolCommandArgv, readPersistedSession, toPersistedAlertState, type PersistedDoor, type PersistedPane, type PersistedSession, type PersistedToolMetadata, type PersistedSurfaceType } from './session-types';
 import { getActivity, getLivePersistedAlertState, getTerminalPaneState, isUntouched } from './terminal-registry';
 import { UNNAMED_PANEL_TITLE } from './terminal-state';
 import { isToolReaped } from './tool-reap-store';
@@ -82,17 +82,13 @@ export async function buildPersistedSession(
   // The native Lath persisted layout (docs/specs/tiling-engine.md → "Persistence").
   // The only layout Dormouse writes.
   lathLayout?: unknown,
-  surfaceRefs?: PersistedSurfaceRefs,
-  // The Workspace's next `surface:N` counter, persisted independently of
-  // `surfaceRefs` so pruned (killed) entries never cause a number to be reused.
-  surfaceRefsNext?: number,
   previous?: PersistedSession | null,
   options: SaveOptions = {},
 ): Promise<PersistedSession> {
   // One probe for the whole set: a terminal pane's cwd is the only field here
   // that costs a host round trip.
   const cwds = await probeCwds(platform, cwdSurfaceIds(panes, doors), options.probeCwd !== false);
-  return assemblePersistedSession(panes, doors, lathLayout, surfaceRefs, surfaceRefsNext, previous, cwds, options.alertDelivery);
+  return assemblePersistedSession(panes, doors, lathLayout, previous, cwds, options.alertDelivery);
 }
 
 /**
@@ -104,8 +100,6 @@ export function assemblePersistedSession(
   panes: SavePaneInput[],
   doors: PersistedDoor[],
   lathLayout: unknown,
-  surfaceRefs: PersistedSurfaceRefs | undefined,
-  surfaceRefsNext: number | undefined,
   previous: PersistedSession | null | undefined,
   cwds: Record<string, string | null> | null,
   alertDeliveryOverrides?: AlertDeliveryOverrides,
@@ -168,8 +162,6 @@ export function assemblePersistedSession(
     panes: persisted,
     doors: persistedDoors,
     ...(lathLayout !== undefined ? { lathLayout } : {}),
-    ...(surfaceRefs && Object.keys(surfaceRefs).length > 0 ? { surfaceRefs } : {}),
-    ...(surfaceRefsNext !== undefined && surfaceRefsNext > 1 ? { surfaceRefsNext } : {}),
   };
 }
 
@@ -180,14 +172,12 @@ export async function saveSession(
   panes: SavePaneInput[],
   doors: PersistedDoor[] = [],
   lathLayout?: unknown,
-  surfaceRefs?: PersistedSurfaceRefs,
-  surfaceRefsNext?: number,
   /** Defaults to the platform's own slot; a Workspace substitutes its own. */
   sink?: SaveSink,
   options: SaveOptions = {},
 ): Promise<void> {
   const previous = sink ? sink.previous() : readPersistedSession(platform.getState());
-  const session = await buildPersistedSession(platform, panes, doors, lathLayout, surfaceRefs, surfaceRefsNext, previous, options);
+  const session = await buildPersistedSession(platform, panes, doors, lathLayout, previous, options);
   if (sink) sink.publish(session);
   else platform.saveState(session);
 }

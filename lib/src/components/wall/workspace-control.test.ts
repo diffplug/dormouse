@@ -454,7 +454,7 @@ describe('surface.list --all', () => {
     const first = getWorkspacesSnapshot().workspaces[0].id;
     createWorkspace({ id: 'ws-2', name: 'build', activate: false });
     handleFor(first, { handleDorControl: listing(terminalRows('a', ['surface:1'])) });
-    const second = listing(terminalRows('b', ['surface:1', 'surface:2']));
+    const second = listing(terminalRows('b', ['surface:2', 'surface:3']));
     handleFor('ws-2', { handleDorControl: second });
 
     const detail = request('surface.list', { scope: 'all' });
@@ -463,8 +463,8 @@ describe('surface.list --all', () => {
     const result = answer(detail) as { surfaces: Array<{ ref: string; workspaceRef: string }>; workspaces: unknown[] };
     expect(result.surfaces.map((surface) => [surface.workspaceRef, surface.ref])).toEqual([
       ['workspace:1', 'surface:1'],
-      ['workspace:2', 'surface:1'],
       ['workspace:2', 'surface:2'],
+      ['workspace:2', 'surface:3'],
     ]);
     expect(result.workspaces).toHaveLength(2);
     // Each Wall is asked for its own Workspace: the caller's container target
@@ -478,7 +478,7 @@ describe('surface.list --all', () => {
     // in the Workspace the user is looking at.
     createWorkspace({ id: 'ws-2', name: 'build', activate: true });
     handleFor(first, { handleDorControl: listing(terminalRows('a', ['surface:1', 'surface:2'])) });
-    handleFor('ws-2', { handleDorControl: listing(terminalRows('b', ['surface:1'])) });
+    handleFor('ws-2', { handleDorControl: listing(terminalRows('b', ['surface:3'])) });
 
     const detail = request('surface.list', { scope: 'all' });
     await listAllWorkspaceSurfaces(detail);
@@ -487,7 +487,7 @@ describe('surface.list --all', () => {
     expect(result.surfaces.map((surface) => [surface.workspaceRef, surface.ref, surface.focused])).toEqual([
       ['workspace:1', 'surface:1', false],
       ['workspace:1', 'surface:2', false],
-      ['workspace:2', 'surface:1', true],
+      ['workspace:2', 'surface:3', true],
     ]);
   });
 

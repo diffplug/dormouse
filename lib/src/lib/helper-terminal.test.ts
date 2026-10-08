@@ -53,7 +53,7 @@ describe('helper lifecycle', () => {
     vi.spyOn(labs, 'isDelayedKillEnabled').mockReturnValue(true);
     try {
       const old = await openHelper('parent');
-      await resetHelper('parent', { workspaceId: 'ws', title: 'shell', ref: 'surface:1' });
+      await resetHelper('parent', { workspaceId: 'ws', title: 'shell' });
       expect(registry.has(old.id)).toBe(true);
       expect(pending.getPendingKills().map(kill => [kill.kind, kill.id])).toEqual([['helper', old.id]]);
       // The host owns one helper per parent: the old one's claim goes before the fresh one spawns.
@@ -86,7 +86,7 @@ describe('helper lifecycle', () => {
         if (request.op === 'promote') throw new Error('timed out');
         return { home: '/home/user', command: 'git status', busy: false };
       });
-      await expect(resetHelper('parent', { workspaceId: 'ws', title: 'shell', ref: 'surface:1' })).rejects.toThrow('timed out');
+      await expect(resetHelper('parent', { workspaceId: 'ws', title: 'shell' })).rejects.toThrow('timed out');
       expect(pending.getPendingKills().map(kill => [kill.kind, kill.id])).toEqual([['helper', old.id]]);
       await pending.finalizePendingKills();
       expect(registry.has(old.id)).toBe(false);
@@ -102,7 +102,7 @@ describe('helper lifecycle', () => {
     vi.spyOn(labs, 'isDelayedKillEnabled').mockReturnValue(true);
     try {
       const old = await openHelper('parent');
-      await resetHelper('parent', { workspaceId: 'ws', title: 'shell', ref: 'surface:1' });
+      await resetHelper('parent', { workspaceId: 'ws', title: 'shell' });
       const fresh = await openHelper('parent');
       registry.get(fresh.id)!.untouched = false;
       const [before] = pending.getPendingKills();

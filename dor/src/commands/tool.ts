@@ -139,7 +139,7 @@ Text output:
 JSON output:
   {
     "status": "created",
-    "surface_id": "pane-def",
+    "surface_id": "surface-3",
     "surface_ref": "surface:3",
     "command": "pnpm storybook",
     "cwd": "/Users/me/projects/site",

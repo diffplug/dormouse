@@ -55,7 +55,7 @@ The containment hierarchy `dor` handles commit to (`docs/specs/dor-cli.md`):
 Window ⊃ Workspace ⊃ Pane ⊃ Surface  (terminal = Session | browser)
 ```
 
-**Surface identity:** a Surface's id is minted as `surface-<n>` (`docs/specs/transport.md` → Surface ids); a primary Surface's id is its Lath leaf id, and a helper receives its Lath leaf only on promotion. A terminal Surface's id is its `SessionId`, stable (I1); browser replacement and relaunch have different identity effects (I10).
+**Surface identity:** a Surface's id is minted as `surface-<n>` (`docs/specs/transport.md` → Surface ids), and its `dor` ref is the id's number (`docs/specs/dor-cli.md` → Handle Model); a primary Surface's id is its Lath leaf id, and a helper receives its Lath leaf only on promotion. A terminal Surface's id is its `SessionId`, stable (I1); browser replacement and relaunch have different identity effects (I10).
 
 ## Containers
 
@@ -246,7 +246,7 @@ Source of truth: `focusSession` / `refitSession` in `lib/src/lib/terminal-lifecy
 - I7: Every Surface sits in exactly one Pane; every Pane and its Surfaces belong to exactly one Workspace; every Workspace belongs to one Window.
 - I8: **Must preserve Process and Activity during `switchWorkspace`, without firing a fresh ring** (I3). A switch reattaches terminal elements but resumes and restores nothing, so no ring can fire (`docs/specs/layout.md` → Workspaces).
 - I9: A Workspace's union status is a pure projection of its members' Activity: no independent state, destroyed with the Workspace.
-- I10: **Must preserve a terminal Surface's `SessionId`** (I1). **Must transfer the `surface:N` CLI ref when replacing a browser Surface**, minting a new id in the same layout slot with its target URL. An `agent-browser-screencast` ⇄ `agent-browser-popout` relaunch keeps the Surface id; render-mode changes do not universally imply replacement (rationale; `docs/specs/dor-browser.md` → Display Modal And Render Swaps).
+- I10: **Must preserve a terminal Surface's `SessionId`** (I1). Replacing a browser Surface mints a new id, and with it a new ref, in the same layout slot with its target URL. An `agent-browser-screencast` ⇄ `agent-browser-popout` relaunch keeps the Surface id; render-mode changes do not universally imply replacement (rationale; `docs/specs/dor-browser.md` → Display Modal And Render Swaps).
 
 ## Retired / overloaded terms
 

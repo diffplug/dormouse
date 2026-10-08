@@ -9,7 +9,7 @@ import { StrictMode, act } from 'react';
 import { flushSync } from 'react-dom';
 import { type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { SURFACE_CONTROL_METHODS, WINDOW_CONTROL_METHODS } from 'dor/protocol';
+import { SURFACE_CONTROL_METHODS, surfaceRefForId, WINDOW_CONTROL_METHODS } from 'dor/protocol';
 import { moveSurface } from './wall/surface-move';
 import { recordToolDirty, resetToolDirty } from '../lib/tool-dirty-store';
 import { browserLeafMeta, toolLeafMeta } from './wall/lath-wall-engine';
@@ -970,6 +970,21 @@ it('routes Tools to the requested Workspace and never launches after lookup race
 });
 
 
+it('lists every Workspace with refs unique across them, each derived from its id', async () => {
+  createWorkspace({ id: 'ws-2', activate: false });
+  await render(<WorkspaceWindow />);
+  let listed: { ok: boolean; result?: { surfaces: Array<{ id: string; ref: string }> } } | undefined;
+  await act(async () => { listed = await new Promise(resolve => {
+    window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
+      requestId: 'all', method: SURFACE_CONTROL_METHODS.list, params: { scope: 'all' }, respond: resolve,
+    } }));
+  }); });
+  const rows = listed!.result!.surfaces;
+  expect(rows).toHaveLength(2);
+  expect(new Set(rows.map(row => row.ref)).size).toBe(2);
+  for (const row of rows) expect(row.ref).toBe(surfaceRefForId(row.id));
+});
+
 describe('Surface moves between Workspaces', () => {
   const request = (destination: { workspace: string } | { new: true }, focus = false) => ({ destination, focus, dangerouslyDestroyIframePageState: false });
   async function twoWalls(sourcePanes = ['pane-a', 'pane-b']) {
@@ -979,28 +994,31 @@ describe('Surface moves between Workspaces', () => {
     return source;
   }
 
-  it('preserves Session identity, TODO and retained cwd, retires the source ref, and recomputes both unions', async () => {
-    const source = await twoWalls();
-    publishWorkspaceSession(source, { version: 3, panes: [{ id: 'pane-a', title: 'exited', cwd: '/retained' }, { id: 'pane-b', title: 'other' }] });
-    await act(async () => setTerminalActivity('pane-a', { todo: true }));
+  it('preserves Session identity, ref, TODO and retained cwd, and recomputes both unions', async () => {
+    const source = await twoWalls(['surface-3', 'pane-b']);
+    publishWorkspaceSession(source, { version: 3, panes: [{ id: 'surface-3', title: 'exited', cwd: '/retained' }, { id: 'pane-b', title: 'other' }] });
+    await act(async () => setTerminalActivity('surface-3', { todo: true }));
     const kill = vi.spyOn(fake, 'killPty');
     const acknowledge = vi.spyOn(fake, 'alertAcknowledge');
     let result;
-    await act(async () => { result = await moveSurface('pane-a', request({ workspace: 'new' })); });
-    expect(result).toMatchObject({ surfaceId: 'pane-a', surfaceRef: 'surface:2', workspaceId: 'ws-2' });
+    await act(async () => { result = await moveSurface('surface-3', request({ workspace: 'new' })); });
+    expect(result).toMatchObject({ surfaceId: 'surface-3', surfaceRef: 'surface:3', workspaceId: 'ws-2' });
     expect(getWallHandle(source)!.surfaceIds()).toEqual(['pane-b']);
-    expect(getWallHandle('ws-2')!.surfaceIds()).toEqual(['pane-x', 'pane-a']);
+    expect(getWallHandle('ws-2')!.surfaceIds()).toEqual(['pane-x', 'surface-3']);
     expect(getActiveWorkspaceId()).toBe(source);
     expect(kill).not.toHaveBeenCalled();
     expect(acknowledge).not.toHaveBeenCalled();
-    expect(getActivitySnapshot().get('pane-a')?.todo).toBe(true);
+    expect(getActivitySnapshot().get('surface-3')?.todo).toBe(true);
     expect(getWorkspaceSurfacesSnapshot().get(source)).toEqual(['pane-b']);
-    expect(getWorkspaceSurfacesSnapshot().get('ws-2')).toContain('pane-a');
-    expect(previousWorkspaceSession(source)?.surfaceRefs).not.toHaveProperty('pane-a');
-    expect(previousWorkspaceSession('ws-2')?.panes.find(p => p.id === 'pane-a')?.cwd).toBe('/retained');
+    expect(getWorkspaceSurfacesSnapshot().get('ws-2')).toContain('surface-3');
+    expect(previousWorkspaceSession('ws-2')?.panes.find(p => p.id === 'surface-3')?.cwd).toBe('/retained');
+    // A ref cached before the move still names the moved Surface, asked from
+    // the Workspace it left.
     const respond = vi.fn();
-    await act(async () => getWallHandle(source)!.handleDorControl({ requestId: 'retired', method: SURFACE_CONTROL_METHODS.read, params: { surface: 'surface:1' }, respond }));
-    expect(respond).toHaveBeenCalledWith(expect.objectContaining({ ok: false }));
+    await act(async () => window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
+      requestId: 'cached', surfaceId: 'pane-b', method: SURFACE_CONTROL_METHODS.read, params: { surface: 'surface:3' }, respond,
+    } })));
+    expect(respond).toHaveBeenCalledWith(expect.objectContaining({ ok: true, result: expect.objectContaining({ surfaceId: 'surface-3', surfaceRef: 'surface:3' }) }));
   });
 
   it('fences a save collected during adoption before the retained cwd migrates', async () => {
@@ -1020,28 +1038,28 @@ describe('Surface moves between Workspaces', () => {
     expect(previousWorkspaceSession('ws-2')?.panes.find(pane => pane.id === 'pane-a')?.cwd).toBe('/retained');
   });
 
-  it('routes a moved dor caller to its destination: short refs can name another pane and ensure can duplicate work left behind', async () => {
-    const source = await twoWalls();
-    terminalRegistry.seedTerminalManualCwd('pane-b', '/repo');
-    terminalRegistry.applyTerminalSemanticEvents('pane-b', [{ type: 'commandLine', commandLine: 'pnpm dev' }, { type: 'commandStart', source: 'osc633_boundaries' }]);
-    await act(async () => { await moveSurface('pane-a', request({ workspace: 'workspace:2' })); });
+  it('routes a moved dor caller to its destination: its cached refs still name their Surfaces, and ensure can duplicate work left behind', async () => {
+    const source = await twoWalls(['surface-31', 'surface-32']);
+    terminalRegistry.seedTerminalManualCwd('surface-32', '/repo');
+    terminalRegistry.applyTerminalSemanticEvents('surface-32', [{ type: 'commandLine', commandLine: 'pnpm dev' }, { type: 'commandStart', source: 'osc633_boundaries' }]);
+    await act(async () => { await moveSurface('surface-31', request({ workspace: 'workspace:2' })); });
     const ask = async (method: string, params: Record<string, unknown>) => {
       let answer: unknown;
       await act(async () => { answer = await new Promise(resolve => {
         window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
-          requestId: 'moved-caller', surfaceId: 'pane-a', method, params, respond: resolve,
+          requestId: 'moved-caller', surfaceId: 'surface-31', method, params, respond: resolve,
         } }));
         if (method === SURFACE_CONTROL_METHODS.ensure) {
-          const created = getWallHandle('ws-2')!.surfaceIds().find(id => id !== 'pane-x' && id !== 'pane-a')!;
+          const created = getWallHandle('ws-2')!.surfaceIds().find(id => id !== 'pane-x' && id !== 'surface-31')!;
           terminalRegistry.applyTerminalSemanticEvents(created, [{ type: 'promptStart' }]);
         }
       }); });
       return answer;
     };
-    expect(await ask(SURFACE_CONTROL_METHODS.read, { surface: 'surface:1' })).toMatchObject({ ok: true, result: { surfaceId: 'pane-x' } });
-    expect(await ask(SURFACE_CONTROL_METHODS.read, { surface: 'surface:pane-b' })).toMatchObject({ ok: true, result: { surfaceId: 'pane-b' } });
+    expect(await ask(SURFACE_CONTROL_METHODS.read, { surface: 'surface:32' })).toMatchObject({ ok: true, result: { surfaceId: 'surface-32' } });
+    expect(await ask(SURFACE_CONTROL_METHODS.read, { surface: 'surface:31' })).toMatchObject({ ok: true, result: { surfaceId: 'surface-31' } });
     expect(await ask(SURFACE_CONTROL_METHODS.ensure, { command: ['pnpm', 'dev'], cwd: '/repo', minimized: false, restart: false })).toMatchObject({ ok: true, result: { status: 'created' } });
-    expect(getWallHandle(source)!.surfaceIds()).toEqual(['pane-b']);
+    expect(getWallHandle(source)!.surfaceIds()).toEqual(['surface-32']);
     expect(getWallHandle('ws-2')!.surfaceIds()).toHaveLength(3);
   });
 
@@ -1075,18 +1093,17 @@ describe('Surface moves between Workspaces', () => {
     expect(target).not.toBe(source);
     expect(getWallHandle(target)!.surfaceIds()).toEqual(['pane-a']);
     expect(wallFor(target).querySelector('[data-session-id="pane-a"][data-focused="true"]')).not.toBeNull();
-    expect(result).toMatchObject({ surfaceRef: 'surface:1' });
+    expect(result).toMatchObject({ surfaceRef: 'pane-a' });
     await act(async () => { await expect(moveSurface('pane-a', request({ new: true }))).rejects.toThrow('only Surface'); });
   });
 
-  it('rolls back layout, ownership, references and allocator when destination adoption fails', async () => {
+  it('rolls back layout and ownership when destination adoption fails', async () => {
     const source = await twoWalls();
     const target = getWallHandle('ws-2')!;
     const adoption = vi.spyOn(target, 'adoptSurfaceMove').mockImplementation(() => { throw new Error('placement failed'); });
     await act(async () => { await expect(moveSurface('pane-a', request({ workspace: 'workspace:2' }))).rejects.toThrow('placement failed'); });
     expect(getWallHandle(source)!.surfaceIds()).toEqual(['pane-a', 'pane-b']);
     expect(target.surfaceIds()).toEqual(['pane-x']);
-    expect(getWallHandle(source)!.serializeNow().surfaceRefs).toEqual({ 'pane-a': 'surface:1', 'pane-b': 'surface:2' });
     adoption.mockRestore();
   });
 
@@ -1140,7 +1157,7 @@ describe('Surface moves between Workspaces', () => {
     const terminal = vi.spyOn(terminalRegistry, 'getTerminalInstance').mockReturnValue({ buffer: { active: { type: 'alternate' } }, write } as unknown as ReturnType<typeof terminalRegistry.getTerminalInstance>);
     await act(async () => { await moveSurface('pane-a', request({ workspace: 'workspace:2' }, true)); });
     expect(write).not.toHaveBeenCalled();
-    expect(container.querySelector('.shell-spawn-notice')?.textContent).toContain('Cached surface:N refs now resolve here');
+    expect(container.querySelector('.shell-spawn-notice')?.textContent).toBe('Moved pane-a from workspace:1 to workspace:2. Unscoped dor ensure can duplicate work left behind.');
     terminal.mockRestore();
   });
 

@@ -61,7 +61,7 @@ dor intercepts exactly three mutually exclusive identity flags:
                      so the same key in another Workspace is another browser.
   --session <name>   Attach to a raw agent-browser session by its literal name.
   --surface <handle> Drive the browser Surface a handle names (surface:N,
-                     surface:focused, a stable id, title:<title>). dor asks the
+                     surface:focused, a Surface id, title:<title>). dor asks the
                      host which agent-browser session that Surface is bound to,
                      which is the only way to address a GUI-spawned session.
 
@@ -86,7 +86,7 @@ driven with dor playwright --surface instead.
 In an "open" command, dor also resolves a Dormouse target in place of a URL:
 a schemeless host:port (and the ":<port>" localhost shorthand) defaults to
 http:// rather than agent-browser's https://, and a terminal Surface handle
-(surface:N, surface:self, surface:focused, or a stable id) resolves to the
+(surface:N, surface:self, surface:focused, or a Surface id) resolves to the
 dev-server URL that terminal owns via the host port scan.
 
 Examples:

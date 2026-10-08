@@ -160,7 +160,7 @@ Source of truth: `createWorkspaceMotion` in `lib/src/components/workspace-motion
 - **Must confirm plain iframe and serving iframe Tool moves before creating a destination or changing membership**, with the typed-letter Workspace confirmation ([Workspace lifecycle](#workspace-lifecycle)): the Surface reopens at its last-known saved URL, possibly losing page state. Doors remain minimized while waiting. CLI consent: `docs/specs/dor-cli.md` → dor move.
 - **Must refuse dirty Tools, pending Tool approval, browser startup, closing Surfaces/Workspaces and helper promotion**, rechecking after consent and asynchronous preparation. Iframe consent never bypasses a dirty or pending refusal.
 - **Must follow a GUI move into destination passthrough** (acknowledgement: `docs/specs/alert.md` → Workspace union); CLI focus: `docs/specs/dor-cli.md` → dor move. Remove a source with no Panes or Doors unless it is pinned, which refills instead; if Doors remain but no pane does, refill normally.
-- **Must prepare before departure and roll back failed adoption**, restoring layout, Doors, parked state, selection, zoom, metadata and refs. Refs: `docs/specs/dor-cli.md` → Handle Model; durable publication: `docs/specs/transport.md` → Persisted session types.
+- **Must prepare before departure and roll back failed adoption**, restoring layout, Doors, parked state, selection, zoom and metadata. Refs: `docs/specs/dor-cli.md` → Handle Model; durable publication: `docs/specs/transport.md` → Persisted session types.
 
 Source of truth: `moveSurface` in `lib/src/components/wall/surface-move.ts`.
 
@@ -353,7 +353,7 @@ Source of truth: `usePaneRename` in `lib/src/components/wall/use-pane-rename.tsx
 | mount / unmount | Reparents or removes the persistent DOM element. The Registry entry survives, and neither fits the terminal — the caller owns fitting ([Animations](#animations)). |
 | Dispose `disposeSession` | Kills the PTY, disposes xterm, removes the registry entry on kill or Surface replacement; never on minimize. |
 
-- Shell selection replacement: the standalone Settings dialog's Shell row and the VS Code shell picker send `dormouse:new-terminal` with `replaceUntouched` when the selected shell type changes. **Must identify a shell by executable path plus ordered arguments**, so WSL distributions and Windows Developer shells sharing an executable stay distinct. The Wall always mints a new session id and a fresh `surface:N` ref. An untouched selected plain terminal pane or door is replaced in its leaf (an atomic identity swap), the old session disposed and its ref retired; a touched selection, or none, spawns a new pane beside it.
+- Shell selection replacement: the standalone Settings dialog's Shell row and the VS Code shell picker send `dormouse:new-terminal` with `replaceUntouched` when the selected shell type changes. **Must identify a shell by executable path plus ordered arguments**, so WSL distributions and Windows Developer shells sharing an executable stay distinct. The Wall always mints a new Surface id, so a new ref. An untouched selected plain terminal pane or door is replaced in its leaf (an atomic identity swap), the old session disposed; a touched selection, or none, spawns a new pane beside it.
 - **Replay-time terminal reports must be dropped; user input must not be** (`docs/specs/transport.md` → "Report filtering on the input side").
 
 Source of truth: `lib/src/lib/terminal-registry.ts` (the facade over `lib/src/lib/terminal-store.ts` and `lib/src/lib/terminal-lifecycle.ts`).

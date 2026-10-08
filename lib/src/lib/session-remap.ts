@@ -7,8 +7,8 @@ import { mintSurfaceId } from './surface-ids';
 /**
  * A closed Workspace's record with every Surface given a fresh id, for Reopen
  * (`docs/specs/reopen.md`): the rebuilt Sessions must never share an id — a
- * PTY's, the host's — with the ones the close just killed, and its `surface:N`
- * refs start over in the Workspace it reopens as.
+ * PTY's, the host's — with the ones the close just killed, so each comes back
+ * under a new ref.
  */
 export function withFreshSurfaceIds(session: PersistedSession, mint = mintSurfaceId): PersistedSession {
   const ids = new Map<string, string>();
@@ -25,10 +25,9 @@ export function withFreshSurfaceIds(session: PersistedSession, mint = mintSurfac
   const renameNode = (node: LathNode): LathNode => node.kind === 'leaf'
     ? { ...node, id: rename(node.id) as string }
     : { ...node, children: node.children.map(child => ({ ...child, node: renameNode(child.node) })) };
-  const { surfaceRefs: _refs, surfaceRefsNext: _next, ...rest } = session;
   const layout = session.lathLayout;
   return {
-    ...rest,
+    ...session,
     panes: session.panes.map(pane => ({ ...pane, id: fresh(pane.id) })),
     ...(session.doors ? {
       doors: session.doors.map(door => ({

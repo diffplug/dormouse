@@ -24,7 +24,7 @@ Source of truth: `openHelper` / `helperHasWork` / `disposeHelper` / `closeHelper
 
 ## Promotion and source closure
 
-**Must promote the actual Session into a regular split beside its source**, preserving the PTY, xterm, scrollback, directory, partial input, and identity. Cancel pending autorun, close context, assign the public Surface ref, and focus the promoted terminal. Failed placement restores auxiliary host ownership. The source's next opening creates a new helper.
+**Must promote the actual Session into a regular split beside its source**, preserving the PTY, xterm, scrollback, directory, partial input, and identity. Cancel pending autorun, close context, make its Surface ref targetable, and focus the promoted terminal. Failed placement restores auxiliary host ownership. The source's next opening creates a new helper.
 
 **Must reject Reset, source retirement, and duplicate Promote during ownership transfer**, including from a reopened context. A failed transfer or rollback reports its error and resumes inspection so promotion can be retried.
 

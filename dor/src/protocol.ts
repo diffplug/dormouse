@@ -167,6 +167,65 @@ export function parseWorkspaceRef(ref: string): ParsedWorkspaceRef {
   return { target, number: numeric ? Number(bare) : null, name: numeric ? '' : bare };
 }
 
+const SURFACE_ID_PREFIX = 'surface-';
+const SURFACE_REF_PREFIX = 'surface:';
+const NUMBERED_SURFACE_ID = /^surface-(\d+)$/;
+const BARE_NUMBER = /^\d+$/;
+
+/** A Surface's `dor` ref, derived from its id: `surface-347` is `surface:347`
+ *  (`docs/specs/dor-cli.md` → "Handle Model"). An id without the `surface-`
+ *  prefix is its own ref. */
+export function surfaceRefForId(id: string): string {
+  return id.startsWith(SURFACE_ID_PREFIX) ? SURFACE_REF_PREFIX + id.slice(SURFACE_ID_PREFIX.length) : id;
+}
+
+/** The number in a `surface-<n>` id, else null. */
+export function surfaceIdNumber(id: string): number | null {
+  const match = NUMBERED_SURFACE_ID.exec(id);
+  return match ? Number(match[1]) : null;
+}
+
+/** Creation order: numbered ids by number, then every other id, ties by id. */
+export function compareSurfaceIds(a: string, b: string): number {
+  const na = surfaceIdNumber(a);
+  const nb = surfaceIdNumber(b);
+  if (na !== nb) {
+    if (na === null) return 1;
+    if (nb === null) return -1;
+    return na - nb;
+  }
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+/** What a `dor` Surface target names (`docs/specs/dor-cli.md` → "Handle
+ *  Model"). `id` names one Surface Window-wide; `invalid` names none, and
+ *  carries the refusal that says which form to use. */
+export type ParsedSurfaceTarget =
+  | { kind: 'title'; title: string }
+  | { kind: 'self' }
+  | { kind: 'focused' }
+  | { kind: 'id'; id: string }
+  | { kind: 'invalid'; message: string };
+
+function notASurfaceHandle(target: string, n: string): ParsedSurfaceTarget {
+  const suggestion = BARE_NUMBER.test(n) ? `${SURFACE_REF_PREFIX}${n}` : `${SURFACE_REF_PREFIX}<n>`;
+  return { kind: 'invalid', message: `'${target}' is not a Surface handle; use ${suggestion}` };
+}
+
+/** Read a Surface target in the one grammar every host resolves. */
+export function parseSurfaceTarget(target: string): ParsedSurfaceTarget {
+  if (target.startsWith('title:')) return { kind: 'title', title: target.slice('title:'.length) };
+  if (target === 'surface:focused') return { kind: 'focused' };
+  if (target === 'surface:self') return { kind: 'self' };
+  if (target.startsWith(SURFACE_REF_PREFIX)) {
+    const rest = target.slice(SURFACE_REF_PREFIX.length);
+    return rest ? { kind: 'id', id: SURFACE_ID_PREFIX + rest } : notASurfaceHandle(target, '');
+  }
+  if (BARE_NUMBER.test(target)) return notASurfaceHandle(target, target);
+  if (target.startsWith('pane:')) return notASurfaceHandle(target, target.slice('pane:'.length));
+  return { kind: 'id', id: target };
+}
+
 /** A control request as it travels over a transport, correlated by `requestId`. */
 export interface DorControlRequestPayload {
   requestId: string;

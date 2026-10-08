@@ -192,8 +192,6 @@ Carriers: the `surface_reserve_ids` invoke (standalone); `surface:reserveIds` �
 
 **Must carry Workspace delivery overrides in `PersistedSession.alertDelivery`**, across hosts; inheritance and validation follow `docs/specs/alert.md` → Alarm settings.
 
-**Workspace-scoped dor refs.** A `PersistedSession` may record `surfaceRefs` — stable Surface id → Workspace-local `dor` short ref (`surface:N`) — plus `surfaceRefsNext`, the next number to hand out. Ref-preserving layout moves and replacement transfers follow `docs/specs/dor-cli.md` → Handle Model. **Must drop a killed Surface's entry without reusing its retired ref**: persist `surfaceRefsNext` independently rather than deriving it from the map, and clamp it above the map's highest ref on load. Old snapshots without the fields allocate refs from the restored Surfaces on first mount.
-
 **Surface kinds in the snapshot.** Each `PersistedPane` records a `surfaceType` (`docs/specs/glossary.md`): `'terminal'` — the default, **omitted from the row** so terminal snapshots stay byte-identical — `'browser'`, or `'tool'`, whose extra `command` and `tool` fields are `docs/specs/dor-tool.md` → Persistence and hosts. **A pane lacking it reads as `'terminal'`.** A browser pane mints no PTY on restore and survives resume without one, rebuilding from the persisted layout (visible) or `PersistedDoor.params` (minimized). **Must reject a layout whose leaves differ from the visible pane set during restore or resume, and omit visible browser ids from the terminal fallback.**
 
 **Each mounted Workspace publishes its `PersistedSession` to a Window collector**, which orders them by the Workspace store and writes the whole Window through one debounced writer the host installs at boot (rationale).

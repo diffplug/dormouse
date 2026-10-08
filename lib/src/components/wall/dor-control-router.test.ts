@@ -119,18 +119,18 @@ describe('dor control routing', () => {
 
   it('captures in-process helper identity from the registry without aliasing self', () => {
     const owner = handleFor(getWorkspacesSnapshot().workspaces[0].id, ['parent']);
-    registry.set('helper', { helper: { parentId: 'parent', command: '' } } as TerminalEntry);
+    registry.set('surface-9', { helper: { parentId: 'parent', command: '' } } as TerminalEntry);
     try {
-      dispatch(request({ surfaceId: 'helper' }));
+      dispatch(request({ surfaceId: 'surface-9' }));
       expect(owner.handleDorControl).toHaveBeenCalledWith(expect.objectContaining({
         surfaceId: undefined, helperParentId: 'parent', placementSurfaceId: 'parent',
       }));
-      for (const surface of ['helper', 'surface:helper', 'surface:self']) {
-        const detail = dispatch(request({ surfaceId: 'helper', params: { surface } }));
+      for (const surface of ['surface-9', 'surface:9', 'surface:self']) {
+        const detail = dispatch(request({ surfaceId: 'surface-9', params: { surface } }));
         expect(detail.respond).toHaveBeenCalledWith({ ok: false, error: expect.stringContaining('not public Surface targets') });
       }
       expect(owner.handleDorControl).toHaveBeenCalledTimes(1);
-    } finally { registry.delete('helper'); }
+    } finally { registry.delete('surface-9'); }
   });
 
   it('refuses a request a pending helper makes, though it names its open parent', () => {
@@ -185,19 +185,18 @@ describe('dor control routing', () => {
       });
   });
 
-  it('routes a stable-id target to the Workspace holding it, over the caller', () => {
+  it('routes an id or ref target to the Workspace holding it, over the caller', () => {
     const first = getWorkspacesSnapshot().workspaces[0].id;
     createWorkspace({ id: 'ws-2' });
-    const caller = handleFor(first, ['pane-a']);
-    const owner = handleFor('ws-2', ['pane-b']);
-    for (const surface of ['pane-b', 'surface:pane-b']) {
-      expect(resolveDorControlRoute(request({ surfaceId: 'pane-a', params: { surface } })))
+    const caller = handleFor(first, ['surface-1']);
+    const owner = handleFor('ws-2', ['surface-2']);
+    for (const surface of ['surface-2', 'surface:2']) {
+      expect(resolveDorControlRoute(request({ surfaceId: 'surface-1', params: { surface } })))
         .toEqual({ kind: 'handle', handle: owner });
     }
-    // A Workspace-scoped `surface:N`, `surface:self` and a title stay with the
-    // caller: every Workspace has a `surface:1`.
-    for (const surface of ['surface:1', 'surface:self', 'title:pane-b']) {
-      expect(resolveDorControlRoute(request({ surfaceId: 'pane-a', params: { surface } })))
+    // `surface:self`, a title, and a refused bare number stay with the caller.
+    for (const surface of ['surface:self', 'title:surface-2', '2']) {
+      expect(resolveDorControlRoute(request({ surfaceId: 'surface-1', params: { surface } })))
         .toEqual({ kind: 'handle', handle: caller });
     }
   });

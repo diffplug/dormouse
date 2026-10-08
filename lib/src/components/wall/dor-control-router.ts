@@ -1,4 +1,4 @@
-import { isAppControlMethod, isToolControlMethod, isWindowControlMethod, isWorkspaceControlMethod, SURFACE_CONTROL_METHODS } from 'dor/protocol';
+import { isAppControlMethod, isToolControlMethod, isWindowControlMethod, isWorkspaceControlMethod, parseSurfaceTarget, SURFACE_CONTROL_METHODS } from 'dor/protocol';
 import { registry, isHelperSession } from '../../lib/terminal-store';
 import { createRefCount } from '../../lib/ref-count';
 import { getPendingKill, isPendingKillSession } from '../../lib/pending-kills';
@@ -9,7 +9,7 @@ import { handleToolControl } from './tool-control';
 import { errorText, mountingRefusal, requestForWall, ROUTE_RETRIES } from './dor-control-shared';
 import { getWallHandle, wallHandleOwning, type WallHandle } from './wall-handles';
 import { handleWorkspaceControl, listAllWorkspaceSurfaces, type WindowControlParams } from './workspace-control';
-import { classifySurfaceTarget, type DorControlRequest } from './use-dor-control';
+import type { DorControlRequest } from './use-dor-control';
 
 /**
  * The one window listener for `dormouse:control-request`, deciding which Wall
@@ -43,16 +43,12 @@ export type DorControlRoute =
    *  `message` — the active Workspace still mounting — if nothing ever does. */
   | { kind: 'none'; message: string };
 
-/**
- * The Workspace holding the Surface this target names, when the target names
- * one Window-wide: only a stable id does (`classifySurfaceTarget`). `surface:N`
- * is Workspace-scoped — every Workspace has a `surface:1` — so it stays with
- * the Wall that answers.
- */
+/** The Workspace holding the Surface this target names by id or ref
+ *  (`parseSurfaceTarget`); either names one Surface Window-wide. */
 function wallHandleOwningTarget(target: unknown): WallHandle | null {
   if (typeof target !== 'string') return null;
-  const classified = classifySurfaceTarget(target);
-  return classified.kind === 'stable' ? wallHandleOwning(classified.id) : null;
+  const parsed = parseSurfaceTarget(target);
+  return parsed.kind === 'id' ? wallHandleOwning(parsed.id) : null;
 }
 
 /** The host supplies this before cross-window routing. In-process requests
@@ -66,9 +62,8 @@ function withHelperOrigin(detail: DorControlRequest): DorControlRequest {
 
 /**
  * Resolution order: the app verbs, the Tool reads, the Window's own verbs, an explicit
- * container target, a target Surface named by its stable id, else the caller's
- * own Workspace, else the active one. `surface:N` targets are resolved by the
- * chosen Wall, within its own Workspace.
+ * container target, the Workspace holding a target Surface named by id or
+ * ref, else the caller's own Workspace, else the active one.
  */
 export function resolveDorControlRoute(detail: DorControlRequest): DorControlRoute {
   const route = resolveRoute(detail);
@@ -90,9 +85,9 @@ function resolveRoute(detail: DorControlRequest): DorControlRoute {
   if (isWindowControlMethod(detail.method)) return { kind: 'reopen' };
   const params: WindowControlParams = detail.params ?? {};
   if (typeof params.surface === 'string') {
-    const target = classifySurfaceTarget(params.surface);
+    const target = parseSurfaceTarget(params.surface);
     if ((target.kind === 'self' && detail.helperParentId)
-      || (target.kind === 'stable' && isHelperSession(target.id))) {
+      || (target.kind === 'id' && isHelperSession(target.id))) {
       return { kind: 'error', message: 'Helper terminals are not public Surface targets; promote the helper first' };
     }
   }
@@ -120,7 +115,7 @@ function resolveRoute(detail: DorControlRequest): DorControlRoute {
       ? { kind: 'handle', handle }
       : { kind: 'pending', message: mountingRefusal(String(params.workspace).trim()) };
   }
-  // A stable id names one Surface in the whole Window, so a command targeting
+  // An id or ref names one Surface in the whole Window, so a command targeting
   // one is answered by whichever Workspace holds it, caller or not.
   const owningTarget = wallHandleOwningTarget(params.surface);
   if (owningTarget) return { kind: 'handle', handle: owningTarget };

@@ -63,7 +63,8 @@ import type {
   SurfaceView as DorSurfaceView,
 } from 'dor/commands/types';
 import { hasBrowser, hasTerminal } from 'dor/commands/types';
-import { DEFAULT_WORKSPACE_ID, type PersistedSurfaceRefs, type WorkspaceId } from '../lib/session-types';
+import { compareSurfaceIds, surfaceRefForId } from 'dor/protocol';
+import { DEFAULT_WORKSPACE_ID, type WorkspaceId } from '../lib/session-types';
 import { clearWorkspaceSurfaces, setWorkspaceSurfaces } from '../lib/workspace-surfaces';
 import { nextTodoMember } from '../lib/workspace-union';
 import { deriveDisplayedSurfaceLabel } from '../lib/session-label';
@@ -191,45 +192,11 @@ function surfaceRenderModeFromParams(params: unknown): DorSurfaceRenderMode | nu
   return hasBrowser(surfaceKindFromParams(params)) ? resolveRenderMode(params) : null;
 }
 
-function surfaceRefNumber(ref: string): number | null {
-  const match = /^surface:([1-9]\d*)$/.exec(ref);
-  return match ? Number(match[1]) : null;
-}
-
-function createSurfaceRefRegistry(
-  initialSurfaceRefs: PersistedSurfaceRefs | undefined,
-  initialSurfaceRefsNext: number | undefined,
-): {
-  refs: Map<string, string>;
-  nextIndex: number;
-} {
-  const refs = new Map<string, string>();
-  let max = 0;
-  for (const [id, ref] of Object.entries(initialSurfaceRefs ?? {})) {
-    const n = surfaceRefNumber(ref);
-    if (!id || n === null) continue;
-    refs.set(id, ref);
-    max = Math.max(max, n);
-  }
-  // The counter is the source of truth (killed entries are pruned from the map, so
-  // `max` alone would let a pruned number be reused). Clamp above `max` too, so a
-  // stale/absent persisted counter can never hand out a live ref's number.
-  const persistedNext = initialSurfaceRefsNext !== undefined && Number.isInteger(initialSurfaceRefsNext)
-    ? initialSurfaceRefsNext
-    : 0;
-  return { refs, nextIndex: Math.max(persistedNext, max + 1) };
-}
-
 /** Stage `id`'s shell as the current default selection, started in `cwd`. Stages
  *  nothing when neither is set, leaving the host's own default shell and cwd. */
 function stageDefaultShell(id: string, cwd: string | undefined): void {
   const defaults = getDefaultShellOpts();
   if (defaults?.shell || cwd) setPendingShellOpts(id, { shell: defaults?.shell, args: defaults?.args, cwd });
-}
-
-function compareBySurfaceRef(a: DorSurface, b: DorSurface): number {
-  return (surfaceRefNumber(a.ref) ?? Number.MAX_SAFE_INTEGER)
-    - (surfaceRefNumber(b.ref) ?? Number.MAX_SAFE_INTEGER);
 }
 
 function ShellSpawnNotice({
@@ -270,8 +237,6 @@ export function Wall({
   initialMode = 'command',
   restoredLathLayout,
   initialDoors,
-  initialSurfaceRefs,
-  initialSurfaceRefsNext,
   emptyForMove = false,
   onEvent,
   baseboardNotice,
@@ -346,43 +311,6 @@ export function Wall({
    *  (docs/specs/terminal-context.md → Helper lifecycle). */
   const isReplaceableShell = (id: string): boolean => closeKindOf(id) === 'trivial' && !getHelper(id);
   const restoredLathLayoutRef = useRef(restoredLathLayout);
-  const dorSurfaceRefsRef = useRef<Map<string, string> | null>(null);
-  const nextDorSurfaceRefIndexRef = useRef(1);
-  if (dorSurfaceRefsRef.current === null) {
-    const registry = createSurfaceRefRegistry(initialSurfaceRefs, initialSurfaceRefsNext);
-    dorSurfaceRefsRef.current = registry.refs;
-    nextDorSurfaceRefIndexRef.current = registry.nextIndex;
-  }
-
-  const surfaceRefForId = useCallback((id: string): string => {
-    const refs = dorSurfaceRefsRef.current!;
-    const existing = refs.get(id);
-    if (existing) return existing;
-    const ref = `surface:${nextDorSurfaceRefIndexRef.current++}`;
-    refs.set(id, ref);
-    return ref;
-  }, []);
-  // Drop a Surface's ref when it is killed. The counter never rewinds, so its
-  // `surface:N` is retired, not reused — a later target that names it fails
-  // instead of resolving to a different Surface (spec → Handle Model).
-  const forgetSurfaceRef = useCallback((id: string): void => {
-    dorSurfaceRefsRef.current!.delete(id);
-  }, []);
-  const transferSurfaceRef = useCallback((fromId: string, toId: string): string => {
-    const ref = surfaceRefForId(fromId);
-    dorSurfaceRefsRef.current!.set(toId, ref);
-    // The old leaf is being replaced (e.g. a browser render-mode swap); its id is
-    // dead, so hand the ref to the new id and drop the stale entry.
-    dorSurfaceRefsRef.current!.delete(fromId);
-    return ref;
-  }, [surfaceRefForId]);
-  const surfaceRefsForSave = useCallback((): { refs: PersistedSurfaceRefs; next: number } => {
-    return {
-      refs: Object.fromEntries(dorSurfaceRefsRef.current!),
-      next: nextDorSurfaceRefIndexRef.current,
-    };
-  }, []);
-
   // One reference-counted lease per open dialog: overlapping dialogs each hold
   // their own, so the one closing cannot release the other's suppression.
   const dialogKeyboardActiveRef = useRef(false);
@@ -701,9 +629,8 @@ export function Wall({
     // check, so a late OSC signal can't type the command into a dead surface.
     disposeSession(id);
     clearLocalSurfaceActivity(id);
-    forgetSurfaceRef(id);
     fireEvent({ type: 'kill', id });
-  }, [fireEvent, forgetSurfaceRef, lath]);
+  }, [fireEvent, lath]);
 
   /** Tear a Surface down after its helper guard. */
   const killPaneImmediately = useCallback((id: string): void => {
@@ -751,15 +678,11 @@ export function Wall({
       lath.store.removeLeaf(id);
       // Dispose only after the removal: a refill it triggers reads this pane's cwd.
       disposeSession(id);
-      // Forget the ref only now — while the pane is fading it is still in
-      // `listPanes()`, so an earlier delete would let a `dor` projection re-mint a
-      // fresh ref for the dying pane.
-      forgetSurfaceRef(id);
       if (wasSelectedPane) selectAfterKill(doorNeighbors);
     }, exitMs);
     clearLocalSurfaceActivity(id);
     fireEvent({ type: 'kill', id });
-  }, [fireEvent, forgetSurfaceRef, removeDoor, selectAfterKill, disposeDetached, lath, nav]);
+  }, [fireEvent, removeDoor, selectAfterKill, disposeDetached, lath, nav]);
 
   /** This Wall's own pending Surfaces and helpers. */
   const ownPendingKill = (kill: PendingKill): boolean => isOwnPendingKill(kill, effectiveWorkspaceId);
@@ -957,8 +880,6 @@ export function Wall({
       mintSurfaceId,
       initialDoorsRef.current,
     );
-    for (const id of paneIds) surfaceRefForId(id);
-    for (const door of doorsRef.current) surfaceRefForId(door.id);
     // Prime default-shell opts for the fresh path's generated ids (a no-op for
     // already-restored ids).
     if (fresh) {
@@ -973,7 +894,7 @@ export function Wall({
     // only fires for ids added later (the seed's own commits predate its subscribe).
     prevLeafIdsRef.current = new Set(paneIds);
     for (const id of paneIds) fireEvent({ type: 'paneAdded', id });
-  }, [lath, fireEvent, surfaceRefForId]);
+  }, [lath, fireEvent]);
 
   /** Whether a `closeAll` is walking this Wall's Surfaces. It short-circuits the
    *  auto-spawn refill, which would otherwise repopulate the Workspace being
@@ -995,7 +916,7 @@ export function Wall({
    *  the ref a `dor` caller can act on. */
   const iframeSurfaceRefs = useCallback(
     (): string[] => memberSurfaceIds().filter(isIframeSurface).map(surfaceRefForId),
-    [isIframeSurface, memberSurfaceIds, surfaceRefForId],
+    [isIframeSurface, memberSurfaceIds],
   );
 
   const browserSessions = useCallback(
@@ -1044,7 +965,6 @@ export function Wall({
   const refillEmptyTree = useCallback((departedId?: string) => {
     if (lath.store.getSnapshot().tree.root !== null) return;
     const id = mintSurfaceId();
-    surfaceRefForId(id);
     stageDefaultShell(id, departedId ? getInheritableCwd(departedId) : undefined);
     lath.store.setEnterHint(id, 'top-left'); // grows from the top-left as the killed pane shrank to the bottom-right
     lath.store.addLeaf(id, terminalLeafMeta(), null); // becomes the root
@@ -1053,7 +973,7 @@ export function Wall({
     const sel = selectedIdRef.current;
     const selDangling = sel !== null && selectedTypeRef.current === 'pane' && !lath.store.has(sel);
     if (sel === null || selDangling) selectPane(id);
-  }, [lath, surfaceRefForId, selectPane]);
+  }, [lath, selectPane]);
 
   // Auto-spawn: whenever a commit empties the tree (last pane killed/minimized),
   // spawn one to keep a pane visible — the Wall's "always one pane" rule.
@@ -1110,7 +1030,6 @@ export function Wall({
     selectedIdRef,
     selectedTypeRef,
     activeRef,
-    surfaceRefsForSave,
     workspaceId,
   });
 
@@ -1249,7 +1168,6 @@ export function Wall({
           closeHelperParent(item.id);
           lath.store.replaceLeaf(item.id, afterRestore.newId, terminalLeafMeta());
           disposeSession(item.id);
-          forgetSurfaceRef(item.id);
           selectPane(afterRestore.newId);
           if (afterRestore.announce) {
             showShellSpawnNotice(afterRestore.newId, `Switched to ${afterRestore.shellName}`);
@@ -1257,7 +1175,7 @@ export function Wall({
         }
       });
     }
-  }, [selectPane, removeDoor, removeDoorAndSelect, restoreFromToken, enterTerminalMode, forgetSurfaceRef, showShellSpawnNotice, lath, nav]);
+  }, [selectPane, removeDoor, removeDoorAndSelect, restoreFromToken, enterTerminalMode, showShellSpawnNotice, lath, nav]);
   const handleReattachRef = useRef(handleReattach);
   handleReattachRef.current = handleReattach;
 
@@ -1269,7 +1187,6 @@ export function Wall({
   const reopenSurface = useCallback((record: SurfaceReopenRecord, focus: boolean): { id: string; ref: string } => {
     const id = mintSurfaceId();
     const meta = reopenPane(id, record.pane, record.meta);
-    const ref = surfaceRefForId(id);
     const { placement } = record;
     if (placement.kind === 'door') {
       lath.store.addDoor(id, meta);
@@ -1278,8 +1195,8 @@ export function Wall({
       restoreFromToken(id, meta, { ...placement.token, leafId: id });
       if (focus) enterTerminalMode(id);
     }
-    return { id, ref };
-  }, [surfaceRefForId, restoreFromToken, enterTerminalMode, insertDoorAt, lath]);
+    return { id, ref: surfaceRefForId(id) };
+  }, [restoreFromToken, enterTerminalMode, insertDoorAt, lath]);
 
   /**
    * A pending kill (`docs/specs/reopen.md` → "Labs: No-confirm delayed kill"):
@@ -1309,7 +1226,6 @@ export function Wall({
       kind: 'surface',
       id,
       workspaceId: effectiveWorkspaceId,
-      ref: surfaceRefForId(id),
       title: deriveDisplayedSurfaceLabel(kind, id, persistedPanelTitle(meta.title)),
       label: SURFACE_KIND_LABEL[kind],
     }, {
@@ -1430,7 +1346,7 @@ export function Wall({
         ...(isPreviewSlotParams(source.params) ? { preview: true } : {}),
       };
     });
-  }, [lath, surfaceRefForId]);
+  }, [lath]);
 
   const buildDorSurfaces = useCallback(
     (): DorSurface[] => buildDorSurfacesInternal(false),
@@ -1438,7 +1354,7 @@ export function Wall({
   );
   const buildDorSurfaceList = useCallback(
     // buildDorSurfacesInternal already returns a fresh array, so sort it in place.
-    (): DorSurface[] => buildDorSurfacesInternal(true).sort(compareBySurfaceRef),
+    (): DorSurface[] => buildDorSurfacesInternal(true).sort((a, b) => compareSurfaceIds(a.id, b.id)),
     [buildDorSurfacesInternal],
   );
 
@@ -1574,7 +1490,7 @@ export function Wall({
       minimizePane(newId, { select: selectedNew });
     }
     return { ok: true, value: { id: newId, ref: surfaceRefForId(newId), minimized } };
-  }, [addMinimizedSplitDoor, minimizePane, restoreFromToken, surfaceRefForId, lath, settleAddSelection, nav]);
+  }, [addMinimizedSplitDoor, minimizePane, restoreFromToken, lath, settleAddSelection, nav]);
 
   /**
    * Create a non-terminal content surface (iframe, agent-browser) next to a
@@ -1619,7 +1535,7 @@ export function Wall({
       // Whether the user's current selection sits on the pane being replaced.
       const selectionReplaced = selectedTypeRef.current === 'pane' && selectedIdRef.current === reference.id;
       // Atomic identity swap in place; then dispose the old terminal session.
-      const ref = transferSurfaceRef(reference.id, newId);
+      // The replacement is a new Surface, with its own ref.
       lath.store.replaceLeaf(reference.id, newId, browserMeta);
       disposeSession(reference.id);
       // Replacing the pane the user is selected on forces selection onto the
@@ -1630,7 +1546,7 @@ export function Wall({
       // onto the resulting door rather than leave selectedType='pane' pointing
       // at a door id (the overlay would keep a stale rect).
       if (minimized) minimizePane(newId, { select: selectedNew });
-      return { ok: true, value: { id: newId, ref, status: 'replaced' } };
+      return { ok: true, value: { id: newId, ref: surfaceRefForId(newId), status: 'replaced' } };
     }
 
     // Split beside the reference by its aspect ratio (autoEdge). The split-event
@@ -1647,7 +1563,7 @@ export function Wall({
     });
     if (minimized) minimizePane(newId, { select: selectedNew });
     return { ok: true, value: { id: newId, ref: surfaceRefForId(newId), status: 'created' } };
-  }, [minimizePane, surfaceRefForId, transferSurfaceRef, lath, settleAddSelection, nav]);
+  }, [minimizePane, lath, settleAddSelection, nav]);
 
   /**
    * Replace a content surface's renderer in place, preserving its slot
@@ -1669,12 +1585,11 @@ export function Wall({
     // A browser Surface has no helper; the terminal's goes with the old id.
     closeHelperParent(oldId);
     const newId = mintSurfaceId();
-    transferSurfaceRef(oldId, newId);
     lath.store.replaceLeaf(oldId, newId, browserLeafMeta(next.title, next.params));
     clearLocalSurfaceActivity(oldId);
     selectPane(newId);
     return newId;
-  }, [transferSurfaceRef, selectPane, lath, nav]);
+  }, [selectPane, lath, nav]);
 
   // Listen for external "new terminal" requests (e.g. from the standalone AppBar)
   useEffect(() => {
@@ -1684,7 +1599,6 @@ export function Wall({
       if (!activeRef.current) return;
       const detail = ((e as CustomEvent<ShellSpawnRequest>).detail ?? {}) as ShellSpawnRequest;
       const newId = mintSurfaceId();
-      surfaceRefForId(newId);
 
       // Store shell options so getOrCreateTerminal picks them up on mount
       if (detail?.shell) {
@@ -1705,7 +1619,6 @@ export function Wall({
       if (shouldReplaceUntouched) {
         lath.store.replaceLeaf(selectedPaneId!, newId, terminalLeafMeta());
         disposeSession(selectedPaneId!);
-        forgetSurfaceRef(selectedPaneId!);
         selectPane(newId);
         if (detail.announce) {
           showShellSpawnNotice(newId, `Switched to ${shellName}`);
@@ -1740,7 +1653,7 @@ export function Wall({
     };
     window.addEventListener('dormouse:new-terminal', handler);
     return () => window.removeEventListener('dormouse:new-terminal', handler);
-  }, [surfaceRefForId, forgetSurfaceRef, selectPane, enterTerminalMode, showShellSpawnNotice, lath, nav]);
+  }, [selectPane, enterTerminalMode, showShellSpawnNotice, lath, nav]);
 
   // --- dor control plane (the `dor` CLI's webview handler) ---
   // A tool grows its browser when its command starts serving.
@@ -1756,7 +1669,6 @@ export function Wall({
     doorsRef,
     buildDorSurfaces,
     buildDorSurfaceList,
-    surfaceRefForId,
     createSplitSurface,
     createContentSurface,
     isClosingSurface,
@@ -1913,13 +1825,11 @@ export function Wall({
   // assigned INTO one stable object: the registry holds that object, so a
   // re-render never replaces a registered entry.
   // Capture before a synchronous commit. Rollback restores the complete Wall,
-  // including a Door's held rect and the ref allocator, without killing Sessions.
+  // including a Door's held rect, without killing Sessions.
   // It runs only before `finishSurfaceMove`, so no refill has mounted a shell.
   const captureMoveRollback = () => {
     const snapshot = lath.store.getSnapshot();
     const savedDoors = doorsRef.current;
-    const refs = new Map(dorSurfaceRefsRef.current);
-    const next = nextDorSurfaceRefIndexRef.current;
     const selected = selectedIdRef.current;
     const type = selectedTypeRef.current;
     const last = lastPaneIdRef.current;
@@ -1928,7 +1838,6 @@ export function Wall({
     return () => {
       movingSurfaceRef.current = true;
       doorsRef.current = savedDoors; setDoors(savedDoors);
-      dorSurfaceRefsRef.current = refs; nextDorSurfaceRefIndexRef.current = next;
       lath.store.restoreSnapshot(snapshot);
       selectedIdRef.current = selected; setSelectedId(selected);
       selectedTypeRef.current = type; setSelectedType(type);
@@ -1948,11 +1857,10 @@ export function Wall({
       if (isToolDirty(id, meta.params)) throw new Error('Save or discard Tool edits before moving this Surface');
       captureToolParams(lath, [id]);
       if ((meta.params?.launchSession && !meta.params?.session) || getAgentBrowserSurfaceController(id)?.snapshot().phase === 'launching') throw new Error('Wait for the browser to connect before moving this Surface');
-      const surfaceRef = surfaceRefForId(id);
       const params = { ...meta.params };
       delete params.toolPreview;
       return {
-        meta: { ...meta, params }, surfaceRef,
+        meta: { ...meta, params },
         iframe: isIframeSurface(id), terminal: surfaceHasTerminal(id),
         depart: () => {
           const rollback = captureMoveRollback();
@@ -1962,7 +1870,6 @@ export function Wall({
           if (nav.hasPane(id)) {
             if (!lath.store.removeLeaf(id).ok) throw new Error('Could not detach the Surface');
           } else { removeDoor(id); lath.store.forgetLeaf(id); }
-          forgetSurfaceRef(id);
           if (selectedIdRef.current === id) {
             exitTerminalMode();
             const nextId = livePaneId();
@@ -1980,9 +1887,8 @@ export function Wall({
       movingSurfaceRef.current = true;
       const ref = livePaneId();
       if (!lath.store.addLeaf(id, meta, ref ? { refId: ref, edge: lath.store.autoEdgeFor(ref) } : null).ok) throw new Error('Could not place the Surface');
-      const surfaceRef = surfaceRefForId(id);
       publishMembership();
-      return { surfaceRef, rollback };
+      return rollback;
     },
     finishSurfaceMove: (options) => {
       movingSurfaceRef.current = false;
@@ -2085,7 +1991,6 @@ export function Wall({
     source: 'keyboard' | 'mouse' = 'mouse',
   ) => {
     const newId = mintSurfaceId();
-    surfaceRefForId(newId);
     const ref = id && nav.hasPane(id) ? id : null;
     // Carry the currently selected shell into every manual split.
     stageDefaultShell(newId, ref ? getInheritableCwd(ref) : undefined);
@@ -2098,7 +2003,7 @@ export function Wall({
     // passthrough, and defer DOM focus through the shared focus path.
     enterTerminalMode(newId);
     onEventRef.current?.({ type: 'split', direction: splitDirection, source });
-  }, [enterTerminalMode, surfaceRefForId, lath, nav]);
+  }, [enterTerminalMode, lath, nav]);
 
   // --- Wall actions (for tab buttons) ---
 
@@ -2328,12 +2233,11 @@ export function Wall({
         lath.store.setMeta(id, browserLeafMeta(hostPathDisplay(browserUrlFromParams(fallback.restore) ?? '', true), fallback.restore));
       }
     },
-    resolveSurfaceRef: surfaceRefForId,
     onResolveToolApproval: (id: string, choice: 'upstream' | 'folder' | 'decline' | 'retry') => {
       void resolveToolApproval(id, choice);
     },
     onPinPreview: previewSlot.pin,
-  }), [previewSlot, addSplitPanel, minimizePane, enterTerminalMode, exitTerminalMode, requestKill, replaceSurface, buildDorSurfaces, createContentSurface, surfaceRefForId, resolveToolApproval, lath, nav]);
+  }), [previewSlot, addSplitPanel, minimizePane, enterTerminalMode, exitTerminalMode, requestKill, replaceSurface, buildDorSurfaces, createContentSurface, resolveToolApproval, lath, nav]);
   const openContextPort = useCallback(async (id: string, entry: PortUrlEntry, mode: PortMode): Promise<void> => {
     const opening = terminalContextRef.current;
     // Success dismisses only the context that asked; a failed or cancelled
@@ -2462,12 +2366,11 @@ export function Wall({
         throw new Error('Could not split the source pane');
       }
       finishPromotion(id);
-      surfaceRefForId(helper.id);
       setTerminalContext(null);
       enterTerminalMode(helper.id);
     },
     openPort: openContextPort,
-  }), [contextSourceId, terminalContext, lath, nav, surfaceRefForId, enterTerminalMode, openContextPort, cancelContextPortLaunches]);
+  }), [contextSourceId, terminalContext, lath, nav, enterTerminalMode, openContextPort, cancelContextPortLaunches]);
 
   const wallActionsRef = useRef(wallActions);
   wallActionsRef.current = wallActions;
@@ -2651,7 +2554,7 @@ export function Wall({
               <>
                 <ExternalLinkModalHost />
                 <ToolEditorCloseModalHost />
-                <AgentBrowserScreenModalHost resolveLabel={surfaceRefForId} />
+                <AgentBrowserScreenModalHost />
                 {enableBurrow ? (
                   <Suspense fallback={null}>
                     <RemotePairingModalHost />

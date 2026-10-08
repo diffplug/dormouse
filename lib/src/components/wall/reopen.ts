@@ -1,4 +1,5 @@
 import type { ReopenResponse } from 'dor/commands/types';
+import { surfaceRefForId } from 'dor/protocol';
 import { getPlatform } from '../../lib/platform';
 import { newestReopenClosedAt, popReopenRecord, pushReopenRecord, type SurfaceReopenRecord, type WorkspaceReopenRecord } from '../../lib/reopen-stack';
 import { withFreshSurfaceIds } from '../../lib/session-remap';
@@ -82,7 +83,8 @@ function restoredResponse(kill: PendingKill): ReopenResponse {
     return { status: 'reopened', kind: 'workspace', workspaceId: kill.id, workspaceRef: workspaceRefFor(kill.id) };
   }
   // A helper comes back on its parent, the Surface a caller can name.
-  return { status: 'reopened', kind: 'surface', surfaceId: kill.surfaceId ?? kill.id, surfaceRef: kill.ref ?? kill.id };
+  const surfaceId = kill.surfaceId ?? kill.id;
+  return { status: 'reopened', kind: 'surface', surfaceId, surfaceRef: surfaceRefForId(surfaceId) };
 }
 
 /** `dor reopen` (`window.reopen`): focus-neutral, and an empty stack refuses. */

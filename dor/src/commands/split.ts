@@ -107,7 +107,7 @@ Text output:
 JSON output:
   {
     "status": "created",
-    "surface_id": "pane-abc",
+    "surface_id": "surface-2",
     "surface_ref": "surface:2",
     "direction": "right",
     "minimized": false,

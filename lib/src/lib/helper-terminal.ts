@@ -171,11 +171,11 @@ export function reattachHelper(helper: HelperTerminal): boolean {
  * pending kill instead, which a restore puts back in place of the fresh one
  * (`docs/specs/reopen.md` → "Labs: No-confirm delayed kill").
  */
-export async function resetHelper(parentId: string, parent: { workspaceId: WorkspaceId; title: string; ref: string }): Promise<void> {
+export async function resetHelper(parentId: string, parent: { workspaceId: WorkspaceId; title: string }): Promise<void> {
   if (!isDelayedKillEnabled()) { disposeHelper(parentId); return; }
   const old = detachHelper(parentId);
   if (!old) return;
-  addPendingKill({ kind: 'helper', id: old.id, workspaceId: parent.workspaceId, ref: parent.ref, surfaceId: old.parentId, title: parent.title, label: 'Helper' }, {
+  addPendingKill({ kind: 'helper', id: old.id, workspaceId: parent.workspaceId, surfaceId: old.parentId, title: parent.title, label: 'Helper' }, {
     // A closed parent, or a replacement with work of its own, refuses: the old
     // helper stays pending, its countdown untouched, until it finalizes.
     restore: () => reattachHelper(old),

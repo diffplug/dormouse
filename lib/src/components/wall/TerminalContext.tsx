@@ -1,4 +1,5 @@
 import { useCallback, useContext, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { surfaceRefForId } from 'dor/protocol';
 import { messageOf } from '../../lib/errors';
 import { wallHandleOwning } from './wall-handles';
 import { MoveWorkspaceAction } from './MoveWorkspaceAction';
@@ -61,19 +62,19 @@ export function TerminalContext({ id, title, closing, origin, warning: openWarni
   const mismatch = !!helper && !!cwd && !!helperCwd && (cwd.path !== helperCwd.path || cwd.isRemote !== helperCwd.isRemote || (cwd.isRemote && cwd.host !== helperCwd.host));
   const source = wallHandleOwning(id);
   const warning = openWarning ?? (helperError || (helper && helper.status !== 'waiting' && (!cwd || !helperCwd) ? 'Directory comparison unavailable: a terminal has not reported its directory.' : undefined));
-  return <TerminalContextView placement={placement} terminalRole={tool ? 'tool' : 'helper'} closing={closing} origin={origin} surfaceRef={actions.resolveSurfaceRef(id)}
+  return <TerminalContextView placement={placement} terminalRole={tool ? 'tool' : 'helper'} closing={closing} origin={origin} surfaceRef={surfaceRefForId(id)}
     workspaceMove={source?.canMoveSurfaces ? <MoveWorkspaceAction id={id} sourceId={source.workspaceId} /> : undefined} titleSources={titleSources} cwd={cwd ? display(cwd) : 'Directory unknown'} helperCwd={helperCwd && display(helperCwd)} mismatch={mismatch}
     scan={scan} watchRule={offeredRule} watching={watchRule !== null} todo={activities.get(id)?.todo === true} notification={activities.get(id)?.notification}
     status={tool ? (state.currentCommand ? 'running' : 'completed') : helper?.status ?? 'waiting'} command={tool ? state.currentCommand?.rawCommandLine ?? state.lastCommand?.rawCommandLine ?? '' : helper?.command ?? defaultCommand} defaultCommand={defaultCommand} warning={warning}
     explorerLabel={IS_MAC ? 'Reveal in Finder' : IS_WINDOWS ? 'Open in Explorer' : 'Open folder'} canExplore={!!platform.terminalContext && !!cwd && !cwd.isRemote}
     browserProviders={hostBrowserProviders()} canIframe={!!platform.createIframeProxyUrl}
-    onClose={onClose} onCopyRef={() => copy(actions.resolveSurfaceRef(id))} onCopyPath={() => copy(cwd?.path ?? '')}
+    onClose={onClose} onCopyRef={() => copy(surfaceRefForId(id))} onCopyPath={() => copy(cwd?.path ?? '')}
     onExplore={async () => { if (platform.terminalContext && cwd) await platform.terminalContext({ op: 'openDirectory', id, path: cwd.path }); }}
     onWatch={() => { if (offeredRule) setCommandWatched(offeredRule, watchRule === null); }} onTodo={() => toggleSessionTodo(id)}
     onPort={(entry, mode) => context.openPort(id, entry, mode)}
     onModify={async command => { await platform.terminalContext?.({ op: 'settings', command }); setDefaultCommand(command); }}
     resetAsks={!isDelayedKillEnabled()}
-    onReset={async () => { await resetHelper(id, { workspaceId: source?.workspaceId ?? DEFAULT_WORKSPACE_ID, title: deriveSurfaceLabel(state, appTitleForPane, title ?? id), ref: actions.resolveSurfaceRef(id) }); await openHelper(id); }} onPromote={() => context.promote(id)}
+    onReset={async () => { await resetHelper(id, { workspaceId: source?.workspaceId ?? DEFAULT_WORKSPACE_ID, title: deriveSurfaceLabel(state, appTitleForPane, title ?? id) }); await openHelper(id); }} onPromote={() => context.promote(id)}
     onKeepPreview={preview ? () => actions.onPinPreview?.(id) : undefined}>
     {tool && <div data-context-terminal={id} className="h-full px-3 py-2" onMouseDown={() => getTerminalInstance(id)?.focus()}><TerminalPane id={id} isFocused={false} /></div>}
     {helper && <div data-helper-terminal={helper.id} className="h-full px-3 py-2" onMouseDown={() => focusSession(helper.id, true)}><TerminalPane key={helper.id} id={helper.id} isFocused={false} /></div>}

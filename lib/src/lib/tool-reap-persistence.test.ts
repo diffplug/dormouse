@@ -56,13 +56,13 @@ describe('saving', () => {
   it('writes the reaped mark while the Tool is reaped, and drops it once it is not', () => {
     const panes = [{ id: 'tool', title: 'Viewer', surfaceType: 'tool' as const, params: toolParams }];
     markToolReaped('tool', { payload: '{"v":1,"state":1}', cwd: '/repo', alert: null });
-    const saved = assemblePersistedSession(panes, [], undefined, undefined, undefined, null, null);
+    const saved = assemblePersistedSession(panes, [], undefined, null, null);
     expect(saved.panes[0].tool).toMatchObject({ reaped: true });
     expect(JSON.stringify(saved)).not.toContain('"state"');
     expect(readPersistedSession(saved)?.panes[0].tool?.reaped).toBe(true);
     resetToolReaps();
     // A previous record's mark is not carried past the rehydrate.
-    const after = assemblePersistedSession(panes, [], undefined, undefined, undefined, saved, null);
+    const after = assemblePersistedSession(panes, [], undefined, saved, null);
     expect(after.panes[0].tool).not.toHaveProperty('reaped');
   });
 });

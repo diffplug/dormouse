@@ -31,7 +31,7 @@ A read-only `builtin:file` view reports clean as it starts (`docs/specs/dor-tool
 - **Must capture at the close**: `persistableLeafMeta`, the `PersistedPane` projection with the cwd the Session last reported, the Workspace id, and a Pane's restore token or a Door's index.
 - **Must keep records in memory, per Window, newest first, capped at 20.** **Never persist them**; `docs/specs/transport.md` → "What is persisted" stands, and cold restore already covers quit.
 - **Must reopen through the cold-restore per-pane path**: a Pane from its token, with the selected pane as fallback; a Door at its index. A Surface whose Workspace has closed reopens in the active Workspace.
-- **Must mint a new Surface id and `surface:N` ref**; refs are never reused (`docs/specs/dor-cli.md` → "Handle Model").
+- **Must mint a new Surface id**, and with it a new ref (`docs/specs/dor-cli.md` → "Handle Model").
 
 Source of truth: `lib/src/lib/reopen-stack.ts`; `reopenSurface` in `lib/src/components/Wall.tsx`; `reopenPane` in `lib/src/lib/session-restore.ts`.
 

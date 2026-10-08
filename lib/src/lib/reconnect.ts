@@ -4,7 +4,7 @@ import type { LathPersistedLayout } from './lath/persistence';
 import type { PlatformAdapter, PtyInfo } from './platform/types';
 import { restoreBrowserSurfaceTodo, resumeTerminal } from './terminal-registry';
 import type { TerminalResumeInfo } from './terminal-lifecycle';
-import { carrySurfaceRefs, readPersistedSession, type PersistedDoor, type PersistedSession, type PersistedSurfaceRefs } from './session-types';
+import { readPersistedSession, type PersistedDoor, type PersistedSession } from './session-types';
 import { isReapedToolPane, persistedLathLayout, restoreReapedTool, restoreSession } from './session-restore';
 
 export interface ReconnectResult {
@@ -13,11 +13,6 @@ export interface ReconnectResult {
    *  leaf set matching the visible pane set. */
   lathLayout?: LathPersistedLayout;
   doors?: PersistedDoor[];
-  /** Workspace-scoped stable `dor` Surface refs restored with the session. */
-  surfaceRefs?: PersistedSurfaceRefs;
-  /** The Workspace's next `surface:N` counter, carried so a killed ref's number
-   *  is never reused across a resume/restore. */
-  surfaceRefsNext?: number;
 }
 
 /** Every PTY the host still holds, with whatever replay each one sent. Collected
@@ -252,7 +247,7 @@ function resumeLivePtys(
   // close/reopen) restores splits and doors instead of stacking every live
   // PTY into one tab group.
   const plan = getSavedResumePlan(saved, ids, reaped.map((pane) => pane.id));
-  if (!plan) return { paneIds: ids, doors: [], ...carrySurfaceRefs(saved) };
+  if (!plan) return { paneIds: ids, doors: [] };
   for (const pane of reaped) restoreReapedTool(pane);
   return plan;
 }
@@ -302,6 +297,5 @@ function getSavedResumePlan(saved: PersistedSession | null, liveIds: string[], r
     paneIds: layoutMatchesVisiblePanes ? paneIds : paneIds.filter((id) => liveSet.has(id)),
     doors,
     lathLayout: layoutMatchesVisiblePanes ? lathLayout : undefined,
-    ...carrySurfaceRefs(saved),
   };
 }

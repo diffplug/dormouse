@@ -5,9 +5,9 @@ import { createSerialQueue } from '../../host/remote/serial-queue';
 import { useCallback, useEffect, useRef, type MutableRefObject } from 'react';
 import { getPlatform, PLATFORM_STRING } from '../../lib/platform';
 import { currentWindowRef, getActiveWorkspaceId } from '../../lib/workspace-store';
-import { DEFAULT_WORKSPACE_ID, type WorkspaceId } from '../../lib/session-types';
+import type { WorkspaceId } from '../../lib/session-types';
 import type { DorControlRequestPayload, DorControlResult } from 'dor/protocol';
-import { SURFACE_CONTROL_METHODS, unsupportedControlMethodMessage } from 'dor/protocol';
+import { parseSurfaceTarget, SURFACE_CONTROL_METHODS, surfaceRefForId, unsupportedControlMethodMessage, type ParsedSurfaceTarget } from 'dor/protocol';
 import type {
   BrowserAutomationProvider,
   Surface as DorSurface,
@@ -179,38 +179,8 @@ type EnsureBrowserSurface = (args: {
   preserveSource?: boolean;
 }) => EnsureBrowserSurfaceResult;
 
-/**
- * What a `dor` Surface target names, in the one grammar
- * `docs/specs/dor-cli.md` → "Handle Model" defines. `stable` is the only kind
- * that identifies a Surface Window-wide, which is what lets the router send a
- * request to whichever Workspace holds it; `ref` is Workspace-scoped (every
- * Workspace has a `surface:1`), and `nothing` is a target that names no
- * Surface at all (a bare `surface:`).
- */
-export type SurfaceTargetKind =
-  | { kind: 'title'; title: string }
-  | { kind: 'self' }
-  | { kind: 'focused' }
-  | { kind: 'ref'; ref: string }
-  | { kind: 'stable'; id: string }
-  | { kind: 'nothing' };
-
-const POSITIONAL_SURFACE_REF = /^\d+$/;
-
-/** Classify a target once, for the matcher below and for the router's routing
- *  decision (`dor-control-router.ts`). */
-export function classifySurfaceTarget(target: string): SurfaceTargetKind {
-  if (target.startsWith('title:')) return { kind: 'title', title: target.slice('title:'.length) };
-  if (target === 'surface:focused') return { kind: 'focused' };
-  if (target === 'surface:self') return { kind: 'self' };
-  if (!target.startsWith('surface:')) return { kind: 'stable', id: target };
-  const rest = target.slice('surface:'.length);
-  if (!rest) return { kind: 'nothing' };
-  return POSITIONAL_SURFACE_REF.test(rest) ? { kind: 'ref', ref: target } : { kind: 'stable', id: rest };
-}
-
 function matchesTarget(
-  classified: SurfaceTargetKind,
+  classified: ParsedSurfaceTarget,
   surface: DorSurface,
   callerSurfaceId: string | undefined,
 ): boolean {
@@ -219,14 +189,11 @@ function matchesTarget(
       return surface.focused;
     case 'self':
       return callerSurfaceId !== undefined && surface.id === callerSurfaceId;
-    case 'ref':
-      return classified.ref === surface.ref;
-    case 'stable':
+    case 'id':
       return classified.id === surface.id;
     case 'title':
       return surface.title === classified.title;
-    // What a bare `surface:` names.
-    case 'nothing':
+    case 'invalid':
       return false;
   }
 }
@@ -237,7 +204,7 @@ function matchesDorSurfaceTarget(
   surface: DorSurface,
   callerSurfaceId: string | undefined,
 ): boolean {
-  return !target || matchesTarget(classifySurfaceTarget(target), surface, callerSurfaceId);
+  return !target || matchesTarget(parseSurfaceTarget(target), surface, callerSurfaceId);
 }
 
 function renderSurfaceForError(surface: DorSurface): string {
@@ -261,13 +228,13 @@ function resolveSurfaceTarget(
   surfaces: DorSurface[],
   target: string | undefined,
   callerSurfaceId: string | undefined,
-  workspaceId: WorkspaceId,
 ): ParseResult<DorSurface> {
   // A caller this Wall does not hold never reaches here as one: the router
   // drops it before dispatching (`requestForWall`), so an omitted target falls
   // back to this Workspace's focused Surface.
   const resolvedTarget = target ?? callerSurfaceId ?? 'surface:focused';
-  const classified = classifySurfaceTarget(resolvedTarget);
+  const classified = parseSurfaceTarget(resolvedTarget);
+  if (classified.kind === 'invalid') return { ok: false, message: classified.message };
   const matches = surfaces.filter((surface) => matchesTarget(classified, surface, callerSurfaceId));
   const single = pickSingleMatch(matches, resolvedTarget);
   if (single) return single;
@@ -278,8 +245,7 @@ function resolveSurfaceTarget(
   }
   const fallback = !target && !callerSurfaceId ? (surfaces[0] ?? null) : null;
   if (fallback) return { ok: true, value: fallback };
-  const named = classified.kind === 'ref' ? { ref: classified.ref } : classified.kind === 'stable' ? { id: classified.id } : null;
-  const pending = named && pendingSurfaceRefusal(resolvedTarget, named, workspaceId);
+  const pending = classified.kind === 'id' ? pendingSurfaceRefusal(resolvedTarget, classified.id) : null;
   return { ok: false, message: pending ?? `surface '${resolvedTarget}' was not found` };
 }
 
@@ -632,7 +598,7 @@ export function toolRunCommand(run: string | readonly string[], terminalId?: str
  * surface-resolution/query helpers. This is CLI policy — surface targeting,
  * param coercion, command quoting, restart/integration timing — not wall layout;
  * the layout primitives it drives (`createSplitSurface`, `createContentSurface`,
- * `closeSurface`, `buildDorSurfaces`, `surfaceRefForId`) are owned by the
+ * `closeSurface`, `buildDorSurfaces`) are owned by the
  * Wall and injected here (docs/specs/dor-cli.md).
  */
 export function useDorControl({
@@ -641,7 +607,6 @@ export function useDorControl({
   doorsRef,
   buildDorSurfaces,
   buildDorSurfaceList,
-  surfaceRefForId,
   createSplitSurface,
   createContentSurface,
   isClosingSurface,
@@ -663,8 +628,6 @@ export function useDorControl({
   /** Like `buildDorSurfaces` but also includes minimized (doored) Surfaces —
    *  the full `dor list` view. */
   buildDorSurfaceList: () => DorSurface[];
-  /** Stable `surface:N` ref for a pane/door id, shared with the render. */
-  surfaceRefForId: (id: string) => string;
   createSplitSurface: (args: {
     command?: string;
     direction: DorResolvedSplitDirection;
@@ -729,12 +692,12 @@ export function useDorControl({
   const resolveVisibleSurface = useCallback((
     target: string | undefined,
     callerSurfaceId: string | undefined,
-  ): ParseResult<DorSurface> => resolveSurfaceTarget(buildDorSurfaces(), target, callerSurfaceId, workspaceScope() ?? DEFAULT_WORKSPACE_ID), [buildDorSurfaces, workspaceScope]);
+  ): ParseResult<DorSurface> => resolveSurfaceTarget(buildDorSurfaces(), target, callerSurfaceId), [buildDorSurfaces]);
 
   const resolveListedSurface = useCallback((
     target: string | undefined,
     callerSurfaceId: string | undefined,
-  ): ParseResult<DorSurface> => resolveSurfaceTarget(buildDorSurfaceList(), target, callerSurfaceId, workspaceScope() ?? DEFAULT_WORKSPACE_ID), [buildDorSurfaceList, workspaceScope]);
+  ): ParseResult<DorSurface> => resolveSurfaceTarget(buildDorSurfaceList(), target, callerSurfaceId), [buildDorSurfaceList]);
 
   // The shared prelude of every handler that acts on an existing surface
   // (send / read / await / kill / resolve*): a target surface is required and
@@ -1041,7 +1004,7 @@ export function useDorControl({
       surfaceRef: result.value.ref,
       minimized,
     };
-  }, [createContentSurface, findBrowserSurface, updateSurfaceParams, surfaceRefForId, lath]);
+  }, [createContentSurface, findBrowserSurface, updateSurfaceParams, lath]);
 
 
   // The request handler itself. The window listener that picks WHICH Wall runs it
@@ -2331,7 +2294,7 @@ export function useDorControl({
     }
 
     detail.respond({ ok: false, error: unsupportedControlMethodMessage(detail.method) });
-  }, [beginPreviewSwitch, browserKeyScope, buildDorSurfaces, buildDorSurfaceList, closeSurface, createContentSurface, createSplitSurface, ensureBrowserSurface, findBrowserSurface, findSurfaceIdRunningCommand, findSurfaceByParams, isTargetable, revealSurface, previewSlot, restoreInterruptedRun, restoreOnLatePrompt, supersedePreviews, isClosingWorkspace, requireAutomationSession, requireBrowserSurface, requireListedSurface, requireTerminalSurface, resolveListedSurface, resolveVisibleSurface, surfaceRefForId, lath, nav, workspaceRef, workspaceScope]);
+  }, [beginPreviewSwitch, browserKeyScope, buildDorSurfaces, buildDorSurfaceList, closeSurface, createContentSurface, createSplitSurface, ensureBrowserSurface, findBrowserSurface, findSurfaceIdRunningCommand, findSurfaceByParams, isTargetable, revealSurface, previewSlot, restoreInterruptedRun, restoreOnLatePrompt, supersedePreviews, isClosingWorkspace, requireAutomationSession, requireBrowserSurface, requireListedSurface, requireTerminalSurface, resolveListedSurface, resolveVisibleSurface, lath, nav, workspaceRef, workspaceScope]);
 
   return { findSurfaceByParams, updateSurfaceParams, handleDorControl };
 }

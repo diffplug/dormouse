@@ -10,7 +10,6 @@ import { setSurfaceIdWallOwnership } from '../../lib/surface-ids';
 
 export interface PreparedSurfaceMove {
   meta: LeafMeta;
-  surfaceRef: string;
   iframe: boolean;
   terminal: boolean;
   /** Detach membership, never the Session. Returns a complete Wall rollback. */
@@ -27,7 +26,8 @@ export interface PreparedSurfaceMove {
 export interface WallHandle {
   canMoveSurfaces: boolean;
   prepareSurfaceMove(id: string): PreparedSurfaceMove;
-  adoptSurfaceMove(id: string, meta: LeafMeta): { surfaceRef: string; rollback(): void };
+  /** Place a moved Surface here. Returns a complete Wall rollback. */
+  adoptSurfaceMove(id: string, meta: LeafMeta): () => void;
   /** End a Surface move on this Wall. An emptied tree refills when Doors
    *  remain, or when `keepEmpty` says the Workspace stays (a pinned source). */
   finishSurfaceMove(options?: { keepEmpty?: boolean }): void;
@@ -47,9 +47,9 @@ export interface WallHandle {
   surfaceIds(): string[];
   ownsSurface(id: string): boolean;
   /** Member Surfaces rendered as plain iframes, Doored ones included, as their
-   *  Workspace-stable `surface:N` refs: the page state a move between Windows
-   *  destroys (`docs/specs/layout.md` → Workspaces). Refs, not internal ids,
-   *  because the refusal naming them is read by a `dor` caller. Agent-browser
+   *  refs: the page state a move between Windows destroys
+   *  (`docs/specs/layout.md` → Workspaces). Refs, not internal ids, because
+   *  the refusal naming them is read by a `dor` caller. Agent-browser
    *  Surfaces are not among them — their session lives in the host and
    *  reconnects. */
   iframeSurfaceRefs(): string[];

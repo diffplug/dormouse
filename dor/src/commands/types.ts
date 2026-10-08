@@ -503,7 +503,7 @@ export interface IframeSurfaceResponse {
 }
 
 export interface ResolveOpenTargetRequest extends WorkspaceScopedRequest {
-  /** A terminal Surface handle (surface:N, surface:<stable-id>, surface:self,
+  /** A terminal Surface handle (surface:N, a Surface id, surface:self,
    *  surface:focused) whose dev-server URL should be resolved. */
   surface: string;
 }
@@ -523,7 +523,7 @@ export interface ResolveOpenTargetResponse {
  *  key names no Surface, and a Surface's session was minted long ago. */
 export type ResolveBrowserRequest = WorkspaceScopedRequest & { provider: BrowserAutomationProvider } & (
   | {
-    /** A Surface handle (surface:N, surface:<stable-id>, surface:self,
+    /** A Surface handle (surface:N, a Surface id, surface:self,
      *  surface:focused, title:<title>) naming the browser Surface to drive. */
     surface: string;
     key?: undefined;

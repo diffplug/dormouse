@@ -1,3 +1,4 @@
+import { surfaceIdNumber } from 'dor/protocol';
 import { createIdPool } from './id-pool';
 import type { PersistedSession } from './session-types';
 import { registry } from './terminal-store';
@@ -55,8 +56,7 @@ export function maxSurfaceNumber(sessions: Iterable<PersistedSession>): number {
   let max = 0;
   for (const session of sessions) {
     for (const { id } of [...session.panes, ...(session.doors ?? [])]) {
-      const match = /^surface-(\d+)$/.exec(id);
-      if (match) max = Math.max(max, Number(match[1]));
+      max = Math.max(max, surfaceIdNumber(id) ?? 0);
     }
   }
   return max;

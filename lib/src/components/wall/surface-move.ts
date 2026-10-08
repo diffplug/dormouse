@@ -1,5 +1,6 @@
 import { flushSync } from 'react-dom';
 import type { MoveSurfaceRequest, MoveSurfaceResponse } from 'dor/commands/types';
+import { surfaceRefForId } from 'dor/protocol';
 import { closeWorkspace, createWorkspace, generateWorkspaceId, getActiveWorkspaceId, hasWorkspace, isWorkspacePinned, resolveWorkspaceRef, setActiveWorkspace, workspaceRefFor } from '../../lib/workspace-store';
 import { forgetWorkspaceSession, invalidateWorkspaceSaves, isWorkspaceTransferPending, moveRetainedSurfaceRecord, publishWorkspaceSessions, setWorkspaceTransferPending } from '../../lib/window-session-aggregator';
 import { cancelPendingConfirmation, dismissWorkspaceUi, requestConfirmation, setWorkspaceMoveError } from '../../lib/workspace-ui-store';
@@ -134,13 +135,10 @@ export async function moveSurface(id: string, request: Omit<MoveSurfaceRequest, 
     const receiver = target!;
     // Read after the last await: a pin set meanwhile keeps the source.
     const keepSource = isWorkspacePinned(source.workspaceId);
-    let surfaceRef = '';
     flushSync(() => {
       undoDeparture = prepared.depart();
       try {
-        const adopted = receiver.adoptSurfaceMove(id, prepared.meta);
-        undoAdoption = adopted.rollback;
-        surfaceRef = adopted.surfaceRef;
+        undoAdoption = receiver.adoptSurfaceMove(id, prepared.meta);
       } catch (error) { undoDeparture(); undoDeparture = undefined; throw error; }
       receiver.finishSurfaceMove();
       // A pinned source is never discarded: it refills, as a kill of its last
@@ -168,15 +166,16 @@ export async function moveSurface(id: string, request: Omit<MoveSurfaceRequest, 
       }
     });
     const workspaceRef = workspaceRefFor(targetId);
+    const surfaceRef = surfaceRefForId(id);
     if (prepared.terminal) {
-      const moved = `Moved ${prepared.surfaceRef} from ${oldWorkspaceRef} to ${workspaceRef} ${surfaceRef}.`;
+      const moved = `Moved ${surfaceRef} from ${oldWorkspaceRef} to ${workspaceRef}.`;
       const terminal = getTerminalInstance(id);
       if (terminal?.buffer.active.type === 'alternate') {
-        receiver.showMoveNotice(id, `${moved} Cached surface:N refs now resolve here; use stable ID ${id}. Unscoped dor ensure can duplicate work left behind.`);
+        receiver.showMoveNotice(id, `${moved} Unscoped dor ensure can duplicate work left behind.`);
       } else {
         // Raw xterm write: keep host-minted refs and ids from carrying controls.
-        const line = sanitizeText(`${moved} Stable ID: ${id}.`, 500);
-        terminal?.write(`\r\n[Dormouse] ${line}\r\nShort surface:N refs now resolve in the destination Workspace; cached refs may target other panes. Unscoped dor ensure searches here and can duplicate a server left behind. Use stable IDs across moves.\r\n`);
+        const line = sanitizeText(moved, 500);
+        terminal?.write(`\r\n[Dormouse] ${line}\r\nUnscoped dor ensure searches here and can duplicate a server left behind.\r\n`);
       }
     }
     return { status: 'moved', surfaceId: id, surfaceRef, workspaceId: targetId, workspaceRef };

@@ -10,8 +10,6 @@ import { applyTerminalSemanticEvents, removeTerminalPaneState } from '../../lib/
 const session = (id: string): PersistedSession => ({
   version: 3,
   panes: [{ id, cwd: '/repo', title: 'shell', untouched: true }],
-  surfaceRefs: { [id]: 'surface:1' },
-  surfaceRefsNext: 2,
 });
 
 beforeEach(() => {
@@ -76,7 +74,6 @@ describe('closing one window of several', () => {
     expect(pane).toMatchObject({ cwd: '/repo', title: 'shell', untouched: true });
     // Minted as any new Surface is, in strip order.
     expect(snapshot.workspaces.map(workspace => workspace.session.panes[0].id)).toEqual(['surface-1', 'surface-2']);
-    expect(snapshot.workspaces[1].session.surfaceRefs).toBeUndefined();
   });
 
   it('keeps a pin, which a reopened window restores', () => {

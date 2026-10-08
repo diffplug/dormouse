@@ -115,9 +115,6 @@ export interface PersistedDoor {
   token?: unknown;
 }
 
-/** Workspace-scoped stable `dor` short refs: Surface id -> `surface:N`. */
-export type PersistedSurfaceRefs = Record<string, string>;
-
 export interface PersistedSession {
   /** Workspace delivery overrides, shared by standalone and VS Code snapshots. */
   alertDelivery?: AlertDeliveryOverrides;
@@ -127,12 +124,6 @@ export interface PersistedSession {
   /** Native Lath persisted layout (`LathPersistedLayout`) — the layout Dormouse
    *  writes (docs/specs/tiling-engine.md → "Persistence"). */
   lathLayout?: unknown;
-  /** Stable `dor` short refs scoped to this Workspace. Refs are never reused. */
-  surfaceRefs?: PersistedSurfaceRefs;
-  /** Next `surface:N` number to hand out in this Workspace. Persisted alongside
-   *  `surfaceRefs` (not derived from it) so a killed Surface's entry can be dropped
-   *  from `surfaceRefs` immediately without its number ever being reused. */
-  surfaceRefsNext?: number;
 }
 
 export type WorkspaceId = string;
@@ -194,8 +185,6 @@ interface PersistedSessionV3Input {
   panes: PersistedPaneInput[];
   doors?: PersistedDoor[];
   lathLayout?: unknown;
-  surfaceRefs?: unknown;
-  surfaceRefsNext?: unknown;
 }
 
 // --- Validation guards (reject untrusted blobs) ---
@@ -287,33 +276,6 @@ function isPersistedSessionV3(value: unknown): value is PersistedSessionV3Input 
   );
 }
 
-function validSurfaceRef(value: unknown): value is string {
-  return typeof value === 'string' && /^surface:[1-9]\d*$/.test(value);
-}
-
-function normalizeSurfaceRefs(value: unknown): PersistedSurfaceRefs | undefined {
-  if (!isRecord(value)) return undefined;
-  const refs: PersistedSurfaceRefs = {};
-  for (const [id, ref] of Object.entries(value)) {
-    if (id.length > 0 && validSurfaceRef(ref)) refs[id] = ref;
-  }
-  return Object.keys(refs).length > 0 ? refs : undefined;
-}
-
-function normalizeSurfaceRefsNext(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isInteger(value) && value >= 1 ? value : undefined;
-}
-
-/** Carry the optional ref map and counter together through restore/resume shapes. */
-export function carrySurfaceRefs(
-  source: Pick<PersistedSession, 'surfaceRefs' | 'surfaceRefsNext'> | null | undefined,
-): Pick<PersistedSession, 'surfaceRefs' | 'surfaceRefsNext'> {
-  return {
-    ...(source?.surfaceRefs ? { surfaceRefs: source.surfaceRefs } : {}),
-    ...(source?.surfaceRefsNext !== undefined ? { surfaceRefsNext: source.surfaceRefsNext } : {}),
-  };
-}
-
 /** Parse a v3 Session; malformed present state warns and falls back to fresh. */
 export function readPersistedSession(raw: unknown): PersistedSession | null {
   if (isEmptyState(raw)) return null;
@@ -325,9 +287,7 @@ export function readPersistedSession(raw: unknown): PersistedSession | null {
 
 function normalizeSessionV3(session: PersistedSessionV3Input): PersistedSession {
   const alertDelivery = normalizeAlertDeliveryOverrides(session.alertDelivery);
-  const surfaceRefs = normalizeSurfaceRefs(session.surfaceRefs);
-  const surfaceRefsNext = normalizeSurfaceRefsNext(session.surfaceRefsNext);
-  const { alertDelivery: _rawDelivery, surfaceRefs: _rawRefs, surfaceRefsNext: _rawNext, ...rest } = session;
+  const { alertDelivery: _rawDelivery, ...rest } = session;
   // Deny-list retired fields so future PersistedPane fields pass through without
   // manual allowlist updates. Neither retired field is on PersistedPaneInput.
   const panes: PersistedPane[] = session.panes.map((pane) => {
@@ -343,10 +303,9 @@ function normalizeSessionV3(session: PersistedSessionV3Input): PersistedSession 
     };
   });
   return {
-    ...(rest as Omit<PersistedSession, 'panes' | 'surfaceRefs' | 'surfaceRefsNext'>),
+    ...(rest as Omit<PersistedSession, 'panes'>),
     panes,
     ...(Object.keys(alertDelivery).length ? { alertDelivery } : {}),
-    ...carrySurfaceRefs({ surfaceRefs, surfaceRefsNext }),
   };
 }
 

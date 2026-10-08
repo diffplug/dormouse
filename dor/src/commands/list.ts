@@ -65,11 +65,11 @@ Text output prints one row per Surface: a * marks the focused Surface, then the 
 
 Filters are ANDed. --command is an exact match against the running command reported by shell integration. --cwd resolves to an absolute path like dor ensure --cwd, relative to the invoking shell's PWD when available.
 
-JSON output (--json) always includes both stable ids and refs, and each row carries has_terminal (a PTY) and has_browser (a browser renderer) — gate on those, not on kind, so a Surface that has both still matches — and the preview slot's row adds preview: true. It adds top-level caller_surface_ref/caller_surface_id and focused_surface_ref/focused_surface_id — the calling and focused Surfaces, null when neither is in the list — plus workspace_ref, window_ref, and a host block (app, workspace, cli_js_path, node_path): the identity dump dor identify used to print.
+JSON output (--json) always includes both ids and refs, and each row carries has_terminal (a PTY) and has_browser (a browser renderer) — gate on those, not on kind, so a Surface that has both still matches — and the preview slot's row adds preview: true. It adds top-level caller_surface_ref/caller_surface_id and focused_surface_ref/focused_surface_id — the calling and focused Surfaces, null when neither is in the list — plus workspace_ref, window_ref, and a host block (app, workspace, cli_js_path, node_path): the identity dump dor identify used to print.
 
 --workspace <ref> lists another Workspace instead, in this window or another: workspace:<n> (a stable number) or workspace:<name>, which resolves only when exactly one Workspace carries that name. Both are accepted bare ("2", "build"). --window <label> lists another window's Surfaces or Workspaces (window:main, ws-2).
 
---all lists every Workspace of this Window, grouped under a Workspace header — every Workspace keeps its header, including one holding nothing and one the filters emptied. Rows keep their own Workspace-scoped surface:N refs, so several groups have a surface:1, but only the active Workspace's selection carries the focus marker; each JSON row adds workspace_ref, and the payload adds a workspaces array plus caller_workspace_ref/focused_workspace_ref, because caller_surface_ref/focused_surface_ref then name a ref several groups share (the _id halves stay unique). Target a row from another Workspace by its stable id, or pass --workspace.
+--all lists every Workspace of this Window, grouped under a Workspace header — every Workspace keeps its header, including one holding nothing and one the filters emptied. Refs are unique across the groups, and a row from another Workspace is targeted by its ref as it stands. Only the active Workspace's selection carries the focus marker; each JSON row adds workspace_ref, and the payload adds a workspaces array plus caller_workspace_ref/focused_workspace_ref.
 
 --workspaces prints the Workspace overview instead of any Surface: one row per Workspace with the active marker, its name, [pinned] when it is pinned (dor workspace pin), [ringing]/[todo] when any member Surface is, and [attention N] for the number owing it. It takes --json and --window, and no other flag.
 
@@ -407,9 +407,7 @@ function renderListJson(
     focused_surface_id: focused?.id ?? null,
     window_ref: response.windowRef,
     workspace_ref: response.workspaceRef,
-    // Under `--all` a `surface:N` ref is shared by every Workspace, so the two
-    // ref pointers above name a row only together with the Workspace it is in;
-    // the `_id` halves stay unique on their own.
+    // Under `--all`, which Workspace holds the caller and the focused Surface.
     ...(response.workspaces ? {
       caller_workspace_ref: caller?.workspaceRef ?? null,
       focused_workspace_ref: focused?.workspaceRef ?? null,

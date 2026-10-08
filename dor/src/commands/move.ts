@@ -15,11 +15,11 @@ export const moveCommand: Command = {
     docs: {
       brief: 'Move a surface to another workspace.',
       customUsage: ['<surface> <workspace>|--new [--workspace source] [--focus] [--dangerously-destroy-iframe-page-state] [--json]'],
-      fullDescription: `Moves a Surface within this Window, preserving its stable ID and allocating a new surface:N ref in the destination. Focus stays put unless --focus is set. --new creates a Workspace; it is refused for the source's only Surface.
+      fullDescription: `Moves a Surface within this Window, keeping its id and ref. Focus stays put unless --focus is set. --new creates a Workspace; it is refused for the source's only Surface.
 
 Plain iframes reopen at their saved URL and require --dangerously-destroy-iframe-page-state. Dirty or pending Tools cannot move, even with that flag.
 
-After your own pane moves, short refs and unscoped ensure resolve in the destination. Use stable Surface IDs across moves.
+After your own pane moves, unscoped ensure searches the destination and can duplicate work left behind.
 
 To move an entire Workspace to another Window or strip position, use dor workspace move.
 
