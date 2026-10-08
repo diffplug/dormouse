@@ -344,7 +344,10 @@ test('a presence window speaks only for its own identities and Client static', a
   assert.ok(revoked.misses.includes('client-not-paired'));
 });
 
-test('revoking a client cuts off access immediately', async () => {
+// Nothing in the product removes a record yet (docs/specs/security.md ->
+// "Known gaps": revocation has no mechanism). This pins what the shared ACL
+// does once something does: the next connection finds no pairing.
+test('an ACL record removed in the shared ACL stops matching on the next connection', async () => {
   const { burrow, authenticator, client } = await world();
   await client.pair(burrow, { accountId: ACCOUNT, authenticator });
   assert.equal((await client.connect(burrow, { accountId: ACCOUNT, authenticator })).ok, true);

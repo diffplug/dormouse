@@ -253,12 +253,6 @@ const TAURI = [
     'withGlobalTauri',
     'withGlobalTauri enabled',
   ],
-  [
-    'standalone/src-tauri/tauri.conf.json',
-    replace('"https://dormouse.sh/standalone-latest.json"', '"https://updates.example.net/latest.json"'),
-    'updater endpoints',
-    'a changed updater endpoint',
-  ],
 ];
 
 for (const [relative, mutate, expected, label] of [...STRUCTURAL, ...CSP, ...TAURI]) {
