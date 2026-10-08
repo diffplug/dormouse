@@ -108,6 +108,14 @@ function addSource(set: SourceSet, source: ListedRingSource | WatchingSource): v
   else if (!set.sources.includes(source)) set.sources.push(source);
 }
 
+/** Every source a set holds: `watching` first, then the escalation order. */
+function eachSource(set: SourceSet, visit: (source: ListedRingSource | WatchingSource) => void): void {
+  if (set.watching !== null) visit(set.watching);
+  for (const source of LISTED_RING_SOURCES) {
+    if (set.sources.includes(source)) visit(source);
+  }
+}
+
 /** Take `watching` off a set. Returns whether that left it empty. */
 function dropWatching(set: SourceSet): boolean {
   set.watching = null;
@@ -124,8 +132,9 @@ interface Ring extends SourceSet {
   episode: AlertEpisode;
   /** What it shows, and what the TODO a look turns it into keeps. */
   detail: ActivityNotification;
-  /** Published as `ALERT_RINGING` at least once. Until then, coming due on an
-   *  engaged Session makes it a hold (`publishDeferral`). */
+  /** Published as `ALERT_RINGING` at least once — set only by
+   *  `reconcileRing`, so false means deferred at every publish since it
+   *  opened. Until then, coming due on an engaged Session makes it a hold. */
   shown: boolean;
 }
 
@@ -947,29 +956,31 @@ export class AlertManager {
     if (entry.deferWake !== null) return;
     entry.deferWake = setTimeout(() => {
       entry.deferWake = null;
-      this.notify(id);
+      if (entry.detector.hasRecentOutput()) this.armDeferWake(id, entry);
+      else this.notify(id);
     }, Math.max(0, entry.detector.quietAt() - Date.now()));
   }
 
   /**
-   * Run before every publish. Whatever publishes a deferral arms the wake that
-   * publishes its end. A ring that comes due without ever having shown is
-   * still news to the Session: engaged, it becomes a hold like a fresh
-   * completion would, rather than ringing in front of the user.
+   * Run by `notify` before every publish, and it mutates: whatever publishes a
+   * deferral arms the wake that publishes its end, and a ring that comes due
+   * without ever having shown is still news to the Session — engaged, it
+   * becomes a hold like a fresh completion would, rather than ringing in front
+   * of the user. Every deferred-to-due edge ends in `notify`, so this is the
+   * one place that decision is made.
    */
-  private publishDeferral(id: string, entry: AlertEntry): void {
+  private reconcileRing(id: string, entry: AlertEntry): void {
     const { ring } = entry;
     if (ring === null) return;
     if (this.isDeferred(entry)) {
       this.armDeferWake(id, entry);
-    } else if (ring.shown) {
-      return;
-    } else if (this.isEngaged(id)) {
-      entry.ring = null;
-      if (ring.watching) this.hold(entry, ring.watching, ring.detail);
-      for (const source of ring.sources) this.hold(entry, source, ring.detail);
-    } else {
-      ring.shown = true;
+    } else if (!ring.shown) {
+      if (this.isEngaged(id)) {
+        entry.ring = null;
+        eachSource(ring, (source) => this.hold(entry, source, ring.detail));
+      } else {
+        ring.shown = true;
+      }
     }
   }
 
@@ -1029,6 +1040,7 @@ export class AlertManager {
    * Only clearing a ring or a hold records an acknowledgement.
    */
   private clearRingForUser(entry: AlertEntry): Ring | null {
+    this.clearDeferWake(entry);
     const { ring, held } = entry;
     if (ring === null && held === null) return null;
     entry.ring = null;
@@ -1038,7 +1050,8 @@ export class AlertManager {
     return ring;
   }
 
-  /** A look at a ring: it becomes a TODO, keeping its detail. */
+  /** A look at a ring: it becomes a TODO showing what the ring showed — its
+   *  detail replaces the TODO's outright, unlike a receipt's (`updateReceipt`). */
   private ringToTodo(entry: AlertEntry, ring: Ring | null): void {
     if (ring === null) return;
     entry.todo = true;
@@ -1157,10 +1170,7 @@ export class AlertManager {
     const held = entry.held;
     if (held === null) return;
     entry.held = null;
-    if (held.watching !== null) this.holdOrDeliver(id, entry, held.watching, held.detail);
-    for (const source of LISTED_RING_SOURCES) {
-      if (held.sources.includes(source)) this.holdOrDeliver(id, entry, source, held.detail);
-    }
+    eachSource(held, (source) => this.holdOrDeliver(id, entry, source, held.detail));
   }
 
   // --- Alert controls ---
@@ -1169,9 +1179,8 @@ export class AlertManager {
     const entry = this.entries.get(id);
     if (!entry) return;
 
-    // Dismissing a ring leaves a TODO behind, so the summons is not lost. A
-    // Session with nothing ringing or held has nothing to dismiss.
-    if (entry.ring === null && entry.held === null) return;
+    // Dismissing a ring leaves a TODO behind, so the summons is not lost. With
+    // nothing ringing or held, nothing changes and `notify` publishes nothing.
     this.ringToTodo(entry, this.clearRingForUser(entry));
     this.notify(id);
   }
@@ -1387,7 +1396,7 @@ export class AlertManager {
 
   private notify(id: string): void {
     const entry = this.entries.get(id);
-    if (entry) this.publishDeferral(id, entry);
+    if (entry) this.reconcileRing(id, entry);
     const state = this.getState(id);
     const last = this.lastEmitted.get(id);
     // A helper publishes nothing, but takes back what it published before a demotion.

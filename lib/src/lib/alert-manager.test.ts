@@ -1317,7 +1317,7 @@ describe('AlertManager in isolation', () => {
       expect(manager.getState(id).status).toBe('ALERT_RINGING');
     });
 
-    it('keeps a deferred notification past thirty seconds until output goes quiet', () => {
+    it('keeps a ring deferred past thirty seconds until output goes quiet', () => {
       const id = 'defer-without-ceiling';
       driveToBusy(manager, id);
       manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'build failed' });
