@@ -1,46 +1,41 @@
 /**
- * Every lint self-test (`scripts/*-lint-selftest.mjs`) plants its violations in
- * a sandbox (`makeSandbox` in `scripts/lint-kit.mjs`) and never writes the
+ * Every lint self-test (`scripts/*-lint-selftest.mjs`) runs in a sandbox copy
+ * of the tree (`makeSelftest` in `scripts/lint-kit.mjs`) and never writes the
  * checkout: a planted line another reader sees is a false finding, and one an
- * interrupted run leaves behind is a real one. This runs them all, at once, and
- * requires every tracked file to be untouched afterwards — the same bytes and
- * the same change time, so an edit that was put back still counts — and no
- * file to have appeared or vanished.
+ * interrupted run leaves behind is a real one. This is how the root
+ * `pnpm test` runs them — all at once — and it fails if one fails, or if any
+ * tracked file was written afterwards (its change time moves even when the
+ * bytes are put back), or a path appeared in or left `git status`.
  *
- * A self-test discovered by name is covered without being listed here.
+ * A self-test is found by its name, so a new one is covered without being
+ * listed here.
  */
 
 import assert from 'node:assert/strict';
 import { execFile, execFileSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
-import { lstatSync, readdirSync, readFileSync, readlinkSync } from 'node:fs';
+import { lstatSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 
-import { repoRoot } from './lint-kit.mjs';
+import { gitPaths, repoRoot } from './lint-kit.mjs';
 
 const SELFTESTS = readdirSync(join(repoRoot, 'scripts'))
   .filter((name) => name.endsWith('-lint-selftest.mjs'))
   .sort();
 
-const git = (...args) => execFileSync('git', args, { cwd: repoRoot, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
-
-/** Each tracked file's bytes and change time, and every path git reports beside them. */
+/** Each tracked file's size and change time, and every path git reports beside them. */
 function snapshot() {
   const files = new Map();
-  for (const rel of git('ls-files', '-z').split('\0').filter(Boolean)) {
-    const path = join(repoRoot, rel);
-    const stat = lstatSync(path, { throwIfNoEntry: false });
-    if (!stat) files.set(rel, 'missing');
-    else if (stat.isDirectory()) continue;
-    else {
-      const bytes = stat.isSymbolicLink() ? readlinkSync(path) : readFileSync(path);
-      files.set(rel, `${createHash('sha256').update(bytes).digest('hex')} ctime ${stat.ctimeMs}`);
-    }
+  for (const rel of gitPaths()) {
+    const stat = lstatSync(join(repoRoot, rel), { throwIfNoEntry: false });
+    files.set(rel, stat ? `${stat.size} bytes, ctime ${stat.ctimeMs}` : 'missing');
   }
   // Untracked and ignored paths too, so a planted file or a backup is seen.
-  const status = git('status', '--porcelain=v1', '-z', '--untracked-files=all', '--ignored=matching');
-  return { files, status: status.split('\0').filter(Boolean).sort() };
+  const status = execFileSync('git', ['status', '--porcelain=v1', '-z', '--untracked-files=all', '--ignored=matching'], {
+    cwd: repoRoot,
+    encoding: 'utf8',
+  });
+  return { files, status: status.split('\0').filter(Boolean) };
 }
 
 function changes(before, after) {
@@ -63,7 +58,9 @@ function run(script) {
 }
 
 test('every lint self-test passes and leaves the checkout untouched', async () => {
-  assert.ok(SELFTESTS.length >= 6, `expected the lint self-tests under scripts/, found ${SELFTESTS.join(', ')}`);
+  for (const lint of ['deploy', 'e2e', 'loopback', 'outbound', 'ps1-cmdlet', 'spec']) {
+    assert.ok(SELFTESTS.includes(`${lint}-lint-selftest.mjs`), `scripts/${lint}-lint-selftest.mjs is missing, so pnpm test no longer runs it`);
+  }
   const before = snapshot();
   const results = await Promise.all(SELFTESTS.map(run));
   const after = snapshot();

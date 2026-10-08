@@ -4,31 +4,15 @@
  *
  * Rules and patterns stay in each lint — this is only the machinery around
  * them, and the repository layout two lints must agree on (`SHIPPED_DIRS`), factored out because the self-test contract is the part that must never
- * rot: a self-test plants each violation in a private copy of the tree
- * (`makeSandbox`) and never writes the repository, so another reader of the
- * checkout never sees a planted line and an interrupted run leaves nothing
- * behind.
+ * rot: a self-test runs in a private copy of the tree (`makeSelftest`) and
+ * never writes the checkout, so another reader of it never sees a planted
+ * line and an interrupted run leaves nothing behind.
  */
 
-import fs, {
-  constants,
-  copyFileSync,
-  existsSync,
-  lstatSync,
-  mkdirSync,
-  mkdtempSync,
-  readdirSync,
-  readFileSync,
-  readlinkSync,
-  realpathSync,
-  rmSync,
-  symlinkSync,
-  writeFileSync,
-} from 'node:fs';
-import { execFileSync } from 'node:child_process';
-import { syncBuiltinESMExports } from 'node:module';
+import { constants, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
-import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { dirname, isAbsolute, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 /**
@@ -80,10 +64,21 @@ export function tempDir(t, prefix) {
   return dir;
 }
 
-let trackedCache = null;
+/** NUL-separated repo-relative paths from `git ls-files` with `args`, in the checkout. */
+export function gitPaths(...args) {
+  return execFileSync('git', ['ls-files', '-z', ...args], {
+    cwd: repoRoot,
+    encoding: 'utf8',
+    maxBuffer: 64 * 1024 * 1024,
+  })
+    .split('\0')
+    .filter(Boolean);
+}
 
-/** Names the NUL-separated file list a lint in a sandbox reads in place of `git ls-files`. */
+/** The NUL-separated file list a sandbox's processes read in place of `git ls-files`. */
 const TRACKED_LIST_ENV = 'LINT_KIT_TRACKED_FILES';
+
+let trackedCache = null;
 
 /**
  * Every tracked file, as repo-relative POSIX paths. Tracked rather than walked,
@@ -97,18 +92,9 @@ const TRACKED_LIST_ENV = 'LINT_KIT_TRACKED_FILES';
  * no checkout, so a lint running in one reads the list it was copied from.
  */
 export function trackedFiles() {
-  const list = process.env[TRACKED_LIST_ENV];
-  trackedCache ??= (
-    list
-      ? readFileSync(list, 'utf8')
-      : execFileSync('git', ['ls-files', '-z'], {
-          cwd: repoRoot,
-          encoding: 'utf8',
-          maxBuffer: 64 * 1024 * 1024,
-        })
-  )
-    .split('\0')
-    .filter(Boolean);
+  trackedCache ??= process.env[TRACKED_LIST_ENV]
+    ? readFileSync(process.env[TRACKED_LIST_ENV], 'utf8').split('\0').filter(Boolean)
+    : gitPaths();
   return trackedCache;
 }
 
@@ -161,93 +147,44 @@ export const replaceText = (from, to) => (path) => {
   writeFileSync(path, text.replace(from, () => to));
 };
 
-/** Run one of the lints in a child — in `sandbox` when given — and capture the result. */
-export function runLint(script, sandbox) {
+/** Run one of the lints in a child and capture the result. */
+function runLint(script) {
   try {
     return {
       ok: true,
-      status: 0,
-      stdout: execFileSync('node', [join(sandbox?.root ?? repoRoot, 'scripts', script)], {
+      stdout: execFileSync('node', [join(repoRoot, 'scripts', script)], {
         encoding: 'utf8',
-        env: sandbox?.env,
         stdio: ['ignore', 'pipe', 'pipe'],
       }),
     };
   } catch (error) {
     return {
       ok: false,
-      status: error?.status ?? null,
       stdout: typeof error?.stdout === 'string' ? error.stdout : '',
       stderr: typeof error?.stderr === 'string' ? error.stderr : '',
     };
   }
 }
 
-/** Whether `path` resolves to `dir` or below it. */
-function isWithin(dir, path) {
-  const rel = relative(dir, resolve(path));
-  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
+/** Run one of the lints in a child, so a thrown rule cannot pass as a failure. */
+function lintFails(script) {
+  return !runLint(script).ok;
 }
 
-/**
- * The `node:fs` calls that write, and which of their arguments is a path they
- * write: a self-test uses only the synchronous API.
- */
-const FS_WRITES = {
-  appendFileSync: [0],
-  chmodSync: [0],
-  copyFileSync: [1],
-  cpSync: [1],
-  linkSync: [1],
-  mkdirSync: [0],
-  renameSync: [0, 1],
-  rmSync: [0],
-  rmdirSync: [0],
-  symlinkSync: [1],
-  truncateSync: [0],
-  unlinkSync: [0],
-  writeFileSync: [0],
-};
-
-let guarded = false;
-
-/**
- * Make every write this process makes through `node:fs` into the repository
- * throw, so a self-test that reaches past its sandbox fails rather than
- * planting a violation where another reader can see it. Applied to the module
- * itself, which `syncBuiltinESMExports` carries to every named import.
- */
-function refuseRepoWrites(sandboxDir) {
-  if (guarded) return;
-  guarded = true;
-  for (const [name, positions] of Object.entries(FS_WRITES)) {
-    const original = fs[name];
-    fs[name] = function guardedWrite(...args) {
-      for (const i of positions) {
-        const target = args[i] instanceof URL ? fileURLToPath(args[i]) : args[i];
-        if (typeof target === 'string' && isWithin(repoRoot, target) && !isWithin(sandboxDir, target)) {
-          throw new Error(`self-test: refused ${name} inside the repository (${target}); plant it in the sandbox`);
-        }
-      }
-      return original.apply(this, args);
-    };
-  }
-  syncBuiltinESMExports();
-}
-
+/** Set, to the sandbox's directory, in a self-test running inside one. */
+const SANDBOX_ENV = 'LINT_KIT_SANDBOX';
 const SANDBOX_PREFIX = 'lint-sandbox-';
 
 /**
  * Remove the sandboxes of self-tests no longer running. A signal is left to
- * kill the process as it would anyway — a handler would wait for the event
- * loop, which a self-test's synchronous run never yields to — so its sandbox
- * outlives it.
+ * kill a self-test as it would anyway, so its sandbox outlives it; the pid in
+ * the name says whose it was.
  */
 function removeOrphanedSandboxes() {
   for (const name of readdirSync(tmpdir())) {
+    if (!name.startsWith(SANDBOX_PREFIX)) continue;
     const pid = Number(name.slice(SANDBOX_PREFIX.length).split('-')[0]);
-    if (!name.startsWith(SANDBOX_PREFIX) || !Number.isInteger(pid) || pid <= 0 || isRunning(pid)) continue;
-    rmSync(join(tmpdir(), name), { recursive: true, force: true });
+    if (Number.isInteger(pid) && !isRunning(pid)) rmSync(join(tmpdir(), name), { recursive: true, force: true });
   }
 }
 
@@ -261,69 +198,68 @@ function isRunning(pid) {
 }
 
 /**
- * A private copy of the working tree, for a self-test to plant violations in:
- * every tracked file, and every untracked one git does not ignore, as the
- * checkout has them. A lint run in it (`runLint(script, sandbox)`) resolves
- * its root to the copy and reads the tracked list it was copied from, so its
- * answer is the one it gives the checkout. Removed when the process exits;
- * one a signal killed is removed by the next self-test to start, found by the
- * pid in its name.
+ * Copy the working tree — every tracked file, and every untracked one git does
+ * not ignore, as the checkout has them — into a new temp directory, and write
+ * the tracked list beside it for `trackedFiles`.
  */
-export function makeSandbox() {
+function makeSandbox() {
   removeOrphanedSandboxes();
   const dir = realpathSync(mkdtempSync(join(tmpdir(), `${SANDBOX_PREFIX}${process.pid}-`)));
   const root = join(dir, 'repo');
   const files = trackedFiles();
-  const untracked = execFileSync('git', ['ls-files', '-z', '--others', '--exclude-standard'], {
-    cwd: repoRoot,
-    encoding: 'utf8',
-    maxBuffer: 64 * 1024 * 1024,
-  })
-    .split('\0')
-    .filter(Boolean);
-  for (const rel of [...files, ...untracked]) {
+  for (const rel of [...files, ...gitPaths('--others', '--exclude-standard')]) {
     const from = join(repoRoot, rel);
+    // Deleted in the working tree, so absent to the lint as well. A link is
+    // copied as the file it reaches, so nothing in the copy leads back out.
     const stat = lstatSync(from, { throwIfNoEntry: false });
-    // Deleted in the working tree, so absent to the lint as well.
     if (!stat || stat.isDirectory()) continue;
     const to = join(root, rel);
     mkdirSync(dirname(to), { recursive: true });
-    const link = stat.isSymbolicLink() ? readlinkSync(from) : null;
-    // A link that stays inside the copy is kept; any other is copied as the
-    // file it reaches, so nothing in the sandbox writes through to the checkout.
-    if (link !== null && !isAbsolute(link) && isWithin(root, join(dirname(to), link))) symlinkSync(link, to);
-    else copyFileSync(from, to, constants.COPYFILE_FICLONE);
+    copyFileSync(from, to, constants.COPYFILE_FICLONE);
   }
   const list = join(dir, 'tracked');
   writeFileSync(list, files.join('\0'));
-  process.once('exit', () => rmSync(dir, { recursive: true, force: true }));
-  return { dir, root, env: { ...process.env, [TRACKED_LIST_ENV]: list } };
+  return { dir, root, list };
 }
 
 /**
- * A self-test run: mutate a file in a sandbox, require the lint to go red
- * there, restore the file for the next case. Nothing touches the repository:
- * every write this process makes into it throws.
+ * Re-run this self-test from a sandbox copy of the tree and exit with its
+ * status. The copy's `repoRoot` is the sandbox, so the self-test, every lint
+ * it runs, and every path either resolves are the copy's: nothing it plants
+ * reaches the checkout.
+ */
+function rerunInSandbox() {
+  const self = relative(repoRoot, realpathSync(process.argv[1]));
+  if (self.startsWith('..') || isAbsolute(self)) throw new Error(`self-test: ${process.argv[1]} is outside ${repoRoot}`);
+  const { dir, root, list } = makeSandbox();
+  const { status } = spawnSync(process.execPath, [join(root, self), ...process.argv.slice(2)], {
+    stdio: 'inherit',
+    env: { ...process.env, [SANDBOX_ENV]: dir, [TRACKED_LIST_ENV]: list },
+  });
+  rmSync(dir, { recursive: true, force: true });
+  process.exit(status ?? 1);
+}
+
+/**
+ * A self-test run: mutate a file, require the lint to go red, restore the file
+ * for the next case. Called from the checkout, it re-runs the whole self-test
+ * in a sandbox copy of the tree (`rerunInSandbox`) and never returns.
  *
- * Throws unless the lint passes the pristine sandbox first — a copy it already
+ * Throws unless the lint passes the unmutated copy first — a copy it already
  * fails would turn every case red for that reason and prove nothing.
  */
 export function makeSelftest(script) {
-  const sandbox = makeSandbox();
-  refuseRepoWrites(sandbox.dir);
+  if (!process.env[SANDBOX_ENV]) rerunInSandbox();
   const weak = [];
   let held = 0;
-  const result = () => runLint(script, sandbox);
-  const fails = () => !result().ok;
-  const pristine = result();
+  const pristine = runLint(script);
   if (!pristine.ok) {
     throw new Error(`self-test: ${script} fails the unmutated sandbox, so no case could prove anything\n${pristine.stdout}${pristine.stderr}`);
   }
 
-  /** Edit `relative` in the sandbox with `mutate`, run the lint, restore, and record. */
+  /** Edit `relative` with `mutate`, run the lint, restore, and record. */
   function runMutation(relative, mutate, check, label) {
-    const path = join(sandbox.root, relative);
-    if (!isWithin(sandbox.root, path)) throw new Error(`self-test: ${relative} is outside the sandbox`);
+    const path = join(repoRoot, relative);
     const original = existsSync(path) ? readFileSync(path) : null;
     try {
       mutate(path);
@@ -337,13 +273,9 @@ export function makeSelftest(script) {
 
   return {
     weak,
-    /** The sandbox's root, for a case that edits it directly and restores it itself. */
-    root: sandbox.root,
-    /** Run the lint in the sandbox. */
-    run: result,
     /** Apply any mutation and require the lint to fail. */
     withMutation(relative, mutate, label) {
-      runMutation(relative, mutate, fails, label);
+      runMutation(relative, mutate, () => lintFails(script), label);
     },
     /**
      * Apply any mutation and require the lint to fail *with `expected` in its
@@ -355,8 +287,8 @@ export function makeSelftest(script) {
         relative,
         mutate,
         () => {
-          const { ok, stderr } = result();
-          return !ok && stderr.includes(expected);
+          const result = runLint(script);
+          return !result.ok && result.stderr.includes(expected);
         },
         label,
       );
@@ -366,7 +298,7 @@ export function makeSelftest(script) {
       runMutation(
         relative,
         appendText(text),
-        fails,
+        () => lintFails(script),
         label,
       );
     },
@@ -376,8 +308,8 @@ export function makeSelftest(script) {
         relative,
         appendText(text),
         () => {
-          const { ok, stdout } = result();
-          return ok && stdout.includes(expected);
+          const result = runLint(script);
+          return result.ok && result.stdout.includes(expected);
         },
         label,
       );

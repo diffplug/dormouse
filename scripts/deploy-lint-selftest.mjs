@@ -80,8 +80,8 @@ for (const {
 
     // Matched and edited in the same normalized form the lint reads, so a
     // `core.autocrlf` checkout does not report every span rule as unmatched.
-    // The byte-exact backup `withMutation` takes is what the file is restored
-    // from, so writing normalized text mid-run costs nothing.
+    // `withMutation` restores the exact bytes it read before the edit, so
+    // writing normalized text mid-run costs nothing.
     const original = readRepoFile(file);
     const match = original.match(pattern);
     if (!match) {

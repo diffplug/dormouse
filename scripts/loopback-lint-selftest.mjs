@@ -31,8 +31,7 @@ const LINT = 'scripts/loopback-lint.mjs';
 
 /**
  * A tracked, non-test source file that binds nothing and names no guard.
- * Anything with those three properties works; this one is a small Windows-only
- * dev helper.
+ * Anything with those three properties works.
  */
 const TARGET = 'standalone/scripts/clean-dev-sidecar.mjs';
 const TEST_TARGET = 'lib/src/lib/feature-flags.test.ts';

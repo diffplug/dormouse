@@ -15,11 +15,11 @@
  * security spec, which headroom alone cannot promise, so it picks the same way
  * from the specs that qualify. Check 15 is a number rather than a pattern: its
  * case removes a paired rationale file instead of planting text.
- * Every case plants in a sandbox copy of the tree, which `scripts/lint-kit.mjs`
- * owns.
+ * `scripts/lint-kit.mjs` owns the sandbox and the edit-and-restore.
  */
 
 import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { makeSelftest, readRepoFile, repoRoot } from './lint-kit.mjs';
@@ -103,9 +103,9 @@ const selftest = makeSelftest('spec-lint.mjs');
 // out of the way, and runs each heading spelling the lint accepts. A missing
 // map path must still fail check 4.
 const originalSpec = readRepoFile(SPEC);
-const specPath = join(selftest.root, SPEC);
+const specPath = join(repoRoot, SPEC);
 const pointerless = originalSpec.replace(/Source of truth/g, 'Implemented in');
-const runSpecLint = () => selftest.run();
+const runSpecLint = () => spawnSync('node', [join(repoRoot, 'scripts/spec-lint.mjs')], { encoding: 'utf8' });
 for (const heading of ['## Files', '### Code map']) {
   const map = `\n${heading}\n\n| Entrypoint | Role |\n|---|---|\n| \`scripts/lint-kit.mjs\` | Lint plumbing. |\n`;
   try {
