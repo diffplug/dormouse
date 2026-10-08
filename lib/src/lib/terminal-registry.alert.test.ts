@@ -761,7 +761,7 @@ describe('terminal-registry alert behavior', () => {
     });
   });
 
-  it('Story 9: sustained output defers an owed ring, but an isolated prompt does not', () => {
+  it('Story 9: confirmed output defers an owed ring, but an isolated prompt or a candidate does not', () => {
     const id = 'story-9';
     createSession(id);
     enableAlert(id);
@@ -772,7 +772,7 @@ describe('terminal-registry alert behavior', () => {
     expect(getActivity(id)).toMatchObject({ status: 'ALERT_RINGING', episode });
     advance(1_600);
     emitOutput(id, 'continued output');
-    expect(getActivity(id)).toMatchObject({ status: 'MIGHT_BE_BUSY', episode });
+    expect(getActivity(id)).toMatchObject({ status: 'ALERT_RINGING', episode });
     emitOutput(id, 'confirmed output');
     expect(getActivity(id)).toMatchObject({ status: 'BUSY', episode });
     advance(5_000);

@@ -42,25 +42,25 @@ describe('QuiesceDetector', () => {
     expect(monitor.getStatus()).toBe('NOTHING_TO_SHOW');
   });
 
-  it('only treats candidate, busy, and finishing states as active', () => {
+  it('only treats confirmed work and its finishing window as busy', () => {
     const { monitor, settled } = createMonitor();
-    expect(monitor.isActive()).toBe(false);
+    expect(monitor.isConfirmedBusy()).toBe(false);
     monitor.onData();
-    expect(monitor.isActive()).toBe(false);
+    expect(monitor.isConfirmedBusy()).toBe(false);
     vi.advanceTimersByTime(1_500);
     monitor.onData();
     expect(monitor.getStatus()).toBe('MIGHT_BE_BUSY');
-    expect(monitor.isActive()).toBe(true);
+    expect(monitor.isConfirmedBusy()).toBe(false);
     vi.advanceTimersByTime(500);
-    expect(monitor.isActive()).toBe(false);
+    expect(monitor.isConfirmedBusy()).toBe(false);
     expect(settled).not.toHaveBeenCalled();
     monitor.reset();
     driveMonitorToBusy(monitor);
-    expect(monitor.isActive()).toBe(true);
+    expect(monitor.isConfirmedBusy()).toBe(true);
     vi.advanceTimersByTime(2_000);
-    expect(monitor.isActive()).toBe(true);
+    expect(monitor.isConfirmedBusy()).toBe(true);
     vi.advanceTimersByTime(3_000);
-    expect(monitor.isActive()).toBe(false);
+    expect(monitor.isConfirmedBusy()).toBe(false);
     expect(settled).toHaveBeenCalledOnce();
   });
 
@@ -70,7 +70,7 @@ describe('QuiesceDetector', () => {
     expect(monitor.onData()).toBe(false);
     vi.advanceTimersByTime(500);
     expect(monitor.onData()).toBe(true);
-    expect(monitor.isActive()).toBe(false);
+    expect(monitor.isConfirmedBusy()).toBe(false);
     monitor.dispose();
     expect(monitor.onData()).toBe(false);
   });
@@ -190,7 +190,7 @@ describe('QuiesceDetector', () => {
     const monitor = new QuiesceDetector({
       onChange: (status) => order.push(`change:${status}`),
       onSettled: () => {
-        expect(monitor.isActive()).toBe(false);
+        expect(monitor.isConfirmedBusy()).toBe(false);
         order.push('settled');
       },
     });

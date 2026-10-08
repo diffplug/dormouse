@@ -1217,17 +1217,17 @@ describe('AlertManager in isolation', () => {
       expect(manager.getState(id).status).toBe('ALERT_RINGING');
     });
 
-    it('defers from MIGHT_BE_BUSY without requiring confirmed activity', () => {
+    it('rings through candidate activity, deferring only once work is confirmed', () => {
       const id = 'defer-candidate';
       manager.onData(id);
       vi.advanceTimersByTime(1_600);
       manager.onData(id);
 
       manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'Done' });
+      expect(manager.getState(id).status).toBe('ALERT_RINGING');
+      manager.onData(id);
       expect(manager.getState(id).status).toBe('WATCHING_DISABLED');
-      vi.advanceTimersByTime(499);
-      expect(manager.getState(id).status).toBe('WATCHING_DISABLED');
-      vi.advanceTimersByTime(1);
+      vi.advanceTimersByTime(5_000);
       expect(manager.getState(id).status).toBe('ALERT_RINGING');
     });
 

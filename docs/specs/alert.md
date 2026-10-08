@@ -107,12 +107,12 @@ What an owed completion becomes, until a verb or a withdrawal (Clearing And TODO
 ```mermaid
 stateDiagram-v2
   direction LR
-  [*] --> Ringing: not engaged, detector quiet
-  [*] --> Deferred: not engaged, detector active
+  [*] --> Ringing: not engaged, no confirmed work
+  [*] --> Deferred: not engaged, confirmed work
   [*] --> Held: engaged
-  Deferred --> Ringing: detector quiet, or an exit source joins
-  Deferred --> Held: detector quiet while engaged, never shown
-  Ringing --> Deferred: detector becomes active
+  Deferred --> Ringing: work ends, or an exit source joins
+  Deferred --> Held: work ends while engaged, never shown
+  Ringing --> Deferred: work confirmed
   Held --> Ringing: viewer goes idle, focus unchanged
   Held --> TODO: focus moves, viewer leaves
   Ringing --> TODO: a look
@@ -125,11 +125,11 @@ stateDiagram-v2
 - Any other end — focus moving, the viewer leaving, a user verb — forgets the hold; only a verb may clear its TODO (rationale).
 - Rule removal withdraws a held `watching` source as it withdraws a ringing one (WATCHING Track).
 
-**With `deferAlertsUntilQuiet` enabled, a ring must be deferred exactly while the output detector is active**, whether WATCHING is on or off; WATCHING Track defines active (rationale).
+**With `deferAlertsUntilQuiet` enabled, a ring must be deferred exactly while the output detector has confirmed work**, whether WATCHING is on or off; WATCHING Track defines confirmed work (rationale).
 
-- **Must open the ring at once and derive deferral, never store it**: a deferred ring keeps its sources, detail, episode, and alarm deadlines, unpublished as `ALERT_RINGING` until the detector returns to quiet, a command-boundary reset included.
+- **Must open the ring at once and derive deferral, never store it**: a deferred ring keeps its sources, detail, episode, and alarm deadlines, unpublished as `ALERT_RINGING` until confirmed work ends, a command-boundary reset included.
 - **A never-shown ring that comes due while engaged must become a hold** (rationale); one already shown goes on ringing.
-- **Never defer a ring carrying an `exit` source**, whatever joined it.
+- **Never defer a ring carrying an `exit` source**, whatever joined it. A held exit leaves an existing deferral alone.
 - **Never cap a deferral** (rationale). Disabling the setting shows every deferred ring at once.
 
 Two ordering rules:
@@ -137,7 +137,7 @@ Two ordering rules:
 - **Must clear the progress cycle before dispatch**, so a completion or error ends the cycle whether or not the event is claimed and `OSC_NOTIF_BUSY` falls back either way.
 - **Must dispatch a command finish for every watch that existed**, including the unseen and engaged ones the ring rule then discards or holds.
 
-Source of truth: `dispatchCompletion` / `holdOrDeliver` / `isDeferred` in `lib/src/lib/alert-manager.ts`; `isActive` in `lib/src/lib/quiesce-detector.ts`. Pinned by `lib/src/lib/alert-engagement.test.ts`.
+Source of truth: `dispatchCompletion` / `holdOrDeliver` / `isDeferred` in `lib/src/lib/alert-manager.ts`; `isConfirmedBusy` in `lib/src/lib/quiesce-detector.ts`. Pinned by `lib/src/lib/alert-engagement.test.ts`.
 
 ## Await
 
@@ -222,20 +222,20 @@ Source of truth: `awaitCompletion` in `lib/src/lib/alert-manager.ts`; `AlertComm
 
 The output/silence detector is always on. Every Session runs one `QuiesceDetector` for its whole lifetime, fed by every output chunk outside the echo window and reset at every command boundary. It never latches and knows nothing about engagement or rules; the rule set decides only whether its state is publicly visible and whether a settle may ring.
 
-**Must use the detector as the single output-activity signal for status, inferred completion, and alert deferral.** Active means `MIGHT_BE_BUSY`, `BUSY`, or `MIGHT_NEED_ATTENTION`; quiet means `NOTHING_TO_SHOW`. A single accepted output chunk leaves a quiet detector quiet. Only confirmed work can settle; rejecting a candidate releases deferral without generating a completion.
+**Must use the detector as the single output-activity signal for status, inferred completion, and alert deferral.** Confirmed work means `BUSY` or `MIGHT_NEED_ATTENTION`; a `MIGHT_BE_BUSY` candidate is not, and neither is quiet (`NOTHING_TO_SHOW`). A single accepted output chunk leaves a quiet detector quiet. Only confirmed work can settle; a rejected candidate generates no completion.
 
 ```mermaid
 stateDiagram-v2
   [*] --> NOTHING_TO_SHOW
-  state "Output active" as Active {
-    MIGHT_BE_BUSY --> BUSY: further output confirms work
+  state "Confirmed work" as Confirmed {
     BUSY --> MIGHT_NEED_ATTENTION: silence
     MIGHT_NEED_ATTENTION --> BUSY: output resumes
   }
   NOTHING_TO_SHOW --> MIGHT_BE_BUSY: repeated output; candidate window elapses
+  MIGHT_BE_BUSY --> BUSY: further output confirms work
   MIGHT_BE_BUSY --> NOTHING_TO_SHOW: confirmation expires
   MIGHT_NEED_ATTENTION --> NOTHING_TO_SHOW: sustained silence / emit completion
-  Active --> NOTHING_TO_SHOW: command boundary or detector reset
+  Confirmed --> NOTHING_TO_SHOW: command boundary or detector reset
 ```
 
 **Must expose quiet to completion consumers before dispatching a settle**, and dispatch before publishing the quiet transition. Completion events owns its routing to awaits and rings; Public State owns the display projection; Completion events owns deferral.

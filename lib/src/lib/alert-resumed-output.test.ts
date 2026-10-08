@@ -48,18 +48,20 @@ describe('owed alerts during resumed output', () => {
     settle();
     expect(manager.getState(ID)).toMatchObject({ status: 'ALERT_RINGING', notification: REPORT });
   });
-  it.each(['watching', 'report'] as const)('defers a %s on candidate activity and keeps its original alarm deadlines', (source) => {
+  it.each(['watching', 'report'] as const)('keeps a %s ringing through candidate activity, deferring it once work is confirmed, on its original alarm deadlines', (source) => {
     ring(source);
     const episode = manager.getState(ID).episode;
     vi.advanceTimersByTime(1_000);
     manager.onData(ID);
-    expect(manager.getState(ID).status).toBe('ALERT_RINGING');
     vi.advanceTimersByTime(1_600);
     manager.onData(ID);
-    expect(manager.getState(ID)).toMatchObject({ status: 'MIGHT_BE_BUSY', episode, todo: false });
-    vi.advanceTimersByTime(500);
+    // A candidate alone would blink the ring with every sparse redraw.
     expect(manager.getState(ID)).toMatchObject({ status: 'ALERT_RINGING', episode });
-    vi.advanceTimersByTime(6_899);
+    manager.onData(ID);
+    expect(manager.getState(ID)).toMatchObject({ status: 'BUSY', episode, todo: false });
+    vi.advanceTimersByTime(5_000);
+    expect(manager.getState(ID)).toMatchObject({ status: 'ALERT_RINGING', episode });
+    vi.advanceTimersByTime(DELAY - 7_600 - 1);
     expect(spoken).not.toHaveBeenCalled();
     vi.advanceTimersByTime(1);
     expect(spoken).toHaveBeenCalledExactlyOnceWith(ID, episode!.id);
@@ -182,21 +184,20 @@ describe('owed alerts during resumed output', () => {
     manager.notifyFromProtocol(ID, REPORT);
     expect(manager.getState(ID).status).toBe('ALERT_RINGING');
   });
-  it('publishes candidate deferral and its expiry for unwatched commands without moving alarm deadlines', () => {
+  it('publishes deferral and its release for unwatched commands without moving alarm deadlines', () => {
     manager.setWatchedCommands([]);
     scheduler.setDefaults({ ...DEFAULT_ALERT_SETTINGS, speakEnabled: true, speakDelayMs: 1_000, pushEnabled: true, pushDelayMs: 1_000 });
-    manager.onData(ID);
-    vi.advanceTimersByTime(1_500);
-    manager.onData(ID);
+    driveToBusy(manager, ID);
     manager.notifyFromProtocol(ID, REPORT);
     const episode = manager.getState(ID).episode;
     expect(manager.getState(ID).status).toBe('WATCHING_DISABLED');
-    vi.advanceTimersByTime(499);
+    vi.advanceTimersByTime(4_999);
     expect(spoken).not.toHaveBeenCalled();
     expect(pushed).not.toHaveBeenCalled();
     vi.advanceTimersByTime(1);
     expect(manager.getState(ID)).toMatchObject({ status: 'ALERT_RINGING', episode });
-    vi.advanceTimersByTime(500);
+    // Long overdue, so delivered at once rather than a full delay after quiet.
+    vi.advanceTimersByTime(1);
     expect(spoken).toHaveBeenCalledExactlyOnceWith(ID, episode!.id);
     expect(pushed).toHaveBeenCalledOnce();
   });

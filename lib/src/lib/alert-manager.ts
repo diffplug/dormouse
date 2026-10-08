@@ -465,13 +465,14 @@ export class AlertManager {
 
   /**
    * The detector alone decides when output is active enough to defer an
-   * owed ring. Exit sources remain authoritative, including a report joined
-   * to an exit.
+   * owed ring: confirmed work only, since a candidate that enters and expires
+   * with each sparse redraw would blink the ring. Exit sources remain
+   * authoritative, including a report joined to an exit.
    */
   private isDeferred(entry: AlertEntry): boolean {
     return entry.ring !== null
       && this.deferAlertsUntilQuiet
-      && entry.detector.isActive()
+      && entry.detector.isConfirmedBusy()
       && !entry.ring.sources.includes('exit');
   }
 

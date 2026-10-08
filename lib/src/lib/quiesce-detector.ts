@@ -64,11 +64,6 @@ export class QuiesceDetector {
     return this.status === 'BUSY' || this.status === 'MIGHT_NEED_ATTENTION';
   }
 
-  /** Candidate work, confirmed work, and its finishing window all defer alerts. */
-  isActive(): boolean {
-    return this.status !== 'NOTHING_TO_SHOW';
-  }
-
   /** Start over from quiet, forgetting the previous command's output history. */
   reset(): void {
     if (this.disposed) return;
