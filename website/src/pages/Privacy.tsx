@@ -17,7 +17,7 @@ export const PRIVACY_SECTIONS: PolicySection[] = [
     <p>DiffPlug LLC operates Dormouse Hosted and is the controller of the personal information described here: the account service at hosted.dormouse.sh, the managed Relay and Pocket at relay.dormouse.sh, and managed voices at voice.dormouse.sh. This policy covers those services, the paid subscription that unlocks them, and related support. Contact us at <a className={LINK_CLASS} href="mailto:support@dormouse.sh">support@dormouse.sh</a> about privacy or your account.</p>
     <p>Our business address is DiffPlug LLC, 447 Sutter St Ste 405, San Francisco, CA 94108, United States.</p>
     <p>Dormouse itself runs on your computer and sends no usage telemetry. An update check fetches a version file from dormouse.sh without sending terminal contents or a Hosted account identifier. Automatic update checks run only if enabled. "Check now" makes a request when you click it. Creating an account does not upload your terminal contents, commands, files, or audio.</p>
-    <p>This website, dormouse.sh, is served by Cloudflare, which processes visitors’ IP addresses and request information to deliver it. Fonts are served from dormouse.sh.</p>
+    <p>This website, dormouse.sh, is served by Cloudflare, which processes visitors’ IP addresses and request information to deliver it.</p>
     <p>This policy does not describe a Relay you operate yourself or third-party services you choose to open. Those services have their own operators and policies.</p>
     <p>Hosted is not directed to children under 13, and we do not knowingly collect their personal information. If you believe a child under 13 has given us personal information, contact us and we will delete it.</p>
   </> },
