@@ -36,11 +36,7 @@ pub struct Registry {
 /// The counter's suffix of a `workspace-<n>` id, if it has one. Ids minted
 /// elsewhere retain their opaque id as a stable ref.
 pub fn ref_number(id: &str) -> Option<u64> {
-    let suffix = id.strip_prefix("workspace-")?;
-    if !suffix.bytes().all(|byte| byte.is_ascii_digit()) {
-        return None;
-    }
-    suffix.parse().ok()
+    crate::ids::numbered(id, "workspace-")
 }
 
 /// The stable `dor` ref of an id: its counter number, else the id itself.

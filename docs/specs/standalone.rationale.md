@@ -57,6 +57,12 @@ In a real build the same day, with the xterm textarea focused and typed into, a 
 
 **Why no window is throttled in the background.** The alert host moved into the sidecar (§Alerts), but a due spoken alarm still plays in the renderer of the window showing its Session (`docs/specs/alert.md` → Spoken alarms), on that window's timers and Web Speech engine. Tauri's default leaves WebKit's policy in force: a minimized or hidden window's timers are throttled and the view may be suspended after roughly five minutes, pausing everything until it is visible again (tauri-utils 2.9.3, `BackgroundThrottlingPolicy`). That delayed the speech for exactly the window a spoken alarm exists to reach — the one the user minimized. The policy cannot be set per state, so every window pays a hidden window's timer cost for it (2026-09).
 
+## Workspace registry
+
+**Why a persisted high-water mark, not the disk scan alone.** The scan sees only what is still saved: closing the highest-numbered Workspace or window deletes it from disk, so the next launch minted its number again, and a `dor` ref an agent cached named a stranger. The file holds a ceiling (hi/lo): a raise writes it once per slack's worth of numbers rather than on every create, keeping a create clear of the atomic write's fsyncs, and a relaunch starts at the ceiling, leaving a gap of at most the slack. Running in memory when the state root or the write fails keeps every create working; only a later launch may then reuse a number.
+
+**Why `ids.json` sits in the state root, not `sessions/`.** `sessions/` is enumerated as window snapshots and swept at boot, and a per-window close removes what it owns there; the counters belong to no window.
+
 ## Routing
 
 Rust routes rather than the webview filtering, because a webview cannot be trusted to drop another window's bytes: it would still have received them, and `pty:data` is the hot path.

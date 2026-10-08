@@ -130,7 +130,7 @@ Source of truth: `install` in `standalone/src-tauri/src/macos_siri_affordance.rs
 
 **Several windows, each with several Workspaces, over one sidecar** (`docs/specs/glossary.md`). The sidecar has no window concept, so **Rust owns the map from PTY to window** and every stdout line passes through it.
 
-**The label is the window's persistence identity**: `main` for the first window (fixed in `tauri.conf.json`), `ws-<n>` for every later one, numbered above every live label, every `sessions/ws-*.json` on disk, and every retained arrival-journal endpoint, so a new window cannot claim a saved or pending identity. Journal-only labels reserve numbers without opening windows.
+**The label is the window's persistence identity**: `main` for the first window (fixed in `tauri.conf.json`), `ws-<n>` for every later one, off the label counter (§Workspace registry), so a new window never claims a live, saved, pending, or closed window's label. Journal-only labels reserve numbers without opening windows.
 
 **Every new window is cloned from `app.windows[0]`**, so its window settings and CSP carry across with no second copy.
 
@@ -142,13 +142,14 @@ Source of truth: `install` in `standalone/src-tauri/src/macos_siri_affordance.rs
 
 **Rust holds the union of every window's Workspaces**, since each webview's store (`lib/src/lib/workspace-store.ts`) sees only its own. Each window reports its list on every change, and the union is broadcast as `dormouse://workspaces` with a monotonic `revision`; a webview drops a snapshot behind the one it holds.
 
-- **Must mint numbered ids only in Rust**, `workspace-<n>` off one counter, handed to a webview in blocks (`workspace_reserve_ids`) so a create mints synchronously. The ref `workspace:<n>` is the id's number, so it never renumbers and never collides across windows.
+- **Must mint numbered ids only in Rust**, `workspace-<n>` off one counter, handed to a webview in blocks (`workspace_reserve_ids`) so a create mints synchronously. The ref `workspace:<n>` is the id's number, so it never renumbers and never collides across windows. Rust mints window labels (§Windows) and `surface-<n>` Surface ids (`surface_reserve_ids`, each block above the floor its caller names) off counters of their own, each shared by every window.
+- **Must persist each counter's high-water mark in `<state root>/ids.json` before handing out a number at or above it**, so no Workspace number, window label, or Surface number is reused across launches. When the state root or the write fails, the counters run in memory (rationale).
 - **Must allow boot and creation when reservation fails**, using opaque UUID ids, and **retain those ids and refs for their lifetime**, even after reservation recovers (`docs/specs/dor-cli.md` → "Handle Model").
-- **Must seed the counter above every id named by a snapshot, a retained arrival-journal record, or a window's report**, and never below 2: `workspace-1` is a bare Wall's only Workspace.
+- **Must seed every counter at boot without ever lowering it**, above its persisted mark and every id a snapshot or retained arrival-journal record names — a label as a journal endpoint, a Surface as a pane or door. A window's report raises the Workspace counter too. **Never mint `workspace-1`**: it is a bare Wall's only Workspace.
 - **A `dor` request naming a Workspace or Window routes to the window holding it** (§Routing). A target the registry cannot place — one no window reports, or a name two windows carry — falls through to the caller's window, which refuses a name duplicated there and otherwise resolves its own. **A target routes as a number only when it reads as `NUMERIC_WORKSPACE_REF`** (`dor/src/protocol.ts`); `007` and `0` are names.
 - **Must keep numbered and opaque refs consistent across Rust, the webview, and the browser harness**: `standalone/scripts/workspace-ref-cases.json` holds the shared cases.
 
-Source of truth: `standalone/src-tauri/src/workspaces.rs`; `installWorkspaceRegistry` in `standalone/src/workspace-registry.ts`.
+Source of truth: `standalone/src-tauri/src/workspaces.rs`; `standalone/src-tauri/src/ids.rs`; `installWorkspaceRegistry` in `standalone/src/workspace-registry.ts`.
 
 ### Routing
 
