@@ -274,10 +274,15 @@ for (const [file, violation] of [
 }
 
 // Every spelling the room rule names must redden it, not just the parse the
-// loop appends: a decode, a log, or a stored frame is the same leak.
+// loop appends: a decode, a log, or a stored frame is the same leak. The
+// decodes are the relay room's set, a `Buffer` and a `TextDecoder` included.
 for (const violation of [
   '\nconst __selftest = (ct: string) => fromBase64Url(ct);\n',
   '\nconst __selftest = (ct: string) => atob(ct);\n',
+  '\nconst __selftest = (frame: string) => Buffer.from(frame, "base64");\n',
+  '\nconst __selftest = (bytes: Uint8Array) => new TextDecoder().decode(bytes);\n',
+  '\nconst __selftest = (frame: string) => Uint8Array.fromBase64(frame);\n',
+  '\nconst __selftest = (decode: (s: string, e: string) => string, frame: string) => decode(frame, "base64");\n',
   '\nconst __selftest = (frame: string) => console.log(frame);\n',
   "\nconst __selftest = (frame: string) => this.#ctx.storage.put('frame', frame);\n",
   "\nconst __selftest = (frame: string) => this.#ctx.storage.sql.exec('SELECT ?', frame);\n",

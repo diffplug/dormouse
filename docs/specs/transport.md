@@ -29,6 +29,7 @@ Source of truth: `PlatformAdapter` in `lib/src/lib/platform/types.ts`.
 - **Hiding a webview does not kill its PTYs**, and becoming visible again resumes over the still-owned ones ("Reconnection protocol").
 - **A naturally exited PTY may stay mounted as an exited pane**; frontend semantic state — CWD, title candidates, last command — is retained until the Session is disposed.
 - **Must keep explicitly killed PTYs non-resumable**: late output never recreates a killed id's buffer.
+- **Must let only an id's current PTY generation speak for it**: a spawn over a live generation stops the displaced one, whose later output and exit are dropped; output after a generation's own exit still flows.
 
 ### Graceful shutdown
 

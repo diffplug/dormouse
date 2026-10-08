@@ -1,6 +1,6 @@
 import { useState, useEffect, useSyncExternalStore } from 'react';
 import { MinusIcon, CornersOutIcon, CornersInIcon, XIcon } from '@phosphor-icons/react';
-import { PANE_GUTTER_PX, PopupButtonRow, TAB_WALL_JOIN_GRADIENT, chromeButton } from '../../lib/src/components/design';
+import { APP_BAR_HEIGHT_PX, PANE_GUTTER_PX, PopupButtonRow, TabWallJoin, chromeButton } from '../../lib/src/components/design';
 import { WorkspaceStrip } from '../../lib/src/components/WorkspaceStrip';
 import { IS_MAC } from '../../lib/src/lib/platform';
 import { moveWorkspaceToNewWindow, onDragBackInsideStrip, onDragCancelled, onDragOutsideWindow, onDropOnOtherWindow } from './workspace-drag';
@@ -148,10 +148,10 @@ export function AppBar() {
   return (
     <div
       data-tauri-drag-region
-      className={`relative flex h-[30px] shrink-0 select-none items-center bg-app-bg text-app-fg text-xs ${
+      className={`relative flex shrink-0 select-none items-center bg-app-bg text-app-fg text-xs ${
         IS_MAC ? 'pl-[78px]' : ''
       }`}
-      style={{ marginBottom: PANE_GUTTER_PX }}
+      style={{ height: APP_BAR_HEIGHT_PX, marginBottom: PANE_GUTTER_PX }}
     >
       {/* On macOS, native traffic lights are shown by titleBarStyle "Overlay" —
           we just leave padding on the left (pl-[78px]) to avoid overlapping them. */}
@@ -184,11 +184,7 @@ export function AppBar() {
           native-style window controls on Windows/Linux. */}
       {!IS_MAC && <WinControls />}
       {/* Reserve the gradient's own band above the Wall's focus-ring gutter. */}
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute inset-x-0 top-full z-10"
-        style={{ height: PANE_GUTTER_PX, backgroundImage: TAB_WALL_JOIN_GRADIENT }}
-      />
+      <TabWallJoin />
     </div>
   );
 }
@@ -205,8 +201,8 @@ function DropCaret() {
     <div
       data-workspace-drop-caret
       aria-hidden="true"
-      className="pointer-events-none fixed top-0 z-50 h-[30px] w-0.5 bg-current"
-      style={{ left: x }}
+      className="pointer-events-none fixed top-0 z-50 w-0.5 bg-current"
+      style={{ left: x, height: APP_BAR_HEIGHT_PX }}
     />
   );
 }

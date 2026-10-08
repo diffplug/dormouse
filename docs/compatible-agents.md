@@ -93,7 +93,7 @@ Open a **draft pull request** with the entry, fixture, documentation, and verifi
 - **Never press a pane a third time unless it asked (`Ctrl+C again`) since its latest press, nor a fourth time.** (rationale)
 - **Never finish early on quiet or replace the retry gates with a blanket second press.** Poll until every target yields or the capture budget expires; retry timing and ask detection live in the module's comments. (rationale)
 - **Must widen every target before its first press.** (rationale)
-- **Must scan only output received after the mark taken before the first interrupt.** Never widen the scan into earlier output; buffer eviction may discard fresh output but must not promote stale output into the scan. (rationale)
+- The scan starts at the mark taken before the first interrupt, a rule `docs/specs/security-local.md` -> "Terminal output" owns; buffer eviction may discard fresh output but never promotes stale output into the scan. (rationale)
 - **Must report each detected command immediately**, retaining earlier detections if a later target times out.
 
 Source of truth: `captureAgentRecovery` / `RecoveryHost` in `lib/src/host/recovery-capture.ts`; pinned by `lib/src/host/recovery-capture.test.ts`.
@@ -123,7 +123,7 @@ Source of truth: `createRecoveryStore` in `lib/src/host/recovery-store.ts`; `Pla
 ### Cold restore
 
 - **Must automatically run a captured command on the next cold restore**, without a confirmation prompt, only while both detection validation and post-interrupt provenance hold. Weakening either requires restoring a confirmation gate. (rationale)
-- **Must revalidate the complete stored invocation before typing it**, using `normalizeResumeCommand`; invalid entries must not execute.
+- The stored invocation is revalidated with `normalizeResumeCommand` before it is typed, a rule `docs/specs/security-local.md` -> "Terminal output" owns.
 - **Must poll for the fresh shell's prompt before typing, with a best-effort write after 15 seconds if no prompt is detected.** Stop without typing if the Session disappears or exits. Command-state seeding follows `docs/specs/terminal-state.md` → Supported OSC Inputs; the passive notice follows `docs/specs/layout.md` → Agent resume on cold restore.
 
 Source of truth: `restoreSession` in `lib/src/lib/session-restore.ts`; `restoreTerminal` / `typeCommandWhenPromptReady` in `lib/src/lib/terminal-lifecycle.ts`; pinned by `lib/src/lib/session-restore.test.ts` and `lib/src/lib/terminal-registry.alert.test.ts`.

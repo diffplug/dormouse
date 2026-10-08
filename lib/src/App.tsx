@@ -34,9 +34,9 @@ export default function App({
   baseboardNotice?: ReactNode;
   dialogHost?: ReactNode;
   enableBurrow?: boolean;
-  /** Render one Wall per Workspace instead of one for the whole page. Only the
-   *  standalone host sets it; VS Code and the website playground mount a bare
-   *  Wall (docs/specs/layout.md → "Workspaces"). */
+  /** Render one Wall per Workspace instead of one for the whole page. The
+   *  standalone host sets it; VS Code mounts a bare Wall per webview
+   *  (docs/specs/layout.md → "Workspaces"). */
   multiWorkspace?: boolean;
   /** One boot record per Workspace; `multiWorkspace` only. */
   initialPlans?: WallBootPlans;

@@ -8,6 +8,7 @@ import {
   useState,
   useSyncExternalStore,
   type PointerEvent as ReactPointerEvent,
+  type ReactNode,
 } from 'react';
 import { clsx } from 'clsx';
 import { PlusIcon, XIcon } from '@phosphor-icons/react';
@@ -63,6 +64,7 @@ export function WorkspaceStrip({
   onDragCancelled,
   onMoveToNewWindow,
   spacerAttributes,
+  afterNew,
 }: {
   className?: string;
   /** The four cross-Window drag hooks (`StripDragHost`). A composition with no
@@ -77,6 +79,8 @@ export function WorkspaceStrip({
   /** Attributes for the empty space between `+` and the pinned group, which
    *  the host may claim (the standalone title bar's window-drag region). */
   spacerAttributes?: Record<`data-${string}`, string | boolean>;
+  /** A host's own control, just after `+` (the website playground's reset). */
+  afterNew?: ReactNode;
 }) {
   const { workspaces, activeId } = useSyncExternalStore(subscribeToWorkspaces, getWorkspacesSnapshot);
   const membership = useSyncExternalStore(subscribeToWorkspaceSurfaces, getWorkspaceSurfacesSnapshot);
@@ -267,6 +271,7 @@ export function WorkspaceStrip({
         >
           <PlusIcon size={12} weight="bold" aria-hidden="true" />
         </button>
+        {afterNew}
       </div>
       <div {...spacerAttributes} data-workspace-strip-spacer className="min-w-8 flex-1 self-stretch" />
       {pinned.length > 0 && (
