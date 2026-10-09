@@ -142,12 +142,12 @@ Source of truth: `install` in `standalone/src-tauri/src/macos_siri_affordance.rs
 
 **Rust holds the union of every window's Workspaces**, since each webview's store (`lib/src/lib/workspace-store.ts`) sees only its own. Each window reports its list on every change, and the union is broadcast as `dormouse://workspaces` with a monotonic `revision`; a webview drops a snapshot behind the one it holds.
 
-- **Must mint numbered ids only in Rust**, `workspace-<n>` off one counter, handed to a webview in blocks (`workspace_reserve_ids`) so a create mints synchronously. The ref `workspace:<n>` is the id's number, so it never renumbers and never collides across windows. Window labels and Surface ids (`surface_reserve_ids`; `docs/specs/transport.md` → "Surface ids") come off app-wide counters of their own.
+- **Must mint numbered ids only in Rust**, `workspace:<n>` off one counter, handed to a webview in blocks (`workspace_reserve_ids`) so a create mints synchronously; an id never renumbers and never collides across windows. Window labels and Surface ids (`surface_reserve_ids`; `docs/specs/transport.md` → "Surface ids") come off app-wide counters of their own.
 - **Must persist the Workspace and window counters as the Surface counter persists** (`docs/specs/transport.md` → "Surface ids"), all three high-water marks in `<state root>/ids.json`. When the state root or the write fails, the counters run in memory (rationale).
-- **Must allow boot and Workspace creation when reservation fails**, using opaque UUID ids, and **retain those ids and refs for their lifetime**, even after reservation recovers (`docs/specs/dor-cli.md` → "Handle Model").
-- **Must seed every counter at boot without ever lowering it**, above its persisted mark and every id a snapshot or retained arrival-journal record names; a window's report raises the Workspace counter too. **Never mint `workspace-1`**: it is a bare Wall's only Workspace.
+- **Must allow boot and Workspace creation when reservation fails**, using `workspace:<uuid>` ids, and **retain those ids for their lifetime**, even after reservation recovers (`docs/specs/dor-cli.md` → "Handle Model").
+- **Must seed every counter at boot without ever lowering it**, above its persisted mark and every id a snapshot or retained arrival-journal record names; a window's report raises the Workspace counter too. **Never mint `workspace:1`**: it is a bare Wall's only Workspace.
 - **A `dor` request naming a Workspace or Window routes to the window holding it** (§Routing). A target the registry cannot place — one no window reports, or a name two windows carry — falls through to the caller's window, which refuses a name duplicated there and otherwise resolves its own. **A target routes as a number only when it reads as `NUMERIC_WORKSPACE_REF`** (`dor/src/protocol.ts`); `007` and `0` are names.
-- **Must keep numbered and opaque refs consistent across Rust, the webview, and the browser harness**: `standalone/scripts/workspace-ref-cases.json` holds the shared cases.
+- **Must read an id's number identically in Rust, the webview, and the browser harness**: `standalone/scripts/workspace-id-cases.json` holds the shared cases.
 
 Source of truth: `standalone/src-tauri/src/workspaces.rs`; `standalone/src-tauri/src/ids.rs`; `installWorkspaceRegistry` in `standalone/src/workspace-registry.ts`.
 

@@ -121,7 +121,7 @@ Source of truth: `lib/src/components/Baseboard.tsx`.
 - **Must reveal a Workspace in command mode before a user close or its confirmation.** Successful user closure selects the next Workspace tab in command mode (previous at the end). Command closures stay focus-neutral.
 - **Must order the strip unpinned tabs, `+` (then any host control), empty space, then the pinned group flush against the strip's right end, the store's list partitioned to match**: a new Workspace ends the unpinned group; pinning moves a tab to the pinned group's left edge, unpinning to just left of `+`. **A reorder (drag, `dor workspace move --index`, an arrival's slot) must clamp within its group. Never scroll the pinned group out of view**; the empty space between belongs to the host, never to the strip's drag or drop targets. A pin survives restore, Transfer, tear-out, and window Reopen (`docs/specs/transport.md` → Persisted session types).
 - **Never close a pinned Workspace alone**: it shows no `×`, middle-click and `x` / `k` do nothing, and the close verb refuses it, Labs pending kill included (`dor`: `docs/specs/dor-cli.md` → dor workspace). Its Window's close still closes it.
-- **Must open the tab menu on right-click, or `Shift+F10` / `ContextMenu` on a focused tab, under the tab, left edges aligned, or right edges where it would overflow**: Rename, Use automatic name (user-set names), Pin right / Unpin, Copy ref, Move to new window (hosts that tear out, with the tear-out's consents), Close. **It holds the chrome keyboard lease and never opens over a rename or pending confirmation, or for a closing or transferring Workspace; any of those starting dismisses it. A right press or Control-click must never start a reorder.**
+- **Must open the tab menu on right-click, or `Shift+F10` / `ContextMenu` on a focused tab, under the tab, left edges aligned, or right edges where it would overflow**: Rename, Use automatic name (user-set names), Pin right / Unpin, Copy id, Move to new window (hosts that tear out, with the tear-out's consents), Close. **It holds the chrome keyboard lease and never opens over a rename or pending confirmation, or for a closing or transferring Workspace; any of those starting dismisses it. A right press or Control-click must never start a reorder.**
 
 Source of truth: `WorkspaceStrip` in `lib/src/components/WorkspaceStrip.tsx`; `WorkspaceTabMenu` in `lib/src/components/WorkspaceTabMenu.tsx`; `setWorkspacePinned` in `lib/src/lib/workspace-store.ts`; `nextTodoMember` in `lib/src/lib/workspace-union.ts`.
 
@@ -178,7 +178,7 @@ VS Code mounts a bare Wall with no Workspace id, which behaves exactly as a sing
 - **Must reject duplicate Workspace IDs before mutating the model.**
 - **Must retain mode and selection across switches unless the [activation gesture](#workspace-tabs) changes them.**
 - Close confirms first when any member's own close would (`docs/specs/reopen.md` → "Workspaces and windows"; under Labs a pending kill instead), then closes every member Surface. **Must select the fresh Workspace that replaces the last closed one. Must serialize closes across the Window.**
-- **Must refuse a Workspace whose Wall has not registered** (`workspace '<ref>' is still mounting`, one wording for every caller), never close past it (I4). A gesture waits out the registration gap first, as `dor workspace close` does, and is dropped unannounced on its timeout, a pending transfer, or a close in flight.
+- **Must refuse a Workspace whose Wall has not registered** (`workspace '<id>' is still mounting`, one wording for every caller), never close past it (I4). A gesture waits out the registration gap first, as `dor workspace close` does, and is dropped unannounced on its timeout, a pending transfer, or a close in flight.
 - Rename edits the Workspace `name` only, never a Surface title or the per-pane inline rename, and keeps it ([Workspace names](#workspace-names)). **A press inside the open rename editor must never start a reorder.**
 - **Must drop the closing Workspace's rename editor and pending confirmation, and no other's.**
 - **Must run every Workspace verb outside the strip**, which renders the rename editor and confirmation from a store, so tab gestures and `dor` commands take one path. Every Workspace verb has a `dor` counterpart (`docs/specs/dor-cli.md` → "dor workspace"): a command close raises no confirmation, refusing instead, and closes its member Surfaces silently.
@@ -329,7 +329,7 @@ Reattach applies the token's restore policy (`docs/specs/tiling-engine.md` → "
 
 ### Splitting from a Door
 
-**`dor split --surface <minimized-ref>` and `dor ensure --surface <minimized-ref>` must create the new terminal Surface directly as a Door**, immediately to the right of the reference Door, and report `minimized: true` even without `--minimize`. Its restore token's neighbor tier points at the reference Door, and `--auto` resolves to `right` — there is no visible pane geometry to inspect.
+**`dor split --surface <minimized-id>` and `dor ensure --surface <minimized-id>` must create the new terminal Surface directly as a Door**, immediately to the right of the reference Door, and report `minimized: true` even without `--minimize`. Its restore token's neighbor tier points at the reference Door, and `--auto` resolves to `right` — there is no visible pane geometry to inspect.
 
 ## Inline rename
 

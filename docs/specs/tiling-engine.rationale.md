@@ -60,6 +60,4 @@ Unbounded parking preserves unsaved iframe state; a ninth minimized browser prev
 
 **Why a parked leaf's held rect outranks an explicit enter hint.** An enter hint is cosmetic — which boundary a new leaf grows from. A re-admitted parked leaf is a live document that has been laying out at the held rect the whole time it was Doored, so starting it collapsed against an edge would force the guest through the reflow the park exists to avoid.
 
-**Why the surface ref is forgotten only after the removal commits.** A fading leaf is still in `listPanes()` for the length of the exit animation, so a `dor` projection built in that window would re-mint a ref for it — an early delete would not stick, leaving projection and tree disagreeing until the next commit.
-
 **Why a no-deps layout effect re-asserts the current frames.** Animator frames are applied imperatively to the leaf divs, while React independently keeps rendering each div at its *target* geometry, so any unrelated commit mid-tween rewrites the inline styles back to the target and snaps the animation. Re-asserting after every commit costs one style write and removes the whole class of "some other state change made the tween jump."
