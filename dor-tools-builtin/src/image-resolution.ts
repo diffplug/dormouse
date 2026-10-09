@@ -11,34 +11,62 @@ import { ascii } from './image-format.js';
  * for pixel. */
 export const RESOLUTION_HEAD = 1 << 16;
 
-/** A PNG's or JPEG's upright pixel width and the dots per inch its header
- * records: a PNG's `pHYs` in pixels per metre, else its `eXIf`; a JPEG's JFIF
- * density in dots per inch or centimetre, else its EXIF. Null without a frame
- * size in `head`. */
-export function imageResolution(head: Uint8Array): { width: number; dpi: number | null } | null {
+/** The pixel density an image file records, for its pixels upright: pixels
+ * per metre across (`x`) and down (`y`), or, when `aspectOnly` (a PNG `pHYs`
+ * in unit 0, a JFIF density in units 0), only their ratio. */
+export interface Resolution { x: number; y: number; aspectOnly: boolean }
+
+const INCH = 0.0254;
+
+/** The dots per inch `resolution` records across; null for an aspect only. */
+export const dpiAcross = (resolution: Resolution | null | undefined): number | null =>
+  resolution && !resolution.aspectOnly ? resolution.x * INCH : null;
+
+/** A PNG's or JPEG's upright pixel width and the resolution its header
+ * records: a PNG's `pHYs`, a JPEG's JFIF density in dots per inch or
+ * centimetre, else its EXIF's across, down by the aspect a unitless record
+ * gives. Null without a frame size in `head`. */
+export function imageResolution(head: Uint8Array): { width: number; resolution: Resolution | null } | null {
   const png = pngSize(head), size = png ?? jpegSize(head);
   if (!size) return null;
-  let dpi: number | null = null, exif: Uint8Array | null = null;
+  let own: Resolution | null = null, exif: Uint8Array | null = null;
   if (png) {
     const view = new DataView(head.buffer, head.byteOffset, head.byteLength);
     for (const { type, start, end } of pngChunks(head)) {
-      // pHYs: pixels per unit across, down, then the unit, where 1 is the metre.
-      if (type === 'pHYs' && end - start === 21 && head[start + 16] === 1) dpi = view.getUint32(start + 8) * 0.0254;
+      // pHYs: pixels per unit across, down, then the unit: 1 the metre, 0 none.
+      if (type === 'pHYs' && end - start === 21 && head[start + 16] <= 1) {
+        own = density(view.getUint32(start + 8), view.getUint32(start + 12), head[start + 16] ? 1 : null);
+      }
       if (type === 'eXIf') exif = head.subarray(start + 8, end - 4);
     }
   } else {
     for (const { marker, start, end } of jpegSegments(head).list) {
-      // JFIF: "JFIF\0", its version, then units (1 dpi, 2 dpcm) and the density across.
-      if (marker === 0xe0 && end - start >= 16 && ascii(head, start + 4, start + 9) === 'JFIF\0') {
-        const units = head[start + 11], density = (head[start + 12] << 8) | head[start + 13];
-        if (density && (units === 1 || units === 2)) dpi = units === 1 ? density : density * 2.54;
+      // JFIF: "JFIF\0", its version, then units (0 none, 1 dpi, 2 dpcm) and the density across and down.
+      if (marker === 0xe0 && end - start >= 16 && ascii(head, start + 4, start + 9) === 'JFIF\0' && head[start + 11] <= 2) {
+        const units = head[start + 11];
+        own = density((head[start + 12] << 8) | head[start + 13], (head[start + 14] << 8) | head[start + 15], units ? (units === 1 ? 1 / INCH : 100) : null);
       }
       if (marker === 0xe1 && ascii(head, start + 4, start + 10) === 'Exif\0\0') exif = head.subarray(start + 10, end);
     }
   }
   const fields = exif ? exifFields(exif) : { orientation: 1, dpi: null };
-  // Orientations 5–8 turn the image a quarter, so it shows as tall as its frame is wide.
-  return { width: fields.orientation >= 5 ? size.height : size.width, dpi: dpi ?? fields.dpi };
+  let resolution = own;
+  if ((!own || own.aspectOnly) && fields.dpi) {
+    const x = fields.dpi / INCH;
+    resolution = { x, y: own ? x * own.y / own.x : x, aspectOnly: false };
+  }
+  // Orientations 5–8 turn the image a quarter, so it shows as tall as its frame
+  // is wide, its density across the frame's down.
+  const turned = fields.orientation >= 5;
+  if (turned && resolution) resolution = { ...resolution, x: resolution.y, y: resolution.x };
+  return { width: turned ? size.height : size.width, resolution };
+}
+
+/** A density of `x` across and `y` down, per metre by `perMetre` units, or
+ * an aspect only when it is null; none when either is zero. */
+function density(x: number, y: number, perMetre: number | null): Resolution | null {
+  if (!x || !y) return null;
+  return perMetre ? { x: x * perMetre, y: y * perMetre, aspectOnly: false } : { x, y, aspectOnly: true };
 }
 
 /** How many of an image's pixels make one CSS pixel, by the `dpi` its file
@@ -62,6 +90,6 @@ export function displayScale(dpi: number | null): number {
  * document gives no size; null when it shows pixel for pixel. */
 export function defaultDisplayWidth(head: Uint8Array): number | null {
   const found = imageResolution(head);
-  const scale = found ? displayScale(found.dpi) : 1;
+  const scale = found ? displayScale(dpiAcross(found.resolution)) : 1;
   return found && scale > 1 ? found.width / scale : null;
 }

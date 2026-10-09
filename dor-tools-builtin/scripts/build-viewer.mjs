@@ -8,8 +8,9 @@ const absWorkingDir = fileURLToPath(new URL('../', import.meta.url));
 // these assets from a checkout where dor-tools-lib has no dist yet.
 const alias = { 'dor-tools-lib': fileURLToPath(new URL('../../dor-tools-lib/src', import.meta.url)) };
 
-/** Bundles the Monaco, Markdown, and image pages' assets into `outdir`, which
- * `viewerAsset` serves by name; the website playground builds its own copy. */
+/** Bundles the Monaco, Markdown, and image pages' assets, and the folder
+ * viewer's tooltip, into `outdir`, which `viewerAsset` serves by name; the
+ * website playground builds its own copy. */
 export async function buildViewerAssets(outdir) {
   // Chunk names carry content hashes; a stale one would still be served.
   await rm(outdir, { recursive: true, force: true });
@@ -37,6 +38,12 @@ export async function buildViewerAssets(outdir) {
       outdir, bundle: true, format: 'esm', platform: 'browser', alias,
       target: 'es2022', minify: true, jsx: 'automatic',
       define: { 'process.env.NODE_ENV': '"production"' },
+    }),
+    // The folder viewer's tooltip, a classic script: `tooltip.js` and `tooltip.css`.
+    build({
+      absWorkingDir,
+      entryPoints: { tooltip: 'viewer/tooltip-page.ts' },
+      outdir, bundle: true, format: 'iife', platform: 'browser', target: 'es2022', minify: true,
     }),
   ]);
 }

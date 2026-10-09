@@ -1,7 +1,6 @@
 /** The pure half of the Markdown editor's image resize handles
  * (./image-resize.tsx): what size a corner drag gives, and whether it saves. */
-
-export interface Size { width: number; height: number }
+import type { Size } from './tip-layout';
 
 /** How far, in CSS pixels, a handle travels before its drag resizes. */
 export const DRAG_THRESHOLD = 2;

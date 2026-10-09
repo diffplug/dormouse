@@ -4,6 +4,7 @@
  * the saved pixels and profile stay exact). No DOM, so Node tests load it. */
 import { cicpMeaning } from '../../src/image-editability';
 import { ascii } from '../../src/image-format';
+import type { Resolution } from '../../src/image-resolution';
 
 /** Why a save will differ from its source beyond the edits; `describe` in
  * `io.ts` words it. `space` is the ICC data color space (`GRAY`, `CMYK`),
@@ -17,10 +18,10 @@ export type SaveNote =
 /** A decoded source's color, in its own format: the canvas space that shows
  * it, the metadata a same-format save re-attaches verbatim (whole PNG chunks,
  * or JPEG APP2 `ICC_PROFILE` segments), the RGB ICC profile among them that a
- * save in the other format converts, the dots per inch its header records
+ * save in the other format converts, the resolution its header records
  * (`imageResolution`), which a save in either format writes, and why a save
  * will differ. */
-export interface SourceColor { space: PredefinedColorSpace; keep: Uint8Array[]; profile?: Uint8Array; dpi?: number; notes: SaveNote[] }
+export interface SourceColor { space: PredefinedColorSpace; keep: Uint8Array[]; profile?: Uint8Array; resolution?: Resolution; notes: SaveNote[] }
 
 /** An ICC profile (null when unreadable) if its data color space (header
  * bytes 16–19) is RGB, the only kind that describes the RGB pixels a save

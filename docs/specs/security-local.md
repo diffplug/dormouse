@@ -93,7 +93,7 @@ What the viewer CSP leaves open is `docs/specs/security.md` -> "What is not defe
 
 **FAIL IF** the folder viewer, `dor-tools-builtin/src/folder-viewer.ts`, serves any request without the capability, `Host`, `Origin`, and response-header rules above, or accepts a POST whose `Origin` is absent, `null`, or not its own. `allowsFileViewerRequest` with `post` gates every route; a POST writes an OSC 367 `open`, which the host runs as `dor open` from that Tool.
 
-**FAIL IF** the folder viewer returns file contents, lists or opens anything outside its canonical root, or renders an entry name as markup. `resolveInside` refuses `.`, `..`, and empty segments, backslashes, and controls, then requires the realpath at or under the root; a symlink whose target leaves it lists as `other`. A listing carries names, kinds, and ignore flags only, and `folderViewerPage` sets names through `textContent`, since script in the page could POST as it.
+**FAIL IF** the folder viewer returns file contents other than the fixed shipped-viewer assets (`viewerAsset`), lists or opens anything outside its canonical root, or renders an entry name as markup. `resolveInside` refuses `.`, `..`, and empty segments, backslashes, and controls, then requires the realpath at or under the root; a symlink whose target leaves it lists as `other`. A listing carries names, kinds, and ignore flags only, and `folderViewerPage` sets names through `textContent`, since script in the page could POST as it.
 
 **FAIL IF** the error viewer, `dor-tools-builtin/src/error-viewer.ts`, serves anything but its one page, breaks the capability, `Host`, `Origin`, and response-header rules above, allows script, or renders its target or message as markup.
 

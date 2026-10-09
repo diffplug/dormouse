@@ -9,7 +9,7 @@
  * A control that cannot act keeps its tip by being `aria-disabled` rather
  * than `disabled`, which this also keeps inert (./aria-disabled.ts). */
 import { refuseDisabledClick } from './aria-disabled';
-import { placeTip, tipLines } from './tip-layout';
+import { placeTip, textLines, tipLines, type TipPart } from './tip-layout';
 import './tooltip.css';
 
 /** How long the mouse rests on a control before its tip shows. */
@@ -48,15 +48,15 @@ export function installTooltips(): void {
     else if (records.some(r => r.target === anchor && r.attributeName?.startsWith('data-tip'))) render();
   });
 
-  /** `el`'s tip: its literal text, else its authored hint. */
-  function textOf(el: HTMLElement): { text: string; literal: boolean } | null {
-    const literal = el.dataset.tipText, hint = el.dataset.tip;
-    return literal ? { text: literal, literal: true } : hint ? { text: hint, literal: false } : null;
+  /** `el`'s tip as lines: its verbatim text, else its authored hint. */
+  function linesOf(el: HTMLElement): TipPart[][] | null {
+    const text = el.dataset.tipText, hint = el.dataset.tip;
+    return text ? textLines(text) : hint ? tipLines(hint) : null;
   }
 
   /** The control `target` is in that has a tip. A `title` the page's
    * libraries set (MDXEditor's image toolbar, an image's own title) becomes
-   * its literal tip on first reach, so the native tooltip never shows beside
+   * its verbatim tip on first reach, so the native tooltip never shows beside
    * this one. */
   function tipOf(target: EventTarget | null): HTMLElement | null {
     const el = target instanceof Element ? target.closest('[data-tip],[data-tip-text],[title]') : null;
@@ -65,13 +65,13 @@ export function installTooltips(): void {
       if (el.title) el.dataset.tipText = el.title;
       el.removeAttribute('title');
     }
-    return textOf(el) ? el : null;
+    return linesOf(el) ? el : null;
   }
 
   function render() {
-    const found = anchor && textOf(anchor);
-    if (!anchor || !found) { hide(); return; }
-    tip.replaceChildren(...tipLines(found.text, found.literal).map(parts => {
+    const lines = anchor && linesOf(anchor);
+    if (!anchor || !lines) { hide(); return; }
+    tip.replaceChildren(...lines.map(parts => {
       const line = document.createElement('div');
       for (const part of parts) {
         if (!part.key) { line.append(part.text); continue; }
@@ -91,8 +91,8 @@ export function installTooltips(): void {
 
   function show(el: HTMLElement, focus = false) {
     hide();
-    // The delay may outlast the control, its tip, or its showing at all.
-    if (!el.isConnected || !textOf(el) || !el.getClientRects().length) return;
+    // The delay may outlast its tip, or the control's showing at all, on the page or not.
+    if (!linesOf(el) || !el.getClientRects().length) return;
     anchor = el;
     fromFocus = focus;
     shown = true;

@@ -1,7 +1,7 @@
-import { createRef, useLayoutEffect, useMemo, useRef, useSyncExternalStore, type ComponentType, type FC } from 'react';
+import { createRef, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ComponentType, type FC } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createPortal, flushSync } from 'react-dom';
-import { $getNearestNodeFromDOMNode, $getNodeByKey, getNearestEditorFromDOMNode, type LexicalEditor } from 'lexical';
+import { $getNodeByKey, getNearestEditorFromDOMNode, type LexicalEditor } from 'lexical';
 import { syntaxHighlighting } from '@codemirror/language';
 import { classHighlighter } from '@lezer/highlight';
 import {
@@ -16,7 +16,7 @@ import { checked, documentPage, loadingState, stateLabel, textSource, type Docum
 import { editableImage, imageSources, imageUrl, ImagesPanel, localImagePath, type SavedImages } from './images-panel';
 import { ImageOverlay } from './image-overlay';
 import { ImageResizeHandles } from './image-resize';
-import { defaultWidth, forgetImageWidths, sizeImages } from './image-size';
+import { defaultWidth, forgetImageWidths, useDefaultWidth } from './image-size';
 import { commentsPlugin } from './markdown-comments';
 import { markdownSafetyPlugin } from './markdown-safety';
 import { pageTheme, subscribeTheme } from './page-theme';
@@ -37,7 +37,6 @@ const update = (change: Partial<typeof store>) => { store = { ...store, ...chang
 const usePage = () => useSyncExternalStore(changes.subscribe, () => store);
 const editorRef = createRef<MDXEditorMethods>();
 let realm: Realm | undefined;
-let sizing: ReturnType<typeof sizeImages> | undefined;
 let loads = 0;
 
 const page = documentPage();
@@ -72,43 +71,57 @@ const editImage = (path: string) => update({ editing: path });
 /** The URL whose head sizes an image: a PNG or JPEG under the document's folder may record its scale. */
 const sizedUrl = (src: string) => editableImage(localImagePath(src)) ? imageUrl(src, store.saved) : null;
 
-/** How long an image that may show at a default width waits for it, in ms;
- * one read later applies when it arrives (`sizeImages`). */
+/** How long a PNG or JPEG under the document's folder waits for its default
+ * width, in ms; one read later applies when it arrives (`useDefaultWidth`). */
 const SIZE_WAIT = 300;
 
 /** An image's URL, given once its default width is known, or `SIZE_WAIT`
- * passes, so it first shows at that width; at once when its document sizes it. */
+ * passes, so it first shows at that width. */
 async function previewUrl(src: string) {
   const sized = sizedUrl(src);
-  if (sized && (sizing?.mayDefault(src) ?? true)) await Promise.race([defaultWidth(sized), new Promise(resolve => setTimeout(resolve, SIZE_WAIT))]);
+  if (sized) await Promise.race([defaultWidth(sized), new Promise(resolve => setTimeout(resolve, SIZE_WAIT))]);
   return imageUrl(src, store.saved);
 }
 
 /** After an image save: every display of it loads the new file, and the document's source stays as it is. */
 function refreshImage(path: string, version: string) {
   update({ saved: { ...store.saved, [path]: version } });
-  // A new handler makes each image node resolve its URL again.
+  // A new handler makes each image node resolve its URL again, and size itself by it.
   realm?.pub(imagePreviewHandler$, (src: string) => previewUrl(src));
-  sizing?.refresh();
 }
 
 /** MDXEditor's own image toolbar (delete, settings), which it does not export; read before `imagePlugin` replaces it. */
-let DefaultImageToolbar: ComponentType<EditImageToolbarProps> = () => null;
-type EditImageToolbarProps = { nodeKey: string; imageSource: string; initialImagePath: string | null; title: string; alt: string; width?: number | 'inherit'; height?: number | 'inherit' };
+let DefaultImageToolbar: ComponentType<ImageChromeProps> = () => null;
+type ImageChromeProps = { nodeKey: string; imageSource: string; initialImagePath: string | null; title: string; alt: string; width?: number | 'inherit'; height?: number | 'inherit' };
 
-function ImageToolbar(props: EditImageToolbarProps) {
+/** What we draw beside each image MDXEditor renders, in place of its image
+ * toolbar: the resize handles, Edit and double-click to open it in the image
+ * editor, then MDXEditor's own buttons; and its default width while the
+ * document leaves it unsized. All of it through the image's own editor: the
+ * root's, or a table cell's. */
+function ImageChrome(props: ImageChromeProps) {
   const iconFor = useCellValue(iconComponentFor$);
-  const editor = useCellValue(rootEditor$);
-  const path = editor && editablePath(editor, props.nodeKey);
   const ref = useRef<HTMLDivElement>(null);
-  // A table cell's images are in an editor of its own, which sizing learns of here, before the image paints.
-  useLayoutEffect(() => {
-    const own = getNearestEditorFromDOMNode(ref.current);
-    if (own) sizing?.track(own);
-  }, []);
+  const [editor, setEditor] = useState<LexicalEditor | null>(null);
+  // Before the image paints, so its default width applies to its first frame.
+  useLayoutEffect(() => setEditor(getNearestEditorFromDOMNode(ref.current)), []);
+  const path = editor && editablePath(editor, props.nodeKey);
+  // Its preview URL (`previewUrl`) is the one whose head sizes it.
+  useDefaultWidth(ref, path && typeof props.width !== 'number' && typeof props.height !== 'number' ? props.imageSource : null);
+  useEffect(() => {
+    const wrapper = ref.current?.parentElement;
+    if (!wrapper || !path) return;
+    const open = (event: MouseEvent) => {
+      if (!(event.target instanceof HTMLImageElement)) return;
+      event.preventDefault();
+      editImage(path);
+    };
+    wrapper.addEventListener('dblclick', open);
+    return () => wrapper.removeEventListener('dblclick', open);
+  }, [path]);
   return (
     <>
-      <ImageResizeHandles nodeKey={props.nodeKey} keepHeight={typeof props.height === 'number'} />
+      <ImageResizeHandles editor={editor} nodeKey={props.nodeKey} keepHeight={typeof props.height === 'number'} />
       <div ref={ref} className="md-image-toolbar">
         {path && <button type="button" className="md-image-edit" data-tip="Open in the image editor [double-click]" onClick={() => editImage(path)}>{iconFor('edit')}</button>}
         <DefaultImageToolbar {...props} />
@@ -120,8 +133,8 @@ function ImageToolbar(props: EditImageToolbarProps) {
 const capture = realmPlugin({
   init(r) {
     realm = r;
-    const toolbar = r.getValue(editImageToolbarComponent$) as ComponentType<EditImageToolbarProps>;
-    if (toolbar !== ImageToolbar) DefaultImageToolbar = toolbar;
+    const toolbar = r.getValue(editImageToolbarComponent$) as ComponentType<ImageChromeProps>;
+    if (toolbar !== ImageChrome) DefaultImageToolbar = toolbar;
   },
   postInit(r) {
     const editor = r.getValue(rootEditor$);
@@ -130,17 +143,6 @@ const capture = realmPlugin({
     // Only image nodes change the list, so typing does not walk the document.
     editor.registerMutationListener(ImageNode, refresh, { skipInitialization: true });
     refresh();
-    sizing = sizeImages(editor, sizedUrl);
-    const open = (event: MouseEvent) => {
-      if (!(event.target instanceof HTMLImageElement)) return;
-      const key = editor.read(() => $getNearestNodeFromDOMNode(event.target as Node)?.getKey());
-      const path = key && editablePath(editor, key);
-      if (path) { event.preventDefault(); editImage(path); }
-    };
-    editor.registerRootListener((element, previous) => {
-      previous?.removeEventListener('dblclick', open);
-      element?.addEventListener('dblclick', open);
-    });
   },
 });
 
@@ -187,7 +189,7 @@ const plugins = [
   headingsPlugin(), listsPlugin(), quotePlugin(), thematicBreakPlugin(), linkPlugin(), linkDialogPlugin(),
   // Unpadded tables: padding to aligned columns rewrites every row of a table when one cell changes.
   tablePlugin({ tablePipeAlign: false }), frontmatterPlugin(), markdownShortcutPlugin(),
-  imagePlugin({ imageUploadHandler: upload, imagePreviewHandler: previewUrl, disableImageResize: true, allowSetImageDimensions: true, EditImageToolbar: ImageToolbar as FC }),
+  imagePlugin({ imageUploadHandler: upload, imagePreviewHandler: previewUrl, disableImageResize: true, allowSetImageDimensions: true, EditImageToolbar: ImageChrome as FC }),
   codeBlockPlugin({ defaultCodeBlockLanguage: '', codeBlockEditorDescriptors: [mermaidDescriptor] }),
   codeMirrorPlugin({ codeBlockLanguages: {
     '': 'Plain text', sh: 'Shell', bash: 'Bash', js: 'JavaScript', jsx: 'JSX', ts: 'TypeScript', tsx: 'TSX', json: 'JSON',

@@ -1,5 +1,4 @@
 import { viewerTitle } from './file-viewer-format.js';
-import { TOOLTIP_SCRIPT, TOOLTIP_STYLE } from './tooltip-script.js';
 import { escapeHtml } from './viewer-http.js';
 
 const compare = (a: string, b: string): number => a < b ? -1 : a > b ? 1 : 0;
@@ -10,7 +9,8 @@ export const byDisplayOrder = (a: Ordered, b: Ordered): number =>
 
 /** The largest JSON body a folder viewer's POST accepts. */
 export const FOLDER_BODY_LIMIT = 8 * 1024;
-export const FOLDER_CSP = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'";
+/** Its own script and style inline, and the shipped tooltip's from its own origin (`assets/`). */
+export const FOLDER_CSP = "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'";
 
 const STYLE = `
 :root{color-scheme:light dark}
@@ -370,8 +370,8 @@ const SCRIPT = `(function () {
  * `textContent`; the root's path is escaped into the markup. */
 export function folderViewerPage(root: string): string {
   const name = escapeHtml(viewerTitle(root));
-  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>${name}</title><style>${STYLE}${TOOLTIP_STYLE}</style></head>`
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>${name}</title><style>${STYLE}</style><link rel="stylesheet" href="assets/tooltip.css"></head>`
     + `<body><header><span id="root" data-tip-text="${escapeHtml(root)}">${name}</span>`
     + '<button type="button" id="show" aria-pressed="true" data-tip="Show ignored files">Ignored</button><button type="button" id="collapse" aria-label="Collapse all folders" data-tip="Collapse all folders"><svg viewBox="0 0 16 16"><path d="M3 1h11l1 1v10h-1V2H3zM1 4h11l1 1v9l-1 1H1l-1-1V5zm0 1v9h11V5zm2 4V8h7v1z"/></svg></button><button type="button" id="refresh" aria-label="Refresh" data-tip="Refresh"><svg viewBox="0 0 16 16"><path d="M13 2v4H9l1.5-1.5A4.5 4.5 0 1 0 12.4 9h1A5.5 5.5 0 1 1 11.2 3.8z"/></svg></button></header>'
-    + `<ul id="tree" role="tree" tabindex="0" aria-label="${name}"></ul><div id="status" role="status"></div><script>${SCRIPT}</script><script>${TOOLTIP_SCRIPT}</script></body></html>`;
+    + `<ul id="tree" role="tree" tabindex="0" aria-label="${name}"></ul><div id="status" role="status"></div><script>${SCRIPT}</script><script src="assets/tooltip.js"></script></body></html>`;
 }

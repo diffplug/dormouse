@@ -11,11 +11,10 @@ import { afterEach, beforeEach, test } from 'node:test';
 import { folderDehydrateSequence, oscOpen, readFolderViewState, startFolderViewer } from '../dist/folder-viewer.js';
 import { parseToolDehydrate, readDehydrated, TOOL_PAYLOAD_LIMIT } from 'dor-tools-lib/osc';
 import { folderViewerPage } from '../dist/folder-viewer-page.js';
-import { TOOLTIP_SCRIPT, TOOLTIP_STYLE } from '../dist/tooltip-script.js';
 
 const posixOnly = { skip: process.platform === 'win32' ? 'POSIX file names and symlinks' : false };
 const hasGit = spawnSync('git', ['--version']).status === 0;
-const CSP = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'";
+const CSP = "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'";
 
 let base;
 let root;
@@ -311,7 +310,7 @@ async function runPage(names, { listings = null, saved = null } = {}) {
       ? new Promise((resolve, reject) => posts.push({ sent: `${url} ${JSON.parse(init.body).path}`, ok: () => resolve(answer({ ok: true, status: 'created' })), fail: () => reject(new Error('lost')) }))
       : Promise.resolve(answer({ entries: listing(url), truncated: false }));
   };
-  // The page's own script; the tooltip's follows it.
+  // The page's own inline script; the tooltip's loads from `assets/`.
   runInNewContext(/<script>([\s\S]*?)<\/script>/.exec(folderViewerPage(root))[1], { document, fetch, setTimeout, clearTimeout });
   await settle();
   const tree = elements.tree.handlers;
@@ -325,10 +324,22 @@ async function runPage(names, { listings = null, saved = null } = {}) {
 }
 const settle = () => new Promise(resolve => setImmediate(resolve));
 
-test('the page shows the other pages\' tooltips, never a native title', async () => {
+test('the page shows the other pages\' tooltips, which it serves beside it, never a native title', async () => {
   const page = folderViewerPage(root);
-  assert.ok(page.includes(`<script>${TOOLTIP_SCRIPT}</script>`) && page.includes(TOOLTIP_STYLE));
-  assert.doesNotMatch(page.replace(TOOLTIP_SCRIPT, ''), /\stitle=|\.title\s*=/);
+  assert.match(page, /<link rel="stylesheet" href="assets\/tooltip\.css">/);
+  assert.match(page, /<script src="assets\/tooltip\.js"><\/script><\/body>/);
+  assert.doesNotMatch(page, /\stitle=|\.title\s*=/);
+  const viewer = await start();
+  for (const [name, type] of [['tooltip.js', /javascript/], ['tooltip.css', /^text\/css/]]) {
+    const asset = await call(viewer, `${viewer.path}assets/${name}`);
+    assert.equal(asset.status, 200, name);
+    assert.match(asset.headers['content-type'], type);
+    assert.equal(asset.headers['content-security-policy'], CSP);
+  }
+  assert.match((await call(viewer, `${viewer.path}assets/tooltip.js`)).body, /dor-tip/);
+  // Only what the build shipped, never a file of the folder.
+  await files({ 'a.js': 'a' });
+  for (const name of ['a.js', 'folder-viewer.js']) assert.equal((await call(viewer, `${viewer.path}assets/${name}`)).status, 404, name);
   assert.match(page, /id="refresh"[^>]* data-tip="Refresh"/);
   // A name or path is shown verbatim, never read as a hint's [k] shortcuts.
   assert.match(page, /id="root" data-tip-text="/);

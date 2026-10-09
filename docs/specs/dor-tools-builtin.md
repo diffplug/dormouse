@@ -55,7 +55,7 @@ Source of truth: `saveText` / `StorePath` in `dor-tools-builtin/src/editor-route
 - **Must edit only a PNG or JPEG at or under the document's canonical directory whose spelled path is its realpath**, in the [Image editor](#image-editor) over the document, else view-only with why. Its save leaves the source unchanged and reloads every display; closing it unsaved asks first.
 - **Must report the Tool dirty while the document or open image is unsaved**; Cmd/Ctrl+S saves the one in front, and the close-prompt save writes both.
 
-Source of truth: `dor-tools-builtin/viewer/markdown.tsx`; `safeCreateDOM` in `dor-tools-builtin/viewer/markdown-safety.ts`; `sizeImages` in `dor-tools-builtin/viewer/image-size.ts`; `editorRoutes` in `dor-tools-builtin/src/editor-routes.ts`; `PASTE_BOUND` in `dor-tools-builtin/src/image-format.ts`; `dor-tools-builtin/src/markdown-images.ts`. Tests: `dor-tools-builtin/test/markdown-editor.test.mjs`.
+Source of truth: `dor-tools-builtin/viewer/markdown.tsx`; `safeCreateDOM` in `dor-tools-builtin/viewer/markdown-safety.ts`; `useDefaultWidth` in `dor-tools-builtin/viewer/image-size.ts`; `editorRoutes` in `dor-tools-builtin/src/editor-routes.ts`; `PASTE_BOUND` in `dor-tools-builtin/src/image-format.ts`; `dor-tools-builtin/src/markdown-images.ts`. Tests: `dor-tools-builtin/test/markdown-editor.test.mjs`.
 
 ## Image editor
 

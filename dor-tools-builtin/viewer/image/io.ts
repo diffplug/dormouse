@@ -5,12 +5,12 @@
  * `?version=` and answers `{version}`. */
 import { imageEditability } from '../../src/image-editability';
 import { imageKind, imageTypeName, VERSION_HEADER } from '../../src/image-format';
-import { imageResolution } from '../../src/image-resolution';
+import { imageResolution, type Resolution } from '../../src/image-resolution';
 import { checked, type DocumentSource } from '../document-session';
 import { iccSpace, type SaveNote, type SourceColor } from './icc';
 import { iccSegmentsOf, jpegColor, spliceIcc } from './jpeg';
 import { isOpaque, type Raster, type Rect } from './pixels';
-import { iccpChunk, physOf, withPhys } from './png';
+import { iccpChunk } from './png';
 import type { PngJob } from './png-worker';
 
 export type EditableMime = 'image/png' | 'image/jpeg';
@@ -24,9 +24,9 @@ export interface ImageFormat {
   /** The source's color metadata, re-attached verbatim on save: whole PNG
    * chunks, or JPEG APP2 `ICC_PROFILE` segments. */
   keep: readonly Uint8Array[];
-  /** The dots per inch the source records, which a save writes: a PNG's
-   * `pHYs` where `keep` holds none recording a resolution, a JPEG's JFIF density. */
-  dpi?: number;
+  /** The resolution the source records, which a save writes: a PNG's `pHYs`,
+   * a JPEG's JFIF density. */
+  resolution?: Resolution;
 }
 /** An image file as the editor opens it. */
 export interface LoadedImage extends ImageFormat {
@@ -58,10 +58,10 @@ export async function decodeImage(blob: Blob, type = blob.type): Promise<ImageLo
   const content = imageKind(bytes);
   const mime = saveType(type, content);
   // Read before a PNG decode takes the bytes.
-  const recorded = imageResolution(bytes)?.dpi ?? undefined;
+  const recorded = imageResolution(bytes)?.resolution ?? undefined;
   const source = await decodeContent(blob, bytes, content);
-  const { space, keep, dpi, notes } = await asSaved({ ...source, dpi: recorded }, content, mime);
-  return { edit: { raster: source.raster, mime, colorSpace: space, keep, dpi, note: describe(notes) || undefined } };
+  const { space, keep, resolution, notes } = await asSaved({ ...source, resolution: recorded }, content, mime);
+  return { edit: { raster: source.raster, mime, colorSpace: space, keep, resolution, note: describe(notes) || undefined } };
 }
 
 /** A decoded source: its pixels and its color in its own format. */
@@ -91,13 +91,11 @@ export async function asSaved(source: Decoded, content: string | undefined, mime
   if (content === mime) return source;
   const keep = source.profile ? await profileAs(mime, source.profile) : [];
   const profile = keep.length ? source.profile : undefined;
-  // A PNG keeps at most one iCCP, which the profile converts, and one pHYs,
-  // whose resolution carries over; a JPEG keeps only its profile.
-  const carried = (source.profile ? 1 : 0) + (source.dpi && physOf(source.keep) ? 1 : 0);
-  const droppedOther = content === 'image/png' && source.keep.length > carried;
+  // A PNG keeps at most one iCCP, which the profile converts; a JPEG keeps only its profile.
+  const droppedOther = content === 'image/png' && source.keep.length > (source.profile ? 1 : 0);
   const lostAlpha = mime === 'image/jpeg' && !isOpaque(source.raster);
   return {
-    space: profile ? iccSpace(profile) : 'srgb', keep, profile, dpi: source.dpi,
+    space: profile ? iccSpace(profile) : 'srgb', keep, profile, resolution: source.resolution,
     notes: [...source.notes, { kind: 'formatMismatch', from: content, to: mime, droppedOther, lostAlpha }],
   };
 }
@@ -171,7 +169,7 @@ export function over(r: Raster, area: Rect, layer: Uint8ClampedArray): Raster {
  * else holds `r`, which a PNG encode then takes rather than copies. */
 export async function encodeImage(r: Raster, format: ImageFormat, owned = false): Promise<Blob> {
   if (!r.width || !r.height) throw new Error('An empty image cannot be saved.');
-  if (format.mime === 'image/png') return new Blob(await encodePngOffThread(owned ? r : { ...r, data: r.data.slice() }, withPhys(format.keep, format.dpi)), { type: 'image/png' });
+  if (format.mime === 'image/png') return new Blob(await encodePngOffThread(owned ? r : { ...r, data: r.data.slice() }, format.keep, format.resolution), { type: 'image/png' });
   // A JPEG is opaque, so a canvas's premultiplication loses nothing; the
   // sRGB canvas and ImageData pass the raw values through unconverted.
   const canvas = document.createElement('canvas');
@@ -179,12 +177,12 @@ export async function encodeImage(r: Raster, format: ImageFormat, owned = false)
   canvas.getContext('2d', { colorSpace: 'srgb' })!.putImageData(new ImageData(r.data as Uint8ClampedArray<ArrayBuffer>, r.width, r.height, { colorSpace: 'srgb' }), 0, 0);
   const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.92));
   if (!blob) throw new Error('This image could not be encoded.');
-  return new Blob(spliceIcc(new Uint8Array(await blob.arrayBuffer()), format.keep, format.dpi), { type: 'image/jpeg' });
+  return new Blob(spliceIcc(new Uint8Array(await blob.arrayBuffer()), format.keep, format.resolution), { type: 'image/jpeg' });
 }
 
 /** `encodePng` of `r`, which this takes, on a worker of its own. */
-const encodePngOffThread = (r: Raster, keep: readonly Uint8Array[]): Promise<Uint8Array<ArrayBuffer>[]> =>
-  pngWorker({ encode: { raster: r, keep } }, [r.data.buffer as ArrayBuffer]);
+const encodePngOffThread = (r: Raster, keep: readonly Uint8Array[], resolution?: Resolution): Promise<Uint8Array<ArrayBuffer>[]> =>
+  pngWorker({ encode: { raster: r, keep, resolution } }, [r.data.buffer as ArrayBuffer]);
 
 /** An image document read from the route `load` and written to `save`, under
  * `name`: its bytes, decoded as they load. */

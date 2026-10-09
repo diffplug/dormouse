@@ -8,12 +8,10 @@ export interface TipPart { text: string; key: boolean }
 // `]` key, which that pattern cannot.
 const SHORTCUT = /\[(\]|[^\]]+)\]/g;
 
-/** A tip's text as lines, each line as runs: an authored hint (`data-tip`)
- * split at each newline, each `[k]` in it a shortcut; or `literal` text (a
- * name, a path: `data-tip-text`) as one plain run, each line break a space. */
-export function tipLines(text: string, literal = false): TipPart[][] {
-  if (literal) return [[{ text: text.replace(/\r\n?|[\n\u2028\u2029]/g, ' '), key: false }]];
-  return text.split('\n').map(line => {
+/** An authored hint (`data-tip`) as lines, each line as runs: split at each
+ * newline, each `[k]` in it a shortcut. */
+export function tipLines(hint: string): TipPart[][] {
+  return hint.split('\n').map(line => {
     const parts: TipPart[] = [];
     let last = 0;
     for (const match of line.matchAll(SHORTCUT)) {
@@ -25,6 +23,10 @@ export function tipLines(text: string, literal = false): TipPart[][] {
     return parts;
   });
 }
+
+/** Text shown verbatim (a name, a path: `data-tip-text`) as one line of one
+ * plain run, each line break a space. */
+export const textLines = (text: string): TipPart[][] => [[{ text: text.replace(/\r\n?|[\n\u2028\u2029]/g, ' '), key: false }]];
 
 export interface Box { left: number; top: number; right: number; bottom: number }
 export interface Size { width: number; height: number }

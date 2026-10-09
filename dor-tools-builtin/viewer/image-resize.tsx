@@ -1,13 +1,14 @@
 /** Corner handles that resize an image in the Markdown editor
  * (docs/specs/dor-tools-builtin.md -> Markdown editor), drawn by its image
- * toolbar inside MDXEditor's image wrapper while the image is selected. A drag
- * keeps the image's aspect from the size it shows at, within the column, and
- * its release saves a width, and a height only when the document gave one, as
- * one undo step, when the width changed. Esc cancels it. */
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { $getNodeByKey, $getSelection, $isNodeSelection, getNearestEditorFromDOMNode, type LexicalEditor } from 'lexical';
+ * chrome (`ImageChrome`) inside MDXEditor's image wrapper while the image is
+ * selected. A drag keeps the image's aspect from the size it shows at, within
+ * the column, and its release saves a width, and a height only when the
+ * document gave one, as one undo step, when the width changed. Esc cancels it. */
+import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react';
+import { $getNodeByKey, $getSelection, $isNodeSelection, type LexicalEditor } from 'lexical';
 import { $isImageNode } from '@mdxeditor/editor';
-import { dragSize, pastThreshold, savedSize, type Size } from './image-drag';
+import { dragSize, pastThreshold, savedSize } from './image-drag';
+import type { Size } from './tip-layout';
 
 const CORNERS = ['nw', 'ne', 'sw', 'se'] as const;
 /** The shortest side a drag leaves an image, in CSS pixels. */
@@ -24,7 +25,7 @@ function columnWidth(block: HTMLElement): number {
  * release. Returns what cancels it, for when the handle unmounts mid-drag. */
 function drag(editor: LexicalEditor, key: string, img: HTMLImageElement, keepHeight: boolean, down: PointerEvent): () => void {
   const handle = down.target as HTMLElement, corner = handle.dataset.corner!;
-  const box = img.getBoundingClientRect(), start = { width: box.width, height: box.height }, ratio = box.height / box.width;
+  const box = img.getBoundingClientRect(), ratio = box.height / box.width;
   const block = editor.getElementByKey(key)?.parentElement;
   const max = block ? columnWidth(block) : Infinity;
   const min = Math.min(max, Math.max(MIN_SIDE, MIN_SIDE / ratio));
@@ -33,16 +34,15 @@ function drag(editor: LexicalEditor, key: string, img: HTMLImageElement, keepHei
   // Away from the opposite corner is larger.
   const sx = corner[1] === 'w' ? -1 : 1, sy = corner[0] === 'n' ? -1 : 1;
   // The size to save, null until the pointer passes the threshold and after Esc.
-  let size: Size | null = null, resizing = false, cancelled = false;
+  let size: Size | null = null, cancelled = false;
   // Every listener goes with the drag, wherever it ends.
   const listening = new AbortController(), { signal } = listening;
 
   const move = (event: PointerEvent) => {
     if (cancelled || event.pointerId !== down.pointerId) return;
     const dx = (event.clientX - down.clientX) * sx, dy = (event.clientY - down.clientY) * sy;
-    if (!resizing && !pastThreshold(dx, dy)) return;
-    resizing = true;
-    size = dragSize(start, dx, dy, min, max);
+    if (!size && !pastThreshold(dx, dy)) return;
+    size = dragSize(box, dx, dy, min, max);
     img.style.width = `${size.width}px`;
     img.style.height = `${size.height}px`;
   };
@@ -50,7 +50,7 @@ function drag(editor: LexicalEditor, key: string, img: HTMLImageElement, keepHei
     if (signal.aborted) return;
     listening.abort();
     if (handle.hasPointerCapture(down.pointerId)) handle.releasePointerCapture(down.pointerId);
-    const saved = save ? savedSize(start, size) : null;
+    const saved = save ? savedSize(box, size) : null;
     if (!saved) { Object.assign(img.style, shown); return; }
     // The element keeps the new width, which the node's then matches.
     if (!keepHeight) img.style.height = shown.height;
@@ -59,7 +59,6 @@ function drag(editor: LexicalEditor, key: string, img: HTMLImageElement, keepHei
       if ($isImageNode(node)) node.setWidthAndHeight(saved.width, keepHeight ? saved.height : 'inherit');
     });
   };
-  const ends = (save: boolean) => (event: PointerEvent) => { if (event.pointerId === down.pointerId) end(save); };
   // Esc restores the size but holds the pointer until its release, whose click the frame then swallows.
   const escape = (event: KeyboardEvent) => {
     if (event.key !== 'Escape') return;
@@ -71,23 +70,19 @@ function drag(editor: LexicalEditor, key: string, img: HTMLImageElement, keepHei
   };
   handle.setPointerCapture(down.pointerId);
   handle.addEventListener('pointermove', move, { signal });
-  handle.addEventListener('pointerup', ends(true), { signal });
-  // A handle that leaves the page loses its capture to the document.
-  for (const target of [handle, document]) {
-    target.addEventListener('lostpointercapture', ends(false) as EventListener, { signal });
-    target.addEventListener('pointercancel', ends(false) as EventListener, { signal });
-  }
+  handle.addEventListener('pointerup', event => { if (event.pointerId === down.pointerId) end(true); }, { signal });
+  // A cancelled pointer, or a handle that leaves the page, loses its capture,
+  // which reaches the document either way; a release's comes after `end`.
+  document.addEventListener('lostpointercapture', event => { if (event.pointerId === down.pointerId) end(false); }, { signal });
   window.addEventListener('keydown', escape, { capture: true, signal });
   return () => end(false);
 }
 
-/** The selection frame and corner handles of image node `nodeKey`, shown
- * while it alone is selected. `keepHeight` says the document gave it a height. */
-export function ImageResizeHandles({ nodeKey, keepHeight }: { nodeKey: string; keepHeight: boolean }) {
+/** The selection frame and corner handles of image node `nodeKey` in
+ * `editor`, its own (the root's, or a table cell's), shown while it alone is
+ * selected. `keepHeight` says the document gave it a height. */
+export function ImageResizeHandles({ editor, nodeKey, keepHeight }: { editor: LexicalEditor | null; nodeKey: string; keepHeight: boolean }) {
   const ref = useRef<HTMLSpanElement>(null);
-  // The node's editor: the root's, or a table cell's.
-  const [editor, setEditor] = useState<LexicalEditor | null>(null);
-  useEffect(() => setEditor(getNearestEditorFromDOMNode(ref.current)), []);
   const subscribe = useCallback((changed: () => void) => editor?.registerUpdateListener(changed) ?? (() => {}), [editor]);
   const selected = useSyncExternalStore(subscribe, () => !!editor?.getEditorState().read(() => {
     const selection = $getSelection();

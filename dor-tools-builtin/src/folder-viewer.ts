@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { resolveBinaryPath, spawnAndCapture } from 'dor-lib-common';
 import { DEHYDRATE_ENV, dehydrateSequence, openSequence, readDehydrated, validToolOpenPath } from 'dor-tools-lib/osc';
 import { byDisplayOrder, FOLDER_BODY_LIMIT, FOLDER_CSP, folderViewerPage } from './folder-viewer-page.js';
+import { viewerAsset } from './viewer-assets.js';
 import { announceViewer, HttpError, isInsideRoot, pathSegments, readJsonBody, reply, resolveInside, startCapabilityViewer } from './viewer-server.js';
 
 /** Entries one listing returns. */
@@ -70,7 +71,8 @@ export function folderDehydrateSequence(state: FolderViewState): string {
 }
 
 /** One Tool process lists one canonical root, a directory at a time, and never
- * serves file contents: select and activate hand a path to `open`. Its view
+ * serves file contents, only its page and the shipped tooltip (`assets/`):
+ * select and activate hand a path to `open`. Its view
  * starts from `initial` and follows what the page reports. */
 export async function startFolderViewer(
   input: string,
@@ -184,6 +186,9 @@ export async function startFolderViewer(
         reply(res, 200, page, 'text/html; charset=utf-8');
       } else if (name === 'list') {
         reply(res, 200, JSON.stringify(await list(url.searchParams.get('dir') ?? '')), 'application/json');
+      } else if (name?.startsWith('assets/')) {
+        const asset = await viewerAsset(name.slice('assets/'.length));
+        reply(res, 200, asset.bytes, asset.mime);
       } else {
         throw new HttpError(404);
       }

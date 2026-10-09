@@ -2,6 +2,7 @@
  * segments, spliced into the bytes a canvas encodes. No DOM, so Node tests load it. */
 import { jpegSegments, type JpegSegment } from '../../src/image-editability';
 import { ascii, latin1 } from '../../src/image-format';
+import type { Resolution } from '../../src/image-resolution';
 import { iccSpace, rgbProfile, type SourceColor } from './icc';
 
 type Bytes = Uint8Array<ArrayBuffer>;
@@ -61,21 +62,24 @@ export function iccSegmentsOf(profile: Uint8Array): Bytes[] {
 
 /** `encoded` with its own ICC segments replaced by `icc`, placed after SOI and
  * the APP0 header that follows it, when there is one: the file's parts, in
- * order. With `dpi`, that header is a JFIF one recording it. */
-export function spliceIcc(encoded: Uint8Array, icc: readonly Uint8Array[], dpi?: number): Bytes[] {
+ * order. With `resolution`, that header is a JFIF one recording it. */
+export function spliceIcc(encoded: Uint8Array, icc: readonly Uint8Array[], resolution?: Resolution): Bytes[] {
   const { list, rest } = segments(encoded);
   const app0 = list[0]?.marker === 0xe0 ? encoded.subarray(list[0].start, list[0].end) : undefined;
-  const head = dpi ? jfifDensity(app0, dpi) : app0 ? [app0] : [];
+  const head = resolution ? jfifDensity(app0, resolution) : app0 ? [app0] : [];
   return [encoded.subarray(0, 2), ...head, ...icc,
     ...list.slice(app0 ? 1 : 0).filter(s => !isIcc(encoded, s)).map(s => encoded.subarray(s.start, s.end)), encoded.subarray(rest)] as Bytes[];
 }
 
-/** A JFIF APP0 header recording `dpi` dots per inch: the encoder's `app0`
- * patched when it is one, else a new one ahead of it. */
-function jfifDensity(app0: Uint8Array | undefined, dpi: number): Uint8Array[] {
-  const d = Math.min(0xffff, Math.max(1, Math.round(dpi)));
-  // Units (1, the inch), then the density across and down.
-  const density = [1, d >> 8, d & 255, d >> 8, d & 255];
+/** A JFIF APP0 header recording `resolution`, in dots per inch, or units 0
+ * for an aspect only, scaled to fit: the encoder's `app0` patched when it is
+ * one, else a new one ahead of it. */
+function jfifDensity(app0: Uint8Array | undefined, { x, y, aspectOnly }: Resolution): Uint8Array[] {
+  // Pixels per metre over this are dots per inch; an aspect shrinks to fit 16 bits.
+  const scale = aspectOnly ? Math.max(1, x / 0xffff, y / 0xffff) : 1 / 0.0254;
+  const u16 = (v: number) => { const d = Math.min(0xffff, Math.max(1, Math.round(v / scale))); return [d >> 8, d & 255]; };
+  // Units (1, the inch, or 0, none), then the density across and down.
+  const density = [aspectOnly ? 0 : 1, ...u16(x), ...u16(y)];
   if (app0 && app0.length >= 18 && ascii(app0, 4, 9) === 'JFIF\0') {
     const out = app0.slice();
     out.set(density, 11);

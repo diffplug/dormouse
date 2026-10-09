@@ -6,12 +6,14 @@
  * when any pixel is not opaque. No DOM, so Node tests load it. */
 import { ascii, isPng, latin1, PNG_SIGNATURE } from '../../src/image-format';
 import { exifFields } from '../../src/image-editability';
+import type { Resolution } from '../../src/image-resolution';
 import { isOpaque, orient, type Raster } from './pixels';
 import { cicpSpace, iccSpace, rgbProfile, type SaveNote, type SourceColor } from './icc';
 
 type Bytes = Uint8Array<ArrayBuffer>;
-/** The ancillary chunks a save keeps; an `iCCP` only with an RGB profile. */
-const KEPT = new Set(['iCCP', 'sRGB', 'gAMA', 'cHRM', 'cICP', 'pHYs']);
+/** The ancillary chunks a save keeps; an `iCCP` only with an RGB profile. A
+ * `pHYs` is written from the resolution instead (`encodePng`). */
+const KEPT = new Set(['iCCP', 'sRGB', 'gAMA', 'cHRM', 'cICP']);
 /** Past this many pixels the codec declines, as a canvas would. */
 const MAX_PIXELS = 1 << 27;
 /** Samples per pixel, by color type. */
@@ -278,30 +280,18 @@ export async function iccpChunk(profile: Uint8Array): Promise<Bytes> {
   return chunk('iCCP', data);
 }
 
-const isPhys = (k: Uint8Array) => k.length === 21 && ascii(k, 4, 8) === 'pHYs';
-/** The `pHYs` among `keep` (whole chunks) that records a resolution, in unit
- * 1, the metre; one in unit 0 records only the pixels' aspect. */
-export const physOf = (keep: readonly Uint8Array[]): Uint8Array | undefined => keep.find(k => isPhys(k) && k[16] === 1);
-
-/** `keep` (whole chunks) recording `dpi` dots per inch across: as it is when
- * its `pHYs` records a resolution, else with one that does in place of an
- * aspect-only `pHYs`, whose aspect it keeps, or after the rest. */
-export function withPhys(keep: readonly Uint8Array[], dpi: number | undefined): readonly Uint8Array[] {
-  if (!dpi || physOf(keep)) return keep;
-  const at = keep.findIndex(isPhys);
-  const aspect = at < 0 ? null : new DataView(keep[at].buffer, keep[at].byteOffset + 8, 8);
-  // Pixels per metre across, then down, then unit 1, the metre.
-  const data = new Uint8Array(9), view = new DataView(data.buffer), across = Math.round(dpi / 0.0254);
-  const down = aspect?.getUint32(0) ? Math.round(across * aspect.getUint32(4) / aspect.getUint32(0)) : across;
-  view.setUint32(0, across); view.setUint32(4, down); data[8] = 1;
-  const phys = chunk('pHYs', data);
-  return at < 0 ? [...keep, phys] : keep.map((k, i) => i === at ? phys : k);
+/** A `pHYs` chunk recording `resolution`: per metre, or unit 0 for an aspect only. */
+function phys({ x, y, aspectOnly }: Resolution): Bytes {
+  const data = new Uint8Array(9), view = new DataView(data.buffer), u32 = (v: number) => Math.min(0xffffffff, Math.max(1, Math.round(v)));
+  view.setUint32(0, u32(x)); view.setUint32(4, u32(y)); data[8] = aspectOnly ? 0 : 1;
+  return chunk('pHYs', data);
 }
 
 /** `r` as a PNG's parts, in order, with `keep` (whole chunks from a decoded
- * source) after its header. Reads every pixel before it returns, so the
- * caller may change `r` while the bytes are compressed. */
-export function encodePng(r: Raster, keep: readonly Uint8Array[] = []): Promise<Bytes[]> {
+ * source) after its header, then a `pHYs` recording `resolution`. Reads
+ * every pixel before it returns, so the caller may change `r` while the bytes
+ * are compressed. */
+export function encodePng(r: Raster, keep: readonly Uint8Array[] = [], resolution?: Resolution): Promise<Bytes[]> {
   const { width, height, data } = r;
   if (!width || !height) throw new Error('An empty image cannot be saved.');
   const opaque = isOpaque(r), channels = opaque ? 3 : 4, rowBytes = width * channels, stride = rowBytes + 1;
@@ -323,7 +313,7 @@ export function encodePng(r: Raster, keep: readonly Uint8Array[] = []): Promise<
   }
   const ihdr = new Uint8Array(13), h = new DataView(ihdr.buffer);
   h.setUint32(0, width); h.setUint32(4, height); ihdr[8] = 8; ihdr[9] = opaque ? 2 : 6;
-  const head = [new Uint8Array(PNG_SIGNATURE), chunk('IHDR', ihdr), ...keep.map(k => k as Bytes)];
+  const head = [new Uint8Array(PNG_SIGNATURE), chunk('IHDR', ihdr), ...keep.map(k => k as Bytes), ...resolution ? [phys(resolution)] : []];
   return idat(filtered).then(parts => [...head, ...parts, chunk('IEND', new Uint8Array(0))]);
 }
 
