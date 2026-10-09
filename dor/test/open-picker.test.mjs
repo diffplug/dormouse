@@ -77,6 +77,7 @@ function fakeTerminal({ columns = 120, rows = 20 } = {}) {
   let onInput;
   let onResize;
   let output = '';
+  let taken = 0;
   return {
     columns: () => columns,
     rows: () => rows,
@@ -85,6 +86,8 @@ function fakeTerminal({ columns = 120, rows = 20 } = {}) {
     send(chunk) { onInput(chunk); },
     resize(width, height) { columns = width; rows = height; onResize(); },
     get output() { return output; },
+    /** Output written since the previous call. */
+    take() { const text = output.slice(taken); taken = output.length; return text; },
     get listening() { return onInput !== undefined; },
   };
 }
@@ -116,6 +119,9 @@ async function until(predicate, label) {
   assert.fail(`timed out waiting for ${label}`);
 }
 
+/** The rows a frame repainted, in order. */
+const paintedRows = (text) => [...text.matchAll(/\x1b\[(\d+);1H/g)].map(match => Number(match[1]));
+
 test('picker redraws only changed rows, skips identical frames, and repaints after resize', async () => {
   const terminal = fakeTerminal({ columns: 60, rows: 8 });
   const result = runFilePicker({
@@ -126,32 +132,30 @@ test('picker redraws only changed rows, skips identical frames, and repaints aft
   });
   try {
     await until(() => terminal.output.includes('2/2'), 'completed listing');
-    // Both the query/count row and the first file fill the terminal width.
-    assert.doesNotMatch(terminal.output, /2\/2\x1b\[0m\x1b\[0m\x1b\[K/);
-    assert.doesNotMatch(terminal.output, /a{58}\x1b\[0m\x1b\[0m\x1b\[K/);
-    const before = terminal.output;
+    // The query/count row and the first file fill the terminal width, so an
+    // erase after either would delete its last character.
+    assert.doesNotMatch(terminal.take(), /\x1b\[K/, 'rows are erased only before they are written');
     terminal.send('\x1b[A'); // Already at the top.
     terminal.resize(60, 8);
-    assert.equal(terminal.output, before, 'unchanged frames emit no bytes or cursor toggles');
+    assert.equal(terminal.take(), '', 'unchanged frames emit no bytes or cursor toggles');
 
     terminal.send('\x1b[B');
-    const update = terminal.output.slice(before.length);
-    assert.deepEqual([...update.matchAll(/\x1b\[(\d+);1H/g)].map(match => Number(match[1])), [2, 3]);
+    const update = terminal.take();
+    assert.deepEqual(paintedRows(update), [2, 3]);
     assert.ok(update.endsWith('\x1b[1;3H\x1b[?25h\x1b[?2026l'), 'returns the cursor to the query');
 
-    const unfiltered = terminal.output.length;
     terminal.send('b');
-    const filtered = terminal.output.slice(unfiltered);
-    assert.match(filtered, /b\x1b\[0m\x1b\[1m\.ts\x1b\[0m\x1b\[0m\x1b\[K/, 'shorter replacement clears the old row tail');
+    const filtered = terminal.take();
+    assert.match(filtered, /\x1b\[2;1H\x1b\[2K[^H]*b\x1b\[0m\x1b\[1m\.ts/, 'shorter replacement clears the old row first');
     assert.doesNotMatch(filtered, /0…\/2/, 'typing does not paint an empty list before ranking');
-    const narrow = terminal.output.length;
     terminal.resize(120, 10);
-    assert.deepEqual([...terminal.output.slice(narrow).matchAll(/\x1b\[(\d+);1H/g)].map(match => Number(match[1])), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
-    assert.match(terminal.output.slice(narrow), /Opens with/);
-    const wide = terminal.output.length;
+    const wide = terminal.take();
+    assert.deepEqual(paintedRows(wide), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    assert.match(wide, /Opens with/);
     terminal.resize(60, 6);
-    assert.deepEqual([...terminal.output.slice(wide).matchAll(/\x1b\[(\d+);1H/g)].map(match => Number(match[1])), [1, 2, 3, 4, 5, 6]);
-    assert.match(terminal.output.slice(wide), /1;4H/, 'query cursor survives resize');
+    const narrow = terminal.take();
+    assert.deepEqual(paintedRows(narrow), [1, 2, 3, 4, 5, 6]);
+    assert.match(narrow, /1;4H/, 'query cursor survives resize');
     terminal.send('\r');
     assert.deepEqual(await result, { file: 'b.ts' });
   } finally {
@@ -170,12 +174,12 @@ test('handler replies leave unchanged file rows alone', async () => {
   });
   try {
     await until(() => reply !== undefined, 'handler request');
-    const before = terminal.output.length;
+    terminal.take();
     reply({ handlers: HANDLERS, config: '/config', warnings: [], target: '/a.ts', directory: false });
     await until(() => terminal.output.includes('builtin:file'), 'handler reply');
-    const update = terminal.output.slice(before);
+    const update = terminal.take();
     assert.doesNotMatch(update, /a\.ts|b\.ts/);
-    assert.deepEqual([...update.matchAll(/\x1b\[(\d+);1H/g)].map(match => Number(match[1])), [19, 20]);
+    assert.deepEqual(paintedRows(update), [19, 20]);
   } finally {
     terminal.send('\x03');
     await result;

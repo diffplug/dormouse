@@ -69,7 +69,7 @@ export function runFilePicker(options: PickerOptions): Promise<PickerChoice | nu
   let listRows = 0;
   let redrawTimer: ReturnType<typeof setTimeout> | undefined;
   let previousLines: string[] = [];
-  let previousColumns = 0;
+  let previousSize = '';
   const listing = new AbortController();
 
   return new Promise((resolve) => {
@@ -196,6 +196,9 @@ export function runFilePicker(options: PickerOptions): Promise<PickerChoice | nu
         }
         if (done) return;
       }
+      // A query edit restarts ranking; without a slice now, this frame would
+      // paint an empty list until the deferred scan catches up.
+      ranker.seed();
       render();
     };
 
@@ -246,17 +249,16 @@ export function runFilePicker(options: PickerOptions): Promise<PickerChoice | nu
       // Handler replies and ranking ticks often change nothing visible. Keep
       // those frames silent, and leave unchanged rows alone on real updates.
       // A resize invalidates the cache because the terminal may reflow rows.
-      const resized = columns !== previousColumns || lines.length !== previousLines.length;
+      // Erasing before writing keeps a character in the last column, where an
+      // erase after it would land on that character.
+      const size = `${columns}x${rows}`;
       let out = '';
       lines.forEach((line, index) => {
-        if (!resized && line === previousLines[index]) return;
-        out += `${CSI}${index + 1};1H${line}${SGR.reset}`;
-        // At the right margin the cursor still occupies the last cell (wrap
-        // pending). Erasing there would delete the character just written.
-        if (displayWidth(line) < columns) out += `${CSI}K`;
+        if (size === previousSize && line === previousLines[index]) return;
+        out += `${CSI}${index + 1};1H${CSI}2K${line}${SGR.reset}`;
       });
       previousLines = lines;
-      previousColumns = columns;
+      previousSize = size;
       if (out) terminal.write(`${CSI}?2026h${CSI}?25l${out}${CSI}1;${3 + displayWidth(shown)}H${CSI}?25h${CSI}?2026l`);
     };
 

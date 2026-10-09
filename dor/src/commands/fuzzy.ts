@@ -205,11 +205,12 @@ export class Ranker {
     this.ranked = [];
     this.pending = [];
     this.selected = undefined;
-    // Seed the next frame before the picker redraws. Otherwise each keystroke
-    // paints an empty list until the deferred scan and redraw timer catch up.
-    // Large searches still yield after one bounded slice.
-    if (this.scanning) this.step(SLICE_MS);
     this.schedule();
+  }
+
+  /** One bounded slice now, so a frame drawn right away shows matches. */
+  seed(): void {
+    if (this.scanning) this.step(SLICE_MS);
   }
 
   /** Ranks everything listed so far, now: Enter opens what is best. */
