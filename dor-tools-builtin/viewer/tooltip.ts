@@ -1,9 +1,11 @@
 /** Tooltips for every built-in page, in place of native `title` tooltips,
  * which the host's webview shows late or never: one delegated listener shows
- * the `data-tip` text of the control under the mouse, or of the control
- * keyboard focus reaches, on a raised surface like the app's pane-header
- * tooltips (DESIGN.md -> Header Action Button). `[k]` renders as a shortcut
- * and a newline starts another line (./tip-layout.ts). Touch input shows none.
+ * the tip of the control under the mouse, or of the control keyboard focus
+ * reaches, on a raised surface like the app's pane-header tooltips
+ * (DESIGN.md -> Header Action Button). A `data-tip` is an authored hint, where
+ * `[k]` renders as a shortcut and a newline starts another line; a
+ * `data-tip-text` is shown verbatim on one line, for names, paths, and other
+ * text a user wrote (./tip-layout.ts). Touch input shows none.
  * A control that cannot act keeps its tip by being `aria-disabled` rather
  * than `disabled`, which this also keeps inert (./aria-disabled.ts). */
 import { refuseDisabledClick } from './aria-disabled';
@@ -40,29 +42,36 @@ export function installTooltips(): void {
   /** The anchor's own `aria-describedby`, restored on hide. */
   let describedBy: string | null = null;
   // While a tip shows, its control leaving the page or changing its disabled
-  // state hides it; a changed `data-tip` replaces the text.
+  // state hides it; a changed tip replaces the text.
   const watch = new MutationObserver(records => {
     if (!anchor?.isConnected || records.some(r => r.target === anchor && r.attributeName === 'aria-disabled')) hide();
-    else if (records.some(r => r.target === anchor && r.attributeName === 'data-tip')) render();
+    else if (records.some(r => r.target === anchor && r.attributeName?.startsWith('data-tip'))) render();
   });
 
+  /** `el`'s tip: its literal text, else its authored hint. */
+  function textOf(el: HTMLElement): { text: string; literal: boolean } | null {
+    const literal = el.dataset.tipText, hint = el.dataset.tip;
+    return literal ? { text: literal, literal: true } : hint ? { text: hint, literal: false } : null;
+  }
+
   /** The control `target` is in that has a tip. A `title` the page's
-   * libraries set (MDXEditor's image toolbar) becomes its tip on first
-   * reach, so the native tooltip never shows beside this one. */
+   * libraries set (MDXEditor's image toolbar, an image's own title) becomes
+   * its literal tip on first reach, so the native tooltip never shows beside
+   * this one. */
   function tipOf(target: EventTarget | null): HTMLElement | null {
-    const el = target instanceof Element ? target.closest('[data-tip],[title]') : null;
+    const el = target instanceof Element ? target.closest('[data-tip],[data-tip-text],[title]') : null;
     if (!(el instanceof HTMLElement)) return null;
     if (el.hasAttribute('title')) {
-      if (el.title) el.dataset.tip = el.title;
+      if (el.title) el.dataset.tipText = el.title;
       el.removeAttribute('title');
     }
-    return el.dataset.tip ? el : null;
+    return textOf(el) ? el : null;
   }
 
   function render() {
-    const text = anchor?.dataset.tip;
-    if (!anchor || !text) { hide(); return; }
-    tip.replaceChildren(...tipLines(text).map(parts => {
+    const found = anchor && textOf(anchor);
+    if (!anchor || !found) { hide(); return; }
+    tip.replaceChildren(...tipLines(found.text, found.literal).map(parts => {
       const line = document.createElement('div');
       for (const part of parts) {
         if (!part.key) { line.append(part.text); continue; }
@@ -82,6 +91,8 @@ export function installTooltips(): void {
 
   function show(el: HTMLElement, focus = false) {
     hide();
+    // The delay may outlast the control, its tip, or its showing at all.
+    if (!el.isConnected || !textOf(el) || !el.getClientRects().length) return;
     anchor = el;
     fromFocus = focus;
     shown = true;
@@ -90,7 +101,7 @@ export function installTooltips(): void {
     if (!shown) return;
     describedBy = el.getAttribute('aria-describedby');
     el.setAttribute('aria-describedby', describedBy ? `${describedBy} ${ID}` : ID);
-    watch.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['aria-disabled', 'data-tip'] });
+    watch.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['aria-disabled', 'data-tip', 'data-tip-text'] });
   }
 
   function hide() {

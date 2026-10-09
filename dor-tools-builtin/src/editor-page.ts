@@ -8,7 +8,7 @@ const CONFIRM = '<dialog id="confirm"><form method="dialog"><h2>Discard unsaved 
 
 export function editorPage(name: string): string {
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>${escapeHtml(name)}</title><link rel="stylesheet" href="assets/editor.css"></head><body>
-<header><span id="filename" data-tip="${escapeHtml(name)}">${escapeHtml(name)}</span><span id="state" role="status">Loading…</span><button id="wrap" data-tip="Toggle word wrap" aria-pressed="false">Wrap</button><button id="reload" data-tip="Reload from disk">Reload</button><button id="save" aria-disabled="true" data-tip="Save [Cmd/Ctrl+S]">Save</button></header>
+<header><span id="filename" data-tip-text="${escapeHtml(name)}">${escapeHtml(name)}</span><span id="state" role="status">Loading…</span><button id="wrap" data-tip="Toggle word wrap" aria-pressed="false">Wrap</button><button id="reload" data-tip="Reload from disk">Reload</button><button id="save" aria-disabled="true" data-tip="Save [Cmd/Ctrl+S]">Save</button></header>
 <div id="error" role="alert" hidden></div><main id="editor" aria-label="Code editor"></main><footer><span id="language"></span><span id="position"></span><span id="encoding">UTF-8</span></footer>
 ${CONFIRM}
 <script type="module" src="assets/editor.js"></script></body></html>`;

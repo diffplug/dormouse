@@ -98,7 +98,7 @@ const SCRIPT = `(function () {
       : '<svg viewBox="0 0 16 16"><path d="M3 1h6l4 4v10H3zm1 1v12h8V6H8V2zm5 .5V5h2.5z"/></svg>';
     row.appendChild(icon);
     row.appendChild(name);
-    row.setAttribute('data-tip', entry.name);
+    row.setAttribute('data-tip-text', entry.name);
     li.appendChild(row);
     var node = { name: entry.name, path: parent.path ? parent.path + '/' + entry.name : entry.name, kind: entry.kind,
       level: parent.level + 1, parent: parent, li: li, row: row, children: [], group: null, expanded: false, loaded: false };
@@ -371,7 +371,7 @@ const SCRIPT = `(function () {
 export function folderViewerPage(root: string): string {
   const name = escapeHtml(viewerTitle(root));
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>${name}</title><style>${STYLE}${TOOLTIP_STYLE}</style></head>`
-    + `<body><header><span id="root" data-tip="${escapeHtml(root)}">${name}</span>`
+    + `<body><header><span id="root" data-tip-text="${escapeHtml(root)}">${name}</span>`
     + '<button type="button" id="show" aria-pressed="true" data-tip="Show ignored files">Ignored</button><button type="button" id="collapse" aria-label="Collapse all folders" data-tip="Collapse all folders"><svg viewBox="0 0 16 16"><path d="M3 1h11l1 1v10h-1V2H3zM1 4h11l1 1v9l-1 1H1l-1-1V5zm0 1v9h11V5zm2 4V8h7v1z"/></svg></button><button type="button" id="refresh" aria-label="Refresh" data-tip="Refresh"><svg viewBox="0 0 16 16"><path d="M13 2v4H9l1.5-1.5A4.5 4.5 0 1 0 12.4 9h1A5.5 5.5 0 1 1 11.2 3.8z"/></svg></button></header>'
     + `<ul id="tree" role="tree" tabindex="0" aria-label="${name}"></ul><div id="status" role="status"></div><script>${SCRIPT}</script><script>${TOOLTIP_SCRIPT}</script></body></html>`;
 }

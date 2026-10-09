@@ -19,7 +19,7 @@ export class CommentNode extends DecoratorNode<ReactElement> {
   updateDOM() { return false; }
   isInline() { return true; }
   getText() { return this.getLatest().__text; }
-  decorate() { return <span data-tip={this.__text}>{this.__text.length > 48 ? `${this.__text.slice(0, 44)}… -->` : this.__text}</span>; }
+  decorate() { return <span data-tip-text={this.__text}>{this.__text.length > 48 ? `${this.__text.slice(0, 44)}… -->` : this.__text}</span>; }
 }
 
 const $isCommentNode = (node: LexicalNode | null | undefined): node is CommentNode => node instanceof CommentNode;

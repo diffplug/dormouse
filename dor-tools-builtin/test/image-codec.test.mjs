@@ -546,6 +546,11 @@ test('a save writes the resolution its source records, in either format', async 
   const withPhys = await resave(makePng(1, 1, 8, 2, [[1, 2, 3]], [phys, chunk('eXIf', tiff({ xres: [72, 1] }))]), 'image/png');
   assert.deepEqual(chunks(withPhys.saved).filter(c => c.type === 'pHYs').map(c => c.raw), [phys]);
 
+  // An aspect-only pHYs (unit 0) records no resolution: the eXIf's replaces it, keeping its aspect.
+  const aspectOnly = () => makePng(1, 1, 8, 2, [[1, 2, 3]], [chunk('pHYs', [0, 0, 0, 1, 0, 0, 0, 2, 0]), chunk('eXIf', tiff({ xres: [144, 1] }))]);
+  const upgraded = await resave(aspectOnly(), 'image/png');
+  assert.deepEqual(chunks(upgraded.saved).filter(c => c.type === 'pHYs').map(c => Array.from(c.data)), [[0, 0, 0x16, 0x25, 0, 0, 0x2c, 0x4a, 1]], '5669 across, twice that down');
+
   // A JPEG re-encoded by a canvas, whose own header records none.
   assert.equal(dpi((await resave(splice(JPEG, [], 144), 'image/jpeg')).saved), 144);
 
@@ -553,6 +558,10 @@ test('a save writes the resolution its source records, in either format', async 
   const pngAsJpeg = await resave(makePng(1, 1, 8, 2, [[1, 2, 3]], [phys]), 'image/jpeg');
   assert.equal(dpi(pngAsJpeg.saved), 144);
   assert.equal(pngAsJpeg.edit.note, describe([mismatch('image/png', 'image/jpeg', false, false)]));
+  // An aspect-only pHYs is not carried, so is noted as dropped.
+  const aspectAsJpeg = await resave(aspectOnly(), 'image/jpeg');
+  assert.equal(dpi(aspectAsJpeg.saved), 144);
+  assert.equal(aspectAsJpeg.edit.note, describe([mismatch('image/png', 'image/jpeg', true, false)]));
   const jpegAsPng = await resave(splice(JPEG, [], 216), 'image/png');
   assert.equal(jpegAsPng.edit.mime, 'image/png');
   assert.equal(dpi(jpegAsPng.saved), 216);

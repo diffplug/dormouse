@@ -278,14 +278,24 @@ export async function iccpChunk(profile: Uint8Array): Promise<Bytes> {
   return chunk('iCCP', data);
 }
 
-/** `keep` (whole chunks) and, when it holds no `pHYs`, one recording `dpi`
- * dots per inch. */
+const isPhys = (k: Uint8Array) => k.length === 21 && ascii(k, 4, 8) === 'pHYs';
+/** The `pHYs` among `keep` (whole chunks) that records a resolution, in unit
+ * 1, the metre; one in unit 0 records only the pixels' aspect. */
+export const physOf = (keep: readonly Uint8Array[]): Uint8Array | undefined => keep.find(k => isPhys(k) && k[16] === 1);
+
+/** `keep` (whole chunks) recording `dpi` dots per inch across: as it is when
+ * its `pHYs` records a resolution, else with one that does in place of an
+ * aspect-only `pHYs`, whose aspect it keeps, or after the rest. */
 export function withPhys(keep: readonly Uint8Array[], dpi: number | undefined): readonly Uint8Array[] {
-  if (!dpi || keep.some(k => ascii(k, 4, 8) === 'pHYs')) return keep;
+  if (!dpi || physOf(keep)) return keep;
+  const at = keep.findIndex(isPhys);
+  const aspect = at < 0 ? null : new DataView(keep[at].buffer, keep[at].byteOffset + 8, 8);
   // Pixels per metre across, then down, then unit 1, the metre.
-  const data = new Uint8Array(9), view = new DataView(data.buffer), perMetre = Math.round(dpi / 0.0254);
-  view.setUint32(0, perMetre); view.setUint32(4, perMetre); data[8] = 1;
-  return [...keep, chunk('pHYs', data)];
+  const data = new Uint8Array(9), view = new DataView(data.buffer), across = Math.round(dpi / 0.0254);
+  const down = aspect?.getUint32(0) ? Math.round(across * aspect.getUint32(4) / aspect.getUint32(0)) : across;
+  view.setUint32(0, across); view.setUint32(4, down); data[8] = 1;
+  const phys = chunk('pHYs', data);
+  return at < 0 ? [...keep, phys] : keep.map((k, i) => i === at ? phys : k);
 }
 
 /** `r` as a PNG's parts, in order, with `keep` (whole chunks from a decoded

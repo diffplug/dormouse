@@ -4,13 +4,13 @@
  * the editor shows the image view-only; a save POSTs the bytes with
  * `?version=` and answers `{version}`. */
 import { imageEditability } from '../../src/image-editability';
-import { ascii, imageKind, imageTypeName, VERSION_HEADER } from '../../src/image-format';
+import { imageKind, imageTypeName, VERSION_HEADER } from '../../src/image-format';
 import { imageResolution } from '../../src/image-resolution';
 import { checked, type DocumentSource } from '../document-session';
 import { iccSpace, type SaveNote, type SourceColor } from './icc';
 import { iccSegmentsOf, jpegColor, spliceIcc } from './jpeg';
 import { isOpaque, type Raster, type Rect } from './pixels';
-import { iccpChunk, withPhys } from './png';
+import { iccpChunk, physOf, withPhys } from './png';
 import type { PngJob } from './png-worker';
 
 export type EditableMime = 'image/png' | 'image/jpeg';
@@ -25,7 +25,7 @@ export interface ImageFormat {
    * chunks, or JPEG APP2 `ICC_PROFILE` segments. */
   keep: readonly Uint8Array[];
   /** The dots per inch the source records, which a save writes: a PNG's
-   * `pHYs` where `keep` holds none, a JPEG's JFIF density. */
+   * `pHYs` where `keep` holds none recording a resolution, a JPEG's JFIF density. */
   dpi?: number;
 }
 /** An image file as the editor opens it. */
@@ -93,7 +93,7 @@ export async function asSaved(source: Decoded, content: string | undefined, mime
   const profile = keep.length ? source.profile : undefined;
   // A PNG keeps at most one iCCP, which the profile converts, and one pHYs,
   // whose resolution carries over; a JPEG keeps only its profile.
-  const carried = (source.profile ? 1 : 0) + (source.dpi && source.keep.some(k => ascii(k, 4, 8) === 'pHYs') ? 1 : 0);
+  const carried = (source.profile ? 1 : 0) + (source.dpi && physOf(source.keep) ? 1 : 0);
   const droppedOther = content === 'image/png' && source.keep.length > carried;
   const lostAlpha = mime === 'image/jpeg' && !isOpaque(source.raster);
   return {

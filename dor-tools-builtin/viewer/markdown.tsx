@@ -1,7 +1,7 @@
-import { createRef, useMemo, useSyncExternalStore, type ComponentType, type FC } from 'react';
+import { createRef, useLayoutEffect, useMemo, useRef, useSyncExternalStore, type ComponentType, type FC } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createPortal, flushSync } from 'react-dom';
-import { $getNearestNodeFromDOMNode, $getNodeByKey, type LexicalEditor } from 'lexical';
+import { $getNearestNodeFromDOMNode, $getNodeByKey, getNearestEditorFromDOMNode, type LexicalEditor } from 'lexical';
 import { syntaxHighlighting } from '@codemirror/language';
 import { classHighlighter } from '@lezer/highlight';
 import {
@@ -72,10 +72,15 @@ const editImage = (path: string) => update({ editing: path });
 /** The URL whose head sizes an image: a PNG or JPEG under the document's folder may record its scale. */
 const sizedUrl = (src: string) => editableImage(localImagePath(src)) ? imageUrl(src, store.saved) : null;
 
-/** An image's URL, given once its default width is known, so it first shows at that width. */
+/** How long an image that may show at a default width waits for it, in ms;
+ * one read later applies when it arrives (`sizeImages`). */
+const SIZE_WAIT = 300;
+
+/** An image's URL, given once its default width is known, or `SIZE_WAIT`
+ * passes, so it first shows at that width; at once when its document sizes it. */
 async function previewUrl(src: string) {
   const sized = sizedUrl(src);
-  if (sized) await defaultWidth(sized);
+  if (sized && (sizing?.mayDefault(src) ?? true)) await Promise.race([defaultWidth(sized), new Promise(resolve => setTimeout(resolve, SIZE_WAIT))]);
   return imageUrl(src, store.saved);
 }
 
@@ -95,10 +100,16 @@ function ImageToolbar(props: EditImageToolbarProps) {
   const iconFor = useCellValue(iconComponentFor$);
   const editor = useCellValue(rootEditor$);
   const path = editor && editablePath(editor, props.nodeKey);
+  const ref = useRef<HTMLDivElement>(null);
+  // A table cell's images are in an editor of its own, which sizing learns of here, before the image paints.
+  useLayoutEffect(() => {
+    const own = getNearestEditorFromDOMNode(ref.current);
+    if (own) sizing?.track(own);
+  }, []);
   return (
     <>
       <ImageResizeHandles nodeKey={props.nodeKey} keepHeight={typeof props.height === 'number'} />
-      <div className="md-image-toolbar">
+      <div ref={ref} className="md-image-toolbar">
         {path && <button type="button" className="md-image-edit" data-tip="Open in the image editor [double-click]" onClick={() => editImage(path)}>{iconFor('edit')}</button>}
         <DefaultImageToolbar {...props} />
       </div>

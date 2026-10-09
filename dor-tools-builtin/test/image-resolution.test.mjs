@@ -31,8 +31,8 @@ function jpeg({ width = 1200, height = 800, jfif, jfifLength = 14, jfifTag = 'JF
   ]);
 }
 
-test('a scale is a whole multiple of the 72 or else the 96 dpi baseline, from 2×, within 1 dpi', () => {
-  for (const [dpi, scale] of [[null, 1], [0, 1], [1, 1], [72, 1], [96, 1], [143.99, 2], [144, 2], [145, 2], [216, 3], [192, 2], [288, 4], [150, 1], [300, 1], [146, 1], [190, 1]]) {
+test('a scale is macOS\'s 2× or 3× of 72 dpi, else a whole multiple of 96 dpi from 2×, within 1 dpi', () => {
+  for (const [dpi, scale] of [[null, 1], [0, 1], [1, 1], [72, 1], [96, 1], [143.99, 2], [144, 2], [145, 2], [216, 3], [192, 2], [288, 3], [384, 4], [576, 6], [432, 1], [150, 1], [300, 1], [146, 1], [190, 1]]) {
     assert.equal(displayScale(dpi), scale, `${dpi} dpi`);
   }
 });

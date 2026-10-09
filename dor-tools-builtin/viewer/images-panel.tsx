@@ -76,7 +76,7 @@ function ImageRow({ src, editor, saved, onEdit }: { src: string; editor: Lexical
     <li>
       <img src={imageUrl(src, saved)} alt="" loading="lazy" />
       {path === null
-        ? <span className="image-name" data-tip={src}>{src}</span>
+        ? <span className="image-name" data-tip-text={src}>{src}</span>
         : <input className="image-name" value={draft} disabled={state.busy} aria-label={`Rename ${name}`} spellCheck={false}
             onChange={event => { setDraft(event.target.value); setState({}); }}
             onBlur={() => void commit()}
@@ -84,8 +84,8 @@ function ImageRow({ src, editor, saved, onEdit }: { src: string; editor: Lexical
               if (event.key === 'Enter') { event.preventDefault(); void commit(); }
               if (event.key === 'Escape') { event.preventDefault(); setDraft(name); setState({}); }
             }} />}
-      {editableImage(path) && <button type="button" className="image-edit" data-tip={`Edit ${name}`} onClick={() => onEdit(path)}>Edit</button>}
-      {folder && <span className="image-folder" data-tip={path!}>{folder}</span>}
+      {editableImage(path) && <button type="button" className="image-edit" data-tip-text={`Edit ${name}`} onClick={() => onEdit(path)}>Edit</button>}
+      {folder && <span className="image-folder" data-tip-text={path!}>{folder}</span>}
       {state.error && <span className="image-error" role="alert">{state.error}</span>}
     </li>
   );

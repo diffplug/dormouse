@@ -42,18 +42,20 @@ export function imageResolution(head: Uint8Array): { width: number; dpi: number 
 }
 
 /** How many of an image's pixels make one CSS pixel, by the `dpi` its file
- * records. Two baselines record a 1× pixel: 72 dpi, the macOS point (a Retina
- * screenshot records 144, or 216 at 3×), and 96 dpi, Windows' 100% scale (192
- * at 200%). A whole multiple of 72, else of 96, from twice up, is that scale,
- * within 1 dpi since pixels per metre round. Anything else — none, 72, 96, or
- * a print resolution such as 150 or 300 — is 1, pixel for pixel. */
+ * records. Two baselines record a 1× pixel: 72 dpi, the macOS point, whose
+ * only scales are a Retina screenshot's 144 (2×) and 216 (3×), and 96 dpi,
+ * Windows' 100% scale, at any whole multiple from twice up (192 at 200%, 288
+ * at 300%), within 1 dpi since pixels per metre round. Anything else — none,
+ * 72, 96, or a print resolution such as 150 or 300 — is 1, pixel for pixel. */
 export function displayScale(dpi: number | null): number {
   if (dpi === null) return 1;
-  for (const baseline of [72, 96]) {
+  /** The whole multiple of `baseline` that `dpi` is, else 0. */
+  const multiple = (baseline: number) => {
     const scale = Math.round(dpi / baseline);
-    if (scale >= 2 && Math.abs(dpi - scale * baseline) <= 1) return scale;
-  }
-  return 1;
+    return Math.abs(dpi - scale * baseline) <= 1 ? scale : 0;
+  };
+  const mac = multiple(72), windows = multiple(96);
+  return mac === 2 || mac === 3 ? mac : Math.max(windows, 1);
 }
 
 /** The CSS width an image whose file starts with `head` shows at when its

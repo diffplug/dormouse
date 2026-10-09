@@ -330,8 +330,11 @@ test('the page shows the other pages\' tooltips, never a native title', async ()
   assert.ok(page.includes(`<script>${TOOLTIP_SCRIPT}</script>`) && page.includes(TOOLTIP_STYLE));
   assert.doesNotMatch(page.replace(TOOLTIP_SCRIPT, ''), /\stitle=|\.title\s*=/);
   assert.match(page, /id="refresh"[^>]* data-tip="Refresh"/);
-  const tips = (await runPage(['a.txt'])).created.map(element => element.attributes['data-tip']).filter(Boolean);
-  assert.deepEqual(tips, ['a.txt']);
+  // A name or path is shown verbatim, never read as a hint's [k] shortcuts.
+  assert.match(page, /id="root" data-tip-text="/);
+  const { created } = await runPage(['report [draft].md']);
+  assert.deepEqual(created.map(element => element.attributes['data-tip-text']).filter(Boolean), ['report [draft].md']);
+  assert.ok(!created.some(element => 'data-tip' in element.attributes));
 });
 
 test('the page sends an activate only once every select in flight has settled', async () => {

@@ -46,26 +46,64 @@ function show(element: HTMLElement | null, width: number | null) {
   else element.style.setProperty('--default-width', `${width}px`);
 }
 
-/** Sizes `editor`'s images, reading each unsized one's head from `urlOf` its
- * source (null for none). `refresh` sizes them all again, after `urlOf` changes. */
-export function sizeImages(editor: LexicalEditor, urlOf: (src: string) => string | null): { refresh(): void } {
-  const keys = new Set<NodeKey>();
-  /** The URL whose head sizes node `key`, or null when it has a size of its own. */
-  const unsizedUrl = (key: NodeKey) => editor.read(() => {
+/** The image sizing of a document's editors: the root's from the start, a
+ * table cell's once one of its images renders (`track`). */
+export interface ImageSizing {
+  /** Sizes `editor`'s images too; once per editor. */
+  track(editor: LexicalEditor): void;
+  /** Sizes every image again, after `urlOf` changes. */
+  refresh(): void;
+  /** Whether an image of `src` may show at a default width: one is unsized,
+   * or none is known yet. */
+  mayDefault(src: string): boolean;
+}
+
+/** Sizes `editor`'s images, and those of each editor `track` adds, reading
+ * each unsized one's head from `urlOf` its source (null for none). */
+export function sizeImages(editor: LexicalEditor, urlOf: (src: string) => string | null): ImageSizing {
+  const editors = new Map<LexicalEditor, Set<NodeKey>>();
+  /** Node `key`'s source, and whether the document gives it a size. */
+  const imageOf = (editor: LexicalEditor, key: NodeKey) => editor.read(() => {
     const node = $getNodeByKey(key);
-    return $isImageNode(node) && node.getWidth() === 'inherit' && node.getHeight() === 'inherit' ? urlOf(node.getSrc()) : null;
+    return $isImageNode(node) ? { src: node.getSrc(), unsized: node.getWidth() === 'inherit' && node.getHeight() === 'inherit' } : null;
   });
-  const apply = (key: NodeKey) => {
-    const url = unsizedUrl(key);
+  /** The URL whose head sizes node `key`, or null when it has a size of its own. */
+  const unsizedUrl = (editor: LexicalEditor, key: NodeKey) => {
+    const image = imageOf(editor, key);
+    return image?.unsized ? urlOf(image.src) : null;
+  };
+  const apply = (editor: LexicalEditor, key: NodeKey) => {
+    const url = unsizedUrl(editor, key);
     if (!url) { show(editor.getElementByKey(key), null); return; }
     // The node may have changed, or gained a size, while its head was read.
-    void defaultWidth(url).then(width => { if (unsizedUrl(key) === url) show(editor.getElementByKey(key), width); });
+    void defaultWidth(url).then(width => { if (unsizedUrl(editor, key) === url) show(editor.getElementByKey(key), width); });
   };
-  editor.registerMutationListener(ImageNode, mutations => {
-    for (const [key, mutation] of mutations) {
-      if (mutation === 'destroyed') keys.delete(key);
-      else { keys.add(key); apply(key); }
-    }
-  });
-  return { refresh: () => keys.forEach(apply) };
+  const sizing: ImageSizing = {
+    track(editor) {
+      if (editors.has(editor)) return;
+      const keys = new Set<NodeKey>();
+      editors.set(editor, keys);
+      editor.registerMutationListener(ImageNode, mutations => {
+        for (const [key, mutation] of mutations) {
+          if (mutation === 'destroyed') keys.delete(key);
+          else { keys.add(key); apply(editor, key); }
+        }
+      });
+    },
+    refresh: () => editors.forEach((keys, editor) => keys.forEach(key => apply(editor, key))),
+    mayDefault(src) {
+      let known = false;
+      for (const [editor, keys] of editors) {
+        for (const key of keys) {
+          const image = imageOf(editor, key);
+          if (image?.src !== src) continue;
+          if (image.unsized) return true;
+          known = true;
+        }
+      }
+      return !known;
+    },
+  };
+  sizing.track(editor);
+  return sizing;
 }
