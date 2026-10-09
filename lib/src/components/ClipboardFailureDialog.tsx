@@ -7,7 +7,7 @@ import {
   subscribeToClipboardFailure,
   type ClipboardFailure,
 } from '../lib/clipboard-failure';
-import { getPlatformOrNull } from '../lib/platform';
+import { ExternalTextLink } from './ExternalTextLink';
 import { MODAL_OVERLAY_INSET, modalActionButton, ModalCloseButton, ModalFrame, OVERLAY_MAX_HEIGHT } from './design';
 
 /** Opens on a clipboard write that failed every way it could, asking the user
@@ -24,7 +24,6 @@ export function ClipboardFailureDialog({ failure, onClose }: { failure: Clipboar
     // Reporting this one would replace the evidence on screen.
     setCopyState(await writeTextToClipboard(failure.report, { reportFailure: false }) ? 'copied' : 'failed');
   };
-  const openExternal = getPlatformOrNull()?.openExternal;
 
   return (
     <ModalFrame
@@ -51,9 +50,7 @@ export function ClipboardFailureDialog({ failure, onClose }: { failure: Clipboar
           <li>Copy the details below.</li>
           <li>
             Add them as a comment on{' '}
-            {openExternal
-              ? <button type="button" className="text-link underline" onClick={() => openExternal(CLIPBOARD_FAILURE_ISSUE_URL)}>{CLIPBOARD_FAILURE_ISSUE_URL}</button>
-              : <a className="text-link underline" href={CLIPBOARD_FAILURE_ISSUE_URL} target="_blank" rel="noreferrer">{CLIPBOARD_FAILURE_ISSUE_URL}</a>}
+            <ExternalTextLink href={CLIPBOARD_FAILURE_ISSUE_URL}>{CLIPBOARD_FAILURE_ISSUE_URL}</ExternalTextLink>
             , along with what you clicked and what you were doing just before.
           </li>
           <li>Then try your copy again; it usually works on a retry.</li>
