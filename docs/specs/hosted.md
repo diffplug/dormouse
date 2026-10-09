@@ -59,7 +59,7 @@ Continuing past the sign-in notice is how an account agrees to the Hosted terms 
 
 - **Must show the notice beside every sign-in method**, naming `TERMS_VERSION` and linking the terms and privacy policy without leaving the page.
 - **`TERMS_VERSION` is the policy pages' revision date** and changes with every terms revision.
-- **Must record each account's first acceptance of each version**, after a sign-in that continued past the notice,, current version only.
+- **Must record each account's first acceptance of each version**, after a sign-in that continued past the notice, current version only.
 
 Source of truth: `termsRoutes` in `hosted/server/terms.ts`; `TERMS_VERSION` in `hosted/server/policy-constants.ts`.
 
