@@ -2,6 +2,7 @@ import { Component, type ReactNode } from "react";
 import { Wall } from "./components/Wall";
 import { WorkspaceWindow } from "./components/WorkspaceWindow";
 import { ThemeDebuggerGlobal } from "./components/ThemeDebugger";
+import { ClipboardFailureGlobal } from "./components/ClipboardFailureDialog";
 import type { WallBootPlans, WallBootProps } from "./components/wall/wall-types";
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
@@ -50,6 +51,7 @@ export default function App({
         : <Wall {...boot} {...shell} />}
 
       <ThemeDebuggerGlobal />
+      <ClipboardFailureGlobal />
     </ErrorBoundary>
   );
 }
