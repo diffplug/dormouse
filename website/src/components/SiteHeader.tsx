@@ -75,7 +75,7 @@ const SiteHeader = forwardRef<HTMLElement, SiteHeaderProps>(
             </a>
             <div className="ml-auto flex min-w-0 items-center gap-3 md:gap-8">
               {controls ? <div className="min-w-0">{controls}</div> : null}
-              <nav className="flex shrink-0 items-center gap-5 md:gap-10">
+              <nav className="flex shrink-0 items-center gap-3 text-sm min-[360px]:gap-4 min-[360px]:text-base sm:gap-5 sm:text-lg md:gap-10">
                 {navLinks.map(({ href, label, external, hideOnMobile, covers }) => {
                   const isActive = activePath === href || (activePath !== undefined && (covers?.includes(activePath) ?? false));
                   return (
