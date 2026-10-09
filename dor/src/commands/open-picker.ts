@@ -68,6 +68,8 @@ export function runFilePicker(options: PickerOptions): Promise<PickerChoice | nu
   let handlerRows = new Map<number, number>();
   let listRows = 0;
   let redrawTimer: ReturnType<typeof setTimeout> | undefined;
+  let previousLines: string[] = [];
+  let previousColumns = 0;
   const listing = new AbortController();
 
   return new Promise((resolve) => {
@@ -241,10 +243,21 @@ export function runFilePicker(options: PickerOptions): Promise<PickerChoice | nu
         lines.push(dim(clip(hints().join('  '), columns)));
       }
 
-      let out = `${CSI}?2026h${CSI}?25l`;
-      lines.forEach((line, index) => { out += `${CSI}${index + 1};1H${line}${SGR.reset}${CSI}K`; });
-      out += `${CSI}1;${3 + displayWidth(shown)}H${CSI}?25h${CSI}?2026l`;
-      terminal.write(out);
+      // Handler replies and ranking ticks often change nothing visible. Keep
+      // those frames silent, and leave unchanged rows alone on real updates.
+      // A resize invalidates the cache because the terminal may reflow rows.
+      const resized = columns !== previousColumns || lines.length !== previousLines.length;
+      let out = '';
+      lines.forEach((line, index) => {
+        if (!resized && line === previousLines[index]) return;
+        out += `${CSI}${index + 1};1H${line}${SGR.reset}`;
+        // At the right margin the cursor still occupies the last cell (wrap
+        // pending). Erasing there would delete the character just written.
+        if (displayWidth(line) < columns) out += `${CSI}K`;
+      });
+      previousLines = lines;
+      previousColumns = columns;
+      if (out) terminal.write(`${CSI}?2026h${CSI}?25l${out}${CSI}1;${3 + displayWidth(shown)}H${CSI}?25h${CSI}?2026l`);
     };
 
     const renderPanel = (width: number): Line[] => {

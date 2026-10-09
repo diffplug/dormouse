@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runCli } from '../dist/cli.js';
 import { fuzzyMatch, Ranker } from '../dist/commands/fuzzy.js';
-import { parseKeys } from '../dist/commands/open-picker.js';
+import { parseKeys, runFilePicker } from '../dist/commands/open-picker.js';
 import { listFiles } from '../dist/commands/file-list.js';
 import { execFileSync } from 'node:child_process';
 import { setImmediate } from 'node:timers/promises';
@@ -75,13 +75,15 @@ test('parseKeys decodes keys, mouse, paste, and a lone escape', () => {
 
 function fakeTerminal({ columns = 120, rows = 20 } = {}) {
   let onInput;
+  let onResize;
   let output = '';
   return {
     columns: () => columns,
     rows: () => rows,
     write: (text) => { output += text; },
-    listen(input) { onInput = input; return () => { onInput = undefined; }; },
+    listen(input, resize) { onInput = input; onResize = resize; return () => { onInput = undefined; onResize = undefined; }; },
     send(chunk) { onInput(chunk); },
+    resize(width, height) { columns = width; rows = height; onResize(); },
     get output() { return output; },
     get listening() { return onInput !== undefined; },
   };
@@ -113,6 +115,72 @@ async function until(predicate, label) {
   }
   assert.fail(`timed out waiting for ${label}`);
 }
+
+test('picker redraws only changed rows, skips identical frames, and repaints after resize', async () => {
+  const terminal = fakeTerminal({ columns: 60, rows: 8 });
+  const result = runFilePicker({
+    terminal,
+    fixedTool: 'builtin:file',
+    async listFiles(onFiles) { onFiles(['a'.repeat(58), 'b.ts']); return { truncated: false }; },
+    async handlers() { assert.fail('fixed handler needs no lookup'); },
+  });
+  try {
+    await until(() => terminal.output.includes('2/2'), 'completed listing');
+    // Both the query/count row and the first file fill the terminal width.
+    assert.doesNotMatch(terminal.output, /2\/2\x1b\[0m\x1b\[0m\x1b\[K/);
+    assert.doesNotMatch(terminal.output, /a{58}\x1b\[0m\x1b\[0m\x1b\[K/);
+    const before = terminal.output;
+    terminal.send('\x1b[A'); // Already at the top.
+    terminal.resize(60, 8);
+    assert.equal(terminal.output, before, 'unchanged frames emit no bytes or cursor toggles');
+
+    terminal.send('\x1b[B');
+    const update = terminal.output.slice(before.length);
+    assert.deepEqual([...update.matchAll(/\x1b\[(\d+);1H/g)].map(match => Number(match[1])), [2, 3]);
+    assert.ok(update.endsWith('\x1b[1;3H\x1b[?25h\x1b[?2026l'), 'returns the cursor to the query');
+
+    const unfiltered = terminal.output.length;
+    terminal.send('b');
+    const filtered = terminal.output.slice(unfiltered);
+    assert.match(filtered, /b\x1b\[0m\x1b\[1m\.ts\x1b\[0m\x1b\[0m\x1b\[K/, 'shorter replacement clears the old row tail');
+    assert.doesNotMatch(filtered, /0…\/2/, 'typing does not paint an empty list before ranking');
+    const narrow = terminal.output.length;
+    terminal.resize(120, 10);
+    assert.deepEqual([...terminal.output.slice(narrow).matchAll(/\x1b\[(\d+);1H/g)].map(match => Number(match[1])), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    assert.match(terminal.output.slice(narrow), /Opens with/);
+    const wide = terminal.output.length;
+    terminal.resize(60, 6);
+    assert.deepEqual([...terminal.output.slice(wide).matchAll(/\x1b\[(\d+);1H/g)].map(match => Number(match[1])), [1, 2, 3, 4, 5, 6]);
+    assert.match(terminal.output.slice(wide), /1;4H/, 'query cursor survives resize');
+    terminal.send('\r');
+    assert.deepEqual(await result, { file: 'b.ts' });
+  } finally {
+    if (terminal.listening) terminal.send('\x03');
+    await result;
+  }
+});
+
+test('handler replies leave unchanged file rows alone', async () => {
+  const terminal = fakeTerminal({ columns: 60 });
+  let reply;
+  const result = runFilePicker({
+    terminal,
+    async listFiles(onFiles) { onFiles(['a.ts', 'b.ts']); return { truncated: false }; },
+    handlers: () => new Promise(resolve => { reply = resolve; }),
+  });
+  try {
+    await until(() => reply !== undefined, 'handler request');
+    const before = terminal.output.length;
+    reply({ handlers: HANDLERS, config: '/config', warnings: [], target: '/a.ts', directory: false });
+    await until(() => terminal.output.includes('builtin:file'), 'handler reply');
+    const update = terminal.output.slice(before);
+    assert.doesNotMatch(update, /a\.ts|b\.ts/);
+    assert.deepEqual([...update.matchAll(/\x1b\[(\d+);1H/g)].map(match => Number(match[1])), [19, 20]);
+  } finally {
+    terminal.send('\x03');
+    await result;
+  }
+});
 
 async function withTree(run) {
   const dir = await mkdtemp(join(tmpdir(), 'dor-picker-'));
