@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { defaultDisplayWidth, displayScale, exifFields, imageResolution } from '../dist/image-resolution.js';
+import { exifFields, pngChunks } from '../dist/image-editability.js';
+import { defaultDisplayWidth, displayScale, imageResolution } from '../dist/image-resolution.js';
+import { chunk, tiff } from './bundle.mjs';
 
 const u16 = n => [n >> 8, n & 0xff];
 const u32 = n => [n >>> 24, (n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff];
 const text = s => [...s].map(c => c.charCodeAt(0));
-const chunk = (type, data) => [...u32(data.length), ...text(type), ...data, 0, 0, 0, 0];
 
 /** A PNG head: IHDR, then `pHYs` as [pixels per unit, unit] and `eXIf` when given, then IDAT. */
 function png({ width = 2880, height = 1800, phys, exif } = {}) {
@@ -16,18 +17,6 @@ function png({ width = 2880, height = 1800, phys, exif } = {}) {
     ...phys ? chunk('pHYs', [...u32(phys[0]), ...u32(phys[0]), phys[1]]) : [],
     ...chunk('IDAT', [0]),
   ]);
-}
-
-/** A big-endian TIFF block whose first IFD holds the given tags, each SHORT unless `orientationType` says otherwise. */
-function tiff({ orientation, orientationType = 3, xres, unit } = {}) {
-  const entries = [];
-  if (orientation) entries.push([0x0112, orientationType, orientation]);
-  if (xres) entries.push([0x011a, 5, null]);
-  if (unit) entries.push([0x0128, 3, unit]);
-  const rationalAt = 8 + 2 + entries.length * 12 + 4;
-  const body = entries.flatMap(([tag, type, value]) =>
-    [...u16(tag), ...u16(type), ...u32(1), ...(value === null ? u32(rationalAt) : [...u16(value), 0, 0])]);
-  return [...text('MM'), 0, 42, ...u32(8), ...u16(entries.length), ...body, ...u32(0), ...xres ? [...u32(xres[0]), ...u32(xres[1])] : []];
 }
 
 /** A JPEG head: SOI, a JFIF APP0 as [units, density] (cut to its first `jfifLength` bytes) and an EXIF APP1 when given, SOF0, then SOS. */
@@ -94,9 +83,7 @@ test('a quarter-turned image shows as wide as its frame is tall', () => {
 test('EXIF fields read from either byte order and stop at the end of the block', () => {
   const big = Uint8Array.from(tiff({ orientation: 6, xres: [300, 1], unit: 2 }));
   assert.deepEqual(exifFields(big), { orientation: 6, dpi: 300 });
-  // The same IFD, little-endian.
-  const little = Uint8Array.from([0x49, 0x49, 42, 0, 8, 0, 0, 0, 1, 0, 0x12, 0x01, 3, 0, 1, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0]);
-  assert.deepEqual(exifFields(little), { orientation: 5, dpi: null });
+  assert.deepEqual(exifFields(Uint8Array.from(tiff({ orientation: 5, xres: [144, 1], unit: 2, little: true }))), { orientation: 5, dpi: 144 }, 'little-endian');
   assert.deepEqual(exifFields(big.subarray(0, 20)), { orientation: 1, dpi: null });
   // Every entry, but not the resolution they point at.
   assert.deepEqual(exifFields(big.subarray(0, big.length - 8)), { orientation: 6, dpi: null });
@@ -108,4 +95,14 @@ test('EXIF fields read from either byte order and stop at the end of the block',
   assert.deepEqual(exifFields(Uint8Array.from([0x4d, 0x4d, 0, 42])), { orientation: 1, dpi: null });
   assert.deepEqual(exifFields(Uint8Array.from([0x4d, 0x4d, 0, 42, 0, 0, 0, 100])), { orientation: 1, dpi: null });
   assert.equal(exifFields(Uint8Array.from([0, 0, ...big.subarray(2)])).orientation, 1);
+});
+
+test('a PNG\'s metadata chunks are those before its image data, or before its head ends', () => {
+  const head = png({ phys: [5669, 1], exif: tiff({ orientation: 6 }) });
+  assert.deepEqual(pngChunks(head).map(c => c.type), ['IHDR', 'eXIf', 'pHYs']);
+  const [, exif, phys] = pngChunks(head);
+  assert.deepEqual([exif.end, phys.start, phys.end - phys.start], [phys.start, exif.end, 21], 'each whole, with its CRC');
+  assert.deepEqual(pngChunks(head.subarray(0, phys.end - 1)).map(c => c.type), ['IHDR', 'eXIf'], 'a chunk cut short is not listed');
+  assert.deepEqual(pngChunks(head.subarray(0, 8)), []);
+  assert.deepEqual(pngChunks(Uint8Array.from([1, 2, 3])), []);
 });

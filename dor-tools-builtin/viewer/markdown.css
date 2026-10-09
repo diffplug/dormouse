@@ -72,8 +72,16 @@ body .mdxeditor-toolbar button{padding:2px}
 .prose img{max-width:100%}
 /* An image the document gives no size shows at the width its file records (image-size.ts). */
 .prose .md-default-size img{width:var(--default-width)}
-/* MDXEditor's edge resize handles stretch an image off its aspect; its corners keep it. */
-.prose :is([class*=_imageResizerN_],[class*=_imageResizerE_],[class*=_imageResizerS_],[class*=_imageResizerW_]){display:none}
+/* A block image, so its wrapper, and the frame inset in it, hug it with no line gap below. */
+.prose [data-editor-block-type=image] img{display:block}
+/* A selected image: our frame and corner handles (image-resize.tsx), in place of MDXEditor's outline. */
+.prose [data-editor-block-type=image]:has(.md-image-frame:not([hidden])) img{outline:none}
+.md-image-frame{position:absolute;inset:0;z-index:2;pointer-events:none;outline:1px solid var(--vscode-focusBorder,Highlight)}
+.md-image-handle{position:absolute;width:8px;height:8px;margin:-4px;background:var(--vscode-editor-background,Canvas);border:1px solid var(--vscode-focusBorder,Highlight);pointer-events:auto;touch-action:none}
+.md-image-handle[data-corner=nw]{left:0;top:0;cursor:nwse-resize}
+.md-image-handle[data-corner=ne]{right:0;top:0;cursor:nesw-resize}
+.md-image-handle[data-corner=sw]{left:0;bottom:0;cursor:nesw-resize}
+.md-image-handle[data-corner=se]{right:0;bottom:0;cursor:nwse-resize}
 /* MDXEditor's table editor: content-sized, its row/column tools slim and shown on hover. */
 .prose [class*=tableEditor]{width:auto;min-width:min(100%,320px);table-layout:auto;height:auto}
 .prose [class*=tableEditor]>tbody>tr>:not([class*=toolCell]){padding:1px 8px}

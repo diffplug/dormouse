@@ -15,7 +15,8 @@ import '@mdxeditor/editor/style.css';
 import { checked, documentPage, loadingState, stateLabel, textSource, type DocumentState } from './document-session';
 import { editableImage, imageSources, imageUrl, ImagesPanel, localImagePath, type SavedImages } from './images-panel';
 import { ImageOverlay } from './image-overlay';
-import { forgetImageWidths, sizeImages } from './image-size';
+import { ImageResizeHandles } from './image-resize';
+import { defaultWidth, forgetImageWidths, sizeImages } from './image-size';
 import { commentsPlugin } from './markdown-comments';
 import { markdownSafetyPlugin } from './markdown-safety';
 import { pageTheme, subscribeTheme } from './page-theme';
@@ -68,7 +69,15 @@ function editablePath(editor: LexicalEditor, key: string): string | null {
 /** Opens a PNG or JPEG under the document's folder in the image editor overlay. */
 const editImage = (path: string) => update({ editing: path });
 
-const previewUrl = async (src: string) => imageUrl(src, store.saved);
+/** The URL whose head sizes an image: a PNG or JPEG under the document's folder may record its scale. */
+const sizedUrl = (src: string) => editableImage(localImagePath(src)) ? imageUrl(src, store.saved) : null;
+
+/** An image's URL, given once its default width is known, so it first shows at that width. */
+async function previewUrl(src: string) {
+  const sized = sizedUrl(src);
+  if (sized) await defaultWidth(sized);
+  return imageUrl(src, store.saved);
+}
 
 /** After an image save: every display of it loads the new file, and the document's source stays as it is. */
 function refreshImage(path: string, version: string) {
@@ -87,10 +96,13 @@ function ImageToolbar(props: EditImageToolbarProps) {
   const editor = useCellValue(rootEditor$);
   const path = editor && editablePath(editor, props.nodeKey);
   return (
-    <div className="md-image-toolbar">
-      {path && <button type="button" className="md-image-edit" data-tip="Open in the image editor [double-click]" onClick={() => editImage(path)}>{iconFor('edit')}</button>}
-      <DefaultImageToolbar {...props} />
-    </div>
+    <>
+      <ImageResizeHandles nodeKey={props.nodeKey} keepHeight={typeof props.height === 'number'} />
+      <div className="md-image-toolbar">
+        {path && <button type="button" className="md-image-edit" data-tip="Open in the image editor [double-click]" onClick={() => editImage(path)}>{iconFor('edit')}</button>}
+        <DefaultImageToolbar {...props} />
+      </div>
+    </>
   );
 }
 
@@ -107,8 +119,7 @@ const capture = realmPlugin({
     // Only image nodes change the list, so typing does not walk the document.
     editor.registerMutationListener(ImageNode, refresh, { skipInitialization: true });
     refresh();
-    // A PNG or JPEG under the document's folder may record its scale.
-    sizing = sizeImages(editor, src => editableImage(localImagePath(src)) ? imageUrl(src, store.saved) : null);
+    sizing = sizeImages(editor, sizedUrl);
     const open = (event: MouseEvent) => {
       if (!(event.target instanceof HTMLImageElement)) return;
       const key = editor.read(() => $getNearestNodeFromDOMNode(event.target as Node)?.getKey());
@@ -165,7 +176,7 @@ const plugins = [
   headingsPlugin(), listsPlugin(), quotePlugin(), thematicBreakPlugin(), linkPlugin(), linkDialogPlugin(),
   // Unpadded tables: padding to aligned columns rewrites every row of a table when one cell changes.
   tablePlugin({ tablePipeAlign: false }), frontmatterPlugin(), markdownShortcutPlugin(),
-  imagePlugin({ imageUploadHandler: upload, imagePreviewHandler: previewUrl, allowSetImageDimensions: true, EditImageToolbar: ImageToolbar as FC }),
+  imagePlugin({ imageUploadHandler: upload, imagePreviewHandler: previewUrl, disableImageResize: true, allowSetImageDimensions: true, EditImageToolbar: ImageToolbar as FC }),
   codeBlockPlugin({ defaultCodeBlockLanguage: '', codeBlockEditorDescriptors: [mermaidDescriptor] }),
   codeMirrorPlugin({ codeBlockLanguages: {
     '': 'Plain text', sh: 'Shell', bash: 'Bash', js: 'JavaScript', jsx: 'JSX', ts: 'TypeScript', tsx: 'TSX', json: 'JSON',

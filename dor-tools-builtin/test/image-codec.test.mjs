@@ -3,26 +3,20 @@ import { test } from 'node:test';
 import { crc32 as zlibCrc32, deflateSync, inflateSync } from 'node:zlib';
 import { imageEditability, jpegSize, MAX_EDIT_PIXELS, pngSize } from '../dist/image-editability.js';
 import { IMAGE_BOUND } from '../dist/image-format.js';
-import { load } from './bundle.mjs';
+import { imageResolution } from '../dist/image-resolution.js';
+import { chunk, load, tiff } from './bundle.mjs';
 
 const png = await load('../viewer/image/png.ts');
 const jpeg = await load('../viewer/image/jpeg.ts');
 const { cicpSpace, iccSpace } = await load('../viewer/image/icc.ts');
-const { over, decodeImage, asSaved, describe, saveType } = await load('../viewer/image/io.ts');
+const { over, decodeImage, encodeImage, asSaved, describe, saveType } = await load('../viewer/image/io.ts');
 /** `r` as PNG bytes, its parts joined. */
 const encode = async (r, keep) => new Uint8Array(Buffer.concat(await png.encodePng(r, keep)));
 /** `spliceIcc`'s parts, joined. */
-const splice = (encoded, icc) => new Uint8Array(Buffer.concat(jpeg.spliceIcc(encoded, icc)));
+const splice = (encoded, icc, dpi) => new Uint8Array(Buffer.concat(jpeg.spliceIcc(encoded, icc, dpi)));
 
 // PNGs built here with Node's zlib and CRC, independently of the codec under test.
 const SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-function chunk(type, data) {
-  const body = Buffer.concat([Buffer.from(type, 'latin1'), Buffer.from(data)]);
-  const length = Buffer.alloc(4), crc = Buffer.alloc(4);
-  length.writeUInt32BE(data.length);
-  crc.writeUInt32BE(zlibCrc32(body));
-  return Buffer.concat([length, body, crc]);
-}
 function ihdr(width, height, depth, colorType, interlace = 0) {
   const b = Buffer.alloc(13);
   b.writeUInt32BE(width, 0); b.writeUInt32BE(height, 4);
@@ -431,12 +425,7 @@ test('a PNG\'s iCCP is kept only when it describes RGB, as every save is', async
 });
 
 /** An `eXIf` chunk holding orientation `o`, big- or little-endian. */
-function exif(o, little = false) {
-  const b = Buffer.alloc(26), u16 = (v, at) => little ? b.writeUInt16LE(v, at) : b.writeUInt16BE(v, at), u32 = (v, at) => little ? b.writeUInt32LE(v, at) : b.writeUInt32BE(v, at);
-  b.write(little ? 'II' : 'MM', 0, 'latin1'); u16(42, 2); u32(8, 4);
-  u16(1, 8); u16(0x0112, 10); u16(3, 12); u32(1, 14); u16(o, 18);
-  return chunk('eXIf', b);
-}
+const exif = (o, little = false) => chunk('eXIf', tiff({ orientation: o, little }));
 
 test('a PNG\'s eXIf orientation turns its pixels upright, and a save writes them so without it', async () => {
   // Gray 3×2, rows [10 20 30] / [40 50 60].
@@ -496,4 +485,79 @@ test('a save writes the type its name gives, whatever its bytes hold', () => {
   assert.equal(saveType('image/jpeg', 'image/gif'), 'image/jpeg');
   assert.equal(saveType('', 'image/jpeg'), 'image/jpeg');
   assert.equal(saveType('', 'image/gif'), 'image/png');
+});
+
+test('a JPEG save records the resolution in its JFIF header, written when the encoder wrote none', () => {
+  // The encoder's JFIF header records only an aspect (units 0).
+  assert.equal(imageResolution(JPEG).dpi, null);
+  const app0 = markers(JPEG).list[0].bytes;
+  const patched = splice(JPEG, [], 144), header = markers(patched).list[0].bytes;
+  assert.deepEqual(Array.from(header.subarray(11, 16)), [1, 0, 144, 0, 144], 'units 1, the inch, then the density across and down');
+  assert.deepEqual(Buffer.from(patched).fill(0, 13, 18), Buffer.from(JPEG).fill(0, 13, 18), 'nothing else changes');
+  assert.equal(app0[11], 0, 'the encoder\'s bytes are untouched');
+  assert.equal(imageResolution(patched).dpi, 144);
+  assert.equal(imageResolution(splice(JPEG, [], 143.99)).dpi, 144, 'a resolution from pixels per metre rounds');
+
+  // With no APP0, or another first, a JFIF header goes right after SOI.
+  const bare = new Uint8Array(Buffer.concat([JPEG.subarray(0, 2), JPEG.subarray(2 + app0.length)]));
+  const written = splice(bare, [iccSegment(1, 1, icc({ desc: 'Display P3' }))], 216);
+  assert.deepEqual(markers(written).list.map(s => s.marker).slice(0, 3), [0xe0, 0xe2, markers(bare).list[0].marker]);
+  assert.equal(imageResolution(written).dpi, 216);
+  const jfxx = Buffer.from([0xff, 0xe0, 0, 8, ...Buffer.from('JFXX\0', 'latin1'), 0x10]);
+  const ahead = splice(new Uint8Array(Buffer.concat([JPEG.subarray(0, 2), jfxx, bare.subarray(2)])), [], 144);
+  assert.deepEqual(markers(ahead).list.slice(0, 2).map(s => Buffer.from(s.bytes).toString('latin1', 4, 8)), ['JFIF', 'JFXX']);
+  assert.equal(imageResolution(ahead).dpi, 144);
+});
+
+/** The page's codecs in this thread: the PNG worker runs here, and a canvas
+ * encodes every JPEG as `JPEG` (whose JFIF header records no resolution) and
+ * decodes any image as one gray pixel. */
+function fakeBrowser() {
+  globalThis.Worker = class {
+    postMessage(job) {
+      const run = 'decode' in job ? png.decodePng(job.decode) : png.encodePng(job.encode.raster, job.encode.keep);
+      run.then(result => this.onmessage({ data: { result } }), error => this.onmessage({ data: { error: error.message } }));
+    }
+    terminate() {}
+  };
+  globalThis.ImageData = class { constructor(data, width, height) { Object.assign(this, { data, width, height }); } };
+  globalThis.createImageBitmap = async () => ({ width: 1, height: 1, close() {} });
+  globalThis.document = { createElement: () => ({
+    getContext: () => ({ drawImage() {}, putImageData() {}, getImageData: () => ({ data: new Uint8ClampedArray([128, 128, 128, 255]) }) }),
+    toBlob: done => done(new Blob([JPEG], { type: 'image/jpeg' })),
+  }) };
+}
+
+test('a save writes the resolution its source records, in either format', async () => {
+  fakeBrowser();
+  /** `bytes` opened as `type` and saved, unedited. */
+  const resave = async (bytes, type) => {
+    const { edit } = await decodeImage(new Blob([bytes]), type);
+    return { edit, saved: new Uint8Array(await (await encodeImage(edit.raster, edit)).arrayBuffer()) };
+  };
+  const dpi = bytes => Math.round(imageResolution(bytes).dpi);
+  const phys = chunk('pHYs', [0, 0, 0x16, 0x25, 0, 0, 0x16, 0x25, 1]);
+
+  // A PNG whose resolution is only in its eXIf, which the save drops, gains a pHYs.
+  const exifOnly = await resave(makePng(1, 1, 8, 2, [[1, 2, 3]], [chunk('eXIf', tiff({ xres: [144, 1] }))]), 'image/png');
+  assert.equal(exifOnly.edit.dpi, 144);
+  assert.deepEqual(chunks(exifOnly.saved).filter(c => c.type === 'pHYs').map(c => c.raw), [phys], '5669 pixels per metre');
+  // One that has a pHYs keeps it verbatim, and only it.
+  const withPhys = await resave(makePng(1, 1, 8, 2, [[1, 2, 3]], [phys, chunk('eXIf', tiff({ xres: [72, 1] }))]), 'image/png');
+  assert.deepEqual(chunks(withPhys.saved).filter(c => c.type === 'pHYs').map(c => c.raw), [phys]);
+
+  // A JPEG re-encoded by a canvas, whose own header records none.
+  assert.equal(dpi((await resave(splice(JPEG, [], 144), 'image/jpeg')).saved), 144);
+
+  // Across formats, both ways: the pHYs is carried, so not noted as dropped.
+  const pngAsJpeg = await resave(makePng(1, 1, 8, 2, [[1, 2, 3]], [phys]), 'image/jpeg');
+  assert.equal(dpi(pngAsJpeg.saved), 144);
+  assert.equal(pngAsJpeg.edit.note, describe([mismatch('image/png', 'image/jpeg', false, false)]));
+  const jpegAsPng = await resave(splice(JPEG, [], 216), 'image/png');
+  assert.equal(jpegAsPng.edit.mime, 'image/png');
+  assert.equal(dpi(jpegAsPng.saved), 216);
+
+  // Nothing recorded, nothing written.
+  assert.ok(!chunks((await resave(makePng(1, 1, 8, 2, [[1, 2, 3]]), 'image/png')).saved).some(c => c.type === 'pHYs'));
+  assert.equal(imageResolution((await resave(JPEG, 'image/jpeg')).saved).dpi, null);
 });

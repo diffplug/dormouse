@@ -5,7 +5,7 @@
  * standard PNG; 16-bit samples round to 8 bits. It encodes 8-bit RGB, or RGBA
  * when any pixel is not opaque. No DOM, so Node tests load it. */
 import { ascii, isPng, latin1, PNG_SIGNATURE } from '../../src/image-format';
-import { exifFields } from '../../src/image-resolution';
+import { exifFields } from '../../src/image-editability';
 import { isOpaque, orient, type Raster } from './pixels';
 import { cicpSpace, iccSpace, rgbProfile, type SaveNote, type SourceColor } from './icc';
 
@@ -276,6 +276,16 @@ export async function iccpChunk(profile: Uint8Array): Promise<Bytes> {
   data.set(latin1('ICC profile'));
   data.set(new Uint8Array(compressed), 13);
   return chunk('iCCP', data);
+}
+
+/** `keep` (whole chunks) and, when it holds no `pHYs`, one recording `dpi`
+ * dots per inch. */
+export function withPhys(keep: readonly Uint8Array[], dpi: number | undefined): readonly Uint8Array[] {
+  if (!dpi || keep.some(k => ascii(k, 4, 8) === 'pHYs')) return keep;
+  // Pixels per metre across, then down, then unit 1, the metre.
+  const data = new Uint8Array(9), view = new DataView(data.buffer), perMetre = Math.round(dpi / 0.0254);
+  view.setUint32(0, perMetre); view.setUint32(4, perMetre); data[8] = 1;
+  return [...keep, chunk('pHYs', data)];
 }
 
 /** `r` as a PNG's parts, in order, with `keep` (whole chunks from a decoded

@@ -60,10 +60,28 @@ export function iccSegmentsOf(profile: Uint8Array): Bytes[] {
 }
 
 /** `encoded` with its own ICC segments replaced by `icc`, placed after SOI and
- * the JFIF APP0 header that follows it, when there is one: the file's parts, in order. */
-export function spliceIcc(encoded: Uint8Array, icc: readonly Uint8Array[]): Bytes[] {
+ * the APP0 header that follows it, when there is one: the file's parts, in
+ * order. With `dpi`, that header is a JFIF one recording it. */
+export function spliceIcc(encoded: Uint8Array, icc: readonly Uint8Array[], dpi?: number): Bytes[] {
   const { list, rest } = segments(encoded);
-  const head = list[0]?.marker === 0xe0 ? [list[0]] : [];
-  return [encoded.subarray(0, 2), ...head.map(s => encoded.subarray(s.start, s.end)), ...icc,
-    ...list.slice(head.length).filter(s => !isIcc(encoded, s)).map(s => encoded.subarray(s.start, s.end)), encoded.subarray(rest)] as Bytes[];
+  const app0 = list[0]?.marker === 0xe0 ? encoded.subarray(list[0].start, list[0].end) : undefined;
+  const head = dpi ? jfifDensity(app0, dpi) : app0 ? [app0] : [];
+  return [encoded.subarray(0, 2), ...head, ...icc,
+    ...list.slice(app0 ? 1 : 0).filter(s => !isIcc(encoded, s)).map(s => encoded.subarray(s.start, s.end)), encoded.subarray(rest)] as Bytes[];
+}
+
+/** A JFIF APP0 header recording `dpi` dots per inch: the encoder's `app0`
+ * patched when it is one, else a new one ahead of it. */
+function jfifDensity(app0: Uint8Array | undefined, dpi: number): Uint8Array[] {
+  const d = Math.min(0xffff, Math.max(1, Math.round(dpi)));
+  // Units (1, the inch), then the density across and down.
+  const density = [1, d >> 8, d & 255, d >> 8, d & 255];
+  if (app0 && app0.length >= 18 && ascii(app0, 4, 9) === 'JFIF\0') {
+    const out = app0.slice();
+    out.set(density, 11);
+    return [out];
+  }
+  // Its length, "JFIF\0", version 1.01, the density, and no thumbnail.
+  const jfif = Uint8Array.from([0xff, 0xe0, 0, 16, ...latin1('JFIF\0'), 1, 1, ...density, 0, 0]);
+  return app0 ? [jfif, app0] : [jfif];
 }

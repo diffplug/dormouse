@@ -65,7 +65,7 @@ Source of truth: `dor-tools-builtin/viewer/markdown.tsx`; `safeCreateDOM` in `do
 - **Must save exactly the submitted bytes, within the byte bound**, under the revision, identity, permission, and replacement rules of [Editing files](#editing-files).
 - **Must refuse a save whose `Content-Type` or signature is not its extension's type** (415); the page saves that type, decoding by content.
 - **Must send the revision as the `X-Dor-Version` response header and take it back as the save's `version` query parameter**, the image bytes as the body, in-place replacement included.
-- **Must submit every untouched PNG pixel exactly**, at 8 bits per channel, **with the source's color metadata only in its own format, never a non-RGB ICC profile**; an RGB profile converts. EXIF is dropped, pixels written upright.
+- **Must submit every untouched PNG pixel exactly**, at 8 bits per channel, **with the source's color metadata only in its own format, never a non-RGB ICC profile, and its recorded resolution in either**; an RGB profile converts. EXIF is dropped, pixels written upright.
 
 Source of truth: `editorRoutes` in `dor-tools-builtin/src/editor-routes.ts`; `imageEditability` / `MAX_EDIT_PIXELS` in `dor-tools-builtin/src/image-editability.ts`; `IMAGE_BOUND` in `dor-tools-builtin/src/image-format.ts`; `decodeImage` / `encodeImage` in `dor-tools-builtin/viewer/image/io.ts`. Tests: `dor-tools-builtin/test/file-viewer.test.mjs`, `dor-tools-builtin/test/image-codec.test.mjs`.
 
