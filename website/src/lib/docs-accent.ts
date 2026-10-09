@@ -185,3 +185,30 @@ export function docsMutedTextForSurfaces(
   }
   return toHex(quietest);
 }
+
+/**
+ * A verdict colour — a theme's terminal red, yellow, or green — legible as
+ * text on every surface it may occupy.
+ *
+ * Kept as-is where it already clears them, so a theme's own hues show through;
+ * otherwise walked away from the least-contrasting surface, as a link accent is.
+ */
+export function docsStatusColorFor(
+  color: string,
+  backgrounds: readonly string[],
+  minContrast = MIN_CONTRAST,
+): string | null {
+  if (backgrounds.length === 0) return null;
+  const flats = backgrounds.map((background) => flatten(color, background));
+  if (flats.some((flat) => flat === null)) return null;
+  const resolved = flats as Array<{ base: Rgb; bg: Rgb }>;
+  const clearsEverySurface = (candidate: Rgb) =>
+    resolved.every(({ bg }) => contrastRatio(candidate, bg) >= minContrast);
+  const limiting = resolved.reduce((worst, candidate) =>
+    contrastRatio(candidate.base, candidate.bg) < contrastRatio(worst.base, worst.bg)
+      ? candidate
+      : worst,
+  );
+  if (clearsEverySurface(limiting.base)) return toHex(limiting.base);
+  return boostAway(limiting.base, limiting.bg, clearsEverySurface);
+}

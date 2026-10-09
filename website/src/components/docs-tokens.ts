@@ -105,6 +105,8 @@ export const NOTE_CLASS =
  * scans source statically and never sees an interpolated utility, so the alpha
  * here is the one that must match the literal beside it.
  */
+export type DocsSurfaceVariants = readonly (readonly { tintVar: string; tintAlpha: number }[])[];
+
 export const TINTED_DOCS_SURFACES = [
   {
     token: "--docs-card-text-muted",
@@ -129,6 +131,29 @@ export const TINTED_DOCS_SURFACES = [
     ],
   },
 ] as const;
+
+/**
+ * Verdict colours — good, mixed, bad — from the active theme's terminal green,
+ * yellow, and red, corrected to clear body-text AA on the page and on the 4%
+ * card tint a highlighted table column sits on.
+ *
+ * `DocsLayout`'s paint effect derives each token; index.css carries the
+ * fallback for the site's own black, and `website/src/lib/docs-accent.test.ts`
+ * checks both. Never let colour carry a verdict alone: pair it with a shape.
+ */
+export const DOCS_STATUS_COLORS = [
+  { token: "--docs-status-good", ansiVar: "--vscode-terminal-ansiGreen" },
+  { token: "--docs-status-mixed", ansiVar: "--vscode-terminal-ansiYellow" },
+  { token: "--docs-status-bad", ansiVar: "--vscode-terminal-ansiRed" },
+].map((status) => ({
+  ...status,
+  surfaceVariants: [[], [{ tintVar: "--color-text", tintAlpha: 0.04 }]] as DocsSurfaceVariants,
+}));
+
+/** Written out rather than interpolated: Tailwind scans source statically. */
+export const STATUS_GOOD_TEXT_CLASS = "text-[var(--docs-status-good)]";
+export const STATUS_MIXED_TEXT_CLASS = "text-[var(--docs-status-mixed)]";
+export const STATUS_BAD_TEXT_CLASS = "text-[var(--docs-status-bad)]";
 
 /** Reference body prose: the shared size, leading, and muted colour. Callers
  *  add their own flow margin. */

@@ -140,6 +140,12 @@ Source of truth: `DOCS_PAGES` in `website/src/lib/docs-pages.ts`; `DocsLayout` i
 
 Source of truth: `Hosted` in `website/src/pages/Hosted.tsx`; `HostingRequirementNotice` in `website/src/components/HostingRequirementNotice.tsx`.
 
+## `/comparison`
+
+**Must keep every claim in one file, and link readers to it to suggest a correction or another tool**; `website/src/pages/Comparison.test.tsx` pins that the linked file exists. Each tab is a rail entry, and its anchor opens it, so a shared link keeps the tab.
+
+Source of truth: `VERSUS` and `COMPARISON` in `website/src/lib/comparison.tsx`; `Comparison` in `website/src/pages/Comparison.tsx`.
+
 ## Hosted policies
 
 **Must prerender `/privacy` and `/terms` outside Docs navigation with standalone marketing chrome and a last-updated date.** **Must distinguish the revision date from the policy's applicability conditions; draft policies remain marked as not yet effective.**
