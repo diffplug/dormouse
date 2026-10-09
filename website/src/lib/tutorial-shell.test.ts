@@ -131,11 +131,10 @@ describe("TutorialShell program dispatch", () => {
   });
 });
 
-// The playground shell drives the alert tutorial's WATCHING/command-exit demos
-// (docs/specs/tutorial.md) entirely through OSC 633 shell-integration reports.
-// Nothing else asserts these bytes, so a refactor could silently stop emitting
-// them and leave every alert demo showing "nothing is running" while the rest
-// of the suite stays green.
+// The playground shell reports every command, including the Alerts section's
+// `agent` and `build` programs (docs/specs/tutorial.md), through OSC 633
+// shell-integration reports. Nothing else asserts these bytes, so a refactor
+// could silently stop emitting them while the rest of the suite stays green.
 describe("TutorialShell OSC 633 shell integration", () => {
   it("reports the prompt with OSC 633;A / 633;B", () => {
     const { output, shell } = createHarness();

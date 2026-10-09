@@ -1,7 +1,7 @@
 /**
  * Just enough raw CDP for the two things `agent-browser` cannot do: give the
  * Pocket page a virtual WebAuthn authenticator, and keep a record of everything
- * that page logs (`scripts/pairing-walkthrough/README.md` → The Pocket browser).
+ * that page logs (`scripts/pairing-walkthrough/README.md` → Known limitations).
  *
  * The CLI has no raw-CDP verb, so this opens a WebSocket of its own to the page
  * target's `webSocketDebuggerUrl`. Chrome accepts that second client while

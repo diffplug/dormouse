@@ -13,7 +13,7 @@ import { cfg } from '../cfg';
 export interface AlertSettings {
   /** ms — how long without typing, pointer, or wheel input before the user counts as away (the renderer's presence window). */
   inactivityTimeoutMs: number;
-  /** Defer non-exit rings until five seconds after the last accepted output. */
+  /** Defer non-exit rings while the output detector has confirmed work, until it settles. */
   deferAlertsUntilQuiet: boolean;
   /** Speak a ring out loud after `speakDelayMs`, unless its pane is the one being looked at. */
   speakEnabled: boolean;
