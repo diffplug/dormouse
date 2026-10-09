@@ -62,6 +62,12 @@ body {
   --docs-card-text-muted: #787878;
   --docs-note-text-muted: #7b7977;
   --docs-code-text-muted: #909090;
+  /* The registry's dark terminal green, yellow, and red, corrected against the
+     site's black and the 4% card tint (`DOCS_STATUS_COLORS`); pinned by
+     `docs-accent.test.ts`. */
+  --docs-status-good: #0dbc79;
+  --docs-status-mixed: #e5e510;
+  --docs-status-bad: #d55050;
 }
 
 html {

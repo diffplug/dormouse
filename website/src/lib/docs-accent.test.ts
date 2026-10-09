@@ -7,8 +7,13 @@ import {
   docsAccentFor,
   docsMutedTextFor,
   docsMutedTextForSurfaces,
+  docsStatusColorFor,
 } from "./docs-accent";
-import { TINTED_DOCS_SURFACES } from "../components/docs-tokens";
+import {
+  DOCS_STATUS_COLORS,
+  TINTED_DOCS_SURFACES,
+  type DocsSurfaceVariants,
+} from "../components/docs-tokens";
 
 /** The site's own palette, which `website/src/index.css` declares as literals
  *  because the marketing pages are locked to it and prerender without JS. */
@@ -26,7 +31,7 @@ const tintFor = (tintVar: string, foreground: string): string => {
 };
 
 const surfacesFor = (
-  surfaceVariants: (typeof TINTED_DOCS_SURFACES)[number]["surfaceVariants"],
+  surfaceVariants: DocsSurfaceVariants,
   foreground: string,
   background: string,
 ): string[] =>
@@ -49,6 +54,7 @@ const themes = getBundledThemes().map((theme) => {
     accent: theme.accent,
     background: vars["--vscode-editor-background"],
     foreground: vars["--vscode-editor-foreground"],
+    vars,
   };
 });
 
@@ -187,6 +193,36 @@ describe("docs muted text colour", () => {
       const declared = css.match(new RegExp(`${token}:\\s*(#[0-9a-f]{6})`, "i"))?.[1];
       const surfaces = surfacesFor(surfaceVariants, SITE_FOREGROUND, SITE_BACKGROUND);
       expect(declared).toBe(docsMutedTextForSurfaces(SITE_FOREGROUND, surfaces));
+    },
+  );
+});
+
+describe("docs verdict colours", () => {
+  it.each(DOCS_STATUS_COLORS)("$token clears WCAG AA on every surface in every bundled theme", ({ ansiVar, surfaceVariants }) => {
+    for (const t of themes) {
+      const surfaces = surfacesFor(surfaceVariants, t.foreground, t.background);
+      const status = docsStatusColorFor(t.vars[ansiVar], surfaces);
+      expect(status, t.id).not.toBeNull();
+      for (const surface of surfaces) {
+        expect(contrastRatio(rgb(status!), rgb(surface)), `${t.id} (${status} on ${surface})`)
+          .toBeGreaterThanOrEqual(4.5);
+      }
+    }
+  });
+
+  it("keeps a hue that already contrasts", () => {
+    expect(docsStatusColorFor("#23d18b", ["#000000"])).toBe("#23d18b");
+  });
+
+  it.each(DOCS_STATUS_COLORS)(
+    "agrees with the static $token fallback index.css declares",
+    ({ token, ansiVar, surfaceVariants }) => {
+      // The site's black, with the registry's dark-theme terminal hue.
+      const css = readFileSync(new URL("../index.css", import.meta.url), "utf8");
+      const declared = css.match(new RegExp(`${token}:\\s*(#[0-9a-f]{6})`, "i"))?.[1];
+      const hue = completeThemeVars({}, "dark")[ansiVar];
+      const surfaces = surfacesFor(surfaceVariants, SITE_FOREGROUND, SITE_BACKGROUND);
+      expect(declared).toBe(docsStatusColorFor(hue, surfaces));
     },
   );
 });
