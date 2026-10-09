@@ -38,12 +38,12 @@ test('a dor client and the host control server complete a request', skipOnWindow
       const client = new SocketControlClient({
         socketPath,
         token: 'shared-secret',
-        surfaceId: 'surface-1',
+        surfaceId: 'surface:1',
         timeoutMs: 5000,
       });
       assert.deepEqual(await client.listSurfaces({}), { surfaces: [] });
       assert.equal(forwarded.length, 1);
-      assert.equal(forwarded[0].data.surfaceId, 'surface-1');
+      assert.equal(forwarded[0].data.surfaceId, 'surface:1');
       assert.equal(forwarded[0].data.method, 'surface.list');
     } finally {
       server.close();

@@ -31,8 +31,7 @@ async function withTempDir(prefix, run) {
 
 const fixtureSurfaces = [
   {
-    id: 'surface-1',
-    ref: 'surface:1',
+    id: 'surface:1',
     kind: 'terminal',
     renderMode: null,
     title: 'pnpm dev',
@@ -47,8 +46,7 @@ const fixtureSurfaces = [
     awaited: false,
   },
   {
-    id: 'surface-2',
-    ref: 'surface:2',
+    id: 'surface:2',
     kind: 'terminal',
     renderMode: null,
     title: 'repo "watch"',
@@ -64,8 +62,7 @@ const fixtureSurfaces = [
     awaited: true,
   },
   {
-    id: 'surface-3',
-    ref: 'surface:3',
+    id: 'surface:3',
     kind: 'browser',
     renderMode: 'agent-browser-screencast',
     title: 'Dormouse',
@@ -80,8 +77,7 @@ const fixtureSurfaces = [
     awaited: false,
   },
   {
-    id: 'surface-4',
-    ref: 'surface:4',
+    id: 'surface:4',
     kind: 'terminal',
     renderMode: null,
     title: '<idle> server.js',
@@ -100,22 +96,22 @@ const fixtureSurfaces = [
 // The Window's Workspaces, as the host projects them for `--workspaces` and for
 // the `--all` group headers.
 const fixtureWorkspaces = [
-  { ref: 'workspace:1', id: 'workspace-1', name: 'Workspace 1', pinned: false, active: true, ringing: false, todo: false, count: 0 },
-  { ref: 'workspace:2', id: 'workspace-2b1c', name: 'build', pinned: true, active: false, ringing: true, todo: true, count: 2 },
+  { id: 'workspace:1', name: 'Workspace 1', pinned: false, active: true, ringing: false, todo: false, count: 0 },
+  { id: 'workspace:2', name: 'build', pinned: true, active: false, ringing: true, todo: true, count: 2 },
 ];
 
 // Listening ports the host would attach to a terminal Surface for `--ports`.
-const fixturePortsByRef = {
+const fixturePortsById = {
   'surface:1': [{ family: 'IPv4', address: '0.0.0.0', port: 5173, pid: 4242, processName: 'node' }],
   'surface:4': [{ family: 'IPv6', address: '::1', port: 8080, pid: 5151, processName: 'python' }],
 };
 
 /** The Workspace a `workspace:<n|name>` target names in the fixture, the way the
- *  host resolves one — positional ref, bare position, or exact name. */
+ *  host resolves one — its id, bare number, or exact name. */
 function fixtureWorkspace(target) {
   const bare = String(target).replace(/^workspace:/, '');
   return fixtureWorkspaces.find((row) => (
-    row.ref === target || row.ref === `workspace:${bare}` || row.name === bare
+    row.id === `workspace:${bare}` || row.name === bare
   )) ?? fixtureWorkspaces[0];
 }
 
@@ -140,25 +136,25 @@ function fixtureClient(surfacesFixture = fixtureSurfaces) {
       if (request.scope === 'all') {
         return {
           surfaces: [
-            { ...fixtureSurfaces[0], workspaceRef: 'workspace:1' },
-            { ...fixtureSurfaces[2], workspaceRef: 'workspace:2' },
-            { ...fixtureSurfaces[3], workspaceRef: 'workspace:2' },
+            { ...fixtureSurfaces[0], workspaceId: 'workspace:1' },
+            { ...fixtureSurfaces[2], workspaceId: 'workspace:2' },
+            { ...fixtureSurfaces[3], workspaceId: 'workspace:2' },
           ],
           workspaces: fixtureWorkspaces,
           windowRef: 'window:1',
-          workspaceRef: 'workspace:1',
+          workspaceId: 'workspace:1',
         };
       }
       // Mirror the host: attach listening ports to terminal Surfaces on request.
       const surfaces = request.includePorts
         ? surfacesFixture.map((surface) => (surface.kind === 'terminal'
-          ? { ...surface, ports: fixturePortsByRef[surface.ref] ?? [] }
+          ? { ...surface, ports: fixturePortsById[surface.id] ?? [] }
           : surface))
         : surfacesFixture;
       return {
         surfaces,
         windowRef: 'window:1',
-        workspaceRef: 'workspace:1',
+        workspaceId: 'workspace:1',
       };
     },
     async splitSurface(request) {
@@ -167,8 +163,7 @@ function fixtureClient(surfacesFixture = fixtureSurfaces) {
       const command = request.command ? buildShellCommandForKind('posix', request.command) : undefined;
       return {
         status: 'created',
-        surfaceId: 'surface-3',
-        surfaceRef: 'surface:3',
+        surfaceId: 'surface:3',
         direction: request.direction === 'auto' ? 'right' : request.direction,
         minimized: request.minimized,
         ...(command ? { command } : {}),
@@ -207,8 +202,7 @@ function fixtureClient(surfacesFixture = fixtureSurfaces) {
       const keyed = named && request.name === 'storybook' && !request.fresh;
       return {
         status: keyed ? 'existing' : 'created',
-        surfaceId: 'surface-4',
-        surfaceRef: 'surface:4',
+        surfaceId: 'surface:4',
         command,
         cwd: request.cwd,
         minimized: request.minimized,
@@ -224,8 +218,7 @@ function fixtureClient(surfacesFixture = fixtureSurfaces) {
       const isExisting = command === 'pnpm dev:workspace';
       return {
         status: isExisting ? (request.restart ? 'restarted' : 'existing') : 'created',
-        surfaceId: 'surface-3',
-        surfaceRef: 'surface:3',
+        surfaceId: 'surface:3',
         command,
         cwd: request.cwd,
         minimized: request.minimized,
@@ -235,10 +228,7 @@ function fixtureClient(surfacesFixture = fixtureSurfaces) {
       this.requests.push({ method: 'sendSurface', request });
       return {
         status: 'sent',
-        surfaceId: request.surface === 'surface:2'
-          ? 'surface-2'
-          : 'surface-1',
-        surfaceRef: request.surface ?? 'surface:1',
+        surfaceId: request.surface === 'surface:2' ? 'surface:2' : 'surface:1',
         inputCount: request.inputCount,
       };
     },
@@ -249,11 +239,8 @@ function fixtureClient(surfacesFixture = fixtureSurfaces) {
         : 'visible one\nvisible two';
       const limited = request.lines ? text.split('\n').slice(-request.lines).join('\n') : text;
       return {
-        workspaceRef: 'workspace:1',
-        surfaceId: request.surface === 'surface:2'
-          ? 'surface-2'
-          : 'surface-1',
-        surfaceRef: request.surface ?? 'surface:1',
+        workspaceId: 'workspace:1',
+        surfaceId: request.surface === 'surface:2' ? 'surface:2' : 'surface:1',
         text: limited,
       };
     },
@@ -261,20 +248,14 @@ function fixtureClient(surfacesFixture = fixtureSurfaces) {
       this.requests.push({ method: 'killSurface', request });
       return {
         status: 'killed',
-        surfaceId: request.surface === 'surface:2'
-          ? 'surface-2'
-          : 'surface-1',
-        surfaceRef: request.surface,
+        surfaceId: request.surface === 'surface:2' ? 'surface:2' : 'surface:1',
       };
     },
     async iframeSurface(request) {
       this.requests.push({ method: 'iframeSurface', request });
       return {
         status: request.surface === 'surface:1' ? 'replaced' : 'created',
-        surfaceId: request.surface === 'surface:1'
-          ? 'surface-1'
-          : 'surface-3',
-        surfaceRef: request.surface === 'surface:1' ? 'surface:1' : 'surface:3',
+        surfaceId: request.surface === 'surface:1' ? 'surface:1' : 'surface:3',
         url: request.url,
         minimized: request.minimized,
       };
@@ -283,8 +264,7 @@ function fixtureClient(surfacesFixture = fixtureSurfaces) {
       this.requests.push({ method: 'browserSurface', request });
       return {
         status: 'created',
-        surfaceId: 'surface-3',
-        surfaceRef: 'surface:3',
+        surfaceId: 'surface:3',
         session: request.session,
         minimized: false,
       };
@@ -299,9 +279,10 @@ function fixtureClient(surfacesFixture = fixtureSurfaces) {
       // so the same key in `build` is another browser entirely.
       if (request.key !== undefined) {
         const workspace = fixtureWorkspaces.find((row) => (
-          request.workspace === row.name || request.workspace === row.ref
+          request.workspace === row.name || request.workspace === row.id
         ));
-        return { binding: { session: `dormouse.${workspace ? workspace.id : '1'}.${request.key}`, ...request.proposed } };
+        // `sessionForKey` scrubs the id's colon: a session name is a socket path.
+        return { binding: { session: `dormouse.${workspace ? workspace.id.replace(':', '-') : '1'}.${request.key}`, ...request.proposed } };
       }
       if (request.surface === 'surface:1') {
         throw new Error("surface 'surface:1' has no browser (kind: terminal)");
@@ -316,8 +297,7 @@ function fixtureClient(surfacesFixture = fixtureSurfaces) {
       this.requests.push({ method: 'newWorkspace', request });
       return {
         status: 'created',
-        workspaceId: 'workspace-9f3a',
-        workspaceRef: 'workspace:3',
+        workspaceId: 'workspace:3',
         name: request.name ?? 'Workspace 3',
       };
     },
@@ -326,7 +306,7 @@ function fixtureClient(surfacesFixture = fixtureSurfaces) {
       // Mirror the host: the answer names the Workspace the target resolved to,
       // so a test can tell a forwarded target from an ignored one.
       const target = fixtureWorkspace(request.workspace);
-      return { status: 'renamed', workspaceId: target.id, workspaceRef: target.ref, name: request.name };
+      return { status: 'renamed', workspaceId: target.id, name: request.name };
     },
     async closeWorkspace(request) {
       this.requests.push({ method: 'closeWorkspace', request });
@@ -334,22 +314,22 @@ function fixtureClient(surfacesFixture = fixtureSurfaces) {
       if (!request.force) {
         throw new Error("workspace 'workspace:2' holds Surfaces Reopen cannot restore; pass --force to close it");
       }
-      return { status: 'closed', workspaceId: 'workspace-2b1c', workspaceRef: 'workspace:2', name: 'build' };
+      return { status: 'closed', workspaceId: 'workspace:2', name: 'build' };
     },
     async switchWorkspace(request) {
       this.requests.push({ method: 'switchWorkspace', request });
       const target = fixtureWorkspace(request.workspace);
-      return { status: 'active', workspaceId: target.id, workspaceRef: target.ref, name: target.name };
+      return { status: 'active', workspaceId: target.id, name: target.name };
     },
     async pinWorkspace(request) {
       this.requests.push({ method: 'pinWorkspace', request });
       const target = fixtureWorkspace(request.workspace);
-      return { status: request.pinned ? 'pinned' : 'unpinned', workspaceId: target.id, workspaceRef: target.ref, name: target.name };
+      return { status: request.pinned ? 'pinned' : 'unpinned', workspaceId: target.id, name: target.name };
     },
     async moveWorkspace(request) {
       this.requests.push({ method: 'moveWorkspace', request });
       const target = fixtureWorkspace(request.workspace);
-      return { status: 'moved', workspaceId: target.id, workspaceRef: target.ref, name: target.name };
+      return { status: 'moved', workspaceId: target.id, name: target.name };
     },
     async restartApp() {
       this.requests.push({ method: 'restartApp' });
@@ -357,7 +337,7 @@ function fixtureClient(surfacesFixture = fixtureSurfaces) {
     },
     async reopenClosed() {
       this.requests.push({ method: 'reopenClosed' });
-      return { status: 'reopened', kind: 'surface', surfaceId: 'surface-4f2a', surfaceRef: 'surface:4' };
+      return { status: 'reopened', kind: 'surface', surfaceId: 'surface:4' };
     },
     async resolveOpenTarget(request) {
       this.requests.push({ method: 'resolveOpenTarget', request });
@@ -366,8 +346,7 @@ function fixtureClient(surfacesFixture = fixtureSurfaces) {
         throw new Error("surface 'surface:2' is not serving any port");
       }
       return {
-        surfaceId: 'surface-1',
-        surfaceRef: 'surface:1',
+        surfaceId: 'surface:1',
         port: 5173,
         url: 'http://localhost:5173/',
       };
@@ -384,9 +363,8 @@ function awaitClient(outcome) {
     async awaitSurface(request) {
       this.requests.push({ method: 'awaitSurface', request });
       return {
-        workspaceRef: 'workspace:1',
-        surfaceId: 'surface-3',
-        surfaceRef: request.surface,
+        workspaceId: 'workspace:1',
+        surfaceId: 'surface:3',
         waitedMs: 0,
         ...outcome,
       };
@@ -1145,14 +1123,14 @@ test('agent-browser --key in another Workspace drives that Workspace own session
   // namespaced by the Workspace's stable id, so nothing here can reach the
   // first Workspace's `dormouse.1.default`.
   assert.deepEqual(ab.calls, [
-    ['agent-browser', '--session', 'dormouse.workspace-2b1c.default', 'open', 'http://localhost:6006'],
-    ['agent-browser', '--session', 'dormouse.workspace-2b1c.default', 'stream', 'status', '--json'],
+    ['agent-browser', '--session', 'dormouse.workspace-2.default', 'open', 'http://localhost:6006'],
+    ['agent-browser', '--session', 'dormouse.workspace-2.default', 'stream', 'status', '--json'],
   ]);
   assert.deepEqual(client.requests, [
     { method: 'resolveBrowser', request: { provider: 'agent-browser', key: 'default', proposed: proposedHere, workspace: 'build' } },
     {
       method: 'browserSurface',
-      request: { provider: 'agent-browser', key: 'default', session: 'dormouse.workspace-2b1c.default', cwd: process.cwd(), wsPort: 61141, workspace: 'build' },
+      request: { provider: 'agent-browser', key: 'default', session: 'dormouse.workspace-2.default', cwd: process.cwd(), wsPort: 61141, workspace: 'build' },
     },
   ]);
 });
@@ -1184,8 +1162,8 @@ test('agent-browser --workspace names the Workspace and never reaches the binary
   // Intercepted like the identity flags: the browser opens in `build`, the
   // handle resolves there, and agent-browser sees neither the flag nor its value.
   assert.deepEqual(ab.calls, [
-    ['agent-browser', '--session', 'dormouse.workspace-2b1c.default', 'open', 'http://localhost:5173/'],
-    ['agent-browser', '--session', 'dormouse.workspace-2b1c.default', 'stream', 'status', '--json'],
+    ['agent-browser', '--session', 'dormouse.workspace-2.default', 'open', 'http://localhost:5173/'],
+    ['agent-browser', '--session', 'dormouse.workspace-2.default', 'stream', 'status', '--json'],
   ]);
   // Every host round trip the run makes names it: the session namespace, the
   // handle resolution, and the surface the browser lands in.
@@ -1585,7 +1563,7 @@ test('an unresolvable bare name is a missing install, including with no PATH', (
 // in. The control socket is private host plumbing (the CLI is the public API), so
 // the host block must not echo it — the snapshot proves the field is absent.
 const listEnv = {
-  DORMOUSE_SURFACE_ID: 'surface-2',
+  DORMOUSE_SURFACE_ID: 'surface:2',
   DORMOUSE_CLI_JS: '/opt/dormouse/dor-cli/dist/dor.js',
   DORMOUSE_NODE: '/opt/dormouse/node',
   DORMOUSE_HOST: 'vscode',
@@ -1610,7 +1588,7 @@ test('list tags an awaited surface after its todo', async () => {
   const json = await runCli(['list', '--json'], { client: fixtureClient(), env: listEnv });
   const surfaces = JSON.parse(json.stdout).surfaces;
   assert.deepEqual(
-    surfaces.map((surface) => [surface.ref, surface.awaited]),
+    surfaces.map((surface) => [surface.id, surface.awaited]),
     [['surface:1', false], ['surface:2', true], ['surface:3', false], ['surface:4', false]],
   );
 });
@@ -1622,7 +1600,7 @@ test('list tags the preview slot in text and JSON only', async () => {
   assert.match(rows.find((line) => line.includes('surface:2')), /\[preview\]$/);
   assert.doesNotMatch(rows.find((line) => line.includes('surface:1')), /\[preview\]/);
   const json = await runCli(['list', '--json'], { client: fixtureClient(surfaces), env: listEnv });
-  assert.deepEqual(JSON.parse(json.stdout).surfaces.map((surface) => [surface.ref, surface.preview]), [['surface:1', undefined], ['surface:2', true]]);
+  assert.deepEqual(JSON.parse(json.stdout).surfaces.map((surface) => [surface.id, surface.preview]), [['surface:1', undefined], ['surface:2', true]]);
 });
 
 test('list --all groups every Workspace under a header', async () => {
@@ -1636,10 +1614,10 @@ test('list --all json tags each row with its Workspace and carries the directory
   const result = await runCli(['list', '--all', '--json'], { client: fixtureClient(), env: listEnv });
   const payload = JSON.parse(result.stdout);
   assert.deepEqual(
-    payload.surfaces.map((surface) => [surface.workspace_ref, surface.ref]),
+    payload.surfaces.map((surface) => [surface.workspace_id, surface.id]),
     [['workspace:1', 'surface:1'], ['workspace:2', 'surface:3'], ['workspace:2', 'surface:4']],
   );
-  assert.deepEqual(payload.workspaces.map((row) => row.ref), ['workspace:1', 'workspace:2']);
+  assert.deepEqual(payload.workspaces.map((row) => row.id), ['workspace:1', 'workspace:2']);
   await snapshot('list-all-json', result);
 });
 
@@ -1791,7 +1769,7 @@ test('reopen asks the host once and names what came back', async () => {
   await snapshot('reopen', await runCli(['reopen'], { client, env: standaloneEnv }));
   await snapshot('reopen-json', await runCli(['reopen', '--json'], { client, env: standaloneEnv }));
   assert.deepEqual(client.requests, [{ method: 'reopenClosed' }, { method: 'reopenClosed' }]);
-  const workspace = { async reopenClosed() { return { status: 'reopened', kind: 'workspace', workspaceId: 'workspace-7', workspaceRef: 'workspace:7' }; } };
+  const workspace = { async reopenClosed() { return { status: 'reopened', kind: 'workspace', workspaceId: 'workspace:7' }; } };
   await snapshot('reopen-workspace', await runCli(['reopen'], { client: workspace, env: standaloneEnv }));
   const window = { async reopenClosed() { return { status: 'reopened', kind: 'window' }; } };
   await snapshot('reopen-window', await runCli(['reopen'], { client: window, env: standaloneEnv }));
@@ -1835,33 +1813,23 @@ test('list json output', async () => {
   );
 });
 
-test('list id-format both output', async () => {
-  await snapshot(
-    'list-id-format-both',
-    await runCli(['list', '--id-format', 'both'], { client: fixtureClient(), env: listEnv }),
-  );
-});
-
-test('list id-format ids output', async () => {
-  await snapshot(
-    'list-id-format-ids',
-    await runCli(['list', '--id-format', 'ids'], { client: fixtureClient(), env: listEnv }),
-  );
-});
-
-test('list json schema includes ids and refs regardless of id-format', async () => {
-  const result = await runCli(['list', '--json', '--id-format', 'ids'], { client: fixtureClient(), env: listEnv });
+test('list json carries one spelling of each id', async () => {
+  const result = await runCli(['list', '--json'], { client: fixtureClient(), env: listEnv });
   assert.equal(result.exitCode, 0);
   assert.equal(result.stderr, '');
   const payload = JSON.parse(result.stdout);
-  assert.equal(payload.surfaces[0].id, fixtureSurfaces[0].id);
-  assert.equal(payload.surfaces[0].ref, 'surface:1');
+  assert.equal(payload.surfaces[0].id, 'surface:1');
+  assert.equal('ref' in payload.surfaces[0], false);
   assert.equal(payload.caller_surface_id, listEnv.DORMOUSE_SURFACE_ID);
-  assert.equal(payload.caller_surface_ref, 'surface:2');
-  assert.equal(payload.focused_surface_id, fixtureSurfaces[0].id);
-  assert.equal(payload.focused_surface_ref, 'surface:1');
-  assert.equal(payload.workspace_ref, 'workspace:1');
+  assert.equal(payload.focused_surface_id, 'surface:1');
+  assert.equal(payload.workspace_id, 'workspace:1');
   assert.equal(payload.window_ref, 'window:1');
+  for (const key of ['caller_surface_ref', 'focused_surface_ref', 'workspace_ref']) assert.equal(key in payload, false, key);
+});
+
+test('list refuses the retired --id-format', async () => {
+  const result = await runCli(['list', '--id-format', 'ids'], { client: fixtureClient(), env: listEnv });
+  assert.notEqual(result.exitCode, 0);
 });
 
 test('list filters by kind, view, command, and cwd without port scanning', async () => {
@@ -1878,9 +1846,9 @@ test('list filters by kind, view, command, and cwd without port scanning', async
   assert.deepEqual(client.requests, [{ includePorts: false }]);
 
   const payload = JSON.parse(result.stdout);
-  assert.deepEqual(payload.surfaces.map((surface) => surface.ref), ['surface:1']);
-  assert.equal(payload.caller_surface_ref, null);
-  assert.equal(payload.focused_surface_ref, 'surface:1');
+  assert.deepEqual(payload.surfaces.map((surface) => surface.id), ['surface:1']);
+  assert.equal(payload.caller_surface_id, null);
+  assert.equal(payload.focused_surface_id, 'surface:1');
   assert.equal(payload.surfaces[0].ports, undefined);
 });
 
@@ -1906,7 +1874,7 @@ test('list --port filters by listening port and includes port data', async () =>
   assert.deepEqual(client.requests, [{ includePorts: true }]);
 
   const payload = JSON.parse(result.stdout);
-  assert.deepEqual(payload.surfaces.map((surface) => surface.ref), ['surface:1']);
+  assert.deepEqual(payload.surfaces.map((surface) => surface.id), ['surface:1']);
   assert.deepEqual(payload.surfaces[0].ports.map((port) => port.port), [5173]);
 });
 
@@ -1916,7 +1884,7 @@ test('list reports a null caller when the calling surface is not in the list', a
     env: { ...listEnv, DORMOUSE_SURFACE_ID: '99999999-9999-4999-8999-999999999999' },
   });
   assert.equal(result.exitCode, 0);
-  assert.equal(JSON.parse(result.stdout).caller_surface_ref, null);
+  assert.equal(JSON.parse(result.stdout).caller_surface_id, null);
 });
 
 test('list without env reports null caller and host paths', async () => {
@@ -2091,7 +2059,7 @@ test('tool --list escapes control and format characters in repo text, in every o
 });
 
 test('tool and open escape control and format characters in the host answer, in every output', async () => {
-  const answer = { status: 'created', surfaceId: 's', surfaceRef: 'surface:9', command: 'run \u009b31m \u007f \u001b[2J \u202e', cwd: '/work/\u0085site\ufeff', minimized: false, key: 'k\u009d' };
+  const answer = { status: 'created', surfaceId: 'surface:9', command: 'run \u009b31m \u007f \u001b[2J \u202e', cwd: '/work/\u0085site\ufeff', minimized: false, key: 'k\u009d' };
   const client = fixtureClient();
   client.toolSurface = async () => answer;
   for (const argv of [['tool', 'evil'], ['tool', '--json', 'evil'], ['open', 'a.md'], ['open', '--json', 'a.md']]) {
@@ -2139,14 +2107,14 @@ test('open forwards one file, explicit handler, placement, and Workspace to Tool
     file: 'a b.md', tool: 'markdown', cwd: '/repo',
     workspace: 'workspace:2', fresh: true, minimized: true, surface: 'surface:4',
   } });
-  assert.equal(JSON.parse(result.stdout).surface_ref, 'surface:4');
+  assert.equal(JSON.parse(result.stdout).surface_id, 'surface:4');
 });
 
 test('open --preview asks for the preview slot and prints its retarget', async () => {
   const client = fixtureClient();
   client.toolSurface = async function toolSurface(request) {
     this.requests.push({ method: 'toolSurface', request });
-    return { status: 'retargeted', surfaceId: 'slot', surfaceRef: 'surface:5', command: 'viewer a.md', cwd: request.cwd, minimized: false, key: null };
+    return { status: 'retargeted', surfaceId: 'surface:5', command: 'viewer a.md', cwd: request.cwd, minimized: false, key: null };
   };
   const result = await runCli(['open', '--preview', 'a.md'], { client, env: { PWD: '/repo' } });
   assert.equal(result.exitCode, 0);

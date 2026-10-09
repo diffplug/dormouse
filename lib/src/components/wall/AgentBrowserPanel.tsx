@@ -2,7 +2,6 @@
  * `agent-browser-surface-controller.ts`; see docs/specs/dor-browser.md. */
 import { useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { clsx } from 'clsx';
-import { surfaceRefForId } from 'dor/protocol';
 import { TERMINAL_BOTTOM_RADIUS_CLASS } from '../design';
 import { isEditableTarget } from '../../lib/dom';
 import { isMacSelectAll } from '../../lib/select-all';
@@ -350,7 +349,7 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
     if (phase === 'relaunching') return 'Relaunching browser…';
     // Addressed to this pane: a bare `dor agent-browser open` drives the caller's default
     // key, which for a keyed or GUI-launched pane is some other browser.
-    const command = `${cli} --surface ${surfaceRefForId(id)} open <url>`;
+    const command = `${cli} --surface ${id} open <url>`;
     // A pane whose launch never named a session has no browser to drive yet.
     if (phase === 'ended' && error) {
       return session

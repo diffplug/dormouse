@@ -3600,7 +3600,7 @@ fn workspace_reserve_ids(windows: tauri::State<'_, WindowState>, count: u64) -> 
 }
 
 /// Hand a webview a block of Surface ids to mint from, every number above
-/// `floor` — the highest `surface-<n>` that webview restored — and never
+/// `floor` — the highest `surface:<n>` that webview restored — and never
 /// handed out before by any window of this run or an earlier one
 /// (§Workspace registry).
 #[tauri::command(async)]
@@ -5047,16 +5047,16 @@ mod tests {
         let dir = TempDir::new("arrivals-round-trip");
         // Nothing in flight is no file at all, and forgetting is then a no-op.
         assert!(read_arrivals_from(dir.path()).unwrap().is_empty());
-        forget_arrival_on_disk(dir.path(), "workspace-7").unwrap();
+        forget_arrival_on_disk(dir.path(), "workspace:7").unwrap();
         assert!(!arrivals_path(dir.path()).exists());
 
-        record_arrival_on_disk(dir.path(), &arrival_of("workspace-7", "main", "ws-2")).unwrap();
-        record_arrival_on_disk(dir.path(), &arrival_of("workspace-8", "main", "ws-3")).unwrap();
+        record_arrival_on_disk(dir.path(), &arrival_of("workspace:7", "main", "ws-2")).unwrap();
+        record_arrival_on_disk(dir.path(), &arrival_of("workspace:8", "main", "ws-3")).unwrap();
         // Recording the same id again replaces rather than duplicates.
-        record_arrival_on_disk(dir.path(), &arrival_of("workspace-7", "main", "ws-2")).unwrap();
+        record_arrival_on_disk(dir.path(), &arrival_of("workspace:7", "main", "ws-2")).unwrap();
         let records = read_arrivals_from(dir.path()).unwrap();
         assert_eq!(records.len(), 2);
-        assert_eq!(records[1]["workspaceId"], "workspace-7");
+        assert_eq!(records[1]["workspaceId"], "workspace:7");
         assert_eq!(records[1]["from"], "main");
         assert_eq!(records[1]["to"], "ws-2");
         assert_eq!(records[1]["workspace"]["name"], "Moved");
@@ -5069,12 +5069,12 @@ mod tests {
             Vec::<String>::new()
         );
 
-        forget_arrival_on_disk(dir.path(), "workspace-7").unwrap();
+        forget_arrival_on_disk(dir.path(), "workspace:7").unwrap();
         let records = read_arrivals_from(dir.path()).unwrap();
         assert_eq!(records.len(), 1);
-        assert_eq!(records[0]["workspaceId"], "workspace-8");
+        assert_eq!(records[0]["workspaceId"], "workspace:8");
         // Forgetting the last record removes the file.
-        forget_arrival_on_disk(dir.path(), "workspace-8").unwrap();
+        forget_arrival_on_disk(dir.path(), "workspace:8").unwrap();
         assert!(!arrivals_path(dir.path()).exists());
     }
 
@@ -5084,18 +5084,18 @@ mod tests {
         write_session_to(
             dir.path(),
             "main",
-            &snapshot_json(&[("workspace-2", "A"), ("workspace-7", "Stale")], "workspace-2"),
+            &snapshot_json(&[("workspace:2", "A"), ("workspace:7", "Stale")], "workspace:2"),
         )
         .unwrap();
-        record_arrival_on_disk(dir.path(), &arrival_of("workspace-7", "ws-3", "main")).unwrap();
+        record_arrival_on_disk(dir.path(), &arrival_of("workspace:7", "ws-3", "main")).unwrap();
 
         restore_arrivals(dir.path()).unwrap();
 
         // Appended, or here replaced by id: the target keeps what it had and
         // its own active Workspace.
         let main = read_snapshot(dir.path(), "main").unwrap();
-        assert_eq!(snapshot_ids(&main), vec!["workspace-2", "workspace-7"]);
-        assert_eq!(main["activeWorkspaceId"], "workspace-2");
+        assert_eq!(snapshot_ids(&main), vec!["workspace:2", "workspace:7"]);
+        assert_eq!(main["activeWorkspaceId"], "workspace:2");
         assert_eq!(main["workspaces"][1]["name"], "Moved");
         // A source that never had a snapshot gets none.
         assert!(read_session_from(dir.path(), "ws-3").unwrap().is_none());
@@ -5104,14 +5104,14 @@ mod tests {
     #[test]
     fn a_leftover_arrival_boots_into_a_tear_out_targets_new_snapshot() {
         let dir = TempDir::new("arrivals-tear-out-target");
-        record_arrival_on_disk(dir.path(), &arrival_of("workspace-7", "main", "ws-2")).unwrap();
+        record_arrival_on_disk(dir.path(), &arrival_of("workspace:7", "main", "ws-2")).unwrap();
         assert!(read_session_from(dir.path(), "ws-2").unwrap().is_none());
 
         restore_arrivals(dir.path()).unwrap();
 
         let ws2 = read_snapshot(dir.path(), "ws-2").unwrap();
-        assert_eq!(snapshot_ids(&ws2), vec!["workspace-7"]);
-        assert_eq!(ws2["activeWorkspaceId"], "workspace-7");
+        assert_eq!(snapshot_ids(&ws2), vec!["workspace:7"]);
+        assert_eq!(ws2["activeWorkspaceId"], "workspace:7");
         assert_eq!(ws2["version"], WINDOW_VERSION);
         // The window the merge created is one the boot enumeration reopens.
         assert_eq!(routing::restorable_labels(session_file_names(dir.path())), vec!["ws-2"]);
@@ -5124,22 +5124,22 @@ mod tests {
         write_session_to(
             dir.path(),
             "ws-3",
-            &snapshot_json(&[("workspace-7", "Docs"), ("workspace-8", "Keep")], "workspace-7"),
+            &snapshot_json(&[("workspace:7", "Docs"), ("workspace:8", "Keep")], "workspace:7"),
         )
         .unwrap();
         // A source whose only Workspace left is a closed window.
-        write_session_to(dir.path(), "ws-4", &snapshot_json(&[("workspace-9", "Only")], "workspace-9"))
+        write_session_to(dir.path(), "ws-4", &snapshot_json(&[("workspace:9", "Only")], "workspace:9"))
             .unwrap();
-        record_arrival_on_disk(dir.path(), &arrival_of("workspace-7", "ws-3", "main")).unwrap();
-        record_arrival_on_disk(dir.path(), &arrival_of("workspace-9", "ws-4", "main")).unwrap();
+        record_arrival_on_disk(dir.path(), &arrival_of("workspace:7", "ws-3", "main")).unwrap();
+        record_arrival_on_disk(dir.path(), &arrival_of("workspace:9", "ws-4", "main")).unwrap();
 
         restore_arrivals(dir.path()).unwrap();
 
         let ws3 = read_snapshot(dir.path(), "ws-3").unwrap();
-        assert_eq!(snapshot_ids(&ws3), vec!["workspace-8"]);
+        assert_eq!(snapshot_ids(&ws3), vec!["workspace:8"]);
         assert!(read_session_from(dir.path(), "ws-4").unwrap().is_none());
         let main = read_snapshot(dir.path(), "main").unwrap();
-        assert_eq!(snapshot_ids(&main), vec!["workspace-7", "workspace-9"]);
+        assert_eq!(snapshot_ids(&main), vec!["workspace:7", "workspace:9"]);
         // Each id is now in exactly one snapshot.
         assert_eq!(
             routing::restorable_labels(session_file_names(dir.path())),
@@ -5159,7 +5159,7 @@ mod tests {
         windows.begin_transfer(&ids, "main", "ws-2");
         guard(&windows.routing).mark_transfer("t1", 42);
         windows.forget_pty("t3");
-        let mut arrival = arrival_of("workspace-7", "main", "ws-2");
+        let mut arrival = arrival_of("workspace:7", "main", "ws-2");
         arrival.terminal_ids = ids.to_vec();
         guard(&windows.arrivals).push(arrival);
 
@@ -5369,14 +5369,14 @@ mod tests {
     #[test]
     fn adoption_keeps_the_journal_until_both_snapshots_are_durable() {
         let dir = TempDir::new("arrival-commit");
-        write_session_to(dir.path(), "main", &snapshot_json(&[("workspace-7", "Moved")], "workspace-7")).unwrap();
-        record_arrival_on_disk(dir.path(), &arrival_of("workspace-7", "main", "ws-2")).unwrap();
-        super::mark_arrival_adopted_on_disk(dir.path(), "workspace-7").unwrap();
+        write_session_to(dir.path(), "main", &snapshot_json(&[("workspace:7", "Moved")], "workspace:7")).unwrap();
+        record_arrival_on_disk(dir.path(), &arrival_of("workspace:7", "main", "ws-2")).unwrap();
+        super::mark_arrival_adopted_on_disk(dir.path(), "workspace:7").unwrap();
         assert_eq!(read_arrivals_from(dir.path()).unwrap().len(), 1);
-        write_session_to(dir.path(), "ws-2", &snapshot_json(&[("workspace-7", "Moved")], "workspace-7")).unwrap();
+        write_session_to(dir.path(), "ws-2", &snapshot_json(&[("workspace:7", "Moved")], "workspace:7")).unwrap();
         super::retire_saved_arrivals(dir.path()).unwrap();
         assert_eq!(read_arrivals_from(dir.path()).unwrap().len(), 1);
-        write_session_to(dir.path(), "main", &snapshot_json(&[], "workspace-1")).unwrap();
+        write_session_to(dir.path(), "main", &snapshot_json(&[], "workspace:1")).unwrap();
         super::retire_saved_arrivals(dir.path()).unwrap();
         assert!(!arrivals_path(dir.path()).exists());
     }
@@ -5384,25 +5384,25 @@ mod tests {
     #[test]
     fn a_hand_back_is_recovered_in_the_source_before_its_next_flush() {
         let dir = TempDir::new("arrival-handback");
-        let arrival = arrival_of("workspace-7", "main", "ws-2");
+        let arrival = arrival_of("workspace:7", "main", "ws-2");
         record_arrival_on_disk(dir.path(), &arrival).unwrap();
         super::return_arrival_on_disk(dir.path(), &arrival).unwrap();
         assert_eq!(read_arrivals_from(dir.path()).unwrap()[0]["to"], "main");
         restore_arrivals(dir.path()).unwrap();
-        assert_eq!(snapshot_ids(&read_snapshot(dir.path(), "main").unwrap()), vec!["workspace-7"]);
+        assert_eq!(snapshot_ids(&read_snapshot(dir.path(), "main").unwrap()), vec!["workspace:7"]);
         assert!(read_session_from(dir.path(), "ws-2").unwrap().is_none());
     }
 
     #[test]
     fn closing_an_adopted_target_never_resurrects_either_copy() {
         let dir = TempDir::new("arrival-target-close");
-        write_session_to(dir.path(), "main", &snapshot_json(&[("workspace-7", "Stale"), ("workspace-8", "Keep")], "workspace-8")).unwrap();
-        record_arrival_on_disk(dir.path(), &arrival_of("workspace-7", "main", "ws-2")).unwrap();
-        super::mark_arrival_adopted_on_disk(dir.path(), "workspace-7").unwrap();
+        write_session_to(dir.path(), "main", &snapshot_json(&[("workspace:7", "Stale"), ("workspace:8", "Keep")], "workspace:8")).unwrap();
+        record_arrival_on_disk(dir.path(), &arrival_of("workspace:7", "main", "ws-2")).unwrap();
+        super::mark_arrival_adopted_on_disk(dir.path(), "workspace:7").unwrap();
         super::close_window_snapshot(dir.path(), "ws-2").unwrap();
         restore_arrivals(dir.path()).unwrap();
         assert!(read_session_from(dir.path(), "ws-2").unwrap().is_none());
-        assert_eq!(snapshot_ids(&read_snapshot(dir.path(), "main").unwrap()), vec!["workspace-8"]);
+        assert_eq!(snapshot_ids(&read_snapshot(dir.path(), "main").unwrap()), vec!["workspace:8"]);
         assert!(!arrivals_path(dir.path()).exists());
     }
 
@@ -5423,7 +5423,7 @@ mod tests {
     fn a_failed_arrival_journal_refuses_the_move_with_nothing_changed() {
         let dir = TempDir::new("arrival-journal-first");
         let windows = super::WindowState::default();
-        let mut arrival = arrival_of("workspace-7", "main", "ws-2");
+        let mut arrival = arrival_of("workspace:7", "main", "ws-2");
         arrival.terminal_ids = vec!["pane-a".to_string()];
         windows.mint("pane-a", "main");
         // A directory where the journal belongs fails its read on every platform.
@@ -5438,7 +5438,7 @@ mod tests {
         assert_eq!(guard(&windows.arrivals).len(), 1);
         // A refusal after the write puts back the record it replaced, and
         // never withdraws a newer drop's record.
-        let mut later = arrival_of("workspace-7", "ws-2", "ws-3");
+        let mut later = arrival_of("workspace:7", "ws-2", "ws-3");
         let previous = record_arrival_on_disk(dir.path(), &later).unwrap();
         super::withdraw_arrival_on_disk(dir.path(), &arrival, None).unwrap();
         assert_eq!(read_arrivals_from(dir.path()).unwrap()[0]["to"], "ws-3");
@@ -5466,7 +5466,7 @@ mod tests {
         close.clear("ws-2");
         assert!(admitted(&arrivals, &machine, &close, &closing, "main", "ws-2"));
         // A close queued behind another transfer, or a snapshot already removed.
-        arrivals.push(arrival_of("workspace-7", "ws-2", "ws-3"));
+        arrivals.push(arrival_of("workspace:7", "ws-2", "ws-3"));
         arrivals.defer_close("ws-2");
         assert!(!admitted(&arrivals, &machine, &close, &closing, "main", "ws-2"));
         arrivals.forget_deferred_close("ws-2");
@@ -5522,9 +5522,9 @@ mod tests {
     #[test]
     fn a_settled_recovery_preserves_the_targets_newer_snapshot() {
         let dir = TempDir::new("arrival-newer-target");
-        record_arrival_on_disk(dir.path(), &arrival_of("workspace-7", "main", "ws-2")).unwrap();
-        super::mark_arrival_adopted_on_disk(dir.path(), "workspace-7").unwrap();
-        write_session_to(dir.path(), "ws-2", &snapshot_json(&[("workspace-7", "Renamed after adoption")], "workspace-7")).unwrap();
+        record_arrival_on_disk(dir.path(), &arrival_of("workspace:7", "main", "ws-2")).unwrap();
+        super::mark_arrival_adopted_on_disk(dir.path(), "workspace:7").unwrap();
+        write_session_to(dir.path(), "ws-2", &snapshot_json(&[("workspace:7", "Renamed after adoption")], "workspace:7")).unwrap();
         restore_arrivals(dir.path()).unwrap();
         assert_eq!(read_snapshot(dir.path(), "ws-2").unwrap()["workspaces"][0]["name"], "Renamed after adoption");
     }
@@ -5532,10 +5532,10 @@ mod tests {
     #[test]
     fn a_failed_source_write_rolls_back_the_target_and_retries() {
         let dir = TempDir::new("arrival-source-write");
-        write_session_to(dir.path(), "main", &snapshot_json(&[("workspace-7", "Moved"), ("workspace-8", "Keep")], "workspace-8")).unwrap();
-        let before = snapshot_json(&[("workspace-9", "Target")], "workspace-9");
+        write_session_to(dir.path(), "main", &snapshot_json(&[("workspace:7", "Moved"), ("workspace:8", "Keep")], "workspace:8")).unwrap();
+        let before = snapshot_json(&[("workspace:9", "Target")], "workspace:9");
         write_session_to(dir.path(), "ws-2", &before).unwrap();
-        record_arrival_on_disk(dir.path(), &arrival_of("workspace-7", "main", "ws-2")).unwrap();
+        record_arrival_on_disk(dir.path(), &arrival_of("workspace:7", "main", "ws-2")).unwrap();
         let blocked = temp_write_path(&dir.path().join(session_file_name("main")));
         fs::create_dir(&blocked).unwrap();
         restore_arrivals(dir.path()).unwrap();
@@ -5544,13 +5544,13 @@ mod tests {
         fs::remove_dir(blocked).unwrap();
         restore_arrivals(dir.path()).unwrap();
         assert!(!arrivals_path(dir.path()).exists());
-        assert_eq!(snapshot_ids(&read_snapshot(dir.path(), "main").unwrap()), vec!["workspace-8"]);
+        assert_eq!(snapshot_ids(&read_snapshot(dir.path(), "main").unwrap()), vec!["workspace:8"]);
     }
 
     #[test]
     fn an_unreadable_source_retains_the_record_without_changing_the_target() {
         let dir = TempDir::new("arrival-retry");
-        record_arrival_on_disk(dir.path(), &arrival_of("workspace-7", "main", "ws-2")).unwrap();
+        record_arrival_on_disk(dir.path(), &arrival_of("workspace:7", "main", "ws-2")).unwrap();
         write_session_to(dir.path(), "main", "broken json").unwrap();
         restore_arrivals(dir.path()).unwrap();
         assert!(read_session_from(dir.path(), "ws-2").unwrap().is_none());
@@ -5558,16 +5558,16 @@ mod tests {
         // The only readable durable copy is still the journal; reservations
         // must not reuse its id before a later boot can complete recovery.
         assert_eq!(super::saved_windows(dir.path()).next_workspace, 8);
-        write_session_to(dir.path(), "main", &snapshot_json(&[("workspace-7", "Moved")], "workspace-7")).unwrap();
+        write_session_to(dir.path(), "main", &snapshot_json(&[("workspace:7", "Moved")], "workspace:7")).unwrap();
         restore_arrivals(dir.path()).unwrap();
         assert!(!arrivals_path(dir.path()).exists());
-        assert_eq!(snapshot_ids(&read_snapshot(dir.path(), "ws-2").unwrap()), vec!["workspace-7"]);
+        assert_eq!(snapshot_ids(&read_snapshot(dir.path(), "ws-2").unwrap()), vec!["workspace:7"]);
     }
 
     #[test]
     fn a_retained_arrival_reserves_both_window_labels_without_opening_them() {
         let dir = TempDir::new("arrival-label-reservation");
-        record_arrival_on_disk(dir.path(), &arrival_of("workspace-7", "ws-40", "ws-50")).unwrap();
+        record_arrival_on_disk(dir.path(), &arrival_of("workspace:7", "ws-40", "ws-50")).unwrap();
         // Fail recovery before either endpoint has a readable snapshot.
         fs::create_dir(dir.path().join("ws-40.json")).unwrap();
         restore_arrivals(dir.path()).unwrap();
@@ -5607,8 +5607,8 @@ mod tests {
         let windows = boot_ids(root.path());
         let ids = (0..8).map(|_| windows.reserve_ids(super::ids::Kind::Workspace, 1, 0).start).collect::<Vec<_>>();
         assert_eq!(ids, (2..10).collect::<Vec<_>>());
-        // workspace-6 through workspace-9 closed; only workspace-5 is saved.
-        write_session_to(&sessions, "main", &snapshot_json(&[("workspace-5", "Kept")], "workspace-5")).unwrap();
+        // workspace:6 through workspace:9 closed; only workspace:5 is saved.
+        write_session_to(&sessions, "main", &snapshot_json(&[("workspace:5", "Kept")], "workspace:5")).unwrap();
         assert_eq!(super::saved_windows(&sessions).next_workspace, 6);
         assert_eq!(boot_ids(root.path()).reserve_ids(super::ids::Kind::Workspace, 1, 0).start, 10);
     }
@@ -5621,7 +5621,7 @@ mod tests {
         let labels = (0..4).map(|_| super::next_window_label(&windows)).collect::<Vec<_>>();
         assert_eq!(labels, ["ws-1", "ws-2", "ws-3", "ws-4"]);
         // ws-4 closed, taking its snapshot with it; ws-2 is still saved.
-        write_session_to(&sessions, "ws-2", &snapshot_json(&[("workspace-2", "Kept")], "workspace-2")).unwrap();
+        write_session_to(&sessions, "ws-2", &snapshot_json(&[("workspace:2", "Kept")], "workspace:2")).unwrap();
         assert_eq!(super::saved_windows(&sessions).next_ws, 3);
         assert_eq!(super::next_window_label(&boot_ids(root.path())), "ws-5");
     }
@@ -5639,15 +5639,15 @@ mod tests {
     #[test]
     fn the_surface_seed_covers_panes_and_doors_in_snapshots_and_the_journal() {
         let dir = TempDir::new("ids-surface-seed");
-        let snapshot = serde_json::json!({ "version": WINDOW_VERSION, "activeWorkspaceId": "workspace-2", "workspaces": [{
-            "id": "workspace-2", "name": "Saved",
-            "session": { "version": SESSION_VERSION, "panes": [{ "id": "surface-3" }], "doors": [{ "id": "surface-9" }] }
+        let snapshot = serde_json::json!({ "version": WINDOW_VERSION, "activeWorkspaceId": "workspace:2", "workspaces": [{
+            "id": "workspace:2", "name": "Saved",
+            "session": { "version": SESSION_VERSION, "panes": [{ "id": "surface:3" }], "doors": [{ "id": "surface:9" }] }
         }] });
         write_session_to(dir.path(), "main", &snapshot.to_string()).unwrap();
         assert_eq!(super::saved_windows(dir.path()).next_surface, 10);
         // A retained record: its Workspace is in no snapshot yet.
-        let mut arrival = arrival_of("workspace-7", "main", "ws-2");
-        arrival.payload["workspace"]["session"]["panes"] = serde_json::json!([{ "id": "surface-12" }]);
+        let mut arrival = arrival_of("workspace:7", "main", "ws-2");
+        arrival.payload["workspace"]["session"]["panes"] = serde_json::json!([{ "id": "surface:12" }]);
         record_arrival_on_disk(dir.path(), &arrival).unwrap();
         assert_eq!(super::saved_windows(dir.path()).next_surface, 13);
     }
@@ -5655,14 +5655,14 @@ mod tests {
     #[test]
     fn the_arrivals_file_is_gone_after_the_boot_merge() {
         let dir = TempDir::new("arrivals-gone");
-        record_arrival_on_disk(dir.path(), &arrival_of("workspace-7", "main", "ws-2")).unwrap();
+        record_arrival_on_disk(dir.path(), &arrival_of("workspace:7", "main", "ws-2")).unwrap();
         assert!(arrivals_path(dir.path()).exists());
 
         restore_arrivals(dir.path()).unwrap();
         assert!(!arrivals_path(dir.path()).exists());
         // Idempotent: a second boot has nothing to merge and changes nothing.
         restore_arrivals(dir.path()).unwrap();
-        assert_eq!(snapshot_ids(&read_snapshot(dir.path(), "ws-2").unwrap()), vec!["workspace-7"]);
+        assert_eq!(snapshot_ids(&read_snapshot(dir.path(), "ws-2").unwrap()), vec!["workspace:7"]);
 
         // An unreadable file is dropped rather than replayed on every launch.
         fs::write(arrivals_path(dir.path()), "{not json").unwrap();
@@ -5685,10 +5685,10 @@ mod tests {
         write_session_to(dir.path(), "ws-2", &old.to_string()).unwrap();
         fs::write(dir.path().join("ws-2.json.tmp"), b"old").unwrap();
         fs::write(geometry_path(dir.path(), "ws-2"), b"{}").unwrap();
-        write_session_to(dir.path(), "main", &snapshot_json(&[("workspace-2", "Kept")], "workspace-2")).unwrap();
+        write_session_to(dir.path(), "main", &snapshot_json(&[("workspace:2", "Kept")], "workspace:2")).unwrap();
         fs::write(geometry_path(dir.path(), "main"), b"{}").unwrap();
-        record_arrival_on_disk(dir.path(), &arrival_of("workspace-7", "main", "ws-3")).unwrap();
-        let mut stale = arrival_of("workspace-8", "main", "ws-4");
+        record_arrival_on_disk(dir.path(), &arrival_of("workspace:7", "main", "ws-3")).unwrap();
+        let mut stale = arrival_of("workspace:8", "main", "ws-4");
         stale.payload["workspace"]["session"]["version"] = serde_json::json!(3);
         record_arrival_on_disk(dir.path(), &stale).unwrap();
 
@@ -5697,10 +5697,10 @@ mod tests {
         assert!(read_session_from(dir.path(), "ws-2").unwrap().is_none());
         assert!(!dir.path().join("ws-2.json.tmp").exists());
         assert!(!geometry_path(dir.path(), "ws-2").exists());
-        assert_eq!(snapshot_ids(&read_snapshot(dir.path(), "main").unwrap()), vec!["workspace-2"]);
+        assert_eq!(snapshot_ids(&read_snapshot(dir.path(), "main").unwrap()), vec!["workspace:2"]);
         assert!(geometry_path(dir.path(), "main").exists());
         let records = read_arrivals_from(dir.path()).unwrap();
-        assert_eq!(records.iter().filter_map(record_workspace_id).collect::<Vec<_>>(), vec!["workspace-7"]);
+        assert_eq!(records.iter().filter_map(record_workspace_id).collect::<Vec<_>>(), vec!["workspace:7"]);
         // Nothing of another format is left, so a second boot changes nothing.
         assert_eq!(discard_other_formats(dir.path()).unwrap(), (0, 0));
     }

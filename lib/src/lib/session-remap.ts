@@ -14,7 +14,7 @@ export function freshSurfaceIdCount(session: PersistedSession): number {
  * A closed Workspace's record with every Surface given a fresh id, for Reopen
  * (`docs/specs/reopen.md`): the rebuilt Sessions must never share an id — a
  * PTY's, the host's — with the ones the close just killed, so each comes back
- * under a new ref. Mints {@link freshSurfaceIdCount} ids synchronously, more
+ * under a new id. Mints {@link freshSurfaceIdCount} ids synchronously, more
  * than the page's pool may hold, so a caller passes a `surfaceIdMinter`.
  */
 export function withFreshSurfaceIds(session: PersistedSession, mint = mintSurfaceId): PersistedSession {

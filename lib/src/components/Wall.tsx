@@ -63,12 +63,12 @@ import type {
   SurfaceView as DorSurfaceView,
 } from 'dor/commands/types';
 import { hasBrowser, hasTerminal } from 'dor/commands/types';
-import { compareSurfaceIds, surfaceRefForId } from 'dor/protocol';
+import { compareSurfaceIds } from 'dor/protocol';
 import { DEFAULT_WORKSPACE_ID, type WorkspaceId } from '../lib/session-types';
 import { clearWorkspaceSurfaces, setWorkspaceSurfaces } from '../lib/workspace-surfaces';
 import { nextTodoMember } from '../lib/workspace-union';
 import { deriveDisplayedSurfaceLabel } from '../lib/session-label';
-import { getWorkspace, getWorkspacesSnapshot, setActiveWorkspace, subscribeToWorkspaces, workspaceRefFor } from '../lib/workspace-store';
+import { getWorkspace, getWorkspacesSnapshot, setActiveWorkspace, subscribeToWorkspaces } from '../lib/workspace-store';
 import { awaitWallEmpty } from './wall/close-all';
 import { closeKind, type CloseKind } from './wall/close-kind';
 import { registerWallHandle, type WallHandle } from './wall/wall-handles';
@@ -1179,7 +1179,7 @@ export function Wall({
   handleReattachRef.current = handleReattach;
 
   /**
-   * Rebuild a closed Surface from its record as a new Surface with a new ref
+   * Rebuild a closed Surface from its record as a new Surface with a new id
    * (docs/specs/reopen.md → "The reopen record"): where it sat, a Pane beside the selected pane when its
    * neighbors are gone. `focus` selects it as a reopen gesture does.
    */
@@ -1283,7 +1283,6 @@ export function Wall({
   // The Surfaces of the current Workspace. `buildDorSurfaces` is the visible-pane
   // projection used for geometry/placement; `buildDorSurfaceList` additionally
   // includes minimized (doored) Surfaces for `dor list` and direct operations.
-  // Refs derive from the id (`surfaceRefForId`), not from layout/list position.
   // This is a parallel projection to the phone's `DirectoryEntry` (`lib/src/remote/burrow/directory-collect.ts`) over the same
   // stores — keep the shared field derivations (activity / cwd / ringing / todo)
   // in sync.
@@ -1325,7 +1324,7 @@ export function Wall({
 
       return {
         id: source.id,
-        ref: surfaceRefForId(source.id),
+        ref: source.id,
         kind,
         renderMode,
         title,
@@ -1400,7 +1399,7 @@ export function Wall({
       ? doorsRef.current.find((door) => door.id === referenceId)
       : undefined;
     if (!referenceVisible && !referenceDoor) {
-      return { ok: false, message: `surface '${reference.ref}' is not in the active workspace` };
+      return { ok: false, message: `surface '${reference.id}' is not in the active workspace` };
     }
 
     const newId = mintSurfaceId();
@@ -1517,7 +1516,7 @@ export function Wall({
     status: 'created' | 'replaced';
   }> => {
     const referenceVisible = nav.hasPane(reference.id);
-    if (!referenceVisible) return { ok: false, message: `surface '${reference.ref}' is not visible` };
+    if (!referenceVisible) return { ok: false, message: `surface '${reference.id}' is not visible` };
 
     const newId = preparedId ?? mintSurfaceId();
     const browserMeta = browserLeafMeta(title, params);
@@ -1530,7 +1529,7 @@ export function Wall({
       // Whether the user's current selection sits on the pane being replaced.
       const selectionReplaced = selectedTypeRef.current === 'pane' && selectedIdRef.current === reference.id;
       // Atomic identity swap in place; then dispose the old terminal session.
-      // The replacement is a new Surface, with its own ref.
+      // The replacement is a new Surface, with its own id.
       lath.store.replaceLeaf(reference.id, newId, browserMeta);
       disposeSession(reference.id);
       // Replacing the pane the user is selected on forces selection onto the
@@ -1657,7 +1656,7 @@ export function Wall({
     revealSurface,
     previewSlot,
     isClosingWorkspace: useCallback(() => closingWorkspaceRef.current, []),
-    workspaceRef: useCallback(() => workspaceRefFor(effectiveWorkspaceId), [effectiveWorkspaceId]),
+    answeringWorkspaceId: useCallback(() => effectiveWorkspaceId, [effectiveWorkspaceId]),
     // The raw prop, not `effectiveWorkspaceId`: a bare Wall keeps the unscoped
     // agent-browser session names (docs/specs/dor-browser.md → Managed identity).
     workspaceScope: useCallback(() => workspaceId, [workspaceId]),

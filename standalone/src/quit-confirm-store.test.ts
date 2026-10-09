@@ -90,7 +90,7 @@ describe("quit-confirm store", () => {
     const names = getQuitConfirmWorkspaceNames();
     expect(char).toMatch(/^[a-z]$/);
     expect(names).toContain('Second');
-    setActiveWorkspace('workspace-1');
+    setActiveWorkspace('workspace:1');
     moveWorkspace(second.id, 0);
     renameWorkspace(second.id, 'Renamed');
     expect(getQuitConfirmChar()).toBe(char);
@@ -113,14 +113,14 @@ describe("quit-confirm store", () => {
 
   it('clears competing chrome without dropping transfer guards', () => {
     const answer = vi.fn();
-    requestConfirmation({ id: 'workspace-1', char: 'a', answer });
-    setRenamingWorkspace('workspace-1');
-    setWorkspaceMoveError({ id: 'workspace-1', reason: 'Wait for the Tool browser to connect' });
-    setWorkspaceTransferPending('workspace-1', true);
+    requestConfirmation({ id: 'workspace:1', char: 'a', answer });
+    setRenamingWorkspace('workspace:1');
+    setWorkspaceMoveError({ id: 'workspace:1', reason: 'Wait for the Tool browser to connect' });
+    setWorkspaceTransferPending('workspace:1', true);
     openQuitConfirm(makeCtx());
     expect(getWorkspaceUiSnapshot()).toEqual({ confirmation: null, renamingId: null, moveError: null, menu: null });
     expect(answer).toHaveBeenCalledExactlyOnceWith(false);
-    expect(isWorkspaceTransferPending('workspace-1')).toBe(true);
+    expect(isWorkspaceTransferPending('workspace:1')).toBe(true);
     expect(chromeKeyboardHeld()).toBe(true);
   });
 

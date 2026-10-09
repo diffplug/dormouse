@@ -59,7 +59,7 @@ afterEach(() => {
 describe('dor control routing', () => {
   it('delivers to the Wall that owns the caller, not the active one', () => {
     const first = getWorkspacesSnapshot().workspaces[0].id;
-    const second = createWorkspace({ id: 'ws-2' }).id; // becomes active
+    const second = createWorkspace({ id: 'workspace:2' }).id; // becomes active
     const owner = handleFor(first, ['pane-a']);
     handleFor(second, ['pane-b']);
     expect(resolveDorControlRoute(request({ surfaceId: 'pane-a' }))).toEqual({ kind: 'handle', handle: owner });
@@ -106,7 +106,7 @@ describe('dor control routing', () => {
     try {
       const unrelated = handleFor(getWorkspacesSnapshot().workspaces[0].id, ['unrelated']);
       const late = dispatch(request({ surfaceId: 'helper', helperParentId: 'late' }));
-      const owner = handleFor(createWorkspace({ id: 'ws-late', activate: false }).id, ['late']);
+      const owner = handleFor(createWorkspace({ id: 'workspace:late', activate: false }).id, ['late']);
       await vi.advanceTimersByTimeAsync(0);
       expect(owner.handleDorControl).toHaveBeenCalledTimes(1);
       const gone = dispatch(request({ surfaceId: 'helper', helperParentId: 'gone' }));
@@ -119,18 +119,18 @@ describe('dor control routing', () => {
 
   it('captures in-process helper identity from the registry without aliasing self', () => {
     const owner = handleFor(getWorkspacesSnapshot().workspaces[0].id, ['parent']);
-    registry.set('surface-9', { helper: { parentId: 'parent', command: '' } } as TerminalEntry);
+    registry.set('surface:9', { helper: { parentId: 'parent', command: '' } } as TerminalEntry);
     try {
-      dispatch(request({ surfaceId: 'surface-9' }));
+      dispatch(request({ surfaceId: 'surface:9' }));
       expect(owner.handleDorControl).toHaveBeenCalledWith(expect.objectContaining({
         surfaceId: undefined, helperParentId: 'parent', placementSurfaceId: 'parent',
       }));
-      for (const surface of ['surface-9', 'surface:9', 'surface:self']) {
-        const detail = dispatch(request({ surfaceId: 'surface-9', params: { surface } }));
+      for (const surface of ['surface:9', 'surface:self']) {
+        const detail = dispatch(request({ surfaceId: 'surface:9', params: { surface } }));
         expect(detail.respond).toHaveBeenCalledWith({ ok: false, error: expect.stringContaining('not public Surface targets') });
       }
       expect(owner.handleDorControl).toHaveBeenCalledTimes(1);
-    } finally { registry.delete('surface-9'); }
+    } finally { registry.delete('surface:9'); }
   });
 
   it('refuses a request a pending helper makes, though it names its open parent', () => {
@@ -146,7 +146,7 @@ describe('dor control routing', () => {
 
   it('falls back to the active Workspace for an unknown caller', () => {
     const first = getWorkspacesSnapshot().workspaces[0].id;
-    const second = createWorkspace({ id: 'ws-2' }).id;
+    const second = createWorkspace({ id: 'workspace:2' }).id;
     handleFor(first);
     const active = handleFor(second);
     expect(resolveDorControlRoute(request({ surfaceId: 'gone' }))).toEqual({ kind: 'handle', handle: active });
@@ -156,10 +156,10 @@ describe('dor control routing', () => {
     expect((resolveDorControlRoute(request()) as { handle: WallHandle }).handle.workspaceId).toBe(first);
   });
 
-  it('routes an explicit workspace target positionally, over the caller', () => {
+  it('routes an explicit workspace target by its number, over the caller', () => {
     const first = getWorkspacesSnapshot().workspaces[0].id;
-    createWorkspace({ id: 'ws-2' });
-    const target = handleFor('ws-2');
+    createWorkspace({ id: 'workspace:2' });
+    const target = handleFor('workspace:2');
     handleFor(first, ['pane-a']);
     for (const value of ['workspace:2', '2']) {
       expect(resolveDorControlRoute(request({ surfaceId: 'pane-a', params: { workspace: value } })))
@@ -169,15 +169,15 @@ describe('dor control routing', () => {
 
   it('routes an explicit workspace target by name', () => {
     const first = getWorkspacesSnapshot().workspaces[0].id;
-    createWorkspace({ id: 'ws-2', name: 'build' });
-    const target = handleFor('ws-2');
+    createWorkspace({ id: 'workspace:2', name: 'build' });
+    const target = handleFor('workspace:2');
     handleFor(first, ['pane-a']);
     for (const value of ['workspace:build', 'build']) {
       expect(resolveDorControlRoute(request({ surfaceId: 'pane-a', params: { workspace: value } })))
         .toEqual({ kind: 'handle', handle: target });
     }
-    createWorkspace({ id: 'ws-3', name: 'build' });
-    handleFor('ws-3');
+    createWorkspace({ id: 'workspace:3', name: 'build' });
+    handleFor('workspace:3');
     expect(resolveDorControlRoute(request({ params: { workspace: 'build' } })))
       .toEqual({
         kind: 'error',
@@ -185,23 +185,25 @@ describe('dor control routing', () => {
       });
   });
 
-  it('routes an id or ref target to the Workspace holding it, over the caller', () => {
+  it('routes an id target to the Workspace holding it, over the caller', () => {
     const first = getWorkspacesSnapshot().workspaces[0].id;
-    createWorkspace({ id: 'ws-2' });
-    const caller = handleFor(first, ['surface-1']);
-    const owner = handleFor('ws-2', ['surface-2']);
-    for (const surface of ['surface-2', 'surface:2']) {
-      expect(resolveDorControlRoute(request({ surfaceId: 'surface-1', params: { surface } })))
+    createWorkspace({ id: 'workspace:2' });
+    const caller = handleFor(first, ['surface:1']);
+    const owner = handleFor('workspace:2', ['surface:2']);
+    for (const surface of ['surface:2']) {
+      expect(resolveDorControlRoute(request({ surfaceId: 'surface:1', params: { surface } })))
         .toEqual({ kind: 'handle', handle: owner });
     }
     // `surface:self` and a title stay with the caller.
-    for (const surface of ['surface:self', 'title:surface-2']) {
-      expect(resolveDorControlRoute(request({ surfaceId: 'surface-1', params: { surface } })))
+    for (const surface of ['surface:self', 'title:surface:2']) {
+      expect(resolveDorControlRoute(request({ surfaceId: 'surface:1', params: { surface } })))
         .toEqual({ kind: 'handle', handle: caller });
     }
     // A malformed handle is refused before any Wall is asked.
-    expect(resolveDorControlRoute(request({ surfaceId: 'surface-1', params: { surface: 'pane:2' } })))
-      .toEqual({ kind: 'error', message: "'pane:2' is not a Surface handle; use surface:2" });
+    for (const surface of ['pane:2', 'surface-2', '2']) {
+      expect(resolveDorControlRoute(request({ surfaceId: 'surface:1', params: { surface } })))
+        .toEqual({ kind: 'error', message: `'${surface}' is not a Surface handle; use surface:2` });
+    }
   });
 
   it('answers the container verbs and --all at the Window, with no Wall involved', () => {
@@ -312,7 +314,7 @@ describe('dor control routing', () => {
       // No Wall has registered yet — the request must not be dropped.
       const detail = request();
       window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail }));
-      const workspaceId = createWorkspace({ id: 'ws-2' }).id;
+      const workspaceId = createWorkspace({ id: 'workspace:2' }).id;
       const handle = handleFor(workspaceId);
       expect(handle.handleDorControl).not.toHaveBeenCalled();
 
@@ -332,18 +334,18 @@ describe('dor control routing', () => {
 
       // `dor workspace new build && dor split --workspace build`: the Workspace
       // is in the store, its Wall is one effect away.
-      createWorkspace({ id: 'ws-2', name: 'build', activate: false });
+      createWorkspace({ id: 'workspace:2', name: 'build', activate: false });
       const detail = request({ surfaceId: 'pane-a', params: { workspace: 'build' } });
       window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail }));
       expect(detail.respond).not.toHaveBeenCalled();
-      const target = handleFor('ws-2');
+      const target = handleFor('workspace:2');
       await vi.advanceTimersByTimeAsync(0);
       expect(target.handleDorControl).toHaveBeenCalledTimes(1);
       expect(detail.respond).not.toHaveBeenCalled();
 
       // One that never registers is answered — not left as "no such Workspace",
       // which it is not, and not left unanswered, which blocks the caller.
-      createWorkspace({ id: 'ws-3', name: 'agents', activate: false });
+      createWorkspace({ id: 'workspace:3', name: 'agents', activate: false });
       const never = request({ params: { workspace: 'agents' } });
       window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: never }));
       await vi.advanceTimersByTimeAsync(10);
@@ -378,9 +380,9 @@ describe('dor control routing', () => {
 
   it('drops a caller the answering Wall does not hold', () => {
     const first = getWorkspacesSnapshot().workspaces[0].id;
-    createWorkspace({ id: 'ws-2', name: 'build' });
+    createWorkspace({ id: 'workspace:2', name: 'build' });
     handleFor(first, ['pane-a']);
-    const target = handleFor('ws-2', ['pane-b']);
+    const target = handleFor('workspace:2', ['pane-b']);
     const release = installDorControlRouter();
 
     // `dor split --workspace build` from pane-a: the caller belongs to another

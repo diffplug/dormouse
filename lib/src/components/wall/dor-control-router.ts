@@ -1,8 +1,8 @@
-import { isAppControlMethod, isToolControlMethod, isWindowControlMethod, isWorkspaceControlMethod, parseSurfaceTarget, SURFACE_CONTROL_METHODS, surfaceRefForId } from 'dor/protocol';
+import { isAppControlMethod, isToolControlMethod, isWindowControlMethod, isWorkspaceControlMethod, parseSurfaceTarget, SURFACE_CONTROL_METHODS } from 'dor/protocol';
 import { registry, isHelperSession } from '../../lib/terminal-store';
 import { createRefCount } from '../../lib/ref-count';
 import { getPendingKill, isPendingKillSession } from '../../lib/pending-kills';
-import { getActiveWorkspaceId, isWindowRef, resolveWorkspaceRef, workspaceRefFor } from '../../lib/workspace-store';
+import { getActiveWorkspaceId, isWindowRef, resolveWorkspaceRef } from '../../lib/workspace-store';
 import { handleAppControl } from './app-control';
 import { handleReopenControl } from './reopen';
 import { handleToolControl } from './tool-control';
@@ -63,11 +63,11 @@ export function resolveDorControlRoute(detail: DorControlRequest): DorControlRou
   // keeps its process: neither may be reached, nor call into its Wall
   // (`docs/specs/reopen.md` → "Labs: No-confirm delayed kill").
   if (route.kind === 'handle' && getPendingKill('workspace', route.handle.workspaceId)) {
-    return { kind: 'error', message: `workspace '${workspaceRefFor(route.handle.workspaceId)}' is a pending kill` };
+    return { kind: 'error', message: `workspace '${route.handle.workspaceId}' is a pending kill` };
   }
   // A helper's request names its parent; a pending helper is itself the caller.
   const caller = [detail.surfaceId, detail.helperParentId].find(id => id && isPendingKillSession(id));
-  if (caller) return { kind: 'error', message: `surface '${surfaceRefForId(caller)}' is a pending kill` };
+  if (caller) return { kind: 'error', message: `surface '${caller}' is a pending kill` };
   return route;
 }
 
@@ -107,7 +107,7 @@ function resolveRoute(detail: DorControlRequest): DorControlRoute {
       ? { kind: 'handle', handle }
       : { kind: 'pending', message: mountingRefusal(String(params.workspace).trim()) };
   }
-  // An id or ref names one Surface in the whole Window, so a command targeting
+  // An id names one Surface in the whole Window, so a command targeting
   // one is answered by whichever Workspace holds it, caller or not.
   const owningTarget = target?.kind === 'id' ? wallHandleOwning(target.id) : null;
   if (owningTarget) return { kind: 'handle', handle: owningTarget };
@@ -124,7 +124,7 @@ function resolveRoute(detail: DorControlRequest): DorControlRoute {
   const active = getWallHandle(activeId);
   return active
     ? { kind: 'handle', handle: active }
-    : { kind: 'none', message: mountingRefusal(workspaceRefFor(activeId)) };
+    : { kind: 'none', message: mountingRefusal(activeId) };
 }
 
 function dispatchDorControl(detail: DorControlRequest, attempt: number): void {

@@ -1,4 +1,4 @@
-import { isWorkspaceControlMethod, surfaceRefForId, unsupportedControlMethodMessage, WORKSPACE_CONTROL_METHODS } from 'dor/protocol';
+import { isWorkspaceControlMethod, unsupportedControlMethodMessage, WORKSPACE_CONTROL_METHODS } from 'dor/protocol';
 import type { DorControlResult } from 'dor/protocol';
 import type {
   GroupedSurface,
@@ -18,8 +18,7 @@ import {
   moveWorkspace,
   resolveWorkspaceRef,
   setActiveWorkspace,
-  workspaceRefFor,
-  type ResolvedWorkspace,
+  type WorkspaceMeta,
 } from '../../lib/workspace-store';
 import { getWorkspaceSurfacesSnapshot } from '../../lib/workspace-surfaces';
 import { cancelPendingConfirmation } from '../../lib/workspace-ui-store';
@@ -59,7 +58,6 @@ export function workspaceRows(): WorkspaceRow[] {
   return workspaces.map((workspace) => {
     const union = computeWorkspaceUnion(membership.get(workspace.id) ?? [], activity);
     return {
-      ref: workspaceRefFor(workspace.id),
       id: workspace.id,
       name: workspace.name,
       auto: workspace.nameIsAuto,
@@ -126,11 +124,11 @@ export async function listAllWorkspaceSurfaces(detail: DorControlRequest): Promi
   const surfaces: GroupedSurface[] = [];
   for (const { row, answer } of answers) {
     if (!answer) {
-      detail.respond({ ok: false, error: mountingRefusal(row.ref) });
+      detail.respond({ ok: false, error: mountingRefusal(row.id) });
       return;
     }
     if (!answer.ok) {
-      detail.respond({ ok: false, error: `${row.ref}: ${answer.error ?? 'listing failed'}` });
+      detail.respond({ ok: false, error: `${row.id}: ${answer.error ?? 'listing failed'}` });
       return;
     }
     const listed = answer.result as ListSurfacesResponse;
@@ -138,7 +136,7 @@ export async function listAllWorkspaceSurfaces(detail: DorControlRequest): Promi
       // Each Wall marks its own selection focused, but the Window has one focus:
       // a row of an inactive Workspace is not it (`docs/specs/dor-cli.md` →
       // "Current Implemented Commands").
-      surfaces.push({ ...surface, workspaceRef: row.ref, focused: surface.focused && row.active });
+      surfaces.push({ ...surface, workspaceId: row.id, focused: surface.focused && row.active });
     }
   }
 
@@ -147,14 +145,14 @@ export async function listAllWorkspaceSurfaces(detail: DorControlRequest): Promi
     result: {
       surfaces: includePorts ? await attachSurfacePorts(surfaces) : surfaces,
       workspaces: rows,
-      workspaceRef: (rows.find((row) => row.active) ?? rows[0]).ref,
+      workspaceId: (rows.find((row) => row.active) ?? rows[0]).id,
       windowRef: currentWindowRef(),
     } satisfies ListSurfacesResponse,
   });
 }
 
 /** The Workspace a mutating verb names, or null once the failure is answered. */
-function requireWorkspace(detail: DorControlRequest): ResolvedWorkspace | null {
+function requireWorkspace(detail: DorControlRequest): WorkspaceMeta | null {
   const target = stringParam(detail.params?.workspace);
   if (!target) {
     detail.respond({ ok: false, error: 'workspace is required' });
@@ -176,14 +174,13 @@ export async function handleWorkspaceControl(detail: DorControlRequest): Promise
   /** The one shape every mutating verb answers with. */
   const respondMutation = (
     status: WorkspaceMutationResponse['status'],
-    workspace: ResolvedWorkspace,
+    workspace: WorkspaceMeta,
     renamedTo?: string,
   ) => detail.respond({
     ok: true,
     result: {
       status,
       workspaceId: workspace.id,
-      workspaceRef: workspace.ref,
       name: renamedTo ?? workspace.name,
     } satisfies WorkspaceMutationResponse,
   });
@@ -206,7 +203,7 @@ export async function handleWorkspaceControl(detail: DorControlRequest): Promise
       // (`docs/specs/dor-cli.md` → "dor workspace"). `dor workspace switch` is
       // the verb that activates.
       const meta = createWorkspace({ ...(name ? { name } : {}), activate: false });
-      respondMutation('created', { ...meta, ref: workspaceRefFor(meta.id) });
+      respondMutation('created', meta);
       return;
     }
 
@@ -220,7 +217,7 @@ export async function handleWorkspaceControl(detail: DorControlRequest): Promise
       }
       const refused = nameWorkspace(target.id, auto ? null : name!);
       if (refused) {
-        detail.respond({ ok: false, error: `workspace '${target.ref}' was not renamed: ${refused}` });
+        detail.respond({ ok: false, error: `workspace '${target.id}' was not renamed: ${refused}` });
         return;
       }
       // `--auto` answers the outgoing name: the derived one is computed
@@ -247,7 +244,7 @@ export async function handleWorkspaceControl(detail: DorControlRequest): Promise
       // Idempotent: pinning a pinned Workspace answers as if it had pinned it.
       const refusal = pinWorkspace(target.id, params.pinned);
       if (refusal) {
-        detail.respond({ ok: false, error: `workspace '${target.ref}' was not ${params.pinned ? 'pinned' : 'unpinned'}: ${refusal}` });
+        detail.respond({ ok: false, error: `workspace '${target.id}' was not ${params.pinned ? 'pinned' : 'unpinned'}: ${refusal}` });
         return;
       }
       respondMutation(params.pinned ? 'pinned' : 'unpinned', target);
@@ -272,7 +269,7 @@ export async function handleWorkspaceControl(detail: DorControlRequest): Promise
           return;
         }
         if (!handle) {
-          detail.respond({ ok: false, error: mountingRefusal(target.ref) });
+          detail.respond({ ok: false, error: mountingRefusal(target.id) });
           return;
         }
         if (handle.dirtyToolIds().length) {
@@ -289,10 +286,10 @@ export async function handleWorkspaceControl(detail: DorControlRequest): Promise
         // (`docs/specs/layout.md` → Workspaces). The caller says so explicitly.
         const iframes = handle.iframeSurfaceIds();
         if (iframes.length > 0 && params.dangerouslyDestroyIframePageState !== true) {
-          const refs = iframes.map(surfaceRefForId).join(', ');
+          const ids = iframes.join(', ');
           detail.respond({
             ok: false,
-            error: `workspace '${target.ref}' holds ${iframes.length} iframe Surface(s) whose page state a move destroys (${refs}); `
+            error: `workspace '${target.id}' holds ${iframes.length} iframe Surface(s) whose page state a move destroys (${ids}); `
               + 'pass --dangerously-destroy-iframe-page-state to move it anyway',
           });
           return;
@@ -305,7 +302,7 @@ export async function handleWorkspaceControl(detail: DorControlRequest): Promise
         try {
           await platform.transferWorkspace(target.id, label, index === undefined ? {} : { index });
         } catch (err) {
-          detail.respond({ ok: false, error: `workspace '${target.ref}' was not moved: ${errorText(err)}` });
+          detail.respond({ ok: false, error: `workspace '${target.id}' was not moved: ${errorText(err)}` });
           return;
         }
         respondMutation('moved', target);
@@ -325,7 +322,7 @@ export async function handleWorkspaceControl(detail: DorControlRequest): Promise
       // missing one would drop the Workspace with its Sessions still running
       // (`docs/specs/glossary.md` → "Invariants" I4).
       if (!await awaitWallHandle(target.id)) {
-        detail.respond({ ok: false, error: mountingRefusal(target.ref) });
+        detail.respond({ ok: false, error: mountingRefusal(target.id) });
         return;
       }
       if (!isCurrent()) {
@@ -337,7 +334,7 @@ export async function handleWorkspaceControl(detail: DorControlRequest): Promise
       // (`docs/specs/dor-cli.md` → "dor workspace").
       const refused = workspaceCloseRefusal(target.id);
       if (refused) {
-        detail.respond({ ok: false, error: `workspace '${target.ref}' was not closed: ${refused}` });
+        detail.respond({ ok: false, error: `workspace '${target.id}' was not closed: ${refused}` });
         return;
       }
       // Like `dor kill`, a command close raises no prompt: it refuses instead,
@@ -346,13 +343,13 @@ export async function handleWorkspaceControl(detail: DorControlRequest): Promise
       if (params.force !== true && workspaceNeedsCloseConfirmation(target.id)) {
         detail.respond({
           ok: false,
-          error: `workspace '${target.ref}' holds Surfaces Reopen cannot restore; pass --force to close it`,
+          error: `workspace '${target.id}' holds Surfaces Reopen cannot restore; pass --force to close it`,
         });
         return;
       }
       const refusal = await closeWorkspaceWithSurfaces(target.id, 'silent');
       if (refusal) {
-        detail.respond({ ok: false, error: `workspace '${target.ref}' was not closed: ${refusal}` });
+        detail.respond({ ok: false, error: `workspace '${target.id}' was not closed: ${refusal}` });
         return;
       }
       respondMutation('closed', target);

@@ -147,19 +147,18 @@ export function spansWorkspaces(method: string, params?: Record<string, unknown>
 export interface ParsedWorkspaceRef {
   /** The target as written, trimmed — what an error message quotes back. */
   target: string;
-  /** The number the ref reads as, else null. What that number *means* is the
-   *  resolving host's business: a registry host matches it against the
-   *  Workspace's minted id, a host without one falls back to the strip
-   *  position. Named for the reading, not for either resolution. */
+  /** The number the target reads as — the Workspace id `workspace:<n>` — else
+   *  null. */
   number: number | null;
-  /** The Workspace name it reads as otherwise; empty when it is numeric. */
+  /** Otherwise a fallback id's suffix or a Workspace name; empty when it is
+   *  numeric. */
   name: string;
 }
 
 const NUMERIC_WORKSPACE_REF = /^[1-9]\d*$/;
 
-/** Split a `workspace:<n|name>` target into its readings. A ref that reads as a
- *  number is a number, never a name. */
+/** Split a `workspace:<n|name>` target into its readings. A target that reads
+ *  as a number is a number, never a name. */
 export function parseWorkspaceRef(ref: string): ParsedWorkspaceRef {
   const target = ref.trim();
   const bare = (target.startsWith('workspace:') ? target.slice('workspace:'.length) : target).trim();
@@ -167,8 +166,8 @@ export function parseWorkspaceRef(ref: string): ParsedWorkspaceRef {
   return { target, number: numeric ? Number(bare) : null, name: numeric ? '' : bare };
 }
 
-const SURFACE_ID_PREFIX = 'surface-';
-const SURFACE_REF_PREFIX = 'surface:';
+const SURFACE_PREFIX = 'surface:';
+const WORKSPACE_PREFIX = 'workspace:';
 const BARE_NUMBER = /^\d+$/;
 
 /** The number in a counter-minted `<prefix><n>` id, else null. */
@@ -177,29 +176,28 @@ function idNumber(prefix: string, id: string): number | null {
   return BARE_NUMBER.test(digits) ? Number(digits) : null;
 }
 
-/** The registry number of a `workspace-<n>` id; a random or bare id has none. */
+/** The Workspace id numbered `n`. */
+export function workspaceIdFor(n: number): string {
+  return WORKSPACE_PREFIX + n;
+}
+
+/** The registry number of a `workspace:<n>` id; a fallback id has none. */
 export function workspaceIdNumber(id: string): number | null {
-  return idNumber('workspace-', id);
+  return idNumber(WORKSPACE_PREFIX, id);
 }
 
-/** The Surface id numbered `n`. */
+/** The Surface id numbered `n` — also its `dor` handle (`docs/specs/dor-cli.md`
+ *  → "Handle Model"). */
 export function surfaceIdFor(n: number): string {
-  return SURFACE_ID_PREFIX + n;
+  return SURFACE_PREFIX + n;
 }
 
-/** A Surface's `dor` ref, derived from its id: `surface-347` is `surface:347`
- *  (`docs/specs/dor-cli.md` → "Handle Model"). An id without the `surface-`
- *  prefix is its own ref. */
-export function surfaceRefForId(id: string): string {
-  return id.startsWith(SURFACE_ID_PREFIX) ? SURFACE_REF_PREFIX + id.slice(SURFACE_ID_PREFIX.length) : id;
-}
-
-/** The number in a `surface-<n>` id, else null. */
+/** The number in a `surface:<n>` id, else null. */
 export function surfaceIdNumber(id: string): number | null {
-  return idNumber(SURFACE_ID_PREFIX, id);
+  return idNumber(SURFACE_PREFIX, id);
 }
 
-/** The highest `surface-<n>` number among `ids`, else 0. */
+/** The highest `surface:<n>` number among `ids`, else 0. */
 export function maxSurfaceIdNumber(ids: Iterable<string>): number {
   let max = 0;
   for (const id of ids) max = Math.max(max, surfaceIdNumber(id) ?? 0);
@@ -228,23 +226,16 @@ export type ParsedSurfaceTarget =
   | { kind: 'id'; id: string }
   | { kind: 'invalid'; message: string };
 
-function notASurfaceHandle(target: string, n: string): ParsedSurfaceTarget {
-  const suggestion = BARE_NUMBER.test(n) ? `${SURFACE_REF_PREFIX}${n}` : `${SURFACE_REF_PREFIX}<n>`;
-  return { kind: 'invalid', message: `'${target}' is not a Surface handle; use ${suggestion}` };
-}
-
-/** Read a Surface target in the one grammar every host resolves. */
+/** Read a Surface target in the one grammar every host resolves: the handle is
+ *  the Surface's id. */
 export function parseSurfaceTarget(target: string): ParsedSurfaceTarget {
   if (target.startsWith('title:')) return { kind: 'title', title: target.slice('title:'.length) };
   if (target === 'surface:focused') return { kind: 'focused' };
   if (target === 'surface:self') return { kind: 'self' };
-  if (target.startsWith(SURFACE_REF_PREFIX)) {
-    const rest = target.slice(SURFACE_REF_PREFIX.length);
-    return rest ? { kind: 'id', id: SURFACE_ID_PREFIX + rest } : notASurfaceHandle(target, '');
-  }
-  if (BARE_NUMBER.test(target)) return notASurfaceHandle(target, target);
-  if (target.startsWith('pane:')) return notASurfaceHandle(target, target.slice('pane:'.length));
-  return { kind: 'id', id: target };
+  if (target.startsWith(SURFACE_PREFIX) && target.length > SURFACE_PREFIX.length) return { kind: 'id', id: target };
+  // `3`, `pane:3`, and `surface-3` each read as an attempt at `surface:3`.
+  const n = /^(?:pane:|surface-)?(\d+)$/.exec(target)?.[1];
+  return { kind: 'invalid', message: `'${target}' is not a Surface handle; use ${SURFACE_PREFIX}${n ?? '<n>'}` };
 }
 
 /** A control request as it travels over a transport, correlated by `requestId`. */

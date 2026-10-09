@@ -61,7 +61,7 @@ dor intercepts exactly three mutually exclusive identity flags:
                      so the same key in another Workspace is another browser.
   --session <name>   Attach to a raw agent-browser session by its literal name.
   --surface <handle> Drive the browser Surface a handle names (surface:N,
-                     surface:focused, a Surface id, title:<title>). dor asks the
+                     surface:self, surface:focused, title:<title>). dor asks the
                      host which agent-browser session that Surface is bound to,
                      which is the only way to address a GUI-spawned session.
 

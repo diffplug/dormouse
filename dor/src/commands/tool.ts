@@ -89,15 +89,15 @@ export const toolCommand: Command = {
     {
       scope: 'root',
       findReplace: [
-        '  dor tool [--global] [--json] [--minimize] [--fresh] [--surface id|ref] [--workspace ref] [--cwd path]<TO-EOL>',
-        '  dor tool [--global] [--json] [--minimize] [--fresh] [--surface id|ref] [--cwd path] [--workspace ref] <name> [args...]\n  dor tool [--json] [--minimize] [--surface id|ref] [--cwd path] [--workspace ref] -- <command>...\n  dor tool --list [--global] [--cwd path] [--json]\n',
+        '  dor tool [--global] [--json] [--minimize] [--fresh] [--surface handle] [--workspace ref] [--cwd path]<TO-EOL>',
+        '  dor tool [--global] [--json] [--minimize] [--fresh] [--surface handle] [--cwd path] [--workspace ref] <name> [args...]\n  dor tool [--json] [--minimize] [--surface handle] [--cwd path] [--workspace ref] -- <command>...\n  dor tool --list [--global] [--cwd path] [--json]\n',
       ],
     },
     {
       scope: 'command-usage',
       findReplace: [
-        '  dor tool [--global] [--json] [--minimize] [--fresh] [--surface id|ref] [--workspace ref] [--cwd path]<TO-EOL>',
-        '  dor tool [--global] [--json] [--minimize] [--fresh] [--surface id|ref] [--cwd path] [--workspace ref] <name> [args...]\n  dor tool [--json] [--minimize] [--surface id|ref] [--cwd path] [--workspace ref] -- <command>...\n  dor tool --list [--global] [--cwd path] [--json]\n',
+        '  dor tool [--global] [--json] [--minimize] [--fresh] [--surface handle] [--workspace ref] [--cwd path]<TO-EOL>',
+        '  dor tool [--global] [--json] [--minimize] [--fresh] [--surface handle] [--cwd path] [--workspace ref] <name> [args...]\n  dor tool [--json] [--minimize] [--surface handle] [--cwd path] [--workspace ref] -- <command>...\n  dor tool --list [--global] [--cwd path] [--json]\n',
       ],
     },
     {
@@ -139,8 +139,7 @@ Text output:
 JSON output:
   {
     "status": "created",
-    "surface_id": "surface-3",
-    "surface_ref": "surface:3",
+    "surface_id": "surface:3",
     "command": "pnpm storybook",
     "cwd": "/Users/me/projects/site",
     "minimized": false,
@@ -170,7 +169,7 @@ JSON output:
         json: { kind: 'boolean', brief: 'Print JSON output.', optional: true, withNegated: false },
         minimize: { kind: 'boolean', brief: 'Create the surface minimized.', optional: true, withNegated: false },
         fresh: { kind: 'boolean', brief: 'Ignore a declared key and always create.', optional: true, withNegated: false },
-        surface: { kind: 'parsed', parse: stringParser, brief: 'Surface to split when creating.', optional: true, placeholder: 'id|ref' },
+        surface: { kind: 'parsed', parse: stringParser, brief: 'Surface to split when creating.', optional: true, placeholder: 'handle' },
         workspace: workspaceFlag,
         cwd: { kind: 'parsed', parse: stringParser, brief: 'Working directory for the tool file and the command.', optional: true, placeholder: 'path' },
         list: { kind: 'boolean', brief: 'List the declared Tools instead of running one.', optional: true, withNegated: false },

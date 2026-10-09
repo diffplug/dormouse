@@ -2,8 +2,7 @@ exitCode: 0
 stdout:
 {
   "status": "unpinned",
-  "workspace_id": "workspace-2b1c",
-  "workspace_ref": "workspace:2",
+  "workspace_id": "workspace:2",
   "name": "build"
 }
 

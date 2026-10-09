@@ -52,7 +52,7 @@ const stateDir = path.join(os.tmpdir(), `dormouse-${process.pid}-browser-state`)
 // The inner app's own agent-browser daemons. It names managed sessions
 // `dormouse.<workspace>.<key>` exactly as the installed app does, and every
 // agent-browser shares one socket directory by default, so without this the
-// inner app's workspace-1 `default` browser is the installed app's. Under the
+// inner app's workspace:1 `default` browser is the installed app's. Under the
 // short `/tmp`, not macOS's long `os.tmpdir()`: socket paths cap near 104 bytes.
 const agentBrowserDir = mkdtempSync(path.join(process.platform === 'win32' ? os.tmpdir() : '/tmp', 'dab-'));
 
@@ -172,7 +172,7 @@ const invokeMap = {
     const first = ids.workspace;
     ids.workspace += n;
     saveIds();
-    return Array.from({ length: n }, (_, i) => `workspace-${first + i}`);
+    return Array.from({ length: n }, (_, i) => `workspace:${first + i}`);
   },
   // Surface ids (docs/specs/transport.md -> "Surface ids"): never at or below
   // the floor the page restored, which outlives this process in localStorage.
@@ -181,13 +181,13 @@ const invokeMap = {
     const first = Math.max(ids.surface, (Number(floor) || 0) + 1);
     ids.surface = first + n;
     saveIds();
-    return Array.from({ length: n }, (_, i) => `surface-${first + i}`);
+    return Array.from({ length: n }, (_, i) => `surface:${first + i}`);
   },
   workspace_report: ({ entries }) => {
     // Restored browser state survives this process; mirror Rust's report seed.
     const seeded = ids.workspace;
     for (const entry of entries ?? []) {
-      const minted = refNumber(entry?.id ?? '');
+      const minted = workspaceIdNumber(entry?.id ?? '');
       if (minted !== undefined) ids.workspace = Math.max(ids.workspace, minted + 1);
     }
     if (ids.workspace !== seeded) saveIds();
@@ -224,15 +224,14 @@ function saveIds() {
 }
 let registryEntries = '[]';
 let registryRevision = 0;
-/** A minted id's counter number, else undefined; mirrors `ref_number` in standalone/src-tauri/src/workspaces.rs. */
-function refNumber(id) {
-  const minted = /^workspace-(\d+)$/.exec(id);
+/** A minted id's counter number, else undefined; mirrors `id_number` in standalone/src-tauri/src/workspaces.rs. */
+function workspaceIdNumber(id) {
+  const minted = /^workspace:(\d+)$/.exec(id);
   return minted ? Number(minted[1]) : undefined;
 }
 function registrySnapshot() {
   const workspaces = JSON.parse(registryEntries).map((entry) => ({
     id: entry.id,
-    ref: `workspace:${refNumber(entry.id) ?? entry.id}`,
     name: entry.name,
     active: Boolean(entry.active),
   }));
@@ -420,12 +419,12 @@ async function openAgentBrowser() {
 }
 
 /**
- * The caller's ref when this harness runs as a Dor Tool, else undefined. The
+ * The caller's id when this harness runs as a Dor Tool, else undefined. The
  * Tool frames the announced port in its own pane (docs/specs/dor-tool.md ->
  * Serving), so a keyed browser opened on top would split off a second copy of
  * the app. `--kind tool` leaves the caller in the list only when it is a Tool.
  */
-async function callerToolRef() {
+async function callerToolId() {
   if (!insideDormouse || process.env.DORMOUSE_BROWSER_DEV_AB_SESSION) return undefined;
   const list = spawn('dor', ['list', '--kind', 'tool', '--json'], { cwd: repoRoot, stdio: ['ignore', 'pipe', 'ignore'] });
   let stdout = '';
@@ -436,7 +435,7 @@ async function callerToolRef() {
   });
   if (code !== 0) return undefined;
   try {
-    return JSON.parse(stdout).caller_surface_ref ?? undefined;
+    return JSON.parse(stdout).caller_surface_id ?? undefined;
   } catch {
     return undefined;
   }
@@ -484,8 +483,8 @@ try {
   process.stdout.write(
     `\u001b]367;serve;${JSON.stringify({ port: vitePort, name: 'Dormouse dev', v: 1 })}\u001b\\`,
   );
-  const toolRef = await callerToolRef();
-  if (toolRef) log(`Tool ${toolRef} shows the app; try: dor agent-browser --surface ${toolRef} snapshot -i`);
+  const toolId = await callerToolId();
+  if (toolId) log(`Tool ${toolId} shows the app; try: dor agent-browser --surface ${toolId} snapshot -i`);
   else await openAgentBrowser();
   log('running; Ctrl-C to stop');
 } catch (err) {

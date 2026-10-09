@@ -65,7 +65,7 @@ export interface TerminalContextViewProps {
   closing?: boolean;
   /** Viewport coordinates the reveal grows from; absent, the top-left corner. */
   origin?: { x: number; y: number };
-  defaultCommand?: string; surfaceRef: string; cwd: string; helperCwd?: string; mismatch?: boolean;
+  defaultCommand?: string; surfaceId: string; cwd: string; helperCwd?: string; mismatch?: boolean;
   workspaceMove?: ReactNode;
   titleSources: { source: string; value: string; note?: string }[];
   scan: ContextScan; watchRule?: string | null; watching: boolean; todo: boolean;
@@ -75,7 +75,7 @@ export interface TerminalContextViewProps {
   browserProviders: readonly BrowserAutomationProvider[];
   explorerLabel: string; canExplore: boolean; canIframe: boolean;
   children: ReactNode;
-  onClose(): void; onCopyRef: Action; onCopyPath: Action; onExplore: Action;
+  onClose(): void; onCopyId: Action; onCopyPath: Action; onExplore: Action;
   onWatch(): void; onTodo(): void; onPort(entry: PortUrlEntry, mode: PortMode): void | Promise<void>;
   onModify(command: string): Promise<void>; onReset: Action; onPromote: Action;
   /** Whether Reset asks first; under Labs it makes the old helper a pending kill instead. Default true. */
@@ -193,27 +193,27 @@ const PORT_ICON = <PlugIcon size={14} className="shrink-0 text-muted" />;
 const BELL_ICON = <BellIcon size={14} className="shrink-0 text-muted" />;
 
 /** The copyable Surface ref, the title explanation, the workspace move, then `actions`. */
-function HeaderRow({ surfaceRef, onExplain, onCopyRef, actions, workspaceMove }: {
-  surfaceRef: string; actions: ReactNode; workspaceMove?: ReactNode;
-  onExplain(): void; onCopyRef(): Promise<boolean>;
+function HeaderRow({ surfaceId, onExplain, onCopyId, actions, workspaceMove }: {
+  surfaceId: string; actions: ReactNode; workspaceMove?: ReactNode;
+  onExplain(): void; onCopyId(): Promise<boolean>;
 }) {
   const row = useRef<HTMLDivElement>(null);
   const measures = useRef<HTMLDivElement>(null);
   const actionsRef = useRef<HTMLDivElement>(null);
   const [compact, setCompact] = useState<0 | 1 | 2>(0);
-  // The explanation drops its label, then the ref drops to its icon; the workspace move wraps.
+  // The explanation drops its label, then the id drops to its icon; the workspace move wraps.
   useRowFit(row, measures, (width, gap, [ref, explain, explainIcon]) => {
     const room = width - (actionsRef.current?.offsetWidth ?? 0) - 2 * gap;
     setCompact(ref + explain + gap <= room ? 0 : ref + explainIcon + gap <= room ? 1 : 2);
-  }, [surfaceRef], [actionsRef]);
+  }, [surfaceId], [actionsRef]);
   return <div ref={row} data-context-title className="relative flex min-h-7 min-w-0 items-center gap-1">
     <div ref={measures} aria-hidden="true" inert className={MEASURER_CLASS}>
-      <span className={ACTION_BOX_CLASS}>{surfaceRef}{COPY_ICON}</span>
+      <span className={ACTION_BOX_CLASS}>{surfaceId}{COPY_ICON}</span>
       <span className={ACTION_BOX_CLASS}>{EXPLAIN_ICON}{EXPLAIN_TEXT}</span>
       <span className={ACTION_BOX_CLASS}>{EXPLAIN_ICON}</span>
     </div>
     <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-1">
-      <ContextCopyAction label={`Copy ${surfaceRef}`} confirmation={compact === 2 ? COPY_CHECK : undefined} onCopy={onCopyRef}>{compact < 2 && <span>{surfaceRef}</span>}{COPY_ICON}</ContextCopyAction>
+      <ContextCopyAction label={`Copy ${surfaceId}`} confirmation={compact === 2 ? COPY_CHECK : undefined} onCopy={onCopyId}>{compact < 2 && <span>{surfaceId}</span>}{COPY_ICON}</ContextCopyAction>
       <ContextAction label="Explain this title" onClick={onExplain}>{EXPLAIN_ICON}{compact === 0 && EXPLAIN_TEXT}</ContextAction>
       {workspaceMove}
     </div>
@@ -494,7 +494,7 @@ export function TerminalContextView(p: TerminalContextViewProps) {
       style={{ boxShadow: ELEVATED_PANE_SHADOW, clipPath: shape?.clip, ...teeth && { [`border${SIDE_NAME[teeth]}Width`]: 0 } }}>
     <div ref={content} className="terminal-context-content flex min-h-0 flex-1 flex-col">
       <div className="shrink-0 max-h-[45%] overflow-auto pb-1" style={{ paddingLeft: 8 + reach('left'), paddingRight: 4 + reach('right'), paddingTop: reach('top') }}>
-        <HeaderRow workspaceMove={p.workspaceMove} surfaceRef={p.surfaceRef} onExplain={() => setDetail('title')} onCopyRef={() => attempt(p.onCopyRef)} actions={<>
+        <HeaderRow workspaceMove={p.workspaceMove} surfaceId={p.surfaceId} onExplain={() => setDetail('title')} onCopyId={() => attempt(p.onCopyId)} actions={<>
           {placement && <div role="group" aria-label="Helper placement" className="flex shrink-0 items-center gap-0.5">{placement.available.map(side =>
             <ContextAction key={side} label={`Place helper at ${side}`} pressed={placement.side === side} keepFocus onClick={() => placement.onChange(side)}><PlacementIcon side={side} /></ContextAction>)}</div>}
           <ContextAction label="Close terminal context" onClick={close} muted><XIcon size={15} /></ContextAction>

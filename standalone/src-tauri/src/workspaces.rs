@@ -1,11 +1,11 @@
 //! The application-wide Workspace registry: which window holds which Workspace,
-//! under what stable ref (`docs/specs/standalone.md` → "Workspace registry").
+//! under what id (`docs/specs/standalone.md` → "Workspace registry").
 //!
 //! Each webview owns its own Workspace list (`lib/src/lib/workspace-store.ts`)
 //! and reports it here on every change; this is the one place that sees every
 //! window's, which is what a `dor` request naming a sibling window's Workspace
-//! routes through. Ids are minted only here — `workspace-<n>` from one counter
-//! seeded above every id on disk — so a ref never renumbers and never collides
+//! routes through. Ids are minted only here — `workspace:<n>` from one counter
+//! seeded above every id on disk — so an id never renumbers and never collides
 //! across windows.
 //!
 //! Pure over its own state, like `routing`; `lib.rs` holds the lock and emits.
@@ -33,15 +33,10 @@ pub struct Registry {
     pub windows: HashMap<String, Vec<Entry>>,
 }
 
-/// The counter's suffix of a `workspace-<n>` id, if it has one. Ids minted
-/// elsewhere retain their opaque id as a stable ref.
-pub fn ref_number(id: &str) -> Option<u64> {
+/// The counter's number in a `workspace:<n>` id, if it has one; a fallback
+/// `workspace:<uuid>` has none.
+pub fn id_number(id: &str) -> Option<u64> {
     crate::ids::Kind::Workspace.number(id)
-}
-
-/// The stable `dor` ref of an id: its counter number, else the id itself.
-pub fn ref_for(id: &str) -> String {
-    ref_number(id).map_or_else(|| format!("workspace:{id}"), |n| format!("workspace:{n}"))
 }
 
 /// Every Workspace id a persisted window snapshot names.
@@ -79,8 +74,8 @@ pub fn forget_window(registry: &mut Registry, label: &str) -> bool {
     true
 }
 
-/// What a `dor` target names: `workspace:<n>` or bare `<n>` is a stable ref;
-/// anything else is a name.
+/// What a `dor` target names: `workspace:<n>` or bare `<n>` is an id's
+/// number; anything else is an exact id, else a name.
 enum Target<'a> {
     Number(u64),
     Name(&'a str),
@@ -110,13 +105,14 @@ pub fn window_of<'a>(registry: &'a Registry, target: &str) -> Option<&'a str> {
         Target::Number(n) => registry.windows.iter().find_map(|(label, entries)| {
             entries
                 .iter()
-                .any(|entry| ref_number(&entry.id) == Some(n))
+                .any(|entry| id_number(&entry.id) == Some(n))
                 .then_some(label.as_str())
         }),
         Target::Name(name) => {
-            // Canonical opaque ids win over mutable names in every window.
+            // Exact ids win over mutable names in every window.
+            let id = format!("workspace:{name}");
             if let Some((label, _)) = registry.windows.iter().find(|(_, entries)| {
-                entries.iter().any(|entry| entry.id == name)
+                entries.iter().any(|entry| entry.id == id)
             }) {
                 return Some(label.as_str());
             }
@@ -143,7 +139,6 @@ pub fn snapshot(registry: &Registry) -> JsonValue {
             "label": label,
             "workspaces": registry.windows[*label].iter().map(|entry| json!({
                 "id": entry.id,
-                "ref": ref_for(&entry.id),
                 "name": entry.name,
                 "active": entry.active,
             })).collect::<Vec<_>>(),
@@ -164,38 +159,31 @@ mod tests {
     }
 
     #[test]
-    fn refs_match_the_shared_host_grammar() {
-        let cases: Vec<JsonValue> = serde_json::from_str(include_str!("../../scripts/workspace-ref-cases.json")).unwrap();
+    fn id_numbers_match_the_shared_host_grammar() {
+        let cases: Vec<JsonValue> = serde_json::from_str(include_str!("../../scripts/workspace-id-cases.json")).unwrap();
         assert!(!cases.is_empty());
         for case in cases {
             let id = case["id"].as_str().unwrap();
-            assert_eq!(ref_for(id), case["ref"].as_str().unwrap(), "{id}");
+            assert_eq!(id_number(id), case["number"].as_u64(), "{id}");
         }
-    }
-
-    #[test]
-    fn refs_come_from_the_id_and_never_from_position() {
-        assert_eq!(ref_for("workspace-7"), "workspace:7".to_string());
-        assert_eq!(ref_for("workspace-abc12345-3"), "workspace:workspace-abc12345-3".to_string());
-        assert_eq!(ref_for("workspace-"), "workspace:workspace-".to_string());
     }
 
     #[test]
     fn a_snapshot_names_its_workspace_ids() {
         let ids = snapshot_ids(&json!({
-            "workspaces": [{ "id": "workspace-4" }, { "id": "workspace-9", "name": "n" }, { "name": "no id" }]
+            "workspaces": [{ "id": "workspace:4" }, { "id": "workspace:9", "name": "n" }, { "name": "no id" }]
         }));
-        assert_eq!(ids, vec!["workspace-4", "workspace-9"]);
+        assert_eq!(ids, vec!["workspace:4", "workspace:9"]);
     }
 
     #[test]
     fn a_report_bumps_the_revision_only_when_something_changed() {
         let mut registry = Registry::default();
-        assert!(report(&mut registry, "main", vec![entry("workspace-2", "A", true)]));
+        assert!(report(&mut registry, "main", vec![entry("workspace:2", "A", true)]));
         assert_eq!(registry.revision, 1);
-        assert!(!report(&mut registry, "main", vec![entry("workspace-2", "A", true)]));
+        assert!(!report(&mut registry, "main", vec![entry("workspace:2", "A", true)]));
         assert_eq!(registry.revision, 1);
-        assert!(report(&mut registry, "main", vec![entry("workspace-2", "B", true)]));
+        assert!(report(&mut registry, "main", vec![entry("workspace:2", "B", true)]));
         assert_eq!(registry.revision, 2);
         assert!(forget_window(&mut registry, "main"));
         assert!(!forget_window(&mut registry, "main"));
@@ -208,12 +196,12 @@ mod tests {
         report(
             &mut registry,
             "main",
-            vec![entry("workspace-2", "Build", true), entry("workspace-5", "Docs", false)],
+            vec![entry("workspace:2", "Build", true), entry("workspace:5", "Docs", false)],
         );
         report(
             &mut registry,
             "ws-2",
-            vec![entry("workspace-3", "Build", true)],
+            vec![entry("workspace:3", "Build", true)],
         );
         assert_eq!(window_of(&registry, "workspace:5"), Some("main"));
         assert_eq!(window_of(&registry, " 3 "), Some("ws-2"));
@@ -228,13 +216,15 @@ mod tests {
     }
 
     #[test]
-    fn legacy_ids_never_route_as_positions_or_conflicting_names() {
+    fn an_exact_id_routes_before_a_name_and_never_as_a_position() {
         let mut registry = Registry::default();
-        report(&mut registry, "main", vec![entry("ws-a", "2", true), entry("ws-b", "2", false)]);
-        report(&mut registry, "ws-2", vec![entry("workspace-2", "ws-b", true)]);
-        assert_eq!(window_of(&registry, "workspace:ws-b"), Some("main"));
+        report(&mut registry, "main", vec![entry("workspace:abc", "2", true), entry("workspace:def", "2", false)]);
+        report(&mut registry, "ws-2", vec![entry("workspace:2", "abc", true)]);
+        assert_eq!(window_of(&registry, "workspace:abc"), Some("main"));
+        assert_eq!(window_of(&registry, "def"), Some("main"));
         assert_eq!(window_of(&registry, "workspace:2"), Some("ws-2"));
-        assert_eq!(window_of(&registry, &ref_for("ws-a")), Some("main"));
+        // The retired spelling names nothing.
+        assert_eq!(window_of(&registry, "workspace-2"), None);
     }
 
     #[test]
@@ -243,11 +233,11 @@ mod tests {
         report(
             &mut registry,
             "main",
-            vec![entry("workspace-7", "Build", true), entry("workspace-8", "0", false)],
+            vec![entry("workspace:7", "Build", true), entry("workspace:8", "0", false)],
         );
-        report(&mut registry, "ws-2", vec![entry("workspace-9", "007", true)]);
+        report(&mut registry, "ws-2", vec![entry("workspace:9", "007", true)]);
         // `NUMERIC_WORKSPACE_REF` reads neither as a ref, so each routes to
-        // the window holding the Workspace so named, never to `workspace-7`.
+        // the window holding the Workspace so named, never to `workspace:7`.
         assert_eq!(window_of(&registry, "007"), Some("ws-2"));
         assert_eq!(window_of(&registry, "workspace:007"), Some("ws-2"));
         assert_eq!(window_of(&registry, "0"), Some("main"));
@@ -256,14 +246,15 @@ mod tests {
     }
 
     #[test]
-    fn the_snapshot_orders_windows_by_label_and_carries_refs() {
+    fn the_snapshot_orders_windows_by_label_and_carries_ids() {
         let mut registry = Registry::default();
-        report(&mut registry, "ws-2", vec![entry("workspace-3", "B", true)]);
-        report(&mut registry, "main", vec![entry("workspace-2", "A", true)]);
+        report(&mut registry, "ws-2", vec![entry("workspace:3", "B", true)]);
+        report(&mut registry, "main", vec![entry("workspace:2", "A", true)]);
         let snapshot = snapshot(&registry);
         assert_eq!(snapshot["revision"], 2);
         assert_eq!(snapshot["windows"][0]["label"], "main");
-        assert_eq!(snapshot["windows"][0]["workspaces"][0]["ref"], "workspace:2");
+        assert_eq!(snapshot["windows"][0]["workspaces"][0]["id"], "workspace:2");
+        assert!(snapshot["windows"][0]["workspaces"][0].get("ref").is_none());
         assert_eq!(snapshot["windows"][1]["label"], "ws-2");
         assert_eq!(snapshot["windows"][1]["workspaces"][0]["active"], true);
     }

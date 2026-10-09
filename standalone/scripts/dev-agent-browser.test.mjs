@@ -235,7 +235,7 @@ test('run as a Tool, leaves the browser to the Tool instead of opening a second'
   const harness = await fixture(t);
   const run = harness.start({
     DORMOUSE_SURFACE_ID: 'outer-pane',
-    TEST_DOR_LIST: JSON.stringify({ caller_surface_ref: 'surface:4', surfaces: [] }),
+    TEST_DOR_LIST: JSON.stringify({ caller_surface_id: 'surface:4', surfaces: [] }),
   });
   await run.wait(/running; Ctrl-C to stop/);
   assert.match(run.output, /Tool surface:4 shows the app; try: dor agent-browser --surface surface:4 snapshot -i/);
@@ -284,33 +284,35 @@ async function command(run, cmd, args = {}) {
   return (await response.json()).result;
 }
 
-test('registry seeds reservations above restored IDs and mirrors canonical workspace refs', async t => {
+test('registry seeds reservations above restored IDs, reading id numbers as Rust does', async t => {
   const f = await fixture(t);
   const run = await f.start().ready();
-  const cases = JSON.parse(await readFile(path.join(scripts, 'workspace-ref-cases.json'), 'utf8'));
+  const cases = JSON.parse(await readFile(path.join(scripts, 'workspace-id-cases.json'), 'utf8'));
   await command(run, 'workspace_report', { entries: cases.map(({ id }) => ({ id, name: id, active: false })) });
   const registry = await command(run, 'workspace_registry');
-  assert.deepEqual(registry.windows[0].workspaces.map(({ id, ref }) => ({ id, ref })), cases);
-  await command(run, 'workspace_report', { entries: [{ id: 'workspace-400', name: 'Restored', active: true }] });
-  assert.deepEqual(await command(run, 'workspace_reserve_ids', { count: 2 }), ['workspace-401', 'workspace-402']);
+  assert.deepEqual(registry.windows[0].workspaces.map(({ id }) => id), cases.map(({ id }) => id));
+  const highest = Math.max(...cases.map(({ number }) => number ?? 0));
+  assert.deepEqual(await command(run, 'workspace_reserve_ids', { count: 1 }), [`workspace:${highest + 1}`]);
+  await command(run, 'workspace_report', { entries: [{ id: 'workspace:400', name: 'Restored', active: true }] });
+  assert.deepEqual(await command(run, 'workspace_reserve_ids', { count: 2 }), ['workspace:401', 'workspace:402']);
   // Repeated/lower restored reports never wind the process counter backwards.
-  await command(run, 'workspace_report', { entries: [{ id: 'workspace-400', name: 'Restored', active: true }] });
-  assert.deepEqual(await command(run, 'workspace_reserve_ids', { count: 1 }), ['workspace-403']);
+  await command(run, 'workspace_report', { entries: [{ id: 'workspace:400', name: 'Restored', active: true }] });
+  assert.deepEqual(await command(run, 'workspace_reserve_ids', { count: 1 }), ['workspace:403']);
   // Surface ids stay above the floor the page restored, and never wind back.
-  assert.deepEqual(await command(run, 'surface_reserve_ids', { count: 2, floor: 0 }), ['surface-1', 'surface-2']);
-  assert.deepEqual(await command(run, 'surface_reserve_ids', { count: 1, floor: 40 }), ['surface-41']);
-  assert.deepEqual(await command(run, 'surface_reserve_ids', { count: 1, floor: 3 }), ['surface-42']);
+  assert.deepEqual(await command(run, 'surface_reserve_ids', { count: 2, floor: 0 }), ['surface:1', 'surface:2']);
+  assert.deepEqual(await command(run, 'surface_reserve_ids', { count: 1, floor: 40 }), ['surface:41']);
+  assert.deepEqual(await command(run, 'surface_reserve_ids', { count: 1, floor: 3 }), ['surface:42']);
 });
 
 test('a restart never re-mints an id an earlier run handed out', async t => {
   const f = await fixture(t);
   const first = await f.start().ready();
-  assert.deepEqual(await command(first, 'surface_reserve_ids', { count: 2, floor: 0 }), ['surface-1', 'surface-2']);
-  assert.deepEqual(await command(first, 'workspace_reserve_ids', { count: 1 }), ['workspace-2']);
-  await command(first, 'workspace_report', { entries: [{ id: 'workspace-9', name: 'Gone later', active: true }] });
+  assert.deepEqual(await command(first, 'surface_reserve_ids', { count: 2, floor: 0 }), ['surface:1', 'surface:2']);
+  assert.deepEqual(await command(first, 'workspace_reserve_ids', { count: 1 }), ['workspace:2']);
+  await command(first, 'workspace_report', { entries: [{ id: 'workspace:9', name: 'Gone later', active: true }] });
   await first.stop();
-  // The page restored nothing above surface-1: surface-2 was killed before the restart.
+  // The page restored nothing above surface:1: surface:2 was killed before the restart.
   const second = await f.start().ready();
-  assert.deepEqual(await command(second, 'surface_reserve_ids', { count: 1, floor: 1 }), ['surface-3']);
-  assert.deepEqual(await command(second, 'workspace_reserve_ids', { count: 1 }), ['workspace-10']);
+  assert.deepEqual(await command(second, 'surface_reserve_ids', { count: 1, floor: 1 }), ['surface:3']);
+  assert.deepEqual(await command(second, 'workspace_reserve_ids', { count: 1 }), ['workspace:10']);
 });

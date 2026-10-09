@@ -3,8 +3,7 @@ stdout:
 {
   "surfaces": [
     {
-      "id": "surface-1",
-      "ref": "surface:1",
+      "id": "surface:1",
       "kind": "terminal",
       "has_terminal": true,
       "has_browser": false,
@@ -30,8 +29,7 @@ stdout:
       ]
     },
     {
-      "id": "surface-2",
-      "ref": "surface:2",
+      "id": "surface:2",
       "kind": "terminal",
       "has_terminal": true,
       "has_browser": false,
@@ -50,8 +48,7 @@ stdout:
       "ports": []
     },
     {
-      "id": "surface-3",
-      "ref": "surface:3",
+      "id": "surface:3",
       "kind": "browser",
       "has_terminal": false,
       "has_browser": true,
@@ -68,8 +65,7 @@ stdout:
       "awaited": false
     },
     {
-      "id": "surface-4",
-      "ref": "surface:4",
+      "id": "surface:4",
       "kind": "terminal",
       "has_terminal": true,
       "has_browser": false,
@@ -95,12 +91,10 @@ stdout:
       ]
     }
   ],
-  "caller_surface_ref": "surface:2",
-  "caller_surface_id": "surface-2",
-  "focused_surface_ref": "surface:1",
-  "focused_surface_id": "surface-1",
+  "caller_surface_id": "surface:2",
+  "focused_surface_id": "surface:1",
   "window_ref": "window:1",
-  "workspace_ref": "workspace:1",
+  "workspace_id": "workspace:1",
   "host": {
     "app": "vscode",
     "workspace": "/Users/me/projects/site",

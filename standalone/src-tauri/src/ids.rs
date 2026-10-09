@@ -1,12 +1,12 @@
-//! The app-wide id counters: Surface numbers (`surface-<n>`), Workspace
-//! numbers (`workspace-<n>`), and window labels (`ws-<n>`)
+//! The app-wide id counters: Surface numbers (`surface:<n>`), Workspace
+//! numbers (`workspace:<n>`), and window labels (`ws-<n>`)
 //! (`docs/specs/standalone.md` → "Workspace registry").
 //!
 //! Each counter's next number persists in `ids.json`. Every reservation hands
 //! the caller the file to write before any number in the block is used, so a
 //! relaunch starting there never reuses a number whatever closed since, and
-//! never skips one it did not hand out: a ref is the number, so numbers stay
-//! as dense as the creates behind them. No slack past the block, as a hi/lo
+//! never skips one it did not hand out: a `dor` user types the number, so
+//! numbers stay as dense as the creates behind them. No slack past the block, as a hi/lo
 //! ceiling would add: every relaunch's numbering jumped by the slack. The
 //! write per reservation is affordable because the webviews reserve a few ids
 //! at a time, at the pace of user creates.
@@ -33,13 +33,13 @@ pub enum Kind {
 impl Kind {
     pub fn prefix(self) -> &'static str {
         match self {
-            Kind::Surface => "surface-",
-            Kind::Workspace => "workspace-",
+            Kind::Surface => "surface:",
+            Kind::Workspace => "workspace:",
             Kind::Window => crate::routing::WS_LABEL_PREFIX,
         }
     }
 
-    /// The lowest number ever handed out. `workspace-1` is what a bare Wall
+    /// The lowest number ever handed out. `workspace:1` is what a bare Wall
     /// calls its only Workspace, and a fresh window minting it would collide
     /// with a snapshot restored under that id.
     fn first(self) -> u64 {
@@ -178,6 +178,16 @@ mod tests {
     }
 
     #[test]
+    fn ids_are_spelled_with_a_colon_and_only_that_spelling_has_a_number() {
+        assert_eq!(Kind::Surface.id(3), "surface:3");
+        assert_eq!(Kind::Workspace.id(3), "workspace:3");
+        assert_eq!(Kind::Window.id(3), "ws-3");
+        assert_eq!(Kind::Surface.number("surface:3"), Some(3));
+        assert_eq!(Kind::Surface.number("surface-3"), None);
+        assert_eq!(Kind::Workspace.number("workspace-3"), None);
+    }
+
+    #[test]
     fn every_block_asks_to_persist_exactly_its_end() {
         let mut counters = Counters::default();
         let (block, file) = counters.reserve(Kind::Workspace, 4, 0);
@@ -221,28 +231,28 @@ mod tests {
     #[test]
     fn surface_ids_come_from_panes_and_doors() {
         let snapshot = json!({ "workspaces": [
-            { "id": "workspace-2", "session": {
-                "panes": [{ "id": "surface-3" }, { "id": "custom-id" }],
-                "doors": [{ "id": "surface-9" }]
+            { "id": "workspace:2", "session": {
+                "panes": [{ "id": "surface:3" }, { "id": "custom-id" }],
+                "doors": [{ "id": "surface:9" }]
             } },
-            { "id": "workspace-3", "session": { "panes": [{ "id": "surface-4" }] } },
-            { "id": "workspace-4" }
+            { "id": "workspace:3", "session": { "panes": [{ "id": "surface:4" }] } },
+            { "id": "workspace:4" }
         ] });
         let ids = snapshot_surface_ids(&snapshot);
-        assert_eq!(ids, vec!["surface-3", "custom-id", "surface-9", "surface-4"]);
+        assert_eq!(ids, vec!["surface:3", "custom-id", "surface:9", "surface:4"]);
         assert_eq!(seed_next(Kind::Surface, ids), 10);
     }
 
     #[test]
     fn each_counter_seeds_above_every_id_given_and_never_below_its_first() {
         assert_eq!(seed_next(Kind::Surface, Vec::<String>::new()), 1);
-        assert_eq!(seed_next(Kind::Surface, ["surface-", "surface-1a", "surface-+4"]), 1);
+        assert_eq!(seed_next(Kind::Surface, ["surface:", "surface:1a", "surface:+4", "surface-7"]), 1);
         assert_eq!(seed_next(Kind::Window, ["main", "ws-2", "ws-7", "ws-x"]), 8);
         assert_eq!(seed_next(Kind::Window, ["main"]), 1);
         assert_eq!(seed_next(Kind::Workspace, Vec::<String>::new()), 2);
-        assert_eq!(seed_next(Kind::Workspace, ["workspace-0", "workspace-1"]), 2);
-        assert_eq!(seed_next(Kind::Workspace, ["workspace-3", "workspace-12", "workspace-x"]), 13);
-        // `workspace-1` is a bare Wall's own, even on an empty counter.
+        assert_eq!(seed_next(Kind::Workspace, ["workspace:0", "workspace:1"]), 2);
+        assert_eq!(seed_next(Kind::Workspace, ["workspace:3", "workspace:12", "workspace:x", "workspace-40"]), 13);
+        // `workspace:1` is a bare Wall's own, even on an empty counter.
         assert_eq!(Counters::default().reserve(Kind::Workspace, 1, 0).0, 2..3);
     }
 }

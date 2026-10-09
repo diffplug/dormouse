@@ -101,7 +101,7 @@ function pickerClient({ handlers = async () => ({ target: '/x', directory: false
     },
     async toolSurface(request) {
       this.requests.push({ method: 'toolSurface', request });
-      return { status: 'created', surfaceId: 'pane-x', surfaceRef: 'surface:9', command: `viewer ${request.file}`, cwd: request.cwd, minimized: false, key: null };
+      return { status: 'created', surfaceId: 'surface:9', command: `viewer ${request.file}`, cwd: request.cwd, minimized: false, key: null };
     },
   };
 }

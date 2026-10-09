@@ -25,10 +25,10 @@ const prompt = (id: string) => applyTerminalSemanticEvents(id, [{ type: 'promptS
 describe('helper lifecycle', () => {
   it('takes a Surface id from the host pool at birth, past one already live', async () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
-    await installSurfaceIdPool(async (count) => Array.from({ length: count }, (_, i) => `surface-${5 + i}`), 0);
+    await installSurfaceIdPool(async (count) => Array.from({ length: count }, (_, i) => `surface:${5 + i}`), 0);
     try {
-      registry.set('surface-5', { untouched: true } as TerminalEntry);
-      expect((await openHelper('parent')).id).toBe('surface-6');
+      registry.set('surface:5', { untouched: true } as TerminalEntry);
+      expect((await openHelper('parent')).id).toBe('surface:6');
     } finally {
       resetSurfaceIdPool();
       error.mockRestore();

@@ -107,7 +107,7 @@ describe('VS Code session alert persistence', () => {
     const old = contextWithState({ version: 3, panes: [{ id: 'pane-1', title: 'Old', cwd: '/old', untouched: false, scrollback: 'secret' }] });
     await discardUnreadableSessionState(old.context);
     expect(old.read()).toBeUndefined();
-    const current = { version: 4, panes: [{ id: 'surface-1', title: 'New', cwd: '/new', untouched: false }] };
+    const current = { version: 4, panes: [{ id: 'surface:1', title: 'New', cwd: '/new', untouched: false }] };
     const kept = contextWithState(current);
     await discardUnreadableSessionState(kept.context);
     expect(kept.read()).toBe(current);

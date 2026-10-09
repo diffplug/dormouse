@@ -15,7 +15,6 @@ import type {
   CliOptions,
   Command,
   DorCommandContext,
-  IdFormat,
   ListSurfacesResponse,
   ListWorkspacesResponse,
   Surface,
@@ -29,9 +28,7 @@ import { hasBrowser, hasTerminal, SURFACE_KINDS } from './types.js';
 import {
   callerWorkingDirectory,
   errorMessage,
-  parseIdFormat,
   parsePositiveInt,
-  renderHandle,
   printable,
   renderPrintableJson,
   requireControlClient,
@@ -45,7 +42,6 @@ interface ListFlags extends WorkspaceScopedFlags {
   readonly all?: boolean;
   readonly command?: string;
   readonly cwd?: string;
-  readonly idFormat?: IdFormat;
   readonly json?: boolean;
   readonly kind?: SurfaceKind;
   readonly port?: number;
@@ -57,7 +53,7 @@ interface ListFlags extends WorkspaceScopedFlags {
 
 const FULL_DESCRIPTION = `Lists every Surface in the current Workspace — terminals and browser Surfaces, including minimized ones (view "minimized").
 
-Text output prints one row per Surface: a * marks the focused Surface, then the handle, kind, render mode ("-" for terminals), view, location (cwd for terminals, URL for browser Surfaces), and title. Trailing tags: (you) for the calling terminal, [ringing], [todo], [awaited] while a dor await is parked on it, [preview] for the Workspace's preview slot (dor open --preview), and listening ports with --ports.
+Text output prints one row per Surface: a * marks the focused Surface, then its id (surface:<n>, the handle every command takes), kind, render mode ("-" for terminals), view, location (cwd for terminals, URL for browser Surfaces), and title. Trailing tags: (you) for the calling terminal, [ringing], [todo], [awaited] while a dor await is parked on it, [preview] for the Workspace's preview slot (dor open --preview), and listening ports with --ports.
 
 --ports adds each terminal's listening TCP ports. The host shells out per pane (lsof / PowerShell), so it is opt-in; remote sessions report none.
 
@@ -65,11 +61,11 @@ Text output prints one row per Surface: a * marks the focused Surface, then the 
 
 Filters are ANDed. --command is an exact match against the running command reported by shell integration. --cwd resolves to an absolute path like dor ensure --cwd, relative to the invoking shell's PWD when available.
 
-JSON output (--json) always includes both ids and refs, and each row carries has_terminal (a PTY) and has_browser (a browser renderer) — gate on those, not on kind, so a Surface that has both still matches — and the preview slot's row adds preview: true. It adds top-level caller_surface_ref/caller_surface_id and focused_surface_ref/focused_surface_id — the calling and focused Surfaces, null when neither is in the list — plus workspace_ref, window_ref, and a host block (app, workspace, cli_js_path, node_path): the identity dump dor identify used to print.
+JSON output (--json) gives each row its id, has_terminal (a PTY), and has_browser (a browser renderer) — gate on those, not on kind, so a Surface that has both still matches — and the preview slot's row adds preview: true. It adds top-level caller_surface_id and focused_surface_id — the calling and focused Surfaces, null when neither is in the list — plus workspace_id, window_ref, and a host block (app, workspace, cli_js_path, node_path): the identity dump dor identify used to print.
 
---workspace <ref> lists another Workspace instead, in this window or another: workspace:<n> (a stable number) or workspace:<name>, which resolves only when exactly one Workspace carries that name. Both are accepted bare ("2", "build"). --window <label> lists another window's Surfaces or Workspaces (window:main, ws-2).
+--workspace <ref> lists another Workspace instead, in this window or another: its id workspace:<n> or workspace:<name>, which resolves only when exactly one Workspace carries that name. Both are accepted bare ("2", "build"). --window <label> lists another window's Surfaces or Workspaces (window:main, ws-2).
 
---all lists every Workspace of this Window, grouped under a Workspace header — every Workspace keeps its header, including one holding nothing and one the filters emptied. Refs are unique across the groups, and a row from another Workspace is targeted by its ref as it stands. Only the active Workspace's selection carries the focus marker; each JSON row adds workspace_ref, and the payload adds a workspaces array plus caller_workspace_ref/focused_workspace_ref.
+--all lists every Workspace of this Window, grouped under a Workspace header — every Workspace keeps its header, including one holding nothing and one the filters emptied. Ids are unique across the groups, and a row from another Workspace is targeted by its id as it stands. Only the active Workspace's selection carries the focus marker; each JSON row adds workspace_id, and the payload adds a workspaces array plus caller_workspace_id/focused_workspace_id.
 
 --workspaces prints the Workspace overview instead of any Surface: one row per Workspace with the active marker, its name, [pinned] when it is pinned (dor workspace pin), [ringing]/[todo] when any member Surface is, and [attention N] for the number owing it. It takes --json and --window, and no other flag.
 
@@ -108,13 +104,6 @@ function buildListCommand(): Command['command'] {
       brief: 'Working directory to match.',
       optional: true,
       placeholder: 'path',
-    },
-    idFormat: {
-      kind: 'parsed',
-      parse: parseIdFormat,
-      brief: 'Handle format for text output.',
-      optional: true,
-      placeholder: 'refs|ids|both',
     },
     json: { kind: 'boolean', brief: 'Print JSON output.', optional: true, withNegated: false },
     kind: {
@@ -164,7 +153,7 @@ function buildListCommand(): Command['command'] {
     docs: {
       brief: 'List Dormouse Surfaces.',
       customUsage: [
-        `[--workspace ref|--all] [--window label] [--kind ${SURFACE_KINDS.join('|')}] [--view paned|zoomed|minimized] [--command text] [--cwd path] [--port number] [--ports] [--json] [--id-format refs|ids|both]`,
+        `[--workspace ref|--all] [--window label] [--kind ${SURFACE_KINDS.join('|')}] [--view paned|zoomed|minimized] [--command text] [--cwd path] [--port number] [--ports] [--json]`,
         '--workspaces [--window label] [--json]',
       ],
       fullDescription: FULL_DESCRIPTION,
@@ -203,10 +192,9 @@ async function runListCommand(
     });
     const env = context.options.env ?? {};
     const filtered = applyListFilters(response, flags, context.options);
-    const idFormat = flags.idFormat ?? 'refs';
     const stdout = flags.json === true
       ? renderListJson(filtered, env, includePorts)
-      : renderListText(filtered, env, idFormat, includePorts);
+      : renderListText(filtered, env, includePorts);
     writeStdout(context, stdout);
     return undefined;
   } catch (error) {
@@ -276,10 +264,9 @@ function surfaceLocation(surface: Surface): string {
 function renderListText(
   response: ListSurfacesResponse,
   env: Record<string, string | undefined>,
-  idFormat: IdFormat,
   includePorts: boolean,
 ): string {
-  const rows = surfaceRows(response, env, idFormat, includePorts);
+  const rows = surfaceRows(response, env, includePorts);
   if (!response.workspaces) return rows.length === 0 ? '' : `${rows.join('\n')}\n`;
 
   // Every row of a `--all` answer carries the Workspace it came from
@@ -287,9 +274,9 @@ function renderListText(
   // Workspace keeps its header**, even one no row survived: the listing says
   // which Workspaces there are, and the JSON payload lists them all either way.
   const groups = response.workspaces.map((workspace) => [
-    `${workspace.ref}  ${printable(workspace.name)}${workspace.active ? '  [active]' : ''}${workspace.pinned ? '  [pinned]' : ''}`,
+    `${workspace.id}  ${printable(workspace.name)}${workspace.active ? '  [active]' : ''}${workspace.pinned ? '  [pinned]' : ''}`,
     ...response.surfaces.flatMap((surface, index) => (
-      surface.workspaceRef === workspace.ref ? [`  ${rows[index]}`] : []
+      surface.workspaceId === workspace.id ? [`  ${rows[index]}`] : []
     )),
   ].join('\n'));
   return groups.length === 0 ? '' : `${groups.join('\n\n')}\n`;
@@ -309,17 +296,15 @@ function attentionTags(row: { ringing: boolean; todo: boolean }): string[] {
 function surfaceRows(
   response: ListSurfacesResponse,
   env: Record<string, string | undefined>,
-  idFormat: IdFormat,
   includePorts: boolean,
 ): string[] {
   const surfaces = response.surfaces;
   if (surfaces.length === 0) return [];
 
   const callerId = env.DORMOUSE_SURFACE_ID;
-  const handles = surfaces.map((surface) => renderHandle(surface, idFormat));
   const locations = surfaces.map(surfaceLocation);
   const renderModes = surfaces.map((surface) => surface.renderMode ?? '-');
-  const handleWidth = Math.max(...handles.map((handle) => handle.length));
+  const idWidth = Math.max(...surfaces.map((surface) => surface.id.length));
   const kindWidth = Math.max(...surfaces.map((surface) => surface.kind.length));
   const renderModeWidth = Math.max(...renderModes.map((renderMode) => renderMode.length));
   const viewWidth = Math.max(...surfaces.map((surface) => surface.view.length));
@@ -327,7 +312,7 @@ function surfaceRows(
 
   const lines = surfaces.map((surface, index) => {
     const marker = surface.focused ? '*' : ' ';
-    const handle = handles[index].padEnd(handleWidth);
+    const id = surface.id.padEnd(idWidth);
     const kind = surface.kind.padEnd(kindWidth);
     const renderMode = renderModes[index].padEnd(renderModeWidth);
     const view = surface.view.padEnd(viewWidth);
@@ -343,7 +328,7 @@ function surfaceRows(
         : []),
     ];
 
-    return `${marker} ${handle}  ${kind}  ${renderMode}  ${view}  ${location}  ${printable(surface.title)}${tagTrailer(tags)}`.trimEnd();
+    return `${marker} ${id}  ${kind}  ${renderMode}  ${view}  ${location}  ${printable(surface.title)}${tagTrailer(tags)}`.trimEnd();
   });
 
   return lines;
@@ -353,7 +338,7 @@ function surfaceRows(
 function renderWorkspacesText(response: ListWorkspacesResponse): string {
   const rows = response.workspaces;
   if (rows.length === 0) return '';
-  const refWidth = Math.max(...rows.map((row) => row.ref.length));
+  const idWidth = Math.max(...rows.map((row) => row.id.length));
   const names = rows.map((row) => printable(row.name));
   const nameWidth = Math.max(...names.map((name) => name.length));
   const lines = rows.map((row, index) => {
@@ -362,7 +347,7 @@ function renderWorkspacesText(response: ListWorkspacesResponse): string {
       ...attentionTags(row),
       ...(row.count > 0 ? [`[attention ${row.count}]`] : []),
     ];
-    return `${row.active ? '*' : ' '} ${row.ref.padEnd(refWidth)}  ${names[index].padEnd(nameWidth)}${tagTrailer(tags)}`.trimEnd();
+    return `${row.active ? '*' : ' '} ${row.id.padEnd(idWidth)}  ${names[index].padEnd(nameWidth)}${tagTrailer(tags)}`.trimEnd();
   });
   return `${lines.join('\n')}\n`;
 }
@@ -376,7 +361,6 @@ function renderWorkspacesJson(response: ListWorkspacesResponse): string {
 
 function renderWorkspaceJson(row: WorkspaceRow): Record<string, unknown> {
   return {
-    ref: row.ref,
     id: row.id,
     name: row.name,
     auto: row.auto,
@@ -399,16 +383,14 @@ function renderListJson(
 
   const payload = {
     surfaces: response.surfaces.map((surface) => renderSurfaceJson(surface, includePorts)),
-    caller_surface_ref: caller?.ref ?? null,
     caller_surface_id: caller?.id ?? null,
-    focused_surface_ref: focused?.ref ?? null,
     focused_surface_id: focused?.id ?? null,
     window_ref: response.windowRef,
-    workspace_ref: response.workspaceRef,
+    workspace_id: response.workspaceId,
     // Under `--all`, which Workspace holds the caller and the focused Surface.
     ...(response.workspaces ? {
-      caller_workspace_ref: caller?.workspaceRef ?? null,
-      focused_workspace_ref: focused?.workspaceRef ?? null,
+      caller_workspace_id: caller?.workspaceId ?? null,
+      focused_workspace_id: focused?.workspaceId ?? null,
       workspaces: response.workspaces.map(renderWorkspaceJson),
     } : {}),
     host: {
@@ -427,7 +409,6 @@ function renderSurfaceJson(
 ): Record<string, unknown> {
   return {
     id: surface.id,
-    ref: surface.ref,
     kind: surface.kind,
     // Derived at the JSON boundary: a kind *is* a capability set, so these are a
     // pure function of kind and are not carried as wire state.
@@ -450,8 +431,8 @@ function renderSurfaceJson(
       ? { ports: (surface.ports ?? []).map(renderPortJson) }
       : {}),
     // Only a cross-Workspace listing carries it; within one Workspace the
-    // top-level `workspace_ref` already says which.
-    ...(surface.workspaceRef ? { workspace_ref: surface.workspaceRef } : {}),
+    // top-level `workspace_id` already says which.
+    ...(surface.workspaceId ? { workspace_id: surface.workspaceId } : {}),
   };
 }
 

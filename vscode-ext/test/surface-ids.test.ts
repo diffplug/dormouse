@@ -21,13 +21,13 @@ afterEach(async () => { await removeDir(dir); });
 describe('createSurfaceIdAllocator', () => {
   it('persists exactly the end of each block before handing it out, and a later run resumes there', async () => {
     const first = createSurfaceIdAllocator(dir, logger);
-    expect(await first.reserve(3, 0)).toEqual(['surface-1', 'surface-2', 'surface-3']);
+    expect(await first.reserve(3, 0)).toEqual(['surface:1', 'surface:2', 'surface:3']);
     expect(await persisted()).toBe(4);
-    expect(await first.reserve(1, 0)).toEqual(['surface-4']);
+    expect(await first.reserve(1, 0)).toEqual(['surface:4']);
     expect(await persisted()).toBe(5);
     // No slack: the relaunch wastes no numbers.
     const later = createSurfaceIdAllocator(dir, logger);
-    expect(await later.reserve(1, 0)).toEqual(['surface-5']);
+    expect(await later.reserve(1, 0)).toEqual(['surface:5']);
   });
 
   it('never hands out a number another window sharing the file did, nor writes it lower', async () => {
@@ -61,19 +61,19 @@ describe('createSurfaceIdAllocator', () => {
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(settled).toBe(false);
     await rm(lock, { recursive: true });
-    expect(await waiting).toEqual(['surface-1']);
+    expect(await waiting).toEqual(['surface:1']);
 
     await mkdir(lock);
     const old = new Date(Date.now() - 60_000);
     await utimes(lock, old, old);
-    expect(await createSurfaceIdAllocator(dir, logger).reserve(1, 0)).toEqual(['surface-2']);
+    expect(await createSurfaceIdAllocator(dir, logger).reserve(1, 0)).toEqual(['surface:2']);
     expect(logger.error).not.toHaveBeenCalled();
   });
 
   it('honors the floor the webview restored', async () => {
     const allocator = createSurfaceIdAllocator(dir, logger);
-    expect(await allocator.reserve(2, 41)).toEqual(['surface-42', 'surface-43']);
-    expect(await allocator.reserve(1, 3)).toEqual(['surface-44']);
+    expect(await allocator.reserve(2, 41)).toEqual(['surface:42', 'surface:43']);
+    expect(await allocator.reserve(1, 3)).toEqual(['surface:44']);
   });
 
   it('hands out ids from memory alone when it has no storage', async () => {

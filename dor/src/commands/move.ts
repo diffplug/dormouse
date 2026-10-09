@@ -15,7 +15,7 @@ export const moveCommand: Command = {
     docs: {
       brief: 'Move a surface to another workspace.',
       customUsage: ['<surface> <workspace>|--new [--workspace source] [--focus] [--dangerously-destroy-iframe-page-state] [--json]'],
-      fullDescription: `Moves a Surface within this Window, keeping its id and ref. Focus stays put unless --focus is set. --new creates a Workspace; it is refused for the source's only Surface.
+      fullDescription: `Moves a Surface within this Window, keeping its id. Focus stays put unless --focus is set. --new creates a Workspace; it is refused for the source's only Surface.
 
 Plain iframes reopen at their saved URL and require --dangerously-destroy-iframe-page-state. Dirty or pending Tools cannot move, even with that flag.
 
@@ -54,6 +54,6 @@ Text output: moved surface:4 workspace:2`,
 };
 
 function renderMoveResponse(result: MoveSurfaceResponse, json: boolean): string {
-  if (!json) return `${result.status} ${result.surfaceRef} ${result.workspaceRef}\n`;
-  return renderJson({ status: result.status, surface_id: result.surfaceId, surface_ref: result.surfaceRef, workspace_id: result.workspaceId, workspace_ref: result.workspaceRef });
+  if (!json) return `${result.status} ${result.surfaceId} ${result.workspaceId}\n`;
+  return renderJson({ status: result.status, surface_id: result.surfaceId, workspace_id: result.workspaceId });
 }

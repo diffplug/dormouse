@@ -45,7 +45,7 @@ The target is one of:
                  localhost:5173, box.ts.net:3000). The explicit port marks a
                  dev/infra server, which is http far more often than not.
   :<port>        Sugar for http://localhost:<port> (e.g. :5173).
-  surface:<ref>  A terminal Surface handle (surface:N, surface:self, or
+  surface:<n>    A terminal Surface handle (surface:N, surface:self, or
                  surface:focused). Dormouse scans that terminal's
                  listening ports and opens http://localhost:<port>/; it fails if
                  the terminal owns zero or multiple ports.
@@ -57,8 +57,7 @@ Text output:
 JSON output:
   {
     "status": "created",
-    "surface_id": "surface-3",
-    "surface_ref": "surface:3",
+    "surface_id": "surface:3",
     "url": "http://localhost:5173",
     "minimized": false
   }`,
@@ -67,7 +66,7 @@ JSON output:
       flags: {
         json: { kind: 'boolean', brief: 'Print JSON output.', optional: true, withNegated: false },
         minimize: { kind: 'boolean', brief: 'Create or replace the surface minimized.', optional: true, withNegated: false },
-        surface: { kind: 'parsed', parse: stringParser, brief: 'Surface to replace or split from.', optional: true, placeholder: 'id|ref' },
+        surface: { kind: 'parsed', parse: stringParser, brief: 'Surface to replace or split from.', optional: true, placeholder: 'handle' },
         workspace: workspaceFlag,
       },
       positional: {
@@ -121,12 +120,11 @@ function renderIframeResponse(response: IframeSurfaceResponse, json: boolean): s
     return renderJson({
       status: response.status,
       surface_id: response.surfaceId,
-      surface_ref: response.surfaceRef,
       url: response.url,
       minimized: response.minimized,
     });
   }
 
   const minimized = response.minimized ? '  [minimized]' : '';
-  return `${response.status} ${response.surfaceRef}${minimized}  ${JSON.stringify(response.url)}\n`;
+  return `${response.status} ${response.surfaceId}${minimized}  ${JSON.stringify(response.url)}\n`;
 }

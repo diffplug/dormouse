@@ -63,8 +63,8 @@ describe('closing one window of several', () => {
   });
 
   it('records every Workspace in strip order under its own ids, marked for Reopen, reserving none', async () => {
-    const reserveSurfaces = vi.fn(async (count: number) => Array.from({ length: count }, (_, i) => `surface-${100 + i}`));
-    const reserveWorkspaces = vi.fn(async (count: number) => Array.from({ length: count }, (_, i) => `workspace-${100 + i}`));
+    const reserveSurfaces = vi.fn(async (count: number) => Array.from({ length: count }, (_, i) => `surface:${100 + i}`));
+    const reserveWorkspaces = vi.fn(async (count: number) => Array.from({ length: count }, (_, i) => `workspace:${100 + i}`));
     await installSurfaceIdPool(reserveSurfaces, 0);
     await installWorkspaceIdPool(reserveWorkspaces);
     reserveSurfaces.mockClear();
@@ -94,21 +94,21 @@ describe('reopening a closed window', () => {
   /** A host counter, clamping a block to 64 as Rust does. */
   const counting = (prefix: string, start: number) => {
     let next = start;
-    return async (count: number) => Array.from({ length: Math.min(count, 64) }, () => `${prefix}-${next++}`);
+    return async (count: number) => Array.from({ length: Math.min(count, 64) }, () => `${prefix}:${next++}`);
   };
   const closed = (workspaces: number, panes: number): PersistedWindow => ({
     version: 2,
     workspaces: Array.from({ length: workspaces }, (_, w) => ({
-      id: `workspace-${w + 2}`,
+      id: `workspace:${w + 2}`,
       name: `W${w}`,
       nameIsAuto: false,
       ...(w === 0 ? { pinned: true } : {}),
       session: {
         version: 4,
-        panes: Array.from({ length: panes }, (_, p) => ({ id: `surface-${w * panes + p + 1}`, cwd: null, title: '', untouched: true })),
+        panes: Array.from({ length: panes }, (_, p) => ({ id: `surface:${w * panes + p + 1}`, cwd: null, title: '', untouched: true })),
       },
     })),
-    activeWorkspaceId: `workspace-${workspaces + 1}`,
+    activeWorkspaceId: `workspace:${workspaces + 1}`,
     reopened: true,
   });
 
@@ -119,12 +119,12 @@ describe('reopening a closed window', () => {
     const fresh = await withFreshWindowIds(saved);
     expect(fresh).not.toHaveProperty('reopened');
     const workspaceIds = fresh.workspaces.map(workspace => workspace.id);
-    expect(workspaceIds.every(id => /^workspace-\d+$/.test(id) && !saved.workspaces.some(old => old.id === id))).toBe(true);
+    expect(workspaceIds.every(id => /^workspace:\d+$/.test(id) && !saved.workspaces.some(old => old.id === id))).toBe(true);
     expect(fresh.activeWorkspaceId).toBe(workspaceIds[5]);
     expect(fresh.workspaces.map(workspace => workspace.pinned)).toEqual([true, undefined, undefined, undefined, undefined, undefined]);
     const surfaces = fresh.workspaces.flatMap(workspace => workspace.session.panes.map(pane => pane.id));
     expect(surfaces).toHaveLength(72);
     expect(new Set(surfaces).size).toBe(72);
-    expect(surfaces.every(id => /^surface-\d+$/.test(id) && Number(id.slice('surface-'.length)) >= 1000)).toBe(true);
+    expect(surfaces.every(id => /^surface:\d+$/.test(id) && Number(id.slice('surface:'.length)) >= 1000)).toBe(true);
   });
 });

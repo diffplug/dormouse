@@ -7,7 +7,7 @@ import {
   readPersistedWindow,
 } from './session-types';
 
-const panes = [{ id: 'surface-1', title: 'A', cwd: null, untouched: false }];
+const panes = [{ id: 'surface:1', title: 'A', cwd: null, untouched: false }];
 
 describe('persisted format versions', () => {
   afterEach(() => vi.restoreAllMocks());
@@ -21,7 +21,7 @@ describe('persisted format versions', () => {
   it('reads only the current Session version, discarding any other quietly', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const info = vi.spyOn(console, 'info').mockImplementation(() => {});
-    expect(readPersistedSession({ version: 4, panes })?.panes.map((pane) => pane.id)).toEqual(['surface-1']);
+    expect(readPersistedSession({ version: 4, panes })?.panes.map((pane) => pane.id)).toEqual(['surface:1']);
     // VS Code hands state back JSON-stringified.
     expect(readPersistedSession(JSON.stringify({ version: 4, panes }))?.panes).toEqual(panes);
     expect(readPersistedSession({ version: 3, panes })).toBeNull();
@@ -48,7 +48,7 @@ describe('persisted format versions', () => {
 
   it('rejects a current Session with a pane missing `untouched`', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    expect(readPersistedSession({ version: 4, panes: [{ id: 'surface-1', title: 'A', cwd: null }] })).toBeNull();
+    expect(readPersistedSession({ version: 4, panes: [{ id: 'surface:1', title: 'A', cwd: null }] })).toBeNull();
     expect(warn).toHaveBeenCalledTimes(1);
   });
 

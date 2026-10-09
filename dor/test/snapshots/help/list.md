@@ -4,13 +4,13 @@ Invocation: `dor list --help`
 
 ```text
 USAGE
-  dor list [--workspace ref|--all] [--window label] [--kind terminal|browser|tool] [--view paned|zoomed|minimized] [--command text] [--cwd path] [--port number] [--ports] [--json] [--id-format refs|ids|both]
+  dor list [--workspace ref|--all] [--window label] [--kind terminal|browser|tool] [--view paned|zoomed|minimized] [--command text] [--cwd path] [--port number] [--ports] [--json]
   dor list --workspaces [--window label] [--json]
   dor list --help
 
 Lists every Surface in the current Workspace — terminals and browser Surfaces, including minimized ones (view "minimized").
 
-Text output prints one row per Surface: a * marks the focused Surface, then the handle, kind, render mode ("-" for terminals), view, location (cwd for terminals, URL for browser Surfaces), and title. Trailing tags: (you) for the calling terminal, [ringing], [todo], [awaited] while a dor await is parked on it, [preview] for the Workspace's preview slot (dor open --preview), and listening ports with --ports.
+Text output prints one row per Surface: a * marks the focused Surface, then its id (surface:<n>, the handle every command takes), kind, render mode ("-" for terminals), view, location (cwd for terminals, URL for browser Surfaces), and title. Trailing tags: (you) for the calling terminal, [ringing], [todo], [awaited] while a dor await is parked on it, [preview] for the Workspace's preview slot (dor open --preview), and listening ports with --ports.
 
 --ports adds each terminal's listening TCP ports. The host shells out per pane (lsof / PowerShell), so it is opt-in; remote sessions report none.
 
@@ -18,11 +18,11 @@ Text output prints one row per Surface: a * marks the focused Surface, then the 
 
 Filters are ANDed. --command is an exact match against the running command reported by shell integration. --cwd resolves to an absolute path like dor ensure --cwd, relative to the invoking shell's PWD when available.
 
-JSON output (--json) always includes both ids and refs, and each row carries has_terminal (a PTY) and has_browser (a browser renderer) — gate on those, not on kind, so a Surface that has both still matches — and the preview slot's row adds preview: true. It adds top-level caller_surface_ref/caller_surface_id and focused_surface_ref/focused_surface_id — the calling and focused Surfaces, null when neither is in the list — plus workspace_ref, window_ref, and a host block (app, workspace, cli_js_path, node_path): the identity dump dor identify used to print.
+JSON output (--json) gives each row its id, has_terminal (a PTY), and has_browser (a browser renderer) — gate on those, not on kind, so a Surface that has both still matches — and the preview slot's row adds preview: true. It adds top-level caller_surface_id and focused_surface_id — the calling and focused Surfaces, null when neither is in the list — plus workspace_id, window_ref, and a host block (app, workspace, cli_js_path, node_path): the identity dump dor identify used to print.
 
---workspace <ref> lists another Workspace instead, in this window or another: workspace:<n> (a stable number) or workspace:<name>, which resolves only when exactly one Workspace carries that name. Both are accepted bare ("2", "build"). --window <label> lists another window's Surfaces or Workspaces (window:main, ws-2).
+--workspace <ref> lists another Workspace instead, in this window or another: its id workspace:<n> or workspace:<name>, which resolves only when exactly one Workspace carries that name. Both are accepted bare ("2", "build"). --window <label> lists another window's Surfaces or Workspaces (window:main, ws-2).
 
---all lists every Workspace of this Window, grouped under a Workspace header — every Workspace keeps its header, including one holding nothing and one the filters emptied. Refs are unique across the groups, and a row from another Workspace is targeted by its ref as it stands. Only the active Workspace's selection carries the focus marker; each JSON row adds workspace_ref, and the payload adds a workspaces array plus caller_workspace_ref/focused_workspace_ref.
+--all lists every Workspace of this Window, grouped under a Workspace header — every Workspace keeps its header, including one holding nothing and one the filters emptied. Ids are unique across the groups, and a row from another Workspace is targeted by its id as it stands. Only the active Workspace's selection carries the focus marker; each JSON row adds workspace_id, and the payload adds a workspaces array plus caller_workspace_id/focused_workspace_id.
 
 --workspaces prints the Workspace overview instead of any Surface: one row per Workspace with the active marker, its name, [pinned] when it is pinned (dor workspace pin), [ringing]/[todo] when any member Surface is, and [attention N] for the number owing it. It takes --json and --window, and no other flag.
 
@@ -39,7 +39,6 @@ FLAGS
      [--all]         List every Workspace, grouped by a Workspace header.
      [--command]     Exact running command to match.
      [--cwd]         Working directory to match.
-     [--id-format]   Handle format for text output.
      [--json]        Print JSON output.
      [--kind]        Surface kind to show.
      [--port]        Show terminal Surfaces listening on this TCP port.

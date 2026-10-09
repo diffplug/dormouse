@@ -49,7 +49,7 @@ export interface LivePtyRouting {
  * must still land in the Workspace holding its source: routed anywhere else it
  * misses that plan's slice, is resumed as an ordinary top-level pane, and its id
  * — absent from that Workspace's saved panes — makes the whole saved layout
- * unusable, costing the Workspace its splits, Doors and refs. A helper whose
+ * unusable, costing the Workspace its splits and Doors. A helper whose
  * source is itself unowned follows it into the active Workspace.
  */
 export function routeUnownedPtys(

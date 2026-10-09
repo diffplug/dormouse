@@ -7,7 +7,7 @@ USAGE
   dor move <surface> <workspace>|--new [--workspace source] [--focus] [--dangerously-destroy-iframe-page-state] [--json]
   dor move --help
 
-Moves a Surface within this Window, keeping its id and ref. Focus stays put unless --focus is set. --new creates a Workspace; it is refused for the source's only Surface.
+Moves a Surface within this Window, keeping its id. Focus stays put unless --focus is set. --new creates a Workspace; it is refused for the source's only Surface.
 
 Plain iframes reopen at their saved URL and require --dangerously-destroy-iframe-page-state. Dirty or pending Tools cannot move, even with that flag.
 

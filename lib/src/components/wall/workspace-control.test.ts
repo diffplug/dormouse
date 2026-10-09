@@ -11,8 +11,6 @@ import {
   renameWorkspace,
   resetWorkspaces,
   setWorkspacePinned,
-  installWorkspaceIdPool,
-  resetWorkspaceIdPool,
 } from '../../lib/workspace-store';
 import { clearTerminalActivity, setTerminalActivity } from '../../lib/session-activity-store';
 import { createAlertEpisode } from '../../lib/alert-episode';
@@ -61,7 +59,7 @@ afterEach(() => {
 describe('workspace.list', () => {
   it('reports one row per Workspace with its union status', async () => {
     const first = getWorkspacesSnapshot().workspaces[0].id;
-    const second = createWorkspace({ id: 'ws-2', name: 'build', activate: false }).id;
+    const second = createWorkspace({ id: 'workspace:2', name: 'build', activate: false }).id;
     setWorkspaceSurfaces(first, ['a']);
     setWorkspaceSurfaces(second, ['b', 'c']);
     setTerminalActivity('b', { status: 'ALERT_RINGING', episode: createAlertEpisode() });
@@ -73,8 +71,8 @@ describe('workspace.list', () => {
     expect(answer(detail)).toEqual({
       windowRef: 'window:1',
       workspaces: [
-        { ref: 'workspace:1', id: first, name: 'Workspace 1', auto: true, pinned: false, active: true, ringing: false, todo: false, count: 0 },
-        { ref: 'workspace:2', id: 'ws-2', name: 'build', auto: false, pinned: false, active: false, ringing: true, todo: true, count: 2 },
+        { id: first, name: 'Workspace 1', auto: true, pinned: false, active: true, ringing: false, todo: false, count: 0 },
+        { id: 'workspace:2', name: 'build', auto: false, pinned: false, active: false, ringing: true, todo: true, count: 2 },
       ],
     });
     expect(workspaceRows()).toHaveLength(2);
@@ -91,38 +89,37 @@ describe('workspace mutation verbs', () => {
     expect(answer(detail)).toEqual({
       status: 'created',
       workspaceId: created.id,
-      workspaceRef: 'workspace:2',
       name: 'build',
     });
     expect(getWorkspacesSnapshot().activeId).toBe(active);
   });
 
   it('renames and switches by positional ref or name', async () => {
-    createWorkspace({ id: 'ws-2', name: 'build', activate: false });
+    createWorkspace({ id: 'workspace:2', name: 'build', activate: false });
 
     const renamed = request('workspace.rename', { workspace: 'workspace:build', name: 'agents' });
     await handleWorkspaceControl(renamed);
     expect(answer(renamed)).toEqual({
-      status: 'renamed', workspaceId: 'ws-2', workspaceRef: 'workspace:2', name: 'agents',
+      status: 'renamed', workspaceId: 'workspace:2', name: 'agents',
     });
 
     const switched = request('workspace.switch', { workspace: 'agents' });
     await handleWorkspaceControl(switched);
-    expect(answer(switched)).toMatchObject({ status: 'active', workspaceId: 'ws-2' });
-    expect(getWorkspacesSnapshot().activeId).toBe('ws-2');
+    expect(answer(switched)).toMatchObject({ status: 'active', workspaceId: 'workspace:2' });
+    expect(getWorkspacesSnapshot().activeId).toBe('workspace:2');
   });
 
   it('hands a name back to auto-naming with auto', async () => {
-    createWorkspace({ id: 'ws-2', name: 'build', activate: false });
+    createWorkspace({ id: 'workspace:2', name: 'build', activate: false });
     const detail = request('workspace.rename', { workspace: 'workspace:2', auto: true });
     await handleWorkspaceControl(detail);
-    expect(answer(detail)).toMatchObject({ status: 'renamed', workspaceId: 'ws-2' });
+    expect(answer(detail)).toMatchObject({ status: 'renamed', workspaceId: 'workspace:2' });
     expect(getWorkspacesSnapshot().workspaces[1].nameIsAuto).toBe(true);
   });
 
   it('refuses an ambiguous name instead of picking, and lists the candidates', async () => {
     renameWorkspace(getWorkspacesSnapshot().workspaces[0].id, 'build');
-    createWorkspace({ id: 'ws-2', name: 'build', activate: false });
+    createWorkspace({ id: 'workspace:2', name: 'build', activate: false });
 
     const detail = request('workspace.switch', { workspace: 'build' });
     await handleWorkspaceControl(detail);
@@ -146,39 +143,39 @@ describe('workspace mutation verbs', () => {
 describe('workspace.pin', () => {
   it('pins right and unpins, idempotently, reporting the pin in the listing', async () => {
     const first = getWorkspacesSnapshot().workspaces[0].id;
-    createWorkspace({ id: 'ws-2', name: 'build', activate: false });
+    createWorkspace({ id: 'workspace:2', name: 'build', activate: false });
 
     const pin = request('workspace.pin', { workspace: 'workspace:1', pinned: true });
     await handleWorkspaceControl(pin);
-    expect(answer(pin)).toEqual({ status: 'pinned', workspaceId: first, workspaceRef: 'workspace:1', name: 'Workspace 1' });
-    expect(getWorkspacesSnapshot().workspaces.map((ws) => ws.id)).toEqual(['ws-2', first]);
-    expect(workspaceRows().map((row) => [row.id, row.pinned])).toEqual([['ws-2', false], [first, true]]);
+    expect(answer(pin)).toEqual({ status: 'pinned', workspaceId: first, name: 'Workspace 1' });
+    expect(getWorkspacesSnapshot().workspaces.map((ws) => ws.id)).toEqual(['workspace:2', first]);
+    expect(workspaceRows().map((row) => [row.id, row.pinned])).toEqual([['workspace:2', false], [first, true]]);
 
     const again = request('workspace.pin', { workspace: 'build', pinned: true });
     await handleWorkspaceControl(again);
-    expect(answer(again)).toMatchObject({ status: 'pinned', workspaceId: 'ws-2' });
+    expect(answer(again)).toMatchObject({ status: 'pinned', workspaceId: 'workspace:2' });
     const unpin = request('workspace.pin', { workspace: 'build', pinned: false });
     await handleWorkspaceControl(unpin);
-    expect(answer(unpin)).toMatchObject({ status: 'unpinned', workspaceId: 'ws-2' });
-    expect(workspaceRows().map((row) => [row.id, row.pinned])).toEqual([['ws-2', false], [first, true]]);
+    expect(answer(unpin)).toMatchObject({ status: 'unpinned', workspaceId: 'workspace:2' });
+    expect(workspaceRows().map((row) => [row.id, row.pinned])).toEqual([['workspace:2', false], [first, true]]);
   });
 
   it('refuses a pin or a rename while the Workspace transfers, leaving both as they were', async () => {
-    createWorkspace({ id: 'ws-2', name: 'build', activate: false });
-    setWorkspaceTransferPending('ws-2', true);
+    createWorkspace({ id: 'workspace:2', name: 'build', activate: false });
+    setWorkspaceTransferPending('workspace:2', true);
     try {
       const pin = request('workspace.pin', { workspace: 'build', pinned: true });
       await handleWorkspaceControl(pin);
       expect(answer(pin)).toBe("workspace 'workspace:2' was not pinned: Workspace is transferring");
-      expect(workspaceRows().find((row) => row.id === 'ws-2')?.pinned).toBe(false);
+      expect(workspaceRows().find((row) => row.id === 'workspace:2')?.pinned).toBe(false);
       for (const params of [{ name: 'deploys' }, { auto: true }]) {
         const rename = request('workspace.rename', { workspace: 'build', ...params });
         await handleWorkspaceControl(rename);
         expect(answer(rename)).toBe("workspace 'workspace:2' was not renamed: Workspace is transferring");
       }
-      expect(workspaceRows().find((row) => row.id === 'ws-2')).toMatchObject({ name: 'build', auto: false });
+      expect(workspaceRows().find((row) => row.id === 'workspace:2')).toMatchObject({ name: 'build', auto: false });
     } finally {
-      setWorkspaceTransferPending('ws-2', false);
+      setWorkspaceTransferPending('workspace:2', false);
     }
   });
 
@@ -193,20 +190,14 @@ describe('workspace.pin', () => {
 });
 
 describe('workspace.move', () => {
-  // Refs are the minted id's number only once a pool is installed; without
-  // one, `workspace-7` would read as a position (`docs/specs/dor-cli.md`).
-  beforeEach(async () => {
-    await installWorkspaceIdPool(async (count) => Array.from({ length: count }, (_, i) => `workspace-${100 + i}`));
-  });
-  afterEach(() => { resetWorkspaceIdPool(); });
 
   it('reorders within the Window without a host, and refuses a move between Windows there', async () => {
-    const second = createWorkspace({ id: 'workspace-7', name: 'build', activate: false }).id;
+    const second = createWorkspace({ id: 'workspace:7', name: 'build', activate: false }).id;
     handleFor(getWorkspacesSnapshot().workspaces[0].id);
     handleFor(second);
     const reorder = request('workspace.move', { workspace: 'workspace:7', index: 0 });
     await handleWorkspaceControl(reorder);
-    expect(answer(reorder)).toMatchObject({ status: 'moved', workspaceId: second, workspaceRef: 'workspace:7' });
+    expect(answer(reorder)).toMatchObject({ status: 'moved', workspaceId: second });
     expect(getWorkspacesSnapshot().workspaces[0].id).toBe(second);
 
     setPlatform({} as unknown as PlatformAdapter);
@@ -221,17 +212,17 @@ describe('workspace.move', () => {
 
   it('clamps --index within the Workspace\'s own group', async () => {
     const first = getWorkspacesSnapshot().workspaces[0].id;
-    createWorkspace({ id: 'workspace-7', name: 'build', activate: false });
-    createWorkspace({ id: 'workspace-8', name: 'notes', pinned: true, activate: false });
+    createWorkspace({ id: 'workspace:7', name: 'build', activate: false });
+    createWorkspace({ id: 'workspace:8', name: 'notes', pinned: true, activate: false });
     const move = request('workspace.move', { workspace: 'workspace:8', index: 0 });
     await handleWorkspaceControl(move);
-    expect(answer(move)).toMatchObject({ status: 'moved', workspaceRef: 'workspace:8' });
-    expect(getWorkspacesSnapshot().workspaces.map((ws) => ws.id)).toEqual([first, 'workspace-7', 'workspace-8']);
+    expect(answer(move)).toMatchObject({ status: 'moved' });
+    expect(getWorkspacesSnapshot().workspaces.map((ws) => ws.id)).toEqual([first, 'workspace:7', 'workspace:8']);
   });
 
   it('refuses cross-window moves of dirty Tools even with the iframe destruction flag', async () => {
-    const second = createWorkspace({ id: 'workspace-7', name: 'build', activate: false }).id;
-    handleFor(second, { dirtyToolIds: () => ['editor'], iframeSurfaceIds: () => ['surface-4'] });
+    const second = createWorkspace({ id: 'workspace:7', name: 'build', activate: false }).id;
+    handleFor(second, { dirtyToolIds: () => ['editor'], iframeSurfaceIds: () => ['surface:4'] });
     const transferWorkspace = vi.fn(async () => {});
     setPlatform({ transferWorkspace } as unknown as PlatformAdapter);
     for (const dangerouslyDestroyIframePageState of [false, true]) {
@@ -246,9 +237,9 @@ describe('workspace.move', () => {
   });
 
   it('refuses to move a Workspace holding iframes unless told to destroy their page state', async () => {
-    const second = createWorkspace({ id: 'workspace-7', name: 'build', activate: false }).id;
+    const second = createWorkspace({ id: 'workspace:7', name: 'build', activate: false }).id;
     handleFor(getWorkspacesSnapshot().workspaces[0].id);
-    handleFor(second, { iframeSurfaceIds: () => ['surface-4'] });
+    handleFor(second, { iframeSurfaceIds: () => ['surface:4'] });
     const transferWorkspace = vi.fn(async () => {});
     setPlatform({ transferWorkspace } as unknown as PlatformAdapter);
 
@@ -262,7 +253,7 @@ describe('workspace.move', () => {
     });
     await handleWorkspaceControl(forced);
     expect(transferWorkspace).toHaveBeenCalledWith(second, 'ws-2', {});
-    expect(answer(forced)).toMatchObject({ status: 'moved', workspaceRef: 'workspace:7' });
+    expect(answer(forced)).toMatchObject({ status: 'moved' });
 
     transferWorkspace.mockRejectedValueOnce(new Error('the host refused'));
     const failed = request('workspace.move', { workspace: 'workspace:7', toWindow: 'new', dangerouslyDestroyIframePageState: true });
@@ -271,7 +262,7 @@ describe('workspace.move', () => {
   });
 
   it('carries --index to the target window rather than reordering here', async () => {
-    const second = createWorkspace({ id: 'workspace-7', name: 'build', activate: false }).id;
+    const second = createWorkspace({ id: 'workspace:7', name: 'build', activate: false }).id;
     handleFor(getWorkspacesSnapshot().workspaces[0].id);
     handleFor(second);
     const transferWorkspace = vi.fn(async () => {});
@@ -280,13 +271,13 @@ describe('workspace.move', () => {
     const both = request('workspace.move', { workspace: 'workspace:7', toWindow: 'ws-2', index: 0 });
     await handleWorkspaceControl(both);
     expect(transferWorkspace).toHaveBeenCalledWith(second, 'ws-2', { index: 0 });
-    expect(answer(both)).toMatchObject({ status: 'moved', workspaceRef: 'workspace:7' });
+    expect(answer(both)).toMatchObject({ status: 'moved' });
     // The slot it names is the target's: this strip is not reordered on the way out.
     expect(getWorkspacesSnapshot().workspaces.map((workspace) => workspace.id)[1]).toBe(second);
   });
 
   it('answers moved only once the target has adopted the Workspace, and the hand-back reason otherwise', async () => {
-    const second = createWorkspace({ id: 'workspace-7', name: 'build', activate: false }).id;
+    const second = createWorkspace({ id: 'workspace:7', name: 'build', activate: false }).id;
     handleFor(getWorkspacesSnapshot().workspaces[0].id);
     handleFor(second);
     let adopt!: () => void;
@@ -301,7 +292,7 @@ describe('workspace.move', () => {
     expect(pending.respond).not.toHaveBeenCalled();
     adopt();
     await running;
-    expect(answer(pending)).toMatchObject({ status: 'moved', workspaceRef: 'workspace:7' });
+    expect(answer(pending)).toMatchObject({ status: 'moved' });
 
     transferWorkspace.mockRejectedValueOnce(new Error('the target window closed mid-arrival'));
     const handedBack = request('workspace.move', { workspace: 'workspace:7', toWindow: 'ws-2' });
@@ -312,7 +303,7 @@ describe('workspace.move', () => {
 
 describe('workspace.close', () => {
   it('refuses a Workspace holding work, and closes it with force', async () => {
-    const second = createWorkspace({ id: 'ws-2', name: 'build', activate: false }).id;
+    const second = createWorkspace({ id: 'workspace:2', name: 'build', activate: false }).id;
     const closeAll = vi.fn(async () => null);
     handleFor(getWorkspacesSnapshot().workspaces[0].id);
     handleFor(second, { needsCloseConfirmation: () => true, closeAll });
@@ -328,14 +319,14 @@ describe('workspace.close', () => {
     const forced = request('workspace.close', { workspace: 'workspace:2', force: true });
     await handleWorkspaceControl(forced);
     expect(answer(forced)).toEqual({
-      status: 'closed', workspaceId: second, workspaceRef: 'workspace:2', name: 'build',
+      status: 'closed', workspaceId: second, name: 'build',
     });
     expect(closeAll).toHaveBeenCalled();
     expect(getWorkspacesSnapshot().workspaces).toHaveLength(1);
   });
 
   it('refuses a pinned Workspace even with force', async () => {
-    const second = createWorkspace({ id: 'ws-2', name: 'build', activate: false }).id;
+    const second = createWorkspace({ id: 'workspace:2', name: 'build', activate: false }).id;
     const closeAll = vi.fn(async () => null);
     handleFor(getWorkspacesSnapshot().workspaces[0].id);
     handleFor(second, { needsCloseConfirmation: () => true, closeAll });
@@ -351,7 +342,7 @@ describe('workspace.close', () => {
   });
 
   it('refuses a Workspace whose Wall never registered, rather than orphaning its Sessions', async () => {
-    createWorkspace({ id: 'ws-2', name: 'build', activate: false });
+    createWorkspace({ id: 'workspace:2', name: 'build', activate: false });
     handleFor(getWorkspacesSnapshot().workspaces[0].id);
     // The Wall is what walks the member Surfaces; without one, dropping the
     // Workspace would leave its PTYs running with nothing holding them.
@@ -372,12 +363,12 @@ describe('workspace.close', () => {
   });
 
   it('refuses a second close while one is in flight', async () => {
-    createWorkspace({ id: 'ws-2', activate: false });
-    createWorkspace({ id: 'ws-3', activate: false });
+    createWorkspace({ id: 'workspace:2', activate: false });
+    createWorkspace({ id: 'workspace:3', activate: false });
     handleFor(getWorkspacesSnapshot().workspaces[0].id);
     let releaseFirst = () => {};
-    handleFor('ws-2', { closeAll: () => new Promise<string | null>((resolve) => { releaseFirst = () => resolve(null); }) });
-    handleFor('ws-3');
+    handleFor('workspace:2', { closeAll: () => new Promise<string | null>((resolve) => { releaseFirst = () => resolve(null); }) });
+    handleFor('workspace:3');
 
     const first = request('workspace.close', { workspace: 'workspace:2', force: true });
     const running = handleWorkspaceControl(first);
@@ -399,25 +390,25 @@ function listing(surfaces: Array<Record<string, unknown>>) {
   return vi.fn((detail: DorControlRequest) => {
     detail.respond({
       ok: true,
-      result: { surfaces, workspaceRef: 'workspace:x', windowRef: 'window:1' },
+      result: { surfaces, windowRef: 'window:1' },
     });
   });
 }
 
 /** Terminal rows as a Wall reports them, `focused` on the first. */
 function terminalRows(numbers: number[]): Array<Record<string, unknown>> {
-  return numbers.map((n, index) => ({ ref: `surface:${n}`, id: `surface-${n}`, kind: 'terminal', focused: index === 0 }));
+  return numbers.map((n, index) => ({ id: `surface:${n}`, kind: 'terminal', focused: index === 0 }));
 }
 
 it.each([
   ['close', { workspace: 'workspace:2' }],
   ['move', { workspace: 'workspace:2', toWindow: 'new' }],
 ] as const)('answers a pending confirmation no as workspace.%s starts, even when it refuses', async (verb, params) => {
-  createWorkspace({ id: 'ws-2', activate: false });
-  handleFor('ws-2', { needsCloseConfirmation: () => true });
+  createWorkspace({ id: 'workspace:2', activate: false });
+  handleFor('workspace:2', { needsCloseConfirmation: () => true });
   setPlatform({} as unknown as PlatformAdapter);
   const confirmed = vi.fn();
-  requestConfirmation({ id: 'ws-2', char: 'q', answer: confirmed });
+  requestConfirmation({ id: 'workspace:2', char: 'q', answer: confirmed });
   const detail = request(`workspace.${verb}`, params);
   await handleWorkspaceControl(detail);
   expect(answer(detail)).toEqual(expect.any(String));
@@ -427,11 +418,11 @@ it.each([
 });
 
 it.each(['close', 'move'] as const)('refuses workspace.%s if a newer confirmation supersedes its Wall lookup', async verb => {
-  createWorkspace({ id: 'ws-2', activate: false });
-  handleFor('ws-2');
+  createWorkspace({ id: 'workspace:2', activate: false });
+  handleFor('workspace:2');
   const detail = request(`workspace.${verb}`, { workspace: 'workspace:2', toWindow: 'new', force: true });
   const pending = handleWorkspaceControl(detail);
-  const newer = { id: 'ws-2', char: 'q', answer: vi.fn() };
+  const newer = { id: 'workspace:2', char: 'q', answer: vi.fn() };
   requestConfirmation(newer);
   await pending;
   expect(answer(detail)).toContain('superseded');
@@ -442,7 +433,7 @@ it.each(['close', 'move'] as const)('refuses workspace.%s if a newer confirmatio
 
 it('cancels pending consent even when a cross-Window move names an invalid Workspace', async () => {
   const answer = vi.fn();
-  requestConfirmation({ id: 'ws-2', char: 'q', answer });
+  requestConfirmation({ id: 'workspace:2', char: 'q', answer });
   await handleWorkspaceControl(request('workspace.move', { workspace: 'missing', toWindow: 'new' }));
   expect(answer).toHaveBeenCalledExactlyOnceWith(false);
   resetWorkspaceUi();
@@ -451,16 +442,16 @@ it('cancels pending consent even when a cross-Window move names an invalid Works
 describe('surface.list --all', () => {
   it('tags every row with its Workspace and carries the directory', async () => {
     const first = getWorkspacesSnapshot().workspaces[0].id;
-    createWorkspace({ id: 'ws-2', name: 'build', activate: false });
+    createWorkspace({ id: 'workspace:2', name: 'build', activate: false });
     handleFor(first, { handleDorControl: listing(terminalRows([1])) });
     const second = listing(terminalRows([2, 3]));
-    handleFor('ws-2', { handleDorControl: second });
+    handleFor('workspace:2', { handleDorControl: second });
 
     const detail = request('surface.list', { scope: 'all' });
     await listAllWorkspaceSurfaces(detail);
 
-    const result = answer(detail) as { surfaces: Array<{ ref: string; workspaceRef: string }>; workspaces: unknown[] };
-    expect(result.surfaces.map((surface) => [surface.workspaceRef, surface.ref])).toEqual([
+    const result = answer(detail) as { surfaces: Array<{ id: string; workspaceId: string }>; workspaces: unknown[] };
+    expect(result.surfaces.map((surface) => [surface.workspaceId, surface.id])).toEqual([
       ['workspace:1', 'surface:1'],
       ['workspace:2', 'surface:2'],
       ['workspace:2', 'surface:3'],
@@ -475,15 +466,15 @@ describe('surface.list --all', () => {
     const first = getWorkspacesSnapshot().workspaces[0].id;
     // Every Wall marks its own selection; the Window has one focus, and it is
     // in the Workspace the user is looking at.
-    createWorkspace({ id: 'ws-2', name: 'build', activate: true });
+    createWorkspace({ id: 'workspace:2', name: 'build', activate: true });
     handleFor(first, { handleDorControl: listing(terminalRows([1, 2])) });
-    handleFor('ws-2', { handleDorControl: listing(terminalRows([3])) });
+    handleFor('workspace:2', { handleDorControl: listing(terminalRows([3])) });
 
     const detail = request('surface.list', { scope: 'all' });
     await listAllWorkspaceSurfaces(detail);
 
-    const result = answer(detail) as { surfaces: Array<{ ref: string; workspaceRef: string; focused: boolean }> };
-    expect(result.surfaces.map((surface) => [surface.workspaceRef, surface.ref, surface.focused])).toEqual([
+    const result = answer(detail) as { surfaces: Array<{ id: string; workspaceId: string; focused: boolean }> };
+    expect(result.surfaces.map((surface) => [surface.workspaceId, surface.id, surface.focused])).toEqual([
       ['workspace:1', 'surface:1', false],
       ['workspace:1', 'surface:2', false],
       ['workspace:2', 'surface:3', true],
@@ -492,7 +483,7 @@ describe('surface.list --all', () => {
 
   it('scans every Workspace terminal in one batched call, never per Wall', async () => {
     const first = getWorkspacesSnapshot().workspaces[0].id;
-    createWorkspace({ id: 'ws-2', name: 'build', activate: false });
+    createWorkspace({ id: 'workspace:2', name: 'build', activate: false });
     const port = (value: number): OpenPort => ({ family: 'IPv4', address: '127.0.0.1', port: value, pid: 1 });
     const getOpenPortsMany = vi.fn(async (ids: string[]) => Object.fromEntries(
       ids.map((id, index) => [id, [port(5000 + index)]]),
@@ -501,14 +492,14 @@ describe('surface.list --all', () => {
     setPlatform({ getOpenPorts, getOpenPortsMany } as unknown as PlatformAdapter);
     const firstWall = listing(terminalRows([1]));
     handleFor(first, { handleDorControl: firstWall });
-    handleFor('ws-2', { handleDorControl: listing(terminalRows([2, 3])) });
+    handleFor('workspace:2', { handleDorControl: listing(terminalRows([2, 3])) });
 
     const detail = request('surface.list', { scope: 'all', includePorts: true });
     await listAllWorkspaceSurfaces(detail);
 
     // One scan for the whole Window, not one per Workspace and not one per row.
     expect(getOpenPortsMany).toHaveBeenCalledTimes(1);
-    expect(getOpenPortsMany).toHaveBeenCalledWith(['surface-1', 'surface-2', 'surface-3']);
+    expect(getOpenPortsMany).toHaveBeenCalledWith(['surface:1', 'surface:2', 'surface:3']);
     expect(getOpenPorts).not.toHaveBeenCalled();
     // The Walls are asked for rows only: a forwarded `includePorts` would be N
     // scans again.
@@ -518,9 +509,9 @@ describe('surface.list --all', () => {
   });
 
   it('fails the listing when a Workspace Wall never registers', async () => {
-    createWorkspace({ id: 'ws-2', name: 'build', activate: false });
+    createWorkspace({ id: 'workspace:2', name: 'build', activate: false });
     handleFor(getWorkspacesSnapshot().workspaces[0].id, { handleDorControl: listing([]) });
-    // No Wall for `ws-2`: a Workspace missing from the answer would read as a
+    // No Wall for `workspace:2`: a Workspace missing from the answer would read as a
     // Workspace holding nothing, so the whole listing fails instead.
     const detail = request('surface.list', { scope: 'all' });
     await listAllWorkspaceSurfaces(detail);
@@ -528,9 +519,9 @@ describe('surface.list --all', () => {
   });
 
   it('fails the whole listing when one Workspace cannot answer', async () => {
-    createWorkspace({ id: 'ws-2', name: 'build', activate: false });
+    createWorkspace({ id: 'workspace:2', name: 'build', activate: false });
     handleFor(getWorkspacesSnapshot().workspaces[0].id, { handleDorControl: listing([]) });
-    handleFor('ws-2', { handleDorControl: () => { throw new Error('boom'); } });
+    handleFor('workspace:2', { handleDorControl: () => { throw new Error('boom'); } });
 
     const detail = request('surface.list', { scope: 'all' });
     await listAllWorkspaceSurfaces(detail);

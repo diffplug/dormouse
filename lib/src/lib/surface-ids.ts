@@ -4,7 +4,7 @@ import type { PersistedSession } from './session-types';
 import { registry } from './terminal-store';
 
 /**
- * Surface ids (`docs/specs/transport.md` → "Surface ids"): `surface-<n>` off one
+ * Surface ids (`docs/specs/transport.md` → "Surface ids"): `surface:<n>` off one
  * host counter, handed to this page in blocks so a Wall mints synchronously.
  * With no host installed (playground, Storybook, Pocket, tests) the page
  * counts on its own.
@@ -19,7 +19,7 @@ const pool = createIdPool(8, 6, 'surface-ids');
 let localSequence = 0;
 
 /** Mint from `reserve`, which hands out ids numbered above `floor` — the highest
- *  `surface-<n>` this page restored. Resolves once the first block is in hand,
+ *  `surface:<n>` this page restored. Resolves once the first block is in hand,
  *  so a Surface created after boot never carries an opaque id. */
 export function installSurfaceIdPool(
   reserve: (count: number, floor: number) => Promise<string[]>,
@@ -28,14 +28,14 @@ export function installSurfaceIdPool(
   return pool.install((count) => reserve(count, floor));
 }
 
-/** Keep the page's own counter above `floor`, the highest `surface-<n>` a
+/** Keep the page's own counter above `floor`, the highest `surface:<n>` a
  *  restore brings back; a host's counter is above it already (the
  *  reservation's floor). */
 export function seedSurfaceIds(floor: number): void {
   localSequence = Math.max(localSequence, floor);
 }
 
-/** Back to the page's own counter, from `surface-1` (tests). */
+/** Back to the page's own counter, from `surface:1` (tests). */
 export function resetSurfaceIdPool(): void {
   pool.reset();
   localSequence = 0;
@@ -43,7 +43,7 @@ export function resetSurfaceIdPool(): void {
 
 function nextId(): string {
   if (!pool.installed) return surfaceIdFor(++localSequence);
-  return pool.take() ?? `surface-${crypto.randomUUID()}`;
+  return pool.take() ?? `surface:${crypto.randomUUID()}`;
 }
 
 /** The first id from `next` no Session in this page already holds; a skipped
@@ -69,7 +69,7 @@ export async function surfaceIdMinter(count: number): Promise<() => string> {
   return () => mintFrom(next);
 }
 
-/** The highest `surface-<n>` number among `sessions`' Surfaces, else 0. */
+/** The highest `surface:<n>` number among `sessions`' Surfaces, else 0. */
 export function maxSurfaceNumber(sessions: Iterable<PersistedSession>): number {
   let max = 0;
   for (const session of sessions) {

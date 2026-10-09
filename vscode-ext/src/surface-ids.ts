@@ -1,6 +1,6 @@
 /**
  * The install's Surface id counter (docs/specs/vscode.md → "Surface id
- * minting"): every webview of every window reserves `surface-<n>` blocks from
+ * minting"): every webview of every window reserves `surface:<n>` blocks from
  * it, so an id names one Surface across the install.
  *
  * Its next number lives in one `surface-ids.json` under `globalStorageUri`,
@@ -9,7 +9,7 @@
  * a cross-process lock, re-reads the file under it — another window may have
  * moved it — and writes the end of its block there, flushed to disk, before
  * handing anything out. A later run starting there reuses nothing and skips
- * nothing: no slack, since a ref is the number and webviews reserve a few ids
+ * nothing: no slack, since a `dor` handle is the number and webviews reserve a few ids
  * at a time.
  */
 

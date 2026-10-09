@@ -3,8 +3,7 @@ stdout:
 {
   "status": "reopened",
   "kind": "surface",
-  "surface_id": "surface-4f2a",
-  "surface_ref": "surface:4"
+  "surface_id": "surface:4"
 }
 
 stderr:

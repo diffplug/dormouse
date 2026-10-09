@@ -570,12 +570,12 @@ mod tests {
         crate::workspaces::report(
             &mut registry,
             "main",
-            vec![crate::workspaces::Entry { id: "workspace-2".into(), name: "Build".into(), active: true }],
+            vec![crate::workspaces::Entry { id: "workspace:2".into(), name: "Build".into(), active: true }],
         );
         crate::workspaces::report(
             &mut registry,
             "ws-2",
-            vec![crate::workspaces::Entry { id: "workspace-5".into(), name: "Docs".into(), active: true }],
+            vec![crate::workspaces::Entry { id: "workspace:5".into(), name: "Docs".into(), active: true }],
         );
         let view = state.view(&registry);
         let from_main = |params: JsonValue| json!({ "surfaceId": "a", "params": params });

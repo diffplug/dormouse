@@ -71,9 +71,8 @@ A one-line summary naming the cause and how long the wait took goes to stderr, s
 
 JSON output:
   {
-    "workspace_ref": "workspace:1",
+    "workspace_id": "workspace:1",
     "surface_id": "...",
-    "surface_ref": "surface:3",
     "cause": "quiet",
     "waited_ms": 615000,
     "detail": "output stopped after 10m 15s"
@@ -151,9 +150,8 @@ async function runAwaitCommand(this: DorCommandContext, flags: AwaitFlags, surfa
       // even on success.
       writeStdout(this, flags.json === true
         ? renderJson({
-          workspace_ref: response.workspaceRef,
+          workspace_id: response.workspaceId,
           surface_id: response.surfaceId,
-          surface_ref: response.surfaceRef,
           cause,
           waited_ms: response.waitedMs,
           detail,
@@ -165,9 +163,9 @@ async function runAwaitCommand(this: DorCommandContext, flags: AwaitFlags, surfa
     case 'timeout':
       // Reports the `--timeout` value as given, not the measured wait: "you asked
       // for 600s and got none of it" is the fact the caller can act on.
-      return failWith(this, EXIT_TIMED_OUT, `timed out after ${timeoutSeconds}s waiting for ${response.surfaceRef} to ${flags.until === 'exit' ? 'exit' : 'go quiet'}`);
+      return failWith(this, EXIT_TIMED_OUT, `timed out after ${timeoutSeconds}s waiting for ${response.surfaceId} to ${flags.until === 'exit' ? 'exit' : 'go quiet'}`);
     case 'died':
-      return failWith(this, EXIT_DIED, `${response.surfaceRef} exited after ${formatDuration(response.waitedMs)}`);
+      return failWith(this, EXIT_DIED, `${response.surfaceId} exited after ${formatDuration(response.waitedMs)}`);
   }
 }
 

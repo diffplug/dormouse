@@ -1,5 +1,4 @@
 import { useEffect } from 'react';
-import { surfaceRefForId } from 'dor/protocol';
 import { AgentBrowserScreenModal } from './wall/AgentBrowserScreenModal';
 import {
   closeAgentBrowserScreenModal,
@@ -10,7 +9,7 @@ import { useDialogKeyboardOwner } from './wall/wall-context';
 
 /**
  * Mounts the agent-browser screen modal when a surface requests it, mirroring
- * ExternalLinkModalHost, titled with the Surface's ref.
+ * ExternalLinkModalHost, titled with the Surface's id.
  */
 export function AgentBrowserScreenModalHost() {
   const id = useOpenAgentBrowserScreenModalId();
@@ -29,7 +28,7 @@ export function AgentBrowserScreenModalHost() {
   return (
     <AgentBrowserScreenModal
       controller={controller}
-      label={surfaceRefForId(id)}
+      label={id}
       onClose={closeAgentBrowserScreenModal}
     />
   );

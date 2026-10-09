@@ -16,8 +16,6 @@ import type { PersistedWindow } from "dormouse-lib/lib/session-types";
 
 export interface RegistryWorkspace {
   id: string;
-  /** `workspace:<n>` for a numbered id; `workspace:<id>` for an opaque id. */
-  ref: string;
   name: string;
   active: boolean;
 }

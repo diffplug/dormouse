@@ -157,7 +157,7 @@ describe('AgentBrowserPanel placeholders', () => {
       root.render(
         <PaneWriteContext.Provider value={paneWriteFor(() => {})}>
           <WallActionsContext.Provider value={stubActions()}>
-            <AgentBrowserPanel {...paneProps('surface-7', { surfaceType: 'browser', renderMode, session: 'dormouse.1.gui-5f3a' })} />
+            <AgentBrowserPanel {...paneProps('surface:7', { surfaceType: 'browser', renderMode, session: 'dormouse.1.gui-5f3a' })} />
           </WallActionsContext.Provider>
         </PaneWriteContext.Provider>,
       );

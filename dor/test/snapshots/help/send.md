@@ -23,7 +23,6 @@ JSON output:
   {
     "status": "sent",
     "surface_id": "...",
-    "surface_ref": "surface:3",
     "input_count": 1
   }
 

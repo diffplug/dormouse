@@ -3,26 +3,26 @@
  * Workspaces), so this host has no Window-wide Workspace model to answer with:
  * a Workspace-spanning `dor` request would report one webview's Workspace as if
  * it were all of them, and a mutation would move a strip that does not exist.
- * This host serves exactly the one Workspace each webview is — positional 1 —
+ * This host serves exactly the one Workspace each webview is — `workspace:1` —
  * and refuses everything that spans, at the extension host, before the request
  * reaches a webview.
  */
 
-import { parseWorkspaceRef, spansWorkspaces } from 'dor/protocol';
-import { DEFAULT_WORKSPACE_NAME } from '../../lib/src/lib/session-types';
+import { parseWorkspaceRef, spansWorkspaces, workspaceIdNumber } from 'dor/protocol';
+import { DEFAULT_WORKSPACE_ID, DEFAULT_WORKSPACE_NAME } from '../../lib/src/lib/session-types';
 
 const REFUSAL = 'Dormouse in VS Code puts each Workspace in its own webview, so';
 
 /**
- * Whether a container ref names the one Workspace this webview *is*: its
- * position, or the name a bare Wall registers — a caller that read the name out
- * of `dor list` must be able to hand it straight back
+ * Whether a container ref names the one Workspace this webview *is*: its id, or
+ * the name a bare Wall registers — a caller that read either out of `dor list`
+ * must be able to hand it straight back
  * (`docs/specs/dor-cli.md` → "Handle Model").
  */
 function namesThisWebviewsWorkspace(workspace: unknown): boolean {
   if (typeof workspace !== 'string') return false;
   const { number, name } = parseWorkspaceRef(workspace);
-  return number === 1 || name === DEFAULT_WORKSPACE_NAME;
+  return number === workspaceIdNumber(DEFAULT_WORKSPACE_ID) || name === DEFAULT_WORKSPACE_NAME;
 }
 
 /**
@@ -33,7 +33,7 @@ function namesThisWebviewsWorkspace(workspace: unknown): boolean {
 export function dorWorkspaceRefusal(method: string, params: Record<string, unknown> | undefined): string | null {
   const workspace = params?.workspace;
   if (workspace !== undefined && !namesThisWebviewsWorkspace(workspace)) {
-    return `${REFUSAL} it has no workspace '${String(workspace)}': this webview is workspace:1, ${JSON.stringify(DEFAULT_WORKSPACE_NAME)}`;
+    return `${REFUSAL} it has no workspace '${String(workspace)}': this webview is ${DEFAULT_WORKSPACE_ID}, ${JSON.stringify(DEFAULT_WORKSPACE_NAME)}`;
   }
   if (spansWorkspaces(method, params)) {
     return `${REFUSAL} dor workspace, dor list --workspaces and dor list --all are not available here`;

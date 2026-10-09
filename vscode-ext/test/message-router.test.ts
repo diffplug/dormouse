@@ -215,7 +215,7 @@ it('answers a Surface id reservation from the window counter, by request id', as
   const disposable = router.attachRouter(webview.channel, {});
   try {
     webview.send({ type: 'surface:reserveIds', count: 2, floor: 41, requestId: 'req-7' });
-    await vi.waitFor(() => expect(webview.posted).toContainEqual({ type: 'surface:reservedIds', ids: ['surface-42', 'surface-43'], requestId: 'req-7' }));
+    await vi.waitFor(() => expect(webview.posted).toContainEqual({ type: 'surface:reservedIds', ids: ['surface:42', 'surface:43'], requestId: 'req-7' }));
   } finally { disposable.dispose(); }
 });
 
@@ -224,10 +224,10 @@ it('reserves above every Surface PTY this extension host holds, whatever floor t
   const asking = fakeWebview();
   const disposables = [router.attachRouter(sibling.channel, {}), router.attachRouter(asking.channel, {})];
   try {
-    sibling.send({ type: 'pty:spawn', id: 'surface-90', options: { cwd: '/repo' } });
+    sibling.send({ type: 'pty:spawn', id: 'surface:90', options: { cwd: '/repo' } });
     sibling.send({ type: 'pty:spawn', id: 'surface-uuid', options: { cwd: '/repo' } });
     asking.send({ type: 'surface:reserveIds', count: 1, floor: 5, requestId: 'req-8' });
-    await vi.waitFor(() => expect(asking.posted).toContainEqual({ type: 'surface:reservedIds', ids: ['surface-91'], requestId: 'req-8' }));
+    await vi.waitFor(() => expect(asking.posted).toContainEqual({ type: 'surface:reservedIds', ids: ['surface:91'], requestId: 'req-8' }));
   } finally { for (const disposable of disposables) disposable.dispose(); }
 });
 
@@ -795,12 +795,12 @@ it('holds a webview\'s iframe leases under its router, and ends them with it', (
   const disposable = router.attachRouter(webview.channel);
   const otherDisposable = router.attachRouter(other.channel);
   try {
-    webview.send({ type: 'iframe:createProxyUrl', url: 'http://localhost:5173/', embedderOrigins: [], lease: 'surface-1#a', requestId: 'r1' });
-    other.send({ type: 'iframe:createProxyUrl', url: 'http://localhost:5173/', embedderOrigins: [], lease: 'surface-1#a', requestId: 'r2' });
+    webview.send({ type: 'iframe:createProxyUrl', url: 'http://localhost:5173/', embedderOrigins: [], lease: 'surface:1#a', requestId: 'r1' });
+    other.send({ type: 'iframe:createProxyUrl', url: 'http://localhost:5173/', embedderOrigins: [], lease: 'surface:1#a', requestId: 'r2' });
     const [owner, otherOwner] = iframeProxy.create.mock.calls.map(([, , lease]) => (lease as { owner: string; id: string }).owner);
     expect(owner).not.toBe(otherOwner);
-    webview.send({ type: 'iframe:releaseProxy', lease: 'surface-1#a' });
-    expect(iframeProxy.release).toHaveBeenLastCalledWith(owner, 'surface-1#a');
+    webview.send({ type: 'iframe:releaseProxy', lease: 'surface:1#a' });
+    expect(iframeProxy.release).toHaveBeenLastCalledWith(owner, 'surface:1#a');
     webview.send({ type: 'dormouse:init' });
     expect(iframeProxy.release).toHaveBeenLastCalledWith(owner);
     iframeProxy.release.mockClear();

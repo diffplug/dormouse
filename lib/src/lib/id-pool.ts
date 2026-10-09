@@ -6,7 +6,7 @@
  *
  * Keep the pool small: the host numbers ids densely across launches, and the
  * ids a page holds when it exits are never handed out, so they are the gap a
- * launch leaves in the numbering, and a ref is the number. A burst that mints
+ * launch leaves in the numbering, and a `dor` handle is the number. A burst that mints
  * more than the pool holds at once reserves its count first ({@link IdPool.minter}).
  */
 export interface IdPool {

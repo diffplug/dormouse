@@ -4,7 +4,7 @@ Invocation: `dor open --help`
 
 ```text
 USAGE
-  dor open [--json] [--minimize] [--fresh] [--surface id|ref] [--workspace ref] [--cwd path] [--tool name] [--preview] [<path>]
+  dor open [--json] [--minimize] [--fresh] [--surface handle] [--workspace ref] [--cwd path] [--tool name] [--preview] [<path>]
   dor open --help
 
 Opens one existing local file or folder. `dor o` is the same command. Relative paths resolve from the caller's directory (or --cwd); symlink aliases resolve to the same path. A file: URL naming this machine is accepted as its path; other URLs and Surface handles are not.

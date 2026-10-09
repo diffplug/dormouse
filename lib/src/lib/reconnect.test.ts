@@ -437,11 +437,11 @@ describe('resumeOrRestoreFrom', () => {
 
   it('keeps the page\'s own id counter above every Surface it restores or resumes', async () => {
     resetSurfaceIdPool();
-    const { platform, live: collected } = await live([{ id: 'surface-9', alive: true }]);
-    resumeOrRestoreFrom(platform, collected, { savedSession: savedFor('surface-5'), ptyIds: new Set() });
-    expect(mintSurfaceId()).toBe('surface-6');
-    resumeOrRestoreFrom(platform, collected, { savedSession: null, ptyIds: new Set(['surface-9']) });
-    expect(mintSurfaceId()).toBe('surface-10');
+    const { platform, live: collected } = await live([{ id: 'surface:9', alive: true }]);
+    resumeOrRestoreFrom(platform, collected, { savedSession: savedFor('surface:5'), ptyIds: new Set() });
+    expect(mintSurfaceId()).toBe('surface:6');
+    resumeOrRestoreFrom(platform, collected, { savedSession: null, ptyIds: new Set(['surface:9']) });
+    expect(mintSurfaceId()).toBe('surface:10');
   });
 
   it('gives each Workspace only the live PTYs its own saved record names', async () => {

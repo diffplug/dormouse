@@ -1,12 +1,11 @@
 import type { ReopenResponse } from 'dor/commands/types';
-import { surfaceRefForId } from 'dor/protocol';
 import { getPlatform } from '../../lib/platform';
 import { newestReopenClosedAt, popReopenRecord, pushReopenRecord, type SurfaceReopenRecord, type WorkspaceReopenRecord } from '../../lib/reopen-stack';
 import { freshSurfaceIdCount, withFreshSurfaceIds } from '../../lib/session-remap';
 import { surfaceIdMinter } from '../../lib/surface-ids';
 import { getPendingKills, pendingKillKey, restorePendingKill, type PendingKill } from '../../lib/pending-kills';
 import { restoreSession } from '../../lib/session-restore';
-import { createWorkspace, generateWorkspaceId, getActiveWorkspaceId, moveWorkspace, setActiveWorkspace, workspaceRefFor } from '../../lib/workspace-store';
+import { createWorkspace, generateWorkspaceId, getActiveWorkspaceId, moveWorkspace, setActiveWorkspace } from '../../lib/workspace-store';
 import type { DorControlRequest } from './use-dor-control';
 import { wallBootFromResult } from './wall-types';
 import { getWallHandle } from './wall-handles';
@@ -57,16 +56,16 @@ function reopenSurface(record: SurfaceReopenRecord, gesture: boolean): ReopenRes
     // say why rather than that there is nothing to reopen.
     pushReopenRecord(record);
     if (gesture) return null;
-    throw new Error(mountingRefusal(workspaceRefFor(getActiveWorkspaceId())));
+    throw new Error(mountingRefusal(getActiveWorkspaceId()));
   }
   if (gesture) setActiveWorkspace(handle.workspaceId);
   const id = handle.reopenSurface(record, gesture);
-  return { status: 'reopened', kind: 'surface', surfaceId: id, surfaceRef: surfaceRefForId(id) };
+  return { status: 'reopened', kind: 'surface', surfaceId: id };
 }
 
 /**
  * A closed Workspace comes back as a new one, at its strip slot, through cold
- * restore: new Sessions and Surface ids, so new refs.
+ * restore: new Sessions and Surface ids.
  */
 async function reopenWorkspace(record: WorkspaceReopenRecord, gesture: boolean): Promise<ReopenResponse> {
   const { name, nameIsAuto, session } = record.workspace;
@@ -77,16 +76,16 @@ async function reopenWorkspace(record: WorkspaceReopenRecord, gesture: boolean):
   setWorkspaceBootPlan(id, restored ? wallBootFromResult(restored) : {});
   createWorkspace({ id, name, nameIsAuto, activate: gesture, alertDelivery: session.alertDelivery });
   moveWorkspace(id, record.index);
-  return { status: 'reopened', kind: 'workspace', workspaceId: id, workspaceRef: workspaceRefFor(id) };
+  return { status: 'reopened', kind: 'workspace', workspaceId: id };
 }
 
 function restoredResponse(kill: PendingKill): ReopenResponse {
   if (kill.kind === 'workspace') {
-    return { status: 'reopened', kind: 'workspace', workspaceId: kill.id, workspaceRef: workspaceRefFor(kill.id) };
+    return { status: 'reopened', kind: 'workspace', workspaceId: kill.id };
   }
   // A helper comes back on its parent, the Surface a caller can name.
   const surfaceId = kill.surfaceId ?? kill.id;
-  return { status: 'reopened', kind: 'surface', surfaceId, surfaceRef: surfaceRefForId(surfaceId) };
+  return { status: 'reopened', kind: 'surface', surfaceId };
 }
 
 /** `dor reopen` (`window.reopen`): focus-neutral, and an empty stack refuses. */

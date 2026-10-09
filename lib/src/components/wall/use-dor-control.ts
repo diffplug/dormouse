@@ -7,7 +7,7 @@ import { getPlatform, PLATFORM_STRING } from '../../lib/platform';
 import { currentWindowRef, getActiveWorkspaceId } from '../../lib/workspace-store';
 import type { WorkspaceId } from '../../lib/session-types';
 import type { DorControlRequestPayload, DorControlResult } from 'dor/protocol';
-import { parseSurfaceTarget, SURFACE_CONTROL_METHODS, surfaceRefForId, unsupportedControlMethodMessage, type ParsedSurfaceTarget } from 'dor/protocol';
+import { parseSurfaceTarget, SURFACE_CONTROL_METHODS, unsupportedControlMethodMessage, type ParsedSurfaceTarget } from 'dor/protocol';
 import type {
   BrowserAutomationProvider,
   Surface as DorSurface,
@@ -196,7 +196,7 @@ function matchesTarget(
 }
 
 function renderSurfaceForError(surface: DorSurface): string {
-  return `${surface.ref} ${JSON.stringify(surface.title)}`;
+  return `${surface.id} ${JSON.stringify(surface.title)}`;
 }
 
 // Resolve exactly one match: ok for a single hit, an ambiguity error for many,
@@ -221,7 +221,10 @@ function resolveSurfaceTarget(
   // drops it before dispatching (`requestForWall`), so an omitted target falls
   // back to this Workspace's focused Surface.
   const resolvedTarget = target ?? callerSurfaceId ?? 'surface:focused';
-  const classified = parseSurfaceTarget(resolvedTarget);
+  // The caller is the host's identity for the invoking Surface, never typed.
+  const classified: ParsedSurfaceTarget = target === undefined && callerSurfaceId !== undefined
+    ? { kind: 'id', id: callerSurfaceId }
+    : parseSurfaceTarget(resolvedTarget);
   if (classified.kind === 'invalid') return { ok: false, message: classified.message };
   const matches = surfaces.filter((surface) => matchesTarget(classified, surface, callerSurfaceId));
   const single = pickSingleMatch(matches, resolvedTarget);
@@ -602,7 +605,7 @@ export function useDorControl({
   closeSurface,
   revealSurface,
   previewSlot,
-  workspaceRef,
+  answeringWorkspaceId,
   workspaceScope,
 }: {
   /** The Lath engine — visible-pane projection (`lath.listPanes()`), aspect-ratio
@@ -656,11 +659,11 @@ export function useDorControl({
   revealSurface: (id: string, options?: { focusNeutral?: boolean }) => boolean;
   /** This Wall's preview slot pinning (`docs/specs/dor-tool.md` -> Preview slot). */
   previewSlot: PreviewSlotPin;
-  /** This Wall's own positional Workspace ref, reported by `dor list` so a caller
-   *  learns which Workspace answered (docs/specs/dor-cli.md → "Handle Model").
+  /** This Wall's Workspace id, reported by `dor list` so a caller learns which
+   *  Workspace answered (docs/specs/dor-cli.md → "Handle Model").
    *  The Window's own ref rides beside it, so `dor list` says which Window
    *  answered too (`currentWindowRef`). */
-  workspaceRef: () => string;
+  answeringWorkspaceId: () => string;
   /** This Wall's Workspace id, which namespaces the managed browser `--key`
    *  sessions it answers for; `undefined` on a bare Wall, which mints a scope
    *  of its own (docs/specs/dor-browser.md → Managed identity). */
@@ -720,7 +723,7 @@ export function useDorControl({
     const target = requireListedSurface(surfaceParam, detail);
     if (!target) return null;
     if (!hasTerminal(target.kind)) {
-      detail.respond({ ok: false, error: `surface '${target.ref}' has no terminal (kind: ${target.kind})` });
+      detail.respond({ ok: false, error: `surface '${target.id}' has no terminal (kind: ${target.kind})` });
       return null;
     }
     return target;
@@ -736,7 +739,7 @@ export function useDorControl({
     const target = requireListedSurface(surfaceParam, detail);
     if (!target) return null;
     if (!hasBrowser(target.kind)) {
-      detail.respond({ ok: false, error: `surface '${target.ref}' has no browser (kind: ${target.kind})` });
+      detail.respond({ ok: false, error: `surface '${target.id}' has no browser (kind: ${target.kind})` });
       return null;
     }
     return target;
@@ -755,11 +758,11 @@ export function useDorControl({
     if (rendering !== provider) {
       // Name the command that does work on it, so the caller's next try lands.
       const remedy = rendering
-        ? `drive it with ${BROWSER_PROVIDER_GUI[rendering].cli} --surface ${target.ref}`
+        ? `drive it with ${BROWSER_PROVIDER_GUI[rendering].cli} --surface ${target.id}`
         : `an iframe cannot be driven; open its page with dor agent-browser open ${browserUrlFromParams(lath.getMeta(target.id)?.params) ?? '<url>'}`;
       detail.respond({
         ok: false,
-        error: `surface '${target.ref}' is not ${provider} rendered (render_mode: ${target.renderMode}) — ${remedy}`,
+        error: `surface '${target.id}' is not ${provider} rendered (render_mode: ${target.renderMode}) — ${remedy}`,
       });
       return null;
     }
@@ -770,7 +773,7 @@ export function useDorControl({
     if (!session) {
       // A pane whose launch has not yet named its session
       // (docs/specs/dor-browser.md → "Browser Connection").
-      detail.respond({ ok: false, error: `surface '${target.ref}' has no ${provider} session yet` });
+      detail.respond({ ok: false, error: `surface '${target.id}' has no ${provider} session yet` });
       return null;
     }
     return session;
@@ -1045,7 +1048,7 @@ export function useDorControl({
         ok: true,
         result: {
           surfaces,
-          workspaceRef: workspaceRef(),
+          workspaceId: answeringWorkspaceId(),
           windowRef: currentWindowRef(),
         },
       });
@@ -1089,7 +1092,6 @@ export function useDorControl({
         result: {
           status: 'created',
           surfaceId: result.value.id,
-          surfaceRef: surfaceRefForId(result.value.id),
           direction,
           minimized: result.value.minimized,
           ...(command ? { command } : {}),
@@ -1181,7 +1183,6 @@ export function useDorControl({
           result: {
             status,
             surfaceId: surface.surfaceId,
-            surfaceRef: surfaceRefForId(surface.surfaceId),
             command: surface.command,
             cwd: surface.cwd,
             minimized: surface.minimized,
@@ -1460,7 +1461,7 @@ export function useDorControl({
             return unavailable();
           }
           if (!interrupted.ok) {
-            detail.respond({ ok: false, error: `surface '${surfaceRefForId(slotId)}' ${interrupted.message}` });
+            detail.respond({ ok: false, error: `surface '${slotId}' ${interrupted.message}` });
             return true;
           }
           const gone = workspaceGone();
@@ -1543,7 +1544,7 @@ export function useDorControl({
             if (match.id === callerId && !surfaceRunsCommand(matchState, matchedCommand, matchedCwd)) {
               detail.respond({
                 ok: false,
-                error: `surface '${surfaceRefForId(match.id)}' is this tool's own pane, which Dormouse is restarting; try again once it runs`,
+                error: `surface '${match.id}' is this tool's own pane, which Dormouse is restarting; try again once it runs`,
               });
               return;
             }
@@ -1557,7 +1558,7 @@ export function useDorControl({
             // request for this key finds it running.
             if (rehydrated) {
               if (await waitForNewToolCommand(match.id, rehydrated.command, rehydrated.cwd, detail.signal) !== 'ready') {
-                detail.respond({ ok: false, error: `surface '${surfaceRefForId(match.id)}' command did not restart` });
+                detail.respond({ ok: false, error: `surface '${match.id}' command did not restart` });
                 return;
               }
             } else if (idle) {
@@ -1565,7 +1566,7 @@ export function useDorControl({
               if (!restarted.ok) {
                 detail.respond({
                   ok: false,
-                  error: `surface '${surfaceRefForId(match.id)}' ${restarted.message}`,
+                  error: `surface '${match.id}' ${restarted.message}`,
                 });
                 return;
               }
@@ -1692,7 +1693,7 @@ export function useDorControl({
         if (booleanParam(params.restart)) {
           const restarted = await restartSurfaceInPlace(existingId, command, cwd, detail.signal);
           if (!restarted.ok) {
-            detail.respond({ ok: false, error: `surface '${surfaceRefForId(existingId)}' ${restarted.message}` });
+            detail.respond({ ok: false, error: `surface '${existingId}' ${restarted.message}` });
             return;
           }
           detail.respond({
@@ -1700,7 +1701,6 @@ export function useDorControl({
             result: {
               status: 'restarted',
               surfaceId: existingId,
-              surfaceRef: surfaceRefForId(existingId),
               command,
               cwd,
               minimized,
@@ -1713,7 +1713,6 @@ export function useDorControl({
           result: {
             status: 'existing',
             surfaceId: existingId,
-            surfaceRef: surfaceRefForId(existingId),
             command,
             cwd,
             minimized,
@@ -1773,7 +1772,6 @@ export function useDorControl({
         result: {
           status: 'created',
           surfaceId: result.value.id,
-          surfaceRef: surfaceRefForId(result.value.id),
           command,
           cwd,
           minimized: result.value.minimized,
@@ -1799,7 +1797,6 @@ export function useDorControl({
         result: {
           status: 'sent',
           surfaceId: target.id,
-          surfaceRef: target.ref,
           inputCount: typeof params.inputCount === 'number' ? params.inputCount : 1,
         },
       });
@@ -1815,9 +1812,8 @@ export function useDorControl({
       detail.respond({
         ok: true,
         result: {
-          workspaceRef: workspaceRef(),
+          workspaceId: answeringWorkspaceId(),
           surfaceId: target.id,
-          surfaceRef: target.ref,
           text,
         },
       });
@@ -1859,15 +1855,14 @@ export function useDorControl({
       // in-flight entry, and a client that is somehow still listening gets an
       // answer instead of blocking to its own deadline.
       if (outcome.kind === 'cancelled') {
-        detail.respond({ ok: false, error: `await on '${target.ref}' was cancelled by the host` });
+        detail.respond({ ok: false, error: `await on '${target.id}' was cancelled by the host` });
         return;
       }
       detail.respond({
         ok: true,
         result: {
-          workspaceRef: workspaceRef(),
+          workspaceId: answeringWorkspaceId(),
           surfaceId: target.id,
-          surfaceRef: target.ref,
           outcome: outcome.kind,
           ...(outcome.kind === 'resolved' ? { cause: outcome.cause } : {}),
           // The host measured the wait; re-measuring here would only add the
@@ -1906,7 +1901,7 @@ export function useDorControl({
       if (confirmation.mode === 'if-read') {
         const text = readSurfaceText(target.id, undefined, false);
         if (!text.includes(confirmation.text)) {
-          detail.respond({ ok: false, error: `surface '${target.ref}' read text did not contain confirmation text` });
+          detail.respond({ ok: false, error: `surface '${target.id}' read text did not contain confirmation text` });
           return;
         }
       }
@@ -1921,7 +1916,6 @@ export function useDorControl({
         result: {
           status: 'killed',
           surfaceId: target.id,
-          surfaceRef: target.ref,
         },
       });
       return;
@@ -1970,7 +1964,6 @@ export function useDorControl({
         result: {
           status: result.value.status,
           surfaceId: result.value.id,
-          surfaceRef: surfaceRefForId(result.value.id),
           url,
           minimized: booleanParam(params.minimized),
         },
@@ -2134,7 +2127,7 @@ export function useDorControl({
         const stored = (lath.getMeta(targetId)?.params as { browserViewport?: unknown } | undefined)?.browserViewport;
         const effective = setting ?? (isBrowserViewportSetting(stored) ? stored : { mode: 'fixed', width: 1440, height: 900 });
         detail.respond({ ok: true, result: {
-          surfaceId: targetId, surfaceRef: surfaceRefForId(targetId), provider, renderMode: mode.mode,
+          surfaceId: targetId, provider, renderMode: mode.mode,
           requested: effective, ...(measured.viewport ? { actual: measured.viewport } : {}), ready: measured.ok && !!measured.viewport,
         } });
       } catch (error) {
@@ -2228,7 +2221,6 @@ export function useDorControl({
         result: {
           status: result.status,
           surfaceId: result.surfaceId,
-          surfaceRef: surfaceRefForId(result.surfaceId),
           session,
           minimized: result.minimized,
         },
@@ -2254,13 +2246,13 @@ export function useDorControl({
       // LAN/Tailnet address). Shared with the pane context menu's port list.
       const entries = listenerUrlsByPort(ports);
       if (entries.length === 0) {
-        detail.respond({ ok: false, error: `surface '${target.ref}' is not serving any port` });
+        detail.respond({ ok: false, error: `surface '${target.id}' is not serving any port` });
         return;
       }
       if (entries.length > 1) {
         detail.respond({
           ok: false,
-          error: `surface '${target.ref}' is serving multiple ports (${entries.map((entry) => entry.port).join(', ')}); open one explicitly, e.g. ${entries[0].url}`,
+          error: `surface '${target.id}' is serving multiple ports (${entries.map((entry) => entry.port).join(', ')}); open one explicitly, e.g. ${entries[0].url}`,
         });
         return;
       }
@@ -2268,7 +2260,6 @@ export function useDorControl({
         ok: true,
         result: {
           surfaceId: target.id,
-          surfaceRef: target.ref,
           port: entries[0].port,
           url: entries[0].url,
         },
@@ -2277,7 +2268,7 @@ export function useDorControl({
     }
 
     detail.respond({ ok: false, error: unsupportedControlMethodMessage(detail.method) });
-  }, [beginPreviewSwitch, browserKeyScope, buildDorSurfaces, buildDorSurfaceList, closeSurface, createContentSurface, createSplitSurface, ensureBrowserSurface, findBrowserSurface, findSurfaceIdRunningCommand, findSurfaceByParams, isTargetable, revealSurface, previewSlot, restoreInterruptedRun, restoreOnLatePrompt, supersedePreviews, isClosingWorkspace, requireAutomationSession, requireBrowserSurface, requireListedSurface, requireTerminalSurface, resolveListedSurface, resolveVisibleSurface, lath, nav, workspaceRef, workspaceScope]);
+  }, [beginPreviewSwitch, browserKeyScope, buildDorSurfaces, buildDorSurfaceList, closeSurface, createContentSurface, createSplitSurface, ensureBrowserSurface, findBrowserSurface, findSurfaceIdRunningCommand, findSurfaceByParams, isTargetable, revealSurface, previewSlot, restoreInterruptedRun, restoreOnLatePrompt, supersedePreviews, isClosingWorkspace, requireAutomationSession, requireBrowserSurface, requireListedSurface, requireTerminalSurface, resolveListedSurface, resolveVisibleSurface, lath, nav, answeringWorkspaceId, workspaceScope]);
 
   return { findSurfaceByParams, updateSurfaceParams, handleDorControl };
 }

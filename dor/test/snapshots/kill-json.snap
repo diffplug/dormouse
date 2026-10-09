@@ -2,8 +2,7 @@ exitCode: 0
 stdout:
 {
   "status": "killed",
-  "surface_id": "surface-2",
-  "surface_ref": "surface:2"
+  "surface_id": "surface:2"
 }
 
 stderr:

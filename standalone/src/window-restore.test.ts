@@ -197,7 +197,7 @@ describe("restoreWindowOrFresh", () => {
   it("remaps a reopened window to fresh ids before it restores, and saves them at once", async () => {
     const counting = (prefix: string, start: number) => {
       let next = start;
-      return async (count: number) => Array.from({ length: count }, () => `${prefix}-${next++}`);
+      return async (count: number) => Array.from({ length: count }, () => `${prefix}:${next++}`);
     };
     await installSurfaceIdPool(counting("surface", 50), 0);
     await installWorkspaceIdPool(counting("workspace", 20));
@@ -205,10 +205,10 @@ describe("restoreWindowOrFresh", () => {
       const closed: PersistedWindow = {
         version: 2,
         workspaces: [
-          { id: "workspace-3", name: "A", nameIsAuto: false, session: sessionOver("surface-4", "surface-5") },
-          { id: "workspace-7", name: "B", nameIsAuto: false, session: sessionOver("surface-9") },
+          { id: "workspace:3", name: "A", nameIsAuto: false, session: sessionOver("surface:4", "surface:5") },
+          { id: "workspace:7", name: "B", nameIsAuto: false, session: sessionOver("surface:9") },
         ],
-        activeWorkspaceId: "workspace-7",
+        activeWorkspaceId: "workspace:7",
         reopened: true,
       };
       const { platform, saves } = fakePlatform([], closed);
@@ -217,12 +217,12 @@ describe("restoreWindowOrFresh", () => {
 
       const workspaces = getWorkspacesSnapshot();
       const ids = workspaces.workspaces.map((workspace) => workspace.id);
-      expect(ids.every((id) => /^workspace-\d+$/.test(id) && !["workspace-3", "workspace-7"].includes(id))).toBe(true);
+      expect(ids.every((id) => /^workspace:\d+$/.test(id) && !["workspace:3", "workspace:7"].includes(id))).toBe(true);
       expect(workspaces.activeId).toBe(ids[1]);
       expect(Object.keys(plans)).toEqual(ids);
       const panes = Object.values(plans).flatMap((plan) => plan.initialPaneIds ?? []);
       expect(panes).toHaveLength(3);
-      expect(panes.every((id) => /^surface-\d+$/.test(id) && !["surface-4", "surface-5", "surface-9"].includes(id))).toBe(true);
+      expect(panes.every((id) => /^surface:\d+$/.test(id) && !["surface:4", "surface:5", "surface:9"].includes(id))).toBe(true);
       // On disk before anything else can read the closed window's ids again.
       const written = saves[saves.length - 1];
       expect(written.workspaces.map((workspace) => workspace.id)).toEqual(ids);
@@ -234,7 +234,7 @@ describe("restoreWindowOrFresh", () => {
   });
 
   it("mints a unique first Workspace id for every fresh Window", async () => {
-    // Two windows that both started fresh must not both hold `workspace-1`:
+    // Two windows that both started fresh must not both hold `workspace:1`:
     // each writes its own blob, and a relaunch would then meet the same
     // Workspace id twice and refuse the whole restore.
     const first = fakePlatform([], null);

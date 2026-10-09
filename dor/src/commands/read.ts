@@ -45,9 +45,8 @@ Text mode prints terminal text directly.
 
 JSON output:
   {
-    "workspace_ref": "workspace:1",
+    "workspace_id": "workspace:1",
     "surface_id": "...",
-    "surface_ref": "surface:3",
     "text": "..."
   }`,
     },
@@ -94,9 +93,8 @@ function parseLineCount(input: string): number {
 function renderReadResponse(response: ReadSurfaceResponse, json: boolean): string {
   if (json) {
     return renderJson({
-      workspace_ref: response.workspaceRef,
+      workspace_id: response.workspaceId,
       surface_id: response.surfaceId,
-      surface_ref: response.surfaceRef,
       text: response.text,
     });
   }

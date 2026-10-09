@@ -4,7 +4,7 @@ Invocation: `dor split --help`
 
 ```text
 USAGE
-  dor split [--left|--right|--up|--down|--auto] [--json] [--minimize] [--surface id|ref] [--workspace ref] [-- <command>...]
+  dor split [--left|--right|--up|--down|--auto] [--json] [--minimize] [--surface handle] [--workspace ref] [-- <command>...]
   dor split --help
 
 If no direction is provided, --auto is used. --auto chooses right when the target surface is wide, down when it is narrow, and right when the target is minimized.
@@ -33,8 +33,7 @@ Text output:
 JSON output:
   {
     "status": "created",
-    "surface_id": "surface-2",
-    "surface_ref": "surface:2",
+    "surface_id": "surface:2",
     "direction": "right",
     "minimized": false,
     "command": "pnpm dev"

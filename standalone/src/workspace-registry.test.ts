@@ -1,4 +1,5 @@
-import workspaceRefCases from "../scripts/workspace-ref-cases.json?raw";
+import workspaceIdCases from "../scripts/workspace-id-cases.json?raw";
+import { workspaceIdNumber } from "dor/protocol";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createWorkspace,
@@ -6,7 +7,6 @@ import {
   renameWorkspace,
   resetWorkspaces,
   setActiveWorkspace,
-  workspaceRefFor,
 } from "dormouse-lib/lib/workspace-store";
 import { mintSurfaceId, resetSurfaceIdPool } from "dormouse-lib/lib/surface-ids";
 import type { PersistedSession, PersistedWindow } from "dormouse-lib/lib/session-types";
@@ -22,11 +22,11 @@ function host(report?: () => Promise<unknown>) {
   const invoke = vi.fn(async (cmd: string, args?: Record<string, unknown>): Promise<unknown> => {
     if (cmd === "workspace_reserve_ids") {
       const count = Number(args?.count);
-      return Array.from({ length: count }, (_, i) => `workspace-${50 + i}`);
+      return Array.from({ length: count }, (_, i) => `workspace:${50 + i}`);
     }
     if (cmd === "surface_reserve_ids") {
       const first = Math.max(1000, Number(args?.floor) + 1);
-      return Array.from({ length: Number(args?.count) }, (_, i) => `surface-${first + i}`);
+      return Array.from({ length: Number(args?.count) }, (_, i) => `surface:${first + i}`);
     }
     if (cmd === "workspace_registry") return { revision: 3, windows: [{ label: "main", workspaces: [] }] };
     if (cmd === "workspace_report") return report?.() ?? null;
@@ -66,25 +66,25 @@ describe("workspace registry", () => {
     }) as PersistedSession;
     const restored: PersistedWindow = {
       version: 2,
-      activeWorkspaceId: "workspace-1",
+      activeWorkspaceId: "workspace:1",
       workspaces: [
-        { id: "workspace-1", name: "Workspace 1", nameIsAuto: true, session: session(["surface-3"], ["surface-1500"]) },
-        { id: "workspace-2", name: "Workspace 2", nameIsAuto: true, session: session(["surface-1200"], []) },
+        { id: "workspace:1", name: "Workspace 1", nameIsAuto: true, session: session(["surface:3"], ["surface:1500"]) },
+        { id: "workspace:2", name: "Workspace 2", nameIsAuto: true, session: session(["surface:1200"], []) },
       ],
     };
     uninstall = await installWorkspaceRegistry(h, restored);
     expect(h.invoke).toHaveBeenCalledWith("surface_reserve_ids", { count: 8, floor: 1500 });
-    expect(mintSurfaceId()).toBe("surface-1501");
+    expect(mintSurfaceId()).toBe("surface:1501");
   });
 
   it("mints from the host's block and reports the store once per change, coalesced", async () => {
     const h = host();
     uninstall = await installWorkspaceRegistry(h, null);
     expect(h.invoke).toHaveBeenCalledWith("workspace_reserve_ids", { count: 4 });
-    expect(generateWorkspaceId()).toBe("workspace-50");
+    expect(generateWorkspaceId()).toBe("workspace:50");
     await Promise.resolve();
     // The boot report: the store as it stood at install.
-    expect(h.reports()).toEqual([[{ id: "workspace-1", name: "Workspace 1", active: true }]]);
+    expect(h.reports()).toEqual([[{ id: "workspace:1", name: "Workspace 1", active: true }]]);
 
     const created = createWorkspace({ name: "build" });
     renameWorkspace(created.id, "docs");
@@ -93,8 +93,8 @@ describe("workspace registry", () => {
     // Three mutations in one task: one report, with the final state.
     expect(h.reports()).toHaveLength(2);
     expect(h.reports()[1]).toEqual([
-      { id: "workspace-1", name: "Workspace 1", active: false },
-      { id: "workspace-51", name: "docs", active: true },
+      { id: "workspace:1", name: "Workspace 1", active: false },
+      { id: "workspace:51", name: "docs", active: true },
     ]);
   });
 
@@ -104,7 +104,7 @@ describe("workspace registry", () => {
     expect(getRegistrySnapshot().revision).toBe(3);
     h.push({ revision: 2, windows: [] });
     expect(getRegistrySnapshot().revision).toBe(3);
-    h.push({ revision: 4, windows: [{ label: "ws-2", workspaces: [{ id: "workspace-9", ref: "workspace:9", name: "n", active: true }] }] });
+    h.push({ revision: 4, windows: [{ label: "ws-2", workspaces: [{ id: "workspace:9", name: "n", active: true }] }] });
     expect(getRegistrySnapshot().windows[0].label).toBe("ws-2");
     acceptRegistrySnapshot({ revision: 4, windows: [] });
     expect(getRegistrySnapshot().windows).toEqual([]);
@@ -118,8 +118,8 @@ describe("workspace registry", () => {
     uninstall = await installWorkspaceRegistry(h, null);
     reject(new Error('bridge unavailable'));
     await new Promise(resolve => setTimeout(resolve, 0));
-    renameWorkspace('workspace-1', 'changed');
-    renameWorkspace('workspace-1', 'Workspace 1');
+    renameWorkspace('workspace:1', 'changed');
+    renameWorkspace('workspace:1', 'Workspace 1');
     await Promise.resolve();
     expect(h.reports()).toHaveLength(2);
     expect(h.reports()[1]).toEqual(h.reports()[0]);
@@ -132,22 +132,21 @@ describe("workspace registry", () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     const h = host(report);
     uninstall = await installWorkspaceRegistry(h, null);
-    renameWorkspace('workspace-1', 'B');
+    renameWorkspace('workspace:1', 'B');
     await Promise.resolve();
-    renameWorkspace('workspace-1', 'Workspace 1');
+    renameWorkspace('workspace:1', 'Workspace 1');
     await Promise.resolve();
     reject(new Error('late A failure'));
     await new Promise(resolve => setTimeout(resolve, 0));
-    renameWorkspace('workspace-1', 'temporary');
-    renameWorkspace('workspace-1', 'Workspace 1');
+    renameWorkspace('workspace:1', 'temporary');
+    renameWorkspace('workspace:1', 'Workspace 1');
     await Promise.resolve();
     expect(h.reports()).toHaveLength(3);
   });
 
-  it('shares canonical numbered and opaque refs with Rust and the browser harness', async () => {
-    uninstall = await installWorkspaceRegistry(host(), null);
-    const cases: { id: string; ref: string }[] = JSON.parse(workspaceRefCases);
-    for (const { id, ref } of cases) expect(workspaceRefFor(id)).toBe(ref);
+  it('reads id numbers as Rust and the browser harness do', () => {
+    const cases: { id: string; number: number | null }[] = JSON.parse(workspaceIdCases);
+    for (const { id, number } of cases) expect(workspaceIdNumber(id), id).toBe(number);
   });
 
 });

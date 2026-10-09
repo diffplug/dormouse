@@ -164,7 +164,7 @@ export interface PersistedWindow {
 }
 
 /** Default id/name for the single Workspace a fresh Window is created with. */
-export const DEFAULT_WORKSPACE_ID: WorkspaceId = 'workspace-1';
+export const DEFAULT_WORKSPACE_ID: WorkspaceId = 'workspace:1';
 export const DEFAULT_WORKSPACE_NAME = 'Workspace 1';
 
 type PersistedSessionInput = Omit<PersistedSession, 'alertDelivery'> & { alertDelivery?: unknown };

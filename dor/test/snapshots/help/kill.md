@@ -20,7 +20,6 @@ JSON output:
   {
     "status": "killed",
     "surface_id": "...",
-    "surface_ref": "surface:3"
   }
 
 FLAGS

@@ -3,8 +3,7 @@ stdout:
 {
   "surfaces": [
     {
-      "id": "surface-1",
-      "ref": "surface:1",
+      "id": "surface:1",
       "kind": "terminal",
       "has_terminal": true,
       "has_browser": false,
@@ -19,11 +18,10 @@ stdout:
       "ringing": false,
       "todo": false,
       "awaited": false,
-      "workspace_ref": "workspace:1"
+      "workspace_id": "workspace:1"
     },
     {
-      "id": "surface-3",
-      "ref": "surface:3",
+      "id": "surface:3",
       "kind": "browser",
       "has_terminal": false,
       "has_browser": true,
@@ -38,11 +36,10 @@ stdout:
       "ringing": false,
       "todo": false,
       "awaited": false,
-      "workspace_ref": "workspace:2"
+      "workspace_id": "workspace:2"
     },
     {
-      "id": "surface-4",
-      "ref": "surface:4",
+      "id": "surface:4",
       "kind": "terminal",
       "has_terminal": true,
       "has_browser": false,
@@ -57,21 +54,18 @@ stdout:
       "ringing": true,
       "todo": false,
       "awaited": false,
-      "workspace_ref": "workspace:2"
+      "workspace_id": "workspace:2"
     }
   ],
-  "caller_surface_ref": null,
   "caller_surface_id": null,
-  "focused_surface_ref": "surface:1",
-  "focused_surface_id": "surface-1",
+  "focused_surface_id": "surface:1",
   "window_ref": "window:1",
-  "workspace_ref": "workspace:1",
-  "caller_workspace_ref": null,
-  "focused_workspace_ref": "workspace:1",
+  "workspace_id": "workspace:1",
+  "caller_workspace_id": null,
+  "focused_workspace_id": "workspace:1",
   "workspaces": [
     {
-      "ref": "workspace:1",
-      "id": "workspace-1",
+      "id": "workspace:1",
       "name": "Workspace 1",
       "pinned": false,
       "active": true,
@@ -80,8 +74,7 @@ stdout:
       "count": 0
     },
     {
-      "ref": "workspace:2",
-      "id": "workspace-2b1c",
+      "id": "workspace:2",
       "name": "build",
       "pinned": true,
       "active": false,

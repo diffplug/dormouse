@@ -612,15 +612,15 @@ describe('VSCodeAdapter Surface ids', () => {
   afterEach(() => { vi.unstubAllGlobals(); resetSurfaceIdPool(); });
 
   it('init mints from the extension host, above every Surface the webview restored', async () => {
-    const saved = { version: 4, panes: [{ id: 'surface-41', cwd: null, title: 'shell', untouched: true }], doors: [{ id: 'surface-9', title: 'docs' }] };
+    const saved = { version: 4, panes: [{ id: 'surface:41', cwd: null, title: 'shell', untouched: true }], doors: [{ id: 'surface:9', title: 'docs' }] };
     vi.stubGlobal('acquireVsCodeApi', () => ({ postMessage, getState: () => saved, setState: vi.fn() }));
     const adapter = new VSCodeAdapter();
     const ready = adapter.init();
     const request = postMessage.mock.calls.at(-1)![0];
     expect(request).toMatchObject({ type: 'surface:reserveIds', count: 8, floor: 41 });
-    windowTarget.dispatchEvent(hostMessage({ type: 'surface:reservedIds', requestId: request.requestId, ids: Array.from({ length: 8 }, (_, i) => `surface-${1042 + i}`) }));
+    windowTarget.dispatchEvent(hostMessage({ type: 'surface:reservedIds', requestId: request.requestId, ids: Array.from({ length: 8 }, (_, i) => `surface:${1042 + i}`) }));
     await ready;
-    expect(mintSurfaceId()).toBe('surface-1042');
+    expect(mintSurfaceId()).toBe('surface:1042');
   });
 });
 

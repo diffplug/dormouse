@@ -2,8 +2,7 @@ exitCode: 0
 stdout:
 {
   "status": "sent",
-  "surface_id": "surface-2",
-  "surface_ref": "surface:2",
+  "surface_id": "surface:2",
   "input_count": 1
 }
 
