@@ -33,12 +33,6 @@ pub struct Registry {
     pub windows: HashMap<String, Vec<Entry>>,
 }
 
-/// The counter's number in a `workspace:<n>` id, if it has one; a fallback
-/// `workspace:<uuid>` has none.
-pub fn id_number(id: &str) -> Option<u64> {
-    crate::ids::Kind::Workspace.number(id)
-}
-
 /// Every Workspace id a persisted window snapshot names.
 pub fn snapshot_ids(snapshot: &JsonValue) -> Vec<String> {
     snapshot
@@ -74,26 +68,17 @@ pub fn forget_window(registry: &mut Registry, label: &str) -> bool {
     true
 }
 
-/// What a `dor` target names: `workspace:<n>` or bare `<n>` is an id's
-/// number; anything else is an exact id, else a name.
-enum Target<'a> {
-    Number(u64),
-    Name(&'a str),
-}
-
-fn parse_target(target: &str) -> Target<'_> {
-    let bare = target
-        .trim()
-        .strip_prefix("workspace:")
-        .unwrap_or(target.trim())
-        .trim();
-    // Mirrors `NUMERIC_WORKSPACE_REF` in `dor/src/protocol.ts`: a ref is a
-    // digit run with no leading zero, so a Workspace named "007" stays a name
-    // rather than routing as `workspace:7`.
-    match bare.parse::<u64>() {
-        Ok(n) if !bare.starts_with('0') && bare.bytes().all(|b| b.is_ascii_digit()) => Target::Number(n),
-        _ => Target::Name(bare),
-    }
+/// What a `dor` target names: the Workspace id it spells, prefix restored,
+/// and the name it reads as unless it reads as a number. Mirrors
+/// `parseWorkspaceRef` in `dor/src/protocol.ts`, `NUMERIC_WORKSPACE_REF` included:
+/// a number is a digit run with no leading zero, so a Workspace named "007"
+/// stays a name rather than routing as `workspace:7`.
+fn parse_target(target: &str) -> (String, Option<&str>) {
+    let prefix = crate::ids::Kind::Workspace.prefix();
+    let trimmed = target.trim();
+    let bare = trimmed.strip_prefix(prefix).unwrap_or(trimmed).trim();
+    let numeric = !bare.is_empty() && !bare.starts_with('0') && bare.bytes().all(|b| b.is_ascii_digit());
+    (format!("{prefix}{bare}"), (!numeric).then_some(bare))
 }
 
 /// The window holding the Workspace a `dor` target names, or `None` when no
@@ -101,31 +86,20 @@ fn parse_target(target: &str) -> Target<'_> {
 /// falls through to the caller's own window: it refuses a name duplicated
 /// there, and otherwise resolves its own, so a local Workspace wins.
 pub fn window_of<'a>(registry: &'a Registry, target: &str) -> Option<&'a str> {
-    match parse_target(target) {
-        Target::Number(n) => registry.windows.iter().find_map(|(label, entries)| {
-            entries
-                .iter()
-                .any(|entry| id_number(&entry.id) == Some(n))
-                .then_some(label.as_str())
-        }),
-        Target::Name(name) => {
-            // Exact ids win over mutable names in every window.
-            let id = format!("workspace:{name}");
-            if let Some((label, _)) = registry.windows.iter().find(|(_, entries)| {
-                entries.iter().any(|entry| entry.id == id)
-            }) {
-                return Some(label.as_str());
-            }
-            let mut holders = registry.windows.iter().filter_map(|(label, entries)| {
-                entries
-                    .iter()
-                    .any(|entry| entry.name == name)
-                    .then_some(label.as_str())
-            });
-            let first = holders.next()?;
-            holders.next().is_none().then_some(first)
-        }
+    let (id, name) = parse_target(target);
+    // Exact ids win over mutable names in every window.
+    if let Some((label, _)) = registry.windows.iter().find(|(_, entries)| entries.iter().any(|entry| entry.id == id)) {
+        return Some(label.as_str());
     }
+    let name = name?;
+    let mut holders = registry.windows.iter().filter_map(|(label, entries)| {
+        entries
+            .iter()
+            .any(|entry| entry.name == name)
+            .then_some(label.as_str())
+    });
+    let first = holders.next()?;
+    holders.next().is_none().then_some(first)
 }
 
 /// What every webview receives after a change, ordered by label so the strip
@@ -164,7 +138,7 @@ mod tests {
         assert!(!cases.is_empty());
         for case in cases {
             let id = case["id"].as_str().unwrap();
-            assert_eq!(id_number(id), case["number"].as_u64(), "{id}");
+            assert_eq!(crate::ids::Kind::Workspace.number(id), case["number"].as_u64(), "{id}");
         }
     }
 
@@ -236,7 +210,7 @@ mod tests {
             vec![entry("workspace:7", "Build", true), entry("workspace:8", "0", false)],
         );
         report(&mut registry, "ws-2", vec![entry("workspace:9", "007", true)]);
-        // `NUMERIC_WORKSPACE_REF` reads neither as a ref, so each routes to
+        // `NUMERIC_WORKSPACE_REF` reads neither as a number, so each routes to
         // the window holding the Workspace so named, never to `workspace:7`.
         assert_eq!(window_of(&registry, "007"), Some("ws-2"));
         assert_eq!(window_of(&registry, "workspace:007"), Some("ws-2"));

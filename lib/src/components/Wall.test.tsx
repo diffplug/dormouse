@@ -1730,7 +1730,7 @@ describe('Wall on the Lath engine', () => {
     }
   });
 
-  it('gives a shell selection that replaces an untouched pane a new Surface and ref', async () => {
+  it('gives a shell selection that replaces an untouched pane a new Surface', async () => {
     await act(async () => {
       root.render(<Wall initialPaneIds={['surface:a']} initialMode="command" />);
     });
@@ -1749,7 +1749,7 @@ describe('Wall on the Lath engine', () => {
       });
       await flush();
 
-      let listed: { result?: { surfaces: Array<{ id: string; ref: string }> } } | undefined;
+      let listed: { result?: { surfaces: Array<{ id: string }> } } | undefined;
       await act(async () => {
         window.dispatchEvent(new CustomEvent('dormouse:control-request', {
           detail: {
@@ -1763,13 +1763,13 @@ describe('Wall on the Lath engine', () => {
 
       expect(listed?.result?.surfaces).toHaveLength(1);
       const replacement = listed!.result!.surfaces[0];
-      expect(replacement).toMatchObject({ id: 'surface:1', ref: 'surface:1' });
+      expect(replacement).toMatchObject({ id: 'surface:1' });
     } finally {
       untouchedSpy.mockRestore();
     }
   });
 
-  it('gives a shell selection that replaces an untouched selected door a new Surface and ref', async () => {
+  it('gives a shell selection that replaces an untouched selected door a new Surface', async () => {
     await act(async () => {
       root.render(<Wall initialPaneIds={['surface:a']} initialMode="command" />);
     });
@@ -1796,7 +1796,7 @@ describe('Wall on the Lath engine', () => {
       await flushFrame();
       await flush();
 
-      let listed: { result?: { surfaces: Array<{ id: string; ref: string }> } } | undefined;
+      let listed: { result?: { surfaces: Array<{ id: string }> } } | undefined;
       await act(async () => {
         window.dispatchEvent(new CustomEvent('dormouse:control-request', {
           detail: {
@@ -1809,7 +1809,7 @@ describe('Wall on the Lath engine', () => {
       await flush();
 
       expect(listed?.result?.surfaces).toHaveLength(2);
-      expect(listed!.result!.surfaces.map((surface) => surface.ref)).toEqual(['surface:1', 'surface:2']);
+      expect(listed!.result!.surfaces.map((surface) => surface.id)).toEqual(['surface:1', 'surface:2']);
       expect(listed!.result!.surfaces.some((surface) => surface.id === 'surface:a')).toBe(false);
       expect(container.querySelector('[data-door-id="surface:a"]')).toBeNull();
     } finally {

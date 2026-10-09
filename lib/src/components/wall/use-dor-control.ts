@@ -220,11 +220,8 @@ function resolveSurfaceTarget(
   // A caller this Wall does not hold never reaches here as one: the router
   // drops it before dispatching (`requestForWall`), so an omitted target falls
   // back to this Workspace's focused Surface.
-  const resolvedTarget = target ?? callerSurfaceId ?? 'surface:focused';
-  // The caller is the host's identity for the invoking Surface, never typed.
-  const classified: ParsedSurfaceTarget = target === undefined && callerSurfaceId !== undefined
-    ? { kind: 'id', id: callerSurfaceId }
-    : parseSurfaceTarget(resolvedTarget);
+  const resolvedTarget = target ?? (callerSurfaceId !== undefined ? 'surface:self' : 'surface:focused');
+  const classified = parseSurfaceTarget(resolvedTarget);
   if (classified.kind === 'invalid') return { ok: false, message: classified.message };
   const matches = surfaces.filter((surface) => matchesTarget(classified, surface, callerSurfaceId));
   const single = pickSingleMatch(matches, resolvedTarget);
@@ -236,7 +233,7 @@ function resolveSurfaceTarget(
   }
   const fallback = !target && !callerSurfaceId ? (surfaces[0] ?? null) : null;
   if (fallback) return { ok: true, value: fallback };
-  const pending = classified.kind === 'id' ? pendingSurfaceRefusal(resolvedTarget, classified.id) : null;
+  const pending = classified.kind === 'id' ? pendingSurfaceRefusal(classified.id) : null;
   return { ok: false, message: pending ?? `surface '${resolvedTarget}' was not found` };
 }
 
@@ -663,7 +660,7 @@ export function useDorControl({
    *  Workspace answered (docs/specs/dor-cli.md → "Handle Model").
    *  The Window's own ref rides beside it, so `dor list` says which Window
    *  answered too (`currentWindowRef`). */
-  answeringWorkspaceId: () => string;
+  answeringWorkspaceId: string;
   /** This Wall's Workspace id, which namespaces the managed browser `--key`
    *  sessions it answers for; `undefined` on a bare Wall, which mints a scope
    *  of its own (docs/specs/dor-browser.md → Managed identity). */
@@ -1048,7 +1045,7 @@ export function useDorControl({
         ok: true,
         result: {
           surfaces,
-          workspaceId: answeringWorkspaceId(),
+          workspaceId: answeringWorkspaceId,
           windowRef: currentWindowRef(),
         },
       });
@@ -1812,7 +1809,7 @@ export function useDorControl({
       detail.respond({
         ok: true,
         result: {
-          workspaceId: answeringWorkspaceId(),
+          workspaceId: answeringWorkspaceId,
           surfaceId: target.id,
           text,
         },
@@ -1861,7 +1858,7 @@ export function useDorControl({
       detail.respond({
         ok: true,
         result: {
-          workspaceId: answeringWorkspaceId(),
+          workspaceId: answeringWorkspaceId,
           surfaceId: target.id,
           outcome: outcome.kind,
           ...(outcome.kind === 'resolved' ? { cause: outcome.cause } : {}),

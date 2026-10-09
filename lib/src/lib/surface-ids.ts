@@ -43,7 +43,7 @@ export function resetSurfaceIdPool(): void {
 
 function nextId(): string {
   if (!pool.installed) return surfaceIdFor(++localSequence);
-  return pool.take() ?? `surface:${crypto.randomUUID()}`;
+  return pool.take() ?? surfaceIdFor(crypto.randomUUID());
 }
 
 /** The first id from `next` no Session in this page already holds; a skipped

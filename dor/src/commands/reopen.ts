@@ -53,11 +53,11 @@ async function runReopenCommand(this: DorCommandContext, flags: ReopenFlags): Pr
     }
     return new Error(message);
   }
-  writeStdout(this, flags.json === true ? renderReopenJson(response) : `reopened ${reopenedRef(response)}\n`);
+  writeStdout(this, flags.json === true ? renderReopenJson(response) : `reopened ${reopenedId(response)}\n`);
   return undefined;
 }
 
-function reopenedRef(response: ReopenResponse): string {
+function reopenedId(response: ReopenResponse): string {
   if (response.kind === 'surface') return response.surfaceId;
   if (response.kind === 'workspace') return response.workspaceId;
   return 'window';

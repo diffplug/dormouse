@@ -1,5 +1,3 @@
-import workspaceIdCases from "../scripts/workspace-id-cases.json?raw";
-import { workspaceIdNumber } from "dor/protocol";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createWorkspace,
@@ -143,10 +141,4 @@ describe("workspace registry", () => {
     await Promise.resolve();
     expect(h.reports()).toHaveLength(3);
   });
-
-  it('reads id numbers as Rust and the browser harness do', () => {
-    const cases: { id: string; number: number | null }[] = JSON.parse(workspaceIdCases);
-    for (const { id, number } of cases) expect(workspaceIdNumber(id), id).toBe(number);
-  });
-
 });

@@ -96,7 +96,7 @@ describe('the reopen stack', () => {
 });
 
 describe('Reopen', () => {
-  it('rebuilds a reopenable close where it sat, as a new Surface with a new ref', async () => {
+  it('rebuilds a reopenable close where it sat, as a new Surface with a new id', async () => {
     await renderTerminalBesideBrowser();
     const killed = await control<{ surfaceRef: string }>(SURFACE_CONTROL_METHODS.kill, { surface: 'surface:web', confirmation: { mode: 'dangerously' } });
     expect(killed.ok).toBe(true);
@@ -111,9 +111,8 @@ describe('Reopen', () => {
     const layout = getWallHandle(DEFAULT_WORKSPACE_ID)!.serializeNow().lathLayout as { tree: { root: unknown }; leafMeta: Record<string, { params?: unknown }> };
     expect(layout.tree.root).toMatchObject({ kind: 'split', dir: 'row', children: [{ node: { id: 'surface:a' } }, { node: { id: reopened } }] });
     expect(layout.leafMeta[reopened].params).toMatchObject(WEB_PARAMS);
-    const listed = await control<{ surfaces: Array<{ id: string; ref: string; url?: string }> }>(SURFACE_CONTROL_METHODS.list);
-    const surface = listed.result!.surfaces.find(s => s.id === reopened)!;
-    expect(surface.ref).toBe('surface:1');
+    const listed = await control<{ surfaces: Array<{ id: string; url?: string }> }>(SURFACE_CONTROL_METHODS.list);
+    expect(listed.result!.surfaces.map(s => s.id)).toContain('surface:1');
     expect(_reopenRecordsForTesting()).toHaveLength(0);
   });
 

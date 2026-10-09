@@ -1,6 +1,6 @@
 import { getPendingKills } from './pending-kills';
 import { normalizeAlertDeliveryOverrides, sameAlertDeliveryOverrides, type AlertDeliveryOverrides } from './alert-delivery-model';
-import { parseWorkspaceRef, workspaceIdFor, workspaceIdNumber } from 'dor/protocol';
+import { parseWorkspaceRef, workspaceIdFor } from 'dor/protocol';
 import { DEFAULT_WORKSPACE_ID, DEFAULT_WORKSPACE_NAME, type WorkspaceId } from './session-types';
 import { createIdPool } from './id-pool';
 
@@ -102,7 +102,7 @@ export function resetWorkspaceIdPool(): void {
 export function generateWorkspaceId(): WorkspaceId {
   const reserved = idPool.take();
   if (reserved !== undefined) return reserved;
-  if (idPool.installed) return `workspace:${crypto.randomUUID()}`;
+  if (idPool.installed) return workspaceIdFor(crypto.randomUUID());
   let id: WorkspaceId;
   do id = workspaceIdFor(++localSequence); while (hasWorkspace(id));
   return id;
@@ -315,18 +315,15 @@ export type WorkspaceRefResolution =
 
 /**
  * Resolve a `workspace:<n|name>` target (`docs/specs/dor-cli.md` → "Handle
- * Model"): a number names the Workspace whose id carries it; otherwise an exact
- * id wins over an unambiguous name.
+ * Model"): the exact id it names, else an unambiguous name; a number is never
+ * a name.
  */
 export function resolveWorkspaceRef(ref: string): WorkspaceRefResolution {
-  const { target, number, name } = parseWorkspaceRef(ref);
+  const { target, id, name } = parseWorkspaceRef(ref);
   const found = (meta: WorkspaceMeta): WorkspaceRefResolution => ({ ok: true, ...meta });
-  if (number !== null) {
-    const match = state.workspaces.find((ws) => workspaceIdNumber(ws.id) === number);
-    if (match) return found(match);
-  } else if (name) {
-    const byId = state.workspaces.find((ws) => ws.id === `workspace:${name}`);
-    if (byId) return found(byId);
+  const byId = state.workspaces.find((ws) => ws.id === id);
+  if (byId) return found(byId);
+  if (name) {
     const matches = state.workspaces.filter((workspace) => workspace.name === name);
     if (matches.length === 1) return found(matches[0]);
     if (matches.length > 1) {
@@ -338,7 +335,7 @@ export function resolveWorkspaceRef(ref: string): WorkspaceRefResolution {
   }
   // Off the strip on its way to a kill (`docs/specs/reopen.md`).
   const pending = getPendingKills().find(kill => kill.kind === 'workspace'
-    && (number !== null ? workspaceIdNumber(kill.id) === number : kill.id === `workspace:${name}` || kill.title === name));
+    && (kill.id === id || (name !== '' && kill.title === name)));
   if (pending) return { ok: false, message: `workspace '${target}' is a pending kill` };
   return { ok: false, message: `unknown workspace target '${target}'` };
 }

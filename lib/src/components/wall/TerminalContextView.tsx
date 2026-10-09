@@ -192,7 +192,7 @@ const FOLDER_ICON = <FolderSimpleIcon size={14} className="shrink-0 text-muted" 
 const PORT_ICON = <PlugIcon size={14} className="shrink-0 text-muted" />;
 const BELL_ICON = <BellIcon size={14} className="shrink-0 text-muted" />;
 
-/** The copyable Surface ref, the title explanation, the workspace move, then `actions`. */
+/** The copyable Surface id, the title explanation, the workspace move, then `actions`. */
 function HeaderRow({ surfaceId, onExplain, onCopyId, actions, workspaceMove }: {
   surfaceId: string; actions: ReactNode; workspaceMove?: ReactNode;
   onExplain(): void; onCopyId(): Promise<boolean>;
@@ -202,9 +202,9 @@ function HeaderRow({ surfaceId, onExplain, onCopyId, actions, workspaceMove }: {
   const actionsRef = useRef<HTMLDivElement>(null);
   const [compact, setCompact] = useState<0 | 1 | 2>(0);
   // The explanation drops its label, then the id drops to its icon; the workspace move wraps.
-  useRowFit(row, measures, (width, gap, [ref, explain, explainIcon]) => {
+  useRowFit(row, measures, (width, gap, [idBox, explain, explainIcon]) => {
     const room = width - (actionsRef.current?.offsetWidth ?? 0) - 2 * gap;
-    setCompact(ref + explain + gap <= room ? 0 : ref + explainIcon + gap <= room ? 1 : 2);
+    setCompact(idBox + explain + gap <= room ? 0 : idBox + explainIcon + gap <= room ? 1 : 2);
   }, [surfaceId], [actionsRef]);
   return <div ref={row} data-context-title className="relative flex min-h-7 min-w-0 items-center gap-1">
     <div ref={measures} aria-hidden="true" inert className={MEASURER_CLASS}>

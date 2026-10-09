@@ -8,7 +8,7 @@
  * reaches a webview.
  */
 
-import { parseWorkspaceRef, spansWorkspaces, workspaceIdNumber } from 'dor/protocol';
+import { parseWorkspaceRef, spansWorkspaces } from 'dor/protocol';
 import { DEFAULT_WORKSPACE_ID, DEFAULT_WORKSPACE_NAME } from '../../lib/src/lib/session-types';
 
 const REFUSAL = 'Dormouse in VS Code puts each Workspace in its own webview, so';
@@ -21,8 +21,8 @@ const REFUSAL = 'Dormouse in VS Code puts each Workspace in its own webview, so'
  */
 function namesThisWebviewsWorkspace(workspace: unknown): boolean {
   if (typeof workspace !== 'string') return false;
-  const { number, name } = parseWorkspaceRef(workspace);
-  return number === workspaceIdNumber(DEFAULT_WORKSPACE_ID) || name === DEFAULT_WORKSPACE_NAME;
+  const { id, name } = parseWorkspaceRef(workspace);
+  return id === DEFAULT_WORKSPACE_ID || name === DEFAULT_WORKSPACE_NAME;
 }
 
 /**

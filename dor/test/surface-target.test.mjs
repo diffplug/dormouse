@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { compareSurfaceIds, parseSurfaceTarget, surfaceIdFor, surfaceIdNumber, workspaceIdFor, workspaceIdNumber } from '../dist/protocol.js';
+import { compareSurfaceIds, parseSurfaceTarget, surfaceIdFor, surfaceIdNumber, workspaceIdFor } from '../dist/protocol.js';
 
 test('a Surface id is surface:<n>, and its number is the counter', () => {
   assert.equal(surfaceIdFor(347), 'surface:347');
@@ -8,8 +8,6 @@ test('a Surface id is surface:<n>, and its number is the counter', () => {
   assert.equal(surfaceIdNumber('surface:0b9c'), null);
   assert.equal(surfaceIdNumber('surface-347'), null);
   assert.equal(workspaceIdFor(3), 'workspace:3');
-  assert.equal(workspaceIdNumber('workspace:3'), 3);
-  assert.equal(workspaceIdNumber('workspace-3'), null);
 });
 
 test('the handle is the id', () => {

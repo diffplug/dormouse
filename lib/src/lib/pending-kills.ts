@@ -191,8 +191,8 @@ export function isOwnPendingKill(kill: PendingKill, workspaceId: WorkspaceId): b
 }
 
 /** Why a `dor` Surface target naming `id` names nothing: a pending kill. */
-export function pendingSurfaceRefusal(target: string, id: string): string | null {
-  return getPendingKill('surface', id) ? `surface '${target}' is a pending kill` : null;
+export function pendingSurfaceRefusal(id: string): string | null {
+  return getPendingKill('surface', id) ? `surface '${id}' is a pending kill` : null;
 }
 
 /** How far through its countdown a kill is, 0 to 1. */

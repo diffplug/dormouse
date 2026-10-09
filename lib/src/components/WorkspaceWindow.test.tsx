@@ -972,10 +972,10 @@ it('routes Tools to the requested Workspace and never launches after lookup race
 });
 
 
-it('lists every Workspace with refs unique across them, each derived from its id', async () => {
+it('lists every Workspace with ids unique across them, and no second spelling', async () => {
   createWorkspace({ id: 'workspace:2', activate: false });
   await render(<WorkspaceWindow />);
-  let listed: { ok: boolean; result?: { surfaces: Array<{ id: string; ref: string }> } } | undefined;
+  let listed: { ok: boolean; result?: { surfaces: Array<{ id: string }> } } | undefined;
   await act(async () => { listed = await new Promise(resolve => {
     window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
       requestId: 'all', method: SURFACE_CONTROL_METHODS.list, params: { scope: 'all' }, respond: resolve,
@@ -983,8 +983,8 @@ it('lists every Workspace with refs unique across them, each derived from its id
   }); });
   const rows = listed!.result!.surfaces;
   expect(rows).toHaveLength(2);
-  expect(new Set(rows.map(row => row.ref)).size).toBe(2);
-  for (const row of rows) expect(row.ref).toBe(row.id);
+  expect(new Set(rows.map(row => row.id)).size).toBe(2);
+  for (const row of rows) expect(row).not.toHaveProperty('ref');
 });
 
 describe('Surface moves between Workspaces', () => {

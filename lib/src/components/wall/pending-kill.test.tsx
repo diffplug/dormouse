@@ -107,14 +107,14 @@ describe('a pending kill', () => {
     expect(leafIds()).toEqual(['surface:11']);
   });
 
-  it('restores the same Surface, its ref intact', async () => {
+  it('restores the same Surface, its id intact', async () => {
     await renderTwoShells();
     await clickKill('surface:12');
     await act(async () => { restorePendingKill(pendingKillKey('surface', 'surface:12')); });
     await harness.flush();
     expect(leafIds().sort()).toEqual(['surface:11', 'surface:12']);
-    const listed = await control<{ surfaces: Array<{ id: string; ref: string }> }>(SURFACE_CONTROL_METHODS.list);
-    expect(listed.result!.surfaces.map(surface => [surface.id, surface.ref])).toEqual([['surface:11', 'surface:11'], ['surface:12', 'surface:12']]);
+    const listed = await control<{ surfaces: Array<{ id: string }> }>(SURFACE_CONTROL_METHODS.list);
+    expect(listed.result!.surfaces.map(surface => surface.id)).toEqual(['surface:11', 'surface:12']);
   });
 
   it('finalizes through the kill path', async () => {

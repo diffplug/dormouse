@@ -194,8 +194,7 @@ export async function moveSurface(id: string, request: Omit<MoveSurfaceRequest, 
 /** Gesture errors use the Window's existing move refusal presentation. */
 export function requestSurfaceMove(id: string, destination: MoveSurfaceRequest['destination']): void {
   const source = wallHandleOwning(id);
-  const target = 'workspace' in destination && hasWorkspace(destination.workspace) ? { workspace: destination.workspace } : destination;
-  void moveSurface(id, { destination: target, focus: true, dangerouslyDestroyIframePageState: false }, true).catch(error => {
+  void moveSurface(id, { destination, focus: true, dangerouslyDestroyIframePageState: false }, true).catch(error => {
     if (source) setWorkspaceMoveError({ id: source.workspaceId, reason: errorText(error) });
   });
 }

@@ -147,28 +147,27 @@ export function spansWorkspaces(method: string, params?: Record<string, unknown>
 export interface ParsedWorkspaceRef {
   /** The target as written, trimmed — what an error message quotes back. */
   target: string;
-  /** The number the target reads as — the Workspace id `workspace:<n>` — else
-   *  null. */
+  /** The Workspace id the target names exactly, prefix restored. */
+  id: string;
+  /** The number the target reads as, else null. */
   number: number | null;
-  /** Otherwise a fallback id's suffix or a Workspace name; empty when it is
-   *  numeric. */
+  /** The Workspace name it reads as otherwise; empty when it is numeric. */
   name: string;
 }
 
+const SURFACE_PREFIX = 'surface:';
+const WORKSPACE_PREFIX = 'workspace:';
+const BARE_NUMBER = /^\d+$/;
 const NUMERIC_WORKSPACE_REF = /^[1-9]\d*$/;
 
 /** Split a `workspace:<n|name>` target into its readings. A target that reads
  *  as a number is a number, never a name. */
 export function parseWorkspaceRef(ref: string): ParsedWorkspaceRef {
   const target = ref.trim();
-  const bare = (target.startsWith('workspace:') ? target.slice('workspace:'.length) : target).trim();
+  const bare = (target.startsWith(WORKSPACE_PREFIX) ? target.slice(WORKSPACE_PREFIX.length) : target).trim();
   const numeric = NUMERIC_WORKSPACE_REF.test(bare);
-  return { target, number: numeric ? Number(bare) : null, name: numeric ? '' : bare };
+  return { target, id: WORKSPACE_PREFIX + bare, number: numeric ? Number(bare) : null, name: numeric ? '' : bare };
 }
-
-const SURFACE_PREFIX = 'surface:';
-const WORKSPACE_PREFIX = 'workspace:';
-const BARE_NUMBER = /^\d+$/;
 
 /** The number in a counter-minted `<prefix><n>` id, else null. */
 function idNumber(prefix: string, id: string): number | null {
@@ -176,19 +175,14 @@ function idNumber(prefix: string, id: string): number | null {
   return BARE_NUMBER.test(digits) ? Number(digits) : null;
 }
 
-/** The Workspace id numbered `n`. */
-export function workspaceIdFor(n: number): string {
+/** The Workspace id numbered `n`, or a fallback's `workspace:<uuid>`. */
+export function workspaceIdFor(n: number | string): string {
   return WORKSPACE_PREFIX + n;
 }
 
-/** The registry number of a `workspace:<n>` id; a fallback id has none. */
-export function workspaceIdNumber(id: string): number | null {
-  return idNumber(WORKSPACE_PREFIX, id);
-}
-
-/** The Surface id numbered `n` — also its `dor` handle (`docs/specs/dor-cli.md`
- *  → "Handle Model"). */
-export function surfaceIdFor(n: number): string {
+/** The Surface id numbered `n`, or a fallback's `surface:<uuid>` — also its
+ *  `dor` handle (`docs/specs/dor-cli.md` → "Handle Model"). */
+export function surfaceIdFor(n: number | string): string {
   return SURFACE_PREFIX + n;
 }
 

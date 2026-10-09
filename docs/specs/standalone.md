@@ -147,7 +147,7 @@ Source of truth: `install` in `standalone/src-tauri/src/macos_siri_affordance.rs
 - **Must allow boot and Workspace creation when reservation fails**, using `workspace:<uuid>` ids, and **retain those ids for their lifetime**, even after reservation recovers (`docs/specs/dor-cli.md` → "Handle Model").
 - **Must seed every counter at boot without ever lowering it**, above its persisted mark and every id a snapshot or retained arrival-journal record names; a window's report raises the Workspace counter too. **Never mint `workspace:1`**: it is a bare Wall's only Workspace.
 - **A `dor` request naming a Workspace or Window routes to the window holding it** (§Routing). A target the registry cannot place — one no window reports, or a name two windows carry — falls through to the caller's window, which refuses a name duplicated there and otherwise resolves its own. **A target routes as a number only when it reads as `NUMERIC_WORKSPACE_REF`** (`dor/src/protocol.ts`); `007` and `0` are names.
-- **Must read an id's number identically in Rust, the webview, and the browser harness**: `standalone/scripts/workspace-id-cases.json` holds the shared cases.
+- **Must read an id's number identically in Rust and the browser harness**: `standalone/scripts/workspace-id-cases.json` holds the shared cases.
 
 Source of truth: `standalone/src-tauri/src/workspaces.rs`; `standalone/src-tauri/src/ids.rs`; `installWorkspaceRegistry` in `standalone/src/workspace-registry.ts`.
 
