@@ -315,7 +315,7 @@ export const VERSUS: readonly Versus[] = [
       {
         lead: "Some reasons you might prefer cmux:",
         points: [
-          "Its terminal is native Rust (Ghostty's), while Dormouse's is xterm.js, the one inside VS Code.",
+          "Its terminal is native Zig (Ghostty's), while Dormouse's is xterm.js, the one inside VS Code.",
           <>
             Its browser is a <Ext href="https://github.com/manaflow-ai/cmux-v2">private fork</Ext> of Chromium (it used to
             be WebKit), which feels native and has an API agents can drive. Dormouse drives unmodified Playwright or

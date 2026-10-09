@@ -244,11 +244,13 @@ function tabFromHash(hash: string): string {
 
 /**
  * WAI-ARIA tabs: arrows and Home/End move between them, and only the open one
- * sits in the tab order. Every panel is rendered, hidden but one, so each id
- * the rail links exists in the prerendered page.
+ * sits in the tab order. Before hydration, every comparison is a visible,
+ * labeled section, so the content and rail anchors also work without JS.
  */
 function ComparisonTabs() {
-  const [active, setActive] = useState(TABS[0].id);
+  const [active, setActive] = useState<string | null>(null);
+  const enhanced = active !== null;
+  const scrollToHash = useRef(false);
   const tabRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const tablistRef = useRef<HTMLDivElement>(null);
 
@@ -258,8 +260,8 @@ function ComparisonTabs() {
     // to a panel that was hidden when it looked.
     const followHash = () => {
       const id = tabFromHash(window.location.hash);
+      scrollToHash.current = window.location.hash === `#${id}`;
       setActive(id);
-      if (window.location.hash === `#${id}`) tablistRef.current?.scrollIntoView({ block: "start" });
     };
     followHash();
     window.addEventListener("hashchange", followHash);
@@ -269,9 +271,15 @@ function ComparisonTabs() {
   // On a phone the strip scrolls sideways; keep the open tab in it. Scrolled by
   // hand rather than `scrollIntoView`, which would also move the page.
   useEffect(() => {
+    if (active === null) return;
     const list = tablistRef.current;
     const tab = tabRefs.current[active];
     if (!list || !tab) return;
+    // Wait until React has revealed the tab strip and hidden the other panels.
+    if (scrollToHash.current) {
+      list.scrollIntoView({ block: "start" });
+      scrollToHash.current = false;
+    }
     if (tab.offsetLeft < list.scrollLeft || tab.offsetLeft + tab.offsetWidth > list.scrollLeft + list.clientWidth) {
       list.scrollLeft = tab.offsetLeft - (list.clientWidth - tab.offsetWidth) / 2;
     }
@@ -302,6 +310,7 @@ function ComparisonTabs() {
       <div
         ref={tablistRef}
         role="tablist"
+        hidden={!enhanced}
         aria-label="Compare Dormouse with"
         onKeyDown={onKeyDown}
         className={`relative mt-8 flex gap-1 overflow-x-auto border-b border-[var(--color-text)]/15 ${SCROLL_MT_CLASS}`}
@@ -335,21 +344,27 @@ function ComparisonTabs() {
         <section
           key={versus.id}
           id={versus.id}
-          role="tabpanel"
-          aria-labelledby={`tab-${versus.id}`}
-          hidden={versus.id !== active}
+          role={enhanced ? "tabpanel" : undefined}
+          aria-labelledby={`${enhanced ? "tab" : "heading"}-${versus.id}`}
+          hidden={enhanced && versus.id !== active}
           className={SCROLL_MT_CLASS}
         >
+          <h2 id={`heading-${versus.id}`} hidden={enhanced} className="mt-8 font-display text-xl">
+            {versus.label}
+          </h2>
           <VersusPanel versus={versus} />
         </section>
       ))}
       <section
         id={TABLE_TAB.id}
-        role="tabpanel"
-        aria-labelledby={`tab-${TABLE_TAB.id}`}
-        hidden={TABLE_TAB.id !== active}
+        role={enhanced ? "tabpanel" : undefined}
+        aria-labelledby={`${enhanced ? "tab" : "heading"}-${TABLE_TAB.id}`}
+        hidden={enhanced && TABLE_TAB.id !== active}
         className={`pt-6 ${SCROLL_MT_CLASS}`}
       >
+        <h2 id={`heading-${TABLE_TAB.id}`} hidden={enhanced} className="mb-4 font-display text-xl">
+          {TABLE_TAB.label}
+        </h2>
         <ComparisonTable />
         <Legend />
       </section>

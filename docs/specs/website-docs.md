@@ -142,7 +142,9 @@ Source of truth: `Hosted` in `website/src/pages/Hosted.tsx`; `HostingRequirement
 
 ## `/comparison`
 
-**Must keep every claim in one file, and link readers to it to suggest a correction or another tool**; `website/src/pages/Comparison.test.tsx` pins that the linked file exists. Each tab is a rail entry, and its anchor opens it, so a shared link keeps the tab.
+**Must keep every claim in one linked file for corrections or tool suggestions.** **Must make each tab a rail entry whose anchor opens it.**
+
+**Must keep all comparisons and the table readable without JavaScript**, as labeled sections with working rail anchors; hydration enables the tabs.
 
 Source of truth: `VERSUS` and `COMPARISON` in `website/src/lib/comparison.tsx`; `Comparison` in `website/src/pages/Comparison.tsx`.
 
