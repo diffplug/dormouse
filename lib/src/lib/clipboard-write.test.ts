@@ -11,6 +11,7 @@ vi.mock('./mouse-selection', () => ({ getMouseSelectionState: () => ({ bracketed
 vi.mock('./terminal-registry', () => ({ getDefaultShellOpts: () => null, getTerminalShellKind: () => null, writeUserInput: () => {} }));
 
 import { writeTextToClipboard } from './clipboard';
+import { dismissClipboardFailure, getClipboardFailure } from './clipboard-failure';
 
 /** What each `execCommand('copy')` copied: a `copy` listener's `setData`,
  *  else what a focused textarea had selected. */
@@ -109,5 +110,33 @@ describe('writeTextToClipboard', () => {
     stubClipboard(undefined);
     expect(await writeTextToClipboard('')).toBe(false);
     expect(execCommand).not.toHaveBeenCalled();
+  });
+});
+
+describe('clipboard failure report', () => {
+  afterEach(() => dismissClipboardFailure());
+
+  it('reports a write refused every way, describing the attempt but never the text', async () => {
+    stubClipboard({ writeText: () => Promise.reject(new DOMException('denied', 'NotAllowedError')) });
+    execCommand.mockReturnValue(false);
+    expect(await writeTextToClipboard('first')).toBe(false);
+    const before = getClipboardFailure()!.count;
+    expect(await writeTextToClipboard('secret-token')).toBe(false);
+    const failure = getClipboardFailure();
+    expect(failure?.count).toBe(before + 1);
+    expect(failure?.report).toContain('NotAllowedError: denied');
+    expect(failure?.report).toContain("execCommand('copy'): returned false");
+    expect(failure?.report).toContain('textLength: 12');
+    expect(failure?.report).not.toContain('secret-token');
+  });
+
+  it('reports nothing when the fallback copies, or when the caller opts out', async () => {
+    stubClipboard({ writeText: () => Promise.reject(new DOMException('denied', 'NotAllowedError')) });
+    firesCopy = true;
+    expect(await writeTextToClipboard('hello')).toBe(true);
+    execCommand.mockReturnValue(false);
+    firesCopy = false;
+    expect(await writeTextToClipboard('hello', { reportFailure: false })).toBe(false);
+    expect(getClipboardFailure()).toBeNull();
   });
 });
