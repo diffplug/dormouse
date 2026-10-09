@@ -56,9 +56,14 @@ jobs:
       - name: Install workspace dependencies
         run: pnpm install --frozen-lockfile
 
-      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
-        with:
-          targets: ${{ matrix.target }}
+      # Direct rustup rather than an action; ci.yml's smoketest says why.
+      - name: Install Rust stable
+        shell: bash
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update --target "$TARGET"
+          rustup default stable
+        env:
+          TARGET: ${{ matrix.target }}
 
       # No Rust cache: a release build restores nothing a run on another ref
       # wrote, since the default branch's cache scope is reachable from every
