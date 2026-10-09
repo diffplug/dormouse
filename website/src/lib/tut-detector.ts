@@ -10,9 +10,13 @@ type MouseSelectionState = import("dormouse-lib/lib/mouse-selection").MouseSelec
 interface ActivityStoreModule {
   subscribeToActivity: (listener: () => void) => () => void;
   getActivitySnapshot: () => Map<string, ActivityState>;
-  subscribeToWatchedCommands: (listener: () => void) => () => void;
-  getWatchedCommands: () => string[];
-  getRunningCommandWatchRule: (id: string) => string | null;
+}
+
+/** Whether spoken alarms are on in the active Workspace, app default or
+ *  Workspace override alike. */
+interface SpeechStoreModule {
+  subscribe: (listener: () => void) => () => void;
+  isSpeechOn: () => boolean;
 }
 
 /** Notification sources a program emits for itself, as opposed to the ones
@@ -39,6 +43,8 @@ export interface TutDetectorOptions {
   themeStore: ThemeStoreModule;
   /** The desktop's shells' command lines, which credit the `dor open` section. */
   commandStore?: CommandStoreModule;
+  /** Credits `al-speak`; the desktop's alone. */
+  speechStore?: SpeechStoreModule;
 }
 
 export class TutDetector {
@@ -51,18 +57,18 @@ export class TutDetector {
   private currentMode: WallMode = "command";
   private currentPaneId: string | null = null;
   private commandModePanels = new Set<string>();
-  private pendingSpreadIds = new Set<string>();
-  private spreadCheckQueued = false;
   private pendingMoveTargetId: string | null = null;
   private pendingMoveClearTimer: ReturnType<typeof setTimeout> | null = null;
   private prevActivity = new Map<string, ActivityState>();
   private prevMouse = new Map<string, MouseSelectionState>();
   private previousThemeId = '';
+  private speechStore: SpeechStoreModule | undefined;
   private disposables: (() => void)[] = [];
 
-  constructor({ state, activityStore, mouseStore, themeStore, commandStore }: TutDetectorOptions) {
+  constructor({ state, activityStore, mouseStore, themeStore, commandStore, speechStore }: TutDetectorOptions) {
     this.state = state;
     this.commandStore = commandStore;
+    this.speechStore = speechStore;
     this.activityStore = activityStore;
     this.mouseStore = mouseStore;
     this.themeStore = themeStore;
@@ -91,9 +97,16 @@ export class TutDetector {
     this.disposables.push(
       this.activityStore.subscribeToActivity(() => this.processActivity()),
     );
-    this.disposables.push(
-      this.activityStore.subscribeToWatchedCommands(() => this.processWatchedCommands()),
-    );
+    const speech = this.speechStore;
+    if (speech) {
+      // Turned on, not found on: a setting saved on an earlier visit is no act.
+      let wasOn = speech.isSpeechOn();
+      this.disposables.push(speech.subscribe(() => {
+        const on = speech.isSpeechOn();
+        if (on && !wasOn) this.state.markComplete("al-speak");
+        wasOn = on;
+      }));
+    }
     this.disposables.push(
       this.mouseStore.subscribeToMouseSelection(() => this.processMouse()),
     );
@@ -193,14 +206,6 @@ export class TutDetector {
     if (changed) this.state.markComplete("th-theme");
   }
 
-  /** The user watched the fake `longtask` the item names — never merely any
-   *  rule, since fresh installs start with the coding-agent defaults. */
-  private processWatchedCommands(): void {
-    if (this.activityStore.getWatchedCommands().includes("longtask")) {
-      this.state.markComplete("al-watch-cmd");
-    }
-  }
-
   private processActivity(): void {
     const snapshot = this.activityStore.getActivitySnapshot();
     for (const [id, current] of snapshot) {
@@ -215,35 +220,24 @@ export class TutDetector {
         continue;
       }
 
-      if (!prev.watchingEnabled && current.watchingEnabled) {
-        this.queueSpreadCheck(id);
-      }
-
-      // Gate al-ring on a true status transition. Without the prev.status
-      // check, a pane already in ALERT_RINGING at the moment its first
-      // activity event fires (e.g. restored state, or a pane spawned after
-      // start() that arrives mid-task) would credit the user for work they
-      // did not do this session.
-      if (prev.status !== "ALERT_RINGING" && current.status === "ALERT_RINGING") {
-        this.state.markComplete("al-ring");
-      }
-
-      // Credit the two rule-free alarm paths off the notification that landed,
-      // not off the status: both project to plain ALERT_RINGING.
+      const ringing = current.status === "ALERT_RINGING";
+      const wasRinging = prev.status === "ALERT_RINGING";
       const source = current.notification?.source;
-      if (source && source !== prev.notification?.source) {
+      // Credit a ring by the source its detail names. A true transition, so a
+      // pane already ringing when first seen (a restore) credits nothing.
+      if (ringing && !wasRinging && source) {
         if (source === "COMMAND_EXIT") this.state.markComplete("al-cmd-exit");
+        else if (source === "WATCHING") this.state.markComplete("al-watch");
         else if (TERMINAL_REPORT_SOURCES.has(source)) this.state.markComplete("al-notif");
       }
-
-      // A look without typing turns a ring into a TODO, so the dismissal is
-      // the ring ending with a TODO standing.
-      if (prev.status === "ALERT_RINGING" && current.status !== "ALERT_RINGING" && current.todo) {
+      // A look turns a ring into a TODO: the ring gone, not merely deferred.
+      if (wasRinging && !ringing && current.todo && current.episode === null) {
         this.state.markComplete("al-todo-auto");
       }
-      // Only a bare TODO with no notification behind it was added by hand.
-      if (!prev.todo && current.todo && !source) {
-        this.state.markComplete("al-todo-manual");
+      if (!prev.todo && current.todo && !ringing && !wasRinging) {
+        // A completion on the pane the user is looking at is held as a TODO
+        // carrying its detail; one added by hand carries none.
+        this.state.markComplete(source ? "al-held" : "al-todo-manual");
       }
       if (prev.todo && !current.todo) {
         this.state.markComplete("al-todo-clear");
@@ -252,41 +246,8 @@ export class TutDetector {
       this.prevActivity.set(id, { ...current });
     }
     for (const id of this.prevActivity.keys()) {
-      if (!snapshot.has(id)) {
-        this.prevActivity.delete(id);
-        this.pendingSpreadIds.delete(id);
-      }
+      if (!snapshot.has(id)) this.prevActivity.delete(id);
     }
-  }
-
-  private queueSpreadCheck(id: string): void {
-    if (this.state.isComplete("al-spreads")) return;
-    this.pendingSpreadIds.add(id);
-    if (this.spreadCheckQueued) return;
-    this.spreadCheckQueued = true;
-    // FakePtyAdapter publishes Activity before updating the command store.
-    // Read both at the end of this turn so a new command cannot borrow the
-    // previous command's identity and falsely look like the same WATCHING rule.
-    queueMicrotask(() => {
-      this.spreadCheckQueued = false;
-      if (this.pendingSpreadIds.size === 0) return;
-      const snapshot = this.activityStore.getActivitySnapshot();
-      const ruleCounts = new Map<string, number>();
-      for (const [paneId, current] of snapshot) {
-        if (!current.watchingEnabled) continue;
-        const rule = this.activityStore.getRunningCommandWatchRule(paneId);
-        if (rule) ruleCounts.set(rule, (ruleCounts.get(rule) ?? 0) + 1);
-      }
-      for (const paneId of this.pendingSpreadIds) {
-        if (!snapshot.get(paneId)?.watchingEnabled) continue;
-        const rule = this.activityStore.getRunningCommandWatchRule(paneId);
-        if (rule && (ruleCounts.get(rule) ?? 0) > 1) {
-          this.state.markComplete("al-spreads");
-          break;
-        }
-      }
-      this.pendingSpreadIds.clear();
-    });
   }
 
   private processMouse(): void {
@@ -320,7 +281,6 @@ export class TutDetector {
     for (const fn of this.disposables) fn();
     this.disposables = [];
     this.clearPendingMoveTarget();
-    this.pendingSpreadIds.clear();
   }
 
 }

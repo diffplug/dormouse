@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_MOUSE_SELECTION_STATE, type CopyEditorState, type MouseSelectionState } from "dormouse-lib/lib/mouse-selection";
 import type { ActivityState } from "dormouse-lib/lib/terminal-registry";
-import { watchRuleFor } from "dormouse-lib/lib/terminal-state";
 import { DESKTOP_SECTIONS } from "./tut-items";
 import { TutDetector } from "./tut-detector";
 import { TutorialState } from "./tutorial-state";
@@ -14,13 +13,19 @@ function activity(
   return { episode: null, status, watchingEnabled, todo, notification: null, awaited: false };
 }
 
-function makeDetectorHarness(initialActivitySnapshot = new Map<string, ActivityState>()) {
+type Source = NonNullable<ActivityState["notification"]>["source"];
+
+/** A pane ringing with `source`'s detail. */
+function ringing(source: Source): ActivityState {
+  return { ...activity("ALERT_RINGING"), episode: { id: "episode", startedAt: 0 }, notification: { source, title: "t", body: null } };
+}
+
+function makeDetectorHarness(initialActivitySnapshot = new Map<string, ActivityState>(), speechOnAtStart = false) {
   let activityListener: (() => void) | null = null;
-  let watchedListener: (() => void) | null = null;
   let mouseListener: (() => void) | null = null;
   let activitySnapshot = initialActivitySnapshot;
-  let watchedCommands: string[] = [];
-  const runningCommands = new Map<string, string>();
+  let speechListener: (() => void) | null = null;
+  let speechOn = speechOnAtStart;
   let mouseSnapshot = new Map<string, MouseSelectionState>();
   let themeListener: (() => void) | null = null;
   let activeThemeId = "vscode.theme-defaults.dark_vs";
@@ -33,14 +38,6 @@ function makeDetectorHarness(initialActivitySnapshot = new Map<string, ActivityS
         activityListener = listener;
         return () => {
           activityListener = null;
-        };
-      },
-      getWatchedCommands: () => watchedCommands,
-      getRunningCommandWatchRule: (id) => watchRuleFor(new Set(watchedCommands), runningCommands.get(id) ?? null),
-      subscribeToWatchedCommands: (listener) => {
-        watchedListener = listener;
-        return () => {
-          watchedListener = null;
         };
       },
     },
@@ -62,6 +59,15 @@ function makeDetectorHarness(initialActivitySnapshot = new Map<string, ActivityS
         };
       },
     },
+    speechStore: {
+      isSpeechOn: () => speechOn,
+      subscribe: (listener) => {
+        speechListener = listener;
+        return () => {
+          speechListener = null;
+        };
+      },
+    },
   });
 
   detector.start();
@@ -69,14 +75,18 @@ function makeDetectorHarness(initialActivitySnapshot = new Map<string, ActivityS
   return {
     state,
     detector,
-    setRunningCommand: (id: string, command: string) => runningCommands.set(id, command),
     setActivitySnapshot: (snapshot: Map<string, ActivityState>) => {
       activitySnapshot = snapshot;
       activityListener?.();
     },
-    setWatchedCommands: (names: string[]) => {
-      watchedCommands = names;
-      watchedListener?.();
+    /** One pane, `pane-a`, in `activityState`. */
+    setPane: (activityState: ActivityState) => {
+      activitySnapshot = new Map([["pane-a", activityState]]);
+      activityListener?.();
+    },
+    setSpeechOn: (on: boolean) => {
+      speechOn = on;
+      speechListener?.();
     },
     setMouseSnapshot: (snapshot: Map<string, MouseSelectionState>) => {
       mouseSnapshot = snapshot;
@@ -173,155 +183,77 @@ describe("TutDetector", () => {
     expect(state.isComplete("kb-arrows")).toBe(true);
   });
 
-  it("does not credit al-ring when a pane is already ringing at first observation", () => {
+  it("credits nothing for a pane already ringing at first observation", () => {
     const { state, setActivitySnapshot } = makeDetectorHarness();
 
-    setActivitySnapshot(new Map([
-      ["pane-b", activity("ALERT_RINGING")],
-    ]));
+    setActivitySnapshot(new Map([["pane-b", ringing("OSC 9")]]));
 
-    expect(state.isComplete("al-ring")).toBe(false);
+    expect(state.isComplete("al-notif")).toBe(false);
   });
 
-  it("credits al-ring on a true status transition", () => {
-    const { state, setActivitySnapshot } = makeDetectorHarness();
+  it.each([
+    ["OSC 9", "al-notif"],
+    ["BEL", "al-notif"],
+    ["COMMAND_EXIT", "al-cmd-exit"],
+    ["WATCHING", "al-watch"],
+  ] as const)("credits a ring whose detail is %s as %s", (source, item) => {
+    const { state, setPane } = makeDetectorHarness();
 
-    setActivitySnapshot(new Map([
-      ["pane-a", activity("NOTHING_TO_SHOW")],
-    ]));
-    expect(state.isComplete("al-ring")).toBe(false);
+    setPane(activity("NOTHING_TO_SHOW"));
+    // Deferred behind output: an episode, but not yet ringing.
+    setPane({ ...ringing(source), status: "BUSY" });
+    expect(state.isComplete(item)).toBe(false);
 
-    setActivitySnapshot(new Map([
-      ["pane-a", activity("ALERT_RINGING")],
-    ]));
-    expect(state.isComplete("al-ring")).toBe(true);
+    setPane(ringing(source));
+    expect(state.isComplete(item)).toBe(true);
   });
 
-  it("credits al-todo-auto when a dismissed ring leaves a TODO behind", () => {
-    const { state, setActivitySnapshot } = makeDetectorHarness();
-    const watching = { source: "WATCHING", title: "longtask went quiet", body: null } as const;
+  it("credits al-todo-auto when a look turns a ring into a TODO, never when output defers it", () => {
+    const { state, setPane } = makeDetectorHarness();
+    const ring = { ...ringing("OSC 9"), todo: true };
 
-    setActivitySnapshot(new Map([["pane-a", activity("BUSY")]]));
-    setActivitySnapshot(new Map([["pane-a", { ...activity("ALERT_RINGING"), notification: watching }]]));
+    setPane(activity("NOTHING_TO_SHOW"));
+    setPane(ring);
+    setPane({ ...ring, status: "BUSY" });
     expect(state.isComplete("al-todo-auto")).toBe(false);
 
-    // The look turns the ring into a TODO carrying its detail: not a hand-added one.
-    setActivitySnapshot(new Map([["pane-a", { ...activity("NOTHING_TO_SHOW", true), notification: watching }]]));
+    setPane(ring);
+    setPane({ ...ring, status: "NOTHING_TO_SHOW", episode: null });
     expect(state.isComplete("al-todo-auto")).toBe(true);
+    expect(state.isComplete("al-held")).toBe(false);
     expect(state.isComplete("al-todo-manual")).toBe(false);
   });
 
-  it("credits al-watch-cmd once a longtask rule exists, not for the agent defaults", () => {
-    const { state, setWatchedCommands } = makeDetectorHarness();
-
-    setWatchedCommands(["claude", "codex"]);
-    expect(state.isComplete("al-watch-cmd")).toBe(false);
-    setWatchedCommands(["claude", "codex", "longtask"]);
-    expect(state.isComplete("al-watch-cmd")).toBe(true);
-  });
-
-  it("credits al-spreads only when a second pane lights up from the same rule", async () => {
-    const { state, setActivitySnapshot, setRunningCommand, setWatchedCommands } = makeDetectorHarness();
-    setWatchedCommands(["longtask"]);
-    setRunningCommand("pane-a", "longtask");
-    setRunningCommand("pane-b", "longtask");
-
-    setActivitySnapshot(new Map([
-      ["pane-a", activity("WATCHING_DISABLED", false, false)],
-      ["pane-b", activity("WATCHING_DISABLED", false, false)],
-    ]));
-    setActivitySnapshot(new Map([
-      ["pane-a", activity("NOTHING_TO_SHOW", false, true)],
-      ["pane-b", activity("WATCHING_DISABLED", false, false)],
-    ]));
-    await Promise.resolve();
-    expect(state.isComplete("al-spreads")).toBe(false);
-
-    setActivitySnapshot(new Map([
-      ["pane-a", activity("NOTHING_TO_SHOW", false, true)],
-      ["pane-b", activity("NOTHING_TO_SHOW", false, true)],
-    ]));
-    await Promise.resolve();
-    expect(state.isComplete("al-spreads")).toBe(true);
-  });
-
-
-  it("credits al-spreads for two scripts one bare runner rule covers", async () => {
-    const { state, setActivitySnapshot, setRunningCommand, setWatchedCommands } = makeDetectorHarness();
-    setWatchedCommands(["pnpm"]);
-    setRunningCommand("pane-a", "pnpm dev");
-    setRunningCommand("pane-b", "pnpm test");
-    setActivitySnapshot(new Map([
-      ["pane-a", activity("NOTHING_TO_SHOW")],
-      ["pane-b", activity("WATCHING_DISABLED")],
-    ]));
-    setActivitySnapshot(new Map([
-      ["pane-a", activity("NOTHING_TO_SHOW")],
-      ["pane-b", activity("NOTHING_TO_SHOW")],
-    ]));
-    await Promise.resolve();
-    expect(state.isComplete("al-spreads")).toBe(true);
-  });
-
-  it("does not credit different watched commands, including a command updated after Activity", async () => {
-    const { state, setActivitySnapshot, setRunningCommand, setWatchedCommands } = makeDetectorHarness();
-    setWatchedCommands(["longtask", "other-task"]);
-    setRunningCommand("pane-a", "longtask");
-    setRunningCommand("pane-b", "longtask");
-    setActivitySnapshot(new Map([
-      ["pane-a", activity("NOTHING_TO_SHOW")],
-      ["pane-b", activity("WATCHING_DISABLED")],
-    ]));
-    setActivitySnapshot(new Map([
-      ["pane-a", activity("NOTHING_TO_SHOW")],
-      ["pane-b", activity("NOTHING_TO_SHOW")],
-    ]));
-    // The fake adapter announces WATCHING before the new command's semantic state.
-    setRunningCommand("pane-b", "other-task");
-    await Promise.resolve();
-    expect(state.isComplete("al-spreads")).toBe(false);
-  });
-
-  it("does not credit a queued spread after disposal", async () => {
-    const { state, detector, setActivitySnapshot, setRunningCommand, setWatchedCommands } = makeDetectorHarness();
-    setWatchedCommands(["longtask"]);
-    setRunningCommand("pane-a", "longtask");
-    setRunningCommand("pane-b", "longtask");
-    setActivitySnapshot(new Map([
-      ["pane-a", activity("NOTHING_TO_SHOW")],
-      ["pane-b", activity("WATCHING_DISABLED")],
-    ]));
-    setActivitySnapshot(new Map([
-      ["pane-a", activity("NOTHING_TO_SHOW")],
-      ["pane-b", activity("NOTHING_TO_SHOW")],
-    ]));
-    detector.dispose();
-    await Promise.resolve();
-    expect(state.isComplete("al-spreads")).toBe(false);
-  });
-
-  it("credits al-notif for a program-sent notification and al-cmd-exit for a command exit", () => {
+  it("credits al-held for a TODO a completion leaves, and al-todo-manual for one with no detail", () => {
     const { state, setActivitySnapshot } = makeDetectorHarness();
+    const held = { ...activity("NOTHING_TO_SHOW", true), notification: { source: "OSC 9", title: null, body: "Allow?" } } as const;
 
-    setActivitySnapshot(new Map([["pane-a", activity("WATCHING_DISABLED", false, false)]]));
-    setActivitySnapshot(new Map([
-      ["pane-a", {
-        ...activity("ALERT_RINGING", false, false),
-        notification: { source: "OSC 777", title: "Build finished", body: "3 packages" },
-      }],
-    ]));
-    expect(state.isComplete("al-notif")).toBe(true);
-    expect(state.isComplete("al-cmd-exit")).toBe(false);
+    setActivitySnapshot(new Map([["pane-a", activity("NOTHING_TO_SHOW")], ["pane-b", activity("NOTHING_TO_SHOW")]]));
+    setActivitySnapshot(new Map([["pane-a", held], ["pane-b", activity("NOTHING_TO_SHOW")]]));
+    expect(state.isComplete("al-held")).toBe(true);
+    expect(state.isComplete("al-todo-manual")).toBe(false);
 
-    setActivitySnapshot(new Map([
-      ["pane-a", {
-        ...activity("ALERT_RINGING", false, false),
-        notification: { source: "COMMAND_EXIT", title: "Command finished", body: "slowbuild exited 0" },
-      }],
-    ]));
-    expect(state.isComplete("al-cmd-exit")).toBe(true);
+    setActivitySnapshot(new Map([["pane-a", held], ["pane-b", activity("NOTHING_TO_SHOW", true)]]));
+    expect(state.isComplete("al-todo-manual")).toBe(true);
   });
 
+  it("credits al-todo-clear when a TODO goes", () => {
+    const { state, setPane } = makeDetectorHarness();
+
+    setPane(activity("NOTHING_TO_SHOW", true));
+    setPane(activity("NOTHING_TO_SHOW", false));
+    expect(state.isComplete("al-todo-clear")).toBe(true);
+  });
+
+  it("credits al-speak when spoken alarms are turned on, never for a setting already on", () => {
+    const already = makeDetectorHarness(new Map(), true);
+    already.setSpeechOn(true);
+    expect(already.state.isComplete("al-speak")).toBe(false);
+
+    const { state, setSpeechOn } = makeDetectorHarness();
+    setSpeechOn(true);
+    expect(state.isComplete("al-speak")).toBe(true);
+  });
 
   it("does not credit th-theme for the boot-time theme restore", () => {
     const { state, setActiveThemeId } = makeDetectorHarness();

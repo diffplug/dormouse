@@ -33,13 +33,15 @@ Source of truth: `WORKERS` in `hosted/scripts/workers.mjs`; `workerApp` in `host
 
 **May create provider-only accounts without verified email.** Public email is null; pgstencil's internal placeholder is never a delivery address. Email-code login remains an access path to an account's canonical verified mailbox. No merge, email adoption, unlink, or account-recovery interface exists.
 
-**Must identify accounts by immutable user ID, never email.** Provider-only accounts keep their identity when a provider subsequently supplies email. Exception: `ADMIN_EMAIL` ("Managed voice").
+**Must identify accounts by immutable user ID, never email.** Provider-only accounts keep their identity when a provider subsequently supplies email. Exceptions: `ADMIN_EMAIL` ("Managed voice") and `SIGN_IN_ALLOWLIST` (below).
+
+**Must sign in only `SIGN_IN_ALLOWLIST`'s verified emails, in production, until launch.** A request naming another email is refused before a code is sent or an account created; on a GET, which every read of a login is, a login whose user is not a listed verified email has all its user's logins deleted before the auth handler answers. Signed out, the frontend shows its pre-launch notice instead of the sign-in form unless the URL carries `?signin` or a failed callback's `?error`. The test entry runs without the gate; previews and local development keep it off. Ends at launch (Future item 4).
 
 **Must enable providers explicitly in `OAUTH_PROVIDERS`.** The allowed set is GitHub, Google, Microsoft, and Apple. Missing paired credentials or unknown names fail closed; unused credentials enable nothing. Email uses Postmark in production and local capture in development.
 
 **Must discard provider tokens after identity verification and omit login tokens from browser JSON.** Cookies and upstream identity verification follow the packed adapter.
 
-Source of truth: `hosted/server/providers.js`; `authPolicy` / `providerBindings` in `hosted/server/policy.ts`.
+Source of truth: `hosted/server/providers.js`; `authPolicy` / `providerBindings` in `hosted/server/policy.ts`; `prelaunchAuth` in `hosted/server/prelaunch.ts`.
 
 ## Interface
 
@@ -50,6 +52,16 @@ Source of truth: `hosted/server/providers.js`; `authPolicy` / `providerBindings`
 **Must render on Dormouse product theme tokens**, the OS light/dark preference choosing bundled Light Visual Studio or Kimbie Dark, loading no marketing styles, fonts, or analytics.
 
 Source of truth: `App` in `hosted/src/App.tsx`; `restoreTheme` in `hosted/src/main.tsx`.
+
+## Terms acceptance
+
+Continuing past the sign-in notice is how an account agrees to the Hosted terms (`website/src/pages/Terms.tsx` -> "The service").
+
+- **Must show the notice beside every sign-in method**, naming `TERMS_VERSION` and linking the terms and privacy policy without leaving the page.
+- **`TERMS_VERSION` is the policy pages' revision date** and changes with every terms revision.
+- **Must record each account's first acceptance of each version**, after a sign-in that continued past the notice,, current version only.
+
+Source of truth: `termsRoutes` in `hosted/server/terms.ts`; `TERMS_VERSION` in `hosted/server/policy-constants.ts`.
 
 ## Managed voice
 
@@ -64,7 +76,7 @@ An admin-only test slice: Dormouse desktop exchanges a pasted voice token for El
 
 Errors are JSON `{ message }`. Cookie routes answer 401 without a login and 403 for any account but the admin.
 
-**Must admit only `ADMIN_EMAIL` while it is the account's verified email, rechecked on every request.** This gate, `isAdmin`, is also the Relay's entitlement ("Relay") and the only exception to "never email" ("Identity and login"); nothing else may key on an address, and it ends with the entitlement in Future item 3.
+**Must admit only `ADMIN_EMAIL` while it is the account's verified email, rechecked on every request.** This gate, `isAdmin`, is also the Relay's entitlement ("Relay") and with `SIGN_IN_ALLOWLIST` the only exceptions to "never email" ("Identity and login"); nothing else may key on an address, and it ends with the entitlement in Future item 3.
 
 **Must store only a token's SHA-256.** A token is `dmv_` plus base64url of 32 random bytes, returned only by the mint response. Revocation is permanent.
 
@@ -81,7 +93,7 @@ Errors are JSON `{ message }`. Cookie routes answer 401 without a login and 403 
 
 **Must delete ElevenLabs speech history, which keeps each generation's text, from the production voice Worker only**: one pass shortly after each successful speak, and a Cron Trigger every 5 minutes for what that missed. No retention bound is guaranteed (rationale).
 
-- **Must use an ElevenLabs account dedicated to Dormouse voice.** A sweep deletes the whole account's history.
+- **Must use an ElevenLabs service account dedicated to Dormouse voice, with history access isolated from other workspace usage.** A sweep deletes every history item visible to its key (rationale).
 - **Never touch the database or any binding but `ELEVENLABS_API_KEY` in a sweep**, so an idle deployment lets Postgres suspend. Without the key nothing runs; development and previews never sweep.
 - **Must fail the cron invocation when its pass cannot list or any delete fails; the after-speech pass only logs** (rationale).
 
@@ -180,6 +192,8 @@ sequenceDiagram
   end
 ```
 
+Pre-launch, a signed-out visitor to `verificationUrl` is sent to the devlog instead of signing in, and the code is lost, unless the link carries `?signin` (`/enroll?signin#<userCode>`); "Identity and login" owns the gate.
+
 Begin answers another origin, or none, with the self-host 409 `ORIGIN_MISMATCH_ERROR`. `userCode` is `XXXX-XXXX`; `verificationUrl` is `ACCOUNT_ORIGIN/enroll#<userCode>`, absent without `ACCOUNT_ORIGIN`; `expiresAt` is `ENROLLMENT_TTL_MS` (10 minutes) out; `interval` is 5 seconds. `enrolled` is the self-host `BurrowEnrollResponse`, `origin` the relay's `APP_ORIGIN` and `rpId` its hostname, without `requireUserVerification`. `redeemed` answers until the approval expires, so the Burrow can name what the account must remove. The 409 names `ACCOUNT_ORIGIN/account` at `MAX_ENROLLED_BURROWS` Burrows.
 
 - **Never write from begin.** The device code is 32 bytes, the bearer shape: a 4-byte big-endian expiry in epoch seconds, then 28 random bytes. The user code is `enrollUserCode`: `HMAC-SHA-256(RELAY_ENROLL_SECRET, deviceCode)` read five bits at a time into `ENROLL_USER_CODE_ALPHABET`, values past it skipped (rationale).
@@ -246,3 +260,4 @@ Source of truth: `.github/workflows/hosted-production.yml`; `hosted/scripts/prod
 1. Deploy the configured providers and pass real production acceptance. pgstencil includes the Microsoft fix; personal and work/school callbacks need acceptance.
 2. Add per-browser login listing/revocation, sign-out-everywhere, and account recovery before broad paid use. Revisit the fixed 24-hour login lifetime for daily voice use.
 3. Managed voice beyond the admin slice: the subscription replacing `ADMIN_EMAIL` (`docs/specs/pricing.md` -> "Checkout and entitlement"), credentials scoped for non-admin accounts, per-account quotas, usage accounting, and spending bounds beyond the fixed daily cap, and explicit text/redaction disclosure.
+4. Open sign-in: delete `hosted/server/prelaunch.ts` and the frontend's pre-launch notice.

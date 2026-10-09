@@ -129,6 +129,19 @@ button:disabled {
   background: var(--vscode-list-activeSelectionBackground);
   color: var(--vscode-list-activeSelectionForeground);
 }
+.button-link {
+  display: flex;
+  box-sizing: border-box;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 9px 14px;
+  border-radius: 4px;
+  text-decoration: none;
+}
+.button-link:hover {
+  filter: brightness(1.15);
+}
 .text-button {
   padding: 6px 0;
   background: transparent;

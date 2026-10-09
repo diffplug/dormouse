@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AlertManager, type ActivityNotification, type AwaitOutcome } from './alert-manager';
 import { applyTerminalEvents, TerminalProtocolParser } from './terminal-protocol';
 import { cfg } from '../cfg';
-import { collectEpisodes, engage, finishCommand, goIdle, leave, runCommand, VIEWER } from './alert-manager-test-utils';
+import { collectEpisodes, driveToBusy, engage, finishCommand, goIdle, leave, runCommand, VIEWER } from './alert-manager-test-utils';
 import { alertedPty, createOwnerPtyStream } from '../host/owner-pty';
 
 /**
@@ -97,16 +97,16 @@ describe('held completions', () => {
     ['report', (id: string) => manager.notifyFromProtocol(id, PERMISSION)],
     ['settle', (id: string) => watchedTurn(id)],
     ['exit', (id: string) => { runCommand(manager, id, 'pnpm build'); finishCommand(manager, id, 0, { promptStart: true }); }],
-  ] as const)('holds a %s while engaged and rings it once presence lapses from inactivity', (_kind, complete) => {
+  ] as const)('holds a %s while engaged as a TODO and rings it once presence lapses from inactivity', (_kind, complete) => {
     manager.onData(PANE);
     engage(manager, PANE);
     complete(PANE);
     expect(ringing(PANE)).toBe(false);
-    expect(manager.getState(PANE).todo).toBe(false);
+    expect(manager.getState(PANE).todo).toBe(true);
 
     goIdle(manager, PANE);
     vi.advanceTimersByTime(5_000);
-    expect(manager.getState(PANE)).toMatchObject({ status: 'ALERT_RINGING', todo: false });
+    expect(manager.getState(PANE)).toMatchObject({ status: 'ALERT_RINGING', todo: true });
   });
 
   it.each([
@@ -114,7 +114,7 @@ describe('held completions', () => {
     ['focus moving to another pane', () => engage(manager, OTHER)],
     ['focus moving away while presence lapses', () => manager.setViewer(VIEWER, { present: false, focusId: OTHER }, 'idle')],
     ['the viewer going away', () => manager.removeViewer(VIEWER)],
-  ] as const)('drops a held completion on an explicit disengage: %s', (_how, disengage) => {
+  ] as const)('leaves a held completion as its TODO, never ringing it, on an explicit disengage: %s', (_how, disengage) => {
     manager.onData(PANE);
     engage(manager, PANE);
     manager.notifyFromProtocol(PANE, PERMISSION);
@@ -122,7 +122,7 @@ describe('held completions', () => {
     disengage();
     vi.advanceTimersByTime(120_000);
     goIdle(manager, PANE);
-    expect(manager.getState(PANE)).toMatchObject({ status: 'WATCHING_DISABLED', todo: false, notification: null });
+    expect(manager.getState(PANE)).toMatchObject({ status: 'WATCHING_DISABLED', todo: true, notification: PERMISSION });
   });
 
   it('rings a held exit with its exit code', () => {
@@ -159,29 +159,34 @@ describe('held completions', () => {
     expect(manager.getState(PANE)).toMatchObject({ status: 'ALERT_RINGING', notification: PERMISSION });
   });
 
-  it('holds a deferred report that comes due while engaged', () => {
+  it('holds a ring that comes due while engaged without ever having shown', () => {
     output(PANE, 3_000);
     manager.notifyFromProtocol(PANE, PERMISSION);
     engage(manager, PANE);
     vi.advanceTimersByTime(5_000);
-    expect(ringing(PANE)).toBe(false);
+    expect(manager.getState(PANE)).toMatchObject({ status: 'WATCHING_DISABLED', episode: null, todo: true, notification: PERMISSION });
 
     goIdle(manager, PANE);
     expect(manager.getState(PANE)).toMatchObject({ status: 'ALERT_RINGING', notification: PERMISSION });
   });
 
-  it('rechecks recent output when a quiet report held for engagement escalates', () => {
+  it('rings a never-shown deferred ring once quiet if the viewer left before it came due', () => {
     output(PANE, 3_000);
     manager.notifyFromProtocol(PANE, PERMISSION);
     engage(manager, PANE);
+    leave(manager);
     vi.advanceTimersByTime(5_000);
-    expect(ringing(PANE)).toBe(false);
+    expect(manager.getState(PANE)).toMatchObject({ status: 'ALERT_RINGING', todo: false, notification: PERMISSION });
+  });
 
-    output(PANE, 5_000);
-    goIdle(manager, PANE);
+  it('keeps ringing a ring that already showed when it comes due again while engaged', () => {
+    manager.notifyFromProtocol(PANE, PERMISSION);
+    expect(ringing(PANE)).toBe(true);
+    driveToBusy(manager, PANE);
     expect(ringing(PANE)).toBe(false);
+    engage(manager, PANE);
     vi.advanceTimersByTime(5_000);
-    expect(manager.getState(PANE)).toMatchObject({ status: 'ALERT_RINGING', notification: PERMISSION });
+    expect(manager.getState(PANE)).toMatchObject({ status: 'ALERT_RINGING', todo: false, notification: PERMISSION });
   });
 
   it('acknowledging drops what was held and records it as answered', () => {
@@ -344,9 +349,10 @@ describe('walking away from a permission prompt', () => {
     player(steps).to(untilMs);
   }
 
-  it('holds the permission request while the user is still there', () => {
+  it('holds the permission request as a TODO while the user is still there', () => {
     replay(ENTER_AT + cfg.alert.inactivityTimeout - 1);
-    expect(manager.getState(PANE)).toMatchObject({ todo: false, notification: null });
+    expect(ringing(PANE)).toBe(false);
+    expect(manager.getState(PANE)).toMatchObject({ todo: true, notification: { body: 'Claude needs your permission' } });
   });
 
   it('keeps it pending through endless redraws, then rings when they stop', () => {
@@ -355,7 +361,7 @@ describe('walking away from a permission prompt', () => {
     vi.advanceTimersByTime(5_000);
     expect(manager.getState(PANE)).toMatchObject({
       status: 'ALERT_RINGING',
-      todo: false,
+      todo: true,
       notification: { body: 'Claude needs your permission' },
     });
   });
@@ -422,7 +428,7 @@ describe('a Claude Code turn', () => {
     return steps;
   }
 
-  it('holds the finish while the user watches, and drops it once they type', () => {
+  it('shows the finish as TODO while the user watches, and clears it once they type', () => {
     const endAt = ENTER_AT + RECORDED_TURN_MS;
     const typedAt = endAt + 2_000;
     const run = player([
@@ -432,14 +438,14 @@ describe('a Claude Code turn', () => {
     ]);
 
     run.to(typedAt - 1);
-    expect(manager.getState(PANE)).toMatchObject({ todo: false, notification: null });
+    expect(manager.getState(PANE)).toMatchObject({ todo: true, notification: FINISHED });
     run.to(endAt + IDLE_NOTICE_AFTER_MS - 1);
     expect(episodes.size).toBe(0);
     expect(manager.getState(PANE)).toMatchObject({ todo: false, notification: null });
   });
 
   it.each([
-    ['after a short turn and its trailing frame go quiet', RECORDED_TURN_MS, 3 + QUIET_MS],
+    ['immediately after a turn too short to establish activity', RECORDED_TURN_MS, 0],
     ['once a longer turn has gone quiet', LONG_TURN_MS, 3 + QUIET_MS],
   ] as const)('rings "claude finished" once when the user moved away mid-turn: %s', (_when, turnMs, afterEndMs) => {
     const ringAt = ENTER_AT + turnMs + afterEndMs;
@@ -477,8 +483,8 @@ describe('a Claude Code turn', () => {
     const run = player([...turn(RECORDED_TURN_MS), at(idleAt, () => goIdle(manager, PANE))]);
 
     run.to(idleAt - 1);
-    expect(manager.getState(PANE)).toMatchObject({ todo: false, notification: null });
+    expect(manager.getState(PANE)).toMatchObject({ todo: true, notification: FINISHED });
     run.to(idleAt);
-    expect(manager.getState(PANE)).toMatchObject({ status: 'ALERT_RINGING', todo: false, notification: FINISHED });
+    expect(manager.getState(PANE)).toMatchObject({ status: 'ALERT_RINGING', todo: true, notification: FINISHED });
   });
 });

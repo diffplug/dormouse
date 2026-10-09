@@ -1,4 +1,6 @@
 import { test, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import { TERMS_VERSION } from "../policy-constants";
 import { authPolicy, providerBindings, LOGIN_FRESH_AGE_MS } from "../policy";
 import { allowedDevRequest } from "../dev-host-guard";
 import type { IncomingMessage } from "node:http";
@@ -39,4 +41,11 @@ test("the recent-login window matches the adapter's own freshAge", async () => {
     email: { send: async () => {} } as never,
   });
   expect(built.session?.freshAge).toBe(LOGIN_FRESH_AGE_MS / 1000);
+});
+test("the sign-in notice names the terms revision the policy pages print", () => {
+  const layout = readFileSync(
+    new URL("../../../website/src/components/HostedPolicyLayout.tsx", import.meta.url),
+    "utf8",
+  );
+  expect(layout).toContain(`Last updated <time dateTime="${TERMS_VERSION}">`);
 });

@@ -170,25 +170,6 @@ describe("TutorialShell OSC 633 shell integration", () => {
     expect(output.join("")).toContain("\x1b]633;D;127\x07");
   });
 
-  it("re-announces the running command line via reportRunningCommand", () => {
-    const { output, shell } = createHarness();
-    shell.handleInput("ascii-splash --no-mouse\r");
-    output.length = 0;
-
-    shell.reportRunningCommand();
-    const data = output.join("");
-    expect(data).toContain("\x1b]633;E;ascii-splash --no-mouse\x07");
-    expect(data).toContain("\x1b]633;C\x07");
-  });
-
-  it("reportRunningCommand is a no-op at a prompt", () => {
-    const { output, shell } = createHarness();
-    shell.handleInput("a"); // prompt shown, no command running
-    output.length = 0;
-
-    shell.reportRunningCommand();
-    expect(output.join("")).toBe("");
-  });
 });
 
 /** A shell in `/home/demo/p` of `files`, past its first prompt. */
@@ -262,7 +243,7 @@ describe("TutorialShell tab completion", () => {
   it("completes a command name, and lists every command on an empty line", () => {
     expect(typed("tu\t").echo).toBe("tutorial ");
     expect(typed("c\t\t").echo).toBe("c\r\ncd  changelog\r\n" + promptFor("~/p") + "c");
-    expect(typed("\t\t").echo).toBe("\r\nascii-splash  cd  changelog  dor  ls  pwd  tutorial\r\n" + promptFor("~/p"));
+    expect(typed("\t\t").echo).toBe("\r\nagent  ascii-splash  build  cd  changelog  dor  ls  pwd  tutorial\r\n" + promptFor("~/p"));
     expect(typed("./t\t").echo).toBe("./t");
   });
 
@@ -270,7 +251,7 @@ describe("TutorialShell tab completion", () => {
     const output: string[] = [];
     const shell = new TutorialShell((data) => output.push(data), () => null, { promptShown: true });
     shell.handleInput("\t\t");
-    expect(output.join("")).toContain("ascii-splash  changelog  tutorial\r\n");
+    expect(output.join("")).toContain("agent  ascii-splash  build  changelog  tutorial\r\n");
     output.length = 0;
     shell.handleInput("ls s\t");
     expect(output.join("")).toBe("ls s");

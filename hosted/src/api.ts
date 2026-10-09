@@ -87,6 +87,24 @@ async function voice(method: string, path = ""): Promise<Response> {
     "Voice tokens are temporarily unavailable. Try again.",
   );
 }
+/**
+ * Records that this account continued past the sign-in notice naming
+ * `version`. False when the server no longer accepts that version.
+ */
+export async function acceptTerms(version: string): Promise<boolean> {
+  const response = await request(
+    "/api/terms/acceptance",
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ version }),
+    },
+    "Sign-in is temporarily unavailable. Please try again.",
+  );
+  if (response.status === 409) return false;
+  if (!response.ok) throw failed();
+  return true;
+}
 /** A voice or relay call's error when the server gave none written for this page. */
 const failed = () =>
   new Error("That did not work. Reload the page and try again.");

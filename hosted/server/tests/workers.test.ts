@@ -20,8 +20,10 @@ import {
 } from "./oauth-server";
 import type { Session } from "../../src/api";
 import { ADMIN_EMAIL } from "../admin";
+import { PRELAUNCH_REFUSAL, SIGN_IN_ALLOWLIST } from "../prelaunch";
 import { CRON_SWEEP_CAP, SPEECH_SWEEP_CAP, VOICE_DAILY_CAP } from "../voice";
 import { ALREADY_APPROVED, RECENT_LOGIN_REQUIRED } from "../relay-account";
+import { TERMS_VERSION } from "../policy-constants";
 import {
   API_ROUTES,
   NOT_ENTITLED_ERROR,
@@ -403,7 +405,13 @@ async function fixture(
       }>;
     const remove = (burrowId: string, from = origin) =>
       request(`/api/relay/burrows/${burrowId}`, { method: "DELETE", headers: { origin: from } });
-    return { request, post, session, email, oauth, tokens, speak, mint, approve, computers, remove };
+    const accept = (version: unknown, from = origin) =>
+      request("/api/terms/acceptance", {
+        method: "POST",
+        body: JSON.stringify({ version }),
+        headers: { origin: from, "content-type": "application/json" },
+      });
+    return { request, post, session, email, oauth, tokens, speak, mint, approve, computers, remove, accept };
   }
   return {
     ...context,
@@ -537,7 +545,7 @@ test("same-site requests fail, the sibling Workers' included; production exclude
       (
         await browser.post(
           "email-otp/send-verification-otp",
-          { email: "x@example.test", type: "sign-in" },
+          { email: ADMIN_EMAIL, type: "sign-in" },
           sameSite,
         )
       ).status,
@@ -582,7 +590,7 @@ test("same-site requests fail, the sibling Workers' included; production exclude
   };
   for (const sameSite of SAME_SITE)
     expect((await account.fetch(sameSite + "/api/auth/csrf")).status, sameSite).toBe(421);
-  await browser.email("real-clock@example.test");
+  await browser.email(SIGN_IN_ALLOWLIST[1]);
   expect(
     Math.abs(
       Date.parse((await browser.session())!.session.createdAt) - Date.now(),
@@ -594,6 +602,59 @@ test("same-site requests fail, the sibling Workers' included; production exclude
     'ALTER TABLE "session" DROP COLUMN "emailAuthenticated"',
   );
   expect((await browser.request("/api/ready")).status).toBe(503);
+});
+
+test("pre-launch, production signs in only the allowlist's verified emails", async ({
+  onTestFinished,
+}) => {
+  const f = await fixture(true, "github");
+  onTestFinished(f.close);
+  for (const address of SIGN_IN_ALLOWLIST) {
+    const listed = f.browser();
+    await listed.email(address.toUpperCase());
+    expect((await listed.session())!.user.email).toBe(address);
+  }
+  const stranger = f.browser();
+  const refused = await stranger.post("email-otp/send-verification-otp", {
+    email: "stranger@example.test",
+    type: "sign-in",
+  });
+  expect(refused.status).toBe(403);
+  expect(await refused.json()).toEqual({ message: PRELAUNCH_REFUSAL });
+  expect(
+    (
+      await stranger.post("sign-in/email-otp", {
+        email: "stranger@example.test",
+        otp: "00000000",
+      })
+    ).status,
+  ).toBe(403);
+  expect(
+    await queryDatabase(f.database.url, 'SELECT 1 FROM "user" WHERE email = $1', [
+      "stranger@example.test",
+    ]),
+  ).toHaveLength(0);
+  // A provider login lands, then is deleted before its first use, as is one
+  // claiming a listed address unverified.
+  for (const profile of [
+    { email: "stranger@example.test" },
+    { email: ADMIN_EMAIL, verified: false },
+  ]) {
+    const browser = f.browser();
+    await browser.oauth("github", profile);
+    expect(await browser.session()).toBeNull();
+    expect(
+      (await browser.request("/api/voice/tokens")).status,
+    ).toBe(401);
+  }
+  expect(
+    await queryDatabase(
+      f.database.url,
+      `SELECT 1 FROM "session" s JOIN "user" u ON u.id = s."userId"
+        WHERE NOT (u."emailVerified" AND u.email = ANY($1))`,
+      [SIGN_IN_ALLOWLIST],
+    ),
+  ).toHaveLength(0);
 });
 
 test("the relay and voice are ready only while their own roles hold the grants their lookups need", async ({
@@ -707,6 +768,31 @@ test("preview runs cloud smoke against real auth, ignores stale providers, and p
 
 const voiceId = "21m00Tcm4TlvDq8ikWAM";
 const hi = { text: "hi", voiceId };
+
+test("terms acceptance: any signed-in account records the current version once, from this origin only", async ({
+  onTestFinished,
+}) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const user = f.browser();
+  expect((await user.accept(TERMS_VERSION)).status).toBe(401);
+  await user.email("someone@example.test");
+  for (const sameSite of SAME_SITE)
+    expect((await user.accept(TERMS_VERSION, sameSite)).status, sameSite).toBe(403);
+  expect((await user.accept("2026-09-29")).status).toBe(409);
+  expect((await user.accept(TERMS_VERSION)).status).toBe(204);
+  const [first] = await queryDatabase<{ acceptedAt: Date }>(
+    f.database.url,
+    `SELECT "acceptedAt" FROM dormouse_terms_acceptances`,
+  );
+  expect((await user.accept(TERMS_VERSION)).status).toBe(204);
+  expect(
+    await queryDatabase(
+      f.database.url,
+      `SELECT version, "acceptedAt" FROM dormouse_terms_acceptances`,
+    ),
+  ).toEqual([{ version: TERMS_VERSION, acceptedAt: first.acceptedAt }]);
+});
 
 test("managed voice: only the verified admin mints, speaks, and revokes", async ({
   onTestFinished,

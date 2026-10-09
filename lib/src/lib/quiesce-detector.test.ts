@@ -42,29 +42,35 @@ describe('QuiesceDetector', () => {
     expect(monitor.getStatus()).toBe('NOTHING_TO_SHOW');
   });
 
-  it('uses a single accepted chunk to delay an alert, independently of BUSY and resets', () => {
-    const { monitor } = createMonitor();
-    expect(monitor.hasRecentOutput()).toBe(false);
-    expect(monitor.onData()).toBe(true);
-    expect(monitor.getStatus()).toBe('NOTHING_TO_SHOW');
+  it('only treats confirmed work and its finishing window as busy', () => {
+    const { monitor, settled } = createMonitor();
+    expect(monitor.isConfirmedBusy()).toBe(false);
+    monitor.onData();
+    expect(monitor.isConfirmedBusy()).toBe(false);
+    vi.advanceTimersByTime(1_500);
+    monitor.onData();
+    expect(monitor.getStatus()).toBe('MIGHT_BE_BUSY');
+    expect(monitor.isConfirmedBusy()).toBe(false);
+    vi.advanceTimersByTime(500);
+    expect(monitor.isConfirmedBusy()).toBe(false);
+    expect(settled).not.toHaveBeenCalled();
     monitor.reset();
-    vi.advanceTimersByTime(4_999);
-    expect(monitor.hasRecentOutput()).toBe(true);
-    vi.advanceTimersByTime(1);
-    expect(monitor.hasRecentOutput()).toBe(false);
+    driveMonitorToBusy(monitor);
+    expect(monitor.isConfirmedBusy()).toBe(true);
+    vi.advanceTimersByTime(2_000);
+    expect(monitor.isConfirmedBusy()).toBe(true);
+    vi.advanceTimersByTime(3_000);
+    expect(monitor.isConfirmedBusy()).toBe(false);
+    expect(settled).toHaveBeenCalledOnce();
   });
 
-  it('rejects resize redraws and disposed output without moving the quiet deadline', () => {
+  it('rejects resize redraws and disposed output', () => {
     const { monitor } = createMonitor();
-    monitor.onData();
-    const quietAt = monitor.quietAt();
-    vi.advanceTimersByTime(1_000);
     monitor.onResize();
     expect(monitor.onData()).toBe(false);
-    expect(monitor.quietAt()).toBe(quietAt);
     vi.advanceTimersByTime(500);
     expect(monitor.onData()).toBe(true);
-    expect(monitor.quietAt()).toBe(quietAt + 1_500);
+    expect(monitor.isConfirmedBusy()).toBe(false);
     monitor.dispose();
     expect(monitor.onData()).toBe(false);
   });
@@ -183,7 +189,10 @@ describe('QuiesceDetector', () => {
     const order: string[] = [];
     const monitor = new QuiesceDetector({
       onChange: (status) => order.push(`change:${status}`),
-      onSettled: () => order.push('settled'),
+      onSettled: () => {
+        expect(monitor.isConfirmedBusy()).toBe(false);
+        order.push('settled');
+      },
     });
     driveMonitorToMightNeedAttention(monitor);
     vi.advanceTimersByTime(3_000);
@@ -194,6 +203,16 @@ describe('QuiesceDetector', () => {
       'settled',
       'change:NOTHING_TO_SHOW',
     ]);
+  });
+
+  it('preserves new activity started by a completion consumer', () => {
+    const monitor = new QuiesceDetector({
+      onSettled: () => driveMonitorToBusy(monitor),
+    });
+    driveMonitorToBusy(monitor);
+    vi.advanceTimersByTime(5_000);
+    expect(monitor.getStatus()).toBe('BUSY');
+    monitor.dispose();
   });
 
   it('does not double-report NOTHING_TO_SHOW when the settled handler resets it', () => {
@@ -301,30 +320,6 @@ describe('QuiesceDetector', () => {
     monitor.onData();
     expect(monitor.getStatus()).toBe('NOTHING_TO_SHOW');
     expect(changes).toEqual([]);
-  });
-
-  it('quietAt counts from the last accepted output and outlives reset', () => {
-    const { monitor } = createMonitor();
-    monitor.onData();
-    const quietAt = monitor.quietAt();
-    expect(quietAt).toBe(Date.now() + 5_000);
-
-    vi.advanceTimersByTime(1_000);
-    monitor.reset();
-    // A command boundary resets the state machine, but "how long since this
-    // pane printed" is the fact an owner timing quiet across it still needs.
-    expect(monitor.quietAt()).toBe(quietAt);
-  });
-
-  it('a resize-suppressed output does not move quietAt', () => {
-    const { monitor } = createMonitor();
-    monitor.onData();
-    const quietAt = monitor.quietAt();
-
-    monitor.onResize();
-    vi.advanceTimersByTime(100);
-    monitor.onData();
-    expect(monitor.quietAt()).toBe(quietAt);
   });
 
   it('onResize suppresses output detection for 500ms', () => {

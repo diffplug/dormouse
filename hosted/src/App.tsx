@@ -6,6 +6,7 @@ import {
   type FormEvent,
 } from "react";
 import {
+  acceptTerms,
   approveEnrollment,
   createVoiceToken,
   getAccounts,
@@ -24,8 +25,45 @@ import {
   type Session,
   type VoiceToken,
 } from "./api";
-import { LOGIN_FRESH_AGE_MS, RECENT_LOGIN_WINDOW } from "../server/policy-constants";
+import {
+  LOGIN_FRESH_AGE_MS,
+  RECENT_LOGIN_WINDOW,
+  TERMS_VERSION,
+} from "../server/policy-constants";
 import { takeEnrollment, type Enrollment } from "./enrollment";
+
+// The terms version the sign-in notice showed when this tab continued past it,
+// kept through a provider's redirect until the account's acceptance is
+// recorded (docs/specs/hosted.md -> "Terms acceptance").
+const CONTINUED_KEY = "dormouse.terms-continued";
+function noteContinued() {
+  try {
+    sessionStorage.setItem(CONTINUED_KEY, TERMS_VERSION);
+  } catch {
+    // Storage blocked: the agreement stands, only its record is lost.
+  }
+}
+/** Records a pending acceptance; a failure leaves it for the next refresh. */
+async function recordContinued() {
+  let version: string | null = null;
+  try {
+    version = sessionStorage.getItem(CONTINUED_KEY);
+  } catch {
+    return;
+  }
+  if (!version) return;
+  await acceptTerms(version);
+  sessionStorage.removeItem(CONTINUED_KEY);
+}
+
+// Pre-launch: a signed-out visitor is sent to the devlog's email signup
+// instead of the sign-in form; `/login?signin` still opens it, as does a
+// failed provider callback's `?error`, which only a sign-in started there
+// reaches, so its message shows. Delete this, and its use below, at launch.
+const SUBSCRIBE_URL = "https://nedshed.dev/subscribe";
+const SUBSCRIBE_REDIRECT_MS = 4000;
+const SIGN_IN_PARAMS = new URLSearchParams(location.search);
+const SIGN_IN_OPEN = SIGN_IN_PARAMS.has("signin") || SIGN_IN_PARAMS.has("error");
 
 export function App({ enrollment }: { enrollment: Enrollment | null }) {
   const [session, setSession] = useState<Session | null>(null);
@@ -72,6 +110,7 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
           getComputers().catch(() => null),
         ])
       : [[], null, null];
+    if (current) await recordContinued().catch(() => {});
     if (generation !== refreshGeneration.current) return;
     setSession(current);
     setEnabled(providers);
@@ -109,6 +148,15 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
   useEffect(() => {
     if (enterCode) codeInput.current?.focus();
   }, [enterCode]);
+  const comingSoon = !loading && !session && !SIGN_IN_OPEN;
+  useEffect(() => {
+    if (!comingSoon) return;
+    const timer = setTimeout(
+      () => location.assign(SUBSCRIBE_URL),
+      SUBSCRIBE_REDIRECT_MS,
+    );
+    return () => clearTimeout(timer);
+  }, [comingSoon]);
   useEffect(() => {
     // A link opened in the tab already on `/enroll` changes only the fragment:
     // take its code as the first load did, without reloading. Elsewhere a
@@ -161,6 +209,7 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
       return;
     }
     void act("verify", async () => {
+      noteContinued();
       await post("sign-in/email-otp", { email: email.trim(), otp: code });
       setCode("");
       setEnterCode(false);
@@ -245,14 +294,18 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
       </header>
       <main>
         <h1>
-          {enrolling
+          {comingSoon
+            ? "Coming soon"
+            : enrolling
             ? "Approve a computer"
             : session
               ? "Your account"
               : "Sign in to Dormouse Hosted"}
         </h1>
         <p className="intro">
-          {enrolling
+          {comingSoon
+            ? "Check out the devlog at nedshed.dev."
+            : enrolling
             ? !enrolling.code
               ? "This link cannot be approved."
               : session
@@ -264,6 +317,10 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
         </p>
         {loading ? (
           <p role="status">Checking your account…</p>
+        ) : comingSoon ? (
+          <a className="primary button-link" href={SUBSCRIBE_URL}>
+            Subscribe at nedshed.dev
+          </a>
         ) : (
           <>
             {error && (
@@ -612,7 +669,10 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
                         key={provider}
                         disabled={!!busy}
                         onClick={() =>
-                          void act(provider, () => social(provider, false))
+                          void act(provider, () => {
+                            noteContinued();
+                            return social(provider, false);
+                          })
                         }
                       >
                         {busy === provider
@@ -622,6 +682,25 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
                     ))}
                   </section>
                 )}
+                <p className="help">
+                  By continuing, you agree to the{" "}
+                  <a
+                    href="https://dormouse.sh/terms/"
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Terms
+                  </a>{" "}
+                  (version {TERMS_VERSION}) and acknowledge the{" "}
+                  <a
+                    href="https://dormouse.sh/privacy/"
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Privacy policy
+                  </a>
+                  .
+                </p>
                 {enrolling && enabled.length > 0 ? (
                   <p className="help">
                     Signing in with a provider leaves this page. Afterwards,

@@ -424,7 +424,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                     onChange={(deferAlertsUntilQuiet) => updateAlertSettings({ deferAlertsUntilQuiet })}
                   />
                   <div className={`${UNDER_SWITCH_INDENT} mt-1 text-sm leading-relaxed text-muted`}>
-                    Terminal notifications wait until five seconds after the last output.
+                    Terminal notifications wait while a program is busy, until its output settles.
                     If output resumes, the alert pauses until quiet without losing it or
                     repeating alarms already sent. Command exits alert immediately.
                   </div>
