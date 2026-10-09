@@ -33,7 +33,6 @@ const noopActions: WallActions = {
   onFinishRename: () => ({ accepted: true }),
   onCancelRename: () => {},
   onSwapRenderMode: () => {},
-  resolveSurfaceRef: (id) => id,
   onResolveToolApproval: () => {},
 };
 

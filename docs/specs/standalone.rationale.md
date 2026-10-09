@@ -57,6 +57,12 @@ In a real build the same day, with the xterm textarea focused and typed into, a 
 
 **Why no window is throttled in the background.** The alert host moved into the sidecar (§Alerts), but a due spoken alarm still plays in the renderer of the window showing its Session (`docs/specs/alert.md` → Spoken alarms), on that window's timers and Web Speech engine. Tauri's default leaves WebKit's policy in force: a minimized or hidden window's timers are throttled and the view may be suspended after roughly five minutes, pausing everything until it is visible again (tauri-utils 2.9.3, `BackgroundThrottlingPolicy`). That delayed the speech for exactly the window a spoken alarm exists to reach — the one the user minimized. The policy cannot be set per state, so every window pays a hidden window's timer cost for it (2026-09).
 
+## Workspace registry
+
+**Why a persisted high-water mark, not the disk scan alone.** The scan sees only what is still saved: closing the highest-numbered Workspace or window deletes it from disk, so the next launch minted its number again, and a `dor` handle an agent cached named a stranger. The mark is the end of the last block handed out, written on every reservation. A hi/lo ceiling a slack past it (1024 Surfaces, 64 Workspaces, 16 windows) was tried first to keep the fsync off most creates, and dropped (2026-10): since the handle is the number, every relaunch jumped `surface:` ids by about 1024. Each reservation is a webview's small pool refill, at the pace of user creates and off the main thread, so a write per reservation is affordable. Running in memory when the state root or the write fails keeps every create working; only a later launch may then reuse a number.
+
+**Why `ids.json` sits in the state root, not `sessions/`.** `sessions/` is enumerated as window snapshots and swept at boot, and a per-window close removes what it owns there; the counters belong to no window.
+
 ## Routing
 
 Rust routes rather than the webview filtering, because a webview cannot be trusted to drop another window's bytes: it would still have received them, and `pty:data` is the hot path.

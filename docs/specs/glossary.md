@@ -16,7 +16,7 @@ A **Surface** is the durable occupant of a Pane — the content in a slot. Three
 
 A **Pane** is one Lath leaf, a slot in the tiling layout (`docs/specs/tiling-engine.md`); `lib/src/components/Wall.tsx` owns Panes and Surfaces both.
 
-A Pane holds one primary Surface today; helpers share its Pane ([Containers](#containers)). The model reserves several primary Surfaces per Pane (a future in-pane surface strip), so **`dor` targets content by Surface ref (`surface:N`)**, reserving Pane refs for layout-only commands (rationale).
+A Pane holds one primary Surface today; helpers share its Pane ([Containers](#containers)). The model reserves several primary Surfaces per Pane (a future in-pane surface strip), so **`dor` targets content by Surface id (`surface:N`)**, reserving Pane refs for layout-only commands (rationale).
 
 **Surface kinds** — the `kind` a `dor` handle reports, derived from the Pane's params, never stored on the id:
 
@@ -55,11 +55,11 @@ The containment hierarchy `dor` handles commit to (`docs/specs/dor-cli.md`):
 Window ⊃ Workspace ⊃ Pane ⊃ Surface  (terminal = Session | browser)
 ```
 
-**Surface identity:** a primary Surface's id is its Lath leaf id; a helper receives its Lath leaf only on promotion. A terminal Surface's id is its `SessionId`, stable (I1); browser replacement and relaunch have different identity effects (I10).
+**Surface identity:** minting: `docs/specs/transport.md` → Surface ids; the id `surface:<n>` is the `dor` handle: `docs/specs/dor-cli.md` → Handle Model. A primary Surface's id is its Lath leaf id, and a helper receives its Lath leaf only on promotion. A terminal Surface's id is its `SessionId`, stable (I1); a browser Surface's across render swaps and replacement: I10.
 
 ## Containers
 
-**Must keep a helper as an auxiliary terminal Surface in its source's Pane**, with a stable Session id and explicit parent association. It has no independent Lath leaf, public ref, or alerting until promotion; `docs/specs/terminal-context.md` owns its lifetime. A shown helper is `Paned` within the source body; a closed context leaves it `Hidden` and DOM-parked (`Mounted`).
+**Must keep a helper as an auxiliary terminal Surface in its source's Pane**, with a stable Session id and explicit parent association. It has no independent Lath leaf, targetable id, or alerting until promotion; `docs/specs/terminal-context.md` owns its lifetime. A shown helper is `Paned` within the source body; a closed context leaves it `Hidden` and DOM-parked (`Mounted`).
 
 Workspace and Window are containers, not Session layers — they group Surfaces rather than describing one Surface's state (containment is I7).
 
@@ -197,10 +197,10 @@ A user verb is an intentional action that produces a single observable change.
 | `createWorkspace` | Add a Workspace and mount its Wall, which spawns one pane; activate by default, unless `activate: false`. |
 | `closeWorkspace` | `kill` each member Surface, then remove the Workspace; closing the last Workspace atomically creates a fresh replacement. |
 | `renameWorkspace` | Update a Workspace's `name`; touches no Session |
-| `moveWorkspace` | Reorder a Workspace within its Window; a minted ref renames nothing (a host with no registry still numbers by position) and touches no Session |
+| `moveWorkspace` | Reorder a Workspace within its Window; renames nothing and touches no Session |
 | `transferWorkspace` | Move a Workspace to another Window, Surfaces and Sessions intact: `release` each member Session (detached, Process still Live) and resume it there. Kills nothing — not a `closeWorkspace`. |
 | `tearOut` | `transferWorkspace` into a Window created for it. A Window whose last Workspace leaves closes itself. |
-| `reopen` | Rebuild the newest reopenable close — a Surface, Workspace, or window — from its in-memory record as a new one: new Sessions, ids, and refs (`docs/specs/reopen.md`). Never a `restore` or `reattach`. |
+| `reopen` | Rebuild the newest reopenable close — a Surface, Workspace, or window — from its in-memory record as a new one: new Sessions and ids (`docs/specs/reopen.md`). Never a `restore` or `reattach`. |
 
 Source of truth: `setActiveWorkspace` / `createWorkspace` / `closeWorkspace` / `renameWorkspace` / `moveWorkspace` in `lib/src/lib/workspace-store.ts`; `closeAll` in `lib/src/components/Wall.tsx`; `prepareWorkspaceTransfer` in `lib/src/components/wall/workspace-transfer.ts`.
 
@@ -246,7 +246,7 @@ Source of truth: `focusSession` / `refitSession` in `lib/src/lib/terminal-lifecy
 - I7: Every Surface sits in exactly one Pane; every Pane and its Surfaces belong to exactly one Workspace; every Workspace belongs to one Window.
 - I8: **Must preserve Process and Activity during `switchWorkspace`, without firing a fresh ring** (I3). A switch reattaches terminal elements but resumes and restores nothing, so no ring can fire (`docs/specs/layout.md` → Workspaces).
 - I9: A Workspace's union status is a pure projection of its members' Activity: no independent state, destroyed with the Workspace.
-- I10: **Must preserve a terminal Surface's `SessionId`** (I1). **Must transfer the `surface:N` CLI ref when replacing a browser Surface**, minting a new id in the same layout slot with its target URL. An `agent-browser-screencast` ⇄ `agent-browser-popout` relaunch keeps the Surface id; render-mode changes do not universally imply replacement (rationale; `docs/specs/dor-browser.md` → Display Modal And Render Swaps).
+- I10: **Must preserve a terminal Surface's `SessionId`** (I1). **Must keep a browser Surface's id across every render-mode swap and relaunch**, swapping its renderer in place (`docs/specs/dor-browser.md` → Display Modal And Render Swaps). Replacing an untouched shell — by a browser Surface or a host New Terminal — creates a new Surface with a new id (rationale).
 
 ## Retired / overloaded terms
 

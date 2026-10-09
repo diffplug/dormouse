@@ -177,13 +177,20 @@ OSC parsing and stripping for those rows: `docs/specs/terminal-escapes.md` → "
 
 Source of truth: `ManagedVoicePort` in `lib/src/lib/platform/managed-voice-types.ts`; `createManagedVoicePort` in `standalone/src/managed-voice-port.ts`; `createManagedVoiceHost` in `lib/src/host/managed-voice-host.ts`.
 
+## Surface ids
+
+**Must mint every Surface id as `surface:<n>` off one host counter** — standalone's Rust for every window, the VS Code extension host for every window of the install, else the page alone — handed to the webview in blocks so a Wall mints synchronously. Each reservation names a floor, the highest `surface:<n>` the webview restored, and every number it returns is above it. A helper's id is minted at its birth. The id is the `dor` handle (`docs/specs/dor-cli.md` → Handle Model); beyond its number, it is opaque.
+
+- **A host must persist its counter's high-water mark before handing out a number at or above it**, so no number is reused across launches, **and never past the block it hands out**, so a relaunch skips only the ids a webview held unused at exit; where each host keeps it: `docs/specs/standalone.md` → "Workspace registry", `docs/specs/vscode.md` → "Surface id minting".
+- **Must allow creation when a reservation fails**, minting `surface:<uuid>`.
+
+Carriers: the `surface_reserve_ids` invoke (standalone); `surface:reserveIds` → `surface:reservedIds` (VS Code). Source of truth: `lib/src/lib/surface-ids.ts`.
+
 ## Persisted session types
 
 **The layout field.** A `PersistedSession` records the layout as `lathLayout` — the native Lath tree (`docs/specs/tiling-engine.md` → "Persistence"). Each `PersistedDoor` carries a Lath restore `token` as its sole restore payload.
 
 **Must carry Workspace delivery overrides in `PersistedSession.alertDelivery`**, across hosts; inheritance and validation follow `docs/specs/alert.md` → Alarm settings.
-
-**Workspace-scoped dor refs.** A `PersistedSession` may record `surfaceRefs` — stable Surface id → Workspace-local `dor` short ref (`surface:N`) — plus `surfaceRefsNext`, the next number to hand out. Ref-preserving layout moves and replacement transfers follow `docs/specs/dor-cli.md` → Handle Model. **Must drop a killed Surface's entry without reusing its retired ref**: persist `surfaceRefsNext` independently rather than deriving it from the map, and clamp it above the map's highest ref on load. Old snapshots without the fields allocate refs from the restored Surfaces on first mount.
 
 **Surface kinds in the snapshot.** Each `PersistedPane` records a `surfaceType` (`docs/specs/glossary.md`): `'terminal'` — the default, **omitted from the row** so terminal snapshots stay byte-identical — `'browser'`, or `'tool'`, whose extra `command` and `tool` fields are `docs/specs/dor-tool.md` → Persistence and hosts. **A pane lacking it reads as `'terminal'`.** A browser pane mints no PTY on restore and survives resume without one, rebuilding from the persisted layout (visible) or `PersistedDoor.params` (minimized). **Must reject a layout whose leaves differ from the visible pane set during restore or resume, and omit visible browser ids from the terminal fallback.**
 
@@ -191,19 +198,21 @@ Source of truth: `ManagedVoicePort` in `lib/src/lib/platform/managed-voice-types
 
 - **A Workspace with neither a published nor a boot-seeded session is dropped rather than written empty**, so a mid-boot snapshot cannot blank a restored Workspace.
 - **A Workspace's save compares against its own previous record** — seeded from disk until its Wall publishes — never the Window's active one, or a dead PTY's retained cwd and alert would come from the wrong Workspace.
-- **Reordering, renaming, pinning, or switching the active Workspace writes too.** **Always write `nameIsAuto`**; lacking it, only a `Workspace <n>` name is auto. **Write `pinned` only when true**, in every record a Window builds.
+- **Reordering, renaming, pinning, or switching the active Workspace writes too.** **Always write `nameIsAuto`**. **Write `pinned` only when true**, in every record a Window builds.
 - **Must publish both Workspace records in one synchronous step with a Surface move's ownership change**, unprobed and behind one Window write (`pagehide` included), fencing saves collected before or during the change and retaining a departed Session's previous cwd/alert in the destination.
 - **VS Code does not use the collector** — each webview persists one bare `PersistedSession`, its single Workspace, through its own per-surface state API (`docs/specs/vscode.md`).
 
-**The Window wrapping lives at the standalone adapter boundary, never in the shared save/restore code**, which still operates on a bare `PersistedSession` per Workspace (`docs/specs/standalone.md` → Persistence). **A Window-persisting adapter answers through `getWindowState` / `saveWindowState`, and answers nothing on the bare-Session `getState` / `saveState` pair** — its blob is a Window and every shared reader of `getState` wants a Session. **A blob written before standalone persisted Windows is wrapped as the window's one Workspace**; that is the only migration.
+**The Window wrapping lives at the standalone adapter boundary, never in the shared save/restore code**, which still operates on a bare `PersistedSession` per Workspace (`docs/specs/standalone.md` → Persistence). **A Window-persisting adapter answers through `getWindowState` / `saveWindowState`, and answers nothing on the bare-Session `getState` / `saveState` pair** — its blob is a Window and every shared reader of `getState` wants a Session.
 
 **A save probes every non-browser pane's cwd in one host round trip where the adapter offers `getCwds`, and every save landing in one microtask shares that round trip**, falling back to one `getCwd` per id (rationale). **A flush may say `probeCwd: false`** and keep each pane's previously persisted cwd — the post-kill quit flush (`docs/specs/standalone.md` → "Quit flow").
 
-**A corrupt save must never block startup.** Every read goes through `readPersistedSession()` / `readPersistedWindow()`, which accept the canonical parsed object *or* a JSON-stringified blob and log-and-discard anything present but unreadable. `readPersistedWindow` also drops Workspaces whose inner session is unreadable and repairs a dangling `activeWorkspaceId` to the first Workspace.
+**`PersistedSession.version` is 4 and `PersistedWindow.version` 2; a reader must discard any other version as a fresh start, never migrate it.** Every writer stamps both, pinned by `standalone/scripts/persisted-format.json`; the standalone Rust host's discard: `docs/specs/standalone.md` → Persistence.
 
-**Must keep recovery commands outside `PersistedPane`.** `normalizeSessionV3` strips legacy `resumeCommand` fields. Capture, records, and execution follow `docs/compatible-agents.md`.
+**A corrupt save must never block startup.** Every read goes through `readPersistedSession()` / `readPersistedWindow()`, which accept the canonical parsed object *or* a JSON-stringified blob and log-and-discard anything present but unreadable. `readPersistedWindow` also drops unreadable Workspace records and repairs a dangling `activeWorkspaceId` to the first Workspace.
 
-Source of truth: `PersistedSession` in `lib/src/lib/session-types.ts`; `lib/src/lib/window-session-aggregator.ts`; `saveSession` in `lib/src/lib/session-save.ts`; `restoreSession` in `lib/src/lib/session-restore.ts`; `lib/src/lib/window-persistence.ts`; `standalone/src/coalesce-cwds.ts`.
+**Must keep recovery commands outside `PersistedPane`.** Capture, records, and execution follow `docs/compatible-agents.md`.
+
+Source of truth: `PersistedSession` in `lib/src/lib/session-types.ts`; `lib/src/lib/window-session-aggregator.ts`; `saveSession` in `lib/src/lib/session-save.ts`; `restoreSession` in `lib/src/lib/session-restore.ts`; `standalone/src/coalesce-cwds.ts`.
 
 ## Persistence policy
 
@@ -215,7 +224,7 @@ Source of truth: `PersistedSession` in `lib/src/lib/session-types.ts`; `lib/src/
 
 **Must remove legacy transcript bytes from disk** (rationale). **No writer accepts a transcript-bearing Session shape.**
 
-- **`readPersistedSession` drops `scrollback` and `resumeCommand` when present** and requires neither, so a transcript never survives into a parsed Session and the first save after upgrade rewrites each store without one.
+- **Never parse a transcript-bearing blob**: it is of an older format (Persisted session types). Standalone deletes such a snapshot at boot (`docs/specs/standalone.md` → Persistence); VS Code deletes such a `workspaceState` blob at activation (`discardUnreadableSessionState` in `vscode-ext/src/session-state.ts`), and a panel's first save overwrites its `setState` blob.
 - **Standalone sweeps orphaned session temp files at boot**, the only path that can retire a transcript a crash left in one, and **never touches a live snapshot**. `sweep_orphan_session_temps` in `standalone/src-tauri/src/lib.rs`.
 - **Debug standalone must atomically remove obsolete pane `scrollback` from recognized legacy-root snapshots**, preserving other fields and leaving malformed snapshots untouched. `scrub_legacy_session_transcripts` in `standalone/src-tauri/src/lib.rs`.
 
@@ -247,7 +256,6 @@ Standalone's per-window record: `docs/specs/standalone.md` -> "Persistence". "Re
 - **A spawn that fails still reports an exit.** `pty-core.spawn` answers a node-pty failure with `error` *and* `exit`; `error` reaches no webview (rationale).
 - **Teardown acks are correlated by request id, never by message type alone.** For `interrupt` and the graceful kill the pty-host echoes `requestId` on `interruptDone` / `gracefulKillDone` and the caller compares it — a timed-out call's ack still arrives afterwards (rationale).
 - **An omitted interrupt target list is not an empty one.** `pty-core.interrupt(ids)` broadcasts to every live PTY only when `ids` is *omitted*; an empty array is a no-op, so a caller whose computed set comes out empty never sends the blanket second press that destroys codex's hint.
-- **Untouched defaults conservatively.** New saved panes include `untouched`; a pane read without the field defaults to `untouched: false`, so it still requires kill confirmation.
 - **Replay filtering does not re-fire alerts**, quiesce-detector events, or protocol notifications (`docs/specs/terminal-escapes.md` → "`pty:data` strip semantics").
 - **Never run a synchronous subprocess on a PTY host's event loop** (the Tauri sidecar, VS Code's pty-host); `/proc` reads and small state files are exempt (rationale). Pinned by `standalone/sidecar/no-sync-subprocess.test.js`.
 - **Must discard a probe's answer for a PTY replaced or exited mid-probe.**

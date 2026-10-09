@@ -13,7 +13,7 @@ Source of truth: `surface.tool` in `lib/src/components/wall/use-dor-control.ts`.
 
 **Must designate the Surface as `tool` before its command starts serving.** A Tool has terminal and browser capabilities for one run of its command ([Run end](#run-end)), including while booting, awaiting approval, or showing a port conflict. Browser operations still require the renderer/session they operate on.
 
-- **Must retain the Session id, public Surface ref, and terminal across serving and renderer changes**, which are changes within one Surface.
+- **Must retain the Session id, Surface id, and terminal across serving and renderer changes**, which are changes within one Surface.
 - **Never offer or apply a renderer swap outside a Tool's declarable `render` values** ([Declaring tools](#declaring-tools)), in the Display modal or `onSwapRenderMode` (rationale).
 - **Must run the terminal Activity model for a Tool**, including when its browser is visible; watched-command defaults belong to `docs/specs/alert.md`.
 - **Never apply the untouched-shell kill or shell-replacement shortcut to a Tool**, which spawns touched; the Tools a close does not ask about are `docs/specs/reopen.md` → "Reopenable kinds".
@@ -120,7 +120,7 @@ Source of truth: `ToolPanel` in `lib/src/components/wall/ToolPanel.tsx`.
 
 A Tool is designated for one run of its command, not for the life of its Surface.
 
-**Must turn a Tool whose designated run ended into a plain terminal in place**: the user's Ctrl+C or quit, a crash, a failed boot, a suspend (the shell's prompt is the only signal; a resumed run is an ordinary terminal's, its announcements inert as [OSC 367](#osc-367) has them). Keep the Session id, Surface ref, scrollback, and a user rename; retire the browser, announcements, and unsaved state ([Serving](#serving)); drop a preview mark. Only a finished run ends it: the designated command's, including one that starts and finishes in one output chunk, or any command once a host replacement has lapsed; booting, pending approval, and a takeover waiting for its prompt have ended nothing. It then persists as a terminal, keyed reuse never matches it, and Terminal Context gives it a helper (`docs/specs/terminal-context.md` → Tool context). (rationale)
+**Must turn a Tool whose designated run ended into a plain terminal in place**: the user's Ctrl+C or quit, a crash, a failed boot, a suspend (the shell's prompt is the only signal; a resumed run is an ordinary terminal's, its announcements inert as [OSC 367](#osc-367) has them). Keep the Session id, Surface id, scrollback, and a user rename; retire the browser, announcements, and unsaved state ([Serving](#serving)); drop a preview mark. Only a finished run ends it: the designated command's, including one that starts and finishes in one output chunk, or any command once a host replacement has lapsed; booting, pending approval, and a takeover waiting for its prompt have ended nothing. It then persists as a terminal, keyed reuse never matches it, and Terminal Context gives it a helper (`docs/specs/terminal-context.md` → Tool context). (rationale)
 
 **Must keep the designation while the host replaces a run**: an in-place restart (idle keyed match, `dor ensure --restart`, approval match), a preview retarget with its kept or restored retypes ([Preview slot](#preview-slot)), and a reap's stop until rehydrate ([Reaping](#reaping)). One host hold, set before the host's interrupt and released once the successor run starts or the host gives up, both exempts the end here and silences its command-exit alert (`docs/specs/alert.md` → Command-exit Track). A replacement the host gives up on ends the run; so does a rehydrate's failed run (Error tier).
 
@@ -264,7 +264,7 @@ flowchart TD
   A4 -- no --> RTP[retarget, pin: retargeted]
 ```
 
-- **Must retarget in place**: interrupt the slot's command with Ctrl+C, then type the new Tool's command, quoted for the slot's shell, in the slot's directory, retaining the Session id, Surface ref, terminal, and a user rename; the new Tool may differ. The old command's browser, announcements, and unsaved state retire at once ([Serving](#serving)); a Door slot reattaches focus-neutrally. Slot Tools should exit on Ctrl+C (`less -K`, `glow`).
+- **Must retarget in place**: interrupt the slot's command with Ctrl+C, then type the new Tool's command, quoted for the slot's shell, in the slot's directory, retaining the Session id, Surface id, terminal, and a user rename; the new Tool may differ. The old command's browser, announcements, and unsaved state retire at once ([Serving](#serving)); a Door slot reattaches focus-neutrally. Slot Tools should exit on Ctrl+C (`less -K`, `glow`).
 - **Must pin a slot whose occupant outlives a short grace after the interrupt** and place the launch as if there were no slot (rationale); a slot pinned meanwhile gets its previous command typed again, and the launch is placed likewise unless superseded.
 - **Must let the newest preview in a Workspace supersede older ones** not yet past lookup or interrupt, which answer `superseded` with the slot's handle, or an error while there is no slot (rationale). A kept slot, or a run an abandoned retarget interrupted and nothing replaced, gets its command typed again when its prompt comes late (rationale). **Never retype a Surface the user has typed into since the interrupt**, one a newer command or retarget has taken, or one going away with its Workspace.
 - **Never let a preview take over its caller or become a Door.** A new slot splits focus-neutrally from `--surface` when given, else from the slot pinned last while it is a visible pane of the Workspace, else from the caller (rationale). `--preview` rejects `--fresh` and `--minimize`.
@@ -324,7 +324,7 @@ sequenceDiagram
 **Must answer `takeover` before waiting for the calling shell's prompt**: the answer promises placement, not command startup.
 
 - **Must leave the caller unchanged on prompt timeout or cancellation**, rechecking transfer/closing state, pane membership, CWD, kind, and helper presence after the wait. **Must complete an accepted takeover after switching Workspaces** without changing the active Workspace (rationale).
-- **Must retain the Session id, Surface ref, scrollback, and any user rename** through the transformation.
+- **Must retain the Session id, Surface id, scrollback, and any user rename** through the transformation.
 - **Must report an error when the caller is its own keyed match and that match is not running**, instead of reporting a misleading `existing` result.
 - **May interleave user keystrokes arriving between the prompt and command injection.**
 - **Must include already-owned background listeners in the usual process-tree scan**; [Serving](#serving) owns selection.

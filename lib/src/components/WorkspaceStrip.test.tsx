@@ -121,22 +121,22 @@ describe('WorkspaceStrip', () => {
 
   it('activates on click', async () => {
     const first = getWorkspacesSnapshot().workspaces[0].id;
-    await act(async () => { createWorkspace({ id: 'ws-2' }); });
+    await act(async () => { createWorkspace({ id: 'workspace:2' }); });
     await render();
-    expect(getActiveWorkspaceId()).toBe('ws-2');
+    expect(getActiveWorkspaceId()).toBe('workspace:2');
     expect(tabFor(first).querySelector('[data-workspace-tab-close]')).toBeNull();
-    expect(tabFor('ws-2').querySelector('[data-workspace-tab-close]')).not.toBeNull();
+    expect(tabFor('workspace:2').querySelector('[data-workspace-tab-close]')).not.toBeNull();
     await act(async () => { activateButton(first).click(); });
     expect(getActiveWorkspaceId()).toBe(first);
     expect(tabFor(first).querySelector('[data-workspace-tab-close]')).not.toBeNull();
-    expect(tabFor('ws-2').querySelector('[data-workspace-tab-close]')).toBeNull();
+    expect(tabFor('workspace:2').querySelector('[data-workspace-tab-close]')).toBeNull();
   });
 
   it('shows the TODO pill on every tab and the alarm inset on hidden ones, counting them in the label', async () => {
     const first = getWorkspacesSnapshot().workspaces[0].id;
-    await act(async () => { createWorkspace({ id: 'ws-2' }); });
+    await act(async () => { createWorkspace({ id: 'workspace:2' }); });
     setWorkspaceSurfaces(first, ['pane-a', 'pane-b']);
-    setWorkspaceSurfaces('ws-2', ['pane-c', 'pane-d']);
+    setWorkspaceSurfaces('workspace:2', ['pane-c', 'pane-d']);
     setTerminalActivity('pane-a', { status: 'ALERT_RINGING', episode: createAlertEpisode() });
     setTerminalActivity('pane-b', { todo: true });
     setTerminalActivity('pane-c', { status: 'ALERT_RINGING', episode: createAlertEpisode() });
@@ -147,22 +147,22 @@ describe('WorkspaceStrip', () => {
     expect(tabFor(first).querySelector('[data-alert-ring-inset]')).not.toBeNull();
     // The visible Workspace's panes ring for it, so its tab wears no inset, and
     // with no TODO it shows nothing at all.
-    expect(tabFor('ws-2').querySelector('.todo-pill-shell')).toBeNull();
-    expect(tabFor('ws-2').querySelector('[data-alert-ring-inset]')).toBeNull();
-    expect(activateButton('ws-2').getAttribute('aria-label')).toBe('Workspace 2');
+    expect(tabFor('workspace:2').querySelector('.todo-pill-shell')).toBeNull();
+    expect(tabFor('workspace:2').querySelector('[data-alert-ring-inset]')).toBeNull();
+    expect(activateButton('workspace:2').getAttribute('aria-label')).toBe('Workspace 2');
 
     // A TODO shows on the visible tab as on a hidden one.
     await act(async () => { setTerminalActivity('pane-d', { todo: true }); });
-    expect(tabFor('ws-2').querySelector('.todo-pill-shell')).not.toBeNull();
-    expect(tabFor('ws-2').querySelector('[data-alert-ring-inset]')).toBeNull();
-    expect(activateButton('ws-2').getAttribute('aria-label')).toBe('Workspace 2, 2 needing attention');
+    expect(tabFor('workspace:2').querySelector('.todo-pill-shell')).not.toBeNull();
+    expect(tabFor('workspace:2').querySelector('[data-alert-ring-inset]')).toBeNull();
+    expect(activateButton('workspace:2').getAttribute('aria-label')).toBe('Workspace 2, 2 needing attention');
   });
 
   /** Nothing else on screen appears or disappears with selection, so neither
    *  does the tab's TODO pill. */
   it('keeps the TODO pill through activating and leaving its Workspace', async () => {
     const first = getWorkspacesSnapshot().workspaces[0].id;
-    await act(async () => { createWorkspace({ id: 'ws-2' }); });
+    await act(async () => { createWorkspace({ id: 'workspace:2' }); });
     setWorkspaceSurfaces(first, ['pane-a']);
     setTerminalActivity('pane-a', { todo: true });
     await render();
@@ -173,7 +173,7 @@ describe('WorkspaceStrip', () => {
     expect(getActiveWorkspaceId()).toBe(first);
     expect(tabFor(first).querySelector('.todo-pill-shell')).toBe(pill);
 
-    await act(async () => { activateButton('ws-2').click(); });
+    await act(async () => { activateButton('workspace:2').click(); });
     expect(tabFor(first).querySelector('.todo-pill-shell')).toBe(pill);
   });
 
@@ -181,7 +181,7 @@ describe('WorkspaceStrip', () => {
    *  members merely owe a TODO must not wear it. */
   it('leaves the alarm inset off a hidden Workspace with no ringing member', async () => {
     const first = getWorkspacesSnapshot().workspaces[0].id;
-    await act(async () => { createWorkspace({ id: 'ws-2' }); });
+    await act(async () => { createWorkspace({ id: 'workspace:2' }); });
     setWorkspaceSurfaces(first, ['pane-a']);
     setTerminalActivity('pane-a', { todo: true });
     await render();
@@ -194,7 +194,7 @@ describe('WorkspaceStrip', () => {
    *  member that started it must not remount the inset and replay its burst. */
   it('keeps one burst while a Workspace stays ringing', async () => {
     const first = getWorkspacesSnapshot().workspaces[0].id;
-    await act(async () => { createWorkspace({ id: 'ws-2' }); });
+    await act(async () => { createWorkspace({ id: 'workspace:2' }); });
     setWorkspaceSurfaces(first, ['pane-a', 'pane-b']);
     setTerminalActivity('pane-a', { status: 'ALERT_RINGING', episode: { id: 'older', startedAt: 1_000 } });
     setTerminalActivity('pane-b', { status: 'ALERT_RINGING', episode: { id: 'newer', startedAt: 2_000 } });
@@ -214,7 +214,7 @@ describe('WorkspaceStrip', () => {
    *  Workspace is visible must not leave its start behind for the next one. */
   it('clocks the burst from the ring that began while the Workspace was visible', async () => {
     const first = getWorkspacesSnapshot().workspaces[0].id;
-    await act(async () => { createWorkspace({ id: 'ws-2' }); });
+    await act(async () => { createWorkspace({ id: 'workspace:2' }); });
     setWorkspaceSurfaces(first, ['pane-a']);
     const now = vi.spyOn(Date, 'now').mockReturnValue(1_000);
     setTerminalActivity('pane-a', { status: 'ALERT_RINGING', episode: { id: 'first', startedAt: 1_000 } });
@@ -232,7 +232,7 @@ describe('WorkspaceStrip', () => {
     // Leaving reveals the summons: a burst 100ms old, not one clocked from the
     // ring that ended eight seconds ago and already past the animation's end.
     now.mockReturnValue(9_100);
-    await act(async () => { activateButton('ws-2').click(); });
+    await act(async () => { activateButton('workspace:2').click(); });
     const inset = tabFor(first).querySelector<HTMLElement>('[data-alert-ring-inset]')!;
     expect(inset.style.animationDelay).toBe('-100ms');
   });
@@ -241,7 +241,7 @@ describe('WorkspaceStrip', () => {
    *  must not anchor the summons its tab shows once left. */
   it('clocks the burst on leaving from the rings still sounding', async () => {
     const first = getWorkspacesSnapshot().workspaces[0].id;
-    await act(async () => { createWorkspace({ id: 'ws-2' }); });
+    await act(async () => { createWorkspace({ id: 'workspace:2' }); });
     setWorkspaceSurfaces(first, ['pane-a', 'pane-b']);
     const now = vi.spyOn(Date, 'now').mockReturnValue(2_000);
     await render();
@@ -253,7 +253,7 @@ describe('WorkspaceStrip', () => {
     await act(async () => { setTerminalActivity('pane-a', { status: 'NOTHING_TO_SHOW' }); });
 
     now.mockReturnValue(2_100);
-    await act(async () => { activateButton('ws-2').click(); });
+    await act(async () => { activateButton('workspace:2').click(); });
     const inset = tabFor(first).querySelector<HTMLElement>('[data-alert-ring-inset]')!;
     expect(inset.style.animationDelay).toBe('-100ms');
   });
@@ -262,7 +262,7 @@ describe('WorkspaceStrip', () => {
    *  target, beside the tab's button rather than inside it. */
   it('enters the next TODO from its own pill, activating the Workspace and never renaming it', async () => {
     const first = getWorkspacesSnapshot().workspaces[0].id;
-    await act(async () => { createWorkspace({ id: 'ws-2' }); });
+    await act(async () => { createWorkspace({ id: 'workspace:2' }); });
     setWorkspaceSurfaces(first, ['pane-a']);
     setTerminalActivity('pane-a', { todo: true });
     const handle = stubHandle(first, { enterNextTodo: vi.fn(() => 'pane-a'), enterCommandMode: vi.fn() });
@@ -287,7 +287,7 @@ describe('WorkspaceStrip', () => {
   /** A TODO cleared between render and click leaves nothing to enter. */
   it('activates in command mode from a pill with no TODO behind it, and never renames', async () => {
     const first = getWorkspacesSnapshot().workspaces[0].id;
-    await act(async () => { createWorkspace({ id: 'ws-2' }); });
+    await act(async () => { createWorkspace({ id: 'workspace:2' }); });
     setWorkspaceSurfaces(first, ['pane-a']);
     setTerminalActivity('pane-a', { todo: true });
     const handle = stubHandle(first, { enterNextTodo: () => null, enterCommandMode: vi.fn() });
@@ -326,7 +326,7 @@ describe('WorkspaceStrip', () => {
    *  Surface the click entered, and a repeat is a new signal. */
   it('spotlights the Surface the pill lands on, again on a repeat click', async () => {
     const first = getWorkspacesSnapshot().workspaces[0].id;
-    await act(async () => { createWorkspace({ id: 'ws-2' }); });
+    await act(async () => { createWorkspace({ id: 'workspace:2' }); });
     setWorkspaceSurfaces(first, ['pane-a']);
     setTerminalActivity('pane-a', { todo: true });
     stubHandle(first, { enterNextTodo: () => 'pane-a' });
@@ -340,7 +340,7 @@ describe('WorkspaceStrip', () => {
 
   it('ignores the click a drag from the pill ends with', async () => {
     const first = getWorkspacesSnapshot().workspaces[0].id;
-    await act(async () => { createWorkspace({ id: 'ws-2' }); });
+    await act(async () => { createWorkspace({ id: 'workspace:2' }); });
     setWorkspaceSurfaces(first, ['pane-a']);
     setTerminalActivity('pane-a', { todo: true });
     const handle = stubHandle(first, { enterNextTodo: vi.fn(() => 'pane-a') });
@@ -356,7 +356,7 @@ describe('WorkspaceStrip', () => {
     await act(async () => { window.dispatchEvent(pointer('pointerup', { clientX: 90, clientY: 12 })); });
     await act(async () => { todoPill(first)!.click(); });
     expect(handle.enterNextTodo).not.toHaveBeenCalled();
-    expect(getActiveWorkspaceId()).toBe('ws-2');
+    expect(getActiveWorkspaceId()).toBe('workspace:2');
     await act(async () => { todoPill(first)!.click(); });
     expect(handle.enterNextTodo).toHaveBeenCalledTimes(1);
   });
@@ -410,19 +410,19 @@ describe('WorkspaceStrip', () => {
     await render();
     expect(container.querySelector('[data-workspace-tab-close]')).not.toBeNull();
 
-    await act(async () => { createWorkspace({ id: 'ws-2' }); });
+    await act(async () => { createWorkspace({ id: 'workspace:2' }); });
     const closed = vi.fn(async () => null);
-    stubHandle('ws-2', { closeAll: closed });
+    stubHandle('workspace:2', { closeAll: closed });
     await act(async () => {
-      container.querySelector<HTMLButtonElement>('[data-workspace-tab-close="ws-2"]')!.click();
+      container.querySelector<HTMLButtonElement>('[data-workspace-tab-close="workspace:2"]')!.click();
     });
     expect(closed).toHaveBeenCalledWith([]);
     expect(getWorkspacesSnapshot().workspaces.map((workspace) => workspace.id)).toEqual([first]);
   });
 
   it('reorders on a drag past the threshold, and Escape restores the original index', async () => {
-    createWorkspace({ id: 'ws-2' });
-    createWorkspace({ id: 'ws-3' });
+    createWorkspace({ id: 'workspace:2' });
+    createWorkspace({ id: 'workspace:3' });
     await render();
     const order = () => getWorkspacesSnapshot().workspaces.map((workspace) => workspace.id);
     const first = order()[0];
@@ -443,16 +443,16 @@ describe('WorkspaceStrip', () => {
     expect(order()[0]).toBe(first);
     // Past the second tab's center (150).
     await act(async () => { window.dispatchEvent(pointer('pointermove', { clientX: 160, clientY: 12 })); });
-    expect(order()).toEqual(['ws-2', first, 'ws-3']);
+    expect(order()).toEqual(['workspace:2', first, 'workspace:3']);
 
     await act(async () => {
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     });
-    expect(order()).toEqual([first, 'ws-2', 'ws-3']);
+    expect(order()).toEqual([first, 'workspace:2', 'workspace:3']);
   });
 
   it('never captures the pointer before the drag activates, so a plain press still activates', async () => {
-    createWorkspace({ id: 'ws-2' });
+    createWorkspace({ id: 'workspace:2' });
     await render();
     const first = getWorkspacesSnapshot().workspaces[0].id;
     // A captured pointer retargets the following `click` to the capture element,
@@ -474,7 +474,7 @@ describe('WorkspaceStrip', () => {
   });
 
   it('captures the pointer on the dragged tab, and activates on the click after the drag ends', async () => {
-    createWorkspace({ id: 'ws-2' });
+    createWorkspace({ id: 'workspace:2' });
     await render();
     const first = getWorkspacesSnapshot().workspaces[0].id;
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(
@@ -495,7 +495,7 @@ describe('WorkspaceStrip', () => {
 
     // The click the release produces is the drag's tail and must not activate…
     await act(async () => { activateButton(first).click(); });
-    expect(getActiveWorkspaceId()).toBe('ws-2');
+    expect(getActiveWorkspaceId()).toBe('workspace:2');
     // …but the latch is one-shot, so the next click (a keyboard activation, a
     // later plain click) is a real activate again.
     await act(async () => { activateButton(first).click(); });
@@ -504,7 +504,7 @@ describe('WorkspaceStrip', () => {
 
   it('renders the rename editor and close flow the command-mode keys open', async () => {
     const first = getWorkspacesSnapshot().workspaces[0].id;
-    await act(async () => { createWorkspace({ id: 'ws-2' }); });
+    await act(async () => { createWorkspace({ id: 'workspace:2' }); });
     await render();
 
     await act(async () => { requestWorkspaceRename(first); });
@@ -515,20 +515,20 @@ describe('WorkspaceStrip', () => {
     });
 
     const closed = vi.fn(async () => null);
-    stubHandle('ws-2', { closeAll: closed });
-    await act(async () => { requestWorkspaceClose('ws-2'); });
+    stubHandle('workspace:2', { closeAll: closed });
+    await act(async () => { requestWorkspaceClose('workspace:2'); });
     expect(closed).toHaveBeenCalled();
   });
 
   it.each(['close', 'move'] as const)('defers the %s gate while another Workspace is being renamed', async (kind) => {
     const first = getWorkspacesSnapshot().workspaces[0].id;
-    await act(async () => { createWorkspace({ id: 'ws-2' }); });
+    await act(async () => { createWorkspace({ id: 'workspace:2' }); });
     const proceed = vi.fn(async () => null);
-    stubHandle('ws-2', { closeAll: proceed });
+    stubHandle('workspace:2', { closeAll: proceed });
     await render();
     await act(async () => { requestWorkspaceRename(first); });
     await act(async () => {
-      requestConfirmation(kind === 'close' ? workspaceCloseConfirmation('ws-2', 'q') : { id: 'ws-2', char: 'q', answer: ok => { if (ok) void proceed(); } });
+      requestConfirmation(kind === 'close' ? workspaceCloseConfirmation('workspace:2', 'q') : { id: 'workspace:2', char: 'q', answer: ok => { if (ok) void proceed(); } });
     });
     const input = container.querySelector<HTMLInputElement>(`[data-workspace-rename-for="${first}"]`)!;
     expect(document.body.querySelector('#kill-confirm-title')).toBeNull();
@@ -544,10 +544,10 @@ describe('WorkspaceStrip', () => {
 
   it('answers the pending confirmation no when a newer one is raised, and ignores modifiers and chords', async () => {
     const first = getWorkspacesSnapshot().workspaces[0].id;
-    await act(async () => { createWorkspace({ id: 'ws-2' }); });
+    await act(async () => { createWorkspace({ id: 'workspace:2' }); });
     stubHandle(first);
     const closed = vi.fn(async () => null);
-    stubHandle('ws-2', { closeAll: closed });
+    stubHandle('workspace:2', { closeAll: closed });
     await render();
     const proceed = vi.fn();
     const move = vi.fn((ok: boolean) => { if (ok) proceed(); });
@@ -567,7 +567,7 @@ describe('WorkspaceStrip', () => {
 
     // A close raised over it answers the move no; the same letter typed at the
     // close closes and must not also move, however the two were minted.
-    await act(async () => { requestConfirmation(workspaceCloseConfirmation('ws-2', 'k')); });
+    await act(async () => { requestConfirmation(workspaceCloseConfirmation('workspace:2', 'k')); });
     expect(move).toHaveBeenCalledExactlyOnceWith(false);
     expect(document.body.querySelector('#kill-confirm-title')?.textContent).toBe('Confirm kill workspace');
     await act(async () => {
@@ -582,18 +582,18 @@ describe('WorkspaceStrip', () => {
 
   it('releases the rename lease when the tab being renamed is middle-clicked closed', async () => {
     const first = getWorkspacesSnapshot().workspaces[0].id;
-    await act(async () => { createWorkspace({ id: 'ws-2' }); });
-    stubHandle('ws-2', { closeAll: async () => null });
+    await act(async () => { createWorkspace({ id: 'workspace:2' }); });
+    stubHandle('workspace:2', { closeAll: async () => null });
     await render();
 
     await act(async () => {
-      activateButton('ws-2').click();
+      activateButton('workspace:2').click();
     });
     expect(chromeKeyboardHeld()).toBe(true);
     // Removing the focused input fires no `blur`, so neither submit nor cancel
     // runs: only the close verb can put `renamingId` back.
     await act(async () => {
-      tabFor('ws-2').dispatchEvent(new MouseEvent('auxclick', { button: 1, bubbles: true, cancelable: true }));
+      tabFor('workspace:2').dispatchEvent(new MouseEvent('auxclick', { button: 1, bubbles: true, cancelable: true }));
     });
     await act(async () => { await Promise.resolve(); });
     expect(getWorkspacesSnapshot().workspaces.map((workspace) => workspace.id)).toEqual([first]);
@@ -602,8 +602,8 @@ describe('WorkspaceStrip', () => {
   });
 
   it('never starts a reorder from a press inside the open rename editor', async () => {
-    createWorkspace({ id: 'ws-2' });
-    createWorkspace({ id: 'ws-3' });
+    createWorkspace({ id: 'workspace:2' });
+    createWorkspace({ id: 'workspace:3' });
     await render();
     const order = () => getWorkspacesSnapshot().workspaces.map((workspace) => workspace.id);
     const first = order()[0];
@@ -625,26 +625,26 @@ describe('WorkspaceStrip', () => {
     await act(async () => { input.dispatchEvent(pointer('pointerdown', { button: 0, clientX: 50, clientY: 12 })); });
     await act(async () => { window.dispatchEvent(pointer('pointermove', { clientX: 160, clientY: 12 })); });
     await act(async () => { window.dispatchEvent(pointer('pointerup', { clientX: 160, clientY: 12 })); });
-    expect(order()).toEqual([first, 'ws-2', 'ws-3']);
+    expect(order()).toEqual([first, 'workspace:2', 'workspace:3']);
     expect(capture).not.toHaveBeenCalled();
     expect(getWorkspaceUiSnapshot().renamingId).toBe(first);
   });
 
   it('does not accept a pending kill during transfer and releases its keyboard lease on departure', async () => {
-    createWorkspace({ id: 'ws-2' });
+    createWorkspace({ id: 'workspace:2' });
     const closeAll = vi.fn(async () => null);
-    stubHandle('ws-2', { needsCloseConfirmation: () => true, closeAll });
+    stubHandle('workspace:2', { needsCloseConfirmation: () => true, closeAll });
     await render();
-    await act(async () => { requestConfirmation(workspaceCloseConfirmation('ws-2', 'q')); });
+    await act(async () => { requestConfirmation(workspaceCloseConfirmation('workspace:2', 'q')); });
     expect(document.body.querySelector('#kill-confirm-title')?.textContent).toBe('Confirm kill workspace');
     expect(chromeKeyboardHeld()).toBe(true);
-    setWorkspaceTransferPending('ws-2', true);
+    setWorkspaceTransferPending('workspace:2', true);
     await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'q', bubbles: true })); });
     expect(closeAll).not.toHaveBeenCalled();
-    expect(getWorkspaceUiSnapshot().confirmation?.id).toBe('ws-2');
+    expect(getWorkspaceUiSnapshot().confirmation?.id).toBe('workspace:2');
     // A failed transfer leaves this prompt usable; successful commit dismisses it.
-    setWorkspaceTransferPending('ws-2', false);
-    await act(async () => { dismissWorkspaceUi('ws-2'); });
+    setWorkspaceTransferPending('workspace:2', false);
+    await act(async () => { dismissWorkspaceUi('workspace:2'); });
     expect(document.body.querySelector('#kill-confirm-title')).toBeNull();
     expect(chromeKeyboardHeld()).toBe(false);
     await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'q', bubbles: true })); });
@@ -652,11 +652,11 @@ describe('WorkspaceStrip', () => {
   });
 
   it('keeps the close confirmation up through a bare Shift or Meta, as the pane kill does', async () => {
-    await act(async () => { createWorkspace({ id: 'ws-2' }); });
-    stubHandle('ws-2', { needsCloseConfirmation: () => true, closeAll: async () => null });
+    await act(async () => { createWorkspace({ id: 'workspace:2' }); });
+    stubHandle('workspace:2', { needsCloseConfirmation: () => true, closeAll: async () => null });
     await render();
     await act(async () => {
-      container.querySelector<HTMLButtonElement>('[data-workspace-tab-close="ws-2"]')!.click();
+      container.querySelector<HTMLButtonElement>('[data-workspace-tab-close="workspace:2"]')!.click();
     });
     expect(document.body.querySelector('#kill-confirm-title')).not.toBeNull();
 
@@ -678,7 +678,7 @@ describe('WorkspaceStrip', () => {
 
 it('keeps a move refusal visible and releases the keyboard when dismissed', async () => {
   await render();
-  await act(async () => setWorkspaceMoveError({ id: 'ws-1', reason: 'Wait for the Tool browser to connect before moving this Workspace' }));
+  await act(async () => setWorkspaceMoveError({ id: 'workspace:1', reason: 'Wait for the Tool browser to connect before moving this Workspace' }));
   expect(document.querySelector('[role="alert"]')?.textContent).toContain('Wait for the Tool browser');
   expect(chromeKeyboardHeld()).toBe(true);
   await act(async () => {
@@ -704,26 +704,26 @@ describe('pinned tabs', () => {
   it('groups pinned tabs after +, with no close button, and middle-click closes nothing', async () => {
     const first = getWorkspacesSnapshot().workspaces[0].id;
     await act(async () => {
-      createWorkspace({ id: 'ws-2', name: 'Notes', pinned: true });
-      createWorkspace({ id: 'ws-3', name: 'Build' });
+      createWorkspace({ id: 'workspace:2', name: 'Notes', pinned: true });
+      createWorkspace({ id: 'workspace:3', name: 'Build' });
     });
     const closeAll = vi.fn(async () => null);
-    stubHandle('ws-2', { closeAll });
+    stubHandle('workspace:2', { closeAll });
     await render();
     const strip = container.querySelector('[data-workspace-strip]')!;
     const order = [...strip.querySelectorAll<HTMLElement>('[data-workspace-tab], [data-workspace-new], [data-workspace-strip-spacer]')]
       .map((element) => element.dataset.workspaceTab ?? ('workspaceNew' in element.dataset ? '+' : 'spacer'));
     // The empty spacer pushes the pinned group flush against the strip's right end.
-    expect(order).toEqual([first, 'ws-3', '+', 'spacer', 'ws-2']);
-    expect(tabFor('ws-2').closest('[data-workspace-pinned-group]')).not.toBeNull();
-    expect(activateButton('ws-2').getAttribute('aria-label')).toBe('Notes, pinned');
+    expect(order).toEqual([first, 'workspace:3', '+', 'spacer', 'workspace:2']);
+    expect(tabFor('workspace:2').closest('[data-workspace-pinned-group]')).not.toBeNull();
+    expect(activateButton('workspace:2').getAttribute('aria-label')).toBe('Notes, pinned');
 
     // Active, and still no ×.
-    await act(async () => { activateButton('ws-2').click(); });
-    expect(tabFor('ws-2').dataset.workspaceTabActive).toBe('true');
-    expect(tabFor('ws-2').querySelector('[data-workspace-tab-close]')).toBeNull();
+    await act(async () => { activateButton('workspace:2').click(); });
+    expect(tabFor('workspace:2').dataset.workspaceTabActive).toBe('true');
+    expect(tabFor('workspace:2').querySelector('[data-workspace-tab-close]')).toBeNull();
     await act(async () => {
-      tabFor('ws-2').dispatchEvent(new MouseEvent('auxclick', { bubbles: true, cancelable: true, button: 1 }));
+      tabFor('workspace:2').dispatchEvent(new MouseEvent('auxclick', { bubbles: true, cancelable: true, button: 1 }));
     });
     await act(async () => { await Promise.resolve(); });
     expect(closeAll).not.toHaveBeenCalled();
@@ -796,29 +796,29 @@ describe('tab tweens', () => {
   }
 
   it('slides the tabs a move displaces from where they were, and leaves the rest', async () => {
-    const first = await renderWith('ws-2', 'ws-3');
+    const first = await renderWith('workspace:2', 'workspace:3');
     await act(async () => { moveWorkspace(first, 1); });
-    expect(tweens).toEqual(new Map([[first, ['translate(-40px, 0px)']], ['ws-2', ['translate(60px, 0px)']]]));
+    expect(tweens).toEqual(new Map([[first, ['translate(-40px, 0px)']], ['workspace:2', ['translate(60px, 0px)']]]));
   });
 
   it('slides a tab that pinning remounts into the other group, its × tweening away, with `+`', async () => {
-    const first = await renderWith('ws-2');
+    const first = await renderWith('workspace:2');
     await act(async () => { setWorkspacePinned(first, true); });
     expect(tweens).toEqual(new Map([
       [first, ['width 60px→40px', 'translate(-60px, 0px)']],
-      ['ws-2', ['translate(60px, 0px)']],
+      ['workspace:2', ['translate(60px, 0px)']],
       ['+', ['translate(60px, 0px)']],
     ]));
   });
 
   it('tweens the × from the old active tab to the new one, leaving + where it was', async () => {
-    const first = await renderWith('ws-2');
-    await act(async () => { activateButton('ws-2').click(); });
-    expect(tweens).toEqual(new Map([[first, ['width 60px→40px']], ['ws-2', ['width 40px→60px']]]));
+    const first = await renderWith('workspace:2');
+    await act(async () => { activateButton('workspace:2').click(); });
+    expect(tweens).toEqual(new Map([[first, ['width 60px→40px']], ['workspace:2', ['width 40px→60px']]]));
   });
 
   it('keeps the × as the rename editor\'s slack, then tweens the tab to text that outgrows it', async () => {
-    const first = await renderWith('ws-2');
+    const first = await renderWith('workspace:2');
     await act(async () => { requestWorkspaceRename(first); });
     expect(tweens.size).toBe(0);
     const input = tabFor(first).querySelector('input')!;
@@ -840,7 +840,7 @@ describe('tab tweens', () => {
   });
 
   it('never measures for a change that leaves the strip as it was, and tweens nothing under reduced motion', async () => {
-    const first = await renderWith('ws-2');
+    const first = await renderWith('workspace:2');
     measure.mockClear();
     await act(async () => { setWorkspaceAlertDelivery(first, { pushEnabled: false }); });
     expect(measure).not.toHaveBeenCalled();
@@ -871,8 +871,8 @@ describe('tab context menu', () => {
     await rightClick(first);
     expect(menuEl()).not.toBeNull();
     // Auto-named, so no Use automatic name; one window, so no Move to new window.
-    expect(itemKeys()).toEqual(['rename', 'pin', 'copy-ref', 'close']);
-    expect(item('copy-ref').textContent).toContain('workspace:1');
+    expect(itemKeys()).toEqual(['rename', 'pin', 'copy-id', 'close']);
+    expect(item('copy-id').textContent).toContain('workspace:1');
     expect(menuEl()!.querySelector('[role="separator"]')).not.toBeNull();
     expect(chromeKeyboardHeld()).toBe(true);
     expect(document.activeElement).toBe(items()[0]);
@@ -885,11 +885,11 @@ describe('tab context menu', () => {
 
   it('opens under its tab, left edges aligned, or right edges aligned at the window\'s right end', async () => {
     const first = getWorkspacesSnapshot().workspaces[0].id;
-    await act(async () => { createWorkspace({ id: 'ws-2', name: 'Notes', pinned: true }); });
+    await act(async () => { createWorkspace({ id: 'workspace:2', name: 'Notes', pinned: true }); });
     await render();
     // jsdom lays nothing out: a tab near the left, and a pinned one at the
     // window's right end (innerWidth 1024).
-    const boxes: Record<string, { left: number; width: number }> = { [first]: { left: 100, width: 80 }, 'ws-2': { left: 950, width: 60 } };
+    const boxes: Record<string, { left: number; width: number }> = { [first]: { left: 100, width: 80 }, 'workspace:2': { left: 950, width: 60 } };
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
       const box = this.dataset.workspaceTab ? boxes[this.dataset.workspaceTab] : undefined;
       const left = box?.left ?? 0;
@@ -905,35 +905,35 @@ describe('tab context menu', () => {
     await key(menuEl()!, { key: 'Escape' });
 
     // 224px from 950 would run off the right: its right edge meets the tab's.
-    await rightClick('ws-2');
+    await rightClick('workspace:2');
     expect(menuEl()!.style.left).toBe(`${950 + 60 - 224}px`);
   });
 
   it('offers Use automatic name only for a user-set name, and Move to new window only from a host that tears out', async () => {
-    await act(async () => { createWorkspace({ id: 'ws-2', name: 'Deploys' }); });
+    await act(async () => { createWorkspace({ id: 'workspace:2', name: 'Deploys' }); });
     const tearOut = vi.fn();
     await render(<WorkspaceStrip onMoveToNewWindow={tearOut} />);
-    await rightClick('ws-2');
-    expect(itemKeys()).toEqual(['rename', 'auto-name', 'pin', 'copy-ref', 'new-window', 'close']);
+    await rightClick('workspace:2');
+    expect(itemKeys()).toEqual(['rename', 'auto-name', 'pin', 'copy-id', 'new-window', 'close']);
     await act(async () => { item('auto-name').click(); });
-    expect(getWorkspacesSnapshot().workspaces.find((ws) => ws.id === 'ws-2')?.nameIsAuto).toBe(true);
+    expect(getWorkspacesSnapshot().workspaces.find((ws) => ws.id === 'workspace:2')?.nameIsAuto).toBe(true);
     expect(menuEl()).toBeNull();
 
-    await rightClick('ws-2');
+    await rightClick('workspace:2');
     await act(async () => { item('new-window').click(); });
-    expect(tearOut).toHaveBeenCalledExactlyOnceWith('ws-2');
+    expect(tearOut).toHaveBeenCalledExactlyOnceWith('workspace:2');
   });
 
   it('pins right and unpins, and a pinned tab\'s Close is inert and says why', async () => {
     const first = getWorkspacesSnapshot().workspaces[0].id;
-    await act(async () => { createWorkspace({ id: 'ws-2' }); });
+    await act(async () => { createWorkspace({ id: 'workspace:2' }); });
     const closeAll = vi.fn(async () => null);
     stubHandle(first, { closeAll });
     await render();
     await rightClick(first);
     expect(item('pin').textContent).toBe('Pin right');
     await act(async () => { item('pin').click(); });
-    expect(getWorkspacesSnapshot().workspaces.map((ws) => [ws.id, ws.pinned === true])).toEqual([['ws-2', false], [first, true]]);
+    expect(getWorkspacesSnapshot().workspaces.map((ws) => [ws.id, ws.pinned === true])).toEqual([['workspace:2', false], [first, true]]);
     expect(tabFor(first).closest('[data-workspace-pinned-group]')).not.toBeNull();
 
     await rightClick(first);
@@ -947,39 +947,39 @@ describe('tab context menu', () => {
     expect(menuEl()).not.toBeNull();
 
     await act(async () => { item('pin').click(); });
-    expect(getWorkspacesSnapshot().workspaces.map((ws) => [ws.id, ws.pinned === true])).toEqual([['ws-2', false], [first, false]]);
+    expect(getWorkspacesSnapshot().workspaces.map((ws) => [ws.id, ws.pinned === true])).toEqual([['workspace:2', false], [first, false]]);
   });
 
   it('closes an unpinned Workspace through the close verb, and renames through the editor', async () => {
-    await act(async () => { createWorkspace({ id: 'ws-2' }); });
+    await act(async () => { createWorkspace({ id: 'workspace:2' }); });
     const closeAll = vi.fn(async () => null);
-    stubHandle('ws-2', { closeAll });
+    stubHandle('workspace:2', { closeAll });
     await render();
-    await rightClick('ws-2');
+    await rightClick('workspace:2');
     await act(async () => { item('rename').click(); });
-    expect(getWorkspaceUiSnapshot().renamingId).toBe('ws-2');
+    expect(getWorkspaceUiSnapshot().renamingId).toBe('workspace:2');
     expect(menuEl()).toBeNull();
     // Never over the open editor.
-    await rightClick('ws-2');
+    await rightClick('workspace:2');
     expect(menuEl()).toBeNull();
     await act(async () => {
-      container.querySelector('[data-workspace-rename-for="ws-2"]')!
+      container.querySelector('[data-workspace-rename-for="workspace:2"]')!
         .dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     });
 
-    await rightClick('ws-2');
+    await rightClick('workspace:2');
     await act(async () => { item('close').click(); });
     await act(async () => { await Promise.resolve(); });
     expect(closeAll).toHaveBeenCalled();
   });
 
-  it('copies the Workspace ref', async () => {
+  it('copies the Workspace id', async () => {
     const writeText = vi.fn(async () => {});
     Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
-    await act(async () => { createWorkspace({ id: 'ws-2' }); });
+    await act(async () => { createWorkspace({ id: 'workspace:2' }); });
     await render();
-    await rightClick('ws-2');
-    await act(async () => { item('copy-ref').click(); });
+    await rightClick('workspace:2');
+    await act(async () => { item('copy-id').click(); });
     expect(writeText).toHaveBeenCalledWith('workspace:2');
   });
 
@@ -1005,7 +1005,7 @@ describe('tab context menu', () => {
 
   it('hands focus back to the pinned tab where it lands after a keyboard Pin right', async () => {
     const first = getWorkspacesSnapshot().workspaces[0].id;
-    await act(async () => { createWorkspace({ id: 'ws-2', activate: false }); });
+    await act(async () => { createWorkspace({ id: 'workspace:2', activate: false }); });
     await render();
     activateButton(first).focus();
     await key(activateButton(first), { key: 'ContextMenu' });
@@ -1015,34 +1015,34 @@ describe('tab context menu', () => {
   });
 
   it('never opens for a Workspace on its way to another window, and goes when its Workspace does', async () => {
-    await act(async () => { createWorkspace({ id: 'ws-2' }); });
+    await act(async () => { createWorkspace({ id: 'workspace:2' }); });
     await render();
-    setWorkspaceTransferPending('ws-2', true);
-    await rightClick('ws-2');
+    setWorkspaceTransferPending('workspace:2', true);
+    await rightClick('workspace:2');
     expect(menuEl()).toBeNull();
-    setWorkspaceTransferPending('ws-2', false);
-    await rightClick('ws-2');
+    setWorkspaceTransferPending('workspace:2', false);
+    await rightClick('workspace:2');
     expect(menuEl()).not.toBeNull();
-    await act(async () => { dismissWorkspaceUi('ws-2'); });
+    await act(async () => { dismissWorkspaceUi('workspace:2'); });
     expect(menuEl()).toBeNull();
   });
 
   it('pins nothing once its Workspace has begun transferring', async () => {
-    await act(async () => { createWorkspace({ id: 'ws-2' }); });
+    await act(async () => { createWorkspace({ id: 'workspace:2' }); });
     await render();
-    await rightClick('ws-2');
-    setWorkspaceTransferPending('ws-2', true);
+    await rightClick('workspace:2');
+    setWorkspaceTransferPending('workspace:2', true);
     try {
       await act(async () => { item('pin').click(); });
-      expect(getWorkspacesSnapshot().workspaces.find((ws) => ws.id === 'ws-2')?.pinned).toBeUndefined();
+      expect(getWorkspacesSnapshot().workspaces.find((ws) => ws.id === 'workspace:2')?.pinned).toBeUndefined();
     } finally {
-      setWorkspaceTransferPending('ws-2', false);
+      setWorkspaceTransferPending('workspace:2', false);
     }
   });
 
   it('never starts a reorder from a right press or a macOS Control-click', async () => {
     const first = getWorkspacesSnapshot().workspaces[0].id;
-    await act(async () => { createWorkspace({ id: 'ws-2' }); });
+    await act(async () => { createWorkspace({ id: 'workspace:2' }); });
     await render();
     const order = () => getWorkspacesSnapshot().workspaces.map((workspace) => workspace.id);
     const boxes = new Map(order().map((id, index) => [id, { left: index * 100, width: 100 }]));
@@ -1056,7 +1056,7 @@ describe('tab context menu', () => {
       await act(async () => { tabFor(first).dispatchEvent(pointer('pointerdown', { clientX: 50, clientY: 12, ...init })); });
       await act(async () => { window.dispatchEvent(pointer('pointermove', { clientX: 160, clientY: 12 })); });
       await act(async () => { window.dispatchEvent(pointer('pointerup', { clientX: 160, clientY: 12 })); });
-      expect(order()).toEqual([first, 'ws-2']);
+      expect(order()).toEqual([first, 'workspace:2']);
     }
   });
 });

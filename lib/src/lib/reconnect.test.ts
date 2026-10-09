@@ -17,6 +17,7 @@ vi.mock('./terminal-registry', () => ({
 }));
 
 import { collectLivePtys, resumeOrRestore, resumeOrRestoreFrom } from './reconnect';
+import { mintSurfaceId, resetSurfaceIdPool } from './surface-ids';
 import { getHelper, forgetHelper } from './helper-terminal';
 import { setPlatform } from './platform';
 import type { LathNode } from './lath/model';
@@ -101,7 +102,7 @@ describe('resumeOrRestore', () => {
     const layout = lathLayoutFor('parent');
     const helper = { parentId: 'parent', command: 'git status' };
     const result = await resumeOrRestore(createPlatform([{ id: 'parent', alive: true }, { id: 'helper', alive: true, helper }], {
-      version: 3, lathLayout: layout, panes: [{ id: 'parent', title: 'Parent', cwd: null }],
+      version: 4, lathLayout: layout, panes: [{ id: 'parent', title: 'Parent', cwd: null, untouched: false }],
     }));
     expect(result.paneIds).toEqual(['parent']); expect(result.lathLayout).toEqual(layout);
     expect(terminalRegistryMocks.resumeTerminal).toHaveBeenCalledWith('helper', 'helper-replay', { alive: true, exitCode: undefined, helper });
@@ -115,13 +116,13 @@ describe('resumeOrRestore', () => {
       title: 'Pane C',
     }];
     const saved: PersistedSession = {
-      version: 3,
+      version: 4,
       lathLayout,
       doors,
       panes: [
-        { id: 'pane-a', title: 'Pane A', cwd: null },
-        { id: 'pane-b', title: 'Pane B', cwd: null },
-        { id: 'pane-c', title: 'Pane C', cwd: null },
+        { id: 'pane-a', title: 'Pane A', cwd: null, untouched: false },
+        { id: 'pane-b', title: 'Pane B', cwd: null, untouched: false },
+        { id: 'pane-c', title: 'Pane C', cwd: null, untouched: false },
       ],
     };
 
@@ -143,29 +144,12 @@ describe('resumeOrRestore', () => {
     });
   });
 
-  it('restores workspace-scoped dor surface refs when resuming live PTYs', async () => {
-    const saved: PersistedSession = {
-      version: 3,
-      lathLayout: lathLayoutFor('pane-a'),
-      surfaceRefs: { 'pane-a': 'surface:1', 'closed-pane': 'surface:2' },
-      panes: [
-        { id: 'pane-a', title: 'Pane A', cwd: null },
-      ],
-    };
-
-    const result = await resumeOrRestore(createPlatform([
-      { id: 'pane-a', alive: true },
-    ], saved));
-
-    expect(result.surfaceRefs).toEqual({ 'pane-a': 'surface:1', 'closed-pane': 'surface:2' });
-  });
-
   it('seeds saved visible pane titles when resuming live PTYs', async () => {
     const saved: PersistedSession = {
-      version: 3,
+      version: 4,
       lathLayout: lathLayoutFor('pane-a'),
       panes: [
-        { id: 'pane-a', title: 'Production API', cwd: null },
+        { id: 'pane-a', title: 'Production API', cwd: null, untouched: false },
       ],
     };
 
@@ -182,10 +166,10 @@ describe('resumeOrRestore', () => {
 
   it('restores the launch shell reported by a live PTY', async () => {
     const saved: PersistedSession = {
-      version: 3,
+      version: 4,
       lathLayout: lathLayoutFor('pane-a'),
       panes: [
-        { id: 'pane-a', title: 'PowerShell', cwd: null },
+        { id: 'pane-a', title: 'PowerShell', cwd: null, untouched: false },
       ],
     };
 
@@ -203,7 +187,7 @@ describe('resumeOrRestore', () => {
 
   it('seeds saved untouched state when resuming live PTYs', async () => {
     const saved: PersistedSession = {
-      version: 3,
+      version: 4,
       lathLayout: lathLayoutFor('pane-a'),
       panes: [
         { id: 'pane-a', title: 'Pane A', cwd: null, untouched: true },
@@ -222,36 +206,16 @@ describe('resumeOrRestore', () => {
     });
   });
 
-  it('defaults missing saved untouched state to touched when resuming live PTYs', async () => {
-    const saved = {
-      version: 3 as const,
-      lathLayout: lathLayoutFor('pane-a'),
-      panes: [
-        { id: 'pane-a', title: 'Pane A', cwd: null },
-      ],
-    };
-
-    await resumeOrRestore(createPlatform([
-      { id: 'pane-a', alive: true },
-    ], saved as PersistedSession));
-
-    expect(terminalRegistryMocks.resumeTerminal).toHaveBeenCalledWith('pane-a', 'pane-a-replay', {
-      alive: true,
-      exitCode: undefined,
-      title: 'Pane A',
-    });
-  });
-
   it('seeds saved minimized door titles when resuming live PTYs', async () => {
     const saved: PersistedSession = {
-      version: 3,
+      version: 4,
       lathLayout: lathLayoutFor(),
       doors: [{
         id: 'pane-a',
         title: 'Renamed Door',
       }],
       panes: [
-        { id: 'pane-a', title: 'Renamed Door', cwd: null },
+        { id: 'pane-a', title: 'Renamed Door', cwd: null, untouched: false },
       ],
     };
 
@@ -268,11 +232,11 @@ describe('resumeOrRestore', () => {
 
   it('does not reuse a saved layout when live PTYs do not match saved panes', async () => {
     const saved: PersistedSession = {
-      version: 3,
+      version: 4,
       lathLayout: lathLayoutFor('pane-a', 'pane-b'),
       panes: [
-        { id: 'pane-a', title: 'Pane A', cwd: null },
-        { id: 'pane-b', title: 'Pane B', cwd: null },
+        { id: 'pane-a', title: 'Pane A', cwd: null, untouched: false },
+        { id: 'pane-b', title: 'Pane B', cwd: null, untouched: false },
       ],
     };
 
@@ -297,13 +261,13 @@ describe('resumeOrRestore', () => {
       title: 'Pane B',
     }];
     const saved: PersistedSession = {
-      version: 3,
+      version: 4,
       lathLayout: lathLayoutFor(),
       doors,
       panes: [
-        { id: 'pane-a', title: 'Pane A', cwd: null },
-        { id: 'pane-b', title: 'Pane B', cwd: null },
-        { id: 'stale-pane', title: 'Stale Pane', cwd: null },
+        { id: 'pane-a', title: 'Pane A', cwd: null, untouched: false },
+        { id: 'pane-b', title: 'Pane B', cwd: null, untouched: false },
+        { id: 'stale-pane', title: 'Stale Pane', cwd: null, untouched: false },
       ],
     };
 
@@ -323,12 +287,12 @@ describe('resumeOrRestore', () => {
   it('ignores stale saved panes when the saved layout still matches live visible panes', async () => {
     const lathLayout = lathLayoutFor('pane-a', 'pane-b');
     const saved: PersistedSession = {
-      version: 3,
+      version: 4,
       lathLayout,
       panes: [
-        { id: 'pane-a', title: 'Pane A', cwd: null },
-        { id: 'pane-b', title: 'Pane B', cwd: null },
-        { id: 'stale-pane', title: 'Stale Pane', cwd: null },
+        { id: 'pane-a', title: 'Pane A', cwd: null, untouched: false },
+        { id: 'pane-b', title: 'Pane B', cwd: null, untouched: false },
+        { id: 'stale-pane', title: 'Stale Pane', cwd: null, untouched: false },
       ],
     };
 
@@ -347,11 +311,11 @@ describe('resumeOrRestore', () => {
   it('keeps the saved layout and a visible browser pane when only terminals have live PTYs', async () => {
     const lathLayout = lathLayoutFor('pane-term', 'pane-web');
     const saved: PersistedSession = {
-      version: 3,
+      version: 4,
       lathLayout,
       panes: [
-        { id: 'pane-term', title: 'Terminal', cwd: null },
-        { id: 'pane-web', title: 'localhost', cwd: null, surfaceType: 'browser' },
+        { id: 'pane-term', title: 'Terminal', cwd: null, untouched: false },
+        { id: 'pane-web', title: 'localhost', cwd: null, untouched: false, surfaceType: 'browser' },
       ],
     };
 
@@ -371,14 +335,15 @@ describe('resumeOrRestore', () => {
 
   it('restores browser surface TODO from the persisted alert during live resume', async () => {
     const saved: PersistedSession = {
-      version: 3,
+      version: 4,
       lathLayout: lathLayoutFor('pane-term', 'pane-web'),
       panes: [
-        { id: 'pane-term', title: 'Terminal', cwd: null },
+        { id: 'pane-term', title: 'Terminal', cwd: null, untouched: false },
         {
           id: 'pane-web',
           title: 'localhost',
           cwd: null,
+          untouched: false,
           surfaceType: 'browser',
           alert: { status: 'WATCHING_DISABLED', watchingEnabled: false, todo: true, notification: null },
         },
@@ -403,12 +368,12 @@ describe('resumeOrRestore', () => {
 
   it('drops visible browser panes from terminal fallback when the saved layout is rejected', async () => {
     const saved: PersistedSession = {
-      version: 3,
+      version: 4,
       lathLayout: lathLayoutFor('pane-term', 'stale-term', 'pane-web'),
       panes: [
-        { id: 'pane-term', title: 'Terminal', cwd: null },
-        { id: 'stale-term', title: 'Stale terminal', cwd: null },
-        { id: 'pane-web', title: 'localhost', cwd: null, surfaceType: 'browser' },
+        { id: 'pane-term', title: 'Terminal', cwd: null, untouched: false },
+        { id: 'stale-term', title: 'Stale terminal', cwd: null, untouched: false },
+        { id: 'pane-web', title: 'localhost', cwd: null, untouched: false, surfaceType: 'browser' },
       ],
     };
 
@@ -432,12 +397,12 @@ describe('resumeOrRestore', () => {
       params: { surfaceType: 'browser', renderMode: 'iframe', url: 'http://localhost:5173' },
     }];
     const saved: PersistedSession = {
-      version: 3,
+      version: 4,
       lathLayout,
       doors,
       panes: [
-        { id: 'pane-term', title: 'Terminal', cwd: null },
-        { id: 'door-web', title: 'localhost', cwd: null, surfaceType: 'browser' },
+        { id: 'pane-term', title: 'Terminal', cwd: null, untouched: false },
+        { id: 'door-web', title: 'localhost', cwd: null, untouched: false, surfaceType: 'browser' },
       ],
     };
 
@@ -459,7 +424,7 @@ describe('resumeOrRestoreFrom', () => {
   });
 
   const savedFor = (...ids: string[]): PersistedSession => ({
-    version: 3,
+    version: 4,
     lathLayout: lathLayoutFor(...ids),
     panes: ids.map((id) => ({ id, title: id, cwd: null, untouched: false })),
   });
@@ -469,6 +434,15 @@ describe('resumeOrRestoreFrom', () => {
     const platform = createPlatform(ptys, savedState);
     return { platform, live: await collectLivePtys(platform) };
   }
+
+  it('keeps the page\'s own id counter above every Surface it restores or resumes', async () => {
+    resetSurfaceIdPool();
+    const { platform, live: collected } = await live([{ id: 'surface:9', alive: true }]);
+    resumeOrRestoreFrom(platform, collected, { savedSession: savedFor('surface:5'), ptyIds: new Set() });
+    expect(mintSurfaceId()).toBe('surface:6');
+    resumeOrRestoreFrom(platform, collected, { savedSession: null, ptyIds: new Set(['surface:9']) });
+    expect(mintSurfaceId()).toBe('surface:10');
+  });
 
   it('gives each Workspace only the live PTYs its own saved record names', async () => {
     const { platform, live: collected } = await live([
@@ -659,7 +633,7 @@ describe('collectLivePtys addressing', () => {
       // A saved terminal pane is exactly what the retry protects: ask again.
       const saved = addressedPlatform();
       (saved.platform as { getState: () => unknown }).getState = () => ({
-        version: 3,
+        version: 4,
         panes: [{ id: 'a', title: 'a', cwd: '/tmp', untouched: false, alert: null }],
       });
       const restoring = resumeOrRestore(saved.platform);

@@ -21,7 +21,6 @@ export type {
   DorCommandContext,
   EnsureSurfaceRequest,
   EnsureSurfaceResponse,
-  IdFormat,
   IframeSurfaceRequest,
   IframeSurfaceResponse,
   MoveSurfaceRequest,

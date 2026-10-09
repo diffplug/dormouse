@@ -26,6 +26,7 @@ import {
 import { DEFAULT_WORKSPACE_NAME, metaFromRecord, windowPaneIds } from "dormouse-lib/lib/session-types";
 import type { PersistedSession, PersistedWindow, WorkspaceId } from "dormouse-lib/lib/session-types";
 import { wallBootFromResult, type WallBootPlans } from "dormouse-lib/components/wall/wall-types";
+import { withFreshWindowIds } from "dormouse-lib/components/wall/window-reopen";
 
 /**
  * How a live PTY that no saved Workspace names is routed. Two kinds reach here:
@@ -48,7 +49,7 @@ export interface LivePtyRouting {
  * must still land in the Workspace holding its source: routed anywhere else it
  * misses that plan's slice, is resumed as an ordinary top-level pane, and its id
  * — absent from that Workspace's saved panes — makes the whole saved layout
- * unusable, costing the Workspace its splits, Doors and refs. A helper whose
+ * unusable, costing the Workspace its splits and Doors. A helper whose
  * source is itself unowned follows it into the active Workspace.
  */
 export function routeUnownedPtys(
@@ -88,7 +89,14 @@ export function routeUnownedPtys(
 export async function restoreWindowOrFresh(platform: PlatformAdapter): Promise<WallBootPlans> {
   const saved = platform.getWindowState?.() ?? null;
   try {
-    return await restoreWindow(platform, saved);
+    // A window Reopen built still holds the closed one's ids (docs/specs/reopen.md);
+    // `init()` installed the pools this remap mints from.
+    const plans = await restoreWindow(platform, saved?.reopened ? await withFreshWindowIds(saved) : saved);
+    // Its fresh ids head for disk at once (the write is issued synchronously;
+    // render need not wait on it): a reload that read the closed window's again
+    // would remap over the Sessions this boot just started.
+    if (saved?.reopened) void flushWindowSession();
+    return plans;
   } catch (err) {
     console.error("[dormouse] Could not restore the persisted Window; starting fresh", err);
   }

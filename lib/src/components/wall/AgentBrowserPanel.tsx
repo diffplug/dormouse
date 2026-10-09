@@ -57,19 +57,18 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
   const syncEngaged = params?.syncEngaged;
   const cwd = params?.cwd;
   // poppedOut is derived from the canonical renderMode the shell passes; fall
-  // back to resolving it from params for a direct mount (tests) / legacy blob.
+  // back to resolving it from params for a direct mount (tests).
   const seededMode = renderModeProp ?? resolveRenderMode(params);
   const provider = surfaceProvider(seededMode);
   const cli = BROWSER_PROVIDER_GUI[provider].cli;
 
   // The surface-scoped controller: get-or-create, keyed by surface id. Survives
   // this component's unmount (minimize, layout churn, StrictMode). Keyed by
-  // provider too: a minimized pane keeps this view mounted while its Wall
-  // restores a failed cross-provider swap in place, and the restored provider
-  // needs its own. One released under this view is replaced when params next
-  // change (`generation`), never on the release itself: a kill releases it as
-  // the pane starts to fade, where re-acquiring would leave a live controller
-  // behind for a dead Surface.
+  // provider too: a cross-provider render swap keeps the Surface id and this
+  // view mounted, and the new provider needs its own. One released under this
+  // view is replaced when params next change (`generation`), never on the
+  // release itself: a kill releases it as the pane starts to fade, where
+  // re-acquiring would leave a live controller behind for a dead Surface.
   const [generation, setGeneration] = useState(0);
   const controller = useMemo(
     () => acquireAgentBrowserSurfaceController(id, { ...params, renderMode: seededMode }),
@@ -350,7 +349,7 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
     if (phase === 'relaunching') return 'Relaunching browser…';
     // Addressed to this pane: a bare `dor agent-browser open` drives the caller's default
     // key, which for a keyed or GUI-launched pane is some other browser.
-    const command = `${cli} --surface ${actions.resolveSurfaceRef(id)} open <url>`;
+    const command = `${cli} --surface ${id} open <url>`;
     // A pane whose launch never named a session has no browser to drive yet.
     if (phase === 'ended' && error) {
       return session

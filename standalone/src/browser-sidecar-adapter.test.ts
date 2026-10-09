@@ -42,9 +42,9 @@ describe("BrowserSidecarAdapter capability surface", () => {
 // exercises what the app does (docs/specs/transport.md -> "The governing rule").
 describe("BrowserSidecarAdapter session persistence", () => {
   const KEY = "dormouse.browser-sidecar.session";
-  const session = { version: 3 as const, panes: [{ id: "pane-a", title: "A", cwd: "/a", untouched: false }] };
+  const session = { version: 4 as const, panes: [{ id: "pane-a", title: "A", cwd: "/a", untouched: false }] };
   const windowBlob = {
-    version: 1 as const,
+    version: 2 as const,
     workspaces: [{ id: "ws-1", name: "One", nameIsAuto: false, session }],
     activeWorkspaceId: "ws-1",
   };
@@ -60,11 +60,16 @@ describe("BrowserSidecarAdapter session persistence", () => {
     localStorage.removeItem(KEY);
   });
 
-  it("wraps a pre-Window blob rather than dropping it", () => {
-    localStorage.setItem(KEY, JSON.stringify(session));
+  it.each([
+    ["a bare Session", { ...session, version: 3 }],
+    ["a Window", { ...windowBlob, version: 1 }],
+  ])("starts fresh on %s an older build left in localStorage", (_kind, blob) => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    localStorage.setItem(KEY, JSON.stringify(blob));
     const adapter = new BrowserSidecarAdapter(new BrowserSidecarHost("http://localhost:1234"));
-    expect(adapter.getWindowState()?.workspaces.map((ws) => ws.session)).toEqual([session]);
+    expect(adapter.getWindowState()).toBeNull();
     localStorage.removeItem(KEY);
+    info.mockRestore();
   });
 
   it("claims the recovery commands for its saved panes during init", async () => {

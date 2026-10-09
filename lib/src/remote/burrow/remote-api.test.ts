@@ -235,7 +235,7 @@ async function attach(
   session: RemoteApiSession,
   cols: number,
   rows: number,
-  surfaceId = 'surface-1',
+  surfaceId = 'surface:1',
   requestId = 'attach-1',
 ): Promise<void> {
   session.handle({
@@ -326,7 +326,7 @@ describe('RemoteApiSession hello', () => {
 describe('RemoteApiSession directory.watch', () => {
   it('answers with the request id as subId and emits one snapshot per collect', async () => {
     const provider = new FakeProvider();
-    provider.entries = [entry('surface-1', 'near'), entry('surface-far', 'far')];
+    provider.entries = [entry('surface:1', 'near'), entry('surface-far', 'far')];
     const { session, sent } = makeSession(provider);
 
     await watchDirectory(session);
@@ -343,11 +343,11 @@ describe('RemoteApiSession directory.watch', () => {
   it('coalesces a burst of changes into one re-snapshot per debounce window', async () => {
     vi.useFakeTimers();
     const provider = new FakeProvider();
-    provider.entries = [entry('surface-1', 'before')];
+    provider.entries = [entry('surface:1', 'before')];
     const { session, sent } = makeSession(provider);
     await watchDirectory(session);
 
-    provider.entries = [entry('surface-1', 'after')];
+    provider.entries = [entry('surface:1', 'after')];
     provider.changeDirectory();
     provider.changeDirectory();
     provider.changeDirectory();
@@ -361,8 +361,8 @@ describe('RemoteApiSession directory.watch', () => {
     await settle();
     expect(provider.collects).toBe(2);
     expect(snapshots(sent).map((s) => s.entries)).toEqual([
-      [entry('surface-1', 'before')],
-      [entry('surface-1', 'after')],
+      [entry('surface:1', 'before')],
+      [entry('surface:1', 'after')],
     ]);
 
     // A later change opens a fresh window rather than riding the spent timer.
@@ -374,7 +374,7 @@ describe('RemoteApiSession directory.watch', () => {
 
   it('drops a snapshot whose collect resolved after the subscription was replaced', async () => {
     const provider = new FakeProvider();
-    provider.entries = [entry('surface-1', 'stale')];
+    provider.entries = [entry('surface:1', 'stale')];
     const slow = gate();
     provider.collectGate = slow.promise;
     const { session, sent } = makeSession(provider);
@@ -382,7 +382,7 @@ describe('RemoteApiSession directory.watch', () => {
     await watchDirectory(session, 'dir-1');
     // The client re-watches (a reconnect) before the first collect answers.
     provider.collectGate = null;
-    provider.entries = [entry('surface-1', 'fresh')];
+    provider.entries = [entry('surface:1', 'fresh')];
     await watchDirectory(session, 'dir-2');
     slow.release();
     await settle();
@@ -390,7 +390,7 @@ describe('RemoteApiSession directory.watch', () => {
     // The client correlates by subId, so a snapshot for a subscription it has
     // already replaced would be an answer to a question it stopped asking.
     expect(snapshots(sent)).toEqual([
-      { subId: 'dir-2', entries: [entry('surface-1', 'fresh')] },
+      { subId: 'dir-2', entries: [entry('surface:1', 'fresh')] },
     ]);
   });
 
@@ -401,7 +401,7 @@ describe('RemoteApiSession directory.watch', () => {
     // answer would blank the phone's picker until the next change.
     vi.useFakeTimers();
     const provider = new FakeProvider();
-    provider.entries = [entry('surface-1', 'first')];
+    provider.entries = [entry('surface:1', 'first')];
     const { session, sent } = makeSession(provider);
     await watchDirectory(session);
     expect(snapshots(sent)).toHaveLength(1);
@@ -416,7 +416,7 @@ describe('RemoteApiSession directory.watch', () => {
 
     // A second change while the first is still in flight, answered immediately.
     provider.collectGate = null;
-    provider.entries = [entry('surface-1', 'newest')];
+    provider.entries = [entry('surface:1', 'newest')];
     provider.changeDirectory();
     vi.advanceTimersByTime(150);
     await settle();
@@ -425,8 +425,8 @@ describe('RemoteApiSession directory.watch', () => {
     await settle();
 
     expect(snapshots(sent).map((s) => s.entries)).toEqual([
-      [entry('surface-1', 'first')],
-      [entry('surface-1', 'newest')],
+      [entry('surface:1', 'first')],
+      [entry('surface:1', 'newest')],
     ]);
   });
 
@@ -460,7 +460,7 @@ describe('RemoteApiSession directory.watch', () => {
   it('keeps the last good snapshot and retries after collection rejects', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const provider = new FakeProvider();
-    provider.entries = [entry('surface-1', 'before')];
+    provider.entries = [entry('surface:1', 'before')];
     const { session, sent } = makeSession(provider);
     await watchDirectory(session, 'dir-1');
 
@@ -468,7 +468,7 @@ describe('RemoteApiSession directory.watch', () => {
     await watchDirectory(session, 'dir-2');
 
     expect(snapshots(sent)).toEqual([
-      { subId: 'dir-1', entries: [entry('surface-1', 'before')] },
+      { subId: 'dir-1', entries: [entry('surface:1', 'before')] },
     ]);
     expect(warn).toHaveBeenCalledWith(
       'burrow: directory collection failed',
@@ -476,12 +476,12 @@ describe('RemoteApiSession directory.watch', () => {
     );
 
     provider.collectError = null;
-    provider.entries = [entry('surface-1', 'after')];
+    provider.entries = [entry('surface:1', 'after')];
     await watchDirectory(session, 'dir-3');
 
     expect(snapshots(sent)).toEqual([
-      { subId: 'dir-1', entries: [entry('surface-1', 'before')] },
-      { subId: 'dir-3', entries: [entry('surface-1', 'after')] },
+      { subId: 'dir-1', entries: [entry('surface:1', 'before')] },
+      { subId: 'dir-3', entries: [entry('surface:1', 'after')] },
     ]);
   });
 });
@@ -489,7 +489,7 @@ describe('RemoteApiSession directory.watch', () => {
 describe('RemoteApiSession surface.attach', () => {
   it('resizes through the handle and keeps the synchronous repaint data', async () => {
     const provider = new FakeProvider();
-    provider.addSurface('surface-1', 'pty-1', 80, 24);
+    provider.addSurface('surface:1', 'pty-1', 80, 24);
     const { session, sent } = makeSession(provider);
 
     await attach(session, 100, 30);
@@ -510,7 +510,7 @@ describe('RemoteApiSession surface.attach', () => {
 
   it('carries the text projection on terminal.data only when it differs', async () => {
     const provider = new FakeProvider();
-    provider.addSurface('surface-1', 'pty-1', 80, 24);
+    provider.addSurface('surface:1', 'pty-1', 80, 24);
     const { session, sent } = makeSession(provider);
 
     await attach(session, 100, 30);
@@ -537,13 +537,13 @@ describe('RemoteApiSession surface.attach', () => {
 
   it('falls back to the surface size for a missing dimension', async () => {
     const provider = new FakeProvider();
-    provider.addSurface('surface-1', 'pty-1', 80, 24);
+    provider.addSurface('surface:1', 'pty-1', 80, 24);
     const { session, sent } = makeSession(provider);
 
     session.handle({
       requestId: 'attach-1',
       method: REMOTE_METHODS.surfaceAttach,
-      params: { surfaceId: 'surface-1', cols: 120 },
+      params: { surfaceId: 'surface:1', cols: 120 },
     });
     await settle();
 
@@ -553,7 +553,7 @@ describe('RemoteApiSession surface.attach', () => {
 
   it('requests owner-managed repaint and retains synchronous data at the same size', async () => {
     const provider = new FakeProvider();
-    provider.addSurface('surface-1', 'pty-1', 80, 24);
+    provider.addSurface('surface:1', 'pty-1', 80, 24);
     const { session, sent } = makeSession(provider);
 
     await attach(session, 80, 24);
@@ -569,7 +569,7 @@ describe('RemoteApiSession surface.attach', () => {
 
   it('answers and unwinds a synchronous repaint failure after stream readiness', async () => {
     const provider = new FakeProvider();
-    provider.addSurface('surface-1', 'pty-1');
+    provider.addSurface('surface:1', 'pty-1');
     vi.spyOn(provider, 'resizePty').mockImplementation(() => {
       throw new Error('PTY unavailable');
     });
@@ -597,12 +597,12 @@ describe('RemoteApiSession surface.attach', () => {
 
   it('replaces the previous attachment, unsubscribing its stream', async () => {
     const provider = new FakeProvider();
-    provider.addSurface('surface-1', 'pty-1', 80, 24);
-    provider.addSurface('surface-2', 'pty-2', 80, 24);
+    provider.addSurface('surface:1', 'pty-1', 80, 24);
+    provider.addSurface('surface:2', 'pty-2', 80, 24);
     const { session, sent } = makeSession(provider);
 
-    await attach(session, 100, 30, 'surface-1');
-    await attach(session, 100, 30, 'surface-2', 'attach-2');
+    await attach(session, 100, 30, 'surface:1');
+    await attach(session, 100, 30, 'surface:2', 'attach-2');
     sent.length = 0;
     provider.emitData('pty-1', 'from the old attachment');
 
@@ -627,7 +627,7 @@ describe('RemoteApiSession surface.attach', () => {
 
   it('fails an attach when its owner cannot resolve the surface', async () => {
     const provider = new FakeProvider();
-    provider.addSurface('surface-1', 'pty-1', 80, 24);
+    provider.addSurface('surface:1', 'pty-1', 80, 24);
     provider.resolveError = new Error('owner unavailable');
     const { session, sent } = makeSession(provider);
 
@@ -643,7 +643,7 @@ describe('RemoteApiSession surface.attach', () => {
 
   it('fails and unwinds an attach whose resize is rejected', async () => {
     const provider = new FakeProvider();
-    provider.addSurface('surface-1', 'pty-1', 80, 24);
+    provider.addSurface('surface:1', 'pty-1', 80, 24);
     provider.resizeError = new Error('owner unavailable');
     const { session, sent } = makeSession(provider);
 
@@ -709,7 +709,7 @@ describe('RemoteApiSession surface.attach', () => {
 
   it('ignores a handle that resolves after dispose, and answers nothing', async () => {
     const provider = new FakeProvider();
-    provider.addSurface('surface-1', 'pty-1', 80, 24);
+    provider.addSurface('surface:1', 'pty-1', 80, 24);
     const slow = gate();
     provider.resolveGate = slow.promise;
     const { session, sent } = makeSession(provider);
@@ -717,7 +717,7 @@ describe('RemoteApiSession surface.attach', () => {
     session.handle({
       requestId: 'attach-1',
       method: REMOTE_METHODS.surfaceAttach,
-      params: { surfaceId: 'surface-1', cols: 80, rows: 24 },
+      params: { surfaceId: 'surface:1', cols: 80, rows: 24 },
     });
     session.dispose();
     slow.release();
@@ -733,13 +733,13 @@ describe('RemoteApiSession terminal input', () => {
   it.each([[100, 30], [80, 24]])('leaves repaint restoration to the owner after resizing to %ix%i', async (cols, rows) => {
     vi.useFakeTimers();
     const provider = new FakeProvider();
-    provider.addSurface('surface-1', 'pty-1');
+    provider.addSurface('surface:1', 'pty-1');
     const { session, sent } = makeSession(provider);
     await attach(session, 80, 24);
 
     session.handle({
       requestId: 'resize', method: REMOTE_METHODS.terminalResize,
-      params: { surfaceId: 'surface-1', cols, rows },
+      params: { surfaceId: 'surface:1', cols, rows },
     });
     await settle();
     expect(reply(sent, 'resize').result).toEqual({ cols, rows });
@@ -754,22 +754,22 @@ describe('RemoteApiSession terminal input', () => {
 
   it('rejects write and resize unless the surface is the current attachment', async () => {
     const provider = new FakeProvider();
-    provider.addSurface('surface-1', 'pty-1', 80, 24);
-    const background = provider.addSurface('surface-2', 'pty-2', 100, 30);
+    provider.addSurface('surface:1', 'pty-1', 80, 24);
+    const background = provider.addSurface('surface:2', 'pty-2', 100, 30);
     const { session, sent } = makeSession(provider);
 
-    await attach(session, 80, 24, 'surface-1');
+    await attach(session, 80, 24, 'surface:1');
     sent.length = 0;
 
     session.handle({
       requestId: 'write-background',
       method: REMOTE_METHODS.terminalWrite,
-      params: { surfaceId: 'surface-2', bytes: toBase64Url(utf8Encode('invisible\r')) },
+      params: { surfaceId: 'surface:2', bytes: toBase64Url(utf8Encode('invisible\r')) },
     });
     session.handle({
       requestId: 'resize-background',
       method: REMOTE_METHODS.terminalResize,
-      params: { surfaceId: 'surface-2', cols: 120, rows: 40 },
+      params: { surfaceId: 'surface:2', cols: 120, rows: 40 },
     });
 
     expect(provider.writes).toEqual([]);
@@ -778,26 +778,26 @@ describe('RemoteApiSession terminal input', () => {
       {
         requestId: 'write-background',
         ok: false,
-        error: 'surface is not attached: surface-2',
+        error: 'surface is not attached: surface:2',
       },
       {
         requestId: 'resize-background',
         ok: false,
-        error: 'surface is not attached: surface-2',
+        error: 'surface is not attached: surface:2',
       },
     ]);
 
     session.handle({
       requestId: 'detach',
       method: REMOTE_METHODS.surfaceDetach,
-      params: { surfaceId: 'surface-1' },
+      params: { surfaceId: 'surface:1' },
     });
     sent.length = 0;
 
     session.handle({
       requestId: 'write-detached',
       method: REMOTE_METHODS.terminalWrite,
-      params: { surfaceId: 'surface-1', bytes: toBase64Url(utf8Encode('stale\r')) },
+      params: { surfaceId: 'surface:1', bytes: toBase64Url(utf8Encode('stale\r')) },
     });
 
     expect(provider.writes).toEqual([]);
@@ -805,14 +805,14 @@ describe('RemoteApiSession terminal input', () => {
       {
         requestId: 'write-detached',
         ok: false,
-        error: 'surface is not attached: surface-1',
+        error: 'surface is not attached: surface:1',
       },
     ]);
   });
 
   it('rejects a write with no surfaceId at all', async () => {
     const provider = new FakeProvider();
-    provider.addSurface('surface-1', 'pty-1', 80, 24);
+    provider.addSurface('surface:1', 'pty-1', 80, 24);
     const { session, sent } = makeSession(provider);
     await attach(session, 100, 30);
     sent.length = 0;
@@ -831,20 +831,20 @@ describe('RemoteApiSession terminal input', () => {
 
   it('keeps write and resize pinned to the surface resolved at attach', async () => {
     const provider = new FakeProvider();
-    const attached = provider.addSurface('surface-1', 'pty-1', 80, 24);
-    const swappedIn = provider.addSurface('surface-2', 'pty-2', 100, 30);
+    const attached = provider.addSurface('surface:1', 'pty-1', 80, 24);
+    const swappedIn = provider.addSurface('surface:2', 'pty-2', 100, 30);
     const { session, sent } = makeSession(provider);
 
-    await attach(session, 90, 25, 'surface-1');
-    // A Burrow-side pane swap moves a different terminal behind `surface-1`.
-    provider.surfaces.set('surface-1', swappedIn);
-    provider.surfaces.set('surface-2', attached);
+    await attach(session, 90, 25, 'surface:1');
+    // A Burrow-side pane swap moves a different terminal behind `surface:1`.
+    provider.surfaces.set('surface:1', swappedIn);
+    provider.surfaces.set('surface:2', attached);
     sent.length = 0;
 
     session.handle({
       requestId: 'write-after-swap',
       method: REMOTE_METHODS.terminalWrite,
-      params: { surfaceId: 'surface-1', bytes: toBase64Url(utf8Encode('still-attached\r')) },
+      params: { surfaceId: 'surface:1', bytes: toBase64Url(utf8Encode('still-attached\r')) },
     });
 
     expect(provider.writes).toEqual([['pty-1', 'still-attached\r']]);
@@ -852,7 +852,7 @@ describe('RemoteApiSession terminal input', () => {
     session.handle({
       requestId: 'resize-after-swap',
       method: REMOTE_METHODS.terminalResize,
-      params: { surfaceId: 'surface-1', cols: 120, rows: 40 },
+      params: { surfaceId: 'surface:1', cols: 120, rows: 40 },
     });
 
     // The owner's resize is synchronous; only the reply waits on the handle,
@@ -874,7 +874,7 @@ describe('RemoteApiSession terminal input', () => {
 
   it('clamps a resize and keeps the current size for a dimension it cannot read', async () => {
     const provider = new FakeProvider();
-    provider.addSurface('surface-1', 'pty-1', 80, 24);
+    provider.addSurface('surface:1', 'pty-1', 80, 24);
     const { session, sent } = makeSession(provider);
     await attach(session, 90, 25);
     provider.handleResizes.length = 0;
@@ -883,7 +883,7 @@ describe('RemoteApiSession terminal input', () => {
     session.handle({
       requestId: 'resize-1',
       method: REMOTE_METHODS.terminalResize,
-      params: { surfaceId: 'surface-1', cols: 0, rows: 40.7 },
+      params: { surfaceId: 'surface:1', cols: 0, rows: 40.7 },
     });
     await settle();
 
@@ -893,7 +893,7 @@ describe('RemoteApiSession terminal input', () => {
     session.handle({
       requestId: 'resize-2',
       method: REMOTE_METHODS.terminalResize,
-      params: { surfaceId: 'surface-1', rows: Number.NaN },
+      params: { surfaceId: 'surface:1', rows: Number.NaN },
     });
     await settle();
 
@@ -904,7 +904,7 @@ describe('RemoteApiSession terminal input', () => {
 
   it('answers a rejected terminal resize instead of leaving it pending', async () => {
     const provider = new FakeProvider();
-    provider.addSurface('surface-1', 'pty-1', 80, 24);
+    provider.addSurface('surface:1', 'pty-1', 80, 24);
     const { session, sent } = makeSession(provider);
     await attach(session, 100, 30);
     provider.resizeError = new Error('owner unavailable');
@@ -913,7 +913,7 @@ describe('RemoteApiSession terminal input', () => {
     session.handle({
       requestId: 'resize-1',
       method: REMOTE_METHODS.terminalResize,
-      params: { surfaceId: 'surface-1', cols: 120, rows: 40 },
+      params: { surfaceId: 'surface:1', cols: 120, rows: 40 },
     });
     await settle();
 
@@ -926,7 +926,7 @@ describe('RemoteApiSession terminal input', () => {
 
   it('discards a terminal report a mirror answered, and still answers ok', async () => {
     const provider = new FakeProvider();
-    provider.addSurface('surface-1', 'pty-1', 80, 24);
+    provider.addSurface('surface:1', 'pty-1', 80, 24);
     const { session, sent } = makeSession(provider);
     await attach(session, 100, 30);
     sent.length = 0;
@@ -942,7 +942,7 @@ describe('RemoteApiSession terminal input', () => {
       session.handle({
         requestId: `write-${name}`,
         method: REMOTE_METHODS.terminalWrite,
-        params: { surfaceId: 'surface-1', bytes: toBase64Url(utf8Encode(bytes)) },
+        params: { surfaceId: 'surface:1', bytes: toBase64Url(utf8Encode(bytes)) },
       });
     }
 
@@ -958,7 +958,7 @@ describe('RemoteApiSession terminal input', () => {
       session.handle({
         requestId: `input-${index}`,
         method: REMOTE_METHODS.terminalWrite,
-        params: { surfaceId: 'surface-1', bytes: toBase64Url(utf8Encode(bytes)) },
+        params: { surfaceId: 'surface:1', bytes: toBase64Url(utf8Encode(bytes)) },
       });
     }
 
@@ -969,24 +969,24 @@ describe('RemoteApiSession terminal input', () => {
 describe('RemoteApiSession surface.detach', () => {
   it('is idempotent, and a stale detach leaves a newer attachment alone', async () => {
     const provider = new FakeProvider();
-    provider.addSurface('surface-1', 'pty-1', 80, 24);
-    provider.addSurface('surface-2', 'pty-2', 80, 24);
+    provider.addSurface('surface:1', 'pty-1', 80, 24);
+    provider.addSurface('surface:2', 'pty-2', 80, 24);
     const { session, sent } = makeSession(provider);
 
-    await attach(session, 100, 30, 'surface-1');
+    await attach(session, 100, 30, 'surface:1');
     session.handle({
       requestId: 'detach-1',
       method: REMOTE_METHODS.surfaceDetach,
-      params: { surfaceId: 'surface-1' },
+      params: { surfaceId: 'surface:1' },
     });
     // Detaching again names a surface that is no longer attached: a no-op, not
     // an error.
     session.handle({
       requestId: 'detach-1-again',
       method: REMOTE_METHODS.surfaceDetach,
-      params: { surfaceId: 'surface-1' },
+      params: { surfaceId: 'surface:1' },
     });
-    await attach(session, 100, 30, 'surface-2', 'attach-2');
+    await attach(session, 100, 30, 'surface:2', 'attach-2');
     sent.length = 0;
 
     // A detach the client sent before it switched panes must not kill the
@@ -994,7 +994,7 @@ describe('RemoteApiSession surface.detach', () => {
     session.handle({
       requestId: 'detach-stale',
       method: REMOTE_METHODS.surfaceDetach,
-      params: { surfaceId: 'surface-1' },
+      params: { surfaceId: 'surface:1' },
     });
 
     expect(sent).toEqual([{ requestId: 'detach-stale', ok: true, result: {} }]);
@@ -1002,7 +1002,7 @@ describe('RemoteApiSession surface.detach', () => {
     session.handle({
       requestId: 'write-1',
       method: REMOTE_METHODS.terminalWrite,
-      params: { surfaceId: 'surface-2', bytes: toBase64Url(utf8Encode('ok')) },
+      params: { surfaceId: 'surface:2', bytes: toBase64Url(utf8Encode('ok')) },
     });
     expect(provider.writes).toEqual([['pty-2', 'ok']]);
   });
@@ -1011,7 +1011,7 @@ describe('RemoteApiSession surface.detach', () => {
 describe('RemoteApiSession teardown', () => {
   it('waits for stream readiness and rejects an exit ordered before it', async () => {
     const provider = new FakeProvider();
-    provider.addSurface('surface-1', 'pty-1', 80, 24);
+    provider.addSurface('surface:1', 'pty-1', 80, 24);
     const { session, sent } = makeSession(provider);
     const ready = gate();
     provider.streamReadyGate = ready.promise;
@@ -1019,7 +1019,7 @@ describe('RemoteApiSession teardown', () => {
     session.handle({
       requestId: 'attach-1',
       method: REMOTE_METHODS.surfaceAttach,
-      params: { surfaceId: 'surface-1', cols: 80, rows: 24 },
+      params: { surfaceId: 'surface:1', cols: 80, rows: 24 },
     });
     await settle();
 
@@ -1035,7 +1035,7 @@ describe('RemoteApiSession teardown', () => {
     expect(reply(sent, 'attach-1')).toEqual({
       requestId: 'attach-1',
       ok: false,
-      error: 'surface closed while attaching: surface-1',
+      error: 'surface closed while attaching: surface:1',
     });
     expect(sent.some((p) => (p as RemoteEventMsg).event === REMOTE_EVENTS.terminalClosed)).toBe(
       false,
@@ -1045,7 +1045,7 @@ describe('RemoteApiSession teardown', () => {
 
   it('fails the attach when the PTY exits while surface resolution is in flight', async () => {
     const provider = new FakeProvider();
-    provider.addSurface('surface-1', 'pty-1', 80, 24);
+    provider.addSurface('surface:1', 'pty-1', 80, 24);
     const { session, sent } = makeSession(provider);
     const held = gate();
     provider.resolveGate = held.promise;
@@ -1053,7 +1053,7 @@ describe('RemoteApiSession teardown', () => {
     session.handle({
       requestId: 'attach-1',
       method: REMOTE_METHODS.surfaceAttach,
-      params: { surfaceId: 'surface-1', cols: 80, rows: 24 },
+      params: { surfaceId: 'surface:1', cols: 80, rows: 24 },
     });
     await settle();
 
@@ -1066,7 +1066,7 @@ describe('RemoteApiSession teardown', () => {
     expect(reply(sent, 'attach-1')).toEqual({
       requestId: 'attach-1',
       ok: false,
-      error: 'surface closed while attaching: surface-1',
+      error: 'surface closed while attaching: surface:1',
     });
     expect(sent.some((p) => (p as RemoteEventMsg).event === REMOTE_EVENTS.terminalClosed)).toBe(
       false,
@@ -1080,10 +1080,10 @@ describe('RemoteApiSession teardown', () => {
 
   it('tears down the attachment when the attached PTY exits', async () => {
     const provider = new FakeProvider();
-    provider.addSurface('surface-1', 'pty-1', 80, 24);
+    provider.addSurface('surface:1', 'pty-1', 80, 24);
     const { session, sent } = makeSession(provider);
 
-    await attach(session, 100, 30, 'surface-1');
+    await attach(session, 100, 30, 'surface:1');
     sent.length = 0;
 
     // The attached PTY exits (process death, or the pane disposed on the Burrow).
@@ -1105,12 +1105,12 @@ describe('RemoteApiSession teardown', () => {
     session.handle({
       requestId: 'write-after-exit',
       method: REMOTE_METHODS.terminalWrite,
-      params: { surfaceId: 'surface-1', bytes: toBase64Url(utf8Encode('ghost\r')) },
+      params: { surfaceId: 'surface:1', bytes: toBase64Url(utf8Encode('ghost\r')) },
     });
     session.handle({
       requestId: 'resize-after-exit',
       method: REMOTE_METHODS.terminalResize,
-      params: { surfaceId: 'surface-1', cols: 120, rows: 40 },
+      params: { surfaceId: 'surface:1', cols: 120, rows: 40 },
     });
 
     expect(provider.writes).toEqual([]);
@@ -1119,12 +1119,12 @@ describe('RemoteApiSession teardown', () => {
       {
         requestId: 'write-after-exit',
         ok: false,
-        error: 'surface is not attached: surface-1',
+        error: 'surface is not attached: surface:1',
       },
       {
         requestId: 'resize-after-exit',
         ok: false,
-        error: 'surface is not attached: surface-1',
+        error: 'surface is not attached: surface:1',
       },
     ]);
   });
@@ -1136,7 +1136,7 @@ describe('RemoteApiSession teardown', () => {
     // rather than acknowledged — the buffered `terminal.closed` would otherwise
     // be flushed for a subscription the client is never given.
     const provider = new FakeProvider();
-    provider.addSurface('surface-1', 'pty-1', 80, 24);
+    provider.addSurface('surface:1', 'pty-1', 80, 24);
     const { session, sent } = makeSession(provider);
     const held = gate();
     provider.resizeGate = held.promise;
@@ -1144,7 +1144,7 @@ describe('RemoteApiSession teardown', () => {
     session.handle({
       requestId: 'attach-1',
       method: REMOTE_METHODS.surfaceAttach,
-      params: { surfaceId: 'surface-1', cols: 100, rows: 30 },
+      params: { surfaceId: 'surface:1', cols: 100, rows: 30 },
     });
     await settle();
     expect(provider.handleResizes).toEqual([['pty-1', 100, 30]]);
@@ -1156,7 +1156,7 @@ describe('RemoteApiSession teardown', () => {
     expect(reply(sent, 'attach-1')).toEqual({
       requestId: 'attach-1',
       ok: false,
-      error: 'surface closed while attaching: surface-1',
+      error: 'surface closed while attaching: surface:1',
     });
     expect(sent.some((p) => (p as RemoteEventMsg).event === REMOTE_EVENTS.terminalClosed)).toBe(
       false,
@@ -1166,7 +1166,7 @@ describe('RemoteApiSession teardown', () => {
 
   it('dispose stops the stream and ignores later requests', async () => {
     const provider = new FakeProvider();
-    provider.addSurface('surface-1', 'pty-1', 80, 24);
+    provider.addSurface('surface:1', 'pty-1', 80, 24);
     const { session, sent } = makeSession(provider);
 
     await attach(session, 100, 30);
@@ -1191,51 +1191,51 @@ describe('RemoteApiSession size holds', () => {
 
   it('takes each attach’s hold under this session’s holder, with a lease of its own', async () => {
     const provider = new FakeProvider();
-    provider.addSurface('surface-1', 'pty-1', 80, 24);
+    provider.addSurface('surface:1', 'pty-1', 80, 24);
     const { session } = makeSession(provider);
 
     await attach(session, 100, 30);
-    await attach(session, 90, 30, 'surface-1', 'attach-2');
+    await attach(session, 90, 30, 'surface:1', 'attach-2');
 
     expect(provider.holds).toEqual([
-      ['surface-1', heldBy('1')],
-      ['surface-1', heldBy('2')],
+      ['surface:1', heldBy('1')],
+      ['surface:1', heldBy('2')],
     ]);
   });
 
   it('gives the hold back on detach, and only the attachment’s own', async () => {
     const provider = new FakeProvider();
-    provider.addSurface('surface-1', 'pty-1', 80, 24);
+    provider.addSurface('surface:1', 'pty-1', 80, 24);
     const { session } = makeSession(provider);
     await attach(session, 100, 30);
 
     session.handle({ requestId: 'detach-other', method: REMOTE_METHODS.surfaceDetach, params: { surfaceId: 'nope' } });
     expect(provider.releases).toEqual([]);
-    session.handle({ requestId: 'detach-1', method: REMOTE_METHODS.surfaceDetach, params: { surfaceId: 'surface-1' } });
-    expect(provider.releases).toEqual([['surface-1', heldBy('1')]]);
+    session.handle({ requestId: 'detach-1', method: REMOTE_METHODS.surfaceDetach, params: { surfaceId: 'surface:1' } });
+    expect(provider.releases).toEqual([['surface:1', heldBy('1')]]);
   });
 
   it('gives the previous pane back when it attaches another, and keeps the new one', async () => {
     const provider = new FakeProvider();
-    provider.addSurface('surface-1', 'pty-1', 80, 24);
-    provider.addSurface('surface-2', 'pty-2', 80, 24);
+    provider.addSurface('surface:1', 'pty-1', 80, 24);
+    provider.addSurface('surface:2', 'pty-2', 80, 24);
     const { session } = makeSession(provider);
     await attach(session, 100, 30);
-    await attach(session, 100, 30, 'surface-2', 'attach-2');
+    await attach(session, 100, 30, 'surface:2', 'attach-2');
 
-    expect(provider.releases).toEqual([['surface-1', heldBy('1')]]);
+    expect(provider.releases).toEqual([['surface:1', heldBy('1')]]);
   });
 
   it('re-attaching the same pane releases the old lease, never the one it just took', async () => {
     // The owner compares leases, so the release of attachment 1 lands after
     // attachment 2 took the pane and frees nothing.
     const provider = new FakeProvider();
-    provider.addSurface('surface-1', 'pty-1', 80, 24);
+    provider.addSurface('surface:1', 'pty-1', 80, 24);
     const { session } = makeSession(provider);
     await attach(session, 100, 30);
-    await attach(session, 90, 30, 'surface-1', 'attach-2');
+    await attach(session, 90, 30, 'surface:1', 'attach-2');
 
-    expect(provider.releases).toEqual([['surface-1', heldBy('1')]]);
+    expect(provider.releases).toEqual([['surface:1', heldBy('1')]]);
   });
 
   it('gives back the hold a superseded attach took, while the newer one keeps its own', async () => {
@@ -1272,13 +1272,13 @@ describe('RemoteApiSession size holds', () => {
 
   it('gives back, at every owner, the hold of an attach whose resolve failed', async () => {
     const provider = new FakeProvider();
-    provider.addSurface('surface-1', 'pty-1', 80, 24);
+    provider.addSurface('surface:1', 'pty-1', 80, 24);
     provider.resolveError = new Error('owner unavailable');
     const { session, sent } = makeSession(provider);
     await attach(session, 51, 14);
 
     expect(reply(sent, 'attach-1').error).toBe('surface attach failed: owner unavailable');
-    expect(provider.unresolvedReleases).toEqual([['surface-1', heldBy('1')]]);
+    expect(provider.unresolvedReleases).toEqual([['surface:1', heldBy('1')]]);
   });
 
   it('gives back the hold of a superseded attach its owner answered too late', async () => {
@@ -1303,36 +1303,36 @@ describe('RemoteApiSession size holds', () => {
 
   it('gives no hold back at every owner once a handle carries it', async () => {
     const provider = new FakeProvider();
-    provider.addSurface('surface-1', 'pty-1', 80, 24);
+    provider.addSurface('surface:1', 'pty-1', 80, 24);
     const { session } = makeSession(provider);
     await attach(session, 100, 30);
     session.dispose();
 
-    expect(provider.releases).toEqual([['surface-1', heldBy('1')]]);
+    expect(provider.releases).toEqual([['surface:1', heldBy('1')]]);
     expect(provider.unresolvedReleases).toEqual([]);
   });
 
   it('gives back a hold that resolves after dispose', async () => {
     const provider = new FakeProvider();
-    provider.addSurface('surface-1', 'pty-1', 80, 24);
+    provider.addSurface('surface:1', 'pty-1', 80, 24);
     const slow = gate();
     provider.resolveGate = slow.promise;
     const { session } = makeSession(provider);
     session.handle({
       requestId: 'attach-1',
       method: REMOTE_METHODS.surfaceAttach,
-      params: { surfaceId: 'surface-1', cols: 80, rows: 24 },
+      params: { surfaceId: 'surface:1', cols: 80, rows: 24 },
     });
     session.dispose();
     slow.release();
     await settle();
 
-    expect(provider.releases).toEqual([['surface-1', heldBy('1')]]);
+    expect(provider.releases).toEqual([['surface:1', heldBy('1')]]);
   });
 
   it('gives the pane back on dispose, and says so once', async () => {
     const provider = new FakeProvider();
-    provider.addSurface('surface-1', 'pty-1', 80, 24);
+    provider.addSurface('surface:1', 'pty-1', 80, 24);
     const disposed = vi.fn();
     const session = new RemoteApiSession({
       burrowId: 'burrow-1',
@@ -1345,45 +1345,45 @@ describe('RemoteApiSession size holds', () => {
 
     session.dispose();
     session.dispose();
-    expect(provider.releases).toEqual([['surface-1', heldBy('1')]]);
+    expect(provider.releases).toEqual([['surface:1', heldBy('1')]]);
     expect(disposed).toHaveBeenCalledTimes(1);
   });
 
   it('gives the pane back when its PTY exits', async () => {
     const provider = new FakeProvider();
-    provider.addSurface('surface-1', 'pty-1', 80, 24);
+    provider.addSurface('surface:1', 'pty-1', 80, 24);
     const { session } = makeSession(provider);
     await attach(session, 100, 30);
 
     provider.emitExit('pty-1', 0);
-    expect(provider.releases).toEqual([['surface-1', heldBy('1')]]);
+    expect(provider.releases).toEqual([['surface:1', heldBy('1')]]);
   });
 
   it('gives back the hold of an attach whose resize the owner refused', async () => {
     const provider = new FakeProvider();
-    provider.addSurface('surface-1', 'pty-1', 80, 24);
+    provider.addSurface('surface:1', 'pty-1', 80, 24);
     provider.resizeError = new Error('owner gone');
     const { session } = makeSession(provider);
     await attach(session, 100, 30);
 
-    expect(provider.releases).toEqual([['surface-1', heldBy('1')]]);
+    expect(provider.releases).toEqual([['surface:1', heldBy('1')]]);
   });
 
   it('gives back the hold of an attach whose PTY had already exited', async () => {
     const provider = new FakeProvider();
-    provider.addSurface('surface-1', 'pty-1', 80, 24);
+    provider.addSurface('surface:1', 'pty-1', 80, 24);
     // The exit is replayed when the session subscribes: the attach never installs.
     provider.emitExit('pty-1', 23);
     const { session, sent } = makeSession(provider);
     await attach(session, 80, 24);
 
     expect(reply(sent, 'attach-1').ok).toBe(false);
-    expect(provider.releases).toEqual([['surface-1', heldBy('1')]]);
+    expect(provider.releases).toEqual([['surface:1', heldBy('1')]]);
   });
 
   it('gives back the hold of an attach whose stream could not start', async () => {
     const provider = new FakeProvider();
-    provider.addSurface('surface-1', 'pty-1', 80, 24);
+    provider.addSurface('surface:1', 'pty-1', 80, 24);
     provider.streamPty = () => {
       throw new Error('no such PTY');
     };
@@ -1391,12 +1391,12 @@ describe('RemoteApiSession size holds', () => {
     await attach(session, 80, 24);
 
     expect(reply(sent, 'attach-1').error).toBe('surface attach failed: no such PTY');
-    expect(provider.releases).toEqual([['surface-1', heldBy('1')]]);
+    expect(provider.releases).toEqual([['surface:1', heldBy('1')]]);
   });
 
   it('keeps tearing down when a release throws', async () => {
     const provider = new FakeProvider();
-    provider.addSurface('surface-1', 'pty-1', 80, 24);
+    provider.addSurface('surface:1', 'pty-1', 80, 24);
     const { session } = makeSession(provider);
     await attach(session, 100, 30);
     vi.spyOn(console, 'warn').mockImplementation(() => {});

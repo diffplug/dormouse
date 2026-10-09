@@ -11,11 +11,11 @@ import {
   installWorkspaceIdPool,
   subscribeToWorkspaces,
 } from "dormouse-lib/lib/workspace-store";
+import { installSurfaceIdPool, maxSurfaceNumber } from "dormouse-lib/lib/surface-ids";
+import type { PersistedWindow } from "dormouse-lib/lib/session-types";
 
 export interface RegistryWorkspace {
   id: string;
-  /** `workspace:<n>` for a numbered id; `workspace:<id>` for an opaque id. */
-  ref: string;
   name: string;
   active: boolean;
 }
@@ -67,12 +67,14 @@ export interface RegistryHost {
 }
 
 /**
- * Install this Window into the registry. Resolves once the first id block is
- * in hand, so a Workspace created after boot never carries an unminted id.
+ * Install this Window into the registry. Resolves once the first Workspace and
+ * Surface id blocks are in hand, so nothing created after boot carries an
+ * unminted id; Surface ids are numbered above every one `restored` names
+ * (docs/specs/transport.md → "Surface ids").
  * Reports coalesce per microtask: a restore that sets several Workspaces at
  * once is one report, not one per entry.
  */
-export async function installWorkspaceRegistry(host: RegistryHost): Promise<() => void> {
+export async function installWorkspaceRegistry(host: RegistryHost, restored: PersistedWindow | null): Promise<() => void> {
   let scheduled = false;
   let last = "";
   let reportSequence = 0;
@@ -98,7 +100,13 @@ export async function installWorkspaceRegistry(host: RegistryHost): Promise<() =
   };
   const unsubscribeStore = subscribeToWorkspaces(schedule);
   const unlisten = await host.onSnapshot(acceptRegistrySnapshot);
-  await installWorkspaceIdPool((count) => host.invoke<string[]>("workspace_reserve_ids", { count }));
+  await Promise.all([
+    installWorkspaceIdPool((count) => host.invoke<string[]>("workspace_reserve_ids", { count })),
+    installSurfaceIdPool(
+      (count, floor) => host.invoke<string[]>("surface_reserve_ids", { count, floor }),
+      maxSurfaceNumber(restored?.workspaces.map((workspace) => workspace.session) ?? []),
+    ),
+  ]);
   try {
     acceptRegistrySnapshot(await host.invoke<WorkspaceRegistrySnapshot>("workspace_registry"));
   } catch {

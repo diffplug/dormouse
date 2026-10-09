@@ -1,15 +1,15 @@
-import { isAppControlMethod, isToolControlMethod, isWindowControlMethod, isWorkspaceControlMethod, SURFACE_CONTROL_METHODS } from 'dor/protocol';
+import { isAppControlMethod, isToolControlMethod, isWindowControlMethod, isWorkspaceControlMethod, parseSurfaceTarget, SURFACE_CONTROL_METHODS } from 'dor/protocol';
 import { registry, isHelperSession } from '../../lib/terminal-store';
 import { createRefCount } from '../../lib/ref-count';
 import { getPendingKill, isPendingKillSession } from '../../lib/pending-kills';
-import { getActiveWorkspaceId, isWindowRef, resolveWorkspaceRef, workspaceRefFor } from '../../lib/workspace-store';
+import { getActiveWorkspaceId, isWindowRef, resolveWorkspaceRef } from '../../lib/workspace-store';
 import { handleAppControl } from './app-control';
 import { handleReopenControl } from './reopen';
 import { handleToolControl } from './tool-control';
 import { errorText, mountingRefusal, requestForWall, ROUTE_RETRIES } from './dor-control-shared';
 import { getWallHandle, wallHandleOwning, type WallHandle } from './wall-handles';
 import { handleWorkspaceControl, listAllWorkspaceSurfaces, type WindowControlParams } from './workspace-control';
-import { classifySurfaceTarget, type DorControlRequest } from './use-dor-control';
+import type { DorControlRequest } from './use-dor-control';
 
 /**
  * The one window listener for `dormouse:control-request`, deciding which Wall
@@ -43,18 +43,6 @@ export type DorControlRoute =
    *  `message` — the active Workspace still mounting — if nothing ever does. */
   | { kind: 'none'; message: string };
 
-/**
- * The Workspace holding the Surface this target names, when the target names
- * one Window-wide: only a stable id does (`classifySurfaceTarget`). `surface:N`
- * is Workspace-scoped — every Workspace has a `surface:1` — so it stays with
- * the Wall that answers.
- */
-function wallHandleOwningTarget(target: unknown): WallHandle | null {
-  if (typeof target !== 'string') return null;
-  const classified = classifySurfaceTarget(target);
-  return classified.kind === 'stable' ? wallHandleOwning(classified.id) : null;
-}
-
 /** The host supplies this before cross-window routing. In-process requests
  * (OSC, fake adapter) capture the same origin from the renderer registry, once
  * on arrival, so a promotion during route retries cannot clear it. */
@@ -66,9 +54,8 @@ function withHelperOrigin(detail: DorControlRequest): DorControlRequest {
 
 /**
  * Resolution order: the app verbs, the Tool reads, the Window's own verbs, an explicit
- * container target, a target Surface named by its stable id, else the caller's
- * own Workspace, else the active one. `surface:N` targets are resolved by the
- * chosen Wall, within its own Workspace.
+ * container target, the Workspace holding a target Surface named by id or
+ * ref, else the caller's own Workspace, else the active one.
  */
 export function resolveDorControlRoute(detail: DorControlRequest): DorControlRoute {
   const route = resolveRoute(detail);
@@ -76,7 +63,7 @@ export function resolveDorControlRoute(detail: DorControlRequest): DorControlRou
   // keeps its process: neither may be reached, nor call into its Wall
   // (`docs/specs/reopen.md` → "Labs: No-confirm delayed kill").
   if (route.kind === 'handle' && getPendingKill('workspace', route.handle.workspaceId)) {
-    return { kind: 'error', message: `workspace '${workspaceRefFor(route.handle.workspaceId)}' is a pending kill` };
+    return { kind: 'error', message: `workspace '${route.handle.workspaceId}' is a pending kill` };
   }
   // A helper's request names its parent; a pending helper is itself the caller.
   const caller = [detail.surfaceId, detail.helperParentId].find(id => id && isPendingKillSession(id));
@@ -89,12 +76,12 @@ function resolveRoute(detail: DorControlRequest): DorControlRoute {
   if (isToolControlMethod(detail.method)) return { kind: 'tool' };
   if (isWindowControlMethod(detail.method)) return { kind: 'reopen' };
   const params: WindowControlParams = detail.params ?? {};
-  if (typeof params.surface === 'string') {
-    const target = classifySurfaceTarget(params.surface);
-    if ((target.kind === 'self' && detail.helperParentId)
-      || (target.kind === 'stable' && isHelperSession(target.id))) {
-      return { kind: 'error', message: 'Helper terminals are not public Surface targets; promote the helper first' };
-    }
+  const target = typeof params.surface === 'string' ? parseSurfaceTarget(params.surface) : null;
+  // A malformed handle names nothing anywhere, so no Wall need answer it.
+  if (target?.kind === 'invalid') return { kind: 'error', message: target.message };
+  if ((target?.kind === 'self' && detail.helperParentId)
+    || (target?.kind === 'id' && isHelperSession(target.id))) {
+    return { kind: 'error', message: 'Helper terminals are not public Surface targets; promote the helper first' };
   }
   // Typed before use: `params` is whatever crossed the control socket, and a
   // non-string ref reaching `.trim()` would throw out of the window listener,
@@ -120,9 +107,9 @@ function resolveRoute(detail: DorControlRequest): DorControlRoute {
       ? { kind: 'handle', handle }
       : { kind: 'pending', message: mountingRefusal(String(params.workspace).trim()) };
   }
-  // A stable id names one Surface in the whole Window, so a command targeting
+  // An id names one Surface in the whole Window, so a command targeting
   // one is answered by whichever Workspace holds it, caller or not.
-  const owningTarget = wallHandleOwningTarget(params.surface);
+  const owningTarget = target?.kind === 'id' ? wallHandleOwning(target.id) : null;
   if (owningTarget) return { kind: 'handle', handle: owningTarget };
   // The caller's own Workspace: `dor split` from a background Workspace lands
   // beside its caller, not in whichever Workspace the user is looking at.
@@ -137,7 +124,7 @@ function resolveRoute(detail: DorControlRequest): DorControlRoute {
   const active = getWallHandle(activeId);
   return active
     ? { kind: 'handle', handle: active }
-    : { kind: 'none', message: mountingRefusal(workspaceRefFor(activeId)) };
+    : { kind: 'none', message: mountingRefusal(activeId) };
 }
 
 function dispatchDorControl(detail: DorControlRequest, attempt: number): void {

@@ -28,7 +28,7 @@ Source of truth: `attachRouter` in `vscode-ext/src/message-router.ts`, pinned by
 
 **One webview is one Workspace.** The bottom-panel `WebviewView` ("Dormouse") is the default Workspace; each `dormouse.open` editor-tab `WebviewPanel` is an independent Workspace. VS Code — not Dormouse — owns their tabs, creation, and closing, so **Dormouse adds no create/rename/close affordances here**: the webview mounts a bare `<Wall>` (`docs/specs/layout.md` → Workspaces). A Workspace's Surfaces are the terminal Sessions its router's `ownedPtyIds` hold plus the browser Surfaces rendered in it.
 
-**The extension host refuses every Workspace-spanning `dor` request** — the container verbs, `dor list --workspaces` / `--all`, and any `--workspace` but this webview's own — before routing it, since no webview can answer for its siblings (`docs/specs/dor-cli.md` → "dor workspace"). **Its own Workspace is accepted by position *and* by name** (`DEFAULT_WORKSPACE_NAME`), so a ref read out of `dor list` can be handed straight back. Source of truth: `dorWorkspaceRefusal` in `vscode-ext/src/dor-workspace-guard.ts`.
+**The extension host refuses every Workspace-spanning `dor` request** — the container verbs, `dor list --workspaces` / `--all`, and any `--workspace` but this webview's own — before routing it, since no webview can answer for its siblings (`docs/specs/dor-cli.md` → "dor workspace"). **Its own Workspace is accepted by its id `workspace:1` *and* by name** (`DEFAULT_WORKSPACE_NAME`), so either, read out of `dor list`, can be handed straight back. Source of truth: `dorWorkspaceRefusal` in `vscode-ext/src/dor-workspace-guard.ts`.
 
 ### Surfacing union status on native chrome
 
@@ -74,6 +74,12 @@ A `WebviewPanelSerializer` under the `dormouse` view type restores editor panels
 **Must offer every live extension-host PTY to shared capture**, across the view and editor panels. **Must store the record under `storageUri`, falling back to `globalStorageUri`; never `workspaceState`** (rationale). If neither directory exists, skip capture.
 
 Source of truth: `captureAgentRecoveryCommands` / `takeRecoveryCommands` in `vscode-ext/src/session-state.ts`.
+
+### Surface id minting
+
+**The extension host mints every Surface id its webviews use** (`docs/specs/transport.md` → Surface ids) **off one counter for the whole install** (rationale), its high-water mark in `surface-ids.json` under `globalStorageUri`, **never `workspaceState`** (rationale). A Surface id names one Surface across the install, except in the windows "Duplicate Workspace in New Window" cold-restores (§Peer surfaces across windows).
+
+Source of truth: `vscode-ext/src/surface-ids.ts`.
 
 ## Theme integration
 
@@ -206,7 +212,7 @@ The broker window listens on the authenticated local socket and every other wind
 
 **Cross-window streams are reference-counted per routed PTY**: two attachments to one foreign surface share one `subscribe`, only zero-to-one starts the owner forwarding and only one-to-zero stops it. **The owner answers the first `subscribe` with `subscribed` only after its sink and atomic liveness check are installed**, a recorded exit going first on the same ordered socket, so an exit cannot be overtaken by a successful attach. **The last unsubscribe stops the forwarding but keeps the route** (rationale). **Routes are refreshed by every resolve and dropped only by an `exit` frame or the owning window disconnecting** (`forgetPeerRoutes`).
 
-**Never key routes by a raw `ptyId`** — pane and PTY ids are unique only within a window, and cold restore can duplicate them across windows (rationale). The broker replaces an answer's owner-local `ptyId` with an opaque route handle for the `(peer socket, ptyId)` pair; follow-up surface asks address that peer alone, and `subscribe`, `write`, and PTY-only `resizePty` translate it back to the owner's id on that socket only. **The handle is checked against this window's PTYs and stays in the peer namespace after its route closes**, so a stale handle fails closed. **When a peer disconnects, every handle routed to it is dropped and reported as exited.**
+**Never key routes by a raw `ptyId`**: cold restore can duplicate Surface ids across windows (rationale). The broker replaces an answer's owner-local `ptyId` with an opaque route handle for the `(peer socket, ptyId)` pair; follow-up surface asks address that peer alone, and `subscribe`, `write`, and PTY-only `resizePty` translate it back to the owner's id on that socket only. **The handle is checked against this window's PTYs and stays in the peer namespace after its route closes**, so a stale handle fails closed. **When a peer disconnects, every handle routed to it is dropped and reported as exited.**
 
 **Never send a result both ways**: the broker's `commandRoutes` records which window is owed each in-flight `burrowRequestId`; an answer with an entry goes to that socket alone, one without to this window's webviews (rationale). A disconnecting window's routes are dropped, its commands left to the asking adapter's timeout, and **whatever the broker was still asking it is settled empty on the spot**. **A `result` frame is taken only from the window the request was put to.**
 

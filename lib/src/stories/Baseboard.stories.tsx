@@ -119,9 +119,9 @@ export const AlarmOutputsEnabled: Story = {
 export const WorkspaceAlertSettings: Story = {
   args: { items: [] },
   parameters: {
-    primedWorkspaces: { workspaces: [{ id: 'workspace-alert-story', name: 'Builds', alertDelivery: { speakEnabled: true } }] },
+    primedWorkspaces: { workspaces: [{ id: 'workspace:alert-story', name: 'Builds', alertDelivery: { speakEnabled: true } }] },
   },
-  decorators: [(Story) => <WorkspaceIdContext.Provider value="workspace-alert-story"><Story /></WorkspaceIdContext.Provider>],
+  decorators: [(Story) => <WorkspaceIdContext.Provider value="workspace:alert-story"><Story /></WorkspaceIdContext.Provider>],
   play: async ({ canvasElement }) => {
     const body = within(canvasElement.ownerDocument.body);
     fireEvent.contextMenu(body.getByRole('button', { name: 'Spoken alarms' }));

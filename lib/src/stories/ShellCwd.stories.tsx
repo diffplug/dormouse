@@ -56,7 +56,6 @@ const noopActions: WallActions = {
   onFinishRename: () => ({ accepted: true }),
   onCancelRename: () => {},
   onSwapRenderMode: () => {},
-  resolveSurfaceRef: (id) => id,
   onResolveToolApproval: () => {},
 };
 
@@ -128,7 +127,7 @@ export const TitleFallbacksAndPinnedTitles: Story = storyFor([
 
 const titleCandidatesInHeaderMenu = storyFor([
   caseState(
-    'title-candidates-popup',
+    'surface:title-candidates-popup',
     'Title candidates in header menu',
     titleCandidateState(),
     'The context title explanation shows the latest title per channel',
@@ -143,7 +142,7 @@ export const TitleCandidatesInHeaderMenu: Story = {
     fakePty: { scenario: flattenScenario(SCENARIO_SHELL_PROMPT) },
   },
   // A flex column, or the `flex-1` Wall collapses to its Baseboard and hides the pane.
-  render: () => <div className="flex flex-col" style={{ width: 900, height: 680 }}><Wall initialPaneIds={['title-candidates-popup']} /></div>,
+  render: () => <div className="flex flex-col" style={{ width: 900, height: 680 }}><Wall initialPaneIds={['surface:title-candidates-popup']} /></div>,
   play: openHeaderContextMenu,
 };
 
@@ -400,7 +399,7 @@ function titleCandidateState(): TerminalPaneState {
 
 async function openHeaderContextMenu() {
   await waitForPrimedState();
-  const title = await requireElement<HTMLElement>('[data-pane-title-for="title-candidates-popup"]', 'terminal title');
+  const title = await requireElement<HTMLElement>('[data-pane-title-for="surface:title-candidates-popup"]', 'terminal title');
 
   const rect = title.getBoundingClientRect();
   title.dispatchEvent(new MouseEvent('contextmenu', {

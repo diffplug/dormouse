@@ -17,9 +17,9 @@ To move a single Surface between Workspaces, use dor move.
 
 Manages this Window's Workspaces. Listing them is dor list --workspaces (the overview) and dor list --all (every Workspace's Surfaces); this command only mutates.
 
-A <workspace> target is workspace:<n> — a stable number that a strip reorder or a move between windows never changes — or workspace:<name>, which resolves only when exactly one Workspace carries that name and otherwise fails listing the candidates. Both forms are also accepted bare ("2", "build"). A target in another window is routed there.
+A <workspace> target is its id workspace:<n> — a number that a strip reorder or a move between windows never changes — or workspace:<name>, which resolves only when exactly one Workspace carries that name and otherwise fails listing the candidates. Both forms are also accepted bare ("2", "build"). A target in another window is routed there.
 
-new creates a Workspace in the background and prints its ref: it never moves the user to it, since that is a larger theft than the focus a bare dor split takes. Use dor workspace switch to activate one. Without a name, the Workspace is auto-named: after its terminals' most common git repository and branch ("dormouse @ main"), else their most common directory, and "Workspace N" until one reports a directory. An auto-name follows the terminals, so a script should target the Workspace by its number.
+new creates a Workspace in the background and prints its id: it never moves the user to it, since that is a larger theft than the focus a bare dor split takes. Use dor workspace switch to activate one. Without a name, the Workspace is auto-named: after its terminals' most common git repository and branch ("dormouse @ main"), else their most common directory, and "Workspace N" until one reports a directory. An auto-name follows the terminals, so a script should target the Workspace by its number.
 
 rename sets a name the Workspace keeps; rename --auto hands it back to auto-naming and prints the outgoing name, since the derived one is computed afterwards.
 
@@ -38,8 +38,7 @@ Text output:
 JSON output:
   {
     "status": "created",
-    "workspace_id": "...",
-    "workspace_ref": "workspace:2",
+    "workspace_id": "workspace:2",
     "name": "build"
   }
 

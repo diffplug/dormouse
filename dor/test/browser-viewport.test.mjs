@@ -5,7 +5,7 @@ import { runCli } from '../dist/cli.js';
 function fixture(provider = 'agent-browser') {
   const calls = [];
   const response = {
-    surfaceId: 'browser-1', surfaceRef: 'surface:2', provider,
+    surfaceId: 'surface:2', provider,
     renderMode: `${provider}-screencast`, requested: { mode: 'fixed', width: 1440, height: 900 },
     actual: { width: 1440, height: 900, dpr: 1 }, ready: true,
   };
@@ -22,7 +22,7 @@ test('both full provider names query the existing Surface without spawning a nat
     const result = await runCli([provider, '--surface', 'surface:2', 'dor-embed-size', '--json'], options);
     assert.equal(result.exitCode, 0);
     assert.deepEqual(JSON.parse(result.stdout), {
-      surface_id: response.surfaceId, surface_ref: response.surfaceRef, provider,
+      surface_id: response.surfaceId, provider,
       render_mode: response.renderMode, requested: response.requested,
       actual: response.actual, ready: true,
     });

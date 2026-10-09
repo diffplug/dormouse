@@ -16,7 +16,7 @@ function WorkspaceWindowStory() {
   return (
     <div className="flex h-[520px] flex-col">
       <AppBar />
-      <WorkspaceWindow initialPaneIds={['workspace-window-story']} />
+      <WorkspaceWindow initialPaneIds={['surface:workspace-window-story']} />
     </div>
   );
 }

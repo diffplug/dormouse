@@ -4,7 +4,7 @@ workspace:1  Workspace 1  [active]
   * surface:1  terminal  -                         paned      /Users/me/projects/site  pnpm dev
 
 workspace:2  build  [pinned]
-    surface:1  browser   agent-browser-screencast  paned      http://localhost:5173/   Dormouse
-    surface:2  terminal  -                         minimized  /Users/me/api            <idle> server.js  [ringing]
+    surface:3  browser   agent-browser-screencast  paned      http://localhost:5173/   Dormouse
+    surface:4  terminal  -                         minimized  /Users/me/api            <idle> server.js  [ringing]
 
 stderr:

@@ -75,7 +75,7 @@ const ORIGIN = 'https://hosted.example';
 const START = 1_700_000_000_000;
 const BURROW_LABEL = 'Ned’s laptop';
 const PHONE_LABEL = 'iPhone';
-const SURFACE_ID = 'surface-1';
+const SURFACE_ID = 'surface:1';
 const PTY_ID = 'pty-1';
 
 const ENTRY: DirectoryEntry = {
@@ -637,14 +637,14 @@ describe('size authority across a one-time connection, end to end', () => {
   });
 
   it('gives the pane back when the phone detaches, and when it attaches another', async () => {
-    registry.set('surface-2', { terminal: { ...terminal, resize: vi.fn() } } as unknown as TerminalEntry);
+    registry.set('surface:2', { terminal: { ...terminal, resize: vi.fn() } } as unknown as TerminalEntry);
     const { phone } = await attachedPhone();
-    await phone.attach('surface-2', 51, 14, { onData: () => {} });
+    await phone.attach('surface:2', 51, 14, { onData: () => {} });
     await settleUntil(() => getSizeHolds(SURFACE_ID).length === 0);
-    expect(getSizeHolds('surface-2')).toMatchObject([{ label: PHONE_LABEL }]);
+    expect(getSizeHolds('surface:2')).toMatchObject([{ label: PHONE_LABEL }]);
 
-    await phone.detach('surface-2');
-    await settleUntil(() => getSizeHolds('surface-2').length === 0);
-    registry.delete('surface-2');
+    await phone.detach('surface:2');
+    await settleUntil(() => getSizeHolds('surface:2').length === 0);
+    registry.delete('surface:2');
   });
 });

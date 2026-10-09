@@ -47,8 +47,8 @@ export const splitCommand: Command = {
     {
       scope: 'root',
       findReplace: [
-        `  dor split ${groupedSplitDirectionUsage} [--json] [--minimize] [--surface id|ref] [--workspace ref]<TO-EOL>`,
-        `  dor split ${groupedSplitDirectionUsage} [--json] [--minimize] [--surface id|ref] [--workspace ref] [-- <command>...]\n`,
+        `  dor split ${groupedSplitDirectionUsage} [--json] [--minimize] [--surface handle] [--workspace ref]<TO-EOL>`,
+        `  dor split ${groupedSplitDirectionUsage} [--json] [--minimize] [--surface handle] [--workspace ref] [-- <command>...]\n`,
       ],
     },
     {
@@ -58,8 +58,8 @@ export const splitCommand: Command = {
         `${groupedSplitDirectionUsage}`,
         // <TO-EOL> swallows the flags this patch is about to remove, so the
         // tail is rewritten whole rather than matched around them.
-        '[--surface id|ref]<TO-EOL>',
-        '[--surface id|ref] [--workspace ref] [-- <command>...]\n',
+        '[--surface handle]<TO-EOL>',
+        '[--surface handle] [--workspace ref] [-- <command>...]\n',
       ],
       remove: ['<WS>[--down]', '<WS>[--left]', '<WS>[--right]', '<WS>[--up]'],
     },
@@ -107,8 +107,7 @@ Text output:
 JSON output:
   {
     "status": "created",
-    "surface_id": "pane-abc",
-    "surface_ref": "surface:2",
+    "surface_id": "surface:2",
     "direction": "right",
     "minimized": false,
     "command": "pnpm dev"
@@ -122,7 +121,7 @@ JSON output:
         left: { kind: 'boolean', brief: 'Split left of the target surface.', optional: true, withNegated: false },
         minimize: { kind: 'boolean', brief: 'Create the surface minimized.', optional: true, withNegated: false },
         right: { kind: 'boolean', brief: 'Split right of the target surface.', optional: true, withNegated: false },
-        surface: { kind: 'parsed', parse: stringParser, brief: 'Reference Surface for placement.', optional: true, placeholder: 'id|ref' },
+        surface: { kind: 'parsed', parse: stringParser, brief: 'Reference Surface for placement.', optional: true, placeholder: 'handle' },
         up: { kind: 'boolean', brief: 'Split above the target surface.', optional: true, withNegated: false },
         workspace: workspaceFlag,
       },
@@ -184,7 +183,6 @@ function renderSplitResponse(response: SplitSurfaceResponse, json: boolean): str
     return renderJson({
       status: response.status,
       surface_id: response.surfaceId,
-      surface_ref: response.surfaceRef,
       direction: response.direction,
       minimized: response.minimized,
       ...(response.command ? { command: response.command } : {}),
@@ -193,5 +191,5 @@ function renderSplitResponse(response: SplitSurfaceResponse, json: boolean): str
 
   const minimized = response.minimized ? '  [minimized]' : '';
   const command = response.command ? `  ${JSON.stringify(response.command)}` : '';
-  return `${response.status} ${response.surfaceRef}  [${response.direction}]${minimized}${command}\n`;
+  return `${response.status} ${response.surfaceId}  [${response.direction}]${minimized}${command}\n`;
 }

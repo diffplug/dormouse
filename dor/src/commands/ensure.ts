@@ -76,15 +76,15 @@ export const ensureCommand: Command = {
     {
       scope: 'root',
       findReplace: [
-        '  dor ensure [--json] [--minimize] [--restart] [--surface id|ref] [--cwd path] [--workspace ref]<TO-EOL>',
-        '  dor ensure [--json] [--minimize] [--restart] [--surface id|ref] [--cwd path] [--workspace ref] -- <command>...\n',
+        '  dor ensure [--json] [--minimize] [--restart] [--surface handle] [--cwd path] [--workspace ref]<TO-EOL>',
+        '  dor ensure [--json] [--minimize] [--restart] [--surface handle] [--cwd path] [--workspace ref] -- <command>...\n',
       ],
     },
     {
       scope: 'command-usage',
       findReplace: [
-        '  dor ensure [--json] [--minimize] [--restart] [--surface id|ref] [--cwd path] [--workspace ref]<TO-EOL>',
-        '  dor ensure [--json] [--minimize] [--restart] [--surface id|ref] [--cwd path] [--workspace ref] -- <command>...\n',
+        '  dor ensure [--json] [--minimize] [--restart] [--surface handle] [--cwd path] [--workspace ref]<TO-EOL>',
+        '  dor ensure [--json] [--minimize] [--restart] [--surface handle] [--cwd path] [--workspace ref] -- <command>...\n',
       ],
     },
     {
@@ -123,8 +123,7 @@ Text output:
 JSON output:
   {
     "status": "created",
-    "surface_id": "pane-def",
-    "surface_ref": "surface:3",
+    "surface_id": "surface:3",
     "command": "npm run dev",
     "cwd": "/Users/me/projects/site",
     "minimized": false
@@ -135,7 +134,7 @@ JSON output:
         json: { kind: 'boolean', brief: 'Print JSON output.', optional: true, withNegated: false },
         minimize: { kind: 'boolean', brief: 'Create the surface minimized.', optional: true, withNegated: false },
         restart: { kind: 'boolean', brief: 'Restart a matching surface in place.', optional: true, withNegated: false },
-        surface: { kind: 'parsed', parse: stringParser, brief: 'Surface to split when creating.', optional: true, placeholder: 'id|ref' },
+        surface: { kind: 'parsed', parse: stringParser, brief: 'Surface to split when creating.', optional: true, placeholder: 'handle' },
         cwd: { kind: 'parsed', parse: stringParser, brief: 'Working directory for matching and for the new command.', optional: true, placeholder: 'path' },
         workspace: workspaceFlag,
       },
@@ -178,12 +177,11 @@ function renderEnsureResponse(response: EnsureSurfaceResponse, json: boolean): s
     return renderJson({
       status: response.status,
       surface_id: response.surfaceId,
-      surface_ref: response.surfaceRef,
       command: response.command,
       cwd: response.cwd,
       minimized: response.minimized,
     });
   }
 
-  return `${response.status} ${response.surfaceRef}  ${JSON.stringify(response.command)}\n`;
+  return `${response.status} ${response.surfaceId}  ${JSON.stringify(response.command)}\n`;
 }

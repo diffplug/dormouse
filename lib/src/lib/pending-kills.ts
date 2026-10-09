@@ -20,9 +20,6 @@ export interface PendingKill {
   id: string;
   /** The Workspace it belongs to, or is. */
   workspaceId: WorkspaceId;
-  /** The `surface:N` a `dor` caller may still name it by; a helper's is its
-   *  parent's. */
-  ref?: string;
   /** The public Surface a restore brings back: a helper's parent. */
   surfaceId?: string;
   title: string;
@@ -193,12 +190,9 @@ export function isOwnPendingKill(kill: PendingKill, workspaceId: WorkspaceId): b
   return kill.kind !== 'workspace' && kill.workspaceId === workspaceId;
 }
 
-/** Why a `dor` Surface target names nothing in `workspaceId`: a pending kill,
- *  by its stable id anywhere or by the ref it keeps there. */
-export function pendingSurfaceRefusal(target: string, named: { ref?: string; id?: string }, workspaceId: WorkspaceId): string | null {
-  const pending = snapshot.some(kill => kill.kind === 'surface'
-    && (named.ref !== undefined ? kill.ref === named.ref && kill.workspaceId === workspaceId : kill.id === named.id));
-  return pending ? `surface '${target}' is a pending kill` : null;
+/** Why a `dor` Surface target naming `id` names nothing: a pending kill. */
+export function pendingSurfaceRefusal(id: string): string | null {
+  return getPendingKill('surface', id) ? `surface '${id}' is a pending kill` : null;
 }
 
 /** How far through its countdown a kill is, 0 to 1. */

@@ -1,0 +1,13 @@
+[
+  { "id": "workspace:7", "number": 7 },
+  { "id": "workspace:007", "number": 7 },
+  { "id": "workspace:0", "number": 0 },
+  { "id": "workspace:+7", "number": null },
+  { "id": "workspace:-7", "number": null },
+  { "id": "workspace:1.5", "number": null },
+  { "id": "workspace:١", "number": null },
+  { "id": "workspace:", "number": null },
+  { "id": "workspace:abc12345-3", "number": null },
+  { "id": "workspace-7", "number": null },
+  { "id": "ws-7", "number": null }
+]

@@ -9,7 +9,6 @@ import { hasShellInputControls } from 'dor/commands/shell-quote';
 import {
   ACTIVITY_NOTIFICATION_SOURCES,
   type ActivityNotification,
-  type ActivityNotificationSource,
   type TodoState,
 } from './alert-manager';
 
@@ -61,16 +60,6 @@ export interface PersistedPane {
 }
 
 /**
- * The notification sources a build from before the tolerant reader knows. Such
- * a build rejects a whole session that carries any other, so the writer keeps
- * to these until no strict pre-tolerant build reads the file
- * (`docs/specs/alert.md` -> Public State).
- */
-const STRICT_READER_NOTIFICATION_SOURCES: readonly ActivityNotificationSource[] = Object.freeze([
-  'OSC 9', 'OSC 9;4', 'OSC 99', 'OSC 777', 'BEL', 'COMMAND_EXIT',
-]);
-
-/**
  * Narrow Activity down to what may reach disk. The parameter deliberately uses
  * the persisted shape: live `AlertState` is structurally assignable to it, and
  * this explicit projection keeps `JSON.stringify` from writing extra live or
@@ -78,13 +67,10 @@ const STRICT_READER_NOTIFICATION_SOURCES: readonly ActivityNotificationSource[] 
  * no one has looked at is written as the TODO a look would have left.
  */
 export function toPersistedAlertState(state: PersistedAlertState & { episode?: AlertEpisode | null }): PersistedAlertState {
-  const notification = state.notification ?? null;
   return {
     status: state.status,
     todo: state.todo || state.status === 'ALERT_RINGING' || isAlertDeferred(state),
-    notification: notification !== null && STRICT_READER_NOTIFICATION_SOURCES.includes(notification.source)
-      ? notification
-      : null,
+    notification: state.notification ?? null,
   };
 }
 
@@ -115,24 +101,22 @@ export interface PersistedDoor {
   token?: unknown;
 }
 
-/** Workspace-scoped stable `dor` short refs: Surface id -> `surface:N`. */
-export type PersistedSurfaceRefs = Record<string, string>;
+/** The `PersistedSession.version` this build writes and the only one it reads
+ *  (`docs/specs/transport.md` → "Persisted session types"). Pinned against the
+ *  Rust host by `standalone/scripts/persisted-format.json`. */
+export const PERSISTED_SESSION_VERSION = 4;
+/** The `PersistedWindow.version` this build writes and the only one it reads. */
+export const PERSISTED_WINDOW_VERSION = 2;
 
 export interface PersistedSession {
   /** Workspace delivery overrides, shared by standalone and VS Code snapshots. */
   alertDelivery?: AlertDeliveryOverrides;
-  version: 3;
+  version: typeof PERSISTED_SESSION_VERSION;
   panes: PersistedPane[];
   doors?: PersistedDoor[];
   /** Native Lath persisted layout (`LathPersistedLayout`) — the layout Dormouse
    *  writes (docs/specs/tiling-engine.md → "Persistence"). */
   lathLayout?: unknown;
-  /** Stable `dor` short refs scoped to this Workspace. Refs are never reused. */
-  surfaceRefs?: PersistedSurfaceRefs;
-  /** Next `surface:N` number to hand out in this Workspace. Persisted alongside
-   *  `surfaceRefs` (not derived from it) so a killed Surface's entry can be dropped
-   *  from `surfaceRefs` immediately without its number ever being reused. */
-  surfaceRefsNext?: number;
 }
 
 export type WorkspaceId = string;
@@ -141,8 +125,6 @@ export type WorkspaceId = string;
 export interface PersistedWorkspace {
   id: WorkspaceId;
   name: string;
-  /** Always written. A blob from before auto-naming lacks it, and reads a
-   *  default name as auto, any other as user-set. */
   nameIsAuto: boolean;
   /** Written only when true; absent reads as unpinned
    *  (`docs/specs/layout.md` → "Workspace tabs"). */
@@ -172,31 +154,20 @@ export function metaFromRecord(record: PersistedWorkspace): WorkspaceMeta {
 
 /** Standalone Window snapshot. VS Code persists one bare Session per webview. */
 export interface PersistedWindow {
-  version: 1;
+  version: typeof PERSISTED_WINDOW_VERSION;
   workspaces: PersistedWorkspace[];
   activeWorkspaceId: WorkspaceId;
+  /** A closed window's snapshot, kept for Reopen with that window's ids: the
+   *  window that boots from it remaps them before restoring
+   *  (`withFreshWindowIds` in `lib/src/components/wall/window-reopen.ts`). */
+  reopened?: true;
 }
 
 /** Default id/name for the single Workspace a fresh Window is created with. */
-export const DEFAULT_WORKSPACE_ID: WorkspaceId = 'workspace-1';
+export const DEFAULT_WORKSPACE_ID: WorkspaceId = 'workspace:1';
 export const DEFAULT_WORKSPACE_NAME = 'Workspace 1';
 
-/** Whether a name is one `Workspace <n>` the app assigned, not one a user typed. */
-export function isDefaultWorkspaceName(name: string): boolean {
-  return /^Workspace \d+$/.test(name);
-}
-
-type PersistedPaneInput = Omit<PersistedPane, 'untouched'> & { untouched?: boolean };
-
-interface PersistedSessionV3Input {
-  alertDelivery?: unknown;
-  version: 3;
-  panes: PersistedPaneInput[];
-  doors?: PersistedDoor[];
-  lathLayout?: unknown;
-  surfaceRefs?: unknown;
-  surfaceRefsNext?: unknown;
-}
+type PersistedSessionInput = Omit<PersistedSession, 'alertDelivery'> & { alertDelivery?: unknown };
 
 // --- Validation guards (reject untrusted blobs) ---
 
@@ -230,10 +201,7 @@ function isPersistedPaneShape(value: unknown): boolean {
     typeof value.id === 'string' &&
     typeof value.title === 'string' &&
     (typeof value.cwd === 'string' || value.cwd === null) &&
-    // Neither `scrollback` nor `resumeCommand` is checked: legacy blobs carry
-    // them and stay readable, new ones never do, and `normalizeSessionV3` strips
-    // both either way.
-    (value.untouched === undefined || typeof value.untouched === 'boolean') &&
+    typeof value.untouched === 'boolean' &&
     (value.surfaceType === undefined || value.surfaceType === 'terminal' || value.surfaceType === 'browser' || value.surfaceType === 'tool') &&
     (value.command === undefined || (value.surfaceType === 'tool' && typeof value.command === 'string')) &&
     (value.tool === undefined || (value.surfaceType === 'tool' && isPersistedToolMetadataShape(value.tool))) &&
@@ -278,8 +246,8 @@ function isPersistedDoor(value: unknown): value is PersistedDoor {
   );
 }
 
-function isPersistedSessionV3(value: unknown): value is PersistedSessionV3Input {
-  if (!isRecord(value) || value.version !== 3) return false;
+function isPersistedSession(value: unknown): value is PersistedSessionInput {
+  if (!isRecord(value) || value.version !== PERSISTED_SESSION_VERSION) return false;
   return (
     Array.isArray(value.panes) &&
     value.panes.every(isPersistedPaneShape) &&
@@ -287,66 +255,36 @@ function isPersistedSessionV3(value: unknown): value is PersistedSessionV3Input 
   );
 }
 
-function validSurfaceRef(value: unknown): value is string {
-  return typeof value === 'string' && /^surface:[1-9]\d*$/.test(value);
-}
-
-function normalizeSurfaceRefs(value: unknown): PersistedSurfaceRefs | undefined {
-  if (!isRecord(value)) return undefined;
-  const refs: PersistedSurfaceRefs = {};
-  for (const [id, ref] of Object.entries(value)) {
-    if (id.length > 0 && validSurfaceRef(ref)) refs[id] = ref;
-  }
-  return Object.keys(refs).length > 0 ? refs : undefined;
-}
-
-function normalizeSurfaceRefsNext(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isInteger(value) && value >= 1 ? value : undefined;
-}
-
-/** Carry the optional ref map and counter together through restore/resume shapes. */
-export function carrySurfaceRefs(
-  source: Pick<PersistedSession, 'surfaceRefs' | 'surfaceRefsNext'> | null | undefined,
-): Pick<PersistedSession, 'surfaceRefs' | 'surfaceRefsNext'> {
-  return {
-    ...(source?.surfaceRefs ? { surfaceRefs: source.surfaceRefs } : {}),
-    ...(source?.surfaceRefsNext !== undefined ? { surfaceRefsNext: source.surfaceRefsNext } : {}),
-  };
-}
-
-/** Parse a v3 Session; malformed present state warns and falls back to fresh. */
+/** Parse a Session; another build's version is a quiet fresh start, malformed
+ *  present state warns and falls back to fresh. */
 export function readPersistedSession(raw: unknown): PersistedSession | null {
   if (isEmptyState(raw)) return null;
   const value = parseJsonString(raw);
-  if (isPersistedSessionV3(value)) return normalizeSessionV3(value);
-  console.warn('[dormouse] Ignoring unreadable persisted session; starting fresh.');
+  if (isPersistedSession(value)) return normalizeSession(value);
+  logDiscard(value, PERSISTED_SESSION_VERSION, 'session');
   return null;
 }
 
-function normalizeSessionV3(session: PersistedSessionV3Input): PersistedSession {
+/** Say why a present blob starts fresh: another build's version is expected
+ *  and never migrated (`docs/specs/transport.md` → "Persisted session types");
+ *  anything else is unreadable. */
+function logDiscard(value: unknown, current: number, kind: 'session' | 'window'): void {
+  const version = isRecord(value) ? value.version : undefined;
+  if (typeof version === 'number' && version !== current) {
+    console.info(`[dormouse] Discarding a ${kind} saved by another version (format ${version}); starting fresh.`);
+  } else {
+    console.warn(`[dormouse] Ignoring unreadable persisted ${kind}; starting fresh.`);
+  }
+}
+
+function normalizeSession(session: PersistedSessionInput): PersistedSession {
   const alertDelivery = normalizeAlertDeliveryOverrides(session.alertDelivery);
-  const surfaceRefs = normalizeSurfaceRefs(session.surfaceRefs);
-  const surfaceRefsNext = normalizeSurfaceRefsNext(session.surfaceRefsNext);
-  const { alertDelivery: _rawDelivery, surfaceRefs: _rawRefs, surfaceRefsNext: _rawNext, ...rest } = session;
-  // Deny-list retired fields so future PersistedPane fields pass through without
-  // manual allowlist updates. Neither retired field is on PersistedPaneInput.
-  const panes: PersistedPane[] = session.panes.map((pane) => {
-    const {
-      scrollback: _retiredScrollback,
-      resumeCommand: _retiredResumeCommand,
-      ...carried
-    } = pane as PersistedPaneInput & { scrollback?: unknown; resumeCommand?: unknown };
-    return {
-      ...carried,
-      untouched: pane.untouched ?? false,
-      ...(carried.alert ? { alert: normalizePersistedAlert(carried.alert) } : {}),
-    };
-  });
+  const { alertDelivery: _rawDelivery, ...rest } = session;
+  const panes = session.panes.map((pane) => pane.alert ? { ...pane, alert: normalizePersistedAlert(pane.alert) } : pane);
   return {
-    ...(rest as Omit<PersistedSession, 'panes' | 'surfaceRefs' | 'surfaceRefsNext'>),
+    ...rest,
     panes,
     ...(Object.keys(alertDelivery).length ? { alertDelivery } : {}),
-    ...carrySurfaceRefs({ surfaceRefs, surfaceRefsNext }),
   };
 }
 
@@ -367,40 +305,40 @@ function isEmptyState(raw: unknown): boolean {
 
 // --- Window container (stage 2b) ---
 
-// Structural gate only: a v1 Window with a workspaces array and an active id.
+// Structural gate only: a current Window with a workspaces array and an active id.
 // Each Workspace element is validated (and dropped if bad) per-item in
 // readPersistedWindow, so malformed elements don't reject the whole Window.
-function isPersistedWindowShape(value: unknown): boolean {
+function isPersistedWindowShape(value: unknown): value is Record<string, unknown> {
   return (
     isRecord(value) &&
-    value.version === 1 &&
+    value.version === PERSISTED_WINDOW_VERSION &&
     Array.isArray(value.workspaces) &&
     typeof value.activeWorkspaceId === 'string'
   );
 }
 
-/** Wrap a single `PersistedSession` as a one-Workspace `PersistedWindow`. */
-export function wrapSessionInWindow(
-  session: PersistedSession,
-  id: WorkspaceId = DEFAULT_WORKSPACE_ID,
-  name: string = DEFAULT_WORKSPACE_NAME,
-): PersistedWindow {
-  return { version: 1, workspaces: [{ id, name, nameIsAuto: isDefaultWorkspaceName(name), session }], activeWorkspaceId: id };
+// `pinned` and `session` are read leniently: anything but `true` is unpinned,
+// and the session goes through `readPersistedSession`.
+function isPersistedWorkspaceShape(value: unknown): value is Record<string, unknown> & Pick<PersistedWorkspace, 'id' | 'name' | 'nameIsAuto'> {
+  return isRecord(value) && typeof value.id === 'string' && typeof value.name === 'string' && typeof value.nameIsAuto === 'boolean';
 }
 
 /** Parse a Window, dropping invalid Workspaces and repairing a dangling active id. */
 export function readPersistedWindow(raw: unknown): PersistedWindow | null {
   if (isEmptyState(raw)) return null;
   const value = parseJsonString(raw);
-  if (!isRecord(value) || !isPersistedWindowShape(value)) {
-    console.warn('[dormouse] Ignoring unreadable persisted window; starting fresh.');
+  if (!isPersistedWindowShape(value)) {
+    logDiscard(value, PERSISTED_WINDOW_VERSION, 'window');
     return null;
   }
 
   const seen = new Set<WorkspaceId>();
   const workspaces = (value.workspaces as unknown[])
     .map((ws): PersistedWorkspace | null => {
-      if (!isRecord(ws) || typeof ws.id !== 'string' || typeof ws.name !== 'string') return null;
+      if (!isPersistedWorkspaceShape(ws)) {
+        console.warn('[dormouse] Ignoring a malformed persisted Workspace');
+        return null;
+      }
       // First wins. A duplicate id is rejected outright by `setWorkspaces`, and a
       // blob that throws there would leave the app with nothing rendered at all.
       if (seen.has(ws.id)) {
@@ -410,15 +348,14 @@ export function readPersistedWindow(raw: unknown): PersistedWindow | null {
       const session = readPersistedSession(ws.session);
       if (!session) return null;
       seen.add(ws.id);
-      const nameIsAuto = typeof ws.nameIsAuto === 'boolean' ? ws.nameIsAuto : isDefaultWorkspaceName(ws.name);
-      return workspaceRecord({ id: ws.id, name: ws.name, nameIsAuto, pinned: ws.pinned === true }, session);
+      return workspaceRecord({ id: ws.id, name: ws.name, nameIsAuto: ws.nameIsAuto, pinned: ws.pinned === true }, session);
     })
     .filter((ws): ws is PersistedWorkspace => ws !== null);
   if (workspaces.length === 0) return null;
   const activeWorkspaceId = workspaces.some((ws) => ws.id === value.activeWorkspaceId)
     ? (value.activeWorkspaceId as WorkspaceId)
     : workspaces[0].id;
-  return { version: 1, workspaces, activeWorkspaceId };
+  return { version: PERSISTED_WINDOW_VERSION, workspaces, activeWorkspaceId, ...(value.reopened === true ? { reopened: true } : {}) };
 }
 
 /** Every pane id the Window's Workspaces name, across all of them — what a boot

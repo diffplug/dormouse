@@ -134,17 +134,17 @@ function viewerParams(file: string, extra: Record<string, unknown> = {}) {
 
 type Leaf = { id: string; params?: Record<string, unknown>; title?: string };
 
-/** A Wall of a plain terminal `pane-a` beside the given Tool leaves. */
+/** A Wall of a plain terminal `surface:a` beside the given Tool leaves. */
 async function mountWall(leaves: Leaf[], options: { doors?: Leaf[]; mode?: 'command' | 'passthrough' } = {}) {
-  const ids = ['pane-a', ...leaves.map(leaf => leaf.id)];
+  const ids = ['surface:a', ...leaves.map(leaf => leaf.id)];
   await act(async () => root.render(<Wall
     initialMode={options.mode ?? 'passthrough'}
     restoredLathLayout={{
       version: 1,
-      tree: { root: ids.length === 1 ? { kind: 'leaf', id: 'pane-a' }
+      tree: { root: ids.length === 1 ? { kind: 'leaf', id: 'surface:a' }
         : { kind: 'split', dir: 'row', children: ids.map(id => ({ node: { kind: 'leaf', id }, weight: 1 / ids.length })) } },
       leafMeta: Object.fromEntries([
-        ['pane-a', { component: 'terminal', tabComponent: 'terminal', title: 'shell' }],
+        ['surface:a', { component: 'terminal', tabComponent: 'terminal', title: 'shell' }],
         ...leaves.map(leaf => [leaf.id, { component: 'tool', tabComponent: 'tool', title: leaf.title ?? 'viewer', params: leaf.params }]),
       ]),
     }}
@@ -153,21 +153,21 @@ async function mountWall(leaves: Leaf[], options: { doors?: Leaf[]; mode?: 'comm
   await flush();
 }
 
-/** The common prelude: the host installed, and `pane-a` running `caller`
- *  beside a marked `slot` running a.md's viewer — a pane unless `minimized`. */
+/** The common prelude: the host installed, and `surface:a` running `caller`
+ *  beside a marked `surface:slot` running a.md's viewer — a pane unless `minimized`. */
 async function mountSlot(options: { caller?: string; slot?: ShellOptions; title?: string; minimized?: boolean; mode?: 'command' | 'passthrough' } = {}) {
   const toolControl = installHost();
-  const slot = { id: 'slot', params: viewerParams('a.md'), title: options.title };
+  const slot = { id: 'surface:slot', params: viewerParams('a.md'), title: options.title };
   await mountWall(options.minimized ? [] : [slot], { doors: options.minimized ? [slot] : [], mode: options.mode });
-  shell('pane-a', options.caller ?? null);
-  shell('slot', 'view /repo/a.md', options.slot);
+  shell('surface:a', options.caller ?? null);
+  shell('surface:slot', 'view /repo/a.md', options.slot);
   return toolControl;
 }
 
-type ToolResult = { status: string; surfaceId: string; surfaceRef: string; command: string; minimized: boolean };
+type ToolResult = { status: string; surfaceId: string; command: string; minimized: boolean };
 
 /** Dispatch one control request from `caller`; its `respond` mock. */
-function dispatch(method: string, params: Record<string, unknown>, caller = 'pane-a') {
+function dispatch(method: string, params: Record<string, unknown>, caller = 'surface:a') {
   const respond = vi.fn();
   window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
     method, surfaceId: caller, params, signal: requests.signal, respond,
@@ -175,11 +175,11 @@ function dispatch(method: string, params: Record<string, unknown>, caller = 'pan
   return respond;
 }
 
-const dispatchTool = (params: Record<string, unknown>, caller = 'pane-a') =>
+const dispatchTool = (params: Record<string, unknown>, caller = 'surface:a') =>
   dispatch(SURFACE_CONTROL_METHODS.tool, { cwd: '/repo', ...params }, caller);
 
 /** Dispatch one `surface.tool` request; its `respond` mock. */
-async function request(params: Record<string, unknown>, caller = 'pane-a') {
+async function request(params: Record<string, unknown>, caller = 'surface:a') {
   let respond!: ReturnType<typeof vi.fn>;
   await act(async () => { respond = dispatchTool(params, caller); });
   return respond;
@@ -220,17 +220,17 @@ async function leafOrder(): Promise<string[]> {
 async function listRow(id: string) {
   let respond!: ReturnType<typeof vi.fn>;
   await act(async () => { respond = dispatch(SURFACE_CONTROL_METHODS.list, {}); });
-  return (respond.mock.calls[0][0].result.surfaces as Array<{ id: string; ref: string; focused: boolean; preview?: boolean }>).find(row => row.id === id);
+  return (respond.mock.calls[0][0].result.surfaces as Array<{ id: string; focused: boolean; preview?: boolean }>).find(row => row.id === id);
 }
 
 /** Double-click the empty area of the slot's Pane header, as a user keeps it. */
-const keepByHeader = () => doubleClick(container.querySelector('[data-lath-leaf="slot"] .lath-leaf-header .cursor-grab')!);
+const keepByHeader = () => doubleClick(container.querySelector('[data-lath-leaf="surface:slot"] .lath-leaf-header .cursor-grab')!);
 
 const focusOf = (id: string) => container.querySelector(`[data-session-id="${id}"]`)?.getAttribute('data-focused') ?? null;
 const leafCount = () => container.querySelectorAll('[data-lath-leaf]').length;
-/** The one visible leaf a test created, beside `pane-a` and `slot`. */
+/** The one visible leaf a test created, beside `surface:a` and `surface:slot`. */
 const newLeaf = () => Array.from(container.querySelectorAll('[data-lath-leaf]'), leaf => leaf.getAttribute('data-lath-leaf')!)
-  .find(id => id !== 'pane-a' && id !== 'slot')!;
+  .find(id => id !== 'surface:a' && id !== 'surface:slot')!;
 
 /** A created Tool's shell in `/repo` reports `command` running; released afterwards. */
 function startTool(id: string, command: string): void {
@@ -242,80 +242,79 @@ describe('dor open --preview', () => {
   it('creates a missing slot as a focus-neutral split, never taking over a caller that would qualify', async () => {
     installHost();
     await mountWall([]);
-    shell('pane-a', 'dor open --preview a.md');
+    shell('surface:a', 'dor open --preview a.md');
     const result = await answer(await request({ file: 'a.md', preview: true }));
     expect(result.status).toBe('created');
-    expect(result.surfaceId).not.toBe('pane-a');
+    expect(result.surfaceId).not.toBe('surface:a');
     expect(leafCount()).toBe(2);
-    expect(focusOf('pane-a')).toBe('true');
+    expect(focusOf('surface:a')).toBe('true');
     startTool(result.surfaceId, result.command);
     expect(await listRow(result.surfaceId)).toMatchObject({ preview: true });
-    expect(await listRow('pane-a')).not.toHaveProperty('preview');
+    expect(await listRow('surface:a')).not.toHaveProperty('preview');
     const state = await saved();
     expect(state.lathLayout.leafMeta[result.surfaceId].params).toMatchObject({ toolPreview: true, toolTarget: '/repo/a.md' });
     expect(state.panes.find(pane => pane.id === result.surfaceId)?.tool).toMatchObject({ preview: true, target: '/repo/a.md' });
   });
 
-  it('retargets the slot in place, keeping its Session, ref, and a default title up to date', async () => {
+  it('retargets the slot in place, keeping its Session, id, and a default title up to date', async () => {
     await mountSlot();
-    const ref = (await listRow('slot'))!.ref;
     // The interrupt is the host's own: its exit is silenced before the Ctrl+C.
     const silencedAt: number[] = [];
-    vi.spyOn(fake, 'alertSilenceRun').mockImplementation(id => { if (id === 'slot') silencedAt.push(typed.slot.length); });
+    vi.spyOn(fake, 'alertSilenceRun').mockImplementation(id => { if (id === 'surface:slot') silencedAt.push(typed['surface:slot'].length); });
     // Asked from another directory, the slot's shell still runs it where it is.
     const result = await answer(await request({ file: 'b.md', preview: true, cwd: '/repo/docs' }));
     expect(silencedAt).toEqual([0]);
-    expect(result).toMatchObject({ status: 'retargeted', surfaceId: 'slot', surfaceRef: ref, command: 'view /repo/b.md', cwd: '/repo', minimized: false });
-    expect(typed.slot).toEqual(['\x03', 'view /repo/b.md\r']);
-    expect(typed['pane-a']).toEqual([]);
+    expect(result).toMatchObject({ status: 'retargeted', surfaceId: 'surface:slot', command: 'view /repo/b.md', cwd: '/repo', minimized: false });
+    expect(typed['surface:slot']).toEqual(['\x03', 'view /repo/b.md\r']);
+    expect(typed['surface:a']).toEqual([]);
     expect(leafCount()).toBe(2);
-    expect(focusOf('pane-a')).toBe('true');
-    await waitUntil(() => terminalRegistry.getTerminalPaneState('slot').currentCommand?.rawCommandLine === 'view /repo/b.md');
-    expect(await paramsOf('slot')).toMatchObject({
+    expect(focusOf('surface:a')).toBe('true');
+    await waitUntil(() => terminalRegistry.getTerminalPaneState('surface:slot').currentCommand?.rawCommandLine === 'view /repo/b.md');
+    expect(await paramsOf('surface:slot')).toMatchObject({
       command: 'view /repo/b.md', toolArgv: ['view', '/repo/b.md'], toolKey: ['viewer', '/repo/b.md'],
       toolTarget: '/repo/b.md', toolPreview: true, cwd: '/repo',
     });
-    expect((await listRow('slot'))?.ref).toBe(ref);
+    expect(await listRow('surface:slot')).toBeDefined();
   });
 
   it('reattaches a minimized slot without focus when it is retargeted', async () => {
     await mountSlot({ minimized: true });
-    expect(await answer(await request({ file: 'b.md', preview: true }))).toMatchObject({ status: 'retargeted', surfaceId: 'slot', minimized: false });
-    expect(container.querySelector('[data-door-id="slot"]')).toBeNull();
-    expect(container.querySelector('[data-lath-leaf="slot"]')).not.toBeNull();
-    expect(focusOf('pane-a')).toBe('true');
+    expect(await answer(await request({ file: 'b.md', preview: true }))).toMatchObject({ status: 'retargeted', surfaceId: 'surface:slot', minimized: false });
+    expect(container.querySelector('[data-door-id="surface:slot"]')).toBeNull();
+    expect(container.querySelector('[data-lath-leaf="surface:slot"]')).not.toBeNull();
+    expect(focusOf('surface:a')).toBe('true');
   });
 
   it('reports a superseded preview against the slot as it stands, still minimized', async () => {
     await mountSlot({ minimized: true, slot: { holdInterrupt: true } });
     const first = await request({ file: 'b.md', preview: true });
-    await waitUntil(() => typed.slot.length === 1);
+    await waitUntil(() => typed['surface:slot'].length === 1);
     const second = await request({ file: 'c.md', preview: true });
-    expect(await answer(first)).toMatchObject({ status: 'superseded', surfaceId: 'slot', minimized: true, command: 'view /repo/a.md' });
-    await waitUntil(() => typed.slot.length === 2);
-    act(() => returnToPrompt('slot'));
+    expect(await answer(first)).toMatchObject({ status: 'superseded', surfaceId: 'surface:slot', minimized: true, command: 'view /repo/a.md' });
+    await waitUntil(() => typed['surface:slot'].length === 2);
+    act(() => returnToPrompt('surface:slot'));
     expect(await answer(second)).toMatchObject({ status: 'retargeted', minimized: false });
   });
 
   it('carries a selection on the minimized slot onto its pane', async () => {
     await mountSlot({ minimized: true, mode: 'command' });
     await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })));
-    expect(await listRow('pane-a')).toMatchObject({ focused: false });
+    expect(await listRow('surface:a')).toMatchObject({ focused: false });
     expect(await answer(await request({ file: 'b.md', preview: true }))).toMatchObject({ status: 'retargeted', minimized: false });
-    expect(await listRow('slot')).toMatchObject({ focused: true });
+    expect(await listRow('surface:slot')).toMatchObject({ focused: true });
   });
 
   it('never leaves a new slot minimized beside a minimized caller', async () => {
     installHost();
     await mountWall([], { doors: [{ id: 'viewer', params: viewerParams('a.md', { toolPreview: undefined }) }] });
-    shell('pane-a', null);
+    shell('surface:a', null);
     shell('viewer', 'view /repo/a.md');
     const result = await answer(await request({ file: 'b.md', preview: true }, 'viewer'));
     expect(result).toMatchObject({ status: 'created', minimized: false });
     expect(container.querySelector(`[data-door-id="${result.surfaceId}"]`)).toBeNull();
     expect(container.querySelector(`[data-lath-leaf="${result.surfaceId}"]`)).not.toBeNull();
     expect(container.querySelector('[data-door-id="viewer"]')).not.toBeNull();
-    expect(focusOf('pane-a')).toBe('true');
+    expect(focusOf('surface:a')).toBe('true');
     startTool(result.surfaceId, result.command);
   });
 
@@ -329,50 +328,50 @@ describe('dor open --preview', () => {
 
   it('leaves the slot running when it already shows the file', async () => {
     await mountSlot();
-    expect(await answer(await request({ file: 'a.md', preview: true }))).toMatchObject({ status: 'existing', surfaceId: 'slot' });
-    expect(typed.slot).toEqual([]);
+    expect(await answer(await request({ file: 'a.md', preview: true }))).toMatchObject({ status: 'existing', surfaceId: 'surface:slot' });
+    expect(typed['surface:slot']).toEqual([]);
   });
 
   it('ends a slot whose command exited: a plain terminal, so the next preview opens a new slot', async () => {
     await mountSlot();
-    act(() => returnToPrompt('slot'));
+    act(() => returnToPrompt('surface:slot'));
     await flush();
     // docs/specs/dor-tool.md -> Run end: the mark went with the Tool.
-    expect(await paramsOf('slot')).toBeUndefined();
-    expect(await listRow('slot')).not.toHaveProperty('preview');
+    expect(await paramsOf('surface:slot')).toBeUndefined();
+    expect(await listRow('surface:slot')).not.toHaveProperty('preview');
     const result = await answer(await request({ file: 'a.md', preview: true }));
     expect(result).toMatchObject({ status: 'created', command: 'view /repo/a.md' });
-    expect(result.surfaceId).not.toBe('slot');
-    expect(typed.slot).toEqual([]);
+    expect(result.surfaceId).not.toBe('surface:slot');
+    expect(typed['surface:slot']).toEqual([]);
   });
 
   it('re-runs the slot for its own file when that preview supersedes one still interrupting it', async () => {
     await mountSlot({ slot: { holdInterrupt: true } });
     const first = await request({ file: 'b.md', preview: true });
-    await waitUntil(() => typed.slot.length === 1);
+    await waitUntil(() => typed['surface:slot'].length === 1);
     // The shell still reports a.md's viewer running: the interrupt has not landed.
     const second = await request({ file: 'a.md', preview: true });
-    expect(await answer(first)).toMatchObject({ status: 'superseded', surfaceId: 'slot' });
-    await waitUntil(() => typed.slot.length === 2);
-    act(() => returnToPrompt('slot'));
-    expect(await answer(second)).toMatchObject({ status: 'adopted', surfaceId: 'slot', command: 'view /repo/a.md' });
-    expect(typed.slot).toEqual(['\x03', '\x03', 'view /repo/a.md\r']);
+    expect(await answer(first)).toMatchObject({ status: 'superseded', surfaceId: 'surface:slot' });
+    await waitUntil(() => typed['surface:slot'].length === 2);
+    act(() => returnToPrompt('surface:slot'));
+    expect(await answer(second)).toMatchObject({ status: 'adopted', surfaceId: 'surface:slot', command: 'view /repo/a.md' });
+    expect(typed['surface:slot']).toEqual(['\x03', '\x03', 'view /repo/a.md\r']);
   });
 
   it('reveals a pinned keyed match without focus instead of retargeting the slot', async () => {
     installHost();
-    await mountWall([{ id: 'slot', params: viewerParams('a.md') }], { doors: [{ id: 'kept', params: viewerParams('b.md', { toolPreview: undefined }) }] });
-    shell('pane-a', null);
-    shell('slot', 'view /repo/a.md');
-    shell('kept', 'view /repo/b.md');
-    expect(container.querySelector('[data-door-id="kept"]')).not.toBeNull();
-    expect(await answer(await request({ file: 'b.md', preview: true }))).toMatchObject({ status: 'existing', surfaceId: 'kept', minimized: false });
-    expect(container.querySelector('[data-door-id="kept"]')).toBeNull();
-    expect(container.querySelector('[data-lath-leaf="kept"]')).not.toBeNull();
-    expect(focusOf('pane-a')).toBe('true');
-    expect(typed.slot).toEqual([]);
-    expect(typed.kept).toEqual([]);
-    expect(await paramsOf('slot')).toMatchObject({ toolTarget: '/repo/a.md', toolPreview: true });
+    await mountWall([{ id: 'surface:slot', params: viewerParams('a.md') }], { doors: [{ id: 'surface:kept', params: viewerParams('b.md', { toolPreview: undefined }) }] });
+    shell('surface:a', null);
+    shell('surface:slot', 'view /repo/a.md');
+    shell('surface:kept', 'view /repo/b.md');
+    expect(container.querySelector('[data-door-id="surface:kept"]')).not.toBeNull();
+    expect(await answer(await request({ file: 'b.md', preview: true }))).toMatchObject({ status: 'existing', surfaceId: 'surface:kept', minimized: false });
+    expect(container.querySelector('[data-door-id="surface:kept"]')).toBeNull();
+    expect(container.querySelector('[data-lath-leaf="surface:kept"]')).not.toBeNull();
+    expect(focusOf('surface:a')).toBe('true');
+    expect(typed['surface:slot']).toEqual([]);
+    expect(typed['surface:kept']).toEqual([]);
+    expect(await paramsOf('surface:slot')).toMatchObject({ toolTarget: '/repo/a.md', toolPreview: true });
   });
 
   it.each([
@@ -382,29 +381,29 @@ describe('dor open --preview', () => {
     const toolControl = installHost();
     const answerLookup = toolControl.getMockImplementation()!;
     toolControl.mockImplementation(async call => call.target === 'missing.md' ? { status: 'error', message: 'no rule matches' } as never : answerLookup(call));
-    await mountWall([{ id: 'slot', params: viewerParams('a.md') }], { doors: [{ id: 'kept', params: viewerParams('b.md', { toolPreview: undefined }) }] });
-    shell('pane-a', null);
-    shell('slot', 'view /repo/a.md', { holdInterrupt: true });
-    shell('kept', 'view /repo/b.md');
+    await mountWall([{ id: 'surface:slot', params: viewerParams('a.md') }], { doors: [{ id: 'surface:kept', params: viewerParams('b.md', { toolPreview: undefined }) }] });
+    shell('surface:a', null);
+    shell('surface:slot', 'view /repo/a.md', { holdInterrupt: true });
+    shell('surface:kept', 'view /repo/b.md');
     const first = await request({ file: 'c.md', preview: true });
-    await waitUntil(() => typed.slot.length === 1);
+    await waitUntil(() => typed['surface:slot'].length === 1);
     const second = await request({ file, preview: true });
-    expect(await answer(first)).toMatchObject({ status: 'superseded', surfaceId: 'slot' });
+    expect(await answer(first)).toMatchObject({ status: 'superseded', surfaceId: 'surface:slot' });
     await waitUntil(() => second.mock.calls.length > 0);
     expect(second.mock.calls[0][0]).toMatchObject(file === 'b.md'
-      ? { ok: true, result: { status: 'existing', surfaceId: 'kept' } } : { ok: false, error: 'no rule matches' });
-    expect(typed.slot).toEqual(['\x03']);
+      ? { ok: true, result: { status: 'existing', surfaceId: 'surface:kept' } } : { ok: false, error: 'no rule matches' });
+    expect(typed['surface:slot']).toEqual(['\x03']);
     // The viewer exits on its interrupt; nothing replaced it, so it runs again.
-    act(() => returnToPrompt('slot'));
-    await waitUntil(() => typed.slot.length === 2);
-    expect(typed.slot).toEqual(['\x03', 'view /repo/a.md\r']);
-    expect(await paramsOf('slot')).toMatchObject({ toolTarget: '/repo/a.md', toolPreview: true });
+    act(() => returnToPrompt('surface:slot'));
+    await waitUntil(() => typed['surface:slot'].length === 2);
+    expect(typed['surface:slot']).toEqual(['\x03', 'view /repo/a.md\r']);
+    expect(await paramsOf('surface:slot')).toMatchObject({ toolTarget: '/repo/a.md', toolPreview: true });
   });
 
   it('lets the latest preview win: a queued one and one interrupting the slot report superseded', async () => {
     const toolControl = await mountSlot({ slot: { holdInterrupt: true } });
     const first = await request({ file: 'b.md', preview: true });
-    await waitUntil(() => typed.slot.length === 1);
+    await waitUntil(() => typed['surface:slot'].length === 1);
     // The second is still queued behind the first when the third arrives.
     let second!: ReturnType<typeof vi.fn>;
     let third!: ReturnType<typeof vi.fn>;
@@ -413,16 +412,16 @@ describe('dor open --preview', () => {
       third = dispatchTool({ file: 'd.md', preview: true });
     });
     for (const superseded of [first, second]) {
-      expect(await answer(superseded)).toMatchObject({ status: 'superseded', surfaceId: 'slot', command: 'view /repo/a.md' });
+      expect(await answer(superseded)).toMatchObject({ status: 'superseded', surfaceId: 'surface:slot', command: 'view /repo/a.md' });
     }
-    await waitUntil(() => typed.slot.length === 2);
-    act(() => returnToPrompt('slot'));
-    expect(await answer(third)).toMatchObject({ status: 'retargeted', surfaceId: 'slot', command: 'view /repo/d.md' });
-    expect(typed.slot).toEqual(['\x03', '\x03', 'view /repo/d.md\r']);
+    await waitUntil(() => typed['surface:slot'].length === 2);
+    act(() => returnToPrompt('surface:slot'));
+    expect(await answer(third)).toMatchObject({ status: 'retargeted', surfaceId: 'surface:slot', command: 'view /repo/d.md' });
+    expect(typed['surface:slot']).toEqual(['\x03', '\x03', 'view /repo/d.md\r']);
     // The queued one never reached its lookup.
     expect(toolControl.mock.calls.map(([call]) => call.target)).toEqual(['b.md', 'd.md']);
-    await waitUntil(() => terminalRegistry.getTerminalPaneState('slot').currentCommand?.rawCommandLine === 'view /repo/d.md');
-    expect(await paramsOf('slot')).toMatchObject({ toolTarget: '/repo/d.md', toolPreview: true });
+    await waitUntil(() => terminalRegistry.getTerminalPaneState('surface:slot').currentCommand?.rawCommandLine === 'view /repo/d.md');
+    expect(await paramsOf('surface:slot')).toMatchObject({ toolTarget: '/repo/d.md', toolPreview: true });
   });
 
   it('creates no slot for a preview superseded during its lookup', async () => {
@@ -431,7 +430,7 @@ describe('dor open --preview', () => {
     const answerLookup = toolControl.getMockImplementation()!;
     toolControl.mockImplementationOnce(async (call) => { await lookup.promise; return answerLookup(call); });
     await mountWall([]);
-    shell('pane-a', 'claude');
+    shell('surface:a', 'claude');
     const first = await request({ file: 'a.md', preview: true });
     const second = await request({ file: 'b.md', preview: true });
     await act(async () => lookup.resolve());
@@ -448,20 +447,20 @@ describe('dor open --preview', () => {
     expect(await answer(await request({ file: 'b.md', preview: true }))).toMatchObject({ status: 'retargeted', command: 'view /repo/b.md' });
     const next = await request({ file: 'c.md', preview: true });
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 250)); });
-    expect(typed.slot).toEqual(['\x03', 'view /repo/b.md\r']);
-    act(() => reportRunning('slot', 'view /repo/b.md'));
-    await waitUntil(() => typed.slot.length === 4);
-    act(() => reportRunning('slot', 'view /repo/c.md'));
+    expect(typed['surface:slot']).toEqual(['\x03', 'view /repo/b.md\r']);
+    act(() => reportRunning('surface:slot', 'view /repo/b.md'));
+    await waitUntil(() => typed['surface:slot'].length === 4);
+    act(() => reportRunning('surface:slot', 'view /repo/c.md'));
     expect(await answer(next)).toMatchObject({ status: 'retargeted', command: 'view /repo/c.md' });
-    expect(typed.slot).toEqual(['\x03', 'view /repo/b.md\r', '\x03', 'view /repo/c.md\r']);
+    expect(typed['surface:slot']).toEqual(['\x03', 'view /repo/b.md\r', '\x03', 'view /repo/c.md\r']);
   });
 
   it('never aborts a slot creation: the newer preview retargets the new slot', async () => {
     installHost();
     let integrated = false;
-    vi.mocked(terminalRegistry.isPaneOscDriven).mockImplementation(id => id === 'pane-a' || integrated);
+    vi.mocked(terminalRegistry.isPaneOscDriven).mockImplementation(id => id === 'surface:a' || integrated);
     await mountWall([]);
-    shell('pane-a', 'claude');
+    shell('surface:a', 'claude');
     const first = await request({ file: 'a.md', preview: true });
     await waitUntil(() => leafCount() === 2);
     const created = newLeaf();
@@ -477,51 +476,51 @@ describe('dor open --preview', () => {
 
   it('pins a slot on its unsaved-changes report at once, and splits the next slot from it', async () => {
     await mountSlot();
-    act(() => recordToolDirty('slot', false));
-    act(() => recordToolDirty('slot', null));
-    expect(await paramsOf('slot')).toMatchObject({ toolPreview: true });
-    act(() => recordToolDirty('slot', true));
-    expect(await paramsOf('slot')).not.toHaveProperty('toolPreview');
+    act(() => recordToolDirty('surface:slot', false));
+    act(() => recordToolDirty('surface:slot', null));
+    expect(await paramsOf('surface:slot')).toMatchObject({ toolPreview: true });
+    act(() => recordToolDirty('surface:slot', true));
+    expect(await paramsOf('surface:slot')).not.toHaveProperty('toolPreview');
     const result = await answer(await request({ file: 'b.md', preview: true }));
     expect(result.status).toBe('created');
-    expect(typed.slot).toEqual([]);
-    expect(await leafOrder()).toEqual(['pane-a', 'slot', result.surfaceId]);
+    expect(typed['surface:slot']).toEqual([]);
+    expect(await leafOrder()).toEqual(['surface:a', 'surface:slot', result.surfaceId]);
     startTool(result.surfaceId, result.command);
   });
 
   it.each([
     ['its header', keepByHeader],
-    ['unsaved changes', () => act(() => recordToolDirty('slot', true))],
+    ['unsaved changes', () => act(() => recordToolDirty('surface:slot', true))],
   ])('restores a slot kept by %s while a preview interrupts it, and previews in a new slot', async (_, keep) => {
     await mountSlot({ slot: { holdInterrupt: true } });
     const respond = await request({ file: 'b.md', preview: true });
-    await waitUntil(() => typed.slot.length === 1);
+    await waitUntil(() => typed['surface:slot'].length === 1);
     keep();
-    act(() => returnToPrompt('slot'));
+    act(() => returnToPrompt('surface:slot'));
     const result = await answer(respond);
     expect(result).toMatchObject({ status: 'created', command: 'view /repo/b.md' });
-    expect(result.surfaceId).not.toBe('slot');
-    expect(typed.slot).toEqual(['\x03', 'view /repo/a.md\r']);
-    expect(terminalRegistry.getTerminalPaneState('slot').currentCommand?.rawCommandLine).toBe('view /repo/a.md');
-    const kept = await paramsOf('slot');
+    expect(result.surfaceId).not.toBe('surface:slot');
+    expect(typed['surface:slot']).toEqual(['\x03', 'view /repo/a.md\r']);
+    expect(terminalRegistry.getTerminalPaneState('surface:slot').currentCommand?.rawCommandLine).toBe('view /repo/a.md');
+    const kept = await paramsOf('surface:slot');
     expect(kept).toMatchObject({ toolTarget: '/repo/a.md' });
     expect(kept).not.toHaveProperty('toolPreview');
-    expect(await leafOrder()).toEqual(['pane-a', 'slot', result.surfaceId]);
+    expect(await leafOrder()).toEqual(['surface:a', 'surface:slot', result.surfaceId]);
     startTool(result.surfaceId, result.command);
   });
 
   it('restores a slot kept while a preview interrupts it, even once that preview is cancelled', async () => {
     await mountSlot({ slot: { holdInterrupt: true } });
     const respond = await request({ file: 'b.md', preview: true });
-    await waitUntil(() => typed.slot.length === 1);
+    await waitUntil(() => typed['surface:slot'].length === 1);
     keepByHeader();
     act(() => requests.abort());
-    act(() => returnToPrompt('slot'));
+    act(() => returnToPrompt('surface:slot'));
     await waitUntil(() => respond.mock.calls.length > 0);
     expect(respond).toHaveBeenCalledWith({ ok: false, error: 'tool launch cancelled' });
-    expect(typed.slot).toEqual(['\x03', 'view /repo/a.md\r']);
-    expect(terminalRegistry.getTerminalPaneState('slot').currentCommand?.rawCommandLine).toBe('view /repo/a.md');
-    expect(await paramsOf('slot')).not.toHaveProperty('toolPreview');
+    expect(typed['surface:slot']).toEqual(['\x03', 'view /repo/a.md\r']);
+    expect(terminalRegistry.getTerminalPaneState('surface:slot').currentCommand?.rawCommandLine).toBe('view /repo/a.md');
+    expect(await paramsOf('surface:slot')).not.toHaveProperty('toolPreview');
     expect(leafCount()).toBe(2);
   });
 
@@ -531,20 +530,20 @@ describe('dor open --preview', () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
     try {
       const respond = await request({ file: 'b.md', preview: true });
-      await waitUntil(() => typed.slot.length === 1);
+      await waitUntil(() => typed['surface:slot'].length === 1);
       await act(async () => { await vi.advanceTimersByTimeAsync(PREVIEW_INTERRUPT_GRACE_MS - 100); });
       expect(respond).not.toHaveBeenCalled();
       expect(leafCount()).toBe(2);
       await act(async () => { await vi.advanceTimersByTimeAsync(100); });
       const result = await answer(respond);
       expect(result).toMatchObject({ status: 'created', command: 'view /repo/b.md' });
-      expect(result.surfaceId).not.toBe('slot');
+      expect(result.surfaceId).not.toBe('surface:slot');
       // Kept as it stands: its command still runs, and was never typed again.
-      expect(typed.slot).toEqual(['\x03']);
-      expect(terminalRegistry.getTerminalPaneState('slot').currentCommand?.rawCommandLine).toBe('view /repo/a.md');
-      expect(await paramsOf('slot')).not.toHaveProperty('toolPreview');
+      expect(typed['surface:slot']).toEqual(['\x03']);
+      expect(terminalRegistry.getTerminalPaneState('surface:slot').currentCommand?.rawCommandLine).toBe('view /repo/a.md');
+      expect(await paramsOf('surface:slot')).not.toHaveProperty('toolPreview');
       expect(await paramsOf(result.surfaceId)).toMatchObject({ toolPreview: true, toolTarget: '/repo/b.md' });
-      expect(await leafOrder()).toEqual(['pane-a', 'slot', result.surfaceId]);
+      expect(await leafOrder()).toEqual(['surface:a', 'surface:slot', result.surfaceId]);
       // The launch queue is free once the new slot's command reports.
       startTool(result.surfaceId, result.command);
       await act(async () => { await vi.advanceTimersByTimeAsync(100); });
@@ -557,31 +556,30 @@ describe('dor open --preview', () => {
   it('leaves one marked slot when a preview arrives during the slot\'s close and the close is refused', async () => {
     await mountSlot();
     // Running helper work refuses the close, once the held inspection answers.
-    const helper: helpers.HelperTerminal = { id: 'helper-slot', parentId: 'slot', command: '', status: 'off' };
-    vi.spyOn(helpers, 'getHelper').mockImplementation(id => id === 'slot' ? helper : undefined);
+    const helper: helpers.HelperTerminal = { id: 'surface:helper-slot', parentId: 'surface:slot', command: '', status: 'off' };
+    vi.spyOn(helpers, 'getHelper').mockImplementation(id => id === 'surface:slot' ? helper : undefined);
     const inspection = Promise.withResolvers<boolean>();
     vi.spyOn(helpers, 'helperHasWork').mockReturnValue(inspection.promise);
-    const ref = (await listRow('slot'))!.ref;
     let kill!: ReturnType<typeof vi.fn>;
-    await act(async () => { kill = dispatch(SURFACE_CONTROL_METHODS.kill, { surface: ref, confirmation: { mode: 'dangerously' } }); });
+    await act(async () => { kill = dispatch(SURFACE_CONTROL_METHODS.kill, { surface: 'surface:slot', confirmation: { mode: 'dangerously' } }); });
     const result = await answer(await request({ file: 'b.md', preview: true }));
     expect(result.status).toBe('created');
     startTool(result.surfaceId, result.command);
     await act(async () => inspection.resolve(true));
     await waitUntil(() => kill.mock.calls.length > 0);
     expect(kill.mock.calls[0][0]).toMatchObject({ ok: false });
-    expect(container.querySelector('[data-lath-leaf="slot"]')).not.toBeNull();
+    expect(container.querySelector('[data-lath-leaf="surface:slot"]')).not.toBeNull();
     const { leafMeta } = (await saved()).lathLayout;
     expect(Object.keys(leafMeta).filter(id => leafMeta[id].params?.toolPreview === true)).toEqual([result.surfaceId]);
   });
 
   it('pins the slot for a request from its own Session and splits the new slot from it', async () => {
     await mountSlot();
-    const result = await answer(await request({ file: 'b.md', preview: true }, 'slot'));
+    const result = await answer(await request({ file: 'b.md', preview: true }, 'surface:slot'));
     expect(result.status).toBe('created');
-    expect(typed.slot).toEqual([]);
-    expect(await paramsOf('slot')).not.toHaveProperty('toolPreview');
-    expect(await leafOrder()).toEqual(['pane-a', 'slot', result.surfaceId]);
+    expect(typed['surface:slot']).toEqual([]);
+    expect(await paramsOf('surface:slot')).not.toHaveProperty('toolPreview');
+    expect(await leafOrder()).toEqual(['surface:a', 'surface:slot', result.surfaceId]);
     startTool(result.surfaceId, result.command);
   });
 });
@@ -600,7 +598,7 @@ describe('a prompt after the interrupt\'s grace', () => {
     await mountSlot({ slot: { holdInterrupt: true } });
     vi.useFakeTimers(clock);
     const respond = await request({ file: 'b.md', preview: true });
-    expect(typed.slot).toEqual(['\x03']);
+    expect(typed['surface:slot']).toEqual(['\x03']);
     await advance(PREVIEW_INTERRUPT_GRACE_MS);
     const created = respond.mock.calls[0]?.[0]?.result as ToolResult;
     expect(created).toMatchObject({ status: 'created', command: 'view /repo/b.md' });
@@ -616,12 +614,12 @@ describe('a prompt after the interrupt\'s grace', () => {
     const created = await outliveGrace();
     expect(await answer(await request({ file: 'b.md', preview: true }))).toMatchObject({ status: 'existing', surfaceId: created });
     await advance(500);
-    expect(typed.slot).toEqual(['\x03']);
-    act(() => returnToPrompt('slot'));
-    await waitUntil(() => typed.slot.length === 2);
-    expect(typed.slot).toEqual(['\x03', 'view /repo/a.md\r']);
-    expect(terminalRegistry.getTerminalPaneState('slot').currentCommand?.rawCommandLine).toBe('view /repo/a.md');
-    expect(await paramsOf('slot')).not.toHaveProperty('toolPreview');
+    expect(typed['surface:slot']).toEqual(['\x03']);
+    act(() => returnToPrompt('surface:slot'));
+    await waitUntil(() => typed['surface:slot'].length === 2);
+    expect(typed['surface:slot']).toEqual(['\x03', 'view /repo/a.md\r']);
+    expect(terminalRegistry.getTerminalPaneState('surface:slot').currentCommand?.rawCommandLine).toBe('view /repo/a.md');
+    expect(await paramsOf('surface:slot')).not.toHaveProperty('toolPreview');
   });
 
   it('leaves a kept slot at its prompt when the user typed into it before the prompt came', async () => {
@@ -629,120 +627,120 @@ describe('a prompt after the interrupt\'s grace', () => {
     vi.spyOn(terminalRegistry, 'getSessionInputVersion').mockImplementation(() => input);
     await outliveGrace();
     input += 1;
-    act(() => returnToPrompt('slot'));
+    act(() => returnToPrompt('surface:slot'));
     await settle();
-    expect(typed.slot).toEqual(['\x03']);
+    expect(typed['surface:slot']).toEqual(['\x03']);
   });
 
   it('types a superseded slot\'s viewer again once its late prompt comes', async () => {
     installHost();
-    await mountWall([{ id: 'slot', params: viewerParams('a.md') }], { doors: [{ id: 'kept', params: viewerParams('b.md', { toolPreview: undefined }) }] });
-    shell('pane-a', null);
-    shell('slot', 'view /repo/a.md', { holdInterrupt: true });
-    shell('kept', 'view /repo/b.md');
+    await mountWall([{ id: 'surface:slot', params: viewerParams('a.md') }], { doors: [{ id: 'surface:kept', params: viewerParams('b.md', { toolPreview: undefined }) }] });
+    shell('surface:a', null);
+    shell('surface:slot', 'view /repo/a.md', { holdInterrupt: true });
+    shell('surface:kept', 'view /repo/b.md');
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
     const first = await request({ file: 'c.md', preview: true });
     const second = await request({ file: 'b.md', preview: true });
-    expect(await answer(first)).toMatchObject({ status: 'superseded', surfaceId: 'slot' });
-    expect(await answer(second)).toMatchObject({ status: 'existing', surfaceId: 'kept' });
+    expect(await answer(first)).toMatchObject({ status: 'superseded', surfaceId: 'surface:slot' });
+    expect(await answer(second)).toMatchObject({ status: 'existing', surfaceId: 'surface:kept' });
     // The last request's own wait for the prompt runs out; the queue is free.
     await advance(PREVIEW_INTERRUPT_GRACE_MS);
-    expect(await answer(await request({ file: 'b.md', preview: true }))).toMatchObject({ status: 'existing', surfaceId: 'kept' });
-    expect(typed.slot).toEqual(['\x03']);
-    act(() => returnToPrompt('slot'));
-    await waitUntil(() => typed.slot.length === 2);
-    expect(typed.slot).toEqual(['\x03', 'view /repo/a.md\r']);
-    expect(await paramsOf('slot')).toMatchObject({ toolTarget: '/repo/a.md', toolPreview: true });
+    expect(await answer(await request({ file: 'b.md', preview: true }))).toMatchObject({ status: 'existing', surfaceId: 'surface:kept' });
+    expect(typed['surface:slot']).toEqual(['\x03']);
+    act(() => returnToPrompt('surface:slot'));
+    await waitUntil(() => typed['surface:slot'].length === 2);
+    expect(typed['surface:slot']).toEqual(['\x03', 'view /repo/a.md\r']);
+    expect(await paramsOf('surface:slot')).toMatchObject({ toolTarget: '/repo/a.md', toolPreview: true });
   });
 
   it('gives up on a prompt later than its window', async () => {
     await outliveGrace({ toFake: ['setInterval', 'clearInterval', 'setTimeout', 'clearTimeout', 'Date'] });
     await advance(PROMPT_RETURN_TIMEOUT_MS - PREVIEW_INTERRUPT_GRACE_MS);
-    act(() => returnToPrompt('slot'));
+    act(() => returnToPrompt('surface:slot'));
     await advance(1_000);
     vi.useRealTimers();
     await settle();
-    expect(typed.slot).toEqual(['\x03']);
+    expect(typed['surface:slot']).toEqual(['\x03']);
   });
 });
 
 describe('pinning the slot', () => {
   it('pins by open without restarting when the slot shows the file', async () => {
     await mountSlot();
-    expect(await answer(await request({ file: 'a.md' }))).toMatchObject({ status: 'existing', surfaceId: 'slot' });
-    expect(typed.slot).toEqual([]);
-    expect(await paramsOf('slot')).toMatchObject({ toolTarget: '/repo/a.md', toolKey: ['viewer', '/repo/a.md'] });
-    expect(await paramsOf('slot')).not.toHaveProperty('toolPreview');
-    expect(await listRow('slot')).not.toHaveProperty('preview');
+    expect(await answer(await request({ file: 'a.md' }))).toMatchObject({ status: 'existing', surfaceId: 'surface:slot' });
+    expect(typed['surface:slot']).toEqual([]);
+    expect(await paramsOf('surface:slot')).toMatchObject({ toolTarget: '/repo/a.md', toolKey: ['viewer', '/repo/a.md'] });
+    expect(await paramsOf('surface:slot')).not.toHaveProperty('toolPreview');
+    expect(await listRow('surface:slot')).not.toHaveProperty('preview');
   });
 
   it('places an open as if there were no slot once the slot\'s command exited', async () => {
     await mountSlot();
-    act(() => returnToPrompt('slot'));
+    act(() => returnToPrompt('surface:slot'));
     await flush();
     const result = await answer(await request({ file: 'a.md' }));
     expect(result).toMatchObject({ status: 'created', command: 'view /repo/a.md' });
-    expect(result.surfaceId).not.toBe('slot');
-    expect(typed.slot).toEqual([]);
+    expect(result.surfaceId).not.toBe('surface:slot');
+    expect(typed['surface:slot']).toEqual([]);
   });
 
   it('reveals a pinned Tool with the resolved key, leaving a slot showing the file under another Tool alone', async () => {
     installHost();
     const other = viewerParams('a.md', { command: 'other /repo/a.md', toolArgv: ['other', '/repo/a.md'], toolName: 'other', toolKey: undefined });
-    await mountWall([{ id: 'slot', params: other }], { doors: [{ id: 'kept', params: viewerParams('a.md', { toolPreview: undefined }) }] });
-    shell('pane-a', null);
-    shell('slot', 'other /repo/a.md');
-    shell('kept', 'view /repo/a.md');
-    expect(await answer(await request({ file: 'a.md' }))).toMatchObject({ status: 'existing', surfaceId: 'kept', minimized: false });
-    expect(typed.slot).toEqual([]);
-    expect(typed.kept).toEqual([]);
-    expect(await paramsOf('slot')).toMatchObject({ toolName: 'other', toolTarget: '/repo/a.md', toolPreview: true });
+    await mountWall([{ id: 'surface:slot', params: other }], { doors: [{ id: 'surface:kept', params: viewerParams('a.md', { toolPreview: undefined }) }] });
+    shell('surface:a', null);
+    shell('surface:slot', 'other /repo/a.md');
+    shell('surface:kept', 'view /repo/a.md');
+    expect(await answer(await request({ file: 'a.md' }))).toMatchObject({ status: 'existing', surfaceId: 'surface:kept', minimized: false });
+    expect(typed['surface:slot']).toEqual([]);
+    expect(typed['surface:kept']).toEqual([]);
+    expect(await paramsOf('surface:slot')).toMatchObject({ toolName: 'other', toolTarget: '/repo/a.md', toolPreview: true });
   });
 
   it('restores a slot kept while an open with another Tool interrupts it, and opens beside it', async () => {
     await mountSlot({ caller: 'claude', slot: { holdInterrupt: true } });
     const respond = await request({ file: 'a.md', tool: 'other' });
-    await waitUntil(() => typed.slot.length === 1);
+    await waitUntil(() => typed['surface:slot'].length === 1);
     keepByHeader();
-    act(() => returnToPrompt('slot'));
+    act(() => returnToPrompt('surface:slot'));
     await waitUntil(() => leafCount() === 3);
     const created = newLeaf();
     startTool(created, 'other /repo/a.md');
     expect(await answer(respond)).toMatchObject({ status: 'created', surfaceId: created });
-    expect(typed.slot).toEqual(['\x03', 'view /repo/a.md\r']);
-    expect(await paramsOf('slot')).toMatchObject({ toolName: 'viewer', toolTarget: '/repo/a.md' });
+    expect(typed['surface:slot']).toEqual(['\x03', 'view /repo/a.md\r']);
+    expect(await paramsOf('surface:slot')).toMatchObject({ toolName: 'viewer', toolTarget: '/repo/a.md' });
   });
 
   it('retargets then pins when open names another Tool for the file the slot shows', async () => {
     await mountSlot();
-    expect(await answer(await request({ file: 'a.md', tool: 'other' }))).toMatchObject({ status: 'retargeted', surfaceId: 'slot', command: 'other /repo/a.md' });
-    expect(typed.slot).toEqual(['\x03', 'other /repo/a.md\r']);
-    await waitUntil(() => terminalRegistry.getTerminalPaneState('slot').currentCommand?.rawCommandLine === 'other /repo/a.md');
-    const params = await paramsOf('slot');
+    expect(await answer(await request({ file: 'a.md', tool: 'other' }))).toMatchObject({ status: 'retargeted', surfaceId: 'surface:slot', command: 'other /repo/a.md' });
+    expect(typed['surface:slot']).toEqual(['\x03', 'other /repo/a.md\r']);
+    await waitUntil(() => terminalRegistry.getTerminalPaneState('surface:slot').currentCommand?.rawCommandLine === 'other /repo/a.md');
+    const params = await paramsOf('surface:slot');
     expect(params).toMatchObject({ toolName: 'other', toolArgv: ['other', '/repo/a.md'], toolTarget: '/repo/a.md' });
     expect(params).not.toHaveProperty('toolPreview');
     // The new Tool declares no key; the old one's does not linger.
     expect(params?.toolKey).toBeUndefined();
     // The previous Tool's default title follows the Tool.
-    expect(await titleOf('slot')).toBe('other');
+    expect(await titleOf('surface:slot')).toBe('other');
   });
 
   it('keeps a renamed slot\'s title across a retarget to another Tool', async () => {
     await mountSlot({ title: 'notes' });
-    expect(await answer(await request({ file: 'a.md', tool: 'other' }))).toMatchObject({ status: 'retargeted', surfaceId: 'slot' });
-    await waitUntil(() => terminalRegistry.getTerminalPaneState('slot').currentCommand?.rawCommandLine === 'other /repo/a.md');
-    expect(await titleOf('slot')).toBe('notes');
+    expect(await answer(await request({ file: 'a.md', tool: 'other' }))).toMatchObject({ status: 'retargeted', surfaceId: 'surface:slot' });
+    await waitUntil(() => terminalRegistry.getTerminalPaneState('surface:slot').currentCommand?.rawCommandLine === 'other /repo/a.md');
+    expect(await titleOf('surface:slot')).toBe('notes');
   });
 
   it('pins without interrupting when the slot\'s own Session opens its file with another Tool', async () => {
     await mountSlot();
-    const respond = await request({ file: 'a.md', tool: 'other' }, 'slot');
+    const respond = await request({ file: 'a.md', tool: 'other' }, 'surface:slot');
     await waitUntil(() => leafCount() === 3);
     const created = newLeaf();
     startTool(created, 'other /repo/a.md');
     expect(await answer(respond)).toMatchObject({ status: 'created', surfaceId: created });
-    expect(typed.slot).toEqual([]);
-    expect(await paramsOf('slot')).not.toHaveProperty('toolPreview');
+    expect(typed['surface:slot']).toEqual([]);
+    expect(await paramsOf('surface:slot')).not.toHaveProperty('toolPreview');
   });
 
   it('leaves the slot alone for a fresh open of its file', async () => {
@@ -752,13 +750,13 @@ describe('pinning the slot', () => {
     const created = newLeaf();
     startTool(created, 'view /repo/a.md');
     expect(await answer(respond)).toMatchObject({ status: 'created', surfaceId: created });
-    expect(await paramsOf('slot')).toMatchObject({ toolPreview: true });
+    expect(await paramsOf('surface:slot')).toMatchObject({ toolPreview: true });
   });
 
   it('pins on a double-click of its header, and a press past the threshold drags it instead', async () => {
     await mountSlot();
-    const label = container.querySelector<HTMLElement>('[data-pane-title-for="slot"]')!;
-    const leaf = container.querySelector<HTMLElement>('[data-lath-leaf="slot"]')!;
+    const label = container.querySelector<HTMLElement>('[data-pane-title-for="surface:slot"]')!;
+    const leaf = container.querySelector<HTMLElement>('[data-lath-leaf="surface:slot"]')!;
     act(() => label.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, clientX: 100, clientY: 15, button: 0 })));
     act(() => window.dispatchEvent(new MouseEvent('pointermove', { clientX: 104, clientY: 15 })));
     expect(leaf.style.opacity).toBe('');
@@ -766,24 +764,24 @@ describe('pinning the slot', () => {
     expect(leaf.style.opacity).toBe('0.6');
     act(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })));
     expect(leaf.style.opacity).toBe('');
-    expect(await paramsOf('slot')).toMatchObject({ toolPreview: true });
+    expect(await paramsOf('surface:slot')).toMatchObject({ toolPreview: true });
     keepByHeader();
-    expect(await paramsOf('slot')).not.toHaveProperty('toolPreview');
-    expect(container.querySelector('[data-lath-leaf="slot"] .italic')).toBeNull();
+    expect(await paramsOf('surface:slot')).not.toHaveProperty('toolPreview');
+    expect(container.querySelector('[data-lath-leaf="surface:slot"] .italic')).toBeNull();
   });
 
   it('pins from Keep open in its terminal context, which only a slot offers', async () => {
     await mountSlot();
     const keepOpen = () => container.querySelector<HTMLButtonElement>('[data-terminal-context] button[aria-label="Keep open"]');
     await act(async () => {
-      container.querySelector('[data-pane-header-for="slot"]')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 120, clientY: 15 }));
+      container.querySelector('[data-pane-header-for="surface:slot"]')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 120, clientY: 15 }));
     });
     expect(document.activeElement?.closest('[data-terminal-context]')).not.toBeNull();
     const keep = keepOpen()!;
     expect(keep.tabIndex).toBe(0);
     act(() => keep.focus());
     await act(async () => keep.click());
-    expect(await paramsOf('slot')).not.toHaveProperty('toolPreview');
+    expect(await paramsOf('surface:slot')).not.toHaveProperty('toolPreview');
     // Pinned, it is an ordinary Tool, whose open context offers nothing to keep.
     expect(container.querySelector('[data-terminal-context]')).not.toBeNull();
     expect(keepOpen()).toBeNull();
@@ -797,7 +795,7 @@ describe('pinning the slot', () => {
     const created = newLeaf();
     startTool(created, 'view /repo/a.md');
     expect(await answer(respond)).toMatchObject({ status: 'created', surfaceId: created });
-    expect(typed.slot).toEqual([]);
+    expect(typed['surface:slot']).toEqual([]);
   });
 });
 
@@ -807,14 +805,14 @@ describe('a serving slot', () => {
     const close = vi.spyOn(browserController, 'closeBrowserSurface');
     const serving = { url: 'http://localhost:6006/', renderMode: 'iframe', toolAnnouncedPort: 6006, toolAnnouncedPath: '/' };
     // Running before mount, so the serving poll finds its command current.
-    shell('pane-a', null);
-    shell('slot', 'view /repo/a.md');
-    await mountWall([{ id: 'slot', params: viewerParams('a.md', serving) }]);
+    shell('surface:a', null);
+    shell('surface:slot', 'view /repo/a.md');
+    await mountWall([{ id: 'surface:slot', params: viewerParams('a.md', serving) }]);
     expect(close).not.toHaveBeenCalled();
-    expect(await answer(await request({ file: 'b.md', preview: true }))).toMatchObject({ status: 'retargeted', surfaceId: 'slot' });
-    expect(close).toHaveBeenCalledWith('slot', expect.objectContaining({ url: 'http://localhost:6006/', toolTarget: '/repo/a.md' }));
-    await waitUntil(() => terminalRegistry.getTerminalPaneState('slot').currentCommand?.rawCommandLine === 'view /repo/b.md');
-    const params = await paramsOf('slot');
+    expect(await answer(await request({ file: 'b.md', preview: true }))).toMatchObject({ status: 'retargeted', surfaceId: 'surface:slot' });
+    expect(close).toHaveBeenCalledWith('surface:slot', expect.objectContaining({ url: 'http://localhost:6006/', toolTarget: '/repo/a.md' }));
+    await waitUntil(() => terminalRegistry.getTerminalPaneState('surface:slot').currentCommand?.rawCommandLine === 'view /repo/b.md');
+    const params = await paramsOf('surface:slot');
     expect(params).toMatchObject({ toolTarget: '/repo/b.md' });
     for (const field of ['url', 'renderMode', 'toolAnnouncedPort', 'toolAnnouncedPath']) expect(params?.[field]).toBeUndefined();
   });
@@ -835,14 +833,14 @@ describe('a folder in the slot', () => {
 
   it('shows a previewed folder in the slot through the folder viewer', async () => {
     const toolControl = installFolderHost();
-    await mountWall([{ id: 'slot', params: viewerParams('a.md') }]);
-    shell('pane-a', null);
-    shell('slot', 'view /repo/a.md');
+    await mountWall([{ id: 'surface:slot', params: viewerParams('a.md') }]);
+    shell('surface:a', null);
+    shell('surface:slot', 'view /repo/a.md');
     const result = await answer(await request({ file: 'docs', preview: true }));
     expect(toolControl).toHaveBeenCalledWith({ op: 'open', target: 'docs', cwd: '/repo', tool: undefined, preview: true });
-    expect(result).toMatchObject({ status: 'retargeted', surfaceId: 'slot', command: 'dor __view-folder /repo/docs' });
-    await waitUntil(() => terminalRegistry.getTerminalPaneState('slot').currentCommand?.rawCommandLine === 'dor __view-folder /repo/docs');
-    expect(await paramsOf('slot')).toMatchObject({
+    expect(result).toMatchObject({ status: 'retargeted', surfaceId: 'surface:slot', command: 'dor __view-folder /repo/docs' });
+    await waitUntil(() => terminalRegistry.getTerminalPaneState('surface:slot').currentCommand?.rawCommandLine === 'dor __view-folder /repo/docs');
+    expect(await paramsOf('surface:slot')).toMatchObject({
       toolScope: 'builtin', toolName: 'folder', toolTarget: '/repo/docs', toolKey: ['folder', '/repo/docs'], toolPreview: true,
     });
   });
@@ -854,15 +852,15 @@ describe('a folder in the slot', () => {
       toolName: 'folder', toolScope: 'builtin', toolRender: 'iframe', toolPort: 'announced', toolKey: ['folder', '/repo/docs'],
       toolTarget: '/repo/docs', toolPreview: true,
     };
-    await mountWall([{ id: 'slot', params: folder }]);
-    shell('pane-a', null);
-    shell('slot', 'dor __view-folder /repo/docs');
-    const result = await answer(await request({ file: 'docs/a.md', preview: true, cwd: '/repo/docs' }, 'slot'));
+    await mountWall([{ id: 'surface:slot', params: folder }]);
+    shell('surface:a', null);
+    shell('surface:slot', 'dor __view-folder /repo/docs');
+    const result = await answer(await request({ file: 'docs/a.md', preview: true, cwd: '/repo/docs' }, 'surface:slot'));
     expect(result).toMatchObject({ status: 'created', command: 'view /repo/docs/a.md' });
-    expect(typed.slot).toEqual([]);
-    expect(await paramsOf('slot')).not.toHaveProperty('toolPreview');
+    expect(typed['surface:slot']).toEqual([]);
+    expect(await paramsOf('surface:slot')).not.toHaveProperty('toolPreview');
     expect(await paramsOf(result.surfaceId)).toMatchObject({ toolPreview: true, toolTarget: '/repo/docs/a.md' });
-    expect(await leafOrder()).toEqual(['pane-a', 'slot', result.surfaceId]);
+    expect(await leafOrder()).toEqual(['surface:a', 'surface:slot', result.surfaceId]);
     startTool(result.surfaceId, result.command);
   });
 });
@@ -885,7 +883,7 @@ describe('an OSC 367 open', () => {
       : openLookup(request.target!.slice('/repo/'.length)));
     Object.assign(fake, { toolControl });
     await mountWall([{ id: 'folder', params: folder }]);
-    shell('pane-a', null);
+    shell('surface:a', null);
     shell('folder', running);
     return toolControl;
   }
@@ -952,22 +950,22 @@ describe('an OSC 367 open', () => {
 
   it('acts on an open from the run the host launched in a Tool', async () => {
     const toolControl = installHost();
-    await mountWall([{ id: 'slot', params: viewerParams('a.md') }]);
-    shell('pane-a', null);
-    shell('slot', 'view /repo/a.md');
+    await mountWall([{ id: 'surface:slot', params: viewerParams('a.md') }]);
+    shell('surface:a', null);
+    shell('surface:slot', 'view /repo/a.md');
     // The slot's shell reports through its PTY, as a real one does.
-    fake.setInputHandler('slot', data => fake.sendOutput('slot', data === '\x03'
+    fake.setInputHandler('surface:slot', data => fake.sendOutput('surface:slot', data === '\x03'
       ? `^C${osc('633;D;130')}${osc('633;A')}${osc('633;B')}`
       : `\r\n${osc(`633;E;${data.slice(0, -1)}`)}${osc('633;C')}`));
-    expect(await answer(await request({ file: 'b.md', preview: true }))).toMatchObject({ status: 'retargeted', surfaceId: 'slot' });
-    await output('slot', openBytes('/repo/c.md'));
+    expect(await answer(await request({ file: 'b.md', preview: true }))).toMatchObject({ status: 'retargeted', surfaceId: 'surface:slot' });
+    await output('surface:slot', openBytes('/repo/c.md'));
     await waitUntil(() => toolControl.mock.calls.some(([call]) => call.target === '/repo/c.md'));
     startTool(newLeaf(), String((await paramsOf(newLeaf()))?.command));
   });
 
   it('ignores an ordinary terminal', async () => {
     const toolControl = await mountFolder();
-    await emit('pane-a', open('/repo/docs/a.md', true));
+    await emit('surface:a', open('/repo/docs/a.md', true));
     await flush();
     expect(toolControl).not.toHaveBeenCalled();
     expect(container.querySelectorAll('[data-lath-leaf]')).toHaveLength(2);
@@ -982,13 +980,13 @@ describe('a terminal link', () => {
     fake.toolControl = vi.fn(async request => request.op === 'open-handlers'
       ? { status: 'open-handlers' as const, handlers: { handlers: [{ tool: 'viewer', description: 'view', reason: 'open rule' }], config: '/config/dormouse.yml' } }
       : openLookup('a.md'));
-    await act(async () => activateTerminalLink('pane-a', { detail: 1 }, 'file:///repo/a.md', '[Report]'));
+    await act(async () => activateTerminalLink('surface:a', { detail: 1 }, 'file:///repo/a.md', '[Report]'));
     expect(getExternalLinkConfirmationSnapshot()).not.toBeNull();
     expect(fake.toolControl).toHaveBeenCalledTimes(1);
     await act(async () => openFileButton().click());
     await waitUntil(() => getExternalLinkConfirmationSnapshot() === null);
     expect(fake.toolControl).toHaveBeenLastCalledWith({ op: 'open', target: 'file:///repo/a.md', cwd: '/repo', tool: undefined });
-    expect(container.querySelector('[data-lath-leaf="slot"] .italic')).toBeNull();
+    expect(container.querySelector('[data-lath-leaf="surface:slot"] .italic')).toBeNull();
     expect(container.querySelectorAll('[data-lath-leaf]')).toHaveLength(2);
   });
 
@@ -1008,15 +1006,15 @@ describe('a terminal link', () => {
     const toolControl = await mountSlot();
     // The host resolves a link's URL to the file it names.
     toolControl.mockImplementation(async request => openLookup(new URL(request.target!).pathname.slice('/repo/'.length)));
-    const click = (detail: number) => act(async () => activateTerminalLink('pane-a', { detail }, 'file:///repo/a.md', 'a.md'));
+    const click = (detail: number) => act(async () => activateTerminalLink('surface:a', { detail }, 'file:///repo/a.md', 'a.md'));
     await click(1);
     await click(2);
-    await waitUntil(() => container.querySelector('[data-lath-leaf="slot"] .italic') === null);
+    await waitUntil(() => container.querySelector('[data-lath-leaf="surface:slot"] .italic') === null);
     expect(toolControl.mock.calls.map(([request]) => request)).toEqual([
       { op: 'open', target: 'file:///repo/a.md', cwd: '/repo', tool: undefined, preview: true },
       { op: 'open', target: 'file:///repo/a.md', cwd: '/repo', tool: undefined },
     ]);
-    expect(typed.slot).toEqual([]);
+    expect(typed['surface:slot']).toEqual([]);
     expect(getExternalLinkConfirmationSnapshot()).toBeNull();
   });
 });
@@ -1026,15 +1024,15 @@ describe('a switching slot', () => {
    *  finds its command current. */
   async function mountServingSlot(options: ShellOptions = {}) {
     const toolControl = installHost();
-    shell('pane-a', null);
-    shell('slot', 'view /repo/a.md', options);
-    await mountWall([{ id: 'slot', params: viewerParams('a.md', {
+    shell('surface:a', null);
+    shell('surface:slot', 'view /repo/a.md', options);
+    await mountWall([{ id: 'surface:slot', params: viewerParams('a.md', {
       url: 'http://localhost:6006/', renderMode: 'iframe', toolAnnouncedPort: 6006, toolAnnouncedPath: '/',
     }) }]);
     return toolControl;
   }
 
-  const inSlot = <T extends Element>(selector: string) => Array.from(container.querySelectorAll<T>(`[data-lath-leaf="slot"] ${selector}`));
+  const inSlot = <T extends Element>(selector: string) => Array.from(container.querySelectorAll<T>(`[data-lath-leaf="surface:slot"] ${selector}`));
   const frames = () => inSlot<HTMLIFrameElement>('iframe');
   const layerOf = (element: Element) => element.closest<HTMLElement>('[data-browser-layer]')!;
   const terminalHalf = () => inSlot<HTMLElement>('[data-tool-half="terminal"]')[0];
@@ -1042,10 +1040,10 @@ describe('a switching slot', () => {
   const ghosted = (element: Element) => /\bpreview-ghost(-static)?\b/.test(element.className);
   /** The slot's new command serves at `port`, as a viewer announces it. */
   const serve = (port: number) => {
-    fake.setOpenPorts('slot', [{ protocol: 'tcp', family: 'IPv4', address: '127.0.0.1', port, pid: 1 }]);
-    act(() => recordToolAnnounce('slot', { port, path: '/', name: null, key: null, dehydrate: false, persist: null }));
+    fake.setOpenPorts('surface:slot', [{ protocol: 'tcp', family: 'IPv4', address: '127.0.0.1', port, pid: 1 }]);
+    act(() => recordToolAnnounce('surface:slot', { port, path: '/', name: null, key: null, dehydrate: false, persist: null }));
   };
-  const runs = (line: string) => () => terminalRegistry.getTerminalPaneState('slot').currentCommand?.rawCommandLine === line;
+  const runs = (line: string) => () => terminalRegistry.getTerminalPaneState('surface:slot').currentCommand?.rawCommandLine === line;
   const sleep = (ms: number) => act(async () => { await new Promise(resolve => setTimeout(resolve, ms)); });
 
   it('holds the old frame as a blurred ghost until the new one loads, remounting neither', async () => {
@@ -1059,10 +1057,10 @@ describe('a switching slot', () => {
     expect(await answer(respond)).toMatchObject({ status: 'retargeted' });
     await waitUntil(runs('view /repo/b.md'));
     // Retired, the Tool has no URL, yet its terminal face never shows.
-    expect((await paramsOf('slot'))?.url).toBeUndefined();
+    expect((await paramsOf('surface:slot'))?.url).toBeUndefined();
     expect(terminalHalf().style.visibility).toBe('hidden');
     expect(browserHalf().style.visibility).toBe('');
-    expect(container.querySelector('[data-lath-leaf="slot"] [data-browser-display-trigger]')).not.toBeNull();
+    expect(container.querySelector('[data-lath-leaf="surface:slot"] [data-browser-display-trigger]')).not.toBeNull();
     expect(frames()).toEqual([old]);
 
     serve(7007);
@@ -1107,12 +1105,12 @@ describe('a switching slot', () => {
     await mountServingSlot({ holdInterrupt: true });
     const [old] = frames();
     const first = await request({ file: 'b.md', preview: true });
-    await waitUntil(() => typed.slot.length === 1);
+    await waitUntil(() => typed['surface:slot'].length === 1);
     const second = await request({ file: 'c.md', preview: true });
     expect(await answer(first)).toMatchObject({ status: 'superseded' });
     expect(ghosted(layerOf(old))).toBe(true);
-    await waitUntil(() => typed.slot.length === 2);
-    act(() => returnToPrompt('slot'));
+    await waitUntil(() => typed['surface:slot'].length === 2);
+    act(() => returnToPrompt('surface:slot'));
     expect(await answer(second)).toMatchObject({ status: 'retargeted', command: 'view /repo/c.md' });
     expect(frames()[0]).toBe(old);
     expect(ghosted(layerOf(old))).toBe(true);
@@ -1123,7 +1121,7 @@ describe('a switching slot', () => {
     const lookup = Promise.withResolvers<void>();
     const answerLookup = toolControl.getMockImplementation()!;
     toolControl.mockImplementationOnce(async (call) => { await lookup.promise; return answerLookup(call); });
-    const respond = await request({ file: 'b.md', preview: true }, 'slot');
+    const respond = await request({ file: 'b.md', preview: true }, 'surface:slot');
     const blurred = ghosted(layerOf(frames()[0]));
     await act(async () => lookup.resolve());
     expect(blurred).toBe(false);
@@ -1147,12 +1145,12 @@ describe('a switching slot', () => {
 
   it('ends the hold once the slot is kept during its interrupt, before the new slot answers', async () => {
     let integrated = false;
-    vi.mocked(terminalRegistry.isPaneOscDriven).mockImplementation(id => id === 'pane-a' || id === 'slot' || integrated);
+    vi.mocked(terminalRegistry.isPaneOscDriven).mockImplementation(id => id === 'surface:a' || id === 'surface:slot' || integrated);
     await mountServingSlot({ holdInterrupt: true });
     const respond = await request({ file: 'b.md', preview: true });
-    await waitUntil(() => typed.slot.length === 1);
+    await waitUntil(() => typed['surface:slot'].length === 1);
     keepByHeader();
-    act(() => returnToPrompt('slot'));
+    act(() => returnToPrompt('surface:slot'));
     await waitUntil(() => leafCount() === 3);
     const ghostsWhileWaiting = inSlot('.preview-ghost-static').length;
     integrated = true;
@@ -1164,7 +1162,7 @@ describe('a switching slot', () => {
 
   it('ends the hold once the slot is kept during its lookup, before the new slot answers', async () => {
     let integrated = false;
-    vi.mocked(terminalRegistry.isPaneOscDriven).mockImplementation(id => id === 'pane-a' || id === 'slot' || integrated);
+    vi.mocked(terminalRegistry.isPaneOscDriven).mockImplementation(id => id === 'surface:a' || id === 'surface:slot' || integrated);
     const toolControl = await mountServingSlot();
     const lookup = Promise.withResolvers<void>();
     const answerLookup = toolControl.getMockImplementation()!;
@@ -1188,10 +1186,10 @@ describe('a switching slot', () => {
     expect(terminalHalf().hasAttribute('inert')).toBe(true);
     expect(await answer(respond)).toMatchObject({ status: 'retargeted' });
     await waitUntil(runs('view /repo/b.md'));
-    act(() => fake.sendOutput('slot', 'view /repo/b.md\r\n\x1b]2;b.md\x07'));
+    act(() => fake.sendOutput('surface:slot', 'view /repo/b.md\r\n\x1b]2;b.md\x07'));
     await sleep(PREVIEW_OUTPUT_QUIET_MS + 50);
     expect(ghosted(terminalHalf())).toBe(true);
-    act(() => fake.sendOutput('slot', '# b\r\n'));
+    act(() => fake.sendOutput('surface:slot', '# b\r\n'));
     await sleep(PREVIEW_OUTPUT_QUIET_MS / 2);
     expect(ghosted(terminalHalf())).toBe(true);
     await sleep(PREVIEW_OUTPUT_QUIET_MS);
@@ -1203,12 +1201,12 @@ describe('a switching slot', () => {
     await mountServingSlot();
     expect(await answer(await request({ file: 'b.md', preview: true }))).toMatchObject({ status: 'retargeted' });
     await waitUntil(runs('view /repo/b.md'));
-    act(() => terminalRegistry.applyTerminalSemanticEvents('slot', [{ type: 'commandFinish', exitCode: 1 }]));
+    act(() => terminalRegistry.applyTerminalSemanticEvents('surface:slot', [{ type: 'commandFinish', exitCode: 1 }]));
     expect(frames()).toHaveLength(0);
     // The failed run ended the Tool: the slot is the plain terminal showing it
     // (docs/specs/dor-tool.md -> Run end).
     await flush();
-    expect(await paramsOf('slot')).toBeUndefined();
+    expect(await paramsOf('surface:slot')).toBeUndefined();
     expect(inSlot('[data-testid="terminal-pane"]')).toHaveLength(1);
   });
 
@@ -1219,10 +1217,10 @@ describe('a switching slot', () => {
     // The name once came from the dev-server chip, which the port scan
     // resolves for each new viewer's port only after the switch has ended.
     await mountServingSlot();
-    act(() => setDevServerResolution(6006, { paneId: 'slot', fallbackTitle: null }));
+    act(() => setDevServerResolution(6006, { paneId: 'surface:slot', fallbackTitle: null }));
     try {
-      if (rename) act(() => { terminalRegistry.setTerminalUserTitle('slot', rename); });
-      const name = () => inSlot<HTMLElement>('[data-pane-title-for="slot"]')[0];
+      if (rename) act(() => { terminalRegistry.setTerminalUserTitle('surface:slot', rename); });
+      const name = () => inSlot<HTMLElement>('[data-pane-title-for="surface:slot"]')[0];
       const shown = name();
       const typography = shown.className;
       const seen: (string | null)[] = [];
@@ -1244,7 +1242,7 @@ describe('a switching slot', () => {
       await harness.flushFrame();
       expect(frames()).toHaveLength(1);
       sample();
-      act(() => setDevServerResolution(7007, { paneId: 'slot', fallbackTitle: null }));
+      act(() => setDevServerResolution(7007, { paneId: 'surface:slot', fallbackTitle: null }));
       sample();
       expect(seen).toEqual(expected);
     } finally {

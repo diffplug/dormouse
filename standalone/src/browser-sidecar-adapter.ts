@@ -131,7 +131,7 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
         this.onRegistrySnapshot = handler;
         return () => { this.onRegistrySnapshot = null; };
       },
-    });
+    }, this.windowSlot.read());
     // Started, not awaited — see TauriAdapter.
     this.recoveryReady = claimRecoveryCommands(
       (paneIds) => this.host.invoke<Record<string, string>>("take_recovery_commands", { paneIds }),

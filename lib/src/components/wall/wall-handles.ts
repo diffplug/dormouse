@@ -1,5 +1,5 @@
 import type { LeafMeta } from '../../lib/lath/persistence';
-import type { PersistedSession } from '../../lib/session-types';
+import { PERSISTED_SESSION_VERSION, type PersistedSession } from '../../lib/session-types';
 import type { SurfaceReopenRecord } from '../../lib/reopen-stack';
 import type { BrowserAutomationProvider } from 'dor-lib-common/browser-providers';
 import type { WorkspaceId } from '../../lib/session-types';
@@ -9,7 +9,6 @@ import type { DorControlRequest } from './use-dor-control';
 
 export interface PreparedSurfaceMove {
   meta: LeafMeta;
-  surfaceRef: string;
   iframe: boolean;
   terminal: boolean;
   /** Detach membership, never the Session. Returns a complete Wall rollback. */
@@ -26,7 +25,8 @@ export interface PreparedSurfaceMove {
 export interface WallHandle {
   canMoveSurfaces: boolean;
   prepareSurfaceMove(id: string): PreparedSurfaceMove;
-  adoptSurfaceMove(id: string, meta: LeafMeta): { surfaceRef: string; rollback(): void };
+  /** Place a moved Surface here. Returns a complete Wall rollback. */
+  adoptSurfaceMove(id: string, meta: LeafMeta): () => void;
   /** End a Surface move on this Wall. An emptied tree refills when Doors
    *  remain, or when `keepEmpty` says the Workspace stays (a pinned source). */
   finishSurfaceMove(options?: { keepEmpty?: boolean }): void;
@@ -35,8 +35,8 @@ export interface WallHandle {
   /** A brief notice on pane `id`, else the pane the user is on: the Window's
    *  answer to a verb with nothing to act on, or one it refused. */
   showNotice(text: string, id?: string): void;
-  /** Rebuild a closed Surface here (`docs/specs/reopen.md`); `focus` selects it. */
-  reopenSurface(record: SurfaceReopenRecord, focus: boolean): { id: string; ref: string };
+  /** Rebuild a closed Surface here (`docs/specs/reopen.md`); `focus` selects it. Returns its new id. */
+  reopenSurface(record: SurfaceReopenRecord, focus: boolean): string;
   /** This Workspace's record now, with no cwd probe. */
   serializeNow(): PersistedSession;
   /** The same, each cwd as its Session last reported it: a reopen record. */
@@ -45,13 +45,11 @@ export interface WallHandle {
   /** The Wall's member Surfaces: visible panes ∪ Doors. */
   surfaceIds(): string[];
   ownsSurface(id: string): boolean;
-  /** Member Surfaces rendered as plain iframes, Doored ones included, as their
-   *  Workspace-stable `surface:N` refs: the page state a move between Windows
-   *  destroys (`docs/specs/layout.md` → Workspaces). Refs, not internal ids,
-   *  because the refusal naming them is read by a `dor` caller. Agent-browser
-   *  Surfaces are not among them — their session lives in the host and
-   *  reconnects. */
-  iframeSurfaceRefs(): string[];
+  /** Member Surfaces rendered as plain iframes, Doored ones included: the page
+   *  state a move between Windows destroys (`docs/specs/layout.md` →
+   *  Workspaces). Agent-browser Surfaces are not among them — their session
+   *  lives in the host and reconnects. */
+  iframeSurfaceIds(): string[];
   /** The sessions of `provider` that member browser Surfaces are bound to or
    *  launching, which a `--key` elsewhere in the Window must not mint again
    *  (docs/specs/dor-browser.md → "Managed identity"). */
@@ -140,11 +138,11 @@ export function stubWallHandle(workspaceId: WorkspaceId, overrides: Partial<Wall
     showMoveNotice: () => {},
     showNotice: () => {},
     reopenSurface: () => { throw new Error('Reopen is unavailable'); },
-    serializeNow: () => ({ version: 3, panes: [] }),
-    serializeReported: () => ({ version: 3, panes: [] }),
+    serializeNow: () => ({ version: PERSISTED_SESSION_VERSION, panes: [] }),
+    serializeReported: () => ({ version: PERSISTED_SESSION_VERSION, panes: [] }),
     surfaceIds: () => [],
     ownsSurface: () => false,
-    iframeSurfaceRefs: () => [],
+    iframeSurfaceIds: () => [],
     browserSessions: () => [],
     needsCloseConfirmation: () => false,
     dirtyToolIds: () => [],
@@ -157,7 +155,7 @@ export function stubWallHandle(workspaceId: WorkspaceId, overrides: Partial<Wall
     prepareWorkspaceTransfer: async () => ({
       payload: {
         workspaceId,
-        workspace: { id: workspaceId, name: '', nameIsAuto: false, session: { version: 3, panes: [] } },
+        workspace: { id: workspaceId, name: '', nameIsAuto: false, session: { version: PERSISTED_SESSION_VERSION, panes: [] } },
         terminalIds: [],
         allIds: [],
       },

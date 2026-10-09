@@ -1,5 +1,6 @@
 import { getPlatform } from './platform';
 import { registry } from './terminal-store';
+import { mintSurfaceId } from './surface-ids';
 import { disposeSession, getOrCreateTerminal, parkElement, setPendingShellOpts } from './terminal-lifecycle';
 import { addPendingKill } from './pending-kills';
 import { isDelayedKillEnabled } from './labs-settings';
@@ -170,11 +171,11 @@ export function reattachHelper(helper: HelperTerminal): boolean {
  * pending kill instead, which a restore puts back in place of the fresh one
  * (`docs/specs/reopen.md` → "Labs: No-confirm delayed kill").
  */
-export async function resetHelper(parentId: string, parent: { workspaceId: WorkspaceId; title: string; ref: string }): Promise<void> {
+export async function resetHelper(parentId: string, parent: { workspaceId: WorkspaceId; title: string }): Promise<void> {
   if (!isDelayedKillEnabled()) { disposeHelper(parentId); return; }
   const old = detachHelper(parentId);
   if (!old) return;
-  addPendingKill({ kind: 'helper', id: old.id, workspaceId: parent.workspaceId, ref: parent.ref, surfaceId: old.parentId, title: parent.title, label: 'Helper' }, {
+  addPendingKill({ kind: 'helper', id: old.id, workspaceId: parent.workspaceId, surfaceId: old.parentId, title: parent.title, label: 'Helper' }, {
     // A closed parent, or a replacement with work of its own, refuses: the old
     // helper stays pending, its countdown untouched, until it finalizes.
     restore: () => reattachHelper(old),
@@ -189,7 +190,7 @@ export async function resetHelper(parentId: string, parent: { workspaceId: Works
  *  WeakSet so the mark leaves with the entry. */
 const closedParents = new WeakSet<object>();
 
-/** The parent Surface is retiring (kill, renderer swap, shell replacement):
+/** The parent Surface is retiring (kill, shell replacement):
  *  dispose its helper, and refuse an `openHelper` whose host round trip lands
  *  afterwards, which would otherwise spawn a helper PTY nothing can reach. */
 export function closeHelperParent(parentId: string): void {
@@ -227,7 +228,7 @@ export async function openHelper(parentId: string): Promise<HelperTerminal> {
     if (!platform.terminalContext) throw new Error('Helper terminals are unavailable on this host');
     const settings = await platform.terminalContext({ op: 'settings' });
     if (!parentIsOpen(parentId)) throw new Error('The parent terminal has closed');
-    const id = `helper-${crypto.randomUUID()}`;
+    const id = mintSurfaceId();
     // One cwd for the spawn and the launched command's record, so a remote parent
     // leaves the helper in the host default rather than claiming the ssh path.
     const cwd = getInheritableCwd(parentId);

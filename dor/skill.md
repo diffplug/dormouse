@@ -35,21 +35,20 @@ Run `dor <command> --help` for every flag and output format.
 
 Action commands (`read`, `send`, `await`, `kill`) take a surface handle — there is deliberately no `dor kill "npm dev"`. You name the surface you want one of three ways:
 
-1. **Hold the handle.** Commands that create surfaces (`split`, `ensure`, `tool`, `open`) print the new ref (`created surface:3`). Capture it and act on it directly — refs stay valid across any layout churn.
-2. **Address by identity key.** Surfaces with a natural identity skip handle bookkeeping: `dor ensure -- <command>` uses its exact command + cwd as an implicit key (match-or-create in one idempotent call), and browser surfaces are addressed by an explicit key (`dor agent-browser --key <name>`). A browser you did not create has no key you know — hold its ref and use `dor agent-browser --surface <ref>`.
+1. **Hold the handle.** Commands that create surfaces (`split`, `ensure`, `tool`, `open`) print the new surface's id (`created surface:3`). Capture it and act on it directly — ids stay valid across any layout churn.
+2. **Address by identity key.** Surfaces with a natural identity skip handle bookkeeping: `dor ensure -- <command>` uses its exact command + cwd as an implicit key (match-or-create in one idempotent call), and browser surfaces are addressed by an explicit key (`dor agent-browser --key <name>`). A browser you did not create has no key you know — hold its id and use `dor agent-browser --surface <id>`.
 3. **Rediscover.** When you hold nothing — a fresh session, or a process the user started by hand — `dor list` (filtered) turns a description (`--command`, `--cwd`, `--port`) into a handle.
 
-Text output is designed for you to read: it is terse and carries the same refs. Reach for `--json` only when a shell script or pipeline using `jq` consumes the output; under `dor agent-browser` and `dor playwright` it belongs to the native CLI.
+Text output is designed for you to read: it is terse and carries the same ids. Reach for `--json` only when a shell script or pipeline using `jq` consumes the output; under `dor agent-browser` and `dor playwright` it belongs to the native CLI.
 
 ## Surface handles
 
-- `surface:N` — short ref, e.g. `surface:3`. Stable while the Surface stays in the same Workspace: reordering, minimizing, zooming, and focus changes never change it, and numbers are never reused after a kill. A ref for a killed surface fails loudly instead of silently retargeting, moving to another Workspace retires the old ref and allocates a new destination ref.
-- A stable surface id (or `surface:<stable-id>`) — from `--json` output.
+- `surface:N` — the Surface's id, e.g. `surface:3`, the same string `--json` output and `DORMOUSE_SURFACE_ID` carry. Ids are unique across the app and never change: layout churn, focus, and moves between Workspaces leave them as they are, and numbers are never reused after a kill. An id for a killed surface fails loudly instead of silently retargeting.
 - `surface:self` — the terminal you are running in.
 - `surface:focused` — whatever the user currently has focused.
-- `title:<exact title>` — exists for human recovery; avoid it in automation (titles drift). Prefer refs from command responses or `dor list`.
+- `title:<exact title>` — exists for human recovery; avoid it in automation (titles drift). Prefer ids from command responses or `dor list`.
 
-Bare numbers and `pane:N` are not valid handles.
+Bare numbers and `pane:N` are not valid handles; dor refuses them and names the `surface:N` form.
 
 ## Helpers
 
@@ -89,7 +88,7 @@ dor split --minimize -- ./watch.sh
 dor split --                   # blank terminal, focus stays with you
 ```
 
-Direction flags `--left|--right|--up|--down` (default `--auto`). `--surface <ref>` picks which surface to split from; the new terminal starts in your current directory. Always include the `--` (see Rules and pitfalls).
+Direction flags `--left|--right|--up|--down` (default `--auto`). `--surface <id>` picks which surface to split from; the new terminal starts in your current directory. Always include the `--` (see Rules and pitfalls).
 
 ### `dor send` — type into a terminal
 
@@ -131,14 +130,14 @@ dor kill surface:3 --confirm-dangerously          # only when already validated
 
 Two providers drive a real browser that the user watches in a pane: **`dor agent-browser`** is the default; use **`dor playwright`** when the user or the project uses Playwright. Either one satisfies the second hard rule. Both forward to a CLI the user installs themselves (`npm i -g agent-browser`, `npm i -g @playwright/cli`; `DORMOUSE_AGENT_BROWSER_BIN` / `DORMOUSE_PLAYWRIGHT_BIN` override the path), and everything after the Dormouse flags is that CLI's own command set. **`dor iframe`** only shows the human a local `http://` page: you cannot read or drive it, it keeps no logins, and it refuses `https://`.
 
-`dor list` shows each browser's `render_mode`, which says what drives it: `agent-browser-*` takes `dor agent-browser --surface <ref>`, `playwright-*` takes `dor playwright --surface <ref>`, and `iframe` takes neither — open its URL with `dor agent-browser open <url>` instead. `screencast` renders in the pane; `popout` is a separate window the pane stands in for.
+`dor list` shows each browser's `render_mode`, which says what drives it: `agent-browser-*` takes `dor agent-browser --surface <id>`, `playwright-*` takes `dor playwright --surface <id>`, and `iframe` takes neither — open its URL with `dor agent-browser open <url>` instead. `screencast` renders in the pane; `popout` is a separate window the pane stands in for.
 
 ### Browser identity
 
 Each command names its browser one way; the flags are mutually exclusive:
 
 - `--key <name>` (default `default`) — a browser this Workspace knows by name. One key is one browser, reused across commands; use distinct keys for independent browsers at once. agent-browser and Playwright keys are separate.
-- `--surface <handle>` — the browser a handle names; prefer it whenever you hold a ref. It is the only way to reach a browser the user opened from the GUI or a Tool's browser, and it fails on a terminal or an `iframe` surface.
+- `--surface <handle>` — the browser a handle names; prefer it whenever you hold an id. It is the only way to reach a browser the user opened from the GUI or a Tool's browser, and it fails on a terminal or an `iframe` surface.
 - `--session <name>` (Playwright also takes `-s`) — a raw native session by its literal name.
 
 Navigation verbs (`open`, `goto`, agent-browser's `navigate`) also accept Dormouse targets: `host:port` and `:port` default to `http://`, and a terminal handle (`surface:3`) opens the dev-server port that terminal owns.
@@ -151,7 +150,7 @@ dor agent-browser open surface:3                     # the port that terminal ow
 dor agent-browser --key server open http://localhost:3000
 dor agent-browser snapshot                           # further args are agent-browser's own
 dor agent-browser click @e3
-dor agent-browser --surface surface:4 click @e3      # drive the browser a ref names
+dor agent-browser --surface surface:4 click @e3      # drive the browser an id names
 ```
 
 ### `dor playwright` — Playwright pane
@@ -182,7 +181,7 @@ Use `dor-embed-size` rather than the provider's own viewport commands: it is the
 
 ## Dor Tools
 
-A Tool is a command a project or the user declares in `dormouse.yml`, run in one surface that is both a terminal and a browser: when the command starts serving, the pane flips to a browser of that port, and when it exits it flips back, keeping the same ref. `dor list` shows its kind as `tool`, and `send`, `read`, `await`, and `kill` act on its terminal.
+A Tool is a command a project or the user declares in `dormouse.yml`, run in one surface that is both a terminal and a browser: when the command starts serving, the pane flips to a browser of that port, and when it exits it flips back, keeping the same id. `dor list` shows its kind as `tool`, and `send`, `read`, `await`, and `kill` act on its terminal.
 
 **Find them with `dor tool --list`.** It shows the Tools `dor tool <name>` would find from your cwd: the nearest project `dormouse.yml` and whether the user has approved it, then the user's own file. The text under each Tool is the comment its author wrote above it, documentation for you: read it before choosing.
 
@@ -190,7 +189,7 @@ A Tool is a command a project or the user declares in `dormouse.yml`, run in one
 
 **The listing says how to work with each Tool:**
 
-- `[iframe]` is view-only; drive `[agent-browser-screencast]` with `dor agent-browser --surface <ref>` and `[playwright-screencast]` with `dor playwright --surface <ref>`.
+- `[iframe]` is view-only; drive `[agent-browser-screencast]` with `dor agent-browser --surface <id>` and `[playwright-screencast]` with `dor playwright --surface <id>`.
 - `[keyed]`: running it again reveals and focuses the running one (`existing`), or restarts it in place if its command has exited (`adopted`), so it is as safe to repeat as `dor ensure`; `--fresh` starts another. Unkeyed, every call starts another — find the running one with `dor list --kind tool`.
 - `[port announced]`: no browser appears until the command announces its port. `[port auto]` shows the one port it opens.
 - A `run` shown as a list takes arguments (`dor tool <name> <args>`); a string takes none.
@@ -212,9 +211,9 @@ dor workspace switch workspace:build      # move the user to it
 dor workspace close workspace:2 --force   # close it and everything in it
 ```
 
-A Window holds several Workspaces, each with its own surfaces and its own `surface:1`. You almost never need these: your commands land in the Workspace that currently owns your terminal's stable ID, and creating one is a change the user sees. When you do, name one as `workspace:<n>` or `workspace:<name>`, and pass `--workspace <ref>` to any surface command to act in it (`dor list --all` lists every Workspace in this Window). A surface's stable id finds it in any Workspace without that flag; `surface:N` does not, since every Workspace has one. `close` refuses a Workspace holding your running work unless you pass `--force`.
+A Window holds several Workspaces, each with its own surfaces. You almost never need these: your commands land in the Workspace that currently holds your terminal, and creating one is a change the user sees. When you do, name one by its id `workspace:<n>` or as `workspace:<name>`, and pass `--workspace <ref>` to any surface command to act in it (`dor list --all` lists every Workspace in this Window). A surface's id finds it in any Workspace without that flag. `close` refuses a Workspace holding your running work unless you pass `--force`.
 
-**Use stable Surface IDs across moves.** `dor move <surface> <workspace>` moves one pane; `--new` creates a Workspace, and `--focus` follows it. A Workspace named `new` remains targetable. If your own terminal moves, cached `surface:N` refs immediately resolve in the destination: `dor kill surface:3` can target someone else's pane. Unscoped `dor ensure -- pnpm dev` searches only the destination and may duplicate the server you left behind. Keep that server's stable ID, or target its original Workspace with `--workspace`. The moved terminal prints a local notice with its old/new handles; the command response prints its new ref. Iframes require `--dangerously-destroy-iframe-page-state` and reopen at their saved URL; dirty or pending Tools refuse even with that flag.
+`dor move <surface> <workspace>` moves one pane, keeping its id; `--new` creates a Workspace, and `--focus` follows it. A Workspace named `new` remains targetable. If your own terminal moves, unscoped `dor ensure -- pnpm dev` searches only the destination and may duplicate the server you left behind. Keep that server's id, or target its original Workspace with `--workspace`. The moved terminal prints a local notice naming its new Workspace. Iframes require `--dangerously-destroy-iframe-page-state` and reopen at their saved URL; dirty or pending Tools refuse even with that flag.
 
 ## Recipes
 
@@ -257,7 +256,7 @@ dor ensure --cwd ~/wt/feature-b -- npm run dev
 dor list --command "npm run dev" --cwd ~/wt/feature-a   # picks one
 ```
 
-**Long-running background job, out of the way.** Minimize it; rediscover it later by command instead of remembering the ref:
+**Long-running background job, out of the way.** Minimize it; rediscover it later by command instead of remembering the id:
 
 ```sh
 dor ensure --minimize -- npm test -- --watch
@@ -276,7 +275,7 @@ dor kill surface:N --confirm-if-read "npm run dev"
 
 - **Never run a bare `dor split` (no `--`).** It moves the user's keyboard focus to the new pane, hijacking their keystrokes. `dor split -- <command>`, a blank `dor split --`, and `dor ensure` never take focus.
 - **Never pre-quote command tails.** Everything after `--` is forwarded as a raw argv array; Dormouse quotes it correctly for whatever shell the target surface runs (POSIX, cmd, PowerShell). Pass `-- npm test -- --watch`, not `-- "npm test -- --watch"`.
-- **Take refs from responses.** Capture the ref that `split`/`ensure`/`tool`/`open` print rather than re-listing and guessing.
+- **Take ids from responses.** Capture the id that `split`/`ensure`/`tool`/`open` print rather than re-listing and guessing.
 - **`--command` is exact.** Match the command string you launched with, including its flags.
 - **Prefer `--confirm-if-read` over `--confirm-dangerously`** unless you have just read the surface yourself.
 - **Never run `dor app restart` unless the user asks.** It quits and reopens Dormouse Standalone, stopping every process that is not a resumable agent session and clearing all scrollback.

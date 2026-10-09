@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { registry, pendingShellOpts, type TerminalEntry } from './terminal-store';
+import { installSurfaceIdPool, resetSurfaceIdPool } from './surface-ids';
 import { applyTerminalSemanticEvents, getTerminalPaneState, resetTerminalPaneState, removeTerminalPaneState } from './terminal-state-store';
 import { beginPromotion, cancelPromotion, closeHelperParent, detachHelper, disposeHelper, resetHelper, finishPromotion, getHelper, helperHasWork, openHelper, reattachHelper, restoreHelper, setHelperVisible, subscribeHelpers } from './helper-terminal';
 
@@ -22,6 +23,18 @@ afterEach(() => { setHelperVisible('parent', false); disposeHelper('parent'); re
 const prompt = (id: string) => applyTerminalSemanticEvents(id, [{ type: 'promptStart' }, { type: 'promptEnd' }]);
 
 describe('helper lifecycle', () => {
+  it('takes a Surface id from the host pool at birth, past one already live', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    await installSurfaceIdPool(async (count) => Array.from({ length: count }, (_, i) => `surface:${5 + i}`), 0);
+    try {
+      registry.set('surface:5', { untouched: true } as TerminalEntry);
+      expect((await openHelper('parent')).id).toBe('surface:6');
+    } finally {
+      resetSurfaceIdPool();
+      error.mockRestore();
+    }
+  });
+
   it('detaches a helper with its Session alive and puts it back in place of its replacement', async () => {
     const old = await openHelper('parent');
     expect(detachHelper('parent')).toBe(old);
@@ -40,7 +53,7 @@ describe('helper lifecycle', () => {
     vi.spyOn(labs, 'isDelayedKillEnabled').mockReturnValue(true);
     try {
       const old = await openHelper('parent');
-      await resetHelper('parent', { workspaceId: 'ws', title: 'shell', ref: 'surface:1' });
+      await resetHelper('parent', { workspaceId: 'ws', title: 'shell' });
       expect(registry.has(old.id)).toBe(true);
       expect(pending.getPendingKills().map(kill => [kill.kind, kill.id])).toEqual([['helper', old.id]]);
       // The host owns one helper per parent: the old one's claim goes before the fresh one spawns.
@@ -73,7 +86,7 @@ describe('helper lifecycle', () => {
         if (request.op === 'promote') throw new Error('timed out');
         return { home: '/home/user', command: 'git status', busy: false };
       });
-      await expect(resetHelper('parent', { workspaceId: 'ws', title: 'shell', ref: 'surface:1' })).rejects.toThrow('timed out');
+      await expect(resetHelper('parent', { workspaceId: 'ws', title: 'shell' })).rejects.toThrow('timed out');
       expect(pending.getPendingKills().map(kill => [kill.kind, kill.id])).toEqual([['helper', old.id]]);
       await pending.finalizePendingKills();
       expect(registry.has(old.id)).toBe(false);
@@ -89,7 +102,7 @@ describe('helper lifecycle', () => {
     vi.spyOn(labs, 'isDelayedKillEnabled').mockReturnValue(true);
     try {
       const old = await openHelper('parent');
-      await resetHelper('parent', { workspaceId: 'ws', title: 'shell', ref: 'surface:1' });
+      await resetHelper('parent', { workspaceId: 'ws', title: 'shell' });
       const fresh = await openHelper('parent');
       registry.get(fresh.id)!.untouched = false;
       const [before] = pending.getPendingKills();

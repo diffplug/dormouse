@@ -4,7 +4,7 @@ import type { PersistedSession } from './session-types';
 
 describe('withFreshSurfaceIds', () => {
   const session: PersistedSession = {
-    version: 3,
+    version: 4,
     panes: [
       { id: 'a', cwd: '/repo', title: 'shell', untouched: true },
       { id: 'b', cwd: null, title: 'docs', untouched: false, surfaceType: 'browser' },
@@ -16,11 +16,9 @@ describe('withFreshSurfaceIds', () => {
       tree: { root: { kind: 'split', dir: 'row', children: [{ node: { kind: 'leaf', id: 'a' }, weight: 0.5 }, { node: { kind: 'leaf', id: 'b' }, weight: 0.5 }] } },
       leafMeta: { a: { component: 'terminal', tabComponent: 'terminal', title: 'shell' }, b: { component: 'browser', tabComponent: 'surface', title: 'docs' } },
     },
-    surfaceRefs: { a: 'surface:1', b: 'surface:2', door: 'surface:3' },
-    surfaceRefsNext: 4,
   };
 
-  it('renames every Surface everywhere it is named, and starts its refs over', () => {
+  it('renames every Surface everywhere it is named', () => {
     let n = 0;
     const fresh = withFreshSurfaceIds(session, () => `new-${++n}`);
     expect(fresh.panes.map(pane => pane.id)).toEqual(['new-1', 'new-2', 'new-3']);
@@ -33,7 +31,5 @@ describe('withFreshSurfaceIds', () => {
       leafMeta: { 'new-1': { title: 'shell' }, 'new-2': { title: 'docs' } },
     });
     expect(Object.keys((fresh.lathLayout as { leafMeta: object }).leafMeta)).toEqual(['new-1', 'new-2']);
-    expect(fresh.surfaceRefs).toBeUndefined();
-    expect(fresh.surfaceRefsNext).toBeUndefined();
   });
 });

@@ -77,7 +77,7 @@ describe('saveSession', () => {
 
   it('persists the live alert state even when the previous snapshot was empty', async () => {
     const platform = createPlatform({
-      version: 3,
+      version: 4,
       layout: null,
       panes: [{ id: 'pane-a', title: 'Pane A', cwd: null, alert: null }],
     });
@@ -87,7 +87,7 @@ describe('saveSession', () => {
     await saveSession(platform, [{ id: 'pane-a', title: 'Pane A' }]);
 
     expect(platform.saveState).toHaveBeenCalledWith({
-      version: 3,
+      version: 4,
       doors: [],
       panes: [
         expect.objectContaining({
@@ -105,7 +105,7 @@ describe('saveSession', () => {
 
     expect(platform.getCwd).toHaveBeenCalledWith('pane-a');
     expect(platform.saveState).toHaveBeenCalledWith({
-      version: 3,
+      version: 4,
       doors: [],
       panes: [
         expect.objectContaining({
@@ -125,7 +125,7 @@ describe('saveSession', () => {
     }]);
 
     expect(platform.saveState).toHaveBeenCalledWith({
-      version: 3,
+      version: 4,
       doors: [
         expect.objectContaining({
           id: 'pane-a',
@@ -155,7 +155,7 @@ describe('saveSession', () => {
     }]);
 
     expect(platform.saveState).toHaveBeenCalledWith({
-      version: 3,
+      version: 4,
       doors: [
         expect.objectContaining({
           id: 'pane-a',
@@ -178,7 +178,7 @@ describe('saveSession', () => {
     await saveSession(platform, [{ id: 'pane-a', title: 'Pane A' }]);
 
     expect(platform.saveState).toHaveBeenCalledWith({
-      version: 3,
+      version: 4,
       doors: [],
       panes: [
         expect.objectContaining({
@@ -327,29 +327,6 @@ describe('saveSession', () => {
     expect(saved.lathLayout).toEqual(lathLayout);
   });
 
-  it('persists workspace-scoped dor surface refs and the next-ref counter', async () => {
-    const platform = createPlatform(null);
-
-    await saveSession(platform, [{ id: 'pane-a', title: 'Pane A' }], [], undefined, {
-      'pane-a': 'surface:5',
-    }, 8);
-
-    const saved = vi.mocked(platform.saveState).mock.calls[0]![0] as PersistedSession;
-    // Only the live entry is persisted; the counter (8) is kept independently so
-    // the pruned surface:1..4/6..7 numbers are never reused on restore.
-    expect(saved.surfaceRefs).toEqual({ 'pane-a': 'surface:5' });
-    expect(saved.surfaceRefsNext).toBe(8);
-  });
-
-  it('omits the next-ref counter for a fresh workspace that never advanced it', async () => {
-    const platform = createPlatform(null);
-
-    await saveSession(platform, [{ id: 'pane-a', title: 'Pane A' }], [], undefined, undefined, 1);
-
-    const saved = vi.mocked(platform.saveState).mock.calls[0]![0] as PersistedSession;
-    expect('surfaceRefsNext' in saved).toBe(false);
-  });
-
   it('omits lathLayout entirely when not supplied', async () => {
     const platform = createPlatform(null);
 
@@ -446,12 +423,12 @@ describe('saveSession', () => {
       // The post-kill flush: every probe would answer null and be discarded for
       // the previous record's value anyway.
       const platform = createPlatform({
-        version: 3,
+        version: 4,
         panes: [{ id: 'pane-a', title: 'Pane A', cwd: '/before-the-kill', untouched: false }],
       });
       platform.getCwds = vi.fn(async () => ({}));
 
-      await saveSession(platform, [{ id: 'pane-a', title: 'Pane A' }], [], undefined, undefined, undefined, undefined, { probeCwd: false });
+      await saveSession(platform, [{ id: 'pane-a', title: 'Pane A' }], [], undefined, undefined, { probeCwd: false });
 
       expect(platform.getCwds).not.toHaveBeenCalled();
       expect(platform.getCwd).not.toHaveBeenCalled();

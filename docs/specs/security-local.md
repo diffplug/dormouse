@@ -124,7 +124,7 @@ The attacker is another local account reading disk; what the remote stack leaves
 
 **Standalone's session store is owner-only before any bytes are written** — every window snapshot, its geometry sibling, and the arrival journal (`docs/specs/standalone.md` -> "Persistence", "Boot and geometry", "Arrival queue"), on every platform. The same helper locks the whole standalone app-data directory before the sidecar spawns.
 
-**No writer persists scrollback** (`docs/specs/transport.md` -> "What is persisted", "Retiring the transcripts already on disk"). Snapshots older versions left behind do carry transcripts (rationale).
+**No writer persists scrollback** (`docs/specs/transport.md` -> "What is persisted", "Retiring the transcripts already on disk"). A snapshot an older version left can carry a transcript until retired (rationale).
 
 **Standalone writes `recovery.json` beside its sessions directory**, under the state root, owner-only: one rebuilt agent-resume invocation per Surface, never a buffer, unlinked as it is read (`docs/compatible-agents.md` -> "Recovery record").
 

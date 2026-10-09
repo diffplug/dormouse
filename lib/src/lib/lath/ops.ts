@@ -39,8 +39,7 @@ export type RestoreToken = {
    *  after; a split sibling contributes its first leaf). Null when it was the root leaf. */
   siblingId: LeafId | null;
   /** Leaf set of the same-parent sibling node that supplied `siblingId`.
-   *  Present on tokens written after the split-subtree restore fix; absent legacy
-   *  tokens degrade to the older leaf-neighbor behavior. */
+   *  Absent, with `siblingFingerprint`, for a root-leaf removal. */
   siblingLeafIds?: LeafId[];
   /** Structure-only fingerprint of that same-parent sibling node, used when the
    *  removed parent collapsed and the sibling subtree itself becomes the exact target. */

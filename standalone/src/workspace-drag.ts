@@ -216,7 +216,7 @@ function moveOutOfWindow(id: WorkspaceId, destination: () => Promise<CursorHit |
     // The one thing a move cannot carry is a plain iframe's document, Doored
     // ones included; it reopens at its saved URL. The user says so first, with
     // the same typed letter a kill takes (docs/specs/layout.md → Workspaces).
-    const iframes = getWallHandle(id)?.iframeSurfaceRefs() ?? [];
+    const iframes = getWallHandle(id)?.iframeSurfaceIds() ?? [];
     if (iframes.length > 0) {
       requestConfirmation({
         id,
