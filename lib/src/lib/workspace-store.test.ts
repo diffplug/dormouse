@@ -315,14 +315,21 @@ describe('workspace-store', () => {
     await installWorkspaceIdPool(reserve);
     expect(reserve).toHaveBeenCalledWith(4);
     expect(generateWorkspaceId()).toBe('workspace:100');
-    expect(createWorkspace().id).toBe('workspace:101');
-    expect(generateWorkspaceId()).toBe('workspace:102');
     expect(reserve).toHaveBeenCalledTimes(1);
     // Draining past the low-water mark tops the pool back up in the background.
-    expect(generateWorkspaceId()).toBe('workspace:103');
+    expect(createWorkspace().id).toBe('workspace:101');
     await Promise.resolve();
     expect(reserve).toHaveBeenCalledTimes(2);
-    expect(reserve).toHaveBeenLastCalledWith(4);
+    expect(reserve).toHaveBeenLastCalledWith(2);
+  });
+
+  it('keeps a quick run of creates ahead of the refill round trip', async () => {
+    await installWorkspaceIdPool(minting(100));
+    createWorkspace();
+    createWorkspace();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    // A pool's worth of creates, faster than the next refill lands.
+    expect(Array.from({ length: 4 }, () => createWorkspace().id)).toEqual(['workspace:102', 'workspace:103', 'workspace:104', 'workspace:105']);
   });
 
   it('a failed first reservation still creates opaque ids that resolve, and can recover', async () => {

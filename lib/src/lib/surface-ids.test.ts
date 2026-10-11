@@ -27,17 +27,22 @@ describe('mintSurfaceId', () => {
     const reserve = counting(500);
     await installSurfaceIdPool(reserve, 0);
     expect(reserve).toHaveBeenCalledWith(8, 0);
-    expect(mintSurfaceId()).toBe('surface:500');
-    for (let i = 0; i < 5; i++) mintSurfaceId();
+    expect([mintSurfaceId(), mintSurfaceId()]).toEqual(['surface:500', 'surface:501']);
     expect(reserve).toHaveBeenCalledTimes(1);
-    // Draining past the low-water mark refills before the pool runs dry, back
-    // up to the pool's size and no further: what it holds at exit is burned.
+    // Draining past the low-water mark refills well before the pool runs dry,
+    // back up to the pool's size and no further: what it holds at exit is burned.
     mintSurfaceId();
     await Promise.resolve();
     expect(reserve).toHaveBeenCalledTimes(2);
-    expect(reserve).toHaveBeenLastCalledWith(7, 0);
-    expect(mintSurfaceId()).toBe('surface:507');
-    expect(mintSurfaceId()).toBe('surface:508');
+    expect(reserve).toHaveBeenLastCalledWith(3, 0);
+  });
+
+  it('keeps a quick run of creates ahead of the refill round trip', async () => {
+    await installSurfaceIdPool(counting(1), 0);
+    for (let i = 0; i < 3; i++) mintSurfaceId();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    // A pool's worth of creates, faster than the next refill lands.
+    expect(Array.from({ length: 8 }, () => mintSurfaceId())).toEqual(Array.from({ length: 8 }, (_, i) => `surface:${i + 4}`));
   });
 
   it('names the restored floor in every reservation', async () => {
@@ -88,10 +93,10 @@ describe('surfaceIdMinter', () => {
     const reserve = counting(1);
     await installSurfaceIdPool(reserve, 0);
     reserve.mockClear();
-    const mint = await surfaceIdMinter(3);
-    expect([mint(), mint(), mint()]).toEqual(['surface:1', 'surface:2', 'surface:3']);
+    const mint = await surfaceIdMinter(2);
+    expect([mint(), mint()]).toEqual(['surface:1', 'surface:2']);
     expect(reserve).not.toHaveBeenCalled();
-    expect(mintSurfaceId()).toBe('surface:4');
+    expect(mintSurfaceId()).toBe('surface:3');
   });
 
   it('has a burst larger than the pool in hand, reserving only the rest, past the host\'s block clamp', async () => {

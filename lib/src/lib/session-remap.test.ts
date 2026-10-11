@@ -47,8 +47,8 @@ describe('withFreshSurfaceIds', () => {
     expect(new Set(ids).size).toBe(15);
     expect(ids.every((id) => /^surface:\d+$/.test(id))).toBe(true);
     // The pool's 8 serve first; the host reserves only the other 7, and then
-    // the pool's own refill.
-    expect(reserve.mock.calls).toEqual([[7, 0], [7, 0]]);
+    // the pool's own refill, asked once it fell below its low-water mark.
+    expect(reserve.mock.calls).toEqual([[7, 0], [3, 0]]);
     expect(mintSurfaceId()).toMatch(/^surface:\d+$/);
   });
 });

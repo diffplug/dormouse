@@ -80,12 +80,13 @@ export function isWorkspacePinned(id: WorkspaceId): boolean {
  *  on its own, after the bare Wall's `DEFAULT_WORKSPACE_ID`, `workspace:1`. */
 export const WORKSPACE_ID_POOL_SIZE = 4;
 // Small, so a launch burns at most 4 numbers (see `createIdPool`): Workspaces
-// are created one gesture or `dor` call at a time, and a refill once the last
-// is taken is one host round trip of a few ms. A window's Reopen reserves
+// are created one gesture or `dor` call at a time, and a refill once 2 are gone
+// is one host round trip of a few ms, so a quick run of creates stays ahead of
+// it rather than taking opaque ids for life. A window's Reopen reserves
 // through `workspaceIdMinter`.
 const idPool = createIdPool({
   size: WORKSPACE_ID_POOL_SIZE,
-  low: 1,
+  low: 3,
   label: 'workspace-store',
   idFor: workspaceIdFor,
   localStart: 1,

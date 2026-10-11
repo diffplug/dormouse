@@ -13,12 +13,13 @@ import { registry } from './terminal-store';
 export const SURFACE_ID_POOL_SIZE = 8;
 // Small, so a launch burns at most 8 numbers (see `createIdPool`). Surfaces are
 // created at the user's pace — a keystroke, a click, a `dor` process each — and
-// a refill is one host round trip of a few ms, so refilling once 2 are left
-// keeps a quick run of creates ahead of it; a burst that mints more at once
-// reserves through `surfaceIdMinter`.
+// a refill is one host round trip of a few ms, so refilling once 3 are gone
+// keeps a quick run of creates ahead of it, where a lower mark left a run
+// outpacing the refill with opaque ids for life; a burst that mints more at
+// once reserves through `surfaceIdMinter`.
 const pool = createIdPool({
   size: SURFACE_ID_POOL_SIZE,
-  low: 2,
+  low: 6,
   label: 'surface-ids',
   idFor: surfaceIdFor,
   localStart: 0,
