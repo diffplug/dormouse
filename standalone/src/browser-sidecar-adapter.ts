@@ -61,6 +61,7 @@ export interface BrowserSidecarAdapter extends AlertClientMethods {}
 
 export class BrowserSidecarAdapter implements PlatformAdapter {
   readonly offersLabs = true;
+  readonly aboutHost = 'standalone';
   readonly reapsTools = true;
   private dataHandlers = new Set<(detail: PtyDataDetail) => void>();
   private exitHandlers = new Set<(detail: { id: string; exitCode: number }) => void>();

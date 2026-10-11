@@ -93,7 +93,7 @@ beforeEach(() => {
     return nextFrame;
   });
   vi.stubGlobal('cancelAnimationFrame', (id: number) => frames.delete(id));
-  sectionOffsets = { general: 16, activity: 116, notifications: 516, network: 916 };
+  sectionOffsets = { general: 16, activity: 116, notifications: 516, network: 916, about: 1316 };
   stubResizeObserver(400);
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
     const top = this.dataset.settingsTopic
@@ -167,7 +167,7 @@ describe('SettingsDialog navigation and search', () => {
     await act(async () => byText('Activity').click());
     await advanceScroll();
     expect(scrollTo).toHaveBeenLastCalledWith({ top: 100, behavior: 'instant' });
-    expect(visible('[role="region"]')).toHaveLength(3);
+    expect(visible('[role="region"]')).toHaveLength(4);
   });
 
   it('finds live command names and edits a setting directly in results', async () => {
@@ -179,6 +179,14 @@ describe('SettingsDialog navigation and search', () => {
     const before = getAlertSettings().deferAlertsUntilQuiet;
     await act(async () => visible('[role="switch"]')[0].click());
     expect(getAlertSettings().deferAlertsUntilQuiet).toBe(!before);
+  });
+
+  it('ends with About, which a search for the version finds alone', async () => {
+    await render();
+    const nav = document.querySelector('nav[aria-label="Settings topics"]')!;
+    expect([...nav.querySelectorAll('button')].at(-1)?.textContent).toBe('About');
+    await search('version');
+    expect(visible('[data-setting]').map((node) => node.dataset.setting)).toEqual(['about']);
   });
 
   it('keeps Tab focus out of search-filtered settings', async () => {

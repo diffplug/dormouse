@@ -44,6 +44,7 @@ export class VSCodeAdapter implements PlatformAdapter {
   // And updates: the Marketplace installs them, so Settings → Network shows
   // that instead of an update check.
   readonly hostOwnsUpdates = true;
+  readonly aboutHost = 'vscode';
   private vscode: ReturnType<typeof acquireVsCodeApi>;
   private hostState: unknown = (globalThis as typeof globalThis & { __DORMOUSE_HOST_STATE__?: unknown }).__DORMOUSE_HOST_STATE__ ?? null;
   // Captured once, at construction, from the global the extension host injects

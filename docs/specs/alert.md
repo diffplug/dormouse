@@ -435,7 +435,7 @@ Source of truth: `push` in `lib/src/host/remote/service.ts`; `pushAlert` in `vsc
 
 ### Settings dialog
 
-Opened by the baseboard's Settings button. Its Activity and Notifications topics are this spec's; Network's content is `docs/specs/remote-network.md` -> "Settings → Network".
+Opened by the baseboard's Settings button. Its Activity and Notifications topics are this spec's; Network's content is `docs/specs/remote-network.md` -> "Settings → Network", and About's is `docs/specs/deploy.md` -> "Build stamp".
 
 - **Must show only application-wide settings**, excluding Workspace overrides.
 - A baseboard alarm button toggles only its own setting, as an override for that Workspace; components without a Workspace scope edit application defaults. **Must open a separate Workspace alert dialog from either button's right-click or focused `Shift+F10`/`ContextMenu`**, only with a Workspace scope, preserving per-field inheritance and reset-all.

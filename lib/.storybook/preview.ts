@@ -338,6 +338,9 @@ const preview: Preview = {
       // names it instead of an update check.
       platform.hostOwnsUpdates = context.parameters?.hostOwnsUpdates === true || undefined;
 
+      // Which host Settings → About names; absent reads as unknown.
+      platform.aboutHost = context.parameters?.aboutHost;
+
       // The updater's port, which only Standalone's main window has: a story
       // about Settings → Network's update checks names the last successful
       // check (`null` for none), and every other story has no updater.

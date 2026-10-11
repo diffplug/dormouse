@@ -2,6 +2,7 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "path";
+import { buildStampVitePlugin } from "../scripts/build-stamp.mjs";
 import { relayDefineVitePlugin, relayOriginDefine, resolveRelayOrigin } from "../scripts/relay-origin.mjs";
 
 const libDir = path.resolve(import.meta.dirname, "../lib");
@@ -15,7 +16,7 @@ const host = process.env.TAURI_DEV_HOST;
 const port = Number(process.env.DORMOUSE_BROWSER_DEV_VITE_PORT || 1420);
 
 export default defineConfig(({ command }) => ({
-  plugins: [react(), tailwindcss(), relayDefineVitePlugin()],
+  plugins: [react(), tailwindcss(), relayDefineVitePlugin(), buildStampVitePlugin()],
   // The relay pair the sidecar bakes, under the same rule: the dev server is a
   // dev build and `vite build` a release one, which fails if the define did not
   // reach a chunk (docs/specs/relay.md → "Relay origin").

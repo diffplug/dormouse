@@ -513,7 +513,7 @@ export const HoverContents: Story = {
     const body = dialog(canvasElement);
     const topic = await hoverTopic(body, 'Notifications');
     await expect(topic).toHaveAttribute('aria-current', 'location');
-    await expect(body.getAllByRole('region')).toHaveLength(3);
+    await expect(body.getAllByRole('region')).toHaveLength(4);
   },
 };
 
@@ -530,7 +530,7 @@ export const ScrollFollowsContents: Story = {
     content.scrollTo({ top: content.scrollHeight, behavior: 'smooth' });
     await waitFor(() => {
       expect(Math.abs(content.scrollHeight - content.clientHeight - content.scrollTop)).toBeLessThan(2);
-      expect(contentsButton(body, 'Notifications')).toHaveAttribute('aria-current', 'location');
+      expect(contentsButton(body, 'About')).toHaveAttribute('aria-current', 'location');
     });
   },
 };
@@ -549,5 +549,22 @@ export const HoverSettingsOverridesScroll: Story = {
     await userEvent.unhover(heading);
     await expect(contentsButton(body, 'General')).toHaveAttribute('aria-current', 'location');
     await userEvent.hover(heading);
+  },
+};
+
+/**
+ * About, the last topic: Storybook's bundle carries no build stamp, so it reads
+ * as an unknown version (`AboutSettings.stories` covers each install kind).
+ */
+export const AboutTopic: Story = {
+  parameters: {
+    aboutHost: 'standalone',
+    primedBurrow: { status: UNENROLLED_STATUS },
+  },
+  play: async ({ canvasElement }) => {
+    await selectTopic('About')({ canvasElement });
+    const body = dialog(canvasElement);
+    await expect(body.getByRole('region', { name: 'About' })).toHaveTextContent('Dormouse, version unknown');
+    await expect(body.getByRole('button', { name: 'Copy details' })).toBeVisible();
   },
 };

@@ -1,4 +1,5 @@
-import { BellIcon, FlaskIcon, GearIcon, GlobeIcon, MagnifyingGlassIcon, PulseIcon } from '@phosphor-icons/react';
+import { BellIcon, FlaskIcon, GearIcon, GlobeIcon, InfoIcon, MagnifyingGlassIcon, PulseIcon } from '@phosphor-icons/react';
+import { AboutSettings } from './AboutSettings';
 import { SecondsField, SwitchRow } from './AlarmSettingsControls';
 import { ScrollFades } from './ScrollFades';
 import type { AlertSink } from '../lib/alert-delivery-model';
@@ -102,6 +103,7 @@ const TOPICS = [
   { id: 'notifications', label: 'Notifications', icon: BellIcon, groups: ['speech', 'push'] },
   { id: 'network', label: 'Network', icon: GlobeIcon, groups: ['network', 'phones', 'updates'] },
   { id: 'labs', label: 'Labs', icon: FlaskIcon, groups: ['delayedKill'] },
+  { id: 'about', label: 'About', icon: InfoIcon, groups: ['about'] },
 ] as const;
 type TopicId = typeof TOPICS[number]['id'];
 type GroupId = typeof TOPICS[number]['groups'][number];
@@ -473,6 +475,11 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                 </section>
               </TopicSection>
             )}
+            <TopicSection id="about" hidden={!visible('about')}>
+              <section data-setting="about" hidden={!matches('about')}>
+                <AboutSettings />
+              </section>
+            </TopicSection>
           </div>
           <ScrollFades above={above} below={below} />
         </div>
