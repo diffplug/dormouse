@@ -182,6 +182,7 @@ describe('SettingsDialog navigation and search', () => {
   });
 
   it('ends with About, which a search for the version finds alone', async () => {
+    vi.stubGlobal('__DORMOUSE_BUILD__', { version: '1.2.0', commit: 'd080b4f5', commitsSinceVersion: 14, dirty: false, official: false, host: 'standalone' });
     await render();
     const nav = document.querySelector('nav[aria-label="Settings topics"]')!;
     expect([...nav.querySelectorAll('button')].at(-1)?.textContent).toBe('About');

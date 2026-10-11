@@ -597,7 +597,7 @@ export const AboutOfficialVsCode: Story = {
 /** A local build — `pnpm dogfood:standalone`, `dev:standalone` — carries the commits past its tag. */
 export const AboutDevelopment: Story = {
   parameters: aboutParameters(DEVELOPMENT_STAMP),
-  play: aboutShows(/Dormouse 1\.2\.0\+14Development build/),
+  play: aboutShows(/Dormouse version 1\.2\.0\+14Development build/),
 };
 
 export const AboutDevelopmentDirty: Story = {
@@ -608,7 +608,7 @@ export const AboutDevelopmentDirty: Story = {
 /** A shallow clone, where the version tag was not there to count from. */
 export const AboutDevelopmentUnknownCount: Story = {
   parameters: aboutParameters({ ...DEVELOPMENT_STAMP, commitsSinceVersion: null }),
-  play: aboutShows(/Dormouse 1\.2\.0\+\?/),
+  play: aboutShows(/Dormouse version 1\.2\.0\+\?/),
 };
 
 /** Self-host outranks official or not: it names the one Relay this build reaches. */

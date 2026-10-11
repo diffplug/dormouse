@@ -49,7 +49,7 @@ function kindOf({ stamp, relay }: AboutFacts): InstallKind | null {
 }
 
 function versionLine(stamp: BuildStamp | null): string {
-  return stamp ? `Dormouse ${buildTag(stamp)}` : 'Dormouse, version unknown';
+  return stamp ? `Dormouse version ${buildTag(stamp)}` : 'Dormouse, version unknown';
 }
 
 function commitLine(stamp: BuildStamp): string {

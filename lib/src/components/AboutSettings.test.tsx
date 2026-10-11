@@ -47,7 +47,7 @@ function button(label: string): HTMLButtonElement {
 describe('AboutPanel', () => {
   it('names a development build with its commits past the tag and uncommitted changes', async () => {
     await render({ stamp: STAMP, relay: HOSTED });
-    expect(container.textContent).toContain('Dormouse 1.2.0+14');
+    expect(container.textContent).toContain('Dormouse version 1.2.0+14');
     expect(container.textContent).toContain('Development build · d080b4f5, with uncommitted changes · Desktop app');
     await act(async () => button('Source').click());
     expect(openExternal).toHaveBeenCalledWith('https://github.com/diffplug/dormouse/tree/d080b4f5');
@@ -101,7 +101,7 @@ describe('AboutPanel', () => {
 describe('aboutDiagnostics', () => {
   it('lists the build, install kind, host, Relay, and OS', () => {
     expect(aboutDiagnostics({ stamp: STAMP, relay: SELF_HOST }, ENV)).toBe(
-      'Dormouse 1.2.0+14 (d080b4f5, with uncommitted changes)\n' +
+      'Dormouse version 1.2.0+14 (d080b4f5, with uncommitted changes)\n' +
         'Install: Self-host build\n' +
         'Host: Desktop app\n' +
         'Relay: relay.example.com (self-host)\n' +
