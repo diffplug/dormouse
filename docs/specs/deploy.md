@@ -28,8 +28,15 @@ Human-driven, in order:
 3. **Commit and tag** — `git commit -am "Release vX.Y.Z"` then `git tag vX.Y.Z`.
 4. **Push** — `git push && git push origin vX.Y.Z`, which triggers CI (Stage 1).
 5. **Run local signing** — plug in the PIV USB key, then `./scripts/sign-and-deploy.sh all X.Y.Z`: it waits for CI, verifies and signs artifacts, writes the website update manifest, and creates the GitHub Release. Secrets follow [Environment / secrets](#environment--secrets). **Must reject a dirty tree, untracked files, or commits ahead of the configured upstream**; without an upstream the script warns that push status is unknown.
-6. **Deploy website** — commit `website/public/standalone-latest.json`. Cloudflare Pages project `mouseterm` deploys `release` to `dormouse.sh`; `main` produces previews. Promote reviewed `main` with `git fetch origin` then `git push origin origin/main:release`, without force.
-7. **Verify the release**
+6. **Verify the macOS sidecar** on the `.app` in the release's `.tar.gz` (`docs/specs/security-ci.md` -> "Desktop Releases"):
+   1. Launch it.
+   2. Open a terminal (`node-pty`).
+   3. Connect a phone directly (`node-datachannel`).
+   4. `codesign -d --entitlements - "Dormouse Terminal.app/Contents/MacOS/node"` matches `standalone/src-tauri/entitlements-macos-node.plist`.
+
+   On a failure, restore `disable-library-validation` to `standalone/src-tauri/entitlements-macos-node.plist` and re-sign as a patch release before deploying the website; when step 5's own load check fails, restore it and run `./scripts/sign-and-deploy.sh resume X.Y.Z`.
+7. **Deploy website** — commit `website/public/standalone-latest.json`. Cloudflare Pages project `mouseterm` deploys `release` to `dormouse.sh`; `main` produces previews. Promote reviewed `main` with `git fetch origin` then `git push origin origin/main:release`, without force.
+8. **Verify the release**
    - GitHub Release assets are correct
    - On a Mac: extract the `.tar.gz`, open the `.app`, no Gatekeeper warning
    - On Windows: run the `.exe` installer, no SmartScreen warning
