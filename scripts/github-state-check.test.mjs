@@ -4,7 +4,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { FRAGMENT, run, SECTIONS, stateHash } from './github-state-check.mjs';
-import { repoRoot, tempDir } from './lint-kit.mjs';
+import { readRepoFile, repoRoot, tempDir } from './lint-kit.mjs';
 import { judgeFragment } from './security-audit-report.mjs';
 
 // Responses recorded from the live API with the maintainer's `gh` login (URLs,
@@ -14,6 +14,14 @@ import { judgeFragment } from './security-audit-report.mjs';
 const fixture = JSON.parse(readFileSync(new URL('./github-state-check.fixture.json', import.meta.url), 'utf8'));
 const NOW = new Date(Date.parse(fixture.recordedAt) + 3_600_000);
 const R = 'repos/diffplug/dormouse';
+// The recorded tend tag, re-keyed to the ref the workflows pin now, so a tend
+// regeneration doesn't strand the fixture.
+const TEND_TAG = `repos/max-sixty/tend/git/ref/tags/${readRepoFile('.github/workflows/tend-review.yaml').match(/max-sixty\/tend\/claude@([^\s#]+)/)[1]}`;
+for (const path of Object.keys(fixture.responses).filter((p) => p.startsWith('repos/max-sixty/tend/git/ref/tags/'))) {
+  const recorded = fixture.responses[path];
+  delete fixture.responses[path];
+  fixture.responses[TEND_TAG] = recorded;
+}
 const ADMIN = { actor_type: 'RepositoryRole', actor_id: 5, bypass_mode: 'exempt' };
 const APP = { actor_type: 'Integration', actor_id: 5228264, bypass_mode: 'always' };
 
@@ -219,7 +227,7 @@ test('the state hash ignores listing order and run history, and tracks every jud
     if (clause.includes('has a successful `schedule` run') || name.includes('`secrets.allowed`') && !name.includes('new repo-level')) continue;
     assert.notEqual(replay(mutate).hash, base, `hash blind to: ${name}`);
   }
-  assert.notEqual(replay((ctx) => { ctx.responses['repos/max-sixty/tend/git/ref/tags/0.3.10'].body.object.sha = '0'.repeat(40); }).hash, base, 'hash blind to a moved tend tag');
+  assert.notEqual(replay((ctx) => { ctx.responses[TEND_TAG].body.object.sha = '0'.repeat(40); }).hash, base, 'hash blind to a moved tend tag');
   assert.equal(stateHash({ a: 1, volatile: { x: 1 } }), stateHash({ volatile: { x: 2 }, a: 1 }));
 });
 

@@ -18,15 +18,17 @@ const edit = (file, from, to) => (inputs) => {
 };
 const add = (file, text) => (inputs) => { inputs.workflows[file] = text; };
 const CHECKOUT = 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1';
+// Read from the workflow, not pinned here, so a tend regeneration doesn't break these cases.
+const TEND = real.workflows['tend-review.yaml'].match(/max-sixty\/tend\/claude@[^\s#]+/)[0];
 
 const cases = [
   ['an action referenced by tag', edit('ci.yml', `uses: ${CHECKOUT}`, 'uses: actions/checkout@v7'), 'by something other than a commit hash'],
   ['an action referenced by a short hash', edit('argos.yml', `uses: ${CHECKOUT}`, 'uses: actions/checkout@3d3c42e'), 'by something other than a commit hash'],
   ['a docker action by tag', add('extra.yml', 'on: push\njobs:\n  a:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: docker://alpine:3\n'), 'not pinned by digest'],
   ['a reusable workflow by branch', add('extra.yml', 'on: push\njobs:\n  a:\n    uses: octo/repo/.github/workflows/x.yml@main\n'), 'by something other than a commit hash'],
-  ['tend referenced outside tend-*.yaml', edit('ci.yml', `uses: ${CHECKOUT}`, 'uses: max-sixty/tend/claude@0.3.10'), 'which only `tend-*.yaml` may reference by tag'],
-  ['tend unpinned', edit('tend-review.yaml', 'max-sixty/tend/claude@0.3.10', 'max-sixty/tend/claude@main'), 'not a released version'],
-  ['tend below 0.1.19', edit('tend-review.yaml', 'max-sixty/tend/claude@0.3.10', 'max-sixty/tend/claude@0.1.18'), 'below 0.1.19'],
+  ['tend referenced outside tend-*.yaml', edit('ci.yml', `uses: ${CHECKOUT}`, `uses: ${TEND}`), 'which only `tend-*.yaml` may reference by tag'],
+  ['tend unpinned', edit('tend-review.yaml', TEND, 'max-sixty/tend/claude@main'), 'not a released version'],
+  ['tend below 0.1.19', edit('tend-review.yaml', TEND, 'max-sixty/tend/claude@0.1.18'), 'below 0.1.19'],
   ['tend in yolo mode', edit('tend-review.yaml', 'merge: restricted', 'merge: yolo'), 'passes `merge: yolo`'],
   ['.config/tend.yaml in yolo mode', (inputs) => { inputs.tendConfig = inputs.tendConfig.replace('merge: restricted', 'merge: yolo'); }, '.config/tend.yaml sets `merge: yolo`'],
   ['pull_request_target outside tend', edit('argos.yml', '\non:\n', '\non:\n  pull_request_target:\n'), 'triggers on `pull_request_target`'],
