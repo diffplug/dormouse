@@ -101,7 +101,7 @@ export const DETERMINISTIC = { 'audit-github-state.md': 'scripts/github-state-ch
  * carries, sub-bullets included. Fenced code is skipped, and nothing under
  * `## Future` is a rule.
  */
-function specRules(root, spec) {
+export function specRules(root, spec) {
   const path = join(root, spec);
   // Fail closed: a moved spec must not shrink what its domain owes to nothing.
   if (!existsSync(path)) throw new Error(`a domain claims ${spec}, which does not exist`);

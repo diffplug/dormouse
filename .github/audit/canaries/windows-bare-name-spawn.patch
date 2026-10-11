@@ -1,4 +1,4 @@
-Domain: application-security
+Domain: local
 Rule: `docs/specs/security-local.md` -> "Spawned programs" #1 — spawns a program by bare name on Windows
 Expect: standalone/sidecar/clipboard-ops.js
 Source: reverses #1040 (clipboard reads ran `powershell` by bare name)

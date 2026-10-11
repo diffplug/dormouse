@@ -27,7 +27,7 @@ function auditShapedBody(totalLength) {
   const head = [
     'Audit failed at 2026-08-29. [Run](https://example.invalid/run) · [Transcript](https://example.invalid/art)',
     '',
-    '- **A domain returned `FAIL`.** audit-application.md opened with `VERDICT: FAIL`.',
+    '- **A domain returned `FAIL`.** audit-local.md opened with `VERDICT: FAIL`.',
     '',
   ].join('\n');
   const filler = `${'finding detail line'.padEnd(72, '.')}\n`;

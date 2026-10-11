@@ -1,4 +1,4 @@
-Domain: application-security
+Domain: local
 Class: a recovery record outlives its age gate and is typed at a shell on restore
 Expect: lib/src/host/recovery-store.ts
 Severity: INFO — hardening: `normalizeResumeCommand` rebuilds a restored command at the typing boundary, so a stale record types only a known resume invocation

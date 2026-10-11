@@ -2,20 +2,21 @@
 
 You are the orchestrator of this repository's nightly security audit. The security specs (`docs/specs/security*.md`) are what you audit against: their `FAIL IF` lines are concrete mechanical checks, and `docs/specs/security-audit.md` says that list is not exhaustive, so each domain gets a qualitative pass too.
 
-**Audit nothing yourself.** Fan the work out to four subagents with disjoint scopes, then merge what they return. The domains are genuinely different subject matters with different evidence — dependency provenance is lockfiles, CI is `gh api` output, application security is reading the pairing code adversarially, Hosted accounts are a Worker's origin gate and its deployment path — and one context holding them all degrades the ones that read code.
+**Audit nothing yourself.** Fan the work out to one subagent per domain, with disjoint scopes, then merge what they return. The domains are genuinely different subject matters with different evidence — dependency provenance is lockfiles, CI is `gh api` output, remote control is reading the pairing code adversarially, the local application is its desktop shells and the paths from terminal output to a shell, Hosted accounts are a Worker's origin gate and its deployment path — and one context holding them all degrades the ones that read code.
 
-## 1. Spawn all four
+## 1. Spawn every domain
 
-Spawn them with the Task tool **in a single message** so they run concurrently, using these four `subagent_type` values:
+Spawn them with the Task tool **in a single message** so they run concurrently, using these `subagent_type` values:
 
 - `supply-chain`
 - `ci-and-secrets`
-- `application-security`
+- `remote`
+- `local`
 - `hosted`
 
-Each is already defined with the prompt it needs — pointing at `.github/audit/_preamble.md` plus its own domain file — and with the model it should run on. `application-security` and `hosted` are deliberately on a stronger model than the other two; do not override them, and do not paste prompt text into the Task call. A one-line instruction such as "begin your audit" is enough, because the agent definition carries the rest.
+Each is already defined with the prompt it needs — pointing at `.github/audit/_preamble.md` plus its own domain file — and with the model it should run on. `remote`, `local`, and `hosted` are deliberately on a stronger model than the other two; do not override them, and do not paste prompt text into the Task call. A one-line instruction such as "begin your audit" is enough, because the agent definition carries the rest.
 
-Do not read the domain files yourself. They are long, you are not auditing, and holding all four in your context is the thing this split exists to avoid.
+Do not read the domain files yourself. They are long, you are not auditing, and holding them all in your context is the thing this split exists to avoid.
 
 ## 2. Wait without ending your turn
 
@@ -56,13 +57,13 @@ finished() { [ -s "$1" ] && [ "$(sed -e '/^[[:space:]]*$/d' "$1" | tail -n1)" = 
 # 540 leaves a minute of margin under the cap.
 CALL_END=$(( $(date +%s) + 540 ))
 ANSWER="ALL FINISHED"
-until finished audit-supply-chain.md && finished audit-ci-secrets.md && finished audit-application.md && finished audit-hosted.md; do
+until finished audit-supply-chain.md && finished audit-ci-secrets.md && finished audit-remote.md && finished audit-local.md && finished audit-hosted.md; do
   NOW=$(date +%s)
   [ "$NOW" -ge "$DEADLINE" ] && { ANSWER="DEADLINE"; break; }
   [ "$NOW" -ge "$CALL_END" ] && { ANSWER="STILL WAITING"; break; }
   sleep 10
 done
-for f in audit-supply-chain.md audit-ci-secrets.md audit-application.md audit-hosted.md; do
+for f in audit-supply-chain.md audit-ci-secrets.md audit-remote.md audit-local.md audit-hosted.md; do
   if finished "$f"; then echo "$f: finished"
   elif [ -s "$f" ]; then echo "$f: still writing"
   else echo "$f: not started"; fi
@@ -109,7 +110,8 @@ emit() {
 { echo "# Security audit"; echo
   emit "Supply chain" audit-supply-chain.md
   emit "CI and secrets" audit-ci-secrets.md
-  emit "Application security" audit-application.md
+  emit "Remote control" audit-remote.md
+  emit "Local application" audit-local.md
   emit "Hosted accounts" audit-hosted.md
 } > audit-report.md
 ```
@@ -123,12 +125,12 @@ For a domain cut off mid-report, the Summary says that and gives its verdict lin
 **The reporting step computes each domain's verdict from its result and finding lines, and reports any line that disagrees with it as an anomaly** — a domain's `VERDICT:` line and your status file alike. So read verdicts the way it does, from the lines rather than from anyone's summary:
 
 ```sh
-for f in audit-supply-chain.md audit-ci-secrets.md audit-application.md audit-hosted.md; do
+for f in audit-supply-chain.md audit-ci-secrets.md audit-remote.md audit-local.md audit-hosted.md; do
   node scripts/security-audit-report.mjs check "$f"
 done
 ```
 
-Each call prints that fragment's computed verdict first, then why. Write `PASS` or `FAIL` — no other text — to `audit-status.txt` according to the precedence below. PASS requires all four domains to print `PASS`.
+Each call prints that fragment's computed verdict first, then why. Write `PASS` or `FAIL` — no other text — to `audit-status.txt` according to the precedence below. PASS requires every domain to print `PASS`.
 
 FAIL if any fragment printed `FAIL`. That is a finding, and it stays a finding whether or not the other domains reported.
 

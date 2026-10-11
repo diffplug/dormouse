@@ -1,4 +1,4 @@
-Domain: application-security
+Domain: local
 Class: a persisted browser binaryPath runs a program off another machine
 Expect: dor-lib-common/src/browser-providers.ts
 Source: reverses #1040 (a UNC binaryPath passed the executable gate)

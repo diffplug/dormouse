@@ -40,7 +40,7 @@ import { RULE_ID, SEVERITY_RANK, domains, parseFragment, readFragment, ruleId } 
 
 export const POOL_DIR = '.github/audit/canaries';
 /** The domains a canary runs: the code-reading ones. `ci-and-secrets` reads live GitHub state, which a checkout cannot seed. */
-export const CANARY_DOMAINS = ['supply-chain', 'application-security', 'hosted'];
+export const CANARY_DOMAINS = ['supply-chain', 'remote', 'local', 'hosted'];
 /** What the replacement history says, the same on every run. */
 const COMMIT_MESSAGE = 'Audited tree';
 const HEADER_RE = /^(Domain|Rule|Class|Expect|Source|Severity): (\S.*)$/;

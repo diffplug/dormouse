@@ -1,4 +1,4 @@
-Domain: application-security
+Domain: local
 Class: a crafted file name escapes a shell quoting helper
 Expect: dor/src/commands/shell-quote.ts
 Source: reverses #1033 (PowerShell closes a quoted string at U+2018-U+201B too)

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Decides whether a security-audit run needs its four model-run domains, and
+ * Decides whether a security-audit run needs its model-run domains, and
  * records what this run audited for the next one to compare against. See
  * docs/specs/security-audit.md -> "Skipping an unchanged audit".
  *
@@ -87,7 +87,7 @@ function main() {
   }, null, 2)}\n`);
 
   if (decision.skip) {
-    writeFileSync('audit-report.md', `# Security audit\n\nThe four domains were skipped: ${decision.reason}. Only the deterministic checks ran; their fragment follows in the reporting step.\n`);
+    writeFileSync('audit-report.md', `# Security audit\n\nThe domains were skipped: ${decision.reason}. Only the deterministic checks ran; their fragment follows in the reporting step.\n`);
     writeFileSync('audit-status.txt', 'PASS\n');
   }
   // A skipped run's reporting steps read only the deterministic fragment.

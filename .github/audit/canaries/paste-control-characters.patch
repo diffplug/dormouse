@@ -1,4 +1,4 @@
-Domain: application-security
+Domain: local
 Class: a crafted file name types input at the shell
 Expect: lib/src/lib/clipboard.ts
 Source: reverses #1033 (a pasted or dropped file name may carry a control character)

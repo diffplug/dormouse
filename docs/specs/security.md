@@ -92,7 +92,8 @@ Gaps rather than accepted risks: we intend to close them.
 
 | Domain | Specs | Covers |
 | --- | --- | --- |
-| `application-security` | [security-local.md](./security-local.md), [security-remote.md](./security-remote.md) | local boundaries, remote control, and everything no other domain claims |
+| `remote` | [security-remote.md](./security-remote.md) | remote control and the self-host installers |
+| `local` | [security-local.md](./security-local.md) | local boundaries, the desktop shells, and everything no other domain claims |
 | `hosted` | [security-hosted.md](./security-hosted.md) | Hosted accounts, the one-time rendezvous, and the pgstencil provenance link |
 | `supply-chain` | [security-supply-chain.md](./security-supply-chain.md) | the dependency graph, the lockfile, the disclosure and its generator |
 | `ci-and-secrets` | [security-ci.md](./security-ci.md), [security-audit.md](./security-audit.md), this spec | GitHub Actions, the bot, releases, secrets, and the audit itself |
