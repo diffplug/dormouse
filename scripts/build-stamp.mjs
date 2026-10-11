@@ -54,7 +54,7 @@ function buildStamp() {
   cached ??= computeBuildStamp({
     env: process.env,
     git: runGit,
-    changelog: readFileSync(resolve(repoRoot, 'CHANGELOG.md'), 'utf8'),
+    changelog: readChangelog(),
   });
   return cached;
 }
@@ -89,6 +89,15 @@ function latestChangelogVersion(input) {
     if (match) return match[1];
   }
   return '0.0.0';
+}
+
+/** A tree without one (a test fixture) reads as version `0.0.0`, never official. */
+function readChangelog() {
+  try {
+    return readFileSync(resolve(repoRoot, 'CHANGELOG.md'), 'utf8');
+  } catch {
+    return '';
+  }
 }
 
 function runGit(args) {
