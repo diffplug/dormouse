@@ -64,6 +64,31 @@ impl Kind {
     }
 }
 
+/// Why a persisted file's numbers could not be adopted.
+///
+/// Another version's file may hold marks above every number this build knows
+/// of, so it is never overwritten, and no `surface:` or `workspace:` number is
+/// handed out while it stands. A file this version cannot parse at all is
+/// overwritten from the disk scan: every write is atomic, so only outside
+/// damage leaves one, and refusing it would keep every launch on opaque ids
+/// until someone deleted the file by hand; the cost is reusing a number only a
+/// closed Surface or Workspace held. The VS Code extension host takes the same
+/// policy (`persistedNext` in `vscode-ext/src/surface-ids.ts`).
+#[derive(Debug, PartialEq, Eq)]
+pub enum LoadError {
+    OtherVersion(u64),
+    Unreadable(String),
+}
+
+impl std::fmt::Display for LoadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            LoadError::OtherVersion(version) => write!(f, "{FILE} has version {version}, expected {VERSION}"),
+            LoadError::Unreadable(e) => write!(f, "unreadable {FILE}: {e}"),
+        }
+    }
+}
+
 /// Each kind's lowest number not yet handed out or seen.
 #[derive(Debug, Default)]
 pub struct Counters {
@@ -100,10 +125,14 @@ impl Counters {
 
     /// Adopt a persisted file's numbers as starting points: nothing at or
     /// above one was handed out, so starting there reuses nothing.
-    pub fn load(&mut self, contents: &str) -> Result<(), String> {
-        let file: File = serde_json::from_str(contents).map_err(|e| format!("unreadable {FILE}: {e}"))?;
+    pub fn load(&mut self, contents: &str) -> Result<(), LoadError> {
+        let value: JsonValue = serde_json::from_str(contents).map_err(|e| LoadError::Unreadable(e.to_string()))?;
+        if let Some(version) = value.get("version").and_then(JsonValue::as_u64).filter(|v| *v != VERSION) {
+            return Err(LoadError::OtherVersion(version));
+        }
+        let file: File = serde_json::from_value(value).map_err(|e| LoadError::Unreadable(e.to_string()))?;
         if file.version != VERSION {
-            return Err(format!("{FILE} has version {}, expected {VERSION}", file.version));
+            return Err(LoadError::Unreadable(format!("version {}", file.version)));
         }
         self.seed(Kind::Surface, file.surface);
         self.seed(Kind::Workspace, file.workspace);
@@ -258,8 +287,12 @@ mod tests {
     #[test]
     fn an_unreadable_or_foreign_file_loads_nothing() {
         let mut counters = Counters::default();
-        assert!(counters.load("{not json").is_err());
-        assert!(counters.load(r#"{"version":2,"surface":9,"workspace":9,"window":9}"#).is_err());
+        assert!(matches!(counters.load("{not json"), Err(LoadError::Unreadable(_))));
+        assert!(matches!(counters.load(r#"{"version":1,"surface":"9"}"#), Err(LoadError::Unreadable(_))));
+        assert!(matches!(counters.load(r#"{"surface":9,"workspace":9,"window":9}"#), Err(LoadError::Unreadable(_))));
+        // Another version's file, whatever else it holds.
+        assert_eq!(counters.load(r#"{"version":2,"surface":9,"workspace":9,"window":9}"#), Err(LoadError::OtherVersion(2)));
+        assert_eq!(counters.load(r#"{"version":2,"next":{"surface":9}}"#), Err(LoadError::OtherVersion(2)));
         assert_eq!(counters.reserve(Kind::Window, 1, 0), 1..2);
     }
 

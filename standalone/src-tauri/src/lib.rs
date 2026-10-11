@@ -152,13 +152,55 @@ struct WindowState {
     /// registry). Only ever held briefly: a report raising a counter runs on
     /// the main thread.
     ids: Mutex<ids::Counters>,
-    /// Where the counters persist, `None` when the state root is unavailable.
+    /// Where the counters persist, and whether a reservation may write there.
     /// Held across a reservation and its write, so no caller takes a number
     /// before the file covers it, and writes land in reservation order.
-    ids_file: Mutex<Option<PathBuf>>,
+    ids_file: Mutex<IdsFile>,
     /// Windows closed with everything reopenable, newest first
     /// (docs/specs/reopen.md). Memory only: a quit forgets them.
     closed_windows: Mutex<Vec<ClosedWindow>>,
+}
+
+/// Where the id counters persist, and what a reservation may do with the
+/// file (§Workspace registry). Only an `Adopted` file lets a reservation hand
+/// out `workspace:` and `surface:` numbers; window labels, which have no
+/// opaque fallback, are handed out whatever the file's state.
+#[derive(Debug, Default)]
+enum IdsFile {
+    /// No state root, or not seeded yet: nothing persists.
+    #[default]
+    Absent,
+    /// A read failed for a reason other than the file's absence: the next
+    /// reservation reads it again.
+    Unread(PathBuf),
+    /// Adopted, or absent on disk: every reservation writes here.
+    Adopted(PathBuf),
+    /// Another version wrote it (`ids::LoadError`): never overwritten.
+    OtherVersion,
+}
+
+/// Read the counters' file at `path` into `counters`, logging what keeps it
+/// from being adopted.
+fn adopt_ids_file(path: PathBuf, counters: &Mutex<ids::Counters>) -> IdsFile {
+    let contents = match std::fs::read_to_string(&path) {
+        Ok(contents) => contents,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return IdsFile::Adopted(path),
+        Err(e) => {
+            append_log(format!("[ids] read {}: {e}; handing out no Workspace or Surface ids until it reads", path.display()));
+            return IdsFile::Unread(path);
+        }
+    };
+    match guard(counters).load(&contents) {
+        Ok(()) => IdsFile::Adopted(path),
+        Err(e @ ids::LoadError::OtherVersion(_)) => {
+            append_log(format!("[ids] WARNING: {e}; handing out no Workspace or Surface ids, and leaving it alone"));
+            IdsFile::OtherVersion
+        }
+        Err(e) => {
+            append_log(format!("[ids] WARNING: {e}; overwriting it from the disk scan"));
+            IdsFile::Adopted(path)
+        }
+    }
 }
 
 /// What Reopen rebuilds a closed window from: the snapshot its webview built
@@ -199,20 +241,35 @@ impl WindowState {
     /// One block per `(kind, count, above)`: `count` numbers of `kind`, all
     /// above `above`, never handed out by this run or an earlier one
     /// (§Workspace registry). Writes and fsyncs `ids.json` once per call, so
-    /// every caller must be off the main thread.
+    /// every caller must be off the main thread. A Workspace or Surface block
+    /// is empty unless that write landed (`docs/specs/transport.md` →
+    /// "Surface ids"); the counters stay raised, which only skips numbers.
     fn reserve_blocks(&self, asks: &[(ids::Kind, u64, u64)]) -> Vec<std::ops::Range<u64>> {
-        let path = guard(&self.ids_file);
+        let mut file = guard(&self.ids_file);
+        if let IdsFile::Unread(path) = &*file {
+            *file = adopt_ids_file(path.clone(), &self.ids);
+        }
+        let path = match &*file {
+            IdsFile::Adopted(path) => Some(path),
+            IdsFile::Absent | IdsFile::Unread(_) | IdsFile::OtherVersion => None,
+        };
+        let labels_only = |kind: ids::Kind| kind == ids::Kind::Window;
         let (blocks, contents) = {
             let mut counters = guard(&self.ids);
-            let blocks = asks.iter().map(|&(kind, count, above)| counters.reserve(kind, count, above)).collect();
+            let blocks: Vec<_> = asks
+                .iter()
+                .map(|&(kind, count, above)| if path.is_some() || labels_only(kind) { counters.reserve(kind, count, above) } else { 0..0 })
+                .collect();
             (blocks, counters.file())
         };
-        if let Some(path) = path.as_ref() {
-            if let Err(e) = write_file_atomically(path, &contents) {
-                append_log(format!("[ids] {e}; the counters stay in memory"));
+        let persisted = path.is_some_and(|path| match write_file_atomically(path, &contents) {
+            Ok(()) => true,
+            Err(e) => {
+                append_log(format!("[ids] {e}; handing out no Workspace or Surface ids"));
+                false
             }
-        }
-        blocks
+        });
+        blocks.into_iter().zip(asks).map(|(block, &(kind, ..))| if persisted || labels_only(kind) { block } else { 0..0 }).collect()
     }
 
     /// One block, as `reserve_blocks` hands it out.
@@ -226,24 +283,16 @@ impl WindowState {
     }
 
     /// Boot: persist the counters at `path`, and raise each above both the
-    /// numbers a previous run left there and every id it left on disk. A
-    /// missing or unreadable file leaves the disk scan alone.
+    /// numbers a previous run left there and every id it left on disk.
     fn seed_ids(&self, path: PathBuf, saved: &SavedWindows) {
         let mut file = guard(&self.ids_file);
-        let mut counters = guard(&self.ids);
-        match std::fs::read_to_string(&path) {
-            Ok(contents) => {
-                if let Err(e) = counters.load(&contents) {
-                    append_log(format!("[ids] {e}"));
-                }
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => append_log(format!("[ids] read {}: {e}", path.display())),
+        {
+            let mut counters = guard(&self.ids);
+            counters.seed(ids::Kind::Window, saved.next_ws);
+            counters.seed(ids::Kind::Workspace, saved.next_workspace);
+            counters.seed(ids::Kind::Surface, saved.next_surface);
         }
-        *file = Some(path);
-        counters.seed(ids::Kind::Window, saved.next_ws);
-        counters.seed(ids::Kind::Workspace, saved.next_workspace);
-        counters.seed(ids::Kind::Surface, saved.next_surface);
+        *file = adopt_ids_file(path, &self.ids);
     }
 
     fn owned_by(&self, label: &str) -> Vec<String> {
@@ -4779,7 +4828,8 @@ pub fn run() {
                     app.state::<WindowState>().seed_ids(root.join(ids::FILE), &saved);
                     restore_windows(app.handle(), &dir, &saved.labels);
                 }
-                // The counters run in memory, from the floors their callers pass.
+                // Nothing persists the counters: window labels come from memory,
+                // and Workspace and Surface ids fall back to opaque ones.
                 Err(e) => append_log(format!("[window] {e}")),
             }
             if let Some(state) = app.try_state::<WindowState>() {
@@ -5654,6 +5704,73 @@ mod tests {
     }
 
     #[test]
+    fn a_reservation_it_cannot_persist_hands_out_no_workspace_or_surface_ids() {
+        use super::ids::Kind;
+        let root = TempDir::new("ids-write-fails");
+        let windows = boot_ids(root.path());
+        assert_eq!(windows.reserve_ids(Kind::Surface, 2, 0), 1..3);
+        // The temp file the write goes through cannot be created.
+        fs::create_dir(root.path().join("ids.json.tmp")).unwrap();
+        assert!(windows.reserve_id_strings(Kind::Surface, 8, 0).is_empty());
+        assert!(windows.reserve_id_strings(Kind::Workspace, 4, 0).is_empty());
+        // A window still needs its label, which has no opaque fallback.
+        assert_eq!(super::next_window_label(&windows), "ws-1");
+        fs::remove_dir(root.path().join("ids.json.tmp")).unwrap();
+        // The failed reservations only skipped numbers.
+        assert_eq!(windows.reserve_ids(Kind::Surface, 1, 0), 11..12);
+    }
+
+    #[test]
+    fn another_versions_file_is_never_overwritten_nor_handed_out_past() {
+        use super::ids::Kind;
+        let root = TempDir::new("ids-other-version");
+        let theirs = r#"{"version":2,"surface":900,"workspace":90,"window":9}"#;
+        fs::write(root.path().join("ids.json"), theirs).unwrap();
+        let windows = boot_ids(root.path());
+        assert!(windows.reserve_id_strings(Kind::Surface, 8, 0).is_empty());
+        let boot = boot_reserve_ids_on(&windows);
+        assert!(boot.0.is_empty() && boot.1.is_empty());
+        assert_eq!(super::next_window_label(&windows), "ws-1");
+        assert_eq!(fs::read_to_string(root.path().join("ids.json")).unwrap(), theirs);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_file_it_cannot_read_hands_out_nothing_until_it_reads() {
+        use super::ids::Kind;
+        use std::os::unix::fs::PermissionsExt;
+        let root = TempDir::new("ids-unread");
+        let file = root.path().join("ids.json");
+        let ours = r#"{"version":1,"surface":500,"workspace":40,"window":9}"#;
+        fs::write(&file, ours).unwrap();
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o000)).unwrap();
+        let windows = boot_ids(root.path());
+        assert!(windows.reserve_id_strings(Kind::Surface, 8, 0).is_empty());
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o600)).unwrap();
+        assert_eq!(fs::read_to_string(&file).unwrap(), ours);
+        assert_eq!(windows.reserve_ids(Kind::Surface, 1, 0), 500..501);
+    }
+
+    #[test]
+    fn a_file_it_cannot_parse_is_overwritten_from_the_disk_scan() {
+        use super::ids::Kind;
+        let root = TempDir::new("ids-corrupt");
+        fs::write(root.path().join("ids.json"), "{not json").unwrap();
+        let windows = boot_ids(root.path());
+        assert_eq!(windows.reserve_ids(Kind::Surface, 2, 0), 1..3);
+        let file: JsonValue = serde_json::from_str(&fs::read_to_string(root.path().join("ids.json")).unwrap()).unwrap();
+        assert_eq!((file["version"].as_u64(), file["surface"].as_u64()), (Some(1), Some(3)));
+    }
+
+    /// `boot_reserve_ids`'s two blocks, as ids.
+    fn boot_reserve_ids_on(windows: &super::WindowState) -> (Vec<String>, Vec<String>) {
+        use super::ids::Kind;
+        let blocks = windows.reserve_blocks(&[(Kind::Workspace, 4, 0), (Kind::Surface, 8, 0)]);
+        let spell = |kind: Kind, block: &std::ops::Range<u64>| block.clone().map(|n| kind.id(n)).collect::<Vec<_>>();
+        (spell(Kind::Workspace, &blocks[0]), spell(Kind::Surface, &blocks[1]))
+    }
+
+    #[test]
     fn a_relaunch_never_reuses_a_closed_workspace_number() {
         let root = TempDir::new("ids-workspace-relaunch");
         let sessions = root.path().join("sessions");
@@ -5683,8 +5800,8 @@ mod tests {
     fn boot_seeding_never_lowers_a_counter_a_window_already_raised() {
         let root = TempDir::new("ids-seed-max");
         let windows = super::WindowState::default();
-        // A report can land before the disk scan seeds.
-        windows.reserve_ids(super::ids::Kind::Workspace, 30, 0);
+        // A report of workspace:31 can land before the disk scan seeds.
+        super::guard(&windows.ids).seed(super::ids::Kind::Workspace, 32);
         windows.seed_ids(root.path().join("ids.json"), &super::saved_windows(&root.path().join("sessions")));
         assert_eq!(windows.reserve_ids(super::ids::Kind::Workspace, 1, 0).start, 32);
     }

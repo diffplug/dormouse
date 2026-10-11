@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { mkdir, readFile, rm, utimes, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, rm, utimes, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -136,6 +136,36 @@ describe('createSurfaceIdAllocator', () => {
   it('hands out nothing when it cannot persist the block', async () => {
     await mkdir(file());
     expect(await createSurfaceIdAllocator(dir, logger).reserve(1, 0)).toEqual([]);
+    expect(logger.error).toHaveBeenCalled();
+  });
+
+  it('hands out nothing, and writes nothing, when it cannot read the file', async () => {
+    // A Windows virus scanner's EBUSY, here a permission: the mark it hides may
+    // be above every number this window knows.
+    await writeFile(file(), JSON.stringify({ version: 1, surface: 900 }));
+    await chmod(file(), 0o000);
+    try {
+      expect(await createSurfaceIdAllocator(dir, logger).reserve(1, 0)).toEqual([]);
+    } finally {
+      await chmod(file(), 0o600);
+    }
+    expect(await persisted()).toBe(900);
+    expect(hooks.writes).toBe(0);
+    expect(logger.error).toHaveBeenCalled();
+  });
+
+  it('never hands out a number past, or overwrites, a file another version wrote', async () => {
+    const theirs = JSON.stringify({ version: 2, surface: 900 });
+    await writeFile(file(), theirs);
+    expect(await createSurfaceIdAllocator(dir, logger).reserve(1, 0)).toEqual([]);
+    expect(await readFile(file(), 'utf8')).toBe(theirs);
+    expect(hooks.writes).toBe(0);
+  });
+
+  it('overwrites a file it cannot parse, from its own counter and the floor', async () => {
+    await writeFile(file(), '{not json');
+    expect(await createSurfaceIdAllocator(dir, logger).reserve(1, 41)).toEqual(['surface:42']);
+    expect(await persisted()).toBe(43);
     expect(logger.error).toHaveBeenCalled();
   });
 

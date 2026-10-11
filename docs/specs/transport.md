@@ -182,6 +182,7 @@ Source of truth: `ManagedVoicePort` in `lib/src/lib/platform/managed-voice-types
 **Must mint every Surface id as `surface:<n>` off one host counter** — standalone's Rust for every window, the VS Code extension host for every window of the install, else the page alone — handed to the webview in blocks so a Wall mints synchronously. Each reservation names a floor, the highest `surface:<n>` the webview restored, and every number it returns is above it. A helper's id is minted at its birth. The id is the `dor` handle (`docs/specs/dor-cli.md` → Handle Model); beyond its number, it is opaque.
 
 - **A host must persist its counter's high-water mark before handing out a number at or above it**, so no number is reused across launches, **and never past the block it hands out**, so a relaunch skips only the ids a webview held unused at exit; where each host keeps it: `docs/specs/standalone.md` → "Workspace registry", `docs/specs/vscode.md` → "Surface id minting".
+- **Never hand out a number while the counter's file cannot be read or another version wrote it, and never overwrite another version's**; a file this version cannot parse is overwritten from what the host still knows (rationale).
 - **Must allow creation when a reservation fails**, minting `surface:<uuid>`.
 
 Carriers: the `boot_reserve_ids` and `surface_reserve_ids` invokes (standalone); `surface:reserveIds` → `surface:reservedIds` (VS Code). Source of truth: `lib/src/lib/surface-ids.ts`.

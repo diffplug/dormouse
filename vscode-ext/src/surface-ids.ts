@@ -188,15 +188,43 @@ export function createSurfaceIdAllocator(dir: string, logger: AllocatorLog, timi
     return now - watched.since >= staleMs;
   }
 
-  async function persistedNext(): Promise<number> {
+  /**
+   * The persisted next number, or null when this window must hand out none:
+   * a read failing for any reason but the file's absence (a Windows virus
+   * scanner's EBUSY, say) or a file another version wrote. Either may hold a
+   * mark above every number this window knows of, and handing out or writing
+   * over it would reuse numbers; another version's file is never overwritten.
+   *
+   * A file this version cannot parse at all is overwritten, from this
+   * window's own counter and the webview's floor. Every write is atomic, so
+   * only outside damage leaves one, and refusing it would leave the install
+   * on opaque ids until someone deleted the file by hand; the cost is that
+   * numbers handed out since the restored Surfaces' floor may be reused.
+   * Standalone's `ids.json` takes the same policy (`Counters::load` in
+   * `standalone/src-tauri/src/ids.rs`).
+   */
+  async function persistedNext(): Promise<number | null> {
+    let contents: string;
     try {
-      const parsed: unknown = JSON.parse(await readFile(file, 'utf8'));
-      const { version, surface } = (parsed ?? {}) as { version?: unknown; surface?: unknown };
-      if (version === VERSION && Number.isSafeInteger(surface) && (surface as number) >= 0) return surface as number;
-      logger.error(`[surface-ids] ignoring ${file}: not a version ${VERSION} counter`);
+      contents = await readFile(file, 'utf8');
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') logger.error(`[surface-ids] read ${file}: ${String(error)}`);
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 0;
+      logger.error(`[surface-ids] read ${file}: ${String(error)}; handing out no ids`);
+      return null;
     }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(contents);
+    } catch {
+      parsed = undefined;
+    }
+    const { version, surface } = (parsed !== null && typeof parsed === 'object' ? parsed : {}) as { version?: unknown; surface?: unknown };
+    if (typeof version === 'number' && version !== VERSION) {
+      logger.error(`[surface-ids] ${file} has version ${version}, not ${VERSION}; handing out no ids, and leaving it alone`);
+      return null;
+    }
+    if (version === VERSION && Number.isSafeInteger(surface) && (surface as number) >= 0) return surface as number;
+    logger.error(`[surface-ids] ${file} is unreadable; overwriting it from this window's counter`);
     return 0;
   }
 
@@ -211,12 +239,14 @@ export function createSurfaceIdAllocator(dir: string, logger: AllocatorLog, timi
   /**
    * Under the lock: every queued reservation still within its deadline takes
    * its block, in arrival order, and one write persists the end of the last.
-   * Each answer is its block, or none when the write failed — another window,
-   * not seeing it, could hand out the same numbers.
+   * Each answer is its block, or none when the file could not be read or the
+   * write failed — another window, not seeing it, could hand out the same
+   * numbers.
    */
   async function reserveQueued(): Promise<Array<[Request, string[]]>> {
     const batch = queue.splice(0);
     const persisted = await persistedNext();
+    if (persisted === null) return batch.map((request) => [request, []]);
     const now = performance.now();
     const firsts = batch.map((request) => now < request.deadline ? take(request.n, request.above, persisted) : null);
     if (firsts.some((first) => first !== null)) {
