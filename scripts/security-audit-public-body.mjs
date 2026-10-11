@@ -43,7 +43,8 @@ const DAY = 86_400_000;
 const RECENT_DISCLOSURES = 10;
 
 const STATUS_MARKER = /^<!-- security-audit-status outcome=(PASS|FAIL|INCONCLUSIVE) -->/;
-const DISCLOSURE_TITLE = /^\[audit-disclosure ([A-Za-z0-9._-]+)\] (FAIL|BLOCKER|WARNING) (failed check|finding)$/;
+/** `[audit-disclosure <key>/<ledger number>] …`: one per ledger issue, since a finding that recurs after its fix is filed again under its key. */
+const DISCLOSURE_TITLE = /^\[audit-disclosure ([A-Za-z0-9._-]+)\/([1-9]\d*)\] (FAIL|BLOCKER|WARNING) (failed check|finding)$/;
 const MINTED_KEY = /^[0-9a-f]{12}$/;
 const KEY = /^(?:[0-9a-f]{12}|manual-[a-z0-9][a-z0-9-]{0,59})$/;
 const SEVERITY = /^(FAIL|BLOCKER|WARNING)$/;
@@ -93,16 +94,19 @@ export function parseLedger(text) {
   });
 }
 
-/** Each disclosure issue a run filed, keyed by the ledger key its fixed-form title carries; the lowest number wins. */
+/** A ledger issue's identity in the archive: its key and its number in the private tracker. */
+export const archiveId = (key, ledgerNumber) => `${key}/${ledgerNumber}`;
+
+/** Each disclosure issue a run filed, by the ledger issue its fixed-form title names; the lowest number wins. */
 export function parseArchive(issues) {
-  const byKey = new Map();
+  const byLedger = new Map();
   for (const issue of [...issues].sort((a, b) => a.number - b.number)) {
     const m = typeof issue.title === 'string' ? issue.title.match(DISCLOSURE_TITLE) : null;
-    if (!m || byKey.has(m[1]) || !Number.isInteger(issue.number)) continue;
-    byKey.set(m[1], { number: issue.number, key: m[1], severity: m[2], state: issue.state === 'CLOSED' ? 'CLOSED' : 'OPEN',
+    if (!m || byLedger.has(archiveId(m[1], m[2])) || !Number.isInteger(issue.number)) continue;
+    byLedger.set(archiveId(m[1], m[2]), { number: issue.number, key: m[1], severity: m[3], state: issue.state === 'CLOSED' ? 'CLOSED' : 'OPEN',
       createdAt: typeof issue.createdAt === 'string' && ISO.test(issue.createdAt) ? issue.createdAt : null });
   }
-  return byKey;
+  return byLedger;
 }
 
 // --- Validating what a disclosure names --------------------------------------
@@ -166,8 +170,8 @@ const REASON_TEXT = {
   deadline: () => `${DISCLOSURE_DAYS} days after it was filed, not yet fixed`,
 };
 
-/** The archive issue's title: fixed text, the key, and the severity. */
-export const disclosureTitle = (entry) => `[audit-disclosure ${entry.key}] ${entry.severity} ${kindOf(entry.severity)}`;
+/** The archive issue's title: fixed text, the key and ledger number, and the severity. */
+export const disclosureTitle = (entry) => `[audit-disclosure ${archiveId(entry.key, entry.number)}] ${entry.severity} ${kindOf(entry.severity)}`;
 
 /** One disclosure issue's body, from validated fields and a maintainer's summary only. */
 export function disclosureBody({ entry, reason, disclosedAt, repo, root = '.' }) {
@@ -193,7 +197,7 @@ export function disclosureBody({ entry, reason, disclosedAt, repo, root = '.' })
 }
 
 /**
- * The disclosure work a run does: create an issue for each entry newly due
+ * The disclosure work a run does: create an issue for each ledger issue newly due
  * (closed already when its ledger issue is), and close an open one whose
  * ledger issue has since closed. `verify(pr)` says whether a cited PR merged
  * here. Re-running over the archive it produced plans nothing.
@@ -202,7 +206,7 @@ export function planDisclosures({ ledger, archive, now, repo, verify, root = '.'
   const actions = [];
   for (const entry of ledger) {
     if (!entry.key || !entry.severity) continue;
-    const existing = archive.get(entry.key);
+    const existing = archive.get(archiveId(entry.key, entry.number));
     if (existing?.state === 'CLOSED') continue;
     if (existing && entry.state === 'OPEN') continue;
     const cited = entry.state === 'CLOSED' ? citedPr(entry, repo) : null;
@@ -263,7 +267,7 @@ const EMBARGO_NOTES = {
 
 /**
  * The status issue's body. `ledger` is the parsed snapshot, or null when it
- * could not be read; `archive` the disclosure issues by key.
+ * could not be read; `archive` the disclosure issues by ledger issue.
  */
 export function statusBody({ status, fileStatus, date, runUrl, commit, repo, fragments, embargoResult = '', skipped = '', fullRunAt = '', ledger, archive, now, root = '.' }) {
   valid(status, /^(PASS|FAIL|MISSING)$/, 'status');
@@ -302,7 +306,7 @@ export function statusBody({ status, fileStatus, date, runUrl, commit, repo, fra
       '| Key | Severity | Kind | Filed | Disclosure |', '| --- | --- | --- | --- | --- |');
     for (const e of open) {
       // A minted key is a hash; a hand-filed one is a name, held back until disclosure.
-      const shown = archive.get(e.key);
+      const shown = e.key && archive.get(archiveId(e.key, e.number));
       const key = !e.key ? 'unidentified' : MINTED_KEY.test(e.key) || shown ? `\`${e.key}\`` : 'hand-filed';
       lines.push(`| ${key} | ${e.severity ?? '–'} | ${e.severity ? kindOf(e.severity) : '–'} | ${day(e.createdAt)} | ${shown ? `disclosed: #${shown.number}` : e.key ? day(disclosureDue(e.createdAt).toISOString()) : 'when identified'} |`);
     }
@@ -366,15 +370,15 @@ function publish(args) {
   // Disclosures first, so the status body lists what this run published.
   const disclosed = [];
   for (const action of ledger ? planDisclosures({ ledger, archive, now, repo, verify: (pr) => prMerged(repo, pr) }) : []) {
-    const file = bodyFile(dir, `disclosure-${action.entry.key}.md`, action.body);
+    const file = bodyFile(dir, `disclosure-${action.entry.number}.md`, action.body);
     let number = action.number;
     if (action.type === 'create') {
       number = issueNumber(gh(['issue', 'create', ...R, '--title', action.title, '--label', DISCLOSURE_LABEL, '--body-file', file]));
       disclosed.push({ number, entry: action.entry });
-      archive.set(action.entry.key, { number, key: action.entry.key, severity: action.entry.severity, state: action.close ? 'CLOSED' : 'OPEN', createdAt: now.toISOString() });
+      archive.set(archiveId(action.entry.key, action.entry.number), { number, key: action.entry.key, severity: action.entry.severity, state: action.close ? 'CLOSED' : 'OPEN', createdAt: now.toISOString() });
     } else {
       gh(['issue', 'edit', String(number), ...R, '--body-file', file]);
-      archive.get(action.entry.key).state = 'CLOSED';
+      archive.get(archiveId(action.entry.key, action.entry.number)).state = 'CLOSED';
     }
     if (action.close) gh(['issue', 'close', String(number), ...R, '--reason', action.close]);
   }

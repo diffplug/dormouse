@@ -1113,7 +1113,7 @@ const DISCLOSURE_SEED = () => ({
 test('disclosure publishes fixed, dismissed, and overdue findings from validated fields alone', (t) => {
   const { dir, published } = passOver(t, DISCLOSURE_SEED());
   assert.equal(published.status, 0, published.stderr);
-  const byKey = Object.fromEntries(disclosures(dir).map((i) => [i.title.match(/^\[audit-disclosure (\S+)\]/)[1], i]));
+  const byKey = Object.fromEntries(disclosures(dir).map((i) => [i.title.match(/^\[audit-disclosure ([^/\]]+)\/\d+\]/)[1], i]));
   assert.deepEqual(Object.keys(byKey).sort(), ['777777777777', '888888888888', 'aaaaaaaaaaaa', 'bbbbbbbbbbbb', 'cccccccccccc', 'dddddddddddd', 'ffffffffffff']);
   // A heading the checked-out spec lacks, or a path that climbs, is withheld.
   assert.ok(byKey['777777777777'].body.includes('| Where | withheld: the cited spec section is not in the checked-out specs |'), byKey['777777777777'].body);
@@ -1122,8 +1122,8 @@ test('disclosure publishes fixed, dismissed, and overdue findings from validated
   delete byKey['777777777777'];
   delete byKey['888888888888'];
   assert.deepEqual(Object.values(byKey).map((i) => i.title).sort(), [
-    '[audit-disclosure aaaaaaaaaaaa] WARNING finding', '[audit-disclosure bbbbbbbbbbbb] WARNING finding',
-    '[audit-disclosure cccccccccccc] WARNING finding', '[audit-disclosure dddddddddddd] FAIL failed check', '[audit-disclosure ffffffffffff] WARNING finding']);
+    '[audit-disclosure aaaaaaaaaaaa/1] WARNING finding', '[audit-disclosure bbbbbbbbbbbb/2] WARNING finding',
+    '[audit-disclosure cccccccccccc/3] WARNING finding', '[audit-disclosure dddddddddddd/4] FAIL failed check', '[audit-disclosure ffffffffffff/6] WARNING finding']);
   const { aaaaaaaaaaaa: fixed, bbbbbbbbbbbb: uncited, cccccccccccc: dismissed, dddddddddddd: overdue } = byKey;
   assert.deepEqual([fixed.state, fixed.stateReason, uncited.state, dismissed.stateReason, overdue.state], ['CLOSED', 'COMPLETED', 'CLOSED', 'NOT_PLANNED', 'OPEN']);
   assert.ok(fixed.body.includes('| Why disclosed | fixed in [#77](https://github.com/fixture/repo/pull/77) |'), fixed.body);
@@ -1169,7 +1169,7 @@ test('disclosure is idempotent and closes a deadline disclosure once fixed', (t)
   writeFileSync(join(dir, 'gh-state.json'), JSON.stringify(state));
   const third = passOver(t, null, { dir, env });
   assert.equal(third.published.status, 0, `${third.published.stdout}${third.published.stderr}`);
-  const overdue = disclosures(dir).find((i) => i.title.startsWith('[audit-disclosure dddddddddddd]'));
+  const overdue = disclosures(dir).find((i) => i.title.startsWith('[audit-disclosure dddddddddddd/4]'));
   assert.equal(overdue.state, 'CLOSED');
   assert.ok(overdue.body.includes('| Why disclosed | fixed in [#77]'), overdue.body);
   assert.deepEqual({ issues: disclosures(dir).length, comments: statusComments(dir).length }, first);
@@ -1192,6 +1192,25 @@ test('the status issue is commented on only when the outcome changes', (t) => {
   // The FAIL filed a ledger finding this PASS never re-verifies, so it is inconclusive.
   assert.match(run('PASS').comments.at(-1).body, /^The audit's outcome changed from FAIL to INCONCLUSIVE at /);
   assert.equal(ghState(dir).public.length, 1);
+});
+
+// A fixed finding that recurs is filed again under its key, as a second ledger
+// issue: it is disclosed on its own clock, under its own issue, and the status
+// issue never points it at the earlier disclosure.
+test('a finding that recurs after its fix is disclosed again, as its own issue', () => {
+  const now = new Date('2026-10-20T00:00:00Z');
+  const entry = (number, state, createdAt) => ({ number, state, stateReason: state === 'CLOSED' ? 'COMPLETED' : '', createdAt, closedAt: null,
+    key: 'aaaaaaaaaaaa', severity: 'WARNING', meta: null, fixed: [], summary: null });
+  const fixed = entry(3, 'CLOSED', '2026-10-01T00:00:00Z');
+  const recurred = entry(9, 'OPEN', '2026-10-12T00:00:00Z');
+  const both = planDisclosures({ ledger: [recurred, fixed], archive: new Map(), now, repo: 'fixture/repo', verify: () => false });
+  assert.deepEqual(both.map((a) => a.title).sort(), ['[audit-disclosure aaaaaaaaaaaa/3] WARNING finding', '[audit-disclosure aaaaaaaaaaaa/9] WARNING finding']);
+  const archive = new Map([['aaaaaaaaaaaa/3', { number: 40, key: 'aaaaaaaaaaaa', severity: 'WARNING', state: 'CLOSED', createdAt: '2026-10-02T00:00:00Z' }]]);
+  const [again] = planDisclosures({ ledger: [recurred, fixed], archive, now, repo: 'fixture/repo', verify: () => false });
+  assert.deepEqual([again.type, again.title], ['create', '[audit-disclosure aaaaaaaaaaaa/9] WARNING finding']);
+  const body = statusBody({ status: 'PASS', fileStatus: 'PASS', date: '2026-10-13T00:00Z', runUrl: 'https://github.com/fixture/repo/actions/runs/1',
+    commit: COMMIT, repo: 'fixture/repo', fragments: {}, embargoResult: 'filed', ledger: [recurred, fixed], archive, now: new Date('2026-10-13T00:00:00Z'), root: repo });
+  assert.ok(body.includes('| `aaaaaaaaaaaa` | WARNING | finding | 2026-10-12 | 2026-10-19 |'), body);
 });
 
 // The builders' contract, apart from the steps: a hand-filed key is withheld

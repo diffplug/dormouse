@@ -157,7 +157,7 @@ The steps list the tracker with `--limit 1000`: the default of 30 once left an o
 
 **Why a human-only summary, and only from a comment.** The free text a reader wants is a maintainer's to write. The ledger issue's body is the workflow's, model text included, and posted under the same maintainer login, so a `## Public summary` heading there could be a domain's; a comment is a person's, because the workflow comments nothing but its fixed `Seen again` line.
 
-**Why the disclosure's title is the idempotence key.** Labeling the ledger issue would need a fourth step holding `EMBARGO_TOKEN`; a fixed-form title on the public issue is found with the workflow token, and a re-run that finds it publishes nothing. A hand-filed key is a maintainer's slug, which names the finding, so the status issue withholds it until disclosure.
+**Why the disclosure's title is the idempotence key.** Labeling the ledger issue would need a fourth step holding `EMBARGO_TOKEN`; a fixed-form title on the public issue is found with the workflow token, and a re-run that finds it publishes nothing. The title carries the ledger issue's number beside its key because a fixed finding that recurs is filed again under the same key, and keyed alone it would never be disclosed again. A hand-filed key is a maintainer's slug, which names the finding, so the status issue withholds it until disclosure.
 
 ## Environment and `AUDIT_PAT`
 
