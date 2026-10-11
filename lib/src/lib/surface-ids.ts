@@ -2,6 +2,7 @@ import { maxSurfaceIdNumber, surfaceIdFor } from 'dor/protocol';
 import { createIdPool } from './id-pool';
 import { sessionSurfaceIds, type PersistedSession } from './session-types';
 import { registry } from './terminal-store';
+import { isWorkspaceSurface } from './workspace-surfaces';
 
 /**
  * Surface ids (`docs/specs/transport.md` → "Surface ids"): `surface:<n>` off one
@@ -23,7 +24,9 @@ const pool = createIdPool({
   label: 'surface-ids',
   idFor: surfaceIdFor,
   localStart: 0,
-  inUse: (id) => registry.has(id),
+  // Every Surface the page holds: a terminal's Session (a helper's too, which
+  // has no Lath leaf), and any kind of Surface a mounted Wall publishes.
+  inUse: (id) => registry.has(id) || isWorkspaceSurface(id),
   logSkips: true,
 });
 
@@ -42,7 +45,8 @@ export function installSurfaceIdPool(
 
 /** Keep the page's own counter above `floor`, the highest `surface:<n>` a
  *  restore brings back; a host's counter is above it already (the
- *  reservation's floor). */
+ *  reservation's floor). The in-use skip alone would not do: a restore mints
+ *  before its Wall publishes its Surfaces, and every skip is logged as a fault. */
 export function seedSurfaceIds(floor: number): void {
   pool.seed(floor);
 }

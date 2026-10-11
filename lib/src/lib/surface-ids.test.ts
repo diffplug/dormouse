@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { installSurfaceIdPool, maxSurfaceNumber, mintSurfaceId, resetSurfaceIdPool, seedSurfaceIds, surfaceIdMinter } from './surface-ids';
 import type { PersistedSession } from './session-types';
 import { registry, type TerminalEntry } from './terminal-store';
+import { clearWorkspaceSurfaces, setWorkspaceSurfaces } from './workspace-surfaces';
 
 /** A host counter from `start`, honoring the floor and clamping a block to 64
  *  as Rust does. */
@@ -78,6 +79,17 @@ describe('mintSurfaceId', () => {
       expect(error).toHaveBeenCalledWith('[surface-ids] skipping surface:1, which is already in use');
     } finally {
       registry.delete('surface:1');
+    }
+  });
+
+  it('skips an id any Workspace holds, a browser or Tool Surface with no Session among them', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    setWorkspaceSurfaces('workspace:2', ['surface:9', 'surface:3']);
+    try {
+      await installSurfaceIdPool(counting(3), 0);
+      expect(mintSurfaceId()).toBe('surface:4');
+    } finally {
+      clearWorkspaceSurfaces('workspace:2');
     }
   });
 
