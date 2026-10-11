@@ -19,7 +19,7 @@ async function fixture(t) {
   await Promise.all(['dev-agent-browser.mjs', 'dev-host-guard.mjs', 'dev-run.mjs'].map(name =>
     copyFile(path.join(scripts, name), path.join(standalone, 'scripts', name))));
   // The repo modules the harness imports by relative path.
-  await Promise.all(['dor/src/protocol.ts', 'lib/src/lib/platform/types.ts'].map(async file => {
+  await Promise.all(['dor/src/protocol.ts', 'lib/src/lib/platform/types.ts', 'lib/src/host/atomic-json-file.ts'].map(async file => {
     await mkdir(path.join(root, path.dirname(file)), { recursive: true });
     await copyFile(path.join(scripts, '../..', file), path.join(root, file));
   }));
@@ -314,6 +314,15 @@ test('registry seeds reservations above restored IDs, reading id numbers as Rust
   assert.deepEqual(await command(run, 'surface_reserve_ids', { count: 2, floor: 0 }), ['surface:1', 'surface:2']);
   assert.deepEqual(await command(run, 'surface_reserve_ids', { count: 1, floor: 40 }), ['surface:41']);
   assert.deepEqual(await command(run, 'surface_reserve_ids', { count: 1, floor: 3 }), ['surface:42']);
+});
+
+test('a reservation it cannot persist hands out nothing', async t => {
+  const f = await fixture(t);
+  // Nothing can be renamed over a directory.
+  await mkdir(path.join(f.root, 'node_modules/.cache/dormouse-innerdogfood/ids.json'), { recursive: true });
+  const run = await f.start().ready();
+  assert.deepEqual(await command(run, 'surface_reserve_ids', { count: 2, floor: 0 }), []);
+  assert.deepEqual(await command(run, 'boot_reserve_ids', { workspaces: 1, surfaces: 1, floor: 0 }), { workspaces: [], surfaces: [] });
 });
 
 test('a restart never re-mints an id an earlier run handed out', async t => {

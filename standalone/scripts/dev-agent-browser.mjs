@@ -3,7 +3,7 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync } from 'node:fs';
 import { AGENT_BROWSER_SOCKET_DIR_ENV, sessionForKey } from 'dor-lib-common/browser-providers';
 // cross-spawn, not node:child_process: this script spawns `dor` and
 // `agent-browser`, which are `.cmd` shims on Windows that a bare-name spawn
@@ -20,6 +20,7 @@ import { repoRoot, standaloneDir, startDevVite, worktreeId } from './dev-run.mjs
 // The id grammar and the block cap the real hosts use, type-stripped by Node.
 import { surfaceIdFor, workspaceIdFor, workspaceIdNumber } from '../../dor/src/protocol.ts';
 import { ID_RESERVE_MAX_BLOCK } from '../../lib/src/lib/platform/types.ts';
+import { writeJsonAtomic } from '../../lib/src/host/atomic-json-file.ts';
 
 const sidecarDir = path.join(standaloneDir, 'sidecar');
 const sidecarScript = path.join(sidecarDir, 'main.js');
@@ -175,16 +176,16 @@ const invokeMap = {
   // Surface ids (docs/specs/transport.md -> "Surface ids"): never at or below
   // the floor the page restored, which outlives this process in localStorage.
   surface_reserve_ids: ({ count, floor }) => reserve('surface', count, floor),
-  boot_reserve_ids: ({ workspaces, surfaces, floor }) =>
-    ({ workspaces: reserve('workspace', workspaces), surfaces: reserve('surface', surfaces, floor) }),
-  workspace_report: ({ entries }) => {
+  boot_reserve_ids: async ({ workspaces, surfaces, floor }) =>
+    ({ workspaces: await reserve('workspace', workspaces), surfaces: await reserve('surface', surfaces, floor) }),
+  workspace_report: async ({ entries }) => {
     // Restored browser state survives this process; mirror Rust's report seed.
     const seeded = ids.workspace;
     for (const entry of entries ?? []) {
       const minted = workspaceIdNumber(String(entry?.id ?? ''));
       if (minted !== null) ids.workspace = Math.max(ids.workspace, minted + 1);
     }
-    if (ids.workspace !== seeded) saveIds();
+    if (ids.workspace !== seeded) await saveIds().catch((error) => console.error(`[ids] ${error}`));
     const next = JSON.stringify(entries ?? []);
     if (next === registryEntries) return null;
     registryEntries = next;
@@ -211,18 +212,27 @@ function loadIds() {
   }
   return { workspace: 2, surface: 1 };
 }
+/** Writes queue behind one another, each taking the counters as they stand
+ *  when it starts, so the file never moves back. */
+let saving = Promise.resolve();
 function saveIds() {
-  const tmp = `${idsFile}.${process.pid}.tmp`;
-  writeFileSync(tmp, JSON.stringify(ids));
-  renameSync(tmp, idsFile);
+  const saved = saving.then(() => writeJsonAtomic(path.dirname(idsFile), idsFile, { ...ids }, { durable: true }));
+  saving = saved.catch(() => {});
+  return saved;
 }
 /** `count` ids of `kind` (clamped as the hosts clamp), each above `floor`,
- *  persisted before any is handed out. */
-function reserve(kind, count, floor = 0) {
+ *  persisted before any is handed out: none when the write fails, as the
+ *  hosts answer. */
+async function reserve(kind, count, floor = 0) {
   const n = Math.max(1, Math.min(ID_RESERVE_MAX_BLOCK, Number(count) || 1));
   const first = Math.max(ids[kind], (Number(floor) || 0) + 1);
   ids[kind] = first + n;
-  saveIds();
+  try {
+    await saveIds();
+  } catch (error) {
+    console.error(`[ids] ${error}; handing out no ids`);
+    return [];
+  }
   const idFor = kind === 'surface' ? surfaceIdFor : workspaceIdFor;
   return Array.from({ length: n }, (_, i) => idFor(first + i));
 }
