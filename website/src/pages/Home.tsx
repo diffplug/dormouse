@@ -6,6 +6,7 @@ import {
   DesktopIcon,
   DotsThreeOutlineIcon,
   LinuxLogoIcon,
+  ScalesIcon,
   SpeakerHighIcon,
   StorefrontIcon,
   TerminalIcon,
@@ -86,18 +87,29 @@ const DOWNLOAD_BUTTON_BASE =
 
 const DOWNLOAD_BUTTON_VARIANTS = {
   primary:
-    "min-h-14 w-full gap-4 px-6 py-3 text-lg sm:w-auto border-[var(--download-accent)] bg-[var(--download-primary)] text-[var(--color-text)] shadow-[0_0_18px_color-mix(in_oklch,var(--download-accent)_18%,transparent)] hover:border-[var(--download-accent-strong)] hover:bg-[var(--download-primary-hover)]",
+    "min-h-14 gap-4 px-6 py-3 text-lg border-[var(--download-accent)] bg-[var(--download-primary)] text-[var(--color-text)] shadow-[0_0_18px_color-mix(in_oklch,var(--download-accent)_18%,transparent)] hover:border-[var(--download-accent-strong)] hover:bg-[var(--download-primary-hover)]",
   wide:
-    "min-h-12 w-full gap-3 px-5 py-3 text-base sm:w-auto sm:text-lg border-[var(--download-border)] bg-[var(--download-panel)] text-[var(--download-accent)] hover:border-[var(--download-accent)] hover:bg-[var(--download-panel-hover)]",
+    "min-h-12 gap-3 px-5 py-3 text-base sm:text-lg border-[var(--download-border)] bg-[var(--download-panel)] text-[var(--download-accent)] hover:border-[var(--download-accent)] hover:bg-[var(--download-panel-hover)]",
   compact:
-    "min-h-12 w-full gap-3 px-5 py-3 text-base sm:w-auto sm:text-lg border-[var(--download-border)] bg-[var(--download-panel)] text-[var(--download-accent)] hover:border-[var(--download-accent)] hover:bg-[var(--download-panel-hover)]",
+    "min-h-12 gap-3 px-5 py-3 text-base sm:text-lg border-[var(--download-border)] bg-[var(--download-panel)] text-[var(--download-accent)] hover:border-[var(--download-accent)] hover:bg-[var(--download-panel-hover)]",
 } as const;
+
+/**
+ * One grid for the playground row and the VS Code row, so each column's two
+ * buttons share a width: the widest label in that column, no wider.
+ *
+ * The trailing `1fr` track is what lets the VS Code heading span the row
+ * without widening the button columns — an item spanning a flexible track does
+ * not size the intrinsic ones. Below `sm` it is one column of full-width buttons.
+ */
+const DOWNLOAD_GRID_CLASS = "grid gap-3 sm:grid-cols-[repeat(2,max-content)_1fr] sm:gap-x-4";
 
 const DOWNLOAD_MOUSE_BASE =
   "pointer-events-none absolute z-0 size-6 transition-transform duration-200 ease-[cubic-bezier(0.25,1,0.5,1)] motion-reduce:transition-none motion-reduce:group-hover:translate-y-0 motion-reduce:group-focus-visible:translate-y-0";
 
 const PEEK_ROTATION_DEGREES = {
   playground: -1.5,
+  compare: 2.0,
   marketplace: 2.0,
   openVsx: 2.5,
   mac: 3.75,
@@ -110,6 +122,10 @@ const PEEK_MOTIONS = {
   playground: {
     faceClass: "origin-top-right",
     mouseClass: "left-3 top-1.5 -rotate-6 group-hover:-translate-y-4 group-hover:-rotate-12 group-focus-visible:-translate-y-4 group-focus-visible:-rotate-12 motion-reduce:group-hover:-rotate-6 motion-reduce:group-focus-visible:-rotate-6",
+  },
+  compare: {
+    faceClass: "origin-top-left",
+    mouseClass: "right-3 top-1.5 rotate-6 group-hover:-translate-y-4 group-hover:rotate-12 group-focus-visible:-translate-y-4 group-focus-visible:rotate-12 motion-reduce:group-hover:rotate-6 motion-reduce:group-focus-visible:rotate-6",
   },
   marketplace: {
     faceClass: "origin-top-left",
@@ -205,6 +221,7 @@ function DownloadButton({
   onClick,
   peek,
   variant = "primary",
+  fill = false,
 }: {
   href: string;
   children: ReactNode;
@@ -213,6 +230,8 @@ function DownloadButton({
   onClick?: MouseEventHandler<HTMLAnchorElement>;
   peek: keyof typeof PEEK_MOTIONS;
   variant?: "primary" | "wide" | "compact";
+  /** Fill its grid cell, so a column of them shares one width (`DOWNLOAD_GRID_CLASS`). */
+  fill?: boolean;
 }) {
   const motion = PEEK_MOTIONS[peek];
   const peekStyle = { "--peek-rotate": `${PEEK_ROTATION_DEGREES[peek]}deg` } as CSSProperties;
@@ -221,7 +240,7 @@ function DownloadButton({
     <a
       href={href}
       onClick={onClick}
-      className="group relative isolate inline-block overflow-visible focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-4 focus-visible:outline-[var(--download-accent)]"
+      className={`group relative isolate ${fill ? "block" : "inline-block"} overflow-visible focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-4 focus-visible:outline-[var(--download-accent)]`}
       style={peekStyle}
     >
       <img
@@ -230,7 +249,7 @@ function DownloadButton({
         aria-hidden="true"
         className={`${DOWNLOAD_MOUSE_BASE} ${motion.mouseClass}`}
       />
-      <span className={`${DOWNLOAD_BUTTON_BASE} ${motion.faceClass} group-hover:rotate-[var(--peek-rotate)] group-focus-visible:rotate-[var(--peek-rotate)] ${DOWNLOAD_BUTTON_VARIANTS[variant]} ${className}`}>
+      <span className={`${DOWNLOAD_BUTTON_BASE} ${motion.faceClass} group-hover:rotate-[var(--peek-rotate)] group-focus-visible:rotate-[var(--peek-rotate)] ${DOWNLOAD_BUTTON_VARIANTS[variant]} ${fill ? "h-full w-full" : "w-full sm:w-auto"} ${className}`}>
         <span
           aria-hidden="true"
           className="flex size-6 shrink-0 items-center justify-center"
@@ -1011,37 +1030,50 @@ export default function Home() {
         <section id="download" className={`mx-auto max-w-5xl px-4 md:px-6 ${SECTION_PY}`} style={downloadAccentStyle}>
           <h2 className="font-display text-[clamp(1.5rem,2.5vw+0.5rem,2.25rem)] text-[var(--color-text)]">Get Dormouse</h2>
           <p className="mb-4 text-lg leading-relaxed opacity-70">A dormouse knows when to wake up. Multitasking terminal for mice and thumbs.</p>
-          <DownloadButton
-            href={sitePath("/playground")}
-            icon={<TerminalIcon size={26} weight="bold" />}
-            peek="playground"
-          >
-            Try it in the Playground
-          </DownloadButton>
+          <div className={DOWNLOAD_GRID_CLASS}>
+            <DownloadButton
+              href={sitePath("/playground")}
+              icon={<TerminalIcon size={26} weight="bold" />}
+              peek="playground"
+              fill
+            >
+              Try it in the Playground
+            </DownloadButton>
+            <DownloadButton
+              href={sitePath("/comparison")}
+              icon={<ScalesIcon size={22} weight="bold" />}
+              peek="compare"
+              variant="wide"
+              fill
+            >
+              Compare to…
+            </DownloadButton>
 
-          <div className="mt-10 space-y-8">
-            <div>
+            <div className="mt-7 sm:col-span-full">
               <DownloadGroupHeader icon={<VsCodeIcon className="size-6" />}>VS Code Extension</DownloadGroupHeader>
-              <p className="mb-4 text-lg leading-relaxed opacity-70">Also works in Cursor, Windsurf, Antigravity, or any other VS Code fork.</p>
-              <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-4 sm:gap-y-3">
-                <DownloadButton
-                  href="https://marketplace.visualstudio.com/items?itemName=diffplug.dormouse"
-                  icon={<StorefrontIcon size={22} weight="bold" />}
-                  peek="marketplace"
-                  variant="wide"
-                >
-                  Visual Studio Marketplace
-                </DownloadButton>
-                <DownloadButton
-                  href="https://open-vsx.org/extension/diffplug/dormouse"
-                  icon={<CubeIcon size={22} weight="bold" />}
-                  peek="openVsx"
-                  variant="wide"
-                >
-                  Open VSX Registry
-                </DownloadButton>
-              </div>
+              <p className="mb-1 text-lg leading-relaxed opacity-70">Also works in Cursor, Windsurf, Antigravity, or any other VS Code fork.</p>
             </div>
+            <DownloadButton
+              href="https://marketplace.visualstudio.com/items?itemName=diffplug.dormouse"
+              icon={<StorefrontIcon size={22} weight="bold" />}
+              peek="marketplace"
+              variant="wide"
+              fill
+            >
+              Visual Studio Marketplace
+            </DownloadButton>
+            <DownloadButton
+              href="https://open-vsx.org/extension/diffplug/dormouse"
+              icon={<CubeIcon size={22} weight="bold" />}
+              peek="openVsx"
+              variant="wide"
+              fill
+            >
+              Open VSX Registry
+            </DownloadButton>
+          </div>
+
+          <div className="mt-8">
             <div>
               <DownloadGroupHeader icon={<DesktopIcon size={24} weight="bold" />}>Standalone App</DownloadGroupHeader>
               <p className="mb-4 text-lg leading-relaxed opacity-70">Don't settle for your operating system's built-in terminal. Get a nice one.</p>

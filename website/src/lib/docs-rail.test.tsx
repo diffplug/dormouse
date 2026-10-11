@@ -19,6 +19,7 @@ import SupplyChain, { SUPPLY_CHAIN_TOC } from "../pages/SupplyChain";
 import SecurityDocs from "../pages/SecurityDocs";
 import SelfHostDocs, { SELF_HOST_TOC } from "../pages/SelfHostDocs";
 import Hosted, { HOSTED_TOC } from "../pages/Hosted";
+import Comparison, { COMPARISON_TOC } from "../pages/Comparison";
 import AgentSkillDocs from "../pages/AgentSkillDocs";
 import DorDocs from "../pages/DorDocs";
 import CompatibleAgentsDocs from "../pages/CompatibleAgentsDocs";
@@ -34,6 +35,7 @@ const PAGES: Record<string, { element: React.ReactElement; toc: TocEntry[] }> = 
   "/supply-chain": { element: <SupplyChain />, toc: SUPPLY_CHAIN_TOC },
   "/self-host": { element: <SelfHostDocs />, toc: SELF_HOST_TOC },
   "/hosted": { element: <Hosted />, toc: HOSTED_TOC },
+  "/comparison": { element: <Comparison />, toc: COMPARISON_TOC },
   "/agent-skill": { element: <AgentSkillDocs />, toc: skill.toc },
   "/dor": { element: <DorDocs />, toc: cli.toc },
   "/compatible-agents": { element: <CompatibleAgentsDocs />, toc: agents.toc },
