@@ -94,6 +94,14 @@ export interface BurrowView {
   removed?: boolean;
 }
 
+/**
+ * A Burrow push can be registered against: paired, and still on the Relay's
+ * list, whose `pushSubscribe` refuses a Burrow it no longer holds.
+ */
+function isPushTarget(burrow: BurrowView): boolean {
+  return !burrow.needsPairing && !burrow.removed;
+}
+
 /** What a removed Burrow's row says, by who serves this Pocket. */
 export const BURROW_REMOVED_COPY: Record<PocketDeployment, string> = {
   hosted: 'Removed from your account',
@@ -588,11 +596,11 @@ export default function App({
         // Owed deletions first: a replacement registered while a superseded
         // delivery row is still on the Relay would leave that row reachable.
         await client.retirePendingDeletions();
-        // Every paired Burrow, not only the unregistered ones, so one tap also
-        // repairs a rotated endpoint everywhere. Each response commits as it
-        // lands rather than after the loop: a registration that fails on the
-        // third Burrow must not throw away the first two.
-        for (const burrow of burrows.filter((h) => !h.needsPairing)) {
+        // Every paired, listed Burrow, not only the unregistered ones, so one
+        // tap also repairs a rotated endpoint everywhere. Each response commits
+        // as it lands rather than after the loop: a registration that fails on
+        // the third Burrow must not throw away the first two.
+        for (const burrow of burrows.filter(isPushTarget)) {
           const { burrowIds } = await client.subscribeToPush(burrow.burrowId, subscription);
           // Newer than any load still in flight — it answered the same question
           // about the same device, later — so it takes the token from the load
@@ -1198,7 +1206,7 @@ export function BurrowsView({
   onSignOut: () => void;
 }): React.ReactElement {
   const pushNotice = pushNoticeState({
-    pairedBurrowIds: burrows.filter((h) => !h.needsPairing).map((h) => h.burrowId),
+    pairedBurrowIds: burrows.filter(isPushTarget).map((h) => h.burrowId),
     isPushSubscribed,
     availability: pushState,
     configStatus: pushConfigStatus,
