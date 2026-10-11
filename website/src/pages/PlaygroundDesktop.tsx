@@ -115,7 +115,6 @@ function PlaygroundDesktopExperience() {
       if (cancelled) return;
 
       const adapter = platform.initPlatform("fake");
-      adapter.aboutHost = "playground";
       registry.initAlertStateReceiver();
       adapterRef.current = adapter;
 

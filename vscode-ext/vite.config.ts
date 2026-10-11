@@ -10,7 +10,7 @@ import { CSP_NONCE_PLACEHOLDER } from "./src/csp-nonce-placeholder";
  * Output goes to vscode-ext/media/ which the extension serves as a webview.
  */
 export default defineConfig({
-  plugins: [react(), tailwindcss(), buildStampVitePlugin()],
+  plugins: [react(), tailwindcss(), buildStampVitePlugin({ host: "vscode" })],
   html: {
     // Vite stamps this placeholder onto every tag it emits that loads a script
     // or style, and onto a `<meta property="csp-nonce">` that its own runtime

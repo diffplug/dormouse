@@ -182,9 +182,6 @@ export interface WritePtyOptions {
   launch?: true;
 }
 
-/** The hosts Settings → About can name; the website's desktop playground is `playground`. */
-export type AboutHost = 'standalone' | 'vscode' | 'playground';
-
 export interface PlatformAdapter {
   // Lifecycle
   init(): Promise<void>;
@@ -257,13 +254,6 @@ export interface PlatformAdapter {
    * -> "Settings → Network").
    */
   hostOwnsUpdates?: boolean;
-
-  /**
-   * Which host Settings → About names. Display only: never gate behavior on
-   * it — a difference in behavior gets its own capability flag, like the ones
-   * above. Absent reads as unknown (Storybook, tests).
-   */
-  aboutHost?: AboutHost;
 
   /**
    * Agent resume invocations the host captured when it last tore down, keyed by

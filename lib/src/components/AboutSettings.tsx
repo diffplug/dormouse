@@ -1,13 +1,13 @@
 import { ClipboardTextIcon } from '@phosphor-icons/react';
-import { Fragment, useEffect, useState, useSyncExternalStore } from 'react';
+import { Fragment, useSyncExternalStore } from 'react';
+import { buildTag } from 'dor/commands/terminal-text';
+import { CopyButton } from './CopyButton';
 import { ExternalTextLink } from './ExternalTextLink';
 import { modalActionButton } from './design';
 import { hostOf } from './remote-control-shared';
-import { buildTag, installKind, readBuildStamp, type BuildStamp, type InstallKind } from '../lib/build-info';
-import { writeTextToClipboard } from '../lib/clipboard';
-import { getPlatform, PLATFORM_STRING } from '../lib/platform';
-import type { AboutHost } from '../lib/platform/types';
-import type { RelayMode } from '../host/relay-origin';
+import { readBuildStamp, type AboutHost, type BuildStamp } from '../lib/build-info';
+import { PLATFORM_STRING } from '../lib/platform';
+import type { RelayBuild } from '../host/relay-origin';
 import { getBurrowStatusSnapshot, subscribeToBurrowStatus, type BurrowStatusState } from '../remote/burrow/burrow-status-store';
 
 const REPO_URL = 'https://github.com/diffplug/dormouse';
@@ -17,10 +17,11 @@ const DOWNLOAD_URL = 'https://dormouse.sh/#download';
 
 /** What About shows. `relay` is `loading` until the Burrow answers, and `null` where there is none to ask. */
 export interface AboutFacts {
-  host: AboutHost | undefined;
   stamp: BuildStamp | null;
-  relay: { mode: RelayMode; origin: string } | 'loading' | null;
+  relay: RelayBuild | 'loading' | null;
 }
+
+type InstallKind = 'playground' | 'self-host' | 'official' | 'development';
 
 const KIND_LABEL: Record<InstallKind, string> = {
   official: 'Official release',
@@ -35,11 +36,16 @@ const HOST_LABEL: Record<AboutHost, string> = {
   playground: 'Website',
 };
 
-/** `null` while a self-host build could still be the answer. */
-function kindOf(facts: AboutFacts): InstallKind | null {
-  if (facts.relay === 'loading' && facts.host !== 'playground') return null;
-  const mode = facts.relay === 'loading' || facts.relay === null ? null : facts.relay.mode;
-  return installKind(facts.host, facts.stamp, mode);
+/**
+ * A self-host build is always built from source, so it names itself as such
+ * ahead of official or not; anything short of a stamped official build reads
+ * as development. `null` while a self-host build could still be the answer.
+ */
+function kindOf({ stamp, relay }: AboutFacts): InstallKind | null {
+  if (stamp?.host === 'playground') return 'playground';
+  if (relay === 'loading') return null;
+  if (relay?.mode === 'self-host') return 'self-host';
+  return stamp?.official ? 'official' : 'development';
 }
 
 function versionLine(stamp: BuildStamp | null): string {
@@ -62,48 +68,36 @@ export function aboutDiagnostics(
     userAgent: typeof navigator === 'undefined' ? '' : navigator.userAgent,
   },
 ): string {
+  const { stamp, relay } = facts;
   const kind = kindOf(facts);
   const lines = [
-    facts.stamp ? `${versionLine(facts.stamp)} (${commitLine(facts.stamp)})` : versionLine(null),
+    stamp ? `${versionLine(stamp)} (${commitLine(stamp)})` : versionLine(null),
     `Install: ${kind ? KIND_LABEL[kind] : 'unknown'}`,
   ];
-  if (facts.host) lines.push(`Host: ${HOST_LABEL[facts.host]}`);
-  if (facts.relay && facts.relay !== 'loading') lines.push(`Relay: ${hostOf(facts.relay.origin)} (${facts.relay.mode})`);
+  if (stamp) lines.push(`Host: ${HOST_LABEL[stamp.host]}`);
+  if (relay && relay !== 'loading') lines.push(`Relay: ${hostOf(relay.origin)} (${relay.mode})`);
   lines.push(`OS: ${env.platform}`, `User agent: ${env.userAgent}`);
   return `${lines.join('\n')}\n`;
 }
 
-function explanation(kind: InstallKind, facts: AboutFacts): string {
+function explanation(kind: InstallKind, { stamp, relay }: AboutFacts): string {
   switch (kind) {
     case 'official':
-      return `Built by Dormouse’s release pipeline from tag v${facts.stamp!.version}.`;
+      return `Built by Dormouse’s release pipeline from tag v${stamp!.version}.`;
     case 'development':
       return 'Built from source rather than by Dormouse’s release pipeline, so it may differ from any release.';
-    case 'self-host': {
-      const relay = facts.relay !== null && facts.relay !== 'loading' ? hostOf(facts.relay.origin) : 'your Relay';
-      return `Built from source to reach only ${relay}. It never updates itself; rebuild it to update.`;
-    }
+    case 'self-host':
+      return `Built from source to reach only ${hostOf((relay as RelayBuild).origin)}. It never updates itself; rebuild it to update.`;
     case 'playground':
       return 'Simulated terminals running in your browser. Nothing here runs on your computer.';
   }
 }
 
-function sourceRef(stamp: BuildStamp | null): string | null {
-  if (!stamp) return null;
-  return stamp.official ? `v${stamp.version}` : stamp.commit;
-}
-
-/** About, from facts alone — what the stories and tests render. */
+/** About from facts alone, which the unit tests render. */
 export function AboutPanel({ facts }: { facts: AboutFacts }) {
-  const [copied, setCopied] = useState(false);
-  useEffect(() => {
-    if (!copied) return;
-    const timeout = setTimeout(() => setCopied(false), 1400);
-    return () => clearTimeout(timeout);
-  }, [copied]);
-
+  const { stamp } = facts;
   const kind = kindOf(facts);
-  const ref = sourceRef(facts.stamp);
+  const ref = stamp ? (stamp.official ? `v${stamp.version}` : stamp.commit) : null;
   const links: Array<[string, string]> = [
     ...(kind === 'playground' ? [['Download Dormouse', DOWNLOAD_URL] as [string, string]] : []),
     ['Changelog', CHANGELOG_URL],
@@ -114,11 +108,11 @@ export function AboutPanel({ facts }: { facts: AboutFacts }) {
 
   return (
     <div className="mt-2 text-sm leading-relaxed">
-      <div className="text-foreground">{versionLine(facts.stamp)}</div>
+      <div className="text-foreground">{versionLine(stamp)}</div>
       <div className="text-muted">
         {kind ? KIND_LABEL[kind] : '…'}
-        {facts.stamp ? <> · {commitLine(facts.stamp)}</> : null}
-        {facts.host && kind !== 'playground' ? <> · {HOST_LABEL[facts.host]}</> : null}
+        {stamp ? <> · {commitLine(stamp)}</> : null}
+        {stamp && kind !== 'playground' ? <> · {HOST_LABEL[stamp.host]}</> : null}
       </div>
       {kind ? <div className="mt-1 text-muted">{explanation(kind, facts)}</div> : null}
       <div className="mt-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
@@ -130,16 +124,12 @@ export function AboutPanel({ facts }: { facts: AboutFacts }) {
             </Fragment>
           ))}
         </div>
-        <button
-          type="button"
+        <CopyButton
+          text={() => aboutDiagnostics(facts)}
+          label="Copy details"
+          icon={<ClipboardTextIcon size={14} weight="bold" />}
           className={`${modalActionButton({ tone: 'secondary' })} flex items-center gap-1.5`}
-          onClick={async () => {
-            if (await writeTextToClipboard(aboutDiagnostics(facts))) setCopied(true);
-          }}
-        >
-          <ClipboardTextIcon size={14} weight="bold" />
-          {copied ? 'Copied' : 'Copy details'}
-        </button>
+        />
       </div>
     </div>
   );
@@ -163,5 +153,5 @@ export function AboutSettings() {
   // The relay mode comes from the Burrow, never the webview's own bundle: the
   // VS Code webview is built without the relay define.
   const burrow = useSyncExternalStore(subscribeToBurrowStatus, getBurrowStatusSnapshot);
-  return <AboutPanel facts={{ host: getPlatform().aboutHost, stamp: readBuildStamp(), relay: relayFact(burrow) }} />;
+  return <AboutPanel facts={{ stamp: readBuildStamp(), relay: relayFact(burrow) }} />;
 }

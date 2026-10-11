@@ -1,5 +1,5 @@
 import { DEFAULT_HELPER_COMMAND, type TerminalContextRequest, type TerminalContextInfo } from '../terminal-context-types';
-import type { AboutHost, OpenPort, PlatformAdapter, PtyDataDetail, PtyInfo, BurrowLink, SpawnPtyOptions, UpdatesPort, WritePtyOptions } from './types';
+import type { OpenPort, PlatformAdapter, PtyDataDetail, PtyInfo, BurrowLink, SpawnPtyOptions, UpdatesPort, WritePtyOptions } from './types';
 import type { ManagedVoicePort } from './managed-voice-types';
 import type { IframeProxyResult } from './iframe-proxy-types';
 import type { ToolControlResult, ToolHostRequest } from './tool-types';
@@ -103,8 +103,6 @@ export class FakePtyAdapter implements PlatformAdapter {
   hostOwnsTheme?: boolean;
   hostOwnsShells?: boolean;
   hostOwnsUpdates?: boolean;
-  /** Set to `playground` by the website's desktop playground; Storybook sets it per story. */
-  aboutHost?: AboutHost;
   /** The website, which runs on this adapter, may reach open-vsx.org. */
   offersThemeStore?: boolean = true;
 

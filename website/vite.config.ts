@@ -48,8 +48,8 @@ export default defineConfig(({ mode }) => ({
     mode === "test" ? null : reactRouter(),
     tailwindcss(),
     redirectsInDev(),
-    // Settings → About names the playground's build; tests run unstamped.
-    mode === "test" ? null : buildStampVitePlugin(),
+    // Settings → About names the playground's build.
+    buildStampVitePlugin({ host: "playground" }),
   ],
   resolve: {
     alias: {

@@ -7,6 +7,7 @@ import { SettingsDialog, SETTINGS_SCROLL_MS, TOPIC_GAP_PX } from '../components/
 import { WorkspaceIdContext } from '../components/wall/wall-context';
 import { enrolledStatus, SELF_HOST_UNENROLLED_STATUS, UNENROLLED_STATUS } from '../host/remote/test-burrow-link';
 import type { BuildStamp } from '../lib/build-info';
+import type { BurrowConsoleStatus } from '../host/remote/service-protocol';
 import { networkPolicyResult, nothingPolicy } from '../remote/network-policy';
 
 /** The dialog renders into `document.body`, outside `canvasElement`
@@ -562,8 +563,13 @@ export const HoverSettingsOverridesScroll: Story = {
   },
 };
 
-const OFFICIAL_STAMP: BuildStamp = { version: '1.2.0', commit: '4c1e09ab', commitsSinceVersion: 0, dirty: false, official: true };
-const DEVELOPMENT_STAMP: BuildStamp = { version: '1.2.0', commit: 'd080b4f5', commitsSinceVersion: 14, dirty: false, official: false };
+const OFFICIAL_STAMP: BuildStamp = { version: '1.2.0', commit: '4c1e09ab', commitsSinceVersion: 0, dirty: false, official: true, host: 'standalone' };
+const DEVELOPMENT_STAMP: BuildStamp = { version: '1.2.0', commit: 'd080b4f5', commitsSinceVersion: 14, dirty: false, official: false, host: 'standalone' };
+
+/** About's stories: Standalone with an unenrolled Hosted Burrow, unless a story says otherwise. */
+function aboutParameters(buildStamp: BuildStamp | undefined, status: BurrowConsoleStatus | null = UNENROLLED_STATUS) {
+  return { buildStamp, ...(status ? { primedBurrow: { status } } : {}) };
+}
 
 /** Opens About, the last topic, and checks the install kind it names. */
 function aboutShows(kind: RegExp) {
@@ -579,47 +585,47 @@ function aboutShows(kind: RegExp) {
  * release workflow shipped: source links point at the tag.
  */
 export const AboutOfficial: Story = {
-  parameters: { aboutHost: 'standalone', buildStamp: OFFICIAL_STAMP, primedBurrow: { status: UNENROLLED_STATUS } },
+  parameters: aboutParameters(OFFICIAL_STAMP),
   play: aboutShows(/Official release/),
 };
 
 export const AboutOfficialVsCode: Story = {
-  parameters: { aboutHost: 'vscode', buildStamp: OFFICIAL_STAMP, primedBurrow: { status: UNENROLLED_STATUS } },
+  parameters: aboutParameters({ ...OFFICIAL_STAMP, host: 'vscode' }),
   play: aboutShows(/Official release · 4c1e09ab · VS Code extension/),
 };
 
 /** A local build — `pnpm dogfood:standalone`, `dev:standalone` — carries the commits past its tag. */
 export const AboutDevelopment: Story = {
-  parameters: { aboutHost: 'standalone', buildStamp: DEVELOPMENT_STAMP, primedBurrow: { status: UNENROLLED_STATUS } },
+  parameters: aboutParameters(DEVELOPMENT_STAMP),
   play: aboutShows(/Dormouse 1\.2\.0\+14Development build/),
 };
 
 export const AboutDevelopmentDirty: Story = {
-  parameters: { aboutHost: 'standalone', buildStamp: { ...DEVELOPMENT_STAMP, dirty: true }, primedBurrow: { status: UNENROLLED_STATUS } },
+  parameters: aboutParameters({ ...DEVELOPMENT_STAMP, dirty: true }),
   play: aboutShows(/with uncommitted changes/),
 };
 
 /** A shallow clone, where the version tag was not there to count from. */
 export const AboutDevelopmentUnknownCount: Story = {
-  parameters: { aboutHost: 'standalone', buildStamp: { ...DEVELOPMENT_STAMP, commitsSinceVersion: null }, primedBurrow: { status: UNENROLLED_STATUS } },
+  parameters: aboutParameters({ ...DEVELOPMENT_STAMP, commitsSinceVersion: null }),
   play: aboutShows(/Dormouse 1\.2\.0\+\?/),
 };
 
 /** Self-host outranks official or not: it names the one Relay this build reaches. */
 export const AboutSelfHost: Story = {
-  parameters: { aboutHost: 'standalone', buildStamp: DEVELOPMENT_STAMP, primedBurrow: { status: SELF_HOST_UNENROLLED_STATUS } },
+  parameters: aboutParameters(DEVELOPMENT_STAMP, SELF_HOST_UNENROLLED_STATUS),
   play: aboutShows(/Self-host build/),
 };
 
 /** A bundle built without the stamp — Storybook's own. */
 export const AboutUnstamped: Story = {
-  parameters: { aboutHost: 'standalone', primedBurrow: { status: UNENROLLED_STATUS } },
+  parameters: aboutParameters(undefined),
   play: aboutShows(/Dormouse, version unknown/),
 };
 
 /** The website's desktop playground: no Burrow, so no Network topic, and a download link. */
 export const AboutPlayground: Story = {
-  parameters: { aboutHost: 'playground', buildStamp: DEVELOPMENT_STAMP },
+  parameters: aboutParameters({ ...DEVELOPMENT_STAMP, host: 'playground' }, null),
   play: async ({ canvasElement }) => {
     await aboutShows(/Web playground/)({ canvasElement });
     await expect(dialog(canvasElement).getByRole('button', { name: 'Download Dormouse' })).toBeVisible();

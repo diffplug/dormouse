@@ -11,7 +11,6 @@ function fakeGit({ head = HEAD, tagCommit = HEAD, count = '0', status = '' } = {
   return (args) => {
     switch (args.join(' ')) {
       case 'rev-parse HEAD': return head;
-      case 'rev-parse --short=8 HEAD': return head?.slice(0, 8) ?? null;
       case 'rev-list --count v1.2.0..HEAD': return count;
       case 'status --porcelain': return status;
       case 'rev-parse --verify --quiet v1.2.0^{commit}': return tagCommit;

@@ -1,10 +1,8 @@
 // The build stamp every webview bundle and `dor` carry: which version and
 // commit a build came from, and whether it is official — built by
 // release.yml in diffplug/dormouse from its version tag, at that tag's commit,
-// from a clean tree (docs/specs/deploy.md -> "Build stamp").
-//
-//   node scripts/build-stamp.mjs           writes dor/src/generated-version.ts
-//   node scripts/build-stamp.mjs --print   prints the stamp as JSON
+// from a clean tree (docs/specs/deploy.md -> "Build stamp"). Run directly, it
+// writes dor's copy, dor/src/generated-version.ts.
 
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -14,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 const scriptPath = fileURLToPath(import.meta.url);
 const repoRoot = resolve(dirname(scriptPath), '..');
 
-export const BUILD_STAMP_DEFINE = '__DORMOUSE_BUILD__';
+const BUILD_STAMP_DEFINE = '__DORMOUSE_BUILD__';
 const RELEASE_WORKFLOW = 'diffplug/dormouse/.github/workflows/release.yml';
 
 /**
@@ -26,7 +24,7 @@ export function computeBuildStamp({ env, git, changelog }) {
   const version = latestChangelogVersion(changelog);
   const tag = `v${version}`;
   const head = git(['rev-parse', 'HEAD']);
-  const commit = git(['rev-parse', '--short=8', 'HEAD']) || 'unknown';
+  const commit = head?.slice(0, 8) || 'unknown';
   const count = git(['rev-list', '--count', `${tag}..HEAD`]);
   const commitsSinceVersion = count !== null && /^\d+$/.test(count) ? Number(count) : null;
   const status = git(['status', '--porcelain']);
@@ -49,26 +47,33 @@ export function computeBuildStamp({ env, git, changelog }) {
   return { version, commit, commitsSinceVersion, dirty, official };
 }
 
-export function buildStamp() {
-  return computeBuildStamp({
+let cached;
+
+/** Computed once per process: a build that loads its Vite config per environment asks again. */
+function buildStamp() {
+  cached ??= computeBuildStamp({
     env: process.env,
     git: runGit,
     changelog: readFileSync(resolve(repoRoot, 'CHANGELOG.md'), 'utf8'),
   });
+  return cached;
 }
 
 /**
- * Defines {@link BUILD_STAMP_DEFINE} in a webview bundle, failing `vite build`
+ * Defines the stamp in a webview bundle, plus the `host` Settings → About names
+ * (`standalone`, `vscode`, or the website's `playground`), failing `vite build`
  * if the identifier survives into a chunk — the bundle would then read as
- * unstamped.
+ * unstamped. Tests run unstamped, which skips the git calls.
  */
-export function buildStampVitePlugin() {
+export function buildStampVitePlugin({ host }) {
   return {
     name: 'dormouse:build-stamp',
     config() {
-      return { define: { [BUILD_STAMP_DEFINE]: JSON.stringify(buildStamp()) } };
+      if (process.env.VITEST) return;
+      return { define: { [BUILD_STAMP_DEFINE]: JSON.stringify({ ...buildStamp(), host }) } };
     },
     generateBundle(_options, bundle) {
+      if (process.env.VITEST) return;
       for (const chunk of Object.values(bundle)) {
         if (chunk.type === 'chunk' && chunk.code.includes(BUILD_STAMP_DEFINE)) {
           throw new Error(`build stamp: ${BUILD_STAMP_DEFINE} survived into ${chunk.fileName} — the define did not apply.`);
@@ -103,13 +108,9 @@ function writeDorVersion(stamp) {
       `export const DOR_VERSION_METADATA = ${JSON.stringify({
         version: stamp.version,
         commit: stamp.commit,
-        commitsSinceVersion: stamp.commitsSinceVersion ?? 0,
+        commitsSinceVersion: stamp.commitsSinceVersion,
       }, null, 2)} as const;\n`,
   );
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === scriptPath) {
-  const stamp = buildStamp();
-  if (process.argv.includes('--print')) console.log(JSON.stringify(stamp, null, 2));
-  else writeDorVersion(stamp);
-}
+if (process.argv[1] && resolve(process.argv[1]) === scriptPath) writeDorVersion(buildStamp());

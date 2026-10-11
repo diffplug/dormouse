@@ -641,7 +641,6 @@ describe('VSCodeAdapter host capabilities', () => {
   it('owns the theme, the shell, and updates, and offers no updater port', () => {
     const adapter = new VSCodeAdapter();
     expect([adapter.hostOwnsTheme, adapter.hostOwnsShells, adapter.hostOwnsUpdates]).toEqual([true, true, true]);
-    expect(adapter.aboutHost).toBe('vscode');
     // The Marketplace updates the extension, so Settings → Network names it.
     expect(adapter.updates).toBeUndefined();
   });
