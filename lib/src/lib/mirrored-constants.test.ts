@@ -163,9 +163,9 @@ describe('enrollment-offer path mirrors the installers', () => {
 });
 
 // scripts/pairing-walkthrough/README.md -> Steps. The walkthrough drives the
-// built Pocket app from plain Node, so it cannot import either constant; a
-// drift is not a failed build but a run that stalls against a live Chrome and a
-// real Relay, saying only that it never found the button.
+// laptop and Pocket from plain Node, so it cannot import the copy it clicks; a drift
+// is not a failed build but a run that stalls against a live Chrome and a real
+// Relay, saying only that it never found the control.
 describe('the pairing walkthrough mirrors the copy it clicks', () => {
   const file = 'scripts/pairing-walkthrough/steps.mjs';
   const source = readRepoFile(file);
