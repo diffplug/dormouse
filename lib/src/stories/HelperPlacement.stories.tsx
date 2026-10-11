@@ -1,9 +1,9 @@
 import type { Meta, StoryObj } from '@storybook/react';
+import { surfaceIdFor } from 'dor/protocol';
 import { expect, userEvent, waitFor, within } from 'storybook/test';
 import { Wall } from '../components/Wall';
 import { TERMINAL_CONTEXT_TEETH_PX } from '../components/design';
 import { disposeHelper, getHelper } from '../lib/helper-terminal';
-import { seedSurfaceIds } from '../lib/surface-ids';
 import { flushTerminal, getTerminalInstance, refitSession } from '../lib/terminal-registry';
 import { FakePtyAdapter, getPlatform, flattenScenario, SCENARIO_SHELL_PROMPT } from '../lib/platform';
 import { leaves, normalizeWeights, type LathNode } from '../lib/lath/model';
@@ -13,10 +13,10 @@ import { requireElement, settleTerminalContext, settleTerminals } from './settle
 type Layout = 'single' | 'columns' | 'rows' | 'grid' | 'uneven' | 'wide-bottom';
 type Props = { layout: Layout; width: number; height: number; sourceAtEnd: boolean; cursor: 'top' | 'bottom'; zoomed: boolean };
 const SOURCE = 'source';
-const leaf = (id: string): LathNode => ({ kind: 'leaf', id });
+type Shape = Pick<Props, 'layout' | 'sourceAtEnd'>;
 const split = (dir: 'row' | 'col', nodes: LathNode[], weights = nodes.map(() => 1)): LathNode => ({ kind: 'split', dir, children: normalizeWeights(nodes.map((node, i) => ({ node, weight: weights[i] }))) });
-/** The layout's tree, its leaves named by role. */
-function shape({ layout, sourceAtEnd }: Pick<Props, 'layout' | 'sourceAtEnd'>): LathNode {
+/** The layout's tree, each leaf built from its role by `leaf`. */
+function shape({ layout, sourceAtEnd }: Shape, leaf: (role: string) => LathNode): LathNode {
   const pair = sourceAtEnd ? [leaf('peer'), leaf(SOURCE)] : [leaf(SOURCE), leaf('peer')];
   return layout === 'single' ? leaf(SOURCE)
     : layout === 'wide-bottom' ? split('col', [split('row', [leaf('peer'), leaf('peer-2')]), leaf(SOURCE)], [1.08, 1])
@@ -24,13 +24,14 @@ function shape({ layout, sourceAtEnd }: Pick<Props, 'layout' | 'sourceAtEnd'>): 
     : layout === 'grid' ? split('row', [split('col', pair), split('col', [leaf('peer-2'), leaf('peer-3')])])
     : split('row', pair, layout === 'uneven' ? [2, 1] : undefined);
 }
-/** Each role's Surface id: `surface:<n>` in tree order, as a restored Wall numbers its panes. */
-const surfaceIds = (props: Pick<Props, 'layout' | 'sourceAtEnd'>) => new Map(leaves({ root: shape(props) }).map((role, i) => [role, `surface:${i + 1}`]));
-const sourceId = (props: Pick<Props, 'layout' | 'sourceAtEnd'>) => surfaceIds(props).get(SOURCE)!;
+/** The roles in tree order, which is how a restored Wall numbers its panes `surface:1` onward. */
+const roles = (props: Shape) => leaves({ root: shape(props, role => ({ kind: 'leaf', id: role })) });
+const idOf = (props: Shape, role: string) => surfaceIdFor(roles(props).indexOf(role) + 1);
+const sourceId = (props: Shape) => idOf(props, SOURCE);
 function boot(props: Props): LathPersistedLayout {
-  const ids = surfaceIds(props);
-  const named = (node: LathNode): LathNode => node.kind === 'leaf' ? leaf(ids.get(node.id)!) : { ...node, children: node.children.map(child => ({ ...child, node: named(child.node) })) };
-  return { version: 1, tree: { root: named(shape(props)) }, leafMeta: Object.fromEntries([...ids].map(([role, id]) => [id, { component: 'terminal', tabComponent: 'terminal', title: role === SOURCE ? 'Source terminal' : 'Neighbor terminal' }])) };
+  const root = shape(props, role => ({ kind: 'leaf', id: idOf(props, role) }));
+  const source = sourceId(props);
+  return { version: 1, tree: { root }, leafMeta: Object.fromEntries(leaves({ root }).map(id => [id, { component: 'terminal', tabComponent: 'terminal', title: id === source ? 'Source terminal' : 'Neighbor terminal' }])) };
 }
 function PlacementWall(props: Props) {
   return <div data-placement-frame className="flex shrink-0 flex-col" style={{ width: props.width, height: props.height }}>
@@ -161,10 +162,7 @@ const meta = {
   // Argos replays stories for capture; unfinished input from the preceding run
   // must not turn this run's fresh-helper fixture into a preserved helper.
   beforeEach: ({ args }) => {
-    const ids = [...surfaceIds(args).values()];
-    for (const id of ids) disposeHelper(id);
-    // As a restore does, so the helper's minted id is past the panes'.
-    seedSurfaceIds(ids.length);
+    for (const role of roles(args)) disposeHelper(idOf(args, role));
     const platform = getPlatform() as FakePtyAdapter;
     platform.deferHelperStartup = true;
     return () => { platform.deferHelperStartup = false; };
@@ -176,10 +174,10 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 /** A story whose source reports the demo shell's directory; which Surface that is depends on the layout. */
-const story = ({ args = {}, ...rest }: Story = {}): Story => ({
+const story = ({ args = {}, parameters, ...rest }: Story = {}): Story => ({
   ...rest,
   args,
-  parameters: { primedTerminalState: { byId: { [sourceId({ ...meta.args, ...args })]: { cwd: { path: '/home/demo/projects/dormouse', pathKind: 'posix', isRemote: false, source: 'osc633', updatedAt: 0 } } } } },
+  parameters: { ...parameters, primedTerminalState: { byId: { [sourceId({ ...meta.args, ...args })]: { cwd: { path: '/home/demo/projects/dormouse', pathKind: 'posix', isRemote: false, source: 'osc633', updatedAt: 0 } } } } },
 });
 
 export const TwoColumns = story({ args: { layout: 'columns' } });

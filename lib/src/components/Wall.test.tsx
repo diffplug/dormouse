@@ -2080,7 +2080,8 @@ describe('Wall on the Lath engine', () => {
 
       expect(response?.ok).toBe(true);
       expect(response?.error).toBeUndefined();
-      expect(response?.result?.surfaceId).toBe('surface:1');
+      // Minted past the ids the Wall booted with.
+      expect(response?.result?.surfaceId).toBe('surface:9');
       expect(response?.result?.direction).toBe('right');
       expect(response?.result?.minimized).toBe(true);
       expect(getTerminalSpy).toHaveBeenCalledWith(response!.result!.surfaceId);

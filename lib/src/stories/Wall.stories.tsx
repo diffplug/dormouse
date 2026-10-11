@@ -1,19 +1,17 @@
 import type { Meta, StoryObj } from '@storybook/react';
+import { surfaceIdFor } from 'dor/protocol';
 import { Wall } from '../components/Wall';
 import {
   flattenScenario,
   SCENARIO_SHELL_PROMPT,
   SCENARIO_LS_OUTPUT,
 } from '../lib/platform';
-import { seedSurfaceIds } from '../lib/surface-ids';
 import type { ActivityState } from '../lib/terminal-registry';
 import { requireElement, settleTerminalContext, settleTerminals, waitForCondition } from './settle-terminals';
 
 const meta: Meta<typeof Wall> = {
   title: 'App/Wall',
   component: Wall,
-  // As a restore does, so an id the Wall mints is past its fixture panes'.
-  beforeEach: ({ args }) => { seedSurfaceIds(args.initialPaneIds?.length ?? 0); },
   // Hold every snapshot until the terminals have written their scenario and painted.
   // Stories that define their own `play` override this and call `settleTerminals()`
   // themselves at the end.
@@ -227,7 +225,7 @@ export const TerminalContext: Story = {
 
 /** Same-direction splits remain one weighted row, independent of creation order. */
 function flatRowArgs(count: number) {
-  const ids = Array.from({ length: count }, (_, i) => `surface:${i + 1}`);
+  const ids = Array.from({ length: count }, (_, i) => surfaceIdFor(i + 1));
   return {
     initialPaneIds: ids,
     restoredLathLayout: {

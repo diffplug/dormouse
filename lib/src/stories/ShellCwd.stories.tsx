@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react';
+import { surfaceIdFor } from 'dor/protocol';
 import { Baseboard } from '../components/Baseboard';
 import {
   Wall,
@@ -26,7 +27,6 @@ import {
   type TerminalPaneState,
   type TerminalTitle,
 } from '../lib/terminal-registry';
-import { seedSurfaceIds } from '../lib/surface-ids';
 import { createTerminalPaneState } from '../lib/terminal-state';
 import { flattenScenario, SCENARIO_SHELL_PROMPT } from '../lib/platform';
 import { requireElement, settleTerminals, waitForPrimedState } from './settle-terminals';
@@ -143,8 +143,6 @@ export const TitleCandidatesInHeaderMenu: Story = {
   },
   // A flex column, or the `flex-1` Wall collapses to its Baseboard and hides the pane.
   render: () => <div className="flex flex-col" style={{ width: 900, height: 680 }}><Wall initialPaneIds={['surface:1']} /></div>,
-  // As a restore does, so the helper's minted id is past the pane's.
-  beforeEach: () => { seedSurfaceIds(1); },
   play: openHeaderContextMenu,
 };
 
@@ -266,7 +264,7 @@ function casesForGroup(cases: ShellCwdCase[], panes: TerminalPaneState[]): strin
 
 /** Each case is one Surface, numbered `surface:1` onward. */
 function storyFor(unnumbered: Omit<ShellCwdCase, 'id'>[], extraArgs: { showGroups?: boolean } = {}): Story {
-  const cases = unnumbered.map((item, i) => ({ ...item, id: `surface:${i + 1}` }));
+  const cases = unnumbered.map((item, i) => ({ ...item, id: surfaceIdFor(i + 1) }));
   return {
     args: {
       cases,

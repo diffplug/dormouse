@@ -44,6 +44,7 @@ import type { ShellEntry } from '../src/lib/shell-defaults';
 import { getWorkspacesSnapshot, resetWorkspaces, setWorkspaces, type WorkspaceMeta } from '../src/lib/workspace-store';
 import { resetWorkspaceSurfaces, setWorkspaceSurfaces } from '../src/lib/workspace-surfaces';
 import { resetWorkspaceUi } from '../src/lib/workspace-ui-store';
+import { resetSurfaceIdPool } from '../src/lib/surface-ids';
 
 /** `parameters.primedWorkspaces`: the Window a Workspace story renders. */
 interface PrimedWorkspaces {
@@ -494,6 +495,8 @@ const preview: Preview = {
           }
           platform.clearDefaultScenario();
           disposeAllSessions();
+          // Nor its Surface numbers: each story mints from `surface:1`, past its fixtures.
+          resetSurfaceIdPool();
           // A story must not leak its Workspaces into the next one.
           resetWorkspaces();
           resetWorkspaceSurfaces();

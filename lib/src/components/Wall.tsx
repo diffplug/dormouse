@@ -63,7 +63,7 @@ import type {
   SurfaceView as DorSurfaceView,
 } from 'dor/commands/types';
 import { hasBrowser, hasTerminal } from 'dor/commands/types';
-import { compareSurfaceIds } from 'dor/protocol';
+import { compareSurfaceIds, maxSurfaceIdNumber } from 'dor/protocol';
 import { DEFAULT_WORKSPACE_ID, type WorkspaceId } from '../lib/session-types';
 import { clearWorkspaceSurfaces, setWorkspaceSurfaces } from '../lib/workspace-surfaces';
 import { nextTodoMember } from '../lib/workspace-union';
@@ -72,7 +72,7 @@ import { getWorkspace, getWorkspacesSnapshot, setActiveWorkspace, subscribeToWor
 import { awaitWallEmpty } from './wall/close-all';
 import { closeKind, type CloseKind } from './wall/close-kind';
 import { registerWallHandle, type WallHandle } from './wall/wall-handles';
-import { mintSurfaceId } from '../lib/surface-ids';
+import { mintSurfaceId, seedSurfaceIds } from '../lib/surface-ids';
 import { prepareWorkspaceTransfer } from './wall/workspace-transfer';
 import { installDorControlRouter } from './wall/dor-control-router';
 import { reopenClosed } from './wall/reopen';
@@ -880,6 +880,9 @@ export function Wall({
       mintSurfaceId,
       initialDoorsRef.current,
     );
+    // The page's own counter mints past every id this Wall boots with, as a
+    // restore seeds it; a no-op once a host pool hands out the ids.
+    seedSurfaceIds(maxSurfaceIdNumber([...paneIds, ...(initialDoorsRef.current ?? []).map(door => door.id)]));
     // Prime default-shell opts for the fresh path's generated ids (a no-op for
     // already-restored ids).
     if (fresh) {
