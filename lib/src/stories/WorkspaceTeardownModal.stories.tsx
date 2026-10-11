@@ -9,7 +9,7 @@ function runningPanes(count: number) {
   return {
     byId: Object.fromEntries(
       Array.from({ length: count }, (_, i) => [
-        `quit-story-${i}`,
+        `surface:${i + 1}`,
         { activity: { kind: 'running' as const } },
       ]),
     ),

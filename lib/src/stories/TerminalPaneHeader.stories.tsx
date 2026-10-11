@@ -15,11 +15,12 @@ import { summarizeCommandLine, type SetTerminalUserTitleResult } from '../lib/te
 import { commandWatchKey, cwdFromOsc633 } from '../lib/terminal-state';
 import { flattenScenario, SCENARIO_SHELL_PROMPT } from '../lib/platform';
 import { removeMouseSelectionState, setMouseReporting, setOverride } from '../lib/mouse-selection';
+import { seedSurfaceIds } from '../lib/surface-ids';
 import { recordToolDirty, resetToolDirty } from '../lib/tool-dirty-store';
 import { resetTodoSpotlight, spotlightTodo } from '../lib/todo-spotlight';
 import { requireElement, settleTerminalContext, TODO_SPOTLIGHT_HELD_CLASS, waitForCondition, waitForPrimedState } from './settle-terminals';
 
-const SESSION_ID = 'tab-story';
+const SESSION_ID = 'surface:1';
 
 const noopActions: WallActions = {
   onKill: () => {},
@@ -199,6 +200,8 @@ function ContextWallStory() {
 function contextDialogStory(pane: PanePriming): Story {
   return {
     render: ContextWallStory,
+    // As a restore does, so the helper's minted id is past the pane's.
+    beforeEach: () => { seedSurfaceIds(1); },
     parameters: {
       // The derived title is part of what the context's Title row explains.
       ...primedPane({ userTitle: null, ...pane }),
@@ -257,7 +260,7 @@ async function openTodoNotificationPreview() {
       clientY: rect.top + rect.height / 2,
     }));
     await wait(50);
-    if (document.querySelector(`#todo-notification-preview-${SESSION_ID}`)) return;
+    if (document.getElementById(`todo-notification-preview-${SESSION_ID}`)) return;
   }
   throw new Error('TODO notification preview never rendered');
 }

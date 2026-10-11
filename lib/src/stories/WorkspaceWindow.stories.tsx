@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react';
 import { AppBar } from '../../../standalone/src/AppBar';
 import { WorkspaceWindow } from '../components/WorkspaceWindow';
 import { flattenScenario, SCENARIO_LS_OUTPUT } from '../lib/platform';
+import { seedSurfaceIds } from '../lib/surface-ids';
 import { requireElement, settleTerminals, waitForCondition } from './settle-terminals';
 
 const WORKSPACES = [
@@ -16,7 +17,7 @@ function WorkspaceWindowStory() {
   return (
     <div className="flex h-[520px] flex-col">
       <AppBar />
-      <WorkspaceWindow initialPaneIds={['surface:workspace-window-story']} />
+      <WorkspaceWindow initialPaneIds={['surface:1']} />
     </div>
   );
 }
@@ -24,6 +25,8 @@ function WorkspaceWindowStory() {
 const meta: Meta<typeof WorkspaceWindowStory> = {
   title: 'App/WorkspaceWindow',
   component: WorkspaceWindowStory,
+  // As a restore does, so the id the second Workspace's Wall mints is past the first's pane.
+  beforeEach: () => { seedSurfaceIds(1); },
   parameters: {
     fakePty: { scenario: flattenScenario(SCENARIO_LS_OUTPUT) },
     primedWorkspaces: { workspaces: WORKSPACES, activeId: WORKSPACES[0].id },

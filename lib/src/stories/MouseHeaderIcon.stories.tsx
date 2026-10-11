@@ -17,7 +17,7 @@ import {
   type OverrideState,
 } from '../lib/mouse-selection';
 
-const SESSION_ID = 'mouse-story';
+const SESSION_ID = 'surface:1';
 
 const noopActions: WallActions = {
   onKill: () => {},

@@ -11,7 +11,7 @@ import { requireElement, waitForPrimedState } from './settle-terminals';
 
 /** Workspace ids by position, so `parameters.primedWorkspaces` and the story's
  *  membership and stub handle all name the same ones. */
-const ws = (index: number) => `story-ws-${index + 1}`;
+const ws = (index: number) => `workspace:${index + 1}`;
 
 /** `pinned` lists positions to pin; list them last, as the store keeps them
  *  (`docs/specs/layout.md` → "Workspace tabs"). */
@@ -86,19 +86,19 @@ export const Indicators: Story = {
   args: { todoLabels: { 0: 'vim notes.md', 1: 'claude', 2: 'pnpm dev' } },
   parameters: {
     primedWorkspaces: primed(['Builds', 'Agents', 'Workspace 3'], 2, {
-      0: ['builds-a', 'builds-b'],
-      1: ['agents-a'],
-      2: ['visible-a'],
+      0: ['surface:1', 'surface:2'],
+      1: ['surface:3'],
+      2: ['surface:4'],
     }),
     // Applied two frames after mount by the preview decorator, which clears
     // Activity for every session-less id first.
     primedSessionState: {
       byId: {
-        'builds-a': { status: 'ALERT_RINGING' },
-        'builds-b': { todo: true },
-        'agents-a': { todo: true },
+        'surface:1': { status: 'ALERT_RINGING' },
+        'surface:2': { todo: true },
+        'surface:3': { todo: true },
         // The visible Workspace owes attention too: its TODO pill, no inset.
-        'visible-a': { status: 'ALERT_RINGING', todo: true },
+        'surface:4': { status: 'ALERT_RINGING', todo: true },
       },
     },
   },
