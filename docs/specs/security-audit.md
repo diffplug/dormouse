@@ -131,7 +131,7 @@ Source of truth: `.github/audit/_preamble.md`; `dedupFindings` in `scripts/secur
 | `audit-ledger-snapshot.jsonl`, on the runner | what `Read the findings ledger` keeps of each ledger issue (below) |
 | `audit-transcript` artifact | age ciphertext of the transcript, `audit-report.md`, and the fragments |
 | `audit-state` artifact | the audited commit, the GitHub-state hash, whether the domains ran, and when they last did |
-| `Check GitHub state` job log | the GitHub-state verdict, its clause counts, and the hash |
+| `Check GitHub state` job log | the GitHub-state verdict, its clause and WARNING counts, and the hash |
 | `List open findings` and `Read the findings ledger` job logs | how many ledger issues they read |
 
 - **FAIL IF** a public issue can carry finding text: a status or disclosure title, body, or comment is posted from anything but `scripts/security-audit-public-body.mjs` and the step's fixed failure sentence, or that builder emits anything but fixed text, counts, dates, validated run metadata, fragment names, ledger keys and severities, headings it found in the checked-out spec, files it found in the checked-out tree, PR numbers the API reports merged, and a maintainer's public summary. A failed check naming no such heading, in the line form `.github/audit/_preamble.md` fixes, is counted, never quoted (rationale).
@@ -172,7 +172,9 @@ A disclosure carries the key, severity, kind, dates, reason, and where: the rule
 The status issue is the one open issue labeled `security-audit-status`; a run that finds none creates it. **A run comments on it only when the outcome changes and once per new disclosure.**
 
 - **FAIL IF** a disclosure can be published before its ledger issue closes or turns 7 days old, one closed or 7 days old stays unpublished after a run that read it, a ledger issue gets a second disclosure issue, or a public summary is taken from an issue body or from a comment whose author association is not `OWNER`, `MEMBER`, or `COLLABORATOR` (rationale). Pinned by `scripts/security-audit.test.mjs`.
-- **FAIL IF** the status issue is missing, closed, one of several open issues labeled `security-audit-status` in `diffplug/dormouse`, or not pinned there; a maintainer pins it by hand. Pinned by `scripts/github-state-check.mjs`.
+- **FAIL IF** the status issue is missing, closed, or one of several open issues labeled `security-audit-status` in `diffplug/dormouse`. Pinned by `scripts/github-state-check.mjs`.
+
+A maintainer pins the status issue by hand; `scripts/github-state-check.mjs` reports an unpinned one as a WARNING, which changes no verdict (rationale).
 
 Source of truth: `planDisclosures` and `statusBody` in `scripts/security-audit-public-body.mjs`; `Read the findings ledger` in `.github/workflows/security-audit.yaml`.
 

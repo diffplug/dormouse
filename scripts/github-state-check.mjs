@@ -5,7 +5,7 @@
  * environments and their deployment policies and reviewers, the exhaustive
  * secret inventory, workflow permissions, repository security settings, the
  * Hosted tagger App's ruleset bypass, workflow liveness, the embargo
- * repository's visibility, the pinned audit status issue —
+ * repository's visibility, the audit status issue —
  * read live and judged against `.github/audit/expected-github-state.json`.
  *
  * It writes a report fragment in the form `.github/audit/_preamble.md` fixes
@@ -461,11 +461,16 @@ function judge(state, { expected, tendAllowed, now = new Date(), local = false }
   if (state.embargoStatus === '000') add('UNVERIFIABLE', EMBARGO, clause, 'curl reached no server');
   else add(state.embargoStatus === '404' ? 'PASS' : 'FAIL', EMBARGO, clause, `HTTP ${state.embargoStatus}`);
 
-  // The public status issue: exactly one open, and pinned. Pinning is by hand.
-  check(STATUS_ISSUE, `exactly one open issue is labeled \`${expected.statusIssueLabel}\`, and it is pinned`, ['statusIssue'], () => {
-    const { open, pinned } = state.statusIssue;
-    return [open.length === 1 && pinned.includes(open[0]), `open: ${show(open.map((n) => `#${n}`))}; pinned: ${show(pinned.map((n) => `#${n}`))}`];
+  // The public status issue: exactly one open. Pinning is by hand and only
+  // makes it easy to find, so an unpinned one is a WARNING, never a FAIL.
+  check(STATUS_ISSUE, `exactly one open issue is labeled \`${expected.statusIssueLabel}\``, ['statusIssue'], () => {
+    const { open } = state.statusIssue;
+    return [open.length === 1, `open: ${show(open.map((n) => `#${n}`))}`];
   });
+  const { open = [], pinned = [] } = state.statusIssue ?? {};
+  if (open.length === 1 && !pinned.includes(open[0])) {
+    warnings.push(`the \`${expected.statusIssueLabel}\` issue #${open[0]} is not pinned; pin it so readers find it (pinned: ${show(pinned.map((n) => `#${n}`))}).`);
+  }
 
   return { results, info, warnings };
 }
@@ -532,7 +537,7 @@ function main(argv) {
     // fragment only, and the log gets the verdict and counts.
     writeFileSync(args.out, result.text);
     const count = (v) => result.results.filter((r) => r.verdict === v).length;
-    process.stdout.write(`VERDICT: ${result.verdict} (${count('PASS')} PASS, ${count('FAIL')} FAIL, ${count('UNVERIFIABLE')} UNVERIFIABLE). Observed-state hash ${result.hash}.\n`);
+    process.stdout.write(`VERDICT: ${result.verdict} (${count('PASS')} PASS, ${count('FAIL')} FAIL, ${count('UNVERIFIABLE')} UNVERIFIABLE, ${result.warnings.length} WARNING). Observed-state hash ${result.hash}.\n`);
   } else {
     process.stdout.write(result.text);
   }
