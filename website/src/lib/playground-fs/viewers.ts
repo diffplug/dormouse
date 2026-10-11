@@ -24,7 +24,7 @@ export interface ViewerRequest {
   method: string;
   /** The path after `/playground-fs/<token>/`, percent-decoded. */
   route: string;
-  /** `URLSearchParams` of the request URL. */
+  /** The request URL's query string (`url.search`), `?` included. */
   search: string;
   body: string;
 }
