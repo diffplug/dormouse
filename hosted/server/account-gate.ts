@@ -18,6 +18,30 @@ export const accountQuery = <Row extends Record<string, unknown>>(
   values: unknown[],
 ) => queryDatabase<Row>(host.databaseUrl, text, values);
 
+/**
+ * Whether the account's own page made this read: the browser says
+ * `Sec-Fetch-Site: same-origin`, and an `Origin`, if presented, is exactly
+ * `origin`. A sibling's page, a navigation, and a request without Fetch
+ * Metadata all fail. The account's own login lookups ({@link cookieAdmin},
+ * `prelaunchAuth`) call the auth handler in-process and never meet this check.
+ */
+export function ownPageRead(request: Request, origin: string): boolean {
+  const presented = request.headers.get("origin");
+  return (
+    request.headers.get("sec-fetch-site") === "same-origin" &&
+    (presented === null || presented === origin)
+  );
+}
+
+/**
+ * Whether `path` is an auth request another site's page may make without
+ * being a write: a provider's callback, or the CSRF challenge. Every other
+ * request but a POST (whose Origin and CSRF rules the packed adapter holds)
+ * must be {@link ownPageRead}, so a read the adapter adds is gated too.
+ */
+export const openAuthRead = (path: string) =>
+  path === "/api/auth/csrf" || path.startsWith("/api/auth/callback/");
+
 /** The login a cookie route acts for. */
 export interface AccountLogin {
   userId: string;
@@ -29,8 +53,8 @@ export interface AccountLogin {
 }
 
 /**
- * The account Worker's cookie routes' gate: a presented `Origin` is exactly
- * this origin, and a state-changing request must present one — same-site
+ * The account Worker's cookie routes' gate: a read is {@link ownPageRead},
+ * and a state-changing request presents exactly this `Origin` — same-site
  * pages, the relay and voice origins among them, share the login cookie —
  * then the Better Auth handler's `get-session` answers the login (401
  * without one), and only the verified admin passes (`refuse` answers anyone
@@ -56,10 +80,8 @@ function cookieGate(
 ): MiddlewareHandler<{ Variables: { login: AccountLogin } }> {
   return async (c, next) => {
     const origin = new URL(c.req.url).origin;
-    const presented = c.req.header("origin");
-    // A read may omit `Origin`; nothing may present a foreign one.
-    const safe = c.req.method === "GET" || c.req.method === "HEAD";
-    if (presented === undefined ? !safe : presented !== origin)
+    const read = c.req.method === "GET" || c.req.method === "HEAD";
+    if (read ? !ownPageRead(c.req.raw, origin) : c.req.header("origin") !== origin)
       return c.json({ message: "Invalid origin." }, 403);
     const headers = new Headers();
     for (const name of ["cookie", "cf-connecting-ip"]) {

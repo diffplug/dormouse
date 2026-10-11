@@ -300,6 +300,8 @@ async function fixture(
         headers: {
           cookie: [...jar].map(([k, v]) => `${k}=${v}`).join("; "),
           "cf-connecting-ip": "203.0.113.10",
+          // A fetch by the account's own page, unless `init` says otherwise.
+          "sec-fetch-site": "same-origin",
           ...init.headers,
         },
       });
@@ -330,9 +332,7 @@ async function fixture(
       });
     };
     const session = async () =>
-      (
-        await request("/api/auth/get-session")
-      ).json() as Promise<Session | null>;
+      (await request("/api/auth/get-session")).json() as Promise<Session | null>;
     const email = async (address: string) => {
       expect(
         (
@@ -591,6 +591,22 @@ test("same-site requests fail, the sibling Workers' included; production exclude
   for (const sameSite of SAME_SITE)
     expect((await account.fetch(sameSite + "/api/auth/csrf")).status, sameSite).toBe(421);
   await browser.email(SIGN_IN_ALLOWLIST[1]);
+  // A same-site page carries the login cookie to the login reads; only the
+  // account's own page may make them, and a refusal leaves the login alone.
+  for (const sameSite of SAME_SITE)
+    for (const path of ["/api/auth/get-session", "/api/auth/list-accounts"])
+      expect(
+        (
+          await browser.request(path, {
+            headers: { origin: sameSite, "sec-fetch-site": "same-site" },
+          })
+        ).status,
+        `${sameSite} ${path}`,
+      ).toBe(403);
+  // An email-code login connects no provider.
+  const accounts = await browser.request("/api/auth/list-accounts");
+  expect(accounts.status).toBe(200);
+  expect(await accounts.json()).toEqual([]);
   expect(
     Math.abs(
       Date.parse((await browser.session())!.session.createdAt) - Date.now(),

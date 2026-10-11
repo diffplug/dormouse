@@ -1,4 +1,5 @@
 import type { Context, ExecutionContext, Hono } from "hono";
+import { openAuthRead, ownPageRead } from "./account-gate";
 import type { AccountEnv } from "./bindings";
 import { accountRules } from "./headers";
 import { relayAccountRoutes, type RelayAccountHost } from "./relay-account";
@@ -30,7 +31,11 @@ export function accountApp(
     routes(app) {
       configure?.(app);
       app.all("/api/auth/*", (c) =>
-        fetchAuth(c.req.raw, c.env, c.executionCtx),
+        c.req.method !== "POST" &&
+        !openAuthRead(c.req.path) &&
+        !ownPageRead(c.req.raw, c.env.APP_ORIGIN)
+          ? c.json({ message: "Invalid origin." }, 403)
+          : fetchAuth(c.req.raw, c.env, c.executionCtx),
       );
       app.get("/api/providers", (c) =>
         fetchAuth(c.req.raw, c.env, c.executionCtx),
