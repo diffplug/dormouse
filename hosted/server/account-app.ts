@@ -37,9 +37,12 @@ export function accountApp(
           ? c.json({ message: "Invalid origin." }, 403)
           : fetchAuth(c.req.raw, c.env, c.executionCtx),
       );
-      app.get("/api/providers", (c) =>
-        fetchAuth(c.req.raw, c.env, c.executionCtx),
-      );
+      // The provider list needs no login, so it never carries one.
+      app.get("/api/providers", (c) => {
+        const headers = new Headers(c.req.raw.headers);
+        headers.delete("cookie");
+        return fetchAuth(new Request(c.req.raw, { headers }), c.env, c.executionCtx);
+      });
       const host = (c: Context<{ Bindings: AccountEnv }>): RelayAccountHost => ({
         databaseUrl: c.env.HYPERDRIVE.connectionString,
         auth: (request) => fetchAuth(request, c.env, c.executionCtx),

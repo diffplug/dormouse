@@ -22,8 +22,8 @@ export const accountQuery = <Row extends Record<string, unknown>>(
  * Whether the account's own page made this read: the browser says
  * `Sec-Fetch-Site: same-origin`, and an `Origin`, if presented, is exactly
  * `origin`. A sibling's page, a navigation, and a request without Fetch
- * Metadata all fail. The account's own login lookups ({@link cookieAdmin},
- * `prelaunchAuth`) call the auth handler in-process and never meet this check.
+ * Metadata all fail. {@link cookieAdmin}'s in-process login lookup vouches
+ * for a request its gate admitted by carrying the header itself.
  */
 export function ownPageRead(request: Request, origin: string): boolean {
   const presented = request.headers.get("origin");
@@ -32,6 +32,12 @@ export function ownPageRead(request: Request, origin: string): boolean {
     (presented === null || presented === origin)
   );
 }
+
+/** The auth handler's login reads, as Hono's decoded `path` names them. */
+export const LOGIN_READS: readonly string[] = [
+  "/api/auth/get-session",
+  "/api/auth/list-accounts",
+];
 
 /**
  * Whether `path` is an auth request another site's page may make without
@@ -83,7 +89,9 @@ function cookieGate(
     const read = c.req.method === "GET" || c.req.method === "HEAD";
     if (read ? !ownPageRead(c.req.raw, origin) : c.req.header("origin") !== origin)
       return c.json({ message: "Invalid origin." }, 403);
-    const headers = new Headers();
+    // This request passed the gate above, so its lookup is the account's own
+    // read: `prelaunchAuth` refuses a login read that does not say so.
+    const headers = new Headers({ "sec-fetch-site": "same-origin" });
     for (const name of ["cookie", "cf-connecting-ip"]) {
       const value = c.req.header(name);
       if (value) headers.set(name, value);

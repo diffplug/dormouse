@@ -13,6 +13,7 @@ import {
   pushSubscriptionDeletePath,
 } from "remote-lib-common";
 import {
+  type AccountEnv,
   accountBindings,
   accountPreviewBindings,
   relayBindings,
@@ -27,7 +28,9 @@ import {
   type RulesFor,
 } from "../headers";
 import { ADMIN_EMAIL } from "../admin";
+import { accountApp } from "../account-app";
 import { cookieAdmin } from "../account-gate";
+import { prelaunchAuth } from "../prelaunch";
 import { RECENT_LOGIN_REQUIRED, relayAccountRoutes } from "../relay-account";
 import type { RelayRoomRpc } from "../relay-room-contract";
 import { voiceApp } from "../voice-app";
@@ -612,9 +615,16 @@ test("auth reads answer only the account's own page; writes, callbacks, and the 
   const { csrfCookie, csrf } = await csrfChallenge();
   const write = { cookie: `${cookie}; ${csrfCookie}`, origin: account, "x-csrf-token": csrf, "content-type": "application/json" };
   expect((await fetch("/api/auth/sign-out", write, "POST", "{}")).status).toBeGreaterThanOrEqual(500);
-  // A provider's callback arrives from its own site.
-  const callback = await fetch("/api/auth/callback/github?code=x&state=y", { "sec-fetch-site": "cross-site" });
+  // A provider's callback arrives from its own site, carrying the login for a
+  // connection; neither it nor the CSRF challenge nor the provider list is
+  // looked up pre-launch, which without a database would fail them (5xx).
+  const callback = await fetch("/api/auth/callback/github?code=x&state=y", { cookie, "sec-fetch-site": "cross-site" });
   expect(callback.status).toBe(303);
+  const sibling = { cookie, "sec-fetch-site": "same-site", origin: ORIGINS.relay };
+  expect((await fetch("/api/auth/csrf", sibling)).status).toBe(200);
+  const providers = await fetch("/api/providers", sibling);
+  expect(providers.status).toBe(200);
+  expect(await providers.json()).toEqual(["github"]);
   const apple = await fetch("/api/auth/callback/apple", {
     "sec-fetch-site": "cross-site",
     origin: "https://appleid.apple.com",
@@ -622,6 +632,51 @@ test("auth reads answer only the account's own page; writes, callbacks, and the 
   }, "POST", "code=x&state=y");
   expect(apple.status).toBeGreaterThanOrEqual(500);
   expect(outbound).toEqual([]);
+});
+
+test("pre-launch looks a login up only for a login read the account's own page made", async () => {
+  const origin = "https://account.example.test";
+  const seen: string[] = [];
+  const auth = prelaunchAuth(async (request) => {
+    seen.push(new URL(request.url).pathname);
+    return Response.json(null);
+  });
+  const env = { HYPERDRIVE: { connectionString: "postgres://user:pass@127.0.0.1:9/none" } } as AccountEnv;
+  const send = (path: string, headers: Record<string, string> = {}) => {
+    seen.length = 0;
+    return auth(new Request(origin + path, { headers: { cookie: "session=victim", ...headers } }), env, {} as ExecutionContext);
+  };
+  // Refused before any lookup, however the path is spelled.
+  for (const path of ["/api/auth/get-session", "/api/auth/get%2Dsession", "/api/auth/list-accounts"])
+    for (const headers of <Record<string, string>[]>[{}, { "sec-fetch-site": "same-site", origin: "https://relay.example.test" }, { "sec-fetch-site": "same-origin", origin: "null" }]) {
+      expect((await send(path, headers)).status, `${path} ${JSON.stringify(headers)}`).toBe(403);
+      expect(seen, path).toEqual([]);
+    }
+  // The page's read, or a cookie route's lookup: looked up, then answered.
+  expect((await send("/api/auth/get-session", { "sec-fetch-site": "same-origin" })).status).toBe(200);
+  expect(seen).toEqual(["/api/auth/get-session", "/api/auth/get-session"]);
+  // Anything else goes straight through, cookie and all, with no lookup.
+  for (const path of ["/api/auth/callback/github", "/api/auth/csrf", "/api/providers"]) {
+    await send(path, { "sec-fetch-site": "cross-site" });
+    expect(seen, path).toEqual([path]);
+  }
+});
+
+test("the provider list never carries the login cookie to the auth handler", async () => {
+  const cookies: (string | null)[] = [];
+  const app = accountApp(async (request) => {
+    cookies.push(request.headers.get("cookie"));
+    return Response.json([]);
+  }, (env) => env);
+  const response = await app.fetch(
+    new Request(ORIGINS.account + "/api/providers", {
+      headers: { cookie: "session=victim", "sec-fetch-site": "same-site", origin: ORIGINS.relay },
+    }),
+    { APP_ORIGIN: ORIGINS.account } as AccountEnv,
+    {} as ExecutionContext,
+  );
+  expect(response.status).toBe(200);
+  expect(cookies).toEqual([null]);
 });
 
 test("the cookie gate refuses a foreign Origin on every method, and a read the account's page did not make", async () => {
