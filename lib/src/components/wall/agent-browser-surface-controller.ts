@@ -1116,7 +1116,7 @@ export class AgentBrowserSurfaceController {
     // The frame's JPEG is a view over the socket's ArrayBuffer.
     createImageBitmap(new Blob([frame.jpeg as Uint8Array<ArrayBuffer>], { type: 'image/jpeg' })).then((bitmap) => {
       if (this.phase.k === 'disposed' || this.sink !== sink) bitmap.close();
-      else this.paintBitmap(sink.canvas, bitmap, frame.kind);
+      else this.paintBitmap(sink.canvas, bitmap, frame);
     }, () => {
       // A malformed frame is only a missed paint; the next one replaces it.
     }).finally(() => {
@@ -1128,19 +1128,33 @@ export class AgentBrowserSurfaceController {
   }
 
   /**
-   * Draw `bitmap` over the whole canvas. A crisp frame sizes the canvas; a
-   * provisional one, at CSS resolution, is drawn scaled into a canvas of the
-   * same shape rather than resizing it, so switching between the two never
-   * reallocates the backing store or relayouts the pane.
+   * Draw the viewport `bitmap` shows over the canvas. A crisp frame is the
+   * viewport alone, at device resolution, and sizes the canvas; a provisional
+   * one is drawn scaled into a canvas of the viewport's shape rather than
+   * resizing it, so switching between the two never reallocates the backing
+   * store or relayouts the pane. A provisional frame shows the window, the
+   * viewport at its top left: only that part is drawn, and where the frame
+   * falls short of the viewport, the last paint stays (rationale).
    */
-  private paintBitmap(canvas: HTMLCanvasElement, bitmap: ImageBitmap, kind: ViewerFrame['kind']): void {
-    const sameShape = canvas.width > 0 && canvas.height > 0
-      && Math.abs(canvas.width / canvas.height - bitmap.width / bitmap.height) < 0.01;
-    if (kind === 'crisp' || !sameShape) {
-      if (canvas.width !== bitmap.width) canvas.width = bitmap.width;
-      if (canvas.height !== bitmap.height) canvas.height = bitmap.height;
+  private paintBitmap(canvas: HTMLCanvasElement, bitmap: ImageBitmap, frame: ViewerFrame): void {
+    // The viewport in this frame's pixels, and the part of it the frame holds.
+    let whole = { width: bitmap.width, height: bitmap.height };
+    let part = whole;
+    if (frame.kind === 'provisional' && frame.size && frame.windowWidth) {
+      const scale = bitmap.width / frame.windowWidth;
+      whole = { width: frame.size.width * scale, height: frame.size.height * scale };
+      part = { width: Math.min(bitmap.width, whole.width), height: Math.min(bitmap.height, whole.height) };
     }
-    canvas.getContext('2d')?.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    const sameShape = canvas.width > 0 && canvas.height > 0
+      && Math.abs(canvas.width / canvas.height - whole.width / whole.height) < 0.01;
+    if (frame.kind === 'crisp' || !sameShape) {
+      const width = Math.round(whole.width);
+      const height = Math.round(whole.height);
+      if (canvas.width !== width) canvas.width = width;
+      if (canvas.height !== height) canvas.height = height;
+    }
+    canvas.getContext('2d')?.drawImage(bitmap, 0, 0, part.width, part.height,
+      0, 0, part.width * canvas.width / whole.width, part.height * canvas.height / whole.height);
     bitmap.close();
     this.setHasFrame(true);
   }

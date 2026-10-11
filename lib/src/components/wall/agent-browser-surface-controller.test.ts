@@ -91,8 +91,8 @@ function layOut(el: HTMLElement, size: () => { width: number; height: number }):
 }
 
 /** A frame the host sends over a viewer socket. */
-function emitFrame(socket: WebSocketMock | undefined, kind: 'provisional' | 'crisp' = 'provisional', n = 1, size?: { width: number; height: number }) {
-  socket?.emitMessage(encodeViewerFrame({ kind, jpeg: new Uint8Array([0xff, 0xd8, n]), ...(size ? { size } : {}) }).buffer);
+function emitFrame(socket: WebSocketMock | undefined, kind: 'provisional' | 'crisp' = 'provisional', n = 1, size?: { width: number; height: number }, windowWidth?: number) {
+  socket?.emitMessage(encodeViewerFrame({ kind, jpeg: new Uint8Array([0xff, 0xd8, n]), ...(size ? { size } : {}), ...(windowWidth ? { windowWidth } : {}) }).buffer);
 }
 
 /** A controller whose first start streams from `port`, as `dor agent-browser` hands
@@ -259,7 +259,9 @@ describe('painting', () => {
     await decode(80, 60);
     record();
     expect(sizes).toEqual(['40x30', '80x60', '80x60', '80x60']);
-    expect(drawImage.mock.calls.map((call) => call.slice(1))).toEqual([[0, 0, 40, 30], [0, 0, 80, 60], [0, 0, 80, 60], [0, 0, 80, 60]]);
+    expect(drawImage.mock.calls.map((call) => call.slice(1))).toEqual([
+      [0, 0, 40, 30, 0, 0, 40, 30], [0, 0, 80, 60, 0, 0, 80, 60], [0, 0, 40, 30, 0, 0, 80, 60], [0, 0, 80, 60, 0, 0, 80, 60],
+    ]);
     // The frame's viewport size drives the screen indicator and sync.
     expect(controller.getDeviceSize()).toEqual({ width: 40, height: 30 });
 
@@ -267,6 +269,24 @@ describe('painting', () => {
     emitFrame(streamSocket(4321), 'provisional', 5, { width: 50, height: 30 });
     await decode(50, 30);
     expect(`${sink.canvas.width}x${sink.canvas.height}`).toBe('50x30');
+  });
+
+  it('draws only the viewport of a stream frame that shows a window wider or shorter than it', async () => {
+    const { sink, drawImage, decode } = await paintFixture();
+    const viewport = { width: 390, height: 844 };
+    emitFrame(streamSocket(4321), 'crisp', 1, viewport);
+    await decode(780, 1688);
+    // Playwright: the whole 500-wide window at CSS resolution, short of the
+    // viewport's height. The viewport is its top-left 390 columns.
+    emitFrame(streamSocket(4321), 'provisional', 2, viewport, 500);
+    await decode(500, 757);
+    // agent-browser: that window scaled down to fit the viewport's size.
+    emitFrame(streamSocket(4321), 'provisional', 3, viewport, 500);
+    await decode(390, 658);
+    expect(`${sink.canvas.width}x${sink.canvas.height}`).toBe('780x1688');
+    const [, playwright, agentBrowser] = drawImage.mock.calls.map((call) => call.slice(1).map((n: number) => Math.round(n)));
+    expect(playwright).toEqual([0, 0, 390, 757, 0, 0, 780, 1514]);
+    expect(agentBrowser).toEqual([0, 0, 304, 658, 0, 0, 780, 1687]);
   });
 
   it('decodes the newest frame only: one at a time, a later arrival replacing the one waiting', async () => {
