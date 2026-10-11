@@ -5,7 +5,7 @@
  * environments and their deployment policies and reviewers, the exhaustive
  * secret inventory, workflow permissions, repository security settings, the
  * Hosted tagger App's ruleset bypass, workflow liveness, the embargo
- * repository's visibility —
+ * repository's visibility, the pinned audit status issue —
  * read live and judged against `.github/audit/expected-github-state.json`.
  *
  * It writes a report fragment in the form `.github/audit/_preamble.md` fixes
@@ -24,7 +24,8 @@
  * "Hosted Deployments", and "VS Code Extension Releases";
  * docs/specs/security-supply-chain.md -> "Cooldown and alerts";
  * docs/specs/security.md -> "Reporting a vulnerability";
- * docs/specs/security-audit.md -> "Schedule and gate" and "Embargo".
+ * docs/specs/security-audit.md -> "Schedule and gate", "Embargo", and
+ * "Disclosure".
  *
  * Usage: node scripts/github-state-check.mjs [--out <fragment>] [--local]
  *   [--repo <owner/name>]
@@ -66,8 +67,13 @@ const COOLDOWN = ['docs/specs/security-supply-chain.md', 'Cooldown and alerts', 
 const REPORTING = ['docs/specs/security.md', 'Reporting a vulnerability', 'private vulnerability reporting is disabled'];
 const GATE = ['docs/specs/security-audit.md', 'Schedule and gate', '`.github/workflows/security-audit.yaml` is missing or disabled'];
 const EMBARGO = ['docs/specs/security-audit.md', 'Embargo', '`diffplug/dormouse-embargo` is publicly visible'];
+const STATUS_ISSUE = ['docs/specs/security-audit.md', 'Disclosure', 'status issue is missing'];
 export const SECTIONS = [RULESETS, BOT, ENVIRONMENTS, INVENTORY, TEND_ALLOWED, LIVENESS, PERMISSIONS, HOSTED,
-  HOSTED_CREDENTIALS, HOSTED_APP, VSCODE, COOLDOWN, REPORTING, GATE, EMBARGO];
+  HOSTED_CREDENTIALS, HOSTED_APP, VSCODE, COOLDOWN, REPORTING, GATE, EMBARGO, STATUS_ISSUE];
+
+/** The open issues carrying the status label, and the repository's pinned issues: one GraphQL read. */
+const STATUS_QUERY = 'query($owner: String!, $name: String!, $label: String!) { repository(owner: $owner, name: $name) { '
+  + 'issues(labels: [$label], states: OPEN, first: 10) { nodes { number } } pinnedIssues(first: 3) { nodes { issue { number } } } } }';
 
 // --- Fetching -------------------------------------------------------------
 
@@ -86,14 +92,16 @@ function mergePages(pages) {
 }
 
 /**
- * `(path, { paginate, auth }) => { status, body }` over `gh api`. `auth:
- * 'public'` swaps in `WORKFLOW_TOKEN` when set; everything else runs on the
- * inherited `GH_TOKEN` (the PAT in CI) or the operator's login.
+ * `(path, { paginate, auth, fields }) => { status, body }` over `gh api`.
+ * `auth: 'public'` swaps in `WORKFLOW_TOKEN` when set; everything else runs on
+ * the inherited `GH_TOKEN` (the PAT in CI) or the operator's login. `fields`
+ * become `-f` parameters, which `graphql` takes as its query and variables.
  */
 function ghFetcher(env = process.env) {
-  return (path, { paginate = false, auth = 'admin' } = {}) => {
+  return (path, { paginate = false, auth = 'admin', fields = {} } = {}) => {
     const args = ['api', '-H', 'Accept: application/vnd.github+json'];
     if (paginate) args.push('--paginate', '--slurp');
+    for (const [name, value] of Object.entries(fields)) args.push('-f', `${name}=${value}`);
     args.push(path);
     const childEnv = { ...env };
     if (auth === 'public' && env.WORKFLOW_TOKEN) childEnv.GH_TOKEN = env.WORKFLOW_TOKEN;
@@ -251,6 +259,14 @@ function observe(api, { repo, expected, tend = [], curl = curlStatus }) {
   }
 
   state.embargoStatus = curl(`https://github.com/${expected.embargoRepository}`);
+
+  // Public, so the workflow token reads it. Numbers only: the body changes every run.
+  const [owner, name] = repo.split('/');
+  const status = read('statusIssue', 'graphql', { auth: 'public', fields: { query: STATUS_QUERY, owner, name, label: expected.statusIssueLabel } });
+  if (status) {
+    const r = status.data?.repository;
+    state.statusIssue = { open: sorted((r?.issues?.nodes ?? []).map((n) => n.number)), pinned: sorted((r?.pinnedIssues?.nodes ?? []).map((n) => n.issue?.number)) };
+  }
   return state;
 }
 
@@ -444,6 +460,12 @@ function judge(state, { expected, tendAllowed, now = new Date(), local = false }
   const clause = `\`${expected.embargoRepository}\` answers 404 unauthenticated`;
   if (state.embargoStatus === '000') add('UNVERIFIABLE', EMBARGO, clause, 'curl reached no server');
   else add(state.embargoStatus === '404' ? 'PASS' : 'FAIL', EMBARGO, clause, `HTTP ${state.embargoStatus}`);
+
+  // The public status issue: exactly one open, and pinned. Pinning is by hand.
+  check(STATUS_ISSUE, `exactly one open issue is labeled \`${expected.statusIssueLabel}\`, and it is pinned`, ['statusIssue'], () => {
+    const { open, pinned } = state.statusIssue;
+    return [open.length === 1 && pinned.includes(open[0]), `open: ${show(open.map((n) => `#${n}`))}; pinned: ${show(pinned.map((n) => `#${n}`))}`];
+  });
 
   return { results, info, warnings };
 }

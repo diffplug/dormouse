@@ -45,6 +45,7 @@ function addEnvironment(ctx, name, { policy = { deployment_branch_policy: { prot
   ctx.responses[`${R}/environments/${name}/variables`] = { status: 200, body: { total_count: 0, variables: [] } };
 }
 
+const statusRepo = (ctx) => ctx.responses.graphql.body.data.repository;
 const lines = (result, verdict) => result.results.filter((r) => r.verdict === verdict).map((r) => r.clause);
 
 test('the recorded live state passes every clause', () => {
@@ -142,6 +143,10 @@ const violations = [
   ['Dependabot alerts off', (ctx) => { ctx.responses[`${R}/vulnerability-alerts`] = { status: 404, body: null }; }, 'Dependabot alerts are on'],
   ['private vulnerability reporting off', (ctx) => { body(ctx, 'private-vulnerability-reporting').enabled = false; }, 'private vulnerability reporting is enabled'],
   ['the embargo repository goes public', (ctx) => { ctx.embargo = '200'; }, 'answers 404 unauthenticated'],
+  // The status issue's response is synthesized, not recorded: the issue did not exist when the fixture was.
+  ['the status issue is unpinned', (ctx) => { statusRepo(ctx).pinnedIssues.nodes = [{ issue: { number: 151 } }]; }, 'is labeled `security-audit-status`, and it is pinned'],
+  ['the status issue is closed', (ctx) => { statusRepo(ctx).issues.nodes = []; }, 'is labeled `security-audit-status`, and it is pinned'],
+  ['a second status issue opens', (ctx) => { statusRepo(ctx).issues.nodes.push({ number: 1300 }); }, 'is labeled `security-audit-status`, and it is pinned'],
 ];
 for (const [name, mutate, clause] of violations) {
   test(`fails: ${name}`, () => {

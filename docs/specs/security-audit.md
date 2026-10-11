@@ -172,6 +172,7 @@ A disclosure carries the key, severity, kind, dates, reason, and where: the rule
 The status issue is the one open issue labeled `security-audit-status`; a run that finds none creates it. **A run comments on it only when the outcome changes and once per new disclosure.**
 
 - **FAIL IF** a disclosure can be published before its ledger issue closes or turns 7 days old, one closed or 7 days old stays unpublished after a run that read it, a key gets a second disclosure issue, or a public summary is taken from an issue body or from a comment whose author association is not `OWNER`, `MEMBER`, or `COLLABORATOR` (rationale). Pinned by `scripts/security-audit.test.mjs`.
+- **FAIL IF** the status issue is missing, closed, one of several open issues labeled `security-audit-status` in `diffplug/dormouse`, or not pinned there; a maintainer pins it by hand. Pinned by `scripts/github-state-check.mjs`.
 
 Source of truth: `planDisclosures` and `statusBody` in `scripts/security-audit-public-body.mjs`; `Read the findings ledger` in `.github/workflows/security-audit.yaml`.
 
