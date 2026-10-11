@@ -33,17 +33,11 @@ export function ownPageRead(request: Request, origin: string): boolean {
   );
 }
 
-/** The auth handler's login reads, as Hono's decoded `path` names them. */
-export const LOGIN_READS: readonly string[] = [
-  "/api/auth/get-session",
-  "/api/auth/list-accounts",
-];
-
 /**
- * Whether `path` is an auth request another site's page may make without
- * being a write: a provider's callback, or the CSRF challenge. Every other
- * request but a POST (whose Origin and CSRF rules the packed adapter holds)
- * must be {@link ownPageRead}, so a read the adapter adds is gated too.
+ * Whether `path` is an auth request another site's page may make: a
+ * provider's callback, or the CSRF challenge. Every other auth request but a
+ * POST (whose Origin and CSRF rules the packed adapter holds) must be
+ * {@link ownPageRead}, so a read a later adapter adds is gated too.
  */
 export const openAuthRead = (path: string) =>
   path === "/api/auth/csrf" || path.startsWith("/api/auth/callback/");

@@ -29,7 +29,9 @@ import {
 } from "../headers";
 import { ADMIN_EMAIL } from "../admin";
 import { accountApp } from "../account-app";
-import { cookieAdmin } from "../account-gate";
+import { cookieAdmin, openAuthRead } from "../account-gate";
+import { createAuthApp } from "@pgstencil/auth/better-auth";
+import { authPolicy } from "../policy";
 import { prelaunchAuth } from "../prelaunch";
 import { RECENT_LOGIN_REQUIRED, relayAccountRoutes } from "../relay-account";
 import type { RelayRoomRpc } from "../relay-room-contract";
@@ -634,7 +636,7 @@ test("auth reads answer only the account's own page; writes, callbacks, and the 
   expect(outbound).toEqual([]);
 });
 
-test("pre-launch looks a login up only for a login read the account's own page made", async () => {
+test("pre-launch looks a login up for every read the account's own page made, and only then", async () => {
   const origin = "https://account.example.test";
   const seen: string[] = [];
   const auth = prelaunchAuth(async (request) => {
@@ -642,23 +644,67 @@ test("pre-launch looks a login up only for a login read the account's own page m
     return Response.json(null);
   });
   const env = { HYPERDRIVE: { connectionString: "postgres://user:pass@127.0.0.1:9/none" } } as AccountEnv;
-  const send = (path: string, headers: Record<string, string> = {}) => {
+  const send = (path: string, headers: Record<string, string> = {}, method = "GET") => {
     seen.length = 0;
-    return auth(new Request(origin + path, { headers: { cookie: "session=victim", ...headers } }), env, {} as ExecutionContext);
+    return auth(new Request(origin + path, { method, headers: { cookie: "session=victim", ...headers } }), env, {} as ExecutionContext);
   };
-  // Refused before any lookup, however the path is spelled.
-  for (const path of ["/api/auth/get-session", "/api/auth/get%2Dsession", "/api/auth/list-accounts"])
-    for (const headers of <Record<string, string>[]>[{}, { "sec-fetch-site": "same-site", origin: "https://relay.example.test" }, { "sec-fetch-site": "same-origin", origin: "null" }]) {
-      expect((await send(path, headers)).status, `${path} ${JSON.stringify(headers)}`).toBe(403);
-      expect(seen, path).toEqual([]);
-    }
+  // Any read carrying a login is refused before any lookup unless the page
+  // made it, however the path is spelled and whether or not the adapter serves it.
+  const reads = ["/api/auth/get-session", "/api/auth/list-sessions", "/api/auth/list%2Dsessions", "/api/auth/account-info", "/api/providers"];
+  for (const path of reads)
+    for (const method of ["GET", "HEAD", "DELETE"])
+      for (const headers of <Record<string, string>[]>[{}, { "sec-fetch-site": "same-site", origin: "https://relay.example.test" }, { "sec-fetch-site": "same-origin", origin: "null" }]) {
+        expect((await send(path, headers, method)).status, `${method} ${path} ${JSON.stringify(headers)}`).toBe(403);
+        expect(seen, path).toEqual([]);
+      }
   // The page's read, or a cookie route's lookup: looked up, then answered.
-  expect((await send("/api/auth/get-session", { "sec-fetch-site": "same-origin" })).status).toBe(200);
-  expect(seen).toEqual(["/api/auth/get-session", "/api/auth/get-session"]);
-  // Anything else goes straight through, cookie and all, with no lookup.
-  for (const path of ["/api/auth/callback/github", "/api/auth/csrf", "/api/providers"]) {
-    await send(path, { "sec-fetch-site": "cross-site" });
+  for (const path of ["/api/auth/get-session", "/api/auth/account-info"]) {
+    expect((await send(path, { "sec-fetch-site": "same-origin" })).status).toBe(200);
+    expect(seen).toEqual(["/api/auth/get-session", path]);
+  }
+  // A provider callback, the CSRF challenge, and a write go straight through,
+  // cookie and all, with no lookup.
+  for (const [path, method] of [
+    ["/api/auth/callback/github", "GET"],
+    ["/api/auth/%63srf", "GET"],
+    ["/api/auth/callback/apple", "POST"],
+    ["/api/auth/sign-out", "POST"],
+  ]) {
+    await send(path, { "sec-fetch-site": "cross-site" }, method);
     expect(seen, path).toEqual([path]);
+  }
+});
+
+test("every GET the installed Better Auth serves is gated and looked up pre-launch, a provider callback alone excepted", async () => {
+  const built = createAuthApp({
+    ...authPolicy,
+    databaseUrl: "postgres://user:pass@127.0.0.1:9/none",
+    origin: ORIGINS.account,
+    secret: everything.AUTH_SECRET,
+    email: { send: async () => {} } as never,
+  });
+  const endpoints = Object.values(built.auth.api as Record<string, { path?: string; options?: { method?: string | string[] } }>);
+  await built.close();
+  const gets = endpoints.flatMap(({ path, options }) =>
+    path && [options?.method].flat().includes("GET") ? ["/api/auth" + path.replace(/:\w+/g, "x")] : [],
+  );
+  // The enumeration finds the reads the adapter does not serve today.
+  expect(gets).toEqual(expect.arrayContaining(["/api/auth/get-session", "/api/auth/list-sessions", "/api/auth/account-info"]));
+  const cookie = "__Host-pgstencil.session_token=victim";
+  for (const path of gets) {
+    const read = (headers: Record<string, string>) =>
+      workers.account.dispatchFetch(ORIGINS.account + path, { redirect: "manual", headers: { cookie, ...headers } });
+    const sibling = (await read({ "sec-fetch-site": "same-site", origin: ORIGINS.relay })).status;
+    // Without a database, a looked-up login fails the request (5xx).
+    const own = (await read({ "sec-fetch-site": "same-origin" })).status;
+    if (openAuthRead(path)) {
+      expect(path).toMatch(/^\/api\/auth\/callback\//);
+      expect(sibling, path).not.toBe(403);
+      expect(own, path).toBeLessThan(500);
+    } else {
+      expect(sibling, path).toBe(403);
+      expect(own, path).toBeGreaterThanOrEqual(500);
+    }
   }
 });
 

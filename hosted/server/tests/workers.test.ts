@@ -283,7 +283,8 @@ async function fixture(
     await context.close();
     throw error;
   }
-  function browser() {
+  /** A browser at `ip`: one address per browser keeps auth's per-address limits apart. */
+  function browser(ip = "203.0.113.10") {
     const jar = new Map<string, string>();
     let csrf = "";
     async function request(
@@ -299,7 +300,7 @@ async function fixture(
         redirect: "manual",
         headers: {
           cookie: [...jar].map(([k, v]) => `${k}=${v}`).join("; "),
-          "cf-connecting-ip": "203.0.113.10",
+          "cf-connecting-ip": ip,
           // A fetch by the account's own page, unless `init` says otherwise.
           "sec-fetch-site": "same-origin",
           ...init.headers,
@@ -663,14 +664,31 @@ test("pre-launch, production signs in only the allowlist's verified emails", asy
       (await browser.request("/api/voice/tokens")).status,
     ).toBe(401);
   }
-  expect(
-    await queryDatabase(
+  const unlisted = () =>
+    queryDatabase(
       f.database.url,
       `SELECT 1 FROM "session" s JOIN "user" u ON u.id = s."userId"
         WHERE NOT (u."emailVerified" AND u.email = ANY($1))`,
       [SIGN_IN_ALLOWLIST],
-    ),
-  ).toHaveLength(0);
+    );
+  // Every read the page could make takes the lookup first, not only the two
+  // the adapter serves today.
+  for (const [n, path] of ["/api/auth/list-sessions", "/api/auth/account-info"].entries()) {
+    const browser = f.browser(`203.0.113.${20 + n}`);
+    await browser.oauth("github", { email: "stranger@example.test" });
+    expect(await unlisted(), path).not.toHaveLength(0);
+    await browser.request(path);
+    expect(await unlisted(), path).toHaveLength(0);
+  }
+  // A connection an unlisted login starts (a POST, never looked up) completes
+  // on the open callback, attaching an identity its starter controls to its
+  // own unlisted account, and still leaves it signed out and unable to act.
+  const linking = f.browser("203.0.113.30");
+  await linking.oauth("github", { email: "stranger@example.test" });
+  await linking.oauth("github", { email: "second@example.test", subject: "67890" }, true);
+  expect(await linking.session()).toBeNull();
+  expect((await linking.request("/api/voice/tokens")).status).toBe(401);
+  expect(await unlisted()).toHaveLength(0);
 });
 
 test("the relay and voice are ready only while their own roles hold the grants their lookups need", async ({
