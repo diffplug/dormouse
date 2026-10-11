@@ -105,7 +105,7 @@ Installed means `navigator.standalone === true` (iOS) or the standard `(display-
 
 **Never parse the user-agent:** iPadOS reports as a Mac; `navigator.standalone`'s presence is the install-required signal. **A tab cannot detect the installed app**, so the copy allows for "already installed, wrong window."
 
-**Push is asked for once per device, on one card on the Burrows view, never from the wall or a Burrow row**: the prompt and the `PushSubscription` are scope-wide, and only the Relay's rows are per `(burrowId, deliveryId)` ([relay.md](./relay.md) → State files). Its tap subscribes the browser, then registers every paired Burrow.
+**Push is asked for once per device, on one card on the Burrows view, never from the wall or a Burrow row**: the prompt and the `PushSubscription` are scope-wide, and only the Relay's rows are per `(burrowId, deliveryId)` ([relay.md](./relay.md) → State files). Its tap subscribes the browser, then registers every paired Burrow the Relay still lists; a removed row is never a push target.
 
 **Which Burrows this device is registered with is read from the Relay on entering the Burrows list**, never tracked locally (rationale). **The readback is by capability, never by identity** (rationale): `POST /api/push/subscriptions/query` presents this browser's own delivery ids and reports only on those ([relay.md](./relay.md) → Web Push). `POST /api/push/subscribe` answers with the same thing — every Burrow this device is registered with after the mutation — so **both are complete answers, never deltas**: only which is newer.
 

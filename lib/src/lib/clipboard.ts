@@ -1,5 +1,6 @@
 import { hasShellInputControls, shellCommandKind } from 'dor/commands/shell-quote';
 import { wallHandleOwning } from '../components/wall/wall-handles';
+import { beginClipboardAttempt, describeError, noteClipboardStep, reportClipboardFailure, type ClipboardAttempt } from './clipboard-failure';
 import { getMouseSelectionState } from './mouse-selection';
 import { getPlatform, PLATFORM_STRING } from './platform';
 import { shellEscapePath } from './shell-escape';
@@ -7,18 +8,27 @@ import { getDefaultShellOpts, getTerminalShellKind, writeUserInput } from './ter
 
 /** Report failure without throwing so callers retain the selection for retry.
  *  Without the Clipboard API (an insecure origin, such as Pocket over plain
- *  http) or when it refuses, falls back to `document.execCommand('copy')`. */
-export async function writeTextToClipboard(text: string): Promise<boolean> {
+ *  http) or when it refuses, falls back to `document.execCommand('copy')`. A
+ *  write that fails both ways opens the clipboard-failure report, unless
+ *  `reportFailure` is false. */
+export async function writeTextToClipboard(text: string, { reportFailure = true } = {}): Promise<boolean> {
   if (!text) return false;
   const clipboard = typeof navigator === 'undefined' ? undefined : navigator.clipboard;
-  // Before any await, so the fallback runs inside the click or key that asked.
-  if (!clipboard?.writeText) return copyWithExecCommand(text);
+  // Before any await, so the attempt describes, and the fallback runs inside,
+  // the click or key that asked.
+  const attempt = beginClipboardAttempt(text.length);
+  const fail = () => { if (reportFailure) reportClipboardFailure(attempt); return false; };
+  if (!clipboard?.writeText) {
+    noteClipboardStep(attempt, 'navigator.clipboard.writeText: unavailable');
+    return copyWithExecCommand(text, attempt) || fail();
+  }
   try {
     await clipboard.writeText(text);
     return true;
-  } catch {
+  } catch (error) {
     // Denied, or the webview lost focus; the activation may have lapsed too.
-    return copyWithExecCommand(text);
+    noteClipboardStep(attempt, `navigator.clipboard.writeText: ${describeError(error)} (activation now ${navigator.userActivation?.isActive ?? 'unknown'})`);
+    return copyWithExecCommand(text, attempt) || fail();
   }
 }
 
@@ -26,8 +36,11 @@ export async function writeTextToClipboard(text: string): Promise<boolean> {
  *  moving it would blur xterm, which reports the focus change, and commit an
  *  inline rename. WebKit may fire no `copy` without a selection; then a hidden
  *  textarea holds one. */
-function copyWithExecCommand(text: string): boolean {
-  if (typeof document === 'undefined' || typeof document.execCommand !== 'function') return false;
+function copyWithExecCommand(text: string, attempt: ClipboardAttempt): boolean {
+  if (typeof document === 'undefined' || typeof document.execCommand !== 'function') {
+    noteClipboardStep(attempt, 'execCommand: unavailable');
+    return false;
+  }
   let wrote = false;
   const onCopy = (event: ClipboardEvent) => {
     if (!event.clipboardData) return;
@@ -40,13 +53,17 @@ function copyWithExecCommand(text: string): boolean {
   document.addEventListener('copy', onCopy, { capture: true });
   try {
     const copied = document.execCommand('copy');
+    noteClipboardStep(attempt, `execCommand('copy'): returned ${copied}, copy event ${wrote ? 'fired' : 'did not fire'}`);
     if (wrote) return copied;
-  } catch {
+  } catch (error) {
+    noteClipboardStep(attempt, `execCommand('copy'): ${describeError(error)}`);
     // Fall through to the textarea, which fails the same way if it must.
   } finally {
     document.removeEventListener('copy', onCopy, { capture: true });
   }
-  return copyFromTextarea(text);
+  const copied = copyFromTextarea(text);
+  noteClipboardStep(attempt, `textarea execCommand('copy'): ${copied}`);
+  return copied;
 }
 
 /** Copy `text` from a hidden textarea, putting focus back after; a field

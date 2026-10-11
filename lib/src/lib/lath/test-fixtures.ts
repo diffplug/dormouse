@@ -4,7 +4,8 @@
 import type { LeafMeta } from './persistence';
 
 /** Build a `LeafMeta` for tests. `tabComponent` defaults from `component` the same way
- *  the real builders do (`terminal` → `terminal`, anything else → `surface`); `title`
+ *  the real builders do (`terminal` → `terminal`, `tool` → `tool`, anything else →
+ *  `surface`); `title`
  *  defaults to `'t'`. The single builder shared by every Lath wall test suite. */
 export function leafMeta(overrides: {
   title?: string;
@@ -15,7 +16,7 @@ export function leafMeta(overrides: {
   const component = overrides.component ?? 'terminal';
   return {
     component,
-    tabComponent: overrides.tabComponent ?? (component === 'terminal' ? 'terminal' : 'surface'),
+    tabComponent: overrides.tabComponent ?? (component === 'terminal' || component === 'tool' ? component : 'surface'),
     title: overrides.title ?? 't',
     ...(overrides.params ? { params: overrides.params } : {}),
   };

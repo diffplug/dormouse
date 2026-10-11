@@ -33,6 +33,8 @@ const fake = vi.hoisted(() => ({
   listPushSubscribedBurrows: vi.fn<() => Promise<string[]>>(),
   subscribeToPush: vi.fn<(burrowId: string, sub: unknown) => Promise<{ burrowIds: string[] }>>(),
   retirePendingDeletions: vi.fn<() => Promise<void>>(),
+  /** Paired Burrows the Relay's list no longer names: removed rows. */
+  unlisted: [] as string[],
   /** Every client call, in order, so "before" can be asserted rather than assumed. */
   order: [] as string[],
 }));
@@ -59,6 +61,7 @@ vi.mock('../client/pocket-client', async (importOriginal) => ({
   PocketClient: class {
     socketOpen = true;
     sessionToken: string | null = 'tok';
+    accountId = 'owner';
     hasPriorUse = () => true;
     registeredPushEndpoint = () => null;
     setOnBurrowGone = () => undefined;
@@ -66,11 +69,12 @@ vi.mock('../client/pocket-client', async (importOriginal) => ({
     close = () => undefined;
     openSocket = async () => undefined;
     listKnownBurrows = async () => KNOWN;
-    listBurrows = async () => KNOWN.map((record) => ({
-      burrowId: record.burrowId,
-      label: record.label,
-      online: true,
-    }));
+    listBurrows = async () =>
+      KNOWN.filter((record) => !fake.unlisted.includes(record.burrowId)).map((record) => ({
+        burrowId: record.burrowId,
+        label: record.label,
+        online: true,
+      }));
     retirePendingDeletions = () => {
       fake.order.push('retire');
       return fake.retirePendingDeletions();
@@ -129,6 +133,7 @@ let root: Root;
 beforeEach(() => {
   fake.availability = 'ready';
   fake.order = [];
+  fake.unlisted = [];
   fake.subscribeInBrowser.mockReset();
   fake.retirePendingDeletions.mockReset().mockResolvedValue(undefined);
   fake.listPushSubscribedBurrows.mockReset().mockResolvedValue([]);
@@ -234,6 +239,29 @@ describe('the one Enable on the Burrows view', () => {
     expect(rowText('First laptop')).toContain('Push on');
     expect(rowText('Second laptop')).not.toContain('Push on');
     expect(buttonNamed(container, ENABLE)).not.toBeNull();
+  });
+
+  /**
+   * A removed Burrow keeps its paired record until Forget, but the Relay
+   * refuses a registration for a Burrow it no longer lists. Registering it
+   * would throw partway through the loop and leave the card offering an
+   * Enable that can never finish.
+   */
+  it('skips a removed Burrow, so the rest register and push reads on', async () => {
+    fake.unlisted = ['burrow-1'];
+    fake.subscribeInBrowser.mockResolvedValue({ endpoint: 'https://push.example/abc' });
+    fake.subscribeToPush.mockImplementation(async (burrowId) => {
+      if (fake.unlisted.includes(burrowId)) throw new Error('unknown burrow');
+      return { burrowIds: [...registered.add(burrowId)] };
+    });
+    await openBurrows();
+
+    await click(container, ENABLE);
+
+    expect(fake.subscribeToPush.mock.calls.map(([burrowId]) => burrowId)).toEqual(['burrow-2']);
+    expect(alertText(container)).toBeNull();
+    expect(container.textContent).toContain('Push notifications on.');
+    expect(buttonNamed(container, ENABLE)).toBeNull();
   });
 
   /**

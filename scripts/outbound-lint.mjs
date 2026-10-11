@@ -171,6 +171,10 @@ const OUTBOUND_SITES = {
     class: 'user:link-click',
     reason: 'The Hosted voice page link, opened only when the user clicks it.',
   },
+  'lib/src/lib/clipboard-failure.ts': {
+    class: 'user:link-click',
+    reason: 'The copy-failure tracking issue, which ClipboardFailureDialog opens only when the user clicks it.',
+  },
   'lib/src/lib/platform/fake-adapter.ts': {
     class: 'user:link-click',
     reason: 'The website playground\'s and Storybook\'s openExternal: window.open on the user\'s click.',
@@ -291,6 +295,10 @@ const REMOTE_LITERALS = {
   'lib/src/components/SettingsDialog.tsx': {
     hosts: ['dormouse.sh'],
     reason: 'The Hosted voice page link.',
+  },
+  'lib/src/lib/clipboard-failure.ts': {
+    hosts: ['github.com'],
+    reason: 'The copy-failure tracking issue link.',
   },
   'lib/src/lib/themes/openvsx.ts': {
     hosts: ['open-vsx.org'],

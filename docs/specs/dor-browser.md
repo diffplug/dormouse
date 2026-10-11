@@ -180,6 +180,7 @@ Source of truth: `lib/src/components/wall/agent-browser-surface-controller.ts` (
 - **Must send state only on change, and current state to a connecting socket**, except `sync`, which answers each size sent, and agent-browser's `url`, a commit edge sent even when unchanged, since a reload commits the same URL (rationale).
 - **Must report a browser that goes on its own as `status { connected: false }` before its socket closes**, ending a headless pane and auto-reverting a headed one seen connected; a headed browser left with no page is gone after a grace (rationale). A launch or close of the browser ends every socket on it.
 - A headed socket carries no frames. Others paint changed stream frames provisionally, replaced by a host device-resolution capture once the page rests (rationale). **Must spend one host-wide capture budget across all sockets**, with every provider's capture bounded (rationale).
+- **Must carry the viewport's CSS size on every frame, and on a provisional one the CSS width of the window it shows**: a stream frame shows the browser's whole window with the viewport at its top left, and a provisional paint draws only the viewport's part (rationale).
 
 A headed agent-browser window is followed over its browser's CDP, held host-side (rationale): its pages, and the shown page's viewport and ratio, which replace the daemon's own in `status` (rationale). **Must bound every upstream dial.**
 

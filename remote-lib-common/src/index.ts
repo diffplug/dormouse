@@ -1,6 +1,6 @@
 /**
- * Code shared between the frontend (`lib`) and the backend (`relay`) — the
- * Relay-side counterpart to `dor-lib-common`.
+ * Code shared between the frontend (`lib`) and the backends (`relay`, and
+ * Hosted's Workers in `hosted`).
  *
  * Keep this package runtime-agnostic: it is compiled into both a browser bundle
  * (via `lib`) and a Node process (`relay`), so it must not reach for Node or

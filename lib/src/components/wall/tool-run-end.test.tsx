@@ -99,7 +99,9 @@ describe('Run end', () => {
     act(() => { terminalRegistry.setTerminalUserTitle(ID, 'notes'); });
     await run(COMMAND);
     await finish();
-    expect(await leaf()).toMatchObject({ component: 'terminal', title: 'notes' });
+    const after = await leaf();
+    expect(after).toMatchObject({ component: 'terminal', title: 'notes' });
+    expect(after.params).toBeUndefined();
   });
 
   it('ends nothing before the first designated run: a takeover still at the dor line', async () => {

@@ -24,6 +24,8 @@ import SiteHeader from "./SiteHeader";
 import DocsThemeControl from "./DocsThemeControl";
 import {
   ACCENT_TEXT_CLASS,
+  DOCS_STATUS_COLORS,
+  type DocsSurfaceVariants,
   MUTED_ACCENT_LINK_CLASS,
   MUTED_TEXT_CLASS,
   TINTED_DOCS_SURFACES,
@@ -36,6 +38,7 @@ import {
   docsAccentFor,
   docsMutedTextFor,
   docsMutedTextForSurfaces,
+  docsStatusColorFor,
 } from "../lib/docs-accent";
 import { sitePath } from "../lib/site-meta";
 
@@ -187,19 +190,29 @@ export default function DocsLayout({
       // has to match a class string somewhere else
       // (website/src/components/docs-tokens.ts).
       const styles = getComputedStyle(document.body);
-      for (const { token, surfaceVariants } of TINTED_DOCS_SURFACES) {
+      /** Each tint stack flattened onto the page, or null if any layer is unreadable. */
+      const resolveSurfaces = (surfaceVariants: DocsSurfaceVariants): string[] | null => {
         const surfaces = surfaceVariants.map((layers) =>
           layers.reduce<string | null>((surface, { tintVar, tintAlpha }) => {
             const tint = styles.getPropertyValue(tintVar).trim();
             return surface && tint ? compositeColor(tint, surface, tintAlpha) : null;
           }, background),
         );
-        const allSurfacesResolved = surfaces.every(
-          (surface): surface is string => Boolean(surface),
-        );
-        const surfaceMuted =
-          allSurfacesResolved && docsMutedTextForSurfaces(foreground, surfaces);
+        return surfaces.every((surface): surface is string => Boolean(surface)) ? surfaces : null;
+      };
+      for (const { token, surfaceVariants } of TINTED_DOCS_SURFACES) {
+        const surfaces = resolveSurfaces(surfaceVariants);
+        const surfaceMuted = surfaces && docsMutedTextForSurfaces(foreground, surfaces);
         if (surfaceMuted) document.body.style.setProperty(token, surfaceMuted);
+      }
+
+      // Verdict colours take the theme's terminal hues, so red and green read
+      // as that theme's own red and green.
+      for (const { token, ansiVar, surfaceVariants } of DOCS_STATUS_COLORS) {
+        const hue = snapshot?.resolvedVars[ansiVar];
+        const surfaces = resolveSurfaces(surfaceVariants);
+        const status = hue && surfaces && docsStatusColorFor(hue, surfaces);
+        if (status) document.body.style.setProperty(token, status);
       }
     };
     paint();

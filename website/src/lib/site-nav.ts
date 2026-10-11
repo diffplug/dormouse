@@ -14,8 +14,6 @@ interface SiteNavLink {
 export const NAV_LINKS: readonly SiteNavLink[] = [
   { href: sitePath("/playground"), label: "Playground" },
   { href: "/#download", label: "Download", hideOnMobile: true },
-  // Desktop only: on a phone the docs are reached from the homepage's own
-  // links, and the four marketing destinations earn the narrow bar first.
   // `/docs` only ever redirects, so it can never equal the current path — it
   // highlights for the pages it leads to instead. Left bare for that reason:
   // it is an entrypoint `website/public/_redirects` owns, not a served page,
@@ -23,7 +21,6 @@ export const NAV_LINKS: readonly SiteNavLink[] = [
   {
     href: "/docs",
     label: "Docs",
-    hideOnMobile: true,
     covers: DOCS_PAGES.map((page) => page.path),
   },
   { href: "https://github.com/diffplug/dormouse", label: "GitHub", external: true },

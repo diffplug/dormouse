@@ -87,6 +87,9 @@ export const CARD_ACCENT_CLASS = `${CARD_BASE} ${ACCENT_BORDER_CLASS}`;
 export const NOTE_CLASS =
   "rounded-lg border border-[var(--color-caramel)]/30 bg-[var(--color-caramel)]/[0.06] p-4 leading-relaxed";
 
+/** Tint stacks a docs colour token is derived over: each variant lists its layers from the page inward. */
+export type DocsSurfaceVariants = readonly (readonly { tintVar: string; tintAlpha: number }[])[];
+
 /**
  * Every tinted container muted text renders on, each pairing the tint stacks
  * the reader can see with the exact composites that derive its token.
@@ -129,6 +132,29 @@ export const TINTED_DOCS_SURFACES = [
     ],
   },
 ] as const;
+
+/**
+ * Verdict colours — good, mixed, bad — from the active theme's terminal green,
+ * yellow, and red, corrected to clear body-text AA on the page and on the 4%
+ * card tint a highlighted table column sits on.
+ *
+ * `DocsLayout`'s paint effect derives each token; index.css carries the
+ * fallback for the site's own black, and `website/src/lib/docs-accent.test.ts`
+ * checks both. Never let colour carry a verdict alone: pair it with a shape.
+ */
+export const DOCS_STATUS_COLORS = [
+  { token: "--docs-status-good", ansiVar: "--vscode-terminal-ansiGreen" },
+  { token: "--docs-status-mixed", ansiVar: "--vscode-terminal-ansiYellow" },
+  { token: "--docs-status-bad", ansiVar: "--vscode-terminal-ansiRed" },
+].map((status) => ({
+  ...status,
+  surfaceVariants: [[], [{ tintVar: "--color-text", tintAlpha: 0.04 }]] as DocsSurfaceVariants,
+}));
+
+/** Written out rather than interpolated: Tailwind scans source statically. */
+export const STATUS_GOOD_TEXT_CLASS = "text-[var(--docs-status-good)]";
+export const STATUS_MIXED_TEXT_CLASS = "text-[var(--docs-status-mixed)]";
+export const STATUS_BAD_TEXT_CLASS = "text-[var(--docs-status-bad)]";
 
 /** Reference body prose: the shared size, leading, and muted colour. Callers
  *  add their own flow margin. */

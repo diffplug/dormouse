@@ -48,17 +48,17 @@ index c200f0324..010afe71c 100644
      mocks.readClipboardFilePaths.mockResolvedValue(null);
      mocks.readText.mockResolvedValue('\x1b[31mred\x1b[0m');
 diff --git a/lib/src/lib/clipboard.ts b/lib/src/lib/clipboard.ts
-index cfa726c6a..efbbd0116 100644
+index 69a8ed7bf..4e73e342a 100644
 --- a/lib/src/lib/clipboard.ts
 +++ b/lib/src/lib/clipboard.ts
 @@ -1,5 +1,4 @@
 -import { hasShellInputControls, shellCommandKind } from 'dor/commands/shell-quote';
 -import { wallHandleOwning } from '../components/wall/wall-handles';
 +import { shellCommandKind } from 'dor/commands/shell-quote';
+ import { beginClipboardAttempt, describeError, noteClipboardStep, reportClipboardFailure, type ClipboardAttempt } from './clipboard-failure';
  import { getMouseSelectionState } from './mouse-selection';
  import { getPlatform, PLATFORM_STRING } from './platform';
- import { shellEscapePath } from './shell-escape';
-@@ -88,19 +87,13 @@ function writePasteToPty(terminalId: string, text: string): void {
+@@ -105,19 +104,13 @@ function writePasteToPty(terminalId: string, text: string): void {
    writeUserInput(terminalId, payload);
  }
  

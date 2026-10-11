@@ -115,6 +115,9 @@ interface LevelChoice {
   detail: string;
 }
 
+/** How the self-host level's title opens, ahead of the Relay's host. */
+export const RELAY_LEVEL_PREFIX = 'Anywhere, through ';
+
 /**
  * What the picker says for `level`: what the level is for. What it connects to
  * is {@link connectionsFor}'s alone.
@@ -137,7 +140,7 @@ function choiceFor(level: NetworkLevel, relayOrigin: string): Omit<LevelChoice, 
       };
     case 'relay':
       return {
-        title: `Anywhere, through ${hostOf(relayOrigin)}`,
+        title: `${RELAY_LEVEL_PREFIX}${hostOf(relayOrigin)}`,
         detail: 'Directly when they can, otherwise through your Relay.',
       };
   }

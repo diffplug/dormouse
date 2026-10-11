@@ -148,7 +148,9 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
   useEffect(() => {
     if (enterCode) codeInput.current?.focus();
   }, [enterCode]);
-  const comingSoon = !loading && !session && !SIGN_IN_OPEN;
+  // A failed lookup keeps its error and Retry on screen rather than sending
+  // a member who is signed in away during an outage.
+  const comingSoon = !loading && !session && !error && !SIGN_IN_OPEN;
   useEffect(() => {
     if (!comingSoon) return;
     const timer = setTimeout(
