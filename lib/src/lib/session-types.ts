@@ -360,7 +360,7 @@ export function readPersistedWindow(raw: unknown): PersistedWindow | null {
 
 /** Every Surface id a Session names: its panes, then its Doors. The twin of
  *  `ids::session_surface_ids` in `standalone/src-tauri/src/ids.rs`. */
-export function sessionSurfaceIds(session: { panes: readonly { id: string }[]; doors?: readonly { id: string }[] }): string[] {
+export function sessionSurfaceIds(session: PersistedSession): string[] {
   return [...session.panes, ...(session.doors ?? [])].map((surface) => surface.id);
 }
 

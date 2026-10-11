@@ -4,10 +4,10 @@ import type { LathPersistedLayout } from './lath/persistence';
 import type { PlatformAdapter, PtyInfo } from './platform/types';
 import { restoreBrowserSurfaceTodo, resumeTerminal } from './terminal-registry';
 import type { TerminalResumeInfo } from './terminal-lifecycle';
-import { readPersistedSession, type PersistedDoor, type PersistedSession } from './session-types';
+import { readPersistedSession, sessionSurfaceIds, type PersistedDoor, type PersistedSession } from './session-types';
 import { isReapedToolPane, persistedLathLayout, restoreReapedTool, restoreSession } from './session-restore';
 import { maxSurfaceIdNumber } from 'dor/protocol';
-import { maxSurfaceNumber, seedSurfaceIds } from './surface-ids';
+import { seedSurfaceIds } from './surface-ids';
 
 export interface ReconnectResult {
   paneIds: string[];
@@ -196,7 +196,7 @@ export function resumeOrRestoreFrom(
 
   const mine = live.ptys.filter((pty) =>
     opts.ptyIds === undefined || opts.ptyIds.has(pty.id) || opts.claimUnowned?.has(pty.id));
-  seedSurfaceIds(Math.max(maxSurfaceIdNumber(mine.map((pty) => pty.id)), maxSurfaceNumber(saved ? [saved] : [])));
+  seedSurfaceIds(maxSurfaceIdNumber([...mine.map((pty) => pty.id), ...(saved ? sessionSurfaceIds(saved) : [])]));
   const resumed = mine.length > 0 ? resumeLivePtys(platform, mine, live.replay, saved, opts.terminalGrids) : null;
   if (resumed) return resumed;
 
