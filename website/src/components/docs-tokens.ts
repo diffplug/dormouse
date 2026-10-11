@@ -87,6 +87,9 @@ export const CARD_ACCENT_CLASS = `${CARD_BASE} ${ACCENT_BORDER_CLASS}`;
 export const NOTE_CLASS =
   "rounded-lg border border-[var(--color-caramel)]/30 bg-[var(--color-caramel)]/[0.06] p-4 leading-relaxed";
 
+/** Tint stacks a docs colour token is derived over: each variant lists its layers from the page inward. */
+export type DocsSurfaceVariants = readonly (readonly { tintVar: string; tintAlpha: number }[])[];
+
 /**
  * Every tinted container muted text renders on, each pairing the tint stacks
  * the reader can see with the exact composites that derive its token.
@@ -105,8 +108,6 @@ export const NOTE_CLASS =
  * scans source statically and never sees an interpolated utility, so the alpha
  * here is the one that must match the literal beside it.
  */
-export type DocsSurfaceVariants = readonly (readonly { tintVar: string; tintAlpha: number }[])[];
-
 export const TINTED_DOCS_SURFACES = [
   {
     token: "--docs-card-text-muted",

@@ -577,7 +577,7 @@ const buildSelfHost = () =>
  * ({@link SECURITY_PAGE_AUDIENCES}); the spec file on GitHub is the one place
  * every row appears together. A guarantee row, an undefended edge, or a known gap belongs to
  * the audience of the spec its links name, and every link in one entry must
- * agree. An entry naming no spec, a spec in neither group, or both groups
+ * agree. An entry naming no spec, a spec in no group, or specs in more than one
  * fails the build: the spec's own pointers are the classification, so a new
  * spec has to be placed here before its rows can publish anywhere but the
  * umbrella.
@@ -921,7 +921,7 @@ async function main() {
   const data = await generateDocs();
   await mkdir(dataDir, { recursive: true });
   // One file per page: importing a single combined module made every docs
-  // route ship all three documents in one shared chunk.
+  // route ship every document in one shared chunk.
   await Promise.all([
     ...PUBLISHED_PAGES.map((name) =>
       writeFile(join(dataDir, `docs.${name}.json`), `${JSON.stringify(publishable(data[name]), null, 2)}\n`, 'utf8'),
