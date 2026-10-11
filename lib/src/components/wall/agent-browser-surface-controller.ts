@@ -1132,15 +1132,18 @@ export class AgentBrowserSurfaceController {
    * viewport alone, at device resolution, and sizes the canvas; a provisional
    * one is drawn scaled into a canvas of the viewport's shape rather than
    * resizing it, so switching between the two never reallocates the backing
-   * store or relayouts the pane. A provisional frame shows the window, the
-   * viewport at its top left: only that part is drawn, and where the frame
-   * falls short of the viewport, the last paint stays (rationale).
+   * store or relayouts the pane. A provisional frame not of the viewport's
+   * shape shows the window, the viewport at its top left: only that part is
+   * drawn, and where the frame falls short of the viewport, the last paint
+   * stays (rationale). One of the viewport's shape is the viewport alone,
+   * whatever window width the host guessed.
    */
   private paintBitmap(canvas: HTMLCanvasElement, bitmap: ImageBitmap, frame: ViewerFrame): void {
     // The viewport in this frame's pixels, and the part of it the frame holds.
     let whole = { width: bitmap.width, height: bitmap.height };
     let part = whole;
-    if (frame.kind === 'provisional' && frame.size && frame.windowWidth) {
+    if (frame.kind === 'provisional' && frame.size && frame.windowWidth
+      && Math.abs(bitmap.width / bitmap.height - frame.size.width / frame.size.height) >= 0.01) {
       const scale = bitmap.width / frame.windowWidth;
       whole = { width: frame.size.width * scale, height: frame.size.height * scale };
       part = { width: Math.min(bitmap.width, whole.width), height: Math.min(bitmap.height, whole.height) };

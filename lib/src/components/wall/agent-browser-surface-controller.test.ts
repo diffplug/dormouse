@@ -283,10 +283,15 @@ describe('painting', () => {
     // agent-browser: that window scaled down to fit the viewport's size.
     emitFrame(streamSocket(4321), 'provisional', 3, viewport, 500);
     await decode(390, 658);
+    // A browser that drew the viewport alone (Chromium's headless shell),
+    // whatever window width the host guessed.
+    emitFrame(streamSocket(4321), 'provisional', 4, viewport, 500);
+    await decode(390, 844);
     expect(`${sink.canvas.width}x${sink.canvas.height}`).toBe('780x1688');
-    const [, playwright, agentBrowser] = drawImage.mock.calls.map((call) => call.slice(1).map((n: number) => Math.round(n)));
+    const [, playwright, agentBrowser, viewportAlone] = drawImage.mock.calls.map((call) => call.slice(1).map((n: number) => Math.round(n)));
     expect(playwright).toEqual([0, 0, 390, 757, 0, 0, 780, 1514]);
     expect(agentBrowser).toEqual([0, 0, 304, 658, 0, 0, 780, 1687]);
+    expect(viewportAlone).toEqual([0, 0, 390, 844, 0, 0, 780, 1688]);
   });
 
   it('decodes the newest frame only: one at a time, a later arrival replacing the one waiting', async () => {
