@@ -6,11 +6,12 @@ import {
   PAIRING_OUTCOME_COPY,
   PAIRING_OUTCOME_LABEL,
 } from '../components/RemoteControlSection';
+import { RELAY_LEVEL_PREFIX } from '../components/NetworkSettings';
 import { enrollmentOfferPath } from '../host/remote/enroll-offer';
 import { SETUP_CODE_DEAD_MESSAGE } from '../remote/client/pocket-client';
 import { PAIRING_CODE_LABEL } from '../remote/pocket-app/views';
 import { SCAN_REJECTED_MESSAGE } from '../remote/pocket-app/ScanInvitation';
-import { SCAN_LABEL } from '../remote/setup-copy';
+import { SCAN_LABEL, SETUP_BUTTON } from '../remote/setup-copy';
 import { DEFAULT_HELPER_COMMAND } from './terminal-context-types';
 import { ITERM2_COMPAT_VERSION } from './terminal-protocol';
 import { OPEN_PORT_TIMEOUT_MS, OPEN_PORT_TIMEOUT_PER_ID_MS, openPortRequestTimeoutMs } from './platform/types';
@@ -171,6 +172,14 @@ describe('the pairing walkthrough mirrors the copy it clicks', () => {
 
   it('presses the scan button by its shipped label', () => {
     expect(extract(source, file, /^const SCAN_LABEL = '([^']+)';$/m)).toBe(SCAN_LABEL);
+  });
+
+  it('presses the setup button by its shipped label', () => {
+    expect(extract(source, file, /^const SETUP_BUTTON = '([^']+)';$/m)).toBe(SETUP_BUTTON);
+  });
+
+  it('picks the self-host network level by its shipped title', () => {
+    expect(extract(source, file, /^const RELAY_LEVEL_PREFIX = '([^']+)';$/m)).toBe(RELAY_LEVEL_PREFIX);
   });
 
   it('finds the two digits by the live region’s shipped accessible name', () => {

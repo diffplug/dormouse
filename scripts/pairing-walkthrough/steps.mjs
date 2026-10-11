@@ -37,6 +37,19 @@ const POCKET_VIEWPORT = { width: 390, height: 844 };
 const SCAN_LABEL = 'Scan a setup code';
 
 /**
+ * The laptop's button that shows a setup code. Mirrors `SETUP_BUTTON` in
+ * `lib/src/remote/setup-copy.ts`; pinned by `lib/src/lib/mirrored-constants.test.ts`.
+ */
+const SETUP_BUTTON = 'Set up a phone';
+
+/**
+ * How Settings → Network titles the self-host level, ahead of the Relay's host.
+ * Mirrors `RELAY_LEVEL_PREFIX` in `lib/src/components/NetworkSettings.tsx`;
+ * pinned by `lib/src/lib/mirrored-constants.test.ts`.
+ */
+const RELAY_LEVEL_PREFIX = 'Anywhere, through ';
+
+/**
  * The harness line that says where the Burrow keeps its enrollment + ACL. The
  * `[innerdogfood]` prefix `log()` adds is deliberately not matched: it is
  * there for a human reading interleaved output, so pinning it would make a
@@ -352,8 +365,8 @@ async function stepBurrow(ctx) {
 }
 
 /**
- * Open Settings from the baseboard, choose Network → My Relay only, and scroll
- * to the Phones section it opens. A fresh Burrow's network policy is Nothing
+ * Open Settings from the baseboard, choose Network → Anywhere, through <host>,
+ * and scroll to the Phones section it opens. A fresh Burrow's network policy is Nowhere
  * (`docs/specs/remote-network.md` -> "Policy"), which refuses enrollment before
  * any request, so this click is what lets the next step reach the Relay.
  */
@@ -362,11 +375,11 @@ async function stepSettings(ctx) {
   await ab.run(['click', 'button[aria-label="Settings"]']);
   await ab.waitUntil(
     `const radio = [...document.querySelectorAll('[role="dialog"] [role="radio"]')]
-       .find((el) => el.innerText.startsWith('My Relay only'));
+       .find((el) => el.innerText.startsWith(${JSON.stringify(RELAY_LEVEL_PREFIX)}));
      if (!radio) return null;
      if (radio.getAttribute('aria-checked') !== 'true') radio.click();
      return true;`,
-    { what: 'Settings → Network to offer My Relay only' },
+    { what: `Settings → Network to offer ${RELAY_LEVEL_PREFIX}<host>` },
   );
   // The section is below the fold in a short window, and a screenshot is
   // viewport-only — so the wait scrolls it into view as it finds it, at once
@@ -409,7 +422,7 @@ async function stepEnroll(ctx) {
     `const section = ${REMOTE_SECTION};
      if (!section) return null;
      const text = section.innerText;
-     if (/Set up a phone/.test(text)) return { enrolled: true, text };
+     if (text.includes(${JSON.stringify(SETUP_BUTTON)})) return { enrolled: true, text };
      const error = section.querySelector('.text-error');
      if (error && error.textContent.trim()) return { enrolled: false, text: error.textContent.trim() };
      return null;`,
@@ -438,7 +451,7 @@ async function stepEnroll(ctx) {
  */
 async function stepQr(ctx) {
   const ab = ctx.state.burrowBrowser;
-  await ab.run(['find', 'role', 'button', 'click', '--name', 'Set up a phone', '--exact']);
+  await ab.run(['find', 'role', 'button', 'click', '--name', SETUP_BUTTON, '--exact']);
   ctx.record({ setupTokenTtlMs: await setupTokenTtlMs(ctx.repoRoot) });
   await captureQr(ctx);
 }
@@ -1367,7 +1380,7 @@ async function fillField(ctx, selector, value, ab = ctx.state.burrowBrowser) {
 const SETUP = [
   { name: 'relay', title: 'Start the coordinating Relay', run: stepRelay },
   { name: 'burrow', title: 'Start the Burrow in the agent-browser harness', run: stepBurrow },
-  { name: 'settings', title: 'Open Settings → Network and choose My Relay only', run: stepSettings },
+  { name: 'settings', title: 'Open Settings → Network and choose Anywhere, through <host>', run: stepSettings },
   { name: 'enroll', title: 'Enroll this machine through the form', run: stepEnroll },
   { name: 'qr', title: 'Open the phone-setup panel and capture its QR', run: stepQr },
   {
