@@ -1,6 +1,6 @@
 # Security Audit
 
-> - Owns how the security specs are audited: the schedule and the release gate, the deterministic checks and the skip they allow, the four domains and their prompts, the orchestration contract, the three outcomes, the reporting steps, the embargo on finding detail, the environment that holds `AUDIT_PAT`, and the canary that measures recall.
+> - Owns how the security specs are audited: the schedule and the release gate, the deterministic checks and the skip they allow, the four domains and their prompts, the orchestration contract, the three outcomes, the reporting steps, the embargo on finding detail and its disclosure, the environment that holds `AUDIT_PAT`, and the canary that measures recall.
 > - Defers what is audited to `docs/specs/security.md` and the specs it names, and each agent's procedure to its prompt in `.github/audit/`.
 > - Read `docs/specs/security.md` first.
 
@@ -77,8 +77,8 @@ Source of truth: `.github/audit/orchestrator.md`; the fragment contract in `.git
 
 | Outcome | Computed when | Result |
 |---|---|---|
-| `PASS` | every domain computes PASS and `audit-status.txt` is literally `PASS` | public failure issues closed, or commented while the ledger holds an earlier run's finding ([Findings ledger](#findings-ledger)); exit zero |
-| `FAIL` | any domain computes FAIL | private issue filed; public issue filed or updated; exit non-zero |
+| `PASS` | every domain computes PASS and `audit-status.txt` is literally `PASS` | status issue rewritten; exit zero once the ledger was filed and read ([Findings ledger](#findings-ledger)) |
+| `FAIL` | any domain computes FAIL | private issue filed; status issue rewritten; exit non-zero |
 | INCONCLUSIVE | anything else | filed as for `FAIL`, both saying no verdict was reached; exit non-zero |
 
 **Verdicts are computed from the fragments' lines, never read from a conclusion** (rationale). `scripts/security-audit-report.mjs` parses each fragment in the grammar `.github/audit/_preamble.md` fixes:
@@ -99,12 +99,12 @@ Source of truth: `.github/audit/orchestrator.md`; the fragment contract in `.git
 
 - **FAIL IF** the `Redact secrets from agent output` step is removed, stops covering any sink later archived or filed (`audit-report.md`, every `AUDIT_FRAGMENTS` fragment, and the transcript), or stops failing closed by deleting those files when the redactor itself throws (rationale). Pinned by `scripts/security-audit.test.mjs`.
 - **FAIL IF** the reporting step takes a verdict from a `VERDICT:` line or `audit-status.txt` over the computed one, reads a stated verdict from a first line other than exact `VERDICT: PASS`, `VERDICT: FAIL`, or `VERDICT: INCONCLUSIVE`, a fragment computes PASS under any INCONCLUSIVE condition above, an `INFO` line, in the grammar or not, changes a verdict or opens a ledger issue, the manifest is read from anywhere but the claimed specs' `FAIL IF` lines or comes back empty for a fragment or spec it cannot resolve, or a builder that throws hands on anything but INCONCLUSIVE (rationale).
-- **FAIL IF** the private report omits a note for a condition that holds — a failing, missing, unreadable, cut-off, or inconclusive domain, an anomaly, or no status — or any note asserts something about a condition other than its own, or the public issue's domain table omits one (rationale).
-- **FAIL IF** the audit has been weakened in a way no bullet above names — e.g. the prompt no longer requires the qualitative pass, a `FAIL IF` can be ignored, the failure-reporting step that opens a `security-audit-failure` issue and exits non-zero has been removed, or the `AUDIT_PAT` pre-check is removed or bypassed. **This bullet is a judgement item, not a checklist.**
+- **FAIL IF** the private report omits a note for a condition that holds — a failing, missing, unreadable, cut-off, or inconclusive domain, an anomaly, or no status — or any note asserts something about a condition other than its own, or the status issue's domain table omits one (rationale).
+- **FAIL IF** the audit has been weakened in a way no bullet above names — e.g. the prompt no longer requires the qualitative pass, a `FAIL IF` can be ignored, the reporting step that rewrites the status issue and exits non-zero has been removed, or the `AUDIT_PAT` pre-check is removed or bypassed. **This bullet is a judgement item, not a checklist.**
 
 The reporting step's known gaps are `docs/specs/security.md` -> "Known gaps" (rationale).
 
-Source of truth: `Compose the audit report` and `Surface result, file or close issue` in `.github/workflows/security-audit.yaml`; `scripts/security-audit-report.mjs`; reporting, redaction, and local-runner regressions in `scripts/security-audit.test.mjs`.
+Source of truth: `Compose the audit report` and `Publish the audit status` in `.github/workflows/security-audit.yaml`; `scripts/security-audit-report.mjs`; reporting, redaction, and local-runner regressions in `scripts/security-audit.test.mjs`.
 
 ## Findings
 
@@ -119,38 +119,61 @@ Source of truth: `.github/audit/_preamble.md`; `dedupFindings` in `scripts/secur
 
 ## Embargo
 
-**Finding detail stays private until fixed** (rationale):
+**Finding detail stays private until [Disclosure](#disclosure) publishes what of it may cross** (rationale):
 
 | Sink | Carries |
 |---|---|
-| Public `security-audit-failure` issue | the run link, the audited commit, each domain's computed verdict and its failed-check, missing-rule, malformed-line, BLOCKER, and WARNING counts, each failed check's spec and heading, how many verdict lines disagreed, how many ledger findings are open, and whether the private filing failed |
+| Public status issue, labeled `security-audit-status` | the run's time, link, commit, and outcome; whether the domains were skipped and when they last ran; each domain's computed verdict and its failed-check, missing-rule, malformed-line, BLOCKER, and WARNING counts; each failed check's spec and heading; how many verdict lines disagreed; whether the private filing failed; each open ledger finding's severity, kind, and dates, keyed as [Disclosure](#disclosure) allows; the latest disclosures |
+| Public disclosure issue, labeled `security-audit-finding`, one per ledger key | what [Disclosure](#disclosure) lists |
 | Private issue in `diffplug/dormouse-embargo`, one per non-PASS run | the private report ([Outcomes and reporting](#outcomes-and-reporting)), titled with date and commit |
 | Ledger issue in `diffplug/dormouse-embargo`, one per open finding key | one failed rule, its clauses together, or one merged BLOCKER or WARNING, with its evidence |
 | `audit-open-findings.txt`, on the runner | the open ledger titles, leaving the runner only in the transcript |
+| `audit-ledger-snapshot.jsonl`, on the runner | what `Read the findings ledger` keeps of each ledger issue (below) |
 | `audit-transcript` artifact | age ciphertext of the transcript, `audit-report.md`, and the fragments |
 | `audit-state` artifact | the audited commit, the GitHub-state hash, whether the domains ran, and when they last did |
 | `Check GitHub state` job log | the GitHub-state verdict, its clause counts, and the hash |
-| `List open findings` job log | how many ledger findings are open |
+| `List open findings` and `Read the findings ledger` job logs | how many ledger issues they read |
 
-- **FAIL IF** the public issue can carry finding text: it is posted from anything but the output of `scripts/security-audit-public-body.mjs` and the fixed private-filing notes, or that builder emits anything but fixed text, counts, validated run metadata, fragment names, and headings it found in the checked-out spec. A failed check naming no such heading, in the line form `.github/audit/_preamble.md` fixes, is counted, never quoted (rationale).
-- **FAIL IF** `secrets.EMBARGO_TOKEN` is referenced anywhere but the `env:` of `List open findings` and `File embargoed findings`, a workflow or job `env:` or a `$GITHUB_ENV` write could carry it to another step, either step runs anything but `gh` and shell builtins, or `List open findings` writes a title anywhere but `audit-open-findings.txt` (rationale). Pinned by `scripts/security-audit.test.mjs`.
-- **FAIL IF** a non-PASS run whose private filing failed or was skipped can succeed, or its public issue omits that the filing failed; or a PASS run files anything but ledger issues, or `scripts/security-audit-local.sh` files anything.
+- **FAIL IF** a public issue can carry finding text: a status or disclosure title, body, or comment is posted from anything but `scripts/security-audit-public-body.mjs` and the step's fixed failure sentence, or that builder emits anything but fixed text, counts, dates, validated run metadata, fragment names, ledger keys and severities, headings it found in the checked-out spec, files it found in the checked-out tree, PR numbers the API reports merged, and a maintainer's public summary. A failed check naming no such heading, in the line form `.github/audit/_preamble.md` fixes, is counted, never quoted (rationale).
+- **FAIL IF** `secrets.EMBARGO_TOKEN` is referenced anywhere but the `env:` of `List open findings`, `File embargoed findings`, and `Read the findings ledger`, a workflow or job `env:` or a `$GITHUB_ENV` write could carry it to another step, any of them runs anything but `gh` and shell builtins, `List open findings` writes a title anywhere but `audit-open-findings.txt`, or `Read the findings ledger` writes anywhere but `audit-ledger-snapshot.jsonl` or keeps a title past its key and severity, a body past its opening metadata line, or a comment past a maintainer's `Fixed in` PR number or public summary (rationale). Pinned by `scripts/security-audit.test.mjs`.
+- **FAIL IF** a non-PASS run whose private filing failed or was skipped can succeed, or its status issue omits that the filing failed; or a PASS run files anything in the private tracker but ledger issues, or `scripts/security-audit-local.sh` files anything.
 - **FAIL IF** the `audit-transcript` artifact can upload anything but age ciphertext: its `path:` names a non-`.age` file, it uploads when `Encrypt the audit transcript` did not succeed, that step reads its recipient from anywhere but `.github/audit/transcript-recipient.txt`, or it stops running whatever the audit step's outcome (`if: always()`).
 - **FAIL IF** `diffplug/dormouse-embargo` is publicly visible: an unauthenticated `curl -s -o /dev/null -w '%{http_code}' https://github.com/diffplug/dormouse-embargo` must print `404` (rationale). Pinned by `scripts/github-state-check.mjs`.
 
 That the agent shares its job with these steps is `docs/specs/security.md` -> "Known gaps".
 
-Source of truth: `List open findings`, `Encrypt the audit transcript`, `File embargoed findings`, and `Surface result, file or close issue` in `.github/workflows/security-audit.yaml`; `scripts/security-audit-public-body.mjs`; embargo regressions in `scripts/security-audit.test.mjs`.
+Source of truth: `List open findings`, `Encrypt the audit transcript`, `File embargoed findings`, `Read the findings ledger`, and `Publish the audit status` in `.github/workflows/security-audit.yaml`; `scripts/security-audit-public-body.mjs`; embargo regressions in `scripts/security-audit.test.mjs`.
 
 ### Findings ledger
 
 **Every run reads the ledger, a PASS included, and only a human closes a ledger issue** (rationale). A ledger issue's title starts `[audit-finding <key>]`: a failure's key hashes its rule's spec, heading, and number; a finding's, its normalized file and the root-cause symbol it names, or its rule where it names none (rationale). A key with no open issue gets one, a PASS's WARNINGs included, an `INFO` never; one already open gets a `Seen again` comment. Any open `[audit-finding …]` issue counts, a hand-filed `manual-…` key included.
 
+A filed ledger issue's body opens with one metadata line, `<!-- audit-ledger {…} -->`: JSON holding its key, severity, and its rule's spec and heading or its finding's file, with no `--` inside. **A maintainer closes a fixed ledger issue with a comment opening `Fixed in #<n>`** (`Fixed by`, `diffplug/dormouse#<n>`, or the PR's URL are read alike), and closes one not worth fixing as not planned.
+
 Before the agent starts, `List open findings` writes the open titles to `audit-open-findings.txt` for the domains to re-verify. A PASS line naming `[audit-finding <key>]` and then a `path:line` re-verifies a failure cited on its rule, or on its heading for a hand-filed citation (rationale).
 
-- **FAIL IF** `File embargoed findings` can close, edit, or reopen an issue, or open a ledger issue for a key that already has one open (rationale).
-- **FAIL IF** a PASS closes a public `security-audit-failure` issue while a ledger issue opened before that run is still open, or while the ledger could not be read; or a PASS whose ledger could not be read exits zero (rationale).
+- **FAIL IF** `File embargoed findings` can close, edit, or reopen an issue, comment on a ledger issue with anything but its fixed `Seen again` sentence, or open a ledger issue for a key that already has one open (rationale).
+- **FAIL IF** a PASS's status issue reads as all clear while the ledger holds an open finding or could not be read, or a PASS whose findings were not filed or whose ledger could not be read exits zero (rationale). Pinned by `scripts/security-audit.test.mjs`.
 - **FAIL IF** a failure's key changes with its clause letter or a finding's with its line or the words around its symbol, or an open issue with a key the run did not mint stops counting. Pinned by `scripts/security-audit.test.mjs`.
+
+### Disclosure
+
+**A ledger finding becomes public when its ledger issue closes, or 7 days after it was opened, whichever comes first** (rationale), whatever its severity. `Publish the audit status` gives each key one issue labeled `security-audit-finding`, titled `[audit-disclosure <key>] <severity> <kind>`; that title, never a mark on the ledger, keeps a re-run from publishing twice (rationale).
+
+| Ledger issue | Disclosed as | Its issue |
+|---|---|---|
+| closed, citing a PR the API reports merged here | fixed, linking the PR | created closed |
+| closed as completed, citing none | closed, no fix PR cited | created closed |
+| closed as not planned | dismissed | created closed |
+| open 7 days | not yet fixed | created open; closed, rewritten, by the first run that sees the ledger issue closed |
+
+A disclosure carries the key, severity, kind, dates, reason, and where: the rule's spec and heading or the finding's file, each only when the checked-out tree has it; a ledger issue with no metadata line names neither. `Read the findings ledger` keeps of each ledger issue its number, state, close reason, dates, title key and severity, metadata line, and maintainers' fix citations and public summaries. **The one free text that crosses is a maintainer's comment opening `## Public summary`**, verbatim (rationale). A hand-filed key stays off the status issue until disclosed.
+
+The status issue is the one open issue labeled `security-audit-status`; a run that finds none creates it. **A run comments on it only when the outcome changes and once per new disclosure.**
+
+- **FAIL IF** a disclosure can be published before its ledger issue closes or turns 7 days old, one closed or 7 days old stays unpublished after a run that read it, a key gets a second disclosure issue, or a public summary is taken from an issue body or from a comment whose author association is not `OWNER`, `MEMBER`, or `COLLABORATOR` (rationale). Pinned by `scripts/security-audit.test.mjs`.
+
+Source of truth: `planDisclosures` and `statusBody` in `scripts/security-audit-public-body.mjs`; `Read the findings ledger` in `.github/workflows/security-audit.yaml`.
 
 ## Environment and `AUDIT_PAT`
 
