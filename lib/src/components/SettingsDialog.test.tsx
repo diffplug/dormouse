@@ -93,7 +93,7 @@ beforeEach(() => {
     return nextFrame;
   });
   vi.stubGlobal('cancelAnimationFrame', (id: number) => frames.delete(id));
-  sectionOffsets = { appearance: 16, notifications: 516, network: 916, about: 1316 };
+  sectionOffsets = { general: 16, notifications: 516, network: 916, about: 1316 };
   stubResizeObserver(400);
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
     const top = this.dataset.settingsTopic
@@ -128,7 +128,7 @@ describe('SettingsDialog navigation and search', () => {
     sectionOffsets.notifications += 50;
     await advanceScroll(SETTINGS_SCROLL_MS / 2);
     expect(scrollTo).toHaveBeenLastCalledWith({ top: 550, behavior: 'instant' });
-    await act(async () => byText('Appearance').click());
+    await act(async () => byText('General').click());
     await advanceScroll(SETTINGS_SCROLL_MS / 2);
     await act(async () => document.getElementById('settings-content')!.dispatchEvent(new Event('wheel', { bubbles: true })));
     scrollTo.mockClear();
@@ -142,7 +142,7 @@ describe('SettingsDialog navigation and search', () => {
     const heading = document.getElementById('settings-heading-notifications')!;
     scrollTo.mockClear();
     await pointerOver(heading, 'touch');
-    expect(byText('Appearance').getAttribute('aria-current')).toBe('location');
+    expect(byText('General').getAttribute('aria-current')).toBe('location');
     await pointerOver(heading, 'mouse');
     expect(byText('Notifications').getAttribute('aria-current')).toBe('location');
     expect(scrollTo).not.toHaveBeenCalled();
@@ -151,7 +151,7 @@ describe('SettingsDialog navigation and search', () => {
     await act(async () => {
       heading.dispatchEvent(new PointerEvent('pointerout', { bubbles: true, relatedTarget: document.body }));
     });
-    expect(byText('Appearance').getAttribute('aria-current')).toBe('location');
+    expect(byText('General').getAttribute('aria-current')).toBe('location');
   });
 
   it('scrolls on mouse hover and click without hiding sections or reacting to touch hover', async () => {
@@ -164,7 +164,7 @@ describe('SettingsDialog navigation and search', () => {
     await advanceScroll();
     expect(scrollTo).toHaveBeenLastCalledWith({ top: 500, behavior: 'instant' });
     expect(byText('Notifications').getAttribute('aria-current')).toBe('location');
-    await act(async () => byText('Appearance').click());
+    await act(async () => byText('General').click());
     await advanceScroll();
     expect(scrollTo).toHaveBeenLastCalledWith({ top: 0, behavior: 'instant' });
     expect(visible('[role="region"]')).toHaveLength(3);

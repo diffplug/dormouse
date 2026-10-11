@@ -274,7 +274,7 @@ export const ThemeMenuOpenWithInstalledThemes: Story = {
 };
 
 /**
- * VS Code owns the theme; without a shell choice, Appearance is omitted and
+ * VS Code owns the theme; without a shell choice, General is omitted and
  * Notifications becomes the first topic.
  */
 export const HostOwnsTheme: Story = {
@@ -502,7 +502,7 @@ export const ScrollFades: Story = {
   ...Default,
   play: async ({ canvasElement }) => {
     const body = dialog(canvasElement);
-    const content = body.getByRole('region', { name: 'Appearance' }).parentElement!;
+    const content = body.getByRole('region', { name: 'General' }).parentElement!;
     const edges = () => [...content.parentElement!.querySelectorAll<HTMLElement>('[data-scroll-fade]')]
       .map((fade) => fade.dataset.scrollFade);
     await waitFor(() => expect(edges()).toEqual(['below']));
@@ -531,7 +531,7 @@ export const ScrollFollowsContents: Story = {
   ...WithRules,
   play: async ({ canvasElement }) => {
     const body = dialog(canvasElement);
-    await userEvent.unhover(await hoverTopic(body, 'Appearance'));
+    await userEvent.unhover(await hoverTopic(body, 'General'));
     const section = body.getByRole('region', { name: 'Notifications' });
     const content = section.parentElement!;
     // Manual input cancels any remaining topic-animation frame. A bare
@@ -552,12 +552,12 @@ export const HoverSettingsOverridesScroll: Story = {
     const heading = body.getByRole('heading', { name: 'Notifications' });
     const content = body.getByRole('region', { name: 'Notifications' }).parentElement!;
     const scrollTop = content.scrollTop;
-    await expect(contentsButton(body, 'Appearance')).toHaveAttribute('aria-current', 'location');
+    await expect(contentsButton(body, 'General')).toHaveAttribute('aria-current', 'location');
     await userEvent.hover(heading);
     await expect(contentsButton(body, 'Notifications')).toHaveAttribute('aria-current', 'location');
     await expect(content.scrollTop).toBe(scrollTop);
     await userEvent.unhover(heading);
-    await expect(contentsButton(body, 'Appearance')).toHaveAttribute('aria-current', 'location');
+    await expect(contentsButton(body, 'General')).toHaveAttribute('aria-current', 'location');
     await userEvent.hover(heading);
   },
 };

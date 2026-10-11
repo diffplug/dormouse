@@ -1,4 +1,4 @@
-import { BellIcon, FlaskIcon, GlobeIcon, InfoIcon, MagnifyingGlassIcon, PaintBrushIcon } from '@phosphor-icons/react';
+import { BellIcon, FlaskIcon, GearIcon, GlobeIcon, InfoIcon, MagnifyingGlassIcon } from '@phosphor-icons/react';
 import { AboutSettings } from './AboutSettings';
 import { SecondsField, SwitchRow } from './AlarmSettingsControls';
 import { ScrollFades } from './ScrollFades';
@@ -98,7 +98,7 @@ function describePushTargets(push: PushDevicesState, remoteControlBelow: boolean
 }
 
 const TOPICS = [
-  { id: 'appearance', label: 'Appearance', icon: PaintBrushIcon, groups: ['theme', 'shell'] },
+  { id: 'general', label: 'General', icon: GearIcon, groups: ['theme', 'shell'] },
   { id: 'notifications', label: 'Notifications', icon: BellIcon, groups: ['speech', 'push', 'watcher', 'inactivity'] },
   { id: 'network', label: 'Network', icon: GlobeIcon, groups: ['network', 'phones', 'updates'] },
   { id: 'labs', label: 'Labs', icon: FlaskIcon, groups: ['delayedKill'] },
@@ -175,7 +175,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const searchRef = useRef<HTMLInputElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const scrollFrame = useRef<number | null>(null);
-  const [topic, setTopic] = useState<TopicId>('appearance');
+  const [topic, setTopic] = useState<TopicId>('general');
   const [hoveredTopic, setHoveredTopic] = useState<TopicId | null>(null);
   const [above, setAbove] = useState(false);
   const [below, setBelow] = useState(false);
@@ -378,7 +378,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                 {visibleTopics.length ? 'Search results' : 'No settings found.'}
               </div>
             )}
-            <TopicSection id="appearance" hidden={!visible('appearance')}>
+            <TopicSection id="general" hidden={!visible('general')}>
               <div className="mt-4 flex flex-col gap-2">
                 {showTheme && (
                   <section data-setting="theme" hidden={!matches('theme')} className={PICKER_ROW}>
