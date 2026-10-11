@@ -338,8 +338,12 @@ const preview: Preview = {
       // names it instead of an update check.
       platform.hostOwnsUpdates = context.parameters?.hostOwnsUpdates === true || undefined;
 
-      // Which host Settings → About names; absent reads as unknown.
+      // Which host Settings → About names, and the build stamp it reads — a
+      // global here, since Storybook's bundle is built without the stamp's
+      // define (`readBuildStamp` in lib/src/lib/build-info.ts). Absent reads as
+      // unknown.
       platform.aboutHost = context.parameters?.aboutHost;
+      (globalThis as { __DORMOUSE_BUILD__?: unknown }).__DORMOUSE_BUILD__ = context.parameters?.buildStamp;
 
       // The updater's port, which only Standalone's main window has: a story
       // about Settings → Network's update checks names the last successful

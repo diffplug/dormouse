@@ -5,7 +5,8 @@ import type { DormouseTheme } from '../lib/themes';
 import { OVERLAY_MAX_HEIGHT_VAR } from '../components/design';
 import { SettingsDialog, SETTINGS_SCROLL_MS, TOPIC_GAP_PX } from '../components/SettingsDialog';
 import { WorkspaceIdContext } from '../components/wall/wall-context';
-import { enrolledStatus, UNENROLLED_STATUS } from '../host/remote/test-burrow-link';
+import { enrolledStatus, SELF_HOST_UNENROLLED_STATUS, UNENROLLED_STATUS } from '../host/remote/test-burrow-link';
+import type { BuildStamp } from '../lib/build-info';
 import { networkPolicyResult, nothingPolicy } from '../remote/network-policy';
 
 /** The dialog renders into `document.body`, outside `canvasElement`
@@ -552,19 +553,66 @@ export const HoverSettingsOverridesScroll: Story = {
   },
 };
 
-/**
- * About, the last topic: Storybook's bundle carries no build stamp, so it reads
- * as an unknown version (`AboutSettings.stories` covers each install kind).
- */
-export const AboutTopic: Story = {
-  parameters: {
-    aboutHost: 'standalone',
-    primedBurrow: { status: UNENROLLED_STATUS },
-  },
-  play: async ({ canvasElement }) => {
+const OFFICIAL_STAMP: BuildStamp = { version: '1.2.0', commit: '4c1e09ab', commitsSinceVersion: 0, dirty: false, official: true };
+const DEVELOPMENT_STAMP: BuildStamp = { version: '1.2.0', commit: 'd080b4f5', commitsSinceVersion: 14, dirty: false, official: false };
+
+/** Opens About, the last topic, and checks the install kind it names. */
+function aboutShows(kind: RegExp) {
+  return async ({ canvasElement }: { canvasElement: HTMLElement }) => {
     await selectTopic('About')({ canvasElement });
-    const body = dialog(canvasElement);
-    await expect(body.getByRole('region', { name: 'About' })).toHaveTextContent('Dormouse, version unknown');
-    await expect(body.getByRole('button', { name: 'Copy details' })).toBeVisible();
+    const about = dialog(canvasElement).getByRole('region', { name: 'About' });
+    await waitFor(() => expect(about).toHaveTextContent(kind));
+  };
+}
+
+/**
+ * Settings → About (`docs/specs/deploy.md` → "Build stamp") for what CI's
+ * release workflow shipped: source links point at the tag.
+ */
+export const AboutOfficial: Story = {
+  parameters: { aboutHost: 'standalone', buildStamp: OFFICIAL_STAMP, primedBurrow: { status: UNENROLLED_STATUS } },
+  play: aboutShows(/Official release/),
+};
+
+export const AboutOfficialVsCode: Story = {
+  parameters: { aboutHost: 'vscode', buildStamp: OFFICIAL_STAMP, primedBurrow: { status: UNENROLLED_STATUS } },
+  play: aboutShows(/Official release · 4c1e09ab · VS Code extension/),
+};
+
+/** A local build — `pnpm dogfood:standalone`, `dev:standalone` — carries the commits past its tag. */
+export const AboutDevelopment: Story = {
+  parameters: { aboutHost: 'standalone', buildStamp: DEVELOPMENT_STAMP, primedBurrow: { status: UNENROLLED_STATUS } },
+  play: aboutShows(/Dormouse 1\.2\.0\+14Development build/),
+};
+
+export const AboutDevelopmentDirty: Story = {
+  parameters: { aboutHost: 'standalone', buildStamp: { ...DEVELOPMENT_STAMP, dirty: true }, primedBurrow: { status: UNENROLLED_STATUS } },
+  play: aboutShows(/with uncommitted changes/),
+};
+
+/** A shallow clone, where the version tag was not there to count from. */
+export const AboutDevelopmentUnknownCount: Story = {
+  parameters: { aboutHost: 'standalone', buildStamp: { ...DEVELOPMENT_STAMP, commitsSinceVersion: null }, primedBurrow: { status: UNENROLLED_STATUS } },
+  play: aboutShows(/Dormouse 1\.2\.0\+\?/),
+};
+
+/** Self-host outranks official or not: it names the one Relay this build reaches. */
+export const AboutSelfHost: Story = {
+  parameters: { aboutHost: 'standalone', buildStamp: DEVELOPMENT_STAMP, primedBurrow: { status: SELF_HOST_UNENROLLED_STATUS } },
+  play: aboutShows(/Self-host build/),
+};
+
+/** A bundle built without the stamp — Storybook's own. */
+export const AboutUnstamped: Story = {
+  parameters: { aboutHost: 'standalone', primedBurrow: { status: UNENROLLED_STATUS } },
+  play: aboutShows(/Dormouse, version unknown/),
+};
+
+/** The website's desktop playground: no Burrow, so no Network topic, and a download link. */
+export const AboutPlayground: Story = {
+  parameters: { aboutHost: 'playground', buildStamp: DEVELOPMENT_STAMP },
+  play: async ({ canvasElement }) => {
+    await aboutShows(/Web playground/)({ canvasElement });
+    await expect(dialog(canvasElement).getByRole('button', { name: 'Download Dormouse' })).toBeVisible();
   },
 };
