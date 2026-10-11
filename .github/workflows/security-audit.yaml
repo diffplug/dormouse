@@ -672,6 +672,8 @@ jobs:
     environment:
       name: security-audit
     env:
+      # Dealt round-robin across the three code domains; each keeps at least
+      # three seeds in the pool, so raise that floor before this count.
       CANARY_SEEDS: "6"
       CANARY_FRAGMENTS: audit-supply-chain.md audit-application.md audit-hosted.md
     steps:
