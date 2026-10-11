@@ -1,4 +1,5 @@
-import { mkdir, readFile, rm, utimes } from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
+import { mkdir, readFile, rm, utimes, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -6,15 +7,39 @@ import { surfaceIdNumber } from 'dor/protocol';
 import { createSurfaceIdAllocator } from '../src/surface-ids';
 import { removeDir, tempStorageDir } from './helpers';
 
+/** Runs before each durable write, while the allocator holds the lock. */
+const hooks = vi.hoisted(() => ({ duringWrite: null as null | (() => Promise<void>) }));
+vi.mock('../../lib/src/host/atomic-json-file', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../lib/src/host/atomic-json-file')>();
+  return {
+    ...actual,
+    writeJsonAtomic: async (...args: Parameters<typeof actual.writeJsonAtomic>) => {
+      await hooks.duringWrite?.();
+      return actual.writeJsonAtomic(...args);
+    },
+  };
+});
+
 let dir: string;
 const file = () => path.join(dir, 'surface-ids.json');
 const persisted = async () => (JSON.parse(await readFile(file(), 'utf8')) as { surface: number }).surface;
 const logger = { error: vi.fn() };
 const numbers = (ids: string[]) => ids.map(surfaceIdNumber);
 
+const lock = () => `${file()}.lock`;
+/** Another window's lock, held by `pid`. */
+async function holdLock(pid: number, token = 'theirs') {
+  await mkdir(lock());
+  await writeFile(path.join(lock(), 'owner.json'), JSON.stringify({ pid, token }));
+}
+const lockToken = async () => (JSON.parse(await readFile(path.join(lock(), 'owner.json'), 'utf8')) as { token: string }).token;
+/** A pid no process has: one that just exited. */
+const deadPid = () => spawnSync(process.execPath, ['-e', '']).pid!;
+
 beforeEach(async () => {
   dir = await tempStorageDir();
   logger.error.mockClear();
+  hooks.duringWrite = null;
 });
 afterEach(async () => { await removeDir(dir); });
 
@@ -52,22 +77,64 @@ describe('createSurfaceIdAllocator', () => {
     expect(await persisted()).toBe(Math.max(...(all as number[])) + 1);
   });
 
-  it('waits out a held lock, and breaks one its holder left behind', async () => {
-    const lock = `${file()}.lock`;
-    await mkdir(lock);
+  it('waits out a lock a live holder keeps, and takes it once released', async () => {
+    await holdLock(process.pid);
     const waiting = createSurfaceIdAllocator(dir, logger).reserve(1, 0);
     let settled = false;
     void waiting.then(() => { settled = true; });
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(settled).toBe(false);
-    await rm(lock, { recursive: true });
+    await rm(lock(), { recursive: true });
     expect(await waiting).toEqual(['surface:1']);
+    await expect(readFile(path.join(lock(), 'owner.json'))).rejects.toThrow();
+  });
 
-    await mkdir(lock);
+  it('never breaks a live holder\'s lock by its age on disk, and hands out nothing rather than run unlocked', async () => {
+    // A slow flushed write can hold the lock past a second.
+    await holdLock(process.pid);
     const old = new Date(Date.now() - 60_000);
-    await utimes(lock, old, old);
-    expect(await createSurfaceIdAllocator(dir, logger).reserve(1, 0)).toEqual(['surface:2']);
+    await utimes(lock(), old, old);
+    expect(await createSurfaceIdAllocator(dir, logger, { waitMs: 200 }).reserve(1, 0)).toEqual([]);
+    expect(await lockToken()).toBe('theirs');
+    await expect(readFile(file())).rejects.toThrow();
+    expect(logger.error).toHaveBeenCalled();
+  });
+
+  it('breaks a lock whose holder died', async () => {
+    await holdLock(deadPid());
+    expect(await createSurfaceIdAllocator(dir, logger).reserve(1, 0)).toEqual(['surface:1']);
     expect(logger.error).not.toHaveBeenCalled();
+  });
+
+  it('breaks a live holder\'s lock once it has watched it stand the stale age', async () => {
+    // A reused pid, or a holder hung for good.
+    await holdLock(process.pid);
+    expect(await createSurfaceIdAllocator(dir, logger, { waitMs: 2_000, staleMs: 100 }).reserve(1, 0)).toEqual(['surface:1']);
+  });
+
+  it('releases only a lock it still holds', async () => {
+    // Another window judged this holder gone and took the lock mid-write.
+    hooks.duringWrite = async () => {
+      hooks.duringWrite = null;
+      await rm(lock(), { recursive: true });
+      await holdLock(process.pid, 'taken');
+    };
+    await createSurfaceIdAllocator(dir, logger).reserve(1, 0);
+    expect(await lockToken()).toBe('taken');
+  });
+
+  it('counts a queued reservation\'s wait from its arrival', async () => {
+    await holdLock(process.pid);
+    const allocator = createSurfaceIdAllocator(dir, logger, { waitMs: 500 });
+    const started = performance.now();
+    expect(await Promise.all([allocator.reserve(1, 0), allocator.reserve(1, 0), allocator.reserve(1, 0)])).toEqual([[], [], []]);
+    expect(performance.now() - started).toBeLessThan(1_000);
+  });
+
+  it('hands out nothing when it cannot persist the block', async () => {
+    await mkdir(file());
+    expect(await createSurfaceIdAllocator(dir, logger).reserve(1, 0)).toEqual([]);
+    expect(logger.error).toHaveBeenCalled();
   });
 
   it('honors the floor the webview restored', async () => {

@@ -54,6 +54,15 @@ describe('mintSurfaceId', () => {
     expect(error).toHaveBeenCalled();
   });
 
+  it('mints an opaque id when the host hands out none, alone or in a burst', async () => {
+    // The VS Code extension host does, rather than risk a number another window holds.
+    const reserve = vi.fn(async () => [] as string[]);
+    await installSurfaceIdPool(reserve, 0);
+    expect(mintSurfaceId()).toMatch(/^surface:[0-9a-f-]{36}$/);
+    const next = await surfaceIdMinter(2);
+    expect([next(), next()]).toEqual([expect.stringMatching(/^surface:[0-9a-f-]{36}$/), expect.stringMatching(/^surface:[0-9a-f-]{36}$/)]);
+  });
+
   it('skips an id a Session already holds, and says so', async () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
     registry.set('surface:1', {} as TerminalEntry);

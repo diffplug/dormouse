@@ -4,7 +4,7 @@ import { applyLiveToolEvents } from '../tool-events';
 import { offerProgramCopy } from '../mouse-selection';
 import type { TerminalContextRequest, TerminalContextInfo } from '../terminal-context-types';
 import type { IframeProxyResult, OpenPort, PlatformAdapter, PtyDataDetail, PtyInfo, BurrowLink, SpawnPtyOptions, ToolControlResult, ToolHostRequest, WritePtyOptions } from './types';
-import { openPortRequestTimeoutMs } from './types';
+import { openPortRequestTimeoutMs, SURFACE_ID_RESERVE_TIMEOUT_MS } from './types';
 import { createBurrowLinkClient } from '../../host/remote/link-client';
 import { createAlertClient, type AlertClientMethods } from '../../host/alert-client';
 import { isAlertEvent } from '../../host/alert-protocol';
@@ -237,11 +237,14 @@ export class VSCodeAdapter implements PlatformAdapter {
   }
 
   /** Mint Surface ids from the extension host's counter, above every id this
-   *  webview restored (docs/specs/vscode.md → "Surface id minting"). */
+   *  webview restored (docs/specs/vscode.md → "Surface id minting"). Every
+   *  reservation, the first and each refill, waits out the host's bound. */
   async init(): Promise<void> {
     const restored = readPersistedSession(this.getState());
     await installSurfaceIdPool(async (count, floor) => {
-      const ids = await this.requestResponse('surface:reserveIds', 'surface:reservedIds', { count, floor }, (msg) => msg.ids as string[]);
+      const ids = await this.requestResponse(
+        'surface:reserveIds', 'surface:reservedIds', { count, floor }, (msg) => msg.ids as string[], SURFACE_ID_RESERVE_TIMEOUT_MS,
+      );
       if (!ids) throw new Error('the extension host did not answer');
       return ids;
     }, maxSurfaceNumber(restored ? [restored] : []));

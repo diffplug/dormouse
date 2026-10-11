@@ -77,7 +77,7 @@ Source of truth: `captureAgentRecoveryCommands` / `takeRecoveryCommands` in `vsc
 
 ### Surface id minting
 
-**The extension host mints every Surface id its webviews use** (`docs/specs/transport.md` → Surface ids) **off one counter for the whole install** (rationale), its high-water mark in `surface-ids.json` under `globalStorageUri`, **never `workspaceState`** (rationale). A Surface id names one Surface across the install, except in the windows "Duplicate Workspace in New Window" cold-restores (§Peer surfaces across windows).
+**The extension host mints every Surface id its webviews use** (`docs/specs/transport.md` → Surface ids) **off one counter for the whole install** (rationale), its high-water mark in `surface-ids.json` under `globalStorageUri`, **never `workspaceState`** (rationale). A Surface id names one Surface across the install, except in the windows "Duplicate Workspace in New Window" cold-restores (§Peer surfaces across windows). **Never hand out a number not persisted under the cross-window lock**: such a reservation returns no ids, and the webview mints `surface:<uuid>`.
 
 Source of truth: `vscode-ext/src/surface-ids.ts`.
 

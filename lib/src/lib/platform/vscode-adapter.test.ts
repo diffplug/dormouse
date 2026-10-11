@@ -1,7 +1,7 @@
 import { getToolDirty, resetToolDirty } from '../tool-dirty-store';
 import { getToolAnnounce, resetToolAnnounces } from '../tool-announce-store';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { openPortRequestTimeoutMs } from './types';
+import { openPortRequestTimeoutMs, SURFACE_ID_RESERVE_WAIT_MS } from './types';
 import { hostShown, setHostShown } from '../host-shown';
 import { registry, type TerminalEntry } from '../terminal-store';
 import { mintSurfaceId, resetSurfaceIdPool } from '../surface-ids';
@@ -621,6 +621,31 @@ describe('VSCodeAdapter Surface ids', () => {
     windowTarget.dispatchEvent(hostMessage({ type: 'surface:reservedIds', requestId: request.requestId, ids: Array.from({ length: 8 }, (_, i) => `surface:${1042 + i}`) }));
     await ready;
     expect(mintSurfaceId()).toBe('surface:1042');
+  });
+
+  it('waits out the extension host\'s bound on the first reservation and on every refill', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.stubGlobal('acquireVsCodeApi', () => ({ postMessage, getState: () => undefined, setState: vi.fn() }));
+      const adapter = new VSCodeAdapter();
+      // The host may queue a reservation behind other webviews and wait for
+      // another window's lock before it answers.
+      const answer = async (first: number) => {
+        const request = postMessage.mock.calls.at(-1)![0];
+        expect(request.type).toBe('surface:reserveIds');
+        await vi.advanceTimersByTimeAsync(SURFACE_ID_RESERVE_WAIT_MS);
+        windowTarget.dispatchEvent(hostMessage({ type: 'surface:reservedIds', requestId: request.requestId, ids: Array.from({ length: request.count }, (_, i) => `surface:${first + i}`) }));
+        await vi.advanceTimersByTimeAsync(0);
+      };
+      const ready = adapter.init();
+      await answer(1);
+      await ready;
+      expect([mintSurfaceId(), mintSurfaceId(), mintSurfaceId()]).toEqual(['surface:1', 'surface:2', 'surface:3']);
+      await answer(100);
+      expect(Array.from({ length: 6 }, () => mintSurfaceId())).toEqual(['surface:4', 'surface:5', 'surface:6', 'surface:7', 'surface:8', 'surface:100']);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
