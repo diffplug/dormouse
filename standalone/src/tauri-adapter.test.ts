@@ -15,6 +15,7 @@ vi.mock("@tauri-apps/plugin-shell", () => ({
 }));
 
 import { invoke as rawInvoke } from "@tauri-apps/api/core";
+import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import { listen } from "@tauri-apps/api/event";
 import type { AlertStateDetail } from "dormouse-lib/lib/platform/types";
 import { getTerminalPaneState } from "dormouse-lib/lib/terminal-state-store";
@@ -123,6 +124,20 @@ describe("TauriAdapter browser requests", () => {
 
     vi.mocked(rawInvoke).mockRejectedValueOnce(new Error("sidecar gone"));
     expect(await adapter.browser({ provider: "agent-browser", binding, op: "close" })).toEqual({ ok: false, error: "sidecar gone" });
+  });
+});
+
+describe("TauriAdapter external links", () => {
+  it("revalidates every URI before the shell opens it, refusing the schemes the dialog refuses", () => {
+    const adapter = new TauriAdapter();
+    vi.mocked(shellOpen).mockClear();
+    adapter.openExternal("ms-msdt:x");
+    adapter.openExternal("search-ms:query=x");
+    adapter.openExternal("javascript:alert(1)");
+    expect(shellOpen).not.toHaveBeenCalled();
+    adapter.openExternal("vscode://file/x.ts");
+    adapter.openExternal("https://example.com/");
+    expect(vi.mocked(shellOpen).mock.calls).toEqual([["vscode://file/x.ts"], ["https://example.com/"]]);
   });
 });
 

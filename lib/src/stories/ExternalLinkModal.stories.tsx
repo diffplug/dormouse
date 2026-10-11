@@ -64,11 +64,20 @@ export const DeceptiveFullUrl: Story = {
   },
 };
 
-// Custom scheme + match (no separate link text).
-export const CustomScheme: Story = {
+// Any scheme but http, https, mailto, and file opens another app: the title
+// names the scheme, and Cancel holds the initial focus.
+export const OtherApp: Story = {
   args: {
     uri: 'vscode://file/Users/dev/project/src/App.tsx:42:7',
     displayText: '',
+  },
+};
+
+// A Windows handler with a record of running code from a link: no open action.
+export const RefusedHandler: Story = {
+  args: {
+    uri: 'search-ms:query=report',
+    displayText: 'see the report',
   },
 };
 
