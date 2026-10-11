@@ -1,6 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { compareSurfaceIds, parseSurfaceTarget, surfaceIdFor, surfaceIdNumber, workspaceIdFor } from '../dist/protocol.js';
+import { readFileSync } from 'node:fs';
+import { compareSurfaceIds, parseSurfaceTarget, surfaceIdFor, surfaceIdNumber, workspaceIdFor, workspaceIdNumber } from '../dist/protocol.js';
+
+/** The id grammar's cases, shared with Rust's `ids::Kind::number` and the
+ *  browser dev harness. */
+const idCases = JSON.parse(readFileSync(new URL('./id-cases.json', import.meta.url), 'utf8'));
 
 test('a Surface id is surface:<n>, and its number is the counter', () => {
   assert.equal(surfaceIdFor(347), 'surface:347');
@@ -8,6 +13,17 @@ test('a Surface id is surface:<n>, and its number is the counter', () => {
   assert.equal(surfaceIdNumber('surface:0b9c'), null);
   assert.equal(surfaceIdNumber('surface-347'), null);
   assert.equal(workspaceIdFor(3), 'workspace:3');
+});
+
+test('an id\'s number reads as the shared cases say, for each kind and only its own', () => {
+  const kinds = [['surface:', surfaceIdNumber], ['workspace:', workspaceIdNumber]];
+  for (const [prefix, read] of kinds) {
+    for (const { suffix, number } of idCases.numbered) {
+      assert.equal(read(prefix + suffix), number, prefix + suffix);
+      for (const [other, readOther] of kinds) if (other !== prefix) assert.equal(readOther(prefix + suffix), null, `${other} ${prefix}${suffix}`);
+    }
+  }
+  for (const id of idCases.unnumbered) for (const [, read] of kinds) assert.equal(read(id), null, id);
 });
 
 test('the handle is the id', () => {

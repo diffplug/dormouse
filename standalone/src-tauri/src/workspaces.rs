@@ -133,16 +133,6 @@ mod tests {
     }
 
     #[test]
-    fn id_numbers_match_the_shared_host_grammar() {
-        let cases: Vec<JsonValue> = serde_json::from_str(include_str!("../../scripts/workspace-id-cases.json")).unwrap();
-        assert!(!cases.is_empty());
-        for case in cases {
-            let id = case["id"].as_str().unwrap();
-            assert_eq!(crate::ids::Kind::Workspace.number(id), case["number"].as_u64(), "{id}");
-        }
-    }
-
-    #[test]
     fn a_snapshot_names_its_workspace_ids() {
         let ids = snapshot_ids(&json!({
             "workspaces": [{ "id": "workspace:4" }, { "id": "workspace:9", "name": "n" }, { "name": "no id" }]

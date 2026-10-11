@@ -17,6 +17,9 @@ import { corsHeaders, isAuthorized } from './dev-host-guard.mjs';
 // Worktree identity and the Vite server this harness shares with the native
 // dev runner (`dev-standalone.mjs`).
 import { repoRoot, standaloneDir, startDevVite, worktreeId } from './dev-run.mjs';
+// The id grammar and the block cap the real hosts use, type-stripped by Node.
+import { surfaceIdFor, workspaceIdFor, workspaceIdNumber } from '../../dor/src/protocol.ts';
+import { ID_RESERVE_MAX_BLOCK } from '../../lib/src/lib/platform/types.ts';
 
 const sidecarDir = path.join(standaloneDir, 'sidecar');
 const sidecarScript = path.join(sidecarDir, 'main.js');
@@ -166,29 +169,18 @@ const invokeMap = {
   take_recovery_commands: ({ paneIds }) =>
     requestSidecar('recovery:take', { paneIds }, 'recovery:commands', (data) => data.commands ?? {}),
   // The Workspace registry (docs/specs/standalone.md -> "Workspace registry"):
-  // one id counter and one window, since the harness simulates no second one.
-  workspace_reserve_ids: ({ count }) => {
-    const n = Math.max(1, Math.min(64, Number(count) || 1));
-    const first = ids.workspace;
-    ids.workspace += n;
-    saveIds();
-    return Array.from({ length: n }, (_, i) => `workspace:${first + i}`);
-  },
+  // one id counter per kind and one window, since the harness simulates no
+  // second one.
+  workspace_reserve_ids: ({ count }) => reserve('workspace', count),
   // Surface ids (docs/specs/transport.md -> "Surface ids"): never at or below
   // the floor the page restored, which outlives this process in localStorage.
-  surface_reserve_ids: ({ count, floor }) => {
-    const n = Math.max(1, Math.min(64, Number(count) || 1));
-    const first = Math.max(ids.surface, (Number(floor) || 0) + 1);
-    ids.surface = first + n;
-    saveIds();
-    return Array.from({ length: n }, (_, i) => `surface:${first + i}`);
-  },
+  surface_reserve_ids: ({ count, floor }) => reserve('surface', count, floor),
   workspace_report: ({ entries }) => {
     // Restored browser state survives this process; mirror Rust's report seed.
     const seeded = ids.workspace;
     for (const entry of entries ?? []) {
-      const minted = workspaceIdNumber(entry?.id ?? '');
-      if (minted !== undefined) ids.workspace = Math.max(ids.workspace, minted + 1);
+      const minted = workspaceIdNumber(String(entry?.id ?? ''));
+      if (minted !== null) ids.workspace = Math.max(ids.workspace, minted + 1);
     }
     if (ids.workspace !== seeded) saveIds();
     const next = JSON.stringify(entries ?? []);
@@ -222,13 +214,18 @@ function saveIds() {
   writeFileSync(tmp, JSON.stringify(ids));
   renameSync(tmp, idsFile);
 }
+/** `count` ids of `kind` (clamped as the hosts clamp), each above `floor`,
+ *  persisted before any is handed out. */
+function reserve(kind, count, floor = 0) {
+  const n = Math.max(1, Math.min(ID_RESERVE_MAX_BLOCK, Number(count) || 1));
+  const first = Math.max(ids[kind], (Number(floor) || 0) + 1);
+  ids[kind] = first + n;
+  saveIds();
+  const idFor = kind === 'surface' ? surfaceIdFor : workspaceIdFor;
+  return Array.from({ length: n }, (_, i) => idFor(first + i));
+}
 let registryEntries = '[]';
 let registryRevision = 0;
-/** A minted id's counter number, else undefined; mirrors `id_number` in standalone/src-tauri/src/workspaces.rs. */
-function workspaceIdNumber(id) {
-  const minted = /^workspace:(\d+)$/.exec(id);
-  return minted ? Number(minted[1]) : undefined;
-}
 function registrySnapshot() {
   const workspaces = JSON.parse(registryEntries).map((entry) => ({
     id: entry.id,

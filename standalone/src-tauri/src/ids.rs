@@ -128,13 +128,19 @@ impl Counters {
     }
 }
 
-/// The digits after `prefix`, if that is all there is.
+/// The largest number an id carries: the webview reads every number up to it
+/// exactly (JavaScript's `Number.MAX_SAFE_INTEGER`), and none past it.
+const MAX_NUMBER: u64 = (1 << 53) - 1;
+
+/// The ASCII digits after `prefix`, if that is all there is, read as the
+/// webview reads them (`idNumber` in `dor/src/protocol.ts`;
+/// `dor/test/id-cases.json` holds the cases both run).
 fn numbered(id: &str, prefix: &str) -> Option<u64> {
     let suffix = id.strip_prefix(prefix)?;
     if suffix.is_empty() || !suffix.bytes().all(|byte| byte.is_ascii_digit()) {
         return None;
     }
-    suffix.parse().ok()
+    suffix.parse().ok().filter(|n| *n <= MAX_NUMBER)
 }
 
 /// The next number of `kind`, above every id given.
@@ -178,13 +184,32 @@ mod tests {
     }
 
     #[test]
-    fn ids_are_spelled_with_a_colon_and_only_that_spelling_has_a_number() {
+    fn ids_are_spelled_with_their_prefix() {
         assert_eq!(Kind::Surface.id(3), "surface:3");
         assert_eq!(Kind::Workspace.id(3), "workspace:3");
         assert_eq!(Kind::Window.id(3), "ws-3");
-        assert_eq!(Kind::Surface.number("surface:3"), Some(3));
-        assert_eq!(Kind::Surface.number("surface-3"), None);
-        assert_eq!(Kind::Workspace.number("workspace-3"), None);
+        assert_eq!(Kind::Window.number("ws-3"), Some(3));
+    }
+
+    #[test]
+    fn id_numbers_read_as_the_webview_reads_them() {
+        let cases: JsonValue = serde_json::from_str(include_str!("../../../dor/test/id-cases.json")).unwrap();
+        let kinds = [Kind::Surface, Kind::Workspace];
+        for kind in kinds {
+            for case in cases["numbered"].as_array().unwrap() {
+                let id = format!("{}{}", kind.prefix(), case["suffix"].as_str().unwrap());
+                assert_eq!(kind.number(&id), case["number"].as_u64(), "{id}");
+                for other in kinds.into_iter().filter(|other| *other != kind) {
+                    assert_eq!(other.number(&id), None, "{id} as {other:?}");
+                }
+            }
+        }
+        for id in cases["unnumbered"].as_array().unwrap() {
+            let id = id.as_str().unwrap();
+            for kind in kinds {
+                assert_eq!(kind.number(id), None, "{id}");
+            }
+        }
     }
 
     #[test]

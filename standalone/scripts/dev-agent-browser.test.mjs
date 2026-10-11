@@ -18,6 +18,11 @@ async function fixture(t) {
   await mkdir(path.join(standalone, 'sidecar'));
   await Promise.all(['dev-agent-browser.mjs', 'dev-host-guard.mjs', 'dev-run.mjs'].map(name =>
     copyFile(path.join(scripts, name), path.join(standalone, 'scripts', name))));
+  // The repo modules the harness imports by relative path.
+  await Promise.all(['dor/src/protocol.ts', 'lib/src/lib/platform/types.ts'].map(async file => {
+    await mkdir(path.join(root, path.dirname(file)), { recursive: true });
+    await copyFile(path.join(scripts, '../..', file), path.join(root, file));
+  }));
   await writeFile(path.join(standalone, 'sidecar/main.js'), `
     console.error('SIDECAR_AB_DIR ' + process.env.AGENT_BROWSER_SOCKET_DIR);
     const { createInterface } = require('node:readline');
@@ -287,7 +292,14 @@ async function command(run, cmd, args = {}) {
 test('registry seeds reservations above restored IDs, reading id numbers as Rust does', async t => {
   const f = await fixture(t);
   const run = await f.start().ready();
-  const cases = JSON.parse(await readFile(path.join(scripts, 'workspace-id-cases.json'), 'utf8'));
+  // The shared grammar cases, as Workspace ids, short of numbers a counter
+  // could not step past exactly.
+  const idCases = JSON.parse(await readFile(path.join(scripts, '../../dor/test/id-cases.json'), 'utf8'));
+  const cases = [
+    ...idCases.numbered.filter(({ number }) => number === null || number < 1_000)
+      .map(({ suffix, number }) => ({ id: `workspace:${suffix}`, number })),
+    ...idCases.unnumbered.map(id => ({ id, number: null })),
+  ];
   await command(run, 'workspace_report', { entries: cases.map(({ id }) => ({ id, name: id, active: false })) });
   const registry = await command(run, 'workspace_registry');
   assert.deepEqual(registry.windows[0].workspaces.map(({ id }) => id), cases.map(({ id }) => id));

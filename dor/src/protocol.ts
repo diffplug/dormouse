@@ -149,8 +149,6 @@ export interface ParsedWorkspaceRef {
   target: string;
   /** The Workspace id the target names exactly, prefix restored. */
   id: string;
-  /** The number the target reads as, else null. */
-  number: number | null;
   /** The Workspace name it reads as otherwise; empty when it is numeric. */
   name: string;
 }
@@ -166,13 +164,18 @@ export function parseWorkspaceRef(ref: string): ParsedWorkspaceRef {
   const target = ref.trim();
   const bare = (target.startsWith(WORKSPACE_PREFIX) ? target.slice(WORKSPACE_PREFIX.length) : target).trim();
   const numeric = NUMERIC_WORKSPACE_REF.test(bare);
-  return { target, id: WORKSPACE_PREFIX + bare, number: numeric ? Number(bare) : null, name: numeric ? '' : bare };
+  return { target, id: WORKSPACE_PREFIX + bare, name: numeric ? '' : bare };
 }
 
-/** The number in a counter-minted `<prefix><n>` id, else null. */
+/** The number in a counter-minted `<prefix><n>` id, else null: ASCII digits
+ *  alone, leading zeros allowed, up to the largest number read exactly. Rust's
+ *  `ids::Kind::number` reads the same; `dor/test/id-cases.json` holds the
+ *  cases both run. */
 function idNumber(prefix: string, id: string): number | null {
   const digits = id.startsWith(prefix) ? id.slice(prefix.length) : '';
-  return BARE_NUMBER.test(digits) ? Number(digits) : null;
+  if (!BARE_NUMBER.test(digits)) return null;
+  const n = Number(digits);
+  return Number.isSafeInteger(n) ? n : null;
 }
 
 /** The Workspace id numbered `n`, or a fallback's `workspace:<uuid>`. */
@@ -189,6 +192,11 @@ export function surfaceIdFor(n: number | string): string {
 /** The number in a `surface:<n>` id, else null. */
 export function surfaceIdNumber(id: string): number | null {
   return idNumber(SURFACE_PREFIX, id);
+}
+
+/** The number in a `workspace:<n>` id, else null. */
+export function workspaceIdNumber(id: string): number | null {
+  return idNumber(WORKSPACE_PREFIX, id);
 }
 
 /** The highest `surface:<n>` number among `ids`, else 0. */
