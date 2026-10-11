@@ -78,13 +78,21 @@ export function isWorkspacePinned(id: WorkspaceId): boolean {
  *  → "Workspace registry"): `workspace:<n>` off one counter, so an id is unique
  *  across windows. With no host (VS Code, the playground, tests) the page counts
  *  on its own, after the bare Wall's `DEFAULT_WORKSPACE_ID`, `workspace:1`. */
-// Small, so a launch burns at most 4 numbers (see `createIdPool`): Workspaces
-// are created one gesture or `dor` call at a time, and a refill, after each
-// one, is one host round trip of a few ms. A window's Reopen reserves through
-// `workspaceIdMinter`.
 export const WORKSPACE_ID_POOL_SIZE = 4;
-const idPool = createIdPool(WORKSPACE_ID_POOL_SIZE, 3, 'workspace-store');
-let localSequence = 1;
+// Small, so a launch burns at most 4 numbers (see `createIdPool`): Workspaces
+// are created one gesture or `dor` call at a time, and a refill once the last
+// is taken is one host round trip of a few ms. A window's Reopen reserves
+// through `workspaceIdMinter`.
+const idPool = createIdPool({
+  size: WORKSPACE_ID_POOL_SIZE,
+  low: 1,
+  label: 'workspace-store',
+  idFor: workspaceIdFor,
+  localStart: 1,
+  inUse: hasWorkspace,
+  // The page's counter is never seeded: it steps over restored ids.
+  logSkips: false,
+});
 
 /** Give this Window a host that mints ids, starting from `first` when the
  *  caller already asked for a {@link WORKSPACE_ID_POOL_SIZE} block. Resolves
@@ -100,25 +108,19 @@ export function installWorkspaceIdPool(
 /** Forget the installed pool, back to a host with no registry (tests). */
 export function resetWorkspaceIdPool(): void {
   idPool.reset();
-  localSequence = 1;
 }
 
 /** Prefer a host-reserved number; a failed reservation must not prevent boot
  *  from installing persistence, so it falls back to an opaque id. */
 export function generateWorkspaceId(): WorkspaceId {
-  const reserved = idPool.take();
-  if (reserved !== undefined) return reserved;
-  if (idPool.installed) return workspaceIdFor(crypto.randomUUID());
-  let id: WorkspaceId;
-  do id = workspaceIdFor(++localSequence); while (hasWorkspace(id));
-  return id;
+  return idPool.mint();
 }
 
 /** A synchronous minter for `count` Workspaces created at once, with every id
  *  in hand once it resolves, so a burst larger than the pool still mints
  *  numbered ids. */
 export function workspaceIdMinter(count: number): Promise<() => WorkspaceId> {
-  return idPool.minter(count, generateWorkspaceId);
+  return idPool.minter(count);
 }
 
 /** Whether this Window's Workspace ids are unique across every Window of its
@@ -326,12 +328,11 @@ export type WorkspaceRefResolution =
  */
 export function resolveWorkspaceRef(ref: string): WorkspaceRefResolution {
   const { target, id, name } = parseWorkspaceRef(ref);
-  const found = (meta: WorkspaceMeta): WorkspaceRefResolution => ({ ok: true, ...meta });
   const byId = state.workspaces.find((ws) => ws.id === id);
-  if (byId) return found(byId);
+  if (byId) return { ok: true, ...byId };
   if (name) {
     const matches = state.workspaces.filter((workspace) => workspace.name === name);
-    if (matches.length === 1) return found(matches[0]);
+    if (matches.length === 1) return { ok: true, ...matches[0] };
     if (matches.length > 1) {
       const candidates = matches
         .map((workspace) => `${workspace.id} ${JSON.stringify(workspace.name)}`)

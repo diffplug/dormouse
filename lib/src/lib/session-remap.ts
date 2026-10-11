@@ -1,31 +1,31 @@
 import type { LathNode } from './lath/model';
 import { isLathPersistedLayout } from './lath/persistence';
-import type { PersistedSession } from './session-types';
+import { sessionSurfaceIds, type PersistedSession } from './session-types';
 import { isRecord } from './is-record';
-import { mintSurfaceId } from './surface-ids';
-
-/** How many ids {@link withFreshSurfaceIds} mints for `session`, so a caller
- *  can have them in hand first (`surfaceIdMinter`). */
-export function freshSurfaceIdCount(session: PersistedSession): number {
-  return new Set([...session.panes, ...(session.doors ?? [])].map(surface => surface.id)).size;
-}
+import { surfaceIdMinter } from './surface-ids';
 
 /**
- * A closed Workspace's record with every Surface given a fresh id, for Reopen
+ * Closed Workspaces' records with every Surface given a fresh id, for Reopen
  * (`docs/specs/reopen.md`): the rebuilt Sessions must never share an id — a
  * PTY's, the host's — with the ones the close just killed, so each comes back
- * under a new id. Mints {@link freshSurfaceIdCount} ids synchronously, more
- * than the page's pool may hold, so a caller passes a `surfaceIdMinter`.
+ * under a new id. Reserves exactly the ids it mints, at once, before remapping:
+ * a window's worth is more than the page's pool holds.
  */
-export function withFreshSurfaceIds(session: PersistedSession, mint = mintSurfaceId): PersistedSession {
+export async function withFreshSurfaceIds(sessions: readonly PersistedSession[]): Promise<PersistedSession[]> {
+  const count = sessions.reduce((sum, session) => sum + new Set(sessionSurfaceIds(session)).size, 0);
+  const mint = await surfaceIdMinter(count);
+  return sessions.map((session) => remapSurfaceIds(session, mint));
+}
+
+/** `session` with each Surface renamed by `mint`, once per distinct id. */
+function remapSurfaceIds(session: PersistedSession, mint: () => string): PersistedSession {
   const ids = new Map<string, string>();
   const fresh = (id: string): string => {
     let next = ids.get(id);
     if (next === undefined) ids.set(id, next = mint());
     return next;
   };
-  for (const pane of session.panes) fresh(pane.id);
-  for (const door of session.doors ?? []) fresh(door.id);
+  for (const id of sessionSurfaceIds(session)) fresh(id);
   // An id outside the record (a token's sibling that has since closed) maps to
   // nothing live either way, so it is left as written.
   const rename = (id: unknown): unknown => typeof id === 'string' ? ids.get(id) ?? id : id;

@@ -1,8 +1,7 @@
 import type { ReopenResponse } from 'dor/commands/types';
 import { getPlatform } from '../../lib/platform';
 import { newestReopenClosedAt, popReopenRecord, pushReopenRecord, type SurfaceReopenRecord, type WorkspaceReopenRecord } from '../../lib/reopen-stack';
-import { freshSurfaceIdCount, withFreshSurfaceIds } from '../../lib/session-remap';
-import { surfaceIdMinter } from '../../lib/surface-ids';
+import { withFreshSurfaceIds } from '../../lib/session-remap';
 import { getPendingKills, pendingKillKey, restorePendingKill, type PendingKill } from '../../lib/pending-kills';
 import { restoreSession } from '../../lib/session-restore';
 import { createWorkspace, generateWorkspaceId, getActiveWorkspaceId, moveWorkspace, setActiveWorkspace } from '../../lib/workspace-store';
@@ -69,9 +68,9 @@ function reopenSurface(record: SurfaceReopenRecord, gesture: boolean): ReopenRes
  */
 async function reopenWorkspace(record: WorkspaceReopenRecord, gesture: boolean): Promise<ReopenResponse> {
   const { name, nameIsAuto, session } = record.workspace;
-  const mintSurface = await surfaceIdMinter(freshSurfaceIdCount(session));
+  const [savedSession] = await withFreshSurfaceIds([session]);
   const id = generateWorkspaceId();
-  const restored = restoreSession(getPlatform(), { savedSession: withFreshSurfaceIds(session, mintSurface) });
+  const restored = restoreSession(getPlatform(), { savedSession });
   // Parked before the Workspace exists: its Wall mounts from this plan.
   setWorkspaceBootPlan(id, restored ? wallBootFromResult(restored) : {});
   createWorkspace({ id, name, nameIsAuto, activate: gesture, alertDelivery: session.alertDelivery });

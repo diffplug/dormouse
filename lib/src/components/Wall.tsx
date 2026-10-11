@@ -64,7 +64,7 @@ import type {
 } from 'dor/commands/types';
 import { hasBrowser, hasTerminal } from 'dor/commands/types';
 import { compareSurfaceIds, maxSurfaceIdNumber } from 'dor/protocol';
-import { DEFAULT_WORKSPACE_ID, type WorkspaceId } from '../lib/session-types';
+import { DEFAULT_WORKSPACE_ID, sessionSurfaceIds, type WorkspaceId } from '../lib/session-types';
 import { clearWorkspaceSurfaces, setWorkspaceSurfaces } from '../lib/workspace-surfaces';
 import { nextTodoMember } from '../lib/workspace-union';
 import { deriveDisplayedSurfaceLabel } from '../lib/session-label';
@@ -882,7 +882,7 @@ export function Wall({
     );
     // The page's own counter mints past every id this Wall boots with, as a
     // restore seeds it; a no-op once a host pool hands out the ids.
-    seedSurfaceIds(maxSurfaceIdNumber([...paneIds, ...(initialDoorsRef.current ?? []).map(door => door.id)]));
+    seedSurfaceIds(maxSurfaceIdNumber(sessionSurfaceIds({ panes: paneIds.map(id => ({ id })), doors: initialDoorsRef.current })));
     // Prime default-shell opts for the fresh path's generated ids (a no-op for
     // already-restored ids).
     if (fresh) {

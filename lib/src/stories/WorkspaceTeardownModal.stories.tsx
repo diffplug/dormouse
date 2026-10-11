@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react';
 import { WorkspaceTeardownModal } from '../../../standalone/src/WorkspaceTeardownModal';
+import { surfaceIdFor } from 'dor/protocol';
 
 // The modal reads its live running-session count from the terminal-state store
 // (it tracks commands finishing while the dialog is up), so stories prime the
@@ -9,7 +10,7 @@ function runningPanes(count: number) {
   return {
     byId: Object.fromEntries(
       Array.from({ length: count }, (_, i) => [
-        `surface:${i + 1}`,
+        surfaceIdFor(i + 1),
         { activity: { kind: 'running' as const } },
       ]),
     ),

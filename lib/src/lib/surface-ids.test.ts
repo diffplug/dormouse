@@ -28,13 +28,15 @@ describe('mintSurfaceId', () => {
     await installSurfaceIdPool(reserve, 0);
     expect(reserve).toHaveBeenCalledWith(8, 0);
     expect(mintSurfaceId()).toBe('surface:500');
+    for (let i = 0; i < 5; i++) mintSurfaceId();
+    expect(reserve).toHaveBeenCalledTimes(1);
     // Draining past the low-water mark refills before the pool runs dry, back
     // up to the pool's size and no further: what it holds at exit is burned.
-    for (let i = 0; i < 2; i++) mintSurfaceId();
+    mintSurfaceId();
     await Promise.resolve();
     expect(reserve).toHaveBeenCalledTimes(2);
-    expect(reserve).toHaveBeenLastCalledWith(3, 0);
-    for (let i = 0; i < 5; i++) mintSurfaceId();
+    expect(reserve).toHaveBeenLastCalledWith(7, 0);
+    expect(mintSurfaceId()).toBe('surface:507');
     expect(mintSurfaceId()).toBe('surface:508');
   });
 
@@ -82,31 +84,44 @@ describe('mintSurfaceId', () => {
 });
 
 describe('surfaceIdMinter', () => {
-  it('has a burst larger than the pool in hand, past the host\'s block clamp', async () => {
+  it('serves a burst the pool holds from the pool alone', async () => {
+    const reserve = counting(1);
+    await installSurfaceIdPool(reserve, 0);
+    reserve.mockClear();
+    const mint = await surfaceIdMinter(3);
+    expect([mint(), mint(), mint()]).toEqual(['surface:1', 'surface:2', 'surface:3']);
+    expect(reserve).not.toHaveBeenCalled();
+    expect(mintSurfaceId()).toBe('surface:4');
+  });
+
+  it('has a burst larger than the pool in hand, reserving only the rest, past the host\'s block clamp', async () => {
     const reserve = counting(1);
     await installSurfaceIdPool(reserve, 0);
     const mint = await surfaceIdMinter(100);
+    expect(reserve.mock.calls.slice(1, 3)).toEqual([[92, 0], [28, 0]]);
     const burst = Array.from({ length: 100 }, () => mint());
-    // Reserved past the pool's 1..8, which the burst leaves alone.
-    expect(burst).toEqual(Array.from({ length: 100 }, (_, i) => `surface:${i + 9}`));
-    // Past the burst, the minter falls back to the pool.
-    expect(mint()).toBe('surface:1');
+    expect(burst).toEqual(Array.from({ length: 100 }, (_, i) => `surface:${i + 1}`));
+    // Past the burst, the minter mints from the pool, refilled meanwhile.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(mint()).toBe('surface:101');
   });
 
   it('leaves the pool whole for a create that lands while a burst reserves', async () => {
     const counter = counting(1);
     let release!: () => void;
     const gate = new Promise<void>((resolve) => { release = resolve; });
+    let installed = false;
     await installSurfaceIdPool(async (count, floor) => {
-      if (count === 10) await gate;
+      if (installed) await gate;
       return counter(count, floor);
     }, 0);
+    installed = true;
     const reopening = surfaceIdMinter(10);
     // A `dor split` while a 10-Surface Workspace reopens.
     expect(mintSurfaceId()).toBe('surface:1');
     release();
     const mint = await reopening;
-    expect(Array.from({ length: 10 }, () => mint())).toEqual(Array.from({ length: 10 }, (_, i) => `surface:${i + 9}`));
+    expect(Array.from({ length: 10 }, () => mint())).toEqual(Array.from({ length: 10 }, (_, i) => `surface:${i + 2}`));
   });
 
   it('counts in the page when no host mints', async () => {

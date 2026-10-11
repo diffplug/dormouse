@@ -316,10 +316,13 @@ describe('workspace-store', () => {
     expect(reserve).toHaveBeenCalledWith(4);
     expect(generateWorkspaceId()).toBe('workspace:100');
     expect(createWorkspace().id).toBe('workspace:101');
+    expect(generateWorkspaceId()).toBe('workspace:102');
+    expect(reserve).toHaveBeenCalledTimes(1);
     // Draining past the low-water mark tops the pool back up in the background.
+    expect(generateWorkspaceId()).toBe('workspace:103');
     await Promise.resolve();
     expect(reserve).toHaveBeenCalledTimes(2);
-    expect(reserve).toHaveBeenLastCalledWith(2);
+    expect(reserve).toHaveBeenLastCalledWith(4);
   });
 
   it('a failed first reservation still creates opaque ids that resolve, and can recover', async () => {

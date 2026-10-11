@@ -1,6 +1,5 @@
-import { freshSurfaceIdCount, withFreshSurfaceIds } from '../../lib/session-remap';
+import { withFreshSurfaceIds } from '../../lib/session-remap';
 import { PERSISTED_WINDOW_VERSION, workspaceRecord, type PersistedWindow, type PersistedWorkspace, type WorkspaceId } from '../../lib/session-types';
-import { surfaceIdMinter } from '../../lib/surface-ids';
 import { getWorkspacesSnapshot, workspaceIdMinter } from '../../lib/workspace-store';
 import { getWallHandle } from './wall-handles';
 import { pendingKillSessionIds } from '../../lib/pending-kills';
@@ -49,15 +48,15 @@ export function windowReopenSnapshot(): PersistedWindow | null {
  * pools hold.
  */
 export async function withFreshWindowIds(saved: PersistedWindow): Promise<PersistedWindow> {
-  const [mintWorkspace, mintSurface] = await Promise.all([
+  const [mintWorkspace, sessions] = await Promise.all([
     workspaceIdMinter(saved.workspaces.length),
-    surfaceIdMinter(saved.workspaces.reduce((sum, { session }) => sum + freshSurfaceIdCount(session), 0)),
+    withFreshSurfaceIds(saved.workspaces.map((workspace) => workspace.session)),
   ]);
   const fresh = new Map<WorkspaceId, WorkspaceId>();
-  const workspaces = saved.workspaces.map((workspace) => {
+  const workspaces = saved.workspaces.map((workspace, i) => {
     const id = mintWorkspace();
     fresh.set(workspace.id, id);
-    return workspaceRecord({ ...workspace, id }, withFreshSurfaceIds(workspace.session, mintSurface));
+    return workspaceRecord({ ...workspace, id }, sessions[i]);
   });
   return { version: PERSISTED_WINDOW_VERSION, workspaces, activeWorkspaceId: fresh.get(saved.activeWorkspaceId) ?? workspaces[0].id };
 }

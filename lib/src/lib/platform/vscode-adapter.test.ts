@@ -640,9 +640,9 @@ describe('VSCodeAdapter Surface ids', () => {
       const ready = adapter.init();
       await answer(1);
       await ready;
-      expect([mintSurfaceId(), mintSurfaceId(), mintSurfaceId()]).toEqual(['surface:1', 'surface:2', 'surface:3']);
+      expect(Array.from({ length: 7 }, () => mintSurfaceId())).toEqual(Array.from({ length: 7 }, (_, i) => `surface:${i + 1}`));
       await answer(100);
-      expect(Array.from({ length: 6 }, () => mintSurfaceId())).toEqual(['surface:4', 'surface:5', 'surface:6', 'surface:7', 'surface:8', 'surface:100']);
+      expect(Array.from({ length: 3 }, () => mintSurfaceId())).toEqual(['surface:8', 'surface:100', 'surface:101']);
     } finally {
       vi.useRealTimers();
     }

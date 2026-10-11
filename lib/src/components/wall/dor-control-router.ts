@@ -54,8 +54,8 @@ function withHelperOrigin(detail: DorControlRequest): DorControlRequest {
 
 /**
  * Resolution order: the app verbs, the Tool reads, the Window's own verbs, an explicit
- * container target, the Workspace holding a target Surface named by id or
- * ref, else the caller's own Workspace, else the active one.
+ * container target, the Workspace holding a target Surface named by id, else
+ * the caller's own Workspace, else the active one.
  */
 export function resolveDorControlRoute(detail: DorControlRequest): DorControlRoute {
   const route = resolveRoute(detail);

@@ -358,6 +358,12 @@ export function readPersistedWindow(raw: unknown): PersistedWindow | null {
   return { version: PERSISTED_WINDOW_VERSION, workspaces, activeWorkspaceId, ...(value.reopened === true ? { reopened: true } : {}) };
 }
 
+/** Every Surface id a Session names: its panes, then its Doors. The twin of
+ *  `ids::session_surface_ids` in `standalone/src-tauri/src/ids.rs`. */
+export function sessionSurfaceIds(session: { panes: readonly { id: string }[]; doors?: readonly { id: string }[] }): string[] {
+  return [...session.panes, ...(session.doors ?? [])].map((surface) => surface.id);
+}
+
 /** Every pane id the Window's Workspaces name, across all of them — what a boot
  *  claims its recovery record against. */
 export function windowPaneIds(window: PersistedWindow | null): string[] {

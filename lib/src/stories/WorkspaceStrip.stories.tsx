@@ -1,6 +1,7 @@
 import { setWorkspaceMoveError } from '../lib/workspace-ui-store';
 import { useEffect } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
+import { workspaceIdFor } from 'dor/protocol';
 import { expect } from 'storybook/test';
 import { flushSync } from 'react-dom';
 import { cfg } from '../cfg';
@@ -11,7 +12,7 @@ import { requireElement, waitForPrimedState } from './settle-terminals';
 
 /** Workspace ids by position, so `parameters.primedWorkspaces` and the story's
  *  membership and stub handle all name the same ones. */
-const ws = (index: number) => `workspace:${index + 1}`;
+const ws = (index: number) => workspaceIdFor(index + 1);
 
 /** `pinned` lists positions to pin; list them last, as the store keeps them
  *  (`docs/specs/layout.md` → "Workspace tabs"). */

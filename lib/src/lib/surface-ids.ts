@@ -1,6 +1,6 @@
 import { maxSurfaceIdNumber, surfaceIdFor } from 'dor/protocol';
 import { createIdPool } from './id-pool';
-import type { PersistedSession } from './session-types';
+import { sessionSurfaceIds, type PersistedSession } from './session-types';
 import { registry } from './terminal-store';
 
 /**
@@ -10,14 +10,21 @@ import { registry } from './terminal-store';
  * counts on its own.
  */
 
+export const SURFACE_ID_POOL_SIZE = 8;
 // Small, so a launch burns at most 8 numbers (see `createIdPool`). Surfaces are
 // created at the user's pace — a keystroke, a click, a `dor` process each — and
-// a refill is one host round trip of a few ms, so refilling once 3 are gone
+// a refill is one host round trip of a few ms, so refilling once 2 are left
 // keeps a quick run of creates ahead of it; a burst that mints more at once
 // reserves through `surfaceIdMinter`.
-export const SURFACE_ID_POOL_SIZE = 8;
-const pool = createIdPool(SURFACE_ID_POOL_SIZE, 6, 'surface-ids');
-let localSequence = 0;
+const pool = createIdPool({
+  size: SURFACE_ID_POOL_SIZE,
+  low: 2,
+  label: 'surface-ids',
+  idFor: surfaceIdFor,
+  localStart: 0,
+  inUse: (id) => registry.has(id),
+  logSkips: true,
+});
 
 /** Mint from `reserve`, which hands out ids numbered above `floor` — the highest
  *  `surface:<n>` this page restored — starting from `first` when the caller
@@ -36,48 +43,29 @@ export function installSurfaceIdPool(
  *  restore brings back; a host's counter is above it already (the
  *  reservation's floor). */
 export function seedSurfaceIds(floor: number): void {
-  localSequence = Math.max(localSequence, floor);
+  pool.seed(floor);
 }
 
 /** Back to the page's own counter, from `surface:1` (tests). */
 export function resetSurfaceIdPool(): void {
   pool.reset();
-  localSequence = 0;
-}
-
-function nextId(): string {
-  if (!pool.installed) return surfaceIdFor(++localSequence);
-  return pool.take() ?? surfaceIdFor(crypto.randomUUID());
-}
-
-/** The first id from `next` no Session in this page already holds; a skipped
- *  one is logged, since neither counter should produce one. */
-function mintFrom(next: () => string): string {
-  for (;;) {
-    const id = next();
-    if (!registry.has(id)) return id;
-    console.error(`[surface-ids] skipping ${id}, which is already in use`);
-  }
 }
 
 /** A new Surface id. */
 export function mintSurfaceId(): string {
-  return mintFrom(nextId);
+  return pool.mint();
 }
 
 /** A synchronous minter for `count` Surfaces created at once (a Reopen remaps a
  *  whole Workspace or window), with every id in hand once it resolves, so a
  *  burst larger than the pool still mints numbered ids. */
-export async function surfaceIdMinter(count: number): Promise<() => string> {
-  const next = await pool.minter(count, nextId);
-  return () => mintFrom(next);
+export function surfaceIdMinter(count: number): Promise<() => string> {
+  return pool.minter(count);
 }
 
 /** The highest `surface:<n>` number among `sessions`' Surfaces, else 0. */
 export function maxSurfaceNumber(sessions: Iterable<PersistedSession>): number {
   let max = 0;
-  for (const session of sessions) {
-    max = Math.max(max, maxSurfaceIdNumber([...session.panes, ...(session.doors ?? [])].map(({ id }) => id)));
-  }
+  for (const session of sessions) max = Math.max(max, maxSurfaceIdNumber(sessionSurfaceIds(session)));
   return max;
 }
