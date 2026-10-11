@@ -295,13 +295,11 @@ Source of truth: `window_at` in `standalone/src-tauri/src/routing.rs`; `standalo
 
 ## Persistence
 
-**One `PersistedWindow` per window, every Workspace in it**, restored on the next launch (`docs/specs/transport.md` → "The governing rule"). The Window collector's writer is `TauriAdapter.saveWindowState`; `getWindowState` is the boot reader. Collector and cwd probes: `docs/specs/transport.md` → "Persisted session types". Source of truth: `windowStateSlot` in `standalone/src/window-recovery.ts`.
+**One `PersistedWindow` per window, every Workspace in it**, restored on the next launch (`docs/specs/transport.md` → "The governing rule"). The Window collector's writer is `TauriAdapter.saveWindowState`; `getWindowState` is the boot reader. Collector and cwd probes: `docs/specs/transport.md` → "Persisted session types".
 
 **Boot restores per Workspace off one live-PTY list.** Reload and relaunch are the same path: nothing wires `shutdown()` to `beforeunload`, so a reload's PTYs partition by saved pane id, while a relaunch's list is empty and every Workspace cold-restores at its saved cwds. **A live PTY no saved Workspace names goes to the active Workspace**, except a helper, which goes to the Workspace holding its source.
 
-Source of truth: `restoreWindowOrFresh` in `standalone/src/window-restore.ts`.
-
-**Nothing is deleted at boot but orphaned session temp files, what the arrival merge settles, and another format's state** (`docs/specs/transport.md` → "Retiring the transcripts already on disk"). **Before the arrival merge, boot must delete each snapshot of another `PersistedWindow.version`, with its temp and geometry, and each arrival record holding another `PersistedSession.version`** (`docs/specs/transport.md` → "Persisted session types"). Source of truth: `discard_other_formats` in `standalone/src-tauri/src/lib.rs`.
+**Nothing is deleted at boot but orphaned session temp files, what the arrival merge settles, and another format's state** (`docs/specs/transport.md` → "Retiring the transcripts already on disk"). **Before the arrival merge, boot must delete each snapshot of another `PersistedWindow.version`, with its temp and geometry, and each arrival record holding another `PersistedSession.version`** (`docs/specs/transport.md` → "Persisted session types").
 
 **Never back the session blob with WebKit `localStorage`** — a WAL that grows without bound (rationale). The blob rides the `SessionKeyValueStore` seam over the Rust-backed `standalone/src/tauri-session-store.ts`. Theme selection still persists on `localStorage` (`docs/specs/theme.md`).
 
@@ -312,13 +310,13 @@ Source of truth: `restoreWindowOrFresh` in `standalone/src/window-restore.ts`.
 - **Window identity is implicit**: each command keys by the invoking window's label, so the frontend stays window-agnostic.
 - Only §Per-window close, the boot merge (§Arrival queue), and the discard above delete a snapshot.
 
-**Must use `<app_data_dir>/dev` as the debug state root and `<app_data_dir>` for release builds** (rationale), and **keep Burrow state directly under the identifier's `app_data_dir`**. **Rust passes the sidecar its two directories by environment**, each created owner-only first and empty when it could not be: `DORMOUSE_STATE_DIR` (the Burrow store, `app_data_dir`) and `DORMOUSE_RECOVERY_DIR` (the state root, so a dev run's record cannot reach the installed app). The browser-dev harness sets both to its per-run temp directory. Source of truth: `state_root_from` / `prepare_owner_only_dir` in `standalone/src-tauri/src/lib.rs`.
+**Must use `<app_data_dir>/dev` as the debug state root and `<app_data_dir>` for release builds** (rationale), and **keep Burrow state directly under the identifier's `app_data_dir`**. **Rust passes the sidecar its two directories by environment**, each created owner-only first and empty when it could not be: `DORMOUSE_STATE_DIR` (the Burrow store, `app_data_dir`) and `DORMOUSE_RECOVERY_DIR` (the state root, so a dev run's record cannot reach the installed app). The browser-dev harness sets both to its per-run temp directory.
 
 **The session store is owner-only before any bytes are written** (`docs/specs/security-local.md` -> "Persisted state"; rationale). **Must abort a snapshot save if either permission change fails**, preserving the previous snapshot. **Must withhold a state directory whose restriction fails**, logging a `WARNING` naming the path; the Burrow store and recovery record then stay in memory.
 
 **Must await the store pipeline before exiting**, under the quit timeout (§Quit flow; rationale): `drainSessionSaves` resolves when it goes idle, a rejected write included. Drain is a completion barrier, not a guarantee of successful persistence.
 
-Source of truth: `TauriSessionStore` in `standalone/src/tauri-session-store.ts`.
+Source of truth: `windowStateSlot` in `standalone/src/window-recovery.ts`; `restoreWindowOrFresh` in `standalone/src/window-restore.ts`; `TauriSessionStore` in `standalone/src/tauri-session-store.ts`; `discard_other_formats` / `state_root_from` / `prepare_owner_only_dir` in `standalone/src-tauri/src/lib.rs`.
 
 ### Agent recovery
 
