@@ -41,6 +41,14 @@ function contentsButton(body: Body, name: string) {
   return within(body.getByRole('navigation', { name: 'Settings topics' })).getByRole('button', { name });
 }
 
+/** Notifications, scrolled on to its animation watcher, which sits below speech and push. */
+async function showWatcher({ canvasElement }: { canvasElement: HTMLElement }) {
+  await selectTopic('Notifications')({ canvasElement });
+  const watcher = canvasElement.ownerDocument.body.querySelector<HTMLElement>('[data-setting="watcher"]')!;
+  const content = watcher.closest<HTMLElement>('#settings-content')!;
+  content.scrollTo({ top: content.scrollTop + watcher.getBoundingClientRect().top - content.getBoundingClientRect().top - TOPIC_GAP_PX, behavior: 'instant' });
+}
+
 function selectTopic(name: string) {
   return async ({ canvasElement }: { canvasElement: HTMLElement }) => {
     const body = dialog(canvasElement);
@@ -93,7 +101,7 @@ export const Default: Story = {
 
 /** The mockup's case: rules accumulated, defaults otherwise. */
 export const WithRules: Story = {
-  play: selectTopic('Activity'),
+  play: showWatcher,
   parameters: {
     primedWatchedCommands: ['claude', 'codex'],
     primedAlertSettings: {},
@@ -107,7 +115,7 @@ export const DeferralDisabled: Story = {
     primedAlertSettings: { deferAlertsUntilQuiet: false },
   },
   play: async ({ canvasElement }) => {
-    await selectTopic('Activity')({ canvasElement });
+    await showWatcher({ canvasElement });
     await dialog(canvasElement).findByRole('switch', {
       name: 'Defer alerts until animation stops off',
     });
@@ -198,7 +206,7 @@ export const CustomTimings: Story = {
  * dialog.
  */
 export const ManyRules: Story = {
-  play: selectTopic('Activity'),
+  play: showWatcher,
   parameters: {
     primedWatchedCommands: [
       'cargo',
@@ -266,8 +274,8 @@ export const ThemeMenuOpenWithInstalledThemes: Story = {
 };
 
 /**
- * VS Code owns the theme; without a shell choice, General is omitted and
- * Activity becomes the first topic.
+ * VS Code owns the theme; without a shell choice, Appearance is omitted and
+ * Notifications becomes the first topic.
  */
 export const HostOwnsTheme: Story = {
   parameters: {
@@ -405,9 +413,10 @@ export const NotificationsUnderNothing: Story = {
   },
 };
 
-export const Activity: Story = {
+/** No rules yet: the watcher explains how one is made. */
+export const WatcherEmpty: Story = {
   ...Default,
-  play: selectTopic('Activity'),
+  play: showWatcher,
 };
 
 export const Notifications: Story = {
@@ -436,7 +445,7 @@ export const SearchAcrossTopics: Story = {
   play: async ({ canvasElement }) => {
     const body = dialog(canvasElement);
     fireEvent.change(body.getByRole('searchbox'), { target: { value: 'terminal' } });
-    await expect(body.getByRole('region', { name: 'Activity' })).toBeVisible();
+    await expect(body.getByRole('region', { name: 'Notifications' })).toBeVisible();
     await expect(body.queryByRole('button', { name: /^Theme:/ })).not.toBeInTheDocument();
   },
 };
@@ -493,7 +502,7 @@ export const ScrollFades: Story = {
   ...Default,
   play: async ({ canvasElement }) => {
     const body = dialog(canvasElement);
-    const content = body.getByRole('region', { name: 'General' }).parentElement!;
+    const content = body.getByRole('region', { name: 'Appearance' }).parentElement!;
     const edges = () => [...content.parentElement!.querySelectorAll<HTMLElement>('[data-scroll-fade]')]
       .map((fade) => fade.dataset.scrollFade);
     await waitFor(() => expect(edges()).toEqual(['below']));
@@ -514,7 +523,7 @@ export const HoverContents: Story = {
     const body = dialog(canvasElement);
     const topic = await hoverTopic(body, 'Notifications');
     await expect(topic).toHaveAttribute('aria-current', 'location');
-    await expect(body.getAllByRole('region')).toHaveLength(4);
+    await expect(body.getAllByRole('region')).toHaveLength(3);
   },
 };
 
@@ -522,7 +531,7 @@ export const ScrollFollowsContents: Story = {
   ...WithRules,
   play: async ({ canvasElement }) => {
     const body = dialog(canvasElement);
-    await userEvent.unhover(await hoverTopic(body, 'Activity'));
+    await userEvent.unhover(await hoverTopic(body, 'Appearance'));
     const section = body.getByRole('region', { name: 'Notifications' });
     const content = section.parentElement!;
     // Manual input cancels any remaining topic-animation frame. A bare
@@ -540,15 +549,15 @@ export const HoverSettingsOverridesScroll: Story = {
   ...WithRules,
   play: async ({ canvasElement }) => {
     const body = dialog(canvasElement);
-    const heading = body.getByRole('heading', { name: 'Activity' });
-    const content = body.getByRole('region', { name: 'Activity' }).parentElement!;
+    const heading = body.getByRole('heading', { name: 'Notifications' });
+    const content = body.getByRole('region', { name: 'Notifications' }).parentElement!;
     const scrollTop = content.scrollTop;
-    await expect(contentsButton(body, 'General')).toHaveAttribute('aria-current', 'location');
+    await expect(contentsButton(body, 'Appearance')).toHaveAttribute('aria-current', 'location');
     await userEvent.hover(heading);
-    await expect(contentsButton(body, 'Activity')).toHaveAttribute('aria-current', 'location');
+    await expect(contentsButton(body, 'Notifications')).toHaveAttribute('aria-current', 'location');
     await expect(content.scrollTop).toBe(scrollTop);
     await userEvent.unhover(heading);
-    await expect(contentsButton(body, 'General')).toHaveAttribute('aria-current', 'location');
+    await expect(contentsButton(body, 'Appearance')).toHaveAttribute('aria-current', 'location');
     await userEvent.hover(heading);
   },
 };

@@ -1,4 +1,4 @@
-import { BellIcon, FlaskIcon, GearIcon, GlobeIcon, InfoIcon, MagnifyingGlassIcon, PulseIcon } from '@phosphor-icons/react';
+import { BellIcon, FlaskIcon, GlobeIcon, InfoIcon, MagnifyingGlassIcon, PaintBrushIcon } from '@phosphor-icons/react';
 import { AboutSettings } from './AboutSettings';
 import { SecondsField, SwitchRow } from './AlarmSettingsControls';
 import { ScrollFades } from './ScrollFades';
@@ -98,9 +98,8 @@ function describePushTargets(push: PushDevicesState, remoteControlBelow: boolean
 }
 
 const TOPICS = [
-  { id: 'general', label: 'General', icon: GearIcon, groups: ['theme', 'shell'] },
-  { id: 'activity', label: 'Activity', icon: PulseIcon, groups: ['watcher', 'inactivity'] },
-  { id: 'notifications', label: 'Notifications', icon: BellIcon, groups: ['speech', 'push'] },
+  { id: 'appearance', label: 'Appearance', icon: PaintBrushIcon, groups: ['theme', 'shell'] },
+  { id: 'notifications', label: 'Notifications', icon: BellIcon, groups: ['speech', 'push', 'watcher', 'inactivity'] },
   { id: 'network', label: 'Network', icon: GlobeIcon, groups: ['network', 'phones', 'updates'] },
   { id: 'labs', label: 'Labs', icon: FlaskIcon, groups: ['delayedKill'] },
   { id: 'about', label: 'About', icon: InfoIcon, groups: ['about'] },
@@ -176,7 +175,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const searchRef = useRef<HTMLInputElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const scrollFrame = useRef<number | null>(null);
-  const [topic, setTopic] = useState<TopicId>('general');
+  const [topic, setTopic] = useState<TopicId>('appearance');
   const [hoveredTopic, setHoveredTopic] = useState<TopicId | null>(null);
   const [above, setAbove] = useState(false);
   const [below, setBelow] = useState(false);
@@ -379,7 +378,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                 {visibleTopics.length ? 'Search results' : 'No settings found.'}
               </div>
             )}
-            <TopicSection id="general" hidden={!visible('general')}>
+            <TopicSection id="appearance" hidden={!visible('appearance')}>
               <div className="mt-4 flex flex-col gap-2">
                 {showTheme && (
                   <section data-setting="theme" hidden={!matches('theme')} className={PICKER_ROW}>
@@ -404,8 +403,15 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                 )}
               </div>
             </TopicSection>
-            <TopicSection id="activity" hidden={!visible('activity')}>
-              <section data-setting="watcher" hidden={!matches('watcher')} className="mt-4">
+            <TopicSection id="notifications" hidden={!visible('notifications')}>
+              {(matches('speech') || matches('push')) && <h3 className="mt-4 text-sm font-semibold text-foreground">Application defaults</h3>}
+              <div data-setting="speech" hidden={!matches('speech')}>
+                <AlarmSettingsSection sink="speech" onShowNetwork={showNetwork} />
+              </div>
+              <div data-setting="push" hidden={!matches('push')}>
+                <AlarmSettingsSection sink="push" onShowNetwork={showNetwork} />
+              </div>
+              <section data-setting="watcher" hidden={!matches('watcher')} className={SETTINGS_SECTION}>
                 <div className="text-sm text-foreground">
                   Animation watcher enabled for commands that start with:
                 </div>
@@ -442,15 +448,6 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                   User has walked away after this much inactivity.
                 </div>
               </section>
-            </TopicSection>
-            <TopicSection id="notifications" hidden={!visible('notifications')}>
-              {(matches('speech') || matches('push')) && <h3 className="mt-4 text-sm font-semibold text-foreground">Application defaults</h3>}
-              <div data-setting="speech" hidden={!matches('speech')}>
-                <AlarmSettingsSection sink="speech" onShowNetwork={showNetwork} />
-              </div>
-              <div data-setting="push" hidden={!matches('push')}>
-                <AlarmSettingsSection sink="push" onShowNetwork={showNetwork} />
-              </div>
             </TopicSection>
             {/* Network stays below push, whose `no-burrow` copy says "below". */}
             <TopicSection id="network" hidden={!visible('network')}>
