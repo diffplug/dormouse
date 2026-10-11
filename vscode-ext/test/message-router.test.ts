@@ -7,7 +7,7 @@
  */
 
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 
 import type { ExtensionMessage, WebviewMessage } from '../src/message-types';
 import type { AlertCommand } from '../../lib/src/host/alert-protocol';
@@ -15,6 +15,7 @@ import type { PeerLinkDeps } from '../src/peer-link';
 import type { BurrowDeps } from '../src/burrow';
 import type { WebviewChannel } from '../src/webview-messaging';
 import { openSequence } from 'dor-tools-lib/osc';
+import { removeDir, tempStorageDir } from './helpers';
 
 /** What `message-router.ts` hands the two modules it configures at load. */
 const wiring = vi.hoisted(() => ({
@@ -210,7 +211,15 @@ it('forwards an OSC 367 open only from the run a launch write started', () => {
   }
 });
 
-it('answers a Surface id reservation from the window counter, by request id', async () => {
+/** Activation's counter, in a throwaway `globalStorageUri`. */
+async function activateSurfaceIds(): Promise<void> {
+  const storage = await tempStorageDir();
+  onTestFinished(() => removeDir(storage));
+  (await import('../src/surface-ids')).initSurfaceIds(storage);
+}
+
+it('answers a Surface id reservation from the install counter, by request id', async () => {
+  await activateSurfaceIds();
   const webview = fakeWebview();
   const disposable = router.attachRouter(webview.channel, {});
   try {
@@ -220,6 +229,7 @@ it('answers a Surface id reservation from the window counter, by request id', as
 });
 
 it('reserves above every Surface PTY this extension host holds, whatever floor the asking panel restored', async () => {
+  await activateSurfaceIds();
   const sibling = fakeWebview();
   const asking = fakeWebview();
   const disposables = [router.attachRouter(sibling.channel, {}), router.attachRouter(asking.channel, {})];

@@ -4,16 +4,17 @@ import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { surfaceIdNumber } from 'dor/protocol';
-import { createSurfaceIdAllocator } from '../src/surface-ids';
+import { createSurfaceIdAllocator, reserveSurfaceIds } from '../src/surface-ids';
 import { removeDir, tempStorageDir } from './helpers';
 
 /** Runs before each durable write, while the allocator holds the lock. */
-const hooks = vi.hoisted(() => ({ duringWrite: null as null | (() => Promise<void>) }));
+const hooks = vi.hoisted(() => ({ duringWrite: null as null | (() => Promise<void>), writes: 0 }));
 vi.mock('../../lib/src/host/atomic-json-file', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../lib/src/host/atomic-json-file')>();
   return {
     ...actual,
     writeJsonAtomic: async (...args: Parameters<typeof actual.writeJsonAtomic>) => {
+      hooks.writes++;
       await hooks.duringWrite?.();
       return actual.writeJsonAtomic(...args);
     },
@@ -40,6 +41,7 @@ beforeEach(async () => {
   dir = await tempStorageDir();
   logger.error.mockClear();
   hooks.duringWrite = null;
+  hooks.writes = 0;
 });
 afterEach(async () => { await removeDir(dir); });
 
@@ -143,9 +145,22 @@ describe('createSurfaceIdAllocator', () => {
     expect(await allocator.reserve(1, 3)).toEqual(['surface:44']);
   });
 
-  it('hands out ids from memory alone when it has no storage', async () => {
-    const allocator = createSurfaceIdAllocator(null, logger);
-    expect(await allocator.reserve(500, 0)).toHaveLength(64);
-    expect(logger.error).not.toHaveBeenCalled();
+  it('clamps a block to the most one reservation hands out', async () => {
+    expect(await createSurfaceIdAllocator(dir, logger).reserve(500, 0)).toHaveLength(64);
+  });
+
+  it('answers the reservations queued behind one in flight with one lock, one read, and one write', async () => {
+    const allocator = createSurfaceIdAllocator(dir, logger);
+    const blocks = await Promise.all([allocator.reserve(2, 0), allocator.reserve(3, 0), allocator.reserve(1, 10), allocator.reserve(2, 0)]);
+    expect(hooks.writes).toBe(1);
+    // Each in arrival order, the floor lifting its own block and every one after it.
+    expect(blocks.map(numbers)).toEqual([[1, 2], [3, 4, 5], [11], [12, 13]]);
+    expect(await persisted()).toBe(14);
+  });
+});
+
+describe('reserveSurfaceIds', () => {
+  it('hands out nothing before activation names the install\'s storage', async () => {
+    expect(await reserveSurfaceIds(1, 0)).toEqual([]);
   });
 });

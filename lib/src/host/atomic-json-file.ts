@@ -52,20 +52,35 @@ export async function writeJsonAtomic(dir: string, path: string, value: unknown,
     // Concurrent replacements can briefly leave a Windows destination pending
     // deletion. Retry only that platform's sharing failures, with ten 10ms waits;
     // keep the old file intact and propagate persistent or unrelated failures.
-    for (let attempt = 0; ; attempt++) {
-      try { await rename(tmp, path); break; }
-      catch (error) {
-        const code = (error as NodeJS.ErrnoException).code;
-        if (process.platform !== 'win32' || attempt === 10 || (code !== 'EPERM' && code !== 'EBUSY')) throw error;
-        await delay(10);
-      }
-    }
+    await renameRetrying(tmp, path, {
+      attempts: 11,
+      retryable: ({ code }) => process.platform === 'win32' && (code === 'EPERM' || code === 'EBUSY'),
+    });
     renamed = true;
   } finally {
     // A failed rename must not accumulate temp files holding the same secret.
     if (!renamed) await rm(tmp, { force: true }).catch(() => {});
   }
   if (durable) await syncDirectory(dir);
+}
+
+/** `rename`, tried up to `attempts` times 10ms apart while the failure is
+ *  `retryable` — a Windows virus scanner or a pending deletion can hold a path
+ *  for a moment. Rejects with the last failure. */
+export async function renameRetrying(
+  from: string,
+  to: string,
+  { attempts, retryable }: { attempts: number; retryable: (error: NodeJS.ErrnoException) => boolean },
+): Promise<void> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await rename(from, to);
+      return;
+    } catch (error) {
+      if (attempt >= attempts || !retryable(error as NodeJS.ErrnoException)) throw error;
+      await delay(10);
+    }
+  }
 }
 
 /** Flush the rename itself. Best-effort: Windows cannot open a directory to

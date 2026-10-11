@@ -11,6 +11,7 @@
  * handing anything out. A later run starting there reuses nothing and skips
  * nothing: no slack, since a `dor` handle is the number and webviews reserve a few ids
  * at a time. A reservation that cannot do all that in time hands out nothing.
+ * Reservations queued behind one in flight share the next lock, read, and write.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -18,14 +19,12 @@ import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { surfaceIdFor } from 'dor/protocol';
-import { writeJsonAtomic } from '../../lib/src/host/atomic-json-file';
-import { createSerialQueue } from '../../lib/src/host/remote/serial-queue';
-import { SURFACE_ID_RESERVE_WAIT_MS } from '../../lib/src/lib/platform/types';
+import { renameRetrying, writeJsonAtomic } from '../../lib/src/host/atomic-json-file';
+import { ID_RESERVE_MAX_BLOCK, SURFACE_ID_RESERVE_WAIT_MS } from '../../lib/src/lib/platform/types';
 import { log } from './log';
 
 const FILE = 'surface-ids.json';
 const VERSION = 1;
-const MAX_BLOCK = 64;
 /** The holder's record inside the lock directory. */
 const OWNER = 'owner.json';
 /** A lock whose holder is alive is broken only once this window has watched it
@@ -36,7 +35,7 @@ const LOCK_STALE_MS = 30_000;
 const LOCK_RETRY_MS = 10;
 
 export interface SurfaceIdAllocator {
-  /** `count` ids (clamped to 1..64), each numbered above `floor` and above every
+  /** `count` ids (clamped to 1..`ID_RESERVE_MAX_BLOCK`), each numbered above `floor` and above every
    *  id any window or earlier run handed out. Never rejects; resolves empty when
    *  it cannot persist a block under the cross-window lock within
    *  `SURFACE_ID_RESERVE_WAIT_MS` of the call, so the webview mints
@@ -83,16 +82,12 @@ function isAlive(pid: number): boolean {
  */
 async function removeLock(lock: string, token: string | null, logger: AllocatorLog): Promise<void> {
   const aside = `${lock}.${randomUUID()}`;
-  for (let attempt = 1; ; attempt++) {
-    try {
-      await rename(lock, aside);
-      break;
-    } catch (error) {
-      // A Windows virus scanner can hold the directory for a moment; a lock
-      // left in place stalls every window until it is stale.
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT' || attempt === 5) return;
-      await delay(LOCK_RETRY_MS);
-    }
+  try {
+    // A Windows virus scanner can hold the directory for a moment; a lock
+    // left in place stalls every window until it is stale.
+    await renameRetrying(lock, aside, { attempts: 5, retryable: ({ code }) => code !== 'ENOENT' });
+  } catch {
+    return;
   }
   if (((await readOwner(aside))?.token ?? null) !== token) {
     try {
@@ -156,15 +151,25 @@ async function withLock<T>(
   }
 }
 
-/** A counter persisted under `dir`, or kept in memory alone when there is none. */
-export function createSurfaceIdAllocator(dir: string | null, logger: AllocatorLog, timing: AllocatorTiming = {}): SurfaceIdAllocator {
-  const file = dir === null ? null : path.join(dir, FILE);
+/** One webview's reservation, waiting for its turn at the lock. */
+interface Request {
+  n: number;
+  above: number;
+  deadline: number;
+  resolve(ids: string[]): void;
+}
+
+/** A counter persisted under `dir`. */
+export function createSurfaceIdAllocator(dir: string, logger: AllocatorLog, timing: AllocatorTiming = {}): SurfaceIdAllocator {
+  const file = path.join(dir, FILE);
+  const lock = `${file}.lock`;
   const waitMs = timing.waitMs ?? SURFACE_ID_RESERVE_WAIT_MS;
   const staleMs = timing.staleMs ?? LOCK_STALE_MS;
   /** The lowest number not yet handed out. */
   let next = 1;
-  // One at a time within this process; the lock orders it against the others.
-  const serialize = createSerialQueue();
+  /** Arrival order; the lock orders this process against the others. */
+  const queue: Request[] = [];
+  let draining = false;
 
   /** Created once; a failure shows up as the lock's or the write's. */
   let storageReady: Promise<unknown> | null = null;
@@ -183,7 +188,7 @@ export function createSurfaceIdAllocator(dir: string | null, logger: AllocatorLo
     return now - watched.since >= staleMs;
   }
 
-  async function persistedNext(file: string): Promise<number> {
+  async function persistedNext(): Promise<number> {
     try {
       const parsed: unknown = JSON.parse(await readFile(file, 'utf8'));
       const { version, surface } = (parsed ?? {}) as { version?: unknown; surface?: unknown };
@@ -203,49 +208,75 @@ export function createSurfaceIdAllocator(dir: string | null, logger: AllocatorLo
     return first;
   }
 
-  async function reserveNow(count: number, floor: number, deadline: number): Promise<string[]> {
-    const n = Math.max(1, Math.min(MAX_BLOCK, Math.trunc(count) || 1));
-    const above = Number.isSafeInteger(floor) && floor > 0 ? floor : 0;
-    const first = file === null ? take(n, above, 0) : await reserveInFile(file, n, above, deadline);
-    return first === null ? [] : Array.from({ length: n }, (_, i) => surfaceIdFor(first + i));
-  }
-
-  /** The block's first number, or null when it could not be persisted under
-   *  the lock: another window, not seeing it, could hand out the same one. */
-  async function reserveInFile(file: string, n: number, above: number, deadline: number): Promise<number | null> {
-    const storage = path.dirname(file);
-    await (storageReady ??= mkdir(storage, { recursive: true, mode: 0o700 }).catch(() => {}));
-    const first = await withLock(`${file}.lock`, deadline, breakable, logger, async () => {
-      const first = take(n, above, await persistedNext(file));
+  /**
+   * Under the lock: every queued reservation still within its deadline takes
+   * its block, in arrival order, and one write persists the end of the last.
+   * Each answer is its block, or none when the write failed — another window,
+   * not seeing it, could hand out the same numbers.
+   */
+  async function reserveQueued(): Promise<Array<[Request, string[]]>> {
+    const batch = queue.splice(0);
+    const persisted = await persistedNext();
+    const now = performance.now();
+    const firsts = batch.map((request) => now < request.deadline ? take(request.n, request.above, persisted) : null);
+    if (firsts.some((first) => first !== null)) {
       try {
-        await writeJsonAtomic(storage, file, { version: VERSION, surface: next }, { durable: true });
-        return first;
+        await writeJsonAtomic(path.dirname(file), file, { version: VERSION, surface: next }, { durable: true });
       } catch (error) {
         logger.error(`[surface-ids] write ${file}: ${String(error)}; handing out no ids`);
-        return null;
+        return batch.map((request) => [request, []]);
       }
+    }
+    return batch.map((request, i) => {
+      const first = firsts[i];
+      return [request, first === null ? [] : Array.from({ length: request.n }, (_, k) => surfaceIdFor(first + k))];
     });
-    return first ?? null;
+  }
+
+  async function drain(): Promise<void> {
+    draining = true;
+    try {
+      while (queue.length > 0) {
+        await (storageReady ??= mkdir(dir, { recursive: true, mode: 0o700 }).catch(() => {}));
+        // The head arrived first, so its deadline is the earliest.
+        const head = queue[0];
+        const answers = await withLock(lock, head.deadline, breakable, logger, reserveQueued);
+        if (answers === null) {
+          queue.shift();
+          head.resolve([]);
+          continue;
+        }
+        for (const [request, ids] of answers) request.resolve(ids);
+      }
+    } finally {
+      draining = false;
+    }
   }
 
   return {
     // The wait counts from arrival, so a reservation queued behind others
     // still answers within the bound the webview's timeout allows for.
-    reserve: (count, floor) => {
-      const deadline = performance.now() + waitMs;
-      return serialize(() => reserveNow(count, floor, deadline));
-    },
+    reserve: (count, floor) => new Promise((resolve) => {
+      queue.push({
+        n: Math.max(1, Math.min(ID_RESERVE_MAX_BLOCK, Math.trunc(count) || 1)),
+        above: Number.isSafeInteger(floor) && floor > 0 ? floor : 0,
+        deadline: performance.now() + waitMs,
+        resolve,
+      });
+      if (!draining) void drain();
+    }),
   };
 }
 
-/** In memory until activation names the install's storage. */
-let allocator = createSurfaceIdAllocator(null, log);
+/** None until activation names the install's storage. */
+let allocator: SurfaceIdAllocator | null = null;
 
 /** Activation: persist the install's counter under `dir` (`globalStorageUri`). */
-export function initSurfaceIds(dir: string | null): void {
+export function initSurfaceIds(dir: string): void {
   allocator = createSurfaceIdAllocator(dir, log);
 }
 
+/** No ids before activation: the webview mints `surface:<uuid>`. */
 export function reserveSurfaceIds(count: number, floor: number): Promise<string[]> {
-  return allocator.reserve(count, floor);
+  return allocator?.reserve(count, floor) ?? Promise.resolve([]);
 }

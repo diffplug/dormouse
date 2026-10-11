@@ -90,7 +90,7 @@ export function activate(context: vscode.ExtensionContext) {
   initToolHost(context.globalStorageUri?.fsPath);
   // One counter for every window of the install; never workspaceState, whose
   // writes may not reach disk (session-state.ts).
-  initSurfaceIds(context.globalStorageUri?.fsPath ?? null);
+  initSurfaceIds(context.globalStorageUri.fsPath);
   log.init();
   extensionContext = context;
   discardUnreadableSessionState(context).catch((err) => log.error(`[session] could not delete an unreadable saved session: ${String(err)}`));
