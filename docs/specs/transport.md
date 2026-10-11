@@ -184,7 +184,7 @@ Source of truth: `ManagedVoicePort` in `lib/src/lib/platform/managed-voice-types
 - **A host must persist its counter's high-water mark before handing out a number at or above it**, so no number is reused across launches, **and never past the block it hands out**, so a relaunch skips only the ids a webview held unused at exit; where each host keeps it: `docs/specs/standalone.md` → "Workspace registry", `docs/specs/vscode.md` → "Surface id minting".
 - **Must allow creation when a reservation fails**, minting `surface:<uuid>`.
 
-Carriers: the `surface_reserve_ids` invoke (standalone); `surface:reserveIds` → `surface:reservedIds` (VS Code). Source of truth: `lib/src/lib/surface-ids.ts`.
+Carriers: the `boot_reserve_ids` and `surface_reserve_ids` invokes (standalone); `surface:reserveIds` → `surface:reservedIds` (VS Code). Source of truth: `lib/src/lib/surface-ids.ts`.
 
 ## Persisted session types
 

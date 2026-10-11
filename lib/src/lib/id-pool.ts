@@ -10,8 +10,9 @@
  * more than the pool holds at once reserves its count first ({@link IdPool.minter}).
  */
 export interface IdPool {
-  /** Mint from `reserve`. Resolves once the first block is in hand. */
-  install(reserve: (count: number) => Promise<string[]>): Promise<void>;
+  /** Mint from `reserve`, starting from `first` when the caller already
+   *  asked for the first block. Resolves once the first block is in hand. */
+  install(reserve: (count: number) => Promise<string[]>, first?: Promise<string[]>): Promise<void>;
   /** Forget the installed host (tests). */
   reset(): void;
   /** Whether a host that mints ids is installed. */
@@ -37,16 +38,20 @@ export function createIdPool(size: number, low: number, label: string): IdPool {
     console.error(`[${label}] the host did not reserve ids; using opaque ids until it does`, error);
   }
 
-  function refill(): Promise<void> {
-    if (!reserveIds || refilling) return refilling ?? Promise.resolve();
-    const reserve = reserveIds;
-    // Up to `size`, never past it: what the pool holds at exit is burned.
-    const pending = reserve(Math.max(1, size - ids.length))
-      .then((block) => { if (reserveIds === reserve) ids.push(...block); })
+  /** Add `block` once it lands, unless another host was installed since. */
+  function fill(reserve: (count: number) => Promise<string[]>, block: Promise<string[]>): Promise<void> {
+    const pending = block
+      .then((reserved) => { if (reserveIds === reserve) ids.push(...reserved); })
       .catch(failed)
       .finally(() => { if (refilling === pending) refilling = null; });
     refilling = pending;
     return pending;
+  }
+
+  function refill(): Promise<void> {
+    if (!reserveIds || refilling) return refilling ?? Promise.resolve();
+    // Up to `size`, never past it: what the pool holds at exit is burned.
+    return fill(reserveIds, reserveIds(Math.max(1, size - ids.length)));
   }
 
   function take(): string | undefined {
@@ -56,11 +61,11 @@ export function createIdPool(size: number, low: number, label: string): IdPool {
   }
 
   return {
-    install(reserve) {
+    install(reserve, first) {
       reserveIds = reserve;
       refilling = null;
       ids.length = 0;
-      return refill();
+      return first ? fill(reserve, first) : refill();
     },
     reset() {
       reserveIds = null;

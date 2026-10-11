@@ -15,17 +15,21 @@ import { registry } from './terminal-store';
 // a refill is one host round trip of a few ms, so refilling once 3 are gone
 // keeps a quick run of creates ahead of it; a burst that mints more at once
 // reserves through `surfaceIdMinter`.
-const pool = createIdPool(8, 6, 'surface-ids');
+export const SURFACE_ID_POOL_SIZE = 8;
+const pool = createIdPool(SURFACE_ID_POOL_SIZE, 6, 'surface-ids');
 let localSequence = 0;
 
 /** Mint from `reserve`, which hands out ids numbered above `floor` — the highest
- *  `surface:<n>` this page restored. Resolves once the first block is in hand,
- *  so a Surface created after boot never carries an opaque id. */
+ *  `surface:<n>` this page restored — starting from `first` when the caller
+ *  already asked for a {@link SURFACE_ID_POOL_SIZE} block. Resolves once the
+ *  first block is in hand, so a Surface created after boot never carries an
+ *  opaque id. */
 export function installSurfaceIdPool(
   reserve: (count: number, floor: number) => Promise<string[]>,
   floor: number,
+  first?: Promise<string[]>,
 ): Promise<void> {
-  return pool.install((count) => reserve(count, floor));
+  return pool.install((count) => reserve(count, floor), first);
 }
 
 /** Keep the page's own counter above `floor`, the highest `surface:<n>` a

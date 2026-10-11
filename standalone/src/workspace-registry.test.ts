@@ -26,6 +26,13 @@ function host(report?: () => Promise<unknown>) {
       const first = Math.max(1000, Number(args?.floor) + 1);
       return Array.from({ length: Number(args?.count) }, (_, i) => `surface:${first + i}`);
     }
+    if (cmd === "boot_reserve_ids") {
+      const first = Math.max(1000, Number(args?.floor) + 1);
+      return {
+        workspaces: Array.from({ length: Number(args?.workspaces) }, (_, i) => `workspace:${50 + i}`),
+        surfaces: Array.from({ length: Number(args?.surfaces) }, (_, i) => `surface:${first + i}`),
+      };
+    }
     if (cmd === "workspace_registry") return { revision: 3, windows: [{ label: "main", workspaces: [] }] };
     if (cmd === "workspace_report") return report?.() ?? null;
     return null;
@@ -71,14 +78,22 @@ describe("workspace registry", () => {
       ],
     };
     uninstall = await installWorkspaceRegistry(h, restored);
-    expect(h.invoke).toHaveBeenCalledWith("surface_reserve_ids", { count: 8, floor: 1500 });
+    expect(h.invoke).toHaveBeenCalledWith("boot_reserve_ids", { workspaces: 4, surfaces: 8, floor: 1500 });
     expect(mintSurfaceId()).toBe("surface:1501");
+  });
+
+  it("reserves both pools' first blocks in one boot reservation", async () => {
+    const h = host();
+    uninstall = await installWorkspaceRegistry(h, null);
+    const reservations = vi.mocked(h.invoke).mock.calls.map(([cmd]) => cmd).filter((cmd) => cmd.endsWith("_reserve_ids"));
+    expect(reservations).toEqual(["boot_reserve_ids"]);
+    expect(generateWorkspaceId()).toBe("workspace:50");
+    expect(mintSurfaceId()).toBe("surface:1000");
   });
 
   it("mints from the host's block and reports the store once per change, coalesced", async () => {
     const h = host();
     uninstall = await installWorkspaceRegistry(h, null);
-    expect(h.invoke).toHaveBeenCalledWith("workspace_reserve_ids", { count: 4 });
     expect(generateWorkspaceId()).toBe("workspace:50");
     await Promise.resolve();
     // The boot report: the store as it stood at install.

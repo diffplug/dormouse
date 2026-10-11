@@ -196,18 +196,33 @@ impl RoutingState {
 }
 
 impl WindowState {
-    /// `count` numbers of `kind`, all above `above`, never handed out by this
-    /// run or an earlier one (§Workspace registry). Writes and fsyncs
-    /// `ids.json` every call, so every caller must be off the main thread.
-    fn reserve_ids(&self, kind: ids::Kind, count: u64, above: u64) -> std::ops::Range<u64> {
+    /// One block per `(kind, count, above)`: `count` numbers of `kind`, all
+    /// above `above`, never handed out by this run or an earlier one
+    /// (§Workspace registry). Writes and fsyncs `ids.json` once per call, so
+    /// every caller must be off the main thread.
+    fn reserve_blocks(&self, asks: &[(ids::Kind, u64, u64)]) -> Vec<std::ops::Range<u64>> {
         let path = guard(&self.ids_file);
-        let (block, contents) = guard(&self.ids).reserve(kind, count, above);
+        let (blocks, contents) = {
+            let mut counters = guard(&self.ids);
+            let blocks = asks.iter().map(|&(kind, count, above)| counters.reserve(kind, count, above)).collect();
+            (blocks, counters.file())
+        };
         if let Some(path) = path.as_ref() {
             if let Err(e) = write_file_atomically(path, &contents) {
                 append_log(format!("[ids] {e}; the counters stay in memory"));
             }
         }
-        block
+        blocks
+    }
+
+    /// One block, as `reserve_blocks` hands it out.
+    fn reserve_ids(&self, kind: ids::Kind, count: u64, above: u64) -> std::ops::Range<u64> {
+        self.reserve_blocks(&[(kind, count, above)]).remove(0)
+    }
+
+    /// One block, spelled as ids.
+    fn reserve_id_strings(&self, kind: ids::Kind, count: u64, above: u64) -> Vec<String> {
+        self.reserve_ids(kind, count, above).map(|n| kind.id(n)).collect()
     }
 
     /// Boot: persist the counters at `path`, and raise each above both the
@@ -2991,6 +3006,23 @@ fn read_snapshot_from(dir: &Path, label: &str) -> Result<Option<JsonValue>, Stri
         .transpose()
 }
 
+/// A snapshot's `version`, read without building the rest of it: `Ok(None)`
+/// when there is none, `Null` when it is JSON naming no version.
+fn read_snapshot_version_from(dir: &Path, label: &str) -> Result<Option<JsonValue>, String> {
+    #[derive(Deserialize)]
+    struct Versioned {
+        #[serde(default)]
+        version: JsonValue,
+    }
+    let Some(contents) = read_session_from(dir, label)? else { return Ok(None) };
+    let unreadable = |e: serde_json::Error| format!("unreadable snapshot for {label}: {e}");
+    // Only an object has a `version`; any other JSON names none.
+    if !contents.trim_start().starts_with('{') {
+        return serde_json::from_str::<serde::de::IgnoredAny>(&contents).map(|_| Some(JsonValue::Null)).map_err(unreadable);
+    }
+    serde_json::from_str::<Versioned>(&contents).map(|snapshot| Some(snapshot.version)).map_err(unreadable)
+}
+
 /// The `PersistedWindow.version` and its Workspaces' `PersistedSession.version`
 /// this build writes, and the only ones it keeps (docs/specs/transport.md ->
 /// "Persisted session types"). `standalone/scripts/persisted-format.json` pins
@@ -3007,8 +3039,8 @@ fn discard_other_formats(dir: &Path) -> Result<(usize, usize), String> {
     let mut snapshots = 0;
     for label in routing::restorable_labels(session_file_names(dir)) {
         // An unparseable snapshot is its window's to overwrite, as before.
-        let Ok(Some(snapshot)) = read_snapshot_from(dir, &label) else { continue };
-        if snapshot["version"] != WINDOW_VERSION {
+        let Ok(Some(version)) = read_snapshot_version_from(dir, &label) else { continue };
+        if version != WINDOW_VERSION {
             remove_session_from(dir, &label)?;
             snapshots += 1;
         }
@@ -3593,10 +3625,7 @@ fn saved_windows(dir: &Path) -> SavedWindows {
 /// more (§Workspace registry).
 #[tauri::command(async)]
 fn workspace_reserve_ids(windows: tauri::State<'_, WindowState>, count: u64) -> Vec<String> {
-    windows
-        .reserve_ids(ids::Kind::Workspace, count.clamp(1, 64), 0)
-        .map(|n| ids::Kind::Workspace.id(n))
-        .collect()
+    windows.reserve_id_strings(ids::Kind::Workspace, count, 0)
 }
 
 /// Hand a webview a block of Surface ids to mint from, every number above
@@ -3605,10 +3634,23 @@ fn workspace_reserve_ids(windows: tauri::State<'_, WindowState>, count: u64) -> 
 /// (§Workspace registry).
 #[tauri::command(async)]
 fn surface_reserve_ids(windows: tauri::State<'_, WindowState>, count: u64, floor: Option<u64>) -> Vec<String> {
-    windows
-        .reserve_ids(ids::Kind::Surface, count.clamp(1, 64), floor.unwrap_or(0))
-        .map(|n| ids::Kind::Surface.id(n))
-        .collect()
+    windows.reserve_id_strings(ids::Kind::Surface, count, floor.unwrap_or(0))
+}
+
+/// A webview's first Workspace and Surface blocks at boot, as
+/// `workspace_reserve_ids` and `surface_reserve_ids` hand them out, with one
+/// write of the counters for both.
+#[derive(Serialize)]
+struct BootIds {
+    workspaces: Vec<String>,
+    surfaces: Vec<String>,
+}
+
+#[tauri::command(async)]
+fn boot_reserve_ids(windows: tauri::State<'_, WindowState>, workspaces: u64, surfaces: u64, floor: Option<u64>) -> BootIds {
+    let ask = [(ids::Kind::Workspace, workspaces, 0), (ids::Kind::Surface, surfaces, floor.unwrap_or(0))];
+    let mut ids = windows.reserve_blocks(&ask).into_iter().zip(ask).map(|(block, (kind, ..))| block.map(|n| kind.id(n)).collect());
+    BootIds { workspaces: ids.next().unwrap_or_default(), surfaces: ids.next().unwrap_or_default() }
 }
 
 /// A window's Workspace list, as it stands. Broadcast to every window when it
@@ -4794,6 +4836,7 @@ pub fn run() {
             transfer_workspace_content,
             workspace_reserve_ids,
             surface_reserve_ids,
+            boot_reserve_ids,
             workspace_report,
             workspace_registry,
             remove_window_session,
@@ -5598,6 +5641,16 @@ mod tests {
         // A crash now, with nothing else on disk: the relaunch starts just
         // above, wasting no numbers.
         assert_eq!(boot_ids(root.path()).reserve_ids(super::ids::Kind::Surface, 1, 0).start, block.end);
+    }
+
+    #[test]
+    fn a_boot_reservation_persists_every_block_it_hands_out() {
+        let root = TempDir::new("ids-boot");
+        let windows = boot_ids(root.path());
+        let blocks = windows.reserve_blocks(&[(super::ids::Kind::Workspace, 4, 0), (super::ids::Kind::Surface, 8, 40)]);
+        assert_eq!(blocks, vec![2..6, 41..49]);
+        let file: JsonValue = serde_json::from_str(&fs::read_to_string(root.path().join("ids.json")).unwrap()).unwrap();
+        assert_eq!((file["workspace"].as_u64(), file["surface"].as_u64()), (Some(6), Some(49)));
     }
 
     #[test]

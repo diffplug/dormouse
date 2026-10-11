@@ -10,8 +10,9 @@ import {
   getWorkspacesSnapshot,
   installWorkspaceIdPool,
   subscribeToWorkspaces,
+  WORKSPACE_ID_POOL_SIZE,
 } from "dormouse-lib/lib/workspace-store";
-import { installSurfaceIdPool, maxSurfaceNumber } from "dormouse-lib/lib/surface-ids";
+import { installSurfaceIdPool, maxSurfaceNumber, SURFACE_ID_POOL_SIZE } from "dormouse-lib/lib/surface-ids";
 import type { PersistedWindow } from "dormouse-lib/lib/session-types";
 
 export interface RegistryWorkspace {
@@ -100,18 +101,25 @@ export async function installWorkspaceRegistry(host: RegistryHost, restored: Per
   };
   const unsubscribeStore = subscribeToWorkspaces(schedule);
   const unlisten = await host.onSnapshot(acceptRegistrySnapshot);
+  const restoredMax = maxSurfaceNumber(restored?.workspaces.map((workspace) => workspace.session) ?? []);
+  // Both pools' first blocks in one reservation: one durable write, not two.
+  const boot = host.invoke<{ workspaces: string[]; surfaces: string[] }>(
+    "boot_reserve_ids", { workspaces: WORKSPACE_ID_POOL_SIZE, surfaces: SURFACE_ID_POOL_SIZE, floor: restoredMax },
+  );
   await Promise.all([
-    installWorkspaceIdPool((count) => host.invoke<string[]>("workspace_reserve_ids", { count })),
+    installWorkspaceIdPool(
+      (count) => host.invoke<string[]>("workspace_reserve_ids", { count }),
+      boot.then((ids) => ids.workspaces),
+    ),
     installSurfaceIdPool(
       (count, floor) => host.invoke<string[]>("surface_reserve_ids", { count, floor }),
-      maxSurfaceNumber(restored?.workspaces.map((workspace) => workspace.session) ?? []),
+      restoredMax,
+      boot.then((ids) => ids.surfaces),
     ),
+    host.invoke<WorkspaceRegistrySnapshot>("workspace_registry").then(acceptRegistrySnapshot).catch(() => {
+      // A host without the registry (an older dev harness) leaves it empty.
+    }),
   ]);
-  try {
-    acceptRegistrySnapshot(await host.invoke<WorkspaceRegistrySnapshot>("workspace_registry"));
-  } catch {
-    // A host without the registry (an older dev harness) leaves it empty.
-  }
   schedule();
   return () => {
     unsubscribeStore();

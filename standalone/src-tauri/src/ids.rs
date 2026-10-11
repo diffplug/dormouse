@@ -23,6 +23,10 @@ pub const FILE: &str = "ids.json";
 
 const VERSION: u64 = 1;
 
+/// The most numbers one reservation hands out. The webview's twin is
+/// `ID_RESERVE_MAX_BLOCK` in `lib/src/lib/platform/types.ts`.
+const MAX_BLOCK: u64 = 64;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
     Surface,
@@ -107,17 +111,18 @@ impl Counters {
         Ok(())
     }
 
-    /// Hand out `count` numbers of `kind`, all above `above`, with the file
-    /// contents that must be written before any number in the block is used.
-    pub fn reserve(&mut self, kind: Kind, count: u64, above: u64) -> (Range<u64>, String) {
+    /// Hand out `count` numbers of `kind` (clamped to `1..=MAX_BLOCK`), all
+    /// above `above`. `file()` must be written before any is used.
+    pub fn reserve(&mut self, kind: Kind, count: u64, above: u64) -> Range<u64> {
         let counter = self.next(kind);
         let first = (*counter).max(kind.first()).max(above.saturating_add(1));
-        let end = first.saturating_add(count);
+        let end = first.saturating_add(count.clamp(1, MAX_BLOCK));
         *counter = end;
-        (first..end, self.file())
+        first..end
     }
 
-    fn file(&self) -> String {
+    /// The persisted form of every counter as it stands.
+    pub fn file(&self) -> String {
         serde_json::to_string(&File {
             version: VERSION,
             surface: self.surface,
@@ -143,12 +148,13 @@ fn numbered(id: &str, prefix: &str) -> Option<u64> {
     suffix.parse().ok().filter(|n| *n <= MAX_NUMBER)
 }
 
-/// The next number of `kind`, above every id given.
+/// One past the highest number among `ids` of `kind`, 0 when none has one:
+/// what to `seed` its counter with.
 pub fn seed_next(kind: Kind, ids: impl IntoIterator<Item = impl AsRef<str>>) -> u64 {
     ids.into_iter()
         .filter_map(|id| kind.number(id.as_ref()))
         .max()
-        .map_or(kind.first(), |n| (n + 1).max(kind.first()))
+        .map_or(0, |n| n + 1)
 }
 
 /// Every Surface id a persisted Session names: its panes and its doors.
@@ -215,34 +221,38 @@ mod tests {
     #[test]
     fn every_block_asks_to_persist_exactly_its_end() {
         let mut counters = Counters::default();
-        let (block, file) = counters.reserve(Kind::Workspace, 4, 0);
-        assert_eq!(block, 2..6);
-        let file = persisted(&file);
+        assert_eq!(counters.reserve(Kind::Workspace, 4, 0), 2..6);
+        let file = persisted(&counters.file());
         assert_eq!(file["version"], 1);
         assert_eq!(file["workspace"], 6);
-        let (block, file) = counters.reserve(Kind::Workspace, 1, 0);
-        assert_eq!(block, 6..7);
-        assert_eq!(persisted(&file)["workspace"], 7);
+        assert_eq!(counters.reserve(Kind::Workspace, 1, 0), 6..7);
+        assert_eq!(persisted(&counters.file())["workspace"], 7);
+    }
+
+    #[test]
+    fn a_block_is_clamped_to_one_through_the_most_one_reservation_hands_out() {
+        let mut counters = Counters::default();
+        assert_eq!(counters.reserve(Kind::Surface, 0, 0), 1..2);
+        assert_eq!(counters.reserve(Kind::Surface, 500, 0), 2..66);
     }
 
     #[test]
     fn a_loaded_file_resumes_where_it_left_off_and_every_write_carries_each_kind() {
         let mut counters = Counters::default();
         counters.load(r#"{"version":1,"surface":500,"workspace":40,"window":9}"#).unwrap();
-        let (block, file) = counters.reserve(Kind::Surface, 8, 0);
-        assert_eq!(block, 500..508);
-        let file = persisted(&file);
+        assert_eq!(counters.reserve(Kind::Surface, 8, 0), 500..508);
+        let file = persisted(&counters.file());
         assert_eq!((file["surface"].as_u64(), file["workspace"].as_u64(), file["window"].as_u64()), (Some(508), Some(40), Some(9)));
-        assert_eq!(counters.reserve(Kind::Workspace, 4, 0).0, 40..44);
-        assert_eq!(counters.reserve(Kind::Window, 1, 0).0, 9..10);
+        assert_eq!(counters.reserve(Kind::Workspace, 4, 0), 40..44);
+        assert_eq!(counters.reserve(Kind::Window, 1, 0), 9..10);
     }
 
     #[test]
     fn a_floor_lifts_the_block_above_it() {
         let mut counters = Counters::default();
-        assert_eq!(counters.reserve(Kind::Surface, 2, 500).0, 501..503);
+        assert_eq!(counters.reserve(Kind::Surface, 2, 500), 501..503);
         // A lower floor later never moves the counter back.
-        assert_eq!(counters.reserve(Kind::Surface, 1, 3).0, 503..504);
+        assert_eq!(counters.reserve(Kind::Surface, 1, 3), 503..504);
     }
 
     #[test]
@@ -250,7 +260,7 @@ mod tests {
         let mut counters = Counters::default();
         assert!(counters.load("{not json").is_err());
         assert!(counters.load(r#"{"version":2,"surface":9,"workspace":9,"window":9}"#).is_err());
-        assert_eq!(counters.reserve(Kind::Window, 1, 0).0, 1..2);
+        assert_eq!(counters.reserve(Kind::Window, 1, 0), 1..2);
     }
 
     #[test]
@@ -268,16 +278,22 @@ mod tests {
         assert_eq!(seed_next(Kind::Surface, ids), 10);
     }
 
+    /// The first number a counter seeded from `ids` hands out.
+    fn first_after<const N: usize>(kind: Kind, ids: [&str; N]) -> u64 {
+        let mut counters = Counters::default();
+        counters.seed(kind, seed_next(kind, ids));
+        counters.reserve(kind, 1, 0).start
+    }
+
     #[test]
-    fn each_counter_seeds_above_every_id_given_and_never_below_its_first() {
-        assert_eq!(seed_next(Kind::Surface, Vec::<String>::new()), 1);
-        assert_eq!(seed_next(Kind::Surface, ["surface:", "surface:1a", "surface:+4", "surface-7"]), 1);
-        assert_eq!(seed_next(Kind::Window, ["main", "ws-2", "ws-7", "ws-x"]), 8);
-        assert_eq!(seed_next(Kind::Window, ["main"]), 1);
-        assert_eq!(seed_next(Kind::Workspace, Vec::<String>::new()), 2);
-        assert_eq!(seed_next(Kind::Workspace, ["workspace:0", "workspace:1"]), 2);
-        assert_eq!(seed_next(Kind::Workspace, ["workspace:3", "workspace:12", "workspace:x", "workspace-40"]), 13);
+    fn each_counter_hands_out_above_every_id_seeded_and_never_below_its_first() {
+        assert_eq!(first_after(Kind::Surface, []), 1);
+        assert_eq!(first_after(Kind::Surface, ["surface:", "surface:1a", "surface:+4", "surface-7"]), 1);
+        assert_eq!(first_after(Kind::Window, ["main", "ws-2", "ws-7", "ws-x"]), 8);
+        assert_eq!(first_after(Kind::Window, ["main"]), 1);
         // `workspace:1` is a bare Wall's own, even on an empty counter.
-        assert_eq!(Counters::default().reserve(Kind::Workspace, 1, 0).0, 2..3);
+        assert_eq!(first_after(Kind::Workspace, []), 2);
+        assert_eq!(first_after(Kind::Workspace, ["workspace:0", "workspace:1"]), 2);
+        assert_eq!(first_after(Kind::Workspace, ["workspace:3", "workspace:12", "workspace:x", "workspace-40"]), 13);
     }
 }

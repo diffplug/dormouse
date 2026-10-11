@@ -175,6 +175,8 @@ const invokeMap = {
   // Surface ids (docs/specs/transport.md -> "Surface ids"): never at or below
   // the floor the page restored, which outlives this process in localStorage.
   surface_reserve_ids: ({ count, floor }) => reserve('surface', count, floor),
+  boot_reserve_ids: ({ workspaces, surfaces, floor }) =>
+    ({ workspaces: reserve('workspace', workspaces), surfaces: reserve('surface', surfaces, floor) }),
   workspace_report: ({ entries }) => {
     // Restored browser state survives this process; mirror Rust's report seed.
     const seeded = ids.workspace;

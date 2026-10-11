@@ -82,13 +82,19 @@ export function isWorkspacePinned(id: WorkspaceId): boolean {
 // are created one gesture or `dor` call at a time, and a refill, after each
 // one, is one host round trip of a few ms. A window's Reopen reserves through
 // `workspaceIdMinter`.
-const idPool = createIdPool(4, 3, 'workspace-store');
+export const WORKSPACE_ID_POOL_SIZE = 4;
+const idPool = createIdPool(WORKSPACE_ID_POOL_SIZE, 3, 'workspace-store');
 let localSequence = 1;
 
-/** Give this Window a host that mints ids. Resolves once the first block is
- *  in hand, so a create that follows never falls back to an opaque id. */
-export function installWorkspaceIdPool(reserve: (count: number) => Promise<WorkspaceId[]>): Promise<void> {
-  return idPool.install(reserve);
+/** Give this Window a host that mints ids, starting from `first` when the
+ *  caller already asked for a {@link WORKSPACE_ID_POOL_SIZE} block. Resolves
+ *  once the first block is in hand, so a create that follows never falls back
+ *  to an opaque id. */
+export function installWorkspaceIdPool(
+  reserve: (count: number) => Promise<WorkspaceId[]>,
+  first?: Promise<WorkspaceId[]>,
+): Promise<void> {
+  return idPool.install(reserve, first);
 }
 
 /** Forget the installed pool, back to a host with no registry (tests). */
