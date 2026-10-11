@@ -347,7 +347,7 @@ describe('AlertManager in isolation', () => {
   it.each([
     ['WATCHING', 'watching', null],
     ['report', 'report', REPORT],
-  ] as const)('persists an unacknowledged %s ring as the TODO a look would leave', (_what, source, notification) => {
+  ] as const)('persists an unacknowledged %s ring as a TODO', (_what, source, notification) => {
     const id = `restart-${source}`;
     ringFrom(id, source);
     const persisted = JSON.parse(JSON.stringify(toPersistedAlertState(manager.getState(id))));
@@ -590,7 +590,7 @@ describe('AlertManager in isolation', () => {
     expect(manager.getState(id)).toEqual(quiet);
   });
 
-  it('dismisses a ring still deferred behind animation to a TODO', () => {
+  it('leaves a ring still deferred behind animation for dismiss, which never saw it', () => {
     const id = 'dismiss-deferred';
     driveToBusy(manager, id);
     manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'Build finished' });
@@ -600,8 +600,8 @@ describe('AlertManager in isolation', () => {
 
     vi.advanceTimersByTime(5_000);
     expect(manager.getState(id)).toMatchObject({
-      status: 'WATCHING_DISABLED',
-      todo: true,
+      status: 'ALERT_RINGING',
+      todo: false,
       notification: { source: 'OSC 9', title: null, body: 'Build finished' },
     });
   });
@@ -1275,18 +1275,20 @@ describe('AlertManager in isolation', () => {
       });
     });
 
-    it('turns a deferred ring into a TODO when the user acknowledges', () => {
+    it('keeps a never-shown deferred ring through a look and clears it on input', () => {
       const id = 'defer-acknowledged';
       driveToBusy(manager, id);
       manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'Done' });
 
       manager.acknowledge(id, { input: false });
+      expect(manager.getState(id)).toMatchObject({ status: 'WATCHING_DISABLED', todo: false });
+      manager.acknowledge(id, { input: true });
       vi.advanceTimersByTime(60_000);
       expect(manager.getState(id)).toMatchObject({
         status: 'WATCHING_DISABLED',
         episode: null,
-        todo: true,
-        notification: { source: 'OSC 9', title: null, body: 'Done' },
+        todo: false,
+        notification: null,
       });
     });
 

@@ -38,7 +38,7 @@ Public `status` is a projection — first match wins:
 
 **Persist only** `todo` and the sanitized `notification` (plus `status` for diagnostics):
 
-- **Must persist an unacknowledged ring, deferred or visible, as the TODO a look would leave**, with its detail.
+- **Must persist an unacknowledged ring, deferred or visible, as a TODO** with its detail.
 - Every spawn starts the id's alert state over; a cold restore carries those two on the pane's spawn (`SpawnPtyOptions.alert`), seeded before the PTY spawns, and a live resume keeps the host's. **Never recreate a ring, a progress cycle, or a command-exit arm on restore.**
 - **Must read a notification this build cannot validate as none, keeping the pane**, and **never write a source outside `STRICT_READER_NOTIFICATION_SOURCES`** until no strict pre-tolerant build reads the file (rationale).
 - **Never persist WATCHING per Session**: it is re-derived from the rule set at the next command start. Replay filtering in `docs/specs/terminal-escapes.md` keeps old terminal output from firing notification side effects again.
@@ -135,7 +135,7 @@ stateDiagram-v2
       Deferred --> Showing: confirmed work ends
       Deferred --> NoRing: due while engaged, never shown, becomes a hold
       Showing --> NoRing: verb, or last source withdrawn
-      Deferred --> NoRing: verb, or last source withdrawn
+      Deferred --> NoRing: input, a verb once shown, or last source withdrawn
     }
     --
     state "Hold" as Hold {
@@ -321,15 +321,14 @@ Detail follows one richness order: a text report (`OSC 9`, `OSC 99`, `OSC 777`) 
 
 | Verb | Effect |
 |---|---|
-| acknowledge without input (Engagement) | clears the ring, leaving `todo` on with its detail |
-| acknowledge with input — any keystroke, paste, or drop — or clear TODO (pill click) | clears the ring; `todo` off, notification dropped, even if already off |
-| dismiss (`a`, Pane Header) | clears the ring, leaving `todo` on with its detail; with nothing ringing or held: no change, no notify |
+| acknowledge without input (Engagement), or dismiss (`a`, Pane Header) | clears the ring, leaving `todo` on with its detail; with nothing ringing or held, no change |
+| acknowledge with input — any keystroke, paste, or drop — or clear TODO (pill click) | clears the ring; `todo` off, notification dropped, even if already off (rationale) |
 | toggle TODO (`t`) | clears the ring; `todo` flips, on keeping the ring's detail, off dropping the notification |
 | an await consumes a source (Await) | withdraws that source |
 | a rule stops covering the `watching` key | withdraws `watching` |
 
-- **The user verbs acknowledge; a withdrawal must never acknowledge.** Each verb clears a deferred ring as a visible one and drops a hold; a withdrawal leaves `todo` and its notification as they stood.
-- **Any keystroke into the pane must clear TODO** (rationale).
+- **The user verbs acknowledge; a withdrawal must never acknowledge.** Each verb drops a hold and clears a ring that has shown, deferred or not; a withdrawal leaves `todo` and its notification as they stood.
+- **A ring deferred since it opened must survive every verb but input** (rationale).
 - **Never summon twice for an acknowledged state.** After a user verb clears a ring or drops a hold, a report before any output only updates the TODO (Completion events); opening a ring or starting a command forgets the acknowledgement (rationale).
 - Command-mode `Enter` that only enters passthrough does not clear TODO.
 - Removing a WATCHING rule clears neither a progress cycle nor a command-exit arm.

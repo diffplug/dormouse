@@ -259,6 +259,51 @@ describe('acknowledge', () => {
     expect(manager.getState(PANE)).toMatchObject({ todo: false, notification: null });
   });
 
+  it('leaves a never-shown deferred ring to come due after a look, held if still engaged', () => {
+    output(PANE, 3_000);
+    manager.notifyFromProtocol(PANE, PERMISSION);
+    engage(manager, PANE);
+    manager.acknowledge(PANE, { input: false });
+    output(PANE, 3_000);
+    expect(manager.getState(PANE)).toMatchObject({ status: 'WATCHING_DISABLED', todo: false });
+    expect(manager.getState(PANE).episode).not.toBeNull();
+
+    vi.advanceTimersByTime(5_000);
+    expect(manager.getState(PANE)).toMatchObject({ status: 'WATCHING_DISABLED', episode: null, todo: true, notification: PERMISSION });
+  });
+
+  it('rings a never-shown deferred ring the user looked at and left', () => {
+    output(PANE, 3_000);
+    manager.notifyFromProtocol(PANE, PERMISSION);
+    engage(manager, PANE);
+    manager.acknowledge(PANE, { input: false });
+    leave(manager);
+    vi.advanceTimersByTime(5_000);
+    expect(manager.getState(PANE)).toMatchObject({ status: 'ALERT_RINGING', todo: false, notification: PERMISSION });
+  });
+
+  it('keeps a never-shown deferred ring through every verb but input', () => {
+    output(PANE, 3_000);
+    manager.notifyFromProtocol(PANE, PERMISSION);
+    manager.dismissAlert(PANE);
+    manager.toggleTodo(PANE);
+    manager.clearTodo(PANE);
+    expect(manager.getState(PANE).episode).not.toBeNull();
+
+    keystroke(PANE);
+    expect(manager.getState(PANE)).toMatchObject({ episode: null, todo: false });
+    vi.advanceTimersByTime(5_000);
+    expect(ringing(PANE)).toBe(false);
+  });
+
+  it('turns a ring that showed and then deferred into a TODO on a look', () => {
+    manager.notifyFromProtocol(PANE, PERMISSION);
+    driveToBusy(manager, PANE);
+    expect(ringing(PANE)).toBe(false);
+    manager.acknowledge(PANE, { input: false });
+    expect(manager.getState(PANE)).toMatchObject({ episode: null, todo: true, notification: PERMISSION });
+  });
+
   it('never creates an entry for an id it does not know', () => {
     manager.acknowledge('browser-1', { input: false });
     manager.acknowledge('browser-1', { input: true });

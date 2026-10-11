@@ -286,7 +286,7 @@ describe('terminal-registry alert behavior', () => {
 
     createSession(id);
     expect(getActivity(id)).toEqual(activity);
-    // A ring no one has looked at persists as the TODO a look would leave.
+    // A ring no one has looked at persists as a TODO.
     expect(getLivePersistedAlertState(id)).toMatchObject({ status: 'ALERT_RINGING', todo: true });
 
     unmountElement(id);
