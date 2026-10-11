@@ -590,22 +590,6 @@ describe('AlertManager in isolation', () => {
     expect(manager.getState(id)).toEqual(quiet);
   });
 
-  it('leaves a ring still deferred behind animation for dismiss, which never saw it', () => {
-    const id = 'dismiss-deferred';
-    driveToBusy(manager, id);
-    manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'Build finished' });
-    expect(manager.getState(id)).toMatchObject({ status: 'WATCHING_DISABLED', todo: false });
-
-    manager.dismissAlert(id);
-
-    vi.advanceTimersByTime(5_000);
-    expect(manager.getState(id)).toMatchObject({
-      status: 'ALERT_RINGING',
-      todo: false,
-      notification: { source: 'OSC 9', title: null, body: 'Build finished' },
-    });
-  });
-
   it('protocol completion is held while the Session is engaged', () => {
     const id = 'osc-progress-held';
 
@@ -1272,23 +1256,6 @@ describe('AlertManager in isolation', () => {
         status: 'ALERT_RINGING',
         todo: false,
         notification: { source: 'OSC 9', title: null, body: 'Done' },
-      });
-    });
-
-    it('keeps a never-shown deferred ring through a look and clears it on input', () => {
-      const id = 'defer-acknowledged';
-      driveToBusy(manager, id);
-      manager.notifyFromProtocol(id, { source: 'OSC 9', title: null, body: 'Done' });
-
-      manager.acknowledge(id, { input: false });
-      expect(manager.getState(id)).toMatchObject({ status: 'WATCHING_DISABLED', todo: false });
-      manager.acknowledge(id, { input: true });
-      vi.advanceTimersByTime(60_000);
-      expect(manager.getState(id)).toMatchObject({
-        status: 'WATCHING_DISABLED',
-        episode: null,
-        todo: false,
-        notification: null,
       });
     });
 

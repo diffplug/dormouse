@@ -134,7 +134,8 @@ interface Ring extends SourceSet {
   detail: ActivityNotification;
   /** Published as `ALERT_RINGING` at least once — set only by
    *  `reconcileRing`, so false means deferred at every publish since it
-   *  opened. Until then, coming due on an engaged Session makes it a hold. */
+   *  opened. Until then it has summoned no one: only input clears it
+   *  (`clearRingForUser`), and coming due on an engaged Session makes it a hold. */
   shown: boolean;
 }
 
@@ -1002,7 +1003,7 @@ export class AlertManager {
    * to decide, from the ring returned. Only clearing a ring or a hold records
    * an acknowledgement.
    */
-  private clearRingForUser(entry: AlertEntry, input: boolean): Ring | null {
+  private clearRingForUser(entry: AlertEntry, input = false): Ring | null {
     const ring = input || entry.ring?.shown || !this.isDeferred(entry) ? entry.ring : null;
     const { held } = entry;
     if (ring === null && held === null) return null;
@@ -1088,12 +1089,11 @@ export class AlertManager {
   }
 
   /**
-   * A human interacted with the Session. Both kinds clear the ring and whatever
-   * it held, and mark the running command seen. Without `input` a cleared ring
-   * becomes a TODO and a never-shown deferred ring stays (`clearRingForUser`);
-   * `input` — keys, a paste, a drop, acknowledged as the host writes them —
-   * clears even that, turns TODO off, and opens the echo window, a helper's
-   * included, since its detector runs. Never creates an
+   * A human interacted with the Session. Both kinds clear the ring
+   * (`clearRingForUser`) and whatever it held, and mark the running command
+   * seen; without `input` a cleared ring becomes a TODO, while `input` — keys,
+   * a paste, a drop, acknowledged as the host writes them — turns TODO off and
+   * opens the echo window, a helper's included, since its detector runs. Never creates an
    * entry: an id with none — a browser Surface — has nothing to clear.
    */
   acknowledge(id: string, { input }: { input: boolean }): void {
@@ -1103,10 +1103,11 @@ export class AlertManager {
     if (this.helpers.has(id)) return;
     this.markSeen(entry);
     if (input) {
-      this.setTodoForUser(id, entry, false, true);
+      this.clearRingForUser(entry, true);
+      this.setTodoForUser(id, entry, false);
       return;
     }
-    this.ringToTodo(entry, this.clearRingForUser(entry, false));
+    this.ringToTodo(entry, this.clearRingForUser(entry));
     this.notify(id);
   }
 
@@ -1145,7 +1146,7 @@ export class AlertManager {
 
     // Dismissing a ring leaves a TODO behind, so the summons is not lost. With
     // nothing ringing or held, nothing changes and `notify` publishes nothing.
-    this.ringToTodo(entry, this.clearRingForUser(entry, false));
+    this.ringToTodo(entry, this.clearRingForUser(entry));
     this.notify(id);
   }
 
@@ -1163,10 +1164,9 @@ export class AlertManager {
   }
 
   /** A TODO verb: the ring goes, on keeps the ring's detail, and off drops the
-   *  notification. Only `input` takes a never-shown deferred ring. `notify`
-   *  dedupes unchanged state. */
-  private setTodoForUser(id: string, entry: AlertEntry, todo: TodoState, input = false): void {
-    const ring = this.clearRingForUser(entry, input);
+   *  notification. `notify` dedupes unchanged state. */
+  private setTodoForUser(id: string, entry: AlertEntry, todo: TodoState): void {
+    const ring = this.clearRingForUser(entry);
     if (todo) this.ringToTodo(entry, ring);
     entry.todo = todo;
     if (!todo) entry.notification = null;

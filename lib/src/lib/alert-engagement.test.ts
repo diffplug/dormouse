@@ -259,9 +259,14 @@ describe('acknowledge', () => {
     expect(manager.getState(PANE)).toMatchObject({ todo: false, notification: null });
   });
 
-  it('leaves a never-shown deferred ring to come due after a look, held if still engaged', () => {
+  /** A report behind confirmed work: a ring that has not shown. */
+  function deferredReport(): void {
     output(PANE, 3_000);
     manager.notifyFromProtocol(PANE, PERMISSION);
+  }
+
+  it('leaves a never-shown deferred ring to come due after a look, held if still engaged', () => {
+    deferredReport();
     engage(manager, PANE);
     manager.acknowledge(PANE, { input: false });
     output(PANE, 3_000);
@@ -273,8 +278,7 @@ describe('acknowledge', () => {
   });
 
   it('rings a never-shown deferred ring the user looked at and left', () => {
-    output(PANE, 3_000);
-    manager.notifyFromProtocol(PANE, PERMISSION);
+    deferredReport();
     engage(manager, PANE);
     manager.acknowledge(PANE, { input: false });
     leave(manager);
@@ -283,8 +287,7 @@ describe('acknowledge', () => {
   });
 
   it('keeps a never-shown deferred ring through every verb but input', () => {
-    output(PANE, 3_000);
-    manager.notifyFromProtocol(PANE, PERMISSION);
+    deferredReport();
     manager.dismissAlert(PANE);
     manager.toggleTodo(PANE);
     manager.clearTodo(PANE);
