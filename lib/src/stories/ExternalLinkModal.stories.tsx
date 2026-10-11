@@ -69,7 +69,7 @@ export const DeceptiveFullUrl: Story = {
 export const OtherApp: Story = {
   args: {
     uri: 'vscode://file/Users/dev/project/src/App.tsx:42:7',
-    displayText: '',
+    displayText: 'open in editor',
   },
 };
 

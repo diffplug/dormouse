@@ -61,7 +61,7 @@ it('opens an ordinary URL only after the user confirms', () => {
 it('names the scheme of a link that opens another app, starts on Cancel, and opens only on an explicit confirm', () => {
   act(() => requestExternalLinkConfirmation('vscode://file/repo/src/App.tsx:4', 'open in editor'));
   const title = document.getElementById('external-link-modal-title')!;
-  expect(title.textContent).toBe('This link opens another app: vscode:');
+  expect(title.textContent).toBe('This link opens another app: vscode: — open in editor');
   expect(document.body.textContent).toContain('registered for vscode: links');
   expect(document.activeElement?.textContent).toBe('Cancel');
   act(() => (document.activeElement as HTMLButtonElement).click());
@@ -69,6 +69,15 @@ it('names the scheme of a link that opens another app, starts on Cancel, and ope
   act(() => requestExternalLinkConfirmation('vscode://file/repo/src/App.tsx:4', 'open in editor'));
   act(() => button('Open vscode://').click());
   expect(mocks.open).toHaveBeenCalledWith('vscode://file/repo/src/App.tsx:4');
+});
+
+it('shows an other-app link\'s own text only when it is a plain label, never the URL again', () => {
+  const title = () => document.getElementById('external-link-modal-title')!.textContent;
+  act(() => requestExternalLinkConfirmation('vscode://file/repo/README.md', 'Open README'));
+  expect(title()).toBe('This link opens another app: vscode: — Open README');
+  act(() => clearExternalLinkConfirmation());
+  act(() => requestExternalLinkConfirmation('vscode://file/repo/README.md', 'vscode://file/repo/README.md'));
+  expect(title()).toBe('This link opens another app: vscode:');
 });
 
 it('keeps the plain dialog for http, https, and mailto', () => {

@@ -91,7 +91,7 @@ export function ExternalLinkModal({
           ) : blockedDecision ? (
             <BlockedTitle reason={blockedDecision.reason} />
           ) : openableDecision?.otherApp ? (
-            <OtherAppTitle scheme={openableDecision.scheme} />
+            <OtherAppTitle scheme={openableDecision.scheme} displayText={verdict === 'plain' ? request.displayText.trim() : ''} />
           ) : (
             <OpenTitle verdict={verdict} displayText={request.displayText} />
           )}
@@ -224,10 +224,11 @@ function IconTitle({ icon, children }: { icon: React.ReactNode; children: React.
 
 const TITLE_ICON = 'mt-px shrink-0 text-error';
 
-function OtherAppTitle({ scheme }: { scheme: string }) {
+function OtherAppTitle({ scheme, displayText }: { scheme: string; displayText: string }) {
   return (
     <IconTitle icon={<WarningIcon size={14} weight="fill" className={TITLE_ICON} aria-hidden />}>
       This link opens another app: <code className="font-mono font-semibold">{scheme}:</code>
+      {displayText && <> — <span className="font-semibold">{printableExact(displayText)}</span></>}
     </IconTitle>
   );
 }
