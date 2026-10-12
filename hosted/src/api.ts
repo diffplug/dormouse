@@ -105,7 +105,7 @@ export async function acceptTerms(version: string): Promise<boolean> {
   if (!response.ok) throw failed();
   return true;
 }
-/** A voice or relay call's error when the server gave none written for this page. */
+/** A call's error when the server gave none written for this page. */
 const failed = () =>
   new Error("That did not work. Reload the page and try again.");
 /** Null when the server says this account may not use managed voice. */

@@ -167,8 +167,6 @@ test('a link is live through its expiry second and dead one millisecond after', 
 
 // --- The length cap --------------------------------------------------------
 
-/** The longest origin a link can name: the cap less `/connect/#` and the fragment. */
-
 /** A real origin of about `length` characters, in DNS-legal labels; callers assert the length. */
 function originOfLength(length) {
   const labels = [];
