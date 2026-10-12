@@ -603,6 +603,29 @@ test('msysToWindowsCwd folds a Git Bash POSIX PWD to a Windows drive on win32', 
   assert.equal(msysToWindowsCwd('/c/Users/me/site', 'linux'), '/c/Users/me/site');
 });
 
+test('ensure and tool accept --flag=value before --, as stricli does', async () => {
+  const ensure = fixtureClient();
+  const ensured = await runCli(['ensure', '--cwd=/work/other', '--surface=surface:3', '--', 'pnpm', 'dev'], { client: ensure, env: { PWD: '/work/site' } });
+  assert.equal(ensured.exitCode, 0, ensured.stderr);
+  assert.equal(smudgeWindowsPaths(ensure.requests[0].request.cwd), '/work/other');
+  assert.equal(ensure.requests[0].request.surface, 'surface:3');
+
+  for (const tail of [['storybook'], ['--', 'pnpm', 'dev']]) {
+    const client = fixtureClient();
+    const result = await runCli(['tool', '--workspace=workspace:2', ...tail], { client, env: { PWD: '/work/site' } });
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.equal(client.requests[0].request.workspace, 'workspace:2');
+  }
+
+  for (const argv of [['ensure', '--cwd=', '--', 'pnpm', 'dev'], ['tool', '--cwd=', 'storybook']]) {
+    const result = await runCli(argv, { client: fixtureClient(), env: { PWD: '/work/site' } });
+    assert.equal(result.exitCode, 1, argv.join(' '));
+    assert.equal(result.stderr, 'Error: --cwd requires a value\n');
+  }
+  const boolean = await runCli(['ensure', '--json=true', '--', 'pnpm', 'dev'], { client: fixtureClient(), env: { PWD: '/work/site' } });
+  assert.equal(boolean.stderr, "Error: unknown option '--json=true'\n");
+});
+
 test('ensure json output', async () => {
   await snapshot(
     'ensure-json',

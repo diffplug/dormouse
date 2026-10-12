@@ -69,6 +69,12 @@ export function scanPreDelimiterArgs(head: readonly string[], spec: PreDelimiter
   for (let index = 0; index < head.length; index += 1) {
     const arg = head[index];
     if (spec.booleans.has(arg)) continue;
+    // stricli also takes `--flag=value`.
+    const equals = arg.indexOf('=');
+    if (arg.startsWith('--') && equals > 0 && spec.valued.has(arg.slice(0, equals))) {
+      if (equals === arg.length - 1) return { ok: false, message: `${arg.slice(0, equals)} requires a value` };
+      continue;
+    }
     if (spec.valued.has(arg)) {
       const value = head[index + 1];
       if (!value || value.startsWith('-')) return { ok: false, message: `${arg} requires a value` };
