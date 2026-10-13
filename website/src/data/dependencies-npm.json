@@ -665,7 +665,7 @@
       "author": "Marijn Haverbeke",
       "homepage": "https://code.haverbeke.berlin/codemirror/language",
       "versions": [
-        "6.12.4"
+        "6.13.1"
       ]
     },
     {
@@ -720,6 +720,15 @@
       "homepage": "https://code.haverbeke.berlin/codemirror/state",
       "versions": [
         "6.7.6"
+      ]
+    },
+    {
+      "name": "@codemirror/streamparser",
+      "license": "MIT",
+      "author": "Marijn Haverbeke",
+      "homepage": "https://code.haverbeke.berlin/codemirror/streamparser",
+      "versions": [
+        "6.0.0"
       ]
     },
     {
