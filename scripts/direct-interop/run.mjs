@@ -88,8 +88,9 @@ const blackhole = process.argv.includes('--stun-blackhole');
 /** Whether the page is the one-time page Hosted serves; see question 5. */
 const stunPage = blackhole || process.argv.includes('--stun');
 /**
- * The policy the addon's Burrow runs under, which `directPeeringFor` reads: My
- * Relay only's unrestricted Burrow by default, as Pocket meets it.
+ * The policy the addon's Burrow runs under, which `directPeeringFor` reads:
+ * "Anywhere, through your Relay"'s unrestricted Burrow by default, as Pocket
+ * meets it.
  */
 const level = allowed ? 'local' : stunPage ? 'anywhere' : 'relay';
 const networkPolicy = { level, allowed: allowed ?? [], autoUpdate: false };

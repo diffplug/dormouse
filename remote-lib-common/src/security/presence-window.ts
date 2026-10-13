@@ -6,7 +6,8 @@
  * Each entry names the identities its proof was verified for, so a redeem can
  * re-run the ACL conjunction against them and nothing else. In memory only,
  * and evaluated rather than reaped: an entry past its bounds reads as closed
- * and is dropped the next time anything asks about it.
+ * and is dropped the next time anything asks about it, and every `seed` also
+ * drops the entries past the hard cap.
  */
 
 import { PRESENCE_WINDOW_IDLE_MS, PRESENCE_WINDOW_MAX_MS } from './e2e-bounds.js';
