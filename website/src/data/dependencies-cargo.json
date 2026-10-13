@@ -77,7 +77,7 @@
       "homepage": "https://github.com/serde-rs/json",
       "declaredName": "serde_json",
       "versions": [
-        "1.0.152"
+        "1.0.154"
       ]
     },
     {
