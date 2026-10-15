@@ -2191,7 +2191,7 @@ test('a chunk emitted just before list([id]) appears in the replay exactly once'
   assert.equal(replay.data.data, 'before\r\nmid-transfer');
   // Exactly once: the chunk is in the replay, and it was emitted as `data`
   // exactly once — the host drops that copy, so the pane never renders it twice.
-  assert.equal(replay.data.data.split('mid-transfer').length - 1, 1);
+  assert.equal(events.filter((entry) => entry.event === 'data' && entry.data.data === 'mid-transfer').length, 1);
 });
 
 // A transfer's split point: everything a reader consumed before it saw the
