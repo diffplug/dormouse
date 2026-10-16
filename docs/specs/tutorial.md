@@ -136,4 +136,4 @@ Source of truth: `WallEvent` in `lib/src/components/wall/wall-types.ts`, emitted
 Two `tut-boxed` scenarios close the playground's `docs/specs/mouse-and-clipboard.md` coverage gaps, needing no section change:
 
 1. **`SCENARIO_BRACKETED_PASTE_TUI`** — closes [§8.5](mouse-and-clipboard.md#85-bracketed-paste). Emits `\x1b[?2004h` and an idle ANSI-framed view.
-2. **`SCENARIO_SMART_TOKENS`** — closes the [§3.3](mouse-and-clipboard.md#33-selection-hint-text) hint and [§5.1–§5.3](mouse-and-clipboard.md#51-detection). Prints one of each shape from `lib/src/lib/smart-token.ts`'s `PATTERNS`.
+2. **`SCENARIO_SMART_TOKENS`** — closes [§5.1–§5.3](mouse-and-clipboard.md#51-detection). Prints one of each shape from `lib/src/lib/smart-token.ts`'s `PATTERNS`.
