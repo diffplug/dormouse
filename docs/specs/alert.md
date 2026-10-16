@@ -433,7 +433,7 @@ Source of truth: `push` in `lib/src/host/remote/service.ts`; `pushAlert` in `vsc
 
 ### Settings dialog
 
-Its Notifications topic is this spec's; Network's content is `docs/specs/remote-network.md` -> "Settings → Network", and About's is `docs/specs/deploy.md` -> "Build stamp".
+The Settings dialog's Notifications topic is this spec's; Network's content is `docs/specs/remote-network.md` -> "Settings → Network", and About's is `docs/specs/deploy.md` -> "Build stamp".
 
 - **Must show only application-wide settings**, excluding Workspace overrides.
 - A baseboard alarm button toggles only its own setting, as an override for that Workspace; components without a Workspace scope edit application defaults. **Must open a separate Workspace alert dialog from either button's right-click or focused `Shift+F10`/`ContextMenu`**, only with a Workspace scope, preserving per-field inheritance and reset-all.
@@ -480,7 +480,7 @@ Where it surfaces is host-specific:
 
 **Must keep context alert controls scoped to the source**, with TODO, running-command WATCHING, and notification detail. **Must suppress helper alerting until promotion, including after exit**: no completion dispatch (await, ring, TODO, speech, push), protocol report, acknowledgement, or TODO control, and only the default state published. A helper still tracks its command and feeds its detector, so one promoted mid-command is WATCHING what it runs; promotion publishes that state and never replays a suppressed event (rationale).
 
-Clicking the pill clears TODO. **A Workspace tab's TODO pill must never clear a TODO** (it acknowledges without input: Engagement).
+Clicking a Pane header's TODO pill clears TODO. **A Workspace tab's TODO pill must never clear a TODO** (it acknowledges without input: Engagement).
 
 **Must wear the alarm treatment on every ringing terminal Pane**, labelled only once the speech sink acts. Its look and motion — one arrival burst per episode, never replayed by a remount — live at `AlertRingIndicator` and `useAlertRingBurst`; its layering: `docs/specs/layout.md` → Alarm overlay.
 

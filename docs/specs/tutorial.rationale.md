@@ -42,4 +42,4 @@
 
 **What `sendOutput` is for.** It is the playground shells' output path: bytes go through the real parser, so the alert programs' `OSC 633` and `OSC 9` reach the Activity layer as a real PTY's would.
 
-**Why the theme subscription backs the opening ask.** Picking a theme needs no command-mode vocabulary; the picker remains operable through ordinary keyboard focus. Comparing consecutive theme ids also keeps the achievement repeatable after progress is reset.
+**Why a theme change is a tutorial item.** Picking a theme needs no command-mode vocabulary; the picker remains operable through ordinary keyboard focus. Comparing consecutive theme ids also keeps the achievement repeatable after progress is reset.

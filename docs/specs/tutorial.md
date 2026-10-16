@@ -57,7 +57,7 @@ Extras: `Starred on GitHub` (persisted separately), FlappyTerm, `Reset progress`
 
 ### Runner-local intercepts
 
-**`TutRunner` intercepts `p` while Copy paste is open; it is not a real Dormouse shortcut.** Desktop only.
+**`TutRunner` intercepts `p` to toggle `PlaceToPaste` while Copy paste is open; it is not a real Dormouse shortcut.** Desktop only.
 
 ### Pocket Copy paste specifics
 

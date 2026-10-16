@@ -41,11 +41,11 @@ ul{margin:0;padding:0;list-style:none}
 `;
 
 // Plain script inside a template literal: no backslashes, backticks, or interpolation.
+// `showIgnored`: shown by default (product decision, PR #835); the button only hides ignored rows — dotfiles always list.
 const SCRIPT = `(function () {
   'use strict';
   var tree = document.getElementById('tree');
   var show = document.getElementById('show');
-  // Shown by default (product decision, PR #835); the button only hides ignored rows — dotfiles always list.
   var showIgnored = true;
   var status = document.getElementById('status');
   var root = { path: '', kind: 'dir', level: 0, parent: null, children: [], group: tree, expanded: true, loaded: false };

@@ -71,7 +71,7 @@ Source of truth: `closeWorkspaceWithSurfaces` in `lib/src/components/wall/worksp
 | `dor` command closes | Unchanged: immediate |
 
 - **Must detach a pending Surface the way minimize does** (keep the token, park its page, keep the PTY Live) without creating a Door. **A pending Workspace leaves the strip** — a successor activates, or a fresh replacement if it was the last — **while its Wall stays mounted and inactive**.
-- **Must finalize through the kill path** when the countdown completes or the user finalizes the entry early; a pending Workspace closes every member, and comes back if a helper's work refuses.
+- **Must finalize through the kill path** when the countdown completes or the user finalizes it early from `PendingKillOverlay`; a pending Workspace closes every member, and comes back if a helper's work refuses.
 - **Restoring a pending kill reattaches the same Surface or Workspace**, id and process intact, at its slot; it is not a rebuild. One that cannot come back now (a helper whose parent closed or whose replacement holds work) stays pending, its countdown untouched. Reopen takes the newest entry across pending kills and reopen records ([Reopen verb](#reopen-verb)), passing over one that cannot come back.
 - **Must silence alerts from pending Sessions and omit them from `dor` listings and Clients**; a `dor` request naming one by id, made by one, or reaching a pending Workspace's Wall fails as a pending kill.
 - **Must count pending running work in the quit and window-close gates, then finalize every pending kill as either tears down.** A Workspace leaving for another window or closing finalizes its own. Nothing pending is persisted, so none survives a restart.

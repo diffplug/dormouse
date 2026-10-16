@@ -82,7 +82,7 @@ Source of truth: `openContextPort` in `lib/src/components/Wall.tsx`; `prepareFor
 
 ## Display Modal And Render Swaps
 
-The Display modal is the GUI for render mode and screencast resolution, Resize with pane or Fixed size. **Must offer only the render modes the Surface's screen controller declares** (`renderModes`), never the host's global capabilities: both presentations of a provider its host drives (`browserProviders`), the running one's screencast even where it does not; always `iframe`; for a Tool, only its declarable renders (`docs/specs/dor-tool.md` → Declaring tools). `setRenderMode` refuses any other mode.
+The Display modal, opened by the header's Display trigger (`BrowserDisplayButton`), is the GUI for render mode and screencast resolution, Resize with pane or Fixed size. **Must offer only the render modes the Surface's screen controller declares** (`renderModes`), never the host's global capabilities: both presentations of a provider its host drives (`browserProviders`), the running one's screencast even where it does not; always `iframe`; for a Tool, only its declarable renders (`docs/specs/dor-tool.md` → Declaring tools). `setRenderMode` refuses any other mode.
 
 The host owns Resize with pane (rationale), answering each engagement — a choice of Resize with pane, named in every size sent — with its state: applying, synced, or off.
 

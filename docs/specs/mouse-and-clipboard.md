@@ -241,7 +241,7 @@ Source of truth: `terminalOwnsEvent` in `lib/src/lib/terminal-mouse-router.ts`.
 
 ## 7. Rendering Notes
 
-**Must keep selection and hint updates from rerendering pane headers or override banners** (rationale).
+**Must keep selection updates and `SelectionOverlay`'s drag hint from rerendering pane headers or override banners** (rationale).
 
 Source of truth: `TerminalPaneHeader` in `lib/src/components/wall/TerminalPaneHeader.tsx` and `MouseOverrideBanner` in `lib/src/components/wall/MouseOverrideBanner.tsx`, pinned by `lib/src/components/wall/mouse-chrome.test.tsx`.
 

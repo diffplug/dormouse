@@ -23,7 +23,7 @@ type Action = () => void | Promise<void>;
 const SPINNING = <CircleNotchIcon size={13} className="shrink-0 animate-spin" />;
 const PAUSED = <PauseIcon size={13} className="shrink-0" />;
 const SETTLED = <CheckIcon size={13} className="shrink-0" />;
-/** One row per helper state (docs/specs/terminal-context.md → Helper lifecycle);
+/** One row per helper state;
  *  a `reset` state offers Reset in place of Modify. */
 const HELPER_STATUS: Record<HelperStatus, { icon: ReactNode; label: (command: string) => string; reset?: boolean }> = {
   waiting: { icon: SPINNING, label: () => 'Waiting for shell…' },

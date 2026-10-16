@@ -71,7 +71,7 @@ Source of truth: `AlertRingIndicator` in `lib/src/components/wall/AlertRingIndic
 
 ### Pane header responsive sizing
 
-**Must measure each header's own border-box width, never the viewport, retaining its tier at zero width** (rationale). Each terminal boundary below compact is the width at which the next-lowest-priority element would start eating the group's padding (rationale).
+**Must measure each header's own border-box width, never the viewport, retaining its tier at zero width** (rationale). Each terminal tier boundary is the width at which the next-lowest-priority element would start eating the group's padding (rationale).
 
 **Must yield the pane-action group last, and zoom last within it** (to the popover where there is one), since zooming restores everything the header dropped. Narrowing, each header drops:
 
@@ -272,7 +272,7 @@ Source of truth: `requestKill` in `lib/src/components/Wall.tsx`; `wireXtermHandl
 
 ## Selection overlay
 
-One ring marks the one active pane or Door: a solid stroke in passthrough, marching ants in command mode, centered on the gutter's midline (rationale).
+One ring marks the one active pane or Door: a solid stroke in passthrough, marching ants in command mode, centered on the midline of the `PANE_GUTTER_PX` gap between panes (rationale).
 
 - **Must march for as long as command mode lasts in a focused window** (rationale), pausing only during Workspace title editing, under reduced motion, or under `cfg.marchingAnts.paused`; an unfocused window pauses it. **Never restart or retime the march for travel.**
 - Under `WorkspaceWindow` the ring renders into `document.body`, outside the Workspace's transform and stacking context. **Every modal must render into `document.body` too, at a `MODAL_LAYERS` value above the ring's**, or the ring crosses it — by value, never insertion order.

@@ -9,7 +9,7 @@
 
 **`/hosted` is canonical; `/pricing` 301-redirects to it.** The tool is free and open source, and Hosted is the optional service with a price, so pricing is a section of the Hosted page, never a page of its own.
 
-**Settings is the front door.** The spoken-alarm row's managed-voice link and the playground tutorial land on `/hosted#voice`. `#remote-control` and `#voice` keep resolving as section ids.
+**Settings is the front door.** The spoken-alarm row's managed-voice link and the playground tutorial land on `/hosted#voice`. `#pricing` (the plan cards, which each JSON-LD `Offer` url names), `#remote-control`, and `#voice` keep resolving as section ids.
 
 **Prices, inclusions, and the FAQ are prerendered text**, and the page emits `Product` / `Offer` JSON-LD carrying one `Offer` per paid plan at its current price, so an assistant fetching the page can quote it. **Offers stay `PreOrder` while checkout is unbuilt.**
 
@@ -21,7 +21,7 @@
 
 Each paid card carries a 30-day refund beneath its buy button.
 
-- **A buy button opens the unbuilt-checkout notice. Never render a buy button that silently does nothing.**
+- **A buy button opens the unbuilt-checkout notice.** **Never render a buy button that silently does nothing.**
 
 ### The founding card's live half
 
