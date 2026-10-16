@@ -54,7 +54,7 @@ The extension-root README is the packaged listing body, so the canonical guide s
 
 **Must pass** `--baseImagesUrl` on every `vsce` or `ovsx` invocation that builds a VSIX from source, rather than letting either infer a base (rationale); `checkImageBaseUrl` pins them to `SITE_IMAGE_BASE`, exempting a `--packagePath` republish.
 
-**Never** write to `public/guide/` from anything but the generator, which replaces its `images/` directory each build (rationale). Hand-authored assets stay at `public/` root.
+**Never** write to `public/guide/` from anything but the generator (rationale). Hand-authored assets stay at `public/` root.
 
 **The guide spells site links absolutely** (`https://dormouse.sh/dor`); `localizeSiteLinks` turns them back into served paths on the site ([rendering contract](#markdown-rendering-contract) op 5).
 
@@ -72,7 +72,7 @@ A major guide rewrite also reviews the listing's discovery fields in `vscode-ext
 
 **Must retain ordered-list starts and blank-separated paragraphs within their own list item.** **Must interpret backslash escapes only before ASCII punctuation**, preserving ordinary path characters.
 
-Source of truth: `parseMarkdown` and `createSlugger` in `website/scripts/docs-parser.js`.
+Source of truth: `parseMarkdown` in `website/scripts/docs-parser.js`.
 
 ## Markdown rendering contract
 
@@ -86,7 +86,7 @@ Every Markdown source keeps its content in source order; `buildDocument` applies
 
 `dor/skill.md` does not pass through `buildDocument`: it is asserted free of site links instead ([`/agent-skill` guide](#agent-skill-guide)).
 
-**Never** publish a relative repository link as-is; `resolveRepoLinks` sends it to the publishing page or the canonical file and fails the build when the target does not exist, and `assertRouteFragments` fails it when a fragment into a published page names no heading that page renders. A source keeps its repo-relative link, which spec-lint verifies down to the fragment. Known gap: `assertRouteFragments` skips query-bearing links.
+**Never** publish a relative repository link as-is; the build fails when the link's target does not exist, and `assertRouteFragments` fails it when a fragment into a published page names no heading that page renders. A source keeps its repo-relative link, which spec-lint verifies down to the fragment. Known gap: `assertRouteFragments` skips query-bearing links.
 
 **Never** use a regular expression or a line-number patch to turn a canonical source's prose into site prose. Channel-specific differences are explicit entries in one fixed delta table per document (`*_DELTA`), each naming exactly one source target and failing the build when its target matches zero blocks or more than one.
 
@@ -94,7 +94,7 @@ Every Markdown source keeps its content in source order; `buildDocument` applies
 
 **Must redirect withheld-section links to the canonical file on GitHub and fail generation on remaining dangling anchors.**
 
-Tables, media, and prose fit a phone's width without horizontal overflow, an inline code span offering a break at each of its separators (rationale). **Never** let such a hint change what the span's `textContent` yields, so a path still pastes into a shell. **Never** inject an HTML string.
+Tables, media, and prose fit a phone's width without horizontal overflow (rationale). **Never** let a line-break hint in an inline code span change what the span's `textContent` yields, so a path still pastes into a shell. **Never** inject an HTML string.
 
 Source of truth: `buildDocument` in `website/scripts/generate-docs.js`; `MarkdownDocument` in `website/src/components/MarkdownDocument.tsx`.
 
@@ -130,7 +130,7 @@ Source of truth: `DOCS_PAGES` in `website/src/lib/docs-pages.ts`; `DocsLayout` i
 
 **Must describe the account service and link its account app, privacy policy, and terms.**
 
-**Must describe the managed Relay as Pocket's Relay:** terminals stay on an awake, online computer, and self-hosting remains. `NotifySignupForm` exposes the `nedshed.dev` devlog handoff and keeps email per tab; `website/src/components/NotifySignupForm.test.tsx` pins both.
+**Must describe the managed Relay as Pocket's Relay:** terminals stay on an awake, online computer, and self-hosting remains.
 
 **Must open `/self-host` with the Relay boundary:** Dormouse needs none; a new install opens no connection on its own (`docs/specs/remote-network.md` -> "Policy"); push and a paired phone need a Relay, and a one-time connection only Hosted's rendezvous of its handshake; it links `/hosted`. `/hosted`'s managed Relay section discloses metadata, labels the review pending, and links the model. `website/src/lib/docs-rail.test.tsx` pins both.
 
@@ -162,7 +162,7 @@ The targeting and Surface-handle introduction is extracted from the matching sec
 
 **Must preserve unclassified help as ordered prose and reconstruct each shipped snapshot byte for byte from parsed source slices**; generation fails on a snapshot set that disagrees with the root inventory, and never silently discards source text.
 
-Source of truth: `buildCli` in `website/scripts/generate-docs.js`; `parseHelp` in `website/scripts/help-parser.js`; `DorDocs` in `website/src/pages/DorDocs.tsx`.
+Source of truth: `buildCli` in `website/scripts/generate-docs.js`; `DorDocs` in `website/src/pages/DorDocs.tsx`.
 
 ## `/compatible-agents` guide
 
@@ -180,17 +180,15 @@ Source of truth: `buildSkill` in `website/scripts/generate-docs.js`; `AgentSkill
 
 ## `/self-host` runbook
 
-**Never keep a second copy of `SELF_HOST.md` under `website/`**; the page publishes the canonical file (rationale). `SELF_HOST_DELTA` withholds its `#` title, its opening blockquote, and the sections addressed to the assistant or to a maintainer, each rule carrying its own `reason`.
+**Never keep a second copy of `SELF_HOST.md` under `website/`**; the page publishes the canonical file (rationale). `SELF_HOST_DELTA` withholds its `#` title, its opening blockquote, and the sections addressed to the assistant or to a maintainer.
 
 **Must** keep every withheld section present in `SELF_HOST.md`: a delta rule matching nothing fails the build, so renaming one is a decision, never a silent republication.
-
-Above the runbook the page renders the security spec's self-host rows from `docs.security.json` ([`/security` spec](#security-spec)).
 
 Source of truth: `SELF_HOST_DELTA` in `website/scripts/generate-docs.js`; `SelfHostDocs` in `website/src/pages/SelfHostDocs.tsx`.
 
 ## `/security` spec
 
-`docs/specs/security.md` stays canonical in `docs/specs/`, budgeted by spec-lint and read by the nightly audit. `SECURITY_DELTA` withholds its `#` title and front-matter blockquote and nothing else.
+`docs/specs/security.md` stays canonical in `docs/specs/`. `SECURITY_DELTA` withholds its `#` title and front-matter blockquote and nothing else.
 
 **Must** publish every section, so **the spec may carry no `## Future` heading and no `Reserved:` paragraph**; `checkSecurityFold` pins that, and staged material has to be withheld by a delta rule before it can exist there.
 
@@ -207,7 +205,7 @@ flowchart LR
 
 The spec file on GitHub is the one place every entry appears together. The three pages cross-link, and each specialized page links `/security#how-the-guarantees-are-checked`; `website/src/pages/security-pages.test.tsx` pins the entries and links.
 
-Source of truth: `SECURITY_DELTA`, `SECURITY_AUDIENCES` (spec → audience), `SECURITY_PAGE_AUDIENCES`, and `securityAudiences` in `website/scripts/generate-docs.js`; `SecurityDocs` in `website/src/pages/SecurityDocs.tsx`.
+Source of truth: `buildSecurity` and `SECURITY_AUDIENCES` (spec → audience) in `website/scripts/generate-docs.js`; `SecurityDocs` in `website/src/pages/SecurityDocs.tsx`.
 
 ## Generated documentation boundary
 
@@ -237,7 +235,7 @@ Root `README.md` is shorter than the canonical product guide and does not duplic
 - **Public links use canonical HTTPS URLs, and a local link resolves**. `SELF_HOST.md` and the security spec get only the HTTPS half; spec-lint already resolves their relative links.
 - **Every page whose `linkedFrom` names a README is linked from it**, as an exact URL. The guide owes no link to `/self-host` or `/security`: neither running a Relay nor auditing the repository is part of installing an editor extension.
 - **The homepage links every page whose `linkedFrom` names it**, root-relatively.
-- **No page is served under `/docs`, and the homepage links none there**: `checkNoDocsPrefixPages` fails on a `DOCS_PAGES` path or a homepage href starting with `/docs`, which can only be the entrypoint or a legacy 301.
+- **No page is served under `/docs`, and the homepage links none there** (`checkNoDocsPrefixPages`).
 
 When a public feature section changes, review compares it with its owning implementation spec; prose is not checked with phrase blacklists.
 
