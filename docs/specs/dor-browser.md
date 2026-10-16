@@ -11,9 +11,9 @@ Source of truth: `lib/src/components/wall/BrowserPanel.tsx`, `lib/src/components
 
 ## Providers
 
-An automated renderer belongs to one provider, the CLI that drives its browser. **Must read every per-provider fact from the one registry** — render modes, CLI, binary for `dor`, the hosts and the webview; label and viewport hint for the GUI — never a ternary on the provider or a mode prefix. **Must spell provider names in full and lowercase in UI, commands and renderer identifiers**, including public `render_mode` and `dormouse.yml` `render` values; abbreviated modes are not aliases. `parseRenderMode` reads anything but a provider's mode as `iframe`.
+An automated renderer belongs to one provider, the CLI that drives its browser. **Must read every per-provider fact from the one registry** — render modes, CLI, binary for `dor`, the hosts and the webview; label and viewport hint for the GUI — never a ternary on the provider or a mode prefix. **Must spell provider names in full and lowercase in commands and renderer identifiers**, including public `render_mode` and `dormouse.yml` `render` values; abbreviated modes are not aliases. `parseRenderMode` reads anything but a provider's mode as `iframe`.
 
-**Must name automated actions by provider.** The remembered provider preference defaults to agent-browser, else an available provider.
+The remembered provider preference defaults to agent-browser, else an available provider.
 
 Source of truth: `BROWSER_PROVIDERS` and `parseRenderMode` in `dor-lib-common/src/browser-providers.ts`; `BROWSER_PROVIDER_GUI` in `lib/src/components/wall/browser-automation.ts`; `BrowserProviderSwitch` in `lib/src/components/wall/BrowserProviderSwitch.tsx`.
 
@@ -49,19 +49,17 @@ A Surface's pane is in sight when its window (VS Code: webview) is shown, its Wo
 
 - An unseen screencast parks ([Browser Connection](#browser-connection)).
 - An iframe proxy grant follows its view's lease, not sight.
-- **Never evict or reload a minimized iframe page to bound resources**; past `RETAINED_PAGES_WARN_ABOVE` of them the Baseboard shows a quiet count, never a modal (`docs/specs/layout.md` → Baseboard places it).
+- **Never evict or reload a minimized iframe page to bound resources**; past `RETAINED_PAGES_WARN_ABOVE` of them the Baseboard shows a count (`docs/specs/layout.md` → Baseboard places it).
 
 Source of truth: `lib/src/lib/surface-sight.ts`, `useSurfaceVisibility` in `lib/src/components/wall/use-surface-visibility.ts`, `lib/src/components/RetainedPagesIndicator.tsx`.
 
 ## Browser Chrome
 
-**Must register a screen controller from both renderers, unconditionally**: chrome is keyed by it, and render swaps are separately host-gated. A Tool's header keeps only its Display trigger (`docs/specs/layout.md` → Pane header).
-
-The Display trigger shows a capability-first identity — a robot for an automated renderer, then a glyph for its presentation (pane-sized, fixed, popout, or the frame alone for `iframe`) — labelled `<provider> <view>`; browser Doors reuse it (rationale).
+**Must register a screen controller from both renderers, unconditionally**: chrome is keyed by it, and render swaps are separately host-gated.
 
 **Must follow CLI scheme selection in the URL editor**, plus bare loopback → `http://` and bare remote → `https://` (`normalizeNavUrl`; rationale), and refuse any other scheme, since no renderer opens one.
 
-Source of truth: `lib/src/components/wall/SurfacePaneHeader.tsx`, `lib/src/components/wall/BrowserDisplayIcon.tsx`, `lib/src/components/wall/browser-url.ts`.
+Source of truth: `lib/src/components/wall/SurfacePaneHeader.tsx`, `lib/src/components/wall/browser-url.ts`.
 
 ## Dev-Server Chip
 
@@ -74,7 +72,7 @@ Source of truth: `lib/src/components/wall/use-dev-server-ports.ts`, `servesLoopb
 
 ## Pane Context Menu Connect
 
-**Must scan once per context opening**, with the per-port URL selection of `docs/specs/dor-cli.md` → Browser Open Target Resolution, and offer system browser, iframe, and each provider's screencast and popout for the selected port; a failed scan is distinct from no listeners. **Must always preserve the source terminal when opening from context**, even an untouched one.
+**Must scan once per context opening**, with the per-port URL selection of `docs/specs/dor-cli.md` → Browser Open Target Resolution; a failed scan is distinct from no listeners. **Must always preserve the source terminal when opening from context**, even an untouched one.
 
 **Must reuse targets per source, port, and provider**: a provider's screencast and popout share a browser session, and a reuse is one `setRenderMode(mode, { url })` intent to the Surface's controller, so a mode switch relaunches at the port's page rather than racing a navigation into it (rationale). Minimized targets are reattached, closed ones recreated.
 
@@ -84,7 +82,7 @@ Source of truth: `openContextPort` in `lib/src/components/Wall.tsx`; `prepareFor
 
 ## Display Modal And Render Swaps
 
-The Display modal is the GUI for render mode and screencast resolution, Resize with pane or Fixed size; device emulation is CLI-only. **Must offer only the render modes the Surface's screen controller declares** (`renderModes`), never the host's global capabilities: both presentations of a provider its host drives (`browserProviders`), the running one's screencast even where it does not; always `iframe`; for a Tool, only its declarable renders (`docs/specs/dor-tool.md` → Declaring tools). `setRenderMode` refuses any other mode.
+The Display modal is the GUI for render mode and screencast resolution, Resize with pane or Fixed size. **Must offer only the render modes the Surface's screen controller declares** (`renderModes`), never the host's global capabilities: both presentations of a provider its host drives (`browserProviders`), the running one's screencast even where it does not; always `iframe`; for a Tool, only its declarable renders (`docs/specs/dor-tool.md` → Declaring tools). `setRenderMode` refuses any other mode.
 
 The host owns Resize with pane (rationale), answering each engagement — a choice of Resize with pane, named in every size sent — with its state: applying, synced, or off.
 
@@ -188,7 +186,7 @@ Source of truth: `createViewerServer` and `BrowserView` in `lib/src/host/browser
 
 ### Pop-Out
 
-A popout relaunches the same session headed, because Chrome fixes headed/headless at launch; the pane becomes a stub with Pop back in. Only the last http(s) active URL is carried, plus the window's resolution on a pop-in: other tabs, DOM state, scroll, form inputs, session storage, and cookies/logins do not survive.
+A popout relaunches the same session headed, because Chrome fixes headed/headless at launch; the pane becomes a stub. Only the last http(s) active URL is carried, plus the window's resolution on a pop-in: other tabs, DOM state, scroll, form inputs, session storage, and cookies/logins do not survive.
 
 A pop-out or pop-in is a `launch` of the bound session ([Browser Host](#browser-host)), resolving once the relaunched browser is up, never waiting for the page (rationale); agent-browser's first stops the live daemon (rationale). **Never query the daemon during the close/reopen gap** (rationale): Dormouse supplies the active-tab URL and the host trusts it. **Never run a CLI verb for a browser whose window closed but the pop-in's own `close`** (rationale).
 
@@ -250,12 +248,12 @@ Source of truth: `createPlaywrightProvider` in `lib/src/host/playwright-host.ts`
 
 The proxy instruments any `http://` upstream, loopback and remote alike: headers are rewritten per the table below and the shim injected into HTML; HTTP and WebSocket traffic passes through. A site's "do not embed" is overridden, not obeyed (rationale); the sandbox neutralizes JS framebusting. **Must refuse link-local / cloud-metadata address literals (`scheme`) after canonicalizing equivalent spellings** — decimal/octal/hex, short forms, IPv4-mapped IPv6; this checks the hostname literal, not DNS answers, and named targets remain the user's command authority.
 
-**Must refuse `https://` at every entry to the iframe renderer on a host with the proxy**, in the one `IFRAME_HTTP_ONLY` wording (a host without it frames https raw):
+**Must refuse `https://` at every entry to the iframe renderer on a host with the proxy** (a host without it frames https raw):
 
 | Entry | Outcome |
 | --- | --- |
 | `surface.iframe` (`dor iframe`) | refused before any pane opens, naming `dor agent-browser open <url>` |
-| Display modal | iframe option disabled, showing the wording |
+| Display modal | iframe option disabled |
 | Render swap to `iframe`, tool or not | refused, judged on the page on screen (chrome URL, then `params.url`) |
 | New-tab request from a framed page | `agent-browser-screencast` where supported, closed on a failed launch; otherwise the iframe refusal |
 | A pane already holding one | `scheme` panel error |
@@ -282,7 +280,7 @@ Header rewriting beyond `Origin`, `Cookie`, `Set-Cookie`, and the framing header
 
 Current limits: absolute-origin subresources (`http://localhost:5173/...`, `ws://localhost:5173/...`) bypass the proxy uninstrumented, acceptable for loopback; and the shim reclaims only Dormouse control messages, leaving ordinary keyboard and pointer interaction inside the frame.
 
-Source of truth: `lib/src/components/wall/IframePanel.tsx`, `lib/src/host/iframe-proxy.ts`, `lib/src/host/iframe-proxy-rewrite.ts` (`instrumentHtml`, `isBlockedAddress`), `IFRAME_HTTP_ONLY` in `lib/src/lib/platform/iframe-proxy-types.ts`, `iframeRefusal` in `lib/src/components/wall/browser-url.ts`.
+Source of truth: `lib/src/components/wall/IframePanel.tsx`, `lib/src/host/iframe-proxy.ts`, `lib/src/host/iframe-proxy-rewrite.ts` (`instrumentHtml`, `isBlockedAddress`), `iframeRefusal` in `lib/src/components/wall/browser-url.ts`.
 
 ### Iframe Proxy Leases
 

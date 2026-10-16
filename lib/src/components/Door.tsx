@@ -19,8 +19,8 @@ import {
 export interface DoorProps {
   doorId?: string;
   title: string;
-  /** A browser Surface's display identity (`docs/specs/dor-browser.md` -> Browser
-   *  Chrome). Door draws the glyph pair and names it, so the visible and
+  /** A browser Surface's display identity (`DESIGN.md` -> Doors). Door draws
+   *  the glyph pair and names it, so the visible and
    *  accessible meanings cannot drift apart. */
   browserDisplay?: BrowserDisplayMode;
   /** Set only for a Tool whose last report says it has unsaved changes. */
