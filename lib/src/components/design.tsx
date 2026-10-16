@@ -55,8 +55,9 @@ export const COPY_FLASH_PATH_CLASS = 'fill-header-active-bg/25';
 /** How a Copy button says what its copy did. */
 export const COPY_OUTCOME_LABEL: Record<CopyOutcome, string> = { copied: 'Copied', failed: 'Couldn’t copy' };
 
-/** A preview slot's label in its Pane header and Door, italic as an editor's
- *  preview tab is (`docs/specs/layout.md` → "Pane header"). */
+/** A preview slot's label in its Pane header and Door: italic alone, as an
+ *  editor's preview tab is. A Preview pill beside it repeated the mark at a
+ *  pill's width in every header (product decision, 2026-09-28). */
 export const PREVIEW_LABEL_CLASS = 'italic';
 
 /** The `max-w-` / `h-` / `min-w-` bounds of `DOOR_TAB_CLASS`, for code that has

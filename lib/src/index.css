@@ -43,7 +43,7 @@ body {
 }
 
 /* While a terminal context is open every other pane recedes under a scrim of the
- * Wall's own ground (docs/specs/layout.md → "Header context menu"). A scrim rather
+ * Wall's own ground (DESIGN.md → "Terminal Context Teeth"). A scrim rather
  * than the leaf's opacity, which the animator writes; it takes no input, so a press
  * still reaches the pane and dismisses the context. */
 .lath-host .lath-leaf::after {
