@@ -97,8 +97,9 @@ const idPool = createIdPool({
 
 /** Give this Window a host that mints ids, starting from `first` when the
  *  caller already asked for a {@link WORKSPACE_ID_POOL_SIZE} block. Resolves
- *  once the first block is in hand, so a create that follows never falls back
- *  to an opaque id. */
+ *  once the first block is in hand, so a create that follows falls back to an
+ *  opaque id only when the host hands out none (its counter file can't be
+ *  read or written). */
 export function installWorkspaceIdPool(
   reserve: (count: number) => Promise<WorkspaceId[]>,
   first?: Promise<WorkspaceId[]>,

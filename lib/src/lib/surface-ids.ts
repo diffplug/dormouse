@@ -33,8 +33,9 @@ const pool = createIdPool({
 /** Mint from `reserve`, which hands out ids numbered above `floor` — the highest
  *  `surface:<n>` this page restored — starting from `first` when the caller
  *  already asked for a {@link SURFACE_ID_POOL_SIZE} block. Resolves once the
- *  first block is in hand, so a Surface created after boot never carries an
- *  opaque id. */
+ *  first block is in hand, so a Surface created after boot carries an opaque
+ *  id only when the host hands out none (its counter file can't be locked,
+ *  read, or written). */
 export function installSurfaceIdPool(
   reserve: (count: number, floor: number) => Promise<string[]>,
   floor: number,
