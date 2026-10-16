@@ -276,7 +276,7 @@ async function shutdown() {
     ]);
   } catch {}
   dorControl?.close();
-  host.dispose();
+  host.dispose(); // settles every outstanding Burrow ask, before the PTYs go
   mgr.killAll();
   process.exit(0);
 }
