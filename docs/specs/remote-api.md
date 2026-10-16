@@ -37,7 +37,7 @@ A Surface is named on the wire by `surfaceId`. Remote-only vocabulary:
 
 **A `RemoteApiSession` exists only for an authorized session**: created at promotion ([remote-security-model.md](./remote-security-model.md) → Connection), disposed when the Client disconnects, when the Burrow reaps the session, and by any promotion that replaces it, so **a re-authorizing Client can never inherit the previous session's attachment**.
 
-**The Burrow says goodbye before an ending it chose**: `SessionEndV1` (`{ v: 1, t: 'session-end' }`, exact keys), one padded control message on whichever path carries the session — Take back, an idle reap, a one-time End, a replacement from the same Client static on another relay socket, a paired direct-only session's ending, a one-time path refusal. **A path's ending adds `reason: 'network-not-allowed'`, and may add one IP literal `address` (≤ 45 characters) with its `addressSource`** (`docs/specs/remote-network.md` -> "Local networks"). **Never on a poisoned session, never instead of the dispose.** **The session is over at the goodbye**: nothing after it is read, and the remote-api handler goes with it. **A switched channel closes only once the goodbye has left it, or after `SESSION_END_FLUSH_MS`**, sending nothing more meanwhile (rationale). A Client reports the goodbye as burrow loss (`endedByBurrow`).
+**The Burrow says goodbye before an ending it chose**: `SessionEndV1` (`{ v: 1, t: 'session-end' }`, exact keys), one padded control message on whichever path carries the session — Take back, an idle reap, a one-time End, a replacement from the same Client static on another relay socket, a paired direct-only session's ending, a one-time path refusal. **A path's ending adds `reason: 'network-not-allowed'`, and may add one IP literal `address` (≤ 45 characters) with its `addressSource`** (`docs/specs/remote-network.md` -> "Local networks"). **Never on a poisoned session, never instead of the dispose.** **The session is over at the goodbye**: nothing after it is read. **A switched channel closes only once the goodbye has left it, or after `SESSION_END_FLUSH_MS`**, sending nothing more meanwhile (rationale). A Client reports the goodbye as burrow loss (`endedByBurrow`).
 
 Source of truth: `BurrowRuntime.#promoteConnection` in `lib/src/remote/burrow/burrow-runtime.ts`, `EstablishedE2eSession.end` in `lib/src/remote/burrow/established-session.ts`, `SessionEndV1` in `remote-lib-common/src/security/e2e-ceremony.ts`, `ClientSessionCore` in `lib/src/remote/client/session-core.ts`.
 
@@ -52,8 +52,6 @@ After authorization the same Noise session may move off the Relay onto a WebRTC 
 - **Each side sends its whole description once, never trickled**, when its gathering settles (rationale).
 - **The answerer's setup budget (`DIRECT_ANSWER_TIMEOUT_MS`) is shorter than the offerer's (`DIRECT_SETUP_TIMEOUT_MS`)**, so the answerer gives up first.
 - **An SDP over `MAX_DIRECT_SDP_LENGTH` is never sent**: the Client skips the offer, the Burrow declines. The bound derives from `CONTROL_PAYLOAD_SIZE`, so a maximal signal fits one control body.
-
-**The two shipped stacks are proven against each other by hand**, by `scripts/direct-interop/run.mjs` (rationale).
 
 **Every byte on the channel is a Noise transport message of the promoted session**: one message per channel frame, raw bytes, the same two `CipherState`s and counters. **Every inbound frame is bounded at `NOISE_MAX_MESSAGE_LENGTH` before decryption**, and a frame over it — or a non-binary message — disposes the session. (rationale)
 
@@ -119,11 +117,11 @@ Reserved: `workspace.ref` and `name` are `WindowSnapshot.workspaces[]` keys ([Fu
 
 Reserved: **`paneRef` is set to the same value as `surfaceId`** and no Client reads it — it becomes the Pane handle when `window.watch` lands ([Future](#future), The Window), so a Burrow keeps setting it. **`focused` and `exitCode` likewise have no Client reader yet.**
 
-**Snapshot-only, never deltas**: on any change the Burrow coalesces and resends the whole listing, one snapshot per collect (rationale). **A collect emits only while it is still the newest and its subscription stands**, so a stale answer — an empty timed-out one included — never blanks the picker (rationale). **A collection that rejects emits nothing**, leaving the last good snapshot standing; the next invalidation or `directory.watch` retries it.
+**Snapshot-only, never deltas**: on any change the Burrow coalesces and resends the whole listing, one snapshot per collect (rationale). **A snapshot never lands after a fresher one, and a collection that fails sends nothing**, so a stale answer — an empty timed-out one included — never blanks the picker.
 
 **Duplicate `surfaceId`s collapse to the first answerer** — the same owner an attach's read-only resolve probe selects, so the row shown is the surface attached. (rationale)
 
-Invalidation reaches the session through `watchDirectory`, Workspace and membership changes included. **A late answer — one for an ask that already settled — invalidates the directory rather than being dropped** (rationale), at each burrow's ask bridge (`docs/specs/standalone.md` -> "Rust ↔ sidecar bridge", `docs/specs/vscode.md` -> "Peer surfaces").
+Workspace and membership changes invalidate the directory. **A late answer — one for an ask that already settled — invalidates the directory rather than being dropped** (rationale), at each burrow's ask bridge (`docs/specs/standalone.md` -> "Rust ↔ sidecar bridge", `docs/specs/vscode.md` -> "Peer surfaces").
 
 **Never list or attach standalone browser or iframe Surfaces**: neither enters the xterm registry. ([Future](#future) stages browser remoting; iframes stay unsupported even there.)
 
@@ -139,7 +137,7 @@ Source of truth: `RemoteApiSession` in `lib/src/remote/burrow/remote-api.ts`, `l
 
 Replicated, not screencast: the client renders its own xterm from the same data the burrow UI consumes. **That is the *processed* stream** — Dormouse-owned sequences parsed, stripped, and answered at the Burrow; renderer-owned ones remain, and every renderer parses them for itself ([terminal-escapes.md](./terminal-escapes.md)).
 
-**The Burrow discards terminal reports arriving from a remote session** — the owner's xterm is the sole reply authority for renderer-owned queries (device attributes, DSR/CPR, window ops, XTSMGRAPHICS, cell size, kitty graphics responses). **A mirror renders and may take size authority, but never answers.** (rationale) The Client drops the same chunks rather than spending the relay on them; only a chunk wholly made of report shapes matches, so keystrokes and pastes never do (`inputIsReplayTerminalReport` in `lib/src/lib/terminal-report-filter.ts`).
+**The Burrow discards terminal reports arriving from a remote session** — the owner's xterm is the sole reply authority for renderer-owned queries (device attributes, DSR/CPR, window ops, XTSMGRAPHICS, cell size, kitty graphics responses). **A mirror renders and may take size authority, but never answers.** (rationale) Only a chunk wholly made of report shapes is discarded, so keystrokes and pastes never are (`inputIsReplayTerminalReport` in `lib/src/lib/terminal-report-filter.ts`).
 
 **The unit of processed output is a projection pair, never a bare string.** `terminal.data` carries `bytes` — the renderer projection — and `text`, the same chunk with string-control payloads removed; **`text` omitted means identical to `bytes`, present is authoritative, empty included** (rationale). Additive on protocol-v1. The same pair crosses every Burrow seam as `ProcessedPtyChunk` and arrives as `PtyDataDetail`, so a Client's text consumers read what the Burrow's own do.
 
@@ -153,11 +151,9 @@ Source of truth: `TerminalDataEvent` in `remote-lib-common/src/remote/wire.ts`, 
 
 1. Client attaches with `{ cols, rows }`.
 2. Burrow resizes through the owning xterm's resize path (last-attach-wins); the resulting `SIGWINCH` repaint is what fills the client's screen. (rationale)
-3. **If the requested size equals the current size**, the Burrow requests an owner-managed **PTY-only** repaint: the owner bounces the PTY's rows and restores them, the xterm staying at the requested size.
+3. **If the requested size equals the current size**, the Burrow requests an owner-managed **PTY-only** repaint, the xterm staying at the requested size.
 
-**Must cancel restoration on every later PTY resize or repaint, exit, kill, or replacement.** Local and other-Viewer size writers share that owner. Detach/disposal leave restoration running. (rationale)
-
-Source of truth: `resize` in `standalone/sidecar/pty-core.js`, shared by both hosts and pinned by `standalone/sidecar/pty-core.test.js`.
+Source of truth: `resize` in `standalone/sidecar/pty-core.js`, shared by both hosts.
 
 **Normal-screen history does not regenerate on resize** and is absent from the shipped protocol (see [Future](#future): in-flight replay, then semantic scrollback).
 
@@ -179,7 +175,7 @@ Source of truth: `RemoteApiSession` in `lib/src/remote/burrow/remote-api.ts`, pi
 
 #### Size authority: last-attach-wins
 
-A terminal has one size, and **the most recent remote size writer holds it**: an attach with dimensions and `terminal.resize` both resize through the owning xterm under a `SurfaceHold` — an opaque per-session holder id, its label, and a per-attachment lease — which the owning webview records, with the size, before the size moves. **A pane keeps one hold per holder**, the newest writer's last; another viewer's release leaves the rest. **A held pane stands at its newest hold's size**: when that hold goes first, the pane takes the size the holder now newest last set (rationale).
+A terminal has one size, and **the most recent remote size writer holds it**: an attach with dimensions and `terminal.resize` both resize through the owning xterm under a `SurfaceHold` — an opaque per-session holder id, its label, and a per-attachment lease — which the owning webview records with the size. **A pane keeps one hold per holder**, the newest writer's last; another viewer's release leaves the rest. **A held pane stands at its newest hold's size**: when that hold goes first, the pane takes the size the holder now newest last set (rationale).
 
 - **Never re-fit a held pane locally** — box resize, layout settle, remount, focus, or keystroke (rationale).
 - **Must show the strip on a held pane, and only there** ([layout.md](./layout.md) → "Pane body"): the newest holder's label — the ACL record's, bounded again by `boundedPairingLabel`, or the one-time device label — as text.
@@ -189,13 +185,13 @@ A terminal has one size, and **the most recent remote size writer holds it**: an
 - **Must drop every hold another service instance took** once a `status` event names another `serviceId` — a VS Code broker window closed, a sidecar restarted — since no release will come. Each `BurrowService` mints one, names it in every `status` event (once at start too), and stamps it on its sessions' holds (rationale).
 - **Holds live in webview memory**: a reload or a Workspace transfer drops them, and the pane fits its box under a phone still attached.
 
-Source of truth: `lib/src/remote/burrow/peer-surfaces.ts` (the owner's half), `lib/src/lib/size-hold-store.ts`, `takeBackSize` in `lib/src/remote/burrow/take-back.ts`, `BurrowService` in `lib/src/host/remote/service.ts` (the `serviceId`).
+Source of truth: `lib/src/remote/burrow/peer-surfaces.ts` (the owner's half), `takeBackSize` in `lib/src/remote/burrow/take-back.ts`, `BurrowService` in `lib/src/host/remote/service.ts` (the `serviceId`).
 
 ## Input authority and multiple viewers
 
 **Input authority is flat**: selfhost is single-user, so every authorized session, a one-time one included, is the owner and gets full input (`grants: { input: true, layout: false }`), and no session gets layout operations.
 
-Concurrency then needs no arbitration: attach state is per-session and streams fan out per attachment, one PTY subscription and one sink each (rationale). The window lease ([Future](#future)) is the only exclusive resource.
+Concurrency then needs no arbitration: attach state is per-session and streams fan out per attachment (rationale). The window lease ([Future](#future)) is the only exclusive resource.
 
 Graded grants, layout mutations, and connected-viewer display with per-viewer disconnect are staged ([Future](#future) items 5–6).
 

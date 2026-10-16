@@ -1290,8 +1290,10 @@ module.exports.create = function create(send, ptyModule, { platform = process.pl
   const REPLAY_CHARS = 200000;
   const ptyShells = new Map(); // id -> resolved shell executable
   // Repaint restoration belongs to the PTY owner, where every local and remote
-  // resize passes. A Viewer-local timer cannot see another display taking size
-  // authority (docs/specs/remote-api.md -> Attach is the resize).
+  // resize passes: a later resize or repaint, exit, kill, or replacement
+  // cancels it, and a Viewer's detach does not, or the PTY is left a row off
+  // its xterm. A Viewer-local timer cannot see another display taking size
+  // authority.
   const repaintTimers = new Map();
   const FORCE_REPAINT_BOUNCE_MS = 60;
 
