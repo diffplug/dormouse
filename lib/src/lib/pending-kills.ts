@@ -9,7 +9,7 @@ import { getWorkspaceSurfacesSnapshot } from './workspace-surfaces';
  * lifecycle, a helper — supplies how to restore and finalize it.
  */
 
-/** How long a pending kill lives before it finalizes. */
+/** How long a pending kill lives before it finalizes: long enough to notice a wrong kill, short enough that a pending process does not linger. */
 export const PENDING_KILL_MS = 10_000;
 
 export type PendingKillKind = 'surface' | 'workspace' | 'helper';
