@@ -10,7 +10,7 @@ Dormouse can owe the user attention in three ways. Each is a source of the Sessi
 
 | Source | Rings when | Detail |
 |---|---|---|
-| `watching` (WATCHING Track) | a watched command's output went busy, then quiet | `WATCHING`: `<watch key> went quiet` |
+| `watching` (WATCHING Track) | a watched command's output went busy, then quiet | `WATCHING`, titled with the watch key |
 | `report` (Terminal reports) | the PTY emitted `BEL`, `OSC 9`, `OSC 99`, or `OSC 777`, or ended an `OSC 9;4` cycle | the sanitized report |
 | `exit` (Command-exit Track) | a seen command exited | `COMMAND_EXIT` |
 
@@ -384,7 +384,7 @@ stateDiagram-v2
 | Contract | Speech | Push |
 |---|---|---|
 | Performed by | The realm showing the Session, sent `alert:speak`; with none it is not spoken, and a missing backend is a silent no-op. | The host's own Burrow (Push notifications), only while enrolled, whether or not a realm still shows the Session. |
-| Payload | Pane label via `toSpokenText`; fallback `terminal`. | The label the realm last published, via `toPushText`, plus a fixed body; fallback `terminal`. |
+| Payload | Pane label via `toSpokenText`. | The label the realm last published, via `toPushText`, plus a fixed body. |
 | Delivery identity | The episode the host named, rechecked at engine admission, plus native attempt identity; renderer-local `speaking` / `spoken`. | HTTP push tagged by Session id, so a newer ring replaces the prior notification. |
 | After delivery | Clearing the ring cuts off speech. | Never recalled — another push would only replace one stale notice with another. |
 | Failure | A refused or unavailable engine produces no marker. | Warn on non-2xx, partial, or zero delivery; never retry stale alarms. |
@@ -433,13 +433,13 @@ Source of truth: `push` in `lib/src/host/remote/service.ts`; `pushAlert` in `vsc
 
 ### Settings dialog
 
-Opened by the baseboard's Settings button. Its Notifications topic is this spec's; Network's content is `docs/specs/remote-network.md` -> "Settings → Network", and About's is `docs/specs/deploy.md` -> "Build stamp".
+Its Notifications topic is this spec's; Network's content is `docs/specs/remote-network.md` -> "Settings → Network", and About's is `docs/specs/deploy.md` -> "Build stamp".
 
 - **Must show only application-wide settings**, excluding Workspace overrides.
 - A baseboard alarm button toggles only its own setting, as an override for that Workspace; components without a Workspace scope edit application defaults. **Must open a separate Workspace alert dialog from either button's right-click or focused `Shift+F10`/`ContextMenu`**, only with a Workspace scope, preserving per-field inheritance and reset-all.
 - The watched-command list removes rules and cannot add one — creating a rule stays the terminal context of a Pane running the command. It is the only place a rule set on a since-closed Pane can be removed.
 - **The push group's device line must name every device a push would reach**, and otherwise say why there is none.
-- **The Managed voice group must never show the token**, and states what is sent to Hosted, and how long ElevenLabs keeps it, before one is saved. It is hidden without `managedVoice`, which a self-host build's adapter omits, and hidden unless the port offers setup (`offerSetup`, a dev build's adapter) or a token is already configured, managed voice being an admin-only test slice; wherever it shows, the speech row names managed voice instead of linking the `/hosted` preview ([website-docs.md](./website-docs.md) -> `/hosted` preview).
+- **The Managed voice group must never show the token**, and states what is sent to Hosted, and how long ElevenLabs keeps it, before one is saved. It is hidden without `managedVoice`, which a self-host build's adapter omits, and hidden unless the port offers setup (`offerSetup`, a dev build's adapter) or a token is already configured, managed voice being an admin-only test slice; wherever it shows, the speech row names managed voice instead of linking the `/hosted` preview ([website-docs.md](./website-docs.md) -> `/hosted`).
 - Each sink carries a test control, usable while the sink is off: the test sound goes through the shared speech queue and selected voice, reporting admission or an unavailable backend, never Session delivery state; the test push takes the real Burrow→ACL→Relay path and distinguishes no targets, zero, partial, and full delivery, hidden without a Burrow service.
 
 Source of truth: `SettingsDialog` in `lib/src/components/SettingsDialog.tsx`; `WorkspaceAlarmSettingsDialog` in `lib/src/components/WorkspaceAlarmSettings.tsx`; `Baseboard` in `lib/src/components/Baseboard.tsx`.
@@ -468,22 +468,19 @@ Source of truth: `computeWorkspaceUnion` in `lib/src/lib/workspace-union.ts`; `s
 Where it surfaces is host-specific:
 
 - VS Code reflects the terminal portion onto native chrome — `docs/specs/vscode.md`, which also owns why browser-surface TODO stays webview-local.
-- Standalone shows terminal rings/TODOs on panes and doors, and a browser Surface's `todo` on its own door. **Every Workspace tab, the visible one included, must carry its union's TODO pill** (rationale). **Only a hidden Workspace's tab may wear the alarm inset while ringing**, the visible one's panes already ringing. Whenever a tab shows either, `count` joins its accessible name (`WorkspaceStrip` in `lib/src/components/WorkspaceStrip.tsx`).
+- Standalone: **Only a hidden Workspace's tab may wear the alarm inset while ringing**, the visible one's panes already ringing. Whenever a tab shows its TODO pill or alarm inset, `count` joins its accessible name (`WorkspaceStrip` in `lib/src/components/WorkspaceStrip.tsx`).
 
 ## UI Contract
 
 ### Pane Header
 
-A terminal's or Tool's header, on either face, shows a fixed-text `TODO` pill when `todo === true`, a hover/focus notification preview when TODO has `notification`, and the terminal context opened by right-click or by `a`. **Never tint a ringing Session's header**: the Pane overlay already outlines it.
-
 - **`a` on the selected Pane in command mode must dismiss a ringing Session and open the terminal context, whatever the status; it never edits a WATCHING rule.**
-- **Must offer user additions to WATCHING only in the terminal context** ("Watch all `<key>` commands"), whenever a foreground command has a watch key — naming the bare runner rule instead when one already covers the running script — and removals there or in Settings. Removing a rule drops it for every Session running that command.
-- Right-click always opens the context. Pressing `t` toggles TODO.
-- The mobile composition dismisses by acknowledgement alone — a tap, leaving a TODO, or a keystroke, clearing it — and wears its ring as the alarm inset, never an icon (`docs/specs/mobile-terminal-ui.md`). In Pocket only the keystroke reaches the host, as a Client's write (Engagement); a Client cannot dismiss yet (`docs/specs/remote-api.md` → Future).
+- **Must offer user additions to WATCHING only in the terminal context**, whenever a foreground command has a watch key — naming the bare runner rule instead when one already covers the running script — and removals there or in Settings. Removing a rule drops it for every Session running that command.
+- The mobile composition dismisses by acknowledgement alone — a tap, leaving a TODO, or a keystroke, clearing it (`docs/specs/mobile-terminal-ui.md`). In Pocket only the keystroke reaches the host, as a Client's write (Engagement); a Client cannot dismiss yet (`docs/specs/remote-api.md` → Future).
 
 **Must keep context alert controls scoped to the source**, with TODO, running-command WATCHING, and notification detail. **Must suppress helper alerting until promotion, including after exit**: no completion dispatch (await, ring, TODO, speech, push), protocol report, acknowledgement, or TODO control, and only the default state published. A helper still tracks its command and feeds its detector, so one promoted mid-command is WATCHING what it runs; promotion publishes that state and never replays a suppressed event (rationale).
 
-**Never put notification text inside the TODO pill**, which always reads `TODO`; it belongs in preview and detail surfaces. Clicking the pill clears TODO. **A Workspace tab's TODO pill must never clear a TODO** (it acknowledges without input: Engagement); the Surface it enters plays the landing spotlight on its header's pill, a Door's once reattached.
+Clicking the pill clears TODO. **A Workspace tab's TODO pill must never clear a TODO** (it acknowledges without input: Engagement).
 
 **Must wear the alarm treatment on every ringing terminal Pane**, labelled only once the speech sink acts. Its look and motion — one arrival burst per episode, never replayed by a remount — live at `AlertRingIndicator` and `useAlertRingBurst`; its layering: `docs/specs/layout.md` → Alarm overlay.
 
@@ -491,7 +488,7 @@ Source of truth: `TerminalContext` in `lib/src/components/wall/TerminalContext.t
 
 ### Door
 
-A Door is display-only for alert state, with no Door-specific alert menu. It shows the TODO pill while `todo`, the alarm inset while ringing, and the speech state while one is set — `SPEAKING` displacing the TODO pill for its utterance, `SPOKEN` sitting beside it until the ring clears. Its look: `Door` in `lib/src/components/Door.tsx`.
+A Door is display-only for alert state. It shows the TODO pill while `todo`, the alarm inset while ringing, and the speech state while one is set — `SPEAKING` displacing the TODO pill for its utterance, `SPOKEN` sitting beside it until the ring clears. Its look: `Door` in `lib/src/components/Door.tsx`.
 
 ## Text And Security
 
