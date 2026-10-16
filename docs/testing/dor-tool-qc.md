@@ -1,6 +1,6 @@
 # Dor Tool innerdogfood QC recipe
 
-Use this fixture with the current contracts in `docs/specs/dor-tool.md` and `docs/specs/layout.md`. Historical September 2026 results and coverage limits live in `docs/specs/dor-tool.rationale.md` → Lifecycle; header findings live in `docs/specs/layout.rationale.md` → Pane header responsive sizing.
+Use this fixture with the current contracts in `docs/specs/dor-tool.md` and `docs/specs/layout.md`. Header findings live in `docs/specs/layout.rationale.md` → Pane header responsive sizing.
 
 ## Harness and isolation
 
