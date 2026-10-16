@@ -15,7 +15,7 @@
  * Reads `GITHUB_EVENT_NAME`, `GITHUB_SHA`, `GITHUB_RUN_ID`,
  * `GITHUB_REPOSITORY`, `RUNNER_TEMP`, and `STATE_HASH` (the check's output);
  * `gh` runs on the workflow token. Writes `skip=`, `reason=` to
- * `GITHUB_OUTPUT` (and `fragments=`, the one fragment a skipped run reports), `$RUNNER_TEMP/audit-state/audit-state.json` for the
+ * `GITHUB_OUTPUT` (with `full_run_at=` for the status issue, and `fragments=`, the one fragment a skipped run reports), `$RUNNER_TEMP/audit-state/audit-state.json` for the
  * `audit-state` artifact, and — when skipping — the `audit-report.md` and
  * `audit-status.txt` the orchestrator would otherwise write. The reporting
  * step still holds that status to the GitHub-state fragment's own verdict.
@@ -92,7 +92,7 @@ function main() {
   }
   // A skipped run's reporting steps read only the deterministic fragment.
   if (env.GITHUB_OUTPUT) {
-    appendFileSync(env.GITHUB_OUTPUT, `skip=${decision.skip}\nreason=${decision.reason.replace(/\n/g, ' ')}\n${decision.skip ? `fragments=${FRAGMENT}\n` : ''}`);
+    appendFileSync(env.GITHUB_OUTPUT, `skip=${decision.skip}\nfull_run_at=${decision.fullRunAt}\nreason=${decision.reason.replace(/\n/g, ' ')}\n${decision.skip ? `fragments=${FRAGMENT}\n` : ''}`);
   }
   if (env.GITHUB_STEP_SUMMARY) appendFileSync(env.GITHUB_STEP_SUMMARY, `**Domains ${decision.skip ? 'skipped' : 'run in full'}:** ${decision.reason}.\n`);
   console.log(`${decision.skip ? 'Skipping' : 'Running'} the domains: ${decision.reason}.`);
