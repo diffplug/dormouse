@@ -566,8 +566,8 @@ describe('doored leaves', () => {
   it('seed keeps parked leaves, minus any it admits to the new tree', () => {
     const store = seeded();
     store.doorLeaf('b', { park: true });
-    // The workspaces-rollout switch parks the outgoing Workspace, then seeds the
-    // incoming one — clearing here would unmount exactly what parking preserved.
+    // Hydration may reseed a store that already holds parked documents —
+    // clearing here would unmount exactly what parking preserved.
     store.seed({ root: { kind: 'leaf', id: 'z' } }, [['z', leafMeta()]]);
     expect(store.parkedIds()).toEqual(['b']);
     // The park's meta has to survive with it, or the store would be holding DOM it

@@ -1,8 +1,7 @@
 /**
  * A headless Client (Dormouse Pocket) speaking only the `e2e` relay envelope —
- * the initiator half of the harness in
- * `docs/specs/remote-security-model.md` -> `## Future` -> **Scope:
- * e2e-client-burrow**. Deliberately `PocketClient`-free: it is a bare
+ * the initiator half of the e2e harness (`docs/specs/relay.md` -> "E2E
+ * framing"). Deliberately `PocketClient`-free: it is a bare
  * `/ws/client` socket plus the real ceremonies, so the suite tests the wire
  * rather than a production class that does not send these frames yet.
  *

@@ -164,7 +164,7 @@ function ReleaseArticle({ release }: { release: ChangelogRelease }) {
 /**
  * How many releases the rail lists.
  *
- * The page renders every release; the rail carries four other pages beside
+ * The page renders every release; the rail carries the other docs pages beside
  * this one, and an entry per release would be longer than all of them.
  */
 export const CHANGELOG_TOC_RELEASES = 5;
