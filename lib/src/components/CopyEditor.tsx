@@ -318,7 +318,9 @@ const OpenCopyEditor = memo(function OpenCopyEditor({ terminalId, selection, edi
   // as any format shows them: a `*` on one format, the widest count, and the
   // Copy button, whose labels are stacked to its widest. In a window or side
   // narrower than that, the key hints and the legend (`data-chrome-optional`)
-  // clip first, so the segments, the count, and Copy still show.
+  // clip first, so the segments, the count, and Copy still show. Sized to the
+  // text alone, a 19-column pane's editor came out 188px wide and lost the
+  // count and Copy (2026-10).
   const header = (ref: Ref<HTMLDivElement> | undefined, starred: EditorFormat | null) => (
     <div ref={ref} className="flex shrink-0 flex-col gap-1 border-b border-border px-2 py-1.5">
       {/* The program's own copy has no scope of Dormouse's to expand. */}

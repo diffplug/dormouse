@@ -145,8 +145,9 @@ export async function readTextFromClipboard(): Promise<string> {
   }
 }
 
-/** Paste file references, then text, then an image temp path; spec §8.6 owns
- * priority and concurrency. */
+/** Paste file references, then text, then an image temp path (spec §8.6).
+ * The first two are read in parallel; the image only once both are empty,
+ * since reading it allocates a temp file. */
 export async function doPaste(terminalId: string): Promise<void> {
   const platform = getPlatform();
 
