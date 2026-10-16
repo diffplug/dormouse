@@ -45,15 +45,13 @@ Source of truth: `hosted/server/providers.js`; `authPolicy` / `providerBindings`
 
 ## Interface
 
-**Must bundle the website's shared favicon into the account frontend**, served from the account origin.
-
 **Must link the account footer to the public Hosted privacy policy and terms.**
 
 **Must show configured sign-in methods only.** Login tokens never enter browser storage, and only public identity fields render, without provider images or external assets.
 
-**Must render on Dormouse product theme tokens**, the OS light/dark preference choosing bundled Light Visual Studio or Kimbie Dark, loading no marketing styles, fonts, or analytics.
+**Must render on Dormouse product theme tokens, loading no marketing styles, fonts, or analytics.**
 
-Source of truth: `hosted/index.html`; `App` in `hosted/src/App.tsx`; `restoreTheme` in `hosted/src/main.tsx`.
+Source of truth: `App` in `hosted/src/App.tsx`; `restoreTheme` in `hosted/src/main.tsx`.
 
 ## Terms acceptance
 
@@ -225,7 +223,7 @@ Source of truth: `relayApiRoutes` in `hosted/server/relay-api.ts`; `relayAccount
 
 **Must run local development with `dor tool hosted` inside Dormouse.** Its single loopback `http://localhost:<port>` origin serves Vite and Node auth on a disposable development database, with the voice token and Relay account routes but never speak, which every Hosted build reaches only at `https://voice.dormouse.sh`. Host, Origin, and Fetch Metadata checks guard the local captured-email inbox; no production entry imports an inbox or test-control handler. `dor tool one-time` runs the relay Worker on loopback without a database, so its Relay routes answer 503 (`docs/specs/one-time.md` -> "Dev loop").
 
-**Must verify the three production Worker bundles and run the consumer's integration suite before release.** Root `pnpm test` runs Hosted's deploy-script and Docker-free suites; `pnpm test:hosted` adds the suites that need Docker. Only test entries inject deterministic Better Auth. Simulated callbacks do not certify provider registrations; production acceptance requires real browser login with each enabled provider and email delivery.
+**Must verify the three production Worker bundles and run the consumer's integration suite before release.** Only test entries inject deterministic Better Auth. Simulated callbacks do not certify provider registrations; production acceptance requires real browser login with each enabled provider and email delivery.
 
 **Must keep production, test, and preview databases and credentials separate.** The development and preview entries are email-only. Production configuration and operator steps live in `hosted/README.md`.
 
