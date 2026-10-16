@@ -246,6 +246,8 @@ listening_release() {
 
 # $1 = the release id that must be answering. Three legs, all required:
 # systemd's own view, a 200, and the identity of whoever holds the port.
+# systemd's leg goes first: it catches a responder no port lookup can see,
+# in a foreign network namespace or under WSL with networkingMode=mirrored.
 service_healthy() {
   unit_active \
     && http_ok "http://127.0.0.1:$LOOPBACK_PORT/api/hello" 2 \
@@ -935,6 +937,8 @@ current_release() { basename "$(readlink "$ROOT/current" 2>/dev/null || true)"; 
 
 # $1 = the release id that must be answering. Three legs, all required: systemd's
 # own view, a 200, and the identity of whoever holds the port.
+# systemd's leg goes first: it catches a responder no port lookup can see,
+# in a foreign network namespace or under WSL with networkingMode=mirrored.
 service_healthy() {
   unit_active \
     && http_ok "http://127.0.0.1:$PORT/api/hello" 2 \
