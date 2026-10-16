@@ -659,9 +659,9 @@ export function Wall({
     // (connection, loops, timers, screen registration). A safe no-op for
     // iframe/terminal surfaces.
     closeBrowserSurface(id, nav.paneParams(id));
-    // Two-phase kill (docs/specs/tiling-engine.md → "Animation"): fade the pane in
-    // place (a last-pane kill also shrinks it toward the bottom-right), then commit
-    // `remove` once the fade completes — survivors tween into the reclaimed space.
+    // Two-phase kill: fade the pane in place (a last-pane kill also shrinks it
+    // toward the bottom-right), then commit `remove` once the fade completes —
+    // survivors tween into the reclaimed space.
     // Keep the mounted terminal DOM through the fade so the visible content fades
     // in place; dispose in the finalizer. The restore token is discarded (kills
     // don't restore).

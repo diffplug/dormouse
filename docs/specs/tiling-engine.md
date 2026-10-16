@@ -42,7 +42,7 @@ Source of truth: `lib/src/lib/lath/layout.ts`.
 
 ## Operations
 
-All ops are pure and synchronous and return `{ tree, ok }` plus op-specific fields. **On `ok: false` the returned `tree` is the input object**, on `ok: true` always a fresh one — so identity comparison detects a rejected op, and tree identity never signals "no visual change." Sash live-resize and DnD previews evaluate ops speculatively per frame without committing (rationale).
+All ops are pure and synchronous and return `{ tree, ok }` plus op-specific fields. **On `ok: false` the returned `tree` is the input object**, on `ok: true` always a fresh one — so identity comparison detects a rejected op, and tree identity never signals "no visual change."
 
 | Operation | Behavior |
 |---|---|
@@ -56,11 +56,11 @@ All ops are pure and synchronous and return `{ tree, ok }` plus op-specific fiel
 
 A `DropTarget` is a leaf swap or an edge at an ancestor path, optionally narrowed to a contiguous child range of that split. **Must normalize a range away in the committed tree**, so persistence keeps its version-1 shape.
 
-Source of truth: `lib/src/lib/lath/ops.ts`; `lib/src/lib/lath/drop-target.ts`.
+Source of truth: `lib/src/lib/lath/ops.ts`.
 
 ## Hierarchical drag and drop
 
-Drags use pointer events only, never HTML5 DnD, so they are drivable from CDP. One drag controller owns both the pane and the Door gestures; `Door.tsx` / `Baseboard.tsx` report presses only. **Must hit-test each preview and the release against the store's live tree**, including commits React has not rendered, so a background `dor split` / `dor kill` mid-drag shows up in the next preview.
+Drags use pointer events only, never HTML5 DnD, so they are drivable from CDP. **Must hit-test each preview and the release against the store's live tree**, including commits React has not rendered, so a background `dor split` / `dor kill` mid-drag shows up in the next preview.
 
 `hitTest` returns the one drop a point would commit: its target, its preview rect, and its scope. The scope model:
 
@@ -71,9 +71,9 @@ Drags use pointer events only, never HTML5 DnD, so they are drivable from CDP. O
 
 A pane drag starts on a leaf's header, and **never while zoomed or during a sash drag**. The press has already run the header's click path, so a drag begins from passthrough on that pane (rationale). Drops surface as proposals the Wall commits: drag start moves selection onto the dragged pane, a candidate drop `move`s it, and a release below the wall minimizes it with its token. Escape, pointer cancellation, window blur, or a release on nothing cancels, and a Door stays. **Must delegate Workspace-strip pane drops to `docs/specs/layout.md` → Moving Surfaces between Workspaces** before local hit-testing.
 
-A Door drag-out runs the same machinery as an external drag (no swap candidates). Its drop inserts the Surface at the hit-tested position — **the token is not consulted, because the user chose the position**.
+A Door drag-out yields no swap. Its drop inserts the Surface at the hit-tested position — **the token is not consulted, because the user chose the position**.
 
-Source of truth: `createDragController` in `lib/src/components/wall/lath-drag-controller.ts`; `hitTest` in `lib/src/lib/lath/hit-test.ts`.
+Source of truth: `createDragController` in `lib/src/components/wall/lath-drag-controller.ts`.
 
 ## Restore tokens (Doors)
 
@@ -105,9 +105,9 @@ Source of truth: `RestoreToken` / `restore` in `lib/src/lib/lath/ops.ts`.
 A parked leaf is mounted by the adapter but absent from the split tree: its DOM survives while it lays out nothing, paints nothing, and takes no input. It exists for Surfaces whose state lives in the DOM — an `<iframe>`'s document, a screencast canvas — where a plain remove turns reattach into a reload. A parked leaf still carries a token: parking decides whether DOM survives, the token where it lands.
 
 - **Every minimize doors, whatever the Surface kind; only a park also keeps the DOM.** **Must park browser and Tool Surfaces** (`shouldParkOnMinimize`), unlike terminals, whose persistent xterm instance remounts without replay ([glossary.md → View](glossary.md#view)). A Surface may also be born as a Door (`dor split` / `dor ensure` targeting another Door), with no pane to detach.
-- **Parking must be one commit**: an id absent from both the tree and the parked set for even one render unmounts the leaf and loses its DOM state, so every re-admitting op unparks in the same commit. **`seed` admits by tree membership**, never by the metadata it is handed (rationale), and runs once per Wall mount, so a Workspace switch never re-seeds.
-- **One `leafMeta` map holds every leaf the Wall owns**, laid out or Doored, so **no Door record carries a metadata copy that can go stale**: title and params writes reach a Doored leaf by the same path as a visible one, and every reader goes through `lath.getMeta(id)` (rationale). The runtime Door record is `{ id, token }`; on hydration `seed` reads a restored Door's persisted row for its metadata, the only place it does.
-- **A parked leaf keeps its last rect, held in the store and never the adapter** (rationale), and renders there hidden and inert, so the guest never sees a zero-extent viewport (rationale). A leaf parked before the Wall reports geometry falls back to the whole wall rect.
+- **Parking must be one commit**: an id absent from both the tree and the parked set for even one render unmounts the leaf and loses its DOM state, so every re-admitting op unparks in the same commit.
+- **One `leafMeta` map holds every leaf the Wall owns**, laid out or Doored, so **no Door record carries a metadata copy that can go stale**: title and params writes reach a Doored leaf by the same path as a visible one, and every reader goes through `lath.getMeta(id)` (rationale).
+- **A parked leaf keeps its last rect** and renders there hidden and inert, so the guest never sees a zero-extent viewport (rationale).
 - **Parked is a visibility signal**: it reaches the body as `PaneProps.parked` ([Pane props contract](#pane-props-contract)), so a minimized `agent-browser-screencast` releases viewer resources while keeping its daemon session.
 - **Never evict parked browser or Tool DOM to enforce a count limit** — retention is unbounded until reattach or Surface destruction (rationale). Parking covers minimized browser and Tool Surfaces only: a hidden Workspace parks nothing (`docs/specs/layout.md` → Workspace lifecycle).
 
@@ -115,13 +115,11 @@ Source of truth: `minimizePane` in `lib/src/components/Wall.tsx`; `doorLeaf` in 
 
 ## The wall store and engine
 
-**`lath-wall-store.ts` is the sole state authority**: tree, `leafMeta`, parked set, `zoomedId`, and a revision bumped on every commit, behind a `useSyncExternalStore` snapshot. **Every tree mutation commits atomically**; a rejected op commits nothing and notifies nothing. **Must reject zero-area geometry reports**, keeping the last valid geometry, since the geometry-dependent queries (`neighborOf`, `autoEdgeFor`, restore's fallback tier) read it (rationale). `LATH_LAYOUT_OPTS` is the one geometry both the store and the adapter lay out with.
+**`lath-wall-store.ts` is the sole state authority** for the tree, `leafMeta`, the parked set, and `zoomedId`, and bumps a revision on every commit. **Every tree mutation commits atomically**; a rejected op commits nothing and notifies nothing. `LATH_LAYOUT_OPTS` is the one geometry both the store and the adapter lay out with.
 
-`lath-wall-engine.ts` is the Wall-facing handle over the store — the animator, vocabulary maps, meta builders, persistence conveniences — built once per Wall mount, one per mounted Wall, never shared across Workspaces. Its readers rely on two projections: `listPanes()` is tree pre-order, so **Doored and parked leaves are not listed** (rationale), while `getMeta(id)` resolves them.
+`lath-wall-engine.ts` is the Wall-facing handle over the store, one per mounted Wall, never shared across Workspaces. Its readers rely on two projections: `listPanes()` is tree pre-order, so **Doored and parked leaves are not listed**, while `getMeta(id)` resolves them.
 
-Selection, focus, and mode policy stay at the Wall ([layout.md](layout.md)). The `Cmd/Ctrl+Arrow` swap is one `swapLeaves` with no companion title swap — meta and registry entries follow ids. Embed self-focus surfaces as `onLeafFocused(id)` from `focusin`, which the Wall adopts like a click.
-
-Source of truth: `lib/src/components/wall/lath-wall-store.ts`; `lib/src/components/wall/lath-wall-engine.ts`.
+Source of truth: `lib/src/components/wall/lath-wall-engine.ts`.
 
 ## The HTML adapter (LathHost)
 
@@ -130,7 +128,6 @@ An adapter owns exactly three things: mapping input into Wall coordinates, apply
 - **Must never re-parent, reorder, or unmount a leaf's div within one Wall** except on a remove commit, and **must render leaf divs in sorted-by-id DOM order, never tree order** — moving DOM nodes blurs the xterm inside one and reloads a moved `<iframe>`.
 - **Header, body, and whole-leaf overlay slots resolve from `leafMeta` through one component registry**, never a surface-kind branch beside it; an unregistered key renders that slot empty.
 - A sash drag streams a `resize` preview and proposes one commit on release; Escape, pointer cancellation, window blur, or a concurrent tree or zoom change cancels it.
-- **Must report geometry from the measuring layout effect, never a passive effect** (rationale).
 
 Source of truth: `LathHost` in `lib/src/components/wall/LathHost.tsx`.
 
@@ -143,17 +140,17 @@ Source of truth: `LathHost` in `lib/src/components/wall/LathHost.tsx`.
 - A retarget mid-flight starts every leaf from its current interpolated frame, so motion is interruptible.
 - **Must derive add/insert hints from the opposite placement edge, and reattach hints from the opposite token edge.**
 - **Must prefer a parked leaf's held rect over an explicit enter hint, and an explicit hint over a derived one** (rationale).
-- **Exit is two-phase**: `markDying` fades the leaf in place with its DOM still mounted, then `store.removeLeaf` commits before `disposeSession` and survivors tween into the space. A second kill of a dying leaf is a no-op, and a dying leaf takes no pointer input.
-- Reduced motion is the same code path with zero duration (`motionIsInstant()`). **There is no CSS entrance/exit path.** **Must re-assert the current frames after every React commit while unsettled** (rationale).
+- **Exit is two-phase**: the leaf fades in place with its DOM still mounted, then its removal commits and survivors tween into the space. A second kill of a dying leaf is a no-op, and a dying leaf takes no pointer input.
+- Reduced motion is the same code path with zero duration (`motionIsInstant()`). **There is no CSS entrance/exit path.**
 
-Source of truth: `createAnimator` in `lib/src/lib/lath/animator.ts`; the animator ownership in `lib/src/components/wall/lath-wall-engine.ts`.
+Source of truth: `createAnimator` in `lib/src/lib/lath/animator.ts`.
 
 ## Pane props contract
 
 **Every pane body and header component takes plain `PaneProps` and never sees the engine**:
 
-- Read: `PaneProps` — `{ id, title, params, parked? }`, straight from `leafMeta`, parked leaves included.
-- Write: `PaneWriteContext` (`setTitle`, `updateParams`), provided by the Wall over the store; the `dor` params refresh and render-swap flows route through it.
+- Read: `PaneProps`, straight from `leafMeta`, parked leaves included.
+- Write: `PaneWriteContext`, provided by the Wall over the store.
 - Visibility: `parked` is the one non-meta prop, and absent means "not parked" — right for anything rendered outside LathHost. `useSurfaceVisibility(parked)` folds it with document visibility and the Wall's Workspace being visible (`docs/specs/layout.md` → "Workspaces"), so a backgrounded window, a hidden Workspace, and a minimized browser or Tool Surface all gate streaming while the session stays alive.
 - Terminal sizing: `docs/specs/layout.md` → "Animations".
 

@@ -310,7 +310,7 @@ Pane↔door: Down from a pane with no pane below it selects the first door; Up f
 
 **Must keep Workspace tabs and `+` command-mode-only selection targets.** `Enter` on an inactive tab activates it and retains tab selection in command mode; on the active tab it enters the last live pane in passthrough, falling back to the first. `Enter` on `+` creates a Workspace and enters its terminal after mount. Other pane actions and terminal clipboard operations are inert there. Every passthrough entry selects a live pane.
 
-`Cmd/Ctrl+Arrow` swaps Surface content between two panes, leaving the layout shape unchanged (`docs/specs/tiling-engine.md` → "The wall store and engine"). Selection stays on the moved Surface, so the breadcrumb records the partner (the pane now holding the old slot): the opposite `Cmd+Arrow` swaps back exactly and a plain opposite arrow selects the partner. **Must ignore swap chords while non-pane chrome is selected**, including when a prior pane move left a breadcrumb.
+`Cmd/Ctrl+Arrow` swaps Surface content between two panes, leaving the layout shape unchanged (`docs/specs/glossary.md` → "User verbs"). Selection stays on the moved Surface, so the breadcrumb records the partner (the pane now holding the old slot): the opposite `Cmd+Arrow` swaps back exactly and a plain opposite arrow selects the partner. **Must ignore swap chords while non-pane chrome is selected**, including when a prior pane move left a breadcrumb.
 
 Source of truth: `WallNav` in `lib/src/components/wall/keyboard/types.ts`; `handlePaneNavigation` in `lib/src/components/wall/keyboard/handle-pane-navigation.ts`.
 
