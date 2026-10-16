@@ -98,6 +98,7 @@ When code covered by a spec changes, change the spec. Where two specs overlap (p
 
 **What stays.** A spec holds contracts, not mechanism:
 
+- **Must pass two questions before keeping a rule:** would a reviewer reject a change that broke it, and could that change's author miss the break? What anyone sees by opening the page or file — an icon, a label, an asset's source — fails the second, and no **Keep** category rescues it.
 - **Keep** what crosses a module, process, or host boundary; the semantics a user or caller relies on, with their edge cases; what another spec defers to; and what no code shows — a human process, a repository setting, a compatibility or security bound. Such a fact (a constant, bound, direction, "only" or "never") stays in the spec, not the rationale.
 - **Never keep** what one module alone carries: presentation (durations, sizes, styling, copy text) and mechanism (call order, locking, a state machine's steps, a caller list). It lives at that code as a comment, test, or story, and the spec says nothing. Move a non-obvious constraint into a comment there first. Test, story, and dev-tooling requirements live with their tests or in `TESTING_AND_MODIFICATION_GUIDE.md`; a spec keeps only an isolation or auth fact another worktree or agent relies on, and a `FAIL IF` stays.
 - **Never copy a value the code computes**, unless a peer, another deploy, or an older build must agree with it.
