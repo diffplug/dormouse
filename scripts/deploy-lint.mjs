@@ -5,13 +5,14 @@
  * root via `pnpm test` (see the root package.json). Exits non-zero with a
  * per-violation report naming the rule that was broken.
  *
- * Why this exists: those `FAIL IF` lines bind all three installers, and until
- * now nothing executed them. No workflow parses `deploy/local/`, no script
- * references it, and the installers are the one part of the tree that CI never
- * touches — so the rules were enforced entirely by whoever remembered to read
- * them. The observed cost of that is real: the macOS `manage verify` once checked
- * modes without owners while Linux checked both; the owner rules below now
- * pin the same property on all three platforms.
+ * Why this exists: those `FAIL IF` lines bind all three installers, and CI
+ * executes only part of one of them — `.github/workflows/ci.yml` runs the Linux
+ * installer in test mode, which stops short of systemd and Serve — and never
+ * the macOS or Windows installer. Without this lint the rules would be enforced
+ * only by whoever remembered to read them. The observed cost of that is real:
+ * the macOS `manage verify` once checked modes without owners while Linux
+ * checked both; the owner rules below now pin the same property on all three
+ * platforms.
  *
  * The check: every installer must still contain the load-bearing control each
  * rule names. This is a *textual* check on purpose — the same ceiling
