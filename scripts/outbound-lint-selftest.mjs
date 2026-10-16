@@ -199,7 +199,7 @@ const CSP = [
     'a CDN in a built-in viewer CSP',
   ],
   [
-    'dor-tools-builtin/src/file-viewer.ts',
+    'dor-tools-builtin/src/image-format.ts',
     replace("img-src data:;", "img-src data: https:;"),
     'img-src admits https:',
     'https: in the image viewer CSP',
@@ -225,7 +225,7 @@ const CSP = [
     'a built-in viewer CSP with no form-action',
   ],
   [
-    'dor-tools-builtin/src/file-viewer.ts',
+    'dor-tools-builtin/src/image-format.ts',
     replace("; base-uri 'none'", ''),
     'no base-uri',
     'an image viewer CSP with no base-uri',

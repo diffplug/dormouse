@@ -1,5 +1,5 @@
 /** Getting pixels in and out of the image editor, and the HTTP shape both
- * image routes share (docs/specs/dor-tools-builtin.md -> Image editor): a GET
+ * image routes share (`editorRoutes` in src/editor-routes.ts): a GET
  * returns the bytes with their revision in `X-Dor-Version`, or JSON naming why
  * the editor shows the image view-only; a save POSTs the bytes with
  * `?version=` and answers `{version}`. */

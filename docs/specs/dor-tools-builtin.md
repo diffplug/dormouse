@@ -7,7 +7,7 @@
 
 - **Must bundle the viewers and their runtime dependencies into `dist/runtime.js` in `dor-tools-builtin`**, without workspace or installed-package resolution at runtime.
 - **Must stage the runtime and its adjacent `viewer` assets together under `dor/dist/builtin`**. Both hosts copy that tree with the CLI; `viewerAsset` serves the files the build placed in it, by exact name, relative to the runtime module.
-- **Must keep `file-viewer-format`, the page builders (`editor-page`, `folder-viewer-page`, `error-viewer-page`) with their CSPs, `viewer-http`, `image-format`, `image-editability`, and `editor-routes` free of Node runtime dependencies**: lib's renderer and host modules import the first, the website playground serves the pages and answers the editor routes with the last (`docs/specs/tutorial.md` → Playground filesystem), and every build of lib source maps `dor-tools-builtin/*` to this package's `src`, as it maps `dor/*`. `dor-tools-builtin/test/browser-shared.test.mjs` bundles them for a browser.
+- **Must keep `file-viewer-format`, the page builders (`editor-page`, `folder-viewer-page`, `error-viewer-page`) with their CSPs, and `editor-routes` with its imports free of Node runtime dependencies**: lib's renderer and host modules import the first, the website playground serves the pages and answers the editor routes (`docs/specs/tutorial.md` → Playground filesystem), and every build of lib source maps `dor-tools-builtin/*` to this package's `src`, as it maps `dor/*`. `dor-tools-builtin/test/browser-shared.test.mjs` bundles them for a browser.
 - **Must build the viewer assets through `buildViewerAssets`**, which the website runs into its own static tree.
 - **Must load the runtime only for valid `__view-*` invocations, in the launcher's process**, through a URL relative to `dor.js`. Other CLI commands never load the viewer implementation; `./runtime` exports only types, so a value import fails `dor`'s build.
 - **Must speak the Tool protocol through `dor-tools-lib`** (`docs/specs/dor-tools-lib.md`): the viewers announce and report with its `osc` encoders, and the editor answers the save channel with its `frame` client.
@@ -24,7 +24,7 @@ Source of truth: `dor/package.json`, `dor-tools-builtin/package.json`; `dor-tool
 
 **Must require a user Tool for PDFs**, including files named `README.pdf`. (rationale)
 
-**Must retain media/HTML grant descriptors until the Tool exits.** Refresh reads those files again; replacements and dependency-graph changes require restarting. Text editing follows [Editing files](#editing-files). **Must report a view that cannot be edited (not text or an [editable image](#image-editor)) clean as it starts**, so closing it asks nothing (`docs/specs/reopen.md` → "Reopenable kinds"). Cold restore creates a fresh URL capability; Workspace movement keeps the live binding.
+**Must retain media/HTML grant descriptors until the Tool exits.** Refresh reads those files again; replacements and dependency-graph changes require restarting. Editing follows [Editing files](#editing-files) and [Image editor](#image-editor). **Must report a view it cannot edit clean as it starts**, so closing it asks nothing (`docs/specs/reopen.md` → "Reopenable kinds"). Cold restore creates a fresh URL capability; Workspace movement keeps the live binding.
 
 Source of truth: `runFileViewer` in `dor-tools-builtin/src/file-viewer.ts`; `fileViewerFormat` in `dor-tools-builtin/src/file-viewer-format.ts`. Tests: `dor-tools-builtin/test/file-viewer.test.mjs`.
 
@@ -48,26 +48,23 @@ Source of truth: `saveText` / `StorePath` in `dor-tools-builtin/src/editor-route
 - **Must keep HTML comments verbatim and save with one final newline, the file's majority bullet and thematic-break marker, and unpadded tables**; the rest follows MDXEditor's serialization. Its normalization of loaded text is not an edit (rationale).
 - **Never let document HTML reach the live DOM outside an allowlist** of tags and attributes, `href` limited to `http(s):`, `mailto:`, fragments, and scheme-less paths; saving keeps every original attribute, escaped, and HTML images serialize in an inert document. Mermaid diagrams are the one other path, under mermaid's own sanitizer (`docs/specs/security-local.md` → "Local-file viewer"; rationale).
 - **Must serve images on request from regular image-format files at or under the document's canonical directory**, by realpath, under a `sandbox` CSP. Nothing else loads, external URLs included.
-- **Never show an image at a size the document does not state**: unsized, it shows pixel for pixel, never past the column. A pasted or dropped PNG or JPEG whose header records a scale goes in at its pixel width over that scale (rationale).
-- **Must save a corner drag of a selected image as a width**, and a height only if the document had one; the image dialog sets and clears both, as an unsaved edit.
+- **Never show an image at a size the document does not state**: unsized, it shows pixel for pixel, within the column. A pasted or dropped PNG or JPEG with a recorded scale goes in at its pixel width over that scale (rationale).
 - **Must write a pasted or dropped PNG, JPEG, GIF, or WebP beside the document as a new file**, signature-checked, at most 32 MiB, never replacing a file; its reference is an unsaved edit.
 - **Must rename a listed image on disk at once**, to an image name in its own directory not starting with `.`, never replacing another file (case-only renames allowed); rewritten references are an unsaved edit.
-- **Must edit only a PNG or JPEG at or under the document's canonical directory whose spelled path is its realpath**, in the [Image editor](#image-editor) over the document, else view-only with why. Its save reloads every display and, when it changes the pixel size, rescales each width and height the document states for that image by its own axis, as an unsaved edit; closing it unsaved asks first.
-- **Must report the Tool dirty while the document or open image is unsaved**; Cmd/Ctrl+S saves the one in front, and the close-prompt save writes both.
+- **Must edit a PNG or JPEG in the [Image editor](#image-editor) over the document** where the grant may replace it (`docs/specs/security-local.md` → "Local-file viewer"); a save that changes its pixel size rescales each width and height the document states for it, per axis, as an unsaved edit.
+- **Must report the Tool dirty while the document or open image is unsaved**, and the close-prompt save writes both.
 
-Source of truth: `dor-tools-builtin/viewer/markdown.tsx`; `safeCreateDOM` in `dor-tools-builtin/viewer/markdown-safety.ts`; `defaultDisplayWidth` / `rescaledSize` in `dor-tools-builtin/src/image-resolution.ts`; `editorRoutes` in `dor-tools-builtin/src/editor-routes.ts`; `PASTE_BOUND` in `dor-tools-builtin/src/image-format.ts`; `dor-tools-builtin/src/markdown-images.ts`. Tests: `dor-tools-builtin/test/markdown-editor.test.mjs`.
+Source of truth: `dor-tools-builtin/viewer/markdown.tsx`; `safeCreateDOM` in `dor-tools-builtin/viewer/markdown-safety.ts`; `editorRoutes` in `dor-tools-builtin/src/editor-routes.ts`; `dor-tools-builtin/src/markdown-images.ts`. Tests: `dor-tools-builtin/test/markdown-editor.test.mjs`.
 
 ## Image editor
 
 `builtin:file` edits PNG and JPEG, alone or over a [Markdown document](#markdown-editor).
 
-- **Must leave other formats, a PNG or JPEG past the byte or pixel bound, and an HDR or narrow-range PNG view-only, decided from its header before editing**: `builtin:file` streams it; the Markdown editor's `edit/` answers `{viewOnly: reason}`.
-- **Must save exactly the submitted bytes, within the byte bound**, under the revision, identity, permission, and replacement rules of [Editing files](#editing-files).
-- **Must refuse a save whose `Content-Type` or signature is not its extension's type** (415); the page saves that type, decoding by content.
-- **Must send the revision as the `X-Dor-Version` response header and take it back as the save's `version` query parameter**, the image bytes as the body, in-place replacement included.
-- **Must submit every untouched PNG pixel exactly**, at 8 bits per channel, **with the source's color metadata only in its own format, never a non-RGB ICC profile, and its recorded resolution in either**; an RGB profile converts. EXIF is dropped, pixels written upright.
+- **Must leave a PNG or JPEG past 32 MiB or 2²⁶ pixels, or an HDR or narrow-range PNG, view-only**, judged from its header before decoding.
+- **Must save the submitted bytes unchanged, within 32 MiB**, under the revision, identity, permission, and replacement rules of [Editing files](#editing-files).
+- **Must re-encode untouched PNG pixels exactly**, at 8 bits per channel, keeping the recorded resolution and the source's color metadata except a non-RGB ICC profile: verbatim in its own format, across formats only an RGB profile, converted. EXIF is dropped, pixels written upright.
 
-Source of truth: `editorRoutes` in `dor-tools-builtin/src/editor-routes.ts`; `imageEditability` / `MAX_EDIT_PIXELS` in `dor-tools-builtin/src/image-editability.ts`; `IMAGE_BOUND` in `dor-tools-builtin/src/image-format.ts`; `decodeImage` / `encodeImage` in `dor-tools-builtin/viewer/image/io.ts`. Tests: `dor-tools-builtin/test/file-viewer.test.mjs`, `dor-tools-builtin/test/image-codec.test.mjs`.
+Source of truth: `editorRoutes` in `dor-tools-builtin/src/editor-routes.ts`; `imageEditability` in `dor-tools-builtin/src/image-editability.ts`; `decodeImage` / `encodeImage` in `dor-tools-builtin/viewer/image/io.ts`. Tests: `dor-tools-builtin/test/image-codec.test.mjs`.
 
 ## Code editor
 
