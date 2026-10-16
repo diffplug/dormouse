@@ -70,6 +70,7 @@ Per package, from the worktree root:
 (cd standalone/sidecar && node --test)
 (cd dor && node --test)                                        # help snapshots
 (cd vscode-ext && npx vitest run)
+(cd website && pnpm test)                                      # tsc --noEmit, then vitest: the website's only typecheck
 pnpm lint:specs && node scripts/xterm-lint.mjs                  # fast inner loop
 pnpm test                                                      # full CI test gate
 cargo test                                                     # see §2
