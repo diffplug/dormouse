@@ -36,6 +36,9 @@ export function forwardUpgrade(
  * Accept-then-close, so the refused end reads a code rather than a failed
  * upgrade. Accepted outside hibernation: the socket is never the object's, so
  * none of its events reach the object's handlers.
+ * Local `wrangler dev` logs `Uncaught Error: Network connection lost.` once
+ * per socket accepted this way, even one closed cleanly: workerd noise, not a
+ * room fault (reproduced 2026-09-28).
  */
 export function refuseSocket(code: number, reason: string): Response {
   const { 0: client, 1: server } = new WebSocketPair();
