@@ -1,6 +1,6 @@
 import { flushSync } from 'react-dom';
 import type { MoveSurfaceRequest, MoveSurfaceResponse } from 'dor/commands/types';
-import { closeWorkspace, createWorkspace, generateWorkspaceId, getActiveWorkspaceId, hasWorkspace, isWorkspacePinned, resolveWorkspaceRef, setActiveWorkspace, workspaceRefFor } from '../../lib/workspace-store';
+import { closeWorkspace, createWorkspace, generateWorkspaceId, getActiveWorkspaceId, hasWorkspace, isWorkspacePinned, resolveWorkspaceRef, setActiveWorkspace } from '../../lib/workspace-store';
 import { forgetWorkspaceSession, invalidateWorkspaceSaves, isWorkspaceTransferPending, moveRetainedSurfaceRecord, publishWorkspaceSessions, setWorkspaceTransferPending } from '../../lib/window-session-aggregator';
 import { cancelPendingConfirmation, dismissWorkspaceUi, requestConfirmation, setWorkspaceMoveError } from '../../lib/workspace-ui-store';
 import type { WorkspaceId } from '../../lib/session-types';
@@ -100,7 +100,6 @@ export async function moveSurface(id: string, request: Omit<MoveSurfaceRequest, 
   setWorkspaceTransferPending(source.workspaceId, true);
   if (targetId) setWorkspaceTransferPending(targetId, true);
   const activeBefore = getActiveWorkspaceId();
-  const oldWorkspaceRef = workspaceRefFor(source.workspaceId);
   let created = false;
   let committed = false;
   let undoDeparture: (() => void) | undefined;
@@ -134,13 +133,10 @@ export async function moveSurface(id: string, request: Omit<MoveSurfaceRequest, 
     const receiver = target!;
     // Read after the last await: a pin set meanwhile keeps the source.
     const keepSource = isWorkspacePinned(source.workspaceId);
-    let surfaceRef = '';
     flushSync(() => {
       undoDeparture = prepared.depart();
       try {
-        const adopted = receiver.adoptSurfaceMove(id, prepared.meta);
-        undoAdoption = adopted.rollback;
-        surfaceRef = adopted.surfaceRef;
+        undoAdoption = receiver.adoptSurfaceMove(id, prepared.meta);
       } catch (error) { undoDeparture(); undoDeparture = undefined; throw error; }
       receiver.finishSurfaceMove();
       // A pinned source is never discarded: it refills, as a kill of its last
@@ -167,19 +163,18 @@ export async function moveSurface(id: string, request: Omit<MoveSurfaceRequest, 
         setActiveWorkspace(targetId!); receiver.enterCommandMode();
       }
     });
-    const workspaceRef = workspaceRefFor(targetId);
     if (prepared.terminal) {
-      const moved = `Moved ${prepared.surfaceRef} from ${oldWorkspaceRef} to ${workspaceRef} ${surfaceRef}.`;
+      const moved = `Moved ${id} from ${source.workspaceId} to ${targetId}.`;
       const terminal = getTerminalInstance(id);
       if (terminal?.buffer.active.type === 'alternate') {
-        receiver.showMoveNotice(id, `${moved} Cached surface:N refs now resolve here; use stable ID ${id}. Unscoped dor ensure can duplicate work left behind.`);
+        receiver.showMoveNotice(id, `${moved} Unscoped dor ensure can duplicate work left behind.`);
       } else {
-        // Raw xterm write: keep host-minted refs and ids from carrying controls.
-        const line = sanitizeText(`${moved} Stable ID: ${id}.`, 500);
-        terminal?.write(`\r\n[Dormouse] ${line}\r\nShort surface:N refs now resolve in the destination Workspace; cached refs may target other panes. Unscoped dor ensure searches here and can duplicate a server left behind. Use stable IDs across moves.\r\n`);
+        // Raw xterm write: keep host-minted ids from carrying controls.
+        const line = sanitizeText(moved, 500);
+        terminal?.write(`\r\n[Dormouse] ${line}\r\nUnscoped dor ensure searches here and can duplicate a server left behind.\r\n`);
       }
     }
-    return { status: 'moved', surfaceId: id, surfaceRef, workspaceId: targetId, workspaceRef };
+    return { status: 'moved', surfaceId: id, workspaceId: targetId };
   } catch (error) {
     if (committed) throw error;
     flushSync(() => {
@@ -199,8 +194,7 @@ export async function moveSurface(id: string, request: Omit<MoveSurfaceRequest, 
 /** Gesture errors use the Window's existing move refusal presentation. */
 export function requestSurfaceMove(id: string, destination: MoveSurfaceRequest['destination']): void {
   const source = wallHandleOwning(id);
-  const target = 'workspace' in destination && hasWorkspace(destination.workspace) ? { workspace: workspaceRefFor(destination.workspace) } : destination;
-  void moveSurface(id, { destination: target, focus: true, dangerouslyDestroyIframePageState: false }, true).catch(error => {
+  void moveSurface(id, { destination, focus: true, dangerouslyDestroyIframePageState: false }, true).catch(error => {
     if (source) setWorkspaceMoveError({ id: source.workspaceId, reason: errorText(error) });
   });
 }

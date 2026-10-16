@@ -5,7 +5,9 @@ import { BROWSER_PROVIDER_IDS, BROWSER_PROVIDERS, parseRenderMode, parseStreamPo
 test('sessionForKey namespaces a key under the workspace', () => {
   assert.equal(sessionForKey('default'), 'dormouse.1.default');
   assert.equal(sessionForKey('gui-abc'), 'dormouse.1.gui-abc');
-  assert.equal(sessionForKey('default', 'workspace-2b1c'), 'dormouse.workspace-2b1c.default');
+  // A Workspace id's colon is scrubbed: Windows forbids it in the socket path.
+  assert.equal(sessionForKey('default', 'workspace:3'), 'dormouse.workspace-3.default');
+  assert.equal(sessionForKey('tool.surface:7'), 'dormouse.1.tool.surface-7');
 });
 
 test('sessionForKey scrubs the key like the scope: a session name is a socket path', () => {

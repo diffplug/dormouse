@@ -45,6 +45,7 @@ function addEnvironment(ctx, name, { policy = { deployment_branch_policy: { prot
   ctx.responses[`${R}/environments/${name}/variables`] = { status: 200, body: { total_count: 0, variables: [] } };
 }
 
+const statusRepo = (ctx) => ctx.responses.graphql.body.data.repository;
 const lines = (result, verdict) => result.results.filter((r) => r.verdict === verdict).map((r) => r.clause);
 
 test('the recorded live state passes every clause', () => {
@@ -142,6 +143,9 @@ const violations = [
   ['Dependabot alerts off', (ctx) => { ctx.responses[`${R}/vulnerability-alerts`] = { status: 404, body: null }; }, 'Dependabot alerts are on'],
   ['private vulnerability reporting off', (ctx) => { body(ctx, 'private-vulnerability-reporting').enabled = false; }, 'private vulnerability reporting is enabled'],
   ['the embargo repository goes public', (ctx) => { ctx.embargo = '200'; }, 'answers 404 unauthenticated'],
+  // The status issue's response is synthesized, not recorded: the issue did not exist when the fixture was.
+  ['the status issue is closed', (ctx) => { statusRepo(ctx).issues.nodes = []; }, 'exactly one open issue is labeled `security-audit-status`'],
+  ['a second status issue opens', (ctx) => { statusRepo(ctx).issues.nodes.push({ number: 1300 }); }, 'exactly one open issue is labeled `security-audit-status`'],
 ];
 for (const [name, mutate, clause] of violations) {
   test(`fails: ${name}`, () => {
@@ -151,6 +155,19 @@ for (const [name, mutate, clause] of violations) {
     assert.ok(failed.some((c) => c.includes(clause)), `no FAIL on "${clause}"; failed: ${failed.join(' | ')}`);
   });
 }
+
+// Pinning only makes the status issue easy to find, so an unpinned one is a
+// WARNING: it reaches the fragment, and from there the ledger and the status
+// issue's WARNING count, and changes no verdict.
+test('an unpinned status issue is a WARNING, never a failure', () => {
+  const result = replay((ctx) => { statusRepo(ctx).pinnedIssues.nodes = [{ issue: { number: 151 } }]; });
+  assert.equal(result.verdict, 'PASS');
+  assert.deepEqual(result.warnings, ['the `security-audit-status` issue #1200 is not pinned; pin it so readers find it (pinned: `#151`).']);
+  const judged = judgeFragment(repoRoot, FRAGMENT, result.text);
+  assert.equal(judged.verdict, 'PASS', judged.doubts.join('; '));
+  assert.deepEqual(judged.findings.map((f) => [f.severity, f.path, f.cause]), [['WARNING', '.github/audit/expected-github-state.json', 'security-audit-status']]);
+  assert.deepEqual(replay().warnings, []);
+});
 
 // The tagger App is private: no token an audit run holds can read it, so the
 // fixture records the 403 CI gets, and nothing about it is a FAIL IF. An org
@@ -248,7 +265,11 @@ test('the CLI reads gh, writes the fragment, and hands the hash on', (t) => {
     const [a, b] = split(body[key]);
     return [{ ...body, [key]: a }, { ...body, [key]: b }];
   };
-  const arms = Object.entries(fixture.responses).map(([path, r], i) => {
+  // Unpinned, so the log's WARNING count is read from the run, not a constant.
+  const unpin = (ctx) => { statusRepo(ctx).pinnedIssues.nodes = []; };
+  const responses = structuredClone(fixture.responses);
+  unpin({ responses });
+  const arms = Object.entries(responses).map(([path, r], i) => {
     let body = r.body;
     if (path.includes('/runs?')) body = { ...body, workflow_runs: body.workflow_runs.map((run) => ({ ...run, created_at: new Date(Date.now() - 3600e3).toISOString() })) };
     if (r.status >= 400) return `  '${path}') echo 'gh: Not Found (HTTP ${r.status})' >&2; exit 1 ;;`;
@@ -274,11 +295,11 @@ cat "$f$slurp"
   assert.equal(cli.status, 0, cli.stderr);
   const written = readFileSync(join(dir, FRAGMENT), 'utf8');
   assert.equal(written.split('\n')[0], 'VERDICT: PASS', written);
-  const { hash } = replay();
+  const { hash } = replay(unpin);
   assert.equal(readFileSync(output, 'utf8'), `hash=${hash}\nverdict=PASS\n`);
   // The job log is public: with `--out`, stdout carries the verdict and
   // counts, never a clause or its evidence (docs/specs/security-audit.md -> "Embargo").
-  const clauses = written.split('\n').filter((line) => line.startsWith('- ')).length;
+  const clauses = written.split('\n').filter((line) => /^- (PASS|FAIL|UNVERIFIABLE): /.test(line)).length;
   assert.ok(clauses > 0, written);
-  assert.equal(cli.stdout, `VERDICT: PASS (${clauses} PASS, 0 FAIL, 0 UNVERIFIABLE). Observed-state hash ${hash}.\n`);
+  assert.equal(cli.stdout, `VERDICT: PASS (${clauses} PASS, 0 FAIL, 0 UNVERIFIABLE, 1 WARNING). Observed-state hash ${hash}.\n`);
 });

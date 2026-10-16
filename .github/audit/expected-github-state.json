@@ -90,5 +90,6 @@
   "app": { "id": 5228264, "permissions": { "contents": "write", "metadata": "read" }, "events": [] },
   "liveness": { "workflow": "workflow-audit.yaml", "event": "schedule", "branch": "main", "hours": 48, "infoAfterHours": 27 },
   "activeWorkflows": ["security-audit.yaml", "workflow-audit.yaml"],
-  "embargoRepository": "diffplug/dormouse-embargo"
+  "embargoRepository": "diffplug/dormouse-embargo",
+  "statusIssueLabel": "security-audit-status"
 }

@@ -113,7 +113,7 @@ Reserved: a `capabilities` field on the client hello (what the client can render
 
 **Must list registered terminal Surfaces, excluding helper Sessions.** A Tool remains listed through its terminal even while showing its browser capability. `directory.watch` subscribes without attaching; `DirectoryEntry` / `DirectorySnapshot` own the payload. Thumbnails are staged ([Future](#future)).
 
-**Must list every Workspace's terminals, hidden ones included; `workspace` names an entry's Workspace only where its `ref` is unique across the Burrow's Windows** (standalone; VS Code sends none; rationale). **Entries arrive in each Window's strip order** (rationale); `active` marks the Workspace that Window shows. **A Client must list entries without `workspace` as before.**
+**Must list every Workspace's terminals, hidden ones included; `workspace` names an entry's Workspace only where its `ref`, the Workspace id, is unique across the Burrow's Windows** (standalone; VS Code sends none; rationale). **Entries arrive in each Window's strip order** (rationale); `active` marks the Workspace that Window shows. **A Client must list entries without `workspace` as before.**
 
 Reserved: `workspace.ref` and `name` are `WindowSnapshot.workspaces[]` keys ([Future](#future), The Window).
 

@@ -56,7 +56,7 @@ export interface DirectoryWorkspaceInput extends DirectoryWorkspace {
  * The entries in `workspaces` order — the Window's strip order — each naming
  * its Workspace, and within one Workspace in `inputs` order. A pane no
  * Workspace claims (its Wall has not published yet) follows, ungrouped. With no
- * `workspaces` — a host whose refs are not unique across Windows — the entries
+ * `workspaces` — a host whose ids are not unique across Windows — the entries
  * stay in `inputs` order and name none.
  */
 export function buildDirectorySnapshot(

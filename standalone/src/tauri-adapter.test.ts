@@ -156,9 +156,9 @@ describe("TauriAdapter port probing", () => {
 // docs/specs/transport.md -> "The governing rule": standalone restores window
 // state, so nothing is deleted at boot and the record is claimed once.
 describe("TauriAdapter window persistence", () => {
-  const session = { version: 3 as const, panes: [{ id: "pane-a", title: "A", cwd: "/a", untouched: false }] };
+  const session = { version: 4 as const, panes: [{ id: "pane-a", title: "A", cwd: "/a", untouched: false }] };
   const windowBlob = {
-    version: 1 as const,
+    version: 2 as const,
     workspaces: [{ id: "ws-1", name: "One", nameIsAuto: false, session }],
     activeWorkspaceId: "ws-1",
   };
@@ -185,10 +185,12 @@ describe("TauriAdapter window persistence", () => {
     adapter.shutdown();
   });
 
-  it("wraps a pre-Window blob as the one Workspace", async () => {
-    const { adapter } = await booted((cmd) => (cmd === "load_session" ? JSON.stringify(session) : undefined));
-    expect(adapter.getWindowState()?.workspaces.map((ws) => ws.session)).toEqual([session]);
+  it("starts fresh on a blob an older build wrote", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    const { adapter } = await booted((cmd) => (cmd === "load_session" ? JSON.stringify({ ...session, version: 3 }) : undefined));
+    expect(adapter.getWindowState()).toBeNull();
     adapter.shutdown();
+    info.mockRestore();
   });
 
   it("claims the recovery commands for every saved pane, before restore reads them", async () => {

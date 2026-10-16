@@ -15,7 +15,9 @@ import { requireElement, settleTerminals } from './settle-terminals';
 // (docs/specs/mouse-and-clipboard.md §4.5): each story selects rows of the
 // source pane and checks the side the editor took.
 
-const SOURCE = 'copy-placement-source';
+const SOURCE = 'surface:1';
+const PEER = 'surface:2';
+const PEER_2 = 'surface:3';
 type Layout = 'single' | 'source-over-peer' | 'peer-over-source' | 'two-columns' | 'three-columns' | 'narrow-source';
 interface Props {
   layout: Layout;
@@ -32,11 +34,11 @@ const leaf = (id: string): LathNode => ({ kind: 'leaf', id });
 const split = (dir: 'row' | 'col', nodes: LathNode[], weights = nodes.map(() => 1)): LathNode => ({ kind: 'split', dir, children: normalizeWeights(nodes.map((node, i) => ({ node, weight: weights[i] }))) });
 const LAYOUTS: Record<Layout, LathNode> = {
   single: leaf(SOURCE),
-  'source-over-peer': split('col', [leaf(SOURCE), leaf('peer')]),
-  'peer-over-source': split('col', [leaf('peer'), leaf(SOURCE)]),
-  'two-columns': split('row', [leaf(SOURCE), leaf('peer')]),
-  'three-columns': split('row', [leaf(SOURCE), leaf('peer'), leaf('peer-2')]),
-  'narrow-source': split('row', [leaf(SOURCE), leaf('peer')], [1, 5]),
+  'source-over-peer': split('col', [leaf(SOURCE), leaf(PEER)]),
+  'peer-over-source': split('col', [leaf(PEER), leaf(SOURCE)]),
+  'two-columns': split('row', [leaf(SOURCE), leaf(PEER)]),
+  'three-columns': split('row', [leaf(SOURCE), leaf(PEER), leaf(PEER_2)]),
+  'narrow-source': split('row', [leaf(SOURCE), leaf(PEER)], [1, 5]),
 };
 function boot(layout: Layout): LathPersistedLayout {
   const root = LAYOUTS[layout];

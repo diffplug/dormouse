@@ -13,9 +13,8 @@ Text mode prints terminal text directly.
 
 JSON output:
   {
-    "workspace_ref": "workspace:1",
+    "workspace_id": "workspace:1",
     "surface_id": "...",
-    "surface_ref": "surface:3",
     "text": "..."
   }
 

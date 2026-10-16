@@ -345,13 +345,12 @@ describe('AlertManager in isolation', () => {
   });
 
   it.each([
-    ['WATCHING', 'watching', null],
+    ['WATCHING', 'watching', RING_DETAIL.watching],
     ['report', 'report', REPORT],
   ] as const)('persists an unacknowledged %s ring as the TODO a look would leave', (_what, source, notification) => {
     const id = `restart-${source}`;
     ringFrom(id, source);
     const persisted = JSON.parse(JSON.stringify(toPersistedAlertState(manager.getState(id))));
-    // A WATCHING detail is live-only (`STRICT_READER_NOTIFICATION_SOURCES`).
     expect(persisted).toEqual({ status: 'ALERT_RINGING', todo: true, notification });
 
     const restarted = new AlertManager();

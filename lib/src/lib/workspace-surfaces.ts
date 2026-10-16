@@ -41,6 +41,12 @@ export function clearWorkspaceSurfaces(workspaceId: WorkspaceId): void {
   emit(next);
 }
 
+/** Whether any mounted Workspace holds `surfaceId`, a pane or a Door of any kind. */
+export function isWorkspaceSurface(surfaceId: string): boolean {
+  for (const ids of membership.values()) if (ids.includes(surfaceId)) return true;
+  return false;
+}
+
 /** Stable snapshot reference (changes only on mutation) for `useSyncExternalStore`. */
 export function getWorkspaceSurfacesSnapshot(): Membership {
   return membership;

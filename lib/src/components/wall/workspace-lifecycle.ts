@@ -4,7 +4,7 @@ import { awaitWallHandle, mountingRefusal } from './dor-control-shared';
 import { getWallHandle } from './wall-handles';
 import { forgetWorkspaceSession, isWorkspaceTransferPending } from '../../lib/window-session-aggregator';
 import { cancelPendingConfirmation, dismissWorkspaceUi, requestConfirmation, setRenamingWorkspace, type WorkspaceConfirmation } from '../../lib/workspace-ui-store';
-import { closeWorkspace, createWorkspace, getActiveWorkspaceId, getWorkspacesSnapshot, isWorkspacePinned, moveWorkspace, renameWorkspace, resumeAutoWorkspaceName, setActiveWorkspace, setWorkspacePinned, workspaceRefFor } from '../../lib/workspace-store';
+import { closeWorkspace, createWorkspace, getActiveWorkspaceId, getWorkspacesSnapshot, isWorkspacePinned, moveWorkspace, renameWorkspace, resumeAutoWorkspaceName, setActiveWorkspace, setWorkspacePinned } from '../../lib/workspace-store';
 import { addPendingKill } from '../../lib/pending-kills';
 import { getHelper, helperHasWork } from '../../lib/helper-terminal';
 import { isDelayedKillEnabled } from '../../lib/labs-settings';
@@ -106,7 +106,7 @@ export async function closeWorkspaceWithSurfaces(
   const refused = workspaceCloseRefusal(id);
   if (refused) return refused;
   const handle = getWallHandle(id);
-  if (!handle) return mountingRefusal(workspaceRefFor(id));
+  if (!handle) return mountingRefusal(id);
   closeInFlight = true;
   try {
     if (mode === 'prompt') {

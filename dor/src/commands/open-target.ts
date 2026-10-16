@@ -14,8 +14,8 @@ const BARE_PORT = /^:\d{1,5}(?:[/?#].*)?$/;
 const HOST_PORT = /^([A-Za-z0-9._-]+|\[[0-9A-Fa-f:]+\]):\d{1,5}(?:[/?#].*)?$/;
 
 /** A dor Surface handle used as a browser-open target: `surface:N`,
- *  `surface:<stable-id>`, `surface:self`, or `surface:focused`. Every form
- *  carries the `surface:` prefix, which a real URL never does. */
+ *  `surface:self`, or `surface:focused`. Every form carries the `surface:`
+ *  prefix, which a real URL never does. */
 export function isSurfaceOpenTarget(target: string): boolean {
   return target.startsWith('surface:');
 }

@@ -688,7 +688,7 @@ describe('iframe grant capacity', () => {
 // activity.
 describe('iframe proxy leases', () => {
   let n = 0;
-  const lease = (owner = 'window-a') => ({ owner, id: `surface-${++n}#mount` });
+  const lease = (owner = 'window-a') => ({ owner, id: `surface:${++n}#mount` });
   const leased = (l: { owner: string; id: string }) => ({ ...NO_LOG, lease: l });
   const portOf = (url: string) => Number(new URL(url).port);
 

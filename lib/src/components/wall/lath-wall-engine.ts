@@ -229,7 +229,7 @@ export type LathWallEngine = {
   seed(
     lathBlob: unknown,
     initialPaneIds: string[] | undefined,
-    generatePaneId: () => string,
+    mintSurfaceId: () => string,
     /** Persisted Doors restored alongside the tree. Their meta is seeded into the
      *  store in the same commit, because the store — not the Door record — is the
      *  authority for a minimized Surface's title/params from then on. */
@@ -306,7 +306,7 @@ export function createLathWallEngine(
       });
     },
 
-    seed(lathBlob, initialPaneIds, generatePaneId, doors) {
+    seed(lathBlob, initialPaneIds, mintSurfaceId, doors) {
       // Doors ride into `leafMeta` beside the tree's leaves: a restored Door is a
       // detached leaf, and detachment is a tree fact, not a metadata one.
       const doorMeta = (doors ?? []).map(
@@ -326,7 +326,7 @@ export function createLathWallEngine(
       // 2. Fresh tree from the restored session ids (or one generated id), splitting
       //    successive panes via the store's autoEdge — the `null` position every
       //    Wall-level add without a reference pane uses.
-      const ids = initialPaneIds && initialPaneIds.length > 0 ? initialPaneIds : [generatePaneId()];
+      const ids = initialPaneIds && initialPaneIds.length > 0 ? initialPaneIds : [mintSurfaceId()];
       store.seed(leafTree(ids[0]), [[ids[0], terminalLeafMeta()], ...doorMeta]);
       for (let i = 1; i < ids.length; i++) {
         store.addLeaf(ids[i], terminalLeafMeta(), null);
