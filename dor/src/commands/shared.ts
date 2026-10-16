@@ -147,6 +147,8 @@ export function msysToWindowsCwd(pwd: string, platform: string): string {
 // travel in the request. Prefer the shell's PWD (injectable, matches what the
 // user sees) and fall back to the process cwd. resolvePath canonicalizes both the
 // default and a relative/absolute path into one absolute path the host can key on.
+// Every command that sends a caller cwd resolves it here, so none skips the
+// MSYS fold above.
 export function callerWorkingDirectory(flag: string | undefined, { env, host }: CliOptions): string {
   const base = msysToWindowsCwd(env?.PWD ?? host.cwd(), host.platform);
   return host.resolvePath(base, flag ?? '.');
