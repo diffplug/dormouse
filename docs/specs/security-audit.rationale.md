@@ -163,11 +163,13 @@ gh secret set AUDIT_PAT --env security-audit --repo diffplug/dormouse --body 'gi
 
 **Why measure recall (2026-10-07).** Run 37710148950 reported two failed checks and two WARNINGs; run 37713086378, on the same code, reported none of the four. Earlier, a real webview bug was found in 3 of 20 runs. A PASS says nothing about what a run would have caught; a canary turns that into a number per run.
 
-**Why a seed deletes the pins that would catch it.** A regression on `main` has passed CI, so a seed whose test still fails measures whether a domain runs a test, not whether it reads code. A seed that reclassifies an `OUTBOUND_SITES` entry or narrows a lint models the commit that silenced it.
+**Why a seed deletes the pins that would catch it.** A regression on `main` has passed CI, so a seed whose test still fails measures whether a domain runs a test, not whether it reads code. A seed that reclassifies an `OUTBOUND_SITES` entry or narrows a lint models the commit that silenced it. A value `scripts/supply-chain-config.test.mjs` reads is the exception: the domain is told to run that test as its evidence, so a cooldown or pin seed would measure the test, and the supply-chain seeds break clauses no script answers instead.
 
 **Why the history is replaced.** A commit on top of the audited one leaves `git diff HEAD~1`, the remote-tracking ref, and the reflog each listing the seeds. The seeds applied sit in `$RUNNER_TEMP`, which an agent that goes looking can still read; the measurement assumes it does not.
 
 **Why only the code domains.** `ci-and-secrets` reads repository settings, which a checkout cannot seed, and `scripts/github-state-check.mjs` answers them deterministically, with planted-violation tests of its own.
+
+**Why a draw is dealt across the domains (2026-10-11).** Canary run 37720586893 drew six seeds from a pool of thirteen, twelve of them application-security, and all six it drew were, so hosted's and supply-chain's recall went unmeasured. A uniform draw of six from twelve, three, and three still leaves supply-chain out about one run in four; dealt round-robin, each domain gets two, so the caught-over-seeded figure now weights the domains equally rather than by pool size.
 
 **Why a seed may name its severity (2026-10-07).** Canary run 37720586893 scored `recovery-created-at-nan` missed: the domain found the NaN age skipping `readAndClearRecord`'s max-age gate and rated it INFO hardening, which it is, because `normalizeResumeCommand` rebuilds the command at the typing boundary. The seed's expectation was wrong, not the domain. A seed whose real severity is below WARNING says so in its header, with the reason beside it, rather than the scorer counting every INFO and with it every near-miss.
 

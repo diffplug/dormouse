@@ -3,7 +3,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
-import { CANARY_DOMAINS, POOL_DIR, parseSeed, publicRecord, readPool, redact, score, summaryLine } from './security-audit-canary.mjs';
+import { CANARY_DOMAINS, POOL_DIR, parseSeed, publicRecord, readPool, redact, score, shuffle, summaryLine } from './security-audit-canary.mjs';
 import { SENTINEL, domains, ruleNumber } from './security-audit-report.mjs';
 import { repoRoot as repo, tempDir, workflowRunBlock } from './lint-kit.mjs';
 
@@ -32,7 +32,7 @@ const realGit = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' 
 // measure nothing on the night it is drawn, so `pnpm test` fails first.
 test('every canary parses, names a rule its domain owns, and applies to this tree', () => {
   const pool = readPool(repo);
-  assert.ok(pool.length >= CANARY_DOMAINS.length, 'the pool is nearly empty');
+  for (const d of CANARY_DOMAINS) assert.ok(pool.filter((s) => s.domain === d).length >= 3, `${d} has fewer than three seeds`);
   for (const s of pool) {
     if (s.rule) {
       const owner = domains(repo).find((d) => d.specs.includes(s.rule.spec));
@@ -58,6 +58,23 @@ test('the whole pool applies, one seed over another', (t) => {
     const run = spawnSync('git', ['apply', join(repo, POOL_DIR, `${s.id}.patch`)], { cwd: dir, encoding: 'utf8' });
     assert.equal(run.status, 0, `${s.id} does not apply over the seeds before it: ${run.stderr}`);
   }
+});
+
+// The first canary drew six application-security seeds of six: a draw is dealt
+// across the domains, so one that has a seed is never left unmeasured.
+test('a draw is dealt across the domains, whatever their share of the pool', () => {
+  const seeds = (domain, n) => Array.from({ length: n }, (_, i) => ({ id: `${domain}-${i}`, domain }));
+  const pool = [...seeds('application-security', 12), ...seeds('hosted', 3), ...seeds('supply-chain', 3)];
+  for (const key of ['1', '37720586893', 'k']) {
+    const order = shuffle(pool, key);
+    assert.deepEqual(order.map((s) => s.id).sort(), pool.map((s) => s.id).sort());
+    // The first six are two rounds of all three domains.
+    const first = order.slice(0, 6).map((s) => s.domain);
+    assert.deepEqual(first.slice(3), first.slice(0, 3), key);
+    assert.deepEqual(new Set(first), new Set(CANARY_DOMAINS), key);
+    assert.deepEqual(shuffle(pool, key), order);
+  }
+  assert.notDeepEqual(shuffle(pool, '1').map((s) => s.id), shuffle(pool, '2').map((s) => s.id));
 });
 
 // --- Fixtures ---------------------------------------------------------------

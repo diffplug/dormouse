@@ -169,7 +169,7 @@ Source of truth: `Verify AUDIT_PAT is provisioned` in `.github/workflows/securit
 
 **A `workflow_dispatch` with `canary: true` measures the audit's recall instead of auditing** (rationale). Its `canary` job runs on `main` alone, and the `audit` job not at all:
 
-1. `seed` applies `CANARY_SEEDS` seeds from `.github/audit/canaries/`, in an order the run id fixes, skipping one that does not apply over those before it; then it deletes the pool and replaces the history with one root commit, so nothing in the checkout tells a seed from the code around it.
+1. `seed` applies `CANARY_SEEDS` seeds from `.github/audit/canaries/`, in an order the run id fixes, dealt round-robin across the code domains, skipping one that does not apply over those before it; then it deletes the pool and replaces the history with one root commit, so nothing in the checkout tells a seed from the code around it (rationale).
 2. The audit's agent runs the code domains over that checkout: `supply-chain`, `application-security`, and `hosted`, handed an empty open-findings list. `ci-and-secrets` reads live GitHub state, which a checkout cannot seed, and the ledger is never read.
 3. `score` counts a seed caught only when a `FAIL` result, or a finding at or above the seed's catch severity, cites one of its `Expect:` files and, for a seed naming a `FAIL IF`, that rule: the result's rule id, or the finding's spec and heading.
 
@@ -182,7 +182,7 @@ Source of truth: `Verify AUDIT_PAT is provisioned` in `.github/workflows/securit
 - **FAIL IF** the `canary` job can push or file: it holds any write permission, runs its agent on a token but its own read-only one, keeps the checkout's credentials, runs `gh` or `git push`, or names `AUDIT_PAT` or `EMBARGO_TOKEN`; or `scripts/security-audit-local.sh canary`, which seeds a copy of the committed tree, files anything. Pinned by `scripts/security-audit-canary.test.mjs`.
 - **FAIL IF** a canary run can gate a release or feed the skip: the `audit` job runs in it, it runs on a ref but `main`, it uploads an `audit-state` artifact, or the gate in `.github/workflows/release.yml` can select a run with the canary's title. Pinned by `scripts/security-audit-canary.test.mjs`.
 - **FAIL IF** a canary publishes seed detail: the step summary or the `canary-recall` artifact carries anything but the counts and a validated run link, or the scorecard, the seeds applied, or a fragment leaves the runner but as age ciphertext to `.github/audit/transcript-recipient.txt`. Pinned by `scripts/security-audit-canary.test.mjs`.
-- **FAIL IF** a seed stops applying to the tree, alone or over the rest of the pool, or names a rule that moved or that its `Domain:` does not own. Pinned by `scripts/security-audit-canary.test.mjs`, which `pnpm test` runs.
+- **FAIL IF** a seed stops applying to the tree, alone or over the rest of the pool, or names a rule that moved or that its `Domain:` does not own, or a code domain has fewer than three seeds. Pinned by `scripts/security-audit-canary.test.mjs`, which `pnpm test` runs.
 
 Source of truth: `seed` and `score` in `scripts/security-audit-canary.mjs`; the `canary` job in `.github/workflows/security-audit.yaml`; `run_canary` in `scripts/security-audit-local.sh`.
 

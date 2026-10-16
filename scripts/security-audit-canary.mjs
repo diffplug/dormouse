@@ -6,9 +6,10 @@
  *
  *   node scripts/security-audit-canary.mjs seed --key <key> --count <n> --stash <dir>
  *     In the working directory: apply up to <n> seeds from `.github/audit/canaries/`,
- *     in an order <key> fixes, skipping one that does not apply over those
- *     before it; delete that directory; and replace the git history with one
- *     root commit, so nothing in the checkout says which changes are seeds.
+ *     in an order <key> fixes, dealt round-robin across the domains, skipping
+ *     one that does not apply over those before it; delete that directory; and
+ *     replace the git history with one root commit, so nothing in the checkout
+ *     says which changes are seeds.
  *     Writes the seeds applied to <dir>/seeds.json, outside the checkout.
  *   node scripts/security-audit-canary.mjs score --stash <dir> --scorecard <file> --public <file>
  *       [--run-url <url>] [--summary <file>]
@@ -87,10 +88,13 @@ export function readPool(root = '.') {
     .map((f) => parseSeed(f.slice(0, -'.patch'.length), readFileSync(join(dir, f), 'utf8')));
 }
 
-/** The pool in the order `key` fixes: each seed ranked by a hash of the key and its id. */
+/** The pool in the order `key` fixes, dealt round-robin across the domains, each ranked by a hash of the key and its name. */
 export function shuffle(pool, key) {
-  const rank = (s) => createHash('sha256').update(`${key}\0${s.id}`).digest('hex');
-  return [...pool].sort((a, b) => (rank(a) < rank(b) ? -1 : 1));
+  const rank = (name) => createHash('sha256').update(`${key}\0${name}`).digest('hex');
+  const ranked = (xs, name) => [...xs].sort((a, b) => (rank(name(a)) < rank(name(b)) ? -1 : 1));
+  const hands = ranked(CANARY_DOMAINS, (d) => d).map((d) => ranked(pool.filter((s) => s.domain === d), (s) => s.id));
+  const rounds = Math.max(0, ...hands.map((hand) => hand.length));
+  return Array.from({ length: rounds }, (_, i) => hands.map((hand) => hand[i])).flat().filter(Boolean);
 }
 
 // --- Seed --------------------------------------------------------------------
