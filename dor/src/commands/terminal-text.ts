@@ -50,14 +50,13 @@ export function renderToolResponse(response: ToolSurfaceResponse, json: boolean)
     return renderPrintableJson({
       status: response.status,
       surface_id: response.surfaceId,
-      surface_ref: response.surfaceRef,
       command: response.command,
       cwd: response.cwd,
       minimized: response.minimized,
       key: response.key,
     });
   }
-  return `${printableExact(`${response.status} ${response.surfaceRef}  ${JSON.stringify(response.command)}`)}\n`;
+  return `${printableExact(`${response.status} ${response.surfaceId}  ${JSON.stringify(response.command)}`)}\n`;
 }
 
 // The prerelease-style build tag: `<version>+<N>` when the build carries commits

@@ -32,7 +32,7 @@ Source of truth: `BrowserPanelParams` in `lib/src/components/wall/BrowserPanel.t
 
 ## Placement And Lifetime
 
-**Must share one placement rule across browser entry points**: replace an untouched, helper-less terminal caller in place, else split next to the reference surface. **Never replace a reference that already has a browser.** A replacement transfers the target Surface's `surface:N` ref to the new browser Surface id. The pane context menu never replaces ([Pane Context Menu Connect](#pane-context-menu-connect)); helper callers follow `docs/specs/dor-cli.md` → Helper callers and targets.
+**Must share one placement rule across browser entry points**: replace an untouched, helper-less terminal caller in place, else split next to the reference surface. **Never replace a reference that already has a browser.** A replacement is a new Surface (`docs/specs/glossary.md` → "Invariants" I10). The pane context menu never replaces ([Pane Context Menu Connect](#pane-context-menu-connect)); helper callers follow `docs/specs/dor-cli.md` → Helper callers and targets.
 
 **Must open focus-neutrally**, like `dor ensure`, except a Pane Context Menu placement and `docs/specs/layout.md` corner case #6.
 
@@ -94,10 +94,12 @@ The host owns Resize with pane (rationale), answering each engagement — a choi
 
 **Must persist resolved viewport settings**, restoring them when the browser is recreated without rereading a preset definition.
 
+Surface identity across swaps: `docs/specs/glossary.md` → "Invariants" I10.
+
 | From -> To | Behavior |
 | --- | --- |
-| `iframe` or the other provider -> `agent-browser-*` / `playwright-*` | Swaps at once to a session-less pane whose controller launches at the current URL, headed for a popout (rationale). A failed launch restores the previous renderer in place (`launchFallback: { restore }`), even minimized: the embed, or the previous provider reopened in its own session, keeping its `key` (rationale). Inert without the capability; a non-http(s) `url` refuses the swap (`browserSurfaceUrl`). |
-| `agent-browser-screencast` ↔ `agent-browser-popout` | Same Surface id and session, headed/headless relaunch; preserves only the active URL. |
+| `iframe` or the other provider -> `agent-browser-*` / `playwright-*` | Swaps at once to a session-less renderer whose controller launches at the current URL, headed for a popout (rationale). A failed launch restores the previous renderer in place (`launchFallback: { restore }`), even minimized: the embed, or the previous provider reopened in its own session, keeping its `key` (rationale). Inert without the capability; a non-http(s) `url` refuses the swap (`browserSurfaceUrl`). |
+| `agent-browser-screencast` ↔ `agent-browser-popout` | Same session, headed/headless relaunch; preserves only the active URL. |
 | `agent-browser-*` -> `iframe` | Uses canonical `params.url`; with multiple tabs, requires confirmation, since only the active tab survives. |
 
 Source of truth: `lib/src/components/wall/AgentBrowserScreenModal.tsx`, `offeredRenderModes` in `lib/src/components/wall/browser-automation.ts`, `onSwapRenderMode` in `lib/src/components/Wall.tsx`, `createViewportSync` in `lib/src/host/browser-sync.ts`.
@@ -148,7 +150,7 @@ Source of truth: `browserLaunchEnv` in `lib/src/host/browser-launch-env.ts`, `cr
 
 - **Must match `--key <name>` against `[A-Za-z0-9._-]+`**, since it becomes part of a session name and so a filesystem path; the default is `--key default`. Identity-flag exclusivity: `docs/specs/dor-cli.md` → "Browser Surface Addressing".
 - **Must resolve a key to the Surface of that provider holding it in the answering Wall**, whose stored binding — session, cwd, executable — the command runs with, so a Surface keeps its session however keys were named when it was made.
-- **Must mint a key no Surface holds as `dormouse.<scope>.<name>`**, scoped by the stable id of the Workspace that will hold the browser, so a strip reorder renames nothing. **Must give a bare Wall (a VS Code webview, Pocket), which has no Workspace id, a scope of its own for its life**, so two webviews' `--key default` are two browsers (rationale). A key's concurrent first commands share one reservation of the caller's cwd and executable (`BrowserBindingReservations`). **Never mint a session a Surface anywhere in the Window holds, or the provider's reservation of another key**: take the first free `.2`, `.3`, … suffix (rationale).
+- **Must mint a key no Surface holds as `dormouse.<scope>.<name>`**, scoped by the id of the Workspace that will hold the browser, so a strip reorder renames nothing; **Must scrub every character outside `[A-Za-z0-9._-]` from scope and key**, the id's `:` included, since the name becomes a filesystem path (`workspace:3` → `dormouse.workspace-3.<name>`). **Must give a bare Wall (a VS Code webview, Pocket), which has no Workspace id, a scope of its own for its life**, so two webviews' `--key default` are two browsers (rationale). A key's concurrent first commands share one reservation of the caller's cwd and executable (`BrowserBindingReservations`). **Never mint a session a Surface anywhere in the Window holds, or the provider's reservation of another key**: take the first free `.2`, `.3`, … suffix (rationale).
 - **Must let only the answering Workspace name a key**, so `dor` resolves it host-side (`docs/specs/dor-cli.md` → "Browser Surface Addressing") and names `dormouse.1.<name>` itself only with no control endpoint at all, outside Dormouse, where `dor` is a pure passthrough. **Never fall back CLI-side when the host refuses a managed invocation**, a passthrough verb included: that would name the wrong Workspace's browser, so the refusal fails the command before the binary runs (`docs/specs/dor-cli.md` → "Handle Model").
 - **Must name GUI-spawned sessions `dormouse.1.gui-<hex>`, minted host-wide**, which no `--key` names; `--surface <handle>` reaches them. **Must answer only for a Surface its provider renders**: an `iframe` Surface has no session to drive.
 - **Must map one browser to one Surface**, found by its host-reported native identity (agent-browser: the session; Playwright: installation, project scope and session, which a raw `--session` shares across one project's subdirectories). A command for a browser that has a Surface hands its stream over, refreshes `binaryPath` and reuses the pane — not an invariant: a Surface killed or render-swapped mid-command leaves the trailing request to mint a fresh pane (rationale).

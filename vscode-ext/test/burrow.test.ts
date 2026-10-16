@@ -1265,19 +1265,19 @@ describe('burrow provider', () => {
   it('asks the webviews for the directory and for an attach', async () => {
     const mod = await freshBurrow();
     const bound = fakeDeps();
-    bound.answers.set('directory', [{ surfaceId: 'surface-1' }]);
+    bound.answers.set('directory', [{ surfaceId: 'surface:1' }]);
     bound.answers.set('surfaceOp', [{ ptyId: 'pty-1', cols: 100, rows: 30 }]);
     const provider = mod.createBurrowProvider(bound.deps());
 
-    expect(await provider.collectDirectory()).toEqual([{ surfaceId: 'surface-1' }]);
+    expect(await provider.collectDirectory()).toEqual([{ surfaceId: 'surface:1' }]);
 
-    const handle = await provider.resolveSurface('surface-1', { cols: 100, rows: 30 });
+    const handle = await provider.resolveSurface('surface:1', { cols: 100, rows: 30 });
     expect(handle).toMatchObject({ ptyId: 'pty-1', cols: 100, rows: 30 });
     // Attach-is-the-resize: the size rides the attach, because the owner is the
     // only one that can reach its xterm.
     expect(bound.asked.at(-1)).toEqual({
       op: 'surfaceOp',
-      params: { surfaceId: 'surface-1', op: 'attach', cols: 100, rows: 30 },
+      params: { surfaceId: 'surface:1', op: 'attach', cols: 100, rows: 30 },
     });
   });
 
@@ -1287,16 +1287,16 @@ describe('burrow provider', () => {
     bound.answers.set('surfaceOp', [{ ptyId: 'pty-1', cols: 51, rows: 14 }]);
     const provider = mod.createBurrowProvider(bound.deps());
 
-    const handle = (await provider.resolveSurface('surface-1', { cols: 51, rows: 14 }, HOLD))!;
+    const handle = (await provider.resolveSurface('surface:1', { cols: 51, rows: 14 }, HOLD))!;
     expect(bound.asked.at(-1)).toEqual({
       op: 'surfaceOp',
-      params: { surfaceId: 'surface-1', op: 'attach', cols: 51, rows: 14, hold: HOLD },
+      params: { surfaceId: 'surface:1', op: 'attach', cols: 51, rows: 14, hold: HOLD },
     });
     handle.release();
     await tick();
     expect(bound.asked.at(-1)).toEqual({
       op: 'surfaceOp',
-      params: { surfaceId: 'surface-1', op: 'release', hold: HOLD },
+      params: { surfaceId: 'surface:1', op: 'release', hold: HOLD },
     });
   });
 
@@ -1312,7 +1312,7 @@ describe('burrow provider', () => {
     const bound = fakeDeps();
     bound.answers.set('surfaceOp', [{ ptyId: 'pty-1', cols: 100, rows: 30 }]);
     const provider = mod.createBurrowProvider(bound.deps());
-    const handle = (await provider.resolveSurface('surface-1', { cols: 100, rows: 30 }))!;
+    const handle = (await provider.resolveSurface('surface:1', { cols: 100, rows: 30 }))!;
 
     bound.answers.set('surfaceOp', []);
     await expect(handle.resize(120, 40)).rejects.toThrow('surface owner unavailable');

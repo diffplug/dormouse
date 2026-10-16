@@ -3,7 +3,6 @@ import type {
   CliResult,
   ControlClient,
   DorCommandContext,
-  IdFormat,
   ParseResult,
 } from './types.js';
 import { errorLine } from './terminal-text.js';
@@ -39,15 +38,6 @@ export function parseNonNegativeInt(input: string, flag: string): number {
   return value;
 }
 
-
-export function isIdFormat(value: string): value is IdFormat {
-  return value === 'refs' || value === 'ids' || value === 'both';
-}
-
-export function parseIdFormat(value: string): IdFormat {
-  if (isIdFormat(value)) return value;
-  throw new SyntaxError(`invalid --id-format '${value}'`);
-}
 
 export interface PreDelimiterArgSpec {
   /** Flags taking no value. */
@@ -124,17 +114,6 @@ export const workspaceFlag = {
 /** The `workspace` field of a request, present only when the flag was given. */
 export function workspaceParam(workspace: string | undefined): { workspace?: string } {
   return workspace === undefined ? {} : { workspace };
-}
-
-export function renderHandle(handle: { ref: string; id: string }, idFormat: IdFormat): string {
-  switch (idFormat) {
-    case 'refs':
-      return handle.ref;
-    case 'ids':
-      return handle.id;
-    case 'both':
-      return `${handle.ref} ${handle.id}`;
-  }
 }
 
 export function writeStdout(context: DorCommandContext, stdout: string): void {

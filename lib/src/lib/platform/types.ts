@@ -89,6 +89,31 @@ export function openPortRequestTimeoutMs(count: number, hops = 1): number {
 }
 
 
+/**
+ * How long the VS Code extension host lets one Surface id reservation wait —
+ * queued behind its other webviews' and for the cross-window lock together,
+ * counted from its arrival — before answering it with no ids
+ * (`vscode-ext/src/surface-ids.ts`). Far above a live holder's few-ms hold.
+ */
+export const SURFACE_ID_RESERVE_WAIT_MS = 3_000;
+
+/**
+ * The most Surface or Workspace ids one reservation hands out; a host clamps a
+ * larger ask to it, and the page asks again for the rest. The VS Code extension
+ * host and the browser dev harness read this; Rust keeps its twin, `MAX_BLOCK`
+ * in `standalone/src-tauri/src/ids.rs`.
+ */
+export const ID_RESERVE_MAX_BLOCK = 64;
+
+/**
+ * The webview's deadline for that answer. The host answers within the wait
+ * plus one durable write (the reservation's own, or the one ahead of it still
+ * in flight when the wait runs out); this leaves that write 5 s, so only a
+ * pathological fsync makes the webview mint `surface:<uuid>` while the host
+ * persists a block nobody uses.
+ */
+export const SURFACE_ID_RESERVE_TIMEOUT_MS = SURFACE_ID_RESERVE_WAIT_MS + 5_000;
+
 export type AlertStateDetail = { id: string } & AlertState;
 
 export type { IframeProxyResult };

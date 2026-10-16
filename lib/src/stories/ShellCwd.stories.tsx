@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react';
+import { surfaceIdFor } from 'dor/protocol';
 import { Baseboard } from '../components/Baseboard';
 import {
   Wall,
@@ -56,7 +57,6 @@ const noopActions: WallActions = {
   onFinishRename: () => ({ accepted: true }),
   onCancelRename: () => {},
   onSwapRenderMode: () => {},
-  resolveSurfaceRef: (id) => id,
   onResolveToolApproval: () => {},
 };
 
@@ -72,63 +72,62 @@ export default meta;
 type Story = StoryObj<typeof ShellCwdMatrix>;
 
 export const CwdSourcesAndPathKinds: Story = storyFor([
-  caseState('cwd-none', 'No CWD', idle({ activity: { kind: 'unknown' } }), 'No shell integration signal yet'),
-  caseState('cwd-manual', 'Manual/restored', idle({ cwd: manual('/Users/me/restored-app') }), 'Initial launch or persisted directory'),
-  caseState('cwd-process', 'Process fallback', idle({ cwd: processCwd('/Users/me/live-process') }), 'Local PTY process CWD'),
-  caseState('cwd-osc7-local', 'OSC 7 local POSIX', idle({ cwd: osc7('file://localhost/Users/me/project') }), 'file://localhost/Users/me/project'),
-  caseState('cwd-osc7-remote', 'OSC 7 remote POSIX', idle({ cwd: osc7('file://prod-box/home/me/project') }), 'Preserves remote host identity'),
-  caseState('cwd-osc7-encoded', 'OSC 7 encoded', idle({ cwd: osc7('file://localhost/Users/me/My%20Project/ma%C3%B1ana') }), 'Decoded spaces and non-ASCII'),
-  caseState('cwd-osc99-drive', 'OSC 9;9 drive', idle({ cwd: osc99('C:\\Users\\me\\repo') }), 'Windows drive-letter path'),
-  caseState('cwd-osc99-unc', 'OSC 9;9 UNC', idle({ cwd: osc99('\\\\server\\share\\repo') }), 'Windows UNC path'),
-  caseState('cwd-osc99-wsl', 'OSC 9;9 WSL-like', idle({ cwd: osc99('/mnt/c/Users/me/repo') }), 'Unknown path kind by design'),
-  caseState('cwd-osc633', 'OSC 633 Cwd', idle({ cwd: osc633('/workspaces/dormouse') }), 'VS Code shell integration CWD'),
-  caseState('cwd-osc1337', 'OSC 1337 CurrentDir', idle({ cwd: osc1337('/Users/me/iterm-app') }), 'iTerm2 CurrentDir compatibility'),
+  caseState('No CWD', idle({ activity: { kind: 'unknown' } }), 'No shell integration signal yet'),
+  caseState('Manual/restored', idle({ cwd: manual('/Users/me/restored-app') }), 'Initial launch or persisted directory'),
+  caseState('Process fallback', idle({ cwd: processCwd('/Users/me/live-process') }), 'Local PTY process CWD'),
+  caseState('OSC 7 local POSIX', idle({ cwd: osc7('file://localhost/Users/me/project') }), 'file://localhost/Users/me/project'),
+  caseState('OSC 7 remote POSIX', idle({ cwd: osc7('file://prod-box/home/me/project') }), 'Preserves remote host identity'),
+  caseState('OSC 7 encoded', idle({ cwd: osc7('file://localhost/Users/me/My%20Project/ma%C3%B1ana') }), 'Decoded spaces and non-ASCII'),
+  caseState('OSC 9;9 drive', idle({ cwd: osc99('C:\\Users\\me\\repo') }), 'Windows drive-letter path'),
+  caseState('OSC 9;9 UNC', idle({ cwd: osc99('\\\\server\\share\\repo') }), 'Windows UNC path'),
+  caseState('OSC 9;9 WSL-like', idle({ cwd: osc99('/mnt/c/Users/me/repo') }), 'Unknown path kind by design'),
+  caseState('OSC 633 Cwd', idle({ cwd: osc633('/workspaces/dormouse') }), 'VS Code shell integration CWD'),
+  caseState('OSC 1337 CurrentDir', idle({ cwd: osc1337('/Users/me/iterm-app') }), 'iTerm2 CurrentDir compatibility'),
 ]);
 
 export const HostAndDirectoryDisambiguation: Story = storyFor([
-  caseState('host-sibling-app', 'Sibling app', running('/repo/app', 'pnpm test --watch'), 'Same command in sibling directories'),
-  caseState('host-sibling-api', 'Sibling api', running('/repo/api', 'pnpm test --watch'), 'Same command in sibling directories'),
-  caseState('host-unrelated-work', 'Unrelated app A', running('/work/client/app', 'npm run dev'), 'Same basename in unrelated tree'),
-  caseState('host-unrelated-tmp', 'Unrelated app B', running('/tmp/scratch/app', 'npm run dev'), 'Same basename in unrelated tree'),
-  caseState('host-local-same-path', 'Local same path', running('/home/me/app', 'cargo watch -x test', { host: 'localhost' }), 'Local host kept distinct'),
-  caseState('host-remote-same-path', 'Remote same path', running('/home/me/app', 'cargo watch -x test', { host: 'prod-box' }), 'Remote host kept distinct'),
-  caseState('host-long-path', 'Long path', running('/Users/me/src/company/product/apps/customer-facing-dashboard', 'docker compose up'), 'Long directory label truncates'),
-  caseState('host-unknown-a', 'Unknown duplicate A', running(null, 'pytest'), 'No CWD available'),
-  caseState('host-unknown-b', 'Unknown duplicate B', running(null, 'pytest'), 'No CWD available'),
+  caseState('Sibling app', running('/repo/app', 'pnpm test --watch'), 'Same command in sibling directories'),
+  caseState('Sibling api', running('/repo/api', 'pnpm test --watch'), 'Same command in sibling directories'),
+  caseState('Unrelated app A', running('/work/client/app', 'npm run dev'), 'Same basename in unrelated tree'),
+  caseState('Unrelated app B', running('/tmp/scratch/app', 'npm run dev'), 'Same basename in unrelated tree'),
+  caseState('Local same path', running('/home/me/app', 'cargo watch -x test', { host: 'localhost' }), 'Local host kept distinct'),
+  caseState('Remote same path', running('/home/me/app', 'cargo watch -x test', { host: 'prod-box' }), 'Remote host kept distinct'),
+  caseState('Long path', running('/Users/me/src/company/product/apps/customer-facing-dashboard', 'docker compose up'), 'Long directory label truncates'),
+  caseState('Unknown duplicate A', running(null, 'pytest'), 'No CWD available'),
+  caseState('Unknown duplicate B', running(null, 'pytest'), 'No CWD available'),
 ]);
 
 export const ShellActivityLifecycle: Story = storyFor([
-  caseState('activity-unknown', 'Unknown', idle({ activity: { kind: 'unknown' }, title: terminalTitle('shell', 'osc0') }), 'No shell integration signal'),
-  caseState('activity-prompt', 'Prompt drawing', idle({ activity: { kind: 'prompt' }, title: terminalTitle('zsh', 'osc0') }), 'Prompt start'),
-  caseState('activity-editing', 'Editing', idle({ activity: { kind: 'editing' }, title: terminalTitle('zsh', 'osc0') }), 'At prompt'),
-  caseState('activity-running', 'Running', running('/repo/app', 'npm run dev'), 'Foreground command active'),
-  caseState('activity-finished-zero', 'Finished 0', finished('/repo/app', 'npm run dev', 0), 'Successful exit'),
-  caseState('activity-finished-nonzero', 'Finished nonzero', finished('/repo/app', 'pnpm test', 1), 'Failing exit'),
-  caseState('activity-finished-missing', 'Finished missing code', finished('/repo/app', 'cargo test'), 'No exit code reported'),
-  caseState('activity-next-prompt', 'Next prompt', idle({ cwd: manual('/repo/app'), activity: { kind: 'editing' }, title: terminalTitle('zsh', 'osc0') }), 'Finished state cleared by prompt'),
+  caseState('Unknown', idle({ activity: { kind: 'unknown' }, title: terminalTitle('shell', 'osc0') }), 'No shell integration signal'),
+  caseState('Prompt drawing', idle({ activity: { kind: 'prompt' }, title: terminalTitle('zsh', 'osc0') }), 'Prompt start'),
+  caseState('Editing', idle({ activity: { kind: 'editing' }, title: terminalTitle('zsh', 'osc0') }), 'At prompt'),
+  caseState('Running', running('/repo/app', 'npm run dev'), 'Foreground command active'),
+  caseState('Finished 0', finished('/repo/app', 'npm run dev', 0), 'Successful exit'),
+  caseState('Finished nonzero', finished('/repo/app', 'pnpm test', 1), 'Failing exit'),
+  caseState('Finished missing code', finished('/repo/app', 'cargo test'), 'No exit code reported'),
+  caseState('Next prompt', idle({ cwd: manual('/repo/app'), activity: { kind: 'editing' }, title: terminalTitle('zsh', 'osc0') }), 'Finished state cleared by prompt'),
 ]);
 
 export const CommandSnapshotBehavior: Story = storyFor([
-  caseState('snapshot-running', 'Running snapshot', running('/repo/app', 'pnpm test --watch'), 'Header disambiguates with command start CWD'),
-  caseState('snapshot-cwd-changed', 'CWD changed while running', running('/repo/app', 'pnpm test --watch', { currentCwd: '/repo/other' }), 'Still groups by /repo/app'),
-  caseState('snapshot-finished', 'Finished retains start CWD', finished('/repo/app', 'pnpm test --watch', 0, { currentCwd: '/repo/other' }), 'Freshly finished command keeps start CWD'),
-  caseState('snapshot-osc633', 'OSC 633 explicit command', running('/repo/app', 'pnpm test --watch', { source: 'osc633_E' }), 'Command line from OSC 633;E'),
-  caseState('snapshot-osc133-title', 'OSC 133 title fallback', running('/repo/app', null, { source: 'osc133_boundaries', title: terminalTitle('zsh', 'osc0') }), 'Boundaries without command line'),
+  caseState('Running snapshot', running('/repo/app', 'pnpm test --watch'), 'Header disambiguates with command start CWD'),
+  caseState('CWD changed while running', running('/repo/app', 'pnpm test --watch', { currentCwd: '/repo/other' }), 'Still groups by /repo/app'),
+  caseState('Finished retains start CWD', finished('/repo/app', 'pnpm test --watch', 0, { currentCwd: '/repo/other' }), 'Freshly finished command keeps start CWD'),
+  caseState('OSC 633 explicit command', running('/repo/app', 'pnpm test --watch', { source: 'osc633_E' }), 'Command line from OSC 633;E'),
+  caseState('OSC 133 title fallback', running('/repo/app', null, { source: 'osc133_boundaries', title: terminalTitle('zsh', 'osc0') }), 'Boundaries without command line'),
 ]);
 
 export const TitleFallbacksAndPinnedTitles: Story = storyFor([
-  caseState('title-user', 'User-pinned title', running('/repo/app', 'npm run dev', { title: terminalTitle('Production API', 'user') }), 'Pinned title overrides command and CWD'),
-  caseState('title-app-over-command', 'App title over command', running('/repo/app', 'npm run dev', { title: terminalTitle('dev server: ready', 'osc0') }), 'Fresh app title beats command'),
-  caseState('title-stale-shell', 'Stale shell title', running('/repo/app', 'npm run dev', { title: terminalTitleAt('zsh', 'osc0', BASE_TIME - 1) }), 'Pre-command shell title does not beat command'),
-  caseState('title-osc0', 'OSC 0 unknown command', running('/repo/app', null, { title: terminalTitle('zsh', 'osc0') }), 'Terminal title fallback for unknown active command'),
-  caseState('title-osc2', 'OSC 2 unknown command', running('/repo/app', null, { title: terminalTitle('vim', 'osc2') }), 'Terminal title fallback for unknown active command'),
-  caseState('title-idle-fallback', 'Idle fallback', idle({ activity: { kind: 'editing' } }), 'No foreground command'),
-  caseState('title-long-user', 'Long user title', idle({ cwd: manual('/repo/app'), title: terminalTitle('my-extremely-long-running-background-process-with-a-very-descriptive-name', 'user') }), 'Truncates before controls'),
+  caseState('User-pinned title', running('/repo/app', 'npm run dev', { title: terminalTitle('Production API', 'user') }), 'Pinned title overrides command and CWD'),
+  caseState('App title over command', running('/repo/app', 'npm run dev', { title: terminalTitle('dev server: ready', 'osc0') }), 'Fresh app title beats command'),
+  caseState('Stale shell title', running('/repo/app', 'npm run dev', { title: terminalTitleAt('zsh', 'osc0', BASE_TIME - 1) }), 'Pre-command shell title does not beat command'),
+  caseState('OSC 0 unknown command', running('/repo/app', null, { title: terminalTitle('zsh', 'osc0') }), 'Terminal title fallback for unknown active command'),
+  caseState('OSC 2 unknown command', running('/repo/app', null, { title: terminalTitle('vim', 'osc2') }), 'Terminal title fallback for unknown active command'),
+  caseState('Idle fallback', idle({ activity: { kind: 'editing' } }), 'No foreground command'),
+  caseState('Long user title', idle({ cwd: manual('/repo/app'), title: terminalTitle('my-extremely-long-running-background-process-with-a-very-descriptive-name', 'user') }), 'Truncates before controls'),
 ]);
 
 const titleCandidatesInHeaderMenu = storyFor([
   caseState(
-    'title-candidates-popup',
     'Title candidates in header menu',
     titleCandidateState(),
     'The context title explanation shows the latest title per channel',
@@ -143,17 +142,17 @@ export const TitleCandidatesInHeaderMenu: Story = {
     fakePty: { scenario: flattenScenario(SCENARIO_SHELL_PROMPT) },
   },
   // A flex column, or the `flex-1` Wall collapses to its Baseboard and hides the pane.
-  render: () => <div className="flex flex-col" style={{ width: 900, height: 680 }}><Wall initialPaneIds={['title-candidates-popup']} /></div>,
+  render: () => <div className="flex flex-col" style={{ width: 900, height: 680 }}><Wall initialPaneIds={['surface:1']} /></div>,
   play: openHeaderContextMenu,
 };
 
 export const GroupingKeys: Story = storyFor([
-  caseState('group-app-dev', 'App dev server', running('/repo/app', 'npm run dev'), 'Directory: app, command: npm run dev, status: running'),
-  caseState('group-api-dev', 'API dev server', running('/repo/api', 'npm run dev'), 'Directory: api, command: npm run dev, status: running'),
-  caseState('group-app-test', 'App test', running('/repo/app', 'pnpm test --watch'), 'Shares directory with app dev'),
-  caseState('group-api-idle', 'API idle', idle({ cwd: manual('/repo/api'), activity: { kind: 'editing' } }), 'Idle directory grouping uses pane CWD'),
-  caseState('group-docs-finished', 'Docs finished', finished('/repo/docs', 'cargo test', 0), 'Finished status group'),
-  caseState('group-unknown', 'Unknown', idle({ activity: { kind: 'unknown' } }), 'Unknown status group'),
+  caseState('App dev server', running('/repo/app', 'npm run dev'), 'Directory: app, command: npm run dev, status: running'),
+  caseState('API dev server', running('/repo/api', 'npm run dev'), 'Directory: api, command: npm run dev, status: running'),
+  caseState('App test', running('/repo/app', 'pnpm test --watch'), 'Shares directory with app dev'),
+  caseState('API idle', idle({ cwd: manual('/repo/api'), activity: { kind: 'editing' } }), 'Idle directory grouping uses pane CWD'),
+  caseState('Docs finished', finished('/repo/docs', 'cargo test', 0), 'Finished status group'),
+  caseState('Unknown', idle({ activity: { kind: 'unknown' } }), 'Unknown status group'),
 ], { showGroups: true });
 
 function ShellCwdMatrix({
@@ -263,7 +262,9 @@ function casesForGroup(cases: ShellCwdCase[], panes: TerminalPaneState[]): strin
   return cases.filter((item) => panes.includes(item.state)).map((item) => item.label);
 }
 
-function storyFor(cases: ShellCwdCase[], extraArgs: { showGroups?: boolean } = {}): Story {
+/** Each case is one Surface, numbered `surface:1` onward. */
+function storyFor(unnumbered: Omit<ShellCwdCase, 'id'>[], extraArgs: { showGroups?: boolean } = {}): Story {
+  const cases = unnumbered.map((item, i) => ({ ...item, id: surfaceIdFor(i + 1) }));
   return {
     args: {
       cases,
@@ -277,8 +278,8 @@ function storyFor(cases: ShellCwdCase[], extraArgs: { showGroups?: boolean } = {
   };
 }
 
-function caseState(id: string, label: string, state: TerminalPaneState, note?: string): ShellCwdCase {
-  return { id, label, state, note };
+function caseState(label: string, state: TerminalPaneState, note?: string): Omit<ShellCwdCase, 'id'> {
+  return { label, state, note };
 }
 
 function idle({
@@ -400,7 +401,7 @@ function titleCandidateState(): TerminalPaneState {
 
 async function openHeaderContextMenu() {
   await waitForPrimedState();
-  const title = await requireElement<HTMLElement>('[data-pane-title-for="title-candidates-popup"]', 'terminal title');
+  const title = await requireElement<HTMLElement>('[data-pane-title-for="surface:1"]', 'terminal title');
 
   const rect = title.getBoundingClientRect();
   title.dispatchEvent(new MouseEvent('contextmenu', {

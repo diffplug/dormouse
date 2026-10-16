@@ -25,9 +25,8 @@ A one-line summary naming the cause and how long the wait took goes to stderr, s
 
 JSON output:
   {
-    "workspace_ref": "workspace:1",
+    "workspace_id": "workspace:1",
     "surface_id": "...",
-    "surface_ref": "surface:3",
     "cause": "quiet",
     "waited_ms": 615000,
     "detail": "output stopped after 10m 15s"

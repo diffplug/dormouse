@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react';
+import { surfaceIdFor } from 'dor/protocol';
 import { expect, userEvent, waitFor, within } from 'storybook/test';
 import { Wall } from '../components/Wall';
 import { TERMINAL_CONTEXT_TEETH_PX } from '../components/design';
@@ -9,19 +10,28 @@ import { leaves, normalizeWeights, type LathNode } from '../lib/lath/model';
 import type { LathPersistedLayout } from '../lib/lath/persistence';
 import { requireElement, settleTerminalContext, settleTerminals } from './settle-terminals';
 
-const SOURCE = 'placement-source';
 type Layout = 'single' | 'columns' | 'rows' | 'grid' | 'uneven' | 'wide-bottom';
 type Props = { layout: Layout; width: number; height: number; sourceAtEnd: boolean; cursor: 'top' | 'bottom'; zoomed: boolean };
-const leaf = (id: string): LathNode => ({ kind: 'leaf', id });
+const SOURCE = 'source';
+type Shape = Pick<Props, 'layout' | 'sourceAtEnd'>;
 const split = (dir: 'row' | 'col', nodes: LathNode[], weights = nodes.map(() => 1)): LathNode => ({ kind: 'split', dir, children: normalizeWeights(nodes.map((node, i) => ({ node, weight: weights[i] }))) });
-function boot({ layout, sourceAtEnd }: Props): LathPersistedLayout {
+/** The layout's tree, each leaf built from its role by `leaf`. */
+function shape({ layout, sourceAtEnd }: Shape, leaf: (role: string) => LathNode): LathNode {
   const pair = sourceAtEnd ? [leaf('peer'), leaf(SOURCE)] : [leaf(SOURCE), leaf('peer')];
-  const root = layout === 'single' ? leaf(SOURCE)
+  return layout === 'single' ? leaf(SOURCE)
     : layout === 'wide-bottom' ? split('col', [split('row', [leaf('peer'), leaf('peer-2')]), leaf(SOURCE)], [1.08, 1])
     : layout === 'rows' ? split('col', pair)
     : layout === 'grid' ? split('row', [split('col', pair), split('col', [leaf('peer-2'), leaf('peer-3')])])
     : split('row', pair, layout === 'uneven' ? [2, 1] : undefined);
-  return { version: 1, tree: { root }, leafMeta: Object.fromEntries(leaves({ root }).map(id => [id, { component: 'terminal', tabComponent: 'terminal', title: id === SOURCE ? 'Source terminal' : 'Neighbor terminal' }])) };
+}
+/** The roles in tree order, which is how a restored Wall numbers its panes `surface:1` onward. */
+const roles = (props: Shape) => leaves({ root: shape(props, role => ({ kind: 'leaf', id: role })) });
+const idOf = (props: Shape, role: string) => surfaceIdFor(roles(props).indexOf(role) + 1);
+const sourceId = (props: Shape) => idOf(props, SOURCE);
+function boot(props: Props): LathPersistedLayout {
+  const root = shape(props, role => ({ kind: 'leaf', id: idOf(props, role) }));
+  const source = sourceId(props);
+  return { version: 1, tree: { root }, leafMeta: Object.fromEntries(leaves({ root }).map(id => [id, { component: 'terminal', tabComponent: 'terminal', title: id === source ? 'Source terminal' : 'Neighbor terminal' }])) };
 }
 function PlacementWall(props: Props) {
   return <div data-placement-frame className="flex shrink-0 flex-col" style={{ width: props.width, height: props.height }}>
@@ -34,7 +44,7 @@ function terminal(id: string) {
   if (!term) throw new Error(`Terminal ${id} never mounted`);
   return term;
 }
-const sourcePane = () => document.querySelector<HTMLElement>(`[data-lath-leaf="${SOURCE}"]`)!;
+const sourcePane = (source: string) => document.querySelector<HTMLElement>(`[data-lath-leaf="${source}"]`)!;
 const context = () => document.querySelector<HTMLElement>('[data-terminal-context]')!;
 const rect = (element: Element) => {
   const { x, y, width, height } = element.getBoundingClientRect();
@@ -50,20 +60,20 @@ function expectContained(element: Element, parent: Element) {
   expect(a.right).toBeLessThanOrEqual(b.right + 1);
   expect(a.bottom).toBeLessThanOrEqual(b.bottom + 1);
 }
-async function rightClickSourceHeader() {
-  const header = await requireElement(`[data-pane-header-for="${SOURCE}"]`, 'source header');
+async function rightClickSourceHeader(source: string) {
+  const header = await requireElement(`[data-pane-header-for="${source}"]`, 'source header');
   header.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 }));
   await requireElement('[data-helper-terminal] .xterm', 'helper terminal');
-  const helper = getHelper(SOURCE)!;
+  const helper = getHelper(source)!;
   // Fitting after output changes wrapping and can clip xterm's current prompt
   // line. Release the fake shell only once it has its actual mounted grid.
   refitSession(helper.id);
   (getPlatform() as FakePtyAdapter).resumeHelperStartup(helper.id);
 }
-async function openContext() {
-  await rightClickSourceHeader();
+async function openContext(source: string) {
+  await rightClickSourceHeader(source);
   await settleTerminalContext();
-  const helper = getHelper(SOURCE)!;
+  const helper = getHelper(source)!;
   expect(helper.status).toBe('completed');
   // Protocol completion precedes xterm's async parsing of the command echo.
   // Drain that queue before the paint gate captures a wrapped narrow terminal.
@@ -88,29 +98,30 @@ function expectedSide({ layout, zoomed, cursor, sourceAtEnd }: Props) {
   return sourceAtEnd ? 'left' : 'right';
 }
 async function prepare(args: Props) {
+  const id = sourceId(args);
   await settleTerminals();
   if (args.zoomed) {
-    await userEvent.click(within(sourcePane()).getByRole('button', { name: 'Zoom' }));
-    await waitFor(() => expect(sourcePane().getBoundingClientRect().width).toBeGreaterThan(args.width * 0.8));
+    await userEvent.click(within(sourcePane(id)).getByRole('button', { name: 'Zoom' }));
+    await waitFor(() => expect(sourcePane(id).getBoundingClientRect().width).toBeGreaterThan(args.width * 0.8));
   }
-  const source = terminal(SOURCE);
-  refitSession(SOURCE);
+  const source = terminal(id);
+  refitSession(id);
   await waitFor(() => expect(source.rows).toBeGreaterThan(4));
   // Real xterm cursor positioning, sampled by production code when context opens.
   const row = args.cursor === 'top' ? 2 : source.rows - 1;
   await new Promise<void>(resolve => source.write(`\x1b[${row};1Hsource cursor here`, resolve));
-  const before = rect(sourcePane());
+  const before = rect(sourcePane(id));
   const size = { cols: source.cols, rows: source.rows };
   const expectSourceUnchanged = () => {
-    expect(rect(sourcePane())).toEqual(before);
+    expect(rect(sourcePane(id))).toEqual(before);
     expect({ cols: source.cols, rows: source.rows }).toEqual(size);
   };
-  await openContext();
+  await openContext(id);
   expectSourceUnchanged();
   await waitFor(() => expect(document.querySelector('[data-ring="outline"]')).toHaveAttribute('data-context-union', 'true'));
   const ring = document.querySelector('[data-ring="outline"]')!.closest('svg')!.parentElement!;
   expectContained(context(), ring);
-  expectContained(sourcePane(), ring);
+  expectContained(sourcePane(id), ring);
   // Keyboard focus on the container must not add a second browser-native ring.
   await userEvent.tab();
   context().focus();
@@ -129,7 +140,7 @@ async function prepare(args: Props) {
     expect(within(context()).getByRole('button', { name: 'Place helper at bottom' })).toBeVisible();
   }
   const a = context().getBoundingClientRect();
-  const b = sourcePane().getBoundingClientRect();
+  const b = sourcePane(id).getBoundingClientRect();
   if (!args.zoomed && args.layout !== 'single') {
     const overlap = { right: b.right - a.left, left: a.right - b.left, bottom: b.bottom - a.top, top: a.bottom - b.top };
     // Only the teeth reach over the source, and they face it.
@@ -150,43 +161,50 @@ const meta = {
   component: PlacementWall,
   // Argos replays stories for capture; unfinished input from the preceding run
   // must not turn this run's fresh-helper fixture into a preserved helper.
-  beforeEach: () => {
-    disposeHelper(SOURCE);
+  beforeEach: ({ args }) => {
+    for (const role of roles(args)) disposeHelper(idOf(args, role));
     const platform = getPlatform() as FakePtyAdapter;
     platform.deferHelperStartup = true;
     return () => { platform.deferHelperStartup = false; };
   },
   args: { layout: 'single', width: 1100, height: 780, sourceAtEnd: false, cursor: 'bottom', zoomed: false },
-  parameters: { layout: 'fullscreen', fakePty: { scenario: flattenScenario(SCENARIO_SHELL_PROMPT) }, primedTerminalState: { byId: { [SOURCE]: { cwd: { path: '/home/demo/projects/dormouse', pathKind: 'posix', isRemote: false, source: 'osc633', updatedAt: 0 } } } }, chromatic: { viewports: [1200] } },
+  parameters: { layout: 'fullscreen', fakePty: { scenario: flattenScenario(SCENARIO_SHELL_PROMPT) }, chromatic: { viewports: [1200] } },
   play: async ({ args, canvasElement }) => { await prepare(args); canvasElement.dataset.placementCheck = 'passed'; },
 } satisfies Meta<typeof PlacementWall>;
 export default meta;
 type Story = StoryObj<typeof meta>;
+/** A story whose source reports the demo shell's directory; which Surface that is depends on the layout. */
+const story = ({ args = {}, parameters, ...rest }: Story = {}): Story => ({
+  ...rest,
+  args,
+  parameters: { ...parameters, primedTerminalState: { byId: { [sourceId({ ...meta.args, ...args })]: { cwd: { path: '/home/demo/projects/dormouse', pathKind: 'posix', isRemote: false, source: 'osc633', updatedAt: 0 } } } } },
+});
 
-export const TwoColumns: Story = { args: { layout: 'columns' } };
-export const RightColumn: Story = { args: { layout: 'columns', sourceAtEnd: true } };
-export const TwoRows: Story = { args: { layout: 'rows' } };
-export const BottomRow: Story = { args: { layout: 'rows', sourceAtEnd: true } };
-export const WideBottomRow: Story = { args: { layout: 'wide-bottom' }, globals: { theme: 'Dark (Visual Studio)' } };
-export const Grid: Story = { args: { layout: 'grid' } };
-export const UnevenColumns: Story = { args: { layout: 'uneven' } };
-export const CursorAtTop: Story = { args: { cursor: 'top' } };
-export const CursorAtBottom: Story = {};
-export const ZoomedPane: Story = { args: { layout: 'grid', zoomed: true } };
-export const NarrowWindow: Story = { args: { width: 294, height: 620 } };
-export const ShortWindow: Story = { args: { width: 580, height: 310 } };
+export const TwoColumns = story({ args: { layout: 'columns' } });
+export const RightColumn = story({ args: { layout: 'columns', sourceAtEnd: true } });
+export const TwoRows = story({ args: { layout: 'rows' } });
+export const BottomRow = story({ args: { layout: 'rows', sourceAtEnd: true } });
+export const WideBottomRow = story({ args: { layout: 'wide-bottom' }, globals: { theme: 'Dark (Visual Studio)' } });
+export const Grid = story({ args: { layout: 'grid' } });
+export const UnevenColumns = story({ args: { layout: 'uneven' } });
+export const CursorAtTop = story({ args: { cursor: 'top' } });
+export const CursorAtBottom = story();
+export const ZoomedPane = story({ args: { layout: 'grid', zoomed: true } });
+export const NarrowWindow = story({ args: { width: 294, height: 620 } });
+export const ShortWindow = story({ args: { width: 580, height: 310 } });
 
 /** Real xterm input and browser pointer focus, through the same controls as users. */
-export const PreserveInputAndFocus: Story = {
+export const PreserveInputAndFocus = story({
   play: async ({ args, canvasElement, step }) => {
+    const source = sourceId(args);
     const { expectSourceUnchanged } = await prepare(args);
-    const helper = getHelper(SOURCE)!;
+    const helper = getHelper(source)!;
     const input = terminal(helper.id);
     const element = input.element!;
     const unfinished = 'echo keep-this-input';
     const bufferText = () => Array.from({ length: input.buffer.active.length }, (_, i) => input.buffer.active.getLine(i)?.translateToString(true) ?? '').join('\n');
     const checkInput = () => {
-      expect(getHelper(SOURCE)?.id).toBe(helper.id);
+      expect(getHelper(source)?.id).toBe(helper.id);
       expect(terminal(helper.id)).toBe(input);
       expect(input.element).toBe(element);
       expect(bufferText()).toContain(unfinished);
@@ -217,10 +235,10 @@ export const PreserveInputAndFocus: Story = {
     await step('Close and reopen the retained helper, then select the top side', async () => {
       await userEvent.click(within(context()).getByRole('button', { name: 'Close terminal context' }));
       await waitFor(() => expect(document.querySelector('[data-terminal-context]')).toBeNull());
-      const resizedSource = rect(sourcePane());
-      await rightClickSourceHeader();
+      const resizedSource = rect(sourcePane(source));
+      await rightClickSourceHeader(source);
       expect(context().dataset.contextSide).toBe('bottom');
-      expect(rect(sourcePane())).toEqual(resizedSource);
+      expect(rect(sourcePane(source))).toEqual(resizedSource);
       checkInput();
       input.focus();
       const focused = document.activeElement;
@@ -232,6 +250,6 @@ export const PreserveInputAndFocus: Story = {
     });
     canvasElement.dataset.placementCheck = 'passed';
   },
-};
+});
 
-export const TwoColumnsDark: Story = { args: { layout: 'columns' }, globals: { theme: 'Dark (Visual Studio)' } };
+export const TwoColumnsDark = story({ args: { layout: 'columns' }, globals: { theme: 'Dark (Visual Studio)' } });

@@ -9,7 +9,6 @@ import type { FileFormat } from 'dor-tools-builtin/file-viewer-format';
 
 export type { BrowserAutomationProvider, BrowserBinding, SurfaceRenderMode };
 
-export type IdFormat = 'refs' | 'ids' | 'both';
 export type SplitDirection = 'left' | 'right' | 'up' | 'down' | 'auto';
 export type ResolvedSplitDirection = 'left' | 'right' | 'up' | 'down';
 export type SurfaceKind = 'terminal' | 'browser' | 'tool';
@@ -64,7 +63,6 @@ export interface SurfacePort {
 
 export interface Surface {
   id: string;
-  ref: string;
   kind: SurfaceKind;
   renderMode: SurfaceRenderMode | null;
   title: string;
@@ -96,12 +94,12 @@ export interface Surface {
   /** The Workspace this Surface belongs to. Present only for a `scope: 'all'`
    *  listing, where rows from several Workspaces share one list — every row of
    *  one carries it ({@link GroupedSurface}). */
-  workspaceRef?: string;
+  workspaceId?: string;
 }
 
 /** A row of a cross-Workspace listing (`dor list --all`): every row says which
  *  Workspace it came from, so the caller can group them. */
-export type GroupedSurface = Surface & { workspaceRef: string };
+export type GroupedSurface = Surface & { workspaceId: string };
 
 /** How wide a listing reaches: one Workspace (the default) or every Workspace
  *  in this Window. */
@@ -121,7 +119,6 @@ export interface WorkspaceScopedFlags {
 }
 
 export interface ListSurfacesRequest extends WorkspaceScopedRequest {
-  pane?: string;
   window?: string;
   /** Omitted means `workspace`. */
   scope?: ListScope;
@@ -134,7 +131,7 @@ export interface ListSurfacesResponse {
   surfaces: Surface[];
   /** The Workspace that answered; for `scope: 'all'`, which every Workspace
    *  answers, the active one. */
-  workspaceRef: string;
+  workspaceId: string;
   windowRef: string;
   /** Present only for `scope: 'all'`: this Window's Workspaces in strip order,
    *  so the caller can render a header for each group of `surfaces`. */
@@ -142,10 +139,9 @@ export interface ListSurfacesResponse {
 }
 
 /** One Workspace of this Window, as `dor list --workspaces` prints it: its
- *  positional ref and name, whether it is the active one, and the union status
+ *  id and name, whether it is the active one, and the union status
  *  over its member Surfaces (`docs/specs/alert.md` → Workspace union). */
 export interface WorkspaceRow {
-  ref: string;
   id: string;
   name: string;
   /** Derived from its terminals rather than set by a user. */
@@ -215,12 +211,10 @@ export interface MoveWorkspaceRequest {
 }
 
 /** The answer every mutating Workspace verb gives: what it did, and the
- *  Workspace it did it to. `workspaceRef` is positional, so for `close` it is
- *  the ref the Workspace had. */
+ *  Workspace it did it to. */
 export interface WorkspaceMutationResponse {
   status: 'created' | 'renamed' | 'closed' | 'active' | 'moved' | 'pinned' | 'unpinned';
   workspaceId: string;
-  workspaceRef: string;
   name: string;
 }
 
@@ -231,8 +225,8 @@ export interface AppRestartResponse {
 
 /** What `dor reopen` brought back: a Surface, a Workspace, or a window. */
 export type ReopenResponse = { status: 'reopened' } & (
-  | { kind: 'surface'; surfaceId: string; surfaceRef: string }
-  | { kind: 'workspace'; workspaceId: string; workspaceRef: string }
+  | { kind: 'surface'; surfaceId: string }
+  | { kind: 'workspace'; workspaceId: string }
   | { kind: 'window' }
 );
 
@@ -254,7 +248,6 @@ export interface SplitSurfaceRequest extends WorkspaceScopedRequest {
 export interface SplitSurfaceResponse {
   status: 'created';
   surfaceId: string;
-  surfaceRef: string;
   direction: ResolvedSplitDirection;
   minimized: boolean;
   command?: string;
@@ -274,7 +267,6 @@ export interface EnsureSurfaceRequest extends WorkspaceScopedRequest {
 export interface EnsureSurfaceResponse {
   status: 'created' | 'existing' | 'restarted';
   surfaceId: string;
-  surfaceRef: string;
   command: string;
   cwd: string;
   minimized: boolean;
@@ -327,7 +319,6 @@ export interface ToolSurfaceResponse {
    */
   status: 'created' | 'existing' | 'adopted' | 'pending' | 'takeover' | 'retargeted' | 'superseded';
   surfaceId: string;
-  surfaceRef: string;
   /** The rendered command, as typed into the shell. */
   command: string;
   cwd: string;
@@ -411,7 +402,6 @@ export interface SendSurfaceRequest extends WorkspaceScopedRequest {
 export interface SendSurfaceResponse {
   status: 'sent';
   surfaceId: string;
-  surfaceRef: string;
   inputCount: number;
 }
 
@@ -422,9 +412,8 @@ export interface ReadSurfaceRequest extends WorkspaceScopedRequest {
 }
 
 export interface ReadSurfaceResponse {
-  workspaceRef: string;
+  workspaceId: string;
   surfaceId: string;
-  surfaceRef: string;
   text: string;
 }
 
@@ -447,9 +436,8 @@ export interface AwaitSurfaceRequest extends WorkspaceScopedRequest {
 }
 
 export interface AwaitSurfaceResponse {
-  workspaceRef: string;
+  workspaceId: string;
   surfaceId: string;
-  surfaceRef: string;
   outcome: AwaitSurfaceOutcome;
   /** Present iff `outcome === 'resolved'`. */
   cause?: AwaitCause;
@@ -469,7 +457,6 @@ export interface KillSurfaceRequest extends WorkspaceScopedRequest {
 export interface KillSurfaceResponse {
   status: 'killed';
   surfaceId: string;
-  surfaceRef: string;
 }
 
 /** Move one Surface within this Window. Exactly one destination is required. */
@@ -483,9 +470,7 @@ export type MoveSurfaceRequest = WorkspaceScopedRequest & {
 export interface MoveSurfaceResponse {
   status: 'moved';
   surfaceId: string;
-  surfaceRef: string;
   workspaceId: string;
-  workspaceRef: string;
 }
 
 export interface IframeSurfaceRequest extends WorkspaceScopedRequest {
@@ -497,20 +482,18 @@ export interface IframeSurfaceRequest extends WorkspaceScopedRequest {
 export interface IframeSurfaceResponse {
   status: 'created' | 'replaced';
   surfaceId: string;
-  surfaceRef: string;
   url: string;
   minimized: boolean;
 }
 
 export interface ResolveOpenTargetRequest extends WorkspaceScopedRequest {
-  /** A terminal Surface handle (surface:N, surface:<stable-id>, surface:self,
-   *  surface:focused) whose dev-server URL should be resolved. */
+  /** A terminal Surface handle (surface:N, surface:self, surface:focused)
+   *  whose dev-server URL should be resolved. */
   surface: string;
 }
 
 export interface ResolveOpenTargetResponse {
   surfaceId: string;
-  surfaceRef: string;
   /** The URL to open — `http://localhost:<port>/` for the single owned port. */
   url: string;
   /** The resolved listening port. */
@@ -523,8 +506,8 @@ export interface ResolveOpenTargetResponse {
  *  key names no Surface, and a Surface's session was minted long ago. */
 export type ResolveBrowserRequest = WorkspaceScopedRequest & { provider: BrowserAutomationProvider } & (
   | {
-    /** A Surface handle (surface:N, surface:<stable-id>, surface:self,
-     *  surface:focused, title:<title>) naming the browser Surface to drive. */
+    /** A Surface handle (surface:N, surface:self, surface:focused,
+     *  title:<title>) naming the browser Surface to drive. */
     surface: string;
     key?: undefined;
     proposed?: undefined;
@@ -575,7 +558,6 @@ export type BrowserViewportRequest = WorkspaceScopedRequest & { provider: Browse
 
 export interface BrowserViewportResponse {
   surfaceId: string;
-  surfaceRef: string;
   provider: BrowserAutomationProvider;
   renderMode: SurfaceRenderMode;
   requested: BrowserViewportSetting;
@@ -586,7 +568,6 @@ export interface BrowserViewportResponse {
 export interface BrowserSurfaceResponse {
   status: 'created' | 'existing' | 'replaced';
   surfaceId: string;
-  surfaceRef: string;
   session: string;
   minimized: boolean;
 }

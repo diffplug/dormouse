@@ -18,6 +18,12 @@
 
 **Why the recovery record is not `workspaceState`.** Writing it there was tried and measured (2026-08): detection completed and the record was never written — the state store's SQLite flush is already tearing down while `deactivate()` runs.
 
+## Surface id minting
+
+**Why the mark is not in `workspaceState`.** Its writes reach disk on VS Code's own schedule, so a raised mark could be lost after its numbers were handed out, and the next run would reuse them; the counter file is flushed, then its directory, before a reservation is answered.
+
+**Why one counter for the install.** Install-wide uniqueness is wanted for itself: the id is the `dor` handle, so it names one Surface across every window and stays the same when the Surface moves between them (decided 2026-10-08). A counter per window (`storageUri`) also broke the Burrow: it numbered every window from `surface:1`, and the phone directory, keyed by Surface id, kept only the first window's row for each number, so another window's terminals vanished from the phone and an attach could reach the wrong window. Each window's extension host is its own process, so the read-raise-write takes a lock across them.
+
 ## CSP policy
 
 **Why Vite stamps the nonce rather than a post-hoc rewrite.** Vite walks its own output with a real HTML parser, so coverage follows the shape it actually emitted — a regex over the document only covers the tags whoever wrote it thought of.
